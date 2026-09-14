@@ -1,6 +1,6 @@
 # Project handoff
 
-Last verified: **2026-09-14**. Status: **local v0.1 implemented and installed**; restart the existing Harness web host to load the new pane. Read README.md for operation and migration instructions.
+Last verified: **2026-09-14**. Status: **v0.1 implemented; public MIT source release**. Read README.md for installation, operation, dependency licenses and migration instructions.
 
 ## Accepted goal and current result
 
@@ -35,7 +35,9 @@ The earlier capacity fixture has 2,000 records and 1,000 four-page small text PD
 
 Registered exactly once in the user's existing `web` profile using the official additive plugin CLI. Prior vision/cron plugins and profile patch were preserved; running user host not restarted. Local peer symlinks point to the user's built Harness checkout. `npm ci` can remove those links; rerun the install helper after rebuilding when dependencies are refreshed.
 
-Repository remains private/local with no remote configured. Source changes are committed at completion. No remote publication, actual Zotero migration or new scheduler was authorized/performed. Standalone and isolated test hosts were stopped after verification.
+Public repository: [mappedinfo/dsh-paper-library](https://github.com/mappedinfo/dsh-paper-library). The owner requested public GitHub publication and MIT for original project code on 2026-09-14. Third-party terms remain intact: default PyMuPDF and citeproc runtime dependencies use AGPL, and bundled CSL assets use CC BY-SA. See `THIRD_PARTY.md`; do not describe the full installation as MIT-only.
+
+The initial two commits and current tree were audited before publication: no real literature, managed PDFs, catalogs, credentials, private config or user absolute paths were tracked. Reproduce the bounded file/history/package checks with `npm run check:publication`; the receipt is `docs/validation/publication.json`. Historical AGPL root notices reflect the earlier original-code license; the current original-code grant is MIT. Keep runtime data ignored. Source changes are committed at completion; ordinary later pushes follow the repository's existing upstream and the active task authorization. No actual Zotero migration or new scheduler was performed. Standalone and isolated test hosts were stopped after verification.
 
 ## Known limits and next validation
 

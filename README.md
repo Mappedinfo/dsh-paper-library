@@ -2,11 +2,13 @@
 
 独立于 Zotero 的 DeepSeek Harness 文献插件：自动获取与归档、检索、阅读、引用、PDF 批注与 AI 反馈。
 
+项目原创代码采用 [MIT](LICENSE)。默认 PDF 引擎 PyMuPDF 采用 AGPL/商业许可，CSL 等第三方组件保留原许可；完整安装的依赖栈并非仅受 MIT 约束。详见 [第三方许可](THIRD_PARTY.md)。
+
 **继续开发前先读 [项目交接](HANDOFF.md)**，其中记录当前能力、验证证据和待验证项。
 
 ## 使用
 
-本机已通过 Harness 官方插件命令安装到现有 `web` profile。重启 Harness 后，在右侧面板的入口页选择 **文献库 / Paper Library**。启动时不会导入或扫描现有 Zotero 文献。
+按下方步骤安装到 Harness profile 后，重启 Harness，在右侧面板的入口页选择 **文献库 / Paper Library**。启动时不会导入或扫描现有 Zotero 文献。
 
 1. **把 PDF 拖入窗口，或粘贴论文链接 / DOI**，自动下载或复制、解析并保存。支持多文件顺序导入；也可点击「导入文献」选择文件、输入本地路径，或导入 JSON、RIS、BibTeX。目录和元数据按每批 100 条继续处理，显示累计进度；每条记录保存检查点。
 2. 搜索标题、作者、年份、DOI、引用键、标签或摘要，打开论文；一次只显示一页。
@@ -60,13 +62,15 @@ PDF 上传和下载均使用流式处理，不做整份 Base64 拷贝。服务�
 Node `^22.19 || >=24`、Python `>=3.11`、`uv` 和已构建的本地 DeepSeek Harness。
 
 ```sh
+git clone https://github.com/mappedinfo/dsh-paper-library.git
+cd dsh-paper-library
 npm ci --ignore-scripts --legacy-peer-deps
 uv sync --locked
 npm run build
 node scripts/install-harness.mjs --harness /absolute/deepseek-harness --home /absolute/dsh-home --profile web
 ```
 
-不传 `--home` 时安装脚本使用项目内隔离 profile；不会默默修改用户全局配置。脚本仅链接声明的 Harness 运行时依赖，并调用官方插件命令注册。重装依赖后可重新运行它恢复本地依赖链接。包保持 `private: true`，尚未发布。
+将示例中的路径替换为本地已构建的 Harness checkout 和目标 DSH 配置目录。不传 `--home` 时安装脚本使用项目内隔离 profile；不会默默修改用户全局配置。脚本仅链接声明的 Harness 运行时依赖，并调用官方插件命令注册。重装依赖后可重新运行它恢复本地依赖链接。源码通过 GitHub 发布；`private: true` 仅防止意外发布到 npm。
 
 独立本地界面与 JSON CLI：
 
@@ -86,4 +90,4 @@ uv run python scripts/benchmark.py --output artifacts/capacity-new
 node --expose-gc scripts/benchmark-node.mjs artifacts/capacity-new/library artifacts/capacity-new/node-report.json
 ```
 
-测试使用合成数据，产物与文献目录不进入 Git。CSL 使用官方 APA 样式与 `citeproc-js`，BibLaTeX 使用 Citation.js；出处和许可见 [THIRD_PARTY.md](THIRD_PARTY.md)。项目代码使用 AGPL-3.0-or-later。
+测试使用合成数据，产物与文献目录不进入 Git。CSL 使用官方 APA 样式与 `citeproc-js`，BibLaTeX 使用 Citation.js；出处、版权声明及依赖的许可义务见 [THIRD_PARTY.md](THIRD_PARTY.md)。

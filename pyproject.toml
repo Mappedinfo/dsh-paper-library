@@ -4,10 +4,14 @@ version = "0.1.0"
 description = "Lightweight independent literature and PDF annotation plugin for DeepSeek Harness"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "AGPL-3.0-or-later"
+license = "MIT"
 dependencies = [
     "pymupdf>=1.26,<2",
 ]
+
+[project.urls]
+Repository = "https://github.com/mappedinfo/dsh-paper-library"
+Issues = "https://github.com/mappedinfo/dsh-paper-library/issues"
 
 [dependency-groups]
 dev = [

@@ -1,6 +1,6 @@
 # Validation, 2026-09-14
 
-This is a local first version, installed in Harness's existing `web` profile. User literature was not migrated. Tests and capacity fixtures are synthetic.
+This first version was validated in an existing Harness `web` profile and isolated test profiles. User literature was not migrated. Tests and capacity fixtures are synthetic. The source is available in the public GitHub repository; original code and dependency licenses are distinguished in `THIRD_PARTY.md`.
 
 ## Functional checks
 
@@ -52,4 +52,4 @@ Metadata/abstract retrieval only; no full-text index, OCR or resident embeddings
 
 Automatic parsing uses at most three pages / 30,000 characters; unreliable or incomplete fields remain flagged for review. Public acquisition covers Crossref/DOI, arXiv, direct PDFs and generic citation meta tags. Network branches beyond the W3C direct PDF are tested with deterministic transport fixtures. Authenticated publisher access, browser providers and live model generation are not validated here. The API documents all intake limits.
 
-Local installation is verified. The running user host was not restarted; reopening Harness is required for the newly registered right-panel entry. Publication, remote push and actual-library migration were not performed.
+Local installation is verified. Existing hosts require restart after initial plugin registration. Actual-library migration was not performed. Public source publication uses the MIT license for original project files, preserving third-party terms and excluding runtime data.

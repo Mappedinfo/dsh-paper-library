@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "description": "Independent literature library with portable PDF annotations for DeepSeek Harness",
-  "license": "AGPL-3.0-or-later",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/mappedinfo/dsh-paper-library.git" },
+  "homepage": "https://github.com/mappedinfo/dsh-paper-library#readme",
+  "bugs": { "url": "https://github.com/mappedinfo/dsh-paper-library/issues" },
   "type": "module",
   "engines": { "node": "^22.19.0 || >=24" },
   "main": "./src/harness/index.mjs",
@@ -13,7 +16,7 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
-  "files": ["src/**/*.mjs", "src/**/*.py", "lib/client.js", "web", "skills", "vendor/csl", "cordis.patch.yml", "pyproject.toml", "uv.lock", "README.md", "HANDOFF.md", "THIRD_PARTY.md", "docs/api.md", "docs/validation.md", "docs/upstream-manifest.md", "docs/validation", "LICENSE"],
+  "files": ["src/**/*.mjs", "src/**/*.py", "lib/client.js", "web", "skills", "vendor/csl", "cordis.patch.yml", "pyproject.toml", "uv.lock", "README.md", "HANDOFF.md", "THIRD_PARTY.md", "docs/api.md", "docs/validation.md", "docs/upstream-manifest.md", "docs/validation", "LICENSE", "licenses"],
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {
@@ -29,6 +32,8 @@
     "build": "node scripts/build.mjs",
     "test": "node --test tests-js/*.test.mjs",
     "test:harness": "node tests-js/adapter-web-smoke.mjs",
+    "check:publication": "node scripts/check-publication.mjs",
+    "verify:github": "node scripts/verify-github.mjs",
     "start": "node src/server.mjs",
     "dev": "node src/server.mjs",
     "install:harness": "node scripts/install-harness.mjs"
