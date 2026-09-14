@@ -118,13 +118,23 @@ try {
   }
   checks.push('cold-sessions-native-visible-without-agent-or-model-generation')
 
-  const context = await api({ action: 'chat_context', id: paper.id, annotation_ids: [annotationId], question: 'Explain this saved page-two note.' })
+  const catalog = await api({ action: 'chat_catalog', id: paper.id })
+  const originalNote = catalog.annotations.find(note => note.id === annotationId)
+  assert.equal(originalNote.status, 'new')
+  const context = await api({ action: 'chat_context', id: paper.id, annotation_refs: [{ id: annotationId, version: originalNote.version }], question: 'Explain this saved page-two note.' })
   assert.deepEqual(context.annotation_ids, [annotationId])
   assert.match(context.text, /第 2 页 · 批注/)
   assert.equal(context.text.includes('SOURCE_DATA'), false)
   assert.match(context.text, /Synthetic page-two question/)
   checks.push('native-annotation-context-retains-real-page-and-identity')
-  const question = { action: 'chat_send', id: paper.id, annotation_ids: [annotationId], question: 'Explain this saved page-two note.', request_id: 'native-reading-request-1' }
+  assert.ok(context.snapshot_id && context.draft_text.includes(context.reference.ref))
+  assert.equal((await api({ action: 'chat_catalog', id: paper.id })).annotations.find(note => note.id === annotationId).status, 'new')
+  await core({ action: 'annotation_update', id: paper.id, annotation_id: annotationId, comment: 'UPDATED synthetic question saved after snapshot preparation.' }, { library, python })
+  const frozen = await api({ action: 'chat_reference', id: paper.id, snapshot_id: context.snapshot_id })
+  assert.equal(frozen.text, context.text)
+  assert.equal(frozen.text.includes('UPDATED'), false)
+  checks.push('draft-preparation-does-not-mark-sent-and-later-pdf-edit-cannot-change-snapshot')
+  const question = { action: 'chat_send', id: paper.id, snapshot_id: context.snapshot_id, request_id: 'native-reading-request-1' }
   const accepted = await api(question)
   assert.equal(accepted.accepted, true)
   const deadline = Date.now() + 20000
@@ -144,6 +154,11 @@ try {
   const active = await observe([ensured.sessionId, other.sessionId])
   assert.deepEqual(active.observations, [{ sessionLoaded: true, agentLoaded: true }, { sessionLoaded: false, agentLoaded: false }])
   assert.equal(active.generations, 1)
+  assert.ok(active.references.some(reference => reference.snapshotId === context.snapshot_id && reference.text.includes('Synthetic page-two question') && !reference.text.includes('UPDATED')))
+  assert.equal(history.annotation_usage[annotationId], originalNote.version)
+  assert.equal((await api({ action: 'chat_catalog', id: paper.id })).annotations.find(note => note.id === annotationId).status, 'updated')
+  assert.ok(history.messages.some(message => message.references?.some(reference => reference.snapshot_id === context.snapshot_id)))
+  checks.push('model-receives-exact-frozen-source-and-logged-usage-distinguishes-updated-version')
   checks.push('native-prompt-adopts-cold-session-and-commits-assistant-history')
   checks.push('reading-one-paper-does-not-activate-other-paper-agents')
 
@@ -171,7 +186,25 @@ try {
   checks.push('committed-assistant-reply-saves-to-native-pdf-with-provenance')
   checks.push('repeated-feedback-save-is-idempotent-and-browser-text-is-ignored')
 
-  const report = { verified_at: new Date().toISOString(), ok: true, checks, deterministicModelGenerations: 1, externalModelRequestsMade: 0, sourceData: 'Fresh synthetic three-page PDFs generated per run', limitations: ['No paid model-quality evaluation', 'No real-library migration or memory benchmark', 'Browser interaction is validated separately'] }
+  const current = (await api({ action: 'chat_catalog', id: paper.id })).annotations.find(note => note.id === annotationId)
+  const mainReference = await api({ action: 'chat_context', id: paper.id, annotation_refs: [{ id: annotationId, version: current.version }], question: 'Discuss the updated note from the main conversation.' })
+  // Native RPC models the main composer after reload: only durable plain text
+  // tokens remain, and no plugin chat_send callback can advance the usage state.
+  await rpc('session/prompt', { sessionId: ensured.sessionId, requestId: 'native-main-reference-2', mode: 'queue', content: [{ type: 'text', text: mainReference.draft_text }] })
+  const mainDeadline = Date.now() + 20000
+  do {
+    history = await api({ action: 'chat_history', id: paper.id })
+    if (history.annotation_usage[annotationId] === current.version && !history.running) break
+    await new Promise(resolveDelay => setTimeout(resolveDelay, 150))
+  } while (Date.now() < mainDeadline)
+  assert.equal(history.annotation_usage[annotationId], current.version)
+  assert.equal((await api({ action: 'chat_catalog', id: paper.id })).annotations.find(note => note.id === annotationId).status, 'sent')
+  const mainObservation = await observe([ensured.sessionId])
+  assert.equal(mainObservation.generations, 2)
+  assert.ok(mainObservation.references.some(reference => reference.snapshotId === mainReference.snapshot_id && reference.text.includes('UPDATED')))
+  checks.push('native-main-composer-plain-token-resolves-and-updates-sent-baseline-without-plugin-send')
+
+  const report = { verified_at: new Date().toISOString(), ok: true, checks, deterministicModelGenerations: mainObservation.generations, externalModelRequestsMade: 0, sourceData: 'Fresh synthetic three-page PDFs generated per run', limitations: ['No paid model-quality evaluation', 'No real-library migration or memory benchmark', 'Browser interaction is validated separately'] }
   await mkdir(dirname(reportPath), { recursive: true })
   await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n')
   console.log(JSON.stringify(report))

@@ -268,14 +268,55 @@ test('invalid or oversized snapshots preserve the last good reading state and ne
   const e = environment()
   const snapshot = { paperId: 'paper-1', page: 1, tab: 'reader', chatDraft: 'small draft' }
   e.message({ type: 'paper-library:reader-state', snapshot })
-  e.message({ type: 'paper-library:reader-state', snapshot: { ...snapshot, chatDraft: '文'.repeat(23000) } })
+  e.message({ type: 'paper-library:reader-state', snapshot: { ...snapshot, annotationDraft: { mode: 'note', id: 'paper-1', page: 1, comment: '文'.repeat(64000), quote: '文'.repeat(64000) } } })
   assert.equal(e.messages.at(-1).value.type, 'paper-library:reader-state-error')
   e.message({ type: 'paper-library:ready' })
   assert.deepEqual(e.messages.at(-1).value.snapshot, snapshot)
   assert.throws(() => readerSnapshot({ ...snapshot, page: -1 }), /页码/)
   assert.throws(() => readerSnapshot({ ...snapshot, annotationDraft: { mode: 'image' } }), /草稿类型/)
-  assert.throws(() => readerSnapshot({ ...snapshot, chatContext: { annotationIds: Array(41).fill('note') } }), /40/)
+  assert.throws(() => readerSnapshot({ ...snapshot, chatContext: { annotationIds: Array(1001).fill('note') } }), /1000/)
   assert.throws(() => readerSnapshot({ ...snapshot, chatContext: { annotationIds: [], selection: { page: 2, text: 'x'.repeat(8001) } } }), /长度/)
-  assert.throws(() => readerSnapshot({ ...snapshot, chatDraft: 'x'.repeat(64000), chatContext: { annotationIds: [], selection: { page: 2, text: 'x'.repeat(3000) } } }), /64 KiB/)
+  assert.throws(() => readerSnapshot({ ...snapshot, annotationDraft: { mode: 'note', id: 'paper-1', page: 1, comment: '文'.repeat(64000), quote: '文'.repeat(64000) } }), /256 KiB/)
+  e.bridge.dispose()
+})
+
+test('up to 1000 annotation identities and revisions restore without retaining note bodies', () => {
+  const refs = Array.from({ length: 1000 }, (_, index) => ({ id: `note-${index}`, version: 'a'.repeat(64), text: 'not retained' }))
+  const snapshot = readerSnapshot({ paperId: 'paper-1', page: 1, tab: 'conversation', chatDraft: '', chatContext: { annotationRefs: refs } })
+  assert.equal(snapshot.chatContext.annotationRefs.length, 1000)
+  assert.equal(Object.hasOwn(snapshot.chatContext.annotationRefs[0], 'text'), false)
+  assert.throws(() => readerSnapshot({ paperId: 'paper-1', page: 1, chatContext: { annotationRefs: [{ id: 'note', version: 'stale?' }] } }), /版本/)
+})
+
+test('the bridge transfers canonical draft tokens as chips and rejects mismatched snapshot identity', async () => {
+  const e = environment()
+  const hash = 'a'.repeat(64), ref = `[[paper-library-ref:v1:paper-1:${hash}]]`
+  const reference = { ref, label: '批注 3 条', clipboardText: ref }
+  e.bridge.mountedSession('paper')
+  e.action('draft', { text: 'Readable snapshot', draft_text: `${ref}\n\n我的问题`, reference, snapshot_id: hash })
+  await tick(); e.frame(); await tick()
+  assert.equal(e.inputEdits[0].name, 'slash/input-insert-text')
+  assert.equal(e.inputEdits[0].request.text, `${ref}\n\n我的问题`)
+  assert.equal(e.inputEdits[1].name, 'slash/input-insert-reference')
+  assert.equal(e.inputEdits[1].request.reference.ref, ref)
+  e.action('draft', { requestId: 'wrong', text: 'Readable snapshot', draft_text: ref, reference, snapshot_id: 'b'.repeat(64) })
+  await tick()
+  assert.match(e.messages.at(-1).value.error, /快照不一致/)
+  assert.equal(e.inputEdits.length, 2)
+  e.bridge.dispose()
+})
+
+test('reference page navigation waits for an authorized ready iframe and never edits a composer', async () => {
+  const e = environment()
+  e.setCurrent('paper'); e.bridge.mountedSession('paper')
+  const pending = e.bridge.openReference({ sessionId: 'paper', paperId: 'paper-1', page: 8, snapshot_id: 'a'.repeat(64) })
+  e.frame(); await pending
+  assert.equal(e.messages.length, 0)
+  e.message({ type: 'paper-library:ready' })
+  assert.equal(e.messages.at(-1).value.type, 'paper-library:reference-open')
+  assert.equal(e.messages.at(-1).value.page, 8)
+  assert.equal(e.inputEdits.length, 0)
+  e.setCurrent('other')
+  await assert.rejects(e.bridge.openReference({ sessionId: 'paper', paperId: 'paper-1', page: 8, snapshot_id: 'a'.repeat(64) }), /其他对话/)
   e.bridge.dispose()
 })

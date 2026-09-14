@@ -22,8 +22,20 @@ Each run creates fresh synthetic PDFs and a managed library under its own
 host logs, cookies, session IDs and absolute paths stay out of the public
 receipt at `docs/validation/paper-chat-harness.json`.
 
-Checks cover one-paper session reuse, distinct papers, cold creation and native
-prompt adoption, quoted annotation page context, real assistant history,
-idempotent prompt retries, native PDF feedback persistence and repeated saves,
-and unauthenticated access rejection. These are integration checks, not an
-evaluation of model quality or a real-library memory benchmark.
+The current run has 13 checks and two deterministic generations, with zero
+external model requests. It covers one-paper Session reuse, distinct papers,
+cold creation and native prompt adoption, real annotation pages, assistant
+history, idempotent retries and PDF reply provenance. Reference-specific
+checks prepare a snapshot without marking it sent, edit the PDF afterward,
+and confirm that the native model still receives the frozen original source.
+The native logged projection then distinguishes the edited annotation's new
+version. A second prompt goes directly through the main native admission path
+with a plain persisted token, proving that reference resolution and sent status
+do not depend on the plugin's send button. Unauthenticated reads are refused.
+
+The fixture uses real `createUserMessage`, Host pre-step processing and native
+Session persistence. Exact source text is logged in a generic `Paper Library`
+plugin context; snapshot identity, annotation versions and body hash stay in
+the source envelope. Browser chip rendering, keyboard interaction and narrow
+layout are verified separately. These integration checks do not evaluate model
+quality, a real library or total application memory.

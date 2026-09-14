@@ -10,7 +10,8 @@ assert.match(source, /\ninitialize\(\);\s*$/);
 const testSource = source.replace(/\ninitialize\(\);\s*$/, '\n') + `
 globalThis.testUI = { state, announceReady, currentHarnessRoute, manualModel,
   loadModels, renderModelRoute, requestFeedback, requestPage, restoreReaderState,
-  saveAnnotation, setReaderRestore(value) { readerRestore = value; } };
+  saveAnnotation, setReaderRestore(value) { readerRestore = value; },
+  readyReader() { initializedReader = true; }, pendingReference() { return pendingReferenceOpen; } };
 `;
 
 function environment({ standalone = false, models = [{ id: 'fallback-model', provider: 'fallback-provider' }], modelResponse, apiResponse } = {}) {
@@ -240,4 +241,19 @@ for (const mode of ['note', 'highlight']) test(`restoring a ${mode} waits for th
     assert.deepEqual(saved.rects, selection.rects);
     assert.equal(saved.text, selection.text);
   }
+});
+
+test('native reference navigation accepts only the authorized parent and opens the actual PDF page', async () => {
+  const fixture = environment({ apiResponse: request => request.action === 'page' ? pageResult(request.page) : undefined });
+  fixture.ui.state.active = { id: 'paper-a', pdf: true }; fixture.ui.state.pageCount = 2;
+  const payload = { type: 'paper-library:reference-open', version: 1, paperId: 'paper-a', page: 2, snapshot_id: 'frozen-snapshot' };
+  fixture.send(payload, { source: {} }); fixture.send(payload, { origin: 'https://untrusted.invalid' });
+  fixture.send({ ...payload, page: 2001 });
+  assert.equal(fixture.ui.pendingReference(), null);
+  assert.equal(fixture.requests.length, 0);
+  fixture.send(payload);
+  assert.equal(fixture.ui.pendingReference().page, 2, 'navigation is retained while the reader is still booting');
+  fixture.ui.readyReader(); fixture.send(payload); await fixture.flush();
+  assert.equal(fixture.ui.state.page, 2);
+  assert.equal(fixture.ui.state.tab, 'reader');
 });

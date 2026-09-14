@@ -28,7 +28,8 @@ export function apply(ctx, rawConfig = {}) {
     scoped.effect(() => registerBundledSkills(scoped), 'paper-library: bundled paper-fetch skill')
   })
   ctx.inject(['connection', 'webServer', 'sessionController', 'workspaceRegistry', 'sessionPersistence', 'sessionProjections', 'sessions', 'agents', 'agentDefaultModel'], web => {
-    const paperChat = createPaperChat(web, { library: config.library, python: config.python, dispatch, core })
+    const paperChat = createPaperChat(web, { library: config.library, python: config.python, dispatch, core, maxAnnotationCharacters: config.maxAnnotationCharacters })
+    paperChat.install()
     const fetchHandler = createFetchHandler({ ...options, paperChat, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',

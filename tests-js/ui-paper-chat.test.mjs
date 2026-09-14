@@ -14,9 +14,9 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function environment({ api: respond, created = false } = {}) {
+function environment({ api: respond, created = false, notes = [], storage: persistedStorage } = {}) {
   const elements = new Map(), listeners = new Map(), documentListeners = new Map(), timers = new Map();
-  const requests = [], posts = [], toasts = [], saved = [], snapshots = [], storage = new Map();
+  const requests = [], posts = [], toasts = [], saved = [], snapshots = [], navigations = [], storage = persistedStorage || new Map();
   let serial = 0, timerSerial = 0, currentPaper = null;
   class Element {
     constructor(tag = 'div') {
@@ -52,10 +52,11 @@ function environment({ api: respond, created = false } = {}) {
   vm.runInContext(source, context, { filename: 'web/paper-chat.js' });
   function defaultResponse(action, args) {
     if (action === 'chat_ensure') return { sessionId: `session-${args.id}`, created };
+    if (action === 'chat_catalog') return { annotations: notes.map(note => ({ status: 'new', page: 1, version: `version-${note.id}`, ...note })), total: notes.length, truncated: false };
     if (action === 'chat_history') return { sessionId: `session-${args.id}`, model: { provider: 'test', model: args.id }, messages: [], running: false, hasMore: false };
     if (action === 'chat_send') return { sessionId: `session-${args.id}`, accepted: true };
     if (action === 'chat_save_feedback') return { sessionId: `session-${args.id}`, messageId: args.message_id, saved: { duplicate: false } };
-    if (action === 'chat_context') return { text: 'Host-derived paper and annotation context.' };
+    if (action === 'chat_context') return { snapshot_id: `snapshot-${++serial}`, text: 'Host-derived paper and annotation context.', draft_text: '[paper-reference]\n\nQuestion', reference: { ref: 'paper-reference', label: '批注引用', clipboardText: 'paper-reference' } };
     throw new Error(`Unexpected paper-chat action: ${action}`);
   }
   const chat = window.PaperLibraryChat.create({
@@ -66,7 +67,7 @@ function environment({ api: respond, created = false } = {}) {
     },
     toast: (text, error) => toasts.push({ text, error }), getPaper: () => currentPaper,
     getContext: () => ({ sessionId: 'composer-session' }), getAnnotations: () => [],
-    navigate() {}, changed() { snapshots.push({ paperId: currentPaper?.id, draft: chat.draft() }); }, savedFeedback: async id => saved.push(id), getLibrary: () => 'synthetic-test-library',
+    navigate() {}, navigateReference: (id, page) => navigations.push({ id, page }), changed() { snapshots.push({ paperId: currentPaper?.id, draft: chat.draft() }); }, savedFeedback: async id => saved.push(id), getLibrary: () => 'synthetic-test-library',
   });
   chat.setAvailable(true);
   const open = item => { currentPaper = typeof item === 'string' ? { id: item, pdf: true } : item; return chat.paperOpened(currentPaper); };
@@ -80,7 +81,7 @@ function environment({ api: respond, created = false } = {}) {
     await flush();
   };
   const all = node => [node, ...node.children.flatMap(all)];
-  return { chat, open, element, requests, posts, toasts, saved, snapshots, timers, bridgeResult, advance, all,
+  return { chat, open, element, requests, posts, toasts, saved, snapshots, timers, bridgeResult, advance, all, storage, navigations,
     visibility(value) { document.visibilityState = value; documentListeners.get('visibilitychange')?.(); },
   };
 }
@@ -88,7 +89,7 @@ function environment({ api: respond, created = false } = {}) {
 test('opening a paper creates its native session without sending a message or invoking feedback', async t => {
   const fixture = environment({ created: true }); t.after(() => fixture.chat.dispose());
   await fixture.open('paper-a');
-  assert.deepEqual(fixture.requests, [{ action: 'chat_ensure', id: 'paper-a', source_session_id: 'composer-session' }]);
+  assert.deepEqual(fixture.requests, [{ action: 'chat_ensure', id: 'paper-a', source_session_id: 'composer-session' }, { action: 'chat_catalog', id: 'paper-a' }]);
   assert.match(fixture.element('paper-chat-status').textContent, /尚未调用模型/);
   assert.equal(fixture.element('paper-chat-send').disabled, false);
   assert.equal(fixture.posts.length, 1);
@@ -149,6 +150,8 @@ test('an uncertain send reuses its request ID and a successful retry preserves a
   const sends = fixture.requests.filter(request => request.action === 'chat_send');
   assert.equal(sends.length, 2);
   assert.equal(sends[0].request_id, sends[1].request_id);
+  assert.equal(sends[0].snapshot_id, sends[1].snapshot_id);
+  assert.equal(fixture.requests.filter(request => request.action === 'chat_context').length, 1, 'uncertain retry cannot re-read a changed PDF');
   fixture.chat.restoreDraft('A new question typed while that retry is pending.');
   retry.resolve({ accepted: true }); await flush();
   assert.equal(fixture.chat.draft(), 'A new question typed while that retry is pending.');
@@ -157,27 +160,27 @@ test('an uncertain send reuses its request ID and a successful retry preserves a
 
 test('a second saved note during an automatic send reports it was not sent and preserves the draft and paper', async t => {
   const sending = deferred();
-  const fixture = environment({ api: action => action === 'chat_send' ? sending.promise : undefined });
+  const fixture = environment({ notes: [{ id: 'draft-context' }, { id: 'saved-note-1' }, { id: 'saved-note-2' }], api: action => action === 'chat_send' ? sending.promise : undefined });
   t.after(() => fixture.chat.dispose());
   await fixture.open('paper-a');
   fixture.element('paper-chat-auto').checked = true;
   fixture.chat.restoreDraft('Keep my unsent question about A.');
-  fixture.chat.useAnnotation({ id: 'draft-context' });
+  await fixture.chat.useAnnotation({ id: 'draft-context' });
   const first = fixture.chat.savedAnnotation('paper-a', 'saved-note-1'); await flush();
   await fixture.chat.savedAnnotation('paper-a', 'saved-note-2');
   assert.equal(fixture.requests.filter(request => request.action === 'chat_send').length, 1);
-  assert.deepEqual(fixture.requests.find(request => request.action === 'chat_send').annotation_ids, ['saved-note-1']);
+  assert.deepEqual(fixture.requests.find(request => request.action === 'chat_context').annotation_refs, [{ id: 'saved-note-1', version: 'version-saved-note-1' }]);
   assert.match(fixture.toasts.at(-1).text, /批注已保存，尚未发送/);
-  assert.match(fixture.toasts.at(-1).text, /在论文对话中讨论/);
+  assert.match(fixture.toasts.at(-1).text, /加入本次引用/);
   assert.equal(fixture.chat.draft(), 'Keep my unsent question about A.');
-  assert.deepEqual(plain(fixture.chat.context()), { annotationIds: ['draft-context'] });
+  assert.deepEqual(plain(fixture.chat.context()), { annotationRefs: [{ id: 'draft-context', version: 'version-draft-context' }] });
   // Completing A's outstanding send after navigating must not touch B or flush
   // an undisclosed queue of A annotations into B's conversation.
   await fixture.open('paper-b');
   fixture.chat.restoreDraft('A separate unsent question about B.');
   sending.resolve({ accepted: true }); await first;
   assert.equal(fixture.chat.draft(), 'A separate unsent question about B.');
-  assert.deepEqual(plain(fixture.chat.context()), { annotationIds: [] });
+  assert.deepEqual(plain(fixture.chat.context()), { annotationRefs: [] });
   assert.equal(fixture.requests.filter(request => request.action === 'chat_send').length, 1);
   await fixture.open('paper-a');
   assert.equal(fixture.chat.draft(), 'Keep my unsent question about A.');
@@ -283,4 +286,160 @@ test('partial and interrupted assistant messages have no PDF-save control', asyn
   t.after(() => fixture.chat.dispose());
   fixture.chat.visible(true); await fixture.open('paper-a');
   assert.equal(fixture.all(fixture.element('paper-chat-messages')).filter(node => node.tagName === 'BUTTON').length, 0);
+});
+
+test('adding another saved note does not mutate a mixed selection or replace selected PDF text', async t => {
+  const notes = Array.from({ length: 5 }, (_, index) => ({ id: `note-${index + 1}`, page: index + 1 }));
+  const fixture = environment({ notes }); t.after(() => fixture.chat.dispose());
+  await fixture.open('paper-a');
+  await fixture.chat.useAnnotation(notes[0]); await fixture.chat.useAnnotation(notes[3]);
+  fixture.chat.useSelection({ page: 7, text: 'A temporary passage.' });
+  notes.push({ id: 'note-6', page: 6 });
+  await fixture.chat.savedAnnotation('paper-a', 'note-6');
+  assert.deepEqual(plain(fixture.chat.context()), { annotationRefs: [
+    { id: 'note-1', version: 'version-note-1' }, { id: 'note-4', version: 'version-note-4' },
+  ], selection: { page: 7, text: 'A temporary passage.' } });
+  assert.equal(fixture.element('paper-chat-new-suggestion').hidden, false);
+  assert.equal(fixture.requests.some(request => request.action === 'chat_send'), false);
+  await fixture.element('paper-chat-add-new').dispatch('click');
+  assert.equal(fixture.chat.context().annotationRefs.length, 3);
+  await fixture.chat.useAnnotation(notes[0]);
+  assert.deepEqual(plain(fixture.chat.context().annotationRefs.map(ref => ref.id)), ['note-4', 'note-6']);
+});
+
+test('all means all 65 user notes while the searchable drawer renders at most twenty rows', async t => {
+  const notes = Array.from({ length: 65 }, (_, index) => ({ id: `note-${index + 1}`, page: index % 3 + 1, comment: `question ${index + 1}` }));
+  notes.push({ id: 'ai-reply', kind: 'ai-feedback' });
+  const fixture = environment({ notes }); t.after(() => fixture.chat.dispose());
+  await fixture.open('paper-a'); await fixture.element('paper-chat-all').dispatch('click');
+  assert.equal(fixture.chat.context().annotationRefs.length, 65);
+  await fixture.element('paper-chat-context-label').dispatch('click');
+  assert.equal(fixture.element('paper-reference-list').children.length, 20);
+  await fixture.element('paper-reference-next').dispatch('click');
+  assert.match(fixture.element('paper-reference-page-label').textContent, /21–40 \/ 65/);
+  fixture.element('paper-reference-search').value = 'question 65'; await fixture.element('paper-reference-search').dispatch('input');
+  assert.equal(fixture.element('paper-reference-list').children.length, 1);
+  assert.equal(fixture.chat.context().annotationRefs.length, 65, 'searching does not clear selections');
+  fixture.chat.restoreDraft('Compare every note.'); await fixture.element('paper-chat-form').dispatch('submit'); await flush();
+  assert.equal(fixture.requests.find(request => request.action === 'chat_context').annotation_refs.length, 65);
+  const send = fixture.requests.find(request => request.action === 'chat_send');
+  assert.deepEqual(Object.keys(send).sort(), ['action', 'id', 'request_id', 'snapshot_id']);
+});
+
+test('an incomplete annotation catalog cannot be submitted as all notes', async t => {
+  const fixture = environment({ api: action => action === 'chat_catalog' ? { annotations: [{ id: 'visible', version: 'v1', status: 'new', page: 1 }], total: 1001, truncated: true } : undefined });
+  t.after(() => fixture.chat.dispose()); await fixture.open('paper-a');
+  assert.equal(fixture.element('paper-chat-all').disabled, true);
+  await fixture.element('paper-chat-all').dispatch('click');
+  assert.equal(fixture.chat.context().annotationRefs.length, 0);
+  assert.match(fixture.element('paper-chat-status').textContent, /不能把其中一部分称为全部/);
+});
+
+test('an edited or deleted draft reference stays frozen until adopted or removed', async t => {
+  const notes = [{ id: 'note-1', version: 'v1', page: 2 }, { id: 'note-2', version: 'v1', page: 3 }];
+  const fixture = environment({ notes }); t.after(() => fixture.chat.dispose()); await fixture.open('paper-a');
+  await fixture.element('paper-chat-all').dispatch('click');
+  notes[0].version = 'v2'; notes[0].comment = 'Revised question'; notes.splice(1, 1);
+  await fixture.chat.annotationsChanged('paper-a');
+  assert.equal(fixture.chat.context().annotationRefs[0].version, 'v1');
+  assert.match(fixture.element('paper-chat-coverage').textContent, /2 条已选批注已更新或删除/);
+  await fixture.element('paper-chat-context-label').dispatch('click');
+  const adopt = fixture.all(fixture.element('paper-reference-list')).find(node => node.tagName === 'BUTTON' && node.textContent === '采用当前版本');
+  await adopt.dispatch('click');
+  assert.equal(fixture.chat.context().annotationRefs[0].version, 'v2');
+  assert.equal(fixture.chat.context().annotationRefs[1].id, 'note-2', 'deleted reference remains visible for explicit removal');
+  const boxes = fixture.all(fixture.element('paper-reference-list')).filter(node => node.tagName === 'INPUT');
+  boxes[1].checked = false; await boxes[1].dispatch('change');
+  assert.equal(fixture.chat.context().annotationRefs.length, 1);
+});
+
+test('send state follows committed usage and never reparses the PDF during history polling', async t => {
+  let usage = {};
+  const fixture = environment({ notes: [{ id: 'note-1', version: 'v1' }], api: action => action === 'chat_history' ? { messages: [], annotation_usage: usage, usage_revision: JSON.stringify(usage) } : undefined });
+  t.after(() => fixture.chat.dispose()); fixture.chat.visible(true); await fixture.open('paper-a');
+  await fixture.element('paper-chat-all').dispatch('click');
+  await fixture.element('paper-chat-form').dispatch('submit'); await flush();
+  assert.equal(fixture.element('paper-chat-new').textContent, '新增与更新 1', 'queue acceptance does not mark a note sent');
+  usage = { 'note-1': 'v1' }; await fixture.advance(4000);
+  assert.equal(fixture.element('paper-chat-new').textContent, '新增与更新 0');
+  assert.equal(fixture.requests.filter(request => request.action === 'chat_catalog').length, 1);
+});
+
+test('annotation IDs matching Object prototype names remain new without an own usage entry', async t => {
+  const fixture = environment({ notes: [{ id: 'constructor', version: 'v1' }, { id: 'toString', version: 'v1' }], api: action => action === 'chat_history' ? { messages: [], annotation_usage: {}, usage_revision: 'empty' } : undefined });
+  t.after(() => fixture.chat.dispose()); fixture.chat.visible(true); await fixture.open('paper-a');
+  await fixture.element('paper-chat-choose').dispatch('click');
+  const statuses = fixture.all(fixture.element('paper-reference-list')).filter(node => node.tagName === 'STRONG').map(node => node.textContent);
+  assert.equal(statuses.length, 2); assert.ok(statuses.every(text => text.includes('未发送')));
+});
+
+test('draft selections and frozen uncertain requests survive a fresh reader instance', async t => {
+  const notes = [{ id: 'note-1', version: 'v1' }];
+  const first = environment({ notes, api: action => action === 'chat_send' ? Promise.reject(new Error('Connection lost after admission')) : undefined });
+  t.after(() => first.chat.dispose()); await first.open('paper-a');
+  await first.element('paper-chat-all').dispatch('click'); first.chat.restoreDraft('A durable question.');
+  await first.element('paper-chat-form').dispatch('submit'); await flush();
+  const firstSend = first.requests.find(request => request.action === 'chat_send');
+  const second = environment({ notes, storage: first.storage }); t.after(() => second.chat.dispose()); await second.open('paper-a');
+  assert.equal(second.chat.draft(), 'A durable question.');
+  assert.deepEqual(plain(second.chat.context().annotationRefs), [{ id: 'note-1', version: 'v1' }]);
+  await second.element('paper-chat-form').dispatch('submit'); await flush();
+  assert.equal(second.requests.some(request => request.action === 'chat_context'), false);
+  assert.equal(second.requests.find(request => request.action === 'chat_send').snapshot_id, firstSend.snapshot_id);
+  assert.equal(second.requests.find(request => request.action === 'chat_send').request_id, firstSend.request_id);
+});
+
+test('over-budget context errors preserve the complete selection and do not dispatch a partial prompt', async t => {
+  const notes = Array.from({ length: 80 }, (_, index) => ({ id: `note-${index}` }));
+  const fixture = environment({ notes, api: action => action === 'chat_context' ? Promise.reject(new Error('Selected 80 notes exceed the 48000 character budget. Reduce your selection.')) : undefined });
+  t.after(() => fixture.chat.dispose()); await fixture.open('paper-a'); await fixture.element('paper-chat-all').dispatch('click');
+  fixture.chat.restoreDraft('Consider all of these.'); await fixture.element('paper-chat-form').dispatch('submit'); await flush();
+  assert.equal(fixture.chat.context().annotationRefs.length, 80);
+  assert.equal(fixture.chat.draft(), 'Consider all of these.');
+  assert.equal(fixture.requests.some(request => request.action === 'chat_send'), false);
+  assert.match(fixture.element('paper-chat-status').textContent, /80 notes exceed/);
+});
+
+test('main draft carries the frozen native reference and does not advance usage', async t => {
+  const fixture = environment({ notes: [{ id: 'note-1' }] }); t.after(() => fixture.chat.dispose()); await fixture.open('paper-a');
+  await fixture.element('paper-chat-all').dispatch('click'); fixture.chat.restoreDraft('Draft this question.');
+  const sending = fixture.element('paper-chat-draft').dispatch('click'); await flush();
+  const post = fixture.posts.at(-1).data;
+  assert.equal(post.action, 'draft'); assert.ok(post.snapshot_id); assert.equal(post.reference.ref, 'paper-reference');
+  assert.equal(post.draft_text, '[paper-reference]\n\nQuestion');
+  fixture.bridgeResult(post); await sending;
+  assert.equal(fixture.chat.draft(), 'Draft this question.');
+  assert.equal(fixture.chat.context().annotationRefs.length, 1);
+  assert.equal(fixture.requests.some(request => request.action === 'chat_send'), false);
+  assert.equal(fixture.element('paper-chat-new').textContent, '新增与更新 1');
+});
+
+test('ambiguous PDF identities are visible but cannot enter a reference set', async t => {
+  const notes = [{ id: 'duplicate', version: 'v1', identity_reliable: false, identity_source: 'duplicate-pdf-nm' }, { id: 'fallback', version: 'v1', identity_reliable: false, identity_source: 'external-xref' }];
+  const fixture = environment({ notes }); t.after(() => fixture.chat.dispose()); await fixture.open('paper-a');
+  assert.equal(fixture.element('paper-chat-all').disabled, true);
+  await fixture.element('paper-chat-all').dispatch('click');
+  assert.equal(fixture.chat.context().annotationRefs.length, 0);
+  await fixture.element('paper-chat-choose').dispatch('click');
+  const boxes = fixture.all(fixture.element('paper-reference-list')).filter(node => node.tagName === 'INPUT');
+  assert.equal(boxes[0].disabled, true); assert.equal(boxes[1].disabled, false);
+  await fixture.chat.useAnnotation(notes[1]);
+  assert.equal(fixture.chat.context().annotationRefs[0].id, 'fallback');
+  assert.match(fixture.element('paper-reference-read-status').textContent, /重复标识/);
+});
+
+test('history reference previews load on demand and page links return to the source', async t => {
+  const fixture = environment({ api(action) {
+    if (action === 'chat_history') return { messages: [{ id: 'user-1', role: 'user', text: 'Question', references: [{ snapshot_id: 'snapshot-1', paperId: 'paper-a', count: 2, pages: [2, 3] }] }] };
+    if (action === 'chat_reference') return { text: 'The exact saved content, unchanged after later PDF edits.', annotation_refs: [{ id: 'note-1', version: 'v1', page: 2 }, { id: 'note-2', version: 'v1', page: 3 }] };
+  } });
+  t.after(() => fixture.chat.dispose()); fixture.chat.visible(true); await fixture.open('paper-a');
+  assert.equal(fixture.requests.some(request => request.action === 'chat_reference'), false);
+  const button = fixture.all(fixture.element('paper-chat-messages')).find(node => node.tagName === 'BUTTON');
+  await button.dispatch('click');
+  assert.equal(fixture.requests.filter(request => request.action === 'chat_reference').length, 1);
+  const sourceLink = fixture.all(fixture.element('paper-chat-messages')).find(node => node.tagName === 'BUTTON' && node.textContent === '返回第 3 页');
+  await sourceLink.dispatch('click'); assert.deepEqual(fixture.navigations, [{ id: 'paper-a', page: 3 }]);
+  await button.dispatch('click');
+  assert.equal(fixture.all(fixture.element('paper-chat-messages')).some(node => node.textContent.includes('exact saved content')), false, 'collapsing releases the full snapshot body');
 });

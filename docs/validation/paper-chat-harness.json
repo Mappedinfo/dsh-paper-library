@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-14T14:02:37.808Z",
+  "verified_at": "2026-09-14T14:32:16.582Z",
   "ok": true,
   "checks": [
     "fresh-synthetic-library-and-native-page-two-annotation",
@@ -7,13 +7,16 @@
     "same-paper-reuses-session-and-two-papers-remain-distinct",
     "cold-sessions-native-visible-without-agent-or-model-generation",
     "native-annotation-context-retains-real-page-and-identity",
+    "draft-preparation-does-not-mark-sent-and-later-pdf-edit-cannot-change-snapshot",
+    "model-receives-exact-frozen-source-and-logged-usage-distinguishes-updated-version",
     "native-prompt-adopts-cold-session-and-commits-assistant-history",
     "reading-one-paper-does-not-activate-other-paper-agents",
     "same-request-retry-does-not-duplicate-user-turn-or-generation",
     "committed-assistant-reply-saves-to-native-pdf-with-provenance",
-    "repeated-feedback-save-is-idempotent-and-browser-text-is-ignored"
+    "repeated-feedback-save-is-idempotent-and-browser-text-is-ignored",
+    "native-main-composer-plain-token-resolves-and-updates-sent-baseline-without-plugin-send"
   ],
-  "deterministicModelGenerations": 1,
+  "deterministicModelGenerations": 2,
   "externalModelRequestsMade": 0,
   "sourceData": "Fresh synthetic three-page PDFs generated per run",
   "limitations": [

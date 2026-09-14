@@ -18,6 +18,10 @@ class ReadingAdapter extends LlmAdapter {
   async * stream(options) {
     options.signal?.throwIfAborted()
     this.observation.generations++
+    this.observation.references = options.messages.filter(message => message.source?.plugin === 'Paper Library' && message.source.paperLibraryReference).map(message => ({
+      snapshotId: message.source.paperLibraryReference.snapshot_id,
+      text: message.content.filter(block => block.type === 'text').map(block => block.text).join('\n').slice(0, 4000),
+    })).slice(-8)
     yield { type: 'block-start', index: 0, blockType: 'text' }
     yield { type: 'text-delta', index: 0, text: REPLY }
     yield { type: 'block-end', index: 0, block: { type: 'text', text: REPLY } }
@@ -27,7 +31,7 @@ class ReadingAdapter extends LlmAdapter {
 
 /** Test-only authenticated booleans make cold lifecycle assertions independent from plugin receipts. */
 export function apply(ctx) {
-  const observation = { generations: 0 }
+  const observation = { generations: 0, references: [] }
   ctx.effect(() => ctx.llm.registerAdapter([PROVIDER], new ReadingAdapter(observation)), 'paper-library: deterministic test model')
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/api/paper-chat-fixture', handler(req, res) {
@@ -37,7 +41,7 @@ export function apply(ctx) {
       const ids = url.searchParams.getAll('session')
       if (req.method !== 'GET' || ids.length > 12 || ids.some(id => !/^paper-library-[a-f0-9]{40}$/.test(id))) { res.writeHead(400); res.end(); return }
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ generations: observation.generations, observations: ids.map(id => ({ sessionLoaded: Boolean(ctx.sessions.get(id)), agentLoaded: Boolean(ctx.agents.get(id)) })) }))
+      res.end(JSON.stringify({ generations: observation.generations, references: observation.references, observations: ids.map(id => ({ sessionLoaded: Boolean(ctx.sessions.get(id)), agentLoaded: Boolean(ctx.agents.get(id)) })) }))
     },
   }), 'paper-library: cold-session fixture observations')
 }

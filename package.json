@@ -16,7 +16,7 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
-  "files": ["src/**/*.mjs", "src/**/*.py", "lib/client.js", "web", "skills", "vendor/csl", "cordis.patch.yml", "pyproject.toml", "uv.lock", "README.md", "HANDOFF.md", "THIRD_PARTY.md", "docs/api.md", "docs/validation.md", "docs/upstream-manifest.md", "docs/validation", "LICENSE", "licenses"],
+  "files": ["src/**/*.mjs", "src/**/*.py", "lib/client.js", "web", "skills", "vendor/csl", "cordis.patch.yml", "pyproject.toml", "uv.lock", "README.md", "HANDOFF.md", "THIRD_PARTY.md", "docs/api.md", "docs/validation.md", "docs/annotation-reference-design.md", "docs/upstream-manifest.md", "docs/validation", "LICENSE", "licenses"],
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {
@@ -25,7 +25,8 @@
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-sidebar-right",
         "@deepseek-ai/dsh-client-ui-model-selection",
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-input-trigger"
       ]
     }
   },
@@ -43,7 +44,8 @@
   "dependencies": {
     "@citation-js/core": "^0.7.18",
     "@citation-js/plugin-bibtex": "^0.7.18",
-    "citeproc": "^2.4.63"
+    "citeproc": "^2.4.63",
+    "zod": "^4.0.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.1 <5",
@@ -54,7 +56,8 @@
     "@deepseek-ai/dsh-client-locale": ">=0.1.5-rc.2 <0.2.0",
     "@deepseek-ai/dsh-client-ui-sidebar-right": ">=0.1.5-rc.2 <0.2.0",
     "@deepseek-ai/dsh-client-ui-model-selection": ">=0.1.5-rc.2 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.5-rc.2 <0.2.0"
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.5-rc.2 <0.2.0",
+    "@deepseek-ai/dsh-client-ui-input-trigger": ">=0.1.5-rc.2 <0.2.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": { "optional": true },
@@ -65,7 +68,8 @@
     "@deepseek-ai/dsh-client-locale": { "optional": true },
     "@deepseek-ai/dsh-client-ui-sidebar-right": { "optional": true },
     "@deepseek-ai/dsh-client-ui-model-selection": { "optional": true },
-    "@deepseek-ai/dsh-client-ui-conversation": { "optional": true }
+    "@deepseek-ai/dsh-client-ui-conversation": { "optional": true },
+    "@deepseek-ai/dsh-client-ui-input-trigger": { "optional": true }
   },
   "devDependencies": { "esbuild": "^0.25.0" }
 }

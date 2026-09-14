@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 const flags = new Map()
 for (let i = 2; i < process.argv.length; i += 2) flags.set(process.argv[i], process.argv[i + 1])
 const log = flags.get('--log'), port = Number(flags.get('--port'))
-assert.ok(log && Number.isInteger(port) && port > 0 && port < 65536, 'Usage: --log PRIVATE_HOST_LOG --port PORT [--require-idle true] [--require-chat true] [--output RECEIPT]')
+assert.ok(log && Number.isInteger(port) && port > 0 && port < 65536, 'Usage: --log PRIVATE_HOST_LOG --port PORT [--require-idle true] [--require-chat true] [--require-references true] [--output RECEIPT]')
 const text = await readFile(log, 'utf8')
 const candidates = [...text.matchAll(/https?:\/\/[^\s]+/g)].map(match => match[0])
 const address = candidates.reverse().map(value => { try { return new URL(value) } catch { return null } }).find(url => url?.protocol === 'http:' && url.hostname === '127.0.0.1' && Number(url.port) === port && url.searchParams.has('token'))
@@ -28,12 +28,16 @@ assert.equal(response.status, 200)
 const status = await response.json()
 assert.equal(status.ok, true, 'Installed library status unavailable')
 const conversationCapability = status.result.paper_conversations === true
+const annotationReferences = status.result.annotation_references === true
 if (flags.get('--require-chat') === 'true') assert.equal(conversationCapability, true, 'Restarted host lacks the paper-conversation capability')
+if (flags.get('--require-references') === 'true') assert.equal(annotationReferences, true, 'Restarted host lacks the immutable annotation reference capability')
 const staticResponse = await fetch(`${address.origin}/api/paper-library/paper-chat.js`, { headers, signal: AbortSignal.timeout(10000) })
-if (flags.get('--require-chat') === 'true') {
+if (flags.get('--require-chat') === 'true' || flags.get('--require-references') === 'true') {
   assert.equal(staticResponse.status, 200)
-  assert.ok((await staticResponse.text()).includes('PaperLibraryChat'))
+  const script = await staticResponse.text()
+  assert.ok(script.includes('PaperLibraryChat'))
+  if (flags.get('--require-references') === 'true') assert.ok(script.includes('chat_catalog') && script.includes('annotation_refs'))
 }
-const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
+const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
 if (flags.get('--output')) await writeFile(flags.get('--output'), JSON.stringify(report, null, 2) + '\n')
 console.log(JSON.stringify(report))

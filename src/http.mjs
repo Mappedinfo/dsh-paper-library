@@ -87,7 +87,7 @@ export function createFetchHandler(options = {}) {
           let result = chatAction
             ? await options.paperChat(input, { signal: request.signal })
             : await dispatch(input, { ...options, signal: request.signal });
-          if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat) };
+          if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true };
           return json({ok:true,result});
         } finally { jsonRequests--; }
       }

@@ -1,0 +1,107 @@
+{
+  "verified_at": "2026-09-14T14:39:18.825Z",
+  "ok": true,
+  "node": "v25.9.0",
+  "platform": "darwin",
+  "source_fixture": "artifacts/capacity-2000-1000/library",
+  "fixture_generator": "scripts/benchmark.py",
+  "fixture_verified": {
+    "records": 2000,
+    "pdfs": 1000,
+    "synthetic_marker_rows": 2000,
+    "catalog_pdf_sha256": "ebffd2d5e1f0ad70a893423bd94debcc04e50ebf2b2fa18a14d4f159734b27ae",
+    "original_unchanged": true,
+    "pages_per_pdf": 4,
+    "fixture_pdf_bytes": 20600
+  },
+  "private_run": ".local/paper-chat-test-home/runs/reference-memory-e3d066b2-fb62-4b0f-96ea-586345bed34b",
+  "annotation_count": 45,
+  "annotation_source_characters": 5490,
+  "host": {
+    "measurement": "ps RSS samples; each sample is current RSS, maximum is a sampled maximum, not a true high-water mark",
+    "sample_interval_ms": 200,
+    "sample_count": 73,
+    "sampled_peak_rss_mib": 602.17,
+    "measurements": [
+      {
+        "stage": "ready_after_authentication",
+        "rss_mib": 594.97
+      },
+      {
+        "stage": "settled_before_paper_access_after_5_seconds",
+        "rss_mib": 594.98
+      },
+      {
+        "stage": "after_45_note_catalog",
+        "rss_mib": 598.14
+      },
+      {
+        "stage": "after_exact_45_note_snapshot",
+        "rss_mib": 602.17
+      },
+      {
+        "stage": "after_20_other_cold_paper_opens",
+        "rss_mib": 569.17
+      },
+      {
+        "stage": "after_30_history_polls",
+        "rss_mib": 569.86
+      },
+      {
+        "stage": "settled_idle_after_5_seconds",
+        "rss_mib": 569.88
+      }
+    ],
+    "settled_delta_from_ready_mib": -25.09,
+    "settled_delta_from_prework_mib": -25.1,
+    "explicit_gc": false
+  },
+  "workers": {
+    "measurement": "resource.getrusage(RUSAGE_SELF).ru_maxrss in one-request Python processes, including response JSON serialization; true per-process high-water",
+    "cases": {
+      "get": {
+        "processes": 52,
+        "pdf_opens": 0,
+        "peak_rss_mib": 23.05,
+        "elapsed_ms_total": 49.88
+      },
+      "annotation_catalog": {
+        "processes": 1,
+        "pdf_opens": 1,
+        "peak_rss_mib": 58.08,
+        "elapsed_ms_total": 54.66
+      },
+      "annotation_context_exact": {
+        "processes": 1,
+        "pdf_opens": 1,
+        "peak_rss_mib": 58.14,
+        "elapsed_ms_total": 48.44
+      }
+    },
+    "diagnostic_wrapper": "Standard-library observation around the same core dispatch; logs action, elapsed time, PDF-open count and RSS, never source text"
+  },
+  "workflow": {
+    "cold_paper_sessions": 21,
+    "other_paper_opens": 20,
+    "history_polls": 30,
+    "history_worker_processes": 30,
+    "history_pdf_opens": 0,
+    "prework_settle_ms": 5000,
+    "idle_settle_ms": 5000,
+    "resident_worker_processes": 0,
+    "active_agents": 0,
+    "published_live_sessions": 0,
+    "deterministic_model_generations": 0,
+    "external_model_requests": 0,
+    "isolated_host_stopped": true
+  },
+  "limitations": [
+    "Browser and benchmark-driver RSS are excluded; this is the isolated Harness host plus separately reported workers.",
+    "Synthetic small four-page text PDFs do not represent scanned/image-heavy PDFs or a real user library.",
+    "Only one 45-note paper and 20 other cold paper opens were measured; long-lived activated agents and large sent histories were not exercised.",
+    "A sampled host maximum can miss sub-200-ms peaks; worker ru_maxrss is a real high-water but includes the small diagnostic wrapper.",
+    "Host startup and automatic garbage collection can dominate RSS deltas. Negative deltas are not feature memory savings; no host-without-plugin baseline was measured.",
+    "History polls still launch metadata-only short workers; zero PDF opens does not mean zero CPU or zero worker starts.",
+    "No model was invoked, and no formal usability or provider-quality validation is implied."
+  ]
+}

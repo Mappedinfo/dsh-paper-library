@@ -36,15 +36,19 @@ test('catalog API imports, searches and exports citations independent of Zotero'
 test('HTTP advertises paper conversations only when the native host adapter is present',async()=>{
   const library=await mkdtemp(join(tmpdir(),'paper-http-capability-'));
   try {
-    for(const enabled of [false,true]) {
+    for(const capability of ['standalone','legacy','references']) {
+      const enabled=capability!=='standalone';
       let called=false;
-      const handler=createFetchHandler({library,...(enabled?{paperChat:async()=>{called=true;throw new Error('status must use the core');}}:{})});
+      const paperChat=async()=>{called=true;throw new Error('status must use the core');};
+      if(capability==='references') paperChat.annotationReferences=true;
+      const handler=createFetchHandler({library,...(enabled?{paperChat}:{})});
       const response=await handler(new Request('http://localhost/api',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'status'})}));
       assert.equal(response.status,200);
       const body=await response.json();
       assert.equal(body.ok,true);
       assert.equal(body.result.count,0);
       assert.equal(body.result.paper_conversations,enabled);
+      assert.equal(body.result.annotation_references,capability==='references');
       assert.equal(called,false);
     }
   } finally {await rm(library,{recursive:true,force:true});}
@@ -56,7 +60,7 @@ test('native chat requests route to the host adapter with their request signal',
     calls.push({input,signal:options.signal});
     return {sessionId:'paper-session',created:input.action==='chat_ensure',model:{provider:'fixture',model:'native'},messages:[],running:false,hasMore:false};
   }});
-  for(const action of ['chat_ensure','chat_context','chat_send','chat_history','chat_save_feedback']) {
+  for(const action of ['chat_ensure','chat_catalog','chat_context','chat_reference','chat_send','chat_history','chat_save_feedback']) {
     const input={action,id:'paper-a',...(action==='chat_send'?{question:'Discuss the saved note.',annotation_ids:['note-1'],request_id:'stable-request'}:{}),...(action==='chat_save_feedback'?{message_id:'12'}:{})};
     const request=new Request('http://localhost/api/paper-library/api',{method:'POST',headers:{origin:'http://localhost','content-type':'application/json'},body:JSON.stringify(input)});
     const response=await handler(request);

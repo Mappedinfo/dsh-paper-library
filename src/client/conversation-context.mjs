@@ -1,7 +1,9 @@
+import { annotationReferenceInsert, parseAnnotationReference } from './annotation-references.mjs'
+
 const VERSION = 1
 const ACTION = 'paper-library:conversation-action'
 const RESULT = 'paper-library:conversation-result'
-const SNAPSHOT_LIMIT = 64 * 1024
+const SNAPSHOT_LIMIT = 256 * 1024
 const TEXT_LIMIT = 64 * 1024
 const NAVIGATION_TIMEOUT = 8000
 
@@ -27,8 +29,17 @@ export function readerSnapshot(value) {
   }
   if (value.chatContext != null) {
     const context = value.chatContext
-    if (!Array.isArray(context.annotationIds) || context.annotationIds.length > 40) throw new Error('对话引用最多保留 40 条批注')
-    snapshot.chatContext = { annotationIds: context.annotationIds.map(id => boundedString(id, 160)) }
+    if (context.annotationRefs !== undefined) {
+      if (!Array.isArray(context.annotationRefs) || context.annotationRefs.length > 1000) throw new Error('对话引用最多保留 1000 条批注')
+      snapshot.chatContext = { annotationRefs: context.annotationRefs.map(ref => {
+        if (!ref || !/^[a-f0-9]{64}$/.test(ref.version)) throw new Error('批注引用版本无效')
+        return { id: boundedString(ref.id, 160), version: ref.version }
+      }) }
+    } else {
+      // Previous installed readers can still restore their IDs until they refresh.
+      if (!Array.isArray(context.annotationIds) || context.annotationIds.length > 1000) throw new Error('对话引用最多保留 1000 条批注')
+      snapshot.chatContext = { annotationIds: context.annotationIds.map(id => boundedString(id, 160)) }
+    }
     if (context.selection != null) snapshot.chatContext.selection = {
       page: pageNumber(context.selection.page),
       text: boundedString(context.selection.text, 8000),
@@ -62,13 +73,16 @@ export function readerSnapshot(value) {
       snapshot.annotationDraft.selection = { page: pageNumber(selection.page), text: boundedString(selection.text, TEXT_LIMIT), rects }
     }
   }
-  if (new TextEncoder().encode(JSON.stringify(snapshot)).length > SNAPSHOT_LIMIT) throw new Error('阅读草稿超过 64 KiB，无法暂存')
+  if (new TextEncoder().encode(JSON.stringify(snapshot)).length > SNAPSHOT_LIMIT) throw new Error('阅读草稿超过 256 KiB，无法暂存')
   return snapshot
 }
 
 /** Append through Harness's public span edit so existing reference chips and attachments survive. */
-export function appendConversationDraft(ctx, sessionId, text) {
+export function appendConversationDraft(ctx, sessionId, text, reference) {
   if (typeof text !== 'string' || !text.trim() || text.length > TEXT_LIMIT) throw new Error('批注文本为空或超过 65,536 个字符')
+  const insert = reference === undefined ? undefined : annotationReferenceInsert(reference)
+  const referenceOffset = insert ? text.indexOf(insert.ref) : -1
+  if (insert && (referenceOffset < 0 || text.indexOf(insert.ref, referenceOffset + insert.ref.length) !== -1)) throw new Error('草稿必须包含一次完整批注引用')
   const binding = ctx.sessions.binding(sessionId)
   if (!binding || binding.session.getSnapshot().removed) throw new Error('这篇论文的 DSH 对话不可用，请重新打开文献')
   if (ctx.sessions.subagentAddress(sessionId) !== undefined) throw new Error('子代理对话不支持接收阅读草稿')
@@ -86,10 +100,23 @@ export function appendConversationDraft(ctx, sessionId, text) {
     span: { start: end, end, draftRev: state.draftRev },
   })
   if (applied !== true) throw new Error('主对话草稿刚刚发生变化，请重试；现有内容已保留')
+  if (insert) {
+    const next = input.state.getSnapshot()
+    const start = end + (state.draft ? 2 : 0) + referenceOffset
+    const inserted = binding.ctx.bail(binding.ctx, 'slash/input-insert-reference', {
+      reference: insert,
+      span: { start, end: start + insert.ref.length, draftRev: next.draftRev },
+    })
+    // A plain canonical token is still a complete, Host-resolvable draft. Do not
+    // reappend it after a decoration race or destroy the user's other inputs.
+    if (inserted !== true) input.notify?.('info', '批注引用已保留为文本，可直接发送；点击引用预览可查看材料')
+    return inserted === true
+  }
+  return true
 }
 
 /** Root-owned frame bridge survives the right Sidebar's session-keyed remount. */
-export function createConversationBridge({ window, ctx }) {
+export function createConversationBridge({ window, ctx, rememberReference = () => {} }) {
   const origin = window.location.origin
   const frames = new Map()
   const mounted = new Map()
@@ -98,7 +125,16 @@ export function createConversationBridge({ window, ctx }) {
   let navigation = null
   let frameTimer = null
   let terminalRelay = null
+  let pendingReference = null
   const post = (target, data) => { if (active) target.postMessage({ ...data, version: VERSION }, origin) }
+
+  function relayReference() {
+    if (!pendingReference) return
+    const target = [...frames].reverse().find(([, frame]) => frame.ready)?.[0]
+    if (!target) return
+    post(target, { type: 'paper-library:reference-open', ...pendingReference })
+    pendingReference = null
+  }
 
   function relayResult(target) {
     if (!terminalRelay) return
@@ -131,7 +167,8 @@ export function createConversationBridge({ window, ctx }) {
         // Sidebar's own passive mount effect has published its current service binding by this frame.
         ctx.sidebarRight.openTab('paper-library')
         // Waiting for the composer mount also lets Harness restore its persisted draft first.
-        if (pending.text !== undefined) appendConversationDraft(ctx, pending.sessionId, pending.text)
+        if (pending.text !== undefined) appendConversationDraft(ctx, pending.sessionId, pending.text, pending.reference)
+        relayReference()
         finishNavigation()
       } catch (error) {
         finishNavigation(error)
@@ -139,11 +176,11 @@ export function createConversationBridge({ window, ctx }) {
     })
   }
 
-  function openSession(sessionId, text) {
+  function openSession(sessionId, text, reference) {
     if (navigation) throw new Error('正在打开论文对话，请稍后重试')
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => finishNavigation(new Error('论文对话已切换，但文献库面板未能重新打开；请从右侧栏打开文献库')), NAVIGATION_TIMEOUT)
-      navigation = { sessionId, text, resolve, reject, timer }
+      navigation = { sessionId, text, reference, resolve, reject, timer }
       try {
         ctx.sessions.open(sessionId)
         scheduleOpen()
@@ -160,8 +197,14 @@ export function createConversationBridge({ window, ctx }) {
     const binding = ctx.sessions.binding(data.sessionId)
     if (!binding || binding.session.getSnapshot().removed) throw new Error('论文对话不存在，请重新打开文献')
     if (navigation) throw new Error('正在打开论文对话，请稍后重试')
-    if (data.action === 'draft' && (typeof data.text !== 'string' || !data.text.trim() || data.text.length > TEXT_LIMIT)) throw new Error('批注文本为空或超过 65,536 个字符')
-    await openSession(data.sessionId, data.action === 'draft' ? data.text : undefined)
+    const text = data.reference ? data.draft_text : data.text
+    if (data.action === 'draft' && (typeof text !== 'string' || !text.trim() || text.length > TEXT_LIMIT)) throw new Error('批注文本为空或超过 65,536 个字符')
+    const reference = data.action === 'draft' && data.reference ? annotationReferenceInsert(data.reference) : undefined
+    if (reference) {
+      if (parseAnnotationReference(reference.ref).snapshot_id !== data.snapshot_id) throw new Error('批注引用快照不一致')
+      rememberReference(data.sessionId, reference)
+    }
+    await openSession(data.sessionId, data.action === 'draft' ? text : undefined, reference)
   }
 
   function onMessage(event) {
@@ -174,6 +217,7 @@ export function createConversationBridge({ window, ctx }) {
       frame.ready = true
       if (snapshot) post(event.source, { type: 'paper-library:restore', snapshot })
       relayResult(event.source)
+      relayReference()
       return
     }
     if (data.type === 'paper-library:reader-state') {
@@ -211,6 +255,15 @@ export function createConversationBridge({ window, ctx }) {
   window.addEventListener('message', onMessage)
 
   return {
+    /** Reveal a page after a user explicitly opens an immutable reference. */
+    async openReference({ sessionId, paperId, page, snapshot_id }) {
+      boundedString(paperId, 200); pageNumber(page)
+      if (!/^[a-f0-9]{64}$/.test(snapshot_id)) throw new Error('批注引用快照无效')
+      if (ctx.sessions.list.getSnapshot().current !== sessionId) throw new Error('你已切换到其他对话，请在原对话重新打开引用')
+      pendingReference = { paperId, page, snapshot_id }
+      try { await openSession(sessionId) }
+      catch (error) { pendingReference = null; throw error }
+    },
     /** Authorize exactly one generated iframe's WindowProxy until its pane unmounts. */
     attach(target) {
       const record = { ready: false, requests: new Map() }
@@ -229,7 +282,7 @@ export function createConversationBridge({ window, ctx }) {
       active = false
       window.removeEventListener('message', onMessage)
       finishNavigation(new Error('文献库插件已卸载'))
-      frames.clear(); mounted.clear(); snapshot = null; terminalRelay = null
+      frames.clear(); mounted.clear(); snapshot = null; terminalRelay = null; pendingReference = null
     },
   }
 }

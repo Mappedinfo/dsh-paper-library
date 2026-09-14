@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -15,13 +16,16 @@ async function fixture(t, preparedStore) {
   const receipts = new Set(), sends = [], saves = [], closed = [], memberships = new Set()
   const defaultModel = { provider: 'fixture-default', model: 'reader-default', reasoningEffort: 'low' }
   let creations = 0, follows = 0, promotions = 0, activeSends = 0, maxSends = 0
+  let projection, preStep
   const ctx = {
+    effect: callback => callback(),
+    on: (name, callback) => { if (name === 'agent/pre-step') preStep = callback; return () => {} },
     agentDefaultModel: { currentSelection: () => defaultModel, saveSelection: () => { throw new Error('Must not change the global model') } },
-    sessionProjections: { stateOf: session => session.selection },
+    sessionProjections: { stateOf: session => session.selection, register: value => { projection = value; return () => {} } },
     agents: { get: id => agents.get(id) },
     sessions: {
       get: id => attached.get(id),
-      flush: async () => {},
+      flush: async () => true,
       prepare: (id, { meta }) => {
         if (preparedStore) return preparedStore.prepare(id, { meta })
         const events = []
@@ -60,7 +64,7 @@ async function fixture(t, preparedStore) {
           const record = stored.get(address.sessionId)
           assert.ok(record)
           const selection = record.events.filter(event => event.type === 'model/selection').at(-1)?.data
-          yield { type: 'snapshot', header: record.header, records: record.events.map(event => ({ type: 'event', event })), cursor: record.events.length - 1, hasMore: false, projections: { values: { title: record.events.find(event => event.type === 'session/title')?.data.title, modelSelection: { next: selection, lastUsed: null } } } }
+          yield { type: 'snapshot', header: record.header, records: record.events.map(event => ({ type: 'event', event })), cursor: record.events.length - 1, hasMore: false, projections: { values: { title: record.events.find(event => event.type === 'session/title')?.data.title, modelSelection: { next: selection, lastUsed: null }, ...(projection ? { [projection.key]: record.events.reduce(projection.apply, projection.init(record.header)) } : {}) } } }
           promotions++
         } finally { assert.ok(signal.aborted); follows-- }
       },
@@ -73,7 +77,9 @@ async function fixture(t, preparedStore) {
           receipts.add(key)
           sends.push(request)
           const record = stored.get(request.sessionId)
-          record.events.push({ seq: record.events.length, type: 'user/message', time: Date.now(), data: { source: { kind: 'user', rpcId: request.requestId }, content: request.content } })
+          const user = { id: `user-${request.requestId}`, role: 'user', source: { kind: 'user' }, content: request.content }
+          const decision = await preStep({ agent: { session: { id: request.sessionId } }, signal: new AbortController().signal }, async () => ({ kind: 'enter', messages: [user] }))
+          for (const message of decision.messages) record.events.push({ seq: record.events.length, type: 'user/message', time: Date.now(), data: message })
           agents.set(request.sessionId, { status: 'running', inbox: { nextTurn: [], nextStep: [] } })
         }
         activeSends--
@@ -81,11 +87,21 @@ async function fixture(t, preparedStore) {
       },
     },
   }
-  const annotations = [{ id: 'note-1', page: 2, text: 'quoted paper text', comment: 'Why?', author: 'Reader' }]
+  const annotations = [{ id: 'note-1', page: 2, text: 'quoted paper text', comment: 'Why?', author: 'Reader', version: createHash('sha256').update('fixture version1').digest('hex') }]
   const kernel = async request => {
     switch (request.action) {
       case 'get': return { id: request.id, title: 'A synthetic paper', citekey: request.id, pdf: true, page_count: 3 }
       case 'annotations': return { annotations }
+      case 'annotation_catalog': return { annotations, total: annotations.length, total_exact: true, truncated: false }
+      case 'annotation_context_exact': {
+        const selected = request.annotation_refs.map(ref => {
+          const annotation = annotations.find(note => note.id === ref.id)
+          if (!annotation) throw new Error('ANNOTATION_MISSING')
+          if (annotation.version !== ref.version) throw new Error('ANNOTATION_STALE')
+          return { ...annotation }
+        })
+        return { annotations: selected, context_hash: 'synthetic-context-hash', source_characters: selected.reduce((sum, note) => sum + note.text.length + note.comment.length, request.selection?.text.length ?? 0), coverage: { requested: selected.length, included: selected.length, total: annotations.length, total_exact: true, all: selected.length === annotations.length } }
+      }
       case 'feedback_context': {
         const selected = request.annotation_ids === undefined ? annotations : annotations.filter(annotation => request.annotation_ids.includes(annotation.id))
         if (!selected.length) throw new Error('Selected annotations no longer exist')
@@ -96,7 +112,9 @@ async function fixture(t, preparedStore) {
     }
   }
   const options = { library, dispatch: kernel, core: kernel }
-  return { ctx, options, stored, attached, agents, sends, saves, closed, memberships, annotations, chat: createPaperChat(ctx, options), counters: () => ({ creations, follows, promotions, maxSends }) }
+  const chat = createPaperChat(ctx, options)
+  chat.install()
+  return { ctx, options, stored, attached, agents, sends, saves, closed, memberships, annotations, chat, counters: () => ({ creations, follows, promotions, maxSends }) }
 }
 
 test('a paper opens one durable cold native session, inherits source model, and survives service restart', async t => {
@@ -199,7 +217,7 @@ test('context presents bounded page-linked annotations as readable quoted Markdo
   await assert.rejects(f.chat({ action: 'chat_context', id: 'paper-a', selection: { page: 4, text: 'outside' } }), /页码超出/)
   await assert.rejects(f.chat({ action: 'chat_context', id: 'paper-a', selection: { page: 1, text: 'x'.repeat(8001) } }), /8000/)
   await assert.rejects(f.chat({ action: 'chat_context', id: 'paper-a', question: 'x'.repeat(4001) }), /4000/)
-  await assert.rejects(f.chat({ action: 'chat_context', id: 'paper-a', annotation_ids: ['deleted-note'] }), /no longer exist/)
+  await assert.rejects(f.chat({ action: 'chat_context', id: 'paper-a', annotation_ids: ['deleted-note'] }), /已删除/)
   await assert.rejects(f.chat({ action: 'chat_context', id: 'paper-a', annotation_ids: [] }), /请输入|输入阅读问题/)
 })
 
@@ -229,6 +247,64 @@ test('native prompt queue serializes per paper and retries reuse the same durabl
   const aborted = AbortSignal.abort(new Error('Cancelled before admission'))
   await assert.rejects(f.chat({ ...request, request_id: 'draft-2' }, { signal: aborted }), /Cancelled/)
   assert.equal(f.sends.length, 1)
+})
+
+test('prepared versions remain unsent until logged, survive edits, and replay exact snapshots after service restart', async t => {
+  const f = await fixture(t)
+  const originalVersion = f.annotations[0].version
+  const selected = [{ id: 'note-1', version: originalVersion }]
+  const context = await f.chat({ action: 'chat_context', id: 'paper-a', annotation_refs: selected, question: 'Compare this note.' })
+  assert.equal((await f.chat({ action: 'chat_catalog', id: 'paper-a' })).annotations[0].status, 'new')
+  f.annotations[0].comment = 'Changed after preparing the snapshot'
+  f.annotations[0].version = createHash('sha256').update('fixture version2').digest('hex')
+  await assert.rejects(f.chat({ action: 'chat_context', id: 'paper-a', annotation_refs: selected, question: 'Compare this note.' }), /已更新/)
+  const request = { action: 'chat_send', id: 'paper-a', snapshot_id: context.snapshot_id, request_id: 'frozen-1' }
+  await f.chat(request)
+  const history = await f.chat({ action: 'chat_history', id: 'paper-a' })
+  assert.equal(history.annotation_usage['note-1'], originalVersion)
+  assert.match(history.messages[0].text, /Why\?/)
+  assert.equal(history.messages[0].text.includes('Changed after preparing'), false)
+  assert.equal(history.messages[0].references[0].snapshot_id, context.snapshot_id)
+  assert.equal((await f.chat({ action: 'chat_catalog', id: 'paper-a' })).annotations[0].status, 'updated')
+  f.annotations.splice(0)
+  const restarted = createPaperChat(f.ctx, f.options)
+  await restarted(request)
+  assert.equal(f.sends.length, 1)
+  assert.equal((await restarted({ action: 'chat_reference', id: 'paper-a', snapshot_id: context.snapshot_id })).text, context.text)
+  await assert.rejects(restarted({ action: 'chat_reference', id: 'paper-b', snapshot_id: context.snapshot_id }), /不属于/)
+})
+
+test('legacy uncertain retries bind their first snapshot while changed intent requires a new request', async t => {
+  const f = await fixture(t)
+  const request = { action: 'chat_send', id: 'paper-a', annotation_ids: ['note-1'], question: 'Original question', request_id: 'legacy-bound' }
+  const first = await f.chat(request)
+  f.annotations[0].comment = 'Changed PDF'
+  f.annotations[0].version = 'a'.repeat(64)
+  const second = await f.chat(request)
+  assert.equal(second.snapshot_id, first.snapshot_id)
+  assert.equal(second.text.includes('Changed PDF'), false)
+  await assert.rejects(f.chat({ ...request, question: 'Different question' }), /已改变/)
+  await assert.rejects(f.chat({ ...request, annotation_ids: [] }), /已改变/)
+  const newer = await f.chat({ action: 'chat_context', id: 'paper-a', annotation_ids: ['note-1'], question: 'Original question' })
+  await assert.rejects(f.chat({ action: 'chat_send', id: 'paper-a', snapshot_id: newer.snapshot_id, request_id: 'legacy-bound' }), /另一份快照/)
+  assert.equal(f.sends.length, 1)
+})
+
+test('live usage is published only after the exact log cut passes a durable flush', async t => {
+  const f = await fixture(t)
+  const context = await f.chat({ action: 'chat_context', id: 'paper-a', annotation_ids: ['note-1'], question: 'Read' })
+  await f.chat({ action: 'chat_send', id: 'paper-a', snapshot_id: context.snapshot_id, request_id: 'durable-1' })
+  f.attached.set(context.sessionId, { header: { id: context.sessionId } })
+  let flushes = 0
+  f.ctx.sessions.flush = async () => { flushes++; throw new Error('Synthetic disk failure') }
+  await assert.rejects(f.chat({ action: 'chat_history', id: 'paper-a' }), /disk failure/)
+  f.ctx.sessions.flush = async () => { flushes++; return false }
+  await assert.rejects(f.chat({ action: 'chat_catalog', id: 'paper-a' }), /尚未确认/)
+  f.ctx.sessions.flush = async () => { flushes++; return true }
+  const history = await f.chat({ action: 'chat_history', id: 'paper-a' })
+  assert.equal(history.annotation_usage['note-1'], f.annotations[0].version)
+  await f.chat({ action: 'chat_history', id: 'paper-a' })
+  assert.equal(flushes, 3, 'Unchanged history polls reuse the verified durable cut')
 })
 
 test('history exposes bounded human and assistant text while omitting internal prompts and reasoning', () => {

@@ -8,7 +8,7 @@ import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
 
 export const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const defaultLibrary = join(homedir(), '.local', 'share', 'dsh-paper-library');
-const actions = new Set(['status','import','list','get','update','attach','page','annotations','annotate','annotation_update','annotation_delete','export_annotations','export_pdf','link','graph','feedback_context','save_feedback','feedback']);
+const actions = new Set(['status','import','list','get','update','attach','page','annotations','annotation_catalog','annotation_context_exact','annotate','annotation_update','annotation_delete','export_annotations','export_pdf','link','graph','feedback_context','save_feedback','feedback']);
 let pending = Promise.resolve();
 let importsPending = Promise.resolve();
 let importCount = 0;

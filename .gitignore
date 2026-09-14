@@ -11,6 +11,7 @@ lib/
 .data/
 data/
 .local/
+.paper-library/
 artifacts/
 .env
 *.sqlite*

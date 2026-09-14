@@ -252,7 +252,7 @@ function renderAnnotations() {
     if (note.text) card.append(el('blockquote', '', note.text));
     if (note.comment || note.content) card.append(el('p', 'annotation-comment', note.comment || note.content));
     const actions = el('div', 'annotation-actions'); const edit = el('button', 'button subtle', '编辑'); edit.dataset.noteAction = 'edit'; const remove = el('button', 'button subtle delete-note', '删除'); remove.dataset.noteAction = 'delete'; actions.append(edit, remove);
-    if (paperChatUI?.available()) { const discuss = el('button', 'button subtle', '在论文对话中讨论'); discuss.dataset.noteAction = 'discuss'; actions.append(discuss); }
+    if (paperChatUI?.available() && note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const discuss = el('button', 'button subtle', paperChatUI.hasAnnotation(note.id) ? '移出本次引用' : '加入本次引用'); discuss.dataset.noteAction = 'discuss'; actions.append(discuss); }
     card.append(actions); fragment.append(card);
   }
   if (!state.annotations.length) fragment.append(emptyState('第一条批注，从一个问题开始', '在阅读页选择文字以高亮，或添加一条整页笔记。'));
@@ -294,13 +294,13 @@ async function handleNoteAction(event) {
   const action = button.dataset.noteAction;
   if (action === 'previous' || action === 'next') { state.noteOffset += action === 'next' ? 40 : -40; renderAnnotations(); return; }
   const note = state.annotations.find((entry) => entry.id === button.closest('[data-annotation-id]').dataset.annotationId); if (!note) return;
-  if (action === 'discuss') { paperChatUI?.useAnnotation(note); return; }
+  if (action === 'discuss') { await paperChatUI?.useAnnotation(note); if (state.active?.id) renderAnnotations(); return; }
   if (action === 'page') { state.page = note.page; clearPage(); await switchTab('reader'); }
   if (action === 'edit') openAnnotation('edit', note);
   if (action === 'delete') {
     if (button.dataset.confirm !== 'true') { button.dataset.confirm = 'true'; button.textContent = '确认删除'; setTimeout(() => { if (button.isConnected) { delete button.dataset.confirm; button.textContent = '删除'; } }, 5000); return; }
     const id = state.active.id; button.disabled = true;
-    try { await api('annotation_delete', { id, annotation_id: note.id }); toast('批注已删除'); if (state.active?.id === id) { await loadAnnotations(id); if (note.page === state.page) await requestPage(state.page); } }
+    try { await api('annotation_delete', { id, annotation_id: note.id }); toast('批注已删除'); if (state.active?.id === id) { await loadAnnotations(id); await paperChatUI?.annotationsChanged(id); if (note.page === state.page) await requestPage(state.page); } }
     catch (error) { toast(error.message, true); button.disabled = false; }
   }
 }
@@ -743,7 +743,7 @@ $('graph-stage').addEventListener('click', activateGraphNode); $('graph-stage').
 document.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close(); document.querySelector('.workspace').classList.remove('show-detail'); paperChatUI?.visible(false); $('search').focus(); $('search').select(); } });
 function publishReaderState() {
   if (restoringReader || !state.active || window.parent === window) return true;
-  const snapshot = { paperId: state.active.id, page: state.page, tab: state.tab, chatDraft: paperChatUI?.draft() || '', chatContext: paperChatUI?.context() || { annotationIds: [] } };
+  const snapshot = { paperId: state.active.id, page: state.page, tab: state.tab, chatDraft: paperChatUI?.draft() || '', chatContext: paperChatUI?.context() || { annotationRefs: [] } };
   if ($('annotation-dialog').open && state.annotationDraft?.id === state.active.id) {
     const draft = state.annotationDraft;
     snapshot.annotationDraft = { mode: draft.mode, id: draft.id, page: draft.page, comment: $('annotation-comment').value,
@@ -752,7 +752,7 @@ function publishReaderState() {
     };
   }
   const serialized = JSON.stringify(snapshot);
-  if (new Blob([serialized]).size > 64 * 1024) return false;
+  if (new Blob([serialized]).size > 256 * 1024) return false;
   window.parent.postMessage({ type: 'paper-library:reader-state', version: 1, snapshot }, window.location.origin);
   return true;
 }
@@ -787,7 +787,16 @@ async function restoreReaderState() {
     }
   } finally { restoringReader = false; publishReaderState(); }
 }
-async function initialize() { announceReady(); await loadStatus(); await loadList(); initializedReader = true; await restoreReaderState(); if (!paperChatUI?.available()) loadModels(); }
+let pendingReferenceOpen = null;
+async function openReferencedPaper(value) {
+  if (!initializedReader) { pendingReferenceOpen = value; return; }
+  if (state.active?.id !== value.paperId) await openPaper(value.paperId);
+  if (state.active?.id !== value.paperId) return;
+  await switchTab('reader');
+  if (state.active.pdf && value.page !== state.page) await requestPage(value.page);
+  publishReaderState();
+}
+async function initialize() { announceReady(); await loadStatus(); await loadList(); initializedReader = true; await restoreReaderState(); if (pendingReferenceOpen) { const value = pendingReferenceOpen; pendingReferenceOpen = null; await openReferencedPaper(value); } if (!paperChatUI?.available()) loadModels(); }
 const currentModelDisplay = el('div', 'current-harness-model'); currentModelDisplay.id = 'current-harness-model'; currentModelDisplay.hidden = true;
 currentModelDisplay.append(el('span', '', '当前 DSH 模型'));
 const currentModelName = el('strong'); currentModelName.id = 'current-harness-model-name'; currentModelDisplay.append(currentModelName);
@@ -798,9 +807,14 @@ refreshModels.type = 'button'; refreshModels.style.marginTop = '6px'; refreshMod
 refreshModels.addEventListener('click', () => { announceReady(); loadModels(); }); $('model-status').after(refreshModels);
 paperChatUI = window.PaperLibraryChat?.create({ api, toast, getPaper: () => state.active, getContext: () => state.harnessContext,
   getAnnotations: () => state.annotations, getLibrary: () => state.library,
-  navigate: switchTab, changed: publishReaderState,
+  navigate: switchTab, navigateReference: (paperId, page) => openReferencedPaper({ paperId, page }), changed: publishReaderState,
   savedFeedback: async id => { if (state.active?.id !== id) return; await loadFeedback(id); await loadAnnotations(id); if (state.active.pdf) await requestPage(state.page); },
 });
 window.addEventListener('pagehide', () => { publishReaderState(); paperChatUI?.dispose(); });
-window.addEventListener('message', receiveHarnessContext);
+window.addEventListener('message', event => {
+  receiveHarnessContext(event);
+  const value = event.data;
+  if (event.source !== window.parent || event.origin !== window.location.origin || value?.type !== 'paper-library:reference-open' || value.version !== 1 || typeof value.paperId !== 'string' || !value.paperId || value.paperId.length > 160 || !Number.isInteger(value.page) || value.page < 1 || value.page > 2000) return;
+  void openReferencedPaper(value).catch(error => toast(error.message, true));
+});
 initialize();

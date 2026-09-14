@@ -1,0 +1,67 @@
+{
+  "verified_at": "2026-09-14T14:50:25.048Z",
+  "ok": true,
+  "checks": [
+    "three-of-45-new-notes-across-pages-and-20-row-pagination",
+    "switching-two-papers-restores-each-draft-and-reference-set",
+    "saving-note-46-suggests-addition-without-changing-selection-or-calling-model",
+    "edited-selected-note-remains-frozen-until-explicit-current-version-adoption",
+    "wide-and-narrow-reference-drawer-render-without-horizontal-overflow",
+    "inline-send-logs-three-exact-sources-updates-new-count-and-history-page-return",
+    "new-and-sent-notes-mix-and-all-46-append-as-one-native-reference-preserving-draft",
+    "browser-reload-restores-durable-reference-token-and-native-snapshot-inspector",
+    "main-composer-send-resolves-all-46-and-reconciles-inline-sent-status",
+    "missing-snapshot-inspector-shows-error-and-composer-remains-editable",
+    "unknown-snapshot-is-rejected-without-model-generation"
+  ],
+  "deterministicModelGenerations": 3,
+  "externalModelRequestsMade": 0,
+  "sourceData": "Fresh synthetic three-page PDFs and 46 user notes",
+  "browserErrors": [],
+  "memory": {
+    "samples": [
+      {
+        "stage": "initial-native-page",
+        "hostRssMiB": 598.5,
+        "chromiumProcessRssSumMiB": 484.921875,
+        "chromiumProcessCount": 4,
+        "mainPageJSHeapUsedMiB": 31.871002197265625
+      },
+      {
+        "stage": "reference-drawer-46-notes",
+        "hostRssMiB": 440.90625,
+        "chromiumProcessRssSumMiB": 678.34375,
+        "chromiumProcessCount": 4,
+        "mainPageJSHeapUsedMiB": 50.124568939208984
+      },
+      {
+        "stage": "after-refresh-and-reference-inspector",
+        "hostRssMiB": 444.90625,
+        "chromiumProcessRssSumMiB": 759.734375,
+        "chromiumProcessCount": 4,
+        "mainPageJSHeapUsedMiB": 43.31758499145508
+      },
+      {
+        "stage": "idle-after-three-completed-model-turns",
+        "hostRssMiB": 449.1875,
+        "chromiumProcessRssSumMiB": 758.34375,
+        "chromiumProcessCount": 4,
+        "mainPageJSHeapUsedMiB": 54.68736267089844
+      }
+    ],
+    "sampledMaxHostRssMiB": 598.5,
+    "sampledMaxChromiumProcessRssSumMiB": 759.734375,
+    "sampledMaxMainPageJSHeapUsedMiB": 54.68736267089844,
+    "scope": "Four samples in a synthetic 46-note browser walkthrough; browser process RSS double-counts shared memory. JS heap covers the main page renderer only. Neither is total physical application memory or a measured high-water mark."
+  },
+  "screenshots": [
+    ".local/paper-chat-test-home/runs/reference-browser-a2af996d-fcd5-41e6-897a-463376103468/reference-drawer-wide.png",
+    ".local/paper-chat-test-home/runs/reference-browser-a2af996d-fcd5-41e6-897a-463376103468/reference-drawer-narrow.png",
+    ".local/paper-chat-test-home/runs/reference-browser-a2af996d-fcd5-41e6-897a-463376103468/native-reference-chip.png",
+    ".local/paper-chat-test-home/runs/reference-browser-a2af996d-fcd5-41e6-897a-463376103468/native-restored-reference.png"
+  ],
+  "limitations": [
+    "Synthetic documents only; no real-library or model-quality claim",
+    "Memory is sampled at four stages, not a high-water measurement; multiprocess RSS double-counts shared pages and excludes Python worker peaks"
+  ]
+}

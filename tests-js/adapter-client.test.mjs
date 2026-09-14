@@ -22,13 +22,15 @@ test('published client bundle mounts the public library tab and releases hidden 
     sidebarRightTabs: { register: definition => { registrations.set('tab', definition); return () => registrations.delete('tab') } },
     modelDirectories: { directoryFor: sessionId => ({ sessionId }) },
     sessions: { subagentAddress: () => undefined },
+    inputTriggers: { registerSource: source => { registrations.set('references', source); return () => registrations.delete('references') } },
     slots: {
-      inject: (name, callback) => { assert.ok(['sidebar.right.pane.tab', 'conversation.input.overlay'].includes(name)); return callback() },
-      register: (definition, component) => { const key = definition.name === 'sidebar.right.pane.tab' ? 'body' : 'mount'; registrations.set(key, { definition, component }); return () => registrations.delete(key) },
+      inject: (name, callback) => { assert.ok(['sidebar.right.pane.tab', 'conversation.input.overlay', 'conversation.input.dock'].includes(name)); return callback() },
+      register: (definition, component) => { const key = definition.name === 'sidebar.right.pane.tab' ? 'body' : definition.name === 'conversation.input.dock' ? 'inspector' : 'mount'; registrations.set(key, { definition, component }); return () => registrations.delete(key) },
     },
   }
   plugin.apply(ctx)
   assert.equal(registrations.get('tab').kind, 'paper-library')
+  assert.equal(registrations.get('references').name, 'paper-library-annotations')
   assert.equal(registrations.get('body').definition.key, registrations.get('tab').id)
   const injected = registrations.get('body').definition.inject('session-1')
   assert.equal(injected.sessionId, 'session-1')
@@ -36,6 +38,7 @@ test('published client bundle mounts the public library tab and releases hidden 
   assert.equal(injected.modelAvailable, true)
   assert.ok(injected.conversationBridge)
   assert.equal(registrations.get('mount').definition.name, 'conversation.input.overlay')
+  assert.equal(registrations.get('inspector').definition.name, 'conversation.input.dock')
   const component = registrations.get('body').component
   const hidden = component({ useTabInfo: () => ({ tab: { visible: false } }) })
   assert.equal(hidden.type(hidden.props), null)

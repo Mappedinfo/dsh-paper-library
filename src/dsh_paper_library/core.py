@@ -21,6 +21,12 @@ import xml.etree.ElementTree as ET
 
 MAX_IMPORT = 2000
 MAX_ANNOTATIONS = 5000
+REFERENCE_CATALOG_LIMIT = 1000
+REFERENCE_SCAN_LIMIT = 20000
+REFERENCE_SOURCE_CHARACTERS = 24000
+REFERENCE_MAX_CHARACTERS = 96000
+REFERENCE_PREVIEW_CHARACTERS = 240
+REFERENCE_ANNOTATION_BYTES = 2 * 1024 * 1024
 PORTABLE_NAME = "paper-library.csl.json"
 RELATIONS = {"related", "supports", "contradicts", "cites"}
 
@@ -776,7 +782,7 @@ class Library:
         return {}
 
     @classmethod
-    def _annotation(cls, page, annot):
+    def _annotation(cls, page, annot, exact=False):
         import pymupdf as fitz
         info = annot.info
         extra = cls._annotation_metadata(annot)
@@ -792,8 +798,149 @@ class Library:
         if not text and kind in {"highlight", "underline", "strikeout", "squiggly"}:
             words = page.get_text("words")
             unrotated = [fitz.Rect(r) * page.derotation_matrix for r in rects]
-            text = " ".join(word[4] for word in words if any(fitz.Rect(word[:4]).intersects(rect) for rect in unrotated))[:20000]
+            text = " ".join(word[4] for word in words if any(fitz.Rect(word[:4]).intersects(rect) for rect in unrotated))
+            if not exact:
+                text = text[:20000]
         return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra else "external-pdf", **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id") if key in extra}}
+
+    @staticmethod
+    def _reference_annotation(value, identity_reliable):
+        """Version semantic PDF content, not file hashes or reader timestamps.
+
+        Geometry is normalized to a millipoint so lossless PDF serialization
+        roundoff does not mark every annotation as edited. No source text is
+        shortened here: preview limits belong only to the catalogue projection.
+        """
+        # PyMuPDF must decode an object's strings before their lengths are
+        # available. Bound further normalization/hash copies of external data;
+        # this is not a guarantee against arbitrary PDF decompression costs.
+        if len(value["text"]) + len(value["comment"]) > REFERENCE_ANNOTATION_BYTES or len(value["text"].encode("utf-8")) + len(value["comment"].encode("utf-8")) > REFERENCE_ANNOTATION_BYTES:
+            raise ValueError("ANNOTATION_TEXT_LIMIT: a PDF annotation exceeds the 2 MiB parsing budget; reduce that annotation in a PDF reader before refreshing")
+        def text(value):
+            return unicodedata.normalize("NFC", str(value or "").replace("\r\n", "\n").replace("\r", "\n"))
+        normalized = {"page": value["page"], "type": value["type"],
+                      "text": text(value["text"]), "comment": text(value["comment"]),
+                      "rects": [[round(float(v), 3) for v in rect] for rect in value["rects"]]}
+        version = hashlib.sha256(json.dumps(normalized, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+        return {**value, "version": version, "identity_reliable": identity_reliable,
+                "identity_source": "pdf-nm" if identity_reliable else "page-xref",
+                "text_characters": len(value["text"]), "comment_characters": len(value["comment"]),
+                "source_characters": len(value["text"]) + len(value["comment"])}
+
+    @staticmethod
+    def _reference_limits(max_characters=REFERENCE_SOURCE_CHARACTERS):
+        return {"annotations": REFERENCE_CATALOG_LIMIT, "source_characters": max_characters,
+                "selection_characters": 8000, "preview_characters": REFERENCE_PREVIEW_CHARACTERS,
+                "scanned_annotations": REFERENCE_SCAN_LIMIT, "annotation_bytes": REFERENCE_ANNOTATION_BYTES}
+
+    def annotation_catalog(self, id):
+        """Bounded current-paper metadata for selection; never a resident index."""
+        item = self.get(id)
+        values, seen, duplicate_ids = [], set(), set()
+        total, scanned, characters, total_exact = 0, 0, 0, True
+        if item["pdf"]:
+            with self._open_pdf(self.pdf_path(id)) as doc:
+                stop = False
+                for page in doc:
+                    for annot in page.annots() or []:
+                        if scanned >= REFERENCE_SCAN_LIMIT:
+                            total_exact, stop = False, True
+                            break
+                        scanned += 1
+                        if self._annotation_metadata(annot).get("kind") == "ai-feedback":
+                            continue
+                        total += 1
+                        value = self._reference_annotation(self._annotation(page, annot, exact=True), bool(annot.info.get("id")))
+                        characters += value["source_characters"]
+                        if value["id"] in seen:
+                            duplicate_ids.add(value["id"])
+                        seen.add(value["id"])
+                        if len(values) < REFERENCE_CATALOG_LIMIT:
+                            projected = {key: value[key] for key in ("id", "version", "page", "type", "source", "identity_reliable", "identity_source", "text_characters", "comment_characters", "source_characters")}
+                            projected.update({key: value[key][:REFERENCE_PREVIEW_CHARACTERS] for key in ("text", "comment")})
+                            projected["preview_truncated"] = any(len(value[key]) > REFERENCE_PREVIEW_CHARACTERS for key in ("text", "comment"))
+                            values.append(projected)
+                    if stop:
+                        break
+        for value in values:
+            if value["id"] in duplicate_ids:
+                value.update(identity_reliable=False, identity_source="duplicate-pdf-nm")
+        return {"annotations": values, "total": total, "returned": len(values),
+                "total_exact": total_exact, "truncated": not total_exact or total > len(values),
+                "source_characters": characters, "source_characters_exact": total_exact,
+                "ambiguous_ids": sorted(duplicate_ids)[:REFERENCE_CATALOG_LIMIT], "limits": self._reference_limits()}
+
+    def annotation_context_exact(self, id, annotation_refs, selection=None, max_characters=REFERENCE_SOURCE_CHARACTERS):
+        """Freeze complete selected versions or fail; never silently omit text."""
+        if not isinstance(annotation_refs, list) or len(annotation_refs) > REFERENCE_CATALOG_LIMIT:
+            raise ValueError(f"Choose at most {REFERENCE_CATALOG_LIMIT} annotation references")
+        if isinstance(max_characters, bool) or not isinstance(max_characters, int) or not 1 <= max_characters <= REFERENCE_MAX_CHARACTERS:
+            raise ValueError(f"Source character budget must be 1–{REFERENCE_MAX_CHARACTERS}")
+        requested = {}
+        for ref in annotation_refs:
+            if not isinstance(ref, dict) or not isinstance(ref.get("id"), str) or not 1 <= len(ref["id"]) <= 160 or re.search(r"[\x00-\x1f]", ref["id"]) or not isinstance(ref.get("version"), str) or not re.fullmatch(r"[0-9a-f]{64}", ref["version"]):
+                raise ValueError("Annotation reference requires an ID and SHA-256 content version")
+            if ref["id"] in requested:
+                raise ValueError("Duplicate annotation references are not allowed")
+            requested[ref["id"]] = ref["version"]
+        item = self.get(id)
+        if selection is not None:
+            if not isinstance(selection, dict) or isinstance(selection.get("page"), bool) or not isinstance(selection.get("page"), int) or selection["page"] < 1 or not isinstance(selection.get("text"), str) or not selection["text"].strip() or len(selection["text"]) > 8000:
+                raise ValueError("Selection requires a PDF page and 1–8000 text characters")
+            selection = {"page": selection["page"], "text": selection["text"]}
+        if not item["pdf"] and (requested or selection is not None):
+            raise ValueError("This paper has no PDF for annotation references")
+        found, stale, seen = {}, [], set()
+        total, scanned, total_exact = 0, 0, True
+        characters = len(selection["text"]) if selection else 0
+        if item["pdf"]:
+            with self._open_pdf(self.pdf_path(id)) as doc:
+                if selection and selection["page"] > doc.page_count:
+                    raise ValueError("Selection page is outside the current PDF")
+                stop = False
+                for page in doc:
+                    for annot in page.annots() or []:
+                        if scanned >= REFERENCE_SCAN_LIMIT:
+                            total_exact, stop = False, True
+                            break
+                        scanned += 1
+                        annotation_id = annot.info.get("id") or f"external-{page.number + 1}-{annot.xref}"
+                        if annotation_id in requested:
+                            if annotation_id in seen:
+                                raise ValueError("ANNOTATION_AMBIGUOUS: selected PDF annotation identity occurs more than once")
+                            seen.add(annotation_id)
+                        if self._annotation_metadata(annot).get("kind") == "ai-feedback":
+                            continue
+                        total += 1
+                        if annotation_id not in requested:
+                            continue
+                        raw_value = self._annotation(page, annot, exact=True)
+                        if characters + len(raw_value["text"]) + len(raw_value["comment"]) > max_characters:
+                            raise ValueError(f"SOURCE_BUDGET_EXCEEDED: selected source exceeds {max_characters} characters; reduce the selection (no text was sent)")
+                        value = self._reference_annotation(raw_value, bool(annot.info.get("id")))
+                        if value["version"] != requested[annotation_id]:
+                            stale.append(annotation_id)
+                        characters += value["source_characters"]
+                        if characters > max_characters:
+                            raise ValueError(f"SOURCE_BUDGET_EXCEEDED: selected source exceeds {max_characters} characters; reduce the selection (no text was sent)")
+                        found[annotation_id] = value
+                    if stop:
+                        break
+        if not total_exact:
+            raise ValueError("ANNOTATION_SCAN_LIMIT: PDF exceeds the bounded annotation scan; refresh a smaller document")
+        missing = sorted(set(requested) - set(found))
+        if missing:
+            raise ValueError("ANNOTATION_MISSING: selected source annotations no longer exist or are AI feedback; refresh before sending: " + ", ".join(missing[:5]))
+        if stale:
+            raise ValueError("ANNOTATION_STALE: selected annotations changed; review and adopt current versions before sending: " + ", ".join(stale[:5]))
+        if characters > max_characters:
+            raise ValueError(f"SOURCE_BUDGET_EXCEEDED: selected source exceeds {max_characters} characters; reduce the selection (no text was sent)")
+        annotations = [found[ref["id"]] for ref in annotation_refs]
+        content = {"annotation_refs": annotation_refs, "annotations": annotations, "selection": selection}
+        context_hash = hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+        return {"item": item, **content, "source_characters": characters, "context_hash": context_hash,
+                "coverage": {"requested": len(requested), "included": len(annotations), "total": total, "total_exact": total_exact, "all": len(annotations) == total},
+                "limits": self._reference_limits(max_characters)}
 
     def annotations(self, id):
         result, characters = [], 0
@@ -1137,6 +1284,7 @@ def dispatch(request):
         actions = {
             "list": ("query", "limit", "offset"), "get": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page": ("id", "page", "scale"),
             "annotations": ("id",), "annotate": ("id", "page", "type", "rects", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment"), "annotation_delete": ("id", "annotation_id"),
+            "annotation_catalog": ("id",), "annotation_context_exact": ("id", "annotation_refs", "selection", "max_characters"),
             "export_annotations": ("id", "format"), "link": ("source", "target", "relation", "note"), "graph": ("id", "limit"), "feedback_context": ("id", "annotation_ids"), "save_feedback": ("id", "text", "model", "annotation_ids", "expected_context_hash"), "feedback": ("id",),
             "save_conversation_feedback": ("id", "text", "model", "annotation_ids", "source_session_id", "source_message_id", "page"),
         }
