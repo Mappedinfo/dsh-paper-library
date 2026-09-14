@@ -112,6 +112,130 @@ def test_feedback_context_and_portable_generated_note(tmp_path):
     assert len(request(tmp_path, "feedback_context", id=item["id"])["annotations"]) == 2  # external note + source note, AI excluded
 
 
+def test_conversation_feedback_worker_and_portable_provenance(tmp_path):
+    source = tmp_path / "paper.pdf"
+    with fitz.open() as doc:
+        doc.new_page().insert_text((50, 80), "An article without annotations.")
+        doc.save(source)
+    original_bytes = source.read_bytes()
+    item = request(tmp_path, "import", path=str(source))["items"][0]
+    managed = Path(request(tmp_path, "export_pdf", id=item["id"])["path"])
+    before = managed.read_bytes()
+    payload = {"id": item["id"], "text": "由主对话选定保存的解释，尚需核验。", "model": "test/native", "annotation_ids": [], "source_session_id": "paper-session", "source_message_id": "17"}
+    with pytest.raises(ValueError, match="source annotations"):
+        request(tmp_path, "save_feedback", **payload)
+    process = subprocess.run([sys.executable, "-m", "dsh_paper_library.worker"], input=json.dumps({"library": str(tmp_path / "library"), "action": "save_conversation_feedback", **payload}), text=True, capture_output=True)
+    assert process.returncode == 0, process.stderr
+    saved = json.loads(process.stdout)["result"]
+    assert saved["kind"] == "ai-feedback"
+    assert saved["duplicate"] is False
+    assert saved["page"] == 1
+    assert saved["annotation_ids"] == []
+    assert saved["source_kind"] == "dsh-conversation"
+    assert saved["comment"].endswith(payload["text"])
+    assert source.read_bytes() == original_bytes
+    assert (tmp_path / "library" / "backups" / f"{item['id']}.pdf.bak").read_bytes() == before
+    with fitz.open(managed) as doc:
+        page = doc[0]
+        annot = next(page.annots())
+        assert annot.type[1] == "Text"
+        metadata = json.loads(annot.info["subject"].removeprefix("paper-library:"))
+        assert metadata["source_session_id"] == "paper-session"
+        assert metadata["source_message_id"] == "17"
+        assert metadata["annotation_ids"] == []
+
+    copied = tmp_path / "portable.pdf"
+    shutil.copy2(managed, copied)
+    imported = dispatch({"library": str(tmp_path / "fresh"), "action": "import", "path": str(copied)})["items"][0]
+    recovered = dispatch({"library": str(tmp_path / "fresh"), "action": "feedback", "id": imported["id"]})["feedback"]
+    assert len(recovered) == 1
+    for key in ("id", "source_kind", "source_session_id", "source_message_id", "annotation_ids", "comment"):
+        assert recovered[0][key] == saved[key]
+    fresh_path = Path(dispatch({"library": str(tmp_path / "fresh"), "action": "export_pdf", "id": imported["id"]})["path"])
+    fresh_bytes = fresh_path.read_bytes()
+    duplicate = dispatch({"library": str(tmp_path / "fresh"), "action": "save_conversation_feedback", **payload, "id": imported["id"]})
+    assert duplicate["duplicate"] is True
+    assert duplicate["annotation_id"] == saved["annotation_id"]
+    assert fresh_path.read_bytes() == fresh_bytes
+    exported = dispatch({"library": str(tmp_path / "fresh"), "action": "export_annotations", "id": imported["id"], "format": "json"})
+    assert json.loads(exported["text"])["annotations"][0]["source_message_id"] == "17"
+
+
+def test_conversation_feedback_deduplicates_concurrent_saves_without_rewriting(tmp_path):
+    item = request(tmp_path, "import", path=str(make_pdf(tmp_path / "paper.pdf")))["items"][0]
+    payload = {"id": item["id"], "text": "The actual saved assistant reply.", "model": "test/native", "annotation_ids": [], "source_session_id": "session-a", "source_message_id": "5"}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: request(tmp_path, "save_conversation_feedback", **payload), range(4)))
+    assert sum(not result["duplicate"] for result in results) == 1
+    assert len({result["annotation_id"] for result in results}) == 1
+    managed = Path(request(tmp_path, "export_pdf", id=item["id"])["path"])
+    saved_bytes = managed.read_bytes()
+    backup = tmp_path / "library" / "backups" / f"{item['id']}.pdf.bak"
+    backup_bytes = backup.read_bytes()
+    duplicate = request(tmp_path, "save_conversation_feedback", **{**payload, "text": "A conflicting retry must not replace the saved text."})
+    assert duplicate["duplicate"] is True
+    assert duplicate["comment"].endswith(payload["text"])
+    assert managed.read_bytes() == saved_bytes
+    assert backup.read_bytes() == backup_bytes
+    request(tmp_path, "save_conversation_feedback", **{**payload, "source_session_id": "session-b"})
+    request(tmp_path, "save_conversation_feedback", **{**payload, "source_message_id": "6"})
+    assert len(request(tmp_path, "feedback", id=item["id"])["feedback"]) == 3
+
+
+@pytest.mark.parametrize("override", [{"annotation_ids": ["invented"]}, {"annotation_ids": None}, {"source_session_id": ""}, {"source_message_id": "5\nforged"}, {"source_message_id": "x" * 201}, {"page": True}, {"page": 1.5}, {"page": 0}, {"page": 2}])
+def test_conversation_feedback_rejects_invalid_provenance_or_page(tmp_path, override):
+    item = request(tmp_path, "import", path=str(make_pdf(tmp_path / "paper.pdf")))["items"][0]
+    managed = Path(request(tmp_path, "export_pdf", id=item["id"])["path"])
+    before = managed.read_bytes()
+    payload = {"id": item["id"], "text": "A native assistant reply.", "model": "test/native", "annotation_ids": [], "source_session_id": "session-a", "source_message_id": "5", **override}
+    with pytest.raises(ValueError):
+        request(tmp_path, "save_conversation_feedback", **payload)
+    assert managed.read_bytes() == before
+    assert not request(tmp_path, "feedback", id=item["id"])["feedback"]
+
+
+def test_conversation_feedback_uses_atomic_write_and_requires_pdf(tmp_path, monkeypatch):
+    metadata = request(tmp_path, "import", items=[{"title": "Metadata only"}])["items"][0]
+    payload = {"text": "A native assistant reply.", "model": "test/native", "annotation_ids": [], "source_session_id": "session-a", "source_message_id": "5"}
+    with pytest.raises(ValueError, match="Attach a PDF"):
+        request(tmp_path, "save_conversation_feedback", id=metadata["id"], **payload)
+    item = request(tmp_path, "import", path=str(make_pdf(tmp_path / "paper.pdf")))["items"][0]
+    library = Library(tmp_path / "library")
+    try:
+        managed = library.pdf_path(item["id"])
+        before = managed.read_bytes()
+        def fail(*args, **kwargs):
+            raise OSError("Simulated save failure")
+        monkeypatch.setattr(library, "_atomic_save", fail)
+        with pytest.raises(OSError, match="Simulated save failure"):
+            library.save_conversation_feedback(id=item["id"], **payload)
+        assert managed.read_bytes() == before
+        assert not library.feedback(item["id"])["feedback"]
+    finally:
+        library.close()
+
+
+def test_conversation_feedback_page_and_bounded_duplicate_scan(tmp_path, monkeypatch):
+    source = make_pdf(tmp_path / "paper.pdf")
+    with fitz.open(source) as doc:
+        doc.new_page()
+        doc.saveIncr()
+    item = request(tmp_path, "import", path=str(source))["items"][0]
+    payload = {"id": item["id"], "text": "A discussion of the second page.", "model": "test/native", "annotation_ids": [], "source_session_id": "session-a", "source_message_id": "5", "page": 2}
+    saved = request(tmp_path, "save_conversation_feedback", **payload)
+    assert saved["page"] == 2
+    monkeypatch.setattr("dsh_paper_library.core.MAX_ANNOTATIONS", 1)
+    with pytest.raises(ValueError, match="complete.*duplicate check"):
+        request(tmp_path, "save_conversation_feedback", **payload)
+    monkeypatch.setattr("dsh_paper_library.core.MAX_ANNOTATIONS", 2)
+    duplicate = request(tmp_path, "save_conversation_feedback", **{**payload, "page": 1})
+    assert duplicate["duplicate"] is True
+    assert duplicate["page"] == 2
+    with pytest.raises(ValueError, match="annotation limit reached"):
+        request(tmp_path, "save_conversation_feedback", **{**payload, "source_message_id": "6"})
+    assert len(request(tmp_path, "feedback", id=item["id"])["feedback"]) == 1
+
+
 def test_concurrent_annotation_writes_and_atomic_failure(tmp_path, monkeypatch):
     item = request(tmp_path, "import", path=str(make_pdf(tmp_path / "paper.pdf")))["items"][0]
     def write(index):

@@ -11,7 +11,7 @@ test('published client bundle mounts the public library tab and releases hidden 
   const effects = []
   const react = { createElement: (type, props) => ({ type, props }), useRef: value => ({ current: value }), useEffect: () => {} }
   new Script(readFileSync(bundle, 'utf8')).runInNewContext({
-    window: { __ModuleLoader__: { load: entry => {
+    window: { location: { origin: 'http://localhost:3080' }, addEventListener: () => {}, removeEventListener: () => {}, __ModuleLoader__: { load: entry => {
       assert.equal(entry.id, '@mappedinfo/dsh-paper-library')
       plugin = entry.factory(name => { assert.equal(name, 'react'); return react })
     } } },
@@ -23,8 +23,8 @@ test('published client bundle mounts the public library tab and releases hidden 
     modelDirectories: { directoryFor: sessionId => ({ sessionId }) },
     sessions: { subagentAddress: () => undefined },
     slots: {
-      inject: (name, callback) => { assert.equal(name, 'sidebar.right.pane.tab'); return callback() },
-      register: (definition, component) => { registrations.set('body', { definition, component }); return () => registrations.delete('body') },
+      inject: (name, callback) => { assert.ok(['sidebar.right.pane.tab', 'conversation.input.overlay'].includes(name)); return callback() },
+      register: (definition, component) => { const key = definition.name === 'sidebar.right.pane.tab' ? 'body' : 'mount'; registrations.set(key, { definition, component }); return () => registrations.delete(key) },
     },
   }
   plugin.apply(ctx)
@@ -34,6 +34,8 @@ test('published client bundle mounts the public library tab and releases hidden 
   assert.equal(injected.sessionId, 'session-1')
   assert.equal(injected.directory.sessionId, 'session-1')
   assert.equal(injected.modelAvailable, true)
+  assert.ok(injected.conversationBridge)
+  assert.equal(registrations.get('mount').definition.name, 'conversation.input.overlay')
   const component = registrations.get('body').component
   const hidden = component({ useTabInfo: () => ({ tab: { visible: false } }) })
   assert.equal(hidden.type(hidden.props), null)

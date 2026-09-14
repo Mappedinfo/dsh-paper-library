@@ -1,0 +1,14 @@
+{
+  "verified_at": "2026-09-14T14:00:55.721Z",
+  "ok": true,
+  "authenticatedHost": true,
+  "nativeConversationsIdle": true,
+  "libraryAvailable": true,
+  "paperConversations": true,
+  "chatScriptAvailable": true,
+  "nativePwaRefreshed": true,
+  "nativeGuideShowsPaperConversations": true,
+  "nativeLibraryPaneReopened": true,
+  "modelRequestsMade": 0,
+  "privateDocumentsRead": false
+}

@@ -1,0 +1,24 @@
+{
+  "verified_at": "2026-09-14T13:56:48Z",
+  "ok": true,
+  "environment": "Isolated native Harness web profile; generated three-page synthetic PDFs; deterministic local test model",
+  "checks": [
+    "opening a paper retains the current main conversation and reuses its own paper conversation",
+    "inline send creates a native main-conversation turn and both views show the same completed reply",
+    "opening another paper's main conversation restores its inline draft",
+    "main-input append targets the correct conversation and preserves existing text; the other paper's draft stays intact",
+    "closing and reopening the pane restores an unsaved page-two annotation and its exact text",
+    "save-and-draft persists the annotation and appends readable page-two context to the correct native main input",
+    "native main-input send appears in the embedded conversation with the completed assistant reply",
+    "the embedded save-reply control confirms that the real assistant message was saved into the managed PDF",
+    "automatic annotation sending is initially unchecked",
+    "reader page two and selected annotation context survive the native session remount"
+  ],
+  "externalModelRequestsMade": 0,
+  "realDocumentsUsed": false,
+  "limitations": [
+    "Native Harness hides blank conversations from its sidebar until their first turn; the plugin can reopen them",
+    "No formal user study, real provider quality evaluation, or new memory benchmark",
+    "Deliberate fixture-host restarts generated expected reconnect warnings during development"
+  ]
+}

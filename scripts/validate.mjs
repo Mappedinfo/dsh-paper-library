@@ -8,6 +8,7 @@ const commands=[
   ['javascript_tests',process.execPath,['--test',...(await readdir('tests-js')).filter(name=>name.endsWith('.test.mjs')).sort().map(name=>`tests-js/${name}`)]],
   ['python_tests','uv',['run','--offline','pytest','-q']],
   ['browser_syntax',process.execPath,['--check','web/app.js']],
+  ['paper_chat_syntax',process.execPath,['--check','web/paper-chat.js']],
 ];
 const checks=[];
 for(const[id,command,args]of commands){

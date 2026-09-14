@@ -1,13 +1,13 @@
 {
-  "verified_at": "2026-09-14T12:20:53.695Z",
+  "verified_at": "2026-09-14T14:04:59.732Z",
   "scope": "Pre-publication source, history, manifest and package checks; not remote publication or a legal opinion",
   "ok": true,
   "source_license": "MIT",
   "third_party_notices_preserved": true,
-  "history_commits": "6",
-  "history_blobs_checked": 120,
-  "tracked_files_checked": 96,
-  "packaged_files_checked": 52,
+  "history_commits": "8",
+  "history_blobs_checked": 132,
+  "tracked_files_checked": 112,
+  "packaged_files_checked": 58,
   "findings": [],
   "limits": [
     "Credential signatures are bounded checks, not proof that every possible secret is absent.",

@@ -1,12 +1,13 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { dispatch } from '../bridge.mjs'
+import { core, dispatch } from '../bridge.mjs'
 import { createFetchHandler } from '../http.mjs'
 import { resolveConfig } from './config.mjs'
 import { createHarnessAI, discoverModels } from './ai.mjs'
 import { createNodeHandler } from './http.mjs'
 import { registerLibraryTools } from './tools.mjs'
 import { registerBundledSkills } from './skills.mjs'
+import { createPaperChat } from './paper-chat.mjs'
 
 export const name = 'paper-library'
 export const inject = ['tools', 'llm']
@@ -26,8 +27,9 @@ export function apply(ctx, rawConfig = {}) {
   ctx.inject(['skills'], scoped => {
     scoped.effect(() => registerBundledSkills(scoped), 'paper-library: bundled paper-fetch skill')
   })
-  ctx.inject(['connection', 'webServer'], web => {
-    const fetchHandler = createFetchHandler({ ...options, basePath: '/api/paper-library' })
+  ctx.inject(['connection', 'webServer', 'sessionController', 'workspaceRegistry', 'sessionPersistence', 'sessionProjections', 'sessions', 'agents', 'agentDefaultModel'], web => {
+    const paperChat = createPaperChat(web, { library: config.library, python: config.python, dispatch, core })
+    const fetchHandler = createFetchHandler({ ...options, paperChat, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',
       path: '/api/paper-library',

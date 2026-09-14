@@ -2,7 +2,7 @@ const TYPE = 'paper-library:context'
 
 /** Only public route identifiers cross the iframe boundary; no settings or credentials. */
 export function modelContext(sessionId, snapshot, available = true) {
-  const context = { type: TYPE, version: 1, sessionId: sessionId ?? null, provider: null, model: null, reasoningEffort: null, status: 'unavailable' }
+  const context = { type: TYPE, version: 1, sessionId: sessionId ?? null, provider: null, model: null, reasoningEffort: null, status: 'unavailable', capabilities: { paperConversations: true } }
   if (!available || typeof sessionId !== 'string' || !sessionId) return context
   if (!snapshot || snapshot.status === 'loading' || snapshot.status === 'selecting' || !snapshot.current) return { ...context, status: snapshot?.status === 'error' ? 'unavailable' : 'loading' }
   const selection = snapshot.current

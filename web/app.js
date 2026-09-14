@@ -6,8 +6,12 @@ const state = {
   items: [], total: 0, libraryCount: 0, offset: 0, limit: 40, query: '', active: null, tab: 'reader',
   page: 1, pageCount: 0, pageData: null, selection: null, annotations: [], noteOffset: 0,
   models: [], harnessContext: null, modelTicket: 0, library: '', listTicket: 0, itemTicket: 0, pageTicket: 0, metadataDraft: null, openedId: null,
-  pageWanted: null, pageRunning: false, annotationDraft: null, aiBusy: false,
+  pageWanted: null, pageRunning: false, pagePromise: null, annotationDraft: null, aiBusy: false,
 };
+let paperChatUI;
+let readerRestore = null;
+let restoringReader = false;
+let initializedReader = false;
 const intake = { pending: [], records: [], running: false, current: null, sequence: 0, total: 0, completed: 0, failed: 0, metadataOnly: 0, promise: null };
 const relationNames = { related: '相关', supports: '支持', contradicts: '相矛盾', cites: '引用', tagged: '标签', tag: '标签', has_tag: '标签' };
 const typeNames = { 'article-journal': '期刊论文', 'paper-conference': '会议论文', book: '图书', chapter: '章节', thesis: '学位论文', report: '报告', document: '文献' };
@@ -19,7 +23,15 @@ function el(tag, className, text) {
   return node;
 }
 async function api(action, args = {}) {
-  const response = await fetch('./api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...args }) });
+  let response;
+  // The server rejects excess requests before reading or dispatching them. Retry
+  // only that explicit admission response; an uncertain mutation is never replayed.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    response = await fetch('./api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...args }) });
+    if (response.status !== 429 || attempt === 4) break;
+    await response.text();
+    await new Promise(resolve => setTimeout(resolve, 250 * 2 ** attempt));
+  }
   let data;
   try { data = await response.json(); } catch { throw new Error(`服务返回无法读取的响应（HTTP ${response.status}）。请刷新后重试。`); }
   if (!response.ok || !data.ok) throw new Error(typeof data.error === 'string' ? data.error : data.error?.message || `请求未完成（HTTP ${response.status}）`);
@@ -57,6 +69,7 @@ async function loadStatus() {
     $('item-count').textContent = result.count ?? '0';
     state.libraryCount = result.count || 0; renderWelcome();
     $('auto-feedback').checked = readPreference(preferenceKey()) === 'true';
+    paperChatUI?.setAvailable(result.paper_conversations);
   } catch (error) { $('library-status').textContent = '连接未完成'; errorAt('library-error', error); }
 }
 async function loadList() {
@@ -116,8 +129,11 @@ async function openPaper(id) {
   $('reader-content').hidden = true; $('no-pdf').hidden = true;
   try {
     const item = await api('get', { id }); if (ticket !== state.itemTicket) return;
-    state.active = item; renderPaperHeader(); renderList(); await switchTab('reader');
+    state.active = item; renderPaperHeader(); renderList();
+    void paperChatUI?.paperOpened(item);
+    await switchTab('reader');
     if (item.pdf) loadAnnotations(id); else renderAnnotations(); loadFeedback(id);
+    publishReaderState();
   } catch (error) { if (ticket === state.itemTicket) { $('paper-title').textContent = '文献未能打开'; errorAt('detail-error', error); } }
 }
 function renderPaperHeader() {
@@ -135,19 +151,25 @@ function renderPaperHeader() {
 async function switchTab(tab) {
   state.tab = tab;
   for (const node of document.querySelectorAll('.tab')) { const selected = node.dataset.tab === tab; node.classList.toggle('active', selected); if (selected) node.setAttribute('aria-current', 'page'); else node.removeAttribute('aria-current'); }
-  for (const name of ['reader', 'annotations', 'graph']) $(`${name}-tab`).hidden = name !== tab;
+  for (const name of ['reader', 'annotations', 'conversation', 'graph']) $(`${name}-tab`).hidden = name !== tab;
+  paperChatUI?.visible(tab === 'conversation');
   if (!state.active) return;
   if (tab === 'reader' && state.active.pdf && !state.pageData) await requestPage(state.page);
-  if (tab === 'annotations') { if (state.active.pdf) await loadAnnotations(state.active.id); else renderAnnotations(); loadFeedback(state.active.id); if (!currentHarnessRoute() && !state.models.length) loadModels(); }
+  if (tab === 'annotations') { if (state.active.pdf) await loadAnnotations(state.active.id); else renderAnnotations(); loadFeedback(state.active.id); if (!paperChatUI?.available() && !currentHarnessRoute() && !state.models.length) loadModels(); }
   if (tab === 'graph') await loadGraph();
+  publishReaderState();
 }
-async function requestPage(page) {
+function requestPage(page) {
   if (!state.active?.pdf) return;
   const next = Math.max(1, Math.min(Number(page) || 1, state.pageCount || Infinity));
   state.pageWanted = { id: state.active.id, page: next, ticket: ++state.pageTicket };
   clearPage();
-  if (state.pageRunning) return;
+  if (state.pageRunning) return state.pagePromise;
   state.pageRunning = true;
+  state.pagePromise = renderPageQueue();
+  return state.pagePromise;
+}
+async function renderPageQueue() {
   try {
     // Serialize page renders even when the user switches documents rapidly.
     while (state.pageWanted) {
@@ -163,10 +185,11 @@ async function requestPage(page) {
         $('pdf-page').hidden = false; renderWords(pageData.words || [], pageData.width, pageData.height);
         $('page-message').textContent = pageData.words?.length ? '文字选择按整词保存。PDF 中的已有批注会随页面显示。' : '这一页没有可选择的文字，可能是扫描页面。你仍可添加页批注。';
         errorAt('detail-error', null);
+        publishReaderState();
       } catch (error) { if (wanted.ticket === state.pageTicket && wanted.id === state.active?.id) errorAt('detail-error', error); }
     }
   } finally {
-    state.pageRunning = false; $('page-loading').hidden = true;
+    state.pageRunning = false; state.pagePromise = null; $('page-loading').hidden = true;
     $('previous-page').disabled = state.page <= 1; $('next-page').disabled = !state.pageCount || state.page >= state.pageCount;
   }
 }
@@ -228,7 +251,9 @@ function renderAnnotations() {
     card.append(meta);
     if (note.text) card.append(el('blockquote', '', note.text));
     if (note.comment || note.content) card.append(el('p', 'annotation-comment', note.comment || note.content));
-    const actions = el('div', 'annotation-actions'); const edit = el('button', 'button subtle', '编辑'); edit.dataset.noteAction = 'edit'; const remove = el('button', 'button subtle delete-note', '删除'); remove.dataset.noteAction = 'delete'; actions.append(edit, remove); card.append(actions); fragment.append(card);
+    const actions = el('div', 'annotation-actions'); const edit = el('button', 'button subtle', '编辑'); edit.dataset.noteAction = 'edit'; const remove = el('button', 'button subtle delete-note', '删除'); remove.dataset.noteAction = 'delete'; actions.append(edit, remove);
+    if (paperChatUI?.available()) { const discuss = el('button', 'button subtle', '在论文对话中讨论'); discuss.dataset.noteAction = 'discuss'; actions.append(discuss); }
+    card.append(actions); fragment.append(card);
   }
   if (!state.annotations.length) fragment.append(emptyState('第一条批注，从一个问题开始', '在阅读页选择文字以高亮，或添加一条整页笔记。'));
   if (state.annotations.length > 40) {
@@ -248,16 +273,20 @@ function openAnnotation(mode, note = null) {
   $('annotation-quote').textContent = note?.text || selection?.text || ''; $('annotation-quote').hidden = !$('annotation-quote').textContent;
   $('annotation-comment').value = note?.comment || note?.content || ''; $('annotation-comment').required = mode === 'note';
   errorAt('annotation-error', null); openDialog('annotation-dialog');
+  $('annotation-save-draft').hidden = !paperChatUI?.available(); publishReaderState();
 }
 async function saveAnnotation(event) {
   event.preventDefault(); const draft = state.annotationDraft; if (!draft) return;
   setBusy(event.target, true); errorAt('annotation-error', null);
   try {
-    if (draft.mode === 'edit') await api('annotation_update', { id: draft.id, annotation_id: draft.note.id, comment: $('annotation-comment').value });
-    else await api('annotate', { id: draft.id, page: draft.page, type: draft.mode, text: draft.selection?.text || '', rects: draft.selection?.rects || [[20, 20, 40, 40]], comment: $('annotation-comment').value, author: 'Reader', color: '#ffdb66' });
+    const result = draft.mode === 'edit'
+      ? await api('annotation_update', { id: draft.id, annotation_id: draft.note.id, comment: $('annotation-comment').value })
+      : await api('annotate', { id: draft.id, page: draft.page, type: draft.mode, text: draft.selection?.text || '', rects: draft.selection?.rects || [[20, 20, 40, 40]], comment: $('annotation-comment').value, author: 'Reader', color: '#ffdb66' });
     closeDialog('annotation-dialog'); clearSelection(); toast('批注已保存到 PDF');
     if (state.active?.id === draft.id) { await loadAnnotations(draft.id); if (state.page === draft.page) await requestPage(state.page); }
-    if ($('auto-feedback').checked) requestFeedback(draft.id, true);
+    publishReaderState();
+    if (paperChatUI?.available()) await paperChatUI.savedAnnotation(draft.id, result.annotation?.id || draft.note?.id, event.submitter?.id === 'annotation-save-draft');
+    else if ($('auto-feedback').checked) requestFeedback(draft.id, true);
   } catch (error) { errorAt('annotation-error', error); } finally { setBusy(event.target, false); }
 }
 async function handleNoteAction(event) {
@@ -265,6 +294,7 @@ async function handleNoteAction(event) {
   const action = button.dataset.noteAction;
   if (action === 'previous' || action === 'next') { state.noteOffset += action === 'next' ? 40 : -40; renderAnnotations(); return; }
   const note = state.annotations.find((entry) => entry.id === button.closest('[data-annotation-id]').dataset.annotationId); if (!note) return;
+  if (action === 'discuss') { paperChatUI?.useAnnotation(note); return; }
   if (action === 'page') { state.page = note.page; clearPage(); await switchTab('reader'); }
   if (action === 'edit') openAnnotation('edit', note);
   if (action === 'delete') {
@@ -539,6 +569,14 @@ function announceReady() {
   if (window.parent !== window) window.parent.postMessage({ type: 'paper-library:ready', version: 1 }, window.location.origin);
 }
 function receiveHarnessContext(event) {
+  if (event.origin === window.location.origin && event.source === window.parent && window.parent !== window && event.data?.version === 1) {
+    if (event.data.type === 'paper-library:restore') {
+      readerRestore = event.data.snapshot;
+      if (initializedReader) void restoreReaderState();
+      return;
+    }
+    if (event.data.type === 'paper-library:reader-state-error') { toast(event.data.error || '阅读草稿暂未保存到主窗口。', true); return; }
+  }
   if (window.parent === window || event.source !== window.parent || event.origin !== window.location.origin) return;
   const data = event.data;
   if (!data || typeof data !== 'object' || data.type !== 'paper-library:context' || data.version !== 1) return;
@@ -661,7 +699,7 @@ $('previous-list').addEventListener('click', () => { state.offset = Math.max(0, 
 $('next-list').addEventListener('click', () => { state.offset += state.limit; loadList(); });
 $('refresh').addEventListener('click', () => { loadStatus(); loadList(); if (state.active && state.tab === 'annotations') loadModels(); });
 $('export-library').addEventListener('click', exportLibrary);
-$('back-library').addEventListener('click', () => document.querySelector('.workspace').classList.remove('show-detail'));
+$('back-library').addEventListener('click', () => { document.querySelector('.workspace').classList.remove('show-detail'); paperChatUI?.visible(false); });
 for (const button of document.querySelectorAll('[data-tab]')) button.addEventListener('click', () => switchTab(button.dataset.tab));
 $('import-open').addEventListener('click', () => { errorAt('import-error', null); $('import-result').textContent = ''; openDialog('import-dialog'); });
 $('welcome-import').addEventListener('click', () => { if (state.libraryCount) { if (state.items[0]) openPaper(state.items[0].id); else { document.querySelector('.workspace').classList.remove('show-detail'); $('search').focus(); } } else { errorAt('import-error', null); $('import-result').textContent = ''; openDialog('import-dialog'); } });
@@ -692,6 +730,9 @@ $('previous-page').addEventListener('click', () => requestPage(state.page - 1));
 $('page-number').addEventListener('change', () => requestPage($('page-number').value));
 $('word-layer').addEventListener('pointerup', () => setTimeout(readSelection, 0)); $('word-layer').addEventListener('keyup', readSelection);
 $('clear-selection').addEventListener('click', clearSelection); $('annotate-selection').addEventListener('click', () => openAnnotation('highlight'));
+$('discuss-selection').addEventListener('click', () => paperChatUI?.useSelection(state.selection));
+$('annotation-comment').addEventListener('input', publishReaderState);
+$('annotation-dialog').addEventListener('close', publishReaderState);
 $('page-note').addEventListener('click', () => openAnnotation('note')); $('annotation-form').addEventListener('submit', saveAnnotation); $('annotation-list').addEventListener('click', handleNoteAction);
 $('request-feedback').addEventListener('click', () => requestFeedback());
 $('auto-feedback').addEventListener('change', () => { savePreference(preferenceKey(), String($('auto-feedback').checked)); if ($('auto-feedback').checked) toast('已开启：保存批注后会调用所选模型，并使用模型额度。'); });
@@ -699,8 +740,54 @@ $('feedback-model').addEventListener('change', () => { const model = manualModel
 $('link-open').addEventListener('click', openLink); $('link-form').addEventListener('submit', saveLink); $('link-search').addEventListener('input', debounce(loadLinkTargets));
 function activateGraphNode(event) { const node = event.target.closest('[data-graph-id]'); if (node && node.dataset.nodeType !== 'tag') openPaper(node.dataset.graphId); }
 $('graph-stage').addEventListener('click', activateGraphNode); $('graph-stage').addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateGraphNode(event); } });
-document.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close(); document.querySelector('.workspace').classList.remove('show-detail'); $('search').focus(); $('search').select(); } });
-async function initialize() { announceReady(); await loadStatus(); await loadList(); loadModels(); }
+document.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close(); document.querySelector('.workspace').classList.remove('show-detail'); paperChatUI?.visible(false); $('search').focus(); $('search').select(); } });
+function publishReaderState() {
+  if (restoringReader || !state.active || window.parent === window) return true;
+  const snapshot = { paperId: state.active.id, page: state.page, tab: state.tab, chatDraft: paperChatUI?.draft() || '', chatContext: paperChatUI?.context() || { annotationIds: [] } };
+  if ($('annotation-dialog').open && state.annotationDraft?.id === state.active.id) {
+    const draft = state.annotationDraft;
+    snapshot.annotationDraft = { mode: draft.mode, id: draft.id, page: draft.page, comment: $('annotation-comment').value,
+      ...(draft.note ? { note: { id: draft.note.id, page: draft.note.page } } : {}),
+      ...(draft.selection ? { selection: { page: draft.selection.page, text: draft.selection.text, rects: draft.selection.rects } } : {}),
+    };
+  }
+  const serialized = JSON.stringify(snapshot);
+  if (new Blob([serialized]).size > 64 * 1024) return false;
+  window.parent.postMessage({ type: 'paper-library:reader-state', version: 1, snapshot }, window.location.origin);
+  return true;
+}
+async function restoreReaderState() {
+  if (!readerRestore || restoringReader) return;
+  const snapshot = readerRestore; readerRestore = null;
+  if (typeof snapshot.paperId !== 'string' || !snapshot.paperId || !Number.isInteger(snapshot.page) || snapshot.page < 1) return;
+  restoringReader = true;
+  try {
+    await openPaper(snapshot.paperId);
+    if (state.active?.id !== snapshot.paperId) return;
+    if (state.active.pdf && snapshot.page !== state.page) await requestPage(snapshot.page);
+    paperChatUI?.restoreDraft(snapshot.chatDraft);
+    paperChatUI?.restoreContext(snapshot.chatContext);
+    if (['reader', 'annotations', 'conversation', 'graph'].includes(snapshot.tab)) await switchTab(snapshot.tab);
+    const draft = snapshot.annotationDraft;
+    if (draft?.id === state.active.id && ['note', 'highlight', 'edit'].includes(draft.mode)) {
+      if (draft.mode === 'edit') {
+        await loadAnnotations(state.active.id);
+        const note = state.annotations.find(note => note.id === draft.note?.id);
+        if (!note) { toast('原批注已变化，未保存的文字保留在对话草稿中。', true); paperChatUI?.restoreDraft([snapshot.chatDraft, draft.comment].filter(Boolean).join('\n\n')); return; }
+        openAnnotation('edit', note);
+      } else {
+        if (draft.selection) state.selection = draft.selection;
+        openAnnotation(draft.mode);
+        // A queued page render may still be completing. The saved draft's page
+        // is authoritative for this annotation, independent of the reader image.
+        state.annotationDraft.page = draft.page;
+        $('annotation-page-label').textContent = `第 ${draft.page} 页`;
+      }
+      $('annotation-comment').value = draft.comment || '';
+    }
+  } finally { restoringReader = false; publishReaderState(); }
+}
+async function initialize() { announceReady(); await loadStatus(); await loadList(); initializedReader = true; await restoreReaderState(); if (!paperChatUI?.available()) loadModels(); }
 const currentModelDisplay = el('div', 'current-harness-model'); currentModelDisplay.id = 'current-harness-model'; currentModelDisplay.hidden = true;
 currentModelDisplay.append(el('span', '', '当前 DSH 模型'));
 const currentModelName = el('strong'); currentModelName.id = 'current-harness-model-name'; currentModelDisplay.append(currentModelName);
@@ -709,5 +796,11 @@ const refreshModels = el('button', 'button subtle', '刷新模型');
 refreshModels.id = 'refresh-models';
 refreshModels.type = 'button'; refreshModels.style.marginTop = '6px'; refreshModels.style.padding = '3px 0'; refreshModels.style.fontSize = '10px';
 refreshModels.addEventListener('click', () => { announceReady(); loadModels(); }); $('model-status').after(refreshModels);
+paperChatUI = window.PaperLibraryChat?.create({ api, toast, getPaper: () => state.active, getContext: () => state.harnessContext,
+  getAnnotations: () => state.annotations, getLibrary: () => state.library,
+  navigate: switchTab, changed: publishReaderState,
+  savedFeedback: async id => { if (state.active?.id !== id) return; await loadFeedback(id); await loadAnnotations(id); if (state.active.pdf) await requestPage(state.page); },
+});
+window.addEventListener('pagehide', () => { publishReaderState(); paperChatUI?.dispose(); });
 window.addEventListener('message', receiveHarnessContext);
 initialize();

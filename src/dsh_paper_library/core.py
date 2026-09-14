@@ -764,17 +764,22 @@ class Library:
             result = result * page.rotation_matrix
         return result
 
+    @staticmethod
+    def _annotation_metadata(annot):
+        subject = annot.info.get("subject", "")
+        if subject.startswith("paper-library:") and len(subject) < 100000:
+            try:
+                extra = json.loads(subject[len("paper-library:"):])
+                return extra if isinstance(extra, dict) else {}
+            except ValueError:
+                pass
+        return {}
+
     @classmethod
     def _annotation(cls, page, annot):
         import pymupdf as fitz
         info = annot.info
-        extra = {}
-        subject = info.get("subject", "")
-        if subject.startswith("paper-library:") and len(subject) < 100000:
-            try:
-                extra = json.loads(subject[len("paper-library:"):])
-            except ValueError:
-                pass
+        extra = cls._annotation_metadata(annot)
         rects = []
         if annot.vertices and annot.type[0] in {8, 9, 10, 11}:
             for index in range(0, len(annot.vertices), 4):
@@ -788,7 +793,7 @@ class Library:
             words = page.get_text("words")
             unrotated = [fitz.Rect(r) * page.derotation_matrix for r in rects]
             text = " ".join(word[4] for word in words if any(fitz.Rect(word[:4]).intersects(rect) for rect in unrotated))[:20000]
-        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra else "external-pdf", **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated") if key in extra}}
+        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra else "external-pdf", **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id") if key in extra}}
 
     def annotations(self, id):
         result, characters = [], 0
@@ -1057,6 +1062,49 @@ class Library:
         rows = self.db.execute("SELECT payload FROM feedback WHERE paper_id=? LIMIT 100", (id,)).fetchall()
         return {"feedback": [json.loads(row[0]) for row in rows]}
 
+    def save_conversation_feedback(self, id, text, model, annotation_ids, source_session_id, source_message_id, page=1):
+        """Persist an explicitly saved, host-verified native assistant message.
+
+        This worker action is internal to the Harness adapter: the host must read
+        and verify the completed assistant message itself. Browser-supplied text
+        or provenance is not authority. DSH retains the canonical transcript;
+        this PDF note is a portable, explicitly AI-generated saved excerpt.
+        """
+        if not isinstance(text, str) or not text.strip() or len(text) > 28000:
+            raise ValueError("Feedback must contain 1–28000 characters")
+        if not isinstance(annotation_ids, list) or annotation_ids:
+            raise ValueError("Conversation feedback requires an explicit empty annotation_ids list; source associations must not be inferred")
+        for value in (source_session_id, source_message_id):
+            if not isinstance(value, str) or not 1 <= len(value) <= 200 or value != value.strip() or any(ord(char) < 32 or ord(char) == 127 for char in value):
+                raise ValueError("Conversation source IDs must contain 1–200 characters without surrounding whitespace or control characters")
+        if type(page) is not int or page < 1:
+            raise ValueError("Conversation feedback page must be a positive integer")
+        with self.lock():
+            item = self.get(id)
+            if not item["pdf"]:
+                raise ValueError("Attach a PDF before saving conversation feedback to it")
+            # Scan PDF metadata under the write lock, without extracting source
+            # text or trusting a truncated annotations() result for uniqueness.
+            # Copies/reimports retain the same key without any catalog row.
+            count = 0
+            with self._open_pdf(self.pdf_path(id)) as doc:
+                self._page(doc, page)
+                for current in doc:
+                    for annot in current.annots() or []:
+                        count += 1
+                        if count > MAX_ANNOTATIONS:
+                            raise ValueError("PDF annotation limit prevents a complete conversation feedback duplicate check")
+                        extra = self._annotation_metadata(annot)
+                        if extra.get("kind") == "ai-feedback" and extra.get("source_kind") == "dsh-conversation" and extra.get("source_session_id") == source_session_id and extra.get("source_message_id") == source_message_id:
+                            value = self._annotation(current, annot)
+                            return {**value, "annotation_id": value["id"], "duplicate": True}
+            if count >= MAX_ANNOTATIONS:
+                raise ValueError("PDF annotation limit reached; conversation feedback was not saved")
+            extra = {"kind": "ai-feedback", "model": str(model)[:200], "annotation_ids": [], "generated": now(), "source_kind": "dsh-conversation", "source_session_id": source_session_id, "source_message_id": source_message_id}
+            result = self._write_pdf(id, lambda doc: self._add_annotation(doc, page, "note", comment="AI-generated conversation feedback · " + extra["model"] + "\n\n" + text, author="AI · Paper Library", color="#8b9cff", extra=extra))
+            value = result["annotation"]
+            return {**value, "annotation_id": value["id"], "duplicate": False}
+
 
 def dispatch(request):
     if not isinstance(request, dict):
@@ -1090,6 +1138,7 @@ def dispatch(request):
             "list": ("query", "limit", "offset"), "get": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page": ("id", "page", "scale"),
             "annotations": ("id",), "annotate": ("id", "page", "type", "rects", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment"), "annotation_delete": ("id", "annotation_id"),
             "export_annotations": ("id", "format"), "link": ("source", "target", "relation", "note"), "graph": ("id", "limit"), "feedback_context": ("id", "annotation_ids"), "save_feedback": ("id", "text", "model", "annotation_ids", "expected_context_hash"), "feedback": ("id",),
+            "save_conversation_feedback": ("id", "text", "model", "annotation_ids", "source_session_id", "source_message_id", "page"),
         }
         if action not in actions:
             raise ValueError("Unknown core action")

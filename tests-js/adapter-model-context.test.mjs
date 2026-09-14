@@ -21,6 +21,7 @@ test('composer model updates reach the same iframe without navigation or credent
   assert.equal(first.model, 'selected-model')
   assert.equal(first.provider, 'configured-provider')
   assert.equal(first.sessionId, 'session-a')
+  assert.equal(first.capabilities.paperConversations, true)
   assert.equal(Object.hasOwn(first, 'secret'), false)
   fixture.update({ current: { provider: 'other-provider', model: 'new-model', reasoningEffort: 'high' }, routable: true, status: 'ready' })
   assert.equal(fixture.messages.at(-1).value.model, 'new-model')

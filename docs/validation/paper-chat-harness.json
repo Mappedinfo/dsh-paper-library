@@ -1,0 +1,24 @@
+{
+  "verified_at": "2026-09-14T14:02:37.808Z",
+  "ok": true,
+  "checks": [
+    "fresh-synthetic-library-and-native-page-two-annotation",
+    "unauthenticated-chat-and-fixture-observation-refused",
+    "same-paper-reuses-session-and-two-papers-remain-distinct",
+    "cold-sessions-native-visible-without-agent-or-model-generation",
+    "native-annotation-context-retains-real-page-and-identity",
+    "native-prompt-adopts-cold-session-and-commits-assistant-history",
+    "reading-one-paper-does-not-activate-other-paper-agents",
+    "same-request-retry-does-not-duplicate-user-turn-or-generation",
+    "committed-assistant-reply-saves-to-native-pdf-with-provenance",
+    "repeated-feedback-save-is-idempotent-and-browser-text-is-ignored"
+  ],
+  "deterministicModelGenerations": 1,
+  "externalModelRequestsMade": 0,
+  "sourceData": "Fresh synthetic three-page PDFs generated per run",
+  "limitations": [
+    "No paid model-quality evaluation",
+    "No real-library migration or memory benchmark",
+    "Browser interaction is validated separately"
+  ]
+}

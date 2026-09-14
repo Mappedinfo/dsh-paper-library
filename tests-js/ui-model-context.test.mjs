@@ -9,10 +9,11 @@ const source = await readFile(new URL('../web/app.js', import.meta.url), 'utf8')
 assert.match(source, /\ninitialize\(\);\s*$/);
 const testSource = source.replace(/\ninitialize\(\);\s*$/, '\n') + `
 globalThis.testUI = { state, announceReady, currentHarnessRoute, manualModel,
-  loadModels, renderModelRoute, requestFeedback };
+  loadModels, renderModelRoute, requestFeedback, requestPage, restoreReaderState,
+  saveAnnotation, setReaderRestore(value) { readerRestore = value; } };
 `;
 
-function environment({ standalone = false, models = [{ id: 'fallback-model', provider: 'fallback-provider' }], modelResponse } = {}) {
+function environment({ standalone = false, models = [{ id: 'fallback-model', provider: 'fallback-provider' }], modelResponse, apiResponse } = {}) {
   const elements = new Map(), labels = new Map(), requests = [], messages = [], storage = new Map();
   class Element {
     constructor(tag = 'div') {
@@ -32,6 +33,7 @@ function environment({ standalone = false, models = [{ id: 'fallback-model', pro
     addEventListener(type, listener) { if (!this.listeners.has(type)) this.listeners.set(type, []); this.listeners.get(type).push(listener); }
     dispatch(type, event = {}) { for (const listener of this.listeners.get(type) || []) listener(event); }
     before() {} after() {} setAttribute() {} removeAttribute() {} focus() {} select() {}
+    showModal() { this.open = true; } close() { this.open = false; }
     querySelectorAll() { return []; }
   }
   function element(id) { if (!elements.has(id)) { const node = new Element(id === 'feedback-model' ? 'select' : 'div'); node.id = id; } return elements.get(id); }
@@ -48,8 +50,8 @@ function environment({ standalone = false, models = [{ id: 'fallback-model', pro
   if (standalone) window.parent = window;
   const fetch = async (_url, options) => {
     const request = JSON.parse(options.body); requests.push(request);
-    let result;
-    switch (request.action) {
+    let result = apiResponse ? await apiResponse(request) : undefined;
+    if (result === undefined) switch (request.action) {
       case 'models': result = modelResponse ? await modelResponse() : { models }; break;
       case 'ai_feedback': result = { saved: true }; break;
       case 'feedback': result = { feedback: [] }; break;
@@ -61,7 +63,7 @@ function environment({ standalone = false, models = [{ id: 'fallback-model', pro
   const context = vm.createContext({ document, window, fetch, console,
     ResizeObserver: class { observe() {} },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
-    setTimeout: () => 1, clearTimeout() {}, structuredClone,
+    setTimeout: () => 1, clearTimeout() {}, structuredClone, Blob,
   });
   vm.runInContext(testSource, context, { filename: 'web/app.js' });
   const ui = context.testUI;
@@ -164,4 +166,78 @@ test('a late fallback response cannot overwrite a newer current-session route', 
   assert.equal(fixture.ui.state.models.length, 0);
   assert.equal(fixture.element('current-harness-model-name').textContent, 'current-provider / new-current-model');
   assert.equal(fixture.element('feedback-model').closest('label').hidden, true);
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(accept => { resolve = accept; });
+  return { promise, resolve };
+}
+const pageResult = page => ({ page, page_count: 2, width: 400, height: 500, image: '', words: [] });
+
+test('a queued page request stays pending until the requested PDF page has actually rendered', async t => {
+  const first = deferred(), second = deferred();
+  const fixture = environment({ apiResponse: request => request.action === 'page' ? (request.page === 1 ? first.promise : second.promise) : undefined });
+  fixture.ui.state.active = { id: 'paper-a', pdf: true };
+  fixture.ui.state.pageCount = 2;
+  const rendering = fixture.ui.requestPage(1);
+  let queuedFinished = false;
+  const queued = fixture.ui.requestPage(2).then(() => { queuedFinished = true; });
+  t.after(async () => { first.resolve(pageResult(1)); second.resolve(pageResult(2)); await rendering; await queued; });
+  await fixture.flush();
+  assert.equal(queuedFinished, false);
+  first.resolve(pageResult(1)); await fixture.flush();
+  assert.equal(queuedFinished, false, 'the old render finishing must not resolve the queued page prematurely');
+  assert.equal(fixture.requests.filter(request => request.action === 'page').at(-1).page, 2);
+  second.resolve(pageResult(2)); await queued;
+  assert.equal(fixture.ui.state.page, 2);
+  assert.equal(fixture.ui.state.pageRunning, false);
+  assert.equal(fixture.ui.state.pagePromise, null);
+});
+
+for (const mode of ['note', 'highlight']) test(`restoring a ${mode} waits for the queued PDF page and saves to its original page`, async t => {
+  const first = deferred(), second = deferred(); let firstRequested = false;
+  const paper = { id: 'paper-a', pdf: true, title: 'Synthetic two-page paper', citekey: 'Fixture2026' };
+  const fixture = environment({ apiResponse(request) {
+    if (request.action === 'get') return paper;
+    if (request.action === 'page') {
+      if (request.page === 2) return second.promise;
+      if (!firstRequested) { firstRequested = true; return first.promise; }
+      return pageResult(request.page);
+    }
+    if (request.action === 'annotate') return { annotation: { id: 'saved-note', page: request.page, type: request.type, comment: request.comment } };
+    return undefined;
+  } });
+  fixture.ui.state.active = paper;
+  fixture.ui.state.pageCount = 2;
+  const rendering = fixture.ui.requestPage(1);
+  t.after(async () => { first.resolve(pageResult(1)); second.resolve(pageResult(2)); await rendering; });
+  await fixture.flush();
+  const selection = { page: 2, text: 'Text selected on page two.', rects: [[50, 80, 160, 95]] };
+  fixture.ui.setReaderRestore({ paperId: 'paper-a', page: 2, tab: 'reader', chatDraft: '', annotationDraft: {
+    id: 'paper-a', mode, page: 2, comment: 'This unsaved annotation belongs to page two.', ...(mode === 'highlight' ? { selection } : {}),
+  } });
+  let restored = false;
+  const restoring = fixture.ui.restoreReaderState().then(() => { restored = true; });
+  await fixture.flush();
+  assert.equal(restored, false, 'restoration must wait for an already-running renderer');
+  first.resolve(pageResult(1)); await fixture.flush();
+  assert.equal(fixture.ui.state.page, 1);
+  assert.equal(restored, false, 'restoration must still wait until page 2 is available');
+  assert.equal(fixture.requests.filter(request => request.action === 'page').at(-1).page, 2);
+  second.resolve(pageResult(2)); await restoring;
+  assert.equal(fixture.ui.state.page, 2);
+  assert.equal(fixture.ui.state.annotationDraft.page, 2);
+  assert.equal(fixture.element('annotation-page-label').textContent, '第 2 页');
+  assert.equal(fixture.element('annotation-comment').value, 'This unsaved annotation belongs to page two.');
+  assert.equal(fixture.element('annotation-dialog').open, true);
+  await fixture.ui.saveAnnotation({ preventDefault() {}, target: fixture.element('annotation-form') });
+  const saved = fixture.requests.find(request => request.action === 'annotate');
+  assert.equal(saved.id, 'paper-a');
+  assert.equal(saved.page, 2);
+  assert.equal(saved.comment, 'This unsaved annotation belongs to page two.');
+  if (mode === 'highlight') {
+    assert.deepEqual(saved.rects, selection.rects);
+    assert.equal(saved.text, selection.text);
+  }
 });

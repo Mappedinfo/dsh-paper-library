@@ -24,7 +24,8 @@
       "inject": [
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-sidebar-right",
-        "@deepseek-ai/dsh-client-ui-model-selection"
+        "@deepseek-ai/dsh-client-ui-model-selection",
+        "@deepseek-ai/dsh-client-ui-conversation"
       ]
     }
   },
@@ -32,6 +33,7 @@
     "build": "node scripts/build.mjs",
     "test": "node --test tests-js/*.test.mjs",
     "test:harness": "node tests-js/adapter-web-smoke.mjs",
+    "test:paper-chat": "node tests-js/paper-chat-harness-smoke.mjs",
     "check:publication": "node scripts/check-publication.mjs",
     "verify:github": "node scripts/verify-github.mjs",
     "start": "node src/server.mjs",
@@ -51,7 +53,8 @@
     "@deepseek-ai/dsh-host-webserver": ">=0.1.5-rc.2 <0.2.0",
     "@deepseek-ai/dsh-client-locale": ">=0.1.5-rc.2 <0.2.0",
     "@deepseek-ai/dsh-client-ui-sidebar-right": ">=0.1.5-rc.2 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-model-selection": ">=0.1.5-rc.2 <0.2.0"
+    "@deepseek-ai/dsh-client-ui-model-selection": ">=0.1.5-rc.2 <0.2.0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.5-rc.2 <0.2.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": { "optional": true },
@@ -61,7 +64,8 @@
     "@deepseek-ai/dsh-host-webserver": { "optional": true },
     "@deepseek-ai/dsh-client-locale": { "optional": true },
     "@deepseek-ai/dsh-client-ui-sidebar-right": { "optional": true },
-    "@deepseek-ai/dsh-client-ui-model-selection": { "optional": true }
+    "@deepseek-ai/dsh-client-ui-model-selection": { "optional": true },
+    "@deepseek-ai/dsh-client-ui-conversation": { "optional": true }
   },
   "devDependencies": { "esbuild": "^0.25.0" }
 }

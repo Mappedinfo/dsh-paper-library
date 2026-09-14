@@ -1,0 +1,7 @@
+- id: agent-default-model
+  config:
+    provider: paper-library-native-chat-fixture
+    model: deterministic-reader
+- insert:
+    - id: paper-library-native-chat-fixture
+      name: ./index.mjs

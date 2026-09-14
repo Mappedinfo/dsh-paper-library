@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { dispatch, projectRoot } from './bridge.mjs';
 
-const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
+const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
 const baseHeaders = {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
@@ -81,8 +81,13 @@ export function createFetchHandler(options = {}) {
         try {
           const input = JSON.parse(await readBounded(request, 45*1024*1024));
           // Browser cannot forge AI output or arbitrary worker internals.
-          if (['save_feedback','export_pdf','inspect_pdf'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
-          const result = await dispatch(input, { ...options, signal: request.signal });
+          if (['save_feedback','save_conversation_feedback','export_pdf','inspect_pdf'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
+          const chatAction = typeof input?.action === 'string' && input.action.startsWith('chat_');
+          if (chatAction && !options.paperChat) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板打开论文对话。'},400);
+          let result = chatAction
+            ? await options.paperChat(input, { signal: request.signal })
+            : await dispatch(input, { ...options, signal: request.signal });
+          if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat) };
           return json({ok:true,result});
         } finally { jsonRequests--; }
       }
