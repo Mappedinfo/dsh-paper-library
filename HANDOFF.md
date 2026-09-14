@@ -52,6 +52,8 @@ The initial two commits and current tree were audited before publication: no rea
 
 ## Known limits and next validation
 
+**Design proposal (2026-09-14, not implemented):** [Continuous annotation references](docs/annotation-reference-design.md) analyzes new/updated, manually selected and all-note scopes in one composer, and audits the official Harness reference APIs. It identifies the current silent 40-note/text truncation, replace-only note selection, missing sent-version tracking and custom-chip persistence/rendering limits. The proposal does not change installed behavior or establish these choices as accepted implementation requirements.
+
 1. **WPS viewing/saving:** native application automation failed to complete opening the synthetic copy. Validate standard highlights/comments and embedded metadata after WPS save on a copied file; do not claim WPS compatibility from PyMuPDF-only tests. Existing user documents were not edited.
 2. **Real library:** benchmark a user-selected export/copy, including scanned/image-heavy PDFs and long reading sessions. Keep total browser/host/worker memory separate. Do not infer Zotero's 3 GB cause from this implementation.
 3. **Search:** title/author/DOI/citekey/tags/abstract only. Full-text indexing/OCR/embeddings are deferred; add an explicit on-demand pipeline and memory budget if requested.
