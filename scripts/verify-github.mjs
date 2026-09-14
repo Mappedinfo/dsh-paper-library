@@ -16,7 +16,7 @@ assert.equal(metadata.full_name.toLowerCase(),repo);
 assert.equal(metadata.private,false);
 assert.equal(branch,'main');
 assert.equal(remoteHead,localHead,'Public main must match the verified local commit');
-assert.match(origin,/github\.com[:/]mappedinfo\/dsh-paper-library(?:\.git)?$/);
+assert.match(origin,/github\.com[:/]mappedinfo\/dsh-paper-library(?:\.git)?$/i);
 assert.equal(Buffer.from(license.content,'base64').toString('utf8'),await readFile('LICENSE','utf8'));
 assert.match(await readFile('LICENSE','utf8'),/^MIT License\n/);
 const report = {verified_at:new Date().toISOString(),ok:true,repository:metadata.full_name,url:metadata.html_url,visibility:metadata.visibility,default_branch:branch,local_head:localHead,remote_head:remoteHead,root_license:'MIT',github_license:metadata.license?.spdx_id || null,origin};
