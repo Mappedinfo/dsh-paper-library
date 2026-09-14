@@ -1,1 +1,32 @@
-{"ok":true,"plugin":"@mappedinfo/dsh-paper-library","plugins":["@deepseek-ai/dsh-tool-vision-read","@mappedinfo/dsh-cron-scheduler","@mappedinfo/dsh-paper-library"],"preservedUserPatch":null}
+{
+  "ok": true,
+  "verifiedDate": "2026-09-14",
+  "plugin": "@mappedinfo/dsh-paper-library",
+  "plugins": [
+    "@deepseek-ai/dsh-tool-vision-read",
+    "@mappedinfo/dsh-cron-scheduler",
+    "@mappedinfo/dsh-paper-library"
+  ],
+  "preservedUserPatch": true,
+  "profile": "web",
+  "buildPassed": true,
+  "lockedPythonDependenciesSynced": true,
+  "restart": {
+    "explicitlyAuthorized": true,
+    "sameSourceCheckout": true,
+    "sameHomeAndLoopbackAuthority": true,
+    "oldHostStoppedBeforeNewHost": true,
+    "replacementHostListening": true
+  },
+  "ui": {
+    "method": "native PWA accessibility inspection",
+    "existingAuthenticationRestored": true,
+    "rightSidebarEntry": "文献库",
+    "paneRoute": "/api/paper-library/",
+    "paneLoaded": true,
+    "catalogCount": 0,
+    "pdfAndLinkImportControlsVisible": true
+  },
+  "realDocumentsImported": false,
+  "modelGenerationSubmitted": false
+}

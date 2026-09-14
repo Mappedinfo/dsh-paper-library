@@ -33,7 +33,7 @@ The earlier capacity fixture has 2,000 records and 1,000 four-page small text PD
 
 ## Installation and Git boundary
 
-Registered exactly once in the user's existing `web` profile using the official additive plugin CLI. Prior vision/cron plugins and profile patch were preserved; running user host not restarted. Local peer symlinks point to the user's built Harness checkout. `npm ci` can remove those links; rerun the install helper after rebuilding when dependencies are refreshed.
+Registered exactly once in the user's existing `web` profile using the official additive plugin CLI. Prior vision/cron plugins and profile patch were preserved. After explicit restart authorization, the source-checkout host was restarted on its original loopback address; the authenticated native PWA reopened the right-sidebar **文献库** pane and displayed the empty catalog and PDF/link import controls. No real documents were imported and no model generation was submitted during installation verification. See `docs/validation/install.json`. Local peer symlinks point to the user's built Harness checkout. `npm ci` can remove those links; rerun the install helper after rebuilding when dependencies are refreshed.
 
 Public repository: [mappedinfo/dsh-paper-library](https://github.com/mappedinfo/dsh-paper-library). The owner requested public GitHub publication and MIT for original project code on 2026-09-14. Third-party terms remain intact: default PyMuPDF and citeproc runtime dependencies use AGPL, and bundled CSL assets use CC BY-SA. See `THIRD_PARTY.md`; do not describe the full installation as MIT-only.
 
