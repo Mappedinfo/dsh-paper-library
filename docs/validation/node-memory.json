@@ -1,0 +1,50 @@
+{
+  "generated_at": "2026-09-14T07:45:07.899Z",
+  "node": "v25.9.0",
+  "records": 2000,
+  "document_switches": 20,
+  "explicit_gc_available": true,
+  "measurements": [
+    {
+      "stage": "adapter_loaded",
+      "rss_mib": 47.73,
+      "heap_used_mib": 4.62
+    },
+    {
+      "stage": "catalog_opened",
+      "rss_mib": 48.25,
+      "heap_used_mib": 4.89
+    },
+    {
+      "stage": "after_30_searches",
+      "rss_mib": 51.89,
+      "heap_used_mib": 6.6
+    },
+    {
+      "stage": "after_document_switches",
+      "rss_mib": 61.47,
+      "heap_used_mib": 11.08
+    },
+    {
+      "stage": "after_explicit_gc",
+      "rss_mib": 60.11,
+      "heap_used_mib": 4.42
+    },
+    {
+      "stage": "after_first_apa",
+      "rss_mib": 60.13,
+      "heap_used_mib": 4.54
+    },
+    {
+      "stage": "after_citation_gc",
+      "rss_mib": 59.98,
+      "heap_used_mib": 4.13
+    }
+  ],
+  "resident_worker_pids": [],
+  "limits": [
+    "Node adapter only, excluding Harness/browser",
+    "Synthetic text PDFs",
+    "Explicit GC measurements are diagnostic, not normal timing guarantees"
+  ]
+}

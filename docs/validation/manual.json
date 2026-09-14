@@ -1,0 +1,20 @@
+{
+  "verified_date": "2026-09-14",
+  "method": "Codex computer-use browser walkthrough, synthetic documents only",
+  "checks": [
+    {"id":"library_list","status":"pass","observed":"Three synthetic imported records appeared with author, year, tags and PDF state."},
+    {"id":"current_page","status":"pass","observed":"Rendered page 1 of 3 with selectable word layer."},
+    {"id":"apa_clipboard","status":"pass","observed":"Clipboard text: Wang, S. (2026). Reading urban change. Synthetic Reading Examples."},
+    {"id":"chinese_page_note","status":"pass","observed":"Saved Chinese note, reloaded UI and found the same comment on page 1."},
+    {"id":"highlight","status":"pass","observed":"Selected sentence, saved a native highlight plus Chinese comment; annotation count rose to 2."},
+    {"id":"graph_relationship","status":"pass","observed":"Added related-paper edge; graph displayed both documents and the user-entered reason."},
+    {"id":"whole_library_export","status":"pass","observed":"Clicked global export, browser reported all 3 fixture references exported as BibLaTeX."},
+    {"id":"browser_console","status":"pass","observed":"No captured browser errors or warnings in the final walkthrough."},
+    {"id":"unconfigured_model","status":"pass","observed":"Standalone UI showed no configured model and offered refresh rather than fabricated AI text."},
+    {"id":"harness_current_model","status":"pass","observed":"Actual isolated Harness loaded the 2,000-record catalog. The reader showed paper-library-qa-a / reader-a automatically; changing the composer to QA Reader B changed the reader to paper-library-qa-b / reader-b while the same paper and annotation tab remained open."},
+    {"id":"model_switch_draft","status":"pass","observed":"Typed an unsaved Chinese page-note draft, changed the actual Harness composer from model B back to A, and observed the same draft text still in the open annotation dialog. The draft was not saved to the fixture PDF."},
+    {"id":"model_fixture_boundary","status":"pass","observed":"The local selection-only adapter rejected a synthetic conversation turn before network generation. This made the conversation sidebar available; no external model request was made. Temporary host restart produced expected reconnect warnings, with no captured later reader error. Test host and tab were stopped after verification."},
+    {"id":"wps_roundtrip","status":"unverified","observed":"Native app automation could not complete the file-open workflow. No WPS compatibility claim."},
+    {"id":"browser_total_memory","status":"unverified","observed":"Browser process memory was not measured."}
+  ]
+}

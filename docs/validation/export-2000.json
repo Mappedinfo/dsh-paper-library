@@ -1,0 +1,11 @@
+{
+  "verified_at": "2026-09-14T08:01:47.316Z",
+  "source_count": 2000,
+  "exported_count": 2000,
+  "parsed_count": 2000,
+  "unique_keys": 2000,
+  "missing_keys": [],
+  "elapsed_ms": 2201,
+  "status": "pass",
+  "source": "Synthetic capacity fixture"
+}

@@ -1,0 +1,10 @@
+- insert:
+    - id: paper-library
+      name: '@mappedinfo/dsh-paper-library'
+      config:
+        library: !!js process.env.DSH_PAPER_LIBRARY_DIR
+        python: !!js process.env.DSH_PAPER_LIBRARY_PYTHON
+        provider: !!js process.env.DSH_PAPER_LIBRARY_PROVIDER
+        model: !!js process.env.DSH_PAPER_LIBRARY_MODEL
+        requireToolApproval: true
+        maxOutputTokens: 1600

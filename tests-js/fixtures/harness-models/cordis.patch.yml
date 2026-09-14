@@ -1,0 +1,9 @@
+- id: agent-default-model
+  config:
+    provider: paper-library-qa-a
+    model: reader-a
+- insert:
+    - id: paper-library-qa-models
+      name: ./index.mjs
+    - id: paper-library-qa-workspace
+      name: ./seed-workspace.mjs

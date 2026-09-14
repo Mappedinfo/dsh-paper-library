@@ -1,0 +1,76 @@
+{
+  "generated_at": "2026-09-14T07:54:11.911Z",
+  "node": "v25.9.0",
+  "platform": "darwin",
+  "source": "artifacts/capacity-2000-1000/library",
+  "synthetic_records": 2000,
+  "synthetic_pdfs": 1000,
+  "pages_per_pdf": 4,
+  "baseline": "Isolated default web profile",
+  "plugin": "Same default web profile plus Paper Library bundle; deployment library points to synthetic fixture",
+  "method": "Concurrent separate Node hosts; ps RSS snapshots at matching milestones; no explicit GC, no browser, no model calls",
+  "measurements": [
+    {
+      "stage": "ready_idle",
+      "elapsed_ms": 6877,
+      "baseline_host_rss_mib": 124.92,
+      "plugin_host_rss_mib": 466.39,
+      "observed_difference_mib": 341.47,
+      "baseline_children": [],
+      "plugin_children": []
+    },
+    {
+      "stage": "after_100_metadata_queries",
+      "elapsed_ms": 11787,
+      "baseline_host_rss_mib": 60.48,
+      "plugin_host_rss_mib": 92.72,
+      "observed_difference_mib": 32.24,
+      "baseline_children": [],
+      "plugin_children": [],
+      "operations": 100,
+      "operation_elapsed_ms": 4788
+    },
+    {
+      "stage": "after_20_document_renders",
+      "elapsed_ms": 14075,
+      "baseline_host_rss_mib": 60.58,
+      "plugin_host_rss_mib": 208.38,
+      "observed_difference_mib": 147.8,
+      "baseline_children": [],
+      "plugin_children": [],
+      "operations": 20,
+      "scale": 1.25,
+      "operation_elapsed_ms": 2207
+    },
+    {
+      "stage": "after_apa_20_records",
+      "elapsed_ms": 15262,
+      "baseline_host_rss_mib": 60.56,
+      "plugin_host_rss_mib": 207.94,
+      "observed_difference_mib": 147.38,
+      "baseline_children": [],
+      "plugin_children": [],
+      "operations": 1,
+      "citation_records": 20,
+      "operation_elapsed_ms": 1144
+    },
+    {
+      "stage": "settled_idle_5_seconds",
+      "elapsed_ms": 20309,
+      "baseline_host_rss_mib": 60.94,
+      "plugin_host_rss_mib": 201.5,
+      "observed_difference_mib": 140.56,
+      "baseline_children": [],
+      "plugin_children": []
+    }
+  ],
+  "resident_workers_after_idle": [],
+  "model_requests_made": 0,
+  "limits": [
+    "RSS snapshots are not process peak RSS and do not measure short-lived worker peaks.",
+    "Observed differences between separate processes are descriptive, not an exact causal plugin allocation; startup, V8 GC and OS memory scheduling vary.",
+    "Baseline remains idle while the plugin host receives literature requests; the resulting difference includes workload allocations.",
+    "Excludes browser, PDF/CSL worker peak RSS and unrelated existing Harness instances.",
+    "Synthetic small text PDFs do not establish memory use for large scanned PDFs or the user actual library."
+  ]
+}

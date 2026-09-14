@@ -1,0 +1,49 @@
+{
+  "generated_at": "2026-09-14T15:40:09+0800",
+  "platform": "darwin",
+  "python": "3.13.12",
+  "records": 2000,
+  "pdfs": 1000,
+  "pages_per_pdf": 4,
+  "fixture_pdf_bytes": 20600,
+  "fixture_seconds": 7.25,
+  "catalog_bytes": 3883008,
+  "results": {
+    "idle_catalog_status": {
+      "peak_rss_mib": 24.23,
+      "elapsed_ms": 1.02,
+      "operations": 1,
+      "final_count": 2000
+    },
+    "literal_search_100": {
+      "peak_rss_mib": 26.72,
+      "elapsed_ms": 324.25,
+      "operations": 100,
+      "final_count": 1
+    },
+    "broad_search_100": {
+      "peak_rss_mib": 26.8,
+      "elapsed_ms": 611.21,
+      "operations": 100,
+      "final_count": 2000
+    },
+    "render_current_page": {
+      "peak_rss_mib": 63.36,
+      "elapsed_ms": 96.73,
+      "operations": 1,
+      "final_count": null
+    },
+    "switch_documents_30": {
+      "peak_rss_mib": 68.38,
+      "elapsed_ms": 654.78,
+      "operations": 30,
+      "final_count": null
+    }
+  },
+  "limits": [
+    "Synthetic small text PDFs; not real-library validation",
+    "Workers only; excludes Node host, Harness and browser",
+    "No resident worker or embedding model between requests",
+    "ru_maxrss is process high-water resident memory; not retained-memory proof"
+  ]
+}

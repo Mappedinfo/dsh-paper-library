@@ -1,0 +1,15 @@
+{
+  "retrieved": "2026-09-14T07:34:24.101Z",
+  "resources": [
+    {
+      "name": "apa.csl",
+      "url": "https://raw.githubusercontent.com/citation-style-language/styles/master/apa.csl",
+      "sha256": "1ece4fb3c295e66d04b4394e295aa58a87741ceeef1658192437eb9953c2f13e"
+    },
+    {
+      "name": "locales-en-US.xml",
+      "url": "https://raw.githubusercontent.com/citation-style-language/locales/master/locales-en-US.xml",
+      "sha256": "ac864c7c21166b4390d82c31792cdc509400727fa0060b43d8aa17e07f9cb079"
+    }
+  ]
+}

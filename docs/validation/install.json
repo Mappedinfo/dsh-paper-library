@@ -1,0 +1,1 @@
+{"ok":true,"plugin":"@mappedinfo/dsh-paper-library","plugins":["@deepseek-ai/dsh-tool-vision-read","@mappedinfo/dsh-cron-scheduler","@mappedinfo/dsh-paper-library"],"preservedUserPatch":null}
