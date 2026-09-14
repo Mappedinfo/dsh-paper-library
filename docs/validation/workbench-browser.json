@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-14T15:44:15.072Z",
+  "verified_at": "2026-09-14T16:08:15.548Z",
   "checks": [
     "compact-current-paper-toolbar-cards-title-and-sourced-metadata",
     "741px-reader-has-no-document-horizontal-overflow",
@@ -8,7 +8,7 @@
     "ordinary-metadata-edits-preserve-affiliation-provenance",
     "typed-scientific-nodes-metadata-projections-directed-evidence-edge-persist",
     "graph-evidence-returns-to-known-pdf-page",
-    "430-and-1400px-reading-layout-has-no-document-overflow",
+    "430-and-1400px-reading-layout-has-no-document-overflow-and-resize-restores-sharp-page-anchor",
     "fresh-page-reloads-saved-graph-and-rich-metadata",
     "visible-node-edit-preserves-source-and-type-filter-restores-all-relations",
     "visible-relation-edit-and-delete-preserve-direction-sources-and-endpoint-nodes",
@@ -32,5 +32,5 @@
   "browser_errors": [],
   "model_requests": 0,
   "scope": "Synthetic catalog and PDF only; no external metadata lookup, no formal user validation",
-  "screenshots": ".local/workbench-browser-cBntu9"
+  "screenshots": ".local/workbench-browser-iaVlED"
 }

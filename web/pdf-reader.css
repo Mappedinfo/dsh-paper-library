@@ -1,0 +1,17 @@
+.paper-pdf-reader { position:relative; min-height:220px; height:100%; overflow:auto; overscroll-behavior:contain; overflow-anchor:none; scrollbar-gutter:stable; background:#e7e9e5; outline:none; }
+.paper-pdf-reader:focus-visible { outline:2px solid var(--teal,#286a61); outline-offset:-2px; }
+.pdr-pages { display:flex; flex-direction:column; align-items:center; gap:16px; padding:12px 0; min-height:100%; box-sizing:border-box; }
+.pdr-page-slot { flex:none; min-width:0; margin:0; padding:0; position:relative; }
+.pdr-page-caption { height:24px; line-height:20px; font-size:10px; text-align:center; color:#788079; user-select:none; }
+.pdr-sheet { position:relative; width:100%; background:white; box-shadow:0 1px 5px #1b2c2425; overflow:hidden; }
+.pdr-page-image { position:absolute; inset:0; display:block; width:100%; height:100%; margin:0; pointer-events:none; user-select:none; }
+.pdr-word-layer { position:absolute; inset:0; width:100%; height:100%; overflow:hidden; line-height:1; cursor:text; z-index:1; }
+.pdr-word { position:absolute; display:block; color:transparent; white-space:pre; font-family:Arial,sans-serif; line-height:1; transform-origin:left top; user-select:text; -webkit-user-select:text; }
+.pdr-word::selection { background:#5b93bd66; color:transparent; }
+.paper-pdf-reader[data-tool="note"] .pdr-word-layer,.paper-pdf-reader[data-tool="note"] .pdr-word { user-select:none; -webkit-user-select:none; cursor:crosshair; }
+.paper-pdf-reader[data-tool="highlight"] .pdr-word-layer,.paper-pdf-reader[data-tool="underline"] .pdr-word-layer,.paper-pdf-reader[data-tool="strikeout"] .pdr-word-layer { cursor:text; }
+.pdr-placeholder { position:absolute; inset:0; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; padding:20px; color:#899087; text-align:center; font-size:12px; }
+.pdr-pages>.pdr-placeholder { position:relative; min-height:220px; }
+.pdr-error,.pdr-layout-error { color:#983e31; font-size:12px; line-height:1.6; }
+.pdr-layout-error { padding:20px; overflow-wrap:anywhere; }
+@media(max-width:620px) { .pdr-page-caption { font-size:9px; } .paper-pdf-reader { min-height:180px; } }

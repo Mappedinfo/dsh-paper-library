@@ -30,6 +30,14 @@ assert.equal(status.ok, true, 'Installed library status unavailable')
 const conversationCapability = status.result.paper_conversations === true
 const annotationReferences = status.result.annotation_references === true
 const workbench = status.result.catalog_management === true && status.result.typed_graph === true
+const readingWorkspace = status.result.reading_workspace === true
+if (flags.get('--require-reader') === 'true') {
+  assert.equal(readingWorkspace, true, 'Restarted host lacks the continuous reading workspace')
+  for (const file of ['pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css']) {
+    const asset = await fetch(`${address.origin}/api/paper-library/${file}`, {headers,signal:AbortSignal.timeout(10000)})
+    assert.equal(asset.status,200,`Missing reading asset: ${file}`)
+  }
+}
 if (flags.get('--require-workbench') === 'true') {
   assert.equal(workbench, true, 'Restarted host lacks the catalog and typed graph capabilities')
   for (const file of ['workbench.js','workbench.css','knowledge-graph.js','knowledge-graph.css']) {
@@ -46,6 +54,6 @@ if (flags.get('--require-chat') === 'true' || flags.get('--require-references') 
   assert.ok(script.includes('PaperLibraryChat'))
   if (flags.get('--require-references') === 'true') assert.ok(script.includes('chat_catalog') && script.includes('annotation_refs'))
 }
-const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
+const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
 if (flags.get('--output')) await writeFile(flags.get('--output'), JSON.stringify(report, null, 2) + '\n')
 console.log(JSON.stringify(report))

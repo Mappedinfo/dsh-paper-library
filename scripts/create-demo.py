@@ -30,7 +30,7 @@ def create_demo(output: Path):
                     "A useful reading note connects the author's claim to its supporting evidence. Select this sentence and save a highlight with a question.\n\n"
                     "What does the comparison establish? Which assumption makes the interpretation possible? What evidence would change the conclusion?\n\n"
                     "Portable annotations are stored in the PDF document. Copying the PDF should preserve the note, author and page location.\n\n"
-                    "The library renders one page at a time. Search retrieves a bounded set of records from an index on disk.", fontsize=13, lineheight=1.65)
+                    "The library loads a small window of pages while scrolling. Search retrieves bounded records from an index on disk.", fontsize=13, lineheight=1.65)
                 page.insert_text((52, 785), f"Synthetic fixture / page {page_no + 1}", fontsize=9)
             doc.set_metadata({"title": title, "author": f"{given} {family}"})
             doc.save(path)

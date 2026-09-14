@@ -15,7 +15,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function environment({ respond, active = null } = {}) {
+function environment({ respond, active = null, storage = new Map(), library = 'synthetic-library', panelHost } = {}) {
   const ids = new Map(), selectors = new Map(), requests = [], changes = [], toasts = [], loads = [], opens = [], selections = [];
   class Element {
     constructor(tag = 'div') {
@@ -60,16 +60,17 @@ function environment({ respond, active = null } = {}) {
   for (const id of ['copy-apa','export-bib','download-pdf','metadata-open','attach-open']) selector('.paper-actions').append(element(id, id === 'download-pdf' ? 'a' : 'button'));
   const exportLabel = new Element('label'); exportLabel.append(element('export-notes', 'select')); body.append(exportLabel);
   const document = { body, getElementById: element, createElement: tag => new Element(tag), querySelector: selector, querySelectorAll: value => body.querySelectorAll(value) };
-  const window = {};
-  const state = { active, items: active ? [active] : [], sort: 'modified', order: 'desc', archived: false, offset: 0, limit: 40, tab: 'reader' };
+  const window = {localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)}};
+  const state = { active, library, items: active ? [active] : [], sort: 'modified', order: 'desc', archived: false, offset: 0, limit: 40, tab: 'reader' };
   vm.runInNewContext(source, { window, document, structuredClone }, { filename: 'web/workbench.js' });
   const workbench = window.PaperWorkbench.create({ state,
+    ...panelHost,
     api: async (action, data) => { requests.push({ action, ...plain(data) }); return respond ? respond(action, data) : { id: data.id || 'created', ...data.metadata, pdf: false }; },
     loadList: async () => { loads.push(plain(state)); }, openPaper: async id => opens.push(id),
-    selectPaper: item => { selections.push(item.id); state.active = item; }, changed: (...args) => changes.push(plain(args)),
+    selectPaper: item => { selections.push(item.id); state.active = item; workbench.paperChanged(item); workbench.header(); }, changed: (...args) => changes.push(plain(args)),
     toast: (...args) => toasts.push(args),
   });
-  return { workbench, state, element, selector, form, requests, changes, toasts, loads, opens, selections, window };
+  return { workbench, state, element, selector, form, requests, changes, toasts, loads, opens, selections, window, storage };
 }
 
 const original = () => ({ id: 'paper-a', title: 'Synthetic title', pdf: true, type: 'article-journal', citekey: 'Example2026',
@@ -130,6 +131,97 @@ test('a stale metadata lookup cannot reopen the editor after selecting a differe
   assert.equal(f.element('metadata-dialog').open, false);
   assert.equal(f.element('toolbar-paper').textContent, 'B');
   assert.equal(f.element('metadata-enrich').disabled, false);
+});
+
+test('metadata uses injected sidebar hooks and keeps each paper draft across close and paper switches', async () => {
+  const calls=[];const a=original(),b={...original(),id:'paper-b',title:'Paper B'};
+  const f=environment({active:a});
+  f.workbench.setPanelHost({openMetadataPanel:()=>calls.push('open'),closeMetadataPanel:()=>calls.push('close')});
+  f.workbench.edit(a);assert.equal(f.element('metadata-dialog').open,false,'The sidebar host owns visibility; no modal opens');
+  f.element('edit-title').value='Unsaved A';await f.form.dispatch('input');
+  f.workbench.metadataVisibility(false);f.workbench.edit(b);f.element('edit-title').value='Unsaved B';await f.form.dispatch('input');
+  f.workbench.paperChanged(a);assert.equal(f.element('edit-title').value,'Unsaved A');
+  f.workbench.paperChanged(b);assert.equal(f.element('edit-title').value,'Unsaved B');
+  await f.form.dispatch('submit');assert.equal(calls.at(-1),'close');
+  assert.equal(f.requests[0].id,'paper-b');assert.equal(f.requests[0].metadata.title,'Unsaved B');
+});
+
+test('editing a different table row aligns its summary and save target without opening a PDF or recursively replacing drafts', async () => {
+  const a=original(),b={...original(),id:'paper-b',title:'Second record',author:[{literal:'B Author',affiliation:[{name:'B Institute'}]}]};
+  const f=environment({active:a});f.state.items.push(b);f.workbench.edit(a);f.element('edit-title').value='Unsaved A';await f.form.dispatch('input');f.workbench.setTable(true);
+  const row=f.element('catalog-table').querySelectorAll('tr').find(n=>n.dataset.paperId===b.id);
+  await row.querySelectorAll('button').find(n=>n.textContent==='编辑').dispatch('click');
+  assert.equal(f.state.active.id,b.id);assert.equal(f.element('toolbar-paper').textContent,b.title);assert.equal(f.element('edit-title').value,b.title);
+  assert.equal(f.element('paper-metadata').querySelectorAll('dd')[0].textContent,'B Institute');
+  assert.deepEqual(f.selections,[b.id],'Editor-triggered selection must not recurse through paperChanged');assert.deepEqual(f.opens,[]);assert.deepEqual(f.requests,[]);
+  await f.form.dispatch('submit');assert.equal(f.requests[0].id,b.id);
+  f.workbench.edit(a);assert.equal(f.element('edit-title').value,'Unsaved A');
+});
+
+test('new metadata entries hide the previously selected paper summary and restore it when editing a record',()=>{
+  const paper=original(),f=environment({active:paper});f.workbench.edit(paper);
+  assert.equal(f.selector('.paper-header').hidden,false);
+  f.workbench.edit(null);assert.equal(f.selector('.paper-header').hidden,true);assert.equal(f.element('edit-title').value,'');
+  assert.equal(f.state.active.id,paper.id,'New-entry drafts do not replace the selected catalogue record');
+  f.workbench.edit(paper);assert.equal(f.selector('.paper-header').hidden,false);assert.equal(f.element('edit-title').value,paper.title);
+});
+
+test('metadata drafts survive reload with raw invalid fields and author evidence, isolated by library', async () => {
+  const storage=new Map(),paper=original();const f=environment({active:paper,storage});
+  f.workbench.edit(paper);f.element('edit-title').value='Draft title';f.element('edit-received').value='2026-';
+  await f.form.dispatch('input');
+  const restored=environment({active:paper,storage});restored.workbench.edit(paper);
+  assert.equal(restored.element('edit-title').value,'Draft title');assert.equal(restored.element('edit-received').value,'2026-');
+  restored.element('edit-received').value='2026-01';await restored.form.dispatch('submit');
+  assert.deepEqual(restored.requests[0].metadata.author,paper.author);
+  const other=environment({active:paper,storage,library:'another-library'});other.workbench.edit(paper);
+  assert.equal(other.element('edit-title').value,paper.title);
+});
+
+test('metadata lookup fills untouched fields while preserving manual draft changes and explicit clears', async () => {
+  const paper=original();const f=environment({active:paper,respond:action=>action==='metadata_lookup'?{item:{...paper,title:'Lookup title',DOI:'10.1000/synthetic','container-title':'Lookup journal',publication_dates:{...paper.publication_dates,accepted:'2026-08-04'}}}:{id:paper.id}});
+  f.workbench.edit(paper);f.element('edit-title').value='My title';f.element('edit-accepted').value='';await f.form.dispatch('input');
+  await f.element('metadata-enrich').dispatch('click');
+  assert.equal(f.element('edit-title').value,'My title');assert.equal(f.element('edit-accepted').value,'');
+  assert.equal(f.element('edit-doi').value,'10.1000/synthetic');assert.equal(f.element('edit-journal').value,'Lookup journal');
+  assert.equal(f.requests.length,1,'A lookup never saves the merged draft');
+});
+
+test('typing or closing during metadata lookup prevents its late response from replacing a draft', async () => {
+  const lookup=deferred(),paper=original();const f=environment({active:paper,respond:()=>lookup.promise});
+  f.workbench.edit(paper);const pending=f.element('metadata-enrich').dispatch('click');await flush();
+  f.element('edit-title').value='Typed after lookup';await f.form.dispatch('input');f.workbench.metadataVisibility(false);
+  lookup.resolve({item:{...paper,title:'Late result'}});await pending;
+  assert.equal(f.element('edit-title').value,'Typed after lookup');
+  f.workbench.edit(paper);assert.equal(f.element('edit-title').value,'Typed after lookup');
+});
+
+test('metadata save completion retains new edits made while saving the same paper', async () => {
+  const done=deferred(),paper=original(),calls=[];const f=environment({active:paper,respond:()=>done.promise,panelHost:{openMetadataPanel:()=>{},closeMetadataPanel:()=>calls.push('close')}});
+  f.workbench.edit(paper);f.element('edit-title').value='Submitted';const pending=f.form.dispatch('submit');await flush();
+  f.element('edit-title').value='More editing';await f.form.dispatch('input');
+  done.resolve({...paper,title:'Submitted'});await pending;
+  assert.deepEqual(calls,[]);assert.equal(f.element('edit-title').value,'More editing');
+  const reloaded=environment({active:paper,storage:f.storage});reloaded.workbench.edit(paper);assert.equal(reloaded.element('edit-title').value,'More editing');
+});
+
+test('metadata draft cache stays within 12 papers and 256 KiB and rejects an oversized switch', async () => {
+  const f=environment();for(let i=0;i<15;i++){f.workbench.edit({...original(),id:`synthetic-${i}`});f.element('edit-title').value=`Draft ${i}`;await f.form.dispatch('input');}
+  const raw=[...f.storage.values()][0],stored=JSON.parse(raw);assert.equal(stored.length,12);assert.ok(raw.length*2<=256*1024);
+  assert.equal(stored[0][0],'synthetic-3');
+  f.element('edit-title').value='x'.repeat(140000);await f.form.dispatch('input');
+  assert.equal(f.workbench.edit({...original(),id:'must-not-overwrite'}),false);
+  assert.equal(f.element('edit-title').value.length,140000);assert.match(f.toasts.at(-1)[0],/256 KiB/);
+  assert.ok([...f.storage.values()][0].length*2<=256*1024);
+});
+
+test('unsaved new entries and ranking removals are restored without inventing verified metadata', async () => {
+  const f=environment();f.workbench.edit(null);f.element('edit-title').value='New local record';await f.element('ranking-add').dispatch('click');
+  const inputs=f.element('ranking-rows').querySelectorAll('[data-rank-field]');inputs.find(i=>i.dataset.rankField==='year').value='2026';
+  inputs.find(i=>i.dataset.rankField==='category').value='Synthetic category';inputs.find(i=>i.dataset.rankField==='source').value='Manual source';await f.form.dispatch('input');
+  f.workbench.edit(original());f.workbench.edit(null);assert.equal(f.element('edit-title').value,'New local record');assert.equal(f.element('ranking-rows').children.length,1);
+  await f.element('ranking-rows').querySelector('button').dispatch('click');f.workbench.edit(original());f.workbench.edit(null);
+  assert.equal(f.element('ranking-rows').children.length,0);await f.form.dispatch('submit');assert.equal(f.requests[0].action,'create');
 });
 
 test('table selection remains metadata-only and all tool labels follow the chosen record', async () => {
@@ -194,7 +286,7 @@ test('table selection cannot publish the previous reader chat draft under the se
   const end = appSource.indexOf('async function restoreReaderState()', start);
   assert.ok(start >= 0 && end > start);
   const messages = [];
-  const context = { restoringReader: false, readerPaperId: 'reader-paper-a', state: { active: { id: 'selected-paper-b' }, page: 3, tab: 'conversation' },
+  const context = { readingPanels:null, restoringReader: false, readerPaperId: 'reader-paper-a', state: { active: { id: 'selected-paper-b' }, page: 3, tab: 'conversation' },
     workbenchUI: { isTable: () => true }, paperChatUI: { draft: () => 'Private draft for previous paper A', context: () => ({ annotationRefs: [{ id: 'note-from-A' }] }) },
     window: { parent: { postMessage: message => messages.push(message) }, location: { origin: 'http://localhost:43121' } },
     $: () => ({ open: false }), Blob,

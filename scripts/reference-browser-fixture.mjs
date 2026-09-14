@@ -116,10 +116,12 @@ try {
   await writeFile(join(run, 'native-buttons.json'), JSON.stringify(await page.locator('button').evaluateAll(nodes => nodes.map(node => ({ text: node.innerText, title: node.title, label: node.getAttribute('aria-label') }))), null, 2))
   await page.locator('[data-sidebar-right-guide-entry="paper-library"]').click()
   const frame = page.frameLocator('iframe[src*="paper-library"]')
+  const ensureChat = async () => { if (!await frame.locator('#conversation-tab').isVisible()) await frame.locator('[data-tab="conversation"]').click() }
+  const closeChat = async () => { if (await frame.locator('#conversation-tab').isVisible()) await frame.getByRole('button',{name:'关闭浮动对话',exact:true}).click() }
   await frame.locator('#paper-list .paper-card').first().waitFor()
   await frame.getByRole('button', { name: new RegExp(paper.title) }).click()
-  await frame.locator('#pdf-page').waitFor()
-  await frame.locator('[data-tab="conversation"]').click()
+  await frame.locator('.pdr-sheet[data-loaded="true"]').first().waitFor()
+  await ensureChat()
   await frame.locator('#paper-chat-all').filter({ hasText: '45' }).waitFor()
   if (process.argv.includes('--recon')) {
     await page.screenshot({ path: join(run, 'initial.png'), fullPage: true })
@@ -135,10 +137,12 @@ try {
       await frame.locator(`input[data-reference-id="${notes[index].id}"]`).check()
     }
     const openPaperCard = async id => {
-      if (await frame.locator('#back-library').isVisible()) await frame.locator('#back-library').click()
-      await frame.locator(`.paper-card[data-id="${id}"]`).click()
-      await frame.locator('#pdf-page').waitFor()
-      await frame.locator('[data-tab="conversation"]').click()
+      if (!await frame.locator(`.paper-card[data-id="${id}"]`).isVisible()) {
+        await frame.locator('#workspace-library').click()
+        await frame.locator(`#catalog-table tr[data-id="${id}"]`).getByRole('button',{name:'阅读',exact:true}).click()
+      } else await frame.locator(`.paper-card[data-id="${id}"]`).click()
+      await frame.locator('.pdr-sheet[data-loaded="true"]').first().waitFor()
+      await ensureChat()
       await frame.locator('#paper-chat-send:not([disabled])').waitFor()
     }
     assert.equal(await frame.locator('#paper-chat-auto').isChecked(), false)
@@ -161,22 +165,25 @@ try {
     record('switching-two-papers-restores-each-draft-and-reference-set')
 
     await frame.locator('[data-tab="reader"]').click()
+    await closeChat()
+    await frame.locator('[data-tab="annotations"]').click()
     await frame.locator('#page-note').click()
     await frame.locator('#annotation-comment').fill('Synthetic newly saved note 46: keep the earlier reference set unchanged.')
     await frame.getByRole('button', { name: '仅保存批注', exact: true }).click()
     await frame.locator('#annotation-dialog').waitFor({ state: 'hidden' })
-    await frame.locator('[data-tab="conversation"]').click()
+    await ensureChat()
     await selected(3)
     await frame.locator('#paper-chat-new-suggestion').waitFor()
     assert.equal((await observe()).generations, generatedBefore + 1)
     record('saving-note-46-suggests-addition-without-changing-selection-or-calling-model')
 
-    await frame.locator('[data-tab="annotations"]').click()
+    await closeChat()
+    if(!await frame.locator('#annotations-tab').isVisible())await frame.locator('[data-tab="annotations"]').click()
     await frame.locator(`[data-annotation-id="${notes[0].id}"] [data-note-action="edit"]`).click()
     await frame.locator('#annotation-comment').fill('Synthetic reference 1: revised before sending; explicitly adopt this version.')
     await frame.getByRole('button', { name: '仅保存批注', exact: true }).click()
     await frame.locator('#annotation-dialog').waitFor({ state: 'hidden' })
-    await frame.locator('[data-tab="conversation"]').click()
+    await ensureChat()
     await frame.locator('#paper-chat-context-label').click()
     await frame.getByRole('button', { name: '采用当前版本', exact: true }).click()
     await selected(3)
@@ -205,7 +212,7 @@ try {
     await frame.locator('.paper-chat-reference-preview').filter({ hasText: 'revised before sending' }).waitFor()
     await frame.getByRole('button', { name: '返回第 2 页', exact: true }).click()
     await poll(() => frame.locator('#page-number').inputValue(), value => value === '2', 'History link did not return to page two')
-    await frame.locator('[data-tab="conversation"]').click()
+    await ensureChat()
     record('inline-send-logs-three-exact-sources-updates-new-count-and-history-page-return')
 
     await frame.locator('#paper-chat-new').click()
@@ -251,7 +258,7 @@ try {
     assert.equal((await observe()).generations, generatedBefore + 3)
     const allMessage = history.messages.find(message => message.references?.some(reference => reference.count === 46))
     assert.ok(allMessage)
-    await frame.locator('[data-tab="conversation"]').click()
+    await ensureChat()
     await frame.locator('#paper-chat-refresh').click()
     await frame.locator('#paper-chat-new').filter({ hasText: '新增与更新 0' }).waitFor()
     record('main-composer-send-resolves-all-46-and-reconciles-inline-sent-status')

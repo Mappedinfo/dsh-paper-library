@@ -33,7 +33,8 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
     src: '/api/paper-library/',
     loading: 'lazy',
     referrerPolicy: 'same-origin',
-    allow: 'clipboard-write',
+    allow: 'clipboard-write; fullscreen',
+    allowFullScreen: true,
     style: { width: '100%', height: '100%', minHeight: '480px', border: 0, background: '#f5f4ef' },
   })
 }

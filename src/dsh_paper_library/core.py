@@ -1146,6 +1146,25 @@ class Library:
                     result.append(value)
         return {"annotations": result, "truncated": False}
 
+    def page_layout(self, id):
+        """Page-tree geometry only; no page pixels, text, images or annotations.
+
+        The worker retains at most 2,000 small geometry records and closes the
+        PDF before returning. Coordinates share page()'s displayed point space.
+        """
+        pages = []
+        with self._open_pdf(self.pdf_path(id)) as doc:
+            # _open_pdf rejects larger files before touching individual pages.
+            for page in doc:
+                width, height = page.rect.width, page.rect.height
+                if not all(math.isfinite(value) and value > 0 for value in (width, height)):
+                    raise ValueError(f"Invalid dimensions on PDF page {page.number + 1}")
+                pages.append({"page": page.number + 1, "width": width, "height": height, "rotation": page.rotation})
+            count = doc.page_count
+        return {"id": id, "page_count": count, "pages": pages,
+                "coordinate_system": "displayed-pdf-points", "rotation_applied": True,
+                "truncated": False, "limits": {"pages": 2000}}
+
     def page(self, id, page=1, scale=1.25):
         import pymupdf as fitz
         scale = float(scale)
@@ -1178,18 +1197,24 @@ class Library:
     def _add_annotation(self, doc, page, type="highlight", rects=None, text="", comment="", author="Reader", color="#ffdb66", extra=None):
         import pymupdf as fitz
         current = self._page(doc, page)
-        if type not in {"highlight", "note"}:
-            raise ValueError("Only highlight and note can be created")
+        if type not in {"highlight", "underline", "strikeout", "note"}:
+            raise ValueError("Supported annotation types are highlight, underline, strikeout and note")
         rects = rects or ([[20, 20, 40, 40]] if type == "note" else [])
         if not rects or len(rects) > 200:
             raise ValueError("Provide 1–200 annotation rectangles")
         unrotated = [self._rect(rect, current, inverse=True) for rect in rects]
         if len(text) > 20000 or len(comment) > 30000:
             raise ValueError("Annotation text/comment exceeds limit")
-        if type == "highlight":
-            # Transform displayed quad vertices, not only the bounding box; this preserves writing direction on rotated pages.
-            quads = [fitz.Rect(rect).quad * current.derotation_matrix for rect in rects]
-            annot = current.add_highlight_annot(quads)
+        if type != "note":
+            # Markup quad order follows the native text baseline. Transforming
+            # an already ordered displayed quad rotates that baseline a second
+            # time on 90/270-degree pages, putting underline on the wrong edge.
+            # Our selection API supplies axis-aligned word rectangles, not
+            # arbitrary in-page text-direction quads.
+            quads = [rect.quad for rect in unrotated]
+            creator = {"highlight": current.add_highlight_annot, "underline": current.add_underline_annot,
+                       "strikeout": current.add_strikeout_annot}[type]
+            annot = creator(quads)
         else:
             annot = current.add_text_annot(unrotated[0].tl, comment, icon="Note")
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
@@ -1214,7 +1239,7 @@ class Library:
         if not isinstance(position, dict) or "pageIndex" not in position:
             raise ValueError("Zotero annotation has no pageIndex/position")
         kind = annotation.get("annotationType") or annotation.get("type")
-        if kind not in {"highlight", "note"}:
+        if kind not in {"highlight", "underline", "strikeout", "note"}:
             raise ValueError(f"unsupported Zotero annotation type {kind!r}")
         rects = position.get("rects")
         if not rects:
@@ -1281,6 +1306,9 @@ class Library:
                     matrix = page.derotation_matrix * ~page.transformation_matrix
                     rect = fitz.Rect(annotation["rect"]) * matrix
                     attributes = {"page": str(annotation["page"] - 1), "name": annotation["id"], "title": annotation["author"], "rect": ",".join(str(round(v, 3)) for v in rect)}
+                    stroke = (annotation.get("color") or {}).get("stroke")
+                    if isinstance(stroke, (list, tuple)) and len(stroke) == 3 and all(isinstance(value, (int, float)) and math.isfinite(value) for value in stroke):
+                        attributes["color"] = "#" + "".join(f"{round(max(0, min(1, value)) * 255):02X}" for value in stroke)
                     if annotation["created"]:
                         attributes["creationdate"] = annotation["created"]
                     if annotation["modified"]:
@@ -1288,7 +1316,8 @@ class Library:
                     if annotation["type"] != "note":
                         points = []
                         for display in annotation["rects"]:
-                            quad = fitz.Rect(display).quad * matrix
+                            native_rect = fitz.Rect(display) * page.derotation_matrix
+                            quad = native_rect.quad * ~page.transformation_matrix
                             for point in (quad.ul, quad.ur, quad.ll, quad.lr):
                                 points.extend(point)
                         attributes["coords"] = ",".join(str(round(v, 3)) for v in points)
@@ -1451,7 +1480,7 @@ def dispatch(request):
             path = library.pdf_path(request["id"])
             return {"path": str(path), "filename": path.name}
         actions = {
-            "list": ("query", "limit", "offset", "sort", "order", "archived"), "get": ("id", "include_archived"), "create": ("metadata",), "archive": ("id",), "restore": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page": ("id", "page", "scale"),
+            "list": ("query", "limit", "offset", "sort", "order", "archived"), "get": ("id", "include_archived"), "create": ("metadata",), "archive": ("id",), "restore": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page_layout": ("id",), "page": ("id", "page", "scale"),
             "annotations": ("id",), "annotate": ("id", "page", "type", "rects", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment"), "annotation_delete": ("id", "annotation_id"),
             "annotation_catalog": ("id",), "annotation_context_exact": ("id", "annotation_refs", "selection", "max_characters"),
             "export_annotations": ("id", "format"), "link": ("source", "target", "relation", "note"), "graph": ("id", "limit"), "feedback_context": ("id", "annotation_ids"), "save_feedback": ("id", "text", "model", "annotation_ids", "expected_context_hash"), "feedback": ("id",),

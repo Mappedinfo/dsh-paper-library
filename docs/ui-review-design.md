@@ -1,6 +1,21 @@
 # Compact literature workbench
 
-Accepted 2026-09-14 from seven owner browser comments. The primary workflow is selecting a paper, reading and annotating it, then asking questions in its existing DSH conversation. A separate table supports catalog maintenance. The target collection is about 2,000 records / 1,000 PDFs, including use in a 741 × 597 pane.
+## Current reading workspace revision
+
+Accepted 2026-09-14 from the owner's next nine browser comments; implemented and verified separately from the earlier workbench milestone. Reading is the primary work surface. The library table remains for catalog management and the graph remains for exploring evidence relationships.
+
+- A single import entry belongs to the library context. Dragging PDFs and pasting links continue to work. Scope and sort controls perform real server queries; decorative scope/sort captions are removed.
+- A compact contextual ribbon follows reading, annotation, citation/export and catalog actions. The current paper title remains in its first row. Metadata edit is a top-ribbon control.
+- PDF pages scroll continuously. Page geometry is inexpensive and bounded to 2,000 pages; at most three page images/text layers are retained, with one page/layout request in flight. Far pages are evicted, scroll positions remain, and failures have local retry controls. No full-document rasterization or resident worker is added.
+- Highlighter, underline, strikeout and note modes and annotation color are chosen in the ribbon. PDF-native annotations keep page coordinates and persist with the managed PDF. Existing source files are unchanged.
+- Annotation lists share the reading workspace in a left/right movable sidebar. Metadata uses a quick-edit sidebar; drafts survive closing and switching papers under an explicit bounded cache. Selecting catalog rows continues to be metadata-only.
+- The per-paper DSH conversation is a floating, resizable reading panel, with its existing reference collection, drafts, model routing and native main-conversation bridge. Closing the panel stops its history polling; preparing references never sends them.
+- Fullscreen keeps the toolbar available and expands the PDF workspace. Escape or the fullscreen button restores the normal view; a reading-focus fallback is visible if the host denies native fullscreen.
+- Tool instructions and loading/errors occupy a compact toolbar status line. The old static paragraph below a page is removed.
+
+Acceptance requires rendered narrow/wide reading checks, free scrolling and bounded residency, all four portable annotation types, left/right sidebars, metadata draft recovery, floating conversation/reference regression checks, fullscreen recovery and preserved catalog/graph flows. Synthetic documents only; no user annotations or provider requests are used in UI tests.
+
+The initial workbench was accepted 2026-09-14 from seven owner browser comments. The target collection is about 2,000 records / 1,000 PDFs, including use in a 741 × 597 pane. Its original contract follows; single-page reading and separate annotation/conversation pages are superseded by the revision above.
 
 ## Acceptance contract
 

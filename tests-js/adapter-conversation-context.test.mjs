@@ -280,6 +280,45 @@ test('invalid or oversized snapshots preserve the last good reading state and ne
   e.bridge.dispose()
 })
 
+test('reading panel position and underline or strikeout drafts survive iframe replacement without raster caches', () => {
+  for (const mode of ['underline', 'strikeout']) {
+    const e = environment()
+    const snapshot = { paperId: 'paper-1', page: 2, tab: 'reader', chatDraft: 'A continuing paper question',
+      panels: { side: 'left', annotations: true, metadata: false, chat: true, image: 'discard-me', width: 9000 },
+      annotationDraft: { id: 'paper-1', page: 2, mode, color: '#4b8CDD', comment: 'Reader interpretation',
+        selection: { page: 2, text: 'Exact original passage', rects: [[10, 20, 90, 35]], renderedImage: 'discard-me' } },
+      residentPages: [{ page: 1, image: 'discard-me', words: ['discard-me'] }],
+    }
+    e.message({ type: 'paper-library:reader-state', snapshot }); e.detach()
+    const target = { postMessage: (value, origin) => e.messages.push({ value, origin }) }; e.bridge.attach(target)
+    e.message({ type: 'paper-library:ready' }, target)
+    const restored = e.messages.at(-1).value.snapshot
+    assert.deepEqual(restored.panels, { side: 'left', annotations: true, metadata: false, chat: true })
+    assert.equal(restored.annotationDraft.mode, mode); assert.equal(restored.annotationDraft.color, '#4b8CDD')
+    assert.deepEqual(restored.annotationDraft.selection, { page: 2, text: 'Exact original passage', rects: [[10, 20, 90, 35]] })
+    assert.equal(Object.hasOwn(restored, 'residentPages'), false)
+    assert.equal(restored.chatDraft, snapshot.chatDraft)
+    e.bridge.dispose()
+  }
+})
+
+test('invalid panel placement or annotation color cannot overwrite the last good reader snapshot', () => {
+  const e = environment()
+  const snapshot = { paperId: 'paper-1', page: 4, tab: 'annotations', chatDraft: '', panels: { side: 'right', annotations: true, metadata: false, chat: false }, annotationDraft: { id: 'paper-1', page: 4, mode: 'strikeout', color: '#ffdb66', comment: '' } }
+  e.message({ type: 'paper-library:reader-state', snapshot })
+  for (const color of ['red', '#fff', '#11223344', '', 42]) {
+    assert.throws(() => readerSnapshot({ ...snapshot, annotationDraft: { ...snapshot.annotationDraft, color } }), /颜色/)
+    e.message({ type: 'paper-library:reader-state', snapshot: { ...snapshot, annotationDraft: { ...snapshot.annotationDraft, color } } })
+    assert.equal(e.messages.at(-1).value.type, 'paper-library:reader-state-error')
+  }
+  assert.throws(() => readerSnapshot({ ...snapshot, panels: { side: 'bottom' } }), /侧栏位置/)
+  e.message({ type: 'paper-library:reader-state', snapshot: { ...snapshot, panels: { side: 'bottom' } } })
+  assert.equal(e.messages.at(-1).value.type, 'paper-library:reader-state-error')
+  e.message({ type: 'paper-library:ready' })
+  assert.deepEqual(e.messages.at(-1).value.snapshot, snapshot)
+  e.bridge.dispose()
+})
+
 test('up to 1000 annotation identities and revisions restore without retaining note bodies', () => {
   const refs = Array.from({ length: 1000 }, (_, index) => ({ id: `note-${index}`, version: 'a'.repeat(64), text: 'not retained' }))
   const snapshot = readerSnapshot({ paperId: 'paper-1', page: 1, tab: 'conversation', chatDraft: '', chatContext: { annotationRefs: refs } })

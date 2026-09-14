@@ -27,6 +27,20 @@ export function readerSnapshot(value) {
     tab: ['reader', 'annotations', 'conversation', 'graph'].includes(value.tab) ? value.tab : 'reader',
     chatDraft: boundedString(value.chatDraft ?? '', TEXT_LIMIT),
   }
+  if (value.panels != null) {
+    const panels = value.panels
+    if (!panels || typeof panels !== 'object' || !['left', 'right'].includes(panels.side)) throw new Error('阅读侧栏位置无效')
+    snapshot.panels = {side: panels.side, annotations: panels.annotations === true, metadata: panels.metadata === true, chat: panels.chat === true}
+  }
+  if (value.readerSelection != null) {
+    const selection=value.readerSelection
+    if (!Array.isArray(selection.rects) || selection.rects.length > 200) throw new Error('阅读选区过大')
+    const rects=selection.rects.map(rect=>{
+      if(!Array.isArray(rect)||rect.length!==4||rect.some(number=>!Number.isFinite(number)))throw new Error('阅读选区坐标无效')
+      return [...rect]
+    })
+    snapshot.readerSelection={page:pageNumber(selection.page),text:boundedString(selection.text,20000),rects}
+  }
   if (value.chatContext != null) {
     const context = value.chatContext
     if (context.annotationRefs !== undefined) {
@@ -47,12 +61,16 @@ export function readerSnapshot(value) {
   }
   if (value.annotationDraft != null) {
     const draft = value.annotationDraft
-    if (!['note', 'highlight', 'edit'].includes(draft.mode)) throw new Error('批注草稿类型无效')
+    if (!['note', 'highlight', 'underline', 'strikeout', 'edit'].includes(draft.mode)) throw new Error('批注草稿类型无效')
     snapshot.annotationDraft = {
       mode: draft.mode,
       id: boundedString(draft.id, 200),
       page: pageNumber(draft.page),
       comment: boundedString(draft.comment ?? '', TEXT_LIMIT),
+    }
+    if (draft.color !== undefined) {
+      if (typeof draft.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(draft.color)) throw new Error('批注草稿颜色无效')
+      snapshot.annotationDraft.color = draft.color
     }
     if (draft.quote !== undefined) snapshot.annotationDraft.quote = boundedString(draft.quote, TEXT_LIMIT)
     if (draft.note) {

@@ -11,6 +11,9 @@ const commands=[
   ['paper_chat_syntax',process.execPath,['--check','web/paper-chat.js']],
   ['workbench_syntax',process.execPath,['--check','web/workbench.js']],
   ['knowledge_graph_syntax',process.execPath,['--check','web/knowledge-graph.js']],
+  ['pdf_reader_syntax',process.execPath,['--check','web/pdf-reader.js']],
+  ['reading_panels_syntax',process.execPath,['--check','web/reading-panels.js']],
+  ['reading_shell_syntax',process.execPath,['--check','web/reading-shell.js']],
 ];
 const checks=[];
 for(const[id,command,args]of commands){
