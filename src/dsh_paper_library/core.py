@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import base64
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import fcntl
 import hashlib
 from itertools import islice
@@ -29,6 +29,8 @@ REFERENCE_PREVIEW_CHARACTERS = 240
 REFERENCE_ANNOTATION_BYTES = 2 * 1024 * 1024
 PORTABLE_NAME = "paper-library.csl.json"
 RELATIONS = {"related", "supports", "contradicts", "cites"}
+PUBLICATION_DATES = {"published", "online", "print", "received", "accepted"}
+MAX_METADATA_BYTES = 256 * 1024
 
 
 def now():
@@ -66,8 +68,119 @@ def managed_filename(item, id, full_id=False):
     return prefix + title + suffix
 
 
+def bounded_text(value, field, limit, required=False):
+    if not isinstance(value, str) or len(value) > limit:
+        raise ValueError(f"{field} must be text of at most {limit} characters")
+    value = value.strip()
+    if required and not value:
+        raise ValueError(f"{field} must not be empty")
+    return value
+
+
+def publication_date(value, field):
+    value = bounded_text(value, field, 10, required=True)
+    if not re.fullmatch(r"\d{4}(?:-\d{2}(?:-\d{2})?)?", value):
+        raise ValueError(f"{field} must be YYYY, YYYY-MM or YYYY-MM-DD")
+    parts = [int(part) for part in value.split("-")]
+    try:
+        date(*(parts + [1] * (3 - len(parts))))
+    except ValueError as exc:
+        raise ValueError(f"{field} is not a valid calendar date") from exc
+    return value
+
+
+def normalize_research_metadata(item):
+    """Validate supplied bibliographic evidence; no missing value is inferred."""
+    if isinstance(item.get("issued"), dict) and "date-parts" in item["issued"]:
+        parts = item["issued"]["date-parts"]
+        if not isinstance(parts, list) or not 1 <= len(parts) <= 2:
+            raise ValueError("issued.date-parts must contain one date or a two-date range")
+        for values in parts:
+            if not isinstance(values, list) or not 1 <= len(values) <= 3 or any(isinstance(v, bool) or not isinstance(v, int) for v in values):
+                raise ValueError("issued.date-parts must contain integer year/month/day values")
+            try:
+                date(*(values + [1] * (3 - len(values))))
+            except ValueError as exc:
+                raise ValueError("issued.date-parts is not a valid calendar date") from exc
+    for role in ("author", "editor", "translator"):
+        if role not in item:
+            continue
+        people = item[role]
+        if not isinstance(people, list) or len(people) > 300:
+            raise ValueError(f"{role} must be an array of at most 300 people")
+        normalized = []
+        for person in people:
+            if not isinstance(person, dict):
+                raise ValueError(f"Each {role} must be an object")
+            person = dict(person)
+            for field in ("family", "given", "literal", "suffix", "dropping-particle", "non-dropping-particle"):
+                if field in person:
+                    person[field] = bounded_text(person[field], f"{role}.{field}", 1000)
+            if "affiliation" in person:
+                affiliations = person["affiliation"]
+                if isinstance(affiliations, str):
+                    affiliations = [{"name": affiliations}] if affiliations.strip() else []
+                if not isinstance(affiliations, list) or len(affiliations) > 30:
+                    raise ValueError("affiliation must be an array of at most 30 institutions")
+                clean = []
+                for affiliation in affiliations:
+                    if isinstance(affiliation, str):
+                        affiliation = {"name": affiliation}
+                    if not isinstance(affiliation, dict) or set(affiliation) - {"name", "id", "ror", "source"}:
+                        raise ValueError("affiliation accepts name, id, ror and source fields")
+                    value = {"name": bounded_text(affiliation.get("name"), "affiliation.name", 500, required=True)}
+                    for field in ("id", "ror", "source"):
+                        if affiliation.get(field) not in (None, ""):
+                            value[field] = bounded_text(affiliation[field], f"affiliation.{field}", 2000)
+                    clean.append(value)
+                person["affiliation"] = clean
+            normalized.append(person)
+        item[role] = normalized
+    if "publication_dates" in item:
+        values = item["publication_dates"]
+        if not isinstance(values, dict) or set(values) - PUBLICATION_DATES:
+            raise ValueError("publication_dates accepts published, online, print, received and accepted")
+        item["publication_dates"] = {field: publication_date(value, f"publication_dates.{field}")
+                                     for field, value in values.items() if value not in (None, "")}
+    if "journal_rankings" in item:
+        rankings = item["journal_rankings"]
+        if not isinstance(rankings, list) or len(rankings) > 30:
+            raise ValueError("journal_rankings must be an array of at most 30 category/year records")
+        clean = []
+        for ranking in rankings:
+            if not isinstance(ranking, dict) or set(ranking) - {"system", "year", "category", "quartile", "source", "verified_at"}:
+                raise ValueError("Journal ranking has unsupported fields")
+            if ranking.get("system") != "JCR":
+                raise ValueError("Journal ranking system must be JCR")
+            year = ranking.get("year")
+            if isinstance(year, bool) or not isinstance(year, int) or not 1900 <= year <= 9999:
+                raise ValueError("JCR year must be an integer from 1900 to 9999")
+            if ranking.get("quartile") not in {"Q1", "Q2", "Q3", "Q4"}:
+                raise ValueError("JCR quartile must be Q1, Q2, Q3 or Q4")
+            value = {"system": "JCR", "year": year, "quartile": ranking["quartile"],
+                     "category": bounded_text(ranking.get("category"), "JCR category", 500, required=True),
+                     "source": bounded_text(ranking.get("source"), "JCR source", 2000, required=True)}
+            if ranking.get("verified_at") not in (None, ""):
+                verified = bounded_text(ranking["verified_at"], "JCR verified_at", 40)
+                try:
+                    if len(verified) <= 10:
+                        publication_date(verified, "JCR verified_at")
+                    else:
+                        datetime.fromisoformat(verified.replace("Z", "+00:00"))
+                except ValueError as exc:
+                    raise ValueError("JCR verified_at must be an ISO date or datetime") from exc
+                value["verified_at"] = verified
+            clean.append(value)
+        item["journal_rankings"] = clean
+    if len(json.dumps(item, ensure_ascii=False, allow_nan=False).encode("utf-8")) > MAX_METADATA_BYTES:
+        raise ValueError("Metadata exceeds 256 KiB; shorten long fields")
+    return item
+
+
 def csl_item(raw):
     """Keep CSL fields; translate Zotero export objects without guessing authors/dates."""
+    if not isinstance(raw, dict):
+        raise ValueError("metadata must be an object")
     item = dict(raw)
     zotero = "itemType" in item or "creators" in item
     if zotero:
@@ -108,10 +221,10 @@ def csl_item(raw):
     if item.get("DOI"):
         item["DOI"] = canonical_doi(item["DOI"])
     # Host filesystem paths and attachment objects never become portable metadata.
-    for field in ("attachments", "annotations", "creators", "collections", "relations", "path", "localPath", "uri", "key", "itemKey", "version", "dateAdded", "dateModified", "pdf_filename"):
+    for field in ("attachments", "annotations", "creators", "collections", "relations", "path", "localPath", "uri", "key", "itemKey", "version", "dateAdded", "dateModified", "pdf_filename", "archived", "archived_at"):
         item.pop(field, None)
     item.pop("id", None)
-    return item
+    return normalize_research_metadata(item)
 
 
 def parse_ris(text):
@@ -173,10 +286,15 @@ class Library:
         CREATE INDEX IF NOT EXISTS papers_pdf_sha ON papers(json_extract(metadata,'$.source_pdf_sha256'));
         CREATE TABLE IF NOT EXISTS links(source TEXT, target TEXT, relation TEXT, note TEXT, provenance TEXT, created TEXT, UNIQUE(source,target,relation));
         CREATE TABLE IF NOT EXISTS feedback(id TEXT PRIMARY KEY, paper_id TEXT NOT NULL, payload TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS paper_archive(paper_id TEXT PRIMARY KEY, archived_at TEXT NOT NULL);
         """)
         indexed = self.db.execute("SELECT 1 FROM sqlite_master WHERE name='paper_search'").fetchone()
         # The search index stays on disk; neither search nor list opens a PDF.
-        search_expression = "new.title || ' ' || new.citekey || ' ' || coalesce(json_extract(new.metadata,'$.author'),'') || ' ' || coalesce(json_extract(new.metadata,'$.tags'),'') || ' ' || coalesce(json_extract(new.metadata,'$.abstract'),'') || ' ' || coalesce(new.doi,'')"
+        search_expression = "new.title || ' ' || new.citekey || ' ' || coalesce(json_extract(new.metadata,'$.author'),'') || ' ' || coalesce(json_extract(new.metadata,'$.tags'),'') || ' ' || coalesce(json_extract(new.metadata,'$.abstract'),'') || ' ' || coalesce(new.doi,'') || ' ' || coalesce(json_extract(new.metadata,'$.issued'),'') || ' ' || coalesce(json_extract(new.metadata,'$.container-title'),'') || ' ' || coalesce(json_extract(new.metadata,'$.publication_dates'),'')"
+        # Version 2 expands the metadata-only index once, not at each worker start.
+        migrate_search = self.db.execute("PRAGMA user_version").fetchone()[0] < 2
+        if migrate_search:
+            self.db.executescript("DROP TRIGGER IF EXISTS papers_search_insert; DROP TRIGGER IF EXISTS papers_search_update; DROP TRIGGER IF EXISTS papers_search_delete;")
         self.db.executescript(f"""
         CREATE VIRTUAL TABLE IF NOT EXISTS paper_search USING fts5(id UNINDEXED, text, tokenize='trigram');
         CREATE TRIGGER IF NOT EXISTS papers_search_insert AFTER INSERT ON papers BEGIN
@@ -190,8 +308,11 @@ class Library:
           DELETE FROM paper_search WHERE id=old.id;
         END;
         """)
-        if not indexed:
+        if not indexed or migrate_search:
+            self.db.execute("DELETE FROM paper_search")
             self.db.execute("INSERT INTO paper_search(id,text) SELECT id," + search_expression.replace("new.", "") + " FROM papers")
+        if migrate_search:
+            self.db.execute("PRAGMA user_version=2")
         os.chmod(self.root / "catalog.sqlite3", 0o600)
         self.db.commit()
         self._recover_file_update()
@@ -213,16 +334,22 @@ class Library:
             finally:
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
-    def get(self, id):
-        row = self.db.execute("SELECT * FROM papers WHERE id=?", (id,)).fetchone()
+    def get(self, id, include_archived=False):
+        if not isinstance(include_archived, bool):
+            raise ValueError("include_archived must be boolean")
+        row = self.db.execute("SELECT papers.*,paper_archive.archived_at FROM papers LEFT JOIN paper_archive ON paper_archive.paper_id=papers.id WHERE papers.id=?", (id,)).fetchone()
         if not row:
             raise ValueError("Paper not found")
+        if row["archived_at"] and not include_archived:
+            raise ValueError("Paper is archived; restore it from trash before opening or editing")
         result = json.loads(row["metadata"])
         result.update(id=row["id"], citekey=row["citekey"], pdf=bool(row["pdf_path"]), created=row["created"], modified=row["modified"])
         result["pdf_filename"] = Path(row["pdf_path"]).name if row["pdf_path"] else None
+        result.update(archived=bool(row["archived_at"]), archived_at=row["archived_at"])
         return result
 
     def pdf_path(self, id):
+        self.get(id)  # An archived record is inspectable only through explicit metadata reads.
         row = self.db.execute("SELECT pdf_path FROM papers WHERE id=?", (id,)).fetchone()
         if not row or not row[0]:
             raise ValueError("Paper has no attached PDF")
@@ -231,21 +358,84 @@ class Library:
             raise ValueError("Managed PDF is missing or outside library")
         return path
 
-    def list(self, query="", limit=40, offset=0):
+    def list(self, query="", limit=40, offset=0, sort=None, order=None, archived=False):
         limit, offset = max(1, clamp(limit, 40, 200)), clamp(offset, 0, 10000000)
+        if not isinstance(archived, bool):
+            raise ValueError("archived must be boolean")
         query = str(query).strip()[:500]
+        expressions = {
+            "title": "papers.title COLLATE NOCASE",
+            "author": "coalesce(json_extract(papers.metadata,'$.author[0].family'),json_extract(papers.metadata,'$.author[0].literal')) COLLATE NOCASE",
+            "year": "coalesce(json_extract(papers.metadata,'$.issued.date-parts[0][0]'),CAST(substr(json_extract(papers.metadata,'$.publication_dates.published'),1,4) AS INTEGER))",
+            "journal": "json_extract(papers.metadata,'$.container-title') COLLATE NOCASE",
+            "modified": "papers.modified", "created": "papers.created", "citekey": "papers.citekey COLLATE NOCASE",
+            # For multiple categories, use the latest reported year and its worst
+            # quartile, so sorting never silently chooses a journal's best category.
+            "jcr": "(SELECT max(json_extract(r.value,'$.quartile')) FROM json_each(papers.metadata,'$.journal_rankings') r WHERE json_extract(r.value,'$.system')='JCR' AND json_extract(r.value,'$.year')=(SELECT max(json_extract(y.value,'$.year')) FROM json_each(papers.metadata,'$.journal_rankings') y WHERE json_extract(y.value,'$.system')='JCR'))",
+        }
+        if sort is not None and (not isinstance(sort, str) or sort not in expressions):
+            raise ValueError("Unsupported catalog sort field")
+        if order is not None and (not isinstance(order, str) or order not in {"asc", "desc"}):
+            raise ValueError("Catalog order must be asc or desc")
+        counts = self.db.execute("SELECT count(*) AS total,count(paper_archive.paper_id) AS archived FROM papers LEFT JOIN paper_archive ON paper_archive.paper_id=papers.id").fetchone()
+        archive_filter = "paper_archive.paper_id IS NOT NULL" if archived else "paper_archive.paper_id IS NULL"
+        joins = " LEFT JOIN paper_archive ON paper_archive.paper_id=papers.id"
         if len(query) >= 3:
             phrase = '"' + query.replace('"', '""') + '"'
-            total = self.db.execute("SELECT count(*) FROM paper_search WHERE paper_search MATCH ?", (phrase,)).fetchone()[0]
-            rows = self.db.execute("SELECT papers.id FROM paper_search JOIN papers ON papers.id=paper_search.id WHERE paper_search MATCH ? ORDER BY rank,papers.id LIMIT ? OFFSET ?", (phrase, limit, offset)).fetchall()
-            return {"items": [self.get(row[0]) for row in rows], "total": total, "limit": limit, "offset": offset, "search_mode": "fts5-trigram"}
-        # Escape wildcard characters: quick search is literal, including percent/underscore.
-        query = str(query)[:500].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        args = (f"%{query}%", f"%{query}%", f"%{query}%")
-        where = "WHERE title LIKE ? ESCAPE '\\' OR citekey LIKE ? ESCAPE '\\' OR metadata LIKE ? ESCAPE '\\'"
-        total = self.db.execute("SELECT count(*) FROM papers " + where, args).fetchone()[0]
-        rows = self.db.execute("SELECT id FROM papers " + where + " ORDER BY modified DESC,id LIMIT ? OFFSET ?", args + (limit, offset)).fetchall()
-        return {"items": [self.get(row[0]) for row in rows], "total": total, "limit": limit, "offset": offset, "search_mode": "literal-short-query" if query else "catalog-list"}
+            source = "paper_search JOIN papers ON papers.id=paper_search.id" + joins
+            where, args = " WHERE paper_search MATCH ? AND " + archive_filter, (phrase,)
+            mode = "fts5-trigram"
+            default_order = "rank,papers.id"
+        else:
+            # Escape wildcards: quick search is literal, including percent/underscore.
+            escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            args = (f"%{escaped}%",) * 3
+            source = "papers" + joins
+            where = " WHERE (title LIKE ? ESCAPE '\\' OR citekey LIKE ? ESCAPE '\\' OR metadata LIKE ? ESCAPE '\\') AND " + archive_filter
+            mode = "literal-short-query" if query else "catalog-list"
+            default_order = "papers.modified DESC,papers.id"
+        if sort is not None:
+            expression = expressions[sort]
+            direction = order or ("desc" if sort in {"modified", "created", "year"} else "asc")
+            sorting = f"({expression}) IS NULL ASC, {expression} {direction}, papers.id ASC"
+        else:
+            if order is not None:
+                raise ValueError("Catalog order requires a sort field")
+            sorting, direction = default_order, None
+        total = self.db.execute("SELECT count(*) FROM " + source + where, args).fetchone()[0]
+        rows = self.db.execute("SELECT papers.id FROM " + source + where + " ORDER BY " + sorting + " LIMIT ? OFFSET ?", args + (limit, offset)).fetchall()
+        return {"items": [self.get(row[0], include_archived=archived) for row in rows], "total": total,
+                "limit": limit, "offset": offset, "search_mode": mode, "sort": sort or ("relevance" if len(query) >= 3 else "modified"),
+                "order": direction or ("asc" if len(query) >= 3 else "desc"), "archived": archived,
+                "active_count": counts["total"] - counts["archived"], "archived_count": counts["archived"]}
+
+    def create(self, metadata=None):
+        if metadata is None:
+            metadata = {}
+        with self.lock():
+            item = csl_item(metadata)
+            if "attachments" in metadata or "path" in metadata:
+                raise ValueError("Manual create accepts metadata only; attach a PDF separately")
+            key, doi = item.get("citekey"), item.get("DOI")
+            existing = self.db.execute("SELECT id FROM papers WHERE citekey=? OR (doi=? AND doi<>'')", (key, doi)).fetchone()
+            if existing:
+                raise ValueError("DOI or citekey already belongs to a catalog record; edit or restore it instead")
+            result, duplicate = self._upsert(item, "manual")
+            if duplicate:
+                raise ValueError("Metadata identifies an existing catalog record; edit or restore it instead")
+            return result
+
+    def archive(self, id):
+        with self.lock():
+            self.get(id, include_archived=True)
+            self.db.execute("INSERT OR IGNORE INTO paper_archive(paper_id,archived_at) VALUES(?,?)", (id, now()))
+            return self.get(id, include_archived=True)
+
+    def restore(self, id):
+        with self.lock():
+            self.get(id, include_archived=True)
+            self.db.execute("DELETE FROM paper_archive WHERE paper_id=?", (id,))
+            return self.get(id)
 
     def _upsert(self, raw, source="manual"):
         item = csl_item(raw)
@@ -270,7 +460,7 @@ class Library:
                 # A DOI metadata record may precede the successful PDF download.
                 # Keep its bibliography and user edits, but carry the actual
                 # attachment evidence into both the catalog and embedded CSL.
-                merged = {key: value for key, value in current.items() if key not in {"id", "pdf", "pdf_filename", "created", "modified"}}
+                merged = {key: value for key, value in current.items() if key not in {"id", "pdf", "pdf_filename", "created", "modified", "archived", "archived_at"}}
                 for field in ("source_pdf_sha256", "parse", "acquisition"):
                     if item.get(field) not in (None, "", [], {}):
                         merged[field] = item[field]
@@ -430,7 +620,7 @@ class Library:
             raise ValueError("metadata must be an object")
         with self.lock():
             old = self.get(id)
-            protected = {"id", "pdf", "pdf_filename", "page_count", "created", "modified", "provenance"}
+            protected = {"id", "pdf", "pdf_filename", "page_count", "created", "modified", "provenance", "archived", "archived_at"}
             merged = {k: v for k, v in old.items() if k not in protected}
             merged.update({k: v for k, v in metadata.items() if k not in protected})
             value = csl_item(merged)
@@ -583,7 +773,7 @@ class Library:
 
     @staticmethod
     def _embed(doc, metadata):
-        portable = {k: v for k, v in metadata.items() if k not in {"id", "pdf", "pdf_filename", "created", "modified", "page_count"}}
+        portable = {k: v for k, v in metadata.items() if k not in {"id", "pdf", "pdf_filename", "created", "modified", "page_count", "archived", "archived_at"}}
         payload = json.dumps(portable, ensure_ascii=False).encode("utf-8")
         if len(payload) > 1024 * 1024:
             raise ValueError("Portable metadata exceeds 1 MB")
@@ -733,7 +923,7 @@ class Library:
                 item["page_count"] = doc.page_count
                 self._embed(doc, item)
                 self._atomic_save(doc, destination, backup=False)
-            stored = {k: v for k, v in item.items() if k not in {"id", "pdf", "pdf_filename", "created", "modified"}}
+            stored = {k: v for k, v in item.items() if k not in {"id", "pdf", "pdf_filename", "created", "modified", "archived", "archived_at"}}
             self.db.execute("UPDATE papers SET metadata=?,pdf_path=?,modified=? WHERE id=?", (json.dumps(stored, ensure_ascii=False), str(destination.relative_to(self.root)), now(), id))
             self.db.commit()
         except BaseException:
@@ -1111,45 +1301,20 @@ class Library:
         return {"text": text, "filename": safe_name(item["citekey"]) + (".md" if format == "markdown" else ".json"), "mime": mime, "truncated": result["truncated"]}
 
     def link(self, source, target, relation="related", note=""):
-        self.get(source)
-        self.get(target)
         if source == target or relation not in RELATIONS or len(note) > 2000:
             raise ValueError("Link requires distinct papers, a supported relation and note of at most 2000 characters")
         value = {"source": source, "target": target, "relation": relation, "note": note, "provenance": "user-asserted", "created": now()}
         with self.lock():
+            # Archive and graph writes share this lock. Validate identities only
+            # after acquiring it so a waiting writer cannot alter a trash record.
+            self.get(source)
+            self.get(target)
             self.db.execute("INSERT INTO links VALUES(:source,:target,:relation,:note,:provenance,:created) ON CONFLICT(source,target,relation) DO UPDATE SET note=excluded.note", value)
         return value
 
     def graph(self, id=None, limit=80):
-        limit = max(1, clamp(limit, 80, 200))
-        if id:
-            self.get(id)
-            rows = self.db.execute("SELECT source,target FROM links WHERE source=? OR target=? LIMIT ?", (id, id, limit + 1)).fetchall()
-            ids = [id] + sorted({row[col] for row in rows for col in ("source", "target")} - {id})
-            truncated = len(ids) > limit
-            ids = ids[:limit]
-        else:
-            listing = self.list(limit=limit)
-            ids = [item["id"] for item in listing["items"]]
-            truncated = listing["total"] > limit
-        nodes, edges, tags = [], [], set()
-        for paper_id in ids:
-            item = self.get(paper_id)
-            nodes.append({"id": paper_id, "label": item["title"], "type": "paper"})
-            for tag in item.get("tags", [])[:20]:
-                tag_id = "tag:" + tag
-                if tag_id not in tags and len(tags) >= 100:
-                    truncated = True
-                    continue
-                tags.add(tag_id)
-                edges.append({"source": paper_id, "target": tag_id, "relation": "tagged", "provenance": "catalog-metadata"})
-        nodes += [{"id": tag, "label": tag[4:], "type": "tag"} for tag in sorted(tags)]
-        if ids:
-            slots = ",".join("?" for _ in ids)
-            rows = self.db.execute(f"SELECT * FROM links WHERE source IN ({slots}) AND target IN ({slots}) LIMIT 1001", ids + ids).fetchall()
-            truncated = truncated or len(rows) > 1000
-            edges += [dict(row) for row in rows[:1000]]
-        return {"nodes": nodes, "edges": edges, "truncated": truncated, "semantics": "User-asserted paper relations and shared tags; no inferred causal or citation claims"}
+        from .knowledge_graph import get_graph
+        return get_graph(self, id=id, limit=limit)
 
     def feedback_context(self, id, annotation_ids=None):
         item = self.get(id)
@@ -1262,17 +1427,21 @@ def dispatch(request):
     library = Library(root)
     try:
         action = request.get("action")
+        if isinstance(action, str) and action.startswith("graph_"):
+            from .knowledge_graph import dispatch_graph
+            return dispatch_graph(library, action, request)
         if action == "export_metadata":
             # One consistent metadata snapshot; PDF contents are never loaded.
             # This short-lived export allocation is not a resident catalog cache.
             library.db.execute("BEGIN")
-            count = library.db.execute("SELECT count(*) FROM papers").fetchone()[0]
+            count = library.db.execute("SELECT count(*) FROM papers WHERE id NOT IN (SELECT paper_id FROM paper_archive)").fetchone()[0]
             if count > 10000:
                 raise ValueError("Library export exceeds 10000 records; export a subset")
-            rows = library.db.execute("SELECT id FROM papers ORDER BY citekey,id").fetchall()
+            rows = library.db.execute("SELECT id FROM papers WHERE id NOT IN (SELECT paper_id FROM paper_archive) ORDER BY citekey,id").fetchall()
             return {"items": [library.get(row[0]) for row in rows], "total": count}
         if action == "status":
-            return {"count": library.db.execute("SELECT count(*) FROM papers").fetchone()[0], "library": str(library.root), "storage": "SQLite + portable native PDF annotations", "worker": "on-demand", "schema": 1}
+            counts = library.db.execute("SELECT count(*) AS total,count(paper_archive.paper_id) AS archived FROM papers LEFT JOIN paper_archive ON paper_archive.paper_id=papers.id").fetchone()
+            return {"count": counts["total"] - counts["archived"], "archived_count": counts["archived"], "total_count": counts["total"], "library": str(library.root), "storage": "SQLite + portable native PDF annotations", "worker": "on-demand", "schema": 2}
         if action == "import":
             return library.import_items(request.get("items"), request.get("path"), request.get("limit", 100), request.get("offset", 0), request.get("metadata"), request.get("metadata_source"), request.get("metadata_verified", False))
         if action == "inspect_pdf":
@@ -1282,7 +1451,7 @@ def dispatch(request):
             path = library.pdf_path(request["id"])
             return {"path": str(path), "filename": path.name}
         actions = {
-            "list": ("query", "limit", "offset"), "get": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page": ("id", "page", "scale"),
+            "list": ("query", "limit", "offset", "sort", "order", "archived"), "get": ("id", "include_archived"), "create": ("metadata",), "archive": ("id",), "restore": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page": ("id", "page", "scale"),
             "annotations": ("id",), "annotate": ("id", "page", "type", "rects", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment"), "annotation_delete": ("id", "annotation_id"),
             "annotation_catalog": ("id",), "annotation_context_exact": ("id", "annotation_refs", "selection", "max_characters"),
             "export_annotations": ("id", "format"), "link": ("source", "target", "relation", "note"), "graph": ("id", "limit"), "feedback_context": ("id", "annotation_ids"), "save_feedback": ("id", "text", "model", "annotation_ids", "expected_context_hash"), "feedback": ("id",),

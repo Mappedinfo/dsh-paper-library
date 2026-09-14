@@ -9,6 +9,8 @@ const commands=[
   ['python_tests','uv',['run','--offline','pytest','-q']],
   ['browser_syntax',process.execPath,['--check','web/app.js']],
   ['paper_chat_syntax',process.execPath,['--check','web/paper-chat.js']],
+  ['workbench_syntax',process.execPath,['--check','web/workbench.js']],
+  ['knowledge_graph_syntax',process.execPath,['--check','web/knowledge-graph.js']],
 ];
 const checks=[];
 for(const[id,command,args]of commands){

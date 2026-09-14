@@ -68,13 +68,31 @@ test('tool mutation approval preserves denial and does not ask for reads', async
   const allow = async () => ({ kind: 'allow' })
   assert.equal((await policy({ name: 'library_search' }, allow)).kind, 'allow')
   assert.equal((await policy({ name: 'library_import' }, allow)).kind, 'ask')
+  for (const spec of TOOL_SPECS.filter(spec => spec.mutate)) assert.equal((await policy({ name: spec.name }, allow)).kind, 'ask', spec.name)
   const deny = { kind: 'deny', reason: 'blocked' }
   assert.equal(await policy({ name: 'library_import' }, async () => deny), deny)
+  assert.equal(await policy({ name: 'library_graph_node_delete' }, async () => deny), deny)
   await assert.rejects(tools.get('library_import').execute({}, { signal: new AbortController().signal }), /exactly one/)
-  assert.equal(tools.size, 9)
+  assert.equal(tools.size, TOOL_SPECS.length)
   dispose()
   assert.equal(tools.size, 0)
   assert.equal(policy, undefined)
+})
+
+test('catalog and graph direct calls retain only structured evidence and bounded metadata', () => {
+  const spec = name => TOOL_SPECS.find(value => value.name === name)
+  assert.deepEqual(requestFromTool(spec('library_search'), { sort: 'year', order: 'desc', archived: true, limit: 20, library: '/wrong' }, {}), { action: 'list', limit: 20, sort: 'year', order: 'desc', archived: true })
+  assert.deepEqual(requestFromTool(spec('library_get'), { id: 'paper', include_archived: true }, {}), { action: 'get', id: 'paper', include_archived: true })
+  const metadata = { title: 'Synthetic paper', author: [{ given: 'Ada', family: 'Reader', affiliation: [{ name: 'Synthetic Institute' }] }], publication_dates: { accepted: '2026-09-01' }, journal_rankings: [{ system: 'JCR', year: 2025, category: 'Synthetic category', quartile: 'Q2', source: 'Synthetic source' }] }
+  assert.deepEqual(requestFromTool(spec('library_create'), { metadata }, {}), { action: 'create', metadata })
+  assert.throws(() => requestFromTool(spec('library_update'), { id: 'paper', metadata: { path: '/wrong.pdf' } }, {}), /not a supported/)
+  assert.throws(() => requestFromTool(spec('library_create'), { metadata: {} }, {}), /title is required/)
+  assert.throws(() => requestFromTool(spec('library_create'), { metadata: { title: 'x'.repeat(128 * 1024) } }, {}), /128 KiB/)
+  assert.throws(() => requestFromTool(spec('library_update'), { metadata: { author: Array.from({ length: 301 }, () => ({ family: 'x' })) } }, {}), /300/)
+  const graphRequest = { id: 'paper', type: 'claim', label: 'Synthetic claim', evidence: { page: null, quote: 'Known source', note: 'Reader interpretation' } }
+  assert.deepEqual(requestFromTool(spec('library_graph_node_put'), graphRequest, {}), { action: 'graph_node_put', ...graphRequest })
+  assert.throws(() => requestFromTool(spec('library_graph_node_put'), { ...graphRequest, evidence: { page: true } }, {}), /invalid value type/)
+  assert.throws(() => requestFromTool(spec('library_graph_node_put'), { ...graphRequest, evidence: { model: 'invented' } }, {}), /not a supported/)
 })
 
 test('feedback tools follow the calling conversation route before deployment fallback', async () => {

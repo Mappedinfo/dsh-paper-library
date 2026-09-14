@@ -140,7 +140,7 @@ async function requestPublic(value, ctx, kind) {
       const { address, family } = answers.find(answer => answer.family === 4) ?? answers[0]
       const requestSignal = AbortSignal.any([ctx.signal, AbortSignal.timeout(15_000)])
       response = await abortable(ctx.transport({ url, address, family, signal: requestSignal, headers: {
-        'User-Agent': USER_AGENT, Accept: kind === 'metadata' ? 'application/json, application/atom+xml, application/xml;q=0.9' : 'application/pdf, text/html;q=0.9, */*;q=0.1',
+        'User-Agent': USER_AGENT, Accept: kind === 'metadata' ? 'application/json, application/atom+xml, application/xml;q=0.9' : kind === 'landing-metadata' ? 'text/html, application/xhtml+xml;q=0.9' : 'application/pdf, text/html;q=0.9, */*;q=0.1',
         'Accept-Encoding': 'identity',
       } }), requestSignal)
       record.status = response.statusCode
@@ -163,11 +163,16 @@ async function requestPublic(value, ctx, kind) {
   }
 }
 
-async function readText(response, limit = TEXT_LIMIT) {
+async function readText(response, limit = TEXT_LIMIT, metadataOnly = false) {
+  if (metadataOnly && /application\/pdf/i.test(response.headers['content-type'] ?? '')) {
+    response.close?.()
+    throw new Error('Metadata refresh does not download PDFs; provide a DOI or article landing URL')
+  }
   const length = Number(response.headers['content-length'])
   if (Number.isFinite(length) && length > limit) { response.close?.(); throw new Error('Metadata or landing page exceeds 2 MiB limit') }
   const chunks = []
   let size = 0
+  let signatureChecked = false
   try {
     const iterator = response.body[Symbol.asyncIterator]()
     while (true) {
@@ -177,6 +182,10 @@ async function readText(response, limit = TEXT_LIMIT) {
       size += chunk.length
       if (size > limit) throw new Error('Metadata or landing page exceeds 2 MiB limit')
       chunks.push(Buffer.from(chunk))
+      if (metadataOnly && !signatureChecked && size >= 5) {
+        signatureChecked = true
+        if (Buffer.concat(chunks, size).subarray(0, 5).toString('ascii') === '%PDF-') throw new Error('Metadata refresh received a PDF; stopped after its signature')
+      }
     }
     return Buffer.concat(chunks, size).toString('utf8')
   } finally { response.close?.() }
@@ -192,6 +201,35 @@ const decode = text => String(text ?? '').replace(/&(?:amp|quot|apos|lt|gt|#\d+|
 const clean = text => decode(String(text ?? '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim()
 const first = value => Array.isArray(value) ? value[0] : value
 
+// Partial dates preserve source precision; never synthesize January 1 or accept
+// Date.parse rollover. Crossref created/deposited are registry dates, not history:
+// https://github.com/CrossRef/rest-api-doc/blob/master/api_format.md
+function partialDate(value) {
+  const raw = Array.isArray(value?.['date-parts']?.[0]) ? value['date-parts'][0] : value
+  const parts = Array.isArray(raw) ? raw : typeof raw === 'string' && /^\d{4}(?:[-/]\d{1,2}){0,2}$/.test(raw.trim()) ? raw.trim().split(/[-/]/).map(Number) : []
+  if (!parts.length || parts.length > 3 || parts.some(part => !Number.isInteger(part))) return undefined
+  const [year, month, day] = parts
+  if (year < 1 || year > 9999 || month !== undefined && (month < 1 || month > 12)) return undefined
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  if (day !== undefined && (day < 1 || day > [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])) return undefined
+  return parts.map((part, index) => String(part).padStart(index ? 2 : 4, '0')).join('-')
+}
+
+function affiliations(value, warnings = []) {
+  if (!Array.isArray(value)) return []
+  const names = value.map(entry => clean(typeof entry === 'string' ? entry : entry?.name)).filter(Boolean)
+  const valid = [...new Set(names.filter(name => name.length <= 500))]
+  if (names.some(name => name.length > 500) || valid.length > 30) warnings.push('Some affiliations exceed the 30-institution / 500-character limits and were omitted; review the source metadata')
+  return valid.slice(0, 30).map(name => ({ name }))
+}
+
+function sourceDates(entries) {
+  return Object.fromEntries(entries.flatMap(([key, value]) => {
+    const date = partialDate(value)
+    return date ? [[key, date]] : []
+  }))
+}
+
 function normalizeDOI(value) {
   let doi = String(value).trim().replace(/^doi:\s*/i, '')
   if (/^https?:\/\/(?:dx\.)?doi\.org\//i.test(doi)) doi = decodeURIComponent(new URL(doi).pathname.slice(1))
@@ -199,14 +237,22 @@ function normalizeDOI(value) {
   return doi
 }
 
-function crossrefCSL(item, doi) {
+function crossrefCSL(item, doi, ctx) {
   if (item.DOI && String(item.DOI).toLowerCase() !== doi.toLowerCase()) throw new Error('Crossref returned metadata for a different DOI')
   const type = { 'journal-article': 'article-journal', 'proceedings-article': 'paper-conference', 'book-chapter': 'chapter', 'posted-content': 'article' }[item.type] ?? 'article'
   const csl = { id: doi, type, DOI: doi, title: clean(first(item.title)), URL: item.URL || `https://doi.org/${doi}` }
-  if (Array.isArray(item.author)) csl.author = item.author.slice(0, 100).map(person => person.family ? { family: person.family, ...(person.given ? { given: person.given } : {}) } : { literal: clean(person.name || person.given) }).filter(person => person.family || person.literal)
+  if (Array.isArray(item.author)) csl.author = item.author.slice(0, 100).filter(person => person && typeof person === 'object').map(person => {
+    const author = person.family ? { family: clean(person.family), ...(person.given ? { given: clean(person.given) } : {}) } : { literal: clean(person.name || person.given) }
+    const affiliation = affiliations(person.affiliation, ctx.warnings)
+    if (affiliation.length) author.affiliation = affiliation
+    return author
+  }).filter(person => person.family || person.literal)
   for (const [key, value] of Object.entries({ 'container-title': first(item['container-title']), volume: item.volume, issue: item.issue, page: item.page, publisher: item.publisher, abstract: item.abstract })) if (value) csl[key] = clean(value)
-  const issued = item.published ?? item['published-print'] ?? item['published-online'] ?? item.issued
-  if (Array.isArray(issued?.['date-parts']?.[0])) csl.issued = { 'date-parts': [issued['date-parts'][0].slice(0, 3)] }
+  const dates = sourceDates([['published', item.published], ['online', item['published-online']], ['print', item['published-print']], ['accepted', item.accepted]])
+  if (Object.keys(dates).length) csl.publication_dates = dates
+  const issued = [item.published, item['published-print'], item['published-online'], item.issued].map(partialDate).find(Boolean)
+  if (issued) csl.issued = { 'date-parts': [issued.split('-').map(Number)] }
+  for (const key of ['ISSN', 'ISBN']) if (Array.isArray(item[key])) csl[key] = item[key].filter(value => typeof value === 'string').slice(0, 20).map(clean)
   return csl
 }
 
@@ -214,13 +260,14 @@ async function doiMetadata(doi, ctx) {
   const response = await requestPublic(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, ctx, 'metadata')
   const data = JSON.parse(await readText(response))
   if (!data.message || typeof data.message !== 'object') throw new Error('Crossref response has no work metadata')
-  const metadata = crossrefCSL(data.message, doi)
+  const metadata = crossrefCSL(data.message, doi, ctx)
   const links = Array.isArray(data.message.link) ? data.message.link : []
   const candidates = links.filter(link => link?.['content-type'] === 'application/pdf' || /\.pdf(?:$|[?#])/i.test(link?.URL ?? '')).map(link => link.URL).filter(value => typeof value === 'string').slice(0, 3)
   if (data.message.resource?.primary?.URL) candidates.push(data.message.resource.primary.URL)
   if (data.message.URL) candidates.push(data.message.URL)
   candidates.push(`https://doi.org/${doi}`)
-  return { metadata, candidates }
+  const landingCandidates = [data.message.resource?.primary?.URL, data.message.URL, `https://doi.org/${doi}`].filter(value => typeof value === 'string')
+  return { metadata, candidates, landingCandidates }
 }
 
 /** Resolve a recognized DOI for local-PDF enrichment; does not download a PDF. */
@@ -238,23 +285,44 @@ function attrs(tag) {
   return result
 }
 
-function landingMetadata(html, url) {
+function landingMetadata(html, url, ctx) {
   const meta = new Map()
+  const citationAuthors = []
+  let currentAuthor
   for (const match of html.matchAll(/<meta\b[^>]*>/gi)) {
     const attributes = attrs(match[0])
     const key = (attributes.name ?? attributes.property ?? '').toLowerCase()
     if (key && attributes.content) meta.set(key, [...(meta.get(key) ?? []), attributes.content.slice(0, 20_000)].slice(0, 100))
+    // Highwire's institution tag belongs to the immediately preceding author;
+    // do not zip a separate institution list to author indices.
+    if (key === 'citation_author') {
+      const literal = clean(attributes.content)
+      currentAuthor = literal && citationAuthors.length < 100 ? { literal } : undefined
+      if (currentAuthor) citationAuthors.push(currentAuthor)
+    } else if (['citation_author_institution', 'citation_author_affiliation'].includes(key) && currentAuthor) {
+      const affiliation = affiliations([...(currentAuthor.affiliation ?? []), { name: attributes.content }], ctx.warnings)
+      if (affiliation.length) currentAuthor.affiliation = affiliation
+    }
   }
   const get = key => first(meta.get(key))
   const metadata = { type: 'article', URL: url }
   const title = get('citation_title') ?? get('dc.title') ?? get('og:title')
   if (title) metadata.title = clean(title)
-  const authors = meta.get('citation_author') ?? meta.get('dc.creator')
-  if (authors) metadata.author = authors.map(name => ({ literal: clean(name) }))
+  const authors = meta.get('dc.creator')
+  if (citationAuthors.length) metadata.author = citationAuthors
+  else if (authors) metadata.author = authors.map(name => ({ literal: clean(name) })).filter(person => person.literal)
   const doi = get('citation_doi') ?? get('dc.identifier')
   if (doi) { try { metadata.DOI = normalizeDOI(doi) } catch {} }
-  const date = get('citation_publication_date') ?? get('citation_date') ?? get('dc.date')
-  if (date && /^\d{4}(?:[-/]\d{1,2})?(?:[-/]\d{1,2})?$/.test(date.trim())) metadata.issued = { 'date-parts': [date.trim().split(/[-/]/).map(Number)] }
+  const dates = sourceDates([
+    ['published', get('citation_publication_date') ?? get('citation_date')],
+    ['online', get('citation_online_date') ?? get('citation_publication_date_online')],
+    ['print', get('citation_print_date') ?? get('citation_publication_date_print')],
+    ['received', get('citation_date_received') ?? get('citation_received_date') ?? get('dc.date.received')],
+    ['accepted', get('citation_date_accepted') ?? get('citation_accepted_date') ?? get('dc.date.accepted')],
+  ])
+  if (Object.keys(dates).length) metadata.publication_dates = dates
+  const date = dates.published ?? dates.print ?? dates.online ?? partialDate(get('dc.date'))
+  if (date) metadata.issued = { 'date-parts': [date.split('-').map(Number)] }
   for (const [key, value] of [['container-title', get('citation_journal_title')], ['volume', get('citation_volume')], ['issue', get('citation_issue')]]) if (value) metadata[key] = clean(value)
   const candidates = [...(meta.get('citation_pdf_url') ?? [])]
   for (const match of html.matchAll(/<(?:link|a)\b[^>]*>/gi)) {
@@ -263,6 +331,33 @@ function landingMetadata(html, url) {
     if (candidates.length >= 12) break
   }
   return { metadata: metadata.title || metadata.DOI ? metadata : undefined, candidates: candidates.slice(0, 12).flatMap(candidate => { try { return [new URL(candidate, url).href] } catch { return [] } }) }
+}
+
+const identityText = value => clean(value).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+const authorNames = person => person.literal ? [identityText(person.literal)] : [identityText(`${person.given ?? ''} ${person.family ?? ''}`), identityText(`${person.family ?? ''} ${person.given ?? ''}`)]
+
+function mergeMetadata(primary, supplement, ctx) {
+  if (!primary) return supplement
+  if (!supplement) return primary
+  const bothDOI = primary.DOI && supplement.DOI
+  if (bothDOI && primary.DOI.toLowerCase() !== supplement.DOI.toLowerCase()) throw new Error('Landing page identifies a different DOI; its metadata and PDF links were not used')
+  const title = identityText(primary.title)
+  if (!bothDOI && !(title.length >= 8 && title === identityText(supplement.title))) {
+    ctx.warnings.push('Supplementary landing metadata has no matching DOI or exact title; it was not merged')
+    return primary
+  }
+  const metadata = { ...supplement, ...primary }
+  const dates = { ...supplement.publication_dates, ...primary.publication_dates }
+  if (Object.keys(dates).length) metadata.publication_dates = dates
+  if (primary.author?.length && supplement.author?.length) {
+    metadata.author = primary.author.map(person => {
+      if (person.affiliation?.length) return person
+      const names = authorNames(person)
+      const matches = supplement.author.filter(candidate => authorNames(candidate).some(name => name && names.includes(name)))
+      return matches.length === 1 && matches[0].affiliation?.length ? { ...person, affiliation: matches[0].affiliation } : person
+    })
+  } else if (!primary.author?.length && supplement.author?.length) metadata.author = supplement.author
+  return metadata
 }
 
 function arxivID(value) {
@@ -285,12 +380,75 @@ async function arxivMetadata(id, ctx) {
   const returnedID = arxivID(field('id'))
   if (!returnedID || returnedID.replace(/v\d+$/, '') !== id.replace(/v\d+$/, '') || /v\d+$/.test(id) && returnedID !== id) throw new Error('arXiv API returned a different article or version')
   const metadata = { id: `arxiv:${returnedID}`, type: 'article', title: field('title'), URL: `https://arxiv.org/abs/${returnedID}`, archive: 'arXiv', archive_location: returnedID }
-  metadata.author = [...entry.matchAll(/<author\b[^>]*>[\s\S]*?<name\b[^>]*>([\s\S]*?)<\/name>[\s\S]*?<\/author>/gi)].slice(0, 100).map(match => ({ literal: clean(match[1]) }))
+  metadata.author = [...entry.matchAll(/<author\b[^>]*>([\s\S]*?)<\/author>/gi)].slice(0, 100).map(match => {
+    const author = { literal: clean(match[1].match(/<name\b[^>]*>([\s\S]*?)<\/name>/i)?.[1]) }
+    const affiliation = affiliations([...match[1].matchAll(/<arxiv:affiliation\b[^>]*>([\s\S]*?)<\/arxiv:affiliation>/gi)].map(value => clean(value[1])), ctx.warnings)
+    if (affiliation.length) author.affiliation = affiliation
+    return author
+  }).filter(person => person.literal)
   const published = field('published')
-  if (/^\d{4}-\d{2}-\d{2}/.test(published)) metadata.issued = { 'date-parts': [published.slice(0, 10).split('-').map(Number)] }
+  const date = /^\d{4}-\d{2}-\d{2}(?:T|$)/.test(published) ? partialDate(published.slice(0, 10)) : undefined
+  // arXiv's published means first-version submission, not journal publication.
+  // Keep the preprint citation date without inventing editorial-history dates.
+  // https://info.arxiv.org/help/api/user-manual.html#3321-title-id-published-and-updated
+  if (date) metadata.issued = { 'date-parts': [date.split('-').map(Number)] }
   if (field('summary')) metadata.abstract = field('summary')
   if (field('arxiv:doi')) { try { metadata.DOI = normalizeDOI(field('arxiv:doi')) } catch {} }
   return metadata
+}
+
+/** Bounded metadata refresh: no file writes, PDF candidates, model or library access.
+ * Caller must validate the returned identity before updating an existing record.
+ * JCR is deliberately absent: year/category rankings require a sourced import or
+ * manual record, and cannot be derived from Crossref citation counts or an IF.
+ */
+export async function resolveMetadata(target, options = {}) {
+  if (typeof target !== 'string' || !target.trim() || target.length > 4096) throw new Error('Provide a DOI, arXiv ID, or public article landing URL')
+  target = target.trim()
+  const ctx = context(options, target)
+  let metadata, doi
+  try { doi = normalizeDOI(target) } catch {}
+  try {
+    if (doi) {
+      let candidates = [`https://doi.org/${doi}`]
+      try {
+        const result = await doiMetadata(doi, ctx)
+        metadata = result.metadata
+        candidates = result.landingCandidates
+      } catch (error) { warn(ctx, error) }
+      // One landing page can supply explicit editorial dates missing in Crossref.
+      // PDF links are never followed by this metadata-only path.
+      const landingURL = candidates.find(value => !/\.pdf(?:$|[?#])/i.test(value))
+      if (landingURL) {
+        const response = await requestPublic(landingURL, ctx, 'landing-metadata')
+        const landing = landingMetadata(await readText(response, TEXT_LIMIT, true), response.url, ctx)
+        if (landing.metadata?.DOI && landing.metadata.DOI.toLowerCase() !== doi.toLowerCase()) throw new Error('Landing page identifies a different DOI')
+        // Without a successful Crossref record, the landing must assert the DOI.
+        if (!metadata && landing.metadata?.DOI?.toLowerCase() !== doi.toLowerCase()) throw new Error('Landing metadata does not establish the requested DOI')
+        metadata = mergeMetadata(metadata, landing.metadata, ctx)
+      }
+    } else {
+      const id = arxivID(target)
+      if (id) metadata = await arxivMetadata(id, ctx)
+      else {
+        const url = publicURL(target)
+        if (/\.pdf$/i.test(url.pathname)) throw new Error('Metadata refresh needs a DOI or article landing URL, not a PDF URL')
+        const response = await requestPublic(url.href, ctx, 'landing-metadata')
+        const landing = landingMetadata(await readText(response, TEXT_LIMIT, true), response.url, ctx)
+        metadata = landing.metadata
+        if (metadata?.DOI) {
+          try {
+            const result = await doiMetadata(metadata.DOI, ctx)
+            metadata = mergeMetadata(result.metadata, metadata, ctx)
+          } catch (error) { warn(ctx, error) }
+        }
+      }
+    }
+  } catch (error) { warn(ctx, error) }
+  ctx.options.signal?.throwIfAborted()
+  if (ctx.signal.aborted) ctx.warnings.push('Metadata refresh deadline reached')
+  if (!metadata && !ctx.warnings.length) ctx.warnings.push('The article page exposed no supported bibliographic metadata')
+  return { status: metadata ? 'metadata_only' : 'unavailable', metadata, provenance: { ...ctx.provenance, kind: 'metadata-refresh' }, warnings: [...new Set(ctx.warnings)] }
 }
 
 async function consumeCandidate(response, directory, ctx) {
@@ -376,9 +534,8 @@ export async function resolveAndFetch(target, options = {}) {
       const response = await requestPublic(candidate.url, ctx, 'paper')
       const result = await consumeCandidate(response, options.directory, ctx)
       if (result.path) return { status: 'downloaded', path: result.path, metadata, bytes: result.bytes, provenance: { ...ctx.provenance, source_url: response.url, validation: 'pdf_signature_only' }, warnings: ctx.warnings }
-      const landing = landingMetadata(result.html, response.url)
-      if (metadata?.DOI && landing.metadata?.DOI && metadata.DOI.toLowerCase() !== landing.metadata.DOI.toLowerCase()) throw new Error('Landing page identifies a different DOI; its PDF links were not followed')
-      metadata = metadata ? { ...landing.metadata, ...metadata } : landing.metadata
+      const landing = landingMetadata(result.html, response.url, ctx)
+      metadata = mergeMetadata(metadata, landing.metadata, ctx)
       if (candidate.depth < 2) landing.candidates.forEach(url => add(url, candidate.depth + 1))
       if (!landing.candidates.length) ctx.warnings.push('Landing page exposed no public PDF link; no login, cookies, or paywall bypass attempted')
     } catch (error) { warn(ctx, error) }

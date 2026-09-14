@@ -3,12 +3,12 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveAndFetch } from './paper-fetch.mjs';
+import { resolveAndFetch, resolveMetadata } from './paper-fetch.mjs';
 import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
 
 export const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const defaultLibrary = join(homedir(), '.local', 'share', 'dsh-paper-library');
-const actions = new Set(['status','import','list','get','update','attach','page','annotations','annotation_catalog','annotation_context_exact','annotate','annotation_update','annotation_delete','export_annotations','export_pdf','link','graph','feedback_context','save_feedback','feedback']);
+const actions = new Set(['status','import','list','get','create','archive','restore','update','attach','page','annotations','annotation_catalog','annotation_context_exact','annotate','annotation_update','annotation_delete','export_annotations','export_pdf','link','graph','graph_node_put','graph_node_delete','graph_edge_put','graph_edge_delete','feedback_context','save_feedback','feedback']);
 let pending = Promise.resolve();
 let importsPending = Promise.resolve();
 let importCount = 0;
@@ -147,9 +147,71 @@ async function importFile(request, options) {
   return core(request, options);
 }
 
+const normalizedIdentity = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+const canonicalDOI = value => String(value || '').trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//i,'').replace(/^doi:\s*/i,'').toLowerCase();
+const missingMetadata = value => value === undefined || value === null || typeof value === 'string' && !value.trim() || Array.isArray(value) && !value.length || value && typeof value === 'object' && !Object.keys(value).length;
+
+function authorIdentities(person) {
+  if (!person || typeof person !== 'object') return [];
+  if (person.literal) return [normalizedIdentity(person.literal)];
+  const family = [person['non-dropping-particle'],person.family].filter(Boolean).join(' ');
+  const given = [person.given,person['dropping-particle']].filter(Boolean).join(' ');
+  return [[given,family,person.suffix],[family,given,person.suffix]].map(parts=>normalizedIdentity(parts.filter(Boolean).join(' '))).filter(Boolean);
+}
+
+function metadataDraft(current, fetched) {
+  const item = structuredClone(current);
+  const incoming = bibliographicMetadata(fetched);
+  for (const [field,value] of Object.entries(incoming)) {
+    // Rankings are user/import-sourced. An online lookup never replaces or adds
+    // them, nor does it substitute a different author list for a manual list.
+    if (field === 'journal_rankings' || missingMetadata(value)) continue;
+    if (missingMetadata(item[field])) item[field] = structuredClone(value);
+  }
+  if (incoming.publication_dates && current.publication_dates) {
+    for (const [field,value] of Object.entries(incoming.publication_dates)) {
+      if (missingMetadata(item.publication_dates[field]) && !missingMetadata(value)) item.publication_dates[field] = value;
+    }
+  }
+  if (current.author?.length && incoming.author?.length) {
+    const matches = (left,right) => authorIdentities(left).some(name=>authorIdentities(right).includes(name));
+    item.author = current.author.map(person=>{
+      if (!missingMetadata(person.affiliation)) return structuredClone(person);
+      const candidates = incoming.author.filter(candidate=>matches(person,candidate));
+      const localMatches = current.author.filter(candidate=>matches(person,candidate));
+      return candidates.length === 1 && localMatches.length === 1 && !missingMetadata(candidates[0].affiliation)
+        ? {...structuredClone(person),affiliation:structuredClone(candidates[0].affiliation)} : structuredClone(person);
+    });
+  }
+  if (Buffer.byteLength(JSON.stringify(item),'utf8') > 256 * 1024) throw new Error('补全后的资料超过 256 KiB；请先缩短较长字段，再刷新资料。');
+  return item;
+}
+
+async function lookupMetadata(request, options) {
+  if (typeof request.id !== 'string' || !request.id || request.id.length > 200) throw new Error('请选择一篇文献，再刷新资料。');
+  let current = await core({action:'get',id:request.id},options);
+  const doi = canonicalDOI(current.DOI);
+  const target = doi || (typeof current.URL === 'string' && current.URL.trim());
+  if (!target) throw new Error('请先在资料中填写并保存 DOI 或论文页面链接，再刷新资料。');
+  const result = await resolveMetadata(target,{...options.fetchOptions,signal:options.signal});
+  if (!result.metadata) throw new Error(`未取得可用文献资料；请核对 DOI 或论文页面链接，也可以手工编辑。${result.warnings?.length?' '+result.warnings.join('；'):''}`);
+  // Network latency must not put an older manual edit back into the editor.
+  const latest = await core({action:'get',id:request.id},options);
+  if (canonicalDOI(latest.DOI) !== doi || !doi && latest.URL !== current.URL) throw new Error('获取期间 DOI 或论文链接发生变化；请按最新资料重新刷新。');
+  current = latest;
+  if (doi) {
+    if (canonicalDOI(result.metadata.DOI) !== doi) throw new Error('在线资料的 DOI 与当前文献不一致，未生成补全草稿；请核对当前 DOI。');
+  } else {
+    const title = normalizedIdentity(current.title);
+    if (title.length < 8 || title !== normalizedIdentity(result.metadata.title)) throw new Error('在线题名与当前文献不能准确匹配，未生成补全草稿；请核对题名，或保存 DOI 后重试。');
+  }
+  return {item:metadataDraft(current,result.metadata),warnings:result.warnings || [],provenance:result.provenance};
+}
+
 export async function dispatch(request, options = {}) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('请求必须是 JSON 对象。');
   const { library: ignoredLibrary, python: ignoredPython, ...safe } = request;
+  if (safe.action === 'metadata_lookup') return lookupMetadata(safe,options);
   if (safe.action === 'models') return options.models ? options.models(options.signal) : { models: [], configured: false };
   if (safe.action === 'export_library') {
     const format = safe.format || 'biblatex';

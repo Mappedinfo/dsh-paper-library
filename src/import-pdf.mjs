@@ -2,7 +2,7 @@ import { resolveDOIMetadata } from './paper-fetch.mjs';
 
 // Network metadata is data: never allow attachment paths or worker arguments to
 // arrive from a publisher response. Only bibliographic fields can be imported.
-const fields = ['type','title','author','editor','translator','issued','DOI','URL','abstract','container-title','collection-title','publisher','publisher-place','volume','issue','page','ISBN','ISSN','language','edition','number','event-title','event-place','archive','archive_location'];
+const fields = ['type','title','author','editor','translator','issued','DOI','URL','abstract','container-title','collection-title','publisher','publisher-place','volume','issue','page','ISBN','ISSN','language','edition','number','event-title','event-place','archive','archive_location','publication_dates','journal_rankings'];
 export function bibliographicMetadata(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   return Object.fromEntries(fields.filter(key => raw[key] !== undefined && raw[key] !== null).map(key => [key,raw[key]]));

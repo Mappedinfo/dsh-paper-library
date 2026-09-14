@@ -15,7 +15,7 @@ skills=Path.home()/".codex"/"skills"
 task_id="task-20260914-01a09ec9"
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--revision",type=int,default=1)
-parser.add_argument("--checkpoint",choices=["initial","intake","publication","promotion","paper-conversations","annotation-references"],default="initial")
+parser.add_argument("--checkpoint",choices=["initial","intake","publication","promotion","paper-conversations","annotation-references","workbench"],default="initial")
 args=parser.parse_args()
 if args.revision<1:
     parser.error("revision must be positive")
@@ -29,6 +29,8 @@ elif args.checkpoint=="paper-conversations":
     task_id="task-20260914-paper-conversations"
 elif args.checkpoint=="annotation-references":
     task_id="task-20260914-annotation-references"
+elif args.checkpoint=="workbench":
+    task_id="task-20260914-workbench-review"
 stem="quality-receipt" if args.checkpoint=="initial" else f"quality-{args.checkpoint}"
 destination=root/(f".local/{stem}.json" if args.revision==1 else f".local/{stem}-v{args.revision}.json")
 # Replaying this completed checkpoint keeps the identical event payload. A later
@@ -49,6 +51,29 @@ criteria={
     "capacity":("docs/validation/harness-memory.json","test"),
 }
 participants=[(name,role,skills/name/"SKILL.md") for name,role in [("frontend-design","primary"),("academic-project-init","support"),("task-execution","common"),("writing-quality","common")]]
+if args.checkpoint=="workbench":
+    criteria={
+        "contextual_toolbar":("docs/validation/workbench-browser.json","test"),
+        "citation_actions_in_toolbar":("docs/validation/workbench-browser.json","test"),
+        "dense_library_cards":("docs/validation/workbench-browser.json","test"),
+        "sortable_catalog_crud":("docs/validation/workbench-browser.json","test"),
+        "compact_paper_title":("docs/validation/workbench-browser.json","test"),
+        "sourced_extended_metadata":("docs/validation/automated.json","test"),
+        "typed_evidence_graph":("docs/validation/workbench-browser.json","test"),
+        "native_reference_regression":("docs/validation/annotation-reference-browser.json","test"),
+        "installed_local_harness":("docs/validation/workbench-install.json","artifact_check"),
+    }
+    participants=[(name,role,(Path.home()/".agents"/"skills")/name/"SKILL.md") for name,role in [("frontend-design","primary"),("webapp-testing","support"),("task-execution","common"),("writing-quality","common")]]
+    for path,_ in criteria.values():
+        evidence=json.loads((root/path).read_text())
+        if path.endswith("automated.json"):
+            passed=bool(evidence.get("checks")) and all(check.get("status")=="pass" for check in evidence["checks"])
+        elif path.endswith("workbench-browser.json"):
+            passed=len(evidence.get("checks",[]))>=13 and evidence.get("browser_errors")==[] and evidence.get("model_requests")==0
+        else:
+            passed=evidence.get("ok") is True
+        if not passed:
+            raise SystemExit(f"Passing workbench evidence required: {path}")
 if args.checkpoint=="paper-conversations":
     criteria={
         "native_paper_conversation":("docs/validation/paper-chat-harness.json","test"),
@@ -137,7 +162,7 @@ if args.checkpoint in {"publication","promotion"}:
         inventory.write_text(json.dumps({"schema_version":1,"observation_id":f"{args.checkpoint}-runtime-20260914","observed_at":datetime.now(timezone.utc).isoformat(),"source_kind":"exposed_runtime_inventory","source_ref":f"route:{args.checkpoint}-runtime-20260914","skills":[{"runtime_id":identity[1],"provider":identity[0],"source_identity":identity[2]}]},indent=2)+"\n")
         inventory.chmod(0o600)
 receipt={"task_id":task_id,"event_id":task_id+f"-close-v{args.revision}","at":datetime.now(timezone.utc).isoformat(),"data":{
-    "scenario":{"initial":"local_plugin_implementation","intake":"automatic_paper_intake","publication":"public_repository_release","promotion":"community_plugin_promotion","paper-conversations":"native_per_paper_reading_conversation","annotation-references":"incremental_native_annotation_references"}[args.checkpoint],
+    "scenario":{"initial":"local_plugin_implementation","intake":"automatic_paper_intake","publication":"public_repository_release","promotion":"community_plugin_promotion","paper-conversations":"native_per_paper_reading_conversation","annotation-references":"incremental_native_annotation_references","workbench":"compact_literature_workbench_review"}[args.checkpoint],
     "skills":[{"id":name,"role":role,"source_hash":digest(path)} for name,role,path in participants],
     "criteria":[{"id":key,"required":True} for key in criteria],
     "self_assessment":{"outcome":"complete","completion_percent":100,"quality_score":4},

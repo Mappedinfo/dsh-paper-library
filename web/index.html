@@ -6,13 +6,22 @@
   <meta name="color-scheme" content="light">
   <title>Paper Library</title>
   <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./workbench.css">
+  <link rel="stylesheet" href="./knowledge-graph.css">
   <script src="./paper-chat.js" defer></script>
+  <script src="./knowledge-graph.js" defer></script>
+  <script src="./workbench.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="./" aria-label="Paper Library 首页"><span class="brand-mark" aria-hidden="true">P<span>↗</span></span><span>Paper Library<small>阅读 · 批注 · 连接</small></span></a>
     <div class="topbar-actions"><span id="library-status" class="status">正在连接文献库…</span><button id="queue-toggle" class="button subtle" hidden>导入进度</button><button id="import-open" class="button primary">＋ 导入文献</button></div>
+    <div id="paper-tools" class="paper-tools" aria-label="当前文献工具栏">
+      <span id="toolbar-paper" class="toolbar-paper">选择一篇文献</span>
+      <div id="toolbar-actions" class="toolbar-actions"></div>
+      <div id="toolbar-reader" class="toolbar-reader"></div>
+    </div>
   </header>
   <main class="workspace">
     <section class="library-pane" aria-label="文献库">
@@ -22,6 +31,7 @@
       <div class="list-heading"><span id="search-summary">全部文献</span><span>最近导入</span></div>
       <div id="library-error" class="inline-error" role="alert" hidden></div>
       <div id="paper-list" class="paper-list" aria-live="polite"></div>
+      <div id="catalog-table" class="catalog-table" hidden></div>
       <div class="pagination"><button id="previous-list" class="button subtle" disabled>← 上一页</button><span id="list-range" class="muted"></span><button id="next-list" class="button subtle" disabled>下一页 →</button></div>
       <footer class="library-footer"><span class="live-dot"></span>按需加载，每次阅读一页<span title="PDF 中的标准批注随文件保存">PDF 原生批注</span></footer>
     </section>

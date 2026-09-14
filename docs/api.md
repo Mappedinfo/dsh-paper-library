@@ -4,11 +4,13 @@ Node `dispatch(request, options)` accepts JSON `{action,...arguments}`. Python w
 
 Core actions:
 
-- `status` → `{count,library,...}`; the HTTP carrier adds `paper_conversations:boolean` and `annotation_references:boolean` for native-conversation and frozen-reference availability
+- `status` → `{count,archived_count,total_count,library,...}`; `count` excludes trash. The HTTP carrier adds `paper_conversations:boolean`, `annotation_references:boolean`, `catalog_management:true` and `typed_graph:true`.
 - `import` with `path` (PDF/directory/JSON/RIS/BIB) or `items` (CSL array), `limit=100,offset=0` → `{imported,duplicates,skipped?,items:[item],warnings:[],next_offset?,done?,total_records?,total_files?}`; Node resolves DOI and BibTeX before core. Repeat with `offset=next_offset` until `done`; partial progress is committed per record. Uploaded JSON/BibTeX use `filename,content_base64` and preserve the same offset contract.
-- `list` with `query=''`, `limit=40`, `offset=0` → `{items,total,limit,offset}`
-- `get` with `id` → item (CSL fields plus `id,title,citekey,tags,pdf` boolean, actual `pdf_filename`, `parse`, `acquisition` when available, and `page_count`)
-- `update` with `id,metadata` → item
+- `list` with `query=''`, `limit=40`, `offset=0`, `sort?`, `order?`, `archived=false` → `{items,total,limit,offset,search_mode,sort,order,archived,active_count,archived_count}`. Limit is clamped to 1–200, query to 500 characters. Sort accepts `title|author|year|journal|modified|created|citekey|jcr`; order accepts `asc|desc` and requires a sort field. Explicit sorts put missing values last and use stable paper IDs to break ties. Without a sort, queries of at least three characters use relevance; otherwise records use descending modification time. `author` uses the first author's family/literal name. `jcr` uses the latest supplied JCR year and its worst category quartile, while returning all supplied ranking records.
+- `get` with `id,include_archived=false` → item (CSL fields plus `id,title,citekey,tags,pdf` boolean, actual `pdf_filename`, `parse`, `acquisition` when available, `page_count`, `archived`, `archived_at`, `created` and `modified`). `include_archived:true` permits metadata inspection only; it does not restore or open the PDF.
+- `create` with `metadata` → a metadata-only item. It accepts no attachment paths; use `attach` separately. Duplicate DOI/citekey identities fail rather than overwrite another record.
+- `update` with `id,metadata` → item. Catalog identity/runtime fields are protected. Attached PDFs retain the existing backup, portable metadata and atomic rename/write behavior.
+- `archive` with `id` → archived item; `restore` with `id` → active item. Both preserve identity, managed PDF, annotations and relationships. Archived records are excluded from ordinary search/export and must be restored before reading or editing; no permanent-delete operation is exposed.
 - `attach` with `id,path` → item; copy into managed storage
 - `page` with `id,page=1,scale=1.25` → `{page,page_count,width,height,image:<base64 PNG>,words:[[x0,y0,x1,y1,text,...]],annotations:[annotation]}`
 - `annotations` with `id` → `{annotations:[{id,page,type,text,comment,author,rect,rects?,created,modified,...}]}`
@@ -20,7 +22,11 @@ Core actions:
 - `export_annotations` with `id,format='xfdf'|'json'|'markdown'` → `{text,filename,mime}`
 - `export_pdf` with `id` → `{path,filename}` (Node streams managed path, not browser-supplied path)
 - `link` with `source,target,relation='related'|'supports'|'contradicts'|'cites',note=''` → link
-- `graph` with `id?,limit=80` → `{nodes:[{id,label,type:'paper'|'tag'}],edges:[{source,target,relation,provenance}],truncated}`
+- `graph` with `id?,limit=80` → `{nodes,edges,truncated,warnings,scope:{paper_id,max_nodes,max_edges},semantics,node_types,relations}`. Limit is clamped to 1–200 nodes, with at most 400 edges. The global view starts with at most 40 active papers; prefer a paper ID for focused reading. Nodes and edges distinguish `provenance:'catalog-metadata'|'user-asserted'` and `editable`; legacy paper links also carry `legacy:true`. This is a bounded projection, not a complete-library inference graph.
+- `graph_node_put` with `id,node_id?,type,label,description?,evidence?` → editable node. Omit `node_id` to create; supply it to edit a node owned by that paper. Type accepts `method|dataset|claim|evidence|concept|author|institution`.
+- `graph_node_delete` with `id,node_id` → `{deleted:true,node_id,removed_edges}`; deletes that editable node and its attached reader-authored relationships.
+- `graph_edge_put` with `id,edge_id?,source,target,relation,evidence?` → editable directed edge. Omit `edge_id` to create. Endpoints must belong to the current paper graph; self-links and duplicate directed relationships fail. Relation accepts `supports|contradicts|uses|evaluates|derived_from|explains|extends|cites|related|authored_by|affiliated_with|published_by`.
+- `graph_edge_delete` with `id,edge_id` → `{deleted:true,edge_id}`.
 - `feedback_context` with `id,annotation_ids?` → `{item,annotations,prompt,context_hash}`; bounded source context, source treated as untrusted data
 - `save_feedback` with `id,text,model,annotation_ids,expected_context_hash?` → AI-labelled standard PDF note for attached papers; digest checked inside write lock when supplied. Internal adapter operation, not browser-callable.
 - `save_conversation_feedback` with `id,text,model,annotation_ids:[],source_session_id,source_message_id,page=1` → standard PDF note containing the native assistant reply and provenance. Requires an attached PDF and 1–28,000 text characters. Session and message identifiers must be 1–200 characters without control characters. Duplicate source Session/message pairs return the existing note without rewriting the PDF or its backup. The return includes `annotation_id,page,kind:'ai-feedback',model,annotation_ids:[],source_kind:'dsh-conversation',source_session_id,source_message_id,generated,comment,duplicate`; the reply body is in `comment`, while `text` retains its ordinary selected-PDF-text meaning. Internal worker operation: call through the verified native-conversation adapter, never browser JSON.
@@ -28,10 +34,51 @@ Core actions:
 
 Node additions:
 
+- `metadata_lookup` with `id` → `{item,warnings,provenance}`. Reads the current item, resolves its saved DOI or URL and returns an editable draft without catalog updates or PDF writes. Existing DOI requires an exact DOI match; otherwise the normalized title must match exactly and contain at least eight characters. It fills only missing bibliographic values/date keys, keeps manual authors and JCR, and adds missing author affiliations only when both lists have one exact name match. It rereads current metadata after the network request so intervening manual edits survive; changed DOI/URL requires retry. Missing identifiers, unavailable metadata, identity mismatch and drafts above 256 KiB return actionable errors. Save reviewed fields through `update`; lookup alone never saves them.
 - `cite` with `ids:[...],format='apa'|'biblatex'|'csl-json'` → `{text,html?,filename,mime}`
 - `export_library` with `format='biblatex'|'csl-json'` → `{text,filename,mime,count}`; consistent metadata snapshot, citation formatter batches100 in short-lived processes, max10000 records
 - `import` with exactly one of `doi`, `url`, `path`, `items`, or `content_base64`. `url` accepts public HTTP(S), DOI and arXiv identifiers. A downloaded PDF is parsed before catalog insertion. Local PDFs use bounded inspection, optionally enrich from Crossref only after exact normalized parsed-title matching, and preserve portable user metadata. Results extend the core envelope with `acquisition:{status:'downloaded'|'metadata_only'|'reused',...}` and warnings. Always use `item.pdf` to determine whether a managed PDF exists. Metadata-only imports do not imply a saved full text.
 - `ai_feedback` with `id,annotation_ids?,provider,model,reasoning_effort?` is the compatibility path for independent annotation feedback. It invokes the configured LLM service and persists a complete result after checking the annotation snapshot; it does not create or continue a native conversation. Optional `session_id` is attribution, not a server route resolver. The installed Harness reader uses the `chat_*` operations below for its conversation workflow.
+
+## Research metadata and graph records
+
+`author`, `editor` and `translator` accept up to 300 people. Each person's `affiliation` is an array of at most 30 `{name,id?,ror?,source?}` records; institution names are limited to 500 characters, optional identity/source text to 2,000. `publication_dates` accepts only `{published?,online?,print?,received?,accepted?}` with calendar-valid `YYYY`, `YYYY-MM` or `YYYY-MM-DD` values. Missing dates stay absent; no month or day is synthesized.
+
+`journal_rankings` holds at most 30 `{system:'JCR',year,category,quartile,source,verified_at?}` records. Year is an integer from 1900 to 9999, category is required and at most 500 characters, quartile is `Q1|Q2|Q3|Q4`, and the required source is at most 2,000 characters. Optional `verified_at` is an ISO date or datetime. Catalog metadata is capped at 256 KiB. Rankings must come from a sourced import or manual entry; lookup does not infer them from citation counts, an impact factor or publisher prose.
+
+Crossref supplies author affiliations and explicit publication/online/print/accepted fields. HTML lookup uses explicit citation author-institution and date tags; it never treats registry creation/deposit time or ordinary page text as a manuscript date. arXiv's original submission date remains its preprint `issued` date, not a journal `publication_dates` value. The reusable Node `resolveMetadata(target, options)` returns `{status:'metadata_only'|'unavailable',metadata?,provenance,warnings}` for a DOI, arXiv identifier or public landing URL. It creates no files, requests at most one landing page in addition to the identifier API, skips known PDF candidates, closes declared PDF responses before reading their bodies, and stops signature-detected PDFs. Existing public-network limits apply. This is source retrieval; `metadata_lookup` adds the current-record identity and merge checks.
+
+Editable graph nodes return `{id,paper_id,type,label,description,evidence,provenance:'user-asserted',editable:true,created,modified}`. Editable edges return the same ownership/provenance fields with `source,target,relation` instead of node fields. Node labels are required and at most 500 characters; descriptions are at most 4,000. Evidence is `{page?,quote?,note?,source?,annotation_id?}`: page is `null` or a known positive integer up to 100,000, quote allows 4,000 characters, note 2,000, source 1,000 and annotation ID 200. Unknown page locations remain `null`; graph evidence does not itself verify that a passage occurs there.
+
+Each paper stores at most 2,000 reader nodes and 2,000 reader relationships. Metadata-derived nodes are read-only, paper-scoped and distinct from reader assertions; matching names alone do not establish a shared person identity. Metadata changes can leave an existing reader relationship's endpoint unavailable: the record remains stored and the projection reports a warning instead of rebinding it to a different author. `truncated:true` also covers omitted nodes/edges and ambiguous identities. See the [workbench contract](ui-review-design.md) for the reading and maintenance workflow.
+
+## Native Harness tools
+
+The plugin registers 17 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
+
+| Tool | Arguments | Node action |
+|---|---|---|
+| `library_search` | `query?,limit?,offset?,sort?,order?,archived?` | `list` |
+| `library_get` | `id,include_archived?` | `get` |
+| `library_create` | `metadata` with required `title` | `create` |
+| `library_update` | `id,metadata` | `update` |
+| `library_archive` | `id` | `archive` |
+| `library_restore` | `id` | `restore` |
+| `library_import` | Exactly one of `path`, `doi`, `url` | `import` |
+| `library_cite` | `ids,format` | `cite` |
+| `library_annotations` | `id` | `annotations` |
+| `library_annotate` | `id,page,type,rects,text?,comment?,author?,color?` | `annotate` |
+| `library_graph` | `id?,limit?` | `graph` |
+| `library_graph_node_put` | `id,node_id?,type,label,description?,evidence?` | `graph_node_put` |
+| `library_graph_node_delete` | `id,node_id` | `graph_node_delete` |
+| `library_graph_edge_put` | `id,edge_id?,source,target,relation,evidence?` | `graph_edge_put` |
+| `library_graph_edge_delete` | `id,edge_id` | `graph_edge_delete` |
+| `library_link` | `source,target,relation,note?` | `link` |
+| `library_feedback` | `id,annotation_ids?,provider?,model?,reasoning_effort?` | `ai_feedback` |
+
+Tool metadata is a closed subset: `title,type,citekey,DOI,URL,abstract,author,editor,container-title,publisher,volume,issue,page,issued,tags,publication_dates,journal_rankings`. Its person schema accepts `family,given,literal,ORCID,affiliation`, with affiliation `{name,ror?,source?}`. Tool `issued` uses CSL `date-parts`. Graph evidence uses the closed schema above. Paths and runtime state cannot enter structured metadata. Each tool request is capped at 128 KiB before dispatch; core field limits still apply. `rects` is required for `library_annotate`, including an empty array for a page note.
+
+Mutation tools pass through the configured native approval pipeline; `requireToolApproval` defaults to true and preserves any existing denial. Read tools do not start a model. `library_feedback` uses the calling Agent's configured model route by default and remains the compatibility feedback operation, not `chat_send`. `metadata_lookup` is a Node/browser operation, not an additional registered native tool.
 
 ## Native paper conversations
 
@@ -89,4 +136,4 @@ The version1 `paper-library:conversation-action` / `paper-library:conversation-r
 
 The reference codec serializes the same token. Harness persists a string draft, so reload currently restores ordinary text; a dock inspector still permits on-demand preview and page navigation. The plugin does not claim automatic chip reconstruction. The inspector uses additive `conversation.input.dock`; it does not replace the main input or history renderers. Authenticated parent `paper-library:reference-open` messages carry `{paperId,page,snapshot_id}` to reveal the source in the reader. A root-owned reader snapshot retains `{paperId,page,tab,chatDraft,chatContext:{annotationRefs:[{id,version}],selection?},annotationDraft?}` within 256 KiB, excluding PDF images. Separately, the reader stores up to 12 paper drafts within a combined 256 KiB browser budget. No credentials cross these protocols.
 
-UI relative base: embedded Harness `/api/paper-library/` POST `api` or `upload`; standalone `/` with the same relative routes. Download GET `pdf/<encoded item id>`. Static `app.js,paper-chat.js,style.css,index.html`. No external fonts/CDNs or client PDF worker.
+UI relative base: embedded Harness `/api/paper-library/` POST `api` or `upload`; standalone `/` with the same relative routes. Download GET `pdf/<encoded item id>`. Static assets include `app.js,paper-chat.js,workbench.js,knowledge-graph.js`, their local styles and `index.html`. No external fonts/CDNs or client PDF worker. Table selection reads catalog metadata only; explicit reading opens one PDF page and the existing per-paper conversation.

@@ -1,0 +1,36 @@
+{
+  "verified_at": "2026-09-14T15:44:15.072Z",
+  "checks": [
+    "compact-current-paper-toolbar-cards-title-and-sourced-metadata",
+    "741px-reader-has-no-document-horizontal-overflow",
+    "server-sort-search-40-row-pagination-and-metadata-only-selection",
+    "manual-create-rich-metadata-edit-archive-and-restore-through-visible-ui",
+    "ordinary-metadata-edits-preserve-affiliation-provenance",
+    "typed-scientific-nodes-metadata-projections-directed-evidence-edge-persist",
+    "graph-evidence-returns-to-known-pdf-page",
+    "430-and-1400px-reading-layout-has-no-document-overflow",
+    "fresh-page-reloads-saved-graph-and-rich-metadata",
+    "visible-node-edit-preserves-source-and-type-filter-restores-all-relations",
+    "visible-relation-edit-and-delete-preserve-direction-sources-and-endpoint-nodes",
+    "visible-node-delete-and-fresh-reload-retain-edits-and-deletions-with-pdf-intact",
+    "no-browser-runtime-errors"
+  ],
+  "viewports": [
+    [
+      741,
+      597
+    ],
+    [
+      430,
+      800
+    ],
+    [
+      1400,
+      950
+    ]
+  ],
+  "browser_errors": [],
+  "model_requests": 0,
+  "scope": "Synthetic catalog and PDF only; no external metadata lookup, no formal user validation",
+  "screenshots": ".local/workbench-browser-cBntu9"
+}
