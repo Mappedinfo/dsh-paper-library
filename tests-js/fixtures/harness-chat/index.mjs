@@ -22,16 +22,24 @@ class ReadingAdapter extends LlmAdapter {
       snapshotId: message.source.paperLibraryReference.snapshot_id,
       text: message.content.filter(block => block.type === 'text').map(block => block.text).join('\n').slice(0, 4000),
     })).slice(-8)
+    const prompt = options.messages.flatMap(message => message.content.filter(block => block.type === 'text').map(block => block.text)).join('\n')
+    let reply = REPLY
+    if (prompt.includes('SOURCE_JSON:\n')) {
+      const source = JSON.parse(prompt.slice(prompt.lastIndexOf('SOURCE_JSON:\n') + 'SOURCE_JSON:\n'.length)).text
+      const polish = prompt.includes('ORIGINAL LANGUAGE')
+      reply = JSON.stringify({ result: polish ? source : '合成翻译：该估计仍存在认识不确定性。', explanation: 'Synthetic deterministic language fixture; no model-quality claim.', vocabulary: /\bEpistemic\b/i.test(source) ? [{ term: 'Epistemic', meaning: '认识上的；有关知识的', source_sentence: source }] : [] })
+      this.observation.language = [...this.observation.language, { provider: options.provider, model: options.model, maxTokens: options.maxTokens, mode: polish ? 'polish' : 'translate' }].slice(-8)
+    }
     yield { type: 'block-start', index: 0, blockType: 'text' }
-    yield { type: 'text-delta', index: 0, text: REPLY }
-    yield { type: 'block-end', index: 0, block: { type: 'text', text: REPLY } }
+    yield { type: 'text-delta', index: 0, text: reply }
+    yield { type: 'block-end', index: 0, block: { type: 'text', text: reply } }
     yield { type: 'finish', reason: { kind: 'stop' } }
   }
 }
 
 /** Test-only authenticated booleans make cold lifecycle assertions independent from plugin receipts. */
 export function apply(ctx) {
-  const observation = { generations: 0, references: [] }
+  const observation = { generations: 0, references: [], language: [] }
   ctx.effect(() => ctx.llm.registerAdapter([PROVIDER], new ReadingAdapter(observation)), 'paper-library: deterministic test model')
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/api/paper-chat-fixture', handler(req, res) {
@@ -41,7 +49,7 @@ export function apply(ctx) {
       const ids = url.searchParams.getAll('session')
       if (req.method !== 'GET' || ids.length > 12 || ids.some(id => !/^paper-library-[a-f0-9]{40}$/.test(id))) { res.writeHead(400); res.end(); return }
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ generations: observation.generations, references: observation.references, observations: ids.map(id => ({ sessionLoaded: Boolean(ctx.sessions.get(id)), agentLoaded: Boolean(ctx.agents.get(id)) })) }))
+      res.end(JSON.stringify({ generations: observation.generations, references: observation.references, language: observation.language, observations: ids.map(id => ({ sessionLoaded: Boolean(ctx.sessions.get(id)), agentLoaded: Boolean(ctx.agents.get(id)) })) }))
     },
   }), 'paper-library: cold-session fixture observations')
 }

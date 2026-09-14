@@ -1,0 +1,31 @@
+{
+  "verified_at": "2026-09-14T16:55:31.113Z",
+  "checks": [
+    "selected-pdf-text-translates-directly-through-authoritative-paper-model",
+    "only-source-grounded-difficult-words-accumulate-with-page-provenance",
+    "vocabulary-review-state-and-edited-meaning-persist-on-host",
+    "metadata-question-language-drafts-and-reading-page-flush-with-browser-storage-disabled",
+    "independent-browser-recovers-host-drafts-page-and-polishes-without-client-storage",
+    "vocabulary-is-shared-between-browsers-and-exportable",
+    "history-and-vocabulary-review-do-not-call-model",
+    "cross-browser-CAS-conflict-keeps-local-draft-and-does-not-overwrite-host",
+    "unsaved-conflict-content-has-explicit-local-export-recovery",
+    "language-and-vocabulary-views-fit-430-741-1400px",
+    "reload-recovers-durable-results-without-browser-cache",
+    "original-pdfs-unchanged-zero-external-requests-zero-browser-errors"
+  ],
+  "model_requests": 2,
+  "external_requests": 0,
+  "browser_errors": [],
+  "independent_browser_contexts": 2,
+  "local_storage_writes": 0,
+  "synthetic_originals_unchanged": true,
+  "screenshots": [
+    ".local/language-browser-uUiAl8/translation-selected-741.png",
+    ".local/language-browser-uUiAl8/vocabulary-cross-browser-741.png",
+    ".local/language-browser-uUiAl8/language-430.png",
+    ".local/language-browser-uUiAl8/language-1400.png",
+    ".local/language-browser-uUiAl8/language-741.png"
+  ],
+  "scope": "Actual Chromium UI and file storage with deterministic local model double; not real provider quality or formal user validation"
+}

@@ -31,6 +31,16 @@ const conversationCapability = status.result.paper_conversations === true
 const annotationReferences = status.result.annotation_references === true
 const workbench = status.result.catalog_management === true && status.result.typed_graph === true
 const readingWorkspace = status.result.reading_workspace === true
+const durableState = status.result.durable_state === true
+const languageLearning = status.result.language_learning === true
+if (flags.get('--require-language') === 'true') {
+  assert.equal(durableState,true,'Restarted host lacks durable local state')
+  assert.equal(languageLearning,true,'Restarted host lacks configured-model language learning')
+  for(const file of ['local-state.js','language-learning.js','language-learning.css']) {
+    const asset=await fetch(`${address.origin}/api/paper-library/${file}`,{headers,signal:AbortSignal.timeout(10000)})
+    assert.equal(asset.status,200,`Missing language/storage asset: ${file}`)
+  }
+}
 if (flags.get('--require-reader') === 'true') {
   assert.equal(readingWorkspace, true, 'Restarted host lacks the continuous reading workspace')
   for (const file of ['pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css']) {
@@ -54,6 +64,6 @@ if (flags.get('--require-chat') === 'true' || flags.get('--require-references') 
   assert.ok(script.includes('PaperLibraryChat'))
   if (flags.get('--require-references') === 'true') assert.ok(script.includes('chat_catalog') && script.includes('annotation_refs'))
 }
-const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
+const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, durableState, languageLearning, chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
 if (flags.get('--output')) await writeFile(flags.get('--output'), JSON.stringify(report, null, 2) + '\n')
 console.log(JSON.stringify(report))

@@ -26,6 +26,8 @@ await access(cli, constants.R_OK)
 for (const [name, relative] of [
   ['@deepseek-ai/dsh-tools', 'packages/core/tools'],
   ['@deepseek-ai/dsh-llm', 'packages/llm/llm'],
+  ['@deepseek-ai/dsh-home-paths', 'packages/util/home-paths'],
+  ['@deepseek-ai/dsh-atomic-write', 'packages/util/atomic-write'],
 ]) {
   const target = join(harness, relative)
   const link = join(project, 'node_modules', name)

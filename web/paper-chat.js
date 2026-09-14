@@ -3,21 +3,20 @@
 // This view projects one native Harness conversation. It never calls a model
 // directly and retains only a bounded recent transcript while the tab is visible.
 window.PaperLibraryChat = {
-  create({ api, toast, getPaper, getContext, getAnnotations, navigate, navigateReference, changed, savedFeedback, getLibrary }) {
+  create({ api, toast, getPaper, getContext, getAnnotations, navigate, navigateReference, changed, savedFeedback, getLibrary, persistence }) {
     const $ = id => document.getElementById(id);
-    const chat = { available: false, paperId: null, sessionId: null, visible: false, ticket: 0, notes: [], catalog: [], catalogReady: false, catalogTotal: 0, catalogTruncated: false, catalogPromise: null, offset: 0, selection: null, busy: false, timer: null, historyLoading: false, failed: null, ensure: null, suggestions: new Set() };
+    const chat = { available: false, paperId: null, sessionId: null, visible: false, ticket: 0, notes: [], catalog: [], catalogReady: false, catalogTotal: 0, catalogTruncated: false, catalogPromise: null, offset: 0, selection: null, busy: false, timer: null, historyLoading: false, failed: null, ensure: null, suggestions: new Set(), draftLoading:false, storedDraft:false };
     const drafts = new Map();
     const pending = new Map();
     const element = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     const nonce = () => window.crypto.randomUUID();
-    const preference = () => `paper-library:${getLibrary()}:auto-paper-conversation`;
-    const draftKey = () => `paper-library:${getLibrary()}:paper-drafts-v2`;
     const MAX_REFS = 1000, DRAFT_BYTES = 262144, PAGE_SIZE = 20;
     const isUserNote = note => !note.ai_generated && note.kind !== 'ai-feedback' && note.type !== 'ai_feedback';
     const status = (text, error = false) => { $('paper-chat-status').textContent = text; $('paper-chat-status').classList.toggle('error', error); };
     const isCurrent = (id, ticket) => id === chat.paperId && ticket === chat.ticket;
     function controls() {
-      const unavailable = !chat.available || !chat.sessionId;
+      const unavailable = !chat.available || !chat.sessionId || chat.draftLoading;
+      $('paper-chat-input').disabled=chat.draftLoading;
       for (const id of ['paper-chat-open', 'paper-chat-draft', 'paper-chat-send', 'paper-chat-auto']) $(id).disabled = unavailable || chat.busy;
       for (const id of ['paper-chat-new', 'paper-chat-choose', 'paper-chat-all']) $(id).disabled = unavailable || !getPaper()?.pdf;
       if (chat.catalogTruncated || chat.catalog.some(note => note.identity_reliable === false && note.identity_source === 'duplicate-pdf-nm')) $('paper-chat-all').disabled = true;
@@ -25,16 +24,15 @@ window.PaperLibraryChat = {
       $('legacy-feedback-controls').hidden = chat.available;
     }
     function remember(publish = true) {
-      if (!chat.paperId) return;
+      if (!chat.paperId || chat.draftLoading) return;
+      const value={ draft: $('paper-chat-input').value, annotationRefs: chat.notes.map(ref => ({ ...ref })), selection: chat.selection, failed: chat.failed };
+      if(window.PaperLibraryLocalState.byteLength(value)>DRAFT_BYTES){status('本篇草稿超过保存上限，内容仍保留在当前页面。请缩小选择后再切换论文。',true);return false;}
       drafts.delete(chat.paperId);
-      drafts.set(chat.paperId, { draft: $('paper-chat-input').value, annotationRefs: chat.notes.map(ref => ({ ...ref })), selection: chat.selection, failed: chat.failed });
+      drafts.set(chat.paperId,value);
+      const paperId=chat.paperId,ticket=chat.ticket;
+      if(persistence)void persistence.put(`chat:${paperId}`,value).then(()=>{if(isCurrent(paperId,ticket))chat.storedDraft=true;}).catch(error=>{if(isCurrent(paperId,ticket))status(`对话草稿尚未保存到本地服务：${error.message}`,true);});
       while (drafts.size > 12) drafts.delete(drafts.keys().next().value);
-      try {
-        let value = JSON.stringify([...drafts]);
-        while (value.length * 2 > DRAFT_BYTES && drafts.size > 1) { drafts.delete(drafts.keys().next().value); value = JSON.stringify([...drafts]); }
-        if (value.length * 2 > DRAFT_BYTES) { status('本篇草稿超过暂存上限，引用仍保留在当前页面。请缩小选择后再切换论文。', true); return false; }
-        localStorage.setItem(draftKey(), value);
-      } catch { status('浏览器未能持久保存草稿，关闭页面前请发送或复制问题。', true); }
+      while(window.PaperLibraryLocalState.byteLength([...drafts])>DRAFT_BYTES&&drafts.size>1)drafts.delete(drafts.keys().next().value);
       if (publish) return changed();
     }
     function contextLabel() {
@@ -56,14 +54,6 @@ window.PaperLibraryChat = {
     function validRefs(value) {
       if (!Array.isArray(value) || value.length > MAX_REFS) return [];
       return value.filter(ref => ref && typeof ref.id === 'string' && ref.id.length <= 160 && typeof ref.version === 'string' && ref.version.length <= 160).map(ref => ({ id: ref.id, version: ref.version }));
-    }
-    function loadDrafts() {
-      if (drafts.size) return;
-      try {
-        const raw = localStorage.getItem(draftKey());
-        if (!raw || raw.length * 2 > DRAFT_BYTES) return;
-        for (const [id, value] of JSON.parse(raw).slice(-12)) if (typeof id === 'string' && value && typeof value.draft === 'string' && value.draft.length <= 12000) drafts.set(id, { ...value, annotationRefs: validRefs(value.annotationRefs) });
-      } catch { /* A malformed local draft cannot replace PDF or session data. */ }
     }
     async function catalog(force = false) {
       if (!chat.available || !chat.paperId || !getPaper()?.pdf) return [];
@@ -321,13 +311,20 @@ window.PaperLibraryChat = {
       // The outer reader has already selected the new paper. Keep the previous
       // draft locally without publishing it under the new paper's identity.
       remember(false); stopTimer();
-      loadDrafts();
       chat.paperId = item.id; chat.sessionId = null; ++chat.ticket; chat.catalog = []; chat.catalogReady = false; chat.catalogTotal = 0; chat.catalogTruncated = false; chat.catalogPromise = null; chat.offset = 0; chat.usageRevision = null; chat.suggestions = new Set(); chat.busy = false;
-      const previous = drafts.get(item.id);
+      const ticket=chat.ticket;let previous=drafts.get(item.id),preferences=null;
+      chat.storedDraft=false;chat.draftLoading=Boolean(persistence);controls();
+      if(persistence){
+        chat.notes=[];chat.selection=null;chat.failed=null;$('paper-chat-input').value='';$('paper-chat-messages').replaceChildren();contextLabel();status('正在读取这篇论文的对话草稿…');
+        try{[previous,preferences]=await Promise.all([persistence.get(`chat:${item.id}`),persistence.get('preferences')]);if(!isCurrent(item.id,ticket))return;chat.storedDraft=previous!==null;}
+        catch(error){if(isCurrent(item.id,ticket)){chat.storedDraft=true;status(`暂时无法读取对话草稿：${error.message}。请点击刷新重试。`,true);}return;}
+      }
+      if(previous&&(!Array.isArray(previous.annotationRefs)||typeof previous.draft!=='string'||previous.draft.length>12000)){status('保存的对话草稿格式无效，请先导出并检查本地状态。',true);return;}
+      chat.draftLoading=false;
       chat.notes = validRefs(previous?.annotationRefs); chat.selection = previous?.selection || null; chat.failed = previous?.failed || null;
       chat.historyKey = undefined;
       $('paper-chat-input').value = previous?.draft || ''; $('paper-chat-messages').replaceChildren(); closeDrawer(); contextLabel(); controls();
-      try { $('paper-chat-auto').checked = localStorage.getItem(preference()) === 'true'; } catch { $('paper-chat-auto').checked = false; }
+      $('paper-chat-auto').checked = preferences?.['auto-paper-conversation']===true||preferences?.['auto-paper-conversation']==='true';
       if (!chat.available) { status('请从 DSH 右侧的文献库打开，便可为每篇论文建立对话。'); return; }
       status('正在准备这篇论文的 DSH 对话…');
       try { await ensure(item.id); if (chat.paperId !== item.id) return; await catalog(); if (chat.visible) await history(); } catch (error) { if (chat.paperId === item.id) status(error.message, true); }
@@ -347,7 +344,7 @@ window.PaperLibraryChat = {
     $('paper-chat-input').addEventListener('input', remember);
     $('paper-chat-open').addEventListener('click', () => openMain());
     $('paper-chat-draft').addEventListener('click', () => openMain(true));
-    $('paper-chat-refresh').addEventListener('click', async () => { try { await catalog(true); await history(); } catch { /* status shown */ } });
+    $('paper-chat-refresh').addEventListener('click', async () => { try { if(chat.draftLoading){await paperOpened(getPaper());return;}await catalog(true); await history(); } catch { /* status shown */ } });
     $('paper-chat-clear-context').addEventListener('click', () => { chat.notes = []; chat.selection = null; contextLabel(); remember(); });
     $('discuss-all-notes').addEventListener('click', () => { navigate('conversation'); void openDrawer(); });
     $('draft-all-notes').addEventListener('click', async () => { if (await addAll()) await openMain(true); });
@@ -362,7 +359,7 @@ window.PaperLibraryChat = {
     $('paper-reference-prev').addEventListener('click', () => { chat.offset = Math.max(0, chat.offset - PAGE_SIZE); renderCatalog(); });
     $('paper-reference-next').addEventListener('click', () => { chat.offset += PAGE_SIZE; renderCatalog(); });
     $('paper-chat-auto').addEventListener('change', () => {
-      try { localStorage.setItem(preference(), String($('paper-chat-auto').checked)); } catch { toast('本次选择已生效，但浏览器未允许保存偏好。'); }
+      if(persistence)void persistence.patch('preferences',{'auto-paper-conversation':$('paper-chat-auto').checked}).catch(error=>toast(`自动发送偏好尚未保存：${error.message}`,true));
       if ($('paper-chat-auto').checked) toast('已开启。新保存的批注会发送到这篇论文的 DSH 对话并使用模型额度。');
     });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') stopTimer(); else if (chat.visible) void history(); });
@@ -371,6 +368,7 @@ window.PaperLibraryChat = {
       setAvailable(value) { chat.available = Boolean(value); controls(); },
       available: () => chat.available,
       paperOpened,
+      hasStoredDraft:()=>chat.storedDraft,
       visible(value) { chat.visible = value; if (value) void history(); else stopTimer(); },
       useAnnotation: useNote,
       hasAnnotation: id => chat.notes.some(ref => ref.id === id),
@@ -396,7 +394,7 @@ window.PaperLibraryChat = {
         contextLabel(); remember();
       },
       restoreDraft(text) { $('paper-chat-input').value = typeof text === 'string' ? text.slice(0, 12000) : ''; remember(); },
-      dispose() { stopTimer(); for (const request of pending.values()) { clearTimeout(request.timer); request.reject(new Error('阅读面板已关闭。')); } pending.clear(); },
+      dispose() { remember(false);stopTimer(); for (const request of pending.values()) { clearTimeout(request.timer); request.reject(new Error('阅读面板已关闭。')); } pending.clear(); },
     };
   },
 };

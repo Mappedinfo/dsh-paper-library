@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 // Execute the shipped workbench without changing its implementation. This small
 // DOM double checks state/data contracts; the browser fixture owns visual checks.
 const source = await readFile(new URL('../web/workbench.js', import.meta.url), 'utf8');
+const localStateSource = await readFile(new URL('../web/local-state.js', import.meta.url), 'utf8');
 const appSource = await readFile(new URL('../web/app.js', import.meta.url), 'utf8');
 const plain = value => JSON.parse(JSON.stringify(value));
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -15,7 +16,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function environment({ respond, active = null, storage = new Map(), library = 'synthetic-library', panelHost } = {}) {
+function environment({ respond, active = null, storage = new Map(), library = 'synthetic-library', panelHost, persistent=false, persistence:customPersistence } = {}) {
   const ids = new Map(), selectors = new Map(), requests = [], changes = [], toasts = [], loads = [], opens = [], selections = [];
   class Element {
     constructor(tag = 'div') {
@@ -43,7 +44,7 @@ function environment({ respond, active = null, storage = new Map(), library = 's
     closest(selector) { if (selector === this.tagName.toLowerCase()) return this; return this.parentNode?.closest(selector) || null; }
     addEventListener(type, fn) { if (!this.listeners.has(type)) this.listeners.set(type, []); this.listeners.get(type).push(fn); }
     async dispatch(type, args = {}) { const event = { preventDefault() {}, stopImmediatePropagation() { this.stopped = true; }, ...args }; for (const fn of this.listeners.get(type) || []) { await fn(event); if (event.stopped) break; } }
-    matches(selector) { if (selector === '[data-rank-field]') return Boolean(this.dataset.rankField); return selector === this.tagName.toLowerCase(); }
+    matches(selector) { if(selector.includes(','))return selector.split(',').some(value=>this.matches(value.trim()));if (selector === '[data-rank-field]') return Boolean(this.dataset.rankField); return selector === this.tagName.toLowerCase(); }
     querySelectorAll(selector) { return this.children.flatMap(child => [...(child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]); }
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
     showModal() { this.open = true; }
@@ -60,10 +61,12 @@ function environment({ respond, active = null, storage = new Map(), library = 's
   for (const id of ['copy-apa','export-bib','download-pdf','metadata-open','attach-open']) selector('.paper-actions').append(element(id, id === 'download-pdf' ? 'a' : 'button'));
   const exportLabel = new Element('label'); exportLabel.append(element('export-notes', 'select')); body.append(exportLabel);
   const document = { body, getElementById: element, createElement: tag => new Element(tag), querySelector: selector, querySelectorAll: value => body.querySelectorAll(value) };
-  const window = {localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)}};
+  const window = {localStorage:{getItem(){throw new Error('Use server state');},setItem(){throw new Error('Browser writes are forbidden');}}};
   const state = { active, library, items: active ? [active] : [], sort: 'modified', order: 'desc', archived: false, offset: 0, limit: 40, tab: 'reader' };
+  vm.runInNewContext(localStateSource,{window,TextEncoder});
   vm.runInNewContext(source, { window, document, structuredClone }, { filename: 'web/workbench.js' });
   const workbench = window.PaperWorkbench.create({ state,
+    persistence:customPersistence||(persistent?{get:async key=>storage.has(`${library}:${key}`)?plain(storage.get(`${library}:${key}`)):null,put:async(key,value)=>{storage.set(`${library}:${key}`,plain(value));return value;}}:undefined),
     ...panelHost,
     api: async (action, data) => { requests.push({ action, ...plain(data) }); return respond ? respond(action, data) : { id: data.id || 'created', ...data.metadata, pdf: false }; },
     loadList: async () => { loads.push(plain(state)); }, openPaper: async id => opens.push(id),
@@ -77,6 +80,22 @@ const original = () => ({ id: 'paper-a', title: 'Synthetic title', pdf: true, ty
   author: [{ family: 'Example', given: 'Alice', ORCID: 'synthetic-orcid', affiliation: [{ name: 'Synthetic University', ror: 'synthetic-ror', source: 'Synthetic title page' }] }],
   issued: { 'date-parts': [[2026, 9, 1]] }, publication_dates: { published: '2026-09-01', received: '2025-10', accepted: '2026-08-02' },
   journal_rankings: [{ system: 'JCR', year: 2025, category: 'Synthetic category', quartile: 'Q2', source: 'Synthetic fixture', verified_at: '2026-09-14' }],
+});
+
+test('metadata service loading disables fields and a late paper response cannot replace the current editor',async()=>{
+  const first=deferred(),second=deferred(),paper=original(),next={...original(),id:'paper-b',title:'Paper B'};
+  const f=environment({active:paper,persistence:{get:key=>key==='metadata:paper-a'?first.promise:second.promise,put:async()=>{}}});
+  const loading=f.workbench.edit(paper);assert.equal(f.element('edit-title').disabled,true);assert.equal(f.form.inert,true);
+  const switching=f.workbench.edit(next);second.resolve(null);await switching;
+  assert.equal(f.element('edit-title').disabled,false);assert.equal(f.element('edit-title').value,'Paper B');
+  first.resolve({fields:{'edit-title':'Late A'}});await loading;
+  assert.equal(f.element('edit-title').value,'Paper B');assert.equal(f.state.active.id,'paper-b');
+});
+
+test('closing metadata during service loading cancels the late editor without creating a blank draft',async()=>{
+  const load=deferred(),writes=[],paper=original();const f=environment({active:paper,persistence:{get:()=>load.promise,put:async(...args)=>writes.push(args)}});
+  const loading=f.workbench.edit(paper);f.workbench.metadataVisibility(false);load.resolve(null);await loading;
+  assert.equal(f.form.inert,false);assert.equal(f.element('edit-title').disabled,false);assert.deepEqual(writes,[]);
 });
 
 test('metadata title edit preserves supplied affiliations, their provenance, full issued date and JCR verification', async () => {
@@ -167,14 +186,14 @@ test('new metadata entries hide the previously selected paper summary and restor
 });
 
 test('metadata drafts survive reload with raw invalid fields and author evidence, isolated by library', async () => {
-  const storage=new Map(),paper=original();const f=environment({active:paper,storage});
-  f.workbench.edit(paper);f.element('edit-title').value='Draft title';f.element('edit-received').value='2026-';
+  const storage=new Map(),paper=original();const f=environment({active:paper,storage,persistent:true});
+  await f.workbench.edit(paper);f.element('edit-title').value='Draft title';f.element('edit-received').value='2026-';
   await f.form.dispatch('input');
-  const restored=environment({active:paper,storage});restored.workbench.edit(paper);
+  const restored=environment({active:paper,storage,persistent:true});await restored.workbench.edit(paper);
   assert.equal(restored.element('edit-title').value,'Draft title');assert.equal(restored.element('edit-received').value,'2026-');
   restored.element('edit-received').value='2026-01';await restored.form.dispatch('submit');
   assert.deepEqual(restored.requests[0].metadata.author,paper.author);
-  const other=environment({active:paper,storage,library:'another-library'});other.workbench.edit(paper);
+  const other=environment({active:paper,storage,library:'another-library',persistent:true});await other.workbench.edit(paper);
   assert.equal(other.element('edit-title').value,paper.title);
 });
 
@@ -197,22 +216,22 @@ test('typing or closing during metadata lookup prevents its late response from r
 });
 
 test('metadata save completion retains new edits made while saving the same paper', async () => {
-  const done=deferred(),paper=original(),calls=[];const f=environment({active:paper,respond:()=>done.promise,panelHost:{openMetadataPanel:()=>{},closeMetadataPanel:()=>calls.push('close')}});
-  f.workbench.edit(paper);f.element('edit-title').value='Submitted';const pending=f.form.dispatch('submit');await flush();
+  const done=deferred(),paper=original(),calls=[];const f=environment({active:paper,persistent:true,respond:()=>done.promise,panelHost:{openMetadataPanel:()=>{},closeMetadataPanel:()=>calls.push('close')}});
+  await f.workbench.edit(paper);f.element('edit-title').value='Submitted';const pending=f.form.dispatch('submit');await flush();
   f.element('edit-title').value='More editing';await f.form.dispatch('input');
   done.resolve({...paper,title:'Submitted'});await pending;
   assert.deepEqual(calls,[]);assert.equal(f.element('edit-title').value,'More editing');
-  const reloaded=environment({active:paper,storage:f.storage});reloaded.workbench.edit(paper);assert.equal(reloaded.element('edit-title').value,'More editing');
+  const reloaded=environment({active:paper,storage:f.storage,persistent:true});await reloaded.workbench.edit(paper);assert.equal(reloaded.element('edit-title').value,'More editing');
 });
 
-test('metadata draft cache stays within 12 papers and 256 KiB and rejects an oversized switch', async () => {
-  const f=environment();for(let i=0;i<15;i++){f.workbench.edit({...original(),id:`synthetic-${i}`});f.element('edit-title').value=`Draft ${i}`;await f.form.dispatch('input');}
-  const raw=[...f.storage.values()][0],stored=JSON.parse(raw);assert.equal(stored.length,12);assert.ok(raw.length*2<=256*1024);
-  assert.equal(stored[0][0],'synthetic-3');
-  f.element('edit-title').value='x'.repeat(140000);await f.form.dispatch('input');
-  assert.equal(f.workbench.edit({...original(),id:'must-not-overwrite'}),false);
-  assert.equal(f.element('edit-title').value.length,140000);assert.match(f.toasts.at(-1)[0],/256 KiB/);
-  assert.ok([...f.storage.values()][0].length*2<=256*1024);
+test('metadata draft memory eviction never removes durable papers and an oversized switch remains explicit', async () => {
+  const f=environment({persistent:true});for(let i=0;i<15;i++){await f.workbench.edit({...original(),id:`synthetic-${i}`});f.element('edit-title').value=`Draft ${i}`;await f.form.dispatch('input');}
+  assert.equal(f.storage.size,15);assert.ok([...f.storage.values()].every(value=>JSON.stringify(value).length*2<=256*1024));
+  await f.workbench.edit({...original(),id:'synthetic-0'});assert.equal(f.element('edit-title').value,'Draft 0');
+  f.element('edit-title').value='中'.repeat(90000);await f.form.dispatch('input');
+  assert.equal(await f.workbench.edit({...original(),id:'must-not-overwrite'}),false);
+  assert.equal(f.element('edit-title').value.length,90000);assert.match(f.toasts.at(-1)[0],/256 KiB/);
+  assert.ok([...f.storage.values()].every(value=>JSON.stringify(value).length*2<=256*1024));
 });
 
 test('unsaved new entries and ranking removals are restored without inventing verified metadata', async () => {
@@ -286,7 +305,7 @@ test('table selection cannot publish the previous reader chat draft under the se
   const end = appSource.indexOf('async function restoreReaderState()', start);
   assert.ok(start >= 0 && end > start);
   const messages = [];
-  const context = { readingPanels:null, restoringReader: false, readerPaperId: 'reader-paper-a', state: { active: { id: 'selected-paper-b' }, page: 3, tab: 'conversation' },
+  const context = { persistence:null,readerStateReady:false,readingPanels:null, restoringReader: false, readerPaperId: 'reader-paper-a', state: { active: { id: 'selected-paper-b' }, page: 3, tab: 'conversation' },
     workbenchUI: { isTable: () => true }, paperChatUI: { draft: () => 'Private draft for previous paper A', context: () => ({ annotationRefs: [{ id: 'note-from-A' }] }) },
     window: { parent: { postMessage: message => messages.push(message) }, location: { origin: 'http://localhost:43121' } },
     $: () => ({ open: false }), Blob,

@@ -14,6 +14,8 @@ const commands=[
   ['pdf_reader_syntax',process.execPath,['--check','web/pdf-reader.js']],
   ['reading_panels_syntax',process.execPath,['--check','web/reading-panels.js']],
   ['reading_shell_syntax',process.execPath,['--check','web/reading-shell.js']],
+  ['local_state_syntax',process.execPath,['--check','web/local-state.js']],
+  ['language_learning_syntax',process.execPath,['--check','web/language-learning.js']],
 ];
 const checks=[];
 for(const[id,command,args]of commands){

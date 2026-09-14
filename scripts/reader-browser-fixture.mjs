@@ -41,7 +41,7 @@ async function stopServer() {
 }
 
 try {
-  server = spawn(process.execPath, ['src/server.mjs', '--port', '0', '--library', library], { cwd: project, stdio: ['ignore', 'pipe', 'pipe'] });
+  server = spawn(process.execPath, ['src/server.mjs', '--port', '0', '--library', library], { cwd: project, env:{...process.env,DSH_HOME:join(run,'home')}, stdio: ['ignore', 'pipe', 'pipe'] });
   const origin = await new Promise((accept, reject) => {
     startTimer = setTimeout(() => reject(new Error('Synthetic server startup timed out')), 15000);
     server.stdout.on('data', bytes => { serverLog += bytes.toString(); const match = serverLog.match(/http:\/\/127\.0\.0\.1:\d+/); if (match) accept(match[0]); });
@@ -209,12 +209,14 @@ try {
     await page.locator('#catalog-sort').selectOption('title'); await page.locator('#next-list').click();
     await page.locator('#list-range').filter({ hasText: '41–44 / 44' }).waitFor();
     await page.locator('#catalog-create').click(); await page.locator('#edit-title').waitFor();
+    await page.waitForFunction(()=>!document.getElementById('metadata-form').inert);
     await page.locator('#edit-title').fill('Synthetic reader CRUD record'); await page.locator('#metadata-form button[type="submit"]').click();
     await page.locator('#metadata-dialog').waitFor({ state: 'hidden' });
     if (!(await page.locator('#catalog-table').isVisible())) await page.locator('#workspace-library').click();
     await page.locator('#search').fill('Synthetic reader CRUD');
     await page.locator('#catalog-table .table-title').filter({ hasText: 'Synthetic reader CRUD record' }).waitFor();
     let row = page.locator('#catalog-table tbody tr').first(); await row.getByRole('button', { name: '编辑', exact: true }).click();
+    await page.waitForFunction(()=>!document.getElementById('metadata-form').inert);
     await page.locator('#edit-title').fill('Synthetic reader CRUD edited'); await page.locator('#metadata-form button[type="submit"]').click();
     await page.locator('#metadata-dialog').waitFor({ state: 'hidden' });
     if (!(await page.locator('#catalog-table').isVisible())) await page.locator('#workspace-library').click();

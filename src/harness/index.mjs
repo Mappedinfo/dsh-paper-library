@@ -8,6 +8,8 @@ import { createNodeHandler } from './http.mjs'
 import { registerLibraryTools } from './tools.mjs'
 import { registerBundledSkills } from './skills.mjs'
 import { createPaperChat } from './paper-chat.mjs'
+import { createLocalStateStore } from '../local-state.mjs'
+import { createLanguageLearning } from './language-learning.mjs'
 
 export const name = 'paper-library'
 export const inject = ['tools', 'llm']
@@ -22,6 +24,7 @@ export function apply(ctx, rawConfig = {}) {
     model: config.model,
     ai: createHarnessAI(ctx.llm, createUserMessage, config),
     models: signal => discoverModels(ctx.llm, signal),
+    localState: createLocalStateStore({ library: config.library, home: config.localStateHome }),
   }
   ctx.effect(() => registerLibraryTools(ctx, defineTool, dispatch, options, config), 'paper-library: tools')
   ctx.inject(['skills'], scoped => {
@@ -30,7 +33,9 @@ export function apply(ctx, rawConfig = {}) {
   ctx.inject(['connection', 'webServer', 'sessionController', 'workspaceRegistry', 'sessionPersistence', 'sessionProjections', 'sessions', 'agents', 'agentDefaultModel'], web => {
     const paperChat = createPaperChat(web, { library: config.library, python: config.python, dispatch, core, maxAnnotationCharacters: config.maxAnnotationCharacters })
     paperChat.install()
-    const fetchHandler = createFetchHandler({ ...options, paperChat, basePath: '/api/paper-library' })
+    const languageAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens })
+    const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, dispatch, library: config.library, python: config.python })
+    const fetchHandler = createFetchHandler({ ...options, paperChat, languageLearning, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',
       path: '/api/paper-library',

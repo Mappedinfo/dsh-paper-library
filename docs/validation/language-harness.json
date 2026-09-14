@@ -1,0 +1,23 @@
+{
+  "verified_at": "2026-09-14T16:49:58.940Z",
+  "ok": true,
+  "checks": [
+    "authenticated-language-service-uses-configured-cold-paper-session",
+    "two-language-operations-use-authoritative-model-and-8192-token-budget-without-starting-agents",
+    "history-vocabulary-and-same-request-replay-make-no-additional-model-calls",
+    "word-encounters-retain-paper-page-model-provenance-and-user-review-state",
+    "fresh-host-restart-recovers-results-vocabulary-and-request-identity-with-zero-replay-generations",
+    "synthetic-original-pdfs-remain-byte-identical"
+  ],
+  "deterministicModelGenerations": 2,
+  "replayGenerationsAfterHostRestart": 0,
+  "languageOutputTokenBudget": 8192,
+  "externalModelRequestsMade": 0,
+  "agentsStarted": 0,
+  "sourceData": "Fresh synthetic PDFs and test-only selected sentence",
+  "limitations": [
+    "Model routing and durability only; no real provider quality evaluation",
+    "Browser language interaction is validated separately"
+  ],
+  "isolated_hosts_stopped": true
+}

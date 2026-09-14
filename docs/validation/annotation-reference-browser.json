@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-14T16:19:07.274Z",
+  "verified_at": "2026-09-14T16:44:21.380Z",
   "ok": true,
   "checks": [
     "three-of-45-new-notes-across-pages-and-20-row-pagination",
@@ -22,43 +22,43 @@
     "samples": [
       {
         "stage": "initial-native-page",
-        "hostRssMiB": 546.578125,
-        "chromiumProcessRssSumMiB": 486.3125,
+        "hostRssMiB": 551.328125,
+        "chromiumProcessRssSumMiB": 465.65625,
         "chromiumProcessCount": 4,
-        "mainPageJSHeapUsedMiB": 31.894817352294922
+        "mainPageJSHeapUsedMiB": 31.518505096435547
       },
       {
         "stage": "reference-drawer-46-notes",
-        "hostRssMiB": 395.859375,
-        "chromiumProcessRssSumMiB": 577.984375,
+        "hostRssMiB": 403.734375,
+        "chromiumProcessRssSumMiB": 597.28125,
         "chromiumProcessCount": 4,
-        "mainPageJSHeapUsedMiB": 55.49983596801758
+        "mainPageJSHeapUsedMiB": 53.314395904541016
       },
       {
         "stage": "after-refresh-and-reference-inspector",
-        "hostRssMiB": 403.578125,
-        "chromiumProcessRssSumMiB": 715.484375,
+        "hostRssMiB": 415.640625,
+        "chromiumProcessRssSumMiB": 764.625,
         "chromiumProcessCount": 4,
-        "mainPageJSHeapUsedMiB": 41.8486328125
+        "mainPageJSHeapUsedMiB": 64.13236618041992
       },
       {
         "stage": "idle-after-three-completed-model-turns",
-        "hostRssMiB": 410.15625,
-        "chromiumProcessRssSumMiB": 726.671875,
+        "hostRssMiB": 420.0625,
+        "chromiumProcessRssSumMiB": 769.28125,
         "chromiumProcessCount": 4,
-        "mainPageJSHeapUsedMiB": 53.16762161254883
+        "mainPageJSHeapUsedMiB": 75.3414077758789
       }
     ],
-    "sampledMaxHostRssMiB": 546.578125,
-    "sampledMaxChromiumProcessRssSumMiB": 726.671875,
-    "sampledMaxMainPageJSHeapUsedMiB": 55.49983596801758,
+    "sampledMaxHostRssMiB": 551.328125,
+    "sampledMaxChromiumProcessRssSumMiB": 769.28125,
+    "sampledMaxMainPageJSHeapUsedMiB": 75.3414077758789,
     "scope": "Four samples in a synthetic 46-note browser walkthrough; browser process RSS double-counts shared memory. JS heap covers the main page renderer only. Neither is total physical application memory or a measured high-water mark."
   },
   "screenshots": [
-    ".local/paper-chat-test-home/runs/reference-browser-4f11c05a-745e-4081-ad9e-5613f1538ea0/reference-drawer-wide.png",
-    ".local/paper-chat-test-home/runs/reference-browser-4f11c05a-745e-4081-ad9e-5613f1538ea0/reference-drawer-narrow.png",
-    ".local/paper-chat-test-home/runs/reference-browser-4f11c05a-745e-4081-ad9e-5613f1538ea0/native-reference-chip.png",
-    ".local/paper-chat-test-home/runs/reference-browser-4f11c05a-745e-4081-ad9e-5613f1538ea0/native-restored-reference.png"
+    ".local/paper-chat-test-home/runs/reference-browser-d76cd3bb-0c76-4fda-ae34-7affe44532c9/reference-drawer-wide.png",
+    ".local/paper-chat-test-home/runs/reference-browser-d76cd3bb-0c76-4fda-ae34-7affe44532c9/reference-drawer-narrow.png",
+    ".local/paper-chat-test-home/runs/reference-browser-d76cd3bb-0c76-4fda-ae34-7affe44532c9/native-reference-chip.png",
+    ".local/paper-chat-test-home/runs/reference-browser-d76cd3bb-0c76-4fda-ae34-7affe44532c9/native-restored-reference.png"
   ],
   "limitations": [
     "Synthetic documents only; no real-library or model-quality claim",

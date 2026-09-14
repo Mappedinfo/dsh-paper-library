@@ -4,10 +4,32 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { dispatch, projectRoot } from './bridge.mjs';
+import { defaultLibrary, dispatch, projectRoot } from './bridge.mjs';
+import { createLocalStateStore, LocalStateError } from './local-state.mjs';
+import { createLanguageLearning } from './harness/language-learning.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
-for (const name of ['workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css','local-state.js','language-learning.js','language-learning.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+const languageActions = new Set(['language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
+const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:'];
+function browserStateKey(key, listPrefix = false) {
+  if (typeof key !== 'string' || !(key === 'preferences' || key === 'reader' || browserStatePrefixes.some(prefix => key.startsWith(prefix)) || /^migration:[a-f0-9]{64}$/.test(key) || (listPrefix && key === 'migration:'))) throw new LocalStateError('此状态类别不能直接从浏览器访问。', 'STATE_FORBIDDEN', 403);
+  return key;
+}
+async function stateRequest(store, input) {
+  if (input.action === 'state_get') return store.get(browserStateKey(input.key));
+  if (input.action === 'state_put') return store.put(browserStateKey(input.key), input.value, input.expected_revision);
+  if (input.action !== 'state_list') throw new LocalStateError('未知的本地状态操作。');
+  const prefix = browserStateKey(input.prefix, true);
+  // Exact singleton keys must not make a new namespace readable by prefix.
+  if (prefix === 'preferences' || prefix === 'reader') {
+    const offset = input.offset ?? 0, limit = input.limit ?? 20;
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10000 || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new LocalStateError('状态分页要求 offset 0–10000、limit 1–50。');
+    const record = await store.get(prefix), total = record.revision === 0 ? 0 : 1;
+    return { records: offset === 0 && total ? [record] : [], total, offset, limit, next_offset: null, hasMore: false, truncated: false };
+  }
+  return store.list({ prefix, offset: input.offset ?? 0, limit: input.limit ?? 20 });
+}
 const baseHeaders = {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
@@ -61,6 +83,10 @@ async function readBounded(request, maxBytes) {
 
 export function createFetchHandler(options = {}) {
   const basePath = (options.basePath || '').replace(/\/$/, '');
+  const localState = options.localState || createLocalStateStore({ library: options.library || defaultLibrary, home: options.localStateHome });
+  // Browsing saved learning data is local and does not initialize an AI route or
+  // paper conversation. Only the host-injected adapter may generate new output.
+  const learningRecords = options.languageLearning || createLanguageLearning({ store: localState, dispatch, library: options.library || defaultLibrary, python: options.python });
   return async function handle(request) {
     const url = new URL(request.url);
     if (options.loopbackOnly) {
@@ -84,11 +110,16 @@ export function createFetchHandler(options = {}) {
           // Browser cannot forge AI output or arbitrary worker internals.
           if (['save_feedback','save_conversation_feedback','export_pdf','inspect_pdf'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
           const chatAction = typeof input?.action === 'string' && input.action.startsWith('chat_');
+          const stateAction = typeof input?.action === 'string' && input.action.startsWith('state_');
+          const languageAction = languageActions.has(input?.action);
           if (chatAction && !options.paperChat) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板打开论文对话。'},400);
-          let result = chatAction
+          if (input?.action === 'language_generate' && !options.languageLearning) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
+          let result = stateAction ? await stateRequest(localState, input)
+            : languageAction ? await learningRecords(input, { signal: request.signal })
+            : chatAction
             ? await options.paperChat(input, { signal: request.signal })
             : await dispatch(input, { ...options, signal: request.signal });
-          if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true, catalog_management: true, typed_graph: true, reading_workspace: true };
+          if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true, catalog_management: true, typed_graph: true, reading_workspace: true, durable_state: true, learning_records: true, language_learning: Boolean(options.languageLearning) };
           return json({ok:true,result});
         } finally { jsonRequests--; }
       }
@@ -107,6 +138,9 @@ export function createFetchHandler(options = {}) {
       const [file,mime] = staticFiles[path];
       const body = await readFile(join(projectRoot,'web',file));
       return new Response(request.method === 'HEAD' ? null : body,{headers:{...baseHeaders,'Content-Type':mime}});
-    } catch(error) { return json({ok:false,error:error.message || '操作失败，请重试。'},400); }
+    } catch(error) {
+      const status = Number.isInteger(error.status) && error.status >= 400 && error.status <= 599 ? error.status : 400;
+      return json({ok:false,error:error.message || '操作失败，请重试。', ...(error.code ? {code:error.code} : {}), ...(error.code === 'STATE_CONFLICT' ? {current:error.current} : {}), ...(['failed','pending','committing'].includes(error.generation_status) ? {generation_status:error.generation_status} : {}), ...(typeof error.retry_with_new_request === 'boolean' ? {retry_with_new_request:error.retry_with_new_request} : {})},status);
+    }
   };
 }

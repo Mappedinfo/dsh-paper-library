@@ -29,7 +29,7 @@ function environment({width=741,storage=new Map()}={}) {
   const observers=[];window.ResizeObserver=class {constructor(fn){this.fn=fn;observers.push(this);}observe(){}disconnect(){this.disconnected=true;}};
   const document={body,createElement:tag=>new Element(tag)};
   vm.runInNewContext(source,{window,document},{filename:'web/reading-panels.js'});
-  const panels=window.PaperReadingPanels.create({root,annotationsRoot,conversationRoot,metadataRoot,onChatVisibility:value=>visibility.push(value),onPanelChange:value=>changes.push({...value}),toast:(...args)=>toasts.push(args)});
+  const panels=window.PaperReadingPanels.create({root,annotationsRoot,conversationRoot,metadataRoot,persistence:{get:async key=>storage.get(key)||null,patch:async(key,value)=>storage.set(key,{...storage.get(key),...value})},onChatVisibility:value=>visibility.push(value),onPanelChange:value=>changes.push({...value}),toast:(...args)=>toasts.push(args)});
   return {panels,root,body,old,original,annotationsRoot,conversationRoot,metadataRoot,visibility,changes,toasts,ids,window,storage,observers};
 }
 const paper={id:'synthetic-a',title:'Synthetic paper'};
@@ -41,7 +41,7 @@ test('reading sidebar moves original content and preserves listener identity whi
   assert.equal(f.annotationsRoot.hidden,false);assert.equal(f.metadataRoot.hidden,true);assert.equal(f.root.dataset.readingSide,'left');
   f.annotationsRoot.dispatch('click');f.ids.get('reading-panel-side').dispatch('click');
   assert.equal(clicks,1);assert.equal(f.root.dataset.readingSide,'right');assert.equal(f.annotationsRoot.hidden,false);
-  assert.equal(f.storage.get('paper-library:reading-panel-side:v1'),'right');
+  assert.equal(f.storage.get('preferences')['reading-panel-side'],'right');
   assert.equal(f.root.classList.contains('reading-panels-roomy'),false);
   f.root.clientWidth=1000;f.observers[0].fn();assert.equal(f.root.classList.contains('reading-panels-roomy'),true);
 });

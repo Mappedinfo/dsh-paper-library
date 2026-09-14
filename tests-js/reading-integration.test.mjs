@@ -15,7 +15,7 @@ const selectionSource=source.slice(source.indexOf('function showReaderSelection(
 function environment({table=false,readerId='paper-a',paper={id:'paper-a',pdf:true},panelValues={},snapshot=null}={}){
   const nodes=new Map(),calls=[],visibility=[],panels={annotations:false,metadata:false,chat:false,...panelValues};
   const element=id=>{if(!nodes.has(id))nodes.set(id,{hidden:false,open:false,value:'',dataset:{readingSide:'left'},classList:{toggle(){}},setAttribute(){},removeAttribute(){}});return nodes.get(id);};
-  const context={state:{active:paper,tab:'reader',page:1,pageData:null,models:[],annotations:[]},readerPaperId:readerId,readerRestore:snapshot,restoringReader:false,
+  const context={state:{active:paper,tab:'reader',page:1,pageData:null,models:[],annotations:[]},readerPaperId:readerId,readerRestore:snapshot,restoringReader:false,durableReaderLoaded:false,persistence:null,readerStateReady:false,
     $:element,document:{querySelectorAll:()=>[]},
     workbenchUI:{isTable:()=>table,setTable:value=>{table=value;calls.push(['table',value]);},header(){},edit:item=>{panels.metadata=true;calls.push(['edit',item.id]);}},
     readingPanels:{show:name=>{panels[name]=true;calls.push(['show',name]);},close:name=>{panels[name]=false;calls.push(['close',name]);},visible:name=>panels[name],setSide:side=>calls.push(['side',side])},
@@ -106,6 +106,21 @@ test('reader selection snapshots reject excess or invalid coordinates and detach
   assert.throws(()=>readerSnapshot({...base,readerSelection:{...selection,rects:[[1,2,NaN,4]]}}));
 });
 
+test('a durable paper chat draft wins over an older parent-frame handoff',async()=>{
+  const f=environment({snapshot:{paperId:'paper-a',page:1,tab:'reader',chatDraft:'Stale parent text',chatContext:{annotationRefs:[]}}});
+  f.context.paperChatUI.hasStoredDraft=()=>true;
+  await f.context.restoreReaderState();
+  assert.equal(f.calls.some(value=>value[0]==='draft'||value[0]==='context'),false);
+});
+
+test('a late saved-page restoration cannot attach paper A selection to newly opened paper B',async()=>{
+  const f=environment({snapshot:{paperId:'paper-a',page:3,tab:'annotations',readerSelection:{page:3,text:'Paper A only',rects:[[1,2,3,4]]}}});
+  f.context.requestPage=async()=>{f.context.state.active={id:'paper-b',pdf:true};};
+  await f.context.restoreReaderState();
+  assert.equal(f.context.state.active.id,'paper-b');assert.equal(f.context.state.selection,undefined);
+  assert.equal(f.calls.some(value=>value[0]==='show'),false);
+});
+
 test('external reference navigation preserves an open annotation draft until the user finishes or closes it',async()=>{
   const f=environment();f.element('annotation-dialog').open=true;f.element('annotation-comment').value='Unsaved thought';
   f.context.state.annotationDraft={id:'paper-a',page:2,mode:'highlight'};
@@ -119,4 +134,30 @@ test('external reference navigation preserves an open annotation draft until the
 test('references received before reader initialization stay pending without opening a paper',async()=>{
   const f=environment(),reference={paperId:'paper-b',page:3};f.context.initializedReader=false;
   await f.context.openReferencedPaper(reference);assert.equal(f.context.pendingReferenceOpen,reference);assert.equal(f.calls.length,0);
+});
+
+test('language results remain available until the authoritative conversation draft has finished restoring',async()=>{
+  const start=source.indexOf('prepareChat:async(text,source)=>{'),end=source.indexOf('\n  }});',start);
+  assert.ok(start>=0&&end>start);
+  const f=environment();let closed=0;
+  f.context.languageUI={close:()=>{closed++;}};
+  f.context.paperChatUI.draft=()=> 'Restored question';
+  const callback=vm.runInContext(`(${source.slice(start+'prepareChat:'.length,end)}\n})`,f.context);
+  f.element('paper-chat-input').disabled=true;
+  await callback('Translated passage',{paperId:'paper-a',page:1});
+  assert.equal(closed,0);assert.equal(f.calls.some(value=>value[0]==='draft'),false);
+  assert.ok(f.calls.some(value=>value[0]==='toast'&&value[1].includes('尚未恢复')));
+  f.element('paper-chat-input').disabled=false;
+  await callback('Translated passage',{paperId:'paper-a',page:1});
+  assert.deepEqual(f.calls.find(value=>value[0]==='draft'),['draft','Restored question\n\nTranslated passage']);assert.equal(closed,1);
+});
+
+test('a removed annotation restores as an unsaved note without replacing a separately persisted question',async()=>{
+  const f=environment({snapshot:{paperId:'paper-a',page:2,tab:'reader',annotationDraft:{id:'paper-a',mode:'edit',comment:'Preserve this unsaved note',note:{id:'gone'}}}});
+  f.context.paperChatUI.hasStoredDraft=()=>true;
+  f.context.openAnnotation=mode=>{f.element('annotation-dialog').open=true;f.calls.push(['editor',mode]);};
+  await f.context.restoreReaderState();
+  assert.ok(f.calls.some(value=>value[0]==='editor'&&value[1]==='note'));
+  assert.equal(f.element('annotation-comment').value,'Preserve this unsaved note');
+  assert.equal(f.calls.some(value=>value[0]==='draft'),false);
 });

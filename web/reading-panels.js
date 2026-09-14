@@ -3,9 +3,9 @@
 // native-conversation state stay owned by the original reader components.
 window.PaperReadingPanels = (() => {
   const names = new Set(['annotations','metadata','chat']);
-  function create({root,annotationsRoot,conversationRoot,metadataRoot,onChatVisibility,onPanelChange,toast}) {
+  function create({root,annotationsRoot,conversationRoot,metadataRoot,onChatVisibility,onPanelChange,toast,persistence}) {
     if (!root || !annotationsRoot || !conversationRoot || !metadataRoot) throw new Error('Reading panels require the workspace and three existing content roots');
-    let sidebar = null, side = 'left', chatOpen = false, collapsed = false, paper = null, disposed = false, lastChatVisible = false;
+    let sidebar = null, side = 'left', sideRevision=0, chatOpen = false, collapsed = false, paper = null, disposed = false, lastChatVisible = false;
     const listeners = [], originals = [annotationsRoot,conversationRoot,metadataRoot].map(element=>({element,parent:element.parentNode,next:element.nextSibling,hidden:element.hidden,open:element.open}));
     const make = (tag,className,text) => {const element=document.createElement(tag);element.className=className;if(text!==undefined)element.textContent=text;return element;};
     const listen = (element,event,fn) => {element.addEventListener(event,fn);listeners.push(()=>element.removeEventListener(event,fn));};
@@ -25,7 +25,7 @@ window.PaperReadingPanels = (() => {
     // same nonmodal form reachable there without creating a second editor.
     const globalHost=make('div','paper-reading-workspace reading-panels-global-host');globalHost.hidden=true;document.body.append(globalHost);
     annotationsRoot.classList.add('reading-annotations-content');metadataRoot.classList.add('reading-metadata-content');conversationRoot.classList.add('reading-conversation-content');
-    try {const saved=window.localStorage?.getItem('paper-library:reading-panel-side:v1');if(saved==='left'||saved==='right')side=saved;} catch {}
+    const ready=persistence?Promise.resolve().then(()=>persistence.get('preferences')).then(value=>{const saved=value?.['reading-panel-side'];if(!disposed&&!sideRevision&&(saved==='left'||saved==='right')){side=saved;render();}}).catch(error=>toast?.(`无法读取侧栏偏好：${error.message}`,true)):Promise.resolve();
     function notify() {
       const visible=chatOpen&&!collapsed;
       if(visible!==lastChatVisible){lastChatVisible=visible;onChatVisibility?.(visible);}
@@ -68,7 +68,7 @@ window.PaperReadingPanels = (() => {
     function toggle(name) {return visible(name)?close(name):show(name);}
     function setSide(value) {
       if(!['left','right'].includes(value))throw new Error('Reading sidebar side must be left or right');
-      if(disposed)return;side=value;try{window.localStorage?.setItem('paper-library:reading-panel-side:v1',side);}catch{}render();
+      if(disposed)return;side=value;sideRevision++;if(persistence)void persistence.patch('preferences',{'reading-panel-side':side}).catch(error=>toast?.(`侧栏偏好尚未保存：${error.message}`,true));render();
     }
     function paperChanged(value) {
       paper=value&&typeof value.id==='string'?{id:value.id,title:String(value.title||'').slice(0,500),archived:Boolean(value.archived)}:null;
@@ -81,7 +81,7 @@ window.PaperReadingPanels = (() => {
     listen(metadataRoot,'close',()=>{if(sidebar==='metadata')close('metadata');});
     for(const panel of [aside,chat])listen(panel,'keydown',event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();close(panel===chat?'chat':sidebar);}});
     render(false);
-    return {toggle,show,close,setSide,paperChanged,visible,dispose(){
+    return {toggle,show,close,setSide,paperChanged,visible,ready,dispose(){
       if(disposed)return;disposed=true;observer?.disconnect();for(const off of listeners)off();
       if(lastChatVisible)onChatVisibility?.(false);
       for(const {element,parent,next,hidden,open} of originals){

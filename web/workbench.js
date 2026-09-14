@@ -8,37 +8,34 @@ window.PaperWorkbench = (() => {
   const institutions = item => [...new Set((item.author || []).flatMap(a => (a.affiliation || []).map(v => typeof v === 'string' ? v : v.name)).filter(Boolean))];
   const ranking = item => (item.journal_rankings || []).map(r => `${r.year} ${r.quartile} · ${r.category}`).join('；');
   const columns = [['title','标题'],['author','作者'],['year','年份'],['journal','期刊 / 出处'],['jcr','JCR'],['citekey','引用键'],[null,'DOI'],[null,'单位'],[null,'发表 / 收稿 / 接收'],[null,'PDF']];
-  function create({state,api,loadList,openPaper,selectPaper,changed,tableChanged,toast,el,openMetadataPanel,closeMetadataPanel}) {
+  function create({state,api,loadList,openPaper,selectPaper,changed,tableChanged,toast,el,openMetadataPanel,closeMetadataPanel,persistence}) {
     let table = false, editing = null, revision = 0, readingId = null;
-    let editorVisible=false, initialFields=null, initialRankings=null, restoring=false, selectingForEdit=false, draftNamespace=null, drafts=new Map(), storageWarned=false;
+    let editorVisible=false, initialFields=null, initialRankings=null, restoring=false, selectingForEdit=false, loadingEditId=null, drafts=new Map();
     const draftFields=['title','authors','year','citekey','tags','type','journal','doi','url','published','online','print','received','accepted','affiliations'];
     const metadataKeys=['id','title','author','issued','type','citekey','tags','container-title','DOI','URL','publication_dates','journal_rankings'];
     const draftLimit=256*1024, draftCount=12;
     const draftId=item=>item?.id||'@new';
-    function cache() {
-      const key=`paper-library:${String(state.library||'default')}:metadata-drafts-v1`;
-      if(key===draftNamespace)return;
-      draftNamespace=key;drafts=new Map();
-      try{const raw=window.localStorage?.getItem(key);if(raw&&raw.length*2<=draftLimit){const values=JSON.parse(raw);if(Array.isArray(values))for(const entry of values.slice(-draftCount))if(Array.isArray(entry)&&typeof entry[0]==='string'&&entry[1]?.base&&entry[1]?.fields&&entry[1]?.initialFields&&Array.isArray(entry[1]?.rankings)&&Array.isArray(entry[1]?.initialRankings))drafts.set(entry[0],entry[1]);}}catch{}
-    }
-    function persistDrafts() {
-      try{window.localStorage?.setItem(draftNamespace,JSON.stringify([...drafts]));}catch{if(!storageWarned){storageWarned=true;toast('浏览器无法保存资料草稿；本次窗口内仍会保留，请及时保存。',true);}}
-    }
+    const stateKey=id=>`metadata:${id==='@new'?'new':id}`;
+    const validDraft=value=>value?.base&&value?.fields&&value?.initialFields&&Array.isArray(value.rankings)&&Array.isArray(value.initialRankings)?value:null;
+    function persistDraft(key,value){if(persistence)void persistence.put(stateKey(key),value).catch(error=>toast(`资料草稿尚未保存到本地服务：${error.message}`,true));}
     function formFields(){return Object.fromEntries(draftFields.map(key=>[key,$(`edit-${key}`).value]));}
     function formRankings(){return [...$('ranking-rows').children].map(row=>({original:JSON.parse(row.dataset.original),fields:Object.fromEntries([...row.querySelectorAll('[data-rank-field]')].map(input=>[input.dataset.rankField,input.value]))}));}
     function snapshotDraft(){return {base:Object.fromEntries(metadataKeys.filter(key=>editing[key]!==undefined).map(key=>[key,structuredClone(editing[key])])),fields:formFields(),rankings:formRankings(),initialFields,initialRankings};}
     function rememberDraft() {
-      if(!editing||restoring)return true;cache();
+      if(!editing||restoring)return true;
       const key=draftId(editing),draft=snapshotDraft();
-      if(JSON.stringify([[key,draft]]).length*2>draftLimit){toast('这份资料草稿超过 256 KiB，请先保存或缩短内容，再切换资料。',true);return false;}
+      if(window.PaperLibraryLocalState.byteLength([[key,draft]])>draftLimit){toast('这份资料草稿超过 256 KiB，请先保存或缩短内容，再切换资料。',true);return false;}
       drafts.delete(key);drafts.set(key,draft);
-      while(drafts.size>draftCount||JSON.stringify([...drafts]).length*2>draftLimit)drafts.delete(drafts.keys().next().value);
-      persistDrafts();return true;
+      persistDraft(key,draft);
+      // Only the working cache is bounded. Every paper has its own durable file.
+      while(drafts.size>draftCount||window.PaperLibraryLocalState.byteLength([...drafts])>draftLimit)drafts.delete(drafts.keys().next().value);
+      return true;
     }
     function dirty(){if(restoring||!editing)return;revision++;rememberDraft();}
-    function metadataVisibility(value){const next=Boolean(value);if(editorVisible&&!next){rememberDraft();revision++;}editorVisible=next;}
+    function setEditorLoading(value){oldForm.inert=value;oldForm.setAttribute('aria-busy',String(value));for(const input of oldForm.querySelectorAll('input, textarea, select, button'))input.disabled=value;}
+    function metadataVisibility(value){const next=Boolean(value);if(editorVisible&&!next){rememberDraft();revision++;loadingEditId=null;setEditorLoading(false);}editorVisible=next;}
     function setPanelHost(value={}){openMetadataPanel=value.openMetadataPanel;closeMetadataPanel=value.closeMetadataPanel;}
-    function paperChanged(item){if(!selectingForEdit&&editorVisible&&editing&&draftId(item)!==draftId(editing))edit(item);}
+    function paperChanged(item){if(selectingForEdit)return;const loadingChanged=loadingEditId!==null&&loadingEditId!==draftId(item);if(loadingChanged){revision++;loadingEditId=null;setEditorLoading(false);}if(editorVisible&&(loadingChanged||editing&&draftId(item)!==draftId(editing)))return edit(item);}
     const button = (text, id, fn, className='button subtle') => { const b=node('button',text,className); b.type='button'; if(id)b.id=id; b.addEventListener('click',fn); return b; };
     const brand=document.querySelector('.brand'), brandGroup=node('div',undefined,'brand-group');brand.before(brandGroup);brandGroup.append(brand,$('toolbar-paper'));
     // Move the existing controls, retaining their event handlers and IDs.
@@ -112,7 +109,16 @@ window.PaperWorkbench = (() => {
       file.hidden=!item.pdf_filename&&!item.parse?.needs_review;
     }
     function edit(item=state.active,{lookup=false}={}) {
-      if(!rememberDraft())return false;cache();const saved=drafts.get(draftId(item));
+      if(!rememberDraft())return false;
+      if(!persistence)return renderEditor(item,drafts.get(draftId(item)),lookup);
+      const ticket=++revision;loadingEditId=draftId(item);setEditorLoading(true);editorVisible=true;$('metadata-dialog-title').textContent='正在读取资料草稿…';
+      if(openMetadataPanel)openMetadataPanel();else if(!$('metadata-dialog').open)$('metadata-dialog').showModal();
+      return persistence.get(stateKey(draftId(item))).then(value=>{
+        if(ticket!==revision)return false;loadingEditId=null;setEditorLoading(false);
+        return renderEditor(item,validDraft(value),lookup);
+      }).catch(error=>{if(ticket===revision){loadingEditId=null;setEditorLoading(false);editorVisible=false;if(closeMetadataPanel)closeMetadataPanel();else $('metadata-dialog').close();toast(`无法读取资料草稿，已有内容仍保留：${error.message}`,true);}return false;});
+    }
+    function renderEditor(item,saved,lookup) {
       // Row editing selects metadata only. Its summary and toolbar must describe
       // the same record that Save will update, even if another PDF was open.
       if(item?.id&&state.active?.id!==item.id&&selectPaper){
@@ -140,7 +146,7 @@ window.PaperWorkbench = (() => {
         }
         if(!lookup){initialFields=saved.initialFields;initialRankings=saved.initialRankings;}
       }
-      restoring=false;editorVisible=true;$('metadata-error').hidden=true;rememberDraft();
+      restoring=false;editorVisible=true;$('metadata-error').hidden=true;
       if(openMetadataPanel)openMetadataPanel();else if(!$('metadata-dialog').open)$('metadata-dialog').showModal();
       return true;
     }
@@ -157,7 +163,7 @@ window.PaperWorkbench = (() => {
         const publication_dates={};for(const k of ['published','online','print','received','accepted']){const v=$(`edit-${k}`).value.trim();if(v)publication_dates[k]=v;}
         const metadata={title:$('edit-title').value.trim(),author,type:type.value,issued:$('edit-year').value===editing._yearText?editing.issued||{}:$('edit-year').value?{'date-parts':[[Number($('edit-year').value)]]}:{},citekey:$('edit-citekey').value.trim(),tags:$('edit-tags').value.split(/[,，]/).map(t=>t.trim()).filter(Boolean),'container-title':$('edit-journal').value.trim(),DOI:$('edit-doi').value.trim(),URL:$('edit-url').value.trim(),publication_dates,journal_rankings};
         const result=await api(editId?'update':'create',{...(editId?{id:editId}:{}),metadata});
-        if(JSON.stringify(drafts.get(savedDraftKey))===submittedDraft){drafts.delete(savedDraftKey);persistDrafts();}
+        if(JSON.stringify(drafts.get(savedDraftKey))===submittedDraft){drafts.delete(savedDraftKey);persistDraft(savedDraftKey,null);}
         if(editRevision===revision){editing=null;editorVisible=false;if(closeMetadataPanel)closeMetadataPanel();else $('metadata-dialog').close();}changed(result);await loadList();toast('文献资料已保存');
       }catch(e){if(editRevision===revision){$('metadata-error').textContent=e.message;$('metadata-error').hidden=false;}else toast(e.message,true);}finally{if(editRevision===revision)buttons.forEach(b=>b.disabled=false);}
     }
@@ -167,7 +173,7 @@ window.PaperWorkbench = (() => {
     }
     async function enrich() {
       const item=state.active;if(!item||!rememberDraft())return;const id=item.id;const token=++revision;$('metadata-enrich').disabled=true;$('metadata-enrich').textContent='正在查找…';
-      try{const result=await api('metadata_lookup',{id});if(token!==revision||state.active?.id!==id)return;if(!edit(result.item,{lookup:true}))return;toast('已将可核验资料填入编辑表单，请核对后保存。');if(result.warnings?.length){$('metadata-error').textContent=result.warnings.join('；');$('metadata-error').hidden=false;}}
+      try{const result=await api('metadata_lookup',{id});if(token!==revision||state.active?.id!==id)return;if(!await edit(result.item,{lookup:true}))return;toast('已将可核验资料填入编辑表单，请核对后保存。');if(result.warnings?.length){$('metadata-error').textContent=result.warnings.join('；');$('metadata-error').hidden=false;}}
       catch(e){toast(e.message,true);}finally{$('metadata-enrich').textContent='补全资料';header();}
     }
     header();return {render,header,edit,setTable,isTable:()=>table,setPanelHost,paperChanged,metadataVisibility};

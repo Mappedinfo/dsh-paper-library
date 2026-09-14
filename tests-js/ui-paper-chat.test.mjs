@@ -6,6 +6,7 @@ import vm from 'node:vm';
 // Run the shipped classic script unchanged. This double tests asynchronous UI
 // behavior and the host contract; it does not claim browser rendering coverage.
 const source = await readFile(new URL('../web/paper-chat.js', import.meta.url), 'utf8');
+const localStateSource = await readFile(new URL('../web/local-state.js', import.meta.url), 'utf8');
 const plain = value => JSON.parse(JSON.stringify(value));
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function deferred() {
@@ -44,11 +45,12 @@ function environment({ api: respond, created = false, notes = [], storage: persi
   };
   const parent = { postMessage: (data, origin) => posts.push({ data: plain(data), origin }) };
   const window = { parent, location: { origin: 'http://localhost:3080' }, crypto: { randomUUID: () => `request-${++serial}` }, addEventListener: (type, handler) => listeners.set(type, handler) };
-  const context = vm.createContext({ window, document,
-    localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
+  const context = vm.createContext({ window, document,TextEncoder,
+    localStorage: { getItem(){throw new Error('Use server persistence');}, setItem(){throw new Error('Browser writes are forbidden');} },
     setTimeout: (callback, delay) => { const id = ++timerSerial; timers.set(id, { callback, delay }); return id; },
     clearTimeout: id => timers.delete(id),
   });
+  vm.runInContext(localStateSource,context);
   vm.runInContext(source, context, { filename: 'web/paper-chat.js' });
   function defaultResponse(action, args) {
     if (action === 'chat_ensure') return { sessionId: `session-${args.id}`, created };
@@ -60,6 +62,7 @@ function environment({ api: respond, created = false, notes = [], storage: persi
     throw new Error(`Unexpected paper-chat action: ${action}`);
   }
   const chat = window.PaperLibraryChat.create({
+    persistence:{get:async key=>storage.has(key)?plain(storage.get(key)):null,put:async(key,value)=>{storage.set(key,plain(value));return value;},patch:async(key,value)=>{storage.set(key,{...storage.get(key),...plain(value)});}},
     api: async (action, args) => {
       requests.push({ action, ...plain(args) });
       const value = respond?.(action, args, defaultResponse);
