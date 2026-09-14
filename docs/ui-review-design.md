@@ -1,5 +1,13 @@
 # Compact literature workbench
 
+## DSH appearance and theme ownership
+
+Accepted 2026-09-15: Paper Library should feel like part of DSH while retaining its reading workflow. The interface uses neutral layered surfaces, system sans-serif typography, compact controls, restrained borders and familiar sidebar selection states. Annotation, language, metadata, graph and import surfaces share those tokens. PDF document pixels and the reader's chosen annotation colors retain their original appearance.
+
+The DSH theme service owns the embedded palette and content font size. The visible iframe follows its resolved light/dark mode, CSS palette values and 12–17 px content setting without reloading, changing the current paper or replacing unsaved input. The plugin reads the official theme snapshot and change event; it does not write appearance settings. A standalone page follows `prefers-color-scheme` with a DSH-based fallback palette. No theme preference is stored in browser storage or another plugin record.
+
+Acceptance: verify both modes at 430, 741 and 1400 px; retain usable catalog, sidebars, language, graph and dialogs; check visible keyboard focus, recoverable errors and representative text contrast; preserve reading and drafts across live changes. The 12-check browser receipt uses actual DSH CSS and the real plugin bridge with an isolated theme event source. Authenticated assets on the restarted local host are checked separately. These checks do not establish a full native-settings walkthrough or formal accessibility certification.
+
 ## Language learning and host-owned data
 
 Accepted 2026-09-15: a reader can translate a selected passage directly, improve an expression without changing its meaning or evidence strength, and revisit difficult words encountered while reading. The selected paper's DSH model is authoritative. Opening the language panel, reading history, or reviewing vocabulary does not call a model; a translation or polish action does. Results remain AI-generated commentary and retain the source text, known PDF page, paper, model and request identity. Difficult terms must occur in the original selection; AI-suggested meanings start as “待学习”, and only the reader marks mastery.

@@ -33,6 +33,20 @@ const workbench = status.result.catalog_management === true && status.result.typ
 const readingWorkspace = status.result.reading_workspace === true
 const durableState = status.result.durable_state === true
 const languageLearning = status.result.language_learning === true
+let themeAssetsAvailable = false
+if (flags.get('--require-theme') === 'true') {
+  for (const file of ['theme.js', 'theme.css']) {
+    const asset = await fetch(`${address.origin}/api/paper-library/${file}`, {headers,signal:AbortSignal.timeout(10000)})
+    assert.equal(asset.status,200,`Missing DSH theme asset: ${file}`)
+    const source = await asset.text()
+    assert.ok(source.includes('--dsw-alias-bg-base') && source.includes('--dsh-content-font-size'), `Invalid theme asset: ${file}`)
+  }
+  const index = await fetch(`${address.origin}/api/paper-library/`, {headers,signal:AbortSignal.timeout(10000)})
+  const html = await index.text()
+  assert.equal(index.status, 200)
+  assert.ok(html.includes('./theme.css') && html.includes('./theme.js'))
+  themeAssetsAvailable = true
+}
 if (flags.get('--require-language') === 'true') {
   assert.equal(durableState,true,'Restarted host lacks durable local state')
   assert.equal(languageLearning,true,'Restarted host lacks configured-model language learning')
@@ -64,6 +78,6 @@ if (flags.get('--require-chat') === 'true' || flags.get('--require-references') 
   assert.ok(script.includes('PaperLibraryChat'))
   if (flags.get('--require-references') === 'true') assert.ok(script.includes('chat_catalog') && script.includes('annotation_refs'))
 }
-const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, durableState, languageLearning, chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
+const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, durableState, languageLearning, ...(themeAssetsAvailable ? {themeAssetsAvailable} : {}), chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
 if (flags.get('--output')) await writeFile(flags.get('--output'), JSON.stringify(report, null, 2) + '\n')
 console.log(JSON.stringify(report))

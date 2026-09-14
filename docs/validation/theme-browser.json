@@ -1,0 +1,1497 @@
+{
+  "verified_at": "2026-09-14T17:12:53.440Z",
+  "checks": [
+    "light-430px-catalog-reader-sidebars-language-graph-and-dialog-fit-with-readable-system-typography",
+    "light-741px-catalog-reader-sidebars-language-graph-and-dialog-fit-with-readable-system-typography",
+    "light-1400px-catalog-reader-sidebars-language-graph-and-dialog-fit-with-readable-system-typography",
+    "light-error-feedback-and-keyboard-focus-remain-visible",
+    "standalone-light-to-dark-media-change-preserves-open-reader-and-unsaved-draft",
+    "dark-430px-catalog-reader-sidebars-language-graph-and-dialog-fit-with-readable-system-typography",
+    "dark-741px-catalog-reader-sidebars-language-graph-and-dialog-fit-with-readable-system-typography",
+    "dark-1400px-catalog-reader-sidebars-language-graph-and-dialog-fit-with-readable-system-typography",
+    "dark-error-feedback-and-keyboard-focus-remain-visible",
+    "standalone-dark-to-light-media-change-preserves-open-reader-and-unsaved-draft",
+    "real-bridge-delivers-harness-dark-light-tokens-and-font-size-without-reloading-iframe",
+    "synthetic-originals-unchanged-zero-models-zero-external-requests-zero-browser-errors-and-no-browser-storage-writes"
+  ],
+  "viewports": [
+    430,
+    741,
+    1400
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "contrast_minimum": 4.5,
+  "measurements": [
+    {
+      "label": "light catalog 430",
+      "values": [
+        {
+          "selector": "#workspace-library",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#catalog-sort",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#catalog-table tbody td",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            249,
+            250,
+            251
+          ],
+          "ratio": 18.082282383551934,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light annotations 430",
+      "values": [
+        {
+          "selector": "#annotation-list .annotation-card",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#reading-panel-side",
+          "foreground": [
+            97,
+            102,
+            107
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 5.799289506181867,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light language 430",
+      "values": [
+        {
+          "selector": "#language-source",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#language-tab-work",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            232.9764705882353,
+            233.99607843137255,
+            236.03529411764706
+          ],
+          "ratio": 15.696880164695568,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light metadata 430",
+      "values": [
+        {
+          "selector": "#edit-title",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#metadata-dialog-title",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light graph 430",
+      "values": [
+        {
+          "selector": ".kg-toolbar h3",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": ".kg-controls label",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light dialog 430",
+      "values": [
+        {
+          "selector": "[data-kg=\"form-title\"]",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "[data-kg=\"form\"] input[name=\"label\"]",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light catalog 741",
+      "values": [
+        {
+          "selector": "#workspace-library",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#catalog-sort",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#catalog-table tbody td",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            235,
+            239,
+            242
+          ],
+          "ratio": 16.342007421408926,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light annotations 741",
+      "values": [
+        {
+          "selector": "#annotation-list .annotation-card",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#reading-panel-side",
+          "foreground": [
+            97,
+            102,
+            107
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 5.799289506181867,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light language 741",
+      "values": [
+        {
+          "selector": "#language-source",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#language-tab-work",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            232.9764705882353,
+            233.99607843137255,
+            236.03529411764706
+          ],
+          "ratio": 15.696880164695568,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light metadata 741",
+      "values": [
+        {
+          "selector": "#edit-title",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#metadata-dialog-title",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light graph 741",
+      "values": [
+        {
+          "selector": ".kg-toolbar h3",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": ".kg-controls label",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light dialog 741",
+      "values": [
+        {
+          "selector": "[data-kg=\"form-title\"]",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "[data-kg=\"form\"] input[name=\"label\"]",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light catalog 1400",
+      "values": [
+        {
+          "selector": "#workspace-library",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#catalog-sort",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#catalog-table tbody td",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            235,
+            239,
+            242
+          ],
+          "ratio": 16.342007421408926,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light annotations 1400",
+      "values": [
+        {
+          "selector": "#annotation-list .annotation-card",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#reading-panel-side",
+          "foreground": [
+            97,
+            102,
+            107
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 5.799289506181867,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light language 1400",
+      "values": [
+        {
+          "selector": "#language-source",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#language-tab-work",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            232.9764705882353,
+            233.99607843137255,
+            236.03529411764706
+          ],
+          "ratio": 15.696880164695568,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light metadata 1400",
+      "values": [
+        {
+          "selector": "#edit-title",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#metadata-dialog-title",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light graph 1400",
+      "values": [
+        {
+          "selector": ".kg-toolbar h3",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": ".kg-controls label",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light dialog 1400",
+      "values": [
+        {
+          "selector": "[data-kg=\"form-title\"]",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "[data-kg=\"form\"] input[name=\"label\"]",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "light error",
+      "values": [
+        {
+          "selector": "#import-error",
+          "foreground": [
+            196,
+            19,
+            19
+          ],
+          "background": [
+            254,
+            238,
+            238
+          ],
+          "ratio": 5.414547137269587,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#import-dialog h2",
+          "foreground": [
+            15,
+            17,
+            21
+          ],
+          "background": [
+            255,
+            255,
+            255
+          ],
+          "ratio": 18.896452054380127,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark catalog 430",
+      "values": [
+        {
+          "selector": "#workspace-library",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            21,
+            21,
+            23
+          ],
+          "ratio": 17.45095194843412,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#catalog-sort",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            44,
+            44,
+            46
+          ],
+          "ratio": 13.33617423071505,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#catalog-table tbody td",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            27,
+            27,
+            28
+          ],
+          "ratio": 16.46953473723769,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark annotations 430",
+      "values": [
+        {
+          "selector": "#annotation-list .annotation-card",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            35,
+            35,
+            36
+          ],
+          "ratio": 15.026101925946511,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#reading-panel-side",
+          "foreground": [
+            207,
+            211,
+            214
+          ],
+          "background": [
+            35,
+            35,
+            36
+          ],
+          "ratio": 10.424919542025554,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark language 430",
+      "values": [
+        {
+          "selector": "#language-source",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            44,
+            44,
+            46
+          ],
+          "ratio": 13.33617423071505,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#language-tab-work",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            73.78823529411764,
+            73.78823529411764,
+            75.50588235294117
+          ],
+          "ratio": 8.492072646435885,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark metadata 430",
+      "values": [
+        {
+          "selector": "#edit-title",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            44,
+            44,
+            46
+          ],
+          "ratio": 13.33617423071505,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#metadata-dialog-title",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            35,
+            35,
+            36
+          ],
+          "ratio": 15.026101925946511,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark graph 430",
+      "values": [
+        {
+          "selector": ".kg-toolbar h3",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            21,
+            21,
+            23
+          ],
+          "ratio": 17.45095194843412,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": ".kg-controls label",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            21,
+            21,
+            23
+          ],
+          "ratio": 17.45095194843412,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark dialog 430",
+      "values": [
+        {
+          "selector": "[data-kg=\"form-title\"]",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            44,
+            44,
+            46
+          ],
+          "ratio": 13.33617423071505,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "[data-kg=\"form\"] input[name=\"label\"]",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            35,
+            35,
+            36
+          ],
+          "ratio": 15.026101925946511,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark catalog 741",
+      "values": [
+        {
+          "selector": "#workspace-library",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            21,
+            21,
+            23
+          ],
+          "ratio": 17.45095194843412,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#catalog-sort",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            44,
+            44,
+            46
+          ],
+          "ratio": 13.33617423071505,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#catalog-table tbody td",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            27,
+            27,
+            28
+          ],
+          "ratio": 16.46953473723769,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark annotations 741",
+      "values": [
+        {
+          "selector": "#annotation-list .annotation-card",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            35,
+            35,
+            36
+          ],
+          "ratio": 15.026101925946511,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#reading-panel-side",
+          "foreground": [
+            207,
+            211,
+            214
+          ],
+          "background": [
+            35,
+            35,
+            36
+          ],
+          "ratio": 10.424919542025554,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark language 741",
+      "values": [
+        {
+          "selector": "#language-source",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            44,
+            44,
+            46
+          ],
+          "ratio": 13.33617423071505,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#language-tab-work",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            73.78823529411764,
+            73.78823529411764,
+            75.50588235294117
+          ],
+          "ratio": 8.492072646435885,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark metadata 741",
+      "values": [
+        {
+          "selector": "#edit-title",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            44,
+            44,
+            46
+          ],
+          "ratio": 13.33617423071505,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#metadata-dialog-title",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            35,
+            35,
+            36
+          ],
+          "ratio": 15.026101925946511,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark graph 741",
+      "values": [
+        {
+          "selector": ".kg-toolbar h3",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            21,
+            21,
+            23
+          ],
+          "ratio": 17.45095194843412,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": ".kg-controls label",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            21,
+            21,
+            23
+          ],
+          "ratio": 17.45095194843412,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark dialog 741",
+      "values": [
+        {
+          "selector": "[data-kg=\"form-title\"]",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            44,
+            44,
+            46
+          ],
+          "ratio": 13.33617423071505,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "[data-kg=\"form\"] input[name=\"label\"]",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            35,
+            35,
+            36
+          ],
+          "ratio": 15.026101925946511,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark catalog 1400",
+      "values": [
+        {
+          "selector": "#workspace-library",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            21,
+            21,
+            23
+          ],
+          "ratio": 17.45095194843412,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#catalog-sort",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            44,
+            44,
+            46
+          ],
+          "ratio": 13.33617423071505,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#catalog-table tbody td",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            27,
+            27,
+            28
+          ],
+          "ratio": 16.46953473723769,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark annotations 1400",
+      "values": [
+        {
+          "selector": "#annotation-list .annotation-card",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            35,
+            35,
+            36
+          ],
+          "ratio": 15.026101925946511,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#reading-panel-side",
+          "foreground": [
+            207,
+            211,
+            214
+          ],
+          "background": [
+            35,
+            35,
+            36
+          ],
+          "ratio": 10.424919542025554,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark language 1400",
+      "values": [
+        {
+          "selector": "#language-source",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            44,
+            44,
+            46
+          ],
+          "ratio": 13.33617423071505,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#language-tab-work",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            73.78823529411764,
+            73.78823529411764,
+            75.50588235294117
+          ],
+          "ratio": 8.492072646435885,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark metadata 1400",
+      "values": [
+        {
+          "selector": "#edit-title",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            44,
+            44,
+            46
+          ],
+          "ratio": 13.33617423071505,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#metadata-dialog-title",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            35,
+            35,
+            36
+          ],
+          "ratio": 15.026101925946511,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark graph 1400",
+      "values": [
+        {
+          "selector": ".kg-toolbar h3",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            21,
+            21,
+            23
+          ],
+          "ratio": 17.45095194843412,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": ".kg-controls label",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            21,
+            21,
+            23
+          ],
+          "ratio": 17.45095194843412,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark dialog 1400",
+      "values": [
+        {
+          "selector": "[data-kg=\"form-title\"]",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            44,
+            44,
+            46
+          ],
+          "ratio": 13.33617423071505,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "[data-kg=\"form\"] input[name=\"label\"]",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            35,
+            35,
+            36
+          ],
+          "ratio": 15.026101925946511,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    },
+    {
+      "label": "dark error",
+      "values": [
+        {
+          "selector": "#import-error",
+          "foreground": [
+            243,
+            119,
+            119
+          ],
+          "background": [
+            49,
+            39,
+            40
+          ],
+          "ratio": 5.316128780137628,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        },
+        {
+          "selector": "#import-dialog h2",
+          "foreground": [
+            249,
+            250,
+            251
+          ],
+          "background": [
+            44,
+            44,
+            46
+          ],
+          "ratio": 13.33617423071505,
+          "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+        }
+      ]
+    }
+  ],
+  "model_requests": 0,
+  "external_requests": 0,
+  "browser_errors": [],
+  "local_storage_writes": 0,
+  "synthetic_originals_unchanged": true,
+  "screenshots": [
+    ".local/theme-browser-RjLPKm/light-catalog-430.png",
+    ".local/theme-browser-RjLPKm/light-annotations-430.png",
+    ".local/theme-browser-RjLPKm/light-language-430.png",
+    ".local/theme-browser-RjLPKm/light-metadata-430.png",
+    ".local/theme-browser-RjLPKm/light-graph-430.png",
+    ".local/theme-browser-RjLPKm/light-dialog-430.png",
+    ".local/theme-browser-RjLPKm/light-catalog-741.png",
+    ".local/theme-browser-RjLPKm/light-annotations-741.png",
+    ".local/theme-browser-RjLPKm/light-language-741.png",
+    ".local/theme-browser-RjLPKm/light-metadata-741.png",
+    ".local/theme-browser-RjLPKm/light-graph-741.png",
+    ".local/theme-browser-RjLPKm/light-dialog-741.png",
+    ".local/theme-browser-RjLPKm/light-catalog-1400.png",
+    ".local/theme-browser-RjLPKm/light-annotations-1400.png",
+    ".local/theme-browser-RjLPKm/light-language-1400.png",
+    ".local/theme-browser-RjLPKm/light-metadata-1400.png",
+    ".local/theme-browser-RjLPKm/light-graph-1400.png",
+    ".local/theme-browser-RjLPKm/light-dialog-1400.png",
+    ".local/theme-browser-RjLPKm/light-error.png",
+    ".local/theme-browser-RjLPKm/dark-catalog-430.png",
+    ".local/theme-browser-RjLPKm/dark-annotations-430.png",
+    ".local/theme-browser-RjLPKm/dark-language-430.png",
+    ".local/theme-browser-RjLPKm/dark-metadata-430.png",
+    ".local/theme-browser-RjLPKm/dark-graph-430.png",
+    ".local/theme-browser-RjLPKm/dark-dialog-430.png",
+    ".local/theme-browser-RjLPKm/dark-catalog-741.png",
+    ".local/theme-browser-RjLPKm/dark-annotations-741.png",
+    ".local/theme-browser-RjLPKm/dark-language-741.png",
+    ".local/theme-browser-RjLPKm/dark-metadata-741.png",
+    ".local/theme-browser-RjLPKm/dark-graph-741.png",
+    ".local/theme-browser-RjLPKm/dark-dialog-741.png",
+    ".local/theme-browser-RjLPKm/dark-catalog-1400.png",
+    ".local/theme-browser-RjLPKm/dark-annotations-1400.png",
+    ".local/theme-browser-RjLPKm/dark-language-1400.png",
+    ".local/theme-browser-RjLPKm/dark-metadata-1400.png",
+    ".local/theme-browser-RjLPKm/dark-graph-1400.png",
+    ".local/theme-browser-RjLPKm/dark-dialog-1400.png",
+    ".local/theme-browser-RjLPKm/dark-error.png",
+    ".local/theme-browser-RjLPKm/host-live-theme-light.png",
+    ".local/theme-browser-RjLPKm/host-live-theme-dark.png"
+  ],
+  "scope": "Actual Chromium UI, standalone system appearance, real plugin bridge and Harness CSS in an isolated host fixture. No live user library, provider quality or formal usability claim."
+}

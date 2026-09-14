@@ -1,5 +1,6 @@
 import { createElement, useEffect, useRef, useState } from 'react'
 import { bindModelContext } from './model-context.mjs'
+import { bindThemeContext } from './theme-context.mjs'
 import { createConversationBridge } from './conversation-context.mjs'
 import { createAnnotationReferences, draftAnnotationReferences } from './annotation-references.mjs'
 
@@ -15,7 +16,7 @@ export const name = 'paper-library-client'
 export const inject = ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'modelDirectories', 'sessions', 'conversation', 'inputTriggers']
 
 /** The reader exists only while its pane is visible; no background PDF renderer. */
-export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailable, conversationBridge }) {
+export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailable, conversationBridge, bindTheme }) {
   const { tab } = useTabInfo()
   const frame = useRef(null)
   useEffect(() => {
@@ -26,6 +27,10 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
     if (!tab.visible || !frame.current?.contentWindow) return undefined
     return bindModelContext({ window, target: frame.current.contentWindow, sessionId, directory, available: modelAvailable })
   }, [sessionId, directory, modelAvailable, tab.visible])
+  useEffect(() => {
+    if (!tab.visible || !frame.current?.contentWindow) return undefined
+    return bindTheme(frame.current.contentWindow)
+  }, [bindTheme, tab.visible])
   if (!tab.visible) return null
   return createElement('iframe', {
     ref: frame,
@@ -35,7 +40,7 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
     referrerPolicy: 'same-origin',
     allow: 'clipboard-write; fullscreen',
     allowFullScreen: true,
-    style: { width: '100%', height: '100%', minHeight: '480px', border: 0, background: '#f5f4ef' },
+    style: { width: '100%', height: '100%', minHeight: '480px', border: 0, background: 'var(--dsw-alias-bg-base, transparent)' },
   })
 }
 
@@ -89,6 +94,11 @@ export function AnnotationReferenceInspector({ sessionId, annotationReferences, 
 export function apply(ctx) {
   let conversationBridge
   let annotationReferences
+  const bindTheme = target => bindThemeContext({
+    window, target,
+    getTheme: () => ctx.get('theme')?.getTheme(),
+    subscribe: listener => ctx.on('theme/change', listener),
+  })
   ctx.effect(() => {
     annotationReferences = createAnnotationReferences({
       window,
@@ -121,6 +131,7 @@ export function apply(ctx) {
     inject: sessionId => ({
       sessionId,
       conversationBridge,
+      bindTheme,
       directory: ctx.modelDirectories.directoryFor(sessionId),
       modelAvailable: ctx.sessions.subagentAddress(sessionId) === undefined,
     }),

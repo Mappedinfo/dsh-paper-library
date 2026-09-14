@@ -16,6 +16,7 @@ const commands=[
   ['reading_shell_syntax',process.execPath,['--check','web/reading-shell.js']],
   ['local_state_syntax',process.execPath,['--check','web/local-state.js']],
   ['language_learning_syntax',process.execPath,['--check','web/language-learning.js']],
+  ['theme_syntax',process.execPath,['--check','web/theme.js']],
 ];
 const checks=[];
 for(const[id,command,args]of commands){
