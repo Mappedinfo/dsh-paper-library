@@ -74,7 +74,10 @@ if args.checkpoint=="publication":
     module=runpy.run_path(str(router/"scripts/resolve_route.py"))
     runtime={"snapshot_id":"publication-runtime-20260914","available_runtime":["task-execution","writing-quality","skill-quality-feedback"],"tools":["tools.exec_command","tools.apply_patch","tools.web__run"]}
     intent={"trivial":False,"family":"general","operation":"publish","evidence_action":"verify","native_required_capabilities":["shell","file_write","retrieval"]}
-    route=module["resolve"](intent,runtime,json.loads((router/"routing-manifest.json").read_text()))
+    # Use the router's documented native path for GitHub operations. The common
+    # execution contract is recorded separately, not as a publishing specialist.
+    primary,readiness=module["native_fallback"](intent,runtime)
+    route={"primary":primary,"native_execution":readiness,"runtime_snapshot_id":runtime["snapshot_id"],"selection":"native_fallback"}
     if route.get("primary",{}).get("id")!="builtin:native":
         raise SystemExit("Publication requires a resolved native execution route")
     identity=["builtin","builtin:native","contract:task-execution-v1"]
