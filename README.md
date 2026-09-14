@@ -2,6 +2,8 @@
 
 独立于 Zotero 的 DeepSeek Harness 文献插件：自动获取与归档、检索、阅读、引用、PDF 批注与 AI 反馈。
 
+[DSH 社区介绍与讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/6623)包含合成演示截图与当前能力说明。
+
 项目原创代码采用 [MIT](LICENSE)。默认 PDF 引擎 PyMuPDF 采用 AGPL/商业许可，CSL 等第三方组件保留原许可；完整安装的依赖栈并非仅受 MIT 约束。详见 [第三方许可](THIRD_PARTY.md)。
 
 **继续开发前先读 [项目交接](HANDOFF.md)**，其中记录当前能力、验证证据和待验证项。
