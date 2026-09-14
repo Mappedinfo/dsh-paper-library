@@ -6,8 +6,9 @@ const state = {
   items: [], total: 0, libraryCount: 0, offset: 0, limit: 40, query: '', active: null, tab: 'reader',
   page: 1, pageCount: 0, pageData: null, selection: null, annotations: [], noteOffset: 0,
   models: [], harnessContext: null, modelTicket: 0, library: '', listTicket: 0, itemTicket: 0, pageTicket: 0, metadataDraft: null, openedId: null,
-  pageWanted: null, pageRunning: false, annotationDraft: null, upload: null, aiBusy: false,
+  pageWanted: null, pageRunning: false, annotationDraft: null, aiBusy: false,
 };
+const intake = { pending: [], records: [], running: false, current: null, sequence: 0, total: 0, completed: 0, failed: 0, metadataOnly: 0, promise: null };
 const relationNames = { related: '相关', supports: '支持', contradicts: '相矛盾', cites: '引用', tagged: '标签', tag: '标签', has_tag: '标签' };
 const typeNames = { 'article-journal': '期刊论文', 'paper-conference': '会议论文', book: '图书', chapter: '章节', thesis: '学位论文', report: '报告', document: '文献' };
 
@@ -110,7 +111,7 @@ async function openPaper(id) {
   errorAt('detail-error', null);
   document.querySelector('.workspace').classList.add('show-detail');
   $('welcome').hidden = true; $('paper-detail').hidden = false;
-  $('paper-title').textContent = '正在打开文献…'; $('paper-authors').textContent = ''; $('paper-tags').replaceChildren();
+  $('paper-title').textContent = '正在打开文献…'; $('paper-authors').textContent = ''; $('paper-tags').replaceChildren(); $('paper-file-meta').hidden = true;
   state.active = null; state.selection = null; state.page = 1; state.pageCount = 0;
   $('reader-content').hidden = true; $('no-pdf').hidden = true;
   try {
@@ -126,6 +127,8 @@ function renderPaperHeader() {
   $('paper-authors').textContent = details.join(' · ');
   $('paper-type').textContent = `${typeNames[item.type] || '文献'}${item.citekey ? ` / ${item.citekey}` : ''}`;
   $('paper-tags').replaceChildren(...tags(item).map((tag) => el('span', 'chip', tag)));
+  const fileNotes = [item.pdf_filename ? `PDF：${item.pdf_filename}` : '', item.parse?.needs_review ? '自动识别的文献资料待核对' : ''].filter(Boolean);
+  $('paper-file-meta').textContent = fileNotes.join(' · '); $('paper-file-meta').hidden = !fileNotes.length; $('paper-file-meta').classList.toggle('needs-review', Boolean(item.parse?.needs_review));
   $('download-pdf').hidden = !item.pdf; $('download-pdf').href = `./pdf/${encodeURIComponent(item.id)}`;
   $('no-pdf').hidden = Boolean(item.pdf); $('reader-content').hidden = !item.pdf;
 }
@@ -272,40 +275,171 @@ async function handleNoteAction(event) {
   }
 }
 
-function chooseUpload(file) { if (!file) return; state.upload = file; $('upload-label').textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB`; $('import-source').value = ''; errorAt('import-error', null); }
 function fileBase64(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = () => reject(new Error('无法读取所选文件。')); reader.readAsDataURL(file); }); }
-async function importPapers(event) {
-  event.preventDefault(); errorAt('import-error', null); $('import-result').textContent = '';
-  const source = $('import-source').value.trim(); const file = state.upload;
-  if (!source && !file) { errorAt('import-error', '请输入 DOI、文件路径，或选择一个文件。'); return; }
-  setBusy(event.target, true); $('import-submit').textContent = '正在导入…';
-  let imported = 0, duplicates = 0, warningCount = 0, firstItem = null;
-  const warnings = [];
+function linkArguments(value) {
+  const source = String(value || '').trim().replace(/^<(.*)>$/, '$1');
+  if (/^(?:doi:\s*)?10\.\d{4,9}\/\S+$/i.test(source)) return { doi: source.replace(/^doi:\s*/i, '') };
+  if (/^https?:\/\//i.test(source)) { try { const url = new URL(source); if (!url.username && !url.password && url.href.length <= 4096) return { url: url.href }; } catch {} }
+  return null;
+}
+function importWarning(value) { return typeof value === 'string' ? value : value?.message || JSON.stringify(value); }
+function importCount(value) { return Array.isArray(value) ? value.length : Number(value) || 0; }
+function newImportSummary() { return { imported: 0, duplicates: 0, skipped: 0, pdfCount: 0, recordCount: 0, firstItem: null, filenames: [], needsReview: false, parseStatuses: [], warnings: [], warningCount: 0, acquisition: null }; }
+function addImportResult(summary, result) {
+  summary.imported += importCount(result.imported); summary.duplicates += importCount(result.duplicates); summary.skipped += importCount(result.skipped);
+  const items = result.items || []; summary.recordCount += items.length; summary.pdfCount += items.filter(item => item.pdf).length;
+  if (!summary.firstItem && items[0]) summary.firstItem = { id: items[0].id, title: title(items[0]), pdf: Boolean(items[0].pdf) };
+  for (const item of items) {
+    if (item.pdf_filename && summary.filenames.length < 3) summary.filenames.push(item.pdf_filename);
+    summary.needsReview ||= Boolean(item.parse?.needs_review);
+    if (item.parse?.status && !summary.parseStatuses.includes(item.parse.status)) summary.parseStatuses.push(item.parse.status);
+  }
+  if (result.acquisition) summary.acquisition = { status: result.acquisition.status, source_url: result.acquisition.source_url };
+  const warnings = new Set([...(result.warnings || []), ...(result.acquisition?.warnings || []), ...items.flatMap(item => item.parse?.warnings || [])].map(importWarning));
+  for (const warning of warnings) { if (summary.warnings.includes(warning)) continue; summary.warningCount++; if (summary.warnings.length < 100) summary.warnings.push(warning); }
+}
+function importOutcome(summary) {
+  let text;
+  if (summary.pdfCount) text = `${summary.pdfCount} 篇 PDF 已在文献库中保存`;
+  else if (summary.recordCount || summary.imported || summary.duplicates) text = '仅保存文献资料，尚未取得 PDF';
+  else text = '未保存文献或 PDF';
+  if (summary.imported > 1) text += ` · 新增 ${summary.imported} 篇`;
+  if (summary.duplicates) text += ` · 重复 ${summary.duplicates} 篇`;
+  if (summary.skipped) text += ` · 跳过 ${summary.skipped} 项`;
+  if (summary.needsReview) text += ' · 自动识别资料待核对';
+  else if (summary.parseStatuses.includes('embedded-metadata')) text += ' · 已读取 PDF 内的文献资料';
+  else if (summary.parseStatuses.includes('local-parse')) text += ' · 已提取 PDF 资料';
+  return text;
+}
+async function uploadPdf(file) {
+  if (file.size > 250 * 1024 * 1024) throw new Error('PDF 超过 250 MiB，请使用较小文件。');
+  // A File is sent directly. No FileReader/base64/ArrayBuffer copy for PDFs.
+  const response = await fetch(`./upload?filename=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: file });
+  let data;
+  try { data = await response.json(); } catch { throw new Error(`PDF 上传未返回可读取的结果（HTTP ${response.status}）。可重新拖入重试。`); }
+  if (!response.ok || !data.ok) throw new Error(typeof data.error === 'string' ? data.error : data.error?.message || `PDF 未保存（HTTP ${response.status}）`);
+  return data.result;
+}
+async function executeImport(job) {
+  const summary = newImportSummary(); job.summary = summary;
+  if (job.file && /\.pdf$/i.test(job.file.name)) {
+    job.message = '正在上传、保存并解析 PDF…'; renderImportQueue();
+    addImportResult(summary, await uploadPdf(job.file)); return summary;
+  }
+  let args = job.args;
+  if (job.file) {
+    if (!/\.(json|ris|bib)$/i.test(job.file.name)) throw new Error('文件格式暂不支持。请导入 PDF、JSON、RIS 或 BIB。');
+    if (job.file.size > 32 * 1024 * 1024) throw new Error('资料文件超过 32 MiB，请分批导出后重新导入。');
+    args = { filename: job.file.name, content_base64: await fileBase64(job.file) };
+  }
+  let offset = 0;
+  while (true) {
+    job.message = args.url || args.doi ? '正在获取论文、保存并解析资料…' : '正在保存并解析文献资料…'; renderImportQueue();
+    const result = await api('import', { ...args, offset, limit: 100 }); addImportResult(summary, result);
+    const total = result.total_files ?? result.total_records;
+    if (total !== undefined) { job.message = `已处理 ${result.next_offset ?? total} / ${total} ${result.total_files !== undefined ? '个 PDF' : '条记录'} · 已导入 ${summary.imported} 篇`; renderImportQueue(); }
+    if (result.done !== false || result.next_offset === null || result.next_offset === undefined) break;
+    if (result.next_offset <= offset) throw new Error('批量导入未继续推进。已完成的记录已保留，可重试。');
+    offset = result.next_offset;
+  }
+  return summary;
+}
+function renderImportQueue() {
+  $('queue-toggle').hidden = !intake.total;
+  const done = intake.completed + intake.failed;
+  $('queue-toggle').textContent = intake.running ? `导入 ${done}/${intake.total}` : '导入结果';
+  $('queue-summary').textContent = `${intake.running ? '正在依次处理' : '处理已结束'} · ${done}/${intake.total}${intake.failed ? ` · 失败 ${intake.failed}` : ''}${intake.metadataOnly ? ` · 仅文献资料 ${intake.metadataOnly}` : ''}`;
+  const fragment = document.createDocumentFragment();
+  for (const job of intake.records.slice(-50)) {
+    const row = el('li', `queue-entry ${job.status}`); row.dataset.queueId = String(job.id);
+    row.append(el('strong', '', `${job.status === 'pending' ? '等待 · ' : job.status === 'working' ? '正在处理 · ' : job.status === 'failed' ? '未完成 · ' : ''}${job.label}`), el('p', '', job.message || '等待前一项完成'));
+    const summary = job.summary;
+    if (summary?.filenames.length) row.append(el('p', 'saved-name', `保存文件：${summary.filenames.join('；')}`));
+    if (summary?.warnings.length) row.append(el('p', 'queue-warning', `${summary.warnings.slice(0, 3).join('\n')}${summary.warningCount > 3 ? `\n还有 ${summary.warningCount - 3} 条提示，打开文献后请核对资料。` : ''}`));
+    if (summary?.firstItem?.id) { const open = el('button', 'queue-paper', `打开：${summary.firstItem.title}`); open.dataset.queuePaper = summary.firstItem.id; row.append(open); }
+    if (job.status === 'failed' && job.args) { const retry = el('button', 'button subtle queue-retry', '重试'); retry.dataset.queueRetry = String(job.id); row.append(retry); }
+    if (job.status === 'failed' && !job.args) row.append(el('p', '', '可重新拖入这个文件重试。'));
+    fragment.append(row);
+  }
+  $('queue-list').replaceChildren(fragment);
+}
+function enqueueImports(sources) {
+  const capacity = Math.max(0, 50 - intake.pending.length - (intake.current ? 1 : 0));
+  const accepted = sources.slice(0, capacity);
+  for (const source of accepted) {
+    const job = { ...source, id: ++intake.sequence, status: 'pending', message: '', summary: null };
+    intake.pending.push(job); intake.records.push(job); intake.total++;
+  }
+  // Completed history never holds File objects or grows with library size.
+  if (intake.records.length > 50) intake.records.splice(0, intake.records.length - 50);
+  if (sources.length > accepted.length) toast(`队列最多同时处理 50 项；还有 ${sources.length - accepted.length} 项尚未加入，请稍后分批导入。`, true);
+  if (accepted.length) { $('import-queue').hidden = false; renderImportQueue(); if (!intake.running) intake.promise = runImportQueue(); }
+  return accepted.length;
+}
+async function runImportQueue() {
+  intake.running = true;
   try {
-    let args;
-    if (source) args = /^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)?10\.\d{4,9}\//i.test(source) ? { doi: source.replace(/^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*)/i, '') } : { path: source };
-    else { if (file.size > 32 * 1024 * 1024) throw new Error('浏览器文件导入支持 32 MB 以内文件。更大的文件请在上方填写本地路径导入。'); args = { filename: file.name, content_base64: await fileBase64(file) }; }
-    let offset = 0;
-    while (true) {
-      const result = await api('import', { ...args, offset, limit: 100 });
-      imported += Array.isArray(result.imported) ? result.imported.length : result.imported ?? result.items?.length ?? 0;
-      duplicates += Array.isArray(result.duplicates) ? result.duplicates.length : result.duplicates || 0;
-      firstItem ||= result.items?.[0];
-      for (const warning of result.warnings || []) { warningCount++; if (warnings.length < 100) warnings.push(typeof warning === 'string' ? warning : warning.message || JSON.stringify(warning)); }
-      const total = result.total_files ?? result.total_records;
-      const processed = result.next_offset ?? total;
-      $('import-result').textContent = `${total !== undefined ? `已处理 ${processed} / ${total} ${result.total_files !== undefined ? '个 PDF' : '条记录'} · ` : ''}已导入 ${imported} 篇${duplicates ? `，重复 ${duplicates} 篇` : ''}${warningCount ? `，${warningCount} 条提示` : ''}`;
-      if (result.done !== false || result.next_offset === null || result.next_offset === undefined) break;
-      if (result.next_offset <= offset) throw new Error('批量导入未能继续推进；已完成的记录已保留，请检查文件后重新导入。');
-      offset = result.next_offset;
+    while (intake.pending.length) {
+      const job = intake.pending.shift(); intake.current = job; job.status = 'working'; renderImportQueue();
+      try {
+        const summary = await executeImport(job);
+        job.status = summary.pdfCount ? 'done' : summary.recordCount || summary.imported || summary.duplicates ? 'review' : 'skipped';
+        job.message = importOutcome(summary); intake.completed++; if (!summary.pdfCount && (summary.recordCount || summary.imported || summary.duplicates)) intake.metadataOnly++;
+        if (job.inputId && $(job.inputId).value.trim() === job.originalInput) $(job.inputId).value = '';
+      } catch (error) {
+        job.status = 'failed'; intake.failed++;
+        const partial = job.summary && (job.summary.imported || job.summary.duplicates) ? `\n已完成部分已保留：${importOutcome(job.summary)}` : '';
+        job.message = `${error.message || '导入未完成'}${partial}`;
+      } finally {
+        job.file = null; intake.current = null; renderImportQueue();
+      }
+      state.offset = 0; await loadList(); await loadStatus();
+      if (!state.active && !state.openedId && job.summary?.firstItem?.id) await openPaper(job.summary.firstItem.id);
     }
-    const message = `已导入 ${imported} 篇${duplicates ? `，识别到 ${duplicates} 篇重复文献` : ''}`;
-    state.offset = 0; await loadList(); await loadStatus();
-    if (firstItem?.id) await openPaper(firstItem.id);
-    state.upload = null; $('import-file').value = ''; $('upload-label').textContent = '选择文件，或拖到这里'; $('import-source').value = '';
-    if (warnings.length) $('import-result').textContent = `${message}\n${warnings.join('\n')}${warningCount > warnings.length ? `\n另有 ${warningCount - warnings.length} 条提示，界面展示前 100 条。` : ''}`;
-    else { closeDialog('import-dialog'); toast(message); }
-  } catch (error) { errorAt('import-error', error); if (imported || duplicates) { $('import-result').textContent = `本次已导入 ${imported} 篇，识别重复 ${duplicates} 篇。已完成的记录仍保存在文献库中；输入已保留，可重试。`; await loadList(); await loadStatus(); } } finally { setBusy(event.target, false); $('import-submit').textContent = '导入文献'; }
+  } finally { intake.running = false; intake.current = null; renderImportQueue(); }
+}
+function enqueueFiles(files) {
+  const sources = Array.from(files || []).map(file => ({ file, label: file.name || '未命名文件' }));
+  const count = enqueueImports(sources);
+  if (count && $('import-dialog').open) closeDialog('import-dialog');
+  return count;
+}
+function enqueueLink(value, inputId = null) {
+  const originalInput = String(value || '').trim(); const args = linkArguments(originalInput); if (!args) return false;
+  return enqueueImports([{ args, label: originalInput, originalInput, inputId }]) > 0;
+}
+function editableTarget(target) { return Boolean(target?.isContentEditable || target?.closest?.('input, textarea, select, [contenteditable]')); }
+function handlePaste(event) {
+  const text = event.clipboardData?.getData('text/plain')?.trim(); if (!text || !linkArguments(text)) return;
+  const inputId = ['quick-import-source', 'import-source'].includes(event.target?.id) ? event.target.id : null;
+  if (!inputId && editableTarget(event.target)) return;
+  event.preventDefault();
+  if (inputId) $(inputId).value = text;
+  if (enqueueLink(text, inputId) && inputId === 'import-source') closeDialog('import-dialog');
+}
+function transferLinks(transfer) {
+  const value = transfer?.getData('text/uri-list') || transfer?.getData('text/plain') || '';
+  return value.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(value => ({ value, args: linkArguments(value) })).filter(entry => entry.args);
+}
+function handleDrop(event) {
+  $('window-drop-overlay').hidden = true;
+  const files = event.dataTransfer?.files;
+  if (files?.length) { event.preventDefault(); enqueueFiles(files); return; }
+  if (editableTarget(event.target) && !['quick-import-source', 'import-source'].includes(event.target.id)) return;
+  const links = transferLinks(event.dataTransfer); if (!links.length) return;
+  event.preventDefault(); enqueueImports(links.map(entry => ({ args: entry.args, label: entry.value })));
+  if ($('import-dialog').open) closeDialog('import-dialog');
+}
+function handleDragOver(event) {
+  const types = Array.from(event.dataTransfer?.types || []);
+  if (types.includes('Files')) { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; $('window-drop-overlay').hidden = false; }
+  else if (!editableTarget(event.target) && (types.includes('text/uri-list') || types.includes('text/plain'))) event.preventDefault();
+}
+function importPapers(event) {
+  event.preventDefault(); const source = $('import-source').value.trim(); errorAt('import-error', null);
+  if (!source) { errorAt('import-error', '请粘贴论文链接、DOI 或填写本地路径，也可直接选择文件。'); return; }
+  const args = linkArguments(source) || { path: source };
+  if (enqueueImports([{ args, label: source, inputId: 'import-source', originalInput: source }])) closeDialog('import-dialog');
 }
 function openMetadata() {
   const item = state.active; if (!item) return;
@@ -534,11 +668,23 @@ $('welcome-import').addEventListener('click', () => { if (state.libraryCount) { 
 for (const button of document.querySelectorAll('.dialog-close')) button.addEventListener('click', () => button.closest('dialog').close());
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', (event) => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close(); } });
 $('import-form').addEventListener('submit', importPapers);
-$('import-file').addEventListener('change', () => chooseUpload($('import-file').files[0]));
-$('import-source').addEventListener('input', () => { if ($('import-source').value.trim()) { state.upload = null; $('import-file').value = ''; $('upload-label').textContent = '选择文件，或拖到这里'; } });
+$('import-file').addEventListener('change', () => { enqueueFiles($('import-file').files); $('import-file').value = ''; });
+$('quick-import-form').addEventListener('submit', (event) => { event.preventDefault(); if (!enqueueLink($('quick-import-source').value, 'quick-import-source')) toast('请输入完整论文链接或 DOI。', true); });
 $('drop-zone').addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('import-file').click(); } });
-for (const name of ['dragenter', 'dragover']) $('drop-zone').addEventListener(name, (event) => { event.preventDefault(); $('drop-zone').classList.add('drag-over'); });
-for (const name of ['dragleave', 'drop']) $('drop-zone').addEventListener(name, (event) => { event.preventDefault(); $('drop-zone').classList.remove('drag-over'); if (name === 'drop') chooseUpload(event.dataTransfer.files[0]); });
+$('queue-toggle').addEventListener('click', () => { $('import-queue').hidden = !$('import-queue').hidden; });
+$('queue-hide').addEventListener('click', () => { $('import-queue').hidden = true; });
+$('queue-list').addEventListener('click', (event) => {
+  const paper = event.target.closest('[data-queue-paper]'); if (paper) { openPaper(paper.dataset.queuePaper); return; }
+  const retry = event.target.closest('[data-queue-retry]'); if (!retry) return;
+  const job = intake.records.find(entry => String(entry.id) === retry.dataset.queueRetry);
+  if (job?.args) enqueueImports([{ args: job.args, label: job.label, inputId: job.inputId, originalInput: job.originalInput }]);
+});
+document.addEventListener('paste', handlePaste);
+document.addEventListener('dragover', handleDragOver);
+document.addEventListener('dragenter', handleDragOver);
+document.addEventListener('dragleave', (event) => { if (!event.relatedTarget) $('window-drop-overlay').hidden = true; });
+document.addEventListener('dragend', () => { $('window-drop-overlay').hidden = true; });
+document.addEventListener('drop', handleDrop);
 $('metadata-open').addEventListener('click', openMetadata); $('metadata-form').addEventListener('submit', saveMetadata);
 $('attach-open').addEventListener('click', () => { if (!state.active) return; $('attach-form').dataset.itemId = state.active.id; errorAt('attach-error', null); openDialog('attach-dialog'); }); $('attach-form').addEventListener('submit', attachPdf);
 $('copy-apa').addEventListener('click', () => cite('apa')); $('export-bib').addEventListener('click', () => cite('biblatex')); $('export-notes').addEventListener('change', exportNotes);

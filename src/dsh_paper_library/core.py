@@ -15,6 +15,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
 
@@ -38,6 +39,25 @@ def canonical_doi(value):
 
 def safe_name(value):
     return re.sub(r"[^\w.\-]+", "_", value, flags=re.U)[:100] or "paper"
+
+
+def filename_component(value, fallback, byte_limit):
+    value = unicodedata.normalize("NFC", str(value or ""))
+    value = re.sub(r"[^\w.\-]+", "-", value, flags=re.U).strip(".-_")
+    return (value.encode("utf-8")[:byte_limit].decode("utf-8", "ignore").rstrip(".-_") or fallback)
+
+
+def managed_filename(item, id, full_id=False):
+    authors = item.get("author") or []
+    first = authors[0] if isinstance(authors, list) and authors and isinstance(authors[0], dict) else {}
+    author = filename_component(first.get("family") or first.get("literal"), "unknown-author", 40)
+    parts = (item.get("issued") or {}).get("date-parts", [[]]) if isinstance(item.get("issued"), dict) else [[]]
+    year = str(parts[0][0]) if parts and parts[0] else "undated"
+    year = filename_component(year, "undated", 12)
+    suffix = "--" + (id if full_id else id[:8]) + ".pdf"
+    prefix = author + "-" + year + "-"
+    title = filename_component(item.get("title"), "untitled", 210 - len((prefix + suffix).encode("utf-8")))
+    return prefix + title + suffix
 
 
 def csl_item(raw):
@@ -82,7 +102,7 @@ def csl_item(raw):
     if item.get("DOI"):
         item["DOI"] = canonical_doi(item["DOI"])
     # Host filesystem paths and attachment objects never become portable metadata.
-    for field in ("attachments", "annotations", "creators", "collections", "relations", "path", "localPath", "uri", "key", "itemKey", "version", "dateAdded", "dateModified"):
+    for field in ("attachments", "annotations", "creators", "collections", "relations", "path", "localPath", "uri", "key", "itemKey", "version", "dateAdded", "dateModified", "pdf_filename"):
         item.pop(field, None)
     item.pop("id", None)
     return item
@@ -168,6 +188,7 @@ class Library:
             self.db.execute("INSERT INTO paper_search(id,text) SELECT id," + search_expression.replace("new.", "") + " FROM papers")
         os.chmod(self.root / "catalog.sqlite3", 0o600)
         self.db.commit()
+        self._recover_file_update()
 
     def close(self):
         self.db.close()
@@ -192,6 +213,7 @@ class Library:
             raise ValueError("Paper not found")
         result = json.loads(row["metadata"])
         result.update(id=row["id"], citekey=row["citekey"], pdf=bool(row["pdf_path"]), created=row["created"], modified=row["modified"])
+        result["pdf_filename"] = Path(row["pdf_path"]).name if row["pdf_path"] else None
         return result
 
     def pdf_path(self, id):
@@ -237,14 +259,34 @@ class Library:
         if not existing and item.get("source_pdf_sha256"):
             existing = self.db.execute("SELECT id FROM papers WHERE json_extract(metadata,'$.source_pdf_sha256')=?", (item["source_pdf_sha256"],)).fetchone()
         if existing:
-            return self.get(existing[0]), True
+            current = self.get(existing[0])
+            if source == "pdf-import" and not current["pdf"]:
+                # A DOI metadata record may precede the successful PDF download.
+                # Keep its bibliography and user edits, but carry the actual
+                # attachment evidence into both the catalog and embedded CSL.
+                merged = {key: value for key, value in current.items() if key not in {"id", "pdf", "pdf_filename", "created", "modified"}}
+                for field in ("source_pdf_sha256", "parse", "acquisition"):
+                    if item.get(field) not in (None, "", [], {}):
+                        merged[field] = item[field]
+                if isinstance(merged.get("parse"), dict):
+                    parsed = dict(merged["parse"])
+                    field_sources = dict(parsed.get("field_sources", {}))
+                    old_sources = (current.get("parse") or {}).get("field_sources", {})
+                    for field, value in current.items():
+                        if field not in {"parse", "acquisition", "source_pdf_sha256"} and field in field_sources and value != item.get(field):
+                            field_sources[field] = old_sources.get(field, "existing-catalog")
+                    parsed["field_sources"] = field_sources
+                    merged["parse"] = parsed
+                self.db.execute("UPDATE papers SET metadata=?,modified=? WHERE id=?", (json.dumps(merged, ensure_ascii=False), now(), current["id"]))
+                current = self.get(current["id"])
+            return current, True
         id = uuid.uuid4().hex
         item["citekey"] = key or "paper_" + id[:10]
         item["provenance"] = {"source": source, "imported": now()}
         self.db.execute("INSERT INTO papers VALUES(?,?,?,?,?,?,?,?)", (id, json.dumps(item, ensure_ascii=False), item["title"], doi, item["citekey"], None, now(), now()))
         return self.get(id), False
 
-    def import_items(self, items=None, path=None, limit=100, offset=0):
+    def import_items(self, items=None, path=None, limit=100, offset=0, metadata=None, metadata_source=None, metadata_verified=False):
         warnings, results, imported, duplicates = [], [], 0, 0
         base = None
         if path:
@@ -277,16 +319,38 @@ class Library:
                 raise ValueError("Import file exceeds 250 MB limit")
             base = source_path.parent
             if source_path.suffix.lower() == ".pdf":
-                metadata = self.read_portable(source_path)
+                inspection = self.inspect_pdf(source_path)
+                supplied = metadata
+                metadata = inspection["metadata"]
+                parse = dict(inspection["parse"])
+                if supplied is not None:
+                    provenance_only = isinstance(supplied, dict) and set(supplied).issubset({"acquisition"})
+                    if not isinstance(supplied, dict) or (metadata_verified is not True and not provenance_only) or not metadata_source:
+                        raise ValueError("PDF enrichment requires verified metadata and its explicit source")
+                    protected = {"source_pdf_sha256", "parse", "provenance", "id", "pdf", "pdf_filename", "page_count"}
+                    for key, value in supplied.items():
+                        if key in protected or value in (None, "", [], {}):
+                            continue
+                        if parse["source"] == "embedded-csl" and metadata.get(key) not in (None, "", [], {}):
+                            continue
+                        metadata[key] = value
+                        parse["field_sources"][key] = str(metadata_source)[:100]
+                    if metadata_verified is True:
+                        parse.update(status="verified-metadata", metadata_source=str(metadata_source)[:100], verified=True)
+                        parse["needs_review"] = not (metadata.get("title") and metadata.get("author") and metadata.get("issued"))
+                    else:
+                        parse["acquisition_source"] = str(metadata_source)[:100]
+                metadata["parse"] = {key: value for key, value in parse.items() if key != "text_excerpt"}
                 with source_path.open("rb") as handle:
                     metadata.setdefault("source_pdf_sha256", hashlib.file_digest(handle, "sha256").hexdigest())
                 if not metadata.get("title") or metadata["title"] == "Untitled":
                     metadata["title"] = source_path.stem
                 with self.lock():
-                    item, duplicate = self._upsert(metadata, "pdf-embedded")
+                    item, duplicate = self._upsert(metadata, "pdf-import")
+                    self.db.commit()
                     if not item["pdf"]:
                         item = self._attach(item["id"], source_path)
-                return {"imported": int(not duplicate), "duplicates": int(duplicate), "items": [item], "warnings": warnings}
+                return {"imported": int(not duplicate), "duplicates": int(duplicate), "items": [item], "warnings": parse.get("warnings", [])}
             if source_path.stat().st_size > 32 * 1024 * 1024:
                 raise ValueError("Metadata import exceeds 32 MB; split the export into batches")
             text = source_path.read_text(encoding="utf-8-sig")
@@ -360,7 +424,7 @@ class Library:
             raise ValueError("metadata must be an object")
         with self.lock():
             old = self.get(id)
-            protected = {"id", "pdf", "page_count", "created", "modified", "provenance"}
+            protected = {"id", "pdf", "pdf_filename", "page_count", "created", "modified", "provenance"}
             merged = {k: v for k, v in old.items() if k not in protected}
             merged.update({k: v for k, v in metadata.items() if k not in protected})
             value = csl_item(merged)
@@ -371,7 +435,8 @@ class Library:
             if duplicate:
                 raise ValueError("DOI or citekey already belongs to another record")
             if old["pdf"]:
-                self._write_pdf(id, lambda doc: self._embed(doc, value))
+                self._update_pdf_metadata(id, value)
+                return self.get(id)
             self.db.execute("UPDATE papers SET metadata=?,title=?,doi=?,citekey=?,modified=? WHERE id=?", (json.dumps(value, ensure_ascii=False), value["title"], value.get("DOI"), value["citekey"], now(), id))
             return self.get(id)
 
@@ -405,27 +470,114 @@ class Library:
     @classmethod
     def read_portable(cls, path):
         with cls._open_pdf(path) as doc:
-            metadata = {"title": doc.metadata.get("title") or "Untitled", "type": "article"}
-            if PORTABLE_NAME in doc.embfile_names():
-                embedded = doc.embfile_get(PORTABLE_NAME)
-                if len(embedded) > 1024 * 1024:
-                    raise ValueError("Embedded metadata exceeds 1 MB")
-                try:
-                    portable = json.loads(embedded)
-                except (ValueError, UnicodeError) as exc:
-                    raise ValueError("Invalid embedded Paper Library metadata") from exc
-                if not isinstance(portable, dict):
-                    raise ValueError("Invalid embedded Paper Library metadata object")
-                metadata.update(portable)
-            elif doc.metadata.get("keywords"):
-                match = re.search(r"paper-library-citekey:([^;]+)", doc.metadata["keywords"])
-                if match:
-                    metadata["citekey"] = match.group(1)
-            return metadata
+            return cls._portable_document(doc)
+
+    @staticmethod
+    def _portable_document(doc):
+        metadata = {"title": doc.metadata.get("title") or "Untitled", "type": "article"}
+        if PORTABLE_NAME in doc.embfile_names():
+            embedded = doc.embfile_get(PORTABLE_NAME)
+            if len(embedded) > 1024 * 1024:
+                raise ValueError("Embedded metadata exceeds 1 MB")
+            try:
+                portable = json.loads(embedded)
+            except (ValueError, UnicodeError) as exc:
+                raise ValueError("Invalid embedded Paper Library metadata") from exc
+            if not isinstance(portable, dict):
+                raise ValueError("Invalid embedded Paper Library metadata object")
+            metadata.update(portable)
+        elif doc.metadata.get("keywords"):
+            match = re.search(r"paper-library-citekey:([^;]+)", doc.metadata["keywords"])
+            if match:
+                metadata["citekey"] = match.group(1)
+        return metadata
+
+    @classmethod
+    def inspect_pdf(cls, path):
+        """Inspect at most three pages; identifier candidates are not verified identities."""
+        import pymupdf as fitz
+        path = Path(path).expanduser().resolve()
+        if not path.is_file() or path.stat().st_size > 250 * 1024 * 1024:
+            raise ValueError("PDF is missing or exceeds 250 MB")
+        with cls._open_pdf(path) as doc:
+            if doc.is_repaired:
+                raise ValueError("Repaired/malformed PDF cannot be automatically imported; save a verified copy in a PDF editor first")
+            embedded = PORTABLE_NAME in doc.embfile_names()
+            metadata = cls._portable_document(doc)
+            source = "embedded-csl" if embedded else "pdf-info"
+            field_sources = {key: source for key in metadata if key not in {"parse", "provenance"} and metadata[key] not in (None, "", [], {})}
+            if not embedded:
+                field_sources["type"] = "default-record-type"
+            if not embedded and doc.metadata.get("author"):
+                metadata["author"] = [{"literal": doc.metadata["author"][:1000]}]
+                field_sources["author"] = "pdf-info-author-literal"
+            text_parts, title_lines, budget, evidence = [], [], 30000, []
+            for number in range(min(3, doc.page_count)):
+                if budget <= 0:
+                    break
+                page = doc[number]
+                if number == 0:
+                    blocks = page.get_text("dict", flags=fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES).get("blocks", [])
+                    lines = []
+                    for block in blocks:
+                        for line in block.get("lines", []):
+                            spans = line.get("spans", [])
+                            content = " ".join(span.get("text", "") for span in spans).strip()
+                            if content:
+                                lines.append(content)
+                                if len(title_lines) < 150 and line["bbox"][1] < page.rect.height * .55:
+                                    title_lines.append((content, max(float(span.get("size", 0)) for span in spans), line["bbox"]))
+                    text = "\n".join(lines)[:budget]
+                else:
+                    text = page.get_text("text")[:budget]
+                text_parts.append(text)
+                budget -= len(text)
+                for match in re.finditer(r"\b10\.\d{4,9}/[^\s<>\"{}]+", text, re.I):
+                    value = match.group().rstrip(".,;:]}>")
+                    while value.endswith(")") and value.count(")") > value.count("("):
+                        value = value[:-1]
+                    value = canonical_doi(value)
+                    if len(value) <= 512:
+                        evidence.append({"kind": "doi", "value": value, "source": "first-pages-text", "page": number + 1})
+                for match in re.finditer(r"(?:arxiv\s*:\s*|arxiv\.org/(?:abs|pdf)/)(\d{4}\.\d{4,5}(?:v\d+)?|[a-z][a-z.\-]+/\d{7}(?:v\d+)?)", text, re.I):
+                    evidence.append({"kind": "arxiv", "value": match.group(1), "source": "first-pages-text", "page": number + 1})
+            title = str(metadata.get("title") or "").strip()
+            generic = not title or title.casefold() in {"untitled", "document", "untitled document", "sample"} or title.lower().startswith("microsoft word -")
+            if generic:
+                candidates = [line for line in title_lines if 8 <= len(line[0]) <= 300 and not re.search(r"(?:https?://|www\.|doi\s*:|arxiv\s*:|^abstract\b|^keywords\b|^references\b|^proceedings\b)", line[0], re.I)]
+                if candidates:
+                    chosen = max(candidates, key=lambda line: (round(line[1], 1), -line[2][1]))
+                    index = candidates.index(chosen)
+                    combined = [chosen[0]]
+                    bottom = chosen[2][3]
+                    for line in candidates[index + 1:index + 3]:
+                        if abs(line[1] - chosen[1]) <= .75 and -chosen[1] * .5 <= line[2][1] - bottom <= chosen[1] * 1.6:
+                            combined.append(line[0])
+                            bottom = line[2][3]
+                        else:
+                            break
+                    metadata["title"] = " ".join(combined)[:500]
+                    field_sources["title"] = "first-page-layout-heuristic"
+                else:
+                    metadata["title"] = path.stem
+                    field_sources["title"] = "filename-fallback"
+            seen, identifiers = set(), []
+            for value in evidence:
+                identity = (value["kind"], value["value"])
+                if identity not in seen and len(identifiers) < 16:
+                    identifiers.append(value)
+                    seen.add(identity)
+            warnings = []
+            if not any(text.strip() for text in text_parts):
+                warnings.append("No extractable text in the inspected pages; OCR was not run")
+            if field_sources.get("title") in {"first-page-layout-heuristic", "filename-fallback"}:
+                warnings.append("Title was inferred locally and needs review")
+            parse = {"status": "embedded-metadata" if embedded else "local-parse", "source": source, "portable_metadata": embedded, "needs_review": not embedded or not (metadata.get("author") and metadata.get("issued")), "pages_inspected": len(text_parts), "text_characters": 30000 - budget, "text_excerpt": "\n\n".join(text_parts)[:30000], "field_sources": field_sources, "identifier_evidence": identifiers, "warnings": warnings, "limits": {"pages": 3, "text_characters": 30000}}
+            return {"metadata": metadata, "doi_candidates": [value["value"] for value in identifiers if value["kind"] == "doi"][:8], "arxiv_candidates": [value["value"] for value in identifiers if value["kind"] == "arxiv"][:8], "parse": parse}
 
     @staticmethod
     def _embed(doc, metadata):
-        portable = {k: v for k, v in metadata.items() if k not in {"id", "pdf", "created", "modified", "page_count"}}
+        portable = {k: v for k, v in metadata.items() if k not in {"id", "pdf", "pdf_filename", "created", "modified", "page_count"}}
         payload = json.dumps(portable, ensure_ascii=False).encode("utf-8")
         if len(payload) > 1024 * 1024:
             raise ValueError("Portable metadata exceeds 1 MB")
@@ -439,7 +591,7 @@ class Library:
         info["keywords"] = (keywords + "; " if keywords else "") + "paper-library-citekey:" + portable.get("citekey", "")
         doc.set_metadata(info)
 
-    def _atomic_save(self, doc, destination, backup=True):
+    def _atomic_save(self, doc, destination, backup=True, backup_key=None):
         descriptor, tempname = tempfile.mkstemp(prefix=".pdf-write-", suffix=".pdf", dir=destination.parent)
         os.close(descriptor)
         try:
@@ -450,7 +602,7 @@ class Library:
             with open(tempname, "rb") as handle:
                 os.fsync(handle.fileno())
             if backup and destination.exists():
-                backup_path = self.root / "backups" / (destination.name + ".bak")
+                backup_path = self.root / "backups" / ((backup_key + ".pdf" if backup_key else destination.name) + ".bak")
                 shutil.copy2(destination, backup_path)
                 os.chmod(backup_path, 0o600)
             os.replace(tempname, destination)
@@ -468,9 +620,98 @@ class Library:
         destination = self.pdf_path(id)
         with self._open_pdf(destination, writing=True) as doc:
             result = operation(doc)
-            self._atomic_save(doc, destination)
+            self._atomic_save(doc, destination, backup_key=id)
         self.db.execute("UPDATE papers SET modified=? WHERE id=?", (now(), id))
         return result
+
+    def _managed_destination(self, item, id, current=None):
+        for full in (False, True):
+            candidate = self.root / "pdfs" / managed_filename(item, id, full_id=full)
+            relative = str(candidate.relative_to(self.root))
+            owner = self.db.execute("SELECT id FROM papers WHERE pdf_path=?", (relative,)).fetchone()
+            if (not owner or owner["id"] == id) and (not candidate.exists() or candidate == current):
+                return candidate
+        raise ValueError("Managed PDF filename already exists; no existing file was overwritten")
+
+    def _file_update_journal(self, value):
+        path = self.root / ".pending-file-update.json"
+        descriptor, temporary = tempfile.mkstemp(prefix=".file-journal-", dir=self.root)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(value, handle, ensure_ascii=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            directory = os.open(self.root, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def _recover_file_update(self):
+        journal = self.root / ".pending-file-update.json"
+        if not journal.exists():
+            return
+        value = json.loads(journal.read_text(encoding="utf-8"))
+        new = (self.root / value["new_path"]).resolve()
+        row = self.db.execute("SELECT pdf_path,metadata FROM papers WHERE id=?", (value["id"],)).fetchone()
+        if not row:
+            raise ValueError("Rename journal paper is missing; preserve both PDFs for recovery")
+        if not new.is_relative_to(self.root / "pdfs"):
+            raise ValueError("Invalid managed PDF journal; no files were removed")
+        if value.get("kind") == "attach":
+            if row["pdf_path"] not in (None, value["new_path"]):
+                raise ValueError("Attachment journal conflicts with catalog; preserve files for recovery")
+            if new.is_file() and not row["pdf_path"]:
+                with self._open_pdf(new) as doc:
+                    metadata = json.loads(row["metadata"])
+                    metadata["page_count"] = doc.page_count
+                self.db.execute("UPDATE papers SET pdf_path=?,metadata=?,modified=? WHERE id=?", (value["new_path"], json.dumps(metadata, ensure_ascii=False), now(), value["id"]))
+                self.db.commit()
+            elif row["pdf_path"] and not new.is_file():
+                raise ValueError("Catalog points to missing attached PDF; preserve journal for recovery")
+            journal.unlink()
+            return
+        old = (self.root / value["old_path"]).resolve()
+        if old == new or not old.is_relative_to(self.root / "pdfs"):
+            raise ValueError("Invalid managed PDF rename journal; no files were removed")
+        active = (self.root / row["pdf_path"]).resolve() if row["pdf_path"] else None
+        if active == old and old.is_file():
+            new.unlink(missing_ok=True)
+        elif active == new and new.is_file():
+            old.unlink(missing_ok=True)
+        else:
+            raise ValueError("Rename state is inconsistent; preserve both PDFs for recovery")
+        journal.unlink()
+
+    def _update_pdf_metadata(self, id, value):
+        current = self.pdf_path(id)
+        destination = self._managed_destination(value, id, current)
+        if destination == current:
+            self._write_pdf(id, lambda doc: self._embed(doc, value))
+            self.db.execute("UPDATE papers SET metadata=?,title=?,doi=?,citekey=?,modified=? WHERE id=?", (json.dumps(value, ensure_ascii=False), value["title"], value.get("DOI"), value["citekey"], now(), id))
+            return
+        relative = str(destination.relative_to(self.root))
+        self._file_update_journal({"id": id, "old_path": str(current.relative_to(self.root)), "new_path": relative})
+        try:
+            with self._open_pdf(current, writing=True) as doc:
+                self._embed(doc, value)
+                self._atomic_save(doc, destination, backup=False)
+            backup = self.root / "backups" / (id + ".pdf.bak")
+            shutil.copy2(current, backup)
+            os.chmod(backup, 0o600)
+            self.db.execute("UPDATE papers SET metadata=?,title=?,doi=?,citekey=?,pdf_path=?,modified=? WHERE id=?", (json.dumps(value, ensure_ascii=False), value["title"], value.get("DOI"), value["citekey"], relative, now(), id))
+            # The catalog switch commits while BOTH copies exist. Recovery uses
+            # that authoritative path to remove only the superseded copy.
+            self.db.commit()
+        except BaseException:
+            self.db.rollback()
+            self._recover_file_update()
+            raise
+        self._recover_file_update()
 
     def _attach(self, id, path):
         path = Path(path).expanduser().resolve()
@@ -479,13 +720,21 @@ class Library:
         item = self.get(id)
         if item["pdf"]:
             raise ValueError("Paper already has a managed PDF; replacement is not automatic")
-        destination = self.root / "pdfs" / (id + ".pdf")
-        with self._open_pdf(path, writing=True) as doc:
-            item["page_count"] = doc.page_count
-            self._embed(doc, item)
-            self._atomic_save(doc, destination, backup=False)
-        stored = {k: v for k, v in item.items() if k not in {"id", "pdf", "created", "modified"}}
-        self.db.execute("UPDATE papers SET metadata=?,pdf_path=?,modified=? WHERE id=?", (json.dumps(stored, ensure_ascii=False), str(destination.relative_to(self.root)), now(), id))
+        destination = self._managed_destination(item, id)
+        self._file_update_journal({"kind": "attach", "id": id, "new_path": str(destination.relative_to(self.root))})
+        try:
+            with self._open_pdf(path, writing=True) as doc:
+                item["page_count"] = doc.page_count
+                self._embed(doc, item)
+                self._atomic_save(doc, destination, backup=False)
+            stored = {k: v for k, v in item.items() if k not in {"id", "pdf", "pdf_filename", "created", "modified"}}
+            self.db.execute("UPDATE papers SET metadata=?,pdf_path=?,modified=? WHERE id=?", (json.dumps(stored, ensure_ascii=False), str(destination.relative_to(self.root)), now(), id))
+            self.db.commit()
+        except BaseException:
+            self.db.rollback()
+            self._recover_file_update()
+            raise
+        self._recover_file_update()
         return self.get(id)
 
     def attach(self, id, path):
@@ -830,10 +1079,13 @@ def dispatch(request):
         if action == "status":
             return {"count": library.db.execute("SELECT count(*) FROM papers").fetchone()[0], "library": str(library.root), "storage": "SQLite + portable native PDF annotations", "worker": "on-demand", "schema": 1}
         if action == "import":
-            return library.import_items(request.get("items"), request.get("path"), request.get("limit", 100), request.get("offset", 0))
+            return library.import_items(request.get("items"), request.get("path"), request.get("limit", 100), request.get("offset", 0), request.get("metadata"), request.get("metadata_source"), request.get("metadata_verified", False))
+        if action == "inspect_pdf":
+            return library.inspect_pdf(request["path"])
         if action == "export_pdf":
             item = library.get(request["id"])
-            return {"path": str(library.pdf_path(request["id"])), "filename": safe_name(item["citekey"]) + ".pdf"}
+            path = library.pdf_path(request["id"])
+            return {"path": str(path), "filename": path.name}
         actions = {
             "list": ("query", "limit", "offset"), "get": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page": ("id", "page", "scale"),
             "annotations": ("id",), "annotate": ("id", "page", "type", "rects", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment"), "annotation_delete": ("id", "annotation_id"),

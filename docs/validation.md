@@ -4,17 +4,20 @@ This is a local first version, installed in Harness's existing `web` profile. Us
 
 ## Functional checks
 
-- 20 Python tests: catalog/import batching and interruption recovery, FTS updates, exact dedup/conflict handling, native annotations, rotations, concurrent writes, source preservation, fresh-catalog PDF recovery, encrypted/signed refusal and atomic feedback context validation.
-- 28 JavaScript tests: real Harness ToolRuntime, bundled lazy client, shared composer model subscriptions, actual UI context handlers and stale/spoofed route rejection, reasoning-effort forwarding, streaming AI success/failure/cancellation, HTTP authentication boundaries, citation rules, 130-record paginated upload/full-library export and complete PDF/feedback copy/reimport flow. AI responses in these tests are deterministic test responses, not live provider evaluations.
-- Eight isolated Harness web checks: plugin load, browser bundle, authenticated page, authentication refusal, cross-origin refusal, model metadata, worker and deployment-library isolation. No model request was made.
+- 26 Python tests: catalog/import batching and interruption recovery, bounded PDF inspection, Unicode filenames/collision and rename-journal recovery, metadata-only item attachment evidence, FTS updates, exact dedup/conflict handling, native annotations, rotations, concurrent writes, source preservation, fresh-catalog PDF recovery, encrypted/signed refusal and atomic feedback context validation.
+- 60 JavaScript tests: public acquisition, DNS/redirect checks and pinned connections, byte/deadline/concurrency budgets, raw PDF upload, title identity and enrichment provenance, UI drop/paste/queue continuation, actual Harness skill registry, ToolRuntime and lazy client, shared composer model subscriptions, AI terminal/cancellation handling, citation rules, paginated metadata import and complete PDF/feedback copy/reimport flow. AI responses are deterministic test responses, not live provider evaluations.
+- Nine isolated Harness web checks: plugin load, session skill catalog with exact bundled skill path, browser bundle, authenticated page, authentication refusal, cross-origin refusal, model metadata, worker and deployment-library isolation. No model request was made; see [host receipt](validation/harness-smoke.json).
 - Full capacity-library export: all 2,000 records re-parsed from BibLaTeX with 2,000 unique original keys and no missing keys; see [export receipt](validation/export-2000.json).
 - Browser walkthrough through Codex computer-use tools: loaded three synthetic papers; opened a PDF; copied APA text to clipboard; saved a Chinese page note and selection highlight; refreshed and observed persisted notes; created a relation and observed its recorded reason in the graph. This is an agent walkthrough, not a formal usability study.
 - Actual Harness sidebar walkthrough with the 2,000-record fixture: opened the reader, observed inherited model A, changed the Harness composer to model B and observed the reader follow it. An unsaved Chinese annotation draft survived switching back to A. The selection-only fixture refused generation before network I/O; the intentionally failed synthetic turn only made the normal conversation sidebar available. Reproduce setup with [the model fixture](../tests-js/fixtures/harness-models/README.md).
+- Automatic intake browser walkthrough: pasted the [W3C dummy PDF](https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf), observed real network download, saved filename and readable page; selected two generated PDFs together and observed sequential automatic saving; rejected a nonstandard-port target with input/retry retained. No browser error/warning logs were recorded. The OS drag gesture itself was not automated; synthetic events exercise the actual application drop handler. See [intake walkthrough](validation/intake-manual.json).
 - WPS attempt did not complete because native application automation failed to maintain a usable file dialog. WPS viewing/saving remains unverified; no existing user document was edited for this test.
 
 Machine-readable checks: [automated](validation/automated.json), [installed profile](validation/install.json), [preserved prior configuration](validation/install-preservation.json), [manual walkthrough](validation/manual.json).
 
 ## Capacity and memory
+
+These capacity measurements were taken before automatic link intake was added. New regression tests verify streaming, queue/concurrency limits and release after failure, but do not establish a new peak-RSS result for large concurrent downloads.
 
 Fixture: **2,000 CSL records, 1,000 PDFs**, four pages per PDF, 20,600 bytes per synthetic text PDF. Disk catalog was about 3.9 MB. These small PDFs do not represent scans or large embedded images.
 
@@ -46,5 +49,7 @@ Raw sanitized evidence: [Python capacity](validation/capacity.json), [Node adapt
 ## Boundaries
 
 Metadata/abstract retrieval only; no full-text index, OCR or resident embeddings. One managed PDF per record. Metadata input is capped at 2,000 records / 32 MB, processed in batches of 100; larger exports must be split. PDF import is capped at 250 MB / 2,000 pages. Rendering is capped at 4 million pixels and 4,000 pixels per dimension. Annotation export is bounded; truncation is reported. AI receives at most 40 annotations / 12,000 source characters and requires a configured Harness model.
+
+Automatic parsing uses at most three pages / 30,000 characters; unreliable or incomplete fields remain flagged for review. Public acquisition covers Crossref/DOI, arXiv, direct PDFs and generic citation meta tags. Network branches beyond the W3C direct PDF are tested with deterministic transport fixtures. Authenticated publisher access, browser providers and live model generation are not validated here. The API documents all intake limits.
 
 Local installation is verified. The running user host was not restarted; reopening Harness is required for the newly registered right-panel entry. Publication, remote push and actual-library migration were not performed.

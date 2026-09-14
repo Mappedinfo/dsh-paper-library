@@ -6,6 +6,7 @@ import { resolveConfig } from './config.mjs'
 import { createHarnessAI, discoverModels } from './ai.mjs'
 import { createNodeHandler } from './http.mjs'
 import { registerLibraryTools } from './tools.mjs'
+import { registerBundledSkills } from './skills.mjs'
 
 export const name = 'paper-library'
 export const inject = ['tools', 'llm']
@@ -22,6 +23,9 @@ export function apply(ctx, rawConfig = {}) {
     models: signal => discoverModels(ctx.llm, signal),
   }
   ctx.effect(() => registerLibraryTools(ctx, defineTool, dispatch, options, config), 'paper-library: tools')
+  ctx.inject(['skills'], scoped => {
+    scoped.effect(() => registerBundledSkills(scoped), 'paper-library: bundled paper-fetch skill')
+  })
   ctx.inject(['connection', 'webServer'], web => {
     const fetchHandler = createFetchHandler({ ...options, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({

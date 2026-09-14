@@ -1,0 +1,13 @@
+{
+  "verified_at": "2026-09-14T11:29:00Z",
+  "method": "Codex computer-use browser walkthrough against an isolated standalone library",
+  "fixture_setup": ".venv/bin/python scripts/create-demo.py --output .local/intake-source",
+  "checks": [
+    {"id": "paste-public-pdf", "status": "pass", "source": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", "observed": "Paste alone started acquisition. Dummy PDF file appeared with a managed author-undated-title-id filename, review notice, one-page image and selectable text."},
+    {"id": "select-multiple-pdfs", "status": "pass", "observed": "Selected generated example-1.pdf and example-2.pdf together. Both saved automatically in sequence; library then contained three records. Saved filenames were visible in the queue."},
+    {"id": "open-imported-pdf", "status": "pass", "observed": "Opened A guide to spatial representations from its queue result. Reader showed page1 of3 and selectable synthetic text."},
+    {"id": "failed-link-recovery", "status": "pass", "observed": "A URL with a nonstandard port was rejected. Library still contained three papers; failed URL remained in input and a Retry control appeared."},
+    {"id": "browser-errors", "status": "pass", "observed": "Browser error/warning log query returned an empty list."}
+  ],
+  "limits": ["No OS-level drag gesture automated; actual application drop handlers have separate synthetic-event tests.", "Public network test used a synthetic W3C PDF; no real research library or live provider generation.", "No formal user study or total-memory measurement."]
+}

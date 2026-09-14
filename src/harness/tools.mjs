@@ -8,7 +8,7 @@ const output = { schema: { type: 'json' }, render: (_args, value) => [{ type: 't
 export const TOOL_SPECS = [
   { name: 'library_search', action: 'list', title: 'Search papers', parameters: { query: string('Title, author, tag, DOI or indexed text'), limit: { type: 'number' }, offset: { type: 'number' } } },
   { name: 'library_get', action: 'get', title: 'Read paper metadata', parameters: { id: string('Library paper ID', true) } },
-  { name: 'library_import', action: 'import', title: 'Import papers', mutate: true, parameters: { path: string('Local PDF, CSL JSON, Zotero JSON, RIS or BibTeX path; originals remain unchanged'), doi: string('DOI to resolve through Crossref') } },
+  { name: 'library_import', action: 'import', title: 'Fetch and import papers', mutate: true, parameters: { path: string('Local PDF, CSL JSON, Zotero JSON, RIS or BibTeX path; originals remain unchanged'), doi: string('DOI to resolve and download when publicly available'), url: string('Public PDF/article URL or arXiv ID; downloads, parses and renames the managed copy') } },
   { name: 'library_cite', action: 'cite', title: 'Format citations', parameters: { ids: { ...ids, required: true }, format: { type: 'string', enum: ['apa', 'biblatex', 'csl-json'], required: true } } },
   { name: 'library_annotations', action: 'annotations', title: 'Read PDF annotations', parameters: { id: string('Library paper ID', true) } },
   { name: 'library_annotate', action: 'annotate', title: 'Annotate managed PDF', mutate: true, parameters: { id: string('Library paper ID', true), page: { type: 'number', required: true }, type: { type: 'string', enum: ['highlight', 'note'], required: true }, rects: { type: 'array', items: { type: 'array', items: { type: 'number' } }, required: true }, text: string('Exact quoted passage'), comment: string('Reader comment'), author: string('Annotation author'), color: string('Hex RGB annotation color') } },
@@ -48,7 +48,7 @@ export function registerLibraryTools(ctx, defineTool, dispatch, options, config)
         execute: async (args, exec) => {
           exec.signal.throwIfAborted()
           const request = requestFromTool(spec, args, exec)
-          if (spec.action === 'import' && Number(Boolean(request.path)) + Number(Boolean(request.doi)) !== 1) throw new Error('Specify exactly one local path or DOI')
+          if (spec.action === 'import' && Number(Boolean(request.path)) + Number(Boolean(request.doi)) + Number(Boolean(request.url)) !== 1) throw new Error('Specify exactly one local path, DOI or paper URL')
           const selected = exec.agent?.options
           const route = selected?.provider && selected?.model ? selected : config
           return dispatch(request, {

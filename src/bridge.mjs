@@ -3,11 +3,51 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveAndFetch } from './paper-fetch.mjs';
+import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
 
 export const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const defaultLibrary = join(homedir(), '.local', 'share', 'dsh-paper-library');
 const actions = new Set(['status','import','list','get','update','attach','page','annotations','annotate','annotation_update','annotation_delete','export_annotations','export_pdf','link','graph','feedback_context','save_feedback','feedback']);
 let pending = Promise.resolve();
+let importsPending = Promise.resolve();
+let importCount = 0;
+let importPayloadBytes = 0;
+const MAX_QUEUED_PAYLOAD = 96 * 1024 * 1024;
+
+function payloadSize(request) {
+  // Conservative UTF-16 accounting without making a second JSON/string copy.
+  // Admission applies to tool/CLI callers too, not just browser uploads.
+  const remaining = [request];
+  let bytes = 0, nodes = 0;
+  while (remaining.length) {
+    const value = remaining.pop();
+    if (++nodes > 100000) throw new Error('导入数据结构过大，请拆分文件。');
+    if (typeof value === 'string') bytes += value.length * 2;
+    else if (value && typeof value === 'object') {
+      for (const [key, child] of Object.entries(value)) {
+        bytes += key.length * 2 + 16;
+        remaining.push(child);
+      }
+    } else bytes += 8;
+    if (bytes > MAX_QUEUED_PAYLOAD) throw new Error('导入数据超过内存预算，请拆分文件或使用本地路径。');
+  }
+  return bytes;
+}
+
+function enqueueImport(request,options) {
+  if (importCount >= 50) throw new Error('导入队列已满，请等待当前文件处理完毕。');
+  const bytes = payloadSize(request);
+  if (importPayloadBytes + bytes > MAX_QUEUED_PAYLOAD) throw new Error('导入队列内存预算已满，请等待当前文件处理完毕。');
+  importCount++;
+  importPayloadBytes += bytes;
+  const result = importsPending.catch(()=>{}).then(()=>{
+    options.signal?.throwIfAborted();
+    return importFile(request,options);
+  }).finally(()=>{importCount--; importPayloadBytes -= bytes;});
+  importsPending=result.then(()=>{},()=>{});
+  return result;
+}
 
 export function core(request, options = {}) {
   // Serial workers bound aggregate native-memory cost and protect PDF writes.
@@ -76,20 +116,29 @@ async function importFile(request, options) {
       return await importFile({ action: 'import', path, offset:request.offset, limit:request.limit }, options);
     } finally { await rm(dir, { recursive: true, force: true }); }
   }
-  if (request.doi) {
-    const doi = String(request.doi).trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '').replace(/^doi:\s*/i, '');
-    if (!/^10\.\d{4,9}\/[^\s?#]+$/i.test(doi) || doi.length > 512) throw new Error('请输入有效 DOI（例如 10.1038/s41586-023-06410-y）。');
-    const response = await fetch(`https://api.crossref.org/works/${encodeURIComponent(doi)}/transform/application/vnd.citationstyles.csl+json`, {
-      headers: { Accept: 'application/vnd.citationstyles.csl+json', 'User-Agent': 'DSHPaperLibrary/0.1 (local literature catalog)' },
-      redirect: 'error', signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
-    });
-    if (!response.ok) throw new Error(`Crossref 返回 ${response.status}；可改用 PDF 或引用文件导入。`);
-    const text = await response.text();
-    if (text.length > 2 * 1024 * 1024) throw new Error('DOI 元数据响应过大。');
-    const item = JSON.parse(text);
-    item.DOI = item.DOI || doi;
-    return core({ action: 'import', items: [item] }, options);
+  if (request.doi || request.url) {
+    const target = String(request.doi || request.url).trim();
+    const doi=target.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i,'').replace(/^doi:\s*/i,'').toLowerCase();
+    if (/^10\.\d{4,9}\/[^\s?#]+$/i.test(doi)) {
+      const found=await core({action:'list',query:doi,limit:100},options);
+      const existing=found.items.find(item=>item.DOI?.toLowerCase()===doi && item.pdf);
+      if(existing) return {imported:0,duplicates:1,items:[existing],warnings:[],acquisition:{status:'reused',source_url:target}};
+    }
+    const directory = await mkdtemp(join(tmpdir(),'paper-library-fetch-'));
+    try {
+      const fetched=await resolveAndFetch(target,{...options.fetchOptions,directory,signal:options.signal});
+      if(fetched.path) return await importPDF(fetched.path,options,core,fetched);
+      if(fetched.metadata?.title) {
+        const metadata={...bibliographicMetadata(fetched.metadata),acquisition:fetched.provenance};
+        const result=await core({action:'import',items:[metadata]},options);
+        result.acquisition={...fetched,path:undefined};
+        result.warnings=[...(result.warnings || []),...(fetched.warnings || []),'已保存文献资料；尚未获得可读 PDF，可拖入文件继续关联。'];
+        return result;
+      }
+      throw new Error(fetched.warnings?.join('；') || '未找到可公开获取的 PDF。请拖入已有 PDF，或使用论文的直接下载链接。');
+    } finally {await rm(directory,{recursive:true,force:true});}
   }
+  if (request.path && extname(String(request.path)).toLowerCase() === '.pdf') return importPDF(request.path,options,core);
   if (request.path && extname(String(request.path)).toLowerCase() === '.bib') {
     if ((await stat(request.path)).size > 16 * 1024 * 1024) throw new Error('BibTeX 文件超过 16 MB；请分批导入。');
     const items = await citationJob({ action:'parse', text:await readFile(request.path,'utf8') }, options);
@@ -137,6 +186,10 @@ export async function dispatch(request, options = {}) {
     return core({ action: 'save_feedback', id: safe.id, text, model: `${provider}/${model}`, annotation_ids: ids, expected_context_hash:context.context_hash }, options);
   }
   if (!actions.has(safe.action)) throw new Error('未知文献操作。');
-  if (safe.action === 'import') return importFile(safe, options);
+  if (safe.action === 'import') {
+    const sources=['path','doi','url','items','content_base64'].filter(key=>safe[key]!==undefined && safe[key]!==null && safe[key]!=='');
+    if(sources.length!==1) throw new Error('请提供一种导入来源：PDF/文件路径、链接、DOI、元数据或上传文件。');
+    return enqueueImport(safe, options);
+  }
   return core(safe, options);
 }

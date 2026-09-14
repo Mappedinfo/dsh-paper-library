@@ -286,3 +286,154 @@ def test_citekey_collisions_do_not_silently_merge_distinct_papers(tmp_path):
     assert different_title["skipped"] == 1 and any("different titles" in warning for warning in different_title["warnings"])
     title_revision_with_same_doi = request(tmp_path, "import", items=[{"id": "sharedKey", "title": "Revised title", "DOI": "10.123/first"}])
     assert title_revision_with_same_doi["duplicates"] == 1
+
+
+def make_inspection_pdf(path):
+    with fitz.open() as doc:
+        page = doc.new_page(width=500, height=700)
+        page.insert_text((45, 60), "Evidence for Neighborhood", fontsize=22)
+        page.insert_text((45, 86), "Traffic Responses", fontsize=22)
+        page.insert_text((45, 120), "A. Researcher and B. Scientist", fontsize=11)
+        page.insert_text((45, 150), "DOI: 10.1234/primary.paper", fontsize=10)
+        page.insert_text((45, 175), "arXiv: 2609.01234v2", fontsize=10)
+        page.insert_text((45, 210), "Abstract", fontsize=14)
+        page.insert_text((45, 235), "This paper examines a transparent neighborhood mechanism.", fontsize=11)
+        page = doc.new_page()
+        page.insert_text((45, 60), "A cited result uses DOI: 10.5678/cited.paper.")
+        doc.new_page().insert_text((45, 60), "Third page evidence.")
+        doc.new_page().insert_text((45, 60), "DOI: 10.9999/excluded.fourth.page")
+        doc.save(path)
+    return path
+
+
+def test_bounded_pdf_inspection_has_candidate_evidence_not_fabricated_identity(tmp_path):
+    original = make_inspection_pdf(tmp_path / "download.pdf")
+    before = original.read_bytes()
+    result = request(tmp_path, "inspect_pdf", path=str(original))
+    assert result["metadata"]["title"] == "Evidence for Neighborhood Traffic Responses"
+    assert "author" not in result["metadata"] and "issued" not in result["metadata"]
+    assert "DOI" not in result["metadata"]
+    assert result["doi_candidates"] == ["10.1234/primary.paper", "10.5678/cited.paper"]
+    assert result["arxiv_candidates"] == ["2609.01234v2"]
+    assert result["parse"]["pages_inspected"] == 3
+    assert result["parse"]["text_characters"] <= 30000
+    assert result["parse"]["needs_review"] and not result["parse"]["portable_metadata"]
+    assert result["parse"]["field_sources"]["title"] == "first-page-layout-heuristic"
+    assert result["parse"]["identifier_evidence"][0]["page"] == 1
+    assert original.read_bytes() == before
+
+
+def test_verified_pdf_import_names_real_file_and_preserves_embedded_edits(tmp_path):
+    source = make_inspection_pdf(tmp_path / "download.pdf")
+    original_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    verified = {"title": "Verified Urban Evidence", "author": [{"family": "Wang", "given": "Shiqi"}], "issued": {"date-parts": [[2026]]}, "DOI": "10.1234/primary.paper", "citekey": "Wang2026Evidence"}
+    item = request(tmp_path, "import", path=str(source), metadata=verified, metadata_source="crossref", metadata_verified=True)["items"][0]
+    assert item["pdf_filename"] == f"Wang-2026-Verified-Urban-Evidence--{item['id'][:8]}.pdf"
+    exported = request(tmp_path, "export_pdf", id=item["id"])
+    assert Path(exported["path"]).name == exported["filename"] == item["pdf_filename"]
+    assert item["parse"]["status"] == "verified-metadata" and not item["parse"]["needs_review"]
+    assert item["parse"]["field_sources"]["DOI"] == "crossref"
+    assert "text_excerpt" not in item["parse"]
+    request(tmp_path, "update", id=item["id"], metadata={"title": "Reader Corrected Title"})
+    managed = request(tmp_path, "export_pdf", id=item["id"])
+    inspected = request(tmp_path, "inspect_pdf", path=managed["path"])
+    assert inspected["parse"]["portable_metadata"]
+    assert inspected["metadata"]["title"] == "Reader Corrected Title"
+    copied = tmp_path / "transport.pdf"
+    shutil.copy2(managed["path"], copied)
+    imported = dispatch({"library": str(tmp_path / "fresh-named"), "action": "import", "path": str(copied), "metadata": {"title": "Old Network Title"}, "metadata_source": "crossref", "metadata_verified": True})["items"][0]
+    assert imported["title"] == "Reader Corrected Title"
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == original_hash
+
+
+def test_parse_provenance_only_does_not_claim_metadata_verification(tmp_path):
+    source = make_inspection_pdf(tmp_path / "download.pdf")
+    item = request(tmp_path, "import", path=str(source), metadata={"acquisition": {"url": "https://example.test/paper.pdf", "source": "direct-url"}}, metadata_source="source-provenance", metadata_verified=False)["items"][0]
+    assert item["parse"]["needs_review"]
+    assert item["parse"]["status"] == "local-parse"
+    assert "verified" not in item["parse"]
+    assert item["acquisition"]["source"] == "direct-url"
+
+
+def test_renaming_preserves_annotations_and_recovers_before_and_after_catalog_switch(tmp_path, monkeypatch):
+    source = make_pdf(tmp_path / "source.pdf")
+    item = request(tmp_path, "import", path=str(source))["items"][0]
+    request(tmp_path, "annotate", id=item["id"], page=1, type="note", comment="Portable after rename")
+    library = Library(tmp_path / "library")
+    before_path = library.pdf_path(item["id"])
+    before_bytes = before_path.read_bytes()
+    atomic_save = library._atomic_save
+    def fail_after_new_file(*args, **kwargs):
+        atomic_save(*args, **kwargs)
+        raise OSError("simulated interruption before catalog switch")
+    monkeypatch.setattr(library, "_atomic_save", fail_after_new_file)
+    with pytest.raises(OSError):
+        library.update(item["id"], {"title": "Before commit failure"})
+    assert library.pdf_path(item["id"]) == before_path
+    assert before_path.read_bytes() == before_bytes
+    assert len(list((tmp_path / "library" / "pdfs").glob("*.pdf"))) == 1
+    monkeypatch.setattr(library, "_atomic_save", atomic_save)
+    recover = library._recover_file_update
+    def fail_cleanup():
+        raise KeyboardInterrupt("simulated termination after catalog switch")
+    monkeypatch.setattr(library, "_recover_file_update", fail_cleanup)
+    with pytest.raises(KeyboardInterrupt):
+        library.update(item["id"], {"title": "Committed human filename"})
+    library.close()
+    resumed = Library(tmp_path / "library")
+    assert resumed.get(item["id"])["title"] == "Committed human filename"
+    assert "Committed-human-filename" in resumed.pdf_path(item["id"]).name
+    assert not before_path.exists()
+    assert len(list((tmp_path / "library" / "pdfs").glob("*.pdf"))) == 1
+    assert any(a["comment"] == "Portable after rename" for a in resumed.annotations(item["id"])["annotations"])
+    resumed.close()
+
+
+def test_unicode_filename_is_bounded_and_collisions_do_not_overwrite(tmp_path):
+    source = make_pdf(tmp_path / "source.pdf")
+    records = [{"id": f"unicode{index}", "title": "城市交通机制" * 80, "author": [{"family": "王世琦/研究"}], "issued": {"date-parts": [[2026]]}} for index in range(2)]
+    items = request(tmp_path, "import", items=records)["items"]
+    for item in items:
+        attached = request(tmp_path, "attach", id=item["id"], path=str(source))
+        assert len(attached["pdf_filename"].encode("utf-8")) <= 210
+        assert "城市" in attached["pdf_filename"] and "/" not in attached["pdf_filename"]
+    filenames = [request(tmp_path, "get", id=item["id"])["pdf_filename"] for item in items]
+    assert filenames[0] != filenames[1]
+    library = Library(tmp_path / "library")
+    candidate = library._managed_destination({"title": "Collision"}, items[0]["id"])
+    candidate.write_bytes(b"existing unrelated file")
+    fallback = library._managed_destination({"title": "Collision"}, items[0]["id"])
+    assert fallback != candidate and items[0]["id"] in fallback.name
+    assert candidate.read_bytes() == b"existing unrelated file"
+    library.close()
+
+
+def test_metadata_only_record_keeps_pdf_evidence_and_repeat_file_identity(tmp_path):
+    source = make_inspection_pdf(tmp_path / "downloaded.pdf")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    original = {"citekey": "MyExactKey", "title": "Reader Corrected Evidence Title", "DOI": "10.1234/primary.paper", "author": [{"family": "ReaderName"}], "issued": {"date-parts": [[2025]]}, "tags": ["keep-my-tag"], "acquisition": {"status": "metadata_only", "source_url": "https://doi.org/10.1234/primary.paper"}}
+    metadata_only = request(tmp_path, "import", items=[original])["items"][0]
+    acquisition = {"source_url": "https://papers.example/downloaded.pdf", "validation": "pdf_parser", "method": "direct-url"}
+    fetched = {"citekey": "NetworkSuggestedKey", "title": "Evidence for Neighborhood Traffic Responses", "DOI": original["DOI"], "author": [{"family": "NetworkName"}], "issued": {"date-parts": [[2026]]}, "acquisition": acquisition}
+    attached = request(tmp_path, "import", path=str(source), metadata=fetched, metadata_source="crossref", metadata_verified=True)["items"][0]
+    assert attached["id"] == metadata_only["id"] and attached["pdf"]
+    for key in ("citekey", "title", "DOI", "author", "issued", "tags"):
+        assert attached[key] == original[key]
+    assert attached["source_pdf_sha256"] == digest
+    assert attached["parse"]["pages_inspected"] == 3
+    assert attached["parse"]["field_sources"]["title"] == "existing-catalog"
+    assert attached["acquisition"] == acquisition  # no stale metadata_only status remains
+    managed = request(tmp_path, "export_pdf", id=attached["id"])
+    portable = Library.read_portable(managed["path"])
+    assert portable["source_pdf_sha256"] == digest
+    assert portable["acquisition"] == acquisition
+    assert portable["parse"] == attached["parse"]
+    # The raw PDF has no embedded DOI. Its persisted source hash must suffice
+    # to deduplicate a subsequent direct drop without another network lookup.
+    repeated = request(tmp_path, "import", path=str(source))
+    assert repeated["duplicates"] == 1 and repeated["imported"] == 0
+    assert repeated["items"][0]["id"] == attached["id"]
+    assert repeated["items"][0]["acquisition"] == acquisition
+    assert request(tmp_path, "list")["total"] == 1
+    assert len(list((tmp_path / "library" / "pdfs").glob("*.pdf"))) == 1
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == digest

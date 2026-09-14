@@ -1,7 +1,9 @@
-import { readFile, stat } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
-import { Readable } from 'node:stream';
-import { join } from 'node:path';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { dispatch, projectRoot } from './bridge.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
@@ -11,6 +13,37 @@ const baseHeaders = {
   'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
 };
 function json(result, status=200) { return new Response(JSON.stringify(result), { status, headers: { ...baseHeaders, 'Content-Type':'application/json;charset=utf-8' } }); }
+const MAX_PDF_BYTES = 250 * 1024 * 1024;
+let uploads = 0;
+let jsonRequests = 0;
+
+/** Stream a browser File to disk with backpressure; never encode a whole PDF as JSON. */
+async function importUpload(request, url, options) {
+  if (!request.headers.get('content-type')?.startsWith('application/pdf')) return json({ok:false,error:'PDF 上传需要 application/pdf。'},415);
+  if (!request.body) return json({ok:false,error:'缺少 PDF 文件。'},400);
+  if (Number(request.headers.get('content-length') || 0) > MAX_PDF_BYTES) return json({ok:false,error:'PDF 超过 250 MiB 上限。'},413);
+  if (uploads >= 2) return json({ok:false,error:'已有文件正在导入，请稍后重试。'},429);
+  const filename = basename(url.searchParams.get('filename') || 'import.pdf');
+  if (!/\.pdf$/i.test(filename) || /[\x00-\x1f]/.test(filename) || Buffer.byteLength(filename) > 240) return json({ok:false,error:'需要有效的 PDF 文件名。'},400);
+  uploads++;
+  let directory;
+  try {
+    directory = await mkdtemp(join(tmpdir(),'paper-library-upload-'));
+    const path = join(directory,filename);
+    let size = 0;
+    const limit = new Transform({transform(chunk,encoding,callback) {
+      size += chunk.length;
+      callback(size > MAX_PDF_BYTES ? new Error('PDF 超过 250 MiB 上限。') : null,chunk);
+    }});
+    const signal = AbortSignal.any([request.signal,AbortSignal.timeout(180000)]);
+    await pipeline(Readable.fromWeb(request.body),limit,createWriteStream(path,{flags:'wx',mode:0o600}),{signal});
+    if (!size) throw new Error('PDF 文件为空。');
+    return json({ok:true,result:await dispatch({action:'import',path},{...options,signal})});
+  } finally {
+    uploads--;
+    if (directory) await rm(directory,{recursive:true,force:true});
+  }
+}
 
 async function readBounded(request, maxBytes) {
   const declared = Number(request.headers.get('content-length') || 0);
@@ -38,14 +71,20 @@ export function createFetchHandler(options = {}) {
     if (url.pathname === basePath && !url.pathname.endsWith('/')) return new Response(null,{status:302,headers:{location:`${basePath}/`}});
     const path = url.pathname.slice(basePath.length).replace(/^\//,'');
     try {
+      if (path === 'upload' && request.method === 'POST') return await importUpload(request,url,options);
       if (path === 'api' && request.method === 'POST') {
         if (!request.headers.get('content-type')?.startsWith('application/json')) return json({ok:false,error:'需要 application/json 请求。'},415);
-        const input = JSON.parse(await readBounded(request, 45*1024*1024));
-        // Browser cannot forge AI output or arbitrary worker internals. It can
-        // request AI through the configured model and receive its saved result.
-        if (['save_feedback','export_pdf'].includes(input.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
-        const result = await dispatch(input, { ...options, signal: request.signal });
-        return json({ok:true,result});
+        // Reserve admission before reading bodies, so parallel large JSON uploads
+        // cannot allocate unbounded strings while waiting for serial workers.
+        if (jsonRequests >= 2) return json({ok:false,error:'已有请求正在处理，请稍后重试。'},429);
+        jsonRequests++;
+        try {
+          const input = JSON.parse(await readBounded(request, 45*1024*1024));
+          // Browser cannot forge AI output or arbitrary worker internals.
+          if (['save_feedback','export_pdf','inspect_pdf'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
+          const result = await dispatch(input, { ...options, signal: request.signal });
+          return json({ok:true,result});
+        } finally { jsonRequests--; }
       }
       if (request.method !== 'GET' && request.method !== 'HEAD') return json({ok:false,error:'不支持的请求方法。'},405);
       if (path.startsWith('pdf/')) {

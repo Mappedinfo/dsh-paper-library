@@ -13,3 +13,5 @@ Project scaffolding was generated through the locally installed canonical `acade
 | DeepSeek Harness | Host plugin, tools and model APIs | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness); host owns its runtime sources |
 
 `vendor/csl/manifest.json` records retrieval date, upstream URLs and exact SHA-256 hashes. `scripts/fetch-csl.mjs` refreshes assets explicitly; tests verify recorded hashes. Lockfiles pin installed package versions. This repository is local and private; no remote or package publication was created.
+
+The bundled `paper-library-fetch` is adapted for this plugin from the user's canonical `paper-fetch-skill`. Its source revision, retained behavior and independent-library changes are recorded in [the skill provenance manifest](docs/upstream-manifest.md).

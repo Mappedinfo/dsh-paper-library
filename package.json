@@ -13,7 +13,7 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
-  "files": ["src/**/*.mjs", "src/**/*.py", "lib/client.js", "web", "vendor/csl", "cordis.patch.yml", "pyproject.toml", "uv.lock", "README.md", "HANDOFF.md", "THIRD_PARTY.md", "docs/api.md", "docs/validation.md", "docs/validation", "LICENSE"],
+  "files": ["src/**/*.mjs", "src/**/*.py", "lib/client.js", "web", "skills", "vendor/csl", "cordis.patch.yml", "pyproject.toml", "uv.lock", "README.md", "HANDOFF.md", "THIRD_PARTY.md", "docs/api.md", "docs/validation.md", "docs/upstream-manifest.md", "docs/validation", "LICENSE"],
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {

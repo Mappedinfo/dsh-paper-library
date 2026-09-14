@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -36,6 +37,19 @@ try {
   const cookie = exchange.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   assert.ok(cookie)
   const authorized = { Cookie: cookie }
+  const rpc = async (method,request) => {
+    const response = await fetch(`${origin}/api/${method}`, {method:'POST',headers:{...authorized,Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({type:'client-request',rpcId:`paper-library-${method}`,method,payload:{args:{request}}})})
+    assert.equal(response.status,200)
+    const body = await response.json()
+    assert.equal(body.result?.ok,true,JSON.stringify(body))
+    return body.result.value
+  }
+  const sessionId = `paper-library-skill-smoke-${Date.now()}`
+  await rpc('session/create',{cwd:project,sessionId})
+  const catalog = await rpc('skills/list',{sessionId})
+  const fetchSkill = catalog.skills.find(skill=>skill.name==='paper-library-fetch')
+  assert.ok(fetchSkill?.modelInvocable,'Bundled fetch skill must be visible in the real session catalog')
+  assert.equal(fetchSkill.path,join(project,'skills/paper-library-fetch/SKILL.md'),'The selected skill must be the independent plugin adaptation')
   const index = await fetch(`${origin}/`, { headers: authorized })
   assert.equal(index.status, 200)
   const html = await index.text()
@@ -57,7 +71,12 @@ try {
   const statusResult = await status.json()
   assert.equal(statusResult.ok, true)
   assert.equal(statusResult.result.library, join(home, 'library'))
-  console.log(JSON.stringify({ ok: true, checks: ['profile-plugin-load', 'browser-module-graph', 'authenticated-library-page', 'unauthenticated-refused', 'cross-origin-refused', 'model-directory', 'catalog-worker', 'browser-library-override-refused'], providerRequestsMade: 0 }))
+  const report = { verified_at:new Date().toISOString(), ok: true, checks: ['profile-plugin-load', 'session-skill-catalog', 'browser-module-graph', 'authenticated-library-page', 'unauthenticated-refused', 'cross-origin-refused', 'model-directory', 'catalog-worker', 'browser-library-override-refused'], providerRequestsMade: 0 }
+  await writeFile(join(project,'docs/validation/harness-smoke.json'),JSON.stringify(report,null,2)+'\n')
+  console.log(JSON.stringify(report))
+} catch (error) {
+  await writeFile(join(project,'docs/validation/harness-smoke.json'),JSON.stringify({verified_at:new Date().toISOString(),ok:false,error:'Harness verification failed; inspect test output.',providerRequestsMade:0},null,2)+'\n')
+  throw error
 } finally {
   clearTimeout(timer)
   child.kill('SIGINT')
