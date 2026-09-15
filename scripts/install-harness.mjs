@@ -24,6 +24,7 @@ await access(cli, constants.R_OK)
 // A link: package resolves ESM imports beside its source. Link only declared
 // runtime peers to the exact checkout, without installing stale registry peers.
 for (const [name, relative] of [
+  ['@deepseek-ai/schemastery', 'vendor/schemastery'],
   ['@deepseek-ai/dsh-tools', 'packages/core/tools'],
   ['@deepseek-ai/dsh-llm', 'packages/llm/llm'],
   ['@deepseek-ai/dsh-home-paths', 'packages/util/home-paths'],

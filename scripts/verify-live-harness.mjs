@@ -36,6 +36,15 @@ const languageLearning = status.result.language_learning === true
 const datasetLibrary = status.result.dataset_library === true && status.result.dataset_preview === true
 const knowledgeWorkflow = status.result.knowledge_workflow === true && status.result.knowledge_generation === true
 const paperAnalysis = status.result.paper_analysis === true
+let nativeSettings = false
+if (flags.get('--require-settings') === 'true') {
+  const result = await fetch(`${address.origin}/api/paper-library/api`, { method:'POST',headers,body:JSON.stringify({action:'settings_get'}),signal:AbortSignal.timeout(10000) })
+  assert.equal(result.status,200)
+  const settings = (await result.json()).result
+  assert.equal(settings?.namespace,'paper-library');assert.equal(settings.backend,'dsh');assert.equal(settings.available,true)
+  for (const file of ['settings.js','settings.css']) assert.equal((await fetch(`${address.origin}/api/paper-library/${file}`,{headers,signal:AbortSignal.timeout(10000)})).status,200)
+  nativeSettings = true
+}
 if (flags.get('--require-analysis') === 'true') {
   assert.equal(paperAnalysis,true,'Restarted host lacks selected-paper background analysis')
   for(const [file,marker] of [['paper-analysis.js','PaperAnalysis'],['paper-analysis.css','paper-analysis-panel'],['theme.css','.pane-heading .search-field']]) {
@@ -113,6 +122,6 @@ if (flags.get('--require-chat') === 'true' || flags.get('--require-references') 
   assert.ok(script.includes('PaperLibraryChat'))
   if (flags.get('--require-references') === 'true') assert.ok(script.includes('chat_catalog') && script.includes('annotation_refs'))
 }
-const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, durableState, languageLearning, datasetLibrary, knowledgeWorkflow, paperAnalysis, ...(themeAssetsAvailable ? {themeAssetsAvailable} : {}), ...(sharedSidebarAssetsAvailable ? {sharedSidebarAssetsAvailable} : {}), chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
+const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, durableState, languageLearning, datasetLibrary, knowledgeWorkflow, paperAnalysis, ...(nativeSettings?{nativeSettings}:{}), ...(themeAssetsAvailable ? {themeAssetsAvailable} : {}), ...(sharedSidebarAssetsAvailable ? {sharedSidebarAssetsAvailable} : {}), chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
 if (flags.get('--output')) await writeFile(flags.get('--output'), JSON.stringify(report, null, 2) + '\n')
 console.log(JSON.stringify(report))

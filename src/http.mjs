@@ -8,11 +8,13 @@ import { defaultLibrary, dispatch, projectRoot } from './bridge.mjs';
 import { createLocalStateStore, LocalStateError } from './local-state.mjs';
 import { createLanguageLearning } from './harness/language-learning.mjs';
 import { createPaperAnalysis } from './harness/paper-analysis.mjs';
+import { createPaperLibrarySettings } from './harness/settings.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
 for (const name of ['workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css','local-state.js','language-learning.js','language-learning.css','theme.js','theme.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['resource-library.js','resource-library.css','knowledge-workflow.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['paper-analysis.js','paper-analysis.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['settings.js','settings.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 const languageActions = new Set(['language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
 const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:'];
 function browserStateKey(key, listPrefix = false) {
@@ -86,7 +88,9 @@ async function readBounded(request, maxBytes) {
 
 export function createFetchHandler(options = {}) {
   const basePath = (options.basePath || '').replace(/\/$/, '');
-  const localState = options.localState || createLocalStateStore({ library: options.library || defaultLibrary, home: options.localStateHome });
+  const store = options.localState || createLocalStateStore({ library: options.library || defaultLibrary, home: options.localStateHome });
+  const settings = options.settings || createPaperLibrarySettings({store});
+  const localState = options.settings ? store : settings.localState;
   // Browsing saved learning data is local and does not initialize an AI route or
   // paper conversation. Only the host-injected adapter may generate new output.
   const learningRecords = options.languageLearning || createLanguageLearning({ store: localState, dispatch, library: options.library || defaultLibrary, python: options.python });
@@ -119,7 +123,10 @@ export function createFetchHandler(options = {}) {
           if (chatAction && !options.paperChat) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板打开论文对话。'},400);
           if (input?.action === 'language_generate' && !options.languageLearning) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
           if (input?.action === 'knowledge_generate' && !options.libraryKnowledge) return json({ok:false,error:'尚未连接 DSH 模型服务；已保存的来源和知识笔记仍可查看。'},409);
-          let result = stateAction ? await stateRequest(localState, input)
+          let result = input?.action === 'settings_get' ? await settings.get()
+            : input?.action === 'settings_update' ? await settings.update(input.patch, input.expected_revision)
+            : input?.action === 'settings_reset' ? await settings.reset(input.expected_revision)
+            : stateAction ? await stateRequest(localState, input)
             : typeof input?.action === 'string' && input.action.startsWith('paper_analysis_') ? await analysisRecords(input)
             : input?.action === 'knowledge_generate' ? await options.libraryKnowledge(input, { signal: request.signal })
             : languageAction ? await learningRecords(input, { signal: request.signal })

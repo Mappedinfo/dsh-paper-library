@@ -3,6 +3,7 @@ import { bindModelContext } from './model-context.mjs'
 import { bindThemeContext } from './theme-context.mjs'
 import { createConversationBridge } from './conversation-context.mjs'
 import { createAnnotationReferences, draftAnnotationReferences } from './annotation-references.mjs'
+import { registerPaperLibrarySettings } from './settings.mjs'
 
 const ID = '@mappedinfo/dsh-paper-library'
 const NS = 'paperLibrary'
@@ -16,7 +17,7 @@ export const name = 'paper-library-client'
 export const inject = ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'modelDirectories', 'sessions', 'conversation', 'inputTriggers']
 
 /** The reader exists only while its pane is visible; no background PDF renderer. */
-export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailable, conversationBridge, bindTheme }) {
+export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailable, conversationBridge, bindTheme, bindSettings }) {
   const { tab } = useTabInfo()
   const frame = useRef(null)
   useEffect(() => {
@@ -31,6 +32,10 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
     if (!tab.visible || !frame.current?.contentWindow) return undefined
     return bindTheme(frame.current.contentWindow)
   }, [bindTheme, tab.visible])
+  useEffect(() => {
+    if (!tab.visible || !frame.current?.contentWindow) return undefined
+    return bindSettings(frame.current.contentWindow)
+  }, [bindSettings, tab.visible])
   if (!tab.visible) return null
   return createElement('iframe', {
     ref: frame,
@@ -94,6 +99,7 @@ export function AnnotationReferenceInspector({ sessionId, annotationReferences, 
 export function apply(ctx) {
   let conversationBridge
   let annotationReferences
+  const { bind: bindSettings } = registerPaperLibrarySettings(ctx, window)
   const bindTheme = target => bindThemeContext({
     window, target,
     getTheme: () => ctx.get('theme')?.getTheme(),
@@ -132,6 +138,7 @@ export function apply(ctx) {
       sessionId,
       conversationBridge,
       bindTheme,
+      bindSettings,
       directory: ctx.modelDirectories.directoryFor(sessionId),
       modelAvailable: ctx.sessions.subagentAddress(sessionId) === undefined,
     }),

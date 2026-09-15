@@ -1,0 +1,28 @@
+{
+  "verified_at": "2026-09-15T10:42:56.219Z",
+  "ok": true,
+  "checks": [
+    "legacy-preferences-migrate-to-native-namespace-with-safe-defaults-and-recovery-copy",
+    "official-plugin-inventory-lists-library-and-configuration-tab-renders-native-keyed-card",
+    "sidebar-edits-in-both-entry-points-share-one-native-value-without-native-page-reload",
+    "all-automation-options-sync-native-to-visible-library-settings-and-library-to-native-live",
+    "own-settings-fit-narrow-and-wide-browser-and-native-card-renders-dsh-themed-controls",
+    "another-browser-recovers-host-file-settings-without-browser-storage-or-library-scanning",
+    "host-restart-restores-native-settings-and-reset-preserves-unrelated-preferences-with-zero-model-calls"
+  ],
+  "browser_errors": [],
+  "external_requests": [],
+  "model_generations": 0,
+  "external_model_requests": 0,
+  "private_documents_read": 0,
+  "library_browser_storage_writes": 0,
+  "screenshots": [
+    ".local/paper-chat-test-home/runs/settings-browser-38594cf7-32a8-49ed-b8c7-40661e42803f/library-settings-900.png",
+    ".local/paper-chat-test-home/runs/settings-browser-38594cf7-32a8-49ed-b8c7-40661e42803f/native-settings-card.png"
+  ],
+  "scope": "Actual Chromium and isolated native DSH settings-file provider; official Plugins inventory/card and authenticated standalone library settings page. Empty synthetic library; no model generation.",
+  "limitations": [
+    "Native reading iframe invalidation protocol is unit-tested separately; this walkthrough verifies visible library settings refresh and native reactive scope, not an active PDF reading pane."
+  ],
+  "isolated_hosts_stopped": true
+}

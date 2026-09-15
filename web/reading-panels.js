@@ -98,9 +98,9 @@ window.PaperReadingPanels = (() => {
     }
     function visible(name) {known(name);return !disposed&&(name==='chat'?chatOpen&&!collapsed:sidebar===name);}
     function toggle(name) {return visible(name)?close(name):show(name);}
-    function setSide(value) {
+    function setSide(value,{persist=true}={}) {
       if(!['left','right'].includes(value))throw new Error('Reading sidebar side must be left or right');
-      if(disposed)return;side=value;sideRevision++;if(persistence)void persistence.patch('preferences',{'reading-panel-side':side}).catch(error=>toast?.(`侧栏偏好尚未保存：${error.message}`,true));render();
+      if(disposed)return;sideRevision++;if(side===value&&!persist)return;side=value;if(persist&&persistence)void persistence.patch('preferences',{'reading-panel-side':side}).catch(error=>toast?.(`侧栏偏好尚未保存：${error.message}`,true));render();
     }
     function paperChanged(value) {
       paper=value&&typeof value.id==='string'?{id:value.id,title:String(value.title||'').slice(0,500),archived:Boolean(value.archived)}:null;

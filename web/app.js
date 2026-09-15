@@ -18,6 +18,7 @@ let languageUI;
 let resourceUI;
 let knowledgeUI;
 let analysisUI;
+let settingsUI;
 let preferences = {};
 let durableReaderLoaded = false;
 let readerStateReady = false;
@@ -91,6 +92,7 @@ async function loadStatus() {
     languageUI?.setAvailable(result.language_learning);
     knowledgeUI?.setAvailable(result.knowledge_generation);
     void analysisUI?.setAvailable(result.paper_analysis);
+    void settingsUI?.refresh();
   } catch (error) { $('library-status').textContent = '连接未完成'; errorAt('library-error', error); }
 }
 async function loadList() {
@@ -992,6 +994,12 @@ analysisUI = window.PaperAnalysis?.create({state,api,persistence,toast,openKnowl
   if(combined.length>4000)throw new Error('合并后超过对话草稿预算，请减少选中节点或先处理已有草稿。');
   paperChatUI.restoreDraft(combined);await paperChatUI.saveDraft();toast('选定材料已加入论文对话草稿；可编辑后发送，也可放入 DSH 主输入框。');
 }});
+settingsUI = window.PaperLibrarySettings?.create({api,persistence,getLibrary:()=>state.library,onChange:(value,descriptor)=>{
+  preferences={...preferences,...value};
+  analysisUI?.applyPreferences(value,descriptor.writable);
+  paperChatUI?.applyPreferences(value,descriptor.writable);
+  if(value['reading-panel-side'])readingPanels?.setSide(value['reading-panel-side'],{persist:false});
+}});
 if(persistence){
   let legacyOffset=0;
   const legacyExport=el('button','button subtle','导出旧草稿');legacyExport.id='legacy-draft-export';legacyExport.type='button';legacyExport.hidden=true;legacyExport.title='下载旧浏览器草稿与当前内容冲突时留下的本机备份';
@@ -1001,7 +1009,7 @@ if(persistence){
   const backup=el('button','button subtle','导出未保存草稿');backup.type='button';backup.addEventListener('click',()=>{const values=persistence.exportPending?.()||[];const url=URL.createObjectURL(new Blob([JSON.stringify({schema:1,drafts:values},null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='paper-library-unsaved-drafts.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});saveStatus.append(label,retry,backup);document.body.append(saveStatus);
   const pending=new Map();persistence.subscribe(event=>{if(event.status==='saved')pending.delete(event.key);else pending.set(event.key,event);const errors=[...pending.values()].filter(value=>value.error);saveStatus.hidden=!errors.length;label.textContent=errors.some(value=>value.status==='conflict')?'另一浏览器已有修改，本窗口草稿尚未落盘。请导出并核对。':'本地保存暂未完成，草稿仍在当前窗口。';});
 }
-window.addEventListener('pagehide', () => { publishReaderState(); paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); readingPanels?.dispose(); readingShell?.dispose(); });
+window.addEventListener('pagehide', () => { publishReaderState(); settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); readingPanels?.dispose(); readingShell?.dispose(); });
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){publishReaderState();void persistence?.flush({keepalive:true}).catch(()=>{});}});
 window.addEventListener('message', event => {
   receiveHarnessContext(event);

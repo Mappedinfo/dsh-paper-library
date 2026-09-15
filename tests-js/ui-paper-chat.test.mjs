@@ -15,7 +15,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function environment({ api: respond, created = false, notes = [], storage: persistedStorage } = {}) {
+function environment({ api: respond, created = false, notes = [], storage: persistedStorage, readState } = {}) {
   const elements = new Map(), listeners = new Map(), documentListeners = new Map(), timers = new Map();
   const requests = [], posts = [], toasts = [], saved = [], snapshots = [], navigations = [], storage = persistedStorage || new Map();
   let serial = 0, timerSerial = 0, currentPaper = null;
@@ -62,7 +62,7 @@ function environment({ api: respond, created = false, notes = [], storage: persi
     throw new Error(`Unexpected paper-chat action: ${action}`);
   }
   const chat = window.PaperLibraryChat.create({
-    persistence:{get:async key=>storage.has(key)?plain(storage.get(key)):null,put:async(key,value)=>{storage.set(key,plain(value));return value;},patch:async(key,value)=>{storage.set(key,{...storage.get(key),...plain(value)});}},
+    persistence:{get:async key=>{const pending=readState?.(key);return pending===undefined?(storage.has(key)?plain(storage.get(key)):null):pending;},put:async(key,value)=>{storage.set(key,plain(value));return value;},patch:async(key,value)=>{storage.set(key,{...storage.get(key),...plain(value)});}},
     api: async (action, args) => {
       requests.push({ action, ...plain(args) });
       const value = respond?.(action, args, defaultResponse);
@@ -88,6 +88,17 @@ function environment({ api: respond, created = false, notes = [], storage: persi
     visibility(value) { document.visibilityState = value; documentListeners.get('visibilitychange')?.(); },
   };
 }
+
+test('late preference restoration cannot reenable automatic sends after a newer native settings change', async t => {
+  const gate=deferred(),note={id:'note-a',text:'A saved synthetic note'};
+  const fixture=environment({notes:[note],storage:new Map([['preferences',{'auto-paper-conversation':true}]]),readState:key=>key==='chat:paper-a'?gate.promise:undefined});
+  t.after(()=>fixture.chat.dispose());
+  const opening=fixture.open('paper-a');await flush();fixture.chat.applyPreferences({'auto-paper-conversation':false});gate.resolve(null);await opening;
+  assert.equal(fixture.element('paper-chat-auto').checked,false);
+  await fixture.chat.savedAnnotation('paper-a','note-a');assert.equal(fixture.requests.some(r=>r.action==='chat_send'),false);
+  fixture.chat.applyPreferences({'auto-paper-conversation':true},false);await fixture.open('paper-b');
+  assert.equal(fixture.element('paper-chat-auto').checked,false);assert.equal(fixture.element('paper-chat-auto').disabled,true);
+});
 
 test('opening a paper creates its native session without sending a message or invoking feedback', async t => {
   const fixture = environment({ created: true }); t.after(() => fixture.chat.dispose());

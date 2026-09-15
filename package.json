@@ -48,6 +48,7 @@
     "zod": "^4.0.0"
   },
   "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.2",
     "@deepseek-ai/cordis": ">=4.0.1 <5",
     "@deepseek-ai/dsh-tools": ">=0.1.5-rc.2 <0.2.0",
     "@deepseek-ai/dsh-llm": ">=0.1.5-rc.2 <0.2.0",
@@ -62,6 +63,7 @@
     "@deepseek-ai/dsh-client-ui-input-trigger": ">=0.1.5-rc.2 <0.2.0"
   },
   "peerDependenciesMeta": {
+    "@deepseek-ai/schemastery": { "optional": true },
     "@deepseek-ai/cordis": { "optional": true },
     "@deepseek-ai/dsh-tools": { "optional": true },
     "@deepseek-ai/dsh-llm": { "optional": true },

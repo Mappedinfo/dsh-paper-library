@@ -13,6 +13,8 @@ import { createLanguageLearning } from './language-learning.mjs'
 import { createLibraryKnowledge } from './library-knowledge.mjs'
 import { createPaperAnalysis } from './paper-analysis.mjs'
 import { createPaperAnalysisAgent } from './paper-analysis-agent.mjs'
+import Schema from '@deepseek-ai/schemastery'
+import { createPaperLibrarySettings, createPaperLibrarySettingsSchema } from './settings.mjs'
 
 export const name = 'paper-library'
 export const inject = ['tools', 'llm']
@@ -20,6 +22,18 @@ export const inject = ['tools', 'llm']
 /** Mount tools in every profile and the library surface when a Web carrier exists. */
 export function apply(ctx, rawConfig = {}) {
   const config = resolveConfig(rawConfig)
+  const store = createLocalStateStore({ library: config.library, home: config.localStateHome })
+  const localSettings = createPaperLibrarySettings({ store })
+  let sharedSettings = localSettings
+  ctx.effect(() => () => localSettings.dispose(), 'paper-library: local preferences')
+  ctx.inject(['settings'], settingsCtx => {
+    const nativeSettings = createPaperLibrarySettings({ store, settings: settingsCtx.settings, schema: createPaperLibrarySettingsSchema(Schema) })
+    sharedSettings = nativeSettings
+    settingsCtx.effect(() => () => { sharedSettings = localSettings; return nativeSettings.dispose() }, 'paper-library: native settings')
+  })
+  // Delegation stays live when the optional settings provider mounts/unmounts.
+  const settings = { get: () => sharedSettings.get(), update: (...args) => sharedSettings.update(...args), reset: (...args) => sharedSettings.reset(...args) }
+  const localState = Object.fromEntries(['get','put','list'].map(method => [method, (...args) => sharedSettings.localState[method](...args)]))
   const options = {
     library: config.library,
     python: config.python,
@@ -27,7 +41,8 @@ export function apply(ctx, rawConfig = {}) {
     model: config.model,
     ai: createHarnessAI(ctx.llm, createUserMessage, config),
     models: signal => discoverModels(ctx.llm, signal),
-    localState: createLocalStateStore({ library: config.library, home: config.localStateHome }),
+    localState,
+    settings,
   }
   ctx.effect(() => registerLibraryTools(ctx, defineTool, dispatch, options, config), 'paper-library: tools')
   ctx.inject(['skills'], scoped => {

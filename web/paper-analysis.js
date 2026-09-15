@@ -8,7 +8,7 @@ window.PaperAnalysis = (() => {
   const activeStates=new Set(['queued','reading','generating','committing']);
   const names={evidence:'原文证据',claim:'论点',method:'方法',dataset:'数据集',observation:'观察',concept:'概念',question:'问题',gap:'缺口'};
   function create({state,api,persistence,toast,prepareChat,openKnowledge,metadataChanged}) {
-    let available=false,paperId=null,epoch=0,job=null,timer=null,autoTimer=null,working=false,disposed=false,preferences={};
+    let available=false,paperId=null,epoch=0,job=null,timer=null,autoTimer=null,working=false,disposed=false,preferences={},settingsWritable=true,preferenceRevision=0;
     const selected=new Set();
     const trigger=button('paper-analysis-open','后台整理',()=>show());
     $('paper-tools').append(trigger);
@@ -19,11 +19,11 @@ window.PaperAnalysis = (() => {
     $('analysis-start').addEventListener('click',()=>void start(false));
     $('analysis-pages').addEventListener('input',()=>{if(paperId)void persistence?.patch(`knowledge-draft:analysis:${paperId}`,{pages:$('analysis-pages').value}).catch(error=>status(error.message,true));});
     $('analysis-cancel').addEventListener('click',()=>void cancel());
-    $('analysis-auto').addEventListener('change',async()=>{preferences.auto_analysis=$('analysis-auto').checked;await savePreferences();if(preferences.auto_analysis&&paperId)void start(true);});
-    $('analysis-fill').addEventListener('change',async()=>{preferences.analysis_fill=$('analysis-fill').checked;await savePreferences();});
-    async function savePreferences(){try{await persistence?.patch('preferences',{auto_analysis:preferences.auto_analysis===true,analysis_fill:preferences.analysis_fill===true});await persistence?.flush();}catch(error){$('analysis-auto').checked=false;preferences.auto_analysis=false;status(error.message,true);}}
+    $('analysis-auto').addEventListener('change',async()=>{if(await savePreference('auto_analysis',$('analysis-auto').checked)&&preferences.auto_analysis&&paperId)void start(true);});
+    $('analysis-fill').addEventListener('change',async()=>{await savePreference('analysis_fill',$('analysis-fill').checked);});
+    async function savePreference(key,value){applyPreferences(preferences,settingsWritable);const ticket=preferenceRevision;try{await persistence?.patch('preferences',{[key]:value});if(ticket===preferenceRevision){preferences[key]=value;applyPreferences(preferences,settingsWritable);}return preferences[key]===value;}catch(error){applyPreferences(preferences,settingsWritable);status(error.message,true);return false;}}
     function status(text,error=false){$('analysis-status').textContent=text;$('analysis-status').classList.toggle('error',error);}
-    function refreshControls(){const busy=working||activeStates.has(job?.status);trigger.hidden=!paperId;trigger.disabled=!paperId;trigger.textContent=activeStates.has(job?.status)?'正在整理…':job?.status==='complete'?'整理结果':'后台整理';$('analysis-start').disabled=!available||busy||!paperId;$('analysis-start').textContent=job&&job.status!=='idle'?'重新整理':'开始整理';$('analysis-cancel').hidden=!activeStates.has(job?.status);$('analysis-pages').disabled=busy;$('analysis-auto').disabled=!available;$('analysis-fill').disabled=busy;}
+    function refreshControls(){const busy=working||activeStates.has(job?.status);trigger.hidden=!paperId;trigger.disabled=!paperId;trigger.textContent=activeStates.has(job?.status)?'正在整理…':job?.status==='complete'?'整理结果':'后台整理';$('analysis-start').disabled=!available||busy||!paperId;$('analysis-start').textContent=job&&job.status!=='idle'?'重新整理':'开始整理';$('analysis-cancel').hidden=!activeStates.has(job?.status);$('analysis-pages').disabled=busy;$('analysis-auto').disabled=!available||!settingsWritable;$('analysis-fill').disabled=busy||!settingsWritable;}
     function render(){refreshControls();const result=$('analysis-result');result.replaceChildren();if(!job||job.status==='idle'){status(available?'整理仅针对当前论文，完成后可选择材料加入对话。':'当前页面可查看已保存结果；运行子代理需通过 DSH 服务打开。');return;}
       status([job.stage||job.status,job.error,...(job.warnings||[])].filter(Boolean).join(' · '),['failed','cancelled','interrupted'].includes(job.status));
       if(job.coverage)result.append(node('p',`已读 PDF 页：${job.coverage.read_pages.join(', ')} · ${job.coverage.characters} 字符 · ${job.coverage.truncated_pages?.length?'部分页因预算截取':'所选范围'}。未读页未纳入结论。`,'small muted'));
@@ -53,9 +53,10 @@ window.PaperAnalysis = (() => {
         if(available&&preferences.auto_analysis&&(!job||job.status==='idle'))autoTimer=setTimeout(()=>{if(paperId===id)void start(true);},700);
       }).catch(error=>{if(ticket===epoch)status(error.message,true);});
     }
-    async function setAvailable(value){available=Boolean(value);try{preferences=await persistence?.get('preferences')||{};$('analysis-auto').checked=preferences.auto_analysis===true;$('analysis-fill').checked=preferences.analysis_fill===true;refreshControls();sync();}catch(error){status(error.message,true);}}
+    async function setAvailable(value){available=Boolean(value);const ticket=preferenceRevision;try{const saved=await persistence?.get('preferences')||{};if(ticket===preferenceRevision)applyPreferences(saved,settingsWritable);refreshControls();sync();}catch(error){status(error.message,true);}}
     const visibility=()=>{if(!document.hidden)void load();};document.addEventListener('visibilitychange',visibility);
-    return{sync,setAvailable,dispose(){disposed=true;clearTimeout(timer);clearTimeout(autoTimer);document.removeEventListener('visibilitychange',visibility);}};
+    function applyPreferences(value,writable=true){preferenceRevision++;settingsWritable=writable;preferences={...preferences,...value};if(!writable){preferences.auto_analysis=false;preferences.analysis_fill=false;}if(!preferences.auto_analysis)clearTimeout(autoTimer);$('analysis-auto').checked=preferences.auto_analysis===true;$('analysis-fill').checked=preferences.analysis_fill===true;refreshControls();}
+    return{sync,setAvailable,applyPreferences,dispose(){disposed=true;clearTimeout(timer);clearTimeout(autoTimer);document.removeEventListener('visibilitychange',visibility);}};
   }
   return{create};
 })();

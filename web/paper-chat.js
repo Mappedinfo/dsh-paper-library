@@ -7,6 +7,7 @@ window.PaperLibraryChat = {
     const $ = id => document.getElementById(id);
     const chat = { available: false, paperId: null, sessionId: null, visible: false, ticket: 0, notes: [], catalog: [], catalogReady: false, catalogTotal: 0, catalogTruncated: false, catalogPromise: null, offset: 0, selection: null, busy: false, timer: null, historyLoading: false, failed: null, ensure: null, suggestions: new Set(), draftLoading:false, storedDraft:false };
     const drafts = new Map();
+    let settingsWritable=true,autoPreferenceSaving=false,preferenceRevision=0;
     const pending = new Map();
     const element = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     const nonce = () => window.crypto.randomUUID();
@@ -18,6 +19,7 @@ window.PaperLibraryChat = {
       const unavailable = !chat.available || !chat.sessionId || chat.draftLoading;
       $('paper-chat-input').disabled=chat.draftLoading;
       for (const id of ['paper-chat-open', 'paper-chat-draft', 'paper-chat-send', 'paper-chat-auto']) $(id).disabled = unavailable || chat.busy;
+      $('paper-chat-auto').disabled ||= !settingsWritable || autoPreferenceSaving;
       for (const id of ['paper-chat-new', 'paper-chat-choose', 'paper-chat-all']) $(id).disabled = unavailable || !getPaper()?.pdf;
       if (chat.catalogTruncated || chat.catalog.some(note => note.identity_reliable === false && note.identity_source === 'duplicate-pdf-nm')) $('paper-chat-all').disabled = true;
       $('annotation-chat-actions').hidden = !chat.available;
@@ -312,7 +314,7 @@ window.PaperLibraryChat = {
       // draft locally without publishing it under the new paper's identity.
       remember(false); stopTimer();
       chat.paperId = item.id; chat.sessionId = null; ++chat.ticket; chat.catalog = []; chat.catalogReady = false; chat.catalogTotal = 0; chat.catalogTruncated = false; chat.catalogPromise = null; chat.offset = 0; chat.usageRevision = null; chat.suggestions = new Set(); chat.busy = false;
-      const ticket=chat.ticket;let previous=drafts.get(item.id),preferences=null;
+      const ticket=chat.ticket,preferenceTicket=preferenceRevision;let previous=drafts.get(item.id),preferences=null;
       chat.storedDraft=false;chat.draftLoading=Boolean(persistence);controls();
       if(persistence){
         chat.notes=[];chat.selection=null;chat.failed=null;$('paper-chat-input').value='';$('paper-chat-messages').replaceChildren();contextLabel();status('正在读取这篇论文的对话草稿…');
@@ -324,7 +326,7 @@ window.PaperLibraryChat = {
       chat.notes = validRefs(previous?.annotationRefs); chat.selection = previous?.selection || null; chat.failed = previous?.failed || null;
       chat.historyKey = undefined;
       $('paper-chat-input').value = previous?.draft || ''; $('paper-chat-messages').replaceChildren(); closeDrawer(); contextLabel(); controls();
-      $('paper-chat-auto').checked = preferences?.['auto-paper-conversation']===true||preferences?.['auto-paper-conversation']==='true';
+      if(preferenceTicket===preferenceRevision)$('paper-chat-auto').checked = settingsWritable&&(preferences?.['auto-paper-conversation']===true||preferences?.['auto-paper-conversation']==='true');
       if (!chat.available) { status('请从 DSH 右侧的文献库打开，便可为每篇论文建立对话。'); return; }
       status('正在准备这篇论文的 DSH 对话…');
       try { await ensure(item.id); if (chat.paperId !== item.id) return; await catalog(); if (chat.visible) await history(); } catch (error) { if (chat.paperId === item.id) status(error.message, true); }
@@ -358,13 +360,16 @@ window.PaperLibraryChat = {
     for (const id of ['paper-reference-search', 'paper-reference-page', 'paper-reference-scope']) $(id).addEventListener(id === 'paper-reference-scope' ? 'change' : 'input', () => { chat.offset = 0; renderCatalog(); });
     $('paper-reference-prev').addEventListener('click', () => { chat.offset = Math.max(0, chat.offset - PAGE_SIZE); renderCatalog(); });
     $('paper-reference-next').addEventListener('click', () => { chat.offset += PAGE_SIZE; renderCatalog(); });
-    $('paper-chat-auto').addEventListener('change', () => {
-      if(persistence)void persistence.patch('preferences',{'auto-paper-conversation':$('paper-chat-auto').checked}).catch(error=>toast(`自动发送偏好尚未保存：${error.message}`,true));
-      if ($('paper-chat-auto').checked) toast('已开启。新保存的批注会发送到这篇论文的 DSH 对话并使用模型额度。');
+    $('paper-chat-auto').addEventListener('change', async () => {
+      const requested=$('paper-chat-auto').checked,preferenceTicket=++preferenceRevision;$('paper-chat-auto').checked=!requested;autoPreferenceSaving=true;controls();
+      try{if(persistence)await persistence.patch('preferences',{'auto-paper-conversation':requested});if(preferenceTicket===preferenceRevision)$('paper-chat-auto').checked=requested;if(requested&&$('paper-chat-auto').checked)toast('已开启。新保存的批注会发送到这篇论文的 DSH 对话并使用模型额度。');}
+      catch(error){toast(`自动发送偏好尚未保存：${error.message}`,true);}
+      finally{autoPreferenceSaving=false;controls();}
     });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') stopTimer(); else if (chat.visible) void history(); });
     controls();
     return {
+      applyPreferences(value,writable=true){preferenceRevision++;settingsWritable=writable;$('paper-chat-auto').checked=writable&&value['auto-paper-conversation']===true;controls();},
       setAvailable(value) { chat.available = Boolean(value); controls(); },
       available: () => chat.available,
       paperOpened,

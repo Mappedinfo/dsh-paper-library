@@ -1,0 +1,20 @@
+{
+  "verified_at": "2026-09-15T10:42:52.227Z",
+  "ok": true,
+  "authenticatedHost": true,
+  "nativeConversationsIdle": true,
+  "libraryAvailable": true,
+  "paperConversations": true,
+  "annotationReferences": true,
+  "workbench": true,
+  "readingWorkspace": true,
+  "durableState": true,
+  "languageLearning": true,
+  "datasetLibrary": true,
+  "knowledgeWorkflow": true,
+  "paperAnalysis": true,
+  "nativeSettings": true,
+  "chatScriptAvailable": true,
+  "modelRequestsMade": 0,
+  "privateDocumentsRead": false
+}
