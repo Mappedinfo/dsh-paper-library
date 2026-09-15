@@ -9,6 +9,7 @@ import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
 export const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const defaultLibrary = join(homedir(), '.local', 'share', 'dsh-paper-library');
 const actions = new Set(['status','import','list','get','create','archive','restore','update','attach','page_layout','page','annotations','annotation_catalog','annotation_context_exact','annotate','annotation_update','annotation_delete','export_annotations','export_pdf','link','graph','graph_node_put','graph_node_delete','graph_edge_put','graph_edge_delete','feedback_context','save_feedback','feedback']);
+const libraryActions = new Set(['resource_list','resource_export','dataset_import','dataset_put','dataset_get','dataset_archive','dataset_restore','dataset_release_put','dataset_release_get','dataset_release_list','dataset_link_put','dataset_link_list','dataset_link_delete','dataset_asset_put','dataset_asset_list','dataset_asset_preview','dataset_graph_promote','knowledge_source_put','knowledge_source_get','knowledge_source_check','knowledge_source_list','knowledge_draft_put','knowledge_draft_get','knowledge_draft_list','knowledge_draft_review','knowledge_note_put','knowledge_note_get','knowledge_note_list','knowledge_export']);
 let pending = Promise.resolve();
 let importsPending = Promise.resolve();
 let importCount = 0;
@@ -78,7 +79,8 @@ function runProcess(command, args, request, options) {
     });
     let stdout = '', stderr = '', bytes = 0, fail;
     const abort = () => { fail = new Error('操作已取消。'); child.kill(); };
-    const timeout = setTimeout(() => { fail = new Error('操作超过 90 秒；请缩小导入批次或检查 PDF。'); child.kill(); }, 90000);
+    const timeoutMs = request.action === 'dataset_asset_preview' ? 15000 : 90000;
+    const timeout = setTimeout(() => { fail = new Error(`操作超过 ${timeoutMs / 1000} 秒；请缩小读取范围或检查文件。`); child.kill(); }, timeoutMs);
     options.signal?.addEventListener('abort', abort, { once: true });
     child.stdout.on('data', chunk => {
       bytes += chunk.length;
@@ -94,10 +96,15 @@ function runProcess(command, args, request, options) {
       if (fail) return reject(fail);
       try {
         const response = JSON.parse(stdout);
-        if (!response.ok) throw new Error(typeof response.error === 'string' ? response.error : response.error?.message || '文献操作失败');
+        if (!response.ok) {
+          const error = new Error(typeof response.error === 'string' ? response.error : response.error?.message || '文献操作失败');
+          if (typeof response.code === 'string') error.code = response.code;
+          if (response.code === 'STATE_CONFLICT') { error.current = response.current; error.status = 409; }
+          throw error;
+        }
         if (code !== 0) throw new Error('文献内核意外退出。');
         accept(response.result);
-      } catch (error) { reject(new Error(stdout.trim() ? error.message : `文献内核未返回结果。${stderr.slice(0, 1000)}`)); }
+      } catch (error) { reject(stdout.trim() ? error : new Error(`文献内核未返回结果。${stderr.slice(0, 1000)}`)); }
     });
     child.stdin.end(JSON.stringify(request));
   });
@@ -211,20 +218,35 @@ async function lookupMetadata(request, options) {
 export async function dispatch(request, options = {}) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('请求必须是 JSON 对象。');
   const { library: ignoredLibrary, python: ignoredPython, ...safe } = request;
+  if (libraryActions.has(safe.action) || safe.action === 'dataset_cite') {
+    if (Buffer.byteLength(JSON.stringify(safe), 'utf8') > 1024 * 1024) throw new Error('库请求超过 1 MiB；请缩小选中材料。');
+    if (safe.action === 'dataset_cite') {
+      const result = await core({action:'dataset_cite',id:safe.id,release_id:safe.release_id},options);
+      return { ...await citationJob({action:'cite',items:[result.item],format:safe.format || 'apa'},options), warnings:result.warnings || [] };
+    }
+    return core(safe, options);
+  }
   if (safe.action === 'metadata_lookup') return lookupMetadata(safe,options);
   if (safe.action === 'models') return options.models ? options.models(options.signal) : { models: [], configured: false };
   if (safe.action === 'export_library') {
     const format = safe.format || 'biblatex';
     if (!['biblatex','csl-json'].includes(format)) throw new Error('整库导出支持 BibLaTeX 或 CSL JSON。');
     const texts = []; const records = []; let count = 0;
-    const snapshot = await core({action:'export_metadata'}, options);
-    for (let offset=0;offset<snapshot.items.length;offset+=100) {
-      const items=snapshot.items.slice(offset,offset+100);
+    let offset=0, revision, bytes=0;
+    while (true) {
+      const page = await core({action:'resource_export',offset,limit:100,...(revision===undefined?{}:{expected_catalog_revision:revision})}, options);
+      revision=page.catalog_revision;
+      const items=page.items;
+      bytes+=Buffer.byteLength(JSON.stringify(items),'utf8');
+      if(bytes>24*1024*1024) throw new Error('引用目录导出超过 24 MiB，请缩小条目资料。');
       count+=items.length;
       if(format==='csl-json') records.push(...items);
-      else texts.push((await citationJob({action:'cite',items,format},options)).text);
+      else if(items.length) texts.push((await citationJob({action:'cite',items,format},options)).text);
+      if(page.done) break;
+      if(!Number.isInteger(page.next_offset)||page.next_offset<=offset) throw new Error('引用目录分页未推进，导出已停止。');
+      offset=page.next_offset;
     }
-    return {text:format==='csl-json'?JSON.stringify(records,null,2):texts.join('\n'),filename:format==='csl-json'?'library.json':'library.bib',mime:format==='csl-json'?'application/json':'application/x-bibtex',count};
+    return {text:format==='csl-json'?JSON.stringify(records,null,2):texts.join('\n'),filename:format==='csl-json'?'library.json':'library.bib',mime:format==='csl-json'?'application/json':'application/x-bibtex',count,scope:'citation-metadata',warnings:format==='biblatex'?['BibLaTeX 保存引用信息；数据系列映射、文件、使用关联与知识正文不属于此格式。']:['CSL JSON 保存引用与数据版本身份；文件、使用关联与知识正文不属于此导出。']};
   }
   if (safe.action === 'cite') {
     if (!Array.isArray(safe.ids) || safe.ids.length < 1 || safe.ids.length > 500) throw new Error('请选择 1–500 篇文献。');

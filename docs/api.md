@@ -53,12 +53,50 @@ Editable graph nodes return `{id,paper_id,type,label,description,evidence,proven
 
 Each paper stores at most 2,000 reader nodes and 2,000 reader relationships. Metadata-derived nodes are read-only, paper-scoped and distinct from reader assertions; matching names alone do not establish a shared person identity. Metadata changes can leave an existing reader relationship's endpoint unavailable: the record remains stored and the projection reports a warning instead of rebinding it to a different author. `truncated:true` also covers omitted nodes/edges and ambiguous identities. See the [workbench contract](ui-review-design.md) for the reading and maintenance workflow.
 
+## Unified dataset catalog and knowledge
+
+All calls use the existing JSON action carrier. `resource_list` accepts `kind:all|paper|dataset` plus bounded pagination, search, sorting and archived scope. Paper IDs and old APIs remain unchanged. Creates use `expected_revision:0`; dataset, release, asset, link and note updates use the returned integer revision. Stale updates return HTTP 409 with `code:STATE_CONFLICT` and `current`.
+
+| Actions | Key input / behavior |
+|---|---|
+| `dataset_put`, `dataset_get`, `dataset_archive`, `dataset_restore` | `id?`, `metadata`, revision; get includes at most 20 children per kind with totals |
+| `dataset_release_put`, `dataset_release_get`, `dataset_release_list` | Parent `id`, optional `release_id`; release metadata carries its own version/DOI/citekey |
+| `dataset_asset_put`, `dataset_asset_list`, `dataset_asset_preview` | Parent `id`, optional `asset_id`, `path` or `url`, optional `release_id`; linked files only |
+| `dataset_link_put`, `dataset_link_list`, `dataset_link_delete` | `paper_id,dataset_id,release_id?,relation,role?,scope?,evidence,review_status,origin`; list by paper or dataset |
+| `dataset_graph_promote` | `paper_id,node_id,dataset_id?,metadata?,expected_revision:0`; retains old node and explicit mapping; no inferred usage |
+| `dataset_cite` | `id,release_id?,format:apa|biblatex|csl-json`; existing CSL formatter and missing-field warnings |
+| `dataset_import` | Up to 100 input items per call; CSL dataset or explicitly identified release with parent binding; conflicts do not replace existing metadata |
+| `resource_export` | `kind,offset,limit<=100,expected_catalog_revision?`; at most 4 MiB per page; use returned `next_offset` and catalog revision |
+| `export_library` | BibLaTeX or CSL JSON citation metadata for papers, datasets and releases; 24 MiB metadata budget; no files, links or notes backup |
+
+Link relations are `mentions|cites|uses|produces|describes`. Evidence is an array; supported fields include `quote,page,printed_page,section,source_uri,source_id,source_kind,source_hash,annotation_id,annotation_version`. Unknown page is null. Explicit review is distinct from scientific verification. AI tool calls force `origin:ai,review_status:needs-review`; a manual accepted link requires some source evidence.
+
+Preview is UTF-8 CSV/TSV/JSONL only, with a 100-row, 50-column, 512-KiB response cap, independent 4-MiB input, 64-KiB physical-line, 8192-character field and 2-second parse budgets. `sample_only:true,total_rows:null`; `status` is `ready|partial|error|missing|unsupported`. A partial result retains valid rows and warnings; no cell is silently truncated. `sample_sha256` covers consumed bytes, not the whole file; `file_sha256` stays null. File replacement cannot silently rebind a path. Other formats remain registered without parsing.
+
+Knowledge calls scope records by `entity:{kind:paper|dataset|release,id}`:
+
+| Actions | Key input / behavior |
+|---|---|
+| `knowledge_source_put/get/list/check` | Put a fixed `annotation|official-excerpt|user-text|metadata|source-note`; annotations require exact `annotation_ref:{id,version}` and are read from PDF. Official excerpts require URL. Check re-reads one saved annotation explicitly; other sources remain snapshot-only. |
+| `knowledge_generate` | Native Harness only: `entity,source_ids,mode:graph|note,request_id,instruction?`. Host resolves model; browser provider/model overrides are ignored. |
+| `knowledge_draft_put/get/list` | `entity,source_ids,mode,title,body?,nodes?,edges?,assertions?`; every proposal starts `needs-review`; author/LLM origin is separate. |
+| `knowledge_draft_review` | `id,expected_revision,decision:accepted|rejected,reviewed_by:user`; UI only, no model tool. Does not automatically create Markdown. |
+| `knowledge_note_put/get/list` | `id?,entity,title,body,source_ids,expected_revision`; revisioned Markdown under `knowledge/notes`, with durable write intent recovery. |
+| `knowledge_export` | 1–20 explicitly selected entities, `format:library-json|rkos-v3`; at most 100 accepted drafts/notes, 200 sources/nodes, 400 relations and 4 MiB. Over-budget scope fails explicitly. |
+
+Generation is at most 40 sources / 24,000 characters and two concurrent requests, with native model output defaulting to 8192 tokens (the configured language-output limit) and a 120-second deadline. Pending, failed, committing and complete records are host-durable; uncertain retries retain request identity. Explicit new-generation retry is required after failure/interruption. A completed request replays its draft without another model call. No model tools, full-library scans, file discovery or background graph extraction run in this path.
+
+Structured nodes use stable typed IDs; Evidence binds an exact selected source excerpt, Observation points to a source node, and Assertion relates evidence/observation to Claim/Gap. Edge uses separately validated typed endpoints. `library-json` contains selected accepted graphs/notes plus referenced snapshots and identity metadata; it is not a whole-library restore format. `rkos-v3` adds role-separated bibliography/sidecars, mappings and losses; native dataset sources are not disguised as Paper records. Runtime exports use the bounded adapter's structural checks; the upstream parser is exercised separately by the synthetic validation script, never auto-discovered at runtime.
+
 ## Native Harness tools
 
-The plugin registers 17 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
+The plugin registers 20 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
 
 | Tool | Arguments | Node action |
 |---|---|---|
+| `library_resources` | `kind?,query?,limit?,offset?,sort?,order?,archived?` | `resource_list` |
+| `library_dataset` | `operation,input_json` | Allowlisted dataset actions; AI usage links forced pending |
+| `library_knowledge` | `operation,input_json` | Selected source/draft/read/export actions; no accept or note overwrite |
 | `library_search` | `query?,limit?,offset?,sort?,order?,archived?` | `list` |
 | `library_get` | `id,include_archived?` | `get` |
 | `library_create` | `metadata` with required `title` | `create` |

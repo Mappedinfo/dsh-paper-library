@@ -24,6 +24,13 @@ class ReadingAdapter extends LlmAdapter {
     })).slice(-8)
     const prompt = options.messages.flatMap(message => message.content.filter(block => block.type === 'text').map(block => block.text)).join('\n')
     let reply = REPLY
+    if (prompt.includes('LIBRARY_KNOWLEDGE_JSON:\n')) {
+      const selected = JSON.parse(prompt.slice(prompt.lastIndexOf('LIBRARY_KNOWLEDGE_JSON:\n') + 'LIBRARY_KNOWLEDGE_JSON:\n'.length))
+      const source = selected.sources[0]
+      reply = JSON.stringify({ title: 'Synthetic dataset knowledge', body: `# Synthetic dataset\n\n${source.text}\n\nSource: [${source.id}]\n\nThis is a deterministic integration fixture, not a scientific assessment.`, nodes: [], edges: [], assertions: [] })
+      if (selected.mode === 'graph') reply = JSON.stringify({ title:'Synthetic typed graph', body:'Synthetic relationships for integration testing.', nodes:[{id:'source-excerpt',type:'evidence',label:'Selected source',source_id:source.id,quote:source.text},{id:'reported-count',type:'observation',label:'The selected source reports twelve example trips',source_node:'evidence:source-excerpt'},{id:'bounded-claim',type:'claim',label:'This synthetic release reports twelve trips'}], edges:[{subject:'observation:reported-count',object:`${selected.entity.kind}:${selected.entity.id}`,relation:'observed_on',source_id:source.id,surface:'Selected synthetic release only'}], assertions:[{subject:'observation:reported-count',object:'claim:bounded-claim',relation:'supports',surface:'Source-reported synthetic count only'}] })
+      this.observation.knowledge = [...this.observation.knowledge, { provider: options.provider, model: options.model, maxTokens: options.maxTokens, mode: selected.mode, sourceIds: selected.sources.map(item => item.id), sourceTexts: selected.sources.map(item => item.text) }].slice(-8)
+    }
     if (prompt.includes('SOURCE_JSON:\n')) {
       const source = JSON.parse(prompt.slice(prompt.lastIndexOf('SOURCE_JSON:\n') + 'SOURCE_JSON:\n'.length)).text
       const polish = prompt.includes('ORIGINAL LANGUAGE')
@@ -39,7 +46,7 @@ class ReadingAdapter extends LlmAdapter {
 
 /** Test-only authenticated booleans make cold lifecycle assertions independent from plugin receipts. */
 export function apply(ctx) {
-  const observation = { generations: 0, references: [], language: [] }
+  const observation = { generations: 0, references: [], language: [], knowledge: [] }
   ctx.effect(() => ctx.llm.registerAdapter([PROVIDER], new ReadingAdapter(observation)), 'paper-library: deterministic test model')
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/api/paper-chat-fixture', handler(req, res) {
@@ -49,7 +56,7 @@ export function apply(ctx) {
       const ids = url.searchParams.getAll('session')
       if (req.method !== 'GET' || ids.length > 12 || ids.some(id => !/^paper-library-[a-f0-9]{40}$/.test(id))) { res.writeHead(400); res.end(); return }
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ generations: observation.generations, references: observation.references, language: observation.language, observations: ids.map(id => ({ sessionLoaded: Boolean(ctx.sessions.get(id)), agentLoaded: Boolean(ctx.agents.get(id)) })) }))
+      res.end(JSON.stringify({ generations: observation.generations, references: observation.references, language: observation.language, knowledge: observation.knowledge, observations: ids.map(id => ({ sessionLoaded: Boolean(ctx.sessions.get(id)), agentLoaded: Boolean(ctx.agents.get(id)) })) }))
     },
   }), 'paper-library: cold-session fixture observations')
 }

@@ -1,0 +1,12 @@
+{
+  "verified_at": "2026-09-15T07:33:04.752467+00:00",
+  "ok": true,
+  "source_bytes": 1073741824,
+  "read_bytes": 1309,
+  "rows_returned": 100,
+  "worker_peak_rss_bytes": 25903104,
+  "worker_exited": true,
+  "source_stat_unchanged": true,
+  "model_requests": 0,
+  "scope": "One 1 GiB sparse synthetic CSV with a valid first 200 rows; true worker peak RSS only. Excludes browser and host; not a real-library capacity comparison."
+}

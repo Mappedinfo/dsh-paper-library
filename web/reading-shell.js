@@ -9,14 +9,14 @@ window.PaperReadingShell = (() => {
     strikeout: '拖选文字，保存为 PDF 删除线批注。',
     note: '点击页面中的位置，添加一条便笺。',
   };
-  function create({state, workbench, panels, reader, navigate, toast}) {
+  function create({state, workbench, panels, reader, navigate, toast, contextChanged}) {
     const $ = id => document.getElementById(id);
     const node = (tag, text, className) => { const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n; };
     const button = (id, text, action) => {const n=node('button',text,'button subtle');n.type='button';n.id=id;n.addEventListener('click',action);return n;};
     const top=document.querySelector('.topbar'), workspace=document.querySelector('.workspace');
     let context='reader', tool='select', color='#ffdb66', focused=false;
     const ribbon=node('nav',null,'reader-ribbon');ribbon.setAttribute('aria-label','文献工作区');
-    const library=button('workspace-library','文献库',()=>{leaveFocus();$('catalog-expand').click();});
+    const library=button('workspace-library','库',()=>{leaveFocus();$('catalog-expand').click();});
     library.title='展开或收起文献表格';ribbon.append(library);
     const tabs=document.querySelector('.tabs');for(const tab of [...tabs.children])ribbon.append(tab);tabs.remove();
     const citations=button('ribbon-citations','引用与导出',()=>{context='citations';sync();});ribbon.append(citations);
@@ -56,9 +56,9 @@ window.PaperReadingShell = (() => {
     $('paper-chat-input').rows=3;
     function status(text, error=false){message.textContent=text||hints[tool];message.classList.toggle('error',error);}
     function sync(){
-      const table=Boolean(workbench()?.isTable()), active=Boolean(state.active&&!state.active.archived), pdf=active&&Boolean(state.active.pdf);
+      const table=Boolean(workbench()?.isTable()), active=Boolean(state.active&&!state.active.archived&&state.active.resource_kind!=='dataset'), pdf=active&&Boolean(state.active.pdf);
       panels()?.setReadingActive?.(!table&&active&&state.tab!=='graph');
-      if(table&&focused)leaveFocus();
+      if((table||state.active?.resource_kind==='dataset')&&focused)leaveFocus();
       const mode=table?'library':context;
       document.body.classList.toggle('library-mode',table);document.body.classList.toggle('has-paper',active);
       library.setAttribute('aria-pressed',String(table));
@@ -81,6 +81,7 @@ window.PaperReadingShell = (() => {
       if(mode==='graph')status('选择节点查看联系与来源；有页码的依据可返回 PDF。');
       else if(mode==='citations')status('对当前论文复制引用，或导出文件与已保存的批注。');
       else status(hints[tool]);
+      contextChanged?.();
     }
     function setContext(value){context=value==='conversation'?'reader':value;sync();}
     function leaveFocus(){

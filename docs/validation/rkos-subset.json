@@ -1,0 +1,19 @@
+{
+  "verified_at": "2026-09-15T07:26:02.333198+00:00",
+  "ok": true,
+  "upstream_sha256": "3dd97ae44011093fc889c3d6b9f3a5f719c1761bdf084ee42a722aa066b162b3",
+  "upstream_lint_executed": true,
+  "private_registry_or_wiki_loaded": false,
+  "model_calls": 0,
+  "issues": [],
+  "loss_codes": [
+    "RKOS_BIBLIOGRAPHIC_DATASET_UNSUPPORTED",
+    "RKOS_DATASET_SOURCE_UNSUPPORTED"
+  ],
+  "checks": [
+    "pure upstream parser/build/lint on synthetic records",
+    "compatible Evidence/Claim/Assertion retained",
+    "dataset-native sources retained in JSON and explicitly reported as unsupported in v3",
+    "bibliographic and graph datasets use separate file roles"
+  ]
+}

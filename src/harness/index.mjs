@@ -10,6 +10,7 @@ import { registerBundledSkills } from './skills.mjs'
 import { createPaperChat } from './paper-chat.mjs'
 import { createLocalStateStore } from '../local-state.mjs'
 import { createLanguageLearning } from './language-learning.mjs'
+import { createLibraryKnowledge } from './library-knowledge.mjs'
 
 export const name = 'paper-library'
 export const inject = ['tools', 'llm']
@@ -35,7 +36,16 @@ export function apply(ctx, rawConfig = {}) {
     paperChat.install()
     const languageAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens })
     const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, dispatch, library: config.library, python: config.python })
-    const fetchHandler = createFetchHandler({ ...options, paperChat, languageLearning, basePath: '/api/paper-library' })
+    const libraryKnowledge = createLibraryKnowledge({ store: options.localState, ai: languageAI, paperChat, dispatch, library: config.library, python: config.python,
+      getModel: async (entity, { signal } = {}) => {
+        if (entity.kind === 'release') {
+          const release = await dispatch({action:'dataset_release_get',release_id:entity.id},{library:config.library,python:config.python,signal})
+          return (await paperChat({action:'chat_ensure',id:release.dataset_id},{signal})).model
+        }
+        return (await paperChat({action:'chat_ensure',id:entity.id},{signal})).model
+      },
+    })
+    const fetchHandler = createFetchHandler({ ...options, paperChat, languageLearning, libraryKnowledge, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',
       path: '/api/paper-library',

@@ -10,8 +10,9 @@ import { createLanguageLearning } from './harness/language-learning.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
 for (const name of ['workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css','local-state.js','language-learning.js','language-learning.css','theme.js','theme.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['resource-library.js','resource-library.css','knowledge-workflow.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 const languageActions = new Set(['language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
-const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:'];
+const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:'];
 function browserStateKey(key, listPrefix = false) {
   if (typeof key !== 'string' || !(key === 'preferences' || key === 'reader' || browserStatePrefixes.some(prefix => key.startsWith(prefix)) || /^migration:[a-f0-9]{64}$/.test(key) || (listPrefix && key === 'migration:'))) throw new LocalStateError('此状态类别不能直接从浏览器访问。', 'STATE_FORBIDDEN', 403);
   return key;
@@ -114,12 +115,15 @@ export function createFetchHandler(options = {}) {
           const languageAction = languageActions.has(input?.action);
           if (chatAction && !options.paperChat) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板打开论文对话。'},400);
           if (input?.action === 'language_generate' && !options.languageLearning) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
+          if (input?.action === 'knowledge_generate' && !options.libraryKnowledge) return json({ok:false,error:'尚未连接 DSH 模型服务；已保存的来源和知识笔记仍可查看。'},409);
           let result = stateAction ? await stateRequest(localState, input)
+            : input?.action === 'knowledge_generate' ? await options.libraryKnowledge(input, { signal: request.signal })
             : languageAction ? await learningRecords(input, { signal: request.signal })
             : chatAction
             ? await options.paperChat(input, { signal: request.signal })
             : await dispatch(input, { ...options, signal: request.signal });
           if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true, catalog_management: true, typed_graph: true, reading_workspace: true, durable_state: true, learning_records: true, language_learning: Boolean(options.languageLearning) };
+          if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge) };
           return json({ok:true,result});
         } finally { jsonRequests--; }
       }

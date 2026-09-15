@@ -184,8 +184,13 @@ def csl_item(raw):
     item = dict(raw)
     zotero = "itemType" in item or "creators" in item
     if zotero:
-        types = {"journalArticle": "article-journal", "conferencePaper": "paper-conference", "book": "book", "bookSection": "chapter", "thesis": "thesis", "report": "report", "preprint": "article", "webpage": "webpage"}
+        types = {"journalArticle": "article-journal", "conferencePaper": "paper-conference", "book": "book", "bookSection": "chapter", "thesis": "thesis", "report": "report", "preprint": "article", "webpage": "webpage", "dataset": "dataset"}
         item["type"] = types.get(item.get("itemType"), "article")
+        # Zotero's top-level numeric version is a sync revision. CSL version is
+        # a publication/release label and must survive JSON/BibLaTeX roundtrips.
+        item.pop("version", None)
+        if raw.get("versionNumber") not in (None, ""):
+            item["version"] = str(raw["versionNumber"])
         for old, new in {"publicationTitle": "container-title", "bookTitle": "container-title", "date": "issued", "url": "URL", "pages": "page", "place": "publisher-place"}.items():
             if old in item and new not in item:
                 item[new] = item[old]
@@ -221,7 +226,10 @@ def csl_item(raw):
     if item.get("DOI"):
         item["DOI"] = canonical_doi(item["DOI"])
     # Host filesystem paths and attachment objects never become portable metadata.
-    for field in ("attachments", "annotations", "creators", "collections", "relations", "path", "localPath", "uri", "key", "itemKey", "version", "dateAdded", "dateModified", "pdf_filename", "archived", "archived_at"):
+    # The normalized item must remain CSL on subsequent updates. Retaining
+    # itemType would misinterpret an already normalized publication version as
+    # Zotero's sync counter and discard it on the next pass.
+    for field in ("attachments", "annotations", "creators", "itemType", "collections", "relations", "path", "localPath", "uri", "key", "itemKey", "versionNumber", "dateAdded", "dateModified", "pdf_filename", "archived", "archived_at"):
         item.pop(field, None)
     item.pop("id", None)
     return normalize_research_metadata(item)
@@ -238,7 +246,7 @@ def parse_ris(text):
         if tag == "TY":
             if current:
                 entries.append(current)
-            current = {"type": {"JOUR": "article-journal", "BOOK": "book", "CHAP": "chapter", "CONF": "paper-conference", "THES": "thesis"}.get(value, "article"), "tags": []}
+            current = {"type": {"JOUR": "article-journal", "BOOK": "book", "CHAP": "chapter", "CONF": "paper-conference", "THES": "thesis", "DATA": "dataset"}.get(value, "article"), "tags": []}
         elif tag == "ER":
             if current:
                 entries.append(current)
@@ -440,6 +448,8 @@ class Library:
     def _upsert(self, raw, source="manual"):
         item = csl_item(raw)
         doi, key = item.get("DOI"), item.get("citekey")
+        self._check_shared_citekey(key)
+        self._check_dataset_doi(doi)
         existing = self.db.execute("SELECT id FROM papers WHERE doi=? AND doi<>''", (doi,)).fetchone() if doi else None
         key_record = self.db.execute("SELECT id,doi,title FROM papers WHERE citekey=?", (key,)).fetchone() if key else None
         if key_record:
@@ -481,6 +491,21 @@ class Library:
         item["provenance"] = {"source": source, "imported": now()}
         self.db.execute("INSERT INTO papers VALUES(?,?,?,?,?,?,?,?)", (id, json.dumps(item, ensure_ascii=False), item["title"], doi, item["citekey"], None, now(), now()))
         return self.get(id), False
+
+    def _check_shared_citekey(self, key, paper_id=None):
+        """Respect additive dataset/alias registrations without changing paper IDs."""
+        if key and self.db.execute("SELECT 1 FROM sqlite_master WHERE name='resource_citekeys'").fetchone():
+            row = self.db.execute("SELECT kind,owner_id FROM resource_citekeys WHERE citekey=?", (key,)).fetchone()
+            if row and (row["kind"] != "paper" or (paper_id is not None and row["owner_id"] != paper_id)):
+                raise ValueError("Citation key belongs to another resource or a retained citation alias")
+            if row and paper_id is None and not self.db.execute("SELECT 1 FROM papers WHERE id=? AND citekey=?", (row["owner_id"], key)).fetchone():
+                raise ValueError("Citation key is a retained alias; resolve the existing paper before importing")
+
+    def _check_dataset_doi(self, doi):
+        if doi and self.db.execute("SELECT 1 FROM sqlite_master WHERE name='datasets'").fetchone():
+            for table in ("datasets", "dataset_releases"):
+                if self.db.execute(f"SELECT 1 FROM {table} WHERE doi=?", (doi,)).fetchone():
+                    raise ValueError("DOI identifies a dataset or release; do not merge it with a paper")
 
     def import_items(self, items=None, path=None, limit=100, offset=0, metadata=None, metadata_source=None, metadata_verified=False):
         warnings, results, imported, duplicates = [], [], 0, 0
@@ -565,6 +590,26 @@ class Library:
             raise ValueError(f"Import batch exceeds {MAX_IMPORT} items; split the export")
         limit, offset = max(1, clamp(limit, 100, 100)), clamp(offset, 0, MAX_IMPORT)
         for raw in items[offset:offset + limit]:
+            if isinstance(raw, dict) and raw.get("resource_kind") != "paper" and (raw.get("type") == "dataset" or raw.get("itemType") == "dataset" or raw.get("resource_kind") in {"dataset", "release"}):
+                # Preserve this importer's file/batch checkpoints while routing
+                # explicit dataset metadata to its own additive catalogue. Never
+                # promote an existing paper row or open a dataset attachment as PDF.
+                from .datasets import dispatch as dataset_dispatch
+                batch = dataset_dispatch(self, {"action": "dataset_import", "items": [raw],
+                    "source": "zotero-json" if "itemType" in raw else "csl-json-or-ris"})
+                imported += batch["imported"]
+                duplicates += batch["duplicates"]
+                warnings.extend(batch["warnings"])
+                warnings.extend("Dataset record skipped: " + conflict["error"] for conflict in batch["conflicts"])
+                if raw.get("attachments"):
+                    warnings.append("Dataset attachments were not opened or copied; connect explicit data file paths from its dataset entry")
+                for result in batch["items"]:
+                    if result.get("resource_kind") == "release":
+                        parent = dataset_dispatch(self, {"action": "dataset_get", "id": result["dataset_id"], "include_details": False})
+                        results.append({**parent, "imported_release": result})
+                    else:
+                        results.append(result)
+                continue
             # Checkpoint one record at a time. A cancelled large migration must
             # preserve completed records and retry through their existing IDs.
             with self.lock():
@@ -624,12 +669,16 @@ class Library:
             merged = {k: v for k, v in old.items() if k not in protected}
             merged.update({k: v for k, v in metadata.items() if k not in protected})
             value = csl_item(merged)
+            self._check_shared_citekey(value.get("citekey"), id)
+            self._check_dataset_doi(value.get("DOI"))
             value["provenance"] = old.get("provenance", {})
             if "page_count" in old:
                 value["page_count"] = old["page_count"]
             duplicate = self.db.execute("SELECT id FROM papers WHERE id<>? AND (citekey=? OR (doi=? AND doi<>''))", (id, value["citekey"], value.get("DOI"))).fetchone()
             if duplicate:
                 raise ValueError("DOI or citekey already belongs to another record")
+            if old.get("citekey") != value.get("citekey") and self.db.execute("SELECT 1 FROM sqlite_master WHERE name='resource_citekeys'").fetchone():
+                self.db.execute("INSERT OR IGNORE INTO resource_citekeys VALUES(?,?,?)", (old["citekey"], "paper", id))
             if old["pdf"]:
                 self._update_pdf_metadata(id, value)
                 return self.get(id)

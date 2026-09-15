@@ -1,4 +1,5 @@
 import { resolve } from 'node:path'
+import { RESOURCE_TOOL_SPECS, resourceToolRequest } from './resource-tools.mjs'
 
 const string = (description, required = false) => ({ type: 'string', description, ...(required ? { required: true } : {}) })
 const ids = { type: 'array', items: { type: 'string' } }
@@ -22,6 +23,7 @@ const graphRelations = ['supports', 'contradicts', 'uses', 'evaluates', 'derived
 
 /** Small schemas keep scope explicit and avoid exposing core write/feedback internals. */
 export const TOOL_SPECS = [
+  ...RESOURCE_TOOL_SPECS,
   { name: 'library_search', action: 'list', title: 'Search papers', parameters: { query: string('Title, author, tag, DOI or indexed text'), limit: { type: 'integer', description: '1–200 records; default 40' }, offset: { type: 'integer', description: 'Pagination offset, 0–10000000' }, sort: choice(['title', 'author', 'year', 'journal', 'modified', 'created', 'citekey', 'jcr'], 'Catalog sort; JCR uses latest reported year and its worst supplied category quartile'), order: choice(['asc', 'desc'], 'Requires a sort field'), archived: { type: 'boolean', description: 'Read trash instead of active papers; default false' } } },
   { name: 'library_get', action: 'get', title: 'Read paper metadata', parameters: { id: string('Library paper ID', true), include_archived: { type: 'boolean', description: 'Inspect archived metadata; does not restore or open the PDF' } } },
   { name: 'library_create', action: 'create', title: 'Create paper metadata', mutate: true, parameters: { metadata: { ...metadata, properties: { ...metadata.properties, title: string('Paper title', true) } } } },
@@ -43,6 +45,11 @@ export const TOOL_SPECS = [
 
 /** Pick only declared tool arguments, including on programmatic direct calls. */
 export function requestFromTool(spec, args, exec) {
+  if (spec.action === 'dataset_tool' || spec.action === 'knowledge_tool') {
+    const request = resourceToolRequest(spec, args)
+    if (request.path !== undefined) request.path = resolve(exec.agent?.session?.header?.cwd ?? process.cwd(), request.path)
+    return request
+  }
   const request = { action: spec.action }
   for (const key of Object.keys(spec.parameters)) if (args[key] !== undefined) request[key] = args[key]
   // The official schema DSL has closed objects but no maxLength/maxItems

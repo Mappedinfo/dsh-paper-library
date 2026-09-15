@@ -33,6 +33,17 @@ const workbench = status.result.catalog_management === true && status.result.typ
 const readingWorkspace = status.result.reading_workspace === true
 const durableState = status.result.durable_state === true
 const languageLearning = status.result.language_learning === true
+const datasetLibrary = status.result.dataset_library === true && status.result.dataset_preview === true
+const knowledgeWorkflow = status.result.knowledge_workflow === true && status.result.knowledge_generation === true
+if (flags.get('--require-resources') === 'true') {
+  assert.equal(datasetLibrary,true,'Restarted host lacks dataset registration and preview')
+  assert.equal(knowledgeWorkflow,true,'Restarted host lacks native knowledge generation')
+  for (const [file,marker] of [['resource-library.js','ResourceLibrary'],['resource-library.css','resource-preview'],['knowledge-workflow.js','LibraryKnowledge']]) {
+    const asset=await fetch(`${address.origin}/api/paper-library/${file}`,{headers,signal:AbortSignal.timeout(10000)})
+    assert.equal(asset.status,200,`Missing library workflow asset: ${file}`)
+    assert.ok((await asset.text()).includes(marker),`Stale library workflow asset: ${file}`)
+  }
+}
 let themeAssetsAvailable = false
 let sharedSidebarAssetsAvailable = false
 if (flags.get('--require-sidebar') === 'true') {
@@ -93,6 +104,6 @@ if (flags.get('--require-chat') === 'true' || flags.get('--require-references') 
   assert.ok(script.includes('PaperLibraryChat'))
   if (flags.get('--require-references') === 'true') assert.ok(script.includes('chat_catalog') && script.includes('annotation_refs'))
 }
-const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, durableState, languageLearning, ...(themeAssetsAvailable ? {themeAssetsAvailable} : {}), ...(sharedSidebarAssetsAvailable ? {sharedSidebarAssetsAvailable} : {}), chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
+const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, durableState, languageLearning, datasetLibrary, knowledgeWorkflow, ...(themeAssetsAvailable ? {themeAssetsAvailable} : {}), ...(sharedSidebarAssetsAvailable ? {sharedSidebarAssetsAvailable} : {}), chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
 if (flags.get('--output')) await writeFile(flags.get('--output'), JSON.stringify(report, null, 2) + '\n')
 console.log(JSON.stringify(report))

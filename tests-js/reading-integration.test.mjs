@@ -70,7 +70,7 @@ for(const oldTab of ['conversation','annotations'])test(`restoring closed panels
 
 test('table visibility callbacks never resume polling behind the graph or under a different paper identity',()=>{
   const match=source.match(/tableChanged: (table => \{[^\n]+\}),\n/);assert.ok(match,'The production callback must be tested');
-  const visibility=[],context={state:{tab:'graph',active:{id:'paper-a'}},readerPaperId:'paper-a',readingPanels:{visible:()=>true},paperChatUI:{visible:value=>visibility.push(value)},readingShell:{sync(){}},queueMicrotask:fn=>fn()};
+  const visibility=[],context={state:{tab:'graph',active:{id:'paper-a'}},readerPaperId:'paper-a',readingPanels:{visible:()=>true},paperChatUI:{visible:value=>visibility.push(value)},readingShell:{sync(){}},resourceUI:null,queueMicrotask:fn=>fn()};
   vm.createContext(context);const callback=vm.runInContext(`(${match[1]})`,context);
   callback(false);context.state.tab='reader';context.readerPaperId='other-paper';callback(false);
   context.readerPaperId='paper-a';callback(true);callback(false);

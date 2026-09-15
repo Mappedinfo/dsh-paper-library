@@ -17,6 +17,8 @@ const commands=[
   ['local_state_syntax',process.execPath,['--check','web/local-state.js']],
   ['language_learning_syntax',process.execPath,['--check','web/language-learning.js']],
   ['theme_syntax',process.execPath,['--check','web/theme.js']],
+  ['resource_library_syntax',process.execPath,['--check','web/resource-library.js']],
+  ['knowledge_workflow_syntax',process.execPath,['--check','web/knowledge-workflow.js']],
 ];
 const checks=[];
 for(const[id,command,args]of commands){

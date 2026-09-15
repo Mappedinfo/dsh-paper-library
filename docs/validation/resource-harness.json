@@ -1,0 +1,22 @@
+{
+  "verified_at": "2026-09-15T07:31:44.690Z",
+  "ok": true,
+  "checks": [
+    "dataset-and-knowledge-routes-use-actual-harness-authentication",
+    "independent-dataset-prepares-native-cold-session-without-pdf-or-agent",
+    "native-model-receives-only-explicit-snapshot-and-leaves-result-needing-user-review",
+    "explicit-review-and-markdown-save-are-separate-durable-steps-and-generation-replays-once",
+    "release-native-sources-inherit-dataset-session-model-without-fabricating-a-paper",
+    "native-typed-graph-keeps-dataset-evidence-and-reports-RKOS-source-mapping-losses",
+    "fresh-harness-restart-recovers-entities-sources-notes-and-request-identity-with-zero-model-replay"
+  ],
+  "deterministicModelGenerations": 3,
+  "replayGenerationsAfterHostRestart": 0,
+  "agentsStarted": 0,
+  "externalModelRequestsMade": 0,
+  "sourceData": "Fresh synthetic metadata and two explicitly selected source snapshots; no private files",
+  "limitations": [
+    "Model routing and persistence only; no provider-quality or real-library capacity claim"
+  ],
+  "isolated_hosts_stopped": true
+}

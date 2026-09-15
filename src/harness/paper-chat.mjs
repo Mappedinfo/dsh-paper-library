@@ -151,7 +151,7 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
   }
 
   async function identity(id, signal) {
-    const item = await kernel({ action: 'get', id }, signal)
+    const item = await kernel({ action: id.startsWith('dataset_') ? 'dataset_get' : 'get', id, ...(id.startsWith('dataset_') ? { include_details:false } : {}) }, signal)
     const directory = await realpath(library)
     return { item, directory, sessionId: paperSessionId(directory, id) }
   }
@@ -296,6 +296,7 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
   async function handle(request, signal) {
     signal?.throwIfAborted()
     const paper = await identity(request.id, signal)
+    if (paper.item.resource_kind === 'dataset' && !['chat_ensure','chat_history'].includes(request.action)) throw new Error('数据集请使用所选来源的知识工作流；PDF 批注引用仅用于文献。')
     const ensured = await ensure(paper, request, signal)
     const { snapshot, ...session } = ensured
     if (request.action === 'chat_ensure') return session

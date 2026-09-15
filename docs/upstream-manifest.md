@@ -1,5 +1,15 @@
 # Skill adaptation provenance
 
+## Dataset knowledge workflow, 2026-09-15
+
+`paper-library-knowledge` and `paper-library-notes` are independently authored MIT project adaptations of the contracts in `research-knowledge-os` and `knowledge-note`. Reviewed canonical entry SHA-256 values: `d8d440d75adff009d98635ae34431307193784c7003e45af800a8400e8c0c5be` and `b317f9a72c499c4d3fc0ca486bc4fa6268227a23523537ed16843441b0854fd9`. The implementation preserves explicit selected inputs, evidence levels, typed atomic relations, mandatory user review for AI proposals and readable source-bounded Markdown.
+
+No upstream Python CLI, private notes, expert registry, bibliography, quality event or personal path is redistributed. The original canonical skills are unchanged. Both project skills are registered under distinct names through the real Harness skill service and use actual plugin tools. Model tools cannot accept a draft or overwrite a knowledge note.
+
+`src/dsh_paper_library/library_knowledge.py` implements an independent bounded v3 subset mapper. Its export includes file roles, mapping and explicit losses. It does not call upstream auto-discovery or an APA bridge. The [synthetic upstream validation](validation/rkos-subset.json) invokes only the explicitly selected parser's pure parse/build/lint functions, with no private graph input. This checks a supported example, not every future graph or complete upstream interoperability.
+
+## PDF acquisition
+
 Verified 2026-09-14. The bundled `skills/paper-library-fetch/SKILL.md` is a project-maintained adaptation of Shiqi's canonical `paper-fetch-skill`, integration version1. Canonical entry SHA-256 at adaptation: `6897894dec45abe806150c9032c6421f4f9df2b65804649aaef618d6a8695627`.
 
 The adaptation retains identifier resolution, actual-PDF verification, bounded sequential acquisition, clear partial results and access limits. The user explicitly selected this independent library as the destination, so the bundled version uses `library_import` and portable PDF metadata. The original skill's Zotero-first routing does not apply to this plugin. The canonical skill was not edited.
