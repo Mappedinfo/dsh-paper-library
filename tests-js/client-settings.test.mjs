@@ -54,7 +54,7 @@ test('scope recovery that resolves after a rejected mutation remains a visible c
   const model = createSettingsCardModel(fixture.scope)
   assert.equal(await model.set('analysis_fill', true), false)
   assert.equal(model.getSnapshot().state, 'conflict')
-  assert.equal(model.getSnapshot().scope.value.analysis_fill, false)
+  assert.equal(model.getSnapshot().scope.value.analysis_fill, true)
   // Equal resolved values do not prove that a native override was persisted.
   assert.equal(await model.set('analysis_fill', false), false)
   fixture.scope.mutate = async () => { throw new Error('connection closed') }
@@ -91,7 +91,7 @@ test('reset clears only four plugin overrides and recovers composition defaults 
   assert.deepEqual(fixture.calls[0].ops.map(op => [op.op, op.path]), Object.keys(SETTINGS_DEFAULTS).map(key => ['unset', [key]]))
   assert.deepEqual(model.getSnapshot().scope.user, { other_plugin_data: 'keep' })
   assert.equal(model.getSnapshot().scope.value['reading-panel-side'], 'right')
-  assert.equal(model.getSnapshot().scope.value.auto_analysis, false)
+  assert.equal(model.getSnapshot().scope.value.auto_analysis, true)
 })
 
 test('card subscribes to cross-surface accepted snapshots and releases subscriptions on unmount/disposal', async () => {
@@ -126,7 +126,7 @@ test('native card exposes all four labelled controls, quota descriptions and hon
   assert.ok(nodes.some(node => node.props.role === 'status' && node.children.includes('loading')))
   fixture.update({ status: 'ready' })
   const ready = walk(PaperLibrarySettingsCard({ model, t: key => key }))
-  assert.equal(ready.filter(node => node.type === 'input').every(node => !node.props.checked && !node.props.disabled), true)
+  assert.equal(ready.filter(node => node.type === 'input').every(node => node.props.checked === SETTINGS_DEFAULTS[node.props.id.replace('paper-library-setting-', '')] && !node.props.disabled), true)
   assert.ok(ready.some(node => node.type === 'p' && node.children.includes('model')))
 })
 

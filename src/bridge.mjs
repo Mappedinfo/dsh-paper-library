@@ -218,7 +218,7 @@ async function lookupMetadata(request, options) {
 export async function dispatch(request, options = {}) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('请求必须是 JSON 对象。');
   const { library: ignoredLibrary, python: ignoredPython, ...safe } = request;
-  if (['paper_analysis_sources','paper_analysis_apply_metadata'].includes(safe.action)) {
+  if (['paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata'].includes(safe.action)) {
     if (Buffer.byteLength(JSON.stringify(safe)) > 128 * 1024) throw new Error('所选论文整理请求超过预算。');
     return core(safe,options);
   }
@@ -277,7 +277,11 @@ export async function dispatch(request, options = {}) {
   if (safe.action === 'import') {
     const sources=['path','doi','url','items','content_base64'].filter(key=>safe[key]!==undefined && safe[key]!==null && safe[key]!=='');
     if(sources.length!==1) throw new Error('请提供一种导入来源：PDF/文件路径、链接、DOI、元数据或上传文件。');
-    return enqueueImport(safe, options);
+    const result=await enqueueImport(safe, options);
+    if(options.onImported){try{result.analysis_queue=await options.onImported(result.items||[]);for(const item of result.analysis_queue||[])if(item.status==='failed')result.warnings=[...(result.warnings||[]),`文献已导入，自动整理未排队：${item.error}`]}catch(error){result.warnings=[...(result.warnings||[]),`文献已导入，自动整理未排队：${error.message}`]}}
+    return result;
   }
-  return core(safe, options);
+  const result=await core(safe, options);
+  if(safe.action==='attach'&&options.onImported){try{result.analysis_queue=await options.onImported([result])}catch(error){result.analysis_queue=[{status:'failed',error:error.message}]}}
+  return result;
 }

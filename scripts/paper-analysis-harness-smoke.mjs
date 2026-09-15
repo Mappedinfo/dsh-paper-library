@@ -104,9 +104,32 @@ try {
   assert.equal((await host.observe(session.sessionId)).generations,0)
   assert.equal((await host.api({action:'knowledge_draft_get',id:completed.draft_id})).nodes.length,3)
   record('restart-recovers-complete-and-interrupted-jobs-with-no-automatic-model-replay')
+  const defaults=await host.api({action:'settings_get'})
+  assert.equal(defaults.value.auto_analysis,true);assert.equal(defaults.value.analysis_fill,true)
+  const fullPdf=join(run,'synthetic-full-paper.pdf')
+  const created=spawnSync('uv',['run','python','-c','import pymupdf,sys\ndoc=pymupdf.open()\nfor i in range(13):\n page=doc.new_page();page.insert_text((50,70),f"AUTO_FULL_TEXT Synthetic automatic page {i+1}. Source bounded evidence.")\ndoc.save(sys.argv[1]);doc.close()',fullPdf],{cwd:project,encoding:'utf8',env:{...process.env,UV_CACHE_DIR:'/private/tmp/codex-uv'}})
+  assert.equal(created.status,0,created.stderr)
+  const imported=await host.api({action:'import',path:fullPdf}),fullPaper=imported.items[0]
+  assert.equal(imported.analysis_queue[0].status,'queued')
+  const full=await until(()=>host.api({action:'paper_analysis_get',id:fullPaper.id}),v=>['complete','failed'].includes(v.status),'automatic full-paper reading')
+  assert.equal(full.status,'complete',JSON.stringify(full));assert.equal(full.batch_count,2);assert.equal(full.coverage.full_document,true)
+  assert.deepEqual(full.coverage.completed_pages,Array.from({length:13},(_,i)=>i+1))
+  assert.ok(full.metadata_result.applied_fields.includes('abstract'))
+  const firstBatch=await host.api({action:'paper_analysis_get',id:fullPaper.id,batch_index:0})
+  assert.notEqual(firstBatch.draft_id,full.draft_id)
+  const fullSession=await host.api({action:'chat_ensure',id:fullPaper.id}),fullObserved=await host.observe(fullSession.sessionId)
+  assert.equal(fullObserved.generations,2);assert.equal(fullObserved.analysis.every(batch=>batch.sourceIds.length<=8),true)
+  assert.equal(fullObserved.analysisAgents.every(agent=>!agent.loaded),true)
+  assert.equal(fullObserved.analysis.flatMap(batch=>batch.sourceTexts).join('\n').includes('automatic page 13'),true)
+  assert.deepEqual(fullObserved.observations,[{sessionLoaded:false,agentLoaded:false}])
+  record('import-automatically-queues-all-thirteen-pages-in-two-native-batches-and-fills-sourced-metadata')
+  await stopHost();host=await startHost()
+  const resumed=await host.api({action:'paper_analysis_get',id:fullPaper.id,batch_index:0})
+  assert.equal(resumed.draft_id,firstBatch.draft_id);assert.equal((await host.observe(fullSession.sessionId)).generations,0)
+  record('full-paper-batch-results-survive-host-restart-without-generation-replay')
   assert.equal(createHash('sha256').update(await readFile(sourcePdf)).digest('hex'),originalHash)
   record('synthetic-source-PDF-unchanged-and-zero-external-provider-requests')
-  report={verified_at:new Date().toISOString(),ok:true,checks,deterministicModelGenerations:3,completedGenerations:1,cancelledOrInterruptedGenerations:2,replayGenerationsAfterHostRestart:0,nativeAgentsPerRun:2,scopedToolProbeExecutions:0,externalModelRequestsMade:0,sourceData:'Five-page synthetic PDF; explicit pages 1 and 3 only in completed job',limitations:['Native spawn routing, lifecycle and durable jobs only; no real provider output-quality or real-library capacity claim']}
+  report={verified_at:new Date().toISOString(),ok:true,checks,deterministicModelGenerations:5,completedGenerations:3,cancelledOrInterruptedGenerations:2,replayGenerationsAfterHostRestart:0,nativeAgentsPerRun:2,scopedToolProbeExecutions:0,externalModelRequestsMade:0,sourceData:'Five-page scoped fixture and thirteen-page automatically queued full-text fixture',limitations:['Native spawn routing, lifecycle and durable jobs only; no real provider output-quality or real-library capacity claim']}
 } catch(error) { report={verified_at:new Date().toISOString(),ok:false,checks,error:error.message,externalModelRequestsMade:0};process.exitCode=1;console.error(error) }
 finally { clearTimeout(startupTimer);await stopHost();await mkdir(run,{recursive:true});await writeFile(join(run,'host.log'),logs.replace(/token=[^\s&]+/g,'token=<redacted>')) }
 await writeFile(join(project,'docs/validation/paper-analysis-harness.json'),JSON.stringify({...report,isolated_hosts_stopped:true},null,2)+'\n')

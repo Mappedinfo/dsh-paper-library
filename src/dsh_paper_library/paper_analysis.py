@@ -24,7 +24,7 @@ def file_version(path):
     value = path.stat()
     # No path or whole-file hash is needed to preserve the extracted snapshot.
     return {"device": value.st_dev, "inode": value.st_ino, "bytes": value.st_size,
-            "modified_ns": value.st_mtime_ns}
+            "modified_ns": str(value.st_mtime_ns)}
 
 
 def selected_pages(value):
@@ -103,6 +103,79 @@ def sources(library, request):
 
 def empty(value):
     return value is None or value == [] or value == {} or isinstance(value, str) and not value.strip()
+
+
+def batch(library, request):
+    """Advance through one PDF with a bounded, restartable text cursor.
+
+    All pages are the default scope, but each worker accesses at most eight
+    pages and returns at most eight chunks / 24,000 characters. Dense pages
+    continue from their exact Unicode offset in the next batch.
+    """
+    pages = request.get("pages")
+    if pages is not None:
+        if not isinstance(pages, list) or not 1 <= len(pages) <= 2000 or any(isinstance(p, bool) or not isinstance(p, int) or not 1 <= p <= 2000 for p in pages) or len(set(pages)) != len(pages):
+            raise ValueError("PAPER_ANALYSIS_INVALID: select unique PDF pages from 1 to 2000")
+    cursor = request.get("cursor") or {"index": 0, "offset": 0}
+    if not isinstance(cursor, dict) or set(cursor) != {"index", "offset"} or any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in cursor.values()):
+        raise ValueError("PAPER_ANALYSIS_INVALID: invalid reading cursor")
+    paper = library.get(request.get("id"))
+    if not paper.get("pdf") or paper.get("archived"):
+        raise ValueError("PAPER_ANALYSIS_INVALID: select an active paper with a PDF")
+    path = library.pdf_path(paper["id"])
+    version = file_version(path)
+    if request.get("file_version") is not None and request["file_version"] != version:
+        raise ValueError("PAPER_ANALYSIS_SOURCE_CHANGED: PDF changed between batches; saved results are retained")
+    extracted, read, completed, blank = [], [], [], []
+    characters = 0
+    index, offset = cursor["index"], cursor["offset"]
+    with library._open_pdf(path) as doc:
+        pages = pages if pages is not None else list(range(1, doc.page_count + 1))
+        if len(pages) > 2000 or any(p > doc.page_count for p in pages) or index >= len(pages):
+            raise ValueError("PAPER_ANALYSIS_INVALID: selected PDF page or cursor does not exist")
+        page_count = doc.page_count
+        while index < len(pages) and len(read) < MAX_PAGES and len(extracted) < MAX_PAGES and characters < MAX_CHARACTERS:
+            number = pages[index]
+            content = doc.load_page(number - 1).get_text("text", sort=True).strip()
+            if offset > len(content):
+                raise ValueError("PAPER_ANALYSIS_INVALID: text cursor exceeds page length")
+            read.append(number)
+            if not content:
+                blank.append(number)
+            while offset < len(content) and len(extracted) < MAX_PAGES and characters < MAX_CHARACTERS:
+                end = min(len(content), offset + MAX_PAGE_CHARACTERS, offset + MAX_CHARACTERS - characters)
+                excerpt = content[offset:end]
+                if excerpt.strip():
+                    extracted.append((number, offset, end, excerpt))
+                characters += len(excerpt)
+                offset = end
+            if offset == len(content):
+                completed.append(number)
+                index, offset = index + 1, 0
+            else:
+                break
+    if file_version(path) != version:
+        raise ValueError("PAPER_ANALYSIS_SOURCE_CHANGED: PDF changed during extraction")
+    current = library.get(paper["id"])
+    if current["modified"] != paper["modified"]:
+        raise PaperConflictError(current)
+    knowledge.setup(library)
+    saved = []
+    for number, start, end, excerpt in extracted:
+        saved.append(knowledge.source_put(library, {
+            "entity": {"kind": "paper", "id": paper["id"]}, "kind": "source-note", "text": excerpt,
+            "title": f"PDF page {number} · {paper['title']}"[:500],
+            "locator": {"page": number, "section": f"PDF text characters {start}–{end}"},
+        }, trusted_provenance={"kind": "selected-pdf-page", "file_version": version, "scope": "text-batch",
+                               "full_document": False, "character_start": start, "character_end": end,
+                               "truncated": False, "extraction": "plain-text", "ocr": False}))
+    return {"paper": paper, "expected_modified": paper["modified"], "file_version": version,
+            "sources": saved, "source_ids": [s["id"] for s in saved],
+            "next_cursor": {"index": index, "offset": offset} if index < len(pages) else None,
+            "coverage": {"scope": "text-batch", "selection": "explicit" if request.get("pages") else "all-pages",
+                         "full_document": False, "requested_pages": pages, "read_pages": read,
+                         "completed_pages": completed, "blank_pages": blank, "truncated_pages": [], "omitted_pages": [],
+                         "characters": characters, "page_count": page_count}}
 
 
 def field_evidence(library, paper_id, supplied, fields):
@@ -192,6 +265,8 @@ def apply_metadata(library, request):
 
 
 def dispatch(library, request):
+    if request.get("action") == "paper_analysis_batch":
+        return batch(library, request)
     if request.get("action") == "paper_analysis_sources":
         return sources(library, request)
     if request.get("action") == "paper_analysis_apply_metadata":

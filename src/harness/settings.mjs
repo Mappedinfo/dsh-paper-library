@@ -7,8 +7,8 @@ import { LocalStateConflictError, LocalStateError } from '../local-state.mjs';
 
 export const PAPER_LIBRARY_SETTINGS_NAMESPACE = 'paper-library';
 export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
-  auto_analysis: false,
-  analysis_fill: false,
+  auto_analysis: true,
+  analysis_fill: true,
   'auto-paper-conversation': false,
   'reading-panel-side': 'left',
 });
@@ -30,8 +30,8 @@ const unavailable = () => new LocalStateError('此库的设置由 DSH 管理。�
 /** The caller supplies DSH's schemastery constructor; standalone has no dependency. */
 export function createPaperLibrarySettingsSchema(Schema) {
   return Schema.object({
-    auto_analysis: Schema.boolean().default(false),
-    analysis_fill: Schema.boolean().default(false),
+    auto_analysis: Schema.boolean().default(true),
+    analysis_fill: Schema.boolean().default(true),
     'auto-paper-conversation': Schema.boolean().default(false),
     'reading-panel-side': Schema.union([Schema.const('left'), Schema.const('right')]).default('left'),
   });

@@ -116,7 +116,7 @@ export function createFetchHandler(options = {}) {
         try {
           const input = JSON.parse(await readBounded(request, 45*1024*1024));
           // Browser cannot forge AI output or arbitrary worker internals.
-          if (['save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','paper_analysis_sources','paper_analysis_apply_metadata'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
+          if (['save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
           const chatAction = typeof input?.action === 'string' && input.action.startsWith('chat_');
           const stateAction = typeof input?.action === 'string' && input.action.startsWith('state_');
           const languageAction = languageActions.has(input?.action);

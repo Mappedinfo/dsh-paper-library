@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createPaperAnalysis } from '../src/harness/paper-analysis.mjs'
 
-const request = { action:'paper_analysis_start', id:'paper-a', request_id:'run-a' }
+const request = { action:'paper_analysis_start', id:'paper-a', request_id:'run-a', apply_metadata:false }
 function gate() { let resolve; const promise=new Promise(done=>{resolve=done}); return {promise,resolve} }
 async function until(predicate) {
   for(let count=0;count<200;count++){if(await predicate())return;await new Promise(resolve=>setImmediate(resolve))}
@@ -46,9 +46,9 @@ function fixture() {
       f.kernel.push(structuredClone(input))
       assert.equal(options.library,'/synthetic/library');assert.equal(options.python,'/synthetic/python')
       if(input.action==='get')return {...f.paper,id:input.id}
-      if(input.action==='paper_analysis_sources'){await f.readGate?.promise;return structuredClone(f.pack)}
+      if(input.action==='paper_analysis_batch'){await f.readGate?.promise;return structuredClone(f.batchPacks?f.batchPacks.shift():f.pack)}
       if(input.action==='knowledge_draft_put'){
-        const draft={...structuredClone(input),id:'draft-a',revision:1,status:'needs-review'}
+        const draft={...structuredClone(input),id:f.drafts.size?`draft-${f.drafts.size}`:'draft-a',revision:1,status:'needs-review'}
         f.drafts.set(draft.id,draft);return structuredClone(draft)
       }
       if(input.action==='knowledge_draft_get')return structuredClone(f.drafts.get(input.id))
@@ -61,7 +61,7 @@ function fixture() {
       throw new Error(`Unexpected kernel operation ${input.action}`)
     },
     async paperChat(input,options){f.routes.push(input);await f.routeGate?.promise;return {model:f.route}},
-    async agent(input){f.calls.push(input);await f.agentGate?.promise;return typeof f.output==='string'?f.output:JSON.stringify(f.output)},
+    async agent(input){f.calls.push(input);await f.agentGate?.promise;const value=f.outputFor?await f.outputFor(input):f.output;return typeof value==='string'?value:JSON.stringify(value)},
   }
   f.handle=createPaperAnalysis(f.options)
   f.record=()=>[...f.records.values()].find(r=>r.value.id==='paper-a'&&r.value.request_id==='run-a')
@@ -81,7 +81,7 @@ test('simultaneous duplicate clicks and completed restart never replay a generat
   const restarted=createPaperAnalysis(f.options)
   assert.equal((await restarted(request)).status,'complete')
   assert.equal(f.calls.length,1)
-  assert.equal(f.kernel.filter(c=>c.action==='paper_analysis_sources').length,1)
+  assert.equal(f.kernel.filter(c=>c.action==='paper_analysis_batch').length,1)
   assert.equal(f.kernel.filter(c=>c.action==='knowledge_draft_put').length,1)
   await assert.rejects(restarted({...request,pages:[7]}),e=>e.code==='ANALYSIS_CONFLICT')
   assertPlainTree(f.record().value)
@@ -99,7 +99,7 @@ test('restart reports an uncertain pending run without new work or a model repla
 
 test('one active document at a time and changed duplicate options fail before more work',async()=>{
   const f=fixture();f.readGate=gate();await f.handle(request)
-  await until(()=>f.kernel.some(c=>c.action==='paper_analysis_sources'))
+  await until(()=>f.kernel.some(c=>c.action==='paper_analysis_batch'))
   await assert.rejects(f.handle({...request,id:'paper-b',request_id:'run-b'}),e=>e.code==='ANALYSIS_BUSY')
   await assert.rejects(f.handle({...request,apply_metadata:true}),e=>e.code==='ANALYSIS_CONFLICT')
   assert.equal(f.kernel.some(c=>c.action==='get'&&c.id==='paper-b'),false)
@@ -112,7 +112,7 @@ test('one active document at a time and changed duplicate options fail before mo
 
 test('cancelling while source extraction waits prevents model resolution and generation',async()=>{
   const f=fixture();f.readGate=gate();await f.handle(request)
-  await until(()=>f.kernel.some(c=>c.action==='paper_analysis_sources'))
+  await until(()=>f.kernel.some(c=>c.action==='paper_analysis_batch'))
   const cancelling=f.handle({action:'paper_analysis_cancel',id:'paper-a'})
   await new Promise(resolve=>setImmediate(resolve));f.readGate.resolve()
   assert.equal((await cancelling).status,'cancelled')
@@ -247,7 +247,7 @@ test('status reads are read-only; failed final persistence never triggers model 
 test('reuse opens an existing result during another active job without new work',async()=>{
   const f=fixture();await f.handle(request);await f.done();f.readGate=gate()
   await f.handle({...request,id:'paper-b',request_id:'run-b'})
-  await until(()=>f.kernel.some(c=>c.action==='paper_analysis_sources'&&c.id==='paper-b'))
+  await until(()=>f.kernel.some(c=>c.action==='paper_analysis_batch'&&c.id==='paper-b'))
   const before=f.kernel.length,writes=f.writes.length
   const reused=await f.handle({...request,request_id:'view-existing',reuse:true})
   assert.equal(reused.status,'complete');assert.equal(reused.request_id,'run-a')
@@ -273,4 +273,29 @@ test('invalid typed identities and page selections cause no state or kernel work
   const f=fixture()
   for(const input of [{...request,id:'dataset_a'},{...request,id:'../paper'}, {...request,request_id:''}, {...request,pages:[1,1]}, {...request,pages:[0]}, {...request,pages:[true]}, {...request,apply_metadata:'true'}])await assert.rejects(f.handle(input))
   assert.equal(f.records.size,0);assert.equal(f.kernel.length,0);assert.equal(f.calls.length,0)
+})
+
+function multiBatch(f){
+  f.sources=Array.from({length:13},(_,i)=>({id:`source-${i+1}`,entity:{kind:'paper',id:'paper-a'},kind:'source-note',verification:'source-note',text:`Evidence on page ${i+1}.`,locator:{page:i+1},content_hash:`hash-${i+1}`}))
+  f.batchPacks=[f.sources.slice(0,8),f.sources.slice(8)].map((sources,index)=>({paper:f.paper,expected_modified:'revision-a',file_version:{bytes:1},sources,source_ids:sources.map(s=>s.id),next_cursor:index===0?{index:8,offset:0}:null,
+    coverage:{read_pages:sources.map(s=>s.locator.page),completed_pages:sources.map(s=>s.locator.page),requested_pages:Array.from({length:13},(_,i)=>i+1),page_count:13,characters:sources.reduce((n,s)=>n+s.text.length,0),blank_pages:[],truncated_pages:[],omitted_pages:[]}}))
+  f.outputFor=({prompt})=>{const input=JSON.parse(prompt.split('LIBRARY_KNOWLEDGE_JSON:\n')[1].split('\nAdditionally return metadata')[0]),s=input.sources[0];return {title:'Batch graph',body:'Source bounded.',nodes:[{id:'e',type:'evidence',label:`Selected ${s.id}`,source_id:s.id,quote:s.text}],edges:[],assertions:[],metadata:{},field_sources:{}}}
+}
+test('all thirteen pages are read serially in bounded batches and prior batch context remains inspectable',async()=>{
+  const f=fixture();multiBatch(f);await f.handle({...request,pages:Array.from({length:13},(_,i)=>i+1)});const result=await f.done()
+  assert.equal(result.status,'complete');assert.equal(result.batch_count,2);assert.equal(result.coverage.full_document,true)
+  assert.deepEqual(result.coverage.read_pages,Array.from({length:13},(_,i)=>i+1));assert.equal(f.calls.length,2)
+  assert.equal(f.drafts.size,2);assert.equal(f.routes.length,1)
+  const reads=f.kernel.filter(x=>x.action==='paper_analysis_batch');assert.deepEqual(reads[1].cursor,{index:8,offset:0});assert.deepEqual(reads[1].file_version,{bytes:1})
+  assert.equal(f.calls[0].prompt.includes('Evidence on page 13.'),false);assert.equal(f.calls[1].prompt.includes('Evidence on page 1.'),false)
+  const first=await f.handle({action:'paper_analysis_get',id:'paper-a',batch_index:0});assert.equal(first.draft.id,'draft-a')
+  const context=await f.handle({action:'paper_analysis_context',id:'paper-a',batch_index:0,node_ids:['evidence:e']});assert.match(context.text,/source-1/);assert.doesNotMatch(context.text,/source-9/)
+  await assert.rejects(f.handle({action:'paper_analysis_get',id:'paper-a',batch_index:2}),/批次/)
+  const restart=createPaperAnalysis(f.options);assert.equal((await restart({...request,pages:Array.from({length:13},(_,i)=>i+1)})).status,'complete')
+})
+test('failure in a later batch retains earlier graph and never replays automatically on restart',async()=>{
+  const f=fixture();multiBatch(f);const respond=f.outputFor;f.outputFor=input=>{if(f.calls.length===2)throw Error('Synthetic later model failure');return respond(input)}
+  await f.handle(request);const result=await f.done();assert.equal(result.status,'failed');assert.equal(result.batch_count,1)
+  assert.equal(result.draft.id,'draft-a');assert.equal((await f.handle({action:'paper_analysis_get',id:'paper-a',batch_index:0})).draft.id,'draft-a')
+  const restarted=createPaperAnalysis(f.options);assert.equal((await restarted(request)).status,'failed');assert.equal(f.calls.length,2)
 })

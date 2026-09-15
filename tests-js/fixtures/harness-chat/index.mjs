@@ -41,7 +41,7 @@ class ReadingAdapter extends LlmAdapter {
           {id:'selected-method',type:'method',label:'Synthetic bounded method'},
           {id:'selected-claim',type:'claim',label:'A synthetic assertion based only on the selected page'}],
         edges:[{subject:`paper:${selected.entity.id}`,object:'method:selected-method',relation:'uses',source_id:source.id,surface:'Synthetic integration relation only'}],
-        assertions:[{subject:'evidence:selected-evidence',object:'claim:selected-claim',relation:'supports',surface:'Selected synthetic source only'}],metadata:{},field_sources:{}})
+        assertions:[{subject:'evidence:selected-evidence',object:'claim:selected-claim',relation:'supports',surface:'Selected synthetic source only'}],metadata:source.text.includes('AUTO_FULL_TEXT')?{abstract:source.text.slice(0,120)}:{},field_sources:source.text.includes('AUTO_FULL_TEXT')?{abstract:[{source_id:source.id,quote:source.text.slice(0,120)}]}:{}})
     } else if (prompt.includes('LIBRARY_KNOWLEDGE_JSON:\n')) {
       const selected = JSON.parse(prompt.slice(prompt.lastIndexOf('LIBRARY_KNOWLEDGE_JSON:\n') + 'LIBRARY_KNOWLEDGE_JSON:\n'.length))
       const source = selected.sources[0]

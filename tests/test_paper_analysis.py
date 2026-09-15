@@ -218,3 +218,63 @@ def test_client_cannot_forge_pdf_extractor_provenance(catalog):
                  kind="source-note", text="User-provided note", pdf_snapshot={"full_document": True})
     assert "pdf_snapshot" not in value
     assert value["verification"] == "source-note"
+
+
+def test_batches_default_to_all_pages_and_keep_each_worker_bounded(catalog, monkeypatch):
+    library, item, original = catalog
+    before = hashlib.sha256(original.read_bytes()).hexdigest()
+    reads, result, pages = [], None, []
+    load = fitz.Document.load_page
+    monkeypatch.setattr(fitz.Document, "load_page", lambda doc, page: (reads.append(page), load(doc, page))[1])
+    while True:
+        start = len(reads)
+        args = {} if result is None else {"cursor": result["next_cursor"], "file_version": result["file_version"]}
+        result = call(library, "paper_analysis_batch", id=item["id"], **args)
+        assert isinstance(result["file_version"]["modified_ns"], str), "Nanoseconds must survive JavaScript JSON roundtrips exactly"
+        assert len(reads) - start <= 8
+        assert len(result["sources"]) <= 8
+        assert result["coverage"]["characters"] <= 24000
+        pages += result["coverage"]["completed_pages"]
+        if not result["next_cursor"]:
+            break
+    assert pages == list(range(1, 13))
+    assert reads == list(range(12))
+    assert hashlib.sha256(original.read_bytes()).hexdigest() == before
+
+
+def test_dense_page_continues_without_losing_unicode_text(catalog, monkeypatch):
+    library, item, _ = catalog
+    content = "科研😀" * 11000
+    monkeypatch.setattr(fitz.Page, "get_text", lambda *args, **kwargs: content)
+    result, texts, offsets = None, [], []
+    while True:
+        args = {} if result is None else {"cursor": result["next_cursor"], "file_version": result["file_version"]}
+        result = call(library, "paper_analysis_batch", id=item["id"], pages=[10], **args)
+        assert result["coverage"]["characters"] <= 24000
+        for source in result["sources"]:
+            assert len(source["text"]) <= 8000
+            assert source["locator"]["page"] == 10
+            texts.append(source["text"])
+            offsets.append((source["pdf_snapshot"]["character_start"], source["pdf_snapshot"]["character_end"]))
+        if not result["next_cursor"]:
+            break
+    assert "".join(texts) == content
+    assert offsets[0][0] == 0 and offsets[-1][1] == len(content)
+    assert all(a[1] == b[0] for a, b in zip(offsets, offsets[1:]))
+
+
+def test_batch_rejects_changed_file_before_reading_next_part(catalog, monkeypatch):
+    library, item, _ = catalog
+    first = call(library, "paper_analysis_batch", id=item["id"])
+    library.annotate(item["id"], page=1, type="note", comment="Changed between batches")
+    monkeypatch.setattr(Library, "_open_pdf", lambda *args, **kwargs: pytest.fail("Changed PDF was opened"))
+    with pytest.raises(ValueError, match="SOURCE_CHANGED"):
+        call(library, "paper_analysis_batch", id=item["id"], cursor=first["next_cursor"], file_version=first["file_version"])
+
+
+@pytest.mark.parametrize("values", [{"pages": [0]}, {"pages": [1, 1]}, {"cursor": {"index": 0, "offset": -1}}, {"cursor": {"index": True, "offset": 0}}])
+def test_batch_rejects_invalid_scope_before_opening_pdf(catalog, monkeypatch, values):
+    library, item, _ = catalog
+    monkeypatch.setattr(Library, "_open_pdf", lambda *args, **kwargs: pytest.fail("Invalid batch opened PDF"))
+    with pytest.raises(ValueError, match="PAPER_ANALYSIS_INVALID"):
+        call(library, "paper_analysis_batch", id=item["id"], **values)

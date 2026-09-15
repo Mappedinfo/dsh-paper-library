@@ -47,7 +47,7 @@ test('schema exposes only the four live preference fields with safe defaults', (
   const field = type => ({ type, default(value) { this.value = value; return this; } });
   const schema = createPaperLibrarySettingsSchema({ object: value => value, boolean: () => field('boolean'), const: value => value, union: values => ({ ...field('union'), values }) });
   assert.deepEqual(Object.keys(schema), Object.keys(PAPER_LIBRARY_SETTINGS_DEFAULTS));
-  assert.equal(schema.auto_analysis.value, false); assert.deepEqual(schema['reading-panel-side'].values, ['left', 'right']);
+  assert.equal(schema.auto_analysis.value, true); assert.deepEqual(schema['reading-panel-side'].values, ['left', 'right']);
 });
 
 test('migration respects explicit native false, normalizes legacy strings and retains unrelated data', async t => {
@@ -101,11 +101,11 @@ test('revision fences serialize competing edits and translate native races to st
 test('partial reset restores composition defaults, preserves other native keys, never reimports on restart', async t => {
   const f = await fixture(t, { legacy: { auto_analysis: true }, user: { future: 1 }, base: { 'reading-panel-side': 'right' } });
   let view = await f.service.get(); assert.equal(view.value.auto_analysis, true);
-  view = await f.service.reset(view.revision, ['auto_analysis']); assert.equal(view.value.auto_analysis, false);
+  view = await f.service.reset(view.revision, ['auto_analysis']); assert.equal(view.value.auto_analysis, true);
   assert.equal(view.value['reading-panel-side'], 'right'); assert.equal(f.settings.raw().future, 1);
   const restartedHost = host({ user: f.settings.raw() }), restarted = createPaperLibrarySettings({ store: f.store, settings: restartedHost, schema: {} });
   t.after(() => restarted.dispose()); await restarted.ready;
-  assert.equal((await restarted.get()).value.auto_analysis, false); assert.equal(restartedHost.updates.length, 0);
+  assert.equal((await restarted.get()).value.auto_analysis, true); assert.equal(restartedHost.updates.length, 0);
 });
 
 test('standalone never migrated deployments use host disk with cross-instance conflicts', async t => {
@@ -115,7 +115,7 @@ test('standalone never migrated deployments use host disk with cross-instance co
   await f.service.update({ analysis_fill: true }, first.revision);
   assert.equal((await second.get()).value.analysis_fill, true);
   await assert.rejects(second.update({ auto_analysis: true }, first.revision), code('STATE_CONFLICT'));
-  const reset = await second.reset((await second.get()).revision); assert.equal(reset.value.analysis_fill, false);
+  const reset = await second.reset((await second.get()).revision); assert.equal(reset.value.analysis_fill, true);
 });
 
 test('standalone fails closed once DSH owns these settings and hides stale managed values', async t => {
@@ -133,7 +133,7 @@ test('legacy-only edits preserve managed recovery values and mixed-store writes 
   let current = await f.service.localState.get('preferences');
   current = await f.service.localState.put('preferences', { ...current.value, old: 2 }, current.revision);
   assert.deepEqual((await f.store.get('preferences')).value, { auto_analysis: false, old: 2 });
-  await assert.rejects(f.service.localState.put('preferences', { ...current.value, old: 3, analysis_fill: true }, current.revision), code('SETTINGS_INVALID'));
+  await assert.rejects(f.service.localState.put('preferences', { ...current.value, old: 3, analysis_fill: false }, current.revision), code('SETTINGS_INVALID'));
   assert.equal(f.settings.raw().analysis_fill, undefined);
   assert.equal((await f.store.get('preferences')).value.old, 2);
 });
@@ -222,7 +222,7 @@ test('actual DSH settings-file persists namespace edits, rejects stale clients a
   const deadline = Date.now() + 3000;
   while ((await service.get()).value['reading-panel-side'] !== 'right' && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal((await service.localState.get('preferences')).value['reading-panel-side'], 'right');
-  const reset = await service.reset((await service.get()).revision, ['auto_analysis']); assert.equal(reset.value.auto_analysis, false);
+  const reset = await service.reset((await service.get()).revision, ['auto_analysis']); assert.equal(reset.value.auto_analysis, true);
   disk = JSON.parse(await readFile(path, 'utf8')); assert.equal(Object.hasOwn(disk[NS], 'auto_analysis'), false); assert.equal(disk[NS].analysis_fill, true);
   await owner.dispose(); assert.equal(ctx.settings.describe().some(item => item.ns === NS), false, 'namespace registration follows the caller fiber');
 });

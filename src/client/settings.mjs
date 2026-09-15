@@ -3,8 +3,8 @@ import { createElement as h, useEffect, useState } from 'react'
 export const SETTINGS_NAMESPACE = 'paper-library'
 const LOCALE = 'paperLibrarySettings'
 export const SETTINGS_DEFAULTS = Object.freeze({
-  auto_analysis: false,
-  analysis_fill: false,
+  auto_analysis: true,
+  analysis_fill: true,
   'auto-paper-conversation': false,
   'reading-panel-side': 'left',
 })
@@ -18,7 +18,7 @@ const writable = snapshot => snapshot.status === 'ready' && snapshot.mode === 'h
 const locales = {
   zh: {
     title: 'Paper Library', description: '与资料库内的设置共用主机文件，修改后同步到已打开的阅读页。',
-    auto_analysis: '选中文献后自动整理', 'auto_analysis.hint': '仅整理选中的、尚无整理记录的 PDF。使用论文对应的 DSH 模型，会消耗模型额度。',
+    auto_analysis: '新增或选中文献后自动整理', 'auto_analysis.hint': '新导入或选中且尚无整理记录的 PDF 会按全文分批排队。使用论文对应的 DSH 模型，会消耗模型额度。',
     analysis_fill: '后台整理后补齐空缺资料', 'analysis_fill.hint': '按有原文依据的 AI 建议补缺，保留已有值；新增资料仍需核对。',
     'auto-paper-conversation': '保存批注后自动发送到论文对话', 'auto-paper-conversation.hint': '保存批注后会请求论文的 DSH 模型并消耗额度。关闭时，由你选择材料并发送。',
     'reading-panel-side': '阅读侧栏位置', 'reading-panel-side.hint': '文献库与批注共用的侧栏。', left: '左侧', right: '右侧',
@@ -30,7 +30,7 @@ const locales = {
   },
   en: {
     title: 'Paper Library', description: 'Shared with the library settings on the host. Open readers update when these choices change.',
-    auto_analysis: 'Organize a paper when selected', 'auto_analysis.hint': 'Only processes the selected PDF if it has no analysis record. Uses the paper’s DSH model and model quota.',
+    auto_analysis: 'Organize imported or selected papers', 'auto_analysis.hint': 'Newly imported or selected PDFs without a prior analysis enter a serial full-text queue. Uses the paper’s DSH model and model quota.',
     analysis_fill: 'Fill missing metadata after analysis', 'analysis_fill.hint': 'Uses source-backed AI suggestions and preserves existing values. Added metadata still needs review.',
     'auto-paper-conversation': 'Send to the paper conversation after saving annotations', 'auto-paper-conversation.hint': 'Saving an annotation requests the paper’s DSH model and uses quota. When off, choose material and send it yourself.',
     'reading-panel-side': 'Reading sidebar position', 'reading-panel-side.hint': 'The shared library and annotations sidebar.', left: 'Left', right: 'Right',

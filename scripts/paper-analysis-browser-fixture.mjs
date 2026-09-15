@@ -11,6 +11,8 @@ import {core,dispatch} from '../src/bridge.mjs'
 import {createFetchHandler} from '../src/http.mjs'
 import {createLocalStateStore} from '../src/local-state.mjs'
 import {createPaperAnalysis} from '../src/harness/paper-analysis.mjs'
+import {createQueuedPaperAnalysis} from '../src/harness/paper-analysis-queue.mjs'
+import {createPaperLibrarySettings} from '../src/harness/settings.mjs'
 const project=dirname(dirname(fileURLToPath(import.meta.url)))
 await mkdir(join(project,'.local'),{recursive:true})
 const run=await mkdtemp(join(project,'.local/paper-analysis-browser-')),library=join(run,'library'),home=join(run,'home'),source=join(run,'source'),python=join(project,'.venv/bin/python')
@@ -30,8 +32,10 @@ const agent=async({prompt,signal})=>{
   const selected=JSON.parse(prompt.split('LIBRARY_KNOWLEDGE_JSON:\n')[1].split('\nAdditionally return metadata')[0]),s=selected.sources[0],quote=s.text.slice(0,100)
   return JSON.stringify({title:'Synthetic selected-paper graph',body:'Only selected pages were inspected.',nodes:[{id:'excerpt',type:'evidence',label:'Selected passage',source_id:s.id,quote},{id:'claim',type:'claim',label:'Synthetic bounded claim'},{id:'unselected',type:'method',label:'Unselected method sentinel'}],edges:[],assertions:[{subject:'evidence:excerpt',object:'claim:claim',relation:'supports',surface:'Synthetic source-backed relation'}],metadata:{abstract:quote},field_sources:{abstract:[{source_id:s.id,quote}]}})
 }
-const analysis=createPaperAnalysis({store,dispatch,paperChat,agent,library,python})
-const handler=createFetchHandler({library,python,localState:store,paperChat,paperAnalysis:analysis,loopbackOnly:true})
+await store.put('preferences',{auto_analysis:false,analysis_fill:false},0)
+const settings=createPaperLibrarySettings({store})
+const analysis=createQueuedPaperAnalysis({store,settings,analysis:createPaperAnalysis({store,dispatch,paperChat,agent,library,python})})
+const handler=createFetchHandler({library,python,localState:store,paperChat,paperAnalysis:analysis,settings,onImported:items=>analysis.imported(items),loopbackOnly:true})
 const server=createServer(async(req,res)=>{try{const request=new Request(`http://${req.headers.host}${req.url}`,{method:req.method,headers:req.headers,...(!['GET','HEAD'].includes(req.method)?{body:Readable.toWeb(req),duplex:'half'}:{})});const reply=await handler(request);res.writeHead(reply.status,Object.fromEntries(reply.headers));if(reply.body)Readable.fromWeb(reply.body).pipe(res);else res.end()}catch(error){res.writeHead(500);res.end(error.message)}})
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
 const origin=`http://127.0.0.1:${server.address().port}`,checks=[],errors=[],external=[],screenshots=[]
@@ -43,8 +47,8 @@ try{
   let page=await newPage()
   await page.locator(`.paper-card[data-id="${paper.id}"]`).click();await page.locator('.pdr-page-image').first().waitFor()
   await page.locator('#paper-analysis-open').click();assert.equal(await page.locator('#analysis-auto').isChecked(),false);assert.equal(calls,0)
-  await page.locator('#analysis-pages').fill('1,2,3,4,5,6,7,8,9');await page.locator('#analysis-start').click();await page.waitForFunction(()=>document.getElementById('analysis-status').textContent.includes('最多 8'));assert.equal(calls,0)
-  record('selection-alone-and-invalid-page-range-never-start-model')
+  await page.locator('#analysis-pages').fill('1,1');await page.locator('#analysis-start').click();await page.waitForFunction(()=>document.getElementById('analysis-status').textContent.includes('不能重复'));assert.equal(calls,0)
+  record('explicit-opt-out-and-invalid-page-range-never-start-model')
   await page.locator('#analysis-pages').fill('2');await page.locator('#analysis-start').click();await page.locator('#analysis-result .analysis-node').first().waitFor();assert.equal(calls,1);assert.match(await page.locator('#analysis-result').innerText(),/PDF 页：2/)
   const job=await analysis({action:'paper_analysis_get',id:paper.id});assert.equal(job.status,'complete');assert.equal(job.draft.status,'needs-review');assert.deepEqual(job.coverage.read_pages,[2]);assert.equal(sent,0)
   record('background-selected-page-job-saves-pending-sourced-graph-without-main-chat-message')
@@ -62,6 +66,30 @@ try{
   record('explicit-cancel-stops-background-job-and-retains-previous-draft')
   await page.locator('#analysis-auto').check();await page.evaluate(()=>persistence.flush());assert.equal((await store.get('preferences')).value.auto_analysis,true);assert.equal(calls,2);await page.locator('#analysis-auto').uncheck();await page.evaluate(()=>persistence.flush())
   record('automatic-selection-setting-is-host-owned-and-does-not-replay-interrupted-work')
+  const fullPdf=join(run,'full-paper.pdf')
+  const generatedFull=spawnSync(python,['-c','import pymupdf,sys\ndoc=pymupdf.open()\nfor i in range(13):\n page=doc.new_page();page.insert_text((40,70),f"Synthetic full paper page {i+1}. Exact bounded source.")\ndoc.save(sys.argv[1]);doc.close()',fullPdf],{cwd:project,encoding:'utf8'})
+  assert.equal(generatedFull.status,0,generatedFull.stderr)
+  await settings.reset((await settings.get()).revision)
+  const importedResponse=await page.request.post(`${origin}/api`,{headers:{Origin:origin},data:{action:'import',path:fullPdf}})
+  const imported=(await importedResponse.json()).result;assert.equal(imported.analysis_queue[0].status,'queued')
+  const fullPaper=imported.items[0],beforeFull=2
+  await page.context().close()
+  const deadline=Date.now()+30000;let fullJob
+  while(Date.now()<deadline){fullJob=await analysis({action:'paper_analysis_get',id:fullPaper.id});if(['complete','failed'].includes(fullJob.status))break;await new Promise(resolve=>setTimeout(resolve,100))}
+  assert.equal(fullJob.status,'complete',JSON.stringify(fullJob));assert.equal(fullJob.batch_count,2);assert.equal(fullJob.coverage.full_document,true);assert.equal(calls,beforeFull+2)
+  assert.ok(fullJob.metadata_result.applied_fields.includes('abstract'))
+  record('imported-pdf-finishes-all-thirteen-pages-in-two-batches-with-browser-closed-and-automatic-metadata-fill')
+  page=await newPage();await page.locator(`.paper-card[data-id="${fullPaper.id}"]`).click();await page.locator('.pdr-page-image').first().waitFor();await page.locator('#paper-analysis-open').click()
+  assert.equal(await page.locator('#analysis-auto').isChecked(),true);assert.equal(await page.locator('#analysis-fill').isChecked(),true)
+  assert.match(await page.locator('#analysis-pages').getAttribute('placeholder'),/全部/)
+  await page.locator('#analysis-batch').selectOption('0');await page.waitForFunction(()=>document.getElementById('analysis-result').textContent.includes('本批 PDF 页：1, 2'))
+  await page.locator('#analysis-result input[aria-label="选择 Selected passage"]').check();await page.evaluate(()=>persistence.flush())
+  await page.setViewportSize({width:511,height:518});const fullShot=join(run,'full-analysis-511.png');await page.screenshot({path:fullShot});screenshots.push(relative(project,fullShot))
+  assert.equal(await page.locator('#paper-analysis-panel').evaluate(n=>n.scrollWidth<=n.clientWidth+1),true)
+  await page.context().close();page=await newPage();await page.locator(`.paper-card[data-id="${fullPaper.id}"]`).click();await page.locator('.pdr-page-image').first().waitFor();await page.locator('#paper-analysis-open').click()
+  await page.waitForFunction(()=>document.getElementById('analysis-batch')?.value==='0')
+  assert.equal(await page.locator('#analysis-result input[aria-label="选择 Selected passage"]').isChecked(),true);assert.equal(calls,beforeFull+2)
+  record('enabled-defaults-full-scope-batch-switching-and-selected-batch-restoration-work-at-511px')
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.equal(sent,0)
   const report={verified_at:new Date().toISOString(),ok:true,checks,errors,external,deterministic_generations:calls,main_messages_sent:sent,browser_storage_writes:0,screenshots,scope:'Actual Chromium + disk-backed source/job/metadata APIs with deterministic model adapter. Native subagent lifecycle checked separately; no real provider or private documents.'}
   await writeFile(join(project,'docs/validation/paper-analysis-browser.json'),JSON.stringify(report,null,2)+'\n');console.log(`REPORT ${relative(project,run)}`)

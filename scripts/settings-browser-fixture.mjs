@@ -167,7 +167,7 @@ try {
     assert.equal(await nativeValue(page, 'reading-panel-side'), 'right')
     const restored = await api(page, { action: 'settings_get' }); assert.equal(restored.value.analysis_fill, true)
     await page.locator('[data-paper-library-settings]').getByRole('button', { name: 'Restore defaults', exact: true }).click()
-    await until(() => api(page, { action: 'settings_get' }), value => JSON.stringify(value.value) === JSON.stringify(defaults), 'native reset defaults')
+    await until(() => api(page, { action: 'settings_get' }), value => JSON.stringify(value.value) === JSON.stringify({...defaults,auto_analysis:true,analysis_fill:true}), 'native reset defaults')
     assert.equal((await store.get('preferences')).value.fixture_extra, 'preserve')
     assert.equal((await (await page.context().request.get(`${host.origin}/api/paper-chat-fixture`)).json()).generations, 0)
     record('host-restart-restores-native-settings-and-reset-preserves-unrelated-preferences-with-zero-model-calls')

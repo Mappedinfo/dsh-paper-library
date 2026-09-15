@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-15T10:42:56.219Z",
+  "verified_at": "2026-09-15T11:23:36.209Z",
   "ok": true,
   "checks": [
     "legacy-preferences-migrate-to-native-namespace-with-safe-defaults-and-recovery-copy",
@@ -17,8 +17,8 @@
   "private_documents_read": 0,
   "library_browser_storage_writes": 0,
   "screenshots": [
-    ".local/paper-chat-test-home/runs/settings-browser-38594cf7-32a8-49ed-b8c7-40661e42803f/library-settings-900.png",
-    ".local/paper-chat-test-home/runs/settings-browser-38594cf7-32a8-49ed-b8c7-40661e42803f/native-settings-card.png"
+    ".local/paper-chat-test-home/runs/settings-browser-0162a913-05c4-4cab-9115-9afa7ee4f035/library-settings-900.png",
+    ".local/paper-chat-test-home/runs/settings-browser-0162a913-05c4-4cab-9115-9afa7ee4f035/native-settings-card.png"
   ],
   "scope": "Actual Chromium and isolated native DSH settings-file provider; official Plugins inventory/card and authenticated standalone library settings page. Empty synthetic library; no model generation.",
   "limitations": [

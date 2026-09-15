@@ -1,7 +1,7 @@
 'use strict';
 window.PaperLibrarySettings = (() => {
   const fields = [
-    ['auto_analysis', '选中文献后自动整理', '只处理新选中的、尚无整理记录的 PDF；会使用本篇模型额度。'],
+    ['auto_analysis', '新增或选中文献后自动整理', '新导入或选中且尚无整理记录的 PDF，按全文分批排队；会使用本篇模型额度。'],
     ['analysis_fill', '整理完成后补齐空缺资料', '有原文依据才补缺，保留已有资料；AI 填入内容仍待核对。'],
     ['auto-paper-conversation', '保存批注后自动发送到论文对话', '新保存的批注会发送并使用模型额度。关闭时由你选择材料后发送。'],
   ];

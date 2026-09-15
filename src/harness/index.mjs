@@ -13,6 +13,7 @@ import { createLanguageLearning } from './language-learning.mjs'
 import { createLibraryKnowledge } from './library-knowledge.mjs'
 import { createPaperAnalysis } from './paper-analysis.mjs'
 import { createPaperAnalysisAgent } from './paper-analysis-agent.mjs'
+import { createQueuedPaperAnalysis } from './paper-analysis-queue.mjs'
 import Schema from '@deepseek-ai/schemastery'
 import { createPaperLibrarySettings, createPaperLibrarySettingsSchema } from './settings.mjs'
 
@@ -24,15 +25,20 @@ export function apply(ctx, rawConfig = {}) {
   const config = resolveConfig(rawConfig)
   const store = createLocalStateStore({ library: config.library, home: config.localStateHome })
   const localSettings = createPaperLibrarySettings({ store })
+  const settingsListeners=new Set()
+  const notifySettings=()=>{for(const fn of settingsListeners)fn()}
+  localSettings.subscribe(notifySettings)
   let sharedSettings = localSettings
+  let automaticAnalysis
   ctx.effect(() => () => localSettings.dispose(), 'paper-library: local preferences')
   ctx.inject(['settings'], settingsCtx => {
     const nativeSettings = createPaperLibrarySettings({ store, settings: settingsCtx.settings, schema: createPaperLibrarySettingsSchema(Schema) })
     sharedSettings = nativeSettings
+    nativeSettings.subscribe(notifySettings)
     settingsCtx.effect(() => () => { sharedSettings = localSettings; return nativeSettings.dispose() }, 'paper-library: native settings')
   })
   // Delegation stays live when the optional settings provider mounts/unmounts.
-  const settings = { get: () => sharedSettings.get(), update: (...args) => sharedSettings.update(...args), reset: (...args) => sharedSettings.reset(...args) }
+  const settings = { get: () => sharedSettings.get(), update: (...args) => sharedSettings.update(...args), reset: (...args) => sharedSettings.reset(...args),subscribe:fn=>{settingsListeners.add(fn);return()=>settingsListeners.delete(fn)} }
   const localState = Object.fromEntries(['get','put','list'].map(method => [method, (...args) => sharedSettings.localState[method](...args)]))
   const options = {
     library: config.library,
@@ -43,6 +49,7 @@ export function apply(ctx, rawConfig = {}) {
     models: signal => discoverModels(ctx.llm, signal),
     localState,
     settings,
+    onImported:items=>automaticAnalysis?.imported(items),
   }
   ctx.effect(() => registerLibraryTools(ctx, defineTool, dispatch, options, config), 'paper-library: tools')
   ctx.inject(['skills'], scoped => {
@@ -62,9 +69,10 @@ export function apply(ctx, rawConfig = {}) {
         return (await paperChat({action:'chat_ensure',id:entity.id},{signal})).model
       },
     })
-    const paperAnalysis = createPaperAnalysis({store:options.localState,dispatch,paperChat,library:config.library,python:config.python,
-      agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens})})
-    web.effect(()=>()=>paperAnalysis.dispose(),'paper-library: background analysis lifecycle')
+    const paperAnalysis = createQueuedPaperAnalysis({store:options.localState,settings,analysis:createPaperAnalysis({store:options.localState,dispatch,paperChat,library:config.library,python:config.python,
+      agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens})})})
+    automaticAnalysis=paperAnalysis
+    web.effect(()=>()=>{automaticAnalysis=undefined;paperAnalysis.dispose()},'paper-library: background analysis lifecycle')
     const fetchHandler = createFetchHandler({ ...options, paperChat, languageLearning, libraryKnowledge, paperAnalysis, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',
