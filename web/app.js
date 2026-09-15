@@ -647,6 +647,24 @@ async function exportLibrary() {
   } catch (error) { toast(`文献库导出未完成：${error.message}`, true); }
   finally { button.disabled = false; button.textContent = '导出文献库'; }
 }
+async function buildBibliography() {
+  const button = $('build-bibliography'); button.disabled = true; button.textContent = '正在构建…';
+  try {
+    const result = await api('bibliography_build', {});
+    const lines = [
+      `已为 ${result.count} 条记录构建规范引用库。`, ``,
+      `references.bib：${result.bib_path}（${result.bib_bytes} 字节）`,
+      `身份审计：${result.audit_path}`, ``,
+      `引用键冲突：${result.conflicts}；DOI 重复：${result.doi_duplicates}；PDF 文件缺失：${result.pdf_missing}`,
+      `缺 DOI：${result.missing?.doi ?? 0}；缺年份：${result.missing?.year ?? 0}；缺作者：${result.missing?.author ?? 0}；缺题名：${result.missing?.title ?? 0}`, ``,
+      `未做在线 DOI 核验。需要时通过 library_bibliography 工具（verify:true，有界分批）显式触发；核验只比较公开登记信息，不回写目录。`,
+      ...(result.warnings || []).map(warning => `注意：${warning}`),
+    ];
+    $('copy-fallback').value = lines.join('\n'); $('text-dialog-title').textContent = '引用库构建与身份审计'; openDialog('text-dialog');
+    toast(result.conflicts || result.doi_duplicates ? `引用库已构建，发现 ${result.conflicts + result.doi_duplicates} 处身份问题，请查看审计。` : '引用库与身份审计已写入文献库 exports 目录');
+  } catch (error) { toast(`引用库构建未完成：${error.message}`, true); }
+  finally { button.disabled = false; button.textContent = '构建引用库'; }
+}
 
 function currentHarnessRoute() {
   const context = state.harnessContext;
@@ -807,6 +825,7 @@ $('previous-list').addEventListener('click', () => { state.offset = Math.max(0, 
 $('next-list').addEventListener('click', () => { state.offset += state.limit; loadList(); });
 $('refresh').addEventListener('click', () => { loadStatus(); loadList(); if (state.active && state.tab === 'annotations') loadModels(); });
 $('export-library').addEventListener('click', exportLibrary);
+$('build-bibliography').addEventListener('click', buildBibliography);
 $('back-library').addEventListener('click', () => { document.querySelector('.workspace').classList.remove('show-detail'); paperChatUI?.visible(false); });
 for (const button of document.querySelectorAll('[data-tab]')) button.addEventListener('click', () => {
   const panel = button.dataset.tab === 'annotations' ? 'annotations' : button.dataset.tab === 'conversation' ? 'chat' : null;

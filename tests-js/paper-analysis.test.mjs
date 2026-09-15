@@ -46,7 +46,7 @@ function fixture() {
       f.kernel.push(structuredClone(input))
       assert.equal(options.library,'/synthetic/library');assert.equal(options.python,'/synthetic/python')
       if(input.action==='get')return {...f.paper,id:input.id}
-      if(input.action==='paper_analysis_batch'){await f.readGate?.promise;return structuredClone(f.batchPacks?f.batchPacks.shift():f.pack)}
+      if(input.action==='paper_analysis_batch'){await f.readGate?.promise;const pack=structuredClone(f.batchPacks?f.batchPacks.shift():f.pack);if(input.id!=='paper-a'){pack.paper={...pack.paper,id:input.id};pack.sources=pack.sources.map(s=>({...s,entity:{kind:'paper',id:input.id}}))}return pack}
       if(input.action==='knowledge_draft_put'){
         const draft={...structuredClone(input),id:f.drafts.size?`draft-${f.drafts.size}`:'draft-a',revision:1,status:'needs-review'}
         f.drafts.set(draft.id,draft);return structuredClone(draft)
@@ -97,17 +97,36 @@ test('restart reports an uncertain pending run without new work or a model repla
   f.agentGate.resolve();assert.equal((await f.done()).status,'complete')
 })
 
-test('one active document at a time and changed duplicate options fail before more work',async()=>{
+test('up to two documents run in parallel, a third waits, and changed duplicate options fail before more work',async()=>{
   const f=fixture();f.readGate=gate();await f.handle(request)
   await until(()=>f.kernel.some(c=>c.action==='paper_analysis_batch'))
-  await assert.rejects(f.handle({...request,id:'paper-b',request_id:'run-b'}),e=>e.code==='ANALYSIS_BUSY')
+  const second=await f.handle({...request,id:'paper-b',request_id:'run-b'})
+  assert.equal(second.status,'queued','A second distinct paper admits within the concurrency bound')
+  await until(()=>f.kernel.some(c=>c.action==='paper_analysis_batch'&&c.id==='paper-b'))
+  await assert.rejects(f.handle({...request,id:'paper-c',request_id:'run-c'}),e=>e.code==='ANALYSIS_BUSY')
   await assert.rejects(f.handle({...request,apply_metadata:true}),e=>e.code==='ANALYSIS_CONFLICT')
-  assert.equal(f.kernel.some(c=>c.action==='get'&&c.id==='paper-b'),false)
+  assert.equal(f.kernel.some(c=>c.action==='get'&&c.id==='paper-c'),false)
   f.readGate.resolve();await f.done()
-  const next=await f.handle({...request,request_id:'run-b'})
+  await until(()=>[...f.records.values()].some(record=>record.value.id==='paper-b'&&record.value.request_id==='run-b'&&record.value.status==='complete'))
+  const next=await f.handle({...request,request_id:'run-a2'})
   assert.equal(next.status,'queued')
-  await until(()=>f.calls.length===2)
-  await until(()=>[...f.records.values()].some(record=>record.value.request_id==='run-b'&&record.value.status==='complete'))
+  await until(()=>f.calls.length===3)
+  await until(()=>[...f.records.values()].some(record=>record.value.request_id==='run-a2'&&record.value.status==='complete'))
+})
+
+test('the concurrency bound is configurable and validated',async()=>{
+  const f=fixture()
+  assert.throws(()=>createPaperAnalysis({...f.options,maxConcurrency:0}))
+  assert.throws(()=>createPaperAnalysis({...f.options,maxConcurrency:5}))
+  const single=createPaperAnalysis({...f.options,maxConcurrency:1})
+  try{
+    f.readGate=gate();await single(request)
+    await until(()=>f.kernel.some(c=>c.action==='paper_analysis_batch'))
+    assert.equal(single.slots(),0)
+    await assert.rejects(single({...request,id:'paper-b',request_id:'run-b'}),e=>e.code==='ANALYSIS_BUSY')
+    f.readGate.resolve();await until(()=>f.record()?.value.status==='complete')
+    assert.equal(single.slots(),1)
+  }finally{single.dispose()}
 })
 
 test('cancelling while source extraction waits prevents model resolution and generation',async()=>{

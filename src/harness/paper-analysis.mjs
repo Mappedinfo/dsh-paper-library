@@ -37,8 +37,11 @@ function existingMetadata(paper) {
 }
 
 /** One selected document, one durable job. Browser disconnects do not cancel work;
- * cancellation is explicit and a host restart never reissues an uncertain model call. */
-export function createPaperAnalysis({ store, dispatch, paperChat, agent, library, python }) {
+ * cancellation is explicit and a host restart never reissues an uncertain model call.
+ * Different papers may run in parallel up to maxConcurrency; batches within one
+ * paper stay serial because the reading cursor is ordered. */
+export function createPaperAnalysis({ store, dispatch, paperChat, agent, library, python, maxConcurrency = 2 }) {
+  if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1 || maxConcurrency > 4) throw new Error('Paper analysis concurrency must be an integer from 1 to 4')
   const flights = new Map()
   const starts = new Map(), applies = new Map()
   const kernel = (input, signal) => dispatch(input, { library, python, signal })
@@ -46,6 +49,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, agent, library
   const jobKey = (id, requestId) => `analysis.job:${hash(id)}:${hash(requestId)}`
   const batchKey = (id, requestId, index) => `analysis.batch:${hash([id,requestId])}:${index}`
   let admission = false, disposed = false
+  const slots = () => Math.max(0, maxConcurrency - flights.size - (admission ? 1 : 0))
 
   async function read(id, requestId) {
     if (!requestId) requestId = (await store.get(latestKey(id))).value?.request_id
@@ -193,7 +197,8 @@ export function createPaperAnalysis({ store, dispatch, paperChat, agent, library
     // Selecting a previously processed paper remains a read even while another
     // paper is running. Admission applies only when new work is actually needed.
     if(input.reuse===true){const latest=await read(input.id);if(latest?.value)return publicRecord(latest)}
-    if (admission || flights.size) throw fail('已有一篇论文正在整理，完成或取消后再开始。','ANALYSIS_BUSY',409)
+    // Bounded parallelism: distinct papers admit up to maxConcurrency flights.
+    if (admission || slots() <= 0) throw fail('同时整理论文数量已达上限，完成或取消后再开始。','ANALYSIS_BUSY',409)
     admission=true
     try {
       const paper=await kernel({action:'get',id:input.id})
@@ -276,6 +281,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, agent, library
   }
   handle.dispose=()=>{disposed=true;for(const {abort}of flights.values())abort.abort()}
   handle.wait=async(id,requestId)=>{await flights.get(jobKey(id,requestId))?.promise}
-  handle.busy=()=>admission||flights.size>0
+  handle.busy=()=>slots()<=0
+  handle.slots=slots
   return handle
 }

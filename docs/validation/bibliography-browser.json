@@ -1,0 +1,10 @@
+{
+  "verified_at": "2026-09-15T17:23:27.325Z",
+  "scope": "Synthetic catalog in an isolated standalone server; browser build button, audit dialog and exports files; no model calls or network requests",
+  "checks": [
+    "shelf-button-builds-bibliography-and-shows-audit-summary",
+    "exports-directory-contains-bib-and-audit-after-browser-build",
+    "no-browser-runtime-errors"
+  ],
+  "errors": []
+}

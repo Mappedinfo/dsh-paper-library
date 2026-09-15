@@ -69,7 +69,7 @@ export function apply(ctx, rawConfig = {}) {
         return (await paperChat({action:'chat_ensure',id:entity.id},{signal})).model
       },
     })
-    const paperAnalysis = createQueuedPaperAnalysis({store:options.localState,settings,analysis:createPaperAnalysis({store:options.localState,dispatch,paperChat,library:config.library,python:config.python,
+    const paperAnalysis = createQueuedPaperAnalysis({store:options.localState,settings,analysis:createPaperAnalysis({store:options.localState,dispatch,paperChat,library:config.library,python:config.python,maxConcurrency:config.analysisConcurrency,
       agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens})})})
     automaticAnalysis=paperAnalysis
     web.effect(()=>()=>{automaticAnalysis=undefined;paperAnalysis.dispose()},'paper-library: background analysis lifecycle')

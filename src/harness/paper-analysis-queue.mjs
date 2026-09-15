@@ -6,12 +6,15 @@ const resultKey=id=>`analysis.queue-result:${hash(id)}`
 const fail=(message,code='ANALYSIS_INVALID')=>Object.assign(new Error(message),{code,status:409})
 const valid=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,160}$/.test(value)&&!value.startsWith('dataset_')
 
-/** Durable, serial admission for explicit import events and selected papers.
+/** Durable, bounded-parallel admission for explicit import events and selected papers.
  * Recovery reads only this queue. It never searches the catalog for missing work.
  * An uncertain interrupted generation is removed from the queue without replay.
+ * Several papers may run at once up to the analysis service's own concurrency
+ * limit; reading batches within one paper remain serial.
  */
 export function createQueuedPaperAnalysis({analysis,store,settings}) {
   let disposed=false,draining=false,timer,tail=Promise.resolve()
+  const inFlight=new Set()
   const locked=fn=>{const value=tail.then(fn);tail=value.catch(()=>{});return value}
   async function entries(){return (await store.get(key)).value?.entries||[]}
   async function change(fn){
@@ -24,7 +27,7 @@ export function createQueuedPaperAnalysis({analysis,store,settings}) {
   async function result(id){return (await store.get(resultKey(id))).value}
   async function remember(id,value){const old=await store.get(resultKey(id));await store.put(resultKey(id),value,old.revision)}
   const queued=(item,position)=>({id:item.id,request_id:item.request_id,status:'queued',stage:`等待自动整理 · 队列第 ${position+1} 篇`})
-  function wake(delay=0){if(disposed||draining||timer)return;timer=setTimeout(()=>{timer=null;void drain()},delay);timer.unref?.()}
+  function wake(delay=0){if(disposed||draining)return;if(timer){if(delay>0)return;clearTimeout(timer);timer=null}timer=setTimeout(()=>{timer=null;void drain()},delay);timer.unref?.()}
   async function enqueue(input){
     if(!valid(input.id)||!valid(input.request_id))throw fail('文献或请求标识无效。')
     if(input.pages!==undefined&&(!Array.isArray(input.pages)||!input.pages.length||input.pages.length>2000||new Set(input.pages).size!==input.pages.length||input.pages.some(p=>!Number.isInteger(p)||p<1||p>2000)))throw fail('请指定有效且不重复的 PDF 页码。')
@@ -45,24 +48,34 @@ export function createQueuedPaperAnalysis({analysis,store,settings}) {
       while(!disposed){
         const preferences=await settings.get()
         if(!preferences.available||preferences.value?.auto_analysis!==true)break
-        const first=(await entries())[0];if(!first)break
-        if(analysis.busy()){wakeLater=true;break}
-        try{
-          // Use current fill choice, while keeping the accepted page selection.
-          const response=await locked(async()=>{
-            if(!(await entries()).some(item=>item.id===first.id&&item.request_id===first.request_id))return null
-            return analysis({action:'paper_analysis_start',...first,reuse:true,apply_metadata:preferences.value.analysis_fill===true})
-          })
-          if(!response)continue
-          await analysis.wait(first.id,response.request_id||first.request_id)
-          if(disposed)break
-        }catch(error){
-          if(error.code==='ANALYSIS_BUSY'){wakeLater=true;break}
-          await remember(first.id,{id:first.id,request_id:first.request_id,status:'failed',stage:'自动整理未完成',error:String(error.message).slice(0,1200)})
-        }
-        await locked(()=>change(values=>values.filter(item=>item.id!==first.id)))
+        const available=typeof analysis.slots==='function'?analysis.slots():analysis.busy()?0:1
+        if(available<=0){wakeLater=true;break}
+        const first=(await entries()).find(item=>!inFlight.has(item.id));if(!first)break
+        inFlight.add(first.id)
+        // Each admission settles independently; completion wakes the next drain.
+        void settle(first,preferences).finally(()=>{inFlight.delete(first.id);wake()})
       }
     }catch{wakeLater=true}finally{draining=false;if(wakeLater){wakeLater=false;wake(1500)}}
+  }
+  async function settle(first,preferences){
+    let remove=false
+    try{
+      // Use current fill choice, while keeping the accepted page selection.
+      const response=await locked(async()=>{
+        if(!(await entries()).some(item=>item.id===first.id&&item.request_id===first.request_id))return null
+        return analysis({action:'paper_analysis_start',...first,reuse:true,apply_metadata:preferences.value.analysis_fill===true})
+      })
+      if(!response)return
+      await analysis.wait(first.id,response.request_id||first.request_id)
+      if(disposed)return
+      remove=true
+    }catch(error){
+      if(error.code==='ANALYSIS_BUSY'){wakeLater=true;return}
+      await remember(first.id,{id:first.id,request_id:first.request_id,status:'failed',stage:'自动整理未完成',error:String(error.message).slice(0,1200)})
+      remove=true
+    }finally{
+      if(remove)await locked(()=>change(values=>values.filter(item=>item.id!==first.id)))
+    }
   }
   let wakeLater=false
   const unsubscribe=settings.subscribe?.(()=>wake())

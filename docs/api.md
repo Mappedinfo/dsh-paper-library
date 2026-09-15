@@ -90,7 +90,7 @@ Structured nodes use stable typed IDs; Evidence binds an exact selected source e
 
 ## Native Harness tools
 
-The plugin registers 20 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
+The plugin registers 21 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
 
 | Tool | Arguments | Node action |
 |---|---|---|
@@ -105,6 +105,7 @@ The plugin registers 20 tools through Harness's official tool registry. Optional
 | `library_restore` | `id` | `restore` |
 | `library_import` | Exactly one of `path`, `doi`, `url` | `import` |
 | `library_cite` | `ids,format` | `cite` |
+| `library_bibliography` | `verify?,verify_limit?,include_datasets?` | `bibliography_build` |
 | `library_annotations` | `id` | `annotations` |
 | `library_annotate` | `id,page,type,rects,text?,comment?,author?,color?` | `annotate` |
 | `library_graph` | `id?,limit?` | `graph` |
@@ -230,13 +231,25 @@ Records and word review remain available in standalone mode using the same local
 
 Default extraction visits every PDF page in bounded batches. Explicit selection supports up to 2,000 unique page numbers. A worker invocation accesses at most eight pages and returns at most eight source chunks / 24,000 Unicode characters, with at most 8,000 characters per chunk. A page-index/character-offset cursor continues dense pages without discarding their remaining text. File size and string-valued nanosecond modification time fence later batches against PDF edits. Immutable knowledge sources use `source-note` with page, character range and trusted extraction provenance. Coverage names requested/read/completed/blank pages; `full_document:true` means all pages' extractable text was processed without omissions or blank pages. It does not establish coverage of figures, scanned text or OCR. No rendering, image extraction, library traversal, network lookup or whole-file hash occurs.
 
-Only one paper analysis runs per service instance. Each batch uses a short-lived isolated parent Agent owning one native spawn child; neither is the paper/main Agent. The child receives fixed batch source text, a bounded existing-metadata projection and the selected model. Global tools are filtered; an execution guard also denies scoped tools and `run_code`. A 120-second agent deadline, 180-second batch deadline and configured `maxLanguageOutputTokens` bound each step; there is no eight-page or 180-second whole-paper cap. Both handles are disposed child-first; native private logs follow DSH persistence. Each batch result contains at most 12 nodes, 20 relations and 3,000 summary characters. The existing typed knowledge validator checks endpoints and exact evidence quotes. Batch graphs remain separate; cross-batch synthesis/deduplication is not performed. Bounded aggregate metadata keeps the first supported suggestion for each field, while individual batch suggestions remain saved.
+Distinct papers run in parallel up to the deployment's `analysisConcurrency` (an integer from 1 to 4, default 2); batches within one paper remain serial because the reading cursor is ordered. Admission beyond the bound fails with `ANALYSIS_BUSY` before any catalog read. Each batch uses a short-lived isolated parent Agent owning one native spawn child; neither is the paper/main Agent. The child receives fixed batch source text, a bounded existing-metadata projection and the selected model. Global tools are filtered; an execution guard also denies scoped tools and `run_code`. A 120-second agent deadline, 180-second batch deadline and configured `maxLanguageOutputTokens` bound each step; there is no eight-page or 180-second whole-paper cap. Both handles are disposed child-first; native private logs follow DSH persistence. Each batch result contains at most 12 nodes, 20 relations and 3,000 summary characters. The existing typed knowledge validator checks endpoints and exact evidence quotes. Batch graphs remain separate; cross-batch synthesis/deduplication is not performed. Bounded aggregate metadata keeps the first supported suggestion for each field, while individual batch suggestions remain saved.
 
-Durable `analysis.job:*`, `analysis.latest:*`, `analysis.batch:*` and `analysis.queue:v1` records live under the DSH-home state namespace, inaccessible through browser `state_*` keys. Import/attachment events and explicit selection admit only those paper PDFs; metadata-only records and datasets do not enter the queue. The queue holds at most 2,000 identifiers / 200,000 serialized bytes; overflow is surfaced without undoing the import. One host drains the queue serially, continues after the browser closes, and resumes unstarted entries on startup without searching the catalog. Turning automation off pauses pending items; running work can be cancelled explicitly. Interrupted, failed or cancelled jobs are never automatically replayed. Current metadata-fill settings are read when a queued paper starts.
+Durable `analysis.job:*`, `analysis.latest:*`, `analysis.batch:*` and `analysis.queue:v1` records live under the DSH-home state namespace, inaccessible through browser `state_*` keys. Import/attachment events and explicit selection admit only those paper PDFs; metadata-only records and datasets do not enter the queue. The queue holds at most 2,000 identifiers / 200,000 serialized bytes; overflow is surfaced without undoing the import. One host drains the queue with the same bounded parallelism as manual starts, continues after the browser closes, and resumes unstarted entries on startup without searching the catalog. Turning automation off pauses pending items; running work can be cancelled explicitly. Interrupted, failed or cancelled jobs are never automatically replayed. Current metadata-fill settings are read when a queued paper starts.
 
 `knowledge-draft:analysis:<paper>` page/batch/node-selection drafts use the same host file store; analysis preferences use the shared settings contract below. Job states are queued/reading/generating/committing/complete/failed/cancelled; running records without an owned flight appear interrupted after restart. Reading or restoring saved results never reissues a model call. There is no cross-process job scheduler or whole-library discovery scan.
 
 Internal worker actions `paper_analysis_batch`, the legacy `paper_analysis_sources`, and `paper_analysis_apply_metadata` are blocked at browser HTTP and are not model tools. Fill-only metadata writes after successful analysis reuse the managed-PDF backup/atomic-write path and CAS inside the existing paper lock. Proposed DOI/citekey/JCR changes are forbidden; citations retain their identities. Every filled field retains exact selected-source quotes and `origin:llm, review_status:needs-review`. Context preparation retains that review distinction, writes only a selected paper's draft and requires an explicit later send.
+
+## Canonical bibliography build
+
+`bibliography_build` writes `exports/references.bib` and `exports/bibliography.audit.json` inside the managed library directory, using atomic replacement. It is available as the browser action (the workbench shelf button), the `library_bibliography` native tool, and the JSON CLI. Catalog records and managed PDFs are never modified; the audit reads metadata and stats PDF paths without opening files.
+
+| Field | Contract |
+| --- | --- |
+| `include_datasets` | Default `true` exports the unified catalog (papers, datasets, releases); `false` restricts the BibLaTeX text to papers. The identity audit always covers exactly the active paper catalog. |
+| `verify` | Default `false`. When `true`, up to `verify_limit` (1–100, default 25) paper DOIs are resolved through the bounded public metadata path and compared with catalog identity (DOI equality plus normalized title). Results are reported as `match`, `title-mismatch` (with the online title), `unavailable` or `error`; nothing is written back to the catalog. Remaining unverified records are reported as `remaining` with `truncated:true`. |
+| Result | `{count, kind, bib_path, bib_bytes, audit_path, audit_bytes, conflicts, doi_duplicates, missing, pdf_missing, verification, warnings}`. |
+
+The audit (`paper-library-bibliography-audit.v1`) reports totals, per-field missing identity lists (citekey, DOI, title, author, year), citekey conflicts, duplicate DOI groups and managed-PDF file presence, each capped at 200 listed identifiers with a `truncated` flag; up to 10,000 records are audited. BibLaTeX text is capped at 24 MiB and the audit at 4 MiB. An empty library rejects instead of writing empty exports. BibLaTeX remains citation metadata only: files, usage links and knowledge records are outside its scope.
 
 ## Shared settings
 

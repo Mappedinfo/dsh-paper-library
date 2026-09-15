@@ -232,6 +232,55 @@ export async function dispatch(request, options = {}) {
   }
   if (safe.action === 'metadata_lookup') return lookupMetadata(safe,options);
   if (safe.action === 'models') return options.models ? options.models(options.signal) : { models: [], configured: false };
+  if (safe.action === 'bibliography_build') {
+    // Canonical on-disk bibliography + factual audit. Verification is explicit,
+    // bounded and read-only: online records are compared, never written back.
+    const kind = safe.include_datasets === false ? 'paper' : 'all';
+    const verify = safe.verify === true;
+    const verifyLimit = safe.verify_limit === undefined ? 25 : safe.verify_limit;
+    if (!Number.isSafeInteger(verifyLimit) || verifyLimit < 1 || verifyLimit > 100) throw new Error('核验条数须为 1–100 的整数。');
+    const texts = []; const items = []; let offset = 0, revision, bytes = 0;
+    while (true) {
+      const page = await core({ action:'resource_export', offset, limit:100, kind, ...(revision===undefined?{}:{expected_catalog_revision:revision}) }, options);
+      revision = page.catalog_revision;
+      bytes += Buffer.byteLength(JSON.stringify(page.items),'utf8');
+      if (bytes > 24*1024*1024) throw new Error('引用目录超过 24 MiB，请先缩小条目资料。');
+      items.push(...page.items);
+      if (page.items.length) texts.push((await citationJob({ action:'cite', items:page.items, format:'biblatex' }, options)).text);
+      if (page.done) break;
+      if (!Number.isInteger(page.next_offset) || page.next_offset <= offset) throw new Error('引用目录分页未推进，构建已停止。');
+      offset = page.next_offset;
+    }
+    if (!items.length) throw new Error('文献库为空，无法构建引用库。');
+    const audit = await core({ action:'bibliography_audit' }, options);
+    const verification = { requested: verify, checked: 0, matched: 0, mismatched: 0, unavailable: 0, results: [] };
+    if (verify) {
+      const candidates = items.filter(item => item.resource_kind === 'paper' && typeof item.DOI === 'string' && canonicalDOI(item.DOI));
+      for (const item of candidates.slice(0, verifyLimit)) {
+        options.signal?.throwIfAborted();
+        const doi = canonicalDOI(item.DOI);
+        const entry = { id: item.external_id, citekey: item['citation-key'] || item.id, doi };
+        try {
+          const found = await resolveMetadata(doi, { ...options.fetchOptions, signal: options.signal });
+          const online = found.metadata;
+          if (!online || canonicalDOI(online.DOI) !== doi) entry.status = 'unavailable', verification.unavailable++;
+          else if (normalizedIdentity(online.title) !== normalizedIdentity(item.title)) { entry.status = 'title-mismatch'; entry.online_title = String(online.title || '').slice(0, 300); verification.mismatched++; }
+          else { entry.status = 'match'; verification.matched++; }
+        } catch (error) { entry.status = 'error'; entry.error = String(error.message).slice(0, 300); verification.unavailable++; }
+        verification.results.push(entry);
+        verification.checked++;
+      }
+      verification.truncated = candidates.length > verifyLimit;
+      verification.remaining = Math.max(0, candidates.length - verifyLimit);
+    }
+    const report = { ...audit, verification, bibliography: { count: items.length, kind } };
+    const written = await core({ action:'bibliography_write', bib_text: texts.join('\n'), audit: report }, options);
+    return { count: items.length, kind, ...written,
+      conflicts: audit.citekey_conflict_count, doi_duplicates: audit.doi_duplicate_count,
+      missing: Object.fromEntries(Object.entries(audit.missing).map(([field, value]) => [field, value.count])),
+      pdf_missing: audit.totals.pdf_files_missing, verification,
+      warnings: ['references.bib 保存引用元数据；文件、使用关联与知识正文不属于此格式。', ...(verification.truncated ? [`DOI 核验覆盖前 ${verifyLimit} 条，剩余 ${verification.remaining} 条未核验；请分批再次运行。`] : [])] };
+  }
   if (safe.action === 'export_library') {
     const format = safe.format || 'biblatex';
     if (!['biblatex','csl-json'].includes(format)) throw new Error('整库导出支持 BibLaTeX 或 CSL JSON。');

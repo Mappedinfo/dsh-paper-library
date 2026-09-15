@@ -38,7 +38,7 @@ window.PaperReadingShell = (() => {
     input.addEventListener('input',()=>{color=input.value;reader()?.setTool(tool,color);});colorLabel.append(input);annotationTools.append(colorLabel);
     const sidebar=button('reader-annotations','批注栏',()=>{panels()?.toggle('annotations');sync();});readerTools.append(sidebar);
     // One global import entry. Link intake belongs inside that same import surface.
-    $('import-open').textContent='＋ 导入';libraryTools.append($('import-open'),$('export-library'),$('metadata-enrich'),$('catalog-archive'));
+    $('import-open').textContent='＋ 导入';libraryTools.append($('import-open'),$('export-library'),$('build-bibliography'),$('metadata-enrich'),$('catalog-archive'));
     $('quick-import-form').hidden=true;
     const quick=$('quick-import-source');quick.disabled=true;
     $('paper-tools').append(annotationTools,libraryTools);
@@ -76,7 +76,7 @@ window.PaperReadingShell = (() => {
       readerTools.hidden=table||!pdf||!['reader','annotations'].includes(mode);
       annotationTools.hidden=table||!pdf||mode!=='annotations';
       $('toolbar-actions').hidden=false;libraryTools.hidden=mode!=='library'&&active;
-      $('import-open').disabled=false;$('export-library').disabled=false;
+      $('import-open').disabled=false;$('export-library').disabled=false;$('build-bibliography').disabled=false;
       $('metadata-enrich').disabled=!active;$('catalog-archive').disabled=!active;
       for(const b of annotationTools.querySelectorAll('[data-reader-tool]'))b.setAttribute('aria-pressed',String(b.dataset.readerTool===tool));
       sidebar.setAttribute('aria-pressed',String(Boolean(panels()?.visible('annotations'))));

@@ -1564,6 +1564,12 @@ def dispatch(request):
         if isinstance(action, str) and action.startswith("graph_"):
             from .knowledge_graph import dispatch_graph
             return dispatch_graph(library, action, request)
+        if action == "bibliography_audit":
+            from .bibliography import audit
+            return audit(library, request)
+        if action == "bibliography_write":
+            from .bibliography import write_export
+            return write_export(library, request)
         if action == "export_metadata":
             # One consistent metadata snapshot; PDF contents are never loaded.
             # This short-lived export allocation is not a resident catalog cache.

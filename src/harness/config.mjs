@@ -17,5 +17,7 @@ export function resolveConfig(raw = {}) {
   if (!Number.isSafeInteger(maxLanguageOutputTokens) || maxLanguageOutputTokens < 256 || maxLanguageOutputTokens > 16384) throw new Error('paper-library: maxLanguageOutputTokens must be an integer from 256 to 16384')
   const maxAnnotationCharacters = raw.maxAnnotationCharacters ?? 24000
   if (!Number.isSafeInteger(maxAnnotationCharacters) || maxAnnotationCharacters < 1000 || maxAnnotationCharacters > 96000) throw new Error('paper-library: maxAnnotationCharacters must be an integer from 1000 to 96000')
-  return { library: resolve(library), ...(raw.localStateHome === undefined ? {} : { localStateHome: resolve(raw.localStateHome) }), python: raw.python, provider: raw.provider, model: raw.model, maxOutputTokens, maxLanguageOutputTokens, maxAnnotationCharacters, requireToolApproval: raw.requireToolApproval ?? true }
+  const analysisConcurrency = raw.analysisConcurrency ?? 2
+  if (!Number.isSafeInteger(analysisConcurrency) || analysisConcurrency < 1 || analysisConcurrency > 4) throw new Error('paper-library: analysisConcurrency must be an integer from 1 to 4')
+  return { library: resolve(library), ...(raw.localStateHome === undefined ? {} : { localStateHome: resolve(raw.localStateHome) }), python: raw.python, provider: raw.provider, model: raw.model, maxOutputTokens, maxLanguageOutputTokens, maxAnnotationCharacters, analysisConcurrency, requireToolApproval: raw.requireToolApproval ?? true }
 }
