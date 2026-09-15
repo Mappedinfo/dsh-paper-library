@@ -3,6 +3,7 @@ import { realpath } from 'node:fs/promises'
 import { createAnnotationSnapshotStore, annotationSnapshotToken } from './annotation-snapshots.mjs'
 import { ANNOTATION_USAGE_KEY, annotationUsageProjection, emptyAnnotationUsage, foldAnnotationUsage, loggedAnnotationReference } from './annotation-usage.mjs'
 import { preparePaperReferenceMessages } from './paper-reference-resolver.mjs'
+import { annotationReplySources } from './annotation-replies.mjs'
 
 const ACTIONS = new Set(['chat_ensure', 'chat_catalog', 'chat_context', 'chat_reference', 'chat_send', 'chat_history', 'chat_save_feedback'])
 const MESSAGE_LIMIT = 20
@@ -123,13 +124,51 @@ export function projectPaperHistory(snapshot) {
  * Bind one paper to a normal Harness Session. The returned action handler uses
  * only public Host services and never reads profile files or changes defaults.
  */
-export function createPaperChat(ctx, { library, python, dispatch, core = dispatch, maxAnnotationCharacters = 24000 }) {
+export function createPaperChat(ctx, { library, python, dispatch, core = dispatch, store, maxAnnotationCharacters = 24000 }) {
   const tails = new Map()
   let admitted = 0
   const kernel = (request, signal) => dispatch(request, { library, python, signal })
   const controller = ctx.sessionController
   const snapshots = createAnnotationSnapshotStore({ library })
   const durableCuts = new WeakMap()
+
+  async function saveReply(paper,snapshot,messageId,signal) {
+    const event=snapshot.records.find(row=>row.type==='event'&&String(row.event.seq)===messageId)?.event
+    if(!event||event.type!=='assistant/message'||event.data.interrupted===true)throw new Error('只能保存当前历史中已完成的 AI 回复；请刷新论文对话。')
+    const text=textOf(event.data.message?.content).trim()
+    if(!text||text.length>28000)throw new Error('该回复为空或超过 PDF 批注保存上限。')
+    const association=annotationReplySources(snapshot).get(messageId)
+    if(association&&association.paperId!==paper.item.id)throw new Error('回复引用属于另一篇论文。')
+    const verified=[]
+    for(const id of association?.source_snapshot_ids||[]){const frozen=await snapshots.load(id,{paperId:paper.item.id,sessionId:paper.sessionId});verified.push(...frozen.annotation_refs.map(ref=>ref.id))}
+    if(association&&JSON.stringify([...new Set(verified)])!==JSON.stringify(association.annotation_ids))throw new Error('回复引用记录与原始快照不一致，暂不关联批注。')
+    const attached=ctx.sessions.get(paper.sessionId)
+    if(attached&&await ctx.sessions.flush(attached)!==true)throw new Error('DSH 尚未确认回复已保存，暂不写入 PDF。')
+    let usedModel
+    for(const row of snapshot.records)if(row.type==='event'&&row.event.seq<=event.seq&&row.event.type==='request/header')usedModel=modelOf(row.event.data.header?.config)
+    return core({action:'save_conversation_feedback',id:paper.item.id,text,model:usedModel?`${usedModel.provider}/${usedModel.model}`:'DSH · model not available in this history window',annotation_ids:association?.annotation_ids||[],source_snapshot_ids:association?.source_snapshot_ids||[],source_session_id:paper.sessionId,source_message_id:messageId,page:1},{library,python,signal})
+  }
+
+  async function automaticReplies(paper,snapshot,signal) {
+    if(!store||!paper.item.pdf)return []
+    const statuses=[],visible=new Set(projectPaperHistory(snapshot).messages.map(message=>message.id))
+    let written=0
+    for(const [messageId,source]of [...annotationReplySources(snapshot)].reverse()){
+      if(!source.completed||source.paperId!==paper.item.id||!visible.has(messageId))continue
+      const key=`paper.reply:${createHash('sha256').update(`${paper.sessionId}\0${messageId}`).digest('hex')}`
+      const previous=await store.get(key)
+      if(previous.value){statuses.push({message_id:messageId,...previous.value});continue}
+      if(written++>=2)continue
+      // Persist admission first: an interrupted PDF write is never retried by a
+      // later history poll. Explicit save uses the PDF's idempotent message key.
+      const pending=await store.put(key,{status:'pending'},previous.revision)
+      let value
+      try{const saved=await saveReply(paper,snapshot,messageId,signal);value={status:'saved',annotation_id:saved.annotation_id}}
+      catch(error){value={status:'failed',error:String(error.message).slice(0,500)}}
+      await store.put(key,value,pending.revision);statuses.push({message_id:messageId,...value})
+    }
+    return statuses
+  }
 
   function usageOf(snapshot) {
     const projected = snapshot.projections?.values?.[ANNOTATION_USAGE_KEY]
@@ -316,20 +355,14 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
     if (request.action === 'chat_history') {
       const agent = ctx.agents.get(paper.sessionId)
       const state = await durableUsage(snapshot)
+      const feedback = await automaticReplies(paper,snapshot,signal)
       return { ...session, ...projectPaperHistory(snapshot), annotation_usage: state.usage, usage_revision: state.revision, usage_truncated: state.truncated,
+        feedback,
         running: agent?.status === 'running', queued: (agent?.inbox.nextTurn.length ?? 0) + (agent?.inbox.nextStep.length ?? 0) }
     }
     if (request.action === 'chat_save_feedback') {
-      const event = snapshot.records.find(record => record.type === 'event' && String(record.event.seq) === request.message_id)?.event
-      if (!event || event.type !== 'assistant/message' || event.data.interrupted === true) throw new Error('只能保存当前历史中已完成的 AI 回复；请刷新论文对话。')
-      const text = textOf(event.data.message?.content).trim()
-      if (!text || text.length > 28000) throw new Error('该回复为空或超过 PDF 批注保存上限。')
-      let usedModel
-      for (const record of snapshot.records) {
-        if (record.type !== 'event' || record.event.seq > event.seq) continue
-        if (record.event.type === 'request/header') usedModel = modelOf(record.event.data.header?.config)
-      }
-      const saved = await core({ action: 'save_conversation_feedback', id: request.id, text, model: usedModel ? `${usedModel.provider}/${usedModel.model}` : 'DSH · model not available in this history window', annotation_ids: [], source_session_id: paper.sessionId, source_message_id: request.message_id, page: 1 }, { library, python, signal })
+      const saved = await saveReply(paper,snapshot,request.message_id,signal)
+      if(store){const key=`paper.reply:${createHash('sha256').update(`${paper.sessionId}\0${request.message_id}`).digest('hex')}`,old=await store.get(key);await store.put(key,{status:'saved',annotation_id:saved.annotation_id},old.revision)}
       return { ...session, saved, messageId: request.message_id }
     }
     if (request.action === 'chat_context') return { ...session, ...await context(paper, request, signal) }
@@ -382,6 +415,15 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
         store: snapshots, sessionId: agent.session.id, maxCharacters: maxAnnotationCharacters, signal,
       }) }
     }, { prepend: true })
+    if(store)ctx.on('session/event',(session,event)=>{
+      if(event.type!=='turn/end'||event.data.reason?.kind!=='completed'||!session.id.startsWith('paper-library-'))return
+      const snapshot={header:session.header,records:session.snapshotEvents().slice(-200).map(event=>({type:'event',event}))}
+      const source=[...annotationReplySources(snapshot).values()].findLast(value=>value.completed)
+      if(!source)return
+      queueMicrotask(()=>{void realpath(library).then(directory=>{
+        if(paperSessionId(directory,source.paperId)===session.id)return handler({action:'chat_history',id:source.paperId})
+      }).catch(()=>{/* Native transcript remains authoritative; the next explicit history read exposes/reconciles status. */})})
+    })
   }
   handler.annotationReferences = true
   return handler

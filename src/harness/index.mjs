@@ -56,7 +56,7 @@ export function apply(ctx, rawConfig = {}) {
     scoped.effect(() => registerBundledSkills(scoped), 'paper-library: bundled paper-fetch skill')
   })
   ctx.inject(['connection', 'webServer', 'sessionController', 'workspaceRegistry', 'sessionPersistence', 'sessionProjections', 'sessions', 'agents', 'agentDefaultModel'], web => {
-    const paperChat = createPaperChat(web, { library: config.library, python: config.python, dispatch, core, maxAnnotationCharacters: config.maxAnnotationCharacters })
+    const paperChat = createPaperChat(web, { library: config.library, python: config.python, dispatch, core, store:options.localState, maxAnnotationCharacters: config.maxAnnotationCharacters })
     paperChat.install()
     const languageAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens })
     const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, dispatch, library: config.library, python: config.python })

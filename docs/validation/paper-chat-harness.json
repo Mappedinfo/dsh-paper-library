@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-14T14:32:16.582Z",
+  "verified_at": "2026-09-15T11:43:49.906Z",
   "ok": true,
   "checks": [
     "fresh-synthetic-library-and-native-page-two-annotation",
@@ -8,6 +8,7 @@
     "cold-sessions-native-visible-without-agent-or-model-generation",
     "native-annotation-context-retains-real-page-and-identity",
     "draft-preparation-does-not-mark-sent-and-later-pdf-edit-cannot-change-snapshot",
+    "native-completion-autosaves-under-exact-source-annotation-without-browser-history-poll",
     "model-receives-exact-frozen-source-and-logged-usage-distinguishes-updated-version",
     "native-prompt-adopts-cold-session-and-commits-assistant-history",
     "reading-one-paper-does-not-activate-other-paper-agents",

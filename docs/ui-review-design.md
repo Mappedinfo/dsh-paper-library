@@ -1,5 +1,11 @@
 # Compact literature workbench
 
+## Annotation replies and export tools
+
+Accepted 2026-09-15: AI responses to explicitly referenced annotations belong under those annotations. Source-note counts exclude AI responses. Each reply has a collapsed heading, model/date, readable body and its own delete action. A shared response is labelled under every associated note while the PDF retains one body; unresolved historical responses remain accessible in a collapsed “未关联回复” group. Association uses actual DSH turn references and immutable snapshots; no content-based guessing or implicit inheritance from an earlier turn.
+
+“引用与导出” is a tool menu within library and reading modes. It retains the APA, BibLaTeX, PDF and annotation-export controls without becoming a workspace tab. Opening it preserves mode and PDF position. Escape closes it and restores trigger focus; clicking outside also closes it. The [reply browser fixture](validation/annotation-replies-browser.json) verifies 511/681 px light/dark rendering, counts, shared/unlinked responses, fresh-browser recovery, APA and menu behavior. Native automatic completion has its own [DSH receipt](validation/paper-chat-harness.json).
+
 ## Shared reading rail and compact cards
 
 Accepted 2026-09-15: the reading rail contains “文献库” and “批注” tabs, using the original library and annotation nodes. The rail can sit on either side; changing its tab preserves search, list scroll, annotation state and PDF position. Ctrl/Cmd + K opens library search. Catalog mode restores the full library controls and returning to reading restores the tab. Narrow/fullscreen close returns space to the PDF. Metadata keeps its quick-edit surface and chat keeps its floating panel.

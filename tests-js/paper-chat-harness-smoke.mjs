@@ -137,6 +137,18 @@ try {
   const question = { action: 'chat_send', id: paper.id, snapshot_id: context.snapshot_id, request_id: 'native-reading-request-1' }
   const accepted = await api(question)
   assert.equal(accepted.accepted, true)
+  const saveDeadline=Date.now()+20000
+  let automaticallySaved
+  do{
+    automaticallySaved=(await core({action:'feedback',id:paper.id},{library,python})).feedback.find(note=>note.source_kind==='dsh-conversation')
+    if(automaticallySaved)break
+    await new Promise(resolve=>setTimeout(resolve,150))
+  }while(Date.now()<saveDeadline)
+  assert.ok(automaticallySaved,'The native completion event must save the reply without browser history polling')
+  assert.deepEqual(automaticallySaved.annotation_ids,[annotationId])
+  assert.equal(automaticallySaved.reply_to,annotationId)
+  assert.equal(automaticallySaved.page,2)
+  checks.push('native-completion-autosaves-under-exact-source-annotation-without-browser-history-poll')
   const deadline = Date.now() + 20000
   let history, answer
   do {
@@ -172,7 +184,7 @@ try {
   checks.push('same-request-retry-does-not-duplicate-user-turn-or-generation')
 
   const saved = await api({ action: 'chat_save_feedback', id: paper.id, message_id: answer.id, text: 'This browser-supplied text must never replace the native reply.' })
-  assert.equal(saved.saved.duplicate, false)
+  assert.equal(saved.saved.duplicate, true)
   const savedAgain = await api({ action: 'chat_save_feedback', id: paper.id, message_id: answer.id })
   assert.equal(savedAgain.saved.duplicate, true)
   assert.equal(savedAgain.saved.annotation_id, saved.saved.annotation_id)

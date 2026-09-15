@@ -24,6 +24,7 @@ window.PaperLibraryChat = {
       if (chat.catalogTruncated || chat.catalog.some(note => note.identity_reliable === false && note.identity_source === 'duplicate-pdf-nm')) $('paper-chat-all').disabled = true;
       $('annotation-chat-actions').hidden = !chat.available;
       $('legacy-feedback-controls').hidden = chat.available;
+      $('legacy-feedback').hidden = chat.available;
     }
     function remember(publish = true) {
       if (!chat.paperId || chat.draftLoading) return;
@@ -188,7 +189,7 @@ window.PaperLibraryChat = {
         }
         chat.usageRevision = result.usage_revision; contextLabel();
       }
-      const historyKey = JSON.stringify(result.messages || []);
+      const historyKey = JSON.stringify([result.messages || [],result.feedback||[]]);
       if (historyKey !== chat.historyKey) {
       const list = $('paper-chat-messages');
       const previousTop = list.scrollTop || 0;
@@ -225,7 +226,9 @@ window.PaperLibraryChat = {
         }
         if (message.truncated || text.length < message.text.length) card.append(element('small', 'muted', '较长消息可在主对话中完整阅读。'));
         if (message.role === 'assistant' && message.id && getPaper()?.pdf && !message.partial && !message.interrupted) {
-          const button = element('button', 'button subtle', '保存这条回复到 PDF'); button.type = 'button';
+          const saved=(result.feedback||[]).find(value=>value.message_id===message.id);
+          const button = element('button', 'button subtle', saved?.status==='saved'?'已保存到批注回复':saved?'重试保存回复':'保存这条回复到 PDF'); button.type = 'button';button.disabled=saved?.status==='saved';
+          if(saved?.status==='failed'||saved?.status==='pending')card.append(element('p','small error',saved.error||'回复保存结果尚未确认，可重试；DSH 对话中的原回复仍保留。'));
           button.addEventListener('click', async () => {
             const id = chat.paperId; button.disabled = true;
             try { await api('chat_save_feedback', { id, message_id: message.id }); toast('AI 回复已保存到 PDF'); await savedFeedback(id); }
@@ -254,7 +257,11 @@ window.PaperLibraryChat = {
       try {
         if (!await ensure(id) || !isCurrent(id, ticket)) return;
         const result = await api('chat_history', { id });
-        if (isCurrent(id, ticket)) renderHistory(result);
+        if (isCurrent(id, ticket)) {
+          renderHistory(result);
+          const key=JSON.stringify((result.feedback||[]).filter(value=>value.status==='saved'));
+          if(key!==chat.feedbackKey){chat.feedbackKey=key;if(key!=='[]')await savedFeedback(id);}
+        }
       } catch (error) { if (isCurrent(id, ticket)) status(error.message, true); }
       finally { chat.historyLoading = false; schedule(); }
     }
@@ -325,6 +332,7 @@ window.PaperLibraryChat = {
       chat.draftLoading=false;
       chat.notes = validRefs(previous?.annotationRefs); chat.selection = previous?.selection || null; chat.failed = previous?.failed || null;
       chat.historyKey = undefined;
+      chat.feedbackKey = undefined;
       $('paper-chat-input').value = previous?.draft || ''; $('paper-chat-messages').replaceChildren(); closeDrawer(); contextLabel(); controls();
       if(preferenceTicket===preferenceRevision)$('paper-chat-auto').checked = settingsWritable&&(preferences?.['auto-paper-conversation']===true||preferences?.['auto-paper-conversation']==='true');
       if (!chat.available) { status('请从 DSH 右侧的文献库打开，便可为每篇论文建立对话。'); return; }

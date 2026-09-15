@@ -1053,7 +1053,14 @@ class Library:
             text = " ".join(word[4] for word in words if any(fitz.Rect(word[:4]).intersects(rect) for rect in unrotated))
             if not exact:
                 text = text[:20000]
-        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra else "external-pdf", **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id") if key in extra}}
+        reply_to = None
+        if annot.irt_xref:
+            try:
+                parent = page.load_annot(annot.irt_xref)
+                reply_to = parent.info.get("id") or f"external-{page.number + 1}-{parent.xref}"
+            except (ValueError, RuntimeError):
+                pass
+        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra else "external-pdf", **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids") if key in extra}}
 
     @staticmethod
     def _reference_annotation(value, identity_reliable):
@@ -1288,6 +1295,11 @@ class Library:
         annot.update()
         annotation_id = uuid.uuid4().hex
         doc.xref_set_key(annot.xref, "NM", fitz.get_pdf_str(annotation_id))
+        if extra and extra.get("annotation_ids"):
+            for parent in current.annots() or []:
+                if parent.info.get("id") == extra["annotation_ids"][0]:
+                    annot.set_irt_xref(parent.xref)
+                    break
         return {"annotation": self._annotation(current, annot)}
 
     def annotate(self, id, **kwargs):
@@ -1351,6 +1363,8 @@ class Library:
             lines = ["# " + item["title"], "", "Citation key: `" + item["citekey"] + "`", ""]
             for annotation in annotations:
                 lines.extend([f"## Page {annotation['page']} · {annotation['type']} · {annotation['id']}", "", "> " + annotation["text"].replace("\n", "\n> "), "", annotation["comment"], "", "Author: " + annotation["author"], ""])
+                if annotation.get("annotation_ids") or annotation.get("reply_to"):
+                    lines.extend(["Reply to: " + ", ".join(annotation.get("annotation_ids") or [annotation["reply_to"]]), ""])
             if result["truncated"]:
                 lines.append("Export truncated at 5000 annotations.")
             text, mime = "\n".join(lines), "text/markdown"
@@ -1368,6 +1382,8 @@ class Library:
                     matrix = page.derotation_matrix * ~page.transformation_matrix
                     rect = fitz.Rect(annotation["rect"]) * matrix
                     attributes = {"page": str(annotation["page"] - 1), "name": annotation["id"], "title": annotation["author"], "rect": ",".join(str(round(v, 3)) for v in rect)}
+                    if annotation.get("reply_to"):
+                        attributes["inreplyto"] = annotation["reply_to"]
                     stroke = (annotation.get("color") or {}).get("stroke")
                     if isinstance(stroke, (list, tuple)) and len(stroke) == 3 and all(isinstance(value, (int, float)) and math.isfinite(value) for value in stroke):
                         attributes["color"] = "#" + "".join(f"{round(max(0, min(1, value)) * 255):02X}" for value in stroke)
@@ -1465,7 +1481,7 @@ class Library:
         rows = self.db.execute("SELECT payload FROM feedback WHERE paper_id=? LIMIT 100", (id,)).fetchall()
         return {"feedback": [json.loads(row[0]) for row in rows]}
 
-    def save_conversation_feedback(self, id, text, model, annotation_ids, source_session_id, source_message_id, page=1):
+    def save_conversation_feedback(self, id, text, model, annotation_ids, source_session_id, source_message_id, page=1, source_snapshot_ids=None):
         """Persist an explicitly saved, host-verified native assistant message.
 
         This worker action is internal to the Harness adapter: the host must read
@@ -1475,8 +1491,11 @@ class Library:
         """
         if not isinstance(text, str) or not text.strip() or len(text) > 28000:
             raise ValueError("Feedback must contain 1–28000 characters")
-        if not isinstance(annotation_ids, list) or annotation_ids:
-            raise ValueError("Conversation feedback requires an explicit empty annotation_ids list; source associations must not be inferred")
+        if not isinstance(annotation_ids, list) or len(annotation_ids) > 1000 or any(not isinstance(value, str) or not 1 <= len(value) <= 160 for value in annotation_ids) or len(set(annotation_ids)) != len(annotation_ids) or len(json.dumps(annotation_ids)) > 64000:
+            raise ValueError("Conversation feedback requires bounded unique annotation IDs verified by the host")
+        source_snapshot_ids = source_snapshot_ids or []
+        if not isinstance(source_snapshot_ids, list) or len(source_snapshot_ids) > 4 or any(not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value) for value in source_snapshot_ids):
+            raise ValueError("Invalid source snapshot IDs")
         for value in (source_session_id, source_message_id):
             if not isinstance(value, str) or not 1 <= len(value) <= 200 or value != value.strip() or any(ord(char) < 32 or ord(char) == 127 for char in value):
                 raise ValueError("Conversation source IDs must contain 1–200 characters without surrounding whitespace or control characters")
@@ -1490,6 +1509,8 @@ class Library:
             # text or trusting a truncated annotations() result for uniqueness.
             # Copies/reimports retain the same key without any catalog row.
             count = 0
+            sources = {}
+            duplicate = None
             with self._open_pdf(self.pdf_path(id)) as doc:
                 self._page(doc, page)
                 for current in doc:
@@ -1498,12 +1519,34 @@ class Library:
                         if count > MAX_ANNOTATIONS:
                             raise ValueError("PDF annotation limit prevents a complete conversation feedback duplicate check")
                         extra = self._annotation_metadata(annot)
+                        annotation_id = annot.info.get("id") or f"external-{current.number + 1}-{annot.xref}"
+                        if annotation_id in annotation_ids and extra.get("kind") != "ai-feedback":
+                            if annotation_id in sources:
+                                raise ValueError("Source annotation identity is ambiguous")
+                            sources[annotation_id] = current.number + 1
                         if extra.get("kind") == "ai-feedback" and extra.get("source_kind") == "dsh-conversation" and extra.get("source_session_id") == source_session_id and extra.get("source_message_id") == source_message_id:
                             value = self._annotation(current, annot)
-                            return {**value, "annotation_id": value["id"], "duplicate": True}
+                            duplicate = value
+            if any(value not in sources for value in annotation_ids):
+                raise ValueError("Source annotation is missing or is AI feedback; keep the reply in DSH and refresh its references")
+            if duplicate:
+                if annotation_ids and not duplicate.get("annotation_ids"):
+                    def connect(doc):
+                        current, annot = self._find_annotation(doc, duplicate["id"])
+                        extra = self._annotation_metadata(annot)
+                        extra.update(annotation_ids=annotation_ids, source_snapshot_ids=source_snapshot_ids)
+                        annot.set_info(subject="paper-library:" + json.dumps(extra, ensure_ascii=False))
+                        target_page, parent = self._find_annotation(doc, annotation_ids[0])
+                        if current.number == target_page.number:
+                            annot.set_irt_xref(parent.xref)
+                        return {"annotation": self._annotation(current, annot)}
+                    duplicate = self._write_pdf(id, connect)["annotation"]
+                return {**duplicate, "annotation_id": duplicate["id"], "duplicate": True}
             if count >= MAX_ANNOTATIONS:
                 raise ValueError("PDF annotation limit reached; conversation feedback was not saved")
-            extra = {"kind": "ai-feedback", "model": str(model)[:200], "annotation_ids": [], "generated": now(), "source_kind": "dsh-conversation", "source_session_id": source_session_id, "source_message_id": source_message_id}
+            if annotation_ids:
+                page = sources[annotation_ids[0]]
+            extra = {"kind": "ai-feedback", "model": str(model)[:200], "annotation_ids": annotation_ids, "source_snapshot_ids": source_snapshot_ids, "generated": now(), "source_kind": "dsh-conversation", "source_session_id": source_session_id, "source_message_id": source_message_id}
             result = self._write_pdf(id, lambda doc: self._add_annotation(doc, page, "note", comment="AI-generated conversation feedback · " + extra["model"] + "\n\n" + text, author="AI · Paper Library", color="#8b9cff", extra=extra))
             value = result["annotation"]
             return {**value, "annotation_id": value["id"], "duplicate": False}
@@ -1546,7 +1589,7 @@ def dispatch(request):
             "annotations": ("id",), "annotate": ("id", "page", "type", "rects", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment"), "annotation_delete": ("id", "annotation_id"),
             "annotation_catalog": ("id",), "annotation_context_exact": ("id", "annotation_refs", "selection", "max_characters"),
             "export_annotations": ("id", "format"), "link": ("source", "target", "relation", "note"), "graph": ("id", "limit"), "feedback_context": ("id", "annotation_ids"), "save_feedback": ("id", "text", "model", "annotation_ids", "expected_context_hash"), "feedback": ("id",),
-            "save_conversation_feedback": ("id", "text", "model", "annotation_ids", "source_session_id", "source_message_id", "page"),
+            "save_conversation_feedback": ("id", "text", "model", "annotation_ids", "source_session_id", "source_message_id", "page", "source_snapshot_ids"),
         }
         if action not in actions:
             raise ValueError("Unknown core action")

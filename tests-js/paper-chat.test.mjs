@@ -7,8 +7,9 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createPaperChat, paperSessionId, projectPaperHistory } from '../src/harness/paper-chat.mjs'
+import { createLocalStateStore } from '../src/local-state.mjs'
 
-async function fixture(t, preparedStore) {
+async function fixture(t, preparedStore, automatic=false) {
   const directory = await mkdtemp(join(tmpdir(), 'paper-chat-test-'))
   const library = await realpath(directory)
   t.after(() => rm(directory, { recursive: true, force: true }))
@@ -111,7 +112,7 @@ async function fixture(t, preparedStore) {
       default: throw new Error(`Unexpected operation: ${request.action}`)
     }
   }
-  const options = { library, dispatch: kernel, core: kernel }
+  const options = { library, dispatch: kernel, core: kernel,...(automatic?{store:createLocalStateStore({library,home:join(library,'host')})}:{}) }
   const chat = createPaperChat(ctx, options)
   chat.install()
   return { ctx, options, stored, attached, agents, sends, saves, closed, memberships, annotations, chat, counters: () => ({ creations, follows, promotions, maxSends }) }
@@ -340,6 +341,36 @@ test('saving feedback reads the real assistant event and rejects forged, unrelat
   record.events.push({ seq: 4, type: 'assistant/message', data: { interrupted: true, message: { content: [{ type: 'text', text: 'partial' }] } } })
   await assert.rejects(f.chat({ action: 'chat_save_feedback', id: 'paper-a', message_id: '4' }), /只能保存/)
   await assert.rejects(f.chat({ action: 'chat_save_feedback', id: 'paper-a', message_id: '2' }), /只能保存/)
+})
+
+test('completed native annotation replies auto-save once with exact logged references and survive service restart',async t=>{
+  const f=await fixture(t,undefined,true),ensured=await f.chat({action:'chat_ensure',id:'paper-a'}),record=f.stored.get(ensured.sessionId)
+  const append=(type,data)=>{const event={seq:record.events.length,type,data};record.events.push(event);return String(event.seq)}
+  append('turn/start',{turn:1})
+  await f.chat({action:'chat_send',id:'paper-a',request_id:'threaded-reply',annotation_ids:['note-1'],question:'Explain my annotation'})
+  const reply=append('assistant/message',{message:{content:[{type:'text',text:'Source-grounded reply'}]}})
+  assert.deepEqual((await f.chat({action:'chat_history',id:'paper-a'})).feedback,[],'A still running turn is not saved automatically')
+  append('turn/end',{reason:{kind:'completed'}})
+  const result=await f.chat({action:'chat_history',id:'paper-a'})
+  assert.equal(result.feedback[0].status,'saved');assert.equal(f.saves.length,1)
+  assert.deepEqual(f.saves[0].annotation_ids,['note-1']);assert.equal(f.saves[0].source_snapshot_ids.length,1)
+  assert.equal(f.saves[0].source_message_id,reply)
+  const restored=createPaperChat(f.ctx,f.options);await restored({action:'chat_history',id:'paper-a'});assert.equal(f.saves.length,1)
+  append('turn/start',{turn:2});append('user/message',{source:{kind:'user'},content:[{type:'text',text:'An unrelated question'}]});append('assistant/message',{message:{content:[{type:'text',text:'Unrelated response'}]}});append('turn/end',{reason:{kind:'completed'}})
+  await restored({action:'chat_history',id:'paper-a'});assert.equal(f.saves.length,1,'Unreferenced follow-ups cannot inherit old notes')
+})
+
+test('failed automatic PDF saves remain visible without replay and explicit save recovers',async t=>{
+  const f=await fixture(t,undefined,true),ensured=await f.chat({action:'chat_ensure',id:'paper-a'}),record=f.stored.get(ensured.sessionId)
+  const append=(type,data)=>{const event={seq:record.events.length,type,data};record.events.push(event);return String(event.seq)}
+  append('turn/start',{turn:1});await f.chat({action:'chat_send',id:'paper-a',request_id:'save-recovery',annotation_ids:['note-1'],question:'Explain'})
+  const id=append('assistant/message',{message:{content:[{type:'text',text:'Complete reply preserved in DSH'}]}});append('turn/end',{reason:{kind:'completed'}})
+  let attempts=0
+  const broken=createPaperChat(f.ctx,{...f.options,core:async()=>{attempts++;throw Error('Synthetic PDF write failure')}})
+  const first=await broken({action:'chat_history',id:'paper-a'});assert.equal(first.feedback[0].status,'failed')
+  await broken({action:'chat_history',id:'paper-a'});assert.equal(attempts,1)
+  await f.chat({action:'chat_save_feedback',id:'paper-a',message_id:id})
+  assert.equal((await f.chat({action:'chat_history',id:'paper-a'})).feedback[0].status,'saved');assert.equal(f.saves.length,1)
 })
 
 const harness = resolve(process.env.DSH_CHECKOUT ?? join(dirname(fileURLToPath(import.meta.url)), '../../../deepseek-ai/deepseek-harness'))

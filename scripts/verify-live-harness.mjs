@@ -64,6 +64,15 @@ if (flags.get('--require-resources') === 'true') {
 }
 let themeAssetsAvailable = false
 let sharedSidebarAssetsAvailable = false
+let annotationReplyAssetsAvailable = false
+if (flags.get('--require-replies') === 'true') {
+  for (const file of ['app.js','paper-chat.js','reading-shell.js','reading-shell.css']) {
+    const asset = await fetch(`${address.origin}/api/paper-library/${file}`, {headers,signal:AbortSignal.timeout(10000)})
+    assert.equal(asset.status,200,`Missing annotation reply asset: ${file}`)
+    assert.equal(await asset.text(),await readFile(new URL(`../web/${file}`,import.meta.url),'utf8'),`Installed annotation reply asset differs from source: ${file}`)
+  }
+  annotationReplyAssetsAvailable = true
+}
 if (flags.get('--require-sidebar') === 'true') {
   for (const [file, markers] of [
     ['reading-panels.js', ['reading-sidebar-library', 'reading-sidebar-annotations', 'setReadingActive']],
@@ -122,6 +131,6 @@ if (flags.get('--require-chat') === 'true' || flags.get('--require-references') 
   assert.ok(script.includes('PaperLibraryChat'))
   if (flags.get('--require-references') === 'true') assert.ok(script.includes('chat_catalog') && script.includes('annotation_refs'))
 }
-const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, durableState, languageLearning, datasetLibrary, knowledgeWorkflow, paperAnalysis, ...(nativeSettings?{nativeSettings}:{}), ...(themeAssetsAvailable ? {themeAssetsAvailable} : {}), ...(sharedSidebarAssetsAvailable ? {sharedSidebarAssetsAvailable} : {}), chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
+const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, durableState, languageLearning, datasetLibrary, knowledgeWorkflow, paperAnalysis, ...(nativeSettings?{nativeSettings}:{}), ...(themeAssetsAvailable ? {themeAssetsAvailable} : {}), ...(sharedSidebarAssetsAvailable ? {sharedSidebarAssetsAvailable} : {}), ...(annotationReplyAssetsAvailable ? {annotationReplyAssetsAvailable} : {}), chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
 if (flags.get('--output')) await writeFile(flags.get('--output'), JSON.stringify(report, null, 2) + '\n')
 console.log(JSON.stringify(report))

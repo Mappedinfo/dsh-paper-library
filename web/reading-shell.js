@@ -19,7 +19,10 @@ window.PaperReadingShell = (() => {
     const library=button('workspace-library','库',()=>{leaveFocus();$('catalog-expand').click();});
     library.title='展开或收起文献表格';ribbon.append(library);
     const tabs=document.querySelector('.tabs');for(const tab of [...tabs.children])ribbon.append(tab);tabs.remove();
-    const citations=button('ribbon-citations','引用与导出',()=>{context='citations';sync();});ribbon.append(citations);
+    const citations=node('details',null,'citation-tools');citations.id='citation-tools';
+    citations.append(node('summary','引用与导出'));
+    citations.append($('toolbar-actions'));$('paper-tools').append(citations);
+    citations.addEventListener('toggle',()=>{if(citations.open)status('对当前论文复制引用，或导出文件与已保存的批注。');});
     // Metadata and chat stay within reading; graph is the only other paper surface.
     $('metadata-open').textContent='资料';$('metadata-open').title='在侧栏快速编辑文献资料';
     ribbon.append($('metadata-open'));
@@ -62,7 +65,7 @@ window.PaperReadingShell = (() => {
       const mode=table?'library':context;
       document.body.classList.toggle('library-mode',table);document.body.classList.toggle('has-paper',active);
       library.setAttribute('aria-pressed',String(table));
-      citations.setAttribute('aria-pressed',String(!table&&context==='citations'));citations.disabled=!active;
+      citations.hidden=!active||!['library','reader','annotations'].includes(mode);if(citations.hidden)citations.open=false;
       for(const tab of ribbon.querySelectorAll('[data-tab]')){
         const isPanel=tab.dataset.tab==='annotations'||tab.dataset.tab==='conversation';
         const on=isPanel?!table&&state.tab!=='graph'&&panels()?.visible(tab.dataset.tab==='conversation'?'chat':'annotations'):!table&&state.tab===tab.dataset.tab;
@@ -72,14 +75,13 @@ window.PaperReadingShell = (() => {
       fullscreen.disabled=!pdf;fullscreen.textContent=focused?'退出全屏 ⤡':'全屏阅读 ⤢';fullscreen.setAttribute('aria-pressed',String(focused));
       readerTools.hidden=table||!pdf||!['reader','annotations'].includes(mode);
       annotationTools.hidden=table||!pdf||mode!=='annotations';
-      $('toolbar-actions').hidden=mode!=='citations';libraryTools.hidden=mode!=='library'&&active;
+      $('toolbar-actions').hidden=false;libraryTools.hidden=mode!=='library'&&active;
       $('import-open').disabled=false;$('export-library').disabled=false;
       $('metadata-enrich').disabled=!active;$('catalog-archive').disabled=!active;
       for(const b of annotationTools.querySelectorAll('[data-reader-tool]'))b.setAttribute('aria-pressed',String(b.dataset.readerTool===tool));
       sidebar.setAttribute('aria-pressed',String(Boolean(panels()?.visible('annotations'))));
       message.hidden=!active||table;
       if(mode==='graph')status('选择节点查看联系与来源；有页码的依据可返回 PDF。');
-      else if(mode==='citations')status('对当前论文复制引用，或导出文件与已保存的批注。');
       else status(hints[tool]);
       contextChanged?.();
     }
@@ -97,12 +99,15 @@ window.PaperReadingShell = (() => {
     }
     const fullscreenChange=()=>{if(!document.fullscreenElement&&focused){focused=false;document.body.classList.remove('reader-focused');sync();reader()?.resize();}};
     const keydown=e=>{if(e.key==='Escape'&&focused&&!document.querySelector('dialog[open]:not(#metadata-dialog)')){void toggleFullscreen();}};
+    const closeCitations=e=>{if(citations.open&&!citations.contains(e.target))citations.open=false;};
+    const citationKey=e=>{if(e.key==='Escape'&&citations.open){citations.open=false;citations.querySelector('summary').focus();e.stopImmediatePropagation();}};
+    document.addEventListener('click',closeCitations);document.addEventListener('keydown',citationKey,true);
     document.addEventListener('fullscreenchange',fullscreenChange);document.addEventListener('keydown',keydown);
     // Prevent a homepage link from discarding a question/metadata draft.
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
     sync();
     return {sync,setContext,status,leaveFocus,tool:()=>({type:tool,color}),isFocused:()=>focused,
-      dispose(){document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);}};
+      dispose(){document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);document.removeEventListener('click',closeCitations);document.removeEventListener('keydown',citationKey,true);}};
   }
   return {create};
 })();

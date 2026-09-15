@@ -1,0 +1,32 @@
+{
+  "verified_at": "2026-09-15T11:41:31.699Z",
+  "ok": true,
+  "checks": [
+    "light-replies-nest-under-exact-notes-with-shared-reply-label-and-unlinked-recovery",
+    "light-library-and-reader-export-menu-preserve-mode-page-position-and-keyboard-close",
+    "dark-replies-nest-under-exact-notes-with-shared-reply-label-and-unlinked-recovery",
+    "dark-library-and-reader-export-menu-preserve-mode-page-position-and-keyboard-close",
+    "fresh-browser-restores-pdf-linked-replies-without-browser-storage-or-model-requests"
+  ],
+  "screenshots": [
+    ".local/annotation-replies-browser-MSthRQ/light-511.png",
+    ".local/annotation-replies-browser-MSthRQ/light-681.png",
+    ".local/annotation-replies-browser-MSthRQ/dark-511.png",
+    ".local/annotation-replies-browser-MSthRQ/dark-681.png"
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "viewports": [
+    511,
+    681
+  ],
+  "modelRequests": 0,
+  "externalRequests": 0,
+  "browserErrors": [],
+  "sourcePdfUnchanged": true,
+  "limitations": [
+    "Synthetic browser rendering and disk recovery; automatic native model completion is tested separately."
+  ]
+}

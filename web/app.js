@@ -321,14 +321,32 @@ function showReaderSelection(selection) {
 async function loadAnnotations(id) {
   try {
     const result = await api('annotations', { id }); if (id !== state.active?.id) return;
-    state.annotations = result.annotations || []; $('annotation-count').textContent = `${state.annotations.length}${result.truncated ? '+' : ''}`;
+    state.annotations = result.annotations || []; const count=annotationThreads(state.annotations).notes.length; $('annotation-count').textContent = `${count}${result.truncated ? '+' : ''}`;
     state.annotationsTruncated = Boolean(result.truncated);
-    state.noteOffset = Math.min(state.noteOffset, Math.max(0, Math.ceil(state.annotations.length / 40) - 1) * 40); renderAnnotations();
+    state.noteOffset = Math.min(state.noteOffset, Math.max(0, Math.ceil(count / 40) - 1) * 40); renderAnnotations();
   } catch (error) { if (id === state.active?.id) { $('annotation-count').textContent = ''; $('annotation-list').replaceChildren(emptyState('批注暂时未能读取', error.message)); } }
+}
+function annotationThreads(annotations) {
+  const ai=note=>note.kind==='ai-feedback'||note.type==='ai_feedback'||note.ai_generated;
+  const notes=annotations.filter(note=>!ai(note)),replies=new Map(notes.map(note=>[note.id,[]])),unlinked=[];
+  for(const reply of annotations.filter(ai)){
+    const parents=[...new Set([...(Array.isArray(reply.annotation_ids)?reply.annotation_ids:[]),reply.reply_to].filter(id=>replies.has(id)))];
+    if(!parents.length)unlinked.push(reply);else for(const id of parents)replies.get(id).push(reply);
+  }
+  return {notes,replies,unlinked};
 }
 function renderAnnotations() {
   const fragment = document.createDocumentFragment();
-  for (const note of state.annotations.slice(state.noteOffset, state.noteOffset + 40)) {
+  const {notes,replies,unlinked}=annotationThreads(state.annotations);
+  function replyCard(reply){
+    const details=el('details','annotation-reply');details.dataset.annotationId=reply.id;
+    details.append(el('summary','',`AI 回复${reply.annotation_ids?.length>1?` · 涉及 ${reply.annotation_ids.length} 条批注`:''}`));
+    details.append(el('p','small muted',[reply.model,displayDate(reply.generated||reply.created)].filter(Boolean).join(' · ')));
+    const body=(reply.comment||reply.content||reply.text||'').replace(/^AI-generated (?:conversation )?feedback[^\n]*\n\n/,'');
+    details.append(el('p','annotation-reply-body',body));
+    const actions=el('div','annotation-actions'),remove=el('button','button subtle delete-note','删除回复');remove.dataset.noteAction='delete';actions.append(remove);details.append(actions);return details;
+  }
+  for (const note of notes.slice(state.noteOffset, state.noteOffset + 40)) {
     const card = el('article', 'annotation-card'); card.dataset.annotationId = note.id;
     const meta = el('div', 'annotation-meta'); const pageLink = el('button', 'page-link', `第 ${note.page} 页`); pageLink.dataset.noteAction = 'page';
     meta.append(pageLink, el('span', '', displayDate(note.modified || note.created)), el('span', 'note-type', note.kind === 'ai-feedback' || note.type === 'ai_feedback' || note.ai_generated ? 'AI 生成' : ({highlight:'高亮',underline:'下划线',strikeout:'删除线',note:'便笺'})[note.type] || '批注'));
@@ -337,13 +355,14 @@ function renderAnnotations() {
     if (note.comment || note.content) card.append(el('p', 'annotation-comment', note.comment || note.content));
     const actions = el('div', 'annotation-actions'); const edit = el('button', 'button subtle', '编辑'); edit.dataset.noteAction = 'edit'; const remove = el('button', 'button subtle delete-note', '删除'); remove.dataset.noteAction = 'delete'; actions.append(edit, remove);
     if (paperChatUI?.available() && note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const discuss = el('button', 'button subtle', paperChatUI.hasAnnotation(note.id) ? '移出本次引用' : '加入本次引用'); discuss.dataset.noteAction = 'discuss'; actions.append(discuss); }
-    card.append(actions); fragment.append(card);
+    card.append(actions);for(const reply of replies.get(note.id)||[])card.append(replyCard(reply)); fragment.append(card);
   }
-  if (!state.annotations.length) fragment.append(emptyState('第一条批注，从一个问题开始', '在阅读页选择文字以高亮，或添加一条整页笔记。'));
-  if (state.annotations.length > 40) {
-    const pagination = el('div', 'pagination'); const previous = el('button', 'button subtle', '← 上一页'); previous.disabled = state.noteOffset === 0; previous.dataset.noteAction = 'previous'; const next = el('button', 'button subtle', '下一页 →'); next.disabled = state.noteOffset + 40 >= state.annotations.length; next.dataset.noteAction = 'next';
-    pagination.append(previous, el('span', 'muted', `${state.noteOffset + 1}–${Math.min(state.noteOffset + 40, state.annotations.length)} / ${state.annotations.length}`), next); fragment.append(pagination);
+  if (!notes.length) fragment.append(emptyState('第一条批注，从一个问题开始', '在阅读页选择文字以高亮，或添加一条整页笔记。'));
+  if (notes.length > 40) {
+    const pagination = el('div', 'pagination'); const previous = el('button', 'button subtle', '← 上一页'); previous.disabled = state.noteOffset === 0; previous.dataset.noteAction = 'previous'; const next = el('button', 'button subtle', '下一页 →'); next.disabled = state.noteOffset + 40 >= notes.length; next.dataset.noteAction = 'next';
+    pagination.append(previous, el('span', 'muted', `${state.noteOffset + 1}–${Math.min(state.noteOffset + 40, notes.length)} / ${notes.length}`), next); fragment.append(pagination);
   }
+  if(unlinked.length){const group=el('details','annotation-unlinked');group.append(el('summary','',`未关联回复 · ${unlinked.length}`),el('p','small muted','这类回复没有可核实的批注关联，或原批注已删除。已有内容仍保存在 PDF 中。'));for(const reply of unlinked)group.append(replyCard(reply));fragment.append(group);}
   if (state.annotationsTruncated) fragment.append(el('p', 'small muted', '批注数量或文本量已达读取上限，当前只显示已读取的部分。PDF 中的原始批注仍被保留。'));
   $('annotation-list').replaceChildren(fragment);
 }
@@ -702,7 +721,7 @@ async function loadFeedback(id) {
   try {
     const result = await api('feedback', { id }); if (state.active?.id !== id) return;
     const fragment = document.createDocumentFragment();
-    for (const feedback of (result.feedback || []).slice(-10).reverse()) {
+    for (const feedback of (result.feedback || []).filter(value=>!state.active?.pdf).slice(-10).reverse()) {
       const entry = el('article', 'feedback-entry'); const header = el('header');
       header.append(el('span', 'ai-badge', 'AI 生成'), el('span', '', [feedback.model, displayDate(feedback.generated || feedback.created || feedback.timestamp)].filter(Boolean).join(' · ')));
       entry.append(header, el('p', '', feedback.text || feedback.comment || feedback.content || ''));

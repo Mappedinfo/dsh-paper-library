@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-14T16:54:55.393Z",
+  "verified_at": "2026-09-15T11:43:55.687Z",
   "checks": [
     "compact-current-paper-toolbar-cards-title-and-sourced-metadata",
     "741px-reader-has-no-document-horizontal-overflow",
@@ -32,5 +32,5 @@
   "browser_errors": [],
   "model_requests": 0,
   "scope": "Synthetic catalog and PDF only; no external metadata lookup, no formal user validation",
-  "screenshots": ".local/workbench-browser-dqp8Uk"
+  "screenshots": ".local/workbench-browser-DxIU8U"
 }

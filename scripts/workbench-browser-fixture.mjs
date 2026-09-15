@@ -30,7 +30,7 @@ try {
   await page.goto(origin);await page.waitForLoadState('networkidle');
   await page.locator('#search').fill(paper.title);await page.locator(`.paper-card[data-id="${paper.id}"]`).waitFor();await page.locator(`.paper-card[data-id="${paper.id}"]`).click();await page.locator('.pdr-sheet[data-loaded="true"]').first().waitFor();
   await page.screenshot({path:join(run,'reader-741.png')});
-  await page.locator('#ribbon-citations').click();await page.locator('#paper-tools #copy-apa').waitFor();await page.locator('#metadata-open').click();await page.locator('#reading-side-panel').waitFor();
+  await page.locator('#citation-tools > summary').click();await page.locator('#paper-tools #copy-apa').waitFor();await page.locator('#metadata-open').click();await page.locator('#reading-side-panel').waitFor();
   assert.equal(await page.locator('#paper-tools #copy-apa').count(),1);assert.equal(await page.locator('.paper-header #copy-apa').count(),0);
   assert.ok(Number.parseFloat(await page.locator('#paper-title').evaluate(n=>getComputedStyle(n).fontSize))<=20);
   assert.ok(Number.parseFloat(await page.locator('.paper-card h3').first().evaluate(n=>getComputedStyle(n).fontSize))<=14);

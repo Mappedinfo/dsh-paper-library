@@ -176,7 +176,7 @@ try {
     await screenshot('fullscreen-741'); await page.locator('#reader-fullscreen').click();
     await page.waitForFunction(() => !document.body.classList.contains('reader-focused')); await visiblePDF();
     record('fullscreen-entry-and-exit-preserve-visible-pdf');
-    await page.locator('#ribbon-citations').click(); await page.locator('#copy-apa').click();
+    await page.locator('#citation-tools > summary').click(); await page.locator('#copy-apa').click();
     await page.waitForFunction(() => !document.getElementById('copy-apa').disabled);
     assert.match(await page.evaluate(() => navigator.clipboard.readText()), /Synthetic continuous reader acceptance edited in sidebar/);
     const downloadPromise = page.waitForEvent('download'); await page.locator('#export-bib').click(); const download = await downloadPromise;

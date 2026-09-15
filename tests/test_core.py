@@ -215,6 +215,38 @@ def test_conversation_feedback_uses_atomic_write_and_requires_pdf(tmp_path, monk
         library.close()
 
 
+def test_linked_conversation_reply_is_native_pdf_response_and_recovers_from_pdf(tmp_path):
+    item = request(tmp_path, "import", path=str(make_pdf(tmp_path / "source.pdf")))["items"][0]
+    first = request(tmp_path, "annotate", id=item["id"], page=1, type="note", comment="Question one")["annotation"]
+    second = request(tmp_path, "annotate", id=item["id"], page=1, type="note", comment="Question two")["annotation"]
+    payload = {"id": item["id"], "text": "A response to two selected annotations.", "model": "test/native", "annotation_ids": [first["id"], second["id"]], "source_snapshot_ids": ["a" * 64], "source_session_id": "session-a", "source_message_id": "12"}
+    reply = request(tmp_path, "save_conversation_feedback", **payload)
+    assert reply["reply_to"] == first["id"]
+    assert reply["annotation_ids"] == [first["id"], second["id"]]
+    path = request(tmp_path, "export_pdf", id=item["id"])["path"]
+    with fitz.open(path) as doc:
+        page = doc[0]
+        native = next(a for a in page.annots() if a.info.get("id") == reply["id"])
+        assert page.load_annot(native.irt_xref).info["id"] == first["id"]
+    restored = dispatch({"action": "import", "library": str(tmp_path / "fresh"), "path": path})["items"][0]
+    recovered = dispatch({"action": "feedback", "library": str(tmp_path / "fresh"), "id": restored["id"]})["feedback"][0]
+    assert recovered["reply_to"] == first["id"]
+    assert recovered["source_snapshot_ids"] == ["a" * 64]
+    assert recovered["annotation_ids"] == payload["annotation_ids"]
+
+
+def test_existing_unlinked_reply_gains_verified_association_without_duplicate_or_body_rewrite(tmp_path):
+    item = request(tmp_path, "import", path=str(make_pdf(tmp_path / "source.pdf")))["items"][0]
+    parent = request(tmp_path, "annotate", id=item["id"], page=1, type="note", comment="Question")["annotation"]
+    payload = {"id": item["id"], "text": "Original saved reply.", "model": "test/native", "annotation_ids": [], "source_session_id": "session-a", "source_message_id": "13"}
+    old = request(tmp_path, "save_conversation_feedback", **payload)
+    linked = request(tmp_path, "save_conversation_feedback", **{**payload, "annotation_ids": [parent["id"]], "text": "A retry cannot replace edited content"})
+    assert linked["id"] == old["id"] and linked["duplicate"]
+    assert linked["comment"] == old["comment"]
+    assert linked["reply_to"] == parent["id"]
+    assert len(request(tmp_path, "feedback", id=item["id"])["feedback"]) == 1
+
+
 def test_conversation_feedback_page_and_bounded_duplicate_scan(tmp_path, monkeypatch):
     source = make_pdf(tmp_path / "paper.pdf")
     with fitz.open(source) as doc:
