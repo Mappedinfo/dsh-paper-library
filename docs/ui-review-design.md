@@ -1,5 +1,13 @@
 # Compact literature workbench
 
+## Shared reading rail and compact cards
+
+Accepted 2026-09-15: the reading rail contains “文献库” and “批注” tabs, using the original library and annotation nodes. The rail can sit on either side; changing its tab preserves search, list scroll, annotation state and PDF position. Ctrl/Cmd + K opens library search. Catalog mode restores the full library controls and returning to reading restores the tab. Narrow/fullscreen close returns space to the PDF. Metadata keeps its quick-edit surface and chat keeps its floating panel.
+
+Cards have a 12 px title capped at two lines, an 11 px author/year row and a shared journal/PDF/citekey row, with 7 × 8 px padding. Full metadata remains inspectable; tags and rankings remain available in table/detail views. DSH theme behavior and host-owned state/side preferences retain their existing contracts.
+
+Acceptance: the [13-flow browser fixture](validation/sidebar-browser.json) checks light/dark layouts, card height below 90 px, stable reading across repeated tab switches, PDF note editing, catalog controls and narrow/fullscreen recovery. The observed synthetic maximum is 84.06 px; 12 switches produce zero PDF scroll offset. This supersedes the earlier separate annotation overlay in the reading workspace.
+
 ## DSH appearance and theme ownership
 
 Accepted 2026-09-15: Paper Library should feel like part of DSH while retaining its reading workflow. The interface uses neutral layered surfaces, system sans-serif typography, compact controls, restrained borders and familiar sidebar selection states. Annotation, language, metadata, graph and import surfaces share those tokens. PDF document pixels and the reader's chosen annotation colors retain their original appearance.
@@ -28,7 +36,7 @@ Accepted 2026-09-14 from the owner's next nine browser comments; implemented and
 - A compact contextual ribbon follows reading, annotation, citation/export and catalog actions. The current paper title remains in its first row. Metadata edit is a top-ribbon control.
 - PDF pages scroll continuously. Page geometry is inexpensive and bounded to 2,000 pages; at most three page images/text layers are retained, with one page/layout request in flight. Far pages are evicted, scroll positions remain, and failures have local retry controls. No full-document rasterization or resident worker is added.
 - Highlighter, underline, strikeout and note modes and annotation color are chosen in the ribbon. PDF-native annotations keep page coordinates and persist with the managed PDF. Existing source files are unchanged.
-- Annotation lists share the reading workspace in a left/right movable sidebar. Metadata uses a quick-edit sidebar; drafts survive closing and switching papers in the host-owned storage described above. Selecting catalog rows continues to be metadata-only.
+- Annotation lists use the shared library/annotation rail described above. Metadata retains quick editing; drafts survive closing and switching papers in host-owned storage. Selecting catalog rows continues to be metadata-only.
 - The per-paper DSH conversation is a floating, resizable reading panel, with its existing reference collection, drafts, model routing and native main-conversation bridge. Closing the panel stops its history polling; preparing references never sends them.
 - Fullscreen keeps the toolbar available and expands the PDF workspace. Escape or the fullscreen button restores the normal view; a reading-focus fallback is visible if the host denies native fullscreen.
 - Tool instructions and loading/errors occupy a compact toolbar status line. The old static paragraph below a page is removed.

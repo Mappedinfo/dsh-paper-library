@@ -3,9 +3,9 @@
 // native-conversation state stay owned by the original reader components.
 window.PaperReadingPanels = (() => {
   const names = new Set(['annotations','metadata','chat']);
-  function create({root,annotationsRoot,conversationRoot,metadataRoot,onChatVisibility,onPanelChange,toast,persistence}) {
+  function create({root,annotationsRoot,conversationRoot,metadataRoot,libraryRoot,onAnnotationsRequest,onChatVisibility,onPanelChange,toast,persistence}) {
     if (!root || !annotationsRoot || !conversationRoot || !metadataRoot) throw new Error('Reading panels require the workspace and three existing content roots');
-    let sidebar = null, side = 'left', sideRevision=0, chatOpen = false, collapsed = false, paper = null, disposed = false, lastChatVisible = false;
+    let sidebar = null, side = 'left', sideRevision=0, chatOpen = false, collapsed = false, paper = null, disposed = false, lastChatVisible = false, readingActive=true, sharedOpen=false;
     const listeners = [], originals = [annotationsRoot,conversationRoot,metadataRoot].map(element=>({element,parent:element.parentNode,next:element.nextSibling,hidden:element.hidden,open:element.open}));
     const make = (tag,className,text) => {const element=document.createElement(tag);element.className=className;if(text!==undefined)element.textContent=text;return element;};
     const listen = (element,event,fn) => {element.addEventListener(event,fn);listeners.push(()=>element.removeEventListener(event,fn));};
@@ -15,6 +15,28 @@ window.PaperReadingPanels = (() => {
     const move=button('移至右侧',()=>setSide(side==='left'?'right':'left'));move.id='reading-panel-side';
     const asideClose=button('×',()=>close(sidebar));asideClose.setAttribute('aria-label','收起阅读侧栏');
     const asideBody=make('div','reading-panel-body');asideHeader.append(asideTitle,move,asideClose);asideBody.append(annotationsRoot,metadataRoot);aside.append(asideHeader,asideBody);
+    // The existing shelf and annotations occupy one rail. Move, never clone,
+    // their nodes so search, scroll positions and annotation handlers survive.
+    const libraryChildren=libraryRoot?[...libraryRoot.children]:[];
+    const libraryContent=libraryRoot?make('div','reading-library-content'):null;
+    const sharedHeader=libraryRoot?make('header','reading-sidebar-header'):null;
+    let libraryTab, annotationsTab, sharedMove, sharedClose;
+    if(libraryRoot){
+      libraryContent.id='reading-sidebar-library-content';libraryContent.setAttribute('role','tabpanel');libraryContent.setAttribute('aria-labelledby','reading-sidebar-library');
+      libraryContent.append(...libraryChildren);
+      const tablist=make('div','reading-sidebar-tabs');tablist.setAttribute('role','tablist');tablist.setAttribute('aria-label','阅读侧栏内容');
+      libraryTab=button('文献库',showLibrary);libraryTab.id='reading-sidebar-library';
+      annotationsTab=button('批注',()=>{if(onAnnotationsRequest)onAnnotationsRequest();else show('annotations');});annotationsTab.id='reading-sidebar-annotations';
+      for(const [tab,panel] of [[libraryTab,libraryContent.id],[annotationsTab,annotationsRoot.id]]){tab.setAttribute('role','tab');tab.setAttribute('aria-controls',panel);}
+      const selectTab=tab=>{tab.focus();tab.click();};
+      listen(tablist,'keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?libraryTab:event.key==='End'?annotationsTab:event.target===libraryTab?annotationsTab:libraryTab;if(!next.disabled)selectTab(next);});
+      tablist.append(libraryTab,annotationsTab);
+      sharedMove=button('⇄',()=>setSide(side==='left'?'right':'left'));sharedMove.id='reading-sidebar-side';
+      sharedClose=button('×',()=>{sharedOpen=false;if(sidebar==='annotations')sidebar=null;render();});sharedClose.id='reading-sidebar-close';sharedClose.setAttribute('aria-label','收起阅读侧栏');
+      sharedHeader.append(tablist,sharedMove,sharedClose);
+      annotationsRoot.setAttribute('role','tabpanel');annotationsRoot.setAttribute('aria-labelledby',annotationsTab.id);
+      libraryRoot.append(sharedHeader,libraryContent,annotationsRoot);libraryRoot.classList.add('shared-reading-sidebar');
+    }
     const chat=make('aside','reading-chat-panel');chat.id='reading-chat-panel';chat.setAttribute('aria-label','浮动论文对话');
     const chatHeader=make('header','reading-panel-header'),chatTitle=make('strong','reading-panel-title','论文对话');
     const collapse=button('收起',()=>{collapsed=!collapsed;render();});collapse.id='reading-chat-collapse';collapse.setAttribute('aria-controls','reading-chat-content');
@@ -33,11 +55,21 @@ window.PaperReadingPanels = (() => {
     }
     function render(emit=true) {
       if(disposed)return;
-      root.dataset.readingSide=side;root.classList.toggle('has-reading-sidebar',Boolean(sidebar));
+      root.dataset.readingSide=side;root.classList.toggle('has-reading-sidebar',Boolean(sidebar)&&(!libraryRoot||sidebar==='metadata'));
       placeSidebar();
-      aside.hidden=!sidebar;asideTitle.textContent=sidebar==='metadata'?'文献资料':'批注';
+      aside.hidden=!sidebar||(Boolean(libraryRoot)&&sidebar==='annotations');asideTitle.textContent=sidebar==='metadata'?'文献资料':'批注';
       move.textContent=side==='left'?'移至右侧':'移至左侧';
-      annotationsRoot.hidden=sidebar!=='annotations';metadataRoot.hidden=sidebar!=='metadata';
+      annotationsRoot.hidden=sidebar!=='annotations'||(Boolean(libraryRoot)&&!readingActive);metadataRoot.hidden=sidebar!=='metadata';
+      if(libraryRoot){
+        const annotations=readingActive&&sidebar==='annotations';
+        sharedHeader.hidden=!readingActive;libraryContent.hidden=annotations;
+        libraryRoot.dataset.sidebarPanel=annotations?'annotations':'library';
+        libraryRoot.parentNode.classList.toggle('shared-sidebar-open',readingActive&&sharedOpen);
+        libraryRoot.parentNode.dataset.sidebarSide=readingActive?side:'left';
+        libraryTab.setAttribute('aria-selected',String(!annotations));libraryTab.tabIndex=annotations?-1:0;
+        annotationsTab.setAttribute('aria-selected',String(annotations));annotationsTab.tabIndex=annotations?0:-1;annotationsTab.disabled=!paper||paper.archived;
+        const direction=side==='left'?'移至右侧':'移至左侧';sharedMove.title=direction;sharedMove.setAttribute('aria-label',direction);
+      }
       if(metadataRoot.tagName==='DIALOG') {
         if(sidebar==='metadata'&&!metadataRoot.open)metadataRoot.show();
         else if(sidebar!=='metadata'&&metadataRoot.open)metadataRoot.close();
@@ -56,7 +88,7 @@ window.PaperReadingPanels = (() => {
     function show(name) {
       known(name);if(disposed)return false;
       if(name!=='metadata'&&(!paper||paper.archived)){toast?.('请先打开一篇可阅读的文献。',true);return false;}
-      if(name==='chat'){chatOpen=true;collapsed=false;}else sidebar=name;
+      if(name==='chat'){chatOpen=true;collapsed=false;}else {sidebar=name;if(name==='annotations')sharedOpen=true;}
       render();return true;
     }
     function close(name) {
@@ -75,13 +107,16 @@ window.PaperReadingPanels = (() => {
       if(!paper||paper.archived){sidebar=null;chatOpen=false;}
       render();
     }
+    function setReadingActive(value){const next=Boolean(value);if(next===readingActive)return;readingActive=next;render(false);}
+    function showLibrary(){if(disposed)return;sharedOpen=true;if(sidebar==='annotations')sidebar=null;render();}
     const resize = () => {if(disposed)return;root.classList.toggle('reading-panels-roomy',root.clientWidth>=880);placeSidebar();};
     const observer=typeof window.ResizeObserver==='function'?new window.ResizeObserver(resize):null;
     observer?.observe(root);listen(window,'resize',resize);resize();
     listen(metadataRoot,'close',()=>{if(sidebar==='metadata')close('metadata');});
     for(const panel of [aside,chat])listen(panel,'keydown',event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();close(panel===chat?'chat':sidebar);}});
+    if(libraryRoot)listen(libraryRoot,'keydown',event=>{if(event.key==='Escape'&&sidebar==='annotations'&&!event.defaultPrevented){event.preventDefault();sharedOpen=false;close('annotations');}});
     render(false);
-    return {toggle,show,close,setSide,paperChanged,visible,ready,dispose(){
+    return {toggle,show,close,setSide,paperChanged,setReadingActive,showLibrary,visible,ready,dispose(){
       if(disposed)return;disposed=true;observer?.disconnect();for(const off of listeners)off();
       if(lastChatVisible)onChatVisibility?.(false);
       for(const {element,parent,next,hidden,open} of originals){
@@ -90,6 +125,7 @@ window.PaperReadingPanels = (() => {
         element.hidden=hidden;
       }
       annotationsRoot.classList.remove('reading-annotations-content');metadataRoot.classList.remove('reading-metadata-content');conversationRoot.classList.remove('reading-conversation-content');
+      if(libraryRoot){libraryRoot.append(...libraryChildren);sharedHeader.remove();libraryContent.remove();libraryRoot.classList.remove('shared-reading-sidebar');delete libraryRoot.dataset.sidebarPanel;libraryRoot.parentNode.classList.remove('shared-sidebar-open');delete libraryRoot.parentNode.dataset.sidebarSide;annotationsRoot.removeAttribute('role');annotationsRoot.removeAttribute('aria-labelledby');}
       aside.remove();chat.remove();globalHost.remove();root.classList.remove('paper-reading-workspace','has-reading-sidebar','reading-panels-roomy');delete root.dataset.readingSide;
     }};
   }

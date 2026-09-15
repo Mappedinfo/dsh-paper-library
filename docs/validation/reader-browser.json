@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-14T16:49:32.162Z",
+  "verified_at": "2026-09-15T00:58:16.184Z",
   "checks": [
     "24-mixed-size-rotated-pages-open-in-one-continuous-reader",
     "actual-wheel-scroll-to-pages-12-and-24-updates-page-number",
@@ -12,6 +12,7 @@
     "contextual-citation-ribbon-copies-apa-and-downloads-biblatex",
     "floating-conversation-keeps-pdf-visible-and-preserves-draft-on-close-and-collapse",
     "741-430-1400px-reader-viewports-have-no-document-horizontal-overflow",
+    "annotation-ribbon-reopens-preserved-shared-notes-from-expanded-table",
     "ribbon-library-entry-retains-pagination-create-edit-trash-and-restore",
     "table-selection-opens-correct-pdf-through-reading-fullscreen-and-library-collapse-without-eager-pdf-load",
     "fullscreen-to-library-exits-focus-and-displays-catalog",
@@ -43,22 +44,22 @@
   "synthetic_original_unchanged": true,
   "scope": "Synthetic standalone UI behavior only; native model integration and long-session memory measured separately; no formal user validation",
   "screenshots": [
-    ".local/reader-browser-tOfIqY/reader-741.png",
-    ".local/reader-browser-tOfIqY/scrolled-page-24.png",
-    ".local/reader-browser-tOfIqY/page-error-before-retry.png",
-    ".local/reader-browser-tOfIqY/four-saved-markup-types.png",
-    ".local/reader-browser-tOfIqY/annotations-sidebar-right.png",
-    ".local/reader-browser-tOfIqY/annotations-sidebar-left.png",
-    ".local/reader-browser-tOfIqY/metadata-nonmodal-sidebar.png",
-    ".local/reader-browser-tOfIqY/fullscreen-741.png",
-    ".local/reader-browser-tOfIqY/floating-chat-retained-draft.png",
-    ".local/reader-browser-tOfIqY/reader-final-430.png",
-    ".local/reader-browser-tOfIqY/reader-final-1400.png",
-    ".local/reader-browser-tOfIqY/reader-final-741.png",
-    ".local/reader-browser-tOfIqY/catalog-final-741.png",
-    ".local/reader-browser-tOfIqY/cross-paper-reader.png",
-    ".local/reader-browser-tOfIqY/cross-paper-fullscreen.png",
-    ".local/reader-browser-tOfIqY/cross-paper-library-collapse.png"
+    ".local/reader-browser-nZfWWX/reader-741.png",
+    ".local/reader-browser-nZfWWX/scrolled-page-24.png",
+    ".local/reader-browser-nZfWWX/page-error-before-retry.png",
+    ".local/reader-browser-nZfWWX/four-saved-markup-types.png",
+    ".local/reader-browser-nZfWWX/annotations-sidebar-right.png",
+    ".local/reader-browser-nZfWWX/annotations-sidebar-left.png",
+    ".local/reader-browser-nZfWWX/metadata-nonmodal-sidebar.png",
+    ".local/reader-browser-nZfWWX/fullscreen-741.png",
+    ".local/reader-browser-nZfWWX/floating-chat-retained-draft.png",
+    ".local/reader-browser-nZfWWX/reader-final-430.png",
+    ".local/reader-browser-nZfWWX/reader-final-1400.png",
+    ".local/reader-browser-nZfWWX/reader-final-741.png",
+    ".local/reader-browser-nZfWWX/catalog-final-741.png",
+    ".local/reader-browser-nZfWWX/cross-paper-reader.png",
+    ".local/reader-browser-nZfWWX/cross-paper-fullscreen.png",
+    ".local/reader-browser-nZfWWX/cross-paper-library-collapse.png"
   ],
   "isolated_server_stopped": true
 }

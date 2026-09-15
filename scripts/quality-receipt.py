@@ -15,7 +15,7 @@ skills=Path.home()/".codex"/"skills"
 task_id="task-20260914-01a09ec9"
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--revision",type=int,default=1)
-parser.add_argument("--checkpoint",choices=["initial","intake","publication","promotion","paper-conversations","annotation-references","workbench","reader","language","theme"],default="initial")
+parser.add_argument("--checkpoint",choices=["initial","intake","publication","promotion","paper-conversations","annotation-references","workbench","reader","language","theme","sidebar"],default="initial")
 args=parser.parse_args()
 if args.revision<1:
     parser.error("revision must be positive")
@@ -37,6 +37,8 @@ elif args.checkpoint=="language":
     task_id="task-20260915-language-local-state"
 elif args.checkpoint=="theme":
     task_id="task-20260915-dsh-theme"
+elif args.checkpoint=="sidebar":
+    task_id="task-20260915-shared-reading-sidebar"
 stem="quality-receipt" if args.checkpoint=="initial" else f"quality-{args.checkpoint}"
 destination=root/(f".local/{stem}.json" if args.revision==1 else f".local/{stem}-v{args.revision}.json")
 # Replaying this completed checkpoint keeps the identical event payload. A later
@@ -80,6 +82,29 @@ if args.checkpoint=="theme":
             passed=evidence.get("ok") is True and evidence.get("themeAssetsAvailable") is True
         if not passed:
             raise SystemExit(f"Passing theme evidence required: {path}")
+if args.checkpoint=="sidebar":
+    criteria={
+        "compact_cards_and_shared_reading_rail":("docs/validation/sidebar-browser.json","test"),
+        "reading_position_and_annotation_edit_preserved":("docs/validation/sidebar-browser.json","test"),
+        "sidebar_state_keyboard_and_cleanup":("docs/validation/automated.json","test"),
+        "installed_local_assets":("docs/validation/sidebar-install.json","artifact_check"),
+    }
+    participants=[(name,role,(Path.home()/".agents"/"skills")/name/"SKILL.md") for name,role in [("frontend-design","primary"),("webapp-testing","support"),("task-execution","common"),("writing-quality","common")]]
+    for path,_ in criteria.values():
+        evidence=json.loads((root/path).read_text())
+        if path.endswith("automated.json"):
+            passed=bool(evidence.get("checks")) and all(check.get("status")=="pass" for check in evidence["checks"])
+        elif path.endswith("sidebar-browser.json"):
+            passed=(len(evidence.get("checks",[]))>=13
+                    and evidence.get("browser_errors")==[]
+                    and evidence.get("local_storage_writes")==0
+                    and evidence.get("external_requests")==0
+                    and evidence.get("model_requests")==0
+                    and evidence.get("synthetic_originals_unchanged") is True)
+        else:
+            passed=evidence.get("ok") is True and evidence.get("sharedSidebarAssetsAvailable") is True
+        if not passed:
+            raise SystemExit(f"Passing sidebar evidence required: {path}")
 if args.checkpoint=="language":
     criteria={
         "authoritative_model_translation_and_polish":("docs/validation/language-harness.json","test"),
@@ -227,7 +252,7 @@ if args.checkpoint in {"publication","promotion"}:
         inventory.write_text(json.dumps({"schema_version":1,"observation_id":f"{args.checkpoint}-runtime-20260914","observed_at":datetime.now(timezone.utc).isoformat(),"source_kind":"exposed_runtime_inventory","source_ref":f"route:{args.checkpoint}-runtime-20260914","skills":[{"runtime_id":identity[1],"provider":identity[0],"source_identity":identity[2]}]},indent=2)+"\n")
         inventory.chmod(0o600)
 receipt={"task_id":task_id,"event_id":task_id+f"-close-v{args.revision}","at":datetime.now(timezone.utc).isoformat(),"data":{
-    "scenario":{"initial":"local_plugin_implementation","intake":"automatic_paper_intake","publication":"public_repository_release","promotion":"community_plugin_promotion","paper-conversations":"native_per_paper_reading_conversation","annotation-references":"incremental_native_annotation_references","workbench":"compact_literature_workbench_review","reader":"continuous_pdf_reading_workspace_review","language":"local_language_learning_and_cross_browser_state","theme":"native_dsh_theme_and_typography"}[args.checkpoint],
+    "scenario":{"initial":"local_plugin_implementation","intake":"automatic_paper_intake","publication":"public_repository_release","promotion":"community_plugin_promotion","paper-conversations":"native_per_paper_reading_conversation","annotation-references":"incremental_native_annotation_references","workbench":"compact_literature_workbench_review","reader":"continuous_pdf_reading_workspace_review","language":"local_language_learning_and_cross_browser_state","theme":"native_dsh_theme_and_typography","sidebar":"shared_library_and_annotations_reading_sidebar"}[args.checkpoint],
     "skills":[{"id":name,"role":role,"source_hash":digest(path)} for name,role,path in participants],
     "criteria":[{"id":key,"required":True} for key in criteria],
     "self_assessment":{"outcome":"complete","completion_percent":100,"quality_score":4},

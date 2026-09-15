@@ -30,3 +30,46 @@
 .paper-reading-workspace .reading-panel-body p,.paper-reading-workspace .reading-panel-body blockquote,.paper-reading-workspace .reading-chat-content p{overflow-wrap:anywhere}
 .paper-reading-workspace [hidden]{display:none!important}
 @media(prefers-reduced-motion:reduce){.paper-reading-workspace *{scroll-behavior:auto}}
+
+/* One shared rail for selecting papers and revisiting their annotations. */
+.library-pane.shared-reading-sidebar{--shared-rail-width:214px;min-height:0}
+.reading-library-content{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;overflow:hidden}
+.shared-reading-sidebar>[hidden]{display:none!important}
+.reading-sidebar-header{display:flex;align-items:center;gap:2px;flex:none;min-height:35px;padding:0 6px;border-bottom:1px solid var(--line);background:var(--dsw-specific-sidebar-fill,var(--surface))}
+.reading-sidebar-tabs{display:flex;flex:1;min-width:0;align-self:stretch;gap:2px}
+.reading-sidebar-header .reading-panel-button{font-family:var(--sans);font-size:12px;font-weight:400;color:var(--muted);background:transparent;border:0;border-radius:5px;padding:5px 7px;cursor:pointer;white-space:nowrap}
+.reading-sidebar-tabs .reading-panel-button{border-radius:4px 4px 0 0}
+.reading-sidebar-header .reading-panel-button:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.reading-sidebar-tabs [aria-selected=true]{color:var(--ink);font-weight:500;box-shadow:inset 0 -2px var(--ink)}
+.reading-sidebar-header .reading-panel-button:focus-visible{outline:2px solid var(--dsw-alias-link);outline-offset:-2px}
+.reading-sidebar-header .reading-panel-button:disabled{opacity:.45;cursor:default}
+#reading-sidebar-side{font-size:15px;padding:4px}
+#reading-sidebar-close{display:none}
+.library-pane.shared-reading-sidebar #annotations-tab{flex:1;min-height:0;min-width:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;padding:7px;box-sizing:border-box}
+.shared-reading-sidebar .annotation-list{gap:7px}
+.shared-reading-sidebar .annotation-card{padding:8px;margin:0;border-radius:6px}
+.shared-reading-sidebar .annotation-meta{font-size:10px;gap:5px;margin-bottom:7px;flex-wrap:wrap}
+.shared-reading-sidebar .annotation-card blockquote{font-family:var(--sans);font-size:12px;line-height:1.5;margin:6px 0;padding-left:8px;overflow-wrap:anywhere}
+.shared-reading-sidebar .annotation-comment{font-size:12px;line-height:1.5;margin:8px 0;overflow-wrap:anywhere}
+.shared-reading-sidebar .annotation-actions{gap:4px;margin-top:6px;flex-wrap:wrap}
+.shared-reading-sidebar .annotation-actions .button{font-size:11px;padding:3px 5px}
+.shared-reading-sidebar .annotation-actions .button:first-child{padding-left:0}
+.shared-reading-sidebar .paper-chat-shortcuts{gap:4px;margin:10px 0;flex-wrap:wrap}
+.shared-reading-sidebar .paper-chat-shortcuts .button{font-size:11px;padding:5px;flex:auto}
+.shared-reading-sidebar .feedback-panel{margin-top:12px;padding:8px;font-size:11px}
+.shared-reading-sidebar .feedback-panel summary{font-size:11px}
+.workspace[data-sidebar-side=right]:not(.catalog-expanded){grid-template-columns:minmax(0,1fr) 214px}
+.workspace[data-sidebar-side=right]:not(.catalog-expanded)>.library-pane{grid-column:2;grid-row:1;border-right:0;border-left:1px solid var(--line)}
+.workspace[data-sidebar-side=right]:not(.catalog-expanded)>.detail-pane{grid-column:1;grid-row:1}
+@media(min-width:1250px){.workspace[data-sidebar-side=right]:not(.catalog-expanded){grid-template-columns:minmax(0,1fr) 235px}}
+@media(max-width:820px){.workspace[data-sidebar-side=right]:not(.catalog-expanded){grid-template-columns:minmax(0,1fr) 192px}}
+@media(max-width:620px){
+  body .workspace.shared-sidebar-open:not(.catalog-expanded){display:grid;grid-template-columns:190px minmax(0,1fr)}
+  body .workspace.shared-sidebar-open[data-sidebar-side=right]:not(.catalog-expanded){grid-template-columns:minmax(0,1fr) 190px}
+  body .workspace.shared-sidebar-open>.library-pane.shared-reading-sidebar{display:flex;min-width:0;height:100%}
+  .reading-sidebar-header #reading-sidebar-close{display:block;padding:4px}
+}
+body.reader-focused .workspace.shared-sidebar-open:not(.catalog-expanded){display:grid;grid-template-columns:214px minmax(0,1fr)}
+body.reader-focused .workspace.shared-sidebar-open[data-sidebar-side=right]:not(.catalog-expanded){grid-template-columns:minmax(0,1fr) 214px}
+body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-sidebar{display:flex;height:100%}
+.reader-focused .reading-sidebar-header #reading-sidebar-close{display:block;padding:4px}

@@ -34,6 +34,21 @@ const readingWorkspace = status.result.reading_workspace === true
 const durableState = status.result.durable_state === true
 const languageLearning = status.result.language_learning === true
 let themeAssetsAvailable = false
+let sharedSidebarAssetsAvailable = false
+if (flags.get('--require-sidebar') === 'true') {
+  for (const [file, markers] of [
+    ['reading-panels.js', ['reading-sidebar-library', 'reading-sidebar-annotations', 'setReadingActive']],
+    ['reading-panels.css', ['shared-reading-sidebar', 'shared-sidebar-open']],
+    ['reading-shell.js', ['setReadingActive']],
+    ['app.js', ['libraryRoot:document.querySelector', 'onAnnotationsRequest']],
+  ]) {
+    const asset = await fetch(`${address.origin}/api/paper-library/${file}`, {headers,signal:AbortSignal.timeout(10000)})
+    assert.equal(asset.status, 200, `Missing shared sidebar asset: ${file}`)
+    const source = await asset.text()
+    for (const marker of markers) assert.ok(source.includes(marker), `Stale shared sidebar asset: ${file}`)
+  }
+  sharedSidebarAssetsAvailable = true
+}
 if (flags.get('--require-theme') === 'true') {
   for (const file of ['theme.js', 'theme.css']) {
     const asset = await fetch(`${address.origin}/api/paper-library/${file}`, {headers,signal:AbortSignal.timeout(10000)})
@@ -78,6 +93,6 @@ if (flags.get('--require-chat') === 'true' || flags.get('--require-references') 
   assert.ok(script.includes('PaperLibraryChat'))
   if (flags.get('--require-references') === 'true') assert.ok(script.includes('chat_catalog') && script.includes('annotation_refs'))
 }
-const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, durableState, languageLearning, ...(themeAssetsAvailable ? {themeAssetsAvailable} : {}), chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
+const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, durableState, languageLearning, ...(themeAssetsAvailable ? {themeAssetsAvailable} : {}), ...(sharedSidebarAssetsAvailable ? {sharedSidebarAssetsAvailable} : {}), chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
 if (flags.get('--output')) await writeFile(flags.get('--output'), JSON.stringify(report, null, 2) + '\n')
 console.log(JSON.stringify(report))

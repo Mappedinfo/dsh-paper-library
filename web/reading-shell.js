@@ -57,6 +57,7 @@ window.PaperReadingShell = (() => {
     function status(text, error=false){message.textContent=text||hints[tool];message.classList.toggle('error',error);}
     function sync(){
       const table=Boolean(workbench()?.isTable()), active=Boolean(state.active&&!state.active.archived), pdf=active&&Boolean(state.active.pdf);
+      panels()?.setReadingActive?.(!table&&active&&state.tab!=='graph');
       if(table&&focused)leaveFocus();
       const mode=table?'library':context;
       document.body.classList.toggle('library-mode',table);document.body.classList.toggle('has-paper',active);
@@ -64,7 +65,7 @@ window.PaperReadingShell = (() => {
       citations.setAttribute('aria-pressed',String(!table&&context==='citations'));citations.disabled=!active;
       for(const tab of ribbon.querySelectorAll('[data-tab]')){
         const isPanel=tab.dataset.tab==='annotations'||tab.dataset.tab==='conversation';
-        const on=isPanel?panels()?.visible(tab.dataset.tab==='conversation'?'chat':'annotations'):!table&&state.tab===tab.dataset.tab;
+        const on=isPanel?!table&&state.tab!=='graph'&&panels()?.visible(tab.dataset.tab==='conversation'?'chat':'annotations'):!table&&state.tab===tab.dataset.tab;
         tab.disabled=!active;tab.classList.toggle('active',Boolean(on));tab.setAttribute('aria-pressed',String(Boolean(on)));
       }
       $('metadata-open').disabled=!active;$('metadata-open').setAttribute('aria-pressed',String(Boolean(panels()?.visible('metadata'))));

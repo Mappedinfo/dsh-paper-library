@@ -108,6 +108,7 @@ function renderList() {
   const fragment = document.createDocumentFragment();
   for (const item of state.items) {
     const card = el('button', `paper-card${state.active?.id === item.id ? ' selected' : ''}`);
+    card.title=[title(item),[authors(item),year(item)].filter(Boolean).join(' · '),item['container-title'],item.citekey].filter(Boolean).join('\n');
     card.type = 'button'; card.dataset.id = item.id; card.setAttribute('aria-pressed', String(state.active?.id === item.id));
     card.append(el('h3', '', title(item)), el('p', '', `${authors(item)}${year(item) ? ` · ${year(item)}` : ''}`));
     card.append(el('p', 'card-journal', item['container-title'] || typeNames[item.type] || '文献资料'));
@@ -777,7 +778,7 @@ $('export-library').addEventListener('click', exportLibrary);
 $('back-library').addEventListener('click', () => { document.querySelector('.workspace').classList.remove('show-detail'); paperChatUI?.visible(false); });
 for (const button of document.querySelectorAll('[data-tab]')) button.addEventListener('click', () => {
   const panel = button.dataset.tab === 'annotations' ? 'annotations' : button.dataset.tab === 'conversation' ? 'chat' : null;
-  if (panel && readingPanels?.visible(panel) && state.tab !== 'graph') { readingPanels.close(panel); void switchTab('reader'); }
+  if (panel && readingPanels?.visible(panel) && state.tab !== 'graph' && !workbenchUI?.isTable()) { readingPanels.close(panel); void switchTab('reader'); }
   else void switchTab(button.dataset.tab);
 });
 $('import-open').addEventListener('click', () => { errorAt('import-error', null); $('import-result').textContent = ''; openDialog('import-dialog'); });
@@ -819,7 +820,7 @@ $('feedback-model').addEventListener('change', () => { const model = manualModel
 $('link-open').addEventListener('click', openLink); $('link-form').addEventListener('submit', saveLink); $('link-search').addEventListener('input', debounce(loadLinkTargets));
 function activateGraphNode(event) { const node = event.target.closest('[data-graph-id]'); if (node && node.dataset.nodeType !== 'tag') openPaper(node.dataset.graphId); }
 $('graph-stage').addEventListener('click', activateGraphNode); $('graph-stage').addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateGraphNode(event); } });
-document.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close(); document.querySelector('.workspace').classList.remove('show-detail'); paperChatUI?.visible(false); $('search').focus(); $('search').select(); } });
+document.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close(); if(readingPanels&&state.active&&!workbenchUI?.isTable())readingPanels.showLibrary();else document.querySelector('.workspace').classList.remove('show-detail'); $('search').focus(); $('search').select(); } });
 function publishReaderState() {
   if (restoringReader || !state.active || workbenchUI?.isTable() || (workbenchUI && readerPaperId !== state.active.id)) return true;
   const snapshot = { paperId: state.active.id, page: state.page, tab: state.tab, chatDraft: paperChatUI?.draft() || '', chatContext: paperChatUI?.context() || { annotationRefs: [] },
@@ -933,7 +934,7 @@ paperChatUI = window.PaperLibraryChat?.create({ api, toast, persistence, getPape
   navigate: switchTab, navigateReference: (paperId, page) => openReferencedPaper({ paperId, page }), changed: publishReaderState,
   savedFeedback: async id => { if (state.active?.id !== id) return; await loadFeedback(id); await loadAnnotations(id); if (state.active.pdf) await refreshPage(); },
 });
-readingPanels = window.PaperReadingPanels?.create({persistence,root:$('reading-workspace'),annotationsRoot:$('annotations-tab'),conversationRoot:$('conversation-tab'),metadataRoot:$('metadata-dialog'),
+readingPanels = window.PaperReadingPanels?.create({persistence,root:$('reading-workspace'),annotationsRoot:$('annotations-tab'),conversationRoot:$('conversation-tab'),metadataRoot:$('metadata-dialog'),libraryRoot:document.querySelector('.library-pane'),onAnnotationsRequest:()=>void switchTab('annotations'),
   onChatVisibility: visible => paperChatUI?.visible(visible && state.tab!=='graph' && !workbenchUI?.isTable()),
   onPanelChange: value => { workbenchUI?.metadataVisibility(value.sidebar==='metadata'); readingShell?.sync(); publishReaderState(); }, toast,
 });

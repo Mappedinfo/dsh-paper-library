@@ -1,0 +1,18 @@
+{
+  "verified_at": "2026-09-15T00:54:18.972Z",
+  "ok": true,
+  "authenticatedHost": true,
+  "nativeConversationsIdle": true,
+  "libraryAvailable": true,
+  "paperConversations": true,
+  "annotationReferences": true,
+  "workbench": true,
+  "readingWorkspace": true,
+  "durableState": true,
+  "languageLearning": true,
+  "themeAssetsAvailable": true,
+  "sharedSidebarAssetsAvailable": true,
+  "chatScriptAvailable": true,
+  "modelRequestsMade": 0,
+  "privateDocumentsRead": false
+}

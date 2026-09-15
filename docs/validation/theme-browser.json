@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-14T17:12:53.440Z",
+  "verified_at": "2026-09-15T00:57:14.440Z",
   "checks": [
     "light-430px-catalog-reader-sidebars-language-graph-and-dialog-fit-with-readable-system-typography",
     "light-741px-catalog-reader-sidebars-language-graph-and-dialog-fit-with-readable-system-typography",
@@ -36,11 +36,11 @@
             21
           ],
           "background": [
-            255,
-            255,
-            255
+            254,
+            254,
+            254
           ],
-          "ratio": 18.896452054380127,
+          "ratio": 18.736319868405797,
           "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
         },
         {
@@ -94,18 +94,18 @@
           "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
         },
         {
-          "selector": "#reading-panel-side",
+          "selector": "#reading-sidebar-side",
           "foreground": [
             97,
             102,
             107
           ],
           "background": [
-            255,
-            255,
-            255
+            249,
+            250,
+            251
           ],
-          "ratio": 5.799289506181867,
+          "ratio": 5.549422196980242,
           "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
         }
       ]
@@ -319,18 +319,18 @@
           "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
         },
         {
-          "selector": "#reading-panel-side",
+          "selector": "#reading-sidebar-side",
           "foreground": [
             97,
             102,
             107
           ],
           "background": [
-            255,
-            255,
-            255
+            249,
+            250,
+            251
           ],
-          "ratio": 5.799289506181867,
+          "ratio": 5.549422196980242,
           "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
         }
       ]
@@ -544,18 +544,18 @@
           "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
         },
         {
-          "selector": "#reading-panel-side",
+          "selector": "#reading-sidebar-side",
           "foreground": [
             97,
             102,
             107
           ],
           "background": [
-            255,
-            255,
-            255
+            249,
+            250,
+            251
           ],
-          "ratio": 5.799289506181867,
+          "ratio": 5.549422196980242,
           "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
         }
       ]
@@ -804,18 +804,18 @@
           "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
         },
         {
-          "selector": "#reading-panel-side",
+          "selector": "#reading-sidebar-side",
           "foreground": [
             207,
             211,
             214
           ],
           "background": [
-            35,
-            35,
-            36
+            27,
+            27,
+            28
           ],
-          "ratio": 10.424919542025554,
+          "ratio": 11.426354977256201,
           "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
         }
       ]
@@ -1029,18 +1029,18 @@
           "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
         },
         {
-          "selector": "#reading-panel-side",
+          "selector": "#reading-sidebar-side",
           "foreground": [
             207,
             211,
             214
           ],
           "background": [
-            35,
-            35,
-            36
+            27,
+            27,
+            28
           ],
-          "ratio": 10.424919542025554,
+          "ratio": 11.426354977256201,
           "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
         }
       ]
@@ -1254,18 +1254,18 @@
           "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
         },
         {
-          "selector": "#reading-panel-side",
+          "selector": "#reading-sidebar-side",
           "foreground": [
             207,
             211,
             214
           ],
           "background": [
-            35,
-            35,
-            36
+            27,
+            27,
+            28
           ],
-          "ratio": 10.424919542025554,
+          "ratio": 11.426354977256201,
           "font": "-apple-system, \"system-ui\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
         }
       ]
@@ -1452,46 +1452,46 @@
   "local_storage_writes": 0,
   "synthetic_originals_unchanged": true,
   "screenshots": [
-    ".local/theme-browser-RjLPKm/light-catalog-430.png",
-    ".local/theme-browser-RjLPKm/light-annotations-430.png",
-    ".local/theme-browser-RjLPKm/light-language-430.png",
-    ".local/theme-browser-RjLPKm/light-metadata-430.png",
-    ".local/theme-browser-RjLPKm/light-graph-430.png",
-    ".local/theme-browser-RjLPKm/light-dialog-430.png",
-    ".local/theme-browser-RjLPKm/light-catalog-741.png",
-    ".local/theme-browser-RjLPKm/light-annotations-741.png",
-    ".local/theme-browser-RjLPKm/light-language-741.png",
-    ".local/theme-browser-RjLPKm/light-metadata-741.png",
-    ".local/theme-browser-RjLPKm/light-graph-741.png",
-    ".local/theme-browser-RjLPKm/light-dialog-741.png",
-    ".local/theme-browser-RjLPKm/light-catalog-1400.png",
-    ".local/theme-browser-RjLPKm/light-annotations-1400.png",
-    ".local/theme-browser-RjLPKm/light-language-1400.png",
-    ".local/theme-browser-RjLPKm/light-metadata-1400.png",
-    ".local/theme-browser-RjLPKm/light-graph-1400.png",
-    ".local/theme-browser-RjLPKm/light-dialog-1400.png",
-    ".local/theme-browser-RjLPKm/light-error.png",
-    ".local/theme-browser-RjLPKm/dark-catalog-430.png",
-    ".local/theme-browser-RjLPKm/dark-annotations-430.png",
-    ".local/theme-browser-RjLPKm/dark-language-430.png",
-    ".local/theme-browser-RjLPKm/dark-metadata-430.png",
-    ".local/theme-browser-RjLPKm/dark-graph-430.png",
-    ".local/theme-browser-RjLPKm/dark-dialog-430.png",
-    ".local/theme-browser-RjLPKm/dark-catalog-741.png",
-    ".local/theme-browser-RjLPKm/dark-annotations-741.png",
-    ".local/theme-browser-RjLPKm/dark-language-741.png",
-    ".local/theme-browser-RjLPKm/dark-metadata-741.png",
-    ".local/theme-browser-RjLPKm/dark-graph-741.png",
-    ".local/theme-browser-RjLPKm/dark-dialog-741.png",
-    ".local/theme-browser-RjLPKm/dark-catalog-1400.png",
-    ".local/theme-browser-RjLPKm/dark-annotations-1400.png",
-    ".local/theme-browser-RjLPKm/dark-language-1400.png",
-    ".local/theme-browser-RjLPKm/dark-metadata-1400.png",
-    ".local/theme-browser-RjLPKm/dark-graph-1400.png",
-    ".local/theme-browser-RjLPKm/dark-dialog-1400.png",
-    ".local/theme-browser-RjLPKm/dark-error.png",
-    ".local/theme-browser-RjLPKm/host-live-theme-light.png",
-    ".local/theme-browser-RjLPKm/host-live-theme-dark.png"
+    ".local/theme-browser-Df9v4b/light-catalog-430.png",
+    ".local/theme-browser-Df9v4b/light-annotations-430.png",
+    ".local/theme-browser-Df9v4b/light-language-430.png",
+    ".local/theme-browser-Df9v4b/light-metadata-430.png",
+    ".local/theme-browser-Df9v4b/light-graph-430.png",
+    ".local/theme-browser-Df9v4b/light-dialog-430.png",
+    ".local/theme-browser-Df9v4b/light-catalog-741.png",
+    ".local/theme-browser-Df9v4b/light-annotations-741.png",
+    ".local/theme-browser-Df9v4b/light-language-741.png",
+    ".local/theme-browser-Df9v4b/light-metadata-741.png",
+    ".local/theme-browser-Df9v4b/light-graph-741.png",
+    ".local/theme-browser-Df9v4b/light-dialog-741.png",
+    ".local/theme-browser-Df9v4b/light-catalog-1400.png",
+    ".local/theme-browser-Df9v4b/light-annotations-1400.png",
+    ".local/theme-browser-Df9v4b/light-language-1400.png",
+    ".local/theme-browser-Df9v4b/light-metadata-1400.png",
+    ".local/theme-browser-Df9v4b/light-graph-1400.png",
+    ".local/theme-browser-Df9v4b/light-dialog-1400.png",
+    ".local/theme-browser-Df9v4b/light-error.png",
+    ".local/theme-browser-Df9v4b/dark-catalog-430.png",
+    ".local/theme-browser-Df9v4b/dark-annotations-430.png",
+    ".local/theme-browser-Df9v4b/dark-language-430.png",
+    ".local/theme-browser-Df9v4b/dark-metadata-430.png",
+    ".local/theme-browser-Df9v4b/dark-graph-430.png",
+    ".local/theme-browser-Df9v4b/dark-dialog-430.png",
+    ".local/theme-browser-Df9v4b/dark-catalog-741.png",
+    ".local/theme-browser-Df9v4b/dark-annotations-741.png",
+    ".local/theme-browser-Df9v4b/dark-language-741.png",
+    ".local/theme-browser-Df9v4b/dark-metadata-741.png",
+    ".local/theme-browser-Df9v4b/dark-graph-741.png",
+    ".local/theme-browser-Df9v4b/dark-dialog-741.png",
+    ".local/theme-browser-Df9v4b/dark-catalog-1400.png",
+    ".local/theme-browser-Df9v4b/dark-annotations-1400.png",
+    ".local/theme-browser-Df9v4b/dark-language-1400.png",
+    ".local/theme-browser-Df9v4b/dark-metadata-1400.png",
+    ".local/theme-browser-Df9v4b/dark-graph-1400.png",
+    ".local/theme-browser-Df9v4b/dark-dialog-1400.png",
+    ".local/theme-browser-Df9v4b/dark-error.png",
+    ".local/theme-browser-Df9v4b/host-live-theme-light.png",
+    ".local/theme-browser-Df9v4b/host-live-theme-dark.png"
   ],
   "scope": "Actual Chromium UI, standalone system appearance, real plugin bridge and Harness CSS in an isolated host fixture. No live user library, provider quality or formal usability claim."
 }

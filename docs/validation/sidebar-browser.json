@@ -1,0 +1,743 @@
+{
+  "verified_at": "2026-09-15T00:51:49.974Z",
+  "checks": [
+    "light-681px-cards-at-most-90px-and-library-notes-share-one-sidebar-with-stable-reader-position",
+    "light-1400px-cards-at-most-90px-and-library-notes-share-one-sidebar-with-stable-reader-position",
+    "light-shared-note-page-link-and-edit-save-standard-pdf-annotation",
+    "light-metadata-and-floating-conversation-preserve-drafts-with-shared-sidebar",
+    "light-expanded-table-retains-search-sort-scope-create-import-export-and-pagination",
+    "light-430px-and-fullscreen-share-sidebar-and-close-back-to-pdf",
+    "dark-681px-cards-at-most-90px-and-library-notes-share-one-sidebar-with-stable-reader-position",
+    "dark-1400px-cards-at-most-90px-and-library-notes-share-one-sidebar-with-stable-reader-position",
+    "dark-shared-note-page-link-and-edit-save-standard-pdf-annotation",
+    "dark-metadata-and-floating-conversation-preserve-drafts-with-shared-sidebar",
+    "dark-expanded-table-retains-search-sort-scope-create-import-export-and-pagination",
+    "dark-430px-and-fullscreen-share-sidebar-and-close-back-to-pdf",
+    "original-synthetic-pdfs-unchanged-zero-external-model-browser-errors-and-storage-writes"
+  ],
+  "viewports": [
+    [
+      681,
+      518
+    ],
+    [
+      1400,
+      950
+    ],
+    [
+      430,
+      800
+    ]
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "card_height_limit": 90,
+  "card_measurements": [
+    {
+      "mode": "light",
+      "width": 681,
+      "cards": [
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 23: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 22: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 21: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 20: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 19: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 18: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 17: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 16: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 15: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 14: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 13: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 12: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 11: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 10: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 9: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 8: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 7: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 6: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 5: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 4: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 3: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 2: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 1: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 0: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic shared sidebar acceptance: preserving continuous reading while a compact library and standard PDF annotations occupy the same navigation column",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic second reader identity",
+          "font": "12px"
+        }
+      ]
+    },
+    {
+      "mode": "light",
+      "width": 1400,
+      "cards": [
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 23: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 22: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 21: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 20: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 19: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 18: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 17: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 16: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 15: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 14: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 13: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 12: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 11: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 10: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 9: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 8: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 7: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 6: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 5: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 4: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 3: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 2: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 1: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 0: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic shared sidebar acceptance: preserving continuous reading while a compact library and standard PDF annotations occupy the same navigation column",
+          "font": "12px"
+        },
+        {
+          "height": 67.875,
+          "title": "Synthetic second reader identity",
+          "font": "12px"
+        }
+      ]
+    },
+    {
+      "mode": "dark",
+      "width": 681,
+      "cards": [
+        {
+          "height": 84.0625,
+          "title": "Synthetic shared sidebar acceptance: preserving continuous reading while a compact library and standard PDF annotations occupy the same navigation column",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 23: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 22: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 21: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 20: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 19: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 18: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 17: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 16: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 15: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 14: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 13: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 12: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 11: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 10: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 9: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 8: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 7: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 6: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 5: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 4: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 3: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 2: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 1: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 0: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic second reader identity",
+          "font": "12px"
+        }
+      ]
+    },
+    {
+      "mode": "dark",
+      "width": 1400,
+      "cards": [
+        {
+          "height": 84.0625,
+          "title": "Synthetic shared sidebar acceptance: preserving continuous reading while a compact library and standard PDF annotations occupy the same navigation column",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 23: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 22: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 21: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 20: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 19: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 18: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 17: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 16: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 15: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 14: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 13: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 12: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 11: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 10: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 9: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 8: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 7: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 6: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 5: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 4: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 3: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 2: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 1: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 84.0625,
+          "title": "Synthetic compact catalog 0: a deliberately long research title with enough words to exercise wrapping and truncation",
+          "font": "12px"
+        },
+        {
+          "height": 67.875,
+          "title": "Synthetic second reader identity",
+          "font": "12px"
+        }
+      ]
+    }
+  ],
+  "reader_state_measurements": [
+    {
+      "label": "light 681 library to annotations",
+      "before": {
+        "page": "6",
+        "scroll": 2775
+      },
+      "after": {
+        "page": "6",
+        "scroll": 2775
+      }
+    },
+    {
+      "label": "light 681 annotations to library",
+      "before": {
+        "page": "6",
+        "scroll": 2775
+      },
+      "after": {
+        "page": "6",
+        "scroll": 2775
+      }
+    },
+    {
+      "label": "light 681 reopened annotations",
+      "before": {
+        "page": "6",
+        "scroll": 2775
+      },
+      "after": {
+        "page": "6",
+        "scroll": 2775
+      }
+    },
+    {
+      "label": "light 1400 library to annotations",
+      "before": {
+        "page": "6",
+        "scroll": 6296
+      },
+      "after": {
+        "page": "6",
+        "scroll": 6296
+      }
+    },
+    {
+      "label": "light 1400 annotations to library",
+      "before": {
+        "page": "6",
+        "scroll": 6296
+      },
+      "after": {
+        "page": "6",
+        "scroll": 6296
+      }
+    },
+    {
+      "label": "light 1400 reopened annotations",
+      "before": {
+        "page": "6",
+        "scroll": 6296
+      },
+      "after": {
+        "page": "6",
+        "scroll": 6296
+      }
+    },
+    {
+      "label": "dark 681 library to annotations",
+      "before": {
+        "page": "6",
+        "scroll": 2775
+      },
+      "after": {
+        "page": "6",
+        "scroll": 2775
+      }
+    },
+    {
+      "label": "dark 681 annotations to library",
+      "before": {
+        "page": "6",
+        "scroll": 2775
+      },
+      "after": {
+        "page": "6",
+        "scroll": 2775
+      }
+    },
+    {
+      "label": "dark 681 reopened annotations",
+      "before": {
+        "page": "6",
+        "scroll": 2775
+      },
+      "after": {
+        "page": "6",
+        "scroll": 2775
+      }
+    },
+    {
+      "label": "dark 1400 library to annotations",
+      "before": {
+        "page": "6",
+        "scroll": 6296
+      },
+      "after": {
+        "page": "6",
+        "scroll": 6296
+      }
+    },
+    {
+      "label": "dark 1400 annotations to library",
+      "before": {
+        "page": "6",
+        "scroll": 6296
+      },
+      "after": {
+        "page": "6",
+        "scroll": 6296
+      }
+    },
+    {
+      "label": "dark 1400 reopened annotations",
+      "before": {
+        "page": "6",
+        "scroll": 6296
+      },
+      "after": {
+        "page": "6",
+        "scroll": 6296
+      }
+    }
+  ],
+  "model_requests": 0,
+  "external_requests": 0,
+  "browser_errors": [],
+  "local_storage_writes": 0,
+  "synthetic_originals_unchanged": true,
+  "screenshots": [
+    ".local/sidebar-browser-GpcSM2/light-compact-library-681.png",
+    ".local/sidebar-browser-GpcSM2/light-shared-annotations-681.png",
+    ".local/sidebar-browser-GpcSM2/light-shared-right-681.png",
+    ".local/sidebar-browser-GpcSM2/light-compact-library-1400.png",
+    ".local/sidebar-browser-GpcSM2/light-shared-annotations-1400.png",
+    ".local/sidebar-browser-GpcSM2/light-shared-right-1400.png",
+    ".local/sidebar-browser-GpcSM2/light-table-681.png",
+    ".local/sidebar-browser-GpcSM2/light-shared-annotations-430.png",
+    ".local/sidebar-browser-GpcSM2/light-fullscreen-annotations-430.png",
+    ".local/sidebar-browser-GpcSM2/dark-compact-library-681.png",
+    ".local/sidebar-browser-GpcSM2/dark-shared-annotations-681.png",
+    ".local/sidebar-browser-GpcSM2/dark-shared-right-681.png",
+    ".local/sidebar-browser-GpcSM2/dark-compact-library-1400.png",
+    ".local/sidebar-browser-GpcSM2/dark-shared-annotations-1400.png",
+    ".local/sidebar-browser-GpcSM2/dark-shared-right-1400.png",
+    ".local/sidebar-browser-GpcSM2/dark-table-681.png",
+    ".local/sidebar-browser-GpcSM2/dark-shared-annotations-430.png",
+    ".local/sidebar-browser-GpcSM2/dark-fullscreen-annotations-430.png"
+  ],
+  "scope": "Actual Chromium with isolated synthetic library and host file storage. Shared sidebar layout and reader recovery; no real library or provider and no formal user validation."
+}

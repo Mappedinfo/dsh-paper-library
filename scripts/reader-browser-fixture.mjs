@@ -123,7 +123,7 @@ try {
     assert.equal(injectedFailures, 1); record('failed-page-retains-placeholder-and-explicit-retry-clears-error-and-loads-that-page');
     await jump(1);
     await page.locator('[data-tab="annotations"]').click();
-    if (await page.locator('#reading-side-panel').isVisible()) await page.getByRole('button', { name: '收起阅读侧栏', exact: true }).click();
+    if (await page.locator('.library-pane #annotations-tab').isVisible()) await page.locator('#reading-sidebar-library').click();
     const colors = { highlight: '#fed766', underline: '#2674ba', strikeout: '#c53b45', note: '#3a9365' };
     for (const type of ['highlight', 'underline', 'strikeout', 'note']) {
       await page.locator(`#reader-tool-${type}`).click();
@@ -149,17 +149,17 @@ try {
     }
     await screenshot('four-saved-markup-types'); record('mouse-selection-and-page-click-save-four-standard-native-pdf-types-with-chosen-colors');
     await page.locator('#reader-tool-select').click(); await page.locator('#reader-annotations').click();
-    await page.locator('#reading-side-panel').waitFor(); await visiblePDF();
-    await page.locator('#reading-panel-side').click();
+    await page.locator('.library-pane #annotations-tab').waitFor(); assert.equal(await page.locator('#reading-side-panel').isVisible(), false); await visiblePDF();
+    await page.locator('#reading-sidebar-side').click();
     assert.equal(await page.locator('#reading-workspace').getAttribute('data-reading-side'), 'right');
     await screenshot('annotations-sidebar-right');
-    await page.locator('#reading-panel-side').click();
+    await page.locator('#reading-sidebar-side').click();
     assert.equal(await page.locator('#reading-workspace').getAttribute('data-reading-side'), 'left');
     await screenshot('annotations-sidebar-left');
     const noteCard = page.locator('#annotation-list .annotation-card').filter({ hasText: 'Synthetic existing page 12 note' });
     await noteCard.locator('[data-note-action="page"]').click(); await waitPage(12); await ready(12); await visiblePDF();
     record('annotation-sidebar-switches-left-right-and-note-click-returns-to-page-12');
-    await page.getByRole('button', { name: '收起阅读侧栏', exact: true }).click();
+    await page.locator('#reading-sidebar-library').click();
     await page.locator('#metadata-open').click(); await page.locator('#metadata-dialog').waitFor();
     assert.equal(await page.locator('#metadata-dialog').evaluate(dialog => dialog.matches(':modal')), false);
     await visiblePDF(); await page.locator('#edit-title').fill(`${paper.title} edited in sidebar`);
@@ -204,6 +204,21 @@ try {
       await screenshot(`reader-final-${width}`);
     }
     record('741-430-1400px-reader-viewports-have-no-document-horizontal-overflow');
+    await page.locator('#reading-sidebar-annotations').click();
+    await page.locator('.library-pane #annotations-tab').waitFor();
+    const annotationReturnPage = await page.locator('#page-number').inputValue();
+    await page.locator('#workspace-library').click(); await page.locator('#catalog-table table').waitFor();
+    assert.equal(await page.locator('[data-tab="annotations"]').getAttribute('aria-pressed'), 'false');
+    assert.equal(await page.locator('.library-pane #annotations-tab').isVisible(), false);
+    await page.locator('[data-tab="annotations"]').click();
+    await page.locator('#catalog-table').waitFor({ state: 'hidden' });
+    await page.locator('.library-pane #annotations-tab').waitFor();
+    assert.equal(await page.locator('#reading-side-panel').isVisible(), false);
+    assert.equal(await page.locator('#page-number').inputValue(), annotationReturnPage);
+    await visiblePDF();
+    assert.equal(await page.locator('#annotation-list .annotation-card').count(), 5);
+    await page.locator('#reading-sidebar-library').click();
+    record('annotation-ribbon-reopens-preserved-shared-notes-from-expanded-table');
     await page.locator('#workspace-library').click(); await page.locator('#catalog-table table').waitFor();
     await page.locator('#search').fill('Synthetic reader catalog'); await page.locator('#list-range').filter({ hasText: '1–40 / 44' }).waitFor();
     await page.locator('#catalog-sort').selectOption('title'); await page.locator('#next-list').click();
