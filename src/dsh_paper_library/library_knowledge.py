@@ -180,7 +180,7 @@ def source_ids(library, ids):
     return sources
 
 
-def source_put(library, request):
+def source_put(library, request, *, trusted_provenance=None):
     entity = entity_of(library, request.get("entity"))
     kind = request.get("kind")
     if kind not in {"annotation", "official-excerpt", "user-text", "metadata", "source-note"}:
@@ -210,6 +210,10 @@ def source_put(library, request):
     if kind == "official-excerpt" and not url:
         raise ValueError("KNOWLEDGE_INVALID: official excerpt requires its source URL")
     value = {"entity": entity, "kind": kind, "text": content, "locator": locator, "url": url, "title": text(request.get("title", ""), "source title", 500, True), "verification": "source-note" if kind in {"annotation", "user-text", "source-note"} else "metadata-only" if kind == "metadata" else "unverified", **provenance}
+    # Only a server-side extractor can attach file-version provenance. The
+    # public source_put request never forwards a client-supplied value here.
+    if trusted_provenance is not None:
+        value["pdf_snapshot"] = trusted_provenance
     value["content_hash"] = digest(content)
     id = "ks-" + digest(encoded(value))
     value.update(id=id, created_at=stamp())

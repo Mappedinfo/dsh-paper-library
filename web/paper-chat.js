@@ -394,6 +394,10 @@ window.PaperLibraryChat = {
         contextLabel(); remember();
       },
       restoreDraft(text) { $('paper-chat-input').value = typeof text === 'string' ? text.slice(0, 12000) : ''; remember(); },
+      async saveDraft() {
+        if (!chat.paperId || chat.draftLoading) throw new Error('论文对话草稿尚未恢复。');
+        if (persistence) await persistence.put(`chat:${chat.paperId}`, { draft:$('paper-chat-input').value, annotationRefs:chat.notes.map(ref=>({...ref})), selection:chat.selection, failed:chat.failed });
+      },
       dispose() { remember(false);stopTimer(); for (const request of pending.values()) { clearTimeout(request.timer); request.reject(new Error('阅读面板已关闭。')); } pending.clear(); },
     };
   },

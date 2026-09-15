@@ -14,6 +14,8 @@
   <link rel="stylesheet" href="./language-learning.css">
   <link rel="stylesheet" href="./theme.css">
   <link rel="stylesheet" href="./resource-library.css">
+  <link rel="stylesheet" href="./paper-analysis.css">
+  <script src="./paper-analysis.js" defer></script>
   <script src="./theme.js" defer></script>
   <script src="./local-state.js" defer></script>
   <script src="./paper-chat.js" defer></script>
@@ -39,8 +41,7 @@
   </header>
   <main class="workspace">
     <section class="library-pane" aria-label="文献与数据集库">
-      <div class="pane-heading"><div><p class="eyebrow">YOUR RESEARCH SHELF</p><h1>库 <span id="item-count" class="count">—</span></h1></div><div class="shelf-actions"><button id="export-library" class="button subtle" title="导出全部文献为 BibLaTeX">导出文献库</button><button id="refresh" class="icon-button" title="刷新文献库" aria-label="刷新文献库">↻</button></div></div>
-      <label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="检索标题、作者、标签…" autocomplete="off" aria-label="检索文献"><kbd>⌘ K</kbd></label>
+      <div class="pane-heading"><div><p class="eyebrow">YOUR RESEARCH SHELF</p><h1>库 <span id="item-count" class="count">—</span></h1></div><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="检索标题、作者、标签…" autocomplete="off" aria-label="检索文献与数据集"><kbd>⌘ K</kbd></label><div class="shelf-actions"><button id="export-library" class="button subtle" title="导出全部文献为 BibLaTeX">导出文献库</button><button id="refresh" class="icon-button" title="刷新文献库" aria-label="刷新文献库">↻</button></div></div>
       <form id="quick-import-form" class="quick-import"><label for="quick-import-source">粘贴论文链接或 DOI，自动保存</label><div><input id="quick-import-source" type="text" placeholder="https://… 或 10.…" autocomplete="off" aria-label="粘贴论文链接或 DOI 自动导入"><button type="submit" class="icon-button" aria-label="导入链接">↵</button></div><p>也可把一个或多个 PDF 拖到窗口任意位置。</p></form>
       <div class="list-heading"><span id="search-summary"></span></div>
       <div id="library-error" class="inline-error" role="alert" hidden></div>

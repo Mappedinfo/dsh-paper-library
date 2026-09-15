@@ -1,0 +1,22 @@
+{
+  "verified_at": "2026-09-15T08:40:39.425Z",
+  "ok": true,
+  "checks": [
+    "selection-alone-and-invalid-page-range-never-start-model",
+    "background-selected-page-job-saves-pending-sourced-graph-without-main-chat-message",
+    "explicit-metadata-fill-persists-in-managed-paper-with-pending-provenance",
+    "only-checked-result-nodes-enter-durable-paper-chat-draft-with-no-send",
+    "second-browser-restores-result-and-pages-without-model-replay-and-panel-fits-511-681-1400",
+    "explicit-cancel-stops-background-job-and-retains-previous-draft",
+    "automatic-selection-setting-is-host-owned-and-does-not-replay-interrupted-work"
+  ],
+  "errors": [],
+  "external": [],
+  "deterministic_generations": 2,
+  "main_messages_sent": 0,
+  "browser_storage_writes": 0,
+  "screenshots": [
+    ".local/paper-analysis-browser-4hudLL/analysis-result-511.png"
+  ],
+  "scope": "Actual Chromium + disk-backed source/job/metadata APIs with deterministic model adapter. Native subagent lifecycle checked separately; no real provider or private documents."
+}

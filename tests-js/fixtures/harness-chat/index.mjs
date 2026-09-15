@@ -1,4 +1,5 @@
 import { LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 
 export const name = 'paper-library-native-chat-fixture'
 export const inject = ['llm', 'webServer', 'connection', 'sessions', 'agents']
@@ -24,7 +25,24 @@ class ReadingAdapter extends LlmAdapter {
     })).slice(-8)
     const prompt = options.messages.flatMap(message => message.content.filter(block => block.type === 'text').map(block => block.text)).join('\n')
     let reply = REPLY
-    if (prompt.includes('LIBRARY_KNOWLEDGE_JSON:\n')) {
+    if (prompt.includes('PAPER_ANALYSIS_JSON:\n')) {
+      const raw = prompt.slice(prompt.lastIndexOf('LIBRARY_KNOWLEDGE_JSON:\n') + 'LIBRARY_KNOWLEDGE_JSON:\n'.length).split('\nAdditionally return metadata')[0]
+      const selected = JSON.parse(raw), source = selected.sources[0]
+      this.observation.analysis = [...this.observation.analysis, { provider: options.provider, model: options.model, maxTokens: options.maxTokens,
+        sourceIds: selected.sources.map(item => item.id), sourceTexts: selected.sources.map(item => item.text), tools: (options.tools ?? []).map(tool => tool.name) }].slice(-12)
+      if (selected.sources.some(item => item.text.includes('NATIVE_ANALYSIS_CANCEL_FIXTURE'))) {
+        await new Promise((_, reject) => {
+          const abort = () => reject(options.signal.reason ?? new Error('Synthetic analysis cancelled'))
+          if (options.signal.aborted) abort(); else options.signal.addEventListener('abort', abort, { once: true })
+        })
+      }
+      reply = JSON.stringify({title:'Synthetic selected-page graph',body:'Selected-page evidence only; this fixture makes no scientific claim.',
+        nodes:[{id:'selected-evidence',type:'evidence',label:'Selected page excerpt',source_id:source.id,quote:source.text.slice(0,120)},
+          {id:'selected-method',type:'method',label:'Synthetic bounded method'},
+          {id:'selected-claim',type:'claim',label:'A synthetic assertion based only on the selected page'}],
+        edges:[{subject:`paper:${selected.entity.id}`,object:'method:selected-method',relation:'uses',source_id:source.id,surface:'Synthetic integration relation only'}],
+        assertions:[{subject:'evidence:selected-evidence',object:'claim:selected-claim',relation:'supports',surface:'Selected synthetic source only'}],metadata:{},field_sources:{}})
+    } else if (prompt.includes('LIBRARY_KNOWLEDGE_JSON:\n')) {
       const selected = JSON.parse(prompt.slice(prompt.lastIndexOf('LIBRARY_KNOWLEDGE_JSON:\n') + 'LIBRARY_KNOWLEDGE_JSON:\n'.length))
       const source = selected.sources[0]
       reply = JSON.stringify({ title: 'Synthetic dataset knowledge', body: `# Synthetic dataset\n\n${source.text}\n\nSource: [${source.id}]\n\nThis is a deterministic integration fixture, not a scientific assessment.`, nodes: [], edges: [], assertions: [] })
@@ -46,7 +64,25 @@ class ReadingAdapter extends LlmAdapter {
 
 /** Test-only authenticated booleans make cold lifecycle assertions independent from plugin receipts. */
 export function apply(ctx) {
-  const observation = { generations: 0, references: [], language: [], knowledge: [] }
+  const observation = { generations: 0, references: [], language: [], knowledge: [], analysis: [], analysisAgents: [], analysisGuard: {attempts:0,denied:0,executed:0} }
+  ctx.on('agent/created', async ({ agent }) => {
+    if (agent.session.id.startsWith('paper-analysis-') || agent.session.header.parentSession?.startsWith('paper-analysis-')) {
+      observation.analysisAgents.push({id:agent.session.id,parent:agent.session.header.parentSession,origin:agent.session.header.origin})
+    }
+    if (agent.session.header.parentSession?.startsWith('paper-analysis-')) {
+      // Scoped tools are intentionally outside allow:[]; prove the product's
+      // executor guard denies one even through a PTC sub-dispatch identity.
+      const dispose=agent.ctx.tools.register(defineTool({name:'paper_analysis_guard_probe',description:'Synthetic native executor guard probe',parameters:{},
+        output:{schema:{type:'json'},render:()=>[{type:'text',text:'synthetic'}]},
+        execute:async()=>{observation.analysisGuard.executed++;return{}},
+      }))
+      try {
+        observation.analysisGuard.attempts++
+        const result=await agent.ctx.tools.execute({name:'paper_analysis_guard_probe',arguments:{},callId:'synthetic-guard-probe',parent:Symbol('synthetic-ptc-parent'),agent,signal:new AbortController().signal})
+        if(result.isError&&JSON.stringify(result).includes('source-bounded paper analysis cannot execute tools'))observation.analysisGuard.denied++
+      } finally { dispose() }
+    }
+  })
   ctx.effect(() => ctx.llm.registerAdapter([PROVIDER], new ReadingAdapter(observation)), 'paper-library: deterministic test model')
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/api/paper-chat-fixture', handler(req, res) {
@@ -56,7 +92,9 @@ export function apply(ctx) {
       const ids = url.searchParams.getAll('session')
       if (req.method !== 'GET' || ids.length > 12 || ids.some(id => !/^paper-library-[a-f0-9]{40}$/.test(id))) { res.writeHead(400); res.end(); return }
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ generations: observation.generations, references: observation.references, language: observation.language, knowledge: observation.knowledge, observations: ids.map(id => ({ sessionLoaded: Boolean(ctx.sessions.get(id)), agentLoaded: Boolean(ctx.agents.get(id)) })) }))
+      res.end(JSON.stringify({ generations: observation.generations, references: observation.references, language: observation.language, knowledge: observation.knowledge,
+        analysis:observation.analysis,analysisGuard:observation.analysisGuard,analysisAgents:observation.analysisAgents.map(item=>({...item,loaded:Boolean(ctx.agents.get(item.id))})),
+        observations: ids.map(id => ({ sessionLoaded: Boolean(ctx.sessions.get(id)), agentLoaded: Boolean(ctx.agents.get(id)) })) }))
     },
   }), 'paper-library: cold-session fixture observations')
 }

@@ -11,6 +11,8 @@ import { createPaperChat } from './paper-chat.mjs'
 import { createLocalStateStore } from '../local-state.mjs'
 import { createLanguageLearning } from './language-learning.mjs'
 import { createLibraryKnowledge } from './library-knowledge.mjs'
+import { createPaperAnalysis } from './paper-analysis.mjs'
+import { createPaperAnalysisAgent } from './paper-analysis-agent.mjs'
 
 export const name = 'paper-library'
 export const inject = ['tools', 'llm']
@@ -45,7 +47,10 @@ export function apply(ctx, rawConfig = {}) {
         return (await paperChat({action:'chat_ensure',id:entity.id},{signal})).model
       },
     })
-    const fetchHandler = createFetchHandler({ ...options, paperChat, languageLearning, libraryKnowledge, basePath: '/api/paper-library' })
+    const paperAnalysis = createPaperAnalysis({store:options.localState,dispatch,paperChat,library:config.library,python:config.python,
+      agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens})})
+    web.effect(()=>()=>paperAnalysis.dispose(),'paper-library: background analysis lifecycle')
+    const fetchHandler = createFetchHandler({ ...options, paperChat, languageLearning, libraryKnowledge, paperAnalysis, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',
       path: '/api/paper-library',

@@ -114,6 +114,49 @@ input[type="checkbox"] { accent-color: var(--dsw-alias-button-primary-fill); }
 .catalog-table tr:hover td { background: var(--dsw-alias-interactive-bg-hover); }
 .catalog-table tr.selected td { background: var(--dsw-specific-sidebar-nav-item-active); }
 .table-title { font-weight: 500; }
+/* Catalog density is independent of the PDF/chat content font. Every cell owns
+ * its text width; a long title must never paint over the next column. */
+.catalog-table table { table-layout: fixed; min-width: 1690px; font-size: 12px; line-height: 1.4; }
+.catalog-table .catalog-column-title { width: 300px; }
+.catalog-table .catalog-column-author { width: 180px; }
+.catalog-table .catalog-column-year { width: 64px; }
+.catalog-table .catalog-column-journal { width: 160px; }
+.catalog-table .catalog-column-jcr { width: 120px; }
+.catalog-table .catalog-column-citekey { width: 140px; }
+.catalog-table .catalog-column-doi { width: 165px; }
+.catalog-table .catalog-column-institution { width: 180px; }
+.catalog-table .catalog-column-dates { width: 170px; }
+.catalog-table .catalog-column-kind { width: 85px; }
+.catalog-table .catalog-column-actions { width: 126px; }
+.catalog-table th, .catalog-table td { min-width: 0 !important; max-width: none; padding: 6px 10px; }
+.catalog-table .table-title, .catalog-table .table-cell-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; width: 100%; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; white-space: normal; line-height: 1.4; }
+.catalog-table .table-title { min-width: 0; margin: 0; border-radius: 2px; }
+.catalog-table .table-title:focus-visible { outline-offset: 1px; }
+.catalog-table .table-row-actions .button { font-size: 10px; line-height: 1.2; padding: 1px 0; }
+.catalog-cell-preview { position: fixed; z-index: 40; width: max-content; max-width: min(360px, calc(100vw - 16px)); max-height: 180px; overflow: auto; padding: 9px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--dsw-alias-bg-layer-2); color: var(--ink); box-shadow: var(--shadow); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; pointer-events: none; }
+/* The search input lives in the heading in both table and shared-rail modes.
+ * Narrow rails use the same labeled controls with compact icon presentation. */
+.library-pane .pane-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 8px 10px; }
+.library-pane .pane-heading h1 { display: flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 13px; }
+.library-pane .pane-heading .count { margin: 0; padding: 2px 4px; font-size: 10px; }
+.library-pane .pane-heading .search-field { min-width: 0; max-width: none; min-height: 28px; height: 28px; margin: 0; padding: 0 6px; gap: 4px; border-radius: 6px; }
+.library-pane .pane-heading .search-field > span { font-size: 15px; line-height: 1; }
+.library-pane .pane-heading .search-field input { flex: 1 1 auto; width: 100%; min-width: 0; height: 26px; padding: 0; margin: 0; font-size: 11px; border: 0; background: transparent; }
+.library-pane .pane-heading .search-field kbd { display: none; flex-shrink: 0; padding: 1px 3px; font-size: 9px; }
+.library-pane .pane-heading .shelf-actions { flex-direction: row; align-items: center; gap: 2px; }
+.library-pane .pane-heading #catalog-expand { width: 24px; min-height: 26px; padding: 2px; font-size: 0; }
+.library-pane .pane-heading #catalog-expand::after { content: '⤢'; font-size: 15px; }
+.library-pane .pane-heading #refresh { width: 24px; height: 26px; font-size: 19px; }
+.catalog-expanded .pane-heading #catalog-expand { width: auto; padding: 3px 5px; font-size: 11px; }
+.catalog-expanded .pane-heading #catalog-expand::after { content: none; }
+.catalog-expanded .pane-heading .search-field kbd { display: inline; }
+.catalog-expanded .catalog-controls { padding: 0 10px 7px; gap: 5px; }
+.catalog-expanded .catalog-controls select, .catalog-expanded .catalog-controls .button { font-size: 11px; padding: 4px 6px; }
+@media (max-width:400px) {
+  .catalog-expanded .pane-heading #catalog-expand { width: 24px; padding: 2px; font-size: 0; }
+  .catalog-expanded .pane-heading #catalog-expand::after { content: '⤡'; font-size: 15px; }
+  .catalog-expanded .pane-heading .search-field kbd { display: none; }
+}
 .paper-metadata dt, .paper-file-disclosure { color: var(--muted); }
 .paper-header h2 { font-weight: 500; }
 .welcome-paper { transform: none; width: 64px; height: 80px; margin-bottom: 20px; padding: 24px 12px; background: var(--surface); border-color: var(--line); border-radius: 8px; box-shadow: none; }

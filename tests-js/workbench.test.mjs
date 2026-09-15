@@ -61,7 +61,7 @@ function environment({ respond, active = null, storage = new Map(), library = 's
   for (const id of ['copy-apa','export-bib','download-pdf','metadata-open','attach-open']) selector('.paper-actions').append(element(id, id === 'download-pdf' ? 'a' : 'button'));
   const exportLabel = new Element('label'); exportLabel.append(element('export-notes', 'select')); body.append(exportLabel);
   const document = { body, getElementById: element, createElement: tag => new Element(tag), querySelector: selector, querySelectorAll: value => body.querySelectorAll(value) };
-  const window = {localStorage:{getItem(){throw new Error('Use server state');},setItem(){throw new Error('Browser writes are forbidden');}}};
+  const window = new Element('window');window.localStorage={getItem(){throw new Error('Use server state');},setItem(){throw new Error('Browser writes are forbidden');}};
   const state = { active, library, items: active ? [active] : [], sort: 'modified', order: 'desc', archived: false, offset: 0, limit: 40, tab: 'reader' };
   vm.runInNewContext(localStateSource,{window,TextEncoder});
   vm.runInNewContext(source, { window, document, structuredClone }, { filename: 'web/workbench.js' });

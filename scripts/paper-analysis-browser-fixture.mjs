@@ -1,0 +1,69 @@
+/** Actual browser + host disk job lifecycle; deterministic selected-material adapter.
+ * Native subagent isolation is tested separately by paper-analysis-harness-smoke. */
+import assert from 'node:assert/strict'
+import {createServer} from 'node:http'
+import {Readable} from 'node:stream'
+import {spawnSync} from 'node:child_process'
+import {mkdir,mkdtemp,writeFile} from 'node:fs/promises'
+import {dirname,join,relative} from 'node:path'
+import {fileURLToPath} from 'node:url'
+import {core,dispatch} from '../src/bridge.mjs'
+import {createFetchHandler} from '../src/http.mjs'
+import {createLocalStateStore} from '../src/local-state.mjs'
+import {createPaperAnalysis} from '../src/harness/paper-analysis.mjs'
+const project=dirname(dirname(fileURLToPath(import.meta.url)))
+await mkdir(join(project,'.local'),{recursive:true})
+const run=await mkdtemp(join(project,'.local/paper-analysis-browser-')),library=join(run,'library'),home=join(run,'home'),source=join(run,'source'),python=join(project,'.venv/bin/python')
+const generated=spawnSync(python,['scripts/create-reader-demo.py','--output',source],{cwd:project,encoding:'utf8'});assert.equal(generated.status,0,generated.stderr)
+const [paper]=(await core({action:'import',path:join(source,'reader-export.json')},{library,python})).items
+const store=createLocalStateStore({library,home}),route={provider:'synthetic-provider',model:'selected-paper-model'}
+let calls=0,hold=false,sent=0
+const paperChat=async input=>{
+  if(input.action==='chat_ensure')return{sessionId:`synthetic-${input.id}`,model:route}
+  if(input.action==='chat_catalog')return{annotations:[],total:0}
+  if(input.action==='chat_history')return{messages:[],status:'idle',model:route}
+  sent++;throw new Error('Browser fixture may prepare, never send a main conversation')
+}
+const agent=async({prompt,signal})=>{
+  calls++
+  if(hold)await new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}))
+  const selected=JSON.parse(prompt.split('LIBRARY_KNOWLEDGE_JSON:\n')[1].split('\nAdditionally return metadata')[0]),s=selected.sources[0],quote=s.text.slice(0,100)
+  return JSON.stringify({title:'Synthetic selected-paper graph',body:'Only selected pages were inspected.',nodes:[{id:'excerpt',type:'evidence',label:'Selected passage',source_id:s.id,quote},{id:'claim',type:'claim',label:'Synthetic bounded claim'},{id:'unselected',type:'method',label:'Unselected method sentinel'}],edges:[],assertions:[{subject:'evidence:excerpt',object:'claim:claim',relation:'supports',surface:'Synthetic source-backed relation'}],metadata:{abstract:quote},field_sources:{abstract:[{source_id:s.id,quote}]}})
+}
+const analysis=createPaperAnalysis({store,dispatch,paperChat,agent,library,python})
+const handler=createFetchHandler({library,python,localState:store,paperChat,paperAnalysis:analysis,loopbackOnly:true})
+const server=createServer(async(req,res)=>{try{const request=new Request(`http://${req.headers.host}${req.url}`,{method:req.method,headers:req.headers,...(!['GET','HEAD'].includes(req.method)?{body:Readable.toWeb(req),duplex:'half'}:{})});const reply=await handler(request);res.writeHead(reply.status,Object.fromEntries(reply.headers));if(reply.body)Readable.fromWeb(reply.body).pipe(res);else res.end()}catch(error){res.writeHead(500);res.end(error.message)}})
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
+const origin=`http://127.0.0.1:${server.address().port}`,checks=[],errors=[],external=[],screenshots=[]
+let browser
+const record=name=>{checks.push(name);console.log(`PASS ${name}`)}
+try{
+  const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'playwright');browser=await chromium.launch({headless:true})
+  async function newPage(){const ctx=await browser.newContext({viewport:{width:900,height:760}});const page=await ctx.newPage();page.setDefaultTimeout(20000);page.on('pageerror',error=>errors.push(error.message));page.on('request',req=>{if(/^https?:/.test(req.url())&&new URL(req.url()).origin!==origin)external.push(req.url())});await page.addInitScript(()=>{Storage.prototype.setItem=()=>{throw new Error('Browser Storage writes forbidden')}});await page.goto(origin);await page.waitForLoadState('networkidle');return page}
+  let page=await newPage()
+  await page.locator(`.paper-card[data-id="${paper.id}"]`).click();await page.locator('.pdr-page-image').first().waitFor()
+  await page.locator('#paper-analysis-open').click();assert.equal(await page.locator('#analysis-auto').isChecked(),false);assert.equal(calls,0)
+  await page.locator('#analysis-pages').fill('1,2,3,4,5,6,7,8,9');await page.locator('#analysis-start').click();await page.waitForFunction(()=>document.getElementById('analysis-status').textContent.includes('最多 8'));assert.equal(calls,0)
+  record('selection-alone-and-invalid-page-range-never-start-model')
+  await page.locator('#analysis-pages').fill('2');await page.locator('#analysis-start').click();await page.locator('#analysis-result .analysis-node').first().waitFor();assert.equal(calls,1);assert.match(await page.locator('#analysis-result').innerText(),/PDF 页：2/)
+  const job=await analysis({action:'paper_analysis_get',id:paper.id});assert.equal(job.status,'complete');assert.equal(job.draft.status,'needs-review');assert.deepEqual(job.coverage.read_pages,[2]);assert.equal(sent,0)
+  record('background-selected-page-job-saves-pending-sourced-graph-without-main-chat-message')
+  await page.locator('#analysis-apply').click();await page.waitForFunction(()=>document.getElementById('analysis-result').textContent.includes('已补齐'));assert.ok((await core({action:'get',id:paper.id},{library,python})).abstract)
+  record('explicit-metadata-fill-persists-in-managed-paper-with-pending-provenance')
+  await page.locator('#analysis-result input[aria-label="选择 Selected passage"]').check();await page.locator('#analysis-result input[aria-label="选择 Synthetic bounded claim"]').check();await page.locator('#analysis-to-chat').click();await page.locator('#paper-analysis-panel').waitFor({state:'hidden'});assert.match(await page.locator('#paper-chat-input').inputValue(),/尚未核对/);assert.match(await page.locator('#paper-chat-input').inputValue(),/Selected passage/);assert.doesNotMatch(await page.locator('#paper-chat-input').inputValue(),/Unselected method sentinel/);assert.equal(sent,0);await page.evaluate(()=>persistence.flush())
+  record('only-checked-result-nodes-enter-durable-paper-chat-draft-with-no-send')
+  await page.context().close();page=await newPage();await page.locator(`.paper-card[data-id="${paper.id}"]`).click();await page.locator('.pdr-page-image').first().waitFor();await page.locator('#paper-analysis-open').click();await page.locator('.analysis-node').first().waitFor();assert.equal(calls,1)
+  for(const width of [511,681,1400]){await page.setViewportSize({width,height:760});assert.equal(await page.locator('#paper-analysis-panel').evaluate(n=>n.getBoundingClientRect().right<=innerWidth&&n.scrollWidth<=n.clientWidth+1),true)}
+  const shot=join(run,'analysis-result-511.png');await page.setViewportSize({width:511,height:518});await page.screenshot({path:shot});screenshots.push(relative(project,shot));assert.equal(await page.locator('#analysis-pages').inputValue(),'2')
+  assert.equal(await page.locator('#analysis-result input[aria-label="选择 Selected passage"]').isChecked(),true)
+  assert.equal(await page.locator('#analysis-result input[aria-label="选择 Unselected method sentinel"]').isChecked(),false)
+  record('second-browser-restores-result-and-pages-without-model-replay-and-panel-fits-511-681-1400')
+  await page.locator('#paper-analysis-open').click();hold=true;await page.locator('#analysis-start').click();await page.waitForFunction(()=>document.getElementById('analysis-status').textContent.includes('子代理'));await page.locator('#analysis-cancel').click();await page.waitForFunction(()=>document.getElementById('analysis-status').textContent.includes('取消'));assert.equal(calls,2);hold=false
+  record('explicit-cancel-stops-background-job-and-retains-previous-draft')
+  await page.locator('#analysis-auto').check();await page.evaluate(()=>persistence.flush());assert.equal((await store.get('preferences')).value.auto_analysis,true);assert.equal(calls,2);await page.locator('#analysis-auto').uncheck();await page.evaluate(()=>persistence.flush())
+  record('automatic-selection-setting-is-host-owned-and-does-not-replay-interrupted-work')
+  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.equal(sent,0)
+  const report={verified_at:new Date().toISOString(),ok:true,checks,errors,external,deterministic_generations:calls,main_messages_sent:sent,browser_storage_writes:0,screenshots,scope:'Actual Chromium + disk-backed source/job/metadata APIs with deterministic model adapter. Native subagent lifecycle checked separately; no real provider or private documents.'}
+  await writeFile(join(project,'docs/validation/paper-analysis-browser.json'),JSON.stringify(report,null,2)+'\n');console.log(`REPORT ${relative(project,run)}`)
+}catch(error){if(browser)for(const page of browser.contexts().flatMap(c=>c.pages())){await page.screenshot({path:join(run,`failure-${Date.now()}.png`)});console.error((await page.locator('body').innerText()).slice(-5000))}throw error}
+finally{analysis.dispose();await browser?.close();await new Promise(resolve=>server.close(resolve))}

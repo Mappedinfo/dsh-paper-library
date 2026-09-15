@@ -33,6 +33,15 @@ PUBLICATION_DATES = {"published", "online", "print", "received", "accepted"}
 MAX_METADATA_BYTES = 256 * 1024
 
 
+class PaperConflictError(ValueError):
+    code = "STATE_CONFLICT"
+    status = 409
+
+    def __init__(self, current):
+        super().__init__("STATE_CONFLICT: paper metadata changed; reload before saving")
+        self.current = current
+
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -660,11 +669,15 @@ class Library:
         next_offset = offset + min(limit, max(0, len(items) - offset))
         return {"imported": imported, "duplicates": duplicates, "skipped": next_offset - offset - imported - duplicates, "items": results, "warnings": warnings, "total_records": len(items), "offset": offset, "limit": limit, "next_offset": next_offset if next_offset < len(items) else None, "done": next_offset >= len(items)}
 
-    def update(self, id, metadata):
+    def update(self, id, metadata, expected_modified=None):
         if not isinstance(metadata, dict):
             raise ValueError("metadata must be an object")
+        if expected_modified is not None and (not isinstance(expected_modified, str) or not expected_modified):
+            raise ValueError("expected_modified must be a saved paper modification stamp")
         with self.lock():
             old = self.get(id)
+            if expected_modified is not None and expected_modified != old["modified"]:
+                raise PaperConflictError(old)
             protected = {"id", "pdf", "pdf_filename", "page_count", "created", "modified", "provenance", "archived", "archived_at"}
             merged = {k: v for k, v in old.items() if k not in protected}
             merged.update({k: v for k, v in metadata.items() if k not in protected})

@@ -19,6 +19,7 @@ const commands=[
   ['theme_syntax',process.execPath,['--check','web/theme.js']],
   ['resource_library_syntax',process.execPath,['--check','web/resource-library.js']],
   ['knowledge_workflow_syntax',process.execPath,['--check','web/knowledge-workflow.js']],
+  ['paper_analysis_syntax',process.execPath,['--check','web/paper-analysis.js']],
 ];
 const checks=[];
 for(const[id,command,args]of commands){

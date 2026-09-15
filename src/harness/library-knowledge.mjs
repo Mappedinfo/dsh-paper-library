@@ -18,7 +18,7 @@ function routeOf(value) {
   if (!value?.provider || !value?.model) throw fail('当前条目尚未配置 DSH 模型，请在其对话中选择。', 'KNOWLEDGE_MODEL_REQUIRED', 409)
   return { provider: string(value.provider, '模型提供方', 200), model: string(value.model, '模型', 200), ...(value.reasoningEffort ? { reasoningEffort: string(value.reasoningEffort, '推理强度', 80) } : {}) }
 }
-function outputOf(raw, mode) {
+export function outputOf(raw, mode) {
   if (typeof raw !== 'string' || Buffer.byteLength(raw) > 160000) throw fail('知识生成结果超过保存预算。', 'KNOWLEDGE_INCOMPLETE', 502)
   let output
   try { output = JSON.parse(raw.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i, '$1')) } catch { throw fail('模型未返回完整 JSON，未保存为完成结果。', 'KNOWLEDGE_INCOMPLETE', 502) }
@@ -32,7 +32,7 @@ function outputOf(raw, mode) {
   if (Buffer.byteLength(JSON.stringify(result)) > 160000) throw fail('知识草稿超过保存预算。', 'KNOWLEDGE_INCOMPLETE', 502)
   return result
 }
-function promptOf(request, sources) {
+export function promptOf(request, sources) {
   const goal = request.mode === 'note'
     ? 'Write a readable Markdown knowledge note: definition, a concrete example, what the object contains/does, applicable tasks, mechanism, version/coverage, comparisons, limits, sources and unverified points. Do not fabricate history or fill unsupported sections. Reference sources by their exact source ID. Keep an original quote distinct from your explanation. Return empty graph arrays unless useful source-supported nodes are explicit.'
     : 'Propose a small typed knowledge graph supported ONLY by the selected sources. A dataset can be a primary source without any Paper. An Observation is a source-reported result, not an inference from a Claim. Distinguish structural Edges from evidential Assertions. Return at most 20 nodes and 40 relations; never fabricate evidence, locators, bibliographic facts or unprovided versions.'

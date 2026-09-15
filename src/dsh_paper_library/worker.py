@@ -9,16 +9,17 @@ def dispatch_request(request):
     if not isinstance(request, dict):
         raise ValueError("Request must be a JSON object")
     action = request.get("action", "")
-    if isinstance(action, str) and (action.startswith("dataset_") or action in {"resource_list", "resource_export"} or action.startswith("knowledge_")):
+    if isinstance(action, str) and (action.startswith("dataset_") or action in {"resource_list", "resource_export"} or action.startswith("knowledge_") or action.startswith("paper_analysis_")):
         root = request.get("library")
         if not isinstance(root, str) or not Path(root).expanduser().is_absolute():
             raise ValueError("library must be an absolute local directory")
         if len(json.dumps(request, ensure_ascii=False).encode("utf-8")) > 1024 * 1024:
             raise ValueError("Library request exceeds 1 MiB; select fewer sources")
-        from . import datasets, library_knowledge
+        from . import datasets, library_knowledge, paper_analysis
         library = Library(root)
         try:
-            return (library_knowledge if action.startswith("knowledge_") else datasets).dispatch(library, request)
+            handler = paper_analysis if action.startswith("paper_analysis_") else library_knowledge if action.startswith("knowledge_") else datasets
+            return handler.dispatch(library, request)
         finally:
             library.close()
     return dispatch(request)

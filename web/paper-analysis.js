@@ -1,0 +1,61 @@
+'use strict';
+
+// A single visible document drives status reads. Jobs and results live on the host.
+window.PaperAnalysis = (() => {
+  const $=id=>document.getElementById(id);
+  const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
+  const button=(id,text,fn)=>{const n=node('button',text,'button subtle');n.id=id;n.type='button';n.addEventListener('click',fn);return n;};
+  const activeStates=new Set(['queued','reading','generating','committing']);
+  const names={evidence:'原文证据',claim:'论点',method:'方法',dataset:'数据集',observation:'观察',concept:'概念',question:'问题',gap:'缺口'};
+  function create({state,api,persistence,toast,prepareChat,openKnowledge,metadataChanged}) {
+    let available=false,paperId=null,epoch=0,job=null,timer=null,autoTimer=null,working=false,disposed=false,preferences={};
+    const selected=new Set();
+    const trigger=button('paper-analysis-open','后台整理',()=>show());
+    $('paper-tools').append(trigger);
+    const panel=node('section',undefined,'paper-analysis-panel');panel.id='paper-analysis-panel';panel.hidden=true;panel.setAttribute('aria-label','当前论文后台整理');
+    panel.innerHTML='<header><strong>论文后台整理</strong><button id="analysis-close" type="button" class="icon-button" aria-label="关闭后台整理">×</button></header><p id="analysis-paper" class="small muted"></p><div class="analysis-settings"><label>读取页码<input id="analysis-pages" placeholder="默认前 3 页，例如 1,2,6" aria-label="后台整理页码"></label><label class="analysis-check"><input type="checkbox" id="analysis-auto">选中文献后自动整理</label><label class="analysis-check"><input type="checkbox" id="analysis-fill">完成后补齐空缺资料</label></div><p class="small muted">使用本篇 DSH 模型，最多读取 8 页、24,000 字符。已有资料保留，AI 结果标记待核对。后台任务会使用模型额度。</p><div class="analysis-actions"><button id="analysis-start" class="button" type="button">开始整理</button><button id="analysis-cancel" class="button subtle" type="button" hidden>取消任务</button></div><p id="analysis-status" role="status"></p><div id="analysis-result"></div>';
+    document.body.append(panel);
+    $('analysis-close').addEventListener('click',()=>{panel.hidden=true;});
+    $('analysis-start').addEventListener('click',()=>void start(false));
+    $('analysis-pages').addEventListener('input',()=>{if(paperId)void persistence?.patch(`knowledge-draft:analysis:${paperId}`,{pages:$('analysis-pages').value}).catch(error=>status(error.message,true));});
+    $('analysis-cancel').addEventListener('click',()=>void cancel());
+    $('analysis-auto').addEventListener('change',async()=>{preferences.auto_analysis=$('analysis-auto').checked;await savePreferences();if(preferences.auto_analysis&&paperId)void start(true);});
+    $('analysis-fill').addEventListener('change',async()=>{preferences.analysis_fill=$('analysis-fill').checked;await savePreferences();});
+    async function savePreferences(){try{await persistence?.patch('preferences',{auto_analysis:preferences.auto_analysis===true,analysis_fill:preferences.analysis_fill===true});await persistence?.flush();}catch(error){$('analysis-auto').checked=false;preferences.auto_analysis=false;status(error.message,true);}}
+    function status(text,error=false){$('analysis-status').textContent=text;$('analysis-status').classList.toggle('error',error);}
+    function refreshControls(){const busy=working||activeStates.has(job?.status);trigger.hidden=!paperId;trigger.disabled=!paperId;trigger.textContent=activeStates.has(job?.status)?'正在整理…':job?.status==='complete'?'整理结果':'后台整理';$('analysis-start').disabled=!available||busy||!paperId;$('analysis-start').textContent=job&&job.status!=='idle'?'重新整理':'开始整理';$('analysis-cancel').hidden=!activeStates.has(job?.status);$('analysis-pages').disabled=busy;$('analysis-auto').disabled=!available;$('analysis-fill').disabled=busy;}
+    function render(){refreshControls();const result=$('analysis-result');result.replaceChildren();if(!job||job.status==='idle'){status(available?'整理仅针对当前论文，完成后可选择材料加入对话。':'当前页面可查看已保存结果；运行子代理需通过 DSH 服务打开。');return;}
+      status([job.stage||job.status,job.error,...(job.warnings||[])].filter(Boolean).join(' · '),['failed','cancelled','interrupted'].includes(job.status));
+      if(job.coverage)result.append(node('p',`已读 PDF 页：${job.coverage.read_pages.join(', ')} · ${job.coverage.characters} 字符 · ${job.coverage.truncated_pages?.length?'部分页因预算截取':'所选范围'}。未读页未纳入结论。`,'small muted'));
+      if(job.model)result.append(node('p',`${job.model.provider} / ${job.model.model}`,'small muted'));
+      if(job.metadata&&Object.keys(job.metadata).length){const detail=node('details');detail.append(node('summary','基础资料建议与依据'),node('pre',JSON.stringify(job.metadata,null,2)));for(const [field,refs]of Object.entries(job.field_sources||{})){detail.append(node('strong',field));for(const ref of refs)detail.append(node('blockquote',ref.quote),node('p',ref.source_id,'small muted'));}result.append(detail);if(job.metadata_result)result.append(node('p',`已补齐：${job.metadata_result.applied_fields?.join('、')||'无新增字段'}；AI 提供的字段仍待核对。`,'small muted'));else if(job.status==='complete')result.append(button('analysis-apply','补齐空缺资料',()=>void applyMetadata()));}
+      const draft=job.draft;if(!draft)return;
+      result.append(node('h3',draft.title||'图谱草稿'),node('p',draft.status==='accepted'?'已核对':'AI 生成 · 待核对','small muted'));
+      if(draft.body){const detail=node('details');detail.append(node('summary','阅读摘要'),node('pre',draft.body));result.append(detail);}
+      result.append(node('p','勾选要带入本次对话的节点；关联关系会随所选节点一起加入。','small muted'));
+      for(const value of draft.nodes||[]){const id=`${value.type}:${value.id}`,row=node('label',undefined,'analysis-node'),check=node('input');check.type='checkbox';check.checked=selected.has(id);check.setAttribute('aria-label',`选择 ${value.label}`);check.addEventListener('change',()=>{if(check.checked)selected.add(id);else selected.delete(id);void persistence?.patch(`knowledge-draft:analysis:${paperId}`,{node_ids:[...selected],request_id:job.request_id}).catch(error=>status(error.message,true));});const content=node('span');content.append(node('small',names[value.type]||value.type),node('span',value.label));if(value.quote)content.append(node('q',value.quote));row.append(check,content);result.append(row);}
+      const relations=node('details');relations.open=true;relations.append(node('summary',`关系 ${(draft.edges?.length||0)+(draft.assertions?.length||0)}`));const labels=new Map(draft.nodes.map(n=>[`${n.type}:${n.id}`,n.label]));for(const edge of [...(draft.edges||[]),...(draft.assertions||[])])relations.append(node('p',`${labels.get(edge.subject)||edge.subject} → ${edge.relation} → ${labels.get(edge.object)||edge.object}`,'analysis-relation'));result.append(relations);
+      const controls=node('div',undefined,'analysis-actions');controls.append(button('analysis-to-chat','选中材料加入论文对话',()=>void context()),button('analysis-review','打开知识工作流审阅',()=>{panel.hidden=true;openKnowledge();}));result.append(controls);
+    }
+    function schedulePoll(){clearTimeout(timer);if(disposed||!paperId||document.hidden||!activeStates.has(job?.status))return;timer=setTimeout(()=>void load(),1500);}
+    async function load(){const ticket=epoch,id=paperId;if(!id)return;try{const value=await api('paper_analysis_get',{id});if(ticket!==epoch)return;const completed=job?.status!==value.status&&value.status==='complete';job=value;render();if(completed&&job.metadata_result)await metadataChanged(id);schedulePoll();}catch(error){if(ticket===epoch)status(error.message,true);}}
+    async function start(reuse){if(!available||!paperId||working||activeStates.has(job?.status))return;const ticket=epoch,id=paperId;working=true;refreshControls();try{const raw=$('analysis-pages').value.trim();const pages=raw?raw.split(/[,，\s]+/).map(Number):undefined;if(pages&&(!pages.length||pages.length>8||new Set(pages).size!==pages.length||pages.some(n=>!Number.isInteger(n)||n<1||n>2000)))throw new Error('请输入最多 8 个不重复的 PDF 页码，用逗号分隔。');await persistence?.flush();if(ticket!==epoch)return;const sourceSession=state.harnessContext?.sessionId;const value=await api('paper_analysis_start',{id,request_id:crypto.randomUUID(),reuse,apply_metadata:$('analysis-fill').checked,...(sourceSession?{source_session_id:sourceSession}:{}),...(pages?{pages}:{})});if(ticket!==epoch)return;job=value;selected.clear();render();schedulePoll();}catch(error){if(ticket===epoch)status(error.message,true);}finally{if(ticket===epoch){working=false;refreshControls();}}}
+    async function cancel(){const ticket=epoch,id=paperId;try{const value=await api('paper_analysis_cancel',{id,request_id:job.request_id});if(ticket!==epoch)return;job=value;render();}catch(error){if(ticket===epoch)status(error.message,true);}}
+    async function applyMetadata(){const ticket=epoch,id=paperId;try{const value=await api('paper_analysis_apply',{id,request_id:job.request_id});if(ticket!==epoch)return;job=value;render();await metadataChanged(id);}catch(error){if(ticket===epoch)status(`资料未保存：${error.message}`,true);}}
+    async function context(){const ticket=epoch,id=paperId;try{if(!selected.size)throw new Error('先勾选要加入对话的节点。');const value=await api('paper_analysis_context',{id,request_id:job.request_id,node_ids:[...selected]});if(ticket!==epoch)return;await prepareChat(value.text,id);panel.hidden=true;}catch(error){if(ticket===epoch)status(error.message,true);}}
+    function show(){if(!paperId){toast('先选中一篇已关联 PDF 的文献。');return;}panel.hidden=false;void load();}
+    function sync(){const paper=state.active;const id=paper&&!paper.archived&&paper.resource_kind!=='dataset'&&paper.pdf?paper.id:null;trigger.hidden=!id;if(id===paperId)return;paperId=id;++epoch;clearTimeout(timer);clearTimeout(autoTimer);job=null;working=false;selected.clear();$('analysis-pages').value='';$('analysis-paper').textContent=id?paper.title:'';if(!id){panel.hidden=true;return;}render();
+      const ticket=epoch;
+      void Promise.all([load(),persistence?.get(`knowledge-draft:analysis:${id}`)]).then(([,draft])=>{
+        if(ticket!==epoch)return;
+        if(draft&&typeof draft.pages==='string')$('analysis-pages').value=draft.pages;
+        if(draft?.request_id===job?.request_id&&Array.isArray(draft.node_ids)){for(const id of draft.node_ids)if(typeof id==='string')selected.add(id);render();}
+        if(available&&preferences.auto_analysis&&(!job||job.status==='idle'))autoTimer=setTimeout(()=>{if(paperId===id)void start(true);},700);
+      }).catch(error=>{if(ticket===epoch)status(error.message,true);});
+    }
+    async function setAvailable(value){available=Boolean(value);try{preferences=await persistence?.get('preferences')||{};$('analysis-auto').checked=preferences.auto_analysis===true;$('analysis-fill').checked=preferences.analysis_fill===true;refreshControls();sync();}catch(error){status(error.message,true);}}
+    const visibility=()=>{if(!document.hidden)void load();};document.addEventListener('visibilitychange',visibility);
+    return{sync,setAvailable,dispose(){disposed=true;clearTimeout(timer);clearTimeout(autoTimer);document.removeEventListener('visibilitychange',visibility);}};
+  }
+  return{create};
+})();
