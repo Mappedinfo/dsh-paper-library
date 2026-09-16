@@ -253,20 +253,43 @@ export async function dispatch(request, options = {}) {
     }
     if (!items.length) throw new Error('文献库为空，无法构建引用库。');
     const audit = await core({ action:'bibliography_audit' }, options);
-    const verification = { requested: verify, checked: 0, matched: 0, mismatched: 0, unavailable: 0, results: [] };
+    // Field-level comparison keeps every differing value explicit: catalog and
+    // online values are both recorded, and a conflict never writes back.
+    const compareField = (catalogValue, onlineValue, normalize) => {
+      const catalog = String(catalogValue ?? '').trim(), online = String(onlineValue ?? '').trim();
+      const c = normalize(catalog), o = normalize(online);
+      if (!c && !o) return { validation_status: 'missing-both' };
+      if (!c) return { validation_status: 'missing-catalog', online: online.slice(0, 300) };
+      if (!o) return { validation_status: 'missing-online', catalog: catalog.slice(0, 300) };
+      // Values are compared normalized but reported as stored/registered.
+      return c === o ? { validation_status: 'match' } : { validation_status: 'conflict', catalog: catalog.slice(0, 300), online: online.slice(0, 300) };
+    };
+    const firstAuthor = value => Array.isArray(value) && value.length ? normalizedIdentity(value[0]?.family || value[0]?.literal || '') : '';
+    const issuedYear = value => Number.isInteger(value?.['date-parts']?.[0]?.[0]) ? String(value['date-parts'][0][0]) : '';
+    const verification = { requested: verify, checked: 0, provider_confirmed: 0, conflict: 0, unavailable: 0, results: [] };
     if (verify) {
       const candidates = items.filter(item => item.resource_kind === 'paper' && typeof item.DOI === 'string' && canonicalDOI(item.DOI));
       for (const item of candidates.slice(0, verifyLimit)) {
         options.signal?.throwIfAborted();
         const doi = canonicalDOI(item.DOI);
-        const entry = { id: item.external_id, citekey: item['citation-key'] || item.id, doi };
+        const entry = { id: item.external_id, citekey: item['citation-key'] || item.id, doi, checked_at: new Date().toISOString() };
         try {
           const found = await resolveMetadata(doi, { ...options.fetchOptions, signal: options.signal });
           const online = found.metadata;
-          if (!online || canonicalDOI(online.DOI) !== doi) entry.status = 'unavailable', verification.unavailable++;
-          else if (normalizedIdentity(online.title) !== normalizedIdentity(item.title)) { entry.status = 'title-mismatch'; entry.online_title = String(online.title || '').slice(0, 300); verification.mismatched++; }
-          else { entry.status = 'match'; verification.matched++; }
-        } catch (error) { entry.status = 'error'; entry.error = String(error.message).slice(0, 300); verification.unavailable++; }
+          const sourceUrl = found.provenance?.requests?.find(request => request.kind === 'metadata')?.url;
+          try { entry.source = sourceUrl ? new URL(sourceUrl).hostname : undefined; } catch {}
+          if (!online || canonicalDOI(online.DOI) !== doi) { entry.validation_status = 'unavailable'; verification.unavailable++; }
+          else {
+            entry.fields = [
+              { field: 'title', ...compareField(item.title, online.title, normalizedIdentity) },
+              { field: 'year', ...compareField(issuedYear(item.issued), issuedYear(online.issued), value => value) },
+              { field: 'container-title', ...compareField(item['container-title'], online['container-title'], normalizedIdentity) },
+              { field: 'first-author', ...compareField(firstAuthor(item.author), firstAuthor(online.author), value => value) },
+            ];
+            entry.validation_status = entry.fields.some(field => field.validation_status === 'conflict') ? 'conflict' : 'provider-confirmed';
+            verification[entry.validation_status === 'conflict' ? 'conflict' : 'provider_confirmed']++;
+          }
+        } catch (error) { entry.validation_status = 'unavailable'; entry.error = String(error.message).slice(0, 300); verification.unavailable++; }
         verification.results.push(entry);
         verification.checked++;
       }
@@ -278,6 +301,7 @@ export async function dispatch(request, options = {}) {
     return { count: items.length, kind, ...written,
       conflicts: audit.citekey_conflict_count, doi_duplicates: audit.doi_duplicate_count,
       missing: Object.fromEntries(Object.entries(audit.missing).map(([field, value]) => [field, value.count])),
+      actionable: { lookup_by_url: audit.actionable.lookup_by_url.count, manual_only: audit.actionable.manual_only.count },
       pdf_missing: audit.totals.pdf_files_missing, verification,
       warnings: ['references.bib 保存引用元数据；文件、使用关联与知识正文不属于此格式。', ...(verification.truncated ? [`DOI 核验覆盖前 ${verifyLimit} 条，剩余 ${verification.remaining} 条未核验；请分批再次运行。`] : [])] };
   }

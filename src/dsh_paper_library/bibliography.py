@@ -51,9 +51,12 @@ def audit(library, request):
         raise ValueError("Bibliography audit exceeds 10000 records; audit a subset export instead")
     records, missing = [], {"citekey": [], "doi": [], "title": [], "author": [], "year": []}
     pdf_present, pdf_missing = [], []
+    lookup_by_url, manual_only = [], []
     for row in rows:
         metadata = json.loads(row["metadata"])
         doi = _doi(row["doi"] or metadata.get("DOI"))
+        url = metadata.get("URL")
+        has_url = isinstance(url, str) and bool(url.strip())
         authors = metadata.get("author")
         has_author = isinstance(authors, list) and bool(authors)
         has_title = bool(isinstance(row["title"], str) and row["title"].strip())
@@ -62,6 +65,9 @@ def audit(library, request):
             missing["citekey"].append(row["id"])
         if not doi:
             missing["doi"].append(row["id"])
+            # Records without a DOI are still actionable when a landing URL
+            # remains; without either identifier only manual entry helps.
+            (lookup_by_url if has_url else manual_only).append(row["id"])
         if not has_title:
             missing["title"].append(row["id"])
         if not has_author:
@@ -76,7 +82,7 @@ def audit(library, request):
         records.append({
             "id": row["id"], "citekey": row["citekey"], "doi": doi or None,
             "title": row["title"][:120], "year": year, "authors": len(authors) if has_author else 0,
-            "has_pdf": bool(row["pdf_path"]), "pdf_file_present": pdf_exists,
+            "has_pdf": bool(row["pdf_path"]), "pdf_file_present": pdf_exists, "has_url": has_url,
         })
     citekeys, dois = {}, {}
     for record in records:
@@ -102,6 +108,10 @@ def audit(library, request):
             "pdf_files_missing": len(pdf_missing),
         },
         "missing": {field: _cap(ids) for field, ids in missing.items()},
+        "actionable": {
+            "lookup_by_url": _cap(lookup_by_url),
+            "manual_only": _cap(manual_only),
+        },
         "citekey_conflicts": citekey_conflicts,
         "citekey_conflict_count": len(citekey_conflicts),
         "doi_duplicates": doi_duplicates,

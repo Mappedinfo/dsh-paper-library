@@ -34,15 +34,19 @@ def test_audit_reports_identity_facts_without_inventing_values(library, tmp_path
     add_pdf(library, complete, tmp_path, "complete.pdf")
     sparse = library.create({"title": "Sparse record", "citekey": "sparse2026"})
     empty = library.create({"title": "Metadata only", "citekey": "empty2026", "DOI": "10.0000/empty"})
+    linked = library.create({"title": "Has landing page", "citekey": "linked2026", "URL": "https://example.org/paper"})
     audit = call(library, "bibliography_audit")
     assert audit["schema"] == "paper-library-bibliography-audit.v1"
-    assert audit["totals"] == {"records": 3, "with_pdf": 1, "pdf_files_present": 1, "pdf_files_missing": 0}
-    assert audit["missing"]["doi"]["ids"] == [sparse["id"]]
-    assert set(audit["missing"]["author"]["ids"]) == {sparse["id"], empty["id"]}
-    assert audit["missing"]["year"]["count"] == 2
+    assert audit["totals"] == {"records": 4, "with_pdf": 1, "pdf_files_present": 1, "pdf_files_missing": 0}
+    assert audit["missing"]["doi"]["count"] == 2
+    assert set(audit["missing"]["author"]["ids"]) == {sparse["id"], empty["id"], linked["id"]}
+    assert audit["missing"]["year"]["count"] == 3
     assert audit["citekey_conflicts"] == [] and audit["doi_duplicates"] == []
+    assert audit["actionable"]["lookup_by_url"]["ids"] == [linked["id"]]
+    assert audit["actionable"]["manual_only"]["ids"] == [sparse["id"]]
     record = next(item for item in audit["records"] if item["id"] == complete["id"])
     assert record["doi"] == "10.0000/complete" and record["pdf_file_present"] is True and record["year"] == 2026
+    assert next(item for item in audit["records"] if item["id"] == linked["id"])["has_url"] is True
 
 
 def test_audit_flags_duplicate_doi_and_missing_managed_file(library, tmp_path):

@@ -662,8 +662,10 @@ async function buildBibliography() {
       `references.bib：${result.bib_path}（${result.bib_bytes} 字节）`,
       `身份审计：${result.audit_path}`, ``,
       `引用键冲突：${result.conflicts}；DOI 重复：${result.doi_duplicates}；PDF 文件缺失：${result.pdf_missing}`,
-      `缺 DOI：${result.missing?.doi ?? 0}；缺年份：${result.missing?.year ?? 0}；缺作者：${result.missing?.author ?? 0}；缺题名：${result.missing?.title ?? 0}`, ``,
-      `未做在线 DOI 核验。需要时通过 library_bibliography 工具（verify:true，有界分批）显式触发；核验只比较公开登记信息，不回写目录。`,
+      `缺 DOI：${result.missing?.doi ?? 0}（其中 ${result.actionable?.lookup_by_url ?? 0} 条有页面链接可用「补全资料」，${result.actionable?.manual_only ?? 0} 条需手工补齐）；缺年份：${result.missing?.year ?? 0}；缺作者：${result.missing?.author ?? 0}；缺题名：${result.missing?.title ?? 0}`, ``,
+      result.verification?.requested
+        ? `在线核验 ${result.verification.checked} 条：登记一致 ${result.verification.provider_confirmed}；字段冲突 ${result.verification.conflict}；不可用 ${result.verification.unavailable}${result.verification.truncated ? `；其余 ${result.verification.remaining} 条未核验` : ''}。逐字段明细见审计文件，核验不回写目录。`
+        : `未做在线 DOI 核验。需要时通过 library_bibliography 工具（verify:true，有界分批）显式触发；核验只比较公开登记信息，不回写目录。`,
       ...(result.warnings || []).map(warning => `注意：${warning}`),
     ];
     $('copy-fallback').value = lines.join('\n'); $('text-dialog-title').textContent = '引用库构建与身份审计'; openDialog('text-dialog');
