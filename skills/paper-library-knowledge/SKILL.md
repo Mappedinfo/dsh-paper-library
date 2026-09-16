@@ -15,6 +15,7 @@ description: "根据明确选择的文献批注、数据集说明或本地来源
 2. 若用户明确提供了摘录，可调用 `source_put`，输入 `entity`、`kind`、`text`、`url`（官方摘录必需）及已知 `locator`。kind 可为 `official-excerpt`、`user-text`、`metadata`、`source-note`；已保存论文批注用 `annotation` 加 `annotation_ref:{id,version}`，由工具从 PDF 读取原文。不要自行捏造批注版本或页码。
 3. 阅读完整来源后，用 `draft_put` 建立草稿。输入包含 `entity`、`mode:"graph"`、`source_ids`、`title`、`nodes`、`edges`、`assertions`。节点结构为 `{id,type,label,fields}`；证据节点额外记录 `source_id` 与精确 `quote`。Observation 通过 `source_node:"evidence:节点ID"` 连接来源节点。边用 `{subject:"type:id",object:"type:id",relation,surface,source_id?}`；Assertion 同样采用原子端点。
 4. 用 `draft_get` 读回保存结果并告知用户它是待审阅草稿；正式审核在库界面完成。模型工具不能接受自己的草稿，也不能直接写知识正文。
+5. 审阅前可用 `draft_lint`（输入 `{"id":"草稿ID"}`）做只读结构检查：无支撑主张、孤立节点、未被引用的证据、重复关系、悬空端点与缺来源的观察。它只报告问题，不修改草稿；发现的问题由用户逐项核对处理。
 
 Evidence／Figure／Formula 保存原文或来源材料，Observation 只描述来源实际报告的结果；Claim 是有边界的命题。证据类节点／Observation 到 Claim／Gap 的支持、限定或反驳采用 Assertion；论文使用数据、结果在哪份数据上观察、方法归属等采用 Edge。不要把同时出现、主题相似或数据介绍误判为实际使用。
 

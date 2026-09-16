@@ -29,6 +29,7 @@ const paperChat=async input=>{
 const agent=async({prompt,signal})=>{
   calls++
   if(hold)await new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}))
+  if(prompt.includes('READING_RECORDS_JSON:\n'))return JSON.stringify({title:'合成精读笔记',body:'## 一句话概括\n浏览器夹具笔记，不构成学术判断。'})
   const selected=JSON.parse(prompt.split('LIBRARY_KNOWLEDGE_JSON:\n')[1].split('\nAdditionally return metadata')[0]),s=selected.sources[0],quote=s.text.slice(0,100)
   return JSON.stringify({title:'Synthetic selected-paper graph',body:'Only selected pages were inspected.',nodes:[{id:'excerpt',type:'evidence',label:'Selected passage',source_id:s.id,quote},{id:'claim',type:'claim',label:'Synthetic bounded claim'},{id:'unselected',type:'method',label:'Unselected method sentinel'}],edges:[],assertions:[{subject:'evidence:excerpt',object:'claim:claim',relation:'supports',surface:'Synthetic source-backed relation'}],metadata:{abstract:quote},field_sources:{abstract:[{source_id:s.id,quote}]}})
 }
@@ -49,22 +50,22 @@ try{
   await page.locator('#paper-analysis-open').click();assert.equal(await page.locator('#analysis-auto').isChecked(),false);assert.equal(calls,0)
   await page.locator('#analysis-pages').fill('1,1');await page.locator('#analysis-start').click();await page.waitForFunction(()=>document.getElementById('analysis-status').textContent.includes('不能重复'));assert.equal(calls,0)
   record('explicit-opt-out-and-invalid-page-range-never-start-model')
-  await page.locator('#analysis-pages').fill('2');await page.locator('#analysis-start').click();await page.locator('#analysis-result .analysis-node').first().waitFor();assert.equal(calls,1);assert.match(await page.locator('#analysis-result').innerText(),/PDF 页：2/)
+  await page.locator('#analysis-pages').fill('2');await page.locator('#analysis-start').click();await page.locator('#analysis-result .analysis-node').first().waitFor();assert.equal(calls,2);assert.match(await page.locator('#analysis-result').innerText(),/PDF 页：2/);assert.match(await page.locator('#analysis-result').innerText(),/精读笔记草稿已生成/)
   const job=await analysis({action:'paper_analysis_get',id:paper.id});assert.equal(job.status,'complete');assert.equal(job.draft.status,'needs-review');assert.deepEqual(job.coverage.read_pages,[2]);assert.equal(sent,0)
   record('background-selected-page-job-saves-pending-sourced-graph-without-main-chat-message')
   await page.locator('#analysis-apply').click();await page.waitForFunction(()=>document.getElementById('analysis-result').textContent.includes('已补齐'));assert.ok((await core({action:'get',id:paper.id},{library,python})).abstract)
   record('explicit-metadata-fill-persists-in-managed-paper-with-pending-provenance')
   await page.locator('#analysis-result input[aria-label="选择 Selected passage"]').check();await page.locator('#analysis-result input[aria-label="选择 Synthetic bounded claim"]').check();await page.locator('#analysis-to-chat').click();await page.locator('#paper-analysis-panel').waitFor({state:'hidden'});assert.match(await page.locator('#paper-chat-input').inputValue(),/尚未核对/);assert.match(await page.locator('#paper-chat-input').inputValue(),/Selected passage/);assert.doesNotMatch(await page.locator('#paper-chat-input').inputValue(),/Unselected method sentinel/);assert.equal(sent,0);await page.evaluate(()=>persistence.flush())
   record('only-checked-result-nodes-enter-durable-paper-chat-draft-with-no-send')
-  await page.context().close();page=await newPage();await page.locator(`.paper-card[data-id="${paper.id}"]`).click();await page.locator('.pdr-page-image').first().waitFor();await page.locator('#paper-analysis-open').click();await page.locator('.analysis-node').first().waitFor();assert.equal(calls,1)
+  await page.context().close();page=await newPage();await page.locator(`.paper-card[data-id="${paper.id}"]`).click();await page.locator('.pdr-page-image').first().waitFor();await page.locator('#paper-analysis-open').click();await page.locator('.analysis-node').first().waitFor();assert.equal(calls,2)
   for(const width of [511,681,1400]){await page.setViewportSize({width,height:760});assert.equal(await page.locator('#paper-analysis-panel').evaluate(n=>n.getBoundingClientRect().right<=innerWidth&&n.scrollWidth<=n.clientWidth+1),true)}
   const shot=join(run,'analysis-result-511.png');await page.setViewportSize({width:511,height:518});await page.screenshot({path:shot});screenshots.push(relative(project,shot));assert.equal(await page.locator('#analysis-pages').inputValue(),'2')
   assert.equal(await page.locator('#analysis-result input[aria-label="选择 Selected passage"]').isChecked(),true)
   assert.equal(await page.locator('#analysis-result input[aria-label="选择 Unselected method sentinel"]').isChecked(),false)
   record('second-browser-restores-result-and-pages-without-model-replay-and-panel-fits-511-681-1400')
-  await page.locator('#paper-analysis-open').click();hold=true;await page.locator('#analysis-start').click();await page.waitForFunction(()=>document.getElementById('analysis-status').textContent.includes('子代理'));await page.locator('#analysis-cancel').click();await page.waitForFunction(()=>document.getElementById('analysis-status').textContent.includes('取消'));assert.equal(calls,2);hold=false
+  await page.locator('#paper-analysis-open').click();hold=true;await page.locator('#analysis-start').click();await page.waitForFunction(()=>document.getElementById('analysis-status').textContent.includes('子代理'));await page.locator('#analysis-cancel').click();await page.waitForFunction(()=>document.getElementById('analysis-status').textContent.includes('取消'));assert.equal(calls,3);hold=false
   record('explicit-cancel-stops-background-job-and-retains-previous-draft')
-  await page.locator('#analysis-auto').check();await page.evaluate(()=>persistence.flush());assert.equal((await store.get('preferences')).value.auto_analysis,true);assert.equal(calls,2);await page.locator('#analysis-auto').uncheck();await page.evaluate(()=>persistence.flush())
+  await page.locator('#analysis-auto').check();await page.evaluate(()=>persistence.flush());assert.equal((await store.get('preferences')).value.auto_analysis,true);assert.equal(calls,3);await page.locator('#analysis-auto').uncheck();await page.evaluate(()=>persistence.flush())
   record('automatic-selection-setting-is-host-owned-and-does-not-replay-interrupted-work')
   const fullPdf=join(run,'full-paper.pdf')
   const generatedFull=spawnSync(python,['-c','import pymupdf,sys\ndoc=pymupdf.open()\nfor i in range(13):\n page=doc.new_page();page.insert_text((40,70),f"Synthetic full paper page {i+1}. Exact bounded source.")\ndoc.save(sys.argv[1]);doc.close()',fullPdf],{cwd:project,encoding:'utf8'})
@@ -72,11 +73,11 @@ try{
   await settings.reset((await settings.get()).revision)
   const importedResponse=await page.request.post(`${origin}/api`,{headers:{Origin:origin},data:{action:'import',path:fullPdf}})
   const imported=(await importedResponse.json()).result;assert.equal(imported.analysis_queue[0].status,'queued')
-  const fullPaper=imported.items[0],beforeFull=2
+  const fullPaper=imported.items[0],beforeFull=3
   await page.context().close()
   const deadline=Date.now()+30000;let fullJob
   while(Date.now()<deadline){fullJob=await analysis({action:'paper_analysis_get',id:fullPaper.id});if(['complete','failed'].includes(fullJob.status))break;await new Promise(resolve=>setTimeout(resolve,100))}
-  assert.equal(fullJob.status,'complete',JSON.stringify(fullJob));assert.equal(fullJob.batch_count,2);assert.equal(fullJob.coverage.full_document,true);assert.equal(calls,beforeFull+2)
+  assert.equal(fullJob.status,'complete',JSON.stringify(fullJob));assert.equal(fullJob.batch_count,2);assert.equal(fullJob.coverage.full_document,true);assert.ok(fullJob.note_draft_id);assert.equal(calls,beforeFull+3)
   assert.ok(fullJob.metadata_result.applied_fields.includes('abstract'))
   record('imported-pdf-finishes-all-thirteen-pages-in-two-batches-with-browser-closed-and-automatic-metadata-fill')
   page=await newPage();await page.locator(`.paper-card[data-id="${fullPaper.id}"]`).click();await page.locator('.pdr-page-image').first().waitFor();await page.locator('#paper-analysis-open').click()
@@ -88,7 +89,7 @@ try{
   assert.equal(await page.locator('#paper-analysis-panel').evaluate(n=>n.scrollWidth<=n.clientWidth+1),true)
   await page.context().close();page=await newPage();await page.locator(`.paper-card[data-id="${fullPaper.id}"]`).click();await page.locator('.pdr-page-image').first().waitFor();await page.locator('#paper-analysis-open').click()
   await page.waitForFunction(()=>document.getElementById('analysis-batch')?.value==='0')
-  assert.equal(await page.locator('#analysis-result input[aria-label="选择 Selected passage"]').isChecked(),true);assert.equal(calls,beforeFull+2)
+  assert.equal(await page.locator('#analysis-result input[aria-label="选择 Selected passage"]').isChecked(),true);assert.equal(calls,beforeFull+3)
   record('enabled-defaults-full-scope-batch-switching-and-selected-batch-restoration-work-at-511px')
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.equal(sent,0)
   const report={verified_at:new Date().toISOString(),ok:true,checks,errors,external,deterministic_generations:calls,main_messages_sent:sent,browser_storage_writes:0,screenshots,scope:'Actual Chromium + disk-backed source/job/metadata APIs with deterministic model adapter. Native subagent lifecycle checked separately; no real provider or private documents.'}

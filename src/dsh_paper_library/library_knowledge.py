@@ -644,6 +644,72 @@ def rkos_export(result):
     return {"adapter": "rkos-v3-subset-1", "files": {"citations.bib": "\n".join(references), "rkos-references.bib": "\n".join(rkos_references), "library.literature.knowledge.bib": "\n".join(literature), "library.research.knowledge.bib": "\n".join(research), "library.authority.knowledge.bib": "\n".join(authority)}, "mapping": exported, "losses": losses, "complete": not losses, "validation": {"scope": "bounded typed mapping with explicit loss report", "upstream_lint_executed": False}}
 
 
+def lint_graph(value):
+    """Read-only hygiene findings over one stored draft payload; never repairs.
+
+    Write-time validation already rejects malformed graphs. Lint reports issues
+    that are structurally possible yet worth human attention during review:
+    unsupported claims, isolated nodes, unused evidence, duplicated relations
+    and dangling endpoints (possible in older or externally produced drafts).
+    """
+    nodes = value.get("nodes") or []
+    relations = [(kind, item) for kind in ("edges", "assertions") for item in (value.get(kind) or [])]
+    identities = {f"{node.get('type')}:{node.get('id')}" for node in nodes}
+    entity = value.get("entity") or {}
+    external = {f"{entity.get('kind')}:{entity.get('id')}"}
+    findings = []
+    seen = set()
+    touched, claim_supported, evidence_used = set(), set(), set()
+    observation_sources = {node.get("source_node") for node in nodes if node.get("type") == "observation"}
+    touched |= {source for source in observation_sources if source}
+    for kind, relation in relations:
+        subject, object_, name = relation.get("subject"), relation.get("object"), relation.get("relation")
+        for endpoint in (subject, object_):
+            if endpoint not in identities and endpoint not in external:
+                findings.append({"rule": "dangling-endpoint", "severity": "error", "relation_id": relation.get("id"), "endpoint": endpoint,
+                                 "message": f"关系 {relation.get('id') or ''} 的端点不在本草稿或所属条目中：{endpoint}"})
+            touched.add(endpoint)
+            if isinstance(endpoint, str) and endpoint.split(":", 1)[0] in SOURCES:
+                evidence_used.add(endpoint)
+        signature = (kind, subject, object_, name)
+        if signature in seen:
+            findings.append({"rule": "duplicate-relation", "severity": "warning", "relation_id": relation.get("id"),
+                             "message": f"重复的关系记录：{subject} → {name} → {object_}"})
+        seen.add(signature)
+        if kind == "assertions" and object_:
+            claim_supported.add(object_)
+            if subject:
+                evidence_used.add(subject)
+    for node in nodes:
+        typed = f"{node.get('type')}:{node.get('id')}"
+        if node.get("type") in {"claim", "gap"} and typed not in claim_supported:
+            findings.append({"rule": "unsupported-claim", "severity": "warning", "node": typed,
+                             "message": f"主张没有任何证据或观察支撑：{node.get('label', typed)[:120]}"})
+        if typed not in touched:
+            findings.append({"rule": "isolated-node", "severity": "info", "node": typed,
+                             "message": f"孤立节点，没有任何关系连接：{node.get('label', typed)[:120]}"})
+        if node.get("type") in SOURCES and typed not in evidence_used and typed not in observation_sources:
+            findings.append({"rule": "unused-evidence", "severity": "info", "node": typed,
+                             "message": f"证据材料未被任何主张或观察引用：{node.get('label', typed)[:120]}"})
+        if node.get("type") == "observation":
+            source_node = node.get("source_node") or ""
+            if source_node.split(":", 1)[0] not in SOURCES or source_node not in identities:
+                findings.append({"rule": "observation-without-source", "severity": "warning", "node": typed,
+                                 "message": f"观察缺少指向证据/图/公式的来源节点：{node.get('label', typed)[:120]}"})
+    counts = {"error": 0, "warning": 0, "info": 0}
+    for finding in findings:
+        counts[finding["severity"]] = counts.get(finding["severity"], 0) + 1
+    return findings, counts
+
+
+def draft_lint(library, request):
+    """Report hygiene findings for one saved draft; a read-only review aid."""
+    value = get(library, "drafts", request.get("id"))
+    findings, counts = lint_graph(value)
+    return {"id": value["id"], "revision": value["revision"], "status": value["status"], "mode": value.get("mode"),
+            "checked_at": stamp(), "findings": findings[:200], "truncated": len(findings) > 200, "counts": counts}
+
+
 def dispatch(library, request):
     setup(library)
     action = request.get("action")
@@ -655,6 +721,8 @@ def dispatch(library, request):
         return draft_put(library, request)
     if action == "knowledge_draft_review":
         return draft_review(library, request)
+    if action == "knowledge_draft_lint":
+        return draft_lint(library, request)
     if action == "knowledge_note_put":
         return note_put(library, request)
     if action == "knowledge_export":

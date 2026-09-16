@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-15T17:20:51.689Z",
+  "verified_at": "2026-09-16T01:59:13.618Z",
   "checks": [
     "light-681px-cards-at-most-90px-and-library-notes-share-one-sidebar-with-stable-reader-position",
     "light-1400px-cards-at-most-90px-and-library-notes-share-one-sidebar-with-stable-reader-position",
@@ -585,132 +585,132 @@
       "label": "light 681 library to annotations",
       "before": {
         "page": "6",
-        "scroll": 2775
+        "scroll": 2692
       },
       "after": {
         "page": "6",
-        "scroll": 2775
+        "scroll": 2692
       }
     },
     {
       "label": "light 681 annotations to library",
       "before": {
         "page": "6",
-        "scroll": 2775
+        "scroll": 2692
       },
       "after": {
         "page": "6",
-        "scroll": 2775
+        "scroll": 2692
       }
     },
     {
       "label": "light 681 reopened annotations",
       "before": {
         "page": "6",
-        "scroll": 2775
+        "scroll": 2692
       },
       "after": {
         "page": "6",
-        "scroll": 2775
+        "scroll": 2692
       }
     },
     {
       "label": "light 1400 library to annotations",
       "before": {
         "page": "6",
-        "scroll": 6296
+        "scroll": 6297
       },
       "after": {
         "page": "6",
-        "scroll": 6296
+        "scroll": 6297
       }
     },
     {
       "label": "light 1400 annotations to library",
       "before": {
         "page": "6",
-        "scroll": 6296
+        "scroll": 6297
       },
       "after": {
         "page": "6",
-        "scroll": 6296
+        "scroll": 6297
       }
     },
     {
       "label": "light 1400 reopened annotations",
       "before": {
         "page": "6",
-        "scroll": 6296
+        "scroll": 6297
       },
       "after": {
         "page": "6",
-        "scroll": 6296
+        "scroll": 6297
       }
     },
     {
       "label": "dark 681 library to annotations",
       "before": {
         "page": "6",
-        "scroll": 2775
+        "scroll": 2692
       },
       "after": {
         "page": "6",
-        "scroll": 2775
+        "scroll": 2692
       }
     },
     {
       "label": "dark 681 annotations to library",
       "before": {
         "page": "6",
-        "scroll": 2775
+        "scroll": 2692
       },
       "after": {
         "page": "6",
-        "scroll": 2775
+        "scroll": 2692
       }
     },
     {
       "label": "dark 681 reopened annotations",
       "before": {
         "page": "6",
-        "scroll": 2775
+        "scroll": 2692
       },
       "after": {
         "page": "6",
-        "scroll": 2775
+        "scroll": 2692
       }
     },
     {
       "label": "dark 1400 library to annotations",
       "before": {
         "page": "6",
-        "scroll": 6296
+        "scroll": 6297
       },
       "after": {
         "page": "6",
-        "scroll": 6296
+        "scroll": 6297
       }
     },
     {
       "label": "dark 1400 annotations to library",
       "before": {
         "page": "6",
-        "scroll": 6296
+        "scroll": 6297
       },
       "after": {
         "page": "6",
-        "scroll": 6296
+        "scroll": 6297
       }
     },
     {
       "label": "dark 1400 reopened annotations",
       "before": {
         "page": "6",
-        "scroll": 6296
+        "scroll": 6297
       },
       "after": {
         "page": "6",
-        "scroll": 6296
+        "scroll": 6297
       }
     }
   ],
@@ -720,24 +720,24 @@
   "local_storage_writes": 0,
   "synthetic_originals_unchanged": true,
   "screenshots": [
-    ".local/sidebar-browser-xc7kRQ/light-compact-library-681.png",
-    ".local/sidebar-browser-xc7kRQ/light-shared-annotations-681.png",
-    ".local/sidebar-browser-xc7kRQ/light-shared-right-681.png",
-    ".local/sidebar-browser-xc7kRQ/light-compact-library-1400.png",
-    ".local/sidebar-browser-xc7kRQ/light-shared-annotations-1400.png",
-    ".local/sidebar-browser-xc7kRQ/light-shared-right-1400.png",
-    ".local/sidebar-browser-xc7kRQ/light-table-681.png",
-    ".local/sidebar-browser-xc7kRQ/light-shared-annotations-430.png",
-    ".local/sidebar-browser-xc7kRQ/light-fullscreen-annotations-430.png",
-    ".local/sidebar-browser-xc7kRQ/dark-compact-library-681.png",
-    ".local/sidebar-browser-xc7kRQ/dark-shared-annotations-681.png",
-    ".local/sidebar-browser-xc7kRQ/dark-shared-right-681.png",
-    ".local/sidebar-browser-xc7kRQ/dark-compact-library-1400.png",
-    ".local/sidebar-browser-xc7kRQ/dark-shared-annotations-1400.png",
-    ".local/sidebar-browser-xc7kRQ/dark-shared-right-1400.png",
-    ".local/sidebar-browser-xc7kRQ/dark-table-681.png",
-    ".local/sidebar-browser-xc7kRQ/dark-shared-annotations-430.png",
-    ".local/sidebar-browser-xc7kRQ/dark-fullscreen-annotations-430.png"
+    ".local/sidebar-browser-xGi5xE/light-compact-library-681.png",
+    ".local/sidebar-browser-xGi5xE/light-shared-annotations-681.png",
+    ".local/sidebar-browser-xGi5xE/light-shared-right-681.png",
+    ".local/sidebar-browser-xGi5xE/light-compact-library-1400.png",
+    ".local/sidebar-browser-xGi5xE/light-shared-annotations-1400.png",
+    ".local/sidebar-browser-xGi5xE/light-shared-right-1400.png",
+    ".local/sidebar-browser-xGi5xE/light-table-681.png",
+    ".local/sidebar-browser-xGi5xE/light-shared-annotations-430.png",
+    ".local/sidebar-browser-xGi5xE/light-fullscreen-annotations-430.png",
+    ".local/sidebar-browser-xGi5xE/dark-compact-library-681.png",
+    ".local/sidebar-browser-xGi5xE/dark-shared-annotations-681.png",
+    ".local/sidebar-browser-xGi5xE/dark-shared-right-681.png",
+    ".local/sidebar-browser-xGi5xE/dark-compact-library-1400.png",
+    ".local/sidebar-browser-xGi5xE/dark-shared-annotations-1400.png",
+    ".local/sidebar-browser-xGi5xE/dark-shared-right-1400.png",
+    ".local/sidebar-browser-xGi5xE/dark-table-681.png",
+    ".local/sidebar-browser-xGi5xE/dark-shared-annotations-430.png",
+    ".local/sidebar-browser-xGi5xE/dark-fullscreen-annotations-430.png"
   ],
   "scope": "Actual Chromium with isolated synthetic library and host file storage. Shared sidebar layout and reader recovery; no real library or provider and no formal user validation."
 }

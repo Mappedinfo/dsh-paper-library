@@ -25,7 +25,11 @@ class ReadingAdapter extends LlmAdapter {
     })).slice(-8)
     const prompt = options.messages.flatMap(message => message.content.filter(block => block.type === 'text').map(block => block.text)).join('\n')
     let reply = REPLY
-    if (prompt.includes('PAPER_ANALYSIS_JSON:\n')) {
+    if (prompt.includes('READING_RECORDS_JSON:\n')) {
+      const material = JSON.parse(prompt.slice(prompt.lastIndexOf('READING_RECORDS_JSON:\n') + 'READING_RECORDS_JSON:\n'.length).split('\nEND_OF_READING_RECORDS')[0])
+      reply = JSON.stringify({ title: '合成精读笔记', body: `## 一句话概括\n这是确定性集成夹具依据 ${material.batches.length} 个批次记录生成的精读笔记，不构成学术判断。` })
+      this.observation.analysisNotes = [...(this.observation.analysisNotes || []), { provider: options.provider, model: options.model, batches: material.batches.length }].slice(-4)
+    } else if (prompt.includes('PAPER_ANALYSIS_JSON:\n')) {
       const raw = prompt.slice(prompt.lastIndexOf('LIBRARY_KNOWLEDGE_JSON:\n') + 'LIBRARY_KNOWLEDGE_JSON:\n'.length).split('\nAdditionally return metadata')[0]
       const selected = JSON.parse(raw), source = selected.sources[0]
       this.observation.analysis = [...this.observation.analysis, { provider: options.provider, model: options.model, maxTokens: options.maxTokens,
@@ -64,7 +68,7 @@ class ReadingAdapter extends LlmAdapter {
 
 /** Test-only authenticated booleans make cold lifecycle assertions independent from plugin receipts. */
 export function apply(ctx) {
-  const observation = { generations: 0, references: [], language: [], knowledge: [], analysis: [], analysisAgents: [], analysisGuard: {attempts:0,denied:0,executed:0} }
+  const observation = { generations: 0, references: [], language: [], knowledge: [], analysis: [], analysisNotes: [], analysisAgents: [], analysisGuard: {attempts:0,denied:0,executed:0} }
   ctx.on('agent/created', async ({ agent }) => {
     if (agent.session.id.startsWith('paper-analysis-') || agent.session.header.parentSession?.startsWith('paper-analysis-')) {
       observation.analysisAgents.push({id:agent.session.id,parent:agent.session.header.parentSession,origin:agent.session.header.origin})
@@ -93,7 +97,7 @@ export function apply(ctx) {
       if (req.method !== 'GET' || ids.length > 12 || ids.some(id => !/^paper-library-[a-f0-9]{40}$/.test(id))) { res.writeHead(400); res.end(); return }
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ generations: observation.generations, references: observation.references, language: observation.language, knowledge: observation.knowledge,
-        analysis:observation.analysis,analysisGuard:observation.analysisGuard,analysisAgents:observation.analysisAgents.map(item=>({...item,loaded:Boolean(ctx.agents.get(item.id))})),
+        analysis:observation.analysis,analysisNotes:observation.analysisNotes,analysisGuard:observation.analysisGuard,analysisAgents:observation.analysisAgents.map(item=>({...item,loaded:Boolean(ctx.agents.get(item.id))})),
         observations: ids.map(id => ({ sessionLoaded: Boolean(ctx.sessions.get(id)), agentLoaded: Boolean(ctx.agents.get(id)) })) }))
     },
   }), 'paper-library: cold-session fixture observations')

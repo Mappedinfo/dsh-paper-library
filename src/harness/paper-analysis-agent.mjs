@@ -6,7 +6,7 @@ const MAX_PROMPT_BYTES = 128 * 1024
 const MAX_OUTPUT_BYTES = 160000
 
 function completeJson(result) {
-  if (result?.stopReason !== 'completed') throw fail('后台分析未完整完成；没有采用部分结果。', 'PAPER_ANALYSIS_INCOMPLETE', 502)
+  if (result?.stopReason !== 'completed') throw fail(`后台分析未完整完成（${JSON.stringify(result)?.slice(0, 400)}）；没有采用部分结果。`, 'PAPER_ANALYSIS_INCOMPLETE', 502)
   if (!Array.isArray(result.output)) throw fail('后台分析没有返回完整 JSON。', 'PAPER_ANALYSIS_INCOMPLETE', 502)
   let text = '', bytes = 0
   for (const block of result.output) {

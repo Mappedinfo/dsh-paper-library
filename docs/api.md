@@ -81,6 +81,7 @@ Knowledge calls scope records by `entity:{kind:paper|dataset|release,id}`:
 | `knowledge_generate` | Native Harness only: `entity,source_ids,mode:graph|note,request_id,instruction?`. Host resolves model; browser provider/model overrides are ignored. |
 | `knowledge_draft_put/get/list` | `entity,source_ids,mode,title,body?,nodes?,edges?,assertions?`; every proposal starts `needs-review`; author/LLM origin is separate. |
 | `knowledge_draft_review` | `id,expected_revision,decision:accepted|rejected,reviewed_by:user`; UI only, no model tool. Does not automatically create Markdown. |
+| `knowledge_draft_lint` | `id`. Read-only structural findings over one saved draft: unsupported claims/gaps, isolated nodes, evidence unused by assertions/observations, duplicate relations, dangling endpoints and observations without a source node. Reports severity counts and up to 200 findings; never repairs or rewrites. |
 | `knowledge_note_put/get/list` | `id?,entity,title,body,source_ids,expected_revision`; revisioned Markdown under `knowledge/notes`, with durable write intent recovery. |
 | `knowledge_export` | 1–20 explicitly selected entities, `format:library-json|rkos-v3`; at most 100 accepted drafts/notes, 200 sources/nodes, 400 relations and 4 MiB. Over-budget scope fails explicitly. |
 
@@ -96,7 +97,7 @@ The plugin registers 21 tools through Harness's official tool registry. Optional
 |---|---|---|
 | `library_resources` | `kind?,query?,limit?,offset?,sort?,order?,archived?` | `resource_list` |
 | `library_dataset` | `operation,input_json` | Allowlisted dataset actions; AI usage links forced pending |
-| `library_knowledge` | `operation,input_json` | Selected source/draft/read/export actions; no accept or note overwrite |
+| `library_knowledge` | `operation,input_json` | Selected source/draft/read/lint/export actions; no accept or note overwrite |
 | `library_search` | `query?,limit?,offset?,sort?,order?,archived?` | `list` |
 | `library_get` | `id,include_archived?` | `get` |
 | `library_create` | `metadata` with required `title` | `create` |
@@ -236,6 +237,8 @@ Distinct papers run in parallel up to the deployment's `analysisConcurrency` (an
 Durable `analysis.job:*`, `analysis.latest:*`, `analysis.batch:*` and `analysis.queue:v1` records live under the DSH-home state namespace, inaccessible through browser `state_*` keys. Import/attachment events and explicit selection admit only those paper PDFs; metadata-only records and datasets do not enter the queue. The queue holds at most 2,000 identifiers / 200,000 serialized bytes; overflow is surfaced without undoing the import. One host drains the queue with the same bounded parallelism as manual starts, continues after the browser closes, and resumes unstarted entries on startup without searching the catalog. Turning automation off pauses pending items; running work can be cancelled explicitly. Interrupted, failed or cancelled jobs are never automatically replayed. Current metadata-fill settings are read when a queued paper starts.
 
 `knowledge-draft:analysis:<paper>` page/batch/node-selection drafts use the same host file store; analysis preferences use the shared settings contract below. Job states are queued/reading/generating/committing/complete/failed/cancelled; running records without an owned flight appear interrupted after restart. Reading or restoring saved results never reissues a model call. There is no cross-process job scheduler or whole-library discovery scan.
+
+A completed run also saves one reviewable **reading-note draft** (`mode:note`): after the last batch commits, the same isolated spawn condenses the committed batch graphs — not the raw PDF a second time — into a structured Chinese note (一句话概括 through 待核实与未覆盖), using the paper's authoritative model. Prompt material is the bounded per-batch draft projection (at most 24,000 bytes, batches included in order; partial coverage is recorded as `note_coverage` and stated in the note). The draft's sources are the snapshots actually quoted by the included batches, bounded by the knowledge source budget; batch records retain complete per-batch source lists. The note draft is always `needs-review`, never blocks or fails the analysis job, and a generation failure surfaces only as a job warning with a null `note_draft_id`.
 
 Internal worker actions `paper_analysis_batch`, the legacy `paper_analysis_sources`, and `paper_analysis_apply_metadata` are blocked at browser HTTP and are not model tools. Fill-only metadata writes after successful analysis reuse the managed-PDF backup/atomic-write path and CAS inside the existing paper lock. Proposed DOI/citekey/JCR changes are forbidden; citations retain their identities. Every filled field retains exact selected-source quotes and `origin:llm, review_status:needs-review`. Context preparation retains that review distinction, writes only a selected paper's draft and requires an explicit later send.
 

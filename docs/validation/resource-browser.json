@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-15T07:34:49.305Z",
+  "verified_at": "2026-09-16T01:55:40.757Z",
   "ok": true,
   "checks": [
     "dataset-create-persists-independent-identity-with-type-specific-tools",
@@ -9,6 +9,7 @@
     "dataset-APA-citation-copies-through-CSL",
     "explicit-sources-and-workspace-draft-save-without-generation-or-browser-storage",
     "explicit-review-and-Markdown-note-save-persist-provenance",
+    "explicit-draft-lint-reports-without-changing-the-reviewed-draft",
     "second-browser-recovers-catalog-draft-source-selection-and-Markdown-from-host",
     "knowledge-workflow-fits-narrow-and-wide-viewports",
     "paper-reverse-links-and-return-from-dataset-preserve-PDF-page",
@@ -19,7 +20,7 @@
   "errors": [],
   "external": [],
   "screenshots": [
-    ".local/resource-browser-bQUkQt/dataset-preview.png"
+    ".local/resource-browser-S49DXK/dataset-preview.png"
   ],
   "model_calls": 0,
   "scope": "Actual Chromium and disk APIs with synthetic dataset, CSV, PDF and API-seeded model candidate. Not a real provider generation or formal user test."

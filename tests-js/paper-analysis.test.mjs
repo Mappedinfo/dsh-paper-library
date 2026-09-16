@@ -80,9 +80,10 @@ test('simultaneous duplicate clicks and completed restart never replay a generat
   assert.equal(result.status,'complete')
   const restarted=createPaperAnalysis(f.options)
   assert.equal((await restarted(request)).status,'complete')
-  assert.equal(f.calls.length,1)
+  assert.equal(f.calls.length,2,'One batch generation plus one reading-note generation')
   assert.equal(f.kernel.filter(c=>c.action==='paper_analysis_batch').length,1)
-  assert.equal(f.kernel.filter(c=>c.action==='knowledge_draft_put').length,1)
+  assert.equal(f.kernel.filter(c=>c.action==='knowledge_draft_put'&&c.mode==='graph').length,1)
+  assert.equal(f.kernel.filter(c=>c.action==='knowledge_draft_put'&&c.mode==='note').length,1)
   await assert.rejects(restarted({...request,pages:[7]}),e=>e.code==='ANALYSIS_CONFLICT')
   assertPlainTree(f.record().value)
 })
@@ -110,7 +111,7 @@ test('up to two documents run in parallel, a third waits, and changed duplicate 
   await until(()=>[...f.records.values()].some(record=>record.value.id==='paper-b'&&record.value.request_id==='run-b'&&record.value.status==='complete'))
   const next=await f.handle({...request,request_id:'run-a2'})
   assert.equal(next.status,'queued')
-  await until(()=>f.calls.length===3)
+  await until(()=>f.calls.filter(c=>!c.prompt.includes('精读笔记')).length===3)
   await until(()=>[...f.records.values()].some(record=>record.value.request_id==='run-a2'&&record.value.status==='complete'))
 })
 
@@ -215,7 +216,7 @@ test('concurrent metadata edit is a visible warning while the graph remains avai
   assert.equal(f.kernel.filter(c=>c.action==='paper_analysis_apply_metadata').length,1)
   await createPaperAnalysis(f.options)(request)
     .then(()=>assert.fail('Fingerprint mismatch should not be treated as retry'),e=>assert.equal(e.code,'ANALYSIS_CONFLICT'))
-  assert.equal(f.calls.length,1)
+  assert.equal(f.calls.length,2)
 })
 
 test('manual apply duplicate clicks are coalesced and subsequent reads do not apply again',async()=>{
@@ -237,7 +238,7 @@ test('context uses typed selected nodes and only their evidence references, with
   assert.doesNotMatch(result.text,/UNSELECTED_PRIVATE_BODY|UNSELECTED_CLAIM|source-b/)
   assert.match(result.text,/尚未核对/);assert.match(result.text,/不是指令/)
   assert.deepEqual(f.kernel.slice(before).map(c=>c.action),['knowledge_draft_get','knowledge_source_get'])
-  assert.equal(f.calls.length,1);assert.deepEqual(f.routes,[{action:'chat_ensure',id:'paper-a'}])
+  assert.equal(f.calls.length,2);assert.deepEqual(f.routes,[{action:'chat_ensure',id:'paper-a'}])
   await assert.rejects(f.handle({action:'paper_analysis_context',id:'paper-a',node_ids:['same']}),/不属于/)
   await assert.rejects(f.handle({action:'paper_analysis_context',id:'paper-a',node_ids:['claim:same','claim:same']}),/请选择/)
 })
@@ -249,7 +250,7 @@ test('rejected or oversized selected context is blocked without truncating or ex
   await assert.rejects(f.handle(input),e=>e.code==='ANALYSIS_CONTEXT_BUDGET')
   f.drafts.get('draft-a').status='rejected'
   await assert.rejects(f.handle(input),/否决/)
-  assert.equal(f.calls.length,1)
+  assert.equal(f.calls.length,2)
 })
 
 test('status reads are read-only; failed final persistence never triggers model replay',async()=>{
@@ -259,7 +260,7 @@ test('status reads are read-only; failed final persistence never triggers model 
   const restarted=createPaperAnalysis(f.options)
   for(let count=0;count<5;count++)await restarted({action:'paper_analysis_get',id:'paper-a'})
   assert.equal((await restarted(request)).status,'failed')
-  assert.equal(f.writes.length,writes);assert.equal(f.routes.length,routes);assert.equal(f.calls.length,1)
+  assert.equal(f.writes.length,writes);assert.equal(f.routes.length,routes);assert.equal(f.calls.length,2)
   assert.equal(f.kernel.slice(before).every(c=>c.action==='knowledge_draft_get'),true)
 })
 
@@ -274,7 +275,7 @@ test('reuse opens an existing result during another active job without new work'
   assert.equal(f.kernel.slice(before).every(c=>c.action==='knowledge_draft_get'),true)
   const cancel=f.handle({action:'paper_analysis_cancel',id:'paper-b',request_id:'run-b'})
   await new Promise(resolve=>setImmediate(resolve));f.readGate.resolve();await cancel
-  assert.equal(f.calls.length,1)
+  assert.equal(f.calls.length,2)
 })
 
 test('unavailable saved graph remains a visible read error without erasing metadata suggestions',async()=>{
@@ -285,7 +286,7 @@ test('unavailable saved graph remains a visible read error without erasing metad
   const result=await handle({action:'paper_analysis_get',id:'paper-a'})
   assert.match(result.draft_error,/saved graph missing/);assert.match(result.warnings.at(-1),/saved graph missing/)
   assert.deepEqual(result.metadata,f.output.metadata);assert.deepEqual(result.field_sources,f.output.field_sources)
-  assert.equal(f.writes.length,writes);assert.equal(f.calls.length,1)
+  assert.equal(f.writes.length,writes);assert.equal(f.calls.length,2)
 })
 
 test('invalid typed identities and page selections cause no state or kernel work',async()=>{
@@ -298,13 +299,15 @@ function multiBatch(f){
   f.sources=Array.from({length:13},(_,i)=>({id:`source-${i+1}`,entity:{kind:'paper',id:'paper-a'},kind:'source-note',verification:'source-note',text:`Evidence on page ${i+1}.`,locator:{page:i+1},content_hash:`hash-${i+1}`}))
   f.batchPacks=[f.sources.slice(0,8),f.sources.slice(8)].map((sources,index)=>({paper:f.paper,expected_modified:'revision-a',file_version:{bytes:1},sources,source_ids:sources.map(s=>s.id),next_cursor:index===0?{index:8,offset:0}:null,
     coverage:{read_pages:sources.map(s=>s.locator.page),completed_pages:sources.map(s=>s.locator.page),requested_pages:Array.from({length:13},(_,i)=>i+1),page_count:13,characters:sources.reduce((n,s)=>n+s.text.length,0),blank_pages:[],truncated_pages:[],omitted_pages:[]}}))
-  f.outputFor=({prompt})=>{const input=JSON.parse(prompt.split('LIBRARY_KNOWLEDGE_JSON:\n')[1].split('\nAdditionally return metadata')[0]),s=input.sources[0];return {title:'Batch graph',body:'Source bounded.',nodes:[{id:'e',type:'evidence',label:`Selected ${s.id}`,source_id:s.id,quote:s.text}],edges:[],assertions:[],metadata:{},field_sources:{}}}
+  f.outputFor=({prompt})=>{if(prompt.includes('精读笔记'))return {title:'合成精读笔记',body:'## 一句话概括\n合成笔记。'};const input=JSON.parse(prompt.split('LIBRARY_KNOWLEDGE_JSON:\n')[1].split('\nAdditionally return metadata')[0]),s=input.sources[0];return {title:'Batch graph',body:'Source bounded.',nodes:[{id:'e',type:'evidence',label:`Selected ${s.id}`,source_id:s.id,quote:s.text}],edges:[],assertions:[],metadata:{},field_sources:{}}}
 }
 test('all thirteen pages are read serially in bounded batches and prior batch context remains inspectable',async()=>{
   const f=fixture();multiBatch(f);await f.handle({...request,pages:Array.from({length:13},(_,i)=>i+1)});const result=await f.done()
   assert.equal(result.status,'complete');assert.equal(result.batch_count,2);assert.equal(result.coverage.full_document,true)
-  assert.deepEqual(result.coverage.read_pages,Array.from({length:13},(_,i)=>i+1));assert.equal(f.calls.length,2)
-  assert.equal(f.drafts.size,2);assert.equal(f.routes.length,1)
+  assert.deepEqual(result.coverage.read_pages,Array.from({length:13},(_,i)=>i+1));assert.equal(f.calls.length,3,'Two batch generations plus one reading-note generation')
+  assert.equal(f.drafts.size,3);assert.equal(f.routes.length,1)
+  assert.ok(result.note_draft_id);assert.deepEqual(result.note_coverage,{batches:2,batches_total:2,partial:false})
+  assert.match(f.calls[2].prompt,/全部阅读批次|All reading batches/)
   const reads=f.kernel.filter(x=>x.action==='paper_analysis_batch');assert.deepEqual(reads[1].cursor,{index:8,offset:0});assert.deepEqual(reads[1].file_version,{bytes:1})
   assert.equal(f.calls[0].prompt.includes('Evidence on page 13.'),false);assert.equal(f.calls[1].prompt.includes('Evidence on page 1.'),false)
   const first=await f.handle({action:'paper_analysis_get',id:'paper-a',batch_index:0});assert.equal(first.draft.id,'draft-a')
@@ -317,4 +320,30 @@ test('failure in a later batch retains earlier graph and never replays automatic
   await f.handle(request);const result=await f.done();assert.equal(result.status,'failed');assert.equal(result.batch_count,1)
   assert.equal(result.draft.id,'draft-a');assert.equal((await f.handle({action:'paper_analysis_get',id:'paper-a',batch_index:0})).draft.id,'draft-a')
   const restarted=createPaperAnalysis(f.options);assert.equal((await restarted(request)).status,'failed');assert.equal(f.calls.length,2)
+})
+
+test('a completed run saves one reviewable reading-note draft from committed batches',async()=>{
+  const f=fixture()
+  f.outputFor=input=>input.prompt.includes('精读笔记')?{title:'Synthetic 精读笔记',body:'## 一句话概括\n合成笔记。'}:f.output
+  await f.handle(request);const result=await f.done()
+  assert.equal(result.status,'complete')
+  assert.ok(result.note_draft_id,'Note draft identity is recorded on the job')
+  assert.deepEqual(result.note_coverage,{batches:1,batches_total:1,partial:false})
+  const notePut=f.kernel.find(c=>c.action==='knowledge_draft_put'&&c.mode==='note')
+  assert.ok(notePut);assert.equal(notePut.origin,'llm');assert.equal(notePut.title,'Synthetic 精读笔记')
+  assert.deepEqual(notePut.source_ids,['source-a','source-b'],'Note lists the sources quoted by the batch draft')
+  assert.deepEqual(notePut.nodes,[]);assert.match(notePut.request_id,/^analysis-note-/)
+  const noteCall=f.calls.find(c=>c.prompt.includes('精读笔记'))
+  assert.match(noteCall.prompt,/待核实与未覆盖/);assert.match(noteCall.prompt,/Synthetic paper/)
+  assert.equal(noteCall.provider,'synthetic-provider','The note uses the paper’s authoritative model route')
+})
+test('reading-note failure never fails the completed analysis or erases batch graphs',async()=>{
+  const f=fixture()
+  f.outputFor=input=>input.prompt.includes('精读笔记')?Promise.reject(new Error('Synthetic note failure')):f.output
+  await f.handle(request);const result=await f.done()
+  assert.equal(result.status,'complete')
+  assert.equal(result.note_draft_id,undefined)
+  assert.ok(result.warnings.some(w=>w.includes('精读笔记')),'Note failure is a visible warning')
+  assert.equal(result.draft.id,'draft-a','Batch graph drafts remain saved')
+  assert.equal(f.kernel.filter(c=>c.action==='knowledge_draft_put'&&c.mode==='note').length,0)
 })
