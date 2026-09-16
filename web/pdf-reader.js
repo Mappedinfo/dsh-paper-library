@@ -86,14 +86,17 @@
   }
   function create({ root, api, getPaper, onActivePage = () => {}, onSelection = () => {}, onStatus = () => {}, onPageNote = () => {} }) {
     if (!root) throw new Error('PDF reader requires a scroll viewport');
-    let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', transport = Promise.resolve();
+    let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', transport = Promise.resolve(), zoom = 1;
     const renderedScales = new Map();
     const dom = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     root.classList.add('paper-pdf-reader'); root.tabIndex = 0; root.setAttribute('aria-label', 'PDF 连续阅读区域');
     const strip = dom('div', 'pdr-pages'); root.replaceChildren(strip);
     const current = (id, ticket) => !disposed && id === paperId && id === getPaper()?.id && ticket === generation;
     function request(action, args, valid) { const task = transport.catch(() => {}).then(() => valid() ? api(action, args) : null); transport = task.catch(() => {}); return task; }
-    function scaleFor(page) { const geometry = pages[page - 1]; return Math.max(.2, Math.min(2, layoutWidth / geometry.width * Math.min(2, window.devicePixelRatio || 1))); }
+    // zoom 1 is fit-width; wider layouts scroll horizontally. Raster density may
+    // rise with zoom (capped at 4) so magnified text stays sharp within budget.
+    const fitWidth = () => Math.max(1, Math.min(1100, (root.clientWidth || 664) - PADDING * 2));
+    function scaleFor(page) { const geometry = pages[page - 1]; const cap = Math.min(2 * Math.max(1, zoom), 4); return Math.max(.2, Math.min(cap, layoutWidth / geometry.width * Math.min(2, window.devicePixelRatio || 1))); }
     function announce(loaded = queue.snapshot().residents.includes(active)) { const geometry = pages[active - 1]; if (geometry) onActivePage(active, { paperId, pageCount: pages.length, width: geometry.width, height: geometry.height, loaded }); }
     function placeholder(page, message = '滚动到这里时载入', error = false) {
       const slot = slots[page - 1]; if (!slot) return;
@@ -139,7 +142,7 @@
     function scroll() { if (frame !== null) return; frame = window.requestAnimationFrame(() => { frame = null; updateWindow(); }); }
     function resize() {
       if (!pages.length || root.clientWidth <= 0 || disposed) return;
-      const width = Math.max(1, Math.min(1100, root.clientWidth - PADDING * 2));
+      const width = Math.max(1, fitWidth() * zoom);
       if (Math.abs(width - layoutWidth) < 1) { updateWindow(); return; }
       const oldPage = pageAt(metrics, root.scrollTop), previous = metrics[oldPage - 1], fraction = previous ? (root.scrollTop - previous.top) / previous.height : 0;
       layoutWidth = width; metrics = pageMetrics(pages, width);
@@ -172,7 +175,7 @@
           const layout = await request('page_layout', { id }, () => current(id, ticket)); if (!current(id, ticket)) return false;
           pages = validateLayout(layout); slots = pages.map(geometry => { const outer = dom('section', 'pdr-page-slot'); outer.dataset.pdfPage = String(geometry.page); outer.setAttribute('aria-label', `PDF 第 ${geometry.page} 页`); const caption = dom('div', 'pdr-page-caption', `${geometry.page} / ${pages.length}`), sheet = dom('div', 'pdr-sheet'); sheet.dataset.pdfPage = String(geometry.page); outer.append(caption, sheet); return { outer, sheet }; });
           strip.replaceChildren(...slots.map(slot => slot.outer)); for (const geometry of pages) placeholder(geometry.page);
-          layoutWidth = Math.max(1, Math.min(1100, (root.clientWidth || 664) - PADDING * 2)); metrics = pageMetrics(pages, layoutWidth);
+          layoutWidth = Math.max(1, fitWidth() * zoom); metrics = pageMetrics(pages, layoutWidth);
           for (const metric of metrics) { const slot = slots[metric.page - 1]; slot.outer.style.width = `${layoutWidth}px`; slot.outer.style.height = `${metric.height}px`; slot.sheet.style.height = `${metric.height - CAPTION}px`; }
           active = Math.max(1, Math.min(pages.length, Math.trunc(Number(page)) || 1)); announce(false); return true;
         } catch (error) {
@@ -229,6 +232,13 @@
     }
     function click(event) { const retry = event.target.closest?.('[data-retry-page]'); if (retry && root.contains(retry)) void refresh(Number(retry.dataset.retryPage)).catch(() => {}); }
     function setTool(value, nextColor) { if (!TOOLS.has(value)) throw new Error('Unsupported PDF annotation tool'); tool = value; if (nextColor !== undefined) { if (!/^#[0-9a-f]{6}$/i.test(nextColor)) throw new Error('Annotation color must be #RRGGBB'); color = nextColor; } root.dataset.tool = tool; lastSelection = ''; }
+    function setZoom(value) {
+      const next = Number(value);
+      if (!Number.isFinite(next)) throw new Error('缩放比例无效');
+      const clamped = Math.round(Math.max(.25, Math.min(4, next)) * 100) / 100;
+      if (Math.abs(clamped - zoom) < .001) return zoom;
+      zoom = clamped; resize(); return zoom;
+    }
     // Clearing a browser selection must permit choosing the same passage again.
     // Keep the frozen source available while toolbar/dialog focus collapses it.
     function selectionChanged() { const value = window.getSelection(); if (!value?.rangeCount || value.isCollapsed) lastSelection = ''; }
@@ -236,7 +246,7 @@
     root.addEventListener('scroll', scroll, { passive: true }); root.addEventListener('pointerup', pointerUp); root.addEventListener('keyup', captureSelection); root.addEventListener('click', click); setTool('select');
     document.addEventListener('selectionchange', selectionChanged);
     function dispose() { clear(); disposed = true; queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); document.removeEventListener('selectionchange', selectionChanged); }
-    return { open, goTo, refresh, clear, dispose, setTool, resize, getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
+    return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
   window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection });
 })();

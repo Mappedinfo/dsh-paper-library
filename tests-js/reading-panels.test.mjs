@@ -7,7 +7,9 @@ const source=await readFile(new URL('../web/reading-panels.js',import.meta.url),
 function environment({width=741,storage=new Map(),sharedLibrary=false,onAnnotationsRequest}={}) {
   const ids=new Map(),visibility=[],changes=[],toasts=[];
   class Element {
-    constructor(tag='div') {this.tagName=tag.toUpperCase();this.children=[];this.hidden=false;this.open=false;this.dataset={};this.attributes={};this.events=new Map();this.clientWidth=width;const classes=new Set();this.classList={add:(...names)=>names.forEach(name=>classes.add(name)),remove:(...names)=>names.forEach(name=>classes.delete(name)),contains:name=>classes.has(name),toggle:(name,on)=>{if(on===undefined)on=!classes.has(name);if(on)classes.add(name);else classes.delete(name);return on;}};}
+    constructor(tag='div') {this.tagName=tag.toUpperCase();this.children=[];this.hidden=false;this.open=false;this.dataset={};this.attributes={};this.events=new Map();this.clientWidth=width;const classes=new Set();this.classList={add:(...names)=>names.forEach(name=>classes.add(name)),remove:(...names)=>names.forEach(name=>classes.delete(name)),contains:name=>classes.has(name),toggle:(name,on)=>{if(on===undefined)on=!classes.has(name);if(on)classes.add(name);else classes.delete(name);return on;}};this.style={values:new Map(),setProperty:(k,v)=>{this.style.values.set(k,v);},removeProperty:(k)=>{this.style.values.delete(k);}};this.bounds={left:0,right:width,width:Number(width)||0};}
+    setPointerCapture(){} releasePointerCapture(){}
+    getBoundingClientRect(){return this.bounds;}
     set id(value){this._id=value;ids.set(value,this);} get id(){return this._id;}
     set className(value){this._className=value;this.classList.add(...value.split(' '));}get className(){return this._className;}
     get nextSibling(){return this.parentNode?.children[this.parentNode.children.indexOf(this)+1]||null;}
@@ -207,4 +209,45 @@ test('shared rail disposal restores original library children and annotation roo
   assert.equal(header.parentNode,null);assert.equal(content.parentNode,null);assert.equal(f.root.children.length,0);
   assert.equal(f.observers[0].disconnected,true);assert.equal(f.window.events.get('resize').size,0);assert.equal(f.libraryRoot.events.get('keydown').size,0);assert.equal(tabs.events.get('keydown').size,0);
   f.ids.get('reading-sidebar-annotations').click();assert.equal(f.annotationsRoot.hidden,true);assert.equal(f.workspace.classList.contains('shared-sidebar-open'),false);
+});
+
+test('rail resizer drags to a free width, persists it, and restores it in a fresh host',async()=>{
+  const f=environment({sharedLibrary:true,width:1000});f.panels.paperChanged(paper);f.panels.show('annotations');
+  const handle=f.ids.get('reading-rail-resizer');
+  assert.ok(handle,'A resizer exists for the shared rail');
+  assert.equal(handle.hidden,false);assert.equal(handle.getAttribute('role'),'separator');
+  assert.equal(handle.getAttribute('aria-orientation'),'vertical');
+  handle.dispatch('pointerdown',{button:0,pointerId:1,clientX:214});assert.equal(handle.classList.contains('is-active'),true);
+  handle.dispatch('pointermove',{pointerId:1,clientX:320});
+  assert.equal(f.workspace.style.values.get('--rail-width'),'320px');
+  handle.dispatch('pointermove',{pointerId:1,clientX:5000});
+  assert.equal(f.workspace.style.values.get('--rail-width'),'720px','Widths stay within the 160–720 px bound');
+  handle.dispatch('pointermove',{pointerId:1,clientX:320});
+  handle.dispatch('pointerup',{pointerId:1});
+  assert.equal(handle.classList.contains('is-active'),false);
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(f.storage.get('reader:layout').rail_width,320);
+  handle.dispatch('keydown',{key:'ArrowRight'});
+  assert.equal(f.workspace.style.values.get('--rail-width'),'328px','Keyboard nudges the divider');
+  const restored=environment({sharedLibrary:true,width:1000,storage:f.storage});
+  await restored.panels.ready;
+  assert.equal(restored.workspace.style.values.get('--rail-width'),'328px','A fresh host restores the saved rail width');
+  restored.panels.dispose();
+  assert.equal(restored.workspace.style.values.has('--rail-width'),false,'Disposal clears the inline width');
+});
+
+test('rail resizer follows the rail side and hides when the rail is closed',()=>{
+  const f=environment({sharedLibrary:true,width:1200});f.panels.paperChanged(paper);
+  const handle=f.ids.get('reading-rail-resizer');
+  assert.equal(handle.hidden,true,'No divider while the shared rail is closed');
+  f.panels.show('annotations');assert.equal(handle.hidden,false);
+  f.panels.setSide('right');
+  handle.dispatch('pointerdown',{button:0,pointerId:2,clientX:1200});
+  handle.dispatch('pointermove',{pointerId:2,clientX:900});
+  assert.equal(f.workspace.style.values.get('--rail-width'),'300px','Right-side width is measured from the window edge');
+  handle.dispatch('pointerup',{pointerId:2});
+  f.panels.setReadingActive(false);
+  assert.equal(f.workspace.dataset.sidebarSide,'left');
+  f.panels.setReadingActive(true);
+  assert.equal(f.workspace.style.values.get('--rail-width'),'300px','The chosen width survives mode switches');
 });

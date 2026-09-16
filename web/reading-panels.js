@@ -5,7 +5,7 @@ window.PaperReadingPanels = (() => {
   const names = new Set(['annotations','metadata','chat']);
   function create({root,annotationsRoot,conversationRoot,metadataRoot,libraryRoot,onAnnotationsRequest,onChatVisibility,onPanelChange,toast,persistence}) {
     if (!root || !annotationsRoot || !conversationRoot || !metadataRoot) throw new Error('Reading panels require the workspace and three existing content roots');
-    let sidebar = null, side = 'left', sideRevision=0, chatOpen = false, collapsed = false, paper = null, disposed = false, lastChatVisible = false, readingActive=true, sharedOpen=false;
+    let sidebar = null, side = 'left', sideRevision=0, chatOpen = false, collapsed = false, paper = null, disposed = false, lastChatVisible = false, readingActive=true, sharedOpen=false, railWidth=null;
     const listeners = [], originals = [annotationsRoot,conversationRoot,metadataRoot].map(element=>({element,parent:element.parentNode,next:element.nextSibling,hidden:element.hidden,open:element.open}));
     const make = (tag,className,text) => {const element=document.createElement(tag);element.className=className;if(text!==undefined)element.textContent=text;return element;};
     const listen = (element,event,fn) => {element.addEventListener(event,fn);listeners.push(()=>element.removeEventListener(event,fn));};
@@ -47,7 +47,26 @@ window.PaperReadingPanels = (() => {
     // same nonmodal form reachable there without creating a second editor.
     const globalHost=make('div','paper-reading-workspace reading-panels-global-host');globalHost.hidden=true;document.body.append(globalHost);
     annotationsRoot.classList.add('reading-annotations-content');metadataRoot.classList.add('reading-metadata-content');conversationRoot.classList.add('reading-conversation-content');
+    let layoutReady=Promise.resolve();
     const ready=persistence?Promise.resolve().then(()=>persistence.get('preferences')).then(value=>{const saved=value?.['reading-panel-side'];if(!disposed&&!sideRevision&&(saved==='left'||saved==='right')){side=saved;render();}}).catch(error=>toast?.(`无法读取侧栏偏好：${error.message}`,true)):Promise.resolve();
+    // Free rail width: a draggable separator between the rail and the document,
+    // persisted per library; media-query defaults apply until the user drags.
+    const workspace=libraryRoot?.parentNode;
+    const resizer=workspace?make('div','reading-rail-resizer'):null;
+    if(resizer){
+      resizer.id='reading-rail-resizer';resizer.setAttribute('role','separator');resizer.setAttribute('aria-orientation','vertical');resizer.setAttribute('aria-label','拖动调整阅读与批注栏宽度');resizer.tabIndex=0;resizer.hidden=true;
+      const clampWidth=value=>Math.max(160,Math.min(720,Math.round(value)));
+      function applyWidth(value){railWidth=clampWidth(value);workspace.style.setProperty('--rail-width',`${railWidth}px`);}
+      function removeWidth(){railWidth=null;workspace.style.removeProperty('--rail-width');}
+      function fromEvent(event){const box=workspace.getBoundingClientRect();return side==='right'?box.right-event.clientX:event.clientX-box.left;}
+      listen(resizer,'pointerdown',event=>{if(event.button!==0)return;event.preventDefault();resizer.setPointerCapture(event.pointerId);resizer.classList.add('is-active');});
+      listen(resizer,'pointermove',event=>{if(!resizer.classList.contains('is-active'))return;applyWidth(fromEvent(event));});
+      const finish=event=>{if(!resizer.classList.contains('is-active'))return;resizer.classList.remove('is-active');if(railWidth&&persistence)void persistence.patch('reader:layout',{rail_width:railWidth}).catch(error=>toast?.(`侧栏宽度尚未保存：${error.message}`,true));};
+      listen(resizer,'pointerup',finish);listen(resizer,'pointercancel',finish);
+      listen(resizer,'keydown',event=>{if(!['ArrowLeft','ArrowRight'].includes(event.key))return;event.preventDefault();const step=(event.shiftKey?24:8)*(event.key==='ArrowRight'?1:-1)*(side==='right'?-1:1);const box=workspace.getBoundingClientRect();const currentWidth=railWidth??(side==='right'?box.right-resizer.getBoundingClientRect().left-4:resizer.getBoundingClientRect().left-box.left+4);applyWidth(currentWidth+step);if(persistence)void persistence.patch('reader:layout',{rail_width:railWidth}).catch(()=>{});});
+      workspace.append(resizer);
+      if(persistence)layoutReady=persistence.get('reader:layout').then(value=>{const saved=Number(value?.rail_width);if(!disposed&&Number.isFinite(saved)&&saved>=160&&saved<=720)applyWidth(saved);}).catch(()=>{});
+    }
     function notify() {
       const visible=chatOpen&&!collapsed;
       if(visible!==lastChatVisible){lastChatVisible=visible;onChatVisibility?.(visible);}
@@ -70,6 +89,7 @@ window.PaperReadingPanels = (() => {
         annotationsTab.setAttribute('aria-selected',String(annotations));annotationsTab.tabIndex=annotations?0:-1;annotationsTab.disabled=!paper||paper.archived;
         const direction=side==='left'?'移至右侧':'移至左侧';sharedMove.title=direction;sharedMove.setAttribute('aria-label',direction);
       }
+      if(resizer)resizer.hidden=!(readingActive&&sharedOpen);
       if(metadataRoot.tagName==='DIALOG') {
         if(sidebar==='metadata'&&!metadataRoot.open)metadataRoot.show();
         else if(sidebar!=='metadata'&&metadataRoot.open)metadataRoot.close();
@@ -116,7 +136,7 @@ window.PaperReadingPanels = (() => {
     for(const panel of [aside,chat])listen(panel,'keydown',event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();close(panel===chat?'chat':sidebar);}});
     if(libraryRoot)listen(libraryRoot,'keydown',event=>{if(event.key==='Escape'&&sidebar==='annotations'&&!event.defaultPrevented){event.preventDefault();sharedOpen=false;close('annotations');}});
     render(false);
-    return {toggle,show,close,setSide,paperChanged,setReadingActive,showLibrary,visible,ready,dispose(){
+    return {toggle,show,close,setSide,paperChanged,setReadingActive,showLibrary,visible,ready:Promise.all([ready,layoutReady]).then(()=>undefined),dispose(){
       if(disposed)return;disposed=true;observer?.disconnect();for(const off of listeners)off();
       if(lastChatVisible)onChatVisibility?.(false);
       for(const {element,parent,next,hidden,open} of originals){
@@ -127,6 +147,7 @@ window.PaperReadingPanels = (() => {
       annotationsRoot.classList.remove('reading-annotations-content');metadataRoot.classList.remove('reading-metadata-content');conversationRoot.classList.remove('reading-conversation-content');
       if(libraryRoot){libraryRoot.append(...libraryChildren);sharedHeader.remove();libraryContent.remove();libraryRoot.classList.remove('shared-reading-sidebar');delete libraryRoot.dataset.sidebarPanel;libraryRoot.parentNode.classList.remove('shared-sidebar-open');delete libraryRoot.parentNode.dataset.sidebarSide;annotationsRoot.removeAttribute('role');annotationsRoot.removeAttribute('aria-labelledby');}
       aside.remove();chat.remove();globalHost.remove();root.classList.remove('paper-reading-workspace','has-reading-sidebar','reading-panels-roomy');delete root.dataset.readingSide;
+      if(resizer){resizer.remove();workspace.style?.removeProperty('--rail-width');}
     }};
   }
   return {create};

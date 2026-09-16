@@ -9,7 +9,7 @@ window.PaperReadingShell = (() => {
     strikeout: '拖选文字，保存为 PDF 删除线批注。',
     note: '点击页面中的位置，添加一条便笺。',
   };
-  function create({state, workbench, panels, reader, navigate, toast, contextChanged}) {
+  function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence}) {
     const $ = id => document.getElementById(id);
     const node = (tag, text, className) => { const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n; };
     const button = (id, text, action) => {const n=node('button',text,'button subtle');n.type='button';n.id=id;n.addEventListener('click',action);return n;};
@@ -37,6 +37,19 @@ window.PaperReadingShell = (() => {
     const colorLabel=node('label','颜色','reader-color');const input=node('input');input.type='color';input.id='reader-color';input.value=color;input.setAttribute('aria-label','批注颜色');
     input.addEventListener('input',()=>{color=input.value;reader()?.setTool(tool,color);});colorLabel.append(input);annotationTools.append(colorLabel);
     const sidebar=button('reader-annotations','批注栏',()=>{panels()?.toggle('annotations');sync();});readerTools.append(sidebar);
+    // Fit-width default with free zoom: steppers, an explicit percentage and reset.
+    let zoom=1;
+    const zoomGroup=node('span',null,'reader-zoom');
+    const zoomOut=button('reader-zoom-out','−',()=>setZoom(zoom/1.2));zoomOut.title='缩小';
+    const percent=node('input');percent.id='reader-zoom-percent';percent.type='number';percent.min='25';percent.max='400';percent.step='5';percent.value='100';percent.setAttribute('aria-label','PDF 缩放百分比');percent.title='缩放百分比（25–400）';
+    const zoomIn=button('reader-zoom-in','＋',()=>setZoom(zoom*1.2));zoomIn.title='放大';
+    const zoomFit=button('reader-zoom-fit','全宽',()=>setZoom(1));zoomFit.title='恢复全宽自适应';
+    function setZoom(value){const applied=reader()?.setZoom(value);if(applied===undefined)return;zoom=applied;percent.value=String(Math.round(zoom*100));if(persistence)void persistence.patch('reader:layout',{zoom}).catch(()=>{});}
+    const commitZoom=()=>{const value=Number(percent.value);if(Number.isFinite(value))setZoom(value/100);percent.value=String(Math.round(zoom*100));};
+    percent.addEventListener('change',commitZoom);
+    percent.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();commitZoom();}});
+    zoomGroup.append(zoomOut,percent,zoomIn,zoomFit);readerTools.append(zoomGroup);
+    if(persistence)void persistence.get('reader:layout').then(value=>{const saved=Number(value?.zoom);if(Number.isFinite(saved)&&saved!==1)setZoom(saved);}).catch(()=>{});
     // One global import entry. Link intake belongs inside that same import surface.
     $('import-open').textContent='＋ 导入';libraryTools.append($('import-open'),$('export-library'),$('build-bibliography'),$('metadata-enrich'),$('catalog-archive'));
     $('quick-import-form').hidden=true;

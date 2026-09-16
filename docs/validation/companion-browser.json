@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-16T03:06:16.888Z",
+  "verified_at": "2026-09-16T14:47:21.069Z",
   "ok": true,
   "checks": [
     "toolbar-enables-shared-settings-and-human-save-enters-host-queue",
@@ -11,8 +11,8 @@
   "externalModelRequests": 0,
   "browserErrors": [],
   "screenshots": [
-    ".local/companion-browser-foNAtl/dark-511.png",
-    ".local/companion-browser-foNAtl/dark-681.png"
+    ".local/companion-browser-SawjXf/dark-511.png",
+    ".local/companion-browser-SawjXf/dark-681.png"
   ],
   "limitations": [
     "Synthetic adapter; native DSH completion is covered by paper-chat-harness.json."

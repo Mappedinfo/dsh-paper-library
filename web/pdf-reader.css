@@ -1,6 +1,6 @@
 .paper-pdf-reader { position:relative; min-height:220px; height:100%; overflow:auto; overscroll-behavior:contain; overflow-anchor:none; scrollbar-gutter:stable; background:#e7e9e5; outline:none; }
 .paper-pdf-reader:focus-visible { outline:2px solid var(--teal,#286a61); outline-offset:-2px; }
-.pdr-pages { display:flex; flex-direction:column; align-items:center; gap:16px; padding:12px 0; min-height:100%; box-sizing:border-box; }
+.pdr-pages { display:flex; flex-direction:column; align-items:center; gap:16px; padding:12px 0; min-height:100%; box-sizing:border-box; width:max-content; margin:0 auto; min-width:100%; }
 .pdr-page-slot { flex:none; min-width:0; margin:0; padding:0; position:relative; }
 .pdr-page-caption { height:24px; line-height:20px; font-size:10px; text-align:center; color:#788079; user-select:none; }
 .pdr-sheet { position:relative; width:100%; background:white; box-shadow:0 1px 5px #1b2c2425; overflow:hidden; }
