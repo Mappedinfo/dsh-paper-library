@@ -399,6 +399,20 @@ async function saveAnnotation(event) {
     else if ($('auto-feedback').checked) requestFeedback(draft.id, true);
   } catch (error) { errorAt('annotation-error', error); } finally { setBusy(event.target, false); }
 }
+/** Reader ↔ rail linking: the shared rail keeps its own cards, so linking only
+ * scrolls and flashes the matching card and never rewrites the list. */
+let annotationLinkTimer = null;
+function linkAnnotationCard(annotationId) {
+  const escaped = window.CSS?.escape ? window.CSS.escape(annotationId) : annotationId.replace(/["\\]/g, '\\$&');
+  const card = document.querySelector(`#annotation-list > .annotation-card[data-annotation-id="${escaped}"]`);
+  if (!card) return false;
+  for (const other of document.querySelectorAll('#annotation-list > .annotation-card.is-linked')) other.classList.remove('is-linked');
+  card.classList.add('is-linked');
+  if (readingPanels?.visible('annotations')) card.scrollIntoView({ block: 'center', inline: 'nearest' });
+  if (annotationLinkTimer !== null) window.clearTimeout(annotationLinkTimer);
+  annotationLinkTimer = window.setTimeout(() => { annotationLinkTimer = null; if (card.isConnected) card.classList.remove('is-linked'); }, 2400);
+  return true;
+}
 async function handleNoteAction(event) {
   const button = event.target.closest('[data-note-action]'); if (!button) return;
   const action = button.dataset.noteAction;
@@ -873,6 +887,18 @@ $('discuss-selection').addEventListener('click', () => paperChatUI?.useSelection
 $('annotation-comment').addEventListener('input', publishReaderState);
 $('annotation-dialog').addEventListener('close', publishReaderState);
 $('page-note').addEventListener('click', () => openAnnotation('note')); $('annotation-form').addEventListener('submit', saveAnnotation); $('annotation-list').addEventListener('click', handleNoteAction);
+// Rail → PDF: clicking a card body (never its action buttons) reveals the
+// matching markup in the document and flashes it.
+$('annotation-list').addEventListener('click', event => {
+  if (event.target.closest('[data-note-action]') || event.target.closest('a, input, textarea, summary')) return;
+  const card = event.target.closest('.annotation-card[data-annotation-id]');
+  if (!card || !state.active?.pdf) return;
+  const note = state.annotations.find(entry => entry.id === card.dataset.annotationId);
+  if (!note) return;
+  linkAnnotationCard(note.id);
+  if (state.tab !== 'reader' && state.tab !== 'annotations') void switchTab('reader');
+  void pdfReader?.revealAnnotation(note.id, { page: note.page });
+});
 $('request-feedback').addEventListener('click', () => requestFeedback());
 $('auto-feedback').addEventListener('change', () => { savePreference(preferenceKey(), String($('auto-feedback').checked)); if ($('auto-feedback').checked) toast('已开启：保存批注后会调用所选模型，并使用模型额度。'); });
 $('feedback-model').addEventListener('change', () => { const model = manualModel(); if (model) savePreference(modelKey(), `${model.provider || ''}/${model.id}`); renderModelRoute(); });
@@ -1011,6 +1037,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
     if(['highlight','underline','strikeout'].includes(intent.intent))openAnnotation(intent.intent,null,{selection,color:intent.color});
   },
   onPageNote: (selection,intent) => {if(selection.id===state.active?.id)openAnnotation('note',null,{selection,color:intent.color});},
+  onAnnotationActivate: (annotationId,info) => {if(info?.page&&state.active?.id&&annotationId)linkAnnotationCard(annotationId);},
   onStatus: (message,error) => readingShell?.status(message,error),
 });
 readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,contextChanged:()=>{resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});

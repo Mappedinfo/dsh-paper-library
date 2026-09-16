@@ -15,3 +15,9 @@
 .pdr-error,.pdr-layout-error { color:#983e31; font-size:12px; line-height:1.6; }
 .pdr-layout-error { padding:20px; overflow-wrap:anywhere; }
 @media(max-width:620px) { .pdr-page-caption { font-size:9px; } .paper-pdf-reader { min-height:180px; } }
+
+/* Transient ring over saved markup when the rail reveals it. Hit-testing is
+   geometric, so this overlay never intercepts text selection or clicks. */
+.pdr-annotation-flash{position:absolute;pointer-events:none;z-index:2;border:2px solid var(--teal,#28675c);border-radius:2px;background:#28675c26;animation:pdr-annotation-flash 2.4s ease-out}
+@keyframes pdr-annotation-flash{0%{opacity:0}12%{opacity:1}72%{opacity:1}100%{opacity:0}}
+@media(prefers-reduced-motion:reduce){.pdr-annotation-flash{animation:none;opacity:1}}

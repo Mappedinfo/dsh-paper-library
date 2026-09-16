@@ -200,6 +200,32 @@ try {
     assert.equal(await page.locator('#reader-zoom-percent').inputValue(), '100', 'Zoom is restored from the saved layout');
     assert.ok(Math.abs(await railWidth() - railAfter) < 3, 'The rail width is restored in a fresh page');
     record('saved-rail-width-and-zoom-survive-a-reload');
+    // Reader ↔ rail linking in both directions, on real saved markup.
+    const markup = (await core({ action: 'annotations', id: paper.id }, { library, python })).annotations.find(note => note.comment === 'Synthetic UI highlight comment');
+    assert.ok(markup, 'The saved highlight is available for linking');
+    const cardFor = id => page.locator(`#annotation-list > .annotation-card[data-annotation-id="${id}"]`);
+    await jump(1); await ready(1);
+    await cardFor(markup.id).click();
+    await page.locator('.pdr-annotation-flash').first().waitFor();
+    assert.equal(await cardFor(markup.id).evaluate(node => node.classList.contains('is-linked')), true);
+    record('rail-card-click-reveals-and-flashes-the-matching-pdf-markup');
+    const target = await page.evaluate(async ({ paperId, annotationId }) => {
+      const call = async (action, args = {}) => (await (await fetch('./api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...args }) })).json()).result;
+      const notes = (await call('annotations', { id: paperId })).annotations;
+      const note = notes.find(value => value.id === annotationId);
+      if (!note) return { ok: false, reason: 'missing annotation' };
+      const layout = await call('page_layout', { id: paperId });
+      const sheet = document.querySelector(`.pdr-sheet[data-pdf-page="${note.page}"]`);
+      if (!sheet) return { ok: false, reason: 'page not rendered' };
+      const box = sheet.getBoundingClientRect(), geometry = layout.pages[note.page - 1], rect = note.rects[0];
+      return { ok: true, x: box.left + (rect[0] + rect[2]) / 2 / geometry.width * box.width, y: box.top + (rect[1] + rect[3]) / 2 / geometry.height * box.height };
+    }, { paperId: paper.id, annotationId: markup.id });
+    assert.equal(target.ok, true, `Markup point unavailable: ${target.reason || ''}`);
+    await page.mouse.click(target.x, target.y);
+    await page.waitForFunction(id => document.querySelector(`#annotation-list > .annotation-card[data-annotation-id="${CSS.escape(id)}"]`)?.classList.contains('is-linked'), markup.id);
+    assert.ok(await page.locator('.pdr-annotation-flash').count() > 0, 'Clicking markup also flashes it');
+    record('clicking-pdf-markup-links-its-rail-card');
+    await jump(12); await ready(12);
     await page.locator('#reading-sidebar-library').click();
     await page.locator('#metadata-open').click(); await page.locator('#metadata-dialog').waitFor();
     assert.equal(await page.locator('#metadata-dialog').evaluate(dialog => dialog.matches(':modal')), false);

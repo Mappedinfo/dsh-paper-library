@@ -84,10 +84,10 @@
     function dispose() { reset(null); disposed = true; }
     return { reset, want, ready, invalidate, dispose, idle: () => running || Promise.resolve(), snapshot: () => ({ id, residents: [...residents], wanted: [...wanted], inFlight: inFlight ? { id: inFlight.id, page: inFlight.page } : null }) };
   }
-  function create({ root, api, getPaper, onActivePage = () => {}, onSelection = () => {}, onStatus = () => {}, onPageNote = () => {} }) {
+  function create({ root, api, getPaper, onActivePage = () => {}, onSelection = () => {}, onStatus = () => {}, onPageNote = () => {}, onAnnotationActivate = () => {} }) {
     if (!root) throw new Error('PDF reader requires a scroll viewport');
-    let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', transport = Promise.resolve(), zoom = 1;
-    const renderedScales = new Map();
+    let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, flashTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', transport = Promise.resolve(), zoom = 1;
+    const renderedScales = new Map(), pageAnnotations = new Map();
     const dom = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     root.classList.add('paper-pdf-reader'); root.tabIndex = 0; root.setAttribute('aria-label', 'PDF 连续阅读区域');
     const strip = dom('div', 'pdr-pages'); root.replaceChildren(strip);
@@ -100,7 +100,7 @@
     function announce(loaded = queue.snapshot().residents.includes(active)) { const geometry = pages[active - 1]; if (geometry) onActivePage(active, { paperId, pageCount: pages.length, width: geometry.width, height: geometry.height, loaded }); }
     function placeholder(page, message = '滚动到这里时载入', error = false) {
       const slot = slots[page - 1]; if (!slot) return;
-      renderedScales.delete(page);
+      renderedScales.delete(page); pageAnnotations.delete(page);
       for (const image of slot.sheet.querySelectorAll('img')) image.removeAttribute('src');
       const note = dom('div', `pdr-placeholder${error ? ' pdr-error' : ''}`); note.append(dom('span', '', message));
       if (error) { const retry = dom('button', 'button subtle', '重试此页'); retry.type = 'button'; retry.dataset.retryPage = String(page); note.append(retry); }
@@ -123,8 +123,11 @@
       async install(page, result, job) {
         const ticket = generation, id = paperId;
         const geometry = pages[page - 1];
-        if (!result || result.page !== page || result.page_count !== pages.length || Math.abs(result.width - geometry.width) > .1 || Math.abs(result.height - geometry.height) > .1 || typeof result.image !== 'string' || result.image.length > 24 * 1024 * 1024 || !Array.isArray(result.words) || result.words.length > 20000) throw new Error('页面内容或尺寸已改变，请重新打开 PDF 后重试。');
+        if (!result || result.page !== page || result.page_count !== pages.length || Math.abs(result.width - geometry.width) > .1 || Math.abs(result.height - geometry.height) > .1 || typeof result.image !== 'string' || result.image.length > 24 * 1024 * 1024 || !Array.isArray(result.words) || result.words.length > 20000 || (result.annotations !== undefined && (!Array.isArray(result.annotations) || result.annotations.length > 1000))) throw new Error('页面内容或尺寸已改变，请重新打开 PDF 后重试。');
         const sheet = slots[page - 1].sheet, image = dom('img', 'pdr-page-image'); image.alt = `PDF 第 ${page} 页`; image.draggable = false; image.decoding = 'async'; image.dataset.pdfPage = String(page); image.src = `data:image/png;base64,${result.image}`; sheet.replaceChildren(image); renderWords(sheet, result.words, geometry); sheet.dataset.loaded = 'true';
+        // Saved annotations travel with the page payload so clicks can link the
+        // raster markup to its rail entry without a second catalogue read.
+        pageAnnotations.set(page, (result.annotations || []).filter(annotation => annotation && typeof annotation.id === 'string' && Array.isArray(annotation.rects) && annotation.rects.some(rect => Array.isArray(rect) && rect.length >= 4)));
         renderedScales.set(page, job.requestedScale);
         if (image.decode) await image.decode();
         if (!current(id, ticket) || !sheet.contains(image)) return;
@@ -162,9 +165,10 @@
       }, 120);
     }
     function clear() {
-      ++generation; paperId = null; jumpTarget = null; selection = null; lastSelection = ''; queue.reset(null); renderedScales.clear(); pages = []; metrics = []; slots = []; active = 1; layoutWidth = 0; layoutPromise = null; strip.replaceChildren(); root.scrollTop = 0;
+      ++generation; paperId = null; jumpTarget = null; selection = null; lastSelection = ''; queue.reset(null); renderedScales.clear(); pageAnnotations.clear(); pages = []; metrics = []; slots = []; active = 1; layoutWidth = 0; layoutPromise = null; strip.replaceChildren(); root.scrollTop = 0;
       if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; } if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
       if (resizeTimer !== null) { window.clearTimeout(resizeTimer); resizeTimer = null; }
+      if (flashTimer !== null) { window.clearTimeout(flashTimer); flashTimer = null; }
     }
     async function open(paper, { page = 1 } = {}) {
       clear(); if (!paper?.id || !paper.pdf || disposed) return false;
@@ -220,6 +224,49 @@
         lastSelection = digest; selection = { id: paperId, ...result }; onSelection(selection, { intent: tool, color });
       } catch (error) { selection = null; lastSelection = ''; onSelection(null, { intent: tool, color }); onStatus(error.message, true); }
     }
+    /** Annotation hit-testing uses the same display-space rectangles as the word
+     * layer, so a click that did not select text can link raster markup to its
+     * rail entry. Text selection keeps priority: a non-collapsed selection never
+     * activates an annotation. */
+    function annotationAt(page, x, y) {
+      for (const annotation of pageAnnotations.get(page) || []) for (const rect of annotation.rects) {
+        if (x >= rect[0] - 2 && x <= rect[2] + 2 && y >= rect[1] - 2 && y <= rect[3] + 2) return annotation;
+      }
+      return null;
+    }
+    function flashAnnotation(page, rects) {
+      const slot = slots[page - 1], geometry = pages[page - 1];
+      if (!slot || !geometry) return;
+      for (const node of root.querySelectorAll('.pdr-annotation-flash')) node.remove();
+      for (const rect of (Array.isArray(rects) ? rects : []).slice(0, 200)) {
+        if (!Array.isArray(rect) || rect.length < 4 || rect[2] <= rect[0] || rect[3] <= rect[1]) continue;
+        const box = dom('div', 'pdr-annotation-flash');
+        Object.assign(box.style, { left: `${rect[0] / geometry.width * 100}%`, top: `${rect[1] / geometry.height * 100}%`, width: `${(rect[2] - rect[0]) / geometry.width * 100}%`, height: `${(rect[3] - rect[1]) / geometry.height * 100}%` });
+        slot.sheet.append(box);
+      }
+      if (flashTimer !== null) window.clearTimeout(flashTimer);
+      flashTimer = window.setTimeout(() => { flashTimer = null; for (const node of root.querySelectorAll('.pdr-annotation-flash')) node.remove(); }, 2400);
+    }
+    /** Rail → PDF: navigate to the annotated page, center the markup and flash it. */
+    async function revealAnnotation(id, { page } = {}) {
+      if (disposed || !pages.length || typeof id !== 'string') return false;
+      let target = Number.isInteger(page) && page >= 1 && page <= pages.length ? page : null;
+      if (target === null) for (const [number, list] of pageAnnotations) if (list.some(annotation => annotation.id === id)) { target = number; break; }
+      if (target === null) return false;
+      const id0 = paperId, ticket = generation;
+      jumpTarget = target;
+      try { await goTo(target); } finally { if (current(id0, ticket) && jumpTarget === target) jumpTarget = null; }
+      if (!current(id0, ticket)) return false;
+      const annotation = (pageAnnotations.get(target) || []).find(value => value.id === id);
+      if (!annotation) return false;
+      const geometry = pages[target - 1], metric = metrics[target - 1], first = annotation.rects.find(rect => Array.isArray(rect) && rect.length >= 4);
+      if (first) {
+        const sheet = metric.height - CAPTION;
+        root.scrollTop = Math.max(0, metric.top + CAPTION + (first[1] + first[3]) / 2 / geometry.height * sheet - root.clientHeight / 2);
+      }
+      flashAnnotation(target, annotation.rects);
+      return true;
+    }
     function pointerUp(event) {
       if (tool === 'note') {
         const sheet = event.target.closest?.('.pdr-sheet'); if (!sheet || !root.contains(sheet) || sheet.dataset.loaded !== 'true') return;
@@ -227,6 +274,19 @@
         if (!box.width || !box.height) return;
         const x = Math.max(0, Math.min(geometry.width - Math.min(20, geometry.width), (event.clientX - box.left) / box.width * geometry.width)), y = Math.max(0, Math.min(geometry.height - Math.min(20, geometry.height), (event.clientY - box.top) / box.height * geometry.height));
         onPageNote({ id: paperId, page, text: '', rects: [[x, y, Math.min(geometry.width, x + 20), Math.min(geometry.height, y + 20)]] }, { intent: 'note', color }); return;
+      }
+      // A plain click on saved markup links to the rail; a text selection keeps
+      // its existing annotation flow instead.
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) {
+        const sheet = event.target.closest?.('.pdr-sheet');
+        if (sheet && root.contains(sheet) && sheet.dataset.loaded === 'true') {
+          const page = Number(sheet.dataset.pdfPage), geometry = pages[page - 1], box = sheet.getBoundingClientRect();
+          if (geometry && box.width && box.height) {
+            const hit = annotationAt(page, (event.clientX - box.left) / box.width * geometry.width, (event.clientY - box.top) / box.height * geometry.height);
+            if (hit) { flashAnnotation(page, hit.rects); onAnnotationActivate(hit.id, { page }); }
+          }
+        }
       }
       if (selectionTimer !== null) window.clearTimeout(selectionTimer); selectionTimer = window.setTimeout(() => { selectionTimer = null; captureSelection(); }, 0);
     }
@@ -246,7 +306,7 @@
     root.addEventListener('scroll', scroll, { passive: true }); root.addEventListener('pointerup', pointerUp); root.addEventListener('keyup', captureSelection); root.addEventListener('click', click); setTool('select');
     document.addEventListener('selectionchange', selectionChanged);
     function dispose() { clear(); disposed = true; queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); document.removeEventListener('selectionchange', selectionChanged); }
-    return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
+    return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
   window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection });
 })();

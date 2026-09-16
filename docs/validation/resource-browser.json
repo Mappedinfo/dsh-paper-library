@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-16T14:48:02.115Z",
+  "verified_at": "2026-09-16T14:54:28.537Z",
   "ok": true,
   "checks": [
     "dataset-create-persists-independent-identity-with-type-specific-tools",
@@ -20,7 +20,7 @@
   "errors": [],
   "external": [],
   "screenshots": [
-    ".local/resource-browser-U7X1Is/dataset-preview.png"
+    ".local/resource-browser-y4vBG8/dataset-preview.png"
   ],
   "model_calls": 0,
   "scope": "Actual Chromium and disk APIs with synthetic dataset, CSV, PDF and API-seeded model candidate. Not a real provider generation or formal user test."
