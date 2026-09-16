@@ -717,8 +717,17 @@ class Library:
                         if widget.field_type == fitz.PDF_WIDGET_TYPE_SIGNATURE and widget.field_value:
                             raise ValueError("Digitally signed PDF is read-only; use an unsigned working copy")
                 # Also recognize signatures that are not attached to a visible form widget.
+                # Incrementally updated PDFs may leave freed xref slots whose objects no
+                # longer exist; a missing object cannot hold a signature, so only genuine
+                # probe results matter here.
                 for xref in range(1, doc.xref_length()):
-                    if doc.xref_get_key(xref, "ByteRange")[0] != "null":
+                    try:
+                        signature = doc.xref_get_key(xref, "ByteRange")
+                    except Exception as error:
+                        if "cannot find object in xref" in str(error):
+                            continue
+                        raise
+                    if signature[0] != "null":
                         raise ValueError("Digitally signed PDF is read-only; use an unsigned working copy")
             return doc
         except Exception:

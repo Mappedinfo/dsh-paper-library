@@ -368,6 +368,30 @@ def test_ris_and_unsupported_signatures(tmp_path):
         request(tmp_path, "import", path=str(signed))
 
 
+def test_import_tolerates_freed_xref_slots(monkeypatch, tmp_path):
+    """Incrementally updated PDFs can leave freed xref slots whose probe raises
+    FzErrorFormat; a missing object cannot hold a signature, so import proceeds."""
+    source = make_pdf(tmp_path / "freed-slots.pdf")
+    original = fitz.Document.xref_get_key
+    def probe(doc, xref, key):
+        if xref == 2:
+            raise fitz.mupdf.FzErrorFormat("code=7: cannot find object in xref (2 0 R)")
+        return original(doc, xref, key)
+    monkeypatch.setattr(fitz.Document, "xref_get_key", probe)
+    result = request(tmp_path, "import", path=str(source))
+    assert result["imported"] == 1
+    item = result["items"][0]
+    assert item["pdf"] and item["page_count"] == 1
+
+    def other_error(doc, xref, key):
+        if xref == 2:
+            raise fitz.mupdf.FzErrorFormat("code=3: some other xref failure")
+        return original(doc, xref, key)
+    monkeypatch.setattr(fitz.Document, "xref_get_key", other_error)
+    with pytest.raises(Exception, match="some other xref failure"):
+        request(tmp_path / "second", "import", path=str(source))
+
+
 def test_concurrent_fresh_library_initialization(tmp_path):
     def insert(index):
         return request(tmp_path, "import", items=[{"id": f"fresh{index}", "title": f"Concurrent catalog {index}"}])
