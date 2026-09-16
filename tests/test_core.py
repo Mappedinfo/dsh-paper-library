@@ -25,6 +25,30 @@ def make_pdf(path, rotation=0):
     return path
 
 
+def test_external_companion_replies_are_portable_but_not_human_sources(tmp_path):
+    original = make_pdf(tmp_path / "external.pdf")
+    with fitz.open(original) as doc:
+        page = doc[0]
+        parent = next(page.annots())
+        parent_id = parent.info["id"]
+        reply = page.add_text_annot((240, 160), "Explicit synthetic AI reply")
+        reply.set_info(subject="AI 伴学回复", title="Synthetic companion")
+        reply.set_irt_xref(parent.xref)
+        reply.update()
+        doc.saveIncr()
+    before = original.read_bytes()
+    item = request(tmp_path, "import", path=str(original))["items"][0]
+    annotations = request(tmp_path, "annotations", id=item["id"])["annotations"]
+    replies = [a for a in annotations if a.get("kind") == "ai-feedback"]
+    assert len(replies) == 1 and replies[0]["reply_to"] == parent_id
+    assert replies[0]["source"] == "external-pdf"
+    catalog = request(tmp_path, "annotation_catalog", id=item["id"])
+    assert len(catalog["annotations"]) == 1
+    excerpt = request(tmp_path, "companion_excerpt", id=item["id"], page=1)
+    assert "Evidence" in excerpt["text"] and excerpt["truncated"] is False
+    assert original.read_bytes() == before
+
+
 def request(tmp_path, action, **kw):
     return dispatch({"library": str(tmp_path / "library"), "action": action, **kw})
 

@@ -1,5 +1,11 @@
 # Skill adaptation provenance
 
+## Live reading companion, 2026-09-16
+
+`src/harness/companion-queue.mjs` contains an independently authored MIT prompt and host workflow informed by `ai-companion-reading`'s continuous-reading contract. Reviewed entry SHA-256: `991e4cecf646768f578adcd76ca6bbc76808b42e22251fae5fb1c205e1361c03`. It retains local-question feedback, explicit physical-page evidence, source/reader/inference distinctions, delayed verification and the rule that an explanation does not establish mastery.
+
+This is a bounded runtime adaptation, not a copy or installation of the full personal skill. No private companion profile, research note, mathematics/domain ledger, bibliography or skill registry is redistributed or auto-updated. Native conversation and portable PDF replies are the current records. A supplied private PDF was inspected only in ignored local output; all public tests use newly generated synthetic documents. The upstream skill is unchanged.
+
 ## Dataset knowledge workflow, 2026-09-15
 
 `paper-library-knowledge` and `paper-library-notes` are independently authored MIT project adaptations of the contracts in `research-knowledge-os` and `knowledge-note`. Reviewed canonical entry SHA-256 values: `d8d440d75adff009d98635ae34431307193784c7003e45af800a8400e8c0c5be` and `b317f9a72c499c4d3fc0ca486bc4fa6268227a23523537ed16843441b0854fd9`. The implementation preserves explicit selected inputs, evidence levels, typed atomic relations, mandatory user review for AI proposals and readable source-bounded Markdown.

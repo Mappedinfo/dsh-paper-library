@@ -19,6 +19,7 @@ let resourceUI;
 let knowledgeUI;
 let analysisUI;
 let settingsUI;
+let companionUI;
 let preferences = {};
 let durableReaderLoaded = false;
 let readerStateReady = false;
@@ -89,6 +90,8 @@ async function loadStatus() {
     state.libraryCount = result.count || 0; renderWelcome();
     $('auto-feedback').checked = readPreference(preferenceKey()) === 'true';
     paperChatUI?.setAvailable(result.paper_conversations);
+    paperChatUI?.setHostCompanion(result.realtime_companion);
+    companionUI?.setAvailable(result.realtime_companion);
     languageUI?.setAvailable(result.language_learning);
     knowledgeUI?.setAvailable(result.knowledge_generation);
     void analysisUI?.setAvailable(result.paper_analysis);
@@ -365,6 +368,7 @@ function renderAnnotations() {
   if(unlinked.length){const group=el('details','annotation-unlinked');group.append(el('summary','',`未关联回复 · ${unlinked.length}`),el('p','small muted','这类回复没有可核实的批注关联，或原批注已删除。已有内容仍保存在 PDF 中。'));for(const reply of unlinked)group.append(replyCard(reply));fragment.append(group);}
   if (state.annotationsTruncated) fragment.append(el('p', 'small muted', '批注数量或文本量已达读取上限，当前只显示已读取的部分。PDF 中的原始批注仍被保留。'));
   $('annotation-list').replaceChildren(fragment);
+  companionUI?.decorate();
 }
 function openAnnotation(mode, note = null, options = {}) {
   if (!state.active?.pdf) return;
@@ -384,9 +388,11 @@ async function saveAnnotation(event) {
   setBusy(event.target, true); errorAt('annotation-error', null);
   try {
     const result = draft.mode === 'edit'
-      ? await api('annotation_update', { id: draft.id, annotation_id: draft.note.id, comment: $('annotation-comment').value })
-      : await api('annotate', { id: draft.id, page: draft.page, type: draft.mode, text: draft.selection?.text || '', rects: draft.selection?.rects || [[20, 20, 40, 40]], comment: $('annotation-comment').value, author: 'Reader', color: draft.color || '#ffdb66' });
+      ? await api('annotation_update', { id: draft.id, annotation_id: draft.note.id, comment: $('annotation-comment').value,companion_skip:event.submitter?.id==='annotation-save-draft' })
+      : await api('annotate', { id: draft.id, page: draft.page, type: draft.mode, text: draft.selection?.text || '', rects: draft.selection?.rects || [[20, 20, 40, 40]], comment: $('annotation-comment').value, author: 'Reader', color: draft.color || '#ffdb66',companion_skip:event.submitter?.id==='annotation-save-draft' });
     closeDialog('annotation-dialog'); clearSelection(); toast('批注已保存到 PDF');
+    if(result.companion?.error)toast(result.companion.error,true);
+    void companionUI?.refresh();
     if (state.active?.id === draft.id) { await loadAnnotations(draft.id); await refreshPage(draft.page); }
     publishReaderState();
     if (paperChatUI?.available()) await paperChatUI.savedAnnotation(draft.id, result.annotation?.id || draft.note?.id, event.submitter?.id === 'annotation-save-draft');
@@ -1005,7 +1011,8 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onPageNote: (selection,intent) => {if(selection.id===state.active?.id)openAnnotation('note',null,{selection,color:intent.color});},
   onStatus: (message,error) => readingShell?.status(message,error),
 });
-readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,contextChanged:()=>{resourceUI?.sync();analysisUI?.sync();}});
+readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,contextChanged:()=>{resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
+companionUI=window.PaperCompanion?.create({api,persistence,getPaper:()=>state.active,refreshAnnotations:loadAnnotations,toast});
 languageUI=window.PaperLanguageLearning?.create({api,persistence,getPaper:()=>state.active,getSelection:()=>state.selection,toast,openReference:openReferencedPaper,
   beforeOpen:()=>readingPanels?.close('chat'),prepareChat:async(text,source)=>{
     if(source?.paperId!==state.active?.id){toast('请先返回这条语言记录所属的论文。',true);return;}
@@ -1036,6 +1043,7 @@ settingsUI = window.PaperLibrarySettings?.create({api,persistence,getLibrary:()=
   preferences={...preferences,...value};
   analysisUI?.applyPreferences(value,descriptor.writable);
   paperChatUI?.applyPreferences(value,descriptor.writable);
+  companionUI?.applyPreferences(value,descriptor.writable);
   if(value['reading-panel-side'])readingPanels?.setSide(value['reading-panel-side'],{persist:false});
 }});
 if(persistence){
@@ -1047,7 +1055,7 @@ if(persistence){
   const backup=el('button','button subtle','导出未保存草稿');backup.type='button';backup.addEventListener('click',()=>{const values=persistence.exportPending?.()||[];const url=URL.createObjectURL(new Blob([JSON.stringify({schema:1,drafts:values},null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='paper-library-unsaved-drafts.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});saveStatus.append(label,retry,backup);document.body.append(saveStatus);
   const pending=new Map();persistence.subscribe(event=>{if(event.status==='saved')pending.delete(event.key);else pending.set(event.key,event);const errors=[...pending.values()].filter(value=>value.error);saveStatus.hidden=!errors.length;label.textContent=errors.some(value=>value.status==='conflict')?'另一浏览器已有修改，本窗口草稿尚未落盘。请导出并核对。':'本地保存暂未完成，草稿仍在当前窗口。';});
 }
-window.addEventListener('pagehide', () => { publishReaderState(); settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); readingPanels?.dispose(); readingShell?.dispose(); });
+window.addEventListener('pagehide', () => { publishReaderState(); companionUI?.dispose();settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); readingPanels?.dispose(); readingShell?.dispose(); });
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){publishReaderState();void persistence?.flush({keepalive:true}).catch(()=>{});}});
 window.addEventListener('message', event => {
   receiveHarnessContext(event);

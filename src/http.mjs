@@ -16,6 +16,7 @@ for (const name of ['resource-library.js','resource-library.css','knowledge-work
 for (const name of ['paper-analysis.js','paper-analysis.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['settings.js','settings.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 const languageActions = new Set(['language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
+staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
 const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:'];
 function browserStateKey(key, listPrefix = false) {
   if (typeof key !== 'string' || !(key === 'preferences' || key === 'reader' || browserStatePrefixes.some(prefix => key.startsWith(prefix)) || /^migration:[a-f0-9]{64}$/.test(key) || (listPrefix && key === 'migration:'))) throw new LocalStateError('此状态类别不能直接从浏览器访问。', 'STATE_FORBIDDEN', 403);
@@ -116,14 +117,17 @@ export function createFetchHandler(options = {}) {
         try {
           const input = JSON.parse(await readBounded(request, 45*1024*1024));
           // Browser cannot forge AI output or arbitrary worker internals.
-          if (['save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
+          if (['save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','companion_excerpt','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
+          const companionAction=['companion_status','companion_retry','companion_cancel'].includes(input?.action);
+          if(companionAction&&!options.companion)return json({ok:false,error:'实时伴学需要连接 DSH 服务。'},409);
           const chatAction = typeof input?.action === 'string' && input.action.startsWith('chat_');
           const stateAction = typeof input?.action === 'string' && input.action.startsWith('state_');
           const languageAction = languageActions.has(input?.action);
           if (chatAction && !options.paperChat) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板打开论文对话。'},400);
           if (input?.action === 'language_generate' && !options.languageLearning) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
           if (input?.action === 'knowledge_generate' && !options.libraryKnowledge) return json({ok:false,error:'尚未连接 DSH 模型服务；已保存的来源和知识笔记仍可查看。'},409);
-          let result = input?.action === 'settings_get' ? await settings.get()
+          let result = companionAction ? await options.companion.handle(input)
+            : input?.action === 'settings_get' ? await settings.get()
             : input?.action === 'settings_update' ? await settings.update(input.patch, input.expected_revision)
             : input?.action === 'settings_reset' ? await settings.reset(input.expected_revision)
             : stateAction ? await stateRequest(localState, input)
@@ -133,6 +137,11 @@ export function createFetchHandler(options = {}) {
             : chatAction
             ? await options.paperChat(input, { signal: request.signal })
             : await dispatch(input, { ...options, signal: request.signal });
+          if(options.companion&&['annotate','annotation_update'].includes(input?.action)&&input.companion_skip!==true){
+            try{result.companion=await options.companion.saved(input.id,result.annotation)}
+            catch(error){result.companion={status:'failed',error:`批注已保存，伴学未入队：${error.message}`}}
+          }
+          if(input.action==='status')result={...result,realtime_companion:Boolean(options.companion)};
           if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true, catalog_management: true, typed_graph: true, reading_workspace: true, durable_state: true, learning_records: true, language_learning: Boolean(options.languageLearning) };
           if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true };
           return json({ok:true,result});

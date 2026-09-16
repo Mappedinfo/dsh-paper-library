@@ -216,7 +216,31 @@ try {
   assert.ok(mainObservation.references.some(reference => reference.snapshotId === mainReference.snapshot_id && reference.text.includes('UPDATED')))
   checks.push('native-main-composer-plain-token-resolves-and-updates-sent-baseline-without-plugin-send')
 
-  const report = { verified_at: new Date().toISOString(), ok: true, checks, deterministicModelGenerations: mainObservation.generations, externalModelRequestsMade: 0, sourceData: 'Fresh synthetic three-page PDFs generated per run', limitations: ['No paid model-quality evaluation', 'No real-library migration or memory benchmark', 'Browser interaction is validated separately'] }
+  // Real authenticated annotation saves, with no chat_send and no browser
+  // history polling. Host admission and native completion own the whole path.
+  const settings=await api({action:'settings_get'})
+  await api({action:'settings_update',patch:{'auto-paper-conversation':true},expected_revision:settings.revision})
+  const firstAuto=await api({action:'annotate',id:paper.id,page:2,type:'note',comment:'First synthetic companion question'})
+  const updatedAuto=await api({action:'annotation_update',id:paper.id,annotation_id:firstAuto.annotation.id,comment:'Revised synthetic companion question'})
+  const nextAuto=await api({action:'annotate',id:paper.id,page:2,type:'note',comment:'Second synthetic companion question'})
+  assert.equal(updatedAuto.companion.status,'queued');assert.equal(nextAuto.companion.status,'queued')
+  let companionReplies=[];const companionDeadline=Date.now()+30000
+  do {
+    companionReplies=(await core({action:'annotations',id:paper.id},{library,python})).annotations.filter(note=>note.annotation_ids?.some(id=>[firstAuto.annotation.id,nextAuto.annotation.id].includes(id)))
+    if(companionReplies.length===2)break
+    await new Promise(resolve=>setTimeout(resolve,250))
+  }while(Date.now()<companionDeadline)
+  assert.equal(companionReplies.length,2)
+  assert.ok(companionReplies.every(note=>note.reply_to===note.annotation_ids[0]&&note.page===2))
+  const companionState=await api({action:'companion_status',id:paper.id})
+  assert.equal(companionState.entries.filter(v=>v.status==='saved').length,2)
+  const afterAuto=await observe([ensured.sessionId]);assert.equal(afterAuto.generations,4)
+  assert.ok(afterAuto.references.some(v=>v.text.includes('Revised synthetic companion question')))
+  assert.ok(!afterAuto.references.some(v=>v.text.includes('First synthetic companion question')))
+  checks.push('human-save-host-queue-coalesces-edits-and-automatically-replies-without-browser-chat')
+  checks.push('multiple-continuous-notes-each-gain-one-native-pdf-reply-with-durable-completion')
+
+  const report = { verified_at: new Date().toISOString(), ok: true, checks, deterministicModelGenerations: afterAuto.generations, externalModelRequestsMade: 0, sourceData: 'Fresh synthetic three-page PDFs generated per run', limitations: ['No paid model-quality evaluation', 'No real-library migration or memory benchmark', 'Browser interaction is validated separately'] }
   await mkdir(dirname(reportPath), { recursive: true })
   await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n')
   console.log(JSON.stringify(report))

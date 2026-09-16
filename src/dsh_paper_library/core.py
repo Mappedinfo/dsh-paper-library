@@ -1025,6 +1025,10 @@ class Library:
     @staticmethod
     def _annotation_metadata(annot):
         subject = annot.info.get("subject", "")
+        # Explicit external AI declaration plus native reply identity. Author
+        # names/prose alone never classify a human's note as generated content.
+        if subject == "AI 伴学回复" and annot.irt_xref:
+            return {"kind": "ai-feedback", "source_kind": "external-companion"}
         if subject.startswith("paper-library:") and len(subject) < 100000:
             try:
                 extra = json.loads(subject[len("paper-library:"):])
@@ -1060,7 +1064,13 @@ class Library:
                 reply_to = parent.info.get("id") or f"external-{page.number + 1}-{parent.xref}"
             except (ValueError, RuntimeError):
                 pass
-        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra else "external-pdf", **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids") if key in extra}}
+        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids") if key in extra}}
+
+    def companion_excerpt(self, id, page):
+        """One explicitly selected page, text only; no persistent index or OCR."""
+        with self._open_pdf(self.pdf_path(id)) as doc:
+            text = self._page(doc, page).get_text("text", sort=True).strip()
+            return {"page": int(page), "text": text[:7000], "truncated": len(text) > 7000}
 
     @staticmethod
     def _reference_annotation(value, identity_reliable):
@@ -1593,7 +1603,7 @@ def dispatch(request):
         actions = {
             "list": ("query", "limit", "offset", "sort", "order", "archived"), "get": ("id", "include_archived"), "create": ("metadata",), "archive": ("id",), "restore": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page_layout": ("id",), "page": ("id", "page", "scale"),
             "annotations": ("id",), "annotate": ("id", "page", "type", "rects", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment"), "annotation_delete": ("id", "annotation_id"),
-            "annotation_catalog": ("id",), "annotation_context_exact": ("id", "annotation_refs", "selection", "max_characters"),
+            "annotation_catalog": ("id",), "annotation_context_exact": ("id", "annotation_refs", "selection", "max_characters"), "companion_excerpt": ("id", "page"),
             "export_annotations": ("id", "format"), "link": ("source", "target", "relation", "note"), "graph": ("id", "limit"), "feedback_context": ("id", "annotation_ids"), "save_feedback": ("id", "text", "model", "annotation_ids", "expected_context_hash"), "feedback": ("id",),
             "save_conversation_feedback": ("id", "text", "model", "annotation_ids", "source_session_id", "source_message_id", "page", "source_snapshot_ids"),
         }

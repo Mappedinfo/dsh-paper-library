@@ -218,7 +218,7 @@ async function lookupMetadata(request, options) {
 export async function dispatch(request, options = {}) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('请求必须是 JSON 对象。');
   const { library: ignoredLibrary, python: ignoredPython, ...safe } = request;
-  if (['paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata'].includes(safe.action)) {
+  if (['paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata','companion_excerpt'].includes(safe.action)) {
     if (Buffer.byteLength(JSON.stringify(safe)) > 128 * 1024) throw new Error('所选论文整理请求超过预算。');
     return core(safe,options);
   }

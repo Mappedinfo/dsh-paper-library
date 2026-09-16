@@ -7,7 +7,7 @@ window.PaperLibraryChat = {
     const $ = id => document.getElementById(id);
     const chat = { available: false, paperId: null, sessionId: null, visible: false, ticket: 0, notes: [], catalog: [], catalogReady: false, catalogTotal: 0, catalogTruncated: false, catalogPromise: null, offset: 0, selection: null, busy: false, timer: null, historyLoading: false, failed: null, ensure: null, suggestions: new Set(), draftLoading:false, storedDraft:false };
     const drafts = new Map();
-    let settingsWritable=true,autoPreferenceSaving=false,preferenceRevision=0;
+    let settingsWritable=true,autoPreferenceSaving=false,preferenceRevision=0,hostCompanion=false;
     const pending = new Map();
     const element = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     const nonce = () => window.crypto.randomUUID();
@@ -379,6 +379,7 @@ window.PaperLibraryChat = {
     return {
       applyPreferences(value,writable=true){preferenceRevision++;settingsWritable=writable;$('paper-chat-auto').checked=writable&&value['auto-paper-conversation']===true;controls();},
       setAvailable(value) { chat.available = Boolean(value); controls(); },
+      setHostCompanion(value) {hostCompanion=Boolean(value);},
       available: () => chat.available,
       paperOpened,
       hasStoredDraft:()=>chat.storedDraft,
@@ -396,7 +397,7 @@ window.PaperLibraryChat = {
           if (!note) throw new Error('批注已保存，引用目录暂未找到该条目。请刷新后重试。');
           contextLabel();
           if (draftToMain) { setReferences([note]); await openMain(true); }
-          else if ($('paper-chat-auto').checked) await send(true, { id, question: '请回应我刚保存的这条阅读批注，并指出需要核验的内容。', annotation_refs: [{ id: note.id, version: note.version }] });
+          else if (!hostCompanion && $('paper-chat-auto').checked) await send(true, { id, question: '请回应我刚保存的这条阅读批注，并指出需要核验的内容。', annotation_refs: [{ id: note.id, version: note.version }] });
         } catch (error) { status(error.message, true); }
       },
       draft: () => $('paper-chat-input').value.slice(0, 12000),

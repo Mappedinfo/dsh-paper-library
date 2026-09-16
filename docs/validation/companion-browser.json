@@ -1,0 +1,20 @@
+{
+  "verified_at": "2026-09-16T03:06:16.888Z",
+  "ok": true,
+  "checks": [
+    "toolbar-enables-shared-settings-and-human-save-enters-host-queue",
+    "closed-browser-completes-and-fresh-reader-restores-linked-reply-and-status",
+    "narrow-reader-displays-compact-toggle-and-source-linked-response",
+    "pausing-retains-human-note-without-model-call"
+  ],
+  "deterministicGenerations": 1,
+  "externalModelRequests": 0,
+  "browserErrors": [],
+  "screenshots": [
+    ".local/companion-browser-foNAtl/dark-511.png",
+    ".local/companion-browser-foNAtl/dark-681.png"
+  ],
+  "limitations": [
+    "Synthetic adapter; native DSH completion is covered by paper-chat-harness.json."
+  ]
+}

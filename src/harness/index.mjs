@@ -14,6 +14,7 @@ import { createLibraryKnowledge } from './library-knowledge.mjs'
 import { createPaperAnalysis } from './paper-analysis.mjs'
 import { createPaperAnalysisAgent } from './paper-analysis-agent.mjs'
 import { createQueuedPaperAnalysis } from './paper-analysis-queue.mjs'
+import { createCompanionQueue } from './companion-queue.mjs'
 import Schema from '@deepseek-ai/schemastery'
 import { createPaperLibrarySettings, createPaperLibrarySettingsSchema } from './settings.mjs'
 
@@ -58,6 +59,10 @@ export function apply(ctx, rawConfig = {}) {
   ctx.inject(['connection', 'webServer', 'sessionController', 'workspaceRegistry', 'sessionPersistence', 'sessionProjections', 'sessions', 'agents', 'agentDefaultModel'], web => {
     const paperChat = createPaperChat(web, { library: config.library, python: config.python, dispatch, core, store:options.localState, maxAnnotationCharacters: config.maxAnnotationCharacters })
     paperChat.install()
+    const companion = createCompanionQueue({store:options.localState,settings,paperChat,dispatch,library:config.library,python:config.python})
+    paperChat.onFeedback(companion.feedback)
+    paperChat.onTurnFailure(companion.turnFailed)
+    web.effect(()=>()=>{companion.dispose();paperChat.onFeedback(undefined);paperChat.onTurnFailure(undefined)},'paper-library: companion lifecycle')
     const languageAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens })
     const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, dispatch, library: config.library, python: config.python })
     const libraryKnowledge = createLibraryKnowledge({ store: options.localState, ai: languageAI, paperChat, dispatch, library: config.library, python: config.python,
@@ -73,7 +78,7 @@ export function apply(ctx, rawConfig = {}) {
       agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens})})})
     automaticAnalysis=paperAnalysis
     web.effect(()=>()=>{automaticAnalysis=undefined;paperAnalysis.dispose()},'paper-library: background analysis lifecycle')
-    const fetchHandler = createFetchHandler({ ...options, paperChat, languageLearning, libraryKnowledge, paperAnalysis, basePath: '/api/paper-library' })
+    const fetchHandler = createFetchHandler({ ...options, paperChat, companion, languageLearning, libraryKnowledge, paperAnalysis, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',
       path: '/api/paper-library',

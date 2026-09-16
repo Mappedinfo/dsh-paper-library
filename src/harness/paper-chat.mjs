@@ -125,6 +125,7 @@ export function projectPaperHistory(snapshot) {
  * only public Host services and never reads profile files or changes defaults.
  */
 export function createPaperChat(ctx, { library, python, dispatch, core = dispatch, store, maxAnnotationCharacters = 24000 }) {
+  let feedbackListener,turnFailureListener
   const tails = new Map()
   let admitted = 0
   const kernel = (request, signal) => dispatch(request, { library, python, signal })
@@ -157,7 +158,7 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
       if(!source.completed||source.paperId!==paper.item.id||!visible.has(messageId))continue
       const key=`paper.reply:${createHash('sha256').update(`${paper.sessionId}\0${messageId}`).digest('hex')}`
       const previous=await store.get(key)
-      if(previous.value){statuses.push({message_id:messageId,...previous.value});continue}
+      if(previous.value){statuses.push({message_id:messageId,...previous.value,source_snapshot_ids:source.source_snapshot_ids});continue}
       if(written++>=2)continue
       // Persist admission first: an interrupted PDF write is never retried by a
       // later history poll. Explicit save uses the PDF's idempotent message key.
@@ -165,7 +166,9 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
       let value
       try{const saved=await saveReply(paper,snapshot,messageId,signal);value={status:'saved',annotation_id:saved.annotation_id}}
       catch(error){value={status:'failed',error:String(error.message).slice(0,500)}}
-      await store.put(key,value,pending.revision);statuses.push({message_id:messageId,...value})
+      await store.put(key,value,pending.revision)
+      const status={message_id:messageId,...value,source_snapshot_ids:source.source_snapshot_ids};statuses.push(status)
+      await feedbackListener?.(paper.item.id,status)
     }
     return statuses
   }
@@ -416,8 +419,17 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
       }) }
     }, { prepend: true })
     if(store)ctx.on('session/event',(session,event)=>{
-      if(event.type!=='turn/end'||event.data.reason?.kind!=='completed'||!session.id.startsWith('paper-library-'))return
+      if(event.type!=='turn/end'||!session.id.startsWith('paper-library-'))return
       const snapshot={header:session.header,records:session.snapshotEvents().slice(-200).map(event=>({type:'event',event}))}
+      const turn=snapshot.records.slice(snapshot.records.findLastIndex(row=>row.event.type==='turn/start'))
+      const references=turn.map(row=>loggedAnnotationReference(row.event,session.id)).filter(Boolean)
+      if(event.data.reason?.kind!=='completed'||!annotationReplySources({...snapshot,records:turn}).size){
+        if(references.length)queueMicrotask(()=>{void realpath(library).then(directory=>{
+          const id=references[0].paperId
+          if(paperSessionId(directory,id)===session.id)return turnFailureListener?.(id,references.map(v=>v.snapshot_id),event.data.reason?.kind||'unknown')
+        }).catch(()=>{})})
+        return
+      }
       const source=[...annotationReplySources(snapshot).values()].findLast(value=>value.completed)
       if(!source)return
       queueMicrotask(()=>{void realpath(library).then(directory=>{
@@ -426,5 +438,7 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
     })
   }
   handler.annotationReferences = true
+  handler.onFeedback = listener => {feedbackListener=listener}
+  handler.onTurnFailure = listener => {turnFailureListener=listener}
   return handler
 }

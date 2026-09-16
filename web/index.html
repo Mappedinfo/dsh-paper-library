@@ -21,6 +21,7 @@
   <script src="./theme.js" defer></script>
   <script src="./local-state.js" defer></script>
   <script src="./paper-chat.js" defer></script>
+  <script src="./companion.js" defer></script>
   <script src="./knowledge-graph.js" defer></script>
   <script src="./workbench.js" defer></script>
   <script src="./pdf-reader.js" defer></script>
@@ -94,7 +95,7 @@
           <div id="paper-chat-new-suggestion" class="paper-reference-suggestion" hidden><span id="paper-chat-new-suggestion-label"></span><button id="paper-chat-add-new" class="button subtle">加入</button></div>
           <section id="paper-reference-drawer" class="paper-reference-drawer" hidden aria-label="调整本次批注引用"><div class="paper-reference-heading"><strong>本次提问引用哪些批注</strong><button id="paper-reference-close" class="icon-button" aria-label="收起批注选择">×</button></div><div class="paper-reference-filters"><input id="paper-reference-search" type="search" placeholder="检索原文与评论摘要、批注标识" aria-label="检索批注"><input id="paper-reference-page" type="number" min="1" max="2000" placeholder="页码" aria-label="按 PDF 页码筛选"><select id="paper-reference-scope" aria-label="批注列表范围"><option value="all">全部</option><option value="pending">新增与更新</option><option value="selected">本次已选</option></select></div><p id="paper-reference-read-status" class="small muted" role="status"></p><div id="paper-reference-list" class="paper-reference-list"></div><div class="paper-reference-pagination"><button id="paper-reference-prev" class="button subtle">← 上一页</button><span id="paper-reference-page-label" class="small muted"></span><button id="paper-reference-next" class="button subtle">下一页 →</button></div><div id="paper-reference-selection" class="paper-reference-selection" hidden><p id="paper-reference-selection-label"></p><button id="paper-reference-clear-selection" class="button subtle">移除选文</button></div><p class="small muted">勾选只准备引用。发送时核对版本并保存这次实际引用的内容。</p></section>
           <form id="paper-chat-form"><label class="field">继续追问<textarea id="paper-chat-input" rows="4" maxlength="4000" placeholder="针对这篇论文提问，也可从批注或选中文本开始…"></textarea></label><div class="paper-chat-shortcuts"><button id="paper-chat-send" type="submit" class="button primary">发送到论文对话</button><button id="paper-chat-draft" type="button" class="button">放入主输入框 ↗</button><button id="paper-chat-refresh" type="button" class="button subtle">刷新对话</button></div></form>
-          <label class="checkbox-label"><input id="paper-chat-auto" type="checkbox">保存批注后自动发送到论文对话</label>
+          <label class="checkbox-label"><input id="paper-chat-auto" type="checkbox">实时伴学：保存批注后自动回复</label>
           <p class="small muted paper-chat-cost">发送消息会调用这篇论文对话在 DSH 中选择的模型。放入主输入框只准备草稿。</p>
         </section>
         <section id="graph-tab" class="tab-content graph-content" hidden><div class="section-toolbar"><div><h3>把论文连接起来</h3><p>文献与标签构成线索；论证关系由你明确记录。</p></div><button id="link-open" class="button">＋ 添加联系</button></div><div class="graph-legend"><span><i class="legend-paper"></i>文献</span><span><i class="legend-tag"></i>标签</span><span>点击节点打开文献</span></div><div id="graph-stage" class="graph-stage"></div><p id="graph-status" class="small muted"></p><div id="graph-links" class="graph-links"></div></section>
