@@ -3,13 +3,15 @@ import { Readable } from 'node:stream';
 import { resolve } from 'node:path';
 import { createFetchHandler } from './http.mjs';
 import { defaultLibrary } from './bridge.mjs';
+import { translationServerUrl } from './translation-server.mjs';
 
 const args = process.argv.slice(2);
 const option = (key,fallback) => args.includes(key) ? args[args.indexOf(key)+1] : fallback;
 const port = Number(option('--port','43121'));
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid port');
 const library = resolve(option('--library',defaultLibrary));
-const handle = createFetchHandler({library,loopbackOnly:true});
+const translationServer = translationServerUrl(option('--translation-server', undefined));
+const handle = createFetchHandler({library,loopbackOnly:true,...(translationServer?{translationServer}:{})});
 const server = createServer(async(req,res) => {
   try {
     const controller = new AbortController();

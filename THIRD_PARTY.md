@@ -15,6 +15,7 @@ Project scaffolding was generated through the author's `academic-templates/dev-p
 | CSL en-US locale | Citation localization | [CSL locales](https://github.com/citation-style-language/locales) / CC BY-SA 3.0; embedded authors/rights retained |
 | esbuild | Build the tiny Harness client adapter | [esbuild](https://github.com/evanw/esbuild) / MIT |
 | DeepSeek Harness | Host plugin, tools and model APIs | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) / MIT; installed separately |
+| Zotero translation-server | Optional loopback metadata supply (translators for `/search` and `/web`) | [translation-server](https://github.com/zotero/translation-server) / AGPL-3.0; deployed separately by the operator, never bundled or started by this plugin |
 
 The APA style and en-US locale are supplied by the [Citation Style Language project](https://citationstyles.org/), under CC BY-SA 3.0. Their original author/translator credits and rights links remain embedded in each unchanged file.
 

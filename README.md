@@ -163,7 +163,7 @@ npm start -- --library /absolute/library --port 43121
 node src/cli.mjs --library /absolute/library < request.json
 ```
 
-默认服务仅监听 `127.0.0.1`，拒绝跨来源写入；Harness 内使用其现有认证服务。论文对话不读取其他应用的密钥，不创建第二套服务配置。部署配置支持绝对路径 `library`、`python`；`localStateHome` 可覆盖状态文件所在的 DSH home。`provider`、`model`、`maxOutputTokens` 保留给原有独立反馈 API，论文对话和语言工具使用 Harness 自身的论文会话配置。语言生成独立使用 `maxLanguageOutputTokens`，默认 8,192，以容纳完整译文和词汇释义。`analysisConcurrency` 控制同时自动整理论文的上限，默认 2，可调 1–4。详见 [API](docs/api.md) 与 `cordis.patch.yml`。
+默认服务仅监听 `127.0.0.1`，拒绝跨来源写入；Harness 内使用其现有认证服务。论文对话不读取其他应用的密钥，不创建第二套服务配置。部署配置支持绝对路径 `library`、`python`；`localStateHome` 可覆盖状态文件所在的 DSH home。`provider`、`model`、`maxOutputTokens` 保留给原有独立反馈 API，论文对话和语言工具使用 Harness 自身的论文会话配置。语言生成独立使用 `maxLanguageOutputTokens`，默认 8,192，以容纳完整译文和词汇释义。`analysisConcurrency` 控制同时自动整理论文的上限，默认 2，可调 1–4。`translationServer` 可指向一个自部署的本机 Zotero translation-server（仅回环 http，如 `http://127.0.0.1:1969`）：「补全资料」在主路径（Crossref／页面元数据）取不到结果时，把同一 DOI／arXiv／页面链接交给侧车的 translators 再试一次；候选条目仍须通过既有的 DOI／题名人身份核对才生成可核对草稿，不会写目录。插件不打包、安装或启动该服务（其许可证为 AGPL-3.0，见 [第三方许可](THIRD_PARTY.md)），也绝不向它发送 PDF 正文、批注或草稿。详见 [API](docs/api.md) 与 `cordis.patch.yml`。
 
 验证命令：
 

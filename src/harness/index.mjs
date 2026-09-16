@@ -46,6 +46,7 @@ export function apply(ctx, rawConfig = {}) {
     python: config.python,
     provider: config.provider,
     model: config.model,
+    ...(config.translationServer ? { translationServer: config.translationServer } : {}),
     ai: createHarnessAI(ctx.llm, createUserMessage, config),
     models: signal => discoverModels(ctx.llm, signal),
     localState,

@@ -1,5 +1,6 @@
 import { isAbsolute, resolve } from 'node:path'
 import { defaultLibrary } from '../bridge.mjs'
+import { translationServerUrl } from '../translation-server.mjs'
 
 /** Resolve deployment-owned paths; request JSON never controls these options. */
 export function resolveConfig(raw = {}) {
@@ -19,5 +20,6 @@ export function resolveConfig(raw = {}) {
   if (!Number.isSafeInteger(maxAnnotationCharacters) || maxAnnotationCharacters < 1000 || maxAnnotationCharacters > 96000) throw new Error('paper-library: maxAnnotationCharacters must be an integer from 1000 to 96000')
   const analysisConcurrency = raw.analysisConcurrency ?? 2
   if (!Number.isSafeInteger(analysisConcurrency) || analysisConcurrency < 1 || analysisConcurrency > 4) throw new Error('paper-library: analysisConcurrency must be an integer from 1 to 4')
-  return { library: resolve(library), ...(raw.localStateHome === undefined ? {} : { localStateHome: resolve(raw.localStateHome) }), python: raw.python, provider: raw.provider, model: raw.model, maxOutputTokens, maxLanguageOutputTokens, maxAnnotationCharacters, analysisConcurrency, requireToolApproval: raw.requireToolApproval ?? true }
+  const translationServer = translationServerUrl(raw.translationServer)
+  return { library: resolve(library), ...(raw.localStateHome === undefined ? {} : { localStateHome: resolve(raw.localStateHome) }), python: raw.python, provider: raw.provider, model: raw.model, maxOutputTokens, maxLanguageOutputTokens, maxAnnotationCharacters, analysisConcurrency, ...(translationServer ? { translationServer } : {}), requireToolApproval: raw.requireToolApproval ?? true }
 }

@@ -5,6 +5,7 @@ import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveAndFetch, resolveMetadata } from './paper-fetch.mjs';
 import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
+import { createTranslationServerClient } from './translation-server.mjs';
 
 export const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const defaultLibrary = join(homedir(), '.local', 'share', 'dsh-paper-library');
@@ -201,6 +202,28 @@ async function lookupMetadata(request, options) {
   const target = doi || (typeof current.URL === 'string' && current.URL.trim());
   if (!target) throw new Error('请先在资料中填写并保存 DOI 或论文页面链接，再刷新资料。');
   const result = await resolveMetadata(target,{...options.fetchOptions,signal:options.signal});
+  if (!result.metadata && options.translationServer) {
+    // Optional loopback Zotero translation-server: translators supply candidate
+    // metadata for identifiers/pages the primary path could not resolve. The
+    // same identity gates apply; candidates that fail them are discarded.
+    try {
+      const client = createTranslationServerClient(typeof options.translationServer === 'string' ? { url: options.translationServer } : options.translationServer);
+      const candidates = await client.lookup(target);
+      const matched = candidates.find(item => doi ? canonicalDOI(item.DOI) === doi : normalizedIdentity(current.title).length >= 8 && normalizedIdentity(item.title) === normalizedIdentity(current.title));
+      if (matched) {
+        result.metadata = matched;
+        result.warnings = [...(result.warnings || []), '元数据候选来自本机 translation-server，已通过身份核对。'];
+        result.provenance = { target, provider: 'translation-server', fetched_at: new Date().toISOString() };
+      } else if (candidates.length) {
+        result.warnings = [...(result.warnings || []), 'translation-server 返回的条目未能通过 DOI 或题名核对，未采用。'];
+      } else {
+        result.warnings = [...(result.warnings || []), 'translation-server 没有找到可用条目。'];
+      }
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      result.warnings = [...(result.warnings || []), `translation-server 不可用：${String(error.message).slice(0, 300)}`];
+    }
+  }
   if (!result.metadata) throw new Error(`未取得可用文献资料；请核对 DOI 或论文页面链接，也可以手工编辑。${result.warnings?.length?' '+result.warnings.join('；'):''}`);
   // Network latency must not put an older manual edit back into the editor.
   const latest = await core({action:'get',id:request.id},options);
