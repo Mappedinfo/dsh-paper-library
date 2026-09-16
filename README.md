@@ -6,7 +6,7 @@
 
 项目原创代码采用 [MIT](LICENSE)。默认 PDF 引擎 PyMuPDF 采用 AGPL/商业许可，CSL 等第三方组件保留原许可；完整安装的依赖栈并非仅受 MIT 约束。详见 [第三方许可](THIRD_PARTY.md)。
 
-**继续开发前先读 [项目交接](HANDOFF.md)**，其中记录当前能力、验证证据和待验证项。
+**继续开发前先读 [项目交接](HANDOFF.md)**，其中记录当前能力、验证证据和待验证项。 版本变更见 [CHANGELOG](CHANGELOG.md)。
 
 ## 设置
 
