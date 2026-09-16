@@ -21,6 +21,16 @@ library, conversation, model credentials, or generated AI reply is shown.
 The demonstration seed is idempotent and refuses unrelated library contents.
 Stop only this temporary server when done; the user's Harness host is separate.
 
+## Release announcements
+
+`release-v0.1.0.md` is the reviewed comment that announces one release on the
+existing discussion; `discussion-comments.json` records the published comment
+only after remote readback. `node scripts/announce-release.mjs` runs preflight
+without arguments, posts only when no comment with the same body hash exists
+(`--publish`) and re-reads the recorded comment (`--verify`). The discussion is
+never recreated and a published comment is never rewritten: a changed body needs
+a new reviewed file and a new receipt, so history stays auditable.
+
 ## Publication
 
 Publish the reviewed screenshots to the source repository before running

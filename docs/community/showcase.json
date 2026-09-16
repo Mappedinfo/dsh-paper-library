@@ -9,5 +9,7 @@
   "images": [
     "docs/images/paper-library-reading.jpg",
     "docs/images/paper-library-annotations.jpg"
-  ]
+  ],
+  "releaseBodyFile": "docs/community/release-v0.1.0.md",
+  "releaseReceiptFile": "docs/community/discussion-comments.json"
 }
