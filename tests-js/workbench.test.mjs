@@ -243,27 +243,28 @@ test('unsaved new entries and ranking removals are restored without inventing ve
   assert.equal(f.element('ranking-rows').children.length,0);await f.form.dispatch('submit');assert.equal(f.requests[0].action,'create');
 });
 
-test('table selection remains metadata-only and all tool labels follow the chosen record', async () => {
+test('a catalog title click opens the reader while row actions keep selection-only semantics', async () => {
   const f = environment({ active: original() });
   const b = { ...original(), id: 'paper-b', title: 'Second paper', pdf: false };
   f.state.items.push(b); f.workbench.setTable(true);
   const row = f.element('catalog-table').querySelectorAll('tr').find(n => n.dataset.paperId === b.id);
-  await row.querySelector('button').dispatch('click'); f.workbench.header();
-  assert.deepEqual(f.selections, ['paper-b']); assert.deepEqual(f.opens, []); assert.deepEqual(f.requests, []);
-  assert.equal(f.element('toolbar-paper').textContent, b.title);
-  assert.equal(f.element('toolbar-reader').hidden, true);
-  assert.equal(f.element('download-pdf').hidden, true);
-  assert.equal(f.element('attach-open').hidden, false);
+  // Title click opens the reading surface for the chosen paper directly.
+  await row.querySelector('button').dispatch('click');
+  assert.deepEqual(f.opens, ['paper-b']); assert.deepEqual(f.selections, [], 'A title click is not a bare selection');
+  // The edit action still selects in place without opening the reader.
+  f.opens.length = 0;
+  await [...row.querySelectorAll('button')].find(button => button.textContent === '编辑').dispatch('click');
+  assert.deepEqual(f.opens, [], 'Edit selects without leaving the table'); assert.deepEqual(f.selections, ['paper-b']);
 });
 
-test('collapsing a table selection enters the chosen paper through the full reader initialization', async () => {
+test('a dataset title still routes to the dataset view instead of the reader', async () => {
   const f = environment({ active: original() });
-  const b = { ...original(), id: 'paper-b', title: 'Second paper', pdf: false };
-  f.state.items.push(b); f.workbench.setTable(true);
-  const row = f.element('catalog-table').querySelectorAll('tr').find(n => n.dataset.paperId === b.id);
+  const dataset = { id: 'dataset_synthetic', title: 'Synthetic dataset', resource_kind: 'dataset', citekey: 'syntheticData' };
+  f.state.items.push(dataset); f.workbench.setTable(true);
+  const row = f.element('catalog-table').querySelectorAll('tr').find(n => n.dataset.paperId === dataset.id);
   await row.querySelector('button').dispatch('click');
-  await f.element('catalog-expand').dispatch('click');
-  assert.deepEqual(f.opens, [b.id], 'Revealing old reader DOM under the selected title is not sufficient');
+  assert.deepEqual(f.opens, [], 'Datasets never open the PDF reader');
+  assert.deepEqual(f.selections, ['dataset_synthetic'], 'Dataset titles keep their own selection route');
 });
 
 test('editing a JCR year does not carry forward the previous ranking verification date', async () => {

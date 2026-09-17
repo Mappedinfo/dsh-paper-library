@@ -191,6 +191,7 @@ try {
     await page.locator('#reader-zoom-fit').click();
     await page.waitForFunction(previous => Math.round(document.querySelector('.pdr-page-slot').getBoundingClientRect().width) < previous, magnified250);
     assert.equal(await reader.evaluate(node => node.scrollWidth - node.clientWidth), 0, '全宽 removes the horizontal overflow');
+    await page.evaluate(() => persistence.flush());
     record('fit-width-default-arbitrary-percentage-zoom-and-reset');
     await page.reload(); await page.waitForLoadState('domcontentloaded');
     await page.locator('#continuous-reader .pdr-page-image[src]').first().waitFor({timeout:30000});
@@ -308,15 +309,15 @@ try {
     await page.getByRole('button', { name: '恢复', exact: true }).click(); await page.locator('#list-range').filter({ hasText: '0 篇' }).waitFor();
     await page.locator('#catalog-scope').selectOption('active'); await page.locator('#catalog-table .table-title').filter({ hasText: 'CRUD edited' }).waitFor();
     assert.equal(await overflow(), false); await screenshot('catalog-final-741'); record('ribbon-library-entry-retains-pagination-create-edit-trash-and-restore');
+    // A catalog title click now opens the reader directly; the table collapses.
     const selectCatalogPaper = async selected => {
       if (!(await page.locator('#catalog-table').isVisible())) await page.locator('#workspace-library').click();
       await page.locator('#search').fill(selected.title);
       const title = page.locator(`#catalog-table tr[data-paper-id="${selected.id}"] .table-title`);
-      await title.waitFor(); await page.waitForLoadState('networkidle');
-      const before = apiCalls.length; await title.click();
+      await title.waitFor();
+      await title.click();
+      await page.locator('#catalog-table').waitFor({ state: 'hidden' });
       await page.locator('#toolbar-paper').filter({ hasText: selected.title }).waitFor();
-      assert.equal(await page.locator('#catalog-table').isVisible(), true);
-      assert.equal(apiCalls.slice(before).filter(call => ['page', 'page_layout'].includes(call.action)).length, 0);
     };
     const assertReadingIdentity = async selected => {
       await page.locator('#catalog-table').waitFor({ state: 'hidden' });
@@ -336,10 +337,15 @@ try {
       else await sheet(currentPage).locator('.pdr-word').filter({ hasText: /^Evidence\s*$/ }).first().waitFor();
       assert.equal(apiCalls.filter(call => call.action === 'page').at(-1).id, selected.id);
     };
-    await selectCatalogPaper(paper); await page.locator('[data-tab="reader"]').click(); await assertReadingIdentity(paper);
+    await selectCatalogPaper(paper); await assertReadingIdentity(paper);
     for (const entry of ['reader', 'fullscreen', 'library-collapse']) {
       await selectCatalogPaper(secondPaper);
-      await page.locator(entry === 'reader' ? '[data-tab="reader"]' : entry === 'fullscreen' ? '#reader-fullscreen' : '#workspace-library').click();
+      if (entry === 'fullscreen') await page.locator('#reader-fullscreen').click();
+      if (entry === 'library-collapse') {
+        await page.locator('#workspace-library').click(); await page.locator('#catalog-table').waitFor();
+        await page.locator(`#catalog-table tr[data-paper-id="${secondPaper.id}"] .table-title`).click();
+        await page.locator('#catalog-table').waitFor({ state: 'hidden' });
+      }
       await assertReadingIdentity(secondPaper);
       if (entry === 'fullscreen') {
         await page.waitForFunction(() => document.body.classList.contains('reader-focused'));
@@ -347,9 +353,9 @@ try {
         await page.waitForFunction(() => !document.body.classList.contains('reader-focused') && !document.fullscreenElement);
       }
       await screenshot(`cross-paper-${entry}`);
-      await selectCatalogPaper(paper); await page.locator('[data-tab="reader"]').click(); await assertReadingIdentity(paper);
+      await selectCatalogPaper(paper); await assertReadingIdentity(paper);
     }
-    record('table-selection-opens-correct-pdf-through-reading-fullscreen-and-library-collapse-without-eager-pdf-load');
+    record('table-title-click-opens-correct-pdf-through-reading-fullscreen-and-library-collapse');
     record('fullscreen-to-library-exits-focus-and-displays-catalog');
     assert.equal(await digest(sourcePath), originalHash); record('synthetic-original-pdf-remains-byte-identical');
     assert.equal(await digest(secondSourcePath), secondOriginalHash);
