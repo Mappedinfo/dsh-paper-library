@@ -1,0 +1,15 @@
+{
+  "verified_at": "2026-09-17T15:17:00.856Z",
+  "scope": "Actual isolated DSH profile with a synthetic library: authenticated challenge routes, delivered panel assets, P1 scan, P3 aggregation with the review gate, P4 check/comparison/packet and the exports files. All exercised stages are model-free; the model stages (P2 extraction, model merge suggestions) are not simulated here and are covered by stubbed host tests plus the browser receipt.",
+  "checks": [
+    "challenge-routes-require-the-authenticated-host",
+    "status-advertises-the-scan-theme-export-comparison-and-packet-routes",
+    "authenticated-host-delivers-the-panel-assets",
+    "p1-scan-reads-the-managed-pdf-in-the-real-host-with-zero-model-calls",
+    "p3-aggregation-and-the-user-review-gate-run-in-the-real-host",
+    "p4-check-and-checklist-comparison-run-in-the-real-host",
+    "p4-packet-and-exports-are-written-by-the-real-host"
+  ],
+  "modelRequests": 0,
+  "externalRequests": 0
+}
