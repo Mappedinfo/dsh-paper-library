@@ -245,6 +245,10 @@ export async function dispatch(request, options = {}) {
     if (Buffer.byteLength(JSON.stringify(safe)) > 128 * 1024) throw new Error('所选论文整理请求超过预算。');
     return core(safe,options);
   }
+  if (safe.action === 'challenge_scan') {
+    if (Buffer.byteLength(JSON.stringify(safe)) > 128 * 1024) throw new Error('难点扫描请求超过预算；请缩小所选文献范围。');
+    return core(safe, options);
+  }
   if (libraryActions.has(safe.action) || safe.action === 'dataset_cite') {
     if (Buffer.byteLength(JSON.stringify(safe), 'utf8') > 1024 * 1024) throw new Error('库请求超过 1 MiB；请缩小选中材料。');
     if (safe.action === 'dataset_cite') {

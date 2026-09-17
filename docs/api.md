@@ -91,6 +91,20 @@ Generation is at most 40 sources / 24,000 characters and two concurrent requests
 
 Structured nodes use stable typed IDs; Evidence binds an exact selected source excerpt, Observation points to a source node, and Assertion relates evidence/observation to Claim/Gap. Edge uses separately validated typed endpoints. `library-json` contains selected accepted graphs/notes plus referenced snapshots and identity metadata; it is not a whole-library restore format. `rkos-v3` adds role-separated bibliography/sidecars, mappings and losses; native dataset sources are not disguised as Paper records. Runtime exports use the bounded adapter's structural checks; the upstream parser is exercised separately by the synthetic validation script, never auto-discovered at runtime.
 
+## Research challenge mining
+
+`challenge_scan` mines deterministic, model-free difficulty candidates from explicitly selected papers. It is available over the browser/CLI API (the native tool and corpus panel arrive with the later stages). No model is called: `model_calls` is always `0`.
+
+| Field | Contract |
+| --- | --- |
+| `ids` | 1–50 unique, well-formed paper ids. The scan never searches the catalog on its own. |
+| `sections` | Optional subset of known section names (`limitations`, `future-work`, `threats-to-validity`, `discussion`, `conclusion`, `introduction`, `background`, `related-work`, `results`, `experiment`, `method`); default picks up to six by that priority order from the sections actually found. |
+| Result | `{schema:'paper-library-challenge-candidates.v1', generated_at, scope:{requested,scanned,skipped}, budgets, rules, totals, papers, model_calls}`. |
+
+Sections are recognised from whole heading lines (numbered or not, English or Chinese) and end at back matter (`references`, `bibliography`, `acknowledgements`, `appendix`, …). Unrecognised numbered subsection headings are treated as structure and never scanned, so subsection prose stays inside its parent section. Sentences are split with an abbreviation guard (`et al.`, `e.g.`, initials) so a citation does not truncate evidence.
+
+Budgets: 50 papers per run, 200 pages and 24,000 characters per paper, 6 sections and 40 candidates per paper, 1,200 characters per candidate, and 400 candidates / 200,000 characters per run; `truncated` marks a paper or the whole run that hit a limit. Every candidate keeps its section, real page and matched rule ids (`en-limitation`, `en-challenge`, `en-contrast`, `en-negative`, `en-open`, `zh-limitation`, `zh-challenge`, `zh-contrast`, `zh-negative`, `zh-open`). Papers without a PDF, archived papers and unknown ids are reported in `scope.skipped` with a reason instead of failing the run. No PDF text is sent anywhere and no section is inferred for a page whose text is missing.
+
 ## Native Harness tools
 
 The plugin registers 21 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
