@@ -19,6 +19,7 @@ let resourceUI;
 let knowledgeUI;
 let analysisUI;
 let settingsUI;
+let challengeUI;
 let companionUI;
 let preferences = {};
 let durableReaderLoaded = false;
@@ -95,6 +96,7 @@ async function loadStatus() {
     languageUI?.setAvailable(result.language_learning);
     knowledgeUI?.setAvailable(result.knowledge_generation);
     void analysisUI?.setAvailable(result.paper_analysis);
+    challengeUI?.setAvailable(result.challenge_mining);
     void settingsUI?.refresh();
   } catch (error) { $('library-status').textContent = '连接未完成'; errorAt('library-error', error); }
 }
@@ -1060,6 +1062,7 @@ if(languageUI){
 }
 resourceUI = window.ResourceLibrary?.create({state,api,persistence,toast,loadList,openPaper,workbench:()=>workbenchUI,readingShell:()=>readingShell,knowledge:()=>knowledgeUI,prepare:()=>{publishReaderState();readerStateReady=false;readerPaperId=null;++state.itemTicket;state.pageWanted=null;clearPage();paperChatUI?.visible(false);readingPanels?.close('chat');readingPanels?.close('metadata');readingPanels?.setReadingActive(false);void languageUI?.paperChanged(null);},changed:()=>{renderList();readingShell?.sync();resourceUI?.sync();}});
 knowledgeUI = window.LibraryKnowledge?.create({state,api,persistence,toast,getSelection:()=>state.selection,getAnnotations:()=>state.annotations,openPaper,readingPanels:()=>readingPanels,resource:()=>resourceUI});
+challengeUI = window.ChallengeMining?.create({state,api,toast});
 analysisUI = window.PaperAnalysis?.create({state,api,persistence,toast,openKnowledge:()=>knowledgeUI?.show(state.active),metadataChanged:async id=>{const item=await api('get',{id});if(state.active?.id===id){state.active=item;renderPaperHeader();}await loadList();},prepareChat:async(text,id)=>{
   if(state.active?.id!==id)throw new Error('请先返回这条整理结果所属的论文。');
   await switchTab('conversation');

@@ -16,6 +16,7 @@ for (const name of ['workbench.js','knowledge-graph.js','workbench.css','knowled
 for (const name of ['resource-library.js','resource-library.css','knowledge-workflow.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['paper-analysis.js','paper-analysis.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['settings.js','settings.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['challenge-mining.js','challenge-mining.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 const languageActions = new Set(['language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
 staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
 const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:'];
@@ -134,7 +135,7 @@ export function createFetchHandler(options = {}) {
             : input?.action === 'settings_reset' ? await settings.reset(input.expected_revision)
             : stateAction ? await stateRequest(localState, input)
             : typeof input?.action === 'string' && input.action.startsWith('paper_analysis_') ? await analysisRecords(input)
-            : typeof input?.action === 'string' && input.action.startsWith('challenge_extract_') ? await challengeRecords(input, { signal: request.signal })
+            : typeof input?.action === 'string' && (input.action.startsWith('challenge_extract_') || input.action.startsWith('challenge_theme_suggest_')) ? await challengeRecords(input, { signal: request.signal })
             : input?.action === 'knowledge_generate' ? await options.libraryKnowledge(input, { signal: request.signal })
             : languageAction ? await learningRecords(input, { signal: request.signal })
             : chatAction
@@ -146,7 +147,7 @@ export function createFetchHandler(options = {}) {
           }
           if(input.action==='status')result={...result,realtime_companion:Boolean(options.companion)};
           if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true, catalog_management: true, typed_graph: true, reading_workspace: true, durable_state: true, learning_records: true, language_learning: Boolean(options.languageLearning) };
-          if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true, challenge_mining:Boolean(options.challengeMining), challenge_scan:true };
+          if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true, challenge_mining:Boolean(options.challengeMining), challenge_scan:true, challenge_themes:true, challenge_export:true };
           return json({ok:true,result});
         } finally { jsonRequests--; }
       }

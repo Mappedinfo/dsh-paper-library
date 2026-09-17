@@ -21,6 +21,7 @@ const commands=[
   ['resource_library_syntax',process.execPath,['--check','web/resource-library.js']],
   ['knowledge_workflow_syntax',process.execPath,['--check','web/knowledge-workflow.js']],
   ['paper_analysis_syntax',process.execPath,['--check','web/paper-analysis.js']],
+  ['challenge_mining_syntax',process.execPath,['--check','web/challenge-mining.js']],
   ['settings_syntax',process.execPath,['--check','web/settings.js']],
 ];
 const checks=[];

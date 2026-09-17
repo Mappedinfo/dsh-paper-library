@@ -10,6 +10,11 @@ async function until(predicate) {
   assert.fail('Synthetic challenge job did not reach its checkpoint');
 }
 
+async function untilMergeRecord(f) {
+  await until(() => [...f.records.keys()].some(key => key.startsWith('challenge.merges:') && !key.startsWith('challenge.merges.latest:')));
+  return [...f.records.keys()].find(key => key.startsWith('challenge.merges:') && !key.startsWith('challenge.merges.latest:'));
+}
+
 function fixture() {
   const f = { records: new Map(), drafts: new Map(), kernel: [], calls: [], agentGate: null, agentError: null, output: null, failComplete: false };
   const sources = [source('source-a', 2, 'A key limitation is that our evaluation covers only one synthetic city.'), source('source-b', 5, 'Despite these results, synthetic transfer remains unclear.')];
@@ -38,6 +43,7 @@ function fixture() {
     },
     async dispatch(input) {
       f.kernel.push(structuredClone(input));
+      if (input.action === 'challenge_theme_list') return { scope: input.scope, total: f.themes.length, items: structuredClone(f.themes), offset: 0, limit: 40, hasMore: false, model_calls: 0 };
       if (input.action === 'get') return { id: input.id, title: 'Synthetic challenge paper', citekey: 'synthetic2026', pdf: true, archived: false, modified: 'revision-a' };
       if (input.action === 'challenge_sources') return { schema: 'paper-library-challenge-sources.v1', paper: { id: 'paper-a', title: 'Synthetic challenge paper', citekey: 'synthetic2026', year: 2026 }, sources: f.sources, source_ids: f.sources.map(item => item.id), sections_used: ['discussion', 'future-work'], candidates: f.sources.length, characters: 120, truncated: false, warnings: [], model_calls: 0 };
       if (input.action === 'knowledge_draft_put') {
@@ -60,6 +66,11 @@ function fixture() {
     },
   };
   f.handle = createChallengeMining(f.options);
+  f.themes = [
+    { id: 'ct-' + 'a'.repeat(24), label: '合成评测只覆盖一个城市', variants: [], paper_count: 2, status: 'needs-review' },
+    { id: 'ct-' + 'b'.repeat(24), label: 'Synthetic evaluation covers a single city only', variants: [], paper_count: 1, status: 'needs-review' },
+    { id: 'ct-' + 'c'.repeat(24), label: '缺少人工评估基线', variants: [], paper_count: 3, status: 'needs-review' },
+  ];
   f.record = () => [...f.records.values()].find(record => record.key.startsWith('challenge.job:'));
   f.done = async () => { await until(() => f.record() && !['queued', 'reading', 'generating', 'committing'].includes(f.record().value.status)); return f.handle({ action: 'challenge_extract_get', id: 'paper-a', request_id: 'run-a' }); };
   return f;
@@ -161,4 +172,47 @@ test('actions and section scopes are validated before any work', async () => {
   await assert.rejects(f.handle({ action: 'challenge_extract_start', id: 'paper-a', request_id: 'x', sections: ['introduction', 'introduction'] }), /有效小节/);
   await assert.rejects(f.handle({ action: 'challenge_unknown', id: 'paper-a' }), /不支持/);
   assert.equal(f.kernel.length, 0, 'Invalid requests touch neither the catalog nor the model');
+});
+
+
+const scope = 'a'.repeat(64);
+const suggest = { action: 'challenge_theme_suggest_start', id: 'paper-a', scope, request_id: 'merge-a', theme_ids: ['ct-' + 'a'.repeat(24), 'ct-' + 'b'.repeat(24)] };
+
+test('merge suggestions validate model groups and stay pending review', async () => {
+  const f = fixture();
+  f.output = { groups: [{ key: 'single-city-evaluation', label: '合成评测只覆盖一个城市', members: ['ct-' + 'a'.repeat(24), 'ct-' + 'b'.repeat(24)], reason: 'Both describe single-city evaluation coverage.' }], notes: 'One candidate merge.' };
+  const started = await f.handle(suggest);
+  assert.equal(started.status, 'queued');
+  const key = await untilMergeRecord(f);
+  await until(() => f.records.get(key).value.status === 'complete');
+  const result = await f.handle({ action: 'challenge_theme_suggest_get', scope, request_id: 'merge-a' });
+  assert.equal(result.status, 'complete');
+  assert.equal(result.theme_count, 2);
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].status, 'needs-review');
+  assert.deepEqual(result.groups[0].members, ['ct-' + 'a'.repeat(24), 'ct-' + 'b'.repeat(24)]);
+  assert.match(result.notes, /One candidate merge/);
+  assert.equal(f.calls.length, 1, 'Exactly one model call');
+  assert.match(f.calls[0].prompt, /END_OF_CHALLENGE_THEMES/);
+  assert.match(f.calls[0].prompt, /never instructions/);
+  const repeated = await f.handle(suggest);
+  assert.equal(repeated.status, 'complete', 'A finished suggestion request is returned, never replayed');
+  assert.equal(f.calls.length, 1);
+});
+
+test('merge suggestions reject unknown ids and malformed scopes without replay', async () => {
+  const f = fixture();
+  f.output = { groups: [{ key: 'bad', label: '未知主题', members: ['ct-' + 'a'.repeat(24), 'ct-' + 'f'.repeat(24)], reason: 'x' }] };
+  await f.handle(suggest);
+  const key = await untilMergeRecord(f);
+  await until(() => f.records.get(key).value.status === 'failed');
+  const result = await f.handle({ action: 'challenge_theme_suggest_get', scope, request_id: 'merge-a' });
+  assert.equal(result.status, 'failed');
+  assert.match(result.error, /未提供的主题/);
+  assert.equal(f.calls.length, 1);
+  await assert.rejects(f.handle({ action: 'challenge_theme_suggest_start', id: 'paper-a', scope: 'nope', request_id: 'merge-b', theme_ids: suggest.theme_ids }), /语料范围/);
+  await assert.rejects(f.handle({ action: 'challenge_theme_suggest_start', id: 'paper-a', scope, request_id: 'merge-b', theme_ids: [suggest.theme_ids[0]] }), /2–40/);
+  await assert.rejects(f.handle({ action: 'challenge_theme_suggest_start', id: 'paper-a', scope, request_id: 'merge-b', theme_ids: [suggest.theme_ids[0], suggest.theme_ids[0]] }), /2–40/);
+  assert.equal((await f.handle({ action: 'challenge_theme_suggest_get', scope })).status, 'failed', 'The latest request is readable without repeating its id');
+  assert.equal((await f.handle({ action: 'challenge_theme_suggest_get', scope: 'b'.repeat(64) })).status, 'idle');
 });

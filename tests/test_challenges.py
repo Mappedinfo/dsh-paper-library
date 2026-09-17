@@ -53,9 +53,9 @@ def call(library, action, **values):
     return dispatch_request({"library": str(library.root), "action": action, **values})
 
 
-def make_paper(library, tmp_path, name="paper-1", citekey="synthetic2026", lines=PAPER_LINES, with_pdf=True, archived=False):
+def make_paper(library, tmp_path, name="paper-1", citekey="synthetic2026", lines=PAPER_LINES, with_pdf=True, archived=False, year=2026):
     item = library.create({"title": f"Synthetic challenge paper {name}", "citekey": citekey,
-                           "issued": {"date-parts": [[2026]]}})
+                           "issued": {"date-parts": [[year]]}})
     if with_pdf:
         library.attach(item["id"], str(write_pdf(tmp_path / f"{name}.pdf", lines)))
     if archived:
@@ -202,3 +202,174 @@ def test_source_status_is_validated_and_linted(library, tmp_path):
     assert any(finding["rule"] == "challenge-without-evidence" for finding in linted["findings"])
     backed = knowledge.draft_lint(library, {"id": valid["id"]})
     assert not any(finding["rule"] == "challenge-without-evidence" for finding in backed["findings"])
+
+
+# --- P3: cross-paper themes -------------------------------------------------
+
+def make_difficulty_draft(library, paper, label, quote, page, node_type="gap", source_status="author-stated",
+                          draft_id=None, accept=True):
+    source = call(library, "knowledge_source_put", entity={"kind": "paper", "id": paper["id"]}, kind="user-text",
+                  text=f"{quote} Synthetic context sentence.", locator={"page": page})
+    draft = call(library, "knowledge_draft_put", entity={"kind": "paper", "id": paper["id"]},
+                 source_ids=[source["id"]], request_id=draft_id or f"draft-{paper['id']}-{page}",
+                 nodes=[{"id": "difficulty-1", "type": node_type, "label": label, "source_status": source_status},
+                        {"id": "evidence-1", "type": "evidence", "label": "Synthetic excerpt", "source_id": source["id"], "quote": quote}],
+                 assertions=[{"subject": "evidence:evidence-1", "object": f"{node_type}:difficulty-1", "relation": "identifies"}])
+    if accept:
+        draft = call(library, "knowledge_draft_review", id=draft["id"], reviewed_by="user", decision="accepted",
+                     expected_revision=draft["revision"])
+    return draft
+
+
+def test_themes_aggregate_reviewed_difficulty_records(library, tmp_path):
+    first = make_paper(library, tmp_path, name="a", citekey="alpha2024", year=2024)
+    second = make_paper(library, tmp_path, name="b", citekey="beta2026", year=2026)
+    make_difficulty_draft(library, first, "Cross-city generalization is unclear", "Cross-city generalization remains unclear.", 4)
+    make_difficulty_draft(library, second, "cross city generalization is unclear!", "Generalization across cities is unclear.", 2)
+    result = call(library, "challenge_themes", ids=[first["id"], second["id"]])
+    assert result["schema"] == "paper-library-challenge-themes.v1"
+    assert result["model_calls"] == 0
+    assert result["totals"] == {"records": 2, "themes": 1, "persisted": 1}
+    theme = result["themes"][0]
+    assert theme["paper_count"] == 2 and theme["record_count"] == 2
+    assert theme["status"] == "needs-review" and theme["revision"] == 1
+    assert theme["years"] == {"min": 2024, "max": 2026, "histogram": {"2024": 1, "2026": 1}}
+    assert theme["source_status"]["author-stated"] == 2
+    assert {item["citekey"] for item in theme["papers"]} == {"alpha2024", "beta2026"}
+    assert sorted(quote["page"] for quote in theme["quotes"]) == [2, 4]
+    assert all(quote["quote"] in ("Cross-city generalization remains unclear.", "Generalization across cities is unclear.") for quote in theme["quotes"])
+    assert theme["variants"] == ["cross city generalization is unclear!"]
+    assert result["scope"]["scanned"] == 2 and result["scope"]["skipped"] == []
+
+
+def test_themes_respect_draft_review_status(library, tmp_path):
+    paper = make_paper(library, tmp_path)
+    make_difficulty_draft(library, paper, "Sparse synthetic supervision is unsolved", "Supervision is sparse.", 3, accept=False)
+    assert call(library, "challenge_themes", ids=[paper["id"]])["totals"]["records"] == 0
+    included = call(library, "challenge_themes", ids=[paper["id"]], include="all")
+    assert included["totals"]["records"] == 1
+    assert included["themes"][0]["papers"][0]["draft_status"] == "needs-review"
+
+
+def test_themes_scope_and_option_validation(library, tmp_path):
+    paper = make_paper(library, tmp_path)
+    for ids in ([], [paper["id"], paper["id"]], ["bad id!"], [f"p{index}" for index in range(201)]):
+        with pytest.raises(ValueError):
+            call(library, "challenge_themes", ids=ids)
+    with pytest.raises(ValueError):
+        call(library, "challenge_themes", ids=[paper["id"]], include="everything")
+    with pytest.raises(ValueError):
+        call(library, "challenge_themes", ids=[paper["id"]], persist="yes")
+
+
+def test_themes_propose_pending_merges_without_applying(library, tmp_path):
+    paper = make_paper(library, tmp_path)
+    make_difficulty_draft(library, paper, "Limited synthetic evaluation protocol coverage", "Protocol coverage is limited.", 2, draft_id="one")
+    make_difficulty_draft(library, paper, "Limited synthetic evaluation protocol breadth", "Protocol breadth is limited.", 3, draft_id="two")
+    result = call(library, "challenge_themes", ids=[paper["id"]])
+    assert len(result["themes"]) == 2, "Overlapping labels must stay separate until a reviewer merges them"
+    assert result["merge_suggestions"] and result["merge_suggestions"][0]["jaccard"] >= 0.6
+    suggestion = result["merge_suggestions"][0]
+    assert {suggestion["left"], suggestion["right"]} == {theme["id"] for theme in result["themes"]}
+
+
+def test_theme_persistence_revision_review_and_listing(library, tmp_path):
+    paper = make_paper(library, tmp_path)
+    make_difficulty_draft(library, paper, "No shared synthetic benchmark exists", "No shared benchmark exists.", 2)
+    first = call(library, "challenge_themes", ids=[paper["id"]])
+    theme = first["themes"][0]
+    second = call(library, "challenge_themes", ids=[paper["id"]])
+    assert second["themes"][0]["revision"] == 2
+    assert second["themes"][0]["previous"] == {"revision": 1, "paper_count": 1}
+    assert second["totals"]["persisted"] == 1
+    with pytest.raises(ValueError):
+        call(library, "challenge_theme_review", id=theme["id"], reviewed_by="llm", decision="accepted", expected_revision=2)
+    with pytest.raises(ValueError):
+        call(library, "challenge_theme_review", id=theme["id"], reviewed_by="user", decision="accepted", expected_revision=1)
+    reviewed = call(library, "challenge_theme_review", id=theme["id"], reviewed_by="user", decision="accepted", expected_revision=2)
+    assert reviewed["status"] == "accepted" and reviewed["revision"] == 3
+    listed = call(library, "challenge_theme_list", scope=second["scope"]["hash"])
+    assert listed["total"] == 1 and listed["items"][0]["status"] == "accepted"
+    assert len(listed["items"][0]["papers"]) <= 10 and len(listed["items"][0]["quotes"]) <= 5
+    with pytest.raises(ValueError):
+        call(library, "challenge_theme_list", scope="nope")
+    with pytest.raises(ValueError):
+        call(library, "challenge_theme_list", limit=0)
+
+
+def test_themes_skip_archived_and_missing_papers(library, tmp_path):
+    archived = make_paper(library, tmp_path, name="gone", citekey="gone2026", archived=True)
+    result = call(library, "challenge_themes", ids=[archived["id"], "missing-paper"])
+    assert result["totals"]["records"] == 0
+    assert [item["reason"] for item in result["scope"]["skipped"]] == ["论文在回收站中", "论文不存在或不可读取"]
+    assert result["scope"]["scanned"] == 0
+
+
+def test_theme_merge_requires_review_and_supersedes_members(library, tmp_path):
+    first = make_paper(library, tmp_path, name="a", citekey="alpha2024", year=2024)
+    second = make_paper(library, tmp_path, name="b", citekey="beta2026", year=2026)
+    make_difficulty_draft(library, first, "Limited synthetic evaluation protocol coverage", "Protocol coverage is limited.", 2)
+    make_difficulty_draft(library, second, "Limited synthetic evaluation protocol breadth", "Protocol breadth is limited.", 3)
+    result = call(library, "challenge_themes", ids=[first["id"], second["id"]])
+    themes = {theme["id"]: theme for theme in result["themes"]}
+    ids = sorted(themes)
+    revisions = {theme_id: themes[theme_id]["revision"] for theme_id in ids}
+    with pytest.raises(ValueError):
+        call(library, "challenge_theme_merge", theme_ids=ids, expected_revisions=revisions, reviewed_by="llm")
+    with pytest.raises(ValueError):
+        call(library, "challenge_theme_merge", theme_ids=[ids[0]], expected_revisions={ids[0]: 1}, reviewed_by="user")
+    with pytest.raises(ValueError):
+        call(library, "challenge_theme_merge", theme_ids=ids, expected_revisions={ids[0]: 999, ids[1]: revisions[ids[1]]}, reviewed_by="user")
+    merged = call(library, "challenge_theme_merge", theme_ids=ids, expected_revisions=revisions, reviewed_by="user",
+                  label="Synthetic evaluation protocol coverage and breadth")
+    assert merged["status"] == "needs-review" and merged["origin"] == "user-merge" and merged["revision"] == 1
+    assert merged["merged_from"] == ids
+    assert merged["paper_count"] == 2 and merged["record_count"] == 2
+    assert merged["years"] == {"min": 2024, "max": 2026, "histogram": {"2024": 1, "2026": 1}}
+    assert sorted(quote["page"] for quote in merged["quotes"]) == [2, 3]
+    for theme_id in ids:
+        superseded = call(library, "challenge_theme_get", id=theme_id)["theme"]
+        assert superseded["status"] == "merged" and superseded["superseded_by"] == merged["id"]
+    with pytest.raises(ValueError):
+        call(library, "challenge_theme_merge", theme_ids=ids, expected_revisions=revisions, reviewed_by="user")
+    listed = call(library, "challenge_theme_list", scope=merged["scope"], status="merged")
+    assert listed["total"] == 2
+    assert call(library, "challenge_theme_get", id=merged["id"])["theme"]["paper_count"] == 2
+    with pytest.raises(ValueError):
+        call(library, "challenge_theme_get", id="ct-" + "0" * 24)
+
+
+def test_challenge_export_writes_bounded_reviewed_files(library, tmp_path):
+    first = make_paper(library, tmp_path, name="a", citekey="alpha2024", year=2024)
+    second = make_paper(library, tmp_path, name="b", citekey="beta2026", year=2026)
+    make_difficulty_draft(library, first, "No shared synthetic benchmark exists", "No shared benchmark exists.", 2)
+    make_difficulty_draft(library, second, "No shared synthetic benchmark exists", "A shared benchmark is missing.", 5)
+    result = call(library, "challenge_themes", ids=[first["id"], second["id"]])
+    theme = result["themes"][0]
+    with pytest.raises(ValueError):
+        call(library, "challenge_export", ids=[first["id"], second["id"]], scope=result["scope"]["hash"])
+    call(library, "challenge_theme_review", id=theme["id"], reviewed_by="user", decision="accepted", expected_revision=1)
+    exported = call(library, "challenge_export", ids=[first["id"], second["id"]], scope=result["scope"]["hash"])
+    assert exported["schema"] == "paper-library-challenge-export.v1" and exported["model_calls"] == 0
+    assert exported["themes"] == 1 and exported["citekeys"] == ["alpha2024", "beta2026"]
+    assert set(exported["files"]) == {"challenges.csv", "challenges.md", "challenges.bib"}
+    csv_text = (library.root / "exports/challenges.csv").read_text()
+    assert csv_text.splitlines()[0].startswith("theme_id,theme_label")
+    assert '"accepted"' in csv_text and "alpha2024" in csv_text and "beta2026" in csv_text
+    assert '"Synthetic excerpt"' not in csv_text.splitlines()[0]
+    markdown = (library.root / "exports/challenges.md").read_text()
+    assert "覆盖：2 篇 / 2 条难点记录" in markdown and "2024–2026" in markdown
+    assert "[@alpha2024 p.2]" in markdown and "[@beta2026 p.5]" in markdown
+    assert "`needs-review` 起步" in markdown and "没有携带合并建议" in markdown
+    bib = (library.root / "exports/challenges.bib").read_text()
+    assert "@misc{alpha2024" in bib and "@misc{beta2026" in bib
+    assert "author" not in bib, "Missing metadata fields must stay absent"
+    assert exported["rows"] == 2 and exported["files"]["challenges.csv"]["bytes"] == len(csv_text.encode())
+    assert call(library, "challenge_export", ids=[second["id"]], include="all", include_unreviewed=True,
+                scope=result["scope"]["hash"])["themes"] == 1, "Unreviewed themes are exportable only on request"
+    carried = call(library, "challenge_export", ids=[first["id"], second["id"]], scope=result["scope"]["hash"],
+                   merge_suggestions=[{"left": theme["id"], "right": theme["id"], "jaccard": 0.75}])
+    assert carried["themes"] == 1
+    assert "（相似度 0.75）——待人工确认" in (library.root / "exports/challenges.md").read_text()
+    with pytest.raises(ValueError):
+        call(library, "challenge_export", ids=[second["id"]], scope="0" * 64)

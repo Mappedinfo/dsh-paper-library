@@ -1,0 +1,30 @@
+.challenge-panel{position:fixed;z-index:36;left:12px;right:12px;top:104px;bottom:16px;width:min(760px,calc(100vw - 24px));margin:0 auto;padding:16px;overflow:auto;background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 34px #0002;font-size:12px;overscroll-behavior:contain}
+.challenge-panel[hidden]{display:none}
+.challenge-panel header{display:flex;align-items:start;justify-content:space-between;gap:8px}
+.challenge-panel header strong{font-size:15px}
+.challenge-panel .eyebrow{margin:0 0 2px;font-size:10px;letter-spacing:.08em;color:var(--muted)}
+.challenge-panel h3{font-size:13px;margin:16px 0 6px}
+.challenge-panel .small{font-size:11px;line-height:1.5;margin:6px 0}
+.challenge-panel .button{font-size:12px;padding:5px 9px;min-height:30px;white-space:normal}
+#challenge-count.empty{color:var(--muted)}
+.challenge-corpus{margin:12px 0;padding:10px;border:1px solid var(--line);border-radius:10px}
+.challenge-corpus-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.challenge-corpus-actions{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0}
+.challenge-items{display:grid;gap:2px;max-height:190px;overflow:auto}
+.challenge-item{display:flex;align-items:start;gap:8px;padding:6px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+.challenge-item input{width:14px;height:14px;flex:none;margin-top:2px;accent-color:var(--ink)}
+.challenge-item>span{display:grid;gap:2px;min-width:0;overflow-wrap:anywhere}
+.challenge-item small{color:var(--muted);font-size:10px}
+.challenge-actions{display:flex;flex-wrap:wrap;gap:4px;margin:10px 0}
+.challenge-section{margin:14px 0;padding-top:10px;border-top:1px solid var(--line)}
+.challenge-section details{padding:6px 0;border-bottom:1px solid var(--line)}
+.challenge-section summary{cursor:pointer;font-size:12px}
+.challenge-section blockquote{margin:4px 0 4px 10px;padding-left:8px;border-left:2px solid var(--line);color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.challenge-theme{margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:10px;display:grid;gap:4px}
+.challenge-theme strong{font-size:13px}
+.challenge-theme .button{margin-right:4px}
+.challenge-suggestion{margin:8px 0;padding:8px;border:1px dashed var(--line);border-radius:8px;display:grid;gap:4px}
+.challenge-record{display:grid;gap:3px;padding:6px 0;border-bottom:1px solid var(--line)}
+#challenge-status{font-size:12px;line-height:1.5;margin:8px 0}
+#challenge-open{font-size:12px;flex:none}
+@media(max-height:620px){.challenge-panel{top:76px;bottom:8px}}

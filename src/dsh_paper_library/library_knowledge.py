@@ -449,6 +449,29 @@ def bib_entry(kind, key, fields):
     return f"@{kind}{{{key},\n" + ",\n".join(f"  {name} = {{{safe(value)}}}" for name, value in fields.items() if value is not None and value != "") + "\n}\n"
 
 
+BIB_ENTRY_TYPES = {"article-journal": "article", "book": "book", "chapter": "incollection",
+                  "paper-conference": "inproceedings", "report": "report", "thesis": "thesis"}
+
+
+def bib_fields(metadata, *, dataset=False):
+    """Map stored metadata to BibTeX fields; missing values are omitted, never invented."""
+    issued = metadata.get("issued", {}).get("date-parts", [[None]]) if isinstance(metadata.get("issued"), dict) else [[None]]
+    fields = {"title": metadata.get("title"), "doi": metadata.get("DOI"), "url": metadata.get("URL"),
+              "year": issued[0][0] if issued and issued[0] else None,
+              "version": metadata.get("version"), "publisher": metadata.get("publisher")}
+    authors = [author.get("literal") or ", ".join(filter(None, (author.get("family"), author.get("given"))))
+               for author in metadata.get("author", [])]
+    if authors:
+        fields["author"] = " and ".join(authors)
+    if metadata.get("container-title"):
+        fields["journaltitle"] = metadata["container-title"]
+    for source_field, target_field in (("volume", "volume"), ("issue", "number"), ("page", "pages")):
+        if metadata.get(source_field):
+            fields[target_field] = metadata[source_field]
+    entry_type = "dataset" if dataset else BIB_ENTRY_TYPES.get(metadata.get("type"), "misc")
+    return entry_type, fields
+
+
 def export(library, request):
     inputs = request.get("entities", [request.get("entity")])
     if not isinstance(inputs, list) or not 1 <= len(inputs) <= 20:
@@ -504,17 +527,7 @@ def rkos_export(result):
             losses.append({"code": "CITATION_KEY_COLLISION_REMAPPED", "entity": entity, "old": original_key, "new": key})
         citation_keys.add(key)
         citations[encoded(entity)] = key
-        issued = metadata.get("issued", {}).get("date-parts", [[None]])
-        fields = {"title": metadata.get("title"), "doi": metadata.get("DOI"), "url": metadata.get("URL"), "year": issued[0][0] if issued and issued[0] else None, "version": metadata.get("version"), "publisher": metadata.get("publisher")}
-        authors = [author.get("literal") or ", ".join(filter(None, (author.get("family"), author.get("given")))) for author in metadata.get("author", [])]
-        if authors:
-            fields["author"] = " and ".join(authors)
-        if metadata.get("container-title"):
-            fields["journaltitle"] = metadata["container-title"]
-        for source_field, target_field in (("volume", "volume"), ("issue", "number"), ("page", "pages")):
-            if metadata.get(source_field):
-                fields[target_field] = metadata[source_field]
-        entry_type = {"article-journal": "article", "book": "book", "chapter": "incollection", "paper-conference": "inproceedings", "report": "report", "thesis": "thesis"}.get(metadata.get("type"), "misc") if entity["kind"] == "paper" else "dataset"
+        entry_type, fields = bib_fields(metadata, dataset=entity["kind"] != "paper")
         bibliography = bib_entry(entry_type, key, fields)
         references.append(bibliography)
         typed_entity = f"{entity['kind']}:{entity['id']}"

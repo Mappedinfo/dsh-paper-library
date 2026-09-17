@@ -141,8 +141,16 @@ P4 复核、对照与导出
 |---|---|---|---|
 | P1 确定性候选扫描 | **已实施** | `src/dsh_paper_library/challenges.py`（`challenge_scan`）、`worker.py` 路由、`src/bridge.mjs`、`docs/api.md#research-challenge-mining` | 5 项 Python 测试（小节/页码/缩写/预算/跳过/范围校验）+ 3 项桥接集成测试；零模型调用 |
 | P2 单篇受限抽取 | **已实施** | `src/harness/challenge-mining.mjs`、`src/dsh_paper_library/challenges.py`（`challenge_sources`）、`library_knowledge.py`（`source_status` + `challenge-without-evidence` lint）、`src/harness/tools.mjs`（`library_challenges`） | 6 项宿主测试（隔离调用/一次生成/重复不重放/五类无效输出拒绝/忙与取消/中断与新请求）+ 2 项 Python 测试（来源固化与 provenance、source_status 与 lint）；`docs/api.md#bounded-extraction-p2` |
-| P3 跨篇主题聚合 | 待实施 | — | — |
+| P3 跨篇主题聚合 | **已实施** | `src/dsh_paper_library/challenges.py`（`challenge_themes`/`challenge_theme_list`/`challenge_theme_get`/`challenge_theme_review`/`challenge_theme_merge`/`challenge_export`）、`library_knowledge.py`（`bib_fields` 复用）、`src/harness/challenge-mining.mjs`（`challenge_theme_suggest_*`）、`src/bridge.mjs`、`src/harness/tools.mjs`（`library_challenge_themes`/`…_theme_review`/`…_theme_merge`/`…_export`）、`web/challenge-mining.js`、`docs/api.md#cross-paper-theme-aggregation-p3` | 13 项 Python 测试（归一化聚类/年份与覆盖统计/草稿状态过滤/范围校验/待审合并建议/修订与复核/合并取代成员/跳过错档/CSV·Markdown·BibTeX 导出）、3 项桥接测试、4 项面板测试、2 项宿主建议测试；P1+P3 全程零模型调用 |
 | P4 复核、对照与导出 | 待实施 | — | — |
+
+P3 的实现取舍（与设计一致）：
+
+- 语料范围由显式 id 列表定义，scope 取排序后 id 集的 SHA-256；主题按（scope, 归一化标签）存储，重复运行只增加修订，不修改历史。
+- 确定性聚类只合并**完全相同的归一化标签**；相似标签只作为待审建议（Jaccard ≥ 0.6），模型合并建议同样只产出待审分组，落库与合并都必须经用户显式复核。
+- 聚合只读已保存的 `knowledge_drafts`，不打开 PDF；因此 200 篇的口径只针对草稿读取，PDF 扫描仍受 50 篇/次的既有预算约束。
+- 导出只有 `accepted` 主题默认进入；`challenges.bib` 复用与 `rkos-v3` 相同的 `bib_fields` 映射，缺失字段省略、不编造。
+- 面板（`web/challenge-mining.js`）把 P1/P3 标注为「无模型」，P2 与模型合并建议标注为消耗 DSH 模型额度，并复用同一篇论文的模型路由。
 
 P1 的实现取舍（与设计一致，需在后续阶段沿用）：
 

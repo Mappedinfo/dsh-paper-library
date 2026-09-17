@@ -10,6 +10,7 @@ import { createTranslationServerClient } from './translation-server.mjs';
 export const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const defaultLibrary = join(homedir(), '.local', 'share', 'dsh-paper-library');
 const actions = new Set(['status','import','list','get','create','archive','restore','update','attach','page_layout','page','annotations','annotation_catalog','annotation_context_exact','annotate','annotation_update','annotation_delete','export_annotations','export_pdf','link','graph','graph_node_put','graph_node_delete','graph_edge_put','graph_edge_delete','feedback_context','save_feedback','feedback']);
+const challengeActions = new Set(['challenge_scan','challenge_themes','challenge_theme_list','challenge_theme_get','challenge_theme_review','challenge_theme_merge','challenge_export']);
 const libraryActions = new Set(['resource_list','resource_export','dataset_import','dataset_put','dataset_get','dataset_archive','dataset_restore','dataset_release_put','dataset_release_get','dataset_release_list','dataset_link_put','dataset_link_list','dataset_link_delete','dataset_asset_put','dataset_asset_list','dataset_asset_preview','dataset_graph_promote','knowledge_source_put','knowledge_source_get','knowledge_source_check','knowledge_source_list','knowledge_draft_put','knowledge_draft_get','knowledge_draft_list','knowledge_draft_review','knowledge_draft_lint','knowledge_note_put','knowledge_note_get','knowledge_note_list','knowledge_export']);
 let pending = Promise.resolve();
 let importsPending = Promise.resolve();
@@ -245,8 +246,10 @@ export async function dispatch(request, options = {}) {
     if (Buffer.byteLength(JSON.stringify(safe)) > 128 * 1024) throw new Error('所选论文整理请求超过预算。');
     return core(safe,options);
   }
-  if (safe.action === 'challenge_scan') {
-    if (Buffer.byteLength(JSON.stringify(safe)) > 128 * 1024) throw new Error('难点扫描请求超过预算；请缩小所选文献范围。');
+  if (challengeActions.has(safe.action)) {
+    // P1 scans PDFs; P3 aggregates saved drafts and writes exports/. Both are
+    // explicit-scope requests, so the same 128 KiB admission guard applies.
+    if (Buffer.byteLength(JSON.stringify(safe)) > 128 * 1024) throw new Error('难点请求超过预算；请缩小所选文献范围。');
     return core(safe, options);
   }
   if (libraryActions.has(safe.action) || safe.action === 'dataset_cite') {

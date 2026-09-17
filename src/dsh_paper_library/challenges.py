@@ -5,7 +5,10 @@ matched with a fixed lexicon, and every candidate keeps its page and rule IDs.
 The model-facing extraction (P2) and cross-paper themes (P3) build on these
 records; see docs/research-challenge-mining-design.md.
 """
+import hashlib
+import json
 import re
+import unicodedata
 from datetime import datetime, timezone
 
 from . import library_knowledge as knowledge
@@ -326,4 +329,423 @@ def dispatch(library, request):
         return scan(library, request)
     if action == "challenge_sources":
         return sources(library, request)
+    if action == "challenge_themes":
+        return themes(library, request)
+    if action == "challenge_theme_list":
+        return theme_list(library, request)
+    if action == "challenge_theme_get":
+        return theme_get(library, request)
+    if action == "challenge_theme_review":
+        return theme_review(library, request)
+    if action == "challenge_theme_merge":
+        return theme_merge(library, request)
+    if action == "challenge_export":
+        return challenge_export(library, request)
     raise ValueError("CHALLENGE_INVALID: unsupported challenge action")
+
+
+# --- P3: cross-paper themes -------------------------------------------------
+
+MAX_THEME_PAPERS = 200
+MAX_THEMES = 200
+MAX_DRAFTS_PER_PAPER = 100
+MAX_MERGE_MEMBERS = 10
+MAX_EXPORT_BYTES = 8 * 1024 * 1024
+MERGE_JACCARD = 0.6
+THEME_STATUSES = {"needs-review", "accepted", "rejected", "merged"}
+_IGNORED_TOKENS = {"the", "a", "an", "of", "in", "on", "for", "to", "and", "is", "are", "with", "by", "our",
+                   "we", "this", "that", "its", "their", "的", "了", "在", "与", "和", "是"}
+
+
+def _theme_key(label):
+    text = re.sub(r"[\s\W_]+", " ", unicodedata.normalize("NFKC", str(label or "")).lower(), flags=re.UNICODE).strip()
+    return re.sub(r"\s+", " ", text)
+
+
+def _tokens(key):
+    return {token for token in key.split() if token and token not in _IGNORED_TOKENS}
+
+
+def _themes_schema(library):
+    with library.lock():
+        library.db.executescript("""
+        CREATE TABLE IF NOT EXISTS challenge_themes(
+          scope TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL,
+          revision INTEGER NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL,
+          PRIMARY KEY(scope, id));
+        CREATE INDEX IF NOT EXISTS challenge_themes_scope ON challenge_themes(scope, status);
+        """)
+
+
+def _scope_hash(ids):
+    return hashlib.sha256(json.dumps(sorted(ids), ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _difficulty_records(library, paper_ids, include):
+    """Collect labelled difficulty nodes and their evidence from saved drafts."""
+    records, scanned, skipped = [], 0, []
+    statuses = ("accepted",) if include == "accepted" else ("accepted", "needs-review")
+    for paper_id in paper_ids:
+        try:
+            paper = library.get(paper_id, include_archived=True)
+        except (ValueError, KeyError):
+            skipped.append({"id": paper_id, "reason": "论文不存在或不可读取"})
+            continue
+        if paper.get("archived"):
+            skipped.append({"id": paper_id, "reason": "论文在回收站中"})
+            continue
+        drafts = []
+        for status in statuses:
+            page = knowledge.listing(library, "drafts", {"entity": {"kind": "paper", "id": paper_id},
+                                                         "status": status, "limit": MAX_DRAFTS_PER_PAPER, "offset": 0})
+            drafts.extend(page["items"])
+        scanned += 1
+        for preview in drafts:
+            draft = knowledge.get(library, "drafts", preview["id"])
+            sources = {f"{node['type']}:{node['id']}": node for node in draft.get("nodes", []) if node["type"] in knowledge.SOURCES}
+            for node in draft.get("nodes", []):
+                if node["type"] not in {"gap", "question"} or not node.get("source_status"):
+                    continue
+                supports = [relation for relation in draft.get("assertions", [])
+                            if relation.get("object") == f"{node['type']}:{node['id']}" and relation.get("subject") in sources
+                            and relation.get("relation") in {"identifies", "motivates", "justifies", "reports", "evaluates", "supports"}]
+                quotes = []
+                for relation in supports:
+                    source_node = sources[relation["subject"]]
+                    if not source_node or not source_node.get("quote"):
+                        continue
+                    page_number = None
+                    if source_node.get("source_id"):
+                        try:
+                            page_number = knowledge.get(library, "sources", source_node["source_id"])["locator"].get("page")
+                        except ValueError:
+                            page_number = None
+                    quotes.append({"page": page_number, "quote": source_node["quote"]})
+                records.append({
+                    "paper_id": paper_id, "citekey": paper.get("citekey"), "year": _paper_year(paper),
+                    "draft_id": draft["id"], "draft_status": draft["status"], "node_id": f"{node['type']}:{node['id']}",
+                    "label": node["label"], "source_status": node["source_status"],
+                    "target": (node.get("fields") or {}).get("target"), "quotes": quotes,
+                })
+    return records, scanned, skipped
+
+
+def _assemble(scope, key, group, *, label=None, origin="deterministic-aggregation", merged_from=None):
+    papers, years, statuses, quotes = {}, [], {"author-stated": 0, "reviewed-stated": 0, "inferred": 0}, []
+    for record in group:
+        papers.setdefault(record["paper_id"], []).append(record)
+        if isinstance(record["year"], int):
+            years.append(record["year"])
+        statuses[record["source_status"] if record["source_status"] in {"author-stated", "inferred"} else "reviewed-stated"] += 1
+        quotes.extend(record["quotes"])
+    representative = label or sorted(group, key=lambda item: (item["source_status"] != "author-stated", item["label"]))[0]["label"]
+    members = sorted(papers.items(), key=lambda item: (min(record["year"] or 0 for record in item[1]), str(item[0])))
+    theme = {
+        "id": "ct-" + hashlib.sha256(f"{scope}:{key}".encode("utf-8")).hexdigest()[:24],
+        "scope": scope, "key": key, "label": representative,
+        "variants": sorted({record["label"] for record in group} - {representative})[:20],
+        "paper_count": len(papers), "record_count": len(group),
+        "years": {"min": min(years) if years else None, "max": max(years) if years else None,
+                  "histogram": {str(year): years.count(year) for year in sorted(set(years))}},
+        "source_status": statuses, "quotes": quotes[:40], "evidence_count": len(quotes),
+        "papers": [{"paper_id": paper_id, "citekey": values[0]["citekey"], "year": values[0]["year"],
+                    "node_id": values[0]["node_id"], "label": values[0]["label"],
+                    "source_status": values[0]["source_status"], "draft_id": values[0]["draft_id"],
+                    "draft_status": values[0]["draft_status"], "quotes": values[0]["quotes"][:5]}
+                   for paper_id, values in members][:50],
+        "status": "needs-review", "origin": origin,
+    }
+    if merged_from:
+        theme["merged_from"] = merged_from
+    return theme
+
+
+def _store_theme(library, scope, theme, *, keep_status=True):
+    now = _now()
+    with library.lock():
+        row = library.db.execute("SELECT payload,revision,status FROM challenge_themes WHERE scope=? AND id=?", (scope, theme["id"])).fetchone()
+        previous = json.loads(row["payload"]) if row else None
+        revision = (row["revision"] + 1) if row else 1
+        status = row["status"] if row and keep_status else "needs-review"
+        value = {**theme, "status": status, "revision": revision,
+                 "previous": {"revision": previous["revision"], "paper_count": previous["paper_count"]} if previous else None,
+                 "created": previous["created"] if previous else now, "updated": now}
+        library.db.execute(
+            "INSERT INTO challenge_themes(scope,id,payload,status,revision,created,updated) VALUES(?,?,?,?,?,?,?) "
+            "ON CONFLICT(scope,id) DO UPDATE SET payload=excluded.payload,status=excluded.status,revision=excluded.revision,updated=excluded.updated",
+            (scope, theme["id"], json.dumps(value, ensure_ascii=False), status, revision, value["created"], now))
+        library.db.commit()
+    return value
+
+
+def _select_scope(library, request):
+    ids = request.get("ids")
+    if not isinstance(ids, list) or not ids or len(ids) > MAX_THEME_PAPERS:
+        raise ValueError(f"CHALLENGE_SCOPE: select 1–{MAX_THEME_PAPERS} explicit paper ids")
+    if len(set(ids)) != len(ids) or any(not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", value) for value in ids):
+        raise ValueError("CHALLENGE_SCOPE: paper ids must be unique and well formed")
+    include = request.get("include", "accepted")
+    if include not in {"accepted", "all"}:
+        raise ValueError("CHALLENGE_SCOPE: include must be accepted or all")
+    return ids, include
+
+
+def themes(library, request):
+    """Aggregate labelled difficulty records into reviewable corpus themes."""
+    ids, include = _select_scope(library, request)
+    persist = request.get("persist", True)
+    if not isinstance(persist, bool):
+        raise ValueError("CHALLENGE_SCOPE: persist must be boolean")
+    knowledge.setup(library)
+    _themes_schema(library)
+    records, scanned, skipped = _difficulty_records(library, ids, include)
+    buckets = {}
+    for record in records:
+        key = _theme_key(record["label"])
+        if key:
+            buckets.setdefault(key, []).append(record)
+    scope = _scope_hash(ids)
+    assembled = [_assemble(scope, key, group) for key, group in sorted(buckets.items())[:MAX_THEMES]]
+    suggestions = []
+    for index, left in enumerate(assembled):
+        for right in assembled[index + 1:]:
+            left_tokens, right_tokens = _tokens(left["key"]), _tokens(right["key"])
+            if not left_tokens or not right_tokens:
+                continue
+            overlap = len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+            if overlap >= MERGE_JACCARD:
+                suggestions.append({"left": left["id"], "right": right["id"], "jaccard": round(overlap, 3),
+                                    "labels": [left["label"], right["label"]]})
+    stored = [_store_theme(library, scope, theme) for theme in assembled] if persist else []
+    return {
+        "schema": "paper-library-challenge-themes.v1",
+        "generated_at": _now(),
+        "scope": {"hash": scope, "requested": len(ids), "scanned": scanned, "skipped": skipped, "include": include},
+        "totals": {"records": len(records), "themes": len(assembled), "persisted": len(stored)},
+        "merge_suggestions": suggestions[:50],
+        "themes": stored or assembled,
+        "model_calls": 0,
+    }
+
+
+def theme_list(library, request):
+    knowledge.setup(library)
+    _themes_schema(library)
+    limit, offset = request.get("limit", 50), request.get("offset", 0)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_THEMES \
+            or isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 100000:
+        raise ValueError("CHALLENGE_SCOPE: invalid theme pagination")
+    status = request.get("status")
+    if status is not None and status not in THEME_STATUSES:
+        raise ValueError("CHALLENGE_SCOPE: invalid theme status")
+    scope = request.get("scope")
+    if scope is not None and (not isinstance(scope, str) or not re.fullmatch(r"[a-f0-9]{64}", scope)):
+        raise ValueError("CHALLENGE_SCOPE: invalid theme scope")
+    clauses, args = [], []
+    if scope:
+        clauses.append("scope=?")
+        args.append(scope)
+    if status:
+        clauses.append("status=?")
+        args.append(status)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    total = library.db.execute(f"SELECT count(*) FROM challenge_themes {where}", args).fetchone()[0]
+    rows = library.db.execute(f"SELECT payload FROM challenge_themes {where} ORDER BY updated DESC,id LIMIT ? OFFSET ?", [*args, limit, offset]).fetchall()
+    items = [json.loads(row[0]) for row in rows]
+    for item in items:
+        item["papers"] = item.get("papers", [])[:10]
+        item["quotes"] = item.get("quotes", [])[:5]
+    return {"scope": scope, "status": status, "total": total, "items": items, "offset": offset, "limit": limit,
+            "hasMore": offset + len(items) < total, "model_calls": 0}
+
+
+def theme_get(library, request):
+    knowledge.setup(library)
+    _themes_schema(library)
+    row = library.db.execute("SELECT payload FROM challenge_themes WHERE id=?", (request.get("id"),)).fetchone()
+    if not row:
+        raise ValueError("CHALLENGE_MISSING: theme not found")
+    return {"theme": json.loads(row[0]), "model_calls": 0}
+
+
+def theme_review(library, request):
+    if request.get("reviewed_by") != "user" or request.get("decision") not in {"accepted", "rejected"}:
+        raise ValueError("CHALLENGE_REVIEW_REQUIRED: explicit user review is required")
+    knowledge.setup(library)
+    _themes_schema(library)
+    with library.lock():
+        row = library.db.execute("SELECT scope,payload,status,revision FROM challenge_themes WHERE id=?", (request.get("id"),)).fetchone()
+        if not row:
+            raise ValueError("CHALLENGE_MISSING: theme not found")
+        if isinstance(request.get("expected_revision"), bool) or request.get("expected_revision") != row["revision"]:
+            raise ValueError("CHALLENGE_CONFLICT: theme revision changed")
+        value = json.loads(row["payload"])
+        value.update(status=request["decision"], reviewed_by="user", reviewed_at=_now(),
+                     revision=row["revision"] + 1, updated=_now())
+        library.db.execute("UPDATE challenge_themes SET payload=?,status=?,revision=?,updated=? WHERE id=?",
+                           (json.dumps(value, ensure_ascii=False), value["status"], value["revision"], value["updated"], request["id"]))
+        library.db.commit()
+    return value
+
+
+def theme_merge(library, request):
+    """Merge explicitly selected themes into one reviewable theme; nothing is inferred."""
+    if request.get("reviewed_by") != "user":
+        raise ValueError("CHALLENGE_REVIEW_REQUIRED: explicit user review is required")
+    ids = request.get("theme_ids")
+    if not isinstance(ids, list) or not 2 <= len(ids) <= MAX_MERGE_MEMBERS or len(set(ids)) != len(ids) \
+            or any(not isinstance(value, str) or not re.fullmatch(r"ct-[a-f0-9]{24}", value) for value in ids):
+        raise ValueError(f"CHALLENGE_SCOPE: select 2–{MAX_MERGE_MEMBERS} distinct theme ids")
+    revisions = request.get("expected_revisions")
+    if isinstance(revisions, list):
+        # Tool surfaces pass revisions positionally because the schema compiler
+        # rejects map-shaped parameters; both spellings validate identically.
+        if len(revisions) != len(ids) or any(isinstance(value, bool) or not isinstance(value, int) for value in revisions):
+            raise ValueError("CHALLENGE_SCOPE: expected_revisions must cover every merged theme")
+        revisions = dict(zip(ids, revisions))
+    if not isinstance(revisions, dict) or set(revisions) != set(ids) or any(isinstance(value, bool) or not isinstance(value, int) for value in revisions.values()):
+        raise ValueError("CHALLENGE_SCOPE: expected_revisions must cover every merged theme")
+    knowledge.setup(library)
+    _themes_schema(library)
+    with library.lock():
+        rows = {row["id"]: row for row in library.db.execute(
+            f"SELECT id,scope,payload,status,revision FROM challenge_themes WHERE id IN ({','.join('?' * len(ids))})", ids).fetchall()}
+        if len(rows) != len(ids):
+            raise ValueError("CHALLENGE_MISSING: theme not found")
+        scopes = {row["scope"] for row in rows.values()}
+        if len(scopes) != 1:
+            raise ValueError("CHALLENGE_SCOPE: merged themes must share one corpus scope")
+        scope = scopes.pop()
+        for theme_id, row in rows.items():
+            if row["revision"] != revisions[theme_id]:
+                raise ValueError("CHALLENGE_CONFLICT: theme revision changed")
+            if row["status"] == "merged":
+                raise ValueError("CHALLENGE_CONFLICT: theme was already merged")
+        members = [json.loads(row["payload"]) for row in rows.values()]
+    group = [{"paper_id": member["paper_id"], "citekey": member["citekey"], "year": member["year"],
+              "draft_id": member["draft_id"], "draft_status": member["draft_status"], "node_id": member["node_id"],
+              "label": member["label"], "source_status": member["source_status"], "quotes": member["quotes"]}
+             for theme in members for member in theme["papers"]]
+    label = request.get("label")
+    if label is not None and (not isinstance(label, str) or not label.strip() or len(label) > 200):
+        raise ValueError("CHALLENGE_SCOPE: merged label must be bounded text")
+    key = f"merged:{'+'.join(sorted(theme['id'] for theme in members))}"
+    merged = _assemble(scope, key, group, label=label.strip() if label else None,
+                       origin="user-merge", merged_from=sorted(theme["id"] for theme in members))
+    value = _store_theme(library, scope, merged, keep_status=False)
+    now = _now()
+    with library.lock():
+        for theme in members:
+            theme["status"] = "merged"
+            theme["superseded_by"] = value["id"]
+            theme["updated"] = now
+            library.db.execute("UPDATE challenge_themes SET payload=?,status=?,updated=? WHERE id=?",
+                               (json.dumps(theme, ensure_ascii=False), "merged", now, theme["id"]))
+        library.db.commit()
+    return value
+
+
+def _csv_cell(value):
+    if value is None:
+        return ""
+    return str(value).replace("\r\n", "\n").replace("\r", "\n")
+
+
+def challenge_export(library, request):
+    """Write the CSV/Markdown/BibTeX challenge export under the library's exports/."""
+    ids, include = _select_scope(library, request)
+    scope = request.get("scope")
+    if scope is not None and (not isinstance(scope, str) or not re.fullmatch(r"[a-f0-9]{64}", scope)):
+        raise ValueError("CHALLENGE_SCOPE: invalid theme scope")
+    scope = scope or _scope_hash(ids)
+    from . import bibliography
+    include_unreviewed = request.get("include_unreviewed", False)
+    if not isinstance(include_unreviewed, bool):
+        raise ValueError("CHALLENGE_SCOPE: include_unreviewed must be boolean")
+    knowledge.setup(library)
+    _themes_schema(library)
+    statuses = ["accepted"] + (["needs-review"] if include_unreviewed else [])
+    placeholders = ",".join("?" * len(statuses))
+    rows = library.db.execute(f"SELECT payload FROM challenge_themes WHERE scope=? AND status IN ({placeholders}) ORDER BY id",
+                              [scope, *statuses]).fetchall()
+    themes_exported = [json.loads(row[0]) for row in rows]
+    if not themes_exported:
+        raise ValueError("CHALLENGE_MISSING: no reviewed theme to export for this corpus scope")
+    generated = _now()
+    citekeys = sorted({paper["citekey"] for theme in themes_exported for paper in theme["papers"] if paper.get("citekey")})
+    csv_lines = ["theme_id,theme_label,theme_status,theme_revision,paper_id,citekey,year,node_id,source_status,page,quote"]
+    for theme in themes_exported:
+        for paper in theme["papers"]:
+            quotes = paper.get("quotes") or [{"page": None, "quote": None}]
+            for quote in quotes:
+                cells = [theme["id"], theme["label"], theme["status"], theme["revision"], paper["paper_id"], paper["citekey"],
+                         paper["year"], paper["node_id"], paper["source_status"], quote.get("page"), quote.get("quote")]
+                csv_lines.append(",".join('"' + _csv_cell(cell).replace('"', '""') + '"' for cell in cells))
+    csv_text = "\n".join(csv_lines) + "\n"
+    markdown = [
+        "# 研究难点主题导出（Research challenge themes）",
+        "",
+        f"- 生成时间 generated_at：{generated}",
+        f"- 语料范围 corpus scope：`{scope}`（请求 {len(ids)} 篇，模式 include={include}）",
+        f"- 导出主题 themes：{len(themes_exported)}（状态过滤 status={','.join(statuses)}）",
+        f"- 引用论文 citekeys：{len(citekeys)}",
+        "- 生成方式 provenance：P1 确定性扫描 + P2 受限抽取 + P3 确定性聚合；本文件不做模型判断。",
+        "",
+    ]
+    for theme in themes_exported:
+        years = theme["years"]
+        markdown += [
+            f"## {theme['label']}",
+            "",
+            f"- 主题 id：`{theme['id']}`；状态：**{theme['status']}**；修订：{theme['revision']}",
+            f"- 覆盖：{theme['paper_count']} 篇 / {theme['record_count']} 条难点记录；证据 {theme['evidence_count']} 条",
+            f"- 年份：{years['min']}–{years['max']}；分布 {years['histogram']}",
+            f"- 来源状态 source_status：author-stated {theme['source_status']['author-stated']}、"
+            f"reviewed-stated {theme['source_status']['reviewed-stated']}、inferred {theme['source_status']['inferred']}",
+        ]
+        if theme.get("variants"):
+            markdown.append(f"- 归一化变体 variants：{'；'.join(theme['variants'])}")
+        if theme.get("merged_from"):
+            markdown.append(f"- 人工合并自：{', '.join(theme['merged_from'])}")
+        markdown += ["", "证据 evidence：", ""]
+        for paper in theme["papers"]:
+            for quote in (paper.get("quotes") or [{"page": None, "quote": None}]):
+                location = f"[@{paper['citekey']}" + (f" p.{quote['page']}" if quote.get("page") else "") + "]"
+                markdown.append(f"- {location} ({paper['source_status']}) “{quote.get('quote') or '（缺少逐字引用）'}”")
+        markdown.append("")
+    markdown += ["## 待审阅的合并建议 merge suggestions", ""]
+    suggestions = request.get("merge_suggestions") or []
+    if suggestions:
+        for suggestion in suggestions:
+            markdown.append(f"- `{suggestion['left']}` ↔ `{suggestion['right']}`（相似度 {suggestion['jaccard']}）——待人工确认")
+    else:
+        markdown.append("- 本次导出没有携带合并建议（合并建议由 `challenge_themes` 返回，需人工复核）。")
+    markdown += ["", "## 说明", "",
+                 "- 难点与主题一律 `needs-review` 起步，只有人工接受（`status=accepted`）的主题进入本导出。",
+                 "- 缺失的逐字引用保持缺失，不补写、不改写；quote 与页码均来自受限抽取记录。",
+                 "- BibTeX 仅使用目录中已有的元数据字段，缺失字段省略。", ""]
+    bib_entries = []
+    for citekey in citekeys:
+        found = library.db.execute("SELECT id,metadata,citekey FROM papers WHERE citekey=?", (citekey,)).fetchone()
+        if not found:
+            continue
+        metadata = json.loads(found["metadata"])
+        entry_type, fields = knowledge.bib_fields(metadata)
+        bib_entries.append(knowledge.bib_entry(entry_type, citekey, fields))
+    bib_text = "% Research challenge themes export\n" \
+               f"% generated_at {generated}\n% corpus scope {scope}\n% citekeys {len(bib_entries)} of {len(citekeys)}\n\n" \
+               + "\n".join(bib_entries)
+    payloads = {"exports/challenges.csv": csv_text, "exports/challenges.md": "\n".join(markdown), "exports/challenges.bib": bib_text}
+    for relative, content in payloads.items():
+        if len(content.encode("utf-8")) > MAX_EXPORT_BYTES:
+            raise ValueError(f"CHALLENGE_EXPORT: {relative} exceeds the 8 MiB export budget")
+    exports = library.root / "exports"
+    exports.mkdir(exist_ok=True, mode=0o700)
+    written = {}
+    for relative, content in payloads.items():
+        path = library.root / relative
+        bibliography._atomic_write(path, content.encode("utf-8"))
+        written[path.name] = {"path": str(path), "bytes": len(content.encode("utf-8"))}
+    return {"schema": "paper-library-challenge-export.v1", "generated_at": generated, "scope": scope,
+            "themes": len(themes_exported), "rows": max(len(csv_lines) - 1, 0), "citekeys": citekeys,
+            "files": written, "model_calls": 0}

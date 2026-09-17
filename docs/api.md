@@ -119,9 +119,30 @@ Budgets: 50 papers per run, 200 pages and 24,000 characters per paper, 6 section
 
 The standalone preview can read saved records but cannot generate (no agent), exactly like the full-paper analysis path. `status.challenge_mining` reports whether the host route exists; `status.challenge_scan` is always true.
 
+### Cross-paper theme aggregation (P3)
+
+`challenge_themes` aggregates **saved** difficulty records — `gap`/`question` nodes carrying `source_status` in accepted knowledge drafts — into corpus themes. It opens no PDF and calls no model (`model_calls` is always `0`); the corpus is the explicit id list, and `include:'all'` also reads `needs-review` drafts (each exported paper records its `draft_status`).
+
+| Field | Contract |
+| --- | --- |
+| `ids` | 1–200 unique, well-formed paper ids. Aggregation reads saved drafts only, so this bound is wider than the 50-paper PDF scan bound in §Research challenge mining; no whole-catalog scan happens. |
+| `include` | `accepted` (default) or `all`. |
+| `persist` | Default `true`. Themes are stored per corpus scope as `needs-review` records with a revision; re-running bumps the revision and keeps a `previous` summary. |
+| Result | `{schema:'paper-library-challenge-themes.v1', generated_at, scope:{hash,requested,scanned,skipped,include}, totals, merge_suggestions, themes, model_calls}`. |
+
+Labels are keyed by NFKC-normalised, punctuation-stripped lowercase text, so “Cross-city generalization is unclear” and “cross city generalization is unclear!” land in one theme. Each theme reports `paper_count`, `record_count`, `evidence_count`, a `years` histogram (`min`/`max`), per-`source_status` counts, up to 40 exact quotes with their real pages, the normalised `variants`, and up to 50 member papers. Quotes come from frozen sources; a missing quote stays missing. `merge_suggestions` proposes label pairs whose token overlap (Jaccard) is at least 0.6 — a suggestion is never applied automatically.
+
+`challenge_theme_list` (`scope?`, `status?`, `limit`, `offset`) and `challenge_theme_get` (`id`) read stored themes with bounded papers/quotes. `challenge_theme_review` (`id`, `decision:accepted|rejected`, `reviewed_by:'user'`, `expected_revision`) is the only way a theme changes status; a non-user reviewer or a stale revision is rejected.
+
+`challenge_theme_merge` (`theme_ids` 2–10 from one scope, `expected_revisions` — a map keyed by theme id or, for tool surfaces, positions aligned with `theme_ids` — `reviewed_by:'user'`, optional `label`) folds reviewed themes into one new `needs-review` theme and marks every member `status:'merged'` with `superseded_by`. It only unions stored records: papers, years, source-status counts and quotes are summed, never inferred.
+
+`challenge_theme_suggest_start|get|cancel` are the optional model stage. They need `{id, scope, request_id, theme_ids}` (2–40 `needs-review` themes); the paper id is used only to borrow that paper's DSH model route, and the prompt carries theme ids, labels, variants, paper counts and statuses — never PDF text. The validated reply may only group the provided ids (each id at most once, 2–8 members per group, bounded label/reason); unknown ids, duplicate members, bad keys and oversized payloads fail the job with no proposal saved. Every group is written as `needs-review`, and applying one still goes through `challenge_theme_merge`.
+
+`challenge_export` (`ids`, `scope?`, `include_unreviewed?`, optional `merge_suggestions`) writes three files under the library's `exports/` directory with atomic replacement: `challenges.csv` (one row per theme/paper/quote: theme id, label, status, revision, paper id, citekey, year, node id, source_status, page, quote), `challenges.md` (coverage, year spread, source-status counts, variants, per-quote `[@citekey p.N]` lines, pending merge suggestions and the provenance note) and `challenges.bib` (only catalog metadata; missing fields are omitted, never invented). Only `accepted` themes are exported unless `include_unreviewed:true`; exporting an empty scope fails with `CHALLENGE_MISSING`. The 8 MiB per-file export budget is enforced before any write.
+
 ## Native Harness tools
 
-The plugin registers 21 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
+The plugin registers 25 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
 
 | Tool | Arguments | Node action |
 |---|---|---|
