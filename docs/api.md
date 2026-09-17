@@ -105,6 +105,20 @@ Sections are recognised from whole heading lines (numbered or not, English or Ch
 
 Budgets: 50 papers per run, 200 pages and 24,000 characters per paper, 6 sections and 40 candidates per paper, 1,200 characters per candidate, and 400 candidates / 200,000 characters per run; `truncated` marks a paper or the whole run that hit a limit. Every candidate keeps its section, real page and matched rule ids (`en-limitation`, `en-challenge`, `en-contrast`, `en-negative`, `en-open`, `zh-limitation`, `zh-challenge`, `zh-contrast`, `zh-negative`, `zh-open`). Papers without a PDF, archived papers and unknown ids are reported in `scope.skipped` with a reason instead of failing the run. No PDF text is sent anywhere and no section is inferred for a page whose text is missing.
 
+### Bounded extraction (P2)
+
+`challenge_extract_start|get|cancel` run the model stage. `challenge_extract_start` needs `{id, request_id, sections?}` and one active paper with a PDF; the host freezes the candidates into immutable sources (`challenge_sources`), resolves the paper's DSH model, and asks the isolated spawn child for a bounded JSON draft. Results are one `knowledge_draft` per paper in `needs-review`; `mode:graph`, `origin:llm`, and a deterministic `challenge-<hash>` request id make a replay safe.
+
+| Field | Contract |
+| --- | --- |
+| Output shape | `nodes` (`gap`/`question`/`evidence` only), `edges`, `assertions`. Gap and question nodes require `source_status` (`author-stated` or `inferred`; anything else is rejected). Evidence nodes require a `source_id` from the frozen sources and a quote that occurs verbatim, at most 400 characters. |
+| Linkage | Every gap must be the object of at least one assertion whose subject is an evidence node; every question must be the object of a `limits`/`blocks` edge from a gap. This matches the controlled vocabulary, where only claim/gap may be assertion objects. |
+| Limits | 20 nodes, 30 relations, one paper per job, one job at a time, 40 sources / 24,000 characters per paper (the frozen candidate budget). |
+| States | queued/reading/generating/committing/complete/failed/cancelled; a running record without an owned flight reads as `interrupted`. Duplicate starts share one flight; a completed request returns its saved draft without another model call; a new `request_id` is required to regenerate. |
+| Failure | Unsupported status, inexact quotes, unbacked gaps, unlinked questions and unknown source ids fail the job with a visible reason and no draft. Cancellation aborts the owned model call. |
+
+The standalone preview can read saved records but cannot generate (no agent), exactly like the full-paper analysis path. `status.challenge_mining` reports whether the host route exists; `status.challenge_scan` is always true.
+
 ## Native Harness tools
 
 The plugin registers 21 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.

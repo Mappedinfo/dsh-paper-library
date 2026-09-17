@@ -18,6 +18,7 @@ MAX_BODY = 64000
 NODE_TYPES = {"topic", "concept", "question", "claim", "gap", "method", "dataset", "metric", "task", "idea", "experiment", "project", "expert", "evidence", "figure", "formula", "observation"}
 ASSERTIONS = {"supports", "qualifies", "contradicts", "assumes", "defines", "proposes", "evaluates", "reports", "identifies", "motivates", "justifies"}
 SOURCES = {"evidence", "figure", "formula"}
+SOURCE_STATUS = {"author-stated", "reviewer-stated", "inferred"}
 EDGE_TYPES = {
     "uses": {("paper", "method"), ("paper", "dataset"), ("paper", "release"), ("experiment", "method"), ("experiment", "dataset"), ("experiment", "release")},
     "produces": {("paper", "dataset"), ("paper", "release")},
@@ -278,6 +279,14 @@ def validate_graph(library, value, sources):
             item["quote"] = quote
         if node["type"] == "observation":
             item["source_node"] = text(node.get("source_node"), "observation source_node", 200)
+        # Difficulty records separate what an author states from what a model
+        # infers; the label is validated here and never guessed later.
+        if node.get("source_status") is not None:
+            if node["type"] not in {"gap", "question"}:
+                raise ValueError("KNOWLEDGE_INVALID: source_status belongs to gap or question nodes")
+            if node["source_status"] not in SOURCE_STATUS:
+                raise ValueError("KNOWLEDGE_INVALID: unsupported source_status")
+            item["source_status"] = node["source_status"]
         normalized.append(item)
     for item in normalized:
         if item["type"] == "observation" and (item["source_node"] not in identities or item["source_node"].split(":", 1)[0] not in SOURCES):
@@ -685,6 +694,11 @@ def lint_graph(value):
         if node.get("type") in {"claim", "gap"} and typed not in claim_supported:
             findings.append({"rule": "unsupported-claim", "severity": "warning", "node": typed,
                              "message": f"主张没有任何证据或观察支撑：{node.get('label', typed)[:120]}"})
+        # A labelled difficulty record must show its evidence, whichever role the
+        # reviewer assigns later; an unbacked one cannot be reviewed at all.
+        if node.get("source_status") and typed not in claim_supported:
+            findings.append({"rule": "challenge-without-evidence", "severity": "warning", "node": typed,
+                             "message": f"难点记录缺少证据断言（{node['source_status']}）：{node.get('label', typed)[:120]}"})
         if typed not in touched:
             findings.append({"rule": "isolated-node", "severity": "info", "node": typed,
                              "message": f"孤立节点，没有任何关系连接：{node.get('label', typed)[:120]}"})

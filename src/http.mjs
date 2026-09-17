@@ -8,6 +8,7 @@ import { defaultLibrary, dispatch, projectRoot } from './bridge.mjs';
 import { createLocalStateStore, LocalStateError } from './local-state.mjs';
 import { createLanguageLearning } from './harness/language-learning.mjs';
 import { createPaperAnalysis } from './harness/paper-analysis.mjs';
+import { createChallengeMining } from './harness/challenge-mining.mjs';
 import { createPaperLibrarySettings } from './harness/settings.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
@@ -96,6 +97,7 @@ export function createFetchHandler(options = {}) {
   // paper conversation. Only the host-injected adapter may generate new output.
   const learningRecords = options.languageLearning || createLanguageLearning({ store: localState, dispatch, library: options.library || defaultLibrary, python: options.python });
   const analysisRecords = options.paperAnalysis || createPaperAnalysis({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python});
+  const challengeRecords = options.challengeMining || createChallengeMining({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python});
   return async function handle(request) {
     const url = new URL(request.url);
     if (options.loopbackOnly) {
@@ -132,6 +134,7 @@ export function createFetchHandler(options = {}) {
             : input?.action === 'settings_reset' ? await settings.reset(input.expected_revision)
             : stateAction ? await stateRequest(localState, input)
             : typeof input?.action === 'string' && input.action.startsWith('paper_analysis_') ? await analysisRecords(input)
+            : typeof input?.action === 'string' && input.action.startsWith('challenge_extract_') ? await challengeRecords(input, { signal: request.signal })
             : input?.action === 'knowledge_generate' ? await options.libraryKnowledge(input, { signal: request.signal })
             : languageAction ? await learningRecords(input, { signal: request.signal })
             : chatAction
@@ -143,7 +146,7 @@ export function createFetchHandler(options = {}) {
           }
           if(input.action==='status')result={...result,realtime_companion:Boolean(options.companion)};
           if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true, catalog_management: true, typed_graph: true, reading_workspace: true, durable_state: true, learning_records: true, language_learning: Boolean(options.languageLearning) };
-          if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true };
+          if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true, challenge_mining:Boolean(options.challengeMining), challenge_scan:true };
           return json({ok:true,result});
         } finally { jsonRequests--; }
       }

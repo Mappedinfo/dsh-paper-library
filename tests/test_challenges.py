@@ -150,3 +150,55 @@ def test_explicit_section_subset_limits_scanning(library, tmp_path):
     assert entry["sections_used"] == ["conclusion"]
     assert {candidate["section"] for candidate in entry["candidates"]} <= {"conclusion"}
     assert call(library, "challenge_scan", ids=[paper["id"]], sections=["method"])["papers"][0]["candidates"] == []
+
+
+def test_sources_freeze_candidates_with_trusted_provenance(library, tmp_path):
+    paper = make_paper(library, tmp_path, name="freeze", citekey="freeze2026")
+    result = call(library, "challenge_sources", id=paper["id"])
+    assert result["schema"] == "paper-library-challenge-sources.v1"
+    assert result["model_calls"] == 0
+    assert result["source_ids"] and len(result["source_ids"]) == len(result["sources"]) == result["candidates"]
+    assert len(result["source_ids"]) <= 40
+    for source in result["sources"]:
+        assert source["entity"] == {"kind": "paper", "id": paper["id"]}
+        assert source["kind"] == "source-note"
+        assert source["content_hash"]
+        assert source["locator"]["page"] >= 1
+        assert source["pdf_snapshot"]["kind"] == "challenge-candidate"
+        assert source["pdf_snapshot"]["sections"] == result["sections_used"]
+    # Re-running is idempotent: the same candidate text resolves to the same source id.
+    again = call(library, "challenge_sources", id=paper["id"])
+    assert again["source_ids"] == result["source_ids"]
+    with pytest.raises(ValueError, match="CHALLENGE_SCOPE"):
+        call(library, "challenge_sources", id="dataset_x")
+
+
+def test_source_status_is_validated_and_linted(library, tmp_path):
+    from dsh_paper_library import library_knowledge as knowledge
+    paper = make_paper(library, tmp_path, name="status", citekey="status2026")
+    sources = call(library, "challenge_sources", id=paper["id"])
+    entity = {"kind": "paper", "id": paper["id"]}
+    source_id = sources["source_ids"][0]
+    text = sources["sources"][0]["text"]
+    quote = text[:40]
+
+    def draft(nodes, assertions, request_id):
+        return knowledge.draft_put(library, {"entity": entity, "source_ids": [source_id], "request_id": request_id,
+                                             "mode": "graph", "nodes": nodes, "edges": [], "assertions": assertions})
+
+    valid = draft([
+        {"id": "difficulty", "type": "gap", "label": "Synthetic evaluation covers one city", "source_status": "author-stated"},
+        {"id": "proof", "type": "evidence", "label": "Stated limitation", "source_id": source_id, "quote": quote},
+    ], [{"subject": "evidence:proof", "object": "gap:difficulty", "relation": "identifies", "surface": "Explicit limitation sentence"}], "challenge-1")
+    assert valid["nodes"][0]["source_status"] == "author-stated"
+
+    with pytest.raises(ValueError, match="source_status"):
+        draft([{"id": "x", "type": "gap", "label": "Bad status", "source_status": "author-said"}], [], "challenge-2")
+    with pytest.raises(ValueError, match="source_status belongs"):
+        draft([{"id": "x", "type": "claim", "label": "Wrong type", "source_status": "inferred"}], [], "challenge-3")
+
+    unbacked = draft([{"id": "lonely", "type": "gap", "label": "No evidence at all", "source_status": "inferred"}], [], "challenge-4")
+    linted = knowledge.draft_lint(library, {"id": unbacked["id"]})
+    assert any(finding["rule"] == "challenge-without-evidence" for finding in linted["findings"])
+    backed = knowledge.draft_lint(library, {"id": valid["id"]})
+    assert not any(finding["rule"] == "challenge-without-evidence" for finding in backed["findings"])

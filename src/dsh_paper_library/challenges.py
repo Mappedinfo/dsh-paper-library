@@ -8,6 +8,9 @@ records; see docs/research-challenge-mining-design.md.
 import re
 from datetime import datetime, timezone
 
+from . import library_knowledge as knowledge
+from . import paper_analysis
+
 MAX_PAPERS = 50
 MAX_SECTIONS_PER_PAPER = 6
 MAX_CANDIDATES_PER_PAPER = 40
@@ -193,6 +196,11 @@ def scan(library, request):
                 or len(set(requested_sections)) != len(requested_sections)):
             raise ValueError("CHALLENGE_SCOPE: sections must be unique known section names")
 
+    persist = request.get("persist", False)
+    if not isinstance(persist, bool):
+        raise ValueError("CHALLENGE_SCOPE: persist must be boolean")
+    if persist and len(ids) != 1:
+        raise ValueError("CHALLENGE_SCOPE: persisting candidate sources requires exactly one paper")
     papers, skipped, rule_counts = [], [], {rule: 0 for rule in RULE_IDS}
     total_candidates = total_characters = 0
     aggregate_truncated = False
@@ -246,8 +254,13 @@ def scan(library, request):
             "warnings": [] if found else ["未识别到任何小节标题；该篇未产出候选"],
         })
 
+    persisted = None
+    if persist and papers and papers[0]["candidates"]:
+        saved = _freeze(library, library.get(papers[0]["id"]), papers[0])
+        persisted = {"source_ids": [source["id"] for source in saved], "sources": len(saved)}
     return {
         "schema": "paper-library-challenge-candidates.v1",
+        **({"persisted": persisted} if persist else {}),
         "generated_at": _now(),
         "scope": {"requested": len(ids), "scanned": len(papers), "skipped": skipped},
         "budgets": {
@@ -263,8 +276,54 @@ def scan(library, request):
     }
 
 
+def _freeze(library, paper, entry):
+    """Freeze one scanned paper's candidates as immutable knowledge sources."""
+    version = paper_analysis.file_version(library.pdf_path(paper["id"]))
+    knowledge.setup(library)
+    saved = []
+    for index, candidate in enumerate(entry["candidates"]):
+        saved.append(knowledge.source_put(library, {
+            "entity": {"kind": "paper", "id": paper["id"]}, "kind": "source-note",
+            "text": candidate["text"],
+            "title": f"PDF p{candidate['page']} · {candidate['section']} · {paper.get('citekey') or paper['id']}"[:500],
+            "locator": {"page": candidate["page"], "section": f"{candidate['section']} · candidate {index + 1}"},
+        }, trusted_provenance={"kind": "challenge-candidate", "file_version": version, "scope": "section-scan",
+                               "sections": entry["sections_used"], "rules": candidate["rules"],
+                               "extraction": "plain-text", "ocr": False, "truncated": entry["truncated"]}))
+    return saved
+
+
+def sources(library, request):
+    """Freeze one paper's candidates as bounded, immutable knowledge sources.
+
+    The extraction stage reads only these snapshots, so a later PDF edit cannot
+    change what was reviewed, and a changed PDF re-scans into new sources.
+    """
+    paper_id = request.get("id")
+    if not isinstance(paper_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", paper_id) or paper_id.startswith("dataset_"):
+        raise ValueError("CHALLENGE_SCOPE: select one paper id")
+    scanned = scan(library, {"ids": [paper_id], "sections": request.get("sections")})
+    if not scanned["papers"]:
+        reason = scanned["scope"]["skipped"][0]["reason"] if scanned["scope"]["skipped"] else "无法扫描"
+        raise ValueError(f"CHALLENGE_SCOPE: {reason}")
+    entry = scanned["papers"][0]
+    paper = library.get(paper_id)
+    saved = _freeze(library, paper, entry)
+    return {
+        "schema": "paper-library-challenge-sources.v1",
+        "paper": {"id": paper_id, "citekey": paper.get("citekey"), "title": _paper_title(library, paper),
+                  "year": _paper_year(paper)},
+        "sources": saved, "source_ids": [source["id"] for source in saved],
+        "sections_used": entry["sections_used"], "candidates": len(entry["candidates"]),
+        "characters": entry["characters"], "truncated": entry["truncated"], "warnings": entry["warnings"],
+        "budgets": scanned["budgets"], "rules": scanned["rules"], "model_calls": 0,
+    }
+
+
 def dispatch(library, request):
     action = request.get("action")
     if action == "challenge_scan":
         return scan(library, request)
+    if action == "challenge_sources":
+        return sources(library, request)
     raise ValueError("CHALLENGE_INVALID: unsupported challenge action")

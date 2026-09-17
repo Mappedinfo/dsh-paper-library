@@ -14,6 +14,7 @@ import { createLibraryKnowledge } from './library-knowledge.mjs'
 import { createPaperAnalysis } from './paper-analysis.mjs'
 import { createPaperAnalysisAgent } from './paper-analysis-agent.mjs'
 import { createQueuedPaperAnalysis } from './paper-analysis-queue.mjs'
+import { createChallengeMining } from './challenge-mining.mjs'
 import { createCompanionQueue } from './companion-queue.mjs'
 import Schema from '@deepseek-ai/schemastery'
 import { createPaperLibrarySettings, createPaperLibrarySettingsSchema } from './settings.mjs'
@@ -79,7 +80,9 @@ export function apply(ctx, rawConfig = {}) {
       agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens})})})
     automaticAnalysis=paperAnalysis
     web.effect(()=>()=>{automaticAnalysis=undefined;paperAnalysis.dispose()},'paper-library: background analysis lifecycle')
-    const fetchHandler = createFetchHandler({ ...options, paperChat, companion, languageLearning, libraryKnowledge, paperAnalysis, basePath: '/api/paper-library' })
+    const challengeMining = createChallengeMining({store:options.localState,dispatch,paperChat,library:config.library,python:config.python,
+      agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens})})
+    const fetchHandler = createFetchHandler({ ...options, paperChat, companion, languageLearning, libraryKnowledge, paperAnalysis, challengeMining, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',
       path: '/api/paper-library',

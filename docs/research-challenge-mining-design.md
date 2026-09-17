@@ -1,6 +1,6 @@
 # 研究难点挖掘：把“语言现象”变成可复核的领域难点
 
-2026-09-17。性质：设计契约（P1 已实施，P2–P4 待实施）。实施状态见 §7。本文记录外部依据的核实范围、与本项目现有能力的映射、四阶段管线、预算与不变式。评审通过后再进入实施。
+2026-09-17。性质：设计契约（P1、P2 已实施，P3–P4 待实施）。实施状态见 §7。本文记录外部依据的核实范围、与本项目现有能力的映射、四阶段管线、预算与不变式。评审通过后再进入实施。
 
 ## 0. 结论速览
 
@@ -140,7 +140,7 @@ P4 复核、对照与导出
 | 阶段 | 状态 | 落地位置 | 验证 |
 |---|---|---|---|
 | P1 确定性候选扫描 | **已实施** | `src/dsh_paper_library/challenges.py`（`challenge_scan`）、`worker.py` 路由、`src/bridge.mjs`、`docs/api.md#research-challenge-mining` | 5 项 Python 测试（小节/页码/缩写/预算/跳过/范围校验）+ 3 项桥接集成测试；零模型调用 |
-| P2 单篇受限抽取 | 待实施 | — | — |
+| P2 单篇受限抽取 | **已实施** | `src/harness/challenge-mining.mjs`、`src/dsh_paper_library/challenges.py`（`challenge_sources`）、`library_knowledge.py`（`source_status` + `challenge-without-evidence` lint）、`src/harness/tools.mjs`（`library_challenges`） | 6 项宿主测试（隔离调用/一次生成/重复不重放/五类无效输出拒绝/忙与取消/中断与新请求）+ 2 项 Python 测试（来源固化与 provenance、source_status 与 lint）；`docs/api.md#bounded-extraction-p2` |
 | P3 跨篇主题聚合 | 待实施 | — | — |
 | P4 复核、对照与导出 | 待实施 | — | — |
 
