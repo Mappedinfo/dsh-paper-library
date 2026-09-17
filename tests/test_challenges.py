@@ -1,4 +1,6 @@
 """Deterministic challenge-candidate mining: sections, triggers, budgets, skips."""
+import json
+
 import pymupdf as fitz
 import pytest
 
@@ -373,3 +375,118 @@ def test_challenge_export_writes_bounded_reviewed_files(library, tmp_path):
     assert "（相似度 0.75）——待人工确认" in (library.root / "exports/challenges.md").read_text()
     with pytest.raises(ValueError):
         call(library, "challenge_export", ids=[second["id"]], scope="0" * 64)
+
+
+# --- P4: structural check, comparison and review packet ---------------------
+
+def make_gap_only_draft(library, paper, label, draft_id=None):
+    """A gap without an evidence assertion: structurally invalid, still storable."""
+    source = call(library, "knowledge_source_put", entity={"kind": "paper", "id": paper["id"]}, kind="user-text",
+                  text="Synthetic context sentence for an unbacked gap.", locator={"page": 6})
+    draft = call(library, "knowledge_draft_put", entity={"kind": "paper", "id": paper["id"]}, source_ids=[source["id"]],
+                 request_id=draft_id or f"gap-{paper['id']}",
+                 nodes=[{"id": "unsupported-1", "type": "gap", "label": label, "source_status": "inferred"}])
+    return call(library, "knowledge_draft_review", id=draft["id"], reviewed_by="user", decision="accepted", expected_revision=draft["revision"])
+
+
+def test_theme_check_reports_only_structural_findings(library, tmp_path):
+    paper = make_paper(library, tmp_path)
+    make_difficulty_draft(library, paper, "No shared synthetic benchmark exists", "No shared benchmark exists.", 2)
+    themes = call(library, "challenge_themes", ids=[paper["id"]])
+    checked = call(library, "challenge_theme_check", scope=themes["scope"]["hash"])
+    assert checked["schema"] == "paper-library-challenge-theme-check.v1" and checked["model_calls"] == 0
+    assert checked["themes"] == 1 and checked["counts"]["error"] == 0
+    codes = {finding["code"] for finding in checked["findings"]}
+    assert "theme-single-paper" in codes and "theme-unreviewed" in codes and "theme-revised" not in codes
+    assert checked["by_status"]["needs-review"] == 1
+    with pytest.raises(ValueError):
+        call(library, "challenge_theme_check", scope="nope")
+    with pytest.raises(ValueError):
+        call(library, "challenge_theme_check", scope=themes["scope"]["hash"], statuses=["bogus"])
+    assert call(library, "challenge_theme_check", scope="a" * 64)["themes"] == 0
+
+
+def test_theme_check_flags_missing_evidence(library, tmp_path):
+    paper = make_paper(library, tmp_path)
+    make_gap_only_draft(library, paper, "Synthetic gaps may lack evidence")
+    themes = call(library, "challenge_themes", ids=[paper["id"]])
+    checked = call(library, "challenge_theme_check", scope=themes["scope"]["hash"])
+    assert checked["counts"]["error"] == 1
+    error = next(finding for finding in checked["findings"] if finding["severity"] == "error")
+    assert error["code"] == "theme-without-evidence" and error["theme_id"] == themes["themes"][0]["id"]
+    assert "theme-inferred-only" in {finding["code"] for finding in checked["findings"]}
+
+
+def test_comparison_matches_checklist_entries_and_reports_gaps(library, tmp_path):
+    first = make_paper(library, tmp_path, name="a", citekey="alpha2026")
+    second = make_paper(library, tmp_path, name="b", citekey="beta2026")
+    make_difficulty_draft(library, first, "No shared synthetic benchmark exists", "No shared benchmark exists.", 2)
+    make_difficulty_draft(library, second, "Human evaluation of synthetic transfer is missing", "Human evaluation is missing.", 3)
+    themes = call(library, "challenge_themes", ids=[first["id"], second["id"]])
+    checked = call(library, "challenge_comparison", ids=[first["id"], second["id"]], scope=themes["scope"]["hash"],
+                   checklist_text="# 我的清单\n- no shared synthetic benchmark\n- 城市洪涝的实时预报\n", checklist_date="2026-09-17")
+    assert checked["schema"] == "paper-library-challenge-comparison.v1" and checked["model_calls"] == 0
+    assert checked["checklist"]["date"] == "2026-09-17" and checked["checklist"]["origin"] == "user-text"
+    assert checked["counts"] == {"entries": 2, "covered": 1, "partial": 0, "gaps": 1, "themes": 2, "unmatched_themes": 1}
+    assert [entry["status"] for entry in checked["entries"]] == ["covered", "gap"]
+    assert checked["entries"][0]["matches"][0]["label"] == "No shared synthetic benchmark exists"
+    assert checked["gaps"] == ["城市洪涝的实时预报"]
+    assert checked["unmatched_themes"] == [theme["id"] for theme in themes["themes"] if "Human evaluation" in theme["label"]]
+    assert "κ" in checked["manual_review_note"]
+    again = call(library, "challenge_comparison", ids=[first["id"], second["id"]], scope=themes["scope"]["hash"],
+                 checklist_text="# 我的清单\n- no shared synthetic benchmark\n- 城市洪涝的实时预报\n")
+    assert again["id"] == checked["id"] and again["revision"] == 2
+    listed = call(library, "challenge_comparison_list", scope=themes["scope"]["hash"])
+    assert listed["total"] == 1 and listed["items"][0]["revision"] == 2 and listed["items"][0]["gaps"] == ["城市洪涝的实时预报"]
+    assert call(library, "challenge_comparison_get", id=checked["id"])["comparison"]["checklist"]["hash"] == checked["checklist"]["hash"]
+    with pytest.raises(ValueError):
+        call(library, "challenge_comparison_get", id="cc-" + "0" * 24)
+
+
+def test_comparison_reads_a_bounded_local_checklist_file(library, tmp_path):
+    paper = make_paper(library, tmp_path)
+    make_difficulty_draft(library, paper, "No shared synthetic benchmark exists", "No shared benchmark exists.", 2)
+    themes = call(library, "challenge_themes", ids=[paper["id"]])
+    checklist = tmp_path / "plan.md"
+    checklist.write_text("# 研究计划\n- no shared synthetic benchmark\n- 另一条无关条目\n")
+    result = call(library, "challenge_comparison", ids=[paper["id"]], scope=themes["scope"]["hash"],
+                  checklist_path=str(checklist), checklist_label="我的清单")
+    assert result["checklist"]["origin"] == "local-file" and result["checklist"]["source"].startswith("我的清单 (")
+    assert result["checklist"]["date"] and result["checklist"]["date"][:2] == "20"
+    assert result["counts"]["covered"] == 1
+    binary = tmp_path / "notes.pdf"
+    binary.write_text("not a checklist")
+    with pytest.raises(ValueError):
+        call(library, "challenge_comparison", ids=[paper["id"]], checklist_path=str(binary))
+    with pytest.raises(ValueError):
+        call(library, "challenge_comparison", ids=[paper["id"]], checklist_path=str(tmp_path / "missing.md"))
+    with pytest.raises(ValueError):
+        call(library, "challenge_comparison", ids=[paper["id"]], checklist_text="# 空清单\n\n")
+    with pytest.raises(ValueError):
+        call(library, "challenge_comparison", ids=[paper["id"]], checklist_text="# 清单\n- 一条有效条目\n", checklist_date="2026/09/17")
+
+
+def test_review_packet_writes_findings_and_comparison(library, tmp_path):
+    paper = make_paper(library, tmp_path)
+    make_difficulty_draft(library, paper, "No shared synthetic benchmark exists", "No shared benchmark exists.", 2)
+    themes = call(library, "challenge_themes", ids=[paper["id"]])
+    scope = themes["scope"]["hash"]
+    compared = call(library, "challenge_comparison", ids=[paper["id"]], scope=scope, checklist_text="# 清单\n- no shared synthetic benchmark\n- 未覆盖的方向\n")
+    packet = call(library, "challenge_review_packet", ids=[paper["id"]], scope=scope, comparison_id=compared["id"])
+    assert packet["schema"] == "paper-library-challenge-review-packet.v1" and packet["model_calls"] == 0
+    assert set(packet["files"]) == {"challenges-review-packet.md", "challenges-review-packet.json"}
+    markdown = (library.root / "exports/challenges-review-packet.md").read_text()
+    assert "研究难点人工评审包" in markdown and "结构检查 findings" in markdown
+    assert "theme-single-paper" in markdown and "[@synthetic2026 p.2]" in markdown
+    assert "与自有清单的对照" in markdown and "[缺口] 未覆盖的方向" in markdown
+    assert "κ" in markdown and "challenge_theme_review" in markdown
+    payload = json.loads((library.root / "exports/challenges-review-packet.json").read_text())
+    assert payload["comparison"]["id"] == compared["id"] and payload["themes"][0]["status"] == "needs-review"
+    assert payload["provenance"]["review_actions"][0]["action"] == "challenge_theme_review"
+    assert payload["counts"]["warning"] >= 1
+    other = call(library, "challenge_comparison", ids=[paper["id"]], scope="b" * 64, checklist_text="# 清单\n- no shared synthetic benchmark\n")
+    assert other["id"] != compared["id"]
+    with pytest.raises(ValueError):
+        call(library, "challenge_review_packet", ids=[paper["id"]], scope=scope, comparison_id=other["id"])
+    with pytest.raises(ValueError):
+        call(library, "challenge_review_packet", ids=[paper["id"]], scope="c" * 64)

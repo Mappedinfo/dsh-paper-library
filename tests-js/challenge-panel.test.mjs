@@ -8,7 +8,7 @@ const source = await readFile(new URL('../web/challenge-mining.js', import.meta.
 let ids = new Map();
 
 class Element {
-  constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.hidden = false; this.dataset = {}; this.attributes = {}; this.events = new Map(); this.textContent = ''; const classes = new Set(); this.classList = { add: (...names) => names.forEach(name => classes.add(name)), remove: (...names) => names.forEach(name => classes.delete(name)), contains: name => classes.has(name), toggle: (name, on) => { if (on === undefined) on = !classes.has(name); if (on) classes.add(name); else classes.delete(name); return on; } }; }
+  constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.value = ''; this.hidden = false; this.dataset = {}; this.attributes = {}; this.events = new Map(); this.textContent = ''; const classes = new Set(); this.classList = { add: (...names) => names.forEach(name => classes.add(name)), remove: (...names) => names.forEach(name => classes.delete(name)), contains: name => classes.has(name), toggle: (name, on) => { if (on === undefined) on = !classes.has(name); if (on) classes.add(name); else classes.delete(name); return on; } }; }
   set id(value) { this._id = value; ids.set(value, this); } get id() { return this._id; }
   set innerHTML(value) { this._html = value; for (const match of value.matchAll(/id="([^"]+)"/g)) { const created = new Element('div'); created.id = match[1]; this.children.push(created); } }
   get innerHTML() { return this._html || ''; }
@@ -174,4 +174,43 @@ test('model merge suggestions stay optional, bounded and pending review', async 
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(f.calls.at(-1).action, 'challenge_theme_merge', 'Applying a model suggestion still uses the reviewed merge path');
   assert.deepEqual(f.calls.at(-1).payload.expected_revisions, [1, 1]);
+});
+
+test('P4 review controls check structure, compare a checklist and write the packet', async () => {
+  const theme = { id: 'ct-' + 'a'.repeat(24), key: 'single city', label: '合成评测只覆盖一个城市', variants: [], paper_count: 1, record_count: 1, years: { min: 2026, max: 2026, histogram: { 2026: 1 } }, source_status: { 'author-stated': 1, 'reviewed-stated': 0, inferred: 0 }, evidence_count: 1, quotes: [{ page: 2, quote: 'A key limitation is synthetic coverage.' }], papers: [{ paper_id: 'paper-a', citekey: 'paper-a2026', year: 2026, node_id: 'gap:coverage', label: '合成评测只覆盖一个城市', source_status: 'author-stated', draft_id: 'kd-1', draft_status: 'accepted', quotes: [{ page: 2, quote: 'A key limitation is synthetic coverage.' }] }], status: 'needs-review', revision: 1 };
+  const themesPayload = { scope: { hash: 'd'.repeat(64), scanned: 1, skipped: [], include: 'accepted' }, totals: { records: 1, themes: 1, persisted: 1 }, merge_suggestions: [], themes: [theme], model_calls: 0 };
+  const comparisonPayload = { id: 'cc-' + 'b'.repeat(24), scope: 'd'.repeat(64), checklist: { source: '我的清单 (pasted text)', date: '2026-09-17', origin: 'user-text', entries: ['synthetic coverage'] }, counts: { entries: 1, covered: 1, partial: 0, gaps: 0, themes: 1, unmatched_themes: 0 }, entries: [{ entry: 'synthetic coverage', status: 'covered', best_overlap: 0.6, matches: [{ theme_id: theme.id, label: theme.label, status: 'needs-review', overlap: 0.6 }] }], themes: [], gaps: [], unmatched_themes: [], manual_review_note: '匹配只比较词面重叠；κ 一类结论必须由人独立完成。', model_calls: 0 };
+  const f = environment({ items: [paper('paper-a')], results: {
+    challenge_themes: themesPayload,
+    challenge_theme_check: { schema: 'paper-library-challenge-theme-check.v1', scope: 'd'.repeat(64), themes: 1, counts: { error: 0, warning: 1, info: 1 }, by_status: { 'needs-review': 1 }, findings: [{ theme_id: theme.id, label: theme.label, status: 'needs-review', code: 'theme-single-paper', severity: 'warning', message: '主题只覆盖 1 篇文献，尚不构成跨篇结论。' }], truncated: false, model_calls: 0 },
+    challenge_comparison: comparisonPayload,
+    challenge_review_packet: { schema: 'paper-library-challenge-review-packet.v1', scope: 'd'.repeat(64), themes: 1, counts: { error: 0, warning: 1, info: 1 }, comparison: comparisonPayload.id, files: { 'challenges-review-packet.md': { path: '/synthetic/library/exports/challenges-review-packet.md', bytes: 2048 } }, model_calls: 0 },
+  } });
+  f.ui.setAvailable(true);
+  f.get('challenge-open').click();
+  const box = f.get('challenge-items').children[0]; box.children[0].checked = true; box.children[0].dispatch('change');
+  f.get('challenge-aggregate').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(f.get('challenge-comparison').disabled, false, 'Review controls unlock once a scope exists');
+  f.get('challenge-check').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(f.calls.at(-1), { action: 'challenge_theme_check', payload: { scope: 'd'.repeat(64) } });
+  assert.match(f.status(), /1 警告 · 1 提示/);
+  assert.match(allText(f.result()), /theme-single-paper/);
+  f.get('challenge-checklist').value = '# 我的清单\n- synthetic coverage\n';
+  f.get('challenge-checklist-label').value = '我的清单';
+  f.get('challenge-comparison').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(f.calls.at(-1).action, 'challenge_comparison');
+  assert.deepEqual(f.calls.at(-1).payload.ids, ['paper-a']);
+  assert.equal(f.calls.at(-1).payload.checklist_text, '# 我的清单\n- synthetic coverage', 'Checklist text is trimmed before it is sent');
+  assert.equal(f.calls.at(-1).payload.checklist_label, '我的清单');
+  assert.match(f.status(), /覆盖 1/);
+  assert.match(allText(f.result()), /κ/);
+  f.get('challenge-packet').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(f.calls.at(-1).action, 'challenge_review_packet');
+  assert.equal(f.calls.at(-1).payload.comparison_id, comparisonPayload.id);
+  assert.match(f.status(), /评审包已写入 exports\//);
+  assert.match(allText(f.result()), /challenges-review-packet\.md/);
 });

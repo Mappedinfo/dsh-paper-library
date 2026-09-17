@@ -147,7 +147,7 @@ export function createFetchHandler(options = {}) {
           }
           if(input.action==='status')result={...result,realtime_companion:Boolean(options.companion)};
           if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true, catalog_management: true, typed_graph: true, reading_workspace: true, durable_state: true, learning_records: true, language_learning: Boolean(options.languageLearning) };
-          if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true, challenge_mining:Boolean(options.challengeMining), challenge_scan:true, challenge_themes:true, challenge_export:true };
+          if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true, challenge_mining:Boolean(options.challengeMining), challenge_scan:true, challenge_themes:true, challenge_export:true, challenge_comparison:true, challenge_review_packet:true };
           return json({ok:true,result});
         } finally { jsonRequests--; }
       }

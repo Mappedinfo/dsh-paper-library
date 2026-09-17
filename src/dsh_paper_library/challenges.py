@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from . import library_knowledge as knowledge
 from . import paper_analysis
+from pathlib import Path
 
 MAX_PAPERS = 50
 MAX_SECTIONS_PER_PAPER = 6
@@ -341,6 +342,16 @@ def dispatch(library, request):
         return theme_merge(library, request)
     if action == "challenge_export":
         return challenge_export(library, request)
+    if action == "challenge_theme_check":
+        return theme_check(library, request)
+    if action == "challenge_comparison":
+        return comparison(library, request)
+    if action == "challenge_comparison_list":
+        return comparison_list(library, request)
+    if action == "challenge_comparison_get":
+        return comparison_get(library, request)
+    if action == "challenge_review_packet":
+        return review_packet(library, request)
     raise ValueError("CHALLENGE_INVALID: unsupported challenge action")
 
 
@@ -363,7 +374,7 @@ def _theme_key(label):
 
 
 def _tokens(key):
-    return {token for token in key.split() if token and token not in _IGNORED_TOKENS}
+    return _tokenize(key)
 
 
 def _themes_schema(library):
@@ -748,4 +759,350 @@ def challenge_export(library, request):
         written[path.name] = {"path": str(path), "bytes": len(content.encode("utf-8"))}
     return {"schema": "paper-library-challenge-export.v1", "generated_at": generated, "scope": scope,
             "themes": len(themes_exported), "rows": max(len(csv_lines) - 1, 0), "citekeys": citekeys,
+            "files": written, "model_calls": 0}
+
+
+# --- P4: comparison, structural check and review packet ---------------------
+
+MAX_CHECKLIST_ENTRIES = 200
+MAX_CHECKLIST_CHARACTERS = 65536
+MAX_CHECKLIST_FILE_BYTES = 1024 * 1024
+MAX_PACKET_BYTES = 8 * 1024 * 1024
+MATCH_STRONG = 0.5
+MATCH_WEAK = 0.2
+CHECKLIST_EXTENSIONS = {".md", ".markdown", ".txt", ".text", ".json", ".csv", ".bib"}
+_CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_CHECKLIST_BULLET = re.compile(r"^\s*(?:[-*+•]|\d+[.)、])\s*")
+_CHECKLIST_HEADING = re.compile(r"^\s*#{1,6}\s*")
+
+
+def _tokenize(key):
+    """Whitespace tokens for Latin text, character bigrams for CJK labels."""
+    tokens = set()
+    for token in key.split():
+        if not token or token in _IGNORED_TOKENS:
+            continue
+        if _CJK.search(token):
+            cleaned = re.sub(r"[^\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaffA-Za-z0-9]+", "", token)
+            if not cleaned:
+                continue
+            if len(cleaned) <= 2:
+                tokens.add(cleaned)
+            else:
+                tokens.update(cleaned[index:index + 2] for index in range(len(cleaned) - 1))
+        else:
+            tokens.add(token)
+    return tokens
+
+
+def _overlap(left, right):
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
+def _comparison_schema(library):
+    with library.lock():
+        library.db.executescript("""
+        CREATE TABLE IF NOT EXISTS challenge_comparisons(
+          id TEXT PRIMARY KEY, scope TEXT NOT NULL, payload TEXT NOT NULL, revision INTEGER NOT NULL,
+          created TEXT NOT NULL, updated TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS challenge_comparisons_scope ON challenge_comparisons(scope, updated);
+        """)
+
+
+def _checklist_entries(library, request):
+    source, reference_date, origin = "pasted text", None, "user-text"
+    text = request.get("checklist_text")
+    if text is not None and text not in (None, ""):
+        if not isinstance(text, str) or len(text) > MAX_CHECKLIST_CHARACTERS:
+            raise ValueError("CHALLENGE_SCOPE: checklist text exceeds 65536 characters")
+    elif request.get("checklist_path"):
+        raw = request["checklist_path"]
+        if not isinstance(raw, str) or len(raw) > 4096:
+            raise ValueError("CHALLENGE_SCOPE: invalid checklist path")
+        path = Path(raw).expanduser()
+        if path.suffix.lower() not in CHECKLIST_EXTENSIONS:
+            raise ValueError("CHALLENGE_SCOPE: checklist must be a text, Markdown, JSON, CSV or BibTeX file")
+        if not path.is_file():
+            raise ValueError("CHALLENGE_MISSING: checklist file not found")
+        data = path.read_bytes()
+        if len(data) > MAX_CHECKLIST_FILE_BYTES:
+            raise ValueError("CHALLENGE_SCOPE: checklist file exceeds 1 MiB")
+        text = data.decode("utf-8", errors="replace")
+        source, origin = str(path), "local-file"
+        reference_date = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
+    else:
+        raise ValueError("CHALLENGE_SCOPE: provide checklist_text or checklist_path")
+    if request.get("checklist_date") is not None:
+        if not isinstance(request["checklist_date"], str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", request["checklist_date"]):
+            raise ValueError("CHALLENGE_SCOPE: checklist_date must be YYYY-MM-DD")
+        reference_date = request["checklist_date"]
+    if request.get("checklist_label") is not None:
+        if not isinstance(request["checklist_label"], str) or not request["checklist_label"].strip() or len(request["checklist_label"]) > 200:
+            raise ValueError("CHALLENGE_SCOPE: checklist label must be bounded text")
+        source = f"{request['checklist_label'].strip()} ({source})"
+    bullets, plain, headings = [], [], []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("|") or stripped.startswith("```"):
+            continue
+        is_heading = bool(_CHECKLIST_HEADING.match(stripped))
+        candidate = _CHECKLIST_HEADING.sub("", _CHECKLIST_BULLET.sub("", stripped)).strip().strip("*_` ")
+        if not candidate:
+            continue
+        # A long line is often several comma-separated asks; short lines stay whole.
+        parts = re.split(r"[；;]", candidate) if len(candidate) > 60 else [candidate]
+        for part in parts:
+            value = part.strip().strip("*_` ")
+            if len(value) < 3:
+                continue
+            (bullets if _CHECKLIST_BULLET.match(stripped) else headings if is_heading else plain).append(value[:400])
+    # Bullets win; a plain-line list is the fallback; a multi-heading outline is
+    # the last resort, so a lone document title never becomes a checklist entry.
+    chosen = bullets or plain or (headings if len(headings) >= 2 else [])
+    entries, seen = [], set()
+    for value in chosen:
+        if value.lower() in seen:
+            continue
+        seen.add(value.lower())
+        entries.append(value)
+    if not entries:
+        raise ValueError("CHALLENGE_SCOPE: checklist produced no comparable entries")
+    return {"source": source, "origin": origin, "date": reference_date, "entries": entries}
+
+
+def _stored_themes(library, scope, statuses=None, limit=MAX_THEMES):
+    clauses, args = ["scope=?"], [scope]
+    if statuses:
+        clauses.append(f"status IN ({','.join('?' * len(statuses))})")
+        args.extend(statuses)
+    rows = library.db.execute(f"SELECT payload FROM challenge_themes WHERE {' AND '.join(clauses)} ORDER BY id LIMIT ?", [*args, limit]).fetchall()
+    return [json.loads(row[0]) for row in rows]
+
+
+def theme_check(library, request):
+    """Structural findings over stored themes; read-only, no model, no rewrite."""
+    scope = request.get("scope")
+    if not isinstance(scope, str) or not re.fullmatch(r"[a-f0-9]{64}", scope):
+        raise ValueError("CHALLENGE_SCOPE: invalid theme scope")
+    knowledge.setup(library)
+    _themes_schema(library)
+    statuses = request.get("statuses")
+    if statuses is not None and (not isinstance(statuses, list) or not statuses or any(value not in THEME_STATUSES for value in statuses)):
+        raise ValueError("CHALLENGE_SCOPE: invalid theme status filter")
+    stored = _stored_themes(library, scope, statuses)
+    findings = []
+    for theme in stored:
+        findings.extend(_theme_findings(theme))
+    counts = {severity: sum(1 for finding in findings if finding["severity"] == severity) for severity in ("error", "warning", "info")}
+    by_status = {status: sum(1 for theme in stored if theme["status"] == status) for status in sorted(THEME_STATUSES)}
+    return {
+        "schema": "paper-library-challenge-theme-check.v1", "generated_at": _now(), "scope": scope,
+        "themes": len(stored), "counts": counts, "by_status": by_status,
+        "findings": findings[:200], "truncated": len(findings) > 200, "model_calls": 0,
+    }
+
+
+def _theme_findings(theme):
+    findings = []
+    base = {"theme_id": theme["id"], "label": theme["label"], "status": theme["status"]}
+    if not theme.get("evidence_count"):
+        findings.append({**base, "code": "theme-without-evidence", "severity": "error", "message": "主题没有任何逐字引用；不能作为结论使用。"})
+    if theme.get("paper_count", 0) < 2:
+        findings.append({**base, "code": "theme-single-paper", "severity": "warning", "message": "主题只覆盖 1 篇文献，尚不构成跨篇结论。"})
+    if not (theme.get("source_status") or {}).get("author-stated"):
+        findings.append({**base, "code": "theme-inferred-only", "severity": "warning", "message": "主题没有作者自陈的难点记录，全部来自推断或外部评审。"})
+    if theme["status"] == "needs-review":
+        findings.append({**base, "code": "theme-unreviewed", "severity": "info", "message": "主题尚未经过人工复核。"})
+    if theme["status"] == "merged":
+        findings.append({**base, "code": "theme-merged-member", "severity": "info", "message": f"该主题已被合并到 {theme.get('superseded_by')}。"})
+    if theme.get("revision", 1) > 1:
+        findings.append({**base, "code": "theme-revised", "severity": "info", "message": f"主题已修订 {theme['revision'] - 1} 次，导出前请确认看过最新版本。"})
+    return findings
+
+
+def comparison(library, request):
+    """Deterministic comparison of accepted themes against a user-owned checklist."""
+    ids, include = _select_scope(library, request)
+    scope = request.get("scope")
+    if scope is not None and (not isinstance(scope, str) or not re.fullmatch(r"[a-f0-9]{64}", scope)):
+        raise ValueError("CHALLENGE_SCOPE: invalid theme scope")
+    scope = scope or _scope_hash(ids)
+    knowledge.setup(library)
+    _themes_schema(library)
+    _comparison_schema(library)
+    checklist = _checklist_entries(library, request)
+    # A comparison is a report, not an export: every stored theme is compared and
+    # its review status is reported, so a gap decision is never made on a filter.
+    statuses = request.get("statuses", sorted(THEME_STATUSES))
+    if not isinstance(statuses, list) or not statuses or any(value not in THEME_STATUSES for value in statuses):
+        raise ValueError("CHALLENGE_SCOPE: invalid theme status filter")
+    stored = _stored_themes(library, scope, statuses)
+    theme_tokens = {theme["id"]: _tokenize(" ".join([theme["key"], *theme.get("variants", []), theme["label"]])) for theme in stored}
+    entry_tokens = [_tokenize(_theme_key(entry)) for entry in checklist["entries"]]
+    entries = []
+    for index, entry in enumerate(checklist["entries"]):
+        matches = sorted(({"theme_id": theme["id"], "label": theme["label"], "status": theme["status"],
+                           "overlap": round(_overlap(entry_tokens[index], theme_tokens[theme["id"]]), 3)}
+                          for theme in stored if _overlap(entry_tokens[index], theme_tokens[theme["id"]]) >= MATCH_WEAK),
+                         key=lambda item: (-item["overlap"], item["theme_id"]))
+        best = matches[0]["overlap"] if matches else 0.0
+        entries.append({"entry": entry, "matches": matches[:10],
+                        "status": "covered" if best >= MATCH_STRONG else "partial" if matches else "gap",
+                        "best_overlap": best})
+    themes = [{"theme_id": theme["id"], "label": theme["label"], "status": theme["status"],
+               "entries": [entry["entry"] for entry in entries if any(match["theme_id"] == theme["id"] for match in entry["matches"])]}
+              for theme in stored]
+    gaps = [entry["entry"] for entry in entries if entry["status"] == "gap"]
+    unmatched = [theme["theme_id"] for theme in themes if not theme["entries"]]
+    checklist_hash = hashlib.sha256("\n".join(checklist["entries"]).encode("utf-8")).hexdigest()
+    record_id = "cc-" + hashlib.sha256(f"{scope}:{checklist_hash}".encode("utf-8")).hexdigest()[:24]
+    now = _now()
+    with library.lock():
+        row = library.db.execute("SELECT payload FROM challenge_comparisons WHERE id=?", (record_id,)).fetchone()
+        previous = json.loads(row[0]) if row else None
+        revision = (previous["revision"] + 1) if previous else 1
+        value = {
+            "schema": "paper-library-challenge-comparison.v1", "id": record_id, "scope": scope,
+            "generated_at": now, "revision": revision, "checklist": {**checklist, "hash": checklist_hash},
+            "statuses": statuses, "thresholds": {"strong": MATCH_STRONG, "weak": MATCH_WEAK},
+            "counts": {"entries": len(entries), "covered": sum(1 for entry in entries if entry["status"] == "covered"),
+                       "partial": sum(1 for entry in entries if entry["status"] == "partial"), "gaps": len(gaps),
+                       "themes": len(themes), "unmatched_themes": len(unmatched)},
+            "entries": entries, "themes": themes, "gaps": gaps, "unmatched_themes": unmatched,
+            "manual_review_note": "匹配只比较词面重叠，不判断研究价值、饱和度或一致性；κ 一类人工编码结论必须由人独立完成。",
+            "created": previous["created"] if previous else now, "model_calls": 0,
+        }
+        library.db.execute(
+            "INSERT INTO challenge_comparisons(id,scope,payload,revision,created,updated) VALUES(?,?,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,revision=excluded.revision,updated=excluded.updated",
+            (record_id, scope, json.dumps(value, ensure_ascii=False), revision, value["created"], now))
+        library.db.commit()
+    return value
+
+
+def comparison_list(library, request):
+    knowledge.setup(library)
+    _comparison_schema(library)
+    limit, offset = request.get("limit", 20), request.get("offset", 0)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200 \
+            or isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 100000:
+        raise ValueError("CHALLENGE_SCOPE: invalid comparison pagination")
+    scope = request.get("scope")
+    if scope is not None and (not isinstance(scope, str) or not re.fullmatch(r"[a-f0-9]{64}", scope)):
+        raise ValueError("CHALLENGE_SCOPE: invalid theme scope")
+    where, args = ("WHERE scope=?", [scope]) if scope else ("", [])
+    total = library.db.execute(f"SELECT count(*) FROM challenge_comparisons {where}", args).fetchone()[0]
+    rows = library.db.execute(f"SELECT payload FROM challenge_comparisons {where} ORDER BY updated DESC,id LIMIT ? OFFSET ?", [*args, limit, offset]).fetchall()
+    items = []
+    for row in rows:
+        value = json.loads(row[0])
+        items.append({key: value[key] for key in ("id", "scope", "generated_at", "revision", "checklist", "counts", "gaps", "unmatched_themes")})
+    return {"scope": scope, "total": total, "items": items, "offset": offset, "limit": limit,
+            "hasMore": offset + len(items) < total, "model_calls": 0}
+
+
+def comparison_get(library, request):
+    knowledge.setup(library)
+    _comparison_schema(library)
+    row = library.db.execute("SELECT payload FROM challenge_comparisons WHERE id=?", (request.get("id"),)).fetchone()
+    if not row:
+        raise ValueError("CHALLENGE_MISSING: comparison not found")
+    return {"comparison": json.loads(row[0]), "model_calls": 0}
+
+
+def review_packet(library, request):
+    """Write the human review packet: themes, findings, comparison, manual note."""
+    ids, include = _select_scope(library, request)
+    scope = request.get("scope")
+    if scope is not None and (not isinstance(scope, str) or not re.fullmatch(r"[a-f0-9]{64}", scope)):
+        raise ValueError("CHALLENGE_SCOPE: invalid theme scope")
+    scope = scope or _scope_hash(ids)
+    knowledge.setup(library)
+    _themes_schema(library)
+    _comparison_schema(library)
+    statuses = request.get("statuses", list(THEME_STATUSES))
+    if not isinstance(statuses, list) or not statuses or any(value not in THEME_STATUSES for value in statuses):
+        raise ValueError("CHALLENGE_SCOPE: invalid theme status filter")
+    stored = _stored_themes(library, scope, statuses)
+    if not stored:
+        raise ValueError("CHALLENGE_MISSING: no theme to review for this corpus scope")
+    findings = [finding for theme in stored for finding in _theme_findings(theme)]
+    compared = None
+    if request.get("comparison_id") is not None:
+        compared = comparison_get(library, {"id": request["comparison_id"]})["comparison"]
+        if compared["scope"] != scope:
+            raise ValueError("CHALLENGE_SCOPE: comparison belongs to another corpus scope")
+    generated = _now()
+    counts = {severity: sum(1 for finding in findings if finding["severity"] == severity) for severity in ("error", "warning", "info")}
+    packet = {
+        "schema": "paper-library-challenge-review-packet.v1", "generated_at": generated, "scope": scope,
+        "statuses": statuses, "themes": stored, "findings": findings, "counts": counts,
+        "comparison": compared,
+        "manual_note": "匹配与结构检查只报告可核验事实；研究价值、主题饱和度与编码一致性（κ）必须由人另行判断。",
+        "provenance": {
+            "pipeline": "P1 deterministic scan → P2 bounded per-paper extraction → P3 deterministic aggregation",
+            "review_actions": [
+                {"action": "challenge_theme_review", "params": {"id": "<theme id>", "decision": "accepted|rejected", "reviewed_by": "user", "expected_revision": "<revision>"}},
+                {"action": "challenge_theme_merge", "params": {"theme_ids": ["<id>", "<id>"], "expected_revisions": ["<revision>", "<revision>"], "reviewed_by": "user"}},
+                {"action": "challenge_export", "params": {"ids": ids, "scope": scope}},
+            ],
+        },
+        "model_calls": 0,
+    }
+    markdown = [
+        "# 研究难点人工评审包（manual review packet）", "",
+        f"- 生成时间 generated_at：{generated}",
+        f"- 语料范围 corpus scope：`{scope}`（请求 {len(ids)} 篇）",
+        f"- 状态过滤 statuses：{', '.join(statuses)}",
+        f"- 结构检查：{counts['error']} 错误 · {counts['warning']} 警告 · {counts['info']} 提示",
+        "- 生成方式：P1 确定性扫描 + P2 受限抽取 + P3 确定性聚合；本文件不包含模型判断。",
+        "- 阅读顺序：先看结构检查 → 逐条确认引用（citekey + 页码）→ 接受/否决/合并 → 再运行导出。", "",
+    ]
+    if findings:
+        markdown += ["## 结构检查 findings", ""]
+        for finding in findings:
+            markdown.append(f"- [{ {'error': '错误', 'warning': '警告', 'info': '提示'}[finding['severity']] }] `{finding['code']}` {finding['label']}（`{finding['theme_id']}`，{finding['status']}）：{finding['message']}")
+        markdown.append("")
+    for theme in stored:
+        years = theme["years"]
+        markdown += [
+            f"## {theme['label']}", "",
+            f"- 主题 id：`{theme['id']}`；状态 **{theme['status']}**；修订 {theme['revision']}",
+            f"- 覆盖 {theme['paper_count']} 篇 / {theme['record_count']} 条记录；证据 {theme['evidence_count']} 条；年份 {years['min']}–{years['max']}",
+            f"- source_status：author-stated {theme['source_status']['author-stated']} · reviewed-stated {theme['source_status']['reviewed-stated']} · inferred {theme['source_status']['inferred']}",
+        ]
+        if theme.get("merged_from"):
+            markdown.append(f"- 合并自：{', '.join(theme['merged_from'])}")
+        markdown.append("")
+        for paper in theme["papers"]:
+            for quote in (paper.get("quotes") or [{"page": None, "quote": None}]):
+                markdown.append(f"- [@{paper['citekey']}" + (f" p.{quote['page']}" if quote.get("page") else "") + f"] ({paper['source_status']}) “{quote.get('quote') or '（缺少逐字引用）'}”")
+        markdown.append("")
+    if compared:
+        markdown += ["## 与自有清单的对照 comparison", "",
+                     f"- 对照清单 checklist：`{compared['checklist']['source']}`（日期 {compared['checklist']['date'] or '未知'}，{len(compared['checklist']['entries'])} 条）",
+                     f"- 覆盖 covered {compared['counts']['covered']} · 部分 partial {compared['counts']['partial']} · 缺口 gaps {compared['counts']['gaps']} · 未匹配主题 {compared['counts']['unmatched_themes']}", ""]
+        for entry in compared["entries"]:
+            matched = "；".join(f"{match['label']}（{match['overlap']}）" for match in entry["matches"][:3]) or "无"
+            markdown.append(f"- [{ {'covered': '覆盖', 'partial': '部分', 'gap': '缺口'}[entry['status']] }] {entry['entry']} → {matched}")
+        markdown.append("")
+    markdown += ["## 人工说明", "", f"- {packet['manual_note']}",
+                 "- 复核动作只通过 `challenge_theme_review` / `challenge_theme_merge` 生效，插件不会自动接受任何主题。", ""]
+    markdown_text = "\n".join(markdown)
+    json_text = json.dumps(packet, ensure_ascii=False, indent=1, allow_nan=False) + "\n"
+    for name, content in (("challenges-review-packet.md", markdown_text), ("challenges-review-packet.json", json_text)):
+        if len(content.encode("utf-8")) > MAX_PACKET_BYTES:
+            raise ValueError(f"CHALLENGE_EXPORT: {name} exceeds the 8 MiB export budget")
+    from . import bibliography
+    exports = library.root / "exports"
+    exports.mkdir(exist_ok=True, mode=0o700)
+    written = {}
+    for name, content in (("challenges-review-packet.md", markdown_text), ("challenges-review-packet.json", json_text)):
+        path = exports / name
+        bibliography._atomic_write(path, content.encode("utf-8"))
+        written[name] = {"path": str(path), "bytes": len(content.encode("utf-8"))}
+    return {"schema": "paper-library-challenge-review-packet.v1", "generated_at": generated, "scope": scope,
+            "themes": len(stored), "counts": counts, "comparison": compared["id"] if compared else None,
             "files": written, "model_calls": 0}

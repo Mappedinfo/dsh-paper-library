@@ -1,6 +1,6 @@
 # 研究难点挖掘：把“语言现象”变成可复核的领域难点
 
-2026-09-17。性质：设计契约（P1、P2 已实施，P3–P4 待实施）。实施状态见 §7。本文记录外部依据的核实范围、与本项目现有能力的映射、四阶段管线、预算与不变式。评审通过后再进入实施。
+2026-09-17。性质：设计契约（P1–P4 已实施）。实施状态见 §7。本文记录外部依据的核实范围、与本项目现有能力的映射、四阶段管线、预算与不变式。评审通过后再进入实施。
 
 ## 0. 结论速览
 
@@ -142,7 +142,13 @@ P4 复核、对照与导出
 | P1 确定性候选扫描 | **已实施** | `src/dsh_paper_library/challenges.py`（`challenge_scan`）、`worker.py` 路由、`src/bridge.mjs`、`docs/api.md#research-challenge-mining` | 5 项 Python 测试（小节/页码/缩写/预算/跳过/范围校验）+ 3 项桥接集成测试；零模型调用 |
 | P2 单篇受限抽取 | **已实施** | `src/harness/challenge-mining.mjs`、`src/dsh_paper_library/challenges.py`（`challenge_sources`）、`library_knowledge.py`（`source_status` + `challenge-without-evidence` lint）、`src/harness/tools.mjs`（`library_challenges`） | 6 项宿主测试（隔离调用/一次生成/重复不重放/五类无效输出拒绝/忙与取消/中断与新请求）+ 2 项 Python 测试（来源固化与 provenance、source_status 与 lint）；`docs/api.md#bounded-extraction-p2` |
 | P3 跨篇主题聚合 | **已实施** | `src/dsh_paper_library/challenges.py`（`challenge_themes`/`challenge_theme_list`/`challenge_theme_get`/`challenge_theme_review`/`challenge_theme_merge`/`challenge_export`）、`library_knowledge.py`（`bib_fields` 复用）、`src/harness/challenge-mining.mjs`（`challenge_theme_suggest_*`）、`src/bridge.mjs`、`src/harness/tools.mjs`（`library_challenge_themes`/`…_theme_review`/`…_theme_merge`/`…_export`）、`web/challenge-mining.js`、`docs/api.md#cross-paper-theme-aggregation-p3` | 13 项 Python 测试（归一化聚类/年份与覆盖统计/草稿状态过滤/范围校验/待审合并建议/修订与复核/合并取代成员/跳过错档/CSV·Markdown·BibTeX 导出）、3 项桥接测试、4 项面板测试、2 项宿主建议测试；P1+P3 全程零模型调用 |
-| P4 复核、对照与导出 | 待实施 | — | — |
+| P4 复核、对照与评审包 | **已实施** | `src/dsh_paper_library/challenges.py`（`challenge_theme_check`/`challenge_comparison`/`challenge_comparison_list`/`challenge_comparison_get`/`challenge_review_packet`）、`src/bridge.mjs`、`src/harness/tools.mjs`（`library_challenge_theme_check`/`…_comparison`/`…_review_packet`）、`web/challenge-mining.js`、`docs/api.md#comparison-structural-check-and-review-packet-p4` | 5 项 Python 测试（结构发现分级/缺证据报错/清单匹配与缺口/文件来源与日期/评审包内容与跨 scope 拒绝）、1 项桥接测试、1 项面板测试、3 项浏览器检查；对照与结构检查全程零模型调用 |
+
+P4 的实现取舍（与设计一致）：
+
+- 对照只做词面重叠（拉丁文按词、中日韩文按字符二元组），阈值与匹配数全部写进结果；报告不判断研究价值、饱和度或一致性，κ 一类结论明确留给人工。
+- 对照记录的来源（粘贴文本 / 本地路径）与日期（文件修改时间或用户给出的 `YYYY-MM-DD`）随报告保存；清单文件限定文本类扩展名并限制 1 MiB。
+- 结构检查只读已存主题，不修改任何记录；评审包把发现、主题、对照与「复核动作载荷」写成一个 Markdown 与一个 JSON，供人工逐条处理。
 
 P3 的实现取舍（与设计一致）：
 
@@ -157,4 +163,4 @@ P1 的实现取舍（与设计一致，需在后续阶段沿用）：
 - 只认整行标题；被 PDF 抽取粘连到正文行内的标题不会被识别（保守，避免把正文误当小节）。未识别的编号子标题不打断所属小节，也不进入扫描。
 - 句子切分带缩写保护（`et al.`／`e.g.`／单字母缩写），避免引用把证据截断。
 - 候选只带页码与命中规则，**不预判** `source_status`——该分级属于 P2，由模型在受限抽取中给出证据后再定。
-- P1 的“视图”通过 API/JSON 交付（`challenge_scan` 返回候选与规则回执）；图形面板在 P4 与主题视图一并交付。
+- P1 的“视图”通过 API/JSON 交付（`challenge_scan` 返回候选与规则回执）；库级「研究难点」面板在 P3 交付并列出 P1 回执、P2 状态与主题，P4 在其上补齐结构检查、对照与评审包。

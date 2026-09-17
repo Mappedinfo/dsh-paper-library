@@ -14,6 +14,7 @@ window.ChallengeMining = (() => {
   function create({ state, api, toast }) {
     let available = false, busy = false, epoch = 0, timer = null, disposed = false;
     let scan = null, themes = null, scope = null, extract = null, suggest = null, workingId = null, merging = false;
+    let check = null, comparison = null, packet = null;
     const selected = new Set();
 
     const trigger = button('challenge-open', '研究难点', () => toggle());
@@ -27,6 +28,13 @@ window.ChallengeMining = (() => {
       + '<div class="challenge-corpus-actions"><button id="challenge-select-all" class="button subtle" type="button">全选当前列表</button><button id="challenge-select-none" class="button subtle" type="button">清空</button><button id="challenge-refresh" class="button subtle" type="button">读取当前列表</button></div>'
       + '<div id="challenge-items" class="challenge-items"></div></div>'
       + '<div class="challenge-actions"><button id="challenge-scan" class="button" type="button">扫描候选段落（无模型）</button><button id="challenge-extract" class="button subtle" type="button">逐篇抽取难点（模型）</button><button id="challenge-extract-cancel" class="button subtle" type="button" hidden>取消抽取</button><button id="challenge-aggregate" class="button subtle" type="button">聚合主题（无模型）</button><button id="challenge-suggest" class="button subtle" type="button">模型合并建议（可选）</button><button id="challenge-export" class="button subtle" type="button">导出 CSV / Markdown / BibTeX</button></div>'
+      + '<div class="challenge-review"><strong>4 · 复核与对照</strong>'
+      + '<p class="small muted">结构检查是只读的；对照清单可粘贴文本或给出本地 .md/.txt/.json/.csv/.bib 路径（插件记录来源与日期，不判断研究价值）。评审包写入文献库 exports/。</p>'
+      + '<div class="challenge-actions"><button id="challenge-check" class="button subtle" type="button">结构检查</button><button id="challenge-comparison" class="button subtle" type="button">与自有清单对照</button><button id="challenge-packet" class="button subtle" type="button">生成人工评审包</button></div>'
+      + '<textarea id="challenge-checklist" rows="3" maxlength="65536" placeholder="粘贴清单（每行一条，或以 - 开头的列表），或填写下面的本地文件路径"></textarea>'
+      + '<label class="challenge-path">清单文件路径<input id="challenge-checklist-path" placeholder="/path/to/PhDPlan.md" autocomplete="off"></label>'
+      + '<label class="challenge-path">清单名称（写入报告）<input id="challenge-checklist-label" placeholder="例如：PhDPlan 2026-09" autocomplete="off"></label>'
+      + '<p class="small muted">κ 一类编码一致性结论留给人工研究；插件只报告可核验的词面重叠。</p></div>'
       + '<p id="challenge-status" role="status"></p><div id="challenge-result"></div>';
     document.body.append(panel);
     $('challenge-close').addEventListener('click', () => { panel.hidden = true; });
@@ -39,6 +47,9 @@ window.ChallengeMining = (() => {
     $('challenge-aggregate').addEventListener('click', () => void runThemes());
     $('challenge-suggest').addEventListener('click', () => void runSuggest());
     $('challenge-export').addEventListener('click', () => void runExport());
+    $('challenge-check').addEventListener('click', () => void runCheck());
+    $('challenge-comparison').addEventListener('click', () => void runComparison());
+    $('challenge-packet').addEventListener('click', () => void runPacket());
 
     const ids = () => [...selected];
     const selectable = () => (state.items || []).filter(item => item && item.id && !item.archived && item.resource_kind !== 'dataset' && item.pdf);
@@ -56,6 +67,9 @@ window.ChallengeMining = (() => {
       $('challenge-aggregate').disabled = !count || !idle;
       $('challenge-suggest').disabled = !scope || (themes?.themes?.length || 0) < 2 || !idle || !available;
       $('challenge-export').disabled = !scope || !idle;
+      $('challenge-check').disabled = !scope || !idle;
+      $('challenge-comparison').disabled = !scope || !idle || !ids().length;
+      $('challenge-packet').disabled = !scope || !idle;
       $('challenge-scan').textContent = scan ? '重新扫描候选段落' : '扫描候选段落（无模型）';
     }
     function renderCorpus() {
@@ -150,6 +164,34 @@ window.ChallengeMining = (() => {
           box.append(row);
         }
         if (suggest.status === 'complete' && !(suggest.groups || []).length) box.append(node('p', '模型没有提出合并建议；主题保持独立。', 'small muted'));
+        result.append(box);
+      }
+      if (check) {
+        const box = node('section', undefined, 'challenge-section'); box.append(node('h3', 'P4 · 结构检查（只读）'));
+        const counts = check.counts || {};
+        box.append(node('p', `主题 ${check.themes} 个 · ${counts.error || 0} 错误 · ${counts.warning || 0} 警告 · ${counts.info || 0} 提示${check.truncated ? '（仅显示前 200 条）' : ''}`, 'small muted'));
+        const labels = { error: '错误', warning: '警告', info: '提示' };
+        for (const finding of check.findings || []) box.append(node('p', `[${labels[finding.severity] || finding.severity}] ${finding.code} ${finding.label}（${finding.status}）：${finding.message}`, 'small muted'));
+        if (!(check.findings || []).length) box.append(node('p', '未发现结构问题。', 'small muted'));
+        result.append(box);
+      }
+      if (comparison) {
+        const box = node('section', undefined, 'challenge-section'); box.append(node('h3', 'P4 · 与自有清单对照'));
+        const counts = comparison.counts || {};
+        box.append(node('p', `清单：${comparison.checklist.source}（${comparison.checklist.date || '未记录日期'}）`, 'small muted'));
+        box.append(node('p', `覆盖 ${counts.covered} · 部分 ${counts.partial} · 缺口 ${counts.gaps} · 未匹配主题 ${counts.unmatched_themes}`, 'small muted'));
+        const labels = { covered: '覆盖', partial: '部分', gap: '缺口' };
+        for (const entry of comparison.entries || []) {
+          const matches = (entry.matches || []).slice(0, 3).map(match => `${match.label}（${match.overlap}）`).join('；') || '无';
+          box.append(node('p', `[${labels[entry.status] || entry.status}] ${entry.entry} → ${matches}`, 'small muted'));
+        }
+        box.append(node('p', comparison.manual_review_note, 'small muted'));
+        result.append(box);
+      }
+      if (packet) {
+        const box = node('section', undefined, 'challenge-section'); box.append(node('h3', 'P4 · 人工评审包'));
+        box.append(node('p', `主题 ${packet.themes} 个 · ${packet.counts.error} 错误 · ${packet.counts.warning} 警告 · ${packet.counts.info} 提示${packet.comparison ? ` · 含对照 ${packet.comparison}` : ' · 未含对照'}`, 'small muted'));
+        for (const file of Object.values(packet.files || {})) box.append(node('p', `${file.path}（${file.bytes} 字节）`, 'small muted'));
         result.append(box);
       }
       refreshControls();
@@ -257,9 +299,40 @@ window.ChallengeMining = (() => {
       } catch (error) { status(`导出未完成：${error.message}`, true); }
       finally { busy = false; refreshControls(); }
     }
+    async function runCheck() {
+      if (!scope) { status('先生成主题草稿。', true); return; }
+      busy = true; refreshControls(); status('正在做主题结构检查（只读）…');
+      try { check = await api('challenge_theme_check', { scope }); render(); status(`结构检查完成：${check.counts.error} 错误 · ${check.counts.warning} 警告 · ${check.counts.info} 提示。`, check.counts.error > 0); }
+      catch (error) { status(error.message, true); }
+      finally { busy = false; refreshControls(); }
+    }
+    async function runComparison() {
+      if (!scope) { status('先生成主题草稿。', true); return; }
+      const text = $('challenge-checklist').value.trim();
+      const path = $('challenge-checklist-path').value.trim();
+      const label = $('challenge-checklist-label').value.trim();
+      if (!text && !path) { status('请粘贴清单文本或填写本地清单文件路径。', true); return; }
+      busy = true; refreshControls(); status('正在对照清单（确定性匹配，无模型）…');
+      try {
+        comparison = await api('challenge_comparison', { ids: ids(), scope, ...(text ? { checklist_text: text } : { checklist_path: path }), ...(label ? { checklist_label: label } : {}) });
+        render();
+        status(`对照完成：覆盖 ${comparison.counts.covered} · 部分 ${comparison.counts.partial} · 缺口 ${comparison.counts.gaps}。`, comparison.counts.gaps > 0);
+      } catch (error) { status(`对照未完成：${error.message}`, true); }
+      finally { busy = false; refreshControls(); }
+    }
+    async function runPacket() {
+      if (!scope) { status('先生成主题草稿。', true); return; }
+      busy = true; refreshControls(); status('正在写入评审包…');
+      try {
+        packet = await api('challenge_review_packet', { ids: ids(), scope, ...(comparison?.id ? { comparison_id: comparison.id } : {}) });
+        render(); status(`评审包已写入 exports/（${packet.counts.error} 错误 · ${packet.counts.warning} 警告 · ${packet.counts.info} 提示）。`);
+      } catch (error) { status(`评审包未写入：${error.message}`, true); }
+      finally { busy = false; refreshControls(); }
+    }
     async function open() {
       panel.hidden = false; ++epoch; renderCorpus(); render();
       if (!scan && !themes) status('选择语料后先运行 P1 扫描；P2 与 P3 需要已保存的难点草稿。');
+      if (check && !scope) check = null;
     }
     function toggle() { if (panel.hidden) void open(); else panel.hidden = true; }
     function sync() { if (!panel.hidden) refreshCorpus(); refreshControls(); }

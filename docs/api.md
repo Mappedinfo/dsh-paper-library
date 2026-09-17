@@ -140,9 +140,17 @@ Labels are keyed by NFKC-normalised, punctuation-stripped lowercase text, so “
 
 `challenge_export` (`ids`, `scope?`, `include_unreviewed?`, optional `merge_suggestions`) writes three files under the library's `exports/` directory with atomic replacement: `challenges.csv` (one row per theme/paper/quote: theme id, label, status, revision, paper id, citekey, year, node id, source_status, page, quote), `challenges.md` (coverage, year spread, source-status counts, variants, per-quote `[@citekey p.N]` lines, pending merge suggestions and the provenance note) and `challenges.bib` (only catalog metadata; missing fields are omitted, never invented). Only `accepted` themes are exported unless `include_unreviewed:true`; exporting an empty scope fails with `CHALLENGE_MISSING`. The 8 MiB per-file export budget is enforced before any write.
 
+### Comparison, structural check and review packet (P4)
+
+`challenge_theme_check` (`scope`, optional `statuses`) is a read-only structural pass over stored themes. Findings use stable codes: `theme-without-evidence` (error), `theme-single-paper` and `theme-inferred-only` (warning), `theme-unreviewed`, `theme-merged-member` and `theme-revised` (info). It writes nothing, calls no model and reports `counts` plus `by_status`.
+
+`challenge_comparison` (`ids`, `scope?`, `checklist_text` **or** `checklist_path`, optional `checklist_label`/`checklist_date`, optional `statuses`) compares stored themes against a checklist the user owns. Entries come from bullet lines, or plain lines when there are no bullets, or a multi-heading outline; a lone document title is never an entry. Matching is deterministic token overlap — whitespace tokens for Latin text and character bigrams for CJK — with `covered` at ≥ 0.5, `partial` at ≥ 0.2 and `gap` below that (thresholds are returned in the result). A file path must end in `.md/.markdown/.txt/.text/.json/.csv/.bib`, may not exceed 1 MiB, and its recorded `checklist.date` is the file's modification date in UTC unless `checklist_date` (`YYYY-MM-DD`) is given; pasted text is recorded as `pasted text`. The result keeps every entry with up to ten candidate matches and overlaps, the per-theme entry lists, the uncovered `gaps`, the `unmatched_themes`, and a `manual_review_note` stating that only wording was compared. Reports are stored per corpus scope and checklist hash with a revision (`challenge_comparison_list`, `challenge_comparison_get`). By default every stored status is compared, because a comparison is a report, not an export; each theme's status is shown.
+
+`challenge_review_packet` (`ids`, `scope?`, optional `comparison_id`, optional `statuses`) writes the human review packet: `exports/challenges-review-packet.md` (findings first, then every theme with coverage, years, `source_status` counters and `[@citekey p.N]` quotes, then the comparison table, then the manual note) and `exports/challenges-review-packet.json` (the same content plus `provenance.review_actions`, which names the exact `challenge_theme_review` / `challenge_theme_merge` / `challenge_export` payloads a reviewer should send). A comparison from another corpus scope is refused. Both files respect the 8 MiB export budget and both are written atomically; `model_calls` stays `0`.
+
 ## Native Harness tools
 
-The plugin registers 25 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
+The plugin registers 29 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
 
 | Tool | Arguments | Node action |
 |---|---|---|

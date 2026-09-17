@@ -1,6 +1,6 @@
 {
-  "verified_at": "2026-09-17T15:10:57.886Z",
-  "scope": "Synthetic catalog in an isolated standalone server; corpus panel, P1 scan receipts, P3 aggregation, review gate and exports files; no model calls and no external requests. The P2 extraction and model merge suggestions need the host subagent and are asserted to be disabled here instead of simulated.",
+  "verified_at": "2026-09-17T15:15:59.068Z",
+  "scope": "Synthetic catalog in an isolated standalone server; corpus panel, P1 scan receipts, P3 aggregation, review gate, P4 structural check/comparison/review packet and exports files; no model calls and no external requests. The P2 extraction and model merge suggestions need the host subagent and are asserted to be disabled here instead of simulated.",
   "checks": [
     "corpus-panel-opens-from-the-shelf-without-calling-a-model",
     "p1-scan-renders-section-and-trigger-receipts-for-the-selected-corpus",
@@ -8,6 +8,9 @@
     "export-refuses-to-write-unreviewed-themes",
     "accepted-theme-exports-after-an-explicit-human-review",
     "exports-directory-holds-csv-markdown-and-bibtex-after-the-browser-flow",
+    "p4-structural-check-reports-verifiable-findings-only",
+    "p4-comparison-matches-entries-and-lists-gaps-with-provenance",
+    "p4-review-packet-writes-findings-and-comparison-for-human-review",
     "no-browser-runtime-errors-and-no-external-requests"
   ],
   "errors": [],

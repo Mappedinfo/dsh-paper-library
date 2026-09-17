@@ -88,6 +88,37 @@ try {
   const bib = await readFile(join(library, 'exports', 'challenges.bib'), 'utf8');
   assert.match(bib, /@\w+\{/);
   record('exports-directory-holds-csv-markdown-and-bibtex-after-the-browser-flow');
+  await page.locator('#challenge-check').click();
+  await page.waitForFunction(() => /P4 · 结构检查/.test(document.getElementById('challenge-result')?.textContent || ''));
+  const checkText = await page.locator('#challenge-result').innerText();
+  assert.match(checkText, /结构检查（只读）/);
+  assert.match(checkText, /主题 1 个/);
+  assert.match(checkText, /theme-revised/, 'A re-aggregated theme is flagged before export');
+  record('p4-structural-check-reports-verifiable-findings-only');
+  await page.fill('#challenge-checklist', '# 我的清单\n- synthetic evaluation covers only one city\n- 未被覆盖的方向\n');
+  await page.fill('#challenge-checklist-label', '合成清单');
+  await page.locator('#challenge-comparison').click();
+  await page.waitForFunction(() => /与自有清单对照/.test(document.getElementById('challenge-result')?.textContent || ''));
+  const compareText = await page.locator('#challenge-result').innerText();
+  assert.match(compareText, /合成清单/);
+  assert.match(compareText, /覆盖 1/);
+  assert.match(compareText, /缺口 1/);
+  assert.match(compareText, /未被覆盖的方向/);
+  assert.match(compareText, /κ/, 'The report keeps manual agreement out of scope');
+  record('p4-comparison-matches-entries-and-lists-gaps-with-provenance');
+  await page.locator('#challenge-packet').click();
+  await page.waitForFunction(() => /评审包已写入/.test(document.getElementById('challenge-status')?.textContent || ''));
+  const packetMarkdown = await readFile(join(library, 'exports', 'challenges-review-packet.md'), 'utf8');
+  assert.match(packetMarkdown, /研究难点人工评审包/);
+  assert.match(packetMarkdown, /与自有清单的对照/);
+  assert.match(packetMarkdown, /challenge_theme_review/);
+  const packetJson = JSON.parse(await readFile(join(library, 'exports', 'challenges-review-packet.json'), 'utf8'));
+  assert.equal(packetJson.schema, 'paper-library-challenge-review-packet.v1');
+  assert.equal(packetJson.comparison.checklist.source.startsWith('合成清单'), true);
+  assert.equal(packetJson.counts.info >= 1, true);
+  assert.equal(packetJson.counts.error, 0);
+  assert.equal(packetJson.model_calls, 0);
+  record('p4-review-packet-writes-findings-and-comparison-for-human-review');
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);
   record('no-browser-runtime-errors-and-no-external-requests');
@@ -97,7 +128,7 @@ try {
 }
 await writeFile(join(project, 'docs/validation/challenge-mining-browser.json'), JSON.stringify({
   verified_at: new Date().toISOString(),
-  scope: 'Synthetic catalog in an isolated standalone server; corpus panel, P1 scan receipts, P3 aggregation, review gate and exports files; no model calls and no external requests. The P2 extraction and model merge suggestions need the host subagent and are asserted to be disabled here instead of simulated.',
+  scope: 'Synthetic catalog in an isolated standalone server; corpus panel, P1 scan receipts, P3 aggregation, review gate, P4 structural check/comparison/review packet and exports files; no model calls and no external requests. The P2 extraction and model merge suggestions need the host subagent and are asserted to be disabled here instead of simulated.',
   checks, errors, externalRequests: external.length, modelRequests: 0,
 }, null, 2) + '\n');
 console.log(JSON.stringify({ run: relative(project, run), checks: checks.length, errors }));

@@ -62,3 +62,29 @@ test('challenge_scan and challenge_themes share one admission guard', async t =>
   await assert.rejects(dispatch({ action: 'challenge_themes', ids: Array.from({ length: 201 }, (_, i) => `p${i}`) }, { library: f.library }), /CHALLENGE_SCOPE/);
   await assert.rejects(dispatch({ action: 'challenge_export', ids: [] }, { library: f.library }), /CHALLENGE_SCOPE/);
 });
+
+test('P4 review routes stay deterministic and review-gated through the bridge', async t => {
+  const f = await fixture(t);
+  const aggregated = await dispatch({ action: 'challenge_themes', ids: [f.paper.id] }, { library: f.library });
+  const scope = aggregated.scope.hash;
+  const checked = await dispatch({ action: 'challenge_theme_check', scope }, { library: f.library });
+  assert.equal(checked.schema, 'paper-library-challenge-theme-check.v1');
+  assert.equal(checked.model_calls, 0);
+  assert.equal(checked.themes, 1);
+  assert.ok(checked.findings.some(finding => finding.code === 'theme-single-paper' && finding.severity === 'warning'));
+  const compared = await dispatch({ action: 'challenge_comparison', ids: [f.paper.id], scope,
+    checklist_text: '# 清单\n- no shared synthetic evaluation protocol\n- 未被覆盖的方向\n', checklist_label: '合成清单' }, { library: f.library });
+  assert.equal(compared.counts.covered, 1);
+  assert.equal(compared.counts.gaps, 1);
+  assert.match(compared.checklist.source, /^合成清单 \(pasted text\)$/);
+  assert.equal(compared.model_calls, 0);
+  assert.equal((await dispatch({ action: 'challenge_comparison_list', scope }, { library: f.library })).total, 1);
+  assert.equal((await dispatch({ action: 'challenge_comparison_get', id: compared.id }, { library: f.library })).comparison.id, compared.id);
+  await assert.rejects(dispatch({ action: 'challenge_comparison', ids: [f.paper.id], checklist_text: '' }, { library: f.library }), /CHALLENGE_SCOPE/);
+  await assert.rejects(dispatch({ action: 'challenge_review_packet', ids: [f.paper.id], scope: 'e'.repeat(64) }, { library: f.library }), /CHALLENGE_MISSING/);
+  const packet = await dispatch({ action: 'challenge_review_packet', ids: [f.paper.id], scope, comparison_id: compared.id }, { library: f.library });
+  assert.equal(packet.model_calls, 0);
+  assert.deepEqual(Object.keys(packet.files).sort(), ['challenges-review-packet.json', 'challenges-review-packet.md']);
+  assert.match(await readFile(join(f.library, 'exports/challenges-review-packet.md'), 'utf8'), /κ/);
+  assert.equal(JSON.parse(await readFile(join(f.library, 'exports/challenges-review-packet.json'), 'utf8')).comparison.id, compared.id);
+});
