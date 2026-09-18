@@ -277,6 +277,82 @@ test('a conflicting save keeps both sides and offers recovery instead of overwri
   assert.equal(created.payload.board.nodes.length > 0, true, 'no edit is discarded');
 });
 
+test('tidy-tree arranging is deterministic, respects the reader\'s order and survives cycles', () => {
+  const { board } = loadPanel();
+  const { tidyTree, placeInColumn, boardFromPapers } = board;
+  const node = (id, x, y, w = 200, h = 100) => ({ id, kind: 'concept', x, y, w, h, text: id });
+  const nodes = [node('root', 400, 300), node('b', 100, 500), node('a', 100, 200), node('leaf', 700, 900)];
+  const edges = [
+    { id: 'e1', from: 'root', to: 'a', kind: 'arrow' },
+    { id: 'e2', from: 'root', to: 'b', kind: 'arrow' },
+    { id: 'e3', from: 'a', to: 'leaf', kind: 'arrow' },
+  ];
+  const arranged = tidyTree(nodes, edges);
+  const at = id => arranged.find(value => value.id === id);
+  // The root with no incoming edge is leftmost; every child sits right of its parent.
+  assert.equal(at('root').x < at('a').x, true);
+  assert.equal(at('a').x < at('leaf').x, true);
+  assert.equal(at('a').x, at('b').x, 'one column per depth');
+  // Children keep the reader's vertical order (a above b) and parent rows sit between them.
+  assert.equal(at('a').y < at('b').y, true);
+  assert.equal(at('root').y, (at('a').y + at('b').y) / 2);
+  assert.equal(at('a').y, at('leaf').y, 'a single child shares its parent\'s row');
+  // Deterministic and origin-preserving: the top-left of the content does not jump.
+  assert.deepEqual(arranged.map(value => [value.id, value.x, value.y]), tidyTree(nodes, edges).map(value => [value.id, value.x, value.y]));
+  assert.equal(Math.min(...arranged.map(value => value.x)), 100, 'the tree lands where the content already was');
+  assert.equal(Math.min(...arranged.map(value => value.y)), 200);
+  // Column spacing accounts for the widest node of each depth.
+  const wide = tidyTree([node('root', 0, 0, 500, 100), node('kid', 0, 200, 100, 100)], [{ id: 'e', from: 'root', to: 'kid', kind: 'arrow' }]);
+  assert.equal(wide.find(value => value.id === 'kid').x, 580);
+
+  // An explicit root is honoured, extra parents are ignored, and an unrelated group stacks below.
+  const explicit = tidyTree([node('b', 0, 0), node('a', 0, 300)], [{ id: 'e', from: 'a', to: 'b', kind: 'arrow' }], { rootId: 'a' });
+  assert.equal(explicit.find(value => value.id === 'a').x < explicit.find(value => value.id === 'b').x, true);
+  const twoParents = tidyTree([node('r', 0, 0), node('x', 0, 200), node('y', 0, 400)], [{ id: 'e1', from: 'r', to: 'y', kind: 'arrow' }, { id: 'e2', from: 'x', to: 'y', kind: 'arrow' }]);
+  assert.equal(twoParents.find(value => value.id === 'y').x > twoParents.find(value => value.id === 'r').x, true, 'y keeps its first parent');
+  // A cycle is arranged, never recursed into forever.
+  const cyclic = tidyTree([node('p', 0, 0), node('q', 0, 200)], [{ id: 'e1', from: 'p', to: 'q', kind: 'arrow' }, { id: 'e2', from: 'q', to: 'p', kind: 'arrow' }]);
+  assert.equal(cyclic.length, 2);
+  assert.equal(tidyTree([node('solo', 5, 7)], []).length, 1);
+
+  // New papers stack under the existing content instead of landing on top of it.
+  const existing = [node('keep', 100, 100, 200, 100)];
+  const placed = placeInColumn(existing, [node('new', 0, 0, 200, 100), node('newer', 0, 0, 200, 60)]);
+  assert.equal(placed[0].x, 100);
+  assert.equal(placed[0].y, 240);
+  assert.equal(placed[1].y, 380);
+
+  // A generated board is a real root-plus-papers mind map, already arranged.
+  const generated = boardFromPapers([{ id: 'paper_a', title: 'Paper A', year: 2025 }, { id: 'paper_b', title: 'Paper B' }], ' 技术路线 ');
+  assert.equal(generated.title, '技术路线');
+  assert.equal(generated.nodes.length, 3);
+  assert.equal(generated.edges.length, 2);
+  assert.equal(generated.edges.every(edge => edge.relation === 'related' && edge.origin === 'user'), true);
+  const root = generated.nodes.find(value => value.kind === 'concept');
+  assert.equal(root.text, '技术路线');
+  assert.equal(generated.nodes.filter(value => value.kind === 'paper').every(value => value.x > root.x), true, 'papers grow right of the theme');
+  assert.throws(() => boardFromPapers([], 'x'), /至少一篇文献/);
+  assert.throws(() => boardFromPapers([{ id: 'paper_a' }], '   '), /主题/);
+});
+
+test('the tidy control arranges the board, persists it and declines a single node', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  assert.equal(harness.panel.addPapers([{ id: 'paper_a', title: '论文 A' }, { id: 'paper_b', title: '论文 B' }]), 2);
+  await harness.runTimers();
+  assert.equal(harness.panel.board().nodes.length, 2);
+  assert.equal(harness.panel.selection().length, 2, 'the added papers are the scope');
+  assert.equal(harness.panel.tidy(), 2);
+  await harness.runTimers();
+  assert.equal(state.filter(call => call.action === 'board_save').length >= 2, true, 'arranging reaches the host');
+  // An empty board has nothing to arrange, and still says so instead of failing.
+  await harness.panel.load('b-empty');
+  assert.equal(harness.panel.board().nodes.length, 0);
+  assert.equal(harness.panel.tidy(), 0);
+  assert.equal(harness.messages.some(message => /至少要有两个节点/.test(message)), true);
+});
+
 test('a failed listing reports itself, never fabricates a board, and recovers on retry', async () => {
   state.length = 0;
   let failing = true;

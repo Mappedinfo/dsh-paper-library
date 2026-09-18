@@ -101,6 +101,88 @@
   function rectsIntersect(a, b) { return a.x <= b.x + b.w && b.x <= a.x + a.w && a.y <= b.y + b.h && b.y <= a.y + a.h; }
   const normalizeRect = (start, end) => ({ x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), w: Math.abs(end.x - start.x), h: Math.abs(end.y - start.y) });
   function idsInRect(nodes, rect) { return nodes.filter(node => rectsIntersect(rect, nodeBounds(node))).map(node => node.id); }
+  const verticalOrder = (byId, a, b) => (byId.get(a).y - byId.get(b).y) || (byId.get(a).x - byId.get(b).x) || (a < b ? -1 : a > b ? 1 : 0);
+
+  /**
+   * Deterministic tidy tree ("整理成树"): a leftmost root whose children grow rightwards,
+   * one column per depth. Children keep their current top-to-bottom order, so the layout
+   * respects the arrangement the reader made, and the same board always maps to the same
+   * coordinates. Disconnected groups become further roots stacked below the first tree,
+   * and a cycle can never recurse forever.
+   */
+  function tidyTree(nodes, edges, options = {}) {
+    if (nodes.length < 2) return nodes.map(node => ({ ...node }));
+    const gapX = options.gapX ?? 80, gapY = options.gapY ?? 36;
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    const children = new Map(), hasParent = new Set();
+    for (const edge of edges) {
+      if (edge.from === edge.to || !byId.has(edge.from) || !byId.has(edge.to)) continue;
+      // One parent per node keeps the result a tree; the extra relation is left untouched.
+      if (hasParent.has(edge.to)) continue;
+      if (!children.has(edge.from)) children.set(edge.from, []);
+      children.get(edge.from).push(edge.to);
+      hasParent.add(edge.to);
+    }
+    for (const list of children.values()) list.sort((a, b) => verticalOrder(byId, a, b));
+    const ordered = nodes.map(node => node.id).sort((a, b) => verticalOrder(byId, a, b));
+    const explicit = options.rootId && byId.has(options.rootId) ? options.rootId : null;
+    const depth = new Map(), rows = new Map(), seen = new Set();
+    let nextRow = 0;
+    const assign = (id, level) => {
+      seen.add(id);
+      depth.set(id, level);
+      const kids = (children.get(id) ?? []).filter(child => !seen.has(child));
+      if (!kids.length) { rows.set(id, nextRow); return nextRow++; }
+      const placed = kids.map(child => assign(child, level + 1));
+      const row = (placed[0] + placed[placed.length - 1]) / 2;
+      rows.set(id, row);
+      return row;
+    };
+    const roots = [explicit ?? ordered.find(id => !hasParent.has(id)) ?? ordered[0]];
+    for (const id of ordered) if (!seen.has(id) && !roots.includes(id)) roots.push(id);
+    for (const root of roots) if (!seen.has(root)) assign(root, 0);
+    const columnWidth = [];
+    for (const [id, level] of depth) columnWidth[level] = Math.max(columnWidth[level] ?? 0, byId.get(id).w);
+    const columnX = [];
+    let cursor = 0;
+    for (let level = 0; level < columnWidth.length; level++) { columnX[level] = cursor; cursor += columnWidth[level] + gapX; }
+    const bounds = boundsOf(nodes), rowHeight = Math.max(...nodes.map(node => node.h)) + gapY;
+    const originX = bounds ? bounds.x : 0, originY = bounds ? bounds.y : 0;
+    return nodes.map(node => ({
+      ...node,
+      x: round(originX + columnX[depth.get(node.id)]),
+      y: round(originY + rows.get(node.id) * rowHeight),
+    }));
+  }
+
+  /** Stack additions under the existing content without disturbing it. */
+  function placeInColumn(existing, additions, options = {}) {
+    const gap = options.gap ?? 40;
+    const bounds = boundsOf(existing);
+    const x = bounds ? bounds.x : 0;
+    let y = bounds ? bounds.y + bounds.h + gap : 0;
+    return additions.map(node => {
+      const placed = { ...node, x: round(x), y: round(y) };
+      y += node.h + gap;
+      return placed;
+    });
+  }
+
+  /** A new mind map from catalog papers: one root question/theme with a node per paper. */
+  function boardFromPapers(papers, title, { maxCharacters = 120 } = {}) {
+    const trimmed = String(title ?? '').trim().slice(0, maxCharacters);
+    if (!trimmed) throw new Error('请先写下这张画板的主题。');
+    if (!papers.length) throw new Error('请先勾选至少一篇文献。');
+    const root = createNode('concept', { x: 0, y: 0 }, trimmed);
+    root.text = trimmed;
+    const nodes = [root], edges = [];
+    for (const paper of papers) {
+      const node = paperNode(paper, { x: 0, y: 0 });
+      nodes.push(node);
+      edges.push({ id: makeId('e'), from: root.id, to: node.id, kind: 'arrow', relation: 'related', origin: 'user' });
+    }
+    return { schema: 1, title: trimmed, origin: 'user', status: 'saved', nodes: tidyTree(nodes, edges), edges };
+  }
 
   const sizeFor = kind => DEFAULT_SIZE[kind] || DEFAULT_SIZE.text;
   function createNode(kind, point, text) {
@@ -866,6 +948,45 @@
       return node.id;
     }
 
+    /** Add several papers at once, stacked under the existing content. */
+    function addPapers(papers) {
+      if (!papers?.length) return 0;
+      const room = Math.max(0, LIMITS.nodes - board.nodes.length);
+      const additions = placeInColumn(board.nodes, papers.slice(0, room).map(paper => paperNode(paper, { x: 0, y: 0 })));
+      if (!additions.length) { toast(`画板最多 ${LIMITS.nodes} 个节点。`, true); return 0; }
+      board = { ...board, nodes: [...board.nodes, ...additions] };
+      pushHistory(); render(); scheduleSave();
+      select(additions.map(node => node.id));
+      return additions.length;
+    }
+
+    /** Build a new mind map from chosen papers; the host still owns validation and storage. */
+    async function generateFromPapers(papers, title) {
+      const draft = boardFromPapers(papers, title);
+      const result = await api('board_create', { board: draft });
+      if (!live) return null;
+      await refreshList();
+      await load(result.board.id);
+      return result.board.id;
+    }
+
+    /**
+     * Arrange the selection as a tidy tree, or the whole board when fewer than two
+     * nodes are selected. Only the scope's own nodes move; unrelated content stays put.
+     */
+    function tidy() {
+      const ids = new Set([...selection].filter(id => byId(id)));
+      const scoped = ids.size > 1;
+      const nodes = scoped ? board.nodes.filter(node => ids.has(node.id)) : board.nodes;
+      if (nodes.length < 2) { toast('至少要有两个节点才能整理成树。', true); return 0; }
+      const inScope = new Set(nodes.map(node => node.id));
+      const edges = board.edges.filter(edge => inScope.has(edge.from) && inScope.has(edge.to));
+      const arranged = new Map(tidyTree(nodes, edges).map(node => [node.id, node]));
+      board = { ...board, nodes: board.nodes.map(node => arranged.get(node.id) ?? node) };
+      pushHistory(); render(); scheduleSave();
+      return nodes.length;
+    }
+
     function bind() {
       svg.addEventListener('pointerdown', event => { event.preventDefault(); beginDrag(event); });
       svg.addEventListener('pointermove', continueDrag);
@@ -892,6 +1013,8 @@
       const undoButton = $('board-undo'), redoButton = $('board-redo');
       if (undoButton) undoButton.addEventListener('click', undo);
       if (redoButton) redoButton.addEventListener('click', redo);
+      const tidyButton = $('board-tidy');
+      if (tidyButton) tidyButton.addEventListener('click', () => { const count = tidy(); if (count) toast(`已把 ${count} 个节点整理成树`); });
       const zoomIn = $('board-zoom-in'), zoomOut = $('board-zoom-out'), fit = $('board-fit');
       if (zoomIn) zoomIn.addEventListener('click', () => { const size = surfaceSize(); view = applyZoom(view, 1.2, { x: size.width / 2, y: size.height / 2 }); applyView(); });
       if (zoomOut) zoomOut.addEventListener('click', () => { const size = surfaceSize(); view = applyZoom(view, 1 / 1.2, { x: size.width / 2, y: size.height / 2 }); applyView(); });
@@ -976,6 +1099,9 @@
       selection: () => [...selection],
       flush,
       addPaper,
+      addPapers,
+      generateFromPapers,
+      tidy,
       outline: (maximum) => outline({ ...board, title: board.title }, maximum),
       setTool,
       dispose() {
@@ -992,7 +1118,8 @@
   }
 
   window.PaperBoard = Object.freeze({
-    create, model, outline, createNode, paperNode, LIMITS, NODE_KINDS, KIND_LABEL, RELATIONS, RELATION_ORDER, EDGE_KINDS, COLORS, DEFAULT_SIZE,
+    create, model, outline, createNode, paperNode, tidyTree, placeInColumn, boardFromPapers,
+    LIMITS, NODE_KINDS, KIND_LABEL, RELATIONS, RELATION_ORDER, EDGE_KINDS, COLORS, DEFAULT_SIZE,
     geometry: { round, round3, clamp, nodeBounds, toScene, toScreen, applyZoom, boundsOf, viewportFor, hitNode, hitEdge, edgeGeometry, anchorPoint, distanceToSegment, normalizeRect, idsInRect },
   });
 })();

@@ -138,8 +138,11 @@ try {
   // The keyboard-accessible picker reaches the same result.
   await page.locator('#board-add-paper').click();
   await page.locator('#board-paper-dialog').waitFor();
-  await page.locator('#board-paper-list button').first().waitFor();
-  await page.locator('#board-paper-list button').first().click();
+  const pickerRows = page.locator('#board-paper-list .board-picker-row');
+  await pickerRows.first().waitFor();
+  assert.equal(await page.locator('#board-paper-add').isDisabled(), true, 'nothing is actionable before a paper is checked');
+  await pickerRows.first().locator('input').check();
+  await page.locator('#board-paper-add').click();
   await page.waitForFunction(() => document.querySelectorAll('.board-node-kind-paper').length === 2);
   await waitForHost(value => value.board.nodes.length === 4, 'the picker node to reach the record');
   record('the-paper-picker-adds-the-same-node-kind-without-dragging');
@@ -199,28 +202,59 @@ try {
     const enabled = await page.evaluate(() => document.fullscreenEnabled);
     throw new Error(`Fullscreen never engaged (enabled: ${enabled}; toast: ${toastText}; page errors: ${errors.join(' | ') || 'none'})`);
   }
-  assert.equal(await page.locator('#board-fullscreen').getAttribute('aria-pressed'), 'true');
+  // The control reflects the state; fullscreenchange is a separate task from entering.
+  await page.waitForFunction(() => document.getElementById('board-fullscreen')?.getAttribute('aria-pressed') === 'true');
   assert.match(await page.locator('#board-fullscreen').textContent(), /退出全屏/);
   // Exiting through the same control: Escape is browser chrome, which headless Chromium
   // does not deliver to the page, so the product path is the assertion here.
   await page.locator('#board-fullscreen').click();
   await page.waitForFunction(() => !document.fullscreenElement);
-  assert.equal(await page.locator('#board-fullscreen').getAttribute('aria-pressed'), 'false');
+  await page.waitForFunction(() => document.getElementById('board-fullscreen')?.getAttribute('aria-pressed') === 'false');
   assert.match(await page.locator('#board-fullscreen').textContent(), /全屏/);
   record('fullscreen-grows-the-board-and-its-control-returns-to-the-embedded-view');
 
+  // Arranging the board into a tidy tree: the connected root ends left of its child,
+  // and arranging twice is idempotent rather than drifting.
+  await page.locator('#board-tidy').click();
+  const firstTidy = await waitForHost(value => value.board.nodes.find(node => node.kind === 'note').x < value.board.nodes.find(node => node.kind === 'rect').x, 'the tidied columns');
+  const coordinates = board => board.nodes.map(node => `${node.id}:${node.x},${node.y}`).sort().join('|');
+  await page.locator('#board-tidy').click();
+  const secondTidy = await waitForHost(value => value.board.nodes.length === 5 || value.board.nodes.length === 4, 'the board after a second arrange');
+  assert.equal(coordinates(secondTidy.board), coordinates(firstTidy.board), 'arranging an arranged board changes nothing');
+  record('arranging-connects-the-board-into-left-to-right-columns-and-is-idempotent');
+
+  // A mind map generated from checked papers is a new board and leaves the first alone.
+  await page.locator('#board-add-paper').click();
+  await page.locator('#board-paper-dialog').waitFor();
+  await page.locator('#board-paper-list .board-picker-row').first().waitFor();
+  await page.locator('#board-paper-list .board-picker-row').nth(0).locator('input').check();
+  await page.locator('#board-paper-list .board-picker-row').nth(1).locator('input').check();
+  await page.locator('#board-paper-topic').fill('合成文献结构');
+  await page.locator('#board-paper-generate').click();
+  await page.waitForFunction(() => document.querySelectorAll('#board-select option').length === 2);
+  const generated = await waitForHost(value => value.boards.some(board => board.node_count === 3), 'the generated mind map');
+  assert.equal(generated.boards.length, 2);
+  assert.deepEqual(generated.boards.map(board => board.node_count).sort(), [3, 4], 'the first board keeps its four nodes');
+  const generatedId = generated.boards.find(board => board.node_count === 3).id;
+  const generatedBoard = await page.evaluate(async id => (await (await fetch('./api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'board_get', id }) })).json()).result.board, generatedId);
+  assert.equal(generatedBoard.title, '合成文献结构');
+  assert.equal(generatedBoard.edges.length, 2, 'each paper hangs off the theme node');
+  const theme = generatedBoard.nodes.find(node => node.kind === 'concept');
+  assert.equal(generatedBoard.nodes.filter(node => node.kind === 'paper').every(node => node.x > theme.x), true, 'papers sit right of the theme');
+  record('generating-a-mind-map-from-checked-papers-creates-a-new-arranged-board');
+
   // A second board stays separate, and deletion tombstones only that record.
   await page.locator('#board-new').click();
-  await page.waitForFunction(() => document.querySelectorAll('#board-select option').length === 2);
+  await page.waitForFunction(() => document.querySelectorAll('#board-select option').length === 3);
   await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 0);
-  const two = await waitForHost(value => value.boards.length === 2, 'the second board record');
-  assert.equal(two.boards.filter(board => board.node_count === 0).length, 1, 'the new board starts empty while the first keeps its nodes');
-  record('a-second-board-is-created-empty-and-the-first-board-is-untouched');
+  await waitForHost(value => value.boards.length === 3, 'the third board record');
+  record('a-new-board-starts-empty-and-leaves-the-others-untouched');
 
   await page.locator('#board-delete').click();
-  await page.waitForFunction(() => document.querySelectorAll('#board-select option').length === 1);
-  const remaining = await waitForHost(value => value.boards.length === 1, 'the deleted board to disappear');
-  assert.equal(remaining.boards[0].node_count, 4, 'the deleted board was the empty one');
+  await page.waitForFunction(() => document.querySelectorAll('#board-select option').length === 2);
+  const remaining = await waitForHost(value => value.boards.length === 2, 'the deleted board to disappear');
+  assert.equal(remaining.boards.some(board => board.node_count === 0), false, 'the empty board was the one deleted');
+  assert.deepEqual(remaining.boards.map(board => board.node_count).sort(), [3, 4]);
   record('deleting-a-board-tombstones-only-that-record');
 
   assert.deepEqual(errors, []);

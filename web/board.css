@@ -49,6 +49,12 @@
 .board-dialog::backdrop{background:var(--dsw-alias-bg-mask-1)}
 .board-dialog h2{font-size:15px;margin:0 0 8px}
 .board-dialog .board-picker{max-height:240px;overflow:auto;display:grid;gap:2px;margin:8px 0}
+.board-dialog .board-picker-row{display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;cursor:pointer}
+.board-dialog .board-picker-row:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.board-dialog .board-picker-row input{flex:none;margin-top:3px;accent-color:var(--dsw-alias-link)}
+.board-dialog .board-picker-row span{display:grid;gap:2px;min-width:0}
+.board-dialog .board-picker-row strong{font-weight:500;overflow-wrap:anywhere}
+.board-dialog .board-picker-row small{color:var(--muted);font-size:10px}
 .board-dialog .board-picker button{font:inherit;text-align:left;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:inherit;cursor:pointer}
 .board-dialog .board-picker button:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .board-dialog .board-picker small{display:block;color:var(--muted);font-size:10px}

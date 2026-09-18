@@ -1101,11 +1101,19 @@ boardUI = window.PaperBoard?.create({root:$('board-view'),api,toast,
 $('board-open').addEventListener('click',()=>{void boardUI?.open();});
 let boardPickerTicket=0,boardPickerTimer=null;
 for(const button of document.querySelectorAll('#board-paper-dialog .dialog-close'))button.addEventListener('click',()=>$('board-paper-dialog').close?.());
-/** Keyboard-accessible alternative to dragging a paper onto the canvas. */
+/** Keyboard-accessible alternative to dragging: pick one or many papers, then add them
+ * to the current board or build a new mind map from them. */
 function openBoardPaperPicker(){
   const dialog=$('board-paper-dialog');
   if(!dialog||!boardUI)return;
   const list=$('board-paper-list'),search=$('board-paper-search'),status=$('board-paper-status');
+  const chosen=new Map();
+  const addButton=$('board-paper-add'),generateButton=$('board-paper-generate'),selectedLabel=$('board-paper-selected'),topic=$('board-paper-topic');
+  const syncChosen=()=>{
+    const count=chosen.size;
+    selectedLabel.textContent=count?`已勾选 ${count} 篇文献。`:'尚未勾选文献。';
+    addButton.disabled=!count;generateButton.disabled=!count;
+  };
   async function render(){
     const ticket=++boardPickerTicket;
     list.replaceChildren(el('p','small muted','正在检索…'));
@@ -1113,17 +1121,28 @@ function openBoardPaperPicker(){
       const result=await api('resource_list',{kind:'paper',query:search.value.trim(),limit:30,offset:0,sort:'modified',order:'desc'});
       if(ticket!==boardPickerTicket)return;
       const items=(result.items||[]).filter(item=>(item.resource_kind||'paper')==='paper');
-      status.textContent=items.length?`共 ${result.total||items.length} 篇；选择一篇即可加入画板。`:'没有匹配的文献。';
+      status.textContent=items.length?`共 ${result.total||items.length} 篇；勾选后可加入画板或新建画板。`:'没有匹配的文献。';
       list.replaceChildren();
       for(const item of items){
-        const button=el('button');button.type='button';
-        button.append(el('strong',null,title(item)),el('small',null,[authors(item),year(item)].filter(Boolean).join(' · ')||'文献'));
-        button.addEventListener('click',()=>{boardUI?.addPaper({id:item.id,title:title(item),year:year(item),citekey:item.citekey});toast('已加入画板');dialog.close?.();});
-        list.append(button);
+        const row=el('label','board-picker-row');
+        const box=el('input');box.type='checkbox';box.checked=chosen.has(item.id);
+        box.addEventListener('change',()=>{
+          if(box.checked)chosen.set(item.id,{id:item.id,title:title(item),year:year(item),citekey:item.citekey});
+          else chosen.delete(item.id);
+          syncChosen();
+        });
+        const text=el('span');text.append(el('strong',null,title(item)),el('small',null,[authors(item),year(item)].filter(Boolean).join(' · ')||'文献'));
+        row.append(box,text);list.append(row);
       }
     }catch(error){if(ticket!==boardPickerTicket)return;status.textContent=error.message||'检索失败';list.replaceChildren();}
   }
-  search.value='';
+  addButton.onclick=()=>{if(!chosen.size)return;const added=boardUI.addPapers([...chosen.values()]);if(added){toast(`已加入 ${added} 篇文献`);dialog.close?.();}};
+  generateButton.onclick=async()=>{
+    if(!chosen.size)return;
+    try{const id=await boardUI.generateFromPapers([...chosen.values()],topic.value.trim()||'文献结构');if(id){toast('已按勾选的文献新建画板');dialog.close?.();}}
+    catch(error){toast(error.message||'新建画板失败',true);}
+  };
+  search.value='';topic.value='';chosen.clear();syncChosen();
   search.oninput=()=>{clearTimeout(boardPickerTimer);boardPickerTimer=setTimeout(()=>void render(),200);};
   dialog.showModal?.();
   void render();
