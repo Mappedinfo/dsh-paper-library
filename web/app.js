@@ -347,9 +347,19 @@ async function loadAnnotations(id) {
   } catch (error) { if (id === state.active?.id) { $('annotation-count').textContent = ''; $('annotation-list').replaceChildren(emptyState('批注暂时未能读取', error.message)); } }
 }
 // Threading lives in web/annotation-threads.js so the no-duplication rule is
-// unit-testable without the DOM.
+// unit-testable without the DOM. The inline fallback keeps the rail correct when
+// an already-running host has not yet been restarted after this asset was added.
 function annotationThreads(annotations) {
-  return window.PaperAnnotationThreads.threads(annotations);
+  if (window.PaperAnnotationThreads) return window.PaperAnnotationThreads.threads(annotations);
+  const list=Array.isArray(annotations)?annotations:[];
+  const ai=note=>note.kind==='ai-feedback'||note.type==='ai_feedback'||note.ai_generated===true;
+  const notes=list.filter(note=>!ai(note)),replies=new Map(notes.map(note=>[note.id,[]])),unlinked=[];
+  for(const reply of list.filter(ai)){
+    const declared=(Array.isArray(reply.annotation_ids)&&reply.annotation_ids.length?reply.annotation_ids:[reply.reply_to]).filter(id=>typeof id==='string'&&replies.has(id));
+    const parents=declared.length?(reply.source_kind==='dsh-conversation'?declared:[declared[0]]):[];
+    if(!parents.length)unlinked.push(reply);else for(const id of parents)replies.get(id).push(reply);
+  }
+  return {notes,replies,unlinked};
 }
 function renderAnnotations() {
   const fragment = document.createDocumentFragment();
