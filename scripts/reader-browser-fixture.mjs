@@ -180,7 +180,25 @@ try {
     assert.equal(partial.text, preview, 'The annotation stores the exact selected slice');
     assert.ok(!partial.text.startsWith('Evidence') && partial.text.endsWith('stan'), `Stored quote must be the exact slice: ${partial.text}`);
     assert.ok(partial.rects[0][0] > 0 && partial.rects[0][2] - partial.rects[0][0] < 400, 'The rectangle covers the slice, not the line start');
+    // The same drag with a markup tool active opens the annotation dialog
+    // immediately, and its quote must be the same exact slice.
+    await page.locator('#reader-tool-highlight').click(); await ready(1);
+    await page.evaluate(() => { window.__markupAtUp = ''; document.addEventListener('pointerup', () => { window.__markupAtUp = window.getSelection().toString(); }, true); });
+    await page.mouse.move(fromBox.x + fromBox.width * .45, fromBox.y + fromBox.height * .5); await page.mouse.down();
+    await page.mouse.move(toBox.x + toBox.width * .5, toBox.y + toBox.height * .5, { steps: 14 }); await page.mouse.up();
+    await page.locator('#annotation-dialog').waitFor();
+    const atUp = (await page.evaluate(() => window.__markupAtUp)).replace(/\s+/g, ' ').trim();
+    const quoted = (await page.locator('#annotation-quote').innerText()).replace(/\s+/g, ' ').trim();
+    assert.equal(quoted, atUp, `Annotation quote must equal the dragged slice (${atUp} vs ${quoted})`);
+    assert.ok(!quoted.startsWith('Evidence') && quoted.endsWith('stan'), `Markup drag quote must stay partial: ${quoted}`);
+    await page.locator('#annotation-comment').fill('Synthetic markup partial drag comment');
+    await page.locator('#annotation-form button[type="submit"]').first().click();
+    await page.locator('#annotation-dialog').waitFor({ state: 'hidden' }); await ready(1);
+    const markupDrag = (await core({ action: 'annotations', id: paper.id }, { library, python })).annotations.find(note => note.comment === 'Synthetic markup partial drag comment');
+    assert.ok(markupDrag, 'The markup-tool drag stored an annotation');
+    assert.equal(markupDrag.text, quoted, 'The stored quote is the dragged slice');
     record('a-partial-word-drag-saves-the-exact-selected-slice-not-the-whole-word-or-line');
+    await page.locator('#reader-tool-select').click();
     await page.locator('#reader-tool-select').click(); await page.locator('#reader-annotations').click();
     await page.locator('.library-pane #annotations-tab').waitFor(); assert.equal(await page.locator('#reading-side-panel').isVisible(), false); await visiblePDF();
     await page.locator('#reading-sidebar-side').click();
@@ -317,8 +335,8 @@ try {
     assert.equal(await page.locator('#reading-side-panel').isVisible(), false);
     assert.equal(await page.locator('#page-number').inputValue(), annotationReturnPage);
     await visiblePDF();
-    // Five fixture annotations plus the partial-selection annotation saved above.
-    assert.equal(await page.locator('#annotation-list .annotation-card').count(), 6);
+    // Five fixture annotations plus the two partial-selection annotations saved above.
+    assert.equal(await page.locator('#annotation-list .annotation-card').count(), 7);
     await page.locator('#reading-sidebar-library').click();
     record('annotation-ribbon-reopens-preserved-shared-notes-from-expanded-table');
     await page.locator('#workspace-library').click(); await page.locator('#catalog-table table').waitFor();

@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-18T03:47:14.647Z",
+  "verified_at": "2026-09-18T03:55:37.661Z",
   "checks": [
     "24-mixed-size-rotated-pages-open-in-one-continuous-reader",
     "actual-wheel-scroll-to-pages-12-and-24-updates-page-number",
@@ -50,22 +50,22 @@
   "synthetic_original_unchanged": true,
   "scope": "Synthetic standalone UI behavior only; native model integration and long-session memory measured separately; no formal user validation",
   "screenshots": [
-    ".local/reader-browser-QtIuZt/reader-741.png",
-    ".local/reader-browser-QtIuZt/scrolled-page-24.png",
-    ".local/reader-browser-QtIuZt/page-error-before-retry.png",
-    ".local/reader-browser-QtIuZt/four-saved-markup-types.png",
-    ".local/reader-browser-QtIuZt/annotations-sidebar-right.png",
-    ".local/reader-browser-QtIuZt/annotations-sidebar-left.png",
-    ".local/reader-browser-QtIuZt/metadata-nonmodal-sidebar.png",
-    ".local/reader-browser-QtIuZt/fullscreen-741.png",
-    ".local/reader-browser-QtIuZt/floating-chat-retained-draft.png",
-    ".local/reader-browser-QtIuZt/reader-final-430.png",
-    ".local/reader-browser-QtIuZt/reader-final-1400.png",
-    ".local/reader-browser-QtIuZt/reader-final-741.png",
-    ".local/reader-browser-QtIuZt/catalog-final-741.png",
-    ".local/reader-browser-QtIuZt/cross-paper-reader.png",
-    ".local/reader-browser-QtIuZt/cross-paper-fullscreen.png",
-    ".local/reader-browser-QtIuZt/cross-paper-library-collapse.png"
+    ".local/reader-browser-2XEakq/reader-741.png",
+    ".local/reader-browser-2XEakq/scrolled-page-24.png",
+    ".local/reader-browser-2XEakq/page-error-before-retry.png",
+    ".local/reader-browser-2XEakq/four-saved-markup-types.png",
+    ".local/reader-browser-2XEakq/annotations-sidebar-right.png",
+    ".local/reader-browser-2XEakq/annotations-sidebar-left.png",
+    ".local/reader-browser-2XEakq/metadata-nonmodal-sidebar.png",
+    ".local/reader-browser-2XEakq/fullscreen-741.png",
+    ".local/reader-browser-2XEakq/floating-chat-retained-draft.png",
+    ".local/reader-browser-2XEakq/reader-final-430.png",
+    ".local/reader-browser-2XEakq/reader-final-1400.png",
+    ".local/reader-browser-2XEakq/reader-final-741.png",
+    ".local/reader-browser-2XEakq/catalog-final-741.png",
+    ".local/reader-browser-2XEakq/cross-paper-reader.png",
+    ".local/reader-browser-2XEakq/cross-paper-fullscreen.png",
+    ".local/reader-browser-2XEakq/cross-paper-library-collapse.png"
   ],
   "isolated_server_stopped": true
 }
