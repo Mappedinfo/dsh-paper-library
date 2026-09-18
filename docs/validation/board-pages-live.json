@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-18T04:26:58.580Z",
+  "verified_at": "2026-09-18T08:22:50.808Z",
   "url": "https://mappedinfo.github.io/dsh-paper-library/",
   "scope": "The deployed GitHub Pages site, read over the public network and exercised in real Chromium: asset delivery, draw/persist/reload, tidy-tree arranging, PNG export, hidden host-only controls, and no third-party requests or page errors. Browser storage on the visitor is convenience, not a durable store. This does not measure availability, latency, capacity or the host's security posture.",
   "checks": [
@@ -8,7 +8,8 @@
     "drawing-on-the-live-site-persists-and-reports-saved",
     "a-reload-of-the-live-site-restores-the-drawing",
     "tidy-arranging-and-png-export-work-on-the-live-site",
+    "the-published-example-source-file-renders-from-its-url",
     "no-failed-requests-no-page-errors-and-no-third-party-requests"
   ],
-  "checks_count": 6
+  "checks_count": 7
 }
