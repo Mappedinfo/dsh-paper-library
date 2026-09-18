@@ -95,16 +95,14 @@ test('selection uses displayed PDF coordinates, merges only adjacent words on a 
 });
 
 test('a partial selection keeps only the selected slice of each word', () => {
-  // Drag from inside "Evidence" to inside "standard" on one line: the first and
-  // last word keep only the covered slice, interior words stay whole, and a
-  // coverage rectangle from another line never clips this line.
-  const line = [102, 300, 700, 326], otherLine = [97, 340, 560, 366];
+  // The slice rectangles come from the browser's own range for that word, so a
+  // word partially selected at either end keeps exactly the covered characters.
   const entries = [
-    { box: [100, 300, 200, 326], parts: [line, otherLine], text: 'ence' },
-    { box: [210, 300, 300, 326], parts: [line, otherLine], text: 'sentence' },
-    { box: [420, 300, 520, 326], parts: [line, otherLine], text: 'stan' },
-    { box: [680, 300, 720, 326], parts: [line, otherLine], text: 'dard' },
-    { box: [530, 340, 600, 366], parts: [line, otherLine], text: 'Next' },
+    { box: [100, 300, 200, 326], parts: [[102, 200]], text: 'ence' },
+    { box: [210, 300, 300, 326], parts: [[210, 300]], text: 'sentence' },
+    { box: [420, 300, 520, 326], parts: [[420, 520]], text: 'stan' },
+    { box: [680, 300, 720, 326], parts: [[680, 700]], text: 'dard' },
+    { box: [530, 340, 600, 366], parts: [[530, 560]], text: 'Next' },
   ];
   assert.deepEqual(plain(clipWords(entries)), [
     [102, 300, 200, 326, 'ence'],
@@ -120,17 +118,19 @@ test('a partial selection keeps only the selected slice of each word', () => {
     'Adjacent words merge; a large gap and a second line stay separate rectangles');
 });
 
-test('clipWords keeps whole words, drops empty slices and survives missing coverage', () => {
-  assert.deepEqual(plain(clipWords([{ box: [10, 20, 40, 30], parts: [[5, 15, 60, 25]], text: ' Word ' }])), [[10, 20, 40, 30, 'Word']]);
-  assert.deepEqual(plain(clipWords([{ box: [10, 20, 40, 30], parts: [[10, 12]], text: 'Legacy' }])), [[10, 20, 12, 30, 'Legacy']], 'A horizontal-only coverage pair still clips precisely');
+test('clipWords never drops a selected word and only skips whitespace', () => {
+  // A word whose slice could not be measured keeps its whole box: silently
+  // dropping it would hide text the reader saw highlighted.
+  assert.deepEqual(plain(clipWords([{ box: [10, 20, 40, 30], parts: [], text: 'Whole' }])), [[10, 20, 40, 30, 'Whole']]);
+  // A word covered by a wider slice rectangle is clipped to its own box.
+  assert.deepEqual(plain(clipWords([{ box: [10, 20, 40, 30], parts: [[5, 60]], text: ' Word ' }])), [[10, 20, 40, 30, 'Word']]);
+  // Whitespace-only slices (the separator space) and unusable entries are skipped.
   assert.deepEqual(plain(clipWords([
-    { box: [10, 20, 40, 30], parts: [[10, 20, 12, 25]], text: '' },
-    { box: [50, 20, 60, 30], parts: [], text: 'Whole' },
-    { box: [70, 20, 70, 30], parts: [[70, 20, 80, 25]], text: 'Degenerate' },
-    { box: [0, 0, 10, 10], parts: [[20, 0, 30, 10]], text: 'Outside' },
-    { box: [0, 0, 10, 10], parts: [[2, 2, 8, 8]], text: 'Kept' },
-    { box: [0, 40, 10, 50], parts: [[0, 0, 10, 10]], text: 'OtherLine' },
-  ])), [[50, 20, 60, 30, 'Whole'], [2, 0, 8, 10, 'Kept']]);
+    { box: [10, 20, 40, 30], parts: [[10, 12]], text: '   ' },
+    { box: [70, 20, 70, 30], parts: [[70, 80]], text: 'Degenerate' },
+    { box: [0, 0, 10, 10], parts: [[2, 8]], text: 'Kept' },
+  ])), [[2, 0, 8, 10, 'Kept']]);
   assert.deepEqual(plain(clipWords([])), []);
   assert.deepEqual(plain(clipWords([null, { box: [1, 2, 3] }])), []);
 });
+

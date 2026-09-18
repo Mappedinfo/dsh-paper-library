@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-18T04:43:10.378Z",
+  "verified_at": "2026-09-18T16:30:25.912Z",
   "scope": "Synthetic standalone UI: per-annotation feedback write-back rendering and PDF linking; no model call or external request",
   "checks": [
     "each-generated-reply-nests-under-its-own-annotation",

@@ -27,27 +27,24 @@
     const candidates = [center, center + 1, center - 1, center + 2, center - 2];
     return [...new Set(candidates)].filter(page => page > 0 && page <= metrics.length).slice(0, MAX_RESIDENT);
   }
-  /** Clip每个被选中的词框到真实选区：部分选中的词只保留选中部分与选中文字，
-   * 这样一次拖选不会把整词（或整行开头）算进批注。 */
+  /** Clip每个被选中的词框到真实选区：横向取该词被选中字符的矩形，纵向沿用词框
+   * （与栅格文字一致）。只要这个词确实被选中且有文字，就绝不丢弃——否则界面
+   * 高亮过的文字会从批注与预览中消失。缺少可测量矩形时回退到整个词框。 */
   function clipWords(entries) {
     const words = [];
     for (const entry of entries || []) {
       if (!entry || !Array.isArray(entry.box) || entry.box.length < 4 || !entry.box.every(Number.isFinite)) continue;
       const [left, top, right, bottom] = entry.box;
       if (right <= left || bottom <= top) continue;
-      // Coverage comes from the browser's own selection rectangles ([left, top,
-      // right, bottom]); a word with no measured overlap keeps its whole box, so
-      // degenerate layout data cannot silently drop a selected word.
-      const raw = Array.isArray(entry.parts) && entry.parts.length ? entry.parts : [[left, top, right, bottom]];
-      const parts = raw
-        .filter(part => Array.isArray(part) && part.length >= 2 && part.every(Number.isFinite))
-        .filter(part => part.length < 4 || (part[3] > top + .5 && part[1] < bottom - .5))
-        .map(part => [Math.max(left, part[0]), Math.min(right, part[part.length >= 4 ? 2 : 1])])
-        .filter(part => part[1] - part[0] > .5);
-      if (!parts.length) continue;
       const text = typeof entry.text === 'string' ? entry.text.replace(/\s+/g, ' ').trim() : '';
       if (!text) continue;
-      words.push([Math.min(...parts.map(part => part[0])), top, Math.max(...parts.map(part => part[1])), bottom, text]);
+      const parts = (Array.isArray(entry.parts) ? entry.parts : [])
+        .filter(part => Array.isArray(part) && part.length >= 2 && part.every(Number.isFinite))
+        .map(part => [Math.max(left, part[0]), Math.min(right, part[part.length >= 2 ? 1 : 1])])
+        .filter(part => part[1] - part[0] > .5);
+      const start = parts.length ? Math.min(...parts.map(part => part[0])) : left;
+      const end = parts.length ? Math.max(...parts.map(part => part[1])) : right;
+      words.push([start, top, end, bottom, text]);
     }
     return words;
   }
@@ -110,7 +107,7 @@
   }
   function create({ root, api, getPaper, onActivePage = () => {}, onSelection = () => {}, onStatus = () => {}, onPageNote = () => {}, onAnnotationActivate = () => {} }) {
     if (!root) throw new Error('PDF reader requires a scroll viewport');
-    let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, flashTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', transport = Promise.resolve(), zoom = 1;
+    let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, flashTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', pendingRange = null, transport = Promise.resolve(), zoom = 1;
     const renderedScales = new Map(), pageAnnotations = new Map();
     const dom = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     root.classList.add('paper-pdf-reader'); root.tabIndex = 0; root.setAttribute('aria-label', 'PDF 连续阅读区域');
@@ -130,17 +127,64 @@
       if (error) { const retry = dom('button', 'button subtle', '重试此页'); retry.type = 'button'; retry.dataset.retryPage = String(page); note.append(retry); }
       slot.sheet.replaceChildren(note); slot.sheet.dataset.loaded = 'false';
     }
+    /** One invisible text run per raster word.
+     *
+     * The run's glyph advance is fitted to the word's own box afterwards
+     * (fitWordLayer), so the selectable layer sits exactly over the raster:
+     * dragging a visible word hits that word, and the highlight covers the same
+     * glyphs. The separator space stays inside the run (it keeps cross-word
+     * selection continuous) but outside the fitted inline box, so releasing the
+     * pointer in a gap never reaches into the following word. */
     function renderWords(sheet, words, geometry) {
       const layer = dom('div', 'word-layer pdr-word-layer'); layer.dataset.pdfPage = String(geometry.page); layer.setAttribute('aria-label', `PDF 第 ${geometry.page} 页可选文字`);
       const fragment = document.createDocumentFragment(), factor = layoutWidth / geometry.width;
+      let previous = null, lineLast = null;
+      const flushTrailing = () => { if (!lineLast) return; const width = Math.max(6, (lineLast.y1 - lineLast.y0) * .6); fragment.append(gapRun(lineLast.x1, lineLast.x1 + width, lineLast.y0, lineLast.y1, geometry, factor)); lineLast = null; };
       for (const word of words) {
         if (!Array.isArray(word) || word.length < 5 || !word.slice(0, 4).every(Number.isFinite) || typeof word[4] !== 'string') continue;
         const [x0, y0, x1, y1, text] = word;
-        if (x1 <= x0 || y1 <= y0 || x0 < -1 || y0 < -1 || x1 > geometry.width + 1 || y1 > geometry.height + 1) continue;
-        const span = dom('span', 'pdf-word pdr-word', `${text} `); span.dataset.rect = JSON.stringify([x0, y0, x1, y1]); span.dataset.pdfPage = String(geometry.page); span.dataset.height = String(y1 - y0);
-        Object.assign(span.style, { left: `${x0 / geometry.width * 100}%`, top: `${y0 / geometry.height * 100}%`, width: `${(x1 - x0) / geometry.width * 100}%`, height: `${(y1 - y0) / geometry.height * 100}%`, fontSize: `${(y1 - y0) * factor * .85}px` }); fragment.append(span);
+        if (x1 <= x0 || y1 <= y0 || x0 < -1 || y0 < -1 || x1 > geometry.width + 1 || y1 > geometry.height + 1) { previous = null; flushTrailing(); continue; }
+        const span = dom('span', 'pdf-word pdr-word'); span.dataset.rect = JSON.stringify([x0, y0, x1, y1]); span.dataset.pdfPage = String(geometry.page); span.dataset.height = String(y1 - y0);
+        const run = dom('i', 'pdf-word-text', text);
+        span.append(run);
+        Object.assign(span.style, { left: `${x0 / geometry.width * 100}%`, top: `${y0 / geometry.height * 100}%`, width: `${(x1 - x0) / geometry.width * 100}%`, height: `${(y1 - y0) / geometry.height * 100}%`, fontSize: `${(y1 - y0) * factor}px` });
+        // The separator space gets its own run over the real gap. Without it a
+        // pointer released between two words hits the bare layer, where the
+        // browser resolves the caret to the layer instead of the previous word.
+        if (previous && Math.abs(previous.y0 - y0) < .5) {
+          if (x0 - previous.x1 > .5) fragment.append(gapRun(previous.x1, x0, y0, y1, geometry, factor));
+        } else flushTrailing();
+        fragment.append(span);
+        previous = { x1, y0, y1 }; lineLast = { x1, y0, y1 };
       }
-      layer.append(fragment); sheet.append(layer);
+      flushTrailing();
+      layer.append(fragment); sheet.append(layer); fitWordLayer(layer);
+    }
+    /** Fit each text run to its word box so the invisible layer matches the raster.
+     * A run that cannot be measured keeps its natural width. */
+    function fitWordLayer(layer) {
+      if (!layer) return;
+      for (const span of layer.querySelectorAll('.pdr-word')) {
+        const run = span.querySelector('.pdf-word-text');
+        if (!run) continue;
+        const box = span.getBoundingClientRect().width, natural = textWidth(run);
+        const scale = box > 0 && natural > 0 ? Math.min(4, Math.max(.25, box / natural)) : 1;
+        run.style.transform = `scaleX(${scale})`;
+        span.dataset.textScale = String(scale);
+      }
+    }
+    /** A space run covering one real inter-word gap, positioned like its neighbours. */
+    function gapRun(left, right, y0, y1, geometry, factor) {
+      const gap = dom('span', 'pdf-word-gap', ' ');
+      gap.style.left = `${left / geometry.width * 100}%`;
+      gap.style.top = `${y0 / geometry.height * 100}%`;
+      gap.style.width = `${(right - left) / geometry.width * 100}%`;
+      gap.style.height = `${(y1 - y0) / geometry.height * 100}%`;
+      gap.style.fontSize = `${(y1 - y0) * factor}px`;
+      return gap;
+    }
+    function textWidth(run) {
+      try { const range = document.createRange(); range.selectNodeContents(run); const rect = range.getBoundingClientRect(); return rect.width; } catch { return 0; }
     }
     const queue = createPageWindow({
       load: job => { const ticket = generation, scale = scaleFor(job.page); job.requestedScale = scale; return request('page', { id: job.id, page: job.page, scale }, () => current(job.id, ticket)); },
@@ -174,7 +218,11 @@
       const oldPage = pageAt(metrics, root.scrollTop), previous = metrics[oldPage - 1], fraction = previous ? (root.scrollTop - previous.top) / previous.height : 0;
       layoutWidth = width; metrics = pageMetrics(pages, width);
       for (const metric of metrics) { const slot = slots[metric.page - 1]; slot.outer.style.width = `${width}px`; slot.outer.style.height = `${metric.height}px`; slot.sheet.style.height = `${metric.height - CAPTION}px`; }
-      for (const page of queue.snapshot().residents) for (const span of slots[page - 1].sheet.querySelectorAll('.pdr-word')) span.style.fontSize = `${Number(span.dataset.height) * width / pages[page - 1].width * .85}px`;
+      for (const page of queue.snapshot().residents) {
+        const sheet = slots[page - 1].sheet, factor = width / pages[page - 1].width;
+        for (const span of sheet.querySelectorAll('.pdr-word')) span.style.fontSize = `${Number(span.dataset.height) * factor}px`;
+        fitWordLayer(sheet.querySelector('.pdr-word-layer'));
+      }
       if (previous) root.scrollTop = metrics[oldPage - 1].top + fraction * metrics[oldPage - 1].height;
       updateWindow();
       // Keep fit-width text sharp after expanding the pane, and release an
@@ -230,19 +278,28 @@
       finally { if (current(id, ticket)) updateWindow(); }
     }
     function layerOf(node) { const element = node?.nodeType === 3 ? node.parentElement : node; return element?.closest?.('.pdr-word-layer'); }
-    /** The part of one word span the selection covers; a word selected in full keeps its text. */
-    function selectedText(range, span) {
+    /** The selection's slice inside one word span, or null when it cannot be built. */
+    function sliceOf(range, span) {
       try {
         const bounds = document.createRange(); bounds.selectNodeContents(span);
         const slice = range.cloneRange();
         if (slice.compareBoundaryPoints(Range.START_TO_START, bounds) < 0) slice.setStart(bounds.startContainer, bounds.startOffset);
         if (slice.compareBoundaryPoints(Range.END_TO_END, bounds) > 0) slice.setEnd(bounds.endContainer, bounds.endOffset);
-        return slice.toString();
-      } catch { return span.textContent.trim(); }
+        return slice;
+      } catch { return null; }
     }
     function captureSelection() {
       if (tool === 'note' || !paperId) return;
-      const value = window.getSelection(); if (!value?.rangeCount || value.isCollapsed) return;
+      const live = window.getSelection();
+      // A drag can end over a non-text area (past the last word of a line, a
+      // caption, the page margin): Chrome then resolves the caret to the layer
+      // and collapses the selection. Restore the last real range of this drag so
+      // the reader keeps what it showed while dragging.
+      if (live && (!live.rangeCount || live.isCollapsed) && pendingRange?.startContainer?.isConnected && pendingRange?.endContainer?.isConnected) {
+        try { live.removeAllRanges(); live.addRange(pendingRange); } catch { /* keep the collapsed selection */ }
+      }
+      const value = window.getSelection();
+      if (!value?.rangeCount || value.isCollapsed) return;
       const anchor = layerOf(value.anchorNode), focus = layerOf(value.focusNode);
       if (!anchor || !focus || !root.contains(anchor) || !root.contains(focus)) {
         if (root.contains(value.anchorNode) || root.contains(value.focusNode)) { selection = null; lastSelection = ''; onSelection(null, { intent: tool, color }); onStatus('请选择同一 PDF 页内的文字，再保存批注。', true); }
@@ -254,16 +311,19 @@
       if (!geometry || !box?.width || !box?.height) return;
       // Client rects describe what the reader actually dragged over, including a
       // partial word; each overlapped word box is clipped to that coverage.
-      const coverage = typeof range.getClientRects === 'function' ? [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0).map(rect => [rect.left, rect.top, rect.right, rect.bottom]) : [];
       const entries = [], scaleX = geometry.width / box.width, scaleY = geometry.height / box.height;
       for (const span of anchor.children) {
         if (!value.containsNode(span, true)) continue;
         const word = span.getBoundingClientRect();
-        entries.push({
-          box: [word.left, word.top, word.right, word.bottom],
-          parts: coverage,
-          text: selectedText(range, span),
-        });
+        // The slice is the exact selected part of this word; its own client
+        // rectangles describe where those characters are, in any page layout.
+        const slice = sliceOf(range, span);
+        const text = slice ? slice.toString() : span.textContent;
+        if (!text || !text.trim()) continue;
+        const parts = slice && typeof slice.getClientRects === 'function'
+          ? [...slice.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0).map(rect => [rect.left, rect.right])
+          : [];
+        entries.push({ box: [word.left, word.top, word.right, word.bottom], parts, text });
       }
       const selected = clipWords(entries).map(([left, top, right, bottom, text]) => [(left - box.left) * scaleX, (top - box.top) * scaleY, (right - box.left) * scaleX, (bottom - box.top) * scaleY, text]);
       if (!selected.length) return;
@@ -350,8 +410,16 @@
     }
     // Clearing a browser selection must permit choosing the same passage again.
     // Keep the frozen source available while toolbar/dialog focus collapses it.
-    function selectionChanged() { const value = window.getSelection(); if (!value?.rangeCount || value.isCollapsed) lastSelection = ''; }
+    function selectionChanged() {
+      const value = window.getSelection();
+      if (!value?.rangeCount || value.isCollapsed) { lastSelection = ''; return; }
+      const anchor = layerOf(value.anchorNode), focus = layerOf(value.focusNode);
+      if (!anchor || anchor !== focus || !root.contains(anchor)) return;
+      // Remember the last real selection of the current drag for pointerup.
+      try { pendingRange = value.getRangeAt(0).cloneRange(); } catch { pendingRange = null; }
+    }
     const resizeObserver = new ResizeObserver(() => { try { resize(); } catch (error) { onStatus(error.message, true); } }); resizeObserver.observe(root);
+    root.addEventListener('pointerdown', () => { pendingRange = null; }, { passive: true });
     root.addEventListener('scroll', scroll, { passive: true }); root.addEventListener('pointerup', pointerUp); root.addEventListener('keyup', captureSelection); root.addEventListener('click', click); setTool('select');
     document.addEventListener('selectionchange', selectionChanged);
     function dispose() { clear(); disposed = true; queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); document.removeEventListener('selectionchange', selectionChanged); }
