@@ -19,3 +19,4 @@ artifacts/
 *.png
 *.log
 coverage/
+_site/

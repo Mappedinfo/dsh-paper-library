@@ -4,21 +4,57 @@
   "private": true,
   "description": "Independent literature library with portable PDF annotations for DeepSeek Harness",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/mappedinfo/dsh-paper-library.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mappedinfo/dsh-paper-library.git"
+  },
   "homepage": "https://github.com/mappedinfo/dsh-paper-library#readme",
-  "bugs": { "url": "https://github.com/mappedinfo/dsh-paper-library/issues" },
+  "bugs": {
+    "url": "https://github.com/mappedinfo/dsh-paper-library/issues"
+  },
   "type": "module",
-  "engines": { "node": "^22.19.0 || >=24" },
+  "engines": {
+    "node": "^22.19.0 || >=24"
+  },
   "main": "./src/harness/index.mjs",
-  "bin": { "paper-library": "./src/cli.mjs" },
+  "bin": {
+    "paper-library": "./src/cli.mjs"
+  },
   "exports": {
     ".": "./src/harness/index.mjs",
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
-  "files": ["src/**/*.mjs", "src/**/*.py", "lib/client.js", "web", "skills", "vendor/csl", "cordis.patch.yml", "pyproject.toml", "uv.lock", "README.md", "HANDOFF.md", "CHANGELOG.md", "THIRD_PARTY.md", "docs/api.md", "docs/validation.md", "docs/annotation-reference-design.md", "docs/library-datasets-knowledge-design.md", "docs/upstream-manifest.md", "docs/validation", "LICENSE", "licenses"],
+  "files": [
+    "src/**/*.mjs",
+    "src/**/*.py",
+    "lib/client.js",
+    "web",
+    "skills",
+    "vendor/csl",
+    "cordis.patch.yml",
+    "pyproject.toml",
+    "uv.lock",
+    "README.md",
+    "HANDOFF.md",
+    "CHANGELOG.md",
+    "THIRD_PARTY.md",
+    "docs/api.md",
+    "docs/validation.md",
+    "docs/annotation-reference-design.md",
+    "docs/library-datasets-knowledge-design.md",
+    "docs/upstream-manifest.md",
+    "docs/validation",
+    "LICENSE",
+    "licenses",
+    "site",
+    "docs/whiteboard-design.md",
+    "docs/board-pages.md"
+  ],
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "inject": [
@@ -39,7 +75,10 @@
     "verify:github": "node scripts/verify-github.mjs",
     "start": "node src/server.mjs",
     "dev": "node src/server.mjs",
-    "install:harness": "node scripts/install-harness.mjs"
+    "install:harness": "node scripts/install-harness.mjs",
+    "build:site": "node scripts/build-site.mjs",
+    "test:standalone": "node scripts/board-standalone-fixture.mjs",
+    "test:board-harness": "node scripts/board-harness-smoke.mjs"
   },
   "dependencies": {
     "@citation-js/core": "^0.7.18",
@@ -63,19 +102,47 @@
     "@deepseek-ai/dsh-client-ui-input-trigger": ">=0.1.5-rc.2 <0.2.0"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/schemastery": { "optional": true },
-    "@deepseek-ai/cordis": { "optional": true },
-    "@deepseek-ai/dsh-tools": { "optional": true },
-    "@deepseek-ai/dsh-llm": { "optional": true },
-    "@deepseek-ai/dsh-home-paths": { "optional": true },
-    "@deepseek-ai/dsh-atomic-write": { "optional": true },
-    "@deepseek-ai/dsh-client-connection": { "optional": true },
-    "@deepseek-ai/dsh-host-webserver": { "optional": true },
-    "@deepseek-ai/dsh-client-locale": { "optional": true },
-    "@deepseek-ai/dsh-client-ui-sidebar-right": { "optional": true },
-    "@deepseek-ai/dsh-client-ui-model-selection": { "optional": true },
-    "@deepseek-ai/dsh-client-ui-conversation": { "optional": true },
-    "@deepseek-ai/dsh-client-ui-input-trigger": { "optional": true }
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    },
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-home-paths": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-atomic-write": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-connection": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-host-webserver": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-locale": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-sidebar-right": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-model-selection": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-conversation": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-input-trigger": {
+      "optional": true
+    }
   },
-  "devDependencies": { "esbuild": "^0.25.0" }
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
 }

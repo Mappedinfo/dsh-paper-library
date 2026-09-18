@@ -56,10 +56,10 @@ function environment(ids = []) {
   return { doc, registry, Element };
 }
 
-function loadPanel({ api, confirm = true } = {}) {
+function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
   const ids = [
     'board-stage', 'board-select', 'board-status', 'board-zoom-label', 'board-zoom-in', 'board-zoom-out', 'board-fit',
-    'board-undo', 'board-redo', 'board-delete', 'board-title', 'board-new', 'board-close', 'board-add-paper',
+    'board-undo', 'board-redo', 'board-delete', 'board-title', 'board-new', 'board-close', 'board-add-paper', 'board-send', 'board-tidy', 'board-fullscreen',
     'board-conflict', 'board-conflict-note', 'board-conflict-reload', 'board-conflict-copy', 'board-accept-ai',
     'board-relation', 'board-edge-label-input', 'board-color', 'board-kind', 'board-selection',
     'board-tool-select', 'board-tool-pan', 'board-tool-text', 'board-tool-note', 'board-tool-rect', 'board-tool-ellipse', 'board-tool-diamond',
@@ -81,7 +81,8 @@ function loadPanel({ api, confirm = true } = {}) {
   vm.createContext(context);
   vm.runInContext(source, context);
   const board = context.window.PaperBoard;
-  const panel = board.create({ root, api: api || (async () => ({})), toast: (message) => messages.push(message) });
+  if (canvas) { const original = Element.prototype; original.__canvas = canvas; }
+  const panel = board.create({ root, api: api || (async () => ({})), toast: (message) => messages.push(message), ...(capabilities ? { capabilities } : {}) });
   const stage = registry.get('board-stage');
   const svg = stage.children[0];
   return {
@@ -351,6 +352,52 @@ test('the tidy control arranges the board, persists it and declines a single nod
   assert.equal(harness.panel.board().nodes.length, 0);
   assert.equal(harness.panel.tidy(), 0);
   assert.equal(harness.messages.some(message => /至少要有两个节点/.test(message)), true);
+});
+
+test('still exports paint from the model, so the file never depends on page styles', () => {
+  const calls = [];
+  const context = new Proxy({}, {
+    get: (_target, key) => {
+      if (['fillStyle', 'strokeStyle', 'lineWidth', 'font', 'textAlign'].includes(key)) return '';
+      if (['save', 'restore', 'translate', 'scale', 'beginPath', 'moveTo', 'lineTo', 'arc', 'arcTo', 'rect', 'ellipse', 'closePath', 'fill', 'stroke', 'fillRect', 'fillText', 'setLineDash'].includes(key)) return (...args) => calls.push([key, ...args]);
+      return undefined;
+    },
+    set: () => true,
+  });
+  const canvasStub = { width: 0, height: 0, getContext: () => context };
+  const { board } = loadPanel();
+  const nodes = [
+    { id: 'n-1', kind: 'note', x: 0, y: 0, w: 220, h: 140, text: '导出节点一', origin: 'user' },
+    { id: 'n-2', kind: 'paper', x: 400, y: 40, w: 260, h: 120, text: 'Paper A', origin: 'user', paper: { id: 'paper_a', title: 'Paper A', year: 2025, citekey: 'k2025' } },
+    { id: 'n-3', kind: 'ellipse', x: 0, y: 300, w: 160, h: 90, text: 'AI 提议', origin: 'llm' },
+  ];
+  const value = { schema: 1, title: '导出画板', origin: 'user', status: 'saved', nodes, edges: [{ id: 'e-1', from: 'n-1', to: 'n-2', kind: 'arrow', relation: 'explains', label: '解释' }] };
+  board.renderToCanvas(value, canvasStub, { scale: 2, padding: 40 });
+  // The bitmap covers the content plus padding, at the requested density.
+  assert.equal(canvasStub.width, Math.round((400 + 260 + 80) * 2));
+  assert.equal(canvasStub.height, Math.round((300 + 90 + 80) * 2));
+  const kinds = calls.map(call => call[0]);
+  // Three node bodies plus the arrowhead.
+  assert.equal(kinds.filter(kind => kind === 'fill').length >= 3, true, 'every node is painted');
+  assert.equal(kinds.filter(kind => kind === 'stroke').length >= 4, true, 'edges and node outlines are painted');
+  assert.equal(calls.some(call => call[0] === 'ellipse'), true, 'an ellipse node keeps its shape');
+  assert.equal(calls.some(call => call[0] === 'setLineDash' && Array.isArray(call[1]) && call[1].length === 2), true, 'an AI proposal keeps its dashed outline');
+  assert.equal(calls.filter(call => call[0] === 'fillText').some(call => /2025/.test(String(call[1]))), true, 'paper metadata is drawn');
+  assert.equal(calls.some(call => call[0] === 'fillText' && call[1] === '解释'), true, 'edge labels are drawn');
+  assert.throws(() => board.renderToCanvas(value, { getContext: () => null }), /不支持画布导出/);
+});
+
+test('a host without a library or composer hides those controls instead of faking them', async () => {
+  const harness = loadPanel({ api: apiStub(), capabilities: { libraryPapers: false, conversation: false } });
+  assert.equal(harness.registry.get('board-add-paper').hidden, true);
+  assert.equal(harness.registry.get('board-send').hidden, true);
+  // The hidden reference control must also refuse programmatically, not just visually.
+  assert.equal(await harness.panel.sendToConversation(), false);
+  assert.equal(harness.messages.some(message => /DSH/.test(message)), false, 'a hidden control does not nag');
+
+  const full = loadPanel({ api: apiStub() });
+  assert.equal(full.registry.get('board-add-paper').hidden, false);
+  assert.equal(full.registry.get('board-send').hidden, false);
 });
 
 test('a knowledge-graph node joins the board without inventing metadata', async () => {

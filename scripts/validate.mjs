@@ -23,6 +23,8 @@ const commands=[
   ['paper_analysis_syntax',process.execPath,['--check','web/paper-analysis.js']],
   ['challenge_mining_syntax',process.execPath,['--check','web/challenge-mining.js']],
   ['board_syntax',process.execPath,['--check','web/board.js']],
+  ['standalone_syntax',process.execPath,['--check','site/standalone.js']],
+  ['site_build',process.execPath,['scripts/build-site.mjs']],
   ['settings_syntax',process.execPath,['--check','web/settings.js']],
 ];
 const checks=[];

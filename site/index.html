@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>文献画板 · Paper Library Whiteboard</title>
+  <meta name="description" content="独立运行的文献画板：自由画布、思维导图整理、PNG 与 JSON 导出。DSH 插件里的画板与它共用同一份画布代码。">
+  <link rel="stylesheet" href="./theme.css">
+  <link rel="stylesheet" href="./board.css">
+  <style>
+    html, body { height: 100%; }
+    body { margin: 0; display: flex; flex-direction: column; background: var(--paper); color: var(--ink); font: 14px/1.6 var(--sans, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif); }
+    .site-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .site-header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+    .site-header p { margin: 0; font-size: 11px; color: var(--muted); }
+    .site-header .site-actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+    .site-header .button { font-size: 12px; padding: 5px 9px; min-height: 30px; }
+    .site-header a { color: var(--muted); font-size: 11px; }
+    #board-view { flex: 1; min-height: 0; grid-column: auto; grid-row: auto; }
+    #board-view:fullscreen { background: var(--paper); }
+    .site-foot { border-top: 1px solid var(--line); padding: 6px 14px; font-size: 11px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; }
+    .site-foot strong { font-weight: 600; }
+    .standalone-status { color: var(--dsw-alias-state-warn-label, #88520f); }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div>
+      <h1>文献画板</h1>
+      <p>独立画布服务 · 数据只保存在这个浏览器里 · 请用「导出 JSON」做长期备份</p>
+    </div>
+    <div class="site-actions">
+      <button id="site-export-json" class="button subtle" type="button" title="把全部画板导出为一个 JSON 文件">导出 JSON</button>
+      <button id="site-import-json" class="button subtle" type="button" title="从导出的 JSON 文件恢复画板；同标识会导入为新画板">导入 JSON</button>
+      <button id="site-export-png" class="button subtle" type="button" title="把当前画板导出为 PNG 图片">导出 PNG</button>
+      <input id="site-import-file" type="file" accept="application/json,.json" hidden>
+      <a href="https://github.com/Mappedinfo/dsh-paper-library" target="_blank" rel="noreferrer noopener">GitHub 源码</a>
+    </div>
+  </header>
+  <!--BOARD_MARKUP-->
+  <footer class="site-foot">
+    <span><strong>独立模式</strong>：没有文献库、没有模型、没有对话引用，全部绘制都在本地完成。</span>
+    <span class="standalone-status" id="site-storage-status" role="status"></span>
+  </footer>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="./board.js" defer></script>
+  <script src="./standalone.js" defer></script>
+</body>
+</html>

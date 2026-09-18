@@ -313,6 +313,103 @@
   const emptyBoard = () => ({ schema: 1, title: '未命名画板', origin: 'user', status: 'saved', view: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [] });
 
   /**
+   * Draw a board onto a 2D canvas for a still export. This deliberately paints from the
+   * model instead of serializing the live SVG: the page's stylesheet, theme variables and
+   * fonts never leak into the file, and the result is identical wherever it runs.
+   */
+  function renderToCanvas(board, canvas, options = {}) {
+    const scale = options.scale ?? 2, padding = options.padding ?? 40;
+    const palette = { background: '#ffffff', nodeFill: '#ffffff', nodeStroke: '#b9c3b6', paperFill: '#edf3fe', paperStroke: '#4176e6', noteFill: '#fdf6e8', ink: '#0f1115', muted: '#61666b', edge: '#6b7268', ...(options.palette ?? {}) };
+    const bounds = boundsOf(board.nodes) ?? { x: 0, y: 0, w: 640, h: 360 };
+    const width = Math.round((bounds.w + padding * 2) * scale), height = Math.round((bounds.h + padding * 2) * scale);
+    canvas.width = Math.max(1, width);
+    canvas.height = Math.max(1, height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('当前环境不支持画布导出。');
+    ctx.save();
+    ctx.scale(scale, scale);
+    ctx.fillStyle = palette.background;
+    ctx.fillRect(0, 0, width / scale, height / scale);
+    ctx.translate(padding - bounds.x, padding - bounds.y);
+    const byId = new Map(board.nodes.map(node => [node.id, node]));
+    const wrap = (text, perLine, lines) => {
+      const value = String(text ?? '');
+      const rows = [];
+      let row = '';
+      for (const character of value) {
+        row += character;
+        if (row.length >= perLine || character === '\n') { rows.push(row.replace(/\n$/, '')); row = ''; }
+        if (rows.length >= lines) break;
+      }
+      if (row && rows.length < lines) rows.push(row);
+      if (rows.join('').length < value.replace(/\n/g, '').length && rows.length) rows[rows.length - 1] = `${rows[rows.length - 1].slice(0, Math.max(0, perLine - 1))}…`;
+      return rows;
+    };
+    // Edges first so nodes cover their ends.
+    for (const edge of board.edges) {
+      const from = byId.get(edge.from), to = byId.get(edge.to);
+      if (!from || !to) continue;
+      const geometry = edgeGeometry(from, to, edge.kind);
+      ctx.strokeStyle = edge.origin === 'llm' ? palette.muted : palette.edge;
+      ctx.lineWidth = 1.6;
+      if (edge.origin === 'llm') ctx.setLineDash([6, 4]); else ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(geometry.start.x, geometry.start.y);
+      ctx.lineTo(geometry.end.x, geometry.end.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (edge.kind === 'arrow') {
+        const angle = Math.atan2(geometry.end.y - geometry.start.y, geometry.end.x - geometry.start.x), size = 9;
+        ctx.fillStyle = palette.edge;
+        ctx.beginPath();
+        ctx.moveTo(geometry.end.x, geometry.end.y);
+        ctx.lineTo(geometry.end.x - size * Math.cos(angle - Math.PI / 7), geometry.end.y - size * Math.sin(angle - Math.PI / 7));
+        ctx.lineTo(geometry.end.x - size * Math.cos(angle + Math.PI / 7), geometry.end.y - size * Math.sin(angle + Math.PI / 7));
+        ctx.closePath();
+        ctx.fill();
+      }
+      if (edge.label) {
+        ctx.fillStyle = palette.muted;
+        ctx.font = '11px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(String(edge.label).slice(0, 40), geometry.mid.x, geometry.mid.y - 5);
+        ctx.textAlign = 'left';
+      }
+    }
+    for (const node of board.nodes) {
+      const b = nodeBounds(node);
+      const isPaper = node.kind === 'paper';
+      ctx.fillStyle = isPaper ? palette.paperFill : node.kind === 'note' ? palette.noteFill : palette.nodeFill;
+      ctx.strokeStyle = node.color ?? (isPaper ? palette.paperStroke : palette.nodeStroke);
+      ctx.lineWidth = node.origin === 'llm' ? 1.2 : 1.5;
+      if (node.origin === 'llm') ctx.setLineDash([5, 3]); else ctx.setLineDash([]);
+      ctx.beginPath();
+      if (node.kind === 'ellipse') ctx.ellipse(b.cx, b.cy, b.w / 2, b.h / 2, 0, 0, Math.PI * 2);
+      else if (node.kind === 'diamond') { ctx.moveTo(b.cx, b.y); ctx.lineTo(b.right, b.cy); ctx.lineTo(b.cx, b.bottom); ctx.lineTo(b.x, b.cy); ctx.closePath(); }
+      else if (node.kind === 'text') ctx.rect(b.x, b.y, b.w, b.h);
+      else { const radius = 10; ctx.moveTo(b.x + radius, b.y); ctx.arcTo(b.right, b.y, b.right, b.bottom, radius); ctx.arcTo(b.right, b.bottom, b.x, b.bottom, radius); ctx.arcTo(b.x, b.bottom, b.x, b.y, radius); ctx.arcTo(b.x, b.y, b.right, b.y, radius); ctx.closePath(); }
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = palette.ink;
+      ctx.font = '13px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+      const inner = Math.max(4, b.w - 20), perLine = Math.max(4, Math.floor(inner / 13));
+      if (isPaper && node.paper) {
+        ctx.fillStyle = palette.muted;
+        ctx.font = '11px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+        ctx.fillText(String([node.paper.year, node.paper.citekey].filter(Boolean).join(' · ') || '文献').slice(0, 60), b.x + 10, b.y + 18);
+        ctx.fillStyle = palette.ink;
+        ctx.font = '13px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+        wrap(node.text || node.paper.title || node.paper.id, perLine, 4).forEach((line, index) => ctx.fillText(line, b.x + 10, b.y + 42 + index * 17));
+      } else {
+        wrap(node.text, perLine, 6).forEach((line, index) => ctx.fillText(line, b.x + 10, b.y + 24 + index * 17));
+      }
+    }
+    ctx.restore();
+    return canvas;
+  }
+
+  /**
    * One knowledge-graph node becomes one board node. A paper-typed graph node keeps its
    * paper binding; anything else becomes a concept/text node carrying only the label the
    * graph already showed, so the board never invents metadata the graph did not have.
@@ -332,6 +429,8 @@
     const toast = options.toast || (() => {});
     const onClose = options.onClose || (() => {});
     const onOpenPaper = options.onOpenPaper || null;
+    // A static host has no library and no composer; those controls are hidden rather than faked.
+    const capabilities = { libraryPapers: true, conversation: true, ...(options.capabilities ?? {}) };
     const doc = root.ownerDocument || document;
     const $ = id => doc.getElementById(id);
     const stage = $('board-stage');
@@ -414,7 +513,7 @@
 
     /** Freeze what the reader sees, then ask the host to place its chip in the draft. */
     async function sendToConversation() {
-      if (!boardId) return false;
+      if (!boardId || !capabilities.conversation) return false;
       const view = doc.defaultView;
       // Outside DSH there is no composer at all; say that before blaming the session.
       if (!view?.parent || view.parent === view) { toast('请从 DSH 的文献库面板打开画板，才能把画板引用放进对话。', true); return false; }
@@ -1173,6 +1272,8 @@
       const emptyCreate = $('board-create-first');
       if (emptyCreate) emptyCreate.addEventListener('click', () => void createBoard());
       // The inspector only offers a shape change for a single node; paper nodes keep their binding.
+      if (!capabilities.libraryPapers) for (const id of ['board-add-paper']) { const control = $(id); if (control) control.hidden = true; }
+      if (!capabilities.conversation) for (const id of ['board-send']) { const control = $(id); if (control) control.hidden = true; }
     }
 
     /** Selects are filled from the exported constants so the UI cannot drift from the schema. */
@@ -1231,7 +1332,7 @@
   }
 
   window.PaperBoard = Object.freeze({
-    create, model, outline, createNode, paperNode, nodeFromGraphPayload, tidyTree, placeInColumn, boardFromPapers,
+    create, model, outline, renderToCanvas, createNode, paperNode, nodeFromGraphPayload, tidyTree, placeInColumn, boardFromPapers,
     LIMITS, NODE_KINDS, KIND_LABEL, RELATIONS, RELATION_ORDER, EDGE_KINDS, COLORS, DEFAULT_SIZE,
     geometry: { round, round3, clamp, nodeBounds, toScene, toScreen, applyZoom, boundsOf, viewportFor, hitNode, hitEdge, edgeGeometry, anchorPoint, distanceToSegment, normalizeRect, idsInRect },
   });

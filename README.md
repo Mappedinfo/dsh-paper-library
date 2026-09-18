@@ -50,7 +50,17 @@
 - **AI 也能读写画板**：DSH 会话可用 `library_board` 工具列出、读取、创建与修改画板。模型新增或改动的节点与连线会标为「AI 提议」（虚线边框）等待你确认，未改动的内容保留你的署名，只有你能「接受 AI 改动」；AI 新建的画板在你保存前一直是待核对状态。
 - **保存与冲突**：画板改动自动保存到运行 DSH 的本机（与批注草稿同一私有状态目录），关闭画板、切换画板或离开页面都会先写入。若同一张画板在另一个窗口被修改，界面会提示冲突，并提供「载入已保存版本」或「另存为新画板」，两边都不会被覆盖。删除画板只置墓碑，记录仍留在本机状态目录，可由人工恢复。
 
-画板只在打开时存在于浏览器内存：没有常驻渲染进程、没有后台任务，打开、列表与绘制都不调用模型。验证记录见 [18 项真实 Chromium 回执](docs/validation/board-browser.json) 与 [7 项原生 DSH 回执](docs/validation/board-harness.json)，设计与边界见 [docs/whiteboard-design.md](docs/whiteboard-design.md)。
+画板只在打开时存在于浏览器内存：没有常驻渲染进程、没有后台任务，打开、列表与绘制都不调用模型。验证记录见 [19 项真实 Chromium 回执](docs/validation/board-browser.json) 与 [7 项原生 DSH 回执](docs/validation/board-harness.json)，设计与边界见 [docs/whiteboard-design.md](docs/whiteboard-design.md)。
+
+### 独立画板（GitHub Pages）
+
+同一份画布代码也作为一个**独立静态画板**发布在 GitHub Pages 上，不需要 DSH、不需要服务器：
+`https://mappedinfo.github.io/dsh-paper-library/`。它由 `.github/workflows/pages.yml` 在 main 上自动构建部署；
+页面里的文献库、阅读器、对话引用控件在独立模式下**隐藏而不是假装可用**。存储用的是浏览器
+`localStorage`（按来源与浏览器各自独立，容量约 5 MB，上限 40 张画板 / 4 MiB，界面会报告用量），
+因此**「导出 JSON」才是长期备份**；导入同标识的文件不会覆盖，而是另存为新画板。独立站支持 PNG 导出
+（按模型绘制，不依赖页面样式与字体）。构建与边界见 [docs/board-pages.md](docs/board-pages.md)，
+本地回执见 [docs/validation/board-standalone.json](docs/validation/board-standalone.json)。
 
 ## 实时伴学
 
