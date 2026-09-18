@@ -1,0 +1,156 @@
+# Literature whiteboard (画板)
+
+## Scope decision
+
+Accepted 2026-09-18 from the owner's request for "a whiteboard like Excalidraw or draw.io that can
+interact with DSH's built-in references". The owner selected, explicitly:
+
+- **Shape** — a free canvas first (shapes, text, free placement, pan/zoom) that can be *snapped* into
+  a mind-map tree on demand. Not a pure auto-layout graph and not a graph-only tool.
+- **Reference interaction** — (1) board → conversation: selected board content becomes a reference
+  chip in the DSH composer; (2) library/graph → board: papers drag into the canvas as nodes and
+  double-click back into the reader; (3) the DSH agent can read and write boards through a host tool.
+  Node ↔ `@file`/`@session` binding was explicitly **not** selected and is out of scope.
+- **Implementation** — a self-contained SVG canvas with no new runtime dependency. Excalidraw and
+  tldraw were rejected for bundle size and (for tldraw) licence review.
+- **Placement** — a new view inside this project's own `web/` application, which DSH already embeds as
+  the same-origin `sidebar.right.pane.tab` iframe, with a fullscreen mode for narrow sidebars.
+
+## Verified basis for not installing an existing plugin
+
+The board is built here rather than installed because no published plugin provides the requested
+combination. Names were checked against the public npm registry on 2026-09-18, not asserted from
+memory:
+
+| Package | Registry | What it actually is |
+| --- | --- | --- |
+| `dsh-plugin-canvas` | 0.1.0 | infinite **session** canvas: workspaces, agent presets and session cards |
+| `omnimux-workflow` | 0.1.1 | workflow DAG editor with node/edge execution |
+| `dsh-plugin-freecanvas` | 0.2.0 | app shell that embeds a local Canvas Agent; split layouts |
+| `dsh-wf` | 2.4.5 | UI **sketch** pad in the composer that emits a JSONL description |
+| `dsh-comfyui-canvas` | 0.1.7 | embeds a ComfyUI instance for image/video/3D generation |
+| `dsh-with-pencil` | 0.5.5 | session-aware Pencil (pen.dev) design integration |
+| `@huanlin/dsh-plugin-aigc-canvas` | 0.1.9 | AIGC node canvas (text→image/video/audio) |
+| `@xiaohe-store/dsh-canvas` | 0.1.15 | e-commerce content canvas with templates |
+| `canvas-agent-dsh` | **404** | not published |
+| `dsh-ramify` | **404** | not published |
+
+None of the published packages is a free-form Excalidraw/draw.io-style board, and none reads or
+writes DSH's `@` reference system or the paper library. Two names that circulated in an earlier
+assistant reply do not exist at all, so that reply is treated as unverified and is not a basis for
+installation.
+
+## Data model
+
+One board is one host-owned record under the plugin's existing private state store
+(`$DSH_HOME/paper-library/<library-hash>/state`), keyed `board:<id>`. This reuses the store's existing
+guarantees instead of adding a second persistence path: 256 KiB per record, revision-checked writes
+(`expected_revision`, first write `0`), atomic replacement, private directory. Listing reads at most
+50 board records through the store's own bounded `list({ prefix: 'board:' })`; no separate index
+record exists, so a listing can never drift from the boards themselves.
+
+```jsonc
+{
+  "schema": 1,
+  "board": {
+    "id": "b-<12 hex>",              // [A-Za-z0-9_-]{1,60}
+    "title": "…",                     // 1–200 characters
+    "created_at": "…", "updated_at": "…",
+    "origin": "user" | "llm",         // who created the record
+    "status": "saved" | "needs-review", // AI writes are reviewable, like every other AI draft
+    "view": { "x": 0, "y": 0, "zoom": 1 },
+    "nodes": [{
+      "id": "n-<12 hex>", "kind": "text|note|concept|paper|rect|ellipse|diamond",
+      "x": 0, "y": 0, "w": 240, "h": 120, "text": "…", "color": "#rrggbb",
+      "paper": { "id": "…", "title": "…", "year": 2025, "citekey": "…" }
+    }],
+    "edges": [{ "id": "e-<12 hex>", "from": "n-…", "to": "n-…", "label": "…",
+                "kind": "arrow|line|elbow",
+                "relation": "related|supports|contradicts|cites|explains|extends" }]
+  }
+}
+```
+
+Bounds are enforced by the store module before any write, with explicit messages rather than silent
+truncation: ≤ 400 nodes, ≤ 800 edges, ≤ 2000 characters of node text, coordinates within ±1e6,
+zoom 0.2–4, and the store's own 256 KiB record cap. A board node that points at a paper stores a
+**denormalized, at-write-time copy** of that paper's title/year/citekey: the board stays readable when
+the paper is archived, and the reader is always the authority for current metadata. Node `paper.id`
+is the only identity that matters; a missing paper degrades to a plain node, never to a fabricated
+title.
+
+## Reference interaction contract
+
+A board reference reuses the plugin's proven reference shape rather than DSH's generic file
+references, because only the plugin owns immutable snapshots and the `agent/pre-step` expansion:
+
+1. **Freeze.** "放入对话" writes one immutable, content-addressed snapshot record
+   `board-ref:<sha256>` (key grammar allowed by the store) containing the rendered outline text plus
+   node/edge identity, the board revision it came from, and `created_at`. Sending again creates a new
+   snapshot; nothing mutates an existing one.
+2. **Token.** The inserted chip carries `[[paper-library-board:v1:<boardId>:<snapshotHash>]]`, whose
+   canonical text *is* its clipboard form, exactly like `[[paper-library-ref:v1:…]]`.
+3. **Chip.** A second registered `@` source (`paper-library-boards`, order 30) owns the token: it
+   lists at most five recent board references for the current session, and implements
+   `codec.serialize`/`clipboardText` plus `openReference` for the editor. Chips route by source name,
+   so annotation chips and board chips cannot be confused.
+4. **Expansion.** The host expands board tokens in `agent/pre-step`. The visible draft keeps a short
+   `〔引用画板 …〕` marker, and the frozen text is appended as a **separate** user message from source
+   `paper-library-board`. The rendering is bounded by the same character budget as annotation
+   references, and a truncation is stated in the text itself rather than silently applied.
+5. **Distinguishability.** Board material is user-authored source, never model output; the appended
+   message carries its own source name and no AI provenance. Snapshot loading does not call a model.
+
+Unlike annotation snapshots, a board snapshot is **not bound to one paper conversation**: a board is
+cross-paper by nature, so it may be referenced from any session. Session identity is recorded for
+provenance only and is not an authorization gate. Board snapshots are shape-validated before use; a
+malformed or missing snapshot fails the turn with a readable message instead of dropping the material
+silently.
+
+## Phases
+
+- **P1 — record and agent tool (model-free).** `src/harness/board-store.mjs` (validation, CRUD,
+  bounded listing, snapshots), HTTP actions `board_list|board_get|board_put|board_delete`, the native
+  `library_board` tool (AI writes marked `origin:'llm'`, `status:'needs-review'`), and the `status`
+  capability flag. No canvas yet.
+- **P2 — free canvas.** `web/board.js` + `web/board.css`: SVG canvas with pan/zoom, text/note/shape
+  nodes, drag, resize, edge drawing, multi-select, delete, bounded undo/redo, debounced
+  revision-checked saving, board switcher, fullscreen. Wired into `index.html`, `app.js`, the
+  `src/http.mjs` asset allowlist, and `scripts/validate.mjs` syntax checks.
+- **P3 — library integration and snapping.** Drag papers from the catalog or knowledge graph onto the
+  canvas (paper nodes), double-click back into the reader, deterministic tidy-tree layout for a
+  selection, and "generate a board from selected papers".
+- **P4 — reference chips.** Snapshot store, token family, the `paper-library-boards` `@` source, the
+  bridge `board_draft` action, host `agent/pre-step` expansion, and the frozen-material inspector.
+
+## Invariants
+
+- No new runtime dependency, no model call while opening, listing or drawing a board, and no
+  background worker. The canvas runs only while its view is visible.
+- Every write is revision-checked; a conflicting write reports the conflict and preserves both the
+  saved board and the local unsaved edit rather than overwriting.
+- A board never becomes the authority for paper metadata, and a paper node never invents a title it
+  did not read from the catalog.
+- Board content that reaches a conversation is frozen at send time, labelled as user material, and
+  bounded; the outline rendering states its own truncation.
+- Board records are user data: they are not evicted, and browser `localStorage`/`sessionStorage` is
+  never authoritative.
+
+## Acceptance
+
+Synthetic-only validation, following the existing project discipline:
+
+- `tests-js/board-store.test.mjs` — schema bounds, revision conflicts, forbidden keys, bounded
+  listing, snapshot immutability, and AI-write review marking, all against an in-memory/temporary
+  store with no private data.
+- `tests-js/board-panel.test.mjs` — canvas reducer behavior (create/drag/connect/delete/undo/redo,
+  tidy-tree layout determinism) through the same fake-DOM harness the other panels use.
+- `tests-js/board-references.test.mjs` — token parse/render, chip codec round-trip, snapshot
+  integrity, and `agent/pre-step` expansion including the malformed and over-budget paths.
+- `scripts/board-browser-fixture.mjs` — real Chromium receipt for draw/drag/zoom/connect/save/reload,
+  library drag-in, tidy-tree snapping, and the board→conversation chip.
+- `scripts/board-harness-smoke.mjs` — native DSH check that the tool reads and writes a board and
+  that a board reference reaches a turn as frozen material, model-free stages only.
+
+Not claimed: Excalidraw feature parity (no freehand pressure curves, no image import, no multiplayer),
+tldraw-style shape binding, real-library capacity numbers, or any provider-quality claim.

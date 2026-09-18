@@ -9,6 +9,8 @@ import { createLocalStateStore, LocalStateError } from './local-state.mjs';
 import { createLanguageLearning } from './harness/language-learning.mjs';
 import { createPaperAnalysis } from './harness/paper-analysis.mjs';
 import { createChallengeMining } from './harness/challenge-mining.mjs';
+import { createBoardStore } from './harness/board-store.mjs';
+import { handleBoardRequest } from './harness/board-tools.mjs';
 import { createPaperLibrarySettings } from './harness/settings.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
@@ -99,6 +101,8 @@ export function createFetchHandler(options = {}) {
   const learningRecords = options.languageLearning || createLanguageLearning({ store: localState, dispatch, library: options.library || defaultLibrary, python: options.python });
   const analysisRecords = options.paperAnalysis || createPaperAnalysis({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python});
   const challengeRecords = options.challengeMining || createChallengeMining({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python});
+  // Whiteboards are local state only: they never initialize a model route or the Python worker.
+  const boards = options.boards || createBoardStore({ localState });
   return async function handle(request) {
     const url = new URL(request.url);
     if (options.loopbackOnly) {
@@ -125,6 +129,7 @@ export function createFetchHandler(options = {}) {
           if(companionAction&&!options.companion)return json({ok:false,error:'实时伴学需要连接 DSH 服务。'},409);
           const chatAction = typeof input?.action === 'string' && input.action.startsWith('chat_');
           const stateAction = typeof input?.action === 'string' && input.action.startsWith('state_');
+          const boardAction = typeof input?.action === 'string' && input.action.startsWith('board_');
           const languageAction = languageActions.has(input?.action);
           if (chatAction && !options.paperChat) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板打开论文对话。'},400);
           if (input?.action === 'language_generate' && !options.languageLearning) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
@@ -134,6 +139,7 @@ export function createFetchHandler(options = {}) {
             : input?.action === 'settings_update' ? await settings.update(input.patch, input.expected_revision)
             : input?.action === 'settings_reset' ? await settings.reset(input.expected_revision)
             : stateAction ? await stateRequest(localState, input)
+            : boardAction ? await handleBoardRequest(boards, input, { writer: 'user' })
             : typeof input?.action === 'string' && input.action.startsWith('paper_analysis_') ? await analysisRecords(input)
             : typeof input?.action === 'string' && (input.action.startsWith('challenge_extract_') || input.action.startsWith('challenge_theme_suggest_')) ? await challengeRecords(input, { signal: request.signal })
             : input?.action === 'knowledge_generate' ? await options.libraryKnowledge(input, { signal: request.signal })
@@ -147,7 +153,7 @@ export function createFetchHandler(options = {}) {
           }
           if(input.action==='status')result={...result,realtime_companion:Boolean(options.companion)};
           if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true, catalog_management: true, typed_graph: true, reading_workspace: true, durable_state: true, learning_records: true, language_learning: Boolean(options.languageLearning) };
-          if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true, challenge_mining:Boolean(options.challengeMining), challenge_scan:true, challenge_themes:true, challenge_export:true, challenge_comparison:true, challenge_review_packet:true };
+          if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true, challenge_mining:Boolean(options.challengeMining), challenge_scan:true, challenge_themes:true, challenge_export:true, challenge_comparison:true, challenge_review_packet:true, whiteboard:true };
           return json({ok:true,result});
         } finally { jsonRequests--; }
       }

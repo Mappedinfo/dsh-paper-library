@@ -15,6 +15,7 @@ import { createPaperAnalysis } from './paper-analysis.mjs'
 import { createPaperAnalysisAgent } from './paper-analysis-agent.mjs'
 import { createQueuedPaperAnalysis } from './paper-analysis-queue.mjs'
 import { createChallengeMining } from './challenge-mining.mjs'
+import { createBoardStore } from './board-store.mjs'
 import { createCompanionQueue } from './companion-queue.mjs'
 import Schema from '@deepseek-ai/schemastery'
 import { createPaperLibrarySettings, createPaperLibrarySettingsSchema } from './settings.mjs'
@@ -42,9 +43,12 @@ export function apply(ctx, rawConfig = {}) {
   // Delegation stays live when the optional settings provider mounts/unmounts.
   const settings = { get: () => sharedSettings.get(), update: (...args) => sharedSettings.update(...args), reset: (...args) => sharedSettings.reset(...args),subscribe:fn=>{settingsListeners.add(fn);return()=>settingsListeners.delete(fn)} }
   const localState = Object.fromEntries(['get','put','list'].map(method => [method, (...args) => sharedSettings.localState[method](...args)]))
+  // Boards reuse the private state store, so no second persistence path exists.
+  const boards = createBoardStore({ localState })
   const options = {
     library: config.library,
     python: config.python,
+    boards,
     provider: config.provider,
     model: config.model,
     ...(config.translationServer ? { translationServer: config.translationServer } : {}),
