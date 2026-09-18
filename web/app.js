@@ -20,6 +20,7 @@ let knowledgeUI;
 let analysisUI;
 let settingsUI;
 let challengeUI;
+let boardUI;
 let companionUI;
 let preferences = {};
 let durableReaderLoaded = false;
@@ -97,6 +98,8 @@ async function loadStatus() {
     knowledgeUI?.setAvailable(result.knowledge_generation);
     void analysisUI?.setAvailable(result.paper_analysis);
     challengeUI?.setAvailable(result.challenge_mining);
+    // The board is a local-only surface: it appears once the host advertises it.
+    $('board-open').hidden = result.whiteboard !== true;
     void settingsUI?.refresh();
   } catch (error) { $('library-status').textContent = '连接未完成'; errorAt('library-error', error); }
 }
@@ -122,6 +125,16 @@ function renderList() {
     const card = el('button', `paper-card${state.active?.id === item.id ? ' selected' : ''}`);
     card.title=[title(item),[authors(item),year(item)].filter(Boolean).join(' · '),item['container-title'],item.citekey].filter(Boolean).join('\n');
     card.type = 'button'; card.dataset.id = item.id; card.dataset.resourceKind = item.resource_kind || 'paper'; card.setAttribute('aria-pressed', String(state.active?.id === item.id));
+    // Papers can be dragged straight onto the whiteboard; datasets are not board material.
+    if ((item.resource_kind || 'paper') === 'paper') {
+      card.draggable = true;
+      card.addEventListener('dragstart', event => {
+        const payload = JSON.stringify({ id: item.id, title: title(item), year: year(item), citekey: item.citekey });
+        event.dataTransfer?.setData('application/x-paper-library-paper', payload);
+        event.dataTransfer?.setData('text/plain', title(item));
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+      });
+    }
     card.append(el('h3', '', title(item)), el('p', '', `${item.resource_kind === 'dataset' ? item.publisher || '发布者未提供' : authors(item)}${year(item) ? ` · ${year(item)}` : ''}`));
     card.append(el('p', 'card-journal', item.resource_kind === 'dataset' ? '数据集' : item['container-title'] || typeNames[item.type] || '文献资料'));
     const footer = el('div', 'card-footer');
@@ -153,6 +166,9 @@ function clearPage() {
   clearSelection();
 }
 async function openPaper(id) {
+  // Opening a paper takes over the detail column the board occupies; the board settles
+  // its pending edits and is left without stealing focus from the chosen paper.
+  if (boardUI?.isOpen()) await boardUI.close({ focus: false });
   resourceUI?.hide(); knowledgeUI?.hide();
   publishReaderState();
   readerStateReady=false;
@@ -189,8 +205,7 @@ async function openPaper(id) {
     publishReaderState();
   } catch (error) { if (ticket === state.itemTicket) { $('paper-title').textContent = '文献未能打开'; errorAt('detail-error', error); } }
 }
-async function openResource(item){if(!item)return;if(item.resource_kind==='dataset')return resourceUI?.open(item.id);return openPaper(item.id);}
-function renderPaperHeader() {
+async function openResource(item){if(!item)return;if(item.resource_kind==='dataset')return resourceUI?.open(item.id);return openPaper(item.id);}function renderPaperHeader() {
   const item = state.active; if (!item) return;
   $('paper-title').textContent = title(item);
   const details = [authors(item), year(item), item['container-title']].filter(Boolean);
@@ -1078,6 +1093,42 @@ settingsUI = window.PaperLibrarySettings?.create({api,persistence,getLibrary:()=
   companionUI?.applyPreferences(value,descriptor.writable);
   if(value['reading-panel-side'])readingPanels?.setSide(value['reading-panel-side'],{persist:false});
 }});
+boardUI = window.PaperBoard?.create({root:$('board-view'),api,toast,
+  onClose:({focus})=>{if(focus)$('board-open').focus();},
+  onRequestPapers:()=>openBoardPaperPicker(),
+  onOpenPaper:id=>{const item=state.items.find(value=>value.id===id);void openResource(item||{id});},
+});
+$('board-open').addEventListener('click',()=>{void boardUI?.open();});
+let boardPickerTicket=0,boardPickerTimer=null;
+for(const button of document.querySelectorAll('#board-paper-dialog .dialog-close'))button.addEventListener('click',()=>$('board-paper-dialog').close?.());
+/** Keyboard-accessible alternative to dragging a paper onto the canvas. */
+function openBoardPaperPicker(){
+  const dialog=$('board-paper-dialog');
+  if(!dialog||!boardUI)return;
+  const list=$('board-paper-list'),search=$('board-paper-search'),status=$('board-paper-status');
+  async function render(){
+    const ticket=++boardPickerTicket;
+    list.replaceChildren(el('p','small muted','正在检索…'));
+    try{
+      const result=await api('resource_list',{kind:'paper',query:search.value.trim(),limit:30,offset:0,sort:'modified',order:'desc'});
+      if(ticket!==boardPickerTicket)return;
+      const items=(result.items||[]).filter(item=>(item.resource_kind||'paper')==='paper');
+      status.textContent=items.length?`共 ${result.total||items.length} 篇；选择一篇即可加入画板。`:'没有匹配的文献。';
+      list.replaceChildren();
+      for(const item of items){
+        const button=el('button');button.type='button';
+        button.append(el('strong',null,title(item)),el('small',null,[authors(item),year(item)].filter(Boolean).join(' · ')||'文献'));
+        button.addEventListener('click',()=>{boardUI?.addPaper({id:item.id,title:title(item),year:year(item),citekey:item.citekey});toast('已加入画板');dialog.close?.();});
+        list.append(button);
+      }
+    }catch(error){if(ticket!==boardPickerTicket)return;status.textContent=error.message||'检索失败';list.replaceChildren();}
+  }
+  search.value='';
+  search.oninput=()=>{clearTimeout(boardPickerTimer);boardPickerTimer=setTimeout(()=>void render(),200);};
+  dialog.showModal?.();
+  void render();
+}
+
 if(persistence){
   let legacyOffset=0;
   const legacyExport=el('button','button subtle','导出旧草稿');legacyExport.id='legacy-draft-export';legacyExport.type='button';legacyExport.hidden=true;legacyExport.title='下载旧浏览器草稿与当前内容冲突时留下的本机备份';
@@ -1087,7 +1138,7 @@ if(persistence){
   const backup=el('button','button subtle','导出未保存草稿');backup.type='button';backup.addEventListener('click',()=>{const values=persistence.exportPending?.()||[];const url=URL.createObjectURL(new Blob([JSON.stringify({schema:1,drafts:values},null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='paper-library-unsaved-drafts.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});saveStatus.append(label,retry,backup);document.body.append(saveStatus);
   const pending=new Map();persistence.subscribe(event=>{if(event.status==='saved')pending.delete(event.key);else pending.set(event.key,event);const errors=[...pending.values()].filter(value=>value.error);saveStatus.hidden=!errors.length;label.textContent=errors.some(value=>value.status==='conflict')?'另一浏览器已有修改，本窗口草稿尚未落盘。请导出并核对。':'本地保存暂未完成，草稿仍在当前窗口。';});
 }
-window.addEventListener('pagehide', () => { publishReaderState(); companionUI?.dispose();settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); readingPanels?.dispose(); readingShell?.dispose(); });
+window.addEventListener('pagehide', () => { publishReaderState(); boardUI?.dispose(); companionUI?.dispose();settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); readingPanels?.dispose(); readingShell?.dispose(); });
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){publishReaderState();void persistence?.flush({keepalive:true}).catch(()=>{});}});
 window.addEventListener('message', event => {
   receiveHarnessContext(event);

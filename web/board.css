@@ -1,0 +1,59 @@
+/* The board is the workspace's second column, so the library shelf stays visible and
+ * papers can be dragged in; fullscreen (real Fullscreen API) gives it the whole screen. */
+#board-view{grid-column:2;grid-row:1;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--paper);color:var(--ink);font-size:12px}
+#board-view[hidden]{display:none}
+#board-view:fullscreen{border-radius:0}
+.board-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--surface,var(--paper))}
+.board-toolbar .board-group{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.board-toolbar .board-right{margin-left:auto}
+.board-toolbar .board-sep{width:1px;height:20px;background:var(--line);margin:0 2px}
+.board-tool{font:inherit;font-size:12px;padding:5px 9px;min-height:30px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:inherit;cursor:pointer}
+.board-tool:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.board-tool[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.board-toolbar .button{font-size:12px;padding:5px 9px;min-height:30px}
+.board-toolbar .button:disabled,.board-toolbar .board-tool:disabled{opacity:.5;cursor:default}
+.board-title{font:inherit;font-size:13px;font-weight:600;min-width:150px;max-width:280px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:inherit}
+.board-field{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:11px}
+.board-field select{font:inherit;font-size:12px;max-width:220px;padding:5px 6px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:inherit}
+.board-status{font-size:11px;color:var(--muted);min-width:0;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.board-status.is-error{color:var(--dsw-alias-state-error-primary);font-weight:500}
+.board-status.is-saved{color:var(--dsw-alias-state-success-primary)}
+.board-conflict{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--dsw-alias-state-warn-tertiary);color:var(--dsw-alias-state-warn-label)}
+.board-conflict[hidden]{display:none}
+.board-stage{position:relative;flex:1;min-height:280px;overflow:hidden;background-color:var(--paper);background-image:radial-gradient(circle,var(--line) 1px,transparent 1px);touch-action:none}
+#board-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:default}
+#board-canvas.is-pan{cursor:grab}
+#board-canvas.is-panning{cursor:grabbing}
+#board-canvas.is-drawing{cursor:crosshair}
+.board-node{cursor:move}
+.board-node-shape{fill:var(--dsw-alias-bg-layer-2);stroke:var(--line);stroke-width:1.5}
+.board-node-kind-note .board-node-shape{fill:var(--dsw-alias-state-warn-tertiary);stroke:var(--dsw-alias-state-warn-label)}
+.board-node-kind-paper .board-node-shape{fill:var(--dsw-specific-bubble);stroke:var(--dsw-alias-link)}
+.board-node.is-selected .board-node-shape{stroke:var(--dsw-alias-link);stroke-width:2}
+.board-node.is-ai .board-node-shape{stroke-dasharray:5 3}
+.board-node-text{font:500 13px var(--dsw-font-family);fill:var(--ink);pointer-events:none;white-space:pre-wrap}
+.board-node-meta{font:400 11px var(--dsw-font-family);fill:var(--muted);pointer-events:none}
+.board-node-handle{fill:var(--paper);stroke:var(--dsw-alias-link);stroke-width:1.5}
+.board-edge{stroke:var(--line);stroke-width:1.6;fill:none}
+.board-edge-hit{stroke:transparent;stroke-width:12;fill:none;cursor:pointer}
+.board-edge.is-selected{stroke:var(--dsw-alias-link);stroke-width:2.4}
+.board-edge-label{font:400 11px var(--dsw-font-family);fill:var(--muted);pointer-events:none}
+.board-marquee{fill:var(--dsw-alias-interactive-bg-active);stroke:var(--dsw-alias-link);stroke-width:1;stroke-dasharray:4 3}
+.board-marquee[hidden]{display:none}
+.board-editor-layer{position:absolute;inset:0;pointer-events:none}
+.board-text-editor{position:absolute;pointer-events:auto;font:500 13px var(--dsw-font-family);line-height:1.4;padding:6px 8px;border:1px solid var(--dsw-alias-link);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--ink);resize:none;box-sizing:border-box;overflow:auto}
+.board-empty{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:6px;text-align:center;color:var(--muted);pointer-events:none}
+.board-empty[hidden]{display:none}
+.board-empty strong{color:var(--ink);font-size:14px}
+.board-dialog{border:1px solid var(--line);border-radius:12px;background:var(--paper);color:var(--ink);padding:14px;width:min(460px,calc(100vw - 32px))}
+.board-dialog::backdrop{background:var(--dsw-alias-bg-mask-1)}
+.board-dialog h2{font-size:15px;margin:0 0 8px}
+.board-dialog .board-picker{max-height:240px;overflow:auto;display:grid;gap:2px;margin:8px 0}
+.board-dialog .board-picker button{font:inherit;text-align:left;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:inherit;cursor:pointer}
+.board-dialog .board-picker button:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.board-dialog .board-picker small{display:block;color:var(--muted);font-size:10px}
+.board-dialog .dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}
+.board-dialog .field{display:grid;gap:4px;margin:6px 0}
+.board-dialog input,.board-dialog select{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:inherit}
+body.board-mode .detail-pane{display:none}
+@media (max-width:640px){.board-toolbar{gap:4px;padding:6px}.board-title{min-width:110px}.board-status{display:none}}

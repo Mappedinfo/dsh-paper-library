@@ -1,0 +1,24 @@
+{
+  "verified_at": "2026-09-18T02:29:45.205Z",
+  "scope": "Synthetic catalog in an isolated standalone server; free canvas drawing, text editing, connecting, moving, paper drag-in and picker, undo/redo, delete, zoom/fit/fullscreen, board switching, deletion and host persistence across a reload; zero model calls and zero external requests. The AI-proposal review path and the conversation reference chip need the native host tool and the DSH composer, so they are covered by the native harness receipt and unit tests rather than simulated here.",
+  "checks": [
+    "board-view-opens-and-creates-the-first-board-without-a-model",
+    "placing-a-shape-creates-one-editable-node-and-returns-to-selection",
+    "dragging-the-connect-handle-onto-another-node-creates-one-directed-edge",
+    "dragging-a-node-saves-new-coordinates-without-losing-its-edge",
+    "dragging-a-library-paper-onto-the-canvas-creates-a-bound-paper-node",
+    "the-paper-picker-adds-the-same-node-kind-without-dragging",
+    "double-clicking-a-paper-node-returns-to-that-paper-in-the-library",
+    "reopening-the-board-restores-every-node-and-edge",
+    "a-page-reload-restores-the-board-from-the-host-record",
+    "undo-redo-and-delete-apply-to-the-canvas-and-its-undo-history",
+    "zoom-and-fit-update-the-viewport-and-refit-the-content",
+    "fullscreen-grows-the-board-and-its-control-returns-to-the-embedded-view",
+    "a-second-board-is-created-empty-and-the-first-board-is-untouched",
+    "deleting-a-board-tombstones-only-that-record",
+    "no-browser-runtime-errors-and-no-external-requests"
+  ],
+  "errors": [],
+  "externalRequests": 0,
+  "modelRequests": 0
+}

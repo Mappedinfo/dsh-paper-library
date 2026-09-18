@@ -17,6 +17,8 @@
   <link rel="stylesheet" href="./paper-analysis.css">
   <link rel="stylesheet" href="./settings.css">
   <link rel="stylesheet" href="./challenge-mining.css">
+  <link rel="stylesheet" href="./board.css">
+  <script src="./board.js" defer></script>
   <script src="./settings.js" defer></script>
   <script src="./challenge-mining.js" defer></script>
   <script src="./paper-analysis.js" defer></script>
@@ -37,7 +39,7 @@
 <body>
   <header class="topbar">
     <a class="brand" href="./" aria-label="Paper Library 首页"><span class="brand-mark" aria-hidden="true">P<span>↗</span></span><span>Paper Library<small>阅读 · 批注 · 连接</small></span></a>
-    <div class="topbar-actions"><span id="library-status" class="status">正在连接文献库…</span><button id="queue-toggle" class="button subtle" hidden>导入进度</button><button id="import-open" class="button primary">＋ 导入文献</button></div>
+    <div class="topbar-actions"><span id="library-status" class="status">正在连接文献库…</span><button id="board-open" class="button subtle" type="button" title="打开文献画板：自由摆放节点与连线，可整理成思维导图">画板</button><button id="queue-toggle" class="button subtle" hidden>导入进度</button><button id="import-open" class="button primary">＋ 导入文献</button></div>
     <div id="paper-tools" class="paper-tools" aria-label="当前文献工具栏">
       <span id="toolbar-paper" class="toolbar-paper">选择一篇文献</span>
       <div id="toolbar-actions" class="toolbar-actions"></div>
@@ -103,6 +105,50 @@
         <section id="graph-tab" class="tab-content graph-content" hidden><div class="section-toolbar"><div><h3>把论文连接起来</h3><p>文献与标签构成线索；论证关系由你明确记录。</p></div><button id="link-open" class="button">＋ 添加联系</button></div><div class="graph-legend"><span><i class="legend-paper"></i>文献</span><span><i class="legend-tag"></i>标签</span><span>点击节点打开文献</span></div><div id="graph-stage" class="graph-stage"></div><p id="graph-status" class="small muted"></p><div id="graph-links" class="graph-links"></div></section>
       </article>
     </section>
+  <section id="board-view" class="board-view" hidden aria-label="文献画板">
+    <header class="board-toolbar">
+      <div class="board-group" role="toolbar" aria-label="画板工具">
+        <button id="board-tool-select" class="board-tool" type="button" aria-pressed="true" title="选择与移动（V）">选择</button>
+        <button id="board-tool-pan" class="board-tool" type="button" aria-pressed="false" title="平移画布（H，或空格拖动）">平移</button>
+        <span class="board-sep" aria-hidden="true"></span>
+        <button id="board-tool-text" class="board-tool" type="button" aria-pressed="false" title="文本（T）">文本</button>
+        <button id="board-tool-note" class="board-tool" type="button" aria-pressed="false" title="便签（N）">便签</button>
+        <button id="board-tool-rect" class="board-tool" type="button" aria-pressed="false" title="矩形（R）">矩形</button>
+        <button id="board-tool-ellipse" class="board-tool" type="button" aria-pressed="false" title="椭圆（O）">椭圆</button>
+        <button id="board-tool-diamond" class="board-tool" type="button" aria-pressed="false" title="菱形（D）">菱形</button>
+      </div>
+      <label class="board-field">画板 <select id="board-select" aria-label="选择画板"></select></label>
+      <input id="board-title" class="board-title" maxlength="200" aria-label="画板标题">
+      <div class="board-group">
+        <button id="board-new" class="button subtle" type="button">＋ 新建</button>
+        <button id="board-add-paper" class="button subtle" type="button" title="从文献库挑选一篇文献加入画板；也可以直接把文献拖进来">＋ 文献</button>
+        <button id="board-delete" class="button subtle" type="button">删除画板</button>
+      </div>
+      <span id="board-status" class="board-status" role="status" aria-live="polite"></span>
+      <div class="board-group board-right">
+        <span id="board-selection" class="board-status"></span>
+        <label class="board-field">形状 <select id="board-kind" aria-label="节点形状" disabled></select></label>
+        <label class="board-field">描边 <select id="board-color" aria-label="节点描边颜色" disabled></select></label>
+        <label class="board-field">关系 <select id="board-relation" aria-label="连线关系" disabled></select></label>
+        <label class="board-field">标签 <input id="board-edge-label-input" maxlength="200" aria-label="连线标签" disabled></label>
+        <button id="board-undo" class="button subtle" type="button">撤销</button>
+        <button id="board-redo" class="button subtle" type="button">重做</button>
+        <button id="board-zoom-out" class="button subtle" type="button" aria-label="缩小">−</button>
+        <span id="board-zoom-label" class="board-status">100%</span>
+        <button id="board-zoom-in" class="button subtle" type="button" aria-label="放大">＋</button>
+        <button id="board-fit" class="button subtle" type="button">适应</button>
+        <button id="board-accept-ai" class="button subtle" type="button" title="把标记为 AI 提议的节点与连线转为你的内容；保存画板本身不会自动接受">接受 AI 改动</button>
+        <button id="board-fullscreen" class="button subtle" type="button" aria-pressed="false" title="全屏画板；Esc 退出">全屏 ⤢</button>
+        <button id="board-close" class="button subtle" type="button">返回文献库</button>
+      </div>
+    </header>
+    <div id="board-conflict" class="board-conflict" role="alert" hidden>
+      <span id="board-conflict-note"></span>
+      <button id="board-conflict-reload" class="button subtle" type="button">载入已保存版本</button>
+      <button id="board-conflict-copy" class="button subtle" type="button">另存为新画板</button>
+    </div>
+    <div id="board-stage" class="board-stage"></div>
+  </section>
   </main>
   <dialog id="import-dialog"><form id="import-form"><div class="dialog-heading"><div><p class="eyebrow">ADD TO YOUR SHELF</p><h2>导入文献</h2></div><button type="button" class="icon-button dialog-close" aria-label="关闭">×</button></div><p class="muted">选择或拖入文件后自动保存、命名并解析资料。粘贴论文链接即可尝试获取 PDF；原文件保持原样。</p><label class="field">论文链接、DOI、本地文件或 PDF 文件夹路径<input id="import-source" placeholder="https://… 或 /path/to/papers" autocomplete="off"></label><div class="form-divider">或直接选择文件</div><label id="drop-zone" class="drop-zone" tabindex="0"><span class="empty-symbol">↓</span><strong id="upload-label">选择一个或多个文件，或直接拖入</strong><span>PDF 最大 250 MiB · JSON / RIS / BIB 最大 32 MiB</span><input id="import-file" type="file" accept=".pdf,.json,.ris,.bib" multiple hidden></label><p id="import-error" class="inline-error" role="alert" hidden></p><p id="import-result" class="form-result" role="status"></p><div class="dialog-actions"><button type="button" class="button dialog-close">关闭</button><button id="import-submit" type="submit" class="button primary">导入文献</button></div></form></dialog>
   <dialog id="metadata-dialog"><form id="metadata-form"><div class="dialog-heading"><h2>编辑文献资料</h2><button type="button" class="icon-button dialog-close" aria-label="关闭">×</button></div><label class="field">标题<textarea id="edit-title" rows="3" required></textarea></label><label class="field">作者 <span>每行一位；使用「姓, 名」保留姓名结构</span><textarea id="edit-authors" rows="4" placeholder="Wang, Shiqi"></textarea></label><div class="field-row"><label class="field">年份<input id="edit-year" type="number" min="1" max="9999" placeholder="未知"></label><label class="field">引用键<input id="edit-citekey" autocomplete="off"></label></div><label class="field">标签 <span>以逗号分隔</span><input id="edit-tags"></label><p id="metadata-error" class="inline-error" hidden></p><div class="dialog-actions"><button type="button" class="button dialog-close">取消</button><button type="submit" class="button primary">保存资料</button></div></form></dialog>
@@ -110,6 +156,8 @@
   <dialog id="attach-dialog"><form id="attach-form"><div class="dialog-heading"><h2>关联 PDF</h2><button type="button" class="icon-button dialog-close" aria-label="关闭">×</button></div><label class="field">本地 PDF 路径<input id="attach-path" required placeholder="/path/to/paper.pdf"></label><p id="attach-error" class="inline-error" hidden></p><div class="dialog-actions"><button type="button" class="button dialog-close">取消</button><button type="submit" class="button primary">复制并关联</button></div></form></dialog>
   <dialog id="link-dialog"><form id="link-form"><div class="dialog-heading"><h2>记录文献联系</h2><button type="button" class="icon-button dialog-close" aria-label="关闭">×</button></div><p id="link-source" class="link-source"></p><label class="field">联系类型<select id="link-relation"><option value="related">相关</option><option value="supports">支持</option><option value="contradicts">相矛盾</option><option value="cites">引用</option></select></label><label class="field">检索目标文献<input id="link-search" type="search" placeholder="标题、作者或引用键"></label><label class="field">目标文献<select id="link-target" required></select></label><label class="field">关系依据<textarea id="link-note" rows="3" placeholder="记录页码、论点或作出这一判断的理由"></textarea></label><p id="link-error" class="inline-error" hidden></p><div class="dialog-actions"><button type="button" class="button dialog-close">取消</button><button type="submit" class="button primary">保存联系</button></div></form></dialog>
   <dialog id="text-dialog"><div class="dialog-heading"><h2 id="text-dialog-title">引用文本</h2><button type="button" class="icon-button dialog-close" aria-label="关闭">×</button></div><p class="muted">自动复制不可用，请选择下方文本复制。</p><textarea id="copy-fallback" rows="9" readonly></textarea></dialog>
+
+  <dialog id="board-paper-dialog" class="board-dialog"><div class="dialog-heading"><h2>把文献加入画板</h2><button type="button" class="icon-button dialog-close" aria-label="关闭">×</button></div><label class="field">检索标题、作者或引用键<input id="board-paper-search" type="search" autocomplete="off" placeholder="标题、作者或引用键"></label><p id="board-paper-status" class="small muted" role="status"></p><div id="board-paper-list" class="board-picker"></div><div class="dialog-actions"><button type="button" class="button dialog-close">关闭</button></div></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
   <div id="window-drop-overlay" class="window-drop-overlay" hidden><div><span>↓</span><strong>松开，即可保存到文献库</strong><p>PDF 自动命名与解析 · 多个文件依次处理</p></div></div>
   <section id="import-queue" class="import-queue" role="region" aria-label="导入进度" hidden><header><div><p class="eyebrow">SAVING TO YOUR SHELF</p><h3>导入进度</h3></div><button id="queue-hide" class="icon-button" aria-label="收起导入进度">−</button></header><p id="queue-summary" class="queue-summary" role="status"></p><ol id="queue-list" class="queue-list"></ol></section>
