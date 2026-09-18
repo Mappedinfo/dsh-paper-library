@@ -1097,6 +1097,7 @@ boardUI = window.PaperBoard?.create({root:$('board-view'),api,toast,
   onClose:({focus})=>{if(focus)$('board-open').focus();},
   onRequestPapers:()=>openBoardPaperPicker(),
   onOpenPaper:id=>{const item=state.items.find(value=>value.id===id);void openResource(item||{id});},
+  getSessionId:()=>state.harnessContext?.sessionId||null,
 });
 $('board-open').addEventListener('click',()=>{void boardUI?.open();});
 let boardPickerTicket=0,boardPickerTimer=null;

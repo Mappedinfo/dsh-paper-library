@@ -1,4 +1,5 @@
 import { annotationReferenceInsert, parseAnnotationReference } from './annotation-references.mjs'
+import { boardReferenceInsert, boardReferenceToken } from './board-references.mjs'
 
 const VERSION = 1
 const ACTION = 'paper-library:conversation-action'
@@ -96,9 +97,9 @@ export function readerSnapshot(value) {
 }
 
 /** Append through Harness's public span edit so existing reference chips and attachments survive. */
-export function appendConversationDraft(ctx, sessionId, text, reference) {
+export function appendConversationDraft(ctx, sessionId, text, reference, toInsert = annotationReferenceInsert) {
   if (typeof text !== 'string' || !text.trim() || text.length > TEXT_LIMIT) throw new Error('批注文本为空或超过 65,536 个字符')
-  const insert = reference === undefined ? undefined : annotationReferenceInsert(reference)
+  const insert = reference === undefined ? undefined : toInsert(reference)
   const referenceOffset = insert ? text.indexOf(insert.ref) : -1
   if (insert && (referenceOffset < 0 || text.indexOf(insert.ref, referenceOffset + insert.ref.length) !== -1)) throw new Error('草稿必须包含一次完整批注引用')
   const binding = ctx.sessions.binding(sessionId)
@@ -134,7 +135,7 @@ export function appendConversationDraft(ctx, sessionId, text, reference) {
 }
 
 /** Root-owned frame bridge survives the right Sidebar's session-keyed remount. */
-export function createConversationBridge({ window, ctx, rememberReference = () => {} }) {
+export function createConversationBridge({ window, ctx, rememberReference = () => {}, rememberBoardReference = () => {} }) {
   const origin = window.location.origin
   const frames = new Map()
   const mounted = new Map()
@@ -185,7 +186,7 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
         // Sidebar's own passive mount effect has published its current service binding by this frame.
         ctx.sidebarRight.openTab('paper-library')
         // Waiting for the composer mount also lets Harness restore its persisted draft first.
-        if (pending.text !== undefined) appendConversationDraft(ctx, pending.sessionId, pending.text, pending.reference)
+        if (pending.text !== undefined) appendConversationDraft(ctx, pending.sessionId, pending.text, pending.reference, pending.toInsert)
         relayReference()
         finishNavigation()
       } catch (error) {
@@ -194,11 +195,11 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
     })
   }
 
-  function openSession(sessionId, text, reference) {
+  function openSession(sessionId, text, reference, toInsert) {
     if (navigation) throw new Error('正在打开论文对话，请稍后重试')
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => finishNavigation(new Error('论文对话已切换，但文献库面板未能重新打开；请从右侧栏打开文献库')), NAVIGATION_TIMEOUT)
-      navigation = { sessionId, text, reference, resolve, reject, timer }
+      navigation = { sessionId, text, reference, toInsert, resolve, reject, timer }
       try {
         ctx.sessions.open(sessionId)
         scheduleOpen()
@@ -208,13 +209,24 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
 
   async function perform(data) {
     if (data.action === 'refresh') { await ctx.sessions.refresh(); return }
-    if (!['open', 'draft'].includes(data.action)) throw new Error('不支持的论文对话操作')
+    if (!['open', 'draft', 'board_draft'].includes(data.action)) throw new Error('不支持的论文对话操作')
     if (typeof data.sessionId !== 'string' || !data.sessionId || data.sessionId.length > 200) throw new Error('论文对话标识无效')
     await ctx.sessions.refresh()
     if (!active) throw new Error('文献库已关闭')
     const binding = ctx.sessions.binding(data.sessionId)
     if (!binding || binding.session.getSnapshot().removed) throw new Error('论文对话不存在，请重新打开文献')
     if (navigation) throw new Error('正在打开论文对话，请稍后重试')
+    if (data.action === 'board_draft') {
+      // The reader freezes the board first; this side only carries its identity into the draft.
+      if (typeof data.board_id !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(data.board_id)) throw new Error('画板标识无效')
+      if (typeof data.snapshot_id !== 'string' || !/^[a-f0-9]{64}$/.test(data.snapshot_id)) throw new Error('画板引用快照无效')
+      if (typeof data.title !== 'string' || !data.title.trim() || data.title.length > 200) throw new Error('画板标题无效')
+      const title = data.title.trim()
+      const ref = boardReferenceToken(data.board_id, data.snapshot_id)
+      const reference = { ref, label: `画板：${title}`, clipboardText: ref }
+      rememberBoardReference(data.sessionId, reference)
+      return openSession(data.sessionId, `引用画板：${title}\n${ref}`, reference, boardReferenceInsert)
+    }
     const text = data.reference ? data.draft_text : data.text
     if (data.action === 'draft' && (typeof text !== 'string' || !text.trim() || text.length > TEXT_LIMIT)) throw new Error('批注文本为空或超过 65,536 个字符')
     const reference = data.action === 'draft' && data.reference ? annotationReferenceInsert(data.reference) : undefined
@@ -263,7 +275,7 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
       if (!active) return
       request.result = result
       post(event.source, result)
-      if (!frames.has(event.source) && ['open', 'draft'].includes(data.action)) {
+      if (!frames.has(event.source) && ['open', 'draft', 'board_draft'].includes(data.action)) {
         terminalRelay = { ...result, relay: true, sessionId: data.sessionId }
         const recipient = [...frames].reverse().find(([, candidate]) => candidate.ready)?.[0]
         if (recipient) relayResult(recipient)

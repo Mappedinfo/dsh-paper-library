@@ -23,6 +23,15 @@ class ReadingAdapter extends LlmAdapter {
       snapshotId: message.source.paperLibraryReference.snapshot_id,
       text: message.content.filter(block => block.type === 'text').map(block => block.text).join('\n').slice(0, 4000),
     })).slice(-8)
+    // Board material arrives through its own plugin source. The offered tool names are
+    // recorded only to prove what a real host exposed; this adapter never calls a tool.
+    this.observation.boardReferences = options.messages.filter(message => message.source?.plugin === 'Paper Library' && message.source.paperLibraryBoard).map(message => ({
+      boardId: message.source.paperLibraryBoard.board_id,
+      snapshotId: message.source.paperLibraryBoard.snapshot_id,
+      bodyHash: message.source.paperLibraryBoard.body_hash,
+      text: message.content.filter(block => block.type === 'text').map(block => block.text).join('\n').slice(0, 4000),
+    })).slice(-8)
+    this.observation.tools = (options.tools ?? []).map(tool => tool.name).slice(0, 200)
     const prompt = options.messages.flatMap(message => message.content.filter(block => block.type === 'text').map(block => block.text)).join('\n')
     let reply = REPLY
     if (prompt.includes('READING_RECORDS_JSON:\n')) {
@@ -68,7 +77,7 @@ class ReadingAdapter extends LlmAdapter {
 
 /** Test-only authenticated booleans make cold lifecycle assertions independent from plugin receipts. */
 export function apply(ctx) {
-  const observation = { generations: 0, references: [], language: [], knowledge: [], analysis: [], analysisNotes: [], analysisAgents: [], analysisGuard: {attempts:0,denied:0,executed:0} }
+  const observation = { generations: 0, references: [], boardReferences: [], tools: [], language: [], knowledge: [], analysis: [], analysisNotes: [], analysisAgents: [], analysisGuard: {attempts:0,denied:0,executed:0} }
   ctx.on('agent/created', async ({ agent }) => {
     if (agent.session.id.startsWith('paper-analysis-') || agent.session.header.parentSession?.startsWith('paper-analysis-')) {
       observation.analysisAgents.push({id:agent.session.id,parent:agent.session.header.parentSession,origin:agent.session.header.origin})
@@ -96,7 +105,7 @@ export function apply(ctx) {
       const ids = url.searchParams.getAll('session')
       if (req.method !== 'GET' || ids.length > 12 || ids.some(id => !/^paper-library-[a-f0-9]{40}$/.test(id))) { res.writeHead(400); res.end(); return }
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ generations: observation.generations, references: observation.references, language: observation.language, knowledge: observation.knowledge,
+      res.end(JSON.stringify({ generations: observation.generations, references: observation.references, boardReferences: observation.boardReferences, tools: observation.tools, language: observation.language, knowledge: observation.knowledge,
         analysis:observation.analysis,analysisNotes:observation.analysisNotes,analysisGuard:observation.analysisGuard,analysisAgents:observation.analysisAgents.map(item=>({...item,loaded:Boolean(ctx.agents.get(item.id))})),
         observations: ids.map(id => ({ sessionLoaded: Boolean(ctx.sessions.get(id)), agentLoaded: Boolean(ctx.agents.get(id)) })) }))
     },

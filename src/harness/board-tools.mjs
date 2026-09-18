@@ -85,5 +85,10 @@ export async function handleBoardRequest(store, input, { writer = 'user' } = {})
     }
     return store.snapshot({ id: input.id, maxCharacters: requested })
   }
+  if (action === 'board_snapshot_get') {
+    // Reading frozen material back is a reader surface; the agent reads live boards instead.
+    if (writer !== 'user') throw Object.assign(new Error('画板引用只能由读者本人查看。'), { code: 'BOARD_FORBIDDEN', status: 403 })
+    return store.snapshotLoad(input.snapshot_id)
+  }
   throw Object.assign(new Error('不支持的画板操作。'), { code: 'BOARD_INVALID', status: 400 })
 }

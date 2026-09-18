@@ -3,6 +3,7 @@ import { bindModelContext } from './model-context.mjs'
 import { bindThemeContext } from './theme-context.mjs'
 import { createConversationBridge } from './conversation-context.mjs'
 import { createAnnotationReferences, draftAnnotationReferences } from './annotation-references.mjs'
+import { createBoardReferences } from './board-references.mjs'
 import { registerPaperLibrarySettings } from './settings.mjs'
 
 const ID = '@mappedinfo/dsh-paper-library'
@@ -95,10 +96,35 @@ export function AnnotationReferenceInspector({ sessionId, annotationReferences, 
   )
 }
 
+/** Frozen board material is shown from its snapshot, never re-rendered from the live board. */
+export function BoardReferenceInspector({ sessionId, boardReferences, t }) {
+  const [preview, setPreview] = useState(boardReferences.getSnapshot())
+  useEffect(() => boardReferences.subscribe(() => setPreview(boardReferences.getSnapshot())), [boardReferences])
+  const shown = preview?.sessionId === sessionId ? preview : null
+  if (!shown) return null
+  const snapshot = shown.snapshot ?? null
+  return createElement('section', { 'aria-label': t('board.title'), 'data-paper-board-reference': true, style: {
+    boxSizing: 'border-box', flex: 'none', minWidth: 0, contain: 'inline-size',
+    width: 'calc(100% - var(--dsh-composer-side-clearance, 16px) - var(--dsh-composer-side-clearance, 16px) - var(--dsh-composer-dock-inset, 8px) - var(--dsh-composer-dock-inset, 8px) - var(--dsh-composer-dock-inset, 8px) - var(--dsh-composer-dock-inset, 8px))',
+    maxWidth: 'min(100%, var(--dsh-chat-content-width, 680px))', margin: '0 auto', padding: '10px 12px',
+    overflow: 'hidden', overflowWrap: 'anywhere', fontSize: '12px', lineHeight: 1.5,
+    border: '1px solid var(--dsw-alias-border-l1, #d9dde2)', borderRadius: '12px',
+    background: 'var(--dsw-specific-tip, #f6f7f8)', color: 'inherit',
+  } },
+    createElement('div', { style: { display: 'flex', minWidth: 0, maxWidth: '100%', flexWrap: 'wrap', alignItems: 'center', gap: '6px' } },
+      createElement('strong', { style: { fontWeight: 500 } }, snapshot ? `${t('board.frozen')} · ${snapshot.board_title}` : t('board.title')),
+      createElement('button', { type: 'button', onClick: () => boardReferences.close(), style: { ...referenceButtonStyle, marginLeft: 'auto' } }, t('board.close'))),
+    shown.loading ? createElement('p', { role: 'status' }, t('board.loading')) : null,
+    shown.error ? createElement('p', { role: 'alert' }, shown.error) : null,
+    snapshot ? createElement('pre', { style: { boxSizing: 'border-box', minWidth: 0, width: '100%', maxWidth: '100%', margin: '8px 0 0', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word', font: 'inherit', maxHeight: 'min(260px, 36vh)', overflowY: 'auto', overflowX: 'hidden', padding: '8px 10px', border: '1px solid var(--dsw-alias-border-l1, #d9dde2)', borderRadius: '8px', background: 'var(--dsw-alias-bg-base, transparent)' } }, snapshot.text) : null,
+  )
+}
+
 /** Add a Library entry to Harness's right-panel guide using its public tab registry. */
 export function apply(ctx) {
   let conversationBridge
   let annotationReferences
+  let boardReferences
   const { bind: bindSettings } = registerPaperLibrarySettings(ctx, window)
   const bindTheme = target => bindThemeContext({
     window, target,
@@ -114,13 +140,25 @@ export function apply(ctx) {
         if (binding) ctx.conversation.input.for(binding.ctx).notify('error', message)
       },
     })
-    conversationBridge = createConversationBridge({ window, ctx, rememberReference: annotationReferences.remember })
-    return () => { annotationReferences.dispose(); conversationBridge.dispose() }
+    boardReferences = createBoardReferences({
+      window,
+      notify: (sessionId, message) => {
+        const binding = ctx.sessions.binding(sessionId)
+        if (binding) ctx.conversation.input.for(binding.ctx).notify('error', message)
+      },
+    })
+    conversationBridge = createConversationBridge({
+      window, ctx,
+      rememberReference: annotationReferences.remember,
+      rememberBoardReference: boardReferences.remember,
+    })
+    return () => { annotationReferences.dispose(); boardReferences.dispose(); conversationBridge.dispose() }
   }, 'paper-library: conversation bridge')
   ctx.effect(() => ctx.inputTriggers.registerSource(annotationReferences.source), 'paper-library: annotation references')
+  ctx.effect(() => ctx.inputTriggers.registerSource(boardReferences.source), 'paper-library: board references')
   ctx.effect(() => ctx.locale.register(NS, {
-    zh: { title: '文献库', description: '检索、引用、PDF 批注与论文对话', 'reference.title': '论文批注引用', 'reference.preview': '查看引用', 'reference.close': '收起', 'reference.loading': '正在读取引用快照…', 'reference.frozen': '发送材料快照', 'reference.notes': '条批注', 'reference.page': '第', 'reference.morePages': '其他页数：' },
-    en: { title: 'Paper Library', description: 'Search, cite, annotate PDFs and discuss each paper', 'reference.title': 'Paper annotation references', 'reference.preview': 'Inspect reference', 'reference.close': 'Close', 'reference.loading': 'Loading reference snapshot…', 'reference.frozen': 'Frozen reference material', 'reference.notes': 'annotations', 'reference.page': 'Page', 'reference.morePages': 'More pages:' },
+    zh: { title: '文献库', description: '检索、引用、PDF 批注与论文对话', 'reference.title': '论文批注引用', 'reference.preview': '查看引用', 'reference.close': '收起', 'reference.loading': '正在读取引用快照…', 'reference.frozen': '发送材料快照', 'reference.notes': '条批注', 'reference.page': '第', 'reference.morePages': '其他页数：', 'board.title': '画板引用', 'board.close': '收起', 'board.loading': '正在读取画板快照…', 'board.frozen': '画板材料快照' },
+    en: { title: 'Paper Library', description: 'Search, cite, annotate PDFs and discuss each paper', 'reference.title': 'Paper annotation references', 'reference.preview': 'Inspect reference', 'reference.close': 'Close', 'reference.loading': 'Loading reference snapshot…', 'reference.frozen': 'Frozen reference material', 'reference.notes': 'annotations', 'reference.page': 'Page', 'reference.morePages': 'More pages:', 'board.title': 'Whiteboard references', 'board.close': 'Close', 'board.loading': 'Loading whiteboard snapshot…', 'board.frozen': 'Frozen whiteboard material' },
   }), 'paper-library: locale')
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.sidebarRightTabs.register({
@@ -153,4 +191,9 @@ export function apply(ctx) {
     id: `${ID}/references`, order: 20,
     inject: sessionId => ({ sessionId, annotationReferences }),
   }, props => createElement(AnnotationReferenceInspector, { ...props, t }))), 'paper-library: reference inspector')
+  ctx.effect(() => ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock',
+    id: `${ID}/boards`, order: 21,
+    inject: sessionId => ({ sessionId, boardReferences }),
+  }, props => createElement(BoardReferenceInspector, { ...props, t }))), 'paper-library: board reference inspector')
 }

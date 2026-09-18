@@ -41,10 +41,13 @@ try {
   page.on('request', request => { if (!request.url().startsWith(origin)) external.push(request.url()); });
   page.on('dialog', dialog => void dialog.accept());
 
-  /** Read the host's own record: the assertion is about what was persisted, not the DOM. */
+  /** Read the host's own record: the assertion is about what was persisted, not the DOM.
+   *  A failed read (the standalone server admits few concurrent JSON calls) is reported
+   *  so the caller can retry rather than being mistaken for an empty board. */
   const hostBoard = () => page.evaluate(async () => {
     const call = async (action, args) => (await (await fetch('./api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, ...args }) })).json());
     const list = await call('board_list', {});
+    if (!list?.ok) return { boards: [], board: null, error: String(list?.error ?? 'board_list failed') };
     const boards = list.result.boards;
     if (!boards.length) return { boards, board: null };
     const id = window.__boardId ?? boards[0].id;
@@ -58,10 +61,11 @@ try {
     const deadline = Date.now() + timeout;
     let last = null;
     for (;;) {
-      last = await hostBoard();
-      if (predicate(last)) return last;
+      try { last = await hostBoard(); }
+      catch (error) { last = { boards: [], board: null, error: error.message }; }
+      if (!last.error && predicate(last)) return last;
       if (Date.now() > deadline) throw new Error(`Timed out waiting for the host record: ${label} (last: ${JSON.stringify(last).slice(0, 300)})`);
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
   };
   const nodeCount = () => page.locator('.board-node').count();
@@ -256,6 +260,13 @@ try {
   assert.equal(remaining.boards.some(board => board.node_count === 0), false, 'the empty board was the one deleted');
   assert.deepEqual(remaining.boards.map(board => board.node_count).sort(), [3, 4]);
   record('deleting-a-board-tombstones-only-that-record');
+
+  // Outside DSH there is no composer to reference: the standalone surface says so
+  // instead of pretending the chip was placed.
+  await page.locator('#board-send').click();
+  await page.waitForFunction(() => /DSH 的文献库面板/.test(document.getElementById('toast')?.textContent || ''));
+  assert.match(await page.locator('#toast').innerText(), /请从 DSH 的文献库面板打开画板/);
+  record('the-standalone-preview-refuses-the-conversation-chip-instead-of-faking-it');
 
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);

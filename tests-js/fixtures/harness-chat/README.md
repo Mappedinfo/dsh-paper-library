@@ -3,8 +3,11 @@
 This fixture registers one deterministic, keyless model in an isolated Harness
 profile. It produces an ordinary assistant message through the native agent
 loop. The adapter has no network, credential or tool-call implementation.
-An authenticated, test-only route returns session/agent presence booleans and
-the adapter generation count, making cold-session and retry checks observable.
+An authenticated, test-only route returns session/agent presence booleans, the
+adapter generation count, the board references the model received (board id,
+snapshot id, body hash and text) and the tool names the host offered, making
+cold-session, retry and tool-exposure checks observable. Recording an offered
+tool name is not a tool call.
 
 From the plugin repository, install the isolated profile once, then run the
 smoke against a built Harness checkout:

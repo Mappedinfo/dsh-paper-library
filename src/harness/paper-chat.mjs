@@ -3,6 +3,7 @@ import { realpath } from 'node:fs/promises'
 import { createAnnotationSnapshotStore, annotationSnapshotToken } from './annotation-snapshots.mjs'
 import { ANNOTATION_USAGE_KEY, annotationUsageProjection, emptyAnnotationUsage, foldAnnotationUsage, loggedAnnotationReference } from './annotation-usage.mjs'
 import { preparePaperReferenceMessages } from './paper-reference-resolver.mjs'
+import { prepareBoardReferenceMessages } from './board-references.mjs'
 import { annotationReplySources } from './annotation-replies.mjs'
 
 const ACTIONS = new Set(['chat_ensure', 'chat_catalog', 'chat_context', 'chat_reference', 'chat_send', 'chat_history', 'chat_save_feedback'])
@@ -124,7 +125,7 @@ export function projectPaperHistory(snapshot) {
  * Bind one paper to a normal Harness Session. The returned action handler uses
  * only public Host services and never reads profile files or changes defaults.
  */
-export function createPaperChat(ctx, { library, python, dispatch, core = dispatch, store, maxAnnotationCharacters = 24000 }) {
+export function createPaperChat(ctx, { library, python, dispatch, core = dispatch, store, boards, maxAnnotationCharacters = 24000 }) {
   let feedbackListener,turnFailureListener
   const tails = new Map()
   let admitted = 0
@@ -414,8 +415,12 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
     ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
       const decision = await next()
       if (decision.kind === 'reject') return decision
-      return { ...decision, messages: await preparePaperReferenceMessages(decision.messages, {
+      const messages = await preparePaperReferenceMessages(decision.messages, {
         store: snapshots, sessionId: agent.session.id, maxCharacters: maxAnnotationCharacters, signal,
+      })
+      // Board references are charged against the same character budget.
+      return { ...decision, messages: await prepareBoardReferenceMessages(messages, {
+        boards, maxCharacters: maxAnnotationCharacters, signal,
       }) }
     }, { prepend: true })
     if(store)ctx.on('session/event',(session,event)=>{
