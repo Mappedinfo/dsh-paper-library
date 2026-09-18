@@ -142,15 +142,42 @@ Synthetic-only validation, following the existing project discipline:
 
 - `tests-js/board-store.test.mjs` — schema bounds, revision conflicts, forbidden keys, bounded
   listing, snapshot immutability, and AI-write review marking, all against an in-memory/temporary
-  store with no private data.
+  store with no private data. **Implemented, 8 cases.**
 - `tests-js/board-panel.test.mjs` — canvas reducer behavior (create/drag/connect/delete/undo/redo,
   tidy-tree layout determinism) through the same fake-DOM harness the other panels use.
+  **Implemented, 11 cases** (geometry, model bounds, paper nodes, outline, panel persistence,
+  conflict recovery, listing failure, tidy arranging, settle-on-close).
 - `tests-js/board-references.test.mjs` — token parse/render, chip codec round-trip, snapshot
   integrity, and `agent/pre-step` expansion including the malformed and over-budget paths.
+  **Implemented, 5 cases.**
 - `scripts/board-browser-fixture.mjs` — real Chromium receipt for draw/drag/zoom/connect/save/reload,
-  library drag-in, tidy-tree snapping, and the board→conversation chip.
-- `scripts/board-harness-smoke.mjs` — native DSH check that the tool reads and writes a board and
-  that a board reference reaches a turn as frozen material, model-free stages only.
+  library drag-in, tidy-tree snapping, and the standalone refusal of the conversation chip.
+  **Implemented, 18 checks** in `docs/validation/board-browser.json`.
+- `scripts/board-harness-smoke.mjs` — native DSH check that the tool is offered, that a board token
+  reaches a turn as frozen material, and that an unresolvable reference fails the turn.
+  **Implemented, 7 checks** in `docs/validation/board-harness.json`.
 
-Not claimed: Excalidraw feature parity (no freehand pressure curves, no image import, no multiplayer),
-tldraw-style shape binding, real-library capacity numbers, or any provider-quality claim.
+## What implementation changed in this design
+
+Four decisions were revised while building, each for an observed reason:
+
+- **The board is the workspace's second column, not a fixed overlay.** A full-view overlay hid the
+  library shelf, which made the chosen "drag a paper onto the canvas" interaction impossible. The
+  board now takes the detail column while the shelf stays visible, and the Fullscreen API provides
+  the large canvas. Opening a paper closes the board and settles its pending edits first.
+- **Accepting AI proposals is an explicit action (`board_accept`), never a side effect of saving.**
+  Saving is debounced and automatic, so "a reader save accepts everything" would have silently
+  converted model proposals into reader content. Only edited or added items are marked, decided by
+  comparing against the stored board.
+- **Closing the board, switching boards or unloading the page settles the debounced write.** A
+  fixture run showed a node disappearing when the page reloaded inside the debounce window; the
+  panel now flushes (keepalive on unload) before it goes away, and deleting cancels the debounce so
+  a pending save cannot resurrect a tombstoned board.
+- **A failed board listing reports itself and creates nothing.** Producing a fresh empty board on a
+  transient read failure would have fabricated data; the view now stays usable with a readable
+  retry path.
+
+Not claimed: Excalidraw feature parity (no freehand pressure curves, no image import, no
+multiplayer), tldraw-style shape binding, real-library capacity numbers, or any provider-quality
+claim.
+

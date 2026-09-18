@@ -150,7 +150,7 @@ Labels are keyed by NFKC-normalised, punctuation-stripped lowercase text, so “
 
 ## Native Harness tools
 
-The plugin registers 29 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
+The plugin registers 30 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
 
 | Tool | Arguments | Node action |
 |---|---|---|
@@ -166,6 +166,7 @@ The plugin registers 29 tools through Harness's official tool registry. Optional
 | `library_import` | Exactly one of `path`, `doi`, `url` | `import` |
 | `library_cite` | `ids,format` | `cite` |
 | `library_bibliography` | `verify?,verify_limit?,include_datasets?` | `bibliography_build` |
+| `library_board` | `operation,input_json` | `board_list`/`board_get`/`board_create`/`board_save`/`board_delete`; AI edits stay reviewable proposals |
 | `library_annotations` | `id` | `annotations` |
 | `library_annotate` | `id,page,type,rects,text?,comment?,author?,color?` | `annotate` |
 | `library_graph` | `id?,limit?` | `graph` |
@@ -179,6 +180,25 @@ The plugin registers 29 tools through Harness's official tool registry. Optional
 Tool metadata is a closed subset: `title,type,citekey,DOI,URL,abstract,author,editor,container-title,publisher,volume,issue,page,issued,tags,publication_dates,journal_rankings`. Its person schema accepts `family,given,literal,ORCID,affiliation`, with affiliation `{name,ror?,source?}`. Tool `issued` uses CSL `date-parts`. Graph evidence uses the closed schema above. Paths and runtime state cannot enter structured metadata. Each tool request is capped at 128 KiB before dispatch; core field limits still apply. `rects` is required for `library_annotate`, including an empty array for a page note.
 
 Mutation tools pass through the configured native approval pipeline; `requireToolApproval` defaults to true and preserves any existing denial. Read tools do not start a model. `library_feedback` uses the calling Agent's configured model route by default and remains the compatibility feedback operation, not `chat_send`. `metadata_lookup` is a Node/browser operation, not an additional registered native tool.
+
+## Literature whiteboard
+
+Boards are host-owned records in the plugin's private state store, keyed `board:<id>`, so they inherit the same 256 KiB record cap, revision-checked writes and atomic replacement as every other record. A board holds `{schema:1,id,title,origin,status,view,nodes,edges}` with node kinds `text|note|concept|paper|rect|ellipse|diamond`, edge kinds `arrow|line|elbow` and relations `related|supports|contradicts|cites|explains|extends`. Bounds are enforced before any write: 400 nodes, 800 edges, 2,000 characters of node text, coordinates within ±1e6 and zoom 0.2–4. Listing reads a bounded window of at most 50 records and reports `{boards,scanned,total,truncated}`; a larger archive is stated, never presented as complete. Deleting tombstones the record (`{deleted:true,deleted_at}`) so it stays recoverable by hand.
+
+Authenticated browser actions (all served by the same `/api/paper-library/api` envelope):
+
+- `board_list` → `{boards,scanned,total,truncated}` with per-board `{id,title,origin,status,created_at,updated_at,node_count,edge_count,paper_count,ai_node_count,ai_edge_count}`.
+- `board_get` with `id` → `{board,revision,outline}`; `outline` is the deterministic bounded text rendering (≤24,000 characters, stating any truncation).
+- `board_create` with `board` → `{board,revision,summary}`; the host assigns the id and timestamps.
+- `board_save` with `id,board,expected_revision` → `{board,revision,summary}`. A stale revision is a 409 `STATE_CONFLICT` with the current record, never an overwrite.
+- `board_delete` with `id,expected_revision` → `{id,deleted,revision}`.
+- `board_accept` with `id,expected_revision,item_ids?` → `{board,revision,summary,accepted}`. Reader-only.
+- `board_snapshot` with `id,max_characters?` (500–24,000) → `{snapshot_id,board_id,board_title,board_updated_at,characters,truncated,omitted,text,frozen_at,label}`. The snapshot is content-addressed (its id is the SHA-256 of its own content) and immutable: editing or deleting the board never rewrites it.
+- `board_snapshot_get` with `snapshot_id` → the same record, re-verified by recomputing the digest. Reader-only; a tampered record is refused.
+
+Provenance is decided by the caller, never by the payload: a browser request is always a reader write, and the agent tool is always a model write. A model write marks only the nodes and edges that differ from the stored board as `origin:'llm'`, so an agent editing one node cannot relabel the reader's own work; a board the agent creates stays `status:'needs-review'` until the reader saves it. Only `board_accept` converts proposals into reader content, and only the reader may call it.
+
+A conversation reference is a token `[[paper-library-board:v1:<boardId>:<snapshotHash>]]` inserted by the plugin's own `@` source (`paper-library-boards`, order 30) next to the annotation source. At `agent/pre-step` the host replaces the token with `〔引用画板 <title>〕` and appends the frozen outline as a separate user message whose source is `{kind:'plugin',plugin:'Paper Library',paperLibraryBoard:{version:1,board_id,board_title,snapshot_id,characters,truncated,body_hash}}`. At most four board groups and the shared 24,000-character budget apply; an unresolvable, mismatched or malformed reference fails the turn instead of sending anything else. Unlike annotation snapshots, a board snapshot is not bound to a paper conversation, because a board is cross-paper by nature.
 
 ## Native paper conversations
 
