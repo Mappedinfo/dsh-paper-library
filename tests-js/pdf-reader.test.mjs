@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 const context = vm.createContext({ window: {} });
 vm.runInContext(await readFile(new URL('../web/pdf-reader.js', import.meta.url), 'utf8'), context);
-const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection } = context.window.PaperPDFReader;
+const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint } = context.window.PaperPDFReader;
 const plain = value => JSON.parse(JSON.stringify(value));
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function scheduler({ delayedInstall = false } = {}) {
@@ -152,4 +152,23 @@ test('a selected line break joins without a space and CJK never gets one', () =>
   assert.equal(joinSelection([piece('first', 10, 20, 30, 30), piece('second', 10, 34, 30, 44)]), 'first second');
   assert.equal(joinSelection([piece('first', 10, 20, 30, 30), piece('second', 40, 34, 60, 44)]), 'firstsecond');
   assert.equal(joinSelection([]), '');
+});
+
+test('selection and flash colours come from the picked and stored colours', () => {
+  // The live selection wash must be the colour that will be written to the PDF.
+  assert.equal(hexTint('#fed766', .5), 'rgba(254, 215, 102, 0.5)');
+  assert.equal(hexTint('#2674BA', .45), 'rgba(38, 116, 186, 0.45)');
+  assert.equal(hexTint('#abc', 1), 'rgba(170, 187, 204, 1)');
+  assert.equal(hexTint('#abc', 9), 'rgba(170, 187, 204, 1)', 'Alpha is clamped');
+  assert.equal(hexTint('#abc', -3), 'rgba(170, 187, 204, 0)', 'Alpha is clamped');
+  assert.equal(hexTint('rgb(1,2,3)'), '', 'Only hex colours are accepted');
+  assert.equal(hexTint(undefined), '');
+  assert.equal(hexTint(''), '');
+  // A saved annotation flashes in its own colour, not a fixed UI colour.
+  assert.equal(annotationTint({ color: { stroke: [1, 0.5, 0] } }), 'rgba(255, 128, 0, 0.38)');
+  assert.equal(annotationTint({ color: { stroke: [0, 0, 0] } }, 1), 'rgba(0, 0, 0, 1)');
+  assert.equal(annotationTint({ color: { stroke: [2, -1, 0.2] } }), 'rgba(255, 0, 51, 0.38)', 'Channels are clamped');
+  assert.equal(annotationTint({}), '');
+  assert.equal(annotationTint({ color: { stroke: [1, 2] } }), '');
+  assert.equal(annotationTint(null), '');
 });

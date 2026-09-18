@@ -176,7 +176,7 @@ input[type="checkbox"] { accent-color: var(--dsw-alias-button-primary-fill); }
 .pdr-error, .pdr-layout-error { color: var(--error); }
 .pdr-sheet, .pdf-page { background: white; box-shadow: 0 1px 5px rgb(0 0 0 / .16); color-scheme: light; }
 .pdr-page-image, .pdf-page > img { filter: none; }
-.pdr-word::selection, .pdf-word::selection { background: rgb(65 118 230 / .3); color: transparent; }
+.pdr-word::selection, .pdf-word::selection { background: var(--pdr-selection, rgb(65 118 230 / .3)); color: transparent; }
 .selection-tools { border-color: var(--line); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); box-shadow: var(--shadow); }
 .selection-tools .button { font-size: 11px; }
 .selection-tools strong, .selection-tools p { font-size: 11px; font-family: var(--sans); }
@@ -246,3 +246,5 @@ dialog blockquote { background: var(--dsw-alias-interactive-bg-hover); border-co
   .brand { font-size: 13px; }
   .reader-ribbon .button, .reader-ribbon .tab { font-size: 11px; }
 }
+.reader-mode{border-right-color:var(--dsw-alias-border-l2,#dfe1d6)}
+.reader-mode[data-mode=auto] .button#reader-mode-auto,.reader-mode[data-mode=ask] .button#reader-mode-ask{color:var(--ink);background:var(--dsw-alias-interactive-bg-active);outline-color:var(--dsw-alias-border-l2)}

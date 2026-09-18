@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-18T16:35:53.486Z",
+  "verified_at": "2026-09-18T16:52:26.241Z",
   "scope": "Synthetic two-page fixture in an isolated standalone server: invisible text layer alignment, multi-line capture completeness, gap and line-end releases, and a rotated page. Chromium only; no model call and no external request.",
   "checks": [
     "selectable-text-sits-exactly-over-the-raster-word-boxes",
@@ -15,7 +15,7 @@
   "externalRequests": 0,
   "modelRequests": 0,
   "screenshots": [
-    ".local/selection-browser-tiWVID/multi-line-selection.png",
-    ".local/selection-browser-tiWVID/saved-multi-line-markup.png"
+    ".local/selection-browser-0lKBYN/multi-line-selection.png",
+    ".local/selection-browser-0lKBYN/saved-multi-line-markup.png"
   ]
 }

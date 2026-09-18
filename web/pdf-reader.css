@@ -7,7 +7,7 @@
 .pdr-page-image { position:absolute; inset:0; display:block; width:100%; height:100%; margin:0; pointer-events:none; user-select:none; }
 .pdr-word-layer { position:absolute; inset:0; width:100%; height:100%; overflow:hidden; line-height:1; cursor:text; z-index:1; }
 .pdr-word { position:absolute; display:block; color:transparent; white-space:pre; font-family:Arial,sans-serif; line-height:1; transform-origin:left top; user-select:text; -webkit-user-select:text; }
-.pdr-word::selection { background:#5b93bd66; color:transparent; }
+.pdr-word::selection { background:var(--pdr-selection,#5b93bd66); color:transparent; }
 .paper-pdf-reader[data-tool="note"] .pdr-word-layer,.paper-pdf-reader[data-tool="note"] .pdr-word { user-select:none; -webkit-user-select:none; cursor:crosshair; }
 .paper-pdf-reader[data-tool="highlight"] .pdr-word-layer,.paper-pdf-reader[data-tool="underline"] .pdr-word-layer,.paper-pdf-reader[data-tool="strikeout"] .pdr-word-layer { cursor:text; }
 .pdr-placeholder { position:absolute; inset:0; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; padding:20px; color:#899087; text-align:center; font-size:12px; }
@@ -18,6 +18,6 @@
 
 /* Transient ring over saved markup when the rail reveals it. Hit-testing is
    geometric, so this overlay never intercepts text selection or clicks. */
-.pdr-annotation-flash{position:absolute;pointer-events:none;z-index:2;border:2px solid var(--teal,#28675c);border-radius:2px;background:#28675c26;animation:pdr-annotation-flash 2.4s ease-out}
+.pdr-annotation-flash{position:absolute;pointer-events:none;z-index:2;border:2px solid var(--teal,#28675c);border-radius:2px;background:var(--pdr-selection,#28675c26);animation:pdr-annotation-flash 2.4s ease-out}
 @keyframes pdr-annotation-flash{0%{opacity:0}12%{opacity:1}72%{opacity:1}100%{opacity:0}}
 @media(prefers-reduced-motion:reduce){.pdr-annotation-flash{animation:none;opacity:1}}

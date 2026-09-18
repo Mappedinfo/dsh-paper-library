@@ -67,6 +67,24 @@
     }
     return text;
   }
+  /** rgba() text for a hex colour; used for the live selection wash so the
+   * highlight always shows the colour that will be saved. */
+  function hexTint(value, alpha = .45) {
+    const hex = typeof value === 'string' ? value.trim() : '';
+    const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(hex);
+    const full = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+    if (!short && !full) return '';
+    const channels = (short ? [short[1] + short[1], short[2] + short[2], short[3] + short[3]] : full.slice(1)).map(part => Number.parseInt(part, 16));
+    const level = Number.isFinite(alpha) ? Math.min(1, Math.max(0, alpha)) : .45;
+    return `rgba(${channels.join(', ')}, ${level})`;
+  }
+  /** rgba() text for a saved PDF annotation colour ({stroke:[r,g,b]} in 0–1). */
+  function annotationTint(annotation, alpha = .38) {
+    const stroke = annotation?.color?.stroke;
+    if (!Array.isArray(stroke) || stroke.length < 3 || !stroke.slice(0, 3).every(value => Number.isFinite(value))) return '';
+    const channels = stroke.slice(0, 3).map(value => Math.round(Math.min(1, Math.max(0, value)) * 255));
+    return `rgba(${channels.join(', ')}, ${Number.isFinite(alpha) ? Math.min(1, Math.max(0, alpha)) : .38})`;
+  }
   function mergeSelection(words, page) {
     const rects = [], pieces = []; let characters = 0;
     for (const word of words) {
@@ -364,14 +382,19 @@
       }
       return null;
     }
-    function flashAnnotation(page, rects) {
+    function flashAnnotation(page, rects, annotation = null) {
       const slot = slots[page - 1], geometry = pages[page - 1];
       if (!slot || !geometry) return;
       for (const node of root.querySelectorAll('.pdr-annotation-flash')) node.remove();
+      // Flash in the annotation's own colour so the cue matches the markup.
+      const tint = annotationTint(annotation) || hexTint(color, .38);
+      const source = annotation || (pageAnnotations.get(page) || []).find(value => Array.isArray(value.rects) && value.rects.some(rect => Array.isArray(rect) && rect[2] > rect[0]));
+      const resolved = annotationTint(source) || tint;
       for (const rect of (Array.isArray(rects) ? rects : []).slice(0, 200)) {
         if (!Array.isArray(rect) || rect.length < 4 || rect[2] <= rect[0] || rect[3] <= rect[1]) continue;
         const box = dom('div', 'pdr-annotation-flash');
         Object.assign(box.style, { left: `${rect[0] / geometry.width * 100}%`, top: `${rect[1] / geometry.height * 100}%`, width: `${(rect[2] - rect[0]) / geometry.width * 100}%`, height: `${(rect[3] - rect[1]) / geometry.height * 100}%` });
+        if (resolved) { box.style.background = resolved; box.style.borderColor = resolved.replace(/,\s*[\d.]+\)$/, ', 1)'); }
         slot.sheet.append(box);
       }
       if (flashTimer !== null) window.clearTimeout(flashTimer);
@@ -394,7 +417,7 @@
         const sheet = metric.height - CAPTION;
         root.scrollTop = Math.max(0, metric.top + CAPTION + (first[1] + first[3]) / 2 / geometry.height * sheet - root.clientHeight / 2);
       }
-      flashAnnotation(target, annotation.rects);
+      flashAnnotation(target, annotation.rects, annotation);
       return true;
     }
     function pointerUp(event) {
@@ -414,14 +437,26 @@
           const page = Number(sheet.dataset.pdfPage), geometry = pages[page - 1], box = sheet.getBoundingClientRect();
           if (geometry && box.width && box.height) {
             const hit = annotationAt(page, (event.clientX - box.left) / box.width * geometry.width, (event.clientY - box.top) / box.height * geometry.height);
-            if (hit) { flashAnnotation(page, hit.rects); onAnnotationActivate(hit.id, { page }); }
+            if (hit) { flashAnnotation(page, hit.rects, hit); onAnnotationActivate(hit.id, { page }); }
           }
         }
       }
       if (selectionTimer !== null) window.clearTimeout(selectionTimer); selectionTimer = window.setTimeout(() => { selectionTimer = null; captureSelection(); }, 0);
     }
     function click(event) { const retry = event.target.closest?.('[data-retry-page]'); if (retry && root.contains(retry)) void refresh(Number(retry.dataset.retryPage)).catch(() => {}); }
-    function setTool(value, nextColor) { if (!TOOLS.has(value)) throw new Error('Unsupported PDF annotation tool'); tool = value; if (nextColor !== undefined) { if (!/^#[0-9a-f]{6}$/i.test(nextColor)) throw new Error('Annotation color must be #RRGGBB'); color = nextColor; } root.dataset.tool = tool; lastSelection = ''; }
+    function setTool(value, nextColor) {
+      if (!TOOLS.has(value)) throw new Error('Unsupported PDF annotation tool');
+      tool = value;
+      if (nextColor !== undefined) {
+        if (!/^#[0-9a-f]{6}$/i.test(nextColor)) throw new Error('Annotation color must be #RRGGBB');
+        color = nextColor;
+      }
+      root.dataset.tool = tool;
+      // The selection must preview the colour that will be written to the PDF.
+      const tint = hexTint(color, .5);
+      if (tint) root.style.setProperty('--pdr-selection', tint);
+      lastSelection = '';
+    }
     function setZoom(value) {
       const next = Number(value);
       if (!Number.isFinite(next)) throw new Error('缩放比例无效');
@@ -446,5 +481,5 @@
     function dispose() { clear(); disposed = true; queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); document.removeEventListener('selectionchange', selectionChanged); }
     return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
-  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection });
+  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint });
 })();

@@ -1,0 +1,19 @@
+{
+  "verified_at": "2026-09-18T16:52:21.251Z",
+  "scope": "Synthetic standalone UI: ask/auto markup modes, picker-to-PDF colour contract, rail flash colour and persisted layout. Chromium only; no model call or external request.",
+  "checks": [
+    "the-reader-defaults-to-select-then-ask",
+    "ask-mode-opens-the-dialog-and-saves-the-picked-colour",
+    "auto-mode-colours-on-selection-with-no-dialog",
+    "selection-wash-and-rail-flash-follow-the-real-colour",
+    "mode-and-colour-survive-a-reload",
+    "switching-back-restores-select-then-ask",
+    "no-browser-runtime-errors-and-no-external-requests"
+  ],
+  "errors": [],
+  "externalRequests": 0,
+  "modelRequests": 0,
+  "screenshots": [
+    ".local/markup-mode-485hbg/auto-highlight.png"
+  ]
+}

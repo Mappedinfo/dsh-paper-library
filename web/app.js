@@ -394,6 +394,27 @@ function renderAnnotations() {
   $('annotation-list').replaceChildren(fragment);
   companionUI?.decorate();
 }
+/** 自动着色：拖选即按当前颜色写成自然批注（不弹对话框）。
+ * Questioning stays available afterwards through the rail and the selection tools. */
+let autoMarkupBusy = false;
+const MARKUP_LABELS = { highlight: '高亮', underline: '下划线', strikeout: '删除线' };
+async function autoMarkup(selection, intent = {}) {
+  if (autoMarkupBusy || !selection?.rects?.length || !selection.text?.trim()) return;
+  const type = ['highlight', 'underline', 'strikeout'].includes(intent.intent) ? intent.intent : (readingShell?.markup() || 'highlight');
+  const color = intent.color || readingShell?.tool().color || '#ffdb66';
+  autoMarkupBusy = true;
+  try {
+    await api('annotate', { id: selection.id, page: selection.page, type, text: selection.text, rects: selection.rects, comment: '', author: 'Reader', color });
+    clearSelection();
+    toast(`已${MARKUP_LABELS[type] || '批注'} · 可在批注栏继续提问`);
+    await loadAnnotations(selection.id);
+    publishReaderState();
+    if (state.active?.id === selection.id) await refreshPage(selection.page);
+    await companionUI?.refresh();
+  } catch (error) {
+    toast(`着色未保存：${error.message}`, true);
+  } finally { autoMarkupBusy = false; }
+}
 function openAnnotation(mode, note = null, options = {}) {
   if (!state.active?.pdf) return;
   const markup = ['highlight','underline','strikeout'].includes(mode);
@@ -1062,6 +1083,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
     if(!selection){showReaderSelection(null);return;}
     if(selection?.id!==state.active?.id)return;
     showReaderSelection(selection);
+    if(readingShell?.mode()==='auto'){void autoMarkup(selection,intent);return;}
     if(['highlight','underline','strikeout'].includes(intent.intent))openAnnotation(intent.intent,null,{selection,color:intent.color});
   },
   onPageNote: (selection,intent) => {if(selection.id===state.active?.id)openAnnotation('note',null,{selection,color:intent.color});},
