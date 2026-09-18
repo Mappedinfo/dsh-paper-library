@@ -22,6 +22,7 @@ const commands=[
   ['knowledge_workflow_syntax',process.execPath,['--check','web/knowledge-workflow.js']],
   ['paper_analysis_syntax',process.execPath,['--check','web/paper-analysis.js']],
   ['challenge_mining_syntax',process.execPath,['--check','web/challenge-mining.js']],
+  ['annotation_threads_syntax',process.execPath,['--check','web/annotation-threads.js']],
   ['board_syntax',process.execPath,['--check','web/board.js']],
   ['standalone_syntax',process.execPath,['--check','site/standalone.js']],
   ['site_build',process.execPath,['scripts/build-site.mjs']],

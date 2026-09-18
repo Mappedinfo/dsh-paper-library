@@ -239,6 +239,32 @@ async function lookupMetadata(request, options) {
   return {item:metadataDraft(current,result.metadata),warnings:result.warnings || [],provenance:result.provenance};
 }
 
+/** Parse one reply per annotation. Returns null when the model answered with a
+ * single combined text, so the caller can store it once instead of duplicating. */
+export function splitFeedbackReplies(text, annotations) {
+  const ids = annotations.map(annotation => annotation.id);
+  const allowed = new Set(ids);
+  const raw = String(text).trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i, '$1');
+  let value;
+  try { value = JSON.parse(raw); } catch { return null; }
+  const list = Array.isArray(value) ? value : Array.isArray(value?.replies) ? value.replies : null;
+  if (!list) return null;
+  if (!list.length || list.length > ids.length) throw new Error('模型返回的逐条回复数量与所选批注不符；未写入任何内容。');
+  const seen = new Set(), replies = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object') throw new Error('模型返回的逐条回复格式无效；未写入任何内容。');
+    const annotation_id = item.annotation_id ?? item.annotationId ?? item.id;
+    const comment = item.comment ?? item.text ?? item.reply;
+    if (typeof annotation_id !== 'string' || !allowed.has(annotation_id)) throw new Error('模型回复引用了本次未提供的批注；未写入，以免回复错配。');
+    if (typeof comment !== 'string' || !comment.trim()) throw new Error('模型返回了空回复；未写入任何内容。');
+    if (comment.length > 8000) throw new Error('单条回复超过 8000 字符上限；未写入任何内容。');
+    if (seen.has(annotation_id)) throw new Error('模型对同一条批注返回了多条回复；未写入任何内容。');
+    seen.add(annotation_id);
+    replies.push({ annotation_id, comment: comment.trim() });
+  }
+  return { replies, missing: ids.filter(id => !seen.has(id)) };
+}
+
 export async function dispatch(request, options = {}) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('请求必须是 JSON 对象。');
   const { library: ignoredLibrary, python: ignoredPython, ...safe } = request;
@@ -374,7 +400,19 @@ export async function dispatch(request, options = {}) {
     const ids = context.annotations.map(a => a.id);
     const latest = await core({ action: 'feedback_context', id: safe.id, annotation_ids: ids }, options);
     if (JSON.stringify(latest.annotations) !== JSON.stringify(context.annotations)) throw new Error('生成期间批注发生变化；请重新生成以使用最新批注。');
-    return core({ action: 'save_feedback', id: safe.id, text, model: `${provider}/${model}`, annotation_ids: ids, expected_context_hash:context.context_hash }, options);
+    const common = { id: safe.id, model: `${provider}/${model}`, annotation_ids: ids, expected_context_hash: context.context_hash };
+    if (context.annotations.length > 1) {
+      // Several annotations were asked about together: each answer must land under
+      // the annotation it addresses. A combined answer is saved once, never copied.
+      const split = splitFeedbackReplies(text, context.annotations);
+      if (!split) {
+        const combined = await core({ action: 'save_feedback', text, ...common }, options);
+        return { ...combined, combined: true, warnings: [...(combined.warnings || []), '模型没有按批注分别回复；已保存为一条合并反馈，没有复制到每条批注。'] };
+      }
+      const saved = await core({ action: 'save_feedback', replies: split.replies, ...common }, options);
+      return { ...saved, ...(split.missing.length ? { warnings: [...(saved.warnings || []), `${split.missing.length} 条批注没有获得对应回复；可重新生成补齐。`] } : {}) };
+    }
+    return core({ action: 'save_feedback', text, ...common }, options);
   }
   if (!actions.has(safe.action)) throw new Error('未知文献操作。');
   if (safe.action === 'import') {

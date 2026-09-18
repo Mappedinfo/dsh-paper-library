@@ -1,5 +1,8 @@
 # Validation, 2026-09-16
 
+AI 反馈写回修复通过 **465 JavaScript / 215 Python 测试**。此前一次针对多条批注的反馈会把整段回答写成一条 PDF 便笺，而界面把该便笺按 `annotation_ids` 挂在**每一条**来源批注下，于是同一段答案在所有批注里重复出现。现在 `feedback_context` 在多选时要求模型逐条回复（`mode:'per-annotation'`，严格 JSON），`save_feedback` 新增 `replies` 路径：一次原子写入中为每条批注写一条带 `/IRT` 的回复，且每条只引用自己的批注 id；未回答的批注记入 `missing`，绝不用别人的回答填充。模型若仍返回合并答案，则只保存一条（`combined:true` 并给出提示），不再复制。界面线程构建移入 `web/annotation-threads.js`：逐条回复只挂到自己的批注，历史合并反馈与主对话共享回复仍保留“涉及 N 条批注”标签但不会重复渲染跨批注文本。
+
+
 精确选文修复通过 **456 JavaScript / 213 Python 测试**。PDF 连续阅读此前把选区吸附到整词框：`captureSelection` 直接用每个词的矩形与整词文本，因此从词中开始的一次拖选会得到整个词（在紧排的版面里看起来就像“从行首开始”）。现在 `clipWords` 用浏览器自己的选区矩形（`Range.getClientRects()`）逐词裁剪，并取每个词内真正被选中的文字片段（`selectedText` 用 Range 边界截取），只保留拖动覆盖的部分；同一行的相邻片段仍在 `mergeSelection` 里合并，跨列与跨行保持分离。11 项 `pdf-reader` 单元测试覆盖部分词裁剪、跨行覆盖不误剪、退化数据回退与空片段过滤，[24 流程阅读器回执](validation/reader-browser.json) 新增一项真实 Chromium 检查：从单词中部拖到另一个单词中部，阅读器捕获的文字与浏览器自身选区完全一致，保存的批注引用就是那段切片而不是整词或整行。
 
 

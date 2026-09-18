@@ -641,3 +641,65 @@ def test_metadata_only_record_keeps_pdf_evidence_and_repeat_file_identity(tmp_pa
     assert request(tmp_path, "list")["total"] == 1
     assert len(list((tmp_path / "library" / "pdfs").glob("*.pdf"))) == 1
     assert hashlib.sha256(source.read_bytes()).hexdigest() == digest
+
+
+def test_multi_annotation_feedback_writes_one_reply_per_annotation(tmp_path):
+    item = request(tmp_path, "import", path=str(make_pdf(tmp_path / "paper.pdf")))["items"][0]
+    first = request(tmp_path, "annotate", id=item["id"], page=1, type="note", comment="第一个问题：结论是否有证据？")["annotation"]
+    second = request(tmp_path, "annotate", id=item["id"], page=1, type="note", comment="第二个问题：样本量够吗？")["annotation"]
+    context = request(tmp_path, "feedback_context", id=item["id"], annotation_ids=[first["id"], second["id"]])
+    assert context["mode"] == "per-annotation" and len(context["annotations"]) == 2
+    assert "annotation_id" in context["prompt"] and "one entry per provided annotation id" in context["prompt"]
+    result = request(tmp_path, "save_feedback", id=item["id"], model="test-model", annotation_ids=[first["id"], second["id"]],
+                     expected_context_hash=context["context_hash"],
+                     replies=[{"annotation_id": first["id"], "comment": "针对第一条问题的解释。"},
+                              {"annotation_id": second["id"], "comment": "针对第二条问题的解释。"}])
+    assert result["split"] is True and result["missing"] == []
+    assert [reply["annotation_id"] for reply in result["replies"]] == [first["id"], second["id"]]
+    assert [reply["page"] for reply in result["replies"]] == [1, 1]
+    saved = request(tmp_path, "annotations", id=item["id"])["annotations"]
+    generated = [note for note in saved if note.get("kind") == "ai-feedback"]
+    assert len(generated) == 2, "Each reply is its own PDF note"
+    by_parent = {}
+    for note in generated:
+        assert note["annotation_ids"] == [note["reply_to"]], "A reply cites exactly its own annotation"
+        by_parent[note["reply_to"]] = note["comment"]
+    assert set(by_parent) == {first["id"], second["id"]}
+    assert "针对第一条问题的解释。" in by_parent[first["id"]] and "针对第二条问题的解释。" not in by_parent[first["id"]]
+    assert "针对第二条问题的解释。" in by_parent[second["id"]] and "针对第一条问题的解释。" not in by_parent[second["id"]]
+    assert {note["id"] for note in saved if note.get("kind") != "ai-feedback"} >= {first["id"], second["id"]}
+    single = request(tmp_path, "feedback_context", id=item["id"], annotation_ids=[first["id"]])
+    assert single["mode"] == "single"
+    assert request(tmp_path, "save_feedback", id=item["id"], text="单条回答", model="test-model",
+                   annotation_ids=[first["id"]], expected_context_hash=single["context_hash"])["annotation_id"]
+
+
+def test_multi_annotation_feedback_rejects_mismatched_or_unknown_replies(tmp_path):
+    item = request(tmp_path, "import", path=str(make_pdf(tmp_path / "paper.pdf")))["items"][0]
+    first = request(tmp_path, "annotate", id=item["id"], page=1, type="note", comment="A")["annotation"]
+    second = request(tmp_path, "annotate", id=item["id"], page=1, type="note", comment="B")["annotation"]
+    context = request(tmp_path, "feedback_context", id=item["id"], annotation_ids=[first["id"], second["id"]])
+    base = {"id": item["id"], "model": "test-model", "annotation_ids": [first["id"], second["id"]],
+            "expected_context_hash": context["context_hash"]}
+    with pytest.raises(ValueError, match="one text answer or per-annotation replies"):
+        request(tmp_path, "save_feedback", **base, text="combined", replies=[{"annotation_id": first["id"], "comment": "x"}])
+    with pytest.raises(ValueError, match="one text answer or per-annotation replies"):
+        request(tmp_path, "save_feedback", **base)
+    with pytest.raises(ValueError, match="outside the generated context"):
+        request(tmp_path, "save_feedback", **base, replies=[{"annotation_id": "external-note", "comment": "x"}])
+    with pytest.raises(ValueError, match="only one generated reply"):
+        request(tmp_path, "save_feedback", **base, replies=[{"annotation_id": first["id"], "comment": "x"}, {"annotation_id": first["id"], "comment": "y"}])
+    with pytest.raises(ValueError, match="1–8000 characters"):
+        request(tmp_path, "save_feedback", **base, replies=[{"annotation_id": first["id"], "comment": "   "}])
+    with pytest.raises(ValueError, match="1–100 replies"):
+        request(tmp_path, "save_feedback", **base, replies=[])
+    assert [note for note in request(tmp_path, "annotations", id=item["id"])["annotations"] if note.get("kind") == "ai-feedback"] == []
+    partial = request(tmp_path, "save_feedback", **base, replies=[{"annotation_id": second["id"], "comment": "只回答第二条。"}])
+    assert partial["missing"] == [first["id"]], "Unanswered annotations are reported, not duplicated over"
+    generated = [note for note in request(tmp_path, "annotations", id=item["id"])["annotations"] if note.get("kind") == "ai-feedback"]
+    assert len(generated) == 1 and generated[0]["reply_to"] == second["id"]
+    request(tmp_path, "annotation_update", id=item["id"], annotation_id=first["id"], comment="修改后的问题")
+    with pytest.raises(ValueError, match="批注发生变化"):
+        request(tmp_path, "save_feedback", **base, replies=[{"annotation_id": first["id"], "comment": "stale"}])
+    after = [note for note in request(tmp_path, "annotations", id=item["id"])["annotations"] if note.get("kind") == "ai-feedback"]
+    assert len(after) == 1, "A refused write leaves the saved replies unchanged"

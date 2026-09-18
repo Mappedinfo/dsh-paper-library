@@ -346,14 +346,10 @@ async function loadAnnotations(id) {
     state.noteOffset = Math.min(state.noteOffset, Math.max(0, Math.ceil(count / 40) - 1) * 40); renderAnnotations();
   } catch (error) { if (id === state.active?.id) { $('annotation-count').textContent = ''; $('annotation-list').replaceChildren(emptyState('批注暂时未能读取', error.message)); } }
 }
+// Threading lives in web/annotation-threads.js so the no-duplication rule is
+// unit-testable without the DOM.
 function annotationThreads(annotations) {
-  const ai=note=>note.kind==='ai-feedback'||note.type==='ai_feedback'||note.ai_generated;
-  const notes=annotations.filter(note=>!ai(note)),replies=new Map(notes.map(note=>[note.id,[]])),unlinked=[];
-  for(const reply of annotations.filter(ai)){
-    const parents=[...new Set([...(Array.isArray(reply.annotation_ids)?reply.annotation_ids:[]),reply.reply_to].filter(id=>replies.has(id)))];
-    if(!parents.length)unlinked.push(reply);else for(const id of parents)replies.get(id).push(reply);
-  }
-  return {notes,replies,unlinked};
+  return window.PaperAnnotationThreads.threads(annotations);
 }
 function renderAnnotations() {
   const fragment = document.createDocumentFragment();
@@ -798,9 +794,13 @@ async function requestFeedback(id = state.active?.id, automatic = false) {
   $('feedback-status').classList.remove('error'); $('feedback-status').textContent = '正在根据已保存批注生成反馈…';
   if (automatic) toast('批注已保存，正在请求 AI 反馈…');
   try {
-    await api('ai_feedback', { id, model: model.id, provider: model.provider, ...(model.sessionId ? { session_id: model.sessionId } : {}), ...(model.reasoningEffort ? { reasoning_effort: model.reasoningEffort } : {}) });
-    if (state.active?.id === id) { $('feedback-status').textContent = '反馈已保存，标记为 AI 生成。'; await loadFeedback(id); await loadAnnotations(id); if (state.active.pdf) await requestPage(state.page); }
-    toast('AI 反馈已保存');
+    const result = await api('ai_feedback', { id, model: model.id, provider: model.provider, ...(model.sessionId ? { session_id: model.sessionId } : {}), ...(model.reasoningEffort ? { reasoning_effort: model.reasoningEffort } : {}) });
+    const warnings = result?.warnings || [];
+    const summary = result?.split ? `已按 ${result.replies?.length || 0} 条批注分别写入回复。`
+      : result?.combined ? '模型返回了一条合并回答；已保存为一条反馈，未复制到每条批注。'
+      : '反馈已保存，标记为 AI 生成。';
+    if (state.active?.id === id) { $('feedback-status').textContent = [summary, ...warnings].join(' '); await loadFeedback(id); await loadAnnotations(id); if (state.active.pdf) await requestPage(state.page); }
+    toast([summary, ...warnings].join(' '), warnings.length > 0);
   } catch (error) {
     if (state.active?.id === id) { $('feedback-status').textContent = `反馈未生成：${error.message}\n批注已保存，可修复模型配置后重试。`; $('feedback-status').classList.add('error'); }
     toast(`AI 反馈未完成：${error.message}`, true);
