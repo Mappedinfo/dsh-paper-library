@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 const context = vm.createContext({ window: {} });
 vm.runInContext(await readFile(new URL('../web/pdf-reader.js', import.meta.url), 'utf8'), context);
-const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords } = context.window.PaperPDFReader;
+const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection } = context.window.PaperPDFReader;
 const plain = value => JSON.parse(JSON.stringify(value));
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function scheduler({ delayedInstall = false } = {}) {
@@ -89,7 +89,8 @@ test('layout rejects missing, duplicate, invalid and oversized page geometry ins
 
 test('selection uses displayed PDF coordinates, merges only adjacent words on a line and preserves columns', () => {
   const selection = mergeSelection([[10, 20, 30, 30, 'First'], [32, 20, 50, 30, 'line'], [250, 20, 300, 30, 'column'], [10, 40, 30, 50, 'Next']], 2);
-  assert.deepEqual(plain(selection), { page: 2, text: 'First line column Next', rects: [[10, 20, 50, 30], [250, 20, 300, 30], [10, 40, 30, 50]], wordCount: 4 });
+  assert.deepEqual(plain(selection), { page: 2, text: 'First line columnNext', rects: [[10, 20, 50, 30], [250, 20, 300, 30], [10, 40, 30, 50]], wordCount: 4 },
+    'A line break joins without a space; words on one line keep theirs');
   assert.throws(() => mergeSelection([[0, 0, 10, 10, 'x'.repeat(20001)]], 1), /上限/);
   assert.throws(() => mergeSelection(Array.from({ length: 201 }, (_, i) => [0, i * 20, 10, i * 20 + 10, 'x']), 1), /上限/);
 });
@@ -113,7 +114,7 @@ test('a partial selection keeps only the selected slice of each word', () => {
   ]);
   // Clipped words merge into the exact selected span, not the whole line.
   const merged = mergeSelection(clipWords(entries), 1);
-  assert.deepEqual(plain(merged), { page: 1, text: 'ence sentence stan dard Next', wordCount: 5,
+  assert.deepEqual(plain(merged), { page: 1, text: 'ence sentence stan dardNext', wordCount: 5,
     rects: [[102, 300, 300, 326], [420, 300, 520, 326], [680, 300, 700, 326], [530, 340, 560, 366]] },
     'Adjacent words merge; a large gap and a second line stay separate rectangles');
 });
@@ -134,3 +135,21 @@ test('clipWords never drops a selected word and only skips whitespace', () => {
   assert.deepEqual(plain(clipWords([null, { box: [1, 2, 3] }])), []);
 });
 
+
+test('a selected line break joins without a space and CJK never gets one', () => {
+  const piece = (text, left, top, right, bottom) => ({ text, left, top, right, bottom });
+  // Same Latin line keeps its space; a wrap contributes nothing.
+  assert.equal(joinSelection([piece('the', 10, 20, 30, 30), piece('reader.', 34, 20, 60, 30)]), 'the reader.');
+  assert.equal(joinSelection([piece('the', 10, 20, 30, 30), piece('reader.', 10, 34, 60, 44)]), 'thereader.');
+  // A hyphenated wrap stays one word, exactly as the page prints it.
+  assert.equal(joinSelection([piece('measure-', 10, 20, 60, 30), piece('ment', 10, 34, 40, 44)]), 'measure-ment');
+  // Chinese has no separators, on a line or across one.
+  assert.equal(joinSelection([piece('这是', 10, 20, 40, 30), piece('一个例子', 44, 20, 90, 30)]), '这是一个例子');
+  assert.equal(joinSelection([piece('这是', 10, 20, 40, 30), piece('一个例子', 10, 34, 90, 44)]), '这是一个例子');
+  // Mixed Chinese and Latin follow the same rule and never insert a space next to CJK.
+  assert.equal(joinSelection([piece('方法', 10, 20, 40, 30), piece('A', 44, 20, 60, 30)]), '方法A');
+  // Rotated pages lay a line out vertically: words of one line share left/right.
+  assert.equal(joinSelection([piece('first', 10, 20, 30, 30), piece('second', 10, 34, 30, 44)]), 'first second');
+  assert.equal(joinSelection([piece('first', 10, 20, 30, 30), piece('second', 40, 34, 60, 44)]), 'firstsecond');
+  assert.equal(joinSelection([]), '');
+});

@@ -48,19 +48,40 @@
     }
     return words;
   }
+  const CJK = /[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]/;
+  /** Join selected pieces the way the page is laid out:
+   * - a wrap contributes no space (the page breaks the line, not a space),
+   *   which also keeps a hyphenated break as one word ("measure-" + "ment");
+   * - CJK neighbours never get a separator, matching the page text;
+   * - Latin words on the same visual line keep their space. */
+  function joinSelection(pieces) {
+    let text = '', previous = null;
+    for (const piece of pieces) {
+      if (!piece.text) continue;
+      if (!text) { text = piece.text; previous = piece; continue; }
+      const sameLine = Math.abs(previous.top - piece.top) < 2 && Math.abs(previous.bottom - piece.bottom) < 2
+        || Math.abs(previous.left - piece.left) < 2 && Math.abs(previous.right - piece.right) < 2;
+      const cjk = CJK.test(text.slice(-1)) || CJK.test(piece.text[0]);
+      text += sameLine && !cjk ? ' ' + piece.text : piece.text;
+      previous = piece;
+    }
+    return text;
+  }
   function mergeSelection(words, page) {
-    const rects = [], text = []; let characters = 0;
+    const rects = [], pieces = []; let characters = 0;
     for (const word of words) {
       if (!Array.isArray(word) || word.length < 5 || !word.slice(0, 4).every(Number.isFinite) || typeof word[4] !== 'string') continue;
       const rect = word.slice(0, 4), last = rects.at(-1), height = rect[3] - rect[1];
       if (height <= 0 || rect[2] <= rect[0]) continue;
       if (last && Math.abs(last[1] - rect[1]) < 2 && Math.abs(last[3] - rect[3]) < 2 && rect[0] >= last[2] - 2 && rect[0] - last[2] < height * 1.5) { last[2] = Math.max(last[2], rect[2]); last[1] = Math.min(last[1], rect[1]); last[3] = Math.max(last[3], rect[3]); }
       else rects.push(rect);
-      text.push(word[4].trim());
-      characters += word[4].trim().length + 1;
+      const text = word[4].trim();
+      pieces.push({ text, left: rect[0], top: rect[1], right: rect[2], bottom: rect[3] });
+      characters += text.length + 1;
       if (rects.length > 200 || characters > 20000) throw new Error('选择范围超过单次批注上限，请缩小到较短的段落。');
     }
-    return { page, text: text.join(' '), rects, wordCount: text.length };
+    const text = joinSelection(pieces);
+    return { page, text, rects, wordCount: pieces.length };
   }
   /** Serial scheduling owns page identities, never retains raster/word payloads. */
   function createPageWindow({ load, install, evict, onError = () => {} }) {
@@ -425,5 +446,5 @@
     function dispose() { clear(); disposed = true; queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); document.removeEventListener('selectionchange', selectionChanged); }
     return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
-  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords });
+  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection });
 })();

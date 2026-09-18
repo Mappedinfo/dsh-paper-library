@@ -24,6 +24,11 @@ for index, rotation in enumerate((0, 90)):
     body = "Synthetic measurement text describes the urban study and its comparison across districts for the reader. " * 8
     page.insert_textbox((48, 60, 547, 800), body, fontsize=11, lineheight=1.5)
     page.set_rotation(rotation)
+page = doc.new_page(width=595, height=842)
+page.insert_textbox((48, 60, 547, 400),
+    "本研究比较了城市洪涝的实时预报方法，并讨论其在合成数据上的适用性。城市水文模型需要更细的时"
+    "空分辨率，才能支撑街道尺度的预警与调度决策。合成评估只覆盖单一城市，跨城市的迁移能力仍不明确。",
+    fontsize=11, fontname="china-s", lineheight=1.6)
 doc.save(sys.argv[1]); doc.close()
 `, source], { cwd: project, encoding: 'utf8' });
 assert.equal(generated.status, 0, generated.stderr);
@@ -87,7 +92,21 @@ try {
   });
   await reset();
   const multi = await drag(plan.from, plan.to);
-  assert.equal(multi.preview, plan.expected.join(' '), 'Every dragged word is captured in order');
+  // Words on one visual line keep their space; the wrap contributes nothing.
+  const expectedText = await page.evaluate(expected => {
+    const words = [...document.querySelectorAll('#continuous-reader .pdr-sheet[data-pdf-page="1"] .pdr-word')];
+    const start = words.findIndex(word => word.textContent.trim() === expected[0]);
+    const parts = words.slice(start, start + expected.length).map(word => ({ text: word.textContent.trim(), top: Math.round(word.getBoundingClientRect().top) }));
+    let text = '', previousTop = null;
+    for (const part of parts) {
+      if (previousTop === null) text = part.text;
+      else text += part.top === previousTop ? ' ' + part.text : part.text;
+      previousTop = part.top;
+    }
+    return text;
+  }, plan.expected);
+  assert.equal(multi.preview, expectedText, 'Every dragged word is captured in order, without a space at the wrap');
+  assert.ok(/[A-Za-z]/.test(multi.preview) && multi.preview.includes(' '), 'Latin words on one line keep their space');
   assert.ok(!multi.preview.includes('  '), 'Captured text has no double spaces');
   assert.equal(multi.hidden, false);
   const shot = (name, path) => { screenshots.push(relative(project, path)); return page.screenshot({ path }); };
@@ -143,6 +162,19 @@ try {
   assert.ok(lineResult.preview.endsWith(lineEnd.last), `A line-end release keeps every word (${lineResult.preview.slice(-30)})`);
   assert.equal(lineResult.hidden, false, 'The selection survives a release past the line end');
   record('a-line-end-release-keeps-the-whole-line-instead-of-collapsing');
+
+  // 4b. A Chinese wrap must not gain a space, and the page's own words stay glue.
+  await showPage(3); await reset();
+  const chinese = await page.evaluate(() => {
+    const words = [...document.querySelectorAll('#continuous-reader .pdr-sheet[data-pdf-page="3"] .pdr-word')];
+    const first = words[0].getBoundingClientRect(), second = words[1].getBoundingClientRect();
+    return { expected: words.slice(0, 3).map(word => word.textContent.trim()).join(''), first: words[0].textContent.trim(), from: { x: first.left + 3, y: first.top + first.height / 2 }, to: { x: second.right - 3, y: second.top + second.height / 2 } };
+  });
+  const chineseResult = await drag(chinese.from, chinese.to);
+  assert.ok(chineseResult.preview.startsWith(chinese.first), `The Chinese selection starts at the pointed line (${chineseResult.preview.slice(0, 12)})`);
+  assert.ok(!/\s/.test(chineseResult.preview), `Chinese text never gains an inserted space (${chineseResult.preview})`);
+  assert.equal(chineseResult.preview.replace(/\s+/g, ''), chineseResult.browser.replace(/\s+/g, ''), 'The captured Chinese text matches the browser selection');
+  record('a-chinese-wrap-joins-without-an-inserted-space');
 
   // 5. A rotated page keeps the same precision.
   await showPage(2); await reset();
