@@ -796,6 +796,7 @@
     }
 
     function renderInspector() {
+      renderLinks();
       const relation = $('board-relation');
       const label = $('board-edge-label-input');
       const color = $('board-color');
@@ -1046,7 +1047,11 @@
       if (event.key === ' ') spaceDown = true;
       if (typing) return;
       const meta = event.metaKey || event.ctrlKey;
-      if (event.key === 'Escape') { closeTextEdit(); connectFrom = null; select([]); render(); return; }
+      if (event.key === 'Escape') {
+        if (doc.body.classList.contains('board-focused')) { setFocus(false); return; }
+        closeTextEdit(); connectFrom = null; select([]); render();
+        return;
+      }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); return; }
       if (meta && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); return; }
       if (meta && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); return; }
@@ -1164,6 +1169,7 @@
       open = false;
       closeTextEdit();
       root.hidden = true;
+      setFocus(false);
       doc.body.classList.remove('board-mode');
       onClose({ focus });
     }
@@ -1215,6 +1221,17 @@
       if (!root.requestFullscreen) { toast('当前环境不支持全屏，请展开侧栏或在浏览器中打开。', true); return; }
       try { await root.requestFullscreen({ navigationUI: 'hide' }); }
       catch { toast('浏览器未允许全屏；可展开侧栏继续使用画板。', true); }
+    }
+
+    /** Pure canvas: hide the app chrome so nothing but the board is on screen. */
+    function setFocus(on) {
+      doc.body.classList.toggle('board-focused', Boolean(on));
+      const button = $('board-focus');
+      if (button) {
+        button.setAttribute('aria-pressed', String(Boolean(on)));
+        button.textContent = on ? '退出专注 ⤡' : '专注 ⤢';
+      }
+      if (on) applyView();
     }
 
     function syncFullscreen() {
@@ -1384,6 +1401,48 @@
       } catch (error) { toast(error.message || '加入画板失败', true); return false; }
     }
 
+    /**
+     * Links are associative and many-to-many: a board may sit under several papers and
+     * reading projects at once, and unlinking never touches the board's content.
+     */
+    const LINKS = { papers: 50, projects: 20 };
+    function links() {
+      return { papers: [...(board.links?.papers ?? [])], projects: [...(board.links?.projects ?? [])] };
+    }
+
+    function setLink(kind, id, on) {
+      if (id === undefined || id === null || id === '') { toast('先选择要关联的对象。', true); return false; }
+      if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(id)) { toast('关联标识无效。', true); return false; }
+      const current = links();
+      const list = current[kind] ?? [];
+      const has = list.includes(id);
+      if (on === has) { toast(on ? '已经关联过了。' : '没有关联这一项。'); return false; }
+      const next = on ? [...list, id] : list.filter(value => value !== id);
+      if (next.length > LINKS[kind]) { toast(`一张画板最多关联 ${LINKS[kind]} 个${kind === 'papers' ? '论文' : '项目'}。`, true); return false; }
+      const merged = { ...links(), [kind]: next };
+      const linksValue = {};
+      if (merged.papers.length) linksValue.papers = merged.papers;
+      if (merged.projects.length) linksValue.projects = merged.projects;
+      mutate(currentBoard => ({ ...currentBoard, links: Object.keys(linksValue).length ? linksValue : undefined }));
+      renderLinks();
+      return true;
+    }
+
+    function renderLinks() {
+      const node = $('board-links');
+      if (!node) return;
+      const { papers, projects } = links();
+      const parts = [];
+      if (papers.length) parts.push(`关联论文 ${papers.length}`);
+      if (projects.length) parts.push(`关联项目 ${projects.length}`);
+      node.textContent = parts.length ? parts.join(' · ') : '未关联任何论文或项目';
+      const active = options.getActivePaperId?.();
+      const linkButton = $('board-link-paper');
+      if (linkButton) linkButton.disabled = !active || papers.includes(active);
+      const unlinkButton = $('board-unlink-paper');
+      if (unlinkButton) unlinkButton.disabled = !active || !papers.includes(active);
+    }
+
     /** Build a new mind map from chosen papers; the host still owns validation and storage. */
     async function generateFromPapers(papers, title) {
       const draft = boardFromPapers(papers, title);
@@ -1515,6 +1574,11 @@
       const pinButton = $('board-layout-pin'), unpinButton = $('board-layout-unpin');
       if (pinButton) pinButton.addEventListener('click', () => setPinned(selectedNodeIds(), true));
       if (unpinButton) unpinButton.addEventListener('click', () => setPinned(selectedNodeIds(), false));
+      const linkButton = $('board-link-paper'), unlinkButton = $('board-unlink-paper');
+      if (linkButton) linkButton.addEventListener('click', () => { const id = options.getActivePaperId?.(); if (id) setLink('papers', id, true); else toast('先在文献库里打开一篇论文。', true); });
+      if (unlinkButton) unlinkButton.addEventListener('click', () => { const id = options.getActivePaperId?.(); if (id) setLink('papers', id, false); });
+      const focusButton = $('board-focus');
+      if (focusButton) focusButton.addEventListener('click', () => setFocus(!doc.body.classList.contains('board-focused')));
       const sourceDialog = $('board-source-dialog');
       const sourceStatus = (message, error = false) => {
         const node = $('board-source-status');
@@ -1612,6 +1676,7 @@
     render();
 
     return {
+      links, setLink, setFocus,
       open: openView, close: closeView, resize, load, refreshList, render,
       isOpen: () => open,
       board: () => board,

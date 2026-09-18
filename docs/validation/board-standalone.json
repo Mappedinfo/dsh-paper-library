@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-18T08:20:01.183Z",
+  "verified_at": "2026-09-18T16:12:06.526Z",
   "scope": "The GitHub Pages build served by a local static server: browser-local persistence with a content revision, reload restore, tidy-tree arranging, JSON export/import across profiles including duplicate-identity handling, PNG export, hidden host-only controls, tombstoned deletion, and zero external requests or page errors. No plugin host, library, model or network service is involved, and browser storage is convenience rather than a durable store — the exported JSON is the backup.",
   "checks": [
     "the-independent-page-opens-a-board-and-hides-host-only-controls",
@@ -14,9 +14,10 @@
     "the-standalone-build-reads-and-applies-the-source-and-style-files",
     "a-second-board-is-separate-and-deletion-tombstones-only-that-record",
     "a-repository-source-file-renders-from-a-url-without-duplicating-itself",
+    "focus-mode-is-a-pure-canvas-and-the-standalone-host-has-no-library-chrome",
     "no-browser-runtime-errors-and-no-external-requests"
   ],
-  "checks_count": 13,
+  "checks_count": 14,
   "modelRequests": 0,
   "externalRequests": 0
 }

@@ -72,6 +72,16 @@ test('a generated board is exactly what the host accepts, so both validators agr
   // A stored sidecar with its version marker survives a host round trip.
   const withSchema = validateBoard({ ...converted.board, style: { schema: source.STYLE_SCHEMA, ...converted.style } }, { id: 'b-000000000002' });
   assert.equal(withSchema.style.schema, source.STYLE_SCHEMA);
+  // Links travel in the same file and survive the host validator.
+  const linked = validateBoard({ ...source.fromSource({ ...sample(), papers: ['paper_a', 'paper_b'], projects: ['proj-1'] }, {}).board, style: undefined }, { id: 'b-000000000003' });
+  assert.deepEqual({ ...linked.links, papers: [...linked.links.papers], projects: [...linked.links.projects] }, { papers: ['paper_a', 'paper_b'], projects: ['proj-1'] });
+  assert.equal(linked.links.papers.length, 2, 'one board may sit under several papers');
+  const stripped = validateBoard({ ...converted.board, links: { papers: ['paper_a'], projects: [] } }, { id: 'b-000000000004' });
+  assert.deepEqual({ ...stripped.links, papers: [...stripped.links.papers] }, { papers: ['paper_a'] }, 'an empty list is dropped, not stored as an empty array');
+  assert.throws(() => source.validateSource({ ...sample(), papers: ['a', 'a'] }), /重复/);
+  assert.throws(() => source.validateSource({ ...sample(), projects: Array.from({ length: 21 }, (_, index) => `p${index}`) }), /最多 20 项/);
+  assert.throws(() => validateBoard({ ...converted.board, links: { papers: ['not an id'] } }, { id: 'b-000000000005' }), /必须是 1–60 位/);
+
   // And an exported source validates against its own reader.
   const { source: content, style } = source.toSource(converted.board, {});
   assert.deepEqual(source.validateSource(content), content);

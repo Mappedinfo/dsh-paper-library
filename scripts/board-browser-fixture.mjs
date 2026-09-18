@@ -400,7 +400,10 @@ try {
   assert.equal(sourceJson.schema, 'paper-library-board.v1');
   assert.equal(sourceJson.nodes.every(node => !('x' in node) && !('y' in node) && !('w' in node)), true, 'the content file carries no pixel coordinates');
   assert.equal(sourceJson.nodes.every(node => /^[A-Za-z0-9_-]{1,60}$/.test(node.id)), true, 'ids stay short and addressable');
-  assert.equal(JSON.stringify(sourceJson).includes('"kind":"note"'), true, 'node kinds are readable');
+  // Kinds are written as plain readable words; which kinds exist depends on the board the
+  // earlier steps left open, so assert the vocabulary rather than one specific kind.
+  assert.equal(sourceJson.nodes.every(node => ['text', 'note', 'concept', 'paper', 'rect', 'ellipse', 'diamond'].includes(node.kind)), true, 'node kinds are readable');
+  assert.equal(sourceJson.nodes.length >= 1, true);
   sourceJson.nodes.push({ id: 'fromSource', kind: 'note', text: '源文件新增的节点' });
   await page.locator('#board-source-content').fill(JSON.stringify(sourceJson, null, 2));
   await page.locator('#board-source-apply').click();
@@ -418,6 +421,46 @@ try {
   assert.equal(sidecar.board.style.node.byId.fromSource.fill, '#ffe9ec');
   await page.locator('#board-source-dialog .dialog-close').first().click();
   record('editing-the-source-file-and-its-sidecar-drives-the-canvas');
+
+  // The library shelf lists boards as their own files and links them to papers.
+  await page.locator('#board-close').click();
+  await page.locator('#paper-list .paper-card').first().click();
+  const linkedPaperId = await page.locator('#paper-list .paper-card').first().getAttribute('data-id');
+  await page.locator('#board-shelf > summary').click();
+  await page.locator('.board-shelf-row').first().waitFor();
+  const shelfRows = await page.locator('.board-shelf-row').count();
+  const listedBoards = (await waitForHost(value => value.boards.length >= 2, 'the boards listed in the shelf')).boards.length;
+  assert.equal(shelfRows, Math.min(20, listedBoards), 'the shelf shows the host records it read');
+  assert.match(await page.locator('#board-shelf-count').innerText(), new RegExp(String(listedBoards)));
+  await page.locator('.board-shelf-row').first().getByRole('button', { name: '关联本篇' }).click();
+  let linkedShelf;
+  try { linkedShelf = await waitForHost(value => value.boards.some(board => (board.linked_papers ?? 0) >= 1), 'the paper link recorded on a board'); }
+  catch (error) {
+    const state = await page.evaluate(() => ({ toast: document.getElementById('toast')?.textContent ?? '', rows: [...document.querySelectorAll('.board-shelf-row')].map(row => row.innerText.replace(/\n/g, ' | ')), active: document.querySelector('#paper-list .paper-card')?.getAttribute('data-id') ?? null, shelf: document.getElementById('board-shelf-count')?.textContent }));
+    throw new Error(`${error.message} | toast=${state.toast} | rows=${JSON.stringify(state.rows)} | shelf=${state.shelf} | active=${state.active}`);
+  }
+  assert.equal(linkedShelf.boards.some(board => board.linked_papers >= 1), true);
+  assert.match(await page.locator('.board-shelf-row.is-linked small').first().innerText(), /关联1篇/);
+  await page.locator('.board-shelf-row.is-linked').first().getByRole('button', { name: '解除' }).click();
+  await waitForHost(value => value.boards.every(board => (board.linked_papers ?? 0) === 0), 'the paper link removed');
+  // The paper's own control counts its boards and can create one already linked.
+  await page.locator('#paper-board-new').click();
+  const createdForPaper = await waitForHost(value => value.boards.some(board => (board.linked_papers ?? 0) >= 1), 'a board created from the paper header');
+  assert.equal(createdForPaper.boards.some(board => board.linked_papers >= 1), true);
+  assert.equal(linkedPaperId !== null, true);
+  record('the-library-shelf-lists-boards-and-links-them-to-papers');
+
+  // Focus mode is a pure canvas: no topbar, no library, no reader or annotations.
+  await page.locator('#board-focus').click();
+  await page.waitForFunction(() => document.body.classList.contains('board-focused'));
+  assert.equal(await page.locator('.library-pane').isVisible(), false, 'focus hides the library shelf');
+  assert.equal(await page.locator('.topbar').isVisible(), false, 'focus hides the app topbar');
+  assert.equal(await page.locator('#board-view').isVisible(), true, 'the board is the only thing left');
+  assert.equal(await page.locator('#board-stage').isVisible(), true);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.body.classList.contains('board-focused'));
+  assert.equal(await page.locator('.library-pane').isVisible(), true, 'Escape restores the app chrome');
+  record('focus-mode-leaves-only-the-canvas-and-escape-restores-the-app');
 
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);

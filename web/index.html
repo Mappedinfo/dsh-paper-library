@@ -52,6 +52,7 @@
     <section class="library-pane" aria-label="文献与数据集库">
       <div class="pane-heading"><div><p class="eyebrow">YOUR RESEARCH SHELF</p><h1>库 <span id="item-count" class="count">—</span></h1></div><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="检索标题、作者、标签…" autocomplete="off" aria-label="检索文献与数据集"><kbd>⌘ K</kbd></label><div class="shelf-actions"><button id="build-bibliography" class="button subtle" title="在文献库 exports 目录构建 references.bib 并生成身份审计">构建引用库</button><button id="export-library" class="button subtle" title="导出全部文献为 BibLaTeX">导出文献库</button><button id="refresh" class="icon-button" title="刷新文献库" aria-label="刷新文献库">↻</button></div></div>
       <form id="quick-import-form" class="quick-import"><label for="quick-import-source">粘贴论文链接或 DOI，自动保存</label><div><input id="quick-import-source" type="text" placeholder="https://… 或 10.…" autocomplete="off" aria-label="粘贴论文链接或 DOI 自动导入"><button type="submit" class="icon-button" aria-label="导入链接">↵</button></div><p>也可把一个或多个 PDF 拖到窗口任意位置。</p></form>
+      <details id="board-shelf" class="board-shelf"><summary><span>画板</span><span id="board-shelf-count" class="count">—</span></summary><div id="board-shelf-list" class="board-shelf-list"></div><p class="small muted">画板与库逻辑解耦：它不绑定任何论文，但可以同时关联多篇论文或多个阅读项目。</p></details>
       <div class="list-heading"><span id="search-summary"></span></div>
       <div id="library-error" class="inline-error" role="alert" hidden></div>
       <div id="paper-list" class="paper-list" aria-live="polite"></div>
@@ -162,8 +163,12 @@
         <button id="board-layout-unpin" class="button subtle" type="button">取消钉住</button>
       </div>
       <div class="board-group board-right">
+        <span id="board-links" class="board-status" role="status"></span>
+        <button id="board-link-paper" class="button subtle" type="button" title="把这张画板关联到文献库中当前打开的论文；关联不影响画板内容">关联本篇</button>
+        <button id="board-unlink-paper" class="button subtle" type="button">解除本篇</button>
         <span id="board-layout-status" class="board-status" role="status"></span>
         <button id="board-source-open" class="button subtle" type="button" title="查看/编辑可读的源文件与样式辅助文件（.style.json）">源文件</button>
+        <button id="board-focus" class="button subtle" type="button" aria-pressed="false" title="专注：只显示画板，隐藏顶栏、文献库与阅读批注（Esc 退出）">专注 ⤢</button>
       </div>
     </div>
     <div id="board-conflict" class="board-conflict" role="alert" hidden>

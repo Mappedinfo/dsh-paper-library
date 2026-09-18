@@ -30,7 +30,8 @@ const NODE_FIELDS = new Set(['id', 'kind', 'x', 'y', 'w', 'h', 'text', 'color', 
 const EDGE_FIELDS = new Set(['id', 'from', 'to', 'label', 'kind', 'relation', 'origin', 'waypoints', 'arrow', 'dashed'])
 const ARROWS = new Set(['forward', 'both', 'none'])
 const PAPER_FIELDS = new Set(['id', 'title', 'year', 'citekey'])
-const BOARD_FIELDS = new Set(['schema', 'id', 'title', 'created_at', 'updated_at', 'origin', 'status', 'view', 'nodes', 'edges', 'style'])
+const BOARD_FIELDS = new Set(['schema', 'id', 'title', 'created_at', 'updated_at', 'origin', 'status', 'view', 'nodes', 'edges', 'style', 'links'])
+const LINK_FIELDS = new Set(['papers', 'projects'])
 const LAYOUT_MODES = new Set(['tree', 'radial', 'layered'])
 const LAYOUT_DIRECTIONS = new Set(['lr', 'tb', 'rl', 'bt'])
 
@@ -110,6 +111,31 @@ function normalizeNode(value, index) {
   if (kind !== 'paper' && paper) throw boardError(`第 ${index + 1} 个节点只有 paper 类型可以绑定文献。`)
   if (!node.text && !node.paper) throw boardError(`第 ${index + 1} 个节点既没有文本也没有文献。`)
   return node
+}
+
+/**
+ * A board is one file that may sit under several papers and reading projects. The links are
+ * many-to-many and purely associative: they never copy content, never own the board, and a
+ * board without any link is still a complete board.
+ */
+function normalizeLinks(value) {
+  if (value === undefined) return undefined
+  closedObject(value, '画板关联', LINK_FIELDS)
+  const links = {}
+  for (const [key, label, maximum] of [['papers', '论文', 50], ['projects', '项目', 20]]) {
+    const list = value[key]
+    if (list === undefined) continue
+    if (!Array.isArray(list) || list.length > maximum) throw boardError(`画板关联的${label}最多 ${maximum} 项。`)
+    const seen = new Set()
+    const ids = list.map((entry, index) => {
+      const id = identifier(entry, `第 ${index + 1} 个${label}标识`)
+      if (seen.has(id)) throw boardError(`画板关联的${label}标识 ${id} 重复。`)
+      seen.add(id)
+      return id
+    })
+    if (ids.length) links[key] = ids
+  }
+  return Object.keys(links).length ? links : undefined
 }
 
 const STYLE_TEXT_FIELDS = new Set(['fontSize', 'width'])
@@ -312,6 +338,8 @@ export function validateBoard(value, { id, origin: forcedOrigin } = {}) {
   duplicate(board.edges.map(edge => edge.id), '连线')
   const style = normalizeStyle(value.style, nodeIds)
   if (style) board.style = style
+  const links = normalizeLinks(value.links)
+  if (links) board.links = links
   if (value.created_at !== undefined) {
     if (typeof value.created_at !== 'string' || !Number.isFinite(Date.parse(value.created_at))) throw boardError('画板创建时间无效。')
     board.created_at = value.created_at
@@ -377,6 +405,7 @@ export function boardSummary(board) {
     id: board.id, title: board.title, origin: board.origin, status: board.status,
     created_at: board.created_at ?? null, updated_at: board.updated_at ?? null,
     node_count: board.nodes.length, edge_count: board.edges.length,
+    linked_papers: board.links?.papers?.length ?? 0, linked_projects: board.links?.projects?.length ?? 0,
     paper_count: board.nodes.filter(node => node.paper).length,
     ai_node_count: board.nodes.filter(node => node.origin === 'llm').length,
     ai_edge_count: board.edges.filter(edge => edge.origin === 'llm').length,

@@ -66,7 +66,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
     'board-tool-select', 'board-tool-pan', 'board-tool-text', 'board-tool-note', 'board-tool-rect', 'board-tool-ellipse', 'board-tool-diamond', 'board-tool-connect',
     'board-edge-kind', 'board-edge-arrow', 'board-edge-dashed',
     'board-layout-mode', 'board-layout-direction', 'board-layout-gap-x', 'board-layout-gap-y', 'board-layout-apply', 'board-layout-pin', 'board-layout-unpin', 'board-layout-status',
-    'board-source-open', 'board-source-dialog', 'board-source-content', 'board-source-style', 'board-source-status', 'board-source-apply', 'board-source-download', 'board-source-upload', 'board-source-file', 'board-source-generate',
+    'board-source-open', 'board-source-dialog', 'board-links', 'board-link-paper', 'board-unlink-paper', 'board-focus', 'board-source-content', 'board-source-style', 'board-source-status', 'board-source-apply', 'board-source-download', 'board-source-upload', 'board-source-file', 'board-source-generate',
   ];
   const { doc, registry, Element } = environment(ids);
   doc.defaultView.confirm = () => confirm;
@@ -614,6 +614,65 @@ test('the readable source file round-trips and keeps presentation in its sidecar
   assert.throws(() => harness.panel.applySourceTexts('{"nodes":[{"id":"a","kind":"note","text":"x"},{"id":"b","kind":"note","text":"y","pin":[1,2,3]}],"edges":[]}', '{}'), /pin 必须是/);
   assert.throws(() => harness.panel.applySourceTexts('{"nodes":[{"id":"a","kind":"note","text":"x"}],"edges":[{"from":"a","to":"missing"}]}', '{}'), /端点不在/);
   assert.equal(signature(harness.panel.board()), kept, 'a refused file changes nothing');
+});
+
+test('a board links to papers and projects many-to-many, and unlinking keeps its content', async () => {
+  state.length = 0;
+  let activePaper = 'paper_a';
+  const harness = loadPanel({ api: apiStub() });
+  harness.panel.focus?.(false);
+  await harness.panel.open();
+  harness.panel.setTool('rect');
+  harness.svg.dispatch('pointerdown', { clientX: 200, clientY: 200 });
+  const before = harness.panel.board().nodes.length;
+  const asPlain = value => ({ papers: [...value.papers], projects: [...value.projects] });
+  assert.deepEqual(asPlain(harness.panel.links()), { papers: [], projects: [] });
+  assert.equal(harness.panel.setLink('papers', 'paper_a', true), true);
+  assert.equal(harness.panel.setLink('papers', 'paper_b', true), true);
+  assert.equal(harness.panel.setLink('projects', 'proj-1', true), true);
+  assert.deepEqual(asPlain(harness.panel.links()), { papers: ['paper_a', 'paper_b'], projects: ['proj-1'] });
+  // Repeating the same link is refused instead of duplicating.
+  assert.equal(harness.panel.setLink('papers', 'paper_a', true), false);
+  assert.equal(harness.messages.some(message => /已经关联过/.test(message)), true);
+  // Unlinking one paper leaves the other links and every node untouched.
+  assert.equal(harness.panel.setLink('papers', 'paper_a', false), true);
+  assert.deepEqual(asPlain(harness.panel.links()), { papers: ['paper_b'], projects: ['proj-1'] });
+  assert.equal(harness.panel.board().nodes.length, before);
+  // Invalid ids and unknown targets are refused with a readable reason.
+  assert.equal(harness.panel.setLink('papers', 'not an id', true), false);
+  assert.equal(harness.panel.setLink('projects', '', true), false);
+  assert.equal(harness.messages.some(message => /标识无效/.test(message)), true);
+  await harness.runTimers();
+  const saved = state.filter(call => call.action === 'board_save').at(-1);
+  assert.deepEqual({ ...saved.payload.board.links, papers: [...saved.payload.board.links.papers], projects: [...saved.payload.board.links.projects] }, { papers: ['paper_b'], projects: ['proj-1'] });
+  // Removing the last link drops the field entirely rather than storing an empty object.
+  assert.equal(harness.panel.setLink('papers', 'paper_b', false), true);
+  assert.equal(harness.panel.setLink('projects', 'proj-1', false), true);
+  assert.deepEqual(asPlain(harness.panel.links()), { papers: [], projects: [] });
+  await harness.runTimers();
+  assert.equal(state.filter(call => call.action === 'board_save').at(-1).payload.board.links, undefined);
+});
+
+test('focus mode is a pure canvas and Escape leaves it', async () => {
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  harness.panel.setTool('rect');
+  harness.svg.dispatch('pointerdown', { clientX: 200, clientY: 200 });
+  assert.equal(harness.panel.selection().length, 1, 'the new node starts selected');
+  assert.equal(harness.doc.body.classList.contains('board-focused'), false);
+  harness.registry.get('board-focus').dispatch('click');
+  assert.equal(harness.doc.body.classList.contains('board-focused'), true, 'focus hides the app chrome');
+  assert.equal(harness.registry.get('board-focus').getAttribute('aria-pressed'), 'true');
+  assert.match(harness.registry.get('board-focus').textContent, /退出专注/);
+  // Escape leaves focus before it clears anything else.
+  harness.doc.body.dispatch('keydown', { key: 'Escape' });
+  assert.equal(harness.doc.body.classList.contains('board-focused'), false);
+  assert.equal(harness.panel.selection().length, 1, 'the first Escape only left focus');
+  harness.doc.body.dispatch('keydown', { key: 'Escape' });
+  assert.equal(harness.panel.selection().length, 0, 'a second Escape clears the selection');
+  harness.panel.close();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(harness.doc.body.classList.contains('board-focused'), false, 'closing the board also leaves focus');
 });
 
 test('a knowledge-graph node joins the board without inventing metadata', async () => {

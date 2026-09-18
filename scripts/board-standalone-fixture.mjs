@@ -240,6 +240,18 @@ try {
   await linked.close();
   record('a-repository-source-file-renders-from-a-url-without-duplicating-itself');
 
+  // Focus mode is a pure canvas here too, and this host has no library or reader at all.
+  assert.equal(await page.locator('#board-shelf').count(), 0, 'the standalone page carries no library shelf');
+  assert.equal(await page.locator('#paper-board-new').count(), 0, 'and no per-paper controls');
+  await page.locator('#board-focus').click();
+  await page.waitForFunction(() => document.body.classList.contains('board-focused'));
+  assert.equal(await page.locator('#board-stage').isVisible(), true);
+  assert.equal(await page.locator('.site-header').isVisible(), false, 'focus also hides the standalone header');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.body.classList.contains('board-focused'));
+  assert.equal(await page.locator('.site-header').isVisible(), true);
+  record('focus-mode-is-a-pure-canvas-and-the-standalone-host-has-no-library-chrome');
+
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);
   record('no-browser-runtime-errors-and-no-external-requests');

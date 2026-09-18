@@ -151,6 +151,7 @@ function renderList() {
   $('search-summary').textContent = state.query ? `检索结果 · ${state.total}` : '全部文献';
   if (!state.query && !state.archived && state.kind === 'all') { $('item-count').textContent = state.total; state.libraryCount = state.total; }
   renderWelcome();
+  if(typeof refreshBoardShelf==='function')void refreshBoardShelf();
   $('list-range').textContent = state.total ? `${state.offset + 1}–${Math.min(state.offset + state.limit, state.total)} / ${state.total}` : '0 篇';
   $('previous-list').disabled = state.offset === 0;
   $('next-list').disabled = state.offset + state.limit >= state.total;
@@ -1103,11 +1104,96 @@ settingsUI = window.PaperLibrarySettings?.create({api,persistence,getLibrary:()=
   companionUI?.applyPreferences(value,descriptor.writable);
   if(value['reading-panel-side'])readingPanels?.setSide(value['reading-panel-side'],{persist:false});
 }});
+/** Boards are their own files: the shelf lists them and shows which paper each one is linked to. */
+let boardSummaries=[];
+async function refreshBoardShelf(){
+  const list=$('board-shelf-list'); if(!list||!boardUI)return;
+  try{
+    const result=await api('board_list',{});
+    boardSummaries=result.boards||[];
+    cachedBoardLinks.clear();
+    for(const summary of boardSummaries){try{const record=await api('board_get',{id:summary.id});cachedBoardLinks.set(summary.id,{papers:[...(record.board.links?.papers??[])],projects:[...(record.board.links?.projects??[])]});}catch{cachedBoardLinks.set(summary.id,{papers:[],projects:[]});}}
+    $('board-shelf-count').textContent=String(boardSummaries.length);
+    list.replaceChildren();
+    if(!boardSummaries.length){list.append(el('p','small muted','还没有画板。打开「画板」即可新建，或从论文里点「＋ 画板」。'));}
+    for(const summary of boardSummaries.slice(0,20)){
+      const row=el('div','board-shelf-row');
+      const linked=Boolean(state.active)&&boardSummaryLinks(summary.id).includes(state.active.id);
+      row.classList.toggle('is-linked',linked);
+      const title=el('strong',null,summary.title);
+      title.title=`${summary.node_count} 个节点 · ${summary.edge_count} 条连线`;
+      row.append(title,el('small',null,`${summary.node_count}节点 · 关联${summary.linked_papers??0}篇/ ${summary.linked_projects??0}项目`));
+      const open=el('button',null,'打开'); open.type='button';
+      open.addEventListener('click',()=>{void boardUI.open().then(()=>boardUI.load(summary.id));});
+      const toggle=el('button',null,linked?'解除':'关联本篇'); toggle.type='button';
+      toggle.disabled=!state.active||(state.active.resource_kind||'paper')!=='paper';
+      toggle.addEventListener('click',async()=>{
+        if(!state.active)return;
+        try{
+          await linkBoardToPaper(summary.id,state.active.id,!linked);
+          if(boardUI.board()?.id===summary.id)await boardUI.load(summary.id);
+          await refreshBoardShelf();
+        }catch(error){toast(error.message||'关联失败',true);}
+      });
+      row.append(open,toggle);
+      list.append(row);
+    }
+    if(boardSummaries.length>20)list.append(el('p','small muted',`仅显示最近 20 张，共 ${boardSummaries.length} 张。`));
+    syncPaperBoardControls();
+  }catch(error){$('board-shelf-count').textContent='—';list.replaceChildren(el('p','small muted',error.message||'无法读取画板'));}
+}
+function boardSummaryLinks(id){const found=cachedBoardLinks.get(id);return found?found.papers:[];}
+const cachedBoardLinks=new Map();
+/**
+ * Link or unlink one board directly through the host, so the shelf never has to switch the
+ * app into the board view just to change an association.
+ */
+async function linkBoardToPaper(id,paperId,on){
+  const got=await api('board_get',{id});
+  const papers=[...(got.board.links?.papers??[])],projects=[...(got.board.links?.projects??[])];
+  if(papers.includes(paperId)===on)return;
+  const next=on?[...papers,paperId]:papers.filter(value=>value!==paperId);
+  const links={};
+  if(next.length)links.papers=next;
+  if(projects.length)links.projects=projects;
+  await api('board_save',{id,board:{...got.board,links:Object.keys(links).length?links:undefined},expected_revision:got.revision});
+}
+function syncPaperBoardControls(){
+  const count=$('paper-board-count'); if(!count)return;
+  const active=state.active&&(state.active.resource_kind||'paper')==='paper'?state.active.id:null;
+  count.textContent=String(active?boardSummaries.filter(summary=>boardSummaryLinks(summary.id).includes(active)).length:0);
+}
+// The workbench moves them out of the removed .paper-actions block, but its destination is a
+// collapsed citation menu; a board control belongs on the always-visible reading ribbon.
+// Board controls for the current paper. They are created here rather than living in the
+// static markup because the workbench moves and then removes that block on every setup pass.
+const paperBoardNew=el('button','button subtle','＋ 画板');paperBoardNew.id='paper-board-new';paperBoardNew.type='button';paperBoardNew.title='新建一张画板并关联到这篇论文';
+const paperBoardOpen=el('button','button subtle','这张论文的画板 ');paperBoardOpen.id='paper-board-open';paperBoardOpen.type='button';
+const paperBoardCount=el('span','count','0');paperBoardCount.id='paper-board-count';paperBoardOpen.append(paperBoardCount);
+$('paper-tools').append(paperBoardNew,paperBoardOpen);
+$('paper-board-new').addEventListener('click',async()=>{
+  if(!state.active)return;
+  try{
+    const created=await api('board_create',{board:{title:`${title(state.active)} · 画板`,nodes:[],edges:[],links:{papers:[state.active.id]}}});
+    await refreshBoardShelf();
+    await boardUI.open();
+    await boardUI.load(created.board.id);
+    toast('已新建并关联到这篇论文的画板');
+  }catch(error){toast(error.message||'新建画板失败',true);}
+});
+$('paper-board-open').addEventListener('click',async()=>{
+  if(!state.active)return;
+  const mine=boardSummaries.filter(summary=>boardSummaryLinks(summary.id).includes(state.active.id));
+  await boardUI.open();
+  if(mine.length)await boardUI.load(mine[0].id);
+  else toast('这篇论文还没有画板，可以点左边的「＋ 画板」。');
+});
 boardUI = window.PaperBoard?.create({root:$('board-view'),api,toast,
-  onClose:({focus})=>{if(focus)$('board-open').focus();},
+  onClose:({focus})=>{void refreshBoardShelf();if(focus)$('board-open').focus();},
   onRequestPapers:()=>openBoardPaperPicker(),
   onOpenPaper:id=>{const item=state.items.find(value=>value.id===id);void openResource(item||{id});},
   getSessionId:()=>state.harnessContext?.sessionId||null,
+  getActivePaperId:()=>state.active&&(state.active.resource_kind||'paper')==='paper'?state.active.id:null,
 });
 $('board-open').addEventListener('click',()=>{void boardUI?.open();});
 let boardPickerTicket=0,boardPickerTimer=null;

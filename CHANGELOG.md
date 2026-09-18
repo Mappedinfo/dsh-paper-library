@@ -17,12 +17,14 @@
 - **主机持久化与冲突恢复**：画板是私有状态记录（`board:<id>`，256 KiB 上限、修订号校验、原子替换，删除只置墓碑）。保存去抖；关闭画板、切换画板或离开页面会先落盘（离开时 keepalive），删除取消待写以免复活。跨窗口冲突显示横幅，可载入已保存版本或另存为新画板，两侧都不丢。
 - **画板进对话（引用 chip）**：「放入对话」先冻结一张不可变快照（内容寻址；编辑或删除画板都不会改写它），再把 `[[paper-library-board:v1:…]]` chip 放进 DSH 主输入框；发送时宿主在 `agent/pre-step` 展开为 `〔引用画板 …〕` 标记 + 独立来源消息（`paperLibraryBoard`，含 body hash），预算与批注引用共享（最多 4 组 / 24,000 字符）。格式损坏、快照缺失或身份不一致会让该回合失败，而不是改发别的内容。画板快照不绑定某一篇论文对话。
 - **图谱节点进画板**：在「知识图谱」里选中一个节点后点「加入画板」，即可把它加入当前画板（文献类型节点保留论文绑定，其余按节点名称成为概念节点，不臆造元数据）。画板与图谱共用同一栏，无法同时可见，因此这是一条显式动作而不是拖拽。
+- **画板与库解耦 + 多对多关联**：画板记录新增 `links:{papers:[…],projects:[…]}`（多对多、纯关联，不复制内容；上限 50 篇论文 / 20 个项目）。文献库左侧新增「画板」列表，可打开、对当前论文一键关联/解除；论文工具栏新增「＋ 画板」（新建并关联）与「这张论文的画板 N」。源文件 `board.json` 也携带 `papers`/`projects`，因此一个文件就能表达"它属于谁"。
+- **纯画板专注模式**：新增「专注 ⤢」隐藏顶栏、文献库、阅读与批注，只留画布（Esc 退出），不依赖浏览器全屏权限；独立站同时隐藏站点页眉页脚。
 - **连线加深**：新增点-点「连线」工具；选中连线可切换箭头／直线／折线、单向／无／双向箭头与虚线；拖动线段插入**拐点**、拖动拐点调整、Alt 点击或双击删除。折线路径与命中判定共用同一份正交几何，刚画好的线自动成为选中项并把线型记为后续默认。
 - **自动排版（确定性）**：**分层树**（保留读者的上下顺序，支持 lr／tb／rl／bt 四方向与间距）、**放射思维导图**、**分层图 DAG**（最长路径分层 + 重心排序）。三种模式都把局部坐标锚定在结构上并归一化，因此重复应用不漂移；「钉住选中」的节点永不参与排版，用于特殊位置。
 - **可读源文件与样式辅助文件**：内容文件 `board.json`（短标识、稳定键序、无像素坐标）与 `board.style.json`（配色／尺寸／字号／按关系连线样式／排版参数／固定坐标）可生成、编辑、校验、应用、下载与导入；独立站支持 `?src=boards/example.json` 直接渲染仓库中的源文件（重复访问复用本地副本，不重复导入）。
 - **AI 读写画板**：新增 `library_board` 工具（共 30 个工具）可列、读、建、改、删画板；模型新增/修改的节点与连线标记为 `origin:'llm'` 待评审，未改动内容保留读者署名，只有读者能「接受 AI 改动」；面板对 AI 提议显示虚线边框。
 - **独立画板站（GitHub Pages）**：同一份 `web/board.js` 另有一个无需 DSH 的静态宿主（`site/`），由 `scripts/build-site.mjs` 组装：画板 markup 从插件页面**抽取**而不是复制，两端不会漂移；`site/standalone.js` 实现同一套动作契约，落在 `localStorage`（上限 40 张画板 / 4 MiB，界面报告用量），并支持 JSON 全量导出/导入（同标识另存为新画板，绝不覆盖）与 PNG 导出（按模型绘制，不依赖页面样式）。独立模式下文献库与对话引用控件隐藏而不假装可用。`.github/workflows/pages.yml` 在 main 上自动构建并部署（Pages 源设为 GitHub Actions）。线上地址 <https://mappedinfo.github.io/dsh-paper-library/> 已用真实浏览器复核（6 项检查：资源投递、绘制与保存、刷新恢复、整理成树、PNG 导出、零第三方请求），回执见 `docs/validation/board-pages-live.json`，可用 `node scripts/verify-pages.mjs` 重跑。
-- 验证：**475 JavaScript / 215 Python 测试**，[23 项插件内 Chromium 回执](docs/validation/board-browser.json)、[13 项独立站 Chromium 回执](docs/validation/board-standalone.json)、[7 项原生 DSH 回执](docs/validation/board-harness.json) 与 [线上回执](docs/validation/board-pages-live.json)。设计记录见 [docs/whiteboard-design.md](docs/whiteboard-design.md) 与 [docs/board-pages.md](docs/board-pages.md)。
+- 验证：**475 JavaScript / 215 Python 测试**，[25 项插件内 Chromium 回执](docs/validation/board-browser.json)、[14 项独立站 Chromium 回执](docs/validation/board-standalone.json)、[7 项原生 DSH 回执](docs/validation/board-harness.json) 与 [线上回执](docs/validation/board-pages-live.json)。设计记录见 [docs/whiteboard-design.md](docs/whiteboard-design.md) 与 [docs/board-pages.md](docs/board-pages.md)。
 
 ### 研究难点挖掘（P1–P3）
 

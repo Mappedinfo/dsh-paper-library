@@ -167,6 +167,34 @@ positions.
 - **Error messages were glued together** (`类型 notew 必须在…`); the field labels are now
   separate words in both validators.
 
+## P9: decoupling, many-to-many links and a pure canvas
+
+Accepted 2026-09-18 from the owner's follow-up. A board is a file that may sit under several
+papers and reading projects without becoming part of them:
+
+- **`links: { papers: [...], projects: [...] }`** on the board record — associative only,
+  many-to-many, at most 50 papers and 20 projects, duplicate identifiers rejected, and an empty
+  list dropped rather than stored. Linking never copies board content and unlinking never
+  touches it. The same two arrays appear in the readable `board.json`, so one file states what
+  the board belongs to; `projects` is already validated and round-tripped, and reading projects
+  themselves land in the next phase.
+- **The library lists boards as their own files.** A 「画板」 shelf in the library pane shows
+  each host record with its node/edge/link counts, opens one, and links or unlinks it to the
+  currently open paper. Linking goes through the authenticated host API rather than switching
+  the app into the board view. The paper toolbar offers 「＋ 画板」 (new board, already linked)
+  and 「这张论文的画板 N」.
+- **Focus mode is a pure canvas.** 「专注 ⤢」 hides the topbar, the library, the reader and the
+  annotations — and the standalone page's header and footer — without the Fullscreen API, so it
+  also works inside the DSH sidebar. Escape leaves focus first (a second Escape clears the
+  selection), and closing the board leaves focus.
+
+### What implementation changed here too
+
+- **The per-paper controls are created in JS.** The static block they first lived in is moved
+  and then removed by the workbench module on every setup pass, and the destination is a
+  collapsed citation menu, so a static button silently disappeared and took the app's boot with
+  it.
+
 ## Invariants
 
 - No new runtime dependency, no model call while opening, listing or drawing a board, and no

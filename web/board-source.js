@@ -421,6 +421,8 @@
     const gapX = options.gapX ?? style.layout?.gapX ?? 80;
     const gapY = options.gapY ?? style.layout?.gapY ?? 36;
     if (mode !== 'tree' || direction !== 'lr') source.layout = `${mode}-${direction}`;
+    if (board.links?.papers?.length) source.papers = [...board.links.papers];
+    if (board.links?.projects?.length) source.projects = [...board.links.projects];
     source.nodes = nodes.map(node => {
       const entry = { id: mapping.get(node.id), kind: node.kind };
       if (node.text) entry.text = node.text;
@@ -454,12 +456,27 @@
   }
 
   function validateSource(value) {
-    closed(value, '画板源文件', ['schema', 'title', 'layout', 'nodes', 'edges', 'note']);
+    closed(value, '画板源文件', ['schema', 'title', 'layout', 'nodes', 'edges', 'note', 'papers', 'projects']);
     if (value.schema !== undefined && value.schema !== SOURCE_SCHEMA) fail(`画板源文件版本不受支持（需要 ${SOURCE_SCHEMA}）。`);
     const source = { schema: SOURCE_SCHEMA, title: text(value.title, '标题', LIMITS.title)?.trim() || '未命名画板' };
     if (value.layout !== undefined) {
       if (typeof value.layout !== 'string' || !value.layout.split('-').every(part => [...MODES, ...DIRECTIONS].includes(part))) fail('layout 需要形如 tree-lr、radial 或 layered-tb。');
       source.layout = value.layout;
+    }
+    // The board file also records where it sits: under papers and reading projects. The
+    // links are associative only — the file itself stays one file.
+    for (const [key, label, maximum] of [['papers', '论文', 50], ['projects', '项目', 20]]) {
+      const list = value[key];
+      if (list === undefined) continue;
+      if (!Array.isArray(list) || list.length > maximum) fail(`${label}关联最多 ${maximum} 项。`);
+      const seen = new Set();
+      source[key] = list.map((entry, index) => {
+        const id = identifier(entry, `第 ${index + 1} 个${label}标识`);
+        if (seen.has(id)) fail(`${label}关联标识 ${id} 重复。`);
+        seen.add(id);
+        return id;
+      });
+      if (!source[key].length) delete source[key];
     }
     if (!Array.isArray(value.nodes) || !value.nodes.length || value.nodes.length > LIMITS.nodes) fail(`nodes 必须是 1–${LIMITS.nodes} 项。`);
     const ids = new Set();
@@ -663,10 +680,14 @@
     const positions = new Map(placed.map(node => [node.id, node]));
     const laid = nodes.map(node => positions.get(node.id) ?? node);
     const pins = style.layout?.pins ?? {};
+    const links = {};
+    if (source.papers?.length) links.papers = [...source.papers];
+    if (source.projects?.length) links.projects = [...source.projects];
     return {
       board: {
         schema: 1,
         title: source.title,
+        ...(Object.keys(links).length ? { links } : {}),
         origin: 'user',
         status: 'saved',
         nodes: laid.map(node => {
