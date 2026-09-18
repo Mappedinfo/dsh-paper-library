@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-16T14:53:45.048Z",
+  "verified_at": "2026-09-18T03:50:04.596Z",
   "ok": true,
   "checks": [
     "light-replies-nest-under-exact-notes-with-shared-reply-label-and-unlinked-recovery",
@@ -9,10 +9,10 @@
     "fresh-browser-restores-pdf-linked-replies-without-browser-storage-or-model-requests"
   ],
   "screenshots": [
-    ".local/annotation-replies-browser-Qoccun/light-511.png",
-    ".local/annotation-replies-browser-Qoccun/light-681.png",
-    ".local/annotation-replies-browser-Qoccun/dark-511.png",
-    ".local/annotation-replies-browser-Qoccun/dark-681.png"
+    ".local/annotation-replies-browser-3PPVFu/light-511.png",
+    ".local/annotation-replies-browser-3PPVFu/light-681.png",
+    ".local/annotation-replies-browser-3PPVFu/dark-511.png",
+    ".local/annotation-replies-browser-3PPVFu/dark-681.png"
   ],
   "themes": [
     "light",

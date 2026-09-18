@@ -26,7 +26,7 @@
 .challenge-suggestion{margin:8px 0;padding:8px;border:1px dashed var(--line);border-radius:8px;display:grid;gap:4px}
 .challenge-record{display:grid;gap:3px;padding:6px 0;border-bottom:1px solid var(--line)}
 #challenge-status{font-size:12px;line-height:1.5;margin:8px 0}
-#challenge-open{font-size:12px;flex:none}
+#challenge-open{font-size:10px;padding:3px 6px;flex:none;align-self:center}
 @media(max-height:620px){.challenge-panel{top:76px;bottom:8px}}
 .challenge-review{margin:12px 0;padding:10px;border:1px solid var(--line);border-radius:10px;display:grid;gap:6px}
 .challenge-review textarea{width:100%;font:inherit;font-size:12px;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);resize:vertical}

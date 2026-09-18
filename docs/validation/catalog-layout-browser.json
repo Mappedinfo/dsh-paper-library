@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-15T08:23:55.903Z",
+  "verified_at": "2026-09-18T03:48:56.110Z",
   "checks": [
     "light-511px-table-clips-each-cell-with-compact-heading-and-complete-title-on-hover-or-focus",
     "light-681px-table-clips-each-cell-with-compact-heading-and-complete-title-on-hover-or-focus",
@@ -144,9 +144,9 @@
                 "left": 834,
                 "right": 954,
                 "top": 231.78125,
-                "bottom": 248.578125,
+                "bottom": 265.375,
                 "width": 120,
-                "height": 16.796875
+                "height": 33.59375
               }
             },
             {
@@ -760,9 +760,9 @@
                 "left": 834,
                 "right": 954,
                 "top": 231.78125,
-                "bottom": 248.578125,
+                "bottom": 265.375,
                 "width": 120,
-                "height": 16.796875
+                "height": 33.59375
               }
             },
             {
@@ -1376,9 +1376,9 @@
                 "left": 834,
                 "right": 954,
                 "top": 231.78125,
-                "bottom": 248.578125,
+                "bottom": 265.375,
                 "width": 120,
-                "height": 16.796875
+                "height": 33.59375
               }
             },
             {
@@ -1992,9 +1992,9 @@
                 "left": 834,
                 "right": 954,
                 "top": 231.78125,
-                "bottom": 248.578125,
+                "bottom": 265.375,
                 "width": 120,
-                "height": 16.796875
+                "height": 33.59375
               }
             },
             {
@@ -2608,9 +2608,9 @@
                 "left": 834,
                 "right": 954,
                 "top": 231.78125,
-                "bottom": 248.578125,
+                "bottom": 265.375,
                 "width": 120,
-                "height": 16.796875
+                "height": 33.59375
               }
             },
             {
@@ -3224,9 +3224,9 @@
                 "left": 834,
                 "right": 954,
                 "top": 231.78125,
-                "bottom": 248.578125,
+                "bottom": 265.375,
                 "width": 120,
-                "height": 16.796875
+                "height": 33.59375
               }
             },
             {
@@ -3736,12 +3736,12 @@
   "browser_errors": [],
   "local_storage_writes": 0,
   "screenshots": [
-    ".local/catalog-layout-browser-qDGl40/light-compact-catalog-511.png",
-    ".local/catalog-layout-browser-qDGl40/light-compact-catalog-681.png",
-    ".local/catalog-layout-browser-qDGl40/light-compact-catalog-1400.png",
-    ".local/catalog-layout-browser-qDGl40/dark-compact-catalog-511.png",
-    ".local/catalog-layout-browser-qDGl40/dark-compact-catalog-681.png",
-    ".local/catalog-layout-browser-qDGl40/dark-compact-catalog-1400.png"
+    ".local/catalog-layout-browser-4kFMoE/light-compact-catalog-511.png",
+    ".local/catalog-layout-browser-4kFMoE/light-compact-catalog-681.png",
+    ".local/catalog-layout-browser-4kFMoE/light-compact-catalog-1400.png",
+    ".local/catalog-layout-browser-4kFMoE/dark-compact-catalog-511.png",
+    ".local/catalog-layout-browser-4kFMoE/dark-compact-catalog-681.png",
+    ".local/catalog-layout-browser-4kFMoE/dark-compact-catalog-1400.png"
   ],
   "scope": "Actual Chromium with synthetic metadata, isolated host disk storage, explicit text bounds and full-title hover/focus checks. Not formal user validation."
 }

@@ -27,6 +27,30 @@
     const candidates = [center, center + 1, center - 1, center + 2, center - 2];
     return [...new Set(candidates)].filter(page => page > 0 && page <= metrics.length).slice(0, MAX_RESIDENT);
   }
+  /** Clip每个被选中的词框到真实选区：部分选中的词只保留选中部分与选中文字，
+   * 这样一次拖选不会把整词（或整行开头）算进批注。 */
+  function clipWords(entries) {
+    const words = [];
+    for (const entry of entries || []) {
+      if (!entry || !Array.isArray(entry.box) || entry.box.length < 4 || !entry.box.every(Number.isFinite)) continue;
+      const [left, top, right, bottom] = entry.box;
+      if (right <= left || bottom <= top) continue;
+      // Coverage comes from the browser's own selection rectangles ([left, top,
+      // right, bottom]); a word with no measured overlap keeps its whole box, so
+      // degenerate layout data cannot silently drop a selected word.
+      const raw = Array.isArray(entry.parts) && entry.parts.length ? entry.parts : [[left, top, right, bottom]];
+      const parts = raw
+        .filter(part => Array.isArray(part) && part.length >= 2 && part.every(Number.isFinite))
+        .filter(part => part.length < 4 || (part[3] > top + .5 && part[1] < bottom - .5))
+        .map(part => [Math.max(left, part[0]), Math.min(right, part[part.length >= 4 ? 2 : 1])])
+        .filter(part => part[1] - part[0] > .5);
+      if (!parts.length) continue;
+      const text = typeof entry.text === 'string' ? entry.text.replace(/\s+/g, ' ').trim() : '';
+      if (!text) continue;
+      words.push([Math.min(...parts.map(part => part[0])), top, Math.max(...parts.map(part => part[1])), bottom, text]);
+    }
+    return words;
+  }
   function mergeSelection(words, page) {
     const rects = [], text = []; let characters = 0;
     for (const word of words) {
@@ -206,6 +230,16 @@
       finally { if (current(id, ticket)) updateWindow(); }
     }
     function layerOf(node) { const element = node?.nodeType === 3 ? node.parentElement : node; return element?.closest?.('.pdr-word-layer'); }
+    /** The part of one word span the selection covers; a word selected in full keeps its text. */
+    function selectedText(range, span) {
+      try {
+        const bounds = document.createRange(); bounds.selectNodeContents(span);
+        const slice = range.cloneRange();
+        if (slice.compareBoundaryPoints(Range.START_TO_START, bounds) < 0) slice.setStart(bounds.startContainer, bounds.startOffset);
+        if (slice.compareBoundaryPoints(Range.END_TO_END, bounds) > 0) slice.setEnd(bounds.endContainer, bounds.endOffset);
+        return slice.toString();
+      } catch { return span.textContent.trim(); }
+    }
     function captureSelection() {
       if (tool === 'note' || !paperId) return;
       const value = window.getSelection(); if (!value?.rangeCount || value.isCollapsed) return;
@@ -215,11 +249,26 @@
         return;
       }
       if (anchor !== focus) { selection = null; lastSelection = ''; onSelection(null, { intent: tool, color }); onStatus('选文跨越了多个 PDF 页面，请分别选择并保存每一页的批注。', true); return; }
-      const selected = [];
-      for (const span of anchor.children) if (value.containsNode(span, true)) selected.push([...JSON.parse(span.dataset.rect), span.textContent.trim()]);
+      const page = Number(anchor.dataset.pdfPage), geometry = pages[page - 1], sheet = anchor.closest?.('.pdr-sheet');
+      const range = value.getRangeAt(0), box = sheet?.getBoundingClientRect();
+      if (!geometry || !box?.width || !box?.height) return;
+      // Client rects describe what the reader actually dragged over, including a
+      // partial word; each overlapped word box is clipped to that coverage.
+      const coverage = typeof range.getClientRects === 'function' ? [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0).map(rect => [rect.left, rect.top, rect.right, rect.bottom]) : [];
+      const entries = [], scaleX = geometry.width / box.width, scaleY = geometry.height / box.height;
+      for (const span of anchor.children) {
+        if (!value.containsNode(span, true)) continue;
+        const word = span.getBoundingClientRect();
+        entries.push({
+          box: [word.left, word.top, word.right, word.bottom],
+          parts: coverage,
+          text: selectedText(range, span),
+        });
+      }
+      const selected = clipWords(entries).map(([left, top, right, bottom, text]) => [(left - box.left) * scaleX, (top - box.top) * scaleY, (right - box.left) * scaleX, (bottom - box.top) * scaleY, text]);
       if (!selected.length) return;
       try {
-        const result = mergeSelection(selected, Number(anchor.dataset.pdfPage)); if (!result.rects.length) return;
+        const result = mergeSelection(selected, page); if (!result.rects.length || !result.text.trim()) return;
         const digest = JSON.stringify([result.page, result.text, result.rects]); if (digest === lastSelection) return;
         lastSelection = digest; selection = { id: paperId, ...result }; onSelection(selection, { intent: tool, color });
       } catch (error) { selection = null; lastSelection = ''; onSelection(null, { intent: tool, color }); onStatus(error.message, true); }
@@ -308,5 +357,5 @@
     function dispose() { clear(); disposed = true; queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); document.removeEventListener('selectionchange', selectionChanged); }
     return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
-  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection });
+  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords });
 })();

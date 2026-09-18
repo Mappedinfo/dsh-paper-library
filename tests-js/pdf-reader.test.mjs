@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 const context = vm.createContext({ window: {} });
 vm.runInContext(await readFile(new URL('../web/pdf-reader.js', import.meta.url), 'utf8'), context);
-const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection } = context.window.PaperPDFReader;
+const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords } = context.window.PaperPDFReader;
 const plain = value => JSON.parse(JSON.stringify(value));
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function scheduler({ delayedInstall = false } = {}) {
@@ -92,4 +92,45 @@ test('selection uses displayed PDF coordinates, merges only adjacent words on a 
   assert.deepEqual(plain(selection), { page: 2, text: 'First line column Next', rects: [[10, 20, 50, 30], [250, 20, 300, 30], [10, 40, 30, 50]], wordCount: 4 });
   assert.throws(() => mergeSelection([[0, 0, 10, 10, 'x'.repeat(20001)]], 1), /上限/);
   assert.throws(() => mergeSelection(Array.from({ length: 201 }, (_, i) => [0, i * 20, 10, i * 20 + 10, 'x']), 1), /上限/);
+});
+
+test('a partial selection keeps only the selected slice of each word', () => {
+  // Drag from inside "Evidence" to inside "standard" on one line: the first and
+  // last word keep only the covered slice, interior words stay whole, and a
+  // coverage rectangle from another line never clips this line.
+  const line = [102, 300, 700, 326], otherLine = [97, 340, 560, 366];
+  const entries = [
+    { box: [100, 300, 200, 326], parts: [line, otherLine], text: 'ence' },
+    { box: [210, 300, 300, 326], parts: [line, otherLine], text: 'sentence' },
+    { box: [420, 300, 520, 326], parts: [line, otherLine], text: 'stan' },
+    { box: [680, 300, 720, 326], parts: [line, otherLine], text: 'dard' },
+    { box: [530, 340, 600, 366], parts: [line, otherLine], text: 'Next' },
+  ];
+  assert.deepEqual(plain(clipWords(entries)), [
+    [102, 300, 200, 326, 'ence'],
+    [210, 300, 300, 326, 'sentence'],
+    [420, 300, 520, 326, 'stan'],
+    [680, 300, 700, 326, 'dard'],
+    [530, 340, 560, 366, 'Next'],
+  ]);
+  // Clipped words merge into the exact selected span, not the whole line.
+  const merged = mergeSelection(clipWords(entries), 1);
+  assert.deepEqual(plain(merged), { page: 1, text: 'ence sentence stan dard Next', wordCount: 5,
+    rects: [[102, 300, 300, 326], [420, 300, 520, 326], [680, 300, 700, 326], [530, 340, 560, 366]] },
+    'Adjacent words merge; a large gap and a second line stay separate rectangles');
+});
+
+test('clipWords keeps whole words, drops empty slices and survives missing coverage', () => {
+  assert.deepEqual(plain(clipWords([{ box: [10, 20, 40, 30], parts: [[5, 15, 60, 25]], text: ' Word ' }])), [[10, 20, 40, 30, 'Word']]);
+  assert.deepEqual(plain(clipWords([{ box: [10, 20, 40, 30], parts: [[10, 12]], text: 'Legacy' }])), [[10, 20, 12, 30, 'Legacy']], 'A horizontal-only coverage pair still clips precisely');
+  assert.deepEqual(plain(clipWords([
+    { box: [10, 20, 40, 30], parts: [[10, 20, 12, 25]], text: '' },
+    { box: [50, 20, 60, 30], parts: [], text: 'Whole' },
+    { box: [70, 20, 70, 30], parts: [[70, 20, 80, 25]], text: 'Degenerate' },
+    { box: [0, 0, 10, 10], parts: [[20, 0, 30, 10]], text: 'Outside' },
+    { box: [0, 0, 10, 10], parts: [[2, 2, 8, 8]], text: 'Kept' },
+    { box: [0, 40, 10, 50], parts: [[0, 0, 10, 10]], text: 'OtherLine' },
+  ])), [[50, 20, 60, 30, 'Whole'], [2, 0, 8, 10, 'Kept']]);
+  assert.deepEqual(plain(clipWords([])), []);
+  assert.deepEqual(plain(clipWords([null, { box: [1, 2, 3] }])), []);
 });

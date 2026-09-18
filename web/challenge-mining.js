@@ -18,8 +18,11 @@ window.ChallengeMining = (() => {
     const selected = new Set();
 
     const trigger = button('challenge-open', '研究难点', () => toggle());
-    const actions = document.querySelector('.shelf-actions');
-    if (actions) actions.insertBefore(trigger, $('refresh')); else document.body.append(trigger);
+    // The shelf-heading row is already tight at narrow widths (the workbench
+    // replaces .list-heading with .catalog-controls), so the trigger lives with
+    // the catalog controls instead of squeezing the search box to zero width.
+    const heading = document.querySelector('.catalog-controls') || document.querySelector('.list-heading') || document.querySelector('.shelf-actions');
+    if (heading) heading.append(trigger); else document.body.append(trigger);
     const panel = node('section', undefined, 'challenge-panel');
     panel.id = 'challenge-panel'; panel.hidden = true; panel.setAttribute('aria-label', '跨文献研究难点挖掘');
     panel.innerHTML = '<header><div><p class="eyebrow">RESEARCH CHALLENGE MINING</p><strong>研究难点</strong></div><button id="challenge-close" type="button" class="icon-button" aria-label="关闭研究难点面板">×</button></header>'

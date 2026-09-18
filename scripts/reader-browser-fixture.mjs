@@ -148,6 +148,39 @@ try {
       saved.color.stroke.forEach((value, index) => assert.ok(Math.abs(value - rgb[index]) < .001));
     }
     await screenshot('four-saved-markup-types'); record('mouse-selection-and-page-click-save-four-standard-native-pdf-types-with-chosen-colors');
+
+    // A drag that starts and ends inside words must keep exactly that slice:
+    // the reader may not widen a selection to the word, let alone the line.
+    // Selection uses the select tool first, then the saved annotation is created
+    // from that captured slice, which is the flow a reader actually follows.
+    await page.locator('#reader-tool-select').click(); await ready(1);
+    const from = sheet(1).locator('.pdr-word').filter({ hasText: /^Evidence\s*$/ }).first();
+    const to = sheet(1).locator('.pdr-word').filter({ hasText: /^standard\s*$/ }).first();
+    await from.scrollIntoViewIfNeeded();
+    const fromBox = await from.boundingBox(), toBox = await to.boundingBox();
+    assert.ok(fromBox && toBox, 'Both words are measurable after scrolling them into view');
+    await page.mouse.move(fromBox.x + fromBox.width * .45, fromBox.y + fromBox.height * .5); await page.mouse.down();
+    await page.mouse.move(toBox.x + toBox.width * .5, toBox.y + toBox.height * .5, { steps: 14 }); await page.mouse.up();
+    await page.locator('#selection-tools').waitFor();
+    const dragged = await page.evaluate(() => window.getSelection().toString().replace(/\s+/g, ' ').trim());
+    const preview = (await page.locator('#selection-preview').innerText()).replace(/\s+/g, ' ').trim();
+    assert.notEqual(dragged, 'Evidence sentence for standard', `Synthetic drag must be partial: ${dragged}`);
+    assert.equal(preview, dragged, `Reader selection must equal the browser selection (${dragged} vs ${preview})`);
+    // The captured slice is clipped at both ends and keeps the interior words.
+    assert.ok(!preview.startsWith('Evidence'), `The first word must not be widened: ${preview}`);
+    assert.ok(!preview.endsWith('standard'), `The last word must not be widened: ${preview}`);
+    assert.ok(preview.includes('sentence for stan'), `The interior of the drag must survive: ${preview}`);
+    assert.ok(preview.length < 'Evidence sentence for standard'.length);
+    await page.locator('#annotate-selection').click();
+    await page.locator('#annotation-comment').fill('Synthetic partial selection comment');
+    await page.locator('#annotation-form button[type="submit"]').first().click();
+    await page.locator('#annotation-dialog').waitFor({ state: 'hidden' }); await ready(1);
+    const partial = (await core({ action: 'annotations', id: paper.id }, { library, python })).annotations.find(note => note.comment === 'Synthetic partial selection comment');
+    assert.ok(partial, 'The partial selection saved an annotation');
+    assert.equal(partial.text, preview, 'The annotation stores the exact selected slice');
+    assert.ok(!partial.text.startsWith('Evidence') && partial.text.endsWith('stan'), `Stored quote must be the exact slice: ${partial.text}`);
+    assert.ok(partial.rects[0][0] > 0 && partial.rects[0][2] - partial.rects[0][0] < 400, 'The rectangle covers the slice, not the line start');
+    record('a-partial-word-drag-saves-the-exact-selected-slice-not-the-whole-word-or-line');
     await page.locator('#reader-tool-select').click(); await page.locator('#reader-annotations').click();
     await page.locator('.library-pane #annotations-tab').waitFor(); assert.equal(await page.locator('#reading-side-panel').isVisible(), false); await visiblePDF();
     await page.locator('#reading-sidebar-side').click();
@@ -284,7 +317,8 @@ try {
     assert.equal(await page.locator('#reading-side-panel').isVisible(), false);
     assert.equal(await page.locator('#page-number').inputValue(), annotationReturnPage);
     await visiblePDF();
-    assert.equal(await page.locator('#annotation-list .annotation-card').count(), 5);
+    // Five fixture annotations plus the partial-selection annotation saved above.
+    assert.equal(await page.locator('#annotation-list .annotation-card').count(), 6);
     await page.locator('#reading-sidebar-library').click();
     record('annotation-ribbon-reopens-preserved-shared-notes-from-expanded-table');
     await page.locator('#workspace-library').click(); await page.locator('#catalog-table table').waitFor();

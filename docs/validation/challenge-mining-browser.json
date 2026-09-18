@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-17T15:15:59.068Z",
+  "verified_at": "2026-09-18T03:51:49.871Z",
   "scope": "Synthetic catalog in an isolated standalone server; corpus panel, P1 scan receipts, P3 aggregation, review gate, P4 structural check/comparison/review packet and exports files; no model calls and no external requests. The P2 extraction and model merge suggestions need the host subagent and are asserted to be disabled here instead of simulated.",
   "checks": [
     "corpus-panel-opens-from-the-shelf-without-calling-a-model",

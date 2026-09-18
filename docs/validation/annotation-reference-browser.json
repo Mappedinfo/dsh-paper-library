@@ -1,65 +1,9 @@
 {
-  "verified_at": "2026-09-14T16:44:21.380Z",
-  "ok": true,
-  "checks": [
-    "three-of-45-new-notes-across-pages-and-20-row-pagination",
-    "switching-two-papers-restores-each-draft-and-reference-set",
-    "saving-note-46-suggests-addition-without-changing-selection-or-calling-model",
-    "edited-selected-note-remains-frozen-until-explicit-current-version-adoption",
-    "wide-and-narrow-reference-drawer-render-without-horizontal-overflow",
-    "inline-send-logs-three-exact-sources-updates-new-count-and-history-page-return",
-    "new-and-sent-notes-mix-and-all-46-append-as-one-native-reference-preserving-draft",
-    "browser-reload-restores-durable-reference-token-and-native-snapshot-inspector",
-    "main-composer-send-resolves-all-46-and-reconciles-inline-sent-status",
-    "missing-snapshot-inspector-shows-error-and-composer-remains-editable",
-    "unknown-snapshot-is-rejected-without-model-generation"
-  ],
-  "deterministicModelGenerations": 3,
+  "verified_at": "2026-09-18T03:51:26.451Z",
+  "ok": false,
+  "checks": [],
+  "error": "page.waitForLoadState: Timeout 30000ms exceeded.",
   "externalModelRequestsMade": 0,
-  "sourceData": "Fresh synthetic three-page PDFs and 46 user notes",
-  "browserErrors": [],
-  "memory": {
-    "samples": [
-      {
-        "stage": "initial-native-page",
-        "hostRssMiB": 551.328125,
-        "chromiumProcessRssSumMiB": 465.65625,
-        "chromiumProcessCount": 4,
-        "mainPageJSHeapUsedMiB": 31.518505096435547
-      },
-      {
-        "stage": "reference-drawer-46-notes",
-        "hostRssMiB": 403.734375,
-        "chromiumProcessRssSumMiB": 597.28125,
-        "chromiumProcessCount": 4,
-        "mainPageJSHeapUsedMiB": 53.314395904541016
-      },
-      {
-        "stage": "after-refresh-and-reference-inspector",
-        "hostRssMiB": 415.640625,
-        "chromiumProcessRssSumMiB": 764.625,
-        "chromiumProcessCount": 4,
-        "mainPageJSHeapUsedMiB": 64.13236618041992
-      },
-      {
-        "stage": "idle-after-three-completed-model-turns",
-        "hostRssMiB": 420.0625,
-        "chromiumProcessRssSumMiB": 769.28125,
-        "chromiumProcessCount": 4,
-        "mainPageJSHeapUsedMiB": 75.3414077758789
-      }
-    ],
-    "sampledMaxHostRssMiB": 551.328125,
-    "sampledMaxChromiumProcessRssSumMiB": 769.28125,
-    "sampledMaxMainPageJSHeapUsedMiB": 75.3414077758789,
-    "scope": "Four samples in a synthetic 46-note browser walkthrough; browser process RSS double-counts shared memory. JS heap covers the main page renderer only. Neither is total physical application memory or a measured high-water mark."
-  },
-  "screenshots": [
-    ".local/paper-chat-test-home/runs/reference-browser-d76cd3bb-0c76-4fda-ae34-7affe44532c9/reference-drawer-wide.png",
-    ".local/paper-chat-test-home/runs/reference-browser-d76cd3bb-0c76-4fda-ae34-7affe44532c9/reference-drawer-narrow.png",
-    ".local/paper-chat-test-home/runs/reference-browser-d76cd3bb-0c76-4fda-ae34-7affe44532c9/native-reference-chip.png",
-    ".local/paper-chat-test-home/runs/reference-browser-d76cd3bb-0c76-4fda-ae34-7affe44532c9/native-restored-reference.png"
-  ],
   "limitations": [
     "Synthetic documents only; no real-library or model-quality claim",
     "Memory is sampled at four stages, not a high-water measurement; multiprocess RSS double-counts shared pages and excludes Python worker peaks"
