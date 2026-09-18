@@ -208,6 +208,6 @@ def test_old_catalog_migrates_search_once_and_preserves_original_columns(tmp_pat
     assert request(tmp_path, "list", query="2026")["total"] == 1
     assert request(tmp_path, "list", query="Synthetic Journal")["items"][0]["id"] == original["id"]
     with sqlite3.connect(tmp_path / "library" / "catalog.sqlite3") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3, "the catalog is at the project-era schema version"
         assert len(db.execute("PRAGMA table_info(papers)").fetchall()) == 8
     assert csl_item({"author": [{"family": "Test", "affiliation": "Synthetic Institution"}]})["author"][0]["affiliation"] == [{"name": "Synthetic Institution"}]

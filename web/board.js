@@ -457,7 +457,7 @@
     const onClose = options.onClose || (() => {});
     const onOpenPaper = options.onOpenPaper || null;
     // A static host has no library and no composer; those controls are hidden rather than faked.
-    const capabilities = { libraryPapers: true, conversation: true, ...(options.capabilities ?? {}) };
+    const capabilities = { libraryPapers: true, conversation: true, projects: false, ...(options.capabilities ?? {}) };
     const doc = root.ownerDocument || document;
     const $ = id => doc.getElementById(id);
     const stage = $('board-stage');
@@ -1428,6 +1428,36 @@
       return true;
     }
 
+    /** The project list belongs to the catalog; the panel only offers what it is given.
+     *  The panel is built before the catalog has said whether it has projects at all, so the
+     *  controls are revealed here as well as hidden during the initial bind. */
+    function syncProjectControls() {
+      const hidden = !capabilities.projects;
+      for (const id of ['board-project-select', 'board-link-project', 'board-unlink-project']) { const control = $(id); if (control) control.hidden = hidden; }
+    }
+
+    function setProjects(list) {
+      const select = $('board-project-select');
+      capabilities.projects = Array.isArray(list);
+      syncProjectControls();
+      if (!select) return;
+      select.replaceChildren();
+      for (const entry of list ?? []) {
+        const option = el('option', null, entry.title);
+        option.value = entry.id;
+        select.append(option);
+      }
+      const empty = !select.options?.length;
+      const linkButton = $('board-link-project'), unlinkButton = $('board-unlink-project');
+      if (linkButton) linkButton.disabled = empty;
+      if (unlinkButton) unlinkButton.disabled = empty;
+      if (!select.options?.length) {
+        const placeholder = el('option', null, '还没有阅读项目');
+        placeholder.value = '';
+        select.append(placeholder);
+      }
+    }
+
     function renderLinks() {
       const node = $('board-links');
       if (!node) return;
@@ -1648,6 +1678,10 @@
       // The inspector only offers a shape change for a single node; paper nodes keep their binding.
       if (!capabilities.libraryPapers) for (const id of ['board-add-paper']) { const control = $(id); if (control) control.hidden = true; }
       if (!capabilities.conversation) for (const id of ['board-send']) { const control = $(id); if (control) control.hidden = true; }
+      if (!capabilities.projects) syncProjectControls();
+      const linkProject = $('board-link-project'), unlinkProject = $('board-unlink-project');
+      if (linkProject) linkProject.addEventListener('click', () => setLink('projects', $('board-project-select')?.value, true));
+      if (unlinkProject) unlinkProject.addEventListener('click', () => setLink('projects', $('board-project-select')?.value, false));
     }
 
     /** Selects are filled from the exported constants so the UI cannot drift from the schema. */
@@ -1676,7 +1710,7 @@
     render();
 
     return {
-      links, setLink, setFocus,
+      links, setLink, setFocus, setProjects,
       open: openView, close: closeView, resize, load, refreshList, render,
       isOpen: () => open,
       board: () => board,

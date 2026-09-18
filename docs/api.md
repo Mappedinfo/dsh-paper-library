@@ -151,7 +151,7 @@ Labels are keyed by NFKC-normalised, punctuation-stripped lowercase text, so “
 
 ## Native Harness tools
 
-The plugin registers 30 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
+The plugin registers 31 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
 
 | Tool | Arguments | Node action |
 |---|---|---|
@@ -168,6 +168,7 @@ The plugin registers 30 tools through Harness's official tool registry. Optional
 | `library_cite` | `ids,format` | `cite` |
 | `library_bibliography` | `verify?,verify_limit?,include_datasets?` | `bibliography_build` |
 | `library_board` | `operation,input_json` | `board_list`/`board_get`/`board_create`/`board_save`/`board_delete`; AI edits stay reviewable proposals |
+| `library_projects` | `operation,input_json` | `project_list`/`project_get`/`project_create`/`project_update`/`project_archive`/`project_restore`/`project_link`/`project_unlink`/`project_for_paper`; linking never copies a paper |
 | `library_annotations` | `id` | `annotations` |
 | `library_annotate` | `id,page,type,rects,text?,comment?,author?,color?` | `annotate` |
 | `library_graph` | `id?,limit?` | `graph` |
@@ -181,6 +182,25 @@ The plugin registers 30 tools through Harness's official tool registry. Optional
 Tool metadata is a closed subset: `title,type,citekey,DOI,URL,abstract,author,editor,container-title,publisher,volume,issue,page,issued,tags,publication_dates,journal_rankings`. Its person schema accepts `family,given,literal,ORCID,affiliation`, with affiliation `{name,ror?,source?}`. Tool `issued` uses CSL `date-parts`. Graph evidence uses the closed schema above. Paths and runtime state cannot enter structured metadata. Each tool request is capped at 128 KiB before dispatch; core field limits still apply. `rects` is required for `library_annotate`, including an empty array for a page note.
 
 Mutation tools pass through the configured native approval pipeline; `requireToolApproval` defaults to true and preserves any existing denial. Read tools do not start a model. `library_feedback` uses the calling Agent's configured model route by default and remains the compatibility feedback operation, not `chat_send`. `metadata_lookup` is a Node/browser operation, not an additional registered native tool.
+
+## Reading projects
+
+A reading project is a queryable scope over the same papers, not a container that owns them. The catalog (`user_version` 3) gains three tables: `projects(id,title,description,tags,created,modified)`, `project_papers(project_id,paper_id,position,created)` with `PRIMARY KEY(project_id,paper_id)`, and `project_archive(project_id,archived_at)`. Because the relation lives next to the papers, it is backed up, searched and exported with them, and it is reachable by the agent. A project is archived rather than deleted, exactly like a paper.
+
+Limits are enforced before any write: 500 live projects, 2,000 papers per project, a 200-character title, a 2,000-character description, 20 tags of 50 characters, and ids matching `^p-[0-9a-f]{12}$`. An archived project is refused by every mutating action (`阅读项目 <id> 已归档；恢复后才能修改或关联`) instead of silently changing.
+
+Authenticated browser actions (same `/api/paper-library/api` envelope; all are also admitted by the Node bridge allowlist):
+
+- `project_create` with `title,description?,tags?` → `{project,created:true}`.
+- `project_get` with `id,include_archived?` → `{project,papers,total}`; `papers` are `{id,title,citekey,year,archived,position}` ordered by the stored position.
+- `project_list` with `query?,include_archived?,limit?,offset?` → `{projects,total,limit,offset}`; each entry is `{id,title,description,tags,created,modified,archived,paper_count}`, newest first. Archived projects are excluded unless `include_archived` is true.
+- `project_update` with `id,title?,description?,tags?` → `{project}`. Omitted fields keep their stored value.
+- `project_archive` / `project_restore` with `id` → `{project}` with `archived` reflecting the new state.
+- `project_link` with `id,paper_id,position?` → `{project,linked,duplicate}`. Linking an already-linked paper reports `linked:false,duplicate:true` rather than failing; the paper must exist in the active library.
+- `project_unlink` with `id,paper_id` → `{project,unlinked}`; unlinking something that was not linked is a no-op, not an error.
+- `project_for_paper` with `paper_id` → `{projects,total}` for the *active* projects this paper belongs to.
+
+`resource_list` accepts an optional `project` filter, which restricts the result to `kind='paper'` members of that project and composes with `query`, `sort`, `order`, paging and `archived`. An unknown project id is an error rather than an unfiltered listing. A board may name projects too: `links.projects` in the board record is a plain many-to-many association (at most 20), and the board panel lists whatever the catalog offers through `setProjects`. Unlinking and archiving never touch a paper or a board's own content.
 
 ## Literature whiteboard
 

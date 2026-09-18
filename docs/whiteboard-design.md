@@ -195,6 +195,41 @@ papers and reading projects without becoming part of them:
   collapsed citation menu, so a static button silently disappeared and took the app's boot with
   it.
 
+## P10: reading projects
+
+Completed 2026-09-18, in the order the owner chose (board-side first, then reading projects).
+P9 left `links.projects` validated but with nothing to point at; P10 supplies the thing itself.
+
+- **A project is a catalog scope, not a container.** `projects` + `project_papers` +
+  `project_archive` (SQLite `user_version` 3) hold the many-to-many edge. It lives in the managed
+  library rather than the private state store because a project is bibliographic: it must be
+  backed up, searched and exported with the papers, and the agent must be able to read it. The
+  private store is the right home for a canvas; it is the wrong home for a reading list.
+- **Archive, never delete** — the same rule as papers. Archiving a project keeps its edges and
+  hides it: it leaves `project_list`, it stops claiming papers in `project_for_paper`, and every
+  mutation is refused until it is restored. Unlinking removes exactly one edge and can never
+  archive or delete a paper.
+- **The scope composes.** `resource_list` gained an optional `project` filter that restricts to
+  paper members and composes with query, sort, order, paging and `archived`. An unknown project id
+  is an error rather than a silent unfiltered listing.
+- **Membership is edited where the paper is.** The paper ribbon's 「项目 N」 opens a checkbox list
+  (tick joins, untick leaves) with an inline "new project and join". The board toolbar's project
+  picker is the same idea for a canvas.
+
+### What implementation changed here too
+
+- **A button pressed during a paper load was a silent no-op — in three places.** `openPaper`
+  clears `state.active` while it awaits the catalog, and controls decided both their enabled state
+  and their action from whatever `state.active` was at render time. The paper ribbon's project
+  button, its board buttons and the board shelf's 「关联本篇／解除」 were all affected; the shelf
+  case reproduced in the P9 browser fixture, where the click produced no request at all and the
+  receipt timed out. They now fall back to the id the view already has (`state.openedId`) and say
+  so when no paper is open, which is also what made the 25-check board receipt pass again.
+- **The board's project controls could never appear.** They were hidden during the panel's
+  `bind()`, which runs before the catalog's first status reply, and nothing revealed them
+  afterwards. Visibility now belongs to `setProjects`, which is the moment the catalog actually
+  answers.
+
 ## Invariants
 
 - No new runtime dependency, no model call while opening, listing or drawing a board, and no
@@ -217,9 +252,9 @@ Synthetic-only validation, following the existing project discipline:
   store with no private data. **Implemented, 8 cases.**
 - `tests-js/board-panel.test.mjs` — canvas reducer behavior (create/drag/connect/delete/undo/redo,
   tidy-tree layout determinism) through the same fake-DOM harness the other panels use.
-  **Implemented, 20 cases** (geometry, model bounds, paper nodes, outline, panel persistence,
+  **Implemented, 23 cases** (geometry, model bounds, paper nodes, outline, panel persistence,
   conflict recovery, listing failure, tidy arranging, settle-on-close, graph-node conversion and
-  the closed-board graph path).
+  the closed-board graph path, plus the late reveal of the project picker).
 - `tests-js/board-references.test.mjs` — token parse/render, chip codec round-trip, snapshot
   integrity, and `agent/pre-step` expansion including the malformed and over-budget paths.
   **Implemented, 5 cases.**
@@ -233,6 +268,15 @@ Synthetic-only validation, following the existing project discipline:
 - `scripts/board-harness-smoke.mjs` — native DSH check that the tool is offered, that a board token
   reaches a turn as frozen material, and that an unresolvable reference fails the turn.
   **Implemented, 7 checks** in `docs/validation/board-harness.json`.
+- `tests-js/projects.test.mjs` — the project tables and the bridge/tool surface: create, scope,
+  link, rename, archive/restore, the many-to-many edge, `resource_list`'s project filter, the
+  `library_projects` mapping (including refused host-owned fields), and the allowlist.
+  **Implemented, 4 cases** against a temporary synthetic library.
+- `scripts/project-ui-fixture.mjs` — real Chromium receipt for the project view: creation and a
+  scoped library list, one paper in several projects, tick-to-join/untick-to-leave membership, the
+  inline create-and-join, rename, archive-without-touching-papers, the board-to-project link, and
+  the ribbon button pressed while the paper is still loading. **Implemented, 9 checks** in
+  `docs/validation/project-ui.json`.
 
 ## What implementation changed in this design
 

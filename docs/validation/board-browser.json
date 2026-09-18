@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-18T16:11:53.462Z",
+  "verified_at": "2026-09-18T16:55:16.993Z",
   "scope": "Synthetic catalog in an isolated standalone server; free canvas drawing, text editing, connecting, moving, paper drag-in and picker, undo/redo, delete, zoom/fit/fullscreen, board switching, deletion and host persistence across a reload; zero model calls and zero external requests. The AI-proposal review path and the conversation reference chip need the native host tool and the DSH composer, so they are covered by the native harness receipt and unit tests rather than simulated here.",
   "checks": [
     "board-view-opens-and-creates-the-first-board-without-a-model",

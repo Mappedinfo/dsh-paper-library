@@ -1,0 +1,18 @@
+{
+  "verified_at": "2026-09-18T16:55:26.343Z",
+  "scope": "Synthetic catalog in an isolated standalone server; reading-project creation, project-scoped library lists, many-to-many paper membership with create-and-join, rename and archive without deleting papers, and the board-to-project link. Zero model calls and zero external requests.",
+  "checks": [
+    "the-toolbar-creates-reading-projects-in-the-catalog",
+    "selecting-a-project-scopes-the-library-list",
+    "the-ribbon-opens-membership-while-the-paper-is-still-loading",
+    "one-paper-joins-several-projects-and-unlinking-leaves-the-paper-intact",
+    "the-membership-dialog-creates-a-project-and-joins-it",
+    "editing-a-project-renames-it-without-losing-memberships",
+    "archiving-a-project-hides-it-and-keeps-its-papers",
+    "a-board-links-to-a-reading-project",
+    "no-browser-runtime-errors-and-no-external-requests"
+  ],
+  "errors": [],
+  "externalRequests": 0,
+  "modelRequests": 0
+}

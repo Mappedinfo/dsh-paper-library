@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 const state = {
   items: [], total: 0, libraryCount: 0, offset: 0, limit: 40, query: '', sort: 'modified', order: 'desc', archived: false, kind: 'all', active: null, tab: 'reader',
   page: 1, pageCount: 0, pageData: null, selection: null, annotations: [], noteOffset: 0,
-  models: [], harnessContext: null, modelTicket: 0, library: '', listTicket: 0, itemTicket: 0, pageTicket: 0, metadataDraft: null, openedId: null,
+  models: [], harnessContext: null, modelTicket: 0, library: '', project: '', listTicket: 0, itemTicket: 0, pageTicket: 0, metadataDraft: null, openedId: null,
   pageWanted: null, pageRunning: false, pagePromise: null, annotationDraft: null, aiBusy: false,
 };
 let paperChatUI;
@@ -100,6 +100,7 @@ async function loadStatus() {
     challengeUI?.setAvailable(result.challenge_mining);
     // The board is a local-only surface: it appears once the host advertises it.
     $('board-open').hidden = result.whiteboard !== true;
+    setProjectsAvailable(result.projects === true);
     void settingsUI?.refresh();
   } catch (error) { $('library-status').textContent = '连接未完成'; errorAt('library-error', error); }
 }
@@ -108,7 +109,7 @@ async function loadList() {
   errorAt('library-error', null);
   if (!state.items.length) $('paper-list').replaceChildren(el('div', 'loading', '正在检索文献…'));
   try {
-    const result = await api('resource_list', { kind: state.kind, query: state.query, limit: state.limit, offset: state.offset, sort: state.sort, order: state.order, archived: state.archived });
+    const result = await api('resource_list', { kind: state.kind, query: state.query, limit: state.limit, offset: state.offset, sort: state.sort, order: state.order, archived: state.archived, ...(state.project ? { project: state.project } : {}) });
     if (ticket !== state.listTicket) return;
     state.items = result.items || []; state.total = result.total || 0;
     if (result.active_count !== undefined) { state.libraryCount = result.active_count; $('item-count').textContent = result.active_count; }
@@ -221,6 +222,9 @@ async function openResource(item){if(!item)return;if(item.resource_kind==='datas
   readingShell?.sync();
   languageUI?.sync();
   analysisUI?.sync();
+  // The ribbon badges describe this paper, so they follow the header rather than the tab.
+  syncPaperBoardControls();
+  void syncPaperProjectCount();
 }
 async function switchTab(tab) {
   if (state.active?.resource_kind === 'dataset') return;
@@ -1140,7 +1144,10 @@ async function refreshBoardShelf(){
     if(!boardSummaries.length){list.append(el('p','small muted','还没有画板。打开「画板」即可新建，或从论文里点「＋ 画板」。'));}
     for(const summary of boardSummaries.slice(0,20)){
       const row=el('div','board-shelf-row');
-      const linked=Boolean(state.active)&&boardSummaryLinks(summary.id).includes(state.active.id);
+      // Rows are rebuilt on a host read, which can happen while a paper is still opening:
+      // the id the view already has is the one the control must act on.
+      const linkedId=currentPaperId();
+      const linked=Boolean(linkedId)&&boardSummaryLinks(summary.id).includes(linkedId);
       row.classList.toggle('is-linked',linked);
       const title=el('strong',null,summary.title);
       title.title=`${summary.node_count} 个节点 · ${summary.edge_count} 条连线`;
@@ -1148,11 +1155,12 @@ async function refreshBoardShelf(){
       const open=el('button',null,'打开'); open.type='button';
       open.addEventListener('click',()=>{void boardUI.open().then(()=>boardUI.load(summary.id));});
       const toggle=el('button',null,linked?'解除':'关联本篇'); toggle.type='button';
-      toggle.disabled=!state.active||(state.active.resource_kind||'paper')!=='paper';
+      toggle.disabled=!linkedId;
       toggle.addEventListener('click',async()=>{
-        if(!state.active)return;
+        const paperId=currentPaperId();
+        if(!paperId){toast('请先打开一篇文献，再关联画板');return;}
         try{
-          await linkBoardToPaper(summary.id,state.active.id,!linked);
+          await linkBoardToPaper(summary.id,paperId,!linked);
           if(boardUI.board()?.id===summary.id)await boardUI.load(summary.id);
           await refreshBoardShelf();
         }catch(error){toast(error.message||'关联失败',true);}
@@ -1180,23 +1188,77 @@ async function linkBoardToPaper(id,paperId,on){
   if(projects.length)links.projects=projects;
   await api('board_save',{id,board:{...got.board,links:Object.keys(links).length?links:undefined},expected_revision:got.revision});
 }
+async function syncPaperProjectCount(){
+  const node=$('paper-project-count'); if(!node||!projectsAvailable)return;
+  const id=currentPaperId();
+  if(!id){node.textContent='0';return;}
+  try{const result=await api('project_for_paper',{paper_id:id});node.textContent=String(result.total??(result.projects||[]).length);}
+  catch{node.textContent='0';}
+}
 function syncPaperBoardControls(){
   const count=$('paper-board-count'); if(!count)return;
-  const active=state.active&&(state.active.resource_kind||'paper')==='paper'?state.active.id:null;
+  const active=currentPaperId();
   count.textContent=String(active?boardSummaries.filter(summary=>boardSummaryLinks(summary.id).includes(active)).length:0);
 }
 // The workbench moves them out of the removed .paper-actions block, but its destination is a
 // collapsed citation menu; a board control belongs on the always-visible reading ribbon.
 // Board controls for the current paper. They are created here rather than living in the
 // static markup because the workbench moves and then removes that block on every setup pass.
+// openPaper() clears state.active while it awaits the record, so a ribbon button pressed during
+// that window must fall back to the id it already has: a silent no-op looks like a dead button.
+function currentPaperId(){
+  const item=state.active;
+  if(item)return (item.resource_kind||'paper')==='paper'?item.id:null;
+  return state.openedId||null;
+}
+async function currentPaper(){
+  const item=state.active;
+  if(item&&(item.resource_kind||'paper')==='paper')return item;
+  const id=currentPaperId(); if(!id)return null;
+  try{return await api('get',{id});}catch{return null;}
+}
 const paperBoardNew=el('button','button subtle','＋ 画板');paperBoardNew.id='paper-board-new';paperBoardNew.type='button';paperBoardNew.title='新建一张画板并关联到这篇论文';
 const paperBoardOpen=el('button','button subtle','这张论文的画板 ');paperBoardOpen.id='paper-board-open';paperBoardOpen.type='button';
 const paperBoardCount=el('span','count','0');paperBoardCount.id='paper-board-count';paperBoardOpen.append(paperBoardCount);
-$('paper-tools').append(paperBoardNew,paperBoardOpen);
-$('paper-board-new').addEventListener('click',async()=>{
-  if(!state.active)return;
+const paperProjects=el('button','button subtle','项目 ');paperProjects.id='paper-projects';paperProjects.type='button';paperProjects.title='查看或修改这篇文献所属的阅读项目';
+const paperProjectCount=el('span','count','0');paperProjectCount.id='paper-project-count';paperProjects.append(paperProjectCount);
+$('paper-tools').append(paperBoardNew,paperBoardOpen,paperProjects);
+$('project-select').addEventListener('change',()=>{void selectProject($('project-select').value);});
+$('project-new').addEventListener('click',()=>projectDialogOpen(null));
+$('project-edit').addEventListener('click',()=>projectDialogOpen(projectList.find(project=>project.id===state.project)));
+$('project-archive').addEventListener('click',async()=>{
+  if(!state.project)return;
+  try{await api('project_archive',{id:state.project});state.project='';await refreshProjects();await loadList();toast('项目已归档；文献本身不受影响');}
+  catch(error){toast(error.message||'归档失败',true);}
+});
+$('project-save').addEventListener('click',()=>void projectDialogSave());
+$('project-title').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();void projectDialogSave();}});
+paperProjects.addEventListener('click',()=>{
+  const id=currentPaperId();
+  if(!id){toast('请先打开一篇文献，再查看它的阅读项目');return;}
+  void openMembership(id);
+});
+$('project-membership-new').addEventListener('keydown',async event=>{
+  if(event.key!=='Enter')return;
+  event.preventDefault();
+  const title=$('project-membership-new').value.trim();
+  const id=currentPaperId();
+  if(!title||!id)return;
   try{
-    const created=await api('board_create',{board:{title:`${title(state.active)} · 画板`,nodes:[],edges:[],links:{papers:[state.active.id]}}});
+    const created=await api('project_create',{title});
+    await api('project_link',{id:created.project.id,paper_id:id});
+    $('project-membership-new').value='';
+    await refreshProjects();
+    await openMembership(id);
+    $('project-membership-status').textContent='已新建项目并加入';
+  }catch(error){$('project-membership-status').textContent=error.message||'新建失败';}
+});
+for(const button of document.querySelectorAll('#project-dialog .dialog-close, #project-membership-dialog .dialog-close'))button.addEventListener('click',()=>button.closest('dialog')?.close?.());
+$('paper-board-new').addEventListener('click',async()=>{
+  const item=await currentPaper();
+  if(!item){toast('请先打开一篇文献，再新建画板');return;}
+  try{
+    const created=await api('board_create',{board:{title:`${title(item)} · 画板`,nodes:[],edges:[],links:{papers:[item.id]}}});
     await refreshBoardShelf();
     await boardUI.open();
     await boardUI.load(created.board.id);
@@ -1204,12 +1266,108 @@ $('paper-board-new').addEventListener('click',async()=>{
   }catch(error){toast(error.message||'新建画板失败',true);}
 });
 $('paper-board-open').addEventListener('click',async()=>{
-  if(!state.active)return;
-  const mine=boardSummaries.filter(summary=>boardSummaryLinks(summary.id).includes(state.active.id));
+  const item=await currentPaper();
+  if(!item){toast('请先打开一篇文献，再打开它的画板');return;}
+  const mine=boardSummaries.filter(summary=>boardSummaryLinks(summary.id).includes(item.id));
   await boardUI.open();
   if(mine.length)await boardUI.load(mine[0].id);
   else toast('这篇论文还没有画板，可以点左边的「＋ 画板」。');
 });
+let projectList=[];
+let projectsAvailable=false;
+function setProjectsAvailable(available){
+  projectsAvailable=Boolean(available);
+  const bar=document.querySelector('.project-bar'); if(bar)bar.hidden=!projectsAvailable;
+  const button=$('paper-projects'); if(button)button.hidden=!projectsAvailable;
+  if(projectsAvailable){void refreshProjects();void syncPaperProjectCount();}
+}
+async function refreshProjects(){
+  if(!projectsAvailable)return;
+  try{
+    const result=await api('project_list',{include_archived:false,limit:200});
+    projectList=result.projects||[];
+    const select=$('project-select');
+    if(select){
+      select.replaceChildren(new Option('全部文献',''));
+      for(const project of projectList)select.append(new Option(`${project.title}（${project.paper_count}）`,project.id));
+      select.value=state.project;
+      if(select.value!==state.project){state.project='';select.value='';}
+    }
+    boardUI?.setProjects?.(projectList.map(project=>({id:project.id,title:`${project.title}（${project.paper_count}）`})));
+    const edit=$('project-edit'),archive=$('project-archive');
+    if(edit)edit.disabled=!state.project;
+    if(archive)archive.disabled=!state.project;
+    const active=projectList.find(project=>project.id===state.project);
+    $('project-status').textContent=active?`项目内 ${active.paper_count} 篇`:`共 ${projectList.length} 个项目`;
+  }catch(error){const status=$('project-status');if(status)status.textContent=error.message||'无法读取项目';}
+}
+function projectDialogOpen(project){
+  const dialog=$('project-dialog'); if(!dialog)return;
+  $('project-dialog-title').textContent=project?'编辑阅读项目':'新建阅读项目';
+  $('project-title').value=project?project.title:'';
+  $('project-description').value=project?(project.description||''):'';
+  $('project-tags').value=project?(project.tags||[]).join(', '):'';
+  $('project-error').hidden=true;
+  dialog.dataset.editing=project?project.id:'';
+  dialog.showModal?.();
+}
+async function projectDialogSave(){
+  const title=$('project-title').value.trim();
+  const description=$('project-description').value;
+  const tags=$('project-tags').value.split(',').map(value=>value.trim()).filter(Boolean);
+  const editing=$('project-dialog').dataset.editing;
+  try{
+    const result=editing
+      ?await api('project_update',{id:editing,title,description,tags})
+      :await api('project_create',{title,description,tags});
+    $('project-dialog').close?.();
+    if(!editing)state.project=result.project.id;
+    await refreshProjects();
+    await loadList();
+    toast(editing?'项目已更新':'已新建项目');
+  }catch(error){const node=$('project-error');node.textContent=error.message||'保存失败';node.hidden=false;}
+}
+async function selectProject(id){
+  state.project=id||'';
+  state.offset=0;
+  await loadList();
+  await refreshProjects();
+}
+/** Membership is a checkbox list per paper: ticking links, unticking unlinks. */
+async function openMembership(paperId){
+  const dialog=$('project-membership-dialog'); if(!dialog)return;
+  const list=$('project-membership-list'),status=$('project-membership-status');
+  // Open first, fill second: a failed read must leave a readable dialog, never a silent no-op.
+  $('project-membership-new').value='';
+  status.textContent='';
+  list.replaceChildren(el('p','small muted','正在读取项目…'));
+  dialog.showModal?.();
+  try{
+    if(!projectList.length)await refreshProjects();
+    const mine=new Set(((await api('project_for_paper',{paper_id:paperId})).projects||[]).map(project=>project.id));
+    list.replaceChildren();
+    if(!projectList.length)list.append(el('p','small muted','还没有阅读项目；在下面输入标题即可新建。'));
+    for(const project of projectList){
+      const row=el('label','board-picker-row');
+      const box=el('input');box.type='checkbox';box.checked=mine.has(project.id);
+      box.addEventListener('change',async()=>{
+        try{
+          if(box.checked)await api('project_link',{id:project.id,paper_id:paperId});
+          else await api('project_unlink',{id:project.id,paper_id:paperId});
+          await refreshProjects();
+          await syncPaperProjectCount();
+          status.textContent=box.checked?'已加入项目':'已移出项目';
+        }catch(error){box.checked=!box.checked;status.textContent=error.message||'操作失败';}
+      });
+      const label=el('span');label.append(el('strong',null,project.title),el('small',null,`${project.paper_count} 篇`));
+      row.append(box,label);list.append(row);
+    }
+    if(mine.size)status.textContent=`已属于 ${mine.size} 个项目`;
+  }catch(error){
+    list.replaceChildren();
+    status.textContent=error.message||'无法读取项目；请稍后重试。';
+  }
+}
 boardUI = window.PaperBoard?.create({root:$('board-view'),api,toast,
   onClose:({focus})=>{void refreshBoardShelf();if(focus)$('board-open').focus();},
   onRequestPapers:()=>openBoardPaperPicker(),

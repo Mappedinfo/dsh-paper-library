@@ -11,6 +11,7 @@ export const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const defaultLibrary = join(homedir(), '.local', 'share', 'dsh-paper-library');
 const actions = new Set(['status','import','list','get','create','archive','restore','update','attach','page_layout','page','annotations','annotation_catalog','annotation_context_exact','annotate','annotation_update','annotation_delete','export_annotations','export_pdf','link','graph','graph_node_put','graph_node_delete','graph_edge_put','graph_edge_delete','feedback_context','save_feedback','feedback']);
 const challengeActions = new Set(['challenge_scan','challenge_themes','challenge_theme_list','challenge_theme_get','challenge_theme_review','challenge_theme_merge','challenge_theme_check','challenge_export','challenge_comparison','challenge_comparison_list','challenge_comparison_get','challenge_review_packet']);
+const projectActions = new Set(['project_create','project_update','project_get','project_list','project_archive','project_restore','project_link','project_unlink','project_for_paper']);
 const libraryActions = new Set(['resource_list','resource_export','dataset_import','dataset_put','dataset_get','dataset_archive','dataset_restore','dataset_release_put','dataset_release_get','dataset_release_list','dataset_link_put','dataset_link_list','dataset_link_delete','dataset_asset_put','dataset_asset_list','dataset_asset_preview','dataset_graph_promote','knowledge_source_put','knowledge_source_get','knowledge_source_check','knowledge_source_list','knowledge_draft_put','knowledge_draft_get','knowledge_draft_list','knowledge_draft_review','knowledge_draft_lint','knowledge_note_put','knowledge_note_get','knowledge_note_list','knowledge_export']);
 let pending = Promise.resolve();
 let importsPending = Promise.resolve();
@@ -414,7 +415,7 @@ export async function dispatch(request, options = {}) {
     }
     return core({ action: 'save_feedback', text, ...common }, options);
   }
-  if (!actions.has(safe.action)) throw new Error('未知文献操作。');
+  if (!actions.has(safe.action) && !projectActions.has(safe.action)) throw new Error('未知文献操作。');
   if (safe.action === 'import') {
     const sources=['path','doi','url','items','content_base64'].filter(key=>safe[key]!==undefined && safe[key]!==null && safe[key]!=='');
     if(sources.length!==1) throw new Error('请提供一种导入来源：PDF/文件路径、链接、DOI、元数据或上传文件。');

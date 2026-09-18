@@ -9,6 +9,15 @@
 - **两种模式**：阅读工具栏新增「选文后」切换 —— **勾选后提问**（默认，保持原有“选文→写问题”流程）与 **自动着色**（拖选即按当前颜色写成自然批注，不弹对话框，符合“先勾画、再阅读/提问”的习惯）。模式、颜色与着色类型写入 `reader:layout`，刷新后保留。
 - **取色与渲染一致**：选区高亮此前固定蓝/黄、与取色器无关；现在跟随所选颜色（`--pdr-selection`），批注回看闪示使用批注自身颜色，颜色与模式经同一写入队列持久化，不再因并发读改写产生保存冲突。
 
+### 阅读项目
+
+- **项目是目录里的一个范围，不是文献的容器**：目录数据库新增 `projects`、`project_papers`（多对多，`PRIMARY KEY(project_id,paper_id)`）与 `project_archive` 三张表（`user_version` 3），因此项目与文献一起备份、检索、导出，AI 会话也可用 `library_projects` 工具读写。项目**归档而不删除**，与文献一致。
+- **多对多关联，绝不复制文献**：一篇文献可以同时属于多个项目，一个项目可以有很多文献；`project_link`／`project_unlink` 只增删这条边，移出项目不删除也不归档文献，归档项目同样不动文献，恢复后原成员关系仍在（`project_for_paper` 只报告活动项目）。
+- **项目视图**：文献库顶部新增项目栏，可新建／编辑（标题、说明、标签）／归档；选中项目后文献库只列该项目成员，并与搜索、排序、分页组合（`resource_list` 新增可选 `project` 过滤；未知项目显式报错而不是静默返回整库）。论文工具栏新增「项目 N」按钮，勾选即加入、取消勾选即移出，并可直接「新建项目并加入」。
+- **画板关联项目**：画板既有的 `links.projects`（多对多，上限 20）现在有了 UI：画板工具栏的「项目」选择器 + 「关联项目／解除」。面板构建早于目录首次报告能力，因此项目控件改为在 `setProjects` 时**显式显示**，而不是只在绑定时决定隐藏。
+- **修复「按钮点了没反应」（同一处竞态的第三处）**：`openPaper` 在等待目录返回期间会清空 `state.active`，而界面控件按渲染那一刻的 `state.active` 决定可用与动作。于是打开文献的同一瞬间按下工具栏「项目」、或画板列表里的「关联本篇／解除」，都会被守卫静默忽略（看起来像坏按钮）；实测中画板列表那一处甚至不发任何请求。现在这些控件都回退到视图已经拿到的文献 id（`state.openedId`），确实没有打开文献时才提示；「＋ 画板」「这张论文的画板」与两个角标同样处理。真实 Chromium 的 25 项画板回执因此在改动后重新跑通。
+- 验证：**484 JavaScript / 220 Python 测试**，新增 [9 项阅读项目 Chromium 回执](docs/validation/project-ui.json)（真实浏览器：项目创建与作用域列表、一篇文献属于多个项目、勾选加入／移出、新建并加入、改名、归档不动文献、画板关联项目、加载中点击按钮可用、零页面错误与零外部请求）。
+
 ### 修复
 
 - **换行拼接**：取文此前在每个词之间插入空格，跨行选择会多出一个空格（中文 PDF 一行常被抽取成一个“词”，每处换行都会凭空多一个空格）。现在同一行内的拉丁词保留空格，**换行处不加分隔符**（`measure-`+`ment` 仍是 `measure-ment`），中日韩字符相邻一律不加空格。
@@ -29,9 +38,9 @@
 - **连线加深**：新增点-点「连线」工具；选中连线可切换箭头／直线／折线、单向／无／双向箭头与虚线；拖动线段插入**拐点**、拖动拐点调整、Alt 点击或双击删除。折线路径与命中判定共用同一份正交几何，刚画好的线自动成为选中项并把线型记为后续默认。
 - **自动排版（确定性）**：**分层树**（保留读者的上下顺序，支持 lr／tb／rl／bt 四方向与间距）、**放射思维导图**、**分层图 DAG**（最长路径分层 + 重心排序）。三种模式都把局部坐标锚定在结构上并归一化，因此重复应用不漂移；「钉住选中」的节点永不参与排版，用于特殊位置。
 - **可读源文件与样式辅助文件**：内容文件 `board.json`（短标识、稳定键序、无像素坐标）与 `board.style.json`（配色／尺寸／字号／按关系连线样式／排版参数／固定坐标）可生成、编辑、校验、应用、下载与导入；独立站支持 `?src=boards/example.json` 直接渲染仓库中的源文件（重复访问复用本地副本，不重复导入）。
-- **AI 读写画板**：新增 `library_board` 工具（共 30 个工具）可列、读、建、改、删画板；模型新增/修改的节点与连线标记为 `origin:'llm'` 待评审，未改动内容保留读者署名，只有读者能「接受 AI 改动」；面板对 AI 提议显示虚线边框。
+- **AI 读写画板**：新增 `library_board` 工具可列、读、建、改、删画板；模型新增/修改的节点与连线标记为 `origin:'llm'` 待评审，未改动内容保留读者署名，只有读者能「接受 AI 改动」；面板对 AI 提议显示虚线边框。
 - **独立画板站（GitHub Pages）**：同一份 `web/board.js` 另有一个无需 DSH 的静态宿主（`site/`），由 `scripts/build-site.mjs` 组装：画板 markup 从插件页面**抽取**而不是复制，两端不会漂移；`site/standalone.js` 实现同一套动作契约，落在 `localStorage`（上限 40 张画板 / 4 MiB，界面报告用量），并支持 JSON 全量导出/导入（同标识另存为新画板，绝不覆盖）与 PNG 导出（按模型绘制，不依赖页面样式）。独立模式下文献库与对话引用控件隐藏而不假装可用。`.github/workflows/pages.yml` 在 main 上自动构建并部署（Pages 源设为 GitHub Actions）。线上地址 <https://mappedinfo.github.io/dsh-paper-library/> 已用真实浏览器复核（6 项检查：资源投递、绘制与保存、刷新恢复、整理成树、PNG 导出、零第三方请求），回执见 `docs/validation/board-pages-live.json`，可用 `node scripts/verify-pages.mjs` 重跑。
-- 验证：**475 JavaScript / 215 Python 测试**，[25 项插件内 Chromium 回执](docs/validation/board-browser.json)、[14 项独立站 Chromium 回执](docs/validation/board-standalone.json)、[7 项原生 DSH 回执](docs/validation/board-harness.json) 与 [线上回执](docs/validation/board-pages-live.json)。设计记录见 [docs/whiteboard-design.md](docs/whiteboard-design.md) 与 [docs/board-pages.md](docs/board-pages.md)。
+- 验证：**484 JavaScript / 220 Python 测试**（含阅读项目；工具共 31 个），[25 项插件内 Chromium 回执](docs/validation/board-browser.json)、[14 项独立站 Chromium 回执](docs/validation/board-standalone.json)、[7 项原生 DSH 回执](docs/validation/board-harness.json) 与 [线上回执](docs/validation/board-pages-live.json)。设计记录见 [docs/whiteboard-design.md](docs/whiteboard-design.md) 与 [docs/board-pages.md](docs/board-pages.md)。
 
 ### 研究难点挖掘（P1–P3）
 

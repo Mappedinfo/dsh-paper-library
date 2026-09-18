@@ -305,6 +305,10 @@ class Library:
         CREATE TABLE IF NOT EXISTS feedback(id TEXT PRIMARY KEY, paper_id TEXT NOT NULL, payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS paper_archive(paper_id TEXT PRIMARY KEY, archived_at TEXT NOT NULL);
         """)
+        # Reading projects are part of the catalog so they are queryable, exportable and
+        # available to the agent; the many-to-many edge lives in project_papers.
+        from .projects import SCHEMA_SQL as project_schema
+        self.db.executescript(project_schema)
         indexed = self.db.execute("SELECT 1 FROM sqlite_master WHERE name='paper_search'").fetchone()
         # The search index stays on disk; neither search nor list opens a PDF.
         search_expression = "new.title || ' ' || new.citekey || ' ' || coalesce(json_extract(new.metadata,'$.author'),'') || ' ' || coalesce(json_extract(new.metadata,'$.tags'),'') || ' ' || coalesce(json_extract(new.metadata,'$.abstract'),'') || ' ' || coalesce(new.doi,'') || ' ' || coalesce(json_extract(new.metadata,'$.issued'),'') || ' ' || coalesce(json_extract(new.metadata,'$.container-title'),'') || ' ' || coalesce(json_extract(new.metadata,'$.publication_dates'),'')"
@@ -330,6 +334,9 @@ class Library:
             self.db.execute("INSERT INTO paper_search(id,text) SELECT id," + search_expression.replace("new.", "") + " FROM papers")
         if migrate_search:
             self.db.execute("PRAGMA user_version=2")
+        # Version 3 adds reading projects; the tables above are created idempotently.
+        if self.db.execute("PRAGMA user_version").fetchone()[0] < 3:
+            self.db.execute("PRAGMA user_version=3")
         os.chmod(self.root / "catalog.sqlite3", 0o600)
         self.db.commit()
         self._recover_file_update()
@@ -1655,6 +1662,9 @@ def dispatch(request):
         if isinstance(action, str) and action.startswith("graph_"):
             from .knowledge_graph import dispatch_graph
             return dispatch_graph(library, action, request)
+        if isinstance(action, str) and action.startswith("project_"):
+            from .projects import dispatch_projects
+            return dispatch_projects(library, action, request)
         if action == "bibliography_audit":
             from .bibliography import audit
             return audit(library, request)
@@ -1672,7 +1682,7 @@ def dispatch(request):
             return {"items": [library.get(row[0]) for row in rows], "total": count}
         if action == "status":
             counts = library.db.execute("SELECT count(*) AS total,count(paper_archive.paper_id) AS archived FROM papers LEFT JOIN paper_archive ON paper_archive.paper_id=papers.id").fetchone()
-            return {"count": counts["total"] - counts["archived"], "archived_count": counts["archived"], "total_count": counts["total"], "library": str(library.root), "storage": "SQLite + portable native PDF annotations", "worker": "on-demand", "schema": 2}
+            return {"count": counts["total"] - counts["archived"], "archived_count": counts["archived"], "total_count": counts["total"], "library": str(library.root), "storage": "SQLite + portable native PDF annotations", "worker": "on-demand", "schema": 3, "projects": True}
         if action == "import":
             return library.import_items(request.get("items"), request.get("path"), request.get("limit", 100), request.get("offset", 0), request.get("metadata"), request.get("metadata_source"), request.get("metadata_verified", False))
         if action == "inspect_pdf":

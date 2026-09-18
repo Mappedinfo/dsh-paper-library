@@ -317,6 +317,16 @@ def list_resources(library, request):
         raise ValueError("Unsupported resource sort/order")
     union = "SELECT p.id,'paper' AS kind,p.title,p.metadata,p.citekey,p.created,p.modified,a.archived_at FROM papers p LEFT JOIN paper_archive a ON a.paper_id=p.id UNION ALL SELECT id,'dataset',title,metadata,citekey,created,modified,archived_at FROM datasets"
     where, args = ["archived_at IS " + ("NOT NULL" if archived else "NULL")], []
+    # A reading project is a filter over the same catalog: its members are papers, and the
+    # filter composes with search, sorting and paging like any other scope.
+    project = request.get("project")
+    if project is not None:
+        if not isinstance(project, str) or not project or len(project) > 60:
+            raise ValueError("project must be a project id")
+        if library.db.execute("SELECT 1 FROM projects WHERE id=?", (project,)).fetchone() is None:
+            raise ValueError(f"阅读项目 {project} 不存在")
+        where.append("kind='paper' AND id IN (SELECT paper_id FROM project_papers WHERE project_id=?)")
+        args.append(project)
     if kind != "all":
         where.append("kind=?"); args.append(kind)
     if query:

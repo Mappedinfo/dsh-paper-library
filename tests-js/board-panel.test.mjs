@@ -42,6 +42,7 @@ function environment(ids = []) {
       for (const handler of [...(this.events.get(type) || [])]) handler(event);
       return event;
     }
+    get options() { return this.tagName === 'SELECT' ? this.children : undefined; }
     focus() {} select() {}
     get firstChild() { return this.children[0] || null; }
     get lastChild() { return this.children[this.children.length - 1] || null; }
@@ -53,7 +54,7 @@ function environment(ids = []) {
   doc.addEventListener = (type, handler) => { doc.body.addEventListener(type, handler); };
   doc.removeEventListener = (type, handler) => { doc.body.removeEventListener(type, handler); };
   doc.getElementById = id => registry.get(id) || null;
-  for (const id of ids) { const node = new Element('div'); node.id = id; }
+  for (const entry of ids) { const { id, tag = 'div' } = typeof entry === 'string' ? { id: entry } : entry; const node = new Element(tag); node.id = id; }
   return { doc, registry, Element };
 }
 
@@ -67,6 +68,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
     'board-edge-kind', 'board-edge-arrow', 'board-edge-dashed',
     'board-layout-mode', 'board-layout-direction', 'board-layout-gap-x', 'board-layout-gap-y', 'board-layout-apply', 'board-layout-pin', 'board-layout-unpin', 'board-layout-status',
     'board-source-open', 'board-source-dialog', 'board-links', 'board-link-paper', 'board-unlink-paper', 'board-focus', 'board-source-content', 'board-source-style', 'board-source-status', 'board-source-apply', 'board-source-download', 'board-source-upload', 'board-source-file', 'board-source-generate',
+    { id: 'board-project-select', tag: 'select' }, 'board-link-project', 'board-unlink-project',
   ];
   const { doc, registry, Element } = environment(ids);
   doc.defaultView.confirm = () => confirm;
@@ -651,6 +653,25 @@ test('a board links to papers and projects many-to-many, and unlinking keeps its
   assert.deepEqual(asPlain(harness.panel.links()), { papers: [], projects: [] });
   await harness.runTimers();
   assert.equal(state.filter(call => call.action === 'board_save').at(-1).payload.board.links, undefined);
+});
+
+test('the project picker is revealed by the catalog, not decided when the panel is built', async () => {
+  // The panel is constructed before the first status reply, so a bind-time decision would
+  // leave these controls hidden for the life of the page.
+  const without = loadPanel({ api: apiStub(), capabilities: { projects: false } });
+  const select = without.registry.get('board-project-select');
+  assert.equal(select.hidden, true);
+  assert.equal(without.registry.get('board-link-project').hidden, true);
+  without.panel.setProjects([]);
+  assert.equal(select.hidden, false, 'a catalog that supports projects reveals the picker even when empty');
+  assert.equal(without.registry.get('board-link-project').disabled, true, 'there is nothing to link to yet');
+  assert.deepEqual([...select.options].map(option => option.textContent), ['还没有阅读项目']);
+
+  const full = loadPanel({ api: apiStub(), capabilities: { projects: false } });
+  full.panel.setProjects([{ id: 'p-1', title: '城市感知综述（3）' }, { id: 'p-2', title: '方法复现（0）' }]);
+  assert.equal(full.registry.get('board-project-select').hidden, false);
+  assert.equal(full.registry.get('board-link-project').disabled, false);
+  assert.deepEqual([...full.registry.get('board-project-select').options].map(option => [option.value, option.textContent]), [['p-1', '城市感知综述（3）'], ['p-2', '方法复现（0）']]);
 });
 
 test('focus mode is a pure canvas and Escape leaves it', async () => {
