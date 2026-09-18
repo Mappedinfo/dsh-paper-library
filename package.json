@@ -78,7 +78,8 @@
     "install:harness": "node scripts/install-harness.mjs",
     "build:site": "node scripts/build-site.mjs",
     "test:standalone": "node scripts/board-standalone-fixture.mjs",
-    "test:board-harness": "node scripts/board-harness-smoke.mjs"
+    "test:board-harness": "node scripts/board-harness-smoke.mjs",
+    "verify:pages": "node scripts/verify-pages.mjs"
   },
   "dependencies": {
     "@citation-js/core": "^0.7.18",

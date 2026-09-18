@@ -23,9 +23,19 @@ node scripts/board-standalone-fixture.mjs   # real Chromium receipt, needs a sta
 
 `.github/workflows/pages.yml` runs the same build on every push to `main` that touches the
 site inputs and deploys `_site` through `actions/deploy-pages`. The published site is
-`https://<owner>.github.io/<repo>/`; every asset path is relative, so the project subpath
-needs no configuration. Enabling Pages once is a repository setting (Source: GitHub
-Actions); after that the workflow self-deploys.
+<https://mappedinfo.github.io/dsh-paper-library/>; every asset path is relative, so the
+project subpath needs no configuration. Pages is enabled once in the repository settings
+(Source: GitHub Actions); after that the workflow self-deploys.
+
+```sh
+node scripts/verify-pages.mjs      # reads the live URL in real Chromium, writes a receipt
+```
+
+The [live receipt](validation/board-pages-live.json) records six checks against the deployed
+site: every asset is served, the page is drawable with host-only controls hidden, a drawing
+persists and survives a reload, tidy arranging and PNG export work, and there are no failed
+or third-party requests. It is a functional check of the public service, not an availability,
+latency or security measurement.
 
 ## What the service does
 

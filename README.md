@@ -55,12 +55,13 @@
 ### 独立画板（GitHub Pages）
 
 同一份画布代码也作为一个**独立静态画板**发布在 GitHub Pages 上，不需要 DSH、不需要服务器：
-`https://mappedinfo.github.io/dsh-paper-library/`。它由 `.github/workflows/pages.yml` 在 main 上自动构建部署；
+[**https://mappedinfo.github.io/dsh-paper-library/**](https://mappedinfo.github.io/dsh-paper-library/)
+（2026-09-18 已用真实浏览器在线核对：资源可访问、可绘制、刷新后恢复、可整理成树并导出 PNG，零第三方请求，见 [线上回执](docs/validation/board-pages-live.json)）。它由 `.github/workflows/pages.yml` 在 main 上自动构建部署；
 页面里的文献库、阅读器、对话引用控件在独立模式下**隐藏而不是假装可用**。存储用的是浏览器
 `localStorage`（按来源与浏览器各自独立，容量约 5 MB，上限 40 张画板 / 4 MiB，界面会报告用量），
 因此**「导出 JSON」才是长期备份**；导入同标识的文件不会覆盖，而是另存为新画板。独立站支持 PNG 导出
 （按模型绘制，不依赖页面样式与字体）。构建与边界见 [docs/board-pages.md](docs/board-pages.md)，
-本地回执见 [docs/validation/board-standalone.json](docs/validation/board-standalone.json)。
+本地回执见 [docs/validation/board-standalone.json](docs/validation/board-standalone.json)，线上回执见 [docs/validation/board-pages-live.json](docs/validation/board-pages-live.json)（`node scripts/verify-pages.mjs` 可随时复核）。
 
 ## 实时伴学
 
