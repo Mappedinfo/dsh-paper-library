@@ -353,6 +353,41 @@ test('the tidy control arranges the board, persists it and declines a single nod
   assert.equal(harness.messages.some(message => /至少要有两个节点/.test(message)), true);
 });
 
+test('a knowledge-graph node joins the board without inventing metadata', async () => {
+  const { board } = loadPanel();
+  const { nodeFromGraphPayload } = board;
+  const concept = nodeFromGraphPayload({ type: 'method', label: '合成方法', kind: 'concept' });
+  assert.equal(concept.kind, 'concept');
+  assert.equal(concept.text, '合成方法');
+  assert.equal(concept.origin, 'user');
+  assert.equal('paper' in concept, false, 'a non-paper graph node becomes a plain concept node');
+  const paper = nodeFromGraphPayload({ type: 'paper', label: 'Synthetic paper', paper: { id: 'paper_a', title: 'Synthetic paper', year: 2025, citekey: 'synth2025' } });
+  assert.equal(paper.kind, 'paper');
+  assert.deepEqual({ ...paper.paper }, { id: 'paper_a', title: 'Synthetic paper', year: 2025, citekey: 'synth2025' });
+  // Only a real paper binding survives; a label alone never becomes a paper node.
+  assert.equal(nodeFromGraphPayload({ type: 'paper', label: 'Some title' }).kind, 'concept');
+  assert.throws(() => nodeFromGraphPayload({ label: '   ' }), /名称/);
+  assert.throws(() => nodeFromGraphPayload(null), /内容/);
+});
+
+test('adding a graph node works with the board closed and reports host failures', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub() });
+  // No board is open yet: the path lists, finds nothing, creates one, then appends.
+  assert.equal(await harness.panel.addGraphNode({ label: '合成方法' }), true);
+  assert.equal(state[0].action, 'board_list');
+  assert.equal(state.some(call => call.action === 'board_create'), true);
+  const saved = state.filter(call => call.action === 'board_save').at(-1);
+  assert.equal(saved.payload.board.nodes.length, 1);
+  assert.equal(saved.payload.board.nodes[0].text, '合成方法');
+  assert.equal(harness.panel.isOpen(), false, 'the board view stays closed');
+
+  state.length = 0;
+  const failing = loadPanel({ api: apiStub({ board_list: () => { throw new Error('已有请求正在处理，请稍后重试。'); } }) });
+  assert.equal(await failing.panel.addGraphNode({ label: '合成方法' }), false);
+  assert.equal(failing.messages.some(message => /稍后重试/.test(message)), true, 'a host failure is reported, not swallowed');
+});
+
 test('a failed listing reports itself, never fabricates a board, and recovers on retry', async () => {
   state.length = 0;
   let failing = true;

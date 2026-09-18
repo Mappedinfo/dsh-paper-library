@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-18T02:37:08.952Z",
+  "verified_at": "2026-09-18T03:14:02.370Z",
   "scope": "Synthetic catalog in an isolated standalone server; free canvas drawing, text editing, connecting, moving, paper drag-in and picker, undo/redo, delete, zoom/fit/fullscreen, board switching, deletion and host persistence across a reload; zero model calls and zero external requests. The AI-proposal review path and the conversation reference chip need the native host tool and the DSH composer, so they are covered by the native harness receipt and unit tests rather than simulated here.",
   "checks": [
     "board-view-opens-and-creates-the-first-board-without-a-model",
@@ -18,6 +18,7 @@
     "generating-a-mind-map-from-checked-papers-creates-a-new-arranged-board",
     "a-new-board-starts-empty-and-leaves-the-others-untouched",
     "deleting-a-board-tombstones-only-that-record",
+    "a-selected-knowledge-graph-node-joins-the-board-through-an-explicit-control",
     "the-standalone-preview-refuses-the-conversation-chip-instead-of-faking-it",
     "no-browser-runtime-errors-and-no-external-requests"
   ],

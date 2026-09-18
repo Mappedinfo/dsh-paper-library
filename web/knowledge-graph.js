@@ -17,11 +17,11 @@
     if (evidence.annotation_id) parts.push(`批注：${evidence.annotation_id}`);
     return parts.length ? parts.join('\n') : '尚未补充原文依据';
   }
-  function create({ root, api, getPaper, openPaper, navigatePage, toast = () => {} }) {
+  function create({ root, api, getPaper, openPaper, navigatePage, onAddToBoard, toast = () => {} }) {
     if (!root) throw new Error('Knowledge graph requires a mount element');
     let graph = { nodes: [], edges: [] }, selected = null, edgePage = 0, revision = 0, paperId = null, editing = null, busy = false;
     root.classList.add('knowledge-graph');
-    root.innerHTML = `<div class="kg-toolbar"><div><h3>知识图谱</h3><p>记录方法、数据、论点与论据之间的联系。</p></div><div class="kg-actions"><button type="button" class="button" data-kg="add-node">＋ 节点</button><button type="button" class="button" data-kg="add-edge">＋ 关系</button></div></div>
+    root.innerHTML = `<div class="kg-toolbar"><div><h3>知识图谱</h3><p>记录方法、数据、论点与论据之间的联系。</p></div><div class="kg-actions"><button type="button" class="button subtle" data-kg="add-board">加入画板</button><button type="button" class="button" data-kg="add-node">＋ 节点</button><button type="button" class="button" data-kg="add-edge">＋ 关系</button></div></div>
       <div class="kg-controls"><label>节点类型 <select data-kg="filter"><option value="">全部类型</option></select></label><button type="button" class="text-button" data-kg="reset">查看全部关系</button></div>
       <div class="kg-legend" data-kg="legend"></div><p class="kg-status" role="status" data-kg="status"></p>
       <div class="kg-canvas" data-kg="canvas"></div><section class="kg-inspector" data-kg="inspector" hidden></section>
@@ -151,12 +151,20 @@
       finally { busy = false; }
     }
     el('add-node').addEventListener('click', () => showEditor('node')); el('add-edge').addEventListener('click', () => showEditor('edge'));
+    // The board shares this column, so a selected graph node is handed over explicitly
+    // rather than dragged: the panel owns its markup and reports the node as it stands.
+    el('add-board').addEventListener('click', () => {
+      const node = graph.nodes.find(value => value.id === selected);
+      if (!node) { toast('请先在知识图谱里选中一个节点。', true); return; }
+      if (typeof onAddToBoard !== 'function') { toast('画板尚未连接。', true); return; }
+      onAddToBoard(node);
+    });
     el('cancel').addEventListener('click', closeEditor); form.addEventListener('submit', save);
     el('dialog').addEventListener('cancel', event => { if (busy) event.preventDefault(); else editing = null; });
     el('filter').addEventListener('change', renderCanvas); el('reset').addEventListener('click', () => { selected = null; edgePage = 0; render(); });
     el('previous').addEventListener('click', () => { edgePage = Math.max(0, edgePage - 1); renderRelations(); }); el('next').addEventListener('click', () => { edgePage++; renderRelations(); });
     function clear() { ++revision; paperId = null; selected = null; graph = { nodes: [], edges: [] }; closeEditor(); render(); status('选择一篇文献查看知识图谱。'); }
-    clear(); return { load, clear };
+    clear(); return { load, clear, selectedNode: () => graph.nodes.find(node => node.id === selected) ?? null };
   }
   window.PaperKnowledgeGraph = Object.freeze({ create, types: TYPES, relations: RELATIONS, evidenceSummary, scopedEdges, relationLabel });
 })();

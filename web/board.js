@@ -312,6 +312,20 @@
 
   const emptyBoard = () => ({ schema: 1, title: '未命名画板', origin: 'user', status: 'saved', view: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [] });
 
+  /**
+   * One knowledge-graph node becomes one board node. A paper-typed graph node keeps its
+   * paper binding; anything else becomes a concept/text node carrying only the label the
+   * graph already showed, so the board never invents metadata the graph did not have.
+   */
+  function nodeFromGraphPayload(payload) {
+    if (!payload || typeof payload !== 'object') throw new Error('这个图节点没有可加入画板的内容。');
+    const label = String(payload.label ?? '').trim().slice(0, LIMITS.text);
+    if (!label) throw new Error('这个图节点没有可加入画板的名称。');
+    if (payload.paper?.id) return paperNode({ id: payload.paper.id, title: payload.paper.title ?? label, year: payload.paper.year, citekey: payload.paper.citekey }, { x: 0, y: 0 });
+    const kind = ['note', 'concept', 'text'].includes(payload.kind) ? payload.kind : 'concept';
+    return createNode(kind, { x: 0, y: 0 }, label);
+  }
+
   function create(options = {}) {
     const root = options.root;
     const api = options.api;
@@ -1018,6 +1032,39 @@
       return additions.length;
     }
 
+    /**
+     * Add one knowledge-graph node to the current board. The graph lives in the same
+     * column as the board, so this is the reachable path rather than a drag; it works
+     * with the board closed by reading and writing the record through the host.
+     */
+    async function addGraphNode(payload) {
+      let node;
+      try { node = nodeFromGraphPayload(payload); }
+      catch (error) { toast(error.message, true); return false; }
+      try {
+        if (boardId) await settle();
+        let target = boardId, current = boardId ? { board, revision } : null;
+        if (!target) {
+          const list = await api('board_list', {});
+          if (list.boards.length) {
+            const got = await api('board_get', { id: list.boards[0].id });
+            target = got.board.id; current = { board: got.board, revision: got.revision };
+          } else {
+            const created = await api('board_create', { board: { title: '我的文献画板', nodes: [], edges: [] } });
+            target = created.board.id; current = { board: created.board, revision: created.revision };
+          }
+        }
+        if (current.board.nodes.length >= LIMITS.nodes) throw new Error(`画板最多 ${LIMITS.nodes} 个节点。`);
+        const placed = placeInColumn(current.board.nodes, [node])[0];
+        const saved = await api('board_save', { id: target, board: { ...current.board, nodes: [...current.board.nodes, placed] }, expected_revision: current.revision });
+        if (!live) return false;
+        if (open && target === boardId) { board = saved.board; revision = saved.revision; render(); }
+        else if (open) await load(target);
+        toast('已把这个节点加入画板');
+        return true;
+      } catch (error) { toast(error.message || '加入画板失败', true); return false; }
+    }
+
     /** Build a new mind map from chosen papers; the host still owns validation and storage. */
     async function generateFromPapers(papers, title) {
       const draft = boardFromPapers(papers, title);
@@ -1162,6 +1209,7 @@
       addPaper,
       addPapers,
       generateFromPapers,
+      addGraphNode,
       tidy,
       sendToConversation,
       outline: (maximum) => outline({ ...board, title: board.title }, maximum),
@@ -1183,7 +1231,7 @@
   }
 
   window.PaperBoard = Object.freeze({
-    create, model, outline, createNode, paperNode, tidyTree, placeInColumn, boardFromPapers,
+    create, model, outline, createNode, paperNode, nodeFromGraphPayload, tidyTree, placeInColumn, boardFromPapers,
     LIMITS, NODE_KINDS, KIND_LABEL, RELATIONS, RELATION_ORDER, EDGE_KINDS, COLORS, DEFAULT_SIZE,
     geometry: { round, round3, clamp, nodeBounds, toScene, toScreen, applyZoom, boundsOf, viewportFor, hitNode, hitEdge, edgeGeometry, anchorPoint, distanceToSegment, normalizeRect, idsInRect },
   });

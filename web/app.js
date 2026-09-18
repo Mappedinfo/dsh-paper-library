@@ -1030,7 +1030,7 @@ workbenchUI = window.PaperWorkbench?.create({ state, api, persistence, loadList,
     else if (item && state.active?.id === item.id) { state.active=item; renderPaperHeader(); if(state.tab==='graph')void loadGraph(); }
   },
 });
-knowledgeGraphUI = window.PaperKnowledgeGraph?.create({root:$('graph-tab'),api,getPaper:()=>state.active,openPaper,navigatePage:async page=>{await switchTab('reader');await requestPage(page);},toast});
+knowledgeGraphUI = window.PaperKnowledgeGraph?.create({root:$('graph-tab'),api,getPaper:()=>state.active,openPaper,navigatePage:async page=>{await switchTab('reader');await requestPage(page);},toast,onAddToBoard:node=>void boardUI?.addGraphNode(node.type==='paper'?{kind:'paper',label:node.label,paper:{id:node.paper_id||node.id,title:node.label}}:{kind:'concept',label:node.label})});
 paperChatUI = window.PaperLibraryChat?.create({ api, toast, persistence, getPaper: () => state.active, getContext: () => state.harnessContext,
   getAnnotations: () => state.annotations, getLibrary: () => state.library,
   navigate: switchTab, navigateReference: (paperId, page) => openReferencedPaper({ paperId, page }), changed: publishReaderState,

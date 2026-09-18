@@ -261,8 +261,30 @@ try {
   assert.deepEqual(remaining.boards.map(board => board.node_count).sort(), [3, 4]);
   record('deleting-a-board-tombstones-only-that-record');
 
+  // A knowledge-graph node joins the board through the explicit control: the graph and
+  // the board share one column, so a drag between them is not a reachable interaction.
+  const beforeGraph = await waitForHost(value => value.boards.length === 2, 'two boards before the graph step');
+  const beforeCounts = new Map(beforeGraph.boards.map(board => [board.id, board.node_count]));
+  await page.locator('#paper-list .paper-card').first().click();
+  await page.locator('.tab[data-tab="graph"]').click();
+  await page.locator('#graph-tab [data-kg="canvas"] .kg-node').first().waitFor();
+  await page.locator('#graph-tab [data-kg="canvas"] .kg-node').first().click();
+  const graphLabel = (await page.locator('#graph-tab [data-kg="canvas"] .kg-node').first().getAttribute('aria-label') || '').split(' · ').at(-1);
+  assert.equal(await page.locator('#graph-tab [data-kg="add-board"]').count(), 1, 'the graph panel owns the add-to-board control');
+  await page.locator('#graph-tab [data-kg="add-board"]').click();
+  await page.waitForFunction(() => /已把这个节点加入画板/.test(document.getElementById('toast')?.textContent || ''));
+  const afterGraph = await waitForHost(value => value.boards.reduce((sum, board) => sum + board.node_count, 0) === [...beforeCounts.values()].reduce((a, b) => a + b, 0) + 1, 'exactly one board to gain one node');
+  const grown = afterGraph.boards.filter(board => board.node_count !== beforeCounts.get(board.id));
+  assert.equal(grown.length, 1, 'only one board changed');
+  assert.equal(grown[0].node_count, beforeCounts.get(grown[0].id) + 1, 'exactly one node was added');
+  const grownBoard = await page.evaluate(async id => (await (await fetch('./api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'board_get', id }) })).json()).result.board, grown[0].id);
+  if (graphLabel) assert.equal(grownBoard.nodes.some(node => node.text === graphLabel), true, 'the board node carries the label the graph showed');
+  record('a-selected-knowledge-graph-node-joins-the-board-through-an-explicit-control');
+
   // Outside DSH there is no composer to reference: the standalone surface says so
-  // instead of pretending the chip was placed.
+  // instead of pretending the chip was placed. The graph step closed the board, so reopen it.
+  await page.locator('#board-open').click();
+  await page.locator('.board-node').first().waitFor();
   await page.locator('#board-send').click();
   await page.waitForFunction(() => /DSH 的文献库面板/.test(document.getElementById('toast')?.textContent || ''));
   assert.match(await page.locator('#toast').innerText(), /请从 DSH 的文献库面板打开画板/);

@@ -117,9 +117,10 @@ silently.
   nodes, drag, resize, edge drawing, multi-select, delete, bounded undo/redo, debounced
   revision-checked saving, board switcher, fullscreen. Wired into `index.html`, `app.js`, the
   `src/http.mjs` asset allowlist, and `scripts/validate.mjs` syntax checks.
-- **P3 — library integration and snapping.** Drag papers from the catalog or knowledge graph onto the
-  canvas (paper nodes), double-click back into the reader, deterministic tidy-tree layout for a
-  selection, and "generate a board from selected papers".
+- **P3 — library integration and snapping.** Drag papers from the catalog onto the canvas (paper
+  nodes), double-click back into the reader, deterministic tidy-tree layout for a selection, and
+  "generate a board from selected papers". The knowledge graph lives in the same column as the
+  board, so a graph node is handed over with an explicit control instead of a drag.
 - **P4 — reference chips.** Snapshot store, token family, the `paper-library-boards` `@` source, the
   bridge `board_draft` action, host `agent/pre-step` expansion, and the frozen-material inspector.
 
@@ -145,14 +146,15 @@ Synthetic-only validation, following the existing project discipline:
   store with no private data. **Implemented, 8 cases.**
 - `tests-js/board-panel.test.mjs` — canvas reducer behavior (create/drag/connect/delete/undo/redo,
   tidy-tree layout determinism) through the same fake-DOM harness the other panels use.
-  **Implemented, 11 cases** (geometry, model bounds, paper nodes, outline, panel persistence,
-  conflict recovery, listing failure, tidy arranging, settle-on-close).
+  **Implemented, 13 cases** (geometry, model bounds, paper nodes, outline, panel persistence,
+  conflict recovery, listing failure, tidy arranging, settle-on-close, graph-node conversion and
+  the closed-board graph path).
 - `tests-js/board-references.test.mjs` — token parse/render, chip codec round-trip, snapshot
   integrity, and `agent/pre-step` expansion including the malformed and over-budget paths.
   **Implemented, 5 cases.**
 - `scripts/board-browser-fixture.mjs` — real Chromium receipt for draw/drag/zoom/connect/save/reload,
   library drag-in, tidy-tree snapping, and the standalone refusal of the conversation chip.
-  **Implemented, 18 checks** in `docs/validation/board-browser.json`.
+  **Implemented, 19 checks** in `docs/validation/board-browser.json` (including one knowledge-graph node joining a board).
 - `scripts/board-harness-smoke.mjs` — native DSH check that the tool is offered, that a board token
   reaches a turn as frozen material, and that an unresolvable reference fails the turn.
   **Implemented, 7 checks** in `docs/validation/board-harness.json`.
