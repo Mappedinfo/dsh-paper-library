@@ -69,6 +69,18 @@ try {
   assert.ok(body.length > 3000, `the exported PNG carries the drawing (${body.length} bytes)`);
   record('tidy-arranging-and-png-export-work-on-the-live-site');
 
+  // A board that lives in the repository as a readable source file renders from its URL.
+  const visitor = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+  visitor.on('pageerror', error => errors.push(error.message));
+  visitor.on('request', request => { if (!request.url().startsWith(site) && !request.url().startsWith('data:') && !request.url().startsWith('blob:')) external.push(request.url()); });
+  await visitor.goto(`${site}?src=boards/example.json`);
+  await visitor.locator('#board-stage').waitFor();
+  await visitor.waitForFunction(() => document.querySelectorAll('.board-node').length === 5);
+  assert.match(await visitor.locator('#site-storage-status').innerText(), /已从源文件导入/);
+  assert.equal(await visitor.locator('[data-edge-path]').count(), 4);
+  await visitor.close();
+  record('the-published-example-source-file-renders-from-its-url');
+
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);
   record('no-failed-requests-no-page-errors-and-no-third-party-requests');

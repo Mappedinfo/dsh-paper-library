@@ -143,7 +143,66 @@ try {
   assert.ok(png.body.length > 4000, `the PNG carries the drawing (${png.body.length} bytes)`);
   record('png-export-produces-a-real-image-with-the-drawn-content');
 
+  // The independent build carries the same edge, layout and source capabilities.
+  const sourceBox = await stage();
+  await page.locator('#board-tool-note').click();
+  await page.mouse.click(sourceBox.x + 260, sourceBox.y + 180);
+  await page.locator('.board-text-editor').waitFor();
+  await page.locator('.board-text-editor').fill('独立连线节点');
+  await page.keyboard.press('Control+Enter');
+  await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 3);
+  const linkBoxes = await page.evaluate(() => [...document.querySelectorAll('.board-node')].map(node => {
+    const box = node.querySelector('.board-node-shape').getBoundingClientRect();
+    return { id: node.getAttribute('data-node'), x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  }));
+  const topmost = (x, y) => page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest('[data-node]')?.getAttribute('data-node') ?? null, [x, y]);
+  const clickable = [];
+  for (const node of linkBoxes) if (await topmost(node.x, node.y) === node.id) clickable.push(node);
+  assert.ok(clickable.length >= 2);
+  const storedEdges = () => page.evaluate(() => JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true)[0].board.edges);
+  const edgesBefore = (await storedEdges()).length;
+  await page.locator('#board-tool-connect').click();
+  await page.mouse.click(clickable[0].x, clickable[0].y);
+  await page.mouse.click(clickable[1].x, clickable[1].y);
+  await page.waitForFunction(count => JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true)[0].board.edges.length === count + 1, edgesBefore);
+  await page.locator('#board-edge-kind').selectOption('elbow');
+  await page.locator('#board-edge-dashed').check();
+  await page.waitForFunction(() => JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true)[0].board.edges.some(edge => edge.kind === 'elbow' && edge.dashed === true));
+  record('the-standalone-build-creates-and-styles-an-edge-with-the-connect-tool');
+
+  await page.locator('#board-tool-select').click();
+  await page.keyboard.press('Escape');
+  await page.locator('#board-layout-mode').selectOption('layered');
+  await page.locator('#board-layout-direction').selectOption('tb');
+  await page.locator('#board-layout-apply').click();
+  await page.waitForFunction(() => /分层图/.test(document.getElementById('board-layout-status')?.textContent || ''));
+  const laidOut = () => page.evaluate(() => JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true)[0].board.nodes.map(node => `${node.id}:${node.x},${node.y}`).sort().join('|'));
+  const onceSignature = await laidOut();
+  await page.locator('#board-layout-apply').click();
+  await page.waitForFunction(signature => JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true)[0].board.nodes.map(node => `${node.id}:${node.x},${node.y}`).sort().join('|') === signature, onceSignature);
+  record('automatic-layout-is-available-and-idempotent-in-the-standalone-build');
+
+  await page.locator('#board-source-open').click();
+  await page.locator('#board-source-dialog').waitFor();
+  await page.locator('#board-source-generate').click();
+  const independentSource = JSON.parse(await page.locator('#board-source-content').inputValue());
+  assert.equal(independentSource.schema, 'paper-library-board.v1');
+  assert.equal(independentSource.nodes.every(node => !('x' in node) && !('y' in node)), true, 'the independent build writes the same coordinate-free source');
+  const independentStyle = JSON.parse(await page.locator('#board-source-style').inputValue());
+  independentStyle.layout = { ...(independentStyle.layout ?? {}), pins: { [independentSource.nodes[0].id]: [1200, 600] } };
+  await page.locator('#board-source-style').fill(JSON.stringify(independentStyle, null, 2));
+  await page.locator('#board-source-apply').click();
+  await page.waitForFunction(id => {
+    const board = JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true)[0].board;
+    return board.style?.layout?.pins?.[id]?.[0] === 1200;
+  }, independentSource.nodes[0].id);
+  const pinnedNode = await page.evaluate(id => JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true)[0].board.nodes.find(node => node.id === id), independentSource.nodes[0].id);
+  assert.deepEqual([pinnedNode.x, pinnedNode.y], [1200, 600], 'the sidecar parks a node at an exact position');
+  await page.locator('#board-source-dialog .dialog-close').first().click();
+  record('the-standalone-build-reads-and-applies-the-source-and-style-files');
+
   // Boards are separate, and deletion hides only the deleted one.
+  const nodesInFirstBoard = await page.locator('.board-node').count();
   await page.locator('#board-new').click();
   await page.waitForFunction(() => document.querySelectorAll('#board-select option').length === 2);
   try { await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 0); }
@@ -153,10 +212,33 @@ try {
   }
   await page.locator('#board-delete').click();
   await page.waitForFunction(() => document.querySelectorAll('#board-select option').length === 1);
-  await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 2);
+  await page.waitForFunction(count => document.querySelectorAll('.board-node').length === count, nodesInFirstBoard);
   const afterDelete = await stored();
   assert.equal(afterDelete.records.filter(record => record.board.deleted !== true).length, 1, 'the deleted board is tombstoned locally');
   record('a-second-board-is-separate-and-deletion-tombstones-only-that-record');
+
+  // A repository-hosted source file renders on its own: `?src=boards/example.json`.
+  const linked = await browser.newContext({ viewport: { width: 1280, height: 820 }, acceptDownloads: true });
+  const visitor = await linked.newPage();
+  visitor.on('pageerror', error => errors.push(error.message));
+  await visitor.goto(`${origin}/?src=boards/example.json`);
+  await visitor.locator('#board-stage').waitFor();
+  await visitor.waitForFunction(() => document.querySelectorAll('.board-node').length === 5);
+  const fromFile = await visitor.evaluate(() => JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true)[0].board);
+  assert.equal(fromFile.title, '城市感知的技术路线（示例源文件）');
+  assert.equal(fromFile.nodes.length, 5);
+  assert.equal(fromFile.edges.length, 4);
+  assert.deepEqual(fromFile.nodes.filter(node => node.text.startsWith('这个节点被固定')).map(node => [node.x, node.y]), [[1240, 120]], 'the sidecar pin from the repository file is honoured');
+  assert.equal(await visitor.locator('#board-edge-kind').count(), 1);
+  assert.match(await visitor.locator('#site-storage-status').innerText(), /已从源文件导入/);
+  // Visiting again reuses the local copy instead of duplicating it.
+  await visitor.reload();
+  await visitor.waitForFunction(() => document.querySelectorAll('.board-node').length === 5);
+  const again = await visitor.evaluate(() => JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true).length);
+  assert.equal(again, 1, 'a second visit reuses the imported copy');
+  assert.match(await visitor.locator('#site-storage-status').innerText(), /已打开本地副本/);
+  await linked.close();
+  record('a-repository-source-file-renders-from-a-url-without-duplicating-itself');
 
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);

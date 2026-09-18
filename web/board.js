@@ -20,8 +20,10 @@
   const RELATION_ORDER = Object.freeze(['related', 'supports', 'contradicts', 'cites', 'explains', 'extends']);
   const EDGE_KINDS = Object.freeze({ arrow: '箭头', line: '直线', elbow: '折线' });
   const COLORS = Object.freeze(['#4176e6', '#22864a', '#88520f', '#b0306a', '#6b4fd8', '#0f1115']);
-  const TOOL_IDS = Object.freeze({ select: 'board-tool-select', pan: 'board-tool-pan', text: 'board-tool-text', note: 'board-tool-note', rect: 'board-tool-rect', ellipse: 'board-tool-ellipse', diamond: 'board-tool-diamond' });
-  const TOOL_KEYS = Object.freeze({ v: 'select', h: 'pan', t: 'text', n: 'note', r: 'rect', o: 'ellipse', d: 'diamond' });
+  const TOOL_IDS = Object.freeze({ select: 'board-tool-select', pan: 'board-tool-pan', text: 'board-tool-text', note: 'board-tool-note', rect: 'board-tool-rect', ellipse: 'board-tool-ellipse', diamond: 'board-tool-diamond', connect: 'board-tool-connect' });
+  const TOOL_KEYS = Object.freeze({ v: 'select', h: 'pan', t: 'text', n: 'note', r: 'rect', o: 'ellipse', d: 'diamond', c: 'connect' });
+  /** Optional companion: it owns layout and the readable source format when loaded. */
+  const source = () => window.PaperBoardSource ?? null;
 
   const round = value => Math.round(value * 100) / 100;
   const round3 = value => Math.round(value * 1000) / 1000;
@@ -93,8 +95,7 @@
     for (let index = edges.length - 1; index >= 0; index--) {
       const edge = edges[index], from = byId.get(edge.from), to = byId.get(edge.to);
       if (!from || !to) continue;
-      const geometry = edgeGeometry(from, to, edge.kind);
-      if (distanceToSegment(point, geometry.start, geometry.end) <= tolerance) return edge.id;
+      if (edgeHitDistance(edge, from, to, point) <= tolerance) return edge.id;
     }
     return null;
   }
@@ -185,6 +186,9 @@
   }
 
   const sizeFor = kind => DEFAULT_SIZE[kind] || DEFAULT_SIZE.text;
+  /** New edges follow the panel's current line style, so a preference sticks while drawing. */
+  const edgeDefaults = () => ({ kind: pendingEdgeKind });
+  let pendingEdgeKind = 'arrow';
   function createNode(kind, point, text) {
     if (!NODE_KINDS.includes(kind)) throw new Error('不受支持的节点类型。');
     const size = sizeFor(kind);
@@ -311,6 +315,29 @@
   }
 
   const emptyBoard = () => ({ schema: 1, title: '未命名画板', origin: 'user', status: 'saved', view: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [] });
+
+  /** One place decides how an edge is shaped, styled and hit-tested. */
+  function geometryFor(edge, from, to) {
+    const api = source();
+    if (api) {
+      // `points` is the drawn shape (elbow corners included); `userPoints` is what the
+      // reader placed, which is what a bend-point drag must edit.
+      const userPoints = api.edgePoints(from, to, edge.waypoints ?? []);
+      const points = api.edgeRenderPoints(from, to, edge.kind ?? 'arrow', edge.waypoints ?? []);
+      return { start: points[0], end: points[points.length - 1], points, userPoints, path: api.edgePath(points, edge.kind ?? 'arrow'), mid: api.edgeMidpoint(points) };
+    }
+    const geometry = edgeGeometry(from, to, edge.kind);
+    return { ...geometry, points: [geometry.start, geometry.end], userPoints: [geometry.start, geometry.end] };
+  }
+
+  function edgeHitDistance(edge, from, to, point) {
+    const geometry = geometryFor(edge, from, to);
+    const api = source();
+    return api ? api.distanceToPoints(geometry.points, point) : distanceToSegment(point, geometry.start, geometry.end);
+  }
+
+  const EDGE_STROKE = { arrow: '#6b7268' };
+
 
   /**
    * Draw a board onto a 2D canvas for a still export. This deliberately paints from the
@@ -447,6 +474,7 @@
     let pendingSave = false;
     let conflict = null;
     let drag = null;
+    let connectFrom = null;
     let editor = null;
     let spaceDown = false;
     let live = true;
@@ -553,10 +581,13 @@
 
     function renderNode(node) {
       const bounds = nodeBounds(node);
-      const group = svgEl('g', { class: `board-node board-node-kind-${node.kind}${selection.has(node.id) ? ' is-selected' : ''}${node.origin === 'llm' ? ' is-ai' : ''}`, 'data-node': node.id, tabindex: '-1' });
+      const style = source()?.nodeStyle(board.style ?? {}, node) ?? {};
+      const group = svgEl('g', { class: `board-node board-node-kind-${node.kind}${selection.has(node.id) ? ' is-selected' : ''}${node.origin === 'llm' ? ' is-ai' : ''}${connectFrom === node.id ? ' is-connect-source' : ''}`, 'data-node': node.id, tabindex: '-1' });
       const shape = shapeFor(node);
       shape.setAttribute('class', 'board-node-shape');
-      if (node.color) shape.setAttribute('stroke', node.color);
+      if (style.fill) shape.setAttribute('fill', style.fill);
+      if (node.color || style.stroke) shape.setAttribute('stroke', node.color ?? style.stroke);
+      if (style.fontSize) group.setAttribute('data-font-size', String(style.fontSize));
       group.append(shape);
       if (node.origin === 'llm') group.append(svgEl('text', { class: 'board-node-meta', x: bounds.x + 6, y: bounds.y - 4 }, 'AI 提议'));
       if (node.kind === 'paper' && node.paper) {
@@ -578,15 +609,26 @@
       const from = byId(edge.from), to = byId(edge.to);
       if (!from || !to) return null;
       const selected = selection.has(edge.id);
-      const geometry = edgeGeometry(from, to, edge.kind);
+      const style = source()?.edgeStyle(board.style ?? {}, edge) ?? { arrow: edge.arrow ?? 'forward', dashed: edge.dashed === true, width: undefined, stroke: undefined };
+      const geometry = geometryFor(edge, from, to);
       const group = svgEl('g', { class: `board-edge-group${selected ? ' is-selected' : ''}`, 'data-edge': edge.id });
       const hit = svgEl('path', { class: 'board-edge-hit', d: geometry.path });
       const path = svgEl('path', { class: `board-edge${selected ? ' is-selected' : ''}`, d: geometry.path, 'data-edge-path': edge.id });
-      if (edge.origin === 'llm') path.setAttribute('stroke-dasharray', '6 4');
-      if (edge.kind === 'arrow') path.setAttribute('marker-end', 'url(#board-arrowhead)');
+      if (style.stroke) path.setAttribute('stroke', style.stroke);
+      if (style.width) path.setAttribute('stroke-width', String(style.width));
+      if (edge.origin === 'llm' || style.dashed) path.setAttribute('stroke-dasharray', '6 4');
+      if (style.arrow !== 'none') path.setAttribute('marker-end', 'url(#board-arrowhead)');
+      if (style.arrow === 'both') path.setAttribute('marker-start', 'url(#board-arrowhead)');
       group.append(hit, path);
       if (edge.label) group.append(svgEl('text', { class: 'board-edge-label', x: geometry.mid.x, y: geometry.mid.y - 4 }, edge.label));
-      groupEls(edge.id, { group, path });
+      // A selected edge exposes its bend points, which are draggable and removable.
+      const handles = [];
+      if (selected) for (const [index, point] of (edge.waypoints ?? []).entries()) {
+        const handle = svgEl('circle', { class: 'board-waypoint', cx: point[0], cy: point[1], r: 5, 'data-waypoint': `${edge.id}:${index}` });
+        handles.push(handle);
+        group.append(handle);
+      }
+      edgeEls.set(edge.id, { group, path, points: geometry.points, handles });
       return group;
     }
     function groupEls(id, value) { edgeEls.set(id, value); }
@@ -623,12 +665,19 @@
       for (const edge of board.edges) {
         const record = edgeEls.get(edge.id), from = byId(edge.from), to = byId(edge.to);
         if (!record || !from || !to) continue;
-        const geometry = edgeGeometry(from, to, edge.kind);
+        const geometry = geometryFor(edge, from, to);
+        record.points = geometry.points;
         record.path.setAttribute('d', geometry.path);
         const hit = record.group.firstChild;
         if (hit) hit.setAttribute('d', geometry.path);
         const label = record.group.lastChild;
         if (edge.label && label?.classList?.contains('board-edge-label')) { label.setAttribute('x', geometry.mid.x); label.setAttribute('y', geometry.mid.y - 4); }
+        for (const [index, handle] of (record.handles ?? []).entries()) {
+          const point = (edge.waypoints ?? [])[index];
+          if (!point) continue;
+          handle.setAttribute('cx', point[0]);
+          handle.setAttribute('cy', point[1]);
+        }
       }
       applyView();
     }
@@ -750,6 +799,9 @@
       const relation = $('board-relation');
       const label = $('board-edge-label-input');
       const color = $('board-color');
+      const edgeKind = $('board-edge-kind');
+      const edgeArrow = $('board-edge-arrow');
+      const edgeDashed = $('board-edge-dashed');
       const nodes = selectedNodes();
       const edges = board.edges.filter(edge => selection.has(edge.id));
       const single = nodes.length === 1 ? nodes[0] : null;
@@ -766,6 +818,9 @@
         color.disabled = !single;
         color.value = single?.color ?? '';
       }
+      if (edgeKind) { edgeKind.disabled = edges.length !== 1; if (edges.length === 1) edgeKind.value = edges[0].kind ?? 'arrow'; }
+      if (edgeArrow) { edgeArrow.disabled = edges.length !== 1; if (edges.length === 1) edgeArrow.value = edges[0].arrow ?? 'forward'; }
+      if (edgeDashed) { edgeDashed.disabled = edges.length !== 1; edgeDashed.checked = edges.length === 1 && edges[0].dashed === true; }
       const kind = $('board-kind');
       if (kind) { kind.disabled = !single; if (single) kind.value = single.kind; }
       const count = $('board-selection');
@@ -824,6 +879,23 @@
         svg.classList.add('is-panning');
         return;
       }
+      if (mode === 'connect') {
+        const target = hitNode(board.nodes, point);
+        if (!target) { connectFrom = null; render(); return; }
+        if (!connectFrom) { connectFrom = target; select([target]); render(); return; }
+        if (connectFrom === target) { toast('连线需要两个不同的节点。', true); connectFrom = null; render(); return; }
+        const from = connectFrom;
+        connectFrom = null;
+        let created = null;
+        if (mutate(current => { const result = model.addEdge(current, from, target, { kind: edgeDefaults(current).kind }); created = result.edge; return result.board; })) {
+          // The new edge becomes the selection, and the tool returns to selection so the
+          // reader can immediately style it or drag a bend point into it.
+          if (created) select([created.id]);
+          setTool('select');
+        }
+        render();
+        return;
+      }
       if (SHAPE_TOOLS.includes(mode)) {
         const node = createNode(mode, point, mode === 'text' ? '' : '');
         if (!mutate(current => model.addNode(current, node))) return;
@@ -843,6 +915,29 @@
         if (Math.abs(point.x - (bounds.right + 4)) <= tolerance && Math.abs(point.y - bounds.cy) <= tolerance) {
           drag = { kind: 'connect', id: single.id, start: point };
           return;
+        }
+      }
+      // A selected edge owns its bend points: a handle drags it, Alt+click removes it, and
+      // dragging anywhere else on the line inserts a new one at that leg.
+      const selectedEdge = board.edges.find(edge => selection.has(edge.id));
+      if (selectedEdge) {
+        const from = byId(selectedEdge.from), to = byId(selectedEdge.to);
+        if (from && to) {
+          const geometry = geometryFor(selectedEdge, from, to);
+          const near = Math.max(LIMITS.handle, (source()?.LIMITS ? LIMITS.hit : LIMITS.hit) ) / view.zoom;
+          const handleIndex = (selectedEdge.waypoints ?? []).findIndex(entry => Math.hypot(point.x - entry[0], point.y - entry[1]) <= near);
+          if (handleIndex >= 0 && event.altKey) {
+            const next = (selectedEdge.waypoints ?? []).filter((_, index) => index !== handleIndex);
+            mutate(current => model.setEdge(current, selectedEdge.id, { waypoints: next.length ? next : undefined }));
+            return;
+          }
+          if (handleIndex >= 0) { drag = { kind: 'waypoint', edgeId: selectedEdge.id, index: handleIndex, points: geometry.userPoints }; return; }
+          const api = source();
+          const distance = api ? api.distanceToPoints(geometry.points, point) : distanceToSegment(point, geometry.start, geometry.end);
+          if (distance <= LIMITS.hit / view.zoom && (selectedEdge.waypoints ?? []).length < (api?.LIMITS.waypoints ?? LIMITS.waypoints)) {
+            drag = { kind: 'waypoint', edgeId: selectedEdge.id, index: -1, points: geometry.userPoints };
+            return;
+          }
         }
       }
       const nodeId = hitNode(board.nodes, point);
@@ -892,6 +987,25 @@
         }
         return;
       }
+      if (drag.kind === 'waypoint') {
+        const edge = board.edges.find(value => value.id === drag.edgeId);
+        if (!edge) return;
+        const from = byId(edge.from), to = byId(edge.to);
+        if (!from || !to) return;
+        const api = source();
+        const geometry = geometryFor(edge, from, to);
+        try {
+          const moved = api ? api.dragWaypoint(edge, geometry.userPoints, point, drag.index) : { waypoints: [[point.x, point.y]], index: 0 };
+          if (api) drag.index = moved.index;
+          // A click without movement must not touch the board: re-rendering here would
+          // replace the handle under the pointer and swallow a double-click on it.
+          if (JSON.stringify(moved.waypoints) === JSON.stringify(edge.waypoints ?? [])) return;
+          drag.moved = true;
+          board = model.setEdge(board, edge.id, { waypoints: moved.waypoints });
+          redrawGeometry();
+        } catch (error) { toast(error.message, true); drag = null; }
+        return;
+      }
       if (drag.kind === 'marquee') {
         const rect = normalizeRect(drag.start, point);
         marquee.setAttribute('x', rect.x); marquee.setAttribute('y', rect.y);
@@ -908,6 +1022,7 @@
       marquee.setAttribute('hidden', 'hidden');
       if (finished.kind === 'move') { if (finished.moved) { pushHistory(); scheduleSave(); } return; }
       if (finished.kind === 'resize') { pushHistory(); render(); scheduleSave(); return; }
+      if (finished.kind === 'waypoint') { if (finished.moved) { pushHistory(); render(); scheduleSave(); } return; }
       if (finished.kind === 'connect') {
         if (finished.target) {
           let created = null;
@@ -931,7 +1046,7 @@
       if (event.key === ' ') spaceDown = true;
       if (typing) return;
       const meta = event.metaKey || event.ctrlKey;
-      if (event.key === 'Escape') { closeTextEdit(); select([]); return; }
+      if (event.key === 'Escape') { closeTextEdit(); connectFrom = null; select([]); render(); return; }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); return; }
       if (meta && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); return; }
       if (meta && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); return; }
@@ -1010,7 +1125,7 @@
       if (title) title.value = board.title;
       if (board.view) view = { x: board.view.x, y: board.view.y, zoom: board.view.zoom };
       else view = viewportFor(board.nodes, surfaceSize());
-      render(); renderInspector();
+      render(); renderInspector(); writeLayoutControls(layoutBlock());
       if (boardList) boardList.value = boardId;
       status('已载入');
     }
@@ -1110,6 +1225,111 @@
       button.textContent = focused ? '退出全屏 ⤡' : '全屏 ⤢';
     }
 
+    // ── Presentation, automatic layout and the readable source ────────────────────
+    const styleBlock = () => board.style ?? {};
+    const layoutBlock = () => ({ mode: 'tree', direction: 'lr', gapX: 80, gapY: 36, ...(styleBlock().layout ?? {}) });
+    const pinnedIds = () => new Set(Object.keys(styleBlock().layout?.pins ?? {}));
+    const selectedNodeIds = () => [...selection].filter(id => byId(id));
+
+    function readLayoutControls() {
+      const mode = $('board-layout-mode')?.value ?? 'tree';
+      const direction = $('board-layout-direction')?.value ?? 'lr';
+      const gapX = Number($('board-layout-gap-x')?.value) || 80;
+      const gapY = Number($('board-layout-gap-y')?.value) || 36;
+      return { mode, direction, gapX, gapY };
+    }
+
+    function writeLayoutControls(layout) {
+      if ($('board-layout-mode')) $('board-layout-mode').value = layout.mode ?? 'tree';
+      if ($('board-layout-direction')) $('board-layout-direction').value = layout.direction ?? 'lr';
+      if ($('board-layout-gap-x')) $('board-layout-gap-x').value = String(layout.gapX ?? 80);
+      if ($('board-layout-gap-y')) $('board-layout-gap-y').value = String(layout.gapY ?? 36);
+      layoutStatus();
+    }
+
+    function layoutStatus(extra = '') {
+      const node = $('board-layout-status');
+      if (!node) return;
+      const pinned = pinnedIds().size;
+      node.textContent = extra || `${pinned ? `已钉住 ${pinned} 个节点 · ` : ''}${board.nodes.length} 节点 / ${board.edges.length} 连线`;
+    }
+
+    /** Layout the scope, leaving pinned nodes exactly where the reader parked them. */
+    function applyLayout() {
+      const api = source();
+      if (!api) { toast('这个页面没有加载排版模块。', true); return 0; }
+      const ids = selectedNodeIds();
+      const scoped = ids.length > 1;
+      const pinned = pinnedIds();
+      const scope = (scoped ? board.nodes.filter(node => ids.includes(node.id)) : board.nodes).filter(node => !pinned.has(node.id));
+      if (scope.length < 2) {
+        toast(pinned.size ? '可排版的节点不足两个：已钉住的节点不参与自动排版。' : '至少要有两个节点才能自动排版。', true);
+        return 0;
+      }
+      const inScope = new Set(scope.map(node => node.id));
+      const edges = board.edges.filter(edge => inScope.has(edge.from) && inScope.has(edge.to));
+      const { mode, direction, gapX, gapY } = readLayoutControls();
+      const arranged = new Map(api.layout(scope, edges, { mode, direction, gapX, gapY }).map(node => [node.id, node]));
+      board = {
+        ...board,
+        nodes: board.nodes.map(node => arranged.get(node.id) ?? node),
+        style: { ...styleBlock(), layout: { ...(styleBlock().layout ?? {}), mode, direction, gapX, gapY, ...(pinned.size ? { pins: styleBlock().layout.pins } : {}) } },
+      };
+      pushHistory(); render(); scheduleSave();
+      layoutStatus(`已按${mode === 'radial' ? '放射思维导图' : mode === 'layered' ? '分层图' : '分层树'}（${direction}）排布 ${scope.length} 个节点`);
+      return scope.length;
+    }
+
+    /** Pins are the escape hatch for deliberate placement: the layout never moves them. */
+    function setPinned(ids, on) {
+      if (!ids.length) { toast('请先选中要钉住（或取消钉住）的节点。', true); return 0; }
+      const pins = { ...(styleBlock().layout?.pins ?? {}) };
+      let changed = 0;
+      for (const id of ids) {
+        const node = byId(id);
+        if (!node) continue;
+        if (on && !pins[id]) { pins[id] = [node.x, node.y]; changed++; }
+        else if (!on && pins[id]) { delete pins[id]; changed++; }
+      }
+      if (!changed) { toast(on ? '选中的节点已经钉住了。' : '选中的节点没有钉住。'); return 0; }
+      const layout = { ...(styleBlock().layout ?? {}) };
+      if (Object.keys(pins).length) layout.pins = pins; else delete layout.pins;
+      board = { ...board, style: { ...styleBlock(), layout } };
+      pushHistory(); scheduleSave(); layoutStatus();
+      toast(on ? `已钉住 ${changed} 个节点：它们不再参与自动排版。` : `已取消钉住 ${changed} 个节点。`);
+      return changed;
+    }
+
+    const sourceTexts = () => {
+      const api = source();
+      if (!api) return null;
+      const layout = readLayoutControls();
+      const { source: content, style } = api.toSource({ ...board, title: board.title }, layout);
+      return { content: JSON.stringify(content, null, 2), style: JSON.stringify(style, null, 2) };
+    };
+
+    function applySourceTexts(contentText, styleText) {
+      const api = source();
+      if (!api) throw new Error('这个页面没有加载源文件模块。');
+      if (!contentText.trim()) throw new Error('内容源文件是空的。');
+      let content, style = {};
+      try { content = JSON.parse(contentText); } catch (error) { throw new Error(`内容源文件不是合法 JSON：${error.message}`); }
+      if (styleText.trim()) { try { style = JSON.parse(styleText); } catch (error) { throw new Error(`样式文件不是合法 JSON：${error.message}`); } }
+      const converted = api.fromSource(content, style);
+      board = {
+        ...board,
+        title: converted.board.title,
+        nodes: converted.board.nodes,
+        edges: converted.board.edges,
+        style: Object.keys(converted.style).length > 1 || Object.keys(converted.style).length ? converted.style : undefined,
+      };
+      selection = new Set();
+      pushHistory(); render(); renderInspector();
+      writeLayoutControls({ mode: converted.mode, direction: converted.direction, ...(converted.style.layout ?? {}) });
+      scheduleSave();
+      return { nodes: board.nodes.length, edges: board.edges.length };
+    }
+
     /** Library integration: a dropped paper becomes a paper node at the drop point. */
     function addPaper(paper, clientPoint) {
       const point = clientPoint ? toScene(clientPoint, view) : { x: 0, y: 0 };
@@ -1197,6 +1417,20 @@
       svg.addEventListener('pointerup', endDrag);
       svg.addEventListener('pointercancel', endDrag);
       svg.addEventListener('dblclick', event => {
+        const at = scenePointFromEvent(event);
+        // Double-clicking a bend point removes it: Alt-click works too, but a canvas needs a
+        // gesture a reader can discover without being told.
+        const selectedEdge = board.edges.find(edge => selection.has(edge.id));
+        if (selectedEdge && (selectedEdge.waypoints ?? []).length) {
+          const reach = LIMITS.handle / view.zoom;
+          const index = selectedEdge.waypoints.findIndex(point => Math.hypot(at.x - point[0], at.y - point[1]) <= reach);
+          if (index >= 0) {
+            const next = selectedEdge.waypoints.filter((_, position) => position !== index);
+            mutate(current => model.setEdge(current, selectedEdge.id, { waypoints: next.length ? next : undefined }));
+            render();
+            return;
+          }
+        }
         const nodeId = hitNode(board.nodes, scenePointFromEvent(event));
         if (nodeId) {
           const node = byId(nodeId);
@@ -1229,6 +1463,7 @@
       for (const [name, id] of Object.entries(TOOL_IDS)) { const button = $(id); if (button) button.addEventListener('click', () => setTool(name)); }
       const addPaperButton = $('board-add-paper');
       if (addPaperButton) addPaperButton.addEventListener('click', () => { options.onRequestPapers?.(); });
+      for (const button of doc.querySelectorAll?.('#board-source-dialog .dialog-close') ?? []) button.addEventListener('click', () => sourceDialog?.close?.());
       const newButton = $('board-new'), deleteButton = $('board-delete'), closeButton = $('board-close');
       if (newButton) newButton.addEventListener('click', () => void createBoard());
       if (deleteButton) deleteButton.addEventListener('click', () => void deleteBoard());
@@ -1268,6 +1503,81 @@
         if (!paper?.id) return;
         const rect = stage.getBoundingClientRect();
         addPaper(paper, { x: event.clientX - rect.left, y: event.clientY - rect.top });
+      });
+      // Edge appearance, automatic layout, pins and the readable source file.
+      const editSelectedEdge = update => { const edge = board.edges.find(value => selection.has(value.id)); if (edge) mutate(current => model.setEdge(current, edge.id, update)); };
+      const edgeKind = $('board-edge-kind'), edgeArrow = $('board-edge-arrow'), edgeDashed = $('board-edge-dashed');
+      if (edgeKind) edgeKind.addEventListener('change', () => { pendingEdgeKind = edgeKind.value; editSelectedEdge({ kind: edgeKind.value }); });
+      if (edgeArrow) edgeArrow.addEventListener('change', () => editSelectedEdge({ arrow: edgeArrow.value === 'forward' ? undefined : edgeArrow.value }));
+      if (edgeDashed) edgeDashed.addEventListener('change', () => editSelectedEdge({ dashed: edgeDashed.checked ? true : undefined }));
+      const layoutApply = $('board-layout-apply');
+      if (layoutApply) layoutApply.addEventListener('click', () => { applyLayout(); });
+      const pinButton = $('board-layout-pin'), unpinButton = $('board-layout-unpin');
+      if (pinButton) pinButton.addEventListener('click', () => setPinned(selectedNodeIds(), true));
+      if (unpinButton) unpinButton.addEventListener('click', () => setPinned(selectedNodeIds(), false));
+      const sourceDialog = $('board-source-dialog');
+      const sourceStatus = (message, error = false) => {
+        const node = $('board-source-status');
+        if (!node) return;
+        node.textContent = message;
+        node.classList.toggle('is-error', Boolean(error));
+      };
+      const fillSourceFields = () => {
+        const texts = sourceTexts();
+        if (!texts) { sourceStatus('这个页面没有加载源文件模块。', true); return null; }
+        if ($('board-source-content')) $('board-source-content').value = texts.content;
+        if ($('board-source-style')) $('board-source-style').value = texts.style;
+        return texts;
+      };
+      const sourceOpen = $('board-source-open');
+      if (sourceOpen) sourceOpen.addEventListener('click', () => {
+        if (!$('board-source-content')?.value.trim()) fillSourceFields();
+        sourceStatus('内容文件不含坐标：位置来自排版与固定位置。');
+        sourceDialog?.showModal?.();
+      });
+      const sourceGenerate = $('board-source-generate');
+      if (sourceGenerate) sourceGenerate.addEventListener('click', () => { if (fillSourceFields()) sourceStatus('已按当前画布重写两个文件。'); });
+      const sourceApply = $('board-source-apply');
+      if (sourceApply) sourceApply.addEventListener('click', () => {
+        try {
+          const result = applySourceTexts($('board-source-content')?.value ?? '', $('board-source-style')?.value ?? '');
+          sourceStatus(`已应用：${result.nodes} 个节点、${result.edges} 条连线。`);
+        } catch (error) { sourceStatus(error.message, true); }
+      });
+      const downloadText = (name, text) => {
+        const view = doc.defaultView;
+        if (!view?.Blob || !view.URL?.createObjectURL) { sourceStatus('这个环境不支持下载文件。', true); return; }
+        const url = view.URL.createObjectURL(new view.Blob([text], { type: 'application/json' }));
+        const link = doc.createElement('a');
+        link.href = url; link.download = name;
+        doc.body.append(link); link.click(); link.remove();
+        view.setTimeout?.(() => view.URL.revokeObjectURL(url), 1000);
+      };
+      const sourceDownload = $('board-source-download');
+      if (sourceDownload) sourceDownload.addEventListener('click', () => {
+        const texts = $('board-source-content')?.value.trim() ? { content: $('board-source-content').value, style: $('board-source-style')?.value ?? '{}' } : fillSourceFields();
+        if (!texts) return;
+        const slug = String(board.title ?? 'board').replace(/[\\/:*?"<>|\s]+/g, '-').slice(0, 60) || 'board';
+        downloadText(`${slug}.json`, texts.content);
+        downloadText(`${slug}.style.json`, texts.style);
+        sourceStatus('已下载内容文件与样式文件；把它们放进仓库即可用 URL 直接加载。');
+      });
+      const sourceFile = $('board-source-file');
+      const sourceUpload = $('board-source-upload');
+      if (sourceUpload && sourceFile) sourceUpload.addEventListener('click', () => sourceFile.click());
+      if (sourceFile) sourceFile.addEventListener('change', async () => {
+        const files = [...(sourceFile.files ?? [])];
+        sourceFile.value = '';
+        if (!files.length) return;
+        try {
+          for (const file of files) {
+            const body = await file.text();
+            JSON.parse(body);
+            if (/style/i.test(file.name)) { if ($('board-source-style')) $('board-source-style').value = body; }
+            else if ($('board-source-content')) $('board-source-content').value = body;
+          }
+          sourceStatus('已读入文件；点「校验并应用」才会改动画布。');
+        } catch (error) { sourceStatus(`文件不是合法 JSON：${error.message}`, true); }
       });
       const emptyCreate = $('board-create-first');
       if (emptyCreate) emptyCreate.addEventListener('click', () => void createBoard());
@@ -1312,6 +1622,11 @@
       generateFromPapers,
       addGraphNode,
       tidy,
+      applyLayout,
+      setPinned,
+      sourceTexts,
+      applySourceTexts,
+      layoutBlock,
       sendToConversation,
       outline: (maximum) => outline({ ...board, title: board.title }, maximum),
       setTool,

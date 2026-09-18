@@ -40,9 +40,28 @@ latency or security measurement.
 ## What the service does
 
 Free canvas with pan/zoom, text/note/rectangle/ellipse/diamond nodes, drag and resize,
-connecting by dragging a handle, marquee selection, undo/redo, delete, tidy-tree arranging,
-multiple boards, fullscreen, and export to PNG (painted from the model, so no stylesheet or
-font dependency leaks into the image) and JSON (all boards, for backup and transfer).
+connecting with a dedicated connect tool or by dragging a handle, line kinds (arrow/line/elbow),
+one-way/two-way/no arrowheads, dashed lines, draggable bend points, marquee selection,
+undo/redo, delete, multiple boards, fullscreen, and export to PNG (painted from the model, so
+no stylesheet or font dependency leaks into the image) and JSON (all boards, for backup and
+transfer).
+
+## Boards that live in the repository
+
+`?src=boards/example.json` renders a board that is **text in this repository**:
+
+| File | Holds |
+| --- | --- |
+| `boards/name.json` | title, nodes, edges — short ids, no pixel coordinates |
+| `boards/name.style.json` | colours, sizes, fonts, edge styling, layout mode and pinned positions |
+
+The page fetches the pair, lays it out, and imports it once into local storage; visiting the
+same URL again reuses that local copy instead of duplicating it, and every later edit belongs
+to the visitor's own copy. This is what makes the drawing service independent of the plugin
+without becoming a black box: a board is a diffable file, and `site/boards/` is where the
+published examples live. Layout is deterministic — tree (which respects the vertical order you
+arranged), radial mind map, and layered DAG — and pinned nodes never move, which is how a
+special position survives every "apply layout".
 
 ## Storage honesty
 

@@ -157,7 +157,7 @@
     };
   }
 
-  function boot() {
+  async function boot() {
     const api = window.PaperBoard;
     const root = document.getElementById('board-view');
     if (!api || !root) return;
@@ -240,11 +240,52 @@
     if (boardList) boardList.addEventListener('change', report);
     report();
 
+    /**
+     * `?src=boards/foo.json` renders a board that lives in the repository as text. The file
+     * is a source of truth, not a remote: it is imported once into local storage (an
+     * identical board is reused instead of duplicated), and everything afterwards is the
+     * reader's own editable copy.
+     */
+    async function loadFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const src = params.get('src');
+      if (!src || !/^[\w./-]+\.json$/.test(src) || src.startsWith('/') || src.includes('..')) return false;
+      const content = await (await fetch(src, { cache: 'no-store' })).json();
+      let style = null;
+      const styleUrl = params.get('style') ?? src.replace(/\.json$/, '.style.json');
+      try {
+        const response = await fetch(styleUrl, { cache: 'no-store' });
+        if (response.ok) style = await response.json();
+      } catch { style = null; }
+      const converted = window.PaperBoardSource?.fromSource(content, style ?? {});
+      if (!converted) throw new Error('这个页面没有加载源文件模块。');
+      const signature = JSON.stringify(converted.board.nodes.map(node => [node.text, node.x, node.y])) + JSON.stringify(converted.board.edges.map(edge => [edge.from, edge.to]));
+      const existing = await store.handle({ action: 'board_list' });
+      for (const summary of existing.boards) {
+        const record = await store.handle({ action: 'board_get', id: summary.id });
+        const same = JSON.stringify(record.board.nodes.map(node => [node.text, node.x, node.y])) + JSON.stringify(record.board.edges.map(edge => [edge.from, edge.to]));
+        if (same === signature) { await panel.refreshList(); await panel.load(summary.id); status(`已打开本地副本：${src}`); return true; }
+      }
+      panel.applySourceTexts(JSON.stringify(content, null, 2), style ? JSON.stringify(style, null, 2) : '{}');
+      await panel.flush();
+      status(`已从源文件导入并由本机保存：${src}`);
+      return true;
+    }
+
+    const status = message => {
+      const node = document.getElementById('site-storage-status');
+      if (node) node.textContent = message;
+    };
+
     // Open the first board immediately: a drawing page should be drawable on arrival.
-    panel.open().catch(error => toast(error.message || '无法打开画板', true));
+    await panel.open().catch(error => toast(error.message || '无法打开画板', true));
+    if (new URLSearchParams(window.location.search).has('src')) {
+      try { await loadFromUrl(); }
+      catch (error) { toast(error.message || '无法读取 src 指向的源文件', true); }
+    }
     window.addEventListener('pagehide', () => panel.dispose());
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
-  else boot();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => void boot());
+  else void boot();
 })();

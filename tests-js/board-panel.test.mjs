@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('../web/board.js', import.meta.url), 'utf8');
+const sourceModule = await readFile(new URL('../web/board-source.js', import.meta.url), 'utf8');
 
 class ClassList {
   constructor() { this.values = new Set(); }
@@ -62,7 +63,10 @@ function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
     'board-undo', 'board-redo', 'board-delete', 'board-title', 'board-new', 'board-close', 'board-add-paper', 'board-send', 'board-tidy', 'board-fullscreen',
     'board-conflict', 'board-conflict-note', 'board-conflict-reload', 'board-conflict-copy', 'board-accept-ai',
     'board-relation', 'board-edge-label-input', 'board-color', 'board-kind', 'board-selection',
-    'board-tool-select', 'board-tool-pan', 'board-tool-text', 'board-tool-note', 'board-tool-rect', 'board-tool-ellipse', 'board-tool-diamond',
+    'board-tool-select', 'board-tool-pan', 'board-tool-text', 'board-tool-note', 'board-tool-rect', 'board-tool-ellipse', 'board-tool-diamond', 'board-tool-connect',
+    'board-edge-kind', 'board-edge-arrow', 'board-edge-dashed',
+    'board-layout-mode', 'board-layout-direction', 'board-layout-gap-x', 'board-layout-gap-y', 'board-layout-apply', 'board-layout-pin', 'board-layout-unpin', 'board-layout-status',
+    'board-source-open', 'board-source-dialog', 'board-source-content', 'board-source-style', 'board-source-status', 'board-source-apply', 'board-source-download', 'board-source-upload', 'board-source-file', 'board-source-generate',
   ];
   const { doc, registry, Element } = environment(ids);
   doc.defaultView.confirm = () => confirm;
@@ -79,14 +83,16 @@ function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
     clearTimeout: id => { const index = timers.findIndex(timer => timer.id === id); if (index >= 0) timers.splice(index, 1); },
   };
   vm.createContext(context);
+  vm.runInContext(sourceModule, context);
   vm.runInContext(source, context);
   const board = context.window.PaperBoard;
+  const boardSource = context.window.PaperBoardSource;
   if (canvas) { const original = Element.prototype; original.__canvas = canvas; }
   const panel = board.create({ root, api: api || (async () => ({})), toast: (message) => messages.push(message), ...(capabilities ? { capabilities } : {}) });
   const stage = registry.get('board-stage');
   const svg = stage.children[0];
   return {
-    board, panel, doc, registry, root, stage, svg, calls, messages,
+    board, boardSource, panel, doc, registry, root, stage, svg, calls, messages,
     async runTimers() { const pending = timers.splice(0, timers.length); for (const timer of pending) await timer.fn(); await new Promise(resolve => setImmediate(resolve)); },
     pendingTimers: () => timers.length,
   };
@@ -398,6 +404,216 @@ test('a host without a library or composer hides those controls instead of fakin
   const full = loadPanel({ api: apiStub() });
   assert.equal(full.registry.get('board-add-paper').hidden, false);
   assert.equal(full.registry.get('board-send').hidden, false);
+});
+
+test('a connect tool turns two clicks into one edge and refuses self-links', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  harness.panel.setTool('rect');
+  harness.svg.dispatch('pointerdown', { clientX: 120, clientY: 120 });
+  harness.panel.setTool('rect');
+  harness.svg.dispatch('pointerdown', { clientX: 620, clientY: 380 });
+  assert.equal(harness.panel.board().nodes.length, 2);
+  const [a, b] = harness.panel.board().nodes;
+  harness.panel.setTool('connect');
+  assert.equal(harness.registry.get('board-tool-connect').getAttribute('aria-pressed'), 'true');
+  // First click picks the source; nothing is created yet and the source is marked.
+  harness.svg.dispatch('pointerdown', { clientX: a.x + a.w / 2, clientY: a.y + a.h / 2 });
+  assert.equal(harness.panel.board().edges.length, 0);
+  assert.equal(harness.panel.selection()[0], a.id);
+  // Clicking the same node refuses instead of drawing a self-loop.
+  harness.svg.dispatch('pointerdown', { clientX: a.x + a.w / 2, clientY: a.y + a.h / 2 });
+  assert.equal(harness.panel.board().edges.length, 0);
+  assert.equal(harness.messages.some(message => /两个不同的节点/.test(message)), true);
+  // Source again, then the target: one edge, and it becomes the selection.
+  harness.svg.dispatch('pointerdown', { clientX: a.x + a.w / 2, clientY: a.y + a.h / 2 });
+  harness.svg.dispatch('pointerdown', { clientX: b.x + b.w / 2, clientY: b.y + b.h / 2 });
+  const edges = harness.panel.board().edges;
+  assert.equal(edges.length, 1);
+  assert.equal(edges[0].from, a.id);
+  assert.equal(edges[0].to, b.id);
+  assert.equal(edges[0].kind, 'arrow');
+  assert.equal(harness.panel.selection()[0], edges[0].id);
+  // The tool returns to selection, so the next gesture edits the new line instead of
+  // being swallowed as another connect attempt.
+  assert.equal(harness.registry.get('board-tool-select').getAttribute('aria-pressed'), 'true');
+  // Escape cancels a half-made connection.
+  harness.panel.setTool('connect');
+  harness.svg.dispatch('pointerdown', { clientX: a.x + a.w / 2, clientY: a.y + a.h / 2 });
+  harness.doc.body.dispatch('keydown', { key: 'Escape' });
+  harness.svg.dispatch('pointerdown', { clientX: b.x + b.w / 2, clientY: b.y + b.h / 2 });
+  assert.equal(harness.panel.board().edges.length, 1, 'a cancelled connection adds nothing');
+});
+
+test('edge line style, arrows and dashes are editable, and the choice sticks for new links', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  await harness.panel.addPapers([{ id: 'paper_a', title: '论文 A' }, { id: 'paper_b', title: '论文 B' }]);
+  const added = harness.panel.board();
+  const edge = harness.board.model.addEdge(added, added.nodes[0].id, added.nodes[1].id).edge;
+  harness.panel.applySourceTexts(
+    JSON.stringify({ schema: 'paper-library-board.v1', title: '样式', nodes: added.nodes.map((node, index) => ({ id: `n${index + 1}`, kind: node.kind, text: node.text })), edges: [{ from: 'n1', to: 'n2' }] }),
+    '{}',
+  );
+  const id = harness.panel.board().edges[0].id;
+  harness.panel.render();
+  // Select the edge by clicking its midpoint.
+  const current = harness.panel.board();
+  const from = current.nodes[0], to = current.nodes[1];
+  const geometry = harness.boardSource.edgePoints(from, to, []);
+  const mid = harness.boardSource.edgeMidpoint(geometry);
+  harness.svg.dispatch('pointerdown', { clientX: mid.x, clientY: mid.y });
+  harness.svg.dispatch('pointerup', {});
+  assert.equal(harness.panel.selection()[0], id, 'clicking the line selects it');
+  assert.equal(harness.registry.get('board-edge-kind').disabled, false);
+
+  const kind = harness.registry.get('board-edge-kind');
+  kind.value = 'elbow';
+  kind.dispatch('change');
+  assert.equal(harness.panel.board().edges[0].kind, 'elbow');
+  const arrow = harness.registry.get('board-edge-arrow');
+  arrow.value = 'both';
+  arrow.dispatch('change');
+  assert.equal(harness.panel.board().edges[0].arrow, 'both');
+  const dashed = harness.registry.get('board-edge-dashed');
+  dashed.checked = true;
+  dashed.dispatch('change');
+  assert.equal(harness.panel.board().edges[0].dashed, true);
+  // The chosen line style is what the next connection uses.
+  harness.panel.setTool('connect');
+  harness.svg.dispatch('pointerdown', { clientX: from.x + from.w / 2, clientY: from.y + from.h / 2 });
+  harness.svg.dispatch('pointerdown', { clientX: to.x + to.w / 2, clientY: to.y + to.h / 2 });
+  assert.equal(harness.panel.board().edges.length, 1, 'the pair already has an edge');
+  assert.equal(harness.messages.some(message => /edge|连线/.test(message)), false);
+  assert.equal(harness.boardSource.edgeStyle({}, { relation: undefined, kind: 'elbow' }).kind, 'elbow');
+});
+
+test('dragging a line inserts a bend point, Alt-click removes it, and the path follows it', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  harness.panel.applySourceTexts(JSON.stringify({
+    schema: 'paper-library-board.v1', title: '拐点',
+    nodes: [{ id: 'n1', kind: 'concept', text: 'A' }, { id: 'n2', kind: 'concept', text: 'B' }],
+    edges: [{ from: 'n1', to: 'n2' }],
+  }), '{}');
+  const board = harness.panel.board();
+  const geometry = harness.boardSource.edgePoints(board.nodes[0], board.nodes[1], []);
+  const mid = harness.boardSource.edgeMidpoint(geometry);
+  harness.svg.dispatch('pointerdown', { clientX: mid.x, clientY: mid.y });
+  harness.svg.dispatch('pointerup', {});
+  const edgeId = harness.panel.selection()[0];
+  assert.ok(edgeId);
+  // Drag the line itself: a bend point appears where the pointer went.
+  harness.svg.dispatch('pointerdown', { clientX: mid.x, clientY: mid.y });
+  harness.svg.dispatch('pointermove', { clientX: mid.x + 40, clientY: mid.y - 70 });
+  harness.svg.dispatch('pointerup', {});
+  const bent = harness.panel.board().edges.find(edge => edge.id === edgeId);
+  assert.equal(bent.waypoints.length, 1);
+  const moved = harness.boardSource.edgePoints(board.nodes[0], board.nodes[1], bent.waypoints);
+  assert.equal(moved.length, 3, 'the path now runs through the bend point');
+  assert.equal(moved[1].x, mid.x + 40);
+  assert.equal(moved[1].y, mid.y - 70);
+  assert.match(harness.boardSource.edgePath(moved, 'arrow'), /L/);
+  // Alt-click on the handle removes it again.
+  harness.svg.dispatch('pointerdown', { clientX: bent.waypoints[0][0], clientY: bent.waypoints[0][1], altKey: true });
+  assert.equal(harness.panel.board().edges.find(edge => edge.id === edgeId).waypoints, undefined);
+  // A plain double-click on the handle is the discoverable equivalent.
+  harness.svg.dispatch('pointerdown', { clientX: mid.x, clientY: mid.y });
+  harness.svg.dispatch('pointermove', { clientX: mid.x + 20, clientY: mid.y - 30 });
+  harness.svg.dispatch('pointerup', {});
+  assert.equal(harness.panel.board().edges.find(edge => edge.id === edgeId).waypoints.length, 1);
+  const point = harness.panel.board().edges.find(edge => edge.id === edgeId).waypoints[0];
+  harness.svg.dispatch('dblclick', { clientX: point[0], clientY: point[1] });
+  assert.equal(harness.panel.board().edges.find(edge => edge.id === edgeId).waypoints, undefined, 'double-click removes a bend point');
+  await harness.runTimers();
+  assert.equal(state.some(call => call.action === 'board_save'), true, 'bend points are persisted');
+});
+
+test('automatic layout offers three deterministic modes and never moves a pinned node', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  harness.panel.applySourceTexts(JSON.stringify({
+    schema: 'paper-library-board.v1', title: '排版',
+    nodes: [{ id: 'root', kind: 'concept', text: '根' }, { id: 'a', kind: 'note', text: 'A' }, { id: 'b', kind: 'note', text: 'B' }, { id: 'c', kind: 'note', text: 'C' }],
+    edges: [{ from: 'root', to: 'a' }, { from: 'root', to: 'b' }, { from: 'a', to: 'c' }],
+  }), '{}');
+  const before = harness.panel.board().nodes.find(node => node.id === 'c');
+  // Pin C, then lay out: everything else moves and C stays exactly where it was.
+  harness.panel.select?.();
+  harness.svg.dispatch('pointerdown', { clientX: before.x + before.w / 2, clientY: before.y + before.h / 2 });
+  harness.svg.dispatch('pointerup', {});
+  assert.equal(harness.panel.selection()[0], 'c');
+  assert.equal(harness.panel.setPinned(['c'], true), 1);
+  const pinnedAt = [harness.panel.board().nodes.find(node => node.id === 'c').x, harness.panel.board().nodes.find(node => node.id === 'c').y];
+  harness.registry.get('board-layout-mode').value = 'radial';
+  harness.registry.get('board-layout-direction').value = 'tb';
+  assert.equal(harness.panel.applyLayout(), 3, 'pinned nodes are out of scope');
+  const after = harness.panel.board().nodes.find(node => node.id === 'c');
+  assert.deepEqual([after.x, after.y], pinnedAt, 'a pinned node keeps its special position');
+  assert.equal(harness.panel.layoutBlock().mode, 'radial');
+  assert.equal(harness.panel.layoutBlock().direction, 'tb');
+  assert.match(harness.registry.get('board-layout-status').textContent, /放射思维导图/);
+  // Determinism: laying out again with the same settings changes nothing.
+  const signature = board => board.nodes.map(node => `${node.id}:${node.x},${node.y}`).sort().join('|');
+  const once = signature(harness.panel.board());
+  harness.panel.applyLayout();
+  assert.equal(signature(harness.panel.board()), once);
+  // Unpinning brings the node back into the layout.
+  assert.equal(harness.panel.setPinned(['c'], false), 1);
+  assert.equal(harness.panel.layoutBlock().pins, undefined);
+  // Layered mode is available and still deterministic.
+  harness.registry.get('board-layout-mode').value = 'layered';
+  assert.equal(harness.panel.applyLayout(), 4);
+  const layered = signature(harness.panel.board());
+  harness.panel.applyLayout();
+  assert.equal(signature(harness.panel.board()), layered);
+});
+
+test('the readable source file round-trips and keeps presentation in its sidecar', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  harness.panel.applySourceTexts(JSON.stringify({
+    schema: 'paper-library-board.v1', title: '源文件',
+    nodes: [{ id: 'root', kind: 'concept', text: '主题' }, { id: 'p1', kind: 'paper', paper: 'paper_a', paperTitle: 'Paper A', year: 2026 }, { id: 'parked', kind: 'note', text: '固定位置', pin: [900, 120] }],
+    edges: [{ from: 'root', to: 'p1', relation: 'explains' }, { from: 'p1', to: 'parked', kind: 'elbow', dashed: true }],
+  }), JSON.stringify({ schema: 'paper-library-board-style.v1', node: { byKind: { paper: { fill: '#eef4ff', w: 300 } } }, edge: { byRelation: { explains: { stroke: '#4176e6', width: 2 } } }, layout: { mode: 'layered', direction: 'tb', gapX: 120, gapY: 40, pins: { parked: [900, 120] } } }));
+  const board = harness.panel.board();
+  assert.equal(board.nodes.length, 3);
+  assert.equal(board.nodes.find(node => node.id === 'p1').w, 300, 'sidecar sizing is applied on import');
+  assert.deepEqual([board.nodes.find(node => node.id === 'parked').x, board.nodes.find(node => node.id === 'parked').y], [900, 120]);
+  assert.equal(board.edges[1].kind, 'elbow');
+  assert.equal(board.edges[1].dashed, true);
+
+  const texts = harness.panel.sourceTexts();
+  const content = JSON.parse(texts.content);
+  const style = JSON.parse(texts.style);
+  // The content file is readable: no coordinates, no defaults, stable shape.
+  assert.equal(content.schema, 'paper-library-board.v1');
+  assert.deepEqual(Object.keys(content), ['schema', 'title', 'layout', 'nodes', 'edges']);
+  assert.equal(content.nodes.every(node => !('x' in node) && !('y' in node) && !('w' in node) && !('h' in node)), true, 'coordinates never enter the content file');
+  assert.equal(content.edges[0].kind, undefined, 'the default arrow is omitted');
+  assert.equal(style.schema, 'paper-library-board-style.v1');
+  assert.deepEqual(style.layout.pins, { parked: [900, 120] });
+  // Applying what we exported reproduces the same board, so the pair is a real round trip.
+  const signature = value => value.nodes.map(node => `${node.id}:${node.kind}:${node.text}:${node.x},${node.y}`).sort().join('|') + '#' + value.edges.map(edge => `${edge.from}>${edge.to}:${edge.kind}`).sort().join('|');
+  const exportedSignature = signature(board);
+  harness.panel.applySourceTexts(texts.content, texts.style);
+  assert.equal(signature(harness.panel.board()), exportedSignature);
+  // Generating again from the round-tripped board stays byte-identical.
+  assert.equal(harness.panel.sourceTexts().content, texts.content);
+  assert.equal(harness.panel.sourceTexts().style, texts.style);
+  // Bad files are refused with a readable reason and leave the board alone.
+  const kept = signature(harness.panel.board());
+  assert.throws(() => harness.panel.applySourceTexts('{"nodes":[]}', '{}'), /1–400 项/);
+  assert.throws(() => harness.panel.applySourceTexts('{"nodes":[{"id":"a","kind":"nope"}],"edges":[]}', '{}'), /类型不受支持/);
+  assert.throws(() => harness.panel.applySourceTexts('{"nodes":[{"id":"a","kind":"note","text":"x"},{"id":"b","kind":"note","text":"y","pin":[1,2,3]}],"edges":[]}', '{}'), /pin 必须是/);
+  assert.throws(() => harness.panel.applySourceTexts('{"nodes":[{"id":"a","kind":"note","text":"x"}],"edges":[{"from":"a","to":"missing"}]}', '{}'), /端点不在/);
+  assert.equal(signature(harness.panel.board()), kept, 'a refused file changes nothing');
 });
 
 test('a knowledge-graph node joins the board without inventing metadata', async () => {

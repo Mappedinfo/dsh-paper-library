@@ -1,0 +1,29 @@
+{
+  "schema": "paper-library-board-style.v1",
+  "theme": { "background": "#ffffff", "ink": "#0f1115", "muted": "#61666b", "edge": "#6b7268" },
+  "node": {
+    "byKind": {
+      "concept": { "fill": "#eef4ff", "stroke": "#4176e6", "w": 300, "h": 110, "fontSize": 15 },
+      "note": { "fill": "#ffffff", "stroke": "#b9c3b6", "w": 260, "h": 130 },
+      "paper": { "fill": "#f2f7f2", "stroke": "#22864a", "w": 280 }
+    },
+    "byId": {
+      "parked": { "fill": "#fdf6e8", "stroke": "#88520f", "w": 300 }
+    }
+  },
+  "edge": {
+    "byDefault": { "stroke": "#6b7268", "width": 1.6, "arrow": "forward" },
+    "byRelation": {
+      "explains": { "stroke": "#4176e6", "width": 2 },
+      "extends": { "stroke": "#22864a" },
+      "contradicts": { "stroke": "#b0306a", "dashed": true, "arrow": "both" }
+    }
+  },
+  "layout": {
+    "mode": "radial",
+    "direction": "lr",
+    "gapX": 110,
+    "gapY": 48,
+    "pins": { "parked": [1240, 120] }
+  }
+}

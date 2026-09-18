@@ -27,7 +27,10 @@ const required = [
   'id="board-new"', 'id="board-delete"', 'id="board-tidy"', 'id="board-undo"', 'id="board-redo"', 'id="board-zoom-in"',
   'id="board-zoom-out"', 'id="board-zoom-label"', 'id="board-fit"', 'id="board-fullscreen"', 'id="board-status"',
   'id="board-conflict"', 'id="board-conflict-reload"', 'id="board-conflict-copy"', 'id="board-kind"', 'id="board-color"',
-  'id="board-relation"', 'id="board-edge-label-input"', 'id="board-selection"',
+  'id="board-relation"', 'id="board-edge-label-input"', 'id="board-selection"', 'id="board-tool-connect"', 'id="board-edge-kind"', 'id="board-edge-arrow"', 'id="board-edge-dashed"',
+  'id="board-layout-mode"', 'id="board-layout-direction"', 'id="board-layout-gap-x"', 'id="board-layout-gap-y"', 'id="board-layout-apply"',
+  'id="board-layout-pin"', 'id="board-layout-unpin"', 'id="board-layout-status"', 'id="board-source-open"', 'id="board-source-dialog"',
+  'id="board-source-content"', 'id="board-source-style"', 'id="board-source-apply"', 'id="board-source-download"', 'id="board-source-upload"', 'id="board-source-file"',
 ];
 for (const fragment of required) if (!markup.includes(fragment)) throw new Error(`The board section is missing ${fragment}`);
 if (!markup.includes('id="board-add-paper"') || !markup.includes('id="board-send"')) throw new Error('The host-only controls disappeared; the standalone page still needs to hide them');
@@ -39,7 +42,8 @@ await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 await writeFile(join(output, 'index.html'), page);
 await writeFile(join(output, '.nojekyll'), '');
-for (const asset of ['board.js', 'board.css', 'theme.css']) await cp(join(project, 'web', asset), join(output, asset));
+for (const asset of ['board.js', 'board-source.js', 'board.css', 'theme.css']) await cp(join(project, 'web', asset), join(output, asset));
 await cp(join(project, 'site/standalone.js'), join(output, 'standalone.js'));
+await cp(join(project, 'site/boards'), join(output, 'boards'), { recursive: true });
 
-console.log(JSON.stringify({ output: '_site', markup_lines: markup.split('\n').length, assets: ['index.html', 'board.js', 'board.css', 'theme.css', 'standalone.js'] }));
+console.log(JSON.stringify({ output: '_site', markup_lines: markup.split('\n').length, assets: ['index.html', 'board.js', 'board-source.js', 'board.css', 'theme.css', 'standalone.js', 'boards/example.json', 'boards/example.style.json'] }));

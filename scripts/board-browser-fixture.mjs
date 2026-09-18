@@ -50,7 +50,8 @@ try {
     if (!list?.ok) return { boards: [], board: null, error: String(list?.error ?? 'board_list failed') };
     const boards = list.result.boards;
     if (!boards.length) return { boards, board: null };
-    const id = window.__boardId ?? boards[0].id;
+    // The current board is the one the switcher shows, not simply the first record.
+    const id = document.getElementById('board-select')?.value || boards[0].id;
     const got = await call('board_get', { id });
     return { boards, board: got.result?.board ?? null, outline: got.result?.outline ?? '' };
   });
@@ -289,6 +290,134 @@ try {
   await page.waitForFunction(() => /DSH 的文献库面板/.test(document.getElementById('toast')?.textContent || ''));
   assert.match(await page.locator('#toast').innerText(), /请从 DSH 的文献库面板打开画板/);
   record('the-standalone-preview-refuses-the-conversation-chip-instead-of-faking-it');
+
+  // Automatic layout first: it spreads the nodes out, and it is also where the three modes
+  // and the pinned special position are checked.
+  const signature = value => (value.board?.nodes ?? []).map(node => `${node.id}:${node.x},${node.y}`).sort().join('|');
+  const layoutBefore = signature(await waitForHost(value => (value.board?.nodes?.length ?? 0) >= 4, 'the board before layout'));
+  await page.locator('#board-layout-mode').selectOption('radial');
+  await page.locator('#board-layout-direction').selectOption('tb');
+  // Clear any selection first: the scope is the selection when it holds more than one node.
+  await page.keyboard.press('Escape');
+  await page.locator('#board-layout-apply').click();
+  const arranged = await waitForHost(value => signature(value) !== layoutBefore, 'the arranged board');
+  assert.match(await page.locator('#board-layout-status').innerText(), /放射思维导图/);
+  const arrangedOnce = signature(arranged);
+  await page.keyboard.press('Escape');
+  await page.locator('#board-layout-apply').click();
+  try { await waitForHost(value => signature(value) === arrangedOnce, 'the same arrangement on a second apply'); }
+  catch (error) { throw new Error(`${error.message} | first=${arrangedOnce.slice(0, 150)} | second=${signature(await hostBoard()).slice(0, 150)}`); }
+  // Pin one node, arrange again, and it must stay exactly where the reader put it.
+  const pinBox = await shapeBox(0);
+  await page.mouse.click(pinBox.x + pinBox.width / 2, pinBox.y + pinBox.height / 2);
+  await page.locator('#board-layout-pin').click();
+  const pinned = await waitForHost(value => Object.keys(value.board?.style?.layout?.pins ?? {}).length === 1, 'the pinned node');
+  const pinnedId = Object.keys(pinned.board.style.layout.pins)[0];
+  const pinnedAt = [pinned.board.nodes.find(node => node.id === pinnedId).x, pinned.board.nodes.find(node => node.id === pinnedId).y];
+  await page.locator('#board-layout-mode').selectOption('layered');
+  await page.locator('#board-layout-apply').click();
+  const afterPin = await waitForHost(value => value.board?.style?.layout?.mode === 'layered' && signature(value) !== arrangedOnce, 'the layered pass after pinning');
+  assert.deepEqual([afterPin.board.nodes.find(node => node.id === pinnedId).x, afterPin.board.nodes.find(node => node.id === pinnedId).y], pinnedAt, 'a pinned node keeps its special position');
+  assert.equal(afterPin.board.nodes.length, pinned.board.nodes.length, 'pinning never drops nodes');
+  record('automatic-layout-is-idempotent-and-never-moves-a-pinned-node');
+
+  // The connect tool, line styling and a bend point, verified through the host record.
+  const nodes = await page.evaluate(() => [...document.querySelectorAll('.board-node')].map(node => {
+    const box = node.querySelector('.board-node-shape').getBoundingClientRect();
+    return { id: node.getAttribute('data-node'), x: box.x, y: box.y, width: box.width, height: box.height };
+  }));
+  const topmostAt = (x, y) => page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest('[data-node]')?.getAttribute('data-node') ?? null, [x, y]);
+  const centreOf = node => [node.x + node.width / 2, node.y + node.height / 2];
+  // Only nodes whose centre really is the topmost element there can be clicked reliably:
+  // a pinned node may still sit on top of an arranged one.
+  const reachable = [];
+  for (const node of nodes) {
+    const [x, y] = centreOf(node);
+    if (await topmostAt(x, y) === node.id) reachable.push(node);
+  }
+  assert.ok(reachable.length >= 2, `at least two nodes must be clickable, found ${reachable.length}`);
+  let linkFrom = reachable[0], linkTo = reachable[1], best = -1;
+  for (let a = 0; a < reachable.length; a++) for (let b = a + 1; b < reachable.length; b++) {
+    const distance = Math.hypot(centreOf(reachable[a])[0] - centreOf(reachable[b])[0], centreOf(reachable[a])[1] - centreOf(reachable[b])[1]);
+    if (distance > best) { best = distance; linkFrom = reachable[a]; linkTo = reachable[b]; }
+  }
+  const beforeLink = await waitForHost(value => (value.board?.edges?.length ?? 0) >= 1, 'the board before linking');
+  const [fromX, fromY] = centreOf(linkFrom), [toX, toY] = centreOf(linkTo);
+  assert.equal(await topmostAt(fromX, fromY), linkFrom.id, 'the first target must actually be hit');
+  assert.equal(await topmostAt(toX, toY), linkTo.id, 'the second target must actually be hit');
+  await page.locator('#board-tool-connect').click();
+  await page.mouse.click(fromX, fromY);
+  assert.equal(signature(await waitForHost(() => true, 'the board after picking a source')), signature(beforeLink), 'the first click only picks a source');
+  await page.mouse.click(toX, toY);
+  const linked = await waitForHost(value => (value.board?.edges?.length ?? 0) === beforeLink.board.edges.length + 1, 'the edge made by the connect tool');
+  assert.equal(await page.locator('[data-edge-path]').count(), linked.board.edges.length);
+  // The new edge is selected, so the inspector applies to it directly.
+  await page.locator('#board-edge-kind').selectOption('elbow');
+  await page.locator('#board-edge-arrow').selectOption('both');
+  await page.locator('#board-edge-dashed').check();
+  await waitForHost(value => value.board.edges.some(edge => edge.kind === 'elbow' && edge.arrow === 'both' && edge.dashed === true), 'the styled edge');
+  assert.equal(await page.locator('[data-edge-path][marker-start]').count() >= 1, true, 'a two-way arrow renders a start marker');
+  assert.equal(await page.locator('[data-edge-path][stroke-dasharray]').count() >= 1, true, 'a dashed line renders a dash pattern');
+  record('the-connect-tool-creates-an-edge-and-its-line-style-is-editable');
+
+  // Dragging the line's middle inserts a bend point; Alt-click removes it again.
+  const midOfLastEdge = () => page.evaluate(() => {
+    const paths = [...document.querySelectorAll('[data-edge-path]')];
+    const path = paths[paths.length - 1];
+    const at = path.getPointAtLength(path.getTotalLength() / 2);
+    const matrix = path.getScreenCTM();
+    return { x: at.x * matrix.a + at.y * matrix.c + matrix.e, y: at.x * matrix.b + at.y * matrix.d + matrix.f };
+  });
+  const bendTarget = await midOfLastEdge();
+  await page.mouse.move(bendTarget.x, bendTarget.y);
+  await page.mouse.down();
+  await page.mouse.move(bendTarget.x + 40, bendTarget.y - 90, { steps: 10 });
+  await page.mouse.up();
+  await waitForHost(value => value.board.edges.some(edge => (edge.waypoints ?? []).length === 1), 'the bend point');
+  const handle = await page.locator('[data-waypoint]').first().boundingBox();
+  // Alt-click removes it; the mouse API takes modifiers through the keyboard instead.
+  await page.keyboard.down('Alt');
+  await page.mouse.click(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.keyboard.up('Alt');
+  await waitForHost(value => value.board?.edges.every(edge => (edge.waypoints ?? []).length === 0), 'the bend point removed by Alt-click');
+  // And a plain double-click is the discoverable equivalent.
+  const bendAgain = await midOfLastEdge();
+  await page.mouse.move(bendAgain.x, bendAgain.y);
+  await page.mouse.down();
+  await page.mouse.move(bendAgain.x - 30, bendAgain.y + 60, { steps: 8 });
+  await page.mouse.up();
+  await waitForHost(value => value.board?.edges.some(edge => (edge.waypoints ?? []).length === 1), 'a bend point to double-click');
+  const againHandle = await page.locator('[data-waypoint]').first().boundingBox();
+  await page.mouse.dblclick(againHandle.x + againHandle.width / 2, againHandle.y + againHandle.height / 2);
+  await waitForHost(value => value.board?.edges.every(edge => (edge.waypoints ?? []).length === 0), 'the bend point removed by double-click');
+  record('a-line-bend-point-can-be-dragged-in-and-alt-clicked-away');
+
+  // The readable source file and its style sidecar drive the canvas.
+  await page.locator('#board-source-open').click();
+  await page.locator('#board-source-dialog').waitFor();
+  await page.locator('#board-source-generate').click();
+  const sourceJson = JSON.parse(await page.locator('#board-source-content').inputValue());
+  assert.equal(sourceJson.schema, 'paper-library-board.v1');
+  assert.equal(sourceJson.nodes.every(node => !('x' in node) && !('y' in node) && !('w' in node)), true, 'the content file carries no pixel coordinates');
+  assert.equal(sourceJson.nodes.every(node => /^[A-Za-z0-9_-]{1,60}$/.test(node.id)), true, 'ids stay short and addressable');
+  assert.equal(JSON.stringify(sourceJson).includes('"kind":"note"'), true, 'node kinds are readable');
+  sourceJson.nodes.push({ id: 'fromSource', kind: 'note', text: '源文件新增的节点' });
+  await page.locator('#board-source-content').fill(JSON.stringify(sourceJson, null, 2));
+  await page.locator('#board-source-apply').click();
+  await page.waitForFunction(() => /已应用/.test(document.getElementById('board-source-status')?.textContent || ''));
+  await waitForHost(value => value.board.nodes.some(node => node.text === '源文件新增的节点'), 'the node added through the source file');
+  const styleJson = JSON.parse(await page.locator('#board-source-style').inputValue());
+  styleJson.node = { ...(styleJson.node ?? {}), byId: { fromSource: { fill: '#ffe9ec', w: 260, fontSize: 15 } } };
+  styleJson.layout = { ...(styleJson.layout ?? {}), pins: { fromSource: [1400, 240] } };
+  await page.locator('#board-source-style').fill(JSON.stringify(styleJson, null, 2));
+  await page.locator('#board-source-apply').click();
+  const sidecar = await waitForHost(value => value.board?.style?.layout?.pins?.fromSource?.[0] === 1400 && value.board?.style?.node?.byId?.fromSource?.w === 260, 'the sidecar to take effect');
+  const styled = sidecar.board.nodes.find(node => node.text === '源文件新增的节点');
+  assert.deepEqual([styled.x, styled.y], [1400, 240], 'the sidecar dictates the special position');
+  assert.equal(styled.w, 260, 'the sidecar dictates the size');
+  assert.equal(sidecar.board.style.node.byId.fromSource.fill, '#ffe9ec');
+  await page.locator('#board-source-dialog .dialog-close').first().click();
+  record('editing-the-source-file-and-its-sidecar-drives-the-canvas');
 
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);

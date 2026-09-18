@@ -124,6 +124,49 @@ silently.
 - **P4 — reference chips.** Snapshot store, token family, the `paper-library-boards` `@` source, the
   bridge `board_draft` action, host `agent/pre-step` expansion, and the frozen-material inspector.
 
+## P6–P8: edges, automatic layout and a readable source
+
+Accepted 2026-09-18 from the owner's follow-up: add real connection editing, automatic layout,
+and make the board's source readable with an auxiliary file for presentation and special
+positions.
+
+- **P6 — connections.** A dedicated connect tool (click source, click target) joins the
+  existing handle drag. Lines carry `kind` (`arrow|line|elbow`), `arrow`
+  (`forward|none|both`), `dashed` and up to eight `waypoints`. Dragging a line inserts a bend
+  point at that leg, Alt-click or double-click removes one, and a click without movement never
+  touches the board (which is also what keeps double-click on a handle working). The line
+  style chosen in the inspector becomes the default for the next connection, and the tool
+  returns to selection after drawing one.
+- **P7 — automatic layout.** Three deterministic modes: `tree` (respects the vertical order
+  you arranged, in four directions), `radial` (mind map) and `layered` (longest-path layering
+  with barycenter ordering). Gaps are adjustable. **Pinned nodes never move**, which is the
+  escape hatch for deliberate placement; the layout scope is the selection when it holds more
+  than one node. Every mode emits its own bounding box anchored at the origin, so applying the
+  same layout twice is a no-op instead of a slow drift.
+- **P8 — readable source and a style sidecar.** `board.json` holds the title, nodes and edges
+  with short ids, stable key order and **no pixel coordinates**; `board.style.json` holds
+  colours, sizes, fonts, per-relation edge styling, the layout mode/gaps and the pinned
+  positions. The panel can generate, edit, validate, apply, download and import the pair, and
+  the standalone site can render a repository file directly with `?src=boards/name.json`.
+
+### What implementation changed here too
+
+- **Presentation never rides on the node.** The first version baked a style fill into each
+  node; the host validator rejected it, which is exactly what the new parity test is for. Fills
+  now live only in the style block, which the renderer reads anyway.
+- **Elbow paths needed their own geometry.** The drawn orthogonal path and the straight
+  polyline used for hit-testing diverged, so the visible line could not be grabbed. There is
+  now one `edgeRenderPoints` that inserts the corner, and hit-testing, label placement and
+  dragging all measure the shape on screen.
+- **Layout modes had to be anchored to structure, not to the current picture.** Radial placed
+  its centre from the input bounding box and layered broke ties on current coordinates, so a
+  second pass shifted or swapped nodes. Both now derive local coordinates from the tree and
+  the node order alone.
+- **The connect tool hands back to selection.** Leaving it armed swallowed the next gesture,
+  which is how "drag a bend point into the line you just drew" failed the first time.
+- **Error messages were glued together** (`类型 notew 必须在…`); the field labels are now
+  separate words in both validators.
+
 ## Invariants
 
 - No new runtime dependency, no model call while opening, listing or drawing a board, and no
@@ -146,15 +189,19 @@ Synthetic-only validation, following the existing project discipline:
   store with no private data. **Implemented, 8 cases.**
 - `tests-js/board-panel.test.mjs` — canvas reducer behavior (create/drag/connect/delete/undo/redo,
   tidy-tree layout determinism) through the same fake-DOM harness the other panels use.
-  **Implemented, 13 cases** (geometry, model bounds, paper nodes, outline, panel persistence,
+  **Implemented, 20 cases** (geometry, model bounds, paper nodes, outline, panel persistence,
   conflict recovery, listing failure, tidy arranging, settle-on-close, graph-node conversion and
   the closed-board graph path).
 - `tests-js/board-references.test.mjs` — token parse/render, chip codec round-trip, snapshot
   integrity, and `agent/pre-step` expansion including the malformed and over-budget paths.
   **Implemented, 5 cases.**
+- `tests-js/board-source.test.mjs` — edge geometry (waypoints, elbow corners, bend-point
+  editing), the three layout modes across four directions and two node orders, the source and
+  style validators, and a **parity check that everything the source module emits passes the
+  host's own validator**. **Implemented, 5 cases.**
 - `scripts/board-browser-fixture.mjs` — real Chromium receipt for draw/drag/zoom/connect/save/reload,
   library drag-in, tidy-tree snapping, and the standalone refusal of the conversation chip.
-  **Implemented, 19 checks** in `docs/validation/board-browser.json` (including one knowledge-graph node joining a board).
+  **Implemented, 23 checks** in `docs/validation/board-browser.json` (including a knowledge-graph node joining a board, the connect tool, a bend point, automatic layout with a pinned node, and the source/style pair).
 - `scripts/board-harness-smoke.mjs` — native DSH check that the tool is offered, that a board token
   reaches a turn as frozen material, and that an unresolvable reference fails the turn.
   **Implemented, 7 checks** in `docs/validation/board-harness.json`.

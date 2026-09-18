@@ -15,7 +15,7 @@ export const BOARD_KEY_PREFIX = 'board:'
 export const BOARD_SNAPSHOT_PREFIX = 'board-ref:'
 export const BOARD_LIMITS = Object.freeze({
   listing: 50, nodes: 400, edges: 800, titleCharacters: 200, textCharacters: 2000,
-  labelCharacters: 200, relations: 6, coordinate: 1_000_000, zoomMin: 0.2, zoomMax: 4,
+  labelCharacters: 200, relations: 6, waypoints: 8, coordinate: 1_000_000, zoomMin: 0.2, zoomMax: 4,
   snapshotCharacters: 24_000, searchCharacters: 400,
 })
 
@@ -27,9 +27,12 @@ const EDGE_KINDS = new Set(['arrow', 'line', 'elbow'])
 const RELATIONS = new Set(['related', 'supports', 'contradicts', 'cites', 'explains', 'extends'])
 const ORIGINS = new Set(['user', 'llm'])
 const NODE_FIELDS = new Set(['id', 'kind', 'x', 'y', 'w', 'h', 'text', 'color', 'paper', 'origin'])
-const EDGE_FIELDS = new Set(['id', 'from', 'to', 'label', 'kind', 'relation', 'origin'])
+const EDGE_FIELDS = new Set(['id', 'from', 'to', 'label', 'kind', 'relation', 'origin', 'waypoints', 'arrow', 'dashed'])
+const ARROWS = new Set(['forward', 'both', 'none'])
 const PAPER_FIELDS = new Set(['id', 'title', 'year', 'citekey'])
-const BOARD_FIELDS = new Set(['schema', 'id', 'title', 'created_at', 'updated_at', 'origin', 'status', 'view', 'nodes', 'edges'])
+const BOARD_FIELDS = new Set(['schema', 'id', 'title', 'created_at', 'updated_at', 'origin', 'status', 'view', 'nodes', 'edges', 'style'])
+const LAYOUT_MODES = new Set(['tree', 'radial', 'layered'])
+const LAYOUT_DIRECTIONS = new Set(['lr', 'tb', 'rl', 'bt'])
 
 export function boardError(message, code = 'BOARD_INVALID', status = 400) {
   return Object.assign(new Error(message), { code, status })
@@ -109,6 +112,143 @@ function normalizeNode(value, index) {
   return node
 }
 
+const STYLE_TEXT_FIELDS = new Set(['fontSize', 'width'])
+/** Presentation and special placement live in one bounded, human-editable block. */
+function normalizeStyle(value, nodeIds) {
+  if (value === undefined) return undefined
+  closedObject(value, '画板样式', new Set(['schema', 'theme', 'node', 'edge', 'layout']))
+  const style = {}
+  // The exported sidecar is self-describing; storing it verbatim keeps the file and the
+  // record byte-comparable instead of silently dropping its version marker.
+  if (value.schema !== undefined) {
+    if (value.schema !== 'paper-library-board-style.v1') throw boardError('画板样式版本不受支持。')
+    style.schema = value.schema
+  }
+  if (value.theme !== undefined) {
+    closedObject(value.theme, '配色主题', new Set(['background', 'ink', 'muted', 'edge']))
+    style.theme = {}
+    for (const key of ['background', 'ink', 'muted', 'edge']) {
+      const tint = colour(value.theme[key], `主题颜色 ${key}`)
+      if (tint) style.theme[key] = tint
+    }
+    if (!Object.keys(style.theme).length) delete style.theme
+  }
+  const styleEntry = (entry, name, allowed) => {
+    closedObject(entry, name, allowed)
+    const out = {}
+    if (entry.fill !== undefined) out.fill = colour(entry.fill, `${name}的填充色`)
+    if (entry.stroke !== undefined) out.stroke = colour(entry.stroke, `${name}的描边色`)
+    if (entry.w !== undefined) {
+      if (!Number.isFinite(entry.w) || entry.w < 40 || entry.w > 2000) throw boardError(`${name}的宽度必须在 40–2000 之间。`)
+      out.w = Math.round(entry.w)
+    }
+    if (entry.h !== undefined) {
+      if (!Number.isFinite(entry.h) || entry.h < 32 || entry.h > 2000) throw boardError(`${name}的高度必须在 32–2000 之间。`)
+      out.h = Math.round(entry.h)
+    }
+    if (entry.fontSize !== undefined) {
+      if (!Number.isFinite(entry.fontSize) || entry.fontSize < 9 || entry.fontSize > 32) throw boardError(`${name}的字号必须在 9–32 之间。`)
+      out.fontSize = Math.round(entry.fontSize * 10) / 10
+    }
+    return Object.keys(out).length ? out : undefined
+  }
+  if (value.node !== undefined) {
+    closedObject(value.node, '节点样式', new Set(['byKind', 'byId']))
+    const node = {}
+    if (value.node.byKind !== undefined) {
+      closedObject(value.node.byKind, '按类型样式', NODE_KINDS)
+      const byKind = {}
+      for (const kind of NODE_KINDS) {
+        const entry = value.node.byKind[kind]
+        if (entry === undefined) continue
+        const normalized = styleEntry(entry, `类型 ${kind} 的样式`, new Set(['fill', 'stroke', 'w', 'h', 'fontSize']))
+        if (normalized) byKind[kind] = normalized
+      }
+      if (Object.keys(byKind).length) node.byKind = byKind
+    }
+    if (value.node.byId !== undefined) {
+      closedObject(value.node.byId, '按节点样式', new Set([...nodeIds]))
+      const byId = {}
+      for (const id of nodeIds) {
+        const entry = value.node.byId[id]
+        if (entry === undefined) continue
+        const normalized = styleEntry(entry, `节点 ${id} 的样式`, new Set(['fill', 'stroke', 'w', 'h', 'fontSize']))
+        if (normalized) byId[id] = normalized
+      }
+      if (Object.keys(byId).length) node.byId = byId
+    }
+    if (Object.keys(node).length) style.node = node
+  }
+  if (value.edge !== undefined) {
+    closedObject(value.edge, '连线样式', new Set(['byDefault', 'byRelation']))
+    const edge = {}
+    const edgeEntry = (entry, name) => {
+      closedObject(entry, name, new Set(['stroke', 'width', 'arrow', 'dashed']))
+      const out = {}
+      if (entry.stroke !== undefined) out.stroke = colour(entry.stroke, `${name}的颜色`)
+      if (entry.width !== undefined) {
+        if (!Number.isFinite(entry.width) || entry.width < 0.5 || entry.width > 8) throw boardError(`${name}的线宽必须在 0.5–8 之间。`)
+        out.width = Math.round(entry.width * 10) / 10
+      }
+      if (entry.arrow !== undefined) {
+        if (typeof entry.arrow !== 'string' || !ARROWS.has(entry.arrow)) throw boardError(`${name}的箭头样式不受支持。`)
+        out.arrow = entry.arrow
+      }
+      if (entry.dashed === true) out.dashed = true
+      return Object.keys(out).length ? out : undefined
+    }
+    if (value.edge.byDefault !== undefined) {
+      const normalized = edgeEntry(value.edge.byDefault, '默认连线样式')
+      if (normalized) edge.byDefault = normalized
+    }
+    if (value.edge.byRelation !== undefined) {
+      closedObject(value.edge.byRelation, '按关系样式', RELATIONS)
+      const byRelation = {}
+      for (const relation of RELATIONS) {
+        const entry = value.edge.byRelation[relation]
+        if (entry === undefined) continue
+        const normalized = edgeEntry(entry, `关系 ${relation} 的样式`)
+        if (normalized) byRelation[relation] = normalized
+      }
+      if (Object.keys(byRelation).length) edge.byRelation = byRelation
+    }
+    if (Object.keys(edge).length) style.edge = edge
+  }
+  if (value.layout !== undefined) {
+    closedObject(value.layout, '排版设置', new Set(['mode', 'direction', 'gapX', 'gapY', 'pins']))
+    const layout = {}
+    if (value.layout.mode !== undefined) {
+      if (typeof value.layout.mode !== 'string' || !LAYOUT_MODES.has(value.layout.mode)) throw boardError('排版方式只能是 tree、radial 或 layered。')
+      layout.mode = value.layout.mode
+    }
+    if (value.layout.direction !== undefined) {
+      if (typeof value.layout.direction !== 'string' || !LAYOUT_DIRECTIONS.has(value.layout.direction)) throw boardError('排版方向只能是 lr、tb、rl 或 bt。')
+      layout.direction = value.layout.direction
+    }
+    for (const key of ['gapX', 'gapY']) {
+      if (value.layout[key] === undefined) continue
+      const amount = value.layout[key]
+      if (!Number.isFinite(amount) || amount < 8 || amount > 400) throw boardError(`${key === 'gapX' ? '水平' : '垂直'}间距必须在 8–400 之间。`)
+      layout[key] = Math.round(amount)
+    }
+    if (value.layout.pins !== undefined) {
+      closedObject(value.layout.pins, '固定位置', new Set([...nodeIds]))
+      const pins = {}
+      for (const id of nodeIds) {
+        const point = value.layout.pins[id]
+        if (point === undefined) continue
+        if (!Array.isArray(point) || point.length !== 2) throw boardError(`节点 ${id} 的固定位置必须是 [x,y]。`)
+        pins[id] = [coordinate(point[0], `节点 ${id} 固定位置横坐标`), coordinate(point[1], `节点 ${id} 固定位置纵坐标`)]
+      }
+      if (Object.keys(pins).length) layout.pins = pins
+    }
+    if (Object.keys(layout).length) style.layout = layout
+  }
+  if (!Object.keys(style).length) return undefined
+  if (Buffer.byteLength(JSON.stringify(style), 'utf8') > 64 * 1024) throw boardError('画板样式过大，请精简后重试。', 'BOARD_TOO_LARGE', 413)
+  return style
+}
+
 function normalizeEdge(value, index, nodeIds) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw boardError(`第 ${index + 1} 条连线无效。`)
   closedObject(value, `第 ${index + 1} 条连线`, EDGE_FIELDS)
@@ -124,6 +264,20 @@ function normalizeEdge(value, index, nodeIds) {
   if (relation !== undefined) edge.relation = relation
   const label = boundedText(value.label, '连线标签', BOARD_LIMITS.labelCharacters, false)
   if (label) edge.label = label
+  if (value.arrow !== undefined) {
+    if (typeof value.arrow !== 'string' || !ARROWS.has(value.arrow)) throw boardError(`第 ${index + 1} 条连线的箭头样式不受支持。`)
+    edge.arrow = value.arrow
+  }
+  if (value.dashed === true) edge.dashed = true
+  // A polyline through reader-placed waypoints, so a line can route around a node.
+  if (value.waypoints !== undefined) {
+    if (!Array.isArray(value.waypoints) || value.waypoints.length > BOARD_LIMITS.waypoints) throw boardError(`第 ${index + 1} 条连线的拐点最多 ${BOARD_LIMITS.waypoints} 个。`)
+    edge.waypoints = value.waypoints.map((point, order) => {
+      const name = `第 ${index + 1} 条连线的第 ${order + 1} 个拐点`
+      if (!Array.isArray(point) || point.length !== 2) throw boardError(`${name}必须是 [x,y]。`)
+      return [coordinate(point[0], `${name}横坐标`), coordinate(point[1], `${name}纵坐标`)]
+    })
+  }
   return edge
 }
 
@@ -156,6 +310,8 @@ export function validateBoard(value, { id, origin: forcedOrigin } = {}) {
   const nodeIds = duplicate(board.nodes.map(node => node.id), '节点')
   board.edges = edges.map((edge, index) => normalizeEdge(edge, index, nodeIds))
   duplicate(board.edges.map(edge => edge.id), '连线')
+  const style = normalizeStyle(value.style, nodeIds)
+  if (style) board.style = style
   if (value.created_at !== undefined) {
     if (typeof value.created_at !== 'string' || !Number.isFinite(Date.parse(value.created_at))) throw boardError('画板创建时间无效。')
     board.created_at = value.created_at
