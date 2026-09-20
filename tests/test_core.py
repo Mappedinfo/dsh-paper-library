@@ -703,3 +703,75 @@ def test_multi_annotation_feedback_rejects_mismatched_or_unknown_replies(tmp_pat
         request(tmp_path, "save_feedback", **base, replies=[{"annotation_id": first["id"], "comment": "stale"}])
     after = [note for note in request(tmp_path, "annotations", id=item["id"])["annotations"] if note.get("kind") == "ai-feedback"]
     assert len(after) == 1, "A refused write leaves the saved replies unchanged"
+
+
+def _resolved(cls, name):
+    """The raw class-dictionary entry `cls` resolves `name` to, following the MRO."""
+    for base in cls.__mro__:
+        if name in vars(base):
+            return vars(base)[name]
+    return None
+
+
+def test_library_is_one_object_assembled_from_the_mixins():
+    """The catalog is split across `papers`, `pdf_write` and `annotations` modules so that each
+    cluster is readable on its own. Callers must still see a single class, and the split must not
+    have dropped or duplicated a method: a mixin that stopped being inherited would fail here
+    rather than at the first request that needs it."""
+    from dsh_paper_library import annotations, papers, pdf_write
+
+    for mixin, methods in (
+        (papers.Papers, ("__init__", "list", "create", "import_items", "update", "_upsert")),
+        (pdf_write.PdfWrites, ("_open_pdf", "inspect_pdf", "_atomic_save", "_write_pdf", "attach", "_attach")),
+        (annotations.AnnotationAccess, ("_annotation", "annotation_catalog", "page", "annotate", "export_annotations")),
+    ):
+        assert issubclass(Library, mixin)
+        for name in methods:
+            assert name in vars(mixin), f"{mixin.__name__} does not define {name}"
+            # The method Library resolves must be that mixin's own object. Identity is taken from
+            # the class dictionaries because a classmethod yields a fresh bound object per lookup.
+            assert vars(mixin)[name] is _resolved(Library, name), f"{mixin.__name__}.{name} is the one Library resolves"
+
+    # Every action `dispatch` can route to exists, and the cluster that owns it is the one that
+    # defines it — a method silently re-homed to another mixin would show up here.
+    owners = {name: mixin.__name__ for mixin in (papers.Papers, pdf_write.PdfWrites, annotations.AnnotationAccess)
+              for name in vars(mixin) if not name.startswith('__')}
+    assert owners['list'] == 'Papers'
+    assert owners['inspect_pdf'] == 'PdfWrites'
+    assert owners['annotate'] == 'AnnotationAccess'
+    # No name may be defined by two mixins: the MRO would silently pick the first.
+    seen = {}
+    for mixin in (papers.Papers, pdf_write.PdfWrites, annotations.AnnotationAccess):
+        for name in vars(mixin):
+            if name.startswith('__'):
+                continue
+            assert name not in seen, f"{name} is defined by both {seen.get(name)} and {mixin.__name__}"
+            seen[name] = mixin.__name__
+
+
+def test_the_moved_clusters_still_reach_the_helpers_they_share_with_core():
+    """The mixins cannot import `core` (it imports them), so `core` hands them the shared helpers.
+    A helper that is never bound stays `None` and fails only when that method runs, so this checks
+    the binding itself."""
+    from dsh_paper_library import annotations, papers, pdf_write
+    from dsh_paper_library import core
+
+    assert pdf_write.now is core.now
+    assert pdf_write.managed_filename is core.managed_filename
+    assert pdf_write.canonical_doi is core.canonical_doi
+    assert pdf_write.PORTABLE_NAME == core.PORTABLE_NAME
+    assert annotations.safe_name is core.safe_name
+    assert papers.now is core.now
+    assert papers.clamp is core.clamp
+    assert papers.csl_item is core.csl_item
+    assert papers.parse_ris is core.parse_ris
+    assert papers.MAX_IMPORT == core.MAX_IMPORT
+    assert papers.PaperConflictError is core.PaperConflictError
+
+    # The reference caps are deliberately *not* bound: they are read through `core` when a method
+    # runs, which is what keeps `monkeypatch.setattr("dsh_paper_library.core.MAX_ANNOTATIONS", …)`
+    # effective after the split.
+    assert not hasattr(annotations, "MAX_ANNOTATIONS") or annotations.MAX_ANNOTATIONS is None
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("dsh_paper_library.core.REFERENCE_CATALOG_LIMIT", 2)
+        assert annotations.AnnotationAccess._reference_limits()["annotations"] == 2
