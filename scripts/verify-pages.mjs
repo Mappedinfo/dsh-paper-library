@@ -81,7 +81,7 @@ try {
   await page.locator('#board-mermaid-open').click();
   await page.locator('#board-mermaid-text').fill('flowchart LR\n  L1[线上] --> L2{可用?}\n  L2 -- 是 --> L3([完成])');
   await page.locator('#board-mermaid-parse').click();
-  await page.waitForFunction(() => /解析出 3 个节点、3 条连线（LR 方向）/.test(document.getElementById('board-mermaid-status')?.textContent || ''));
+  await page.waitForFunction(() => /解析出 3 个节点、2 条连线（LR 方向）/.test(document.getElementById('board-mermaid-status')?.textContent || ''));
   await page.locator('#board-source-apply').click();
   await page.waitForFunction(() => JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true).some(record => record.board.nodes.some(node => node.text === '线上')));
   await page.locator('#board-source-dialog .dialog-close').first().click();
