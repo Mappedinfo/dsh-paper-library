@@ -27,13 +27,13 @@
 - **`web/board-render.js`（新，208 行）**：形状／连线／视口的绘制从 `web/board.js` 移出（后者 1962 → 1828 行，即约 175 行净减）。渲染器是工厂：`board`、`view`、`selection`、`live`、`connectFrom` **以回调形式注入**，因为面板是"整体重新赋值"这些变量（约 12 处，含滚轮缩放与平移），而渲染器一直活着——若在构造时捕获副本就会画出旧画板。元素映射（`nodeEls`/`edgeEls`）与 SVG 元素工厂 `createElements` 也归它所有，面板与渲染器共用同一个建元素入口；撤销/重做/删除控件的可用状态仍由面板在 `onRendered` 里决定（那是外壳的事，不是渲染器的事）。
 - **`web/board-bridge.js`（新，~130 行）**：与 DSH 客户端插件的 postMessage 握手（`board_draft`、父窗口/同源/版本/请求号四重校验、20 秒超时、关闭时清理）独立成模块。写测试时抓到拆分本身引入的真实缺陷：面板原先**懒创建** bridge 而监听器写成 `bridge?.onResult`，于是**第一次发送之前**到达的答复（或第二次发送）落在 null 上被静默丢弃——现在 bridge 在绑定监听器之前只创建一次。
 - **接线**：两个新模块都按既有规矩登记在 6 处——`web/index.html`、`site/index.html` 的脚本标签，`src/http.mjs` 静态白名单，`scripts/build-site.mjs` 拷贝与日志清单，面板测试沙箱，以及 `validate.mjs` 的语法检查；`web_asset_wiring` 守卫会兜住漏登记。
-- **测试**：面板测试 30 → 33/34 例。新增 2 例桥接（身份载荷不含画板内容、五类应被忽略的答复、主对话拒绝时如实提示、`dispose()` 后不再监听、无父窗口／无会话／存在冲突时**放弃之前**就返回）与 1 例渲染器契约（后续渲染替换整棵树而非追加、元素映射跟随当前画板、`applyView` 的变换与网格间距按当前 `view` 计算、拖拽快路径复用元素并就地改写几何）。沙箱现在给"帧"真实的 message 通道，并让 `window === document.defaultView`（真实浏览器语义），这也是上述潜在缺陷能被测出来的前提。
+- **测试**：面板测试 30 → 33 例。新增 2 例桥接（身份载荷不含画板内容、五类应被忽略的答复、主对话拒绝时如实提示、`dispose()` 后不再监听、无父窗口／无会话／存在冲突时**放弃之前**就返回）与 1 例渲染器契约（后续渲染替换整棵树而非追加、元素映射跟随当前画板、`applyView` 的变换与网格间距按当前 `view` 计算、拖拽快路径复用元素并就地改写几何）。沙箱现在给"帧"真实的 message 通道，并让 `window === document.defaultView`（真实浏览器语义），这也是上述潜在缺陷能被测出来的前提。
 ### 工程：`core.py` 拆成三个 mixin
 
 - **1705 行 → 574 行**：`Library` 现由三个兄弟模块的 mixin 组装——`papers.py`（目录本身：SQLite 模式、修订号校验的读写、citekey／DOI 唯一性、导入与更新路径，457 行）、`pdf_write.py`（受管 PDF 的读写：打开／检查／原子保存／更新日志／恢复／附件，348 行）、`annotations.py`（批注：原生 PDF 对象模型到读者与 agent 所用的形状，473 行）。`core.py` 保留三者共用的东西：有界元数据辅助函数、宿主同样校验的 caps 常量、跨簇动作（链接、图谱、反馈）以及 `dispatch()`——仍是进入这个类的唯一路由。对调用方没有任何变化，`Library` 仍是一个对象。
 - **为什么不直接 import**：三个 mixin 都**不能**在模块级 `import core`（core 为避免循环导入要先 import 它们），而 mixin 里的裸名字解析的是**自身模块的全局**，不是 class 命名空间。因此 core 在导入后通过 `install_helpers()` 把共享辅助函数交给它们；被测试 monkeypatch 的 caps（`MAX_ANNOTATIONS` 与各项 reference 预算）**故意不绑定**，而是在方法运行时通过 `_constants()` 读 `core` 模块——否则 `monkeypatch.setattr("dsh_paper_library.core.MAX_ANNOTATIONS", 1)` 会在拆分后失效。同理，`_reference_limits` 与 `annotation_context_exact` 的预算默认值从签名里挪进函数体：默认值在导入时求值，会把预算提前冻结。
 - **既有行为不变**：`core.py` 仍按原样再导出 `csl_item`／`parse_ris`／`PaperConflictError`／`MAX_ANNOTATIONS`／`REFERENCE_MAX_CHARACTERS`（`datasets.py`、`paper_analysis.py` 与测试继续照旧 import）。新增两项结构测试：mixins 的继承与方法归属（同一名字被两个 mixin 定义会让 MRO 静默取第一个，故直接断言不存在重复），以及共享辅助函数的绑定与"caps 必须活读"这两件事本身。
-- 验证：**507 JavaScript / 222 Python 测试**、`validate.mjs` 26 项、`check-publication` 通过（`files` 已含 `src`，三个新模块自动随包发布）。
+- 验证：**507 JavaScript / 222 Python 测试**、`validate.mjs` 28 项全绿、`check-publication` 通过（`files` 已含 `src`，三个新模块自动随包发布）。
 
 ### 工程：`web/style.css` 恢复可读排版
 
