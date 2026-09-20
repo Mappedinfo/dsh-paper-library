@@ -35,6 +35,12 @@
 - **既有行为不变**：`core.py` 仍按原样再导出 `csl_item`／`parse_ris`／`PaperConflictError`／`MAX_ANNOTATIONS`／`REFERENCE_MAX_CHARACTERS`（`datasets.py`、`paper_analysis.py` 与测试继续照旧 import）。新增两项结构测试：mixins 的继承与方法归属（同一名字被两个 mixin 定义会让 MRO 静默取第一个，故直接断言不存在重复），以及共享辅助函数的绑定与"caps 必须活读"这两件事本身。
 - 验证：**507 JavaScript / 222 Python 测试**、`validate.mjs` 28 项全绿、`check-publication` 通过（`files` 已含 `src`，三个新模块自动随包发布）。
 
+### 工程：原生画板回执的失败是断言写错，不是产品缺陷
+
+- `scripts/board-harness-smoke.mjs` 此前一直报「the missing snapshot never reaches the model as material」。**实际值是 0，而不是期望的 1**：适配器在每次模型调用时**整体替换** `boardReferences`，所以"被拒绝的引用没有把任何画板材料送进模型"就该是 0 条。诊断依据是读出来的值（`actual: 0, expected: 1`）与现场状态：被拒的这一轮 `outcome=error`、没有提交第二条用户消息、模型**确实被调用**（`generations` 递增）且其请求不含任何 plugin-source 画板消息（缺失快照由 `snapshotLoad` 以 `BOARD_SNAPSHOT_MISSING` 拒绝）。
+- 断言文本自该检查引入（`abab18e`）以来从未改动，因此回执上 2026-09-18 的日期来自一次观测值如今已无法复原的运行——也就是说这条断言当时究竟怎么通过的已不可考；能确定的是它**现在**与代码行为一致。
+- 修正后的检查更强：断言为 0 条、额外断言其中不含该 `boardId` 的引用，并要求这一轮**真的调用过模型**（`generations` 增加），使"空列表"不可能因为"模型根本没跑"而侥幸通过。回执已在真实隔离 DSH profile 下重新生成（[7 项](docs/validation/board-harness.json)，2026-09-20）。
+
 ### 工程：`web/style.css` 恢复可读排版
 
 - **29 行压缩样式表恢复为 2275 行**（每条声明一行、选择器与 `@media` 各占一行、两级缩进）。过程可核对：字符流在**去掉全部空白后逐字节比较**，唯一差异是 **378 处**压缩源省略的块尾分号被补上（合法 CSS，解析后的规则集完全相同）；此外再跑一次独立验证——用 189 个选择器各建一个元素，在 1400/900/511/360 px × 明暗两色共 8 种状态下，把 `getComputedStyle` 的**全部属性**与原压缩表逐一比对，**1760 组元素零差异**（含高度）。改动前 `git show HEAD:web/style.css` 与改动后 `web/style.css` 的 token 流（忽略空白）除那 378 个分号外完全一致。

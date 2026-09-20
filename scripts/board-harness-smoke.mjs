@@ -165,8 +165,12 @@ try {
   assert.ok(observation.tools.includes('library_annotations'))
   checks.push('native-host-offers-the-library_board-tool-alongside-the-other-library-tools')
 
-  // 3. A malformed token fails the turn instead of silently sending something else.
-  await rpc('session/prompt', { sessionId: ensured.sessionId, requestId: 'native-board-reference-2', mode: 'queue', content: [{ type: 'text', text: `引用画板：损坏 [[paper-library-board:v1:${boardId}:${'a'.repeat(64)}]]` }] })
+  // 3. A token whose snapshot does not exist (well-formed, but nothing to resolve) fails the turn
+  // instead of silently sending something else. The expected board-material count is **zero**: the
+  // model still runs — it answers from the conversation alone — and what must never happen is a
+  // board message reaching it, which is exactly what `boardReferences` records.
+  const generationsBefore = (await observe([ensured.sessionId])).generations
+  await rpc('session/prompt', { sessionId: ensured.sessionId, requestId: 'native-board-reference-2', mode: 'queue', content: [{ type: 'text', text: `引用画板：这份快照已不存在 [[paper-library-board:v1:${boardId}:${'a'.repeat(64)}]]` }] })
   const failureDeadline = Date.now() + 25000
   let failed = false
   do {
@@ -177,7 +181,11 @@ try {
     await new Promise(resolveDelay => setTimeout(resolveDelay, 150))
   } while (Date.now() < failureDeadline)
   const missing = await observe([ensured.sessionId])
-  assert.equal(missing.boardReferences.length, 1, 'the missing snapshot never reaches the model as material')
+  // The adapter replaces this list on every model call, so a non-zero count would mean *this*
+  // turn handed the model board material; the board id check keeps the assertion specific.
+  assert.equal(missing.boardReferences.length, 0, 'the missing snapshot never reaches the model as material')
+  assert.equal(missing.boardReferences.some(reference => reference.boardId === boardId), false)
+  assert.ok(missing.generations > generationsBefore, 'the turn did reach the model, so the empty list is a statement about the request and not about a turn that never ran')
   assert.equal(history.messages.filter(message => message.role === 'user').length, 1, 'the rejected turn commits no user message')
   assert.equal(failed, true, `a board reference that cannot be resolved must fail the turn (outcome=${history?.outcome})`)
   checks.push('unresolvable-board-reference-fails-the-turn-instead-of-sending-anything')
