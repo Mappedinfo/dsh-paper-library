@@ -14,11 +14,31 @@ const referenceButtonStyle = {
   background: 'var(--dsw-alias-bg-base, transparent)', color: 'inherit',
   font: 'inherit', lineHeight: 1.4, whiteSpace: 'normal', overflowWrap: 'anywhere', cursor: 'pointer',
 }
+/** The whiteboard is a second entry of this plugin, not a second plugin: the same bundle
+ *  registers two tab types, so the start page offers 文献库 and 画板 side by side and each
+ *  opens its own tab. Its iframe asks the page for the board-only view. */
+const CANVAS_ID = `${ID}/whiteboard`
+const CANVAS_KIND = 'paper-library-whiteboard'
+/** Coloured sheet glyphs for the start page's capsules, drawn at the seat's size. */
+function LibraryGlyph({ size = 20, className }) {
+  return createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', className, fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true' },
+    createElement('path', { d: 'M4 4.5A2.5 2.5 0 0 1 6.5 2H19v20H6.5A2.5 2.5 0 0 1 4 19.5z' }),
+    createElement('path', { d: 'M4 17.5h15' }))
+}
+function CanvasGlyph({ size = 20, className }) {
+  return createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', className, fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true' },
+    createElement('rect', { x: 2.5, y: 4, width: 8, height: 5.5, rx: 1.4 }),
+    createElement('rect', { x: 13.5, y: 14.5, width: 8, height: 5.5, rx: 1.4 }),
+    createElement('path', { d: 'M6.5 9.5v5a2 2 0 0 0 2 2h5' }))
+}
 export const name = 'paper-library-client'
 export const inject = ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'modelDirectories', 'sessions', 'conversation', 'inputTriggers']
 
-/** The reader exists only while its pane is visible; no background PDF renderer. */
-export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailable, conversationBridge, bindTheme, bindSettings }) {
+/** The reader exists only while its pane is visible; no background PDF renderer.
+ *  `view` picks which of the plugin's two surfaces this pane shows: the library, or the
+ *  whiteboard alone (`?view=board`, which the page opens focused on the canvas). */
+export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailable, conversationBridge, bindTheme, bindSettings, view = 'library' }) {
+  const canvas = view === 'board'
   const { tab } = useTabInfo()
   const frame = useRef(null)
   useEffect(() => {
@@ -40,8 +60,8 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
   if (!tab.visible) return null
   return createElement('iframe', {
     ref: frame,
-    title: t('title'),
-    src: '/api/paper-library/',
+    title: t(canvas ? 'canvas.title' : 'title'),
+    src: canvas ? '/api/paper-library/?view=board' : '/api/paper-library/',
     loading: 'lazy',
     referrerPolicy: 'same-origin',
     allow: 'clipboard-write; fullscreen',
@@ -157,8 +177,8 @@ export function apply(ctx) {
   ctx.effect(() => ctx.inputTriggers.registerSource(annotationReferences.source), 'paper-library: annotation references')
   ctx.effect(() => ctx.inputTriggers.registerSource(boardReferences.source), 'paper-library: board references')
   ctx.effect(() => ctx.locale.register(NS, {
-    zh: { title: '文献库', description: '检索、引用、PDF 批注与论文对话', 'reference.title': '论文批注引用', 'reference.preview': '查看引用', 'reference.close': '收起', 'reference.loading': '正在读取引用快照…', 'reference.frozen': '发送材料快照', 'reference.notes': '条批注', 'reference.page': '第', 'reference.morePages': '其他页数：', 'board.title': '画板引用', 'board.close': '收起', 'board.loading': '正在读取画板快照…', 'board.frozen': '画板材料快照' },
-    en: { title: 'Paper Library', description: 'Search, cite, annotate PDFs and discuss each paper', 'reference.title': 'Paper annotation references', 'reference.preview': 'Inspect reference', 'reference.close': 'Close', 'reference.loading': 'Loading reference snapshot…', 'reference.frozen': 'Frozen reference material', 'reference.notes': 'annotations', 'reference.page': 'Page', 'reference.morePages': 'More pages:', 'board.title': 'Whiteboard references', 'board.close': 'Close', 'board.loading': 'Loading whiteboard snapshot…', 'board.frozen': 'Frozen whiteboard material' },
+    zh: { title: '文献库', description: '检索、引用、PDF 批注与论文对话', 'canvas.title': '画板', 'canvas.description': '自由画布、连线与自动排版；可关联论文与阅读项目', 'reference.title': '论文批注引用', 'reference.preview': '查看引用', 'reference.close': '收起', 'reference.loading': '正在读取引用快照…', 'reference.frozen': '发送材料快照', 'reference.notes': '条批注', 'reference.page': '第', 'reference.morePages': '其他页数：', 'board.title': '画板引用', 'board.close': '收起', 'board.loading': '正在读取画板快照…', 'board.frozen': '画板材料快照' },
+    en: { title: 'Paper Library', description: 'Search, cite, annotate PDFs and discuss each paper', 'canvas.title': 'Whiteboard', 'canvas.description': 'A free canvas with connectors and automatic layout; link papers and reading projects', 'reference.title': 'Paper annotation references', 'reference.preview': 'Inspect reference', 'reference.close': 'Close', 'reference.loading': 'Loading reference snapshot…', 'reference.frozen': 'Frozen reference material', 'reference.notes': 'annotations', 'reference.page': 'Page', 'reference.morePages': 'More pages:', 'board.title': 'Whiteboard references', 'board.close': 'Close', 'board.loading': 'Loading whiteboard snapshot…', 'board.frozen': 'Frozen whiteboard material' },
   }), 'paper-library: locale')
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.sidebarRightTabs.register({
@@ -166,21 +186,37 @@ export function apply(ctx) {
     kind: 'paper-library',
     priority: 'extension',
     title: () => t('title'),
-    guide: [{ order: 15, title: () => t('title'), description: () => t('description') }],
+    guide: [{ order: 15, title: () => t('title'), description: () => t('description'), icon: LibraryGlyph }],
   }), 'paper-library: tab type')
+  // The whiteboard is its own tab type of the same plugin: its own start-page capsule, its
+  // own tab, and the same bridge bindings, so 「放入对话」 works from either surface.
+  ctx.effect(() => ctx.sidebarRightTabs.register({
+    id: CANVAS_ID,
+    kind: CANVAS_KIND,
+    priority: 'extension',
+    title: () => t('canvas.title'),
+    guide: [{ order: 16, title: () => t('canvas.title'), description: () => t('canvas.description'), icon: CanvasGlyph }],
+  }), 'paper-library: whiteboard tab type')
+  const paneProps = sessionId => ({
+    sessionId,
+    conversationBridge,
+    bindTheme,
+    bindSettings,
+    directory: ctx.modelDirectories.directoryFor(sessionId),
+    modelAvailable: ctx.sessions.subagentAddress(sessionId) === undefined,
+  })
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
     name: 'sidebar.right.pane.tab',
     key: ID,
     locale: NS,
-    inject: sessionId => ({
-      sessionId,
-      conversationBridge,
-      bindTheme,
-      bindSettings,
-      directory: ctx.modelDirectories.directoryFor(sessionId),
-      modelAvailable: ctx.sessions.subagentAddress(sessionId) === undefined,
-    }),
+    inject: paneProps,
   }, props => createElement(LibraryPane, { ...props, t }))), 'paper-library: tab body')
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+    name: 'sidebar.right.pane.tab',
+    key: CANVAS_ID,
+    locale: NS,
+    inject: paneProps,
+  }, props => createElement(LibraryPane, { ...props, t, view: 'board' }))), 'paper-library: whiteboard tab body')
   ctx.effect(() => ctx.slots.inject('conversation.input.overlay', () => ctx.slots.register({
     name: 'conversation.input.overlay',
     id: ID,

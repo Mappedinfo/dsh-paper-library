@@ -1042,6 +1042,21 @@ async function openReferencedPaper(value) {
   if (state.active.pdf && value.page !== state.page) await requestPage(value.page);
   publishReaderState();
 }
+/**
+ * Which of the two entry surfaces this page was opened as. The plugin registers the
+ * whiteboard as its own DSH tab, and that tab loads this same page with `?view=board`, so
+ * one page serves both entries without a second copy of the canvas.
+ */
+function entryView(){
+  try{return new URLSearchParams(location.search).get('view')==='board'?'board':'library';}
+  catch{return 'library';}
+}
+/** The whiteboard entry is a pure canvas: open the board and leave only it on screen. */
+async function applyEntryView(){
+  if(entryView()!=='board'||!boardUI)return;
+  try{await boardUI.open();boardUI.setFocus?.(true);}
+  catch(error){toast(error.message||'画板未能打开',true);}
+}
 async function initialize() {
   announceReady();await loadStatus();await loadList();
   try{const saved=await persistence?.get('reader');if(saved?.paperId){const detail=saved.page?saved:await persistence.get(`reader:${saved.paperId}`);if(detail){readerRestore=detail;durableReaderLoaded=true;}}}
@@ -1049,6 +1064,8 @@ async function initialize() {
   initializedReader=true;await restoreReaderState();
   if(pendingReferenceOpen){const value=pendingReferenceOpen;pendingReferenceOpen=null;await openReferencedPaper(value);}
   if(!paperChatUI?.available())loadModels();
+  // Last, so the board opens onto a page that has already read its library and status.
+  await applyEntryView();
 }
 const currentModelDisplay = el('div', 'current-harness-model'); currentModelDisplay.id = 'current-harness-model'; currentModelDisplay.hidden = true;
 currentModelDisplay.append(el('span', '', '当前 DSH 模型'));

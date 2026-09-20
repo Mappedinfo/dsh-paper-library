@@ -224,11 +224,29 @@ P9 left `links.projects` validated but with nothing to point at; P10 supplies th
   button, its board buttons and the board shelf's 「关联本篇／解除」 were all affected; the shelf
   case reproduced in the P9 browser fixture, where the click produced no request at all and the
   receipt timed out. They now fall back to the id the view already has (`state.openedId`) and say
-  so when no paper is open, which is also what made the 25-check board receipt pass again.
+  so when no paper is open, which is also what made the board receipt pass again.
 - **The board's project controls could never appear.** They were hidden during the panel's
   `bind()`, which runs before the catalog's first status reply, and nothing revealed them
   afterwards. Visibility now belongs to `setProjects`, which is the moment the catalog actually
   answers.
+
+## P11: an entry of its own in DSH
+
+Added 2026-09-19, because a canvas buried inside the library tab is not really decoupled — the
+owner asked for a 画板 entry next to 文献库 on the right sidebar's start page.
+
+- **Two tab types, one plugin.** `ctx.sidebarRightTabs` takes as many registrations as a plugin
+  has surfaces; the registry refuses a duplicate `id` or an immovable kind, not a second type from
+  the same package. The client bundle now registers 文献库 (`paper-library`) *and* 画板
+  (`paper-library-whiteboard`), each with its own start-page capsule (`order` 15 and 16, each with
+  a glyph), its own stage-two body in the `sidebar.right.pane.tab` seat, and its own tab.
+- **One page, two entry views.** The whiteboard tab loads the same page with `?view=board`; the
+  page opens the board and enters focus mode, so the entry shows a pure canvas and the library,
+  reader and annotations never render. A second copy of the canvas would have been the alternative,
+  and the two would drift.
+- **The bridge is bound in both.** The board tab keeps the theme, settings, model and conversation
+  bindings, so 「放入对话」 freezes a snapshot and drops its reference chip into the composer from
+  either entry.
 
 ## Invariants
 
@@ -264,7 +282,7 @@ Synthetic-only validation, following the existing project discipline:
   host's own validator**. **Implemented, 5 cases.**
 - `scripts/board-browser-fixture.mjs` — real Chromium receipt for draw/drag/zoom/connect/save/reload,
   library drag-in, tidy-tree snapping, and the standalone refusal of the conversation chip.
-  **Implemented, 23 checks** in `docs/validation/board-browser.json` (including a knowledge-graph node joining a board, the connect tool, a bend point, automatic layout with a pinned node, and the source/style pair).
+  **Implemented, 26 checks** in `docs/validation/board-browser.json` (including a knowledge-graph node joining a board, the connect tool, a bend point, automatic layout with a pinned node, the source/style pair, and the plugin's own board entry opening as a pure canvas).
 - `scripts/board-harness-smoke.mjs` — native DSH check that the tool is offered, that a board token
   reaches a turn as frozen material, and that an unresolvable reference fails the turn.
   **Implemented, 7 checks** in `docs/validation/board-harness.json`.

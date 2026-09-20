@@ -462,6 +462,20 @@ try {
   assert.equal(await page.locator('.library-pane').isVisible(), true, 'Escape restores the app chrome');
   record('focus-mode-leaves-only-the-canvas-and-escape-restores-the-app');
 
+  // The whiteboard is also its own DSH entry: that tab loads this same page with
+  // `?view=board` and must come up as a pure canvas — no library, no reader, no topbar —
+  // without a second copy of the canvas.
+  await page.goto(`${origin}/?view=board`);
+  await page.waitForFunction(() => document.body.classList.contains('board-mode') && document.body.classList.contains('board-focused'));
+  assert.equal(await page.locator('#board-view').isVisible(), true, 'the board entry shows the board');
+  assert.equal(await page.locator('#board-stage').isVisible(), true);
+  assert.equal(await page.locator('.library-pane').isVisible(), false, 'the board entry hides the library');
+  assert.equal(await page.locator('.topbar').isVisible(), false, 'and the app topbar');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.body.classList.contains('board-focused'));
+  assert.equal(await page.locator('.library-pane').isVisible(), true, 'Escape still restores the rest of the page inside that entry');
+  record('the-whiteboard-entry-opens-as-a-pure-canvas');
+
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);
   record('no-browser-runtime-errors-and-no-external-requests');
@@ -471,7 +485,7 @@ try {
 }
 await writeFile(join(project, 'docs/validation/board-browser.json'), JSON.stringify({
   verified_at: new Date().toISOString(),
-  scope: 'Synthetic catalog in an isolated standalone server; free canvas drawing, text editing, connecting, moving, paper drag-in and picker, undo/redo, delete, zoom/fit/fullscreen, board switching, deletion and host persistence across a reload; zero model calls and zero external requests. The AI-proposal review path and the conversation reference chip need the native host tool and the DSH composer, so they are covered by the native harness receipt and unit tests rather than simulated here.',
+  scope: 'Synthetic catalog in an isolated standalone server; free canvas drawing, text editing, connecting, moving, paper drag-in and picker, undo/redo, delete, zoom/fit/fullscreen, board switching, deletion and host persistence across a reload, and the `?view=board` entry opening as a pure canvas; zero model calls and zero external requests. The AI-proposal review path and the conversation reference chip need the native host tool and the DSH composer, so they are covered by the native harness receipt and unit tests rather than simulated here.',
   checks, errors, externalRequests: external.length, modelRequests: 0,
 }, null, 2) + '\n');
 console.log(JSON.stringify({ run: relative(project, run), checks: checks.length, errors }));
