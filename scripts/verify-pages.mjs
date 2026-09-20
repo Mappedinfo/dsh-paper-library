@@ -61,6 +61,9 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.board-node').length >= 1);
   record('a-reload-of-the-live-site-restores-the-drawing');
 
+  // The toolbar is menus: 整理成树 lives in the layout panel.
+  await page.locator('#board-layout-open').click();
+  await page.waitForFunction(() => document.getElementById('board-layout-panel')?.classList.contains('is-open'));
   await page.locator('#board-tidy').click();
   await page.waitForFunction(() => /整理成树/.test(document.getElementById('toast')?.textContent || ''));
   const [png] = await Promise.all([page.waitForEvent('download'), page.locator('#site-export-png').click()]);
