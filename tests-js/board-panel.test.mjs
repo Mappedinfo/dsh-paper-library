@@ -127,8 +127,8 @@ const apiStub = (overrides = {}) => async (action, payload, options) => {
 };
 
 test('canvas geometry keeps hits, anchors and zoom stable without a browser', () => {
-  const { board } = loadPanel();
-  const { hitNode, hitEdge, edgeGeometry, anchorPoint, viewportFor, applyZoom, toScene, toScreen, idsInRect, nodeBounds } = board.geometry;
+  const { board, boardSource } = loadPanel();
+  const { hitNode, hitEdge, edgeGeometry, anchorPoint, viewportFor, applyZoom, toScene, toScreen, idsInRect, nodeBounds, edgeAngle, incidenceAt, distanceToSegment, EDGE_ANGLE } = board.geometry;
   const nodes = [
     { id: 'n-1', kind: 'rect', x: 0, y: 0, w: 100, h: 60, text: 'a' },
     { id: 'n-2', kind: 'rect', x: 50, y: 20, w: 100, h: 60, text: 'b' },
@@ -144,8 +144,27 @@ test('canvas geometry keeps hits, anchors and zoom stable without a browser', ()
   // Border anchors sit on the shape edge, never at the centre.
   const left = anchorPoint(nodes[0], { x: -100, y: 30 });
   assert.equal(left.x, 0);
-  assert.equal(edgeGeometry(nodes[0], nodes[1], 'elbow').path, 'M 100 30 H 75 V 30 H 50');
+  assert.equal(edgeGeometry(nodes[0], nodes[1], 'elbow').path, 'M 100 30 H 50');
   assert.equal(edgeGeometry(nodes[0], nodes[1], 'arrow').path, 'M 100 30 L 50 30');
+  // Every geometry helper is the source module's own function: the panel re-exports its
+  // implementation instead of keeping a copy that can drift out of step.
+  const legs = { from: nodes[0], to: nodes[1], kind: 'elbow' };
+  assert.deepEqual(
+    { ...edgeGeometry(legs.from, legs.to, legs.kind) },
+    { ...boardSource.edgeGeometry(legs.from, legs.to, legs.kind) },
+    'the panel draws exactly what board-source.js computes',
+  );
+  for (const [name, delegated, own] of [
+    ['edgeAngle', edgeAngle, boardSource.edgeAngle],
+    ['incidenceAt', incidenceAt, boardSource.incidenceAt],
+    ['distanceToSegment', distanceToSegment, boardSource.distanceToSegment],
+    ['anchorPoint', anchorPoint, boardSource.anchorPoint],
+  ]) {
+    assert.equal(delegated, own, `${name} is board-source.js's own function, not a wrapper or a copy`);
+  }
+  assert.deepEqual({ ...EDGE_ANGLE }, { ...boardSource.EDGE_ANGLE }, 'the angle floor comes from the source module');
+  assert.equal(edgeAngle(0), EDGE_ANGLE.min, 'the floor still clamps on the way through');
+  assert.equal(edgeAngle(999), EDGE_ANGLE.max);
   // Screen and scene conversions are exact inverses (spread: the vm realm has its own prototypes).
   const view = { x: 120, y: -40, zoom: 1.5 };
   assert.deepEqual({ ...toScreen(toScene({ x: 300, y: 200 }, view), view) }, { x: 300, y: 200 });
@@ -1042,4 +1061,41 @@ test('leaving the board settles a pending debounced edit instead of dropping it'
   await switching.panel.load('b-two');
   assert.equal(state[0].action, 'board_save', 'the outgoing board is saved before another is opened');
   assert.equal(state[1].action, 'board_get');
+});
+
+test('the drawing tools stay off until a board record has loaded, so no edit is lost', async () => {
+  // The host admits two JSON requests at a time and answers the rest with 429, so the first
+  // `board_list` can still be retrying while the board view is already on screen. Drawing in that
+  // window would land on an unsaved in-memory board that the arriving load then replaces.
+  const harness = loadPanel({ api: apiStub() });
+  const note = harness.registry.get('board-tool-note');
+  const rect = harness.registry.get('board-tool-rect');
+  const connecting = harness.panel.open();
+  assert.equal(note.disabled, true, 'a shape tool cannot be picked before the record exists');
+  assert.equal(rect.disabled, true);
+  assert.equal(harness.panel.board().nodes.length, 0);
+  harness.panel.setTool('note');
+  assert.equal(note.getAttribute('aria-pressed'), 'false', 'the pick is refused, not recorded');
+  harness.svg.dispatch('pointerdown', { clientX: 120, clientY: 120 });
+  assert.equal(harness.panel.board().nodes.length, 0, 'nothing is drawn on a board that is not loaded');
+  assert.match(harness.registry.get('board-status').textContent, /读取|稍候/);
+  await connecting;
+  assert.equal(note.disabled, false, 'the tools open once the record is on screen');
+  assert.equal(harness.registry.get('board-status').textContent, '已载入');
+  harness.panel.setTool('note');
+  harness.svg.dispatch('pointerdown', { clientX: 120, clientY: 120 });
+  nameShape(harness, '载入之后画的便签');
+  assert.equal(harness.panel.board().nodes.length, 1, 'drawing works normally after the load');
+});
+
+test('a failed listing disables the tools and never fabricates an empty board to draw on', async () => {
+  state.length = 0;
+  const failure = Object.assign(new Error('已有请求正在处理，请稍后重试。'), { status: 429 });
+  const harness = loadPanel({ api: apiStub({ board_list: () => { throw failure; } }) });
+  await harness.panel.open();
+  assert.equal(harness.registry.get('board-tool-note').disabled, true);
+  assert.match(harness.registry.get('board-status').textContent, /已有请求正在处理/);
+  assert.equal(harness.panel.board().nodes.length, 0);
+  const actions = state.map(call => call.action);
+  assert.equal(actions.includes('board_create'), false, 'a failed read never creates a board');
 });

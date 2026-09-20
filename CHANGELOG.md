@@ -17,6 +17,13 @@
 - **接线守卫**：`.github/workflows/pages.yml` 原先只监听 4 个 `web/` 文件，改 `board-source.js` 或 `board-mermaid.js` 不会重新部署；现改为 `web/**`。另外 `site/index.html` **从未加载** `board-mermaid.js`（`build-site.mjs` 复制了、线上也返回 200，但独立站的 Mermaid 入口是死的），现已补上脚本标签并新增独立站检查（standalone 14 → 15 项）。`scripts/validate.mjs` 新增 `web_asset_wiring`：脚本标签、插件静态白名单、站点拷贝资源三者不一致即失败（已用"删掉标签"验证它会失败）；`scripts/verify-pages.mjs` 从"断言资源 200"升级为"在部署页真正粘贴并解析 Mermaid"（7 → 8 项）。
 - 验证：**497 JavaScript / 220 Python 测试**、`validate.mjs` 24 项（含新守卫）、board 31 / standalone 15 / project 9 项回执全绿。
 
+### 工程：画板几何与词汇表的单一归属
+
+- **一份几何实现**：`web/board.js` 曾自带一套边几何（`distanceToSegment`／`anchorAtAngle`／`incidenceAt`／`slideToAngle`／`anchorPair`／局部 `edgeGeometry`），而两个宿主实际绘制与导出 PNG 用的是 `web/board-source.js` 的那一套——两份实现各自演化。现在面板只保留 `geometryFor`（组合调用、给出 `points`/`userPoints`/`path`/`mid`），其余几何全部直接取自源模块；`board.geometry.edgeGeometry` 等**就是**源模块的函数本身（面板测试按函数 identity 断言，而非只比结果）。用 3600 组排布／类型对做实测：改动前有 **1208 组**折线路径或中点不一致，而旧测试断言的正是面板那份副本；`tests-js/board-panel.test.mjs` 现断言 `M 100 30 H 50`（单一实现的折线路径）。
+- **一份词汇表**：`board-source.js` 是节点类型、连线类型、关系、箭头端、排版模式与方向、限制与默认尺寸的唯一出处；面板通过 `sourceApi()` 读取（缺模块时**直接报错**，而不是悄悄退回第二份实现），宿主 `board-store.mjs` 在写入时校验同一套值。两者一个是经典脚本、一个是 ES module，无法互相 import，所以新增 `tests-js/board-vocabulary.test.mjs`：直接从宿主源码里读出它私有的 `new Set([...])` 常量与 `BOARD_LIMITS` 逐字段比对（含"每种类型都有正的默认尺寸""面板不得再出现字面量列表"），一侧加类型而另一侧没加会立刻失败。本轮补回一次误删的大段代码（`hitEdge`/`tidyTree`/`model`/`outline` 等），并让 `sizeFor`、`LIMITS`、`edgeDefaults` 都从源模块取值。
+- **启动竞态修复（真实缺陷）**：宿主同时只受理 2 个 JSON 请求、其余返回 429，`api()` 会退避重试（最多约 7.5 秒），而画布在 `?view=board` 打开时就已经可交互——在这段窗口里画的形状落在**尚未保存的内存画板**上，随后到达的 `board_get` 会用记录内容整体替换它，读者的改动**无声消失**。浏览器回执因此真实变红（连续 3 次都停在同一条断言，`board_list` 迟迟不返回，随后 `board-select` 从空变成另一张画板、状态显示「已载入」）。现在：记录未载入前绘制工具是**禁用**的（`setTool` 如果被程序化调用会给出原因「画板还在读取，请稍候再绘制。」）、画布显示进度光标、没有 `boardId` 时的写入改为明确报告「画板尚未读取完成，这次改动没有保存。」而不是假装保存；列表读取失败也不再放行绘制。新增 2 个面板用例（载入前拒绝绘制／载入后可正常绘制；列表失败不放行且不创建画板）。
+- 验证：**504 JavaScript / 220 Python 测试**、`validate.mjs` 24 项、board 31 项（改动后重跑，含夹角检查）、standalone 15 项回执全绿。
+
 ### 文献画板：形状与工具栏收纳
 
 - **形状终于各有其形**：矩形此前是圆角（`rx:10`），现在**直角**；便签加了**便签质感**（方角、右下折角、轻微投影、原来的暖色纸面）；概念／文献仍是圆角容器。导出 PNG 用同一份圆角表。

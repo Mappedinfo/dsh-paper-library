@@ -1,3 +1,20 @@
+  const NS = 'http://www.w3.org/2000/svg';
+  /** The source module owns the format vocabulary, the layout and the edge geometry. The panel
+   *  is meaningless without it, so a missing module is a loud error rather than a second
+   *  implementation kept in step by hand. */
+  const sourceApi = () => {
+    const api = window.PaperBoardSource;
+    if (!api) throw new Error('画板需要 board-source.js：几何与源文件格式由它提供。');
+    return api;
+  };
+  const source = () => window.PaperBoardSource ?? null;
+  const LIMITS = Object.freeze({
+    ...sourceApi().LIMITS,
+    undo: 50, zoomMin: 0.2, zoomMax: 4, saveDelay: 700, handle: 9, hit: 10,
+  });
+  // Vocabulary: types, limits, sizes and the edge angle come from the source module (the single
+  // owner); everything below is presentation the panel alone cares about.
+  const NODE_KINDS = Object.freeze([...sourceApi().NODE_KINDS]);
 /* Literature whiteboard.
  *
  * A self-contained SVG canvas: no drawing library, no new dependency. Geometry and
@@ -8,24 +25,17 @@
 (function () {
   'use strict';
   const NS = 'http://www.w3.org/2000/svg';
-  const LIMITS = Object.freeze({
-    nodes: 400, edges: 800, undo: 50, text: 2000, title: 200, label: 200,
-    zoomMin: 0.2, zoomMax: 4, coordinate: 1000000, saveDelay: 700, handle: 9, hit: 10,
-  });
-  const NODE_KINDS = Object.freeze(['text', 'note', 'concept', 'paper', 'rect', 'ellipse', 'diamond']);
   const SHAPE_TOOLS = Object.freeze(['text', 'note', 'rect', 'ellipse', 'diamond']);
   const KIND_LABEL = Object.freeze({ text: '文本', note: '便签', concept: '概念', paper: '文献', rect: '矩形', ellipse: '椭圆', diamond: '菱形' });
   /** A rectangle or a sticky note has square corners; only the container kinds are rounded. */
+  const DEFAULT_SIZE = Object.freeze({ ...sourceApi().DEFAULT_SIZE });
   const NODE_RADIUS = Object.freeze({ text: 4, note: 0, rect: 0, concept: 10, paper: 10 });
-  const DEFAULT_SIZE = Object.freeze({ text: { w: 220, h: 64 }, note: { w: 220, h: 140 }, concept: { w: 200, h: 100 }, paper: { w: 260, h: 120 }, rect: { w: 220, h: 140 }, ellipse: { w: 200, h: 120 }, diamond: { w: 200, h: 120 } });
   const RELATIONS = Object.freeze({ related: '相关', supports: '支持', contradicts: '矛盾', cites: '引用', explains: '解释', extends: '扩展' });
-  const RELATION_ORDER = Object.freeze(['related', 'supports', 'contradicts', 'cites', 'explains', 'extends']);
+  const RELATION_ORDER = Object.freeze([...sourceApi().RELATIONS]);
   const EDGE_KINDS = Object.freeze({ arrow: '箭头', line: '直线', elbow: '折线' });
   const COLORS = Object.freeze(['#4176e6', '#22864a', '#88520f', '#b0306a', '#6b4fd8', '#0f1115']);
   const TOOL_IDS = Object.freeze({ select: 'board-tool-select', pan: 'board-tool-pan', text: 'board-tool-text', note: 'board-tool-note', rect: 'board-tool-rect', ellipse: 'board-tool-ellipse', diamond: 'board-tool-diamond', connect: 'board-tool-connect' });
   const TOOL_KEYS = Object.freeze({ v: 'select', h: 'pan', t: 'text', n: 'note', r: 'rect', o: 'ellipse', d: 'diamond', c: 'connect' });
-  /** Optional companion: it owns layout and the readable source format when loaded. */
-  const source = () => window.PaperBoardSource ?? null;
 
   const round = value => Math.round(value * 100) / 100;
   const round3 = value => Math.round(value * 1000) / 1000;
@@ -70,81 +80,11 @@
     for (let index = nodes.length - 1; index >= 0; index--) if (insideBounds(point, nodeBounds(nodes[index]))) return nodes[index].id;
     return null;
   }
-  function distanceToSegment(point, start, end) {
-    const dx = end.x - start.x, dy = end.y - start.y, length = dx * dx + dy * dy;
-    if (!length) return Math.hypot(point.x - start.x, point.y - start.y);
-    const t = clamp(((point.x - start.x) * dx + (point.y - start.y) * dy) / length, 0, 1);
-    return Math.hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy));
-  }
-  /** Clip a centre-to-centre segment to the node's border so arrowheads sit on the edge. */
-  /** How a line may meet a node: never shallower than the edge's minimum incidence, which is
-   *  what keeps an arrowhead off the side it touches. 90° meets the side perpendicular. */
-  const EDGE_ANGLE = Object.freeze({ min: 30, max: 90, default: 90 });
-  const edgeAngle = value => {
-    const degrees = Math.round(Number(value));
-    return Number.isFinite(degrees) ? Math.min(EDGE_ANGLE.max, Math.max(EDGE_ANGLE.min, degrees)) : EDGE_ANGLE.default;
-  };
-  function sideOf(bounds, towards) {
-    const dx = towards.x - bounds.cx, dy = towards.y - bounds.cy;
-    const vertical = (dx ? (bounds.w / 2) / Math.abs(dx) : Infinity) <= (dy ? (bounds.h / 2) / Math.abs(dy) : Infinity);
-    return { dx, dy, vertical, side: vertical ? (dx >= 0 ? 1 : -1) : (dy >= 0 ? 1 : -1), lean: vertical ? Math.sign(dy) : Math.sign(dx) };
-  }
-  function anchorAtAngle(node, towards, angle) {
-    const bounds = nodeBounds(node), { dx, dy, vertical, side, lean } = sideOf(bounds, towards);
-    if (!dx && !dy) return { x: bounds.cx, y: bounds.cy };
-    const radians = edgeAngle(angle) * Math.PI / 180;
-    const slide = Math.cos(radians) / Math.sin(radians);
-    if (vertical) {
-      const y = bounds.cy + lean * slide * (bounds.w / 2);
-      return { x: round(bounds.cx + side * bounds.w / 2), y: round(Math.min(bounds.bottom, Math.max(bounds.y, y))) };
-    }
-    const x = bounds.cx + lean * slide * (bounds.h / 2);
-    return { x: round(Math.min(bounds.right, Math.max(bounds.x, x))), y: round(bounds.cy + side * bounds.h / 2) };
-  }
-  function incidenceAt(node, anchor, other) {
-    const bounds = nodeBounds(node);
-    const onVertical = Math.abs(anchor.x - bounds.x) < 0.01 || Math.abs(anchor.x - bounds.right) < 0.01;
-    const onHorizontal = Math.abs(anchor.y - bounds.y) < 0.01 || Math.abs(anchor.y - bounds.bottom) < 0.01;
-    const across = Math.abs(other.x - anchor.x), along = Math.abs(other.y - anchor.y);
-    const vertical = Math.atan2(across, along) * 180 / Math.PI, horizontal = Math.atan2(along, across) * 180 / Math.PI;
-    if (onVertical && onHorizontal) return Math.max(vertical, horizontal);
-    return onVertical ? vertical : horizontal;
-  }
-  function slideToAngle(node, anchor, other, angle) {
-    const bounds = nodeBounds(node);
-    const vertical = Math.abs(anchor.x - bounds.x) < 0.01 || Math.abs(anchor.x - bounds.right) < 0.01;
-    const radians = edgeAngle(angle) * Math.PI / 180, slide = Math.cos(radians) / Math.sin(radians);
-    if (vertical) {
-      const away = Math.sign(anchor.y - other.y) || Math.sign(bounds.cy - other.y) || 1;
-      anchor.y = round(Math.min(bounds.bottom, Math.max(bounds.y, other.y + away * Math.abs(other.x - anchor.x) * slide)));
-    } else {
-      const away = Math.sign(anchor.x - other.x) || Math.sign(bounds.cx - other.x) || 1;
-      anchor.x = round(Math.min(bounds.right, Math.max(bounds.x, other.x + away * Math.abs(other.y - anchor.y) * slide)));
-    }
-    return anchor;
-  }
-  function anchorPoint(node, towards, angle = EDGE_ANGLE.default) {
-    return anchorAtAngle(node, towards, angle);
-  }
-  /** The two ends of a leg, each meeting its side at least at the edge's minimum incidence. */
-  function anchorPair(from, to, first, last, angle) {
-    let start = anchorAtAngle(from, first, angle), end = anchorAtAngle(to, last, angle);
-    for (let pass = 0; pass < 4; pass++) {
-      const before = `${start.x},${start.y},${end.x},${end.y}`;
-      if (incidenceAt(to, end, start) < edgeAngle(angle)) end = slideToAngle(to, end, start, angle);
-      if (incidenceAt(from, start, end) < edgeAngle(angle)) start = slideToAngle(from, start, end, angle);
-      if (`${start.x},${start.y},${end.x},${end.y}` === before) break;
-    }
-    return [start, end];
-  }
-  function edgeGeometry(from, to, kind, angle = EDGE_ANGLE.default) {
-    const fromBounds = nodeBounds(from), toBounds = nodeBounds(to);
-    const [start, end] = anchorPair(from, to, { x: toBounds.cx, y: toBounds.cy }, { x: fromBounds.cx, y: fromBounds.cy }, angle);
-    const path = kind === 'elbow'
-      ? `M ${start.x} ${start.y} H ${round((start.x + end.x) / 2)} V ${end.y} H ${end.x}`
-      : `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
-    return { start, end, path, mid: { x: round((start.x + end.x) / 2), y: round((start.y + end.y) / 2) } };
-  }
+  // Geometry is delegated: `board-source.js` owns the one implementation, and the keys the
+  // tests and the PNG export use stay the same.
+  const EDGE_ANGLE = sourceApi().EDGE_ANGLE;
+  const { edgeAngle, anchorPoint, anchorAtAngle, incidenceAt, distanceToSegment, edgeGeometry } = sourceApi();
+
   function hitEdge(nodes, edges, point, tolerance = LIMITS.hit) {
     const byId = new Map(nodes.map(node => [node.id, node]));
     for (let index = edges.length - 1; index >= 0; index--) {
@@ -240,11 +180,12 @@
     return { schema: 1, title: trimmed, origin: 'user', status: 'saved', nodes: tidyTree(nodes, edges), edges };
   }
 
-  const sizeFor = kind => DEFAULT_SIZE[kind] || DEFAULT_SIZE.text;
   /** New edges follow the panel's current line style, so a preference sticks while drawing. */
   const edgeDefaults = () => ({ kind: pendingEdgeKind, angle: pendingEdgeAngle });
   let pendingEdgeKind = 'arrow';
   let pendingEdgeAngle = EDGE_ANGLE.default;
+  /** Sizes come from the source module; an unknown kind falls back to the text box. */
+  const sizeFor = kind => sourceApi().DEFAULT_SIZE[kind] ?? sourceApi().DEFAULT_SIZE.text;
   function createNode(kind, point, text) {
     if (!NODE_KINDS.includes(kind)) throw new Error('不受支持的节点类型。');
     const size = sizeFor(kind);
@@ -373,24 +314,20 @@
 
   const emptyBoard = () => ({ schema: 1, title: '未命名画板', origin: 'user', status: 'saved', view: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [] });
 
-  /** One place decides how an edge is shaped, styled and hit-tested. */
+  /** One place decides how an edge is shaped, styled and hit-tested. It is the source module's
+   *  implementation, so the drawn output and the exported PNG can never disagree. */
   function geometryFor(edge, from, to) {
-    const api = source();
-    if (api) {
-      // `points` is the drawn shape (elbow corners included); `userPoints` is what the
-      // reader placed, which is what a bend-point drag must edit.
-      const userPoints = api.edgePoints(from, to, edge.waypoints ?? [], edge.angle);
-      const points = api.edgeRenderPoints(from, to, edge.kind ?? 'arrow', edge.waypoints ?? [], edge.angle);
-      return { start: points[0], end: points[points.length - 1], points, userPoints, path: api.edgePath(points, edge.kind ?? 'arrow'), mid: api.edgeMidpoint(points) };
-    }
-    const geometry = edgeGeometry(from, to, edge.kind, edge.angle);
-    return { ...geometry, points: [geometry.start, geometry.end], userPoints: [geometry.start, geometry.end] };
+    const api = sourceApi();
+    // `points` is the drawn shape (elbow corners included); `userPoints` is what the reader
+    // placed, which is what a bend-point drag must edit.
+    const userPoints = api.edgePoints(from, to, edge.waypoints ?? [], edge.angle);
+    const points = api.edgeRenderPoints(from, to, edge.kind ?? 'arrow', edge.waypoints ?? [], edge.angle);
+    return { start: points[0], end: points[points.length - 1], points, userPoints, path: api.edgePath(points, edge.kind ?? 'arrow'), mid: api.edgeMidpoint(points) };
   }
 
   function edgeHitDistance(edge, from, to, point) {
     const geometry = geometryFor(edge, from, to);
-    const api = source();
-    return api ? api.distanceToPoints(geometry.points, point) : distanceToSegment(point, geometry.start, geometry.end);
+    return sourceApi().distanceToPoints(geometry.points, point);
   }
 
   const EDGE_STROKE = { arrow: '#6b7268' };
@@ -525,6 +462,11 @@
     let tool = 'select';
     let selection = new Set();
     let open = false;
+    /** False until a board record has actually loaded. The canvas is interactive as soon as the
+     *  view opens, and the first listing may still be waiting out the server's admission retry, so
+     *  without this guard a shape drawn in that window lands on an unsaved board that the load
+     *  then replaces — the reader's work would disappear with no warning. */
+    let ready = false;
     let history = [];
     let historyIndex = -1;
     let saveTimer = null;
@@ -810,7 +752,10 @@
     }
 
     async function flush({ keepalive = false } = {}) {
-      if (!live || !boardId || !pendingSave) return;
+      // `boardId` is absent until the first record loads, so an edit made during that window has
+      // nowhere to go; saying so beats pretending it was stored.
+      if (!live || !boardId) { pendingSave = false; if (live) status('画板尚未读取完成，这次改动没有保存。', 'error'); return; }
+      if (!pendingSave) return;
       // Held back until the open edit commits: the node being typed into is empty right now.
       if (editor) return;
       const pruned = pruneEmptyNodes(board);
@@ -1223,7 +1168,20 @@
       select(created);
     }
 
+    /** The drawing tools are meaningless until a record has loaded, so they are plainly disabled
+     *  rather than silently mutating a board that is about to be replaced. */
+    function applyReady() {
+      for (const id of Object.values(TOOL_IDS)) {
+        const button = $(id);
+        if (button) button.disabled = !ready;
+      }
+      stage.classList.toggle('is-loading', !ready);
+    }
+
     function setTool(next) {
+      // The click has already happened; refusing here means the reader gets a reason instead of
+      // an edit that the pending load would discard.
+      if (!ready && next !== 'select' && next !== 'pan') { status('画板还在读取，请稍候再绘制。'); return; }
       tool = next;
       for (const [name, id] of Object.entries(TOOL_IDS)) {
         const button = $(id);
@@ -1302,6 +1260,8 @@
       else view = viewportFor(board.nodes, surfaceSize());
       render(); renderInspector(); writeLayoutControls(layoutBlock());
       if (boardList) boardList.value = boardId;
+      ready = true;
+      applyReady();
       status('已载入');
     }
 
@@ -1309,6 +1269,11 @@
       open = true;
       root.hidden = false;
       doc.body.classList.add('board-mode');
+      // Painting is refused until a record has loaded, so the reader never draws on a board that
+      // the pending listing is about to replace.
+      ready = false;
+      applyReady();
+      status('正在读取画板…');
       svg.focus?.();
       let result;
       try { result = await refreshList(); }
@@ -1332,6 +1297,8 @@
       const wanted = boardId && result.boards.some(summary => summary.id === boardId) ? boardId : result.boards[0].id;
       try { await load(wanted); }
       catch (error) { if (live) status(error.message || '无法打开这个画板', 'error'); }
+      // The record is on screen but the caller may have failed; the tools stay off until it is.
+      applyReady();
     }
 
     async function closeView({ focus = true } = {}) {
@@ -1990,6 +1957,6 @@
   window.PaperBoard = Object.freeze({
     create, model, outline, renderToCanvas, createNode, paperNode, nodeFromGraphPayload, tidyTree, placeInColumn, boardFromPapers,
     LIMITS, NODE_KINDS, KIND_LABEL, RELATIONS, RELATION_ORDER, EDGE_KINDS, EDGE_ANGLE, COLORS, DEFAULT_SIZE,
-    geometry: { round, round3, clamp, nodeBounds, toScene, toScreen, applyZoom, boundsOf, viewportFor, hitNode, hitEdge, edgeGeometry, anchorPoint, anchorAtAngle, incidenceAt, edgeAngle, distanceToSegment, normalizeRect, idsInRect },
+    geometry: { round, round3, clamp, EDGE_ANGLE, nodeBounds, toScene, toScreen, applyZoom, boundsOf, viewportFor, hitNode, hitEdge, edgeGeometry, anchorPoint, anchorAtAngle, incidenceAt, edgeAngle, distanceToSegment, normalizeRect, idsInRect },
   });
 })();

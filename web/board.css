@@ -46,6 +46,8 @@
 #board-canvas.is-pan{cursor:grab}
 #board-canvas.is-panning{cursor:grabbing}
 #board-canvas.is-drawing{cursor:crosshair}
+/* Until the board record loads, the canvas is present but cannot be drawn on. */
+.board-stage.is-loading #board-canvas{cursor:progress}
 .board-node{cursor:move}
 .board-node-shape{fill:var(--dsw-alias-bg-layer-2);stroke:var(--line);stroke-width:1.5}
 .board-node-kind-note .board-node-shape{fill:var(--dsw-alias-state-warn-tertiary);stroke:var(--dsw-alias-state-warn-label)}

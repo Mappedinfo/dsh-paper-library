@@ -16,6 +16,11 @@
 
   const SOURCE_SCHEMA = 'paper-library-board.v1';
   const STYLE_SCHEMA = 'paper-library-board-style.v1';
+  // ── Vocabulary ────────────────────────────────────────────────────────────────
+  // This module is the single owner of what a board file may contain and how an edge is drawn.
+  // `web/board.js` reads these instead of keeping its own copies, and
+  // `tests-js/board-vocabulary.test.mjs` asserts they still match the host's validator, so a
+  // type added on one side cannot drift from the other silently.
   const NODE_KINDS = ['text', 'note', 'concept', 'paper', 'rect', 'ellipse', 'diamond'];
   const EDGE_KINDS = ['arrow', 'line', 'elbow'];
   const RELATIONS = ['related', 'supports', 'contradicts', 'cites', 'explains', 'extends'];
@@ -23,7 +28,8 @@
   const MODES = ['tree', 'radial', 'layered'];
   const DIRECTIONS = ['lr', 'tb', 'rl', 'bt'];
   const LIMITS = { nodes: 400, edges: 800, text: 2000, label: 200, title: 200, waypoints: 8, gapMin: 8, gapMax: 400, coordinate: 1000000 };
-  const COLORS = /^#[0-9a-fA-F]{6}$/;
+  const DEFAULT_SIZE = { text: { w: 220, h: 64 }, note: { w: 220, h: 140 }, concept: { w: 200, h: 100 }, paper: { w: 260, h: 120 }, rect: { w: 220, h: 140 }, ellipse: { w: 200, h: 120 }, diamond: { w: 200, h: 120 } };
+  const COLOUR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
   const fail = message => { throw new Error(message); };
   const isObject = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -43,7 +49,7 @@
   };
   const tint = (value, name) => {
     if (value === undefined) return undefined;
-    if (typeof value !== 'string' || !COLORS.test(value)) fail(`${name}必须是 #rrggbb 颜色。`);
+    if (typeof value !== 'string' || !COLOUR_PATTERN.test(value)) fail(`${name}必须是 #rrggbb 颜色。`);
     return value.toLowerCase();
   };
   const amount = (value, name, low, high) => {
@@ -172,6 +178,13 @@
       out.push(point);
     }
     return out;
+  }
+
+  /** The whole edge geometry in one call: what the panel draws, hit-tests and exports.
+   *  It is the same code the paths above use, exposed so `board.js` needs no second copy. */
+  function edgeGeometry(from, to, kind, angle = EDGE_ANGLE.default) {
+    const points = edgeRenderPoints(from, to, kind ?? 'arrow', [], angle);
+    return { start: points[0], end: points[points.length - 1], path: edgePath(points, kind ?? 'arrow'), mid: edgeMidpoint(points) };
   }
 
   function edgePath(points, kind) {
@@ -718,8 +731,7 @@
     const source = validateSource(rawSource);
     const style = validateStyle(rawStyle);
     const api = typeof window !== 'undefined' ? window.PaperBoard : undefined;
-    const defaults = { text: { w: 220, h: 64 }, note: { w: 220, h: 140 }, concept: { w: 200, h: 100 }, paper: { w: 260, h: 120 }, rect: { w: 220, h: 140 }, ellipse: { w: 200, h: 120 }, diamond: { w: 200, h: 120 } };
-    const sizeFor = kind => (api?.DEFAULT_SIZE ?? defaults)[kind] ?? defaults.text;
+    const sizeFor = kind => DEFAULT_SIZE[kind] ?? DEFAULT_SIZE.text;
     // Source ids are already valid board identifiers, and keeping them verbatim is what
     // makes board → source → board stable instead of growing a prefix on every pass.
     const idFor = id => `${options.prefix ?? ''}${id}`.slice(0, 60);
@@ -803,8 +815,8 @@
   }
 
   window.PaperBoardSource = Object.freeze({
-    SOURCE_SCHEMA, STYLE_SCHEMA, LIMITS, MODES, DIRECTIONS, NODE_KINDS, EDGE_KINDS, RELATIONS, ARROWS, EDGE_ANGLE,
-    anchorPoint, anchorAtAngle, incidenceAt, edgeAngle, edgePoints, edgeRenderPoints, edgePath, edgeMidpoint, distanceToPoints, nearestLeg, dragWaypoint,
+    SOURCE_SCHEMA, STYLE_SCHEMA, LIMITS, DEFAULT_SIZE, MODES, DIRECTIONS, NODE_KINDS, EDGE_KINDS, RELATIONS, ARROWS, EDGE_ANGLE,
+    anchorPoint, anchorAtAngle, incidenceAt, edgeAngle, edgePoints, edgeRenderPoints, edgeGeometry, edgePath, edgeMidpoint, distanceToSegment, distanceToPoints, nearestLeg, dragWaypoint,
     layout, nodeStyle, edgeStyle, toSource, fromSource, validateSource, validateStyle,
   });
 })();

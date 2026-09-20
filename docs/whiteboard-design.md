@@ -376,9 +376,19 @@ Synthetic-only validation, following the existing project discipline:
   store with no private data. **Implemented, 8 cases.**
 - `tests-js/board-panel.test.mjs` — canvas reducer behavior (create/drag/connect/delete/undo/redo,
   tidy-tree layout determinism) through the same fake-DOM harness the other panels use.
-  **Implemented, 24 cases** (geometry, model bounds, paper nodes, outline, panel persistence,
-  conflict recovery, listing failure, tidy arranging, settle-on-close, graph-node conversion and
-  the closed-board graph path, the late reveal of the project picker and the 「更多」 toggle).
+  **Implemented, 30 cases** (geometry — including by-identity assertions that `board.geometry`'s
+  edge helpers *are* `board-source.js`'s functions — model bounds, paper nodes, outline, panel
+  persistence, conflict recovery, listing failure, tidy arranging, settle-on-close, graph-node
+  conversion and the closed-board graph path, the late reveal of the project picker, the 「更多」
+  toggle, and the loading gate that keeps the drawing tools off until a record has loaded).
+- `tests-js/board-vocabulary.test.mjs` — the one-owner contract: the node kinds, edge kinds,
+  relations, arrow ends, layout modes and directions that `web/board-source.js` states must equal
+  the private sets `src/harness/board-store.mjs` validates with, its limits must equal
+  `BOARD_LIMITS` under the host's longer names, every kind must have a positive default size and
+  survive the source codec, and the panel must still read them through `sourceApi()` rather than
+  restating a literal. **Implemented, 5 cases.** The host constants are read from its source
+  because they are deliberately not exported, and a missing declaration fails the test rather than
+  being skipped.
 - `tests-js/board-references.test.mjs` — token parse/render, chip codec round-trip, snapshot
   integrity, and `agent/pre-step` expansion including the malformed and over-budget paths.
   **Implemented, 6 cases** (including the incidence sweep).
