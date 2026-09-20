@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-20T13:35:18.397Z",
+  "verified_at": "2026-09-20T14:10:06.470Z",
   "scope": "Isolated native DSH profile with a deterministic keyless model and a synthetic library; authenticated whiteboard records, immutable snapshot, revision-checked writes, tool exposure, composer-token expansion at agent/pre-step, an unresolvable reference failing the turn, and deletion preserving frozen material. No real profile, external model request or private document is involved.",
   "checks": [
     "unauthenticated-whiteboard-access-refused",

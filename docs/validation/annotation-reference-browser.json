@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-20T14:08:55.282Z",
+  "verified_at": "2026-09-20T14:11:29.076Z",
   "ok": true,
   "checks": [
     "three-of-45-new-notes-across-pages-and-20-row-pagination",
@@ -27,40 +27,40 @@
         "hostRssMiB": null,
         "chromiumProcessRssSumMiB": null,
         "chromiumProcessCount": 4,
-        "mainPageJSHeapUsedMiB": 33.03667449951172
+        "mainPageJSHeapUsedMiB": 33.23015213012695
       },
       {
         "stage": "reference-drawer-46-notes",
         "hostRssMiB": null,
         "chromiumProcessRssSumMiB": null,
         "chromiumProcessCount": 4,
-        "mainPageJSHeapUsedMiB": 31.94965362548828
+        "mainPageJSHeapUsedMiB": 33.45894241333008
       },
       {
         "stage": "after-refresh-and-reference-inspector",
         "hostRssMiB": null,
         "chromiumProcessRssSumMiB": null,
         "chromiumProcessCount": 4,
-        "mainPageJSHeapUsedMiB": 34.98325729370117
+        "mainPageJSHeapUsedMiB": 33.513065338134766
       },
       {
         "stage": "idle-after-three-completed-model-turns",
         "hostRssMiB": null,
         "chromiumProcessRssSumMiB": null,
         "chromiumProcessCount": 4,
-        "mainPageJSHeapUsedMiB": 35.871070861816406
+        "mainPageJSHeapUsedMiB": 35.58137893676758
       }
     ],
     "sampledMaxHostRssMiB": 0,
     "sampledMaxChromiumProcessRssSumMiB": 0,
-    "sampledMaxMainPageJSHeapUsedMiB": 35.871070861816406,
+    "sampledMaxMainPageJSHeapUsedMiB": 35.58137893676758,
     "scope": "Four samples in a synthetic 46-note browser walkthrough; browser process RSS double-counts shared memory. JS heap covers the main page renderer only. Neither is total physical application memory or a measured high-water mark."
   },
   "screenshots": [
-    ".local/paper-chat-test-home/runs/reference-browser-c45d9a6c-bcb7-406c-b903-239e348dc058/reference-drawer-wide.png",
-    ".local/paper-chat-test-home/runs/reference-browser-c45d9a6c-bcb7-406c-b903-239e348dc058/reference-drawer-narrow.png",
-    ".local/paper-chat-test-home/runs/reference-browser-c45d9a6c-bcb7-406c-b903-239e348dc058/native-reference-chip.png",
-    ".local/paper-chat-test-home/runs/reference-browser-c45d9a6c-bcb7-406c-b903-239e348dc058/native-restored-reference.png"
+    ".local/paper-chat-test-home/runs/reference-browser-fba254ba-86ac-406a-a463-a2c1a5a60778/reference-drawer-wide.png",
+    ".local/paper-chat-test-home/runs/reference-browser-fba254ba-86ac-406a-a463-a2c1a5a60778/reference-drawer-narrow.png",
+    ".local/paper-chat-test-home/runs/reference-browser-fba254ba-86ac-406a-a463-a2c1a5a60778/native-reference-chip.png",
+    ".local/paper-chat-test-home/runs/reference-browser-fba254ba-86ac-406a-a463-a2c1a5a60778/native-restored-reference.png"
   ],
   "limitations": [
     "Synthetic documents only; no real-library or model-quality claim",
