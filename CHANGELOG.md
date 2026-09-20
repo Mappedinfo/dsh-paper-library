@@ -22,7 +22,13 @@
 - **一份几何实现**：`web/board.js` 曾自带一套边几何（`distanceToSegment`／`anchorAtAngle`／`incidenceAt`／`slideToAngle`／`anchorPair`／局部 `edgeGeometry`），而两个宿主实际绘制与导出 PNG 用的是 `web/board-source.js` 的那一套——两份实现各自演化。现在面板只保留 `geometryFor`（组合调用、给出 `points`/`userPoints`/`path`/`mid`），其余几何全部直接取自源模块；`board.geometry.edgeGeometry` 等**就是**源模块的函数本身（面板测试按函数 identity 断言，而非只比结果）。用 3600 组排布／类型对做实测：改动前有 **1208 组**折线路径或中点不一致，而旧测试断言的正是面板那份副本；`tests-js/board-panel.test.mjs` 现断言 `M 100 30 H 50`（单一实现的折线路径）。
 - **一份词汇表**：`board-source.js` 是节点类型、连线类型、关系、箭头端、排版模式与方向、限制与默认尺寸的唯一出处；面板通过 `sourceApi()` 读取（缺模块时**直接报错**，而不是悄悄退回第二份实现），宿主 `board-store.mjs` 在写入时校验同一套值。两者一个是经典脚本、一个是 ES module，无法互相 import，所以新增 `tests-js/board-vocabulary.test.mjs`：直接从宿主源码里读出它私有的 `new Set([...])` 常量与 `BOARD_LIMITS` 逐字段比对（含"每种类型都有正的默认尺寸""面板不得再出现字面量列表"），一侧加类型而另一侧没加会立刻失败。本轮补回一次误删的大段代码（`hitEdge`/`tidyTree`/`model`/`outline` 等），并让 `sizeFor`、`LIMITS`、`edgeDefaults` 都从源模块取值。
 - **启动竞态修复（真实缺陷）**：宿主同时只受理 2 个 JSON 请求、其余返回 429，`api()` 会退避重试（最多约 7.5 秒），而画布在 `?view=board` 打开时就已经可交互——在这段窗口里画的形状落在**尚未保存的内存画板**上，随后到达的 `board_get` 会用记录内容整体替换它，读者的改动**无声消失**。浏览器回执因此真实变红（连续 3 次都停在同一条断言，`board_list` 迟迟不返回，随后 `board-select` 从空变成另一张画板、状态显示「已载入」）。现在：记录未载入前绘制工具是**禁用**的（`setTool` 如果被程序化调用会给出原因「画板还在读取，请稍候再绘制。」）、画布显示进度光标、没有 `boardId` 时的写入改为明确报告「画板尚未读取完成，这次改动没有保存。」而不是假装保存；列表读取失败也不再放行绘制。新增 2 个面板用例（载入前拒绝绘制／载入后可正常绘制；列表失败不放行且不创建画板）。
-- 验证：**504 JavaScript / 220 Python 测试**、`validate.mjs` 24 项、board 31 项（改动后重跑，含夹角检查）、standalone 15 项回执全绿。
+### 工程：画板模块拆分（board.js → render + bridge）
+
+- **`web/board-render.js`（新，208 行）**：形状／连线／视口的绘制从 `web/board.js` 移出（后者 1962 → 1828 行，即约 175 行净减）。渲染器是工厂：`board`、`view`、`selection`、`live`、`connectFrom` **以回调形式注入**，因为面板是"整体重新赋值"这些变量（约 12 处，含滚轮缩放与平移），而渲染器一直活着——若在构造时捕获副本就会画出旧画板。元素映射（`nodeEls`/`edgeEls`）与 SVG 元素工厂 `createElements` 也归它所有，面板与渲染器共用同一个建元素入口；撤销/重做/删除控件的可用状态仍由面板在 `onRendered` 里决定（那是外壳的事，不是渲染器的事）。
+- **`web/board-bridge.js`（新，~130 行）**：与 DSH 客户端插件的 postMessage 握手（`board_draft`、父窗口/同源/版本/请求号四重校验、20 秒超时、关闭时清理）独立成模块。写测试时抓到拆分本身引入的真实缺陷：面板原先**懒创建** bridge 而监听器写成 `bridge?.onResult`，于是**第一次发送之前**到达的答复（或第二次发送）落在 null 上被静默丢弃——现在 bridge 在绑定监听器之前只创建一次。
+- **接线**：两个新模块都按既有规矩登记在 6 处——`web/index.html`、`site/index.html` 的脚本标签，`src/http.mjs` 静态白名单，`scripts/build-site.mjs` 拷贝与日志清单，面板测试沙箱，以及 `validate.mjs` 的语法检查；`web_asset_wiring` 守卫会兜住漏登记。
+- **测试**：面板测试 30 → 33/34 例。新增 2 例桥接（身份载荷不含画板内容、五类应被忽略的答复、主对话拒绝时如实提示、`dispose()` 后不再监听、无父窗口／无会话／存在冲突时**放弃之前**就返回）与 1 例渲染器契约（后续渲染替换整棵树而非追加、元素映射跟随当前画板、`applyView` 的变换与网格间距按当前 `view` 计算、拖拽快路径复用元素并就地改写几何）。沙箱现在给"帧"真实的 message 通道，并让 `window === document.defaultView`（真实浏览器语义），这也是上述潜在缺陷能被测出来的前提。
+- 验证：**507 JavaScript / 220 Python 测试**、`validate.mjs` 26 项、board 31 项与 standalone 15 项回执在真实 Chromium 下重跑全绿。
 
 ### 工程：`web/style.css` 恢复可读排版
 

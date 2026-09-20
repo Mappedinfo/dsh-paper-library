@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-20T12:52:24.404Z",
+  "verified_at": "2026-09-20T12:54:25.618Z",
   "scope": "The GitHub Pages build served by a local static server: browser-local persistence with a content revision, reload restore, tidy-tree arranging, JSON export/import across profiles including duplicate-identity handling, PNG export, hidden host-only controls, tombstoned deletion, and zero external requests or page errors. No plugin host, library, model or network service is involved, and browser storage is convenience rather than a durable store — the exported JSON is the backup.",
   "checks": [
     "the-independent-page-opens-a-board-and-hides-host-only-controls",

@@ -25,6 +25,7 @@ const commands=[
   ['annotation_threads_syntax',process.execPath,['--check','web/annotation-threads.js']],
   ['board_syntax',process.execPath,['--check','web/board.js']],
   ['board_bridge_syntax',process.execPath,['--check','web/board-bridge.js']],
+  ['board_render_syntax',process.execPath,['--check','web/board-render.js']],
   ['standalone_syntax',process.execPath,['--check','site/standalone.js']],
   ['site_build',process.execPath,['scripts/build-site.mjs']],
   ['settings_syntax',process.execPath,['--check','web/settings.js']],

@@ -7,6 +7,7 @@ const source = await readFile(new URL('../web/board.js', import.meta.url), 'utf8
 const sourceModule = await readFile(new URL('../web/board-source.js', import.meta.url), 'utf8');
 const mermaidModule = await readFile(new URL('../web/board-mermaid.js', import.meta.url), 'utf8');
 const bridgeModule = await readFile(new URL('../web/board-bridge.js', import.meta.url), 'utf8');
+const renderModule = await readFile(new URL('../web/board-render.js', import.meta.url), 'utf8');
 
 class ClassList {
   constructor() { this.values = new Set(); }
@@ -125,6 +126,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
   vm.runInContext(sourceModule, context);
   vm.runInContext(mermaidModule, context);
   vm.runInContext(bridgeModule, context);
+  vm.runInContext(renderModule, context);
   vm.runInContext(source, context);
   const board = context.window.PaperBoard;
   const boardSource = context.window.PaperBoardSource;
@@ -1225,4 +1227,84 @@ test('the bridge states its own limits instead of pretending the chip was placed
   assert.equal(await sessionless.panel.conversation.send(), false);
   assert.match(sessionless.messages.at(-1), /会话尚未就绪/);
   assert.deepEqual(sessionless.window.__posted, [], 'no request is posted without a conversation');
+});
+
+test('the renderer draws the current board through its accessors, not a captured copy', async () => {
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  assert.ok(harness.window.PaperBoardRender, 'board-render.js is loaded beside the panel');
+  const { create, createElements } = harness.window.PaperBoardRender;
+  const { svgEl, el } = createElements(harness.doc);
+  assert.equal(typeof svgEl, 'function');
+  assert.equal(typeof el, 'function');
+
+  // A standalone renderer over state the test owns: this is what proves the accessors are read on
+  // every call. A renderer that captured `board` at construction would keep drawing the first one.
+  const stage = harness.doc.createElement('div');
+  const viewport = svgEl('g');
+  const edgeLayer = svgEl('g'), nodeLayer = svgEl('g');
+  const empty = harness.doc.createElement('div');
+  viewport.append(edgeLayer, nodeLayer);
+  let board = { schema: 1, title: 't', origin: 'user', status: 'saved', nodes: [], edges: [] };
+  let view = { x: 0, y: 0, zoom: 1 };
+  let selection = new Set();
+  let rendered = 0;
+  const painter = create({
+    doc: harness.doc,
+    dom: { stage, viewport, edgeLayer, nodeLayer, empty },
+    board: () => board,
+    view: () => view,
+    selection: () => selection,
+    live: () => true,
+    connectFrom: () => null,
+    sourceApi: () => harness.boardSource,
+    nodeBounds: harness.board.geometry.nodeBounds,
+    geometryFor: (edge, from, to) => ({ start: { x: from.x, y: from.y }, end: { x: to.x, y: to.y }, points: [{ x: from.x, y: from.y }, { x: to.x, y: to.y }], userPoints: [], path: `M ${from.x} ${from.y} L ${to.x} ${to.y}`, mid: { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 } }),
+    round: harness.board.geometry.round,
+    nodeRadius: { text: 4, note: 0, rect: 0, concept: 10, paper: 10 },
+    onRendered: () => { rendered++; },
+  });
+
+  const a = { id: 'n-a', kind: 'note', x: 0, y: 0, w: 100, h: 60, text: 'A', origin: 'user' };
+  const b = { id: 'n-b', kind: 'concept', x: 300, y: 0, w: 100, h: 60, text: 'B', origin: 'user' };
+  board = { ...board, nodes: [a, b], edges: [{ id: 'e-1', from: 'n-a', to: 'n-b', kind: 'arrow' }] };
+  painter.render();
+  assert.equal(rendered, 1, 'the panel chrome hook runs once per full render');
+  assert.equal(nodeLayer.children.length, 2);
+  assert.equal(edgeLayer.children.length, 1);
+  assert.equal(empty.hidden, true, 'a board with nodes hides the empty hint');
+  assert.ok(painter.nodeElement('n-a'), 'the node element map is available to the drag path');
+  assert.ok(painter.edgeElement('e-1'));
+
+  // A later board, without a second render call, must be what the map reports.
+  board = { ...board, nodes: [a] };
+  painter.render();
+  assert.equal(nodeLayer.children.length, 1, 'the second render replaced the tree instead of appending');
+  assert.equal(painter.nodeElement('n-b'), undefined, 'the map follows the board it just drew');
+  assert.equal(empty.hidden, true);
+
+  board = { ...board, nodes: [] };
+  painter.render();
+  assert.equal(nodeLayer.children.length, 0);
+  assert.equal(empty.hidden, false, 'an empty board shows its hint again');
+
+  // The viewport transform and the grid spacing are the view's, read live.
+  view = { x: 10, y: 20, zoom: 2 };
+  painter.applyView();
+  assert.equal(viewport.getAttribute('transform'), 'translate(10,20) scale(2)');
+  assert.equal(stage.style.backgroundSize, '48px 48px');
+  assert.equal(stage.style.backgroundPosition, '10px 20px');
+  assert.equal(harness.registry.get('board-zoom-label').textContent, '200%');
+
+  // The fast drag path rewrites geometry in place: no new elements, and the shape follows.
+  board = { ...board, nodes: [{ ...a, x: 40, y: 30 }], edges: [] };
+  painter.render();
+  const before = nodeLayer.children[0];
+  board = { ...board, nodes: [{ ...a, x: 90, y: 70 }] };
+  painter.redrawGeometry();
+  assert.equal(nodeLayer.children[0], before, 'a drag reuses the element instead of rebuilding it');
+  assert.equal(before.firstChild.getAttribute('transform'), 'translate(90,70)');
+  const shape = before.firstChild.firstChild;
+  assert.equal(shape.getAttribute('width'), '100');
+  assert.equal(shape.getAttribute('height'), '60');
 });
