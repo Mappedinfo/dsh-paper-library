@@ -72,6 +72,21 @@ try {
   assert.ok(body.length > 3000, `the exported PNG carries the drawing (${body.length} bytes)`);
   record('tidy-arranging-and-png-export-work-on-the-live-site');
 
+  // The Mermaid entry is a *feature* of the deployed page, not just a served asset: it was
+  // copied by the site build but never loaded by the template, so the served-file check alone
+  // would have kept passing while the feature was dead.
+  assert.equal(await page.evaluate(() => Boolean(window.PaperBoardMermaid)), true, 'the live page loads the Mermaid module');
+  await page.locator('#board-menu-open').click();
+  await page.waitForFunction(() => document.getElementById('board-menu')?.classList.contains('is-open'));
+  await page.locator('#board-mermaid-open').click();
+  await page.locator('#board-mermaid-text').fill('flowchart LR\n  L1[线上] --> L2{可用?}\n  L2 -- 是 --> L3([完成])');
+  await page.locator('#board-mermaid-parse').click();
+  await page.waitForFunction(() => /解析出 3 个节点、3 条连线（LR 方向）/.test(document.getElementById('board-mermaid-status')?.textContent || ''));
+  await page.locator('#board-source-apply').click();
+  await page.waitForFunction(() => JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true).some(record => record.board.nodes.some(node => node.text === '线上')));
+  await page.locator('#board-source-dialog .dialog-close').first().click();
+  record('the-live-page-parses-mermaid-into-a-board');
+
   // A board that lives in the repository as a readable source file renders from its URL.
   const visitor = await browser.newPage({ viewport: { width: 1280, height: 820 } });
   visitor.on('pageerror', error => errors.push(error.message));
@@ -94,7 +109,7 @@ try {
 await writeFile(join(project, 'docs/validation/board-pages-live.json'), JSON.stringify({
   verified_at: new Date().toISOString(),
   url: site,
-  scope: 'The deployed GitHub Pages site, read over the public network and exercised in real Chromium: asset delivery, draw/persist/reload, tidy-tree arranging, PNG export, hidden host-only controls, and no third-party requests or page errors. Browser storage on the visitor is convenience, not a durable store. This does not measure availability, latency, capacity or the host\'s security posture.',
+  scope: 'The deployed GitHub Pages site, read over the public network and exercised in real Chromium: asset delivery, draw/persist/reload, tidy-tree arranging, PNG export, the Mermaid entry parsing a pasted flowchart into a board, hidden host-only controls, and no third-party requests or page errors. Browser storage on the visitor is convenience, not a durable store. This does not measure availability, latency, capacity or the host\'s security posture.',
   checks, checks_count: checks.length,
 }, null, 2) + '\n');
 console.log(JSON.stringify({ site, checks: checks.length, errors, external }));

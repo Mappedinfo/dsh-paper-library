@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-18T16:52:21.251Z",
+  "verified_at": "2026-09-20T11:45:30.947Z",
   "scope": "Synthetic standalone UI: ask/auto markup modes, picker-to-PDF colour contract, rail flash colour and persisted layout. Chromium only; no model call or external request.",
   "checks": [
     "the-reader-defaults-to-select-then-ask",
@@ -14,6 +14,6 @@
   "externalRequests": 0,
   "modelRequests": 0,
   "screenshots": [
-    ".local/markup-mode-485hbg/auto-highlight.png"
+    ".local/markup-mode-lhEWMe/auto-highlight.png"
   ]
 }

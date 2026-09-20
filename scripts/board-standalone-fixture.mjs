@@ -209,6 +209,28 @@ try {
   await page.locator('#board-source-dialog .dialog-close').first().click();
   record('the-standalone-build-reads-and-applies-the-source-and-style-files');
 
+  // Mermaid lives in the same source dialog, and the standalone page must load the module:
+  // it was copied by the site build but never referenced by the template, so the feature was
+  // dead online while the asset itself answered 200.
+  assert.equal(await page.evaluate(() => Boolean(window.PaperBoardMermaid)), true, 'the standalone page loads the Mermaid module');
+  await openMenu('#board-menu-open', 'board-menu');
+  await page.locator('#board-mermaid-open').click();
+  await page.locator('#board-mermaid-text').fill('flowchart LR\n  S1[独立站的采集] --> S2{合格?}\n  S2 -- 是 --> S3([入库])\n  S1 --> S3');
+  await page.locator('#board-mermaid-parse').click();
+  await page.waitForFunction(() => /解析出 3 个节点、3 条连线（LR 方向）/.test(document.getElementById('board-mermaid-status')?.textContent || ''));
+  const mermaidSource = JSON.parse(await page.locator('#board-source-content').inputValue());
+  assert.deepEqual(mermaidSource.nodes.map(node => [node.id, node.kind]), [['S1', 'rect'], ['S2', 'diamond'], ['S3', 'rect']]);
+  assert.equal(JSON.parse(await page.locator('#board-source-style').inputValue()).layout.direction, 'lr');
+  await page.locator('#board-source-apply').click();
+  await page.waitForFunction(() => {
+    const board = JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true)[0].board;
+    return board.nodes.some(node => node.text === '独立站的采集') && board.nodes.filter(node => node.id.startsWith('S')).length === 3;
+  });
+  await page.locator('#board-mermaid-generate').click();
+  assert.match(await page.locator('#board-mermaid-text').inputValue(), /^flowchart LR$/m, 'and writes the canvas back as Mermaid');
+  await page.locator('#board-source-dialog .dialog-close').first().click();
+  record('the-standalone-build-parses-mermaid-into-a-board-and-exports-it-again');
+
   // Boards are separate, and deletion hides only the deleted one.
   const nodesInFirstBoard = await page.locator('.board-node').count();
   await openMenu('#board-files-open', 'board-files');

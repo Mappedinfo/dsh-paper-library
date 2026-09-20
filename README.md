@@ -88,7 +88,7 @@
 `localStorage`（按来源与浏览器各自独立，容量约 5 MB，上限 40 张画板 / 4 MiB，界面会报告用量），
 因此**「导出 JSON」才是长期备份**；导入同标识的文件不会覆盖，而是另存为新画板。独立站支持 PNG 导出
 （按模型绘制，不依赖页面样式与字体）。构建与边界见 [docs/board-pages.md](docs/board-pages.md)，
-本地回执见 [docs/validation/board-standalone.json](docs/validation/board-standalone.json)，线上回执见 [docs/validation/board-pages-live.json](docs/validation/board-pages-live.json)（`node scripts/verify-pages.mjs` 可随时复核）。
+本地回执见 [docs/validation/board-standalone.json](docs/validation/board-standalone.json)（15 项，含粘贴 Mermaid 成图），线上回执见 [docs/validation/board-pages-live.json](docs/validation/board-pages-live.json)（`node scripts/verify-pages.mjs` 可随时复核，其中也验证 Mermaid 入口可用）。所有回执的「回执 ← 复现命令」索引见 [docs/validation/README.md](docs/validation/README.md)。
 
 ## 实时伴学
 

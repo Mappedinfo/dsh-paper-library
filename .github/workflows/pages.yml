@@ -10,11 +10,10 @@ on:
   push:
     branches: [main]
     paths:
+      # Every web asset is a site asset: the drawing service is assembled from `web/`, so a
+      # change to any file there — not only the four that used to be listed — must redeploy.
       - 'site/**'
-      - 'web/board.js'
-      - 'web/board.css'
-      - 'web/theme.css'
-      - 'web/index.html'
+      - 'web/**'
       - 'scripts/build-site.mjs'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
