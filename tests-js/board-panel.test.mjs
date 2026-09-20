@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../web/board.js', import.meta.url), 'utf8');
 const sourceModule = await readFile(new URL('../web/board-source.js', import.meta.url), 'utf8');
 const mermaidModule = await readFile(new URL('../web/board-mermaid.js', import.meta.url), 'utf8');
+const bridgeModule = await readFile(new URL('../web/board-bridge.js', import.meta.url), 'utf8');
 
 class ClassList {
   constructor() { this.values = new Set(); }
@@ -59,7 +60,7 @@ function environment(ids = []) {
   return { doc, registry, Element };
 }
 
-function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
+function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, sessionId = null } = {}) {
   const ids = [
     'board-stage', 'board-select', 'board-status', 'board-zoom-label', 'board-zoom-in', 'board-zoom-out', 'board-fit',
     'board-undo', 'board-redo', 'board-delete', 'board-title', 'board-new', 'board-close', 'board-add-paper', 'board-send', 'board-tidy', 'board-fullscreen',
@@ -82,8 +83,40 @@ function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
   const messages = [];
   const timers = [];
   let timersId = 0;
+  // A real frame's `window` IS its document's `defaultView`, and the panel test needs that
+  // identity: the conversation bridge walks from the document up to the parent frame, while the
+  // test reaches the same frame through `window`. Building the view first and pointing both at it
+  // is what makes `window === document.defaultView` true inside the sandbox too.
+  const frameWindow = doc.defaultView;
+  frameWindow.location = { origin: 'https://host.example' };
+  frameWindow.parent = frameWindow;
+  // The frame's own message channel, so `message` listeners registered on `window` are observable.
+  const frameListeners = new Set();
+  const inbox = [];
+  frameWindow.addEventListener = (type, handler) => { if (type === 'message') frameListeners.add(handler); };
+  frameWindow.removeEventListener = (type, handler) => { if (type === 'message') frameListeners.delete(handler); };
+  /** Deliver a message to the frame the way the browser does, with its real source and origin. */
+  frameWindow.deliver = (data, { source = frameWindow.parent, origin = frameWindow.location.origin } = {}) => {
+    inbox.push(data);
+    for (const handler of [...frameListeners]) {
+      handler({ source, origin, data });
+    }
+  };
+  frameWindow.listenerCount = () => frameListeners.size;
+  frameWindow.inbox = inbox;
+  if (parent) {
+    const posted = [];
+    const parentWindow = {
+      location: { origin: 'https://host.example' },
+      postMessage: message => { posted.push(message); },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+    frameWindow.parent = parentWindow;
+    frameWindow.__posted = posted;
+  }
   const context = {
-    window: {},
+    window: frameWindow,
     document: doc,
     setTimeout: (fn, ms) => { const id = ++timersId; timers.push({ id, fn, ms }); return id; },
     clearTimeout: id => { const index = timers.findIndex(timer => timer.id === id); if (index >= 0) timers.splice(index, 1); },
@@ -91,15 +124,16 @@ function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
   vm.createContext(context);
   vm.runInContext(sourceModule, context);
   vm.runInContext(mermaidModule, context);
+  vm.runInContext(bridgeModule, context);
   vm.runInContext(source, context);
   const board = context.window.PaperBoard;
   const boardSource = context.window.PaperBoardSource;
   if (canvas) { const original = Element.prototype; original.__canvas = canvas; }
-  const panel = board.create({ root, api: api || (async () => ({})), toast: (message) => messages.push(message), ...(capabilities ? { capabilities } : {}) });
+  const panel = board.create({ root, api: api || (async () => ({})), toast: (message) => messages.push(message), ...(capabilities ? { capabilities } : {}), ...(sessionId ? { getSessionId: () => sessionId } : {}) });
   const stage = registry.get('board-stage');
   const svg = stage.children[0];
   return {
-    board, boardSource, panel, doc, registry, root, stage, svg, calls, messages,
+    board, boardSource, panel, doc, registry, root, stage, svg, calls, messages, window: context.window,
     editorArea: () => stage.children.find(child => child.className === 'board-editor-layer')?.children[0] ?? null,
     async runTimers() { const pending = timers.splice(0, timers.length); for (const timer of pending) await timer.fn(); await new Promise(resolve => setImmediate(resolve)); },
     pendingTimers: () => timers.length,
@@ -1098,4 +1132,97 @@ test('a failed listing disables the tools and never fabricates an empty board to
   assert.equal(harness.panel.board().nodes.length, 0);
   const actions = state.map(call => call.action);
   assert.equal(actions.includes('board_create'), false, 'a failed read never creates a board');
+});
+
+test('the conversation bridge posts identity only and trusts the parent frame answer', async () => {
+  state.length = 0;
+  const harness = loadPanel({
+    api: apiStub({ board_snapshot: () => ({ snapshot_id: 'snap-1', board_title: '结构图' }) }),
+    sessionId: 'session-1',
+    parent: true,
+  });
+  await harness.panel.open();
+  const conversation = harness.panel.conversation;
+  assert.equal(harness.window.listenerCount(), 1, 'the panel bound one bridge message listener');
+  const result = data => harness.window.deliver(data);
+  const sent = conversation.send();
+  await new Promise(resolve => setImmediate(resolve));
+  const posted = harness.window.__posted.at(-1);
+  assert.equal(posted.type, 'paper-library:conversation-action');
+  assert.equal(posted.version, 1);
+  assert.equal(posted.action, 'board_draft');
+  assert.equal(posted.sessionId, 'session-1');
+  assert.equal(posted.snapshot_id, 'snap-1', 'the chip carries the frozen snapshot, not the board body');
+  assert.equal(posted.title, '结构图');
+  assert.deepEqual(
+    Object.keys(posted).sort(),
+    ['action', 'board_id', 'requestId', 'sessionId', 'snapshot_id', 'title', 'type', 'version'],
+    'only identity travels: no nodes, edges or titles of the pages themselves',
+  );
+
+  // Anything that is not this protocol, from this frame's parent, and about this request is ignored.
+  result({ type: 'paper-library:conversation-result', version: 2, requestId: posted.requestId, ok: true });
+  assert.equal(conversation.pending(), 1, 'a wrong protocol version cannot settle the request');
+  result({ type: 'something-else', version: 1, requestId: posted.requestId, ok: true });
+  assert.equal(conversation.pending(), 1, 'another message type cannot settle the request');
+  harness.window.deliver({ type: 'paper-library:conversation-result', version: 1, requestId: posted.requestId, ok: true }, { source: {}, origin: 'https://host.example' });
+  assert.equal(conversation.pending(), 1, 'a message from anyone but the parent frame is ignored');
+  harness.window.deliver({ type: 'paper-library:conversation-result', version: 1, requestId: posted.requestId, ok: true }, { origin: 'https://elsewhere.example' });
+  assert.equal(conversation.pending(), 1, 'a message from another origin is ignored');
+  result({ type: 'paper-library:conversation-result', version: 1, requestId: 'board-not-mine', ok: true });
+  assert.equal(conversation.pending(), 1, 'an unknown request id is ignored');
+
+  result({ type: 'paper-library:conversation-result', version: 1, requestId: posted.requestId, ok: true });
+  assert.equal(await sent, true);
+  assert.equal(conversation.pending(), 0);
+  assert.match(harness.messages.at(-1), /已把画板引用放进主输入框/);
+
+  // A refusal from the host is reported, not swallowed into a false success.
+  const refused = conversation.send();
+  await new Promise(resolve => setImmediate(resolve));
+  result({ type: 'paper-library:conversation-result', version: 1, requestId: harness.window.__posted.at(-1).requestId, ok: false, error: '主对话拒绝了这次引用。' });
+  assert.equal(await refused, false);
+  assert.equal(harness.messages.at(-1), '主对话拒绝了这次引用。');
+
+  // Closing the view keeps the panel usable (it can be reopened), but disposing it must leave no
+  // message listener and no pending timer behind.
+  await harness.panel.close();
+  assert.equal(harness.window.listenerCount(), 1, 'a closed view stays bound so it can be reopened');
+  harness.panel.dispose();
+  assert.equal(harness.window.listenerCount(), 0, 'disposing the panel stops listening');
+});
+
+test('the bridge states its own limits instead of pretending the chip was placed', async () => {
+  // Outside DSH there is no composer at all: the frame has no parent.
+  const detached = loadPanel({ api: apiStub(), sessionId: 'session-1' });
+  await detached.panel.open();
+  assert.equal(await detached.panel.conversation.send(), false);
+  assert.match(detached.messages.at(-1), /请从 DSH 的文献库面板打开画板/);
+  assert.equal(detached.window.__posted, undefined);
+
+  // A conflict means the stored board is not what the reader sees, so freezing would send material
+  // they did not choose. The panel must refuse before it calls `board_snapshot`.
+  state.length = 0;
+  const conflict = Object.assign(new Error('画板已在另一窗口更新'), { code: 'STATE_CONFLICT' });
+  const harness = loadPanel({
+    api: apiStub({ board_save: () => { throw conflict; }, board_snapshot: payload => ({ snapshot_id: `snap-${payload.id}`, board_title: '标题' }) }),
+    sessionId: 'session-1',
+    parent: true,
+  });
+  await harness.panel.open();
+  harness.panel.setTool('rect');
+  harness.svg.dispatch('pointerdown', { clientX: 200, clientY: 120 });
+  nameShape(harness, '冲突前的形状');
+  await harness.runTimers();
+  state.length = 0;
+  assert.equal(await harness.panel.conversation.send(), false);
+  assert.match(harness.messages.at(-1), /请先处理冲突/);
+  assert.equal(state.some(call => call.action === 'board_snapshot'), false, 'nothing is frozen while the conflict stands');
+
+  // No session yet: the panel says so rather than posting a chip nobody can receive.
+  const sessionless = loadPanel({ api: apiStub({ board_snapshot: () => ({ snapshot_id: 'snap-1', board_title: '标题' }) }), parent: true, capabilities: { conversation: true, libraryPapers: true, projects: true } });
+  await sessionless.panel.open();
+  assert.equal(await sessionless.panel.conversation.send(), false);
+  assert.match(sessionless.messages.at(-1), /会话尚未就绪/);
+  assert.deepEqual(sessionless.window.__posted, [], 'no request is posted without a conversation');
 });

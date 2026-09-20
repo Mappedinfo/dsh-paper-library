@@ -508,60 +508,32 @@
     // ── Conversation bridge ────────────────────────────────────────────────────────
     // The iframe asks the host client plugin to place a reference chip in the composer.
     // It sends identity only; the frozen material stays in the host's snapshot store.
-    const CONVERSATION_ACTION = 'paper-library:conversation-action';
-    const CONVERSATION_RESULT = 'paper-library:conversation-result';
-    const pendingBridge = new Map();
-    let bridgeSequence = 0;
-
-    function bridgeRequest(action, payload) {
-      const view = doc.defaultView;
-      if (!view?.parent || view.parent === view) return Promise.reject(new Error('请从 DSH 的文献库面板打开画板，才能把画板引用放进对话。'));
-      const requestId = `board-${Date.now().toString(36)}-${++bridgeSequence}`;
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pendingBridge.delete(requestId);
-          reject(new Error('主对话暂未响应，画板内容仍在。请刷新 DSH 后重试。'));
-        }, 20000);
-        pendingBridge.set(requestId, { resolve, reject, timer });
-        view.parent.postMessage({ type: CONVERSATION_ACTION, version: 1, requestId, action, ...payload }, view.location.origin);
+    const bridgeApi = () => {
+      const api = window.PaperBoardBridge;
+      if (!api) throw new Error('画板需要 board-bridge.js：放入对话由它和主对话通信。');
+      return api;
+    };
+    /** Created before the message listener is bound and only once: a listener that looks up a
+     *  later-created instance would drop every answer that arrives before the first send. */
+    function createBridge() {
+      return bridgeApi().create({
+        doc,
+        api: () => api,
+        capabilities: () => capabilities,
+        boardId: () => boardId,
+        live: () => live,
+        board: () => board,
+        conflict: () => Boolean(conflict),
+        flush: () => flush(),
+        sessionId: () => options.getSessionId?.() ?? null,
+        toast: (message, error = false) => toast(message, error),
       });
     }
-
-    function onBridgeResult(event) {
-      const view = doc.defaultView;
-      if (!view?.parent || event.source !== view.parent || event.origin !== view.location.origin) return;
-      if (event.data?.type !== CONVERSATION_RESULT || event.data.version !== 1) return;
-      const request = pendingBridge.get(event.data.requestId);
-      if (!request) return;
-      pendingBridge.delete(event.data.requestId);
-      clearTimeout(request.timer);
-      if (event.data.ok) request.resolve(event.data);
-      else request.reject(new Error(event.data.error || '主对话操作未完成。'));
-    }
+    const bridge = createBridge();
+    const onBridgeResult = event => bridge.onResult(event);
 
     /** Freeze what the reader sees, then ask the host to place its chip in the draft. */
-    async function sendToConversation() {
-      if (!boardId || !capabilities.conversation) return false;
-      const view = doc.defaultView;
-      // Outside DSH there is no composer at all; say that before blaming the session.
-      if (!view?.parent || view.parent === view) { toast('请从 DSH 的文献库面板打开画板，才能把画板引用放进对话。', true); return false; }
-      const sessionId = options.getSessionId?.();
-      if (!sessionId) { toast('当前 DSH 会话尚未就绪，请稍后在 DSH 面板中重试。', true); return false; }
-      try {
-        await flush();
-        // A conflict means the stored board is not what the reader sees: freezing now
-        // would send material they did not choose, so the conflict must be resolved first.
-        if (conflict) { toast('画板已在别处修改，请先处理冲突再放入对话。', true); return false; }
-        const frozen = await api('board_snapshot', { id: boardId });
-        if (!live) return false;
-        await bridgeRequest('board_draft', { sessionId, board_id: boardId, snapshot_id: frozen.snapshot_id, title: frozen.board_title ?? board.title });
-        toast('已把画板引用放进主输入框；编辑后可发送，未发送前不会调用模型。');
-        return true;
-      } catch (error) {
-        toast(error.message || '放入对话失败', true);
-        return false;
-      }
-    }
+    const sendToConversation = () => bridge.send();
 
     /** Apply the viewport transform and the matching grid offset. */
     function applyView() {
@@ -1696,7 +1668,7 @@
       if (tidyButton) tidyButton.addEventListener('click', () => { const count = tidy(); if (count) toast(`已把 ${count} 个节点整理成树`); });
       const sendButton = $('board-send');
       if (sendButton) sendButton.addEventListener('click', () => void sendToConversation());
-      doc.defaultView?.addEventListener?.('message', onBridgeResult);
+      bridge.listen();
       const zoomIn = $('board-zoom-in'), zoomOut = $('board-zoom-out'), fit = $('board-fit');
       if (zoomIn) zoomIn.addEventListener('click', () => { const size = surfaceSize(); view = applyZoom(view, 1.2, { x: size.width / 2, y: size.height / 2 }); applyView(); });
       if (zoomOut) zoomOut.addEventListener('click', () => { const size = surfaceSize(); view = applyZoom(view, 1 / 1.2, { x: size.width / 2, y: size.height / 2 }); applyView(); });
@@ -1935,6 +1907,9 @@
       applySourceTexts,
       layoutBlock,
       sendToConversation,
+      // The conversation bridge is exposed for tests and for hosts that want to observe the
+      // postMessage handshake; the panel itself only ever calls `send`.
+      conversation: { send: sendToConversation, pending: () => bridge.pendingCount(), onResult: event => bridge.onResult(event) },
       outline: (maximum) => outline({ ...board, title: board.title }, maximum),
       setTool,
       dispose() {
@@ -1944,9 +1919,7 @@
         // The page may be unloading: start a keepalive write before disabling the panel.
         if (pendingSave) void flush({ keepalive: true });
         live = false;
-        for (const request of pendingBridge.values()) { clearTimeout(request.timer); request.reject(new Error('画板已关闭')); }
-        pendingBridge.clear();
-        doc.defaultView?.removeEventListener?.('message', onBridgeResult);
+        bridge.dispose();
         doc.removeEventListener('keydown', onKeyDown);
         doc.removeEventListener('keyup', onKeyUp);
         doc.removeEventListener('fullscreenchange', syncFullscreen);

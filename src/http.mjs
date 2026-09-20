@@ -19,7 +19,7 @@ for (const name of ['resource-library.js','resource-library.css','knowledge-work
 for (const name of ['paper-analysis.js','paper-analysis.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['settings.js','settings.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['challenge-mining.js','challenge-mining.css','annotation-threads.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
-for (const name of ['board.js','board.css','board-source.js','board-mermaid.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['board.js','board.css','board-source.js','board-bridge.js','board-mermaid.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 const languageActions = new Set(['language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
 staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
 const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:'];

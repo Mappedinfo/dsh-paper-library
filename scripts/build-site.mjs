@@ -42,8 +42,8 @@ await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 await writeFile(join(output, 'index.html'), page);
 await writeFile(join(output, '.nojekyll'), '');
-for (const asset of ['board.js', 'board-source.js', 'board-mermaid.js', 'board.css', 'theme.css']) await cp(join(project, 'web', asset), join(output, asset));
+for (const asset of ['board.js', 'board-source.js', 'board-bridge.js', 'board-mermaid.js', 'board.css', 'theme.css']) await cp(join(project, 'web', asset), join(output, asset));
 await cp(join(project, 'site/standalone.js'), join(output, 'standalone.js'));
 await cp(join(project, 'site/boards'), join(output, 'boards'), { recursive: true });
 
-console.log(JSON.stringify({ output: '_site', markup_lines: markup.split('\n').length, assets: ['index.html', 'board.js', 'board-source.js', 'board-mermaid.js', 'board.css', 'theme.css', 'standalone.js', 'boards/example.json', 'boards/example.style.json'] }));
+console.log(JSON.stringify({ output: '_site', markup_lines: markup.split('\n').length, assets: ['index.html', 'board.js', 'board-source.js', 'board-bridge.js', 'board-mermaid.js', 'board.css', 'theme.css', 'standalone.js', 'boards/example.json', 'boards/example.style.json'] }));

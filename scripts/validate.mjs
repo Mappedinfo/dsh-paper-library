@@ -24,6 +24,7 @@ const commands=[
   ['challenge_mining_syntax',process.execPath,['--check','web/challenge-mining.js']],
   ['annotation_threads_syntax',process.execPath,['--check','web/annotation-threads.js']],
   ['board_syntax',process.execPath,['--check','web/board.js']],
+  ['board_bridge_syntax',process.execPath,['--check','web/board-bridge.js']],
   ['standalone_syntax',process.execPath,['--check','site/standalone.js']],
   ['site_build',process.execPath,['scripts/build-site.mjs']],
   ['settings_syntax',process.execPath,['--check','web/settings.js']],
