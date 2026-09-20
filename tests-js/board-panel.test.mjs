@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('../web/board.js', import.meta.url), 'utf8');
 const sourceModule = await readFile(new URL('../web/board-source.js', import.meta.url), 'utf8');
+const mermaidModule = await readFile(new URL('../web/board-mermaid.js', import.meta.url), 'utf8');
 
 class ClassList {
   constructor() { this.values = new Set(); }
@@ -67,7 +68,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
     'board-tool-select', 'board-tool-pan', 'board-tool-text', 'board-tool-note', 'board-tool-rect', 'board-tool-ellipse', 'board-tool-diamond', 'board-tool-connect',
     'board-edge-kind', 'board-edge-arrow', 'board-edge-dashed', 'board-edge-angle',
     'board-layout-mode', 'board-layout-direction', 'board-layout-gap-x', 'board-layout-gap-y', 'board-layout-apply', 'board-layout-pin', 'board-layout-unpin', 'board-layout-status',
-    'board-source-open', 'board-source-dialog', 'board-links', 'board-link-paper', 'board-unlink-paper', 'board-focus', 'board-source-content', 'board-source-style', 'board-source-status', 'board-source-apply', 'board-source-download', 'board-source-upload', 'board-source-file', 'board-source-generate',
+    'board-source-open', 'board-source-dialog', 'board-mermaid-open', 'board-mermaid-text', 'board-mermaid-status', 'board-mermaid-parse', 'board-mermaid-generate', 'board-links', 'board-link-paper', 'board-unlink-paper', 'board-focus', 'board-source-content', 'board-source-style', 'board-source-status', 'board-source-apply', 'board-source-download', 'board-source-upload', 'board-source-file', 'board-source-generate',
     { id: 'board-project-select', tag: 'select' }, 'board-link-project', 'board-unlink-project',
     'board-more', 'board-panel',
   ];
@@ -87,6 +88,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
   };
   vm.createContext(context);
   vm.runInContext(sourceModule, context);
+  vm.runInContext(mermaidModule, context);
   vm.runInContext(source, context);
   const board = context.window.PaperBoard;
   const boardSource = context.window.PaperBoardSource;
@@ -618,6 +620,41 @@ test('automatic layout offers three deterministic modes and never moves a pinned
   const layered = signature(harness.panel.board());
   harness.panel.applyLayout();
   assert.equal(signature(harness.panel.board()), layered);
+});
+
+test('a pasted Mermaid diagram becomes source text, and the canvas writes Mermaid back', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  const text = harness.registry.get('board-mermaid-text');
+  const status = harness.registry.get('board-mermaid-status');
+  // Nothing to parse yet: the panel says so instead of emptying the board.
+  harness.registry.get('board-mermaid-parse').dispatch('click');
+  assert.match(status.textContent, /先粘贴/);
+  assert.equal(harness.panel.board().nodes.length, 0);
+  text.value = 'flowchart LR\n  A[采集] --> B{合格?}\n  B -- 是 --> C([入库])\n  A --> C\n  classDef x fill:#f00';
+  harness.registry.get('board-mermaid-parse').dispatch('click');
+  assert.match(status.textContent, /3 个节点、3 条连线（LR 方向）/);
+  assert.match(status.textContent, /classDef/, 'ignored directives are reported, not silently dropped');
+  // The parse fills the two source boxes; only 「校验并应用」 writes to the board.
+  const content = JSON.parse(harness.registry.get('board-source-content').value);
+  const style = JSON.parse(harness.registry.get('board-source-style').value);
+  assert.equal(content.schema, 'paper-library-board.v1');
+  assert.deepEqual(content.nodes.map(node => [node.id, node.kind]), [['A', 'rect'], ['B', 'diamond'], ['C', 'rect']]);
+  assert.deepEqual(style.layout, { mode: 'layered', direction: 'lr' });
+  assert.equal(harness.panel.board().nodes.length, 0, 'parsing alone does not touch the canvas');
+  harness.panel.applySourceTexts(JSON.stringify(content), JSON.stringify(style));
+  assert.equal(harness.panel.board().nodes.length, 3);
+  assert.equal(harness.panel.board().edges.length, 3);
+  assert.equal(harness.panel.board().edges.find(edge => edge.label === '是').kind, 'arrow');
+  // And back out again, from whatever is on the canvas now.
+  harness.registry.get('board-mermaid-generate').dispatch('click');
+  const written = text.value;
+  assert.match(written, /^flowchart LR\n/);
+  assert.match(written, /A\[采集\]/);
+  assert.match(written, /C\[\(入库\)\]|C\[入库\]/, 'the ellipse node keeps its shape wrapper');
+  assert.match(written, /\|是\|/);
+  assert.match(status.textContent, /已写出 3 个节点、3 条连线/);
 });
 
 test('the readable source file round-trips and keeps presentation in its sidecar', async () => {

@@ -1696,11 +1696,54 @@
         if ($('board-source-style')) $('board-source-style').value = texts.style;
         return texts;
       };
+      const mermaid = () => window.PaperBoardMermaid ?? null;
       const sourceOpen = $('board-source-open');
       if (sourceOpen) sourceOpen.addEventListener('click', () => {
         if (!$('board-source-content')?.value.trim()) fillSourceFields();
         sourceStatus('内容文件不含坐标：位置来自排版与固定位置。');
         sourceDialog?.showModal?.();
+      });
+      // Mermaid is a third way into the same source path: parse it into the two boxes, and let
+      // the existing 「校验并应用」 be the only thing that touches the board.
+      const mermaidStatus = (message, error = false) => {
+        const node = $('board-mermaid-status');
+        if (!node) return;
+        node.textContent = message;
+        node.classList.toggle('is-error', Boolean(error));
+      };
+      const mermaidOpen = $('board-mermaid-open');
+      if (mermaidOpen) mermaidOpen.addEventListener('click', () => {
+        if (!$('board-source-content')?.value.trim()) fillSourceFields();
+        sourceDialog?.showModal?.();
+        mermaidStatus('粘贴 Mermaid flowchart，点「解析为源文件」，再点「校验并应用」。');
+        $('board-mermaid-text')?.focus?.();
+      });
+      const mermaidParse = $('board-mermaid-parse');
+      if (mermaidParse) mermaidParse.addEventListener('click', () => {
+        const api = mermaid();
+        const text = $('board-mermaid-text')?.value ?? '';
+        if (!api) { mermaidStatus('这个页面没有加载 Mermaid 模块。', true); return; }
+        if (!text.trim()) { mermaidStatus('先粘贴一段 Mermaid flowchart。', true); return; }
+        const parsed = api.parse(text, { title: board.title ? `${board.title} · Mermaid` : 'Mermaid 导入' });
+        if (!parsed.source.nodes.length) {
+          const first = parsed.warnings[0];
+          mermaidStatus(first ? `第 ${first.line} 行：${first.message}` : '没有解析出节点。', true);
+          return;
+        }
+        const style = { schema: source()?.STYLE_SCHEMA, layout: { mode: parsed.layout.mode, direction: parsed.layout.direction } };
+        $('board-source-content').value = JSON.stringify(parsed.source, null, 2);
+        $('board-source-style').value = JSON.stringify(style, null, 2);
+        const notes = parsed.warnings.map(warning => `第 ${warning.line} 行：${warning.message}`);
+        mermaidStatus(`解析出 ${parsed.counts.nodes} 个节点、${parsed.counts.edges} 条连线（${parsed.direction.toUpperCase()} 方向）。点「校验并应用」写入画板。${notes.length ? ` ⚠ ${notes.join('；')}` : ''}`, false);
+      });
+      const mermaidGenerate = $('board-mermaid-generate');
+      if (mermaidGenerate) mermaidGenerate.addEventListener('click', () => {
+        const api = mermaid();
+        if (!api) { mermaidStatus('这个页面没有加载 Mermaid 模块。', true); return; }
+        if (!board.nodes.length) { mermaidStatus('当前画板还没有节点。', true); return; }
+        const written = api.format(board);
+        if ($('board-mermaid-text')) $('board-mermaid-text').value = written.text;
+        mermaidStatus(`已写出 ${board.nodes.length} 个节点、${board.edges.length} 条连线${written.warnings.length ? `（${written.warnings.join('；')}）` : ''}。`);
       });
       const sourceGenerate = $('board-source-generate');
       if (sourceGenerate) sourceGenerate.addEventListener('click', () => { if (fillSourceFields()) sourceStatus('已按当前画布重写两个文件。'); });

@@ -15,7 +15,7 @@ const site = (process.env.SITE_URL ?? 'https://mappedinfo.github.io/dsh-paper-li
 const checks = [];
 const record = label => { checks.push(label); console.log(`PASS ${label}`); };
 
-const assets = ['', 'board.js', 'board.css', 'theme.css', 'standalone.js'];
+const assets = ['', 'board.js', 'board.css', 'theme.css', 'standalone.js', 'board-source.js', 'board-mermaid.js'];
 for (const asset of assets) {
   const response = await fetch(`${site}${asset}`, { redirect: 'follow' });
   assert.equal(response.status, 200, `${asset || '(root)'} must be served`);

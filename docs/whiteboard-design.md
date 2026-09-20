@@ -291,6 +291,27 @@ target node, running along one of its sides.
   when it is the perpendicular default, and the host accepts only integers in 30–90. Two shapes in
   the same place have no side to attach to, so the floor is stated for non-overlapping nodes.
 
+## P13: Mermaid in and out
+
+Asked for 2026-09-20: "can we add Mermaid parsing, converting into our internal structure?"
+
+- **A parser, not the package.** `mermaid` ships a renderer and dagre; the whiteboard needs the
+  text understood, not drawn, and this plugin adds no runtime dependency. `web/board-mermaid.js` is
+  therefore our own bounded parser, and what it does not understand is reported with a line number
+  rather than guessed.
+- **It feeds the existing source path.** The output is a whiteboard source document plus a layout
+  direction, so a pasted diagram goes through `fromSource` → host validation → 「校验并应用」 like a
+  hand-written `board.json`. That keeps one write path, and lets a reader see and edit what the
+  parser produced before it reaches the canvas.
+- **The understood subset is written down**: shapes (`[]`, `()`, `(())`, `{}`, `>…]`, `[[]]`,
+  `[()]`, `[[//]]`), link styles (`-->`, `---`, `-.->`, `-.-`, `==>`, `===`, `<-->`, `o--o`, `x--x`),
+  both label forms, `&` groups, chained statements, `<br/>`, entities, quoted ids, `%%` comments and
+  a `direction` override. Ignored: styling and interaction directives, with `subgraph` flattened and
+  `~~~` dropped; thick and circle endpoints import as documented approximations, and identical links
+  merge. The direction becomes the layout direction.
+- **The reverse direction exists too**, because a canvas that can only consume is half a bridge:
+  `format(board)` writes `flowchart` text, and a round trip is asserted to keep the graph.
+
 ## Invariants
 
 - No new runtime dependency, no model call while opening, listing or drawing a board, and no
@@ -325,7 +346,7 @@ Synthetic-only validation, following the existing project discipline:
   host's own validator**. **Implemented, 5 cases.**
 - `scripts/board-browser-fixture.mjs` — real Chromium receipt for draw/drag/zoom/connect/save/reload,
   library drag-in, tidy-tree snapping, and the standalone refusal of the conversation chip.
-  **Implemented, 29 checks** in `docs/validation/board-browser.json` (including a knowledge-graph node joining a board, the connect tool, a bend point, automatic layout with a pinned node, the source/style pair, and the plugin's own board entry opening as a pure canvas).
+  **Implemented, 30 checks** in `docs/validation/board-browser.json` (including a knowledge-graph node joining a board, the connect tool, a bend point, automatic layout with a pinned node, the source/style pair, and the plugin's own board entry opening as a pure canvas).
 - `scripts/board-harness-smoke.mjs` — native DSH check that the tool is offered, that a board token
   reaches a turn as frozen material, and that an unresolvable reference fails the turn.
   **Implemented, 7 checks** in `docs/validation/board-harness.json`.

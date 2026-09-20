@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-20T09:20:55.565Z",
+  "verified_at": "2026-09-20T09:51:33.848Z",
   "scope": "Synthetic catalog in an isolated standalone server; free canvas drawing, text editing, connecting, moving, paper drag-in and picker, undo/redo, delete, zoom/fit/fullscreen, board switching, deletion and host persistence across a reload, the `?view=board` entry opening as a pure canvas, a 420px pane containing the toolbar behind one toggle while the canvas takes the pane, and an edge attachment measured on the drawn path holding its 30-degree floor; zero model calls and zero external requests. The AI-proposal review path and the conversation reference chip need the native host tool and the DSH composer, so they are covered by the native harness receipt and unit tests rather than simulated here.",
   "checks": [
     "board-view-opens-and-creates-the-first-board-without-a-model",
@@ -24,6 +24,7 @@
     "the-connect-tool-creates-an-edge-and-its-line-style-is-editable",
     "a-line-bend-point-can-be-dragged-in-and-alt-clicked-away",
     "editing-the-source-file-and-its-sidecar-drives-the-canvas",
+    "a-pasted-mermaid-flowchart-becomes-a-board-and-writes-back-as-mermaid",
     "the-library-shelf-lists-boards-and-links-them-to-papers",
     "focus-mode-leaves-only-the-canvas-and-escape-restores-the-app",
     "the-whiteboard-entry-opens-as-a-pure-canvas",

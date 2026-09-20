@@ -431,6 +431,30 @@ try {
   await page.locator('#board-source-dialog .dialog-close').first().click();
   record('editing-the-source-file-and-its-sidecar-drives-the-canvas');
 
+  // A pasted Mermaid flowchart goes through that same source path, and the canvas writes back.
+  await page.locator('#board-mermaid-open').click();
+  await page.locator('#board-mermaid-text').fill('flowchart LR\n  M1[粘贴的采集] --> M2{合格?}\n  M2 -- 是 --> M3([入库])\n  M1 --> M3\n  subgraph 组\n    M3 --> M4>备注]\n  end');
+  await page.locator('#board-mermaid-parse').click();
+  await page.waitForFunction(() => /解析出 4 个节点、4 条连线（LR 方向）/.test(document.getElementById('board-mermaid-status')?.textContent || ''));
+  assert.match(await page.locator('#board-mermaid-status').innerText(), /subgraph 已展开/, 'what we cannot express is reported');
+  const parsedContent = JSON.parse(await page.locator('#board-source-content').inputValue());
+  assert.deepEqual(parsedContent.nodes.map(node => [node.id, node.kind]), [['M1', 'rect'], ['M2', 'diamond'], ['M3', 'rect'], ['M4', 'note']]);
+  assert.equal(parsedContent.edges.find(edge => edge.label === '是').kind, 'arrow');
+  assert.deepEqual(JSON.parse(await page.locator('#board-source-style').inputValue()).layout, { mode: 'layered', direction: 'lr' });
+  await page.locator('#board-source-apply').click();
+  const pasted = await waitForHost(value => value.board?.nodes?.some(node => node.text === '粘贴的采集') && value.board.nodes.some(node => node.kind === 'diamond'), 'the pasted diagram on the canvas');
+  assert.equal(pasted.board.nodes.filter(node => node.id.startsWith('M')).length, 4);
+  assert.equal(pasted.board.edges.filter(edge => edge.from.startsWith('M')).length, 4);
+  assert.equal(pasted.board.style.layout.direction, 'lr', 'the diagram direction becomes the layout direction');
+  assert.equal(pasted.board.nodes.find(node => node.text === '粘贴的采集').y, pasted.board.nodes.find(node => node.text === '入库').y, 'an LR diagram lays out left to right');
+  await page.locator('#board-mermaid-generate').click();
+  const written = await page.locator('#board-mermaid-text').inputValue();
+  assert.match(written, /^flowchart LR$/m);
+  assert.match(written, /M2\{"?合格\?"?\}/, 'the diamond keeps its wrapper');
+  assert.match(written, /\|是\|/);
+  await page.locator('#board-source-dialog .dialog-close').first().click();
+  record('a-pasted-mermaid-flowchart-becomes-a-board-and-writes-back-as-mermaid');
+
   // The library shelf lists boards as their own files and links them to papers.
   await page.locator('#board-close').click();
   await page.locator('#paper-list .paper-card').first().click();

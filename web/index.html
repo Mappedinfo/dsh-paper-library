@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="./challenge-mining.css">
   <link rel="stylesheet" href="./board.css">
   <script src="./board-source.js" defer></script>
+  <script src="./board-mermaid.js" defer></script>
   <script src="./board.js" defer></script>
   <script src="./settings.js" defer></script>
   <script src="./challenge-mining.js" defer></script>
@@ -210,6 +211,7 @@
         <div class="board-section">
           <span class="board-section-label">视图与文件</span>
           <button id="board-source-open" class="button subtle" type="button" title="查看/编辑可读的源文件与样式辅助文件（.style.json）">源文件</button>
+          <button id="board-mermaid-open" class="button subtle" type="button" title="粘贴 Mermaid flowchart，解析成画板源文件或导出现有画板的 Mermaid 文本">Mermaid</button>
           <button id="board-fullscreen" class="button subtle" type="button" aria-pressed="false" title="全屏画板；Esc 退出">全屏 ⤢</button>
           <button id="board-close" class="button subtle" type="button">返回文献库</button>
         </div>
@@ -229,7 +231,13 @@
         <label class="field">样式与固定位置 <code>board.style.json</code><textarea id="board-source-style" rows="12" spellcheck="false" aria-label="画板样式辅助文件"></textarea></label>
       </div>
       <p id="board-source-status" class="small" role="status"></p>
+      <label class="field">Mermaid <code>flowchart</code> <span>粘贴后「解析为源文件」，再点「校验并应用」；子图会展开，样式指令会忽略</span>
+        <textarea id="board-mermaid-text" rows="6" spellcheck="false" aria-label="Mermaid 流程图文本" placeholder="flowchart LR&#10;  A[采集] --> B{合格?}&#10;  B -- 是 --> C([入库])"></textarea>
+      </label>
+      <p id="board-mermaid-status" class="small" role="status"></p>
       <div class="dialog-actions">
+        <button id="board-mermaid-parse" class="button subtle" type="button" title="把上面的 Mermaid 解析成内容文件与排版方向，填进下面的编辑框">解析为源文件</button>
+        <button id="board-mermaid-generate" class="button subtle" type="button" title="把当前画板写成 Mermaid 文本，便于粘贴到 README 或文档">画板导为 Mermaid</button>
         <button id="board-source-generate" class="button subtle" type="button" title="用当前画布内容重写两个编辑框">从画布生成</button>
         <button id="board-source-download" class="button subtle" type="button">下载两个文件</button>
         <button id="board-source-upload" class="button subtle" type="button">导入 JSON</button>
