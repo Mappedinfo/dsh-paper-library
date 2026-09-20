@@ -121,13 +121,22 @@ try {
   // Move the selection and confirm the host stored the new coordinates.
   const before = await waitForHost(value => value.board?.nodes.length === 2 && value.board.edges.length === 1, 'two nodes and one edge');
   const movedA = await shapeBox(0);
+  const labelOf = async index => (await page.locator('.board-node').nth(index).locator('.board-node-text').first().boundingBox());
+  const labelBefore = await labelOf(0);
   await page.mouse.move(movedA.x + movedA.width / 2, movedA.y + movedA.height / 2);
   await page.mouse.down();
   await page.mouse.move(movedA.x + movedA.width / 2 + 90, movedA.y + movedA.height / 2 + 60, { steps: 8 });
+  // The label must travel with the node *during* the drag: it used to stay behind until the
+  // next click re-rendered the whole board.
+  const draggedShape = await shapeBox(0), draggedLabel = await labelOf(0);
+  assert.ok(Math.abs(draggedLabel.x - labelBefore.x - 90) <= 2 && Math.abs(draggedLabel.y - labelBefore.y - 60) <= 2, `the node label follows the drag (moved by ${Math.round(draggedLabel.x - labelBefore.x)},${Math.round(draggedLabel.y - labelBefore.y)})`);
+  assert.ok(Math.abs(draggedLabel.x - draggedShape.x) <= 12 && Math.abs(draggedLabel.y - draggedShape.y) <= 30, 'and stays anchored to its shape');
   await page.mouse.up();
   const after = await waitForHost(value => value.board.nodes[0].x !== before.board.nodes[0].x || value.board.nodes[0].y !== before.board.nodes[0].y, 'the moved node coordinates');
   assert.equal(after.board.edges.length, 1, 'moving a node keeps its edge');
-  record('dragging-a-node-saves-new-coordinates-without-losing-its-edge');
+  const settledLabel = await labelOf(0);
+  assert.ok(Math.abs(settledLabel.x - draggedLabel.x) <= 2 && Math.abs(settledLabel.y - draggedLabel.y) <= 2, 'and the label does not jump again once the drag is released');
+  record('dragging-a-node-moves-its-label-and-saves-the-new-coordinates');
 
   // A library paper drops onto the canvas as a paper node.
   const droppedCard = await page.locator('#paper-list .paper-card').first().getAttribute('data-id');

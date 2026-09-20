@@ -572,36 +572,43 @@
       if (label) label.textContent = `${Math.round(view.zoom * 100)}%`;
     }
 
+    /** The shape is drawn in the node's own coordinates: the content group carries the
+     *  position, so moving a node rewrites one transform instead of every child's geometry. */
     function shapeFor(node) {
-      const bounds = nodeBounds(node);
-      if (node.kind === 'ellipse') return svgEl('ellipse', { cx: bounds.cx, cy: bounds.cy, rx: bounds.w / 2, ry: bounds.h / 2 });
-      if (node.kind === 'diamond') return svgEl('polygon', { points: `${bounds.cx},${bounds.y} ${bounds.right},${bounds.cy} ${bounds.cx},${bounds.bottom} ${bounds.x},${bounds.cy}` });
-      return svgEl('rect', { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h, rx: node.kind === 'text' ? 4 : 10 });
+      const w = node.w, h = node.h;
+      if (node.kind === 'ellipse') return svgEl('ellipse', { cx: w / 2, cy: h / 2, rx: w / 2, ry: h / 2 });
+      if (node.kind === 'diamond') return svgEl('polygon', { points: `${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}` });
+      return svgEl('rect', { x: 0, y: 0, width: w, height: h, rx: node.kind === 'text' ? 4 : 10 });
     }
 
     function renderNode(node) {
       const bounds = nodeBounds(node);
       const style = source()?.nodeStyle(board.style ?? {}, node) ?? {};
       const group = svgEl('g', { class: `board-node board-node-kind-${node.kind}${selection.has(node.id) ? ' is-selected' : ''}${node.origin === 'llm' ? ' is-ai' : ''}${connectFrom === node.id ? ' is-connect-source' : ''}`, 'data-node': node.id, tabindex: '-1' });
+      // Every child is drawn around the node's own origin, and the group is translated into
+      // place. Dragging then moves the shape, its labels and its handles as one instead of
+      // leaving the text behind until something forces a full render.
+      const content = svgEl('g', { class: 'board-node-content', transform: `translate(${bounds.x},${bounds.y})` });
       const shape = shapeFor(node);
       shape.setAttribute('class', 'board-node-shape');
       if (style.fill) shape.setAttribute('fill', style.fill);
       if (node.color || style.stroke) shape.setAttribute('stroke', node.color ?? style.stroke);
       if (style.fontSize) group.setAttribute('data-font-size', String(style.fontSize));
-      group.append(shape);
-      if (node.origin === 'llm') group.append(svgEl('text', { class: 'board-node-meta', x: bounds.x + 6, y: bounds.y - 4 }, 'AI 提议'));
+      content.append(shape);
+      if (node.origin === 'llm') content.append(svgEl('text', { class: 'board-node-meta', x: 6, y: -4 }, 'AI 提议'));
       if (node.kind === 'paper' && node.paper) {
-        group.append(svgEl('text', { class: 'board-node-meta', x: bounds.x + 10, y: bounds.y + 18 }, [node.paper.year, node.paper.citekey].filter(Boolean).join(' · ') || '文献'));
+        content.append(svgEl('text', { class: 'board-node-meta', x: 10, y: 18 }, [node.paper.year, node.paper.citekey].filter(Boolean).join(' · ') || '文献'));
         const title = (node.text || node.paper.title || node.paper.id).slice(0, 90);
-        group.append(svgEl('text', { class: 'board-node-text', x: bounds.x + 10, y: bounds.y + 40 }, title));
+        content.append(svgEl('text', { class: 'board-node-text', x: 10, y: 40 }, title));
       } else {
         const lines = String(node.text || '').split('\n').slice(0, 6);
-        lines.forEach((line, index) => group.append(svgEl('text', { class: 'board-node-text', x: bounds.x + 10, y: bounds.y + 24 + index * 17 }, line.slice(0, 60) || (index === 0 ? '（空）' : ''))));
+        lines.forEach((line, index) => content.append(svgEl('text', { class: 'board-node-text', x: 10, y: 24 + index * 17 }, line.slice(0, 60) || (index === 0 ? '（空）' : ''))));
       }
       if (selection.has(node.id)) {
-        group.append(svgEl('rect', { class: 'board-node-handle', x: bounds.right - 5, y: bounds.bottom - 5, width: 10, height: 10, rx: 2, 'data-handle': 'resize' }));
-        group.append(svgEl('circle', { class: 'board-node-handle', cx: bounds.right + 4, cy: bounds.cy, r: 5, 'data-handle': 'connect' }));
+        content.append(svgEl('rect', { class: 'board-node-handle', x: bounds.w - 5, y: bounds.h - 5, width: 10, height: 10, rx: 2, 'data-handle': 'resize' }));
+        content.append(svgEl('circle', { class: 'board-node-handle', cx: bounds.w + 4, cy: bounds.h / 2, r: 5, 'data-handle': 'connect' }));
       }
+      group.append(content);
       return group;
     }
 
@@ -656,11 +663,20 @@
         const group = nodeEls.get(node.id);
         if (!group) continue;
         const bounds = nodeBounds(node);
-        const shape = group.firstChild;
+        // The content group is the node's position; the shape and the handles are local to it.
+        const content = group.firstChild;
+        if (!content) continue;
+        content.setAttribute('transform', `translate(${bounds.x},${bounds.y})`);
+        const shape = content.firstChild;
         if (!shape) continue;
-        if (node.kind === 'ellipse') { shape.setAttribute('cx', bounds.cx); shape.setAttribute('cy', bounds.cy); shape.setAttribute('rx', bounds.w / 2); shape.setAttribute('ry', bounds.h / 2); }
-        else if (node.kind === 'diamond') shape.setAttribute('points', `${bounds.cx},${bounds.y} ${bounds.right},${bounds.cy} ${bounds.cx},${bounds.bottom} ${bounds.x},${bounds.cy}`);
-        else { shape.setAttribute('x', bounds.x); shape.setAttribute('y', bounds.y); shape.setAttribute('width', bounds.w); shape.setAttribute('height', bounds.h); }
+        if (node.kind === 'ellipse') { shape.setAttribute('cx', bounds.w / 2); shape.setAttribute('cy', bounds.h / 2); shape.setAttribute('rx', bounds.w / 2); shape.setAttribute('ry', bounds.h / 2); }
+        else if (node.kind === 'diamond') shape.setAttribute('points', `${bounds.w / 2},0 ${bounds.w},${bounds.h / 2} ${bounds.w / 2},${bounds.h} 0,${bounds.h / 2}`);
+        else { shape.setAttribute('width', bounds.w); shape.setAttribute('height', bounds.h); }
+        for (const child of content.children ?? []) {
+          const handle = child.getAttribute?.('data-handle');
+          if (handle === 'resize') { child.setAttribute('x', bounds.w - 5); child.setAttribute('y', bounds.h - 5); }
+          else if (handle === 'connect') { child.setAttribute('cx', bounds.w + 4); child.setAttribute('cy', bounds.h / 2); }
+        }
       }
       for (const edge of board.edges) {
         const record = edgeEls.get(edge.id), from = byId(edge.from), to = byId(edge.to);
@@ -682,7 +698,6 @@
       applyView();
     }
 
-    /** History holds whole-board snapshots: bounded, exact, and cheap to reason about. */
     function pushHistory() {
       const snapshot = JSON.stringify({ nodes: board.nodes, edges: board.edges });
       if (history[historyIndex] === snapshot) return;

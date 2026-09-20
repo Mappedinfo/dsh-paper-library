@@ -190,6 +190,12 @@ papers and reading projects without becoming part of them:
 
 ### What implementation changed here too
 
+- **A node's children are drawn in its own coordinates.** Dragging used to rewrite only the
+  shape's geometry, so the labels (and the resize/connect handles) stayed behind until the next
+  click forced a full render. Each node now keeps its children around its own origin, positioned
+  by one `transform`: a drag rewrites that single attribute, so shape, text and handles move as
+  one, and a resize only rewrites the local size and handle offsets. The browser receipt asserts
+  the label travels with the drag and does not jump again on release.
 - **The per-paper controls are created in JS.** The static block they first lived in is moved
   and then removed by the workbench module on every setup pass, and the destination is a
   collapsed citation menu, so a static button silently disappeared and took the app's boot with
