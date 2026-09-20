@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-18T03:50:00.194Z",
+  "verified_at": "2026-09-20T13:53:19.588Z",
   "ok": true,
   "checks": [
     "explicit-opt-out-and-invalid-page-range-never-start-model",
@@ -14,12 +14,12 @@
   ],
   "errors": [],
   "external": [],
-  "deterministic_generations": 6,
+  "deterministic_generations": 8,
   "main_messages_sent": 0,
   "browser_storage_writes": 0,
   "screenshots": [
-    ".local/paper-analysis-browser-GHxMEZ/analysis-result-511.png",
-    ".local/paper-analysis-browser-GHxMEZ/full-analysis-511.png"
+    ".local/paper-analysis-browser-QivoXf/analysis-result-511.png",
+    ".local/paper-analysis-browser-QivoXf/full-analysis-511.png"
   ],
   "scope": "Actual Chromium + disk-backed source/job/metadata APIs with deterministic model adapter. Native subagent lifecycle checked separately; no real provider or private documents."
 }

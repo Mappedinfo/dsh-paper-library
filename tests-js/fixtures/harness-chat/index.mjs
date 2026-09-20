@@ -34,7 +34,12 @@ class ReadingAdapter extends LlmAdapter {
     this.observation.tools = (options.tools ?? []).map(tool => tool.name).slice(0, 200)
     const prompt = options.messages.flatMap(message => message.content.filter(block => block.type === 'text').map(block => block.text)).join('\n')
     let reply = REPLY
-    if (prompt.includes('READING_RECORDS_JSON:\n')) {
+    if (prompt.includes('REVIEW_METHOD: evidence-atlas')) {
+      const material = JSON.parse(prompt.slice(prompt.lastIndexOf('READING_RECORDS_JSON:\n') + 'READING_RECORDS_JSON:\n'.length).split('\nEND_OF_READING_RECORDS')[0])
+      const overlay = prompt.includes('PERSONAL_REVIEW_OVERLAY')
+      reply = JSON.stringify({ title: '证据图谱评审：合成夹具', body: `# 证据图谱评审：合成夹具\n## 1. 快速判定\n条件性评价。\n## 2. 案例拆解\n案例 C1（O/T/I/Y/C/M/Q/E，未报告字段留空）。\n## 3. 状态矩阵\n| 案例 | 需求 | 状态 |\n| C1 | 精度 | unknown |\n## 4. 归因\nreported_result：批次记录中的证据。\n## 5. 联合覆盖\n没有同一案例支撑的联合声称。\n## 6. 形容词\n精准：需要任务指标与参照。\n## 7. 本文最多能声称\nreported_result：${material.batches.length} 个批次的证据。\n## 8. 本文不能声称\nunknown：跨城市泛化。\n## 9. 修改清单\nP0 补一条基线。${overlay ? '\n（已按本地覆盖层调整阶段标准）' : ''}` })
+      this.observation.analysisReviews = [...(this.observation.analysisReviews || []), { provider: options.provider, model: options.model, batches: material.batches.length, overlay }].slice(-4)
+    } else if (prompt.includes('READING_RECORDS_JSON:\n')) {
       const material = JSON.parse(prompt.slice(prompt.lastIndexOf('READING_RECORDS_JSON:\n') + 'READING_RECORDS_JSON:\n'.length).split('\nEND_OF_READING_RECORDS')[0])
       reply = JSON.stringify({ title: '合成精读笔记', body: `## 一句话概括\n这是确定性集成夹具依据 ${material.batches.length} 个批次记录生成的精读笔记，不构成学术判断。` })
       this.observation.analysisNotes = [...(this.observation.analysisNotes || []), { provider: options.provider, model: options.model, batches: material.batches.length }].slice(-4)
@@ -77,7 +82,7 @@ class ReadingAdapter extends LlmAdapter {
 
 /** Test-only authenticated booleans make cold lifecycle assertions independent from plugin receipts. */
 export function apply(ctx) {
-  const observation = { generations: 0, references: [], boardReferences: [], tools: [], language: [], knowledge: [], analysis: [], analysisNotes: [], analysisAgents: [], analysisGuard: {attempts:0,denied:0,executed:0} }
+  const observation = { generations: 0, references: [], boardReferences: [], tools: [], language: [], knowledge: [], analysis: [], analysisNotes: [], analysisReviews: [], analysisAgents: [], analysisGuard: {attempts:0,denied:0,executed:0} }
   ctx.on('agent/created', async ({ agent }) => {
     if (agent.session.id.startsWith('paper-analysis-') || agent.session.header.parentSession?.startsWith('paper-analysis-')) {
       observation.analysisAgents.push({id:agent.session.id,parent:agent.session.header.parentSession,origin:agent.session.header.origin})
@@ -106,7 +111,7 @@ export function apply(ctx) {
       if (req.method !== 'GET' || ids.length > 12 || ids.some(id => !/^paper-library-[a-f0-9]{40}$/.test(id))) { res.writeHead(400); res.end(); return }
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ generations: observation.generations, references: observation.references, boardReferences: observation.boardReferences, tools: observation.tools, language: observation.language, knowledge: observation.knowledge,
-        analysis:observation.analysis,analysisNotes:observation.analysisNotes,analysisGuard:observation.analysisGuard,analysisAgents:observation.analysisAgents.map(item=>({...item,loaded:Boolean(ctx.agents.get(item.id))})),
+        analysis:observation.analysis,analysisNotes:observation.analysisNotes,analysisReviews:observation.analysisReviews,analysisGuard:observation.analysisGuard,analysisAgents:observation.analysisAgents.map(item=>({...item,loaded:Boolean(ctx.agents.get(item.id))})),
         observations: ids.map(id => ({ sessionLoaded: Boolean(ctx.sessions.get(id)), agentLoaded: Boolean(ctx.agents.get(id)) })) }))
     },
   }), 'paper-library: cold-session fixture observations')

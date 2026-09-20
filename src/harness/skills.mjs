@@ -13,7 +13,7 @@ function bundledSkill(name) {
 }
 
 export function bundledFetchSkill() { return bundledSkill('paper-library-fetch'); }
-export function bundledLibrarySkills() { return ['paper-library-fetch','paper-library-knowledge','paper-library-notes'].map(bundledSkill); }
+export function bundledLibrarySkills() { return ['paper-library-fetch','paper-library-knowledge','paper-library-notes','paper-library-review'].map(bundledSkill); }
 
 export function registerBundledSkills(ctx) {
   const disposers=[];

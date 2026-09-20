@@ -16,7 +16,7 @@ test('bundled paper-library-fetch skill is discoverable and loadable through the
     await ctx.plugin(SkillRegistry);
     const dispose=registerBundledSkills(ctx);
     const list=await ctx.skills.list({cwd:'/tmp/synthetic-workspace'});
-    assert.deepEqual(list.map(s=>s.name).sort(),['paper-library-fetch','paper-library-knowledge','paper-library-notes']);
+    assert.deepEqual(list.map(s=>s.name).sort(),['paper-library-fetch','paper-library-knowledge','paper-library-notes','paper-library-review']);
     const fetchEntry=list.find(s=>s.name==='paper-library-fetch');
     assert.equal(fetchEntry.path,skillPath);
     assert.deepEqual(fetchEntry.invocation,{modelInvocable:true,userInvocable:true});
@@ -27,8 +27,18 @@ test('bundled paper-library-fetch skill is discoverable and loadable through the
     assert.match(loaded.content,/library_import/);assert.match(loaded.content,/metadata_only/);
     for(const expected of bundledLibrarySkills().slice(1)) {
       const actual=await ctx.skills.get(expected.name,{});
-      assert.equal(actual.path,expected.path);assert.equal(actual.content,expected.content);
+      assert.equal(actual.path,expected.path);
+      assert.equal(actual.content,expected.content);
       assert.match(actual.content,/library_knowledge/);
+    }
+    // The bundled review skill carries the generic evidence-atlas methodology and
+    // its references, and never a private overlay.
+    const review=await ctx.skills.get('paper-library-review',{});
+    assert.match(review.content,/evidence-atlas-review\.md/);
+    assert.match(review.content,/reviewProfile/);
+    assert.deepEqual(review.invocation,{modelInvocable:true,userInvocable:true});
+    for(const reference of ['evidence-atlas-review.md','review-rubric.md','output-template.md','auto-parse.md']) {
+      assert.ok(existsSync(join(review.resourceBase.path,'references',reference)),`Missing bundled review reference ${reference}`);
     }
     dispose();assert.equal((await ctx.skills.list({})).length,0);
   } finally {await ctx.fiber.dispose();}

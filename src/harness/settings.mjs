@@ -9,6 +9,7 @@ export const PAPER_LIBRARY_SETTINGS_NAMESPACE = 'paper-library';
 export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   auto_analysis: true,
   analysis_fill: true,
+  auto_review: true,
   'auto-paper-conversation': false,
   'reading-panel-side': 'left',
 });
@@ -32,6 +33,7 @@ export function createPaperLibrarySettingsSchema(Schema) {
   return Schema.object({
     auto_analysis: Schema.boolean().default(true),
     analysis_fill: Schema.boolean().default(true),
+    auto_review: Schema.boolean().default(true),
     'auto-paper-conversation': Schema.boolean().default(false),
     'reading-panel-side': Schema.union([Schema.const('left'), Schema.const('right')]).default('left'),
   });

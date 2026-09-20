@@ -3,6 +3,7 @@ window.PaperLibrarySettings = (() => {
   const fields = [
     ['auto_analysis', '新增或选中文献后自动整理', '新导入或选中且尚无整理记录的 PDF，按全文分批排队；会使用本篇模型额度。'],
     ['analysis_fill', '整理完成后补齐空缺资料', '有原文依据才补缺，保留已有资料；AI 填入内容仍待核对。'],
+    ['auto_review', '整理完成后生成证据图谱评审草稿', '在精读笔记之后多一次受限模型调用，产出案例拆解、归因与联合覆盖审计的待审草稿；本地评审覆盖层由 reviewProfile 配置。'],
     ['auto-paper-conversation', '实时伴学：保存批注后自动回复', '有文字评论的新批注和修改会在主机排队，回复跟随原批注；使用本篇模型额度。历史批注不会批量重发。'],
   ];
   function create({api,persistence,onChange=()=>{},getLibrary=()=>''}) {

@@ -33,12 +33,13 @@ export function createQueuedPaperAnalysis({analysis,store,settings}) {
     if(input.pages!==undefined&&(!Array.isArray(input.pages)||!input.pages.length||input.pages.length>2000||new Set(input.pages).size!==input.pages.length||input.pages.some(p=>!Number.isInteger(p)||p<1||p>2000)))throw fail('请指定有效且不重复的 PDF 页码。')
     if(input.source_session_id!==undefined&&(typeof input.source_session_id!=='string'||input.source_session_id.length>200||/[\x00-\x1f]/.test(input.source_session_id)))throw fail('来源对话标识无效。')
     if(input.apply_metadata!==undefined&&typeof input.apply_metadata!=='boolean')throw fail('补齐资料选项无效。')
+    if(input.review!==undefined&&typeof input.review!=='boolean')throw fail('评审选项无效。')
     const previous=await analysis({action:'paper_analysis_get',id:input.id})
     if(previous.status!=='idle')return previous
     const saved=await result(input.id);if(saved)return saved
     const preferences=await settings.get()
     if(!preferences.available||preferences.value?.auto_analysis!==true)return {id:input.id,status:'idle',stage:'自动整理已关闭'}
-    const item={id:input.id,request_id:input.request_id,...(input.pages?{pages:input.pages}:{}),...(input.source_session_id?{source_session_id:input.source_session_id}:{}),apply_metadata:input.apply_metadata??preferences.value.analysis_fill===true}
+    const item={id:input.id,request_id:input.request_id,...(input.pages?{pages:input.pages}:{}),...(input.source_session_id?{source_session_id:input.source_session_id}:{}),apply_metadata:input.apply_metadata??preferences.value.analysis_fill===true,review:input.review??preferences.value.auto_review!==false}
     const items=await locked(async()=>{const current=await entries();if(current.some(v=>v.id===input.id))return current;return (await change(values=>values.some(v=>v.id===item.id)?values:[...values,item])).value.entries})
     wake();const index=items.findIndex(v=>v.id===input.id);return queued(items[index],index)
   }
@@ -63,7 +64,7 @@ export function createQueuedPaperAnalysis({analysis,store,settings}) {
       // Use current fill choice, while keeping the accepted page selection.
       const response=await locked(async()=>{
         if(!(await entries()).some(item=>item.id===first.id&&item.request_id===first.request_id))return null
-        return analysis({action:'paper_analysis_start',...first,reuse:true,apply_metadata:preferences.value.analysis_fill===true})
+        return analysis({action:'paper_analysis_start',...first,reuse:true,apply_metadata:preferences.value.analysis_fill===true,review:first.review??preferences.value.auto_review!==false})
       })
       if(!response)return
       await analysis.wait(first.id,response.request_id||first.request_id)
