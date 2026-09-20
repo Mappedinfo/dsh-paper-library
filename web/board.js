@@ -1675,6 +1675,14 @@
       });
       const emptyCreate = $('board-create-first');
       if (emptyCreate) emptyCreate.addEventListener('click', () => void createBoard());
+      // In a narrow pane the secondary controls sit behind 「更多」; on a wide screen the panel
+      // is layout-transparent and this button is hidden, so one markup serves both.
+      const moreButton = $('board-more'), morePanel = $('board-panel');
+      if (moreButton && morePanel) {
+        const syncMore = () => moreButton.setAttribute('aria-expanded', String(morePanel.classList.contains('is-open')));
+        moreButton.addEventListener('click', () => { morePanel.classList.toggle('is-open'); syncMore(); });
+        syncMore();
+      }
       // The inspector only offers a shape change for a single node; paper nodes keep their binding.
       if (!capabilities.libraryPapers) for (const id of ['board-add-paper']) { const control = $(id); if (control) control.hidden = true; }
       if (!capabilities.conversation) for (const id of ['board-send']) { const control = $(id); if (control) control.hidden = true; }

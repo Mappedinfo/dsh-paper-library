@@ -476,6 +476,50 @@ try {
   assert.equal(await page.locator('.library-pane').isVisible(), true, 'Escape still restores the rest of the page inside that entry');
   record('the-whiteboard-entry-opens-as-a-pure-canvas');
 
+  // A narrow pane — the DSH sidebar — must not turn the toolbar into a wall of wrapped rows,
+  // and the board must own the pane instead of hiding the reader for nothing.
+  await page.setViewportSize({ width: 420, height: 820 });
+  await page.goto(`${origin}/?view=board`);
+  await page.waitForFunction(() => document.body.classList.contains('board-mode') && document.body.classList.contains('board-focused'));
+  const narrow = await page.evaluate(() => {
+    const rect = id => document.getElementById(id).getBoundingClientRect();
+    return {
+      bar: Math.round(document.querySelector('#board-view .board-bar').getBoundingClientRect().height),
+      stage: Math.round(rect('board-stage').height),
+      panel: getComputedStyle(document.getElementById('board-panel')).display,
+      more: getComputedStyle(document.getElementById('board-more')).display,
+      library: Math.round(document.querySelector('.library-pane').getBoundingClientRect().width),
+      board: Math.round(rect('board-view').width),
+      viewport: innerWidth,
+    };
+  });
+  assert.ok(narrow.bar <= 130, `the narrow toolbar stays compact, got ${narrow.bar}px`);
+  assert.ok(narrow.stage > narrow.bar * 3, `the canvas keeps most of the pane, got ${narrow.stage}px of canvas against ${narrow.bar}px of toolbar`);
+  assert.equal(narrow.panel, 'none', 'the secondary controls are contained behind one toggle');
+  assert.notEqual(narrow.more, 'none');
+  assert.equal(narrow.library, 0, 'a narrow pane gives the board the whole width');
+  assert.equal(narrow.board, narrow.viewport);
+  await page.locator('#board-more').click();
+  await page.waitForFunction(() => document.getElementById('board-panel').classList.contains('is-open'));
+  assert.equal(await page.locator('#board-panel').isVisible(), true);
+  assert.equal(await page.locator('#board-more').getAttribute('aria-expanded'), 'true');
+  assert.ok(Math.round(await page.evaluate(() => document.querySelector('#board-view .board-bar').getBoundingClientRect().height)) <= 130, 'opening the panel overlays the canvas instead of pushing it');
+  await page.locator('#board-more').click();
+  assert.equal(await page.locator('#board-more').getAttribute('aria-expanded'), 'false');
+  record('the-narrow-pane-contains-the-toolbar-and-gives-the-canvas-the-pane');
+
+  // The library's own 画板 button in that narrow pane: the shelf steps aside rather than the
+  // board appearing half-width under it while the reader is hidden.
+  await page.goto(`${origin}/`);
+  await page.waitForFunction(() => document.querySelectorAll('#paper-list .paper-card').length > 0);
+  await page.locator('#board-open').click();
+  await page.waitForFunction(() => document.body.classList.contains('board-mode'));
+  const fromLibrary = await page.evaluate(() => ({ library: Math.round(document.querySelector('.library-pane').getBoundingClientRect().width), board: Math.round(document.getElementById('board-view').getBoundingClientRect().width), viewport: innerWidth }));
+  assert.equal(fromLibrary.library, 0, 'the shelf steps aside for the board');
+  assert.equal(fromLibrary.board, fromLibrary.viewport, 'and the canvas fills the pane');
+  record('opening-the-board-from-the-library-fills-a-narrow-pane');
+  await page.setViewportSize({ width: 1440, height: 900 });
+
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);
   record('no-browser-runtime-errors-and-no-external-requests');
@@ -485,7 +529,7 @@ try {
 }
 await writeFile(join(project, 'docs/validation/board-browser.json'), JSON.stringify({
   verified_at: new Date().toISOString(),
-  scope: 'Synthetic catalog in an isolated standalone server; free canvas drawing, text editing, connecting, moving, paper drag-in and picker, undo/redo, delete, zoom/fit/fullscreen, board switching, deletion and host persistence across a reload, and the `?view=board` entry opening as a pure canvas; zero model calls and zero external requests. The AI-proposal review path and the conversation reference chip need the native host tool and the DSH composer, so they are covered by the native harness receipt and unit tests rather than simulated here.',
+  scope: 'Synthetic catalog in an isolated standalone server; free canvas drawing, text editing, connecting, moving, paper drag-in and picker, undo/redo, delete, zoom/fit/fullscreen, board switching, deletion and host persistence across a reload, the `?view=board` entry opening as a pure canvas, and a 420px pane containing the toolbar behind one toggle while the canvas takes the pane; zero model calls and zero external requests. The AI-proposal review path and the conversation reference chip need the native host tool and the DSH composer, so they are covered by the native harness receipt and unit tests rather than simulated here.',
   checks, errors, externalRequests: external.length, modelRequests: 0,
 }, null, 2) + '\n');
 console.log(JSON.stringify({ run: relative(project, run), checks: checks.length, errors }));

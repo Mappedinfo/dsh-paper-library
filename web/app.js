@@ -1051,21 +1051,26 @@ function entryView(){
   try{return new URLSearchParams(location.search).get('view')==='board'?'board':'library';}
   catch{return 'library';}
 }
+const ENTRY_VIEW=entryView();
 /** The whiteboard entry is a pure canvas: open the board and leave only it on screen. */
 async function applyEntryView(){
-  if(entryView()!=='board'||!boardUI)return;
+  if(ENTRY_VIEW!=='board'||!boardUI)return;
   try{await boardUI.open();boardUI.setFocus?.(true);}
   catch(error){toast(error.message||'画板未能打开',true);}
 }
+// Hide the rest of the page before the first paint: entering the board and *then* hiding the
+// library reads as two jumps, and the plate is empty either way for the few hundred ms until
+// the board itself is loaded.
+if(ENTRY_VIEW==='board')document.body.classList.add('board-focused');
 async function initialize() {
-  announceReady();await loadStatus();await loadList();
+  announceReady();await loadStatus();
+  if(ENTRY_VIEW==='board'){await applyEntryView();return;}
+  await loadList();
   try{const saved=await persistence?.get('reader');if(saved?.paperId){const detail=saved.page?saved:await persistence.get(`reader:${saved.paperId}`);if(detail){readerRestore=detail;durableReaderLoaded=true;}}}
   catch(error){toast(`阅读位置读取失败：${error.message}`,true);}
   initializedReader=true;await restoreReaderState();
   if(pendingReferenceOpen){const value=pendingReferenceOpen;pendingReferenceOpen=null;await openReferencedPaper(value);}
   if(!paperChatUI?.available())loadModels();
-  // Last, so the board opens onto a page that has already read its library and status.
-  await applyEntryView();
 }
 const currentModelDisplay = el('div', 'current-harness-model'); currentModelDisplay.id = 'current-harness-model'; currentModelDisplay.hidden = true;
 currentModelDisplay.append(el('span', '', '当前 DSH 模型'));

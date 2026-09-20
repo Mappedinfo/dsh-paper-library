@@ -69,6 +69,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
     'board-layout-mode', 'board-layout-direction', 'board-layout-gap-x', 'board-layout-gap-y', 'board-layout-apply', 'board-layout-pin', 'board-layout-unpin', 'board-layout-status',
     'board-source-open', 'board-source-dialog', 'board-links', 'board-link-paper', 'board-unlink-paper', 'board-focus', 'board-source-content', 'board-source-style', 'board-source-status', 'board-source-apply', 'board-source-download', 'board-source-upload', 'board-source-file', 'board-source-generate',
     { id: 'board-project-select', tag: 'select' }, 'board-link-project', 'board-unlink-project',
+    'board-more', 'board-panel',
   ];
   const { doc, registry, Element } = environment(ids);
   doc.defaultView.confirm = () => confirm;
@@ -672,6 +673,19 @@ test('the project picker is revealed by the catalog, not decided when the panel 
   assert.equal(full.registry.get('board-project-select').hidden, false);
   assert.equal(full.registry.get('board-link-project').disabled, false);
   assert.deepEqual([...full.registry.get('board-project-select').options].map(option => [option.value, option.textContent]), [['p-1', '城市感知综述（3）'], ['p-2', '方法复现（0）']]);
+});
+
+test('the narrow-pane panel contains the secondary controls behind one toggle', async () => {
+  const harness = loadPanel({ api: apiStub() });
+  const more = harness.registry.get('board-more');
+  const panel = harness.registry.get('board-panel');
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  more.dispatch('click');
+  assert.equal(panel.classList.contains('is-open'), true, 'the toggle opens the panel');
+  assert.equal(more.getAttribute('aria-expanded'), 'true');
+  more.dispatch('click');
+  assert.equal(panel.classList.contains('is-open'), false, 'and closes it again');
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
 });
 
 test('focus mode is a pure canvas and Escape leaves it', async () => {

@@ -248,6 +248,23 @@ owner asked for a 画板 entry next to 文献库 on the right sidebar's start pa
   bindings, so 「放入对话」 freezes a snapshot and drops its reference chip into the composer from
   either entry.
 
+### What implementation changed here too
+
+- **The entry decides before it paints.** Switching to the board at the end of `initialize()` showed
+  the library first and then jumped; the entry now resolves at module scope (hiding the rest of the
+  page before the first paint) and opens the board right after `loadStatus()`, reading no paper list
+  and restoring no reader position. The browser receipt samples the boot and asserts the library is
+  never visible.
+- **The toolbar needed containment, not more contrast.** Two freely wrapping rows of ~35 controls
+  became ~11 rows at sidebar width and took 40% of the pane. It is now a tool row, a quick row and a
+  「更多」 panel; at wide widths `display:contents` flattens that panel back into the same inline
+  toolbar (44 controls, 133 px, previously 180 px), while a 420 px pane keeps 121 px of toolbar and
+  gives the canvas the rest (previously the canvas kept 280 px).
+- **A narrow pane gives the board the whole column.** Below 620 px the app is single-pane, so the
+  board used to stack *under* the shelf while `board-mode` hid the reader — half a canvas and a
+  hidden annotation rail. Whenever the board is open in a narrow container the shelf now steps aside
+  and the canvas fills the pane.
+
 ## Invariants
 
 - No new runtime dependency, no model call while opening, listing or drawing a board, and no
@@ -270,9 +287,9 @@ Synthetic-only validation, following the existing project discipline:
   store with no private data. **Implemented, 8 cases.**
 - `tests-js/board-panel.test.mjs` — canvas reducer behavior (create/drag/connect/delete/undo/redo,
   tidy-tree layout determinism) through the same fake-DOM harness the other panels use.
-  **Implemented, 23 cases** (geometry, model bounds, paper nodes, outline, panel persistence,
+  **Implemented, 24 cases** (geometry, model bounds, paper nodes, outline, panel persistence,
   conflict recovery, listing failure, tidy arranging, settle-on-close, graph-node conversion and
-  the closed-board graph path, plus the late reveal of the project picker).
+  the closed-board graph path, the late reveal of the project picker and the 「更多」 toggle).
 - `tests-js/board-references.test.mjs` — token parse/render, chip codec round-trip, snapshot
   integrity, and `agent/pre-step` expansion including the malformed and over-budget paths.
   **Implemented, 5 cases.**
@@ -282,7 +299,7 @@ Synthetic-only validation, following the existing project discipline:
   host's own validator**. **Implemented, 5 cases.**
 - `scripts/board-browser-fixture.mjs` — real Chromium receipt for draw/drag/zoom/connect/save/reload,
   library drag-in, tidy-tree snapping, and the standalone refusal of the conversation chip.
-  **Implemented, 26 checks** in `docs/validation/board-browser.json` (including a knowledge-graph node joining a board, the connect tool, a bend point, automatic layout with a pinned node, the source/style pair, and the plugin's own board entry opening as a pure canvas).
+  **Implemented, 28 checks** in `docs/validation/board-browser.json` (including a knowledge-graph node joining a board, the connect tool, a bend point, automatic layout with a pinned node, the source/style pair, and the plugin's own board entry opening as a pure canvas).
 - `scripts/board-harness-smoke.mjs` — native DSH check that the tool is offered, that a board token
   reaches a turn as frozen material, and that an unresolvable reference fails the turn.
   **Implemented, 7 checks** in `docs/validation/board-harness.json`.

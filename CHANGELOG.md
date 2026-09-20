@@ -40,8 +40,11 @@
 - **可读源文件与样式辅助文件**：内容文件 `board.json`（短标识、稳定键序、无像素坐标）与 `board.style.json`（配色／尺寸／字号／按关系连线样式／排版参数／固定坐标）可生成、编辑、校验、应用、下载与导入；独立站支持 `?src=boards/example.json` 直接渲染仓库中的源文件（重复访问复用本地副本，不重复导入）。
 - **AI 读写画板**：新增 `library_board` 工具可列、读、建、改、删画板；模型新增/修改的节点与连线标记为 `origin:'llm'` 待评审，未改动内容保留读者署名，只有读者能「接受 AI 改动」；面板对 AI 提议显示虚线边框。
 - **DSH 侧栏的独立入口**：同一个插件现在注册**两个**右栏标签类型 —— 「文献库」与「画板」。「开始页面」会列出两张入口卡片（画板附带一行说明），选画板即开一个自己的标签页，可与文献库标签并排；该标签加载同一页面的 `?view=board` 视图，直接以**纯画布**打开（不显示库、阅读与批注，Esc 仍可退出专注），因此画板在 DSH 里是与库平级、又互不干扰的入口。画布代码仍是同一份 `web/board.js`，没有第二份拷贝。
+- **画板工具栏的收纳**：工具栏原本是两行自由换行的控件（约 35 个），在侧栏宽度下会折成约 11 行、吃掉四成高度。现在拆成「工具行 + 快捷行 + 更多面板」：工具行与快捷行各自单行横向可滚动，次要控件（画板管理、选中与样式、关联、自动排版、源文件与视图）收进「更多 ⋯」面板，面板**覆盖**在画布上而不是把画布挤走（打开/收起不产生跳动）。宽屏下同一份 markup 用 `display:contents` 摊平，所有控件照旧内联显示（工具栏 133px，原来 180px），窄屏下工具栏只有 121px、画布拿到其余全部高度（原来画布只剩 280px）。
+- **窄侧栏里画板独占整栏**：≤640px 时应用本来会切成单栏，从库里打开画板会把画板堆到文献列表下面、同时隐藏阅读与批注栏（看起来像"把批注栏遮挡了"，画板还只露出半截）。现在只要画板打开，窄栏就隐藏文献库并让画布占满整栏，点「返回文献库」或 Esc 退出即可。
+- **画板入口不再跳两下**：`?view=board` 以前在 `initialize()` 末尾才切到画板，因此会先画出文献库再跳走。现在入口在模块顶层就判定（首帧前隐藏其余区域），并在 `loadStatus()` 之后**直接**打开画板——画板入口不再读取文献列表、不恢复阅读位置，实测启动全程文献库从未出现。
 - **独立画板站（GitHub Pages）**：同一份 `web/board.js` 另有一个无需 DSH 的静态宿主（`site/`），由 `scripts/build-site.mjs` 组装：画板 markup 从插件页面**抽取**而不是复制，两端不会漂移；`site/standalone.js` 实现同一套动作契约，落在 `localStorage`（上限 40 张画板 / 4 MiB，界面报告用量），并支持 JSON 全量导出/导入（同标识另存为新画板，绝不覆盖）与 PNG 导出（按模型绘制，不依赖页面样式）。独立模式下文献库与对话引用控件隐藏而不假装可用。`.github/workflows/pages.yml` 在 main 上自动构建并部署（Pages 源设为 GitHub Actions）。线上地址 <https://mappedinfo.github.io/dsh-paper-library/> 已用真实浏览器复核（6 项检查：资源投递、绘制与保存、刷新恢复、整理成树、PNG 导出、零第三方请求），回执见 `docs/validation/board-pages-live.json`，可用 `node scripts/verify-pages.mjs` 重跑。
-- 验证：**484 JavaScript / 220 Python 测试**（含阅读项目；工具共 31 个），[26 项插件内 Chromium 回执](docs/validation/board-browser.json)、[14 项独立站 Chromium 回执](docs/validation/board-standalone.json)、[7 项原生 DSH 回执](docs/validation/board-harness.json) 与 [线上回执](docs/validation/board-pages-live.json)。设计记录见 [docs/whiteboard-design.md](docs/whiteboard-design.md) 与 [docs/board-pages.md](docs/board-pages.md)。
+- 验证：**485 JavaScript / 220 Python 测试**（含阅读项目；工具共 31 个），[28 项插件内 Chromium 回执](docs/validation/board-browser.json)、[14 项独立站 Chromium 回执](docs/validation/board-standalone.json)、[7 项原生 DSH 回执](docs/validation/board-harness.json) 与 [线上回执](docs/validation/board-pages-live.json)。设计记录见 [docs/whiteboard-design.md](docs/whiteboard-design.md) 与 [docs/board-pages.md](docs/board-pages.md)。
 
 ### 研究难点挖掘（P1–P3）
 
