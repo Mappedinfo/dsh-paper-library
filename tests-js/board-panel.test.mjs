@@ -98,9 +98,19 @@ function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
   const svg = stage.children[0];
   return {
     board, boardSource, panel, doc, registry, root, stage, svg, calls, messages,
+    editorArea: () => stage.children.find(child => child.className === 'board-editor-layer')?.children[0] ?? null,
     async runTimers() { const pending = timers.splice(0, timers.length); for (const timer of pending) await timer.fn(); await new Promise(resolve => setImmediate(resolve)); },
     pendingTimers: () => timers.length,
   };
+}
+
+/** Name the shape whose editor is open. An unnamed shape is not content, so a test that expects a
+ *  stored node must give it text the way a reader would. */
+function nameShape(harness, text) {
+  const area = harness.editorArea();
+  assert.ok(area, 'the shape editor is open');
+  area.value = text;
+  area.dispatch('blur');
 }
 
 const state = [];
@@ -247,6 +257,7 @@ test('the panel creates a board on first open, persists an edit and reports its 
   // Drawing a node persists it after the debounce, with the loaded revision.
   harness.panel.setTool('note');
   harness.svg.dispatch('pointerdown', { clientX: 100, clientY: 100 });
+  nameShape(harness, '便签 A');
   const drawn = harness.panel.board();
   assert.equal(drawn.nodes.length, 1);
   assert.equal(drawn.nodes[0].kind, 'note');
@@ -266,6 +277,7 @@ test('a conflicting save keeps both sides and offers recovery instead of overwri
   await harness.panel.open();
   harness.panel.setTool('rect');
   harness.svg.dispatch('pointerdown', { clientX: 200, clientY: 120 });
+  nameShape(harness, '冲突前的节点');
   await harness.runTimers();
   assert.equal(harness.registry.get('board-conflict').hidden, false, 'the conflict is shown, not swallowed');
   assert.match(harness.registry.get('board-conflict-note').textContent, /没有被覆盖/);
@@ -280,6 +292,7 @@ test('a conflicting save keeps both sides and offers recovery instead of overwri
   // "Save as a new board" preserves the local edit under a new record.
   harness.panel.setTool('note');
   harness.svg.dispatch('pointerdown', { clientX: 260, clientY: 160 });
+  nameShape(harness, '另存前的本地节点');
   await harness.runTimers();
   assert.equal(harness.registry.get('board-conflict').hidden, false);
   state.length = 0;
@@ -708,6 +721,7 @@ test('a board links to papers and projects many-to-many, and unlinking keeps its
   await harness.panel.open();
   harness.panel.setTool('rect');
   harness.svg.dispatch('pointerdown', { clientX: 200, clientY: 200 });
+  nameShape(harness, '关联测试节点');
   const before = harness.panel.board().nodes.length;
   const asPlain = value => ({ papers: [...value.papers], projects: [...value.projects] });
   assert.deepEqual(asPlain(harness.panel.links()), { papers: [], projects: [] });
@@ -754,6 +768,69 @@ test('the project picker is revealed by the catalog, not decided when the panel 
   assert.equal(full.registry.get('board-project-select').hidden, false);
   assert.equal(full.registry.get('board-link-project').disabled, false);
   assert.deepEqual([...full.registry.get('board-project-select').options].map(option => [option.value, option.textContent]), [['p-1', '城市感知综述（3）'], ['p-2', '方法复现（0）']]);
+});
+
+test('an empty shape is discarded instead of making every later save fail', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  const editor = () => harness.stage.children.find(child => child.className === 'board-editor-layer')?.children[0] ?? null;
+  // Drawing a shape opens the text editor with an empty value: nothing is written yet.
+  harness.panel.setTool('rect');
+  harness.svg.dispatch('pointerdown', { clientX: 160, clientY: 160 });
+  assert.equal(harness.panel.board().nodes.length, 1, 'the shape exists while it is being named');
+  assert.ok(editor(), 'and its editor is open');
+  await harness.runTimers();
+  const whileEditing = state.filter(call => call.action === 'board_save');
+  assert.equal(whileEditing.length, 0, 'a save is held back while the reader is still typing');
+  // Leaving it empty drops the shape rather than storing a node the host would refuse.
+  assert.equal(editor().value, '');
+  editor().dispatch('blur');
+  assert.equal(harness.panel.board().nodes.length, 0, 'the empty shape is gone');
+  await harness.runTimers();
+  const afterDiscard = state.filter(call => call.action === 'board_save');
+  assert.equal(afterDiscard.length, 1, 'the discard itself is saved');
+  assert.equal(afterDiscard[0].payload.board.nodes.length, 0);
+  // Typing real text keeps the node, and the deferred save follows the commit.
+  harness.panel.setTool('note');
+  harness.svg.dispatch('pointerdown', { clientX: 320, clientY: 240 });
+  editor().value = '有内容的便签';
+  editor().dispatch('blur');
+  assert.equal(harness.panel.board().nodes.length, 1);
+  assert.equal(harness.panel.board().nodes[0].text, '有内容的便签');
+  await harness.runTimers();
+  const saved = state.filter(call => call.action === 'board_save').at(-1);
+  assert.equal(saved.payload.board.nodes.length, 1, 'the named node is written');
+  assert.equal(saved.payload.board.nodes[0].text, '有内容的便签');
+  // A node that slips into the record still cannot reach the host: it is pruned and reported.
+  // A shape whose edit is still open never reaches the host, and the edit survives a close.
+  const closing = loadPanel({ api: apiStub() });
+  await closing.panel.open();
+  closing.panel.setTool('rect');
+  closing.svg.dispatch('pointerdown', { clientX: 260, clientY: 260 });
+  state.length = 0;
+  await closing.panel.close();
+  assert.equal(closing.panel.board().nodes.length, 0, 'closing with an unnamed shape discards it');
+  const written = state.filter(call => call.action === 'board_save');
+  assert.equal(written.length, 1, 'and still writes the rest of the board');
+  assert.equal(written[0].payload.board.nodes.length, 0);
+  assert.equal(state.some(call => call.action === 'board_save' && call.payload.board.nodes.some(node => !node.text && !node.paper)), false, 'no empty node is ever sent');
+});
+
+test('a rejected save names the offending node and selects it', async () => {
+  state.length = 0;
+  const failing = apiStub({ board_save: () => { throw new Error('第 1 个节点既没有文本也没有文献。'); } });
+  const harness = loadPanel({ api: failing });
+  await harness.panel.open();
+  harness.panel.setTool('note');
+  harness.svg.dispatch('pointerdown', { clientX: 200, clientY: 200 });
+  const area = harness.stage.children.find(child => child.className === 'board-editor-layer')?.children[0];
+  area.value = '写点东西';
+  area.dispatch('blur');
+  await harness.runTimers();
+  assert.equal(harness.registry.get('board-status').textContent, '这个节点还没有内容：写入文字或删除后即可保存。');
+  assert.equal(harness.messages.some(message => /已选中出错的那个节点/.test(message)), true);
+  assert.equal(harness.panel.selection().length, 1, 'the node the host named is selected');
 });
 
 test('the narrow-pane panel contains the secondary controls behind one toggle', async () => {
@@ -895,6 +972,7 @@ test('leaving the board settles a pending debounced edit instead of dropping it'
   await harness.panel.open();
   harness.panel.setTool('note');
   harness.svg.dispatch('pointerdown', { clientX: 140, clientY: 140 });
+  nameShape(harness, '关闭前写完的便签');
   assert.equal(harness.pendingTimers() > 0, true, 'the edit is still only scheduled');
   assert.equal(state.some(call => call.action === 'board_save'), false);
   await harness.panel.close();
@@ -911,6 +989,7 @@ test('leaving the board settles a pending debounced edit instead of dropping it'
   await switching.panel.open();
   switching.panel.setTool('rect');
   switching.svg.dispatch('pointerdown', { clientX: 200, clientY: 200 });
+  nameShape(switching, '切画板前的节点');
   state.length = 0;
   await switching.panel.load('b-two');
   assert.equal(state[0].action, 'board_save', 'the outgoing board is saved before another is opened');

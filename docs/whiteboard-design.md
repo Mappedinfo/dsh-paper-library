@@ -312,6 +312,25 @@ Asked for 2026-09-20: "can we add Mermaid parsing, converting into our internal 
 - **The reverse direction exists too**, because a canvas that can only consume is half a bridge:
   `format(board)` writes `flowchart` text, and a round trip is asserted to keep the graph.
 
+## P14: an empty shape is not content
+
+Reported from the sidebar 2026-09-20 with a screenshot: several `（空）` shapes and a red
+「第 4 个节点既没有文本也没有文献。」 — the whole board could not be saved.
+
+- **The rule the host enforces has to be the rule the canvas honours.** A node must carry text or
+  a paper; a shape tool click creates a node *before* anything is typed, so the panel was building
+  records the host refuses. Leaving the editor empty now discards the shape (and its edges, and it
+  is undoable) instead of storing a placeholder.
+- **Never write a node that is still being typed into.** Saves are held while the editor is open
+  and resume when it commits — with text it is written, empty it is dropped. Closing the board,
+  switching boards or unloading the page commits the open edit first, which also fixes text that
+  used to be lost when the board closed mid-edit.
+- **A last resort before the wire.** Any empty node that still reaches a write (an older draft,
+  another client) is pruned and the status says so, because failing the *entire* board for one
+  stray shape is the worst possible outcome for the reader's other work.
+- **A rejection should be actionable.** When the host still reports a node problem by position, the
+  panel selects that node and says what to do, rather than printing the host's sentence alone.
+
 ## Invariants
 
 - No new runtime dependency, no model call while opening, listing or drawing a board, and no
@@ -346,7 +365,7 @@ Synthetic-only validation, following the existing project discipline:
   host's own validator**. **Implemented, 5 cases.**
 - `scripts/board-browser-fixture.mjs` — real Chromium receipt for draw/drag/zoom/connect/save/reload,
   library drag-in, tidy-tree snapping, and the standalone refusal of the conversation chip.
-  **Implemented, 30 checks** in `docs/validation/board-browser.json` (including a knowledge-graph node joining a board, the connect tool, a bend point, automatic layout with a pinned node, the source/style pair, and the plugin's own board entry opening as a pure canvas).
+  **Implemented, 31 checks** in `docs/validation/board-browser.json` (including a knowledge-graph node joining a board, the connect tool, a bend point, automatic layout with a pinned node, the source/style pair, and the plugin's own board entry opening as a pure canvas).
 - `scripts/board-harness-smoke.mjs` — native DSH check that the tool is offered, that a board token
   reaches a turn as frozen material, and that an unresolvable reference fails the turn.
   **Implemented, 7 checks** in `docs/validation/board-harness.json`.

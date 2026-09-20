@@ -89,6 +89,18 @@ try {
   }
   record('board-view-opens-and-creates-the-first-board-without-a-model');
 
+  // An unnamed shape must not wedge the board: the host refuses a node with neither text nor a
+  // paper, and rejecting the *whole* board for one empty shape is what left a reader stuck.
+  await page.locator('#board-tool-rect').click();
+  await page.mouse.click(stage.x + 620, stage.y + 520);
+  await page.locator('.board-text-editor').waitFor();
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 0);
+  await waitForHost(value => (value.board?.nodes ?? []).length === 0, 'the discarded shape never reaching the record');
+  assert.equal(/没有文本也没有文献/.test(await page.locator('#board-status').innerText()), false, 'and no rejection is reported');
+  assert.equal(await page.locator('.board-edge-group').count(), 0);
+  record('an-unnamed-shape-is-discarded-instead-of-blocking-every-save');
+
   // Place a note; the shape tool returns to selection so the follow-up click cannot
   // create a stray node while the inline editor is open.
   await page.locator('#board-tool-note').click();
@@ -186,17 +198,23 @@ try {
   assert.equal(await page.locator('[data-edge-path]').count(), 1);
   record('a-page-reload-restores-the-board-from-the-host-record');
 
-  // Undo/redo over a structural edit.
+  // Undo/redo over a structural edit. Creating and naming a node are two steps, so the first
+  // undo removes the text and the second removes the node.
   const reopenedStage = await page.locator('#board-stage').boundingBox();
   await page.locator('#board-tool-ellipse').click();
   await page.mouse.click(reopenedStage.x + 300, reopenedStage.y + 560);
   await page.locator('.board-text-editor').waitFor();
-  await page.keyboard.press('Escape');
+  await page.locator('.board-text-editor').fill('合成的椭圆');
+  await page.keyboard.press('Control+Enter');
   await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 5);
+  await page.locator('#board-undo').click();
+  await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 5 && document.querySelector('.board-node-text')?.textContent !== '合成的椭圆');
   await page.locator('#board-undo').click();
   await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 4);
   await page.locator('#board-redo').click();
   await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 5);
+  await page.locator('#board-redo').click();
+  await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 5 && [...document.querySelectorAll('.board-node-text')].some(node => node.textContent === '合成的椭圆'));
   // Undo/redo restores geometry but deliberately not a selection, so select the node again.
   const restored = await page.locator('.board-node').nth(4).locator('.board-node-shape').boundingBox();
   await page.mouse.click(restored.x + restored.width / 2, restored.y + restored.height / 2);

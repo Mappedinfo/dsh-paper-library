@@ -784,6 +784,9 @@
       if (!live || !boardId) return;
       pendingSave = true;
       status('有未保存的改动');
+      // A node being typed into is empty until the edit commits; writing it now would be
+      // rejected (or would drop the node under the reader's cursor). The commit re-arms this.
+      if (editor) { if (saveTimer !== null) { clearTimeout(saveTimer); saveTimer = null; } return; }
       if (saveTimer !== null) clearTimeout(saveTimer);
       saveTimer = setTimeout(() => { saveTimer = null; void flush(); }, LIMITS.saveDelay);
     }
@@ -801,6 +804,10 @@
 
     async function flush({ keepalive = false } = {}) {
       if (!live || !boardId || !pendingSave) return;
+      // Held back until the open edit commits: the node being typed into is empty right now.
+      if (editor) return;
+      const pruned = pruneEmptyNodes(board);
+      board = pruned.board;
       const payload = { ...board, view: { x: view.x, y: view.y, zoom: view.zoom } };
       pendingSave = false;
       status('正在保存…');
@@ -811,7 +818,7 @@
         board = result.board;
         conflict = null;
         renderConflict();
-        status('已保存', 'saved');
+        status(pruned.removed ? `已保存（忽略了 ${pruned.removed} 个没有内容的节点）` : '已保存', 'saved');
         if (result.board.status !== board.status) render();
       } catch (error) {
         if (!live) return;
@@ -822,6 +829,16 @@
           return;
         }
         pendingSave = true;
+        // The host reports node problems by position; select that node so the reader can fix it.
+        const named = /第 (\d+) 个节点/.exec(error.message ?? '');
+        const target = named ? board.nodes[Number(named[1]) - 1] : null;
+        if (target) {
+          select([target.id]);
+          render(); renderInspector();
+          status(`这个节点还没有内容：写入文字或删除后即可保存。`, 'error');
+          toast('已选中出错的那个节点：请写入文字或删除它。', true);
+          return;
+        }
         status(error.message || '保存失败', 'error');
         toast(error.message || '画板保存失败', true);
       }
@@ -922,17 +939,21 @@
       area.setAttribute('aria-label', `编辑${KIND_LABEL[node.kind] || '节点'}文本`);
       area.style.left = `${screen.x}px`; area.style.top = `${screen.y}px`;
       area.style.width = `${Math.max(60, node.w * view.zoom)}px`; area.style.height = `${Math.max(40, node.h * view.zoom)}px`;
+      // An empty shape is not content: the host refuses a node with neither text nor a paper,
+      // and keeping one would make every later save of the whole board fail. So leaving the
+      // editor empty discards the shape (its edges with it) instead of storing a placeholder.
       const commit = () => {
         const value = area.value;
         closeTextEdit();
+        if (!value.trim() && !byId(node.id)?.paper) { discardEmptyNode(node.id); return; }
         mutate(current => model.setNodeText(current, node.id, value));
       };
       area.addEventListener('blur', commit);
       area.addEventListener('keydown', event => {
-        if (event.key === 'Escape') { event.preventDefault(); closeTextEdit(); }
+        if (event.key === 'Escape') { event.preventDefault(); commit(); }
         if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); commit(); }
       });
-      editor = { node: node.id, area };
+      editor = { node: node.id, area, commit };
       editorLayer.append(area);
       area.focus();
       area.select();
@@ -942,6 +963,24 @@
       const area = editor.area;
       editor = null;
       area.remove();
+    }
+    /** Finish an open edit before the board is written or closed; nothing is left half-typed. */
+    function commitTextEdit() {
+      if (editor) editor.commit();
+    }
+    /** A node with no text and no paper cannot be stored; drop it and anything attached. */
+    function discardEmptyNode(id) {
+      if (!byId(id)) return;
+      selection.delete(id);
+      mutate(current => model.removeItems(current, [id]));
+      render(); renderInspector();
+    }
+    /** Last resort before a write: nothing empty ever reaches the host. The node being edited
+     *  is left alone (its save is deferred until the edit commits). */
+    function pruneEmptyNodes(current) {
+      const empty = current.nodes.filter(node => !String(node.text ?? '').trim() && !node.paper && node.id !== editor?.node).map(node => node.id);
+      if (!empty.length) return { board: current, removed: 0 };
+      return { board: model.removeItems(current, empty), removed: empty.length };
     }
 
     function beginDrag(event) {
@@ -1237,6 +1276,7 @@
     }
 
     async function closeView({ focus = true } = {}) {
+      commitTextEdit();
       await settle({ keepalive: true });
       open = false;
       closeTextEdit();
@@ -1854,6 +1894,7 @@
       outline: (maximum) => outline({ ...board, title: board.title }, maximum),
       setTool,
       dispose() {
+        commitTextEdit();
         closeTextEdit();
         if (saveTimer !== null) { clearTimeout(saveTimer); saveTimer = null; }
         // The page may be unloading: start a keepalive write before disabling the panel.
