@@ -48,6 +48,7 @@
     "LICENSE",
     "licenses",
     "site",
+    "docs/auto-parse-flow.md",
     "docs/paper-review-skill-design.md",
     "docs/whiteboard-design.md",
     "docs/board-pages.md"
