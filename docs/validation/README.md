@@ -28,7 +28,7 @@ They stay out of `npm test` (which is browser-free) for that reason; browser-onl
 
 | Receipt | Command | Verified | Scope |
 |---|---|---|---|
-| `annotation-reference-browser.json` | `node scripts/reference-browser-fixture.mjs`（native host） | 2026-09-20 | — |
+| `annotation-reference-browser.json` | `node scripts/reference-browser-fixture.mjs`（native host） | 2026-09-20 | Real isolated DSH profile in Chromium: 46 synthetic notes referenced through the native composer, per-paper drafts, reload restoration, the snapshot inspector's missing/unknown states, and zero external requests |
 | `annotation-replies-browser.json` | `node scripts/annotation-replies-browser-fixture.mjs` | 2026-09-18 | 5 项检查（回执未写 scope 字段） |
 | `automated.json` | `node scripts/validate.mjs` | 2026-09-20 | Synthetic fixtures, source/runtime integration and checks listed below; excludes WPS and real provider completion |
 | `bibliography-browser.json` | `node scripts/bibliography-browser-fixture.mjs` | 2026-09-20 | Synthetic catalog in an isolated standalone server; browser build button, audit dialog and exports files; no model calls or network requests |

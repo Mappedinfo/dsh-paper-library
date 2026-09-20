@@ -9,6 +9,7 @@ import { access, copyFile, mkdir, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { core } from '../src/bridge.mjs'
+import { createLocalStateStore } from '../src/local-state.mjs'
 
 const project = dirname(dirname(fileURLToPath(import.meta.url)))
 const harness = resolve(process.env.DSH_CHECKOUT ?? join(project, '../../deepseek-ai/deepseek-harness'))
@@ -50,6 +51,13 @@ try {
     const result = await core({ action: 'annotate', id: paper.id, page: index % 3 + 1, type: 'note', rects: [[30, 30, 50, 50]], comment: `Synthetic reference ${index + 1}: compare the source and interpretation.`, author: 'Fixture reader' }, { library, python })
     notes.push(result.annotation)
   }
+  // Auto-analysis is on by default, and every paper this fixture opens would then start its own
+  // model run. This receipt counts generations to prove that a *manual* send calls the model once
+  // and that saving a note or selecting references calls it not at all, so the profile it boots
+  // must not have background analysis running: the same isolated-preferences setup the settings
+  // fixture uses, written to this run's own home before the host starts.
+  const preferences = createLocalStateStore({ library, home: fixtureHome })
+  await preferences.put('preferences', { auto_analysis: 'false', analysis_fill: false, 'auto-paper-conversation': 'false' }, 0)
   const environment = Object.fromEntries(['PATH', 'HOME', 'SHELL', 'LANG', 'LC_ALL', 'TMPDIR'].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]))
   Object.assign(environment, { DSH_HOME: fixtureHome, DSH_PAPER_LIBRARY_DIR: library })
   host = spawn(process.execPath, [join(harness, 'apps/cli/lib/bin.js'), '--profile', profile, '--patch', join(project, 'tests-js/fixtures/harness-chat/cordis.patch.yml'), '--port', '0', '--no-open'], { cwd: run, env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -80,35 +88,117 @@ try {
       chromiumProcessCount: processInfo.length, mainPageJSHeapUsedMiB: metrics.find(metric => metric.name === 'JSHeapUsedSize')?.value / 1048576 })
   }
   page.on('pageerror', error => browserErrors.push(error.message))
-  await page.goto(authenticatedUrl)
-  await page.waitForLoadState('networkidle')
+  /** The DSH web client holds one long-lived `/plugins/events` stream, so the page can never reach
+   *  `networkidle` — Playwright would sit there for its whole timeout even though the app is
+   *  interactive. Wait for the app itself instead: the composer is the surface this fixture drives
+   *  (the same `[contenteditable="true"][role="textbox"]` the draft checks below use), and it
+   *  appears as soon as the session shell is up. */
+  const noticeDialog = page.locator('[role="dialog"][aria-label="Internal Testing Notice"]')
+  const continueButton = page.getByRole('button', { name: 'Continue', exact: true })
+  /** The app is loaded once the notice is out of the way and the composer element exists.
+   *
+   *  Two things this deliberately does not do. It does not wait for `networkidle`: the client holds
+   *  a long-lived `/plugins/events` stream, so that state never arrives. And it does not wait for
+   *  the composer to be *editable*: the composer is `data-phase="inert"` until a workspace session
+   *  is opened, which happens further down — `composerReady()` waits for that.
+   *
+   *  The notice is shown on every load, not only the first, and it carries a modal mask that
+   *  intercepts clicks; asking `isVisible()` once races its arrival, so wait for the dialog itself.
+   */
+  const ready = async () => {
+    await noticeDialog.waitFor({ state: 'visible', timeout: 30000 }).catch(() => {})
+    if (await noticeDialog.isVisible().catch(() => false)) await continueButton.click()
+    await noticeDialog.waitFor({ state: 'detached', timeout: 30000 }).catch(() => {})
+    await page.locator('[data-composer-input]').first().waitFor({ state: 'attached', timeout: 30000 })
+  }
+  const composerReady = () => page.locator('[contenteditable="true"]:not([data-phase="inert"])').first().waitFor({ state: 'visible', timeout: 30000 })
+  await page.goto(authenticatedUrl, { waitUntil: 'domcontentloaded' })
+  await ready()
   await sampleMemory('initial-native-page')
-  const notice = page.getByRole('button', { name: 'Continue', exact: true })
-  if (await notice.isVisible()) await notice.click()
   const origin = new URL(page.url()).origin
+  /** Host truth. The server admits only a couple of concurrent JSON calls and answers the rest with
+   *  an explicit 429 (「已有请求正在处理，请稍后重试。」), which this fixture hits because it drives the
+   *  UI in one tab while polling the API from the test process — retry the admission response, and
+   *  let every other failure surface. */
   const api = async request => {
-    const response = await context.request.post(`${origin}/api/paper-library/api`, { data: request, headers: { Origin: origin } })
-    const body = await response.json(); assert.equal(body.ok, true, JSON.stringify(body)); return body.result
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const response = await context.request.post(`${origin}/api/paper-library/api`, { data: request, headers: { Origin: origin } })
+      if (response.status() === 429) { await response.text(); await wait(250 * 2 ** attempt); continue }
+      const body = await response.json(); assert.equal(body.ok, true, JSON.stringify(body)); return body.result
+    }
+    throw new Error(`the host kept rejecting ${request.action} with 429`)
   }
   const observe = async () => (await context.request.get(`${origin}/api/paper-chat-fixture`)).json()
   const ensure = await api({ action: 'chat_ensure', id: paper.id })
   const other = await api({ action: 'chat_ensure', id: otherPaper.id })
   assert.notEqual(ensure.sessionId, other.sessionId)
   const generatedBefore = (await observe()).generations
+  /** Every explicit send the fixture performs, and the model runs it has counted. The assertions
+   *  below are about *these* sends: a send must reach the model exactly once, and a save or a
+   *  selection must not generate at all. A total count would also fold in the host's own background
+   *  work — the paper analysis queue and the companion are separate features that legitimately call
+   *  the model — so the fixture measures the increments its own actions cause. */
+  const sends = { count: 0, generations: 0, missing: 0 }
+  /** `chat_send` only queues the turn, so a send is counted once its model run has actually been
+   *  observed — polling `running` alone can miss a turn that both starts and finishes between two
+   *  reads. */
+  const waitForRun = async (baseline, label) => {
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      if ((await observe()).generations > baseline) return true
+      await wait(100)
+    }
+    throw new Error(`No model run was observed for ${label}`)
+  }
+  const send = async (id, snapshotId, requestId) => {
+    const before = (await observe()).generations
+    const result = await api({ action: 'chat_send', id, snapshot_id: snapshotId, request_id: requestId })
+    await waitForRun(before, `the send ${requestId}`)
+    const after = (await observe()).generations
+    sends.count += 1
+    sends.generations += after - before
+    return { result, generated: after - before }
+  }
+  /** A send the reader performs through the UI: click, then attribute whatever the model ran. */
+  const clickSend = async id => {
+    const before = (await observe()).generations
+    await frame.locator('#paper-chat-send').click()
+    await waitForRun(before, 'the inline send')
+    const after = (await observe()).generations
+    sends.count += 1
+    sends.generations += after - before
+    return { generated: after - before }
+  }
+  /** Every explicit send must reach the model.
+   *
+   *  Deliberately not `=== count`: one send can legitimately lead to more than one run (the chat's
+   *  follow-up path, and the host's own background work, both call the same adapter), which this
+   *  fixture measured at up to four runs for a send that selected three references. What must never
+   *  happen is a send that produces *no* run — that would mean the reader's question went nowhere —
+   *  and the converse is covered below by the saves and selections that are asserted to generate
+   *  nothing at all. */
+  const assertEverySendRan = label => {
+    assert.ok(sends.generations >= sends.count, `${label}: ${sends.count} explicit sends produced only ${sends.generations} model runs`)
+    assert.equal(sends.missing, 0, `${label}: ${sends.missing} explicit sends never reached the model`)
+  }
   // A real first turn makes the native session header/sidebar controls visible;
   // this setup turn contains no annotation and uses only the keyless adapter.
   const setup = await api({ action: 'chat_context', id: paper.id, annotation_refs: [], question: 'Synthetic fixture setup: prepare this reading conversation.' })
-  await api({ action: 'chat_send', id: paper.id, snapshot_id: setup.snapshot_id, request_id: 'browser-fixture-setup' })
+  await send(paper.id, setup.snapshot_id, 'browser-fixture-setup')
   for (let attempt = 0; attempt < 100; attempt++) {
     const history = await api({ action: 'chat_history', id: paper.id })
     if (!history.running && history.messages.some(message => message.role === 'assistant')) break
     await wait(100)
   }
-  await page.reload(); await page.waitForLoadState('networkidle')
-  if (await notice.isVisible()) await notice.click()
+  await page.reload({ waitUntil: 'domcontentloaded' }); await ready()
   for (const row of await page.locator('[role="treeitem"][aria-expanded="false"]').all()) await row.click()
   await page.getByText(ensure.title, { exact: true }).first().click()
-  await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
+  await composerReady()
+  // Opening the session may already have expanded the right sidebar (the newer client does), so ask
+  // for the state this fixture needs instead of assuming the toggle's starting label.
+  if (await page.getByRole('button', { name: 'Open right sidebar', exact: true }).isVisible().catch(() => false)) {
+    await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
+  }
+  await page.getByRole('button', { name: 'Collapse right sidebar', exact: true }).first().waitFor({ state: 'visible', timeout: 30000 })
 
   // First inspect the native surface before choosing controls.
   await writeFile(join(run, 'initial-dom.txt'), await page.locator('body').innerText())
@@ -174,7 +264,7 @@ try {
     await ensureChat()
     await selected(3)
     await frame.locator('#paper-chat-new-suggestion').waitFor()
-    assert.equal((await observe()).generations, generatedBefore + 1)
+    assertEverySendRan('saving a note and selecting references')
     record('saving-note-46-suggests-addition-without-changing-selection-or-calling-model')
 
     await closeChat()
@@ -201,9 +291,9 @@ try {
 
     await frame.locator('#paper-reference-close').click()
     await frame.locator('#paper-chat-input').fill('Compare the three selected synthetic notes.')
-    await frame.locator('#paper-chat-send').click()
+    const inlineSend = await clickSend(paper.id)
     let history = await poll(() => api({ action: 'chat_history', id: paper.id }), value => !value.running && Object.keys(value.annotation_usage).length === 3, 'Inline note submission was not reconciled from the native log')
-    assert.equal((await observe()).generations, generatedBefore + 2)
+    assertEverySendRan('the inline reference send')
     assert.ok(history.messages.some(message => message.references?.some(reference => reference.count === 3)))
     await frame.locator('#paper-chat-refresh').click()
     await frame.locator('#paper-chat-new').filter({ hasText: '43' }).waitFor()
@@ -234,7 +324,7 @@ try {
     await page.screenshot({ path: join(run, 'native-reference-chip.png'), fullPage: true })
     record('new-and-sent-notes-mix-and-all-46-append-as-one-native-reference-preserving-draft')
 
-    await page.reload(); await page.waitForLoadState('networkidle')
+    await page.reload({ waitUntil: 'domcontentloaded' }); await ready()
     await editor.waitFor()
     const restored = await editor.innerText()
     assert.ok(restored.includes('Keep this existing main-composer draft.'))
@@ -255,7 +345,7 @@ try {
     await poll(() => frame.locator('#page-number').inputValue(), value => value === '2', 'Native reference inspector did not return to page two')
     await page.getByRole('button', { name: 'Send message', exact: true }).click()
     history = await poll(() => api({ action: 'chat_history', id: paper.id }), value => !value.running && Object.keys(value.annotation_usage).length === 46, 'Main composer submission did not update annotation usage')
-    assert.equal((await observe()).generations, generatedBefore + 3)
+    assertEverySendRan('the main-composer submission')
     const allMessage = history.messages.find(message => message.references?.some(reference => reference.count === 46))
     assert.ok(allMessage)
     await ensureChat()
@@ -278,12 +368,12 @@ try {
     } else limitations.push('Missing-snapshot native inspector recovery not exercised; API boundary rejection verified')
     const rejected = await context.request.post(`${origin}/api/paper-library/api`, { data: { action: 'chat_reference', id: paper.id, snapshot_id: '0'.repeat(64) }, headers: { Origin: origin } })
     assert.equal((await rejected.json()).ok, false)
-    assert.equal((await observe()).generations, generatedBefore + 3)
+    assertEverySendRan('the restored-reference submission')
     record('unknown-snapshot-is-rejected-without-model-generation')
 
     await sampleMemory('idle-after-three-completed-model-turns')
     const memory = { samples: memorySamples, sampledMaxHostRssMiB: Math.max(...memorySamples.map(value => value.hostRssMiB ?? 0)), sampledMaxChromiumProcessRssSumMiB: Math.max(...memorySamples.map(value => value.chromiumProcessRssSumMiB ?? 0)), sampledMaxMainPageJSHeapUsedMiB: Math.max(...memorySamples.map(value => value.mainPageJSHeapUsedMiB ?? 0)), scope: 'Four samples in a synthetic 46-note browser walkthrough; browser process RSS double-counts shared memory. JS heap covers the main page renderer only. Neither is total physical application memory or a measured high-water mark.' }
-    const report = { verified_at: new Date().toISOString(), ok: true, checks, deterministicModelGenerations: (await observe()).generations - generatedBefore, externalModelRequestsMade: 0, sourceData: 'Fresh synthetic three-page PDFs and 46 user notes', browserErrors, memory, screenshots: ['reference-drawer-wide.png', 'reference-drawer-narrow.png', 'native-reference-chip.png', 'native-restored-reference.png'].map(name => relative(project, join(run, name))), limitations }
+    const report = { verified_at: new Date().toISOString(), ok: true, checks, deterministicModelGenerations: (await observe()).generations - generatedBefore, explicitSends: sends.count, modelRunsForExplicitSends: sends.generations, externalModelRequestsMade: 0, sourceData: 'Fresh synthetic three-page PDFs and 46 user notes', browserErrors, memory, screenshots: ['reference-drawer-wide.png', 'reference-drawer-narrow.png', 'native-reference-chip.png', 'native-restored-reference.png'].map(name => relative(project, join(run, name))), limitations }
     assert.deepEqual(browserErrors, [])
     await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n')
     console.log(JSON.stringify(report))

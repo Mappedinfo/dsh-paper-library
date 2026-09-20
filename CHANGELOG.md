@@ -44,6 +44,15 @@
 - **既有行为不变**：`core.py` 仍按原样再导出 `csl_item`／`parse_ris`／`PaperConflictError`／`MAX_ANNOTATIONS`／`REFERENCE_MAX_CHARACTERS`（`datasets.py`、`paper_analysis.py` 与测试继续照旧 import）。新增两项结构测试：mixins 的继承与方法归属（同一名字被两个 mixin 定义会让 MRO 静默取第一个，故直接断言不存在重复），以及共享辅助函数的绑定与"caps 必须活读"这两件事本身。
 - 验证：**507 JavaScript / 222 Python 测试**、`validate.mjs` 28 项全绿、`check-publication` 通过（`files` 已含 `src`，三个新模块自动随包发布）。
 
+### 工程：原生批注引用回执重新可跑（四处与新版客户端的脱节）
+
+- `scripts/reference-browser-fixture.mjs` 在本机永远跑不完，根因是**四处夹具与新客户端脱节**，逐一查出后修复：
+  1. **`waitForLoadState('networkidle')` 永远不会满足**：DSH Web 客户端持有 `/plugins/events` 长连接，页面 68 ms 就已可交互，但 networkidle 会一路等到 Playwright 30 秒超时。改为等待**真实就绪信号**。
+  2. **「Internal Testing Notice」对话框每次加载都出现**（不只是首次），它带模态遮罩，会拦掉后续点击；原来用一次 `isVisible()` 竞态判断。现在显式等待对话框出现→点 Continue→等待其消失。
+  3. **模型调用计数对不上**：默认开启的自动整理（auto-analysis）会让每篇打开的文献各自产生模型调用。夹具在自己的隔离 home 里写入偏好关闭它（与 `settings-browser-fixture.mjs` 同一套做法），并把"每次显式发送必须真正到达模型"的断言改为发送计数（一次发送可能合法地产生多次运行——实测一次带三条引用的发送产生了 4 次——但一次发送**产生 0 次**运行意味着读者的问题没送出去，必须失败）。
+  4. **宿主只受理 2 个并发 JSON 请求**，其余返回 429（「已有请求正在处理，请稍后重试。」）；该夹具一边驱动 UI 一边轮询 API，必然撞上，现在按 `project-ui-fixture.mjs` 的做法退避重试。
+- 结果：[11 项回执](docs/validation/annotation-reference-browser.json) 在真实隔离 DSH profile 下**重新跑通并连续两次稳定通过**（此前已提交的回执是失败运行写下的 `ok:false`）。副产品：夹具现在把"本次自己的发送"与"宿主后台工作"分开报告（`explicitSends` / `modelRunsForExplicitSends` / `deterministicModelGenerations`）。
+
 ### 工程：原生画板回执的失败是断言写错，不是产品缺陷
 
 - `scripts/board-harness-smoke.mjs` 此前一直报「the missing snapshot never reaches the model as material」。**实际值是 0，而不是期望的 1**：适配器在每次模型调用时**整体替换** `boardReferences`，所以"被拒绝的引用没有把任何画板材料送进模型"就该是 0 条。诊断依据是读出来的值（`actual: 0, expected: 1`）与现场状态：被拒的这一轮 `outcome=error`、没有提交第二条用户消息、模型**确实被调用**（`generations` 递增）且其请求不含任何 plugin-source 画板消息（缺失快照由 `snapshotLoad` 以 `BOARD_SNAPSHOT_MISSING` 拒绝）。
