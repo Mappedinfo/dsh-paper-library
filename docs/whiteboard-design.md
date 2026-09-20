@@ -331,6 +331,29 @@ Reported from the sidebar 2026-09-20 with a screenshot: several `（空）` shap
 - **A rejection should be actionable.** When the host still reports a node problem by position, the
   panel selects that node and says what to do, rather than printing the host's sentence alone.
 
+## P15: shape vocabulary and a toolbar that stops growing
+
+Asked for 2026-09-20 with a screenshot of a five-row toolbar: shapes have no character (a rounded
+"rectangle"), a diamond is briefly a rectangle, style settings are always on screen, projects,
+layout, paper binding, source and the view controls are all in the open, and the board's files are
+one dropdown.
+
+- **Every kind looks like what it is.** Rectangle square-cornered, sticky note warm paper with a
+  turned-up corner and a soft lift, concept and paper the rounded containers, ellipse and diamond
+  their own shapes. The PNG export shares the same radius table, so the file matches the canvas.
+- **The naming box must not hide the shape.** The inline editor was an opaque rounded rectangle
+  covering the node, which is why a new diamond read as a rectangle until the reader clicked away.
+  It is now a translucent dashed box, and the shape is visible throughout (the DOM was a `polygon`
+  all along — the report was a rendering illusion, and the receipt-free fix is the styling).
+- **Context, not inventory.** Node settings appear for a selected node, link settings for a selected
+  link, and nothing when the canvas is empty. Projects and layout each get a dropdown panel,
+  paper binding plus source/Mermaid content live in a ☰ menu, and the view controls (fit, full
+  screen, focus — with zoom) sit together. Menus are overlays: opening one never reflows the canvas,
+  Escape or a click outside closes it, and only one is open at a time.
+- **Files are a list.** 「画板 ▾」 opens the board's own file list — title, node and link counts,
+  open, delete — with rename and 「＋ 新建画板」 at the bottom. The old `<select>` survives as the
+  hidden value the receipts read; the interface no longer presents a lone dropdown.
+
 ## Invariants
 
 - No new runtime dependency, no model call while opening, listing or drawing a board, and no

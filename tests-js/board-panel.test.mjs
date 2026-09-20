@@ -70,7 +70,9 @@ function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
     'board-layout-mode', 'board-layout-direction', 'board-layout-gap-x', 'board-layout-gap-y', 'board-layout-apply', 'board-layout-pin', 'board-layout-unpin', 'board-layout-status',
     'board-source-open', 'board-source-dialog', 'board-mermaid-open', 'board-mermaid-text', 'board-mermaid-status', 'board-mermaid-parse', 'board-mermaid-generate', 'board-links', 'board-link-paper', 'board-unlink-paper', 'board-focus', 'board-source-content', 'board-source-style', 'board-source-status', 'board-source-apply', 'board-source-download', 'board-source-upload', 'board-source-file', 'board-source-generate',
     { id: 'board-project-select', tag: 'select' }, 'board-link-project', 'board-unlink-project',
-    'board-more', 'board-panel',
+    'board-files-open', 'board-files', 'board-file-list', 'board-files-label',
+    'board-layout-open', 'board-layout-panel', 'board-project-open', 'board-project-panel',
+    'board-menu-open', 'board-menu', 'board-inspector', 'board-inspector-node', 'board-inspector-edge',
   ];
   const { doc, registry, Element } = environment(ids);
   doc.defaultView.confirm = () => confirm;
@@ -833,17 +835,63 @@ test('a rejected save names the offending node and selects it', async () => {
   assert.equal(harness.panel.selection().length, 1, 'the node the host named is selected');
 });
 
-test('the narrow-pane panel contains the secondary controls behind one toggle', async () => {
-  const harness = loadPanel({ api: apiStub() });
-  const more = harness.registry.get('board-more');
-  const panel = harness.registry.get('board-panel');
-  assert.equal(more.getAttribute('aria-expanded'), 'false');
-  more.dispatch('click');
-  assert.equal(panel.classList.contains('is-open'), true, 'the toggle opens the panel');
-  assert.equal(more.getAttribute('aria-expanded'), 'true');
-  more.dispatch('click');
-  assert.equal(panel.classList.contains('is-open'), false, 'and closes it again');
-  assert.equal(more.getAttribute('aria-expanded'), 'false');
+test('the toolbar keeps one menu open at a time and the inspector follows the selection', async () => {
+  state.length = 0;
+  // The stub's created record is `b-created`; the list must describe that same board.
+  const harness = loadPanel({ api: apiStub({ board_list: () => ({ boards: [{ id: 'b-created', title: '结构图', node_count: 3, edge_count: 2 }], scanned: 1, total: 1, truncated: false }) }) });
+  await harness.panel.open();
+  const pairs = [['board-files-open', 'board-files'], ['board-layout-open', 'board-layout-panel'], ['board-project-open', 'board-project-panel'], ['board-menu-open', 'board-menu']];
+  const open = id => harness.registry.get(id).classList.contains('is-open');
+  for (const [trigger, panel] of pairs) {
+    harness.registry.get(trigger).dispatch('click');
+    assert.equal(open(panel), true, `${trigger} opens ${panel}`);
+    assert.equal(harness.registry.get(trigger).getAttribute('aria-expanded'), 'true');
+    assert.equal(pairs.filter(([, other]) => open(other)).length, 1, 'only one menu is open');
+  }
+  // The last trigger closes what it opened.
+  harness.registry.get('board-menu-open').dispatch('click');
+  assert.equal(pairs.some(([, panel]) => open(panel)), false);
+  assert.equal(harness.registry.get('board-menu-open').getAttribute('aria-expanded'), 'false');
+
+  // The file list is a list of boards, not one dropdown: the stub's record is listed and the
+  // current one cannot be reopened.
+  harness.registry.get('board-files-open').dispatch('click');
+  const rows = harness.registry.get('board-file-list').children.filter(child => child.className === 'board-file-row');
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].children[0].textContent, /结构图/);
+  assert.match(rows[0].children[1].textContent, /3 节点 · 2 连线/);
+  assert.equal(harness.registry.get('board-files-label').textContent, '结构图');
+  harness.registry.get('board-files-open').dispatch('click');
+
+  // Nothing selected: no inspector. A node shows the node row; an edge shows the edge row.
+  const inspector = harness.registry.get('board-inspector');
+  assert.equal(inspector.classList.contains('is-open'), false, 'the inspector starts hidden');
+  assert.equal(harness.registry.get('board-inspector-node').hidden, true);
+  assert.equal(harness.registry.get('board-inspector-edge').hidden, true);
+  harness.panel.setTool('rect');
+  harness.svg.dispatch('pointerdown', { clientX: 200, clientY: 160 });
+  nameShape(harness, '被选中的节点');
+  await harness.runTimers();
+  assert.equal(inspector.classList.contains('is-open'), true, 'selecting a node reveals its settings');
+  assert.equal(harness.registry.get('board-inspector-node').hidden, false);
+  assert.equal(harness.registry.get('board-inspector-edge').hidden, true, 'and not the link settings');
+  // Two nodes: the single-node settings step aside.
+  harness.panel.setTool('rect');
+  harness.svg.dispatch('pointerdown', { clientX: 520, clientY: 160 });
+  nameShape(harness, '第二个节点');
+  harness.panel.setTool('select');
+  const [first, second] = harness.panel.board().nodes;
+  harness.svg.dispatch('pointerdown', { clientX: first.x + first.w / 2, clientY: first.y + first.h / 2 });
+  harness.svg.dispatch('pointerdown', { clientX: second.x + second.w / 2, clientY: second.y + second.h / 2, shiftKey: true });
+  assert.equal(harness.registry.get('board-inspector-node').hidden, true, 'two selected nodes have no single-node settings');
+  // A link shows the link settings instead.
+  harness.panel.setTool('connect');
+  const [a, b] = harness.panel.board().nodes;
+  void first; void second;
+  harness.svg.dispatch('pointerdown', { clientX: a.x + a.w / 2, clientY: a.y + a.h / 2 });
+  harness.svg.dispatch('pointerdown', { clientX: b.x + b.w / 2, clientY: b.y + b.h / 2 });
+  assert.equal(harness.registry.get('board-inspector-edge').hidden, false, 'selecting a link reveals the link settings');
+  assert.equal(harness.registry.get('board-inspector-node').hidden, true);
 });
 
 test('focus mode is a pure canvas and Escape leaves it', async () => {

@@ -36,6 +36,11 @@ try {
   const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, acceptDownloads: true });
+  /** The toolbar is menus: open the one that owns a control before using it. */
+  const openMenu = async (trigger, panel) => {
+    if (await page.locator(trigger).getAttribute('aria-expanded') !== 'true') await page.locator(trigger).click();
+    await page.waitForFunction(id => document.getElementById(id)?.classList.contains('is-open'), panel);
+  };
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => { if (!request.url().startsWith(origin) && !request.url().startsWith('data:') && !request.url().startsWith('blob:')) external.push(request.url()); });
   // Deleting a board asks first; Playwright dismisses dialogs unless told otherwise.
@@ -97,6 +102,7 @@ try {
   record('a-reload-restores-the-board-from-browser-storage-alone');
 
   // Arranging works with no host: same deterministic layout as the plugin.
+  await openMenu('#board-layout-open', 'board-layout-panel');
   await page.locator('#board-tidy').click();
   await page.waitForFunction(() => /已把 2 个节点整理成树/.test(document.getElementById('toast')?.textContent || ''));
   const tidied = await stored();
@@ -172,6 +178,7 @@ try {
 
   await page.locator('#board-tool-select').click();
   await page.keyboard.press('Escape');
+  await openMenu('#board-layout-open', 'board-layout-panel');
   await page.locator('#board-layout-mode').selectOption('layered');
   await page.locator('#board-layout-direction').selectOption('tb');
   await page.locator('#board-layout-apply').click();
@@ -182,6 +189,7 @@ try {
   await page.waitForFunction(signature => JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true)[0].board.nodes.map(node => `${node.id}:${node.x},${node.y}`).sort().join('|') === signature, onceSignature);
   record('automatic-layout-is-available-and-idempotent-in-the-standalone-build');
 
+  await openMenu('#board-menu-open', 'board-menu');
   await page.locator('#board-source-open').click();
   await page.locator('#board-source-dialog').waitFor();
   await page.locator('#board-source-generate').click();
@@ -203,6 +211,7 @@ try {
 
   // Boards are separate, and deletion hides only the deleted one.
   const nodesInFirstBoard = await page.locator('.board-node').count();
+  await openMenu('#board-files-open', 'board-files');
   await page.locator('#board-new').click();
   await page.waitForFunction(() => document.querySelectorAll('#board-select option').length === 2);
   try { await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 0); }
@@ -210,6 +219,7 @@ try {
     const state = await page.evaluate(() => ({ nodes: document.querySelectorAll('.board-node').length, options: document.querySelectorAll('#board-select option').length, title: document.getElementById('board-title')?.value, status: document.getElementById('board-status')?.textContent, records: (JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1') ?? '{"records":[]}').records ?? []).map(record => [record.board?.id, record.board?.title, record.board?.nodes?.length ?? record.board?.deleted]) }));
     throw new Error(`A new board did not become the drawing surface: ${JSON.stringify(state)}`);
   }
+  await openMenu('#board-menu-open', 'board-menu');
   await page.locator('#board-delete').click();
   await page.waitForFunction(() => document.querySelectorAll('#board-select option').length === 1);
   await page.waitForFunction(count => document.querySelectorAll('.board-node').length === count, nodesInFirstBoard);

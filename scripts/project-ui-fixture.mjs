@@ -173,9 +173,10 @@ try {
   assert.equal(listed.ok, true, `board_list failed: ${listed.error}`);
   const board = listed.result.boards[0];
   assert.ok(board, 'the paper ribbon created a board');
-  assert.ok(await page.locator('#board-project-select').isVisible(), 'the board reveals its project picker once the catalog offers projects');
-  assert.ok(await page.locator('#board-project-select option').count() >= 2, 'the picker lists the active projects');
   const target = (await projects())[0];
+  if (await page.locator('#board-project-open').getAttribute('aria-expanded') !== 'true') await page.locator('#board-project-open').click();
+  assert.ok(await page.locator('#board-project-select').isVisible(), 'the project menu holds the picker once the catalog offers projects');
+  assert.ok(await page.locator('#board-project-select option').count() >= 2, 'the picker lists the active projects');
   const boardLinks = async id => { const answer = await call('board_get', { id }); assert.equal(answer.ok, true, `board_get failed: ${answer.error}`); return answer.result.board.links ?? {}; };
   await page.locator('#board-project-select').selectOption(target.id);
   await page.locator('#board-link-project').click();

@@ -130,66 +130,80 @@
         <span class="board-sep" aria-hidden="true"></span>
         <button id="board-tool-connect" class="board-tool" type="button" aria-pressed="false" title="连线（C）：点起点再点终点；Esc 取消">连线</button>
       </div>
-      <button id="board-more" class="button subtle board-more" type="button" aria-expanded="false" aria-controls="board-panel" title="其余画板操作：画板管理、样式、关联、排版与源文件">更多 ⋯</button>
-      <span id="board-status" class="board-status" role="status" aria-live="polite"></span>
-      <span id="board-selection" class="board-status"></span>
+
+      <!-- Files: a list of boards, not one dropdown. The old select survives as the value the
+           panel and the receipts read; the list is what the reader clicks. -->
+      <button id="board-files-open" class="button subtle board-menu-button" type="button" aria-expanded="false" aria-controls="board-files" title="画板文件：打开、改名、新建、删除">画板 <span id="board-files-label" class="board-menu-name">未命名画板</span> ▾</button>
+
       <div class="board-group board-quick">
-        <label class="board-field">画板 <select id="board-select" aria-label="选择画板"></select></label>
         <button id="board-undo" class="button subtle" type="button">撤销</button>
         <button id="board-redo" class="button subtle" type="button">重做</button>
+        <span class="board-sep" aria-hidden="true"></span>
         <button id="board-zoom-out" class="button subtle" type="button" aria-label="缩小">−</button>
         <span id="board-zoom-label" class="board-status">100%</span>
         <button id="board-zoom-in" class="button subtle" type="button" aria-label="放大">＋</button>
-        <button id="board-fit" class="button subtle" type="button">适应</button>
-        <button id="board-send" class="button subtle" type="button" title="把这张画板作为不可变引用放进 DSH 主输入框；只准备草稿，不会发送">放入对话</button>
-        <button id="board-focus" class="button subtle" type="button" aria-pressed="false" title="专注：只显示画板，隐藏顶栏、文献库与阅读批注（Esc 退出）">专注 ⤢</button>
-      </div>
-      <div id="board-panel" class="board-panel">
-        <div class="board-section">
-          <span class="board-section-label">画板</span>
-          <input id="board-title" class="board-title" maxlength="200" aria-label="画板标题">
-          <button id="board-new" class="button subtle" type="button">＋ 新建</button>
-          <button id="board-add-paper" class="button subtle" type="button" title="从文献库挑选一篇文献加入画板；也可以直接把文献拖进来">＋ 文献</button>
-          <button id="board-delete" class="button subtle" type="button">删除画板</button>
-          <button id="board-accept-ai" class="button subtle" type="button" title="把标记为 AI 提议的节点与连线转为你的内容；保存画板本身不会自动接受">接受 AI 改动</button>
+        <span class="board-sep" aria-hidden="true"></span>
+        <div class="board-group board-view-group" role="group" aria-label="视图">
+          <button id="board-fit" class="button subtle" type="button" title="适应：把所有节点收进当前视图">适应</button>
+          <button id="board-fullscreen" class="button subtle" type="button" aria-pressed="false" title="全屏画板；Esc 退出">全屏 ⤢</button>
+          <button id="board-focus" class="button subtle" type="button" aria-pressed="false" title="专注：只显示画板，隐藏顶栏、文献库与阅读批注（Esc 退出）">专注 ⤢</button>
         </div>
-        <div class="board-section">
-          <span class="board-section-label">选中与样式</span>
-          <label class="board-field">形状 <select id="board-kind" aria-label="节点形状" disabled></select></label>
-          <label class="board-field">描边 <select id="board-color" aria-label="节点描边颜色" disabled></select></label>
-          <label class="board-field">关系 <select id="board-relation" aria-label="连线关系" disabled></select></label>
-          <label class="board-field">标签 <input id="board-edge-label-input" maxlength="200" aria-label="连线标签" disabled></label>
-          <label class="board-field">线型 <select id="board-edge-kind" aria-label="连线线型" disabled>
+        <button id="board-send" class="button subtle" type="button" title="把这张画板作为不可变引用放进 DSH 主输入框；只准备草稿，不会发送">放入对话</button>
+      </div>
+
+      <div class="board-group board-menus">
+        <button id="board-layout-open" class="button subtle board-menu-button" type="button" aria-expanded="false" aria-controls="board-layout-panel" title="自动排版：分层树／放射思维导图／分层图，方向与间距">排版 ▾</button>
+        <button id="board-project-open" class="button subtle board-menu-button" type="button" aria-expanded="false" aria-controls="board-project-panel" title="把这张画板关联到一个或多个阅读项目">项目 ▾</button>
+        <button id="board-menu-open" class="button subtle board-menu-button" type="button" aria-expanded="false" aria-controls="board-menu" aria-label="更多设置" title="更多设置：绑定文献、源文件与 Mermaid、内容与删除">☰</button>
+      </div>
+      <span id="board-status" class="board-status" role="status" aria-live="polite"></span>
+      <span id="board-selection" class="board-status"></span>
+
+      <div id="board-files" class="board-menu" aria-label="画板文件">
+        <span class="board-menu-label">画板文件</span>
+        <div id="board-file-list" class="board-file-list" role="list"></div>
+        <div class="board-menu-row">
+          <input id="board-title" class="board-title" maxlength="200" aria-label="画板标题" title="改名后回车或点开别处即保存">
+          <button id="board-new" class="button subtle" type="button">＋ 新建画板</button>
+        </div>
+        <label hidden><select id="board-select" aria-label="选择画板"></select></label>
+      </div>
+
+      <!-- Node and link settings appear only while something is selected. -->
+      <div id="board-inspector" class="board-menu board-inspector" aria-label="选中项设置">
+        <div id="board-inspector-node" class="board-menu-row">
+          <span class="board-menu-label">节点样式</span>
+          <label class="board-field">形状 <select id="board-kind" aria-label="节点形状"></select></label>
+          <label class="board-field">描边 <select id="board-color" aria-label="节点描边颜色"></select></label>
+        </div>
+        <div id="board-inspector-edge" class="board-menu-row">
+          <span class="board-menu-label">连线样式</span>
+          <label class="board-field">关系 <select id="board-relation" aria-label="连线关系"></select></label>
+          <label class="board-field">标签 <input id="board-edge-label-input" maxlength="200" aria-label="连线标签"></label>
+          <label class="board-field">线型 <select id="board-edge-kind" aria-label="连线线型">
             <option value="arrow">箭头</option>
             <option value="line">直线</option>
             <option value="elbow">折线</option>
           </select></label>
-          <label class="board-field">箭头 <select id="board-edge-arrow" aria-label="箭头样式" disabled>
+          <label class="board-field">箭头 <select id="board-edge-arrow" aria-label="箭头样式">
             <option value="forward">单向</option>
             <option value="none">无</option>
             <option value="both">双向</option>
           </select></label>
-          <label class="board-field">夹角 <select id="board-edge-angle" aria-label="连线与节点边的夹角" disabled>
+          <label class="board-field">夹角 <select id="board-edge-angle" aria-label="连线与节点边的夹角">
             <option value="90">垂直</option>
             <option value="75">75°</option>
             <option value="60">60°</option>
             <option value="45">45°</option>
             <option value="30">30°</option>
           </select></label>
-          <label class="board-field board-check"><input id="board-edge-dashed" type="checkbox" aria-label="虚线" disabled>虚线</label>
-          <button id="board-tidy" class="button subtle" type="button" title="把选中的节点（未选中时整张画板）按连线整理成从左到右的思维导图">整理成树</button>
+          <label class="board-field board-check"><input id="board-edge-dashed" type="checkbox" aria-label="虚线">虚线</label>
         </div>
-        <div class="board-section">
-          <span class="board-section-label">关联</span>
-          <span id="board-links" class="board-status" role="status"></span>
-          <button id="board-link-paper" class="button subtle" type="button" title="把这张画板关联到文献库中当前打开的论文；关联不影响画板内容">关联本篇</button>
-          <button id="board-unlink-paper" class="button subtle" type="button">解除本篇</button>
-          <label class="board-field">项目 <select id="board-project-select" aria-label="选择一个阅读项目"></select></label>
-          <button id="board-link-project" class="button subtle" type="button" title="把这张画板关联到所选阅读项目（多对多，不复制内容）">关联项目</button>
-          <button id="board-unlink-project" class="button subtle" type="button">解除项目</button>
-        </div>
-        <div class="board-section">
-          <span class="board-section-label">自动排版</span>
+      </div>
+
+      <div id="board-layout-panel" class="board-menu" aria-label="自动排版">
+        <span class="board-menu-label">自动排版</span>
+        <div class="board-menu-row">
           <label class="board-field">排版 <select id="board-layout-mode" aria-label="排版方式">
             <option value="tree">分层树</option>
             <option value="radial">放射思维导图</option>
@@ -203,17 +217,46 @@
           </select></label>
           <label class="board-field">水平间距 <input id="board-layout-gap-x" type="number" min="8" max="400" step="2" value="80" aria-label="水平间距"></label>
           <label class="board-field">垂直间距 <input id="board-layout-gap-y" type="number" min="8" max="400" step="2" value="36" aria-label="垂直间距"></label>
+        </div>
+        <div class="board-menu-row">
           <button id="board-layout-apply" class="button subtle" type="button" title="对选中节点（未选中时整张画板）执行自动排版">应用排版</button>
           <button id="board-layout-pin" class="button subtle" type="button" title="钉住选中的节点：它们不参与自动排版，始终留在你放的位置">钉住选中</button>
           <button id="board-layout-unpin" class="button subtle" type="button">取消钉住</button>
-          <span id="board-layout-status" class="board-status" role="status"></span>
+          <button id="board-tidy" class="button subtle" type="button" title="把选中的节点（未选中时整张画板）按连线整理成从左到右的思维导图">整理成树</button>
         </div>
-        <div class="board-section">
-          <span class="board-section-label">视图与文件</span>
+        <span id="board-layout-status" class="board-status" role="status"></span>
+      </div>
+
+      <div id="board-project-panel" class="board-menu" aria-label="阅读项目关联">
+        <span class="board-menu-label">阅读项目</span>
+        <div class="board-menu-row">
+          <label class="board-field">项目 <select id="board-project-select" aria-label="选择一个阅读项目"></select></label>
+          <button id="board-link-project" class="button subtle" type="button" title="把这张画板关联到所选阅读项目（多对多，不复制内容）">关联项目</button>
+          <button id="board-unlink-project" class="button subtle" type="button">解除项目</button>
+        </div>
+        <span id="board-links" class="board-status" role="status"></span>
+      </div>
+
+      <div id="board-menu" class="board-menu" aria-label="更多设置">
+        <div class="board-menu-section">
+          <span class="board-menu-label">绑定文献</span>
+          <button id="board-add-paper" class="button subtle" type="button" title="从文献库挑选一篇文献加入画板；也可以直接把文献拖进来">＋ 文献</button>
+          <button id="board-link-paper" class="button subtle" type="button" title="把这张画板关联到文献库中当前打开的论文；关联不影响画板内容">关联本篇</button>
+          <button id="board-unlink-paper" class="button subtle" type="button">解除本篇</button>
+        </div>
+        <div class="board-menu-section">
+          <span class="board-menu-label">源文件与来源</span>
           <button id="board-source-open" class="button subtle" type="button" title="查看/编辑可读的源文件与样式辅助文件（.style.json）">源文件</button>
           <button id="board-mermaid-open" class="button subtle" type="button" title="粘贴 Mermaid flowchart，解析成画板源文件或导出现有画板的 Mermaid 文本">Mermaid</button>
-          <button id="board-fullscreen" class="button subtle" type="button" aria-pressed="false" title="全屏画板；Esc 退出">全屏 ⤢</button>
+        </div>
+        <div class="board-menu-section">
+          <span class="board-menu-label">对话与内容</span>
+          <button id="board-accept-ai" class="button subtle" type="button" title="把标记为 AI 提议的节点与连线转为你的内容；保存画板本身不会自动接受">接受 AI 改动</button>
           <button id="board-close" class="button subtle" type="button">返回文献库</button>
+        </div>
+        <div class="board-menu-section">
+          <span class="board-menu-label">危险操作</span>
+          <button id="board-delete" class="button subtle" type="button">删除画板</button>
         </div>
       </div>
     </header>

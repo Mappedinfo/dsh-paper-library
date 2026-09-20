@@ -15,6 +15,8 @@
   const NODE_KINDS = Object.freeze(['text', 'note', 'concept', 'paper', 'rect', 'ellipse', 'diamond']);
   const SHAPE_TOOLS = Object.freeze(['text', 'note', 'rect', 'ellipse', 'diamond']);
   const KIND_LABEL = Object.freeze({ text: '文本', note: '便签', concept: '概念', paper: '文献', rect: '矩形', ellipse: '椭圆', diamond: '菱形' });
+  /** A rectangle or a sticky note has square corners; only the container kinds are rounded. */
+  const NODE_RADIUS = Object.freeze({ text: 4, note: 0, rect: 0, concept: 10, paper: 10 });
   const DEFAULT_SIZE = Object.freeze({ text: { w: 220, h: 64 }, note: { w: 220, h: 140 }, concept: { w: 200, h: 100 }, paper: { w: 260, h: 120 }, rect: { w: 220, h: 140 }, ellipse: { w: 200, h: 120 }, diamond: { w: 200, h: 120 } });
   const RELATIONS = Object.freeze({ related: '相关', supports: '支持', contradicts: '矛盾', cites: '引用', explains: '解释', extends: '扩展' });
   const RELATION_ORDER = Object.freeze(['related', 'supports', 'contradicts', 'cites', 'explains', 'extends']);
@@ -469,7 +471,7 @@
       if (node.kind === 'ellipse') ctx.ellipse(b.cx, b.cy, b.w / 2, b.h / 2, 0, 0, Math.PI * 2);
       else if (node.kind === 'diamond') { ctx.moveTo(b.cx, b.y); ctx.lineTo(b.right, b.cy); ctx.lineTo(b.cx, b.bottom); ctx.lineTo(b.x, b.cy); ctx.closePath(); }
       else if (node.kind === 'text') ctx.rect(b.x, b.y, b.w, b.h);
-      else { const radius = 10; ctx.moveTo(b.x + radius, b.y); ctx.arcTo(b.right, b.y, b.right, b.bottom, radius); ctx.arcTo(b.right, b.bottom, b.x, b.bottom, radius); ctx.arcTo(b.x, b.bottom, b.x, b.y, radius); ctx.arcTo(b.x, b.y, b.right, b.y, radius); ctx.closePath(); }
+      else { const radius = NODE_RADIUS[node.kind] ?? 10; ctx.moveTo(b.x + radius, b.y); ctx.arcTo(b.right, b.y, b.right, b.bottom, radius); ctx.arcTo(b.right, b.bottom, b.x, b.bottom, radius); ctx.arcTo(b.x, b.bottom, b.x, b.y, radius); ctx.arcTo(b.x, b.y, b.right, b.y, radius); ctx.closePath(); }
       ctx.fill();
       ctx.stroke();
       ctx.setLineDash([]);
@@ -535,6 +537,7 @@
     let live = true;
     const nodeEls = new Map(), edgeEls = new Map();
     const boardList = $('board-select');
+    let boardSummaries = [];
 
     const svgEl = (tag, attrs, text) => { const node = doc.createElementNS(NS, tag); for (const [key, value] of Object.entries(attrs || {})) node.setAttribute(key, String(value)); if (text !== undefined) node.textContent = text; return node; };
     const el = (tag, className, text) => { const node = doc.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
@@ -633,8 +636,10 @@
       const w = node.w, h = node.h;
       if (node.kind === 'ellipse') return svgEl('ellipse', { cx: w / 2, cy: h / 2, rx: w / 2, ry: h / 2 });
       if (node.kind === 'diamond') return svgEl('polygon', { points: `${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}` });
-      return svgEl('rect', { x: 0, y: 0, width: w, height: h, rx: node.kind === 'text' ? 4 : 10 });
+      return svgEl('rect', { x: 0, y: 0, width: w, height: h, rx: NODE_RADIUS[node.kind] ?? 10 });
     }
+    /** The turned-up corner that makes a note read as paper rather than a box. */
+    const noteFoldPath = (w, h) => { const size = Math.min(22, w / 4, h / 4); return { size, d: `M ${round(w - size)} ${round(h)} L ${round(w)} ${round(h - size)} L ${round(w)} ${round(h)} Z` }; };
 
     function renderNode(node) {
       const bounds = nodeBounds(node);
@@ -650,6 +655,7 @@
       if (node.color || style.stroke) shape.setAttribute('stroke', node.color ?? style.stroke);
       if (style.fontSize) group.setAttribute('data-font-size', String(style.fontSize));
       content.append(shape);
+      if (node.kind === 'note') content.append(svgEl('path', { class: 'board-node-fold', 'data-note-fold': '', d: noteFoldPath(node.w, node.h).d }));
       if (node.origin === 'llm') content.append(svgEl('text', { class: 'board-node-meta', x: 6, y: -4 }, 'AI 提议'));
       if (node.kind === 'paper' && node.paper) {
         content.append(svgEl('text', { class: 'board-node-meta', x: 10, y: 18 }, [node.paper.year, node.paper.citekey].filter(Boolean).join(' · ') || '文献'));
@@ -731,6 +737,7 @@
           const handle = child.getAttribute?.('data-handle');
           if (handle === 'resize') { child.setAttribute('x', bounds.w - 5); child.setAttribute('y', bounds.h - 5); }
           else if (handle === 'connect') { child.setAttribute('cx', bounds.w + 4); child.setAttribute('cy', bounds.h / 2); }
+          else if (child.getAttribute?.('data-note-fold') !== null && child.getAttribute?.('data-note-fold') !== undefined) child.setAttribute('d', noteFoldPath(bounds.w, bounds.h).d);
         }
       }
       for (const edge of board.edges) {
@@ -884,6 +891,7 @@
 
     function renderInspector() {
       renderLinks();
+      syncInspector();
       const relation = $('board-relation');
       const label = $('board-edge-label-input');
       const color = $('board-color');
@@ -964,6 +972,27 @@
       editor = null;
       area.remove();
     }
+    /** The toolbar's menus: one open at a time, closed by Escape or a click outside. */
+    const MENU_IDS = Object.freeze([['board-files-open', 'board-files'], ['board-layout-open', 'board-layout-panel'], ['board-project-open', 'board-project-panel'], ['board-menu-open', 'board-menu']]);
+    const menuEntries = () => MENU_IDS.map(([trigger, panel]) => ({ trigger: $(trigger), panel: $(panel) })).filter(entry => entry.trigger && entry.panel);
+    function syncMenus() {
+      for (const { trigger, panel } of menuEntries()) trigger.setAttribute('aria-expanded', String(panel.classList.contains('is-open')));
+    }
+    function closeMenus(keep) {
+      for (const { panel } of menuEntries()) if (panel !== keep) panel.classList.remove('is-open');
+      syncMenus();
+    }
+    /** Node and link settings only exist while something is selected. */
+    function syncInspector() {
+      const inspector = $('board-inspector');
+      if (!inspector) return;
+      const nodes = selectedNodes().length, edges = board.edges.filter(edge => selection.has(edge.id)).length;
+      const nodeRow = $('board-inspector-node'), edgeRow = $('board-inspector-edge');
+      if (nodeRow) nodeRow.hidden = nodes !== 1;
+      if (edgeRow) edgeRow.hidden = edges !== 1;
+      inspector.classList.toggle('is-open', nodes === 1 || edges === 1);
+    }
+
     /** Finish an open edit before the board is written or closed; nothing is left half-typed. */
     function commitTextEdit() {
       if (editor) editor.commit();
@@ -1218,9 +1247,36 @@
         option.value = summary.id;
         boardList.append(option);
       }
+      boardSummaries = result.boards;
       if (boardId) boardList.value = boardId;
+      renderFileList(boardSummaries);
       if (result.truncated) status(`画板较多，列表只显示部分（共 ${result.total}）`);
       return result;
+    }
+
+    /** The board's own file list: every record with its size, open or delete. */
+    function renderFileList(boards) {
+      const list = $('board-file-list'), label = $('board-files-label');
+      const current = boards.find(summary => summary.id === boardId);
+      if (label) label.textContent = current?.title || board?.title || '未命名画板';
+      if (!list) return;
+      list.replaceChildren();
+      if (!boards.length) { list.append(el('p', 'small muted', '还没有画板。')); return; }
+      for (const summary of boards) {
+        const row = el('div', 'board-file-row');
+        row.classList.toggle('is-current', summary.id === boardId);
+        row.append(el('strong', null, summary.title || '未命名画板'), el('small', null, `${summary.node_count ?? 0} 节点 · ${summary.edge_count ?? 0} 连线`));
+        const open = el('button', 'button subtle', summary.id === boardId ? '当前' : '打开');
+        open.type = 'button';
+        open.disabled = summary.id === boardId;
+        open.addEventListener('click', () => { closeMenus(null); void load(summary.id); });
+        const remove = el('button', 'button subtle', '删除');
+        remove.type = 'button';
+        remove.title = '删除这张画板；记录会保留在本地状态目录，可由人工恢复';
+        remove.addEventListener('click', () => { pendingDelete = summary.id; void deleteBoard(summary.id); });
+        row.append(open, remove);
+        list.append(row);
+      }
     }
 
     async function load(id) {
@@ -1232,6 +1288,9 @@
       board = result.board;
       boardId = board.id;
       revision = result.revision;
+      if (boardList) boardList.value = boardId;
+      // The file list marks the open board and the trigger shows its name.
+      renderFileList(boardSummaries);
       selection = new Set();
       history = [JSON.stringify({ nodes: board.nodes, edges: board.edges })];
       historyIndex = 0;
@@ -1301,9 +1360,21 @@
       } catch (error) { toast(error.message || '新建画板失败', true); }
     }
 
-    async function deleteBoard() {
-      if (!boardId) return;
-      if (typeof doc.defaultView?.confirm === 'function' && !doc.defaultView.confirm(`删除画板「${board.title}」？画板记录会保留在本地状态目录，可由人工恢复。`)) return;
+    async function deleteBoard(target = boardId) {
+      if (!target) return;
+      const name = target === boardId ? board.title : (boardSummaries.find(summary => summary.id === target)?.title ?? target);
+      if (typeof doc.defaultView?.confirm === 'function' && !doc.defaultView.confirm(`删除画板「${name}」？画板记录会保留在本地状态目录，可由人工恢复。`)) return;
+      // Deleting another record leaves the open one alone.
+      if (target !== boardId) {
+        try {
+          const got = await api('board_get', { id: target });
+          await api('board_delete', { id: target, expected_revision: got.revision });
+          if (!live) return;
+          await refreshList();
+          toast('画板已删除');
+        } catch (error) { toast(error.message || '删除画板失败', true); }
+        return;
+      }
       // Deleting cancels the debounce instead of settling: a pending save would
       // otherwise write the board back and resurrect a record the reader removed.
       pendingSave = false;
@@ -1322,6 +1393,8 @@
     function renameBoard(value) {
       const title = nonEmpty(value, LIMITS.title, '画板标题');
       board = { ...board, title };
+      boardSummaries = boardSummaries.map(summary => (summary.id === boardId ? { ...summary, title } : summary));
+      renderFileList(boardSummaries);
       scheduleSave();
     }
 
@@ -1831,14 +1904,18 @@
       });
       const emptyCreate = $('board-create-first');
       if (emptyCreate) emptyCreate.addEventListener('click', () => void createBoard());
-      // In a narrow pane the secondary controls sit behind 「更多」; on a wide screen the panel
-      // is layout-transparent and this button is hidden, so one markup serves both.
-      const moreButton = $('board-more'), morePanel = $('board-panel');
-      if (moreButton && morePanel) {
-        const syncMore = () => moreButton.setAttribute('aria-expanded', String(morePanel.classList.contains('is-open')));
-        moreButton.addEventListener('click', () => { morePanel.classList.toggle('is-open'); syncMore(); });
-        syncMore();
+      // Every secondary group is one menu: the trigger toggles a panel that drops over the
+      // canvas, and only one is open at a time.
+      for (const { trigger, panel } of menuEntries()) {
+        trigger.addEventListener('click', event => {
+          event.stopPropagation?.();
+          const open = !panel.classList.contains('is-open');
+          closeMenus(open ? panel : null);
+          panel.classList.toggle('is-open', open);
+          syncMenus();
+        });
       }
+      doc.addEventListener('click', event => { if (!event.target?.closest?.('.board-bar')) closeMenus(null); });
       // The inspector only offers a shape change for a single node; paper nodes keep their binding.
       if (!capabilities.libraryPapers) for (const id of ['board-add-paper']) { const control = $(id); if (control) control.hidden = true; }
       if (!capabilities.conversation) for (const id of ['board-send']) { const control = $(id); if (control) control.hidden = true; }

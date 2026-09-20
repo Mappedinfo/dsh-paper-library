@@ -56,6 +56,14 @@ try {
     return { boards, board: got.result?.board ?? null, outline: got.result?.outline ?? '' };
   });
   const shapeBox = async index => page.locator('.board-node').nth(index).locator('.board-node-shape').boundingBox();
+  /** The board's toolbar is menus now: open the one that owns a control before using it. */
+  const menuFor = { layout: '#board-layout-open', project: '#board-project-open', more: '#board-menu-open', files: '#board-files-open' };
+  const openBoardMenu = async name => {
+    const trigger = menuFor[name];
+    if (await page.locator(trigger).getAttribute('aria-expanded') !== 'true') await page.locator(trigger).click();
+    await page.waitForFunction(id => document.getElementById(id)?.classList.contains('is-open'), { layout: 'board-layout-panel', project: 'board-project-panel', more: 'board-menu', files: 'board-files' }[name]);
+  };
+  const closeBoardMenus = async () => { for (const trigger of Object.values(menuFor)) { if (await page.locator(trigger).getAttribute('aria-expanded') === 'true') await page.locator(trigger).click(); } };
   /** Saving is debounced, so a host read must wait for the record to settle — the DOM
    *  updates immediately and would otherwise be compared against a stale record. */
   const waitForHost = async (predicate, label, timeout = 15000) => {
@@ -162,6 +170,7 @@ try {
   record('dragging-a-library-paper-onto-the-canvas-creates-a-bound-paper-node');
 
   // The keyboard-accessible picker reaches the same result.
+  await openBoardMenu('more');
   await page.locator('#board-add-paper').click();
   await page.locator('#board-paper-dialog').waitFor();
   const pickerRows = page.locator('#board-paper-list .board-picker-row');
@@ -247,15 +256,18 @@ try {
 
   // Arranging the board into a tidy tree: the connected root ends left of its child,
   // and arranging twice is idempotent rather than drifting.
+  await openBoardMenu('layout');
   await page.locator('#board-tidy').click();
   const firstTidy = await waitForHost(value => value.board.nodes.find(node => node.kind === 'note').x < value.board.nodes.find(node => node.kind === 'rect').x, 'the tidied columns');
   const coordinates = board => board.nodes.map(node => `${node.id}:${node.x},${node.y}`).sort().join('|');
+  await openBoardMenu('layout');
   await page.locator('#board-tidy').click();
   const secondTidy = await waitForHost(value => value.board.nodes.length === 5 || value.board.nodes.length === 4, 'the board after a second arrange');
   assert.equal(coordinates(secondTidy.board), coordinates(firstTidy.board), 'arranging an arranged board changes nothing');
   record('arranging-connects-the-board-into-left-to-right-columns-and-is-idempotent');
 
   // A mind map generated from checked papers is a new board and leaves the first alone.
+  await openBoardMenu('more');
   await page.locator('#board-add-paper').click();
   await page.locator('#board-paper-dialog').waitFor();
   await page.locator('#board-paper-list .board-picker-row').first().waitFor();
@@ -276,12 +288,15 @@ try {
   record('generating-a-mind-map-from-checked-papers-creates-a-new-arranged-board');
 
   // A second board stays separate, and deletion tombstones only that record.
+  await openBoardMenu('files');
   await page.locator('#board-new').click();
   await page.waitForFunction(() => document.querySelectorAll('#board-select option').length === 3);
   await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 0);
   await waitForHost(value => value.boards.length === 3, 'the third board record');
   record('a-new-board-starts-empty-and-leaves-the-others-untouched');
 
+  await openBoardMenu('more');
+  await openBoardMenu('more');
   await page.locator('#board-delete').click();
   await page.waitForFunction(() => document.querySelectorAll('#board-select option').length === 2);
   const remaining = await waitForHost(value => value.boards.length === 2, 'the deleted board to disappear');
@@ -322,6 +337,7 @@ try {
   // and the pinned special position are checked.
   const signature = value => (value.board?.nodes ?? []).map(node => `${node.id}:${node.x},${node.y}`).sort().join('|');
   const layoutBefore = signature(await waitForHost(value => (value.board?.nodes?.length ?? 0) >= 4, 'the board before layout'));
+  await openBoardMenu('layout');
   await page.locator('#board-layout-mode').selectOption('radial');
   await page.locator('#board-layout-direction').selectOption('tb');
   // Clear any selection first: the scope is the selection when it holds more than one node.
@@ -379,6 +395,8 @@ try {
   const linked = await waitForHost(value => (value.board?.edges?.length ?? 0) === beforeLink.board.edges.length + 1, 'the edge made by the connect tool');
   assert.equal(await page.locator('[data-edge-path]').count(), linked.board.edges.length);
   // The new edge is selected, so the inspector applies to it directly.
+  // Link settings live in the inspector, which appears with the selection.
+  await page.locator('#board-inspector').waitFor();
   await page.locator('#board-edge-kind').selectOption('elbow');
   await page.locator('#board-edge-arrow').selectOption('both');
   await page.locator('#board-edge-dashed').check();
@@ -420,6 +438,7 @@ try {
   record('a-line-bend-point-can-be-dragged-in-and-alt-clicked-away');
 
   // The readable source file and its style sidecar drive the canvas.
+  await openBoardMenu('more');
   await page.locator('#board-source-open').click();
   await page.locator('#board-source-dialog').waitFor();
   await page.locator('#board-source-generate').click();
@@ -450,6 +469,7 @@ try {
   record('editing-the-source-file-and-its-sidecar-drives-the-canvas');
 
   // A pasted Mermaid flowchart goes through that same source path, and the canvas writes back.
+  await openBoardMenu('more');
   await page.locator('#board-mermaid-open').click();
   await page.locator('#board-mermaid-text').fill('flowchart LR\n  M1[粘贴的采集] --> M2{合格?}\n  M2 -- 是 --> M3([入库])\n  M1 --> M3\n  subgraph 组\n    M3 --> M4>备注]\n  end');
   await page.locator('#board-mermaid-parse').click();
@@ -474,6 +494,7 @@ try {
   record('a-pasted-mermaid-flowchart-becomes-a-board-and-writes-back-as-mermaid');
 
   // The library shelf lists boards as their own files and links them to papers.
+  await openBoardMenu('more');
   await page.locator('#board-close').click();
   await page.locator('#paper-list .paper-card').first().click();
   const linkedPaperId = await page.locator('#paper-list .paper-card').first().getAttribute('data-id');
@@ -531,14 +552,14 @@ try {
   // and the board must own the pane instead of hiding the reader for nothing.
   await page.setViewportSize({ width: 420, height: 820 });
   await page.goto(`${origin}/?view=board`);
+  await page.waitForFunction(() => document.querySelector('#board-files-open') && document.body.classList.contains('board-mode'));
   await page.waitForFunction(() => document.body.classList.contains('board-mode') && document.body.classList.contains('board-focused'));
   const narrow = await page.evaluate(() => {
     const rect = id => document.getElementById(id).getBoundingClientRect();
     return {
       bar: Math.round(document.querySelector('#board-view .board-bar').getBoundingClientRect().height),
       stage: Math.round(rect('board-stage').height),
-      panel: getComputedStyle(document.getElementById('board-panel')).display,
-      more: getComputedStyle(document.getElementById('board-more')).display,
+      inspector: document.getElementById('board-inspector').classList.contains('is-open'),
       library: Math.round(document.querySelector('.library-pane').getBoundingClientRect().width),
       board: Math.round(rect('board-view').width),
       viewport: innerWidth,
@@ -546,17 +567,20 @@ try {
   });
   assert.ok(narrow.bar <= 130, `the narrow toolbar stays compact, got ${narrow.bar}px`);
   assert.ok(narrow.stage > narrow.bar * 3, `the canvas keeps most of the pane, got ${narrow.stage}px of canvas against ${narrow.bar}px of toolbar`);
-  assert.equal(narrow.panel, 'none', 'the secondary controls are contained behind one toggle');
-  assert.notEqual(narrow.more, 'none');
+  assert.equal(narrow.inspector, false, 'nothing is selected, so no style panel is on screen either');
   assert.equal(narrow.library, 0, 'a narrow pane gives the board the whole width');
   assert.equal(narrow.board, narrow.viewport);
-  await page.locator('#board-more').click();
-  await page.waitForFunction(() => document.getElementById('board-panel').classList.contains('is-open'));
-  assert.equal(await page.locator('#board-panel').isVisible(), true);
-  assert.equal(await page.locator('#board-more').getAttribute('aria-expanded'), 'true');
-  assert.ok(Math.round(await page.evaluate(() => document.querySelector('#board-view .board-bar').getBoundingClientRect().height)) <= 130, 'opening the panel overlays the canvas instead of pushing it');
-  await page.locator('#board-more').click();
-  assert.equal(await page.locator('#board-more').getAttribute('aria-expanded'), 'false');
+  // Every secondary group is a menu; opening one drops it over the canvas without reflowing it.
+  await openBoardMenu('more');
+  await page.waitForFunction(() => document.getElementById('board-menu').classList.contains('is-open'));
+  assert.equal(await page.locator('#board-menu').isVisible(), true);
+  assert.equal(await page.locator('#board-menu-open').getAttribute('aria-expanded'), 'true');
+  for (const name of ['layout', 'project']) {
+    assert.equal(await page.locator(menuFor[name]).isVisible(), true, `the ${name} menu is reachable in a narrow pane`);
+  }
+  assert.ok(Math.round(await page.evaluate(() => document.querySelector('#board-view .board-bar').getBoundingClientRect().height)) <= 130, 'opening a menu overlays the canvas instead of pushing it');
+  await page.locator('#board-menu-open').click();
+  assert.equal(await page.locator('#board-menu-open').getAttribute('aria-expanded'), 'false');
   record('the-narrow-pane-contains-the-toolbar-and-gives-the-canvas-the-pane');
 
   // The library's own 画板 button in that narrow pane: the shelf steps aside rather than the

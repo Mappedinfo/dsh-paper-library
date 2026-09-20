@@ -6,14 +6,24 @@
 .board-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--surface,var(--paper))}
 .board-toolbar .board-group{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 .board-toolbar .board-right{margin-left:auto}
-/* Containment: the toolbar is two compact rows plus a panel. On a wide screen the panel is
- * transparent to layout (`display:contents`), so every control stays inline exactly as before;
- * in a narrow pane (the DSH sidebar, a phone) the secondary controls move behind 「更多」. */
-.board-more{display:none}
-.board-panel{display:contents}
-.board-section{display:contents}
-.board-section-label{display:none}
-.board-status:empty,.board-quick .board-status:empty{display:none}
+/* Containment: the toolbar carries the tools and the few always-useful controls; everything else
+ * lives in a menu that drops over the canvas, so opening one never reflows or scrolls the board. */
+.board-bar{position:relative}
+.board-menus{margin-left:auto}
+.board-menu-button{white-space:nowrap}
+.board-menu-name{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}
+.board-menu{position:absolute;top:100%;left:8px;z-index:7;display:none;flex-direction:column;gap:8px;min-width:min(260px,calc(100vw - 24px));max-width:calc(100vw - 24px);max-height:62vh;overflow:auto;margin-top:2px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--paper);box-shadow:0 14px 30px rgba(30,40,30,.16)}
+.board-menu.is-open{display:flex}
+.board-inspector{left:auto;right:8px;min-width:min(320px,calc(100vw - 24px))}
+.board-menu-row,.board-menu-section{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.board-menu-label{flex-basis:100%;font-size:10px;letter-spacing:.4px;color:var(--muted)}
+.board-view-group{gap:2px;padding-left:5px;border-left:1px solid var(--line)}
+.board-file-list{display:flex;flex-direction:column;gap:4px;max-height:42vh;overflow:auto}
+.board-file-row{display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--line);border-radius:7px;font-size:11px}
+.board-file-row.is-current{border-color:var(--dsw-alias-link);background:var(--dsw-alias-interactive-bg-hover)}
+.board-file-row strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.board-file-row small{color:var(--muted);font-size:10px;white-space:nowrap}
+.board-status:empty{display:none}
 .board-toolbar .board-check{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)}
 .board-toolbar .board-check input{accent-color:var(--dsw-alias-link);margin:0}
 .board-toolbar .board-field input[type=number]{width:64px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:inherit;font-size:12px}
@@ -39,6 +49,9 @@
 .board-node{cursor:move}
 .board-node-shape{fill:var(--dsw-alias-bg-layer-2);stroke:var(--line);stroke-width:1.5}
 .board-node-kind-note .board-node-shape{fill:var(--dsw-alias-state-warn-tertiary);stroke:var(--dsw-alias-state-warn-label)}
+/* A sticky note: square corners, a turned-up corner and a soft lift off the canvas. */
+.board-node-kind-note{filter:drop-shadow(0 2px 2px rgba(40,45,35,.18))}
+.board-node-fold{fill:var(--dsw-alias-state-warn-label);opacity:.28;pointer-events:none}
 .board-node-kind-paper .board-node-shape{fill:var(--dsw-specific-bubble);stroke:var(--dsw-alias-link)}
 .board-node.is-selected .board-node-shape{stroke:var(--dsw-alias-link);stroke-width:2}
 .board-node.is-ai .board-node-shape{stroke-dasharray:5 3}
@@ -54,8 +67,10 @@
 .board-waypoint{fill:var(--paper);stroke:var(--dsw-alias-link);stroke-width:2;cursor:move}
 .board-marquee[hidden]{display:none}
 .board-editor-layer{position:absolute;inset:0;pointer-events:none}
-.board-text-editor{position:absolute;pointer-events:auto;font:500 13px var(--dsw-font-family);line-height:1.4;padding:6px 8px;border:1px solid var(--dsw-alias-link);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--ink);resize:none;box-sizing:border-box;overflow:auto}
-.board-empty{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:6px;text-align:center;color:var(--muted);pointer-events:none}
+/* The editor sits *on* the shape: an opaque rounded box would hide a diamond or a sticky note
+ * behind a rectangle while the reader is naming it (the reported "diamond starts as a rect"). */
+.board-text-editor{position:absolute;pointer-events:auto;font:500 13px var(--dsw-font-family);line-height:1.4;padding:6px 8px;border:1px dashed var(--dsw-alias-link);border-radius:4px;background:transparent;color:var(--ink);resize:none;box-sizing:border-box;overflow:auto}
+@supports (background:color-mix(in srgb,red 50%,transparent)){.board-text-editor{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 66%,transparent)}}.board-empty{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:6px;text-align:center;color:var(--muted);pointer-events:none}
 .board-empty[hidden]{display:none}
 .board-empty strong{color:var(--ink);font-size:14px}
 .board-dialog{border:1px solid var(--line);border-radius:12px;background:var(--paper);color:var(--ink);padding:14px;width:min(460px,calc(100vw - 32px))}
@@ -99,10 +114,11 @@ body.board-focused #board-view{grid-column:1}
  * single-pane layout would stack the board under the shelf. Whenever the board is open in a
  * narrow container it takes the whole pane, so pressing 「画板」 in the library never leaves the
  * canvas half-visible or hides the reader for nothing. */
+/* A narrow pane cannot show a library column and a canvas at once, and the app's own single-pane
+ * layout would otherwise stack the board under the shelf. Whenever the board is open in a narrow
+ * container it takes the whole pane. */
 @media (max-width:640px){
-  /* The same selectors the base rules use, so the group's own flex-wrap does not win. */
   .board-toolbar{gap:4px;padding:6px}
-  .board-bar{position:relative;flex-wrap:wrap}
   .board-title{min-width:110px;max-width:100%}
   body.board-mode .workspace{display:block}
   body.board-mode .library-pane{display:none}
@@ -110,16 +126,17 @@ body.board-focused #board-view{grid-column:1}
   .board-toolbar .board-tools{order:1;flex:1 1 auto;min-width:0;flex-wrap:nowrap;overflow-x:auto;gap:2px;padding-bottom:2px}
   .board-toolbar .board-tools .board-sep{display:none}
   .board-toolbar .board-tool{padding:5px 6px;min-width:38px}
-  .board-more{order:2;display:inline-flex;flex:none}
-  #board-status{order:3;flex:1 1 auto;min-width:0;max-width:none}
-  #board-selection{order:3;flex:none}
-  .board-toolbar .board-quick{order:5;flex-basis:100%;min-width:0;flex-wrap:nowrap;overflow-x:auto;gap:6px}
-  .board-quick .board-field{flex:1 1 auto;min-width:0}
-  .board-quick .board-field select{min-width:0;max-width:none}
-  /* The panel drops over the canvas instead of pushing it: opening 「更多」 must not reflow
-   * or scroll away what the reader was looking at. */
-  .board-panel{display:none}
-  .board-panel.is-open{display:flex;position:absolute;left:0;right:0;top:100%;z-index:6;flex-direction:column;gap:8px;max-height:58vh;overflow:auto;padding:10px 8px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--paper);box-shadow:0 12px 26px rgba(30,40,30,.14)}
-  .board-section{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
-  .board-section-label{display:block;flex-basis:100%;font-size:10px;letter-spacing:.4px;color:var(--muted);margin-top:2px}
+  #board-files-open{order:2;flex:none}
+  /* A narrow toolbar shows the name inside the file menu, not in the trigger. */
+  .board-menu-name{display:none}
+  .board-menus{order:2;margin-left:auto}
+  /* The save state rides with the menus; the selection count would duplicate the canvas. */
+  #board-status{order:2;flex:1 1 auto;min-width:0;max-width:none}
+  #board-selection{display:none}
+  .board-toolbar .board-quick{order:3;flex-basis:100%;min-width:0;flex-wrap:nowrap;overflow-x:auto;gap:6px}
+  .board-toolbar .board-quick .board-view-group{flex-wrap:nowrap}
+  /* Still anchored under the bar: a static position would drop the panel over the toolbar and
+   * swallow the trigger that opened it. */
+  .board-menu{left:4px;right:4px;max-width:none}
+  .board-inspector{left:4px;right:4px}
 }
