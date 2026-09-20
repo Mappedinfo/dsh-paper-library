@@ -75,16 +75,69 @@
     return Math.hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy));
   }
   /** Clip a centre-to-centre segment to the node's border so arrowheads sit on the edge. */
-  function anchorPoint(node, towards) {
-    const bounds = nodeBounds(node), dx = towards.x - bounds.cx, dy = towards.y - bounds.cy;
-    if (!dx && !dy) return { x: bounds.cx, y: bounds.cy };
-    const scaleX = dx ? (bounds.w / 2) / Math.abs(dx) : Infinity, scaleY = dy ? (bounds.h / 2) / Math.abs(dy) : Infinity;
-    const scale = Math.min(scaleX, scaleY);
-    return { x: round(bounds.cx + dx * scale), y: round(bounds.cy + dy * scale) };
+  /** How a line may meet a node: never shallower than the edge's minimum incidence, which is
+   *  what keeps an arrowhead off the side it touches. 90° meets the side perpendicular. */
+  const EDGE_ANGLE = Object.freeze({ min: 30, max: 90, default: 90 });
+  const edgeAngle = value => {
+    const degrees = Math.round(Number(value));
+    return Number.isFinite(degrees) ? Math.min(EDGE_ANGLE.max, Math.max(EDGE_ANGLE.min, degrees)) : EDGE_ANGLE.default;
+  };
+  function sideOf(bounds, towards) {
+    const dx = towards.x - bounds.cx, dy = towards.y - bounds.cy;
+    const vertical = (dx ? (bounds.w / 2) / Math.abs(dx) : Infinity) <= (dy ? (bounds.h / 2) / Math.abs(dy) : Infinity);
+    return { dx, dy, vertical, side: vertical ? (dx >= 0 ? 1 : -1) : (dy >= 0 ? 1 : -1), lean: vertical ? Math.sign(dy) : Math.sign(dx) };
   }
-  function edgeGeometry(from, to, kind) {
+  function anchorAtAngle(node, towards, angle) {
+    const bounds = nodeBounds(node), { dx, dy, vertical, side, lean } = sideOf(bounds, towards);
+    if (!dx && !dy) return { x: bounds.cx, y: bounds.cy };
+    const radians = edgeAngle(angle) * Math.PI / 180;
+    const slide = Math.cos(radians) / Math.sin(radians);
+    if (vertical) {
+      const y = bounds.cy + lean * slide * (bounds.w / 2);
+      return { x: round(bounds.cx + side * bounds.w / 2), y: round(Math.min(bounds.bottom, Math.max(bounds.y, y))) };
+    }
+    const x = bounds.cx + lean * slide * (bounds.h / 2);
+    return { x: round(Math.min(bounds.right, Math.max(bounds.x, x))), y: round(bounds.cy + side * bounds.h / 2) };
+  }
+  function incidenceAt(node, anchor, other) {
+    const bounds = nodeBounds(node);
+    const onVertical = Math.abs(anchor.x - bounds.x) < 0.01 || Math.abs(anchor.x - bounds.right) < 0.01;
+    const onHorizontal = Math.abs(anchor.y - bounds.y) < 0.01 || Math.abs(anchor.y - bounds.bottom) < 0.01;
+    const across = Math.abs(other.x - anchor.x), along = Math.abs(other.y - anchor.y);
+    const vertical = Math.atan2(across, along) * 180 / Math.PI, horizontal = Math.atan2(along, across) * 180 / Math.PI;
+    if (onVertical && onHorizontal) return Math.max(vertical, horizontal);
+    return onVertical ? vertical : horizontal;
+  }
+  function slideToAngle(node, anchor, other, angle) {
+    const bounds = nodeBounds(node);
+    const vertical = Math.abs(anchor.x - bounds.x) < 0.01 || Math.abs(anchor.x - bounds.right) < 0.01;
+    const radians = edgeAngle(angle) * Math.PI / 180, slide = Math.cos(radians) / Math.sin(radians);
+    if (vertical) {
+      const away = Math.sign(anchor.y - other.y) || Math.sign(bounds.cy - other.y) || 1;
+      anchor.y = round(Math.min(bounds.bottom, Math.max(bounds.y, other.y + away * Math.abs(other.x - anchor.x) * slide)));
+    } else {
+      const away = Math.sign(anchor.x - other.x) || Math.sign(bounds.cx - other.x) || 1;
+      anchor.x = round(Math.min(bounds.right, Math.max(bounds.x, other.x + away * Math.abs(other.y - anchor.y) * slide)));
+    }
+    return anchor;
+  }
+  function anchorPoint(node, towards, angle = EDGE_ANGLE.default) {
+    return anchorAtAngle(node, towards, angle);
+  }
+  /** The two ends of a leg, each meeting its side at least at the edge's minimum incidence. */
+  function anchorPair(from, to, first, last, angle) {
+    let start = anchorAtAngle(from, first, angle), end = anchorAtAngle(to, last, angle);
+    for (let pass = 0; pass < 4; pass++) {
+      const before = `${start.x},${start.y},${end.x},${end.y}`;
+      if (incidenceAt(to, end, start) < edgeAngle(angle)) end = slideToAngle(to, end, start, angle);
+      if (incidenceAt(from, start, end) < edgeAngle(angle)) start = slideToAngle(from, start, end, angle);
+      if (`${start.x},${start.y},${end.x},${end.y}` === before) break;
+    }
+    return [start, end];
+  }
+  function edgeGeometry(from, to, kind, angle = EDGE_ANGLE.default) {
     const fromBounds = nodeBounds(from), toBounds = nodeBounds(to);
-    const start = anchorPoint(from, { x: toBounds.cx, y: toBounds.cy }), end = anchorPoint(to, { x: fromBounds.cx, y: fromBounds.cy });
+    const [start, end] = anchorPair(from, to, { x: toBounds.cx, y: toBounds.cy }, { x: fromBounds.cx, y: fromBounds.cy }, angle);
     const path = kind === 'elbow'
       ? `M ${start.x} ${start.y} H ${round((start.x + end.x) / 2)} V ${end.y} H ${end.x}`
       : `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
@@ -187,8 +240,9 @@
 
   const sizeFor = kind => DEFAULT_SIZE[kind] || DEFAULT_SIZE.text;
   /** New edges follow the panel's current line style, so a preference sticks while drawing. */
-  const edgeDefaults = () => ({ kind: pendingEdgeKind });
+  const edgeDefaults = () => ({ kind: pendingEdgeKind, angle: pendingEdgeAngle });
   let pendingEdgeKind = 'arrow';
+  let pendingEdgeAngle = EDGE_ANGLE.default;
   function createNode(kind, point, text) {
     if (!NODE_KINDS.includes(kind)) throw new Error('不受支持的节点类型。');
     const size = sizeFor(kind);
@@ -220,6 +274,7 @@
       const edge = { id: options.id ?? makeId('e'), from, to, kind: options.kind ?? 'arrow', origin: 'user' };
       if (options.relation) edge.relation = options.relation;
       if (options.label) edge.label = options.label;
+      if (options.angle !== undefined && edgeAngle(options.angle) !== EDGE_ANGLE.default) edge.angle = edgeAngle(options.angle);
       return { board: { ...board, edges: [...board.edges, edge] }, edge };
     },
     removeItems(board, ids) {
@@ -322,11 +377,11 @@
     if (api) {
       // `points` is the drawn shape (elbow corners included); `userPoints` is what the
       // reader placed, which is what a bend-point drag must edit.
-      const userPoints = api.edgePoints(from, to, edge.waypoints ?? []);
-      const points = api.edgeRenderPoints(from, to, edge.kind ?? 'arrow', edge.waypoints ?? []);
+      const userPoints = api.edgePoints(from, to, edge.waypoints ?? [], edge.angle);
+      const points = api.edgeRenderPoints(from, to, edge.kind ?? 'arrow', edge.waypoints ?? [], edge.angle);
       return { start: points[0], end: points[points.length - 1], points, userPoints, path: api.edgePath(points, edge.kind ?? 'arrow'), mid: api.edgeMidpoint(points) };
     }
-    const geometry = edgeGeometry(from, to, edge.kind);
+    const geometry = edgeGeometry(from, to, edge.kind, edge.angle);
     return { ...geometry, points: [geometry.start, geometry.end], userPoints: [geometry.start, geometry.end] };
   }
 
@@ -376,7 +431,7 @@
     for (const edge of board.edges) {
       const from = byId.get(edge.from), to = byId.get(edge.to);
       if (!from || !to) continue;
-      const geometry = edgeGeometry(from, to, edge.kind);
+      const geometry = edgeGeometry(from, to, edge.kind, edge.angle);
       ctx.strokeStyle = edge.origin === 'llm' ? palette.muted : palette.edge;
       ctx.lineWidth = 1.6;
       if (edge.origin === 'llm') ctx.setLineDash([6, 4]); else ctx.setLineDash([]);
@@ -837,6 +892,8 @@
       if (edgeKind) { edgeKind.disabled = edges.length !== 1; if (edges.length === 1) edgeKind.value = edges[0].kind ?? 'arrow'; }
       if (edgeArrow) { edgeArrow.disabled = edges.length !== 1; if (edges.length === 1) edgeArrow.value = edges[0].arrow ?? 'forward'; }
       if (edgeDashed) { edgeDashed.disabled = edges.length !== 1; edgeDashed.checked = edges.length === 1 && edges[0].dashed === true; }
+      const edgeAngleSelect = $('board-edge-angle');
+      if (edgeAngleSelect) { edgeAngleSelect.disabled = edges.length !== 1; if (edges.length === 1) edgeAngleSelect.value = String(edgeAngle(edges[0].angle)); }
       const kind = $('board-kind');
       if (kind) { kind.disabled = !single; if (single) kind.value = single.kind; }
       const count = $('board-selection');
@@ -903,7 +960,7 @@
         const from = connectFrom;
         connectFrom = null;
         let created = null;
-        if (mutate(current => { const result = model.addEdge(current, from, target, { kind: edgeDefaults(current).kind }); created = result.edge; return result.board; })) {
+        if (mutate(current => { const result = model.addEdge(current, from, target, { kind: edgeDefaults(current).kind, angle: edgeDefaults(current).angle }); created = result.edge; return result.board; })) {
           // The new edge becomes the selection, and the tool returns to selection so the
           // reader can immediately style it or drag a bend point into it.
           if (created) select([created.id]);
@@ -1610,8 +1667,9 @@
       });
       // Edge appearance, automatic layout, pins and the readable source file.
       const editSelectedEdge = update => { const edge = board.edges.find(value => selection.has(value.id)); if (edge) mutate(current => model.setEdge(current, edge.id, update)); };
-      const edgeKind = $('board-edge-kind'), edgeArrow = $('board-edge-arrow'), edgeDashed = $('board-edge-dashed');
+      const edgeKind = $('board-edge-kind'), edgeArrow = $('board-edge-arrow'), edgeDashed = $('board-edge-dashed'), edgeAngleSelect = $('board-edge-angle');
       if (edgeKind) edgeKind.addEventListener('change', () => { pendingEdgeKind = edgeKind.value; editSelectedEdge({ kind: edgeKind.value }); });
+      if (edgeAngleSelect) edgeAngleSelect.addEventListener('change', () => { const value = edgeAngle(edgeAngleSelect.value); pendingEdgeAngle = value; editSelectedEdge({ angle: value === EDGE_ANGLE.default ? undefined : value }); });
       if (edgeArrow) edgeArrow.addEventListener('change', () => editSelectedEdge({ arrow: edgeArrow.value === 'forward' ? undefined : edgeArrow.value }));
       if (edgeDashed) edgeDashed.addEventListener('change', () => editSelectedEdge({ dashed: edgeDashed.checked ? true : undefined }));
       const layoutApply = $('board-layout-apply');
@@ -1770,7 +1828,7 @@
 
   window.PaperBoard = Object.freeze({
     create, model, outline, renderToCanvas, createNode, paperNode, nodeFromGraphPayload, tidyTree, placeInColumn, boardFromPapers,
-    LIMITS, NODE_KINDS, KIND_LABEL, RELATIONS, RELATION_ORDER, EDGE_KINDS, COLORS, DEFAULT_SIZE,
-    geometry: { round, round3, clamp, nodeBounds, toScene, toScreen, applyZoom, boundsOf, viewportFor, hitNode, hitEdge, edgeGeometry, anchorPoint, distanceToSegment, normalizeRect, idsInRect },
+    LIMITS, NODE_KINDS, KIND_LABEL, RELATIONS, RELATION_ORDER, EDGE_KINDS, EDGE_ANGLE, COLORS, DEFAULT_SIZE,
+    geometry: { round, round3, clamp, nodeBounds, toScene, toScreen, applyZoom, boundsOf, viewportFor, hitNode, hitEdge, edgeGeometry, anchorPoint, anchorAtAngle, incidenceAt, edgeAngle, distanceToSegment, normalizeRect, idsInRect },
   });
 })();

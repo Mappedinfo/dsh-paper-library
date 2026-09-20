@@ -27,7 +27,15 @@ const EDGE_KINDS = new Set(['arrow', 'line', 'elbow'])
 const RELATIONS = new Set(['related', 'supports', 'contradicts', 'cites', 'explains', 'extends'])
 const ORIGINS = new Set(['user', 'llm'])
 const NODE_FIELDS = new Set(['id', 'kind', 'x', 'y', 'w', 'h', 'text', 'color', 'paper', 'origin'])
-const EDGE_FIELDS = new Set(['id', 'from', 'to', 'label', 'kind', 'relation', 'origin', 'waypoints', 'arrow', 'dashed'])
+const EDGE_FIELDS = new Set(['id', 'from', 'to', 'label', 'kind', 'relation', 'origin', 'waypoints', 'arrow', 'dashed', 'angle'])
+/** An edge meets a node side at this incidence: 90° is perpendicular, and the floor is what
+ *  keeps an arrowhead from running along the side it touches. */
+const EDGE_ANGLE = Object.freeze({ min: 30, max: 90 })
+function edgeAngleValue(value, label) {
+  if (value === undefined || value === null) return undefined
+  if (!Number.isInteger(value) || value < EDGE_ANGLE.min || value > EDGE_ANGLE.max) throw boardError(`${label}的连线夹角必须是 ${EDGE_ANGLE.min}–${EDGE_ANGLE.max} 的整数。`)
+  return value
+}
 const ARROWS = new Set(['forward', 'both', 'none'])
 const PAPER_FIELDS = new Set(['id', 'title', 'year', 'citekey'])
 const BOARD_FIELDS = new Set(['schema', 'id', 'title', 'created_at', 'updated_at', 'origin', 'status', 'view', 'nodes', 'edges', 'style', 'links'])
@@ -304,6 +312,8 @@ function normalizeEdge(value, index, nodeIds) {
       return [coordinate(point[0], `${name}横坐标`), coordinate(point[1], `${name}纵坐标`)]
     })
   }
+  const angle = edgeAngleValue(value.angle, `第 ${index + 1} 条连线`)
+  if (angle !== undefined && angle !== EDGE_ANGLE.max) edge.angle = angle
   return edge
 }
 

@@ -13,6 +13,7 @@
 
 ### 修复
 
+- **连线贴着终点节点**：连线以前一律按"两端中心连线"裁剪到边界，于是当两个节点几乎平行时（例如宽而扁的文献节点 + 右侧略低的来源），箭头会以约 10° 的夹角**贴着节点上/下边**扎进去，看起来像压在节点边框上。现在连线与所连接的那条边有一个**夹角**：拖动后的增量重绘会把它校正到设定值，默认**垂直于边**，可在连线（选中一条线后）的「夹角」里调到 75°/60°/45°/30°，**下限 30°**（更小的请求会被夹到 30°）。校正只在需要时滑动端点，端点仍留在边上（到角就停在角上），因此不改变连线的基本走向。实测 17,448 组不重叠的节点组合 × 5 档角度，最差夹角 29.99°（坐标舍入误差 0.01px 量级）。`angle` 存进画板记录与可读源文件（等于 90 时不写，保持默认），宿主校验只接受 30–90 的整数。
 - **拖动节点时文字掉队**：节点此前把形状、文字与手柄都画在绝对坐标上，而拖动过程中的增量重绘（`redrawGeometry`）只更新了形状的位置，于是文字（以及缩放手柄）留在原地，直到下一次点击画布触发整块重绘才归位。现在每个节点的子元素都按**自身原点**绘制、整个节点由一个 `transform` 定位：拖动只改这一个位移，形状、文字与手柄一起走；缩放时也只改写局部尺寸与手柄位置。真实 Chromium 回执新增断言：拖动过程中文字必须与节点同步位移（在旧代码上实测「移动了 0,0」），松手后不再跳一次。
 
 ### 阅读项目
@@ -50,7 +51,7 @@
 - **窄侧栏里画板独占整栏**：≤640px 时应用本来会切成单栏，从库里打开画板会把画板堆到文献列表下面、同时隐藏阅读与批注栏（看起来像"把批注栏遮挡了"，画板还只露出半截）。现在只要画板打开，窄栏就隐藏文献库并让画布占满整栏，点「返回文献库」或 Esc 退出即可。
 - **画板入口不再跳两下**：`?view=board` 以前在 `initialize()` 末尾才切到画板，因此会先画出文献库再跳走。现在入口在模块顶层就判定（首帧前隐藏其余区域），并在 `loadStatus()` 之后**直接**打开画板——画板入口不再读取文献列表、不恢复阅读位置，实测启动全程文献库从未出现。
 - **独立画板站（GitHub Pages）**：同一份 `web/board.js` 另有一个无需 DSH 的静态宿主（`site/`），由 `scripts/build-site.mjs` 组装：画板 markup 从插件页面**抽取**而不是复制，两端不会漂移；`site/standalone.js` 实现同一套动作契约，落在 `localStorage`（上限 40 张画板 / 4 MiB，界面报告用量），并支持 JSON 全量导出/导入（同标识另存为新画板，绝不覆盖）与 PNG 导出（按模型绘制，不依赖页面样式）。独立模式下文献库与对话引用控件隐藏而不假装可用。`.github/workflows/pages.yml` 在 main 上自动构建并部署（Pages 源设为 GitHub Actions）。线上地址 <https://mappedinfo.github.io/dsh-paper-library/> 已用真实浏览器复核（6 项检查：资源投递、绘制与保存、刷新恢复、整理成树、PNG 导出、零第三方请求），回执见 `docs/validation/board-pages-live.json`，可用 `node scripts/verify-pages.mjs` 重跑。
-- 验证：**485 JavaScript / 220 Python 测试**（含阅读项目；工具共 31 个），[28 项插件内 Chromium 回执](docs/validation/board-browser.json)、[14 项独立站 Chromium 回执](docs/validation/board-standalone.json)、[7 项原生 DSH 回执](docs/validation/board-harness.json) 与 [线上回执](docs/validation/board-pages-live.json)。设计记录见 [docs/whiteboard-design.md](docs/whiteboard-design.md) 与 [docs/board-pages.md](docs/board-pages.md)。
+- 验证：**487 JavaScript / 220 Python 测试**（含阅读项目；工具共 31 个），[29 项插件内 Chromium 回执](docs/validation/board-browser.json)、[14 项独立站 Chromium 回执](docs/validation/board-standalone.json)、[7 项原生 DSH 回执](docs/validation/board-harness.json) 与 [线上回执](docs/validation/board-pages-live.json)。设计记录见 [docs/whiteboard-design.md](docs/whiteboard-design.md) 与 [docs/board-pages.md](docs/board-pages.md)。
 
 ### 研究难点挖掘（P1–P4）
 

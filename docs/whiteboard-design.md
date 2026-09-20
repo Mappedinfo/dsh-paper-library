@@ -271,6 +271,26 @@ owner asked for a 画板 entry next to 文献库 on the right sidebar's start pa
   hidden annotation rail. Whenever the board is open in a narrow container the shelf now steps aside
   and the canvas fills the pane.
 
+## P12: how a line meets a node
+
+Added 2026-09-20 from the owner's report that an arrow (and the line behind it) sometimes hugs the
+target node, running along one of its sides.
+
+- **An incidence angle, not a clip.** Clipping the centre-to-centre segment to the border lands the
+  end wherever that segment crosses, which for a wide, short node can be a ~10° graze along its top
+  edge. The end is now placed so the drawn segment meets the side it lands on at the edge's
+  **angle**: perpendicular by default (90°), adjustable to 75/60/45/30, with a **30° floor** —
+  a shallower request is clamped, never honoured. The lean follows the centre line and the position
+  is clamped to the side, so an end stops at a corner rather than leaving the shape.
+- **Both ends, settled.** Sliding one end moves the line the other end measures against, so the pair
+  is settled over a few passes (a pass that changes nothing ends it, with a four-pass bound). The
+  property that matters is measured, not assumed: 17,448 non-overlapping arrangements across five
+  settings keep a worst incidence of 29.99° (coordinates are rounded to 0.01 px), and the drawn path
+  itself is measured in the browser receipt, where the old geometry reports 10.4°.
+- **`angle` is an edge field.** It travels in the board record and the readable source file, omitted
+  when it is the perpendicular default, and the host accepts only integers in 30–90. Two shapes in
+  the same place have no side to attach to, so the floor is stated for non-overlapping nodes.
+
 ## Invariants
 
 - No new runtime dependency, no model call while opening, listing or drawing a board, and no
@@ -298,14 +318,14 @@ Synthetic-only validation, following the existing project discipline:
   the closed-board graph path, the late reveal of the project picker and the 「更多」 toggle).
 - `tests-js/board-references.test.mjs` — token parse/render, chip codec round-trip, snapshot
   integrity, and `agent/pre-step` expansion including the malformed and over-budget paths.
-  **Implemented, 5 cases.**
+  **Implemented, 6 cases** (including the incidence sweep).
 - `tests-js/board-source.test.mjs` — edge geometry (waypoints, elbow corners, bend-point
   editing), the three layout modes across four directions and two node orders, the source and
   style validators, and a **parity check that everything the source module emits passes the
   host's own validator**. **Implemented, 5 cases.**
 - `scripts/board-browser-fixture.mjs` — real Chromium receipt for draw/drag/zoom/connect/save/reload,
   library drag-in, tidy-tree snapping, and the standalone refusal of the conversation chip.
-  **Implemented, 28 checks** in `docs/validation/board-browser.json` (including a knowledge-graph node joining a board, the connect tool, a bend point, automatic layout with a pinned node, the source/style pair, and the plugin's own board entry opening as a pure canvas).
+  **Implemented, 29 checks** in `docs/validation/board-browser.json` (including a knowledge-graph node joining a board, the connect tool, a bend point, automatic layout with a pinned node, the source/style pair, and the plugin's own board entry opening as a pure canvas).
 - `scripts/board-harness-smoke.mjs` — native DSH check that the tool is offered, that a board token
   reaches a turn as frozen material, and that an unresolvable reference fails the turn.
   **Implemented, 7 checks** in `docs/validation/board-harness.json`.

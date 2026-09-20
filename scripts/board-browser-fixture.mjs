@@ -529,6 +529,68 @@ try {
   record('opening-the-board-from-the-library-fills-a-narrow-pane');
   await page.setViewportSize({ width: 1440, height: 900 });
 
+  // An edge may not run along the side it meets. This arrangement is the reported one: a wide,
+  // short node and a source almost level with it, whose centre line grazes the bottom edge at
+  // about 12°. The drawn path is measured, not the model, so the check covers the real render.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${origin}/?view=board`);
+  await page.waitForFunction(() => document.body.classList.contains('board-mode'));
+  const zoom = Number((await page.locator('#board-zoom-label').innerText()).replace('%', '')) / 100 || 1;
+  const paintingStage = await page.locator('#board-stage').boundingBox();
+  await page.locator('#board-tool-rect').click();
+  await page.mouse.click(paintingStage.x + 180, paintingStage.y + 160);
+  await page.locator('.board-text-editor').waitFor();
+  await page.locator('.board-text-editor').fill('宽节点');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelectorAll('.board-node').length >= 1);
+  const tall = await page.locator('.board-node').last().locator('.board-node-shape').boundingBox();
+  // Widen the fresh node and flatten it, so its bottom edge is long and its aspect ratio extreme.
+  await page.mouse.move(tall.x + tall.width - 5, tall.y + tall.height - 5);
+  await page.mouse.down();
+  await page.mouse.move(tall.x + tall.width + 80, tall.y + tall.height - 80, { steps: 6 });
+  await page.mouse.up();
+  const wide = await page.locator('.board-node').last().locator('.board-node-shape').boundingBox();
+  // A source almost level with the wide node, a little below it: the grazing case.
+  await page.locator('#board-tool-note').click();
+  await page.mouse.click(wide.x + wide.width + 320 * zoom, wide.y + wide.height + 70 * zoom);
+  await page.locator('.board-text-editor').waitFor();
+  await page.locator('.board-text-editor').fill('近平行的来源');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelectorAll('.board-node').length >= 1);
+  const source = await page.locator('.board-node').last().locator('.board-node-shape').boundingBox();
+  await page.locator('#board-tool-connect').click();
+  await page.mouse.click(source.x + source.width / 2, source.y + source.height / 2);
+  await page.mouse.click(wide.x + wide.width / 2, wide.y + wide.height / 2);
+  await page.waitForFunction(() => document.querySelectorAll('.board-edge-group.is-selected [data-edge-path]').length === 1);
+  const attachmentAngle = () => page.evaluate(() => {
+    const path = document.querySelector('.board-edge-group.is-selected [data-edge-path]');
+    const total = path.getTotalLength(), matrix = path.getScreenCTM();
+    // A node's shape lives inside its content transform, so compare in screen space, where zoom
+    // is a uniform scale and the measured angle is the drawn angle.
+    const screen = point => ({ x: point.x * matrix.a + point.y * matrix.c + matrix.e, y: point.x * matrix.b + point.y * matrix.d + matrix.f });
+    const start = screen(path.getPointAtLength(0)), end = screen(path.getPointAtLength(total));
+    const boxes = [...document.querySelectorAll('.board-node')].map(node => ({ id: node.getAttribute('data-node'), box: node.querySelector('.board-node-shape').getBoundingClientRect() }));
+    const on = (value, edge) => Math.abs(value - edge) < 1.5;
+    const target = boxes.find(({ box }) => on(end.x, box.left) || on(end.x, box.right) || on(end.y, box.top) || on(end.y, box.bottom));
+    if (!target) return { onBorder: false, angle: 0 };
+    const box = target.box;
+    const vertical = on(end.x, box.left) || on(end.x, box.right);
+    const across = Math.abs(end.x - start.x), along = Math.abs(end.y - start.y);
+    return { onBorder: true, angle: (vertical ? Math.atan2(across, along) : Math.atan2(along, across)) * 180 / Math.PI, side: vertical ? 'vertical' : 'horizontal' };
+  });
+  const drawn = await attachmentAngle();
+  assert.equal(drawn.onBorder, true, 'the arrow lands exactly on the target border');
+  assert.ok(drawn.angle >= 30 - 0.01, `the grazing attachment is corrected, measured ${drawn.angle.toFixed(1)}° instead of ~12°`);
+  // Relaxing it stays above the floor, and the choice reaches the record.
+  await page.locator('#board-edge-angle').selectOption('30');
+  const relaxedRecord = await waitForHost(value => (value.board?.edges ?? []).some(edge => edge.angle === 30), 'the relaxed angle in the record');
+  assert.equal(relaxedRecord.board.edges.find(edge => edge.angle === 30).angle, 30);
+  const relaxed = await attachmentAngle();
+  assert.ok(relaxed.angle >= 30 - 0.01, `a relaxed edge still keeps the floor, measured ${relaxed.angle.toFixed(1)}°`);
+  await page.locator('#board-edge-angle').selectOption('90');
+  await waitForHost(value => (value.board?.edges ?? []).every(edge => edge.angle === undefined), 'perpendicular stored as the default');
+  record('an-edge-meets-its-node-at-the-configured-angle-with-a-30-degree-floor');
+
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);
   record('no-browser-runtime-errors-and-no-external-requests');
@@ -538,7 +600,7 @@ try {
 }
 await writeFile(join(project, 'docs/validation/board-browser.json'), JSON.stringify({
   verified_at: new Date().toISOString(),
-  scope: 'Synthetic catalog in an isolated standalone server; free canvas drawing, text editing, connecting, moving, paper drag-in and picker, undo/redo, delete, zoom/fit/fullscreen, board switching, deletion and host persistence across a reload, the `?view=board` entry opening as a pure canvas, and a 420px pane containing the toolbar behind one toggle while the canvas takes the pane; zero model calls and zero external requests. The AI-proposal review path and the conversation reference chip need the native host tool and the DSH composer, so they are covered by the native harness receipt and unit tests rather than simulated here.',
+  scope: 'Synthetic catalog in an isolated standalone server; free canvas drawing, text editing, connecting, moving, paper drag-in and picker, undo/redo, delete, zoom/fit/fullscreen, board switching, deletion and host persistence across a reload, the `?view=board` entry opening as a pure canvas, a 420px pane containing the toolbar behind one toggle while the canvas takes the pane, and an edge attachment measured on the drawn path holding its 30-degree floor; zero model calls and zero external requests. The AI-proposal review path and the conversation reference chip need the native host tool and the DSH composer, so they are covered by the native harness receipt and unit tests rather than simulated here.',
   checks, errors, externalRequests: external.length, modelRequests: 0,
 }, null, 2) + '\n');
 console.log(JSON.stringify({ run: relative(project, run), checks: checks.length, errors }));

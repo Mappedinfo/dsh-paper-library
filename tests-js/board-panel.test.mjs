@@ -65,7 +65,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas } = {}) {
     'board-conflict', 'board-conflict-note', 'board-conflict-reload', 'board-conflict-copy', 'board-accept-ai',
     'board-relation', 'board-edge-label-input', 'board-color', 'board-kind', 'board-selection',
     'board-tool-select', 'board-tool-pan', 'board-tool-text', 'board-tool-note', 'board-tool-rect', 'board-tool-ellipse', 'board-tool-diamond', 'board-tool-connect',
-    'board-edge-kind', 'board-edge-arrow', 'board-edge-dashed',
+    'board-edge-kind', 'board-edge-arrow', 'board-edge-dashed', 'board-edge-angle',
     'board-layout-mode', 'board-layout-direction', 'board-layout-gap-x', 'board-layout-gap-y', 'board-layout-apply', 'board-layout-pin', 'board-layout-unpin', 'board-layout-status',
     'board-source-open', 'board-source-dialog', 'board-links', 'board-link-paper', 'board-unlink-paper', 'board-focus', 'board-source-content', 'board-source-style', 'board-source-status', 'board-source-apply', 'board-source-download', 'board-source-upload', 'board-source-file', 'board-source-generate',
     { id: 'board-project-select', tag: 'select' }, 'board-link-project', 'board-unlink-project',
@@ -123,13 +123,15 @@ test('canvas geometry keeps hits, anchors and zoom stable without a browser', ()
   assert.equal(hitNode(nodes, { x: 10, y: 10 }), 'n-1');
   assert.equal(hitNode(nodes, { x: 400, y: 400 }), null);
   const edges = [{ id: 'e-1', from: 'n-1', to: 'n-2', kind: 'arrow' }];
-  assert.equal(hitEdge(nodes, edges, { x: 75, y: 40 }, 6), 'e-1');
+  // These two rectangles overlap, and the default angle still draws a square line at y = 30.
+  assert.equal(hitEdge(nodes, edges, { x: 75, y: 30 }, 6), 'e-1');
+  assert.equal(hitEdge(nodes, edges, { x: 75, y: 40 }, 6), null, 'the hit test follows the drawn line');
   assert.equal(hitEdge(nodes, edges, { x: 300, y: 400 }, 6), null);
   // Border anchors sit on the shape edge, never at the centre.
   const left = anchorPoint(nodes[0], { x: -100, y: 30 });
   assert.equal(left.x, 0);
-  assert.equal(edgeGeometry(nodes[0], nodes[1], 'elbow').path, 'M 100 50 H 75 V 30 H 50');
-  assert.equal(edgeGeometry(nodes[0], nodes[1], 'arrow').path, 'M 100 50 L 50 30');
+  assert.equal(edgeGeometry(nodes[0], nodes[1], 'elbow').path, 'M 100 30 H 75 V 30 H 50');
+  assert.equal(edgeGeometry(nodes[0], nodes[1], 'arrow').path, 'M 100 30 L 50 30');
   // Screen and scene conversions are exact inverses (spread: the vm realm has its own prototypes).
   const view = { x: 120, y: -40, zoom: 1.5 };
   assert.deepEqual({ ...toScreen(toScene({ x: 300, y: 200 }, view), view) }, { x: 300, y: 200 });
@@ -491,6 +493,48 @@ test('edge line style, arrows and dashes are editable, and the choice sticks for
   assert.equal(harness.panel.board().edges.length, 1, 'the pair already has an edge');
   assert.equal(harness.messages.some(message => /edge|连线/.test(message)), false);
   assert.equal(harness.boardSource.edgeStyle({}, { relation: undefined, kind: 'elbow' }).kind, 'elbow');
+});
+
+test('an edge angle controls how the line meets its node, with the floor enforced', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  const { edgeGeometry, incidenceAt } = harness.board.geometry;
+  const wide = { id: 'w', kind: 'concept', x: 0, y: 0, w: 260, h: 120, text: 'wide' };
+  const source = { id: 's', kind: 'note', x: 420, y: 40, w: 120, h: 80, text: 'source' };
+  // A perpendicular attachment (the default) draws a square line; a relaxed one leans.
+  const square = edgeGeometry(source, wide, 'arrow');
+  assert.equal(square.end.x, 260);
+  assert.equal(square.end.y, square.start.y);
+  assert.ok(incidenceAt(wide, square.end, square.start) > 89.99);
+  const relaxed = edgeGeometry(source, wide, 'arrow', 45);
+  assert.ok(incidenceAt(wide, relaxed.end, relaxed.start) >= 45 - 0.01);
+  assert.notEqual(relaxed.end.y, square.end.y);
+  // Values below the floor are clamped, never honoured.
+  const clamped = edgeGeometry(source, wide, 'arrow', 5);
+  assert.ok(incidenceAt(wide, clamped.end, clamped.start) >= 30 - 0.01);
+
+  // The inspector edits the selected edge's angle and remembers it for the next one.
+  harness.panel.setTool('rect');
+  harness.svg.dispatch('pointerdown', { clientX: 120, clientY: 120 });
+  harness.panel.setTool('rect');
+  harness.svg.dispatch('pointerdown', { clientX: 620, clientY: 380 });
+  const [a, b] = harness.panel.board().nodes;
+  harness.panel.setTool('connect');
+  harness.svg.dispatch('pointerdown', { clientX: a.x + a.w / 2, clientY: a.y + a.h / 2 });
+  harness.svg.dispatch('pointerdown', { clientX: b.x + b.w / 2, clientY: b.y + b.h / 2 });
+  const created = harness.panel.board().edges.at(-1);
+  assert.ok(created, 'the connect tool made an edge to edit');
+  assert.equal(created.angle, undefined, 'a new edge defaults to perpendicular');
+  const angleSelect = harness.registry.get('board-edge-angle');
+  assert.equal(angleSelect.disabled, false, 'the control is live for a single selected edge');
+  assert.equal(angleSelect.value, '90');
+  angleSelect.value = '45';
+  angleSelect.dispatch('change');
+  assert.equal(harness.panel.board().edges.at(-1).angle, 45);
+  angleSelect.value = '90';
+  angleSelect.dispatch('change');
+  assert.equal(harness.panel.board().edges.at(-1).angle, undefined, 'back to perpendicular clears the field');
 });
 
 test('dragging a line inserts a bend point, Alt-click removes it, and the path follows it', async () => {

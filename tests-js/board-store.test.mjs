@@ -55,11 +55,20 @@ test('a board round-trips through the real store with a stable summary and no mo
   assert.equal(listing.boards.length, 1);
   assert.equal(listing.truncated, false);
   assert.deepEqual(listing.boards[0], created.summary);
+
+  // An edge may ask for a shallower attachment, down to the 30° floor.
+  const relaxed = await f.store.create({ board: board({ edges: [{ id: 'e-1', from: 'n-1', to: 'n-2', kind: 'arrow', angle: 45 }] }) });
+  assert.equal(relaxed.board.edges[0].angle, 45);
+  const perpendicular = await f.store.create({ board: board({ edges: [{ id: 'e-1', from: 'n-1', to: 'n-2', kind: 'arrow', angle: 90 }] }) });
+  assert.equal('angle' in perpendicular.board.edges[0], false, 'perpendicular is the default and is not stored');
 });
 
 test('board validation rejects dangling, duplicated, oversized and unsupported shapes', () => {
   const cases = [
     [board({ edges: [{ id: 'e-1', from: 'n-1', to: 'n-404' }] }), /端点不在本次画板中/],
+    [board({ edges: [{ id: 'e-1', from: 'n-1', to: 'n-2', angle: 20 }] }), /夹角必须是 30–90 的整数/],
+    [board({ edges: [{ id: 'e-1', from: 'n-1', to: 'n-2', angle: 45.5 }] }), /夹角必须是 30–90 的整数/],
+    [board({ edges: [{ id: 'e-1', from: 'n-1', to: 'n-2', angle: '90' }] }), /夹角必须是 30–90 的整数/],
     [board({ nodes: [paperNode('n-1'), paperNode('n-1', { x: 10 })] }), /重复/],
     [board({ nodes: [{ id: 'n-1', kind: 'concept', text: '' }] }), /既没有文本也没有文献/],
     [board({ nodes: [{ id: 'n-1', kind: 'paper', text: 'x' }] }), /缺少文献标识/],

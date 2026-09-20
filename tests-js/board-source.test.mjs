@@ -19,13 +19,58 @@ const sample = () => ({
     { id: 'b', kind: 'paper', paper: 'paper_a', paperTitle: 'Paper A', year: 2026, citekey: 'wang2026' },
     { id: 'parked', kind: 'concept', text: '固定位置', pin: [900, 120] },
   ],
-  edges: [{ from: 'root', to: 'a', relation: 'explains' }, { from: 'root', to: 'b', kind: 'elbow', dashed: true, arrow: 'both' }, { from: 'a', to: 'parked', waypoints: [[600, 300]] }],
+  edges: [{ from: 'root', to: 'a', relation: 'explains' }, { from: 'root', to: 'b', kind: 'elbow', dashed: true, arrow: 'both', angle: 45 }, { from: 'a', to: 'parked', waypoints: [[600, 300]] }],
+});
+
+test('an edge meets its node side at the configured angle and never shallower than 30°', () => {
+  const node = (id, x, y, w, h) => ({ id, kind: 'concept', x, y, w, h, text: id });
+  // The reported case: a source below-right of a wide node used to attach at ~25° to the top
+  // edge, so the arrowhead ran along the node. It now meets the side perpendicular.
+  const wide = node('wide', 0, 0, 260, 120), shallow = node('source', 420, 40, 120, 80);
+  const perpendicular = source.edgePoints(shallow, wide, [], source.EDGE_ANGLE.default);
+  // The perpendicular foot of the *other* end, which is what makes the segment truly square.
+  assert.equal(perpendicular.at(-1).x, 260);
+  assert.equal(perpendicular.at(-1).y, perpendicular[0].y, 'the default draws a square attachment');
+  assert.ok(source.incidenceAt(wide, perpendicular.at(-1), perpendicular[0]) > 89.99);
+  assert.ok(source.incidenceAt(shallow, perpendicular[0], perpendicular.at(-1)) > 89.99);
+
+  // Every arrangement and every setting keeps the floor: a deterministic sweep, skipping the
+  // pairs that overlap (two shapes in the same place have no side to attach to).
+  let seed = 20260920, worst = Infinity, pairs = 0, perpendicularBoth = 0;
+  for (let index = 0; index < 600; index++) {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    const from = node('a', 0, 0, 40 + (seed % 320), 40 + ((seed >> 3) % 320));
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    const to = node('b', -600 + (seed % 1200), -600 + ((seed >> 5) % 1200), 40 + ((seed >> 7) % 320), 40 + ((seed >> 9) % 320));
+    for (const angle of [30, 45, 60, 75, 90]) {
+      const points = source.edgePoints(from, to, [], angle);
+      const start = points[0], end = points.at(-1);
+      const overlap = from.x < to.x + to.w && to.x < from.x + from.w && from.y < to.y + to.h && to.y < from.y + from.h;
+      if (overlap || Math.hypot(end.x - start.x, end.y - start.y) < 12) continue;
+      const atStart = source.incidenceAt(from, start, end), atEnd = source.incidenceAt(to, end, start);
+      assert.ok(atStart >= source.EDGE_ANGLE.min - 0.01, `${angle}°: start incidence ${atStart}`);
+      assert.ok(atEnd >= source.EDGE_ANGLE.min - 0.01, `${angle}°: end incidence ${atEnd}`);
+      worst = Math.min(worst, atStart, atEnd);
+      pairs += 1;
+      if (atStart > 89.99 && atEnd > 89.99) perpendicularBoth += 1;
+    }
+  }
+  assert.ok(pairs > 1000, `the sweep covered ${pairs} arrangements`);
+  assert.ok(worst >= source.EDGE_ANGLE.min - 0.01, `the worst incidence stayed at ${worst}`);
+  assert.ok(perpendicularBoth > 100, `perpendicular is the common case, ${perpendicularBoth} of ${pairs}`);
+  // The setting is clamped to what the geometry promises: 30–90, defaulting to perpendicular.
+  assert.equal(source.edgeAngle(5), 30);
+  assert.equal(source.edgeAngle(120), 90);
+  assert.equal(source.edgeAngle('nonsense'), 90);
+  assert.equal(source.edgeAngle(undefined), 90);
 });
 
 test('the source and style validators refuse malformed files with readable reasons', () => {
   const cases = [
     [() => source.validateSource({ schema: 'nope', nodes: [] }), /版本不受支持/],
     [() => source.validateSource({ nodes: [] }), /1–400 项/],
+    [() => source.validateSource({ nodes: [{ id: 'a', kind: 'note', text: 'x' }, { id: 'b', kind: 'note', text: 'y' }], edges: [{ from: 'a', to: 'b', angle: 20 }] }), /夹角必须在 30–90 度之间/],
+    [() => source.validateSource({ nodes: [{ id: 'a', kind: 'note', text: 'x' }, { id: 'b', kind: 'note', text: 'y' }], edges: [{ from: 'a', to: 'b', angle: 45.5 }] }), /夹角必须在 30–90 度之间/],
     [() => source.validateSource({ nodes: [{ id: 'a', kind: 'swimlane', text: 'x' }] }), /类型不受支持/],
     [() => source.validateSource({ nodes: [{ id: 'a', kind: 'note', text: 'x' }, { id: 'a', kind: 'note', text: 'y' }] }), /标识重复/],
     [() => source.validateSource({ nodes: [{ id: 'a', kind: 'note', text: 'x' }], edges: [{ from: 'a', to: 'a' }] }), /同一个节点/],
@@ -65,6 +110,8 @@ test('a generated board is exactly what the host accepts, so both validators agr
   assert.equal(validated.edges.find(edge => edge.to === 'b').dashed, true);
   assert.equal(validated.edges.find(edge => edge.to === 'b').arrow, 'both');
   assert.equal(validated.edges.find(edge => edge.to === 'b').kind, 'elbow');
+  assert.equal(validated.edges.find(edge => edge.to === 'b').angle, 45, 'a relaxed angle survives the host validator');
+  assert.equal(validated.edges.find(edge => edge.from === 'root' && edge.to === 'a').angle, undefined, 'perpendicular is the default and is not stored');
   assert.deepEqual(validated.style.layout.pins, { parked: [900, 120] });
   assert.equal(validated.style.node.byKind.paper.fill, '#eef4ff', 'fills travel in the style block, never on the node');
   assert.equal(validated.style.edge.byRelation.explains.stroke, '#4176e6');
@@ -85,6 +132,8 @@ test('a generated board is exactly what the host accepts, so both validators agr
   // And an exported source validates against its own reader.
   const { source: content, style } = source.toSource(converted.board, {});
   assert.deepEqual(source.validateSource(content), content);
+  assert.equal(content.edges.find(entry => entry.to === 'b').angle, 45, 'the readable file states a relaxed angle');
+  assert.equal('angle' in content.edges.find(entry => entry.to === 'a'), false, 'and omits a perpendicular one');
   assert.equal(source.validateStyle(style).schema, undefined);
   // Every node/edge the source module emits is addressable by the host's id grammar.
   for (const node of converted.board.nodes) assert.match(node.id, /^[A-Za-z0-9_-]{1,60}$/);

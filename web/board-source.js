@@ -60,13 +60,87 @@
   const nodeBoundsOf = node => ({ x: node.x, y: node.y, w: node.w, h: node.h, right: node.x + node.w, bottom: node.y + node.h, cx: node.x + node.w / 2, cy: node.y + node.h / 2 });
   const round = value => Math.round(value * 100) / 100;
 
-  /** Clip a centre-to-centre segment to a node's border, so arrowheads sit on the edge. */
-  function anchorPoint(node, towards) {
-    const bounds = nodeBoundsOf(node), dx = towards.x - bounds.cx, dy = towards.y - bounds.cy;
+  /** How a line may meet a node: at most 90° (perpendicular to the side) and never shallower
+   *  than 30°, which is what keeps an arrowhead from running along the side it touches. */
+  const EDGE_ANGLE = Object.freeze({ min: 30, max: 90, default: 90 });
+  const edgeAngle = value => {
+    const degrees = Math.round(Number(value));
+    return Number.isFinite(degrees) ? Math.min(EDGE_ANGLE.max, Math.max(EDGE_ANGLE.min, degrees)) : EDGE_ANGLE.default;
+  };
+
+  /** Which side a centre line leaves through, and which way it leans along that side. */
+  function sideOf(bounds, towards) {
+    const dx = towards.x - bounds.cx, dy = towards.y - bounds.cy;
+    const vertical = (dx ? (bounds.w / 2) / Math.abs(dx) : Infinity) <= (dy ? (bounds.h / 2) / Math.abs(dy) : Infinity);
+    // No lean when the centre line is exactly perpendicular already.
+    return { dx, dy, vertical, side: vertical ? (dx >= 0 ? 1 : -1) : (dy >= 0 ? 1 : -1), lean: vertical ? Math.sign(dy) : Math.sign(dx) };
+  }
+
+  /** An end placed on its side so the line leaves it at `angle` degrees to that side
+   *  (90° = perpendicular). The lean follows the centre line, and the position is clamped to
+   *  the side, so a very shallow request stops at the corner instead of leaving the shape. */
+  function anchorAtAngle(node, towards, angle) {
+    const bounds = nodeBoundsOf(node), { dx, dy, vertical, side, lean } = sideOf(bounds, towards);
     if (!dx && !dy) return { x: bounds.cx, y: bounds.cy };
-    const scaleX = dx ? (bounds.w / 2) / Math.abs(dx) : Infinity, scaleY = dy ? (bounds.h / 2) / Math.abs(dy) : Infinity;
-    const scale = Math.min(scaleX, scaleY);
-    return { x: round(bounds.cx + dx * scale), y: round(bounds.cy + dy * scale) };
+    const radians = edgeAngle(angle) * Math.PI / 180;
+    const slide = Math.cos(radians) / Math.sin(radians);
+    if (vertical) {
+      const y = bounds.cy + lean * slide * (bounds.w / 2);
+      return { x: round(bounds.cx + side * bounds.w / 2), y: round(Math.min(bounds.bottom, Math.max(bounds.y, y))) };
+    }
+    const x = bounds.cx + lean * slide * (bounds.h / 2);
+    return { x: round(Math.min(bounds.right, Math.max(bounds.x, x))), y: round(bounds.cy + side * bounds.h / 2) };
+  }
+
+  /** The same placement under its public name: the anchor a line uses when it meets this node. */
+  function anchorPoint(node, towards, angle = EDGE_ANGLE.default) {
+    return anchorAtAngle(node, towards, angle);
+  }
+
+  /** The angle, in degrees, at which the drawn segment meets the side the anchor sits on.
+   *  A corner belongs to two sides at once, and a line leaving one cannot run along either,
+   *  so a corner reports the friendlier of the two readings. */
+  function incidenceAt(node, anchor, other) {
+    const bounds = nodeBoundsOf(node);
+    const onVertical = Math.abs(anchor.x - bounds.x) < 0.01 || Math.abs(anchor.x - bounds.right) < 0.01;
+    const onHorizontal = Math.abs(anchor.y - bounds.y) < 0.01 || Math.abs(anchor.y - bounds.bottom) < 0.01;
+    const across = Math.abs(other.x - anchor.x), along = Math.abs(other.y - anchor.y);
+    const vertical = Math.atan2(across, along) * 180 / Math.PI, horizontal = Math.atan2(along, across) * 180 / Math.PI;
+    if (onVertical && onHorizontal) return Math.max(vertical, horizontal);
+    return onVertical ? vertical : horizontal;
+  }
+
+  /** Slide one end along its side until the drawn segment meets that side at `angle`.
+   *  Sliding away from the other end can only raise the incidence, so clamping at a corner
+   *  never makes it shallower than the request. */
+  function slideToAngle(node, anchor, other, angle) {
+    const bounds = nodeBoundsOf(node);
+    const vertical = Math.abs(anchor.x - bounds.x) < 0.01 || Math.abs(anchor.x - bounds.right) < 0.01;
+    const slide = Math.cos(edgeAngle(angle) * Math.PI / 180) / Math.sin(edgeAngle(angle) * Math.PI / 180);
+    if (vertical) {
+      const away = Math.sign(anchor.y - other.y) || Math.sign(bounds.cy - other.y) || 1;
+      const y = other.y + away * Math.abs(other.x - anchor.x) * slide;
+      anchor.y = round(Math.min(bounds.bottom, Math.max(bounds.y, y)));
+    } else {
+      const away = Math.sign(anchor.x - other.x) || Math.sign(bounds.cx - other.x) || 1;
+      const x = other.x + away * Math.abs(other.y - anchor.y) * slide;
+      anchor.x = round(Math.min(bounds.right, Math.max(bounds.x, x)));
+    }
+    return anchor;
+  }
+
+  /** Both ends of a leg, meeting their sides at `angle` and never shallower than it.
+   *  Sliding one end moves the line the other end measures against, so this settles a few
+   *  passes; a pass that changes nothing ends it, and the four-pass bound keeps it finite. */
+  function anchorPair(from, to, first, last, angle) {
+    let start = anchorAtAngle(from, first, angle), end = anchorAtAngle(to, last, angle);
+    for (let pass = 0; pass < 4; pass++) {
+      const before = `${start.x},${start.y},${end.x},${end.y}`;
+      if (incidenceAt(to, end, start) < edgeAngle(angle)) end = slideToAngle(to, end, start, angle);
+      if (incidenceAt(from, start, end) < edgeAngle(angle)) start = slideToAngle(from, start, end, angle);
+      if (`${start.x},${start.y},${end.x},${end.y}` === before) break;
+    }
+    return [start, end];
   }
 
   const asPoint = value => ({ x: value[0] ?? value.x, y: value[1] ?? value.y });
@@ -75,11 +149,12 @@
    * The polyline an edge actually follows. Waypoints are reader-placed absolute points, so
    * a line can be routed around a node; the first and last legs are clipped to the shapes.
    */
-  function edgePoints(from, to, waypoints = []) {
+  function edgePoints(from, to, waypoints = [], angle = EDGE_ANGLE.default) {
     const middle = waypoints.map(asPoint);
     const first = middle[0] ?? { x: nodeBoundsOf(to).cx, y: nodeBoundsOf(to).cy };
     const last = middle[middle.length - 1] ?? { x: nodeBoundsOf(from).cx, y: nodeBoundsOf(from).cy };
-    return [anchorPoint(from, first), ...middle.map(point => ({ x: round(point.x), y: round(point.y) })), anchorPoint(to, last)];
+    const [start, end] = anchorPair(from, to, first, last, angle);
+    return [start, ...middle.map(point => ({ x: round(point.x), y: round(point.y) })), end];
   }
 
   /**
@@ -87,8 +162,8 @@
    * points, so hit-testing, label placement and dragging all measure the shape on screen
    * instead of an invisible straight line between its ends.
    */
-  function edgeRenderPoints(from, to, kind, waypoints = []) {
-    const points = edgePoints(from, to, waypoints);
+  function edgeRenderPoints(from, to, kind, waypoints = [], angle = EDGE_ANGLE.default) {
+    const points = edgePoints(from, to, waypoints, angle);
     if (kind !== 'elbow' || points.length < 2) return points;
     const out = [points[0]];
     for (let index = 1; index < points.length; index++) {
@@ -444,6 +519,7 @@
       if (edge.kind && edge.kind !== 'arrow') entry.kind = edge.kind;
       if (edge.arrow && edge.arrow !== 'forward') entry.arrow = edge.arrow;
       if (edge.dashed) entry.dashed = true;
+      if (edge.angle && edge.angle !== EDGE_ANGLE.default) entry.angle = edge.angle;
       if (edge.waypoints?.length) entry.waypoints = edge.waypoints.map(point => [round(point[0]), round(point[1])]);
       if (edge.origin === 'llm') entry.proposed = true;
       return entry;
@@ -514,7 +590,7 @@
     const edges = value.edges ?? [];
     if (!Array.isArray(edges) || edges.length > LIMITS.edges) fail(`edges 最多 ${LIMITS.edges} 条。`);
     source.edges = edges.map((entry, index) => {
-      closed(entry, `第 ${index + 1} 条连线`, ['from', 'to', 'relation', 'label', 'kind', 'arrow', 'dashed', 'waypoints', 'proposed']);
+      closed(entry, `第 ${index + 1} 条连线`, ['from', 'to', 'relation', 'label', 'kind', 'arrow', 'dashed', 'angle', 'waypoints', 'proposed']);
       const edge = { from: identifier(entry.from, `第 ${index + 1} 条连线起点`), to: identifier(entry.to, `第 ${index + 1} 条连线终点`) };
       if (edge.from === edge.to) fail(`第 ${index + 1} 条连线不能连接同一个节点。`);
       if (!ids.has(edge.from) || !ids.has(edge.to)) fail(`第 ${index + 1} 条连线的端点不在本次画板中。`);
@@ -533,6 +609,10 @@
         edge.arrow = entry.arrow;
       }
       if (entry.dashed === true) edge.dashed = true;
+      if (entry.angle !== undefined) {
+        if (!Number.isInteger(entry.angle) || entry.angle < EDGE_ANGLE.min || entry.angle > EDGE_ANGLE.max) fail(`第 ${index + 1} 条连线的夹角必须在 ${EDGE_ANGLE.min}–${EDGE_ANGLE.max} 度之间。`);
+        if (entry.angle !== EDGE_ANGLE.default) edge.angle = entry.angle;
+      }
       if (entry.proposed === true) edge.proposed = true;
       if (entry.waypoints !== undefined) {
         if (!Array.isArray(entry.waypoints) || entry.waypoints.length > LIMITS.waypoints) fail(`第 ${index + 1} 条连线最多 ${LIMITS.waypoints} 个拐点。`);
@@ -670,6 +750,7 @@
       if (entry.label) edge.label = entry.label;
       if (entry.arrow) edge.arrow = entry.arrow;
       if (entry.dashed) edge.dashed = true;
+      if (entry.angle) edge.angle = edgeAngle(entry.angle);
       if (entry.waypoints) edge.waypoints = entry.waypoints.map(point => [...point]);
       return edge;
     });
@@ -722,8 +803,8 @@
   }
 
   window.PaperBoardSource = Object.freeze({
-    SOURCE_SCHEMA, STYLE_SCHEMA, LIMITS, MODES, DIRECTIONS, NODE_KINDS, EDGE_KINDS, RELATIONS, ARROWS,
-    anchorPoint, edgePoints, edgeRenderPoints, edgePath, edgeMidpoint, distanceToPoints, nearestLeg, dragWaypoint,
+    SOURCE_SCHEMA, STYLE_SCHEMA, LIMITS, MODES, DIRECTIONS, NODE_KINDS, EDGE_KINDS, RELATIONS, ARROWS, EDGE_ANGLE,
+    anchorPoint, anchorAtAngle, incidenceAt, edgeAngle, edgePoints, edgeRenderPoints, edgePath, edgeMidpoint, distanceToPoints, nearestLeg, dragWaypoint,
     layout, nodeStyle, edgeStyle, toSource, fromSource, validateSource, validateStyle,
   });
 })();
