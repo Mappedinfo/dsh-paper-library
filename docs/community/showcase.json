@@ -1,15 +1,15 @@
 {
-  "repository": "deepseek-ai/deepseek-harness",
-  "repositoryId": "R_kgDOT3T1gw",
-  "category": "Show Your Plugins!",
-  "categoryId": "DIC_kwDOT3T1g84DDSUe",
-  "guidelines": "https://github.com/deepseek-ai/deepseek-harness/discussions/2004",
-  "title": "DSH | Paper Library | 文献管理、随 PDF 保存的批注与 AI 阅读反馈",
-  "bodyFile": "docs/community/showcase.md",
-  "images": [
-    "docs/images/paper-library-reading.jpg",
-    "docs/images/paper-library-annotations.jpg"
-  ],
-  "releaseBodyFile": "docs/community/release-v0.1.0.md",
-  "releaseReceiptFile": "docs/community/discussion-comments.json"
+ "repository": "deepseek-ai/deepseek-harness",
+ "repositoryId": "R_kgDOT3T1gw",
+ "category": "Show Your Plugins!",
+ "categoryId": "DIC_kwDOT3T1g84DDSUe",
+ "guidelines": "https://github.com/deepseek-ai/deepseek-harness/discussions/2004",
+ "title": "DSH | Paper Library | 文献管理、随 PDF 保存的批注与 AI 阅读反馈",
+ "bodyFile": "docs/community/showcase.md",
+ "images": [
+  "docs/images/paper-library-reading.jpg",
+  "docs/images/paper-library-annotations.jpg"
+ ],
+ "releaseBodyFile": "docs/community/release-v0.2.0.md",
+ "releaseReceiptFile": "docs/community/discussion-comments.json"
 }

@@ -2,7 +2,9 @@
 
 本项目采用语义化版本。每个发布版本在 GitHub Releases 与 Git 标签中同时提供。
 
-## 未发布
+## v0.2.0 — 2026-09-20
+
+第二个公开版本：阅读端加入「选文后」两种模式与颜色一致化、精确选文与换行拼接修复、多条批注的逐条 AI 回复写回；新增阅读项目（多对多范围）、文献画板（自由画布、成树/思维导图、AI 读写与独立侧栏入口），以及研究难点挖掘 P1–P4。
 
 ### 批注模式与颜色一致
 
@@ -46,7 +48,7 @@
 - **独立画板站（GitHub Pages）**：同一份 `web/board.js` 另有一个无需 DSH 的静态宿主（`site/`），由 `scripts/build-site.mjs` 组装：画板 markup 从插件页面**抽取**而不是复制，两端不会漂移；`site/standalone.js` 实现同一套动作契约，落在 `localStorage`（上限 40 张画板 / 4 MiB，界面报告用量），并支持 JSON 全量导出/导入（同标识另存为新画板，绝不覆盖）与 PNG 导出（按模型绘制，不依赖页面样式）。独立模式下文献库与对话引用控件隐藏而不假装可用。`.github/workflows/pages.yml` 在 main 上自动构建并部署（Pages 源设为 GitHub Actions）。线上地址 <https://mappedinfo.github.io/dsh-paper-library/> 已用真实浏览器复核（6 项检查：资源投递、绘制与保存、刷新恢复、整理成树、PNG 导出、零第三方请求），回执见 `docs/validation/board-pages-live.json`，可用 `node scripts/verify-pages.mjs` 重跑。
 - 验证：**485 JavaScript / 220 Python 测试**（含阅读项目；工具共 31 个），[28 项插件内 Chromium 回执](docs/validation/board-browser.json)、[14 项独立站 Chromium 回执](docs/validation/board-standalone.json)、[7 项原生 DSH 回执](docs/validation/board-harness.json) 与 [线上回执](docs/validation/board-pages-live.json)。设计记录见 [docs/whiteboard-design.md](docs/whiteboard-design.md) 与 [docs/board-pages.md](docs/board-pages.md)。
 
-### 研究难点挖掘（P1–P3）
+### 研究难点挖掘（P1–P4）
 
 - **P1 候选扫描（无模型）**：显式选择 1–50 篇，按小节边界做触发词/句式扫描，输出带真实页码与命中规则（`en-limitation`/`zh-open` 等 10 条）的候选段落；全程不发网络、不调用模型。
 - **P2 单篇受限抽取（模型）**：把候选冻结为不可变来源，经隔离 DSH 子代理产出难点记录（`gap`/`question` + `source_status` + 逐字证据），保存为待核对草稿；引用校验失败不落盘，重复请求不重放。

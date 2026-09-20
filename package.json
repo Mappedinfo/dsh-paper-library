@@ -1,6 +1,6 @@
 {
   "name": "@mappedinfo/dsh-paper-library",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Independent literature library with portable PDF annotations for DeepSeek Harness",
   "license": "MIT",
