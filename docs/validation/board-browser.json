@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-21T15:07:32.272Z",
+  "verified_at": "2026-09-21T15:26:30.275Z",
   "scope": "Synthetic catalog in an isolated standalone server; free canvas drawing, text editing, connecting, moving, paper drag-in and picker, undo/redo, delete, zoom/fit/fullscreen, board switching, deletion and host persistence across a reload, the `?view=board` entry opening as a pure canvas, a 420px pane containing the toolbar behind one toggle while the canvas takes the pane, and an edge attachment measured on the drawn path holding its 30-degree floor; zero model calls and zero external requests. The AI-proposal review path and the conversation reference chip need the native host tool and the DSH composer, so they are covered by the native harness receipt and unit tests rather than simulated here.",
   "checks": [
     "board-view-opens-and-creates-the-first-board-without-a-model",
@@ -32,6 +32,7 @@
     "the-narrow-pane-contains-the-toolbar-and-gives-the-canvas-the-pane",
     "opening-the-board-from-the-library-fills-a-narrow-pane",
     "an-edge-meets-its-node-at-the-configured-angle-with-a-30-degree-floor",
+    "drawing-cost-is-bounded-by-dom-work-not-by-elapsed-time",
     "no-browser-runtime-errors-and-no-external-requests"
   ],
   "errors": [],

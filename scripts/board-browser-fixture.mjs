@@ -346,7 +346,11 @@ try {
   const arranged = await waitForHost(value => signature(value) !== layoutBefore, 'the arranged board');
   assert.match(await page.locator('#board-layout-status').innerText(), /放射思维导图/);
   const arrangedOnce = signature(arranged);
+  assert.ok(arrangedOnce.length > 0, 'the arranged board has nodes to compare');
   await page.keyboard.press('Escape');
+  // The menu is an overlay that Escape or any canvas click dismisses, so each apply opens it first:
+  // relying on it having survived the previous step made this check depend on timing.
+  await openBoardMenu('layout');
   await page.locator('#board-layout-apply').click();
   try { await waitForHost(value => signature(value) === arrangedOnce, 'the same arrangement on a second apply'); }
   catch (error) { throw new Error(`${error.message} | first=${arrangedOnce.slice(0, 150)} | second=${signature(await hostBoard()).slice(0, 150)}`); }
@@ -361,6 +365,7 @@ try {
   const pinned = await waitForHost(value => Object.keys(value.board?.style?.layout?.pins ?? {}).length === 1, 'the pinned node');
   const pinnedId = Object.keys(pinned.board.style.layout.pins)[0];
   const pinnedAt = [pinned.board.nodes.find(node => node.id === pinnedId).x, pinned.board.nodes.find(node => node.id === pinnedId).y];
+  await openBoardMenu('layout');
   await page.locator('#board-layout-mode').selectOption('layered');
   await page.locator('#board-layout-apply').click();
   const afterPin = await waitForHost(value => value.board?.style?.layout?.mode === 'layered' && signature(value) !== arrangedOnce, 'the layered pass after pinning');
@@ -663,6 +668,72 @@ try {
 
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);
+  // What the drawing path costs, measured as DOM work rather than as time: element creations and
+  // attribute writes are deterministic, while a wall-clock budget in a test is a flake waiting to
+  // happen on a loaded machine. Both numbers come from the same instrumentation of the DOM API.
+  const instrument = () => page.evaluate(() => {
+    const counters = { created: 0, writes: 0 };
+    window.__drawCounters = counters;
+    const createElementNS = document.createElementNS.bind(document);
+    document.createElementNS = (ns, tag) => { counters.created++; return createElementNS(ns, tag) };
+    const setAttribute = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function (...args) { counters.writes++; return setAttribute.apply(this, args) };
+  });
+  const counted = async run => {
+    await page.evaluate(() => { window.__drawCounters.created = 0; window.__drawCounters.writes = 0 });
+    await run();
+    return page.evaluate(() => ({ ...window.__drawCounters }));
+  };
+  const board = await page.evaluate(async () => {
+    const call = async (action, args) => (await (await fetch('./api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, ...args }) })).json()).result;
+    const nodes = [], edges = [];
+    for (let index = 0; index < 60; index++) {
+      nodes.push({ id: `perf-${index}`, kind: 'note', x: (index % 8) * 240, y: Math.floor(index / 8) * 170, w: 220, h: 140, text: `性能 ${index}`, origin: 'user' });
+      if (index) edges.push({ id: `perf-e${index}`, from: `perf-${index - 1}`, to: `perf-${index}`, kind: 'arrow', origin: 'user' });
+    }
+    const created = await call('board_create', { board: { schema: 1, title: '绘制代价', origin: 'user', status: 'saved', nodes, edges } });
+    return created.board.id;
+  });
+  // The board view lists records when it opens, so reload it to pick up the board just created;
+  // the switcher is the record's own value holder and the visible file list is a menu on top of it.
+  await page.goto(`${origin}/?view=board`);
+  await page.waitForFunction(() => document.body.classList.contains('board-mode'));
+  await page.waitForFunction(id => [...document.getElementById('board-select').options].some(option => option.value === id), board, { timeout: 20000 });
+  // The switcher lives hidden behind the file list, so set its value the way the list does.
+  await page.evaluate(id => {
+    const select = document.getElementById('board-select')
+    select.value = id
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  }, board);
+  await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 60, null, { timeout: 20000 });
+  // Counters do not survive a navigation, so start counting once the board is on screen.
+  await instrument();
+  // A re-render of an unchanged board must not touch the DOM at all.
+  const idle = await counted(() => page.evaluate(() => document.getElementById('board-canvas').dispatchEvent(new Event('focus'))));
+  assert.equal(idle.created, 0, 'a render never creates elements for nodes that already exist');
+  // Dragging one node rewrites that node and its own edges — not the other 59 nodes and 58 edges.
+  const dragBox = await page.locator('.board-node .board-node-shape').first().boundingBox();
+  const drag = await counted(async () => {
+    await page.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(dragBox.x + dragBox.width / 2 + 24, dragBox.y + dragBox.height / 2 + 12, { steps: 6 });
+    await page.mouse.up();
+  });
+  assert.equal(drag.created, 0, 'dragging reuses the elements it already has');
+  assert.ok(drag.writes < 200, `one drag frame must not rewrite the whole board (wrote ${drag.writes} attributes across 6 moves)`);
+  record('drawing-cost-is-bounded-by-dom-work-not-by-elapsed-time');
+  // Put the board back: this check's 60-node board would otherwise skew every later count.
+  await page.evaluate(async id => {
+    const call = async (action, args) => (await (await fetch('./api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, ...args }) })).json()).result;
+    const current = await call('board_get', { id });
+    await call('board_delete', { id, expected_revision: current.revision });
+    // Point the switcher at a board that still exists; the panel closes one and opens the next.
+    const select = document.getElementById('board-select');
+    const fallback = [...select.options].find(option => option.value !== id);
+    if (fallback) { select.value = fallback.value; select.dispatchEvent(new Event('change', { bubbles: true })); }
+  }, board);
+  await page.waitForFunction(id => document.getElementById('board-select').value !== id, board, { timeout: 20000 });
+
   record('no-browser-runtime-errors-and-no-external-requests');
 } finally {
   if (browser) await browser.close();

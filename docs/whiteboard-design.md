@@ -398,7 +398,7 @@ Synthetic-only validation, following the existing project discipline:
   host's own validator**. **Implemented, 5 cases.**
 - `scripts/board-browser-fixture.mjs` — real Chromium receipt for draw/drag/zoom/connect/save/reload,
   library drag-in, tidy-tree snapping, and the standalone refusal of the conversation chip.
-  **Implemented, 31 checks** in `docs/validation/board-browser.json` (including a knowledge-graph node joining a board, the connect tool, a bend point, automatic layout with a pinned node, the source/style pair, and the plugin's own board entry opening as a pure canvas).
+  **Implemented, 32 checks** in `docs/validation/board-browser.json` (including a knowledge-graph node joining a board, the connect tool, a bend point, automatic layout with a pinned node, the source/style pair, the plugin's own board entry opening as a pure canvas, and the drawing-cost guard that counts DOM work).
 - `scripts/board-harness-smoke.mjs` — native DSH check that the tool is offered, that a board token
   reaches a turn as frozen material, and that an unresolvable reference fails the turn.
   **Implemented, 7 checks** in `docs/validation/board-harness.json`.
@@ -424,7 +424,7 @@ Excalidraw is the reference implementation for this surface, so its renderer was
 | Two canvases: a **static** scene and an **interactive** one, so a selection drag repaints only the selection layer | One SVG tree per board; selection adds handles to the node's own group | Kept SVG. The board is bounded at 400 nodes/800 edges, and one tree is what makes text selection, CSS theming, `getComputedStyle`-based receipts and the PNG export straightforward. A second layer would buy little at this scale. |
 | **Persistent scene**: element elements are reused across renders; `StaticCanvas` is memoised on `elementsMap`/`visibleElements` identity plus a shallow app-state compare | **Adopted.** `render()` reconciles keyed by board id instead of `replaceChildren()`, and writes an attribute only when its value actually differs | This was the one real gap. Rebuilding threw away ~1,200 elements and wrote ~3,700 attributes for every selection, rename or save-status change. |
 | Per-element **bitmap cache** in a `WeakMap`, regenerated only when the element object or zoom/theme changes, blitted on whole device pixels | Not applicable: SVG has no bitmap to cache, and the browser already caches rasterisation per element | Documented as a deliberate non-adoption. The equivalent win is element identity, which is what the reconciliation above provides. |
-| Viewport **culling** (`visibleElements` computed from scroll/zoom before painting) | None; every node is drawn | Bounded by 400 nodes, and the receipts assert on the drawn tree (`document.querySelectorAll('.board-node')`), so culling would trade a real page cost for an invisible one. Revisit only if the cap rises. |
+| Viewport **culling** (`visibleElements` computed from scroll/zoom before painting) | None; every node is drawn | **Measured and rejected.** Hiding every off-screen node of a 200-node board in Chromium changed the drag frame not at all (median 8.1 ms before and after, p95 8.8 → 8.4 ms — the browser already skips painting what is clipped). The receipts also assert on the drawn tree (`document.querySelectorAll('.board-node')`). Revisit only if the node cap rises. |
 | `requestAnimationFrame` **throttling** (`renderStaticSceneThrottled`, `throttleRAF`) | None: a render runs synchronously in the event that caused it | Deliberately deferred. `redrawGeometry` is already the cheap drag path, and coalescing changes when the DOM is readable — which several browser receipts rely on. Worth doing together with a receipt that measures frame timing, not before. |
 | Hit-testing: **rotated bounding box first, precise test second, cached by (point, threshold, element version)** | Bounding-box scan for nodes (`hitNode`), segment-distance scan for edges | Equivalent in effect at this size; the early-out is already the bounding box. The cache is unnecessary for ≤400 items. |
 | DPR-aware canvas sizing (`getNormalizedCanvasDimensions`, `scale`), whole-device-pixel grid snapping for the background | `applyView` scales the SVG group and sets the grid's `background-size`/`background-position` | SVG scales natively; the grid follows the same transform. No action needed. |
@@ -470,6 +470,20 @@ Excalidraw is the reference implementation for this surface, so its renderer was
   renderer's JavaScript; what the change removes is the invalidation of ~300 elements per frame, which
   is also what keeps a drag smooth on a slower machine or a bigger board. The full-board pass is still
   one call away (`redrawGeometry()` with no argument) for a layout or a marquee.
+
+  Measuring from *inside* the page — a Playwright round-trip per mouse move costs milliseconds of its
+  own — puts the remaining picture plainly: dragging one node of a 200-node board, the panel's whole
+  synchronous pointermove handler (board update, scoped geometry rewrite, viewport transform) takes
+  **0.1 ms at p90**, while the interval between frames sits at the display's own 8.3 ms. The drawing
+  path is therefore no longer the limit at the board sizes the record format allows, which is why the
+  work stopped here rather than adding `requestAnimationFrame` coalescing on top: coalescing would
+  move when the DOM becomes readable, and several receipts depend on reading it after an action.
+
+  The guard that keeps this honest lives in the browser receipt instead of a timing test: it
+  instruments `createElementNS` and `Element.prototype.setAttribute`, asserts that re-rendering an
+  unchanged 60-node board creates nothing and writes nothing, and that a six-step drag of one node
+  stays under 200 attribute writes. Counts are deterministic; a wall-clock budget in a test is a flake
+  waiting for a loaded machine.
 
 ## What implementation changed in this design
 
