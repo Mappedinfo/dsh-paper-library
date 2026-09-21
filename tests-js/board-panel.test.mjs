@@ -33,11 +33,20 @@ function environment(ids = []) {
     get id() { return this._id; }
     append(...nodes) { for (const node of nodes) { if (!node) continue; if (node.parentNode) node.parentNode.children = node.parentNode.children.filter(child => child !== node); node.parentNode = this; this.children.push(node); } }
     appendChild(node) { this.append(node); return node; }
+    /** Enough of `insertBefore` for the renderer's keyed reconciliation. */
+    insertBefore(node, reference) {
+      if (node.parentNode) node.parentNode.children = node.parentNode.children.filter(child => child !== node);
+      const at = reference ? this.children.indexOf(reference) : -1;
+      if (at < 0) this.children.push(node); else this.children.splice(at, 0, node);
+      node.parentNode = this;
+      return node;
+    }
     replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
     remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this); this.parentNode = null; }
     setAttribute(key, value) { this.attributes[key] = String(value); if (key === 'hidden') this.hidden = true; }
     removeAttribute(key) { delete this.attributes[key]; if (key === 'hidden') this.hidden = false; }
     getAttribute(key) { return this.attributes[key] ?? null; }
+    hasAttribute(key) { return Object.hasOwn(this.attributes, key); }
     addEventListener(type, handler) { if (!this.events.has(type)) this.events.set(type, new Set()); this.events.get(type).add(handler); }
     removeEventListener(type, handler) { this.events.get(type)?.delete(handler); }
     dispatch(type, extra = {}) {
@@ -1307,4 +1316,137 @@ test('the renderer draws the current board through its accessors, not a captured
   const shape = before.firstChild.firstChild;
   assert.equal(shape.getAttribute('width'), '100');
   assert.equal(shape.getAttribute('height'), '60');
+});
+
+test('a connect drag keeps exactly one preview line instead of one per pointer move', async () => {
+  // The gesture used to append a fresh dashed path on every pointermove and never remove the
+  // previous one: a drag across the canvas left dozens of identical paths for the browser to
+  // repaint. One element now follows the pointer, and it belongs to the gesture that made it.
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  harness.panel.applySourceTexts(JSON.stringify({
+    schema: 'paper-library-board.v1', title: '连线预览',
+    nodes: [{ id: 'n1', kind: 'concept', text: 'A' }, { id: 'n2', kind: 'concept', text: 'B' }],
+    edges: [],
+  }), '{}');
+  const [from, to] = harness.panel.board().nodes;
+  // Screen coordinates: the transform the panel applied is exactly what maps scene → client.
+  const view = harness.panel.view?.() ?? { x: 0, y: 0, zoom: 1 };
+  const screen = point => ({ clientX: Math.round(point.x + view.x), clientY: Math.round(point.y + view.y) });
+  const centre = node => screen({ x: node.x + node.w / 2, y: node.y + node.h / 2 });
+  const handle = screen({ x: from.x + from.w + 4, y: from.y + from.h / 2 });
+  // The handle only exists on a selected node, and the pointer must land inside the node.
+  harness.svg.dispatch('pointerdown', centre(from));
+  harness.svg.dispatch('pointerup', {});
+  assert.equal(harness.panel.selection().length, 1, 'the source node is selected');
+  const edgeLayer = harness.svg.children[1].children[0];
+  assert.equal(edgeLayer.getAttribute('aria-label'), '连线');
+  const previews = () => edgeLayer.children.filter(child => child.getAttribute('data-edge-preview'));
+  harness.svg.dispatch('pointerdown', handle);
+  for (let step = 1; step <= 25; step++) {
+    const ratio = step / 25;
+    harness.svg.dispatch('pointermove', screen({
+      x: from.x + from.w / 2 + (to.x + to.w / 2 - (from.x + from.w / 2)) * ratio,
+      y: from.y + from.h / 2 + (to.y + to.h / 2 - (from.y + from.h / 2)) * ratio,
+    }));
+  }
+  assert.equal(previews().length, 1, '25 pointer moves leave exactly one preview line');
+  const preview = previews()[0];
+  assert.match(preview.getAttribute('d'), /^M /);
+  assert.equal(preview.getAttribute('class').includes('board-edge-preview'), true);
+  // Moving away from every node withdraws the preview rather than leaving it behind.
+  harness.svg.dispatch('pointermove', screen({ x: -9000, y: -9000 }));
+  assert.equal(previews().length, 0, 'the preview goes away when no node is under the pointer');
+  // Back onto the target, then release: the preview is gone and the real edge exists.
+  harness.svg.dispatch('pointermove', centre(to));
+  assert.equal(previews().length, 1);
+  harness.svg.dispatch('pointerup', {});
+  assert.equal(previews().length, 0, 'ending the gesture removes the preview');
+  assert.equal(harness.panel.board().edges.length, 1, 'the release created the edge it previewed');
+});
+
+test('closing the board during a connect drag does not leave a preview behind', async () => {
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  harness.panel.applySourceTexts(JSON.stringify({
+    schema: 'paper-library-board.v1', title: '连线中断',
+    nodes: [{ id: 'n1', kind: 'concept', text: 'A' }, { id: 'n2', kind: 'concept', text: 'B' }],
+    edges: [],
+  }), '{}');
+  const [from, to] = harness.panel.board().nodes;
+  const view = harness.panel.view?.() ?? { x: 0, y: 0, zoom: 1 };
+  const screen = point => ({ clientX: Math.round(point.x + view.x), clientY: Math.round(point.y + view.y) });
+  harness.svg.dispatch('pointerdown', screen({ x: from.x + from.w / 2, y: from.y + from.h / 2 }));
+  harness.svg.dispatch('pointerup', {});
+  harness.svg.dispatch('pointerdown', screen({ x: from.x + from.w + 4, y: from.y + from.h / 2 }));
+  harness.svg.dispatch('pointermove', screen({ x: to.x + to.w / 2, y: to.y + to.h / 2 }));
+  const edgeLayer = harness.svg.children[1].children[0];
+  assert.equal(edgeLayer.children.some(child => child.getAttribute('data-edge-preview')), true);
+  await harness.panel.close();
+  assert.equal(edgeLayer.children.some(child => child.getAttribute('data-edge-preview')), false, 'closing the view ends the gesture cleanly');
+  assert.equal(harness.panel.board().edges.length, 0, 'an interrupted gesture creates no edge');
+});
+
+test('the renderer reuses its elements instead of rebuilding the tree', async () => {
+  // Reconciliation is what makes a selection change, a rename or a save-status update cheap: the
+  // nodes a reader is looking at keep their identity, so the browser restyles what moved instead of
+  // re-creating the whole scene. The old renderer replaced every child on every call.
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  harness.panel.applySourceTexts(JSON.stringify({
+    schema: 'paper-library-board.v1', title: '复用',
+    nodes: [{ id: 'n1', kind: 'note', text: 'A' }, { id: 'n2', kind: 'ellipse', text: 'B' }, { id: 'n3', kind: 'diamond', text: 'C' }],
+    edges: [{ from: 'n1', to: 'n2', relation: 'explains', label: '解释' }, { from: 'n2', to: 'n3', kind: 'elbow', waypoints: [[500, 300]] }],
+  }), '{}');
+  const nodeLayer = harness.svg.children[1].children[1];
+  const edgeLayer = harness.svg.children[1].children[0];
+  const snapshot = () => ({
+    nodes: [...nodeLayer.children],
+    edges: [...edgeLayer.children],
+    // The stub reports tag names uppercase, as the DOM does for HTML; SVG tags are lowercase.
+    shapes: nodeLayer.children.map(node => node.firstChild.firstChild.tagName.toLowerCase()),
+    folds: nodeLayer.children.map(node => node.firstChild.children.some(child => child.getAttribute('data-note-fold') !== null)),
+  });
+  const before = snapshot();
+  assert.deepEqual(before.shapes, ['rect', 'ellipse', 'polygon'], 'each node kind draws its own shape');
+  assert.deepEqual(before.folds, [true, false, false], 'only a note has a folded corner');
+  assert.equal(edgeLayer.children.length, 2);
+  assert.equal(edgeLayer.children[0].children[2].textContent, '解释', 'the edge label is drawn');
+
+  // A second render with nothing changed must reuse every element.
+  harness.panel.render();
+  const unchanged = snapshot();
+  assert.deepEqual(unchanged.nodes, before.nodes, 'unchanged nodes keep their elements');
+  assert.deepEqual(unchanged.edges, before.edges, 'unchanged edges keep their elements');
+
+  // Selecting one node reuses the others and only adds the handles to the selected one.
+  const node = harness.panel.board().nodes[0];
+  harness.svg.dispatch('pointerdown', { clientX: node.x + node.w / 2, clientY: node.y + node.h / 2 });
+  harness.svg.dispatch('pointerup', {});
+  assert.equal(harness.panel.selection().length, 1);
+  const selected = snapshot();
+  assert.equal(selected.nodes[0], before.nodes[0], 'the selected node is the same element');
+  assert.equal(selected.nodes[1], before.nodes[1], 'an unselected node is untouched');
+  const handles = selected.nodes[0].firstChild.children.filter(child => child.getAttribute('data-handle'));
+  assert.deepEqual(handles.map(handle => handle.getAttribute('data-handle')), ['resize', 'connect']);
+  assert.equal(handles.every(handle => handle.getAttribute('hidden') === null), true, 'the selected node shows its handles');
+  const otherHandles = selected.nodes[1].firstChild.children.filter(child => child.getAttribute('data-handle'));
+  assert.equal(otherHandles.every(handle => handle.getAttribute('hidden') === 'hidden'), true, 'an unselected node hides them again');
+
+  // Moving a node rewrites its transform in place; the element identity survives.
+  const moved = { ...node, x: node.x + 40, y: node.y + 25 };
+  harness.panel.board().nodes[0] = moved;
+  harness.panel.render();
+  assert.equal(nodeLayer.children[0], before.nodes[0], 'moving a node does not replace it');
+  assert.equal(nodeLayer.children[0].firstChild.getAttribute('transform'), `translate(${moved.x},${moved.y})`);
+
+  // Deleting a node removes exactly its element, and its edges go with it.
+  harness.panel.applySourceTexts(JSON.stringify({
+    schema: 'paper-library-board.v1', title: '复用',
+    nodes: [{ id: 'n2', kind: 'ellipse', text: 'B' }, { id: 'n3', kind: 'diamond', text: 'C' }],
+    edges: [{ from: 'n2', to: 'n3', kind: 'elbow', waypoints: [[500, 300]] }],
+  }), '{}');
+  assert.equal(nodeLayer.children.length, 2, 'the deleted node left the canvas');
+  assert.equal(edgeLayer.children.length, 1, 'and so did its edge');
+  assert.equal(nodeLayer.children[0], before.nodes[1], 'the surviving nodes are still the same elements');
 });

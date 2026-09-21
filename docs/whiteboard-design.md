@@ -412,6 +412,49 @@ Synthetic-only validation, following the existing project discipline:
   the ribbon button pressed while the paper is still loading. **Implemented, 9 checks** in
   `docs/validation/project-ui.json`.
 
+## Renderer: what Excalidraw does, and what this board took from it
+
+Excalidraw is the reference implementation for this surface, so its renderer was read directly
+(`packages/excalidraw/renderer/staticScene.ts`, `interactiveScene.ts`, `renderer/helpers.ts`,
+`components/canvases/StaticCanvas.tsx`, `packages/element/src/renderElement.ts`,
+`collision.ts`) rather than from a summary. What it does, and where this project stands:
+
+| Excalidraw | This board | Decision |
+| --- | --- | --- |
+| Two canvases: a **static** scene and an **interactive** one, so a selection drag repaints only the selection layer | One SVG tree per board; selection adds handles to the node's own group | Kept SVG. The board is bounded at 400 nodes/800 edges, and one tree is what makes text selection, CSS theming, `getComputedStyle`-based receipts and the PNG export straightforward. A second layer would buy little at this scale. |
+| **Persistent scene**: element elements are reused across renders; `StaticCanvas` is memoised on `elementsMap`/`visibleElements` identity plus a shallow app-state compare | **Adopted.** `render()` reconciles keyed by board id instead of `replaceChildren()`, and writes an attribute only when its value actually differs | This was the one real gap. Rebuilding threw away ~1,200 elements and wrote ~3,700 attributes for every selection, rename or save-status change. |
+| Per-element **bitmap cache** in a `WeakMap`, regenerated only when the element object or zoom/theme changes, blitted on whole device pixels | Not applicable: SVG has no bitmap to cache, and the browser already caches rasterisation per element | Documented as a deliberate non-adoption. The equivalent win is element identity, which is what the reconciliation above provides. |
+| Viewport **culling** (`visibleElements` computed from scroll/zoom before painting) | None; every node is drawn | Bounded by 400 nodes, and the receipts assert on the drawn tree (`document.querySelectorAll('.board-node')`), so culling would trade a real page cost for an invisible one. Revisit only if the cap rises. |
+| `requestAnimationFrame` **throttling** (`renderStaticSceneThrottled`, `throttleRAF`) | None: a render runs synchronously in the event that caused it | Deliberately deferred. `redrawGeometry` is already the cheap drag path, and coalescing changes when the DOM is readable — which several browser receipts rely on. Worth doing together with a receipt that measures frame timing, not before. |
+| Hit-testing: **rotated bounding box first, precise test second, cached by (point, threshold, element version)** | Bounding-box scan for nodes (`hitNode`), segment-distance scan for edges | Equivalent in effect at this size; the early-out is already the bounding box. The cache is unnecessary for ≤400 items. |
+| DPR-aware canvas sizing (`getNormalizedCanvasDimensions`, `scale`), whole-device-pixel grid snapping for the background | `applyView` scales the SVG group and sets the grid's `background-size`/`background-position` | SVG scales natively; the grid follows the same transform. No action needed. |
+
+### The two changes that came out of the comparison
+
+- **The connect gesture no longer leaks a DOM node per pointer move.** Dragging from a node's
+  connect handle appended a fresh dashed preview path on every `pointermove` and never removed the
+  previous one; a 40-step drag left 40 identical paths in the edge layer for the browser to repaint.
+  It is now one element per gesture whose `d` is rewritten, removed when the pointer leaves every
+  node, and removed unconditionally by the single `cancelDrag()` teardown (which also covers closing
+  the board or disposing the panel mid-gesture). Measured before/after in Chromium: 11 paths during a
+  40-move drag → 1.
+- **The scene is reconciled, and writes are conditional.** `render()` used to discard and rebuild
+  every node and edge. It now keeps the element maps as a keyed index, creates only what is new,
+  updates in place, and removes what left the board — the same persistent-scene property Excalidraw
+  relies on, expressed for SVG. On top of that, `attr()`/`textOf()` compare before writing, because a
+  `setAttribute` that writes the same string still invalidates the element it was written to.
+
+  Measured on a 150-node/149-edge board in Chromium (one `render()` after load):
+
+  | | elements created | `setAttribute` calls | `render()` |
+  | --- | --- | --- | --- |
+  | before | 1,197 | 3,743 | 1.9 ms |
+  | after | 0 | 151 | 1.4 ms |
+
+  The JavaScript time was never the problem — the DOM mutations were, and they are what invalidate
+  style, layout and paint. The remaining 151 writes are the per-node class strings, which change
+  because the selection changed; a render with no change at all now writes nothing.
+
 ## What implementation changed in this design
 
 Four decisions were revised while building, each for an observed reason:

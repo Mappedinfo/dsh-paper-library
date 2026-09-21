@@ -57,6 +57,16 @@
   4. **宿主只受理 2 个并发 JSON 请求**，其余返回 429（「已有请求正在处理，请稍后重试。」）；该夹具一边驱动 UI 一边轮询 API，必然撞上，现在按 `project-ui-fixture.mjs` 的做法退避重试。
 - 结果：[11 项回执](docs/validation/annotation-reference-browser.json) 在真实隔离 DSH profile 下**重新跑通并连续两次稳定通过**（此前已提交的回执是失败运行写下的 `ok:false`）。副产品：夹具现在把"本次自己的发送"与"宿主后台工作"分开报告（`explicitSends` / `modelRunsForExplicitSends` / `deterministicModelGenerations`）。
 
+### 工程：画板绘制参考 Excalidraw 做的两项优化
+
+对照 Excalidraw 的渲染实现（`renderer/staticScene.ts`、`interactiveScene.ts`、`components/canvases/StaticCanvas.tsx`、`element/src/renderElement.ts`、`collision.ts`）逐条比较后，只取真正适用 SVG 且有可测收益的两项，完整对照表见 [docs/whiteboard-design.md](docs/whiteboard-design.md)。
+
+- **连线手势不再每次指针移动泄漏一个 DOM 节点**：从节点连接点拖出连线时，原实现在每个 `pointermove` 上 `append` 一条新的虚线预览路径，且从不移除上一条——40 步拖拽留下 40 条一模一样的路径让浏览器逐条重绘。现在整个手势只用一个元素（改写 `d`），指针离开所有节点时移除，并统一由 `cancelDrag()` 收尾（关画板、销毁面板、手势异常都覆盖）。真实 Chromium 实测：40 步拖拽期间 11 条 → 1 条。
+- **场景改为按键复用，属性改为"变了才写"**：`render()` 原先整体丢弃并重建整棵节点/连线树；现在以画板 id 为键复用元素，只新建新增项、就地更新已有项、移除已删除项——即 Excalidraw 的持久场景思路在 SVG 上的等价物。在此之上，`attr()`/`textOf()` 先比较再写，因为把同样的字符串再写一次仍会让该元素失效。
+- **实测（150 节点/149 连线，Chromium，加载后一次 `render()`）**：元素创建 **1,197 → 0**，`setAttribute` 调用 **3,743 → 151**，`render()` 1.9 ms → 1.4 ms。剩下的 151 次是各节点的 class（选中态变了）；完全无变化的一次 render 现在什么都不写。真正的开销从来不是 JS 那 2 毫秒，而是这些 DOM 变更所引发的样式/布局/重绘。
+- **明确不采纳**：静态+交互双 Canvas（本画板上限 400 节点，且单棵 SVG 树才让文字选择、CSS 主题、回执里的 `getComputedStyle` 与 PNG 导出保持简单）、逐元素位图缓存（SVG 无位图可缓存，等价收益已由元素复用提供）、视口裁剪（回执按 `document.querySelectorAll('.board-node')` 断言，裁剪会拿看不见的收益换真实页面代价）、RAF 合并渲染（`redrawGeometry` 已是廉价路径，合并会改变 DOM 何时可读，须与帧计时回执一起做）。
+- 验证：**516 JavaScript / 222 Python 测试**（新增 3 项：连线预览只留一条且手势结束/关板即清除、渲染器按键复用并就地更新、跨手势「关板不留预览」）、board 31 项与 standalone 15 项浏览器回执全绿。
+
 ### 工程：原生画板回执的失败是断言写错，不是产品缺陷
 
 - `scripts/board-harness-smoke.mjs` 此前一直报「the missing snapshot never reaches the model as material」。**实际值是 0，而不是期望的 1**：适配器在每次模型调用时**整体替换** `boardReferences`，所以"被拒绝的引用没有把任何画板材料送进模型"就该是 0 条。诊断依据是读出来的值（`actual: 0, expected: 1`）与现场状态：被拒的这一轮 `outcome=error`、没有提交第二条用户消息、模型**确实被调用**（`generations` 递增）且其请求不含任何 plugin-source 画板消息（缺失快照由 `snapshotLoad` 以 `BOARD_SNAPSHOT_MISSING` 拒绝）。

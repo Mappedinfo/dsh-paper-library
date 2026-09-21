@@ -353,6 +353,10 @@ try {
   // Pin one node, arrange again, and it must stay exactly where the reader put it.
   const pinBox = await shapeBox(0);
   await page.mouse.click(pinBox.x + pinBox.width / 2, pinBox.y + pinBox.height / 2);
+  // Selecting a node is a click on the canvas, which dismisses an open toolbar menu — so a reader
+  // (and this fixture) selects first and *then* opens 排版 to pin. Assert that path explicitly
+  // instead of relying on the menu having survived the click.
+  await openBoardMenu('layout');
   await page.locator('#board-layout-pin').click();
   const pinned = await waitForHost(value => Object.keys(value.board?.style?.layout?.pins ?? {}).length === 1, 'the pinned node');
   const pinnedId = Object.keys(pinned.board.style.layout.pins)[0];

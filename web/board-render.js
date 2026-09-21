@@ -75,75 +75,209 @@
     /** The turned-up corner that makes a note read as paper rather than a box. */
     const noteFoldPath = (w, h) => { const size = Math.min(22, w / 4, h / 4); return { size, d: `M ${round(w - size)} ${round(h)} L ${round(w)} ${round(h - size)} L ${round(w)} ${round(h)} Z` }; };
 
-    function renderNode(node) {
+    /**
+     * Write an attribute only when it is actually different.
+     *
+     * The renderer reconciles in place, so most attributes it touches on a given pass already hold
+     * the right value — three quarters of the writes in a plain re-render were no-ops. Skipping them
+     * is what lets the browser keep its style, layout and paint work: a mutation schedule entry that
+     * writes the same string still invalidates the element it was written to.
+     */
+    const attr = (element, name, value) => {
+      const text = value === undefined || value === null ? null : String(value);
+      if (text === null) { if (element.hasAttribute(name)) element.removeAttribute(name); return; }
+      if (element.getAttribute(name) !== text) element.setAttribute(name, text);
+    };
+
+    /** Same rule for text: assigning an identical string still dirties the node. */
+    const textOf = (element, value) => { const text = value === undefined || value === null ? '' : String(value); if (element.textContent !== text) element.textContent = text; };
+
+    const nodeClass = node => `board-node board-node-kind-${node.kind}${selection().has(node.id) ? ' is-selected' : ''}${node.origin === 'llm' ? ' is-ai' : ''}${connectFrom() === node.id ? ' is-connect-source' : ''}`;
+
+    /** Build one node's subtree. The shape is chosen here and never replaced afterwards. */
+    function createNodeElement(node) {
+      const group = svgEl('g', { class: nodeClass(node), 'data-node': node.id, tabindex: '-1' });
+      const content = svgEl('g', { class: 'board-node-content' });
       const bounds = nodeBounds(node);
-      const style = sourceApi().nodeStyle(board().style ?? {}, node);
-      const group = svgEl('g', { class: `board-node board-node-kind-${node.kind}${selection().has(node.id) ? ' is-selected' : ''}${node.origin === 'llm' ? ' is-ai' : ''}${connectFrom() === node.id ? ' is-connect-source' : ''}`, 'data-node': node.id, tabindex: '-1' });
-      // Every child is drawn around the node's own origin, and the group is translated into
-      // place. Dragging then moves the shape, its labels and its handles as one instead of
-      // leaving the text behind until something forces a full render.
-      const content = svgEl('g', { class: 'board-node-content', transform: `translate(${bounds.x},${bounds.y})` });
+      attr(content, 'transform', `translate(${bounds.x},${bounds.y})`);
       const shape = shapeFor(node);
       shape.setAttribute('class', 'board-node-shape');
-      if (style.fill) shape.setAttribute('fill', style.fill);
-      if (node.color || style.stroke) shape.setAttribute('stroke', node.color ?? style.stroke);
-      if (style.fontSize) group.setAttribute('data-font-size', String(style.fontSize));
       content.append(shape);
       if (node.kind === 'note') content.append(svgEl('path', { class: 'board-node-fold', 'data-note-fold': '', d: noteFoldPath(node.w, node.h).d }));
       if (node.origin === 'llm') content.append(svgEl('text', { class: 'board-node-meta', x: 6, y: -4 }, 'AI 提议'));
       if (node.kind === 'paper' && node.paper) {
-        content.append(svgEl('text', { class: 'board-node-meta', x: 10, y: 18 }, [node.paper.year, node.paper.citekey].filter(Boolean).join(' · ') || '文献'));
-        const title = (node.text || node.paper.title || node.paper.id).slice(0, 90);
-        content.append(svgEl('text', { class: 'board-node-text', x: 10, y: 40 }, title));
+        content.append(svgEl('text', { class: 'board-node-meta board-node-paper-meta', x: 10, y: 18 }));
+        content.append(svgEl('text', { class: 'board-node-text', x: 10, y: 40 }));
       } else {
-        const lines = String(node.text || '').split('\n').slice(0, 6);
-        lines.forEach((line, index) => content.append(svgEl('text', { class: 'board-node-text', x: 10, y: 24 + index * 17 }, line.slice(0, 60) || (index === 0 ? '（空）' : ''))));
+        for (let index = 0; index < 6; index++) content.append(svgEl('text', { class: 'board-node-text', x: 10, y: 24 + index * 17, 'data-line': index }));
       }
-      if (selection().has(node.id)) {
-        content.append(svgEl('rect', { class: 'board-node-handle', x: bounds.w - 5, y: bounds.h - 5, width: 10, height: 10, rx: 2, 'data-handle': 'resize' }));
-        content.append(svgEl('circle', { class: 'board-node-handle', cx: bounds.w + 4, cy: bounds.h / 2, r: 5, 'data-handle': 'connect' }));
-      }
+      const resize = svgEl('rect', { class: 'board-node-handle', width: 10, height: 10, rx: 2, 'data-handle': 'resize', hidden: 'hidden' });
+      const connect = svgEl('circle', { class: 'board-node-handle', r: 5, 'data-handle': 'connect', hidden: 'hidden' });
+      content.append(resize, connect);
       group.append(content);
       return group;
     }
 
-    function renderEdge(edge) {
+    /**
+     * Bring an existing node subtree up to date. This is the whole point of the renderer keeping
+     * its elements: a board of 150 nodes used to be thrown away and rebuilt — about 1,200 elements
+     * created and 3,700 attributes written — for every selection, theme or save-status change.
+     */
+    function updateNodeElement(group, node) {
+      const bounds = nodeBounds(node);
+      const style = sourceApi().nodeStyle(board().style ?? {}, node);
+      attr(group, 'class', nodeClass(node));
+      const content = group.firstChild;
+      content.setAttribute('transform', `translate(${bounds.x},${bounds.y})`);
+      attr(group, 'data-font-size', style.fontSize ?? null);
+      const shape = content.firstChild;
+      const radius = nodeRadius[node.kind] ?? 10;
+      if (node.kind === 'ellipse') {
+        attr(shape, 'cx', bounds.w / 2); attr(shape, 'cy', bounds.h / 2);
+        attr(shape, 'rx', bounds.w / 2); attr(shape, 'ry', bounds.h / 2);
+      } else if (node.kind === 'diamond') {
+        attr(shape, 'points', `${bounds.w / 2},0 ${bounds.w},${bounds.h / 2} ${bounds.w / 2},${bounds.h} 0,${bounds.h / 2}`);
+      } else {
+        attr(shape, 'width', bounds.w); attr(shape, 'height', bounds.h); attr(shape, 'rx', radius);
+      }
+      attr(shape, 'fill', style.fill ?? null);
+      attr(shape, 'stroke', node.color ?? style.stroke ?? null);
+      // The trailing texts are the labels; the fold path belongs to a note.
+      const labels = [];
+      for (const child of content.children) {
+        if (child.classList?.contains('board-node-text') || child.classList?.contains('board-node-meta')) labels.push(child);
+      }
+      if (node.kind === 'paper' && node.paper) {
+        const meta = labels.find(label => label.classList.contains('board-node-paper-meta'));
+        const title = labels.find(label => label.classList.contains('board-node-text'));
+        if (meta) textOf(meta, [node.paper.year, node.paper.citekey].filter(Boolean).join(' · ') || '文献');
+        if (title) textOf(title, (node.text || node.paper.title || node.paper.id).slice(0, 90));
+      } else {
+        const lines = String(node.text || '').split('\n').slice(0, 6);
+        const slots = labels.filter(label => label.getAttribute('data-line') !== null);
+        slots.forEach((slot, index) => {
+          const line = lines[index];
+          textOf(slot, line === undefined ? '' : (line.slice(0, 60) || (index === 0 ? '（空）' : '')));
+          attr(slot, 'hidden', line === undefined ? 'hidden' : null);
+        });
+      }
+      const selected = selection().has(node.id);
+      for (const child of content.children) {
+        const handle = child.getAttribute?.('data-handle');
+        if (handle === 'resize') { attr(child, 'hidden', selected ? null : 'hidden'); attr(child, 'x', bounds.w - 5); attr(child, 'y', bounds.h - 5); }
+        else if (handle === 'connect') { attr(child, 'hidden', selected ? null : 'hidden'); attr(child, 'cx', bounds.w + 4); attr(child, 'cy', bounds.h / 2); }
+        else if (child.getAttribute?.('data-note-fold') !== null) attr(child, 'd', noteFoldPath(bounds.w, bounds.h).d);
+      }
+    }
+
+    /** Kept for callers that want a detached subtree (the panel's own renderNode export). */
+    function renderNode(node) {
+      const group = createNodeElement(node);
+      updateNodeElement(group, node);
+      return group;
+    }
+
+    function createEdgeElement(edge) {
+      const group = svgEl('g', { class: 'board-edge-group', 'data-edge': edge.id });
+      group.append(svgEl('path', { class: 'board-edge-hit' }), svgEl('path', { class: 'board-edge', 'data-edge-path': edge.id }));
+      group.append(svgEl('text', { class: 'board-edge-label', hidden: 'hidden' }));
+      return group;
+    }
+
+    function updateEdgeElement(group, edge) {
       const from = byId(edge.from), to = byId(edge.to);
-      if (!from || !to) return null;
+      if (!from || !to) return false;
       const selected = selection().has(edge.id);
       const style = sourceApi().edgeStyle(board().style ?? {}, edge);
       const geometry = geometryFor(edge, from, to);
-      const group = svgEl('g', { class: `board-edge-group${selected ? ' is-selected' : ''}`, 'data-edge': edge.id });
-      const hit = svgEl('path', { class: 'board-edge-hit', d: geometry.path });
-      const path = svgEl('path', { class: `board-edge${selected ? ' is-selected' : ''}`, d: geometry.path, 'data-edge-path': edge.id });
-      if (style.stroke) path.setAttribute('stroke', style.stroke);
-      if (style.width) path.setAttribute('stroke-width', String(style.width));
-      if (edge.origin === 'llm' || style.dashed) path.setAttribute('stroke-dasharray', '6 4');
-      if (style.arrow !== 'none') path.setAttribute('marker-end', 'url(#board-arrowhead)');
-      if (style.arrow === 'both') path.setAttribute('marker-start', 'url(#board-arrowhead)');
-      group.append(hit, path);
-      if (edge.label) group.append(svgEl('text', { class: 'board-edge-label', x: geometry.mid.x, y: geometry.mid.y - 4 }, edge.label));
-      // A selected edge exposes its bend points, which are draggable and removable.
+      attr(group, 'class', `board-edge-group${selected ? ' is-selected' : ''}`);
+      const hit = group.children[0], path = group.children[1];
+      attr(hit, 'd', geometry.path);
+      attr(path, 'd', geometry.path);
+      attr(path, 'stroke', style.stroke ?? null);
+      attr(path, 'stroke-width', style.width ? String(style.width) : null);
+      attr(path, 'stroke-dasharray', edge.origin === 'llm' || style.dashed ? '6 4' : null);
+      attr(path, 'marker-end', style.arrow !== 'none' ? 'url(#board-arrowhead)' : null);
+      attr(path, 'marker-start', style.arrow === 'both' ? 'url(#board-arrowhead)' : null);
+      const label = group.children[2];
+      attr(label, 'hidden', edge.label ? null : 'hidden');
+      if (edge.label) { attr(label, 'x', geometry.mid.x); attr(label, 'y', geometry.mid.y - 4); textOf(label, edge.label); }
+      // Bend points are the trailing children: one per waypoint, added and removed as they change.
       const handles = [];
-      if (selected) for (const [index, point] of (edge.waypoints ?? []).entries()) {
-        const handle = svgEl('circle', { class: 'board-waypoint', cx: point[0], cy: point[1], r: 5, 'data-waypoint': `${edge.id}:${index}` });
+      const waypoints = selected ? (edge.waypoints ?? []) : [];
+      for (let index = 0; index < waypoints.length; index++) {
+        let handle = group.children[3 + index];
+        if (!handle) { handle = svgEl('circle', { class: 'board-waypoint', r: 5 }); group.append(handle); }
+        attr(handle, 'cx', waypoints[index][0]);
+        attr(handle, 'cy', waypoints[index][1]);
+        attr(handle, 'data-waypoint', `${edge.id}:${index}`);
         handles.push(handle);
-        group.append(handle);
       }
+      for (let index = group.children.length - 1; index >= 3 + waypoints.length; index--) group.children[index].remove();
       edgeEls.set(edge.id, { group, path, points: geometry.points, handles });
-      return group;
+      return true;
+    }
+
+    function renderEdge(edge) {
+      const group = createEdgeElement(edge);
+      return updateEdgeElement(group, edge) ? group : null;
     }
 
     function render() {
       if (!live()) return;
       applyView();
-      edgeLayer.replaceChildren();
-      nodeLayer.replaceChildren();
-      edgeEls.clear(); nodeEls.clear();
-      for (const edge of board().edges) { const group = renderEdge(edge); if (group) edgeLayer.append(group); }
-      for (const node of board().nodes) { const group = renderNode(node); nodeEls.set(node.id, group); nodeLayer.append(group); }
+      // Reconcile keyed by board id instead of rebuilding the layer: the elements a reader is
+      // looking at keep their identity across a selection, a rename or a save-status change, so the
+      // browser only restyles what actually moved. This is the SVG equivalent of the persistent
+      // scene a canvas renderer keeps, and it is why `redrawGeometry` and `render` now agree about
+      // what is on screen.
+      reconcileNodes();
+      reconcileEdges();
       empty.hidden = board().nodes.length > 0;
       onRendered();
+    }
+
+    /** Move an element only when its position in the paint order changed. */
+    const placeAt = (layer, element, index) => {
+      if (layer.children[index] !== element) layer.insertBefore(element, layer.children[index] ?? null);
+    };
+
+    function reconcileNodes() {
+      const nodes = board().nodes;
+      const seen = new Set();
+      for (const [index, node] of nodes.entries()) {
+        seen.add(node.id);
+        let group = nodeEls.get(node.id);
+        if (!group) { group = createNodeElement(node); nodeEls.set(node.id, group); }
+        updateNodeElement(group, node);
+        placeAt(nodeLayer, group, index);
+      }
+      for (const [id, group] of [...nodeEls]) {
+        if (seen.has(id)) continue;
+        group.remove();
+        nodeEls.delete(id);
+      }
+    }
+
+    function reconcileEdges() {
+      const edges = board().edges;
+      const seen = new Set();
+      let index = 0;
+      for (const edge of edges) {
+        // An edge whose endpoints are gone is not drawn (the model drops those, but a render can
+        // run against a board mid-edit), and it must not claim a slot in the paint order either.
+        if (!byId(edge.from) || !byId(edge.to)) continue;
+        seen.add(edge.id);
+        let group = edgeEls.get(edge.id)?.group;
+        if (!group) group = createEdgeElement(edge);
+        if (!updateEdgeElement(group, edge)) { group.remove(); edgeEls.delete(edge.id); continue; }
+        placeAt(edgeLayer, group, index++);
+      }
+      for (const [id, record] of [...edgeEls]) {
+        if (seen.has(id)) continue;
+        record.group.remove();
+        edgeEls.delete(id);
+      }
     }
 
     /** Fast path during a drag: move existing elements instead of rebuilding the tree. */

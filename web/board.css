@@ -63,6 +63,8 @@
 .board-edge{stroke:var(--line);stroke-width:1.6;fill:none}
 .board-edge-hit{stroke:transparent;stroke-width:12;fill:none;cursor:pointer}
 .board-edge.is-selected{stroke:var(--dsw-alias-link);stroke-width:2.4}
+/* The line a connect gesture is still dragging: one element, moved instead of re-appended. */
+.board-edge-preview{stroke:var(--dsw-alias-link);stroke-width:1.6;pointer-events:none}
 .board-edge-label{font:400 11px var(--dsw-font-family);fill:var(--muted);pointer-events:none}
 .board-marquee{fill:var(--dsw-alias-interactive-bg-active);stroke:var(--dsw-alias-link);stroke-width:1;stroke-dasharray:4 3}
 .board-node.is-connect-source .board-node-shape{stroke:var(--dsw-alias-link);stroke-width:3;stroke-dasharray:6 3}

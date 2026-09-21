@@ -932,10 +932,16 @@
         const target = hitNode(board.nodes, point);
         drag.target = target && target !== drag.id ? target : null;
         redrawGeometry();
-        if (drag.target) {
-          const from = byId(drag.id), to = byId(drag.target);
-          if (from && to) edgeLayer.append(svgEl('path', { class: 'board-edge', d: edgeGeometry(from, to, 'arrow').path, 'stroke-dasharray': '4 4' }));
+        // One preview element per gesture, moved by rewriting its `d`. Appending a fresh path on
+        // every pointer move left one orphaned node per event for the whole drag: the layer held
+        // dozens of identical dashed paths, all of them repainted by the browser.
+        const from = byId(drag.id), to = drag.target ? byId(drag.target) : null;
+        if (!to) { drag.preview?.remove(); drag.preview = null; return; }
+        if (!drag.preview) {
+          drag.preview = svgEl('path', { class: 'board-edge board-edge-preview', 'data-edge-preview': drag.id, 'stroke-dasharray': '4 4' });
+          edgeLayer.append(drag.preview);
         }
+        drag.preview.setAttribute('d', edgeGeometry(from, to, 'arrow').path);
         return;
       }
       if (drag.kind === 'waypoint') {
@@ -954,7 +960,7 @@
           drag.moved = true;
           board = model.setEdge(board, edge.id, { waypoints: moved.waypoints });
           redrawGeometry();
-        } catch (error) { toast(error.message, true); drag = null; }
+        } catch (error) { toast(error.message, true); cancelDrag(); }
         return;
       }
       if (drag.kind === 'marquee') {
@@ -965,12 +971,18 @@
       }
     }
 
-    function endDrag() {
-      if (!drag) return;
-      const finished = drag;
+    /** End the current gesture everywhere, so a transient preview can never outlive it. */
+    function cancelDrag() {
+      drag?.preview?.remove();
       drag = null;
       svg.classList.remove('is-panning');
       marquee.setAttribute('hidden', 'hidden');
+    }
+
+    function endDrag() {
+      if (!drag) return;
+      const finished = drag;
+      cancelDrag();
       if (finished.kind === 'move') { if (finished.moved) { pushHistory(); scheduleSave(); } return; }
       if (finished.kind === 'resize') { pushHistory(); render(); scheduleSave(); return; }
       if (finished.kind === 'waypoint') { if (finished.moved) { pushHistory(); render(); scheduleSave(); } return; }
@@ -1167,6 +1179,8 @@
     }
 
     async function closeView({ focus = true } = {}) {
+      // A gesture in flight must not leave its preview behind in a view that is closing.
+      cancelDrag();
       commitTextEdit();
       await settle({ keepalive: true });
       open = false;
@@ -1806,6 +1820,7 @@
       outline: (maximum) => outline({ ...board, title: board.title }, maximum),
       setTool,
       dispose() {
+        cancelDrag();
         commitTextEdit();
         closeTextEdit();
         if (saveTimer !== null) { clearTimeout(saveTimer); saveTimer = null; }
