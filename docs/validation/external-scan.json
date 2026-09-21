@@ -1,0 +1,53 @@
+{
+  "verified_at": "2026-09-21T16:34:48Z",
+  "fixture": {
+    "pdfs": 2000,
+    "pdf_bytes": 200,
+    "note_files": 2000,
+    "folders": 17
+  },
+  "first_scan": {
+    "indexed": 2000,
+    "failures": [],
+    "elapsed_ms": 679.82
+  },
+  "second_scan": {
+    "indexed": 0,
+    "skipped": 2000,
+    "elapsed_ms": 52.22
+  },
+  "bounded_scan": {
+    "limit": 200,
+    "indexed": 0,
+    "pending": 0,
+    "truncated": false,
+    "elapsed_ms": 48.61
+  },
+  "rename": {
+    "renamed": 1,
+    "indexed": 0,
+    "elapsed_ms": 50.57
+  },
+  "missing": {
+    "missing": 1,
+    "papers_kept": 2000,
+    "elapsed_ms": 49.94
+  },
+  "restore": {
+    "refreshed": 1,
+    "missing": 0,
+    "elapsed_ms": 51.33
+  },
+  "totals": {
+    "papers": 2000,
+    "external_indexed": 2000,
+    "staged_links": 2000,
+    "catalog_bytes": 5681152,
+    "catalog_bytes_per_record": 2840.6
+  },
+  "limits": [
+    "Synthetic 200-byte PDFs; the scan never opens a PDF, so contents do not affect these timings",
+    "Timings are one short-lived Python worker per call on this machine, not a large real corpus",
+    "No hash of file contents is computed; a same-size, same-mtime rewrite is not detected"
+  ]
+}

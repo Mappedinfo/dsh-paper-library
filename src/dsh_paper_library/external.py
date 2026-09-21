@@ -318,9 +318,9 @@ def _mark_missing(library, source_id, relative):
 
 def _remember(library, source_id, relative, paper_id, details):
     library.db.execute(
-        "INSERT INTO external_files(source,relative,paper_id,size,mtime_ns,missing,updated) VALUES(?,?,?,?,?,0,?) "
-        "ON CONFLICT(source,relative) DO UPDATE SET paper_id=excluded.paper_id,size=excluded.size,mtime_ns=excluded.mtime_ns,missing=0,updated=excluded.updated",
-        (source_id, relative, paper_id, details.st_size, details.st_mtime_ns, _now()),
+        "INSERT INTO external_files(source,relative,paper_id,size,mtime_ns,missing,updated,parent,name) VALUES(?,?,?,?,?,0,?,?,?) "
+        "ON CONFLICT(source,relative) DO UPDATE SET paper_id=excluded.paper_id,size=excluded.size,mtime_ns=excluded.mtime_ns,missing=0,updated=excluded.updated,parent=excluded.parent,name=excluded.name",
+        (source_id, relative, paper_id, details.st_size, details.st_mtime_ns, _now(), os.path.dirname(relative), os.path.basename(relative)),
     )
 
 
@@ -331,13 +331,12 @@ def _forget(library, source_id, relative):
 def _rename_candidate(library, source, relative, details):
     """One disappeared file of the same size and name is a rename, not a new paper."""
     rows = library.db.execute(
-        "SELECT * FROM external_files WHERE source=? AND size=? AND relative<>?",
-        (source["id"], details.st_size, relative),
+        "SELECT * FROM external_files WHERE source=? AND parent=? AND size=? AND relative<>? LIMIT 8",
+        (source["id"], os.path.dirname(relative), details.st_size, relative),
     ).fetchall()
     candidates = [
         row for row in rows
-        if Path(row["relative"]).parent == Path(relative).parent
-        and not (source["root"] / row["relative"]).exists()
+        if not (source["root"] / row["relative"]).exists()
         and row["paper_id"]
         and library.db.execute("SELECT 1 FROM papers WHERE id=?", (row["paper_id"],)).fetchone()
     ]
@@ -360,13 +359,9 @@ def scan(library, request):
     return {"sources": reports, "staged_root": str(staged_root(library))}
 
 
-def _scan_source(library, source, limit):
-    known = _known(library, source["id"])
-    report = {"id": source["id"], "root": str(source["root"]), "exists": source["root"].is_dir(), "indexed": 0, "refreshed": 0, "renamed": 0, "skipped": 0, "missing": 0, "walked": 0, "failures": [], "truncated": False, "pending": 0}
-    if not report["exists"]:
-        report["failures"].append("source directory is not readable")
-        return report
-    seen, budget, entry_budget, stop_walk = set(), limit, MAX_WALK_ENTRIES, False
+def _walk(source, report):
+    """One bounded walk: the file list and its stats, with no catalog work yet."""
+    found, entry_budget, stop_walk = {}, MAX_WALK_ENTRIES, False
     for directory, dirnames, filenames in os.walk(source["root"], followlinks=False):
         dirnames[:] = sorted(name for name in dirnames if name not in SKIP_DIRECTORIES and not name.startswith("."))
         for name in sorted(filenames):
@@ -388,28 +383,54 @@ def _scan_source(library, source, limit):
             if not stat_module.S_ISREG(details.st_mode):
                 continue  # A staged link or a directory-shaped entry is not a source file.
             report["walked"] += 1
-            seen.add(relative)
-            row = known.get(relative)
-            link = staged_path(library, source["id"], relative)
-            if row and not row["missing"] and row["size"] == details.st_size and row["mtime_ns"] == details.st_mtime_ns and link.is_symlink() and os.readlink(link) == str(full):
-                report["skipped"] += 1
-                continue
-            if budget <= 0:
-                report["pending"] += 1
-                report["truncated"] = True
-                continue
-            budget -= 1
-            try:
-                _index_one(library, source, relative, full, details, known, report)
-            except (OSError, ValueError) as error:
-                report["failures"].append(f"{relative}: {error}")
+            found[relative] = (full, details)
         if stop_walk:
             break
+    return found
+
+
+def _disappeared(known, found):
+    """Rows whose file is gone, grouped by the directory and size a rename would keep."""
+    gone, places = {}, {}
     for relative, row in known.items():
-        if relative in seen or row["missing"]:
+        if relative in found or row["missing"]:
             continue
-        _mark_missing(library, source["id"], relative)
-        report["missing"] += 1
+        gone[relative] = row
+        key = (row["parent"] if row["parent"] is not None else os.path.dirname(relative), row["size"])
+        places.setdefault(key, []).append(row)
+    return gone, places
+
+
+def _scan_source(library, source, limit):
+    known = _known(library, source["id"])
+    report = {"id": source["id"], "root": str(source["root"]), "exists": source["root"].is_dir(), "indexed": 0, "refreshed": 0, "renamed": 0, "skipped": 0, "missing": 0, "walked": 0, "failures": [], "truncated": False, "pending": 0}
+    if not report["exists"]:
+        report["failures"].append("source directory is not readable")
+        return report
+    found = _walk(source, report)
+    gone, places = _disappeared(known, found)
+    budget = limit
+    for relative in sorted(found):
+        full, details = found[relative]
+        row = known.get(relative)
+        link = staged_path(library, source["id"], relative)
+        if row and not row["missing"] and row["size"] == details.st_size and row["mtime_ns"] == details.st_mtime_ns and link.is_symlink() and os.readlink(link) == str(full):
+            report["skipped"] += 1
+            continue
+        if budget <= 0:
+            report["pending"] += 1
+            report["truncated"] = True
+            continue
+        budget -= 1
+        try:
+            _index_one(library, source, relative, full, details, row, places, gone, report)
+        except (OSError, ValueError) as error:
+            report["failures"].append(f"{relative}: {error}")
+    for relative in sorted(gone):
+        # A row consumed by a rename is gone from `gone`; the rest are genuinely missing.
+        if relative in gone:
+            _mark_missing(library, source["id"], relative)
+            report["missing"] += 1
     library.db.execute(
         "INSERT INTO external_sources(id,root,label,scanned_at,files,indexed) VALUES(?,?,?,?,?,?) "
         "ON CONFLICT(id) DO UPDATE SET root=excluded.root,label=excluded.label,scanned_at=excluded.scanned_at,files=excluded.files,indexed=excluded.indexed",
@@ -418,23 +439,34 @@ def _scan_source(library, source, limit):
     return report
 
 
-def _index_one(library, source, relative, full, details, known, report):
+def _take_rename(library, source, relative, details, places, gone):
+    """One disappeared file of the same size in the same directory is a rename."""
+    key = (os.path.dirname(relative), details.st_size)
+    candidates = [row for row in places.get(key, []) if row["relative"] in gone and row["paper_id"] and library.db.execute("SELECT 1 FROM papers WHERE id=?", (row["paper_id"],)).fetchone()]
+    if len(candidates) != 1:
+        return None
+    row = candidates[0]
+    moved = gone.pop(row["relative"], None)
+    if moved is not None:
+        places[key].remove(row)
+    return row
+
+
+def _index_one(library, source, relative, full, details, row, places, gone, report):
     fields = parse_filename(Path(relative).stem)
-    row = known.get(relative)
     if row:
         _write_link(library, source["id"], relative, full)
-        library.db.execute("UPDATE external_files SET size=?,mtime_ns=?,missing=0,updated=? WHERE source=? AND relative=?", (details.st_size, details.st_mtime_ns, _now(), source["id"], relative))
+        library.db.execute("UPDATE external_files SET size=?,mtime_ns=?,missing=0,updated=?,parent=?,name=? WHERE source=? AND relative=?", (details.st_size, details.st_mtime_ns, _now(), os.path.dirname(relative), os.path.basename(relative), source["id"], relative))
         if row["paper_id"]:
             _update(library, row["paper_id"], source, relative, details, fields)
         report["refreshed"] += 1
         return
-    moved = _rename_candidate(library, source, relative, details)
+    moved = _take_rename(library, source, relative, details, places, gone)
     if moved:
         _drop_link(library, source["id"], moved["relative"])
         _write_link(library, source["id"], relative, full)
         _forget(library, source["id"], moved["relative"])
         _remember(library, source["id"], relative, moved["paper_id"], details)
-        known.pop(moved["relative"], None)
         if moved["paper_id"]:
             _update(library, moved["paper_id"], source, relative, details, fields)
         report["renamed"] += 1

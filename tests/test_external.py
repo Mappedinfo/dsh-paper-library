@@ -6,7 +6,7 @@ from pathlib import Path
 import pymupdf as fitz
 import pytest
 
-from dsh_paper_library.core import dispatch
+from dsh_paper_library.core import Library, dispatch
 
 
 def make_pdf(path, text="Evidence from the synced paper.", pages=1):
@@ -287,3 +287,38 @@ def test_metadata_from_filenames_never_invents_missing_fields(tmp_path):
     assert paper["title"] == "just-a-filename"
     assert paper.get("author") is None and paper.get("issued") is None
     assert paper["external_source"]["relative"] == "just-a-filename.pdf"
+
+def test_legacy_size_only_records_gain_the_rename_columns(tmp_path):
+    """A library indexed before the rename index existed migrates in place."""
+    sources, base = corpus(tmp_path, {"Owner - 2014 - Old schema.pdf": "A"})
+    request(tmp_path, "external_scan", sources=sources)
+    paper = request(tmp_path, "list", limit=10)["items"][0]
+    library = Library(str(tmp_path / "library"))
+    library.db.execute("DROP INDEX IF EXISTS external_files_place")
+    library.db.execute("ALTER TABLE external_files DROP COLUMN name")
+    library.db.execute("ALTER TABLE external_files DROP COLUMN parent")
+    library.db.commit()
+    library.close()
+    (base / "Owner - 2014 - Old schema.pdf").rename(base / "Owner - 2014 - New schema.pdf")
+    report = request(tmp_path, "external_scan", sources=sources)["sources"][0]
+    assert (report["renamed"], report["indexed"], report["missing"]) == (1, 0, 0)
+    papers = request(tmp_path, "list", limit=10)["items"]
+    assert [item["id"] for item in papers] == [paper["id"]]
+
+
+def test_ambiguous_same_size_disappearances_are_not_merged(tmp_path):
+    """Two vanished files of one size cannot both explain a single new name."""
+    sources, base = corpus(tmp_path, {
+        "One - 2013 - Alpha study.pdf": "same body",
+        "Two - 2013 - Beta study.pdf": "same body",
+    })
+    request(tmp_path, "external_scan", sources=sources)
+    before = len(request(tmp_path, "list", limit=10)["items"])
+    (base / "One - 2013 - Alpha study.pdf").unlink()
+    (base / "Two - 2013 - Beta study.pdf").rename(base / "Three - 2013 - Gamma study.pdf")
+    report = request(tmp_path, "external_scan", sources=sources)["sources"][0]
+    # The new name could belong to either vanished file, so neither record is reused:
+    # one new record appears while both originals are flagged as missing.
+    assert (report["renamed"], report["indexed"], report["missing"]) == (0, 1, 2)
+    assert len(request(tmp_path, "list", limit=10)["items"]) == before + 1
+    assert request(tmp_path, "status")["external_missing"] == 2

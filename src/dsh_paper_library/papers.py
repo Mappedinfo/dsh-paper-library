@@ -61,10 +61,21 @@ class Papers:
         # records which roots were scanned and when. Neither table stores file contents.
         self.db.executescript("""
         CREATE TABLE IF NOT EXISTS external_sources(id TEXT PRIMARY KEY, root TEXT NOT NULL, label TEXT, scanned_at TEXT, files INTEGER NOT NULL DEFAULT 0, indexed INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS external_files(source TEXT NOT NULL, relative TEXT NOT NULL, paper_id TEXT, size INTEGER, mtime_ns INTEGER, missing INTEGER NOT NULL DEFAULT 0, updated TEXT NOT NULL, PRIMARY KEY(source, relative));
-        CREATE INDEX IF NOT EXISTS external_files_size ON external_files(source, size);
+        CREATE TABLE IF NOT EXISTS external_files(source TEXT NOT NULL, relative TEXT NOT NULL, paper_id TEXT, size INTEGER, mtime_ns INTEGER, missing INTEGER NOT NULL DEFAULT 0, updated TEXT NOT NULL, parent TEXT, name TEXT, PRIMARY KEY(source, relative));
         CREATE INDEX IF NOT EXISTS external_files_paper ON external_files(paper_id);
         """)
+        # Rename detection needs the containing directory and the size. Older libraries
+        # stored neither, so add them once and index the lookup instead of scanning every
+        # row that happens to share a size with the new file. The index is created only
+        # after the columns exist, so an existing table migrates instead of failing.
+        self.db.execute("DROP INDEX IF EXISTS external_files_size")
+        if "parent" not in {row["name"] for row in self.db.execute("PRAGMA table_info(external_files)").fetchall()}:
+            self.db.execute("ALTER TABLE external_files ADD COLUMN parent TEXT")
+            self.db.execute("ALTER TABLE external_files ADD COLUMN name TEXT")
+            for row in self.db.execute("SELECT source,relative FROM external_files").fetchall():
+                self.db.execute("UPDATE external_files SET parent=?,name=? WHERE source=? AND relative=?", (os.path.dirname(row["relative"]), os.path.basename(row["relative"]), row["source"], row["relative"]))
+        self.db.execute("CREATE INDEX IF NOT EXISTS external_files_place ON external_files(source,parent,size)")
+        self.db.commit()
         # Reading projects are part of the catalog so they are queryable, exportable and
         # available to the agent; the many-to-many edge lives in project_papers.
         from .projects import SCHEMA_SQL as project_schema
