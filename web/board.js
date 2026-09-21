@@ -295,7 +295,7 @@
 
   /** The panel's own outline preview; the host freezes the authoritative copy. */
   function outline(board, maxCharacters = 24000) {
-    const label = node => (node.text?.trim() || node.paper?.title?.trim() || node.paper?.id || node.id).replace(/\s+/gu, ' ');
+    const label = node => (node.text?.trim() || node.paper?.title?.trim() || node.paper?.id || `（空${KIND_LABEL[node.kind] ?? '形状'}）`).replace(/\s+/gu, ' ');
     const byId = new Map(board.nodes.map(node => [node.id, label(node)]));
     const lines = [`# 画板：${board.title}`, `节点 ${board.nodes.length} · 连线 ${board.edges.length}`];
     for (const node of board.nodes) {
@@ -557,6 +557,8 @@
       nodeRadius: NODE_RADIUS,
       // Panel chrome that follows a full render: the undo/redo and delete controls and the
       // empty-state hint are the shell's business, not the renderer's.
+      // The inline editor is a DOM overlay, so it follows the scene explicitly.
+      onViewApplied: () => syncTextEditor(),
       onRendered: () => {
         const undo = $('board-undo'), redo = $('board-redo');
         if (undo) undo.disabled = historyIndex <= 0;
@@ -623,8 +625,6 @@
       if (!pendingSave) return;
       // Held back until the open edit commits: the node being typed into is empty right now.
       if (editor) return;
-      const pruned = pruneEmptyNodes(board);
-      board = pruned.board;
       const payload = { ...board, view: { x: view.x, y: view.y, zoom: view.zoom } };
       pendingSave = false;
       status('正在保存…');
@@ -635,7 +635,7 @@
         board = result.board;
         conflict = null;
         renderConflict();
-        status(pruned.removed ? `已保存（忽略了 ${pruned.removed} 个没有内容的节点）` : '已保存', 'saved');
+        status('已保存', 'saved');
         if (result.board.status !== board.status) render();
       } catch (error) {
         if (!live) return;
@@ -646,14 +646,17 @@
           return;
         }
         pendingSave = true;
-        // The host reports node problems by position; select that node so the reader can fix it.
+        // The host reports node problems by position; select that node so the reader can fix it —
+        // but repeat the host's own reason rather than assuming what it is. The only node-level
+        // rejection there used to be was an empty node, and that is no longer a rejection at all.
         const named = /第 (\d+) 个节点/.exec(error.message ?? '');
         const target = named ? board.nodes[Number(named[1]) - 1] : null;
         if (target) {
           select([target.id]);
           render(); renderInspector();
-          status(`这个节点还没有内容：写入文字或删除后即可保存。`, 'error');
-          toast('已选中出错的那个节点：请写入文字或删除它。', true);
+          const reason = error.message || '这个节点无法保存。';
+          status(reason, 'error');
+          toast(`已选中出错的那个节点：${reason}`, true);
           return;
         }
         status(error.message || '保存失败', 'error');
@@ -747,23 +750,34 @@
       return toScene({ x: event.clientX - rect.left, y: event.clientY - rect.top }, view);
     }
 
-    function startTextEdit(node) {
-      closeTextEdit();
-      const rect = stage.getBoundingClientRect();
+    /** Place the inline editor over its node at the current zoom and pan. */
+    function placeTextEditor(area, node) {
       const screen = toScreen({ x: node.x, y: node.y }, view);
-      const area = el('textarea', 'board-text-editor');
-      area.value = node.kind === 'paper' ? String(node.text || '') : String(node.text || '');
-      area.maxLength = LIMITS.text;
-      area.setAttribute('aria-label', `编辑${KIND_LABEL[node.kind] || '节点'}文本`);
       area.style.left = `${screen.x}px`; area.style.top = `${screen.y}px`;
       area.style.width = `${Math.max(60, node.w * view.zoom)}px`; area.style.height = `${Math.max(40, node.h * view.zoom)}px`;
-      // An empty shape is not content: the host refuses a node with neither text nor a paper,
-      // and keeping one would make every later save of the whole board fail. So leaving the
-      // editor empty discards the shape (its edges with it) instead of storing a placeholder.
+    }
+    /** Keep an open editor over its node; panning and zooming move the scene, not the DOM layer. */
+    function syncTextEditor() {
+      if (!editor) return;
+      const node = byId(editor.node);
+      if (!node) { closeTextEdit(); return; }
+      placeTextEditor(editor.area, node);
+    }
+
+    function startTextEdit(node) {
+      closeTextEdit();
+      const area = el('textarea', 'board-text-editor');
+      area.value = String(node.text || '');
+      area.maxLength = LIMITS.text;
+      area.setAttribute('aria-label', `编辑${KIND_LABEL[node.kind] || '节点'}文本`);
+      placeTextEditor(area, node);
+      // An unnamed shape is content: a reader who draws a rectangle to hold a place should keep it,
+      // so leaving the editor empty stores the shape instead of discarding it. The canvas shows
+      // 「（空）」 in it and the outline names it by kind, so nothing is pretending to have text.
       const commit = () => {
         const value = area.value;
         closeTextEdit();
-        if (!value.trim() && !byId(node.id)?.paper) { discardEmptyNode(node.id); return; }
+        if (!byId(node.id)) return;
         mutate(current => model.setNodeText(current, node.id, value));
       };
       area.addEventListener('blur', commit);
@@ -806,20 +820,6 @@
     /** Finish an open edit before the board is written or closed; nothing is left half-typed. */
     function commitTextEdit() {
       if (editor) editor.commit();
-    }
-    /** A node with no text and no paper cannot be stored; drop it and anything attached. */
-    function discardEmptyNode(id) {
-      if (!byId(id)) return;
-      selection.delete(id);
-      mutate(current => model.removeItems(current, [id]));
-      render(); renderInspector();
-    }
-    /** Last resort before a write: nothing empty ever reaches the host. The node being edited
-     *  is left alone (its save is deferred until the edit commits). */
-    function pruneEmptyNodes(current) {
-      const empty = current.nodes.filter(node => !String(node.text ?? '').trim() && !node.paper && node.id !== editor?.node).map(node => node.id);
-      if (!empty.length) return { board: current, removed: 0 };
-      return { board: model.removeItems(current, empty), removed: empty.length };
     }
 
     function beginDrag(event) {

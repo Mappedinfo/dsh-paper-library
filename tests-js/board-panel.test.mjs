@@ -836,56 +836,63 @@ test('the project picker is revealed by the catalog, not decided when the panel 
   assert.deepEqual([...full.registry.get('board-project-select').options].map(option => [option.value, option.textContent]), [['p-1', '城市感知综述（3）'], ['p-2', '方法复现（0）']]);
 });
 
-test('an empty shape is discarded instead of making every later save fail', async () => {
+test('an unnamed shape is content: it keeps its place, saves, and is labelled by kind', async () => {
+  // It used to be discarded: an empty node has no text and no paper, the host refused it, and one
+  // such shape made every later save of the whole board fail. That was the wrong trade — a reader
+  // who draws a rectangle to hold a place wants the rectangle, not a silent deletion when they
+  // click away. The host now accepts an unnamed shape, so nothing is dropped and nothing is faked:
+  // the canvas shows （空） in it and the outline names it by kind.
   state.length = 0;
   const harness = loadPanel({ api: apiStub() });
   await harness.panel.open();
-  const editor = () => harness.stage.children.find(child => child.className === 'board-editor-layer')?.children[0] ?? null;
-  // Drawing a shape opens the text editor with an empty value: nothing is written yet.
+  const area = () => harness.stage.children.find(child => child.className === 'board-editor-layer')?.children[0] ?? null;
   harness.panel.setTool('rect');
   harness.svg.dispatch('pointerdown', { clientX: 160, clientY: 160 });
   assert.equal(harness.panel.board().nodes.length, 1, 'the shape exists while it is being named');
-  assert.ok(editor(), 'and its editor is open');
+  assert.ok(area(), 'and its editor is open');
   await harness.runTimers();
-  const whileEditing = state.filter(call => call.action === 'board_save');
-  assert.equal(whileEditing.length, 0, 'a save is held back while the reader is still typing');
-  // Leaving it empty drops the shape rather than storing a node the host would refuse.
-  assert.equal(editor().value, '');
-  editor().dispatch('blur');
-  assert.equal(harness.panel.board().nodes.length, 0, 'the empty shape is gone');
-  await harness.runTimers();
-  const afterDiscard = state.filter(call => call.action === 'board_save');
-  assert.equal(afterDiscard.length, 1, 'the discard itself is saved');
-  assert.equal(afterDiscard[0].payload.board.nodes.length, 0);
-  // Typing real text keeps the node, and the deferred save follows the commit.
-  harness.panel.setTool('note');
-  harness.svg.dispatch('pointerdown', { clientX: 320, clientY: 240 });
-  editor().value = '有内容的便签';
-  editor().dispatch('blur');
-  assert.equal(harness.panel.board().nodes.length, 1);
-  assert.equal(harness.panel.board().nodes[0].text, '有内容的便签');
+  assert.equal(state.filter(call => call.action === 'board_save').length, 0, 'a save is held back while the reader is still typing');
+
+  // Leaving it empty commits an empty text value — the shape stays.
+  assert.equal(area().value, '');
+  area().dispatch('blur');
+  const kept = harness.panel.board().nodes;
+  assert.equal(kept.length, 1, 'the unnamed shape is kept');
+  assert.equal(kept[0].text, '', 'with no pretended text');
+  assert.equal(kept[0].kind, 'rect');
   await harness.runTimers();
   const saved = state.filter(call => call.action === 'board_save').at(-1);
-  assert.equal(saved.payload.board.nodes.length, 1, 'the named node is written');
-  assert.equal(saved.payload.board.nodes[0].text, '有内容的便签');
-  // A node that slips into the record still cannot reach the host: it is pruned and reported.
-  // A shape whose edit is still open never reaches the host, and the edit survives a close.
+  assert.equal(saved.payload.board.nodes.length, 1, 'and it reaches the host');
+  assert.equal(saved.payload.board.nodes[0].text, '');
+
+  // The outline the model reads names it by kind rather than by an opaque id.
+  const outline = harness.panel.outline().text;
+  assert.match(outline, /\[rect\] （空矩形）/, 'an unnamed shape reads as （空矩形） in the outline');
+  assert.equal(outline.includes(kept[0].id), false, 'the node id is not used as a name');
+
+  // Typing real text still behaves the same way.
+  harness.panel.setTool('note');
+  harness.svg.dispatch('pointerdown', { clientX: 320, clientY: 240 });
+  area().value = '有内容的便签';
+  area().dispatch('blur');
+  assert.equal(harness.panel.board().nodes.length, 2);
+  assert.equal(harness.panel.board().nodes[1].text, '有内容的便签');
+  // Closing the board mid-edit commits what is there instead of dropping the shape.
   const closing = loadPanel({ api: apiStub() });
   await closing.panel.open();
-  closing.panel.setTool('rect');
+  closing.panel.setTool('ellipse');
   closing.svg.dispatch('pointerdown', { clientX: 260, clientY: 260 });
-  state.length = 0;
   await closing.panel.close();
-  assert.equal(closing.panel.board().nodes.length, 0, 'closing with an unnamed shape discards it');
-  const written = state.filter(call => call.action === 'board_save');
-  assert.equal(written.length, 1, 'and still writes the rest of the board');
-  assert.equal(written[0].payload.board.nodes.length, 0);
-  assert.equal(state.some(call => call.action === 'board_save' && call.payload.board.nodes.some(node => !node.text && !node.paper)), false, 'no empty node is ever sent');
+  assert.equal(closing.panel.board().nodes.length, 1, 'closing with an unnamed shape keeps it');
+  assert.equal(closing.panel.board().nodes[0].kind, 'ellipse');
 });
 
-test('a rejected save names the offending node and selects it', async () => {
+test('a rejected save names the offending node, selects it and repeats the host reason', async () => {
+  // The host reports node problems by position. The panel selects that node, and repeats the host's
+  // own sentence: an empty node is no longer a rejection, so assuming "no content" here would tell
+  // the reader the wrong thing about, say, an unsupported kind.
   state.length = 0;
-  const failing = apiStub({ board_save: () => { throw new Error('第 1 个节点既没有文本也没有文献。'); } });
+  const failing = apiStub({ board_save: () => { throw new Error('第 1 个节点类型不受支持。'); } });
   const harness = loadPanel({ api: failing });
   await harness.panel.open();
   harness.panel.setTool('note');
@@ -894,8 +901,8 @@ test('a rejected save names the offending node and selects it', async () => {
   area.value = '写点东西';
   area.dispatch('blur');
   await harness.runTimers();
-  assert.equal(harness.registry.get('board-status').textContent, '这个节点还没有内容：写入文字或删除后即可保存。');
-  assert.equal(harness.messages.some(message => /已选中出错的那个节点/.test(message)), true);
+  assert.equal(harness.registry.get('board-status').textContent, '第 1 个节点类型不受支持。', 'the host reason is repeated verbatim');
+  assert.equal(harness.messages.some(message => message === '已选中出错的那个节点：第 1 个节点类型不受支持。'), true, 'and the toast says which node it selected and why');
   assert.equal(harness.panel.selection().length, 1, 'the node the host named is selected');
 });
 
@@ -1534,4 +1541,42 @@ test('an unchanged viewport is not rewritten on every repaint', async () => {
   writes.length = 0;
   harness.panel.render();
   assert.deepEqual(writes, [], 'and then the unchanged view is quiet again');
+});
+
+test('the inline editor follows a pan and a zoom instead of staying where it opened', async () => {
+  // The editor is a DOM overlay positioned from scene coordinates. It used to be placed once, when
+  // it opened, so panning or zooming left it behind at the old screen position while the node moved
+  // — which reads as a second text box that is still typeable. Reported from a trackpad pan.
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  const layer = () => harness.stage.children.find(child => child.className === 'board-editor-layer');
+  const editors = () => layer().children.filter(child => child.className === 'board-text-editor');
+  harness.panel.setTool('rect');
+  harness.svg.dispatch('pointerdown', { clientX: 300, clientY: 220 });
+  assert.equal(editors().length, 1, 'drawing a shape opens exactly one editor');
+  const area = editors()[0];
+  const opened = { left: area.style.left, top: area.style.top, width: area.style.width };
+
+  // A wheel pan (no blur, so the editor stays open) must carry the editor with the scene.
+  harness.svg.dispatch('wheel', { clientX: 100, clientY: 100, deltaX: 0, deltaY: 90, ctrlKey: false, preventDefault() {} });
+  assert.equal(editors().length, 1, 'panning leaves exactly one editor');
+  assert.equal(editors()[0], area, 'and it is the same element, not a replacement');
+  assert.notEqual(area.style.top, opened.top, 'the editor moved with the scene');
+  assert.equal(parseFloat(opened.top) - parseFloat(area.style.top), 90, 'by exactly the pan distance');
+  assert.equal(area.style.left, opened.left, 'and not sideways for a vertical pan');
+
+  // A ctrl-wheel zoom resizes it with its node, and again there is only one.
+  harness.svg.dispatch('wheel', { clientX: 100, clientY: 100, deltaX: 0, deltaY: -100, ctrlKey: true, preventDefault() {} });
+  assert.equal(editors().length, 1, 'zooming leaves exactly one editor');
+  assert.ok(parseFloat(area.style.width) > parseFloat(opened.width), 'the editor grew with its node');
+
+  // The offset between the editor and its node is the relationship that matters, and the browser
+  // receipt asserts it there against real geometry. Here the two exact deltas above are the test:
+  // a pan moves it by the pan distance, a zoom changes its size, and there is never a second box.
+
+  // Committing leaves no editor behind, and a later pan has nothing to move.
+  area.dispatch('blur');
+  assert.equal(editors().length, 0);
+  harness.svg.dispatch('wheel', { clientX: 100, clientY: 100, deltaX: 0, deltaY: 60, ctrlKey: false, preventDefault() {} });
+  assert.equal(editors().length, 0, 'a pan with no editor open creates nothing');
 });

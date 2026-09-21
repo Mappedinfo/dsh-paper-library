@@ -117,7 +117,9 @@ function normalizeNode(value, index) {
   const paper = normalizePaper(value.paper)
   if (paper) node.paper = paper
   if (kind !== 'paper' && paper) throw boardError(`第 ${index + 1} 个节点只有 paper 类型可以绑定文献。`)
-  if (!node.text && !node.paper) throw boardError(`第 ${index + 1} 个节点既没有文本也没有文献。`)
+  // A shape with no text and no paper is content, not an accident: a rectangle or an ellipse the
+  // reader drew to hold a place is a legitimate board element, and refusing it made the whole board
+  // unsaveable until the shape was named or deleted. Only the node's geometry is required.
   return node
 }
 
@@ -368,7 +370,10 @@ export function validateBoard(value, { id, origin: forcedOrigin } = {}) {
   return board
 }
 
-const nodeLabel = node => (node.text?.trim() || node.paper?.title?.trim() || node.paper?.id || node.id).replace(/\s+/gu, ' ')
+const KIND_LABEL = Object.freeze({ text: '文本', note: '便签', concept: '概念', paper: '文献', rect: '矩形', ellipse: '椭圆', diamond: '菱形' })
+/** What a reader — or the model reading the outline — calls this node. An unnamed shape is named by
+ *  its kind rather than by its opaque id, which is what makes an empty rectangle readable. */
+const nodeLabel = node => (node.text?.trim() || node.paper?.title?.trim() || node.paper?.id || `（空${KIND_LABEL[node.kind] ?? '形状'}）`).replace(/\s+/gu, ' ')
 
 /** Deterministic, human-readable rendering used for snapshots and agent reads. */
 export function renderBoardOutline(board, { maxCharacters = BOARD_LIMITS.snapshotCharacters } = {}) {

@@ -70,7 +70,6 @@ test('board validation rejects dangling, duplicated, oversized and unsupported s
     [board({ edges: [{ id: 'e-1', from: 'n-1', to: 'n-2', angle: 45.5 }] }), /夹角必须是 30–90 的整数/],
     [board({ edges: [{ id: 'e-1', from: 'n-1', to: 'n-2', angle: '90' }] }), /夹角必须是 30–90 的整数/],
     [board({ nodes: [paperNode('n-1'), paperNode('n-1', { x: 10 })] }), /重复/],
-    [board({ nodes: [{ id: 'n-1', kind: 'concept', text: '' }] }), /既没有文本也没有文献/],
     [board({ nodes: [{ id: 'n-1', kind: 'paper', text: 'x' }] }), /缺少文献标识/],
     [board({ nodes: [{ id: 'n-1', kind: 'concept', text: 'x', paper: { id: 'paper_a' } }] }), /只有 paper 类型可以绑定文献/],
     [board({ nodes: [{ id: 'n-1', kind: 'concept', text: 'x', color: 'red' }] }), /#rrggbb/],
@@ -192,6 +191,26 @@ test('an agent write is marked as a reviewable proposal without relabelling the 
   const accepted = await f.store.save({ id: generated.board.id, board: generated.board, expectedRevision: generated.revision });
   assert.equal(accepted.board.status, 'saved');
   assert.equal(accepted.board.origin, 'llm', 'accepting review does not rewrite who generated the board');
+});
+
+test('a shape with no text and no paper is content, and reads by kind in the outline', async t => {
+  // It used to be refused ("既没有文本也没有文献"), which made the panel delete the shape when the
+  // reader clicked away — the wrong trade for a rectangle someone drew to hold a place.
+  const f = await fixture(t);
+  const created = await f.store.create({ board: board({ nodes: [
+    { id: 'n-empty', kind: 'rect', x: 0, y: 0, w: 200, h: 120, text: '' },
+    { id: 'n-named', kind: 'concept', x: 300, y: 0, text: '有名字' },
+  ], edges: [] }) });
+  assert.equal(created.board.nodes.length, 2, 'the unnamed shape is stored');
+  assert.equal(created.board.nodes[0].text, '', 'with no invented text');
+  // The outline is what the model reads, so an unnamed shape is named by its kind, not by its id.
+  const outline = renderBoardOutline(created.board).text;
+  assert.match(outline, /\[rect\] （空矩形）/);
+  assert.equal(outline.includes('n-empty'), false, 'the opaque id is not used as a name');
+  // An edge to it is still a real relation, which is the point of keeping the shape.
+  const linked = await f.store.save({ id: created.board.id, board: { ...created.board, edges: [{ id: 'e-1', from: 'n-named', to: 'n-empty', kind: 'arrow' }] }, expectedRevision: created.revision });
+  assert.equal(linked.board.edges.length, 1);
+  assert.match(renderBoardOutline(linked.board).text, /有名字 --arrow--> （空矩形）/);
 });
 
 test('the outline is deterministic and states its own truncation', async t => {

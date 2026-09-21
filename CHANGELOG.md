@@ -57,6 +57,19 @@
   4. **宿主只受理 2 个并发 JSON 请求**，其余返回 429（「已有请求正在处理，请稍后重试。」）；该夹具一边驱动 UI 一边轮询 API，必然撞上，现在按 `project-ui-fixture.mjs` 的做法退避重试。
 - 结果：[11 项回执](docs/validation/annotation-reference-browser.json) 在真实隔离 DSH profile 下**重新跑通并连续两次稳定通过**（此前已提交的回执是失败运行写下的 `ok:false`）。副产品：夹具现在把"本次自己的发送"与"宿主后台工作"分开报告（`explicitSends` / `modelRunsForExplicitSends` / `deterministicModelGenerations`）。
 
+### 修复：空形状是内容（推翻 P14 的一半）
+
+- **报告**：新建文本／标签后不输入文字、切到 DSH 对话页面，形状就被自动删除。原因是切换面板让行内输入框失焦，而 P14 的提交逻辑把"空且非文献"的节点直接丢弃——为了让宿主能保存，却让"先画个框占位"变成不可能。
+- **改法**：宿主不再要求每个节点必须有文字或文献（`board-store.mjs` 只校验几何、类型与标识），一个空形状再也不会拖垮整张画板；面板不再丢弃，`discardEmptyNode`、`pruneEmptyNodes` 与「忽略了 N 个没有内容的节点」一并删除；画布在形状里显示「（空）」，大纲按类型命名——`（空矩形）` 而不是不透明的 `n-…`。**编辑器打开期间仍然推迟保存**、关画板仍先提交编辑，这部分原设计是对的。
+- **顺带纠正一处不实提示**：宿主按位置报节点问题时，面板过去一律说「这个节点还没有内容」，现在改为**原样重复宿主的理由**并仍然选中该节点——空节点已不再是拒绝理由，若继续这么提示，遇到"类型不受支持"之类就会说错。
+
+### 修复：行内输入框随视口移动（"两个文本框"）
+
+- **报告**：新建文本后用触控板平移画布，出现两个都能输入的文本框；点一下只剩最新那个，之后再平移正常。
+- **原因**：行内编辑器是 `.board-editor-layer` 里的 DOM `textarea`，按**屏幕坐标**（`node.x * zoom + view.x`）定位且只在打开时算一次。平移／缩放移动的是 SVG 场景，浮层留在原处——于是节点在新位置、输入框在旧位置，看起来就是第二个框；点一下会提交旧编辑器并新建一个，所以只剩一个。
+- **改法**：渲染器新增 `onViewApplied` 钩子（仅在视口变换真正写入时触发），面板据此重排打开中的编辑器；定位规则收敛为 `placeTextEditor` 一处，打开与跟随共用。面板用例断言平移量恰好等于平移距离、缩放会改变尺寸、层里永远只有一个编辑器；浏览器回执用真实几何复核（与节点的相对偏移不变、缩放用完后复位到 100%）。
+- 验证：**520 JavaScript / 222 Python 测试**、board **32** 项与 standalone 15 项浏览器回执、`validate.mjs` 28 项全绿。
+
 ### 工程：画板绘制参考 Excalidraw 做的两项优化
 
 对照 Excalidraw 的渲染实现（`renderer/staticScene.ts`、`interactiveScene.ts`、`components/canvases/StaticCanvas.tsx`、`element/src/renderElement.ts`、`collision.ts`）逐条比较后，只取真正适用 SVG 且有可测收益的两项，完整对照表见 [docs/whiteboard-design.md](docs/whiteboard-design.md)。

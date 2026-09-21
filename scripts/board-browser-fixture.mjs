@@ -78,6 +78,17 @@ try {
     }
   };
   const nodeCount = () => page.locator('.board-node').count();
+  /** Delete every node that is still unnamed, using the canvas delete the reader would use. */
+  const deleteNodeIfPresent = async () => {
+    for (;;) {
+      const unnamed = page.locator('.board-node', { has: page.locator('.board-node-text', { hasText: '（空）' }) });
+      if (!await unnamed.count()) return;
+      const box = await unnamed.first().locator('.board-node-shape').boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await page.keyboard.press('Delete');
+      await page.waitForTimeout(150);
+    }
+  };
 
   await page.goto(origin);
   await page.waitForLoadState('networkidle');
@@ -97,17 +108,55 @@ try {
   }
   record('board-view-opens-and-creates-the-first-board-without-a-model');
 
-  // An unnamed shape must not wedge the board: the host refuses a node with neither text nor a
-  // paper, and rejecting the *whole* board for one empty shape is what left a reader stuck.
+  // An unnamed shape is content. It used to be discarded on the way out of the editor, which made
+  // 「先画个框占位」 impossible; the record must now hold it, and the canvas has to say it is empty
+  // rather than pretend to have text.
   await page.locator('#board-tool-rect').click();
   await page.mouse.click(stage.x + 620, stage.y + 520);
   await page.locator('.board-text-editor').waitFor();
   await page.keyboard.press('Escape');
-  await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 0);
-  await waitForHost(value => (value.board?.nodes ?? []).length === 0, 'the discarded shape never reaching the record');
+  await waitForHost(value => (value.board?.nodes ?? []).some(node => node.id?.startsWith('n-') && node.text === ''), 'the unnamed shape reaching the record');
+  await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 1);
+  assert.equal(await page.locator('.board-node-text').first().textContent(), '（空）', 'the canvas shows it has no text');
   assert.equal(/没有文本也没有文献/.test(await page.locator('#board-status').innerText()), false, 'and no rejection is reported');
-  assert.equal(await page.locator('.board-edge-group').count(), 0);
-  record('an-unnamed-shape-is-discarded-instead-of-blocking-every-save');
+  record('an-unnamed-shape-is-kept-as-content');
+
+  // A second, unrelated gesture must not multiply the inline editor: it is an overlay positioned
+  // from scene coordinates, so panning has to move it with the scene. Two boxes was the report.
+  await page.locator('#board-tool-ellipse').click();
+  await page.mouse.click(stage.x + 300, stage.y + 520);
+  await page.locator('.board-text-editor').waitFor();
+  const beforePan = await page.locator('.board-text-editor').boundingBox();
+  const beforeNode = await page.locator('.board-node').last().boundingBox();
+  // A trackpad scroll pans without blurring the editor, which is the gesture from the report:
+  // the scroll must land on the canvas, not on the editor overlay.
+  await page.mouse.move(stage.x + 120, stage.y + 120);
+  await page.mouse.wheel(0, 140);
+  await page.waitForTimeout(200);
+  const afterNode = await page.locator('.board-node').last().boundingBox();
+  assert.ok(Math.abs(afterNode.y - beforeNode.y) > 20, 'the scroll panned the scene');
+  assert.equal(await page.locator('.board-text-editor').count(), 1, 'panning never leaves a second editor behind');
+  const afterPan = await page.locator('.board-text-editor').boundingBox();
+  assert.ok(Math.abs((afterPan.x - afterNode.x) - (beforePan.x - beforeNode.x)) < 2, 'the editor keeps its offset inside the node it edits');
+  assert.ok(Math.abs(afterPan.y - beforePan.y - (afterNode.y - beforeNode.y)) < 2, 'and it moved exactly as far as the scene did');
+  // Zooming is the same overlay problem: the box scales with the node it edits. The zoom is put
+  // back afterwards — later checks compare label offsets against a tolerance tuned at 100%.
+  const beforeZoom = await page.locator('.board-text-editor').boundingBox();
+  await page.mouse.move(stage.x + 120, stage.y + 120);
+  await page.keyboard.down('Control');
+  await page.mouse.wheel(0, -240);
+  await page.waitForTimeout(200);
+  const afterZoom = await page.locator('.board-text-editor').boundingBox();
+  assert.ok(afterZoom.width > beforeZoom.width + 2, 'a zoom in grows the editor with its node');
+  assert.equal(await page.locator('.board-text-editor').count(), 1, 'and still only one editor');
+  await page.mouse.wheel(0, 240);
+  await page.keyboard.up('Control');
+  await page.waitForTimeout(200);
+  assert.equal(await page.locator('#board-zoom-label').innerText(), '100%', 'the check leaves the zoom where it found it');
+  await page.keyboard.press('Escape');
+  await waitForHost(value => (value.board?.nodes ?? []).length >= 2, 'the second unnamed shape reaching the record');
+  // Leave the board as this check found it: the later steps count nodes from zero.
+  await deleteNodeIfPresent();
 
   // Place a note; the shape tool returns to selection so the follow-up click cannot
   // create a stray node while the inline editor is open.

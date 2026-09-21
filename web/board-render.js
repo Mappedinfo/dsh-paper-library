@@ -45,9 +45,11 @@
    * @param {(value: number) => number} options.round
    * @param {object} options.nodeRadius    the corner radius per node kind (the panel's own table)
    * @param {() => void} options.onRendered     panel chrome that follows a full render
+   * @param {() => void} options.onViewApplied   panel overlay that must track the viewport (the
+   *                                             inline text editor is a DOM element over the canvas)
    */
   function create(options) {
-    const { doc, dom, board, view, selection, live, connectFrom, sourceApi, nodeBounds, geometryFor, round, nodeRadius, onRendered } = options;
+    const { doc, dom, board, view, selection, live, connectFrom, sourceApi, nodeBounds, geometryFor, round, nodeRadius, onRendered, onViewApplied } = options;
     const { stage, viewport, edgeLayer, nodeLayer, empty } = dom;
     const { svgEl } = createElements(doc);
     const el = id => doc.getElementById(id);
@@ -74,6 +76,10 @@
       stage.style.backgroundPosition = `${current.x}px ${current.y}px`;
       const label = el('board-zoom-label');
       if (label) textOf(label, `${Math.round(current.zoom * 100)}%`);
+      // Overlays positioned from scene coordinates have to be moved with the scene: the inline text
+      // editor lives in a DOM layer over the canvas, so panning or zooming would otherwise leave it
+      // behind at the old screen position — which reads as a second, disconnected text box.
+      onViewApplied?.();
     }
 
     /** The shape is drawn in the node's own coordinates: the content group carries the

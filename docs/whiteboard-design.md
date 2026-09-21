@@ -312,24 +312,36 @@ Asked for 2026-09-20: "can we add Mermaid parsing, converting into our internal 
 - **The reverse direction exists too**, because a canvas that can only consume is half a bridge:
   `format(board)` writes `flowchart` text, and a round trip is asserted to keep the graph.
 
-## P14: an empty shape is not content
+## P14, revised: an unnamed shape *is* content
 
-Reported from the sidebar 2026-09-20 with a screenshot: several `（空）` shapes and a red
-「第 4 个节点既没有文本也没有文献。」 — the whole board could not be saved.
+Two reports shaped this, and the second reversed the first.
 
-- **The rule the host enforces has to be the rule the canvas honours.** A node must carry text or
-  a paper; a shape tool click creates a node *before* anything is typed, so the panel was building
-  records the host refuses. Leaving the editor empty now discards the shape (and its edges, and it
-  is undoable) instead of storing a placeholder.
-- **Never write a node that is still being typed into.** Saves are held while the editor is open
-  and resume when it commits — with text it is written, empty it is dropped. Closing the board,
-  switching boards or unloading the page commits the open edit first, which also fixes text that
-  used to be lost when the board closed mid-edit.
-- **A last resort before the wire.** Any empty node that still reaches a write (an older draft,
-  another client) is pruned and the status says so, because failing the *entire* board for one
-  stray shape is the worst possible outcome for the reader's other work.
-- **A rejection should be actionable.** When the host still reports a node problem by position, the
-  panel selects that node and says what to do, rather than printing the host's sentence alone.
+The first (2026-09-20, from the sidebar): several `（空）` shapes and a red 「第 4 个节点既没有文本也没有
+文献。」 left the whole board unsaveable. The host required every node to carry text or a paper, so the
+panel's fix was to **discard** a shape whose editor closed empty, prune any stray one before a write,
+and hold saves while an editor was open.
+
+The second (2026-09-22, from the owner): 「新建了文本…如果没有输入文字，切到 dsh 对话页面，就会自动删除，
+这个不对的，有时候就是要空文字的形状」. The discard was the wrong trade: switching panes blurs the
+editor, so merely *looking* at the conversation deleted the shape the reader had just drawn. A
+rectangle drawn to hold a place is a legitimate board element — Excalidraw stores an element with no
+text and never deletes one behind the reader's back.
+
+What the revision does:
+
+- **The host accepts an unnamed shape.** `board-store.mjs` no longer requires text or a paper; only
+  the geometry, kind and identifier are validated. One shape without content can no longer take the
+  whole board down with it, which was the real problem behind the first report.
+- **Nothing is discarded and nothing is faked.** The editor commits whatever is there, empty
+  included; `discardEmptyNode`, `pruneEmptyNodes` and the 「忽略了 N 个没有内容的节点」 status are
+  gone. The canvas shows 「（空）」 inside the shape and the outline names it by kind — `（空矩形）`,
+  not an opaque `n-…` id — so a reader and the model both see what it is.
+- **Saves are still held while an editor is open**, and closing the board or switching boards still
+  commits the open edit first. That part of the original fix was right: the node being typed into is
+  empty *at that moment*, and writing it mid-keystroke is what would drop text.
+- **A rejection repeats the host's own reason.** The panel still selects the node the host names by
+  position, but it no longer assumes the reason is emptiness — that assumption would have described,
+  say, an unsupported kind as 「还没有内容」.
 
 ## P15: shape vocabulary and a toolbar that stops growing
 
@@ -353,6 +365,24 @@ one dropdown.
 - **Files are a list.** 「画板 ▾」 opens the board's own file list — title, node and link counts,
   open, delete — with rename and 「＋ 新建画板」 at the bottom. The old `<select>` survives as the
   hidden value the receipts read; the interface no longer presents a lone dropdown.
+
+## P16: an overlay has to move with the scene
+
+Reported 2026-09-22: after drawing a text shape, panning the canvas with a trackpad showed **two**
+text boxes, both typeable; clicking once left only the newest, and further pans were fine.
+
+The inline text editor is a DOM `textarea` in `.board-editor-layer`, positioned in *screen*
+coordinates from its node (`node.x * zoom + view.x`). It was placed once, when it opened. Panning or
+zooming moves the SVG scene and leaves the overlay where it was, so the node appeared in its new
+place and a detached, still-focused input box stayed behind — the second box. A click then commits
+that editor and opens a fresh one on the node, which is why only one survived.
+
+The fix gives the renderer an `onViewApplied` hook, fired whenever the viewport transform is really
+written, and the panel repositions the open editor there. One rule (`placeTextEditor`) serves both
+opening and tracking, so the box cannot drift from its node; the panel test asserts a pan moves it by
+exactly the pan distance and a zoom resizes it, with never more than one editor in the layer, and the
+browser receipt asserts the same against real geometry (offset inside the node preserved, zoom
+restored afterwards).
 
 ## Invariants
 
