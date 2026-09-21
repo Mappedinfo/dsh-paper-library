@@ -455,6 +455,22 @@ Excalidraw is the reference implementation for this surface, so its renderer was
   style, layout and paint. The remaining 151 writes are the per-node class strings, which change
   because the selection changed; a render with no change at all now writes nothing.
 
+  The same measurement applied to a *drag* found the same pattern once more. `redrawGeometry` is the
+  cheap path, but it rewrote every node and every edge on every pointer move. It now takes the ids
+  the gesture touched (a move passes the dragged set, a resize its one node, a bend-point drag the
+  two endpoints, and the connect gesture — which moves nothing on the board — no longer calls it at
+  all). Dragging one node on a 150-node/149-edge board:
+
+  | per pointer move | attribute writes | median | p95 |
+  | --- | --- | --- | --- |
+  | before | 1,504 | 8.1 ms | 11.1 ms |
+  | after | 9.3 | 7.9 ms | 9.8 ms |
+
+  The frame time is dominated by the browser's own layout and paint of a 150-node SVG, not by this
+  renderer's JavaScript; what the change removes is the invalidation of ~300 elements per frame, which
+  is also what keeps a drag smooth on a slower machine or a bigger board. The full-board pass is still
+  one call away (`redrawGeometry()` with no argument) for a layout or a marquee.
+
 ## What implementation changed in this design
 
 Four decisions were revised while building, each for an observed reason:

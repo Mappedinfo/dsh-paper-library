@@ -280,44 +280,55 @@
       }
     }
 
-    /** Fast path during a drag: move existing elements instead of rebuilding the tree. */
-    function redrawGeometry() {
+    /**
+     * Fast path during a gesture: rewrite the geometry of the elements that can have changed.
+     *
+     * `moved` is a Set of node ids the caller knows it touched (a drag moves one or a few). Without
+     * it every node and edge is rewritten, which is what a layout pass needs but a single-node drag
+     * does not: at 150 nodes that was ~1,500 attribute writes per pointer move, and an attribute
+     * write schedules work even when the value is identical.
+     */
+    function redrawGeometry(moved = null) {
       if (!live()) return;
+      const touches = moved ? new Set(moved) : null;
       for (const node of board().nodes) {
+        if (touches && !touches.has(node.id)) continue;
         const group = nodeEls.get(node.id);
         if (!group) continue;
         const bounds = nodeBounds(node);
         // The content group is the node's position; the shape and the handles are local to it.
         const content = group.firstChild;
         if (!content) continue;
-        content.setAttribute('transform', `translate(${bounds.x},${bounds.y})`);
+        attr(content, 'transform', `translate(${bounds.x},${bounds.y})`);
         const shape = content.firstChild;
         if (!shape) continue;
-        if (node.kind === 'ellipse') { shape.setAttribute('cx', bounds.w / 2); shape.setAttribute('cy', bounds.h / 2); shape.setAttribute('rx', bounds.w / 2); shape.setAttribute('ry', bounds.h / 2); }
-        else if (node.kind === 'diamond') shape.setAttribute('points', `${bounds.w / 2},0 ${bounds.w},${bounds.h / 2} ${bounds.w / 2},${bounds.h} 0,${bounds.h / 2}`);
-        else { shape.setAttribute('width', bounds.w); shape.setAttribute('height', bounds.h); }
+        if (node.kind === 'ellipse') { attr(shape, 'cx', bounds.w / 2); attr(shape, 'cy', bounds.h / 2); attr(shape, 'rx', bounds.w / 2); attr(shape, 'ry', bounds.h / 2); }
+        else if (node.kind === 'diamond') attr(shape, 'points', `${bounds.w / 2},0 ${bounds.w},${bounds.h / 2} ${bounds.w / 2},${bounds.h} 0,${bounds.h / 2}`);
+        else { attr(shape, 'width', bounds.w); attr(shape, 'height', bounds.h); }
         for (const child of content.children ?? []) {
           const handle = child.getAttribute?.('data-handle');
-          if (handle === 'resize') { child.setAttribute('x', bounds.w - 5); child.setAttribute('y', bounds.h - 5); }
-          else if (handle === 'connect') { child.setAttribute('cx', bounds.w + 4); child.setAttribute('cy', bounds.h / 2); }
-          else if (child.getAttribute?.('data-note-fold') !== null && child.getAttribute?.('data-note-fold') !== undefined) child.setAttribute('d', noteFoldPath(bounds.w, bounds.h).d);
+          if (handle === 'resize') { attr(child, 'x', bounds.w - 5); attr(child, 'y', bounds.h - 5); }
+          else if (handle === 'connect') { attr(child, 'cx', bounds.w + 4); attr(child, 'cy', bounds.h / 2); }
+          else if (child.getAttribute?.('data-note-fold') !== null && child.getAttribute?.('data-note-fold') !== undefined) attr(child, 'd', noteFoldPath(bounds.w, bounds.h).d);
         }
       }
       for (const edge of board().edges) {
+        // Only an edge with a moved endpoint can have a new path.
+        if (touches && !touches.has(edge.from) && !touches.has(edge.to)) continue;
         const record = edgeEls.get(edge.id), from = byId(edge.from), to = byId(edge.to);
         if (!record || !from || !to) continue;
         const geometry = geometryFor(edge, from, to);
         record.points = geometry.points;
-        record.path.setAttribute('d', geometry.path);
+        attr(record.path, 'd', geometry.path);
         const hit = record.group.firstChild;
-        if (hit) hit.setAttribute('d', geometry.path);
+        if (hit) attr(hit, 'd', geometry.path);
         const label = record.group.lastChild;
-        if (edge.label && label?.classList?.contains('board-edge-label')) { label.setAttribute('x', geometry.mid.x); label.setAttribute('y', geometry.mid.y - 4); }
+        if (edge.label && label?.classList?.contains('board-edge-label')) { attr(label, 'x', geometry.mid.x); attr(label, 'y', geometry.mid.y - 4); }
         for (const [index, handle] of (record.handles ?? []).entries()) {
           const point = (edge.waypoints ?? [])[index];
           if (!point) continue;
-          handle.setAttribute('cx', point[0]);
-          handle.setAttribute('cy', point[1]);
+          attr(handle, 'cx', point[0]);
+          attr(handle, 'cy', point[1]);
         }
       }
       applyView();

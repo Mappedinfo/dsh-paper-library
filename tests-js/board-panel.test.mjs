@@ -1450,3 +1450,47 @@ test('the renderer reuses its elements instead of rebuilding the tree', async ()
   assert.equal(edgeLayer.children.length, 1, 'and so did its edge');
   assert.equal(nodeLayer.children[0], before.nodes[1], 'the surviving nodes are still the same elements');
 });
+
+test('a drag only rewrites the geometry of the elements it moved', async () => {
+  // The drag fast path used to rewrite every node and every edge on every pointer move: at 150
+  // nodes that measured ~1,500 attribute writes per move, all of them invalidating elements that
+  // had not moved. It now takes the ids the gesture touched.
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  harness.panel.applySourceTexts(JSON.stringify({
+    schema: 'paper-library-board.v1', title: '拖拽范围',
+    nodes: [{ id: 'n1', kind: 'concept', text: 'A' }, { id: 'n2', kind: 'concept', text: 'B' }, { id: 'n3', kind: 'concept', text: 'C' }],
+    edges: [{ from: 'n1', to: 'n2' }, { from: 'n2', to: 'n3' }],
+  }), '{}');
+  const nodeLayer = harness.svg.children[1].children[1];
+  const edgeLayer = harness.svg.children[1].children[0];
+  const reads = { transform: [], edgePaths: [] };
+  const spy = (layer, collect) => {
+    for (const element of layer.children) {
+      const original = element.setAttribute.bind(element);
+      element.setAttribute = (name, value) => { collect(element, name, value); return original(name, value); };
+      for (const child of element.children) {
+        const inner = child.setAttribute.bind(child);
+        child.setAttribute = (name, value) => { collect(child, name, value); return inner(name, value); };
+      }
+    }
+  };
+  spy(nodeLayer, (element, name) => { if (name === 'transform') reads.transform.push(element.parentNode?.getAttribute?.('data-node') ?? 'edge'); });
+  spy(edgeLayer, (element, name) => { if (name === 'd') reads.edgePaths.push(element.getAttribute('data-edge-path') ?? 'hit'); });
+
+  // Select n1 and drag it: only its own transform and the one edge attached to it may be rewritten.
+  const [n1, n2] = harness.panel.board().nodes;
+  harness.svg.dispatch('pointerdown', { clientX: n1.x + n1.w / 2, clientY: n1.y + n1.h / 2 });
+  harness.svg.dispatch('pointerup', {});
+  reads.transform.length = 0; reads.edgePaths.length = 0;
+  harness.svg.dispatch('pointerdown', { clientX: n1.x + n1.w / 2, clientY: n1.y + n1.h / 2 });
+  harness.svg.dispatch('pointermove', { clientX: n1.x + n1.w / 2 + 30, clientY: n1.y + n1.h / 2 + 20 });
+  harness.svg.dispatch('pointerup', {});
+  assert.deepEqual(reads.transform, ['n1'], 'only the dragged node is repositioned');
+  assert.equal(reads.edgePaths.length <= 2, true, 'only the edges attached to it are re-pathed');
+
+  // The dragged node really moved, and the nodes the gesture never touched kept their geometry.
+  const moved = harness.panel.board().nodes[0];
+  assert.equal(nodeLayer.children[0].firstChild.getAttribute('transform'), `translate(${moved.x},${moved.y})`);
+  assert.equal(nodeLayer.children[1].firstChild.getAttribute('transform'), `translate(${n2.x},${n2.y})`);
+});

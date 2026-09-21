@@ -918,20 +918,21 @@
         board = model.moveNodes(board, drag.ids, dx, dy);
         drag.start = point;
         drag.moved = true;
-        redrawGeometry();
+        redrawGeometry(drag.ids);
         return;
       }
       if (drag.kind === 'resize') {
         const node = byId(drag.id);
         if (!node) return;
         board = model.resizeNode(board, drag.id, drag.node.w + (point.x - drag.start.x), drag.node.h + (point.y - drag.start.y));
-        redrawGeometry();
+        redrawGeometry([drag.id]);
         return;
       }
       if (drag.kind === 'connect') {
         const target = hitNode(board.nodes, point);
         drag.target = target && target !== drag.id ? target : null;
-        redrawGeometry();
+        // Nothing on the board has moved yet — this gesture only draws its own preview below — so
+        // there is no geometry to redraw here.
         // One preview element per gesture, moved by rewriting its `d`. Appending a fresh path on
         // every pointer move left one orphaned node per event for the whole drag: the layer held
         // dozens of identical dashed paths, all of them repainted by the browser.
@@ -959,7 +960,8 @@
           if (JSON.stringify(moved.waypoints) === JSON.stringify(edge.waypoints ?? [])) return;
           drag.moved = true;
           board = model.setEdge(board, edge.id, { waypoints: moved.waypoints });
-          redrawGeometry();
+          // Only this edge's path can change; its endpoints have not moved.
+          redrawGeometry([edge.from, edge.to]);
         } catch (error) { toast(error.message, true); cancelDrag(); }
         return;
       }
