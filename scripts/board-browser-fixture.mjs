@@ -721,6 +721,7 @@ try {
   });
   assert.equal(drag.created, 0, 'dragging reuses the elements it already has');
   assert.ok(drag.writes < 200, `one drag frame must not rewrite the whole board (wrote ${drag.writes} attributes across 6 moves)`);
+
   record('drawing-cost-is-bounded-by-dom-work-not-by-elapsed-time');
   // Put the board back: this check's 60-node board would otherwise skew every later count.
   await page.evaluate(async id => {

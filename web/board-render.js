@@ -55,13 +55,25 @@
     /** The drawn elements, keyed by board id, so a drag moves nodes instead of rebuilding the tree. */
     const nodeEls = new Map(), edgeEls = new Map();
 
-    /** Apply the viewport transform and the matching grid offset. */
+    /**
+     * Apply the viewport transform and the matching grid offset.
+     *
+     * Skipped when nothing about the view changed: a node drag calls this on every pointer move,
+     * and rewriting the transform of the group that holds the whole scene invalidates it — and with
+     * it every child — for style and paint, on frames where the reader is moving a node, not the
+     * canvas.
+     */
+    let appliedView = null;
     function applyView() {
-      viewport.setAttribute('transform', `translate(${view().x},${view().y}) scale(${view().zoom})`);
-      stage.style.backgroundSize = `${round(24 * view().zoom)}px ${round(24 * view().zoom)}px`;
-      stage.style.backgroundPosition = `${view().x}px ${view().y}px`;
+      const current = view();
+      const signature = `${current.x},${current.y},${current.zoom}`;
+      if (signature === appliedView) return;
+      appliedView = signature;
+      attr(viewport, 'transform', `translate(${current.x},${current.y}) scale(${current.zoom})`);
+      stage.style.backgroundSize = `${round(24 * current.zoom)}px ${round(24 * current.zoom)}px`;
+      stage.style.backgroundPosition = `${current.x}px ${current.y}px`;
       const label = el('board-zoom-label');
-      if (label) label.textContent = `${Math.round(view().zoom * 100)}%`;
+      if (label) textOf(label, `${Math.round(current.zoom * 100)}%`);
     }
 
     /** The shape is drawn in the node's own coordinates: the content group carries the

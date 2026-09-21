@@ -479,6 +479,13 @@ Excalidraw is the reference implementation for this surface, so its renderer was
   work stopped here rather than adding `requestAnimationFrame` coalescing on top: coalescing would
   move when the DOM becomes readable, and several receipts depend on reading it after an action.
 
+  One more redundant write fell out of the same reasoning: `applyView` rewrote the transform of the
+  group that holds the entire scene on every drag frame, even though moving a node does not move the
+  view. It now writes only when the view actually changed, which keeps the whole scene out of style
+  and paint invalidation on those frames. A panel case pins it: a node drag and a repaint write nothing
+  to the viewport group, one zoom writes it exactly once with the new scale, and two view changes write
+  it twice.
+
   The guard that keeps this honest lives in the browser receipt instead of a timing test: it
   instruments `createElementNS` and `Element.prototype.setAttribute`, asserts that re-rendering an
   unchanged 60-node board creates nothing and writes nothing, and that a six-step drag of one node

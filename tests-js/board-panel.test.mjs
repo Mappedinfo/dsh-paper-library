@@ -1494,3 +1494,44 @@ test('a drag only rewrites the geometry of the elements it moved', async () => {
   assert.equal(nodeLayer.children[0].firstChild.getAttribute('transform'), `translate(${moved.x},${moved.y})`);
   assert.equal(nodeLayer.children[1].firstChild.getAttribute('transform'), `translate(${n2.x},${n2.y})`);
 });
+
+test('an unchanged viewport is not rewritten on every repaint', async () => {
+  // The viewport group contains the whole scene, so rewriting its transform invalidates every node
+  // for style and paint. A node drag calls applyView on each pointer move while the view stays put.
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  harness.panel.applySourceTexts(JSON.stringify({
+    schema: 'paper-library-board.v1', title: '视口',
+    nodes: [{ id: 'n1', kind: 'concept', text: 'A' }], edges: [],
+  }), '{}');
+  const viewport = harness.svg.children[1];
+  const writes = [];
+  const original = viewport.setAttribute.bind(viewport);
+  viewport.setAttribute = (name, value) => { writes.push(`${name}=${value}`); return original(name, value); };
+
+  // A drag frame with the view unchanged writes nothing to the viewport group.
+  const node = harness.panel.board().nodes[0];
+  harness.svg.dispatch('pointerdown', { clientX: node.x + node.w / 2, clientY: node.y + node.h / 2 });
+  harness.svg.dispatch('pointerup', {});
+  writes.length = 0;
+  harness.svg.dispatch('pointerdown', { clientX: node.x + node.w / 2, clientY: node.y + node.h / 2 });
+  harness.svg.dispatch('pointermove', { clientX: node.x + node.w / 2 + 30, clientY: node.y + node.h / 2 + 10 });
+  harness.svg.dispatch('pointerup', {});
+  assert.deepEqual(writes, [], 'moving a node does not rewrite the scene transform');
+
+  // A repaint with the same view is just as quiet, and a changed view is written exactly once.
+  writes.length = 0;
+  harness.panel.render();
+  assert.deepEqual(writes, [], 'a repaint with an unchanged view writes nothing either');
+  harness.registry.get('board-zoom-in').dispatch('click');
+  assert.equal(writes.length, 1, 'zooming writes the transform once');
+  assert.match(writes.at(-1), /scale\(1\.2\)/, 'and it carries the new zoom');
+  // Zooming twice from the same statement would be two writes; the same zoom twice is one.
+  writes.length = 0;
+  harness.registry.get('board-zoom-out').dispatch('click');
+  harness.registry.get('board-zoom-in').dispatch('click');
+  assert.equal(writes.length, 2, 'each real view change is written');
+  writes.length = 0;
+  harness.panel.render();
+  assert.deepEqual(writes, [], 'and then the unchanged view is quiet again');
+});
