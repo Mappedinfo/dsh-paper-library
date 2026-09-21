@@ -3,6 +3,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { core, dispatch } from '../bridge.mjs'
 import { createFetchHandler } from '../http.mjs'
 import { resolveConfig } from './config.mjs'
+import { createExternalSources } from './external-sources.mjs'
 import { createHarnessAI, discoverModels } from './ai.mjs'
 import { createNodeHandler } from './http.mjs'
 import { registerLibraryTools } from './tools.mjs'
@@ -42,6 +43,9 @@ export function apply(ctx, rawConfig = {}) {
   })
   // Delegation stays live when the optional settings provider mounts/unmounts.
   const settings = { get: () => sharedSettings.get(), update: (...args) => sharedSettings.update(...args), reset: (...args) => sharedSettings.reset(...args),subscribe:fn=>{settingsListeners.add(fn);return()=>settingsListeners.delete(fn)} }
+  // Synced corpora stay optional: with no configured roots the list is empty and
+  // every other path behaves exactly as before.
+  const sources = createExternalSources({ config })
   const localState = Object.fromEntries(['get','put','list'].map(method => [method, (...args) => sharedSettings.localState[method](...args)]))
   // Boards reuse the private state store, so no second persistence path exists.
   const boards = createBoardStore({ localState })
@@ -56,6 +60,7 @@ export function apply(ctx, rawConfig = {}) {
     models: signal => discoverModels(ctx.llm, signal),
     localState,
     settings,
+    sources,
     onImported:items=>automaticAnalysis?.imported(items),
   }
   ctx.effect(() => registerLibraryTools(ctx, defineTool, dispatch, options, config), 'paper-library: tools')

@@ -528,6 +528,10 @@ def dispatch(request):
     library = Library(root)
     try:
         action = request.get("action")
+        if isinstance(action, str) and action.startswith("external_"):
+            # Indexing of corpora another tool syncs: symlinks in, no copies out.
+            from . import external
+            return external.dispatch(library, request)
         if isinstance(action, str) and action.startswith("graph_"):
             from .knowledge_graph import dispatch_graph
             return dispatch_graph(library, action, request)
@@ -551,7 +555,8 @@ def dispatch(request):
             return {"items": [library.get(row[0]) for row in rows], "total": count}
         if action == "status":
             counts = library.db.execute("SELECT count(*) AS total,count(paper_archive.paper_id) AS archived FROM papers LEFT JOIN paper_archive ON paper_archive.paper_id=papers.id").fetchone()
-            return {"count": counts["total"] - counts["archived"], "archived_count": counts["archived"], "total_count": counts["total"], "library": str(library.root), "storage": "SQLite + portable native PDF annotations", "worker": "on-demand", "schema": 3, "projects": True}
+            synced = library.db.execute("SELECT sum(missing=0) AS indexed,sum(missing=1) AS missing FROM external_files").fetchone()
+            return {"count": counts["total"] - counts["archived"], "archived_count": counts["archived"], "total_count": counts["total"], "library": str(library.root), "storage": "SQLite + portable native PDF annotations", "worker": "on-demand", "schema": 3, "projects": True, "external_indexed": int(synced["indexed"] or 0), "external_missing": int(synced["missing"] or 0)}
         if action == "import":
             return library.import_items(request.get("items"), request.get("path"), request.get("limit", 100), request.get("offset", 0), request.get("metadata"), request.get("metadata_source"), request.get("metadata_verified", False))
         if action == "inspect_pdf":

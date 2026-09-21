@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import { RESOURCE_TOOL_SPECS, resourceToolRequest } from './resource-tools.mjs'
 import { BOARD_TOOL_SPECS, boardToolRequest, handleBoardRequest } from './board-tools.mjs'
 import { PROJECT_TOOL_SPECS, projectToolRequest } from './project-tools.mjs'
+import { SOURCE_TOOL_SPECS, handleSourceRequest } from './external-sources.mjs'
 
 const string = (description, required = false) => ({ type: 'string', description, ...(required ? { required: true } : {}) })
 const ids = { type: 'array', items: { type: 'string' } }
@@ -25,6 +26,7 @@ const graphRelations = ['supports', 'contradicts', 'uses', 'evaluates', 'derived
 
 /** Small schemas keep scope explicit and avoid exposing core write/feedback internals. */
 export const TOOL_SPECS = [
+  ...SOURCE_TOOL_SPECS,
   ...RESOURCE_TOOL_SPECS,
   ...PROJECT_TOOL_SPECS,
   ...BOARD_TOOL_SPECS,
@@ -120,6 +122,12 @@ export function registerLibraryTools(ctx, defineTool, dispatch, options, config)
         execute: async (args, exec) => {
           exec.signal.throwIfAborted()
           const request = requestFromTool(spec, args, exec)
+          // Synced corpora are indexed through deployment-configured roots only.
+          if (spec.sources) {
+            if (!options.sources) throw new Error('Synced paper folders are not configured for this deployment')
+            const preferences = await options.settings?.get?.()
+            return handleSourceRequest(options.sources, spec, request, dispatch, options, exec.signal, preferences?.value || {})
+          }
           // Whiteboards are host state, not managed-library work: they never enter the Python worker.
           if (spec.board) {
             if (!options.boards) throw new Error('Whiteboards require the local state store')

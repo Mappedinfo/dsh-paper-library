@@ -222,8 +222,17 @@ class PdfWrites:
             if os.path.exists(tempname):
                 os.unlink(tempname)
 
+    def _writable_pdf(self, id):
+        """The file a write may modify: a synced paper is promoted to a managed copy first."""
+        row = self.db.execute("SELECT pdf_path FROM papers WHERE id=?", (id,)).fetchone()
+        if row and row["pdf_path"]:
+            from .external import is_external_path, promote
+            if is_external_path(self, row["pdf_path"]):
+                return promote(self, id)
+        return self.pdf_path(id)
+
     def _write_pdf(self, id, operation):
-        destination = self.pdf_path(id)
+        destination = self._writable_pdf(id)
         with self._open_pdf(destination, writing=True) as doc:
             result = operation(doc)
             self._atomic_save(doc, destination, backup_key=id)
@@ -294,7 +303,7 @@ class PdfWrites:
         journal.unlink()
 
     def _update_pdf_metadata(self, id, value):
-        current = self.pdf_path(id)
+        current = self._writable_pdf(id)
         destination = self._managed_destination(value, id, current)
         if destination == current:
             self._write_pdf(id, lambda doc: self._embed(doc, value))

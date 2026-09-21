@@ -12,7 +12,12 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   auto_review: true,
   'auto-paper-conversation': false,
   'reading-panel-side': 'left',
+  // Optional adapter to a separate data-sync service: a config file it owns, or
+  // extra absolute folders. Both default to empty, so the library never needs it.
+  sync_config: '',
+  external_sources: '',
 });
+export const TEXT_SETTINGS = Object.freeze(['sync_config', 'external_sources']);
 const fields = Object.keys(PAPER_LIBRARY_SETTINGS_DEFAULTS);
 const markerKey = 'settings.migration:paper-library';
 const backupKey = 'settings.backup:paper-library';
@@ -36,6 +41,8 @@ export function createPaperLibrarySettingsSchema(Schema) {
     auto_review: Schema.boolean().default(true),
     'auto-paper-conversation': Schema.boolean().default(false),
     'reading-panel-side': Schema.union([Schema.const('left'), Schema.const('right')]).default('left'),
+    sync_config: Schema.string().default(''),
+    external_sources: Schema.string().default(''),
   });
 }
 
@@ -43,7 +50,20 @@ function validatePatch(patch) {
   if (!plain(patch)) throw invalid('设置必须是字段对象。');
   for (const [key, value] of Object.entries(patch)) {
     if (!fields.includes(key)) throw invalid(`此字段不属于可编辑设置：${key}`);
-    if (key === 'reading-panel-side' ? !['left', 'right'].includes(value) : typeof value !== 'boolean') {
+    if (key === 'reading-panel-side') {
+      if (!['left', 'right'].includes(value)) throw invalid('设置值无效：reading-panel-side');
+    } else if (key === 'sync_config') {
+      if (typeof value !== 'string' || value.length > 500) throw invalid('设置值无效：sync_config');
+      const path = value.trim();
+      if (path && !(path.startsWith('/') && !/[\n\r]/.test(path))) throw invalid('数据同步服务配置需要绝对路径，留空表示不启用。');
+    } else if (key === 'external_sources') {
+      if (typeof value !== 'string' || value.length > 8000) throw invalid('设置值无效：external_sources');
+      if (value.trim()) {
+        let parsed;
+        try { parsed = JSON.parse(value); } catch { throw invalid('外部文献源需要 JSON 数组文本，例如 [{"id":"extra","root":"/abs/path"}]。'); }
+        if (!Array.isArray(parsed)) throw invalid('外部文献源需要 JSON 数组文本。');
+      }
+    } else if (typeof value !== 'boolean') {
       throw invalid(`设置值无效：${key}`);
     }
   }
@@ -54,7 +74,7 @@ function managed(value, { legacy = false } = {}) {
   for (const key of fields) {
     if (!own(value, key)) continue;
     let candidate = value[key];
-    if (legacy && key !== 'reading-panel-side' && ['true', 'false'].includes(candidate)) candidate = candidate === 'true';
+    if (legacy && key !== 'reading-panel-side' && !TEXT_SETTINGS.includes(key) && ['true', 'false'].includes(candidate)) candidate = candidate === 'true';
     try { Object.assign(result, validatePatch({ [key]: candidate })); } catch { /* Invalid legacy values remain in their recovery record. */ }
   }
   return result;

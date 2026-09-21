@@ -20,6 +20,14 @@ window.PaperLibrarySettings = (() => {
     const inputs=new Map();
     for(const [key,label,help] of fields){const row=make('label','settings-option'),input=make('input');input.type='checkbox';input.id=`setting-${key}`;const copy=make('span');copy.append(make('strong','',label),make('small','',help));row.append(input,copy);controls.append(row);inputs.set(key,input);input.addEventListener('change',()=>void save({[key]:input.checked}));}
     const sideRow=make('label','settings-side'),side=make('select');side.id='setting-reading-panel-side';side.setAttribute('aria-label','阅读侧栏位置');for(const [value,label]of[['left','左侧'],['right','右侧']]){const option=make('option','',label);option.value=value;side.append(option);}sideRow.append(make('span','','阅读侧栏'),side);controls.append(sideRow);inputs.set('reading-panel-side',side);side.addEventListener('change',()=>void save({'reading-panel-side':side.value}));
+    const syncRow=make('label','settings-option'),syncInput=make('input');syncInput.type='text';syncInput.id='setting-sync_config';syncInput.placeholder='/absolute/path/to/sync-service/config.json';syncInput.autocomplete='off';syncInput.spellcheck=false;
+    const syncCopy=make('span');syncCopy.append(make('strong','','数据同步服务配置（可选）'),make('small','','指向另一个同步/备份插件自己的 JSON 配置；论文仓库只读其中的目录列表，把它当作外部文献源按符号链接纳入。留空表示不启用，插件不依赖它。'));
+    syncRow.append(syncInput,syncCopy);controls.append(syncRow);inputs.set('sync_config',syncInput);
+    syncInput.addEventListener('change',()=>void save({sync_config:syncInput.value.trim()}));
+    const extraRow=make('label','settings-option'),extraInput=make('input');extraInput.type='text';extraInput.id='setting-external_sources';extraInput.placeholder='[{"id":"archive","root":"/Volumes/archive/papers"}]';extraInput.autocomplete='off';extraInput.spellcheck=false;
+    const extraCopy=make('span');extraCopy.append(make('strong','','额外外部文献源'),make('small','','JSON 数组，每项 {id, root}；根目录写绝对路径。扫描只建符号链接，不改动源目录，第一次写批注时才复制进来。'));
+    extraRow.append(extraInput,extraCopy);controls.append(extraRow);inputs.set('external_sources',extraInput);
+    extraInput.addEventListener('change',()=>void save({external_sources:extraInput.value.trim()}));
     const storage=make('details','settings-storage'),summary=make('summary','','模型、外观与存储');storage.append(summary,make('p','','模型沿用每篇论文的 DSH 对话；主题与字号跟随 DSH 外观设置。'));
     const path=make('p','settings-path');storage.append(path,make('p','','文献、PDF、草稿和设置均保存在主机磁盘，不写入浏览器 localStorage。更换资料库目录需要修改部署配置，已有数据不会自动搬迁。'));
     const footer=make('footer'),reload=make('button','button subtle','重新读取'),reset=make('button','button subtle','恢复默认');reload.type=reset.type='button';reload.addEventListener('click',()=>void refresh());reset.addEventListener('click',()=>void save(null));footer.append(reload,reset);
@@ -28,7 +36,7 @@ window.PaperLibrarySettings = (() => {
     function render(){
       controls.disabled=busy||!snapshot?.writable;reset.disabled=busy||!snapshot?.writable;reload.disabled=busy;
       const shown={...snapshot?.value,...pendingPatch};
-      for(const[key,input]of inputs){if(input.type==='checkbox')input.checked=shown[key]===true;else input.value=shown[key]||'left';}
+      for(const[key,input]of inputs){if(input.type==='text'&&document.activeElement===input)continue;if(input.type==='checkbox')input.checked=shown[key]===true;else if(input.tagName==='SELECT')input.value=shown[key]||'left';else input.value=shown[key]??'';}
       path.textContent=`资料库：${getLibrary()||'正在读取…'}`;
       description.textContent=snapshot?.backend==='dsh'&&snapshot.available===false?'设置由 DSH 管理。请在 DSH 的 Paper Library 面板或「设置 → 插件 → 插件配置」中修改。':snapshot?.backend==='local'?'独立运行：设置保存在本机。安装到 DSH 后，插件设置会接入 DSH 的统一设置。':'DSH 中的入口：设置 → 插件 → 插件配置 → Paper Library。两个入口共享同一份主机设置。';
     }

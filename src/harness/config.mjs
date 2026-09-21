@@ -1,6 +1,7 @@
 import { isAbsolute, resolve } from 'node:path'
 import { defaultLibrary } from '../bridge.mjs'
 import { translationServerUrl } from '../translation-server.mjs'
+import { normalizeConfiguredSources } from './external-sources.mjs'
 
 /** Resolve deployment-owned paths; request JSON never controls these options. */
 export function resolveConfig(raw = {}) {
@@ -23,6 +24,11 @@ export function resolveConfig(raw = {}) {
   // A private reviewer overlay stays in the user's own repository: the plugin
   // only reads the explicitly configured absolute file (bounded, at read time).
   if (raw.reviewProfile !== undefined && (typeof raw.reviewProfile !== 'string' || !raw.reviewProfile.trim() || !isAbsolute(raw.reviewProfile))) throw new Error('paper-library: reviewProfile must be an absolute file path')
+  // Corpora another tool syncs are indexed by symlink: the deployment may list
+  // folders directly or point at a sync service's own JSON config. Both stay
+  // optional, so the plugin is fully usable with neither configured.
+  if (raw.syncConfig !== undefined && (typeof raw.syncConfig !== 'string' || !raw.syncConfig.trim() || !isAbsolute(raw.syncConfig))) throw new Error('paper-library: syncConfig must be an absolute file path')
+  const externalSources = normalizeConfiguredSources(raw.externalSources)
   const translationServer = translationServerUrl(raw.translationServer)
-  return { library: resolve(library), ...(raw.localStateHome === undefined ? {} : { localStateHome: resolve(raw.localStateHome) }), python: raw.python, provider: raw.provider, model: raw.model, maxOutputTokens, maxLanguageOutputTokens, maxAnnotationCharacters, analysisConcurrency, ...(translationServer ? { translationServer } : {}), ...(raw.reviewProfile === undefined ? {} : { reviewProfile: resolve(raw.reviewProfile) }), requireToolApproval: raw.requireToolApproval ?? true }
+  return { library: resolve(library), ...(raw.localStateHome === undefined ? {} : { localStateHome: resolve(raw.localStateHome) }), python: raw.python, provider: raw.provider, model: raw.model, maxOutputTokens, maxLanguageOutputTokens, maxAnnotationCharacters, analysisConcurrency, ...(translationServer ? { translationServer } : {}), ...(raw.reviewProfile === undefined ? {} : { reviewProfile: resolve(raw.reviewProfile) }), externalSources, ...(raw.syncConfig === undefined ? {} : { syncConfig: resolve(raw.syncConfig) }), requireToolApproval: raw.requireToolApproval ?? true }
 }

@@ -151,7 +151,7 @@ Labels are keyed by NFKC-normalised, punctuation-stripped lowercase text, so “
 
 ## Native Harness tools
 
-The plugin registers 31 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
+The plugin registers 33 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
 
 | Tool | Arguments | Node action |
 |---|---|---|
@@ -178,10 +178,18 @@ The plugin registers 31 tools through Harness's official tool registry. Optional
 | `library_graph_edge_delete` | `id,edge_id` | `graph_edge_delete` |
 | `library_link` | `source,target,relation,note?` | `link` |
 | `library_feedback` | `id,annotation_ids?,provider?,model?,reasoning_effort?` | `ai_feedback` |
+| `library_sources` | none | `external_status` |
+| `library_sources_scan` | `operation?,source?,limit?` | `external_scan`/`external_prune` |
 
 Tool metadata is a closed subset: `title,type,citekey,DOI,URL,abstract,author,editor,container-title,publisher,volume,issue,page,issued,tags,publication_dates,journal_rankings`. Its person schema accepts `family,given,literal,ORCID,affiliation`, with affiliation `{name,ror?,source?}`. Tool `issued` uses CSL `date-parts`. Graph evidence uses the closed schema above. Paths and runtime state cannot enter structured metadata. Each tool request is capped at 128 KiB before dispatch; core field limits still apply. `rects` is required for `library_annotate`, including an empty array for a page note.
 
 Mutation tools pass through the configured native approval pipeline; `requireToolApproval` defaults to true and preserves any existing denial. Read tools do not start a model. `library_feedback` uses the calling Agent's configured model route by default and remains the compatibility feedback operation, not `chat_send`. `metadata_lookup` is a Node/browser operation, not an additional registered native tool.
+
+## External sources (synced corpora)
+
+`external_sources`, `external_files` and the staged tree under `<library>/external/` let the library index PDF corpora that a separate sync/backup service maintains. Roots always come from deployment configuration (`externalSources`, `syncConfig`) or from the live settings `sync_config` / `external_sources`; a tool argument can never select a path. `external_scan` walks a root, reads only directory entries and size/mtime, records filename-derived metadata as `parse.field_sources = synced-filename` with `needs_review`, and creates one symlink per PDF; unchanged files are skipped from the durable records, and at most 200 new files (limit 2,000) are indexed per call with `pending` reporting the remainder. `external_prune` removes only links whose file is gone. `external_files` keeps `missing = 1` rows and never deletes a paper, so annotations and graphs survive a disappearing file.
+
+`pdf_path` returns the staged link for an external record; every write goes through `_writable_pdf`, which promotes the file into `pdfs/` first (`external_source.promoted`), so a synced directory is never modified. Sources may not live inside the library, staged paths may not escape their source directory, and an existing regular file at a staged path is refused rather than overwritten. Design and configuration: [external-sources.md](external-sources.md).
 
 ## Reading projects
 

@@ -56,6 +56,15 @@ class Papers:
         CREATE TABLE IF NOT EXISTS feedback(id TEXT PRIMARY KEY, paper_id TEXT NOT NULL, payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS paper_archive(paper_id TEXT PRIMARY KEY, archived_at TEXT NOT NULL);
         """)
+        # Synced corpora are indexed by symlink, never copied: external_files keeps the
+        # size/mtime record that makes a rescan a walk plus lookups, and external_sources
+        # records which roots were scanned and when. Neither table stores file contents.
+        self.db.executescript("""
+        CREATE TABLE IF NOT EXISTS external_sources(id TEXT PRIMARY KEY, root TEXT NOT NULL, label TEXT, scanned_at TEXT, files INTEGER NOT NULL DEFAULT 0, indexed INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS external_files(source TEXT NOT NULL, relative TEXT NOT NULL, paper_id TEXT, size INTEGER, mtime_ns INTEGER, missing INTEGER NOT NULL DEFAULT 0, updated TEXT NOT NULL, PRIMARY KEY(source, relative));
+        CREATE INDEX IF NOT EXISTS external_files_size ON external_files(source, size);
+        CREATE INDEX IF NOT EXISTS external_files_paper ON external_files(paper_id);
+        """)
         # Reading projects are part of the catalog so they are queryable, exportable and
         # available to the agent; the many-to-many edge lives in project_papers.
         from .projects import SCHEMA_SQL as project_schema
@@ -128,7 +137,15 @@ class Papers:
         row = self.db.execute("SELECT pdf_path FROM papers WHERE id=?", (id,)).fetchone()
         if not row or not row[0]:
             raise ValueError("Paper has no attached PDF")
-        path = (self.root / row[0]).resolve()
+        stored = Path(os.path.normpath(str(self.root / row[0])))
+        if stored.is_relative_to(self.root / "external"):
+            # A synced paper is staged as a symlink to a file this library does not own.
+            # Resolving it would leave the library root, so the link itself is checked and
+            # every write goes through a managed promotion instead (see pdf_write.py).
+            if stored.is_symlink() and stored.is_file():
+                return stored
+            raise ValueError("Synced PDF is missing; restore it in the source directory, then rescan")
+        path = stored.resolve()
         if not path.is_relative_to(self.root / "pdfs") or not path.is_file():
             raise ValueError("Managed PDF is missing or outside library")
         return path

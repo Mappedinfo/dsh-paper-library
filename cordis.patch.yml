@@ -8,5 +8,7 @@
         model: !!js process.env.DSH_PAPER_LIBRARY_MODEL
         translationServer: !!js process.env.DSH_PAPER_LIBRARY_TRANSLATION_SERVER
         reviewProfile: !!js process.env.DSH_PAPER_LIBRARY_REVIEW_PROFILE
+        syncConfig: !!js process.env.DSH_PAPER_LIBRARY_SYNC_CONFIG
+        externalSources: !!js process.env.DSH_PAPER_LIBRARY_SOURCES
         requireToolApproval: true
         maxOutputTokens: 1600
