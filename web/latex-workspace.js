@@ -18,17 +18,30 @@ window.PaperLatexWorkspace = (() => {
     const rendered = new Map();
     let pendingConflict = null;
 
-    const trigger = make('button', 'button subtle', 'LaTeX'); trigger.id = 'latex-open'; trigger.type = 'button';
-    trigger.title = '打开 LaTeX 工作台：编辑项目文件夹里的 .tex 并查看它编译出的 PDF';
-    (document.querySelector('.topbar-actions') || document.body).append(trigger);
+    // A standalone surface, like the whiteboard: the page itself becomes the workspace and
+    // `?view=latex` opens it without the library, so a DSH tab can host it directly.
+    const trigger = document.getElementById('latex-open') || (() => {
+      const button = make('button', 'button subtle', 'LaTeX'); button.id = 'latex-open'; button.type = 'button';
+      button.title = '打开 LaTeX 工作台：编辑项目文件夹里的 .tex 并查看它编译出的 PDF';
+      (document.querySelector('.topbar-actions') || document.body).append(button);
+      return button;
+    })();
+    const view = document.getElementById('latex-view') || (() => {
+      const section = make('section', 'latex-view'); section.id = 'latex-view'; section.hidden = true;
+      section.setAttribute('aria-label', 'LaTeX 工作台');
+      (document.querySelector('.workspace') || document.body).append(section);
+      return section;
+    })();
+    view.hidden = true;
+    view.textContent = '';
 
-    const dialog = make('dialog', 'latex-workspace'); dialog.id = 'latex-workspace'; dialog.setAttribute('aria-labelledby', 'latex-workspace-title');
-    const header = make('header');
+    const header = make('header', 'latex-header');
     const title = make('strong', '', 'LaTeX 工作台'); title.id = 'latex-workspace-title';
     const subtitle = make('small', '', '项目就是一个装着 .tex 和对应 PDF 的文件夹');
     const titleBox = make('div', 'latex-title'); titleBox.append(title, subtitle);
-    const closeButton = make('button', 'icon-button', '×'); closeButton.type = 'button'; closeButton.id = 'latex-close'; closeButton.setAttribute('aria-label', '关闭 LaTeX 工作台'); closeButton.addEventListener('click', () => dialog.close());
-    header.append(titleBox, closeButton);
+    const back = make('button', 'button subtle', '返回文献库'); back.id = 'latex-back'; back.type = 'button';
+    back.title = '关闭工作台，回到文献库列表';
+    header.append(titleBox, back);
 
     const toolbar = make('div', 'latex-toolbar');
     const projectSelect = make('select'); projectSelect.id = 'latex-project'; projectSelect.setAttribute('aria-label', '选择 LaTeX 项目');
@@ -98,8 +111,7 @@ window.PaperLatexWorkspace = (() => {
     conflictBar.append(conflictText, reload, overwrite);
     const footer = make('footer', 'latex-footer');
     footer.append(conflictBar, status);
-    dialog.append(header, toolbar, newForm, body, aiSection, diff, footer);
-    document.body.append(dialog);
+    view.append(header, toolbar, newForm, body, aiSection, diff, footer);
 
     function say(text, error = false) { status.textContent = text; status.classList.toggle('error', error); }
     function setSaveState(text, kind = '') { saveState.textContent = text; saveState.dataset.state = kind; }
@@ -494,13 +506,14 @@ window.PaperLatexWorkspace = (() => {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); void aiRun('ask'); }
     });
 
-    dialog.addEventListener('keydown', event => {
+    view.addEventListener('keydown', event => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void flush('manual'); }
     });
-    dialog.addEventListener('close', () => { clearTimeout(timer); if (dirty) void flush('manual'); });
 
+    /** Enter the workspace: the page becomes the surface, library hidden like the board's focus. */
     async function open(preferred) {
-      if (!dialog.open) dialog.showModal();
+      view.hidden = false;
+      document.body.classList.add('latex-focused');
       try {
         await refreshProjects(preferred);
         const wanted = project?.id && projects.some(item => item.id === project.id) ? project.id : projects[0]?.id;
@@ -511,15 +524,21 @@ window.PaperLatexWorkspace = (() => {
       }
     }
 
-    async function close() { if (dirty) await flush('manual'); dialog.close(); }
+    async function close() {
+      clearTimeout(timer);
+      if (dirty) await flush('manual');
+      view.hidden = true;
+      document.body.classList.remove('latex-focused');
+    }
 
+    back.addEventListener('click', () => void close());
     trigger.addEventListener('click', () => void open());
     lineNumbers();
     void renderEmpty();
 
     return {
       open, close,
-      isOpen: () => dialog.open,
+      isOpen: () => !view.hidden,
       refresh: () => open(project?.id),
       /** Used by the acceptance fixture to drive the editor without a real keyboard. */
       testHooks: {
@@ -529,7 +548,7 @@ window.PaperLatexWorkspace = (() => {
         openFile,
         state: () => ({ project: project?.id || null, file, revision, dirty, pageCount, page, conflict: Boolean(pendingConflict), ai: { available: ai.available, proposal: ai.proposal?.id || null } }),
       },
-      dispose() { disposed = true; clearTimeout(timer); dialog.remove(); trigger.remove(); },
+      dispose() { disposed = true; clearTimeout(timer); view.hidden = true; document.body.classList.remove('latex-focused'); },
     };
   }
   return { create };

@@ -60,11 +60,25 @@ try {
   record('the-shipped-page-loads-the-panel-and-its-topbar-entry')
 
   await page.locator('#latex-open').click()
-  await page.locator('#latex-workspace').waitFor({ state: 'visible' })
+  await page.locator('#latex-view').waitFor({ state: 'visible' })
   await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('Shell integration manuscript.'), 'project loaded in the editor')
   const options = await page.locator('#latex-project option').allInnerTexts()
   if (!options.some(text => text.includes('外壳验证'))) throw new Error(`project missing from the picker: ${options.join(', ')}`)
-  record('opening-the-panel-loads-the-registered-project-and-its-source')
+  if (!await page.evaluate(() => document.body.classList.contains('latex-focused'))) throw new Error('the workspace did not take over the page')
+  if (await page.locator('.topbar').isVisible()) throw new Error('the library topbar is still visible behind the workspace')
+  record('the-entry-opens-a-full-page-workspace-with-the-registered-project')
+
+  await page.locator('#latex-back').click()
+  await until(() => page.locator('#latex-view').isVisible(), value => value === false, 'back to the library')
+  if (!await page.locator('.library-pane').isVisible()) throw new Error('the library did not come back')
+  record('the-workspace-returns-to-the-library-without-a-reload')
+
+  // The dedicated entry a DSH tab can host: `?view=latex` is a pure workspace page.
+  await page.goto(`${origin}/?view=latex`, { waitUntil: 'load' })
+  await page.locator('#latex-view').waitFor({ state: 'visible' })
+  await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('Shell integration manuscript.'), 'standalone entry loaded the project')
+  if (await page.locator('.library-pane').isVisible()) throw new Error('the standalone entry still renders the library')
+  record('the-view-latex-entry-opens-as-a-pure-workspace-page')
 
   await until(() => page.locator('#latex-status').innerText(), value => value.includes('不可用') || value.includes('未连接'), 'collaboration availability reported')
   const aiVisible = await page.locator('#latex-ai').isVisible()

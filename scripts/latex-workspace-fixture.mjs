@@ -32,8 +32,10 @@ const until = async (read, accept, label, attempts = 200) => {
 
 const TYPES = { '.js': 'text/javascript;charset=utf-8', '.css': 'text/css;charset=utf-8', '.html': 'text/html;charset=utf-8' }
 const PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>LaTeX workspace fixture</title>
+<link rel="stylesheet" href="./style.css">
+<link rel="stylesheet" href="./theme.css">
 <link rel="stylesheet" href="./latex-workspace.css"></head>
-<body><div class="topbar-actions"></div><main id="host"></main>
+<body><div class="topbar-actions"></div><main class="workspace" id="host"></main>
 <script src="./latex-workspace.js"></script>
 <script>
 window.__calls = [];
@@ -159,8 +161,9 @@ try {
   await page.waitForFunction(() => window.latexUI)
 
   await page.locator('#latex-open').click()
-  await page.locator('#latex-workspace').waitFor({ state: 'visible' })
-  record('topbar-entry-opens-the-workspace-dialog')
+  await page.locator('#latex-view').waitFor({ state: 'visible' })
+  if (!await page.evaluate(() => document.body.classList.contains('latex-focused'))) throw new Error('the workspace did not take the page')
+  record('topbar-entry-opens-the-workspace-as-a-page')
 
   await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('The reader types here.'), 'main.tex loaded')
   const mainLabel = await page.locator('#latex-main').innerText()
@@ -182,7 +185,7 @@ try {
   if (!/第 1 \/ \d+ 页/.test(label)) throw new Error(`page label unexpected: ${label}`)
   if (await page.locator('#latex-errors li').count() !== 0) throw new Error('compile reported errors for a valid document')
   if (image < 1) throw new Error('no rendered page')
-  await page.locator('#latex-workspace').screenshot({ path: join(project, 'docs', 'images', 'latex-workspace.jpg'), type: 'jpeg', quality: 82 })
+  await page.screenshot({ path: join(project, 'docs', 'images', 'latex-workspace.jpg'), type: 'jpeg', quality: 82 })
   record('compile-produces-a-pdf-and-the-panel-renders-its-first-page')
 
   // Another editor writes the file behind the panel's back.
@@ -254,7 +257,7 @@ try {
   if (!shown.includes(ANCHOR)) throw new Error(`proposal did not show the anchor: ${shown}`)
   const afterPropose = await readFile(join(first, 'main.tex'), 'utf8')
   if (!afterPropose.includes(ANCHOR)) throw new Error('a proposal must not write to the file')
-  await page.locator('#latex-workspace').screenshot({ path: join(project, 'docs', 'images', 'latex-workspace-ai.jpg'), type: 'jpeg', quality: 82 })
+  await page.screenshot({ path: join(project, 'docs', 'images', 'latex-workspace-ai.jpg'), type: 'jpeg', quality: 82 })
   record('a-proposal-is-shown-for-review-before-anything-is-written')
 
   await page.locator('#latex-ai-accept').click()
@@ -272,10 +275,29 @@ try {
   await until(() => page.locator('.latex-ai-replacements li').count(), count => count === 0, 'proposal discarded')
   record('a-proposal-can-be-discarded-without-writing')
 
-  await page.locator('#latex-close').click()
-  await until(() => page.locator('#latex-workspace').isVisible(), value => value === false, 'dialog closed')
+  // The same surface in dark mode: text and chrome must not collapse into each other.
+  const lightInk = await page.evaluate(() => getComputedStyle(document.getElementById('latex-editor')).color)
+  const lightPanel = await page.evaluate(() => getComputedStyle(document.querySelector('.latex-editor-wrap')).backgroundColor)
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.waitForTimeout(150)
+  const darkInk = await page.evaluate(() => getComputedStyle(document.getElementById('latex-editor')).color)
+  const darkPanel = await page.evaluate(() => getComputedStyle(document.querySelector('.latex-editor-wrap')).backgroundColor)
+  const darkBody = await page.evaluate(() => getComputedStyle(document.getElementById('latex-view')).backgroundColor)
+  if (darkInk === lightInk) throw new Error(`editor ink did not follow the colour scheme (${darkInk})`)
+  if (darkPanel === lightPanel) throw new Error(`editor surface did not follow the colour scheme (${darkPanel})`)
+  const luminance = value => { const [r, g, b] = (value.match(/[\d.]+/g) || [0, 0, 0]).slice(0, 3).map(Number); return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 }
+  if (Math.abs(luminance(darkInk) - luminance(darkBody)) < 0.25) throw new Error(`dark mode leaves text and surface too close: ${darkInk} on ${darkBody}`)
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.screenshot({ path: join(project, 'docs', 'images', 'latex-workspace-dark.jpg'), type: 'jpeg', quality: 82 })
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  record('the-surface-follows-light-and-dark-with-readable-contrast')
+
+  await page.locator('#latex-back').click()
+  await until(() => page.locator('#latex-view').isVisible(), value => value === false, 'workspace closed')
+  if (await page.evaluate(() => document.body.classList.contains('latex-focused'))) throw new Error('the focus class outlived the workspace')
   if (errors.length) throw new Error(`browser errors: ${errors.join(' | ')}`)
-  record('no-browser-errors-and-the-workspace-closes')
+  record('leaving-the-workspace-restores-the-library-page')
 
   const calls = await page.evaluate(() => window.__calls)
   const externalRequests = await page.evaluate(() => performance.getEntriesByType('resource').filter(entry => /^https?:\/\//.test(entry.name) && !entry.name.startsWith(location.origin)).length)

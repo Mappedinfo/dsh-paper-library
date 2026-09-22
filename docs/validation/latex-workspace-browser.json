@@ -1,9 +1,9 @@
 {
-  "verified_at": "2026-09-22T06:32:09.166Z",
+  "verified_at": "2026-09-22T12:47:35.888Z",
   "ok": true,
   "checks": [
     "fixture-projects-register-two-folders-with-their-main-files",
-    "topbar-entry-opens-the-workspace-dialog",
+    "topbar-entry-opens-the-workspace-as-a-page",
     "panel-loads-the-project-tree-and-main-file",
     "editing-persists-through-the-revision-checked-write",
     "compile-produces-a-pdf-and-the-panel-renders-its-first-page",
@@ -18,7 +18,8 @@
     "a-proposal-is-shown-for-review-before-anything-is-written",
     "accepting-the-proposal-writes-through-the-revisioned-path",
     "a-proposal-can-be-discarded-without-writing",
-    "no-browser-errors-and-the-workspace-closes",
+    "the-surface-follows-light-and-dark-with-readable-contrast",
+    "leaving-the-workspace-restores-the-library-page",
     "the-live-panel-made-no-external-requests"
   ],
   "actions": [

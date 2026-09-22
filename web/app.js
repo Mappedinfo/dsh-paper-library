@@ -1049,23 +1049,30 @@ async function openReferencedPaper(value) {
  * one page serves both entries without a second copy of the canvas.
  */
 function entryView(){
-  try{return new URLSearchParams(location.search).get('view')==='board'?'board':'library';}
+  try{const view=new URLSearchParams(location.search).get('view');return view==='board'?'board':view==='latex'?'latex':'library';}
   catch{return 'library';}
 }
 const ENTRY_VIEW=entryView();
-/** The whiteboard entry is a pure canvas: open the board and leave only it on screen. */
+/** Each entry surface is a pure page: open it and leave only it on screen. */
 async function applyEntryView(){
-  if(ENTRY_VIEW!=='board'||!boardUI)return;
-  try{await boardUI.open();boardUI.setFocus?.(true);}
-  catch(error){toast(error.message||'画板未能打开',true);}
+  if(ENTRY_VIEW==='board'&&boardUI){
+    try{await boardUI.open();boardUI.setFocus?.(true);}
+    catch(error){toast(error.message||'画板未能打开',true);}
+    return;
+  }
+  if(ENTRY_VIEW==='latex'&&latexUI){
+    try{await latexUI.open();}
+    catch(error){toast(error.message||'LaTeX 工作台未能打开',true);}
+  }
 }
 // Hide the rest of the page before the first paint: entering the board and *then* hiding the
 // library reads as two jumps, and the plate is empty either way for the few hundred ms until
 // the board itself is loaded.
 if(ENTRY_VIEW==='board')document.body.classList.add('board-focused');
+if(ENTRY_VIEW==='latex')document.body.classList.add('latex-focused');
 async function initialize() {
   announceReady();await loadStatus();
-  if(ENTRY_VIEW==='board'){await applyEntryView();return;}
+  if(ENTRY_VIEW==='board'||ENTRY_VIEW==='latex'){await applyEntryView();return;}
   await loadList();
   try{const saved=await persistence?.get('reader');if(saved?.paperId){const detail=saved.page?saved:await persistence.get(`reader:${saved.paperId}`);if(detail){readerRestore=detail;durableReaderLoaded=true;}}}
   catch(error){toast(`阅读位置读取失败：${error.message}`,true);}

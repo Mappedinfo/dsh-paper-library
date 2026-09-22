@@ -76,7 +76,10 @@
 
 ## 编辑器与预览面板（已实现）
 
-顶栏「LaTeX」按钮打开工作台（`web/latex-workspace.js` + `.css`，纯原生 JS，无外部请求）：
+工作台是**独立页面**（和画板一样），不是弹窗：顶栏「LaTeX」把整页切成工作台（`body.latex-focused`
+隐藏顶栏与文献库），工具栏右侧「返回文献库」回到列表且不刷新页面；`?view=latex` 与画板的
+`?view=board` 对称，可以直接作为一个 DSH 标签页的入口，此时页面只剩工作台。
+（`web/latex-workspace.js` + `.css`，纯原生 JS，无外部请求。）
 
 - **左上**：项目选择（按标题列出主文件）、「＋ 登记文件夹」（绝对路径 + 可选标题；
   文件夹里没有 `.tex` 时可勾选写入最小 `main.tex`）、主文件标签与保存状态。
@@ -89,18 +92,25 @@
 - **对比**：「与上一版对比」（`latex_diff` previous→current）与「项目对照」（`latex_compare`，
   选另一个项目比较同一相对路径），差异显示在对话框底部的 `<pre>` 里。
 
-外壳集成回执（真实 `src/server.mjs` 主机 + 真实页面 + 真实面板，5 项）：
+颜色只走插件的主题桥（`--paper/--surface/--panel/--ink/--muted/--line/--teal/--error` 与
+`--dsw-alias-*`），少数语义色用 `light-dark()`；因此跟随系统/DSH 的浅色与深色，正文与底色始终分离
+（回执里有一条把 `prefers-color-scheme` 切到 dark 后比较计算样式与亮度的检查）。
+布局上只有两个滚动区（编辑器、PDF 预览），其余固定区域都有上限（AI 区 38vh、diff 22vh、错误 18vh），
+所以长回答或长日志不会把工具栏顶出屏幕。
+
+外壳集成回执（真实 `src/server.mjs` 主机 + 真实页面 + 真实面板，7 项）：
 `docs/validation/latex-shell-browser.json`，
 复现命令 `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node scripts/latex-shell-fixture.mjs`。
 
-面板回执（真实 Chromium + 真实 Python worker + 真实 latexmk + 真实协作模块（模型为桩），18 项）：
+面板回执（真实 Chromium + 真实 Python worker + 真实 latexmk + 真实协作模块（模型为桩），19 项）：
 `docs/validation/latex-workspace-browser.json`，
 复现命令 `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node scripts/latex-workspace-fixture.mjs`。
 它覆盖：打开对话框、加载项目树与主文件、编辑落盘、编译并渲染首页、过期保存被拒且不覆盖、
 载入最新不改文件、与上一版对比、切换文件、两个项目对照、面板内登记新文件夹并写入 starter、
 协作区可用并加载模型、提问就地回答且不改文件、提案先审后写、接受后经 CAS 落盘并刷新编辑器、
-放弃提案不写文件、无浏览器报错、零外部请求。截图：`docs/images/latex-workspace.jpg`、
-`docs/images/latex-workspace-ai.jpg`。协作模块本身另有 6 项 Node 测试
+放弃提案不写文件、进入/离开整页工作台、深浅色对比可读、无浏览器报错、零外部请求。
+截图：`docs/images/latex-workspace.jpg`、`docs/images/latex-workspace-ai.jpg`、
+`docs/images/latex-workspace-dark.jpg`。协作模块本身另有 6 项 Node 测试
 （`tests-js/latex-ai.test.mjs`，模型为桩、稿件与写入都是真实文件）。
 
 ## DSH 提问与人机互写（已实现）

@@ -1,13 +1,13 @@
 {
-  "verified_at": "2026-09-22T06:59:25.510Z",
+  "verified_at": "2026-09-22T12:56:16.800Z",
   "scope": "Pre-publication source, history, manifest and package checks; not remote publication or a legal opinion",
   "ok": true,
   "source_license": "MIT",
   "third_party_notices_preserved": true,
-  "history_commits": "113",
-  "history_blobs_checked": 1491,
-  "tracked_files_checked": 362,
-  "source_files_checked": 368,
+  "history_commits": "115",
+  "history_blobs_checked": 1514,
+  "tracked_files_checked": 368,
+  "source_files_checked": 369,
   "packaged_files_checked": 201,
   "findings": [],
   "limits": [
