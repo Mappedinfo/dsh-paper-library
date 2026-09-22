@@ -1804,10 +1804,10 @@
           sourceStatus(`已应用：${result.nodes} 个节点、${result.edges} 条连线。`);
         } catch (error) { sourceStatus(error.message, true); }
       });
-      const downloadText = (name, text) => {
+      const downloadText = (name, text, type = 'application/json') => {
         const view = doc.defaultView;
         if (!view?.Blob || !view.URL?.createObjectURL) { sourceStatus('这个环境不支持下载文件。', true); return; }
-        const url = view.URL.createObjectURL(new view.Blob([text], { type: 'application/json' }));
+        const url = view.URL.createObjectURL(new view.Blob([text], { type }));
         const link = doc.createElement('a');
         link.href = url; link.download = name;
         doc.body.append(link); link.click(); link.remove();
@@ -1838,6 +1838,76 @@
           }
           sourceStatus('已读入文件；点「校验并应用」才会改动画布。');
         } catch (error) { sourceStatus(`文件不是合法 JSON：${error.message}`, true); }
+      });
+      // draw.io is the fourth way into the same source path: the XML is parsed into the two
+      // boxes, and 「校验并应用」 stays the only thing that touches the board — exactly like
+      // Mermaid. Nothing here writes to the board, so a bad file cannot damage one.
+      const drawio = () => window.PaperBoardDrawio ?? null;
+      const drawioStatus = (message, error = false) => {
+        const node = $('board-drawio-status');
+        if (!node) return;
+        node.textContent = message;
+        node.classList.toggle('is-error', Boolean(error));
+      };
+      const drawioParseText = async text => {
+        const api = drawio();
+        if (!api) { drawioStatus('这个页面没有加载 draw.io 模块。', true); return null; }
+        if (!text.trim()) { drawioStatus('先粘贴 .drawio 内容，或用「打开 .drawio」选一个文件。', true); return null; }
+        try {
+          // The compressed page draw.io itself saves needs the host inflater; the uncompressed
+          // page their MCP server writes does not.
+          const parsed = await api.parse(text, { inflate: api.browserInflate });
+          if ($('board-source-content')) $('board-source-content').value = JSON.stringify(parsed.source, null, 2);
+          if ($('board-source-style')) $('board-source-style').value = JSON.stringify(parsed.style, null, 2);
+          const named = parsed.pages?.[0]?.name;
+          const warnings = parsed.warnings ?? [];
+          const notes = warnings.length ? ` ⚠ ${warnings.slice(0, 3).join('；')}${warnings.length > 3 ? `（共 ${warnings.length} 条）` : ''}` : '';
+          drawioStatus(`${named ? `页「${named}」` : '这一页'}解析出 ${parsed.counts.nodes} 个节点、${parsed.counts.edges} 条连线，已填进上面的两个编辑框。点「校验并应用」写入画板。${notes}`);
+          return parsed;
+        } catch (error) { drawioStatus(error.message, true); return null; }
+      };
+      const drawioWrite = () => {
+        const api = drawio();
+        if (!api) { drawioStatus('这个页面没有加载 draw.io 模块。', true); return null; }
+        if (!board.nodes.length) { drawioStatus('当前画板还没有节点。', true); return null; }
+        try {
+          const written = api.toDrawio(board);
+          if ($('board-drawio-text')) $('board-drawio-text').value = written.xml;
+          drawioStatus(`已写出 ${written.counts.nodes} 个节点、${written.counts.edges} 条连线；这段 XML 可以直接在 draw.io 或官方 draw.io MCP 里打开。`);
+          return written;
+        } catch (error) { drawioStatus(error.message, true); return null; }
+      };
+      const drawioOpen = $('board-drawio-open');
+      if (drawioOpen) drawioOpen.addEventListener('click', () => {
+        if (!$('board-source-content')?.value.trim()) fillSourceFields();
+        sourceDialog?.showModal?.();
+        drawioStatus('粘贴 .drawio XML，或点「打开 .drawio」选文件，然后点「解析为源文件」。');
+        $('board-drawio-text')?.focus?.();
+      });
+      const drawioParse = $('board-drawio-parse');
+      if (drawioParse) drawioParse.addEventListener('click', () => void drawioParseText($('board-drawio-text')?.value ?? ''));
+      const drawioGenerate = $('board-drawio-generate');
+      if (drawioGenerate) drawioGenerate.addEventListener('click', () => { drawioWrite(); });
+      const drawioDownload = $('board-drawio-download');
+      if (drawioDownload) drawioDownload.addEventListener('click', () => {
+        const box = $('board-drawio-text');
+        const text = box?.value.trim() ? box.value : drawioWrite()?.xml;
+        if (!text) return;
+        const slug = String(board.title ?? 'board').replace(/[\\/:*?"<>|\s]+/g, '-').slice(0, 60) || 'board';
+        downloadText(`${slug}.drawio`, text, 'application/xml');
+      });
+      const drawioFile = $('board-drawio-file');
+      const drawioUpload = $('board-drawio-upload');
+      if (drawioUpload && drawioFile) drawioUpload.addEventListener('click', () => drawioFile.click());
+      if (drawioFile) drawioFile.addEventListener('change', async () => {
+        const file = [...(drawioFile.files ?? [])][0];
+        drawioFile.value = '';
+        if (!file) return;
+        try {
+          const body = await file.text();
+          if ($('board-drawio-text')) $('board-drawio-text').value = body;
+          await drawioParseText(body);
+        } catch (error) { drawioStatus(`读不到这个文件：${error.message}`, true); }
       });
       const emptyCreate = $('board-create-first');
       if (emptyCreate) emptyCreate.addEventListener('click', () => void createBoard());

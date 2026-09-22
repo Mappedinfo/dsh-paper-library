@@ -17,6 +17,8 @@ Project scaffolding was generated through the author's `academic-templates/dev-p
 | DeepSeek Harness | Host plugin, tools and model APIs | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) / MIT; installed separately |
 | Zotero translation-server | Optional loopback metadata supply (translators for `/search` and `/web`) | [translation-server](https://github.com/zotero/translation-server) / AGPL-3.0; deployed separately by the operator, never bundled or started by this plugin |
 
+`jgraph/drawio-mcp` (npm `@drawio/mcp`, Apache-2.0) was installed into a gitignored `.local/` directory and run once to read its tool surface and the `.drawio` files it writes. Our `.drawio` codec (`web/board-drawio.js`) and our MCP server (`mcp/server.mjs`) are our own implementations of the observed format and tool shape: no file from that project is copied, bundled or depended on, so nothing of it is redistributed here. License evidence, the observed format contract and our interop scope are recorded in [docs/mcp.md](docs/mcp.md).
+
 The APA style and en-US locale are supplied by the [Citation Style Language project](https://citationstyles.org/), under CC BY-SA 3.0. Their original author/translator credits and rights links remain embedded in each unchanged file.
 
 `vendor/csl/manifest.json` records retrieval date, upstream URLs and exact SHA-256 hashes. `scripts/fetch-csl.mjs` refreshes assets explicitly; tests verify recorded hashes. Lockfiles pin installed package versions. Third-party Python/Node runtime packages are installed separately, not vendored in this source repository. Preserve their full notices when distributing them.

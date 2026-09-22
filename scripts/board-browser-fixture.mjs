@@ -343,6 +343,11 @@ try {
   record('arranging-connects-the-board-into-left-to-right-columns-and-is-idempotent');
 
   // A mind map generated from checked papers is a new board and leaves the first alone.
+  // The listing's `node_count` and the record itself can be read across a save, so wait until they
+  // agree before taking this board as the baseline: comparing a stale summary with a settled one is
+  // what made an earlier version of this check fail with no node actually missing.
+  const beforeState = await waitForHost(value => value.boards.length === 1 && value.board && value.boards[0].node_count === value.board.nodes.length, 'the first board settled');
+  const beforeIds = beforeState.board.nodes.map(node => node.id).sort();
   await openBoardMenu('more');
   await page.locator('#board-add-paper').click();
   await page.locator('#board-paper-dialog').waitFor();
@@ -354,7 +359,12 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('#board-select option').length === 2);
   const generated = await waitForHost(value => value.boards.some(board => board.node_count === 3), 'the generated mind map');
   assert.equal(generated.boards.length, 2);
-  assert.deepEqual(generated.boards.map(board => board.node_count).sort(), [3, 4], 'the first board keeps its four nodes');
+  // The first board's own count is whatever the earlier steps left — an unnamed shape may or may
+  // not survive them — so it is compared with itself before and after, not with a hard-coded 4.
+  assert.ok(beforeIds.length >= 4, `the first board held its content (held ${beforeIds.length})`);
+  // Identity, not just a count: the mind map must add nothing to and remove nothing from it.
+  const firstBoard = await page.evaluate(async id => (await (await fetch('./api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'board_get', id }) })).json()).result.board, beforeState.boards[0].id);
+  assert.deepEqual(firstBoard.nodes.map(node => node.id).sort(), beforeIds, 'the first board keeps exactly the nodes it had');
   const generatedId = generated.boards.find(board => board.node_count === 3).id;
   const generatedBoard = await page.evaluate(async id => (await (await fetch('./api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'board_get', id }) })).json()).result.board, generatedId);
   assert.equal(generatedBoard.title, '合成文献结构');
@@ -419,7 +429,9 @@ try {
   // Clear any selection first: the scope is the selection when it holds more than one node.
   await page.keyboard.press('Escape');
   await page.locator('#board-layout-apply').click();
-  const arranged = await waitForHost(value => signature(value) !== layoutBefore, 'the arranged board');
+  // A read that returns no board is not a change: the previous predicate accepted it, and the
+  // check then compared an empty signature against a laid-out board.
+  const arranged = await waitForHost(value => value.board && signature(value) !== layoutBefore, 'the arranged board');
   assert.match(await page.locator('#board-layout-status').innerText(), /放射思维导图/);
   const arrangedOnce = signature(arranged);
   assert.ok(arrangedOnce.length > 0, 'the arranged board has nodes to compare');
@@ -428,7 +440,7 @@ try {
   // relying on it having survived the previous step made this check depend on timing.
   await openBoardMenu('layout');
   await page.locator('#board-layout-apply').click();
-  try { await waitForHost(value => signature(value) === arrangedOnce, 'the same arrangement on a second apply'); }
+  try { await waitForHost(value => value.board && signature(value) === arrangedOnce, 'the same arrangement on a second apply'); }
   catch (error) { throw new Error(`${error.message} | first=${arrangedOnce.slice(0, 150)} | second=${signature(await hostBoard()).slice(0, 150)}`); }
   // Pin one node, arrange again, and it must stay exactly where the reader put it.
   const pinBox = await shapeBox(0);
@@ -577,6 +589,57 @@ try {
   assert.match(written, /\|是\|/);
   await page.locator('#board-source-dialog .dialog-close').first().click();
   record('a-pasted-mermaid-flowchart-becomes-a-board-and-writes-back-as-mermaid');
+
+  // draw.io (`.drawio`) reads and writes the same source path, so a diagram made in draw.io — or
+  // by the official draw.io MCP server — opens here, and this board opens there.
+  await openBoardMenu('more');
+  await page.locator('#board-drawio-open').click();
+  await page.locator('#board-drawio-text').fill('<mxfile host="app.diagrams.net"><diagram id="page-1" name="Page-1"><mxGraphModel><root>'
+    + '<mxCell id="0"/><mxCell id="1" parent="0"/>'
+    + '<mxCell id="2" value="城市感知" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="120" y="80" width="160" height="60" as="geometry"/></mxCell>'
+    + '<mxCell id="3" value="多源数据" style="rounded=0;" vertex="1" parent="1"><mxGeometry x="400" y="240" width="160" height="60" as="geometry"/></mxCell>'
+    + '<mxCell id="4" value="图标" style="shape=mxgraph.aws4.lambda;" vertex="1" parent="1"><mxGeometry x="700" y="80" width="60" height="60" as="geometry"/></mxCell>'
+    + '<mxCell id="5" style="edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="2" target="3"><mxGeometry relative="1" as="geometry"/></mxCell>'
+    + '</root></mxGraphModel></diagram></mxfile>');
+  await page.locator('#board-drawio-parse').click();
+  await page.waitForFunction(() => /解析出 3 个节点、1 条连线/.test(document.getElementById('board-drawio-status')?.textContent || ''));
+  assert.match(await page.locator('#board-drawio-status').innerText(), /图形库形状 mxgraph\.aws4\.lambda/, 'a shape we cannot draw is named in the panel, not silently boxed');
+  const drawioContent = JSON.parse(await page.locator('#board-source-content').inputValue());
+  assert.deepEqual(drawioContent.nodes.map(node => [node.id, node.kind]), [['2', 'concept'], ['3', 'rect'], ['4', 'rect']]);
+  assert.deepEqual(drawioContent.nodes[0].pin, [120, 80], 'the position drawn in draw.io becomes a pin');
+  assert.deepEqual(drawioContent.edges.map(edge => [edge.from, edge.to, edge.kind]), [['2', '3', 'elbow']], 'orthogonal routing is our elbow');
+  await page.locator('#board-source-apply').click();
+  const fromDrawio = await waitForHost(value => value.board?.nodes?.some(node => node.text === '城市感知') && value.board.edges.length === 1, 'the draw.io diagram on the canvas');
+  const placed = fromDrawio.board.nodes.find(node => node.text === '城市感知');
+  assert.deepEqual([placed.x, placed.y, placed.w, placed.h], [120, 80, 160, 60], 'geometry from draw.io is kept exactly');
+  assert.deepEqual([fromDrawio.board.nodes.find(node => node.text === '多源数据').x, fromDrawio.board.nodes.find(node => node.text === '多源数据').y], [400, 240]);
+  // The form draw.io itself saves: percent-encoded XML → raw DEFLATE → base64, decoded in the page.
+  const zipped = await page.evaluate(async model => {
+    const stream = new Blob([new TextEncoder().encode(encodeURIComponent(model))]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+    const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    // draw.io compresses the whole page body, so the base64 *is* the diagram's content.
+    return `<mxfile host="app.diagrams.net"><diagram id="zip" name="压缩页">${btoa(binary)}</diagram></mxfile>`;
+  }, '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="z1" value="压缩页节点" style="rounded=1;" vertex="1" parent="1"><mxGeometry x="60" y="40" width="140" height="60" as="geometry"/></mxCell><mxCell id="z2" value="第二个" vertex="1" parent="1"><mxGeometry x="260" y="40" width="140" height="60" as="geometry"/></mxCell></root></mxGraphModel>');
+  await page.locator('#board-drawio-text').fill(zipped);
+  await page.locator('#board-drawio-parse').click();
+  // That page holds two nodes and no edge, so the exact count is asserted: a range here would
+  // hide an inflater that invented or dropped cells.
+  await page.waitForFunction(() => /页「压缩页」解析出 2 个节点、0 条连线/.test(document.getElementById('board-drawio-status')?.textContent || ''));
+  // Apply it, so the canvas the export reads is the one the compressed page described.
+  await page.locator('#board-source-apply').click();
+  await waitForHost(value => value.board?.nodes?.length === 2 && value.board.nodes.some(node => node.text === '压缩页节点'), 'the decompressed page on the canvas');
+  await page.locator('#board-drawio-generate').click();
+  const writtenDrawio = await page.locator('#board-drawio-text').inputValue();
+  assert.match(writtenDrawio, /^<mxfile host="app\.diagrams\.net"/);
+  assert.match(writtenDrawio, /<diagram id="page-1" name="/);
+  assert.match(writtenDrawio, /value="压缩页节点"/, 'the node read out of the compressed page is written back');
+  assert.match(writtenDrawio, /<mxGeometry x="60" y="40" width="140" height="60"/, 'its geometry is written back unchanged');
+  assert.match(writtenDrawio, /plbKind=concept/, 'our own round-trip marker rides along in the style');
+  assert.match(await page.locator('#board-drawio-status').innerText(), /已写出 2 个节点、0 条连线/);
+  await page.locator('#board-source-dialog .dialog-close').first().click();
+  record('a-drawio-file-opens-here-and-this-board-writes-back-as-drawio');
 
   // The library shelf lists boards as their own files and links them to papers.
   await openBoardMenu('more');

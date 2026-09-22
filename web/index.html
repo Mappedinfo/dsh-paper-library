@@ -23,6 +23,7 @@
   <script src="./board-render.js" defer></script>
   <script src="./board-bridge.js" defer></script>
   <script src="./board-mermaid.js" defer></script>
+  <script src="./board-drawio.js" defer></script>
   <script src="./board.js" defer></script>
   <script src="./settings.js" defer></script>
   <script src="./latex-workspace.js" defer></script>
@@ -252,6 +253,7 @@
           <span class="board-menu-label">源文件与来源</span>
           <button id="board-source-open" class="button subtle" type="button" title="查看/编辑可读的源文件与样式辅助文件（.style.json）">源文件</button>
           <button id="board-mermaid-open" class="button subtle" type="button" title="粘贴 Mermaid flowchart，解析成画板源文件或导出现有画板的 Mermaid 文本">Mermaid</button>
+          <button id="board-drawio-open" class="button subtle" type="button" title="导入 draw.io（.drawio）文件或把画板导出为 .drawio，可与 draw.io 及官方 draw.io MCP 互通">draw.io</button>
         </div>
         <div class="board-menu-section">
           <span class="board-menu-label">对话与内容</span>
@@ -282,9 +284,18 @@
         <textarea id="board-mermaid-text" rows="6" spellcheck="false" aria-label="Mermaid 流程图文本" placeholder="flowchart LR&#10;  A[采集] --> B{合格?}&#10;  B -- 是 --> C([入库])"></textarea>
       </label>
       <p id="board-mermaid-status" class="small" role="status"></p>
+      <label class="field">draw.io <code>.drawio</code> <span>粘贴 draw.io 或官方 draw.io MCP 的 XML，也可以直接打开文件；「解析为源文件」后仍要点「校验并应用」</span>
+        <textarea id="board-drawio-text" rows="5" spellcheck="false" aria-label="draw.io XML" placeholder="&lt;mxfile&gt;…&lt;/mxfile&gt; 或 &lt;mxGraphModel&gt;…&lt;/mxGraphModel&gt;"></textarea>
+      </label>
+      <p id="board-drawio-status" class="small" role="status"></p>
       <div class="dialog-actions">
         <button id="board-mermaid-parse" class="button subtle" type="button" title="把上面的 Mermaid 解析成内容文件与排版方向，填进下面的编辑框">解析为源文件</button>
         <button id="board-mermaid-generate" class="button subtle" type="button" title="把当前画板写成 Mermaid 文本，便于粘贴到 README 或文档">画板导为 Mermaid</button>
+        <button id="board-drawio-parse" class="button subtle" type="button" title="把上面的 draw.io XML 解析成内容文件与固定位置；draw.io 自己保存的压缩页会先解压">解析为源文件</button>
+        <button id="board-drawio-generate" class="button subtle" type="button" title="把当前画板写成 .drawio XML，draw.io 与官方 draw.io MCP 都能打开">画板导为 draw.io</button>
+        <button id="board-drawio-download" class="button subtle" type="button">下载 .drawio</button>
+        <button id="board-drawio-upload" class="button subtle" type="button">打开 .drawio</button>
+        <input id="board-drawio-file" type="file" accept=".drawio,.xml,application/xml,text/xml" hidden>
         <button id="board-source-generate" class="button subtle" type="button" title="用当前画布内容重写两个编辑框">从画布生成</button>
         <button id="board-source-download" class="button subtle" type="button">下载两个文件</button>
         <button id="board-source-upload" class="button subtle" type="button">导入 JSON</button>

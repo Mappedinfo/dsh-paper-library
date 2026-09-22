@@ -84,7 +84,12 @@
 .board-dialog::backdrop{background:var(--dsw-alias-bg-mask-1)}
 .board-dialog h2{font-size:15px;margin:0 0 8px}
 .board-dialog .board-picker{max-height:240px;overflow:auto;display:grid;gap:2px;margin:8px 0}
-.board-source-dialog{width:min(920px,calc(100vw - 32px))}
+/* Content, style and a draw.io box do not fit a laptop viewport at once; the dialog scrolls so
+   the actions at the bottom stay reachable instead of hanging below the screen. */
+.board-source-dialog{width:min(920px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto}
+/* Its action row follows the scroll instead of sitting below the fold, so 「校验并应用」 is
+   reachable without hunting for it. */
+.board-source-dialog .dialog-actions{position:sticky;bottom:-14px;background:var(--paper);z-index:1}
 .board-source-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .board-source-grid textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;overflow:auto;min-height:220px}
 .board-source-grid code{font-size:11px;color:var(--muted)}
@@ -99,7 +104,10 @@
 .board-dialog .board-picker button{font:inherit;text-align:left;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:inherit;cursor:pointer}
 .board-dialog .board-picker button:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .board-dialog .board-picker small{display:block;color:var(--muted);font-size:10px}
-.board-dialog .dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}
+/* The source dialog carries a row of source/Mermaid/draw.io actions. A non-wrapping flex row
+   pushed the leftmost ones outside the dialog box, where they were unreachable behind the
+   modal backdrop, so the row wraps instead. */
+.board-dialog .dialog-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;margin-top:10px}
 .board-dialog .field{display:grid;gap:4px;margin:6px 0}
 .board-dialog input,.board-dialog select{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:inherit}
 body.board-mode .detail-pane{display:none}

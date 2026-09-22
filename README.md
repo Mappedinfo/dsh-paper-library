@@ -76,7 +76,9 @@
 - **AI 也能读写画板**：DSH 会话可用 `library_board` 工具列出、读取、创建与修改画板。模型新增或改动的节点与连线会标为「AI 提议」（虚线边框）等待你确认，未改动的内容保留你的署名，只有你能「接受 AI 改动」；AI 新建的画板在你保存前一直是待核对状态。
 - **保存与冲突**：画板改动自动保存到运行 DSH 的本机（与批注草稿同一私有状态目录），关闭画板、切换画板或离开页面都会先写入。若同一张画板在另一个窗口被修改，界面会提示冲突，并提供「载入已保存版本」或「另存为新画板」，两边都不会被覆盖。删除画板只置墓碑，记录仍留在本机状态目录，可由人工恢复。
 
-画板只在打开时存在于浏览器内存：没有常驻渲染进程、没有后台任务，打开、列表与绘制都不调用模型。验证记录见 [32 项真实 Chromium 回执](docs/validation/board-browser.json)（含按 DOM 变更量而非耗时衡量的绘制代价守卫）（含画板入口以纯画布打开、420px 窄栏下工具栏收纳与画布占满整栏、按实测路径量出的连线夹角下限、粘贴 Mermaid 后写入画板并再导出，以及空形状不阻塞保存）与 [7 项原生 DSH 回执](docs/validation/board-harness.json)，设计与边界见 [docs/whiteboard-design.md](docs/whiteboard-design.md)。
+画板只在打开时存在于浏览器内存：没有常驻渲染进程、没有后台任务，打开、列表与绘制都不调用模型。验证记录见 [34 项真实 Chromium 回执](docs/validation/board-browser.json)（含按 DOM 变更量而非耗时衡量的绘制代价守卫）（含画板入口以纯画布打开、420px 窄栏下工具栏收纳与画布占满整栏、按实测路径量出的连线夹角下限、粘贴 Mermaid 后写入画板并再导出、打开 draw.io 文件（含 draw.io 自己保存的压缩页）后写入画板并再导出为 `.drawio`，以及空形状不阻塞保存）与 [7 项原生 DSH 回执](docs/validation/board-harness.json)，设计与边界见 [docs/whiteboard-design.md](docs/whiteboard-design.md)。
+
+画板与 [draw.io](https://www.drawio.com/) 双向互通：`.drawio`／mxGraph XML（未压缩与他们保存的压缩形式都读）可以从「☰ → 源文件与来源 → draw.io」导入并走同一条「校验并应用」，也能把画板导出成 draw.io 与[官方 draw.io MCP](https://www.drawio.com/docs/manual/generate/drawio-mcp-server/) 都能打开的文件；无法表达的部分逐条带行号报告。同一份格式之上还有本仓库自己的 MCP 服务器 `mcp/server.mjs`（stdio、零依赖、默认只读、画板路径限定在 `--root` 内）：读写可读源文件与 `.drawio`，加 `--library <文献库>` 后另外提供三个**只读**文献工具（检索、元数据、批注），`node scripts/mcp-probe.mjs mcp/server.mjs --root <目录>` 可直接查看它的工具面。许可证核查、实测的格式契约与边界见 **[draw.io 互通与 MCP](docs/mcp.md)**。
 
 ### 独立画板（GitHub Pages）
 

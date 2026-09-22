@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../web/board.js', import.meta.url), 'utf8');
 const sourceModule = await readFile(new URL('../web/board-source.js', import.meta.url), 'utf8');
 const mermaidModule = await readFile(new URL('../web/board-mermaid.js', import.meta.url), 'utf8');
+const drawioModule = await readFile(new URL('../web/board-drawio.js', import.meta.url), 'utf8');
 const bridgeModule = await readFile(new URL('../web/board-bridge.js', import.meta.url), 'utf8');
 const renderModule = await readFile(new URL('../web/board-render.js', import.meta.url), 'utf8');
 
@@ -98,7 +99,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
     'board-tool-select', 'board-tool-pan', 'board-tool-text', 'board-tool-note', 'board-tool-rect', 'board-tool-ellipse', 'board-tool-diamond', 'board-tool-connect',
     'board-edge-kind', 'board-edge-arrow', 'board-edge-dashed', 'board-edge-angle',
     'board-layout-mode', 'board-layout-direction', 'board-layout-gap-x', 'board-layout-gap-y', 'board-layout-apply', 'board-layout-pin', 'board-layout-unpin', 'board-layout-status',
-    'board-source-open', 'board-source-dialog', 'board-mermaid-open', 'board-mermaid-text', 'board-mermaid-status', 'board-mermaid-parse', 'board-mermaid-generate', 'board-links', 'board-link-paper', 'board-unlink-paper', 'board-focus', 'board-source-content', 'board-source-style', 'board-source-status', 'board-source-apply', 'board-source-download', 'board-source-upload', 'board-source-file', 'board-source-generate',
+    'board-source-open', 'board-source-dialog', 'board-mermaid-open', 'board-mermaid-text', 'board-mermaid-status', 'board-mermaid-parse', 'board-mermaid-generate', 'board-drawio-open', 'board-drawio-text', 'board-drawio-status', 'board-drawio-parse', 'board-drawio-generate', 'board-drawio-download', 'board-drawio-upload', 'board-drawio-file', 'board-links', 'board-link-paper', 'board-unlink-paper', 'board-focus', 'board-source-content', 'board-source-style', 'board-source-status', 'board-source-apply', 'board-source-download', 'board-source-upload', 'board-source-file', 'board-source-generate',
     { id: 'board-project-select', tag: 'select' }, 'board-link-project', 'board-unlink-project',
     'board-files-open', 'board-files', 'board-file-list', 'board-files-label',
     'board-layout-open', 'board-layout-panel', 'board-project-open', 'board-project-panel',
@@ -153,6 +154,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
   vm.createContext(context);
   vm.runInContext(sourceModule, context);
   vm.runInContext(mermaidModule, context);
+  vm.runInContext(drawioModule, context);
   vm.runInContext(bridgeModule, context);
   vm.runInContext(renderModule, context);
   vm.runInContext(source, context);
@@ -720,6 +722,61 @@ test('automatic layout offers three deterministic modes and never moves a pinned
   const layered = signature(harness.panel.board());
   harness.panel.applyLayout();
   assert.equal(signature(harness.panel.board()), layered);
+});
+
+test('a .drawio document becomes source text, and the canvas writes .drawio back', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  const text = harness.registry.get('board-drawio-text');
+  const status = harness.registry.get('board-drawio-status');
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  // Nothing to parse yet: the panel says so instead of emptying the board.
+  harness.registry.get('board-drawio-parse').dispatch('click');
+  await settle();
+  assert.match(status.textContent, /先粘贴/);
+  assert.equal(harness.panel.board().nodes.length, 0);
+  // What the official draw.io MCP server writes, plus one shape it can draw and we cannot.
+  text.value = '<mxfile host="app.diagrams.net"><diagram id="page-1" name="Page-1"><mxGraphModel><root>'
+    + '<mxCell id="0"/><mxCell id="1" parent="0"/>'
+    + '<mxCell id="2" value="城市感知" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="120" y="80" width="160" height="60" as="geometry"/></mxCell>'
+    + '<mxCell id="3" value="多源数据" style="rounded=0;" vertex="1" parent="1"><mxGeometry x="400" y="240" width="160" height="60" as="geometry"/></mxCell>'
+    + '<mxCell id="4" value="图标" style="shape=mxgraph.aws4.lambda;" vertex="1" parent="1"><mxGeometry x="640" y="80" width="60" height="60" as="geometry"/></mxCell>'
+    + '<mxCell id="5" style="edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="2" target="3"><mxGeometry relative="1" as="geometry"/></mxCell>'
+    + '</root></mxGraphModel></diagram></mxfile>';
+  harness.registry.get('board-drawio-parse').dispatch('click');
+  await settle();
+  assert.match(status.textContent, /页「Page-1」解析出 3 个节点、1 条连线/);
+  assert.match(status.textContent, /图形库形状 mxgraph\.aws4\.lambda/, 'what we cannot draw is reported in the panel, not silently boxed');
+  // The parse fills the two source boxes; only 「校验并应用」 writes to the board.
+  const content = JSON.parse(harness.registry.get('board-source-content').value);
+  const style = JSON.parse(harness.registry.get('board-source-style').value);
+  assert.equal(content.schema, 'paper-library-board.v1');
+  assert.deepEqual(content.nodes.map(node => [node.id, node.kind]), [['2', 'concept'], ['3', 'rect'], ['4', 'rect']]);
+  assert.deepEqual(content.edges.map(edge => [edge.from, edge.to, edge.kind]), [['2', '3', 'elbow']]);
+  assert.deepEqual(style.layout.pins['2'], [120, 80]);
+  assert.equal(harness.panel.board().nodes.length, 0, 'parsing alone does not touch the canvas');
+  harness.panel.applySourceTexts(JSON.stringify(content), JSON.stringify(style));
+  assert.equal(harness.panel.board().nodes.length, 3);
+  assert.equal(harness.panel.board().edges.length, 1);
+  const placed = harness.panel.board().nodes.find(node => node.text === '城市感知');
+  assert.deepEqual([placed.x, placed.y, placed.w, placed.h], [120, 80, 160, 60], 'the position and size drawn in draw.io are the ones on the canvas');
+  // And back out again, from whatever is on the canvas now.
+  harness.registry.get('board-drawio-generate').dispatch('click');
+  const written = text.value;
+  assert.match(written, /^<mxfile host="app\.diagrams\.net"/);
+  assert.match(written, /<diagram id="page-1" name="[^"]*">/);
+  assert.match(written, /value="城市感知"/);
+  assert.match(written, /edgeStyle=orthogonalEdgeStyle/);
+  assert.match(status.textContent, /已写出 3 个节点、1 条连线/);
+  // A file that is not draw.io at all is refused, and the board keeps what it had.
+  const signature = board => board.nodes.map(node => `${node.id}:${node.x},${node.y}`).sort().join('|');
+  const before = signature(harness.panel.board());
+  text.value = '<html><body>nope</body></html>';
+  harness.registry.get('board-drawio-parse').dispatch('click');
+  await settle();
+  assert.match(status.textContent, /既没有 <mxfile> 的页/);
+  assert.equal(signature(harness.panel.board()), before);
 });
 
 test('a pasted Mermaid diagram becomes source text, and the canvas writes Mermaid back', async () => {

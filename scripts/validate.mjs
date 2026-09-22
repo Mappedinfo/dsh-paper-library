@@ -29,6 +29,7 @@ const commands=[
   ['standalone_syntax',process.execPath,['--check','site/standalone.js']],
   ['site_build',process.execPath,['scripts/build-site.mjs']],
   ['settings_syntax',process.execPath,['--check','web/settings.js']],
+  ['mcp_syntax',process.execPath,['--check','mcp/server.mjs']],
 ];
 const checks=[];
 for(const[id,command,args]of commands){
