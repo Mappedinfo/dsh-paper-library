@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dispatch } from '../src/bridge.mjs'
+import { createLatexAI } from '../src/harness/latex-ai.mjs'
 
 const project = dirname(dirname(fileURLToPath(import.meta.url)))
 const checks = []
@@ -52,14 +53,46 @@ window.latexUI = window.PaperLatexWorkspace.create({ api, toast: message => wind
 
 const python = existsSync(join(project, '.venv', 'bin', 'python')) ? join(project, '.venv', 'bin', 'python') : undefined
 
-async function startServer(library) {
+const memoryStore = () => {
+  const values = new Map()
+  return {
+    async get(key) { const entry = values.get(key); return entry ? { value: entry.value, revision: entry.revision } : { value: null, revision: 0 } },
+    async put(key, value, revision) {
+      const entry = values.get(key)
+      const current = entry ? entry.revision : 0
+      if (revision !== undefined && revision !== current) throw Object.assign(new Error('conflict'), { code: 'STATE_CONFLICT' })
+      values.set(key, { value, revision: current + 1 })
+      return { value, revision: current + 1 }
+    },
+  }
+}
+
+const ANSWER = '这句话目前只有一个总体判断，建议补上样本或范围，再谈机制。'
+const ANCHOR = 'Changed in another editor.'
+
+/** A stub model: the anchor comes from the material it was actually given. */
+function stubModel(prompt) {
+  if (!prompt.includes('只输出一个 JSON 对象')) return ANSWER
+  const start = prompt.indexOf('<<<MATERIAL\n')
+  const end = prompt.indexOf('\nMATERIAL')
+  const body = prompt.slice(start + '<<<MATERIAL\n'.length, end)
+  const anchor = body.split('\n').map(line => line.trim()).find(line => line && !/^\\(documentclass|begin|end|section|usepackage)/.test(line))
+  return JSON.stringify({ summary: '给结论补一个范围限定', replacements: [{ find: anchor, replace: `${anchor} % reviewed` }], notes: '范围来自作者原文，未新增数据' })
+}
+
+async function startServer(library, latexAI) {
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1')
     if (request.method === 'POST' && url.pathname === '/api') {
       const chunks = []
       for await (const chunk of request) chunks.push(chunk)
       try {
-        const result = await dispatch(JSON.parse(Buffer.concat(chunks).toString('utf8')), { library, python })
+        const input = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        const result = input?.action === 'models'
+          ? { models: [{ id: 'stub-model', name: 'Stub 模型', provider: 'stub' }], configured: true }
+          : typeof input?.action === 'string' && input.action.startsWith('latex_ai_')
+            ? await latexAI(input)
+            : await dispatch(input, { library, python })
         response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true, result }))
       } catch (error) {
         response.writeHead(error.status || 400, { 'Content-Type': 'application/json' })
@@ -107,7 +140,15 @@ try {
   const other = await dispatch({ action: 'latex_project_create', root: second, title: '投稿版' }, configured)
   record('fixture-projects-register-two-folders-with-their-main-files')
 
-  const started = await startServer(library)
+  const latexAI = createLatexAI({
+    store: memoryStore(),
+    ai: async ({ prompt }) => stubModel(prompt),
+    config: { provider: 'stub', model: 'stub-model' },
+    dispatch,
+    library,
+    python,
+  })
+  const started = await startServer(library, latexAI)
   server = started.server
   const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
   browser = await chromium.launch({ headless: true })
@@ -191,6 +232,45 @@ try {
   if (!starter.includes('\\documentclass')) throw new Error('starter main.tex was not written')
   await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('\\documentclass'), 'starter loaded into the editor')
   record('the-panel-registers-a-new-folder-and-writes-its-starter')
+
+  // DSH questions and co-writing, driven through the shipped controls.
+  await page.locator('#latex-project').selectOption(created.project.id)
+  await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('Changed in another editor.'), 'main project reselected')
+  await until(() => page.locator('#latex-ai').isVisible(), Boolean, 'DSH section available')
+  await until(() => page.locator('#latex-ai-model option').count(), count => count > 0, 'model list loaded')
+  record('the-workspace-exposes-dsh-questions-and-co-writing')
+
+  await page.locator('#latex-ai-input').fill('这句话的 claim 边界是什么？')
+  await page.locator('#latex-ai-ask').click()
+  await until(() => page.locator('#latex-ai-answer').innerText(), value => value.includes('样本或范围'), 'answer rendered')
+  const afterAsk = await readFile(join(first, 'main.tex'), 'utf8')
+  if (!afterAsk.includes(ANCHOR)) throw new Error('asking must not modify the manuscript')
+  record('a-question-answers-inline-and-leaves-the-file-alone')
+
+  await page.locator('#latex-ai-input').fill('给结论补一个范围限定')
+  await page.locator('#latex-ai-propose').click()
+  await until(() => page.locator('.latex-ai-replacements li').count(), count => count > 0, 'proposal rendered')
+  const shown = await page.locator('.latex-ai-replacements li').first().innerText()
+  if (!shown.includes(ANCHOR)) throw new Error(`proposal did not show the anchor: ${shown}`)
+  const afterPropose = await readFile(join(first, 'main.tex'), 'utf8')
+  if (!afterPropose.includes(ANCHOR)) throw new Error('a proposal must not write to the file')
+  await page.locator('#latex-workspace').screenshot({ path: join(project, 'docs', 'images', 'latex-workspace-ai.jpg'), type: 'jpeg', quality: 82 })
+  record('a-proposal-is-shown-for-review-before-anything-is-written')
+
+  await page.locator('#latex-ai-accept').click()
+  await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('% reviewed'), 'accepted proposal reloaded')
+  const accepted = await readFile(join(first, 'main.tex'), 'utf8')
+  if (!accepted.includes('% reviewed') || !accepted.includes(ANCHOR)) throw new Error('accepting the proposal did not write the file')
+  const saveState = await page.locator('#latex-save-state').innerText()
+  if (!saveState.includes('已接受')) throw new Error(`save state unexpected after accept: ${saveState}`)
+  record('accepting-the-proposal-writes-through-the-revisioned-path')
+
+  await page.locator('#latex-ai-input').fill('再改一次')
+  await page.locator('#latex-ai-propose').click()
+  await until(() => page.locator('.latex-ai-replacements li').count(), count => count > 0, 'second proposal')
+  await page.locator('#latex-ai-discard').click()
+  await until(() => page.locator('.latex-ai-replacements li').count(), count => count === 0, 'proposal discarded')
+  record('a-proposal-can-be-discarded-without-writing')
 
   await page.locator('#latex-close').click()
   await until(() => page.locator('#latex-workspace').isVisible(), value => value === false, 'dialog closed')

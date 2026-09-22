@@ -28,7 +28,8 @@
 - **本地编译与预览**：`latex_compile` 调用本机 `latexmk`（默认 xelatex，可 pdflatex/lualatex），工作目录即项目文件夹，默认超时 120 秒、上限 600 秒；返回退出码、提取的错误行、日志尾部（32,000 字符）与页数，失败不伪造成功；`latex_pdf_pages` / `latex_pdf_page` 复用既有 PDF 管线渲染页面；`latex_clean` 只删构建副产物。实测含中文单页稿从登记到编译完成约 0.3 秒。
 - **对比研究**：`latex_history` + `latex_diff`（`previous`/`current`/历史 id 的 unified diff）以及 `latex_compare`（两个项目间同一相对路径对照）。
 - **编辑器与预览面板**：顶栏「LaTeX」工作台（`web/latex-workspace.js/.css`，原生 JS、零外部请求）——左侧项目/文件与带行号编辑器（900 ms 自动保存、⌘S、串行保存队列），右侧 `latex_pdf_page` 页面预览与翻页、引擎/耗时/页数；「编译」调用本机 latexmk 并列出错误行（可展开日志尾部）；过期保存给出「载入最新／用我的版本覆盖」而不会覆盖别人的改动；「与上一版对比」与「项目对照」显示 unified diff；面板内可登记新文件夹并写入最小 starter。截图 `docs/images/latex-workspace.jpg`。
-- 验证：**537 JavaScript / 250 Python** 测试，另有 [LaTeX 工作台浏览器回执](docs/validation/latex-workspace-browser.json) 13 项（真实 Chromium + 真实 worker + 真实 latexmk，含冲突与对照流程）。，含 `tests/test_latex.py`（13 项：登记与主文件识别、越界与符号链接拒绝、CAS 与历史、项目对照、归档不改文件夹、真实 xelatex 编译与页面渲染、失败报告、clean 只删副产物）与 `tests-js/latex-tools.test.mjs`（读写工具分离、请求映射、白名单一致）。
+- **DSH 提问与人机互写**：面板底部协作区（`src/harness/latex-ai.mjs`，`latex_ai_*` 动作）——「问 DSH」把选中片段或整篇文件作为有界上下文提问，回答就地显示、不写文件；「生成修改提案」要求模型返回逐字替换的 JSON，服务端校验每个锚点恰好出现一次（≤20 处、≤64 KiB）、只保存替换项（不存第二份正文），面板按 `-原文/+新文` 审阅；「接受并写入」重新读取并比对修订号后用同一套 CAS 写入（来源 `ai:<provider>/<model>`），文件改动过则返回 `STATE_CONFLICT` 并保留提案，绝不覆盖；材料一律标注为不可信数据，模型路由来自面板选择或插件配置。
+- 验证：**543 JavaScript / 250 Python** 测试（含 `tests-js/latex-ai.test.mjs` 6 项：提问边界、选文与过期选文、提案锚点校验、接受走 CAS、冲突保留提案、模型路由），另有 [LaTeX 工作台浏览器回执](docs/validation/latex-workspace-browser.json) **18 项**（真实 Chromium + 真实 worker + 真实 latexmk + 真实协作模块（模型桩），含冲突、对照与提案审阅流程）。，含 `tests/test_latex.py`（13 项：登记与主文件识别、越界与符号链接拒绝、CAS 与历史、项目对照、归档不改文件夹、真实 xelatex 编译与页面渲染、失败报告、clean 只删副产物）与 `tests-js/latex-tools.test.mjs`（读写工具分离、请求映射、白名单一致）。
 
 ### 文档
 

@@ -16,6 +16,7 @@ import { createPaperAnalysis } from './paper-analysis.mjs'
 import { createPaperAnalysisAgent } from './paper-analysis-agent.mjs'
 import { createQueuedPaperAnalysis } from './paper-analysis-queue.mjs'
 import { createChallengeMining } from './challenge-mining.mjs'
+import { createLatexAI } from './latex-ai.mjs'
 import { createBoardStore } from './board-store.mjs'
 import { createCompanionQueue } from './companion-queue.mjs'
 import Schema from '@deepseek-ai/schemastery'
@@ -91,7 +92,10 @@ export function apply(ctx, rawConfig = {}) {
     web.effect(()=>()=>{automaticAnalysis=undefined;paperAnalysis.dispose()},'paper-library: background analysis lifecycle')
     const challengeMining = createChallengeMining({store:options.localState,dispatch,paperChat,library:config.library,python:config.python,
       agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens})})
-    const fetchHandler = createFetchHandler({ ...options, paperChat, companion, languageLearning, libraryKnowledge, paperAnalysis, challengeMining, basePath: '/api/paper-library' })
+    // LaTeX questions and co-writing reuse the language route and the local state
+    // store; proposals hold replacements, never a second copy of the manuscript.
+    const latexAI = createLatexAI({ store: options.localState, ai: languageAI, config, dispatch, library: config.library, python: config.python })
+    const fetchHandler = createFetchHandler({ ...options, paperChat, companion, languageLearning, libraryKnowledge, paperAnalysis, challengeMining, latexAI, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',
       path: '/api/paper-library',

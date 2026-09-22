@@ -64,6 +64,24 @@
 .latex-errors li { padding: 4px 12px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #b91c1c; white-space: pre-wrap; }
 .latex-errors .latex-log summary { cursor: pointer; color: var(--muted, #6b7280); }
 .latex-errors .latex-log pre { max-height: 160px; overflow: auto; margin: 4px 0 0; white-space: pre-wrap; color: inherit; }
+/* DSH questions and co-writing: one line of controls, one box for the ask, one for review. */
+.latex-ai { border-top: 1px solid var(--line, #e6e8ef); background: var(--surface-2, #f8f9fc); }
+.latex-ai-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px 4px; }
+.latex-ai-head select { max-width: 260px; }
+.latex-ai-route { font-size: 12px; color: var(--muted, #6b7280); }
+.latex-ai-route.error { color: #b91c1c; }
+.latex-ai textarea { display: block; width: calc(100% - 32px); margin: 4px 16px 6px; resize: vertical; font: 13px/1.55 inherit; }
+.latex-ai-answer { padding: 0 16px 6px; font-size: 13px; }
+.latex-ai-question { margin: 0 0 4px; color: var(--muted, #6b7280); font-style: italic; }
+.latex-ai-text { margin: 0; white-space: pre-wrap; }
+.latex-ai-proposal { padding: 0 16px 6px; font-size: 13px; max-height: 200px; overflow: auto; }
+.latex-ai-summary { margin: 0 0 6px; font-weight: 600; }
+.latex-ai-replacements { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.latex-ai-replacements li { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.latex-ai-replacements del { color: #b91c1c; background: #fee2e2; text-decoration: line-through; display: block; white-space: pre-wrap; }
+.latex-ai-replacements ins { color: #166534; background: #dcfce7; text-decoration: none; display: block; white-space: pre-wrap; }
+.latex-ai-notes { margin: 6px 0 0; color: var(--muted, #6b7280); }
+.latex-ai-actions { display: flex; gap: 8px; padding: 0 16px 10px; }
 .latex-diff {
   margin: 0; padding: 10px 16px; max-height: 220px; overflow: auto; border-top: 1px solid var(--line, #e6e8ef);
   background: var(--surface-2, #f8f9fc); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap;

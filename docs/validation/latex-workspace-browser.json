@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-22T06:22:25.952Z",
+  "verified_at": "2026-09-22T06:32:09.166Z",
   "ok": true,
   "checks": [
     "fixture-projects-register-two-folders-with-their-main-files",
@@ -13,10 +13,20 @@
     "the-file-list-switches-between-project-files",
     "panel-compares-two-projects-on-the-same-relative-file",
     "the-panel-registers-a-new-folder-and-writes-its-starter",
+    "the-workspace-exposes-dsh-questions-and-co-writing",
+    "a-question-answers-inline-and-leaves-the-file-alone",
+    "a-proposal-is-shown-for-review-before-anything-is-written",
+    "accepting-the-proposal-writes-through-the-revisioned-path",
+    "a-proposal-can-be-discarded-without-writing",
     "no-browser-errors-and-the-workspace-closes",
     "the-live-panel-made-no-external-requests"
   ],
   "actions": [
+    "latex_ai_accept",
+    "latex_ai_ask",
+    "latex_ai_discard",
+    "latex_ai_propose",
+    "latex_ai_status",
     "latex_compare",
     "latex_compile",
     "latex_diff",
@@ -26,7 +36,8 @@
     "latex_project_list",
     "latex_read",
     "latex_tree",
-    "latex_write"
+    "latex_write",
+    "models"
   ],
   "external_requests": 0,
   "browser_errors": [],

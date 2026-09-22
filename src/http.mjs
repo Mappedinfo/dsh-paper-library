@@ -132,9 +132,11 @@ export function createFetchHandler(options = {}) {
           const stateAction = typeof input?.action === 'string' && input.action.startsWith('state_');
           const boardAction = typeof input?.action === 'string' && input.action.startsWith('board_');
           const languageAction = languageActions.has(input?.action);
+          const latexAIAction = typeof input?.action === 'string' && input.action.startsWith('latex_ai_');
           if (chatAction && !options.paperChat) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板打开论文对话。'},400);
           if (input?.action === 'language_generate' && !options.languageLearning) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
           if (input?.action === 'knowledge_generate' && !options.libraryKnowledge) return json({ok:false,error:'尚未连接 DSH 模型服务；已保存的来源和知识笔记仍可查看。'},409);
+          if (latexAIAction && !options.latexAI) return json({ok:false,error:'LaTeX 提问与合写需要连接 DSH 模型服务。'},409);
           let result = companionAction ? await options.companion.handle(input)
             : input?.action === 'settings_get' ? await settings.get()
             : input?.action === 'settings_update' ? await settings.update(input.patch, input.expected_revision)
@@ -144,6 +146,7 @@ export function createFetchHandler(options = {}) {
             : typeof input?.action === 'string' && input.action.startsWith('paper_analysis_') ? await analysisRecords(input)
             : typeof input?.action === 'string' && (input.action.startsWith('challenge_extract_') || input.action.startsWith('challenge_theme_suggest_')) ? await challengeRecords(input, { signal: request.signal })
             : input?.action === 'knowledge_generate' ? await options.libraryKnowledge(input, { signal: request.signal })
+            : latexAIAction ? await options.latexAI(input, { signal: request.signal })
             : languageAction ? await learningRecords(input, { signal: request.signal })
             : chatAction
             ? await options.paperChat(input, { signal: request.signal })
@@ -154,6 +157,7 @@ export function createFetchHandler(options = {}) {
           }
           if(input.action==='status')result={...result,realtime_companion:Boolean(options.companion)};
           if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true, catalog_management: true, typed_graph: true, reading_workspace: true, durable_state: true, learning_records: true, language_learning: Boolean(options.languageLearning) };
+          if (input.action === 'status') result = { ...result, latex_ai: Boolean(options.latexAI) };
           if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true, challenge_mining:Boolean(options.challengeMining), challenge_scan:true, challenge_themes:true, challenge_export:true, challenge_comparison:true, challenge_review_packet:true, whiteboard:true };
           return json({ok:true,result});
         } finally { jsonRequests--; }
