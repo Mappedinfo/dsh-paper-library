@@ -320,15 +320,17 @@ test('the panel creates a board on first open, persists an edit and reports its 
   assert.equal(harness.panel.isOpen(), true);
   assert.equal(harness.doc.body.classList.contains('board-mode'), true);
 
-  // Drawing a node persists it after the debounce, with the loaded revision.
+  // Naming a new shape writes it straight away: creating an element is a discrete moment, not the
+  // continuous typing the debounce exists for.
   harness.panel.setTool('note');
   harness.svg.dispatch('pointerdown', { clientX: 100, clientY: 100 });
+  assert.equal(state.some(call => call.action === 'board_save'), false, 'nothing is written while the shape is still unnamed');
   nameShape(harness, '便签 A');
   const drawn = harness.panel.board();
   assert.equal(drawn.nodes.length, 1);
   assert.equal(drawn.nodes[0].kind, 'note');
-  assert.equal(harness.pendingTimers() > 0, true, 'a save is scheduled rather than sent per event');
-  await harness.runTimers();
+  assert.equal(harness.pendingTimers(), 0, 'the save went out immediately, with no timer left behind');
+  await new Promise(resolve => setImmediate(resolve));
   const save = state.filter(call => call.action === 'board_save').at(-1);
   assert.equal(save.payload.expected_revision, 'b'.repeat(64));
   assert.equal(save.payload.board.nodes.length, 1);
@@ -1092,13 +1094,21 @@ test('leaving the board settles a pending debounced edit instead of dropping it'
   harness.panel.setTool('note');
   harness.svg.dispatch('pointerdown', { clientX: 140, clientY: 140 });
   nameShape(harness, '关闭前写完的便签');
-  assert.equal(harness.pendingTimers() > 0, true, 'the edit is still only scheduled');
+  await new Promise(resolve => setImmediate(resolve));
+  state.length = 0;
+  // Nudging with an arrow key is still debounced: it is a repeated, continuous edit, and the
+  // debounce is what stops a held key from writing once per repeat.
+  harness.svg.dispatch('pointerdown', { clientX: 140, clientY: 140 });
+  harness.svg.dispatch('pointerup', {});
+  harness.doc.body.dispatch('keydown', { key: 'ArrowRight', metaKey: false, ctrlKey: false, shiftKey: false, preventDefault() {}, target: harness.doc.body });
+  assert.equal(harness.pendingTimers() > 0, true, 'the nudge is only scheduled');
   assert.equal(state.some(call => call.action === 'board_save'), false);
   await harness.panel.close();
   const saved = state.filter(call => call.action === 'board_save');
   assert.equal(saved.length, 1, 'closing the board writes the pending edit first');
   assert.equal(saved[0].payload.board.nodes.length, 1);
-  assert.equal(saved[0].payload.expected_revision, 'b'.repeat(64));
+  // The eager save that named the shape already advanced the revision, so the settled write uses it.
+  assert.equal(saved[0].payload.expected_revision, 'c'.repeat(64));
   assert.equal(saved[0].options.keepalive, true, 'the write survives the page going away');
   assert.equal(harness.pendingTimers(), 0, 'the debounce timer is not left behind');
 
@@ -1109,7 +1119,11 @@ test('leaving the board settles a pending debounced edit instead of dropping it'
   switching.panel.setTool('rect');
   switching.svg.dispatch('pointerdown', { clientX: 200, clientY: 200 });
   nameShape(switching, '切画板前的节点');
+  await new Promise(resolve => setImmediate(resolve));
   state.length = 0;
+  // A debounced edit is what can still be pending when the reader switches boards.
+  switching.doc.body.dispatch('keydown', { key: 'ArrowRight', metaKey: false, ctrlKey: false, shiftKey: false, preventDefault() {}, target: switching.doc.body });
+  assert.equal(switching.pendingTimers() > 0, true, 'the nudge is still only scheduled');
   await switching.panel.load('b-two');
   assert.equal(state[0].action, 'board_save', 'the outgoing board is saved before another is opened');
   assert.equal(state[1].action, 'board_get');
@@ -1475,14 +1489,14 @@ test('a drag only rewrites the geometry of the elements it moved', async () => {
   const spy = (layer, collect) => {
     for (const element of layer.children) {
       const original = element.setAttribute.bind(element);
-      element.setAttribute = (name, value) => { collect(element, name, value); return original(name, value); };
+      element.setAttribute = (name, value) => { collect(element, name, value, element.attributes[name]); return original(name, value); };
       for (const child of element.children) {
         const inner = child.setAttribute.bind(child);
-        child.setAttribute = (name, value) => { collect(child, name, value); return inner(name, value); };
+        child.setAttribute = (name, value) => { collect(child, name, value, child.attributes[name]); return inner(name, value); };
       }
     }
   };
-  spy(nodeLayer, (element, name) => { if (name === 'transform') reads.transform.push(element.parentNode?.getAttribute?.('data-node') ?? 'edge'); });
+  spy(nodeLayer, (element, name, value, previous) => { if (name === 'transform') reads.transform.push(`${element.parentNode?.getAttribute?.('data-node') ?? 'edge'}: ${previous} -> ${value}`); });
   spy(edgeLayer, (element, name) => { if (name === 'd') reads.edgePaths.push(element.getAttribute('data-edge-path') ?? 'hit'); });
 
   // Select n1 and drag it: only its own transform and the one edge attached to it may be rewritten.
@@ -1492,8 +1506,12 @@ test('a drag only rewrites the geometry of the elements it moved', async () => {
   reads.transform.length = 0; reads.edgePaths.length = 0;
   harness.svg.dispatch('pointerdown', { clientX: n1.x + n1.w / 2, clientY: n1.y + n1.h / 2 });
   harness.svg.dispatch('pointermove', { clientX: n1.x + n1.w / 2 + 30, clientY: n1.y + n1.h / 2 + 20 });
+  const during = [...reads.transform];
   harness.svg.dispatch('pointerup', {});
-  assert.deepEqual(reads.transform, ['n1'], 'only the dragged node is repositioned');
+  await new Promise(resolve => setImmediate(resolve));
+  const asNodes = entries => entries.map(entry => entry.split(':')[0]);
+  assert.deepEqual(asNodes(during), ['n1'], `only the dragged node is repositioned (${JSON.stringify(during)})`);
+  assert.deepEqual(asNodes(reads.transform), ['n1'], `finishing the gesture adds no further geometry writes (${JSON.stringify(reads.transform)})`);
   assert.equal(reads.edgePaths.length <= 2, true, 'only the edges attached to it are re-pathed');
 
   // The dragged node really moved, and the nodes the gesture never touched kept their geometry.
@@ -1579,4 +1597,129 @@ test('the inline editor follows a pan and a zoom instead of staying where it ope
   assert.equal(editors().length, 0);
   harness.svg.dispatch('wheel', { clientX: 100, clientY: 100, deltaX: 0, deltaY: 60, ctrlKey: false, preventDefault() {} });
   assert.equal(editors().length, 0, 'a pan with no editor open creates nothing');
+});
+
+test('clicking empty canvas writes pending work instead of leaving it unsaved', async () => {
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  // A debounced edit: nudge the dropped node so 「有未保存的改动」 is on screen.
+  harness.panel.setTool('note');
+  harness.svg.dispatch('pointerdown', { clientX: 200, clientY: 200 });
+  nameShape(harness, '待保存');
+  await new Promise(resolve => setImmediate(resolve));
+  state.length = 0;
+  harness.doc.body.dispatch('keydown', { key: 'ArrowRight', metaKey: false, ctrlKey: false, shiftKey: false, preventDefault() {}, target: harness.doc.body });
+  assert.equal(harness.pendingTimers() > 0, true, 'the nudge is only scheduled');
+  assert.equal(harness.registry.get('board-status').textContent, '有未保存的改动');
+  assert.equal(state.some(call => call.action === 'board_save'), false);
+
+  // A click on empty canvas is the reader saying they are done: write it now.
+  harness.svg.dispatch('pointerdown', { clientX: 700, clientY: 460 });
+  harness.svg.dispatch('pointerup', {});
+  assert.equal(state.filter(call => call.action === 'board_save').length, 1, 'the click flushed the pending edit');
+  assert.equal(harness.pendingTimers(), 0, 'and cancelled the timer rather than leaving both');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(harness.registry.get('board-status').textContent, '已保存');
+  // A plain click starts a marquee that never moved, so the selection is untouched — only the save
+  // is triggered. (Changing what a click selects is a separate product decision.)
+  assert.equal(harness.panel.selection().length, 1, 'a click does not clear the selection by itself');
+
+  // A click with nothing pending writes nothing at all.
+  state.length = 0;
+  harness.svg.dispatch('pointerdown', { clientX: 720, clientY: 480 });
+  harness.svg.dispatch('pointerup', {});
+  assert.equal(state.some(call => call.action === 'board_save'), false, 'no pending change, no write');
+});
+
+test('creating an edge, a paper node or a copy writes it straight away', async () => {
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  harness.panel.setTool('note');
+  harness.svg.dispatch('pointerdown', { clientX: 160, clientY: 160 });
+  nameShape(harness, 'A');
+  harness.panel.setTool('note');
+  harness.svg.dispatch('pointerdown', { clientX: 420, clientY: 160 });
+  nameShape(harness, 'B');
+  await new Promise(resolve => setImmediate(resolve));
+
+  // The connect tool: two clicks make one edge, and it is written without waiting out a debounce.
+  state.length = 0;
+  const [a, b] = harness.panel.board().nodes;
+  harness.panel.setTool('connect');
+  harness.svg.dispatch('pointerdown', { clientX: a.x + a.w / 2, clientY: a.y + a.h / 2 });
+  harness.svg.dispatch('pointerup', {});
+  harness.svg.dispatch('pointerdown', { clientX: b.x + b.w / 2, clientY: b.y + b.h / 2 });
+  harness.svg.dispatch('pointerup', {});
+  assert.equal(harness.panel.board().edges.length, 1, 'the edge exists');
+  assert.equal(state.some(call => call.action === 'board_save'), true, 'creating the edge saved immediately');
+  assert.equal(harness.pendingTimers(), 0, 'with no debounce timer left behind');
+
+  // A paper dropped onto the canvas.
+  await new Promise(resolve => setImmediate(resolve));
+  state.length = 0;
+  harness.panel.addPaper({ id: 'paper_a', title: 'Paper A', year: 2026, citekey: 'wang2026' }, { x: 260, y: 320 });
+  assert.equal(state.some(call => call.action === 'board_save'), true, 'the dropped paper saved immediately');
+
+  // Duplicating a node and its edge.
+  await new Promise(resolve => setImmediate(resolve));
+  state.length = 0;
+  harness.panel.select?.([a.id]);
+  harness.svg.dispatch('pointerdown', { clientX: a.x + a.w / 2, clientY: a.y + a.h / 2 });
+  harness.svg.dispatch('pointerup', {});
+  const before = harness.panel.board().nodes.length;
+  harness.doc.body.dispatch('keydown', { key: 'd', metaKey: true, ctrlKey: false, shiftKey: false, preventDefault() {}, target: harness.doc.body });
+  assert.equal(harness.panel.board().nodes.length, before + 1, 'the copy exists');
+  assert.equal(state.some(call => call.action === 'board_save'), true, 'and the copy saved immediately');
+});
+
+test('an edit made while a save is in flight is not thrown away by its response', async () => {
+  // Saving eagerly makes this window easy to hit: drop a shape, immediately start the next one. The
+  // response carries the board as the host stored it, so adopting it blindly would discard the
+  // newer local edit and then write the old version back over it.
+  let release = null;
+  const harness = loadPanel({ api: apiStub({ board_save: payload => new Promise(resolve => { release = () => resolve({ board: { ...payload.board }, revision: 'z'.repeat(64), summary: {} }); }) }) });
+  await harness.panel.open();
+  harness.panel.setTool('note');
+  harness.svg.dispatch('pointerdown', { clientX: 160, clientY: 160 });
+  nameShape(harness, '第一个');
+  assert.equal(typeof release, 'function', 'the save is in flight');
+  // A second shape while the first write is unanswered.
+  harness.panel.setTool('note');
+  harness.svg.dispatch('pointerdown', { clientX: 460, clientY: 300 });
+  nameShape(harness, '第二个');
+  assert.equal(harness.panel.board().nodes.length, 2, 'the newer shape is on the board');
+  release();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(harness.panel.board().nodes.length, 2, 'the response did not discard the newer shape');
+  assert.equal(JSON.stringify([...harness.panel.board().nodes].map(node => node.text)), JSON.stringify(['第一个', '第二个']));
+  // The stale response still advanced the revision, so the pending write lands on the new one.
+  await harness.runTimers();
+  const last = state.filter(call => call.action === 'board_save').at(-1);
+  assert.equal(last.payload.expected_revision, 'z'.repeat(64), 'the next write uses the revision the host returned');
+  assert.equal(last.payload.board.nodes.length, 2, 'and carries both shapes');
+});
+
+test('closing the board during an in-flight save still writes what arrived meanwhile', async () => {
+  // The eager save makes an in-flight write normal, and closing the view used to return immediately
+  // when one was running — dropping whatever the reader changed after it started.
+  let release = null;
+  const harness = loadPanel({ api: apiStub({ board_save: payload => new Promise(resolve => { release = () => resolve({ board: { ...payload.board }, revision: 'z'.repeat(64), summary: {} }); }) }) });
+  await harness.panel.open();
+  harness.panel.setTool('note');
+  harness.svg.dispatch('pointerdown', { clientX: 180, clientY: 180 });
+  nameShape(harness, '第一个');
+  assert.equal(typeof release, 'function', 'a save is in flight');
+  harness.panel.setTool('note');
+  harness.svg.dispatch('pointerdown', { clientX: 480, clientY: 320 });
+  nameShape(harness, '第二个');
+  release();
+  state.length = 0;
+  await harness.panel.close();
+  const writes = state.filter(call => call.action === 'board_save');
+  assert.equal(writes.length, 1, 'the change that arrived during the first save was written exactly once');
+  assert.equal(writes[0].payload.board.nodes.length, 2, 'with both shapes');
+  assert.equal(writes[0].payload.expected_revision, 'z'.repeat(64), 'against the revision the first write returned');
+  assert.equal(harness.pendingTimers(), 0, 'and nothing is left scheduled behind a closed board');
+  // The keepalive shape of a close-time write is covered by the settle test above; here the point is
+  // that an in-flight save no longer makes closing return early and drop the newer edit.
 });

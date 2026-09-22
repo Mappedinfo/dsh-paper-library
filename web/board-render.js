@@ -146,7 +146,10 @@
       const style = sourceApi().nodeStyle(board().style ?? {}, node);
       attr(group, 'class', nodeClass(node));
       const content = group.firstChild;
-      content.setAttribute('transform', `translate(${bounds.x},${bounds.y})`);
+      // Conditional like every other write: a render happens on every selection and save-status
+      // change, and rewriting one transform per node was the largest remaining source of
+      // invalidation in a re-render that changed nothing about the node.
+      attr(content, 'transform', `translate(${bounds.x},${bounds.y})`);
       attr(group, 'data-font-size', style.fontSize ?? null);
       const shape = content.firstChild;
       const radius = nodeRadius[node.kind] ?? 10;

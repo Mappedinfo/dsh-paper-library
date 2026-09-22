@@ -757,9 +757,14 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.board-node').length === 60, null, { timeout: 20000 });
   // Counters do not survive a navigation, so start counting once the board is on screen.
   await instrument();
-  // A re-render of an unchanged board must not touch the DOM at all.
-  const idle = await counted(() => page.evaluate(() => document.getElementById('board-canvas').dispatchEvent(new Event('focus'))));
-  assert.equal(idle.created, 0, 'a render never creates elements for nodes that already exist');
+  // Selecting a node re-renders the whole scene. That render must write only what changed about the
+  // selection — before this was measured it rewrote one transform per node, 60 writes on this board.
+  const clickBox = await page.locator('.board-node .board-node-shape').nth(3).boundingBox();
+  const reselect = await counted(async () => {
+    await page.mouse.click(clickBox.x + clickBox.width / 2, clickBox.y + clickBox.height / 2);
+  });
+  assert.equal(reselect.created, 0, 'a render never creates elements for nodes that already exist');
+  assert.ok(reselect.writes <= 20, `selecting a node writes only what changed (wrote ${reselect.writes} on a 60-node board)`);
   // Dragging one node rewrites that node and its own edges — not the other 59 nodes and 58 edges.
   const dragBox = await page.locator('.board-node .board-node-shape').first().boundingBox();
   const drag = await counted(async () => {

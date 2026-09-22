@@ -471,6 +471,8 @@
     let historyIndex = -1;
     let saveTimer = null;
     let pendingSave = false;
+    /** The board write currently in flight, so one save never overlaps another. */
+    let saving = null;
     let conflict = null;
     let drag = null;
     let connectFrom = null;
@@ -608,12 +610,41 @@
     }
 
     /**
+     * Save now instead of waiting out the debounce.
+     *
+     * The debounce exists to fold what a reader does *continuously* — typing, dragging — into one
+     * write. The moments where they expect their work to be durable are discrete instead: dropping a
+     * new shape, finishing a connection, clicking off everything onto empty canvas. Those come here.
+     * An open editor still holds the write back (the node has no text yet), and its commit calls this
+     * too, so naming a shape saves it as soon as the name is committed.
+     */
+    function saveNow() {
+      if (saveTimer !== null) { clearTimeout(saveTimer); saveTimer = null; }
+      if (!pendingSave) return;
+      void flush();
+    }
+
+    /** `scheduleSave()` followed by `saveNow()`, for edits that do not go through `mutate()` — the
+     *  drag fast path writes the board directly, so it has to arm the change before flushing it. */
+    function settleNow() {
+      scheduleSave();
+      saveNow();
+    }
+
+    /** The parts of a board a local edit can change while a write is in flight. */
+    const localContent = value => JSON.stringify({ title: value.title, nodes: value.nodes, edges: value.edges, style: value.style ?? null, links: value.links ?? null });
+
+    /**
      * Saving is debounced, so anything that takes the board away — closing the view,
      * switching boards, unloading the page — must settle first. Otherwise an edit made
      * in the last debounce window would silently disappear.
      */
     async function settle({ keepalive = false } = {}) {
       if (saveTimer !== null) { clearTimeout(saveTimer); saveTimer = null; }
+      // A write already in flight has to finish before the board goes away, and whatever it left
+      // pending is written here — with keepalive when the page is unloading. Without this, closing
+      // the view during an in-flight save would drop the edit that arrived after it started.
+      if (saving) { try { await saving; } catch { /* flush has already reported it */ } }
       if (!pendingSave) return;
       await flush({ keepalive });
     }
@@ -625,14 +656,33 @@
       if (!pendingSave) return;
       // Held back until the open edit commits: the node being typed into is empty right now.
       if (editor) return;
+      // A write is already in flight. Leave this change pending — its follow-up writes it — instead
+      // of sending a second request with the same `expected_revision`, which the host would answer
+      // as a conflict the reader never caused.
+      if (saving) return;
       const payload = { ...board, view: { x: view.x, y: view.y, zoom: view.zoom } };
+      const sent = localContent(payload);
       pendingSave = false;
       status('正在保存…');
+      // One write at a time. Saving eagerly makes two writes easy to overlap — name one shape while
+      // the previous one is still unanswered — and both would carry the same `expected_revision`,
+      // so the second would come back as a conflict the reader never caused. Anything that arrived
+      // meanwhile is left pending and written by the follow-up below.
+      const request = api('board_save', { id: boardId, board: payload, expected_revision: revision }, keepalive ? { keepalive: true } : {});
+      saving = request;
+      let wrote = false;
       try {
-        const result = await api('board_save', { id: boardId, board: payload, expected_revision: revision }, keepalive ? { keepalive: true } : {});
+        const result = await request;
+        wrote = true;
         if (!live) return;
         revision = result.revision;
-        board = result.board;
+        // Adopt the host's copy only when the reader has not changed the board while this write was
+        // in flight. Saving eagerly makes that window easy to hit — drop a shape, start the next one
+        // — and blindly assigning would discard the newer local edit and then save the old version
+        // over it. The host's metadata (status, timestamps, revision) is adopted either way.
+        board = localContent(board) === sent
+          ? result.board
+          : { ...result.board, title: board.title, nodes: board.nodes, edges: board.edges, style: board.style, links: board.links };
         conflict = null;
         renderConflict();
         status('已保存', 'saved');
@@ -661,7 +711,17 @@
         }
         status(error.message || '保存失败', 'error');
         toast(error.message || '画板保存失败', true);
+      } finally {
+        // Whether it succeeded or failed, the write is no longer in flight. A failure keeps
+        // `pendingSave` true on purpose, so a retry happens at the next settle or explicit moment
+        // rather than in a tight loop.
+        if (saving === request) saving = null;
       }
+      // Edits that arrived while this write was in flight were left pending on purpose: write them
+      // now rather than leaving 「有未保存的改动」 on screen until the reader touches something else.
+      // This has to run after the marker is released — otherwise the follow-up would see a write
+      // still "in flight" and no-op.
+      if (wrote && pendingSave && live) saveNow();
     }
 
     function renderConflict() {
@@ -779,6 +839,8 @@
         closeTextEdit();
         if (!byId(node.id)) return;
         mutate(current => model.setNodeText(current, node.id, value));
+        // Naming a shape is the end of creating it, so the new element is written now.
+        saveNow();
       };
       area.addEventListener('blur', commit);
       area.addEventListener('keydown', event => {
@@ -845,6 +907,7 @@
           setTool('select');
         }
         render();
+        if (created) saveNow();
         return;
       }
       if (SHAPE_TOOLS.includes(mode)) {
@@ -900,6 +963,9 @@
       }
       const edgeId = hitEdge(board.nodes, board.edges, point, LIMITS.hit / view.zoom);
       if (edgeId) { select([edgeId], event.shiftKey); return; }
+      // Empty canvas: a click here means the reader is done with what they were doing, so it is a
+      // natural moment to write any pending change instead of leaving 「有未保存的改动」 on screen.
+      saveNow();
       drag = { kind: 'marquee', start: point, additive: event.shiftKey };
       marquee.removeAttribute('hidden');
     }
@@ -985,17 +1051,18 @@
       if (!drag) return;
       const finished = drag;
       cancelDrag();
-      if (finished.kind === 'move') { if (finished.moved) { pushHistory(); scheduleSave(); } return; }
-      if (finished.kind === 'resize') { pushHistory(); render(); scheduleSave(); return; }
-      if (finished.kind === 'waypoint') { if (finished.moved) { pushHistory(); render(); scheduleSave(); } return; }
+      if (finished.kind === 'move') { if (finished.moved) { pushHistory(); scheduleSave(); settleNow(); } return; }
+      if (finished.kind === 'resize') { pushHistory(); render(); scheduleSave(); settleNow(); return; }
+      if (finished.kind === 'waypoint') { if (finished.moved) { pushHistory(); render(); scheduleSave(); settleNow(); } return; }
       if (finished.kind === 'connect') {
+        let created = null;
         if (finished.target) {
-          let created = null;
           if (mutate(current => { const result = model.addEdge(current, finished.id, finished.target); created = result.edge; return result.board; })) {
             if (created) select([created.id]);
           }
         }
         render();
+        if (created) saveNow();
         return;
       }
       if (finished.kind === 'marquee' && finished.rect) {
@@ -1045,6 +1112,7 @@
       let created = [];
       if (!mutate(current => { const result = model.duplicate(current, ids); created = result.nodes.map(node => node.id); return result.board; })) return;
       select(created);
+      saveNow();
     }
 
     /** The drawing tools are meaningless until a record has loaded, so they are plainly disabled
@@ -1386,6 +1454,7 @@
       const node = paperNode(paper, point);
       if (!mutate(current => model.addNode(current, node))) return null;
       select([node.id]);
+      saveNow();
       return node.id;
     }
 
@@ -1398,6 +1467,7 @@
       board = { ...board, nodes: [...board.nodes, ...additions] };
       pushHistory(); render(); scheduleSave();
       select(additions.map(node => node.id));
+      saveNow();
       return additions.length;
     }
 
