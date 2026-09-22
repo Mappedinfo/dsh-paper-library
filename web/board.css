@@ -73,6 +73,9 @@
 .board-editor-layer{position:absolute;inset:0;pointer-events:none}
 /* The editor sits *on* the shape: an opaque rounded box would hide a diamond or a sticky note
  * behind a rectangle while the reader is naming it (the reported "diamond starts as a rect"). */
+/* While a node is being edited, its own text is hidden: the editor is a translucent overlay, so the
+   old text (or the （空） placeholder) would otherwise show through behind the caret. */
+.board-node.is-editing .board-node-text,.board-node.is-editing .board-node-meta{visibility:hidden}
 .board-text-editor{position:absolute;pointer-events:auto;font:500 13px var(--dsw-font-family);line-height:1.4;padding:6px 8px;border:1px dashed var(--dsw-alias-link);border-radius:4px;background:transparent;color:var(--ink);resize:none;box-sizing:border-box;overflow:auto}
 @supports (background:color-mix(in srgb,red 50%,transparent)){.board-text-editor{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 66%,transparent)}}.board-empty{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:6px;text-align:center;color:var(--muted);pointer-events:none}
 .board-empty[hidden]{display:none}

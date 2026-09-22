@@ -552,6 +552,7 @@
       selection: () => selection,
       live: () => live,
       connectFrom: () => connectFrom,
+      editing: () => editor?.node ?? null,
       sourceApi,
       nodeBounds,
       geometryFor,
@@ -824,10 +825,12 @@
       placeTextEditor(editor.area, node);
     }
 
-    function startTextEdit(node) {
+    function startTextEdit(node, seed = '') {
       closeTextEdit();
       const area = el('textarea', 'board-text-editor');
-      area.value = String(node.text || '');
+      // Typing with a node selected opens the editor seeded with that character, the way a whiteboard
+      // does it; with no seed the whole existing text is selected, which is the double-click flow.
+      area.value = seed || String(node.text || '');
       area.maxLength = LIMITS.text;
       area.setAttribute('aria-label', `编辑${KIND_LABEL[node.kind] || '节点'}文本`);
       placeTextEditor(area, node);
@@ -849,14 +852,18 @@
       });
       editor = { node: node.id, area, commit };
       editorLayer.append(area);
+      // The canvas hides this node's own text while the editor is open.
+      painter.nodeElement(node.id)?.classList.add('is-editing');
       area.focus();
-      area.select();
+      if (seed) area.setSelectionRange(area.value.length, area.value.length);
+      else area.select();
     }
     function closeTextEdit() {
       if (!editor) return;
-      const area = editor.area;
+      const { node, area } = editor;
       editor = null;
       area.remove();
+      painter.nodeElement(node)?.classList.remove('is-editing');
     }
     /** The toolbar's menus: one open at a time, closed by Escape or a click outside. */
     const MENU_IDS = Object.freeze([['board-files-open', 'board-files'], ['board-layout-open', 'board-layout-panel'], ['board-project-open', 'board-project-panel'], ['board-menu-open', 'board-menu']]);
@@ -963,8 +970,11 @@
       }
       const edgeId = hitEdge(board.nodes, board.edges, point, LIMITS.hit / view.zoom);
       if (edgeId) { select([edgeId], event.shiftKey); return; }
-      // Empty canvas: a click here means the reader is done with what they were doing, so it is a
-      // natural moment to write any pending change instead of leaving 「有未保存的改动」 on screen.
+      // Empty canvas: the reader is done with what they were doing, so the click ends any open edit,
+      // clears the selection (no need to reach for the select tool) and writes the pending change.
+      // Shift keeps the selection, and a marquee drag replaces it on release.
+      commitTextEdit();
+      if (!event.shiftKey) select([]);
       saveNow();
       drag = { kind: 'marquee', start: point, additive: event.shiftKey };
       marquee.removeAttribute('hidden');
@@ -1101,6 +1111,15 @@
         return;
       }
       if (meta) return;
+      // Typing with a single node selected edits that node. The advertised tool letters only apply
+      // when there is nothing to type into, because an IME needs the printable keys to reach the
+      // editor — otherwise 「便签」 could never be typed after clicking a shape.
+      const single = selectedNodes();
+      if (single.length === 1) {
+        if (event.key === 'Enter' || event.key === 'F2') { event.preventDefault(); startTextEdit(single[0]); return; }
+        if (event.isComposing || event.key === 'Process') { event.preventDefault(); startTextEdit(single[0]); return; }
+        if (event.key.length === 1 && !event.ctrlKey && !event.altKey) { event.preventDefault(); startTextEdit(single[0], event.key); return; }
+      }
       const next = TOOL_KEYS[event.key.toLowerCase()];
       if (next) setTool(next);
     }

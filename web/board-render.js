@@ -39,6 +39,7 @@
    * @param {() => Set<string>} options.selection
    * @param {() => boolean} options.live
    * @param {() => string|null} options.connectFrom  the node a connect gesture started from
+   * @param {() => string|null} options.editing      the node whose inline editor is open, if any
    * @param {() => object} options.sourceApi     board-source.js: sizes, style vocabulary, geometry
    * @param {(node: object) => object} options.nodeBounds
    * @param {(edge: object, from: object, to: object) => object} options.geometryFor
@@ -49,7 +50,7 @@
    *                                             inline text editor is a DOM element over the canvas)
    */
   function create(options) {
-    const { doc, dom, board, view, selection, live, connectFrom, sourceApi, nodeBounds, geometryFor, round, nodeRadius, onRendered, onViewApplied } = options;
+    const { doc, dom, board, view, selection, live, connectFrom, editing, sourceApi, nodeBounds, geometryFor, round, nodeRadius, onRendered, onViewApplied } = options;
     const { stage, viewport, edgeLayer, nodeLayer, empty } = dom;
     const { svgEl } = createElements(doc);
     const el = id => doc.getElementById(id);
@@ -110,7 +111,10 @@
     /** Same rule for text: assigning an identical string still dirties the node. */
     const textOf = (element, value) => { const text = value === undefined || value === null ? '' : String(value); if (element.textContent !== text) element.textContent = text; };
 
-    const nodeClass = node => `board-node board-node-kind-${node.kind}${selection().has(node.id) ? ' is-selected' : ''}${node.origin === 'llm' ? ' is-ai' : ''}${connectFrom() === node.id ? ' is-connect-source' : ''}`;
+    // `is-editing` is derived from the panel's editor rather than toggled by hand, so a re-render
+    // during an edit cannot lose it: the node's own text is hidden while the reader types into the
+    // overlay, which otherwise shows the old text (or 「（空）」) through the translucent editor.
+    const nodeClass = node => `board-node board-node-kind-${node.kind}${selection().has(node.id) ? ' is-selected' : ''}${node.origin === 'llm' ? ' is-ai' : ''}${connectFrom() === node.id ? ' is-connect-source' : ''}${editing?.() === node.id ? ' is-editing' : ''}`;
 
     /** Build one node's subtree. The shape is chosen here and never replaced afterwards. */
     function createNodeElement(node) {

@@ -121,6 +121,33 @@ try {
   assert.equal(/没有文本也没有文献/.test(await page.locator('#board-status').innerText()), false, 'and no rejection is reported');
   record('an-unnamed-shape-is-kept-as-content');
 
+  // Clicking a shape and typing edits it. The reader's report was that the typing went nowhere and
+  // the old text stayed on screen: only a double-click opened the editor, and while it was open the
+  // canvas kept drawing the node's own text (the （空） placeholder here) behind the overlay.
+  const unnamedBox = await page.locator('.board-node-shape').first().boundingBox();
+  await page.mouse.click(unnamedBox.x + unnamedBox.width / 2, unnamedBox.y + unnamedBox.height / 2);
+  await page.keyboard.press('KeyZ');
+  await page.locator('.board-text-editor').waitFor();
+  assert.equal(await page.locator('.board-text-editor').inputValue(), 'z', 'the editor opened with the typed character');
+  assert.match(await page.locator('.board-node').first().getAttribute('class'), /is-editing/, 'and the node is marked as being edited');
+  assert.equal(await page.locator('.board-node.is-editing .board-node-text').first().isVisible(), false, 'so its own text cannot show through the overlay');
+  await page.locator('.board-text-editor').fill('直接打字');
+  // Clicking empty canvas commits the edit, clears the selection and writes it — no need to reach
+  // for the select tool, and no stale placeholder left on the canvas.
+  await page.mouse.click(stage.x + 940, stage.y + 640);
+  await waitForHost(value => (value.board?.nodes ?? []).some(node => node.text === '直接打字'), 'the typed text reaching the record');
+  await page.waitForFunction(() => document.querySelectorAll('.board-text-editor').length === 0);
+  assert.equal(await page.locator('.board-node-text').first().textContent(), '直接打字', 'the canvas shows the typed text');
+  assert.equal(await page.locator('.board-node.is-selected').count(), 0, 'and clicking empty canvas cleared the selection');
+  assert.equal(await page.locator('.board-node.is-editing').count(), 0, 'the editing mark is gone with the editor');
+  record('click-and-type-edits-a-shape-and-empty-canvas-commits-and-deselects');
+
+  // Leave the board as this check found it: the later steps count nodes from zero.
+  const typedBox = await page.locator('.board-node-shape').first().boundingBox();
+  await page.mouse.click(typedBox.x + typedBox.width / 2, typedBox.y + typedBox.height / 2);
+  await page.keyboard.press('Delete');
+  await waitForHost(value => (value.board?.nodes ?? []).length === 0, 'the typed shape being deleted again');
+
   // A second, unrelated gesture must not multiply the inline editor: it is an overlay positioned
   // from scene coordinates, so panning has to move it with the scene. Two boxes was the report.
   await page.locator('#board-tool-ellipse').click();
@@ -154,7 +181,7 @@ try {
   await page.waitForTimeout(200);
   assert.equal(await page.locator('#board-zoom-label').innerText(), '100%', 'the check leaves the zoom where it found it');
   await page.keyboard.press('Escape');
-  await waitForHost(value => (value.board?.nodes ?? []).length >= 2, 'the second unnamed shape reaching the record');
+  await waitForHost(value => (value.board?.nodes ?? []).length >= 1, 'the ellipse reaching the record');
   // Leave the board as this check found it: the later steps count nodes from zero.
   await deleteNodeIfPresent();
 

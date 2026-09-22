@@ -10,12 +10,16 @@ const bridgeModule = await readFile(new URL('../web/board-bridge.js', import.met
 const renderModule = await readFile(new URL('../web/board-render.js', import.meta.url), 'utf8');
 
 class ClassList {
-  constructor() { this.values = new Set(); }
-  add(...names) { for (const name of names) if (name) this.values.add(name); }
-  remove(...names) { for (const name of names) this.values.delete(name); }
+  /** `owner` ties this list to its element, the way the DOM does: adding a class here also changes
+   *  the element's `class` attribute, so a renderer may use either and a test may read either. */
+  constructor(owner = null, initial = []) { this.owner = owner; this.values = new Set(initial.filter(Boolean)); }
+  sync() { if (this.owner) this.owner.attributes.class = [...this.values].join(' '); }
+  add(...names) { for (const name of names) if (name) this.values.add(name); this.sync(); }
+  remove(...names) { for (const name of names) this.values.delete(name); this.sync(); }
   contains(name) { return this.values.has(name); }
-  toggle(name, on) { const next = on === undefined ? !this.values.has(name) : Boolean(on); if (next) this.values.add(name); else this.values.delete(name); return next; }
+  toggle(name, on) { const next = on === undefined ? !this.values.has(name) : Boolean(on); if (next) this.values.add(name); else this.values.delete(name); this.sync(); return next; }
 }
+const classNames = value => String(value ?? '').split(/\s+/).filter(Boolean);
 
 /** Minimal DOM/SVG stand-in: enough for the panel, with no browser and no network. */
 function environment(ids = []) {
@@ -24,11 +28,16 @@ function environment(ids = []) {
   class Element {
     constructor(tag = 'div', ns = null) {
       this.tagName = String(tag).toUpperCase(); this.namespaceURI = ns; this.children = []; this.parentNode = null;
-      this.attributes = {}; this.style = {}; this.dataset = {}; this.events = new Map(); this.classList = new ClassList();
+      this.attributes = {}; this.style = {}; this.dataset = {}; this.events = new Map(); this.classList = new ClassList(this);
       this.textContent = ''; this.value = ''; this.hidden = false; this.disabled = false; this.ownerDocument = doc;
     }
-    set className(value) { this._className = value; this.classList = new ClassList(); for (const name of String(value || '').split(/\s+/)) if (name) this.classList.add(name); }
-    get className() { return this._className || ''; }
+    // The real DOM keeps `class`, `className` and `classList` in sync; the stub must too, or a
+    // renderer that sets `class` through `setAttribute` looks like it never labelled anything.
+    set className(value) {
+      this.attributes.class = String(value ?? '');
+      this.classList = new ClassList(this, classNames(value));
+    }
+    get className() { return this.attributes.class ?? ''; }
     set id(value) { this._id = value; registry.set(value, this); }
     get id() { return this._id; }
     append(...nodes) { for (const node of nodes) { if (!node) continue; if (node.parentNode) node.parentNode.children = node.parentNode.children.filter(child => child !== node); node.parentNode = this; this.children.push(node); } }
@@ -43,8 +52,16 @@ function environment(ids = []) {
     }
     replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
     remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this); this.parentNode = null; }
-    setAttribute(key, value) { this.attributes[key] = String(value); if (key === 'hidden') this.hidden = true; }
-    removeAttribute(key) { delete this.attributes[key]; if (key === 'hidden') this.hidden = false; }
+    setAttribute(key, value) {
+      this.attributes[key] = String(value);
+      if (key === 'hidden') this.hidden = true;
+      if (key === 'class') this.classList = new ClassList(this, classNames(value));
+    }
+    removeAttribute(key) {
+      delete this.attributes[key];
+      if (key === 'hidden') this.hidden = false;
+      if (key === 'class') this.classList = new ClassList(this);
+    }
     getAttribute(key) { return this.attributes[key] ?? null; }
     hasAttribute(key) { return Object.hasOwn(this.attributes, key); }
     addEventListener(type, handler) { if (!this.events.has(type)) this.events.set(type, new Set()); this.events.get(type).add(handler); }
@@ -56,6 +73,8 @@ function environment(ids = []) {
     }
     get options() { return this.tagName === 'SELECT' ? this.children : undefined; }
     focus() {} select() {}
+    /** Textareas expose this in the DOM; the caret-seeded editor relies on it. */
+    setSelectionRange(start, end) { this.selection = { start, end }; }
     get firstChild() { return this.children[0] || null; }
     get lastChild() { return this.children[this.children.length - 1] || null; }
     getBoundingClientRect() { return { left: 0, top: 0, width: 800, height: 520 }; }
@@ -929,7 +948,8 @@ test('the toolbar keeps one menu open at a time and the inspector follows the se
   // The file list is a list of boards, not one dropdown: the stub's record is listed and the
   // current one cannot be reopened.
   harness.registry.get('board-files-open').dispatch('click');
-  const rows = harness.registry.get('board-file-list').children.filter(child => child.className === 'board-file-row');
+  // Membership, not equality: a row also carries `is-current` when it is the open board.
+  const rows = harness.registry.get('board-file-list').children.filter(child => child.classList.contains('board-file-row'));
   assert.equal(rows.length, 1);
   assert.match(rows[0].children[0].textContent, /结构图/);
   assert.match(rows[0].children[1].textContent, /3 节点 · 2 连线/);
@@ -1620,9 +1640,9 @@ test('clicking empty canvas writes pending work instead of leaving it unsaved', 
   assert.equal(harness.pendingTimers(), 0, 'and cancelled the timer rather than leaving both');
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(harness.registry.get('board-status').textContent, '已保存');
-  // A plain click starts a marquee that never moved, so the selection is untouched — only the save
-  // is triggered. (Changing what a click selects is a separate product decision.)
-  assert.equal(harness.panel.selection().length, 1, 'a click does not clear the selection by itself');
+  // The same click also means "nothing is selected": the reader should not have to reach for the
+  // select tool to deselect.
+  assert.equal(harness.panel.selection().length, 0, 'clicking empty canvas clears the selection');
 
   // A click with nothing pending writes nothing at all.
   state.length = 0;
@@ -1722,4 +1742,74 @@ test('closing the board during an in-flight save still writes what arrived meanw
   assert.equal(harness.pendingTimers(), 0, 'and nothing is left scheduled behind a closed board');
   // The keepalive shape of a close-time write is covered by the settle test above; here the point is
   // that an in-flight save no longer makes closing return early and drop the newer edit.
+});
+
+test('typing with a node selected edits it, and the tool letters still work with nothing selected', async () => {
+  // Reported: 「点击并输入了文字，结果旧占位符文字还在这里」 — a click selected the shape and the typing
+  // went nowhere, because only a double-click opened the editor. Typing now starts the edit, which is
+  // also the only rule an IME can work under: the printable keys have to reach the editor.
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  const area = () => harness.stage.children.find(child => child.className === 'board-editor-layer')?.children[0] ?? null;
+  const type = key => harness.doc.body.dispatch('keydown', { key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, preventDefault() {}, target: harness.doc.body });
+
+  // Draw a rect and leave it unnamed; the canvas shows the （空） placeholder.
+  harness.panel.setTool('rect');
+  harness.svg.dispatch('pointerdown', { clientX: 300, clientY: 220 });
+  harness.panel.setTool('select');
+  harness.key = null;
+  area().dispatch('blur');
+  assert.equal(harness.panel.board().nodes[0].text, '');
+  const nodeLayer = harness.svg.children[1].children[1];
+  assert.equal(nodeLayer.children[0].firstChild.children.some(child => child.textContent === '（空）'), true, 'the placeholder is drawn');
+
+  // Click the node, then type: the editor opens seeded with the character and replaces the placeholder.
+  const node = harness.panel.board().nodes[0];
+  harness.svg.dispatch('pointerdown', { clientX: node.x + node.w / 2, clientY: node.y + node.h / 2 });
+  harness.svg.dispatch('pointerup', {});
+  assert.equal(harness.panel.selection().length, 1);
+  type('写');
+  assert.ok(area(), 'typing opened the editor');
+  assert.equal(area().value, '写', 'seeded with the character that was typed');
+  // The node's own text is hidden while its editor is open, so the old placeholder cannot show through.
+  assert.equal(nodeLayer.children[0].getAttribute('class').includes('is-editing'), true, 'the edited node is marked');
+  area().value = '写点东西';
+  area().dispatch('blur');
+  assert.equal(nodeLayer.children[0].getAttribute('class').includes('is-editing'), false, 'and unmarked when it closes');
+  assert.equal(harness.panel.board().nodes[0].text, '写点东西', 'the text is committed');
+  assert.equal(nodeLayer.children[0].firstChild.children.some(child => child.textContent === '（空）'), false, 'the placeholder is gone');
+
+  // Enter edits the selected node too, and keeps what is there for editing.
+  harness.svg.dispatch('pointerdown', { clientX: node.x + node.w / 2, clientY: node.y + node.h / 2 });
+  harness.svg.dispatch('pointerup', {});
+  type('Enter');
+  assert.ok(area(), 'Enter opened the editor');
+  assert.equal(area().value, '写点东西', 'with the existing text');
+  area().dispatch('blur');
+
+  // The advertised tool letters still switch tools when nothing is selected.
+  harness.svg.dispatch('pointerdown', { clientX: 900, clientY: 620 });
+  harness.svg.dispatch('pointerup', {});
+  assert.equal(harness.panel.selection().length, 0);
+  type('r');
+  assert.equal(harness.registry.get('board-tool-rect').getAttribute('aria-pressed'), 'true', 'R still picks the rectangle tool');
+  assert.equal(area(), null, 'and no editor opened');
+});
+
+test('clicking empty canvas ends an open edit instead of leaving the editor behind', async () => {
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  const area = () => harness.stage.children.find(child => child.className === 'board-editor-layer')?.children[0] ?? null;
+  harness.panel.setTool('note');
+  harness.svg.dispatch('pointerdown', { clientX: 240, clientY: 200 });
+  assert.ok(area(), 'the new shape is being named');
+  area().value = '点空白处提交';
+  // Clicking empty canvas commits what was typed, clears the selection, and writes it.
+  state.length = 0;
+  harness.svg.dispatch('pointerdown', { clientX: 880, clientY: 640 });
+  harness.svg.dispatch('pointerup', {});
+  assert.equal(area(), null, 'the editor is gone');
+  assert.equal(harness.panel.board().nodes[0].text, '点空白处提交', 'the typed text was kept');
+  assert.equal(harness.panel.selection().length, 0, 'and nothing is selected');
+  assert.equal(state.some(call => call.action === 'board_save'), true, 'the edit was written');
 });
