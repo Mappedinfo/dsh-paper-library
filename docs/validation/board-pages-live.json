@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-22T05:52:54.517Z",
+  "verified_at": "2026-09-22T07:00:39.438Z",
   "url": "https://mappedinfo.github.io/dsh-paper-library/",
   "scope": "The deployed GitHub Pages site, read over the public network and exercised in real Chromium: asset delivery, draw/persist/reload, tidy-tree arranging, PNG export, the Mermaid entry parsing a pasted flowchart into a board, hidden host-only controls, and no third-party requests or page errors. Browser storage on the visitor is convenience, not a durable store. This does not measure availability, latency, capacity or the host's security posture.",
   "checks": [
