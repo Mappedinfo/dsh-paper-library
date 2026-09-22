@@ -20,8 +20,18 @@
 - **非破坏性**：文件消失只删链接、保留记录与批注图谱并标记 `missing`；同目录同大小的唯一改名沿用原记录；`prune` 只清失效链接。Vault Sync 侧的 `tests/symlinks.test.mjs` 固定「不跟随符号链接」，因此不会重复上传。
 - 验证：**528 JavaScript / 237 Python** 测试，含 `tests-js/external-sources.test.mjs`（配置校验、同步配置读取与缓存、设置合并）与 `tests/test_external.py`（索引、增量、改名、缺失恢复、复制写入、越界拒绝）。
 
+### LaTeX 项目
+
+- **以文件夹为单位**：新增 `latex_projects` / `latex_archive` / `latex_revisions` 三张表，把一个装着 `.tex` 和 PDF 的目录登记为项目；自动识别主文件（`main.tex` → 含 `\documentclass` → 字典序第一个）与同名 PDF，不动文件夹里的任何文件。
+- **读取与写入分离**：原生工具 `library_latex`（list/get/tree/read/pdf_pages/pdf_page/history/diff/compare）与 `library_latex_edit`（create/update/archive/restore/write/compile/clean），共 16 个动作进入 bridge 白名单；`input_json` 只解析一次，部署字段不可由请求传入。
+- **带修订号的原子写入**：单文件上限 2 MiB、历史正文上限 512 KiB、每文件保留 40 版；过期写入返回 `STATE_CONFLICT` 与当前正文；路径经 `realpath` 校验，`../`、绝对路径与指向外部的符号链接一律拒绝。
+- **本地编译与预览**：`latex_compile` 调用本机 `latexmk`（默认 xelatex，可 pdflatex/lualatex），工作目录即项目文件夹，默认超时 120 秒、上限 600 秒；返回退出码、提取的错误行、日志尾部（32,000 字符）与页数，失败不伪造成功；`latex_pdf_pages` / `latex_pdf_page` 复用既有 PDF 管线渲染页面；`latex_clean` 只删构建副产物。实测含中文单页稿从登记到编译完成约 0.3 秒。
+- **对比研究**：`latex_history` + `latex_diff`（`previous`/`current`/历史 id 的 unified diff）以及 `latex_compare`（两个项目间同一相对路径对照）。
+- 验证：**537 JavaScript / 250 Python** 测试，含 `tests/test_latex.py`（13 项：登记与主文件识别、越界与符号链接拒绝、CAS 与历史、项目对照、归档不改文件夹、真实 xelatex 编译与页面渲染、失败报告、clean 只删副产物）与 `tests-js/latex-tools.test.mjs`（读写工具分离、请求映射、白名单一致）。
+
 ### 文档
 
+- **[LaTeX 项目](docs/latex-projects.md)**：项目模型、读写与编译边界、对比方式，以及编辑器／DSH 提问／人机互写的下一步。
 - **[外部文献源](docs/external-sources.md)**：同步目录的配置方式、扫描预算、单一访问地址、写入前复制、改名与缺失规则，以及两个插件之间的边界。
 - **[落库后的自动解析流程](docs/auto-parse-flow.md)**：用 Mermaid 画出导入 → 自动队列 → 分批读取 → 图谱／资料／笔记／评审草稿 → 人工审核的链路与存储分布，并给出数据产出对照表、分批预算和「什么时候不会自动发生」。上限标注为代码预算，样例体量标注为确定性夹具，不冒充真实规模的实测值。
 

@@ -80,6 +80,31 @@ class Papers:
         # available to the agent; the many-to-many edge lives in project_papers.
         from .projects import SCHEMA_SQL as project_schema
         self.db.executescript(project_schema)
+        # LaTeX projects record which real folder holds a manuscript and its PDF. The
+        # revision table keeps bounded text history for diffs and review; no file body
+        # is ever the only copy of anything, because the folder stays authoritative.
+        self.db.executescript("""
+        CREATE TABLE IF NOT EXISTS latex_projects(
+          id TEXT PRIMARY KEY,
+          root TEXT NOT NULL UNIQUE,
+          title TEXT NOT NULL,
+          main_path TEXT,
+          pdf_path TEXT,
+          created TEXT NOT NULL,
+          modified TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS latex_archive(project_id TEXT PRIMARY KEY, archived_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS latex_revisions(
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          path TEXT NOT NULL,
+          sha256 TEXT NOT NULL,
+          body TEXT NOT NULL,
+          origin TEXT NOT NULL,
+          created TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS latex_revisions_file ON latex_revisions(project_id, path, created);
+        """)
         indexed = self.db.execute("SELECT 1 FROM sqlite_master WHERE name='paper_search'").fetchone()
         # The search index stays on disk; neither search nor list opens a PDF.
         search_expression = "new.title || ' ' || new.citekey || ' ' || coalesce(json_extract(new.metadata,'$.author'),'') || ' ' || coalesce(json_extract(new.metadata,'$.tags'),'') || ' ' || coalesce(json_extract(new.metadata,'$.abstract'),'') || ' ' || coalesce(new.doi,'') || ' ' || coalesce(json_extract(new.metadata,'$.issued'),'') || ' ' || coalesce(json_extract(new.metadata,'$.container-title'),'') || ' ' || coalesce(json_extract(new.metadata,'$.publication_dates'),'')"

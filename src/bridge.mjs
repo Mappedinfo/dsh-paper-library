@@ -15,7 +15,14 @@ const projectActions = new Set(['project_create','project_update','project_get',
 // Synced corpora are indexed by symlink; roots come from deployment config or settings,
 // never from a request, and no action here copies or deletes an original file.
 const externalActions = new Set(['external_status','external_scan','external_prune','external_promote']);
+// LaTeX projects edit the reader's own folder: writes are revision-checked and
+// compiling runs their local latexmk, so every action stays behind this list.
+const latexActions = new Set(['latex_project_create','latex_project_list','latex_project_get','latex_project_update','latex_project_archive','latex_project_restore','latex_tree','latex_read','latex_write','latex_compile','latex_pdf_pages','latex_pdf_page','latex_history','latex_diff','latex_compare','latex_clean']);
+
 const libraryActions = new Set(['resource_list','resource_export','dataset_import','dataset_put','dataset_get','dataset_archive','dataset_restore','dataset_release_put','dataset_release_get','dataset_release_list','dataset_link_put','dataset_link_list','dataset_link_delete','dataset_asset_put','dataset_asset_list','dataset_asset_preview','dataset_graph_promote','knowledge_source_put','knowledge_source_get','knowledge_source_check','knowledge_source_list','knowledge_draft_put','knowledge_draft_get','knowledge_draft_list','knowledge_draft_review','knowledge_draft_lint','knowledge_note_put','knowledge_note_get','knowledge_note_list','knowledge_export']);
+/** Every action the reader bridge admits, grouped by the module that owns it.
+ * Exported so a test can prove the tool surface and the bridge agree. */
+export const BRIDGE_ACTIONS = {core: actions, challenge: challengeActions, project: projectActions, library: libraryActions, external: externalActions, latex: latexActions};
 let pending = Promise.resolve();
 let importsPending = Promise.resolve();
 let importCount = 0;
@@ -418,7 +425,7 @@ export async function dispatch(request, options = {}) {
     }
     return core({ action: 'save_feedback', text, ...common }, options);
   }
-  if (!actions.has(safe.action) && !projectActions.has(safe.action) && !externalActions.has(safe.action)) throw new Error('未知文献操作。');
+  if (!actions.has(safe.action) && !projectActions.has(safe.action) && !externalActions.has(safe.action) && !latexActions.has(safe.action)) throw new Error('未知文献操作。');
   if (safe.action === 'import') {
     const sources=['path','doi','url','items','content_base64'].filter(key=>safe[key]!==undefined && safe[key]!==null && safe[key]!=='');
     if(sources.length!==1) throw new Error('请提供一种导入来源：PDF/文件路径、链接、DOI、元数据或上传文件。');

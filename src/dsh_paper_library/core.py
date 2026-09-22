@@ -528,6 +528,10 @@ def dispatch(request):
     library = Library(root)
     try:
         action = request.get("action")
+        if isinstance(action, str) and action.startswith("latex_"):
+            # LaTeX projects own a real folder, not the managed PDF tree.
+            from . import latex
+            return latex.dispatch(library, request)
         if isinstance(action, str) and action.startswith("external_"):
             # Indexing of corpora another tool syncs: symlinks in, no copies out.
             from . import external

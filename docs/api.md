@@ -151,7 +151,7 @@ Labels are keyed by NFKC-normalised, punctuation-stripped lowercase text, so “
 
 ## Native Harness tools
 
-The plugin registers 33 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
+The plugin registers 35 tools through Harness's official tool registry. Optional fields use `?`; enum values and core result schemas are defined above.
 
 | Tool | Arguments | Node action |
 |---|---|---|
@@ -180,6 +180,8 @@ The plugin registers 33 tools through Harness's official tool registry. Optional
 | `library_feedback` | `id,annotation_ids?,provider?,model?,reasoning_effort?` | `ai_feedback` |
 | `library_sources` | none | `external_status` |
 | `library_sources_scan` | `operation?,source?,limit?` | `external_scan`/`external_prune` |
+| `library_latex` | `operation,input_json` (read-only operations) | `latex_project_list`/`latex_project_get`/`latex_tree`/`latex_read`/`latex_pdf_pages`/`latex_pdf_page`/`latex_history`/`latex_diff`/`latex_compare` |
+| `library_latex_edit` | `operation,input_json` (editing operations) | `latex_project_create`/`latex_project_update`/`latex_project_archive`/`latex_project_restore`/`latex_write`/`latex_compile`/`latex_clean` |
 
 Tool metadata is a closed subset: `title,type,citekey,DOI,URL,abstract,author,editor,container-title,publisher,volume,issue,page,issued,tags,publication_dates,journal_rankings`. Its person schema accepts `family,given,literal,ORCID,affiliation`, with affiliation `{name,ror?,source?}`. Tool `issued` uses CSL `date-parts`. Graph evidence uses the closed schema above. Paths and runtime state cannot enter structured metadata. Each tool request is capped at 128 KiB before dispatch; core field limits still apply. `rects` is required for `library_annotate`, including an empty array for a page note.
 
@@ -190,6 +192,10 @@ Mutation tools pass through the configured native approval pipeline; `requireToo
 `external_sources`, `external_files` and the staged tree under `<library>/external/` let the library index PDF corpora that a separate sync/backup service maintains. Roots always come from deployment configuration (`externalSources`, `syncConfig`) or from the live settings `sync_config` / `external_sources`; a tool argument can never select a path. A sync config only offers candidates: an entry is indexed when it is selected by id, by `{"select":"all"}`, or by giving an absolute root, and directories inside `$DSH_HOME` are never offered. One root keeps one source id — a second id for an already indexed directory is refused with `conflict` instead of duplicating its records. `external_scan` walks a root, reads only directory entries and size/mtime, records filename-derived metadata as `parse.field_sources = synced-filename` with `needs_review`, and creates one symlink per PDF; unchanged files are skipped from the durable records, and at most 200 new files (limit 2,000) are indexed per call with `pending` reporting the remainder. `external_prune` removes only links whose file is gone. `external_files` keeps `missing = 1` rows and never deletes a paper, so annotations and graphs survive a disappearing file.
 
 `pdf_path` returns the staged link for an external record; every write goes through `_writable_pdf`, which promotes the file into `pdfs/` first (`external_source.promoted`), so a synced directory is never modified. Sources may not live inside the library, staged paths may not escape their source directory, and an existing regular file at a staged path is refused rather than overwritten. Design and configuration: [external-sources.md](external-sources.md).
+
+## LaTeX projects
+
+`latex_projects(root UNIQUE, main_path, pdf_path)`, `latex_archive` and `latex_revisions(project_id, path, sha256, body, origin, created)` treat one real folder as the unit of work; nothing is copied into the library and archiving only hides the record. `latex_create` detects the main file (`main.tex`, then any file with `\documentclass`, then the first `.tex`) and its same-name PDF, and only writes a starter `main.tex` when `create_missing` is explicit. Every path is `realpath`-checked against the project root, so `..`, absolute paths and symlinks that leave the folder are refused for reads and writes alike. `latex_write` is atomic, capped at 2 MiB, keeps a 512 KiB/40-revision text history per file, and returns `STATE_CONFLICT` with the current body when `expected_revision` is stale. `latex_compile` runs the local `latexmk` (`-xelatex|-pdflatex|-lualatex -interaction=nonstopmode -file-line-error -synctex=1`) with the project folder as cwd, a 120 s default and 600 s maximum timeout, and reports exit code, extracted `-file-line-error` lines, log tail and page count instead of masking a failure; `latex_pdf_pages`/`latex_pdf_page` reuse the reader's bounded PDF pipeline, and `latex_clean` deletes only known build side files. Design: [latex-projects.md](latex-projects.md).
 
 ## Reading projects
 

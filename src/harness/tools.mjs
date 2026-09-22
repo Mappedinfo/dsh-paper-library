@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import { RESOURCE_TOOL_SPECS, resourceToolRequest } from './resource-tools.mjs'
 import { BOARD_TOOL_SPECS, boardToolRequest, handleBoardRequest } from './board-tools.mjs'
 import { PROJECT_TOOL_SPECS, projectToolRequest } from './project-tools.mjs'
+import { LATEX_TOOL_SPECS, latexToolRequest } from './latex-tools.mjs'
 import { SOURCE_TOOL_SPECS, handleSourceRequest } from './external-sources.mjs'
 
 const string = (description, required = false) => ({ type: 'string', description, ...(required ? { required: true } : {}) })
@@ -27,6 +28,7 @@ const graphRelations = ['supports', 'contradicts', 'uses', 'evaluates', 'derived
 /** Small schemas keep scope explicit and avoid exposing core write/feedback internals. */
 export const TOOL_SPECS = [
   ...SOURCE_TOOL_SPECS,
+  ...LATEX_TOOL_SPECS,
   ...RESOURCE_TOOL_SPECS,
   ...PROJECT_TOOL_SPECS,
   ...BOARD_TOOL_SPECS,
@@ -62,6 +64,7 @@ export const TOOL_SPECS = [
 export function requestFromTool(spec, args, exec) {
   if (spec.board) return boardToolRequest(spec, args)
   if (spec.action === 'project_tool') return projectToolRequest(spec, args)
+  if (spec.action === 'latex_tool') return latexToolRequest(spec, args)
   if (spec.action === 'dataset_tool' || spec.action === 'knowledge_tool') {
     const request = resourceToolRequest(spec, args)
     if (request.path !== undefined) request.path = resolve(exec.agent?.session?.header?.cwd ?? process.cwd(), request.path)
