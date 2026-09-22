@@ -1,0 +1,16 @@
+{
+  "verified_at": "2026-09-22T06:38:23.328Z",
+  "ok": true,
+  "checks": [
+    "the-standalone-host-serves-the-plugin-shell",
+    "the-shipped-page-loads-the-panel-and-its-topbar-entry",
+    "opening-the-panel-loads-the-registered-project-and-its-source",
+    "a-host-without-dsh-reports-collaboration-unavailable-instead-of-offering-it",
+    "the-shell-makes-no-external-requests-and-raises-no-browser-errors"
+  ],
+  "external_requests": 0,
+  "browser_errors": [],
+  "limits": [
+    "Local Chromium against the real src/server.mjs host; the DSH-hosted page is not covered here"
+  ]
+}

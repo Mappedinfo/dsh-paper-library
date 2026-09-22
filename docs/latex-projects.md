@@ -89,18 +89,40 @@
 - **对比**：「与上一版对比」（`latex_diff` previous→current）与「项目对照」（`latex_compare`，
   选另一个项目比较同一相对路径），差异显示在对话框底部的 `<pre>` 里。
 
-浏览器回执（真实 Chromium + 真实 Python worker + 真实 latexmk，13 项）：
+外壳集成回执（真实 `src/server.mjs` 主机 + 真实页面 + 真实面板，5 项）：
+`docs/validation/latex-shell-browser.json`，
+复现命令 `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node scripts/latex-shell-fixture.mjs`。
+
+面板回执（真实 Chromium + 真实 Python worker + 真实 latexmk + 真实协作模块（模型为桩），18 项）：
 `docs/validation/latex-workspace-browser.json`，
 复现命令 `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node scripts/latex-workspace-fixture.mjs`。
 它覆盖：打开对话框、加载项目树与主文件、编辑落盘、编译并渲染首页、过期保存被拒且不覆盖、
 载入最新不改文件、与上一版对比、切换文件、两个项目对照、面板内登记新文件夹并写入 starter、
-无浏览器报错、零外部请求。面板截图见 `docs/images/latex-workspace.jpg`。
+协作区可用并加载模型、提问就地回答且不改文件、提案先审后写、接受后经 CAS 落盘并刷新编辑器、
+放弃提案不写文件、无浏览器报错、零外部请求。截图：`docs/images/latex-workspace.jpg`、
+`docs/images/latex-workspace-ai.jpg`。协作模块本身另有 6 项 Node 测试
+（`tests-js/latex-ai.test.mjs`，模型为桩、稿件与写入都是真实文件）。
 
-## 下一步（尚未实现，按顺序落地）
+## DSH 提问与人机互写（已实现）
 
-1. **DSH 提问**：把当前选区或整篇主文件作为有界上下文，走已有的论文会话通道提问，
-   回答可回填为批注或草稿，不直接改文件。
-3. **人机互写**：模型产出的是**补丁提案**（替换片段 + 依据 + 修订号），读者接受后
-   才用 `latex_write` 带 `expected_revision` 落盘，来源记 `ai:<model>`；拒绝则只留历史。
-4. **Markdown → LaTeX**：参考 `MarkTex` 的表格／数学／代码块转换规则，做成本地、离线、
-   不改源文件的导入路径（复用它的表格环境选择与转义思路，不引入浏览器 WASM 依赖）。
+面板底部是同一条协作区（`src/harness/latex-ai.mjs`，动作前缀 `latex_ai_`）：
+
+- **问题**：`latex_ai_ask` 把「文件（或编辑器里选中的片段）+ 你的问题」交给模型，回答直接显示在
+  面板里。材料写明是**不可信引用数据**，模型被告知不要执行其中的指令、不要编造引文或数据。
+  提问**不写文件**；选中的文字已经不在文件里会明确报错，而不是悄悄改用整篇文件。
+- **提案**：`latex_ai_propose` 要求模型返回**逐字替换**的 JSON（`find`/`replace`），服务端逐条校验
+  每个 `find` 在它读到的那一版里**恰好出现一次**（最多 20 处、合计 ≤64 KiB），然后只保存替换项
+  ——**不保存第二份文件正文**，所以文件夹始终是唯一权威。
+- **接受**：`latex_ai_accept` 重新读取文件、比对提案记录的修订号，再用与读者相同的 `latex_write`
+  （CAS）落盘，来源记为 `ai:<provider>/<model>`；文件在提案之后被改过就返回 `STATE_CONFLICT`
+  与当前正文，提案保留待你处理，**绝不覆盖**。
+- **放弃**：`latex_ai_discard` 只清掉提案，留下一条记录。
+- 提问与提案各自留下最多 4 条协作记录（问题/回答/摘要/模型），面板重开即可看到；模型路由可以是
+  请求里选的（面板从 `/models` 列出），也可以来自插件部署配置 `provider`/`model`；两者都没有时
+  会明确提示先选模型，而不是猜一个。
+
+## 下一步（尚未实现）
+
+- **Markdown → LaTeX**：参考 `MarkTex` 的表格／数学／代码块转换规则，做成本地、离线、不改源文件的
+  导入路径（复用它的表格环境选择与转义思路，不引入浏览器 WASM 依赖）。
+- 面板可选增强：编辑区语法高亮、选区→提问的右键菜单、提案的部分接受。
