@@ -1,0 +1,81 @@
+/* LaTeX workspace: a project folder on the left, the PDF it builds on the right. */
+/* `display:flex` below would otherwise win over the `hidden` attribute the panel toggles. */
+.latex-workspace [hidden] { display: none !important; }
+.latex-workspace {
+  width: min(1400px, 96vw);
+  height: min(920px, 92vh);
+  padding: 0;
+  border: 1px solid var(--line, #d8dbe3);
+  border-radius: 14px;
+  background: var(--surface, #fff);
+  color: inherit;
+  overflow: hidden;
+}
+.latex-workspace::backdrop { background: rgba(18, 20, 27, .45); }
+.latex-workspace header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px; border-bottom: 1px solid var(--line, #e6e8ef);
+}
+.latex-workspace .latex-title { display: flex; flex-direction: column; gap: 2px; }
+.latex-workspace .latex-title strong { font-size: 15px; }
+.latex-workspace .latex-title small { color: var(--muted, #6b7280); font-size: 12px; }
+.latex-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 10px 16px; border-bottom: 1px solid var(--line, #e6e8ef); background: var(--surface-2, #fafbfd);
+}
+.latex-toolbar select { max-width: 260px; }
+.latex-main { font-size: 12px; color: var(--muted, #6b7280); }
+.latex-save-state { font-size: 12px; color: var(--muted, #6b7280); }
+.latex-save-state[data-state="dirty"], .latex-save-state[data-state="saving"] { color: #a16207; }
+.latex-save-state[data-state="conflict"], .latex-save-state[data-state="error"] { color: #b91c1c; }
+.latex-new-form {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 10px 16px; border-bottom: 1px solid var(--line, #e6e8ef); background: var(--surface-2, #f2f6ff);
+}
+.latex-new-form input[type="text"] { min-width: 260px; flex: 1 1 260px; }
+.latex-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.latex-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 1fr); height: calc(100% - 190px); min-height: 320px; }
+.latex-editor-pane, .latex-preview-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.latex-editor-pane { border-right: 1px solid var(--line, #e6e8ef); }
+.latex-files { list-style: none; margin: 0; padding: 6px 8px; max-height: 120px; overflow: auto; border-bottom: 1px solid var(--line, #e6e8ef); display: flex; flex-wrap: wrap; gap: 4px; }
+.latex-file-open {
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 2px 8px; border-radius: 999px; border: 1px solid transparent; background: transparent; color: inherit; cursor: pointer;
+}
+.latex-file-open:hover { background: var(--surface-2, #f1f3f9); }
+.latex-file-open.active { border-color: var(--accent, #4f6ef7); background: rgba(79, 110, 247, .12); }
+.latex-editor-wrap { display: flex; flex: 1; min-height: 0; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.latex-gutter {
+  padding: 10px 6px 10px 10px; text-align: right; color: var(--muted, #9aa1ad);
+  background: var(--surface-2, #f7f8fb); border-right: 1px solid var(--line, #eceef4);
+  white-space: pre; overflow: hidden; user-select: none;
+}
+.latex-editor-wrap textarea {
+  flex: 1; min-width: 0; resize: none; border: 0; outline: none; padding: 10px 12px;
+  font: inherit; tab-size: 2; background: transparent; color: inherit; white-space: pre; overflow: auto;
+}
+.latex-preview-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line, #e6e8ef); }
+.latex-page-label { font-size: 12px; color: var(--muted, #6b7280); }
+.latex-build-info { margin-left: auto; font-size: 12px; color: var(--muted, #6b7280); }
+.latex-preview { flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; justify-content: center; align-items: flex-start; background: var(--surface-2, #f4f5f8); }
+.latex-page { max-width: 100%; box-shadow: 0 2px 12px rgba(15, 18, 30, .14); background: #fff; }
+.latex-preview-empty { color: var(--muted, #6b7280); font-size: 13px; }
+.latex-errors { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow: auto; border-top: 1px solid var(--line, #e6e8ef); }
+.latex-errors li { padding: 4px 12px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #b91c1c; white-space: pre-wrap; }
+.latex-errors .latex-log summary { cursor: pointer; color: var(--muted, #6b7280); }
+.latex-errors .latex-log pre { max-height: 160px; overflow: auto; margin: 4px 0 0; white-space: pre-wrap; color: inherit; }
+.latex-diff {
+  margin: 0; padding: 10px 16px; max-height: 220px; overflow: auto; border-top: 1px solid var(--line, #e6e8ef);
+  background: var(--surface-2, #f8f9fc); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap;
+}
+.latex-footer { border-top: 1px solid var(--line, #e6e8ef); }
+.latex-status { margin: 0; padding: 8px 16px; font-size: 12px; color: var(--muted, #4b5563); }
+.latex-status.error { color: #b91c1c; }
+.latex-conflict {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 8px 16px; background: #fff7ed; color: #9a3412; font-size: 12px; border-bottom: 1px solid #fed7aa;
+}
+@media (max-width: 900px) {
+  .latex-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  .latex-editor-pane { border-right: 0; border-bottom: 1px solid var(--line, #e6e8ef); }
+}

@@ -27,7 +27,8 @@
 - **带修订号的原子写入**：单文件上限 2 MiB、历史正文上限 512 KiB、每文件保留 40 版；过期写入返回 `STATE_CONFLICT` 与当前正文；路径经 `realpath` 校验，`../`、绝对路径与指向外部的符号链接一律拒绝。
 - **本地编译与预览**：`latex_compile` 调用本机 `latexmk`（默认 xelatex，可 pdflatex/lualatex），工作目录即项目文件夹，默认超时 120 秒、上限 600 秒；返回退出码、提取的错误行、日志尾部（32,000 字符）与页数，失败不伪造成功；`latex_pdf_pages` / `latex_pdf_page` 复用既有 PDF 管线渲染页面；`latex_clean` 只删构建副产物。实测含中文单页稿从登记到编译完成约 0.3 秒。
 - **对比研究**：`latex_history` + `latex_diff`（`previous`/`current`/历史 id 的 unified diff）以及 `latex_compare`（两个项目间同一相对路径对照）。
-- 验证：**537 JavaScript / 250 Python** 测试，含 `tests/test_latex.py`（13 项：登记与主文件识别、越界与符号链接拒绝、CAS 与历史、项目对照、归档不改文件夹、真实 xelatex 编译与页面渲染、失败报告、clean 只删副产物）与 `tests-js/latex-tools.test.mjs`（读写工具分离、请求映射、白名单一致）。
+- **编辑器与预览面板**：顶栏「LaTeX」工作台（`web/latex-workspace.js/.css`，原生 JS、零外部请求）——左侧项目/文件与带行号编辑器（900 ms 自动保存、⌘S、串行保存队列），右侧 `latex_pdf_page` 页面预览与翻页、引擎/耗时/页数；「编译」调用本机 latexmk 并列出错误行（可展开日志尾部）；过期保存给出「载入最新／用我的版本覆盖」而不会覆盖别人的改动；「与上一版对比」与「项目对照」显示 unified diff；面板内可登记新文件夹并写入最小 starter。截图 `docs/images/latex-workspace.jpg`。
+- 验证：**537 JavaScript / 250 Python** 测试，另有 [LaTeX 工作台浏览器回执](docs/validation/latex-workspace-browser.json) 13 项（真实 Chromium + 真实 worker + 真实 latexmk，含冲突与对照流程）。，含 `tests/test_latex.py`（13 项：登记与主文件识别、越界与符号链接拒绝、CAS 与历史、项目对照、归档不改文件夹、真实 xelatex 编译与页面渲染、失败报告、clean 只删副产物）与 `tests-js/latex-tools.test.mjs`（读写工具分离、请求映射、白名单一致）。
 
 ### 文档
 

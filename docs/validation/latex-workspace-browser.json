@@ -1,0 +1,37 @@
+{
+  "verified_at": "2026-09-22T06:22:25.952Z",
+  "ok": true,
+  "checks": [
+    "fixture-projects-register-two-folders-with-their-main-files",
+    "topbar-entry-opens-the-workspace-dialog",
+    "panel-loads-the-project-tree-and-main-file",
+    "editing-persists-through-the-revision-checked-write",
+    "compile-produces-a-pdf-and-the-panel-renders-its-first-page",
+    "a-stale-save-is-refused-and-surfaced-without-overwriting",
+    "reload-adopts-the-newer-revision-without-writing",
+    "panel-diffs-the-open-file-against-the-previous-revision",
+    "the-file-list-switches-between-project-files",
+    "panel-compares-two-projects-on-the-same-relative-file",
+    "the-panel-registers-a-new-folder-and-writes-its-starter",
+    "no-browser-errors-and-the-workspace-closes",
+    "the-live-panel-made-no-external-requests"
+  ],
+  "actions": [
+    "latex_compare",
+    "latex_compile",
+    "latex_diff",
+    "latex_pdf_page",
+    "latex_pdf_pages",
+    "latex_project_create",
+    "latex_project_list",
+    "latex_read",
+    "latex_tree",
+    "latex_write"
+  ],
+  "external_requests": 0,
+  "browser_errors": [],
+  "limits": [
+    "Local Chromium against a real Python worker and real latexmk; not a DSH host run",
+    "The fixture serves the panel and CSS from web/ verbatim; no build step is involved"
+  ]
+}

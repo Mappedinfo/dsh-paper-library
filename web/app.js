@@ -21,6 +21,7 @@ let analysisUI;
 let settingsUI;
 let challengeUI;
 let boardUI;
+let latexUI;
 let companionUI;
 let preferences = {};
 let durableReaderLoaded = false;
@@ -1145,6 +1146,7 @@ analysisUI = window.PaperAnalysis?.create({state,api,persistence,toast,openKnowl
   if(combined.length>4000)throw new Error('合并后超过对话草稿预算，请减少选中节点或先处理已有草稿。');
   paperChatUI.restoreDraft(combined);await paperChatUI.saveDraft();toast('选定材料已加入论文对话草稿；可编辑后发送，也可放入 DSH 主输入框。');
 }});
+latexUI = window.PaperLatexWorkspace?.create({api,toast,getLibrary:()=>state.library});
 settingsUI = window.PaperLibrarySettings?.create({api,persistence,getLibrary:()=>state.library,onChange:(value,descriptor)=>{
   preferences={...preferences,...value};
   analysisUI?.applyPreferences(value,descriptor.writable);
