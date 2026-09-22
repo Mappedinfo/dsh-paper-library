@@ -69,6 +69,9 @@ test('external source configuration is validated before the plugin loads', () =>
   assert.throws(() => normalizeConfiguredSources('nope'), /array or JSON array/)
   assert.throws(() => normalizeConfiguredSources([{ id: 'Bad Id', root: '/papers' }]), /lowercase/)
   assert.throws(() => normalizeConfiguredSources([{ id: 'local', root: 'papers' }]), /absolute root/)
+  assert.deepEqual(normalizeConfiguredSources([{ id: 'sync-zotero-attachments' }]), [{ id: 'sync-zotero-attachments', from: 'config' }])
+  assert.deepEqual(normalizeConfiguredSources([{ select: 'all' }]), [{ select: 'all', from: 'config' }])
+  assert.throws(() => normalizeConfiguredSources([{ select: 'some' }]), /select must be "all"/)
   assert.throws(() => normalizeConfiguredSources([{ id: 'a', root: '/a' }, { id: 'a', root: '/b' }]), /duplicate/)
   assert.throws(() => normalizeConfiguredSources(Array.from({ length: 9 }, (_, index) => ({ id: `s${index}`, root: `/p${index}` }))), /at most 8/)
   const config = resolveConfig({ library: '/tmp/library', syncConfig: '/Users/example/.dsh/vault-sync/config.json', externalSources: [{ id: 'local', root: '/papers' }] })
@@ -78,33 +81,48 @@ test('external source configuration is validated before the plugin loads', () =>
   assert.throws(() => resolveConfig({ library: '/tmp/library', syncConfig: 'relative.json' }), /absolute/)
 })
 
-test('explicit and service sources merge without duplicating a folder', async () => {
+test('a sync service only offers directories until one is selected', async () => {
   const files = { '/sync/config.json': { body: JSON.stringify(serviceConfig), mtime: 1 } }
-  const sources = createExternalSources({ config: resolveConfig({ library: '/tmp/library', syncConfig: '/sync/config.json', externalSources: [{ id: 'local', root: '/papers' }] }), ...fakeFileSystem(files) })
-  const listed = await sources.list()
-  assert.deepEqual(listed.sources.map(entry => entry.id), ['local', 'sync-zotero-attachments', 'sync-cloudsync-academic'])
-  assert.deepEqual(listed.warnings, [])
+  const sources = createExternalSources({ config: resolveConfig({ library: '/tmp/library', syncConfig: '/sync/config.json' }), ...fakeFileSystem(files) })
+  const offered = await sources.list()
+  assert.deepEqual(offered.sources, [])
+  assert.deepEqual(offered.offered.map(entry => entry.id), ['sync-zotero-attachments', 'sync-cloudsync-academic'])
 
-  const duplicated = createExternalSources({
-    config: resolveConfig({ library: '/tmp/library', syncConfig: '/sync/config.json', externalSources: [{ id: 'sync-zotero-attachments', root: '/Users/example/Documents/academic/zotero-attanger' }] }),
-    ...fakeFileSystem(files),
-  })
-  const merged = await duplicated.list()
-  assert.deepEqual(merged.sources.map(entry => entry.id), ['sync-zotero-attachments', 'sync-cloudsync-academic'])
-  assert.equal(merged.sources.filter(entry => entry.root.includes('zotero-attanger')).length, 1)
+  const byId = await sources.list({ external_sources: '[{"id":"sync-zotero-attachments"}]' })
+  assert.deepEqual(byId.sources.map(entry => entry.root), ['/Users/example/Documents/academic/zotero-attanger'])
+  assert.equal(byId.sources[0].from, 'selection')
+  // `list` reports every candidate; the tool result narrows that to the unselected ones.
+  assert.deepEqual(byId.offered.map(entry => entry.id), ['sync-zotero-attachments', 'sync-cloudsync-academic'])
 
-  const none = await createExternalSources({ config: resolveConfig({ library: '/tmp/library' }) }).list()
-  assert.deepEqual(none.sources, [])
-  assert.deepEqual(none.warnings, [])
-  assert.equal(none.syncConfig, null)
+  const all = await sources.list({ external_sources: '[{"select":"all"}]' })
+  assert.deepEqual(all.sources.map(entry => entry.id), ['sync-zotero-attachments', 'sync-cloudsync-academic'])
+
+  const unknown = await sources.list({ external_sources: '[{"id":"nope"}]' })
+  assert.deepEqual(unknown.sources, [])
+  assert.match(unknown.warnings.join(' '), /no sync service directory matches/)
 })
 
-test('live settings may name the sync service and add folders next to the deployment list', async () => {
+test('state directories inside the DSH home are never offered as paper sources', async () => {
+  const files = { '/sync/config.json': { body: JSON.stringify({ sources: [
+    { id: 'paper-library-state', kind: 'directory', root: '/home/example/.dsh/paper-library' },
+    { id: 'sessions', kind: 'directory', root: '/home/example/.dsh/sessions' },
+    { id: 'zotero-attachments', kind: 'directory', root: '/Users/example/Documents/academic/zotero-attanger' },
+  ] }), mtime: 1 } }
+  const config = resolveConfig({ library: '/tmp/library', localStateHome: '/home/example/.dsh', syncConfig: '/sync/config.json' })
+  const sources = createExternalSources({ config, ...fakeFileSystem(files) })
+  const listed = await sources.list({ external_sources: '[{"select":"all"}]' })
+  assert.deepEqual(listed.offered.map(entry => entry.id), ['sync-zotero-attachments'])
+  assert.deepEqual(listed.sources.map(entry => entry.root), ['/Users/example/Documents/academic/zotero-attanger'])
+  assert.match(listed.warnings.join(' '), /DSH home hold state/)
+})
+
+test('live settings may name the sync service and select from it', async () => {
   const files = { '/sync/config.json': { body: JSON.stringify(serviceConfig), mtime: 1 } }
   const sources = createExternalSources({ config: resolveConfig({ library: '/tmp/library' }), ...fakeFileSystem(files) })
-  const fromSettings = await sources.list({ sync_config: '/sync/config.json', external_sources: '[{"id":"extra","root":"/Volumes/archive/papers"}]' })
-  assert.deepEqual(fromSettings.sources.map(entry => entry.id), ['extra', 'sync-zotero-attachments', 'sync-cloudsync-academic'])
-  assert.equal(fromSettings.sources[0].from, 'settings')
+  const fromSettings = await sources.list({ sync_config: '/sync/config.json', external_sources: '[{"id":"sync-cloudsync-academic"},{"id":"extra","root":"/Volumes/archive/papers"}]' })
+  assert.deepEqual(fromSettings.sources.map(entry => entry.id), ['sync-cloudsync-academic', 'extra'])
+  assert.equal(fromSettings.sources[0].from, 'selection')
+  assert.equal(fromSettings.sources[1].from, 'settings')
   assert.equal(fromSettings.syncConfig, '/sync/config.json')
   assert.equal(fromSettings.rejectedSettings, false)
 
@@ -113,7 +131,7 @@ test('live settings may name the sync service and add folders next to the deploy
   assert.equal(badText.rejectedSettings, true)
 
   const deploymentWins = createExternalSources({ config: resolveConfig({ library: '/tmp/library', syncConfig: '/sync/config.json' }), ...fakeFileSystem(files) })
-  const overridden = await deploymentWins.list({ sync_config: '/sync/other.json' })
+  const overridden = await deploymentWins.list({ sync_config: '/sync/other.json', external_sources: '[{"id":"sync-zotero-attachments"}]' })
   assert.equal(overridden.syncConfig, '/sync/other.json')
   assert.equal(overridden.sources.length, 0)
 })
@@ -121,6 +139,7 @@ test('live settings may name the sync service and add folders next to the deploy
 test('source tools carry deployment roots and ignore any root in their arguments', async () => {
   const files = { '/sync/config.json': { body: JSON.stringify(serviceConfig), mtime: 1 } }
   const sources = createExternalSources({ config: resolveConfig({ library: '/tmp/library', syncConfig: '/sync/config.json' }), ...fakeFileSystem(files) })
+  const preferences = { external_sources: '[{"select":"all"}]' }
   const statusSpec = TOOL_SPECS.find(spec => spec.name === 'library_sources')
   const scanSpec = TOOL_SPECS.find(spec => spec.name === 'library_sources_scan')
   assert.ok(statusSpec && scanSpec && SOURCE_TOOL_SPECS.every(spec => TOOL_SPECS.includes(spec)))
@@ -132,7 +151,8 @@ test('source tools carry deployment roots and ignore any root in their arguments
     seen.push({ request, options })
     return { sources: [], warnings: ['from the service'] }
   }
-  const scan = await (await import('../src/harness/external-sources.mjs')).handleSourceRequest(sources, scanSpec, { action: 'external_scan', operation: 'scan', limit: 3 }, dispatch, { library: '/tmp/library' }, undefined)
+  const { handleSourceRequest } = await import('../src/harness/external-sources.mjs')
+  const scan = await handleSourceRequest(sources, scanSpec, { action: 'external_scan', operation: 'scan', limit: 3 }, dispatch, { library: '/tmp/library' }, undefined, preferences)
   assert.equal(seen[0].request.action, 'external_scan')
   assert.equal(seen[0].request.limit, 3)
   assert.deepEqual(seen[0].request.sources.map(entry => entry.root), ['/Users/example/Documents/academic/zotero-attanger', '/Users/example/ShiqiLocalStorage/CloudSync/Academic'])
@@ -140,9 +160,13 @@ test('source tools carry deployment roots and ignore any root in their arguments
   assert.deepEqual(scan.warnings, ['from the service'])
   assert.equal(scan.configured, 2)
 
-  const prune = await (await import('../src/harness/external-sources.mjs')).handleSourceRequest(sources, scanSpec, { action: 'external_scan', operation: 'prune', source: 'sync-cloudsync-academic' }, dispatch, {}, undefined)
-  assert.equal(seen[1].request.action, 'external_prune')
-  assert.equal(seen[1].request.source, 'sync-cloudsync-academic')
+  const listed = await handleSourceRequest(sources, statusSpec, { action: 'external_status' }, dispatch, {}, undefined, { external_sources: '[{"id":"sync-zotero-attachments"}]' })
+  assert.deepEqual(listed.offered.map(entry => entry.id), ['sync-cloudsync-academic'])
+  assert.match(listed.offered_hint, /额外外部文献源/)
+
+  const prune = await handleSourceRequest(sources, scanSpec, { action: 'external_scan', operation: 'prune', source: 'sync-cloudsync-academic' }, dispatch, {}, undefined, preferences)
+  assert.equal(seen[2].request.action, 'external_prune')
+  assert.equal(seen[2].request.source, 'sync-cloudsync-academic')
   assert.equal(prune.configured, 2)
 })
 

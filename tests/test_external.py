@@ -322,3 +322,16 @@ def test_ambiguous_same_size_disappearances_are_not_merged(tmp_path):
     assert (report["renamed"], report["indexed"], report["missing"]) == (0, 1, 2)
     assert len(request(tmp_path, "list", limit=10)["items"]) == before + 1
     assert request(tmp_path, "status")["external_missing"] == 2
+
+def test_one_directory_keeps_one_identity(tmp_path):
+    """Indexing the same root under a second id must not duplicate every record."""
+    sources, base = corpus(tmp_path, {"Only - 2012 - One study.pdf": "A"})
+    request(tmp_path, "external_scan", sources=sources)
+    before = request(tmp_path, "status")["count"]
+    renamed = [{"id": "renamed-source", "root": sources[0]["root"], "label": "renamed"}]
+    report = request(tmp_path, "external_scan", sources=renamed)["sources"][0]
+    assert report["indexed"] == 0 and report["refreshed"] == 0
+    assert report["conflict"] == "synced-academic"
+    assert "已经按 id synced-academic 索引" in report["failures"][0]
+    assert request(tmp_path, "status")["count"] == before
+    assert len(request(tmp_path, "list", limit=10)["items"]) == 1

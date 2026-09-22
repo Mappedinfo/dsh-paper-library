@@ -13,13 +13,22 @@ Paper Library 和数据同步服务**并列存在、可以各自独立安装**�
 
 | 键 | 环境变量 | 说明 |
 | --- | --- | --- |
-| `externalSources` | `DSH_PAPER_LIBRARY_SOURCES` | 数组或 JSON 数组文本：`[{"id":"archive","root":"/绝对/路径"}]`，最多 8 个 |
+| `externalSources` | `DSH_PAPER_LIBRARY_SOURCES` | 选择要索引的目录，最多 8 项（见下） |
 | `syncConfig` | `DSH_PAPER_LIBRARY_SYNC_CONFIG` | 另一个同步服务自己的 JSON 配置文件的绝对路径；插件只读其中的目录列表 |
+
+`externalSources` 的每一项是三种写法之一：
+
+| 写法 | 含义 |
+| --- | --- |
+| `{"id":"archive","root":"/绝对/路径"}` | 直接索引这个目录 |
+| `{"id":"sync-zotero-attachments"}` | 从同步服务配置里选中同 id 的目录（不必重复写路径） |
+| `{"select":"all"}` | 索引同步服务维护的全部目录 |
 
 **运行时设置**（插件设置卡 / DSH 设置 → 插件 → Paper Library）：
 
 - `数据同步服务配置（可选）`：同步服务配置文件路径，填写后立即生效，留空表示不启用。
-- `额外外部文献源`：JSON 数组文本，例如 `[{"id":"archive","root":"/Volumes/archive/papers"}]`。
+- `额外外部文献源`：JSON 数组文本，元素同上表，例如
+  `[{"id":"sync-zotero-attachments"},{"id":"archive","root":"/Volumes/archive/papers"}]`。
 
 设置里的值优先于部署配置，部署配置作为兜底，因此两条路可以同时存在。
 `syncConfig` 指向的文件会按 mtime 缓存，改完不必重启；文件缺失、改格式或不可读时只报告原因，
@@ -31,8 +40,14 @@ Paper Library 和数据同步服务**并列存在、可以各自独立安装**�
 { "sources": [ { "id": "zotero-attachments", "kind": "directory", "root": "/绝对/路径" } ] }
 ```
 
-插件只取 `kind == "directory"` 的目录项（跳过它自己的 `paper-library` 源），
-按 `sync-<id>` 命名接入。
+插件只把 `kind == "directory"` 的目录当成**候选**（跳过它自己的 `paper-library` 源），
+候选按 `sync-<id>` 命名，并且**只有被选中才索引**——填 `{"select":"all"}` 或写具体的
+`{"id":"sync-zotero-attachments"}`。工具 `library_sources` 会返回 `offered`：还有哪些候选
+没被纳入，连同 id 一起给出，方便直接补一行。
+
+位于 DSH home（`$DSH_HOME`，默认 `~/.dsh`）里的目录永远不会成为候选：那里是插件状态、
+会话和缓存，不是论文。同一个目录只能有一个身份：已经按某个 id 索引过的根目录，再用
+另一个 id 扫描会被拒绝并说明原因，避免把整批记录复制一份。
 
 ## 扫描与索引
 

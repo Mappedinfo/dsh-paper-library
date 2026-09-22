@@ -407,6 +407,14 @@ def _scan_source(library, source, limit):
     if not report["exists"]:
         report["failures"].append("source directory is not readable")
         return report
+    # One directory must have one identity. Indexing the same root under a second id
+    # would duplicate every record it already has, so the conflict is reported instead
+    # and nothing is written until the caller resolves the name.
+    other = library.db.execute("SELECT id FROM external_sources WHERE root=? AND id<>?", (str(source["root"]), source["id"])).fetchone()
+    if other:
+        report["conflict"] = other["id"]
+        report["failures"].append(f"这个目录已经按 id {other['id']} 索引；请继续使用原 id，或先删除旧记录再改名")
+        return report
     found = _walk(source, report)
     gone, places = _disappeared(known, found)
     budget = limit
