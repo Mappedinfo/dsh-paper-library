@@ -26,6 +26,10 @@ body.latex-focused .workspace.shared-sidebar-open:not(.catalog-expanded) { grid-
 body.latex-focused .workspace.shared-sidebar-open[data-sidebar-side=left]:not(.catalog-expanded) { grid-template-columns: var(--rail-width, var(--rail-default, 214px)) minmax(0, 1fr); }
 body.latex-focused .workspace > .library-pane.shared-reading-sidebar { display: flex; height: 100%; min-height: 0; }
 body.latex-focused .workspace:not(.shared-sidebar-open) > .library-pane { display: none; }
+/* `reading-panels.css` keeps `<content> <rail>` for [data-sidebar-side=right] and the plain
+ * workspace keeps it for the left default; both must lose to a closed rail in this view, so
+ * this rule names the same conditions with more classes rather than relying on order. */
+body.latex-focused .workspace[data-sidebar-side]:not(.shared-sidebar-open):not(.catalog-expanded) { grid-template-columns: minmax(0, 1fr); }
 /* Placement only while the rail is actually open: with it closed the surface owns column 1,
  * and a leftover `grid-column: 2` would push it into an implicit empty track. */
 body.latex-focused .workspace[data-sidebar-side=right].shared-sidebar-open > .library-pane.shared-reading-sidebar { grid-column: 2; border-left: 1px solid var(--line); border-right: 0; }

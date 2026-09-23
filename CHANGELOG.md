@@ -46,7 +46,7 @@
 
 - **DSH 提问与合写改挂到阅读侧栏**：不再占用工作台内的页签，而是登记进文献库那套共享 rail（`PaperReadingPanels` 新增 `registerPanel`/`setExternal`，与「批注」同一种实现）：同样的左右切换（⇄，跟随 `reading-panel-side`）、同样的宽度拖拽与保存、同样的标题栏与 ×。打开工作台自动展开且只显示「DSH 写作」，文献库/批注页签让位并在返回时原样恢复；工具栏新增「DSH 写作」开关。没有侧栏实例时（单独嵌入）退化为工作台内页签，功能不变。
 - **修掉一条空白侧栏**：`.workspace[data-sidebar-side]` 的栅格在侧栏关闭后仍保留 `var(--rail-width)` 列，而列内容被隐藏，于是页面右侧留下一条侧栏宽的空白带；现在关闭侧栏时工作台占满整页（单列），打开时才是「内容 + 侧栏」两列，列位置只在侧栏打开时生效（避免内容被推进隐式空轨道）。侧栏的 × 在聚焦视图下重新可见。
-- 验证：**566 JavaScript / 250 Python** 测试；[阅读侧栏回执](docs/validation/sidebar-browser.json) 13 项（批注侧栏行为未回归）、[外壳集成回执](docs/validation/latex-shell-browser.json) 11 项（新增：协作面板共用期刊 rail、关闭侧栏不留空白列、工具栏开关可复原）。
+- 验证：**566 JavaScript / 250 Python** 测试；[阅读侧栏回执](docs/validation/sidebar-browser.json) 13 项（批注侧栏行为未回归）、[外壳集成回执](docs/validation/latex-shell-browser.json) 12 项（新增：协作面板共用阅读 rail、关闭侧栏不留空白列、工具栏开关可复原、侧栏在右侧时同样不残留空列）。
 
 ### 文档
 

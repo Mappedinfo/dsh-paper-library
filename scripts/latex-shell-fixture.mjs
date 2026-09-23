@@ -115,6 +115,19 @@ try {
   if (!await page.locator('#reading-sidebar-latex-ai').isVisible()) throw new Error('the toolbar toggle did not bring the rail back')
   record('the-toolbar-toggle-opens-the-collaboration-rail-again')
 
+  // The reader's own preference can put the rail on the right; the layout must hold there too.
+  await page.locator('#reading-sidebar-side').click()
+  await until(() => page.evaluate(() => document.querySelector('.workspace').getAttribute('data-sidebar-side')), value => value === 'right', 'rail moved to the right')
+  await page.locator('#reading-sidebar-close').click()
+  await until(() => page.evaluate(() => Boolean(document.querySelector('.library-pane')?.getClientRects().length)), value => value === false, 'right rail closed')
+  const rightClosed = await page.evaluate(() => ({
+    workspace: Math.round(document.querySelector('.workspace').getBoundingClientRect().width),
+    view: Math.round(document.getElementById('latex-view').getBoundingClientRect().width),
+    columns: getComputedStyle(document.querySelector('.workspace')).gridTemplateColumns,
+  }))
+  if (rightClosed.view !== rightClosed.workspace || rightClosed.columns.includes(' ')) throw new Error(`right-side rail left an empty column: ${JSON.stringify(rightClosed)}`)
+  record('the-layout-holds-with-the-rail-on-the-right-too')
+
   await until(() => page.locator('#latex-ai-route').innerText(), value => /DSH|模型服务|不可用/.test(value), 'collaboration availability reported')
   record('a-host-without-dsh-reports-collaboration-unavailable-instead-of-offering-it')
 

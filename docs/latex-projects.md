@@ -103,7 +103,7 @@
   输入 900 ms 后**自动保存**，⌘/Ctrl-S 立即保存；保存队列串行，两次击键不会抢同一个修订号。
 - **右侧页签**：`PDF`（`latex_pdf_page` 渲染，1.4×，最多缓存 6 页，翻页与引擎/耗时/页数）与
   `版本`（与上一版对比，以及菜单触发的「与其他项目对比」结果）。
-- **DSH 写作在阅读侧栏里**：提问与提案不是再加一个页签，而是登记进文献库那套**侧栏**
+- **DSH 写作在阅读侧栏里（左右两侧都已验证：侧栏在左或在右，收起后工作台都占满整页）**：提问与提案不是再加一个页签，而是登记进文献库那套**侧栏**
   （`PaperReadingPanels` 的共享 rail，和「批注」同一种实现）：同样的左右切换（⇄，跟随
   `reading-panel-side`）、同样的宽度拖拽与保存（`reader:layout.rail_width`）、同样的标题栏与 ×。
   打开工作台时侧栏自动打开并只显示「DSH 写作」这一栏（文献库/批注页签让位，返回文献库后原样恢复）；
@@ -123,7 +123,7 @@
 布局上只有编辑器与预览两个滚动区；侧栏收起时工作台占满整页（不再留下一条侧栏宽的空白列——
 此前 `.workspace[data-sidebar-side]` 的栅格会保留该列，而列内容被隐藏，看起来就是一条空白色带）。
 
-外壳集成回执（真实 `src/server.mjs` 主机 + 真实页面 + 真实面板，11 项）：
+外壳集成回执（真实 `src/server.mjs` 主机 + 真实页面 + 真实面板，12 项）：
 `docs/validation/latex-shell-browser.json`，
 复现命令 `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node scripts/latex-shell-fixture.mjs`。
 
