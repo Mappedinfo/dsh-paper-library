@@ -77,7 +77,7 @@ try {
   await page.goto(`${origin}/?view=latex`, { waitUntil: 'load' })
   await page.locator('#latex-view').waitFor({ state: 'visible' })
   await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('Shell integration manuscript.'), 'standalone entry loaded the project')
-  if (await page.locator('.library-pane').isVisible()) throw new Error('the standalone entry still renders the library')
+  if (await page.locator('#reading-sidebar-library-content').isVisible()) throw new Error('the standalone entry still renders the library list')
   record('the-view-latex-entry-opens-as-a-pure-workspace-page')
 
   // Project actions live behind one ☰ menu now, not in the toolbar.
@@ -89,8 +89,32 @@ try {
   if (!await page.locator('#latex-setting-starter').isVisible()) throw new Error('the menu does not expose the starter setting')
   record('project-actions-and-settings-live-in-the-hamburger-menu')
 
-  await page.locator('#latex-tab-ai').click()
-  await page.locator('#latex-pane-ai').waitFor({ state: 'visible' })
+  // DSH 写作 lives in the same rail as the annotation panel, not inside the workspace.
+  await page.locator('#reading-sidebar-latex-ai').waitFor({ state: 'visible' })
+  if (!await page.locator('#latex-ai').isVisible()) throw new Error('the collaboration panel is not in the rail')
+  if (await page.locator('#reading-sidebar-library').isVisible()) throw new Error('the library tab should step aside for this panel')
+  if (await page.locator('#reading-sidebar-annotations').isVisible()) throw new Error('the annotations tab should step aside for this panel')
+  await until(() => page.locator('#latex-ai-route').innerText(), value => /DSH|模型服务|不可用/.test(value), 'collaboration availability reported')
+  record('the-collaboration-panel-shares-the-library-rail')
+
+  // Closing the rail must not leave an empty column behind: the surface takes the width.
+  await page.locator('#reading-sidebar-close').click()
+  await until(() => page.evaluate(() => Boolean(document.querySelector('.library-pane')?.getClientRects().length)), value => value === false, 'rail closed')
+  const widths = await page.evaluate(() => ({
+    workspace: Math.round(document.querySelector('.workspace').getBoundingClientRect().width),
+    view: Math.round(document.getElementById('latex-view').getBoundingClientRect().width),
+    columns: getComputedStyle(document.querySelector('.workspace')).gridTemplateColumns,
+    pressed: document.getElementById('latex-ai-open').getAttribute('aria-pressed'),
+  }))
+  if (widths.view !== widths.workspace || widths.columns.includes(' ')) throw new Error(`an empty rail column is left behind: ${JSON.stringify(widths)}`)
+  if (widths.pressed !== 'false') throw new Error('the toolbar toggle did not follow the rail close button')
+  record('closing-the-rail-leaves-no-empty-column')
+
+  await page.locator('#latex-ai-open').click()
+  await page.locator('#latex-ai').waitFor({ state: 'visible' })
+  if (!await page.locator('#reading-sidebar-latex-ai').isVisible()) throw new Error('the toolbar toggle did not bring the rail back')
+  record('the-toolbar-toggle-opens-the-collaboration-rail-again')
+
   await until(() => page.locator('#latex-ai-route').innerText(), value => /DSH|模型服务|不可用/.test(value), 'collaboration availability reported')
   record('a-host-without-dsh-reports-collaboration-unavailable-instead-of-offering-it')
 

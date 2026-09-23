@@ -101,8 +101,14 @@
   比例存进设置 `latex_split`；顶部只有项目选择、主文件、保存状态、自动编译状态、编译按钮和 ☰。
 - **左侧**：文件胶囊（`.tex/.bib/...`，★ 标主文件）+ 带行号的等宽编辑器；
   输入 900 ms 后**自动保存**，⌘/Ctrl-S 立即保存；保存队列串行，两次击键不会抢同一个修订号。
-- **右侧三个页签**：`PDF`（`latex_pdf_page` 渲染，1.4×，最多缓存 6 页，翻页与引擎/耗时/页数）、
-  `DSH 协作`（提问与提案）、`版本`（与上一版对比，以及菜单触发的「与其他项目对比」结果）。
+- **右侧页签**：`PDF`（`latex_pdf_page` 渲染，1.4×，最多缓存 6 页，翻页与引擎/耗时/页数）与
+  `版本`（与上一版对比，以及菜单触发的「与其他项目对比」结果）。
+- **DSH 写作在阅读侧栏里**：提问与提案不是再加一个页签，而是登记进文献库那套**侧栏**
+  （`PaperReadingPanels` 的共享 rail，和「批注」同一种实现）：同样的左右切换（⇄，跟随
+  `reading-panel-side`）、同样的宽度拖拽与保存（`reader:layout.rail_width`）、同样的标题栏与 ×。
+  打开工作台时侧栏自动打开并只显示「DSH 写作」这一栏（文献库/批注页签让位，返回文献库后原样恢复）；
+  工具栏的「DSH 写作」按钮可随时收起/展开。没有传侧栏实例时（例如被单独嵌入），
+  面板退化为工作台内的一个页签，功能不变。
 - **自动编译**（默认开，可在 ☰ 设置里关）：保存成功后空闲约 2.5 秒自动重编译，同一时刻只跑一个；
   已有 PDF 的项目才会自动编译，从未编译过的项目先手动编译一次，连续失败会暂停自动编译，
   手动成功一次后恢复。
@@ -114,10 +120,10 @@
 颜色只走插件的主题桥（`--paper/--surface/--panel/--ink/--muted/--line/--teal/--error` 与
 `--dsw-alias-*`），少数语义色用 `light-dark()`；因此跟随系统/DSH 的浅色与深色，正文与底色始终分离
 （回执里有一条把 `prefers-color-scheme` 切到 dark 后比较计算样式与亮度的检查）。
-布局上只有两个滚动区（编辑器、PDF 预览），其余固定区域都有上限（AI 区 38vh、diff 22vh、错误 18vh），
-所以长回答或长日志不会把工具栏顶出屏幕。
+布局上只有编辑器与预览两个滚动区；侧栏收起时工作台占满整页（不再留下一条侧栏宽的空白列——
+此前 `.workspace[data-sidebar-side]` 的栅格会保留该列，而列内容被隐藏，看起来就是一条空白色带）。
 
-外壳集成回执（真实 `src/server.mjs` 主机 + 真实页面 + 真实面板，8 项）：
+外壳集成回执（真实 `src/server.mjs` 主机 + 真实页面 + 真实面板，11 项）：
 `docs/validation/latex-shell-browser.json`，
 复现命令 `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node scripts/latex-shell-fixture.mjs`。
 
@@ -131,7 +137,8 @@
 在插件目录新建项目并只向同步配置新增一个源（含备份与幂等）、深浅色对比可读、
 无浏览器报错、零外部请求。
 截图：`docs/images/latex-workspace.jpg`、`docs/images/latex-workspace-ai.jpg`、
-`docs/images/latex-workspace-dark.jpg`。协作模块本身另有 6 项 Node 测试
+`docs/images/latex-workspace-dark.jpg`、`docs/images/latex-workspace-rail.jpg`、
+`docs/images/latex-workspace-rail-dark.jpg`。协作模块本身另有 6 项 Node 测试
 （`tests-js/latex-ai.test.mjs`，模型为桩、稿件与写入都是真实文件）。
 
 ## DSH 提问与人机互写（已实现）

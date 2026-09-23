@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-23T02:18:01.041Z",
+  "verified_at": "2026-09-23T03:25:40.256Z",
   "ok": true,
   "checks": [
     "the-standalone-host-serves-the-plugin-shell",
@@ -8,6 +8,9 @@
     "the-workspace-returns-to-the-library-without-a-reload",
     "the-view-latex-entry-opens-as-a-pure-workspace-page",
     "project-actions-and-settings-live-in-the-hamburger-menu",
+    "the-collaboration-panel-shares-the-library-rail",
+    "closing-the-rail-leaves-no-empty-column",
+    "the-toolbar-toggle-opens-the-collaboration-rail-again",
     "a-host-without-dsh-reports-collaboration-unavailable-instead-of-offering-it",
     "the-shell-makes-no-external-requests-and-raises-no-browser-errors"
   ],

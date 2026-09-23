@@ -42,6 +42,12 @@
 - 新增设置：`latex_starter`、`latex_auto_compile`、`latex_split`、`latex_sync_folder`；新主机动作 `latex_ws_status` / `latex_ws_create` / `latex_ws_sync_attach`。
 - 验证：**566 JavaScript / 250 Python** 测试（新增 `tests-js/latex-workspace.test.mjs` 8 项：状态、目录创建与幂等、starter 开关、只增不删的同步写入与备份、非法配置、名称清洗、条目与同步服务校验一致），[外壳集成回执](docs/validation/latex-shell-browser.json) **8 项**、[LaTeX 工作台回执](docs/validation/latex-workspace-browser.json) **22 项**（含分隔条落库、空闲自动重编译、插件目录建项目并只新增一个同步源）。
 
+### LaTeX 工作台：DSH 写作进阅读侧栏、修掉空白侧栏
+
+- **DSH 提问与合写改挂到阅读侧栏**：不再占用工作台内的页签，而是登记进文献库那套共享 rail（`PaperReadingPanels` 新增 `registerPanel`/`setExternal`，与「批注」同一种实现）：同样的左右切换（⇄，跟随 `reading-panel-side`）、同样的宽度拖拽与保存、同样的标题栏与 ×。打开工作台自动展开且只显示「DSH 写作」，文献库/批注页签让位并在返回时原样恢复；工具栏新增「DSH 写作」开关。没有侧栏实例时（单独嵌入）退化为工作台内页签，功能不变。
+- **修掉一条空白侧栏**：`.workspace[data-sidebar-side]` 的栅格在侧栏关闭后仍保留 `var(--rail-width)` 列，而列内容被隐藏，于是页面右侧留下一条侧栏宽的空白带；现在关闭侧栏时工作台占满整页（单列），打开时才是「内容 + 侧栏」两列，列位置只在侧栏打开时生效（避免内容被推进隐式空轨道）。侧栏的 × 在聚焦视图下重新可见。
+- 验证：**566 JavaScript / 250 Python** 测试；[阅读侧栏回执](docs/validation/sidebar-browser.json) 13 项（批注侧栏行为未回归）、[外壳集成回执](docs/validation/latex-shell-browser.json) 11 项（新增：协作面板共用期刊 rail、关闭侧栏不留空白列、工具栏开关可复原）。
+
 ### 文档
 
 - **[LaTeX 项目](docs/latex-projects.md)**：项目模型、读写与编译边界、对比方式，以及编辑器／DSH 提问／人机互写的下一步。

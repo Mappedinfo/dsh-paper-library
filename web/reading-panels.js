@@ -6,6 +6,11 @@ window.PaperReadingPanels = (() => {
   function create({root,annotationsRoot,conversationRoot,metadataRoot,libraryRoot,onAnnotationsRequest,onChatVisibility,onPanelChange,toast,persistence}) {
     if (!root || !annotationsRoot || !conversationRoot || !metadataRoot) throw new Error('Reading panels require the workspace and three existing content roots');
     let sidebar = null, side = 'left', sideRevision=0, chatOpen = false, collapsed = false, paper = null, disposed = false, lastChatVisible = false, readingActive=true, sharedOpen=false, railWidth=null;
+    // Panels another surface owns (today the LaTeX workspace's DSH collaboration). They live in
+    // the same rail, with the same side toggle, width and resizer as the annotation panel; the
+    // reading tabs step aside while such a panel is active and come back untouched after.
+    let externalActive = false;
+    const extraPanels = new Map();
     const listeners = [], originals = [annotationsRoot,conversationRoot,metadataRoot].map(element=>({element,parent:element.parentNode,next:element.nextSibling,hidden:element.hidden,open:element.open}));
     const make = (tag,className,text) => {const element=document.createElement(tag);element.className=className;if(text!==undefined)element.textContent=text;return element;};
     const listen = (element,event,fn) => {element.addEventListener(event,fn);listeners.push(()=>element.removeEventListener(event,fn));};
@@ -32,7 +37,7 @@ window.PaperReadingPanels = (() => {
       listen(tablist,'keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?libraryTab:event.key==='End'?annotationsTab:event.target===libraryTab?annotationsTab:libraryTab;if(!next.disabled)selectTab(next);});
       tablist.append(libraryTab,annotationsTab);
       sharedMove=button('⇄',()=>setSide(side==='left'?'right':'left'));sharedMove.id='reading-sidebar-side';
-      sharedClose=button('×',()=>{sharedOpen=false;if(sidebar==='annotations')sidebar=null;render();});sharedClose.id='reading-sidebar-close';sharedClose.setAttribute('aria-label','收起阅读侧栏');
+      sharedClose=button('×',()=>{sharedOpen=false;if(sidebar==='annotations'||extraPanels.has(sidebar))sidebar=null;render();});sharedClose.id='reading-sidebar-close';sharedClose.setAttribute('aria-label','收起阅读侧栏');
       sharedHeader.append(tablist,sharedMove,sharedClose);
       annotationsRoot.setAttribute('role','tabpanel');annotationsRoot.setAttribute('aria-labelledby',annotationsTab.id);
       libraryRoot.append(sharedHeader,libraryContent,annotationsRoot);libraryRoot.classList.add('shared-reading-sidebar');
@@ -80,16 +85,25 @@ window.PaperReadingPanels = (() => {
       move.textContent=side==='left'?'移至右侧':'移至左侧';
       annotationsRoot.hidden=sidebar!=='annotations'||(Boolean(libraryRoot)&&!readingActive);metadataRoot.hidden=sidebar!=='metadata';
       if(libraryRoot){
-        const annotations=readingActive&&sidebar==='annotations';
-        sharedHeader.hidden=!readingActive;libraryContent.hidden=annotations;
-        libraryRoot.dataset.sidebarPanel=annotations?'annotations':'library';
-        libraryRoot.parentNode.classList.toggle('shared-sidebar-open',readingActive&&sharedOpen);
-        libraryRoot.parentNode.dataset.sidebarSide=readingActive?side:'left';
-        libraryTab.setAttribute('aria-selected',String(!annotations));libraryTab.tabIndex=annotations?-1:0;
-        annotationsTab.setAttribute('aria-selected',String(annotations));annotationsTab.tabIndex=annotations?0:-1;annotationsTab.disabled=!paper||paper.archived;
+        const selectedExtra=externalActive&&extraPanels.has(sidebar)?sidebar:null;
+        const annotations=readingActive&&!externalActive&&sidebar==='annotations';
+        sharedHeader.hidden=!(readingActive||externalActive);
+        libraryContent.hidden=annotations||externalActive;
+        libraryRoot.dataset.sidebarPanel=selectedExtra||(annotations?'annotations':'library');
+        libraryRoot.parentNode.classList.toggle('shared-sidebar-open',(readingActive||externalActive)&&sharedOpen);
+        libraryRoot.parentNode.dataset.sidebarSide=(readingActive||externalActive)?side:'left';
+        libraryTab.hidden=externalActive;
+        annotationsTab.hidden=externalActive;
+        libraryTab.setAttribute('aria-selected',String(!annotations&&!externalActive));libraryTab.tabIndex=annotations||externalActive?-1:0;
+        annotationsTab.setAttribute('aria-selected',String(annotations));annotationsTab.tabIndex=annotations?0:-1;annotationsTab.disabled=externalActive||!paper||paper.archived;
+        for(const panel of extraPanels.values()){
+          const active=selectedExtra===panel.id;
+          panel.tab.hidden=!externalActive;panel.tab.setAttribute('aria-selected',String(active));panel.tab.tabIndex=active?0:-1;
+          panel.element.hidden=!active;
+        }
         const direction=side==='left'?'移至右侧':'移至左侧';sharedMove.title=direction;sharedMove.setAttribute('aria-label',direction);
       }
-      if(resizer)resizer.hidden=!(readingActive&&sharedOpen);
+      if(resizer)resizer.hidden=!((readingActive||externalActive)&&sharedOpen);
       if(metadataRoot.tagName==='DIALOG') {
         if(sidebar==='metadata'&&!metadataRoot.open)metadataRoot.show();
         else if(sidebar!=='metadata'&&metadataRoot.open)metadataRoot.close();
@@ -104,9 +118,11 @@ window.PaperReadingPanels = (() => {
       globalHost.dataset.readingSide=side;globalHost.hidden=!global;
       const host=global?globalHost:root;if(aside.parentNode!==host)host.append(aside);
     }
-    function known(name) {if(!names.has(name))throw new Error('Unknown reading panel');}
+    function known(name) {if(!names.has(name)&&!extraPanels.has(name))throw new Error('Unknown reading panel');}
     function show(name) {
       known(name);if(disposed)return false;
+      // A panel another surface owns needs no paper: it belongs to that surface, not the reader.
+      if(extraPanels.has(name)){externalActive=true;sidebar=name;sharedOpen=true;render();return true;}
       if(name!=='metadata'&&(!paper||paper.archived)){toast?.('请先打开一篇可阅读的文献。',true);return false;}
       if(name==='chat'){chatOpen=true;collapsed=false;}else {sidebar=name;if(name==='annotations')sharedOpen=true;}
       render();return true;
@@ -128,6 +144,29 @@ window.PaperReadingPanels = (() => {
       render();
     }
     function setReadingActive(value){const next=Boolean(value);if(next===readingActive)return;readingActive=next;render(false);}
+    /** Register a rail panel another surface owns; nothing changes until it is shown. */
+    function registerPanel({id,label,element}={}) {
+      if(typeof id!=='string'||!id.trim()||typeof label!=='string'||!label.trim()||!element)throw new Error('A rail panel needs an id, a label and an element');
+      if(disposed)throw new Error('Reading panels are disposed');
+      if(extraPanels.has(id))return extraPanels.get(id);
+      const tab=button(label,()=>{if(sidebar===id)close(id);else show(id);});
+      tab.id=`reading-sidebar-${id}`;tab.setAttribute('role','tab');tab.setAttribute('aria-controls',element.id||id);
+      if(!element.id)element.id=id;
+      element.setAttribute('role','tabpanel');element.setAttribute('aria-labelledby',tab.id);element.hidden=true;
+      const tablist=sharedHeader?sharedHeader.querySelector('.reading-sidebar-tabs'):null;
+      if(tablist)tablist.append(tab);
+      if(libraryRoot&&annotationsRoot.parentNode===libraryRoot)libraryRoot.insertBefore(element,annotationsRoot);
+      else if(annotationsRoot.parentNode)annotationsRoot.parentNode.insertBefore(element,annotationsRoot.nextSibling);
+      const panel={id,label,element,tab};extraPanels.set(id,panel);render(false);return panel;
+    }
+    /** Hand the rail to an external surface (its tabs only) or give it back to reading. */
+    function setExternal(value) {
+      const next=Boolean(value);if(next===externalActive)return;
+      externalActive=next;
+      if(next){sidebar=null;sharedOpen=false;}
+      else if(extraPanels.has(sidebar))sidebar=null;
+      render(false);
+    }
     function showLibrary(){if(disposed)return;sharedOpen=true;if(sidebar==='annotations')sidebar=null;render();}
     const resize = () => {if(disposed)return;root.classList.toggle('reading-panels-roomy',root.clientWidth>=880);placeSidebar();};
     const observer=typeof window.ResizeObserver==='function'?new window.ResizeObserver(resize):null;
@@ -136,7 +175,7 @@ window.PaperReadingPanels = (() => {
     for(const panel of [aside,chat])listen(panel,'keydown',event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();close(panel===chat?'chat':sidebar);}});
     if(libraryRoot)listen(libraryRoot,'keydown',event=>{if(event.key==='Escape'&&sidebar==='annotations'&&!event.defaultPrevented){event.preventDefault();sharedOpen=false;close('annotations');}});
     render(false);
-    return {toggle,show,close,setSide,paperChanged,setReadingActive,showLibrary,visible,ready:Promise.all([ready,layoutReady]).then(()=>undefined),dispose(){
+    return {toggle,show,close,setSide,paperChanged,setReadingActive,showLibrary,visible,registerPanel,setExternal,ready:Promise.all([ready,layoutReady]).then(()=>undefined),dispose(){
       if(disposed)return;disposed=true;observer?.disconnect();for(const off of listeners)off();
       if(lastChatVisible)onChatVisibility?.(false);
       for(const {element,parent,next,hidden,open} of originals){
@@ -145,6 +184,8 @@ window.PaperReadingPanels = (() => {
         element.hidden=hidden;
       }
       annotationsRoot.classList.remove('reading-annotations-content');metadataRoot.classList.remove('reading-metadata-content');conversationRoot.classList.remove('reading-conversation-content');
+      for(const panel of extraPanels.values()){panel.tab.remove();panel.element.remove();}
+      extraPanels.clear();
       if(libraryRoot){libraryRoot.append(...libraryChildren);sharedHeader.remove();libraryContent.remove();libraryRoot.classList.remove('shared-reading-sidebar');delete libraryRoot.dataset.sidebarPanel;libraryRoot.parentNode.classList.remove('shared-sidebar-open');delete libraryRoot.parentNode.dataset.sidebarSide;annotationsRoot.removeAttribute('role');annotationsRoot.removeAttribute('aria-labelledby');}
       aside.remove();chat.remove();globalHost.remove();root.classList.remove('paper-reading-workspace','has-reading-sidebar','reading-panels-roomy');delete root.dataset.readingSide;
       if(resizer){resizer.remove();workspace.style?.removeProperty('--rail-width');}

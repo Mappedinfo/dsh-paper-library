@@ -19,7 +19,7 @@ window.PaperLatexWorkspace = (() => {
   const SPLIT_MIN = 25, SPLIT_MAX = 75;
   const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_split: 50, latex_sync_folder: true };
 
-  function create({api, toast = () => {}, getLibrary = () => ''}) {
+  function create({api, toast = () => {}, getLibrary = () => '', rail = null}) {
     const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
     let projects = [], project = null, tree = null, file = null, revision = null, pageCount = 0, page = 1, tab = 'pdf';
     let dirty = false, saving = false, compiling = false, disposed = false, timer = null, compileTimer = null, generation = 0, saveQueue = Promise.resolve();
@@ -62,9 +62,12 @@ window.PaperLatexWorkspace = (() => {
     const autoLabel = make('span', 'latex-auto'); autoLabel.id = 'latex-auto-state';
     const mainLabel = make('span', 'latex-main'); mainLabel.id = 'latex-main';
     const saveState = make('span', 'latex-save-state'); saveState.id = 'latex-save-state'; saveState.setAttribute('role', 'status');
+    const aiToggle = make('button', 'button subtle', 'DSH 写作'); aiToggle.id = 'latex-ai-open'; aiToggle.type = 'button';
+    aiToggle.title = '在侧栏里提问或让模型改稿';
+    aiToggle.hidden = !rail;
     const menuButton = make('button', 'button subtle latex-menu-button', '☰'); menuButton.id = 'latex-menu-open'; menuButton.type = 'button';
     menuButton.setAttribute('aria-expanded', 'false'); menuButton.setAttribute('aria-controls', 'latex-menu'); menuButton.setAttribute('aria-label', '项目与设置'); menuButton.title = '项目与设置';
-    toolbar.append(projectSelect, mainLabel, saveState, autoLabel, compile, menuButton);
+    toolbar.append(projectSelect, mainLabel, saveState, autoLabel, compile, aiToggle, menuButton);
 
     const menu = make('div', 'latex-menu'); menu.id = 'latex-menu'; menu.setAttribute('aria-label', '项目与设置'); menu.hidden = true;
     const createRow = make('div', 'latex-menu-section');
@@ -126,7 +129,7 @@ window.PaperLatexWorkspace = (() => {
 
     const right = make('section', 'latex-preview-pane'); right.setAttribute('aria-label', '预览与协作');
     const tabs = make('div', 'latex-tabs'); tabs.setAttribute('role', 'tablist');
-    const tabSpecs = [['pdf', 'PDF'], ['ai', 'DSH 协作'], ['version', '版本']];
+    const tabSpecs = rail ? [['pdf', 'PDF'], ['version', '版本']] : [['pdf', 'PDF'], ['ai', 'DSH 协作'], ['version', '版本']];
     const tabButtons = new Map();
     for (const [name, label] of tabSpecs) {
       const button = make('button', 'latex-tab', label); button.id = `latex-tab-${name}`; button.type = 'button';
@@ -147,7 +150,7 @@ window.PaperLatexWorkspace = (() => {
     const errors = make('ul', 'latex-errors'); errors.id = 'latex-errors';
     panePdf.append(previewHead, preview, errors);
 
-    const paneAi = make('div', 'latex-pane'); paneAi.id = 'latex-pane-ai'; paneAi.setAttribute('role', 'tabpanel');
+    const paneAi = make('div', 'latex-pane'); paneAi.id = 'latex-pane-ai'; paneAi.setAttribute('role', 'tabpanel'); paneAi.hidden = Boolean(rail);
     const aiSection = make('section', 'latex-ai'); aiSection.id = 'latex-ai';
     const aiHead = make('div', 'latex-ai-head');
     const aiModel = make('select'); aiModel.id = 'latex-ai-model'; aiModel.setAttribute('aria-label', 'DSH 模型');
@@ -412,7 +415,8 @@ window.PaperLatexWorkspace = (() => {
       lastBuildOk = project.pdf_present ? true : null;
       autoPaused = false;
       ai.checked = false; aiAnswer.textContent = ''; aiProposal.textContent = '';
-      if (tab === 'ai') void aiStatus();
+      // Whichever surface hosts the collaboration, a project switch re-reads its state.
+      if (tab === 'ai' || rail?.visible?.('latex-ai')) void aiStatus();
     }
 
     async function renderEmpty() {
@@ -739,6 +743,7 @@ window.PaperLatexWorkspace = (() => {
       view.hidden = false;
       document.body.classList.add('latex-focused');
       setTab('pdf');
+      showRail(true);
       try {
         if (settingsRevision === null) await loadSettings();
         void refreshWorkspace();
@@ -754,9 +759,35 @@ window.PaperLatexWorkspace = (() => {
     async function close() {
       clearTimeout(timer); clearTimeout(compileTimer); closeMenu();
       if (dirty) await flush('manual');
+      showRail(false);
       view.hidden = true;
       document.body.classList.remove('latex-focused');
     }
+
+    /** The collaboration lives in the reading rail when there is one (same type as 批注). */
+    if (rail?.registerPanel) {
+      try { rail.registerPanel({ id: 'latex-ai', label: 'DSH 写作', element: aiSection }); }
+      catch (error) { say(`侧栏不可用：${error.message}`, true); }
+    }
+    function showRail(open) {
+      if (!rail?.setExternal) return;
+      try {
+        rail.setExternal(open);
+        if (open) { rail.show('latex-ai'); void aiStatus(); }
+        else rail.close('latex-ai');
+        syncRailToggle();
+      } catch (error) { say(`侧栏不可用：${error.message}`, true); }
+    }
+    function syncRailToggle() { aiToggle.setAttribute('aria-pressed', String(Boolean(rail?.visible?.('latex-ai')))); }
+    aiToggle.addEventListener('click', () => {
+      const open = !(rail?.visible?.('latex-ai'));
+      showRail(open);
+      if (open) void aiStatus();
+    });
+    // The rail's own × lives in the rail; keep the toolbar toggle honest about it.
+    document.querySelector('.library-pane.shared-reading-sidebar')?.addEventListener('click', event => {
+      if (event.target?.id === 'reading-sidebar-close' || event.target?.id === 'reading-sidebar-side') syncRailToggle();
+    });
 
     back.addEventListener('click', () => void close());
     trigger.addEventListener('click', () => void open());
@@ -777,12 +808,14 @@ window.PaperLatexWorkspace = (() => {
         openFile,
         compile: reason => compileOnce(reason || 'manual'),
         setTab,
+        showRail,
+        railVisible: () => Boolean(rail?.visible?.('latex-ai')),
         setSplit: (percent, persist) => setSplit(percent, { persist: persist === true }),
         create: (name, starter) => api('latex_ws_create', { name, starter }),
         attachSync: () => api('latex_ws_sync_attach'),
         status: () => refreshWorkspace(),
         state: () => ({
-          project: project?.id || null, file, revision, dirty, pageCount, page, tab, split: settings.latex_split,
+          project: project?.id || null, file, revision, dirty, pageCount, page, tab, split: settings.latex_split, rail: Boolean(rail), railOpen: Boolean(rail?.visible?.('latex-ai')),
           auto: settings.latex_auto_compile !== false, autoPaused, lastBuildOk, root: workspace.root,
           syncCovered: Boolean(workspace.sync?.covered), conflict: Boolean(pendingConflict),
           ai: { available: ai.available, proposal: ai.proposal?.id || null },

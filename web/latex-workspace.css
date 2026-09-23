@@ -15,11 +15,26 @@
   font-size: 13px;
 }
 #latex-view[hidden] { display: none; }
-body.latex-focused .topbar, body.latex-focused .library-pane, body.latex-focused .detail-pane,
+body.latex-focused .topbar, body.latex-focused .detail-pane,
 body.latex-focused .site-header, body.latex-focused .site-foot { display: none; }
 body.latex-focused { overflow: hidden; }
-body.latex-focused .workspace { grid-template-columns: minmax(0, 1fr); height: 100dvh; }
-body.latex-focused #latex-view { grid-column: 1; height: 100%; }
+body.latex-focused .workspace { height: 100dvh; grid-template-columns: minmax(0, 1fr); }
+/* The reading rail stays available in this view: it hosts DSH 写作. When it is open the
+ * workspace is content + rail; when it is closed the surface takes the whole width and the
+ * rail column disappears, instead of leaving an empty strip of rail width behind. */
+body.latex-focused .workspace.shared-sidebar-open:not(.catalog-expanded) { grid-template-columns: minmax(0, 1fr) var(--rail-width, var(--rail-default, 235px)); }
+body.latex-focused .workspace.shared-sidebar-open[data-sidebar-side=left]:not(.catalog-expanded) { grid-template-columns: var(--rail-width, var(--rail-default, 214px)) minmax(0, 1fr); }
+body.latex-focused .workspace > .library-pane.shared-reading-sidebar { display: flex; height: 100%; min-height: 0; }
+body.latex-focused .workspace:not(.shared-sidebar-open) > .library-pane { display: none; }
+/* Placement only while the rail is actually open: with it closed the surface owns column 1,
+ * and a leftover `grid-column: 2` would push it into an implicit empty track. */
+body.latex-focused .workspace[data-sidebar-side=right].shared-sidebar-open > .library-pane.shared-reading-sidebar { grid-column: 2; border-left: 1px solid var(--line); border-right: 0; }
+body.latex-focused .workspace[data-sidebar-side=left].shared-sidebar-open > .library-pane.shared-reading-sidebar { grid-column: 1; }
+body.latex-focused #latex-view { grid-column: 1; grid-row: 1; height: 100%; }
+body.latex-focused .workspace[data-sidebar-side=left].shared-sidebar-open #latex-view { grid-column: 2; }
+body.latex-focused #reading-rail-resizer { z-index: 27; }
+/* The rail's own × is only offered in the focused reader by default; this view is focused too. */
+body.latex-focused .reading-sidebar-header #reading-sidebar-close { display: block; padding: 4px; }
 /* Outside the workspace grid (a fixture or a bare host) the surface still owns the viewport. */
 body > #latex-view { height: 100dvh; }
 
