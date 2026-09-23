@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-22T12:48:21.155Z",
+  "verified_at": "2026-09-23T02:18:01.041Z",
   "ok": true,
   "checks": [
     "the-standalone-host-serves-the-plugin-shell",
@@ -7,6 +7,7 @@
     "the-entry-opens-a-full-page-workspace-with-the-registered-project",
     "the-workspace-returns-to-the-library-without-a-reload",
     "the-view-latex-entry-opens-as-a-pure-workspace-page",
+    "project-actions-and-settings-live-in-the-hamburger-menu",
     "a-host-without-dsh-reports-collaboration-unavailable-instead-of-offering-it",
     "the-shell-makes-no-external-requests-and-raises-no-browser-errors"
   ],

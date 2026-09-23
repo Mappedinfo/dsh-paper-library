@@ -80,9 +80,18 @@ try {
   if (await page.locator('.library-pane').isVisible()) throw new Error('the standalone entry still renders the library')
   record('the-view-latex-entry-opens-as-a-pure-workspace-page')
 
-  await until(() => page.locator('#latex-status').innerText(), value => value.includes('不可用') || value.includes('未连接'), 'collaboration availability reported')
-  const aiVisible = await page.locator('#latex-ai').isVisible()
-  if (aiVisible) throw new Error('the collaboration strip must stay hidden without a DSH route')
+  // Project actions live behind one ☰ menu now, not in the toolbar.
+  if (await page.locator('#latex-project-new').count()) throw new Error('the toolbar still has a folder-registration button')
+  await page.locator('#latex-menu-open').click()
+  await page.locator('#latex-menu').waitFor({ state: 'visible' })
+  if (!await page.locator('#latex-create-name').isVisible()) throw new Error('the menu does not offer creating a project in the plugin folder')
+  if (!await page.locator('#latex-new-root').isVisible()) throw new Error('the menu does not offer registering an existing folder')
+  if (!await page.locator('#latex-setting-starter').isVisible()) throw new Error('the menu does not expose the starter setting')
+  record('project-actions-and-settings-live-in-the-hamburger-menu')
+
+  await page.locator('#latex-tab-ai').click()
+  await page.locator('#latex-pane-ai').waitFor({ state: 'visible' })
+  await until(() => page.locator('#latex-ai-route').innerText(), value => /DSH|模型服务|不可用/.test(value), 'collaboration availability reported')
   record('a-host-without-dsh-reports-collaboration-unavailable-instead-of-offering-it')
 
   const external = await page.evaluate(() => performance.getEntriesByType('resource').filter(entry => /^https?:\/\//.test(entry.name) && !entry.name.startsWith(location.origin)).length)

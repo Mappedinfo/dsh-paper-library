@@ -1,6 +1,7 @@
 /* LaTeX workspace: a full surface of its own (like the whiteboard), not a dialog.
- * Every colour comes from the plugin's theme bridge so light and dark both work;
- * the few semantic colours use light-dark() directly, matching the plugin palette. */
+ * Source left, PDF right — one draggable divider, project actions and settings behind
+ * the ☰ menu, DSH collaboration and versions on the right pane's tabs. Every colour
+ * comes from the plugin's theme bridge, so light and dark both read correctly. */
 #latex-view {
   grid-column: 1 / -1;
   grid-row: 1;
@@ -14,19 +15,15 @@
   font-size: 13px;
 }
 #latex-view[hidden] { display: none; }
-/* Outside the workspace grid (a fixture or a bare host) the surface still owns the viewport. */
-body > #latex-view { height: 100dvh; }
 body.latex-focused .topbar, body.latex-focused .library-pane, body.latex-focused .detail-pane,
 body.latex-focused .site-header, body.latex-focused .site-foot { display: none; }
-/* Focused, the surface *is* the page: the topbar that the workspace height subtracts is gone. */
 body.latex-focused { overflow: hidden; }
 body.latex-focused .workspace { grid-template-columns: minmax(0, 1fr); height: 100dvh; }
 body.latex-focused #latex-view { grid-column: 1; height: 100%; }
+/* Outside the workspace grid (a fixture or a bare host) the surface still owns the viewport. */
+body > #latex-view { height: 100dvh; }
 
-/* The panes scroll; the frame around them never moves. Every fixed region is bounded so a
- * long answer, a proposal or a log tail cannot push the toolbar off screen. */
-.latex-header, .latex-toolbar, .latex-new-form, .latex-footer, .latex-preview-head, .latex-files { flex: 0 0 auto; }
-
+.latex-header, .latex-toolbar, .latex-footer { flex: 0 0 auto; }
 .latex-header {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface);
@@ -36,28 +33,50 @@ body.latex-focused #latex-view { grid-column: 1; height: 100%; }
 .latex-title small { color: var(--muted); font-size: 12px; }
 
 .latex-toolbar {
+  position: relative;
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--surface);
 }
-.latex-toolbar select { max-width: 260px; }
+.latex-toolbar select { max-width: 280px; }
+.latex-menu-button { margin-left: auto; font-size: 15px; line-height: 1; padding: 4px 10px; }
 .latex-main { font-size: 12px; color: var(--muted); }
+.latex-auto { font-size: 12px; color: var(--muted); }
 .latex-save-state { font-size: 12px; color: var(--muted); }
 .latex-save-state[data-state="dirty"], .latex-save-state[data-state="saving"] { color: var(--dsw-alias-state-warn-label); }
 .latex-save-state[data-state="conflict"], .latex-save-state[data-state="error"] { color: var(--error); }
 
-.latex-new-form {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-  padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--teal-light);
+/* The ☰ menu: same habits as the whiteboard's menus, anchored under the toolbar. */
+.latex-menu {
+  position: absolute; top: 100%; right: 8px; z-index: 8;
+  display: flex; flex-direction: column; gap: 10px;
+  min-width: min(420px, calc(100vw - 24px)); max-width: calc(100vw - 24px); max-height: 70vh; overflow: auto;
+  padding: 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--paper); color: var(--ink); box-shadow: var(--shadow);
 }
-.latex-new-form input[type="text"] { min-width: 240px; flex: 1 1 240px; }
+.latex-menu[hidden] { display: none; }
+.latex-menu-section { display: flex; flex-direction: column; gap: 4px; }
+.latex-menu-label { font-size: 11px; letter-spacing: .3px; color: var(--muted); }
+.latex-menu-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.latex-menu-row input[type="text"] { flex: 1 1 200px; min-width: 140px; }
+.latex-menu-row select { flex: 1 1 160px; }
+.latex-menu-hint { margin: 2px 0 0; font-size: 11px; color: var(--muted); }
+.latex-root { font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); background: var(--dsw-alias-interactive-bg-hover); padding: 2px 6px; border-radius: 6px; }
+.latex-sync-state { font-size: 11px; color: var(--muted); }
 .latex-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 
-.latex-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 1fr); flex: 1 1 auto; min-height: 140px; }
+/* Source | divider | preview&collaboration */
+.latex-body {
+  display: grid;
+  grid-template-columns: minmax(160px, var(--latex-split, 50%)) 6px minmax(0, 1fr);
+  flex: 1 1 auto; min-height: 160px;
+}
 .latex-editor-pane, .latex-preview-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.latex-editor-pane { border-right: 1px solid var(--line); }
+.latex-splitter { cursor: col-resize; background: var(--line); touch-action: none; }
+.latex-splitter:hover, .latex-splitter.dragging { background: var(--teal); }
+.latex-splitter:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 
 .latex-files {
-  list-style: none; margin: 0; padding: 6px 8px; max-height: 96px; overflow: auto;
+  list-style: none; margin: 0; padding: 6px 8px; flex: 0 0 auto; max-height: 92px; overflow: auto;
   border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px; background: var(--surface);
 }
 .latex-file-open {
@@ -67,7 +86,6 @@ body.latex-focused #latex-view { grid-column: 1; height: 100%; }
 }
 .latex-file-open:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .latex-file-open.active { border-color: var(--teal); background: var(--teal-light); }
-
 .latex-editor-wrap { display: flex; flex: 1; min-height: 0; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--panel); }
 .latex-gutter {
   padding: 10px 6px 10px 10px; text-align: right; color: var(--muted);
@@ -79,31 +97,44 @@ body.latex-focused #latex-view { grid-column: 1; height: 100%; }
   font: inherit; tab-size: 2; background: transparent; color: var(--ink); white-space: pre; overflow: auto;
 }
 
-.latex-preview-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
-.latex-page-label { font-size: 12px; color: var(--muted); }
+.latex-tabs {
+  display: flex; align-items: center; gap: 2px; flex: 0 0 auto;
+  padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--surface);
+}
+.latex-tab {
+  font-size: 12px; padding: 4px 10px; border: 1px solid transparent; border-radius: 999px;
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.latex-tab:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--ink); }
+.latex-tab.active { border-color: var(--line); background: var(--teal-light); color: var(--ink); }
 .latex-build-info { margin-left: auto; font-size: 12px; color: var(--muted); }
+.latex-pane { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: auto; }
+.latex-pane[hidden] { display: none; }
+
+.latex-preview-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex: 0 0 auto; border-bottom: 1px solid var(--line); background: var(--surface); }
+.latex-page-label { font-size: 12px; color: var(--muted); }
 .latex-preview {
-  flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; justify-content: center;
+  flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px; display: flex; justify-content: center;
   align-items: flex-start; background: var(--dsw-alias-bg-module-platform);
 }
 .latex-page { max-width: 100%; box-shadow: var(--shadow); background: #fff; }
 .latex-preview-empty { color: var(--muted); font-size: 13px; }
-
-.latex-errors { list-style: none; margin: 0; padding: 0; flex: 0 0 auto; max-height: 18vh; overflow: auto; border-top: 1px solid var(--line); background: var(--surface); }
+.latex-errors { list-style: none; margin: 0; padding: 0; flex: 0 0 auto; max-height: 24%; overflow: auto; border-top: 1px solid var(--line); background: var(--surface); }
 .latex-errors li { padding: 4px 12px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--error); white-space: pre-wrap; }
 .latex-errors .latex-log summary { cursor: pointer; color: var(--muted); }
 .latex-errors .latex-log pre { max-height: 150px; overflow: auto; margin: 4px 0 0; white-space: pre-wrap; color: var(--ink); }
 
-.latex-ai { border-top: 1px solid var(--line); background: var(--surface); flex: 0 0 auto; max-height: 38vh; overflow: auto; }
-.latex-ai-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px 4px; }
-.latex-ai-head select { max-width: 260px; }
+/* DSH questions and co-writing: its own tab, never stealing height from the panes. */
+.latex-ai { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
+.latex-ai-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.latex-ai-head select { max-width: 220px; }
 .latex-ai-route { font-size: 12px; color: var(--muted); }
 .latex-ai-route.error { color: var(--error); }
-.latex-ai textarea { display: block; width: calc(100% - 32px); margin: 4px 16px 6px; resize: vertical; font: 13px/1.55 var(--sans); }
-.latex-ai-answer { padding: 0 16px 6px; font-size: 13px; }
+.latex-ai textarea { width: 100%; resize: vertical; font: 13px/1.55 var(--sans); }
+.latex-ai-answer { font-size: 13px; }
 .latex-ai-question { margin: 0 0 4px; color: var(--muted); font-style: italic; }
 .latex-ai-text { margin: 0; white-space: pre-wrap; }
-.latex-ai-proposal { padding: 0 16px 6px; font-size: 13px; max-height: 180px; overflow: auto; }
+.latex-ai-proposal { font-size: 13px; }
 .latex-ai-summary { margin: 0 0 6px; font-weight: 600; }
 .latex-ai-replacements { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .latex-ai-replacements li { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -116,14 +147,15 @@ body.latex-focused #latex-view { grid-column: 1; height: 100%; }
   text-decoration: none; display: block; white-space: pre-wrap; border-radius: 4px; padding: 2px 4px;
 }
 .latex-ai-notes { margin: 6px 0 0; color: var(--muted); }
-.latex-ai-actions { display: flex; gap: 8px; padding: 0 16px 10px; }
+.latex-ai-actions { display: flex; gap: 8px; }
 .latex-ai-actions [hidden] { display: none; }
 
 .latex-diff {
-  margin: 0; padding: 10px 16px; flex: 0 0 auto; max-height: 22vh; overflow: auto; border-top: 1px solid var(--line);
+  margin: 0; flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px 12px;
   background: var(--panel); color: var(--ink);
   font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap;
 }
+
 .latex-footer { border-top: 1px solid var(--line); background: var(--surface); }
 .latex-status { margin: 0; padding: 8px 16px; font-size: 12px; color: var(--muted); }
 .latex-status.error { color: var(--error); }
@@ -135,6 +167,6 @@ body.latex-focused #latex-view { grid-column: 1; height: 100%; }
 .latex-conflict[hidden] { display: none; }
 
 @media (max-width: 900px) {
-  .latex-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
-  .latex-editor-pane { border-right: 0; border-bottom: 1px solid var(--line); }
+  .latex-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 6px minmax(0, 1fr); }
+  .latex-splitter { cursor: row-resize; }
 }

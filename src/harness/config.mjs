@@ -1,4 +1,5 @@
-import { isAbsolute, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { isAbsolute, join, resolve } from 'node:path'
 import { defaultLibrary } from '../bridge.mjs'
 import { translationServerUrl } from '../translation-server.mjs'
 import { normalizeConfiguredSources } from './external-sources.mjs'
@@ -28,7 +29,12 @@ export function resolveConfig(raw = {}) {
   // folders directly or point at a sync service's own JSON config. Both stay
   // optional, so the plugin is fully usable with neither configured.
   if (raw.syncConfig !== undefined && (typeof raw.syncConfig !== 'string' || !raw.syncConfig.trim() || !isAbsolute(raw.syncConfig))) throw new Error('paper-library: syncConfig must be an absolute file path')
+  // The LaTeX workspace keeps its own folder under the DSH home unless the
+  // deployment names one. Same home resolution order as the state store: explicit
+  // configuration, then DSH_HOME, then ~/.dsh — so both never disagree.
+  if (raw.latexRoot !== undefined && (typeof raw.latexRoot !== 'string' || !raw.latexRoot.trim() || !isAbsolute(raw.latexRoot))) throw new Error('paper-library: latexRoot must be an absolute directory')
   const externalSources = normalizeConfiguredSources(raw.externalSources)
   const translationServer = translationServerUrl(raw.translationServer)
-  return { library: resolve(library), ...(raw.localStateHome === undefined ? {} : { localStateHome: resolve(raw.localStateHome) }), python: raw.python, provider: raw.provider, model: raw.model, maxOutputTokens, maxLanguageOutputTokens, maxAnnotationCharacters, analysisConcurrency, ...(translationServer ? { translationServer } : {}), ...(raw.reviewProfile === undefined ? {} : { reviewProfile: resolve(raw.reviewProfile) }), externalSources, ...(raw.syncConfig === undefined ? {} : { syncConfig: resolve(raw.syncConfig) }), requireToolApproval: raw.requireToolApproval ?? true }
+  const latexRoot = resolve(raw.latexRoot ?? join(raw.localStateHome ? resolve(raw.localStateHome) : (process.env.DSH_HOME?.trim() ? process.env.DSH_HOME : join(homedir(), '.dsh')), 'manuscripts'))
+  return { library: resolve(library), latexRoot, ...(raw.localStateHome === undefined ? {} : { localStateHome: resolve(raw.localStateHome) }), python: raw.python, provider: raw.provider, model: raw.model, maxOutputTokens, maxLanguageOutputTokens, maxAnnotationCharacters, analysisConcurrency, ...(translationServer ? { translationServer } : {}), ...(raw.reviewProfile === undefined ? {} : { reviewProfile: resolve(raw.reviewProfile) }), externalSources, ...(raw.syncConfig === undefined ? {} : { syncConfig: resolve(raw.syncConfig) }), requireToolApproval: raw.requireToolApproval ?? true }
 }

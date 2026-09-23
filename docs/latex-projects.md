@@ -74,6 +74,22 @@
 `src/bridge.mjs` 白名单里的 16 个动作通过。浏览器面板通过同一个 `/api/paper-library/api`
 动作面读写，因此编辑器与 Agent 走的是同一条经过校验的路径。
 
+## 默认论文目录与同步（已实现）
+
+插件自己维护一个论文目录，默认 `<DSH home>/manuscripts`（本机 `~/.dsh/manuscripts`），
+可用部署配置 `latexRoot` 或环境变量 `DSH_PAPER_LIBRARY_LATEX_ROOT` 覆盖：
+
+- ☰ 菜单里的**新建项目**在该目录下建 `<名称>/`（名称会清洗成安全的一段路径），
+  按设置写入最小 `main.tex`，然后走同一套 `latex_project_create` 登记；
+  同名再次新建会直接选中已有项目，不会重复建目录
+- 目录不存在时首次新建会 `mkdir -p`；不可写则明确报错，不会静默换到别处
+- 该目录默认作为**独立源**加入数据同步服务（`~/.dsh/vault-sync/config.json`）：
+  写入前 `cp` 备份为 `config.json.bak-<时间>`，只新增一个 `paper-library-latex` 源，
+  绝不删除、重排或改写其他源；已被任何源覆盖（含 `paper-library-state`）时不重复添加；
+  配置缺失、非法 JSON 或不可写时只报告原因，不阻断项目创建
+- 排除构建副产物（`*.aux/*.fls/*.fdb_latexmk/*.synctex.gz/*.out/*.blg/.latex-build`），
+  `.tex/.bib/.pdf/图片` 照常同步；设置 `latex_sync_folder` 可关掉自动纳入
+
 ## 编辑器与预览面板（已实现）
 
 工作台是**独立页面**（和画板一样），不是弹窗：顶栏「LaTeX」把整页切成工作台（`body.latex-focused`
@@ -81,16 +97,19 @@
 `?view=board` 对称，可以直接作为一个 DSH 标签页的入口，此时页面只剩工作台。
 （`web/latex-workspace.js` + `.css`，纯原生 JS，无外部请求。）
 
-- **左上**：项目选择（按标题列出主文件）、「＋ 登记文件夹」（绝对路径 + 可选标题；
-  文件夹里没有 `.tex` 时可勾选写入最小 `main.tex`）、主文件标签与保存状态。
-- **左下**：文件胶囊（`.tex/.bib/...`，★ 标主文件）+ 带行号的等宽编辑器；
-  输入 900 ms 后**自动保存**，⌘/Ctrl-S 立即保存；保存队列串行，所以两次击键不会抢同一个修订号。
-- **右侧**：`latex_pdf_page` 渲染的页面（1.4× 缩放，最多缓存 6 页）、翻页、引擎/耗时/页数；
-  「编译」按钮调用 `latex_compile` 并在下方列出错误行（可展开 latexmk 输出尾部）。
+- **布局是 Overleaf 习惯**：源码在左、PDF 在右，中间一条可拖拽（或 ←/→）的分隔条，
+  比例存进设置 `latex_split`；顶部只有项目选择、主文件、保存状态、自动编译状态、编译按钮和 ☰。
+- **左侧**：文件胶囊（`.tex/.bib/...`，★ 标主文件）+ 带行号的等宽编辑器；
+  输入 900 ms 后**自动保存**，⌘/Ctrl-S 立即保存；保存队列串行，两次击键不会抢同一个修订号。
+- **右侧三个页签**：`PDF`（`latex_pdf_page` 渲染，1.4×，最多缓存 6 页，翻页与引擎/耗时/页数）、
+  `DSH 协作`（提问与提案）、`版本`（与上一版对比，以及菜单触发的「与其他项目对比」结果）。
+- **自动编译**（默认开，可在 ☰ 设置里关）：保存成功后空闲约 2.5 秒自动重编译，同一时刻只跑一个；
+  已有 PDF 的项目才会自动编译，从未编译过的项目先手动编译一次，连续失败会暂停自动编译，
+  手动成功一次后恢复。
+- **☰ 菜单**：新建项目、登记已有文件夹（绝对路径，文件留在原处）、与其他项目对比、
+  写作设置（写入最小 `main.tex`、自动编译）、论文目录与同步状态（「纳入同步」按钮）。
 - **冲突处理**：别的编辑器改过文件后，面板的保存会被拒绝并在底部给出「载入最新 / 用我的版本覆盖」，
   在你选择之前磁盘内容不会被覆盖。
-- **对比**：「与上一版对比」（`latex_diff` previous→current）与「项目对照」（`latex_compare`，
-  选另一个项目比较同一相对路径），差异显示在对话框底部的 `<pre>` 里。
 
 颜色只走插件的主题桥（`--paper/--surface/--panel/--ink/--muted/--line/--teal/--error` 与
 `--dsw-alias-*`），少数语义色用 `light-dark()`；因此跟随系统/DSH 的浅色与深色，正文与底色始终分离
@@ -98,17 +117,19 @@
 布局上只有两个滚动区（编辑器、PDF 预览），其余固定区域都有上限（AI 区 38vh、diff 22vh、错误 18vh），
 所以长回答或长日志不会把工具栏顶出屏幕。
 
-外壳集成回执（真实 `src/server.mjs` 主机 + 真实页面 + 真实面板，7 项）：
+外壳集成回执（真实 `src/server.mjs` 主机 + 真实页面 + 真实面板，8 项）：
 `docs/validation/latex-shell-browser.json`，
 复现命令 `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node scripts/latex-shell-fixture.mjs`。
 
-面板回执（真实 Chromium + 真实 Python worker + 真实 latexmk + 真实协作模块（模型为桩），19 项）：
+面板回执（真实 Chromium + 真实 Python worker + 真实 latexmk + 真实协作模块（模型为桩），22 项）：
 `docs/validation/latex-workspace-browser.json`，
 复现命令 `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node scripts/latex-workspace-fixture.mjs`。
 它覆盖：打开对话框、加载项目树与主文件、编辑落盘、编译并渲染首页、过期保存被拒且不覆盖、
 载入最新不改文件、与上一版对比、切换文件、两个项目对照、面板内登记新文件夹并写入 starter、
 协作区可用并加载模型、提问就地回答且不改文件、提案先审后写、接受后经 CAS 落盘并刷新编辑器、
-放弃提案不写文件、进入/离开整页工作台、深浅色对比可读、无浏览器报错、零外部请求。
+放弃提案不写文件、进入/离开整页工作台、分隔条比例落库、空闲后自动重编译、
+在插件目录新建项目并只向同步配置新增一个源（含备份与幂等）、深浅色对比可读、
+无浏览器报错、零外部请求。
 截图：`docs/images/latex-workspace.jpg`、`docs/images/latex-workspace-ai.jpg`、
 `docs/images/latex-workspace-dark.jpg`。协作模块本身另有 6 项 Node 测试
 （`tests-js/latex-ai.test.mjs`，模型为桩、稿件与写入都是真实文件）。

@@ -16,8 +16,15 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   // extra absolute folders. Both default to empty, so the library never needs it.
   sync_config: '',
   external_sources: '',
+  // LaTeX workspace: the starter file and idle recompiling are on by default so a
+  // new folder behaves like Overleaf; the split is the source pane width in percent.
+  latex_starter: true,
+  latex_auto_compile: true,
+  latex_split: 50,
+  latex_sync_folder: true,
 });
 export const TEXT_SETTINGS = Object.freeze(['sync_config', 'external_sources']);
+export const NUMBER_SETTINGS = Object.freeze({ latex_split: { minimum: 25, maximum: 75 } });
 const fields = Object.keys(PAPER_LIBRARY_SETTINGS_DEFAULTS);
 const markerKey = 'settings.migration:paper-library';
 const backupKey = 'settings.backup:paper-library';
@@ -43,6 +50,10 @@ export function createPaperLibrarySettingsSchema(Schema) {
     'reading-panel-side': Schema.union([Schema.const('left'), Schema.const('right')]).default('left'),
     sync_config: Schema.string().default(''),
     external_sources: Schema.string().default(''),
+    latex_starter: Schema.boolean().default(true),
+    latex_auto_compile: Schema.boolean().default(true),
+    latex_split: Schema.number().default(50),
+    latex_sync_folder: Schema.boolean().default(true),
   });
 }
 
@@ -63,6 +74,9 @@ function validatePatch(patch) {
         try { parsed = JSON.parse(value); } catch { throw invalid('外部文献源需要 JSON 数组文本，例如 [{"id":"extra","root":"/abs/path"}]。'); }
         if (!Array.isArray(parsed)) throw invalid('外部文献源需要 JSON 数组文本。');
       }
+    } else if (NUMBER_SETTINGS[key]) {
+      const { minimum, maximum } = NUMBER_SETTINGS[key];
+      if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw invalid(`设置值无效：${key}（${minimum}–${maximum}）`);
     } else if (typeof value !== 'boolean') {
       throw invalid(`设置值无效：${key}`);
     }
@@ -74,7 +88,7 @@ function managed(value, { legacy = false } = {}) {
   for (const key of fields) {
     if (!own(value, key)) continue;
     let candidate = value[key];
-    if (legacy && key !== 'reading-panel-side' && !TEXT_SETTINGS.includes(key) && ['true', 'false'].includes(candidate)) candidate = candidate === 'true';
+    if (legacy && key !== 'reading-panel-side' && !TEXT_SETTINGS.includes(key) && !NUMBER_SETTINGS[key] && ['true', 'false'].includes(candidate)) candidate = candidate === 'true';
     try { Object.assign(result, validatePatch({ [key]: candidate })); } catch { /* Invalid legacy values remain in their recovery record. */ }
   }
   return result;

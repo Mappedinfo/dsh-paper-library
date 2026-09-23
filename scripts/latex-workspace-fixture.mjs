@@ -10,13 +10,15 @@
  * Writes docs/validation/latex-workspace-browser.json
  */
 import { createServer } from 'node:http'
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dispatch } from '../src/bridge.mjs'
 import { createLatexAI } from '../src/harness/latex-ai.mjs'
+import { createLatexWorkspace } from '../src/harness/latex-workspace.mjs'
+import { resolveConfig } from '../src/harness/config.mjs'
 
 const project = dirname(dirname(fileURLToPath(import.meta.url)))
 const checks = []
@@ -50,6 +52,7 @@ async function api(action, args = {}) {
   }
   return data.result;
 }
+window.__api = api;
 window.latexUI = window.PaperLatexWorkspace.create({ api, toast: message => window.__toast = message, getLibrary: () => 'fixture' });
 </script></body></html>`
 
@@ -82,7 +85,23 @@ function stubModel(prompt) {
   return JSON.stringify({ summary: '给结论补一个范围限定', replacements: [{ find: anchor, replace: `${anchor} % reviewed` }], notes: '范围来自作者原文，未新增数据' })
 }
 
-async function startServer(library, latexAI) {
+/** A settings stub with the same read/write shape the panel expects from the host. */
+function settingsStub(initial) {
+  let value = { ...initial }
+  let revision = 1
+  return {
+    value: () => ({ ...value }),
+    async get() { return { value: { ...value }, revision: String(revision), writable: true, backend: 'dsh', available: true } },
+    async update(patch, expected) {
+      if (expected !== undefined && String(expected) !== String(revision)) throw Object.assign(new Error('设置已被另一窗口更新'), { code: 'STATE_CONFLICT' })
+      value = { ...value, ...patch }
+      revision += 1
+      return { value: { ...value }, revision: String(revision), writable: true, backend: 'dsh', available: true, user: { ...patch } }
+    },
+  }
+}
+
+async function startServer(library, latexAI, latexWorkspace, settings) {
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1')
     if (request.method === 'POST' && url.pathname === '/api') {
@@ -90,11 +109,14 @@ async function startServer(library, latexAI) {
       for await (const chunk of request) chunks.push(chunk)
       try {
         const input = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-        const result = input?.action === 'models'
+        const action = input?.action
+        const result = action === 'models'
           ? { models: [{ id: 'stub-model', name: 'Stub 模型', provider: 'stub' }], configured: true }
-          : typeof input?.action === 'string' && input.action.startsWith('latex_ai_')
-            ? await latexAI(input)
-            : await dispatch(input, { library, python })
+          : action === 'settings_get' ? await settings.get()
+            : action === 'settings_update' ? await settings.update(input.patch, input.expected_revision)
+              : typeof action === 'string' && action.startsWith('latex_ai_') ? await latexAI(input)
+                : typeof action === 'string' && action.startsWith('latex_ws_') ? await latexWorkspace(input)
+                  : await dispatch(input, { library, python })
         response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true, result }))
       } catch (error) {
         response.writeHead(error.status || 400, { 'Content-Type': 'application/json' })
@@ -138,6 +160,10 @@ try {
   await writeFile(join(second, 'main.tex'), TEMPLATE('The submitted version says something else.'))
 
   const configured = { library, python }
+  const syncConfig = join(base, 'dsh', 'vault-sync', 'config.json')
+  await mkdir(dirname(syncConfig), { recursive: true })
+  await writeFile(syncConfig, `${JSON.stringify({ version: 1, stateDir: join(base, 'dsh', 'vault-sync'), remote: { type: 'filesystem', engine: 'auto', root: join(base, 'mirror') }, sources: [{ id: 'obsidian-vault', kind: 'directory', root: join(base, 'vault'), remote: 'obsidian-vault', include: [], exclude: [] }] }, null, 2)}\n`)
+  const settings = settingsStub({ latex_starter: true, latex_auto_compile: true, latex_split: 50, latex_sync_folder: true, sync_config: syncConfig })
   const created = await dispatch({ action: 'latex_project_create', root: first, title: '手稿' }, configured)
   const other = await dispatch({ action: 'latex_project_create', root: second, title: '投稿版' }, configured)
   record('fixture-projects-register-two-folders-with-their-main-files')
@@ -150,7 +176,16 @@ try {
     library,
     python,
   })
-  const started = await startServer(library, latexAI)
+  // The workspace keeps its own folder under the fixture's home and registers it in a
+  // throwaway sync-service config, so the real add-and-backup path is exercised.
+  const workspace = createLatexWorkspace({
+    config: resolveConfig({ library, latexRoot: join(base, 'manuscripts'), localStateHome: join(base, 'dsh') }),
+    dispatch,
+    settings,
+    library,
+    python,
+  })
+  const started = await startServer(library, latexAI, workspace, settings)
   server = started.server
   const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
   browser = await chromium.launch({ headless: true })
@@ -206,6 +241,8 @@ try {
   if (stillExternal !== externalBody) throw new Error('reloading the newest revision rewrote the file')
   record('reload-adopts-the-newer-revision-without-writing')
 
+  await page.locator('#latex-tab-version').click()
+  await page.locator('#latex-pane-version').waitFor({ state: 'visible' })
   await page.locator('#latex-diff-open').click()
   await until(() => page.locator('#latex-diff').isVisible(), Boolean, 'diff view')
   const diffText = await page.locator('#latex-diff').innerText()
@@ -218,6 +255,8 @@ try {
 
   await page.locator('.latex-file-open', { hasText: 'main.tex' }).click()
   await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('Changed in another editor.'), 'main file reloaded')
+  await page.locator('#latex-menu-open').click()
+  await page.locator('#latex-menu').waitFor({ state: 'visible' })
   await page.locator('#latex-compare').selectOption(other.project.id)
   await page.locator('#latex-compare-run').click()
   await until(() => page.locator('#latex-diff').innerText(), value => value.includes('something else'), 'project comparison')
@@ -226,7 +265,8 @@ try {
   // A brand-new folder can be registered from the panel itself.
   const fresh = join(base, 'appendix')
   await mkdir(fresh, { recursive: true })
-  await page.locator('#latex-project-new').click()
+  await page.locator('#latex-menu-open').click()
+  await page.locator('#latex-menu').waitFor({ state: 'visible' })
   await page.locator('#latex-new-root').fill(fresh)
   await page.locator('#latex-new-starter').check()
   await page.locator('#latex-new-submit').click()
@@ -239,10 +279,10 @@ try {
   // DSH questions and co-writing, driven through the shipped controls.
   await page.locator('#latex-project').selectOption(created.project.id)
   await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('Changed in another editor.'), 'main project reselected')
-  await until(() => page.locator('#latex-ai').isVisible(), Boolean, 'DSH section available')
+  await page.locator('#latex-tab-ai').click()
+  await page.locator('#latex-pane-ai').waitFor({ state: 'visible' })
   await until(() => page.locator('#latex-ai-model option').count(), count => count > 0, 'model list loaded')
   record('the-workspace-exposes-dsh-questions-and-co-writing')
-
   await page.locator('#latex-ai-input').fill('这句话的 claim 边界是什么？')
   await page.locator('#latex-ai-ask').click()
   await until(() => page.locator('#latex-ai-answer').innerText(), value => value.includes('样本或范围'), 'answer rendered')
@@ -274,6 +314,49 @@ try {
   await page.locator('#latex-ai-discard').click()
   await until(() => page.locator('.latex-ai-replacements li').count(), count => count === 0, 'proposal discarded')
   record('a-proposal-can-be-discarded-without-writing')
+
+  // Overleaf habit: one divider, remembered in the settings.
+  await page.evaluate(() => window.latexUI.testHooks.setSplit(62, true))
+  await until(() => page.evaluate(() => window.latexUI.testHooks.state().split), value => value === 62, 'split persisted')
+  const appliedSplit = await page.evaluate(() => document.querySelector('.latex-body').style.getPropertyValue('--latex-split'))
+  const storedSplit = await page.evaluate(async () => (await window.__api('settings_get')).value.latex_split)
+  if (appliedSplit !== '62%' || storedSplit !== 62) throw new Error(`split not applied and stored: ${appliedSplit} / ${storedSplit}`)
+  record('the-source-preview-divider-is-draggable-and-remembered')
+
+  // Idle recompiling: a save with auto compile on should rebuild without pressing anything.
+  const beforeAuto = await page.locator('#latex-status').innerText()
+  await page.evaluate(() => window.latexUI.testHooks.type('\\documentclass{article}\n\\begin{document}\nAuto compiled after an idle edit.\n\\end{document}\n'))
+  await until(() => page.locator('#latex-status').innerText(), value => value.includes('自动') && value !== beforeAuto, 'automatic compile', 300)
+  const autoState = await page.evaluate(() => window.latexUI.testHooks.state())
+  if (autoState.auto !== true || autoState.lastBuildOk !== true) throw new Error(`auto compile state unexpected: ${JSON.stringify(autoState)}`)
+  if (!(await readFile(join(first, 'main.pdf'))).length) throw new Error('automatic compile produced no PDF')
+  record('an-idle-edit-recompiles-automatically')
+
+  // A project created from the menu lives in the plugin's own folder and joins the sync config.
+  await page.locator('#latex-menu-open').click()
+  await page.locator('#latex-menu').waitFor({ state: 'visible' })
+  const rootShown = await page.locator('#latex-root').innerText()
+  if (rootShown !== join(base, 'manuscripts')) throw new Error(`the menu does not show the plugin folder: ${rootShown}`)
+  await page.locator('#latex-create-name').fill('插件目录论文')
+  await page.locator('#latex-create-run').click()
+  await until(() => page.locator('#latex-project option').allInnerTexts(), list => list.some(entry => entry.includes('插件目录论文')), 'plugin-folder project created')
+  const pluginDir = join(base, 'manuscripts', '插件目录论文')
+  if (!existsSync(join(pluginDir, 'main.tex'))) throw new Error('the plugin folder project has no starter')
+  const syncDocument = JSON.parse(await readFile(syncConfig, 'utf8'))
+  const addedSource = syncDocument.sources.find(source => source.id === 'paper-library-latex')
+  if (!addedSource || addedSource.root !== join(base, 'manuscripts')) throw new Error(`the plugin folder was not added to the sync config: ${JSON.stringify(syncDocument.sources)}`)
+  if (syncDocument.sources.length !== 2) throw new Error('adding the source changed another entry')
+  const syncBackups = (await readdir(dirname(syncConfig))).filter(name => name.startsWith('config.json.bak-'))
+  if (syncBackups.length !== 1) throw new Error(`expected one config backup, saw ${syncBackups.length}`)
+  await page.locator('#latex-menu-open').click()
+  await page.locator('#latex-menu').waitFor({ state: 'visible' })
+  await until(() => page.locator('#latex-sync-state').innerText(), value => value.includes('已纳入'), 'sync state shown')
+  record('a-project-created-in-the-plugin-folder-joins-the-sync-config-once')
+
+  const syncAgain = await page.evaluate(() => window.latexUI.testHooks.attachSync())
+  if (syncAgain.changed !== false) throw new Error('attaching an already covered folder must not rewrite the config')
+  if ((await readFile(syncConfig, 'utf8')) !== `${JSON.stringify(syncDocument, null, 2)}\n`) throw new Error('the second attach rewrote the config')
+  record('the-sync-attach-is-idempotent')
 
   // The same surface in dark mode: text and chrome must not collapse into each other.
   const lightInk = await page.evaluate(() => getComputedStyle(document.getElementById('latex-editor')).color)

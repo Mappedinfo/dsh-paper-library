@@ -33,6 +33,15 @@
 - **深浅色适配**：所有颜色改走插件主题桥（`--paper/--surface/--panel/--ink/--muted/--line/--teal/--error` 与 `--dsw-alias-*`），语义色用 `light-dark()`；回执新增一条把 `prefers-color-scheme` 切到 dark 后比较计算样式与亮度的检查，并提交深色截图。
 - 验证：**543 JavaScript / 250 Python** 测试（含 `tests-js/latex-ai.test.mjs` 6 项：提问边界、选文与过期选文、提案锚点校验、接受走 CAS、冲突保留提案、模型路由），另有 [外壳集成回执](docs/validation/latex-shell-browser.json) 7 项（真实 `src/server.mjs` 主机 + 真实页面加载面板、进入整页工作台、返回文献库、`?view=latex` 独立入口、无 DSH 时如实提示、零外部请求）与 [LaTeX 工作台浏览器回执](docs/validation/latex-workspace-browser.json) **19 项**（真实 Chromium + 真实 worker + 真实 latexmk + 真实协作模块（模型桩），含冲突、对照与提案审阅流程）。，含 `tests/test_latex.py`（13 项：登记与主文件识别、越界与符号链接拒绝、CAS 与历史、项目对照、归档不改文件夹、真实 xelatex 编译与页面渲染、失败报告、clean 只删副产物）与 `tests-js/latex-tools.test.mjs`（读写工具分离、请求映射、白名单一致）。
 
+### LaTeX 工作台：默认论文目录、☰ 菜单与 Overleaf 式分栏
+
+- **插件维护自己的论文目录**：默认 `<DSH home>/manuscripts`（部署配置 `latexRoot` / `DSH_PAPER_LIBRARY_LATEX_ROOT` 可覆盖）。☰ 菜单「新建项目」在该目录下建文件夹、按设置写入最小 `main.tex` 并登记；同名再建直接选中已有项目。目录默认作为独立源写入数据同步服务的 `config.json`：先备份、幂等、只新增一个 `paper-library-latex` 源，已被任何源覆盖时不重复添加，配置不可读时只报告原因；vault-sync 的默认模板也加入了同一个源（排除 latexmk 构建副产物）。
+- **布局改成 Overleaf 习惯**：源码左 / PDF 右，中间可拖拽（或 ←/→）的分隔条，比例存进设置 `latex_split`（25–75）；右侧改为 `PDF / DSH 协作 / 版本` 三个页签，AI 提问与提案、版本对比都不再占用底部高度。
+- **自动编译默认开**：保存成功后空闲约 2.5 秒自动重编译，同一时刻只跑一个；已有 PDF 的项目才会自动编译，从未编译过的项目先手动编译一次；连续失败暂停自动编译，手动成功一次后恢复。可在 ☰ 菜单关闭。
+- **项目动作进 ☰ 菜单**：工具栏不再有显眼的「＋ 登记文件夹」；新建项目、登记已有文件夹、与其他项目对比（原「项目对照」改名）、写作设置（写入最小 `main.tex`）与论文目录/同步状态都在菜单里。
+- 新增设置：`latex_starter`、`latex_auto_compile`、`latex_split`、`latex_sync_folder`；新主机动作 `latex_ws_status` / `latex_ws_create` / `latex_ws_sync_attach`。
+- 验证：**566 JavaScript / 250 Python** 测试（新增 `tests-js/latex-workspace.test.mjs` 8 项：状态、目录创建与幂等、starter 开关、只增不删的同步写入与备份、非法配置、名称清洗、条目与同步服务校验一致），[外壳集成回执](docs/validation/latex-shell-browser.json) **8 项**、[LaTeX 工作台回执](docs/validation/latex-workspace-browser.json) **22 项**（含分隔条落库、空闲自动重编译、插件目录建项目并只新增一个同步源）。
+
 ### 文档
 
 - **[LaTeX 项目](docs/latex-projects.md)**：项目模型、读写与编译边界、对比方式，以及编辑器／DSH 提问／人机互写的下一步。

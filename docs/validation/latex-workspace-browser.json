@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-22T12:47:35.888Z",
+  "verified_at": "2026-09-23T02:19:27.383Z",
   "ok": true,
   "checks": [
     "fixture-projects-register-two-folders-with-their-main-files",
@@ -18,6 +18,10 @@
     "a-proposal-is-shown-for-review-before-anything-is-written",
     "accepting-the-proposal-writes-through-the-revisioned-path",
     "a-proposal-can-be-discarded-without-writing",
+    "the-source-preview-divider-is-draggable-and-remembered",
+    "an-idle-edit-recompiles-automatically",
+    "a-project-created-in-the-plugin-folder-joins-the-sync-config-once",
+    "the-sync-attach-is-idempotent",
     "the-surface-follows-light-and-dark-with-readable-contrast",
     "leaving-the-workspace-restores-the-library-page",
     "the-live-panel-made-no-external-requests"
@@ -38,7 +42,12 @@
     "latex_read",
     "latex_tree",
     "latex_write",
-    "models"
+    "latex_ws_create",
+    "latex_ws_status",
+    "latex_ws_sync_attach",
+    "models",
+    "settings_get",
+    "settings_update"
   ],
   "external_requests": 0,
   "browser_errors": [],

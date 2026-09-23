@@ -45,11 +45,14 @@ async function fixture(t, options = {}) {
 
 test('schema exposes exactly the live preference fields with safe defaults', () => {
   const field = type => ({ type, default(value) { this.value = value; return this; } });
-  const schema = createPaperLibrarySettingsSchema({ object: value => value, boolean: () => field('boolean'), string: () => field('string'), const: value => value, union: values => ({ ...field('union'), values }) });
+  const schema = createPaperLibrarySettingsSchema({ object: value => value, boolean: () => field('boolean'), string: () => field('string'), number: () => field('number'), const: value => value, union: values => ({ ...field('union'), values }) });
   assert.deepEqual(Object.keys(schema), Object.keys(PAPER_LIBRARY_SETTINGS_DEFAULTS));
   assert.equal(schema.auto_analysis.value, true); assert.deepEqual(schema['reading-panel-side'].values, ['left', 'right']);
   // The data-sync adapter is optional: both of its fields default to empty text.
   assert.equal(schema.sync_config.value, ''); assert.equal(schema.external_sources.value, '');
+  // The LaTeX workspace defaults: starter file and idle recompiling on, split in the middle.
+  assert.equal(schema.latex_starter.value, true); assert.equal(schema.latex_auto_compile.value, true);
+  assert.equal(schema.latex_split.value, 50); assert.equal(schema.latex_sync_folder.value, true);
 });
 
 test('migration respects explicit native false, normalizes legacy strings and retains unrelated data', async t => {
@@ -57,7 +60,7 @@ test('migration respects explicit native false, normalizes legacy strings and re
   const f = await fixture(t, { legacy, user: { auto_analysis: false, future: 7 } });
   const view = await f.service.get();
   assert.equal(view.backend, 'dsh'); assert.equal(view.writable, true);
-  assert.deepEqual(view.value, { auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', sync_config: '', external_sources: '' });
+  assert.deepEqual(view.value, { auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_split: 50, latex_sync_folder: true });
   assert.deepEqual((await f.store.get('preferences')).value, legacy);
   assert.deepEqual((await f.store.get(backup)).value, legacy);
   assert.equal(f.settings.raw().future, 7);
