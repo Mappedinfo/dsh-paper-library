@@ -14,7 +14,7 @@ const serviceConfig = {
   sources: [
     { id: 'paper-library', kind: 'paper-library', root: '/Users/example/.local/share/dsh-paper-library' },
     { id: 'zotero-attachments', kind: 'directory', root: '/Users/example/Documents/academic/zotero-attanger' },
-    { id: 'cloudsync-academic', kind: 'directory', root: '/Users/example/ShiqiLocalStorage/CloudSync/Academic' },
+    { id: 'cloudsync-academic', kind: 'directory', root: '/Users/example/LocalStorage/CloudSync/Academic' },
     { id: 'relative', kind: 'directory', root: 'relative/path' },
     { id: 'remote-only', kind: 'rclone', root: '/Users/example/remote' },
   ],
@@ -36,7 +36,7 @@ function fakeFileSystem(files) {
 test('a sync service config contributes its directory sources and nothing else', () => {
   const { sources, warnings } = sourcesFromSyncConfig(serviceConfig)
   assert.deepEqual(sources.map(entry => entry.id), ['sync-zotero-attachments', 'sync-cloudsync-academic'])
-  assert.deepEqual(sources.map(entry => entry.root), ['/Users/example/Documents/academic/zotero-attanger', '/Users/example/ShiqiLocalStorage/CloudSync/Academic'])
+  assert.deepEqual(sources.map(entry => entry.root), ['/Users/example/Documents/academic/zotero-attanger', '/Users/example/LocalStorage/CloudSync/Academic'])
   assert.deepEqual(warnings, [])
   assert.deepEqual(sourcesFromSyncConfig({}).warnings, ['sync config has no sources array'])
   assert.deepEqual(sourcesFromSyncConfig({ sources: 'nope' }).sources, [])
@@ -155,7 +155,7 @@ test('source tools carry deployment roots and ignore any root in their arguments
   const scan = await handleSourceRequest(sources, scanSpec, { action: 'external_scan', operation: 'scan', limit: 3 }, dispatch, { library: '/tmp/library' }, undefined, preferences)
   assert.equal(seen[0].request.action, 'external_scan')
   assert.equal(seen[0].request.limit, 3)
-  assert.deepEqual(seen[0].request.sources.map(entry => entry.root), ['/Users/example/Documents/academic/zotero-attanger', '/Users/example/ShiqiLocalStorage/CloudSync/Academic'])
+  assert.deepEqual(seen[0].request.sources.map(entry => entry.root), ['/Users/example/Documents/academic/zotero-attanger', '/Users/example/LocalStorage/CloudSync/Academic'])
   assert.equal(seen[0].options.library, '/tmp/library')
   assert.deepEqual(scan.warnings, ['from the service'])
   assert.equal(scan.configured, 2)

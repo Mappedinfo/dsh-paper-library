@@ -595,7 +595,7 @@ def test_renaming_preserves_annotations_and_recovers_before_and_after_catalog_sw
 
 def test_unicode_filename_is_bounded_and_collisions_do_not_overwrite(tmp_path):
     source = make_pdf(tmp_path / "source.pdf")
-    records = [{"id": f"unicode{index}", "title": "城市交通机制" * 80, "author": [{"family": "王世琦/研究"}], "issued": {"date-parts": [[2026]]}} for index in range(2)]
+    records = [{"id": f"unicode{index}", "title": "城市交通机制" * 80, "author": [{"family": "测试作者/研究"}], "issued": {"date-parts": [[2026]]}} for index in range(2)]
     items = request(tmp_path, "import", items=records)["items"]
     for item in items:
         attached = request(tmp_path, "attach", id=item["id"], path=str(source))

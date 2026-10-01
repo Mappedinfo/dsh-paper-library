@@ -35,8 +35,8 @@ window.ChallengeMining = (() => {
       + '<p class="small muted">结构检查是只读的；对照清单可粘贴文本或给出本地 .md/.txt/.json/.csv/.bib 路径（插件记录来源与日期，不判断研究价值）。评审包写入文献库 exports/。</p>'
       + '<div class="challenge-actions"><button id="challenge-check" class="button subtle" type="button">结构检查</button><button id="challenge-comparison" class="button subtle" type="button">与自有清单对照</button><button id="challenge-packet" class="button subtle" type="button">生成人工评审包</button></div>'
       + '<textarea id="challenge-checklist" rows="3" maxlength="65536" placeholder="粘贴清单（每行一条，或以 - 开头的列表），或填写下面的本地文件路径"></textarea>'
-      + '<label class="challenge-path">清单文件路径<input id="challenge-checklist-path" placeholder="/path/to/PhDPlan.md" autocomplete="off"></label>'
-      + '<label class="challenge-path">清单名称（写入报告）<input id="challenge-checklist-label" placeholder="例如：PhDPlan 2026-09" autocomplete="off"></label>'
+      + '<label class="challenge-path">清单文件路径<input id="challenge-checklist-path" placeholder="/path/to/checklist.md" autocomplete="off"></label>'
+      + '<label class="challenge-path">清单名称（写入报告）<input id="challenge-checklist-label" placeholder="例如：研究计划 2026-09" autocomplete="off"></label>'
       + '<p class="small muted">κ 一类编码一致性结论留给人工研究；插件只报告可核验的词面重叠。</p></div>'
       + '<p id="challenge-status" role="status"></p><div id="challenge-result"></div>';
     document.body.append(panel);

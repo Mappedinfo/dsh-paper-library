@@ -4,7 +4,7 @@
   "checks": [
     {
       "id": "client_build",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node scripts/build.mjs",
+      "command": "node scripts/build.mjs",
       "exit_code": 0,
       "elapsed_ms": 115,
       "status": "pass",
@@ -12,7 +12,7 @@
     },
     {
       "id": "javascript_tests",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --test tests-js/adapter-client.test.mjs tests-js/adapter-conversation-context.test.mjs tests-js/adapter-harness.test.mjs tests-js/adapter-model-context.test.mjs tests-js/adapter.test.mjs tests-js/annotation-references.test.mjs tests-js/annotation-replies.test.mjs tests-js/annotation-snapshots.test.mjs tests-js/annotation-threads.test.mjs tests-js/annotation-usage.test.mjs tests-js/batch.test.mjs tests-js/bibliography.test.mjs tests-js/board-api.test.mjs tests-js/board-drawio.test.mjs tests-js/board-mermaid.test.mjs tests-js/board-panel.test.mjs tests-js/board-references.test.mjs tests-js/board-source.test.mjs tests-js/board-store.test.mjs tests-js/board-vocabulary.test.mjs tests-js/bundled-skill-generic.test.mjs tests-js/bundled-skill.test.mjs tests-js/challenge-mining.test.mjs tests-js/challenge-panel.test.mjs tests-js/challenge-themes.test.mjs tests-js/challenges.test.mjs tests-js/citations.test.mjs tests-js/client-local-state.test.mjs tests-js/client-settings.test.mjs tests-js/companion-queue.test.mjs tests-js/external-sources.test.mjs tests-js/flow.test.mjs tests-js/http.test.mjs tests-js/import-pdf.test.mjs tests-js/intake-flow.test.mjs tests-js/knowledge-graph.test.mjs tests-js/language-learning.test.mjs tests-js/latex-ai.test.mjs tests-js/latex-tools.test.mjs tests-js/latex-workspace.test.mjs tests-js/library-knowledge.test.mjs tests-js/local-state-http.test.mjs tests-js/local-state.test.mjs tests-js/mcp-server.test.mjs tests-js/metadata-lookup.test.mjs tests-js/paper-analysis-agent.test.mjs tests-js/paper-analysis-queue.test.mjs tests-js/paper-analysis.test.mjs tests-js/paper-chat.test.mjs tests-js/paper-fetch.test.mjs tests-js/paper-metadata.test.mjs tests-js/paper-reference-resolver.test.mjs tests-js/pdf-reader.test.mjs tests-js/projects.test.mjs tests-js/reading-integration.test.mjs tests-js/reading-panels.test.mjs tests-js/resource-transport.test.mjs tests-js/settings.test.mjs tests-js/theme-context.test.mjs tests-js/translation-server.test.mjs tests-js/ui-intake.test.mjs tests-js/ui-language-learning.test.mjs tests-js/ui-model-context.test.mjs tests-js/ui-paper-chat.test.mjs tests-js/ui-settings.test.mjs tests-js/workbench.test.mjs",
+      "command": "node --test tests-js/adapter-client.test.mjs tests-js/adapter-conversation-context.test.mjs tests-js/adapter-harness.test.mjs tests-js/adapter-model-context.test.mjs tests-js/adapter.test.mjs tests-js/annotation-references.test.mjs tests-js/annotation-replies.test.mjs tests-js/annotation-snapshots.test.mjs tests-js/annotation-threads.test.mjs tests-js/annotation-usage.test.mjs tests-js/batch.test.mjs tests-js/bibliography.test.mjs tests-js/board-api.test.mjs tests-js/board-drawio.test.mjs tests-js/board-mermaid.test.mjs tests-js/board-panel.test.mjs tests-js/board-references.test.mjs tests-js/board-source.test.mjs tests-js/board-store.test.mjs tests-js/board-vocabulary.test.mjs tests-js/bundled-skill-generic.test.mjs tests-js/bundled-skill.test.mjs tests-js/challenge-mining.test.mjs tests-js/challenge-panel.test.mjs tests-js/challenge-themes.test.mjs tests-js/challenges.test.mjs tests-js/citations.test.mjs tests-js/client-local-state.test.mjs tests-js/client-settings.test.mjs tests-js/companion-queue.test.mjs tests-js/external-sources.test.mjs tests-js/flow.test.mjs tests-js/http.test.mjs tests-js/import-pdf.test.mjs tests-js/intake-flow.test.mjs tests-js/knowledge-graph.test.mjs tests-js/language-learning.test.mjs tests-js/latex-ai.test.mjs tests-js/latex-tools.test.mjs tests-js/latex-workspace.test.mjs tests-js/library-knowledge.test.mjs tests-js/local-state-http.test.mjs tests-js/local-state.test.mjs tests-js/mcp-server.test.mjs tests-js/metadata-lookup.test.mjs tests-js/paper-analysis-agent.test.mjs tests-js/paper-analysis-queue.test.mjs tests-js/paper-analysis.test.mjs tests-js/paper-chat.test.mjs tests-js/paper-fetch.test.mjs tests-js/paper-metadata.test.mjs tests-js/paper-reference-resolver.test.mjs tests-js/pdf-reader.test.mjs tests-js/projects.test.mjs tests-js/reading-integration.test.mjs tests-js/reading-panels.test.mjs tests-js/resource-transport.test.mjs tests-js/settings.test.mjs tests-js/theme-context.test.mjs tests-js/translation-server.test.mjs tests-js/ui-intake.test.mjs tests-js/ui-language-learning.test.mjs tests-js/ui-model-context.test.mjs tests-js/ui-paper-chat.test.mjs tests-js/ui-settings.test.mjs tests-js/workbench.test.mjs",
       "exit_code": 0,
       "elapsed_ms": 19262,
       "status": "pass",
@@ -30,7 +30,7 @@
     },
     {
       "id": "browser_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/app.js",
+      "command": "node --check web/app.js",
       "exit_code": 0,
       "elapsed_ms": 39,
       "status": "pass",
@@ -38,7 +38,7 @@
     },
     {
       "id": "paper_chat_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/paper-chat.js",
+      "command": "node --check web/paper-chat.js",
       "exit_code": 0,
       "elapsed_ms": 32,
       "status": "pass",
@@ -46,7 +46,7 @@
     },
     {
       "id": "companion_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/companion.js",
+      "command": "node --check web/companion.js",
       "exit_code": 0,
       "elapsed_ms": 32,
       "status": "pass",
@@ -54,7 +54,7 @@
     },
     {
       "id": "workbench_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/workbench.js",
+      "command": "node --check web/workbench.js",
       "exit_code": 0,
       "elapsed_ms": 34,
       "status": "pass",
@@ -62,7 +62,7 @@
     },
     {
       "id": "knowledge_graph_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/knowledge-graph.js",
+      "command": "node --check web/knowledge-graph.js",
       "exit_code": 0,
       "elapsed_ms": 34,
       "status": "pass",
@@ -70,7 +70,7 @@
     },
     {
       "id": "pdf_reader_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/pdf-reader.js",
+      "command": "node --check web/pdf-reader.js",
       "exit_code": 0,
       "elapsed_ms": 34,
       "status": "pass",
@@ -78,7 +78,7 @@
     },
     {
       "id": "reading_panels_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/reading-panels.js",
+      "command": "node --check web/reading-panels.js",
       "exit_code": 0,
       "elapsed_ms": 33,
       "status": "pass",
@@ -86,7 +86,7 @@
     },
     {
       "id": "reading_shell_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/reading-shell.js",
+      "command": "node --check web/reading-shell.js",
       "exit_code": 0,
       "elapsed_ms": 32,
       "status": "pass",
@@ -94,7 +94,7 @@
     },
     {
       "id": "local_state_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/local-state.js",
+      "command": "node --check web/local-state.js",
       "exit_code": 0,
       "elapsed_ms": 33,
       "status": "pass",
@@ -102,7 +102,7 @@
     },
     {
       "id": "language_learning_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/language-learning.js",
+      "command": "node --check web/language-learning.js",
       "exit_code": 0,
       "elapsed_ms": 34,
       "status": "pass",
@@ -110,7 +110,7 @@
     },
     {
       "id": "theme_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/theme.js",
+      "command": "node --check web/theme.js",
       "exit_code": 0,
       "elapsed_ms": 32,
       "status": "pass",
@@ -118,7 +118,7 @@
     },
     {
       "id": "resource_library_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/resource-library.js",
+      "command": "node --check web/resource-library.js",
       "exit_code": 0,
       "elapsed_ms": 34,
       "status": "pass",
@@ -126,7 +126,7 @@
     },
     {
       "id": "knowledge_workflow_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/knowledge-workflow.js",
+      "command": "node --check web/knowledge-workflow.js",
       "exit_code": 0,
       "elapsed_ms": 34,
       "status": "pass",
@@ -134,7 +134,7 @@
     },
     {
       "id": "paper_analysis_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/paper-analysis.js",
+      "command": "node --check web/paper-analysis.js",
       "exit_code": 0,
       "elapsed_ms": 32,
       "status": "pass",
@@ -142,7 +142,7 @@
     },
     {
       "id": "challenge_mining_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/challenge-mining.js",
+      "command": "node --check web/challenge-mining.js",
       "exit_code": 0,
       "elapsed_ms": 32,
       "status": "pass",
@@ -150,7 +150,7 @@
     },
     {
       "id": "annotation_threads_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/annotation-threads.js",
+      "command": "node --check web/annotation-threads.js",
       "exit_code": 0,
       "elapsed_ms": 32,
       "status": "pass",
@@ -158,7 +158,7 @@
     },
     {
       "id": "board_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/board.js",
+      "command": "node --check web/board.js",
       "exit_code": 0,
       "elapsed_ms": 32,
       "status": "pass",
@@ -166,7 +166,7 @@
     },
     {
       "id": "board_bridge_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/board-bridge.js",
+      "command": "node --check web/board-bridge.js",
       "exit_code": 0,
       "elapsed_ms": 31,
       "status": "pass",
@@ -174,7 +174,7 @@
     },
     {
       "id": "board_render_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/board-render.js",
+      "command": "node --check web/board-render.js",
       "exit_code": 0,
       "elapsed_ms": 31,
       "status": "pass",
@@ -182,7 +182,7 @@
     },
     {
       "id": "standalone_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check site/standalone.js",
+      "command": "node --check site/standalone.js",
       "exit_code": 0,
       "elapsed_ms": 31,
       "status": "pass",
@@ -190,7 +190,7 @@
     },
     {
       "id": "site_build",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node scripts/build-site.mjs",
+      "command": "node scripts/build-site.mjs",
       "exit_code": 0,
       "elapsed_ms": 39,
       "status": "pass",
@@ -198,7 +198,7 @@
     },
     {
       "id": "settings_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check web/settings.js",
+      "command": "node --check web/settings.js",
       "exit_code": 0,
       "elapsed_ms": 31,
       "status": "pass",
@@ -206,7 +206,7 @@
     },
     {
       "id": "mcp_syntax",
-      "command": "/Users/shiqi/.nvm/versions/node/v24.21.0/bin/node --check mcp/server.mjs",
+      "command": "node --check mcp/server.mjs",
       "exit_code": 0,
       "elapsed_ms": 32,
       "status": "pass",
