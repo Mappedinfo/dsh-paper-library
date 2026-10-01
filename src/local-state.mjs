@@ -117,6 +117,13 @@ async function fallbackLock(path, operation) {
 async function locked(path, operation) {
   await safeFile(`${path}.lock`, true);
   if (!atomicWrite) return fallbackLock(path, operation);
+  // withFileLock takes over a lock whose recorded PID has exited. The contract
+  // here is stricter: a pre-existing lock is preserved and reported, never
+  // guessed stale and removed, so only delegate when no lock exists at entry.
+  // A lock created after this check belongs to a live concurrent writer, whose
+  // PID keeps it safe from takeover until it releases.
+  const preExisting = await lstat(`${path}.lock`).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
+  if (preExisting) return fallbackLock(path, operation);
   try { return await atomicWrite.withFileLock(path, operation, { waitMs: 2000 }); }
   catch (error) { if (/timed out waiting for the writer lock/.test(error.message)) throw new LocalStateError('状态写锁仍被占用，请稍后重试；不会自动删除现有锁。', 'STATE_LOCKED', 503); throw error; }
 }
