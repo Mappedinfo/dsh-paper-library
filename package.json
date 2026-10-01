@@ -17,7 +17,7 @@
   },
   "main": "./src/harness/index.mjs",
   "bin": {
-    "paper-library": "./src/cli.mjs"
+    "paper-library": "src/cli.mjs"
   },
   "exports": {
     ".": "./src/harness/index.mjs",
