@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
@@ -70,8 +71,71 @@ export function core(request, options = {}) {
   return result;
 }
 
-function runWorker(request, options) {
-  const python = options.python || join(projectRoot, '.venv', 'bin', process.platform === 'win32' ? 'python.exe' : 'python');
+function venvPython() {
+  return process.platform === 'win32'
+    ? join(projectRoot, '.venv', 'Scripts', 'python.exe')
+    : join(projectRoot, '.venv', 'bin', 'python');
+}
+
+function commandExists(command) {
+  return new Promise(accept => {
+    const probe = spawn(command, ['--version'], { stdio: 'ignore' });
+    probe.on('error', () => accept(false));
+    probe.on('close', code => accept(code === 0));
+  });
+}
+
+function runSetup(command, args, label) {
+  return new Promise((accept, reject) => {
+    const child = spawn(command, args, { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    const collect = chunk => { if (output.length < 4000) output += chunk; };
+    child.stdout.on('data', collect);
+    child.stderr.on('data', collect);
+    const timeout = setTimeout(() => { child.kill(); reject(new Error(`文献内核自动安装超时（${label}）；请检查网络后重试。`)); }, 10 * 60 * 1000);
+    child.on('error', error => { clearTimeout(timeout); reject(error); });
+    child.on('close', code => {
+      clearTimeout(timeout);
+      if (code === 0) return accept();
+      reject(new Error(`文献内核自动安装失败（${label}，退出码 ${code}）：${output.trim().slice(-600)}`));
+    });
+  });
+}
+
+/** The published package ships pyproject.toml/uv.lock but no virtualenv.
+ * Provision one on first use instead of asking the reader to run uv sync. */
+async function provisionVenv(python) {
+  const requirement = 'pymupdf>=1.26,<2';
+  if (await commandExists('uv')) {
+    try {
+      await runSetup('uv', ['sync', '--no-dev'], 'uv sync');
+      if (existsSync(python)) return;
+    } catch { /* fall through to direct venv creation */ }
+    await runSetup('uv', ['venv', '.venv'], 'uv venv');
+    await runSetup('uv', ['pip', 'install', '--python', python, requirement], 'uv pip install pymupdf');
+    return;
+  }
+  if (await commandExists('python3')) {
+    await runSetup('python3', ['-m', 'venv', '.venv'], 'python3 -m venv');
+    await runSetup(python, ['-m', 'pip', 'install', requirement], 'pip install pymupdf');
+    return;
+  }
+  throw new Error('文献内核需要 Python 3.11+：请安装 uv（https://docs.astral.sh/uv/）或 Python 后重试，插件会自动完成依赖安装。');
+}
+
+let venvProvisioning = null;
+async function ensureVenv() {
+  const python = venvPython();
+  if (existsSync(python)) return python;
+  if (!venvProvisioning) {
+    // A failed attempt is retried on the next call rather than cached.
+    venvProvisioning = provisionVenv(python).then(() => python, error => { venvProvisioning = null; throw error; });
+  }
+  return venvProvisioning;
+}
+
+async function runWorker(request, options) {
+  const python = options.python || await ensureVenv();
   return runProcess(python, ['-m', 'dsh_paper_library.worker'], { ...request, library: resolve(options.library || defaultLibrary) }, options);
 }
 
@@ -103,7 +167,7 @@ function runProcess(command, args, request, options) {
     child.stderr.on('data', chunk => { if (stderr.length < 4000) stderr += chunk; });
     child.stdin.on('error', () => {});
     const cleanup = () => { clearTimeout(timeout); options.signal?.removeEventListener('abort', abort); };
-    child.on('error', error => { cleanup(); reject(new Error(`无法运行文献内核，请先完成 npm install 和 uv sync。${error.code || ''}`)); });
+    child.on('error', error => { cleanup(); reject(new Error(`无法运行文献内核（${error.code || error.message}）；自动安装可能未完成，请重试或在插件目录手动运行 uv sync。`)); });
     child.on('close', code => {
       cleanup();
       if (fail) return reject(fail);
