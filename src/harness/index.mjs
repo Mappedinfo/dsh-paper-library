@@ -26,6 +26,24 @@ import { createPaperLibrarySettings, createPaperLibrarySettingsSchema } from './
 export const name = 'paper-library'
 export const inject = ['tools', 'llm']
 
+/** Preferences projected into 设置 → 插件: volatile fields resolve live from the
+ * profile config, hot-reload in place and back the auto-generated settings form.
+ * Keep constraints out of here (the loader validates on boot); range checks belong
+ * to the settings adapter in ./settings.mjs. Unknown config keys pass through. */
+export const Config = Schema.object({
+  auto_analysis: Schema.boolean().default(true).description('新增或选中文献后自动整理（按全文分批排队，使用本篇模型额度）。').volatile(),
+  analysis_fill: Schema.boolean().default(true).description('整理完成后补齐空缺资料（有原文依据才补缺，保留已有资料）。').volatile(),
+  auto_review: Schema.boolean().default(true).description('整理完成后生成证据图谱评审草稿（待审）。').volatile(),
+  'auto-paper-conversation': Schema.boolean().default(false).description('实时伴学：保存批注后自动回复。').volatile(),
+  'reading-panel-side': Schema.union([Schema.const('left'), Schema.const('right')]).default('left').description('阅读侧栏位置（left 左侧 / right 右侧）。').volatile(),
+  sync_config: Schema.string().default('').description('数据同步服务配置文件（绝对路径，留空不启用）。').volatile(),
+  external_sources: Schema.string().default('').description('额外外部文献源（JSON 数组文本，留空不启用）。').volatile(),
+  latex_starter: Schema.boolean().default(true).description('新建 LaTeX 文件夹时生成 starter 文件。').volatile(),
+  latex_auto_compile: Schema.boolean().default(true).description('LaTeX 保存后自动编译。').volatile(),
+  latex_split: Schema.number().default(50).description('LaTeX 源码窗格宽度百分比（25–75）。').volatile(),
+  latex_sync_folder: Schema.boolean().default(true).description('LaTeX 工作区同步到同步服务文件夹。').volatile(),
+})
+
 /** Mount tools in every profile and the library surface when a Web carrier exists. */
 export function apply(ctx, rawConfig = {}) {
   const config = resolveConfig(rawConfig)
@@ -38,7 +56,15 @@ export function apply(ctx, rawConfig = {}) {
   let automaticAnalysis
   ctx.effect(() => () => localSettings.dispose(), 'paper-library: local preferences')
   ctx.inject(['settings'], settingsCtx => {
-    const nativeSettings = createPaperLibrarySettings({ store, settings: settingsCtx.settings, schema: createPaperLibrarySettingsSchema(Schema) })
+    // The settings document is keyed by the profile entry id, which can differ
+    // from the package name when the plugin is installed under an alias.
+    const namespace = ctx.fiber?.entry?.options?.id ?? name
+    const nativeSettings = createPaperLibrarySettings({
+      store, settings: settingsCtx.settings, namespace,
+      schema: createPaperLibrarySettingsSchema(Schema),
+      // Config volatile commits hot-reload in place; relay them to open readers.
+      watch: listener => ctx.on('loader/volatile-update', listener),
+    })
     sharedSettings = nativeSettings
     nativeSettings.subscribe(notifySettings)
     settingsCtx.effect(() => () => { sharedSettings = localSettings; return nativeSettings.dispose() }, 'paper-library: native settings')

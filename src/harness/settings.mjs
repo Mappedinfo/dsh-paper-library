@@ -104,22 +104,25 @@ function preferencesOf(record) {
  * @param {object} options
  * @param {object} options.store - Existing LocalState store; only preferences and two migration keys are read.
  * @param {object} [options.settings] - Native ctx.settings, owned by the caller's injectable fiber.
- * @param {object} [options.schema] - createPaperLibrarySettingsSchema(Schema), required with settings.
+ * @param {object} [options.schema] - createPaperLibrarySettingsSchema(Schema), required only for the legacy register API.
  * @param {object} [options.base] - Optional composition defaults for the four live preferences only.
+ * @param {string} [options.namespace] - DSH plugin entry id; defaults to the plugin name.
+ * @param {function} [options.watch] - Subscribe to native config changes (e.g. loader/volatile-update); returns a disposer.
  */
-export function createPaperLibrarySettings({ store, settings, schema, base = {} }) {
+export function createPaperLibrarySettings({ store, settings, schema, base = {}, namespace = PAPER_LIBRARY_SETTINGS_NAMESPACE, watch }) {
   if (!store?.get || !store?.put || !store?.list) throw new TypeError('settings require the local state store');
   const defaults = { ...PAPER_LIBRARY_SETTINGS_DEFAULTS, ...validatePatch(base) };
-  if (settings && !schema) throw new TypeError('native settings require a schemastery schema');
-  const scope = settings?.register(PAPER_LIBRARY_SETTINGS_NAMESPACE, schema, { base: defaults, applies: 'live' });
+  // DSH ≤ 0.1.6 exposed SettingsProvider.register; newer releases project the plugin
+  // Config's volatile fields into the settings document instead. Support both shapes.
+  const canRegister = typeof settings?.register === 'function';
+  if (canRegister && !schema) throw new TypeError('legacy native settings require a schemastery schema');
+  const scope = canRegister ? settings.register(namespace, schema, { base: defaults, applies: 'live' }) : undefined;
   let disposed = false, tail = Promise.resolve();
   const listeners = new Set();
   function notify() { if (!disposed) for (const listener of listeners) { try { listener(); } catch { /* A view cannot reject a committed preference. */ } } }
-  const unwatch = scope?.watch(notify);
+  const unwatch = scope?.watch?.(notify) ?? (typeof watch === 'function' ? watch(notify) : undefined);
   function native() {
-    const descriptor = settings?.describe({ redactSecrets: true }).find(item => item.ns === PAPER_LIBRARY_SETTINGS_NAMESPACE);
-    if (settings && !descriptor) throw unavailable();
-    return descriptor;
+    return settings?.describe?.({ redactSecrets: true }).find(item => item.ns === namespace);
   }
   async function putOnce(key, value) {
     const current = await store.get(key);
@@ -127,30 +130,40 @@ export function createPaperLibrarySettings({ store, settings, schema, base = {} 
     try { return await store.put(key, value, 0); }
     catch (error) { if (error.code !== 'STATE_CONFLICT') throw error; return store.get(key); }
   }
+  async function writeMarker(value, expected) {
+    try { await store.put(markerKey, value, expected); }
+    catch (error) { if (error.code !== 'STATE_CONFLICT') throw error; /* A concurrent migration already finished. */ }
+  }
   const ready = (async () => {
     if (!settings) return;
     const marker = await store.get(markerKey);
     if (marker.revision !== 0) {
-      if (marker.value?.version !== 1 || marker.value?.namespace !== PAPER_LIBRARY_SETTINGS_NAMESPACE) {
-        throw new LocalStateError('设置迁移记录无效，已保留原文件。', 'STATE_CORRUPT', 409);
-      }
-      return;
+      const version = marker.value?.version;
+      if (version === 2 && marker.value?.namespace === namespace) return;
+      if (version !== 1 && version !== 2) throw new LocalStateError('设置迁移记录无效，已保留原文件。', 'STATE_CORRUPT', 409);
+      // A version-1 record predates the Config-projection backend: the values it
+      // imported were lost with the old settings store, so re-import below. A
+      // version-2 record under a different entry id belongs to another profile.
     }
+    if (!native()) return; // Native layer not mounted for this entry: the local store owns the settings.
     const legacy = await store.get('preferences'), value = preferencesOf(legacy);
     if (legacy.revision !== 0) await putOnce(backupKey, clone(value));
     const candidates = managed(value, { legacy: true });
     let imported = [];
     for (let attempt = 0; attempt < 3; attempt++) {
       const current = native();
+      if (!current) return; // The native layer went away mid-migration; retry on the next boot.
       const patch = Object.fromEntries(Object.entries(candidates).filter(([key]) => !own(current.user ?? {}, key)));
       if (!Object.keys(patch).length) break;
-      try { await settings.update(PAPER_LIBRARY_SETTINGS_NAMESPACE, patch, current.revision); imported = Object.keys(patch); break; }
+      try { await settings.update(namespace, patch, current.revision); imported = Object.keys(patch); break; }
       catch (error) { if (error.code !== 'SETTINGS_CONFLICT' || attempt === 2) throw error; }
     }
-    await putOnce(markerKey, {
-      version: 1, namespace: PAPER_LIBRARY_SETTINGS_NAMESPACE, source_revision: legacy.revision,
+    const record = {
+      version: 2, namespace, source_revision: legacy.revision,
       imported_fields: imported, ignored_fields: fields.filter(key => own(value, key) && !own(candidates, key)),
-    });
+    };
+    if (marker.revision === 0) await putOnce(markerKey, record);
+    else await writeMarker(record, marker.revision);
   })();
   // Expose the rejection on ready and every operation, without an unhandled boot promise.
   void ready.catch(() => {});
@@ -159,18 +172,18 @@ export function createPaperLibrarySettings({ store, settings, schema, base = {} 
     await ready;
     if (disposed) throw unavailable();
     const legacy = await store.get('preferences'), value = preferencesOf(legacy), current = native();
-    const marker = current ? null : await store.get(markerKey);
-    const managedElsewhere = !current && marker.revision !== 0;
-    const backend = current || managedElsewhere ? 'dsh' : 'local';
+    const backend = current ? 'dsh' : 'local';
+    // Without a native descriptor (standalone, or a migration record stranded by a
+    // settings-backend change) the per-library store keeps serving the settings.
     const resolved = current ? { ...defaults, ...managed(current.value ?? {}) }
-      : managedElsewhere ? null : { ...defaults, ...managed(value, { legacy: true }) };
+      : { ...defaults, ...managed(value, { legacy: true }) };
     const revision = hash({ legacy: legacy.revision, backend, namespace: current
       ? { revision: current.revision, value: current.value, user: current.user ?? null, base: current.base ?? null }
-      : marker.revision });
+      : null });
     const descriptor = {
-      namespace: PAPER_LIBRARY_SETTINGS_NAMESPACE, backend, available: !managedElsewhere,
-      writable: current ? settings.writable === true : !managedElsewhere, revision,
-      value: resolved, base: current?.base ?? defaults, user: current?.user ?? (managedElsewhere ? null : managed(value, { legacy: true })),
+      namespace, backend, available: true,
+      writable: current ? settings.writable === true : true, revision,
+      value: resolved, base: current?.base ?? defaults, user: current?.user ?? managed(value, { legacy: true }),
       native_revision: current?.revision ?? null,
     };
     return { legacy, current, descriptor, record: backend === 'local' ? clone(legacy) : {
@@ -188,8 +201,8 @@ export function createPaperLibrarySettings({ store, settings, schema, base = {} 
   }
   async function nativeWrite(current, patch, resetFields) {
     try {
-      if (resetFields) await settings.mutate(PAPER_LIBRARY_SETTINGS_NAMESPACE, resetFields.map(key => ({ op: 'unset', path: [key] })), current.current.revision);
-      else await settings.update(PAPER_LIBRARY_SETTINGS_NAMESPACE, patch, current.current.revision);
+      if (resetFields) await settings.mutate(namespace, resetFields.map(key => ({ op: 'unset', path: [key] })), current.current.revision);
+      else await settings.update(namespace, patch, current.current.revision);
     } catch (error) {
       if (error.code === 'SETTINGS_CONFLICT') throw conflict((await snapshot()).record);
       throw error;

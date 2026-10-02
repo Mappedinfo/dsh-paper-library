@@ -11,13 +11,16 @@ import { createPaperLibrarySettings, createPaperLibrarySettingsSchema, PAPER_LIB
 const NS = 'paper-library', marker = 'settings.migration:paper-library', backup = 'settings.backup:paper-library';
 const code = expected => error => error.code === expected;
 function host({ user = {}, writable = true } = {}) {
-  let base = {}, revision = 0, value, registered = false;
+  let revision = 0;
   const observers = new Set(), updates = [];
-  const settle = () => { value = { ...base, ...user }; for (const observer of observers) observer(value); };
+  const settle = () => { for (const observer of observers) observer(structuredClone(user)); };
   return {
     writable, updates,
-    register(ns, _schema, options) { assert.equal(ns, NS); assert.equal(registered, false); registered = true; base = options.base; settle(); return { get: () => value, watch: fn => { observers.add(fn); return () => observers.delete(fn); } }; },
-    describe(options) { assert.equal(options.redactSecrets, true); return [{ ns: NS, schema: {}, value: structuredClone(value), base: structuredClone(base), user: structuredClone(user), revision, applies: 'live' }]; },
+    // DSH ≥0.1.7 removed SettingsProvider.register: the running entry's volatile
+    // Config fields are projected automatically, so the harness only watches the
+    // entry through this loader/volatile-update shaped hook.
+    watch: fn => { observers.add(fn); return () => observers.delete(fn); },
+    describe(options) { assert.equal(options.redactSecrets, true); return [{ ns: NS, schema: {}, value: structuredClone(user), base: {}, user: structuredClone(user), revision, applies: 'live' }]; },
     async update(ns, patch, expected) {
       assert.equal(ns, NS); if (!this.writable) throw Error('read-only');
       if (expected !== revision) throw Object.assign(Error('conflict'), { code: 'SETTINGS_CONFLICT' });
@@ -38,7 +41,7 @@ async function fixture(t, options = {}) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   if (options.legacy) await store.put('preferences', options.legacy, 0);
   const settings = options.native === false ? undefined : host(options);
-  const service = createPaperLibrarySettings({ store, settings, schema: {}, base: options.base });
+  const service = createPaperLibrarySettings({ store, settings, schema: {}, base: options.base, watch: settings && (fn => settings.watch(fn)) });
   t.after(() => service.dispose()); await service.ready;
   return { directory, library, home, store, settings, service };
 }
@@ -123,14 +126,22 @@ test('standalone never migrated deployments use host disk with cross-instance co
   const reset = await second.reset((await second.get()).revision); assert.equal(reset.value.analysis_fill, true);
 });
 
-test('standalone fails closed once DSH owns these settings and hides stale managed values', async t => {
-  const f = await fixture(t, { legacy: { auto_analysis: true, model: 'kept' } });
-  const standalone = createPaperLibrarySettings({ store: f.store }); t.after(() => standalone.dispose());
-  const view = await standalone.get();
-  assert.equal(view.backend, 'dsh'); assert.equal(view.available, false); assert.equal(view.writable, false); assert.equal(view.value, null);
-  const oldAPI = await standalone.localState.get('preferences'); assert.deepEqual(oldAPI.value, { model: 'kept' });
-  await assert.rejects(standalone.update({ analysis_fill: true }, view.revision), code('SETTINGS_UNAVAILABLE'));
-  await assert.rejects(standalone.localState.put('preferences', oldAPI.value, oldAPI.revision), code('SETTINGS_UNAVAILABLE'));
+test('a stranded migration record without a native descriptor falls back to the local store', async t => {
+  // The released-DSH failure mode: a v1 marker written by the old provider remains
+  // while the running DSH no longer mounts this namespace, so the library must
+  // keep serving and saving its own preferences instead of failing closed.
+  const f = await fixture(t, { native: false, legacy: { auto_analysis: true, model: 'kept' } });
+  await f.store.put(marker, { version: 1, namespace: NS, source_revision: 3, imported_fields: ['auto_analysis'], ignored_fields: [] }, 0);
+  const settings = host(); settings.describe = () => [];
+  const service = createPaperLibrarySettings({ store: f.store, settings }); t.after(() => service.dispose());
+  await service.ready;
+  const view = await service.get();
+  assert.equal(view.backend, 'local'); assert.equal(view.available, true); assert.equal(view.writable, true);
+  assert.equal(view.value.auto_analysis, true); assert.equal(view.value['reading-panel-side'], 'left');
+  const oldAPI = await service.localState.get('preferences'); assert.deepEqual(oldAPI.value, { auto_analysis: true, model: 'kept' });
+  const next = await service.update({ analysis_fill: true }, view.revision);
+  assert.equal(next.value.analysis_fill, true); assert.equal((await f.store.get('preferences')).value.analysis_fill, true);
+  assert.equal((await f.store.get(marker)).value.version, 1, 'the stranded marker is preserved untouched');
 });
 
 test('legacy-only edits preserve managed recovery values and mixed-store writes are refused', async t => {
@@ -241,5 +252,35 @@ test('dispose waits for an in-flight migration before returning', async t => {
   await started; let done = false;
   const disposal = service.dispose().then(() => { done = true; });
   await Promise.resolve(); assert.equal(done, false);
-  release(); await disposal; assert.equal(done, true); assert.equal((await f.store.get(marker)).value.version, 1);
+  release(); await disposal; assert.equal(done, true); assert.equal((await f.store.get(marker)).value.version, 2);
+});
+
+test('legacy SettingsProvider.register API still registers the namespace once and watches its scope', async t => {
+  // DSH ≤0.1.6 hosts expose register(ns, schema) instead of Config projection;
+  // the capability detection must keep supporting them.
+  let registered = 0; const watchers = new Set();
+  const legacyHost = {
+    writable: true,
+    register(ns, schema, options) {
+      registered++; assert.equal(ns, NS); assert.ok(schema); assert.equal(options.base.auto_analysis, true);
+      return { get: () => ({}), watch: fn => { watchers.add(fn); return () => watchers.delete(fn); } };
+    },
+    describe: () => [{ ns: NS, schema: {}, value: {}, base: {}, user: {}, revision: 0, applies: 'live' }],
+    async update() {}, async mutate() {},
+  };
+  const f = await fixture(t, { native: false });
+  const service = createPaperLibrarySettings({ store: f.store, settings: legacyHost, schema: { legacy: true } });
+  t.after(() => service.dispose()); await service.ready;
+  assert.equal(registered, 1); assert.equal(watchers.size, 1);
+  await service.dispose(); assert.equal(watchers.size, 0);
+});
+
+test('plugin Config exports volatile preference fields with defaults and passes library keys through', async () => {
+  const { Config } = await import('../src/harness/index.mjs');
+  const out = Config({ LIBRARY: '/somewhere' });
+  assert.equal(out.LIBRARY, '/somewhere', 'unrelated cordis config keys pass through');
+  for (const [key, value] of Object.entries(PAPER_LIBRARY_SETTINGS_DEFAULTS)) {
+    assert.equal(typeof out[key]?.get, 'function', `${key} resolves to a volatile ref`);
+    assert.deepEqual(out[key].get(), value, `${key} keeps its documented default`);
+  }
 });
