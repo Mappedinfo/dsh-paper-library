@@ -10,6 +10,8 @@
 .pdr-word::selection { background:var(--pdr-selection,#5b93bd66); color:transparent; }
 .paper-pdf-reader[data-tool="note"] .pdr-word-layer,.paper-pdf-reader[data-tool="note"] .pdr-word { user-select:none; -webkit-user-select:none; cursor:crosshair; }
 .paper-pdf-reader[data-tool="ink"] .pdr-sheet,.paper-pdf-reader[data-tool="ink"] .pdr-sheet * { user-select:none; -webkit-user-select:none; cursor:crosshair; }
+.paper-pdf-reader[data-tool="ink"][data-ink-context="linked"] .pdr-ink-target { outline:2px solid var(--teal,#286a61); outline-offset:-2px; }
+.paper-pdf-reader[data-tool="ink"][data-ink-context="linked"] .pdr-sheet:not(.pdr-ink-target),.paper-pdf-reader[data-tool="ink"][data-ink-context="linked"] .pdr-sheet:not(.pdr-ink-target) * { cursor:not-allowed; }
 /* Reserve direct page gestures for the pen; the surrounding reader and platform
    scroll gestures still navigate. Touch input is never converted into ink. */
 .paper-pdf-reader[data-tool="ink"] .pdr-sheet,.paper-pdf-reader[data-tool="highlight"] .pdr-sheet,.paper-pdf-reader[data-tool="underline"] .pdr-sheet,.paper-pdf-reader[data-tool="strikeout"] .pdr-sheet { touch-action:none; }

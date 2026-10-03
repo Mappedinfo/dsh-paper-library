@@ -15,6 +15,7 @@ const commands=[
   ['pdf_reader_syntax',process.execPath,['--check','web/pdf-reader.js']],
   ['reading_panels_syntax',process.execPath,['--check','web/reading-panels.js']],
   ['reading_shell_syntax',process.execPath,['--check','web/reading-shell.js']],
+  ['linked_handwriting_syntax',process.execPath,['--check','web/linked-handwriting.js']],
   ['handwriting_note_syntax',process.execPath,['--check','web/handwriting-note.js']],
   ['local_state_syntax',process.execPath,['--check','web/local-state.js']],
   ['language_learning_syntax',process.execPath,['--check','web/language-learning.js']],

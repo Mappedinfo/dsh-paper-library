@@ -15,7 +15,7 @@ window.PaperReadingShell = (() => {
     auto: { select: '拖选文字即按当前颜色直接着色，之后可在批注栏提问。', highlight: '拖选文字即高亮保存，不再弹出对话框。', underline: '拖选文字即保存下划线，不再弹出对话框。', strikeout: '拖选文字即保存删除线，不再弹出对话框。' },
     ask: { select: '拖选文字，可添加批注或放入论文对话。' },
   };
-  function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence, saveInk, returnToInk}) {
+  function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence, saveInk, returnToInk, beforeToolChange}) {
     const $ = id => document.getElementById(id);
     const node = (tag, text, className) => { const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n; };
     const button = (id, text, action) => {const n=node('button',text,'button subtle');n.type='button';n.id=id;n.addEventListener('click',action);return n;};
@@ -40,7 +40,7 @@ window.PaperReadingShell = (() => {
     const readerTools=$('toolbar-reader'), annotationTools=node('div',null,'annotation-tool-group'), libraryTools=node('div',null,'library-tool-group');
     annotationTools.id='toolbar-annotation';libraryTools.id='toolbar-library';
     for(const [type,label] of [['select','选择'],['ink','手写'],['highlight','高亮'],['underline','下划线'],['strikeout','删除线'],['note','便笺']]){
-      const b=button(`reader-tool-${type}`,label,()=>{tool=type;context='annotations';if(['highlight','underline','strikeout'].includes(type)){markup=type;saveLayoutLater();}applyTool();sync();status(hintFor());});b.dataset.readerTool=type;annotationTools.append(b);
+      const b=button(`reader-tool-${type}`,label,async()=>{if(beforeToolChange&&!await beforeToolChange(type))return;tool=type;context='annotations';if(['highlight','underline','strikeout'].includes(type)){markup=type;saveLayoutLater();}applyTool();sync();status(hintFor());});b.dataset.readerTool=type;annotationTools.append(b);
     }
     const colorLabel=node('label','颜色','reader-color');const input=node('input');input.type='color';input.id='reader-color';input.value=color;input.setAttribute('aria-label','批注颜色');
     // Layout preferences share one write queue: overlapping read-modify-write
@@ -49,7 +49,7 @@ window.PaperReadingShell = (() => {
     const patchLayout=value=>{layoutQueue=layoutQueue.then(()=>persistence?persistence.patch('reader:layout',value):null).catch(()=>{});return layoutQueue;};
     const saveLayout=()=>patchLayout({mode,color,markup,inkColor,inkWidth});
     const saveLayoutLater=()=>{if(saveLayoutTimer!==null)window.clearTimeout(saveLayoutTimer);saveLayoutTimer=window.setTimeout(()=>{saveLayoutTimer=null;saveLayout();},150);};
-    const hintFor=()=>(MODE_HINTS[mode]||{})[tool]||hints[tool]||'';
+    const hintFor=()=>tool==='ink'&&reader()?.getInkContext?.()?'直接在本页写画，笔迹绑定当前批注；再点侧栏手写按钮返回常规标注。':(MODE_HINTS[mode]||{})[tool]||hints[tool]||'';
     input.addEventListener('input',()=>{if(tool==='ink')inkColor=input.value;else color=input.value;applyTool();saveLayout();sync();});colorLabel.append(input);
     const widthLabel=node('label','粗细','reader-ink-width');const widthInput=node('select');widthInput.id='reader-ink-width';widthInput.setAttribute('aria-label','手写笔迹粗细');
     for(const [value,label] of [[1,'细'],[2,'中'],[4,'粗']]){const option=node('option',label);option.value=String(value);widthInput.append(option);}widthInput.value=String(inkWidth);widthLabel.append(widthInput);
@@ -113,7 +113,7 @@ window.PaperReadingShell = (() => {
       inkBar.hidden=!draft;document.body.classList.toggle('has-ink-draft',Boolean(draft));
       if(draft){
         if(!inkTitle&&draft.paperId===state.active?.id)inkTitle=state.active.title||'当前文献';
-        inkLabel.textContent=inkBusy?'正在保存手写…':inkError||`未保存 · 第 ${draft.page} 页 · ${draft.paths.length} 笔`;
+        inkLabel.textContent=inkBusy?'正在保存手写…':inkError||`${draft.parentId?'待自动保存':'未保存'} · 第 ${draft.page} 页 · ${draft.paths.length} 笔`;
         inkLabel.title=inkTitle;inkLabel.classList.toggle('error',Boolean(inkError));
       }else{inkTitle='';inkError='';}
       for(const b of [inkReturn,inkUndo,inkDiscard,inkSave])b.disabled=inkBusy||!draft;
@@ -188,7 +188,7 @@ window.PaperReadingShell = (() => {
     // Prevent a homepage link from discarding a question/metadata draft.
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
     sync();
-    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
+    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
       dispose(){window.removeEventListener('beforeunload',beforeUnload);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);document.removeEventListener('click',closeCitations);document.removeEventListener('keydown',citationKey,true);}};
   }
   return {create};

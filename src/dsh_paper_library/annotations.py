@@ -22,6 +22,7 @@ import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
 from .handwriting import HandwritingAccess
+from .linked_handwriting import LinkedHandwritingAccess, LINKED_KINDS
 
 def _constants():
     """The cap table from `core.py`, resolved when a method runs.
@@ -52,7 +53,7 @@ def install_helpers(**helpers):
         module[name] = value
 
 
-class AnnotationAccess(HandwritingAccess):
+class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
     @staticmethod
     def _ink_paths(paths, page):
         import pymupdf as fitz
@@ -97,7 +98,7 @@ class AnnotationAccess(HandwritingAccess):
 
     @staticmethod
     def _annotation_characters(value):
-        return len(value["text"]) + len(value["comment"]) + (len(json.dumps(value["paths"], separators=(",", ":"))) if "paths" in value else 0) + (len(json.dumps(value["handwriting"], ensure_ascii=False)) if "handwriting" in value else 0)
+        return len(value["text"]) + len(value["comment"]) + (len(json.dumps(value["paths"], separators=(",", ":"))) if "paths" in value else 0) + (len(json.dumps(value["handwriting"], ensure_ascii=False)) if "handwriting" in value else 0) + (len(json.dumps(value["linked_ink"], ensure_ascii=False)) if "linked_ink" in value else 0)
 
     @staticmethod
     def _page(doc, number):
@@ -145,6 +146,8 @@ class AnnotationAccess(HandwritingAccess):
         handwriting = cls._handwriting_page(page) if handwriting is None else handwriting
         linked_board = handwriting["parents"].get(annot.xref)
         own_board = handwriting["children"].get(annot.xref)
+        linked_ink = handwriting["linked_parents"].get(annot.xref)
+        linked_child = handwriting["linked_children"].get(annot.xref)
         rects = []
         vertices = annot.vertices if annot.type[0] in {8, 9, 10, 11} else None
         if vertices:
@@ -168,7 +171,7 @@ class AnnotationAccess(HandwritingAccess):
                 reply_to = parent.info.get("id") or f"external-{page.number + 1}-{parent.xref}"
             except (ValueError, RuntimeError):
                 pass
-        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids") if key in extra}}
+        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids") if key in extra}}
 
     def companion_excerpt(self, id, page):
         """One explicitly selected page, text only; no persistent index or OCR."""
@@ -201,13 +204,17 @@ class AnnotationAccess(HandwritingAccess):
                               width=round(float(value["width"]), 3), color=value.get("color"))
         if value.get("handwriting"):
             normalized["handwriting"] = value["handwriting"]
+        if value.get("linked_ink"):
+            if value["linked_ink"].get("truncated"):
+                raise ValueError("ANNOTATION_GEOMETRY_LIMIT: linked handwriting exceeds the bounded geometry budget")
+            normalized["linked_ink"] = {key: entry for key, entry in value["linked_ink"].items() if key != "annotations"}
         if value.get("handwriting_version"):
             normalized["handwriting_version"] = value["handwriting_version"]
         version = hashlib.sha256(json.dumps(normalized, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
         return {**value, "version": version, "identity_reliable": identity_reliable,
                 "identity_source": "pdf-nm" if identity_reliable else "page-xref",
                 "text_characters": len(value["text"]), "comment_characters": len(value["comment"]),
-                "source_characters": len(value["text"]) + len(value["comment"]) + len(value.get("handwriting", {}).get("transcript", ""))}
+                "source_characters": len(value["text"]) + len(value["comment"]) + len(value.get("handwriting", {}).get("transcript", "")) + len(value.get("linked_ink", {}).get("transcript", ""))}
 
     @staticmethod
     def _reference_limits(max_characters=None):
@@ -234,7 +241,7 @@ class AnnotationAccess(HandwritingAccess):
                             total_exact, stop = False, True
                             break
                         scanned += 1
-                        if self._annotation_metadata(annot).get("kind") in {"ai-feedback", "handwriting-note"}:
+                        if self._annotation_metadata(annot).get("kind") in {"ai-feedback", "handwriting-note"} | LINKED_KINDS:
                             continue
                         total += 1
                         value = self._reference_annotation(self._annotation(page, annot, exact=True, handwriting=handwriting), bool(annot.info.get("id")))
@@ -249,6 +256,10 @@ class AnnotationAccess(HandwritingAccess):
                             if value.get("handwriting"):
                                 projected["handwriting"] = {**value["handwriting"], "transcript": value["handwriting"]["transcript"][:_constants().REFERENCE_PREVIEW_CHARACTERS]}
                                 projected["preview_truncated"] |= len(value["handwriting"]["transcript"]) > _constants().REFERENCE_PREVIEW_CHARACTERS
+                            if value.get("linked_ink"):
+                                projected["linked_ink"] = {key: entry for key, entry in value["linked_ink"].items() if key != "annotations"}
+                                projected["linked_ink"]["transcript"] = value["linked_ink"]["transcript"][:_constants().REFERENCE_PREVIEW_CHARACTERS]
+                                projected["preview_truncated"] |= len(value["linked_ink"]["transcript"]) > _constants().REFERENCE_PREVIEW_CHARACTERS
                             values.append(projected)
                     if stop:
                         break
@@ -305,17 +316,21 @@ class AnnotationAccess(HandwritingAccess):
                             if annotation_id in seen:
                                 raise ValueError("ANNOTATION_AMBIGUOUS: selected PDF annotation identity occurs more than once")
                             seen.add(annotation_id)
-                        if self._annotation_metadata(annot).get("kind") in {"ai-feedback", "handwriting-note"}:
+                        if self._annotation_metadata(annot).get("kind") in {"ai-feedback", "handwriting-note"} | LINKED_KINDS:
                             continue
                         total += 1
                         if annotation_id not in requested:
                             continue
                         raw_value = self._annotation(page, annot, exact=True, handwriting=handwriting)
+                        if raw_value.get("linked_ink"):
+                            geometry_characters += len(json.dumps(raw_value["linked_ink"]["annotations"], separators=(",", ":")))
+                            if geometry_characters > 2_000_000:
+                                raise ValueError("SOURCE_GEOMETRY_BUDGET_EXCEEDED: selected handwriting exceeds the 2 MB geometry budget")
                         if "paths" in raw_value:
                             geometry_characters += len(json.dumps(raw_value["paths"], separators=(",", ":")))
                             if geometry_characters > 2_000_000:
                                 raise ValueError("SOURCE_GEOMETRY_BUDGET_EXCEEDED: selected ink exceeds the 2 MB geometry budget; reduce the selection")
-                        if characters + len(raw_value["text"]) + len(raw_value["comment"]) + len(raw_value.get("handwriting", {}).get("transcript", "")) > max_characters:
+                        if characters + len(raw_value["text"]) + len(raw_value["comment"]) + len(raw_value.get("handwriting", {}).get("transcript", "")) + len(raw_value.get("linked_ink", {}).get("transcript", "")) > max_characters:
                             raise ValueError(f"SOURCE_BUDGET_EXCEEDED: selected source exceeds {max_characters} characters; reduce the selection (no text was sent)")
                         value = self._reference_annotation(raw_value, bool(annot.info.get("id")))
                         if value["version"] != requested[annotation_id]:
@@ -406,11 +421,21 @@ class AnnotationAccess(HandwritingAccess):
                 annotations.append(value)
             return {"page": int(page), "page_count": doc.page_count, "width": width, "height": height, "scale": scale, "image": base64.b64encode(pix.tobytes("png")).decode("ascii"), "words": words, "annotations": annotations, "words_truncated": len(raw_words) > 20000, "annotations_truncated": annotation_truncated, "rotation": current.rotation}
 
-    def _add_annotation(self, doc, page, type="highlight", rects=None, text="", comment="", author="Reader", color="#ffdb66", extra=None, paths=None, width=2, annotation_id=None):
+    def _add_annotation(self, doc, page, type="highlight", rects=None, text="", comment="", author="Reader", color="#ffdb66", extra=None, paths=None, width=2, annotation_id=None, parent_id=None):
         import pymupdf as fitz
         current = self._page(doc, page)
         if type not in {"highlight", "underline", "strikeout", "note", "ink"}:
             raise ValueError("Supported annotation types are highlight, underline, strikeout, note and ink")
+        linked_parent = None
+        if parent_id is not None:
+            if type != "ink":
+                raise ValueError("Only ink accepts parent_id")
+            parent_page, linked_parent = self._handwriting_parent(doc, parent_id)
+            if parent_page.number != current.number:
+                raise ValueError("Linked handwriting and its parent must be on the same page")
+            # Keep the annotation's owning Page alive throughout the mutation.
+            current = parent_page
+            extra = {**(extra or {}), "kind": "linked-handwriting"}
         if type == "ink":
             if isinstance(width, bool) or not isinstance(width, (int, float)) or not 0.5 <= width <= 8:
                 raise ValueError("Ink width must be 0.5–8 PDF points")
@@ -446,6 +471,11 @@ class AnnotationAccess(HandwritingAccess):
         annot.update()
         annotation_id = annotation_id or uuid.uuid4().hex
         doc.xref_set_key(annot.xref, "NM", fitz.get_pdf_str(annotation_id))
+        if linked_parent is not None:
+            annot.set_irt_xref(linked_parent.xref)
+            group = self._linked_handwriting_page(current)["linked_parents"][linked_parent.xref]
+            if group.get("truncated"):
+                raise ValueError("LINKED_HANDWRITING_LIMIT: a parent accepts at most 64 ink objects, 128 strokes, 8192 points and 256 KiB geometry")
         if extra and extra.get("annotation_ids"):
             for parent in current.annots() or []:
                 if parent.info.get("id") == extra["annotation_ids"][0]:
@@ -483,6 +513,7 @@ class AnnotationAccess(HandwritingAccess):
                                  and abs(existing["width"] - width) < 0.00001
                                  and existing["text"] == kwargs.get("text", "") and existing["comment"] == kwargs.get("comment", "")
                                  and existing["author"] == kwargs.get("author", "Reader")[:200]
+                                 and existing.get("parent_id") == kwargs.get("parent_id")
                                  and len(color) == 3 and len(existing["color"].get("stroke", [])) == 3
                                  and all(abs(a - b) < 0.00001 for a, b in zip(existing["color"]["stroke"], color))
                                  and len(paths) == len(saved_paths) and all(len(a) == len(b) for a, b in zip(paths, saved_paths))
@@ -524,6 +555,8 @@ class AnnotationAccess(HandwritingAccess):
             raise ValueError("Comment must be text of at most 30000 characters")
         def operation(doc):
             page, annot = self._find_annotation(doc, annotation_id)
+            if self._annotation_metadata(annot).get("kind") == "linked-handwriting-transcript":
+                raise ValueError("Use linked_handwriting_text with the current group version to update a transcript")
             if self._is_handwriting(annot):
                 raise ValueError("Use handwriting_save to update a handwritten note with its version and original board")
             annot.set_info(content=comment, modDate="D:" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%SZ"))
@@ -536,13 +569,16 @@ class AnnotationAccess(HandwritingAccess):
         def operation(doc):
             page, annot = self._find_annotation(doc, annotation_id)
             child = self._handwriting_child(page, annot)
-            deleting = {annot.xref, *([child.xref] if child else [])}
+            linked = [reply.xref for reply in page.annots() or [] if self._is_linked_handwriting(reply) and reply.irt_xref == annot.xref]
+            deleting = {annot.xref, *linked, *([child.xref] if child else [])}
             # MuPDF otherwise deletes every reply together with its parent.
-            # Only our owned handwritten board belongs to this delete action;
+            # Only our owned handwriting replies belong to this delete action;
             # preserve all other replies as notes with no dangling parent link.
             for reply in page.annots() or []:
                 if reply.xref not in deleting and reply.irt_xref in deleting:
                     doc.xref_set_key(reply.xref, "IRT", "null")
+            for xref in linked:
+                page.delete_annot(page.load_annot(xref))
             if child:
                 page.delete_annot(child)
             page.delete_annot(annot)

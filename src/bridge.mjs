@@ -343,7 +343,7 @@ export function splitFeedbackReplies(text, annotations) {
 export async function dispatch(request, options = {}) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('请求必须是 JSON 对象。');
   const { library: ignoredLibrary, python: ignoredPython, ...safe } = request;
-  if (['handwriting_get','handwriting_save'].includes(safe.action)) {
+  if (['handwriting_get','handwriting_save','linked_handwriting_text'].includes(safe.action)) {
     if (Buffer.byteLength(JSON.stringify(safe), 'utf8') > 512 * 1024) throw new Error('手写便签超过 512 KiB，请缩短笔迹或文字。');
     return core(safe, options);
   }

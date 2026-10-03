@@ -28,6 +28,21 @@ test('handwritten transcripts count toward complete immutable source budgets', a
   const saved = await store.save(value)
   assert.equal((await store.load(saved.id, expected)).annotations[0].handwriting.transcript, '待核对🖊')
 })
+test('linked ink and original handwriting attachments both count in the backend-compatible Unicode source budget', async t => {
+  const { store } = await fixture(t), value = snapshot({ selection: { page: 1, text: '补🌍' } })
+  value.annotations[0].text = '源📄'; value.annotations[0].comment = '问？'
+  value.annotations[0].handwriting = { id: 'hand', transcript: '便签🖊', transcription_source: 'edited', version }
+  value.annotations[0].linked_ink = { version, geometry_version: 'b'.repeat(64), annotation_count: 1, transcript: '原页📝', transcription_source: 'model', transcript_stale: true }
+  // Python len counts each astral character once: 2 + 2 + 3 + 3 + 2.
+  assert.equal(annotationSnapshotSourceCharacters(value), 12)
+  value.coverage.characters = 9
+  await assert.rejects(store.save(value), /字符数与完整来源不一致/)
+  value.coverage.characters = 12
+  const saved = await store.save(value), restored = await store.load(saved.id, expected)
+  assert.deepEqual(restored.annotations[0].handwriting, value.annotations[0].handwriting)
+  assert.deepEqual(restored.annotations[0].linked_ink, value.annotations[0].linked_ink)
+  assert.equal(annotationSnapshotSourceCharacters(restored), 12, 'Stale generated text remains explicit source material and is never silently omitted from the budget')
+})
 async function fixture(t) {
   const library = await mkdtemp(join(tmpdir(), 'annotation-snapshots-'))
   t.after(() => rm(library, { recursive: true, force: true }))

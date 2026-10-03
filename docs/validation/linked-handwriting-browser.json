@@ -1,0 +1,43 @@
+{
+  "verified_at": "2026-10-03T15:17:51.713Z",
+  "complete": true,
+  "scope": "Synthetic Chromium inline handwriting linked to native PDF text annotations, using the real Python worker and host storage.",
+  "checks": [
+    "trusted pen creates a standard text-bound highlight",
+    "sidebar handwriting toggle keeps PDF visible without a separate board",
+    "pause autosaves visible PDF circle as native ink bound to the highlight",
+    "another page cannot acquire handwriting belonging to the selected highlight",
+    "touch input does not create linked handwriting",
+    "same toggle flushes mouse-fallback strokes and restores the prior text tool",
+    "normal text markup works immediately after leaving linked handwriting",
+    "unknown save acknowledgement keeps exact linked draft and locks edits",
+    "reload restores parent binding and same retry ID without duplicate ink",
+    "failed exit retains selected highlight and unsaved strokes",
+    "explicit retry saves a refused batch and then permits exit",
+    "existing attachment-based note remains accessible and unchanged",
+    "linked ink belongs under its parent instead of creating independent sidebar cards",
+    "export and fresh import recover native ink relationships and legacy attachment from PDF alone",
+    "confirmed linked strokes reopen in the reading page",
+    "original bytes unchanged with no browser errors or external model requests"
+  ],
+  "browser_errors": [],
+  "external_requests": 0,
+  "real_provider_calls": 0,
+  "screenshots": [
+    ".local/linked-handwriting-iEgWil/inline-linked-draft.png",
+    ".local/linked-handwriting-iEgWil/linked-handwriting-reopened.png"
+  ],
+  "ink_requests": 7,
+  "lost_acknowledgements": 1,
+  "refused_requests": 2,
+  "trusted_pointer_types": [
+    "pen",
+    "touch",
+    "mouse"
+  ],
+  "limitations": [
+    "Physical Apple Pencil, Sidecar and Safari were not exercised.",
+    "Reload recovery covers completed strokes acknowledged by host storage; abrupt termination of unfinished or unacknowledged writes is not guaranteed.",
+    "Fixed-width ink; no pressure or iPadOS palm rejection claim."
+  ]
+}

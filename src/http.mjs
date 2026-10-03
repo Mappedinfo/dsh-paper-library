@@ -21,7 +21,7 @@ for (const name of ['settings.js','settings.css']) staticFiles[name] = [name, na
 for (const name of ['challenge-mining.js','challenge-mining.css','annotation-threads.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['board.js','board.css','board-source.js','board-render.js','board-bridge.js','board-mermaid.js','board-drawio.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 const languageActions = new Set(['language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
-for (const name of ['handwriting-note.js','handwriting-note.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
 const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:'];
 function browserStateKey(key, listPrefix = false) {

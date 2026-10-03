@@ -90,6 +90,7 @@
     "test:markup-mode": "node scripts/markup-mode-browser-fixture.mjs",
     "test:pencil": "node scripts/pencil-browser-fixture.mjs",
     "test:pencil-markup": "node scripts/pencil-markup-browser-fixture.mjs",
+    "test:linked-handwriting": "node scripts/linked-handwriting-browser-fixture.mjs",
     "test:handwriting": "node scripts/handwriting-browser-fixture.mjs",
     "test:handwriting-harness": "node scripts/handwriting-harness-smoke.mjs",
     "test:feedback": "node scripts/feedback-browser-fixture.mjs",

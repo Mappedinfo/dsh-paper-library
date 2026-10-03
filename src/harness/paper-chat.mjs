@@ -310,6 +310,7 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
       if (annotation.text) parts.push(`原文：\n${sourceQuote(annotation.text)}`)
       if (annotation.comment) parts.push(`我的批注：\n${sourceQuote(annotation.comment)}`)
       if (annotation.handwriting?.transcript) parts.push(`手写便签（${annotation.handwriting.transcription_source === 'model' ? 'AI 识别，可能有误' : '读者校对文字'}）：\n${sourceQuote(annotation.handwriting.transcript)}`)
+      if (annotation.linked_ink?.transcript) parts.push(`原页手写（${annotation.linked_ink.transcription_source === 'model' ? 'AI 识别，可能有误' : '读者校对文字'}${annotation.linked_ink.transcript_stale ? '；笔迹已变化，转写待核对' : ''}）：\n${sourceQuote(annotation.linked_ink.transcript)}`)
       sections.push(parts.join('\n\n'))
     }
     if (selection) sections.push(`**第 ${selection.page} 页 · 选中文本**\n\n${sourceQuote(selection.text)}`)

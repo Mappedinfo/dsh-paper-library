@@ -159,7 +159,7 @@ class HandwritingAccess:
                 raise ValueError("More than one handwriting note is attached to this annotation; resolve the duplicate in a PDF editor")
             parents[annot.irt_xref] = value
             children[annot.xref] = value
-        return {"parents": parents, "children": children}
+        return {"parents": parents, "children": children, **cls._linked_handwriting_page(page)}
 
     @classmethod
     def _handwriting_parent(cls, doc, annotation_id):
@@ -177,7 +177,7 @@ class HandwritingAccess:
             raise ValueError("Handwriting parent annotation is missing or ambiguous")
         page = doc[found[0][0]]
         parent = page.load_annot(found[0][1])
-        if cls._annotation_metadata(parent).get("kind") in {"ai-feedback", "handwriting-note"}:
+        if cls._annotation_metadata(parent).get("kind") in {"ai-feedback", "handwriting-note", "linked-handwriting", "linked-handwriting-transcript"}:
             raise ValueError("Handwriting must attach to a source annotation, not generated feedback or another handwriting note")
         return page, parent
 

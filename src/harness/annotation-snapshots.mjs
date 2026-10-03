@@ -37,6 +37,7 @@ export function annotationSnapshotSourceCharacters(snapshot) {
     for (const _ of note.text) characters++
     for (const _ of note.comment) characters++
     if (typeof note.handwriting?.transcript === 'string') for (const _ of note.handwriting.transcript) characters++
+    if (typeof note.linked_ink?.transcript === 'string') for (const _ of note.linked_ink.transcript) characters++
   }
   if (snapshot.selection) for (const _ of snapshot.selection.text) characters++
   return characters

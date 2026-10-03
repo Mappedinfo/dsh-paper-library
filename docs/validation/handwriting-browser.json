@@ -1,9 +1,9 @@
 {
-  "verified_at": "2026-10-03T14:37:02.883Z",
+  "verified_at": "2026-10-03T15:21:01.418Z",
   "scope": "Synthetic native PDF handwriting attachments, Chromium pen/mouse and deterministic recognition; excludes real model quality and physical Pencil/Sidecar",
   "checks": [
     {
-      "id": "trusted pen writes a board attached to the selected standard highlight",
+      "id": "legacy attachment editor preserves pen input on an existing note",
       "status": "pass"
     },
     {
@@ -47,15 +47,31 @@
       "status": "pass"
     },
     {
-      "id": "page note save-and-handwrite shortcut creates an independent miniature board",
-      "status": "pass"
-    },
-    {
       "id": "external Unicode annotation identities retain working draft and PDF saves",
       "status": "pass"
     },
     {
       "id": "miniature board remains usable at narrow width and in dark theme",
+      "status": "pass"
+    },
+    {
+      "id": "inline PDF handwriting exit automatically recognizes linked strokes without opening a board",
+      "status": "pass"
+    },
+    {
+      "id": "unsaved linked transcription correction survives annotation refresh",
+      "status": "pass"
+    },
+    {
+      "id": "lost correction acknowledgement retries exact text without another model call or changing legacy strokes",
+      "status": "pass"
+    },
+    {
+      "id": "definite transcript version conflict preserves editable text and explicit rebase saves against current strokes",
+      "status": "pass"
+    },
+    {
+      "id": "in-flight correction remains locked across card rerender and cannot discard a newer draft",
       "status": "pass"
     },
     {
@@ -65,10 +81,10 @@
   ],
   "browser_errors": [],
   "external_requests": 0,
-  "model_calls": 3,
+  "model_calls": 5,
   "real_provider_calls": 0,
   "screenshots": [
-    ".local/handwriting-browser-2YJclj/handwriting-recognized.png",
-    ".local/handwriting-browser-2YJclj/handwriting-narrow-dark.png"
+    ".local/handwriting-browser-CPeWuV/handwriting-recognized.png",
+    ".local/handwriting-browser-CPeWuV/handwriting-narrow-dark.png"
   ]
 }

@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-10-03T14:31:14.684Z",
+  "verified_at": "2026-10-03T15:04:57.336Z",
   "complete": true,
   "scope": "Synthetic standalone UI in real Chromium: trusted CDP pen and touch, real mouse input, explicit multi-stroke drafts, native PDF Ink persistence, original preservation, retry, zoom, rotation, fresh catalog recovery and existing tools.",
   "limitations": [
@@ -32,8 +32,8 @@
   "externalRequests": 0,
   "modelRequests": 0,
   "screenshots": [
-    ".local/pencil-browser-TLmglQ/multi-stroke-draft.png",
-    ".local/pencil-browser-TLmglQ/zoomed-draft.png",
-    ".local/pencil-browser-TLmglQ/reopened-ink-and-existing-tools.png"
+    ".local/pencil-browser-AXWHYb/multi-stroke-draft.png",
+    ".local/pencil-browser-AXWHYb/zoomed-draft.png",
+    ".local/pencil-browser-AXWHYb/reopened-ink-and-existing-tools.png"
   ]
 }

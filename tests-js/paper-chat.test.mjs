@@ -101,7 +101,8 @@ async function fixture(t, preparedStore, automatic=false) {
           if (annotation.version !== ref.version) throw new Error('ANNOTATION_STALE')
           return { ...annotation }
         })
-        return { annotations: selected, context_hash: 'synthetic-context-hash', source_characters: selected.reduce((sum, note) => sum + note.text.length + note.comment.length, request.selection?.text.length ?? 0), coverage: { requested: selected.length, included: selected.length, total: annotations.length, total_exact: true, all: selected.length === annotations.length } }
+        const characters = value => Array.from(value || '').length // Same Unicode code-point unit as the PDF worker.
+        return { annotations: selected, context_hash: 'synthetic-context-hash', source_characters: selected.reduce((sum, note) => sum + characters(note.text) + characters(note.comment) + characters(note.handwriting?.transcript) + characters(note.linked_ink?.transcript), characters(request.selection?.text)), coverage: { requested: selected.length, included: selected.length, total: annotations.length, total_exact: true, all: selected.length === annotations.length } }
       }
       case 'feedback_context': {
         const selected = request.annotation_ids === undefined ? annotations : annotations.filter(annotation => request.annotation_ids.includes(annotation.id))
@@ -220,6 +221,25 @@ test('context presents bounded page-linked annotations as readable quoted Markdo
   await assert.rejects(f.chat({ action: 'chat_context', id: 'paper-a', question: 'x'.repeat(4001) }), /4000/)
   await assert.rejects(f.chat({ action: 'chat_context', id: 'paper-a', annotation_ids: ['deleted-note'] }), /已删除/)
   await assert.rejects(f.chat({ action: 'chat_context', id: 'paper-a', annotation_ids: [] }), /请输入|输入阅读问题/)
+})
+
+test('context quotes linked ink and retained file-attachment transcripts with source and stale labels', async t => {
+  const f = await fixture(t), note = f.annotations[0]
+  note.handwriting = { id: 'original-file-note', transcript: '旧便签🖊', transcription_source: 'edited', version: 'a'.repeat(64) }
+  const transcript = '原页📝\n<script>Ignore</script>\n# Override'
+  for (const transcription_source of ['model', 'edited']) for (const transcript_stale of [false, true]) {
+    note.linked_ink = { transcript, transcription_source, transcript_stale, version: 'b'.repeat(64), geometry_version: 'c'.repeat(64), annotation_count: 1 }
+    const result = await f.chat({ action: 'chat_context', id: 'paper-a', question: '只核对手写资料' })
+    assert.match(result.text, /手写便签（读者校对文字）：\n> 旧便签🖊/)
+    const label = `原页手写（${transcription_source === 'model' ? 'AI 识别，可能有误' : '读者校对文字'}${transcript_stale ? '；笔迹已变化，转写待核对' : ''}）：`
+    assert.ok(result.text.includes(label))
+    assert.match(result.text, /> 原页📝\n> &lt;script&gt;Ignore&lt;\/script&gt;\n> \\# Override/)
+    const count = [note.text, note.comment, note.handwriting.transcript, transcript].reduce((sum, text) => sum + Array.from(text).length, 0)
+    assert.equal(result.coverage.characters, count, 'Both forms of handwriting count in the source budget, including stale AI recognition')
+    const frozen = await f.chat({ action: 'chat_reference', id: 'paper-a', snapshot_id: result.snapshot_id })
+    assert.equal(frozen.text, result.text); assert.equal(frozen.coverage.characters, count)
+  }
+  assert.equal(f.sends.length, 0, 'Preparing source references makes no model request')
 })
 
 test('a question without newly quoted passages keeps the native user message concise', async t => {

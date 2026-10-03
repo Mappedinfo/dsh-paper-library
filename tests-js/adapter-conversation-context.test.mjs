@@ -17,6 +17,98 @@ function handwrittenDraft() {
   }
 }
 
+function inlineInkRecord(parentId = 'original-annotation') {
+  return { draft: { paperId: 'paper-1', page: 3, paths: [[[10, 20], [30.5, 40]]], width: 2, color: '#204080', revision: 7, ...(parentId ? { parentId } : {}) },
+    annotation_id: 'ea1c165f-177e-40b1-a55e-71c2e912a052', attempted: true, updatedAt: 1791000000000 }
+}
+const inlineContext = () => ({ paperId: 'paper-1', page: 3, parentId: 'original-annotation', previousTool: 'underline' })
+
+test('inline linked ink crosses the authorized iframe handoff with exact retry identity and detached vectors', () => {
+  const e = environment(), record = inlineInkRecord(), linked = inlineContext()
+  const snapshot = { paperId: 'paper-1', page: 1, tab: 'reader', chatDraft: '', linkedHandwriting: linked, inkDraftRecord: record }
+  const expected = structuredClone(snapshot)
+  e.message({ type: 'paper-library:reader-state', snapshot })
+  record.draft.paths[0][0][0] = 999; record.annotation_id = 'mutated'; record.attempted = false; linked.parentId = 'mutated'
+  e.detach()
+  // An obsolete child cannot replace the frozen handoff, even at the same origin.
+  e.message({ type: 'paper-library:reader-state', snapshot: { paperId: 'paper-1', page: 1, chatDraft: 'obsolete' } })
+  const target = { postMessage: (value, origin) => e.messages.push({ value, origin }) }
+  e.bridge.attach(target); e.message({ type: 'paper-library:ready' }, target)
+  assert.deepEqual(e.messages.at(-1).value.snapshot, expected)
+  const count = e.messages.length; e.message({ type: 'paper-library:ready' }, target); assert.equal(e.messages.length, count)
+  e.bridge.dispose()
+})
+
+test('inline handoff keeps free ink and strips images and unknown fields at every retained boundary', () => {
+  const record = inlineInkRecord(null), image = 'data:image/png;base64,' + 'x'.repeat(300000)
+  record.image = image; record.ownerConfig = 'never-retain'; record.draft.image = image; record.draft.model = 'never-retain'
+  record.draft.paths[0].image = image; record.draft.paths[0][0].image = image
+  const snapshot = readerSnapshot({ paperId: 'paper-1', page: 1, inkDraftRecord: record, image })
+  assert.deepEqual(snapshot.inkDraftRecord, inlineInkRecord(null))
+  assert.equal(Object.hasOwn(snapshot, 'linkedHandwriting'), false)
+  assert.equal(JSON.stringify(snapshot).includes('data:image'), false)
+  assert.equal(JSON.stringify(snapshot).includes('never-retain'), false)
+  for (const previousTool of ['select', 'highlight', 'underline', 'strikeout', 'note']) {
+    const linked = { ...inlineContext(), previousTool, image, privateConfig: 'never-retain' }
+    assert.deepEqual(readerSnapshot({ paperId: 'paper-1', page: 1, linkedHandwriting: linked }).linkedHandwriting, { ...inlineContext(), previousTool })
+  }
+  const blank = readerSnapshot({ paperId: 'paper-1', page: 1, inkDraftRecord: null, linkedHandwriting: null })
+  assert.equal(Object.hasOwn(blank, 'inkDraftRecord'), false); assert.equal(Object.hasOwn(blank, 'linkedHandwriting'), false)
+})
+
+test('inline handoff rejects cross-paper, mismatched parent and malformed save identities', () => {
+  const base = { paperId: 'paper-1', page: 1 }
+  for (const change of [{ paperId: 'paper-2' }, { paperId: '' }, { parentId: '' }, { parentId: ' ' }, { parentId: 'x'.repeat(161) }, { parentId: 'a\u007fb' }, { parentId: 'a\nb' }, { page: 0 }, { page: 2001 }, { previousTool: 'ink' }, { previousTool: 'eraser' }, { previousTool: undefined }]) {
+    assert.throws(() => readerSnapshot({ ...base, linkedHandwriting: { ...inlineContext(), ...change } }), Error, JSON.stringify(change))
+  }
+  for (const change of [{ annotation_id: '' }, { annotation_id: 'not-a-uuid' }, { attempted: undefined }, { attempted: 1 }, { updatedAt: 0 }, { updatedAt: -1 }, { updatedAt: NaN }, { updatedAt: Infinity }, { draft: null }]) {
+    assert.throws(() => readerSnapshot({ ...base, inkDraftRecord: { ...inlineInkRecord(), ...change } }), Error, JSON.stringify(change))
+  }
+  for (const change of [{ paperId: 'paper-2' }, { paperId: '' }, { page: 0 }, { page: 2001 }, { revision: 0 }, { revision: 1.5 }, { revision: Number.MAX_SAFE_INTEGER + 1 }, { parentId: '' }, { parentId: null }, { parentId: 'a'.repeat(161) }, { parentId: 'a\nb' }]) {
+    const record = inlineInkRecord(); record.draft = { ...record.draft, ...change }
+    assert.throws(() => readerSnapshot({ ...base, inkDraftRecord: record }), Error, JSON.stringify(change))
+  }
+  for (const paperId of [null, 'paper-2']) {
+    assert.throws(() => readerSnapshot({ ...base, paperId, linkedHandwriting: inlineContext() }), /身份/)
+    assert.throws(() => readerSnapshot({ ...base, paperId, inkDraftRecord: inlineInkRecord() }), /身份/)
+  }
+  for (const change of [{ parentId: 'another-annotation' }, { page: 2 }]) {
+    assert.throws(() => readerSnapshot({ ...base, linkedHandwriting: { ...inlineContext(), ...change }, inkDraftRecord: inlineInkRecord() }), /不一致/)
+  }
+  assert.throws(() => readerSnapshot({ ...base, linkedHandwriting: inlineContext(), inkDraftRecord: inlineInkRecord(null) }), /不一致/)
+})
+
+test('inline handoff bounds stroke counts, point geometry, pen style and total snapshot bytes', () => {
+  const base = { paperId: 'paper-1', page: 1 }, record = inlineInkRecord(), draft = record.draft
+  const invalid = [
+    { paths: [] }, { paths: Array(65).fill([[0, 0], [1, 1]]) }, { paths: [Array(4097).fill([1, 2])] },
+    ...[null, [], [[0, 0]], [[0, 0], [20001, 1]], [[0, 0], [1, 20001]], [[0, 0], [-1, 2]], [[0, 0], [Infinity, 1]], [[0, 0], [NaN, 1]], [[0, 0], [true, 1]], [[0, 0], [1, 2, 3]]].map(path => ({ paths: [path] })),
+    ...[0, .49, 8.01, NaN, true].map(width => ({ width })), ...['red', '#fff', '#12345678'].map(color => ({ color })),
+  ]
+  for (const change of invalid) assert.throws(() => readerSnapshot({ ...base, inkDraftRecord: { ...record, draft: { ...draft, ...change } } }), Error, JSON.stringify(change)?.slice(0, 120))
+  for (const width of [.5, 8]) {
+    const bounded = { ...record, draft: { ...draft, width, paths: [Array(4096).fill([0, 20000])] } }
+    assert.equal(readerSnapshot({ ...base, inkDraftRecord: bounded }).inkDraftRecord.draft.paths[0].length, 4096)
+  }
+  assert.equal(readerSnapshot({ ...base, inkDraftRecord: { ...record, draft: { ...draft, paths: Array(64).fill([[0, 0], [1, 1]]) } } }).inkDraftRecord.draft.paths.length, 64)
+  const unrestorable = { ...record, draft: { ...draft, paths: [Array(4096).fill([1.123456789012345, 2.123456789012345])] } }
+  assert.throws(() => readerSnapshot({ ...base, inkDraftRecord: unrestorable }), /128 KiB/)
+  const large = { ...record, draft: { ...draft, paths: [Array(4096).fill([1000.123456, 1000.654321])] } }
+  assert.ok(Buffer.byteLength(JSON.stringify(large)) < 256 * 1024)
+  assert.throws(() => readerSnapshot({ ...base, chatDraft: '字'.repeat(64000), inkDraftRecord: large }), /256 KiB/)
+})
+
+test('an invalid linked update retains the last good attempted ink for replacement-frame recovery', () => {
+  const e = environment(), snapshot = { paperId: 'paper-1', page: 3, tab: 'annotations', chatDraft: '', linkedHandwriting: inlineContext(), inkDraftRecord: inlineInkRecord() }
+  e.message({ type: 'paper-library:reader-state', snapshot })
+  e.message({ type: 'paper-library:reader-state', snapshot: { ...snapshot, inkDraftRecord: { ...inlineInkRecord(), annotation_id: 'corrupt-retry-id' } } })
+  assert.equal(e.messages.at(-1).value.type, 'paper-library:reader-state-error')
+  e.detach(); const target = { postMessage: (value, origin) => e.messages.push({ value, origin }) }; e.bridge.attach(target)
+  e.message({ type: 'paper-library:ready' }, target)
+  assert.deepEqual(e.messages.at(-1).value.snapshot, snapshot)
+  e.bridge.dispose()
+})
+
 test('handwriting handoff retains exact bounded vectors, CAS and retry identity across iframe replacement', () => {
   const e = environment()
   const draft = handwrittenDraft()

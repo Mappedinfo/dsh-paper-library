@@ -4,6 +4,7 @@
   const TOOLS = new Set(['select', 'highlight', 'underline', 'strikeout', 'note', 'ink']);
   const MARKUP_TOOLS = new Set(['highlight', 'underline', 'strikeout']);
   const MAX_INK_PATHS = 64, MAX_INK_POINTS = 4096;
+  const inkId = value => typeof value === 'string' && !!value.trim() && value.length <= 256 && !/[\u0000-\u001f]/.test(value);
   /** Snap only to a real text box; the browser still determines the character
    * boundary inside its fitted text run. Useful when a pen is just below text. */
   function nearestTextPosition(boxes, x, y, limit = Infinity) {
@@ -27,13 +28,23 @@
    * cancelled pointer loses only its unfinished stroke; snapshots for saving
    * never include an in-progress stroke. */
   function createInkBuffer() {
-    let draft = null, stroke = null, revision = 0, points = 0;
+    let draft = null, stroke = null, revision = 0, points = 0, context = null;
     const clone = paths => paths.map(path => path.map(point => [...point]));
+    const getContext = () => context ? { ...context } : null;
+    function setContext(value) {
+      if (value !== null && (!value || typeof value !== 'object' || !inkId(value.paperId) || !inkId(value.parentId) || !Number.isInteger(value.page) || value.page < 1 || value.page > MAX_PAGES)) throw new Error('请先选择一条有效的 PDF 批注，再在其页面上手写。');
+      const next = value === null ? null : { paperId: value.paperId, page: value.page, parentId: value.parentId };
+      // Never relabel existing free ink or move a linked draft to another note.
+      // A caller must explicitly finish or discard that draft before switching.
+      if (draft && ((draft.parentId || null) !== (next?.parentId || null) || next && (draft.paperId !== next.paperId || draft.page !== next.page))) throw new Error('已有未保存的手写，请先保存或取消，再切换关联批注。');
+      context = next; return getContext();
+    }
     function start(origin, point, style) {
       if (stroke) return false;
+      if (context && (context.paperId !== origin.paperId || context.page !== origin.page)) throw new Error(`这段手写关联原文第 ${context.page} 页的批注，请返回该文献的这一页继续书写。`);
       if (draft && (draft.paperId !== origin.paperId || draft.page !== origin.page)) throw new Error('请先保存或取消原页面上的手写，再在其他页面书写。');
       if (draft && (draft.paths.length >= MAX_INK_PATHS || points + 2 > MAX_INK_POINTS)) throw new Error('本次手写已达上限，请保存后继续。');
-      if (!draft) draft = { paperId: origin.paperId, page: origin.page, paths: [], width: style.width, color: style.color, revision };
+      if (!draft) draft = { paperId: origin.paperId, page: origin.page, ...(context ? { parentId: context.parentId } : {}), paths: [], width: style.width, color: style.color, revision };
       stroke = [[...point]]; return true;
     }
     function append(point, endpoint = false) {
@@ -66,7 +77,7 @@
       if (draft || stroke) throw new Error('已有手写草稿，不能用另一份草稿覆盖。');
       if (value === null || value === undefined) return false;
       const invalid = () => { throw new Error('保存的手写草稿不完整或超出上限，请保留草稿并重试。'); };
-      if (!value || typeof value !== 'object' || typeof value.paperId !== 'string' || !value.paperId.trim() || value.paperId.length > 256 || /[\u0000-\u001f]/.test(value.paperId)
+      if (!value || typeof value !== 'object' || !inkId(value.paperId) || value.parentId !== undefined && !inkId(value.parentId)
         || !Number.isInteger(value.page) || value.page < 1 || value.page > MAX_PAGES || !Number.isFinite(value.width) || value.width < .5 || value.width > 8 || !/^#[0-9a-f]{6}$/i.test(value.color)
         || !Number.isSafeInteger(value.revision) || value.revision < 0 || !Array.isArray(value.paths) || !value.paths.length || value.paths.length > MAX_INK_PATHS) invalid();
       let count = 0;
@@ -74,11 +85,13 @@
         if (!Array.isArray(path) || path.length < 2 || (count += path.length) > MAX_INK_POINTS) invalid();
         for (const point of path) if (!Array.isArray(point) || point.length !== 2 || !point.every(coordinate => Number.isFinite(coordinate) && coordinate >= 0 && coordinate <= 100000)) invalid();
       }
-      const restored = { paperId: value.paperId, page: value.page, paths: clone(value.paths), width: value.width, color: value.color, revision: Math.max(revision + 1, value.revision) };
+      const restored = { paperId: value.paperId, page: value.page, ...(value.parentId === undefined ? {} : { parentId: value.parentId }), paths: clone(value.paths), width: value.width, color: value.color, revision: Math.max(revision + 1, value.revision) };
       if (encodeURIComponent(JSON.stringify(restored)).replace(/%[0-9a-f]{2}/gi, 'x').length > 128 * 1024) invalid();
-      draft = restored; revision = restored.revision; points = count; return true;
+      draft = restored; revision = restored.revision; points = count;
+      context = restored.parentId ? { paperId: restored.paperId, page: restored.page, parentId: restored.parentId } : null;
+      return true;
     }
-    return { start, append, end, snapshot, preview, undo, clear, restore, isDrawing: () => !!stroke };
+    return { start, append, end, snapshot, preview, undo, clear, restore, setContext, getContext, isDrawing: () => !!stroke };
   }
   function validateLayout(value) {
     if (!value || !Number.isInteger(value.page_count) || value.page_count < 1 || value.page_count > MAX_PAGES || !Array.isArray(value.pages) || value.pages.length !== value.page_count) throw new Error('PDF 页面尺寸列表不完整或超过 2,000 页。');
@@ -231,6 +244,11 @@
     const dom = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     root.classList.add('paper-pdf-reader'); root.tabIndex = 0; root.setAttribute('aria-label', 'PDF 连续阅读区域');
     const strip = dom('div', 'pdr-pages'); root.replaceChildren(strip);
+    function paintInkContext() {
+      const context = ink.getContext();
+      root.dataset.inkContext = context ? 'linked' : 'free';
+      slots.forEach((slot, index) => slot.sheet.classList.toggle('pdr-ink-target', context?.paperId === paperId && context.page === index + 1));
+    }
     function paintInk() {
       const draft = ink.preview();
       for (const layer of root.querySelectorAll('.pdr-ink-draft')) if (!draft || draft.paperId !== paperId || Number(layer.dataset.pdfPage) !== draft.page) layer.remove();
@@ -352,7 +370,8 @@
     function pointerLeave(event) { if (root.hasPointerCapture?.(event.pointerId)) return; if (markupGesture?.pointerId === event.pointerId) endMarkup(true); if (inkGesture?.pointerId === event.pointerId) endInk(true); }
     function undoInk() { endInk(true); if (!inkEnabled) return false; const changed = ink.undo(); if (changed) inkChanged(); return changed; }
     function clearInk(expectedRevision) { if (expectedRevision !== undefined && expectedRevision !== ink.snapshot()?.revision) return false; endInk(true); const cleared = ink.clear(expectedRevision); if (cleared) inkChanged(); return cleared; }
-    function restoreInkDraft(value) { const restored = ink.restore(value); if (restored) inkChanged(); return restored; }
+    function restoreInkDraft(value) { const restored = ink.restore(value); if (restored) { paintInkContext(); inkChanged(); } return restored; }
+    function setInkContext(value) { const context = ink.setContext(value); paintInkContext(); return context; }
     function setInkEnabled(value) { if (!value) endInk(true); inkEnabled = !!value; }
     const current = (id, ticket) => !disposed && id === paperId && id === getPaper()?.id && ticket === generation;
     function request(action, args, valid) { const task = transport.catch(() => {}).then(() => valid() ? api(action, args) : null); transport = task.catch(() => {}); return task; }
@@ -499,7 +518,7 @@
         try {
           const layout = await request('page_layout', { id }, () => current(id, ticket)); if (!current(id, ticket)) return false;
           pages = validateLayout(layout); slots = pages.map(geometry => { const outer = dom('section', 'pdr-page-slot'); outer.dataset.pdfPage = String(geometry.page); outer.setAttribute('aria-label', `PDF 第 ${geometry.page} 页`); const caption = dom('div', 'pdr-page-caption', `${geometry.page} / ${pages.length}`), sheet = dom('div', 'pdr-sheet'); sheet.dataset.pdfPage = String(geometry.page); outer.append(caption, sheet); return { outer, sheet }; });
-          strip.replaceChildren(...slots.map(slot => slot.outer)); for (const geometry of pages) placeholder(geometry.page);
+          strip.replaceChildren(...slots.map(slot => slot.outer)); paintInkContext(); for (const geometry of pages) placeholder(geometry.page);
           layoutWidth = Math.max(1, fitWidth() * zoom); metrics = pageMetrics(pages, layoutWidth);
           for (const metric of metrics) { const slot = slots[metric.page - 1]; slot.outer.style.width = `${layoutWidth}px`; slot.outer.style.height = `${metric.height}px`; slot.sheet.style.height = `${metric.height - CAPTION}px`; }
           active = Math.max(1, Math.min(pages.length, Math.trunc(Number(page)) || 1)); announce(false); return true;
@@ -712,7 +731,7 @@
     root.addEventListener('scroll', scroll, { passive: true }); root.addEventListener('pointerup', pointerUp); root.addEventListener('keyup', captureSelection); root.addEventListener('click', click); setTool('select');
     document.addEventListener('selectionchange', selectionChanged);
     function dispose() { clear(); disposed = true; ink.clear(); queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('pointerdown', pointerDown); root.removeEventListener('pointermove', pointerMove); root.removeEventListener('pointercancel', pointerCancel); root.removeEventListener('lostpointercapture', pointerCancel); root.removeEventListener('pointerleave', pointerLeave); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); document.removeEventListener('selectionchange', selectionChanged); }
-    return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkEnabled, isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
+    return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
   window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, nearestTextPosition });
 })();

@@ -64,6 +64,48 @@ test('restored ink validates every persisted field and cannot overwrite live dra
     const fresh = createInkBuffer(); assert.throws(() => fresh.restore({ ...value, ...patch }), /不完整或超出/); assert.equal(fresh.snapshot(), null);
   }
 });
+test('linked ink binds completed strokes to one parent and refuses other pages without losing them', () => {
+  const buffer = createInkBuffer(), origin = { paperId: 'paper-a', page: 2 }, context = { ...origin, parentId: 'highlight-a' }, style = { width: 2, color: '#336699' };
+  assert.equal(buffer.getContext(), null);
+  buffer.setContext(context); context.parentId = 'mutated';
+  const copy = buffer.getContext(); copy.page = 9;
+  assert.deepEqual(plain(buffer.getContext()), { ...origin, parentId: 'highlight-a' });
+  assert.throws(() => buffer.start({ ...origin, page: 1 }, [1, 2], style), /第 2 页/);
+  assert.throws(() => buffer.start({ ...origin, paperId: 'paper-b' }, [1, 2], style), /返回该文献/);
+  assert.equal(buffer.snapshot(), null);
+  buffer.start(origin, [10, 20], style); assert.equal(buffer.snapshot(), null); buffer.append([30, 40]); buffer.end();
+  const saved = plain(buffer.snapshot()); assert.equal(saved.parentId, 'highlight-a');
+  for (const next of [null, { ...origin, parentId: 'highlight-b' }, { ...origin, page: 1, parentId: 'highlight-a' }, { ...origin, paperId: 'paper-b', parentId: 'highlight-a' }]) {
+    assert.throws(() => buffer.setContext(next), /先保存或取消/); assert.deepEqual(plain(buffer.snapshot()), saved);
+  }
+  buffer.setContext({ ...origin, parentId: 'highlight-a' });
+  buffer.start(origin, [50, 60], style); buffer.end(true); assert.deepEqual(plain(buffer.snapshot()), saved);
+  buffer.undo(); assert.equal(buffer.snapshot(), null); assert.equal(buffer.getContext().parentId, 'highlight-a');
+  buffer.setContext(null); assert.equal(buffer.getContext(), null);
+});
+test('choosing a parent cannot relabel a free ink draft or its in-progress stroke', () => {
+  const buffer = createInkBuffer(), origin = { paperId: 'paper-a', page: 1 }, style = { width: 2, color: '#336699' };
+  buffer.start(origin, [1, 2], style);
+  assert.throws(() => buffer.setContext({ ...origin, parentId: 'highlight-a' }), /先保存或取消/);
+  assert.equal(buffer.isDrawing(), true); assert.equal(buffer.getContext(), null);
+  buffer.end(); const free = plain(buffer.snapshot()); assert.equal(Object.hasOwn(free, 'parentId'), false);
+  assert.throws(() => buffer.setContext({ ...origin, parentId: 'highlight-a' }), /先保存或取消/);
+  assert.deepEqual(plain(buffer.snapshot()), free);
+  buffer.clear(free.revision); buffer.setContext({ ...origin, parentId: 'highlight-a' });
+  buffer.start(origin, [3, 4], style); buffer.end(); const linked = buffer.snapshot();
+  buffer.clear(linked.revision); assert.equal(buffer.getContext().parentId, 'highlight-a', 'Save/clear permits continued writing on the same parent until explicitly leaving');
+});
+test('linked draft restoration retains its parent context and rejects malformed identities atomically', () => {
+  const value = { paperId: 'paper-a', page: 2, parentId: 'highlight-a', width: 2, color: '#336699', revision: 4, paths: [[[10, 20], [30, 40]]] }, buffer = createInkBuffer();
+  buffer.restore(value); assert.deepEqual(plain(buffer.snapshot()), value);
+  assert.deepEqual(plain(buffer.getContext()), { paperId: value.paperId, page: value.page, parentId: value.parentId });
+  for (const parentId of ['', null, 123, 'a\u0000b', 'a'.repeat(257)]) {
+    const fresh = createInkBuffer(); assert.throws(() => fresh.restore({ ...value, parentId }), /不完整或超出/); assert.equal(fresh.getContext(), null); assert.equal(fresh.snapshot(), null);
+  }
+  for (const patch of [{ parentId: '' }, { paperId: '' }, { page: 0 }, { page: 2001 }, { page: 1.5 }]) assert.throws(() => buffer.setContext({ ...value, ...patch }), /有效的 PDF 批注/);
+  assert.equal(buffer.getContext().parentId, value.parentId);
+  buffer.clear(); buffer.restore({ ...value, parentId: undefined }); assert.equal(buffer.getContext(), null, 'Legacy unlinked drafts remain free ink');
+});
 function scheduler({ delayedInstall = false } = {}) {
   const requests = [], installed = new Map(), decoded = [], errors = [], evicted = [];
   let inFlight = 0, peakInFlight = 0, peakResident = 0;

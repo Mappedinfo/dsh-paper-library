@@ -19,6 +19,40 @@ function pageNumber(value) {
   return value
 }
 
+function linkedParent(value) {
+  if (typeof value !== 'string' || !value.trim() || value.length > 160 || /[\x00-\x1f\x7f]/.test(value)) throw new Error('关联手写的批注身份无效')
+  return value
+}
+
+function linkedHandwriting(value, paperId) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.paperId !== 'string' || !value.paperId.trim() || value.paperId !== paperId) throw new Error('关联手写的文献身份无效')
+  if (!['select', 'highlight', 'underline', 'strikeout', 'note'].includes(value.previousTool)) throw new Error('关联手写的原阅读工具无效')
+  return { paperId: value.paperId, page: pageNumber(value.page), parentId: linkedParent(value.parentId), previousTool: value.previousTool }
+}
+
+/** Preserve the source vectors and idempotent save identity across iframe
+ * replacement. Preview images and arbitrary persistence fields are excluded. */
+function inkDraftRecord(value, paperId) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.annotation_id !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.annotation_id) || typeof value.attempted !== 'boolean' || !Number.isFinite(value.updatedAt) || value.updatedAt <= 0) throw new Error('手写草稿的保存身份或修改状态无效')
+  const draft = value.draft
+  if (!draft || typeof draft !== 'object' || Array.isArray(draft) || typeof draft.paperId !== 'string' || !draft.paperId.trim() || draft.paperId !== paperId) throw new Error('手写草稿的文献身份无效')
+  if (!Number.isFinite(draft.width) || draft.width < .5 || draft.width > 8 || typeof draft.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(draft.color) || !Number.isSafeInteger(draft.revision) || draft.revision < 1 || !Array.isArray(draft.paths) || !draft.paths.length || draft.paths.length > 64) throw new Error('手写草稿的笔宽、颜色、版本或笔画数量无效')
+  let count = 0
+  const paths = draft.paths.map(path => {
+    if (!Array.isArray(path) || path.length < 2 || (count += path.length) > 4096) throw new Error('手写草稿笔画无效或超过 4096 点')
+    return path.map(point => {
+      if (!Array.isArray(point) || point.length !== 2 || !point.every(coordinate => Number.isFinite(coordinate) && coordinate >= 0 && coordinate <= 20000)) throw new Error('手写草稿坐标无效或超出范围')
+      return [...point]
+    })
+  })
+  const clean = { paperId: draft.paperId, page: pageNumber(draft.page), paths, width: draft.width, color: draft.color, revision: draft.revision }
+  if (draft.parentId !== undefined) clean.parentId = linkedParent(draft.parentId)
+  // Match restoreInkDraft's individual draft ceiling as well as the complete
+  // reader snapshot budget; accepting an unrestorable handoff would lose ink.
+  if (new TextEncoder().encode(JSON.stringify(clean)).length > 128 * 1024) throw new Error('手写草稿超过 128 KiB，无法恢复')
+  return { draft: clean, annotation_id: value.annotation_id, attempted: value.attempted, updatedAt: value.updatedAt }
+}
+
 /** Only the original bounded vector draft crosses iframe lifetimes. Never
  * retain the recognition PNG, PDF raster, or arbitrary host-state fields. */
 function handwritingDraft(value, paperId) {
@@ -147,6 +181,9 @@ export function readerSnapshot(value) {
     }
   }
   if (value.handwritingDraft != null) snapshot.handwritingDraft = handwritingDraft(value.handwritingDraft, snapshot.paperId)
+  if (value.linkedHandwriting != null) snapshot.linkedHandwriting = linkedHandwriting(value.linkedHandwriting, snapshot.paperId)
+  if (value.inkDraftRecord != null) snapshot.inkDraftRecord = inkDraftRecord(value.inkDraftRecord, snapshot.paperId)
+  if (snapshot.linkedHandwriting && snapshot.inkDraftRecord && (snapshot.linkedHandwriting.parentId !== snapshot.inkDraftRecord.draft.parentId || snapshot.linkedHandwriting.page !== snapshot.inkDraftRecord.draft.page)) throw new Error('手写草稿与关联批注不一致，请先保留当前草稿')
   if (new TextEncoder().encode(JSON.stringify(snapshot)).length > SNAPSHOT_LIMIT) throw new Error('阅读草稿超过 256 KiB，无法暂存')
   return snapshot
 }

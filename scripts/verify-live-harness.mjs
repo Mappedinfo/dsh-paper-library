@@ -78,7 +78,7 @@ let pencilAssetsAvailable = false
 let handwritingNotesAvailable = false
 if (flags.get('--require-handwriting') === 'true') {
   assert.equal(status.result.handwriting_recognition, true, 'Host lacks the handwriting recognition route')
-  for (const file of ['index.html','app.js','handwriting-note.js','handwriting-note.css','annotation-threads.js','pdf-reader.js','pdf-reader.css']) {
+  for (const file of ['index.html','app.js','handwriting-note.js','handwriting-note.css','linked-handwriting.js','reading-shell.js','reading-shell.css','annotation-threads.js','pdf-reader.js','pdf-reader.css']) {
     const asset = await fetch(`${address.origin}/api/paper-library/${file}`, {headers, signal: AbortSignal.timeout(10000)})
     assert.equal(asset.status, 200, `Missing handwriting note asset: ${file}`)
     assert.equal(await asset.text(), await readFile(new URL(`../web/${file}`, import.meta.url), 'utf8'), `Installed handwriting note asset differs from source: ${file}`)
