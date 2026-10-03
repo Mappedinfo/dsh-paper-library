@@ -1,0 +1,39 @@
+{
+  "verified_at": "2026-10-03T13:33:31.539Z",
+  "complete": true,
+  "scope": "Synthetic standalone UI in real Chromium: trusted CDP pen and touch, real mouse input, explicit multi-stroke drafts, native PDF Ink persistence, original preservation, retry, zoom, rotation, fresh catalog recovery and existing tools.",
+  "limitations": [
+    "No physical Apple Pencil, iPad, Sidecar or Safari session was exercised.",
+    "Pointer cancellation uses a synthetic DOM event; other tested input events are trusted Chromium input.",
+    "Fixed PDF stroke widths; no pressure-sensitive rendering or hardware palm-rejection claim.",
+    "Reload recovery covers server-acknowledged completed strokes. Unsent or in-flight drafts, including payloads above the existing 60,000-byte keepalive threshold, are not guaranteed to survive abrupt iframe destruction."
+  ],
+  "checks": [
+    "trusted-pen-draws-over-text-without-selecting-text-opening-a-note-or-autosaving",
+    "trusted-touch-does-not-add-or-change-ink",
+    "multi-stroke-draft-supports-last-stroke-undo-and-trusted-mouse-fallback",
+    "pointer-cancel-drops-only-the-interrupted-stroke",
+    "explicit-save-writes-one-native-multi-stroke-ink-with-width-colour-and-page-coordinates",
+    "saving-preserves-external-annotations-and-the-imported-original",
+    "discard-removes-only-the-unsaved-draft",
+    "completed-strokes-survive-page-reload-through-host-local-draft-storage",
+    "switching-papers-retains-the-origin-draft-and-return-to-ink-restores-its-overlay",
+    "unconfirmed-save-locks-new-strokes-and-undo-until-idempotent-retry",
+    "failed-save-keeps-the-draft-and-lost-acknowledgement-retry-does-not-duplicate-ink",
+    "attempted-draft-reloads-with-its-retry-identity-and-edit-lock-intact",
+    "saving-while-another-paper-is-active-still-writes-only-to-the-origin-pdf",
+    "zoomed-pen-stroke-saves-in-pdf-coordinates-within-one-point",
+    "rotated-page-ink-round-trips-in-the-displayed-coordinate-system",
+    "exported-pdf-has-standard-ink-objects-and-a-fresh-catalog-recovers-all-paths",
+    "reload-recovers-ink-and-existing-text-selection-and-note-tools-still-work",
+    "no-browser-runtime-errors-model-calls-or-external-requests"
+  ],
+  "errors": [],
+  "externalRequests": 0,
+  "modelRequests": 0,
+  "screenshots": [
+    ".local/pencil-browser-XYpfyk/multi-stroke-draft.png",
+    ".local/pencil-browser-XYpfyk/zoomed-draft.png",
+    ".local/pencil-browser-XYpfyk/reopened-ink-and-existing-tools.png"
+  ]
+}

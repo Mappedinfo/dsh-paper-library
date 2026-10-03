@@ -1,4 +1,8 @@
-# Validation, 2026-09-16
+# Validation, 2026-10-03
+
+Pencil handwriting has [18 passing Chromium checks](validation/pencil-browser.json): trusted pen/touch input and mouse fallback; multistroke undo/cancel; explicit native PDF Ink save; local draft recovery; source-bound saves across paper switches; immutable retries after a lost acknowledgment; zoom, rotation and copied-PDF recovery; existing selection/note tools. [Backend tests](../tests/test_ink_annotations.py) cover all four rotations with and without crop boxes, native `/InkList` and XFDF coordinates, original/external annotation preservation, backup/serialization failure and bounded invalid inputs. [Installed-host verification](validation/pencil-install.json) confirms the authenticated local host serves the exact handwriting assets. These checks read no private paper and make no model call.
+
+Physical Apple Pencil/Sidecar, Safari, pressure, double-tap and hardware palm rejection remain unverified. The implementation uses fixed PDF stroke width and ignores touch as drawing input. Draft reload tests cover host-acknowledged completed strokes; an unfinished stroke or an unacknowledged write cannot be guaranteed after abrupt iframe/browser destruction. The native host handoff does not carry an extra copy of the Ink draft. The updated [automated report](validation/automated.json) records the current suite and build results; earlier milestones below retain their original scope.
 
 论文自动解析与评审技能通过 **513 JavaScript / 222 Python 测试**。内置通用技能 `paper-library-review`（案例拆分八维、归因三态、结构化缺失、联合覆盖反拼接、形容词操作化、逐项状态机）随插件发布；个人阶段/期刊/侧重留在使用方私有仓库，由配置 `reviewProfile` 读取（绝对路径、≤8,000 字符、截断可见），并有测试守卫确保内置技能不含任何个人标识。后台整理在精读笔记之后自动多跑一次受限评审，复用同一份批次投影，产出含 9 个必需小节的 `needs-review` 草稿；缺小节或覆盖层不可用只留作业警告，`review:false` 与偏好 `auto_review` 可关闭。[浏览器回执](validation/paper-analysis-browser.json) 9 项、[原生宿主回执](validation/paper-analysis-harness.json) 10 项（确定性模型夹具、零外部提供商请求）。
 

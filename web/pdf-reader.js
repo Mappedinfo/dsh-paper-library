@@ -1,7 +1,71 @@
 (function () {
   'use strict';
   const MAX_PAGES = 2000, MAX_RESIDENT = 3, GAP = 16, CAPTION = 24, PADDING = 12;
-  const TOOLS = new Set(['select', 'highlight', 'underline', 'strikeout', 'note']);
+  const TOOLS = new Set(['select', 'highlight', 'underline', 'strikeout', 'note', 'ink']);
+  const MAX_INK_PATHS = 64, MAX_INK_POINTS = 4096;
+  /** All annotation geometry uses the displayed (already rotated) PDF page.
+   * Scaling from its live bounds also works after zoom or horizontal scrolling. */
+  function inkPoint(event, box, geometry) {
+    if (!box?.width || !box?.height || !geometry || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return null;
+    return [(event.clientX - box.left) / box.width * geometry.width, (event.clientY - box.top) / box.height * geometry.height].map((value, axis) => Math.max(0, Math.min(axis ? geometry.height : geometry.width, Math.round(value * 1000) / 1000)));
+  }
+  /** A bounded, single-page draft independent of page raster residency. A
+   * cancelled pointer loses only its unfinished stroke; snapshots for saving
+   * never include an in-progress stroke. */
+  function createInkBuffer() {
+    let draft = null, stroke = null, revision = 0, points = 0;
+    const clone = paths => paths.map(path => path.map(point => [...point]));
+    function start(origin, point, style) {
+      if (stroke) return false;
+      if (draft && (draft.paperId !== origin.paperId || draft.page !== origin.page)) throw new Error('请先保存或取消原页面上的手写，再在其他页面书写。');
+      if (draft && (draft.paths.length >= MAX_INK_PATHS || points + 2 > MAX_INK_POINTS)) throw new Error('本次手写已达上限，请保存后继续。');
+      if (!draft) draft = { paperId: origin.paperId, page: origin.page, paths: [], width: style.width, color: style.color, revision };
+      stroke = [[...point]]; return true;
+    }
+    function append(point, endpoint = false) {
+      if (!stroke || !point) return false;
+      const previous = stroke.at(-1), distance = Math.hypot(point[0] - previous[0], point[1] - previous[1]);
+      if (distance === 0 || (!endpoint && distance < .25)) return false;
+      if (points + stroke.length >= MAX_INK_POINTS) throw new Error('本次手写已达点数上限，已保留画出的部分；请保存后继续。');
+      stroke.push([...point]); return true;
+    }
+    function end(cancelled = false) {
+      if (!stroke) return false;
+      if (!cancelled) {
+        if (stroke.length === 1) stroke.push([...stroke[0]]);
+        draft.paths.push(stroke); points += stroke.length; draft.revision = ++revision;
+      }
+      stroke = null; if (!draft.paths.length) draft = null; return !cancelled;
+    }
+    function snapshot() { return draft?.paths.length ? { ...draft, paths: clone(draft.paths) } : null; }
+    function preview() { return draft ? { ...draft, paths: [...draft.paths, ...(stroke ? [stroke] : [])] } : null; }
+    function undo() {
+      end(true); if (!draft) return false;
+      points -= draft.paths.pop().length; draft.revision = ++revision;
+      if (!draft.paths.length) draft = null; return true;
+    }
+    function clear(expectedRevision) {
+      if (expectedRevision !== undefined && expectedRevision !== draft?.revision) return false;
+      draft = null; stroke = null; points = 0; ++revision; return true;
+    }
+    function restore(value) {
+      if (draft || stroke) throw new Error('已有手写草稿，不能用另一份草稿覆盖。');
+      if (value === null || value === undefined) return false;
+      const invalid = () => { throw new Error('保存的手写草稿不完整或超出上限，请保留草稿并重试。'); };
+      if (!value || typeof value !== 'object' || typeof value.paperId !== 'string' || !value.paperId.trim() || value.paperId.length > 256 || /[\u0000-\u001f]/.test(value.paperId)
+        || !Number.isInteger(value.page) || value.page < 1 || value.page > MAX_PAGES || !Number.isFinite(value.width) || value.width < .5 || value.width > 8 || !/^#[0-9a-f]{6}$/i.test(value.color)
+        || !Number.isSafeInteger(value.revision) || value.revision < 0 || !Array.isArray(value.paths) || !value.paths.length || value.paths.length > MAX_INK_PATHS) invalid();
+      let count = 0;
+      for (const path of value.paths) {
+        if (!Array.isArray(path) || path.length < 2 || (count += path.length) > MAX_INK_POINTS) invalid();
+        for (const point of path) if (!Array.isArray(point) || point.length !== 2 || !point.every(coordinate => Number.isFinite(coordinate) && coordinate >= 0 && coordinate <= 100000)) invalid();
+      }
+      const restored = { paperId: value.paperId, page: value.page, paths: clone(value.paths), width: value.width, color: value.color, revision: Math.max(revision + 1, value.revision) };
+      if (encodeURIComponent(JSON.stringify(restored)).replace(/%[0-9a-f]{2}/gi, 'x').length > 128 * 1024) invalid();
+      draft = restored; revision = restored.revision; points = count; return true;
+    }
+    return { start, append, end, snapshot, preview, undo, clear, restore, isDrawing: () => !!stroke };
+  }
   function validateLayout(value) {
     if (!value || !Number.isInteger(value.page_count) || value.page_count < 1 || value.page_count > MAX_PAGES || !Array.isArray(value.pages) || value.pages.length !== value.page_count) throw new Error('PDF 页面尺寸列表不完整或超过 2,000 页。');
     return value.pages.map((page, index) => {
@@ -144,13 +208,82 @@
     function dispose() { reset(null); disposed = true; }
     return { reset, want, ready, invalidate, dispose, idle: () => running || Promise.resolve(), snapshot: () => ({ id, residents: [...residents], wanted: [...wanted], inFlight: inFlight ? { id: inFlight.id, page: inFlight.page } : null }) };
   }
-  function create({ root, api, getPaper, onActivePage = () => {}, onSelection = () => {}, onStatus = () => {}, onPageNote = () => {}, onAnnotationActivate = () => {} }) {
+  function create({ root, api, getPaper, onActivePage = () => {}, onSelection = () => {}, onStatus = () => {}, onPageNote = () => {}, onAnnotationActivate = () => {}, onInkChange = () => {} }) {
     if (!root) throw new Error('PDF reader requires a scroll viewport');
     let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, flashTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', pendingRange = null, transport = Promise.resolve(), zoom = 1;
     const renderedScales = new Map(), pageAnnotations = new Map();
+    const ink = createInkBuffer();
+    let inkWidth = 2, inkGesture = null, inkFrame = null, inkEnabled = true;
     const dom = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     root.classList.add('paper-pdf-reader'); root.tabIndex = 0; root.setAttribute('aria-label', 'PDF 连续阅读区域');
     const strip = dom('div', 'pdr-pages'); root.replaceChildren(strip);
+    function paintInk() {
+      const draft = ink.preview();
+      for (const layer of root.querySelectorAll('.pdr-ink-draft')) if (!draft || draft.paperId !== paperId || Number(layer.dataset.pdfPage) !== draft.page) layer.remove();
+      if (!draft || draft.paperId !== paperId) return;
+      const sheet = slots[draft.page - 1]?.sheet, geometry = pages[draft.page - 1];
+      if (!sheet || !geometry) return;
+      let layer = sheet.querySelector('.pdr-ink-draft');
+      if (!layer) {
+        layer = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); layer.classList.add('pdr-ink-draft'); layer.dataset.pdfPage = String(draft.page);
+        layer.setAttribute('viewBox', `0 0 ${geometry.width} ${geometry.height}`); layer.setAttribute('preserveAspectRatio', 'none'); layer.setAttribute('aria-hidden', 'true'); sheet.append(layer);
+      }
+      layer.setAttribute('stroke', draft.color); layer.setAttribute('stroke-width', String(draft.width));
+      while (layer.children.length > draft.paths.length) layer.lastElementChild.remove();
+      draft.paths.forEach((path, index) => {
+        let line = layer.children[index];
+        if (!line) { line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline'); layer.append(line); }
+        const points = (path.length === 1 ? [path[0], path[0]] : path).map(point => point.join(',')).join(' ');
+        if (line.getAttribute('points') !== points) line.setAttribute('points', points);
+      });
+    }
+    function scheduleInk() {
+      if (inkFrame !== null) return;
+      inkFrame = window.requestAnimationFrame(() => { inkFrame = null; paintInk(); });
+    }
+    function inkChanged() { paintInk(); onInkChange(ink.snapshot()); }
+    function endInk(cancelled = false) {
+      if (!inkGesture) return false;
+      const pointerId = inkGesture.pointerId; inkGesture = null;
+      const changed = ink.end(cancelled);
+      try { if (root.hasPointerCapture?.(pointerId)) root.releasePointerCapture(pointerId); } catch { /* The platform may have released capture already. */ }
+      if (inkFrame !== null) { window.cancelAnimationFrame(inkFrame); inkFrame = null; }
+      if (changed) inkChanged(); else paintInk();
+      return changed;
+    }
+    function appendInk(event) {
+      const gesture = inkGesture;
+      if (!gesture || gesture.pointerId !== event.pointerId || gesture.limited) return;
+      const box = gesture.sheet.getBoundingClientRect();
+      let samples = [];
+      try { samples = event.getCoalescedEvents?.() || []; } catch { /* Mouse fallback has no coalesced events. */ }
+      for (const sample of [...samples, event]) {
+        const point = inkPoint(sample, box, gesture.geometry); if (!point) continue;
+        try { ink.append(point, event.type === 'pointerup' && sample === event); }
+        catch (error) { gesture.limited = true; onStatus(error.message, true); break; }
+      }
+      scheduleInk();
+    }
+    function pointerDown(event) {
+      pendingRange = null;
+      if (tool !== 'ink' || !inkEnabled || !paperId || event.pointerType === 'touch' || event.isPrimary === false || event.button !== 0 || inkGesture) return;
+      const sheet = event.target.closest?.('.pdr-sheet'); if (!sheet || !root.contains(sheet) || sheet.dataset.loaded !== 'true') return;
+      const page = Number(sheet.dataset.pdfPage), geometry = pages[page - 1], point = inkPoint(event, sheet.getBoundingClientRect(), geometry); if (!point) return;
+      event.preventDefault(); window.getSelection()?.removeAllRanges(); selection = null; lastSelection = '';
+      try {
+        if (!ink.start({ paperId, page }, point, { color, width: inkWidth })) return;
+        inkGesture = { pointerId: event.pointerId, sheet, geometry, limited: false };
+        try { root.setPointerCapture(event.pointerId); } catch { /* Cancelled on a missed capture rather than leaving a stuck gesture. */ }
+        root.focus({ preventScroll: true }); scheduleInk();
+      } catch (error) { onStatus(error.message, true); }
+    }
+    function pointerMove(event) { if (inkGesture?.pointerId === event.pointerId) { event.preventDefault(); appendInk(event); } }
+    function pointerCancel(event) { if (inkGesture?.pointerId === event.pointerId) endInk(true); }
+    function pointerLeave(event) { if (inkGesture?.pointerId === event.pointerId && !root.hasPointerCapture?.(event.pointerId)) endInk(true); }
+    function undoInk() { endInk(true); if (!inkEnabled) return false; const changed = ink.undo(); if (changed) inkChanged(); return changed; }
+    function clearInk(expectedRevision) { if (expectedRevision !== undefined && expectedRevision !== ink.snapshot()?.revision) return false; endInk(true); const cleared = ink.clear(expectedRevision); if (cleared) inkChanged(); return cleared; }
+    function restoreInkDraft(value) { const restored = ink.restore(value); if (restored) inkChanged(); return restored; }
+    function setInkEnabled(value) { if (!value) endInk(true); inkEnabled = !!value; }
     const current = (id, ticket) => !disposed && id === paperId && id === getPaper()?.id && ticket === generation;
     function request(action, args, valid) { const task = transport.catch(() => {}).then(() => valid() ? api(action, args) : null); transport = task.catch(() => {}); return task; }
     // zoom 1 is fit-width; wider layouts scroll horizontally. Raster density may
@@ -165,6 +298,7 @@
       const note = dom('div', `pdr-placeholder${error ? ' pdr-error' : ''}`); note.append(dom('span', '', message));
       if (error) { const retry = dom('button', 'button subtle', '重试此页'); retry.type = 'button'; retry.dataset.retryPage = String(page); note.append(retry); }
       slot.sheet.replaceChildren(note); slot.sheet.dataset.loaded = 'false';
+      if (ink.preview()?.paperId === paperId && ink.preview()?.page === page) paintInk();
     }
     /** One invisible text run per raster word.
      *
@@ -231,7 +365,7 @@
         const ticket = generation, id = paperId;
         const geometry = pages[page - 1];
         if (!result || result.page !== page || result.page_count !== pages.length || Math.abs(result.width - geometry.width) > .1 || Math.abs(result.height - geometry.height) > .1 || typeof result.image !== 'string' || result.image.length > 24 * 1024 * 1024 || !Array.isArray(result.words) || result.words.length > 20000 || (result.annotations !== undefined && (!Array.isArray(result.annotations) || result.annotations.length > 1000))) throw new Error('页面内容或尺寸已改变，请重新打开 PDF 后重试。');
-        const sheet = slots[page - 1].sheet, image = dom('img', 'pdr-page-image'); image.alt = `PDF 第 ${page} 页`; image.draggable = false; image.decoding = 'async'; image.dataset.pdfPage = String(page); image.src = `data:image/png;base64,${result.image}`; sheet.replaceChildren(image); renderWords(sheet, result.words, geometry); sheet.dataset.loaded = 'true';
+        const sheet = slots[page - 1].sheet, image = dom('img', 'pdr-page-image'); image.alt = `PDF 第 ${page} 页`; image.draggable = false; image.decoding = 'async'; image.dataset.pdfPage = String(page); image.src = `data:image/png;base64,${result.image}`; sheet.replaceChildren(image); renderWords(sheet, result.words, geometry); sheet.dataset.loaded = 'true'; paintInk();
         // Saved annotations travel with the page payload so clicks can link the
         // raster markup to its rail entry without a second catalogue read.
         pageAnnotations.set(page, (result.annotations || []).filter(annotation => annotation && typeof annotation.id === 'string' && Array.isArray(annotation.rects) && annotation.rects.some(rect => Array.isArray(rect) && rect.length >= 4)));
@@ -276,6 +410,9 @@
       }, 120);
     }
     function clear() {
+      // The draft belongs to its original paper/page, not to the disposable
+      // raster window. The caller offers save/discard before leaving the page.
+      endInk(true);
       ++generation; paperId = null; jumpTarget = null; selection = null; lastSelection = ''; queue.reset(null); renderedScales.clear(); pageAnnotations.clear(); pages = []; metrics = []; slots = []; active = 1; layoutWidth = 0; layoutPromise = null; strip.replaceChildren(); root.scrollTop = 0;
       if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; } if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
       if (resizeTimer !== null) { window.clearTimeout(resizeTimer); resizeTimer = null; }
@@ -328,7 +465,7 @@
       } catch { return null; }
     }
     function captureSelection() {
-      if (tool === 'note' || !paperId) return;
+      if (tool === 'note' || tool === 'ink' || !paperId) return;
       const live = window.getSelection();
       // A drag can end over a non-text area (past the last word of a line, a
       // caption, the page margin): Chrome then resolves the caret to the layer
@@ -421,6 +558,8 @@
       return true;
     }
     function pointerUp(event) {
+      if (inkGesture?.pointerId === event.pointerId) { event.preventDefault(); appendInk(event); endInk(); return; }
+      if (tool === 'ink') return;
       if (tool === 'note') {
         const sheet = event.target.closest?.('.pdr-sheet'); if (!sheet || !root.contains(sheet) || sheet.dataset.loaded !== 'true') return;
         const page = Number(sheet.dataset.pdfPage), geometry = pages[page - 1], box = sheet.getBoundingClientRect();
@@ -446,10 +585,16 @@
     function click(event) { const retry = event.target.closest?.('[data-retry-page]'); if (retry && root.contains(retry)) void refresh(Number(retry.dataset.retryPage)).catch(() => {}); }
     function setTool(value, nextColor) {
       if (!TOOLS.has(value)) throw new Error('Unsupported PDF annotation tool');
+      const options = typeof nextColor === 'object' && nextColor !== null ? nextColor : { color: nextColor };
+      if (options.color !== undefined && !/^#[0-9a-f]{6}$/i.test(options.color)) throw new Error('Annotation color must be #RRGGBB');
+      if (options.width !== undefined && (!Number.isFinite(options.width) || options.width < .5 || options.width > 8)) throw new Error('手写笔宽必须在 0.5–8 之间');
+      if (value !== tool) endInk(true);
       tool = value;
-      if (nextColor !== undefined) {
-        if (!/^#[0-9a-f]{6}$/i.test(nextColor)) throw new Error('Annotation color must be #RRGGBB');
-        color = nextColor;
+      if (options.color !== undefined) color = options.color;
+      if (options.width !== undefined) inkWidth = options.width;
+      if (tool === 'ink') {
+        window.getSelection()?.removeAllRanges(); selection = null; pendingRange = null;
+        if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
       }
       root.dataset.tool = tool;
       // The selection must preview the colour that will be written to the PDF.
@@ -467,6 +612,7 @@
     // Clearing a browser selection must permit choosing the same passage again.
     // Keep the frozen source available while toolbar/dialog focus collapses it.
     function selectionChanged() {
+      if (tool === 'ink') return;
       const value = window.getSelection();
       if (!value?.rangeCount || value.isCollapsed) { lastSelection = ''; return; }
       const anchor = layerOf(value.anchorNode), focus = layerOf(value.focusNode);
@@ -475,11 +621,11 @@
       try { pendingRange = value.getRangeAt(0).cloneRange(); } catch { pendingRange = null; }
     }
     const resizeObserver = new ResizeObserver(() => { try { resize(); } catch (error) { onStatus(error.message, true); } }); resizeObserver.observe(root);
-    root.addEventListener('pointerdown', () => { pendingRange = null; }, { passive: true });
+    root.addEventListener('pointerdown', pointerDown); root.addEventListener('pointermove', pointerMove); root.addEventListener('pointercancel', pointerCancel); root.addEventListener('lostpointercapture', pointerCancel); root.addEventListener('pointerleave', pointerLeave);
     root.addEventListener('scroll', scroll, { passive: true }); root.addEventListener('pointerup', pointerUp); root.addEventListener('keyup', captureSelection); root.addEventListener('click', click); setTool('select');
     document.addEventListener('selectionchange', selectionChanged);
-    function dispose() { clear(); disposed = true; queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); document.removeEventListener('selectionchange', selectionChanged); }
-    return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
+    function dispose() { clear(); disposed = true; ink.clear(); queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('pointerdown', pointerDown); root.removeEventListener('pointermove', pointerMove); root.removeEventListener('pointercancel', pointerCancel); root.removeEventListener('lostpointercapture', pointerCancel); root.removeEventListener('pointerleave', pointerLeave); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); document.removeEventListener('selectionchange', selectionChanged); }
+    return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkEnabled, isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
-  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint });
+  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer });
 })();

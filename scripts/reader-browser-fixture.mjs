@@ -28,6 +28,8 @@ await core({ action: 'import', items: Array.from({ length: 44 }, (_, index) => (
 })) }, { library, python });
 const record = value => { checks.push(value); console.log(`PASS ${value}`); };
 const errors = [], apiCalls = [], pageRequests = new Set(), unexpectedRemote = [];
+const pageRequestEvents = [], pageRequestOverlaps = [], pageRequestIds = new WeakMap();
+let documentEpoch = 0, requestSequence = 0;
 let server, browser, page, startTimer, maxInFlightPages = 0, injectPageFailure = null, injectedFailures = 0, serverLog = '';
 let finalReport;
 
@@ -55,14 +57,27 @@ try {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
   page = await context.newPage(); page.setDefaultTimeout(15000);
   page.on('pageerror', error => errors.push(error.message));
+  page.on('framenavigated', frame => { if (frame === page.mainFrame()) { documentEpoch++; pageRequestEvents.push({ event: 'document', documentEpoch, at: Date.now() }); } });
+  const requestState = request => ({ ...pageRequestIds.get(request), timing: { ...request.timing() } });
   page.on('request', request => {
     if (/^https?:/.test(request.url()) && new URL(request.url()).origin !== origin) unexpectedRemote.push(request.url());
     if (request.url().endsWith('/api')) {
-      try { const body = request.postDataJSON(); apiCalls.push(body); if (body.action === 'page') { pageRequests.add(request); maxInFlightPages = Math.max(maxInFlightPages, pageRequests.size); } } catch {}
+      try {
+        const body = request.postDataJSON(); apiCalls.push(body);
+        if (body.action === 'page') {
+          pageRequestIds.set(request, { request: ++requestSequence, documentEpoch, paperId: body.id, page: body.page, scale: body.scale });
+          pageRequests.add(request); maxInFlightPages = Math.max(maxInFlightPages, pageRequests.size);
+          pageRequestEvents.push({ event: 'request', at: Date.now(), ...requestState(request), inFlight: pageRequests.size });
+          // Keep the original strict bound. The lifecycle/timing evidence can
+          // distinguish a real overlap from events delivered late after reload.
+          if (pageRequests.size > 1) pageRequestOverlaps.push({ at: Date.now(), documentEpoch, requests: [...pageRequests].map(requestState) });
+        }
+      } catch {}
     }
   });
-  const finished = request => pageRequests.delete(request);
-  page.on('requestfinished', finished); page.on('requestfailed', finished);
+  page.on('response', response => { const request = response.request(); if (pageRequestIds.has(request)) pageRequestEvents.push({ event: 'response', at: Date.now(), status: response.status(), ...requestState(request) }); });
+  const finished = (request, event) => { if (pageRequestIds.has(request)) pageRequestEvents.push({ event, at: Date.now(), ...requestState(request) }); pageRequests.delete(request); };
+  page.on('requestfinished', request => finished(request, 'finished')); page.on('requestfailed', request => finished(request, 'failed'));
   await page.route('**/api', async route => {
     const body = route.request().postDataJSON();
     if (body.action === 'page' && body.page === injectPageFailure) {
@@ -83,13 +98,41 @@ try {
   const reader = page.locator('#continuous-reader');
   const sheet = number => page.locator(`#continuous-reader .pdr-sheet[data-pdf-page="${number}"]`);
   const ready = number => sheet(number).locator('img.pdr-page-image').waitFor();
+  const annotationSaved = async number => {
+    await page.locator('#annotation-dialog').waitFor({ state: 'hidden' });
+    // The dialog closes as soon as the PDF write succeeds. The form remains
+    // busy until annotations and the raster finish refreshing; an old image
+    // can still be present before that refresh removes its text layer.
+    await page.waitForFunction(() => {
+      const form = document.getElementById('annotation-form');
+      return form && !form.classList.contains('busy') && [...form.querySelectorAll('button[type="submit"]')].every(button => !button.disabled);
+    });
+    await page.waitForFunction(number => {
+      const sheet = document.querySelector(`#continuous-reader .pdr-sheet[data-pdf-page="${number}"]`), image = sheet?.querySelector('img.pdr-page-image');
+      return sheet?.dataset.loaded === 'true' && image?.complete && image.naturalWidth > 0;
+    }, number);
+  };
+  const settlePageRequests = async () => {
+    const deadline = Date.now() + 15000; let quietSince = null;
+    while (Date.now() < deadline) {
+      const readerIdle = await page.evaluate(() => pdfReader?.getSnapshot().inFlightPage === null);
+      if (readerIdle && pageRequests.size === 0) {
+        quietSince ??= Date.now();
+        if (Date.now() - quietSince >= 400) return;
+      } else quietSince = null;
+      await new Promise(resolve => setTimeout(resolve, 40));
+    }
+    assert.fail('The renderer and page transport did not settle before the preference reload');
+  };
   const waitPage = number => page.waitForFunction(value => document.getElementById('page-number').value === String(value), number);
   const overflow = () => page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
   const screenshot = async name => { const path = join(run, `${name}.png`); await page.screenshot({ path }); screenshots.push(relative(project, path)); };
   const visiblePDF = async () => {
     assert.equal(await reader.isVisible(), true);
     const box = await reader.boundingBox(); assert.ok(box && box.width > 50 && box.height > 100);
-    assert.ok(await reader.locator('.pdr-page-image[src]').count() > 0);
+    // Returning from the table can trigger the reader's existing async raster
+    // refresh. Assert the resulting PDF rather than its interim placeholder.
+    await page.waitForFunction(() => [...document.querySelectorAll('#continuous-reader .pdr-page-image[src]')].some(image => image.complete && image.naturalWidth > 0));
   };
   const jump = async number => {
     await page.locator('#page-number').fill(String(number)); await page.locator('#page-number').press('Enter');
@@ -141,7 +184,7 @@ try {
       await page.locator('#annotation-dialog').waitFor();
       await page.locator('#annotation-comment').fill(`Synthetic UI ${type} comment`);
       await page.locator('#annotation-form button[type="submit"]').first().click();
-      await page.locator('#annotation-dialog').waitFor({ state: 'hidden' }); await ready(1);
+      await annotationSaved(1);
       const saved = (await core({ action: 'annotations', id: paper.id }, { library, python })).annotations.find(note => note.comment === `Synthetic UI ${type} comment`);
       assert.ok(saved, `Missing saved UI ${type}`); assert.equal(saved.type, type);
       const rgb = colors[type].slice(1).match(/../g).map(value => Number.parseInt(value, 16) / 255);
@@ -174,7 +217,7 @@ try {
     await page.locator('#annotate-selection').click();
     await page.locator('#annotation-comment').fill('Synthetic partial selection comment');
     await page.locator('#annotation-form button[type="submit"]').first().click();
-    await page.locator('#annotation-dialog').waitFor({ state: 'hidden' }); await ready(1);
+    await annotationSaved(1);
     const partial = (await core({ action: 'annotations', id: paper.id }, { library, python })).annotations.find(note => note.comment === 'Synthetic partial selection comment');
     assert.ok(partial, 'The partial selection saved an annotation');
     assert.equal(partial.text, preview, 'The annotation stores the exact selected slice');
@@ -193,7 +236,7 @@ try {
     assert.ok(!quoted.startsWith('Evidence') && quoted.endsWith('stan'), `Markup drag quote must stay partial: ${quoted}`);
     await page.locator('#annotation-comment').fill('Synthetic markup partial drag comment');
     await page.locator('#annotation-form button[type="submit"]').first().click();
-    await page.locator('#annotation-dialog').waitFor({ state: 'hidden' }); await ready(1);
+    await annotationSaved(1);
     const markupDrag = (await core({ action: 'annotations', id: paper.id }, { library, python })).annotations.find(note => note.comment === 'Synthetic markup partial drag comment');
     assert.ok(markupDrag, 'The markup-tool drag stored an annotation');
     assert.equal(markupDrag.text, quoted, 'The stored quote is the dragged slice');
@@ -244,6 +287,11 @@ try {
     assert.equal(await reader.evaluate(node => node.scrollWidth - node.clientWidth), 0, '全宽 removes the horizontal overflow');
     await page.evaluate(() => persistence.flush());
     record('fit-width-default-arbitrary-percentage-zoom-and-reset');
+    // This checks saved preferences after a fresh load. Drain the current
+    // renderer first: reloading a route-intercepted request before it reaches
+    // the network can omit both finished/failed events and poison the counter.
+    await settlePageRequests();
+    assert.equal(pageRequests.size, 0, 'The previous document finishes page requests before the preference reload');
     await page.reload(); await page.waitForLoadState('domcontentloaded');
     await page.locator('#continuous-reader .pdr-page-image[src]').first().waitFor({timeout:30000});
     await visiblePDF();
@@ -424,9 +472,10 @@ try {
 } catch (error) {
   console.error(error); process.exitCode = 1;
   if (page) { await page.screenshot({ path: join(run, 'failure.png') }).catch(() => {}); await writeFile(join(run, 'failure-dom.txt'), await page.locator('body').innerText().catch(() => 'Unavailable')); }
-  await writeFile(join(run, 'failure.json'), JSON.stringify({ error: error.stack, checks, errors, maxInFlightPages, apiCalls, unexpectedRemote }, null, 2));
+  await writeFile(join(run, 'failure.json'), JSON.stringify({ error: error.stack, checks, errors, maxInFlightPages, pageRequestOverlaps, apiCalls, unexpectedRemote }, null, 2));
 } finally {
   clearTimeout(startTimer); await browser?.close(); await stopServer(); await writeFile(join(run, 'server.log'), serverLog);
+  await writeFile(join(run, 'page-request-events.json'), JSON.stringify({ maxInFlightPages, overlaps: pageRequestOverlaps, events: pageRequestEvents }, null, 2) + '\n');
 }
 if (finalReport && !process.exitCode) {
   if (!finalReport.recon) await writeFile(join(project, 'docs/validation/reader-browser.json'), JSON.stringify({ ...finalReport, isolated_server_stopped: true }, null, 2) + '\n');

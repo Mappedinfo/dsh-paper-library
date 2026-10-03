@@ -4,9 +4,57 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 const context = vm.createContext({ window: {} });
 vm.runInContext(await readFile(new URL('../web/pdf-reader.js', import.meta.url), 'utf8'), context);
-const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint } = context.window.PaperPDFReader;
+const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer } = context.window.PaperPDFReader;
 const plain = value => JSON.parse(JSON.stringify(value));
 const flush = () => new Promise(resolve => setImmediate(resolve));
+test('ink maps zoomed and rotated display geometry, clamps edges and rejects invalid pointer samples', () => {
+  assert.deepEqual(plain(inkPoint({ clientX: 500, clientY: 450 }, { left: 100, top: 50, width: 1600, height: 1200 }, { width: 800, height: 600 })), [200, 200]);
+  assert.deepEqual(plain(inkPoint({ clientX: -20, clientY: 2000 }, { left: 100, top: 50, width: 800, height: 600 }, { width: 800, height: 600 })), [0, 600]);
+  assert.deepEqual(plain(inkPoint({ clientX: 800, clientY: 600 }, { left: 0, top: 0, width: 800, height: 600 }, { width: 600.1239, height: 400.5678 })), [600.1239, 400.5678], 'Rounding cannot put edge points outside a fractional PDF page');
+  assert.equal(inkPoint({ clientX: NaN, clientY: 1 }, { width: 20, height: 20 }, { width: 10, height: 10 }), null);
+  assert.equal(inkPoint({ clientX: 1, clientY: 1 }, { width: 0, height: 20 }, { width: 10, height: 10 }), null);
+});
+test('ink snapshots include only finished strokes, retain original styling, undo and isolate revisions', () => {
+  const buffer = createInkBuffer(), origin = { paperId: 'paper-a', page: 2 }, style = { width: 2, color: '#336699' };
+  buffer.start(origin, [10, 20], style); assert.equal(buffer.snapshot(), null);
+  buffer.append([30, 40]); buffer.end(); const first = buffer.snapshot();
+  assert.deepEqual(plain(first.paths), [[[10, 20], [30, 40]]]);
+  first.paths[0][0][0] = 999; assert.equal(buffer.snapshot().paths[0][0][0], 10);
+  buffer.start(origin, [50, 60], { width: 4, color: '#abcdef' }); buffer.end();
+  const next = buffer.snapshot(); assert.equal(next.width, 2); assert.equal(next.color, '#336699'); assert.ok(next.revision > first.revision);
+  assert.deepEqual(plain(next.paths[1]), [[50, 60], [50, 60]], 'A dot remains a standard two-point Ink path');
+  assert.equal(buffer.clear(first.revision), false, 'An old save cannot erase newer ink');
+  assert.equal(buffer.undo(), true); assert.equal(buffer.snapshot().paths.length, 1);
+  assert.equal(buffer.clear(buffer.snapshot().revision), true); assert.equal(buffer.snapshot(), null);
+});
+test('ink cancellation retains finished strokes and rejects accidental cross-page or cross-paper mixing', () => {
+  const buffer = createInkBuffer(), origin = { paperId: 'paper-a', page: 1 }, style = { width: 2, color: '#336699' };
+  buffer.start(origin, [1, 2], style); buffer.end(true); assert.equal(buffer.snapshot(), null);
+  buffer.start(origin, [1, 2], style); buffer.append([3, 4]); buffer.end(); const saved = plain(buffer.snapshot());
+  buffer.start(origin, [5, 6], style); buffer.append([7, 8]); buffer.end(true); assert.deepEqual(plain(buffer.snapshot()), saved);
+  assert.throws(() => buffer.start({ ...origin, page: 2 }, [1, 2], style), /原页面/);
+  assert.throws(() => buffer.start({ ...origin, paperId: 'paper-b' }, [1, 2], style), /原页面/);
+  assert.deepEqual(plain(buffer.snapshot()), saved);
+});
+test('ink enforces stroke and point caps while retaining captured strokes for saving', () => {
+  const buffer = createInkBuffer(), origin = { paperId: 'paper-a', page: 1 }, style = { width: 2, color: '#336699' };
+  for (let n = 0; n < 64; n++) { buffer.start(origin, [n, n], style); buffer.end(); }
+  assert.throws(() => buffer.start(origin, [80, 80], style), /上限/); assert.equal(buffer.snapshot().paths.length, 64);
+  buffer.clear(); buffer.start(origin, [0, 0], style);
+  for (let n = 1; n < 4096; n++) buffer.append([n, n]);
+  assert.throws(() => buffer.append([4096, 4096]), /点数上限/); buffer.end();
+  assert.equal(buffer.snapshot().paths[0].length, 4096); assert.deepEqual(plain(buffer.snapshot().paths[0].at(-1)), [4095, 4095]);
+  assert.throws(() => buffer.start(origin, [0, 0], style), /上限/);
+});
+test('restored ink validates every persisted field and cannot overwrite live drafts', () => {
+  const value = { paperId: 'paper-a', page: 1, width: 2, color: '#336699', revision: 4, paths: [[[10, 20], [30, 40]]] }, buffer = createInkBuffer();
+  assert.equal(buffer.restore(value), true); assert.deepEqual(plain(buffer.snapshot()), value);
+  value.paths[0][0][0] = 999; assert.equal(buffer.snapshot().paths[0][0][0], 10);
+  assert.throws(() => buffer.restore(value), /覆盖/);
+  for (const patch of [{ paperId: '' }, { page: 0 }, { width: 9 }, { color: 'red' }, { revision: NaN }, { paths: [] }, { paths: [[[1, 2]]] }, { paths: [[[1, -2], [3, 4]]] }, { paths: [[[1, Infinity], [3, 4]]] }, { paths: Array.from({ length: 65 }, () => [[1, 2], [3, 4]]) }]) {
+    const fresh = createInkBuffer(); assert.throws(() => fresh.restore({ ...value, ...patch }), /不完整或超出/); assert.equal(fresh.snapshot(), null);
+  }
+});
 function scheduler({ delayedInstall = false } = {}) {
   const requests = [], installed = new Map(), decoded = [], errors = [], evicted = [];
   let inFlight = 0, peakInFlight = 0, peakResident = 0;

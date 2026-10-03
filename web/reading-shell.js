@@ -8,18 +8,21 @@ window.PaperReadingShell = (() => {
     underline: '拖选文字，保存为 PDF 下划线批注。',
     strikeout: '拖选文字，保存为 PDF 删除线批注。',
     note: '点击页面中的位置，添加一条便笺。',
+    ink: '用 Pencil 或鼠标直接写画；写完点「保存手写」，可逐笔撤销。',
   };
   const MODES = { auto: '自动着色', ask: '勾选后提问' };
   const MODE_HINTS = {
     auto: { select: '拖选文字即按当前颜色直接着色，之后可在批注栏提问。', highlight: '拖选文字即高亮保存，不再弹出对话框。', underline: '拖选文字即保存下划线，不再弹出对话框。', strikeout: '拖选文字即保存删除线，不再弹出对话框。' },
     ask: { select: '拖选文字，可添加批注或放入论文对话。' },
   };
-  function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence}) {
+  function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence, saveInk, returnToInk}) {
     const $ = id => document.getElementById(id);
     const node = (tag, text, className) => { const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n; };
     const button = (id, text, action) => {const n=node('button',text,'button subtle');n.type='button';n.id=id;n.addEventListener('click',action);return n;};
     const top=document.querySelector('.topbar'), workspace=document.querySelector('.workspace');
-    let context='reader', tool='select', color='#ffdb66', mode='ask', markup='highlight', focused=false, saveLayoutTimer=null;
+    let context='reader', tool='select', color='#ffdb66', inkColor='#2455a4', inkWidth=2, mode='ask', markup='highlight', focused=false, saveLayoutTimer=null;
+    let inkBusy=false, inkError='', inkTitle='';
+    const applyTool=()=>reader()?.setTool(tool,tool==='ink'?{color:inkColor,width:inkWidth}:color);
     const ribbon=node('nav',null,'reader-ribbon');ribbon.setAttribute('aria-label','文献工作区');
     const library=button('workspace-library','库',()=>{leaveFocus();$('catalog-expand').click();});
     library.title='展开或收起文献表格';ribbon.append(library);
@@ -36,18 +39,21 @@ window.PaperReadingShell = (() => {
     top.insertBefore(ribbon,$('paper-tools'));
     const readerTools=$('toolbar-reader'), annotationTools=node('div',null,'annotation-tool-group'), libraryTools=node('div',null,'library-tool-group');
     annotationTools.id='toolbar-annotation';libraryTools.id='toolbar-library';
-    for(const [type,label] of [['select','选择'],['highlight','高亮'],['underline','下划线'],['strikeout','删除线'],['note','便笺']]){
-      const b=button(`reader-tool-${type}`,label,()=>{tool=type;context='annotations';if(['highlight','underline','strikeout'].includes(type)){markup=type;saveLayoutLater();}reader()?.setTool(tool,color);sync();status(hintFor());});b.dataset.readerTool=type;annotationTools.append(b);
+    for(const [type,label] of [['select','选择'],['ink','手写'],['highlight','高亮'],['underline','下划线'],['strikeout','删除线'],['note','便笺']]){
+      const b=button(`reader-tool-${type}`,label,()=>{tool=type;context='annotations';if(['highlight','underline','strikeout'].includes(type)){markup=type;saveLayoutLater();}applyTool();sync();status(hintFor());});b.dataset.readerTool=type;annotationTools.append(b);
     }
     const colorLabel=node('label','颜色','reader-color');const input=node('input');input.type='color';input.id='reader-color';input.value=color;input.setAttribute('aria-label','批注颜色');
     // Layout preferences share one write queue: overlapping read-modify-write
     // patches race the revision and would surface as a save conflict banner.
     let layoutQueue=Promise.resolve();
     const patchLayout=value=>{layoutQueue=layoutQueue.then(()=>persistence?persistence.patch('reader:layout',value):null).catch(()=>{});return layoutQueue;};
-    const saveLayout=()=>patchLayout({mode,color,markup});
+    const saveLayout=()=>patchLayout({mode,color,markup,inkColor,inkWidth});
     const saveLayoutLater=()=>{if(saveLayoutTimer!==null)window.clearTimeout(saveLayoutTimer);saveLayoutTimer=window.setTimeout(()=>{saveLayoutTimer=null;saveLayout();},150);};
     const hintFor=()=>(MODE_HINTS[mode]||{})[tool]||hints[tool]||'';
-    input.addEventListener('input',()=>{color=input.value;reader()?.setTool(tool,color);saveLayout();sync();});colorLabel.append(input);
+    input.addEventListener('input',()=>{if(tool==='ink')inkColor=input.value;else color=input.value;applyTool();saveLayout();sync();});colorLabel.append(input);
+    const widthLabel=node('label','粗细','reader-ink-width');const widthInput=node('select');widthInput.id='reader-ink-width';widthInput.setAttribute('aria-label','手写笔迹粗细');
+    for(const [value,label] of [[1,'细'],[2,'中'],[4,'粗']]){const option=node('option',label);option.value=String(value);widthInput.append(option);}widthInput.value=String(inkWidth);widthLabel.append(widthInput);
+    widthInput.addEventListener('change',()=>{inkWidth=Number(widthInput.value);applyTool();saveLayout();});
     // Two reading habits: mark while reading (自动着色) or select then ask
     // (勾选后提问, the default). The choice, colour and markup type persist.
     const modeGroup=node('div',null,'reader-mode');modeGroup.id='reader-mode-group';modeGroup.setAttribute('role','group');modeGroup.setAttribute('aria-label','选文后的行为');
@@ -57,7 +63,7 @@ window.PaperReadingShell = (() => {
       const b=button(`reader-mode-${value}`,label,()=>{mode=value;if(value==='auto'&&tool==='select')reader()?.setTool(tool,color);saveLayout();sync();status(hintFor());});
       b.setAttribute('aria-pressed',String(mode===value));modeButtons[value]=b;modeGroup.append(b);
     }
-    annotationTools.append(modeGroup,colorLabel);
+    annotationTools.append(modeGroup,colorLabel,widthLabel);
     const sidebar=button('reader-annotations','批注栏',()=>{panels()?.toggle('annotations');sync();});readerTools.append(sidebar);
     // Fit-width default with free zoom: steppers, an explicit percentage and reset.
     let zoom=1;
@@ -73,7 +79,10 @@ window.PaperReadingShell = (() => {
     zoomGroup.append(zoomOut,percent,zoomIn,zoomFit);readerTools.append(zoomGroup);
     if(persistence)void persistence.get('reader:layout').then(value=>{
       const saved=Number(value?.zoom);if(Number.isFinite(saved)&&saved!==1)setZoom(saved);
-      if(typeof value?.color==='string'&&/^#[0-9a-f]{6}$/i.test(value.color)){color=value.color;input.value=color;reader()?.setTool(tool,color);}
+      if(typeof value?.color==='string'&&/^#[0-9a-f]{6}$/i.test(value.color))color=value.color;
+      if(typeof value?.inkColor==='string'&&/^#[0-9a-f]{6}$/i.test(value.inkColor))inkColor=value.inkColor;
+      if([1,2,4].includes(value?.inkWidth))inkWidth=value.inkWidth;
+      applyTool();
       if(typeof value?.markup==='string'&&['highlight','underline','strikeout'].includes(value.markup))markup=value.markup;
       if(typeof value?.mode==='string'&&Object.hasOwn(MODES,value.mode))mode=value.mode;
       sync();
@@ -90,6 +99,34 @@ window.PaperReadingShell = (() => {
     const note=$('page-note');note.textContent='页便笺';annotationTools.append(note);
     const message=$('page-message');message.className='ribbon-status';message.setAttribute('role','status');message.setAttribute('aria-live','polite');
     $('paper-tools').after(message);
+    // This draft bar stays reachable even after moving to the library or another
+    // paper. A draft always saves to its original document, never the current one.
+    const inkBar=node('div',null,'reader-ink-draft');inkBar.id='reader-ink-draft';inkBar.hidden=true;
+    const inkLabel=node('span',null,'reader-ink-summary');inkLabel.id='reader-ink-status';inkLabel.setAttribute('role','status');
+    const inkReturn=button('reader-ink-return','返回笔迹',()=>void returnToInk?.());
+    const inkUndo=button('reader-ink-undo','撤销一笔',()=>reader()?.undoInk());
+    const inkDiscard=button('reader-ink-discard','取消手写',()=>reader()?.clearInk());
+    const inkSave=button('reader-ink-save','保存手写',()=>void saveInk?.());
+    inkSave.classList.add('primary');inkBar.append(inkLabel,inkReturn,inkUndo,inkDiscard,inkSave);message.after(inkBar);
+    function syncInk(){
+      const draft=reader()?.getInkDraft?.();
+      inkBar.hidden=!draft;document.body.classList.toggle('has-ink-draft',Boolean(draft));
+      if(draft){
+        if(!inkTitle&&draft.paperId===state.active?.id)inkTitle=state.active.title||'当前文献';
+        inkLabel.textContent=inkBusy?'正在保存手写…':inkError||`未保存 · 第 ${draft.page} 页 · ${draft.paths.length} 笔`;
+        inkLabel.title=inkTitle;inkLabel.classList.toggle('error',Boolean(inkError));
+      }else{inkTitle='';inkError='';}
+      for(const b of [inkReturn,inkUndo,inkDiscard,inkSave])b.disabled=inkBusy||!draft;
+      inkUndo.disabled=inkBusy||!draft||Boolean(inkError);
+      inkDiscard.textContent=inkError?'放弃重试':'取消手写';
+      inkDiscard.title=inkError?'仅移除草稿，已写入 PDF 的笔迹仍保留。':'';
+      input.disabled=tool==='ink'&&(inkBusy||Boolean(draft));widthInput.disabled=inkBusy||Boolean(draft);
+      inkSave.textContent=inkError?'重试保存':'保存手写';
+    }
+    function inkChanged(){inkError='';syncInk();}
+    function inkSaving(value,error=''){inkBusy=Boolean(value);inkError=error;inkBar.setAttribute('aria-busy',String(inkBusy));syncInk();}
+    const beforeUnload=event=>{if(reader()?.getInkDraft?.()||reader()?.isInking?.()){event.preventDefault();event.returnValue='';}};
+    window.addEventListener('beforeunload',beforeUnload);
     const header=document.querySelector('.paper-header');header.classList.add('reader-document-summary');
     // The same summary remains available next to editable fields, without taking PDF space.
     $('metadata-form').prepend(header);
@@ -122,6 +159,8 @@ window.PaperReadingShell = (() => {
       for(const b of annotationTools.querySelectorAll('[data-reader-tool]'))b.setAttribute('aria-pressed',String(b.dataset.readerTool===tool));
       for(const [value,b] of Object.entries(modeButtons))b.setAttribute('aria-pressed',String(mode===value));
       modeGroup.dataset.mode=mode;
+      modeGroup.hidden=tool==='ink';widthLabel.hidden=tool!=='ink';
+      input.value=tool==='ink'?inkColor:color;widthInput.value=String(inkWidth);syncInk();
       sidebar.setAttribute('aria-pressed',String(Boolean(panels()?.visible('annotations'))));
       message.hidden=!active||table;
       if(surface==='graph')status('选择节点查看联系与来源；有页码的依据可返回 PDF。');
@@ -149,8 +188,8 @@ window.PaperReadingShell = (() => {
     // Prevent a homepage link from discarding a question/metadata draft.
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
     sync();
-    return {sync,setContext,status,leaveFocus,tool:()=>({type:tool,color,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
-      dispose(){document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);document.removeEventListener('click',closeCitations);document.removeEventListener('keydown',citationKey,true);}};
+    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
+      dispose(){window.removeEventListener('beforeunload',beforeUnload);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);document.removeEventListener('click',closeCitations);document.removeEventListener('keydown',citationKey,true);}};
   }
   return {create};
 })();

@@ -49,3 +49,14 @@ body{height:100dvh;overflow:hidden}
 .reader-mode-label{white-space:nowrap;margin-right:2px}
 .reader-mode .button{font-size:10px;padding:3px 6px}
 .reader-mode[data-mode=auto] .button#reader-mode-auto,.reader-mode[data-mode=ask] .button#reader-mode-ask{background:#e4ece3;outline:1px solid #b8cbb7;color:#174c40}
+
+/* A Pencil draft remains actionable when the reader changes paper or surface. */
+body.has-ink-draft{--workbench-height:152px}
+.has-ink-draft .topbar{grid-template-rows:28px 28px 32px 19px 40px}
+.reader-ink-draft{grid-column:1/-1;display:flex;align-items:center;gap:6px;min-width:0;overflow-x:auto;white-space:nowrap;border-top:1px solid var(--line);color:var(--ink);font-size:12px}
+.reader-ink-draft[hidden],.reader-ink-width[hidden],.reader-mode[hidden]{display:none}
+.reader-ink-draft .button{flex-shrink:0;min-height:32px;padding:5px 10px;font-size:12px}
+.reader-ink-summary{flex:1;min-width:140px;overflow:hidden;text-overflow:ellipsis}
+.reader-ink-summary.error{color:var(--error,#a14b39)}
+.reader-ink-width{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)}
+.reader-ink-width select{width:52px;min-height:27px;padding:2px 4px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:4px}

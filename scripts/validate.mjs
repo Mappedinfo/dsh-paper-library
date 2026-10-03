@@ -37,7 +37,7 @@ for(const[id,command,args]of commands){
   const run=spawnSync(command,args,{encoding:'utf8',env:{...process.env,UV_CACHE_DIR:'/private/tmp/codex-uv'},maxBuffer:4*1024*1024});
   const output=(run.stdout||'')+(run.stderr||'');
   const count=id==='javascript_tests'?output.match(/(?:#|ℹ) tests (\d+)/)?.[1]:id==='python_tests'?output.match(/(\d+) passed/)?.[1]:undefined;
-  checks.push({id,command:[command,...args].join(' '),exit_code:run.status,elapsed_ms:Math.round(performance.now()-start),status:run.status===0?'pass':'fail',...(count?{test_count:Number(count)}:{}),output:output.replaceAll(process.cwd(),'<project>')});
+  checks.push({id,command:[command===process.execPath?'node':command,...args].join(' '),exit_code:run.status,elapsed_ms:Math.round(performance.now()-start),status:run.status===0?'pass':'fail',...(count?{test_count:Number(count)}:{}),output:output.replaceAll(process.cwd(),'<project>')});
   console.log(`${id}: ${run.status===0?'PASS':'FAIL'}`);
   if(run.status!==0)console.log(output);
 }

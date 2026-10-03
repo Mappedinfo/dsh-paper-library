@@ -36,6 +36,12 @@ def _constants():
 # of the library. The cap constants are deliberately *not* bound; `_constants()` reads them live.
 safe_name = None
 
+# A single pen session is finite; long handwriting is saved in several native
+# annotations by the reader. These limits also bound external Ink projections.
+MAX_INK_STROKES = 64
+MAX_INK_POINTS = 4096
+MAX_INK_BYTES = 128 * 1024
+
 
 def install_helpers(**helpers):
     module = globals()
@@ -46,6 +52,52 @@ def install_helpers(**helpers):
 
 
 class AnnotationAccess:
+    @staticmethod
+    def _ink_paths(paths, page):
+        import pymupdf as fitz
+        if not isinstance(paths, list) or not 1 <= len(paths) <= MAX_INK_STROKES:
+            raise ValueError(f"Ink requires 1–{MAX_INK_STROKES} strokes")
+        if any(not isinstance(stroke, list) or len(stroke) < 2 for stroke in paths):
+            raise ValueError("Each ink stroke requires at least two points")
+        if sum(len(stroke) for stroke in paths) > MAX_INK_POINTS:
+            raise ValueError(f"Ink exceeds {MAX_INK_POINTS} points")
+        result = []
+        for stroke in paths:
+            points = []
+            for point in stroke:
+                if not isinstance(point, (list, tuple)) or len(point) != 2 or not all(
+                    isinstance(value, (int, float)) and not isinstance(value, bool) and (isinstance(value, int) or math.isfinite(value))
+                    for value in point
+                ):
+                    raise ValueError("Ink points require two finite numeric coordinates")
+                x, y = point
+                if not (0 <= x <= page.rect.width and 0 <= y <= page.rect.height):
+                    raise ValueError("Ink points must be inside displayed page")
+                points.append(list(fitz.Point(x, y) * page.derotation_matrix))
+            result.append(points)
+        if len(json.dumps(paths, separators=(",", ":"), allow_nan=False).encode("utf-8")) > MAX_INK_BYTES:
+            raise ValueError("Ink paths exceed 128 KiB")
+        return result
+
+    @staticmethod
+    def _ink_geometry(page, annot):
+        import pymupdf as fitz
+        # PyMuPDF decodes vertices before Python can inspect their size. Avoid
+        # additional copies / response expansion for oversized external objects;
+        # their original geometry remains intact in the PDF and rendered page.
+        vertices = annot.vertices or []
+        width = annot.border.get("width", 1)
+        if len(vertices) > MAX_INK_STROKES or sum(len(stroke) for stroke in vertices) > MAX_INK_POINTS:
+            return {"paths": [], "width": width, "geometry_truncated": True}
+        paths = [[list(fitz.Point(point) * page.rotation_matrix) for point in stroke] for stroke in vertices]
+        if not all(math.isfinite(value) for stroke in paths for point in stroke for value in point) or len(json.dumps(paths, separators=(",", ":")).encode("utf-8")) > MAX_INK_BYTES:
+            return {"paths": [], "width": width, "geometry_truncated": True}
+        return {"paths": paths, "width": width}
+
+    @staticmethod
+    def _annotation_characters(value):
+        return len(value["text"]) + len(value["comment"]) + (len(json.dumps(value["paths"], separators=(",", ":"))) if "paths" in value else 0)
+
     @staticmethod
     def _page(doc, number):
         number = int(number)
@@ -90,9 +142,10 @@ class AnnotationAccess:
         info = annot.info
         extra = cls._annotation_metadata(annot)
         rects = []
-        if annot.vertices and annot.type[0] in {8, 9, 10, 11}:
-            for index in range(0, len(annot.vertices), 4):
-                quad = fitz.Quad(annot.vertices[index:index + 4])
+        vertices = annot.vertices if annot.type[0] in {8, 9, 10, 11} else None
+        if vertices:
+            for index in range(0, len(vertices), 4):
+                quad = fitz.Quad(vertices[index:index + 4])
                 rects.append(list(cls._rect(quad.rect, page)))
         if not rects:
             rects = [list(cls._rect(annot.rect, page))]
@@ -111,7 +164,7 @@ class AnnotationAccess:
                 reply_to = parent.info.get("id") or f"external-{page.number + 1}-{parent.xref}"
             except (ValueError, RuntimeError):
                 pass
-        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids") if key in extra}}
+        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids") if key in extra}}
 
     def companion_excerpt(self, id, page):
         """One explicitly selected page, text only; no persistent index or OCR."""
@@ -137,6 +190,11 @@ class AnnotationAccess:
         normalized = {"page": value["page"], "type": value["type"],
                       "text": text(value["text"]), "comment": text(value["comment"]),
                       "rects": [[round(float(v), 3) for v in rect] for rect in value["rects"]]}
+        if value["type"] == "ink":
+            if value.get("geometry_truncated"):
+                raise ValueError("ANNOTATION_GEOMETRY_LIMIT: an ink annotation exceeds the bounded geometry budget; split it in a PDF editor before referencing")
+            normalized.update(paths=[[[round(float(v), 3) for v in point] for point in stroke] for stroke in value["paths"]],
+                              width=round(float(value["width"]), 3), color=value.get("color"))
         version = hashlib.sha256(json.dumps(normalized, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
         return {**value, "version": version, "identity_reliable": identity_reliable,
                 "identity_source": "pdf-nm" if identity_reliable else "page-xref",
@@ -217,6 +275,7 @@ class AnnotationAccess:
         found, stale, seen = {}, [], set()
         total, scanned, total_exact = 0, 0, True
         characters = len(selection["text"]) if selection else 0
+        geometry_characters = 0
         if item["pdf"]:
             with self._open_pdf(self.pdf_path(id)) as doc:
                 if selection and selection["page"] > doc.page_count:
@@ -239,6 +298,10 @@ class AnnotationAccess:
                         if annotation_id not in requested:
                             continue
                         raw_value = self._annotation(page, annot, exact=True)
+                        if "paths" in raw_value:
+                            geometry_characters += len(json.dumps(raw_value["paths"], separators=(",", ":")))
+                            if geometry_characters > 2_000_000:
+                                raise ValueError("SOURCE_GEOMETRY_BUDGET_EXCEEDED: selected ink exceeds the 2 MB geometry budget; reduce the selection")
                         if characters + len(raw_value["text"]) + len(raw_value["comment"]) > max_characters:
                             raise ValueError(f"SOURCE_BUDGET_EXCEEDED: selected source exceeds {max_characters} characters; reduce the selection (no text was sent)")
                         value = self._reference_annotation(raw_value, bool(annot.info.get("id")))
@@ -274,7 +337,7 @@ class AnnotationAccess:
                     if len(result) >= _constants().MAX_ANNOTATIONS:
                         return {"annotations": result, "truncated": True}
                     value = self._annotation(page, annot)
-                    characters += len(value["text"]) + len(value["comment"])
+                    characters += self._annotation_characters(value)
                     if characters > 2_000_000:
                         return {"annotations": result, "truncated": True}
                     result.append(value)
@@ -321,25 +384,35 @@ class AnnotationAccess:
             annotation_truncated = False
             for a in islice(current.annots() or [], 1001):
                 value = self._annotation(current, a)
-                annotation_characters += len(value["text"]) + len(value["comment"])
+                annotation_characters += self._annotation_characters(value)
                 if len(annotations) >= 1000 or annotation_characters > 2_000_000:
                     annotation_truncated = True
                     break
                 annotations.append(value)
             return {"page": int(page), "page_count": doc.page_count, "width": width, "height": height, "scale": scale, "image": base64.b64encode(pix.tobytes("png")).decode("ascii"), "words": words, "annotations": annotations, "words_truncated": len(raw_words) > 20000, "annotations_truncated": annotation_truncated, "rotation": current.rotation}
 
-    def _add_annotation(self, doc, page, type="highlight", rects=None, text="", comment="", author="Reader", color="#ffdb66", extra=None):
+    def _add_annotation(self, doc, page, type="highlight", rects=None, text="", comment="", author="Reader", color="#ffdb66", extra=None, paths=None, width=2, annotation_id=None):
         import pymupdf as fitz
         current = self._page(doc, page)
-        if type not in {"highlight", "underline", "strikeout", "note"}:
-            raise ValueError("Supported annotation types are highlight, underline, strikeout and note")
-        rects = rects or ([[20, 20, 40, 40]] if type == "note" else [])
-        if not rects or len(rects) > 200:
-            raise ValueError("Provide 1–200 annotation rectangles")
-        unrotated = [self._rect(rect, current, inverse=True) for rect in rects]
+        if type not in {"highlight", "underline", "strikeout", "note", "ink"}:
+            raise ValueError("Supported annotation types are highlight, underline, strikeout, note and ink")
+        if type == "ink":
+            if isinstance(width, bool) or not isinstance(width, (int, float)) or not 0.5 <= width <= 8:
+                raise ValueError("Ink width must be 0.5–8 PDF points")
+            strokes = self._ink_paths(paths, current)
+        else:
+            rects = rects or ([[20, 20, 40, 40]] if type == "note" else [])
+            if not rects or len(rects) > 200:
+                raise ValueError("Provide 1–200 annotation rectangles")
+            unrotated = [self._rect(rect, current, inverse=True) for rect in rects]
         if len(text) > 20000 or len(comment) > 30000:
             raise ValueError("Annotation text/comment exceeds limit")
-        if type != "note":
+        if not isinstance(color, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+            raise ValueError("Color must be a six-digit hex string")
+        if type == "ink":
+            annot = current.add_ink_annot(strokes)
+            annot.set_border(width=float(width))
+        elif type != "note":
             # Markup quad order follows the native text baseline. Transforming
             # an already ordered displayed quad rotates that baseline a second
             # time on 90/270-degree pages, putting underline on the wrong edge.
@@ -351,14 +424,12 @@ class AnnotationAccess:
             annot = creator(quads)
         else:
             annot = current.add_text_annot(unrotated[0].tl, comment, icon="Note")
-        if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
-            raise ValueError("Color must be a six-digit hex string")
         rgb = tuple(int(color[i:i + 2], 16) / 255 for i in (1, 3, 5))
         payload = {"text": text, **(extra or {})}
         annot.set_info(content=comment, title=author[:200], subject="paper-library:" + json.dumps(payload, ensure_ascii=False), creationDate="D:" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%SZ"), modDate="D:" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%SZ"))
         annot.set_colors(stroke=rgb)
         annot.update()
-        annotation_id = uuid.uuid4().hex
+        annotation_id = annotation_id or uuid.uuid4().hex
         doc.xref_set_key(annot.xref, "NM", fitz.get_pdf_str(annotation_id))
         if extra and extra.get("annotation_ids"):
             for parent in current.annots() or []:
@@ -369,6 +440,41 @@ class AnnotationAccess:
 
     def annotate(self, id, **kwargs):
         with self.lock():
+            retry_id = kwargs.get("annotation_id")
+            if retry_id is not None:
+                if kwargs.get("type") != "ink" or not isinstance(retry_id, str) or not re.fullmatch(r"(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})", retry_id):
+                    raise ValueError("Only ink accepts a lowercase UUID annotation_id")
+                # A lost HTTP response must not turn retry into a second stroke.
+                # Check /NM while holding the same lock as the atomic write;
+                # returning an existing object leaves PDF bytes/timestamps alone.
+                with self._open_pdf(self.pdf_path(id)) as doc:
+                    page = self._page(doc, kwargs["page"])
+                    self._ink_paths(kwargs.get("paths"), page)
+                    matches = []
+                    for count, annot in enumerate(page.annots() or []):
+                        if count >= _constants().MAX_ANNOTATIONS:
+                            raise ValueError("Annotation retry exceeds the bounded page scan")
+                        if annot.info.get("id") == retry_id:
+                            matches.append(self._annotation(page, annot))
+                    if matches:
+                        existing = matches[0]
+                        expected_color = kwargs.get("color", "#ffdb66")
+                        color = tuple(int(expected_color[i:i + 2], 16) / 255 for i in (1, 3, 5)) if isinstance(expected_color, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", expected_color) else ()
+                        paths = kwargs["paths"]
+                        saved_paths = existing.get("paths", [])
+                        width = kwargs.get("width", 2)
+                        equal = (len(matches) == 1 and existing["type"] == "ink" and existing["source"] == "paper-library"
+                                 and isinstance(width, (int, float)) and not isinstance(width, bool) and 0.5 <= width <= 8
+                                 and abs(existing["width"] - width) < 0.00001
+                                 and existing["text"] == kwargs.get("text", "") and existing["comment"] == kwargs.get("comment", "")
+                                 and existing["author"] == kwargs.get("author", "Reader")[:200]
+                                 and len(color) == 3 and len(existing["color"].get("stroke", [])) == 3
+                                 and all(abs(a - b) < 0.00001 for a, b in zip(existing["color"]["stroke"], color))
+                                 and len(paths) == len(saved_paths) and all(len(a) == len(b) for a, b in zip(paths, saved_paths))
+                                 and all(abs(a - b) < 0.001 for original, saved in zip(paths, saved_paths) for point, other in zip(original, saved) for a, b in zip(point, other)))
+                        if not equal:
+                            raise ValueError("Ink annotation_id already exists with different content")
+                        return {"annotation": existing, "duplicate": True}
             return self._write_pdf(id, lambda doc: self._add_annotation(doc, **kwargs))
 
     def _import_zotero_annotation(self, id, annotation):
@@ -440,11 +546,22 @@ class AnnotationAccess:
             warnings = []
             with self._open_pdf(self.pdf_path(id)) as doc:
                 for annotation in annotations:
-                    if annotation["type"] not in {"highlight", "note", "underline", "strikeout", "squiggly"}:
-                        warnings.append(f"Skipped XFDF encoding for {annotation['type']} annotation {annotation['id']}; JSON/PDF preserve it")
+                    if annotation["type"] not in {"highlight", "note", "underline", "strikeout", "squiggly", "ink"} or annotation.get("geometry_truncated"):
+                        preservation = "PDF preserves the geometry; JSON marks geometry_truncated" if annotation.get("geometry_truncated") else "JSON/PDF preserve it"
+                        warnings.append(f"Skipped XFDF encoding for {annotation['type']} annotation {annotation['id']}; {preservation}")
                         continue
                     page = doc[annotation["page"] - 1]
-                    matrix = page.derotation_matrix * ~page.transformation_matrix
+                    derotation = page.derotation_matrix
+                    rotation = page.rotation
+                    # On rotated cropped pages PyMuPDF's transformation_matrix
+                    # omits the crop translation. Ask the unrotated page for its
+                    # user-space matrix, then restore it without saving the PDF.
+                    try:
+                        page.set_rotation(0)
+                        native_to_pdf = ~page.transformation_matrix
+                    finally:
+                        page.set_rotation(rotation)
+                    matrix = derotation * native_to_pdf
                     rect = fitz.Rect(annotation["rect"]) * matrix
                     attributes = {"page": str(annotation["page"] - 1), "name": annotation["id"], "title": annotation["author"], "rect": ",".join(str(round(v, 3)) for v in rect)}
                     if annotation.get("reply_to"):
@@ -456,15 +573,23 @@ class AnnotationAccess:
                         attributes["creationdate"] = annotation["created"]
                     if annotation["modified"]:
                         attributes["date"] = annotation["modified"]
-                    if annotation["type"] != "note":
+                    if annotation["type"] == "ink":
+                        attributes["width"] = str(annotation["width"])
+                    elif annotation["type"] != "note":
                         points = []
                         for display in annotation["rects"]:
                             native_rect = fitz.Rect(display) * page.derotation_matrix
-                            quad = native_rect.quad * ~page.transformation_matrix
+                            quad = native_rect.quad * native_to_pdf
                             for point in (quad.ul, quad.ur, quad.ll, quad.lr):
                                 points.extend(point)
                         attributes["coords"] = ",".join(str(round(v, 3)) for v in points)
                     node = ET.SubElement(container, "text" if annotation["type"] == "note" else annotation["type"], attributes)
+                    if annotation["type"] == "ink":
+                        inklist = ET.SubElement(node, "inklist")
+                        for stroke in annotation["paths"]:
+                            points = [fitz.Point(point) * matrix for point in stroke]
+                            ET.SubElement(inklist, "gesture").text = ";".join(
+                                ",".join(str(round(value, 3)) for value in point) for point in points)
                     ET.SubElement(node, "contents").text = annotation["comment"]
             text, mime = ET.tostring(root, encoding="unicode", xml_declaration=True), "application/vnd.adobe.xfdf"
             return {"text": text, "filename": safe_name(item["citekey"]) + ".xfdf", "mime": mime, "warnings": warnings, "truncated": result["truncated"]}

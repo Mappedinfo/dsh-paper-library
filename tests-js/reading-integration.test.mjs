@@ -60,6 +60,15 @@ test('a superseded catalogue open cannot activate the requested panel for a diff
   assert.equal(f.context.state.tab,'reader');assert.equal(f.panels.chat,false);assert.deepEqual(f.visibility,[]);
 });
 
+test('a paper switch during annotation loading cannot read feedback for a cleared or different paper',async()=>{
+  for(const replacement of [null,{id:'paper-b',pdf:true}]){
+    const f=environment();f.context.state.pageData={width:600,height:800};
+    f.context.loadAnnotations=async()=>{f.context.state.active=replacement;};
+    await f.context.switchTab('annotations');
+    assert.equal(f.calls.filter(value=>value[0]==='feedback').length,0);
+  }
+});
+
 for(const oldTab of ['conversation','annotations'])test(`restoring closed panels overrides the old ${oldTab} tab instead of reopening them`,async()=>{
   const snapshot={paperId:'paper-a',page:1,tab:oldTab,chatDraft:'Unsent question',chatContext:{annotationRefs:[]},panels:{side:'right',annotations:false,metadata:false,chat:false}};
   const f=environment({paper:{id:'paper-a',pdf:false},snapshot});await f.context.restoreReaderState();

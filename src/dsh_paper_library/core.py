@@ -571,7 +571,7 @@ def dispatch(request):
             return {"path": str(path), "filename": path.name}
         actions = {
             "list": ("query", "limit", "offset", "sort", "order", "archived"), "get": ("id", "include_archived"), "create": ("metadata",), "archive": ("id",), "restore": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page_layout": ("id",), "page": ("id", "page", "scale"),
-            "annotations": ("id",), "annotate": ("id", "page", "type", "rects", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment"), "annotation_delete": ("id", "annotation_id"),
+            "annotations": ("id",), "annotate": ("id", "page", "type", "rects", "paths", "width", "annotation_id", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment"), "annotation_delete": ("id", "annotation_id"),
             "annotation_catalog": ("id",), "annotation_context_exact": ("id", "annotation_refs", "selection", "max_characters"), "companion_excerpt": ("id", "page"),
             "export_annotations": ("id", "format"), "link": ("source", "target", "relation", "note"), "graph": ("id", "limit"), "feedback_context": ("id", "annotation_ids"), "save_feedback": ("id", "text", "model", "annotation_ids", "expected_context_hash", "replies"), "feedback": ("id",),
             "save_conversation_feedback": ("id", "text", "model", "annotation_ids", "source_session_id", "source_message_id", "page", "source_snapshot_ids"),
