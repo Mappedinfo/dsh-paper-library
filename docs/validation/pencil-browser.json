@@ -1,12 +1,12 @@
 {
-  "verified_at": "2026-10-03T15:04:57.336Z",
+  "verified_at": "2026-10-03T16:38:58.474Z",
   "complete": true,
   "scope": "Synthetic standalone UI in real Chromium: trusted CDP pen and touch, real mouse input, explicit multi-stroke drafts, native PDF Ink persistence, original preservation, retry, zoom, rotation, fresh catalog recovery and existing tools.",
   "limitations": [
     "No physical Apple Pencil, iPad, Sidecar or Safari session was exercised.",
     "Pointer cancellation uses a synthetic DOM event; other tested input events are trusted Chromium input.",
     "Fixed PDF stroke widths; no pressure-sensitive rendering or hardware palm-rejection claim.",
-    "Reload recovery covers server-acknowledged completed strokes. Unsent or in-flight drafts, including payloads above the existing 60,000-byte keepalive threshold, are not guaranteed to survive abrupt iframe destruction."
+    "Acknowledged host-staged batches survive reader replacement and continue on the host; unfinished strokes or drafts lost before staging/handoff confirmation are not guaranteed to survive abrupt termination."
   ],
   "checks": [
     "trusted-pen-draws-over-text-without-selecting-text-opening-a-note-or-autosaving",
@@ -18,10 +18,10 @@
     "discard-removes-only-the-unsaved-draft",
     "completed-strokes-survive-page-reload-through-host-local-draft-storage",
     "switching-papers-retains-the-origin-draft-and-return-to-ink-restores-its-overlay",
-    "unconfirmed-save-locks-new-strokes-and-undo-until-idempotent-retry",
-    "failed-save-keeps-the-draft-and-lost-acknowledgement-retry-does-not-duplicate-ink",
-    "attempted-draft-reloads-with-its-retry-identity-and-edit-lock-intact",
-    "saving-while-another-paper-is-active-still-writes-only-to-the-origin-pdf",
+    "unconfirmed-staging-freezes-immutable-ink-while-reading-and-paper-switching-remain-available",
+    "failed-staging-keeps-frozen-ink-and-lost-enqueue-acknowledgment-does-not-duplicate-native-ink",
+    "frozen-batch-reload-reconciles-the-original-request-and-unlocks-input-only-after-host-confirmation",
+    "staging-while-another-paper-is-active-still-writes-only-to-the-origin-pdf",
     "zoomed-pen-stroke-saves-in-pdf-coordinates-within-one-point",
     "rotated-page-ink-round-trips-in-the-displayed-coordinate-system",
     "exported-pdf-has-standard-ink-objects-and-a-fresh-catalog-recovers-all-paths",
@@ -32,8 +32,8 @@
   "externalRequests": 0,
   "modelRequests": 0,
   "screenshots": [
-    ".local/pencil-browser-AXWHYb/multi-stroke-draft.png",
-    ".local/pencil-browser-AXWHYb/zoomed-draft.png",
-    ".local/pencil-browser-AXWHYb/reopened-ink-and-existing-tools.png"
+    ".local/pencil-browser-mIoJrH/multi-stroke-draft.png",
+    ".local/pencil-browser-mIoJrH/zoomed-draft.png",
+    ".local/pencil-browser-mIoJrH/reopened-ink-and-existing-tools.png"
   ]
 }

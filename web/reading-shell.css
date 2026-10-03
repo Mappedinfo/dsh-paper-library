@@ -75,6 +75,21 @@ body.linked-handwriting-active.has-ink-draft{--workbench-height:204px}
 .annotation-card .annotation-actions .button[data-note-action="handwriting"][aria-pressed="true"]{background:var(--accent,#2455a4);color:var(--on-accent,#fff)}
 .linked-handwriting-summary textarea{display:block;width:100%;min-height:96px;margin-block:8px;resize:vertical}
 .linked-handwriting-summary p{white-space:pre-wrap;overflow-wrap:anywhere}
+.annotation-card .annotation-quote{display:block;width:100%;max-width:100%;min-width:0;text-align:left;white-space:normal;overflow-wrap:anywhere;border:0;border-left:3px solid var(--accent,#387658);padding:7px 10px;margin:10px 0;background:var(--surface);color:var(--ink);font:inherit;line-height:1.6;cursor:pointer}
+.linked-ink-preview{display:block;width:100%;min-height:155px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#2455a4;padding:8px;cursor:pointer;text-align:right}
+.linked-ink-preview svg{display:block;width:100%;height:110px;pointer-events:none}
+.linked-ink-preview span{display:block;font-size:12px;padding:8px 2px 2px}
+.linked-ink-preview:focus-visible,.annotation-quote:focus-visible{outline:2px solid var(--dsw-alias-link,#4176e6);outline-offset:3px}
+.linked-ink-regions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.linked-ink-regions .button,.linked-handwriting-summary .button{min-height:44px}
+.linked-ink-save-status{color:var(--muted);margin:6px 0}
+.ink-queue-menu{flex-shrink:0;font-size:11px;color:var(--ink)}
+.ink-queue-menu[hidden],#reader-return-position[hidden]{display:none}
+.ink-queue-menu>summary{padding:6px 9px;cursor:pointer;list-style:none}
+.ink-queue-panel{position:fixed;right:12px;top:68px;z-index:65;width:330px;max-width:calc(100vw - 24px);max-height:55vh;overflow:auto;padding:12px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px #0003;white-space:normal}
+.ink-queue-item{padding:8px 0;border-bottom:1px solid var(--line)}
+.ink-queue-panel .button{min-height:44px;border:1px solid var(--line);margin:4px 6px 4px 0;color:var(--ink)}
+.ink-queue-item p{margin:4px 0;line-height:1.5;overflow-wrap:anywhere}
 
 /* Keep input options above the horizontally scrollable ribbon, like citations. */
 .reader-pen-settings{flex-shrink:0;font-size:12px}

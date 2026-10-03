@@ -50,7 +50,7 @@ function inkDraftRecord(value, paperId) {
   // Match restoreInkDraft's individual draft ceiling as well as the complete
   // reader snapshot budget; accepting an unrestorable handoff would lose ink.
   if (new TextEncoder().encode(JSON.stringify(clean)).length > 128 * 1024) throw new Error('手写草稿超过 128 KiB，无法恢复')
-  return { draft: clean, annotation_id: value.annotation_id, attempted: value.attempted, updatedAt: value.updatedAt }
+  return { draft: clean, annotation_id: value.annotation_id, attempted: value.attempted, updatedAt: value.updatedAt, ...(value.frozen===true?{frozen:true}:{}) }
 }
 
 /** Only the original bounded vector draft crosses iframe lifetimes. Never
@@ -183,6 +183,10 @@ export function readerSnapshot(value) {
   if (value.handwritingDraft != null) snapshot.handwritingDraft = handwritingDraft(value.handwritingDraft, snapshot.paperId)
   if (value.linkedHandwriting != null) snapshot.linkedHandwriting = linkedHandwriting(value.linkedHandwriting, snapshot.paperId)
   if (value.inkDraftRecord != null) snapshot.inkDraftRecord = inkDraftRecord(value.inkDraftRecord, snapshot.paperId)
+  if (value.inkQueueRefs != null) {
+    if(!Array.isArray(value.inkQueueRefs)||value.inkQueueRefs.length>32)throw new Error('手写队列引用过多')
+    snapshot.inkQueueRefs=value.inkQueueRefs.map(ref=>{if(typeof ref.paperId!=='string'||!ref.paperId||ref.paperId.length>160||typeof ref.annotation_id!=='string'||!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(ref.annotation_id))throw new Error('手写队列引用无效');return {paperId:ref.paperId,annotation_id:ref.annotation_id}})
+  }
   if (snapshot.linkedHandwriting && snapshot.inkDraftRecord && (snapshot.linkedHandwriting.parentId !== snapshot.inkDraftRecord.draft.parentId || snapshot.linkedHandwriting.page !== snapshot.inkDraftRecord.draft.page)) throw new Error('手写草稿与关联批注不一致，请先保留当前草稿')
   if (new TextEncoder().encode(JSON.stringify(snapshot)).length > SNAPSHOT_LIMIT) throw new Error('阅读草稿超过 256 KiB，无法暂存')
   return snapshot

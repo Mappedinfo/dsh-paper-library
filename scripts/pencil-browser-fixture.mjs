@@ -64,7 +64,7 @@ try {
   page.on('pageerror', error => { errors.push(error.stack || error.message); console.error(error.stack || error.message); });
   page.on('request', request => {
     if (/^https?:/.test(request.url()) && new URL(request.url()).origin !== origin) external.push(request.url());
-    if (request.url().endsWith('/api')) { try { const value = request.postDataJSON(); if (value?.action === 'annotate') writes.push(value); } catch {} }
+    if (request.url().endsWith('/api')) { try { const value = request.postDataJSON(); if (value?.action === 'ink_queue_enqueue') writes.push(value.batch); } catch {} }
   });
   await page.addInitScript(() => {
     window.pencilFixtureEvents = [];
@@ -137,10 +137,12 @@ try {
   };
   const save = async () => {
     const response = page.waitForResponse(response => {
-      try { const request = response.request().postDataJSON(); return request?.action === 'annotate' && request.type === 'ink' && response.status() !== 429; } catch { return false; }
+      try { const request = response.request().postDataJSON(); return request?.action === 'ink_queue_enqueue' && response.status() !== 429; } catch { return false; }
     });
     await page.locator('#reader-ink-save').click();
     const completed = await response; assert.equal(completed.status(), 200, await completed.text());
+    const accepted = (await completed.json()).result.job;
+    await page.waitForFunction(id => inkQueue?.records().some(job=>job.annotation_id===id&&job.status==='saved'),accepted.annotation_id);
     await page.locator('#reader-ink-draft').waitFor({ state: 'hidden' });
     await page.waitForLoadState('networkidle');
     await ready(Number(await page.locator('#page-number').inputValue()));
@@ -209,6 +211,7 @@ try {
   record('explicit-save-writes-one-native-multi-stroke-ink-with-width-colour-and-page-coordinates');
   record('saving-preserves-external-annotations-and-the-imported-original');
 
+  await page.locator('#reader-tool-ink').click();
   await draw([[65, 220], [100, 228]]); await pathCount(1);
   await page.locator('#reader-ink-discard').click(); await pathCount(0);
   assert.equal((await inks()).length, 1);
@@ -236,51 +239,50 @@ try {
   let rejected = 0;
   await page.route('**/api', async route => {
     const data = route.request().postDataJSON();
-    if (rejected < 2 && data?.action === 'annotate' && data.type === 'ink') {
+    if (rejected < 2 && data?.action === 'ink_queue_enqueue') {
       rejected++;
-      // First refusal never reaches the server; the second saves successfully
-      // but loses its acknowledgement. Both must retain the same retry ID.
+      // The first request never reaches staging. The second is durably accepted
+      // and continues on the host, but its acknowledgment is lost to the reader.
       if (rejected === 2) {
         const committed = await route.fetch();
-        if (committed.status() !== 200) {
-          rejected--; await route.fulfill({ response: committed }); return;
-        }
+        if (committed.status() !== 200) { rejected--; await route.fulfill({response:committed}); return; }
       }
-      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'Synthetic Ink save unavailable; retry the draft.' }) });
+      await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({ok:false,error:'Synthetic staging unavailable; frozen ink retained.'})});
     } else await route.continue();
   });
+  const originDraft=await page.evaluate(()=>pdfReader.getInkDraft());
   await page.locator('#reader-ink-save').click();
-  await page.waitForFunction(() => document.getElementById('reader-ink-save')?.disabled === false);
-  assert.equal(rejected, 1); assert.equal((await inks()).length, 1);
-  assert.equal(await page.locator('#reader-ink-draft').isVisible(), true);
-  assert.equal(await page.locator('#reader-ink-undo').isDisabled(), true);
-  await page.locator('#reader-ink-return').click(); await page.waitForLoadState('networkidle'); await ready(1); await pathCount(1);
-  await showAnnotationTools(); await page.locator('#reader-tool-ink').click();
-  const lockedPoints = await draftPaths().first().getAttribute('points');
-  await draw([[65, 290], [120, 300]]); await pathCount(1);
-  assert.equal(await draftPaths().first().getAttribute('points'), lockedPoints);
-  assert.equal(await page.locator('#reader-ink-undo').isDisabled(), true);
-  await choosePaper(otherPaper.id); await ready(1);
-  record('unconfirmed-save-locks-new-strokes-and-undo-until-idempotent-retry');
-  await page.locator('#reader-ink-save').click();
-  await page.waitForFunction(() => document.getElementById('reader-ink-save')?.disabled === false);
-  assert.equal(rejected, 2); assert.equal((await inks()).length, 2);
-  assert.equal(await page.locator('#reader-ink-draft').isVisible(), true);
-  await page.reload(); await page.waitForLoadState('networkidle'); await choosePaper(otherPaper.id); await ready(1);
-  assert.equal(await page.locator('#reader-ink-draft').isVisible(), true);
-  assert.equal(await page.locator('#reader-ink-undo').isDisabled(), true);
-  await save();
-  const retried = await inks(); assert.equal(retried.length, 2); assert.equal(retried[1].width, 4);
-  compareEndpoints(retried[1].paths[0], retryPoints, 'retried stroke');
-  assert.equal(new Set(writes.slice(-3).map(write => write.annotation_id)).size, 1);
-  assert.ok(writes.slice(-3).every(write => write.id === paper.id));
-  const otherNotes = (await core({ action: 'annotations', id: otherPaper.id }, { library, python })).annotations;
-  assert.equal(otherNotes.filter(note => note.type === 'ink').length, 0);
-  record('failed-save-keeps-the-draft-and-lost-acknowledgement-retry-does-not-duplicate-ink');
-  record('attempted-draft-reloads-with-its-retry-identity-and-edit-lock-intact');
-  record('saving-while-another-paper-is-active-still-writes-only-to-the-origin-pdf');
-  await choosePaper(paper.id); await ready(1); await showAnnotationTools();
-  await page.locator('#reader-tool-ink').click();
+  await page.waitForFunction(()=>inkQueue?.records().some(job=>job.status==='stage_failed'));
+  assert.equal(rejected,1);assert.equal((await inks()).length,1);
+  assert.equal(await page.locator('#reader-ink-draft').isVisible(),false,'Completed input moves into the frozen queue');
+  const frozen=await page.evaluate(()=>inkQueue.records().find(job=>job.status==='stage_failed'));
+  assert.deepEqual(frozen.paths,originDraft.paths);assert.equal(frozen.paperId,paper.id);
+  await choosePaper(paper.id);await ready(1);await showAnnotationTools();await page.locator('#reader-tool-ink').click();
+  await draw([[65,290],[120,300]]);assert.equal(await page.evaluate(()=>pdfReader.getInkDraft()),null);
+  assert.deepEqual((await page.evaluate(()=>inkQueue.records().find(job=>job.status==='stage_failed'))).paths,frozen.paths);
+  await choosePaper(otherPaper.id);await ready(1);
+  record('unconfirmed-staging-freezes-immutable-ink-while-reading-and-paper-switching-remain-available');
+  const queueMenu=page.locator('#ink-queue-menu');
+  if(!await queueMenu.evaluate(node=>node.open))await queueMenu.locator('summary').click();
+  await queueMenu.locator(`[data-ink-id="${frozen.annotation_id}"]`).getByRole('button',{name:'重试保存'}).click();
+  await page.waitForFunction(()=>inkQueue?.records().some(job=>job.status==='stage_failed'));
+  assert.equal(rejected,2);
+  for(let n=0;n<100&&(await inks()).length!==2;n++)await pause(50);
+  assert.equal((await inks()).length,2,'Host writes continue after the enqueue acknowledgment is lost');
+  await page.reload();await page.waitForLoadState('networkidle');await choosePaper(otherPaper.id);await ready(1);
+  await page.waitForFunction(id=>!inkQueue?.blocked()&&inkQueue?.records().some(job=>job.annotation_id===id&&job.status==='saved'),frozen.annotation_id);
+  const retried=await inks();assert.equal(retried.length,2);assert.equal(retried[1].width,4);
+  compareEndpoints(retried[1].paths[0],retryPoints,'retried stroke');
+  const attempts=writes.filter(write=>write.annotation_id===frozen.annotation_id);assert.ok(attempts.length>=2);
+  assert.equal(new Set(attempts.map(write=>write.annotation_id)).size,1);
+  assert.ok(attempts.every(write=>write.paperId===paper.id));
+  assert.ok(attempts.every(write=>JSON.stringify(write.paths)===JSON.stringify(frozen.paths)));
+  const otherNotes=(await core({action:'annotations',id:otherPaper.id},{library,python})).annotations;
+  assert.equal(otherNotes.filter(note=>note.type==='ink').length,0);
+  record('failed-staging-keeps-frozen-ink-and-lost-enqueue-acknowledgment-does-not-duplicate-native-ink');
+  record('frozen-batch-reload-reconciles-the-original-request-and-unlocks-input-only-after-host-confirmation');
+  record('staging-while-another-paper-is-active-still-writes-only-to-the-origin-pdf');
+  await choosePaper(paper.id);await ready(1);await showAnnotationTools();await page.locator('#reader-tool-ink').click();
 
   const oldWidth = (await sheet(1).boundingBox()).width;
   await page.locator('#reader-zoom-percent').fill('150'); await page.locator('#reader-zoom-percent').press('Enter');
@@ -291,6 +293,7 @@ try {
   const zoomSaved = (await inks()).at(-1); compareEndpoints(zoomSaved.paths[0], zoomPoints, '150 percent stroke');
   record('zoomed-pen-stroke-saves-in-pdf-coordinates-within-one-point');
 
+  await page.locator('#reader-tool-ink').click();
   await page.locator('#reader-zoom-fit').click(); await showPage(2);
   const rotatedPoints = [[60, 95], [95, 105], [130, 90]];
   await draw(rotatedPoints, { number: 2 }); await pathCount(1); await save();
@@ -352,7 +355,7 @@ with pymupdf.open(sys.argv[1]) as doc:
 const receipt = {
   verified_at: new Date().toISOString(), complete: !failure,
   scope: 'Synthetic standalone UI in real Chromium: trusted CDP pen and touch, real mouse input, explicit multi-stroke drafts, native PDF Ink persistence, original preservation, retry, zoom, rotation, fresh catalog recovery and existing tools.',
-  limitations: ['No physical Apple Pencil, iPad, Sidecar or Safari session was exercised.', 'Pointer cancellation uses a synthetic DOM event; other tested input events are trusted Chromium input.', 'Fixed PDF stroke widths; no pressure-sensitive rendering or hardware palm-rejection claim.', 'Reload recovery covers server-acknowledged completed strokes. Unsent or in-flight drafts, including payloads above the existing 60,000-byte keepalive threshold, are not guaranteed to survive abrupt iframe destruction.'],
+  limitations: ['No physical Apple Pencil, iPad, Sidecar or Safari session was exercised.', 'Pointer cancellation uses a synthetic DOM event; other tested input events are trusted Chromium input.', 'Fixed PDF stroke widths; no pressure-sensitive rendering or hardware palm-rejection claim.', 'Acknowledged host-staged batches survive reader replacement and continue on the host; unfinished strokes or drafts lost before staging/handoff confirmation are not guaranteed to survive abrupt termination.'],
   checks, errors, externalRequests: external.length, modelRequests: 0, screenshots,
   ...(failure ? { failure: failure.stack } : {}),
 };

@@ -306,7 +306,7 @@ test('table selection cannot publish the previous reader chat draft under the se
   const end = appSource.indexOf('async function restoreReaderState()', start);
   assert.ok(start >= 0 && end > start);
   const messages = [];
-  const context = { handwritingUI:null,linkedHandwritingUI:null,pdfReader:null,inkSaveIdentity:null,inkSaveUncertain:false,inkDraftUpdatedAt:0,pendingInkHandoff:null,persistence:null,readerStateReady:false,readingPanels:null, restoringReader: false, readerPaperId: 'reader-paper-a', state: { active: { id: 'selected-paper-b' }, page: 3, tab: 'conversation' },
+  const context = { inkQueue:null,handwritingUI:null,linkedHandwritingUI:null,pdfReader:null,inkSaveIdentity:null,inkSaveUncertain:false,inkDraftUpdatedAt:0,pendingInkHandoff:null,persistence:null,readerStateReady:false,readingPanels:null, restoringReader: false, readerPaperId: 'reader-paper-a', state: { active: { id: 'selected-paper-b' }, page: 3, tab: 'conversation' },
     workbenchUI: { isTable: () => true }, paperChatUI: { draft: () => 'Private draft for previous paper A', context: () => ({ annotationRefs: [{ id: 'note-from-A' }] }) },
     window: { parent: { postMessage: message => messages.push(message) }, location: { origin: 'http://localhost:43121' } },
     $: () => ({ open: false }), Blob,

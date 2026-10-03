@@ -12,6 +12,7 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invali
 const library = resolve(option('--library',defaultLibrary));
 const translationServer = translationServerUrl(option('--translation-server', undefined));
 const handle = createFetchHandler({library,loopbackOnly:true,...(translationServer?{translationServer}:{})});
+void handle.startInkQueue().catch(error=>console.error(`Ink queue recovery: ${error.message}`));
 const server = createServer(async(req,res) => {
   try {
     const controller = new AbortController();

@@ -16,7 +16,7 @@
    cannot scroll the page underneath an active pen or cancel its pointer. */
 .paper-pdf-reader[data-tool="ink"],.paper-pdf-reader[data-tool="highlight"],.paper-pdf-reader[data-tool="underline"],.paper-pdf-reader[data-tool="strikeout"],
 .paper-pdf-reader[data-tool="ink"] .pdr-sheet,.paper-pdf-reader[data-tool="highlight"] .pdr-sheet,.paper-pdf-reader[data-tool="underline"] .pdr-sheet,.paper-pdf-reader[data-tool="strikeout"] .pdr-sheet { touch-action:none; }
-.pdr-ink-draft { position:absolute; inset:0; width:100%; height:100%; z-index:2; pointer-events:none; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+.pdr-ink-draft,.pdr-ink-overlay { position:absolute; inset:0; width:100%; height:100%; z-index:2; pointer-events:none; fill:none; stroke-linecap:round; stroke-linejoin:round; }
 .paper-pdf-reader[data-tool="highlight"] .pdr-word-layer,.paper-pdf-reader[data-tool="underline"] .pdr-word-layer,.paper-pdf-reader[data-tool="strikeout"] .pdr-word-layer { cursor:text; }
 .pdr-placeholder { position:absolute; inset:0; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; padding:20px; color:#899087; text-align:center; font-size:12px; }
 .pdr-pages>.pdr-placeholder { position:relative; min-height:220px; }
@@ -26,6 +26,6 @@
 
 /* Transient ring over saved markup when the rail reveals it. Hit-testing is
    geometric, so this overlay never intercepts text selection or clicks. */
-.pdr-annotation-flash{position:absolute;pointer-events:none;z-index:2;border:2px solid var(--teal,#28675c);border-radius:2px;background:var(--pdr-selection,#28675c26);animation:pdr-annotation-flash 2.4s ease-out}
+.pdr-annotation-flash{position:absolute;pointer-events:none;z-index:3;box-sizing:border-box;border:2px solid var(--teal,#28675c);border-radius:3px;background:transparent;box-shadow:0 0 0 1px #fff;animation:pdr-annotation-flash 1.8s ease-out}
 @keyframes pdr-annotation-flash{0%{opacity:0}12%{opacity:1}72%{opacity:1}100%{opacity:0}}
 @media(prefers-reduced-motion:reduce){.pdr-annotation-flash{animation:none;opacity:1}}

@@ -1,6 +1,6 @@
 {
-  "verified_at": "2026-10-03T15:05:14.212Z",
-  "run": ".local/pencil-markup-v9nywq",
+  "verified_at": "2026-10-03T17:00:20.513Z",
+  "run": ".local/pencil-markup-caDMST",
   "checks": [
     "trusted-pen-highlight-keeps-partial-words-and-standard-text-rectangles",
     "trusted-pen-underline-and-strikeout-save-standard-pdf-markup",
@@ -19,8 +19,8 @@
     "trusted-pointer-events-with-no-browser-errors-or-external-requests"
   ],
   "screenshots": [
-    ".local/pencil-markup-v9nywq/pencil-text-markup.png",
-    ".local/pencil-markup-v9nywq/pencil-cjk-markup.png"
+    ".local/pencil-markup-caDMST/pencil-text-markup.png",
+    ".local/pencil-markup-caDMST/pencil-cjk-markup.png"
   ],
   "browser_errors": [],
   "external_requests": 0,

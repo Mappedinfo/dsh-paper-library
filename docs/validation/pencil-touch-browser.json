@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-10-03T15:39:35.994Z",
+  "verified_at": "2026-10-03T16:47:25.594Z",
   "complete": true,
   "scope": "Synthetic PDF in Chromium using trusted CDP pen/touch and real mouse events; tests input classification, scrolling, coexistence and optional pen-only policy.",
   "checks": [
@@ -22,7 +22,7 @@
   "browser_errors": [],
   "external_requests": 0,
   "real_provider_calls": 0,
-  "annotation_requests": 2,
+  "annotation_requests": 1,
   "trusted_pointer_types": [
     "pen",
     "touch",
@@ -34,8 +34,8 @@
     "penOnly": false
   },
   "screenshots": [
-    ".local/pencil-touch-bACs6E/pencil-touch-compatibility.png",
-    ".local/pencil-touch-bACs6E/pencil-input-settings-narrow.png"
+    ".local/pencil-touch-MOzAf2/pencil-touch-compatibility.png",
+    ".local/pencil-touch-MOzAf2/pencil-input-settings-narrow.png"
   ],
   "limitations": [
     "No physical Apple Pencil, iPadOS27, Sidecar, Safari or Electron build was exercised.",

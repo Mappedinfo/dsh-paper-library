@@ -56,6 +56,15 @@ test('inline handoff keeps free ink and strips images and unknown fields at ever
   assert.equal(Object.hasOwn(blank, 'inkDraftRecord'), false); assert.equal(Object.hasOwn(blank, 'linkedHandwriting'), false)
 })
 
+test('frozen batches survive handoff while durable queue payloads cross only by bounded reference',()=>{
+  const record={...inlineInkRecord(null),frozen:true};
+  const ref={paperId:'paper-1',annotation_id:record.annotation_id,paths:'must not cross'};
+  const clean=readerSnapshot({paperId:'paper-1',page:1,inkDraftRecord:record,inkQueueRefs:[ref]});
+  assert.equal(clean.inkDraftRecord.frozen,true);assert.deepEqual(clean.inkQueueRefs,[{paperId:ref.paperId,annotation_id:ref.annotation_id}]);
+  assert.throws(()=>readerSnapshot({paperId:'paper-1',page:1,inkQueueRefs:Array(33).fill(ref)}));
+  assert.throws(()=>readerSnapshot({paperId:'paper-1',page:1,inkQueueRefs:[{...ref,annotation_id:'bad'}]}));
+})
+
 test('inline handoff rejects cross-paper, mismatched parent and malformed save identities', () => {
   const base = { paperId: 'paper-1', page: 1 }
   for (const change of [{ paperId: 'paper-2' }, { paperId: '' }, { parentId: '' }, { parentId: ' ' }, { parentId: 'x'.repeat(161) }, { parentId: 'a\u007fb' }, { parentId: 'a\nb' }, { page: 0 }, { page: 2001 }, { previousTool: 'ink' }, { previousTool: 'eraser' }, { previousTool: undefined }]) {

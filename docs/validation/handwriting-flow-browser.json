@@ -1,0 +1,104 @@
+{
+  "verified_at": "2026-10-03T17:00:00.913Z",
+  "complete": true,
+  "scope": "Synthetic PDF with real native annotation writes, host durable queue and trusted Chromium pen input.",
+  "environment": {
+    "browser": "151.0.7922.34",
+    "node": "v24.21.0",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "viewport": {
+      "width": 1280,
+      "height": 1100
+    },
+    "headless": true
+  },
+  "checks": [
+    "trusted pen creates the parent highlight on a synthetic PDF",
+    "finish restores the previous tool and paints pending preview before a deliberately delayed PDF write",
+    "normal text markup works while the host saves frozen handwriting",
+    "new annotation strokes retain their own parent and page while saved identities prevent preview duplication",
+    "preview navigation focuses actual handwriting regions on a previously offscreen page",
+    "return restores the prior PDF reading position",
+    "original quote action uses the source highlight rather than handwriting bounds",
+    "spatial region selector focuses only its own strokes and the transient outline clears",
+    "manual scrolling cancels temporary focus without changing PDF annotations",
+    "reload recovers a host-acknowledged pending batch without creating a second identity",
+    "host finishes acknowledged handwriting after the browser page is destroyed",
+    "lost PDF acknowledgement survives reload and retries the same immutable identity without duplicate ink",
+    "same-page background save keeps the current raster and does not interrupt an active pen stroke",
+    "ten warm-page finishes restore the tool and preview at the next measured paint",
+    "fresh PDF import recovers every saved stroke and its parent without queue state",
+    "temporary annotation-read failure preserves existing cards and ink preview until a successful refresh",
+    "offscreen cards defer SVG generation until their preview enters the viewport",
+    "narrow light and dark layouts keep quote text wrapped and readable with a reachable handwriting preview",
+    "original file remains unchanged with trusted pen input and no browser errors or external requests"
+  ],
+  "metrics": {
+    "finish_first_paint": {
+      "elapsed": 6.699999988079071,
+      "tool": "underline",
+      "sessionHidden": true,
+      "previewCount": 1,
+      "parentPreviewStrokes": 2,
+      "expectedStrokes": 2,
+      "queue": [
+        {
+          "id": "c5efb256-1458-42de-b2cb-f6f15be95bfa",
+          "status": "staging"
+        }
+      ]
+    },
+    "injected_write_ms": 2073,
+    "focus_lifetime_observed_ms": 2003,
+    "finish_warm_page": {
+      "samples_ms": [
+        5.700000017881393,
+        5.9000000059604645,
+        5.799999982118607,
+        5.300000011920929,
+        5.700000017881393,
+        5.600000023841858,
+        6.699999988079071,
+        6.700000017881393,
+        6.0999999940395355,
+        5.4000000059604645
+      ],
+      "count": 10,
+      "p50_ms": 5.700000017881393,
+      "p95_ms": 6.700000017881393,
+      "max_ms": 6.700000017881393,
+      "definition": "Trusted click on Finish to the next requestAnimationFrame with restored tool, hidden session and visible preview; same loaded PDF page, ten real saves."
+    },
+    "quote_light": {
+      "scrollWidth": 155,
+      "clientWidth": 155,
+      "whiteSpace": "normal",
+      "contrast": 18.896452054380127
+    },
+    "quote_dark": {
+      "scrollWidth": 155,
+      "clientWidth": 155,
+      "whiteSpace": "normal",
+      "contrast": 15.026101925946511
+    }
+  },
+  "browser_errors": [],
+  "external_requests": 0,
+  "real_provider_calls": 0,
+  "screenshots": [
+    ".local/handwriting-flow-NZ55Nj/handwriting-region-focused.png",
+    ".local/handwriting-flow-NZ55Nj/handwriting-flow-read-error.png",
+    ".local/handwriting-flow-NZ55Nj/handwriting-flow-saved.png",
+    ".local/handwriting-flow-NZ55Nj/handwriting-flow-narrow.png",
+    ".local/handwriting-flow-NZ55Nj/handwriting-flow-narrow-dark.png"
+  ],
+  "lost_acknowledgements": 1,
+  "refused_annotation_reads": 1,
+  "native_write_attempts": 17,
+  "limitations": [
+    "No physical Pencil, iPadOS, Sidecar, Safari or Electron was exercised.",
+    "The 2-second PDF write delay and lost acknowledgement are deliberately injected. Warm-page p95 uses ten headless-browser samples on this machine; it is not a general production performance guarantee. Pen-motion frame latency was not measured.",
+    "Recovery covers completed batches acknowledged by host storage; an unacknowledged or incomplete pen stroke is outside this guarantee."
+  ]
+}

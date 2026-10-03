@@ -53,7 +53,8 @@
     "docs/auto-parse-flow.md",
     "docs/paper-review-skill-design.md",
     "docs/whiteboard-design.md",
-    "docs/board-pages.md"
+    "docs/board-pages.md",
+    "docs/handwriting-interaction-design.md"
   ],
   "dsh": {
     "bundle": {
@@ -92,6 +93,7 @@
     "test:pencil-markup": "node scripts/pencil-markup-browser-fixture.mjs",
     "test:pencil-touch": "node scripts/pencil-touch-browser-fixture.mjs",
     "test:linked-handwriting": "node scripts/linked-handwriting-browser-fixture.mjs",
+    "test:handwriting-flow": "node scripts/handwriting-flow-browser-fixture.mjs",
     "test:handwriting": "node scripts/handwriting-browser-fixture.mjs",
     "test:handwriting-harness": "node scripts/handwriting-harness-smoke.mjs",
     "test:feedback": "node scripts/feedback-browser-fixture.mjs",

@@ -16,6 +16,15 @@ const inkSource=snippet('adoptInkHandoff','async function returnToInkDraft(');
 const publishSource=source.slice(source.indexOf('function publishReaderState()'),source.indexOf('async function restoreReaderState()'));
 const inkModule=vm.createContext({window:{}});
 vm.runInContext(await readFile(new URL('../web/pdf-reader.js',import.meta.url),'utf8'),inkModule);
+test('finishing or cancelling a jump clears only its own loading status',async()=>{
+  const shell=await readFile(new URL('../web/reading-shell.js',import.meta.url),'utf8');
+  const body=shell.match(/function focusChanged\(info\)\{[^\n]+\}/)[0];let value='';
+  const context={backPosition:{hidden:true},status:(text,error,options)=>{if(options?.clearIf&&value!==options.clearIf)return;value=text;}};
+  vm.createContext(context);vm.runInContext(body,context);
+  context.focusChanged({pending:true,canReturn:true});assert.equal(value,'正在定位…');assert.equal(context.backPosition.hidden,false);
+  context.focusChanged({pending:false,canReturn:true});assert.equal(value,'');
+  value='保存未确认';context.focusChanged({pending:false,canReturn:false});assert.equal(value,'保存未确认');assert.equal(context.backPosition.hidden,true);
+});
 function environment({table=false,readerId='paper-a',paper={id:'paper-a',pdf:true},panelValues={},snapshot=null}={}){
   const nodes=new Map(),calls=[],visibility=[],panels={annotations:false,metadata:false,chat:false,...panelValues};
   const element=id=>{if(!nodes.has(id))nodes.set(id,{hidden:false,open:false,value:'',dataset:{readingSide:'left'},classList:{toggle(){}},setAttribute(){},removeAttribute(){}});return nodes.get(id);};
@@ -30,7 +39,7 @@ function environment({table=false,readerId='paper-a',paper={id:'paper-a',pdf:tru
     loadAnnotations:async id=>calls.push(['annotations',id]),renderAnnotations(){},loadFeedback:id=>calls.push(['feedback',id]),loadModels(){},
     loadGraph:async()=>calls.push(['graph']),publishReaderState:()=>calls.push(['publish']),currentHarnessRoute:()=>null,toast:(...args)=>calls.push(['toast',...args]),
     openAnnotation:()=>{throw new Error('This fixture has no annotation dialog draft');},
-    clearSelection:()=>{context.state.selection=null;element('selection-tools').hidden=true;},initializedReader:true,pendingReferenceOpen:null,pendingInkHandoff:null,
+    clearSelection:()=>{context.state.selection=null;element('selection-tools').hidden=true;},initializedReader:true,pendingReferenceOpen:null,pendingInkHandoff:null,inkQueue:null,
   };
   vm.createContext(context);vm.runInContext(tabSource+'\n'+selectionSource+'\n'+restoreSource+'\n'+referenceSource,context,{filename:'web/app.js:reading-coordinators'});
   return {context,calls,visibility,panels,element,isTable:()=>table};
@@ -128,56 +137,36 @@ test('a durable paper chat draft wins over an older parent-frame handoff',async(
   assert.equal(f.calls.some(value=>value[0]==='draft'||value[0]==='context'),false);
 });
 
-for(const {oldPaperId,failAdoption,oldAttempted=true} of [{oldPaperId:'paper-a',failAdoption:false},{oldPaperId:'paper-b',failAdoption:false},{oldPaperId:'paper-b',failAdoption:true},{oldPaperId:'paper-b',failAdoption:false,oldAttempted:false}])test(`an ${oldAttempted?'uncertain':'unattempted'} durable ink save from ${oldPaperId} keeps the newer handoff through reconciliation${failAdoption?' and a later storage failure':''}`,async()=>{
-  const old={draft:{paperId:oldPaperId,page:2,parentId:'source-note',paths:[[[10,20],[30,40]]],width:2,color:'#336699',revision:5},annotation_id:'55928353-ff78-43a3-960c-03d253ee9523',attempted:oldAttempted,updatedAt:100};
+for(const oldPaperId of ['paper-a','paper-b'])for(const failAdoption of [false,true])test(`host acceptance of immutable old ink preserves a later handoff from ${oldPaperId}${failAdoption?' through storage failure':''}`,async()=>{
+  const old={draft:{paperId:oldPaperId,page:2,parentId:'source-note',paths:[[[10,20],[30,40]]],width:2,color:'#336699',revision:5},annotation_id:'55928353-ff78-43a3-960c-03d253ee9523',attempted:true,updatedAt:100};
   const newer={draft:{paperId:'paper-a',page:2,parentId:'source-note',paths:[[[50,60],[70,80]]],width:2,color:'#336699',revision:8},annotation_id:'51175682-c95b-4b5a-a3c1-75e9b240c065',attempted:false,updatedAt:200};
-  const snapshot={paperId:'paper-a',page:2,tab:'reader',chatDraft:'',inkDraftRecord:structuredClone(newer),linkedHandwriting:{paperId:'paper-a',page:2,parentId:'source-note',previousTool:'underline'}};
-  const f=environment({snapshot}),c=f.context,buffer=inkModule.window.PaperPDFReader.createInkBuffer(),messages=[],writes=[],requests=[],restoredContexts=[];
-  const plain=value=>JSON.parse(JSON.stringify(value));let enabled=true,fail=true,durable=structuredClone(old),gate=null;
-  Object.assign(c,{
-    inkSaveBusy:false,inkSaveIdentity:null,restoringInkDraft:false,inkDraftStorageBlocked:false,inkSaveUncertain:false,inkSavePromise:null,inkDraftUpdatedAt:0,
-    handwritingUI:null,Blob,
-    window:{parent:{postMessage:value=>messages.push(plain(value))},location:{origin:'http://localhost:43121'},crypto:{randomUUID:()=>{throw new Error('Retrying immutable ink must not mint another identity');}}},
-    persistence:{get:async key=>{assert.equal(key,'reader:ink-draft');return structuredClone(durable);},put:async(key,value)=>{writes.push([key,plain(value)]);if(key==='reader:ink-draft'){if(value?.annotation_id===newer.annotation_id){assert.equal(enabled,false,'Adoption stays locked through durable storage');if(failAdoption)throw new Error('Synthetic adoption storage unavailable');}durable=structuredClone(value);}}},
-    pdfReader:{getInkDraft:()=>buffer.snapshot(),isInking:()=>buffer.isDrawing(),setInkEnabled:value=>{enabled=value;},restoreInkDraft:value=>{const restored=buffer.restore(value);if(restored)c.inkDraftChanged();return restored;},clearInk:revision=>{const cleared=buffer.clear(revision);if(cleared)c.inkDraftChanged();return cleared;}},
-    linkedHandwritingUI:{session:()=>({paperId:'paper-a',page:2,parentId:'source-note',previousTool:'underline'}),draftChanged(){},restore:async value=>{assert.equal(enabled,false,'Adoption stays locked through linked context restoration');restoredContexts.push(plain(value));}},
-    api:async(action,input)=>{assert.equal(action,'annotate');requests.push(plain(input));if(fail)throw new Error('Synthetic old acknowledgement still unavailable');if(gate)await gate;return{annotation:{id:input.annotation_id},duplicate:true};},
-    refreshPage:async page=>f.calls.push(['refresh',page]),
+  const snapshot={paperId:'paper-a',page:2,tab:'reader',chatDraft:'',inkDraftRecord:structuredClone(newer)};
+  const f=environment({snapshot}),c=f.context,buffer=inkModule.window.PaperPDFReader.createInkBuffer(),messages=[],requests=[];
+  const plain=value=>JSON.parse(JSON.stringify(value));let enabled=true,fail=true,durable=structuredClone(old);
+  Object.assign(c,{inkSaveBusy:false,inkSaveIdentity:null,restoringInkDraft:false,inkDraftStorageBlocked:false,inkSaveUncertain:false,inkDraftUpdatedAt:0,handwritingUI:null,Blob,TextEncoder,queueMicrotask,setTimeout,clearTimeout,
+    window:{parent:{postMessage:value=>messages.push(plain(value))},location:{origin:'http://localhost:43121'},crypto:{randomUUID:()=>{throw new Error('Immutable retry minted a new ID');}}},
+    persistence:{get:async()=>structuredClone(durable),put:async(key,value)=>{if(value?.annotation_id===newer.annotation_id&&failAdoption)throw new Error('Synthetic adoption storage unavailable');durable=structuredClone(value);}},
+    pdfReader:{getInkDraft:()=>buffer.snapshot(),isInking:()=>buffer.isDrawing(),setInkEnabled:value=>{enabled=value;},restoreInkDraft:value=>{const ok=buffer.restore(value);if(ok)c.inkDraftChanged();return ok;},clearInk:revision=>{const ok=buffer.clear(revision);if(ok)c.inkDraftChanged();return ok;}},
+    linkedHandwritingUI:{session:()=>null,draftChanged(){},restore:async()=>{}},
+    api:async(action,input)=>{assert.equal(action,'ink_queue_enqueue');requests.push(plain(input.batch));if(fail)throw new Error('Synthetic host acceptance unavailable');return {job:{...input.batch,batch:input.batch,status:'uncertain'}};},
   });
-  Object.assign(c.readingShell,{inkChanged(){},inkSaving(){}});c.paperChatUI.annotationsChanged=async()=>{};
-  vm.runInContext(inkSource+'\n'+publishSource,c,{filename:'web/app.js:ink-reconciliation'});
-  await c.restoreInkDraft();assert.equal(enabled,!oldAttempted);assert.equal(c.inkSaveIdentity.id,old.annotation_id);
-  await c.restoreReaderState();
-  if(!oldAttempted){
-    assert.equal(requests.length,0,'A fresh draft from another paper is never saved automatically merely to restore a handoff');
-    assert.deepEqual(plain(buffer.snapshot()),old.draft);assert.deepEqual(plain(c.pendingInkHandoff),newer);
-    assert.equal(c.inkSaveUncertain,false);assert.equal(enabled,true);
-    assert.equal(await c.saveInkDraft(),false,'The user explicitly attempts the old save; its failed acknowledgement must still preserve both drafts');
-  }
+  Object.assign(c.readingShell,{inkChanged(){},inkSaving(){}});
+  vm.runInContext(await readFile(new URL('../web/ink-queue-client.js',import.meta.url),'utf8'),c);
+  c.inkQueue=c.window.PaperInkQueueClient.create({api:c.api,persistence:c.persistence,onChange:()=>{c.pdfReader.setInkEnabled(!c.inkQueue.blocked());c.publishReaderState();},onAccepted:async()=>{await c.persistence.put('reader:ink-draft',null);const record=c.pendingInkHandoff;if(record){c.pendingInkHandoff=null;setTimeout(()=>void c.adoptInkHandoff(record),0);}}});
+  vm.runInContext(inkSource+'\n'+publishSource,c);
+  const settle=()=>new Promise(resolve=>setTimeout(resolve,15));
+  await c.restoreInkDraft();await settle();await c.restoreReaderState();await settle();
   assert.equal(requests.length,1);assert.equal(requests[0].annotation_id,old.annotation_id);assert.deepEqual(requests[0].paths,old.draft.paths);
-  assert.deepEqual(plain(buffer.snapshot()),old.draft,'An unknown old request remains immutable; later points cannot be substituted into its retry');
-  assert.equal(c.inkSaveUncertain,true);assert.equal(enabled,false);
-  assert.deepEqual(plain(c.pendingInkHandoff),newer);assert.equal(restoredContexts.length,0,'Do not activate the newer annotation while the old save is unconfirmed');
-  assert.deepEqual(messages.at(-1).snapshot.inkDraftRecord,newer,'The parent keeps later ink through another iframe replacement');
-  assert.equal(durable.annotation_id,old.annotation_id);assert.equal(durable.attempted,true);
-  fail=false;
-  let release;gate=new Promise(resolve=>{release=resolve;});
-  const first=c.saveInkDraft(),overlap=c.saveInkDraft();release();
-  assert.deepEqual(await Promise.all([first,overlap]),[false,false],'Every caller sees unfinished later ink instead of ending the session after only the old save');
-  assert.equal(requests.length,2);assert.deepEqual(requests[1],requests[0],'The successful retry uses the same exact id and geometry');
-  assert.deepEqual(plain(buffer.snapshot()),newer.draft);assert.equal(c.inkSaveIdentity.id,newer.annotation_id);
-  assert.equal(c.inkSaveUncertain,false);assert.equal(enabled,true);assert.equal(c.pendingInkHandoff,null);
+  assert.equal(buffer.snapshot(),null,'Frozen geometry leaves the editable buffer');assert.equal(enabled,false);
+  assert.deepEqual(plain(c.pendingInkHandoff),newer);assert.equal(durable.annotation_id,old.annotation_id);
+  assert.deepEqual(messages.at(-1).snapshot.inkDraftRecord,newer);
+  fail=false;await c.inkQueue.retry(old.annotation_id);await settle();
+  assert.deepEqual(requests[1],requests[0]);assert.equal(c.inkQueue.blocked(),false);
+  assert.equal(c.inkQueue.records()[0].status,'uncertain','PDF uncertainty survives successful host staging');
+  assert.deepEqual(plain(buffer.snapshot()),newer.draft);assert.equal(c.inkSaveIdentity.id,newer.annotation_id);assert.equal(enabled,true);assert.equal(c.pendingInkHandoff,null);
   assert.deepEqual(durable,failAdoption?null:newer);assert.deepEqual(messages.at(-1).snapshot.inkDraftRecord,newer);
-  assert.deepEqual(restoredContexts,[{paperId:'paper-a',page:2,parentId:'source-note',previousTool:'highlight'}]);
-  assert.equal(writes.filter(([key,value])=>key==='reader:ink-draft'&&value?.annotation_id===newer.annotation_id).length,1);
-  if(failAdoption){
-    assert.ok(f.calls.some(call=>call[0]==='toast'&&call[1].includes('恢复未完成')));
-    c.window.crypto.randomUUID=()=> '8ef9b59e-adc7-44b4-81ab-8217b02ef37e';
-    buffer.start({paperId:'paper-a',page:2},[90,100],{width:2,color:'#336699'});buffer.append([110,120]);buffer.end();c.inkDraftChanged();
-    const published=messages.at(-1).snapshot.inkDraftRecord;
-    assert.equal(published.draft.paths.length,2,'Freshly edited ink is published after failed persistence, never shadowed by the older pending record');
-    assert.deepEqual(published.draft.paths[1],[[90,100],[110,120]]);assert.equal(published.attempted,false);assert.notEqual(published.annotation_id,newer.annotation_id);
-  }
+  if(failAdoption)assert.ok(f.calls.some(call=>call[0]==='toast'&&call[1].includes('恢复未完成')));
+  c.inkQueue.dispose();
 });
 
 test('a late saved-page restoration cannot attach paper A selection to newly opened paper B',async()=>{

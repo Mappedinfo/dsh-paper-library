@@ -2,15 +2,23 @@
 
 /** A handwriting session belongs to one saved annotation, on the PDF itself. */
 window.PaperLinkedHandwriting = (() => {
-  function create({api,persistence,reader,shell,state,toast,saveInk,inkBusy,inkUncertain,navigate,changed,publish,available}) {
+  function create({api,persistence,reader,shell,state,toast,saveInk,inkBusy,inkUncertain,queue,navigate,changed,publish,available}) {
     let session=null, ending=false, starting=false, timer=null;
     const jobs=new Map(), messages=new Map(), corrections=new Map(), correctionLoads=new Map(), correctionJobs=new Set(), correctionViews=new Map();
     const node=(tag,text)=>{const n=document.createElement(tag);if(text)n.textContent=text;return n;};
     const bar=node('div');bar.id='linked-handwriting-session';bar.className='linked-handwriting-session';bar.hidden=true;
     const status=node('span');status.id='linked-handwriting-status';status.setAttribute('role','status');
-    const finishButton=node('button','结束手写');finishButton.id='linked-handwriting-finish';finishButton.className='button primary';
+    const finishButton=node('button','完成手写');finishButton.id='linked-handwriting-finish';finishButton.className='button primary';
     finishButton.addEventListener('click',()=>void finish());bar.append(status,finishButton);document.getElementById('reader-ink-draft').before(bar);
     const identity=(id,parent)=>JSON.stringify([id,parent]);
+    const recognitionIntents=new Map();let intentLoad=null,intentWrites=Promise.resolve();
+    const intentKey='reader:linked-recognition-pending';
+    function loadIntents(){if(!intentLoad)intentLoad=(async()=>{for(const item of await persistence?.get(intentKey)||[])if(typeof item.paperId==='string'&&typeof item.parentId==='string')recognitionIntents.set(identity(item.paperId,item.parentId),item);})().catch(error=>{intentLoad=null;throw error;});return intentLoad;}
+    function writeIntents(){const value=[...recognitionIntents.values()];intentWrites=intentWrites.catch(()=>{}).then(()=>persistence?.put(intentKey,value));return intentWrites;}
+    async function planRecognition(value){
+      try{await loadIntents();const token=identity(value.paperId,value.parentId);if(recognitionIntents.size>=64&&!recognitionIntents.has(token)){toast('待识别批注较多，请从卡片手动转文字；原笔迹仍会保存。');return;}recognitionIntents.set(token,{paperId:value.paperId,parentId:value.parentId});await writeIntents();await saved(value.paperId,value.parentId);}
+      catch(error){toast(`自动识别安排未能暂存，可从卡片转文字：${error.message}`,true);}
+    }
     async function keyFor(id,parent){const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(identity(id,parent)));return `reader:linked-recognition:${[...new Uint8Array(bytes)].map(n=>n.toString(16).padStart(2,'0')).join('')}`;}
     function active(id,parent){return session?.paperId===id&&session.parentId===parent;}
     function sync(){
@@ -20,7 +28,7 @@ window.PaperLinkedHandwriting = (() => {
       for(const card of document.querySelectorAll('#annotation-list > .annotation-card')){
         const on=active(state.active?.id,card.dataset.annotationId),button=card.querySelector('[data-note-action="handwriting"]');
         card.classList.toggle('is-handwriting',on);
-        if(button){button.setAttribute('aria-pressed',String(on));button.textContent=on?'结束手写':'手写';button.disabled=ending||starting;}
+        if(button){button.setAttribute('aria-pressed',String(on));button.textContent=on?'完成手写':'手写';button.disabled=ending||starting;}
       }
     }
     function remember(){publish?.();void persistence?.put('reader:linked-handwriting',session?{...session}:null).catch(error=>toast(`手写模式未能暂存：${error.message}`,true));sync();}
@@ -34,6 +42,7 @@ window.PaperLinkedHandwriting = (() => {
       if(!item?.id||!note?.id||ending||starting)return;
       if(active(item.id,note.id)){await finish();return;}
       if(session&&!await finish())return;
+      if(inkBusy()){toast('上一份笔迹正在暂存，确认后即可继续手写；仍可继续阅读。');return;}
       const draft=reader()?.getInkDraft();
       if(draft&&(draft.paperId!==item.id||draft.parentId!==note.id)){toast('请先保存或取消当前笔迹，再给这条批注手写。',true);return;}
       const previous=shell()?.tool().type||'highlight';
@@ -51,10 +60,10 @@ window.PaperLinkedHandwriting = (() => {
       const original={...session};
       try{
         if(reader()?.isInking()){toast('请先抬笔，再结束手写。');return false;}
-        if(reader()?.getInkDraft()&&!await saveInk())return false;
+        if(reader()?.getInkDraft()&&!saveInk())return false;
         reader()?.setInkContext(null);session=null;shell()?.setTool(original.previousTool);remember();
         const note=state.active?.id===original.paperId?state.annotations.find(n=>n.id===original.parentId):null;
-        if(note?.linked_ink&&note.linked_ink.transcription_source!=='edited'&&(!note.linked_ink.transcript||note.linked_ink.transcript_stale)&&available())void recognize(original.paperId,note);
+        void planRecognition(original);
         return true;
       }finally{ending=false;sync();}
     }
@@ -80,31 +89,68 @@ window.PaperLinkedHandwriting = (() => {
       return canvas.toDataURL('image/png').split(',')[1];
     }
     function setMessage(id,parent,text){messages.set(identity(id,parent),text);const escaped=CSS.escape(parent);const card=document.querySelector(`#annotation-list > [data-annotation-id="${escaped}"]`);if(card&&state.active?.id===id){let p=card.querySelector('.linked-recognition-status');if(!p){p=node('p');p.className='small muted linked-recognition-status';p.setAttribute('role','status');card.append(p);}p.textContent=text;}}
-    async function recognize(id,note,{fresh=false}={}){
+    async function recognize(id,note,{fresh=false,automatic=false}={}){
       const identityKey=identity(id,note.id);if(jobs.has(identityKey))return;
+      if(queue?.()?.hasPending(id,note.id)||active(id,note.id)){setMessage(id,note.id,'笔迹保存后即可转文字；原笔迹一直保留。');return;}
       if(!available()){toast('转文字需要在论文对话中选择支持图片的模型；原笔迹已保存。',true);return;}
       jobs.set(identityKey,true);setMessage(id,note.id,'正在识别手写，原笔迹已保存…');
       try{
+        await loadIntents();if(automatic){const intent=recognitionIntents.get(identityKey);if(!intent||intent.attempted)return;recognitionIntents.set(identityKey,{...intent,attempted:true});await writeIntents();}
         const key=await keyFor(id,note.id),group=note.linked_ink;if(!group)throw new Error('请先保存手写笔迹。');
         let request=await persistence?.get(key);
         if(request&&request.geometry_version!==group.geometry_version&&!fresh)throw new Error('笔迹已有变化。请点「重新识别」为当前笔迹发起新请求。');
         if(!request||fresh){request={request_id:crypto.randomUUID(),geometry_version:group.geometry_version,expected_version:group.version,save_request_id:crypto.randomUUID()};await persistence?.put(key,request);}
         if(!Object.hasOwn(request,'transcript')){const result=await api('handwriting_recognize',{id,annotation_id:note.id,image:recognitionImage(group),request_id:request.request_id});request={...request,transcript:result.text};await persistence?.put(key,request);}
         await api('linked_handwriting_text',{id,parent_id:note.id,transcript:request.transcript,transcription_source:'model',expected_version:request.expected_version,request_id:request.save_request_id});
-        await persistence?.put(key,null);setMessage(id,note.id,'手写已转为文字，可展开校对；原笔迹仍保留。');await changed(id,note.page);
+        await persistence?.put(key,null);recognitionIntents.delete(identityKey);await writeIntents();setMessage(id,note.id,'手写已转为文字，可展开校对；原笔迹仍保留。');await changed(id,note.page);
       }catch(error){setMessage(id,note.id,`识别未完成：${error.message} 原笔迹仍保留。`);toast('手写已保存；文字识别未完成，可在批注下重试。',true);}
       finally{jobs.delete(identityKey);}
     }
+    const previews=new Map(),lazyPreviews=new Map();
+    const previewObserver=typeof IntersectionObserver==='function'?new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting)paintPreview(entry.target);}):null;
+    function paintPreview(target){const render=lazyPreviews.get(target);if(!render)return;lazyPreviews.delete(target);previewObserver?.unobserve(target);render();}
+    function beforeRender(){previewObserver?.disconnect();lazyPreviews.clear();}
+    function afterRender(){for(const target of lazyPreviews.keys()){const box=target.getBoundingClientRect();if(target.getClientRects().length&&box.bottom>0&&box.top<innerHeight&&box.right>0&&box.left<innerWidth)paintPreview(target);else previewObserver?.observe(target);}}
+    function preview(note){return window.PaperInkPreview?.prepare({annotations:note.linked_ink?.annotations||[],pending:queue?.()?.records()||[],paperId:state.active?.id,parentId:note.id,geometryVersion:note.linked_ink?.geometry_version});}
+    async function reveal(note,regionId){
+      const model=preview(note);if(!model?.regions.length)return;
+      const region=model.regions.find(value=>value.id===regionId);
+      const targets=region?[region]:model.regions.filter(value=>value.page===note.page);
+      if(!targets.length)return;
+      await reader()?.revealRegion({paperId:state.active.id,page:targets[0].page,rects:targets.map(value=>value.bounds),kind:'ink',focusId:`${note.id}:${regionId||'all'}`});
+    }
+    async function saved(id,parent){
+      await loadIntents().catch(()=>{});
+      const token=identity(id,parent);if(!recognitionIntents.has(token)||recognitionIntents.get(token).attempted)return;
+      if(!parent||state.active?.id!==id||active(id,parent)||queue?.()?.hasPending(id,parent))return;
+      const draft=reader()?.getInkDraft();if(draft?.paperId===id&&draft.parentId===parent)return;
+      const note=state.annotations.find(value=>value.id===parent),group=note?.linked_ink;
+      if(group&&(group.transcription_source==='edited'||group.transcript&&!group.transcript_stale)){recognitionIntents.delete(token);void writeIntents().catch(()=>{});return;}
+      if(group&&available())void recognize(id,note,{automatic:true});
+    }
+    async function paperReady(id){await loadIntents().catch(()=>{});for(const item of recognitionIntents.values())if(item.paperId===id)void saved(id,item.parentId);}
     function decorate(card,note){
-      const group=note.linked_ink;if(!group)return;
+      const group=note.linked_ink,pending=(queue?.()?.records()||[]).filter(job=>job.paperId===state.active?.id&&job.parentId===note.id);
+      if(!group&&!pending.length)return;
       const section=node('div');section.className='annotation-handwriting linked-handwriting-summary';
-      const label=group.transcription_source==='model'?'AI 识别待校对':group.transcription_source==='edited'?'已校对文字':'原笔迹已保留';
-      section.append(node('p',`关联手写 · ${label}${group.transcript_stale?' · 有新增笔迹，文字待更新':''}`));
-      if(group.transcript)section.append(node('p',group.transcript));
+      const unsettled=pending.filter(job=>job.status!=='saved');
+      const summary=node('p',unsettled.length?window.PaperInkQueueClient.label(unsettled[0].status):'已保存到 PDF');summary.className='small linked-ink-save-status';summary.setAttribute('role','status');section.append(summary);
+      if(group?.annotations?.length||pending.length){
+        const button=node('button');button.type='button';button.className='linked-ink-preview';button.dataset.noteAction='linked-ink';button.setAttribute('aria-label','查看笔迹，定位到 PDF 中的手写位置');button.append(node('span','查看笔迹 ↗'));section.append(button);
+        lazyPreviews.set(button,()=>{const model=preview(note);if(!model?.strokes.length)return;
+        let cached=previews.get(model.cacheKey);if(!cached){cached=window.PaperInkPreview.render(document,model,{label:'关联手写原笔迹'});previews.set(model.cacheKey,cached);while(previews.size>40)previews.delete(previews.keys().next().value);}
+        button.replaceChildren(cached.cloneNode(true),node('span','查看笔迹 ↗'));
+        if(model.regions.length>1){const regions=node('div');regions.className='linked-ink-regions';model.regions.forEach((region,index)=>{const b=node('button',`笔迹 ${index+1}`);b.className='button subtle';b.dataset.noteAction='linked-ink';b.dataset.regionId=region.id;regions.append(b);});button.after(regions);}
+        if(model.truncated||model.invalidCount)button.after(node('p','预览未能完整显示，请在 PDF 中查看原笔迹。'));
+        });
+      }
+      for(const job of unsettled.filter(job=>['stage_failed','uncertain'].includes(job.status))){const b=node('button','重试保存');b.className='button subtle';b.dataset.noteAction='ink-retry';b.dataset.inkId=job.annotation_id;section.append(b);if(job.error?.message)section.append(node('p',job.error.message));}
+      if(group?.transcript){const label=group.transcription_source==='model'?'AI 识别待校对':'已校对文字';section.append(node('p',`${label}${group.transcript_stale?' · 有新增笔迹，文字待更新':''}`),node('p',group.transcript));}
       const actions=node('div');actions.className='annotation-actions';
       const recognizeButton=node('button','转文字 / 重试');recognizeButton.className='button subtle';recognizeButton.dataset.noteAction='linked-recognize';actions.append(recognizeButton);
       const fresh=node('button','重新识别');fresh.className='button subtle';fresh.dataset.noteAction='linked-recognize-new';fresh.title='对当前全部关联笔迹发起一次新的识别，可能产生模型调用费用';actions.append(fresh);section.append(actions);
-      if(group.transcript)correctionEditor(section,note,state.active.id);
+      recognizeButton.disabled=fresh.disabled=!group||Boolean(unsettled.length);
+      if(group?.transcript)correctionEditor(section,note,state.active.id);
       const message=messages.get(identity(state.active?.id,note.id));if(message){const p=node('p',message);p.className='small muted linked-recognition-status';section.append(p);}card.append(section);
     }
     function correctionEditor(section,note,id){
@@ -131,7 +177,7 @@ window.PaperLinkedHandwriting = (() => {
       discard.addEventListener('click',async()=>{await ready;if(correctionJobs.has(token))return;correctionJobs.add(token);update();try{await persistence?.put(key,null);corrections.delete(token);}catch(error){toast(error.message,true);}finally{correctionJobs.delete(token);update();}});
       rebase.addEventListener('click',async()=>{await ready;if(correctionJobs.has(token))return;correctionJobs.add(token);update();try{const current=(await api('annotations',{id})).annotations.find(value=>value.id===note.id)?.linked_ink;if(!current)throw new Error('原批注已不存在，校对草稿仍保留。');const draft={text:corrections.get(token).text,expected_version:current.version,current_transcript:current.transcript};await persistence?.put(key,draft);corrections.set(token,draft);hint.textContent='已读取最新版本，请核对文字后保存。';}catch(error){toast(error.message,true);}finally{correctionJobs.delete(token);update();}});
     }
-    return {toggle,finish,restore,sync,decorate,recognize,active,session:()=>session?{...session}:null,draftChanged:schedule};
+    return {toggle,finish,restore,sync,decorate,beforeRender,afterRender,reveal,saved,paperReady,recognize,active,session:()=>session?{...session}:null,draftChanged:schedule};
   }
   return {create};
 })();

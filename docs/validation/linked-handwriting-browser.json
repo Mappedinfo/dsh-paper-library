@@ -1,7 +1,7 @@
 {
-  "verified_at": "2026-10-03T15:40:09.175Z",
+  "verified_at": "2026-10-03T16:57:18.568Z",
   "complete": true,
-  "scope": "Synthetic Chromium inline handwriting linked to native PDF text annotations, using the real Python worker and host storage.",
+  "scope": "Synthetic Chromium inline handwriting linked to native PDF text annotations, using the real Python worker and durable host queue.",
   "checks": [
     "trusted pen creates a standard text-bound highlight",
     "sidebar handwriting button spans its action row with an unobstructed 44-pixel target",
@@ -12,15 +12,15 @@
     "touch input does not create linked handwriting",
     "same toggle flushes mouse-fallback strokes and restores the prior text tool",
     "normal text markup works immediately after leaving linked handwriting",
-    "unknown save acknowledgement keeps exact linked draft and locks edits",
-    "reload restores parent binding and same retry ID without duplicate ink",
-    "failed exit retains selected highlight and unsaved strokes",
-    "explicit retry saves a refused batch and then permits exit",
+    "unknown staging acknowledgement freezes exact linked batch and blocks unconfirmed new input",
+    "reload reconciles original host identity and parent binding without duplicate ink",
+    "failed staging retains exact preview while finish immediately restores reading",
+    "explicit retry saves a refused batch without reopening or blocking reading",
     "existing attachment-based note remains accessible and unchanged",
     "linked ink belongs under its parent instead of creating independent sidebar cards",
     "export and fresh import recover native ink relationships and legacy attachment from PDF alone",
     "confirmed linked strokes reopen in the reading page",
-    "600-pixel viewport keeps full-row handwriting and enlarged finish controls visible with pending retry",
+    "600-pixel viewport keeps handwriting, finish and retained queue retry controls reachable",
     "dark-theme inactive handwriting action preserves readable contrast and visible click targets",
     "original bytes unchanged with no browser errors or external model requests"
   ],
@@ -28,14 +28,14 @@
   "external_requests": 0,
   "real_provider_calls": 0,
   "screenshots": [
-    ".local/linked-handwriting-w1iqDu/inline-linked-draft.png",
-    ".local/linked-handwriting-w1iqDu/linked-handwriting-reopened.png",
-    ".local/linked-handwriting-w1iqDu/linked-handwriting-narrow-targets.png",
-    ".local/linked-handwriting-w1iqDu/linked-handwriting-narrow-dark.png"
+    ".local/linked-handwriting-j4fT2x/inline-linked-draft.png",
+    ".local/linked-handwriting-j4fT2x/linked-handwriting-reopened.png",
+    ".local/linked-handwriting-j4fT2x/linked-handwriting-narrow-targets.png",
+    ".local/linked-handwriting-j4fT2x/linked-handwriting-narrow-dark.png"
   ],
-  "ink_requests": 8,
-  "lost_acknowledgements": 1,
-  "refused_requests": 3,
+  "ink_enqueue_requests": 8,
+  "lost_staging_acknowledgements": 1,
+  "refused_staging_requests": 2,
   "trusted_pointer_types": [
     "pen",
     "touch",
@@ -44,6 +44,7 @@
   "limitations": [
     "Physical Apple Pencil, Sidecar and Safari were not exercised.",
     "Reload recovery covers completed strokes acknowledged by host storage; abrupt termination of unfinished or unacknowledged writes is not guaranteed.",
+    "The final narrow-layout scenario leaves one refused staging batch recoverable in the isolated fixture library.",
     "Fixed-width ink; no pressure or iPadOS palm rejection claim."
   ]
 }

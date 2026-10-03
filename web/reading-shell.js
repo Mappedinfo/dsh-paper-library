@@ -8,7 +8,7 @@ window.PaperReadingShell = (() => {
     underline: '拖选文字，保存为 PDF 下划线批注。',
     strikeout: '拖选文字，保存为 PDF 删除线批注。',
     note: '点击页面中的位置，添加一条便笺。',
-    ink: '用 Pencil 或鼠标直接写画；写完点「保存手写」，可逐笔撤销。',
+    ink: '用 Pencil 或鼠标直接写画；点「完成手写」继续阅读，笔迹自动保存。',
   };
   const MODES = { auto: '自动着色', ask: '勾选后提问' };
   const MODE_HINTS = {
@@ -117,7 +117,7 @@ window.PaperReadingShell = (() => {
     const inkReturn=button('reader-ink-return','返回笔迹',()=>void returnToInk?.());
     const inkUndo=button('reader-ink-undo','撤销一笔',()=>reader()?.undoInk());
     const inkDiscard=button('reader-ink-discard','取消手写',()=>reader()?.clearInk());
-    const inkSave=button('reader-ink-save','保存手写',()=>void saveInk?.());
+    const inkSave=button('reader-ink-save','完成手写',()=>{if(saveInk?.()&&!reader()?.getInkContext?.()){tool='select';applyTool();sync();}});
     inkSave.classList.add('primary');inkBar.append(inkLabel,inkReturn,inkUndo,inkDiscard,inkSave);message.after(inkBar);
     function syncInk(){
       const draft=reader()?.getInkDraft?.();
@@ -132,11 +132,30 @@ window.PaperReadingShell = (() => {
       inkDiscard.textContent=inkError?'放弃重试':'取消手写';
       inkDiscard.title=inkError?'仅移除草稿，已写入 PDF 的笔迹仍保留。':'';
       input.disabled=tool==='ink'&&(inkBusy||Boolean(draft));widthInput.disabled=inkBusy||Boolean(draft);
-      inkSave.textContent=inkError?'重试保存':'保存手写';
+      inkSave.textContent=inkError?'重试保存':'完成手写';
     }
     function inkChanged(){inkError='';syncInk();}
     function inkSaving(value,error=''){inkBusy=Boolean(value);inkError=error;inkBar.setAttribute('aria-busy',String(inkBusy));syncInk();}
-    const beforeUnload=event=>{if(reader()?.getInkDraft?.()||reader()?.isInking?.()){event.preventDefault();event.returnValue='';}};
+    let inkQueue=null;
+    const queueMenu=node('details',null,'ink-queue-menu');queueMenu.id='ink-queue-menu';queueMenu.hidden=true;
+    const queueSummary=node('summary','笔迹');queueSummary.id='ink-queue-summary';queueMenu.append(queueSummary);
+    const queuePanel=node('div',null,'ink-queue-panel');queuePanel.setAttribute('aria-label','手写保存进度');queueMenu.append(queuePanel);ribbon.insertBefore(queueMenu,fullscreen);
+    function queueChanged(records){
+      const pending=records.filter(job=>job.status!=='saved');queueMenu.hidden=!records.length;queueSummary.textContent=pending.length?`笔迹 · ${pending.length} 待保存`:'笔迹已保存';
+      queueSummary.classList.toggle('error',pending.some(job=>['stage_failed','uncertain'].includes(job.status)));
+      queuePanel.replaceChildren();
+      const shown=pending.length?pending:records.slice(-1);
+      for(const job of shown){const row=node('div',null,'ink-queue-item');row.dataset.inkId=job.annotation_id;
+        const label=node('p',`第 ${job.page} 页 · ${window.PaperInkQueueClient.label(job.status)}`);label.setAttribute('role','status');row.append(label);
+        if(job.error?.message)row.append(node('p',job.error.message,'small error'));
+        if(['stage_failed','uncertain'].includes(job.status)){const retry=button('', '重试保存',async()=>{retry.disabled=true;try{await inkQueue?.retry(job.annotation_id);}catch(error){toast(error.message,true);}finally{retry.disabled=false;}});row.append(retry);}
+        if(job.status!=='saved'){const exportInk=button('','导出笔迹',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(job,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=`handwriting-${job.annotation_id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});row.append(exportInk);}queuePanel.append(row);
+      }
+      const refresh=button('','刷新保存状态',()=>void inkQueue?.refresh().catch(error=>toast(error.message,true)));queuePanel.append(refresh);
+    }
+    const backPosition=button('reader-return-position','返回刚才位置',()=>void reader()?.returnToReadingPosition());backPosition.hidden=true;readerTools.append(backPosition);
+    function focusChanged(info){backPosition.hidden=!info?.canReturn;if(info?.pending)status('正在定位…');else status('',false,{clearIf:'正在定位…'});}
+    const beforeUnload=event=>{if(reader()?.getInkDraft?.()||reader()?.isInking?.()||inkQueue?.blocked()){event.preventDefault();event.returnValue='';}};
     window.addEventListener('beforeunload',beforeUnload);
     const header=document.querySelector('.paper-header');header.classList.add('reader-document-summary');
     // The same summary remains available next to editable fields, without taking PDF space.
@@ -203,7 +222,7 @@ window.PaperReadingShell = (() => {
     // Prevent a homepage link from discarding a question/metadata draft.
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
     sync();
-    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,inputChanged,setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
+    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
       dispose(){window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placePenOptions);$('paper-tools').removeEventListener('scroll',placePenOptions);document.removeEventListener('click',closePenSettings);document.removeEventListener('keydown',penSettingsKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);document.removeEventListener('click',closeCitations);document.removeEventListener('keydown',citationKey,true);}};
   }
   return {create};

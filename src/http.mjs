@@ -12,6 +12,7 @@ import { createChallengeMining } from './harness/challenge-mining.mjs';
 import { createBoardStore } from './harness/board-store.mjs';
 import { handleBoardRequest } from './harness/board-tools.mjs';
 import { createPaperLibrarySettings } from './harness/settings.mjs';
+import { createInkQueue } from './ink-queue.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
 for (const name of ['workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css','local-state.js','language-learning.js','language-learning.css','theme.js','theme.css','latex-workspace.js','latex-workspace.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
@@ -21,7 +22,7 @@ for (const name of ['settings.js','settings.css']) staticFiles[name] = [name, na
 for (const name of ['challenge-mining.js','challenge-mining.css','annotation-threads.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['board.js','board.css','board-source.js','board-render.js','board-bridge.js','board-mermaid.js','board-drawio.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 const languageActions = new Set(['language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
-for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
 const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:'];
 function browserStateKey(key, listPrefix = false) {
@@ -105,7 +106,8 @@ export function createFetchHandler(options = {}) {
   const challengeRecords = options.challengeMining || createChallengeMining({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python});
   // Whiteboards are local state only: they never initialize a model route or the Python worker.
   const boards = options.boards || createBoardStore({ localState });
-  return async function handle(request) {
+  const inkQueue = options.inkQueue || createInkQueue({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python,autoStart:false});
+  const handle = async function handle(request) {
     const url = new URL(request.url);
     if (options.loopbackOnly) {
       if (!['127.0.0.1','localhost','[::1]'].includes(url.hostname)) return json({ok:false,error:'仅允许本机访问。'},403);
@@ -142,6 +144,7 @@ export function createFetchHandler(options = {}) {
           if (latexAIAction && !options.latexAI) return json({ok:false,error:'LaTeX 提问与合写需要连接 DSH 模型服务。'},409);
           if (latexWsAction && !options.latexWorkspace) return json({ok:false,error:'LaTeX 工作区需要连接 DSH 主机。'},409);
           let result = companionAction ? await options.companion.handle(input)
+            : typeof input?.action === 'string' && input.action.startsWith('ink_queue_') ? await inkQueue.handle(input)
             : input?.action === 'settings_get' ? await settings.get()
             : input?.action === 'settings_update' ? await settings.update(input.patch, input.expected_revision)
             : input?.action === 'settings_reset' ? await settings.reset(input.expected_revision)
@@ -162,7 +165,7 @@ export function createFetchHandler(options = {}) {
             catch(error){result.companion={status:'failed',error:`批注已保存，伴学未入队：${error.message}`}}
           }
           if(input.action==='status')result={...result,realtime_companion:Boolean(options.companion)};
-          if(input.action==='status')result={...result,handwriting_recognition:Boolean(options.handwriting)};
+          if(input.action==='status')result={...result,handwriting_recognition:Boolean(options.handwriting),durable_ink_queue:true};
           if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true, catalog_management: true, typed_graph: true, reading_workspace: true, durable_state: true, learning_records: true, language_learning: Boolean(options.languageLearning) };
           if (input.action === 'status') result = { ...result, latex_ai: Boolean(options.latexAI), latex_workspace: Boolean(options.latexWorkspace), latex_root: options.latexRoot || null };
           if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true, challenge_mining:Boolean(options.challengeMining), challenge_scan:true, challenge_themes:true, challenge_export:true, challenge_comparison:true, challenge_review_packet:true, whiteboard:true };
@@ -189,4 +192,7 @@ export function createFetchHandler(options = {}) {
       return json({ok:false,error:error.message || '操作失败，请重试。', ...(error.code ? {code:error.code} : {}), ...(error.code === 'STATE_CONFLICT' ? {current:error.current} : {}), ...(['failed','pending','committing'].includes(error.generation_status) ? {generation_status:error.generation_status} : {}), ...(typeof error.retry_with_new_request === 'boolean' ? {retry_with_new_request:error.retry_with_new_request} : {})},status);
     }
   };
+  handle.startInkQueue = () => inkQueue.list({});
+  handle.disposeInkQueue = () => inkQueue.dispose();
+  return handle;
 }

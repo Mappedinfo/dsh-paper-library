@@ -30,6 +30,7 @@ They stay out of `npm test` (which is browser-free) for that reason; browser-onl
 |---|---|---|
 | `pencil-touch-browser.json` | `npm run test:pencil-touch` | Trusted Chromium pen/touch/mouse; finger pan, active-stroke isolation, strict mode and compatibility, native PDF save. No physical Sidecar or Electron claim. |
 | `linked-handwriting-browser.json` | `npm run test:linked-handwriting` | Inline linked handwriting, durable recovery, native PDF portability and 44 px targets at desktop and narrow widths. |
+| `handwriting-flow-browser.json` | `npm run test:handwriting-flow` | Detached slow PDF writes, immediate completion, actual SVG previews, quote/ink navigation, temporary focus, return position, reload/iframe destruction, exact native-write retry and bounded timing samples. |
 
 ## Earlier no-argument fixtures (2026-09-20 snapshot: 30 of 57)
 

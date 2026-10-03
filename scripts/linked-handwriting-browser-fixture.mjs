@@ -20,6 +20,7 @@ const library = join(run, 'library'), python = join(project, '.venv/bin/python')
 const checks = [], errors = [], external = [], screenshots = [], inkWrites = [];
 const record = name => { checks.push(name); console.log(`PASS ${name}`); };
 const hash = async path => createHash('sha256').update(await readFile(path)).digest('hex');
+const until = async (read, message) => { const start=Date.now();while(Date.now()-start<20000){const value=await read();if(value)return value;await new Promise(resolve=>setTimeout(resolve,80));}throw new Error(message); };
 const generated = spawnSync(python, ['-c', `import pymupdf,sys
 doc=pymupdf.open()
 for number in range(2):
@@ -42,8 +43,8 @@ const server = createServer(async (req, res) => {
   try {
     const request = new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers: req.headers, ...(!['GET','HEAD'].includes(req.method) ? { body: Readable.toWeb(req), duplex: 'half' } : {}) });
     const input = req.method === 'POST' && req.url.endsWith('/api') ? await request.clone().json() : null;
-    const linked = input?.action === 'annotate' && input.type === 'ink' && input.parent_id;
-    if (linked) inkWrites.push(structuredClone(input));
+    const linked = input?.action === 'ink_queue_enqueue' && input.batch?.parentId;
+    if (linked) { const batch=input.batch;inkWrites.push({action:'annotate',id:batch.paperId,parent_id:batch.parentId,page:batch.page,type:'ink',annotation_id:batch.annotation_id,paths:structuredClone(batch.paths),width:batch.width,color:batch.color}); }
     if (linked && fault === 'refuse') { refused++; res.writeHead(503, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok:false,error:'Synthetic save temporarily unavailable' })); return; }
     const response = await handle(request);
     if (linked && fault === 'lose-ack' && response.status === 200) { fault = null; lostAcks++; await response.arrayBuffer(); res.writeHead(502, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok:false,error:'Synthetic save acknowledgement lost' })); return; }
@@ -91,9 +92,8 @@ try {
     return { from:{x:a.left+2,y:a.top+a.height/2},to:{x:b.right-2,y:b.top+b.height/2} };
   },{first,last});
   const dragText = async value => { await pen('mousePressed',value.from); for(let n=1;n<=12;n++)await pen('mouseMoved',{x:value.from.x+(value.to.x-value.from.x)*n/12,y:value.from.y+(value.to.y-value.from.y)*n/12}); await pen('mouseReleased',value.to); };
-  const annotationReply = type => { const pending=page.waitForResponse(response => { try { const input=response.request().postDataJSON(); return input?.action==='annotate' && input.type===type && response.status()!==429; } catch { return false; } }); pending.catch(()=>{}); return pending; };
-  const saved = async responsePromise => { const response=await responsePromise; assert.equal(response.status(),200,await response.text()); const result=(await response.json()).result; await ready(); return result; };
-  const idleDraft = async () => page.waitForFunction(() => document.getElementById('reader-ink-draft')?.hidden || document.getElementById('reader-ink-draft')?.getAttribute('aria-busy')==='false');
+  const annotationReply = type => { const pending=page.waitForResponse(response => { try { const input=response.request().postDataJSON(); return (type==='ink'?input?.action==='ink_queue_enqueue':input?.action==='annotate'&&input.type===type) && response.status()!==429; } catch { return false; } }); pending.catch(()=>{}); return pending; };
+  const saved = async responsePromise => { const response=await responsePromise; assert.equal(response.status(),200,await response.text()); const result=(await response.json()).result;if(result.job){const id=result.job.annotation_id;await page.waitForFunction(id=>inkQueue.records().find(job=>job.annotation_id===id)?.status==='saved',id);await page.waitForFunction(id=>state.annotations.some(note=>note.id===id),id);} await ready(); return result; };
   const shot = async name => { const path=join(run,`${name}.png`); await page.screenshot({path}); screenshots.push(relative(project,path)); };
   const target = async (locator,{fullRow=false,minHeight=44}={}) => {
     await locator.scrollIntoViewIfNeeded();
@@ -134,19 +134,19 @@ try {
   response=annotationReply('underline'); await dragText(await span(6,8)); const underline=(await saved(response)).annotation; assert.equal(underline.type,'underline'); assert.equal(underline.parent_id,undefined); record('normal text markup works immediately after leaving linked handwriting');
 
   await toggle().click(); await active(true); await ready(); fault='lose-ack'; const beforeLost=inkWrites.length; await draw([[240,275],[255,295],[275,270]]); await pathCount(1);
-  await page.waitForFunction(()=>!document.getElementById('reader-ink-save').disabled&&document.getElementById('reader-ink-undo').disabled); await idleDraft();
-  assert.equal(lostAcks,1); assert.equal(await linkedCount(),3); assert.equal(inkWrites.length,beforeLost+1); const retryId=inkWrites.at(-1).annotation_id; assert.ok(retryId);
-  const previewBefore=await page.locator('.pdr-ink-draft polyline').first().getAttribute('points'); await draw([[300,280],[335,300]]); await pathCount(1); assert.equal(await page.locator('.pdr-ink-draft polyline').first().getAttribute('points'),previewBefore); record('unknown save acknowledgement keeps exact linked draft and locks edits');
-  await page.waitForLoadState('networkidle'); await open(); await idleDraft(); await pathCount(1);
-  await active(true); assert.equal(await page.locator('#reader-ink-undo').isDisabled(),true); response=annotationReply('ink'); await page.locator('#reader-ink-save').click(); await saved(response); await pathCount(0);
-  assert.equal(await linkedCount(),3); assert.equal(inkWrites.at(-1).annotation_id,retryId); assert.equal(inkWrites.at(-1).parent_id,parent.id); record('reload restores parent binding and same retry ID without duplicate ink');
+  await page.waitForFunction(()=>inkQueue.records().some(job=>job.status==='stage_failed')); await pathCount(0);
+  assert.equal(lostAcks,1); await until(async()=>await linkedCount()===3,'accepted lost-ack batch did not complete on host'); assert.equal(inkWrites.length,beforeLost+1); const retryId=inkWrites.at(-1).annotation_id; assert.ok(retryId);
+  const frozenBefore=await page.evaluate(()=>inkQueue.handoff());assert.ok(frozenBefore);await draw([[300,280],[335,300]]);await pathCount(0);assert.deepEqual(await page.evaluate(()=>inkQueue.handoff()),frozenBefore);assert.equal(await card().locator('.ink-preview-svg').getAttribute('data-stroke-count'),'3');record('unknown staging acknowledgement freezes exact linked batch and blocks unconfirmed new input');
+  await page.waitForLoadState('networkidle'); await open(); await pathCount(0);
+  await active(true);await page.waitForFunction(id=>!inkQueue.blocked()&&inkQueue.records().find(job=>job.annotation_id===id)?.status==='saved',retryId);
+  assert.equal(await linkedCount(),3); assert.equal(inkWrites.at(-1).annotation_id,retryId); assert.equal(inkWrites.at(-1).parent_id,parent.id); record('reload reconciles original host identity and parent binding without duplicate ink');
   await page.locator('#linked-handwriting-finish').click(); await active(false);
 
   await toggle().click(); await active(true); await ready(); fault='refuse'; const beforeRefusal=await linkedCount(); await draw([[330,270],[360,290],[390,270]]); await pathCount(1);
-  await page.waitForFunction(()=>!document.getElementById('reader-ink-save').disabled&&document.getElementById('reader-ink-undo').disabled); await idleDraft(); assert.ok(refused>=1); assert.equal(await linkedCount(),beforeRefusal);
-  response=annotationReply('ink'); await toggle().click(); assert.equal((await response).status(),503); await idleDraft(); assert.equal(await toggle().getAttribute('aria-pressed'),'true'); await pathCount(1); record('failed exit retains selected highlight and unsaved strokes');
-  fault=null; response=annotationReply('ink'); await page.locator('#reader-ink-save').click(); await saved(response); await pathCount(0); await toggle().click(); await active(false); assert.equal(await linkedCount(),4);
-  record('explicit retry saves a refused batch and then permits exit');
+  await page.waitForFunction(()=>inkQueue.records().some(job=>job.status==='stage_failed')); await pathCount(0); assert.ok(refused>=1); assert.equal(await linkedCount(),beforeRefusal);
+  const refusedBatch=await page.evaluate(()=>inkQueue.handoff());await toggle().click();await active(false);assert.deepEqual(await page.evaluate(()=>inkQueue.handoff()),refusedBatch);assert.equal(await card().locator('.ink-preview-svg').getAttribute('data-stroke-count'),'4');record('failed staging retains exact preview while finish immediately restores reading');
+  fault=null;response=annotationReply('ink');await card().locator('[data-note-action="ink-retry"]').click();await saved(response);await pathCount(0);await active(false);assert.equal(await linkedCount(),4);
+  record('explicit retry saves a refused batch without reopening or blocking reading');
 
   const legacyCard=page.locator('.annotation-card[data-annotation-id="legacy-source"]'); await legacyCard.locator('[data-note-action="handwriting-legacy"]').click();
   await page.locator('#handwriting-dialog').waitFor({state:'visible'}); await page.waitForFunction(()=>document.getElementById('handwriting-dialog').getAttribute('aria-busy')==='false');
@@ -173,21 +173,21 @@ with pymupdf.open(sys.argv[1]) as doc:
   await toggle().click(); await active(true); await ready(); await target(toggle(),{fullRow:true}); await target(page.locator('#linked-handwriting-finish'));
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   assert.equal(await page.evaluate(()=>parseFloat(getComputedStyle(document.body).getPropertyValue('--workbench-height'))),164);
-  fault='refuse'; await draw([[45,150],[75,155]]); await pathCount(1); await page.waitForFunction(()=>!document.getElementById('reader-ink-save').disabled&&document.getElementById('reader-ink-undo').disabled); await idleDraft();
+  fault='refuse'; await draw([[45,150],[75,155]]); await pathCount(1);
   await target(page.locator('#linked-handwriting-finish')); await target(page.locator('#reader-ink-save'),{minHeight:32});
   assert.equal(await page.evaluate(()=>parseFloat(getComputedStyle(document.body).getPropertyValue('--workbench-height'))),204);
-  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false); await shot('linked-handwriting-narrow-targets');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.waitForFunction(()=>inkQueue.records().some(job=>job.status==='stage_failed'));await pathCount(0);assert.equal(await page.evaluate(()=>parseFloat(getComputedStyle(document.body).getPropertyValue('--workbench-height'))),164);await target(page.locator('#linked-handwriting-finish'));await page.locator('#ink-queue-summary').click();await target(page.locator('.ink-queue-panel').getByRole('button',{name:'重试保存'}));await page.locator('#ink-queue-summary').click();await shot('linked-handwriting-narrow-targets');
   await page.emulateMedia({colorScheme:'dark'});await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark'&&!document.documentElement.getAnimations({subtree:true}).some(animation=>animation.playState==='running'));
   const inactive=legacyCard.locator('[data-note-action="handwriting"]');await target(inactive,{fullRow:true});
   const contrast=await inactive.evaluate(button=>{const style=getComputedStyle(button),luminance=color=>{const rgb=color.match(/[\d.]+/g).slice(0,3).map(Number).map(value=>{const n=value/255;return n<=.04045?n/12.92:((n+.055)/1.055)**2.4;});return .2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2];},a=luminance(style.color),b=luminance(style.backgroundColor);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);});assert.ok(contrast>=4.5,`Inactive handwriting contrast: ${contrast}`);
   await target(page.locator('#linked-handwriting-finish'));await shot('linked-handwriting-narrow-dark');
-  await page.locator('#reader-ink-discard').click(); await pathCount(0); fault=null; await page.locator('#linked-handwriting-finish').click(); await active(false);
-  assert.equal(await linkedCount(),4); record('600-pixel viewport keeps full-row handwriting and enlarged finish controls visible with pending retry');
+  await page.locator('#linked-handwriting-finish').click();await active(false);assert.ok(await page.evaluate(()=>inkQueue.handoff()));fault=null;
+  assert.equal(await linkedCount(),4); record('600-pixel viewport keeps handwriting, finish and retained queue retry controls reachable');
   record('dark-theme inactive handwriting action preserves readable contrast and visible click targets');
   events.push(...await page.evaluate(()=>window.linkedHandwritingEvents)); for(const type of ['pen','mouse','touch'])assert.ok(events.some(event=>event.type===type&&event.trusted)); assert.equal(await hash(source),originalHash); assert.deepEqual(errors,[]); assert.deepEqual(external,[]); record('original bytes unchanged with no browser errors or external model requests');
 } catch(error) { failure=error; if(page){await page.screenshot({path:join(run,'failure.png')}).catch(()=>{});await writeFile(join(run,'failure-state.json'),JSON.stringify(await page.evaluate(()=>({inkBusy:inkSaveBusy,inkUncertain:inkSaveUncertain,inkPromise:!!inkSavePromise,session:linkedHandwritingUI?.session(),draft:pdfReader?.getInkDraft(),body:document.body.innerText})).catch(()=>null),null,2));} }
-finally { await browser?.close(); await new Promise(resolve=>server.close(resolve)); }
-const receipt={verified_at:new Date().toISOString(),complete:!failure,scope:'Synthetic Chromium inline handwriting linked to native PDF text annotations, using the real Python worker and host storage.',checks,browser_errors:errors,external_requests:external.length,real_provider_calls:0,screenshots,ink_requests:inkWrites.length,lost_acknowledgements:lostAcks,refused_requests:refused,trusted_pointer_types:[...new Set(events.filter(event=>event.trusted).map(event=>event.type))],limitations:['Physical Apple Pencil, Sidecar and Safari were not exercised.','Reload recovery covers completed strokes acknowledged by host storage; abrupt termination of unfinished or unacknowledged writes is not guaranteed.','Fixed-width ink; no pressure or iPadOS palm rejection claim.'],...(failure?{error:failure.stack,ink_writes:inkWrites}:{})};
+finally { await browser?.close(); await handle.disposeInkQueue?.(); await new Promise(resolve=>server.close(resolve)); }
+const receipt={verified_at:new Date().toISOString(),complete:!failure,scope:'Synthetic Chromium inline handwriting linked to native PDF text annotations, using the real Python worker and durable host queue.',checks,browser_errors:errors,external_requests:external.length,real_provider_calls:0,screenshots,ink_enqueue_requests:inkWrites.length,lost_staging_acknowledgements:lostAcks,refused_staging_requests:refused,trusted_pointer_types:[...new Set(events.filter(event=>event.trusted).map(event=>event.type))],limitations:['Physical Apple Pencil, Sidecar and Safari were not exercised.','Reload recovery covers completed strokes acknowledged by host storage; abrupt termination of unfinished or unacknowledged writes is not guaranteed.','The final narrow-layout scenario leaves one refused staging batch recoverable in the isolated fixture library.','Fixed-width ink; no pressure or iPadOS palm rejection claim.'],...(failure?{error:failure.stack,ink_writes:inkWrites}:{})};
 await writeFile(join(run,'receipt.json'),JSON.stringify(receipt,null,2)+'\n');
 if(failure){console.error(`Linked handwriting diagnostics: ${relative(project,run)}`);throw failure;}
 await writeFile(join(project,'docs/validation/linked-handwriting-browser.json'),JSON.stringify(receipt,null,2)+'\n');

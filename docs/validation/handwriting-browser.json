@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-10-03T15:21:01.418Z",
+  "verified_at": "2026-10-03T16:57:33.724Z",
   "scope": "Synthetic native PDF handwriting attachments, Chromium pen/mouse and deterministic recognition; excludes real model quality and physical Pencil/Sidecar",
   "checks": [
     {
@@ -84,7 +84,7 @@
   "model_calls": 5,
   "real_provider_calls": 0,
   "screenshots": [
-    ".local/handwriting-browser-CPeWuV/handwriting-recognized.png",
-    ".local/handwriting-browser-CPeWuV/handwriting-narrow-dark.png"
+    ".local/handwriting-browser-OnKITc/handwriting-recognized.png",
+    ".local/handwriting-browser-OnKITc/handwriting-narrow-dark.png"
   ]
 }

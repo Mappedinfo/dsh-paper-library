@@ -4,9 +4,48 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 const context = vm.createContext({ window: {} });
 vm.runInContext(await readFile(new URL('../web/pdf-reader.js', import.meta.url), 'utf8'), context);
-const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, nearestTextPosition } = context.window.PaperPDFReader;
+const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkOverlays, regionRects, minimumScroll, nearestTextPosition } = context.window.PaperPDFReader;
 const plain = value => JSON.parse(JSON.stringify(value));
 const flush = () => new Promise(resolve => setImmediate(resolve));
+test('region geometry supports dots and display-space bounds without selecting unrelated text', () => {
+  const geometry = { width: 800, height: 600 };
+  assert.deepEqual(plain(regionRects([[799, 599, 800, 600]], geometry, 3)), [[796, 596, 800, 600]]);
+  assert.deepEqual(plain(regionRects([[10, 20, 10, 20]], geometry, 3)), [[7, 17, 13, 23]]);
+  assert.deepEqual(plain(regionRects([[900, 20, 910, 30]], geometry)), []);
+  assert.deepEqual(plain(regionRects([[10, 20, 5, 30]], geometry)), []);
+  assert.deepEqual(plain(regionRects([[10, NaN, 20, 30]], geometry)), []);
+  assert.deepEqual(plain(regionRects(Array.from({ length: 201 }, () => [1, 2, 3, 4]), geometry)), []);
+});
+test('focus scroll preserves already-visible content and moves the nearest edge on either axis', () => {
+  assert.equal(minimumScroll(130, 250, 100, 500), 100);
+  assert.equal(minimumScroll(110, 250, 100, 500), 90);
+  assert.equal(minimumScroll(400, 750, 100, 500), 270);
+  assert.equal(minimumScroll(100, 900, 100, 500), 250, 'Oversized regions center without changing zoom');
+  assert.equal(minimumScroll(0, 10, 100, 500), 0);
+});
+const overlay = (id, status = 'queued', extra = {}) => ({ paperId: 'paper-a', page: 1, annotation_id: id, paths: [[[10, 20], [30, 40]]], width: 2, color: '#336699', status, ...extra });
+test('frozen overlays survive acknowledgment and producer removal until matching decoded raster IDs arrive', () => {
+  const store = createInkOverlays();
+  store.replace([overlay('ink-a'), overlay('ink-b')]);
+  store.replace([overlay('ink-a', 'saved'), overlay('ink-b', 'writing')]);
+  store.replace([]); assert.deepEqual(plain(store.snapshot().map(value => value.annotation_id)), ['ink-a'], 'Omitted pending ink is cancellable, saved ink must remain visible');
+  store.confirm('paper-b', 1, ['ink-a']); assert.equal(store.snapshot().length, 1);
+  store.confirm('paper-a', 2, ['ink-a']); assert.equal(store.snapshot().length, 1);
+  store.confirm('paper-a', 1, ['another-ink']); assert.equal(store.snapshot().length, 1);
+  store.confirm('paper-a', 1, ['ink-a']); assert.equal(store.snapshot().length, 0);
+  store.replace([overlay('ink-a', 'saved')]); assert.equal(store.snapshot().length, 0, 'Polling a receipt already present in the raster cannot redraw it');
+  store.forget('paper-a', 1); store.replace([overlay('ink-a', 'saved')]); assert.equal(store.snapshot().length, 1, 'A discarded raster cannot confirm what the next raster contains');
+});
+test('overlay snapshots validate atomically, bound producer input, and never mutate a frozen save identity', () => {
+  const store = createInkOverlays(), batch = overlay('ink-a', 'staging'); store.replace([batch]);
+  batch.paths[0][0][0] = 500; assert.equal(store.snapshot()[0].paths[0][0][0], 10);
+  const copy = store.snapshot(); copy[0].paths[0][0][0] = 99; assert.equal(store.snapshot()[0].paths[0][0][0], 10);
+  assert.throws(() => store.replace([overlay('ink-a', 'saved', { width: 4 })]), /保存身份/);
+  assert.throws(() => store.replace([overlay('ink-b', 'queued', { paths: [[[NaN, 1], [2, 3]]] })]), /不完整/);
+  assert.throws(() => store.replace(Array.from({ length: 33 }, (_, i) => overlay(`ink-${i}`))), /上限/);
+  assert.equal(store.snapshot()[0].annotation_id, 'ink-a');
+  store.replace([overlay('ink-a', 'saved')]); store.replace([overlay('ink-a', 'uncertain')]); assert.equal(store.snapshot()[0].status, 'saved');
+});
 test('annotation input defaults to Sidecar mouse compatibility and uses only declared pointer types for pen-only mode', () => {
   const policy = createInputPolicy();
   assert.deepEqual(plain(policy.info()), { lastType: null, seenPen: false, penOnly: false });
@@ -177,6 +216,24 @@ test('page failure remains retryable and does not block neighboring pages', asyn
   h.requests[0].reject(new Error('broken page')); await rejection; await flush();
   assert.equal(h.requests[1].page, 3); h.requests[1].resolve(); await h.queue.idle(); assert.equal(h.installed.has(3), true);
   h.queue.invalidate(2); const retry = h.queue.ready(2); h.requests[2].resolve(); assert.equal(await retry, true); await h.queue.idle(); assert.equal(h.errors.length, 1);
+});
+
+test('background invalidation preserves the old raster until the new version is installed', async () => {
+  const h = scheduler(); h.queue.reset('paper'); h.queue.want([1]); h.requests[0].resolve({ version: 'old' }); await h.queue.idle();
+  h.queue.invalidate(1, { preserve: true }); const ready = h.queue.ready(1);
+  assert.equal(h.installed.get(1).version, 'old'); assert.deepEqual(h.evicted, []);
+  h.queue.invalidate(1, { preserve: true }); h.requests[1].resolve({ version: 'superseded' }); await flush();
+  assert.equal(h.installed.get(1).version, 'old'); assert.equal(h.requests.length, 3);
+  h.requests[2].resolve({ version: 'fresh' }); assert.equal(await ready, true); await h.queue.idle();
+  assert.equal(h.installed.get(1).version, 'fresh'); assert.deepEqual(h.evicted, []);
+});
+test('a failed background render leaves the old raster available for reading and can retry', async () => {
+  const h = scheduler(); h.queue.reset('paper'); h.queue.want([1]); h.requests[0].resolve({ version: 'old' }); await h.queue.idle();
+  h.queue.invalidate(1, { preserve: true }); const failed = assert.rejects(h.queue.ready(1), /render unavailable/);
+  h.requests[1].reject(new Error('render unavailable')); await failed; await h.queue.idle();
+  assert.equal(h.installed.get(1).version, 'old'); assert.deepEqual(h.evicted, []);
+  h.queue.invalidate(1, { preserve: true }); const ready = h.queue.ready(1); h.requests[2].resolve({ version: 'fresh' }); assert.equal(await ready, true);
+  await h.queue.idle(); assert.equal(h.installed.get(1).version, 'fresh');
 });
 
 test('jump readiness waits for image decoding and eviction still clears an image being decoded', async () => {

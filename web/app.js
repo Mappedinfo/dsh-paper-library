@@ -25,6 +25,7 @@ let latexUI;
 let companionUI;
 let handwritingUI;
 let linkedHandwritingUI;
+let inkQueue;
 let handwritingAvailable = false;
 let preferences = {};
 let durableReaderLoaded = false;
@@ -355,13 +356,29 @@ function showReaderSelection(selection) {
   $('selection-preview').textContent=selection.text;$('selection-tools').hidden=false;publishReaderState();
 }
 
+const annotationLoadJobs=new Map();
 async function loadAnnotations(id) {
-  try {
-    const result = await api('annotations', { id }); if (id !== state.active?.id) return;
-    state.annotations = result.annotations || []; const count=annotationThreads(state.annotations).notes.length; $('annotation-count').textContent = `${count}${result.truncated ? '+' : ''}`;
-    state.annotationsTruncated = Boolean(result.truncated);
-    state.noteOffset = Math.min(state.noteOffset, Math.max(0, Math.ceil(count / 40) - 1) * 40); renderAnnotations();
-  } catch (error) { if (id === state.active?.id) { $('annotation-count').textContent = ''; $('annotation-list').replaceChildren(emptyState('批注暂时未能读取', error.message)); } }
+  const previous=annotationLoadJobs.get(id);if(previous){previous.again=true;return previous.promise;}
+  const job={again:false,promise:null};annotationLoadJobs.set(id,job);
+  job.promise=(async()=>{
+    let loaded=false;
+    do{
+      job.again=false;
+      try{
+        const result=await api('annotations',{id});if(id!==state.active?.id)return false;
+        state.annotations=result.annotations||[];const count=annotationThreads(state.annotations).notes.length;$('annotation-count').textContent=`${count}${result.truncated?'+':''}`;
+        state.annotationsTruncated=Boolean(result.truncated);state.noteOffset=Math.min(state.noteOffset,Math.max(0,Math.ceil(count/40)-1)*40);renderAnnotations();loaded=true;
+      }catch(error){
+        if(id===state.active?.id){
+          $('annotation-count').textContent='显示待更新';
+          if(!state.annotations.length&&!$('annotation-list').querySelector('.annotation-card'))$('annotation-list').replaceChildren(emptyState('批注暂时未能读取',error.message));
+          else toast(`现有批注与笔迹已保留，显示待更新：${error.message}`,true);
+        }
+        return false;
+      }
+    }while(job.again&&id===state.active?.id);
+    if(loaded)void linkedHandwritingUI?.paperReady(id);return loaded;
+  })().finally(()=>annotationLoadJobs.delete(id));return job.promise;
 }
 // Threading lives in web/annotation-threads.js so the no-duplication rule is
 // unit-testable without the DOM. The inline fallback keeps the rail correct when
@@ -379,6 +396,7 @@ function annotationThreads(annotations) {
   return {notes,replies,unlinked};
 }
 function renderAnnotations() {
+  linkedHandwritingUI?.beforeRender();
   const fragment = document.createDocumentFragment();
   const {notes,replies,unlinked}=annotationThreads(state.annotations);
   function replyCard(reply){
@@ -394,7 +412,7 @@ function renderAnnotations() {
     const meta = el('div', 'annotation-meta'); const pageLink = el('button', 'page-link', `第 ${note.page} 页`); pageLink.dataset.noteAction = 'page';
     meta.append(pageLink, el('span', '', displayDate(note.modified || note.created)), el('span', 'note-type', note.kind === 'ai-feedback' || note.type === 'ai_feedback' || note.ai_generated ? 'AI 生成' : ({highlight:'高亮',underline:'下划线',strikeout:'删除线',note:'便笺',ink:'手写'})[note.type] || '批注'));
     card.append(meta);
-    if (note.text) card.append(el('blockquote', '', note.text));
+    if (note.text) { const quote=el('button','annotation-quote',note.text);quote.type='button';quote.dataset.noteAction='page';quote.setAttribute('aria-label',`定位原文：${note.text}`);card.append(quote); }
     if (note.comment || note.content) card.append(el('p', 'annotation-comment', note.comment || note.content));
     if (note.handwriting) { const handwritten = el('div', 'annotation-handwriting'); handwritten.append(el('p', 'small muted', note.handwriting.transcription_source === 'model' ? '手写便签 · AI 识别待校对' : '手写便签 · 原笔迹已保留')); if (note.handwriting.transcript) handwritten.append(el('p', '', note.handwriting.transcript)); card.append(handwritten); }
     linkedHandwritingUI?.decorate(card,note);
@@ -411,33 +429,35 @@ function renderAnnotations() {
   if(unlinked.length){const group=el('details','annotation-unlinked');group.append(el('summary','',`未关联回复 · ${unlinked.length}`),el('p','small muted','这类回复没有可核实的批注关联，或原批注已删除。已有内容仍保存在 PDF 中。'));for(const reply of unlinked)group.append(replyCard(reply));fragment.append(group);}
   if (state.annotationsTruncated) fragment.append(el('p', 'small muted', '批注数量或文本量已达读取上限，当前只显示已读取的部分。PDF 中的原始批注仍被保留。'));
   $('annotation-list').replaceChildren(fragment);
-  companionUI?.decorate();linkedHandwritingUI?.sync();
+  companionUI?.decorate();linkedHandwritingUI?.sync();linkedHandwritingUI?.afterRender();
 }
 /** 自动着色：拖选即按当前颜色写成自然批注（不弹对话框）。
  * Questioning stays available afterwards through the rail and the selection tools. */
 let autoMarkupBusy = false;
-let inkSaveBusy = false, inkSaveIdentity = null, restoringInkDraft = false, inkDraftStorageBlocked = false, inkSaveUncertain = false, inkSavePromise=null, inkDraftUpdatedAt=0;
+let inkSaveBusy = false, inkSaveIdentity = null, restoringInkDraft = false, inkDraftStorageBlocked = false, inkSaveUncertain = false, inkDraftUpdatedAt=0;
 let pendingInkHandoff=null;
 async function adoptInkHandoff(record){
+  if(inkQueue?.blocked()){pendingInkHandoff=record;return;}
   restoringInkDraft=true;pdfReader.setInkEnabled(false);
   try{
     pdfReader.clearInk();pdfReader.restoreInkDraft(record.draft);const restored=pdfReader.getInkDraft();
-    inkSaveIdentity={paperId:restored.paperId,revision:restored.revision,id:record.annotation_id};inkSaveUncertain=record.attempted;inkDraftUpdatedAt=record.updatedAt;
+    inkSaveIdentity={paperId:restored.paperId,revision:restored.revision,requestRevision:record.draft.revision,id:record.annotation_id};inkSaveUncertain=record.attempted;inkDraftUpdatedAt=record.updatedAt;
     pendingInkHandoff=null;
     readingShell?.inkChanged();if(inkSaveUncertain)readingShell?.inkSaving(false,'上次保存尚待确认，请重试后继续书写。');
-    await linkedHandwritingUI?.restore(record.draft.parentId?{paperId:record.draft.paperId,page:record.draft.page,parentId:record.draft.parentId,previousTool:'highlight'}:false);
-    if(!inkDraftStorageBlocked)await persistence?.put('reader:ink-draft',{...record,draft:restored});
+    if(!record.frozen)await linkedHandwritingUI?.restore(record.draft.parentId?{paperId:record.draft.paperId,page:record.draft.page,parentId:record.draft.parentId,previousTool:'highlight'}:false);
+    if(!inkDraftStorageBlocked)await persistence?.put('reader:ink-draft',{...record,draft:{...restored,revision:record.draft.revision}});
+    if(record.frozen||record.attempted)queueMicrotask(()=>saveInkDraft());
   }catch(error){toast(`后续笔迹已保留，恢复未完成：${error.message}`,true);}
-  finally{restoringInkDraft=false;pdfReader.setInkEnabled(!inkSaveUncertain);publishReaderState();}
+  finally{restoringInkDraft=false;pdfReader.setInkEnabled(!inkSaveUncertain&&!inkQueue?.blocked());publishReaderState();}
 }
 function inkDraftChanged(){
   readingShell?.inkChanged();
   if(restoringInkDraft)return;
   const draft=pdfReader?.getInkDraft?.();inkDraftUpdatedAt=Date.now();
-  if(!draft){inkSaveUncertain=false;if(!inkSaveBusy)pdfReader?.setInkEnabled(true);}
+  if(!draft){inkSaveUncertain=false;if(!inkQueue?.blocked())pdfReader?.setInkEnabled(true);}
   inkSaveIdentity=draft?{paperId:draft.paperId,revision:draft.revision,id:window.crypto.randomUUID()}:null;
   // Failed restoration must not overwrite an unreadable or unavailable draft.
-  if(!inkDraftStorageBlocked)void persistence?.put('reader:ink-draft',draft?{draft,annotation_id:inkSaveIdentity.id,updatedAt:inkDraftUpdatedAt}:null).catch(()=>{});
+  if(!inkDraftStorageBlocked&&!inkQueue?.blocked())void persistence?.put('reader:ink-draft',draft?{draft,annotation_id:inkSaveIdentity.id,updatedAt:inkDraftUpdatedAt}:null).catch(()=>{});
   linkedHandwritingUI?.draftChanged();publishReaderState();
 }
 async function restoreInkDraft(){
@@ -448,8 +468,9 @@ async function restoreInkDraft(){
     if(saved?.draft){
       pdfReader?.restoreInkDraft(saved.draft);
       const draft=pdfReader?.getInkDraft?.();
-      if(draft)inkSaveIdentity={paperId:draft.paperId,revision:draft.revision,id:typeof saved.annotation_id==='string'?saved.annotation_id:window.crypto.randomUUID()};
+      if(draft)inkSaveIdentity={paperId:draft.paperId,revision:draft.revision,requestRevision:saved.draft.revision,id:typeof saved.annotation_id==='string'?saved.annotation_id:window.crypto.randomUUID()};
       inkSaveUncertain=saved.attempted===true;inkDraftUpdatedAt=saved.updatedAt||0;
+      if(saved.frozen||saved.attempted)queueMicrotask(()=>saveInkDraft());
     }
   }catch(error){inkDraftStorageBlocked=true;toast(`手写草稿未能恢复：${error.message}。本次新笔迹请保存到 PDF 后再离开。`,true);}
   finally{
@@ -457,41 +478,22 @@ async function restoreInkDraft(){
     if(inkSaveUncertain)readingShell?.inkSaving(false,'上次保存尚待确认，请重试后继续书写。');
   }
 }
-async function saveInkDraft(){
-  if(inkSavePromise)return inkSavePromise;
-  inkSavePromise=(async()=>{const saved=await saveInkDraftImpl();if(saved&&pendingInkHandoff&&!restoringReader){await adoptInkHandoff(pendingInkHandoff);return false;}return saved;})();
-  try{return await inkSavePromise;}finally{inkSavePromise=null;}
-}
-async function saveInkDraftImpl() {
+function saveInkDraft() {
   const draft=pdfReader?.getInkDraft?.();
   if(inkSaveBusy)return false;if(!draft)return true;
   if(pdfReader?.isInking())return false;
   if(!inkSaveIdentity||inkSaveIdentity.paperId!==draft.paperId||inkSaveIdentity.revision!==draft.revision){
     inkSaveIdentity={paperId:draft.paperId,revision:draft.revision,id:window.crypto.randomUUID()};
   }
-  inkSaveBusy=true;pdfReader.setInkEnabled(false);readingShell?.inkSaving(true);
-  let saved=false;
   try{
-    // Preserve the retry ID before a write can succeed with a lost response or
-    // while the host is hiding/recreating this iframe. Restored attempts stay
-    // immutable until retried, so prior strokes cannot be duplicated under a new ID.
-    if(!inkDraftStorageBlocked)await persistence?.put('reader:ink-draft',{draft,annotation_id:inkSaveIdentity.id,attempted:true,updatedAt:inkDraftUpdatedAt});
-    inkSaveUncertain=true;publishReaderState();
-    await api('annotate',{id:draft.paperId,page:draft.page,type:'ink',paths:draft.paths,width:draft.width,color:draft.color,author:'Reader',annotation_id:inkSaveIdentity.id,...(draft.parentId?{parent_id:draft.parentId}:{}),companion_skip:true});
-    saved=true;inkSaveUncertain=false;if(!draft.parentId)toast('手写已保存到 PDF');
-    if(state.active?.id===draft.paperId){
-      await loadAnnotations(draft.paperId);
-      if(state.active?.id===draft.paperId)await refreshPage(draft.page);
-      await paperChatUI?.annotationsChanged(draft.paperId);
-    }
+    if(!inkQueue)throw new Error('手写暂存服务尚未就绪，请保留笔迹后重试。');
+    inkQueue.freeze({...draft,revision:inkSaveIdentity.requestRevision??draft.revision},inkSaveIdentity.id,{attempted:inkSaveUncertain,updatedAt:inkDraftUpdatedAt});
+    restoringInkDraft=true;pdfReader.clearInk(draft.revision);restoringInkDraft=false;
+    inkSaveIdentity=null;inkSaveUncertain=false;pdfReader.setInkEnabled(false);readingShell?.inkChanged();publishReaderState();
+    return true;
   }catch(error){
-    if(saved)toast(`手写已保存，显示未能刷新：${error.message}`,true);
-    else{inkSaveUncertain=true;readingShell?.inkSaving(false,`保存未确认，笔迹已保留：${error.message}`);toast('请重试确认保存，再继续书写；放弃重试只移除草稿。',true);}
-  }finally{
-    if(saved){pdfReader.clearInk(draft.revision);inkSaveIdentity=null;}
-    inkSaveBusy=false;pdfReader.setInkEnabled(!inkSaveUncertain);if(saved)readingShell?.inkSaving(false);publishReaderState();
+    restoringInkDraft=false;toast(error.message,true);return false;
   }
-  return saved;
 }
 async function returnToInkDraft(){
   const draft=pdfReader?.getInkDraft?.();if(!draft)return;
@@ -569,12 +571,15 @@ async function handleNoteAction(event) {
   if (action === 'previous' || action === 'next') { state.noteOffset += action === 'next' ? 40 : -40; renderAnnotations(); return; }
   const note = state.annotations.find((entry) => entry.id === button.closest('[data-annotation-id]').dataset.annotationId); if (!note) return;
   if (action === 'discuss') { await paperChatUI?.useAnnotation(note); if (state.active?.id) renderAnnotations(); return; }
-  if (action === 'page') { await switchTab('reader'); await requestPage(note.page); }
+  if (action === 'page') { await switchTab('reader'); await pdfReader?.revealAnnotation(note.id,{page:note.page});return; }
+  if (action === 'linked-ink') { await linkedHandwritingUI?.reveal(note,button.dataset.regionId);return; }
+  if (action === 'ink-retry') { try{await inkQueue?.retry(button.dataset.inkId);}catch(error){toast(error.message,true);}return; }
   if (action === 'edit') openAnnotation('edit', note);
   if (action === 'handwriting') { await linkedHandwritingUI?.toggle(state.active, note); return; }
   if (action === 'handwriting-legacy') { await handwritingUI?.open(state.active,note);return; }
   if (action === 'linked-recognize'||action === 'linked-recognize-new') { await linkedHandwritingUI?.recognize(state.active.id,note,{fresh:action==='linked-recognize-new'});return; }
   if (action === 'delete') {
+    if(inkQueue?.hasPending(state.active.id,note.id)){toast('这条批注还有待保存笔迹，请先处理后再删除。',true);return;}
     if (button.dataset.confirm !== 'true') { button.dataset.confirm = 'true'; button.textContent = '确认删除'; setTimeout(() => { if (button.isConnected) { delete button.dataset.confirm; button.textContent = '删除'; } }, 5000); return; }
     if(linkedHandwritingUI?.active(state.active.id,note.id)&&!await linkedHandwritingUI.finish())return;
     const id = state.active.id; button.disabled = true;
@@ -1044,7 +1049,7 @@ $('clear-selection').addEventListener('click', () => {clearSelection();publishRe
 $('discuss-selection').addEventListener('click', () => paperChatUI?.useSelection(state.selection));
 $('annotation-comment').addEventListener('input', publishReaderState);
 $('annotation-dialog').addEventListener('close', publishReaderState);
-$('page-note').addEventListener('click', () => openAnnotation('note')); $('annotation-form').addEventListener('submit', saveAnnotation); $('annotation-list').addEventListener('click', handleNoteAction);
+$('page-note').addEventListener('click', () => openAnnotation('note')); $('annotation-form').addEventListener('submit', saveAnnotation); $('annotation-list').addEventListener('click', event=>void handleNoteAction(event).catch(error=>toast(error.message,true)));
 // Rail → PDF: clicking a card body (never its action buttons) reveals the
 // matching markup in the document and flashes it.
 $('annotation-list').addEventListener('click', event => {
@@ -1055,7 +1060,7 @@ $('annotation-list').addEventListener('click', event => {
   if (!note) return;
   linkAnnotationCard(note.id);
   if (state.tab !== 'reader' && state.tab !== 'annotations') void switchTab('reader');
-  void pdfReader?.revealAnnotation(note.id, { page: note.page });
+  void pdfReader?.revealAnnotation(note.id, { page: note.page }).catch(error=>toast(error.message,true));
 });
 $('request-feedback').addEventListener('click', () => requestFeedback());
 $('auto-feedback').addEventListener('change', () => { savePreference(preferenceKey(), String($('auto-feedback').checked)); if ($('auto-feedback').checked) toast('已开启：保存批注后会调用所选模型，并使用模型额度。'); });
@@ -1080,7 +1085,9 @@ function publishReaderState() {
   const handwritingDraft = handwritingUI?.handoff();
   if (handwritingDraft?.id === state.active.id) snapshot.handwritingDraft = handwritingDraft;
   const linked=linkedHandwritingUI?.session();if(linked?.paperId===state.active.id)snapshot.linkedHandwriting=linked;
-  const ink=pdfReader?.getInkDraft();if(ink?.paperId===state.active.id&&inkSaveIdentity)snapshot.inkDraftRecord={draft:ink,annotation_id:inkSaveIdentity.id,attempted:inkSaveUncertain,updatedAt:inkDraftUpdatedAt};
+  const ink=pdfReader?.getInkDraft();if(ink?.paperId===state.active.id&&inkSaveIdentity)snapshot.inkDraftRecord={draft:{...ink,revision:inkSaveIdentity.requestRevision??ink.revision},annotation_id:inkSaveIdentity.id,attempted:inkSaveUncertain,updatedAt:inkDraftUpdatedAt};
+  const frozen=inkQueue?.handoff();if(frozen?.draft.paperId===state.active.id)snapshot.inkDraftRecord=frozen;
+  if(inkQueue)snapshot.inkQueueRefs=inkQueue.references();
   if(pendingInkHandoff?.draft.paperId===state.active.id){snapshot.inkDraftRecord=pendingInkHandoff;delete snapshot.linkedHandwriting;const draft=pendingInkHandoff.draft;if(draft.parentId)snapshot.linkedHandwriting={paperId:draft.paperId,page:draft.page,parentId:draft.parentId,previousTool:'highlight'};}
   const serialized = JSON.stringify(snapshot);
   if (new Blob([serialized]).size > 256 * 1024) return false;
@@ -1142,7 +1149,7 @@ async function applyReaderSnapshot(snapshot,legacyChat=false) {
       // Reconcile the old immutable request before adopting later strokes. The
       // newer handoff remains published even if that reconciliation fails.
       const existing=pdfReader.getInkDraft();
-      if(inkSaveUncertain){if(await saveInkDraft())await adoptInkHandoff(snapshot.inkDraftRecord);}
+      if(inkSaveUncertain){saveInkDraft();}
       else if(!existing||existing.paperId===state.active.id)await adoptInkHandoff(snapshot.inkDraftRecord);
     }
     if(!pendingInkHandoff&&snapshot.linkedHandwriting?.paperId===state.active.id)await linkedHandwritingUI?.restore(snapshot.linkedHandwriting);
@@ -1249,11 +1256,19 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onAnnotationActivate: (annotationId,info) => {if(info?.page&&state.active?.id&&annotationId){const note=state.annotations.find(value=>value.id===annotationId);linkAnnotationCard(note?.kind==='linked-handwriting'?note.parent_id:annotationId);}},
   onInkChange: inkDraftChanged,
   onInputChange: info => readingShell?.inputChanged(info),
+  onFocusChange: info => readingShell?.focusChanged(info),
   onStatus: (message,error,options) => readingShell?.status(message,error,options),
 });
 readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,contextChanged:()=>{resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
-linkedHandwritingUI=window.PaperLinkedHandwriting?.create({api,persistence,reader:()=>pdfReader,shell:()=>readingShell,state,toast,saveInk:saveInkDraft,inkBusy:()=>inkSaveBusy,inkUncertain:()=>inkSaveUncertain,navigate:async page=>{await switchTab('annotations');await requestPage(page);},changed:async(id,page)=>{if(state.active?.id===id){await loadAnnotations(id);await paperChatUI?.annotationsChanged(id);}},publish:publishReaderState,available:()=>handwritingAvailable});
-void restoreInkDraft().then(()=>linkedHandwritingUI?.restore()).catch(error=>toast(error.message,true));
+inkQueue=window.PaperInkQueueClient?.create({api,persistence,
+  onChange:records=>{pdfReader?.setInkEnabled(!inkQueue?.blocked()&&!inkSaveUncertain&&!pendingInkHandoff&&!restoringInkDraft);pdfReader?.setInkOverlays([...records.filter(job=>job.status!=='saved'),...records.filter(job=>job.status==='saved').slice(-16)]);readingShell?.queueChanged(records);if(state.active)renderAnnotations();publishReaderState();},
+  onAccepted:async batch=>{if(!inkDraftStorageBlocked)await persistence?.put('reader:ink-draft',null);inkDraftUpdatedAt=Math.max(inkDraftUpdatedAt,batch.frozenAt||0);if(pendingInkHandoff&&!restoringReader){const record=pendingInkHandoff;setTimeout(()=>void adoptInkHandoff(record),0);}},
+  onSaved:async job=>{if(state.active?.id!==job.paperId)return;const loaded=await loadAnnotations(job.paperId);if(state.active?.id!==job.paperId)return;if(!loaded)throw new Error('已保存到 PDF，显示待更新；可在「笔迹」中刷新保存状态。');void pdfReader?.refresh(job.page,{defer:true});void paperChatUI?.annotationsChanged(job.paperId);linkedHandwritingUI?.saved(job.paperId,job.parentId);},
+  onError:error=>toast(`手写笔迹已保留：${error.message}`,true),
+});
+linkedHandwritingUI=window.PaperLinkedHandwriting?.create({api,persistence,reader:()=>pdfReader,shell:()=>readingShell,state,toast,saveInk:saveInkDraft,inkBusy:()=>inkQueue?.blocked(),inkUncertain:()=>inkSaveUncertain,queue:()=>inkQueue,navigate:async page=>{await switchTab('annotations');await requestPage(page);},changed:async(id,page)=>{if(state.active?.id===id){await loadAnnotations(id);await paperChatUI?.annotationsChanged(id);}},publish:publishReaderState,available:()=>handwritingAvailable});
+readingShell?.setInkQueue(inkQueue);
+void restoreInkDraft().then(()=>inkQueue?.refresh()).then(()=>linkedHandwritingUI?.restore()).then(()=>inkQueue&&state.active?.id?loadAnnotations(state.active.id):null).catch(error=>toast(error.message,true));
 handwritingUI = window.PaperHandwritingNote?.create({ api, persistence, toast, draftChanged: publishReaderState, available: () => handwritingAvailable, changed: async (id, page) => { if (state.active?.id === id) { await loadAnnotations(id); await paperChatUI?.annotationsChanged(id); await refreshPage(page); } } });
 companionUI=window.PaperCompanion?.create({api,persistence,getPaper:()=>state.active,refreshAnnotations:loadAnnotations,toast});
 languageUI=window.PaperLanguageLearning?.create({api,persistence,getPaper:()=>state.active,getSelection:()=>state.selection,toast,openReference:openReferencedPaper,

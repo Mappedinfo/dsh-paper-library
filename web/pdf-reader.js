@@ -41,6 +41,51 @@
     if (!box?.width || !box?.height || !geometry || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return null;
     return [(event.clientX - box.left) / box.width * geometry.width, (event.clientY - box.top) / box.height * geometry.height].map((value, axis) => Math.max(0, Math.min(axis ? geometry.height : geometry.width, Math.round(value * 1000) / 1000)));
   }
+  function regionRects(rects, geometry, padding = 0) {
+    if (!geometry || !Array.isArray(rects) || !rects.length || rects.length > 200) return [];
+    if (rects.some(rect => !Array.isArray(rect) || rect.length !== 4 || !rect.every(Number.isFinite) || rect[2] < rect[0] || rect[3] < rect[1])) return [];
+    return rects.map(rect => {
+      const pad = Math.max(0, padding), [x0, y0, x1, y1] = rect;
+      return [Math.max(0, x0 - pad), Math.max(0, y0 - pad), Math.min(geometry.width, Math.max(x1 + pad, x0 + 1)), Math.min(geometry.height, Math.max(y1 + pad, y0 + 1))];
+    }).filter(rect => rect[2] > rect[0] && rect[3] > rect[1]);
+  }
+  /** Preserve position when already visible; move only the obscured edge. */
+  function minimumScroll(start, end, viewStart, viewSize, margin = 20) {
+    const inset = Math.min(margin, viewSize / 4), low = viewStart + inset, high = viewStart + viewSize - inset;
+    if (start >= low && end <= high) return viewStart;
+    if (end - start > viewSize - inset * 2) return Math.max(0, (start + end - viewSize) / 2);
+    return Math.max(0, start < low ? start - inset : end - viewSize + inset);
+  }
+  /** Frozen queue snapshots outlive the active draft. A save acknowledgment is
+   * insufficient to remove pixels: only a decoded raster with that ID is. */
+  function createInkOverlays() {
+    let values = new Map(); const rasters = new Map();
+    const key = value => JSON.stringify([value.paperId, value.annotation_id]);
+    const clone = value => ({ ...value, paths: value.paths.map(path => path.map(point => [...point])) });
+    const present = value => rasters.get(JSON.stringify([value.paperId, value.page]))?.has(value.annotation_id);
+    function replace(batches) {
+      if (!Array.isArray(batches) || batches.length > 32) throw new Error('待显示笔迹超出单次上限');
+      const next = new Map([...values].filter(([, value]) => value.status === 'saved' && !present(value)));
+      for (const batch of batches) {
+        if (!batch || !inkId(batch.annotation_id) || !['pending', 'staging', 'stage_failed', 'queued', 'writing', 'uncertain', 'saved'].includes(batch.status)) throw new Error('待显示笔迹格式无效');
+        const buffer = createInkBuffer(); buffer.restore({ ...batch, revision: 0 });
+        const { revision, ...draft } = buffer.snapshot(), value = { ...draft, annotation_id: batch.annotation_id, status: batch.status === 'saved' ? 'saved' : 'pending' };
+        const old = values.get(key(value));
+        if (old && JSON.stringify({ ...old, status: null }) !== JSON.stringify({ ...value, status: null })) throw new Error('同一保存身份不能替换笔迹');
+        if (old?.status === 'saved') value.status = 'saved';
+        if (present(value)) next.delete(key(value)); else next.set(key(value), value);
+      }
+      if (next.size > 64 || encodeURIComponent(JSON.stringify([...next.values()])).replace(/%[0-9a-f]{2}/gi, 'x').length > 4 * 1024 * 1024) throw new Error('待刷新笔迹过多，请先刷新已保存页面');
+      values = next; return snapshot();
+    }
+    function confirm(paperId, page, ids) {
+      rasters.set(JSON.stringify([paperId, page]), new Set(ids));
+      for (const [id, value] of values) if (value.paperId === paperId && value.page === page && present(value)) values.delete(id);
+    }
+    function forget(paperId, page) { rasters.delete(JSON.stringify([paperId, page])); }
+    function snapshot() { return [...values.values()].map(clone); }
+    return { replace, confirm, forget, snapshot, forPage: (paperId, page) => [...values.values()].filter(value => value.paperId === paperId && value.page === page), clearRasters: () => rasters.clear(), clear: () => { values.clear(); rasters.clear(); } };
+  }
   /** A bounded, single-page draft independent of page raster residency. A
    * cancelled pointer loses only its unfinished stroke; snapshots for saving
    * never include an in-progress stroke. */
@@ -212,31 +257,32 @@
   /** Serial scheduling owns page identities, never retains raster/word payloads. */
   function createPageWindow({ load, install, evict, onError = () => {} }) {
     let epoch = 0, id = null, wanted = [], running = null, inFlight = null, disposed = false;
-    const residents = new Set(), failures = new Map(), revisions = new Map(), waiters = new Map();
+    const residents = new Set(), failures = new Map(), revisions = new Map(), waiters = new Map(), dirty = new Set();
+    const needs = page => (!residents.has(page) || dirty.has(page)) && !failures.has(page);
     const settle = (page, value, error) => { for (const waiter of waiters.get(page) || []) error ? waiter.reject(error) : waiter.resolve(value); waiters.delete(page); };
     function drop(page) { if (residents.delete(page)) evict(page); }
     function pump() {
       if (running || disposed) return running;
       running = (async () => {
         while (!disposed) {
-          const page = wanted.find(page => !residents.has(page) && !failures.has(page));
+          const page = wanted.find(needs);
           if (page === undefined || !id) break;
-          const job = { id, page, epoch, revision: revisions.get(page) || 0 }; inFlight = job;
+          const job = { id, page, epoch, revision: revisions.get(page) || 0, preserved: residents.has(page) }; job.current = () => job.epoch === epoch && job.id === id && wanted.includes(page) && job.revision === (revisions.get(page) || 0); inFlight = job;
           try {
             const result = await load(job);
             if (job.epoch !== epoch || job.id !== id || !wanted.includes(page) || job.revision !== (revisions.get(page) || 0)) continue;
             // The wanted set has at most three entries. Evict before installing,
             // including during rapid jumps, so no fourth raster becomes resident.
             for (const old of [...residents]) if (!wanted.includes(old)) drop(old);
-            if (residents.size >= MAX_RESIDENT) drop([...residents].find(old => old !== page));
+            if (!residents.has(page) && residents.size >= MAX_RESIDENT) drop([...residents].find(old => old !== page));
             const installed = install(page, result, job); residents.add(page); await installed;
-            if (job.epoch === epoch && job.id === id && wanted.includes(page) && job.revision === (revisions.get(page) || 0)) settle(page, true);
-            else if (job.epoch === epoch) drop(page);
+            if (job.current()) { dirty.delete(page); settle(page, true); }
+            else if (job.epoch === epoch && !wanted.includes(page)) drop(page);
           } catch (error) {
-            if (job.epoch === epoch && job.id === id && wanted.includes(page) && job.revision === (revisions.get(page) || 0)) { drop(page); failures.set(page, error); onError(page, error); settle(page, false, error); }
+            if (job.current()) { if (!job.preserved) drop(page); failures.set(page, error); onError(page, error, { preserved: job.preserved }); settle(page, false, error); }
           } finally { if (inFlight === job) inFlight = null; }
         }
-      })().finally(() => { running = null; if (!disposed && id && wanted.some(page => !residents.has(page) && !failures.has(page))) void pump(); });
+      })().finally(() => { running = null; if (!disposed && id && wanted.some(needs)) void pump(); });
       return running;
     }
     function want(pages) {
@@ -246,18 +292,20 @@
       for (const page of [...waiters.keys()]) if (!wanted.includes(page)) settle(page, false);
       void pump();
     }
-    function reset(nextId) { ++epoch; id = nextId; wanted = []; for (const page of [...residents]) drop(page); for (const page of [...waiters.keys()]) settle(page, false); failures.clear(); revisions.clear(); }
-    function ready(page) { if (residents.has(page) && inFlight?.page !== page) return Promise.resolve(true); if (failures.has(page)) return Promise.reject(failures.get(page)); if (!wanted.includes(page)) return Promise.resolve(false); return new Promise((resolve, reject) => { const values = waiters.get(page) || []; values.push({ resolve, reject }); waiters.set(page, values); }); }
-    function invalidate(page) { revisions.set(page, (revisions.get(page) || 0) + 1); drop(page); failures.delete(page); void pump(); }
+    function reset(nextId) { ++epoch; id = nextId; wanted = []; for (const page of [...residents]) drop(page); for (const page of [...waiters.keys()]) settle(page, false); failures.clear(); revisions.clear(); dirty.clear(); }
+    function ready(page) { if (residents.has(page) && !dirty.has(page) && inFlight?.page !== page) return Promise.resolve(true); if (failures.has(page)) return Promise.reject(failures.get(page)); if (!wanted.includes(page)) return Promise.resolve(false); return new Promise((resolve, reject) => { const values = waiters.get(page) || []; values.push({ resolve, reject }); waiters.set(page, values); }); }
+    function invalidate(page, { preserve = false } = {}) { revisions.set(page, (revisions.get(page) || 0) + 1); dirty.add(page); if (!preserve) drop(page); failures.delete(page); void pump(); }
     function dispose() { reset(null); disposed = true; }
     return { reset, want, ready, invalidate, dispose, idle: () => running || Promise.resolve(), snapshot: () => ({ id, residents: [...residents], wanted: [...wanted], inFlight: inFlight ? { id: inFlight.id, page: inFlight.page } : null }) };
   }
-  function create({ root, api, getPaper, onActivePage = () => {}, onSelection = () => {}, onStatus: reportStatus = () => {}, onPageNote = () => {}, onAnnotationActivate = () => {}, onInkChange = () => {}, onInputChange = () => {} }) {
+  function create({ root, api, getPaper, onActivePage = () => {}, onSelection = () => {}, onStatus: reportStatus = () => {}, onPageNote = () => {}, onAnnotationActivate = () => {}, onInkChange = () => {}, onInputChange = () => {}, onFocusChange = () => {} }) {
     if (!root) throw new Error('PDF reader requires a scroll viewport');
     let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, flashTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', pendingRange = null, transport = Promise.resolve(), zoom = 1;
     const renderedScales = new Map(), pageAnnotations = new Map();
     const ink = createInkBuffer();
     const input = createInputPolicy(onInputChange), handledTouches = new Set();
+    const overlays = createInkOverlays(), inputWaiters = new Set(), dirtyPages = new Set(), refreshWaiters = new Map();
+    let nativeGesture = null, nativeEndTimer = null, refreshTimer = null, focusSequence = 0, focusState = null, returnPosition = null, focusCancelled = null;
     let inkWidth = 2, inkGesture = null, inkFrame = null, inkEnabled = true, markupGesture = null, touchPan = null, policyRejected = false;
     const policyRejection = '仅用笔标注已开启；当前输入未被浏览器识别为笔。';
     function onStatus(message, error = false) { policyRejected = false; reportStatus(message, error); }
@@ -270,6 +318,24 @@
     const dom = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     root.classList.add('paper-pdf-reader'); root.tabIndex = 0; root.setAttribute('aria-label', 'PDF 连续阅读区域');
     const strip = dom('div', 'pdr-pages'); root.replaceChildren(strip);
+    function inputBusy(page) { return [inkGesture, markupGesture, nativeGesture].some(gesture => gesture && (!page || Number(gesture.sheet.dataset.pdfPage) === page)) || !!touchPan; }
+    function waitForInput(page, valid) { if (!valid()) return Promise.resolve(false); if (!inputBusy(page)) return Promise.resolve(true); return new Promise(resolve => inputWaiters.add({ page, valid, resolve })); }
+    function inputEnded() {
+      for (const waiter of inputWaiters) if (!waiter.valid() || !inputBusy(waiter.page)) { inputWaiters.delete(waiter); waiter.resolve(waiter.valid()); }
+      scheduleRefresh();
+    }
+    function paintOverlays(onlyPage) {
+      for (const layer of root.querySelectorAll('.pdr-ink-overlay')) if (!onlyPage || Number(layer.dataset.pdfPage) === onlyPage) layer.remove();
+      for (const batch of overlays.snapshot()) {
+        if (batch.paperId !== paperId || onlyPage && batch.page !== onlyPage) continue;
+        const slot = slots[batch.page - 1], geometry = pages[batch.page - 1]; if (!slot || !geometry) continue;
+        const layer = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); layer.classList.add('pdr-ink-overlay'); layer.dataset.annotationId = batch.annotation_id; layer.dataset.status = batch.status; layer.dataset.pdfPage = String(batch.page);
+        layer.setAttribute('viewBox', `0 0 ${geometry.width} ${geometry.height}`); layer.setAttribute('preserveAspectRatio', 'none'); layer.setAttribute('aria-hidden', 'true'); layer.setAttribute('stroke', batch.color); layer.setAttribute('stroke-width', String(batch.width));
+        for (const path of batch.paths) { const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline'); line.setAttribute('points', path.map(point => point.join(',')).join(' ')); layer.append(line); }
+        slot.sheet.append(layer);
+      }
+    }
+    function setInkOverlays(batches) { overlays.replace(batches); paintOverlays(); return true; }
     function paintInkContext() {
       const context = ink.getContext();
       root.dataset.inkContext = context ? 'linked' : 'free';
@@ -307,6 +373,7 @@
       try { if (root.hasPointerCapture?.(pointerId)) root.releasePointerCapture(pointerId); } catch { /* The platform may have released capture already. */ }
       if (inkFrame !== null) { window.cancelAnimationFrame(inkFrame); inkFrame = null; }
       if (changed) inkChanged(); else paintInk();
+      inputEnded();
       return changed;
     }
     function appendInk(event) {
@@ -326,6 +393,7 @@
       if (!touchPan) return;
       const pointerId = touchPan.pointerId; touchPan = null;
       try { if (root.hasPointerCapture?.(pointerId)) root.releasePointerCapture(pointerId); } catch { /* Already released by the browser. */ }
+      inputEnded();
     }
     function moveTouchPan(event) {
       if (touchPan?.pointerId !== event.pointerId || inkGesture || markupGesture) return;
@@ -380,10 +448,15 @@
       markupGesture = null;
       try { if (root.hasPointerCapture?.(gesture.pointerId)) root.releasePointerCapture(gesture.pointerId); } catch { /* Already released by the platform. */ }
       if (cancelled) { pendingRange = null; lastSelection = ''; selection = null; window.getSelection()?.removeAllRanges(); }
+      inputEnded();
       return gesture;
     }
     function pointerDown(event) {
       input.observe(event);
+      if (!(event.pointerType === 'touch' && (inkGesture || markupGesture))) cancelNavigation();
+      if (tool === 'select' && event.button === 0 && event.isPrimary !== false) {
+        const sheet = event.target.closest?.('.pdr-sheet'); if (sheet && root.contains(sheet)) nativeGesture = { pointerId: event.pointerId, sheet };
+      }
       const annotating = tool === 'ink' || MARKUP_TOOLS.has(tool);
       if (event.pointerType === 'touch' && annotating) {
         event.preventDefault(); if (handledTouches.size < 32) handledTouches.add(event.pointerId);
@@ -418,7 +491,14 @@
       if (event.pointerType === 'touch' && (handledTouches.has(event.pointerId) || tool === 'ink' || MARKUP_TOOLS.has(tool))) { event.preventDefault(); moveTouchPan(event); return; }
       if (markupGesture?.pointerId === event.pointerId) { input.observe(event); event.preventDefault(); moveMarkup(event); } else if (inkGesture?.pointerId === event.pointerId) { input.observe(event); event.preventDefault(); appendInk(event); }
     }
-    function pointerCancel(event) { if (touchPan?.pointerId === event.pointerId) endTouchPan(); if (event.pointerType === 'touch') { if (event.type !== 'lostpointercapture') handledTouches.delete(event.pointerId); return; } if (markupGesture?.pointerId === event.pointerId) endMarkup(true); if (inkGesture?.pointerId === event.pointerId) endInk(true); }
+    function nativePointerEnded(event) {
+      if (nativeGesture?.pointerId !== event.pointerId) return;
+      if (event.type !== 'pointerup') { nativeGesture = null; inputEnded(); return; }
+      if (nativeEndTimer !== null) return;
+      const gesture = nativeGesture;
+      nativeEndTimer = window.setTimeout(() => { nativeEndTimer = null; if (nativeGesture === gesture) { captureSelection(); nativeGesture = null; inputEnded(); } }, 0);
+    }
+    function pointerCancel(event) { nativePointerEnded(event); if (touchPan?.pointerId === event.pointerId) endTouchPan(); if (event.pointerType === 'touch') { if (event.type !== 'lostpointercapture') handledTouches.delete(event.pointerId); return; } if (markupGesture?.pointerId === event.pointerId) endMarkup(true); if (inkGesture?.pointerId === event.pointerId) endInk(true); }
     function pointerLeave(event) { if (root.hasPointerCapture?.(event.pointerId)) return; if (touchPan?.pointerId === event.pointerId) endTouchPan(); if (event.pointerType === 'touch') return; if (markupGesture?.pointerId === event.pointerId) endMarkup(true); if (inkGesture?.pointerId === event.pointerId) endInk(true); }
     function undoInk() { endInk(true); if (!inkEnabled) return false; const changed = ink.undo(); if (changed) inkChanged(); return changed; }
     function clearInk(expectedRevision) { if (expectedRevision !== undefined && expectedRevision !== ink.snapshot()?.revision) return false; endInk(true); const cleared = ink.clear(expectedRevision); if (cleared) inkChanged(); return cleared; }
@@ -432,16 +512,18 @@
     // rise with zoom (capped at 4) so magnified text stays sharp within budget.
     const fitWidth = () => Math.max(1, Math.min(1100, (root.clientWidth || 664) - PADDING * 2));
     function scaleFor(page) { const geometry = pages[page - 1]; const cap = Math.min(2 * Math.max(1, zoom), 4); return Math.max(.2, Math.min(cap, layoutWidth / geometry.width * Math.min(2, window.devicePixelRatio || 1))); }
-    function announce(loaded = queue.snapshot().residents.includes(active)) { const geometry = pages[active - 1]; if (geometry) onActivePage(active, { paperId, pageCount: pages.length, width: geometry.width, height: geometry.height, loaded }); }
+    function announce(loaded = queue.snapshot().residents.includes(active) && slots[active - 1]?.sheet.dataset.loaded === 'true') { const geometry = pages[active - 1]; if (geometry) onActivePage(active, { paperId, pageCount: pages.length, width: geometry.width, height: geometry.height, loaded }); }
     function placeholder(page, message = '滚动到这里时载入', error = false) {
       const slot = slots[page - 1]; if (!slot) return;
       if (markupGesture?.sheet === slot.sheet) endMarkup(true);
       renderedScales.delete(page); pageAnnotations.delete(page);
+      overlays.forget(paperId, page);
       for (const image of slot.sheet.querySelectorAll('img')) image.removeAttribute('src');
       const note = dom('div', `pdr-placeholder${error ? ' pdr-error' : ''}`); note.append(dom('span', '', message));
       if (error) { const retry = dom('button', 'button subtle', '重试此页'); retry.type = 'button'; retry.dataset.retryPage = String(page); note.append(retry); }
       slot.sheet.replaceChildren(note); slot.sheet.dataset.loaded = 'false';
       if (ink.preview()?.paperId === paperId && ink.preview()?.page === page) paintInk();
+      paintOverlays(page);
     }
     /** One invisible text run per raster word.
      *
@@ -509,24 +591,31 @@
         const geometry = pages[page - 1];
         if (!result || result.page !== page || result.page_count !== pages.length || Math.abs(result.width - geometry.width) > .1 || Math.abs(result.height - geometry.height) > .1 || typeof result.image !== 'string' || result.image.length > 24 * 1024 * 1024 || !Array.isArray(result.words) || result.words.length > 20000 || (result.annotations !== undefined && (!Array.isArray(result.annotations) || result.annotations.length > 1000))) throw new Error('页面内容或尺寸已改变，请重新打开 PDF 后重试。');
         const sheet = slots[page - 1].sheet, image = dom('img', 'pdr-page-image');
-        if (markupGesture?.sheet === sheet) endMarkup(true);
-        image.alt = `PDF 第 ${page} 页`; image.draggable = false; image.decoding = 'async'; image.dataset.pdfPage = String(page); image.src = `data:image/png;base64,${result.image}`; sheet.replaceChildren(image); renderWords(sheet, result.words, geometry); sheet.dataset.loaded = 'true'; paintInk();
+        image.alt = `PDF 第 ${page} 页`; image.draggable = false; image.decoding = 'async'; image.dataset.pdfPage = String(page); image.src = `data:image/png;base64,${result.image}`;
+        if (image.decode) await image.decode();
+        const valid = () => current(id, ticket) && job.current();
+        if (!await waitForInput(page, valid) || !valid()) return;
+        // Decode off-DOM, then replace only between complete input gestures.
+        sheet.replaceChildren(image); renderWords(sheet, result.words, geometry); sheet.dataset.loaded = 'true'; paintInk();
         // Saved annotations travel with the page payload so clicks can link the
         // raster markup to its rail entry without a second catalogue read.
         pageAnnotations.set(page, (result.annotations || []).filter(annotation => annotation && typeof annotation.id === 'string' && Array.isArray(annotation.rects) && annotation.rects.some(rect => Array.isArray(rect) && rect.length >= 4)));
+        overlays.confirm(id, page, (result.annotations || []).map(annotation => annotation?.id).filter(value => typeof value === 'string')); paintOverlays(page); paintFocus();
         renderedScales.set(page, job.requestedScale);
-        if (image.decode) await image.decode();
         if (!current(id, ticket) || !sheet.contains(image)) return;
         if (page === active) { announce(true); onStatus(result.words_truncated ? '这一页的可选文字超过上限，仅显示部分文字层。' : result.words.length ? '连续滚动阅读；选中文字后可批注或提问。' : '这一页没有可选择的文字，可使用页批注。'); }
       },
       evict: page => placeholder(page),
-      onError: (page, error) => { placeholder(page, `第 ${page} 页读取失败：${error.message}`, true); if (page === active) onStatus(error.message, true); },
+      onError: (page, error, info) => { if (!info?.preserved) placeholder(page, `第 ${page} 页读取失败：${error.message}`, true); if (page === active) onStatus(error.message, true); },
     });
     function updateWindow(priority) {
       if (!pages.length || disposed || root.clientHeight <= 0) return;
       const next = pageAt(metrics, root.scrollTop + root.clientHeight * .35);
       if (next !== active) { active = next; announce(); }
-      queue.want(visibleWindow(metrics, root.scrollTop, root.clientHeight, priority || jumpTarget));
+      const busyPage = Number((inkGesture || markupGesture || nativeGesture)?.sheet.dataset.pdfPage);
+      const wanted = visibleWindow(metrics, root.scrollTop, root.clientHeight, priority || jumpTarget);
+      queue.want(busyPage ? [busyPage, ...wanted].slice(0, MAX_RESIDENT) : wanted);
+      inputEnded();
     }
     function scroll() { if (frame !== null) return; frame = window.requestAnimationFrame(() => { frame = null; updateWindow(); }); }
     function resize() {
@@ -550,18 +639,21 @@
         resizeTimer = null;
         for (const page of queue.snapshot().residents) {
           const rendered = renderedScales.get(page), desired = scaleFor(page);
-          if (rendered && (desired > rendered * 1.25 || desired < rendered * .65)) queue.invalidate(page);
+          if (rendered && (desired > rendered * 1.25 || desired < rendered * .65)) void refresh(page, { defer: true });
         }
       }, 120);
     }
     function clear() {
       // The draft belongs to its original paper/page, not to the disposable
       // raster window. The caller offers save/discard before leaving the page.
-      endInk(true); endMarkup(true); endTouchPan();
+      endInk(true); endMarkup(true); endTouchPan(); nativeGesture = null; cancelNavigation(); returnPosition = null; overlays.clearRasters();
       ++generation; paperId = null; jumpTarget = null; selection = null; lastSelection = ''; queue.reset(null); renderedScales.clear(); pageAnnotations.clear(); pages = []; metrics = []; slots = []; active = 1; layoutWidth = 0; layoutPromise = null; strip.replaceChildren(); root.scrollTop = 0;
       if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; } if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
       if (resizeTimer !== null) { window.clearTimeout(resizeTimer); resizeTimer = null; }
       if (flashTimer !== null) { window.clearTimeout(flashTimer); flashTimer = null; }
+      if (refreshTimer !== null) { window.clearTimeout(refreshTimer); refreshTimer = null; }
+      if (nativeEndTimer !== null) { window.clearTimeout(nativeEndTimer); nativeEndTimer = null; }
+      dirtyPages.clear(); for (const list of refreshWaiters.values()) for (const waiter of list) waiter.resolve(false); refreshWaiters.clear(); inputEnded(); emitFocus();
     }
     async function open(paper, { page = 1 } = {}) {
       clear(); if (!paper?.id || !paper.pdf || disposed) return false;
@@ -584,6 +676,7 @@
       return goTo(page);
     }
     async function goTo(value) {
+      cancelNavigation();
       const id = paperId, ticket = generation;
       if (layoutPromise && !pages.length) { if (!await layoutPromise || !current(id, ticket)) return false; }
       if (!pages.length) return false;
@@ -593,12 +686,23 @@
       try { return await queue.ready(page); }
       finally { if (current(id, ticket) && jumpTarget === page) { jumpTarget = null; updateWindow(); } }
     }
-    async function refresh(value = active) {
+    function pageVisible(page) { const metric = metrics[page - 1]; return !!metric && metric.top + metric.height > root.scrollTop && metric.top < root.scrollTop + root.clientHeight; }
+    function scheduleRefresh(delay = 240) { if (!dirtyPages.size || refreshTimer !== null || disposed) return; refreshTimer = window.setTimeout(() => { refreshTimer = null; flushRefresh(); }, delay); }
+    function flushRefresh() {
+      if (disposed || inputBusy()) return;
+      for (const page of dirtyPages) {
+        if (!pageVisible(page) || !queue.snapshot().wanted.includes(page)) continue;
+        dirtyPages.delete(page); queue.invalidate(page, { preserve: true });
+        const list = refreshWaiters.get(page) || []; refreshWaiters.delete(page);
+        void queue.ready(page).then(value => { for (const waiter of list) waiter.resolve(value); }, error => { for (const waiter of list) waiter.reject(error); });
+      }
+    }
+    async function refresh(value = active, { defer = false } = {}) {
       if (!pages.length) return false;
-      const page = Math.max(1, Math.min(pages.length, Math.trunc(Number(value)) || active)), id = paperId, ticket = generation;
-      queue.want([page, ...visibleWindow(metrics, root.scrollTop, root.clientHeight)].slice(0, MAX_RESIDENT)); queue.invalidate(page);
-      try { return await queue.ready(page); }
-      finally { if (current(id, ticket)) updateWindow(); }
+      const page = Math.max(1, Math.min(pages.length, Math.trunc(Number(value)) || active)); dirtyPages.add(page);
+      if (defer || !pageVisible(page)) { scheduleRefresh(); return true; }
+      const pending = new Promise((resolve, reject) => { const list = refreshWaiters.get(page) || []; list.push({ resolve, reject }); refreshWaiters.set(page, list); });
+      flushRefresh(); return pending;
     }
     function layerOf(node) { const element = node?.nodeType === 3 ? node.parentElement : node; return element?.closest?.('.pdr-word-layer'); }
     /** The selection's slice inside one word span, or null when it cannot be built. */
@@ -666,45 +770,91 @@
       }
       return null;
     }
-    function flashAnnotation(page, rects, annotation = null) {
-      const slot = slots[page - 1], geometry = pages[page - 1];
-      if (!slot || !geometry) return;
+    function emitFocus() { onFocusChange({ active: !!focusState && !focusState.loading, pending: !!focusState?.loading, focusId: focusState?.focusId || null, kind: focusState?.kind || null, canReturn: !!returnPosition }); }
+    function clearFocus() {
       for (const node of root.querySelectorAll('.pdr-annotation-flash')) node.remove();
-      // Flash in the annotation's own colour so the cue matches the markup.
-      const tint = annotationTint(annotation) || hexTint(color, .38);
-      const source = annotation || (pageAnnotations.get(page) || []).find(value => Array.isArray(value.rects) && value.rects.some(rect => Array.isArray(rect) && rect[2] > rect[0]));
-      const resolved = annotationTint(source) || tint;
-      for (const rect of (Array.isArray(rects) ? rects : []).slice(0, 200)) {
-        if (!Array.isArray(rect) || rect.length < 4 || rect[2] <= rect[0] || rect[3] <= rect[1]) continue;
-        const box = dom('div', 'pdr-annotation-flash');
+      if (flashTimer !== null) { window.clearTimeout(flashTimer); flashTimer = null; }
+    }
+    function cancelNavigation() {
+      focusCancelled?.(); focusCancelled = null;
+      ++focusSequence; jumpTarget = null; focusState = null; clearFocus(); emitFocus();
+      for (const waiter of inputWaiters) if (!waiter.valid()) { inputWaiters.delete(waiter); waiter.resolve(false); }
+    }
+    function userNavigate(event) {
+      if (event.type === 'keydown' && (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Escape'].includes(event.key) || event.target.closest?.('input,textarea,[contenteditable]'))) return;
+      cancelNavigation(); updateWindow();
+    }
+    function paintFocus() {
+      for (const node of root.querySelectorAll('.pdr-annotation-flash')) node.remove();
+      if (!focusState || focusState.loading || focusState.expires <= Date.now()) return;
+      const { page, rects, tint, kind, focusId } = focusState, slot = slots[page - 1], geometry = pages[page - 1]; if (!slot || !geometry) return;
+      for (const rect of rects) {
+        const box = dom('div', 'pdr-annotation-flash'); box.dataset.focusId = focusId; box.dataset.focusKind = kind;
         Object.assign(box.style, { left: `${rect[0] / geometry.width * 100}%`, top: `${rect[1] / geometry.height * 100}%`, width: `${(rect[2] - rect[0]) / geometry.width * 100}%`, height: `${(rect[3] - rect[1]) / geometry.height * 100}%` });
-        if (resolved) { box.style.background = resolved; box.style.borderColor = resolved.replace(/,\s*[\d.]+\)$/, ', 1)'); }
+        if (tint) box.style.borderColor = tint;
         slot.sheet.append(box);
       }
-      if (flashTimer !== null) window.clearTimeout(flashTimer);
-      flashTimer = window.setTimeout(() => { flashTimer = null; for (const node of root.querySelectorAll('.pdr-annotation-flash')) node.remove(); }, 2400);
     }
-    /** Rail → PDF: navigate to the annotated page, center the markup and flash it. */
-    async function revealAnnotation(id, { page } = {}) {
-      if (disposed || !pages.length || typeof id !== 'string') return false;
-      let target = Number.isInteger(page) && page >= 1 && page <= pages.length ? page : null;
-      if (target === null) for (const [number, list] of pageAnnotations) if (list.some(annotation => annotation.id === id)) { target = number; break; }
-      if (target === null) return false;
-      const id0 = paperId, ticket = generation;
-      jumpTarget = target;
-      try { await goTo(target); } finally { if (current(id0, ticket) && jumpTarget === target) jumpTarget = null; }
-      if (!current(id0, ticket)) return false;
-      const annotation = (pageAnnotations.get(target) || []).find(value => value.id === id);
-      if (!annotation) return false;
-      const geometry = pages[target - 1], metric = metrics[target - 1], first = annotation.rects.find(rect => Array.isArray(rect) && rect.length >= 4);
-      if (first) {
-        const sheet = metric.height - CAPTION;
-        root.scrollTop = Math.max(0, metric.top + CAPTION + (first[1] + first[3]) / 2 / geometry.height * sheet - root.clientHeight / 2);
+    function flashAnnotation(page, rects, annotation) {
+      cancelNavigation(); const clipped = regionRects(rects, pages[page - 1], 1); if (!clipped.length) return;
+      const sequence = focusSequence;
+      focusState = { page, rects: clipped, kind: annotation?.type === 'ink' ? 'ink' : 'quote', focusId: annotation?.id || '', tint: annotationTint(annotation, 1), loading: false, expires: Date.now() + 1800 };
+      paintFocus(); emitFocus(); flashTimer = window.setTimeout(() => { if (sequence === focusSequence) { focusState = null; clearFocus(); emitFocus(); } }, 1800);
+    }
+    function readingPosition() {
+      const page = pageAt(metrics, root.scrollTop), metric = metrics[page - 1];
+      return metric ? { paperId, page, fraction: (root.scrollTop - metric.top) / metric.height, horizontal: root.scrollLeft / layoutWidth, zoom } : null;
+    }
+    async function focusRegion(value, annotationId) {
+      if (disposed || value?.paperId !== paperId || !Number.isInteger(value.page) || !pages[value.page - 1]) return false;
+      const { page } = value, id = paperId, ticket = generation;
+      if (!annotationId && !regionRects(value.rects, pages[page - 1]).length) return false;
+      cancelNavigation(); const sequence = focusSequence, valid = () => current(id, ticket) && sequence === focusSequence;
+      const cancelled = new Promise(resolve => { focusCancelled = () => resolve(false); });
+      if (!returnPosition) returnPosition = readingPosition();
+      focusState = { page, kind: value.kind === 'ink' ? 'ink' : 'quote', focusId: typeof value.focusId === 'string' ? value.focusId.slice(0, 256) : annotationId || '', loading: true }; emitFocus();
+      try {
+        if (!await waitForInput(null, valid)) return false;
+        jumpTarget = page;
+        const dirty = dirtyPages.delete(page);
+        queue.want(visibleWindow(metrics, root.scrollTop, root.clientHeight, page));
+        if (dirty) {
+          queue.invalidate(page, { preserve: true });
+          const list = refreshWaiters.get(page) || []; refreshWaiters.delete(page);
+          void queue.ready(page).then(value => { for (const waiter of list) waiter.resolve(value); }, error => { for (const waiter of list) waiter.reject(error); });
+        }
+        if (!await Promise.race([queue.ready(page), cancelled]) || !valid() || !await waitForInput(null, valid)) return false;
+        const annotation = annotationId ? (pageAnnotations.get(page) || []).find(item => item.id === annotationId) : null;
+        const geometry = pages[page - 1], rects = regionRects(annotationId ? annotation?.rects : value.rects, geometry, value.kind === 'ink' ? 3 : 1);
+        if (!rects.length) return false;
+        const sheet = slots[page - 1].sheet.getBoundingClientRect(), viewport = root.getBoundingClientRect();
+        const left = root.scrollLeft + sheet.left - viewport.left - (root.clientLeft || 0), top = root.scrollTop + sheet.top - viewport.top - (root.clientTop || 0);
+        const x0 = left + Math.min(...rects.map(rect => rect[0])) / geometry.width * sheet.width, x1 = left + Math.max(...rects.map(rect => rect[2])) / geometry.width * sheet.width;
+        const y0 = top + Math.min(...rects.map(rect => rect[1])) / geometry.height * sheet.height, y1 = top + Math.max(...rects.map(rect => rect[3])) / geometry.height * sheet.height;
+        root.scrollLeft = minimumScroll(x0, x1, root.scrollLeft, root.clientWidth); root.scrollTop = minimumScroll(y0, y1, root.scrollTop, root.clientHeight);
+        focusState = { ...focusState, rects, tint: annotationTint(annotation, 1), loading: false, expires: Date.now() + 1800 }; paintFocus(); emitFocus();
+        flashTimer = window.setTimeout(() => { flashTimer = null; if (valid()) { focusState = null; clearFocus(); emitFocus(); } }, 1800);
+        return true;
+      } finally {
+        if (valid()) { focusCancelled = null; jumpTarget = null; if (focusState?.loading) { focusState = null; emitFocus(); } updateWindow(); }
       }
-      flashAnnotation(target, annotation.rects, annotation);
-      return true;
+    }
+    function revealRegion(value) { return focusRegion(value); }
+    function revealAnnotation(id, { page } = {}) {
+      let target = Number.isInteger(page) ? page : null;
+      if (target === null) for (const [number, list] of pageAnnotations) if (list.some(annotation => annotation.id === id)) { target = number; break; }
+      return typeof id === 'string' ? focusRegion({ paperId, page: target, kind: 'quote', focusId: id }, id) : Promise.resolve(false);
+    }
+    async function returnToReadingPosition() {
+      const position = returnPosition; if (!position || position.paperId !== paperId) return false;
+      cancelNavigation(); const sequence = focusSequence, id = paperId, ticket = generation, valid = () => current(id, ticket) && focusSequence === sequence;
+      if (!await waitForInput(null, valid)) return false;
+      zoom = position.zoom; resize(); const metric = metrics[position.page - 1]; if (!metric || !valid()) return false;
+      root.scrollTop = metric.top + position.fraction * metric.height; root.scrollLeft = position.horizontal * layoutWidth;
+      returnPosition = null; emitFocus(); updateWindow(position.page); return true;
     }
     function pointerUp(event) {
+      nativePointerEnded(event);
       if (event.pointerType === 'touch' && (handledTouches.has(event.pointerId) || tool === 'ink' || MARKUP_TOOLS.has(tool))) { event.preventDefault(); if (touchPan?.pointerId === event.pointerId) { moveTouchPan(event); endTouchPan(); } handledTouches.delete(event.pointerId); return; }
       if (markupGesture?.pointerId === event.pointerId) {
         event.preventDefault(); moveMarkup(event);
@@ -748,7 +898,7 @@
       const options = typeof nextColor === 'object' && nextColor !== null ? nextColor : { color: nextColor };
       if (options.color !== undefined && !/^#[0-9a-f]{6}$/i.test(options.color)) throw new Error('Annotation color must be #RRGGBB');
       if (options.width !== undefined && (!Number.isFinite(options.width) || options.width < .5 || options.width > 8)) throw new Error('手写笔宽必须在 0.5–8 之间');
-      if (value !== tool) { endInk(true); endMarkup(true); endTouchPan(); }
+      if (value !== tool) { endInk(true); endMarkup(true); endTouchPan(); nativeGesture = null; inputEnded(); }
       tool = value;
       if (options.color !== undefined) color = options.color;
       if (options.width !== undefined) inkWidth = options.width;
@@ -767,6 +917,7 @@
       if (!Number.isFinite(next)) throw new Error('缩放比例无效');
       const clamped = Math.round(Math.max(.25, Math.min(4, next)) * 100) / 100;
       if (Math.abs(clamped - zoom) < .001) return zoom;
+      cancelNavigation();
       zoom = clamped; resize(); return zoom;
     }
     // Clearing a browser selection must permit choosing the same passage again.
@@ -783,9 +934,10 @@
     const resizeObserver = new ResizeObserver(() => { try { resize(); } catch (error) { onStatus(error.message, true); } }); resizeObserver.observe(root);
     root.addEventListener('pointerdown', pointerDown); root.addEventListener('pointermove', pointerMove); root.addEventListener('pointercancel', pointerCancel); root.addEventListener('lostpointercapture', pointerCancel); root.addEventListener('pointerleave', pointerLeave);
     root.addEventListener('scroll', scroll, { passive: true }); root.addEventListener('pointerup', pointerUp); root.addEventListener('keyup', captureSelection); root.addEventListener('click', click); setTool('select');
-    document.addEventListener('selectionchange', selectionChanged);
-    function dispose() { clear(); disposed = true; ink.clear(); queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('pointerdown', pointerDown); root.removeEventListener('pointermove', pointerMove); root.removeEventListener('pointercancel', pointerCancel); root.removeEventListener('lostpointercapture', pointerCancel); root.removeEventListener('pointerleave', pointerLeave); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); document.removeEventListener('selectionchange', selectionChanged); }
-    return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
+    root.addEventListener('wheel', userNavigate, { passive: true }); root.addEventListener('keydown', userNavigate);
+    document.addEventListener('selectionchange', selectionChanged); document.addEventListener('pointerup', nativePointerEnded); document.addEventListener('pointercancel', nativePointerEnded);
+    function dispose() { clear(); disposed = true; ink.clear(); overlays.clear(); queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('pointerdown', pointerDown); root.removeEventListener('pointermove', pointerMove); root.removeEventListener('pointercancel', pointerCancel); root.removeEventListener('lostpointercapture', pointerCancel); root.removeEventListener('pointerleave', pointerLeave); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); root.removeEventListener('wheel', userNavigate); root.removeEventListener('keydown', userNavigate); document.removeEventListener('selectionchange', selectionChanged); document.removeEventListener('pointerup', nativePointerEnded); document.removeEventListener('pointercancel', nativePointerEnded); }
+    return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, revealRegion, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
-  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, nearestTextPosition });
+  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkOverlays, regionRects, minimumScroll, nearestTextPosition });
 })();

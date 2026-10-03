@@ -10,6 +10,7 @@ import { registerLibraryTools } from './tools.mjs'
 import { registerBundledSkills } from './skills.mjs'
 import { createPaperChat } from './paper-chat.mjs'
 import { createLocalStateStore } from '../local-state.mjs'
+import { createInkQueue } from '../ink-queue.mjs'
 import { createLanguageLearning } from './language-learning.mjs'
 import { createHandwriting } from './handwriting.mjs'
 import { createLibraryKnowledge } from './library-knowledge.mjs'
@@ -78,10 +79,13 @@ export function apply(ctx, rawConfig = {}) {
   const localState = Object.fromEntries(['get','put','list'].map(method => [method, (...args) => sharedSettings.localState[method](...args)]))
   // Boards reuse the private state store, so no second persistence path exists.
   const boards = createBoardStore({ localState })
+  const inkQueue = createInkQueue({store:localState,dispatch,library:config.library,python:config.python})
+  ctx.effect(() => () => inkQueue.dispose(), 'paper-library: durable ink queue')
   const options = {
     library: config.library,
     python: config.python,
     boards,
+    inkQueue,
     provider: config.provider,
     model: config.model,
     ...(config.translationServer ? { translationServer: config.translationServer } : {}),

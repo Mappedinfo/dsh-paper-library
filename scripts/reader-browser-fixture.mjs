@@ -251,7 +251,17 @@ try {
     assert.equal(await page.locator('#reading-workspace').getAttribute('data-reading-side'), 'left');
     await screenshot('annotations-sidebar-left');
     const noteCard = page.locator('#annotation-list .annotation-card').filter({ hasText: 'Synthetic existing page 12 note' });
-    await noteCard.locator('[data-note-action="page"]').click(); await waitPage(12); await ready(12); await visiblePDF();
+    const page12NoteId = await noteCard.getAttribute('data-annotation-id');
+    await noteCard.locator('[data-note-action="page"]').click();
+    // Region navigation uses the nearest visible edge. A small target can be
+    // fully visible while the preceding page still occupies most of the view.
+    await page.waitForFunction(id => {
+      const root = document.getElementById('continuous-reader'), flash = root.querySelector(`.pdr-sheet[data-pdf-page="12"] .pdr-annotation-flash[data-focus-id="${CSS.escape(id)}"]`);
+      if (!flash) return false;
+      const viewport = root.getBoundingClientRect(), target = flash.getBoundingClientRect();
+      return target.width > 0 && target.height > 0 && target.left >= viewport.left && target.right <= viewport.right && target.top >= viewport.top && target.bottom <= viewport.bottom;
+    }, page12NoteId);
+    await ready(12); await visiblePDF();
     record('annotation-sidebar-switches-left-right-and-note-click-returns-to-page-12');
     // Free rail width: drag the divider, keep the PDF fitted, persist the choice.
     const railWidth = () => page.locator('.library-pane.shared-reading-sidebar').evaluate(node => Math.round(node.getBoundingClientRect().width));
