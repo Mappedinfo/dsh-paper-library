@@ -95,6 +95,17 @@ try {
   const saved = async responsePromise => { const response=await responsePromise; assert.equal(response.status(),200,await response.text()); const result=(await response.json()).result; await ready(); return result; };
   const idleDraft = async () => page.waitForFunction(() => document.getElementById('reader-ink-draft')?.hidden || document.getElementById('reader-ink-draft')?.getAttribute('aria-busy')==='false');
   const shot = async name => { const path=join(run,`${name}.png`); await page.screenshot({path}); screenshots.push(relative(project,path)); };
+  const target = async (locator,{fullRow=false,minHeight=44}={}) => {
+    await locator.scrollIntoViewIfNeeded();
+    const box=await locator.evaluate((button,{fullRow,minHeight})=>{
+      const rect=button.getBoundingClientRect(),parent=button.parentElement.getBoundingClientRect(),style=getComputedStyle(button);
+      const hit=[[.5,.5],[.15,.25],[.85,.75]].every(([x,y])=>button.contains(document.elementFromPoint(rect.left+rect.width*x,rect.top+rect.height*y)));
+      return {height:rect.height,width:rect.width,rowWidth:parent.width,fontSize:parseFloat(style.fontSize),hit,inViewport:rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight,fullRow,minHeight};
+    },{fullRow,minHeight});
+    assert.ok(box.height>=minHeight,JSON.stringify(box)); assert.ok(box.hit&&box.inViewport,JSON.stringify(box));
+    if(fullRow){assert.ok(Math.abs(box.width-box.rowWidth)<=1,JSON.stringify(box));assert.ok(box.fontSize>=14,JSON.stringify(box));}
+    return box;
+  };
   const open = async () => {
     events.push(...await page.evaluate(()=>window.linkedHandwritingEvents||[]).catch(()=>[]));
     await page.goto(origin); await page.waitForLoadState('networkidle'); await page.waitForFunction(()=>initializedReader&&!restoringReader);
@@ -104,9 +115,11 @@ try {
   await open(); await page.locator('#reader-mode-auto').click(); await page.locator('#reader-tool-highlight').click();
   const highlightReply=annotationReply('highlight'); await dragText(await span(0,4)); parent=(await saved(highlightReply)).annotation;
   assert.equal(parent.type,'highlight'); assert.ok(parent.text.includes('linked handwriting')); await card().waitFor(); record('trusted pen creates a standard text-bound highlight');
+  await target(toggle(),{fullRow:true}); record('sidebar handwriting button spans its action row with an unobstructed 44-pixel target');
 
   await page.locator('#reader-tool-underline').click(); await toggle().click(); await active(true); await ready();
   assert.equal(await toggle().getAttribute('aria-pressed'),'true'); assert.equal(await page.locator('#handwriting-dialog').isVisible(),false);
+  await target(toggle(),{fullRow:true}); await target(page.locator('#linked-handwriting-finish')); record('active handwriting and finish controls retain unobstructed 44-pixel targets');
   await page.locator('#linked-handwriting-status').waitFor({state:'visible'}); record('sidebar handwriting toggle keeps PDF visible without a separate board');
   const firstPath=[[55,270],[85,255],[115,270],[85,288],[55,270]];
   let response=annotationReply('ink'); await draw(firstPath); await pathCount(1); await shot('inline-linked-draft'); await saved(response); await pathCount(0);
@@ -156,6 +169,21 @@ with pymupdf.open(sys.argv[1]) as doc:
   const recovered=(await core({action:'annotations',id:imported.id},{library:freshLibrary,python})).annotations; assert.deepEqual(recovered.find(note=>note.id===parent.id).linked_ink,(await linked()));
   assert.equal(recovered.find(note=>note.id==='legacy-source').handwriting.transcript,legacy.transcript); record('export and fresh import recover native ink relationships and legacy attachment from PDF alone');
   await open(); assert.equal(await linkedCount(),4); assert.equal(await toggle().getAttribute('aria-pressed'),'false'); await shot('linked-handwriting-reopened'); record('confirmed linked strokes reopen in the reading page');
+  await page.setViewportSize({width:600,height:960}); await ready(); await target(toggle(),{fullRow:true});
+  await toggle().click(); await active(true); await ready(); await target(toggle(),{fullRow:true}); await target(page.locator('#linked-handwriting-finish'));
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  assert.equal(await page.evaluate(()=>parseFloat(getComputedStyle(document.body).getPropertyValue('--workbench-height'))),164);
+  fault='refuse'; await draw([[45,150],[75,155]]); await pathCount(1); await page.waitForFunction(()=>!document.getElementById('reader-ink-save').disabled&&document.getElementById('reader-ink-undo').disabled); await idleDraft();
+  await target(page.locator('#linked-handwriting-finish')); await target(page.locator('#reader-ink-save'),{minHeight:32});
+  assert.equal(await page.evaluate(()=>parseFloat(getComputedStyle(document.body).getPropertyValue('--workbench-height'))),204);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false); await shot('linked-handwriting-narrow-targets');
+  await page.emulateMedia({colorScheme:'dark'});await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark'&&!document.documentElement.getAnimations({subtree:true}).some(animation=>animation.playState==='running'));
+  const inactive=legacyCard.locator('[data-note-action="handwriting"]');await target(inactive,{fullRow:true});
+  const contrast=await inactive.evaluate(button=>{const style=getComputedStyle(button),luminance=color=>{const rgb=color.match(/[\d.]+/g).slice(0,3).map(Number).map(value=>{const n=value/255;return n<=.04045?n/12.92:((n+.055)/1.055)**2.4;});return .2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2];},a=luminance(style.color),b=luminance(style.backgroundColor);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);});assert.ok(contrast>=4.5,`Inactive handwriting contrast: ${contrast}`);
+  await target(page.locator('#linked-handwriting-finish'));await shot('linked-handwriting-narrow-dark');
+  await page.locator('#reader-ink-discard').click(); await pathCount(0); fault=null; await page.locator('#linked-handwriting-finish').click(); await active(false);
+  assert.equal(await linkedCount(),4); record('600-pixel viewport keeps full-row handwriting and enlarged finish controls visible with pending retry');
+  record('dark-theme inactive handwriting action preserves readable contrast and visible click targets');
   events.push(...await page.evaluate(()=>window.linkedHandwritingEvents)); for(const type of ['pen','mouse','touch'])assert.ok(events.some(event=>event.type===type&&event.trusted)); assert.equal(await hash(source),originalHash); assert.deepEqual(errors,[]); assert.deepEqual(external,[]); record('original bytes unchanged with no browser errors or external model requests');
 } catch(error) { failure=error; if(page){await page.screenshot({path:join(run,'failure.png')}).catch(()=>{});await writeFile(join(run,'failure-state.json'),JSON.stringify(await page.evaluate(()=>({inkBusy:inkSaveBusy,inkUncertain:inkSaveUncertain,inkPromise:!!inkSavePromise,session:linkedHandwritingUI?.session(),draft:pdfReader?.getInkDraft(),body:document.body.innerText})).catch(()=>null),null,2));} }
 finally { await browser?.close(); await new Promise(resolve=>server.close(resolve)); }

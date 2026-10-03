@@ -24,7 +24,14 @@ DSH_TEST_PROFILE=paper-chat-test npm run test:reference
 
 They stay out of `npm test` (which is browser-free) for that reason; browser-only fixtures are wired as `test:*` scripts in `package.json`.
 
-## No-argument fixtures (30 of 57)
+## Pencil input fixtures (2026-10-03)
+
+| Receipt | Command | Scope |
+|---|---|---|
+| `pencil-touch-browser.json` | `npm run test:pencil-touch` | Trusted Chromium pen/touch/mouse; finger pan, active-stroke isolation, strict mode and compatibility, native PDF save. No physical Sidecar or Electron claim. |
+| `linked-handwriting-browser.json` | `npm run test:linked-handwriting` | Inline linked handwriting, durable recovery, native PDF portability and 44 px targets at desktop and narrow widths. |
+
+## Earlier no-argument fixtures (2026-09-20 snapshot: 30 of 57)
 
 | Receipt | Command | Verified | Scope |
 |---|---|---|---|

@@ -1248,7 +1248,8 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onPageNote: (selection,intent) => {if(selection.id===state.active?.id)openAnnotation('note',null,{selection,color:intent.color});},
   onAnnotationActivate: (annotationId,info) => {if(info?.page&&state.active?.id&&annotationId){const note=state.annotations.find(value=>value.id===annotationId);linkAnnotationCard(note?.kind==='linked-handwriting'?note.parent_id:annotationId);}},
   onInkChange: inkDraftChanged,
-  onStatus: (message,error) => readingShell?.status(message,error),
+  onInputChange: info => readingShell?.inputChanged(info),
+  onStatus: (message,error,options) => readingShell?.status(message,error,options),
 });
 readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,contextChanged:()=>{resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
 linkedHandwritingUI=window.PaperLinkedHandwriting?.create({api,persistence,reader:()=>pdfReader,shell:()=>readingShell,state,toast,saveInk:saveInkDraft,inkBusy:()=>inkSaveBusy,inkUncertain:()=>inkSaveUncertain,navigate:async page=>{await switchTab('annotations');await requestPage(page);},changed:async(id,page)=>{if(state.active?.id===id){await loadAnnotations(id);await paperChatUI?.annotationsChanged(id);}},publish:publishReaderState,available:()=>handwritingAvailable});

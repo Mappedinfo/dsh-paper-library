@@ -62,15 +62,27 @@ body.has-ink-draft{--workbench-height:152px}
 .reader-ink-width select{width:52px;min-height:27px;padding:2px 4px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:4px}
 
 /* The linked session remains on the reading surface, with its target in the rail. */
-body.linked-handwriting-active{--workbench-height:152px}
-.linked-handwriting-active .topbar{grid-template-rows:28px 28px 32px 19px 40px}
-body.linked-handwriting-active.has-ink-draft{--workbench-height:192px}
-.linked-handwriting-active.has-ink-draft .topbar{grid-template-rows:28px 28px 32px 19px 40px 40px}
+body.linked-handwriting-active{--workbench-height:164px}
+.linked-handwriting-active .topbar{grid-template-rows:28px 28px 32px 19px 52px}
+body.linked-handwriting-active.has-ink-draft{--workbench-height:204px}
+.linked-handwriting-active.has-ink-draft .topbar{grid-template-rows:28px 28px 32px 19px 52px 40px}
 .linked-handwriting-session{grid-column:1/-1;display:flex;align-items:center;gap:12px;min-width:0;overflow:hidden;background:var(--surface-alt,var(--surface));border-bottom:1px solid var(--line);font-size:12px}
 .linked-handwriting-session[hidden]{display:none}
 #linked-handwriting-status{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#linked-handwriting-finish{flex-shrink:0;min-height:32px;padding:5px 10px;font-size:12px}
+#linked-handwriting-finish{flex-shrink:0;min-height:44px;padding:10px 14px;font-size:14px}
 .annotation-card.is-handwriting{border-color:var(--accent,#2455a4);box-shadow:inset 3px 0 var(--accent,#2455a4)}
-.annotation-card [data-note-action="handwriting"][aria-pressed="true"]{background:var(--accent,#2455a4);color:var(--on-accent,#fff)}
+.annotation-card .annotation-actions .button[data-note-action="handwriting"]{flex-basis:100%;width:100%;min-height:44px;padding:10px 14px;font-size:14px;line-height:1.4;font-weight:600;justify-content:center;border:1px solid var(--dsw-alias-link,var(--accent,#2455a4));background:var(--surface,#fff);color:var(--dsw-alias-link,var(--accent,#2455a4))}
+.annotation-card .annotation-actions .button[data-note-action="handwriting"][aria-pressed="true"]{background:var(--accent,#2455a4);color:var(--on-accent,#fff)}
 .linked-handwriting-summary textarea{display:block;width:100%;min-height:96px;margin-block:8px;resize:vertical}
 .linked-handwriting-summary p{white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Keep input options above the horizontally scrollable ribbon, like citations. */
+.reader-pen-settings{flex-shrink:0;font-size:12px}
+.reader-pen-settings>summary{cursor:pointer;list-style:none;min-height:28px;padding:4px 10px;border:1px solid var(--line);border-radius:6px;color:var(--ink);background:var(--surface);white-space:nowrap}
+.reader-pen-settings>summary::after{content:' ▾'}
+.reader-pen-settings>summary:focus-visible{outline:2px solid var(--dsw-alias-link,#4176e6);outline-offset:2px}
+.reader-pen-options{position:fixed;top:90px;right:12px;z-index:60;width:300px;max-width:calc(100vw - 24px);overflow:auto;padding:12px;white-space:normal;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);box-shadow:0 8px 24px #0003;line-height:1.55}
+.reader-pen-options>label{display:flex;align-items:center;gap:10px;min-height:44px;font-size:14px;cursor:pointer}
+.reader-pen-options input[type=checkbox]{width:20px;height:20px;flex-shrink:0;accent-color:var(--dsw-alias-link,#4176e6)}
+.reader-pen-options p{margin:8px 0;color:var(--muted);font-size:12px}
+#reader-input-kind{color:var(--ink);font-weight:600}

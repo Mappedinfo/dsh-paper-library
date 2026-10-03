@@ -4,9 +4,35 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 const context = vm.createContext({ window: {} });
 vm.runInContext(await readFile(new URL('../web/pdf-reader.js', import.meta.url), 'utf8'), context);
-const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, nearestTextPosition } = context.window.PaperPDFReader;
+const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, nearestTextPosition } = context.window.PaperPDFReader;
 const plain = value => JSON.parse(JSON.stringify(value));
 const flush = () => new Promise(resolve => setImmediate(resolve));
+test('annotation input defaults to Sidecar mouse compatibility and uses only declared pointer types for pen-only mode', () => {
+  const policy = createInputPolicy();
+  assert.deepEqual(plain(policy.info()), { lastType: null, seenPen: false, penOnly: false });
+  assert.equal(policy.accepts({ pointerType: 'mouse', pressure: .7 }), true);
+  assert.equal(policy.accepts({ pointerType: 'pen', pressure: 0 }), true);
+  assert.equal(policy.accepts({ pointerType: 'touch', pressure: 1 }), false, 'Pressure never turns a finger or palm into a pen');
+  assert.equal(policy.accepts({ pointerType: '' }), true, 'Older compatibility events continue to work by default');
+  policy.setPenOnly(true);
+  assert.equal(policy.accepts({ pointerType: 'mouse', pressure: .7 }), false);
+  assert.equal(policy.accepts({ pointerType: 'pen', pressure: 0 }), true);
+  assert.equal(policy.accepts({ pointerType: 'touch', pressure: 1 }), false);
+  assert.equal(policy.accepts({ pointerType: '' }), false, 'Strict mode requires the browser to report a pen');
+  policy.setPenOnly(false); assert.equal(policy.accepts({ pointerType: 'mouse' }), true);
+});
+test('transient input reporting records trusted browser types and does not infer hardware or spam identical moves', () => {
+  const changes = [], policy = createInputPolicy(info => changes.push(info));
+  policy.observe({ pointerType: 'pen', isTrusted: false, pressure: .8 }); assert.equal(policy.info().lastType, null);
+  policy.observe({ pointerType: 'mouse', isTrusted: true, pressure: .8 }); assert.equal(policy.info().seenPen, false);
+  policy.observe({ pointerType: 'mouse', isTrusted: true, pressure: 0 }); assert.equal(changes.length, 1);
+  policy.observe({ pointerType: 'pen', isTrusted: true }); policy.observe({ pointerType: 'touch', isTrusted: true });
+  assert.deepEqual(plain(policy.info()), { lastType: 'touch', seenPen: true, penOnly: false });
+  policy.observe({ pointerType: 'unrecognized-device', isTrusted: true }); assert.equal(policy.info().lastType, 'unknown');
+  policy.setPenOnly(true); policy.setPenOnly(true); assert.equal(changes.length, 5);
+  changes.at(-1).seenPen = false; const copy = policy.info(); copy.lastType = 'pen';
+  assert.deepEqual(plain(policy.info()), { lastType: 'unknown', seenPen: true, penOnly: true });
+});
 test('pen text snapping chooses measured text on its current line and limits empty-space starts', () => {
   const boxes = [{ left: 10, top: 20, right: 50, bottom: 30 }, { left: 60, top: 20, right: 100, bottom: 30 }, { left: 10, top: 40, right: 50, bottom: 50 }];
   assert.deepEqual(plain(nearestTextPosition(boxes, 25, 25)), { index: 0, x: 25, y: 25 });

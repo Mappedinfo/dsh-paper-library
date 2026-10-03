@@ -20,7 +20,7 @@ window.PaperReadingShell = (() => {
     const node = (tag, text, className) => { const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n; };
     const button = (id, text, action) => {const n=node('button',text,'button subtle');n.type='button';n.id=id;n.addEventListener('click',action);return n;};
     const top=document.querySelector('.topbar'), workspace=document.querySelector('.workspace');
-    let context='reader', tool='select', color='#ffdb66', inkColor='#2455a4', inkWidth=2, mode='ask', markup='highlight', focused=false, saveLayoutTimer=null;
+    let context='reader', tool='select', color='#ffdb66', inkColor='#2455a4', inkWidth=2, mode='ask', markup='highlight', focused=false, saveLayoutTimer=null, penOnly=false;
     let inkBusy=false, inkError='', inkTitle='';
     const applyTool=()=>reader()?.setTool(tool,tool==='ink'?{color:inkColor,width:inkWidth}:color);
     const ribbon=node('nav',null,'reader-ribbon');ribbon.setAttribute('aria-label','文献工作区');
@@ -63,7 +63,17 @@ window.PaperReadingShell = (() => {
       const b=button(`reader-mode-${value}`,label,()=>{mode=value;if(value==='auto'&&tool==='select')reader()?.setTool(tool,color);saveLayout();sync();status(hintFor());});
       b.setAttribute('aria-pressed',String(mode===value));modeButtons[value]=b;modeGroup.append(b);
     }
-    annotationTools.append(modeGroup,colorLabel,widthLabel);
+    const penSettings=node('details',null,'reader-pen-settings');penSettings.id='reader-pen-settings';
+    const penSummary=node('summary','笔输入');penSummary.setAttribute('aria-controls','reader-pen-options');penSettings.append(penSummary);
+    const penOptions=node('div',null,'reader-pen-options'),penLabel=node('label'),penCheck=node('input');penOptions.id='reader-pen-options';penCheck.type='checkbox';penCheck.id='reader-pen-only';penLabel.append(penCheck,document.createTextNode('仅用笔标注'));
+    const inputKind=node('p','在页面上用笔或手指操作后显示识别结果。');inputKind.id='reader-input-kind';inputKind.setAttribute('role','status');
+    penOptions.append(penLabel,inputKind,node('p','手写和划线标注时，手指拖动页面可滚动；选择和便笺仍可用鼠标操作。若 Pencil 被识别为鼠标兼容输入，请关闭「仅用笔标注」。'));penSettings.append(penOptions);
+    penCheck.addEventListener('change',()=>{penOnly=penCheck.checked;reader()?.setPenOnly?.(penOnly);void patchLayout({penOnly});status(hintFor());});
+    function inputChanged(info){const labels={pen:'已识别：手写笔',touch:'已识别：触控',mouse:'收到：鼠标兼容输入',unknown:'输入类型未能识别'};inputKind.dataset.inputKind=info?.lastType||'';inputKind.textContent=labels[info?.lastType]||'在页面上用笔或手指操作后显示识别结果。';if(info?.seenPen&&info.lastType!=='pen')inputKind.textContent+=' · 已检测到手写笔';}
+    const placePenOptions=()=>{if(!penSettings.open)return;const rect=penSummary.getBoundingClientRect();penOptions.style.top=`${rect.bottom+8}px`;penOptions.style.right=`${Math.max(12,window.innerWidth-rect.right)}px`;penOptions.style.maxHeight=`${Math.max(100,window.innerHeight-rect.bottom-20)}px`;};
+    penSettings.addEventListener('toggle',()=>{if(penSettings.open){inputChanged(reader()?.getInputInfo?.());placePenOptions();}});
+    window.addEventListener('resize',placePenOptions);$('paper-tools').addEventListener('scroll',placePenOptions);
+    annotationTools.append(modeGroup,colorLabel,widthLabel,penSettings);
     const sidebar=button('reader-annotations','批注栏',()=>{panels()?.toggle('annotations');sync();});readerTools.append(sidebar);
     // Fit-width default with free zoom: steppers, an explicit percentage and reset.
     let zoom=1;
@@ -82,6 +92,7 @@ window.PaperReadingShell = (() => {
       if(typeof value?.color==='string'&&/^#[0-9a-f]{6}$/i.test(value.color))color=value.color;
       if(typeof value?.inkColor==='string'&&/^#[0-9a-f]{6}$/i.test(value.inkColor))inkColor=value.inkColor;
       if([1,2,4].includes(value?.inkWidth))inkWidth=value.inkWidth;
+      if(typeof value?.penOnly==='boolean'){penOnly=value.penOnly;penCheck.checked=penOnly;reader()?.setPenOnly?.(penOnly);}
       applyTool();
       if(typeof value?.markup==='string'&&['highlight','underline','strikeout'].includes(value.markup))markup=value.markup;
       if(typeof value?.mode==='string'&&Object.hasOwn(MODES,value.mode))mode=value.mode;
@@ -135,7 +146,7 @@ window.PaperReadingShell = (() => {
     const intro=$('annotations-tab').querySelector('.section-toolbar');if(intro)intro.hidden=true;
     const chatIntro=$('conversation-tab').querySelector('.section-toolbar h3');if(chatIntro)chatIntro.textContent='论文对话';
     $('paper-chat-input').rows=3;
-    function status(text, error=false){message.textContent=text||hints[tool];message.classList.toggle('error',error);}
+    function status(text,error=false,options={}){if(options.clearIf!==undefined&&message.textContent!==options.clearIf)return;message.textContent=text||hintFor();message.classList.toggle('error',error);}
     function sync(){
       const table=Boolean(workbench()?.isTable()), active=Boolean(state.active&&!state.active.archived&&state.active.resource_kind!=='dataset'), pdf=active&&Boolean(state.active.pdf);
       panels()?.setReadingActive?.(!table&&active&&state.tab!=='graph');
@@ -153,6 +164,7 @@ window.PaperReadingShell = (() => {
       fullscreen.disabled=!pdf;fullscreen.textContent=focused?'退出全屏 ⤡':'全屏阅读 ⤢';fullscreen.setAttribute('aria-pressed',String(focused));
       readerTools.hidden=table||!pdf||!['reader','annotations'].includes(surface);
       annotationTools.hidden=table||!pdf||surface!=='annotations';
+      if(annotationTools.hidden)penSettings.open=false;
       $('toolbar-actions').hidden=false;libraryTools.hidden=surface!=='library'&&active;
       $('import-open').disabled=false;$('export-library').disabled=false;$('build-bibliography').disabled=false;
       $('metadata-enrich').disabled=!active;$('catalog-archive').disabled=!active;
@@ -183,13 +195,16 @@ window.PaperReadingShell = (() => {
     const keydown=e=>{if(e.key==='Escape'&&focused&&!document.querySelector('dialog[open]:not(#metadata-dialog)')){void toggleFullscreen();}};
     const closeCitations=e=>{if(citations.open&&!citations.contains(e.target))citations.open=false;};
     const citationKey=e=>{if(e.key==='Escape'&&citations.open){citations.open=false;citations.querySelector('summary').focus();e.stopImmediatePropagation();}};
+    const closePenSettings=e=>{if(penSettings.open&&!penSettings.contains(e.target))penSettings.open=false;};
+    const penSettingsKey=e=>{if(e.key==='Escape'&&penSettings.open){penSettings.open=false;penSummary.focus();e.stopImmediatePropagation();}};
+    document.addEventListener('click',closePenSettings);document.addEventListener('keydown',penSettingsKey,true);
     document.addEventListener('click',closeCitations);document.addEventListener('keydown',citationKey,true);
     document.addEventListener('fullscreenchange',fullscreenChange);document.addEventListener('keydown',keydown);
     // Prevent a homepage link from discarding a question/metadata draft.
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
     sync();
-    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
-      dispose(){window.removeEventListener('beforeunload',beforeUnload);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);document.removeEventListener('click',closeCitations);document.removeEventListener('keydown',citationKey,true);}};
+    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,inputChanged,setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
+      dispose(){window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placePenOptions);$('paper-tools').removeEventListener('scroll',placePenOptions);document.removeEventListener('click',closePenSettings);document.removeEventListener('keydown',penSettingsKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);document.removeEventListener('click',closeCitations);document.removeEventListener('keydown',citationKey,true);}};
   }
   return {create};
 })();

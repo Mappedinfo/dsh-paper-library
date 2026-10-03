@@ -1,0 +1,44 @@
+{
+  "verified_at": "2026-10-03T15:39:35.994Z",
+  "complete": true,
+  "scope": "Synthetic PDF in Chromium using trusted CDP pen/touch and real mouse events; tests input classification, scrolling, coexistence and optional pen-only policy.",
+  "checks": [
+    "trusted pen still creates text-bound PDF highlights",
+    "touch drag scrolls in text-markup mode without creating annotations",
+    "trusted pen starts ink and reports actual received pen input",
+    "touch scrolls an ink page while preserving every completed pen stroke",
+    "touch pans horizontally on a zoomed PDF without drawing",
+    "cancelled touch pan releases cleanly and the next gesture remains usable",
+    "touch during an active pen stroke neither scrolls nor interrupts the stroke",
+    "pen-only option refuses mouse drawing while continuing to accept a pen",
+    "policy rejection message clears after accepted pen input and after changing the setting",
+    "turning pen-only off restores Sidecar-style mouse fallback",
+    "native PDF save contains only the four intentional strokes and one highlight",
+    "pen-only preference survives reload while confirmed PDF handwriting remains intact",
+    "input settings close with Escape and an outside click",
+    "600-pixel input menu remains unclipped with a visible 44-pixel checkbox-label target",
+    "original PDF unchanged with trusted input and no browser errors or external requests"
+  ],
+  "browser_errors": [],
+  "external_requests": 0,
+  "real_provider_calls": 0,
+  "annotation_requests": 2,
+  "trusted_pointer_types": [
+    "pen",
+    "touch",
+    "mouse"
+  ],
+  "input_info": {
+    "lastType": "mouse",
+    "seenPen": true,
+    "penOnly": false
+  },
+  "screenshots": [
+    ".local/pencil-touch-bACs6E/pencil-touch-compatibility.png",
+    ".local/pencil-touch-bACs6E/pencil-input-settings-narrow.png"
+  ],
+  "limitations": [
+    "No physical Apple Pencil, iPadOS27, Sidecar, Safari or Electron build was exercised.",
+    "Browser-reported pointer types are verified; this does not identify the physical device or prove operating-system palm rejection."
+  ]
+}

@@ -5,6 +5,23 @@
   const MARKUP_TOOLS = new Set(['highlight', 'underline', 'strikeout']);
   const MAX_INK_PATHS = 64, MAX_INK_POINTS = 4096;
   const inkId = value => typeof value === 'string' && !!value.trim() && value.length <= 256 && !/[\u0000-\u001f]/.test(value);
+  /** Pointer type comes from the browser, never pressure or a platform guess.
+   * Compatibility stays opt-out because Sidecar can report a Pencil as mouse. */
+  function createInputPolicy(onChange = () => {}) {
+    let lastType = null, seenPen = false, penOnly = false;
+    const info = () => ({ lastType, seenPen, penOnly });
+    return {
+      info,
+      observe(event) {
+        if (event.isTrusted === false) return;
+        const type = ['pen', 'mouse', 'touch'].includes(event.pointerType) ? event.pointerType : 'unknown';
+        if (type === lastType) return;
+        lastType = type; if (type === 'pen') seenPen = true; onChange(info());
+      },
+      setPenOnly(value) { const next = !!value; if (next !== penOnly) { penOnly = next; onChange(info()); } return penOnly; },
+      accepts(event) { return event.pointerType !== 'touch' && (!penOnly || event.pointerType === 'pen'); },
+    };
+  }
   /** Snap only to a real text box; the browser still determines the character
    * boundary inside its fitted text run. Useful when a pen is just below text. */
   function nearestTextPosition(boxes, x, y, limit = Infinity) {
@@ -235,12 +252,21 @@
     function dispose() { reset(null); disposed = true; }
     return { reset, want, ready, invalidate, dispose, idle: () => running || Promise.resolve(), snapshot: () => ({ id, residents: [...residents], wanted: [...wanted], inFlight: inFlight ? { id: inFlight.id, page: inFlight.page } : null }) };
   }
-  function create({ root, api, getPaper, onActivePage = () => {}, onSelection = () => {}, onStatus = () => {}, onPageNote = () => {}, onAnnotationActivate = () => {}, onInkChange = () => {} }) {
+  function create({ root, api, getPaper, onActivePage = () => {}, onSelection = () => {}, onStatus: reportStatus = () => {}, onPageNote = () => {}, onAnnotationActivate = () => {}, onInkChange = () => {}, onInputChange = () => {} }) {
     if (!root) throw new Error('PDF reader requires a scroll viewport');
     let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, flashTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', pendingRange = null, transport = Promise.resolve(), zoom = 1;
     const renderedScales = new Map(), pageAnnotations = new Map();
     const ink = createInkBuffer();
-    let inkWidth = 2, inkGesture = null, inkFrame = null, inkEnabled = true, markupGesture = null;
+    const input = createInputPolicy(onInputChange), handledTouches = new Set();
+    let inkWidth = 2, inkGesture = null, inkFrame = null, inkEnabled = true, markupGesture = null, touchPan = null, policyRejected = false;
+    const policyRejection = '仅用笔标注已开启；当前输入未被浏览器识别为笔。';
+    function onStatus(message, error = false) { policyRejected = false; reportStatus(message, error); }
+    function acceptedAnnotationInput() {
+      if (!policyRejected) return;
+      policyRejected = false;
+      // The host may have shown a different error since this rejection.
+      reportStatus('', false, { clearIf: policyRejection });
+    }
     const dom = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     root.classList.add('paper-pdf-reader'); root.tabIndex = 0; root.setAttribute('aria-label', 'PDF 连续阅读区域');
     const strip = dom('div', 'pdr-pages'); root.replaceChildren(strip);
@@ -296,6 +322,17 @@
       }
       scheduleInk();
     }
+    function endTouchPan() {
+      if (!touchPan) return;
+      const pointerId = touchPan.pointerId; touchPan = null;
+      try { if (root.hasPointerCapture?.(pointerId)) root.releasePointerCapture(pointerId); } catch { /* Already released by the browser. */ }
+    }
+    function moveTouchPan(event) {
+      if (touchPan?.pointerId !== event.pointerId || inkGesture || markupGesture) return;
+      if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+      root.scrollLeft += touchPan.x - event.clientX; root.scrollTop += touchPan.y - event.clientY;
+      touchPan.x = event.clientX; touchPan.y = event.clientY;
+    }
     function textCaret(sheet, x, y, nearStart = false) {
       const read = (left, top) => {
         let node, offset;
@@ -321,7 +358,7 @@
       event.preventDefault();
       if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
       window.getSelection()?.removeAllRanges(); selection = null; lastSelection = ''; pendingRange = null;
-      markupGesture = { pointerId: event.pointerId, sheet, anchor: textCaret(sheet, event.clientX, event.clientY, true), x: event.clientX, y: event.clientY, dragged: false };
+      markupGesture = { pointerId: event.pointerId, pointerType: event.pointerType, sheet, anchor: textCaret(sheet, event.clientX, event.clientY, true), x: event.clientX, y: event.clientY, dragged: false };
       try { root.setPointerCapture(event.pointerId); } catch { /* A missed capture is cancelled on leaving the reader. */ }
     }
     function moveMarkup(event) {
@@ -346,13 +383,24 @@
       return gesture;
     }
     function pointerDown(event) {
+      input.observe(event);
+      const annotating = tool === 'ink' || MARKUP_TOOLS.has(tool);
+      if (event.pointerType === 'touch' && annotating) {
+        event.preventDefault(); if (handledTouches.size < 32) handledTouches.add(event.pointerId);
+        // A palm must not change the pen's selection, scroll position or capture.
+        if (inkGesture || markupGesture || touchPan || event.isPrimary === false || !paperId || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+        touchPan = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+        try { root.setPointerCapture(event.pointerId); } catch { /* Leaving the viewport cancels this pan. */ }
+        return;
+      }
+      if (annotating && !input.accepts(event)) { event.preventDefault(); onStatus(policyRejection, true); policyRejected = true; return; }
+      if (annotating) endTouchPan();
       pendingRange = null;
       if (MARKUP_TOOLS.has(tool)) {
         if (!paperId || inkGesture || markupGesture) return;
         const sheet = event.target.closest?.('.pdr-sheet'); if (!sheet || !root.contains(sheet) || sheet.dataset.loaded !== 'true') return;
-        if (event.pointerType === 'touch') { event.preventDefault(); return; }
         if (event.isPrimary === false || event.button !== 0) return;
-        startMarkup(event, sheet); return;
+        startMarkup(event, sheet); acceptedAnnotationInput(); return;
       }
       if (tool !== 'ink' || !inkEnabled || !paperId || event.pointerType === 'touch' || event.isPrimary === false || event.button !== 0 || inkGesture) return;
       const sheet = event.target.closest?.('.pdr-sheet'); if (!sheet || !root.contains(sheet) || sheet.dataset.loaded !== 'true') return;
@@ -360,19 +408,24 @@
       event.preventDefault(); window.getSelection()?.removeAllRanges(); selection = null; lastSelection = '';
       try {
         if (!ink.start({ paperId, page }, point, { color, width: inkWidth })) return;
-        inkGesture = { pointerId: event.pointerId, sheet, geometry, limited: false };
+        acceptedAnnotationInput();
+        inkGesture = { pointerId: event.pointerId, pointerType: event.pointerType, sheet, geometry, limited: false };
         try { root.setPointerCapture(event.pointerId); } catch { /* Cancelled on a missed capture rather than leaving a stuck gesture. */ }
         root.focus({ preventScroll: true }); scheduleInk();
       } catch (error) { onStatus(error.message, true); }
     }
-    function pointerMove(event) { if (markupGesture?.pointerId === event.pointerId) { event.preventDefault(); moveMarkup(event); } else if (inkGesture?.pointerId === event.pointerId) { event.preventDefault(); appendInk(event); } }
-    function pointerCancel(event) { if (markupGesture?.pointerId === event.pointerId) endMarkup(true); if (inkGesture?.pointerId === event.pointerId) endInk(true); }
-    function pointerLeave(event) { if (root.hasPointerCapture?.(event.pointerId)) return; if (markupGesture?.pointerId === event.pointerId) endMarkup(true); if (inkGesture?.pointerId === event.pointerId) endInk(true); }
+    function pointerMove(event) {
+      if (event.pointerType === 'touch' && (handledTouches.has(event.pointerId) || tool === 'ink' || MARKUP_TOOLS.has(tool))) { event.preventDefault(); moveTouchPan(event); return; }
+      if (markupGesture?.pointerId === event.pointerId) { input.observe(event); event.preventDefault(); moveMarkup(event); } else if (inkGesture?.pointerId === event.pointerId) { input.observe(event); event.preventDefault(); appendInk(event); }
+    }
+    function pointerCancel(event) { if (touchPan?.pointerId === event.pointerId) endTouchPan(); if (event.pointerType === 'touch') { if (event.type !== 'lostpointercapture') handledTouches.delete(event.pointerId); return; } if (markupGesture?.pointerId === event.pointerId) endMarkup(true); if (inkGesture?.pointerId === event.pointerId) endInk(true); }
+    function pointerLeave(event) { if (root.hasPointerCapture?.(event.pointerId)) return; if (touchPan?.pointerId === event.pointerId) endTouchPan(); if (event.pointerType === 'touch') return; if (markupGesture?.pointerId === event.pointerId) endMarkup(true); if (inkGesture?.pointerId === event.pointerId) endInk(true); }
     function undoInk() { endInk(true); if (!inkEnabled) return false; const changed = ink.undo(); if (changed) inkChanged(); return changed; }
     function clearInk(expectedRevision) { if (expectedRevision !== undefined && expectedRevision !== ink.snapshot()?.revision) return false; endInk(true); const cleared = ink.clear(expectedRevision); if (cleared) inkChanged(); return cleared; }
     function restoreInkDraft(value) { const restored = ink.restore(value); if (restored) { paintInkContext(); inkChanged(); } return restored; }
     function setInkContext(value) { const context = ink.setContext(value); paintInkContext(); return context; }
     function setInkEnabled(value) { if (!value) endInk(true); inkEnabled = !!value; }
+    function setPenOnly(value) { if (value) { if (inkGesture && inkGesture.pointerType !== 'pen') endInk(true); if (markupGesture && markupGesture.pointerType !== 'pen') endMarkup(true); } return input.setPenOnly(value); }
     const current = (id, ticket) => !disposed && id === paperId && id === getPaper()?.id && ticket === generation;
     function request(action, args, valid) { const task = transport.catch(() => {}).then(() => valid() ? api(action, args) : null); transport = task.catch(() => {}); return task; }
     // zoom 1 is fit-width; wider layouts scroll horizontally. Raster density may
@@ -504,7 +557,7 @@
     function clear() {
       // The draft belongs to its original paper/page, not to the disposable
       // raster window. The caller offers save/discard before leaving the page.
-      endInk(true); endMarkup(true);
+      endInk(true); endMarkup(true); endTouchPan();
       ++generation; paperId = null; jumpTarget = null; selection = null; lastSelection = ''; queue.reset(null); renderedScales.clear(); pageAnnotations.clear(); pages = []; metrics = []; slots = []; active = 1; layoutWidth = 0; layoutPromise = null; strip.replaceChildren(); root.scrollTop = 0;
       if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; } if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
       if (resizeTimer !== null) { window.clearTimeout(resizeTimer); resizeTimer = null; }
@@ -652,6 +705,7 @@
       return true;
     }
     function pointerUp(event) {
+      if (event.pointerType === 'touch' && (handledTouches.has(event.pointerId) || tool === 'ink' || MARKUP_TOOLS.has(tool))) { event.preventDefault(); if (touchPan?.pointerId === event.pointerId) { moveTouchPan(event); endTouchPan(); } handledTouches.delete(event.pointerId); return; }
       if (markupGesture?.pointerId === event.pointerId) {
         event.preventDefault(); moveMarkup(event);
         const gesture = markupGesture; if (!gesture) return;
@@ -694,7 +748,7 @@
       const options = typeof nextColor === 'object' && nextColor !== null ? nextColor : { color: nextColor };
       if (options.color !== undefined && !/^#[0-9a-f]{6}$/i.test(options.color)) throw new Error('Annotation color must be #RRGGBB');
       if (options.width !== undefined && (!Number.isFinite(options.width) || options.width < .5 || options.width > 8)) throw new Error('手写笔宽必须在 0.5–8 之间');
-      if (value !== tool) { endInk(true); endMarkup(true); }
+      if (value !== tool) { endInk(true); endMarkup(true); endTouchPan(); }
       tool = value;
       if (options.color !== undefined) color = options.color;
       if (options.width !== undefined) inkWidth = options.width;
@@ -731,7 +785,7 @@
     root.addEventListener('scroll', scroll, { passive: true }); root.addEventListener('pointerup', pointerUp); root.addEventListener('keyup', captureSelection); root.addEventListener('click', click); setTool('select');
     document.addEventListener('selectionchange', selectionChanged);
     function dispose() { clear(); disposed = true; ink.clear(); queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('pointerdown', pointerDown); root.removeEventListener('pointermove', pointerMove); root.removeEventListener('pointercancel', pointerCancel); root.removeEventListener('lostpointercapture', pointerCancel); root.removeEventListener('pointerleave', pointerLeave); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); document.removeEventListener('selectionchange', selectionChanged); }
-    return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
+    return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
-  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, nearestTextPosition });
+  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, nearestTextPosition });
 })();
