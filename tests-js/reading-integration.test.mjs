@@ -97,6 +97,7 @@ test('an unsaved reader selection survives the host snapshot and restores its so
 
 test('selection changes publish only the current paper coordinates and clearing publishes their removal',()=>{
   const f=environment(),messages=[];
+  f.context.handwritingUI = null;
   f.context.window={parent:{postMessage:value=>messages.push(value)},location:{origin:'http://localhost:43121'}};f.context.Blob=Blob;
   const start=source.indexOf('function publishReaderState()'),end=source.indexOf('async function restoreReaderState()',start);
   vm.runInContext(source.slice(start,end),f.context);

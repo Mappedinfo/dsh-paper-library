@@ -7,6 +7,106 @@ import { appendConversationDraft, createConversationBridge, readerSnapshot } fro
 
 const tick = async () => { for (let i = 0; i < 6; i++) await Promise.resolve() }
 
+function handwrittenDraft() {
+  return {
+    id: 'paper-1', annotation_id: 'original-annotation', page: 3,
+    board: { width: 640, height: 360, strokes: [{ points: [[10, 20], [30.5, 40]], color: '#204080', width: 2 }] },
+    transcript: '这里是读者的想法', transcription_source: 'edited', expected_version: 'a'.repeat(64), boardDirty: true,
+    uncertain: { request_id: 'c8b9f5c0-d9de-4a65-ae74-71a7d87e0f43', expected_version: 'a'.repeat(64) },
+    recognition: { request_id: '341ce2fb-a377-423a-942f-94a60c164d77' }, updatedAt: 1791000000000,
+  }
+}
+
+test('handwriting handoff retains exact bounded vectors, CAS and retry identity across iframe replacement', () => {
+  const e = environment()
+  const draft = handwrittenDraft()
+  // This valid board exceeds the browser keepalive body ceiling. Its parent
+  // snapshot must survive independently of an unfinished state_put request.
+  draft.board.strokes[0].points = Array.from({ length: 6000 }, (_, index) => [10 + index % 600, 20.125])
+  const snapshot = { paperId: 'paper-1', page: 3, tab: 'annotations', chatDraft: '', handwritingDraft: draft }
+  assert.ok(Buffer.byteLength(JSON.stringify(draft)) > 60000)
+  const expected = structuredClone(snapshot)
+  e.message({ type: 'paper-library:reader-state', snapshot })
+  // Handoff stores a detached copy, even if the outgoing child keeps editing.
+  draft.board.strokes[0].points[0][0] = 999
+  e.detach()
+  const target = { postMessage: (value, origin) => e.messages.push({ value, origin }) }
+  e.bridge.attach(target); e.message({ type: 'paper-library:ready' }, target)
+  assert.deepEqual(e.messages.at(-1).value.snapshot, expected)
+  e.bridge.dispose()
+})
+
+test('handwriting handoff strips PNGs and unknown fields at every retained object boundary', () => {
+  const draft = handwrittenDraft(), image = 'data:image/png;base64,' + 'x'.repeat(300000)
+  draft.image = image; draft.pdf = image; draft.ownerConfig = { secret: 'never retain' }
+  draft.board.image = image; draft.board.strokes[0].image = image
+  draft.uncertain.image = image; draft.uncertain.board = { bad: 'payload' }
+  draft.recognition.image = image; draft.recognition.model = 'never retain'
+  const snapshot = readerSnapshot({ paperId: 'paper-1', page: 3, chatDraft: '', handwritingDraft: draft, image })
+  assert.deepEqual(snapshot.handwritingDraft, handwrittenDraft())
+  assert.equal(JSON.stringify(snapshot).includes('never retain'), false)
+  assert.equal(JSON.stringify(snapshot).includes('data:image'), false)
+})
+
+test('handwriting handoff rejects cross-paper identity, malformed versions and invalid provenance', () => {
+  const snapshot = { paperId: 'paper-1', page: 3, tab: 'annotations', chatDraft: '' }
+  const invalid = [
+    { id: 'paper-2' }, { id: '' }, { annotation_id: '' }, { annotation_id: 'a'.repeat(161) },
+    { annotation_id: 'control\nid' }, { page: 0 }, { page: 2001 },
+    { expected_version: 'not-a-version' }, { expected_version: undefined },
+    { uncertain: { request_id: 'not-a-uuid', expected_version: null } },
+    { uncertain: { request_id: handwrittenDraft().uncertain.request_id, expected_version: 'bad' } },
+    { recognition: { request_id: 'bad' } }, { recognition: [] },
+    { transcription_source: 'guessed' }, { transcription_source: 'none' },
+    { transcript: '字'.repeat(12001) }, { transcript: '😀'.repeat(12001) },
+    { boardDirty: 'true' }, { updatedAt: 0 }, { updatedAt: -1 }, { updatedAt: Infinity }, { updatedAt: NaN },
+  ]
+  for (const change of invalid) {
+    assert.throws(() => readerSnapshot({ ...snapshot, handwritingDraft: { ...handwrittenDraft(), ...change } }), Error, JSON.stringify(change))
+  }
+  assert.throws(() => readerSnapshot({ ...snapshot, paperId: null, handwritingDraft: handwrittenDraft() }), /身份/)
+  const e = environment()
+  const good = { ...snapshot, handwritingDraft: handwrittenDraft() }
+  e.message({ type: 'paper-library:reader-state', snapshot: good })
+  e.message({ type: 'paper-library:reader-state', snapshot: { ...good, handwritingDraft: { ...good.handwritingDraft, id: 'paper-2' } } })
+  assert.equal(e.messages.at(-1).value.type, 'paper-library:reader-state-error')
+  e.message({ type: 'paper-library:ready' })
+  assert.deepEqual(e.messages.at(-1).value.snapshot, good)
+  e.bridge.dispose()
+})
+
+test('handwriting handoff validates finite in-board coordinates, strokes and byte budgets', () => {
+  const base = handwrittenDraft(), stroke = base.board.strokes[0]
+  const invalidBoards = [
+    null, [], { ...base.board, width: 0 }, { ...base.board, height: 4097 }, { ...base.board, width: Infinity },
+    { ...base.board, strokes: Array(129).fill(stroke) },
+    { ...base.board, strokes: [{ ...stroke, points: Array(8193).fill([10, 20]) }] },
+    ...[null, [], [[0, 0]], [[0, 0], [641, 1]], [[0, 0], [1, 361]], [[0, 0], [-1, 2]],
+      [[0, 0], [Infinity, 0]], [[0, 0], [NaN, 0]], [[0, 0], [true, 0]], [[0, 0], [1, 2, 3]]
+    ].map(points => ({ ...base.board, strokes: [{ ...stroke, points }] })),
+    ...['red', '#fff', '#12345678'].map(color => ({ ...base.board, strokes: [{ ...stroke, color }] })),
+    ...[0, 16.1, NaN, true].map(width => ({ ...base.board, strokes: [{ ...stroke, width }] })),
+  ]
+  for (const board of invalidBoards) {
+    assert.throws(() => readerSnapshot({ paperId: 'paper-1', page: 3, handwritingDraft: { ...base, board } }), Error, JSON.stringify(board)?.slice(0, 120))
+  }
+  const oversizedBoard = { ...base.board, strokes: [{ ...stroke, points: Array(8192).fill([1.123456789012345, 2.123456789012345]) }] }
+  assert.throws(() => readerSnapshot({ paperId: 'paper-1', page: 3, handwritingDraft: { ...base, board: oversizedBoard } }), /256 KiB/)
+  const bigBoard = { width: 2048, height: 2048, strokes: [{ ...stroke, points: Array(7000).fill([1000.123456, 1000.654321]) }] }
+  assert.ok(Buffer.byteLength(JSON.stringify(bigBoard)) < 256 * 1024)
+  assert.throws(() => readerSnapshot({ paperId: 'paper-1', page: 3, chatDraft: '字'.repeat(64000), handwritingDraft: { ...base, board: bigBoard } }), /256 KiB/)
+})
+
+test('handwriting handoff accepts blank boards, full worker dimensions and Unicode transcript limit', () => {
+  const draft = { ...handwrittenDraft(), board: { width: 4096, height: 1, strokes: [{ points: [[0, 0], [4096, 1]], color: '#Ab12Cd', width: 16 }] },
+    transcript: '😀'.repeat(12000), uncertain: null, recognition: null, expected_version: null, boardDirty: false }
+  const snapshot = readerSnapshot({ paperId: 'paper-1', page: 3, handwritingDraft: draft })
+  assert.deepEqual(snapshot.handwritingDraft, draft)
+  const blank = { ...draft, board: { width: 640, height: 360, strokes: [] }, transcript: '', transcription_source: 'none' }
+  assert.deepEqual(readerSnapshot({ paperId: 'paper-1', page: 3, handwritingDraft: blank }).handwritingDraft, blank)
+  assert.equal(Object.hasOwn(readerSnapshot({ paperId: 'paper-1', page: 3, handwritingDraft: null }), 'handwritingDraft'), false)
+})
+
 function environment() {
   const listeners = new Set(), frames = new Map(), timers = new Map(), messages = []
   let sequence = 0, current = 'source', state = { draft: '', phase: 'plain', occurrences: [], attachmentIds: [], draftRev: 1 }

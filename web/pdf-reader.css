@@ -12,7 +12,7 @@
 .paper-pdf-reader[data-tool="ink"] .pdr-sheet,.paper-pdf-reader[data-tool="ink"] .pdr-sheet * { user-select:none; -webkit-user-select:none; cursor:crosshair; }
 /* Reserve direct page gestures for the pen; the surrounding reader and platform
    scroll gestures still navigate. Touch input is never converted into ink. */
-.paper-pdf-reader[data-tool="ink"] .pdr-sheet { touch-action:none; }
+.paper-pdf-reader[data-tool="ink"] .pdr-sheet,.paper-pdf-reader[data-tool="highlight"] .pdr-sheet,.paper-pdf-reader[data-tool="underline"] .pdr-sheet,.paper-pdf-reader[data-tool="strikeout"] .pdr-sheet { touch-action:none; }
 .pdr-ink-draft { position:absolute; inset:0; width:100%; height:100%; z-index:2; pointer-events:none; fill:none; stroke-linecap:round; stroke-linejoin:round; }
 .paper-pdf-reader[data-tool="highlight"] .pdr-word-layer,.paper-pdf-reader[data-tool="underline"] .pdr-word-layer,.paper-pdf-reader[data-tool="strikeout"] .pdr-word-layer { cursor:text; }
 .pdr-placeholder { position:absolute; inset:0; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; padding:20px; color:#899087; text-align:center; font-size:12px; }

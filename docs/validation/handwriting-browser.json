@@ -1,0 +1,74 @@
+{
+  "verified_at": "2026-10-03T14:37:02.883Z",
+  "scope": "Synthetic native PDF handwriting attachments, Chromium pen/mouse and deterministic recognition; excludes real model quality and physical Pencil/Sidecar",
+  "checks": [
+    {
+      "id": "trusted pen writes a board attached to the selected standard highlight",
+      "status": "pass"
+    },
+    {
+      "id": "stroke eraser undo and redo retain original paths",
+      "status": "pass"
+    },
+    {
+      "id": "touch does not create handwriting",
+      "status": "pass"
+    },
+    {
+      "id": "save preserves native attachment first then automatically stores distinct recognition text",
+      "status": "pass"
+    },
+    {
+      "id": "manual correction saves without another model call or replacing original strokes",
+      "status": "pass"
+    },
+    {
+      "id": "host draft restores unsaved mouse-fallback strokes after reload",
+      "status": "pass"
+    },
+    {
+      "id": "lost save acknowledgement locks draft and exact retry creates no duplicate attachment",
+      "status": "pass"
+    },
+    {
+      "id": "recognition failure preserves saved handwriting and corrected text",
+      "status": "pass"
+    },
+    {
+      "id": "explicit recognition retry recovers after a definite model failure",
+      "status": "pass"
+    },
+    {
+      "id": "parent handoff restores final strokes when host draft write never reached storage",
+      "status": "pass"
+    },
+    {
+      "id": "library shortcut cannot bypass the open handwriting editor",
+      "status": "pass"
+    },
+    {
+      "id": "page note save-and-handwrite shortcut creates an independent miniature board",
+      "status": "pass"
+    },
+    {
+      "id": "external Unicode annotation identities retain working draft and PDF saves",
+      "status": "pass"
+    },
+    {
+      "id": "miniature board remains usable at narrow width and in dark theme",
+      "status": "pass"
+    },
+    {
+      "id": "original unchanged with no browser errors or external requests",
+      "status": "pass"
+    }
+  ],
+  "browser_errors": [],
+  "external_requests": 0,
+  "model_calls": 3,
+  "real_provider_calls": 0,
+  "screenshots": [
+    ".local/handwriting-browser-2YJclj/handwriting-recognized.png",
+    ".local/handwriting-browser-2YJclj/handwriting-narrow-dark.png"
+  ]
+}

@@ -23,6 +23,8 @@ let challengeUI;
 let boardUI;
 let latexUI;
 let companionUI;
+let handwritingUI;
+let handwritingAvailable = false;
 let preferences = {};
 let durableReaderLoaded = false;
 let readerStateReady = false;
@@ -96,6 +98,7 @@ async function loadStatus() {
     paperChatUI?.setHostCompanion(result.realtime_companion);
     companionUI?.setAvailable(result.realtime_companion);
     languageUI?.setAvailable(result.language_learning);
+    handwritingAvailable = result.handwriting_recognition === true;
     knowledgeUI?.setAvailable(result.knowledge_generation);
     void analysisUI?.setAvailable(result.paper_analysis);
     challengeUI?.setAvailable(result.challenge_mining);
@@ -365,7 +368,7 @@ function annotationThreads(annotations) {
   if (window.PaperAnnotationThreads) return window.PaperAnnotationThreads.threads(annotations);
   const list=Array.isArray(annotations)?annotations:[];
   const ai=note=>note.kind==='ai-feedback'||note.type==='ai_feedback'||note.ai_generated===true;
-  const notes=list.filter(note=>!ai(note)),replies=new Map(notes.map(note=>[note.id,[]])),unlinked=[];
+  const notes=list.filter(note=>!ai(note)&&note.kind!=='handwriting-note'),replies=new Map(notes.map(note=>[note.id,[]])),unlinked=[];
   for(const reply of list.filter(ai)){
     const declared=(Array.isArray(reply.annotation_ids)&&reply.annotation_ids.length?reply.annotation_ids:[reply.reply_to]).filter(id=>typeof id==='string'&&replies.has(id));
     const parents=declared.length?(reply.source_kind==='dsh-conversation'?declared:[declared[0]]):[];
@@ -391,7 +394,9 @@ function renderAnnotations() {
     card.append(meta);
     if (note.text) card.append(el('blockquote', '', note.text));
     if (note.comment || note.content) card.append(el('p', 'annotation-comment', note.comment || note.content));
+    if (note.handwriting) { const handwritten = el('div', 'annotation-handwriting'); handwritten.append(el('p', 'small muted', note.handwriting.transcription_source === 'model' ? '手写便签 · AI 识别待校对' : '手写便签 · 原笔迹已保留')); if (note.handwriting.transcript) handwritten.append(el('p', '', note.handwriting.transcript)); card.append(handwritten); }
     const actions = el('div', 'annotation-actions'); const edit = el('button', 'button subtle', '编辑'); edit.dataset.noteAction = 'edit'; const remove = el('button', 'button subtle delete-note', '删除'); remove.dataset.noteAction = 'delete'; actions.append(edit, remove);
+    if (note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const handwriting = el('button', 'button subtle', note.handwriting ? '打开手写便签' : '手写便签'); handwriting.dataset.noteAction = 'handwriting'; actions.prepend(handwriting); }
     if (paperChatUI?.available() && note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const discuss = el('button', 'button subtle', paperChatUI.hasAnnotation(note.id) ? '移出本次引用' : '加入本次引用'); discuss.dataset.noteAction = 'discuss'; actions.append(discuss); }
     card.append(actions);for(const reply of replies.get(note.id)||[])card.append(replyCard(reply)); fragment.append(card);
   }
@@ -502,16 +507,18 @@ function openAnnotation(mode, note = null, options = {}) {
 }
 async function saveAnnotation(event) {
   event.preventDefault(); const draft = state.annotationDraft; if (!draft) return;
+  const handwriting = event.submitter?.id === 'annotation-save-handwriting';
   setBusy(event.target, true); errorAt('annotation-error', null);
   try {
     const result = draft.mode === 'edit'
-      ? await api('annotation_update', { id: draft.id, annotation_id: draft.note.id, comment: $('annotation-comment').value,companion_skip:event.submitter?.id==='annotation-save-draft' })
-      : await api('annotate', { id: draft.id, page: draft.page, type: draft.mode, text: draft.selection?.text || '', rects: draft.selection?.rects || [[20, 20, 40, 40]], comment: $('annotation-comment').value, author: 'Reader', color: draft.color || '#ffdb66',companion_skip:event.submitter?.id==='annotation-save-draft' });
+      ? await api('annotation_update', { id: draft.id, annotation_id: draft.note.id, comment: $('annotation-comment').value,companion_skip:handwriting||event.submitter?.id==='annotation-save-draft' })
+      : await api('annotate', { id: draft.id, page: draft.page, type: draft.mode, text: draft.selection?.text || '', rects: draft.selection?.rects || [[20, 20, 40, 40]], comment: $('annotation-comment').value, author: 'Reader', color: draft.color || '#ffdb66',companion_skip:handwriting||event.submitter?.id==='annotation-save-draft' });
     closeDialog('annotation-dialog'); clearSelection(); toast('批注已保存到 PDF');
     if(result.companion?.error)toast(result.companion.error,true);
     void companionUI?.refresh();
     if (state.active?.id === draft.id) { await loadAnnotations(draft.id); await refreshPage(draft.page); }
     publishReaderState();
+    if (handwriting) { await handwritingUI?.open({id:draft.id}, result.annotation || draft.note); return; }
     if (paperChatUI?.available()) await paperChatUI.savedAnnotation(draft.id, result.annotation?.id || draft.note?.id, event.submitter?.id === 'annotation-save-draft');
     else if ($('auto-feedback').checked) requestFeedback(draft.id, true);
   } catch (error) { errorAt('annotation-error', error); } finally { setBusy(event.target, false); }
@@ -538,6 +545,7 @@ async function handleNoteAction(event) {
   if (action === 'discuss') { await paperChatUI?.useAnnotation(note); if (state.active?.id) renderAnnotations(); return; }
   if (action === 'page') { await switchTab('reader'); await requestPage(note.page); }
   if (action === 'edit') openAnnotation('edit', note);
+  if (action === 'handwriting') { await handwritingUI?.open(state.active, note); return; }
   if (action === 'delete') {
     if (button.dataset.confirm !== 'true') { button.dataset.confirm = 'true'; button.textContent = '确认删除'; setTimeout(() => { if (button.isConnected) { delete button.dataset.confirm; button.textContent = '删除'; } }, 5000); return; }
     const id = state.active.id; button.disabled = true;
@@ -1026,7 +1034,7 @@ $('feedback-model').addEventListener('change', () => { const model = manualModel
 $('link-open').addEventListener('click', openLink); $('link-form').addEventListener('submit', saveLink); $('link-search').addEventListener('input', debounce(loadLinkTargets));
 function activateGraphNode(event) { const node = event.target.closest('[data-graph-id]'); if (node && node.dataset.nodeType !== 'tag') openPaper(node.dataset.graphId); }
 $('graph-stage').addEventListener('click', activateGraphNode); $('graph-stage').addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateGraphNode(event); } });
-document.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close(); if(readingPanels&&state.active&&!workbenchUI?.isTable())readingPanels.showLibrary();else document.querySelector('.workspace').classList.remove('show-detail'); $('search').focus(); $('search').select(); } });
+document.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if (handwritingUI?.isOpen()) { toast('请先保存或关闭手写便签。'); return; } for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close(); if(readingPanels&&state.active&&!workbenchUI?.isTable())readingPanels.showLibrary();else document.querySelector('.workspace').classList.remove('show-detail'); $('search').focus(); $('search').select(); } });
 function publishReaderState() {
   if (restoringReader || !state.active || state.active.resource_kind === 'dataset' || workbenchUI?.isTable() || (workbenchUI && readerPaperId !== state.active.id)) return true;
   const snapshot = { paperId: state.active.id, page: state.page, tab: state.tab, chatDraft: paperChatUI?.draft() || '', chatContext: paperChatUI?.context() || { annotationRefs: [] },
@@ -1040,10 +1048,12 @@ function publishReaderState() {
       ...(draft.selection ? { selection: { page: draft.selection.page, text: draft.selection.text, rects: draft.selection.rects } } : {}),
     };
   }
+  const handwritingDraft = handwritingUI?.handoff();
+  if (handwritingDraft?.id === state.active.id) snapshot.handwritingDraft = handwritingDraft;
   const serialized = JSON.stringify(snapshot);
   if (new Blob([serialized]).size > 256 * 1024) return false;
   if(persistence&&readerStateReady){
-    const durable={...snapshot};delete durable.chatDraft;delete durable.chatContext;
+    const durable={...snapshot};delete durable.chatDraft;delete durable.chatContext;delete durable.handwritingDraft;
     void persistence.put(`reader:${state.active.id}`,durable).catch(()=>{});
     void persistence.put('reader',{paperId:state.active.id}).catch(()=>{});
   }
@@ -1094,6 +1104,13 @@ async function applyReaderSnapshot(snapshot,legacyChat=false) {
         $('annotation-page-label').textContent = `第 ${draft.page} 页`;
       }
       $('annotation-comment').value = draft.comment || '';
+    }
+    if (snapshot.handwritingDraft?.id === state.active?.id) {
+      await loadAnnotations(state.active.id);
+      if (snapshot.paperId !== state.active?.id) return;
+      const note = state.annotations.find(value => value.id === snapshot.handwritingDraft.annotation_id);
+      if (note) await handwritingUI?.open(state.active, note, snapshot.handwritingDraft);
+      else toast('原手写便签所属批注已变化，未自动附到其他批注。', true);
     }
   } finally { restoringReader = wasRestoring; }
 }
@@ -1194,6 +1211,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
 });
 readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,saveInk:saveInkDraft,returnToInk:returnToInkDraft,contextChanged:()=>{resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
 void restoreInkDraft();
+handwritingUI = window.PaperHandwritingNote?.create({ api, persistence, toast, draftChanged: publishReaderState, available: () => handwritingAvailable, changed: async (id, page) => { if (state.active?.id === id) { await loadAnnotations(id); await paperChatUI?.annotationsChanged(id); await refreshPage(page); } } });
 companionUI=window.PaperCompanion?.create({api,persistence,getPaper:()=>state.active,refreshAnnotations:loadAnnotations,toast});
 languageUI=window.PaperLanguageLearning?.create({api,persistence,getPaper:()=>state.active,getSelection:()=>state.selection,toast,openReference:openReferencedPaper,
   beforeOpen:()=>readingPanels?.close('chat'),prepareChat:async(text,source)=>{

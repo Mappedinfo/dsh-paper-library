@@ -422,6 +422,12 @@ try {
     const assertReadingIdentity = async selected => {
       await page.locator('#catalog-table').waitFor({ state: 'hidden' });
       await reader.waitFor();
+      // A raster can appear before openPaper finishes restoring its saved
+      // layout. The annotation count is cleared synchronously on open and is
+      // populated only by loadAnnotations after that restoration has finished.
+      // Wait for that final state before the next catalog toggle, including a
+      // reopen of the same paper in the library-collapse case below.
+      await page.waitForFunction(id => state.active?.id === id && readerStateReady && document.getElementById('annotation-count').textContent !== '', selected.id);
       const count = selected.id === secondPaper.id ? 2 : 24;
       await page.waitForFunction(count => {
         const root = document.getElementById('continuous-reader');

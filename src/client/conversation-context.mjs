@@ -19,6 +19,60 @@ function pageNumber(value) {
   return value
 }
 
+/** Only the original bounded vector draft crosses iframe lifetimes. Never
+ * retain the recognition PNG, PDF raster, or arbitrary host-state fields. */
+function handwritingDraft(value, paperId) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      typeof value.id !== 'string' || !value.id || value.id !== paperId ||
+      typeof value.annotation_id !== 'string' || !value.annotation_id || value.annotation_id.length > 160 || /[\x00-\x1f\x7f]/.test(value.annotation_id)) throw new Error('手写草稿的文献或批注身份无效')
+  const board = value.board
+  if (!board || typeof board !== 'object' || Array.isArray(board) ||
+      !Number.isFinite(board.width) || board.width < 1 || board.width > 4096 ||
+      !Number.isFinite(board.height) || board.height < 1 || board.height > 4096 ||
+      !Array.isArray(board.strokes) || board.strokes.length > 128) throw new Error('手写画板尺寸或笔画数量无效')
+  let count = 0
+  const strokes = board.strokes.map(stroke => {
+    if (!stroke || typeof stroke !== 'object' || Array.isArray(stroke) ||
+        typeof stroke.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(stroke.color) ||
+        !Number.isFinite(stroke.width) || stroke.width < .5 || stroke.width > 16 ||
+        !Array.isArray(stroke.points) || stroke.points.length < 2 ||
+        (count += stroke.points.length) > 8192) throw new Error('手写笔画格式无效或超过 8192 点')
+    const points = stroke.points.map(point => {
+      if (!Array.isArray(point) || point.length !== 2 || !point.every(Number.isFinite) ||
+          point[0] < 0 || point[0] > board.width || point[1] < 0 || point[1] > board.height) throw new Error('手写坐标无效或超出画板')
+      return [...point]
+    })
+    return { points, color: stroke.color, width: stroke.width }
+  })
+  const cleanBoard = { width: board.width, height: board.height, strokes }
+  if (new TextEncoder().encode(JSON.stringify(cleanBoard)).length > SNAPSHOT_LIMIT) throw new Error('手写画板超过 256 KiB')
+  // Count Unicode code points like the PDF worker, while bounding the initial
+  // UTF-16 string before iterating over it.
+  const transcript = boundedString(value.transcript, 24000)
+  let characters = 0
+  for (const _ of transcript) if (++characters > 12000) throw new Error('手写转写超过 12000 字符')
+  if (!['none', 'model', 'edited'].includes(value.transcription_source) ||
+      value.transcription_source === 'none' && transcript) throw new Error('手写转写来源无效')
+  const version = candidate => {
+    if (candidate !== null && (typeof candidate !== 'string' || !/^[a-f0-9]{64}$/.test(candidate))) throw new Error('手写草稿版本无效')
+    return candidate
+  }
+  const request = candidate => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate) ||
+        typeof candidate.request_id !== 'string' || !/^(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.test(candidate.request_id)) throw new Error('手写请求标识无效')
+    return { request_id: candidate.request_id }
+  }
+  if (typeof value.boardDirty !== 'boolean' || !Number.isFinite(value.updatedAt) || value.updatedAt <= 0) throw new Error('手写草稿修改状态无效')
+  return {
+    id: value.id, annotation_id: value.annotation_id, page: pageNumber(value.page),
+    board: cleanBoard, transcript, transcription_source: value.transcription_source,
+    expected_version: version(value.expected_version), boardDirty: value.boardDirty,
+    uncertain: value.uncertain == null ? null : { ...request(value.uncertain), expected_version: version(value.uncertain.expected_version) },
+    recognition: value.recognition == null ? null : request(value.recognition),
+    updatedAt: value.updatedAt,
+  }
+}
+
 /** Keep only reader-owned text and coordinates; rendered PDF pages never enter this cache. */
 export function readerSnapshot(value) {
   if (!value || typeof value !== 'object') throw new Error('阅读状态无效')
@@ -92,6 +146,7 @@ export function readerSnapshot(value) {
       snapshot.annotationDraft.selection = { page: pageNumber(selection.page), text: boundedString(selection.text, TEXT_LIMIT), rects }
     }
   }
+  if (value.handwritingDraft != null) snapshot.handwritingDraft = handwritingDraft(value.handwritingDraft, snapshot.paperId)
   if (new TextEncoder().encode(JSON.stringify(snapshot)).length > SNAPSHOT_LIMIT) throw new Error('阅读草稿超过 256 KiB，无法暂存')
   return snapshot
 }

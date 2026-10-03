@@ -75,6 +75,16 @@ let themeAssetsAvailable = false
 let sharedSidebarAssetsAvailable = false
 let annotationReplyAssetsAvailable = false
 let pencilAssetsAvailable = false
+let handwritingNotesAvailable = false
+if (flags.get('--require-handwriting') === 'true') {
+  assert.equal(status.result.handwriting_recognition, true, 'Host lacks the handwriting recognition route')
+  for (const file of ['index.html','app.js','handwriting-note.js','handwriting-note.css','annotation-threads.js','pdf-reader.js','pdf-reader.css']) {
+    const asset = await fetch(`${address.origin}/api/paper-library/${file}`, {headers, signal: AbortSignal.timeout(10000)})
+    assert.equal(asset.status, 200, `Missing handwriting note asset: ${file}`)
+    assert.equal(await asset.text(), await readFile(new URL(`../web/${file}`, import.meta.url), 'utf8'), `Installed handwriting note asset differs from source: ${file}`)
+  }
+  handwritingNotesAvailable = true
+}
 if (flags.get('--require-pencil') === 'true') {
   for (const file of ['app.js', 'pdf-reader.js', 'pdf-reader.css', 'reading-shell.js', 'reading-shell.css']) {
     const asset = await fetch(`${address.origin}/api/paper-library/${file}`, {headers, signal: AbortSignal.timeout(10000)})
@@ -149,6 +159,6 @@ if (flags.get('--require-chat') === 'true' || flags.get('--require-references') 
   assert.ok(script.includes('PaperLibraryChat'))
   if (flags.get('--require-references') === 'true') assert.ok(script.includes('chat_catalog') && script.includes('annotation_refs'))
 }
-const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, durableState, languageLearning, datasetLibrary, knowledgeWorkflow, paperAnalysis, realtimeCompanion, ...(nativeSettings?{nativeSettings}:{}), ...(themeAssetsAvailable ? {themeAssetsAvailable} : {}), ...(sharedSidebarAssetsAvailable ? {sharedSidebarAssetsAvailable} : {}), ...(annotationReplyAssetsAvailable ? {annotationReplyAssetsAvailable} : {}), ...(pencilAssetsAvailable ? {pencilAssetsAvailable} : {}), chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
+const report = { verified_at: new Date().toISOString(), ok: true, authenticatedHost: true, nativeConversationsIdle: running === 0, libraryAvailable: true, paperConversations: conversationCapability, annotationReferences, workbench, readingWorkspace, durableState, languageLearning, datasetLibrary, knowledgeWorkflow, paperAnalysis, realtimeCompanion, ...(nativeSettings?{nativeSettings}:{}), ...(themeAssetsAvailable ? {themeAssetsAvailable} : {}), ...(sharedSidebarAssetsAvailable ? {sharedSidebarAssetsAvailable} : {}), ...(annotationReplyAssetsAvailable ? {annotationReplyAssetsAvailable} : {}), ...(pencilAssetsAvailable ? {pencilAssetsAvailable} : {}), ...(handwritingNotesAvailable ? {handwritingNotesAvailable} : {}), chatScriptAvailable: staticResponse.status === 200, modelRequestsMade: 0, privateDocumentsRead: false }
 if (flags.get('--output')) await writeFile(flags.get('--output'), JSON.stringify(report, null, 2) + '\n')
 console.log(JSON.stringify(report))

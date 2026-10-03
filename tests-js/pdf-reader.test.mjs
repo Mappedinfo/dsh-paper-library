@@ -4,9 +4,18 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 const context = vm.createContext({ window: {} });
 vm.runInContext(await readFile(new URL('../web/pdf-reader.js', import.meta.url), 'utf8'), context);
-const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer } = context.window.PaperPDFReader;
+const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, nearestTextPosition } = context.window.PaperPDFReader;
 const plain = value => JSON.parse(JSON.stringify(value));
 const flush = () => new Promise(resolve => setImmediate(resolve));
+test('pen text snapping chooses measured text on its current line and limits empty-space starts', () => {
+  const boxes = [{ left: 10, top: 20, right: 50, bottom: 30 }, { left: 60, top: 20, right: 100, bottom: 30 }, { left: 10, top: 40, right: 50, bottom: 50 }];
+  assert.deepEqual(plain(nearestTextPosition(boxes, 25, 25)), { index: 0, x: 25, y: 25 });
+  assert.deepEqual(plain(nearestTextPosition(boxes, 55, 25)), { index: 0, x: 49.99, y: 25 }, 'A gap endpoint remains at the preceding measured word edge');
+  assert.deepEqual(plain(nearestTextPosition(boxes, 25, 47)), { index: 2, x: 25, y: 47 }, 'Multi-line geometry selects the actual target line');
+  assert.equal(nearestTextPosition(boxes, 200, 200, 18), null, 'A distant blank-page start never becomes text');
+  assert.equal(nearestTextPosition(boxes, NaN, 25), null);
+  assert.equal(nearestTextPosition([{ left: 1, top: 1, right: 1, bottom: 3 }], 1, 2), null);
+});
 test('ink maps zoomed and rotated display geometry, clamps edges and rejects invalid pointer samples', () => {
   assert.deepEqual(plain(inkPoint({ clientX: 500, clientY: 450 }, { left: 100, top: 50, width: 1600, height: 1200 }, { width: 800, height: 600 })), [200, 200]);
   assert.deepEqual(plain(inkPoint({ clientX: -20, clientY: 2000 }, { left: 100, top: 50, width: 800, height: 600 }, { width: 800, height: 600 })), [0, 600]);

@@ -13,6 +13,11 @@ const ids = list => Array.from(list || [], value => value.id)
 
 const note = (id, extra = {}) => ({ id, type: 'note', comment: `comment ${id}`, ...extra })
 const ai = (id, extra = {}) => ({ id, type: 'note', kind: 'ai-feedback', comment: `reply ${id}`, ...extra })
+test('handwriting attachments stay under their parent and never count as another note', () => {
+  const parent = note('a', { handwriting: { id: 'hand', transcript: 'Recognized note' } })
+  const grouped = threads([parent, note('hand', { kind: 'handwriting-note', parent_id: 'a' }), ai('reply', { annotation_ids: ['a'] })])
+  assert.deepEqual(ids(grouped.notes), ['a']); assert.deepEqual(ids(grouped.replies.get('a')), ['reply']); assert.deepEqual(ids(grouped.unlinked), [])
+})
 
 test('per-annotation replies nest under exactly their own annotation', () => {
   const annotations = [note('a'), note('b'), ai('r1', { annotation_ids: ['a'], reply_to: 'a' }), ai('r2', { annotation_ids: ['b'], reply_to: 'b' })]

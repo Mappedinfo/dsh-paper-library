@@ -21,6 +21,7 @@ for (const name of ['settings.js','settings.css']) staticFiles[name] = [name, na
 for (const name of ['challenge-mining.js','challenge-mining.css','annotation-threads.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['board.js','board.css','board-source.js','board-render.js','board-bridge.js','board-mermaid.js','board-drawio.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 const languageActions = new Set(['language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
+for (const name of ['handwriting-note.js','handwriting-note.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
 const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:'];
 function browserStateKey(key, listPrefix = false) {
@@ -136,6 +137,7 @@ export function createFetchHandler(options = {}) {
           const latexWsAction = typeof input?.action === 'string' && input.action.startsWith('latex_ws_');
           if (chatAction && !options.paperChat) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板打开论文对话。'},400);
           if (input?.action === 'language_generate' && !options.languageLearning) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
+          if (input?.action === 'handwriting_recognize' && !options.handwriting) return json({ok:false,error:'转文字需要 DSH 中支持图片的模型；笔迹可继续保存。'},409);
           if (input?.action === 'knowledge_generate' && !options.libraryKnowledge) return json({ok:false,error:'尚未连接 DSH 模型服务；已保存的来源和知识笔记仍可查看。'},409);
           if (latexAIAction && !options.latexAI) return json({ok:false,error:'LaTeX 提问与合写需要连接 DSH 模型服务。'},409);
           if (latexWsAction && !options.latexWorkspace) return json({ok:false,error:'LaTeX 工作区需要连接 DSH 主机。'},409);
@@ -151,6 +153,7 @@ export function createFetchHandler(options = {}) {
             : latexAIAction ? await options.latexAI(input, { signal: request.signal })
             : latexWsAction ? await options.latexWorkspace(input, { signal: request.signal })
             : languageAction ? await learningRecords(input, { signal: request.signal })
+            : input?.action === 'handwriting_recognize' ? await options.handwriting(input, { signal: request.signal })
             : chatAction
             ? await options.paperChat(input, { signal: request.signal })
             : await dispatch(input, { ...options, signal: request.signal });
@@ -159,6 +162,7 @@ export function createFetchHandler(options = {}) {
             catch(error){result.companion={status:'failed',error:`批注已保存，伴学未入队：${error.message}`}}
           }
           if(input.action==='status')result={...result,realtime_companion:Boolean(options.companion)};
+          if(input.action==='status')result={...result,handwriting_recognition:Boolean(options.handwriting)};
           if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true, catalog_management: true, typed_graph: true, reading_workspace: true, durable_state: true, learning_records: true, language_learning: Boolean(options.languageLearning) };
           if (input.action === 'status') result = { ...result, latex_ai: Boolean(options.latexAI), latex_workspace: Boolean(options.latexWorkspace), latex_root: options.latexRoot || null };
           if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true, challenge_mining:Boolean(options.challengeMining), challenge_scan:true, challenge_themes:true, challenge_export:true, challenge_comparison:true, challenge_review_packet:true, whiteboard:true };

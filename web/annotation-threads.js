@@ -13,7 +13,7 @@ window.PaperAnnotationThreads = (() => {
   /** Group saved annotations into reader notes plus their AI replies. */
   function threads(annotations) {
     const list = Array.isArray(annotations) ? annotations : [];
-    const notes = list.filter(note => !isAi(note));
+    const notes = list.filter(note => !isAi(note) && note.kind !== 'handwriting-note');
     const replies = new Map(notes.map(note => [note.id, []]));
     const unlinked = [];
     for (const reply of list.filter(isAi)) {

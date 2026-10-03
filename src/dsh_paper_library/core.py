@@ -328,7 +328,7 @@ class Library(Papers, PdfWrites, AnnotationAccess):
             values = [a for a in values if a["id"] in requested]
             if requested - {a["id"] for a in values}:
                 raise ValueError("Some selected annotations no longer exist; refresh before requesting feedback")
-        values = [a for a in values if a.get("kind") != "ai-feedback"][:40]
+        values = [a for a in values if a.get("kind") not in {"ai-feedback", "handwriting-note"}][:40]
         if not values:
             raise ValueError("Add or select source annotations before requesting AI feedback")
         bounded, budget = [], 12000
@@ -337,7 +337,11 @@ class Library(Papers, PdfWrites, AnnotationAccess):
             for key in ("text", "comment"):
                 content[key] = content[key][:min(1500, budget)]
                 budget -= len(content[key])
-            bounded.append({key: content.get(key) for key in ("id", "page", "text", "comment", "author")})
+            projection = {key: content.get(key) for key in ("id", "page", "text", "comment", "author")}
+            if content.get("handwriting"):
+                projection["handwriting"] = {**content["handwriting"], "transcript": content["handwriting"]["transcript"][:min(1500, budget)]}
+                budget -= len(projection["handwriting"]["transcript"])
+            bounded.append(projection)
             if budget <= 0:
                 break
         context = {"title": item["title"][:1000], "citekey": item["citekey"], "annotations": bounded}
@@ -487,7 +491,7 @@ class Library(Papers, PdfWrites, AnnotationAccess):
                             raise ValueError("PDF annotation limit prevents a complete conversation feedback duplicate check")
                         extra = self._annotation_metadata(annot)
                         annotation_id = annot.info.get("id") or f"external-{current.number + 1}-{annot.xref}"
-                        if annotation_id in annotation_ids and extra.get("kind") != "ai-feedback":
+                        if annotation_id in annotation_ids and extra.get("kind") not in {"ai-feedback", "handwriting-note"}:
                             if annotation_id in sources:
                                 raise ValueError("Source annotation identity is ambiguous")
                             sources[annotation_id] = current.number + 1
@@ -572,6 +576,7 @@ def dispatch(request):
         actions = {
             "list": ("query", "limit", "offset", "sort", "order", "archived"), "get": ("id", "include_archived"), "create": ("metadata",), "archive": ("id",), "restore": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page_layout": ("id",), "page": ("id", "page", "scale"),
             "annotations": ("id",), "annotate": ("id", "page", "type", "rects", "paths", "width", "annotation_id", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment"), "annotation_delete": ("id", "annotation_id"),
+            "handwriting_get": ("id", "annotation_id"), "handwriting_save": ("id", "annotation_id", "board", "transcript", "transcription_source", "expected_version", "request_id"),
             "annotation_catalog": ("id",), "annotation_context_exact": ("id", "annotation_refs", "selection", "max_characters"), "companion_excerpt": ("id", "page"),
             "export_annotations": ("id", "format"), "link": ("source", "target", "relation", "note"), "graph": ("id", "limit"), "feedback_context": ("id", "annotation_ids"), "save_feedback": ("id", "text", "model", "annotation_ids", "expected_context_hash", "replies"), "feedback": ("id",),
             "save_conversation_feedback": ("id", "text", "model", "annotation_ids", "source_session_id", "source_message_id", "page", "source_snapshot_ids"),

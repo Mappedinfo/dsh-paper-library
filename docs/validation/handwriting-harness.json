@@ -1,0 +1,22 @@
+{
+  "verified_at": "2026-10-03T14:20:30.438Z",
+  "ok": true,
+  "checks": [
+    "native-authenticated-host-uses-keyless-paper-vision-route-with-no-startup-generation",
+    "real-attachment-admission-stores-validated-image-and-prepared-vision-stream-reads-identical-bytes",
+    "same-request-replay-does-not-repeat-native-vision-generation",
+    "generated-recognition-does-not-change-native-source-annotation-or-original-pdf"
+  ],
+  "deterministicModelGenerations": 1,
+  "externalModelRequestsMade": 0,
+  "imageDimensions": [
+    640,
+    360
+  ],
+  "privateDocumentsRead": false,
+  "limitations": [
+    "Deterministic adapter validates native image delivery, not recognition quality",
+    "Physical Apple Pencil and Sidecar remain manual validation"
+  ],
+  "isolated_hosts_stopped": true
+}

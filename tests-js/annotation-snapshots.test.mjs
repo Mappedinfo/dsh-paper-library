@@ -17,6 +17,17 @@ function snapshot(overrides = {}) {
   }
 }
 const expected = { paperId: 'paper-1', sessionId: 'paper-session-1' }
+test('handwritten transcripts count toward complete immutable source budgets', async t => {
+  const { store } = await fixture(t), value = snapshot()
+  const base = annotationSnapshotSourceCharacters(value)
+  value.annotations[0].handwriting = { id: 'hand', transcript: '待核对🖊', transcription_source: 'model', version }
+  assert.equal(annotationSnapshotSourceCharacters(value), base + 4)
+  value.coverage.characters = base
+  await assert.rejects(store.save(value), /字符数/)
+  value.coverage.characters = base + 4
+  const saved = await store.save(value)
+  assert.equal((await store.load(saved.id, expected)).annotations[0].handwriting.transcript, '待核对🖊')
+})
 async function fixture(t) {
   const library = await mkdtemp(join(tmpdir(), 'annotation-snapshots-'))
   t.after(() => rm(library, { recursive: true, force: true }))
