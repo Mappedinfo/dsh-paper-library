@@ -68,7 +68,7 @@ try {
   });
   await page.addInitScript(() => {
     window.pencilFixtureEvents = [];
-    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) document.addEventListener(type, event => {
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture', 'pointerleave']) document.addEventListener(type, event => {
       if (event.target.closest?.('#continuous-reader')) window.pencilFixtureEvents.push({ type, pointerType: event.pointerType, pointerId: event.pointerId, trusted: event.isTrusted, pressure: event.pressure });
     }, true);
   });
@@ -190,20 +190,75 @@ try {
   assert.ok(await page.evaluate(() => window.pencilFixtureEvents.some(event => event.pointerType === 'mouse' && event.trusted)), 'Mouse fallback uses actual browser input');
   record('multi-stroke-draft-supports-last-stroke-undo-and-trusted-mouse-fallback');
 
-  const cancel = await screenPoints([[65, 220], [110, 225]]);
-  await penEvent('mousePressed', cancel[0]); await penEvent('mouseMoved', cancel[1]); await pathCount(4);
+  const cancelledPoints = [[65, 220], [85, 232], [110, 225]];
+  const cancel = await screenPoints(cancelledPoints);
+  await penEvent('mousePressed', cancel[0]); await penEvent('mouseMoved', cancel[1]); await penEvent('mouseMoved', cancel[2]); await pathCount(4);
   await page.evaluate(() => {
     const last = window.pencilFixtureEvents.findLast(event => event.pointerType === 'pen' && event.type === 'pointerdown');
     document.getElementById('continuous-reader').dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: last.pointerId, pointerType: 'pen' }));
   });
-  await penEvent('mouseReleased', cancel[1]); await pathCount(3);
-  record('pointer-cancel-drops-only-the-interrupted-stroke');
+  await penEvent('mouseReleased', cancel[2]); await pathCount(4);
+  assert.equal(await page.evaluate(() => pdfReader.isInking()), false);
+  const cancelDraft = await page.evaluate(() => pdfReader.getInkDraft());
+  assert.equal(cancelDraft.paths.length, 4); compareEndpoints(cancelDraft.paths[3], cancelledPoints, 'cancelled stroke');
+  record('pointer-cancel-preserves-the-collected-stroke-and-finishes-the-gesture');
+
+  const capturePoints = [[140, 220], [160, 237], [185, 220]], capture = await screenPoints(capturePoints);
+  await penEvent('mousePressed', capture[0]); await penEvent('mouseMoved', capture[1]); await penEvent('mouseMoved', capture[2]);
+  await page.evaluate(() => {
+    const last = window.pencilFixtureEvents.findLast(event => event.pointerType === 'pen' && event.type === 'pointerdown');
+    const root = document.getElementById('continuous-reader');
+    if (!root.hasPointerCapture(last.pointerId)) throw new Error('Expected actual pointer capture');
+    root.releasePointerCapture(last.pointerId);
+  });
+  await penEvent('mouseMoved', {...capture[2], x:capture[2].x+1});
+  await page.waitForFunction(() => !pdfReader.isInking());
+  await penEvent('mouseReleased', capture[2]); await pathCount(5);
+  assert.ok(await page.evaluate(() => window.pencilFixtureEvents.some(event=>event.type==='lostpointercapture'&&event.pointerType==='pen'&&event.trusted)));
+  compareEndpoints((await page.evaluate(() => pdfReader.getInkDraft())).paths[4], capturePoints, 'lost capture stroke');
+  record('trusted-lost-pointer-capture-retains-collected-geometry');
+
+  const leavePoints = [[220, 220], [240, 238], [265, 220]], leave = await screenPoints(leavePoints);
+  // Simulate an environment that cannot acquire capture; the boundary event
+  // itself still comes from trusted Chromium pen movement.
+  await page.evaluate(() => { document.getElementById('continuous-reader').setPointerCapture = () => {}; });
+  await penEvent('mousePressed', leave[0]); await penEvent('mouseMoved', leave[1]); await penEvent('mouseMoved', leave[2]);
+  await penEvent('mouseMoved', {x:3,y:3}); await page.waitForFunction(() => !pdfReader.isInking());
+  await penEvent('mouseReleased', {x:3,y:3});
+  await page.evaluate(() => { delete document.getElementById('continuous-reader').setPointerCapture; });
+  await pathCount(6); compareEndpoints((await page.evaluate(() => pdfReader.getInkDraft())).paths[5], leavePoints, 'uncaptured leave stroke');
+  assert.ok(await page.evaluate(() => window.pencilFixtureEvents.some(event=>event.type==='pointerleave'&&event.pointerType==='pen'&&event.trusted)));
+  record('leaving-the-reader-without-capture-retains-collected-geometry');
+  const continuedPoints = [[300, 220], [325, 235], [350, 220]];
+  await draw(continuedPoints); await pathCount(7);
+  const preservedDraft = await page.evaluate(() => pdfReader.getInkDraft());
+  assert.equal(preservedDraft.paths.length, 7);
+  record('writing-continues-after-cancel-capture-loss-and-reader-leave');
+  const diagnostics = await page.evaluate(async () => {
+    for (let i=0;i<8;i++) await inkDiagnostics.flush();
+    return api('ink_diagnostics_get');
+  });
+  for(const reason of ['pointercancel','lostpointercapture','pointerleave'])assert.ok(diagnostics.events.some(event=>event.event==='stroke_end'&&event.reason===reason&&event.strokes>0&&event.points>0),`Missing preserved-stroke diagnostic: ${reason}`);
+  await page.locator('#reader-pen-settings > summary').click();
+  const downloaded=page.waitForEvent('download');await page.locator('#reader-ink-diagnostics').click();
+  const file=await downloaded,diagnosticPath=join(run,'handwriting-diagnostics.json');await file.saveAs(diagnosticPath);
+  const diagnosticExport=JSON.parse(await readFile(diagnosticPath,'utf8'));
+  assert.ok(diagnosticExport.host.events.length>0&&diagnosticExport.client.events.length>0);
+  const allowed=new Set(['event','client','time','receivedAt','paperId','annotationId','page','strokes','points','revision','count','reason','status','pointerType']);
+  for(const event of [...diagnosticExport.host.events,...diagnosticExport.client.events])for(const [key,value] of Object.entries(event)){assert.ok(allowed.has(key));assert.ok(!Array.isArray(value)&&typeof value!=='object');}
+  assert.doesNotMatch(JSON.stringify(diagnosticExport),/Synthetic Pencil annotation text|Synthetic external annotation must survive/);
+  await page.keyboard.press('Escape');
+  record('handwriting-diagnostic-download-includes-host-and-client-transition-counts-without-text-or-geometry');
   await shot('multi-stroke-draft');
 
   await save();
-  const saved = await inks(); assert.equal(saved.length, 1); assert.equal(saved[0].paths.length, 3);
+  const saved = await inks(); assert.equal(saved.length, 1); assert.equal(saved[0].paths.length, 7);
   assert.equal(saved[0].width, 2);
-  for (const [index, expected] of [first, second, mouse].entries()) compareEndpoints(saved[0].paths[index], expected, `stroke ${index + 1}`);
+  for (const [index, expected] of [first, second, mouse, cancelledPoints, capturePoints, leavePoints, continuedPoints].entries()) compareEndpoints(saved[0].paths[index], expected, `stroke ${index + 1}`);
+  for (let stroke = 0; stroke < preservedDraft.paths.length; stroke++) {
+    assert.equal(saved[0].paths[stroke].length, preservedDraft.paths[stroke].length);
+    preservedDraft.paths[stroke].forEach((point, index) => point.forEach((value, axis) => assert.ok(Math.abs(value-saved[0].paths[stroke][index][axis])<.001)));
+  }
   const expectedColor = color.slice(1).match(/../g).map(part => Number.parseInt(part, 16) / 255);
   assert.ok(saved[0].color.stroke.every((value, index) => Math.abs(value - expectedColor[index]) < .001));
   assert.ok((await annotations()).some(note => note.comment === 'Synthetic external annotation must survive'));
@@ -355,7 +410,7 @@ with pymupdf.open(sys.argv[1]) as doc:
 const receipt = {
   verified_at: new Date().toISOString(), complete: !failure,
   scope: 'Synthetic standalone UI in real Chromium: trusted CDP pen and touch, real mouse input, explicit multi-stroke drafts, native PDF Ink persistence, original preservation, retry, zoom, rotation, fresh catalog recovery and existing tools.',
-  limitations: ['No physical Apple Pencil, iPad, Sidecar or Safari session was exercised.', 'Pointer cancellation uses a synthetic DOM event; other tested input events are trusted Chromium input.', 'Fixed PDF stroke widths; no pressure-sensitive rendering or hardware palm-rejection claim.', 'Acknowledged host-staged batches survive reader replacement and continue on the host; unfinished strokes or drafts lost before staging/handoff confirmation are not guaranteed to survive abrupt termination.'],
+  limitations: ['No physical Apple Pencil, iPad, Sidecar or Safari session was exercised.', 'Pointer cancellation uses a synthetic DOM event; capture unavailability is simulated for the trusted pointerleave case. Other tested input events are trusted Chromium input.', 'Fixed PDF stroke widths; no pressure-sensitive rendering or hardware palm-rejection claim.', 'Acknowledged host-staged batches survive reader replacement and continue on the host; unfinished strokes or drafts lost before staging/handoff confirmation are not guaranteed to survive abrupt termination.'],
   checks, errors, externalRequests: external.length, modelRequests: 0, screenshots,
   ...(failure ? { failure: failure.stack } : {}),
 };

@@ -5,6 +5,19 @@
   const MARKUP_TOOLS = new Set(['highlight', 'underline', 'strikeout']);
   const MAX_INK_PATHS = 64, MAX_INK_POINTS = 4096;
   const inkId = value => typeof value === 'string' && !!value.trim() && value.length <= 256 && !/[\u0000-\u001f]/.test(value);
+  /** Diagnostic metadata is deliberately separate from PDF paths and text. */
+  function createInkTrace(callback = () => {}) {
+    const events = new Set(['stroke_start', 'stroke_end', 'stroke_cancel', 'input_blocked', 'draft_clear', 'draft_restore', 'overlay_update', 'overlay_retire', 'page_install', 'page_defer']);
+    return (event, details = {}) => {
+      if (!events.has(event)) return;
+      const record = { event };
+      for (const key of ['paperId', 'annotationId']) if (inkId(details[key])) record[key] = details[key];
+      for (const key of ['page', 'strokes', 'points', 'revision', 'count']) if (Number.isSafeInteger(details[key]) && details[key] >= 0) record[key] = details[key];
+      if (['pen', 'mouse', 'touch', 'unknown'].includes(details.pointerType)) record.pointerType = details.pointerType;
+      if (typeof details.reason === 'string' && /^[a-z_]{1,64}$/.test(details.reason)) record.reason = details.reason;
+      try { const pending = callback(record); if (pending && typeof pending.then === 'function') Promise.resolve(pending).catch(() => {}); } catch { /* Diagnostics can never interrupt input. */ }
+    };
+  }
   /** Pointer type comes from the browser, never pressure or a platform guess.
    * Compatibility stays opt-out because Sidecar can report a Pencil as mouse. */
   function createInputPolicy(onChange = () => {}) {
@@ -298,11 +311,13 @@
     function dispose() { reset(null); disposed = true; }
     return { reset, want, ready, invalidate, dispose, idle: () => running || Promise.resolve(), snapshot: () => ({ id, residents: [...residents], wanted: [...wanted], inFlight: inFlight ? { id: inFlight.id, page: inFlight.page } : null }) };
   }
-  function create({ root, api, getPaper, onActivePage = () => {}, onSelection = () => {}, onStatus: reportStatus = () => {}, onPageNote = () => {}, onAnnotationActivate = () => {}, onInkChange = () => {}, onInputChange = () => {}, onFocusChange = () => {} }) {
+  function create({ root, api, getPaper, onActivePage = () => {}, onSelection = () => {}, onStatus: reportStatus = () => {}, onPageNote = () => {}, onAnnotationActivate = () => {}, onInkChange = () => {}, onInputChange = () => {}, onFocusChange = () => {}, onInkTrace = () => {} }) {
     if (!root) throw new Error('PDF reader requires a scroll viewport');
     let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, flashTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', pendingRange = null, transport = Promise.resolve(), zoom = 1;
     const renderedScales = new Map(), pageAnnotations = new Map();
     const ink = createInkBuffer();
+    const traceInk = createInkTrace(onInkTrace);
+    const inkDetails = () => { const draft = ink.preview(); return draft ? { paperId: draft.paperId, page: draft.page, strokes: draft.paths.length, points: draft.paths.reduce((total, path) => total + path.length, 0), revision: draft.revision } : { paperId, strokes: 0, points: 0 }; };
     const input = createInputPolicy(onInputChange), handledTouches = new Set();
     const overlays = createInkOverlays(), inputWaiters = new Set(), dirtyPages = new Set(), refreshWaiters = new Map();
     let nativeGesture = null, nativeEndTimer = null, refreshTimer = null, focusSequence = 0, focusState = null, returnPosition = null, focusCancelled = null;
@@ -335,7 +350,7 @@
         slot.sheet.append(layer);
       }
     }
-    function setInkOverlays(batches) { overlays.replace(batches); paintOverlays(); return true; }
+    function setInkOverlays(batches) { overlays.replace(batches); paintOverlays(); traceInk('overlay_update', { paperId, count: overlays.snapshot().length }); return true; }
     function paintInkContext() {
       const context = ink.getContext();
       root.dataset.inkContext = context ? 'linked' : 'free';
@@ -366,13 +381,15 @@
       inkFrame = window.requestAnimationFrame(() => { inkFrame = null; paintInk(); });
     }
     function inkChanged() { paintInk(); onInkChange(ink.snapshot()); }
-    function endInk(cancelled = false) {
+    function endInk(cancelled = false, reason = 'pointerup') {
       if (!inkGesture) return false;
-      const pointerId = inkGesture.pointerId; inkGesture = null;
+      const { pointerId, pointerType } = inkGesture, details = inkDetails(); inkGesture = null;
       const changed = ink.end(cancelled);
       try { if (root.hasPointerCapture?.(pointerId)) root.releasePointerCapture(pointerId); } catch { /* The platform may have released capture already. */ }
       if (inkFrame !== null) { window.cancelAnimationFrame(inkFrame); inkFrame = null; }
       if (changed) inkChanged(); else paintInk();
+      traceInk(cancelled ? 'stroke_cancel' : 'stroke_end', { ...details, pointerType, reason, revision: ink.snapshot()?.revision ?? details.revision });
+      if (changed && ['pointercancel', 'lostpointercapture', 'pointerleave', 'disabled', 'reader_clear', 'tool_change', 'pen_only'].includes(reason)) onStatus('笔输入中断，已保留刚才画出的部分；可继续书写。');
       inputEnded();
       return changed;
     }
@@ -461,12 +478,13 @@
       if (event.pointerType === 'touch' && annotating) {
         event.preventDefault(); if (handledTouches.size < 32) handledTouches.add(event.pointerId);
         // A palm must not change the pen's selection, scroll position or capture.
+        if (inkGesture) traceInk('input_blocked', { paperId, pointerType: 'touch', reason: 'touch_during_stroke' });
         if (inkGesture || markupGesture || touchPan || event.isPrimary === false || !paperId || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
         touchPan = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
         try { root.setPointerCapture(event.pointerId); } catch { /* Leaving the viewport cancels this pan. */ }
         return;
       }
-      if (annotating && !input.accepts(event)) { event.preventDefault(); onStatus(policyRejection, true); policyRejected = true; return; }
+      if (annotating && !input.accepts(event)) { event.preventDefault(); onStatus(policyRejection, true); policyRejected = true; traceInk('input_blocked', { paperId, pointerType: event.pointerType, reason: 'pen_only' }); return; }
       if (annotating) endTouchPan();
       pendingRange = null;
       if (MARKUP_TOOLS.has(tool)) {
@@ -475,17 +493,19 @@
         if (event.isPrimary === false || event.button !== 0) return;
         startMarkup(event, sheet); acceptedAnnotationInput(); return;
       }
-      if (tool !== 'ink' || !inkEnabled || !paperId || event.pointerType === 'touch' || event.isPrimary === false || event.button !== 0 || inkGesture) return;
-      const sheet = event.target.closest?.('.pdr-sheet'); if (!sheet || !root.contains(sheet) || sheet.dataset.loaded !== 'true') return;
+      if (tool !== 'ink') return;
+      if (!inkEnabled || !paperId || event.pointerType === 'touch' || event.isPrimary === false || event.button !== 0 || inkGesture) { traceInk('input_blocked', { paperId, pointerType: event.pointerType, reason: !inkEnabled ? 'disabled' : inkGesture ? 'stroke_active' : 'pointer_ineligible' }); return; }
+      const sheet = event.target.closest?.('.pdr-sheet'); if (!sheet || !root.contains(sheet) || sheet.dataset.loaded !== 'true') { traceInk('input_blocked', { paperId, pointerType: event.pointerType, reason: 'page_not_ready' }); return; }
       const page = Number(sheet.dataset.pdfPage), geometry = pages[page - 1], point = inkPoint(event, sheet.getBoundingClientRect(), geometry); if (!point) return;
       event.preventDefault(); window.getSelection()?.removeAllRanges(); selection = null; lastSelection = '';
       try {
         if (!ink.start({ paperId, page }, point, { color, width: inkWidth })) return;
         acceptedAnnotationInput();
         inkGesture = { pointerId: event.pointerId, pointerType: event.pointerType, sheet, geometry, limited: false };
-        try { root.setPointerCapture(event.pointerId); } catch { /* Cancelled on a missed capture rather than leaving a stuck gesture. */ }
+        try { root.setPointerCapture(event.pointerId); } catch { /* Leaving the viewport preserves the captured part instead of leaving a stuck gesture. */ }
+        traceInk('stroke_start', { ...inkDetails(), pointerType: event.pointerType });
         root.focus({ preventScroll: true }); scheduleInk();
-      } catch (error) { onStatus(error.message, true); }
+      } catch (error) { traceInk('input_blocked', { ...inkDetails(), pointerType: event.pointerType, reason: 'draft_conflict_or_limit' }); onStatus(error.message, true); }
     }
     function pointerMove(event) {
       if (event.pointerType === 'touch' && (handledTouches.has(event.pointerId) || tool === 'ink' || MARKUP_TOOLS.has(tool))) { event.preventDefault(); moveTouchPan(event); return; }
@@ -498,14 +518,22 @@
       const gesture = nativeGesture;
       nativeEndTimer = window.setTimeout(() => { nativeEndTimer = null; if (nativeGesture === gesture) { captureSelection(); nativeGesture = null; inputEnded(); } }, 0);
     }
-    function pointerCancel(event) { nativePointerEnded(event); if (touchPan?.pointerId === event.pointerId) endTouchPan(); if (event.pointerType === 'touch') { if (event.type !== 'lostpointercapture') handledTouches.delete(event.pointerId); return; } if (markupGesture?.pointerId === event.pointerId) endMarkup(true); if (inkGesture?.pointerId === event.pointerId) endInk(true); }
-    function pointerLeave(event) { if (root.hasPointerCapture?.(event.pointerId)) return; if (touchPan?.pointerId === event.pointerId) endTouchPan(); if (event.pointerType === 'touch') return; if (markupGesture?.pointerId === event.pointerId) endMarkup(true); if (inkGesture?.pointerId === event.pointerId) endInk(true); }
-    function undoInk() { endInk(true); if (!inkEnabled) return false; const changed = ink.undo(); if (changed) inkChanged(); return changed; }
-    function clearInk(expectedRevision) { if (expectedRevision !== undefined && expectedRevision !== ink.snapshot()?.revision) return false; endInk(true); const cleared = ink.clear(expectedRevision); if (cleared) inkChanged(); return cleared; }
-    function restoreInkDraft(value) { const restored = ink.restore(value); if (restored) { paintInkContext(); inkChanged(); } return restored; }
+    function pointerCancel(event) {
+      // A child's lost-capture event bubbles. It must not cancel a pointer that
+      // this viewport has just captured (or recaptured) for the same stroke.
+      if (event.type === 'lostpointercapture' && (event.target !== root || root.hasPointerCapture?.(event.pointerId))) return;
+      nativePointerEnded(event); if (touchPan?.pointerId === event.pointerId) endTouchPan();
+      if (event.pointerType === 'touch') { if (event.type !== 'lostpointercapture') handledTouches.delete(event.pointerId); return; }
+      if (markupGesture?.pointerId === event.pointerId) endMarkup(true);
+      if (inkGesture?.pointerId === event.pointerId) endInk(false, event.type);
+    }
+    function pointerLeave(event) { if (root.hasPointerCapture?.(event.pointerId)) return; if (touchPan?.pointerId === event.pointerId) endTouchPan(); if (event.pointerType === 'touch') return; if (markupGesture?.pointerId === event.pointerId) endMarkup(true); if (inkGesture?.pointerId === event.pointerId) endInk(false, 'pointerleave'); }
+    function undoInk() { if (!inkEnabled) return false; if (inkGesture) { endInk(true, 'undo'); return true; } const changed = ink.undo(); if (changed) inkChanged(); return changed; }
+    function clearInk(expectedRevision) { if (expectedRevision !== undefined && expectedRevision !== ink.snapshot()?.revision) { traceInk('draft_clear', { ...inkDetails(), reason: 'revision_mismatch' }); return false; } const details = inkDetails(); endInk(true, 'clear'); const cleared = ink.clear(expectedRevision); if (cleared) inkChanged(); traceInk('draft_clear', { ...details, reason: cleared ? 'explicit_clear' : 'revision_mismatch' }); return cleared; }
+    function restoreInkDraft(value) { const restored = ink.restore(value); if (restored) { paintInkContext(); inkChanged(); traceInk('draft_restore', inkDetails()); } return restored; }
     function setInkContext(value) { const context = ink.setContext(value); paintInkContext(); return context; }
-    function setInkEnabled(value) { if (!value) endInk(true); inkEnabled = !!value; }
-    function setPenOnly(value) { if (value) { if (inkGesture && inkGesture.pointerType !== 'pen') endInk(true); if (markupGesture && markupGesture.pointerType !== 'pen') endMarkup(true); } return input.setPenOnly(value); }
+    function setInkEnabled(value) { const next = !!value; inkEnabled = next; if (!next) { endInk(false, 'disabled'); inkEnabled = false; } }
+    function setPenOnly(value) { if (value) { if (inkGesture && inkGesture.pointerType !== 'pen') endInk(false, 'pen_only'); if (markupGesture && markupGesture.pointerType !== 'pen') endMarkup(true); } return input.setPenOnly(value); }
     const current = (id, ticket) => !disposed && id === paperId && id === getPaper()?.id && ticket === generation;
     function request(action, args, valid) { const task = transport.catch(() => {}).then(() => valid() ? api(action, args) : null); transport = task.catch(() => {}); return task; }
     // zoom 1 is fit-width; wider layouts scroll horizontally. Raster density may
@@ -594,13 +622,17 @@
         image.alt = `PDF 第 ${page} 页`; image.draggable = false; image.decoding = 'async'; image.dataset.pdfPage = String(page); image.src = `data:image/png;base64,${result.image}`;
         if (image.decode) await image.decode();
         const valid = () => current(id, ticket) && job.current();
+        if (valid() && inputBusy(page)) traceInk('page_defer', { paperId: id, page, reason: 'active_input' });
         if (!await waitForInput(page, valid) || !valid()) return;
         // Decode off-DOM, then replace only between complete input gestures.
         sheet.replaceChildren(image); renderWords(sheet, result.words, geometry); sheet.dataset.loaded = 'true'; paintInk();
         // Saved annotations travel with the page payload so clicks can link the
         // raster markup to its rail entry without a second catalogue read.
         pageAnnotations.set(page, (result.annotations || []).filter(annotation => annotation && typeof annotation.id === 'string' && Array.isArray(annotation.rects) && annotation.rects.some(rect => Array.isArray(rect) && rect.length >= 4)));
-        overlays.confirm(id, page, (result.annotations || []).map(annotation => annotation?.id).filter(value => typeof value === 'string')); paintOverlays(page); paintFocus();
+        const rasterIds = (result.annotations || []).map(annotation => annotation?.id).filter(value => typeof value === 'string'), retired = overlays.forPage(id, page).filter(batch => rasterIds.includes(batch.annotation_id));
+        overlays.confirm(id, page, rasterIds); paintOverlays(page); paintFocus();
+        traceInk('page_install', { paperId: id, page, count: rasterIds.length });
+        for (const batch of retired) traceInk('overlay_retire', { paperId: id, page, annotationId: batch.annotation_id, reason: 'raster_confirmed' });
         renderedScales.set(page, job.requestedScale);
         if (!current(id, ticket) || !sheet.contains(image)) return;
         if (page === active) { announce(true); onStatus(result.words_truncated ? '这一页的可选文字超过上限，仅显示部分文字层。' : result.words.length ? '连续滚动阅读；选中文字后可批注或提问。' : '这一页没有可选择的文字，可使用页批注。'); }
@@ -646,7 +678,7 @@
     function clear() {
       // The draft belongs to its original paper/page, not to the disposable
       // raster window. The caller offers save/discard before leaving the page.
-      endInk(true); endMarkup(true); endTouchPan(); nativeGesture = null; cancelNavigation(); returnPosition = null; overlays.clearRasters();
+      endInk(false, 'reader_clear'); endMarkup(true); endTouchPan(); nativeGesture = null; cancelNavigation(); returnPosition = null; overlays.clearRasters();
       ++generation; paperId = null; jumpTarget = null; selection = null; lastSelection = ''; queue.reset(null); renderedScales.clear(); pageAnnotations.clear(); pages = []; metrics = []; slots = []; active = 1; layoutWidth = 0; layoutPromise = null; strip.replaceChildren(); root.scrollTop = 0;
       if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; } if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
       if (resizeTimer !== null) { window.clearTimeout(resizeTimer); resizeTimer = null; }
@@ -689,7 +721,8 @@
     function pageVisible(page) { const metric = metrics[page - 1]; return !!metric && metric.top + metric.height > root.scrollTop && metric.top < root.scrollTop + root.clientHeight; }
     function scheduleRefresh(delay = 240) { if (!dirtyPages.size || refreshTimer !== null || disposed) return; refreshTimer = window.setTimeout(() => { refreshTimer = null; flushRefresh(); }, delay); }
     function flushRefresh() {
-      if (disposed || inputBusy()) return;
+      if (disposed) return;
+      if (inputBusy()) { for (const page of dirtyPages) if (pageVisible(page)) traceInk('page_defer', { paperId, page, reason: 'active_input' }); return; }
       for (const page of dirtyPages) {
         if (!pageVisible(page) || !queue.snapshot().wanted.includes(page)) continue;
         dirtyPages.delete(page); queue.invalidate(page, { preserve: true });
@@ -898,7 +931,7 @@
       const options = typeof nextColor === 'object' && nextColor !== null ? nextColor : { color: nextColor };
       if (options.color !== undefined && !/^#[0-9a-f]{6}$/i.test(options.color)) throw new Error('Annotation color must be #RRGGBB');
       if (options.width !== undefined && (!Number.isFinite(options.width) || options.width < .5 || options.width > 8)) throw new Error('手写笔宽必须在 0.5–8 之间');
-      if (value !== tool) { endInk(true); endMarkup(true); endTouchPan(); nativeGesture = null; inputEnded(); }
+      if (value !== tool) { endInk(false, 'tool_change'); endMarkup(true); endTouchPan(); nativeGesture = null; inputEnded(); }
       tool = value;
       if (options.color !== undefined) color = options.color;
       if (options.width !== undefined) inkWidth = options.width;
@@ -939,5 +972,5 @@
     function dispose() { clear(); disposed = true; ink.clear(); overlays.clear(); queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('pointerdown', pointerDown); root.removeEventListener('pointermove', pointerMove); root.removeEventListener('pointercancel', pointerCancel); root.removeEventListener('lostpointercapture', pointerCancel); root.removeEventListener('pointerleave', pointerLeave); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); root.removeEventListener('wheel', userNavigate); root.removeEventListener('keydown', userNavigate); document.removeEventListener('selectionchange', selectionChanged); document.removeEventListener('pointerup', nativePointerEnded); document.removeEventListener('pointercancel', nativePointerEnded); }
     return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, revealRegion, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
-  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkOverlays, regionRects, minimumScroll, nearestTextPosition });
+  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition });
 })();

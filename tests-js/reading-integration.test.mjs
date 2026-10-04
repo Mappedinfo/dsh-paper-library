@@ -40,10 +40,62 @@ function environment({table=false,readerId='paper-a',paper={id:'paper-a',pdf:tru
     loadGraph:async()=>calls.push(['graph']),publishReaderState:()=>calls.push(['publish']),currentHarnessRoute:()=>null,toast:(...args)=>calls.push(['toast',...args]),
     openAnnotation:()=>{throw new Error('This fixture has no annotation dialog draft');},
     clearSelection:()=>{context.state.selection=null;element('selection-tools').hidden=true;},initializedReader:true,pendingReferenceOpen:null,pendingInkHandoff:null,inkQueue:null,
+    pdfReader:null,restoringInkDraft:false,inkSaveUncertain:false,
   };
   vm.createContext(context);vm.runInContext(tabSource+'\n'+selectionSource+'\n'+restoreSource+'\n'+referenceSource,context,{filename:'web/app.js:reading-coordinators'});
   return {context,calls,visibility,panels,element,isTable:()=>table};
 }
+
+function inkRestorationFixture(snapshot){
+  const f=environment({snapshot}),c=f.context,buffer=inkModule.window.PaperPDFReader.createInkBuffer();let enabled=true,blocked=false;
+  Object.assign(c,{inkDiagnostics:null,inkSaveBusy:false,inkSaveIdentity:null,inkDraftStorageBlocked:false,inkDraftUpdatedAt:0,queueMicrotask,setTimeout,clearTimeout,
+    window:{crypto:{randomUUID:()=> '77b13212-461d-491e-89a3-d8973b949164'}},
+    persistence:{get:async()=>null,put:async()=>{}},
+    pdfReader:{getInkDraft:()=>buffer.snapshot(),isInking:()=>buffer.isDrawing(),setInkEnabled:value=>{enabled=value;},setInkOverlays(){},restoreInkDraft:value=>{buffer.restore(value);c.inkDraftChanged();},clearInk:revision=>{const result=buffer.clear(revision);if(result)c.inkDraftChanged();return result;}},
+    inkQueue:{blocked:()=>blocked,freeze:()=>{blocked=true;}},linkedHandwritingUI:{session:()=>null,draftChanged(){},restore:async()=>{}},handwritingUI:{open:async()=>{}},
+  });
+  Object.assign(c.readingShell,{inkChanged(){},inkSaving(){},queueChanged(){}});vm.runInContext(inkSource,c);
+  const callback=prefix=>{const start=source.indexOf(prefix),end=source.indexOf('\n',start);assert.ok(start>=0);return vm.runInContext('('+source.slice(start+prefix.length,end).replace(/,$/,'')+')',c);};
+  return {...f,buffer,get enabled(){return enabled;},setBlocked:value=>{blocked=value;},queueChanged:callback('  onChange:'),queueAccepted:callback('  onAccepted:')};
+}
+
+test('parent reader restoration locks Ink before opening and stale draft or queue completion cannot unlock it',async()=>{
+  const f=inkRestorationFixture({paperId:'paper-a',page:1,tab:'reader'}),c=f.context;let resume;
+  c.openPaper=()=>new Promise(resolve=>{resume=resolve;});
+  const restoration=c.restoreReaderState();assert.equal(f.enabled,false);assert.equal(c.restoringReader,true);
+  await c.restoreInkDraft();assert.equal(f.enabled,false,'Draft restoration may finish before the parent snapshot');
+  f.queueChanged([]);assert.equal(f.enabled,false,'Queue acknowledgment cannot expose input during restore');
+  c.inkDraftChanged();assert.equal(f.enabled,false,'Empty-draft callbacks cannot reopen input');
+  assert.equal(c.saveInkDraft(),true);assert.equal(f.enabled,false);
+  resume();await restoration;assert.equal(c.restoringReader,false);assert.equal(f.enabled,true);
+});
+
+test('a delayed page and handoff persistence stay locked until the exact restored draft is adopted',async()=>{
+  const record={draft:{paperId:'paper-a',page:2,paths:[[[10,20],[30,40]]],width:2,color:'#336699',revision:5},annotation_id:'55928353-ff78-43a3-960c-03d253ee9523',attempted:false,updatedAt:100};
+  const snapshot={paperId:'paper-a',page:2,tab:'reader',inkDraftRecord:record},f=inkRestorationFixture(snapshot),c=f.context;let pageDone,stored;
+  c.requestPage=()=>new Promise(resolve=>{pageDone=()=>{c.state.page=2;c.state.pageData={width:600,height:800};resolve();};});
+  c.persistence.put=()=>new Promise(resolve=>{stored=resolve;});
+  const restoration=c.applyReaderSnapshot(snapshot);assert.equal(f.enabled,false);assert.equal(f.buffer.snapshot(),null);
+  f.queueChanged([]);assert.equal(f.enabled,false);pageDone();
+  for(let i=0;i<10&&!stored;i++)await new Promise(resolve=>setImmediate(resolve));assert.ok(stored);
+  assert.equal(c.restoringReader,true);assert.equal(f.enabled,false);assert.deepEqual(JSON.parse(JSON.stringify(f.buffer.snapshot().paths)),record.draft.paths);
+  f.queueChanged([]);assert.equal(f.enabled,false,'A queue status transition during the durable adoption cannot unlock input');
+  stored();await restoration;assert.equal(f.enabled,true);assert.equal(c.inkSaveIdentity.id,record.annotation_id);
+});
+
+test('an acknowledgment during parent restoration adopts a queued later handoff after restoration completes',async()=>{
+  const record={draft:{paperId:'paper-a',page:1,paths:[[[50,60],[70,80]]],width:2,color:'#336699',revision:8},annotation_id:'51175682-c95b-4b5a-a3c1-75e9b240c065',attempted:false,updatedAt:200};
+  const snapshot={paperId:'paper-a',page:1,tab:'reader',inkDraftRecord:record,handwritingDraft:{id:'paper-a',annotation_id:'legacy-a'}},f=inkRestorationFixture(snapshot),c=f.context;let annotationsDone;
+  f.buffer.restore({...record.draft,paths:[[[10,20],[30,40]]],revision:5});c.inkSaveUncertain=true;c.inkSaveIdentity={paperId:'paper-a',revision:5,id:'55928353-ff78-43a3-960c-03d253ee9523'};c.inkDraftUpdatedAt=100;
+  c.loadAnnotations=()=>new Promise(resolve=>{annotationsDone=resolve;});
+  const restoration=c.applyReaderSnapshot(snapshot);
+  for(let i=0;i<10&&!annotationsDone;i++)await new Promise(resolve=>setImmediate(resolve));assert.ok(annotationsDone);
+  assert.equal(f.buffer.snapshot(),null);assert.equal(f.enabled,false);assert.equal(c.pendingInkHandoff.annotation_id,record.annotation_id);
+  await f.queueAccepted({paperId:'paper-a',page:1,annotation_id:c.inkQueue.annotation_id,frozenAt:100});f.setBlocked(false);f.queueChanged([]);
+  assert.equal(f.enabled,false);annotationsDone();await restoration;
+  assert.equal(c.pendingInkHandoff,null);assert.equal(c.inkSaveIdentity.id,record.annotation_id);assert.equal(f.enabled,true);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.buffer.snapshot().paths)),record.draft.paths);
+});
 
 test('entering a reading panel from a newly selected catalogue row first initializes the whole paper',async()=>{
   const f=environment({table:true,readerId:'paper-a',paper:{id:'paper-b',pdf:true}});
@@ -143,7 +195,7 @@ for(const oldPaperId of ['paper-a','paper-b'])for(const failAdoption of [false,t
   const snapshot={paperId:'paper-a',page:2,tab:'reader',chatDraft:'',inkDraftRecord:structuredClone(newer)};
   const f=environment({snapshot}),c=f.context,buffer=inkModule.window.PaperPDFReader.createInkBuffer(),messages=[],requests=[];
   const plain=value=>JSON.parse(JSON.stringify(value));let enabled=true,fail=true,durable=structuredClone(old);
-  Object.assign(c,{inkSaveBusy:false,inkSaveIdentity:null,restoringInkDraft:false,inkDraftStorageBlocked:false,inkSaveUncertain:false,inkDraftUpdatedAt:0,handwritingUI:null,Blob,TextEncoder,queueMicrotask,setTimeout,clearTimeout,
+  Object.assign(c,{inkDiagnostics:null,inkSaveBusy:false,inkSaveIdentity:null,restoringInkDraft:false,inkDraftStorageBlocked:false,inkSaveUncertain:false,inkDraftUpdatedAt:0,handwritingUI:null,Blob,TextEncoder,queueMicrotask,setTimeout,clearTimeout,
     window:{parent:{postMessage:value=>messages.push(plain(value))},location:{origin:'http://localhost:43121'},crypto:{randomUUID:()=>{throw new Error('Immutable retry minted a new ID');}}},
     persistence:{get:async()=>structuredClone(durable),put:async(key,value)=>{if(value?.annotation_id===newer.annotation_id&&failAdoption)throw new Error('Synthetic adoption storage unavailable');durable=structuredClone(value);}},
     pdfReader:{getInkDraft:()=>buffer.snapshot(),isInking:()=>buffer.isDrawing(),setInkEnabled:value=>{enabled=value;},restoreInkDraft:value=>{const ok=buffer.restore(value);if(ok)c.inkDraftChanged();return ok;},clearInk:revision=>{const ok=buffer.clear(revision);if(ok)c.inkDraftChanged();return ok;}},

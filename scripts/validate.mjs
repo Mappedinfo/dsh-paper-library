@@ -19,6 +19,8 @@ const commands=[
   ['ink_queue_client_syntax',process.execPath,['--check','web/ink-queue-client.js']],
   ['ink_preview_syntax',process.execPath,['--check','web/ink-preview.js']],
   ['ink_queue_host_syntax',process.execPath,['--check','src/ink-queue.mjs']],
+  ['ink_diagnostics_client_syntax',process.execPath,['--check','web/ink-diagnostics.js']],
+  ['ink_diagnostics_host_syntax',process.execPath,['--check','src/ink-diagnostics.mjs']],
   ['handwriting_note_syntax',process.execPath,['--check','web/handwriting-note.js']],
   ['local_state_syntax',process.execPath,['--check','web/local-state.js']],
   ['language_learning_syntax',process.execPath,['--check','web/language-learning.js']],

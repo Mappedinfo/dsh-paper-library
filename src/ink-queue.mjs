@@ -61,7 +61,7 @@ function alive(job) {
 export function createInkQueue({store,dispatch,library,python,autoStart=true}={}) {
   if(!store?.get||!store?.put||typeof dispatch!=='function')throw new Error('Ink queue requires a CAS store and PDF dispatcher');
   const owner=randomUUID();activeOwners.add(owner);
-  let serial=Promise.resolve(),worker=null,timer=null,stopped=false,lastError=null,inflightId=null;
+  let serial=Promise.resolve(),worker=null,timer=null,stopped=false,lastError=null,inflightId=null,wakeRequested=false;
   const exclusive=fn=>{const promise=serial.catch(()=>{}).then(fn);serial=promise.catch(()=>{});return promise;};
   async function read(){const record=await store.get(INDEX);return {...record,value:manifest(record.value)};}
   async function change(fn){
@@ -117,7 +117,8 @@ export function createInkQueue({store,dispatch,library,python,autoStart=true}={}
       return changed||false;
     });
   }
-  function kick(delay=0){if(stopped||worker||timer)return;timer=setTimeout(()=>{timer=null;worker=run().catch(error=>{lastError={code:error.code||'INK_QUEUE_STORAGE',message:String(error.message).slice(0,600)};}).finally(()=>{worker=null;});},delay);timer.unref?.();}
+  function finished(){worker=null;if(wakeRequested){wakeRequested=false;kick();}}
+  function kick(delay=0){if(stopped)return;if(worker){wakeRequested=true;return;}if(timer)return;timer=setTimeout(()=>{timer=null;worker=run().catch(error=>{lastError={code:error.code||'INK_QUEUE_STORAGE',message:String(error.message).slice(0,600)};}).finally(finished);},delay);timer.unref?.();}
   async function run(){
     while(!stopped){
       const selected=await exclusive(async()=>{
@@ -222,7 +223,7 @@ export function createInkQueue({store,dispatch,library,python,autoStart=true}={}
   }
   async function handle(input){if(input.action==='ink_queue_enqueue')return enqueue(input);if(input.action==='ink_queue_list')return list(input);if(input.action==='ink_queue_retry')return retry(input);fail('未知笔迹队列操作。');}
   async function dispose(){stopped=true;if(timer)clearTimeout(timer);timer=null;try{await worker;}finally{activeOwners.delete(owner);}}
-  async function idle(){if(timer){clearTimeout(timer);timer=null;}if(!worker&&!stopped)worker=run().finally(()=>{worker=null;});await worker;await serial;}
+  async function idle(){if(timer){clearTimeout(timer);timer=null;}if(!worker&&!stopped)worker=run().finally(finished);await worker;await serial;}
   if(autoStart)kick();
   return {handle,enqueue,list,retry,dispose,idle};
 }

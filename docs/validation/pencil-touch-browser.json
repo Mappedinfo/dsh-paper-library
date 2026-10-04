@@ -1,7 +1,7 @@
 {
-  "verified_at": "2026-10-03T16:47:25.594Z",
+  "verified_at": "2026-10-04T01:21:43.623Z",
   "complete": true,
-  "scope": "Synthetic PDF in Chromium using trusted CDP pen/touch and real mouse events; tests input classification, scrolling, coexistence and optional pen-only policy.",
+  "scope": "Synthetic PDF in Chromium using trusted CDP pen/touch and real mouse events; tests input classification, scrolling, coexistence, interrupted stroke preservation and optional pen-only policy.",
   "checks": [
     "trusted pen still creates text-bound PDF highlights",
     "touch drag scrolls in text-markup mode without creating annotations",
@@ -13,7 +13,8 @@
     "pen-only option refuses mouse drawing while continuing to accept a pen",
     "policy rejection message clears after accepted pen input and after changing the setting",
     "turning pen-only off restores Sidecar-style mouse fallback",
-    "native PDF save contains only the four intentional strokes and one highlight",
+    "touch cancellation leaves an active pen alone and interrupted pen geometry survives the next stroke",
+    "native PDF save retains every sampled point including the interrupted pen stroke and no touch ink",
     "pen-only preference survives reload while confirmed PDF handwriting remains intact",
     "input settings close with Escape and an outside click",
     "600-pixel input menu remains unclipped with a visible 44-pixel checkbox-label target",
@@ -34,11 +35,12 @@
     "penOnly": false
   },
   "screenshots": [
-    ".local/pencil-touch-MOzAf2/pencil-touch-compatibility.png",
-    ".local/pencil-touch-MOzAf2/pencil-input-settings-narrow.png"
+    ".local/pencil-touch-BayrQZ/pencil-touch-compatibility.png",
+    ".local/pencil-touch-BayrQZ/pencil-input-settings-narrow.png"
   ],
   "limitations": [
     "No physical Apple Pencil, iPadOS27, Sidecar, Safari or Electron build was exercised.",
-    "Browser-reported pointer types are verified; this does not identify the physical device or prove operating-system palm rejection."
+    "Browser-reported pointer types are verified; this does not identify the physical device or prove operating-system palm rejection.",
+    "Pen pointercancel is a synthetic DOM event; touch cancellation and the surrounding input are trusted Chromium events."
   ]
 }

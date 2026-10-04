@@ -15,7 +15,7 @@ window.PaperReadingShell = (() => {
     auto: { select: '拖选文字即按当前颜色直接着色，之后可在批注栏提问。', highlight: '拖选文字即高亮保存，不再弹出对话框。', underline: '拖选文字即保存下划线，不再弹出对话框。', strikeout: '拖选文字即保存删除线，不再弹出对话框。' },
     ask: { select: '拖选文字，可添加批注或放入论文对话。' },
   };
-  function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence, saveInk, returnToInk, beforeToolChange}) {
+  function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence, diagnostics, saveInk, returnToInk, beforeToolChange}) {
     const $ = id => document.getElementById(id);
     const node = (tag, text, className) => { const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n; };
     const button = (id, text, action) => {const n=node('button',text,'button subtle');n.type='button';n.id=id;n.addEventListener('click',action);return n;};
@@ -68,6 +68,7 @@ window.PaperReadingShell = (() => {
     const penOptions=node('div',null,'reader-pen-options'),penLabel=node('label'),penCheck=node('input');penOptions.id='reader-pen-options';penCheck.type='checkbox';penCheck.id='reader-pen-only';penLabel.append(penCheck,document.createTextNode('仅用笔标注'));
     const inputKind=node('p','在页面上用笔或手指操作后显示识别结果。');inputKind.id='reader-input-kind';inputKind.setAttribute('role','status');
     penOptions.append(penLabel,inputKind,node('p','手写和划线标注时，手指拖动页面可滚动；选择和便笺仍可用鼠标操作。若 Pencil 被识别为鼠标兼容输入，请关闭「仅用笔标注」。'));penSettings.append(penOptions);
+    if(diagnostics){const exportLog=button('reader-ink-diagnostics','导出手写诊断',async()=>{exportLog.disabled=true;try{const report=await diagnostics.exportReport(),url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='handwriting-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('手写诊断已导出，包含最近事件与笔数，不含正文或笔迹坐标。');}catch(error){toast(error.message,true);}finally{exportLog.disabled=false;}});penOptions.append(exportLog);}
     penCheck.addEventListener('change',()=>{penOnly=penCheck.checked;reader()?.setPenOnly?.(penOnly);void patchLayout({penOnly});status(hintFor());});
     function inputChanged(info){const labels={pen:'已识别：手写笔',touch:'已识别：触控',mouse:'收到：鼠标兼容输入',unknown:'输入类型未能识别'};inputKind.dataset.inputKind=info?.lastType||'';inputKind.textContent=labels[info?.lastType]||'在页面上用笔或手指操作后显示识别结果。';if(info?.seenPen&&info.lastType!=='pen')inputKind.textContent+=' · 已检测到手写笔';}
     const placePenOptions=()=>{if(!penSettings.open)return;const rect=penSummary.getBoundingClientRect();penOptions.style.top=`${rect.bottom+8}px`;penOptions.style.right=`${Math.max(12,window.innerWidth-rect.right)}px`;penOptions.style.maxHeight=`${Math.max(100,window.innerHeight-rect.bottom-20)}px`;};

@@ -1,10 +1,10 @@
 {
-  "verified_at": "2026-10-03T16:38:58.474Z",
+  "verified_at": "2026-10-04T01:21:13.894Z",
   "complete": true,
   "scope": "Synthetic standalone UI in real Chromium: trusted CDP pen and touch, real mouse input, explicit multi-stroke drafts, native PDF Ink persistence, original preservation, retry, zoom, rotation, fresh catalog recovery and existing tools.",
   "limitations": [
     "No physical Apple Pencil, iPad, Sidecar or Safari session was exercised.",
-    "Pointer cancellation uses a synthetic DOM event; other tested input events are trusted Chromium input.",
+    "Pointer cancellation uses a synthetic DOM event; capture unavailability is simulated for the trusted pointerleave case. Other tested input events are trusted Chromium input.",
     "Fixed PDF stroke widths; no pressure-sensitive rendering or hardware palm-rejection claim.",
     "Acknowledged host-staged batches survive reader replacement and continue on the host; unfinished strokes or drafts lost before staging/handoff confirmation are not guaranteed to survive abrupt termination."
   ],
@@ -12,7 +12,11 @@
     "trusted-pen-draws-over-text-without-selecting-text-opening-a-note-or-autosaving",
     "trusted-touch-does-not-add-or-change-ink",
     "multi-stroke-draft-supports-last-stroke-undo-and-trusted-mouse-fallback",
-    "pointer-cancel-drops-only-the-interrupted-stroke",
+    "pointer-cancel-preserves-the-collected-stroke-and-finishes-the-gesture",
+    "trusted-lost-pointer-capture-retains-collected-geometry",
+    "leaving-the-reader-without-capture-retains-collected-geometry",
+    "writing-continues-after-cancel-capture-loss-and-reader-leave",
+    "handwriting-diagnostic-download-includes-host-and-client-transition-counts-without-text-or-geometry",
     "explicit-save-writes-one-native-multi-stroke-ink-with-width-colour-and-page-coordinates",
     "saving-preserves-external-annotations-and-the-imported-original",
     "discard-removes-only-the-unsaved-draft",
@@ -32,8 +36,8 @@
   "externalRequests": 0,
   "modelRequests": 0,
   "screenshots": [
-    ".local/pencil-browser-mIoJrH/multi-stroke-draft.png",
-    ".local/pencil-browser-mIoJrH/zoomed-draft.png",
-    ".local/pencil-browser-mIoJrH/reopened-ink-and-existing-tools.png"
+    ".local/pencil-browser-5YJBae/multi-stroke-draft.png",
+    ".local/pencil-browser-5YJBae/zoomed-draft.png",
+    ".local/pencil-browser-5YJBae/reopened-ink-and-existing-tools.png"
   ]
 }

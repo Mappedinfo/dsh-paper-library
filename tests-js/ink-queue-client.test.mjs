@@ -81,7 +81,7 @@ test('app handoff restoration keeps the frozen request revision while the reader
   const ctx=vm.createContext({window:{},TextEncoder,queueMicrotask,setTimeout,clearTimeout});vm.runInContext(readerSource,ctx);vm.runInContext(source,ctx);
   const buffer=ctx.window.PaperPDFReader.createInkBuffer();for(let i=0;i<5;i++)buffer.clear();
   const errors=[],writes=[],requests=[],remote={...draft(),annotation_id:id,attempted:false};
-  Object.assign(ctx,{restoringInkDraft:false,inkDraftStorageBlocked:false,inkSaveUncertain:false,inkSaveBusy:false,restoringReader:false,inkDraftUpdatedAt:0,inkSaveIdentity:null,pendingInkHandoff:null,
+  Object.assign(ctx,{inkDiagnostics:null,restoringInkDraft:false,inkDraftStorageBlocked:false,inkSaveUncertain:false,inkSaveBusy:false,restoringReader:false,inkDraftUpdatedAt:0,inkSaveIdentity:null,pendingInkHandoff:null,
     pdfReader:{clearInk:value=>buffer.clear(value),restoreInkDraft:value=>buffer.restore(value),getInkDraft:()=>buffer.snapshot(),setInkEnabled:()=>{},isInking:()=>false},readingShell:{inkChanged(){},inkSaving(){}},linkedHandwritingUI:{restore:async()=>{}},
     persistence:{put:async(key,value)=>{writes.push(plain(value));}},publishReaderState(){},toast:message=>errors.push(message)});
   ctx.inkQueue=ctx.window.PaperInkQueueClient.create({persistence:ctx.persistence,api:async(action,args)=>{requests.push(plain(args.batch));return {job:{annotation_id:id,batch:remote,status:'queued'}};},onError:error=>errors.push(error.message)});
@@ -150,11 +150,12 @@ test('queue status updates cannot reopen input during asynchronous handoff resto
   const start=appSource.indexOf('inkQueue=window.PaperInkQueueClient?.create('),end=appSource.indexOf('\nlinkedHandwritingUI=',start);
   assert.ok(start>=0&&end>start);const enabled=[];let options;
   const context={window:{PaperInkQueueClient:{create:value=>{options=value;return {blocked:()=>false};}}},api(){},persistence:null,inkQueue:null,
-    restoringInkDraft:true,inkSaveUncertain:false,pendingInkHandoff:null,pdfReader:{setInkEnabled:value=>enabled.push(value),setInkOverlays(){}},readingShell:{queueChanged(){}},
+    restoringInkDraft:true,restoringReader:false,inkSaveUncertain:false,pendingInkHandoff:null,pdfReader:{setInkEnabled:value=>enabled.push(value),setInkOverlays(){}},readingShell:{queueChanged(){}},
     state:{active:null},publishReaderState(){}};
   vm.runInNewContext(appSource.slice(start,end),context);options.onChange([]);
   assert.equal(enabled.at(-1),false,'Restoration holds the input lock until its durable write completes');
   context.restoringInkDraft=false;options.onChange([]);assert.equal(enabled.at(-1),true);
+  context.restoringReader=true;options.onChange([]);assert.equal(enabled.at(-1),false,'Parent snapshot restoration also keeps input locked');
 });
 
 test('saved queue notifications wait for fresh annotations before considering automatic recognition',async()=>{
@@ -164,7 +165,7 @@ test('saved queue notifications wait for fresh annotations before considering au
   const annotationsGate=new Promise(resolve=>{releaseAnnotations=resolve;});
   const context=vm.createContext({window:{},TextEncoder,queueMicrotask,setTimeout,clearTimeout});vm.runInContext(source,context);
   const paperReady=()=>{if(!context.inkQueue.hasPending('paper-a','highlight-a'))recognized.push(context.state.annotationVersion);};
-  Object.assign(context,{inkQueue:null,api:async(action,args)=>{if(action==='ink_queue_list')return {jobs:remote};const job={annotation_id:id,batch:args.batch,status:'queued'};remote=[job];return {job};},persistence:{put:async()=>{}},
+  Object.assign(context,{inkDiagnostics:null,inkQueue:null,api:async(action,args)=>{if(action==='ink_queue_list')return {jobs:remote};const job={annotation_id:id,batch:args.batch,status:'queued'};remote=[job];return {job};},persistence:{put:async()=>{}},
     state:{active:{id:'paper-a'},annotationVersion:'before-save'},restoringInkDraft:false,restoringReader:false,inkSaveUncertain:false,inkDraftStorageBlocked:false,pendingInkHandoff:null,inkDraftUpdatedAt:0,
     pdfReader:{setInkEnabled(){},setInkOverlays(){},refresh(){}},readingShell:{queueChanged(){}},paperChatUI:null,renderAnnotations(){},publishReaderState(){},toast:message=>errors.push(message),
     linkedHandwritingUI:{paperReady,saved(){}},loadAnnotations:async()=>{await annotationsGate;context.state.annotationVersion='after-save';paperReady();return true;}});

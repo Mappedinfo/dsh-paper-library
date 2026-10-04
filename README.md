@@ -56,6 +56,8 @@ npm 安装的包不含 Python 虚拟环境；**首次执行文献操作时插件
 
 **笔与手指分工**：在手写、高亮、下划线和删除线工具中，浏览器报告的笔输入负责标注，手指拖动负责滚动；放大后也可左右拖动。书写中的额外触控不会移动页面或取消笔画。默认保留鼠标兼容书写；打开 **笔输入** 可查看实际识别类型，确认 Pencil 显示「手写笔」后，可开启 **仅用笔标注**。若显示「鼠标兼容输入」，应保持关闭。该开关只限制上述标注工具，普通选择和便笺继续支持鼠标。
 
+浏览器中断输入、失去指针捕获或笔移出未捕获区域时，已采集的笔画部分会保留，并提示继续书写；明确点「撤销一笔」或「取消手写」才删除草稿。若再次出现笔画消失，打开 **笔输入 → 导出手写诊断**：本机最多保留最近 256 条输入、保存与重绘事件，仅含时间、内部标识、笔数和状态，不含正文、图片或笔迹坐标。诊断在后台分批记录，不能追溯升级前或尚未传回主机的事件。
+
 当前先适配 Chrome，后续验证 Electron。macOS 27 与 iPadOS 27 的随航支持更完整的触控，但框架可能只转发兼容鼠标／滚动事件，不能仅凭系统版本保证网页能辨认笔与手指。[Apple 开发说明](https://developer.apple.com/documentation/technotes/tn3212-adopting-gesture-recognizers-for-sidecar-touch-support) 接收浏览器提供的捕获、中断取消与合并采样，使用固定笔宽；当前没有压感笔宽、Pencil 双击或挤压切换工具。待保存笔迹可逐笔撤销。
 
 验证包括[结束、预览与定位](docs/validation/handwriting-flow-browser.json)、[笔与触控分工](docs/validation/pencil-touch-browser.json)、[关联页面手写](docs/validation/linked-handwriting-browser.json)、[识别和旧便签兼容](docs/validation/handwriting-browser.json)、[标准文字标注](docs/validation/pencil-markup-browser.json)及[真实 Harness 图片接口](docs/validation/handwriting-harness.json)，均使用合成文档，涉及模型时使用确定性替身。各回执保留实际日期；物理 Pencil／随航手感和真实识别准确率仍需实际试用。

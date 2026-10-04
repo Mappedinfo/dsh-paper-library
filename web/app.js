@@ -31,6 +31,7 @@ let preferences = {};
 let durableReaderLoaded = false;
 let readerStateReady = false;
 const persistence = window.PaperLibraryLocalState?.create({api,onError:error=>toast(error.message || String(error),true)});
+const inkDiagnostics = window.PaperInkDiagnostics?.create({api});
 let readerPaperId = null;
 let readerRestore = null;
 let restoringReader = false;
@@ -448,13 +449,14 @@ async function adoptInkHandoff(record){
     if(!inkDraftStorageBlocked)await persistence?.put('reader:ink-draft',{...record,draft:{...restored,revision:record.draft.revision}});
     if(record.frozen||record.attempted)queueMicrotask(()=>saveInkDraft());
   }catch(error){toast(`后续笔迹已保留，恢复未完成：${error.message}`,true);}
-  finally{restoringInkDraft=false;pdfReader.setInkEnabled(!inkSaveUncertain&&!inkQueue?.blocked());publishReaderState();}
+  finally{restoringInkDraft=false;pdfReader.setInkEnabled(!restoringReader&&!inkSaveUncertain&&!pendingInkHandoff&&!inkQueue?.blocked());publishReaderState();}
 }
 function inkDraftChanged(){
   readingShell?.inkChanged();
   if(restoringInkDraft)return;
   const draft=pdfReader?.getInkDraft?.();inkDraftUpdatedAt=Date.now();
-  if(!draft){inkSaveUncertain=false;if(!inkQueue?.blocked())pdfReader?.setInkEnabled(true);}
+  inkDiagnostics?.record({event:'draft_changed',paperId:draft?.paperId,page:draft?.page,revision:draft?.revision,strokes:draft?.paths.length||0,points:draft?.paths.reduce((sum,path)=>sum+path.length,0)||0});
+  if(!draft){inkSaveUncertain=false;pdfReader?.setInkEnabled(!restoringReader&&!pendingInkHandoff&&!inkQueue?.blocked());}
   inkSaveIdentity=draft?{paperId:draft.paperId,revision:draft.revision,id:window.crypto.randomUUID()}:null;
   // Failed restoration must not overwrite an unreadable or unavailable draft.
   if(!inkDraftStorageBlocked&&!inkQueue?.blocked())void persistence?.put('reader:ink-draft',draft?{draft,annotation_id:inkSaveIdentity.id,updatedAt:inkDraftUpdatedAt}:null).catch(()=>{});
@@ -474,7 +476,7 @@ async function restoreInkDraft(){
     }
   }catch(error){inkDraftStorageBlocked=true;toast(`手写草稿未能恢复：${error.message}。本次新笔迹请保存到 PDF 后再离开。`,true);}
   finally{
-    restoringInkDraft=false;pdfReader?.setInkEnabled(!inkSaveUncertain);readingShell?.inkChanged();
+    restoringInkDraft=false;pdfReader?.setInkEnabled(!restoringReader&&!inkSaveUncertain&&!pendingInkHandoff&&!inkQueue?.blocked());readingShell?.inkChanged();
     if(inkSaveUncertain)readingShell?.inkSaving(false,'上次保存尚待确认，请重试后继续书写。');
   }
 }
@@ -488,6 +490,7 @@ function saveInkDraft() {
   try{
     if(!inkQueue)throw new Error('手写暂存服务尚未就绪，请保留笔迹后重试。');
     inkQueue.freeze({...draft,revision:inkSaveIdentity.requestRevision??draft.revision},inkSaveIdentity.id,{attempted:inkSaveUncertain,updatedAt:inkDraftUpdatedAt});
+    inkDiagnostics?.record({event:'batch_freeze',paperId:draft.paperId,page:draft.page,annotationId:inkSaveIdentity.id,revision:draft.revision,strokes:draft.paths.length,points:draft.paths.reduce((sum,path)=>sum+path.length,0)});
     restoringInkDraft=true;pdfReader.clearInk(draft.revision);restoringInkDraft=false;
     inkSaveIdentity=null;inkSaveUncertain=false;pdfReader.setInkEnabled(false);readingShell?.inkChanged();publishReaderState();
     return true;
@@ -1103,15 +1106,19 @@ async function restoreReaderState() {
   if (!readerRestore || restoringReader) return;
   const snapshot = readerRestore; readerRestore = null;
   if (typeof snapshot.paperId !== 'string' || !snapshot.paperId || !Number.isInteger(snapshot.page) || snapshot.page < 1) return;
-  restoringReader = true;
+  restoringReader = true;pdfReader?.setInkEnabled(false);
   try {
     await openPaper(snapshot.paperId);
     if (state.active?.id !== snapshot.paperId) return;
     await applyReaderSnapshot(snapshot,!durableReaderLoaded);
-  } finally { restoringReader = false; publishReaderState(); }
+  } finally {
+    restoringReader = false;
+    if(pendingInkHandoff&&!restoringInkDraft&&!inkQueue?.blocked()&&!pdfReader?.getInkDraft?.())await adoptInkHandoff(pendingInkHandoff);
+    pdfReader?.setInkEnabled(!restoringInkDraft&&!inkSaveUncertain&&!pendingInkHandoff&&!inkQueue?.blocked());publishReaderState();
+  }
 }
 async function applyReaderSnapshot(snapshot,legacyChat=false) {
-  const wasRestoring=restoringReader;restoringReader=true;
+  const wasRestoring=restoringReader;restoringReader=true;pdfReader?.setInkEnabled(false);
   try {
     if(!snapshot||snapshot.paperId!==state.active?.id)return;
     if (state.active.pdf && snapshot.page !== state.page) await requestPage(snapshot.page);
@@ -1160,7 +1167,11 @@ async function applyReaderSnapshot(snapshot,legacyChat=false) {
       if (note) await handwritingUI?.open(state.active, note, snapshot.handwritingDraft);
       else toast('原手写便签所属批注已变化，未自动附到其他批注。', true);
     }
-  } finally { restoringReader = wasRestoring; }
+  } finally {
+    restoringReader = wasRestoring;
+    if(!restoringReader&&pendingInkHandoff&&!restoringInkDraft&&!inkQueue?.blocked()&&!pdfReader?.getInkDraft?.())await adoptInkHandoff(pendingInkHandoff);
+    pdfReader?.setInkEnabled(!restoringReader&&!restoringInkDraft&&!inkSaveUncertain&&!pendingInkHandoff&&!inkQueue?.blocked());
+  }
 }
 let pendingReferenceOpen = null;
 async function openReferencedPaper(value) {
@@ -1240,6 +1251,7 @@ readingPanels = window.PaperReadingPanels?.create({persistence,root:$('reading-w
 });
 workbenchUI?.setPanelHost({openMetadataPanel:()=>readingPanels?.show('metadata'),closeMetadataPanel:()=>readingPanels?.close('metadata')});
 pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPaper:()=>state.active,
+  onInkTrace:info=>inkDiagnostics?.record(info),
   onActivePage: (page,info) => {
     if(info.paperId!==state.active?.id)return;
     state.page=page;state.pageCount=info.pageCount;state.pageData={width:info.width,height:info.height};
@@ -1259,12 +1271,12 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onFocusChange: info => readingShell?.focusChanged(info),
   onStatus: (message,error,options) => readingShell?.status(message,error,options),
 });
-readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,contextChanged:()=>{resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
+readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,contextChanged:()=>{resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
 inkQueue=window.PaperInkQueueClient?.create({api,persistence,
-  onChange:records=>{pdfReader?.setInkEnabled(!inkQueue?.blocked()&&!inkSaveUncertain&&!pendingInkHandoff&&!restoringInkDraft);pdfReader?.setInkOverlays([...records.filter(job=>job.status!=='saved'),...records.filter(job=>job.status==='saved').slice(-16)]);readingShell?.queueChanged(records);if(state.active)renderAnnotations();publishReaderState();},
-  onAccepted:async batch=>{if(!inkDraftStorageBlocked)await persistence?.put('reader:ink-draft',null);inkDraftUpdatedAt=Math.max(inkDraftUpdatedAt,batch.frozenAt||0);if(pendingInkHandoff&&!restoringReader){const record=pendingInkHandoff;setTimeout(()=>void adoptInkHandoff(record),0);}},
-  onSaved:async job=>{if(state.active?.id!==job.paperId)return;const loaded=await loadAnnotations(job.paperId);if(state.active?.id!==job.paperId)return;if(!loaded)throw new Error('已保存到 PDF，显示待更新；可在「笔迹」中刷新保存状态。');void pdfReader?.refresh(job.page,{defer:true});void paperChatUI?.annotationsChanged(job.paperId);linkedHandwritingUI?.saved(job.paperId,job.parentId);},
-  onError:error=>toast(`手写笔迹已保留：${error.message}`,true),
+  onChange:records=>{pdfReader?.setInkEnabled(!inkQueue?.blocked()&&!inkSaveUncertain&&!pendingInkHandoff&&!restoringInkDraft&&!restoringReader);pdfReader?.setInkOverlays([...records.filter(job=>job.status!=='saved'),...records.filter(job=>job.status==='saved').slice(-16)]);readingShell?.queueChanged(records);if(state.active)renderAnnotations();publishReaderState();},
+  onAccepted:async batch=>{inkDiagnostics?.record({event:'batch_accepted',paperId:batch.paperId,page:batch.page,annotationId:batch.annotation_id});if(!inkDraftStorageBlocked)await persistence?.put('reader:ink-draft',null);inkDraftUpdatedAt=Math.max(inkDraftUpdatedAt,batch.frozenAt||0);if(pendingInkHandoff&&!restoringReader){const record=pendingInkHandoff;setTimeout(()=>void adoptInkHandoff(record),0);}},
+  onSaved:async job=>{inkDiagnostics?.record({event:'batch_saved',paperId:job.paperId,page:job.page,annotationId:job.annotation_id});if(state.active?.id!==job.paperId)return;const loaded=await loadAnnotations(job.paperId);if(state.active?.id!==job.paperId)return;if(!loaded)throw new Error('已保存到 PDF，显示待更新；可在「笔迹」中刷新保存状态。');void pdfReader?.refresh(job.page,{defer:true});void paperChatUI?.annotationsChanged(job.paperId);linkedHandwritingUI?.saved(job.paperId,job.parentId);},
+  onError:error=>{inkDiagnostics?.record({event:'queue_error',reason:error.code||'unknown'});toast(`手写笔迹已保留：${error.message}`,true);},
 });
 linkedHandwritingUI=window.PaperLinkedHandwriting?.create({api,persistence,reader:()=>pdfReader,shell:()=>readingShell,state,toast,saveInk:saveInkDraft,inkBusy:()=>inkQueue?.blocked(),inkUncertain:()=>inkSaveUncertain,queue:()=>inkQueue,navigate:async page=>{await switchTab('annotations');await requestPage(page);},changed:async(id,page)=>{if(state.active?.id===id){await loadAnnotations(id);await paperChatUI?.annotationsChanged(id);}},publish:publishReaderState,available:()=>handwritingAvailable});
 readingShell?.setInkQueue(inkQueue);

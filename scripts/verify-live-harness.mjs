@@ -79,7 +79,10 @@ let handwritingNotesAvailable = false
 if (flags.get('--require-handwriting') === 'true') {
   assert.equal(status.result.handwriting_recognition, true, 'Host lacks the handwriting recognition route')
   assert.equal(status.result.durable_ink_queue, true, 'Host lacks the durable handwriting queue')
-  for (const file of ['index.html','app.js','handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js','reading-shell.js','reading-shell.css','annotation-threads.js','pdf-reader.js','pdf-reader.css']) {
+  const inkLog = await fetch(`${address.origin}/api/paper-library/api`, {method:'POST',headers,body:JSON.stringify({action:'ink_diagnostics_get'}),signal:AbortSignal.timeout(10000)})
+  assert.equal(inkLog.status,200,'Host lacks local handwriting diagnostics')
+  assert.equal((await inkLog.json()).result.schema,1)
+  for (const file of ['index.html','app.js','handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js','ink-diagnostics.js','reading-shell.js','reading-shell.css','annotation-threads.js','pdf-reader.js','pdf-reader.css']) {
     const asset = await fetch(`${address.origin}/api/paper-library/${file}`, {headers, signal: AbortSignal.timeout(10000)})
     assert.equal(asset.status, 200, `Missing handwriting note asset: ${file}`)
     assert.equal(await asset.text(), await readFile(new URL(`../web/${file}`, import.meta.url), 'utf8'), `Installed handwriting note asset differs from source: ${file}`)

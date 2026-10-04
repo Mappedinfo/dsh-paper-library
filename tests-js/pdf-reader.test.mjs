@@ -3,10 +3,74 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 const context = vm.createContext({ window: {} });
-vm.runInContext(await readFile(new URL('../web/pdf-reader.js', import.meta.url), 'utf8'), context);
-const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkOverlays, regionRects, minimumScroll, nearestTextPosition } = context.window.PaperPDFReader;
+const readerSource = await readFile(new URL('../web/pdf-reader.js', import.meta.url), 'utf8');
+vm.runInContext(readerSource, context);
+const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition } = context.window.PaperPDFReader;
 const plain = value => JSON.parse(JSON.stringify(value));
 const flush = () => new Promise(resolve => setImmediate(resolve));
+function inputLifecycle() {
+  const buffer = createInkBuffer(), paths = [], events = [], messages = [], style = { width: 2, color: '#336699' }, origin = { paperId: 'paper-a', page: 1 };
+  let captured = true;
+  const root = { hasPointerCapture: () => captured, releasePointerCapture: () => { captured = false; } };
+  const scope = vm.createContext({ ink: buffer, root, inkGesture: null, inkFrame: null, inkEnabled: true, markupGesture: null, touchPan: null, handledTouches: new Set(),
+    inkDetails: () => { const draft = buffer.preview(); return { ...origin, strokes: draft?.paths.length || 0, points: draft?.paths.reduce((sum, path) => sum + path.length, 0) || 0, revision: draft?.revision }; },
+    traceInk: createInkTrace(value => events.push(plain(value))), inkChanged: () => paths.push(plain(buffer.snapshot())), paintInk() {}, inputEnded() {},
+    nativePointerEnded() {}, endTouchPan() {}, endMarkup() {}, onStatus: message => messages.push(message), window: { cancelAnimationFrame() {} } });
+  const extract = (start, end) => readerSource.slice(readerSource.indexOf(start), readerSource.indexOf(end, readerSource.indexOf(start)));
+  vm.runInContext(extract('function endInk(', 'function appendInk(') + '\n' + extract('function pointerCancel(', 'function restoreInkDraft(') + '\n' + extract('function setInkEnabled(', 'function setPenOnly('), scope);
+  function start(pointerType = 'pen') { captured = true; buffer.start(origin, [10, 20], style); buffer.append([30, 40]); scope.inkGesture = { pointerId: 7, pointerType }; }
+  const event = (type, extra = {}) => ({ type, pointerId: 7, pointerType: 'pen', target: root, ...extra });
+  return { buffer, paths, events, messages, scope, root, start, event, loseCapture() { captured = false; } };
+}
+test('browser interruptions retain collected Ink and a later pointerup cannot duplicate it', () => {
+  for (const reason of ['pointercancel', 'lostpointercapture', 'pointerleave']) {
+    const f = inputLifecycle(); f.start(); if (reason !== 'pointercancel') f.loseCapture();
+    f.scope[reason === 'pointerleave' ? 'pointerLeave' : 'pointerCancel'](f.event(reason));
+    assert.deepEqual(plain(f.buffer.snapshot().paths), [[[10, 20], [30, 40]]], reason);
+    assert.equal(f.scope.inkGesture, null); assert.equal(f.paths.length, 1); assert.equal(f.scope.endInk(), false);
+    assert.match(f.messages[0], /已保留/); assert.equal(f.events[0].event, 'stroke_end'); assert.equal(f.events[0].reason, reason);
+    f.start(); f.scope.endInk(); assert.equal(f.buffer.snapshot().paths.length, 2, 'Writing can resume without replacing the retained stroke');
+  }
+});
+test('capture transfer, extra touch and captured pointerleave never interrupt the pen stroke', () => {
+  const f = inputLifecycle(); f.start();
+  f.scope.pointerCancel(f.event('lostpointercapture', { target: {} }));
+  f.scope.pointerCancel(f.event('lostpointercapture'));
+  f.scope.pointerCancel(f.event('pointercancel', { pointerType: 'touch', pointerId: 8 }));
+  f.scope.pointerLeave(f.event('pointerleave'));
+  assert.equal(f.buffer.isDrawing(), true); assert.equal(f.buffer.snapshot(), null); assert.equal(f.events.length, 0);
+  f.scope.endInk(); assert.equal(f.buffer.snapshot().paths.length, 1);
+});
+test('an asynchronous input lock and non-discard reader transitions preserve the current partial stroke', () => {
+  const f = inputLifecycle(); f.start();
+  const changed = f.scope.inkChanged; f.scope.inkChanged = () => { assert.equal(f.scope.inkEnabled, false, 'The lock is visible before notification callbacks run'); changed(); f.scope.setInkEnabled(true); };
+  f.scope.setInkEnabled(false); f.scope.inkChanged = changed;
+  assert.equal(f.scope.inkEnabled, false); assert.deepEqual(plain(f.buffer.snapshot().paths), [[[10, 20], [30, 40]]]);
+  assert.equal(f.events[0].reason, 'disabled'); assert.match(f.messages[0], /已保留/);
+  for (const reason of ['reader_clear', 'tool_change', 'pen_only']) {
+    f.scope.setInkEnabled(true); f.start(); f.scope.endInk(false, reason);
+    assert.equal(f.events.at(-1).reason, reason); assert.equal(f.buffer.isDrawing(), false);
+  }
+  assert.equal(f.buffer.snapshot().paths.length, 4);
+});
+test('explicit undo cancels only the current stroke and explicit clear still discards the draft', () => {
+  const f = inputLifecycle(); f.start(); f.scope.endInk(); const complete = plain(f.buffer.snapshot());
+  f.start(); assert.equal(f.scope.undoInk(), true); assert.deepEqual(plain(f.buffer.snapshot()), complete);
+  assert.equal(f.events.at(-1).event, 'stroke_cancel'); assert.equal(f.events.at(-1).reason, 'undo');
+  f.start(); assert.equal(f.scope.clearInk(complete.revision - 1), false); assert.equal(f.buffer.isDrawing(), true, 'Stale save cleanup cannot cancel newer input');
+  assert.equal(f.scope.clearInk(), true); assert.equal(f.buffer.snapshot(), null); assert.equal(f.buffer.isDrawing(), false);
+});
+test('Ink diagnostics expose only bounded metadata and cannot throw into drawing', async () => {
+  const events = [], trace = createInkTrace(value => events.push(value));
+  trace('stroke_end', { paperId: 'paper-a', page: 1, annotationId: 'ink-a', pointerType: 'pen', reason: 'pointercancel', strokes: 2, points: 5, revision: 3, count: 1,
+    paths: [[[1, 2], [3, 4]]], text: 'private text', image: 'private pixels', pointerId: 7 });
+  assert.deepEqual(plain(events[0]), { event: 'stroke_end', paperId: 'paper-a', annotationId: 'ink-a', page: 1, strokes: 2, points: 5, revision: 3, count: 1, pointerType: 'pen', reason: 'pointercancel' });
+  trace('pointer_move', {}); assert.equal(events.length, 1, 'No per-move diagnostic stream');
+  trace('input_blocked', { paperId: 'x'.repeat(257), page: NaN, count: -1, reason: 'private error text', pointerType: 'invented' });
+  assert.deepEqual(plain(events[1]), { event: 'input_blocked' });
+  assert.doesNotThrow(() => createInkTrace(() => { throw new Error('trace unavailable'); })('stroke_start'));
+  createInkTrace(async () => { throw new Error('async trace unavailable'); })('stroke_start'); await flush();
+});
 test('region geometry supports dots and display-space bounds without selecting unrelated text', () => {
   const geometry = { width: 800, height: 600 };
   assert.deepEqual(plain(regionRects([[799, 599, 800, 600]], geometry, 3)), [[796, 596, 800, 600]]);

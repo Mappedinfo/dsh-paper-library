@@ -143,3 +143,16 @@ test('geometry-limited listing retains all pending batches and complete compact 
   const scoped=await queue.list({id:'pending-0'});assert.equal(scoped.receipts.length,4);
   assert.ok(scoped.receipts.every(receipt=>receipt.paperId==='pending-0'));
 });
+
+test('a batch accepted while the worker is going idle starts without another browser request',async t=>{
+  const reached=deferred(),release=deferred(),wrote=deferred();let reads=0;
+  const f=await fixture(t,{write:()=>wrote.resolve(),storeWrap:store=>({...store,get:async key=>{
+    if(key==='ink-queue:index'&&++reads===3){reached.resolve();await release.promise;}
+    return store.get(key);
+  }})}),queue=f.make();
+  const finishing=queue.idle();await reached.promise;
+  await queue.enqueue({batch:batch()});release.resolve();await finishing;
+  // There is intentionally no list/retry/second idle call from a browser.
+  let timeout;try{await Promise.race([wrote.promise,new Promise(resolve=>{timeout=setTimeout(resolve,1000);})]);}finally{clearTimeout(timeout);}
+  assert.equal(f.calls.length,1,'Durable admission must wake an exiting host worker');
+});
