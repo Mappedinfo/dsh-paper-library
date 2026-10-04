@@ -1,6 +1,6 @@
 /** Prepare a synthetic, offline library for public screenshots.
  * Run: node scripts/prepare-promotion-demo.mjs
- * Only .local/promotion is used; no host, model, or existing library is opened.
+ * Only .local/promotion-learning-methods is used; existing libraries are not opened.
  */
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -10,17 +10,17 @@ import { fileURLToPath } from 'node:url'
 import { dispatch } from '../src/bridge.mjs'
 
 const project = dirname(dirname(fileURLToPath(import.meta.url)))
-const root = join(project, '.local/promotion')
+const root = join(project, '.local/promotion-learning-methods')
 const source = join(root, 'source')
 const library = join(root, 'library')
 const marker = join(root, 'synthetic-demo.json')
 const python = join(project, '.venv/bin/python')
 const options = { library, python }
-const identity = { kind: 'paper-library-public-synthetic-demo', version: 1 }
+const identity = { kind: 'paper-library-public-learning-methods-demo', version: 2 }
 const quote = "A useful reading note connects the author's claim to its supporting evidence."
 const comment = '演示批注：这段合成文字用于展示高亮与评论如何保存在 PDF 内，不构成真实论文的研究结论。'
-const relationNote = '演示关系：这两份合成文档共享 evidence 标签；此处手动连接仅用于展示关系与依据记录，不代表真实引文或学术支持。'
-const expectedKeys = ['DemoWang2026', 'DemoChen2026', 'DemoSmith2026']
+const relationNote = '学习方法示例：阅读段落后练习提出清楚的问题；连线仅表示练习顺序。'
+const expectedKeys = ['LearningReading2026', 'LearningThinking2026', 'LearningWriting2026']
 
 async function directory(path) {
   await mkdir(path, { recursive: true })
@@ -70,6 +70,7 @@ async function prepare() {
   assert.deepEqual(fixture.items.map(item => item.citationKey), expectedKeys, 'Unexpected synthetic export contents')
   for (const [index, item] of fixture.items.entries()) {
     assert.equal(item.publicationTitle, 'Synthetic Reading Examples')
+    assert.deepEqual(item.creators, [{ creatorType: 'author', name: 'Learning Demo', fieldMode: 1 }])
     assert.equal(item.attachments.length, 1)
     assert.equal(item.attachments[0].path, join(source, `example-${index + 1}.pdf`))
     assert.ok((await lstat(item.attachments[0].path)).isFile(), 'Synthetic PDF must be a regular file')
@@ -94,9 +95,9 @@ async function prepare() {
   const first = listing.items.find(item => item.citekey === expectedKeys[0])
   const second = listing.items.find(item => item.citekey === expectedKeys[1])
   let annotations = (await dispatch({ action: 'annotations', id: first.id }, options)).annotations
-  if (!annotations.some(annotation => annotation.comment === comment && annotation.author === 'Paper Library demo')) {
+  if (!annotations.some(annotation => annotation.comment === comment && annotation.author === 'Learning Demo')) {
     const page = await dispatch({ action: 'page', id: first.id, page: 1, scale: 0.8 }, options)
-    await dispatch({ action: 'annotate', id: first.id, page: 1, type: 'highlight', rects: selection(page.words, quote), text: quote, comment, author: 'Paper Library demo', color: '#ffdb66' }, options)
+    await dispatch({ action: 'annotate', id: first.id, page: 1, type: 'highlight', rects: selection(page.words, quote), text: quote, comment, author: 'Learning Demo', color: '#ffdb66' }, options)
   }
   const priorGraph = await dispatch({ action: 'graph', limit: 10 }, options)
   if (!priorGraph.edges.some(edge => edge.source === first.id && edge.target === second.id && edge.relation === 'related' && edge.note === relationNote)) {
@@ -104,7 +105,7 @@ async function prepare() {
   }
   annotations = (await dispatch({ action: 'annotations', id: first.id }, options)).annotations
   const graph = await dispatch({ action: 'graph', limit: 10 }, options)
-  const demoAnnotations = annotations.filter(annotation => annotation.comment === comment && annotation.author === 'Paper Library demo')
+  const demoAnnotations = annotations.filter(annotation => annotation.comment === comment && annotation.author === 'Learning Demo')
   const demoRelations = graph.edges.filter(edge => edge.source === first.id && edge.target === second.id && edge.relation === 'related' && edge.note === relationNote)
   assert.equal(demoAnnotations.length, 1, 'Repeated runs must retain exactly one demonstration highlight')
   assert.equal(demoAnnotations[0].text, quote)

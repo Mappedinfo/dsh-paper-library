@@ -36,22 +36,22 @@ test('raw streamed PDF upload parses, names and saves a portable copy without ch
   const payload=await response.json();
   assert.equal(payload.ok,true,JSON.stringify(payload));
   const item=payload.result.items[0];
-  assert.equal(item.pdf,true);assert.equal(item.title,'Reading urban change');
-  assert.match(item.pdf_filename,/Reading-urban-change--[a-f0-9]{8}\.pdf$/);
+  assert.equal(item.pdf,true);assert.equal(item.title,'How to read a paragraph');
+  assert.match(item.pdf_filename,/How-to-read-a-paragraph--[a-f0-9]{8}\.pdf$/);
   assert.ok(item.parse.pages_inspected<=3);
   assert.equal(hash(await readFile(path)),original);
   const download=await handler(new Request(`http://localhost/pdf/${item.id}`));
-  assert.equal(download.status,200);assert.match(download.headers.get('content-disposition'),/Reading-urban-change/);
+  assert.equal(download.status,200);assert.match(download.headers.get('content-disposition'),/How-to-read-a-paragraph/);
   assert.equal(Buffer.from(await download.arrayBuffer()).subarray(0,5).toString(),'%PDF-');
   const again=await dispatch({action:'import',path},{library});
   assert.equal(again.duplicates,1);assert.equal(again.items[0].id,item.id);
 }));
 
 test('a public article link downloads, verifies identity and retains acquisition provenance',()=>fixture(async({path,library})=>{
-  const transport=transportFor(await readFile(path),'<meta name="citation_title" content="Reading urban change"><meta name="citation_author" content="Shiqi Wang"><meta name="citation_publication_date" content="2026"><meta name="citation_pdf_url" content="/paper.pdf">');
+  const transport=transportFor(await readFile(path),'<meta name="citation_title" content="How to read a paragraph"><meta name="citation_author" content="Learning Demo"><meta name="citation_publication_date" content="2026"><meta name="citation_pdf_url" content="/paper.pdf">');
   const result=await dispatch({action:'import',url:'https://papers.example/article'},{library,fetchOptions:transport});
   assert.equal(result.items[0].pdf,true);
-  assert.match(result.items[0].pdf_filename,/2026-Reading-urban-change/);
+  assert.match(result.items[0].pdf_filename,/2026-How-to-read-a-paragraph/);
   assert.equal(result.acquisition.status,'downloaded');
   assert.equal(result.items[0].acquisition.source_url,'https://papers.example/paper.pdf');
   assert.equal(result.items[0].acquisition.validation,'pdf_parser');
@@ -80,8 +80,8 @@ test('upload limits and same-origin checks apply before processing a document',a
 });
 
 test('metadata enrichment rejects unrelated titles and source-controlled filesystem fields',()=>{
-  assert.equal(metadataMatchesPDF({title:'A completely unrelated reference'},{metadata:{title:'Reading urban change'},parse:{text_excerpt:'Reading urban change'}}),false);
-  assert.equal(metadataMatchesPDF({title:'Reading urban change'},{metadata:{title:'Reading urban change'},parse:{text_excerpt:''}}),true);
+  assert.equal(metadataMatchesPDF({title:'A completely unrelated reference'},{metadata:{title:'How to read a paragraph'},parse:{text_excerpt:'How to read a paragraph'}}),false);
+  assert.equal(metadataMatchesPDF({title:'How to read a paragraph'},{metadata:{title:'How to read a paragraph'},parse:{text_excerpt:''}}),true);
   assert.deepEqual(bibliographicMetadata({title:'A title',attachments:[{path:'/private/file.pdf'}],parse:{needs_review:false},path:'/private/file.pdf',metadata_verified:true}),{title:'A title'});
 });
 
