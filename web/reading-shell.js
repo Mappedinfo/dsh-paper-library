@@ -21,7 +21,7 @@ window.PaperReadingShell = (() => {
     const button = (id, text, action) => {const n=node('button',text,'button subtle');n.type='button';n.id=id;n.addEventListener('click',action);return n;};
     const top=document.querySelector('.topbar'), workspace=document.querySelector('.workspace');
     let context='reader', tool='select', color='#ffdb66', inkColor='#2455a4', inkWidth=2, mode='ask', markup='highlight', focused=false, saveLayoutTimer=null, penOnly=false;
-    let inkBusy=false, inkError='', inkTitle='';
+    let inkBusy=false, inkError='', inkTitle='', linkedSession=null, linkedBusy=false, finishLinked=null, inkRecords=[];
     const applyTool=()=>reader()?.setTool(tool,tool==='ink'?{color:inkColor,width:inkWidth}:color);
     const ribbon=node('nav',null,'reader-ribbon');ribbon.setAttribute('aria-label','文献工作区');
     const library=button('workspace-library','库',()=>{leaveFocus();$('catalog-expand').click();});
@@ -111,30 +111,36 @@ window.PaperReadingShell = (() => {
     const note=$('page-note');note.textContent='页便笺';annotationTools.append(note);
     const message=$('page-message');message.className='ribbon-status';message.setAttribute('role','status');message.setAttribute('aria-live','polite');
     $('paper-tools').after(message);
-    // This draft bar stays reachable even after moving to the library or another
-    // paper. A draft always saves to its original document, never the current one.
+    // Reserve one row for the whole handwriting session, including an empty
+    // buffer between autosaves. Draft changes must never move the PDF beneath a pen.
     const inkBar=node('div',null,'reader-ink-draft');inkBar.id='reader-ink-draft';inkBar.hidden=true;
     const inkLabel=node('span',null,'reader-ink-summary');inkLabel.id='reader-ink-status';inkLabel.setAttribute('role','status');
-    const inkReturn=button('reader-ink-return','返回笔迹',()=>void returnToInk?.());
-    const inkUndo=button('reader-ink-undo','撤销一笔',()=>reader()?.undoInk());
-    const inkDiscard=button('reader-ink-discard','取消手写',()=>reader()?.clearInk());
-    const inkSave=button('reader-ink-save','完成手写',()=>{if(saveInk?.()&&!reader()?.getInkContext?.()){tool='select';applyTool();sync();}});
+    const inkReturn=button('reader-ink-return','返回',()=>void returnToInk?.());inkReturn.title='返回待存笔迹';inkReturn.setAttribute('aria-label','返回待存笔迹');
+    const inkUndo=button('reader-ink-undo','撤销',()=>reader()?.undoInk());inkUndo.title='撤销一笔';inkUndo.setAttribute('aria-label','撤销一笔');
+    const inkDiscard=button('reader-ink-discard','清除',()=>reader()?.clearInk());inkDiscard.setAttribute('aria-label','清除待存笔迹');
+    const inkSave=button('reader-ink-save','完成手写',()=>{if(linkedSession){void finishLinked?.();return;}if(saveInk?.()&&!reader()?.getInkContext?.()){tool='select';applyTool();sync();}});
     inkSave.classList.add('primary');inkBar.append(inkLabel,inkReturn,inkUndo,inkDiscard,inkSave);message.after(inkBar);
     function syncInk(){
-      const draft=reader()?.getInkDraft?.();
-      inkBar.hidden=!draft;document.body.classList.toggle('has-ink-draft',Boolean(draft));
-      if(draft){
-        if(!inkTitle&&draft.paperId===state.active?.id)inkTitle=state.active.title||'当前文献';
-        inkLabel.textContent=inkBusy?'正在保存手写…':inkError||`${draft.parentId?'待自动保存':'未保存'} · 第 ${draft.page} 页 · ${draft.paths.length} 笔`;
-        inkLabel.title=inkTitle;inkLabel.classList.toggle('error',Boolean(inkError));
-      }else{inkTitle='';inkError='';}
-      for(const b of [inkReturn,inkUndo,inkDiscard,inkSave])b.disabled=inkBusy||!draft;
+      const draft=reader()?.getInkDraft?.(),target=draft||linkedSession||reader()?.getInkContext?.()||{paperId:state.active?.id,page:state.page};
+      const visible=tool==='ink'||Boolean(draft)||Boolean(linkedSession)||Boolean(reader()?.getInkContext?.());
+      inkBar.hidden=!visible;document.body.classList.toggle('handwriting-tools-visible',visible);document.body.classList.toggle('has-ink-draft',Boolean(draft));
+      const records=inkRecords.filter(job=>job.paperId===target.paperId&&job.page===target.page&&(job.parentId||null)===(target.parentId||null)),pending=records.filter(job=>job.status!=='saved');
+      const failed=pending.some(job=>['stage_failed','uncertain'].includes(job.status));
+      let progress=draft?`${draft.paths.length} 笔${draft.parentId?'待自动保存':'未保存'}`:failed?'保存待重试':pending.length?'后台保存中':records.length?'已保存，可继续写':'直接在 PDF 上写画';
+      if(inkBusy)progress='正在保存…';else if(inkError&&draft)progress=inkError;
+      inkLabel.textContent=`第 ${target.page||state.page||1} 页 · ${target.parentId?'批注手写':'自由手写'} · ${progress}`;
+      if(draft&&draft.paperId===state.active?.id)inkTitle=state.active.title||'当前文献';else if(!draft)inkTitle='';
+      inkLabel.title=[inkTitle,inkLabel.textContent].filter(Boolean).join(' · ');inkLabel.classList.toggle('error',failed||Boolean(inkError&&draft));
+      for(const b of [inkReturn,inkUndo,inkDiscard])b.disabled=inkBusy||!draft;
+      inkSave.disabled=linkedSession?linkedBusy:inkBusy;
       inkUndo.disabled=inkBusy||!draft||Boolean(inkError);
-      inkDiscard.textContent=inkError?'放弃重试':'取消手写';
-      inkDiscard.title=inkError?'仅移除草稿，已写入 PDF 的笔迹仍保留。':'';
+      inkDiscard.textContent=inkError?'放弃重试':'清除';
+      inkDiscard.title=inkError?'仅移除草稿，已写入 PDF 的笔迹仍保留。':'清除待存笔迹，已保存的笔迹仍保留';
       input.disabled=tool==='ink'&&(inkBusy||Boolean(draft));widthInput.disabled=inkBusy||Boolean(draft);
-      inkSave.textContent=inkError?'重试保存':'完成手写';
+      inkSave.textContent=inkError&&!linkedSession?'重试保存':'完成手写';
+      if(!draft)inkError='';
     }
+    function linkedChanged(session,{ending=false,starting=false,finish}={}){linkedSession=session?{...session}:null;linkedBusy=ending||starting;finishLinked=finish;syncInk();}
     function inkChanged(){inkError='';syncInk();}
     function inkSaving(value,error=''){inkBusy=Boolean(value);inkError=error;inkBar.setAttribute('aria-busy',String(inkBusy));syncInk();}
     let inkQueue=null;
@@ -142,6 +148,7 @@ window.PaperReadingShell = (() => {
     const queueSummary=node('summary','笔迹');queueSummary.id='ink-queue-summary';queueMenu.append(queueSummary);
     const queuePanel=node('div',null,'ink-queue-panel');queuePanel.setAttribute('aria-label','手写保存进度');queueMenu.append(queuePanel);ribbon.insertBefore(queueMenu,fullscreen);
     function queueChanged(records){
+      inkRecords=records;syncInk();
       const pending=records.filter(job=>job.status!=='saved');queueMenu.hidden=!records.length;queueSummary.textContent=pending.length?`笔迹 · ${pending.length} 待保存`:'笔迹已保存';
       queueSummary.classList.toggle('error',pending.some(job=>['stage_failed','uncertain'].includes(job.status)));
       queuePanel.replaceChildren();
@@ -223,7 +230,7 @@ window.PaperReadingShell = (() => {
     // Prevent a homepage link from discarding a question/metadata draft.
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
     sync();
-    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
+    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
       dispose(){window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placePenOptions);$('paper-tools').removeEventListener('scroll',placePenOptions);document.removeEventListener('click',closePenSettings);document.removeEventListener('keydown',penSettingsKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);document.removeEventListener('click',closeCitations);document.removeEventListener('keydown',citationKey,true);}};
   }
   return {create};

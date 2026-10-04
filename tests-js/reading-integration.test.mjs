@@ -25,6 +25,55 @@ test('finishing or cancelling a jump clears only its own loading status',async()
   context.focusChanged({pending:false,canReturn:true});assert.equal(value,'');
   value='保存未确认';context.focusChanged({pending:false,canReturn:false});assert.equal(value,'保存未确认');assert.equal(context.backPosition.hidden,true);
 });
+async function handwritingBarFixture(){
+  const shell=await readFile(new URL('../web/reading-shell.js',import.meta.url),'utf8'),classes=new Set(),node=()=>({hidden:false,disabled:false,textContent:'',classList:{toggle(){}}});
+  let draft=null,inkContext=null,saveCalls=0;
+  const context={state:{active:{id:'paper-a',title:'Synthetic paper'},page:1},tool:'ink',inkBusy:false,inkError:'',inkTitle:'',linkedSession:null,linkedBusy:false,finishLinked:null,inkRecords:[],
+    inkBar:node(),inkLabel:node(),inkReturn:node(),inkUndo:node(),inkDiscard:node(),inkSave:node(),input:node(),widthInput:node(),
+    reader:()=>({getInkDraft:()=>draft,getInkContext:()=>inkContext}),document:{body:{classList:{toggle:(name,value)=>value?classes.add(name):classes.delete(name)}}},
+    button:(id,text,action)=>({...node(),action}),saveInk:()=>{saveCalls++;draft=null;return true;},applyTool(){},sync:()=>context.syncInk()};
+  const start=shell.indexOf('function syncInk()'),end=shell.indexOf('function inkChanged()',start);assert.ok(start>=0&&end>start);
+  vm.createContext(context);vm.runInContext(shell.slice(start,end),context);
+  const finishLine=shell.split('\n').find(line=>line.includes("const inkSave=button('reader-ink-save'"));assert.ok(finishLine);
+  vm.runInContext(finishLine.replace('const inkSave=','inkSave='),context);
+  return {context,classes,setDraft:value=>{draft=value;},setContext:value=>{inkContext=value;},saveCalls:()=>saveCalls};
+}
+
+test('the shared handwriting bar safely starts without an active paper or a draft',async()=>{
+  const f=await handwritingBarFixture(),c=f.context;c.state.active=null;c.tool='select';
+  assert.doesNotThrow(()=>c.syncInk());
+  assert.equal(c.inkBar.hidden,true);assert.equal(f.classes.has('handwriting-tools-visible'),false);assert.equal(c.inkTitle,'');
+  assert.equal(c.inkUndo.disabled,true);assert.equal(c.inkDiscard.disabled,true);assert.equal(c.inkReturn.disabled,true);
+  c.tool='ink';assert.doesNotThrow(()=>c.syncInk());assert.equal(c.inkBar.hidden,false);assert.equal(c.inkSave.disabled,false);
+});
+
+test('the shared handwriting bar stays visible as drafts become queued, saved or retryable',async()=>{
+  const f=await handwritingBarFixture(),c=f.context;c.syncInk();
+  assert.equal(c.inkBar.hidden,false);assert.equal(f.classes.has('handwriting-tools-visible'),true);assert.equal(c.inkSave.disabled,false);
+  assert.equal(c.inkUndo.disabled,true);assert.equal(c.inkDiscard.disabled,true);assert.equal(c.inkReturn.disabled,true);
+  f.setDraft({paperId:'paper-a',page:1,paths:[[[10,20],[30,40]]]});c.syncInk();assert.equal(c.inkBar.hidden,false);assert.equal(c.inkUndo.disabled,false);
+  f.setDraft(null);
+  for(const status of ['staging','queued','writing','saved','stage_failed','uncertain']){
+    c.inkRecords=[{paperId:'paper-a',page:1,status}];c.syncInk();
+    assert.equal(c.inkBar.hidden,false,status);assert.equal(f.classes.has('handwriting-tools-visible'),true,status);assert.equal(c.inkSave.disabled,false,status);
+    assert.equal(c.inkUndo.disabled,true,status);assert.equal(c.inkDiscard.disabled,true,status);
+  }
+  c.inkSave.action();assert.equal(f.saveCalls(),1);assert.equal(c.tool,'select');assert.equal(c.inkBar.hidden,true);
+  f.setDraft({paperId:'paper-b',page:3,paths:[[[50,60],[70,80]]]});c.syncInk();
+  assert.equal(c.inkBar.hidden,false,'A different-paper draft keeps its actions reachable outside Ink mode');assert.match(c.inkLabel.textContent,/第 3 页/);assert.equal(c.inkReturn.disabled,false);
+});
+
+test('the shared finish action follows its copied linked session and stays available after autosave',async()=>{
+  const f=await handwritingBarFixture(),c=f.context,session={paperId:'paper-a',page:2,parentId:'parent-a'};let finishes=0;
+  c.linkedChanged(session,{starting:true,finish:()=>{finishes++;}});session.page=9;
+  assert.equal(c.linkedSession.page,2);assert.equal(c.inkSave.disabled,true);assert.equal(c.inkBar.hidden,false);
+  c.linkedChanged({...session,page:2},{finish:()=>{finishes++;}});c.inkRecords=[{paperId:'paper-a',page:2,parentId:'parent-a',status:'saved'}];c.syncInk();
+  assert.equal(c.inkSave.disabled,false);assert.equal(c.inkBar.hidden,false);c.inkSave.action();assert.equal(finishes,1);assert.equal(f.saveCalls(),0,'Linked completion must not also invoke the free-Ink save path');
+  c.linkedChanged({...session,page:2},{ending:true,finish:()=>{finishes++;}});assert.equal(c.inkSave.disabled,true);
+  c.linkedChanged(null,{});assert.equal(c.inkBar.hidden,false,'Clearing the linked session while free Ink remains selected does not remove the shared row');
+  c.tool='highlight';c.syncInk();assert.equal(c.inkBar.hidden,true);
+});
+
 function environment({table=false,readerId='paper-a',paper={id:'paper-a',pdf:true},panelValues={},snapshot=null}={}){
   const nodes=new Map(),calls=[],visibility=[],panels={annotations:false,metadata:false,chat:false,...panelValues};
   const element=id=>{if(!nodes.has(id))nodes.set(id,{hidden:false,open:false,value:'',dataset:{readingSide:'left'},classList:{toggle(){}},setAttribute(){},removeAttribute(){}});return nodes.get(id);};

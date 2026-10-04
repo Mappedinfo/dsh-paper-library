@@ -1,7 +1,7 @@
 {
-  "verified_at": "2026-10-04T01:21:13.894Z",
+  "verified_at": "2026-10-04T01:59:15.012Z",
   "complete": true,
-  "scope": "Synthetic standalone UI in real Chromium: trusted CDP pen and touch, real mouse input, explicit multi-stroke drafts, native PDF Ink persistence, original preservation, retry, zoom, rotation, fresh catalog recovery and existing tools.",
+  "scope": "Synthetic standalone UI in real Chromium: stable 52 px free-handwriting controls from empty mode through first stroke, clear and redraw; trusted CDP pen and touch, real mouse input, explicit multi-stroke drafts, native PDF Ink persistence, original preservation, retry, zoom, rotation, fresh catalog recovery and existing tools.",
   "limitations": [
     "No physical Apple Pencil, iPad, Sidecar or Safari session was exercised.",
     "Pointer cancellation uses a synthetic DOM event; capture unavailability is simulated for the trusted pointerleave case. Other tested input events are trusted Chromium input.",
@@ -9,6 +9,8 @@
     "Acknowledged host-staged batches survive reader replacement and continue on the host; unfinished strokes or drafts lost before staging/handoff confirmation are not guaranteed to survive abrupt termination."
   ],
   "checks": [
+    "empty-free-handwriting-has-a-fixed-action-row-and-can-finish-without-a-pdf-write",
+    "first-freehand-stroke-keeps-the-pdf-sheet-and-reader-viewport-position-and-size-stable",
     "trusted-pen-draws-over-text-without-selecting-text-opening-a-note-or-autosaving",
     "trusted-touch-does-not-add-or-change-ink",
     "multi-stroke-draft-supports-last-stroke-undo-and-trusted-mouse-fallback",
@@ -20,6 +22,7 @@
     "explicit-save-writes-one-native-multi-stroke-ink-with-width-colour-and-page-coordinates",
     "saving-preserves-external-annotations-and-the-imported-original",
     "discard-removes-only-the-unsaved-draft",
+    "clearing-and-redrawing-freehand-keeps-the-action-row-pdf-sheet-and-reader-viewport-stable",
     "completed-strokes-survive-page-reload-through-host-local-draft-storage",
     "switching-papers-retains-the-origin-draft-and-return-to-ink-restores-its-overlay",
     "unconfirmed-staging-freezes-immutable-ink-while-reading-and-paper-switching-remain-available",
@@ -36,8 +39,9 @@
   "externalRequests": 0,
   "modelRequests": 0,
   "screenshots": [
-    ".local/pencil-browser-5YJBae/multi-stroke-draft.png",
-    ".local/pencil-browser-5YJBae/zoomed-draft.png",
-    ".local/pencil-browser-5YJBae/reopened-ink-and-existing-tools.png"
+    ".local/pencil-browser-sflVHi/empty-free-handwriting-toolbar.png",
+    ".local/pencil-browser-sflVHi/multi-stroke-draft.png",
+    ".local/pencil-browser-sflVHi/zoomed-draft.png",
+    ".local/pencil-browser-sflVHi/reopened-ink-and-existing-tools.png"
   ]
 }

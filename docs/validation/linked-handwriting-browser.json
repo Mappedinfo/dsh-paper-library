@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-10-03T16:57:18.568Z",
+  "verified_at": "2026-10-04T01:57:56.448Z",
   "complete": true,
   "scope": "Synthetic Chromium inline handwriting linked to native PDF text annotations, using the real Python worker and durable host queue.",
   "checks": [
@@ -10,6 +10,7 @@
     "pause autosaves visible PDF circle as native ink bound to the highlight",
     "another page cannot acquire handwriting belonging to the selected highlight",
     "touch input does not create linked handwriting",
+    "desktop handwriting row and PDF geometry remain fixed through strokes and autosave",
     "same toggle flushes mouse-fallback strokes and restores the prior text tool",
     "normal text markup works immediately after leaving linked handwriting",
     "unknown staging acknowledgement freezes exact linked batch and blocks unconfirmed new input",
@@ -20,20 +21,274 @@
     "linked ink belongs under its parent instead of creating independent sidebar cards",
     "export and fresh import recover native ink relationships and legacy attachment from PDF alone",
     "confirmed linked strokes reopen in the reading page",
+    "600-pixel handwriting row and PDF geometry remain fixed before drawing through autosave and retry states",
     "600-pixel viewport keeps handwriting, finish and retained queue retry controls reachable",
     "dark-theme inactive handwriting action preserves readable contrast and visible click targets",
     "original bytes unchanged with no browser errors or external model requests"
   ],
+  "layout_samples": {
+    "wide": [
+      {
+        "phase": "entered_without_strokes",
+        "bar": {
+          "top": 112,
+          "height": 52
+        },
+        "reader": {
+          "top": 164,
+          "height": 936
+        },
+        "sheet": {
+          "top": 200,
+          "width": 1021
+        },
+        "finish_count": 1,
+        "minimum_button_height": 44,
+        "button_targets_unobstructed": true,
+        "actions_single_row": true
+      },
+      {
+        "phase": "first_stroke",
+        "bar": {
+          "top": 112,
+          "height": 52
+        },
+        "reader": {
+          "top": 164,
+          "height": 936
+        },
+        "sheet": {
+          "top": 200,
+          "width": 1021
+        },
+        "finish_count": 1,
+        "minimum_button_height": 44,
+        "button_targets_unobstructed": true,
+        "actions_single_row": true
+      },
+      {
+        "phase": "multiple_strokes",
+        "bar": {
+          "top": 112,
+          "height": 52
+        },
+        "reader": {
+          "top": 164,
+          "height": 936
+        },
+        "sheet": {
+          "top": 200,
+          "width": 1021
+        },
+        "finish_count": 1,
+        "minimum_button_height": 44,
+        "button_targets_unobstructed": true,
+        "actions_single_row": true
+      },
+      {
+        "phase": "autosave_pending",
+        "bar": {
+          "top": 112,
+          "height": 52
+        },
+        "reader": {
+          "top": 164,
+          "height": 936
+        },
+        "sheet": {
+          "top": 200,
+          "width": 1021
+        },
+        "finish_count": 1,
+        "minimum_button_height": 44,
+        "button_targets_unobstructed": true,
+        "actions_single_row": true
+      },
+      {
+        "phase": "autosave_saved",
+        "bar": {
+          "top": 112,
+          "height": 52
+        },
+        "reader": {
+          "top": 164,
+          "height": 936
+        },
+        "sheet": {
+          "top": 200,
+          "width": 1021
+        },
+        "finish_count": 1,
+        "minimum_button_height": 44,
+        "button_targets_unobstructed": true,
+        "actions_single_row": true
+      },
+      {
+        "phase": "next_stroke",
+        "bar": {
+          "top": 112,
+          "height": 52
+        },
+        "reader": {
+          "top": 164,
+          "height": 936
+        },
+        "sheet": {
+          "top": 200,
+          "width": 1021
+        },
+        "finish_count": 1,
+        "minimum_button_height": 44,
+        "button_targets_unobstructed": true,
+        "actions_single_row": true
+      }
+    ],
+    "narrow": [
+      {
+        "phase": "entered_without_strokes",
+        "bar": {
+          "top": 112,
+          "height": 52
+        },
+        "reader": {
+          "top": 164,
+          "height": 796
+        },
+        "sheet": {
+          "top": 200,
+          "width": 386
+        },
+        "finish_count": 1,
+        "minimum_button_height": 44,
+        "button_targets_unobstructed": true,
+        "actions_single_row": true
+      },
+      {
+        "phase": "first_stroke",
+        "bar": {
+          "top": 112,
+          "height": 52
+        },
+        "reader": {
+          "top": 164,
+          "height": 796
+        },
+        "sheet": {
+          "top": 200,
+          "width": 386
+        },
+        "finish_count": 1,
+        "minimum_button_height": 44,
+        "button_targets_unobstructed": true,
+        "actions_single_row": true
+      },
+      {
+        "phase": "multiple_strokes",
+        "bar": {
+          "top": 112,
+          "height": 52
+        },
+        "reader": {
+          "top": 164,
+          "height": 796
+        },
+        "sheet": {
+          "top": 200,
+          "width": 386
+        },
+        "finish_count": 1,
+        "minimum_button_height": 44,
+        "button_targets_unobstructed": true,
+        "actions_single_row": true
+      },
+      {
+        "phase": "autosave_pending",
+        "bar": {
+          "top": 112,
+          "height": 52
+        },
+        "reader": {
+          "top": 164,
+          "height": 796
+        },
+        "sheet": {
+          "top": 200,
+          "width": 386
+        },
+        "finish_count": 1,
+        "minimum_button_height": 44,
+        "button_targets_unobstructed": true,
+        "actions_single_row": true
+      },
+      {
+        "phase": "autosave_saved",
+        "bar": {
+          "top": 112,
+          "height": 52
+        },
+        "reader": {
+          "top": 164,
+          "height": 796
+        },
+        "sheet": {
+          "top": 200,
+          "width": 386
+        },
+        "finish_count": 1,
+        "minimum_button_height": 44,
+        "button_targets_unobstructed": true,
+        "actions_single_row": true
+      },
+      {
+        "phase": "next_stroke",
+        "bar": {
+          "top": 112,
+          "height": 52
+        },
+        "reader": {
+          "top": 164,
+          "height": 796
+        },
+        "sheet": {
+          "top": 200,
+          "width": 386
+        },
+        "finish_count": 1,
+        "minimum_button_height": 44,
+        "button_targets_unobstructed": true,
+        "actions_single_row": true
+      },
+      {
+        "phase": "autosave_failed",
+        "bar": {
+          "top": 112,
+          "height": 52
+        },
+        "reader": {
+          "top": 164,
+          "height": 796
+        },
+        "sheet": {
+          "top": 200,
+          "width": 386
+        },
+        "finish_count": 1,
+        "minimum_button_height": 44,
+        "button_targets_unobstructed": true,
+        "actions_single_row": true
+      }
+    ]
+  },
   "browser_errors": [],
   "external_requests": 0,
   "real_provider_calls": 0,
   "screenshots": [
-    ".local/linked-handwriting-j4fT2x/inline-linked-draft.png",
-    ".local/linked-handwriting-j4fT2x/linked-handwriting-reopened.png",
-    ".local/linked-handwriting-j4fT2x/linked-handwriting-narrow-targets.png",
-    ".local/linked-handwriting-j4fT2x/linked-handwriting-narrow-dark.png"
+    ".local/linked-handwriting-MRFLbO/inline-linked-draft.png",
+    ".local/linked-handwriting-MRFLbO/linked-handwriting-reopened.png",
+    ".local/linked-handwriting-MRFLbO/linked-handwriting-narrow-targets.png",
+    ".local/linked-handwriting-MRFLbO/linked-handwriting-narrow-dark.png"
   ],
-  "ink_enqueue_requests": 8,
+  "ink_enqueue_requests": 9,
   "lost_staging_acknowledgements": 1,
   "refused_staging_requests": 2,
   "trusted_pointer_types": [
@@ -43,6 +298,7 @@
   ],
   "limitations": [
     "Physical Apple Pencil, Sidecar and Safari were not exercised.",
+    "Autosave staging acknowledgement is deliberately held while measuring pending-state geometry.",
     "Reload recovery covers completed strokes acknowledged by host storage; abrupt termination of unfinished or unacknowledged writes is not guaranteed.",
     "The final narrow-layout scenario leaves one refused staging batch recoverable in the isolated fixture library.",
     "Fixed-width ink; no pressure or iPadOS palm rejection claim."

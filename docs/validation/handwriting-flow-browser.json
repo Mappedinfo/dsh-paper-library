@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-10-04T01:27:30.735Z",
+  "verified_at": "2026-10-04T01:58:29.227Z",
   "complete": true,
   "scope": "Synthetic PDF with real native annotation writes, host durable queue and trusted Chromium pen input.",
   "environment": {
@@ -36,7 +36,7 @@
   ],
   "metrics": {
     "finish_first_paint": {
-      "elapsed": 6.9000000059604645,
+      "elapsed": 6.699999988079071,
       "tool": "underline",
       "sessionHidden": true,
       "previewCount": 1,
@@ -44,30 +44,30 @@
       "expectedStrokes": 2,
       "queue": [
         {
-          "id": "489e5daa-209f-48c9-912e-c0ea56df6d2e",
+          "id": "de0be67b-c586-40d5-b414-2e73a0f7b438",
           "status": "staging"
         }
       ]
     },
-    "injected_write_ms": 2089,
-    "focus_lifetime_observed_ms": 2005,
+    "injected_write_ms": 2100,
+    "focus_lifetime_observed_ms": 1998,
     "finish_warm_page": {
       "samples_ms": [
-        6.5999999940395355,
         5.9000000059604645,
-        7.699999988079071,
-        5.9000000059604645,
-        5.800000011920929,
-        6.200000017881393,
-        6.5999999940395355,
+        6.300000011920929,
+        6.100000023841858,
+        6.300000011920929,
+        5.5999999940395355,
+        5.699999988079071,
+        6.399999976158142,
         6.4000000059604645,
-        6.4000000059604645,
-        6.199999988079071
+        6.5,
+        6.0999999940395355
       ],
       "count": 10,
-      "p50_ms": 6.200000017881393,
-      "p95_ms": 7.699999988079071,
-      "max_ms": 7.699999988079071,
+      "p50_ms": 6.100000023841858,
+      "p95_ms": 6.5,
+      "max_ms": 6.5,
       "definition": "Trusted click on Finish to the next requestAnimationFrame with restored tool, hidden session and visible preview; same loaded PDF page, ten real saves."
     },
     "quote_light": {
@@ -87,11 +87,11 @@
   "external_requests": 0,
   "real_provider_calls": 0,
   "screenshots": [
-    ".local/handwriting-flow-AYaC2K/handwriting-region-focused.png",
-    ".local/handwriting-flow-AYaC2K/handwriting-flow-read-error.png",
-    ".local/handwriting-flow-AYaC2K/handwriting-flow-saved.png",
-    ".local/handwriting-flow-AYaC2K/handwriting-flow-narrow.png",
-    ".local/handwriting-flow-AYaC2K/handwriting-flow-narrow-dark.png"
+    ".local/handwriting-flow-8decFK/handwriting-region-focused.png",
+    ".local/handwriting-flow-8decFK/handwriting-flow-read-error.png",
+    ".local/handwriting-flow-8decFK/handwriting-flow-saved.png",
+    ".local/handwriting-flow-8decFK/handwriting-flow-narrow.png",
+    ".local/handwriting-flow-8decFK/handwriting-flow-narrow-dark.png"
   ],
   "lost_acknowledgements": 1,
   "refused_annotation_reads": 1,

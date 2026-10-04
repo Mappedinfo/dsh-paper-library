@@ -18,20 +18,54 @@ function note(overrides={}){return {id:'parent-a',page:2,linked_ink:{version:'ve
 function element(tag){return {tagName:tag,children:[],classList:{toggle(){}},setAttribute(){},addEventListener(){},append(...children){this.children.push(...children);},before(){},
   getContext:()=>({fillRect(){},beginPath(){},moveTo(){},lineTo(){},stroke(){}}),toDataURL:()=> 'data:image/png;base64,c3ludGhldGlj'};}
 function fixture({records=new Map(),parent=note()}={}){
-  const f={records,state:{active:{id:'paper-a'},annotations:[parent]},pending:false,draft:null,inking:false,tool:'underline',context:null,calls:[],writes:[],toasts:[],changes:[],beforePut:null,beforeModel:null,modelError:null};
+  const f={records,state:{active:{id:'paper-a'},annotations:[parent]},pending:false,draft:null,inking:false,tool:'underline',context:null,calls:[],writes:[],toasts:[],changes:[],sessionStates:[],finishCallbacks:new Set(),saveCount:0,saveAllowed:true,beforePut:null,beforeModel:null,beforeNavigate:null,modelError:null};
   const context=vm.createContext({window:{},TextEncoder,crypto:webcrypto,setTimeout,clearTimeout,CSS:{escape:value=>value},
     document:{createElement:element,getElementById:()=>element('div'),body:element('body'),querySelectorAll:()=>[],querySelector:()=>null}});
   vm.runInContext(source,context);
   f.persistence={get:async key=>copy(records.get(key)??null),put:async(key,value)=>{f.writes.push([key,copy(value)]);await f.beforePut?.(key,value);records.set(key,copy(value));}};
   f.ui=context.window.PaperLinkedHandwriting.create({state:f.state,persistence:f.persistence,
     reader:()=>({getInkDraft:()=>f.draft,isInking:()=>f.inking,setInkContext:value=>{f.context=copy(value);}}),
-    shell:()=>({tool:()=>({type:f.tool}),setTool:value=>{f.tool=value;}}),queue:()=>({hasPending:()=>f.pending,records:()=>[]}),
+    shell:()=>({tool:()=>({type:f.tool}),setTool:value=>{f.tool=value;},linkedChanged:(session,options)=>{f.sessionStates.push({session:copy(session),starting:options.starting,ending:options.ending,finish:options.finish});f.finishCallbacks.add(options.finish);}}),queue:()=>({hasPending:()=>f.pending,records:()=>[]}),
     api:async(action,args)=>{f.calls.push([action,copy(args)]);if(action==='handwriting_recognize'){await f.beforeModel?.();if(f.modelError)throw f.modelError;return {text:'合成识别文字'};}return {};},
-    saveInk:()=>{f.draft=null;return true;},inkBusy:()=>false,inkUncertain:()=>false,navigate:async()=>{},changed:async(...args)=>{f.changes.push(args);},publish(){},available:()=>true,toast:(...args)=>f.toasts.push(args)});
+    saveInk:()=>{f.saveCount++;if(!f.saveAllowed)return false;f.draft=null;return true;},inkBusy:()=>false,inkUncertain:()=>false,navigate:async()=>{await f.beforeNavigate?.();},changed:async(...args)=>{f.changes.push(args);},publish(){},available:()=>true,toast:(...args)=>f.toasts.push(args)});
   f.models=()=>f.calls.filter(([action])=>action==='handwriting_recognize');
   f.textWrites=()=>f.calls.filter(([action])=>action==='linked_handwriting_text');
   return f;
 }
+
+test('one shared-shell callback reports starting, active, ending and cleared handwriting sessions',async()=>{
+  const f=fixture(),navigation=deferred();f.pending=true;f.beforeNavigate=()=>navigation.promise;
+  f.ui.sync();assert.equal(f.sessionStates.at(-1).session,null);
+  const opening=f.ui.toggle(f.state.active,f.state.annotations[0]);
+  assert.equal(f.sessionStates.at(-1).starting,true);assert.equal(f.sessionStates.at(-1).session,null);
+  navigation.resolve();await opening;
+  const active=f.sessionStates.at(-1);assert.deepEqual(active.session,{paperId:'paper-a',page:2,parentId:'parent-a',previousTool:'underline'});
+  assert.equal(active.starting,false);assert.equal(active.ending,false);assert.equal(f.tool,'ink');
+  f.draft={paperId:'paper-a',parentId:'parent-a',paths:[[[10,20],[30,40]]]};
+  const before=f.sessionStates.length;assert.equal(await active.finish(),true);
+  assert.ok(f.sessionStates.slice(before).some(value=>value.session?.parentId==='parent-a'&&value.ending));
+  assert.equal(f.sessionStates.at(-1).session,null);assert.equal(f.sessionStates.at(-1).ending,false);assert.equal(f.tool,'underline');assert.equal(f.saveCount,1);
+  assert.equal(f.finishCallbacks.size,1,'Rerenders reuse the same finish action');
+  assert.equal(await active.finish(),true);assert.equal(f.saveCount,1,'A repeated finish callback cannot freeze the draft twice');
+  await until(()=>f.records.get(intentKey)?.length===1);
+});
+
+test('shared finish keeps the session active while the pen is down or freezing is refused',async()=>{
+  const f=fixture();f.pending=true;await f.ui.toggle(f.state.active,f.state.annotations[0]);
+  const finish=f.sessionStates.at(-1).finish;f.inking=true;
+  assert.equal(await finish(),false);assert.equal(f.saveCount,0);assert.equal(f.sessionStates.at(-1).session.parentId,'parent-a');assert.equal(f.sessionStates.at(-1).ending,false);
+  f.inking=false;f.saveAllowed=false;f.draft={paperId:'paper-a',parentId:'parent-a',paths:[[[10,20],[30,40]]]};
+  assert.equal(await finish(),false);assert.equal(f.saveCount,1);assert.equal(f.tool,'ink');assert.equal(f.sessionStates.at(-1).session.parentId,'parent-a');
+  assert.ok(f.draft);assert.equal(f.records.has(intentKey),false);
+});
+
+test('an empty automatically saved draft still reports its active session, and free restoration clears only that session',async()=>{
+  const f=fixture();await f.ui.restore({paperId:'paper-a',page:2,parentId:'parent-a',previousTool:'highlight'});
+  assert.equal(f.draft,null);assert.equal(f.sessionStates.at(-1).session.parentId,'parent-a');assert.equal(f.tool,'ink');
+  f.ui.sync();assert.equal(f.sessionStates.at(-1).session.parentId,'parent-a');
+  await f.ui.restore(false);assert.equal(f.sessionStates.at(-1).session,null);assert.equal(f.tool,'ink','Free handwriting remains selected after leaving the linked session');
+  assert.equal(f.finishCallbacks.size,1);
+});
 
 test('finish restores the prior tool before intent persistence or recognition completes',async()=>{
   const f=fixture(),durable=deferred(),model=deferred();

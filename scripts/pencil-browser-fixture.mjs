@@ -154,15 +154,41 @@ try {
         `${label}: expected ${target}, received ${actual[index]}`);
     }
   };
+  const handwritingLayout = async () => {
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    return page.evaluate(() => {
+      const pdf=document.querySelector('#continuous-reader .pdr-sheet[data-pdf-page="1"]').getBoundingClientRect();
+      const viewport=document.getElementById('continuous-reader').getBoundingClientRect(),bar=document.getElementById('reader-ink-draft');
+      return {sheetTop:pdf.top,sheetWidth:pdf.width,viewportTop:viewport.top,viewportHeight:viewport.height,barHeight:bar.getBoundingClientRect().height,barVisible:!bar.hidden};
+    });
+  };
+  const stableHandwritingLayout = async (before,label) => {
+    const after=await handwritingLayout();assert.equal(after.barVisible,true,`${label}: handwriting controls remain present`);
+    assert.ok(Math.abs(after.barHeight-52)<.5,`${label}: handwriting controls retain the fixed 52 px row`);
+    for(const key of ['sheetTop','sheetWidth','viewportTop','viewportHeight'])assert.ok(Math.abs(after[key]-before[key])<.5,`${label}: ${key} changed from ${before[key]} to ${after[key]}`);
+    return after;
+  };
   const shot = async name => { const path = join(run, `${name}.png`); await page.screenshot({ path }); screenshots.push(relative(project, path)); };
 
   await open();
   await page.locator('#reader-tool-ink').click();
+  const emptyLayout=await handwritingLayout();assert.equal(emptyLayout.barVisible,true);assert.equal(emptyLayout.barHeight,52);
+  assert.equal(await page.locator('#reader-ink-save').isEnabled(),true);
+  assert.equal(await page.locator('#reader-ink-undo').isEnabled(),false);assert.equal(await page.locator('#reader-ink-discard').isEnabled(),false);
+  await shot('empty-free-handwriting-toolbar');
+  await page.locator('#reader-ink-save').click();await page.locator('#reader-ink-draft').waitFor({state:'hidden'});
+  assert.equal(await page.locator('#reader-tool-select').getAttribute('aria-pressed'),'true');
+  assert.equal(await page.evaluate(()=>pdfReader.getInkDraft()),null);assert.equal(writes.length,0);
+  record('empty-free-handwriting-has-a-fixed-action-row-and-can-finish-without-a-pdf-write');
+  await page.locator('#reader-tool-ink').click();
   await page.locator('#reader-ink-width').selectOption('2');
   const color = '#b52d36'; await pick(color);
   assert.equal(await page.locator('#reader-tool-ink').getAttribute('aria-pressed'), 'true');
+  const beforeFirstStroke=await handwritingLayout();
   const first = [[55, 72], [80, 75], [110, 69], [145, 73]];
   await draw(first); await pathCount(1);
+  await stableHandwritingLayout(beforeFirstStroke,'First freehand stroke');
+  record('first-freehand-stroke-keeps-the-pdf-sheet-and-reader-viewport-position-and-size-stable');
   assert.equal(await page.locator('#annotation-dialog').isVisible(), false);
   assert.equal(await page.evaluate(() => window.getSelection().toString()), '');
   assert.equal(writes.length, 0, 'Writing remains a draft until explicit save');
@@ -267,17 +293,24 @@ try {
   record('saving-preserves-external-annotations-and-the-imported-original');
 
   await page.locator('#reader-tool-ink').click();
+  const beforeClearLayout=await handwritingLayout();
   await draw([[65, 220], [100, 228]]); await pathCount(1);
+  await stableHandwritingLayout(beforeClearLayout,'Freehand stroke before clear');
   await page.locator('#reader-ink-discard').click(); await pathCount(0);
+  await stableHandwritingLayout(beforeClearLayout,'Cleared freehand draft');
+  assert.equal(await page.locator('#reader-ink-save').isEnabled(),true,'Empty draft still offers finish');
+  assert.equal(await page.locator('#reader-ink-undo').isEnabled(),false);
   assert.equal((await inks()).length, 1);
   record('discard-removes-only-the-unsaved-draft');
 
   await page.locator('#reader-ink-width').selectOption('4');
   const retryPoints = [[65, 230], [115, 235], [145, 223]];
   const persistedDraft = page.waitForResponse(response => {
-    try { const request = response.request().postDataJSON(); return request?.action === 'state_put' && request.key === 'reader:ink-draft' && request.value?.draft?.paths?.length === 1; } catch { return false; }
+    try { const request = response.request().postDataJSON(); return request?.action === 'state_put' && request.key === 'reader:ink-draft' && request.value?.draft?.paths?.length === 1 && response.status() !== 429; } catch { return false; }
   });
   await draw(retryPoints); await pathCount(1);
+  await stableHandwritingLayout(beforeClearLayout,'Second freehand stroke after clear');
+  record('clearing-and-redrawing-freehand-keeps-the-action-row-pdf-sheet-and-reader-viewport-stable');
   assert.equal((await persistedDraft).status(), 200);
   await page.reload(); await page.waitForLoadState('networkidle');
   await choosePaper(paper.id); await ready(1); await showAnnotationTools();
@@ -404,12 +437,17 @@ with pymupdf.open(sys.argv[1]) as doc:
   if (page) { try { const path = join(run, 'failure.png'); await page.screenshot({ path }); screenshots.push(relative(project, path)); } catch {} }
 } finally {
   clearTimeout(startTimer);
-  if (browser) await browser.close();
-  if (server) server.kill();
+  try { if (browser) await browser.close(); }
+  finally {
+    if (server && server.exitCode === null && server.signalCode === null) await new Promise(resolve => {
+      const timeout=setTimeout(()=>server.kill('SIGKILL'),4000);timeout.unref?.();
+      server.once('exit',()=>{clearTimeout(timeout);resolve();});server.kill();
+    });
+  }
 }
 const receipt = {
   verified_at: new Date().toISOString(), complete: !failure,
-  scope: 'Synthetic standalone UI in real Chromium: trusted CDP pen and touch, real mouse input, explicit multi-stroke drafts, native PDF Ink persistence, original preservation, retry, zoom, rotation, fresh catalog recovery and existing tools.',
+  scope: 'Synthetic standalone UI in real Chromium: stable 52 px free-handwriting controls from empty mode through first stroke, clear and redraw; trusted CDP pen and touch, real mouse input, explicit multi-stroke drafts, native PDF Ink persistence, original preservation, retry, zoom, rotation, fresh catalog recovery and existing tools.',
   limitations: ['No physical Apple Pencil, iPad, Sidecar or Safari session was exercised.', 'Pointer cancellation uses a synthetic DOM event; capture unavailability is simulated for the trusted pointerleave case. Other tested input events are trusted Chromium input.', 'Fixed PDF stroke widths; no pressure-sensitive rendering or hardware palm-rejection claim.', 'Acknowledged host-staged batches survive reader replacement and continue on the host; unfinished strokes or drafts lost before staging/handoff confirmation are not guaranteed to survive abrupt termination.'],
   checks, errors, externalRequests: external.length, modelRequests: 0, screenshots,
   ...(failure ? { failure: failure.stack } : {}),

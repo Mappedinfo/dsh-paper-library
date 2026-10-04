@@ -6,10 +6,6 @@ window.PaperLinkedHandwriting = (() => {
     let session=null, ending=false, starting=false, timer=null;
     const jobs=new Map(), messages=new Map(), corrections=new Map(), correctionLoads=new Map(), correctionJobs=new Set(), correctionViews=new Map();
     const node=(tag,text)=>{const n=document.createElement(tag);if(text)n.textContent=text;return n;};
-    const bar=node('div');bar.id='linked-handwriting-session';bar.className='linked-handwriting-session';bar.hidden=true;
-    const status=node('span');status.id='linked-handwriting-status';status.setAttribute('role','status');
-    const finishButton=node('button','完成手写');finishButton.id='linked-handwriting-finish';finishButton.className='button primary';
-    finishButton.addEventListener('click',()=>void finish());bar.append(status,finishButton);document.getElementById('reader-ink-draft').before(bar);
     const identity=(id,parent)=>JSON.stringify([id,parent]);
     const recognitionIntents=new Map();let intentLoad=null,intentWrites=Promise.resolve();
     const intentKey='reader:linked-recognition-pending';
@@ -22,8 +18,7 @@ window.PaperLinkedHandwriting = (() => {
     async function keyFor(id,parent){const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(identity(id,parent)));return `reader:linked-recognition:${[...new Uint8Array(bytes)].map(n=>n.toString(16).padStart(2,'0')).join('')}`;}
     function active(id,parent){return session?.paperId===id&&session.parentId===parent;}
     function sync(){
-      bar.hidden=!session;finishButton.disabled=ending;
-      if(session)status.textContent=`正在给第 ${session.page} 页的批注手写 · 直接在 PDF 上写画，停笔自动保存`;
+      shell()?.linkedChanged?.(session,{ending,starting,finish});
       document.body.classList.toggle('linked-handwriting-active',Boolean(session));
       for(const card of document.querySelectorAll('#annotation-list > .annotation-card')){
         const on=active(state.active?.id,card.dataset.annotationId),button=card.querySelector('[data-note-action="handwriting"]');
