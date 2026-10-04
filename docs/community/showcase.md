@@ -16,7 +16,6 @@
 
 引用方面支持 APA 7 富文本与纯文本、BibLaTeX 导出，也能生成 `references.bib`，检查引用键和 DOI 冲突。缺失的作者、日期等信息会保留为待核对项。
 
-![当前文献库界面，展示合成文献的检索、目录与管理入口](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/images/project-library.jpg)
 
 ### PDF 阅读、批注与论文对话
 
@@ -26,7 +25,6 @@
 
 可选的 **实时伴学** 会在保存带文字评论的批注后回应释义、追问或联想。选文还可以直接翻译、优化表述，难词本保留原句、论文出处和可编辑释义。
 
-![当前 PDF 阅读与批注侧栏，使用合成文档展示标准高亮和评论](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/images/project-annotations.jpg)
 
 ### 从阅读记录到知识、证据与数据集
 
@@ -42,7 +40,6 @@
 
 画板可以导入导出 Mermaid 子集和 draw.io 文件，也有可读的 JSON 源文件。把画板放进 DSH 对话时，会固定当时的内容供模型引用；AI 新增或修改的节点标为提议，由读者审阅接受。
 
-![当前文献画板，用合成文献与概念展示节点、关系和排版](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/images/project-board.jpg)
 
 同一套画布也提供[独立网页版本](https://mappedinfo.github.io/dsh-paper-library/)，可以先体验画图和排版。独立版不连接文献库或 DSH 模型，长期保留内容请导出 JSON。
 
@@ -85,7 +82,7 @@
 
 资料和状态保存在运行 DSH 的本机；使用模型功能时，相应原文、批注或稿件会提交给已配置的 DSH 模型服务。PDF 处理按需运行，阅读时只渲染附近页面；没有常驻向量模型，不会在后台自动解析现有全库 PDF。自动整理针对导入或选中的论文，扫描页尚无全文 OCR。元数据检索、AI 草稿和真实模型质量的验证范围见[验证记录](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/validation.md)。
 
-本文截图使用合成文献、图示与稿件。项目总览截图按当前界面重新生成，手写截图使用程序输入的演示笔画；截图不代表真实模型输出质量或物理 Pencil 测试。[截图来源与复现](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/community/README.md)
+本文截图使用合成文献、图示与稿件。当前公开演示仅采用通用阅读、思考与写作方法；手写截图使用程序输入的演示笔画，截图不代表真实模型输出质量或物理 Pencil 测试。[截图来源与复现](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/community/README.md)
 
 原创代码采用 **MIT**；默认 PyMuPDF、citeproc 运行时涉及 AGPL，CSL 资源保留 CC BY-SA，详见[第三方许可](https://github.com/Mappedinfo/dsh-paper-library/blob/main/THIRD_PARTY.md)。
 

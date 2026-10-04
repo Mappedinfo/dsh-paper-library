@@ -1,20 +1,17 @@
 {
- "repository": "deepseek-ai/deepseek-harness",
- "repositoryId": "R_kgDOT3T1gw",
- "category": "Show Your Plugins!",
- "categoryId": "DIC_kwDOT3T1g84DDSUe",
- "guidelines": "https://github.com/deepseek-ai/deepseek-harness/discussions/2004",
- "title": "DSH | Paper Library | 文献管理、AI 阅读、知识整理与论文写作",
- "bodyFile": "docs/community/showcase.md",
- "images": [
-  "docs/images/project-library.jpg",
-  "docs/images/project-annotations.jpg",
-  "docs/images/project-board.jpg",
-  "docs/images/project-latex.jpg",
-  "docs/images/handwriting-inline.jpg",
-  "docs/images/handwriting-preview.jpg",
-  "docs/images/handwriting-locate.jpg"
- ],
- "releaseBodyFile": "docs/community/release-v0.2.0.md",
- "releaseReceiptFile": "docs/community/discussion-comments.json"
+  "repository": "deepseek-ai/deepseek-harness",
+  "repositoryId": "R_kgDOT3T1gw",
+  "category": "Show Your Plugins!",
+  "categoryId": "DIC_kwDOT3T1g84DDSUe",
+  "guidelines": "https://github.com/deepseek-ai/deepseek-harness/discussions/2004",
+  "title": "DSH | Paper Library | 文献管理、AI 阅读、知识整理与论文写作",
+  "bodyFile": "docs/community/showcase.md",
+  "images": [
+    "docs/images/project-latex.jpg",
+    "docs/images/handwriting-inline.jpg",
+    "docs/images/handwriting-preview.jpg",
+    "docs/images/handwriting-locate.jpg"
+  ],
+  "releaseBodyFile": "docs/community/release-v0.2.0.md",
+  "releaseReceiptFile": "docs/community/discussion-comments.json"
 }
