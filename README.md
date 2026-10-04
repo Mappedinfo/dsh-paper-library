@@ -19,9 +19,24 @@ Paper Library 是独立的 DeepSeek Harness 插件，将文献收集、PDF 阅�
 
 ### 文献库、阅读与批注
 
+从文献库检索、整理条目，打开 PDF 阅读，再将摘录与自己的问题保存在批注中。以下演示只使用通用的阅读、思考与写作练习。[演示说明](docs/community/README.md)
 
-从文献库检索、整理条目，打开 PDF 阅读，再将摘录与自己的问题保存在批注中。[演示说明](docs/community/README.md)
+![当前文献库中的三篇学习方法练习](docs/images/learning-library.jpg)
 
+<details>
+<summary>查看阅读批注、学习画板与 LaTeX 写作</summary>
+
+![用高亮和下划线标出阅读练习，并记录复述与修改句子的问题](docs/images/learning-annotations.jpg)
+
+文献画板把练习文档与阅读步骤放在一起，整理“阅读 → 思考 → 写作 → 返回阅读”的学习循环。
+
+![通用学习循环画板及其关联练习文档](docs/images/learning-board.jpg)
+
+LaTeX 工作台支持并排编辑源码和预览编译结果，继续完成写作。
+
+![LaTeX 工作台中的合成学习稿件与实际编译预览](docs/images/project-latex.jpg)
+
+</details>
 
 [安装与开发](#安装与开发)说明当前源码与已发布 npm 版本的区别。
 

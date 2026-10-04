@@ -56,7 +56,7 @@ def request(tmp_path, action, **kw):
 def test_portable_roundtrip_original_and_external_annotations(tmp_path):
     original = make_pdf(tmp_path / "source.pdf")
     original_hash = hashlib.sha256(original.read_bytes()).hexdigest()
-    item = request(tmp_path, "import", items=[{"id": "Wang2026", "title": "城市论文", "author": [{"family": "王", "given": "世琦"}], "DOI": "https://doi.org/10.1234/TEST"}])["items"][0]
+    item = request(tmp_path, "import", items=[{"id": "LearningDemo2026", "title": "阅读练习", "author": [{"family": "示例", "given": "学习"}], "DOI": "https://doi.org/10.1234/TEST"}])["items"][0]
     item = request(tmp_path, "attach", id=item["id"], path=str(original))
     page = request(tmp_path, "page", id=item["id"])
     word = page["words"][0]
@@ -68,7 +68,7 @@ def test_portable_roundtrip_original_and_external_annotations(tmp_path):
     shutil.copy2(exported["path"], copied)
     imported = dispatch({"library": str(tmp_path / "fresh"), "action": "import", "path": str(copied)})["items"][0]
     assert imported["title"] == "更新标题"
-    assert imported["citekey"] == "Wang2026"
+    assert imported["citekey"] == "LearningDemo2026"
     recovered = dispatch({"library": str(tmp_path / "fresh"), "action": "annotations", "id": imported["id"]})["annotations"]
     assert {a["comment"] for a in recovered} == {"External reader comment", "这句话有何依据？"}
     assert hashlib.sha256(original.read_bytes()).hexdigest() == original_hash
@@ -97,7 +97,7 @@ def test_rotated_words_annotations_and_render_cap(tmp_path, rotation):
 
 
 def test_metadata_dedup_search_pagination_and_graph(tmp_path):
-    data = [{"id": "one", "title": "Literal 100%_ research", "DOI": "10.1/one", "tags": ["城市"]}, {"id": "two", "title": "Another", "tags": ["城市"]}]
+    data = [{"id": "one", "title": "Literal 100%_ research", "DOI": "10.1/one", "tags": ["阅读"]}, {"id": "two", "title": "Another", "tags": ["阅读"]}]
     imported = request(tmp_path, "import", items=data)
     first, second = imported["items"]
     assert request(tmp_path, "import", items=[{"title": "Duplicate", "DOI": "https://doi.org/10.1/ONE"}])["duplicates"] == 1
@@ -113,11 +113,11 @@ def test_metadata_dedup_search_pagination_and_graph(tmp_path):
 def test_zotero_relative_import_and_native_annotation(tmp_path):
     pdf = make_pdf(tmp_path / "attachment.pdf")
     export = tmp_path / "zotero.json"
-    export.write_text(json.dumps({"items": [{"itemType": "journalArticle", "title": "Zotero export", "citationKey": "Wang2026Zotero", "date": "2026-09-14", "creators": [{"creatorType": "author", "firstName": "Shiqi", "lastName": "Wang"}], "attachments": [{"path": "attachment.pdf", "annotations": [{"annotationType": "highlight", "annotationPosition": json.dumps({"pageIndex": 0, "rects": [[50, 420, 100, 435]]}), "annotationText": "Evidence", "annotationComment": "From Zotero"}, {"annotationType": "ink", "annotationPosition": {"pageIndex": 0}}]}]}]}))
+    export.write_text(json.dumps({"items": [{"itemType": "journalArticle", "title": "Zotero export", "citationKey": "LearningDemo2026Zotero", "date": "2026-09-14", "creators": [{"creatorType": "author", "firstName": "Learning", "lastName": "Demo"}], "attachments": [{"path": "attachment.pdf", "annotations": [{"annotationType": "highlight", "annotationPosition": json.dumps({"pageIndex": 0, "rects": [[50, 420, 100, 435]]}), "annotationText": "Evidence", "annotationComment": "From Zotero"}, {"annotationType": "ink", "annotationPosition": {"pageIndex": 0}}]}]}]}))
     result = request(tmp_path, "import", path=str(export))
     item = result["items"][0]
-    assert item["citekey"] == "Wang2026Zotero"
-    assert item["author"] == [{"given": "Shiqi", "family": "Wang"}]
+    assert item["citekey"] == "LearningDemo2026Zotero"
+    assert item["author"] == [{"given": "Learning", "family": "Demo"}]
     assert item["issued"]["date-parts"] == [[2026, 9, 14]]
     assert any(a["comment"] == "From Zotero" for a in request(tmp_path, "annotations", id=item["id"])["annotations"])
     assert any("unsupported Zotero" in warning for warning in result["warnings"])
@@ -324,13 +324,13 @@ def test_encrypted_refusal_and_worker_protocol(tmp_path):
 
 
 def test_fts_index_updates_and_pdf_module_not_loaded_for_search(tmp_path):
-    item = request(tmp_path, "import", items=[{"title": "交通机制 empirical", "id": "index2026", "author": [{"family": "Searchauthor"}], "tags": ["representation"]}])["items"][0]
-    assert request(tmp_path, "list", query="交通机制")["search_mode"] == "fts5-trigram"
-    assert request(tmp_path, "list", query="交通")["search_mode"] == "literal-short-query"
+    item = request(tmp_path, "import", items=[{"title": "阅读方法练习", "id": "index2026", "author": [{"family": "Searchauthor"}], "tags": ["readingnotes"]}])["items"][0]
+    assert request(tmp_path, "list", query="阅读方法")["search_mode"] == "fts5-trigram"
+    assert request(tmp_path, "list", query="阅读")["search_mode"] == "literal-short-query"
     assert request(tmp_path, "list", query="Searchauthor")["total"] == 1
     assert request(tmp_path, "list", query='" OR * NOT x')["total"] == 0
-    request(tmp_path, "update", id=item["id"], metadata={"title": "Changed mechanism", "tags": ["newtag"]})
-    assert request(tmp_path, "list", query="representation")["total"] == 0
+    request(tmp_path, "update", id=item["id"], metadata={"title": "Changed reading notes", "tags": ["newtag"]})
+    assert request(tmp_path, "list", query="readingnotes")["total"] == 0
     assert request(tmp_path, "list", query="Changed")["total"] == 1
     script = "import json,sys;from dsh_paper_library.core import dispatch;dispatch(json.loads(sys.stdin.read()));assert 'pymupdf' not in sys.modules"
     process = subprocess.run([sys.executable, "-c", script], input=json.dumps({"library": str(tmp_path / "library"), "action": "list", "query": "Changed"}), text=True, capture_output=True)
@@ -355,9 +355,9 @@ def test_directory_batched_pdf_import_and_hash_dedup(tmp_path):
 
 def test_ris_and_unsupported_signatures(tmp_path):
     ris = tmp_path / "export.ris"
-    ris.write_text("TY  - JOUR\nTI  - Research paper\nAU  - Wang, Shiqi\nPY  - 2026\nDO  - 10.123/test\nER  -\n", encoding="utf-8")
+    ris.write_text("TY  - JOUR\nTI  - Learning notes\nAU  - Demo, Learning\nPY  - 2026\nDO  - 10.123/test\nER  -\n", encoding="utf-8")
     item = request(tmp_path, "import", path=str(ris))["items"][0]
-    assert item["author"] == [{"family": "Wang", "given": "Shiqi"}]
+    assert item["author"] == [{"family": "Demo", "given": "Learning"}]
     signed = tmp_path / "signed.pdf"
     with fitz.open() as doc:
         doc.new_page()
@@ -530,9 +530,9 @@ def test_bounded_pdf_inspection_has_candidate_evidence_not_fabricated_identity(t
 def test_verified_pdf_import_names_real_file_and_preserves_embedded_edits(tmp_path):
     source = make_inspection_pdf(tmp_path / "download.pdf")
     original_hash = hashlib.sha256(source.read_bytes()).hexdigest()
-    verified = {"title": "Verified Urban Evidence", "author": [{"family": "Wang", "given": "Shiqi"}], "issued": {"date-parts": [[2026]]}, "DOI": "10.1234/primary.paper", "citekey": "Wang2026Evidence"}
+    verified = {"title": "Verified Reading Notes", "author": [{"family": "Demo", "given": "Learning"}], "issued": {"date-parts": [[2026]]}, "DOI": "10.1234/primary.paper", "citekey": "LearningDemo2026Notes"}
     item = request(tmp_path, "import", path=str(source), metadata=verified, metadata_source="crossref", metadata_verified=True)["items"][0]
-    assert item["pdf_filename"] == f"Wang-2026-Verified-Urban-Evidence--{item['id'][:8]}.pdf"
+    assert item["pdf_filename"] == f"Demo-2026-Verified-Reading-Notes--{item['id'][:8]}.pdf"
     exported = request(tmp_path, "export_pdf", id=item["id"])
     assert Path(exported["path"]).name == exported["filename"] == item["pdf_filename"]
     assert item["parse"]["status"] == "verified-metadata" and not item["parse"]["needs_review"]
@@ -595,12 +595,12 @@ def test_renaming_preserves_annotations_and_recovers_before_and_after_catalog_sw
 
 def test_unicode_filename_is_bounded_and_collisions_do_not_overwrite(tmp_path):
     source = make_pdf(tmp_path / "source.pdf")
-    records = [{"id": f"unicode{index}", "title": "城市交通机制" * 80, "author": [{"family": "测试作者/研究"}], "issued": {"date-parts": [[2026]]}} for index in range(2)]
+    records = [{"id": f"unicode{index}", "title": "阅读思考写作" * 80, "author": [{"family": "学习示例/写作"}], "issued": {"date-parts": [[2026]]}} for index in range(2)]
     items = request(tmp_path, "import", items=records)["items"]
     for item in items:
         attached = request(tmp_path, "attach", id=item["id"], path=str(source))
         assert len(attached["pdf_filename"].encode("utf-8")) <= 210
-        assert "城市" in attached["pdf_filename"] and "/" not in attached["pdf_filename"]
+        assert "阅读" in attached["pdf_filename"] and "/" not in attached["pdf_filename"]
     filenames = [request(tmp_path, "get", id=item["id"])["pdf_filename"] for item in items]
     assert filenames[0] != filenames[1]
     library = Library(tmp_path / "library")

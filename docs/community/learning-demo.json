@@ -1,0 +1,77 @@
+{
+  "captured_at": "2026-10-04T03:03:55.819Z",
+  "complete": true,
+  "synthetic": true,
+  "content_scope": "Generic learning methods only: reading, thinking and writing.",
+  "source_generator": "scripts/create-demo.py",
+  "capture_script": "scripts/capture-learning-demo.mjs",
+  "runtime_directory": ".local/learning-demo-CQFp4j",
+  "screenshots": [
+    {
+      "file": "docs/images/learning-library.jpg",
+      "description": "Current library with exactly three generic reading, thinking and writing documents, authored by Learning Demo.",
+      "width": 1440,
+      "height": 720,
+      "sha256": "311a02c4d1a6cd5f8c024480ab44f113f6a017e77c896283d953bbc35cc3e9bb"
+    },
+    {
+      "file": "docs/images/learning-annotations.jpg",
+      "description": "Current PDF reader with a learning passage, native highlight and underline, and comments about restating a paragraph and clarifying a sentence.",
+      "width": 1440,
+      "height": 1000,
+      "sha256": "018ec5f046cf34f7243fb8b0418f7c39ae0934251894ff14ed7f43980f09a8ca"
+    },
+    {
+      "file": "docs/images/learning-board.jpg",
+      "description": "A generic linear learning loop: reading, thinking, writing, and returning to reading; the first three stages link to their corresponding practice documents.",
+      "width": 1440,
+      "height": 900,
+      "sha256": "995609bc59a3d274e16eef4af3178185bd60b563b00c89f0900d6cd53de48b53"
+    }
+  ],
+  "checks": [
+    "Generated source metadata and every page of all three PDFs exactly match the approved generic learning content.",
+    "The visible library contains only the three approved learning titles and a generic learning-loop board.",
+    "Native PDF annotations and displayed cards match the approved learning quotations, comments and Learning Demo author.",
+    "Persisted board text, paper bindings and every edge exactly match the approved learning loop; no prior graph structure is reused.",
+    "Generated original PDFs unchanged; zero external requests, model generation calls and browser errors."
+  ],
+  "approved_titles": [
+    "How to read a paragraph",
+    "How to ask a clear question",
+    "How to revise a draft"
+  ],
+  "author": "Learning Demo",
+  "private_documents_read": 0,
+  "external_requests": 0,
+  "model_requests": 0,
+  "browser_errors": [],
+  "api_actions": [
+    "annotations",
+    "board_get",
+    "board_list",
+    "board_save",
+    "feedback",
+    "get",
+    "ink_diagnostics_append",
+    "ink_queue_list",
+    "models",
+    "page",
+    "page_layout",
+    "paper_analysis_get",
+    "project_for_paper",
+    "project_list",
+    "resource_list",
+    "settings_get",
+    "state_get",
+    "state_list",
+    "state_put",
+    "status"
+  ],
+  "limitations": [
+    "Three generated learning documents only; no personal topic, plan or project structure.",
+    "Annotations and board contents are explicitly seeded through normal APIs, without simulated AI output.",
+    "Screenshots are direct Chromium captures with existing UI controls, without retouching or DOM/style overrides.",
+    "This standalone demo does not establish physical Pencil behavior or live DSH model output."
+  ]
+}

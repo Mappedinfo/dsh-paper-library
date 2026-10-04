@@ -16,6 +16,7 @@
 
 引用方面支持 APA 7 富文本与纯文本、BibLaTeX 导出，也能生成 `references.bib`，检查引用键和 DOI 冲突。缺失的作者、日期等信息会保留为待核对项。
 
+![当前文献库，使用阅读、思考与写作三篇合成练习](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/images/learning-library.jpg)
 
 ### PDF 阅读、批注与论文对话
 
@@ -25,6 +26,7 @@
 
 可选的 **实时伴学** 会在保存带文字评论的批注后回应释义、追问或联想。选文还可以直接翻译、优化表述，难词本保留原句、论文出处和可编辑释义。
 
+![在阅读练习中高亮、划线，并记录自己的复述和问题](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/images/learning-annotations.jpg)
 
 ### 从阅读记录到知识、证据与数据集
 
@@ -40,6 +42,9 @@
 
 画板可以导入导出 Mermaid 子集和 draw.io 文件，也有可读的 JSON 源文件。把画板放进 DSH 对话时，会固定当时的内容供模型引用；AI 新增或修改的节点标为提议，由读者审阅接受。
 
+下图只展示通用学习方法：阅读一段材料、想清楚、写下来，再带着问题返回阅读。前三步各关联一篇合成练习文档。
+
+![阅读、思考、写作与返回阅读的学习循环画板](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/images/learning-board.jpg)
 
 同一套画布也提供[独立网页版本](https://mappedinfo.github.io/dsh-paper-library/)，可以先体验画图和排版。独立版不连接文献库或 DSH 模型，长期保留内容请导出 JSON。
 

@@ -12,6 +12,7 @@ documents and isolated state:
 
 | Views | Reproduction | Provenance and checks |
 | --- | --- | --- |
+| Current library, PDF annotations and learning-loop board | `node scripts/capture-learning-demo.mjs` | [Learning demo](learning-demo.md) and `learning-demo.json` |
 | Current LaTeX workspace with a successfully compiled PDF | `node scripts/capture-latex-demo.mjs` | [LaTeX demo](latex-demo.md) and `latex-demo.json` |
 | Contextual handwriting, saved preview and ink location | `node scripts/capture-handwriting-demo.mjs` | [Handwriting demo](handwriting-demo.md) and `handwriting-demo.json` |
 

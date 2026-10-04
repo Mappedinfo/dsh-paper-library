@@ -1,18 +1,59 @@
 {
   "schema": "paper-library-board.v1",
-  "title": "城市感知的技术路线（示例源文件）",
+  "title": "阅读、思考与写作（学习方法示例）",
   "layout": "radial-lr",
   "nodes": [
-    { "id": "theme", "kind": "concept", "text": "城市感知：从数据到决策" },
-    { "id": "data", "kind": "note", "text": "多源观测：遥感 · 街景 · 轨迹" },
-    { "id": "method", "kind": "note", "text": "时空表示学习" },
-    { "id": "uncertainty", "kind": "concept", "text": "不确定性如何进入决策？" },
-    { "id": "parked", "kind": "note", "text": "这个节点被固定在右上角\n（由 style 文件的 pins 指定）", "pin": [1240, 120] }
+    {
+      "id": "theme",
+      "kind": "concept",
+      "text": "如何读懂一段材料？"
+    },
+    {
+      "id": "data",
+      "kind": "note",
+      "text": "阅读\n预览段落，标出不懂的词。"
+    },
+    {
+      "id": "method",
+      "kind": "note",
+      "text": "思考\n用自己的话复述，再提出一个问题。"
+    },
+    {
+      "id": "uncertainty",
+      "kind": "concept",
+      "text": "写作\n写一段解释，检查句子是否清楚。"
+    },
+    {
+      "id": "parked",
+      "kind": "note",
+      "text": "这个节点被固定在右侧\n记录下一次阅读要问的问题。",
+      "pin": [
+        1240,
+        120
+      ]
+    }
   ],
   "edges": [
-    { "from": "theme", "to": "data", "relation": "explains" },
-    { "from": "theme", "to": "method", "relation": "explains" },
-    { "from": "method", "to": "uncertainty", "relation": "extends" },
-    { "from": "data", "to": "parked", "kind": "elbow", "dashed": true }
+    {
+      "from": "theme",
+      "to": "data",
+      "relation": "explains"
+    },
+    {
+      "from": "theme",
+      "to": "method",
+      "relation": "explains"
+    },
+    {
+      "from": "method",
+      "to": "uncertainty",
+      "relation": "extends"
+    },
+    {
+      "from": "data",
+      "to": "parked",
+      "kind": "elbow",
+      "dashed": true
+    }
   ]
 }

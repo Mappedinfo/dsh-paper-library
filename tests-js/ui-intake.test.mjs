@@ -62,7 +62,7 @@ function environment(onRequest) {
   const imports = () => requests.filter(call => ['upload', 'import'].includes(call.request.action));
   return { ui, element, requests, imports, documentListeners, readerCalls: () => readerCalls };
 }
-function pdfResult(name) { return { imported: 1, duplicates: 0, items: [{ id: name, title: `Parsed ${name}`, pdf: true, pdf_filename: `2026-Wang-${name}`, parse: { status: 'parsed', needs_review: true } }], warnings: [] }; }
+function pdfResult(name) { return { imported: 1, duplicates: 0, items: [{ id: name, title: `Parsed ${name}`, pdf: true, pdf_filename: `2026-Learning-Demo-${name}`, parse: { status: 'parsed', needs_review: true } }], warnings: [] }; }
 function event(target, data = {}) { let prevented = false; return { target, ...data, preventDefault() { prevented = true; }, get prevented() { return prevented; } }; }
 function pasteEvent(target, text) { return event(target, { clipboardData: { getData: () => text } }); }
 
@@ -87,7 +87,7 @@ test('dropping multiple PDFs anywhere starts a sequential raw File upload withou
   assert.equal(fixture.readerCalls(), 0, 'PDFs never pass through FileReader');
   assert.equal(fixture.ui.intake.completed, 2);
   assert.ok(fixture.ui.intake.records.every(job => job.file === null));
-  assert.equal(fixture.ui.intake.records[0].summary.filenames[0], '2026-Wang-first.pdf');
+  assert.equal(fixture.ui.intake.records[0].summary.filenames[0], '2026-Learning-Demo-first.pdf');
   assert.match(fixture.ui.intake.records[0].message, /待核对/);
 });
 

@@ -23,11 +23,11 @@ test('catalog API imports, searches and exports citations independent of Zotero'
       const body=await response.json();
       assert.equal(body.ok,true,JSON.stringify(body));return body.result;
     };
-    const imported=await call({action:'import',items:[{id:'sample',citekey:'Wang2026',title:'Synthetic urban evidence',type:'article-journal',author:[{family:'Wang',given:'Shiqi'}],issued:{'date-parts':[[2026]]}}]});
+    const imported=await call({action:'import',items:[{id:'sample',citekey:'LearningDemo2026',title:'Learning methods example',type:'article-journal',author:[{literal:'Learning Demo'}],issued:{'date-parts':[[2026]]}}]});
     assert.equal(imported.imported,1);
-    const listed=await call({action:'list',query:'urban'});
+    const listed=await call({action:'list',query:'learning'});
     assert.equal(listed.total,1);
-    assert.match((await call({action:'cite',ids:[listed.items[0].id],format:'apa'})).text,/Wang, S\. \(2026\)/);
+    assert.match((await call({action:'cite',ids:[listed.items[0].id],format:'apa'})).text,/Learning Demo\. \(2026\)/);
     assert.equal((await call({action:'status',library:'/never-use-browser-library'})).count,1);
     await assert.rejects(dispatch({action:'ai_feedback',id:listed.items[0].id},{library}),/AI 尚未连接/);
   } finally {await rm(library,{recursive:true,force:true});}

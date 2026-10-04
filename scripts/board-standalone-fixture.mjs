@@ -257,7 +257,7 @@ try {
   await visitor.locator('#board-stage').waitFor();
   await visitor.waitForFunction(() => document.querySelectorAll('.board-node').length === 5);
   const fromFile = await visitor.evaluate(() => JSON.parse(window.localStorage.getItem('paper-library-whiteboard.v1')).records.filter(record => record.board?.deleted !== true)[0].board);
-  assert.equal(fromFile.title, '城市感知的技术路线（示例源文件）');
+  assert.equal(fromFile.title, '阅读、思考与写作（学习方法示例）');
   assert.equal(fromFile.nodes.length, 5);
   assert.equal(fromFile.edges.length, 4);
   assert.deepEqual(fromFile.nodes.filter(node => node.text.startsWith('这个节点被固定')).map(node => [node.x, node.y]), [[1240, 120]], 'the sidecar pin from the repository file is honoured');
