@@ -6,11 +6,25 @@
 
 ## Reproduce the screenshots
 
-The current handwriting showcase uses three direct Chromium captures. See
-[the handwriting demo](handwriting-demo.md) for provenance, reproduction and
-the checked screenshot hashes in `handwriting-demo.json`.
+The project showcase leads with the complete literature-to-writing workflow.
+Its current screenshots are direct Chromium captures, using only synthetic
+documents and isolated state:
 
-The earlier general-library screenshots remain available. To reproduce those:
+| Views | Reproduction | Provenance and checks |
+| --- | --- | --- |
+| Library, PDF annotations and literature whiteboard | `node scripts/capture-project-demo.mjs` | [Project demo](project-demo.md) and `project-demo.json` |
+| Current LaTeX workspace with a successfully compiled PDF | `node scripts/capture-latex-demo.mjs` | [LaTeX demo](latex-demo.md) and `latex-demo.json` |
+| Contextual handwriting, saved preview and ink location | `node scripts/capture-handwriting-demo.mjs` | [Handwriting demo](handwriting-demo.md) and `handwriting-demo.json` |
+
+The scripts use the shipped pages, controls and persistence paths. Images have
+no retouching or injected layout; no private library or real model reply is
+shown. LaTeX compilation uses a real local TeX installation. Handwriting uses
+deterministic browser pen input, not a physical Pencil trial. The model rail in
+the standalone LaTeX demonstration accurately reports its missing connection.
+
+The old `paper-library-reading.jpg` and `paper-library-annotations.jpg` remain
+as historical assets and are no longer used to illustrate the current UI.
+Their original synthetic seed can still be reproduced:
 
 ```sh
 node scripts/prepare-promotion-demo.mjs
@@ -19,8 +33,8 @@ node src/server.mjs --library .local/promotion/library --port 0
 
 Open the printed loopback URL in a browser, select **Reading urban change**, and
 scroll the reading pane until its synthetic PDF title and highlighted passage
-are visible. Capture that page and the **批注** tab. The committed JPEGs in
-`docs/images/` are unedited browser screenshots from standalone preview mode.
+are visible. Capture that page and the **批注** tab. Those two historical JPEGs
+are unedited browser screenshots from standalone preview mode.
 The fixture generator identifies every document as synthetic. No actual user
 library, conversation, model credentials, or generated AI reply is shown.
 
@@ -43,7 +57,7 @@ a new reviewed file and a new receipt, so history stays auditable.
 Publish the reviewed screenshots to the source repository before running the
 discussion tool. With maintainer authorization, `--publish` creates a missing
 discussion; `--update` updates only the existing topic in a verified local
-receipt. The current handwriting update edits Discussion #6623 in place, keeping
+receipt. Project showcase updates edit Discussion #6623 in place, keeping
 its comments and release history.
 
 ```sh

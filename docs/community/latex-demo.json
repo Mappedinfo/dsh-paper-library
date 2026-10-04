@@ -1,0 +1,41 @@
+{
+  "captured_at": "2026-10-04T02:40:57.911Z",
+  "complete": true,
+  "synthetic": true,
+  "source_generator": "scripts/capture-latex-demo.mjs",
+  "runtime_directory": ".local/latex-demo-aNUNDM",
+  "mode": "Current standalone Chromium page, light theme, 1440 × 1080 CSS pixels",
+  "screenshot": {
+    "file": "docs/images/project-latex.jpg",
+    "width": 1440,
+    "height": 1080,
+    "sha256": "ac16d27656f364100cebbd42219e592af8a8a6239279e366c33a103a092f9799",
+    "description": "Current LaTeX source and its actual compiled PDF, with the shared DSH writing rail honestly disconnected in standalone mode."
+  },
+  "compilation": {
+    "engine": "xelatex",
+    "exit_code": 0,
+    "ok": true,
+    "pages": 1,
+    "duration_ms": 378,
+    "errors": [],
+    "warnings": []
+  },
+  "source_sha256": "698c008ae237882127dd854c46ec8ee058bc44f6ab5ed254fcac9b43201101ab",
+  "checks": [
+    "Current shipped page opens the registered synthetic source with DSH writing in the shared reading rail.",
+    "The visible Compile action runs the real local latexmk/xelatex and renders its successfully generated one-page PDF.",
+    "The standalone collaboration rail truthfully reports its missing DSH model connection; no answer or proposal is fabricated.",
+    "Synthetic source remains unchanged, no private document or external/model request is used, and the current UI fits the viewport."
+  ],
+  "private_documents_read": 0,
+  "external_requests": 0,
+  "model_requests": 0,
+  "browser_errors": [],
+  "limitations": [
+    "Standalone screenshot, not a live DSH host or model-quality demonstration.",
+    "Original synthetic manuscript; no real paper, research finding or model output.",
+    "Direct browser JPEG without retouching, injected DOM content or style overrides.",
+    "Reproduction requires the project Python environment, Playwright and local latexmk/xelatex."
+  ]
+}
