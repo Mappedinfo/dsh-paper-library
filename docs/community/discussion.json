@@ -1,12 +1,18 @@
 {
   "ok": true,
+  "mode": "verified",
   "id": "D_kwDOT3T1g84ApPu5",
   "number": 6623,
   "url": "https://github.com/deepseek-ai/deepseek-harness/discussions/6623",
-  "title": "DSH | Paper Library | 文献管理、随 PDF 保存的批注与 AI 阅读反馈",
+  "title": "DSH | Paper Library | 高亮后原页手写、PDF 批注与 AI 阅读",
   "author": "wsqstar",
+  "repository": "deepseek-ai/deepseek-harness",
+  "repositoryId": "R_kgDOT3T1gw",
   "category": "Show Your Plugins!",
+  "categoryId": "DIC_kwDOT3T1g84DDSUe",
   "createdAt": "2026-09-14T12:22:10Z",
-  "verifiedAt": "2026-09-14T12:22:12.168Z",
-  "bodySha256": "236c86347d1db60ce875f453af035a376d8cad11f6ad26d8344225e7f1f7bca0"
+  "updatedAt": "2026-10-04T02:20:49Z",
+  "verifiedAt": "2026-10-04T02:21:38.691Z",
+  "bodySha256": "19aeb34d7d4e486526368745e5e82a33677be2291f9e446a85d07d5f7045fe0c",
+  "bodyHashNormalization": "lf-trim-end"
 }
