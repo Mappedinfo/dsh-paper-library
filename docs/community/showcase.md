@@ -1,47 +1,58 @@
 > **非官方项目，由社区成员独立开发和维护。**
 
-项目地址 [Mappedinfo/dsh-paper-library](https://github.com/Mappedinfo/dsh-paper-library)
+项目地址 [Mappedinfo/dsh-paper-library](https://github.com/Mappedinfo/dsh-paper-library) · [安装与使用](https://github.com/Mappedinfo/dsh-paper-library#安装与开发)
 
 我做了一个 DSH 文献插件 **Paper Library**，把收论文、阅读、引用、批注和 AI 追问放进同一个阅读流程。资料保存在本地，独立于 Zotero 运行，也支持导入 Zotero 的导出数据。
 
-把 PDF 拖进文献库，或者粘贴 DOI／论文链接，插件会获取可用的公开 PDF，解析资料并自动命名落盘。读到想追问的段落，可以保存高亮或评论，再交给当前 DSH 会话的模型反馈。
+**2026-10-04 更新了原页手写。** 读到一句值得追问的话，先高亮，再点这条批注的「手写」，就能在原页写下想法、圈出图表、画箭头。笔迹和这条批注一起保存，之后从侧栏就能看回、跳回。
 
-### 已有功能
+### 高亮后，直接把想法写在原文旁
 
-- **导入与检索**。多 PDF 顺序导入、公开链接／DOI／arXiv 获取，按标题、作者、引用键、标签和摘要快速检索。
-- **引用与导出**。复制 APA 7 富文本或纯文本，导出单篇或整库 BibLaTeX，保留已有引用键。
-- **批注随 PDF 保存**。高亮和评论写入管理副本的标准 PDF 对象，原始文件保持不变。已测试复制 PDF 后在全新资料库恢复批注；另可导出 XFDF、JSON 和 Markdown。
-- **文献关系图**。查看共享标签，记录引用、支持、矛盾或相关关系，并附上自己的依据。
-- **基于批注的 AI 反馈**。沿用当前 DSH 会话的模型与推理强度，也可开启保存批注后自动反馈。AI 回复有明确标记，并随 PDF 保存。
+高亮、下划线和删除线绑定正文文字。点侧栏批注的 **手写** 后，继续在 PDF 上写画，保留原文与笔迹的空间关系；顶部也保留不关联批注的自由手写。
 
-### 与 DSH 怎样集成
+进入手写时就显示固定的一行状态与操作栏，落下第一笔、自动保存、接着写时，页面位置保持稳定。手写开关和完成按钮的点击高度至少为 44 px。
 
-这是原生插件，安装后从 **右侧面板 → 文献库** 打开。插件注册文献检索、导入、引用、批注和反馈等 9 个工具，复用 Harness 的模型服务与 Web 认证，不需要修改 Harness 源码。
+![高亮后在原 PDF 页面写画，使用合并为一行的手写工具栏](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/images/handwriting-inline.jpg)
 
-内置 `paper-library-fetch` skill，可以在 DSH 中这样使用
+### 收笔继续阅读，原笔迹留在批注卡片里
 
-> 用 paper-library-fetch 把这个 DOI 对应的论文保存到文献库，核对标题，并给我 APA 引用。
+关联手写时，停笔约 1.5 秒后自动暂存。点击 **完成手写**，立即回到之前的高亮、下划线等工具，保存继续在后台进行。界面区分待存与已保存到 PDF，保存遇到问题可重试。
 
-### 界面截图
+批注卡片展示原笔迹预览。接入 DSH 视觉模型后，还能在结束手写后自动转文字，展开校对；原笔迹继续保留，校对文字也不会被后续自动识别覆盖。识别会把笔迹图片发送给当前配置的 DSH 视觉模型。
 
-以下是独立预览模式下的实际界面截图，文献与批注均为合成演示内容。DSH 内通过右侧面板加载同一阅读界面。
+![保存后的批注卡片包含原文摘录与手写预览](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/images/handwriting-preview.jpg)
 
-![Paper Library 文献列表与 PDF 阅读界面](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/images/paper-library-reading.jpg)
+### 点预览，找回笔迹所在的位置
 
-![标准 PDF 批注与评论](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/images/paper-library-annotations.jpg)
+点摘录回到原文，点手写预览回到笔迹。相距较远的手写区域可以分别定位，目标短暂描亮；查看后点 **返回刚才位置**，继续刚才的阅读。
 
-### 内存与当前范围
+高亮和页面笔迹写入管理副本的标准 PDF 批注，笔迹保留与高亮的回复关联。导出 PDF 后重新导入，可恢复批注与笔迹；导入的原文件保持不变。
 
-插件采用磁盘 SQLite 索引、短时 PDF 进程和单页渲染；检索时不打开 PDF，也没有常驻向量模型或后台全库解析。当前检索覆盖元数据与摘要，尚未提供全文检索或 OCR。
+![点击笔迹预览，定位并短暂描亮原页上的手写区域](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/images/handwriting-locate.jpg)
 
-容量验证使用了 2,000 条记录和 1,000 个小型合成文字 PDF，不能替代真实扫描件、大图 PDF 和浏览器总内存测试。[验证方法与结果](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/validation.md)已公开。
+这三张图来自当前 `main` 的实际 Chromium 界面，使用合成文档和程序输入的演示笔画，无真实论文或模型生成内容。[演示复现方法](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/community/handwriting-demo.md)
 
-### 安装
+### Apple Pencil 与随航
 
-当前为 v0.1 源码版本，需要已构建的本地 DSH checkout（运行时依赖 `>=0.1.5-rc.2 <0.2.0`）、Node、Python 和 uv。按 [README 安装步骤](https://github.com/Mappedinfo/dsh-paper-library#安装与开发)注册到目标 profile，重启 DSH 后打开右侧文献库；目前尚未发布到 npm。
+这一轮按 Apple Pencil 随航阅读的使用场景开发，目前以 Chrome 为开发与验证目标。在浏览器能区分笔和触控时，笔负责高亮、手写，手指负责滚动；「笔输入」可以查看实际识别类型，再决定是否开启「仅用笔标注」。默认也支持鼠标输入。
 
-Zotero 中仅保存在数据库里的批注，需要先导出到 PDF 或提供带位置的 JSON。当前不迁移收藏夹层级和独立笔记；WPS 保存往返兼容性尚未验证。
+实际识别能力取决于系统和浏览器转发的事件。物理 Pencil／随航、Safari 和 Electron 仍需设备验证；当前使用固定笔宽，没有压感、Pencil 双击或挤压切换工具。自动转文字需要 DSH 视觉模型，识别准确率仍取决于模型和笔迹。[手写功能与验证范围](https://github.com/Mappedinfo/dsh-paper-library#pencil-文字标注与关联手写)
+
+### 同一个文献库里还可以做什么
+
+- **收集与引用**。拖入 PDF，或粘贴公开论文链接／DOI／arXiv；按标题、作者、引用键、标签和摘要检索，复制 APA 7，导出 BibLaTeX。
+- **带着批注问 DSH**。每篇论文有自己的 DSH 对话，把选中的批注和临时选文带进问题；关联的 AI 回复保存在批注下，明确标示来源。
+- **组织阅读项目与画板**。把文献放入阅读项目，在画板上记录概念、便笺和关系，再从文献节点回到原文。
+- **边读边写**。LaTeX 工作台提供源码、PDF 预览和 DSH 写作协作；模型修改先成为提案，由读者审阅接受。
+
+### 安装与当前版本
+
+**试用上述手写功能，请按 [README](https://github.com/Mappedinfo/dsh-paper-library#安装与开发) 安装当前 `main` 源码。** 截至 2026-10-04，npm 的 `@mappedinfo/dsh-paper-library@0.2.2` 已发布，但不包含这轮手写更新。
+
+这是原生 DSH 插件，从右侧面板打开「文献库」，复用 Harness 模型服务与 Web 认证，无需修改 Harness 源码。源码安装需要 Node、Python、uv 和已构建的本地 DSH checkout；具体版本与注册步骤见 README。
+
+插件按需运行 PDF 处理进程，仅渲染阅读位置附近的页面；检索时不打开 PDF，没有常驻向量模型或后台全库解析。当前检索覆盖元数据与摘要，扫描 PDF 尚无全文 OCR；手写转文字是单独的视觉模型功能。[验证记录](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/validation.md)
 
 原创代码采用 **MIT**；默认 PyMuPDF、citeproc 运行时涉及 AGPL，CSL 资源保留 CC BY-SA，详见 [第三方许可](https://github.com/Mappedinfo/dsh-paper-library/blob/main/THIRD_PARTY.md)。
 
-欢迎试用，也欢迎反馈导入失败的文件类型、批注兼容性，以及长时间阅读时的内存表现。
+欢迎试用原页手写，尤其想听听连续书写、笔与手指切换，以及从批注找回笔迹时的实际体验。遇到笔画问题，可以从「笔输入 → 导出手写诊断」取得本机诊断记录；记录不含正文、图片或笔迹坐标。

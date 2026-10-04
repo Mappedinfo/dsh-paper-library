@@ -1,0 +1,47 @@
+{
+  "captured_at": "2026-10-04T02:15:30.850Z",
+  "complete": true,
+  "synthetic": true,
+  "source_generator": "scripts/capture-handwriting-demo.mjs",
+  "runtime_directory": ".local/handwriting-demo-BlnUI7",
+  "mode": "Standalone Chromium preview, light theme, 1440 × 1080 CSS pixels",
+  "screenshots": [
+    {
+      "file": "docs/images/handwriting-inline.jpg",
+      "description": "Inline pen handwriting and a text highlight on the original synthetic PDF, with the unified 52-pixel writing toolbar.",
+      "width": 1440,
+      "height": 1080,
+      "sha256": "2bd42576c753ecb024ea97efc69b3b6b7f00375abd2040f9992899ca76c0ee12"
+    },
+    {
+      "file": "docs/images/handwriting-preview.jpg",
+      "description": "Saved native PDF ink remains visible beside the quotation and its unmodified SVG preview; no AI transcription is shown.",
+      "width": 1440,
+      "height": 1080,
+      "sha256": "dd2103e2ac8e9fa656d2ebfedc5bba1a4cf2e2e45fba41729a02b4c40e7dd1f7"
+    },
+    {
+      "file": "docs/images/handwriting-locate.jpg",
+      "description": "Clicking the real preview locates the saved ink and briefly outlines its region, with Return to previous position available.",
+      "width": 1440,
+      "height": 1080,
+      "sha256": "fcc4ad62331f5f35b420a716e9f5cb9a4475c9aebb267656c20d32437696142b"
+    }
+  ],
+  "checks": [
+    "The highlighted quotation was selected through trusted pen input.",
+    "All demonstration strokes are saved as native linked PDF Ink and appear in the actual card SVG preview.",
+    "The location outline is a temporary UI focus indicator, not a PDF annotation.",
+    "Generated source PDF unchanged; no private library, external request, model call, browser error, or screenshot retouching."
+  ],
+  "private_documents_read": 0,
+  "external_requests": 0,
+  "model_requests": 0,
+  "browser_errors": [],
+  "limitations": [
+    "Pen strokes are deterministic demonstration paths delivered through Chromium CDP, not physical Apple Pencil or Sidecar input.",
+    "The reading passage is original synthetic fixture text, not a published research result.",
+    "No OCR output or model success is simulated.",
+    "Screenshots are direct browser JPEG captures without retouching or DOM/style overrides."
+  ]
+}

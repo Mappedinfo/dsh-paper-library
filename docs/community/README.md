@@ -6,6 +6,12 @@
 
 ## Reproduce the screenshots
 
+The current handwriting showcase uses three direct Chromium captures. See
+[the handwriting demo](handwriting-demo.md) for provenance, reproduction and
+the checked screenshot hashes in `handwriting-demo.json`.
+
+The earlier general-library screenshots remain available. To reproduce those:
+
 ```sh
 node scripts/prepare-promotion-demo.mjs
 node src/server.mjs --library .local/promotion/library --port 0
@@ -34,9 +40,21 @@ a new reviewed file and a new receipt, so history stays auditable.
 
 ## Publication
 
-Publish the reviewed screenshots to the source repository before running
-`node scripts/publish-discussion.mjs` for preflight. With explicit maintainer
-authorization, `--publish` submits one upstream discussion through GitHub CLI.
-An existing post is read back rather than duplicated; differing content requires
-manual review. `--verify` reads the saved topic again. The tool compares remote
-image bytes, title, body, author, repository, and category before recording success.
+Publish the reviewed screenshots to the source repository before running the
+discussion tool. With maintainer authorization, `--publish` creates a missing
+discussion; `--update` updates only the existing topic in a verified local
+receipt. The current handwriting update edits Discussion #6623 in place, keeping
+its comments and release history.
+
+```sh
+node scripts/publish-discussion.mjs --update
+node scripts/publish-discussion.mjs --verify
+```
+
+An update checks the recorded identity and the last verified title/body before
+writing. Unexpected remote changes stop the update for review. GitHub does not
+offer an atomic revision condition on this mutation; the script checks the
+latest remote copy immediately before the request. A retry after uncertain
+readback recognizes an already-applied update and does not submit it again.
+The tool compares public image bytes, title, body, author, repository and category
+before recording success. `--verify` reads the saved topic without changing it.
