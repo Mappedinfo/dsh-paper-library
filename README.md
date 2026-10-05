@@ -8,6 +8,8 @@ Paper Library 是独立的 DeepSeek Harness 插件，将文献收集、PDF 阅�
 
 **继续开发前先读 [项目交接](HANDOFF.md)**，其中记录当前能力、验证证据和待验证项。 版本变更见 [CHANGELOG](CHANGELOG.md)。
 
+本地资料维护另提供[基础元数据覆盖检查](docs/pdf-metadata-audit.md)：先复用 Zotero 和采集清单中的资料，再列出需要补全的文件，避免为已有字段重复调用模型。
+
 ## 从收集文献到阅读、整理与写作
 
 - **收集、管理与引用**：导入 PDF、论文链接、DOI 或 JSON／RIS／BibTeX，检索与维护元数据，复制 APA 7 引用、导出 BibLaTeX，并检查引用键与资料缺失。[使用方法](#使用)
