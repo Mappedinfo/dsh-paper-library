@@ -167,6 +167,44 @@ node scripts/run-paper-analysis-batch.mjs \
 
 运行结束后，使用 `scripts/inspect-paper-analysis-batch.mjs --plan … --run … --selection …` 检查每篇状态、全文覆盖、必需笔记的待审状态、本地 PDF 哈希和最后一批证据引文。报告保存在运行目录，不调用模型或下载文件；引文抽查只覆盖最后一批，不能代替全文内容审阅。上述三个脚本是源码仓库工具，npm 安装包仍使用 CLI 或下面的程序入口。
 
+## 诊断既有运行与比较提示拆分
+
+`scripts/diagnose-paper-analysis-run.mjs` 读取已有计划、运行回执、分析记录和选定来源，检查模型答案封装、JSON 结构、逐项引文及作业状态；不会调用模型或写入文献库。它会新建诊断输出目录，因此该目录须在源码仓库、资料库和既有运行目录之外：
+
+```bash
+node scripts/diagnose-paper-analysis-run.mjs \
+  --plan /absolute/private/plan.json \
+  --run /absolute/private/existing-run \
+  --out /absolute/private/new-diagnosis
+```
+
+若要比较“每批一次同时返回图谱、摘要和元数据”与“图谱加摘要、元数据分两次返回”，可运行 `scripts/probe-paper-analysis-decomposition.mjs`。计划必须只含一个模型路由、最多 3 个明确条目，并设置 `mode:"full"`、`notes:false`、`review:false`、`input_format:"markdown"`、`include_images:true`；模型配置的 `maxCalls` 至少为条目数的 3 倍。示例只含占位 ID：
+
+```json
+{
+  "library": "/absolute/private/library",
+  "request_id": "synthetic-decomposition-check",
+  "mode": "full",
+  "notes": false,
+  "review": false,
+  "input_format": "markdown",
+  "include_images": true,
+  "routes": [
+    {"name": "glm", "config": "/absolute/private/model.json", "ids": ["paper-id-a", "paper-id-b"]}
+  ]
+}
+```
+
+```bash
+node scripts/probe-paper-analysis-decomposition.mjs \
+  --plan /absolute/private/probe-plan.json \
+  --out /absolute/private/new-decomposition-probe
+```
+
+探针每篇只读取首个最多 2 页的批次，并按顺序发出 1 次现行控制调用和 2 次拆分调用；图谱与摘要为第一阶段，缺失元数据及其来源引文为第二阶段。三次调用使用同一批保存来源及同一组页面图片，随后把两阶段结果合并并经过生产 JavaScript 答案结构／引文检查和生产 Python typed-graph 校验函数。探针不调用持久化草稿入口的外层请求检查，也不写图谱、精读笔记或评审草稿。读取批次时会按现行后端规则在资料库保存来源快照，也不应用元数据。新建输出目录会保存逐篇阶段响应，可能含论文引文，应作为私有材料保管。
+
+输出中的 `protocol_execution:"complete"` 只表示探针执行结束。控制与拆分通过数分别列在 `control_passed` 和 `split_passed`；任一阶段失败、缺少响应或合并校验失败都不能计为拆分通过。该探针不代表全文阅读完成或整体成功。每篇拆分方案有两次输出预算，合计上限是控制调用的两倍；输入提示也会重复所选来源和图片。因此结果可以用于观察任务拆分下的表现与实际成本，不能据此声称同成本模型性能提升。
+
 比较两个模型时，为同一组论文分别建立计划和输出目录，并设置不同的 `localStateHome`，避免同篇论文的最新作业指针相互覆盖。两个独立进程不共享并发限制；只有确认使用不同凭据时才可各并发 2，否则应串行运行。保持 PDF 字节、阅读范围、提示词、输出预算和超时一致，保留失败项；不要在比较中途改提示或只重跑失败的一侧。
 
 两组结束后，可检查全部已保存批次并导出逐篇配对结果：
