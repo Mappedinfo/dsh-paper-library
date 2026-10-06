@@ -9,6 +9,8 @@ Project scaffolding was generated through the author's `academic-templates/dev-p
 | Component | Purpose | Upstream / license |
 |---|---|---|
 | PyMuPDF / MuPDF | Native PDF annotations, metadata, current-page render | [PyMuPDF](https://pymupdf.readthedocs.io/en/latest/) / AGPL or Artifex commercial license; default dependency uses AGPL |
+| pymupdf4llm 0.2.9 | Opt-in PDF page-to-Markdown extraction | [PyMuPDF4LLM](https://github.com/pymupdf/RAG) / AGPL-3.0 or Artifex commercial license |
+| tabulate 0.10.0 | Table formatting used by the Markdown extraction dependency | [tabulate](https://github.com/astanin/python-tabulate) / MIT |
 | citeproc-js | CSL processor | [citeproc-js](https://github.com/Juris-M/citeproc-js) / CPAL-1.0-or-later or AGPL-3.0-or-later; default here uses the AGPL option, [upstream notice retained](licenses/citeproc-NOTICE.txt) |
 | Citation.js core and BibTeX plugin | BibLaTeX parsing and output | [Citation.js](https://github.com/citation-js/citation-js) / MIT |
 | Official APA CSL style | APA 7 rules | [CSL styles](https://github.com/citation-style-language/styles/blob/master/apa.csl) / CC BY-SA 3.0; embedded authors/rights retained |

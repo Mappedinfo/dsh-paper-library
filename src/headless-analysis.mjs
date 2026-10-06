@@ -6,6 +6,7 @@ import { defaultLibrary, dispatch as defaultDispatch } from './bridge.mjs'
 import { createLocalStateStore } from './local-state.mjs'
 import { createPaperAnalysis } from './harness/paper-analysis.mjs'
 import { directModelReasoningOptions } from './direct-model.mjs'
+import { analysisInputOptions } from './analysis-input.mjs'
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value)
@@ -58,7 +59,7 @@ function effectiveOptions(input) {
   const pages = input.pages ?? (mode === 'metadata' ? [1] : undefined)
   if (pages !== undefined && (!Array.isArray(pages) || !pages.length || pages.length > 2000 || new Set(pages).size !== pages.length || pages.some(n => !Number.isInteger(n) || n < 1 || n > 2000))) throw fail('ANALYSIS_INVALID')
   return { mode, ...(pages ? { pages: [...pages] } : {}), notes: input.notes ?? mode === 'full',
-    review: input.review ?? false, apply_metadata: input.apply_metadata ?? false }
+    review: input.review ?? false, apply_metadata: input.apply_metadata ?? false, ...analysisInputOptions(input) }
 }
 
 function compact(record, id, requestId) {
@@ -121,7 +122,8 @@ export async function createHeadlessAnalysis(options = {}) {
 
   async function start(input) {
     if (!validId(input.id) || input.id.startsWith('dataset_') || !validId(input.request_id)) throw fail('ANALYSIS_INVALID')
-    await getAgent()
+    const configured = await getAgent()
+    if (input.include_images === true && configured.supportsImages !== true) throw fail('PAPER_ANALYSIS_IMAGES_UNSUPPORTED', '当前分析适配器未确认图片支持。', 409)
     model()
     // 引擎 admission 跨异步 CAS 写入；串行调用 start，但阅读和模型阶段仍可并发。
     const operation = admission.catch(() => {}).then(async () => {

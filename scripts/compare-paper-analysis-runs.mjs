@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { createHeadlessAnalysis } from '../src/headless-analysis.mjs'
 import { dispatch as defaultDispatch } from '../src/bridge.mjs'
 import { hashResidentPdf } from './inspect-paper-analysis-batch.mjs'
+import { analysisInputOptions } from '../src/analysis-input.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const MAX_JSON = 8 * 1024 * 1024
@@ -23,7 +24,7 @@ async function readJSON(path, max=MAX_JSON) {
   } finally { await h?.close() }
 }
 function planShape(plan) {
-  return JSON.stringify({mode:plan.mode,notes:plan.notes,review:plan.review??false,routes:[...(plan.routes??[])].map(r=>[...r.ids].sort()).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))})
+  return JSON.stringify({mode:plan.mode,notes:plan.notes,review:plan.review??false,...analysisInputOptions(plan),routes:[...(plan.routes??[])].map(r=>[...r.ids].sort()).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))})
 }
 function byId(plan) { const out=new Map(); for(const r of plan.routes??[]) for(const id of r.ids??[]) { if(out.has(id)) throw new Error('DUPLICATE_PAPER_ID'); out.set(id,r.name) } return out }
 function quoteRefs(batch) {
@@ -111,6 +112,7 @@ async function readReceipts(runDir) {
         cache_read_tokens:Number.isFinite(cacheRead)?cacheRead:null,cache_write_tokens:Number.isFinite(cacheWrite)?cacheWrite:null,
         output_tokens:Number.isFinite(outputReported)?outputReported:null,thinking_tokens:Number.isFinite(thinking)?thinking:null},analysis_context:row.analysis_context??null,
       prompt_sha256:row.prompt_sha256??null,prompt_bytes:row.prompt_bytes??null,response_body:row.response_body??null,
+      input_sha256:row.input_sha256??null,image_inputs:row.image_inputs??[],
       response_body_encoding:row.response_body_encoding??null,response_body_truncated:row.response_body_truncated===true})
   } catch { result.push({receipt_file:name,status:'unreadable',error_code:'RECEIPT_UNAVAILABLE'}) }
   return result

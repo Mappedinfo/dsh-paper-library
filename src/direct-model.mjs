@@ -1,6 +1,7 @@
 import { lstat, open } from 'node:fs/promises'
 import { Buffer } from 'node:buffer'
 import { constants as fsConstants } from 'node:fs'
+import { validateAnalysisImages } from './model-input-images.mjs'
 
 const MAX_PROMPT_BYTES = 128 * 1024
 const MAX_RESPONSE_BYTES = 512 * 1024
@@ -195,9 +196,14 @@ export async function createDirectModelAgent(config, { fetchImpl = globalThis.fe
   if (typeof fetchImpl !== 'function') throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
   const key = await resolveKey(effective, env)
   const usage = { calls: 0, failures: 0, inputTokens: 0, outputTokens: 0, inputKnown: true, outputKnown: true }
-  const agent = async ({ prompt, provider = effective.provider, model = effective.model, signal } = {}) => {
+  const agent = async ({ prompt, provider = effective.provider, model = effective.model, signal, images } = {}) => {
     if (provider !== effective.provider || model !== effective.model) throw safeError('DIRECT_MODEL_ROUTE_MISMATCH', 409)
     if (typeof prompt !== 'string' || !prompt.trim() || Buffer.byteLength(prompt, 'utf8') > MAX_PROMPT_BYTES) throw safeError('DIRECT_MODEL_PROMPT_INVALID', 413)
+    let validatedImages = null
+    if (images !== undefined) {
+      try { const normalized = validateAnalysisImages(images); validatedImages = normalized.length ? normalized : null }
+      catch { throw safeError('DIRECT_MODEL_IMAGES_INVALID', 413) }
+    }
     if (signal?.aborted) throw safeError('DIRECT_MODEL_ABORTED', 499)
     if (usage.calls >= effective.maxCalls) throw safeError('DIRECT_MODEL_BUDGET_EXHAUSTED', 429)
     usage.calls++
@@ -212,9 +218,19 @@ export async function createDirectModelAgent(config, { fetchImpl = globalThis.fe
         : { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'user-agent': USER_AGENT }
       const reasoning = { ...(effective.thinking === 'default' ? {} : { thinking: { type: effective.thinking } }),
         ...(effective.reasoningEffort !== undefined ? { reasoning_effort: effective.reasoningEffort } : {}) }
+      let content = prompt
+      if (validatedImages) content = effective.provider === 'glm'
+        ? [{ type: 'text', text: prompt }, ...validatedImages.flatMap(image => [
+          { type: 'text', text: `PDF page ${image.page} rendered image:` },
+          { type: 'image_url', image_url: { url: `data:${image.mime_type};base64,${image.data}` } },
+        ])]
+        : [{ type: 'text', text: prompt }, ...validatedImages.flatMap(image => [
+          { type: 'text', text: `PDF page ${image.page} rendered image:` },
+          { type: 'image', source: { type: 'base64', media_type: image.mime_type, data: image.data } },
+        ])]
       const body = effective.provider === 'glm'
-        ? { model, messages: [{ role: 'user', content: prompt }], max_tokens: effective.maxOutputTokens, stream: false, ...reasoning, response_format: { type: 'json_object' } }
-        : { model, max_tokens: effective.maxOutputTokens, messages: [{ role: 'user', content: prompt }], stream: false, ...reasoning }
+        ? { model, messages: [{ role: 'user', content }], max_tokens: effective.maxOutputTokens, stream: false, ...reasoning, response_format: { type: 'json_object' } }
+        : { model, max_tokens: effective.maxOutputTokens, messages: [{ role: 'user', content }], stream: false, ...reasoning }
       response = await fetchImpl(ENDPOINTS[effective.provider], { method: 'POST', headers, body: JSON.stringify(body), signal: requestSignal, redirect: 'manual' })
       if (response.status >= 300 && response.status < 400) throw safeError('DIRECT_MODEL_REDIRECT_REFUSED', response.status)
       if (!response.ok) throw safeError('DIRECT_MODEL_HTTP_ERROR', response.status)
@@ -239,6 +255,7 @@ export async function createDirectModelAgent(config, { fetchImpl = globalThis.fe
     }
   }
   agent.model = { provider: effective.provider, model: effective.model }
+  agent.supportsImages = true
   agent.usage = () => ({ calls: usage.calls, input_tokens: usage.inputKnown ? usage.inputTokens : null,
     output_tokens: usage.outputKnown ? usage.outputTokens : null, failures: usage.failures })
   return agent

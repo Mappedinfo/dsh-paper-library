@@ -1,6 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { deflateSync } from 'node:zlib'
 import { createDirectModelAgent } from '../src/direct-model.mjs'
+import { validateAnalysisImages } from '../src/model-input-images.mjs'
 
 function response(payload, status = 200, headers = {}) {
   return new Response(typeof payload === 'string' ? payload : JSON.stringify(payload), { status, headers })
@@ -12,6 +15,27 @@ const glmResult = (content = '{"title":"A paper"}', finish_reason = 'stop') => (
 const kimiResult = (text = '{"title":"A paper"}', stop_reason = 'end_turn') => ({
   content: [{ type: 'text', text }], stop_reason, usage: { input_tokens: 9, output_tokens: 3 },
 })
+function pngChunk(type,data) {
+  const name=Buffer.from(type), length=Buffer.alloc(4), crc=Buffer.alloc(4); length.writeUInt32BE(data.length)
+  const bytes=Buffer.concat([name,data]); crc.writeUInt32BE(crc32(bytes))
+  return Buffer.concat([length,bytes,crc])
+}
+function crc32(bytes) {
+  let crc=0xffffffff
+  for(const byte of bytes) { crc^=byte; for(let bit=0;bit<8;bit++) crc=(crc>>>1)^(crc&1?0xedb88320:0) }
+  return (crc^0xffffffff)>>>0
+}
+function image(bytes,mime_type,width,height,page=1) { return {mime_type,data:bytes.toString('base64'),page,width,height,sha256:createHash('sha256').update(bytes).digest('hex')} }
+function png(width=2,height=3) {
+  const ihdr=Buffer.alloc(13); ihdr.writeUInt32BE(width,0); ihdr.writeUInt32BE(height,4); ihdr[8]=8; ihdr[9]=6
+  const scanline=Buffer.alloc(height*(1+width*4))
+  return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),pngChunk('IHDR',ihdr),pngChunk('IDAT',deflateSync(scanline)),pngChunk('IEND',Buffer.alloc(0))])
+}
+function jpeg(width=4,height=5) {
+  const sof=Buffer.from([0xff,0xc0,0x00,0x0b,0x08,(height>>8)&255,height&255,(width>>8)&255,width&255,0x01,0x01,0x11,0x00])
+  const sos=Buffer.from([0xff,0xda,0x00,0x08,0x01,0x01,0x00,0x00,0x3f,0x00])
+  return Buffer.concat([Buffer.from([0xff,0xd8]),sof,sos,Buffer.from([0x01,0xff,0xd9])])
+}
 
 test('GLM uses fixed OpenAI endpoint, disabled thinking and bounded JSON text', async () => {
   let request
@@ -24,6 +48,7 @@ test('GLM uses fixed OpenAI endpoint, disabled thinking and bounded JSON text', 
   assert.equal(request.init.headers.authorization, 'Bearer secret')
   assert.match(request.init.headers['user-agent'], /dsh-paper-library/)
   assert.deepEqual(JSON.parse(request.init.body).thinking, { type: 'disabled' })
+  assert.equal(JSON.parse(request.init.body).messages[0].content, 'Return JSON')
   assert.deepEqual(agent.model, { provider: 'glm', model: 'glm-4.7-flash' })
   assert.deepEqual(agent.usage(), { calls: 1, input_tokens: 12, output_tokens: 4, failures: 0 })
 })
@@ -38,6 +63,7 @@ test('Kimi uses fixed Anthropic endpoint and unwraps only a single answer object
   assert.equal(request.init.headers['x-api-key'], 'secret')
   assert.equal(request.init.headers['anthropic-version'], '2023-06-01')
   assert.equal(JSON.parse(request.init.body).stream, false)
+  assert.equal(JSON.parse(request.init.body).messages[0].content, 'Return JSON')
   assert.deepEqual(JSON.parse(request.init.body).thinking, { type: 'disabled' })
   assert.deepEqual(agent.usage(), { calls: 1, input_tokens: 9, output_tokens: 3, failures: 0 })
 })
@@ -200,6 +226,65 @@ test('route mismatch and oversized prompts reject before consuming call budget',
   await assert.rejects(agent({ prompt: 'ok', model: 'other' }), { code: 'DIRECT_MODEL_ROUTE_MISMATCH' })
   await assert.rejects(agent({ prompt: 'x'.repeat(128 * 1024 + 1) }), { code: 'DIRECT_MODEL_PROMPT_INVALID' })
   assert.equal(agent.usage().calls, 0)
+})
+
+test('sends bounded image parts as native GLM data URLs and Kimi Anthropic base64 blocks', async () => {
+  const images=[image(png(),'image/png',2,3,2),image(jpeg(),'image/jpeg',4,5,7)]
+  for(const provider of ['glm','kimi']) {
+    let payload
+    const agent=await createDirectModelAgent({provider,model:'vision-model',keyEnv:'KEY'}, {env:{KEY:'synthetic-key'},fetchImpl:async(_url,init)=>{payload=JSON.parse(init.body);return response(provider==='glm'?glmResult():kimiResult())}})
+    assert.equal(agent.supportsImages,true)
+    assert.equal(await agent({prompt:'Read the figures',images}),'{"title":"A paper"}')
+    const content=payload.messages[0].content
+    assert.deepEqual(content[0],{type:'text',text:'Read the figures'})
+    if(provider==='glm') {
+      assert.deepEqual(content.slice(1),images.flatMap(row=>[
+        {type:'text',text:`PDF page ${row.page} rendered image:`},
+        {type:'image_url',image_url:{url:`data:${row.mime_type};base64,${row.data}`}},
+      ]))
+    } else {
+      assert.deepEqual(content.slice(1),images.flatMap(row=>[
+        {type:'text',text:`PDF page ${row.page} rendered image:`},
+        {type:'image',source:{type:'base64',media_type:row.mime_type,data:row.data}},
+      ]))
+    }
+  }
+  assert.deepEqual(validateAnalysisImages(),[])
+  assert.deepEqual(validateAnalysisImages([]),[])
+  assert.deepEqual(validateAnalysisImages(images).map(row=>row.page),[2,7])
+})
+
+test('explicit empty images preserves legacy text-only payload and duplicate pages are refused', async () => {
+  let body, calls=0
+  const agent=await createDirectModelAgent({provider:'glm',model:'m',keyEnv:'KEY'}, {env:{KEY:'synthetic-key'},fetchImpl:async(_url,init)=>{calls++;body=JSON.parse(init.body);return response(glmResult())}})
+  await agent({prompt:'text only',images:[]})
+  assert.equal(body.messages[0].content,'text only')
+  const duplicate=[image(png(),'image/png',2,3,4),image(jpeg(),'image/jpeg',4,5,4)]
+  await assert.rejects(agent({prompt:'bad pages',images:duplicate}),{code:'DIRECT_MODEL_IMAGES_INVALID'})
+  assert.equal(calls,1)
+  assert.equal(agent.usage().calls,1)
+})
+
+test('rejects malformed, remote, oversized, mismatched and excessive images before budget or network use', async () => {
+  let calls=0
+  const agent=await createDirectModelAgent({provider:'glm',model:'vision-model',keyEnv:'KEY',maxCalls:1},{env:{KEY:'synthetic-key'},fetchImpl:async()=>{calls++;return response(glmResult())}})
+  const valid=image(png(),'image/png',2,3)
+  const broken={...valid,data:'https://example.invalid/paper.png'}
+  const dataUrl={...valid,data:`data:image/png;base64,${valid.data}`}
+  const wrongHash={...valid,sha256:'0'.repeat(64)}
+  const wrongDimensions={...valid,width:3}
+  const wrongMime={...valid,mime_type:'image/webp'}
+  const badPng=image(Buffer.from('not an image'),'image/png',2,3)
+  const tooLarge={...valid,data:'A'.repeat(1_398_104)}
+  const failures=[broken,dataUrl,wrongHash,wrongDimensions,wrongMime,badPng,tooLarge]
+  for(const item of failures) await assert.rejects(agent({prompt:'synthetic',images:[item]}),{code:'DIRECT_MODEL_IMAGES_INVALID'})
+  await assert.rejects(agent({prompt:'synthetic',images:[valid,valid,valid]}),{code:'DIRECT_MODEL_IMAGES_INVALID'})
+  await assert.rejects(agent({prompt:'synthetic',images:[{...valid,width:1601}]}),{code:'DIRECT_MODEL_IMAGES_INVALID'})
+  assert.equal(calls,0)
+  assert.equal(agent.usage().calls,0)
+  await agent({prompt:'synthetic',images:[valid]})
+  assert.equal(calls,1)
+  assert.equal(agent.usage().calls,1)
 })
 
 test('unknown token usage stays null and tool calls are refused', async () => {

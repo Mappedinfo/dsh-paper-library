@@ -7,6 +7,7 @@ requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
     "pymupdf>=1.26,<2",
+    "pymupdf4llm==0.2.9",
 ]
 
 [project.urls]

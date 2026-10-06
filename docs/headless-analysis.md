@@ -77,7 +77,29 @@ JSON
 | `review` | 必须为 `false` | 默认 `false`，启用后追加一次评审调用 |
 | `apply_metadata` | 默认 `false` | 默认 `false` |
 
-这里的默认值属于独立入口；DSH 既有自动整理偏好保持原有行为。仅需每批证据与论断时，显式设置 `notes:false` 可省去总结调用。单批读取最多 8 页／8 个文本块／24000 字符，密集页继续按位置分段。扫描页没有可读文字会报告，不包含 OCR 或图片理解；`coverage.full_document` 与未读、空白、截断范围一并保留。精读笔记／评审使用最多 24 KiB 的已保存批次材料，超出时明确记录部分覆盖，不声称读全。
+这里的默认值属于独立入口；DSH 既有自动整理偏好保持原有行为。仅需每批证据与论断时，设置 `notes:false` 可省去总结调用。默认仍为 `input_format:"text"`、`include_images:false`。
+
+需要先整理栏序并配图时，在分析请求或编排计划中加入：
+
+```json
+{"input_format":"markdown","include_images":true}
+```
+
+- **文字**：固定版本 `pymupdf4llm==0.2.9` 按页生成 Markdown，再连接明确的软连字符断行。原始提取文本和规范化 Markdown 都保存在资料库私有 `derived` 缓存。缓存键绑定 PDF 文件版本、页码与提取器版本，内容另以 SHA-256 核对，不改 PDF。没有启动布局模型或 OCR。Markdown 引文逐字对应已保存的 Markdown 来源，不代表 PDF 原文逐字转录；特殊字形、公式和复杂表格仍需对照页面。
+- **图片**：独立 GLM／Kimi 后端每批最多附加 2 页 PNG，每张 ≤1 MiB、长边 ≤1600 像素，保留页码。每页单独传输，不拼成整篇长图；精细图表可能需要回到 PDF 放大检查。新 Markdown 与配图模式都排除 PDF 批注。`visual_coverage.rendered_pages` 与 `sent_pages` 分开记录；发送过页面也不代表模型读懂了所有细节。审计保留图片哈希及尺寸，不保存上传图片的 base64。
+- **入口和覆盖**：原生 DSH 目前支持 Markdown 文本，图片请求会在读取和模型调用前拒绝，避免宿主静默丢图。纯扫描页没有文字证据时不启动模型，记录无可提取文字；混合文档及转换为空的页面不会计为完整文本覆盖。本次能力不包含扫描件 OCR 或独立视觉全文阅读。
+
+纯文字每批最多读取 8 页／8 个文本块／24000 字符，启用图片后每批最多 2 页；密集页继续按位置分段。图片增加输入用量及批次数，`maxCalls` 仍按显式模型配置限制。精读笔记／评审最多使用 24 KiB 的已保存批次材料，缺失批次或无文字页会明确标记部分覆盖。
+
+只在本地预览预处理结果、暂不调用模型：
+
+```bash
+node scripts/prepare-paper-reading-pack.mjs \
+  --library /absolute/private/library --id paper-id-a --pages 1,2 \
+  --out /absolute/private/new-pack --images
+```
+
+输出 `source.md`、逐页 `page-N.md`、`raw-page-N.txt`、可选 `page-N.png` 与带哈希的 `manifest.json`。最多选择 8 个明确页码；输出须为 Git 工作树及资料库之外的新目录。去掉 `--images` 就不渲染图片。工具只读取本地 PDF，不调用模型、不下载文件；`--help` 显示完整参数。已有虚拟环境缺少转换器时，先执行项目的 `uv sync` 更新依赖。
 
 ## 查看、审阅与写回
 

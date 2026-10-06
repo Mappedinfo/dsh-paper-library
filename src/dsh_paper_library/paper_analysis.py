@@ -1,12 +1,13 @@
 """Selected-page evidence and explicit, sourced metadata fill for background jobs.
 
-This module never invokes a model, discovers another paper, renders a page, or
-edits a PDF while preparing sources. The host owns short-lived job scheduling.
+This module never invokes a model, discovers another paper, or edits a PDF.
+Optional preprocessing/rendering stays on selected pages in the private library.
 """
 import json
 
 from .core import PaperConflictError, normalize_research_metadata, now
 from . import library_knowledge as knowledge
+from . import pdf_preprocessing as preprocessing
 
 MAX_PAGES = 8
 DEFAULT_PAGES = 3
@@ -112,12 +113,26 @@ def batch(library, request):
     pages and returns at most eight chunks / 24,000 characters. Dense pages
     continue from their exact Unicode offset in the next batch.
     """
+    input_format = request.get("input_format", "text")
+    include_images = request.get("include_images", False)
+    if input_format not in ("text", "markdown") or not isinstance(include_images, bool):
+        raise ValueError("PAPER_ANALYSIS_INVALID: input_format must be text or markdown; include_images must be boolean")
+    cursor_version = preprocessing.cursor_version() + ("/annotation-free-text" if input_format == "text" and include_images else "")
     pages = request.get("pages")
     if pages is not None:
         if not isinstance(pages, list) or not 1 <= len(pages) <= 2000 or any(isinstance(p, bool) or not isinstance(p, int) or not 1 <= p <= 2000 for p in pages) or len(set(pages)) != len(pages):
             raise ValueError("PAPER_ANALYSIS_INVALID: select unique PDF pages from 1 to 2000")
-    cursor = request.get("cursor") or {"index": 0, "offset": 0}
-    if not isinstance(cursor, dict) or set(cursor) != {"index", "offset"} or any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in cursor.values()):
+    cursor = request.get("cursor")
+    if cursor is None:
+        cursor = {"index": 0, "offset": 0}
+    cursor_keys = {"index", "offset"}
+    if isinstance(cursor, dict) and "input_format" in cursor:
+        cursor_keys |= {"input_format", "preprocessing_version"}
+        if cursor.get("input_format") != input_format or cursor.get("preprocessing_version") != cursor_version:
+            raise ValueError("PAPER_ANALYSIS_INVALID: reading cursor belongs to another input format or preprocessing version")
+    elif request.get("cursor") is not None and (input_format == "markdown" or include_images):
+        raise ValueError("PAPER_ANALYSIS_INVALID: preprocessed reading cursor requires its input format and preprocessing version")
+    if not isinstance(cursor, dict) or set(cursor) != cursor_keys or any(isinstance(cursor.get(k), bool) or not isinstance(cursor.get(k), int) or cursor[k] < 0 for k in ("index", "offset")):
         raise ValueError("PAPER_ANALYSIS_INVALID: invalid reading cursor")
     paper = library.get(request.get("id"))
     if not paper.get("pdf") or paper.get("archived"):
@@ -127,6 +142,9 @@ def batch(library, request):
     if request.get("file_version") is not None and request["file_version"] != version:
         raise ValueError("PAPER_ANALYSIS_SOURCE_CHANGED: PDF changed between batches; saved results are retained")
     extracted, read, completed, blank = [], [], [], []
+    no_text, image_only, empty_markdown, page_details = [], [], [], {}
+    images, image_warnings = [], ["Page images are bounded to 1600 pixels on the long edge; small text and fine figure details may require local PDF inspection."]
+    page_limit = preprocessing.MAX_IMAGES if include_images else MAX_PAGES
     characters = 0
     index, offset = cursor["index"], cursor["offset"]
     with library._open_pdf(path) as doc:
@@ -134,13 +152,34 @@ def batch(library, request):
         if len(pages) > 2000 or any(p > doc.page_count for p in pages) or index >= len(pages):
             raise ValueError("PAPER_ANALYSIS_INVALID: selected PDF page or cursor does not exist")
         page_count = doc.page_count
-        while index < len(pages) and len(read) < MAX_PAGES and len(extracted) < MAX_PAGES and characters < MAX_CHARACTERS:
+        while index < len(pages) and len(read) < page_limit and len(extracted) < MAX_PAGES and characters < MAX_CHARACTERS:
             number = pages[index]
-            content = doc.load_page(number - 1).get_text("text", sort=True).strip()
+            if input_format == "markdown":
+                prepared = preprocessing.prepare_page(library, paper["id"], doc, number, version)
+                content = prepared["markdown"]
+                page_details[number] = preprocessing.page_provenance(prepared)
+                if not prepared["has_extractable_text"]:
+                    no_text.append(number)
+                    if prepared["has_images"]:
+                        image_only.append(number)
+                elif not content:
+                    empty_markdown.append(number)
+            else:
+                if include_images:
+                    raw, has_images = preprocessing.raw_page(doc, number)
+                    content = raw.strip()
+                else:
+                    page = doc.load_page(number - 1)
+                    content = page.get_text("text", sort=True).strip()
+                    has_images = None
+                if not content:
+                    no_text.append(number)
+                    if has_images:
+                        image_only.append(number)
             if offset > len(content):
                 raise ValueError("PAPER_ANALYSIS_INVALID: text cursor exceeds page length")
             read.append(number)
-            if not content:
+            if not content and input_format == "text" and not include_images:
                 blank.append(number)
             while offset < len(content) and len(extracted) < MAX_PAGES and characters < MAX_CHARACTERS:
                 end = min(len(content), offset + MAX_PAGE_CHARACTERS, offset + MAX_CHARACTERS - characters)
@@ -154,6 +193,11 @@ def batch(library, request):
                 index, offset = index + 1, 0
             else:
                 break
+        if include_images:
+            for number in read:
+                images.append(preprocessing.page_image(library, paper["id"], doc, number, version))
+                if images[-1]["reduced_for_byte_limit"]:
+                    image_warnings.append(f"Page {number}: reduced resolution to fit the 1 MiB image limit")
     if file_version(path) != version:
         raise ValueError("PAPER_ANALYSIS_SOURCE_CHANGED: PDF changed during extraction")
     current = library.get(paper["id"])
@@ -162,20 +206,48 @@ def batch(library, request):
     knowledge.setup(library)
     saved = []
     for number, start, end, excerpt in extracted:
+        provenance = {"kind": "selected-pdf-page", "file_version": version,
+                      "scope": "markdown-batch" if input_format == "markdown" else "text-batch",
+                      "full_document": False, "character_start": start, "character_end": end,
+                      "truncated": False, "extraction": "plain-text", "ocr": False}
+        if input_format == "markdown":
+            provenance.update(extraction="pymupdf4llm-markdown", representation="normalized-markdown",
+                              raw_verbatim=False, exact_quote_basis="saved-source-text",
+                              **preprocessing.engine(), **page_details[number])
         saved.append(knowledge.source_put(library, {
             "entity": {"kind": "paper", "id": paper["id"]}, "kind": "source-note", "text": excerpt,
             "title": f"PDF page {number} · {paper['title']}"[:500],
-            "locator": {"page": number, "section": f"PDF text characters {start}–{end}"},
-        }, trusted_provenance={"kind": "selected-pdf-page", "file_version": version, "scope": "text-batch",
-                               "full_document": False, "character_start": start, "character_end": end,
-                               "truncated": False, "extraction": "plain-text", "ocr": False}))
-    return {"paper": paper, "expected_modified": paper["modified"], "file_version": version,
+            "locator": {"page": number, "section": f"PDF {'normalized Markdown' if input_format == 'markdown' else 'text'} characters {start}–{end}"},
+        }, trusted_provenance=provenance, preserve_text=input_format == "markdown" or include_images))
+    next_cursor = {"index": index, "offset": offset} if index < len(pages) else None
+    if next_cursor is not None and (input_format == "markdown" or include_images):
+        next_cursor.update(input_format=input_format, preprocessing_version=cursor_version)
+    result = {"paper": paper, "expected_modified": paper["modified"], "file_version": version,
+            "input_format": input_format,
             "sources": saved, "source_ids": [s["id"] for s in saved],
-            "next_cursor": {"index": index, "offset": offset} if index < len(pages) else None,
-            "coverage": {"scope": "text-batch", "selection": "explicit" if request.get("pages") else "all-pages",
+            "next_cursor": next_cursor,
+            "coverage": {"scope": "markdown-batch" if input_format == "markdown" else "text-batch", "selection": "explicit" if request.get("pages") else "all-pages",
                          "full_document": False, "requested_pages": pages, "read_pages": read,
                          "completed_pages": completed, "blank_pages": blank, "truncated_pages": [], "omitted_pages": [],
+                         "no_extractable_text_pages": no_text, "image_only_pages": image_only,
+                         "empty_markdown_pages": empty_markdown,
                          "characters": characters, "page_count": page_count}}
+    if input_format == "markdown":
+        result["preprocessing"] = {**preprocessing.engine(), "representation": "normalized-markdown",
+                                   "raw_verbatim": False, "exact_quote_basis": "saved-source-text",
+                                   "warnings": ["Markdown is a derived layout representation; quotes match saved Markdown, not literal PDF text.",
+                                                "No OCR or full-document header detection; formulas, tables and layout may need visual verification."],
+                                   "pages": [{"page": n, **detail} for n, detail in page_details.items()]}
+    if include_images:
+        result.update(images=images, visual_coverage={
+            "requested": True, "rendered_pages": [image["page"] for image in images], "omitted_pages": [],
+            "scaled_pages": [{"page": image["page"], "width": image["width"], "height": image["height"],
+                              "scale": image["scale"]} for image in images], "warnings": image_warnings,
+            "annotations_included": False, "ocr": False, "full_document": False,
+            "max_pages": preprocessing.MAX_IMAGES, "max_edge": preprocessing.MAX_IMAGE_EDGE,
+            "max_image_bytes": preprocessing.MAX_IMAGE_BYTES,
+            "max_total_bytes": preprocessing.MAX_IMAGES * preprocessing.MAX_IMAGE_BYTES})
+    return result
 
 
 def field_evidence(library, paper_id, supplied, fields):

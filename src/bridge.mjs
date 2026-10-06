@@ -105,19 +105,19 @@ function runSetup(command, args, label) {
 /** The published package ships pyproject.toml/uv.lock but no virtualenv.
  * Provision one on first use instead of asking the reader to run uv sync. */
 async function provisionVenv(python) {
-  const requirement = 'pymupdf>=1.26,<2';
+  const requirements = ['pymupdf>=1.26.6,<2', 'pymupdf4llm==0.2.9'];
   if (await commandExists('uv')) {
     try {
       await runSetup('uv', ['sync', '--no-dev'], 'uv sync');
       if (existsSync(python)) return;
     } catch { /* fall through to direct venv creation */ }
     await runSetup('uv', ['venv', '.venv'], 'uv venv');
-    await runSetup('uv', ['pip', 'install', '--python', python, requirement], 'uv pip install pymupdf');
+    await runSetup('uv', ['pip', 'install', '--python', python, ...requirements], 'uv pip install PDF dependencies');
     return;
   }
   if (await commandExists('python3')) {
     await runSetup('python3', ['-m', 'venv', '.venv'], 'python3 -m venv');
-    await runSetup(python, ['-m', 'pip', 'install', requirement], 'pip install pymupdf');
+    await runSetup(python, ['-m', 'pip', 'install', ...requirements], 'pip install PDF dependencies');
     return;
   }
   throw new Error('文献内核需要 Python 3.11+：请安装 uv（https://docs.astral.sh/uv/）或 Python 后重试，插件会自动完成依赖安装。');

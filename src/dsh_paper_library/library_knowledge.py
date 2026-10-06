@@ -181,11 +181,13 @@ def source_ids(library, ids):
     return sources
 
 
-def source_put(library, request, *, trusted_provenance=None):
+def source_put(library, request, *, trusted_provenance=None, preserve_text=False):
     entity = entity_of(library, request.get("entity"))
     kind = request.get("kind")
     if kind not in {"annotation", "official-excerpt", "user-text", "metadata", "source-note"}:
         raise ValueError("KNOWLEDGE_INVALID: unsupported source kind")
+    if preserve_text and (trusted_provenance is None or kind != "source-note"):
+        raise ValueError("KNOWLEDGE_INVALID: preserving source whitespace requires trusted extractor provenance")
     locator = request.get("locator") or {}
     if not isinstance(locator, dict) or set(locator) - {"page", "printed_page", "section"}:
         raise ValueError("KNOWLEDGE_INVALID: invalid source locator")
@@ -203,6 +205,9 @@ def source_put(library, request, *, trusted_provenance=None):
         provenance = {"annotation_ref": {"id": found["id"], "version": found["version"]}, "comment": found.get("comment", "")}
     else:
         content = text(request.get("text"), "source text", MAX_TEXT)
+        if preserve_text:
+            # 验证仍沿用原有边界；可信分页提取保留精确空白与字符位置。
+            content = request["text"]
     url = text(request.get("url", ""), "source URL", 2000, True)
     if url:
         parsed = urlsplit(url)

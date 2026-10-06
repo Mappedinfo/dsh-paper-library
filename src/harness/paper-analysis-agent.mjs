@@ -30,7 +30,11 @@ function completeJson(result) {
  */
 export function createPaperAnalysisAgent(ctx, { cwd, maxOutputTokens = 8192 } = {}) {
   if (!isAbsolute(cwd ?? '') || !Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 16384) throw new Error('Paper analysis requires an absolute library path and bounded output tokens')
-  return async ({ prompt, provider, model, reasoningEffort, signal } = {}) => {
+  const analyze = async ({ prompt, provider, model, reasoningEffort, signal, images } = {}) => {
+    // 原生 spawn 的公开接口接收持久附件引用，但不能绑定已经核验图像能力的
+    // preparedCall。宿主可能把图片转换为纯文字占位符；在持久附件、会话或
+    // 模型调用产生之前明确拒绝，不能把未看图的结果当作多模态分析。
+    if (images !== undefined && (!Array.isArray(images) || images.length > 0)) throw fail('当前 DSH 原生分析接口尚不能保证页面图像传给视觉模型。请使用支持图片的独立模型入口，或明确改用纯文字分析。', 'PAPER_ANALYSIS_IMAGES_UNSUPPORTED', 409)
     if (typeof prompt !== 'string' || !prompt.trim() || Buffer.byteLength(prompt) > MAX_PROMPT_BYTES) throw fail('所选材料为空或超过后台分析预算。', 'PAPER_ANALYSIS_INVALID', 400)
     for (const [name, value] of [['provider', provider], ['model', model], ['reasoningEffort', reasoningEffort]]) {
       if ((name !== 'reasoningEffort' || value !== undefined) && (typeof value !== 'string' || !value.trim() || value.length > 200 || /[\x00-\x1f]/.test(value))) throw fail('请选择这篇论文的有效 DSH 模型。', 'PAPER_ANALYSIS_MODEL_REQUIRED', 409)
@@ -73,4 +77,6 @@ export function createPaperAnalysisAgent(ctx, { cwd, maxOutputTokens = 8192 } = 
       if (cleanupError && !operationError) throw fail('后台分析结束，但 DSH 未确认资源释放。', 'PAPER_ANALYSIS_CLEANUP_FAILED', 503)
     }
   }
+  analyze.supportsImages = false
+  return analyze
 }

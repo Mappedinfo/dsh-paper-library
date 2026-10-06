@@ -10,7 +10,7 @@ Paper Library 将文献收集、PDF 阅读与批注、知识整理和 LaTeX 写�
 
 本地资料维护另提供[基础元数据覆盖检查](docs/pdf-metadata-audit.md)：先复用 Zotero 和采集清单中的资料，再列出需要补全的文件，避免为已有字段重复调用模型。另有[独立模型 API 测试](docs/direct-model-probe.md)，用合成示例验证 GLM／Kimi 直连，无需运行 DSH。
 
-**无界面批量分析**：[独立后端使用说明](docs/headless-analysis.md)提供命令行与程序调用入口，支持首页元数据提取、全文分批阅读和待审阅笔记。结果保存在同一资料库，之后可在 Paper Library 查看、审阅及明确写回。默认不自动修改 PDF 资料；模型次数与并发均有上限。与 Research Knowledge OS 的文献、证据、论断图谱已有 `rkos-v3` 导出适配，完整边界见[兼容性说明](docs/research-os-compatibility.md)。
+**无界面批量分析**：[独立后端使用说明](docs/headless-analysis.md)提供命令行与程序调用入口，支持首页元数据提取、全文分批阅读和待审阅笔记。默认文本路径保持不变；可显式选择 Markdown，并由独立 GLM／Kimi 后端按页接收有界图像，原生 DSH 明确拒绝图像请求。结果保存在同一资料库，之后可在 Paper Library 查看、审阅及明确写回。默认不自动修改 PDF 资料；模型次数与并发均有上限。与 Research Knowledge OS 的文献、证据、论断图谱已有 `rkos-v3` 导出适配，完整边界见[兼容性说明](docs/research-os-compatibility.md)。
 
 ## 从收集文献到阅读、整理与写作
 
@@ -52,7 +52,7 @@ DSH 0.1.7 起，插件把偏好字段声明为 cordis `Config` 的 `volatile` �
 
 **DSH 设置 → 插件 → 插件列表** 可查看已加载的 `@mappedinfo/dsh-paper-library`；全局插件可能默认折叠，也可按包名搜索。此列表表示本机已安装插件。社区展示见上述讨论链接。
 
-npm 安装的包不含 Python 虚拟环境；**首次执行文献操作时插件会自动安装**（优先 `uv sync`，无 `uv` 时回退系统 `python3` 建 venv 安装 PyMuPDF），需要网络且只需一次。两者都不可用时按报错提示安装 uv 或 Python 3.11+ 后重试即可。
+npm 安装的包不含 Python 虚拟环境；**首次执行文献操作时插件会自动安装**（优先 `uv sync`，否则创建 venv 并安装 PyMuPDF 与固定版本 `pymupdf4llm==0.2.9`），需要网络且只需一次。两者都不可用时按报错提示安装 uv 或 Python 3.11+ 后重试即可。
 
 独立预览服务（`npm start`）始终可以保存本地设置。旧版本曾把"库已交给 DSH 管理但 DSH 端入口缺失"误判为只读；现在只要 DSH 没有真正接管该命名空间，预览页就回退到本库存储继续读写，避免形成死锁。不同浏览器访问同一个 DSH 服务时共享主机设置。
 

@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url'
 import { createDirectModelAgent } from '../src/direct-model.mjs'
 import { createHeadlessAnalysis, loadModelConfig } from '../src/headless-analysis.mjs'
 import { createLocalStateStore } from '../src/local-state.mjs'
+import { analysisInputOptions } from '../src/analysis-input.mjs'
+import { validateAnalysisImages } from '../src/model-input-images.mjs'
 
 const MAX_RESPONSE = 512 * 1024
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -33,12 +35,13 @@ function analysisContextReceipt(value, routeIds) {
 }
 
 export function validatePlan(plan) {
-  const fields = new Set(['library', 'python', 'localStateHome', 'request_id', 'mode', 'notes', 'review', 'routes'])
+  const fields = new Set(['library', 'python', 'localStateHome', 'request_id', 'mode', 'notes', 'review', 'routes', 'input_format', 'include_images'])
   if (!plan || Array.isArray(plan) || typeof plan !== 'object' || Object.keys(plan).some(key => !fields.has(key)) ||
       typeof plan.library !== 'string' || !isAbsolute(plan.library) || !idValid(plan.request_id) ||
       !['full', 'metadata'].includes(plan.mode) || typeof plan.notes !== 'boolean' || plan.review !== false ||
       plan.mode === 'metadata' && plan.notes || !Array.isArray(plan.routes) || !plan.routes.length || plan.routes.length > 20) throw fail('BATCH_PLAN_INVALID')
   for (const field of ['python', 'localStateHome']) if (plan[field] !== undefined && (typeof plan[field] !== 'string' || !isAbsolute(plan[field]))) throw fail('BATCH_PLAN_INVALID')
+  try { analysisInputOptions(plan) } catch { throw fail('BATCH_PLAN_INVALID') }
   const names = new Set(), ids = new Set()
   for (const route of plan.routes) {
     if (!route || Array.isArray(route) || Object.keys(route).some(key => !['name', 'config', 'ids'].includes(key)) ||
@@ -172,13 +175,16 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
     return text
   }
   const credentialGroups = () => [...slots.values()].map(slot => ({ id: slot.id, limit: 2, active: slot.active, peak: slot.peak }))
-  function auditBody(body) {
+  function auditBody(body, images = []) {
     // API 正文及 message.content 内的嵌套 JSON 都先解码，再脱敏；\u 编码
     // 不能绕过凭据遮蔽。此规范化仅用于审计副本，adapter 仍接收原文。
     function clean(value, depth = 0) {
       if (typeof value === 'string') {
         if (depth < 8) try { const parsed = JSON.parse(value); if (parsed !== value) return typeof parsed === 'string' ? clean(parsed, depth + 1) : JSON.stringify(clean(parsed, depth + 1)) } catch {}
-        return redact(value.replace(/\\+u([\da-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16))))
+        let text = value.replace(/\\+u([\da-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+        text = text.replace(/data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]+/g, '[IMAGE_DATA_URL_OMITTED]')
+        for (const image of images) text = text.split(image.data).join(`[IMAGE_OMITTED:${image.sha256}]`)
+        return redact(text)
       }
       if (Array.isArray(value)) return value.map(item => clean(item, depth))
       if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [redact(key), clean(item, depth)]))
@@ -256,7 +262,7 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
       routes.push({ ...route, config: { ...config, maxConcurrency: Math.min(config.maxConcurrency ?? 2, 2) },
         request_id: `route-${hash([plan.request_id, route.name])}` })
     }
-    await atomic('run-manifest.json', { schema: 1, request_id: plan.request_id, mode: plan.mode, notes: plan.notes,
+    await atomic('run-manifest.json', { schema: 1, request_id: plan.request_id, mode: plan.mode, notes: plan.notes, ...analysisInputOptions(plan),
       review: false, apply_metadata: false, started_at: startedAt,
       routes: routes.map(route => ({ name: route.name, request_id: route.request_id, provider: route.config.provider,
         model: route.config.model, thinking: route.config.thinking ?? 'disabled', reasoningEffort: route.config.reasoningEffort,
@@ -288,6 +294,10 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
             call.prompt_sha256 = createHash('sha256').update(input.prompt, 'utf8').digest('hex')
             call.prompt_bytes = Buffer.byteLength(input.prompt, 'utf8')
           } else call.prompt_metadata_status = 'invalid'
+          const images = validateAnalysisImages(input?.images)
+          const imageInputs = images.map(({data,...entry})=>({...entry,bytes:Buffer.byteLength(data,'base64')}))
+          if(imageInputs.length)call.image_inputs=imageInputs
+          call.input_sha256=hash({prompt_sha256:call.prompt_sha256,images:imageInputs})
           calls.push(call)
           await progress()
           return context.run(call, async () => {
@@ -297,7 +307,7 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
               call.finished_at = stamp()
               const { fetched, ...receipt } = call
               if (receipt.response_body !== undefined) {
-                const safeBody = auditBody(receipt.response_body)
+                const safeBody = auditBody(receipt.response_body, images)
                 receipt.response_body = safeBody.text
                 receipt.response_body_encoding = 'json-normalized-redacted-no-reasoning'
                 if (safeBody.truncated) receipt.response_body_truncated = true
@@ -310,12 +320,13 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
           })
         }
         auditedAgent.model = agent.model
+        auditedAgent.supportsImages = agent.supportsImages === true
         auditedAgent.usage = () => agent.usage?.() ?? { calls: calls.filter(call => call.route === route.name).length }
         const handle = await analysisFactory({ library: plan.library, python: plan.python, localStateHome: plan.localStateHome,
           modelConfig: route.config, store: observedStore, agent: auditedAgent })
         handles.push(handle)
         const result = await handle({ action: 'paper_analysis_run', ids: route.ids, request_id: route.request_id,
-          mode: plan.mode, notes: plan.notes, review: false, apply_metadata: false })
+          mode: plan.mode, notes: plan.notes, review: false, apply_metadata: false, ...analysisInputOptions(plan) })
         for (const row of result.results ?? []) if (papers.has(row.id)) papers.set(row.id, {
           id: row.id, route: route.name, status: row.status, warnings: row.warnings?.length ?? 0,
           ...(row.note_draft_id ? { note_draft_id: row.note_draft_id } : {}) })

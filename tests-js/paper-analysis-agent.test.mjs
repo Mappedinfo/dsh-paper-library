@@ -43,6 +43,49 @@ test('native spawn has an owned empty parent, paper route, fixed source and no m
   assert.deepEqual(f.events, ['without-initiator', 'guard', 'parent', 'child', 'dispose-child', 'dispose-parent', 'unguard'])
 })
 
+test('native image capability is explicit and an empty image list keeps the legacy text shape', async () => {
+  const f = fixture()
+  assert.equal(f.handle.supportsImages, false)
+  await f.handle({ ...input, images: [] })
+  assert.deepEqual(f.calls[1].options.prompt, [{ type: 'text', text: input.prompt }])
+})
+
+test('native images are refused before host access, attachment persistence or owned allocation', async () => {
+  const data = Buffer.from('SYNTHETIC_IMAGE_PRIVATE_BYTES').toString('base64')
+  const image = { mime_type: 'image/png', data, page: 1, width: 1, height: 1, sha256: 'a'.repeat(64) }
+  let hostAccesses = 0
+  const handle = createPaperAnalysisAgent({ get() { hostAccesses++; throw new Error('Host must not be accessed for unsupported images') } }, { cwd: '/synthetic/library' })
+  for (const images of [[image], [image, image], null, data, { image }]) {
+    await assert.rejects(handle({ ...input, images }), error => {
+      assert.equal(error.code, 'PAPER_ANALYSIS_IMAGES_UNSUPPORTED')
+      assert.equal(error.status, 409)
+      assert.match(error.message, /视觉模型/)
+      assert.equal(error.message.includes(data), false)
+      assert.equal(error.message.includes(input.prompt), false)
+      return true
+    })
+  }
+  assert.equal(hostAccesses, 0)
+  const f = fixture()
+  await assert.rejects(f.handle({ ...input, images: [image] }), { code: 'PAPER_ANALYSIS_IMAGES_UNSUPPORTED' })
+  assert.deepEqual(f.calls, [])
+  assert.deepEqual(f.events, [])
+})
+
+test('cancelled native image requests allocate nothing and do not expose image bytes', async () => {
+  const controller = new AbortController()
+  const data = Buffer.from('SYNTHETIC_CANCELLED_IMAGE_BYTES').toString('base64')
+  controller.abort(new Error('synthetic cancellation'))
+  const f = fixture()
+  await assert.rejects(f.handle({ ...input, images: [{ mime_type: 'image/png', data, page: 1, width: 1, height: 1, sha256: 'b'.repeat(64) }], signal: controller.signal }), error => {
+    assert.equal(error.code, 'PAPER_ANALYSIS_IMAGES_UNSUPPORTED')
+    assert.equal(error.message.includes(data), false)
+    return true
+  })
+  assert.deepEqual(f.calls, [])
+  assert.deepEqual(f.events, [])
+})
+
 test('execution guard denies scoped and PTC tools for owned analysis only', async () => {
   const f = fixture()
   f.duringStart = () => {
