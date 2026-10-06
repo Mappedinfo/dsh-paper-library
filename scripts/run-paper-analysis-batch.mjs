@@ -19,6 +19,19 @@ const stamp = () => new Date().toISOString()
 const within = (parent, child) => { const part = relative(parent, child); return part === '' || part !== '..' && !part.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(part) }
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 
+function analysisContextReceipt(value, routeIds) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !idValid(value.id) || !routeIds.includes(value.id) ||
+      !idValid(value.request_id) || !['batch', 'note', 'review'].includes(value.stage) ||
+      !Array.isArray(value.source_ids) || value.source_ids.length > 2000 || !value.source_ids.length ||
+      value.source_ids.some(id => !idValid(id)) || new Set(value.source_ids).size !== value.source_ids.length ||
+      !Array.isArray(value.pages) || !value.pages.length || value.pages.length > 2000 ||
+      value.pages.some(page => !Number.isSafeInteger(page) || page < 1 || page > 2000) || new Set(value.pages).size !== value.pages.length ||
+      (value.stage === 'batch' ? !Number.isSafeInteger(value.batch_index) || value.batch_index < 0 || value.batch_index > 1_000_000 : value.batch_index !== undefined)) return null
+  const selected = { id: value.id, request_id: value.request_id, stage: value.stage,
+    ...(value.stage === 'batch' ? { batch_index: value.batch_index } : {}), source_ids: [...value.source_ids], pages: [...value.pages] }
+  return Buffer.byteLength(JSON.stringify(selected)) <= 65536 ? selected : null
+}
+
 export function validatePlan(plan) {
   const fields = new Set(['library', 'python', 'localStateHome', 'request_id', 'mode', 'notes', 'review', 'routes'])
   if (!plan || Array.isArray(plan) || typeof plan !== 'object' || Object.keys(plan).some(key => !fields.has(key)) ||
@@ -221,6 +234,11 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
       const response = await fetchImpl(url, init)
       call.http_status = response.status
       const text = await responseBody(response, init.signal, call)
+      call.returned_model = null
+      try {
+        const model = JSON.parse(text)?.model
+        if (typeof model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/.test(model)) call.returned_model = model
+      } catch {}
       // 原样交回已有 adapter，由它继续判断截断、JSON schema 和实际 key 泄漏。
       return new Response(text, { status: response.status,
         headers: { 'content-type': response.headers?.get('content-type') ?? 'application/json' } })
@@ -263,6 +281,13 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
         const auditedAgent = async input => {
           const call = { call_id: calls.length + 1, route: route.name, provider: route.config.provider,
             model: route.config.model, started_at: stamp(), status: 'running' }
+          const selected = analysisContextReceipt(input?.analysisContext, route.ids)
+          if (selected) call.analysis_context = selected
+          else call.analysis_context_status = input?.analysisContext === undefined ? 'missing' : 'invalid'
+          if (typeof input?.prompt === 'string' && Buffer.byteLength(input.prompt) <= 128 * 1024) {
+            call.prompt_sha256 = createHash('sha256').update(input.prompt, 'utf8').digest('hex')
+            call.prompt_bytes = Buffer.byteLength(input.prompt, 'utf8')
+          } else call.prompt_metadata_status = 'invalid'
           calls.push(call)
           await progress()
           return context.run(call, async () => {

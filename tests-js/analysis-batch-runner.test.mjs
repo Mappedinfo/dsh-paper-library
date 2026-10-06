@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { createDirectModelAgent } from '../src/direct-model.mjs'
+import { createPaperAnalysis } from '../src/harness/paper-analysis.mjs'
 import { runAnalysisBatch, validatePlan } from '../scripts/run-paper-analysis-batch.mjs'
 
 async function fixture(t, overrides = {}) {
@@ -13,6 +15,7 @@ async function fixture(t, overrides = {}) {
   const f = { home, library, out: join(home, 'output'), calls: 0, active: 0, peak: 0, writes: [], finishedProgress: [] }
   const key = 'SYNTHETIC_CREDENTIAL_NOT_FOR_REAL_USE'
   f.key = key
+  f.contextFor = (id, request_id) => ({ id, request_id, stage: 'batch', batch_index: 0, source_ids: [`source-${id}`], pages: [2] })
   f.plan = { library, request_id: 'synthetic-plan', mode: 'metadata', notes: false, review: false,
     routes: [{ name: 'glm', config: join(home, 'glm.json'), ids: ['paper-a', 'paper-b', 'paper-c'] },
       { name: 'kimi', config: join(home, 'kimi.json'), ids: ['paper-d', 'paper-e', 'paper-f'] }] }
@@ -32,7 +35,7 @@ async function fixture(t, overrides = {}) {
           while (cursor < input.ids.length) {
             const index = cursor++, id = input.ids[index]
             let status = 'complete', error_code
-            try { await options.agent({ prompt: 'Only synthetic fixture text.', ...options.agent.model }) }
+            try { await options.agent({ prompt: 'Only synthetic fixture text.', ...options.agent.model, analysisContext: f.contextFor(id, input.request_id) }) }
             catch (error) { status = 'failed'; error_code = error.code }
             await options.store.put(`analysis.job:${id}`, { id, status, batch_count: 1 }, 0)
             f.finishedProgress.push(JSON.parse(await readFile(join(f.out, 'progress.json'), 'utf8')))
@@ -49,8 +52,8 @@ async function fixture(t, overrides = {}) {
       f.calls++; f.active++; f.peak = Math.max(f.peak, f.active)
       const content = JSON.stringify({ title: 'Synthetic', body: 'Synthetic fixture only.', nodes: [], edges: [], assertions: [], metadata: {}, field_sources: {} })
       const body = Buffer.from(JSON.stringify(url.includes('bigmodel')
-        ? { choices: [{ finish_reason: 'stop', message: { content } }], diagnostic_echo: key }
-        : { stop_reason: 'end_turn', content: [{ type: 'text', text: content }], diagnostic_echo: key }))
+        ? { model: 'synthetic-glm-response', choices: [{ finish_reason: 'stop', message: { content } }], diagnostic_echo: key }
+        : { model: 'synthetic-kimi-response', stop_reason: 'end_turn', content: [{ type: 'text', text: content }], diagnostic_echo: key }))
       let ended = false
       const close = () => { if (!ended) { ended = true; f.active-- } }
       const stream = new ReadableStream({ start(controller) {
@@ -169,4 +172,79 @@ test('audits retain final answers and settings without provider reasoning conten
   }
   const manifest = JSON.parse(await readFile(join(f.out, 'run-manifest.json'), 'utf8'))
   assert.ok(manifest.routes.every(route => route.thinking === 'disabled'))
+})
+
+test('analysis attaches trusted batch, note and review selections without changing call count', async t => {
+  const records = new Map(), drafts = new Map(), calls = []
+  const sources = [3, 7].map(page => ({ id: `source-${page}`, entity: { kind: 'paper', id: 'paper-a' },
+    text: `Synthetic evidence on page ${page}.`, locator: { page }, content_hash: `hash-${page}` }))
+  const paper = { id: 'paper-a', pdf: true, title: 'Synthetic paper', modified: 'r1' }
+  let revision = 0, index = 0
+  const handle = createPaperAnalysis({ library: '/synthetic/library',
+    store: { async get(key) { return structuredClone(records.get(key) ?? { key, value: null, revision: 0 }) },
+      async put(key, value, expected) {
+        assert.equal(expected, records.get(key)?.revision ?? 0)
+        const saved = { key, value: structuredClone(value), revision: ++revision }; records.set(key, saved); return structuredClone(saved)
+      } },
+    resolveModel: async () => ({ provider: 'glm', model: 'synthetic-model' }),
+    dispatch: async input => {
+      if (input.action === 'get') return paper
+      if (input.action === 'paper_analysis_batch') {
+        const source = sources[index++]
+        return { paper, expected_modified: 'r1', file_version: { bytes: 1 }, sources: [source], source_ids: [source.id],
+          next_cursor: index === 1 ? { index: 1, offset: 0 } : null,
+          coverage: { page_count: 7, read_pages: [source.locator.page], completed_pages: [source.locator.page], blank_pages: [], truncated_pages: [], omitted_pages: [] } }
+      }
+      if (input.action === 'knowledge_draft_put') { const draft = { ...structuredClone(input), id: `draft-${drafts.size}` }; drafts.set(draft.id, draft); return draft }
+      if (input.action === 'knowledge_draft_get') return drafts.get(input.id)
+      if (input.action === 'knowledge_source_get') return sources.find(source => source.id === input.id)
+      throw new Error('Unexpected synthetic action')
+    },
+    agent: async input => {
+      calls.push(input)
+      if (input.prompt.includes('evidence-atlas')) return JSON.stringify({ title: '证据图谱评审：合成论文',
+        body: '快速判定\n案例拆解\n状态矩阵\n归因\n联合覆盖\n形容词\n本文最多能声称\n本文不能声称\n修改清单' })
+      if (input.prompt.includes('READING_RECORDS_JSON')) return JSON.stringify({ title: '合成精读笔记', body: '合成资料。' })
+      const source = sources[calls.length - 1]
+      return JSON.stringify({ title: 'Synthetic graph', body: 'Synthetic summary.', nodes: [{ id: 'evidence', type: 'evidence', label: 'Synthetic evidence', source_id: source.id, quote: source.text }], edges: [], assertions: [], metadata: {}, field_sources: {} })
+    } })
+  t.after(() => handle.dispose())
+  await handle({ action: 'paper_analysis_start', id: 'paper-a', request_id: 'synthetic-context', pages: [3, 7], apply_metadata: false,
+    analysisContext: { id: 'forged-paper', source_ids: ['forged-source'] } })
+  await handle.wait('paper-a', 'synthetic-context')
+  assert.equal((await handle({ action: 'paper_analysis_get', id: 'paper-a' })).status, 'complete')
+  assert.equal(calls.length, 4)
+  assert.deepEqual(calls.map(call => call.analysisContext), [
+    { id: 'paper-a', request_id: 'synthetic-context', stage: 'batch', batch_index: 0, source_ids: ['source-3'], pages: [3] },
+    { id: 'paper-a', request_id: 'synthetic-context', stage: 'batch', batch_index: 1, source_ids: ['source-7'], pages: [7] },
+    { id: 'paper-a', request_id: 'synthetic-context', stage: 'note', source_ids: ['source-3', 'source-7'], pages: [3, 7] },
+    { id: 'paper-a', request_id: 'synthetic-context', stage: 'review', source_ids: ['source-3', 'source-7'], pages: [3, 7] },
+  ])
+  assert.ok(calls.every(call => !call.prompt.includes('forged-paper')))
+})
+
+test('receipts bind bounded context and returned model to exact prompt hashes without storing prompts', async t => {
+  const f = await fixture(t), contextFor = f.contextFor
+  f.contextFor = (...args) => ({ ...contextFor(...args), private_extra: 'SYNTHETIC_CONTEXT_MUST_NOT_BE_WRITTEN' })
+  assert.equal((await runAnalysisBatch(f.plan, f.options)).status, 'complete')
+  const prompt = 'Only synthetic fixture text.', expectedHash = createHash('sha256').update(prompt, 'utf8').digest('hex')
+  const manifest = JSON.parse(await readFile(join(f.out, 'run-manifest.json'), 'utf8'))
+  for (const name of await readdir(join(f.out, 'responses'))) {
+    const text = await readFile(join(f.out, 'responses', name), 'utf8'), receipt = JSON.parse(text)
+    const route = manifest.routes.find(route => route.name === receipt.route)
+    assert.deepEqual(receipt.analysis_context, contextFor(receipt.analysis_context.id, route.request_id))
+    assert.ok(route.ids.includes(receipt.analysis_context.id))
+    assert.equal(receipt.prompt_sha256, expectedHash); assert.equal(receipt.prompt_bytes, Buffer.byteLength(prompt, 'utf8'))
+    assert.equal(receipt.returned_model, `synthetic-${receipt.provider}-response`)
+    assert.equal(text.includes(prompt), false); assert.equal(text.includes('SYNTHETIC_CONTEXT_MUST_NOT_BE_WRITTEN'), false)
+  }
+  const invalid = await fixture(t)
+  invalid.contextFor = (id, request_id) => ({ id, request_id, stage: 'batch', batch_index: 0,
+    source_ids: ['SYNTHETIC_INVALID_CONTEXT'], pages: Array.from({ length: 2001 }, (_, i) => i + 1) })
+  assert.equal((await runAnalysisBatch(invalid.plan, invalid.options)).status, 'complete', 'Audit validation must not change model workflow')
+  for (const name of await readdir(join(invalid.out, 'responses'))) {
+    const text = await readFile(join(invalid.out, 'responses', name), 'utf8'), receipt = JSON.parse(text)
+    assert.equal(receipt.analysis_context_status, 'invalid'); assert.equal(receipt.analysis_context, undefined)
+    assert.equal(text.includes('SYNTHETIC_INVALID_CONTEXT'), false)
+  }
 })

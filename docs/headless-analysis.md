@@ -139,9 +139,24 @@ node scripts/run-paper-analysis-batch.mjs \
 
 输出目录必须新建并位于源码仓库与资料库之外，保存私有运行清单、进度、结果和脱敏的模型响应。审计副本移除 GLM 思考正文及 Kimi 思考块内容，保留最终答案、用量和思考设置；无法解析的响应正文只保存省略标记。响应可能包含论文内容，不能提交到公开仓库。编排器不修改 PDF 资料，不自动重试失败生成或轮换 key。
 
+调用回执包含后端生成的论文 ID、请求 ID、阶段、批次序号、来源 ID 和页码，以及实际提示词的 SHA-256、字节数和服务返回的模型名。提示词正文不另外保存；用户传入的同名上下文不能替代后端关联。回执中的 `succeeded` 只表示模型接口和答案解析通过，图谱、资料引用、整篇阅读和笔记是否成功仍需检查作业结果。
+
 从既有元数据清点挑选首批时，可使用 `scripts/prepare-paper-analysis-run.py --library … --audit … --out … --model-config … --model-config … --count 12`。它只选已有目录中有 DOI／基础来源元数据、6–24 页、当前字节与审计哈希一致的驻留 PDF，按哈希去重；这是便于初次检查的选择规则，不代表随机样本或整库覆盖。实际选中条目与依据只写入私有目录。
 
 运行结束后，使用 `scripts/inspect-paper-analysis-batch.mjs --plan … --run … --selection …` 检查每篇状态、全文覆盖、必需笔记的待审状态、本地 PDF 哈希和最后一批证据引文。报告保存在运行目录，不调用模型或下载文件；引文抽查只覆盖最后一批，不能代替全文内容审阅。上述三个脚本是源码仓库工具，npm 安装包仍使用 CLI 或下面的程序入口。
+
+比较两个模型时，为同一组论文分别建立计划和输出目录，并设置不同的 `localStateHome`，避免同篇论文的最新作业指针相互覆盖。两个独立进程不共享并发限制；只有确认使用不同凭据时才可各并发 2，否则应串行运行。保持 PDF 字节、阅读范围、提示词、输出预算和超时一致，保留失败项；不要在比较中途改提示或只重跑失败的一侧。
+
+两组结束后，可检查全部已保存批次并导出逐篇配对结果：
+
+```bash
+node scripts/compare-paper-analysis-runs.mjs \
+  --left-plan /absolute/private/left-plan.json --left-run /absolute/private/left-run \
+  --right-plan /absolute/private/right-plan.json --right-run /absolute/private/right-run \
+  --selection /absolute/private/selection.json --out /absolute/private/new-comparison
+```
+
+比较器按论文 ID 与完整请求 ID 关联调用，分别读取两份计划的状态目录，核对当前驻留 PDF 哈希，并保存每批草稿、引文检查、笔记范围、实际返回模型、用量和耗时。输出目录不得位于任何 Git 工作树或资料库内。无用量的调用保留未知；原始资料建议、回答和笔记只写入私有报告。精确引文匹配不等于语义正确，全文读取完成也不等于笔记覆盖全部批次；内容比较还需结合相同来源审阅，不能用通过率或输出长度代替质量判断。
 
 包导出 `@mappedinfo/dsh-paper-library/analysis`，源码可直接导入 `src/headless-analysis.mjs`：
 

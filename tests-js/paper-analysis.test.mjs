@@ -320,6 +320,22 @@ test('all thirteen pages are read serially in bounded batches and prior batch co
   await assert.rejects(f.handle({action:'paper_analysis_get',id:'paper-a',batch_index:2}),/批次/)
   const restart=createPaperAnalysis(f.options);assert.equal((await restart({...request,pages:Array.from({length:13},(_,i)=>i+1)})).status,'complete')
 })
+test('selected batch metadata stays separate from cumulative suggestions without replay or writes',async()=>{
+  const f=fixture();multiBatch(f);const respond=f.outputFor
+  f.outputFor=input=>{const graph=respond(input),node=graph.nodes[0];return {...graph,metadata:{abstract:node.quote},field_sources:{abstract:[{source_id:node.source_id,quote:node.quote}]}}}
+  await f.handle({...request,notes:false,review:false});const result=await f.done()
+  assert.equal(result.status,'complete');assert.equal(result.batch_count,2)
+  const writes=f.writes.length,calls=f.calls.length
+  const first=await f.handle({action:'paper_analysis_get',id:'paper-a',request_id:'run-a',batch_index:0})
+  const second=await f.handle({action:'paper_analysis_get',id:'paper-a',request_id:'run-a',batch_index:1})
+  assert.equal(first.batch_metadata.abstract,'Evidence on page 1.')
+  assert.equal(second.batch_metadata.abstract,'Evidence on page 9.')
+  assert.equal(first.batch_field_sources.abstract[0].source_id,'source-1')
+  assert.equal(second.batch_field_sources.abstract[0].source_id,'source-9')
+  assert.equal(second.metadata.abstract,'Evidence on page 1.','Cumulative fill-first suggestions remain unchanged')
+  assert.equal(second.field_sources.abstract[0].source_id,'source-1')
+  assert.equal(f.writes.length,writes);assert.equal(f.calls.length,calls)
+})
 test('failure in a later batch retains earlier graph and never replays automatically on restart',async()=>{
   const f=fixture();multiBatch(f);const respond=f.outputFor;f.outputFor=input=>{if(f.calls.length===2)throw Error('Synthetic later model failure');return respond(input)}
   await f.handle(request);const result=await f.done();assert.equal(result.status,'failed');assert.equal(result.batch_count,1)
