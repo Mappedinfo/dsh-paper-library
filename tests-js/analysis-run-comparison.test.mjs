@@ -103,9 +103,25 @@ test('new questionnaire jobs require analysis_complete and explicit all-success 
     let state='incomplete'
     const wrapper=async req=>{
       const row=await oldAnalysis(req)
+      if(row&&req.id==='paper-a'&&req.batch_index!==undefined) return {...row,
+        batch_answers:[
+          {id:'ans-q1',question_id:'q1',choice:'not_reported',valid:true,errors:[],judgment:'synthetic neutral answer'},
+          {id:'ans-q2-bad',question_id:'q2',valid:false,errors:[{code:'QUOTE_NOT_LOCATED'}],judgment:'synthetic invalid answer'},
+          {id:'ans-q2-good',question_id:'q2',choice:'method_result',valid:true,errors:[],judgment:'synthetic valid answer'},
+        ],
+        question_results:[{question_ids:['q1','q2'],status:'partial',missing:['q2'],errors:[
+          {code:'ANSWER_INVALID',question_id:'q2'},{code:'MISSING_QUESTION',question_id:'q2'},{code:'MODEL_REQUEST_FAILED'},
+        ],request_error:{code:'MODEL_REQUEST_FAILED'}}],
+        batch_compilation:{included_answer_ids:['ans-q1','ans-q2-good'],excluded_answers:[{answer_id:'ans-q2-bad',reason:'invalid'}],truncated:false},
+        batch_graph_error:{code:'GRAPH_WRITE_FAILED'},
+        option_candidates:{questionnaire_version:'reading-questions-v1',questionnaire_hash:'a'.repeat(64),truncated:false,candidates:[
+          {question_id:'q2',proposed_description:'Synthetic other choice',count:1,origins:[{answer_id:'ans-q2-good',source_ids:['src-paper-a']}],status:'needs-human-review'},
+        ]}}
       if(row&&req.id==='paper-a'&&req.batch_index===undefined) {
         row.questionnaire={version:'reading-questions-v1',hash:'a'.repeat(64)}
         row.analysis_complete=state!=='analysis-incomplete'
+        if(state==='incomplete') row.active_questions=[{question_ids:['q2'],status:'running',answers:[]}]
+        if(state==='note-partial') row.note_coverage={partial:true,full_document:false}
         row.question_coverage=state==='incomplete'?{question_ids:['q1','q2'],complete:false,by_question:{q1:{expected_batches:1,answered_batches:1,failed_batches:[],unread_batches:[],valid_answers:1},q2:{expected_batches:1,answered_batches:0,failed_batches:[],unread_batches:[],valid_answers:0}}}:
           {question_ids:['q1','q2'],complete:true,by_question:{q1:{expected_batches:1,answered_batches:1,failed_batches:[],unread_batches:[],valid_answers:1},q2:{expected_batches:1,answered_batches:1,failed_batches:[],unread_batches:[],valid_answers:1}}}
       }
@@ -114,12 +130,19 @@ test('new questionnaire jobs require analysis_complete and explicit all-success 
     f.analysis=wrapper
     const first=await baseCompare()
     assert.equal(first.papers.find(row=>row.id==='paper-a').left.deliverable_complete,false)
+    assert.equal(first.papers.find(row=>row.id==='paper-a').left.question_status,'incomplete')
+    assert.equal(first.papers.find(row=>row.id==='paper-a').left.analysis_complete,true)
     state='analysis-incomplete'; await rm(f.out,{recursive:true,force:true})
     const incompleteOut=join(f.root,'private-out-analysis-incomplete')
     const incomplete=await compareRuns({leftPlanPath:join(f.root,'left-plan.json'),rightPlanPath:join(f.root,'right-plan.json'),leftRunPath:f.left,rightRunPath:f.right,selectionPath:f.path,outPath:incompleteOut,
       createAnalysis:async()=>{const fn=req=>f.analysis(req);fn.dispose=()=>{};return fn},dispatch:f.dispatch})
-    assert.equal(incomplete.papers.find(row=>row.id==='paper-a').left.question_status,'incomplete')
+    assert.equal(incomplete.papers.find(row=>row.id==='paper-a').left.question_status,'complete')
     assert.equal(incomplete.papers.find(row=>row.id==='paper-a').left.deliverable_complete,false)
+    assert.equal(incomplete.papers.find(row=>row.id==='paper-a').left.analysis_complete,false)
+    assert.deepEqual(incomplete.papers.find(row=>row.id==='paper-a').left.active_questions,[{question_ids:['q2'],status:'running',answers:[]}])
+    assert.equal(incomplete.papers.find(row=>row.id==='paper-a').left.batches.length,1,'active question groups stay separate from committed batches')
+    assert.equal(incomplete.counts.left_question_coverage_complete,1)
+    assert.equal(incomplete.counts.left_question_analysis_complete,0,'legacy counter still requires whole-analysis completion')
     state='complete'
     // Use another private output directory for the second report.
     const out=join(f.root,'private-out-success')
@@ -129,6 +152,33 @@ test('new questionnaire jobs require analysis_complete and explicit all-success 
     assert.equal(result.question_protocol,'questionnaire')
     assert.equal(result.analysis_complete,true)
     assert.equal(result.deliverable_complete,true)
+    assert.equal(result.question_status,'complete','question coverage status is independent of analysis_complete')
+    assert.equal(result.question_counts.by_question.q1.expected_batches,1)
+    assert.equal(result.question_counts.by_question.q1.answered_batches,1)
+    assert.equal(result.question_counts.by_question.q1.valid_answers,1)
+    assert.deepEqual(result.question_counts.by_question.q1.choice_distribution,{positive:0,neutral:1,other:0})
+    assert.equal(result.question_counts.by_question.q1.invalid_answers,0)
+    assert.equal(result.question_counts.by_question.q2.invalid_answers,1)
+    assert.deepEqual(result.question_counts.by_question.q2.invalid_reasons,{QUOTE_NOT_LOCATED:1})
+    assert.equal(result.question_counts.by_question.q2.group_error_count,3)
+    assert.equal(result.question_counts.by_question.q2.choice_distribution.positive,1)
+    const batch=result.batches[0]
+    assert.equal(batch.batch_answers.length,3)
+    assert.equal(batch.question_results[0].request_error.code,'MODEL_REQUEST_FAILED')
+    assert.equal(batch.batch_compilation.truncated,false)
+    assert.equal(batch.batch_graph_error.code,'GRAPH_WRITE_FAILED')
+    assert.equal(batch.option_candidates.candidates[0].proposed_description,'Synthetic other choice')
+    assert.equal(second.question_totals.left.q2.invalid_answers,1)
+    assert.equal(second.counts.left_analysis_complete,1)
+    assert.equal(second.counts.left_question_coverage_complete,1)
+    assert.equal(second.counts.left_question_analysis_complete,1)
+    state='note-partial'
+    const notePartialOut=join(f.root,'private-out-note-partial')
+    const notePartial=await compareRuns({leftPlanPath:join(f.root,'left-plan.json'),rightPlanPath:join(f.root,'right-plan.json'),leftRunPath:f.left,rightRunPath:f.right,selectionPath:f.path,outPath:notePartialOut,
+      createAnalysis:async()=>{const fn=req=>f.analysis(req);fn.dispose=()=>{};return fn},dispatch:f.dispatch})
+    assert.equal(notePartial.papers.find(row=>row.id==='paper-a').left.note.partial,true)
+    assert.equal(notePartial.papers.find(row=>row.id==='paper-a').left.deliverable_complete,false)
+    assert.equal(notePartial.counts.left_partial_note_coverage,1)
   } finally { await rm(f.root,{recursive:true,force:true}) }
 })
 

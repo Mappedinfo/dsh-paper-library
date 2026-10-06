@@ -59,18 +59,22 @@ async function inspectPaper({id, route, plan, run, analysis, dispatch, library, 
   item.status=record.status??'unknown'; item.model=record.model??manifest?.model??null; item.coverage=record.coverage??null
   item.analysis_complete=typeof record.analysis_complete==='boolean'?record.analysis_complete:null
   item.questionnaire=record.questionnaire??null
+  if(record.questionnaire&&Array.isArray(record.active_questions)) item.active_questions=record.active_questions
   item.full_questionnaire=typeof record.question_coverage?.full_questionnaire==='boolean'?record.question_coverage.full_questionnaire:null
   if(record.questionnaire) {
     item.question_protocol='questionnaire'
     item.question_coverage=record.question_coverage??null
     item.question_summary=record.question_summary??null
-    item.question_status=record.analysis_complete===false||record.question_coverage?.complete===false?'incomplete':
-      record.analysis_complete===true&&allQuestionCoverageSuccessful(record.question_coverage)?'complete':'unknown'
+    item.question_status=record.question_coverage?.complete===false?'incomplete':
+      allQuestionCoverageSuccessful(record.question_coverage)?'complete':'unknown'
   } else {
     item.question_protocol='legacy'
     item.question_coverage=null
     item.question_status='legacy'
   }
+  // Legacy field name retained as an alias for question-coverage success;
+  // analysis_complete remains the distinct whole-job completion signal.
+  item.question_analysis_complete=item.question_protocol==='questionnaire'?item.question_status==='complete':null
   item.metadata={field_count:Object.keys(record.metadata??{}).length,fields:Object.keys(record.metadata??{}),values:record.metadata??{},field_sources:record.field_sources??{}}
   item.metadata.quote_checks=await exactCheck(Object.entries(record.field_sources??{}).flatMap(([field,items])=>(Array.isArray(items)?items:[]).map(ref=>({kind:'metadata',field,source_id:ref?.source_id??null,quote:ref?.quote??null}))),id,dispatch,library)
   item.metadata.quote_count=item.metadata.quote_checks.length
@@ -91,9 +95,13 @@ async function inspectPaper({id, route, plan, run, analysis, dispatch, library, 
         metadata_quote_checks:hasBatchMetadata?await exactCheck(metadataRefs,id,dispatch,library):[],
         metadata_quote_count:hasBatchMetadata?metadataRefs.length:null,
         node_count:draft?.nodes?.length??null,draft:draft??null,quote_checks:await exactCheck(refs,id,dispatch,library),metadata:batch.metadata??null,
-        field_sources:batch.field_sources??null,quote_normalization:batch.batch_quote_normalization??batch.quote_normalization??null})
+        field_sources:batch.field_sources??null,quote_normalization:batch.batch_quote_normalization??batch.quote_normalization??null,
+        ...(record.questionnaire?{batch_answers:batch.batch_answers??[],question_results:batch.question_results??[],
+          batch_compilation:batch.batch_compilation??null,batch_graph_error:batch.batch_graph_error??null,option_candidates:batch.option_candidates??null,
+          question_group_errors:questionGroupErrors(batch.question_results??[])}:{})})
     } catch(e) { item.batches.push({index:i,error:safeError(e),quote_checks:[]}); item.warnings.push(`BATCH_${i}_UNAVAILABLE`) }
   }
+  if(record.questionnaire) item.question_counts=summarizeQuestions(record.question_coverage,item.batches)
   if(record.note_draft_id) try { const note=await dispatch({action:'knowledge_draft_get',id:record.note_draft_id},{library}); item.note={id:record.note_draft_id,status:note.status??null,body:note.body??null,title:note.title??null,partial:record.note_coverage?.full_document===false||record.note_coverage?.partial===true,coverage:record.note_coverage??null} }
   catch { item.note={status:'unavailable',body:null,partial:null,coverage:record.note_coverage??null}; item.warnings.push('NOTE_UNAVAILABLE') }
   else if(plan.notes===true) { item.note={status:'missing',body:null,partial:null,coverage:record.note_coverage??null}; item.warnings.push('NOTE_REQUIRED_MISSING') }
@@ -111,6 +119,62 @@ function allQuestionCoverageSuccessful(coverage) {
     return row&&Number.isSafeInteger(row.expected_batches)&&row.expected_batches>0&&row.answered_batches===row.expected_batches&&
       Array.isArray(row.failed_batches)&&row.failed_batches.length===0&&Array.isArray(row.unread_batches)&&row.unread_batches.length===0
   })
+}
+
+function questionGroupErrors(results) {
+  const errors=[]
+  const seen=new Set()
+  const add=(entry)=>{const key=JSON.stringify([entry.question_ids,entry.question_id,entry.code]);if(!seen.has(key)){seen.add(key);errors.push(entry)}}
+  for(const result of results) {
+    for(const error of result?.errors??[]) add({question_ids:result.question_ids??[],question_id:error.question_id??null,code:error.code??'UNKNOWN'})
+    if(result?.request_error) add({question_ids:result.question_ids??[],question_id:result.request_error.question_id??null,code:result.request_error.code??'MODEL_REQUEST_FAILED'})
+    for(const part of result?.missing_parts??[]) add({question_ids:result.question_ids??[],question_id:null,code:part==='RAW_HASH_MISMATCH'?'RAW_HASH_MISMATCH':'QUESTION_RESULT_PART_MISSING'})
+  }
+  return errors
+}
+
+function summarizeQuestions(coverage,batches) {
+  if(!coverage||!Array.isArray(coverage.question_ids)||!coverage.by_question||typeof coverage.by_question!=='object') return null
+  const byQuestion={}
+  for(const id of coverage.question_ids) {
+    const expected=coverage.by_question[id]??{}
+    const answers=batches.flatMap(batch=>batch.batch_answers??[]).filter(answer=>answer.question_id===id)
+    const invalidReasons={}
+    const choiceDistribution={positive:0,neutral:0,other:0}
+    for(const answer of answers.filter(row=>row.valid===true)) {
+      if(answer.choice==='other') choiceDistribution.other++
+      else if(answer.choice==='not_reported'||answer.choice==='not_applicable'||answer.neutral===true) choiceDistribution.neutral++
+      else choiceDistribution.positive++
+    }
+    for(const answer of answers.filter(row=>row.valid!==true)) {
+      const errors=Array.isArray(answer.errors)&&answer.errors.length?answer.errors:[{code:'INVALID_ANSWER'}]
+      for(const error of errors) { const code=typeof error?.code==='string'?error.code:'UNKNOWN'; invalidReasons[code]=(invalidReasons[code]??0)+1 }
+    }
+    const groupErrors=batches.flatMap(batch=>batch.question_group_errors??[]).filter(error=>error.question_id===id||!error.question_id&&error.question_ids?.includes(id))
+    byQuestion[id]={expected_batches:expected.expected_batches??0,answered_batches:expected.answered_batches??0,
+      failed_batches:expected.failed_batches??[],unread_batches:expected.unread_batches??[],valid_answers:expected.valid_answers??0,
+      invalid_answers:answers.filter(answer=>answer.valid!==true).length,valid_answer_records:answers.filter(answer=>answer.valid===true).length,
+      choice_distribution:choiceDistribution,invalid_reasons:invalidReasons,group_error_count:groupErrors.length,group_errors:groupErrors}
+  }
+  return {question_ids:[...coverage.question_ids],complete:coverage.complete===true,full_questionnaire:coverage.full_questionnaire===true,by_question:byQuestion}
+}
+
+function aggregateQuestionCounts(records,side) {
+  const totals={}
+  for(const paper of records) for(const [id,row] of Object.entries(paper[side].question_counts?.by_question??{})) {
+    const total=totals[id]??={expected_batches:0,answered_batches:0,failed_batches:0,unread_batches:0,valid_answers:0,invalid_answers:0,
+      invalid_reasons:{},choice_distribution:{positive:0,neutral:0,other:0},group_errors:0}
+    total.expected_batches+=row.expected_batches
+    total.answered_batches+=row.answered_batches
+    total.failed_batches+=row.failed_batches.length
+    total.unread_batches+=row.unread_batches.length
+    total.valid_answers+=row.valid_answers
+    total.invalid_answers+=row.invalid_answers
+    total.group_errors+=row.group_error_count
+    for(const choice of ['positive','neutral','other']) total.choice_distribution[choice]+=row.choice_distribution?.[choice]??0
+    for(const [code,count] of Object.entries(row.invalid_reasons)) total.invalid_reasons[code]=(total.invalid_reasons[code]??0)+count
+  }
+  return totals
 }
 async function readReceipts(runDir) {
   const dir=join(runDir,'responses'), result=[]
@@ -219,14 +283,19 @@ export async function compareRuns({leftPlanPath,leftRunPath,rightPlanPath,rightR
     counts[`${side}_partial_note_coverage`]=records.filter(p=>p[side].note?.partial===true).length
     counts[`${side}_legacy_question_protocol`]=records.filter(p=>p[side].question_protocol==='legacy').length
     counts[`${side}_questionnaire_jobs`]=records.filter(p=>p[side].question_protocol==='questionnaire').length
-    counts[`${side}_question_analysis_complete`]=records.filter(p=>p[side].question_status==='complete').length
+    counts[`${side}_analysis_complete`]=records.filter(p=>p[side].analysis_complete===true).length
+    counts[`${side}_question_coverage_complete`]=records.filter(p=>p[side].question_status==='complete').length
+    // Preserve the old combined completion semantics under the legacy name.
+    counts[`${side}_question_analysis_complete`]=records.filter(p=>p[side].question_protocol==='questionnaire'&&
+      p[side].analysis_complete===true&&allQuestionCoverageSuccessful(p[side].question_coverage)).length
     counts[`${side}_metadata_fields`]=records.reduce((n,p)=>n+(p[side].metadata?.field_count??0),0)
     counts[`${side}_warnings`]=records.reduce((n,p)=>n+(p[side].warnings?.length??0),0)
     counts[`${side}_errors`]=records.filter(p=>p[side].error||p[side].note?.status==='unavailable').length
   }
   const safeRoutes=routes=>Array.isArray(routes)?routes.map(r=>({name:r.name??null,status:r.status??null,error_code:r.error_code??null,error:r.error??null,counts:r.counts??null})):[]
   const report={schema:1,created_at:new Date().toISOString(),run_status:{left:lr.status??'unknown',right:rr.status??'unknown'},route_results:{left:safeRoutes(lr.routes),right:safeRoutes(rr.routes)},
-    usage_latency:{left:responseStats(leftReceipts),right:responseStats(rightReceipts)},quote_exactmatch:{left:quoteTotals(records,'left'),right:quoteTotals(records,'right')},counts,papers:records}
+    usage_latency:{left:responseStats(leftReceipts),right:responseStats(rightReceipts)},quote_exactmatch:{left:quoteTotals(records,'left'),right:quoteTotals(records,'right')},
+    question_totals:{left:aggregateQuestionCounts(records,'left'),right:aggregateQuestionCounts(records,'right')},counts,papers:records}
   for(const row of records) for(const side of ['left','right']) if(row[side].note.body!==null) {
     const safeId=row.id.replace(/[^A-Za-z0-9_-]/g,'_')
     await writeFile(join(out,`${side}-note-${safeId}.md`),String(row[side].note.body),{mode:0o600,flag:'wx'})
