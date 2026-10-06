@@ -42,6 +42,81 @@ test('Kimi uses fixed Anthropic endpoint and unwraps only a single answer object
   assert.deepEqual(agent.usage(), { calls: 1, input_tokens: 9, output_tokens: 3, failures: 0 })
 })
 
+test('explicit thinking modes preserve defaults or serialize enabled reasoning for both APIs', async () => {
+  for (const provider of ['glm', 'kimi']) for (const thinking of ['disabled', 'enabled', 'default']) {
+    let body
+    const agent = await createDirectModelAgent({ provider, model: 'synthetic-model', keyEnv: 'KEY', thinking }, {
+      env: { KEY: 'private-key' }, fetchImpl: async (_url, init) => {
+        body = JSON.parse(init.body); return response(provider === 'glm' ? glmResult() : kimiResult())
+      },
+    })
+    await agent({ prompt: 'Synthetic JSON' })
+    if (thinking === 'default') assert.equal(Object.hasOwn(body, 'thinking'), false)
+    else assert.deepEqual(body.thinking, { type: thinking })
+    assert.equal(Object.hasOwn(body, 'reasoning_effort'), false)
+  }
+  for (const reasoningEffort of ['low', 'high', 'max']) for (const thinking of ['enabled', 'default']) {
+    let body
+    const agent = await createDirectModelAgent({ provider: 'glm', model: 'glm-5.3-flash', keyEnv: 'KEY', thinking, reasoningEffort }, {
+      env: { KEY: 'private-key' }, fetchImpl: async (_url, init) => { body = JSON.parse(init.body); return response(glmResult()) },
+    })
+    await agent({ prompt: 'Synthetic JSON' })
+    assert.equal(body.reasoning_effort, reasoningEffort)
+  }
+})
+
+test('incompatible reasoning fails before credential access or network use', async () => {
+  let reads = 0, calls = 0
+  const env = new Proxy({}, { get() { reads++; throw new Error('Credential access is forbidden') } })
+  const fetchImpl = async () => { calls++; throw new Error('Network use is forbidden') }
+  const base = { provider: 'glm', model: 'synthetic-model', keyEnv: 'KEY' }
+  for (const change of [{ thinking: null }, { thinking: true }, { thinking: 'automatic' }, { reasoningEffort: 'low' },
+    { thinking: 'disabled', reasoningEffort: 'high' }, { thinking: 'default', reasoningEffort: 'medium' }, { thinking: 'enabled', reasoningEffort: null }]) {
+    await assert.rejects(createDirectModelAgent({ ...base, ...change }, { env, fetchImpl }), { code: 'DIRECT_MODEL_CONFIG_INVALID' })
+  }
+  for (const [provider, model] of [['glm', 'glm-5.3-flash'], ['glm', 'glm-5.3-flashx'], ['kimi', 'k3'], ['kimi', 'k3-256k']]) {
+    for (const mode of [{}, { thinking: 'disabled' }]) {
+      await assert.rejects(createDirectModelAgent({ ...base, provider, model, ...mode }, { env, fetchImpl }), { code: 'DIRECT_MODEL_CONFIG_INVALID' })
+    }
+    for (const thinking of ['enabled', 'default']) {
+      const agent = await createDirectModelAgent({ ...base, provider, model, thinking }, { env: { KEY: 'private-key' }, fetchImpl })
+      assert.deepEqual(agent.model, { provider, model })
+    }
+  }
+  assert.equal(reads, 0); assert.equal(calls, 0)
+})
+
+test('Kimi discards thinking and redacted thinking blocks while retaining only the final text', async () => {
+  const data = { ...kimiResult(), content: [
+    { type: 'thinking', thinking: 'private-key and synthetic hidden reasoning', signature: 'synthetic-signature' },
+    { type: 'text', text: '{"title":' }, { type: 'redacted_thinking', data: 'synthetic-redacted-data' },
+    { type: 'text', text: '"A paper"}' },
+  ] }
+  const agent = await createDirectModelAgent({ provider: 'kimi', model: 'k3-256k', keyEnv: 'KEY', thinking: 'default' }, {
+    env: { KEY: 'private-key' }, fetchImpl: async () => response(data),
+  })
+  assert.equal(await agent({ prompt: 'Synthetic JSON' }), '{"title":"A paper"}')
+  assert.deepEqual(agent.usage(), { calls: 1, input_tokens: 9, output_tokens: 3, failures: 0 })
+  assert.equal(JSON.stringify({ model: agent.model, usage: agent.usage(), ...agent }).includes('synthetic hidden reasoning'), false)
+})
+
+test('Kimi still refuses tool blocks, unknown blocks, truncation and malformed final text', async () => {
+  const cases = [
+    [{ ...kimiResult(), content: [...kimiResult().content, { type: 'tool_use', name: 'synthetic' }] }, 'DIRECT_MODEL_INCOMPLETE'],
+    [{ ...kimiResult(), content: [...kimiResult().content, { type: 'unknown' }] }, 'DIRECT_MODEL_INCOMPLETE'],
+    [{ ...kimiResult(), content: [...kimiResult().content, null] }, 'DIRECT_MODEL_INCOMPLETE'],
+    [kimiResult('{"title":"A paper"}', 'max_tokens'), 'DIRECT_MODEL_INCOMPLETE'],
+    [{ ...kimiResult(), content: [{ type: 'thinking', thinking: 'not a final answer' }] }, 'DIRECT_MODEL_INVALID_OUTPUT'],
+    [{ ...kimiResult(), content: [{ type: 'text', text: 7 }] }, 'DIRECT_MODEL_INVALID_OUTPUT'],
+  ]
+  for (const [data, code] of cases) {
+    const agent = await createDirectModelAgent({ provider: 'kimi', model: 'k3', keyEnv: 'KEY', thinking: 'enabled' }, {
+      env: { KEY: 'private-key' }, fetchImpl: async () => response(data),
+    })
+    await assert.rejects(agent({ prompt: 'Synthetic JSON' }), { code })
+  }
+})
+
 test('explicit env file takes precedence and accepts export/quoted comment syntax', async t => {
   const fs = await import('node:fs/promises')
   const os = await import('node:os')

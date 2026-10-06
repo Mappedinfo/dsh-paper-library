@@ -17,7 +17,9 @@ Paper Library 的后台可以直接运行，不需要浏览器或 DSH。独立�
 ```json
 {
   "provider": "glm",
-  "model": "glm-4.7-flash",
+  "model": "glm-5.3-flash",
+  "thinking": "enabled",
+  "reasoningEffort": "low",
   "keyEnv": "GLM_API_KEY",
   "envFile": "/absolute/private/credentials.env",
   "maxCalls": 100,
@@ -27,7 +29,11 @@ Paper Library 的后台可以直接运行，不需要浏览器或 DSH。独立�
 }
 ```
 
-GLM 使用官方 OpenAI Chat Completions 接口。Kimi Code 使用官方 Anthropic Messages 接口；改为 `provider:"kimi"`、`model:"kimi-for-coding"`、`keyEnv:"KIMI_TOKEN_PLAN_KEY"` 即可。模型名称是可修改的示例，不代表最新型号、价格或套餐适用保证；先确认自己的服务支持所选用途。已做过的连接测试及官方说明见[直连测试文档](direct-model-probe.md)。
+GLM 使用官方 OpenAI Chat Completions 接口。Kimi Code 使用官方 Anthropic Messages 接口；可设为 `provider:"kimi"`、`model:"k3-256k"`、`keyEnv:"KIMI_TOKEN_PLAN_KEY"`、`thinking:"default"`、`reasoningEffort:"high"`。模型名称是可修改的示例，不代表价格、套餐适用或分析质量保证；先确认自己的服务支持所选用途。
+
+`thinking` 接受 `disabled`／`enabled`／`default`；为兼容旧配置，省略时仍为 `disabled`。`default` 不发送思考开关，沿用模型服务默认设置。`reasoningEffort` 可选 `low`／`high`／`max`，不能与 `disabled` 同用。思考与最终输出共用服务的输出预算；截断仍报失败，不拼接思考内容充当答案。改变思考设置需要新的批次请求 ID。
+
+截至 2026-10-06，[GLM 官方文档](https://docs.z.ai/guides/vlm/glm-5.3-flash)列出的 Flash 型号是 `glm-5.3-flash`／`glm-5.3-flashx`，只能启用思考。[Kimi 官方文档](https://www.kimi.com/code/docs/kimi-code/models.html)将 `kimi-for-coding` 映射到 K2.8 Preview，并说明 K3 关闭思考后会路由到 K2.8 Preview 无思考版。独立后端因此拒绝 K3 或 GLM-5.3-Flash 系列搭配 `disabled`，避免误把别名当作目标模型测试。服务可能更新别名和权限，切换前仍需核对。仅处理最终文字答案，Kimi 的思考块不作为资料内容保存；连接测试说明见[直连测试文档](direct-model-probe.md)。
 
 `envFile` 是可选项；省略时只读取当前进程的指定环境变量。明确指定文件时，该文件中的指定变量优先；相对路径相对模型配置文件解析。仅解析普通赋值或 `export NAME='value'`，不执行 shell、不展开变量，不尝试第二个 key，不自动换模型或重试请求。支持的两个 API 地址固定，拒绝重定向。
 
@@ -131,7 +137,7 @@ node scripts/run-paper-analysis-batch.mjs \
   --plan /absolute/private/plan.json --out /absolute/private/new-run
 ```
 
-输出目录必须新建并位于源码仓库与资料库之外，保存私有运行清单、进度、结果和脱敏的模型响应。原始响应可能包含论文内容，不能提交到公开仓库。编排器不修改 PDF 资料，不自动重试失败生成或轮换 key。
+输出目录必须新建并位于源码仓库与资料库之外，保存私有运行清单、进度、结果和脱敏的模型响应。审计副本移除 GLM 思考正文及 Kimi 思考块内容，保留最终答案、用量和思考设置；无法解析的响应正文只保存省略标记。响应可能包含论文内容，不能提交到公开仓库。编排器不修改 PDF 资料，不自动重试失败生成或轮换 key。
 
 从既有元数据清点挑选首批时，可使用 `scripts/prepare-paper-analysis-run.py --library … --audit … --out … --model-config … --model-config … --count 12`。它只选已有目录中有 DOI／基础来源元数据、6–24 页、当前字节与审计哈希一致的驻留 PDF，按哈希去重；这是便于初次检查的选择规则，不代表随机样本或整库覆盖。实际选中条目与依据只写入私有目录。
 

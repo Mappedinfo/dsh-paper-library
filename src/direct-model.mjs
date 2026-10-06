@@ -19,6 +19,22 @@ function safeError(code, status) {
   return error
 }
 
+/** Pure validation shared with batch identity checks; never loads credentials. */
+export function directModelReasoningOptions(config) {
+  const thinking = config?.thinking === undefined ? 'disabled' : config.thinking
+  const reasoningEffort = config?.reasoningEffort
+  if (!['disabled', 'enabled', 'default'].includes(thinking) ||
+      (reasoningEffort !== undefined && (!['low', 'high', 'max'].includes(reasoningEffort) || thinking === 'disabled'))) {
+    throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
+  }
+  const model = typeof config?.model === 'string' ? config.model.trim().toLowerCase() : ''
+  if (thinking === 'disabled' && ((config?.provider === 'kimi' && ['k3', 'k3-256k'].includes(model)) ||
+      (config?.provider === 'glm' && ['glm-5.3-flash', 'glm-5.3-flashx'].includes(model)))) {
+    throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
+  }
+  return { thinking, ...(reasoningEffort !== undefined ? { reasoningEffort } : {}) }
+}
+
 function validateConfig(config) {
   if (!config || !['glm', 'kimi'].includes(config.provider)) throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
   if (typeof config.model !== 'string' || !config.model.trim() || config.model.length > 200) throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
@@ -33,7 +49,7 @@ function validateConfig(config) {
     throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
   }
   return Object.freeze({ provider: config.provider, model: config.model, keyEnv: config.keyEnv,
-    envFile: config.envFile, maxOutputTokens, maxCalls, timeoutMs })
+    envFile: config.envFile, maxOutputTokens, maxCalls, timeoutMs, ...directModelReasoningOptions(config) })
 }
 
 function parseEnvValue(raw) {
@@ -146,10 +162,14 @@ function parseModelResponse(provider, data) {
     if (typeof choice.message?.content !== 'string') throw safeError('DIRECT_MODEL_INVALID_OUTPUT', 502)
     return choice.message.content
   }
-  if (data?.stop_reason !== 'end_turn' || !Array.isArray(data.content) || data.content.some(block => block?.type !== 'text')) {
+  if (data?.stop_reason !== 'end_turn' || !Array.isArray(data.content) ||
+      data.content.some(block => !['text', 'thinking', 'redacted_thinking'].includes(block?.type))) {
     throw safeError('DIRECT_MODEL_INCOMPLETE', 502)
   }
-  return data.content.map(block => block.text ?? '').join('')
+  const text = data.content.filter(block => block.type === 'text')
+  if (!text.length || text.some(block => typeof block.text !== 'string')) throw safeError('DIRECT_MODEL_INVALID_OUTPUT', 502)
+  // Thinking blocks are protocol metadata, never part of the returned answer.
+  return text.map(block => block.text).join('')
 }
 
 function toJsonText(text, key) {
@@ -190,9 +210,11 @@ export async function createDirectModelAgent(config, { fetchImpl = globalThis.fe
       const headers = effective.provider === 'glm'
         ? { authorization: `Bearer ${key}`, 'content-type': 'application/json', 'user-agent': USER_AGENT }
         : { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'user-agent': USER_AGENT }
+      const reasoning = { ...(effective.thinking === 'default' ? {} : { thinking: { type: effective.thinking } }),
+        ...(effective.reasoningEffort !== undefined ? { reasoning_effort: effective.reasoningEffort } : {}) }
       const body = effective.provider === 'glm'
-        ? { model, messages: [{ role: 'user', content: prompt }], max_tokens: effective.maxOutputTokens, stream: false, thinking: { type: 'disabled' }, response_format: { type: 'json_object' } }
-        : { model, max_tokens: effective.maxOutputTokens, messages: [{ role: 'user', content: prompt }], stream: false, thinking: { type: 'disabled' } }
+        ? { model, messages: [{ role: 'user', content: prompt }], max_tokens: effective.maxOutputTokens, stream: false, ...reasoning, response_format: { type: 'json_object' } }
+        : { model, max_tokens: effective.maxOutputTokens, messages: [{ role: 'user', content: prompt }], stream: false, ...reasoning }
       response = await fetchImpl(ENDPOINTS[effective.provider], { method: 'POST', headers, body: JSON.stringify(body), signal: requestSignal, redirect: 'manual' })
       if (response.status >= 300 && response.status < 400) throw safeError('DIRECT_MODEL_REDIRECT_REFUSED', response.status)
       if (!response.ok) throw safeError('DIRECT_MODEL_HTTP_ERROR', response.status)

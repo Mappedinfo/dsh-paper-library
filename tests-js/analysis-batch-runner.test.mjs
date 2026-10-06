@@ -115,7 +115,8 @@ test('bounded oversized responses and unsafe transport messages preserve redacte
   const receipt = JSON.parse(await readFile(join(f.out, 'responses', '000001-glm.json'), 'utf8'))
   assert.equal(receipt.transport_error, 'BATCH_RESPONSE_TOO_LARGE')
   assert.equal(receipt.response_body_truncated, true)
-  assert.equal(Buffer.byteLength(receipt.response_body), 512 * 1024)
+  assert.ok(Buffer.byteLength(receipt.response_body) <= 512 * 1024)
+  assert.equal(receipt.response_body, '[unparseable response omitted]')
   const second = { ...f.options, out: join(f.home, 'transport-error'), fetchImpl: async () => { throw new Error(`Unsafe synthetic error ${f.key}`) } }
   assert.equal((await runAnalysisBatch(f.plan, second)).status, 'failed')
   const errorReceipt = await readFile(join(second.out, 'responses', '000001-glm.json'), 'utf8')
@@ -149,4 +150,23 @@ test('plan rejects duplicate papers across routes, implicit paths and unsupporte
   for (const change of [{ library: 'relative/library' }, { review: true }, { notes: true }, { routes: [] }, { apiKey: 'synthetic-raw-value' }]) {
     assert.throws(() => validatePlan({ ...f.plan, ...change }), { code: 'BATCH_PLAN_INVALID' })
   }
+})
+
+test('audits retain final answers and settings without provider reasoning content', async t => {
+  const hidden = 'SYNTHETIC_PRIVATE_REASONING', signature = 'SYNTHETIC_REASONING_SIGNATURE'
+  const f = await fixture(t, { fetchImpl: async url => new Response(JSON.stringify(url.includes('bigmodel')
+    ? { choices: [{ finish_reason: 'stop', message: { content: '{"answer":true}', reasoning_content: hidden } }] }
+    : { stop_reason: 'end_turn', content: [{ type: 'thinking', thinking: hidden, signature },
+      { type: 'redacted_thinking', data: hidden }, { type: 'text', text: '{"answer":true}' }] })) })
+  await runAnalysisBatch(f.plan, f.options)
+  for (const name of await readdir(join(f.out, 'responses'))) {
+    const text = await readFile(join(f.out, 'responses', name), 'utf8')
+    assert.equal(text.includes(hidden), false)
+    assert.equal(text.includes(signature), false)
+    const receipt = JSON.parse(text)
+    assert.match(receipt.response_body, /answer/)
+    assert.equal(receipt.response_body_encoding, 'json-normalized-redacted-no-reasoning')
+  }
+  const manifest = JSON.parse(await readFile(join(f.out, 'run-manifest.json'), 'utf8'))
+  assert.ok(manifest.routes.every(route => route.thinking === 'disabled'))
 })

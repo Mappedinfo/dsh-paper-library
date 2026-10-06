@@ -118,6 +118,26 @@ test('changed configured provider/model or budgets conflict across processes', a
   await assert.rejects(changedBudget(request), { code: 'ANALYSIS_CONFLICT' })
 })
 
+test('batch identity includes effective thinking and reasoning effort across processes', async () => {
+  const f = await fixture(); await f.handle(request)
+  const legacyLimits = [...f.records.values()].find(row => row.key.startsWith('analysis.headless-batch:')).value.limits
+  assert.deepEqual(legacyLimits, { maxConcurrency: 1, maxCalls: 100, maxOutputTokens: 8192, timeoutMs: 120000 })
+  const explicitDefault = await createHeadlessAnalysis({ ...f.options, modelConfig: { ...f.options.modelConfig, thinking: 'disabled' } })
+  assert.equal((await explicitDefault(request)).reused, true)
+  for (const change of [{ thinking: 'default' }, { thinking: 'enabled' }, { thinking: 'default', reasoningEffort: 'low' }]) {
+    const changed = await createHeadlessAnalysis({ ...f.options, modelConfig: { ...f.options.modelConfig, ...change } })
+    await assert.rejects(changed(request), { code: 'ANALYSIS_CONFLICT' })
+  }
+  const g = await fixture({ thinking: 'default', reasoningEffort: 'low' }); await g.handle(request)
+  const manifest = [...g.records.values()].find(row => row.key.startsWith('analysis.headless-batch:')).value
+  assert.equal(manifest.limits.thinking, 'default'); assert.equal(manifest.limits.reasoningEffort, 'low')
+  for (const reasoningEffort of ['high', 'max', undefined]) {
+    const changed = await createHeadlessAnalysis({ ...g.options, modelConfig: { ...g.options.modelConfig, reasoningEffort } })
+    await assert.rejects(changed(request), { code: 'ANALYSIS_CONFLICT' })
+  }
+  assert.equal(f.calls.length, 2); assert.equal(g.calls.length, 2)
+})
+
 test('bounded concurrency admits starts serially without ANALYSIS_BUSY failures', async () => {
   const f = await fixture({ maxConcurrency: 2 }); f.generationGate = gate()
   const run = f.handle({ ...request, ids: ['paper-a', 'paper-b', 'paper-c', 'paper-d'] })
@@ -254,6 +274,22 @@ test('loadModelConfig reads only explicit bounded JSON and resolves explicit env
   await assert.rejects(createHeadlessAnalysis({ modelConfig: { ...valid, apiKey: 'synthetic-private-value' } }), { code: 'DIRECT_MODEL_CONFIG_INVALID' })
 })
 
+test('explicit model config validates reasoning compatibility without loading credentials', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'paper-headless-reasoning-')); t.after(() => rm(home, { recursive: true, force: true }))
+  const path = join(home, 'model.json'), base = { provider: 'glm', model: 'glm-5.3-flash', keyEnv: 'SYNTHETIC_TEST_KEY', envFile: join(home, 'not-created.env') }
+  for (const thinking of ['default', 'enabled']) {
+    const config = { ...base, thinking, reasoningEffort: 'low' }
+    await writeFile(path, JSON.stringify(config)); assert.deepEqual(await loadModelConfig(path), config)
+    await createHeadlessAnalysis({ modelConfig: config })
+  }
+  for (const change of [{}, { thinking: 'disabled' }, { thinking: 'default', reasoningEffort: 'medium' },
+    { thinking: null }, { provider: 'kimi', model: 'k3-256k' }, { provider: 'kimi', model: 'k3', thinking: 'disabled' }]) {
+    const config = { ...base, ...change }
+    await writeFile(path, JSON.stringify(config)); await assert.rejects(loadModelConfig(path), { code: 'DIRECT_MODEL_CONFIG_INVALID' })
+    await assert.rejects(createHeadlessAnalysis({ modelConfig: config }), { code: 'DIRECT_MODEL_CONFIG_INVALID' })
+  }
+})
+
 async function cli(args, input) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, { stdio: ['pipe', 'pipe', 'pipe'] })
@@ -289,7 +325,7 @@ test('CLI waits for start and preserves failed batch JSON using only synthetic m
       if(input.action==='knowledge_draft_put'){const d={...input,id:'draft-a',status:'needs-review'};drafts.set(d.id,d);return d};
       if(input.action==='knowledge_draft_get')return drafts.get(input.id);
       throw new Error('Unexpected synthetic action'); }`
-  const direct = `export async function createDirectModelAgent(config){const fn=async()=>{await new Promise(r=>setTimeout(r,25));if(config.model==='synthetic-failure')throw new Error('Synthetic failure');return JSON.stringify({title:'Synthetic',body:'Synthetic',nodes:[],edges:[],assertions:[],metadata:{},field_sources:{}})};fn.model={provider:config.provider,model:config.model};return fn}`
+  const direct = `export {directModelReasoningOptions} from ${JSON.stringify(new URL('../src/direct-model.mjs?actual', import.meta.url).href)}; export async function createDirectModelAgent(config){const fn=async()=>{await new Promise(r=>setTimeout(r,25));if(config.model==='synthetic-failure')throw new Error('Synthetic failure');return JSON.stringify({title:'Synthetic',body:'Synthetic',nodes:[],edges:[],assertions:[],metadata:{},field_sources:{}})};fn.model={provider:config.provider,model:config.model};return fn}`
   const loader = join(home, 'loader.mjs')
   await writeFile(loader, `export async function load(url,context,next){if(url.endsWith('/src/bridge.mjs'))return{format:'module',shortCircuit:true,source:${JSON.stringify(bridge)}};if(url.endsWith('/src/direct-model.mjs'))return{format:'module',shortCircuit:true,source:${JSON.stringify(direct)}};return next(url,context)}`)
   const args = ['--no-warnings', '--loader', loader, 'src/cli.mjs', '--library', library, '--state-home', join(home, 'state'), '--model-config', config]

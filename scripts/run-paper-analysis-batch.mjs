@@ -172,8 +172,16 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
       return value
     }
     let text
-    try { text = JSON.stringify(clean(JSON.parse(body))) }
-    catch { text = clean(body) }
+    try {
+      const parsed = JSON.parse(body)
+      for (const choice of parsed?.choices ?? []) if (choice?.message) {
+        delete choice.message.reasoning_content
+        delete choice.message.reasoning
+      }
+      if (Array.isArray(parsed?.content)) parsed.content = parsed.content.map(block =>
+        ['thinking', 'redacted_thinking'].includes(block?.type) ? { type: block.type, omitted: true } : block)
+      text = JSON.stringify(clean(parsed))
+    } catch { text = '[unparseable response omitted]' }
     let truncated = Buffer.byteLength(text) > MAX_RESPONSE
     if (truncated) { text = Buffer.from(text).subarray(0, MAX_RESPONSE).toString('utf8'); while (Buffer.byteLength(text) > MAX_RESPONSE) text = text.slice(0, -1) }
     return { text, truncated }
@@ -197,6 +205,7 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
         failed: calls.filter(row => row.status === 'failed').length, active: calls.filter(row => row.status === 'running').length },
       credential_groups: credentialGroups(),
       routes: routes.map(route => ({ name: route.name, provider: route.config.provider, model: route.config.model,
+        thinking: route.config.thinking ?? 'disabled', reasoningEffort: route.config.reasoningEffort,
         maxCalls: route.config.maxCalls, maxConcurrency: route.config.maxConcurrency })) })
   }
   const auditedFetch = async (url, init = {}) => {
@@ -232,7 +241,8 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
     await atomic('run-manifest.json', { schema: 1, request_id: plan.request_id, mode: plan.mode, notes: plan.notes,
       review: false, apply_metadata: false, started_at: startedAt,
       routes: routes.map(route => ({ name: route.name, request_id: route.request_id, provider: route.config.provider,
-        model: route.config.model, maxCalls: route.config.maxCalls, maxConcurrency: route.config.maxConcurrency, ids: route.ids })) }, true)
+        model: route.config.model, thinking: route.config.thinking ?? 'disabled', reasoningEffort: route.config.reasoningEffort,
+        maxCalls: route.config.maxCalls, maxConcurrency: route.config.maxConcurrency, ids: route.ids })) }, true)
     await progress()
     interval = setInterval(() => { progress().catch(() => { progressWarning = true }) }, options.progressIntervalMs ?? 30000)
     interval.unref?.()
@@ -264,7 +274,7 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
               if (receipt.response_body !== undefined) {
                 const safeBody = auditBody(receipt.response_body)
                 receipt.response_body = safeBody.text
-                receipt.response_body_encoding = 'json-normalized-redacted'
+                receipt.response_body_encoding = 'json-normalized-redacted-no-reasoning'
                 if (safeBody.truncated) receipt.response_body_truncated = true
               }
               await atomic(`responses/${String(call.call_id).padStart(6, '0')}-${route.name}.json`, receipt, true)

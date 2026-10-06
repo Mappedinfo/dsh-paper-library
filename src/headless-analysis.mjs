@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path'
 import { defaultLibrary, dispatch as defaultDispatch } from './bridge.mjs'
 import { createLocalStateStore } from './local-state.mjs'
 import { createPaperAnalysis } from './harness/paper-analysis.mjs'
+import { directModelReasoningOptions } from './direct-model.mjs'
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value)
@@ -12,7 +13,7 @@ const fail = (code, message = '后台整理请求无效。', status = 400) => Ob
 const active = new Set(['queued', 'reading', 'generating', 'committing'])
 const actions = new Set(['paper_analysis_start', 'paper_analysis_get', 'paper_analysis_cancel', 'paper_analysis_apply', 'paper_analysis_context', 'paper_analysis_run'])
 const clone = value => JSON.parse(JSON.stringify(value))
-const configFields = new Set(['provider', 'model', 'keyEnv', 'envFile', 'maxOutputTokens', 'maxCalls', 'timeoutMs', 'maxConcurrency'])
+const configFields = new Set(['provider', 'model', 'keyEnv', 'envFile', 'maxOutputTokens', 'maxCalls', 'timeoutMs', 'maxConcurrency', 'thinking', 'reasoningEffort'])
 
 function validatedConfig(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config) || Object.keys(config).some(key => !configFields.has(key)) ||
@@ -23,6 +24,7 @@ function validatedConfig(config) {
     if (config[key] !== undefined && (!Number.isSafeInteger(config[key]) || config[key] < 1 || config[key] > maximum)) throw fail('DIRECT_MODEL_CONFIG_INVALID', '模型配置无效。')
   }
   if (config.envFile !== undefined && (typeof config.envFile !== 'string' || !config.envFile.trim() || /[\x00-\x1f]/.test(config.envFile))) throw fail('DIRECT_MODEL_CONFIG_INVALID', '模型配置无效。')
+  directModelReasoningOptions(config)
   return clone(config)
 }
 
@@ -147,7 +149,10 @@ export async function createHeadlessAnalysis(options = {}) {
     const ids = input.ids ?? (input.id === undefined ? null : [input.id])
     if (!Array.isArray(ids) || !ids.length || ids.length > 2000 || new Set(ids).size !== ids.length || ids.some(id => !validId(id) || id.startsWith('dataset_'))) throw fail('ANALYSIS_INVALID')
     const selected = [...ids], effective = effectiveOptions(input), route = model()
-    const limits = { maxConcurrency, maxCalls, maxOutputTokens: config?.maxOutputTokens ?? 8192, timeoutMs: config?.timeoutMs ?? 120000 }
+    const reasoning = directModelReasoningOptions(config)
+    // Preserve manifests made before explicit reasoning controls existed.
+    const limits = { maxConcurrency, maxCalls, maxOutputTokens: config?.maxOutputTokens ?? 8192, timeoutMs: config?.timeoutMs ?? 120000,
+      ...(reasoning.thinking === 'disabled' ? {} : reasoning) }
     return { ids: selected, effective, route, limits,
       fingerprint: hash({ ids: selected, options: effective, model: route, limits }) }
   }
