@@ -100,6 +100,28 @@ function pagesComplete(coverage, selection) {
   return coverage?.full_document === true
 }
 
+function questionCoverageComplete(coverage) {
+  if (!coverage || coverage.complete !== true || !Array.isArray(coverage.question_ids) || !coverage.question_ids.length ||
+    !coverage.by_question || typeof coverage.by_question !== 'object' || Array.isArray(coverage.by_question)) return false
+  return coverage.question_ids.every(id => {
+    const row = coverage.by_question[id]
+    return row && Number.isSafeInteger(row.expected_batches) && row.expected_batches > 0 && row.answered_batches === row.expected_batches &&
+      Array.isArray(row.failed_batches) && row.failed_batches.length === 0 && Array.isArray(row.unread_batches) && row.unread_batches.length === 0
+  })
+}
+
+function questionState(record) {
+  if (!record.questionnaire) return { protocol: 'legacy', status: 'legacy', analysis_complete: null, coverage: null }
+  const coverage = record.question_coverage ?? null
+  if (record.status === 'partial' || record.analysis_complete === false || coverage?.complete === false) return {
+    protocol: 'questionnaire', status: 'partial', analysis_complete: typeof record.analysis_complete === 'boolean' ? record.analysis_complete : null, coverage,
+  }
+  if (record.analysis_complete !== true || !questionCoverageComplete(coverage)) return {
+    protocol: 'questionnaire', status: 'unknown', analysis_complete: typeof record.analysis_complete === 'boolean' ? record.analysis_complete : null, coverage,
+  }
+  return { protocol: 'questionnaire', status: 'complete', analysis_complete: true, coverage }
+}
+
 async function inspectPaper({ analysis, dispatch, library, row, selection, notesRequired = false, skipRecord = false }) {
   const paper = { id: row.id, request_id: row.request_id ?? null, title: selection?.title ?? null,
     status: row.status ?? 'unknown', error: row.error ?? null, error_code: row.error_code ?? null,
@@ -121,6 +143,11 @@ async function inspectPaper({ analysis, dispatch, library, row, selection, notes
     return paper
   }
   paper.status = record.status ?? paper.status
+  const questions = questionState(record)
+  paper.question_protocol = questions.protocol
+  paper.question_status = questions.status
+  paper.analysis_complete = questions.analysis_complete
+  paper.question_coverage = questions.coverage
   paper.error = record.error ?? paper.error
   paper.coverage = record.coverage ? {
     page_count: record.coverage.page_count ?? null,
@@ -132,7 +159,9 @@ async function inspectPaper({ analysis, dispatch, library, row, selection, notes
   paper.batch_count = record.batch_count ?? 0
   paper.metadata_suggestion_field_count = Object.keys(record.metadata ?? {}).length
   paper.visible_draft_count = [record.draft_id, record.note_draft_id, record.review_draft_id].filter(Boolean).length
-  if (record.status !== 'complete') paper.coverage_class = 'failed'
+  if (record.status === 'failed' || record.status === 'cancelled') paper.coverage_class = 'failed'
+  else if (record.status === 'partial' || questions.status === 'partial') paper.coverage_class = 'partial'
+  else if (record.status !== 'complete' || questions.status === 'unknown') paper.coverage_class = 'unknown'
   else paper.coverage_class = 'partial'
   if (record.status === 'complete' && !pagesComplete(record.coverage, { pages: selection?.pages })) paper.inspection_warnings.push('COVERAGE_INCOMPLETE')
   if (record.status === 'complete' && record.warnings?.length) paper.inspection_warnings.push('RUN_WARNINGS')
@@ -173,20 +202,20 @@ async function inspectPaper({ analysis, dispatch, library, row, selection, notes
   }
   if (record.status === 'complete' && paper.evidence_quote_check.mismatched) paper.inspection_warnings.push('EVIDENCE_QUOTE_MISMATCH')
   if (record.status === 'complete' && paper.evidence_quote_check.unavailable) paper.inspection_warnings.push('EVIDENCE_SOURCE_UNAVAILABLE')
-  if (record.status === 'complete') paper.coverage_class = paper.inspection_warnings.length ? 'partial' : 'success'
+  if (record.status === 'complete' && paper.coverage_class !== 'unknown') paper.coverage_class = paper.inspection_warnings.length ? 'partial' : 'success'
   return paper
 }
 
 function summaryMarkdown(report) {
   const lines = ['# 批量论文整理检查', '', `运行状态：${report.run_status}；检查时间：${report.inspected_at}`, '',
-    `覆盖统计：成功 ${report.counts.success} 篇，部分覆盖 ${report.counts.partial} 篇，失败 ${report.counts.failed} 篇（共 ${report.counts.total} 篇）。`,
+    `覆盖统计：成功 ${report.counts.success} 篇，部分覆盖 ${report.counts.partial} 篇，失败 ${report.counts.failed} 篇${report.counts.unknown ? `，状态未知 ${report.counts.unknown} 篇` : ''}（共 ${report.counts.total} 篇）。`,
     `本机 PDF：哈希匹配 ${report.pdf_counts.match}，不匹配 ${report.pdf_counts.hash_mismatch}，其他异常 ${report.pdf_counts.other}。`, '',
-    '| 文献 | 状态 | 页覆盖 | 批次 | 草稿/节点 | 笔记待审 | 元数据建议字段数 | 引文校验 |',
-    '|---|---|---:|---:|---:|---|---:|---:|']
+    '| 文献 | 状态 | 问题覆盖 | 页覆盖 | 批次 | 草稿/节点 | 笔记待审 | 元数据建议字段数 | 引文校验 |',
+    '|---|---|---|---:|---:|---:|---|---:|---:|']
   for (const item of report.papers) {
     const coverage = item.coverage ? `${item.coverage.completed_pages.length}/${item.coverage.requested_pages?.length ?? item.coverage.page_count ?? '?'}${item.coverage.full_document ? '（全文）' : ''}` : '—'
     const evidence = item.evidence_quote_check
-    lines.push(`| ${escapeCell(item.title || item.id)} | ${item.coverage_class} / ${item.status} | ${coverage} | ${item.batch_count} | ${item.visible_draft_count}/${item.last_batch_node_count} | ${item.note_needs_review === null ? '—' : item.note_needs_review ? '是' : '否'} | ${item.metadata_suggestion_field_count} | ${evidence.matched}/${evidence.checked} |`)
+    lines.push(`| ${escapeCell(item.title || item.id)} | ${item.coverage_class} / ${item.status} | ${item.question_status ?? '—'} | ${coverage} | ${item.batch_count} | ${item.visible_draft_count}/${item.last_batch_node_count} | ${item.note_needs_review === null ? '—' : item.note_needs_review ? '是' : '否'} | ${item.metadata_suggestion_field_count} | ${evidence.matched}/${evidence.checked} |`)
   }
   lines.push('', '模型建议值未作为核验事实输出；本报告只统计字段数量和检查保存引文是否能在对应来源中找到。')
   return lines.join('\n') + '\n'
@@ -226,7 +255,8 @@ export async function inspectBatch({ planPath, runPath, selectionPath, createAna
       }
     }
     const counts = { total: papers.length, success: papers.filter(item => item.coverage_class === 'success').length,
-      partial: papers.filter(item => item.coverage_class === 'partial').length, failed: papers.filter(item => item.coverage_class === 'failed').length }
+      partial: papers.filter(item => item.coverage_class === 'partial').length, failed: papers.filter(item => item.coverage_class === 'failed').length,
+      ...(papers.some(item => item.coverage_class === 'unknown') ? { unknown: papers.filter(item => item.coverage_class === 'unknown').length } : {}) }
     const pdfCounts = { match: papers.filter(item => item.pdf.status === 'match').length,
       hash_mismatch: papers.filter(item => item.pdf.status === 'hash_mismatch').length,
       other: papers.filter(item => !['match', 'hash_mismatch'].includes(item.pdf.status)).length }

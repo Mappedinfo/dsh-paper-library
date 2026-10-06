@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createPaperAnalysisAgent } from '../src/harness/paper-analysis-agent.mjs'
+import { renderAnalysisAgentPersona } from '../src/prompt-templates.mjs'
 
 const input = { prompt: 'Read only FIXED_SELECTED_PAGES and return JSON.', provider: 'fixture', model: 'paper-model', reasoningEffort: 'high' }
 function fixture() {
@@ -38,6 +39,8 @@ test('native spawn has an owned empty parent, paper route, fixed source and no m
   assert.equal(parent.options.seed, undefined); assert.equal(parent.options.parentAgent, undefined)
   assert.equal(child.options.parent, f.parent); assert.equal(child.provider, 'spawn')
   assert.deepEqual(child.options.prompt, [{ type: 'text', text: input.prompt }])
+  assert.equal(child.options.persona, renderAnalysisAgentPersona())
+  assert.match(child.options.persona, /Do not use tools, inspect files, browse, send messages, or delegate/)
   assert.deepEqual(child.options.agentOptions, { provider: 'fixture', model: 'paper-model', reasoningEffort: 'high', maxTokens: 8192 })
   assert.deepEqual(child.options.toolFilter, { allow: [] }); assert.deepEqual(f.parentFilter, { allow: [] }); assert.equal(child.options.maxDepth, 1)
   assert.deepEqual(f.events, ['without-initiator', 'guard', 'parent', 'child', 'dispose-child', 'dispose-parent', 'unguard'])

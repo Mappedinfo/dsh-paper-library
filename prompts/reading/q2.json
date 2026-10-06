@@ -1,0 +1,11 @@
+{
+  "id": "q2",
+  "title": "主张与结果",
+  "question": "作者提出了哪些有限主张，报告了哪些观察或结果？",
+  "guidance": "分别标记作者声称、报告的结果和你的解释。保留条件、比较对象、范围与不确定性；不能把宣称高效当作已经测得高效。",
+  "options": [
+    {"id": "author_claim", "label": "作者明确提出的主张", "graph": {"node_type": "claim", "relation": "reports"}},
+    {"id": "reported_result", "label": "文章报告的观察或结果", "graph": {"node_type": "observation", "relation": "reports"}},
+    {"id": "reader_inference", "label": "基于所读证据的读者解释，尚待核实", "graph": {"node_type": "claim", "relation": "reports"}}
+  ]
+}

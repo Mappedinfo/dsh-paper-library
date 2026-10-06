@@ -1,0 +1,11 @@
+{
+  "id": "q3",
+  "title": "证据位置",
+  "question": "哪些原文、图表说明或公式说明值得作为后续核对的证据？",
+  "guidance": "指出可定位材料及它能核对什么。图像观察不是已验证文字；图表和公式只能引用提供文本中真实出现的说明，不通过 OCR 想象补写。",
+  "options": [
+    {"id": "text", "label": "正文的连续原文片段", "graph": {"node_type": "evidence"}},
+    {"id": "figure", "label": "图表及其可定位文字说明", "graph": {"node_type": "figure"}},
+    {"id": "formula", "label": "公式及其可定位文字说明", "graph": {"node_type": "formula"}}
+  ]
+}

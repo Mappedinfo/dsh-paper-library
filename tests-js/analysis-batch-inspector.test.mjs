@@ -101,3 +101,24 @@ test('a missing saved batch cannot be reported as successfully inspected', async
     assert.ok(f.report.papers[0].inspection_warnings.includes('LAST_BATCH_UNAVAILABLE'))
   } finally { await rm(join(f.run, '..'), { recursive: true, force: true }) }
 })
+
+test('questionnaire incompleteness is partial and missing completeness evidence stays unknown', async () => {
+  const base = { questionnaire: { version: 'reading-questions-v1', hash: 'a'.repeat(64) },
+    coverage: { page_count: 1, read_pages: [1], completed_pages: [1], full_document: true }, batch_count: 0, metadata: {} }
+  const incomplete = await fixture({ route: { name: 'route-a', status: 'partial', results: [{ id: 'paper-a', request_id: 'exact-run', status: 'partial' }] },
+    analysis: async () => ({ ...base, status: 'partial', analysis_complete: false,
+      question_coverage: { question_ids: ['q1'], complete: false, by_question: { q1: { expected_batches: 1, answered_batches: 0, failed_batches: [0], unread_batches: [], valid_answers: 0 } } } }) })
+  try {
+    assert.equal(incomplete.report.papers[0].coverage_class, 'partial')
+    assert.equal(incomplete.report.papers[0].question_status, 'partial')
+    assert.equal(incomplete.report.papers[0].analysis_complete, false)
+  } finally { await rm(join(incomplete.run, '..'), { recursive: true, force: true }) }
+
+  const unknown = await fixture({ route: { name: 'route-a', status: 'complete', results: [{ id: 'paper-a', request_id: 'exact-run', status: 'complete' }] },
+    analysis: async () => ({ ...base, status: 'complete' }) })
+  try {
+    assert.deepEqual(unknown.report.counts, { total: 1, success: 0, partial: 0, failed: 0, unknown: 1 })
+    assert.equal(unknown.report.papers[0].question_status, 'unknown')
+    assert.equal(unknown.report.papers[0].coverage_class, 'unknown')
+  } finally { await rm(join(unknown.run, '..'), { recursive: true, force: true }) }
+})

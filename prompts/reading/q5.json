@@ -1,0 +1,13 @@
+{
+  "id": "q5",
+  "title": "研究要素之间的联系",
+  "question": "本批材料明确说明了方法、数据、指标、任务与结果之间的什么联系？",
+  "guidance": "用一句话写出联系两端和条件。可选 subject 和 object 字段，都是从同一条引文连续复制的简短文字：前者是方法、数据、指标或任务，后者是结果；method_data 时前者是方法，后者是数据。必须同时提供两端，否则只保留关系判断。只记录文本明确连接的要素，不能把不同实验配置拼成一条关系；程序不猜测要素名称之间的连接。",
+  "options": [
+    {"id": "method_data", "label": "方法使用或处理某项数据", "graph": {"node_type": "claim", "relation": "reports"}},
+    {"id": "method_result", "label": "某种方法在给定条件下产生某结果", "graph": {"node_type": "claim", "relation": "reports"}},
+    {"id": "data_result", "label": "结果来自某项数据或子样本", "graph": {"node_type": "claim", "relation": "reports"}},
+    {"id": "metric_result", "label": "结果由某个指标测量", "graph": {"node_type": "claim", "relation": "reports"}},
+    {"id": "task_result", "label": "结果对应某项任务", "graph": {"node_type": "claim", "relation": "reports"}}
+  ]
+}

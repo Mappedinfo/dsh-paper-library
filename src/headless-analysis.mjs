@@ -6,7 +6,7 @@ import { defaultLibrary, dispatch as defaultDispatch } from './bridge.mjs'
 import { createLocalStateStore } from './local-state.mjs'
 import { createPaperAnalysis } from './harness/paper-analysis.mjs'
 import { directModelReasoningOptions } from './direct-model.mjs'
-import { analysisInputOptions } from './analysis-input.mjs'
+import { analysisInputOptions, analysisQuestionOptions } from './analysis-input.mjs'
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value)
@@ -59,7 +59,8 @@ function effectiveOptions(input) {
   const pages = input.pages ?? (mode === 'metadata' ? [1] : undefined)
   if (pages !== undefined && (!Array.isArray(pages) || !pages.length || pages.length > 2000 || new Set(pages).size !== pages.length || pages.some(n => !Number.isInteger(n) || n < 1 || n > 2000))) throw fail('ANALYSIS_INVALID')
   return { mode, ...(pages ? { pages: [...pages] } : {}), notes: input.notes ?? mode === 'full',
-    review: input.review ?? false, apply_metadata: input.apply_metadata ?? false, ...analysisInputOptions(input) }
+    review: input.review ?? false, apply_metadata: input.apply_metadata ?? false, ...analysisInputOptions(input),
+    ...analysisQuestionOptions(input) }
 }
 
 function compact(record, id, requestId) {
@@ -72,14 +73,20 @@ function compact(record, id, requestId) {
     ...(record.draft_id ? { draft_id: record.draft_id } : {}),
     ...(record.note_draft_id ? { note_draft_id: record.note_draft_id } : {}),
     ...(record.review_draft_id ? { review_draft_id: record.review_draft_id } : {}),
+    ...(record.questionnaire ? { questionnaire: record.questionnaire } : {}),
+    ...(record.question_summary ? { question_summary: record.question_summary } : {}),
+    ...(record.question_coverage ? { question_coverage: record.question_coverage } : {}),
+    ...(typeof record.analysis_complete === 'boolean' ? { analysis_complete: record.analysis_complete } : {}),
+    ...(record.batch_answers ? { batch_answers: record.batch_answers } : {}),
     metadata_fields: Object.keys(record.metadata ?? {}), warnings: record.warnings ?? [] })
 }
 
 function aggregate(results) {
   const completed = results.filter(row => row.status === 'complete').length
+  const partial = results.filter(row => row.status === 'partial').length
   const clean = results.filter(row => row.status === 'complete' && !row.warnings?.length).length
-  return { status: clean === results.length ? 'complete' : completed ? 'partial' : 'failed',
-    counts: { total: results.length, complete: completed, incomplete: results.length - completed,
+  return { status: clean === results.length ? 'complete' : completed || partial ? 'partial' : 'failed',
+    counts: { total: results.length, complete: completed, partial, incomplete: results.length - completed,
       with_warnings: results.filter(row => row.warnings?.length).length } }
 }
 

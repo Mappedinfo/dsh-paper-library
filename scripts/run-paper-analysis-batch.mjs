@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { createDirectModelAgent } from '../src/direct-model.mjs'
 import { createHeadlessAnalysis, loadModelConfig } from '../src/headless-analysis.mjs'
 import { createLocalStateStore } from '../src/local-state.mjs'
-import { analysisInputOptions } from '../src/analysis-input.mjs'
+import { analysisInputOptions, analysisQuestionOptions, validQuestionIds } from '../src/analysis-input.mjs'
 import { validateAnalysisImages } from '../src/model-input-images.mjs'
 
 const MAX_RESPONSE = 512 * 1024
@@ -28,20 +28,23 @@ function analysisContextReceipt(value, routeIds) {
       value.source_ids.some(id => !idValid(id)) || new Set(value.source_ids).size !== value.source_ids.length ||
       !Array.isArray(value.pages) || !value.pages.length || value.pages.length > 2000 ||
       value.pages.some(page => !Number.isSafeInteger(page) || page < 1 || page > 2000) || new Set(value.pages).size !== value.pages.length ||
-      (value.stage === 'batch' ? !Number.isSafeInteger(value.batch_index) || value.batch_index < 0 || value.batch_index > 1_000_000 : value.batch_index !== undefined)) return null
+      (value.stage === 'batch' ? !Number.isSafeInteger(value.batch_index) || value.batch_index < 0 || value.batch_index > 1_000_000 : value.batch_index !== undefined) ||
+      (value.question_ids !== undefined && (value.stage !== 'batch' || !validQuestionIds(value.question_ids)))) return null
   const selected = { id: value.id, request_id: value.request_id, stage: value.stage,
-    ...(value.stage === 'batch' ? { batch_index: value.batch_index } : {}), source_ids: [...value.source_ids], pages: [...value.pages] }
+    ...(value.stage === 'batch' ? { batch_index: value.batch_index } : {}),
+    ...(value.question_ids !== undefined ? { question_ids: [...value.question_ids] } : {}),
+    source_ids: [...value.source_ids], pages: [...value.pages] }
   return Buffer.byteLength(JSON.stringify(selected)) <= 65536 ? selected : null
 }
 
 export function validatePlan(plan) {
-  const fields = new Set(['library', 'python', 'localStateHome', 'request_id', 'mode', 'notes', 'review', 'routes', 'input_format', 'include_images'])
+  const fields = new Set(['library', 'python', 'localStateHome', 'request_id', 'mode', 'notes', 'review', 'routes', 'input_format', 'include_images', 'question_ids', 'question_mode'])
   if (!plan || Array.isArray(plan) || typeof plan !== 'object' || Object.keys(plan).some(key => !fields.has(key)) ||
       typeof plan.library !== 'string' || !isAbsolute(plan.library) || !idValid(plan.request_id) ||
       !['full', 'metadata'].includes(plan.mode) || typeof plan.notes !== 'boolean' || plan.review !== false ||
       plan.mode === 'metadata' && plan.notes || !Array.isArray(plan.routes) || !plan.routes.length || plan.routes.length > 20) throw fail('BATCH_PLAN_INVALID')
   for (const field of ['python', 'localStateHome']) if (plan[field] !== undefined && (typeof plan[field] !== 'string' || !isAbsolute(plan[field]))) throw fail('BATCH_PLAN_INVALID')
-  try { analysisInputOptions(plan) } catch { throw fail('BATCH_PLAN_INVALID') }
+  try { analysisInputOptions(plan); analysisQuestionOptions(plan) } catch { throw fail('BATCH_PLAN_INVALID') }
   const names = new Set(), ids = new Set()
   for (const route of plan.routes) {
     if (!route || Array.isArray(route) || Object.keys(route).some(key => !['name', 'config', 'ids'].includes(key)) ||
@@ -263,6 +266,7 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
         request_id: `route-${hash([plan.request_id, route.name])}` })
     }
     await atomic('run-manifest.json', { schema: 1, request_id: plan.request_id, mode: plan.mode, notes: plan.notes, ...analysisInputOptions(plan),
+      ...analysisQuestionOptions(plan),
       review: false, apply_metadata: false, started_at: startedAt,
       routes: routes.map(route => ({ name: route.name, request_id: route.request_id, provider: route.config.provider,
         model: route.config.model, thinking: route.config.thinking ?? 'disabled', reasoningEffort: route.config.reasoningEffort,
@@ -326,7 +330,8 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
           modelConfig: route.config, store: observedStore, agent: auditedAgent })
         handles.push(handle)
         const result = await handle({ action: 'paper_analysis_run', ids: route.ids, request_id: route.request_id,
-          mode: plan.mode, notes: plan.notes, review: false, apply_metadata: false, ...analysisInputOptions(plan) })
+          mode: plan.mode, notes: plan.notes, review: false, apply_metadata: false, ...analysisInputOptions(plan),
+          ...analysisQuestionOptions(plan) })
         for (const row of result.results ?? []) if (papers.has(row.id)) papers.set(row.id, {
           id: row.id, route: route.name, status: row.status, warnings: row.warnings?.length ?? 0,
           ...(row.note_draft_id ? { note_draft_id: row.note_draft_id } : {}) })

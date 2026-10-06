@@ -46,10 +46,7 @@ test('notes and reviews keep missing scan-only batches in coverage and preserve 
     if (request.analysisContext.stage === 'note') return JSON.stringify({ title: '合成精读笔记', body: '合成的来源说明，等待核对。' })
     if (request.analysisContext.stage === 'review') return JSON.stringify({ title: '证据图谱评审：合成练习',
       body: ['快速判定', '案例拆解', '状态矩阵', '归因', '联合覆盖', '形容词', '本文最多能声称', '本文不能声称', '修改清单'].join('\n') })
-    const source = sources.find(item => request.analysisContext.source_ids.includes(item.id))
-    return JSON.stringify({ title: '合成批次', body: '合成来源中的待核对发现。',
-      nodes: [{ id: 'finding', type: 'evidence', label: '合成证据', source_id: source.id, quote: 'international' }],
-      edges: [], assertions: [], metadata: {}, field_sources: {} })
+    return JSON.stringify({answers:request.analysisContext.question_ids.map(question_id=>({question_id,choice:'other',judgment:'合成批次中的词语',evidence:[{source_id:'S1',quote:'international'}]}))})
   }
   agent.supportsImages = true
   const handle = createPaperAnalysis({ store: memoryStore(), library: '/synthetic/library', agent,
@@ -81,7 +78,7 @@ test('notes and reviews keep missing scan-only batches in coverage and preserve 
       include_images: true, notes: true, review: true, apply_metadata: false })
     await handle.wait(paper.id, 'scan-gap')
     const record = await handle({ action: 'paper_analysis_get', id: paper.id, request_id: 'scan-gap' })
-    assert.equal(record.status, 'complete', JSON.stringify(record))
+    assert.equal(record.status, 'partial', JSON.stringify(record))
     assert.equal(record.batch_count, 3)
     assert.equal(record.coverage.full_document, false)
     for (const stage of ['note', 'review']) {

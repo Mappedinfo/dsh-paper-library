@@ -13,7 +13,7 @@ import { dispatch } from '../src/bridge.mjs'
 const run = promisify(execFile)
 const digest = async path => createHash('sha256').update(await readFile(path)).digest('hex')
 
-test('headless batches read synthetic PDFs through the real worker and share review records with HTTP and CLI', { timeout: 60000 }, async () => {
+test('headless batches read synthetic PDFs through the real worker and share question records with HTTP and CLI', { timeout: 60000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'paper-headless-integration-'))
   const library = join(root, 'library'), localStateHome = join(root, 'state')
   const python = resolve('.venv/bin/python')
@@ -46,19 +46,18 @@ print(json.dumps(items))
     const before = await Promise.all(files.map(digest))
     let calls = 0
     const seen = []
-    const agent = async ({ prompt }) => {
+    const agent = async ({ prompt, analysisContext }) => {
       calls++
-      const pack = JSON.parse(prompt.split('LIBRARY_KNOWLEDGE_JSON:\n')[1].split('\nAdditionally return')[0])
-      seen.push(pack.sources.map(source => source.locator.page))
-      const source = pack.sources[0], metadataOnly = prompt.startsWith('Extract ONLY')
+      if (analysisContext?.question_ids) {
+        seen.push(analysisContext.pages)
+        return JSON.stringify({ answers: analysisContext.question_ids.map(question_id => ({ question_id, choice: 'not_reported' })) })
+      }
+      const metadataOnly = prompt.startsWith('Extract ONLY')
+      const sourcePack = prompt.match(/LIBRARY_KNOWLEDGE_JSON:\n(\{[\s\S]*?\})\nAdditionally return/)?.[1]
+      if (metadataOnly && sourcePack) seen.push(JSON.parse(sourcePack).sources.map(source => source.locator.page))
       return JSON.stringify({ title: '阅读方法练习草稿', body: '合成学习练习的待核对记录。',
-        nodes: metadataOnly ? [] : [
-          { id: 'quote', type: 'evidence', label: '原文年份', source_id: source.id, quote: 'Published 2024' },
-          { id: 'claim', type: 'claim', label: '练习中明确给出了年份' },
-        ], edges: [], assertions: metadataOnly ? [] : [
-          { subject: 'evidence:quote', object: 'claim:claim', relation: 'supports', source_id: source.id, surface: '合成例证' },
-        ], metadata: { issued: { 'date-parts': [[2024]] } },
-        field_sources: { issued: [{ source_id: source.id, quote: 'Published 2024' }] },
+        nodes: [], edges: [], assertions: [], ...(metadataOnly ? { metadata: { issued: { 'date-parts': [[2024]] } },
+          field_sources: { issued: [{ source_id: analysisContext.source_ids[0], quote: 'Published 2024' }] } } : {}),
       })
     }
     agent.model = { provider: 'synthetic', model: 'deterministic' }
@@ -66,24 +65,27 @@ print(json.dumps(items))
     const input = { action: 'paper_analysis_run', ids: papers.map(paper => paper.id), request_id: 'learning-full', notes: false }
     const batch = await analysis(input)
     assert.equal(batch.status, 'complete', JSON.stringify(batch))
-    assert.equal(calls, 3, '13 pages use two batches; 3 pages use one')
-    assert.deepEqual(seen, [[1,2,3,4,5,6,7,8], [9,10,11,12,13], [1,2,3]])
+    assert.equal(calls, 9, 'each of three page batches runs the three grouped reading-question calls')
+    assert.deepEqual([...new Map(seen.map(pages => [JSON.stringify(pages), pages])).values()], [[1,2,3,4,5,6,7,8], [9,10,11,12,13], [1,2,3]])
     assert.equal(batch.results.length, 2)
     for (const result of batch.results) {
       assert.equal(result.coverage.full_document, true)
       const record = await analysis({ action: 'paper_analysis_get', id: result.id, request_id: result.request_id })
       assert.equal(record.draft.status, 'needs-review')
       assert.equal(record.draft.origin, 'llm')
-      assert.equal(record.metadata.issued['date-parts'][0][0], 2024)
+      assert.equal(record.question_coverage.complete, true)
+      assert.equal(record.question_summary.valid_answers, 6 * (result.id === papers[0].id ? 2 : 1))
+      assert.equal(record.batch_answers.length, 6, 'the job view exposes the latest batch answers; cumulative counts remain in question_summary')
+      assert.equal(record.metadata.issued, undefined, 'full reading questions do not run the separate metadata extractor')
       assert.equal((await dispatch({ action: 'get', id: result.id }, { library, python })).issued, undefined)
     }
     assert.equal((await analysis(input)).status, 'complete')
-    assert.equal(calls, 3, 'same request reuses persisted results')
+    assert.equal(calls, 9, 'same request reuses persisted results')
 
     const metadata = await analysis({ action: 'paper_analysis_run', ids: [papers[0].id], request_id: 'learning-metadata', mode: 'metadata' })
     assert.equal(metadata.status, 'complete', JSON.stringify(metadata))
-    assert.equal(calls, 4)
-    assert.deepEqual(seen[3], [1], 'metadata extraction defaults to the first page only')
+    assert.equal(calls, 10)
+    assert.deepEqual(seen.at(-1), [1], 'metadata extraction defaults to the first page only')
     assert.equal(metadata.results[0].coverage.full_document, false)
     assert.deepEqual(await Promise.all(files.map(digest)), before, 'analysis never rewrites PDFs')
 

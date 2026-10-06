@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "template": "\n{{TEXT_GAPS}}{{QUESTION_GAPS}}",
+  "text_gaps": "INPUT_COVERAGE_GAPS: {{MISSING_JSON}}. Explicitly disclose these pages as lacking textual evidence. Page rendering alone is not proof they were analyzed. Do not claim full-paper coverage.\n",
+  "question_gaps": "QUESTION_COVERAGE: {{QUESTION_JSON}}. State whether this question coverage is complete or partial. Explicitly disclose each selected question whose status is missing, failed, partial, or otherwise incomplete. Do not present an incomplete answer as completed, and do not claim complete question coverage when any selected question is missing or failed. A completed answer is model output, not independent verification of its claims; use the evidence supplied with that answer.\n"
+}

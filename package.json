@@ -28,6 +28,7 @@
   "files": [
     "src/**/*.mjs",
     "src/**/*.py",
+    "prompts/**/*.json",
     "lib/client.js",
     "web",
     "mcp",
@@ -42,6 +43,7 @@
     "THIRD_PARTY.md",
     "docs/api.md",
     "docs/headless-analysis.md",
+    "docs/reading-questions.md",
     "docs/research-os-compatibility.md",
     "docs/validation.md",
     "docs/annotation-reference-design.md",

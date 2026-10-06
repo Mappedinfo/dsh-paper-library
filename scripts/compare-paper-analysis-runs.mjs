@@ -24,7 +24,9 @@ async function readJSON(path, max=MAX_JSON) {
   } finally { await h?.close() }
 }
 function planShape(plan) {
-  return JSON.stringify({mode:plan.mode,notes:plan.notes,review:plan.review??false,...analysisInputOptions(plan),routes:[...(plan.routes??[])].map(r=>[...r.ids].sort()).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))})
+  return JSON.stringify({mode:plan.mode,notes:plan.notes,review:plan.review??false,...analysisInputOptions(plan),
+    ...(plan.question_ids!==undefined?{question_ids:plan.question_ids}:{}),...(plan.question_mode!==undefined?{question_mode:plan.question_mode}:{}),
+    routes:[...(plan.routes??[])].map(r=>[...r.ids].sort()).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))})
 }
 function byId(plan) { const out=new Map(); for(const r of plan.routes??[]) for(const id of r.ids??[]) { if(out.has(id)) throw new Error('DUPLICATE_PAPER_ID'); out.set(id,r.name) } return out }
 function quoteRefs(batch) {
@@ -55,6 +57,20 @@ async function inspectPaper({id, route, plan, run, analysis, dispatch, library, 
   try { record=await analysis({action:'paper_analysis_get',id,request_id:paperRequestId}) }
   catch(e) { item.error=safeError(e); return item }
   item.status=record.status??'unknown'; item.model=record.model??manifest?.model??null; item.coverage=record.coverage??null
+  item.analysis_complete=typeof record.analysis_complete==='boolean'?record.analysis_complete:null
+  item.questionnaire=record.questionnaire??null
+  item.full_questionnaire=typeof record.question_coverage?.full_questionnaire==='boolean'?record.question_coverage.full_questionnaire:null
+  if(record.questionnaire) {
+    item.question_protocol='questionnaire'
+    item.question_coverage=record.question_coverage??null
+    item.question_summary=record.question_summary??null
+    item.question_status=record.analysis_complete===false||record.question_coverage?.complete===false?'incomplete':
+      record.analysis_complete===true&&allQuestionCoverageSuccessful(record.question_coverage)?'complete':'unknown'
+  } else {
+    item.question_protocol='legacy'
+    item.question_coverage=null
+    item.question_status='legacy'
+  }
   item.metadata={field_count:Object.keys(record.metadata??{}).length,fields:Object.keys(record.metadata??{}),values:record.metadata??{},field_sources:record.field_sources??{}}
   item.metadata.quote_checks=await exactCheck(Object.entries(record.field_sources??{}).flatMap(([field,items])=>(Array.isArray(items)?items:[]).map(ref=>({kind:'metadata',field,source_id:ref?.source_id??null,quote:ref?.quote??null}))),id,dispatch,library)
   item.metadata.quote_count=item.metadata.quote_checks.length
@@ -82,8 +98,19 @@ async function inspectPaper({id, route, plan, run, analysis, dispatch, library, 
   catch { item.note={status:'unavailable',body:null,partial:null,coverage:record.note_coverage??null}; item.warnings.push('NOTE_UNAVAILABLE') }
   else if(plan.notes===true) { item.note={status:'missing',body:null,partial:null,coverage:record.note_coverage??null}; item.warnings.push('NOTE_REQUIRED_MISSING') }
   else item.note={status:'not_required',body:null,partial:false,coverage:record.note_coverage??null}
-  item.deliverable_complete=record.status==='complete'&&record.coverage?.full_document===true&&(!plan.notes||Boolean(record.note_draft_id)&&item.note.status!=='unavailable'&&item.note.status!=='missing'&&item.note.partial!==true)
+  const questionsComplete=!record.questionnaire || record.analysis_complete===true && allQuestionCoverageSuccessful(record.question_coverage)
+  item.deliverable_complete=record.status==='complete'&&record.coverage?.full_document===true&&(!plan.notes||Boolean(record.note_draft_id)&&item.note.status!=='unavailable'&&item.note.status!=='missing'&&item.note.partial!==true)&&questionsComplete
   return item
+}
+
+function allQuestionCoverageSuccessful(coverage) {
+  if(!coverage||typeof coverage!=='object'||coverage.complete!==true||!Array.isArray(coverage.question_ids)||!coverage.question_ids.length||
+    !coverage.by_question||typeof coverage.by_question!=='object'||Array.isArray(coverage.by_question)) return false
+  return coverage.question_ids.every(id=>{
+    const row=coverage.by_question[id]
+    return row&&Number.isSafeInteger(row.expected_batches)&&row.expected_batches>0&&row.answered_batches===row.expected_batches&&
+      Array.isArray(row.failed_batches)&&row.failed_batches.length===0&&Array.isArray(row.unread_batches)&&row.unread_batches.length===0
+  })
 }
 async function readReceipts(runDir) {
   const dir=join(runDir,'responses'), result=[]
@@ -143,9 +170,9 @@ function md(report) {
   lines.push('')
   for(const side of ['left','right']) { const s=report.usage_latency[side]; lines.push(`停止原因 ${side}：finish_reason ${JSON.stringify(s.finish_reason_counts)}；stop_reason ${JSON.stringify(s.stop_reason_counts)}。`, '') }
   lines.push('', '输入 token 按提供商原始口径保留：prompt_tokens 已含缓存；Anthropic input_tokens 不含 cache read/write。未知的缓存或思考 token 保持未知。停止原因分布见 JSON 明细。','',
-    '| Paper ID | 左状态/全文 | 右状态/全文 | 左批次/字段/note | 右批次/字段/note |', '|---|---|---|---|---|')
-  for(const p of report.papers) lines.push(`| ${p.id} | ${p.left.status} / ${p.left.coverage?.full_document===true?'是':'否'} | ${p.right.status} / ${p.right.coverage?.full_document===true?'是':'否'} | ${p.left.batches.length} / ${p.left.metadata.field_count} / ${p.left.note.status??'—'} | ${p.right.batches.length} / ${p.right.metadata.field_count} / ${p.right.note.status??'—'} |`)
-  lines.push('','模型字段是建议值；本报告不裁定内容真伪，也不估算费用。'); return lines.join('\n')+'\n'
+    '| Paper ID | 左状态/全文 | 右状态/全文 | 左问题覆盖 | 右问题覆盖 | 左批次/字段/note | 右批次/字段/note |', '|---|---|---|---|---|---|---|')
+  for(const p of report.papers) lines.push(`| ${p.id} | ${p.left.status} / ${p.left.coverage?.full_document===true?'是':'否'} | ${p.right.status} / ${p.right.coverage?.full_document===true?'是':'否'} | ${p.left.question_status} | ${p.right.question_status} | ${p.left.batches.length} / ${p.left.metadata.field_count} / ${p.left.note.status??'—'} | ${p.right.batches.length} / ${p.right.metadata.field_count} / ${p.right.note.status??'—'} |`)
+  lines.push('','问题流程为 legacy 的作业沿用旧完成判定，不推断其问题覆盖；新问卷作业必须显式报告 analysis_complete 与全部成功覆盖。模型字段是建议值；本报告不裁定内容真伪，也不估算费用。'); return lines.join('\n')+'\n'
 }
 
 export async function compareRuns({leftPlanPath,leftRunPath,rightPlanPath,rightRunPath,selectionPath,outPath,createAnalysis=createHeadlessAnalysis,dispatch=defaultDispatch}) {
@@ -190,6 +217,9 @@ export async function compareRuns({leftPlanPath,leftRunPath,rightPlanPath,rightR
     counts[`${side}_full_document`]=records.filter(p=>p[side].coverage?.full_document===true).length
     counts[`${side}_needs_review_note`]=records.filter(p=>p[side].note?.status==='needs-review').length
     counts[`${side}_partial_note_coverage`]=records.filter(p=>p[side].note?.partial===true).length
+    counts[`${side}_legacy_question_protocol`]=records.filter(p=>p[side].question_protocol==='legacy').length
+    counts[`${side}_questionnaire_jobs`]=records.filter(p=>p[side].question_protocol==='questionnaire').length
+    counts[`${side}_question_analysis_complete`]=records.filter(p=>p[side].question_status==='complete').length
     counts[`${side}_metadata_fields`]=records.reduce((n,p)=>n+(p[side].metadata?.field_count??0),0)
     counts[`${side}_warnings`]=records.reduce((n,p)=>n+(p[side].warnings?.length??0),0)
     counts[`${side}_errors`]=records.filter(p=>p[side].error||p[side].note?.status==='unavailable').length

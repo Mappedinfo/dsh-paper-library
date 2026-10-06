@@ -28,7 +28,7 @@ function fixture(){
 test('import events persist a bounded-parallel queue; duplicate selection and metadata-only items add no extra work',async t=>{
   const f=fixture();t.after(()=>f.handle.dispose())
   await f.handle.imported([{id:'paper-a',pdf:true},{id:'paper-b',pdf:true},{id:'dataset_a',pdf:true},{id:'metadata-only',pdf:false}])
-  await until(()=>f.calls.length===2);assert.equal(f.calls[0].id,'paper-a');assert.equal(f.calls[0].apply_metadata,true)
+  await until(()=>f.calls.length===2);assert.equal(f.calls[0].id,'paper-a');assert.equal(f.calls[0].apply_metadata,false,'Full reading never inherits the metadata-fill setting')
   assert.equal(f.calls[1].id,'paper-b','Two distinct papers run in parallel within the bound')
   assert.equal(f.calls[0].pages,undefined,'Default queue scope is all pages')
   await f.handle({action:'paper_analysis_start',id:'paper-b',request_id:'selected-b',reuse:true})
@@ -45,7 +45,7 @@ test('the third paper waits for a free slot instead of running ahead of capacity
   f.done('paper-a');await until(()=>f.calls.length===3);assert.equal(f.calls[2].id,'paper-c')
   f.done('paper-b');f.done('paper-c');await until(()=>f.records.get('analysis.queue:v1').value.entries.length===0)
 })
-test('turning automation off pauses pending work; re-enabling honors the latest metadata choice',async t=>{
+test('turning automation off pauses pending work; re-enabling keeps full reading free from metadata writes',async t=>{
   const f=fixture();t.after(()=>f.handle.dispose());await f.handle.imported([{id:'paper-a',pdf:true},{id:'paper-b',pdf:true},{id:'paper-c',pdf:true}]);await until(()=>f.calls.length===2)
   f.setAuto(false);f.done('paper-a');await until(()=>f.records.get('analysis.queue:v1').value.entries.length===2);await tick();assert.equal(f.calls.length,2,'Paused automation does not admit the waiting paper')
   f.setFill(false);f.setAuto(true);await until(()=>f.calls.length===3);assert.equal(f.calls[2].apply_metadata,false);f.done('paper-b');f.done('paper-c')
@@ -66,8 +66,42 @@ test('cancelling a waiting paper is durable and later selection does not requeue
 test('disabled defaults overridden by the user stay disabled and malformed queued input never runs',async t=>{
   const f=fixture();t.after(()=>f.handle.dispose());f.setAuto(false)
   const result=await f.handle.imported([{id:'paper-a',pdf:true}]);assert.equal(result[0].status,'idle')
-  for(const input of [{id:'../x',request_id:'x'},{id:'paper-a',request_id:'x',pages:[1,1]},{id:'paper-a',request_id:'x',source_session_id:'bad\n'}])await assert.rejects(f.handle({action:'paper_analysis_start',reuse:true,...input}))
+  for(const input of [{id:'../x',request_id:'x'},{id:'paper-a',request_id:'x',pages:[1,1]},{id:'paper-a',request_id:'x',source_session_id:'bad\n'},
+    {id:'paper-a',request_id:'x',question_ids:['q1','q1']},{id:'paper-a',request_id:'x',question_mode:'random'},{id:'paper-a',request_id:'x',mode:'metadata',notes:true},
+    {id:'paper-a',request_id:'x',input_format:'invalid'},{id:'paper-a',request_id:'x',include_images:'yes'}])await assert.rejects(f.handle({action:'paper_analysis_start',reuse:true,...input}))
   assert.equal(f.calls.length,0)
+})
+
+test('queued selected reading preserves mode, question scope, optional stages and input representation through restart',async t=>{
+  const f=fixture();await f.handle.imported([{id:'paper-a',pdf:true},{id:'paper-b',pdf:true}]);await until(()=>f.calls.length===2)
+  const selected={action:'paper_analysis_start',id:'paper-c',request_id:'selected-c',reuse:true,mode:'full',pages:[3,5],question_ids:['q4','q6'],question_mode:'separate',
+    notes:false,review:false,input_format:'markdown',include_images:true,apply_metadata:true,source_session_id:'source-session'}
+  await f.handle(selected)
+  const saved=f.records.get('analysis.queue:v1').value.entries.find(item=>item.id==='paper-c')
+  assert.equal(saved.mode,'full');assert.deepEqual(saved.question_ids,['q4','q6']);assert.equal(saved.question_mode,'separate')
+  assert.equal(saved.notes,false);assert.equal(saved.review,false);assert.equal(saved.apply_metadata,false)
+  f.handle.dispose();f.done('paper-a')
+  const restored=createQueuedPaperAnalysis(f.options);t.after(()=>restored.dispose());await until(()=>f.calls.length===3)
+  assert.deepEqual(f.calls[2],{...selected,apply_metadata:false})
+  f.done('paper-b');f.done('paper-c')
+})
+
+test('explicit queued metadata mode remains metadata and preserves an explicit no-write choice',async t=>{
+  const f=fixture();t.after(()=>f.handle.dispose())
+  await f.handle({action:'paper_analysis_start',id:'metadata-paper',request_id:'metadata-run',reuse:true,mode:'metadata',notes:false,apply_metadata:false,input_format:'markdown'})
+  await until(()=>f.calls.length===1)
+  assert.equal(f.calls[0].mode,'metadata');assert.equal(f.calls[0].notes,false);assert.equal(f.calls[0].review,false)
+  assert.equal(f.calls[0].input_format,'markdown');assert.equal(f.calls[0].apply_metadata,false)
+  f.done('metadata-paper')
+})
+
+test('legacy persisted queue entries retain default full scope without reinstating automatic metadata writes',async t=>{
+  const f=fixture();f.handle.dispose()
+  await f.options.store.put('analysis.queue:v1',{entries:[{id:'old-paper',request_id:'old-request',apply_metadata:true,review:false}]},0)
+  const restored=createQueuedPaperAnalysis(f.options);t.after(()=>restored.dispose());await until(()=>f.calls.length===1)
+  assert.equal(f.calls[0].id,'old-paper');assert.equal(f.calls[0].mode,undefined)
+  assert.equal(f.calls[0].apply_metadata,false);assert.equal(f.calls[0].review,false)
+  f.done('old-paper')
 })
 test('a stale request cannot inspect or cancel a different queued request',async t=>{
   const f=fixture();t.after(()=>f.handle.dispose());await f.handle.imported([{id:'paper-a',pdf:true},{id:'paper-b',pdf:true},{id:'paper-c',pdf:true}]);await until(()=>f.calls.length===2)

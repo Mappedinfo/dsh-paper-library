@@ -35,6 +35,7 @@ with fitz.open() as doc:
         if kind == 'text':
             page.insert_text((40, 60), f'Learning methods exercise. Published 2024. Page {index + 1}.', fontsize=12)
             page.insert_text((40, 100), 'Synthetic inter-\\nnational reading finding.', fontsize=12)
+            page.insert_text((40, 140), 'The method is reading.', fontsize=12)
             page.add_freetext_annot(fitz.Rect(40, 700, 550, 740), 'SYNTHETIC ANNOTATION EXCLUDED', fontsize=10)
         else:
             pixels = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 40, 40), False)
@@ -52,13 +53,13 @@ finally:
   const paper = JSON.parse(result.stdout)
   const before = await Promise.all([paper.original, paper.managed].map(fileHash))
   const agent = async request => {
-    const sources = JSON.parse(request.prompt.split('LIBRARY_KNOWLEDGE_JSON:\n')[1].split('\nAdditionally return')[0]).sources
-    calls.push({ ...request, sources })
-    const source = sources[0], quote = source.text.includes('international') ? 'international' : 'Published 2024'
-    return JSON.stringify({ title: '合成学习草稿', body: '所选练习页的待核对记录。',
-      nodes: [{ id: 'finding', type: 'evidence', label: '合成摘录', source_id: source.id, quote }],
-      edges: [], assertions: [], metadata: { issued: { 'date-parts': [[2024]] } },
-      field_sources: { issued: [{ source_id: source.id, quote: 'Published 2024' }] } })
+    const sourceId = request.analysisContext.source_ids[0]
+    const source = await dispatch({ action: 'knowledge_source_get', id: sourceId }, { library, python })
+    calls.push({ ...request, sources: [{ id: source.id, text: source.text, locator: source.locator }] })
+    const answers = request.analysisContext.question_ids.map(question_id => question_id === 'q1'
+      ? { question_id, choice: 'method', judgment: '本练习明确将 reading 作为方法。', evidence: [{ source_id: 'S1', quote: 'The method is reading.' }] }
+      : { question_id, choice: 'not_reported' })
+    return JSON.stringify({ answers })
   }
   agent.model = { provider: 'synthetic', model: 'deterministic-vision' }
   agent.supportsImages = true
@@ -83,9 +84,9 @@ test('real worker sends bounded Markdown page images and saves traceable sources
   const f = await fixture(t)
   const result = await f.analysis({ ...f.input, input_format: 'markdown', include_images: true })
   assert.equal(result.status, 'complete', JSON.stringify(result))
-  assert.equal(f.calls.length, 2)
-  assert.deepEqual(f.calls.map(call => call.analysisContext.pages), [[1, 2], [3]])
-  assert.deepEqual(f.calls.map(call => call.images.map(image => image.page)), [[1, 2], [3]])
+  assert.equal(f.calls.length, 6)
+  assert.deepEqual([...new Map(f.calls.map(call => [call.analysisContext.batch_index, call.analysisContext.pages])).values()], [[1, 2], [3]])
+  assert.deepEqual([...new Map(f.calls.map(call => [call.analysisContext.batch_index, call.images.map(image => image.page)])).values()], [[1, 2], [3]])
   const requestId = result.results[0].request_id
   const record = await f.get(requestId)
   assert.equal(record.coverage.full_document, true)
@@ -96,8 +97,8 @@ test('real worker sends bounded Markdown page images and saves traceable sources
   const imageData = []
   for (const [index, call] of f.calls.entries()) {
     assert.ok(call.images.length >= 1 && call.images.length <= 2)
-    assert.match(call.prompt, /normalized Markdown derived from PDF layout/)
-    assert.match(call.prompt, /unverified visual interpretation/)
+    assert.match(call.prompt, /派生 Markdown 的引文只能称为提取文本/)
+    assert.match(call.prompt, /图片可以帮助理解版式和图表/)
     assert.doesNotMatch(call.prompt, /SYNTHETIC ANNOTATION EXCLUDED|data:image\/|file:\/\//)
     let total = 0
     for (const image of call.images) {
@@ -114,7 +115,8 @@ test('real worker sends bounded Markdown page images and saves traceable sources
       total += bytes.length
     }
     assert.ok(total <= 2 * 1024 * 1024)
-    const batch = await f.get(requestId, index)
+    if (index && f.calls[index - 1].analysisContext.batch_index === call.analysisContext.batch_index) continue
+    const batch = await f.get(requestId, call.analysisContext.batch_index)
     assert.equal(batch.batch_preprocessing.raw_verbatim, false)
     assert.equal(batch.batch_preprocessing.derived, true)
     assert.equal(batch.batch_preprocessing.ocr, false)
@@ -138,7 +140,7 @@ test('real worker sends bounded Markdown page images and saves traceable sources
       assert.ok(markdown.includes(source.text))
     }
     const quote = batch.draft.nodes.find(node => node.type === 'evidence')
-    assert.equal(quote.quote, 'international', 'derived quotes are validated against the saved Markdown')
+    assert.equal(quote.quote, 'The method is reading.', 'derived quotes are validated against the saved Markdown')
     assert.ok(call.sources.find(source => source.id === quote.source_id).text.includes(quote.quote))
   }
   // 检查本次临时目录的真实落盘状态与目录数据库；PNG 缓存保留二进制本体。
@@ -156,8 +158,8 @@ test('default text analysis keeps its batch shape and request identity while opt
   const f = await fixture(t)
   const result = await f.analysis(f.input)
   assert.equal(result.status, 'complete', JSON.stringify(result))
-  assert.equal(f.calls.length, 1)
-  assert.deepEqual(f.calls[0].analysisContext.pages, [1, 2, 3])
+  assert.equal(f.calls.length, 3)
+  assert.deepEqual([...new Set(f.calls.map(call => JSON.stringify(call.analysisContext.pages)))].map(value => JSON.parse(value)), [[1, 2, 3]])
   assert.equal(Object.hasOwn(f.calls[0], 'images'), false)
   assert.equal(f.kernel.find(call => call.action === 'paper_analysis_batch').input_format, undefined)
   const record = await f.get(result.results[0].request_id)
@@ -172,7 +174,7 @@ test('default text analysis keeps its batch shape and request identity while opt
     await assert.rejects(f.analysis({ ...f.input, ...options }), { code: 'ANALYSIS_CONFLICT' })
     await assert.rejects(f.analysis({ ...child, ...options }), { code: 'ANALYSIS_CONFLICT' })
   }
-  assert.equal(f.calls.length, 1)
+  assert.equal(f.calls.length, 3)
   assert.equal(f.kernel.filter(call => call.action === 'paper_analysis_batch').length, 1)
   assert.deepEqual(await Promise.all([f.paper.original, f.paper.managed].map(fileHash)), f.before)
 })
@@ -180,7 +182,7 @@ test('default text analysis keeps its batch shape and request identity while opt
 test('scanned pages keep visual coverage separate and never claim full text coverage', { timeout: 60000 }, async t => {
   const f = await fixture(t, ['text', 'scan', 'text'])
   const result = await f.analysis({ ...f.input, input_format: 'markdown', include_images: true })
-  assert.equal(result.status, 'complete', JSON.stringify(result))
+  assert.equal(result.status, 'partial', JSON.stringify(result))
   const record = await f.get(result.results[0].request_id)
   assert.equal(record.coverage.full_document, false)
   assert.deepEqual(record.coverage.no_extractable_text_pages, [2])
@@ -188,9 +190,12 @@ test('scanned pages keep visual coverage separate and never claim full text cove
   assert.deepEqual(record.coverage.blank_pages, [])
   assert.deepEqual(record.visual_coverage.rendered_pages, [1, 2, 3])
   assert.equal(record.visual_coverage.ocr, false)
-  assert.deepEqual(f.calls[0].images.map(image => image.page), [1, 2])
-  assert.deepEqual(f.calls[0].sources.map(source => source.locator.page), [1])
-  assert.deepEqual(f.calls[1].sources.map(source => source.locator.page), [3])
+  assert.equal(record.question_coverage.complete, true, 'all selected reading questions were answered on batches containing text')
+  assert.equal(record.coverage.selected_scope_complete, false, 'the scan page has no textual evidence')
+  const batches = [...new Map(f.calls.map(call => [call.analysisContext.batch_index, call])).values()]
+  assert.deepEqual(batches[0].images.map(image => image.page), [1, 2])
+  assert.deepEqual(batches[0].sources.map(source => source.locator.page), [1])
+  assert.deepEqual(batches[1].sources.map(source => source.locator.page), [3])
   assert.deepEqual(await Promise.all([f.paper.original, f.paper.managed].map(fileHash)), f.before)
 })
 

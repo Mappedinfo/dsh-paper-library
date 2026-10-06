@@ -53,7 +53,7 @@ function output(pack, { metadata = true, graph = true, invalidEdge = false } = {
   return result
 }
 
-test('replayOutput applies production quote normalization and the real Python typed-graph validator without library writes', async () => {
+test('replayOutput validates historical JSON and the real Python typed-graph schema without library writes', async () => {
   const pack = syntheticPack()
   const valid = await replayOutput(pack, output(pack))
   assert.equal(valid.passed, true, valid.error)
@@ -140,7 +140,9 @@ test('probe runs one control and two split calls per paper with identical image 
   assert.equal(result.cases, 1)
   assert.equal(result.control_passed, 1)
   assert.equal(result.split_passed, 1)
-  assert.deepEqual(result.rows[0].control, { passed: true, error: null, quote_normalization: { method: 'unique-whitespace-match-v1', count: 1, metadata: 0, graph: 1 }, graph: { nodes: 2, edges: 0, assertions: 1 } })
+  assert.deepEqual(result.rows[0].control, { passed: true, error: null, protocol: 'legacy-monolithic-v1', validation_scope: 'historical-response-only; not full production workflow validation',
+    quote_normalization: { method: 'unique-whitespace-match-v1', count: 1, metadata: 0, graph: 1 }, graph: { nodes: 2, edges: 0, assertions: 1 },
+    validator: { ok: true, nodes: 2, edges: 0, assertions: 1 } })
   assert.equal(f.sent.length, 3)
   assert.deepEqual(f.sent.map(call => call.imageUrls), [0, 1, 1].map(() => [f.sent[1].imageUrls[0]]))
   assert.ok(f.sent[0].prompt.includes('Additionally return metadata'))

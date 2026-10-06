@@ -206,17 +206,20 @@ test('analysis attaches trusted batch, note and review selections without changi
         body: '快速判定\n案例拆解\n状态矩阵\n归因\n联合覆盖\n形容词\n本文最多能声称\n本文不能声称\n修改清单' })
       if (input.prompt.includes('READING_RECORDS_JSON')) return JSON.stringify({ title: '合成精读笔记', body: '合成资料。' })
       const source = sources[calls.length - 1]
+      if (input.prompt.includes('本轮只回答下面列出的阅读问题')) return JSON.stringify({ answers: [
+        { question_id: 'q1', choice: 'other', judgment: 'Synthetic assertion', evidence: [{ source_id: 'S1', quote: source.text }] },
+      ] })
       return JSON.stringify({ title: 'Synthetic graph', body: 'Synthetic summary.', nodes: [{ id: 'evidence', type: 'evidence', label: 'Synthetic evidence', source_id: source.id, quote: source.text }], edges: [], assertions: [], metadata: {}, field_sources: {} })
     } })
   t.after(() => handle.dispose())
-  await handle({ action: 'paper_analysis_start', id: 'paper-a', request_id: 'synthetic-context', pages: [3, 7], apply_metadata: false,
+  await handle({ action: 'paper_analysis_start', id: 'paper-a', request_id: 'synthetic-context', pages: [3, 7], question_ids: ['q1'], apply_metadata: false,
     analysisContext: { id: 'forged-paper', source_ids: ['forged-source'] } })
   await handle.wait('paper-a', 'synthetic-context')
   assert.equal((await handle({ action: 'paper_analysis_get', id: 'paper-a' })).status, 'complete')
   assert.equal(calls.length, 4)
   assert.deepEqual(calls.map(call => call.analysisContext), [
-    { id: 'paper-a', request_id: 'synthetic-context', stage: 'batch', batch_index: 0, source_ids: ['source-3'], pages: [3] },
-    { id: 'paper-a', request_id: 'synthetic-context', stage: 'batch', batch_index: 1, source_ids: ['source-7'], pages: [7] },
+    { id: 'paper-a', request_id: 'synthetic-context', stage: 'batch', batch_index: 0, question_ids: ['q1'], source_ids: ['source-3'], pages: [3] },
+    { id: 'paper-a', request_id: 'synthetic-context', stage: 'batch', batch_index: 1, question_ids: ['q1'], source_ids: ['source-7'], pages: [7] },
     { id: 'paper-a', request_id: 'synthetic-context', stage: 'note', source_ids: ['source-3', 'source-7'], pages: [3, 7] },
     { id: 'paper-a', request_id: 'synthetic-context', stage: 'review', source_ids: ['source-3', 'source-7'], pages: [3, 7] },
   ])

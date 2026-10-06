@@ -53,8 +53,9 @@ async function fixture(config = {}) {
     f.calls.push(input); f.live++; f.peak = Math.max(f.peak, f.live)
     try {
       await f.generationGate?.promise
-      const id = input.prompt.match(/"id":"(paper-[a-z0-9]+)"/)?.[1] ?? 'paper-a'
+      const id = input.analysisContext?.id ?? input.prompt.match(/"id":"(paper-[a-z0-9]+)"/)?.[1] ?? 'paper-a'
       if (f.failures.has(id)) throw new Error('Synthetic generation failure')
+      if (input.analysisContext?.question_ids) return JSON.stringify({ answers: input.analysisContext.question_ids.map(question_id => ({ question_id, choice: 'not_reported' })) })
       if (input.prompt.includes('READING_RECORDS_JSON')) return JSON.stringify({ title: '合成精读笔记', body: '仅依据合成来源的笔记。' })
       return JSON.stringify({ title: 'Synthetic graph', body: 'Synthetic material only.', nodes: [], edges: [], assertions: [],
         metadata: { 'container-title': 'Synthetic Journal' }, field_sources: { 'container-title': [{ source_id: `source-${id}`, quote: 'Synthetic Journal' }] } })
@@ -76,16 +77,21 @@ test('metadata batch uses first page and never applies metadata, reviews or read
   assert.ok(f.requests.filter(r => r.action === 'paper_analysis_batch').every(r => JSON.stringify(r.pages) === '[1]'))
   assert.equal(f.requests.some(r => r.action === 'paper_analysis_apply_metadata' || r.action === 'knowledge_source_get'), false)
   assert.equal(result.results.some(r => r.draft), false, 'Batch output does not duplicate full drafts')
+  assert.ok(result.results.every(r => r.analysis_complete === undefined), 'Metadata/legacy completion cannot fabricate questionnaire coverage')
   const jobs = [...f.records.values()].filter(r => r.value.id)
   assert.ok(jobs.every(r => r.value.execution === 'direct' && r.value.review === false && r.value.notes === false))
 })
 
-test('full mode defaults to all pages and one reading note without automatic review or metadata writes', async () => {
+test('full mode defaults to the grouped question protocol and one reading note without automatic review or metadata writes', async () => {
   const f = await fixture(), result = await f.handle({ ...request, ids: ['paper-a'], mode: 'full' })
-  assert.equal(result.status, 'complete'); assert.equal(f.calls.length, 2)
+  assert.equal(result.status, 'complete'); assert.equal(f.calls.length, 4)
   assert.equal(Object.hasOwn(f.requests.find(r => r.action === 'paper_analysis_batch'), 'pages'), false)
   assert.ok(result.results[0].note_draft_id)
   assert.equal(result.results[0].review_draft_id, undefined)
+  assert.equal(result.results[0].questionnaire.version, 'reading-questions-v1')
+  assert.equal(result.results[0].question_coverage.complete, true)
+  assert.deepEqual(result.results[0].question_summary, { answers: 6, valid_answers: 6, invalid_answers: 0, other_answers: 0, projection_limitations: 0 })
+  assert.equal(f.calls.filter(call => call.analysisContext?.question_ids).length, 3)
   assert.equal(f.requests.some(r => r.action === 'paper_analysis_apply_metadata'), false)
 })
 
@@ -107,6 +113,25 @@ test('identical concurrent batch requests share one job; changed selections or o
   for (const change of [{ ids: ['paper-b', 'paper-a'] }, { pages: [2] }, { apply_metadata: true }, { mode: 'full' }]) {
     await assert.rejects(f.handle({ ...request, ...change }), { code: 'ANALYSIS_CONFLICT' })
   }
+})
+
+test('question controls participate in full-mode request identity', async () => {
+  const f = await fixture(), full = { ...request, ids: ['paper-a'], mode: 'full', question_ids: ['q1', 'q3'] }
+  await f.handle(full)
+  assert.deepEqual(f.calls.filter(call => call.analysisContext?.question_ids).map(call => call.analysisContext.question_ids), [['q1'], ['q3']])
+  await assert.rejects(f.handle({ ...full, question_ids: ['q1'] }), { code: 'ANALYSIS_CONFLICT' })
+  await assert.rejects(f.handle({ ...full, question_mode: 'separate' }), { code: 'ANALYSIS_CONFLICT' })
+  const saved = [...f.records.values()].find(row => row.key.startsWith('analysis.headless-batch:'))
+  assert.deepEqual(saved.value.options.question_ids, ['q1', 'q3'])
+})
+
+test('a batch made only of partial question analyses remains partial', async () => {
+  const f = await fixture(); f.failures.add('paper-a')
+  const result = await f.handle({ action: 'paper_analysis_run', ids: ['paper-a'], request_id: 'partial-questions', mode: 'full',
+    notes: false, review: false, question_ids: ['q1'] })
+  assert.equal(result.results[0].status, 'partial')
+  assert.equal(result.status, 'partial')
+  assert.equal(result.counts.partial, 1)
 })
 
 test('changed configured provider/model or budgets conflict across processes', async () => {

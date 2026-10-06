@@ -1,0 +1,11 @@
+{
+  "id": "q4",
+  "title": "证据与主张的关系",
+  "question": "给定证据对哪个具体主张构成支持、限定或反驳？",
+  "guidance": "judgment 填被评价的具体主张，choice 填引文对它的关系。例如引文限制了泛化范围，选择 qualifies；不要把被反驳的主张改写成反驳句再选择 contradicts，否则方向会颠倒。不能判断关系就选 other 并说明。",
+  "options": [
+    {"id": "supports", "label": "证据支持 judgment 中的主张", "graph": {"node_type": "claim", "relation": "supports"}},
+    {"id": "qualifies", "label": "证据限定 judgment 中主张的条件或范围", "graph": {"node_type": "claim", "relation": "qualifies"}},
+    {"id": "contradicts", "label": "证据反驳 judgment 中的主张", "graph": {"node_type": "claim", "relation": "contradicts"}}
+  ]
+}

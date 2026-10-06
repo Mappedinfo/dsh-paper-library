@@ -1,0 +1,11 @@
+{
+  "id": "q6",
+  "title": "明确的问题与缺口",
+  "question": "文章明确提出了哪些问题、局限或研究缺口？",
+  "guidance": "区分作者明确陈述和读者推断。只将作者原文明确提出的问题或缺口归为前两个选项；本批没写不等于全文没写。",
+  "options": [
+    {"id": "research_question", "label": "作者明确提出的研究问题", "graph": {"node_type": "question", "source_status": "author-stated"}},
+    {"id": "stated_gap", "label": "作者明确陈述的局限或研究缺口", "graph": {"node_type": "gap", "relation": "identifies", "source_status": "author-stated"}},
+    {"id": "inferred_gap", "label": "读者从现有材料推断的疑点，尚待核实", "graph": {"node_type": "gap", "relation": "reports", "source_status": "inferred"}}
+  ]
+}

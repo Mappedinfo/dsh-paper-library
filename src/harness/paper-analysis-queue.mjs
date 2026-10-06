@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto'
+import {analysisInputOptions,analysisQuestionOptions} from '../analysis-input.mjs'
 
 const hash=value=>createHash('sha256').update(value).digest('hex')
 const key='analysis.queue:v1'
@@ -34,12 +35,19 @@ export function createQueuedPaperAnalysis({analysis,store,settings}) {
     if(input.source_session_id!==undefined&&(typeof input.source_session_id!=='string'||input.source_session_id.length>200||/[\x00-\x1f]/.test(input.source_session_id)))throw fail('来源对话标识无效。')
     if(input.apply_metadata!==undefined&&typeof input.apply_metadata!=='boolean')throw fail('补齐资料选项无效。')
     if(input.review!==undefined&&typeof input.review!=='boolean')throw fail('评审选项无效。')
+    if(input.mode!==undefined&&!['full','metadata'].includes(input.mode))throw fail('请选择全文分析或元数据提取。')
+    if(input.notes!==undefined&&typeof input.notes!=='boolean')throw fail('精读笔记选项无效。')
+    if(input.mode==='metadata'&&(input.notes===true||input.review===true))throw fail('元数据提取不生成精读笔记或全文评审。')
+    const inputOptions={...analysisInputOptions(input),...analysisQuestionOptions(input)}
     const previous=await analysis({action:'paper_analysis_get',id:input.id})
     if(previous.status!=='idle')return previous
     const saved=await result(input.id);if(saved)return saved
     const preferences=await settings.get()
     if(!preferences.available||preferences.value?.auto_analysis!==true)return {id:input.id,status:'idle',stage:'自动整理已关闭'}
-    const item={id:input.id,request_id:input.request_id,...(input.pages?{pages:input.pages}:{}),...(input.source_session_id?{source_session_id:input.source_session_id}:{}),apply_metadata:input.apply_metadata??preferences.value.analysis_fill===true,review:input.review??preferences.value.auto_review!==false}
+    const item={id:input.id,request_id:input.request_id,...(input.pages?{pages:[...input.pages]}:{}),...(input.source_session_id?{source_session_id:input.source_session_id}:{}),
+      ...(input.mode!==undefined?{mode:input.mode}:{}),...(input.notes!==undefined?{notes:input.notes}:{}),...inputOptions,
+      apply_metadata:input.mode==='metadata'?(input.apply_metadata??preferences.value.analysis_fill===true):false,
+      review:input.mode==='metadata'?false:(input.review??preferences.value.auto_review!==false)}
     const items=await locked(async()=>{const current=await entries();if(current.some(v=>v.id===input.id))return current;return (await change(values=>values.some(v=>v.id===item.id)?values:[...values,item])).value.entries})
     wake();const index=items.findIndex(v=>v.id===input.id);return queued(items[index],index)
   }
@@ -61,10 +69,12 @@ export function createQueuedPaperAnalysis({analysis,store,settings}) {
   async function settle(first,preferences){
     let remove=false
     try{
-      // Use current fill choice, while keeping the accepted page selection.
+      // 保留显式分析范围；全文阅读不因旧自动填充设置重新携带元数据写回。
       const response=await locked(async()=>{
         if(!(await entries()).some(item=>item.id===first.id&&item.request_id===first.request_id))return null
-        return analysis({action:'paper_analysis_start',...first,reuse:true,apply_metadata:preferences.value.analysis_fill===true,review:first.review??preferences.value.auto_review!==false})
+        return analysis({action:'paper_analysis_start',...first,reuse:true,
+          apply_metadata:first.mode==='metadata'?(first.apply_metadata??preferences.value.analysis_fill===true):false,
+          review:first.mode==='metadata'?false:(first.review??preferences.value.auto_review!==false)})
       })
       if(!response)return
       await analysis.wait(first.id,response.request_id||first.request_id)

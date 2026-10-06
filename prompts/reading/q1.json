@@ -1,0 +1,12 @@
+{
+  "id": "q1",
+  "title": "研究要素",
+  "question": "本批文字明确出现了哪些方法、数据集、评价指标和任务？",
+  "guidance": "逐个记录。背景中提到的方法与本研究实际使用的方法要在判断中区分；仅出现名称不证明本研究使用了它。",
+  "options": [
+    {"id": "method", "label": "方法或处理流程", "graph": {"node_type": "method", "relation": "reports"}},
+    {"id": "dataset", "label": "数据集或数据来源", "graph": {"node_type": "dataset", "relation": "reports"}},
+    {"id": "metric", "label": "评价指标或测量标准", "graph": {"node_type": "metric", "relation": "reports"}},
+    {"id": "task", "label": "研究任务或应用问题", "graph": {"node_type": "task", "relation": "reports"}}
+  ]
+}
