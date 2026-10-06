@@ -29,15 +29,21 @@ Paper Library 的后台可以直接运行，不需要浏览器或 DSH。独立�
 }
 ```
 
-GLM 使用官方 OpenAI Chat Completions 接口。Kimi Code 使用官方 Anthropic Messages 接口；可设为 `provider:"kimi"`、`model:"k3-256k"`、`keyEnv:"KIMI_TOKEN_PLAN_KEY"`、`thinking:"default"`、`reasoningEffort:"high"`。模型名称是可修改的示例，不代表价格、套餐适用或分析质量保证；先确认自己的服务支持所选用途。
+GLM 使用官方 OpenAI Chat Completions 接口。Kimi Code 使用官方 Anthropic Messages 接口；使用上面的配置改为 Kimi 时，同时设置 `provider:"kimi"`、`model:"k3-256k"`、`keyEnv:"KIMI_TOKEN_PLAN_KEY"`、`thinking:"default"`、`reasoningEffort:"high"`、`maxOutputTokens:32768`。模型名称是可修改的示例，不代表价格、套餐适用或分析质量保证；先确认自己的服务支持所选用途。
 
 `thinking` 接受 `disabled`／`enabled`／`default`；为兼容旧配置，省略时仍为 `disabled`。`default` 不发送思考开关，沿用模型服务默认设置。`reasoningEffort` 可选 `low`／`high`／`max`，不能与 `disabled` 同用。思考与最终输出共用服务的输出预算；截断仍报失败，不拼接思考内容充当答案。改变思考设置需要新的批次请求 ID。
+
+Kimi 启用或沿用默认思考时，总输出预算最低为 16384 tokens；未填写 `maxOutputTokens` 时，`low` 默认 16384，其他档位默认 32768。显式填写较小值会在读取凭据和发送请求前报 `DIRECT_MODEL_OUTPUT_BUDGET_TOO_SMALL`，不会静默增加调用费用。GLM 及关闭思考的旧配置仍默认 8192；所有配置上限仍为 32768。这是本项目针对已观察到的截断设置的预算策略，并非服务端保证的正文保留量。接口用一个 `max_tokens` 控制输出，官方的对应配置见 [Kimi 输出上限说明](https://www.kimi.com/code/docs/kimi-code-cli/configuration/config-files.html#models)。
+
+服务仍返回 `max_tokens`／`length` 时，记录 `DIRECT_MODEL_OUTPUT_TRUNCATED` 及安全的总上限、输出用量、思考用量和停止原因，停止这篇的后续问题组，保留已保存结果；不会自动重问或把未闭合 JSON 当作答案。`timeoutMs`（1–600000）同样用于独立分析的模型阶段，本地提取仍保留单独的读取时限。提高上限降低截断风险，也可能增加用量与耗时。
 
 截至 2026-10-06，[GLM 官方文档](https://docs.z.ai/guides/vlm/glm-5.3-flash)列出的 Flash 型号是 `glm-5.3-flash`／`glm-5.3-flashx`，只能启用思考。[Kimi 官方文档](https://www.kimi.com/code/docs/kimi-code/models.html)将 `kimi-for-coding` 映射到 K2.8 Preview，并说明 K3 关闭思考后会路由到 K2.8 Preview 无思考版。独立后端因此拒绝 K3 或 GLM-5.3-Flash 系列搭配 `disabled`，避免误把别名当作目标模型测试。服务可能更新别名和权限，切换前仍需核对。仅处理最终文字答案，Kimi 的思考块不作为资料内容保存；连接测试说明见[直连测试文档](direct-model-probe.md)。
 
 `envFile` 是可选项；省略时只读取当前进程的指定环境变量。明确指定文件时，该文件中的指定变量优先；相对路径相对模型配置文件解析。仅解析普通赋值或 `export NAME='value'`，不执行 shell、不展开变量，不尝试第二个 key，不自动换模型或重试请求。支持的两个 API 地址固定，拒绝重定向。
 
 `maxCalls` 是单个后台实例的实际调用尝试上限（1–10000，默认 100），含失败尝试、精读笔记和评审；`maxConcurrency` 限制同时处理的文献数（1–4，默认 1）。额度按当前进程计算，不是账号费用上限，也不跨不同进程共享。服务返回的 token 用量会汇总；未知值保持 `null`。同一个服务承接多个批次时，`usage_scope:"headless_instance"` 表示实例累计用量，不冒充单批费用。
+
+明确的服务端额度耗尽与认证拒绝分别记录为 `DIRECT_MODEL_QUOTA_EXHAUSTED`／`DIRECT_MODEL_AUTH_ERROR`。独立入口停止该实例后续请求，未启动文献记录为 `skipped` 并保存原因；已完成草稿与已保存题组继续可读，同一批次 ID 不自动重放。私有批次编排器按实际凭据熔断，多个变量名使用同一个 key 也会共同停止，包括已排队但尚未发送的请求；其他凭据继续运行。收到拒绝时已经发送的最多两个请求可能仍返回。普通瞬时限流和 HTTP 500 保留失败，不触发凭据熔断，也不会自动重试。
 
 ## 命令行批量调用
 
@@ -91,7 +97,11 @@ JSON
 - **图片**：独立 GLM／Kimi 后端每批最多附加 2 页 PNG，每张 ≤1 MiB、长边 ≤1600 像素，保留页码。每页单独传输，不拼成整篇长图；精细图表可能需要回到 PDF 放大检查。新 Markdown 与配图模式都排除 PDF 批注。`visual_coverage.rendered_pages` 与 `sent_pages` 分开记录；发送过页面也不代表模型读懂了所有细节。审计保留图片哈希及尺寸，不保存上传图片的 base64。
 - **入口和覆盖**：原生 DSH 目前支持 Markdown 文本，图片请求会在读取和模型调用前拒绝，避免宿主静默丢图。纯扫描页没有文字证据时不启动模型，记录无可提取文字；混合文档及转换为空的页面不会计为完整文本覆盖。本次能力不包含扫描件 OCR 或独立视觉全文阅读。
 
-纯文字每批最多读取 8 页／8 个文本块／24000 字符，启用图片后每批最多 2 页；密集页继续按位置分段。图片增加输入用量及批次数，`maxCalls` 仍按显式模型配置限制。精读笔记／评审最多使用 24 KiB 的已保存批次材料，缺失批次或无文字页会明确标记部分覆盖。
+纯文字每批最多读取 8 页／8 个文本块／24000 字符，启用图片后每批最多 2 页；密集页继续按位置分段。图片增加输入用量及批次数，`maxCalls` 仍按显式模型配置限制。
+
+精读笔记／评审在本地把已保存材料压缩到 24000 字节，均衡保留各批的判断、短引文及缺题统计；首批过大不会挡住后续批次。短引文绑定可追溯的不可变摘录快照，仍限制 40 个来源／24000 字符，不将整页文本全部塞进笔记。每篇仍只追加一次笔记调用，启用评审时再追加一次评审调用，没有分批模型摘要或自动重问。
+
+`note_coverage.packing`／`review_coverage.packing` 记录参与批次、实际材料大小、引用与来源数量、压缩及省略原因。批次全部参与不等于所有详情完整保留；内容压缩、缺题、来源失配或文字空缺均保留部分覆盖说明。原始回答和逐批草稿继续可读，生成摘要与原文证据分开标记；图像观察仍标记为待核实。连最小材料都无法放入预算时，在调用模型前明确报告 `NOTE_MATERIAL_BUDGET_EXCEEDED`。
 
 只在本地预览预处理结果、暂不调用模型：
 

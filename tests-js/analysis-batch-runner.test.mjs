@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { createDirectModelAgent } from '../src/direct-model.mjs'
+import { classifyModelHttpError } from '../src/model-errors.mjs'
 import { createPaperAnalysis } from '../src/harness/paper-analysis.mjs'
 import { runAnalysisBatch, validatePlan } from '../scripts/run-paper-analysis-batch.mjs'
 
@@ -75,6 +76,67 @@ test('two route aliases for one credential share two slots until each response b
   assert.equal(progress.papers.filter(row => row.status === 'complete').length, 6)
   assert.equal(f.finishedProgress.length, 6)
   assert.ok(f.finishedProgress.some(row => row.papers.some(paper => paper.status === 'complete') && row.status === 'running'))
+})
+
+test('quota fuses queued aliases for one actual key while a different key continues', async t => {
+  const f = await fixture(t)
+  f.plan.routes = [
+    { name: 'glm', config: join(f.home, 'glm.json'), ids: ['paper-a', 'paper-b', 'paper-c'] },
+    { name: 'kimi-alias', config: join(f.home, 'kimi.json'), ids: ['paper-d', 'paper-e', 'paper-f'] },
+    { name: 'other-key', config: join(f.home, 'other.json'), ids: ['paper-g', 'paper-h', 'paper-i'] },
+  ]
+  let quotaSent = false, otherAfterQuota = 0, sharedAfterQuota = 0
+  let releaseOther
+  const otherGate = new Promise(resolve => { releaseOther = resolve })
+  const sharedCredential = 'SHARED_SYNTHETIC_KEY', otherCredential = 'OTHER_SYNTHETIC_KEY'
+  f.options.loadConfig = async path => {
+    const other = path.endsWith('other.json')
+    return { provider: other ? 'glm' : path.endsWith('glm.json') ? 'glm' : 'kimi', model: 'synthetic-model',
+      keyEnv: other ? 'OTHER_KEY' : 'SHARED_KEY', maxCalls: 20, maxConcurrency: 2, maxOutputTokens: 8192, timeoutMs: 1000 }
+  }
+  f.options.createAgent = (selected, { fetchImpl }) => {
+    const credential = selected.keyEnv === 'OTHER_KEY' ? otherCredential : sharedCredential
+    const agent = async request => {
+      const response = await fetchImpl('https://synthetic.invalid/model', { headers: { 'x-api-key': credential }, signal: request.signal })
+      const body = await response.text()
+      if (!response.ok) {
+        const code = classifyModelHttpError(selected.provider, response.status, body)
+        throw Object.assign(new Error(code), { code })
+      }
+      return body
+    }
+    agent.model = { provider: selected.provider, model: selected.model }
+    agent.supportsImages = false
+    agent.usage = () => ({ calls: 0 })
+    return agent
+  }
+  f.options.fetchImpl = async (_url, init) => {
+    const key = new Headers(init.headers).get('x-api-key')
+    if (key === otherCredential && !quotaSent) await otherGate
+    if (key === sharedCredential && !quotaSent) {
+      await new Promise(resolve => setTimeout(resolve, 20))
+      quotaSent = true
+      releaseOther()
+      return new Response(JSON.stringify({ error: { type: 'permission_error', message: "You've reached your 5-hour usage limit." } }), { status: 403 })
+    }
+    if (key === sharedCredential) sharedAfterQuota++
+    if (key === otherCredential && quotaSent) otherAfterQuota++
+    return new Response(JSON.stringify({ model: 'synthetic', ok: true }), { status: 200 })
+  }
+  const result = await runAnalysisBatch(f.plan, f.options)
+  assert.equal(quotaSent, true)
+  assert.equal(sharedAfterQuota, 0, 'no aliased-key fetch begins after the quota response')
+  assert.ok(otherAfterQuota > 0, 'the unrelated credential remains usable after quota')
+  assert.deepEqual(result.credential_groups.map(group => group.peak).sort(), [2, 2])
+  assert.ok(result.credential_groups.every(group => group.active === 0 && group.peak <= 2))
+  const receipts = await Promise.all((await readdir(join(f.out, 'responses'))).map(async name =>
+    JSON.parse(await readFile(join(f.out, 'responses', name), 'utf8'))))
+  const sharedGroups = new Set(receipts.filter(call => ['glm', 'kimi-alias'].includes(call.route)).map(call => call.credential_group))
+  const otherGroups = new Set(receipts.filter(call => call.route === 'other-key').map(call => call.credential_group))
+  assert.equal(sharedGroups.size, 1, 'provider aliases using the same key share one fuse')
+  assert.equal(otherGroups.size, 1)
+  assert.notEqual([...sharedGroups][0], [...otherGroups][0])
+  assert.ok(receipts.some(call => call.error_code === 'DIRECT_MODEL_QUOTA_EXHAUSTED'))
 })
 
 test('private artifacts redact actual credentials and contain no response headers or credential config', async t => {
@@ -172,6 +234,30 @@ test('audits retain final answers and settings without provider reasoning conten
   }
   const manifest = JSON.parse(await readFile(join(f.out, 'run-manifest.json'), 'utf8'))
   assert.ok(manifest.routes.every(route => route.thinking === 'disabled'))
+  assert.ok(manifest.routes.every(route => route.maxOutputTokens === 8192 && route.timeoutMs === 120000))
+})
+
+test('effective Kimi thinking budget is identical in outgoing requests, manifest and receipts', async t => {
+  const sent = []
+  const f = await fixture(t, { fetchImpl: async (url, init) => {
+    sent.push(JSON.parse(init.body))
+    return new Response(JSON.stringify(url.includes('bigmodel')
+      ? { choices: [{ finish_reason: 'stop', message: { content: '{"answer":true}' } }] }
+      : { stop_reason: 'end_turn', content: [{ type: 'text', text: '{"answer":true}' }] }))
+  } })
+  const load = f.options.loadConfig
+  f.options.loadConfig = async path => {
+    const config = await load(path)
+    return config.provider === 'kimi' ? { ...config, model: 'k3-256k', thinking: 'default', reasoningEffort: 'high' } : config
+  }
+  await runAnalysisBatch(f.plan, f.options)
+  const manifest = JSON.parse(await readFile(join(f.out, 'run-manifest.json'), 'utf8'))
+  assert.equal(manifest.routes.find(route => route.name === 'kimi').maxOutputTokens, 32768)
+  assert.ok(sent.filter(body => body.model === 'k3-256k').every(body => body.max_tokens === 32768))
+  for (const name of await readdir(join(f.out, 'responses'))) {
+    const receipt = JSON.parse(await readFile(join(f.out, 'responses', name), 'utf8'))
+    assert.equal(receipt.max_output_tokens, receipt.provider === 'kimi' ? 32768 : 8192)
+  }
 })
 
 test('analysis attaches trusted batch, note and review selections without changing call count', async t => {

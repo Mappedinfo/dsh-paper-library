@@ -64,18 +64,18 @@ function completeness(name, partial, material, total, target) {
 
 export const REVIEW_SECTIONS = Object.freeze([...asset('review').sections])
 
-export function renderNotePrompt(title, material, partial, total) {
+export function renderNotePrompt(title, material, partial, total, packing = {}) {
   const policy = asset('note').record_policy
-  return render('note', { RECORD_POLICY: policy, COMPLETENESS: completeness('note', partial, material, total, asset('note').completeness.target), TITLE_JSON: json(String(title || '').slice(0, 500)), MATERIAL_JSON: json({ batches: material }) })
+  return render('note', { RECORD_POLICY: policy, COMPLETENESS: completeness('note', partial, material, total, asset('note').completeness.target), TITLE_JSON: json(String(title || '').slice(0, 500)), MATERIAL_JSON: json({ batches: material, packing }) })
 }
 
-export function renderReviewPrompt(title, material, partial, total, profile) {
+export function renderReviewPrompt(title, material, partial, total, profile, packing = {}) {
   const review = asset('review')
   const overlay = profile?.text ? expand(review.overlay, { PROFILE_TEXT: profile.text }) : ''
   return render('review', {
     PROFILE_RULE: profile?.text ? review.profile_rule : '', RECORD_POLICY: review.record_policy,
     COMPLETENESS: completeness('review', partial, material, total, review.completeness.target), OVERLAY: overlay,
-    TITLE_JSON: json(String(title || '').slice(0, 500)), MATERIAL_JSON: json({ batches: material }),
+    TITLE_JSON: json(String(title || '').slice(0, 500)), MATERIAL_JSON: json({ batches: material, packing }),
   })
 }
 

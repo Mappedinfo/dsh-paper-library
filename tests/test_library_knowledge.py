@@ -66,6 +66,67 @@ def test_source_level_never_promoted_by_client(catalog, kind, verification):
     assert value["verification"] == verification
 
 
+def test_bounded_excerpt_inherits_server_snapshot_and_preserves_exact_whitespace(catalog, monkeypatch):
+    knowledge.setup(catalog)
+    monkeypatch.setattr(catalog, "_open_pdf", lambda *a, **k: pytest.fail("must not reread PDF"))
+    original = "Synthetic context.\n  精确引文\nwith spaces.\nMore context."
+    parent = knowledge.source_put(catalog, {"entity": PAPER, "kind": "source-note", "text": original,
+        "locator": {"page": 4}, "title": "Synthetic extracted page"}, trusted_provenance={
+        "kind": "selected-pdf-page", "file_version": {"bytes": 1234}, "scope": "markdown-batch",
+        "representation": "normalized-markdown", "raw_verbatim": False, "character_start": 100,
+        "character_end": 100 + len(original), "full_document": False}, preserve_text=True)
+    quote = "  精确引文\nwith spaces.\n"
+    excerpt = call(catalog, "knowledge_source_put", entity=PAPER, kind="source-note",
+        parent_source_id=parent["id"], text=quote, locator={"page": 999},
+        pdf_snapshot={"full_document": True}, verification="full-text")
+    assert excerpt["text"] == quote
+    assert excerpt["locator"]["page"] == 4
+    assert excerpt["verification"] == "source-note"
+    proof = excerpt["pdf_snapshot"]
+    assert proof["parent_source_id"] == parent["id"] and proof["parent_content_hash"] == parent["content_hash"]
+    assert proof["parent_character_start"] == original.index(quote)
+    assert proof["parent_character_end"] == original.index(quote) + len(quote)
+    assert proof["character_start"] == 100 + original.index(quote)
+    assert proof["representation"] == "normalized-markdown" and proof["raw_verbatim"] is False
+    assert proof["full_document"] is False and proof["excerpt_only"] is True
+    assert call(catalog, "knowledge_source_get", id=parent["id"]) == parent
+    assert call(catalog, "knowledge_source_put", entity=PAPER, kind="source-note",
+                parent_source_id=parent["id"], text=quote) == excerpt
+
+
+def test_excerpt_rejects_wrong_entity_modified_quote_and_untrusted_parent(catalog):
+    knowledge.setup(catalog)
+    parent = knowledge.source_put(catalog, {"entity": PAPER, "kind": "source-note", "text": "A synthetic source.",
+        "locator": {"page": 1}}, trusted_provenance={"kind": "selected-pdf-page", "file_version": {"bytes": 10}})
+    for change in [{"entity": ENTITY}, {"kind": "metadata"}, {"text": "A fabricated source."}]:
+        with pytest.raises(ValueError, match="excerpt"):
+            call(catalog, "knowledge_source_put", **{"entity": PAPER, "kind": "source-note",
+                "parent_source_id": parent["id"], "text": "synthetic", **change})
+    untrusted = source(catalog, entity=PAPER, kind="source-note", text="synthetic user text",
+                       pdf_snapshot={"kind": "selected-pdf-page", "file_version": {"bytes": 10}})
+    with pytest.raises(ValueError, match="intact extracted source"):
+        call(catalog, "knowledge_source_put", entity=PAPER, kind="source-note",
+             parent_source_id=untrusted["id"], text="synthetic")
+
+
+def test_excerpt_sources_bind_many_batches_under_the_existing_draft_budget(catalog):
+    knowledge.setup(catalog)
+    excerpt_ids = []
+    for page in range(1, 13):
+        quote = f"Synthetic result on page {page}."
+        parent = knowledge.source_put(catalog, {"entity": PAPER, "kind": "source-note",
+            "text": quote + " More page context." * 300, "locator": {"page": page}},
+            trusted_provenance={"kind": "selected-pdf-page", "file_version": {"bytes": 100}})
+        excerpt = call(catalog, "knowledge_source_put", entity=PAPER, kind="source-note",
+                       parent_source_id=parent["id"], text=quote)
+        excerpt_ids.append(excerpt["id"])
+    value = call(catalog, "knowledge_draft_put", entity=PAPER, source_ids=excerpt_ids, mode="note",
+        request_id="synthetic-balanced-note", title="Synthetic note", body="All twelve source excerpts retained.",
+        nodes=[], edges=[], assertions=[], origin="llm")
+    assert value["source_ids"] == excerpt_ids
+    assert len(value["source_ids"]) == 12
+
+
 def test_annotation_requires_exact_saved_version_and_preserves_comment(catalog, monkeypatch):
     seen = []
     def exact(id, refs, **kwargs):

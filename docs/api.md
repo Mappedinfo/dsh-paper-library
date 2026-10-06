@@ -91,6 +91,8 @@ Knowledge calls scope records by `entity:{kind:paper|dataset|release,id}`:
 
 Generation is at most 40 sources / 24,000 characters and two concurrent requests, with native model output defaulting to 8192 tokens (the configured language-output limit) and a 120-second deadline. Pending, failed, committing and complete records are host-durable; uncertain retries retain request identity. Explicit new-generation retry is required after failure/interruption. A completed request replays its draft without another model call. No model tools, full-library scans, file discovery or background graph extraction run in this path.
 
+`knowledge_source_put` 也支持从既有提取快照创建短摘录：`entity:{kind:"paper",id},kind:"source-note",parent_source_id,text`。后端要求父来源属于同一论文、含服务器提取的 `selected-pdf-page` 文件版本，且 `text` 精确包含于父文本；继承真实页码、Markdown 表示与文件版本，记录父来源 ID、哈希及摘录位置。客户端提供的页码或 PDF 证明不会被采用。返回的 `pdf_snapshot.kind` 为 `selected-source-excerpt`，`excerpt_only:true`，不宣称全文覆盖；父快照保持不变，不重新读取或下载 PDF。此能力用于笔记的短引用绑定，仍受 40 来源／24000 字符的保存上限约束。
+
 Structured nodes use stable typed IDs; Evidence binds an exact selected source excerpt, Observation points to a source node, and Assertion relates evidence/observation to Claim/Gap. Edge uses separately validated typed endpoints. `library-json` contains selected accepted graphs/notes plus referenced snapshots and identity metadata; it is not a whole-library restore format. `rkos-v3` adds role-separated bibliography/sidecars, mappings and losses; native dataset sources are not disguised as Paper records. Runtime exports use the bounded adapter's structural checks; the upstream parser is exercised separately by the synthetic validation script, never auto-discovered at runtime.
 
 ## Research challenge mining

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { analysisInputOptions } from '../analysis-input.mjs'
 import { questionGroups, makeReadingPrompt, parseReadingAnswers, compileReadingGraph, summarizeOptionCandidates } from '../reading-questions.mjs'
+import { isFatalModelError, safeModelErrorMessage, safeTruncationDetails } from '../model-errors.mjs'
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const clone = value => JSON.parse(JSON.stringify(value))
@@ -63,7 +64,7 @@ export async function readQuestionBatch(store, batch, { includeRaw = false } = {
 }
 
 /** 全文按页批次顺序读取；题组间串行，单题失败不能抹掉其他回答。 */
-export async function runQuestionAnalysis({ input, store, kernel, sourcePack, resolveModel, agent, signal, update, batchKey, readingNote, evidenceReview }) {
+export async function runQuestionAnalysis({ input, store, kernel, sourcePack, resolveModel, agent, signal, update, batchKey, readingNote, evidenceReview, modelTimeoutMs }) {
   const config = input.questionnaire_snapshot, groups = questionGroups(config, input), ids = groups.flat()
   const questionCoverage = { question_ids: ids, complete: false, full_questionnaire: ids.length === config.questions.length,
     by_question: Object.fromEntries(ids.map(id => [id, { expected_batches: 0, answered_batches: 0, failed_batches: [], unread_batches: [], valid_answers: 0 }])) }
@@ -113,7 +114,9 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
         await patch({ batch_index: index, active_question_keys: questionKeys })
         let parsed, requestError
         try {
-          const callSignal = AbortSignal.any([signal, AbortSignal.timeout(180000)])
+          const callTimeout = Number.isSafeInteger(modelTimeoutMs) ? modelTimeoutMs
+            : Number.isSafeInteger(agent.modelTimeoutMs) ? agent.modelTimeoutMs : 180000
+          const callSignal = AbortSignal.any([signal, AbortSignal.timeout(callTimeout)])
           const raw = await agent({ prompt, ...model, signal: callSignal, ...(pack.images.length ? { images: pack.images } : {}),
             analysisContext: { id: input.id, request_id: input.request_id, stage: 'batch', batch_index: index, question_ids: questionIds,
               source_ids: [...pack.source_ids], pages: [...pack.coverage.read_pages] } })
@@ -125,7 +128,10 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
           parsed = parseReadingAnswers(raw, pack, questionIds, config)
         } catch (error) {
           if (signal.aborted) throw error
-          requestError = { code: error.code || 'MODEL_REQUEST_FAILED', message: String(error.message).slice(0, 1200) }
+          const code = error.code || 'MODEL_REQUEST_FAILED'
+          const details = safeTruncationDetails(error)
+          requestError = { code, message: isFatalModelError({ code }) || code === 'DIRECT_MODEL_OUTPUT_TRUNCATED'
+            ? safeModelErrorMessage(code) : String(error.message).slice(0, 1200), ...(details ? { details } : {}) }
           parsed = { answers: [], errors: [requestError], missing: questionIds, raw: '' }
         }
         groupRecord = await saveResponse(store, groupRecord, parsed)
@@ -146,6 +152,9 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
         summary.invalid_answers += parsed.answers.filter(answer => !answer.valid).length
         summary.other_answers += parsed.answers.filter(answer => answer.valid && answer.choice === 'other').length
         await patch({ question_coverage: questionCoverage, question_summary: summary, ...(visual ? { visual_coverage: visual } : {}) })
+        if (isFatalModelError(requestError) || requestError?.code === 'DIRECT_MODEL_OUTPUT_TRUNCATED') {
+          throw Object.assign(problem(safeModelErrorMessage(requestError.code)), { code: requestError.code })
+        }
         if (['ANALYSIS_CALL_BUDGET', 'DIRECT_MODEL_CALL_BUDGET', 'DIRECT_MODEL_BUDGET_EXHAUSTED'].includes(requestError?.code)) throw Object.assign(problem('模型调用预算已耗尽；已保存问题回答保留。'), { code: requestError.code })
       }
       const graph = compileReadingGraph(allAnswers, pack, config)
@@ -199,6 +208,7 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
       await patch({ [`${name}_draft_id`]: result.id, [`${name}_coverage`]: result.coverage, ...(name === 'review' ? { review_profile: result.profile } : {}) })
     } catch (error) {
       if (signal.aborted) throw error
+      if (isFatalModelError(error) || error?.code === 'DIRECT_MODEL_OUTPUT_TRUNCATED') throw error
       warnings.push(`${label}草稿未生成：${String(error.message).slice(0, 400)}`)
     }
   }

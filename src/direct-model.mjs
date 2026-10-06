@@ -2,6 +2,7 @@ import { lstat, open } from 'node:fs/promises'
 import { Buffer } from 'node:buffer'
 import { constants as fsConstants } from 'node:fs'
 import { validateAnalysisImages } from './model-input-images.mjs'
+import { classifyModelHttpError, isFatalModelError } from './model-errors.mjs'
 
 const MAX_PROMPT_BYTES = 128 * 1024
 const MAX_RESPONSE_BYTES = 512 * 1024
@@ -36,12 +37,26 @@ export function directModelReasoningOptions(config) {
   return { thinking, ...(reasoningEffort !== undefined ? { reasoningEffort } : {}) }
 }
 
+/** 思考与正文共用 max_tokens。这里限制总预算，不虚构服务未承诺的正文保留量。 */
+export function directModelOutputBudget(config) {
+  const reasoning = directModelReasoningOptions(config)
+  const sharedThinking = config?.provider === 'kimi' && reasoning.thinking !== 'disabled'
+  const defaultTokens = sharedThinking ? (reasoning.reasoningEffort === 'low' ? 16384 : 32768) : 8192
+  const maxOutputTokens = config?.maxOutputTokens ?? defaultTokens
+  if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 32768) {
+    throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
+  }
+  // 已观察到 8192 的大部分被思考占用。显式小预算须先修改配置，不能静默增加费用。
+  if (sharedThinking && maxOutputTokens < 16384) throw safeError('DIRECT_MODEL_OUTPUT_BUDGET_TOO_SMALL', 400)
+  return { maxOutputTokens }
+}
+
 function validateConfig(config) {
   if (!config || !['glm', 'kimi'].includes(config.provider)) throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
   if (typeof config.model !== 'string' || !config.model.trim() || config.model.length > 200) throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
   if (typeof config.keyEnv !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.keyEnv)) throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
   if (config.envFile !== undefined && (typeof config.envFile !== 'string' || !config.envFile)) throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
-  const maxOutputTokens = config.maxOutputTokens ?? 8192
+  const { maxOutputTokens } = directModelOutputBudget(config)
   const maxCalls = config.maxCalls ?? 100
   const timeoutMs = config.timeoutMs ?? 120_000
   if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 32_768 ||
@@ -196,6 +211,7 @@ export async function createDirectModelAgent(config, { fetchImpl = globalThis.fe
   if (typeof fetchImpl !== 'function') throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
   const key = await resolveKey(effective, env)
   const usage = { calls: 0, failures: 0, inputTokens: 0, outputTokens: 0, inputKnown: true, outputKnown: true }
+  let stopped
   const agent = async ({ prompt, provider = effective.provider, model = effective.model, signal, images } = {}) => {
     if (provider !== effective.provider || model !== effective.model) throw safeError('DIRECT_MODEL_ROUTE_MISMATCH', 409)
     if (typeof prompt !== 'string' || !prompt.trim() || Buffer.byteLength(prompt, 'utf8') > MAX_PROMPT_BYTES) throw safeError('DIRECT_MODEL_PROMPT_INVALID', 413)
@@ -205,6 +221,7 @@ export async function createDirectModelAgent(config, { fetchImpl = globalThis.fe
       catch { throw safeError('DIRECT_MODEL_IMAGES_INVALID', 413) }
     }
     if (signal?.aborted) throw safeError('DIRECT_MODEL_ABORTED', 499)
+    if (stopped) throw safeError(stopped.code, stopped.status)
     if (usage.calls >= effective.maxCalls) throw safeError('DIRECT_MODEL_BUDGET_EXHAUSTED', 429)
     usage.calls++
     const controller = new AbortController()
@@ -233,19 +250,34 @@ export async function createDirectModelAgent(config, { fetchImpl = globalThis.fe
         : { model, max_tokens: effective.maxOutputTokens, messages: [{ role: 'user', content }], stream: false, ...reasoning }
       response = await fetchImpl(ENDPOINTS[effective.provider], { method: 'POST', headers, body: JSON.stringify(body), signal: requestSignal, redirect: 'manual' })
       if (response.status >= 300 && response.status < 400) throw safeError('DIRECT_MODEL_REDIRECT_REFUSED', response.status)
-      if (!response.ok) throw safeError('DIRECT_MODEL_HTTP_ERROR', response.status)
+      if (!response.ok) {
+        const raw = await readBounded(response)
+        const error = safeError(classifyModelHttpError(effective.provider, response.status, raw), response.status)
+        if (isFatalModelError(error)) stopped = { code: error.code, status: error.status }
+        throw error
+      }
       const raw = await readBounded(response)
       if (requestSignal.aborted) throw safeError('DIRECT_MODEL_ABORTED', 499)
       let data
       try { data = JSON.parse(raw) } catch { throw safeError('DIRECT_MODEL_INVALID_RESPONSE', 502) }
       usageReceived = true
       recordTokenUsage(effective.provider, data, usage)
+      const stopReason = effective.provider === 'kimi' ? data.stop_reason : data.choices?.[0]?.finish_reason
+      if (stopReason === 'max_tokens' || stopReason === 'length') {
+        const error = safeError('DIRECT_MODEL_OUTPUT_TRUNCATED', 502)
+        const count = value => Number.isSafeInteger(value) && value >= 0 ? value : null
+        error.details = { stop_reason: stopReason, max_output_tokens: effective.maxOutputTokens,
+          output_tokens: count(effective.provider === 'kimi' ? data.usage?.output_tokens : data.usage?.completion_tokens),
+          thinking_tokens: count(data.usage?.output_tokens_details?.thinking_tokens ?? data.usage?.completion_tokens_details?.reasoning_tokens) }
+        throw error
+      }
       const result = toJsonText(parseModelResponse(effective.provider, data), key)
       if (requestSignal.aborted) throw safeError('DIRECT_MODEL_ABORTED', 499)
       return result
     } catch (error) {
       usage.failures++
       if (!usageReceived) { usage.inputKnown = false; usage.outputKnown = false }
+      if (isFatalModelError(error)) stopped = { code: error.code, status: error.status }
       if (error?.code?.startsWith('DIRECT_MODEL_')) throw error
       if (signal?.aborted || requestSignal.aborted) throw safeError('DIRECT_MODEL_ABORTED', 499)
       throw safeError('DIRECT_MODEL_NETWORK_ERROR', 503)
@@ -256,6 +288,8 @@ export async function createDirectModelAgent(config, { fetchImpl = globalThis.fe
   }
   agent.model = { provider: effective.provider, model: effective.model }
   agent.supportsImages = true
+  agent.maxOutputTokens = effective.maxOutputTokens
+  agent.timeoutMs = effective.timeoutMs
   agent.usage = () => ({ calls: usage.calls, input_tokens: usage.inputKnown ? usage.inputTokens : null,
     output_tokens: usage.outputKnown ? usage.outputTokens : null, failures: usage.failures })
   return agent

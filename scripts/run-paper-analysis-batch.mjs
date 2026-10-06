@@ -6,11 +6,12 @@ import { constants } from 'node:fs'
 import { chmod, lstat, mkdir, open, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createDirectModelAgent } from '../src/direct-model.mjs'
+import { createDirectModelAgent, directModelOutputBudget } from '../src/direct-model.mjs'
 import { createHeadlessAnalysis, loadModelConfig } from '../src/headless-analysis.mjs'
 import { createLocalStateStore } from '../src/local-state.mjs'
 import { analysisInputOptions, analysisQuestionOptions, validQuestionIds } from '../src/analysis-input.mjs'
 import { validateAnalysisImages } from '../src/model-input-images.mjs'
+import { classifyModelHttpError, isFatalModelError, safeTruncationDetails } from '../src/model-errors.mjs'
 
 const MAX_RESPONSE = 512 * 1024
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -96,8 +97,10 @@ class Semaphore {
   active = 0
   peak = 0
   waiting = []
+  fatalCode = null
   constructor(id) { this.id = id }
   acquire(signal) {
+    if (this.fatalCode) return Promise.reject(fail(this.fatalCode))
     if (signal?.aborted) return Promise.reject(fail('BATCH_CALL_ABORTED'))
     return new Promise((accept, reject) => {
       const item = { accept, reject, signal }
@@ -110,11 +113,20 @@ class Semaphore {
     while (this.active < 2 && this.waiting.length) {
       const item = this.waiting.shift()
       item.signal?.removeEventListener('abort', item.abort)
+      if (this.fatalCode) { item.reject(fail(this.fatalCode)); continue }
       if (item.signal?.aborted) { item.reject(fail('BATCH_CALL_ABORTED')); continue }
       this.active++
       this.peak = Math.max(this.peak, this.active)
       let released = false
       item.accept(() => { if (!released) { released = true; this.active--; this.pump() } })
+    }
+  }
+  fuse(code) {
+    if (this.fatalCode) return
+    this.fatalCode = code
+    for (const item of this.waiting.splice(0)) {
+      item.signal?.removeEventListener('abort', item.abort)
+      item.reject(fail(code))
     }
   }
 }
@@ -228,7 +240,8 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
       credential_groups: credentialGroups(),
       routes: routes.map(route => ({ name: route.name, provider: route.config.provider, model: route.config.model,
         thinking: route.config.thinking ?? 'disabled', reasoningEffort: route.config.reasoningEffort,
-        maxCalls: route.config.maxCalls, maxConcurrency: route.config.maxConcurrency })) })
+        maxCalls: route.config.maxCalls, maxConcurrency: route.config.maxConcurrency,
+        maxOutputTokens: route.config.maxOutputTokens, timeoutMs: route.config.timeoutMs })) })
   }
   const auditedFetch = async (url, init = {}) => {
     const call = context.getStore()
@@ -238,8 +251,11 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
     secrets.add(credential)
     if (!slots.has(credential)) slots.set(credential, new Semaphore(slots.size + 1))
     call.credential_group = slots.get(credential).id
-    const release = await slots.get(credential).acquire(init.signal)
+    const slot = slots.get(credential)
+    const release = await slot.acquire(init.signal)
     try {
+      // A response may have fused this real-key slot while this request was queued.
+      if (slot.fatalCode) throw fail(slot.fatalCode)
       const response = await fetchImpl(url, init)
       call.http_status = response.status
       const text = await responseBody(response, init.signal, call)
@@ -248,6 +264,8 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
         const model = JSON.parse(text)?.model
         if (typeof model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/.test(model)) call.returned_model = model
       } catch {}
+      const modelErrorCode = classifyModelHttpError(call.provider, response.status, text)
+      if (isFatalModelError({ code: modelErrorCode })) slot.fuse(modelErrorCode)
       // 原样交回已有 adapter，由它继续判断截断、JSON schema 和实际 key 泄漏。
       return new Response(text, { status: response.status,
         headers: { 'content-type': response.headers?.get('content-type') ?? 'application/json' } })
@@ -262,7 +280,8 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
     for (const route of plan.routes) {
       const config = await loadConfig(route.config)
       if (!Object.hasOwn(config, 'maxCalls') || !Number.isSafeInteger(config.maxCalls) || config.maxCalls < 1 || config.maxCalls > 10000) throw fail('BATCH_EXPLICIT_BUDGET_REQUIRED')
-      routes.push({ ...route, config: { ...config, maxConcurrency: Math.min(config.maxConcurrency ?? 2, 2) },
+      routes.push({ ...route, config: { ...config, ...directModelOutputBudget(config), timeoutMs: config.timeoutMs ?? 120000,
+        maxConcurrency: Math.min(config.maxConcurrency ?? 2, 2) },
         request_id: `route-${hash([plan.request_id, route.name])}` })
     }
     await atomic('run-manifest.json', { schema: 1, request_id: plan.request_id, mode: plan.mode, notes: plan.notes, ...analysisInputOptions(plan),
@@ -270,7 +289,8 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
       review: false, apply_metadata: false, started_at: startedAt,
       routes: routes.map(route => ({ name: route.name, request_id: route.request_id, provider: route.config.provider,
         model: route.config.model, thinking: route.config.thinking ?? 'disabled', reasoningEffort: route.config.reasoningEffort,
-        maxCalls: route.config.maxCalls, maxConcurrency: route.config.maxConcurrency, ids: route.ids })) }, true)
+        maxCalls: route.config.maxCalls, maxConcurrency: route.config.maxConcurrency, maxOutputTokens: route.config.maxOutputTokens,
+        timeoutMs: route.config.timeoutMs, ids: route.ids })) }, true)
     await progress()
     interval = setInterval(() => { progress().catch(() => { progressWarning = true }) }, options.progressIntervalMs ?? 30000)
     interval.unref?.()
@@ -290,7 +310,8 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
         const agent = await agentFactory(route.config, { fetchImpl: auditedFetch })
         const auditedAgent = async input => {
           const call = { call_id: calls.length + 1, route: route.name, provider: route.config.provider,
-            model: route.config.model, started_at: stamp(), status: 'running' }
+            model: route.config.model, max_output_tokens: route.config.maxOutputTokens, timeout_ms: route.config.timeoutMs,
+            started_at: stamp(), status: 'running' }
           const selected = analysisContextReceipt(input?.analysisContext, route.ids)
           if (selected) call.analysis_context = selected
           else call.analysis_context_status = input?.analysisContext === undefined ? 'missing' : 'invalid'
@@ -306,7 +327,12 @@ export async function runAnalysisBatch(rawPlan, options = {}) {
           await progress()
           return context.run(call, async () => {
             try { const result = await agent(input); call.status = 'succeeded'; return result }
-            catch (error) { call.status = 'failed'; call.error_code = safeCode(error); throw fail(call.error_code) }
+            catch (error) {
+              call.status = 'failed'; call.error_code = safeCode(error)
+              const details = safeTruncationDetails(error)
+              if (details) call.truncation = details
+              throw Object.assign(fail(call.error_code), details ? { details } : {})
+            }
             finally {
               call.finished_at = stamp()
               const { fetched, ...receipt } = call

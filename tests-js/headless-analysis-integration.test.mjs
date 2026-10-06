@@ -13,6 +13,76 @@ import { dispatch } from '../src/bridge.mjs'
 const run = promisify(execFile)
 const digest = async path => createHash('sha256').update(await readFile(path)).digest('hex')
 
+test('large first answer batch still produces a note with late-batch evidence through the real Python source binder', { timeout: 60000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'paper-note-budget-integration-'))
+  const library = join(root, 'library'), localStateHome = join(root, 'state'), python = resolve('.venv/bin/python')
+  let analysis
+  try {
+    const fixture = await run('uv', ['run', '--offline', '--no-project', '--python', python, 'python', '-B', '-c', `
+import json, sys
+from pathlib import Path
+import pymupdf as fitz
+from dsh_paper_library.core import Library
+root = Path(sys.argv[1])
+original = root / 'synthetic-reading-methods.pdf'
+with fitz.open() as doc:
+    for number in range(1, 97):
+        page = doc.new_page()
+        page.insert_text((40, 60), f'Synthetic reading methods exercise. Exact page {number} evidence.')
+    doc.save(original)
+library = Library(root / 'library')
+paper = library.create({'title': 'Synthetic reading methods exercise'})
+paper = library.attach(paper['id'], str(original))
+print(json.dumps({'id': paper['id'], 'original': str(original), 'managed': str(library.pdf_path(paper['id']))}))
+library.close()
+`, root], { env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONPATH: resolve('src') }, maxBuffer: 1024 * 1024 })
+    const paper = JSON.parse(fixture.stdout), before = await Promise.all([paper.original, paper.managed].map(digest))
+    let calls = 0, noteInput
+    const agent = async input => {
+      calls++
+      const context = input.analysisContext
+      if (context.question_ids) {
+        const page = context.pages[0]
+        return JSON.stringify({ answers: context.question_ids.flatMap(question_id => Array.from({ length: 6 }, (_, index) => ({
+          question_id, choice: 'other', judgment: `合成学习方法判断 ${question_id}/${index}。` + '有限范围的阅读方法说明。'.repeat(100),
+          evidence: [{ source_id: context.source_ids[0], quote: `Synthetic reading methods exercise. Exact page ${page} evidence.` }],
+        }))) })
+      }
+      assert.equal(context.stage, 'note')
+      noteInput = input
+      return JSON.stringify({ title: '合成学习方法笔记', body: '## 一句话概括\n仅汇总保留的合成摘录。\n## 待核实与未覆盖\n细节压缩和图谱省略需逐批审阅。' })
+    }
+    agent.model = { provider: 'synthetic', model: 'deterministic' }
+    analysis = await createHeadlessAnalysis({ library, python, localStateHome, agent })
+    const input = { action: 'paper_analysis_run', ids: [paper.id], request_id: 'synthetic-long-note', notes: true, review: false }
+    const result = await analysis(input), row = result.results[0]
+    assert.ok(row.note_draft_id, `note missing: ${(row.warnings ?? []).join('; ')}`)
+    assert.equal(calls, 37, 'twelve batches with three groups plus one note; no extra model summarization')
+    const saved = await analysis({ action: 'paper_analysis_get', id: paper.id, request_id: row.request_id, batch_index: 0 })
+    assert.ok(Buffer.byteLength(JSON.stringify(saved.batch_answers)) > 24000, 'reproduces the old first-batch packing rejection')
+    assert.equal(saved.note_coverage.batches, 12)
+    assert.equal(saved.note_coverage.partial, true, 'all batch cards participating must not imply uncompressed full coverage')
+    assert.ok(noteInput.analysisContext.pages.includes(1) && noteInput.analysisContext.pages.includes(96))
+    const note = await dispatch({ action: 'knowledge_draft_get', id: row.note_draft_id }, { library, python })
+    const sources = await Promise.all(note.source_ids.map(id => dispatch({ action: 'knowledge_source_get', id }, { library, python })))
+    assert.ok(sources.length <= 40 && sources.length >= 12)
+    assert.ok(sources.some(source => source.locator.page <= 8) && sources.some(source => source.locator.page >= 89))
+    assert.ok(sources.every(source => source.pdf_snapshot?.kind === 'selected-source-excerpt'))
+    assert.ok(sources.reduce((sum, source) => sum + [...source.text].length, 0) <= 24000)
+    for (const source of [sources[0], sources.at(-1)]) {
+      const parent = await dispatch({ action: 'knowledge_source_get', id: source.pdf_snapshot.parent_source_id }, { library, python })
+      assert.equal(source.pdf_snapshot.parent_content_hash, parent.content_hash)
+      assert.equal(parent.text.slice(source.pdf_snapshot.parent_character_start, source.pdf_snapshot.parent_character_end), source.text)
+    }
+    assert.deepEqual(await Promise.all([paper.original, paper.managed].map(digest)), before)
+    await analysis(input)
+    assert.equal(calls, 37, 'reading persisted partial results never replays model calls')
+  } finally {
+    analysis?.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('headless batches read synthetic PDFs through the real worker and share question records with HTTP and CLI', { timeout: 60000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'paper-headless-integration-'))
   const library = join(root, 'library'), localStateHome = join(root, 'state')

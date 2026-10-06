@@ -186,6 +186,30 @@ def source_put(library, request, *, trusted_provenance=None, preserve_text=False
     kind = request.get("kind")
     if kind not in {"annotation", "official-excerpt", "user-text", "metadata", "source-note"}:
         raise ValueError("KNOWLEDGE_INVALID: unsupported source kind")
+    if "parent_source_id" in request:
+        # 短摘录只继承服务器已保存的提取来源；客户端不能伪造文件版本或页码。
+        parent = get(library, "sources", request["parent_source_id"])
+        snapshot = parent.get("pdf_snapshot", {})
+        if (entity["kind"] != "paper" or kind != "source-note" or parent["entity"] != entity
+                or parent["kind"] != "source-note" or snapshot.get("kind") != "selected-pdf-page"
+                or not snapshot.get("file_version") or parent.get("content_hash") != digest(parent["text"])):
+            raise ValueError("KNOWLEDGE_INVALID: excerpt requires an intact extracted source of this paper")
+        excerpt = request.get("text")
+        text(excerpt, "source excerpt", MAX_TEXT)
+        start = parent["text"].find(excerpt)
+        if start < 0:
+            raise ValueError("KNOWLEDGE_INVALID: excerpt must exactly match its parent source")
+        provenance = {**snapshot, "kind": "selected-source-excerpt", "scope": "saved-source-excerpt",
+                      "parent_source_id": parent["id"], "parent_content_hash": parent["content_hash"],
+                      "parent_character_start": start, "parent_character_end": start + len(excerpt),
+                      "full_document": False, "excerpt_only": True}
+        if "character_start" in snapshot:
+            provenance.update(character_start=snapshot["character_start"] + start,
+                              character_end=snapshot["character_start"] + start + len(excerpt))
+        return source_put(library, {"entity": entity, "kind": "source-note", "text": excerpt,
+                                   "title": parent.get("title", ""), "locator": parent["locator"],
+                                   "url": parent.get("url", "")},
+                          trusted_provenance=provenance, preserve_text=True)
     if preserve_text and (trusted_provenance is None or kind != "source-note"):
         raise ValueError("KNOWLEDGE_INVALID: preserving source whitespace requires trusted extractor provenance")
     locator = request.get("locator") or {}

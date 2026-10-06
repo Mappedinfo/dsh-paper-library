@@ -5,8 +5,9 @@ import { dirname, resolve } from 'node:path'
 import { defaultLibrary, dispatch as defaultDispatch } from './bridge.mjs'
 import { createLocalStateStore } from './local-state.mjs'
 import { createPaperAnalysis } from './harness/paper-analysis.mjs'
-import { directModelReasoningOptions } from './direct-model.mjs'
+import { directModelOutputBudget, directModelReasoningOptions } from './direct-model.mjs'
 import { analysisInputOptions, analysisQuestionOptions } from './analysis-input.mjs'
+import { isFatalModelError, safeModelErrorMessage } from './model-errors.mjs'
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value)
@@ -26,6 +27,8 @@ function validatedConfig(config) {
   }
   if (config.envFile !== undefined && (typeof config.envFile !== 'string' || !config.envFile.trim() || /[\x00-\x1f]/.test(config.envFile))) throw fail('DIRECT_MODEL_CONFIG_INVALID', '模型配置无效。')
   directModelReasoningOptions(config)
+  // Preserve the actionable code for explicitly undersized thinking budgets.
+  directModelOutputBudget(config)
   return clone(config)
 }
 
@@ -46,7 +49,10 @@ export async function loadModelConfig(path) {
       config.envFile = resolve(dirname(location), config.envFile)
     }
     return config
-  } catch {
+  } catch (error) {
+    if (error?.code === 'DIRECT_MODEL_OUTPUT_BUDGET_TOO_SMALL') {
+      throw fail('DIRECT_MODEL_OUTPUT_BUDGET_TOO_SMALL', '当前思考模式需要更大的输出令牌预算；请显式提高 maxOutputTokens。', 400)
+    }
     throw fail('DIRECT_MODEL_CONFIG_INVALID', '模型配置无效或无法安全读取。')
   } finally { await file?.close() }
 }
@@ -76,6 +82,7 @@ function compact(record, id, requestId) {
     ...(record.questionnaire ? { questionnaire: record.questionnaire } : {}),
     ...(record.question_summary ? { question_summary: record.question_summary } : {}),
     ...(record.question_coverage ? { question_coverage: record.question_coverage } : {}),
+    ...(record.skipped_reason ? { skipped_reason: record.skipped_reason } : {}),
     ...(typeof record.analysis_complete === 'boolean' ? { analysis_complete: record.analysis_complete } : {}),
     ...(record.batch_answers ? { batch_answers: record.batch_answers } : {}),
     metadata_fields: Object.keys(record.metadata ?? {}), warnings: record.warnings ?? [] })
@@ -84,9 +91,10 @@ function compact(record, id, requestId) {
 function aggregate(results) {
   const completed = results.filter(row => row.status === 'complete').length
   const partial = results.filter(row => row.status === 'partial').length
+  const skipped = results.filter(row => row.status === 'skipped').length
   const clean = results.filter(row => row.status === 'complete' && !row.warnings?.length).length
   return { status: clean === results.length ? 'complete' : completed || partial ? 'partial' : 'failed',
-    counts: { total: results.length, complete: completed, partial, incomplete: results.length - completed,
+    counts: { total: results.length, complete: completed, partial, skipped, incomplete: results.length - completed,
       with_warnings: results.filter(row => row.warnings?.length).length } }
 }
 
@@ -101,7 +109,7 @@ export async function createHeadlessAnalysis(options = {}) {
   const maxCalls = config?.maxCalls ?? 100
   if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1 || maxConcurrency > 4 ||
       !Number.isSafeInteger(maxCalls) || maxCalls < 1 || maxCalls > 10000) throw fail('ANALYSIS_INVALID')
-  let configuredAgent = options.agent, agentPromise, disposed = false, attempts = 0
+  let configuredAgent = options.agent, agentPromise, disposed = false, attempts = 0, fatalModelCode = null
   let admission = Promise.resolve()
   const jobs = new Map(), batches = new Map()
 
@@ -118,14 +126,25 @@ export async function createHeadlessAnalysis(options = {}) {
     return agentPromise
   }
   const usage = () => configuredAgent?.usage?.() ?? { calls: attempts, input_tokens: null, output_tokens: null }
-  const engine = createPaperAnalysis({ store, dispatch, library, python: options.python, maxConcurrency, execution: 'direct',
+  const routedAgent = async request => {
+    const agent = await getAgent()
+    if (fatalModelCode) throw fail(fatalModelCode, safeModelErrorMessage(fatalModelCode), 429)
+    try { return await agent(request) }
+    catch (error) {
+      if (isFatalModelError(error)) fatalModelCode ??= error.code
+      throw error
+    }
+  }
+  routedAgent.modelTimeoutMs = config ? config.timeoutMs ?? 120000 : configuredAgent?.timeoutMs
+  const engineAgent = async request => {
+    if (attempts >= maxCalls) throw fail('DIRECT_MODEL_BUDGET_EXHAUSTED', '本次模型调用次数已达上限。', 429)
+    attempts++
+    return routedAgent(request)
+  }
+  engineAgent.modelTimeoutMs = routedAgent.modelTimeoutMs
+  const engine = createPaperAnalysis({ store, dispatch, library, python: options.python, maxConcurrency, execution: 'direct', modelTimeoutMs: routedAgent.modelTimeoutMs,
     resolveModel: async () => { await getAgent(); return model() },
-    agent: async request => {
-      const agent = await getAgent()
-      if (attempts >= maxCalls) throw fail('DIRECT_MODEL_BUDGET_EXHAUSTED', '本次模型调用次数已达上限。', 429)
-      attempts++
-      return agent(request)
-    } })
+    agent: engineAgent })
 
   async function start(input) {
     if (!validId(input.id) || input.id.startsWith('dataset_') || !validId(input.request_id)) throw fail('ANALYSIS_INVALID')
@@ -160,7 +179,8 @@ export async function createHeadlessAnalysis(options = {}) {
     const selected = [...ids], effective = effectiveOptions(input), route = model()
     const reasoning = directModelReasoningOptions(config)
     // Preserve manifests made before explicit reasoning controls existed.
-    const limits = { maxConcurrency, maxCalls, maxOutputTokens: config?.maxOutputTokens ?? 8192, timeoutMs: config?.timeoutMs ?? 120000,
+    const maxOutputTokens = config ? directModelOutputBudget(config).maxOutputTokens : configuredAgent?.maxOutputTokens ?? 8192
+    const limits = { maxConcurrency, maxCalls, maxOutputTokens, timeoutMs: config?.timeoutMs ?? configuredAgent?.timeoutMs ?? 120000,
       ...(reasoning.thinking === 'disabled' ? {} : reasoning) }
     return { ids: selected, effective, route, limits,
       fingerprint: hash({ ids: selected, options: effective, model: route, limits }) }
@@ -200,15 +220,27 @@ export async function createHeadlessAnalysis(options = {}) {
     }
     const results = new Array(selected.ids.length)
     let next = 0
+    const saveSkipped = async (index, id) => {
+      const requestId = childId(input.request_id, id)
+      const result = compact({ status: 'skipped', skipped_reason: fatalModelCode, error_code: fatalModelCode,
+        error: safeModelErrorMessage(fatalModelCode), warnings: [] }, id, requestId)
+      results[index] = result
+      try { await store.put(failureKey(input.request_id, id), result, 0) }
+      catch { result.warnings.push('跳过状态未能保存；原批次清单保留。') }
+    }
     async function worker() {
       while (next < selected.ids.length) {
         const index = next++, id = selected.ids[index], requestId = childId(input.request_id, id)
+        if (fatalModelCode) { await saveSkipped(index, id); continue }
         try {
           await start({ action: 'paper_analysis_start', id, request_id: requestId, ...selected.effective })
           await engine.wait(id, requestId)
-          results[index] = compact(await engine({ action: 'paper_analysis_get', id, request_id: requestId }), id, requestId)
+          const record = await engine({ action: 'paper_analysis_get', id, request_id: requestId })
+          results[index] = compact(record, id, requestId)
+          if (isFatalModelError({ code: record.error_code })) fatalModelCode ??= record.error_code
         } catch (error) {
-          results[index] = compact({ status: 'failed', error: '此篇后台整理未完成。', error_code: error.code ?? 'ANALYSIS_FAILED' }, id, requestId)
+          if (isFatalModelError(error)) fatalModelCode ??= error.code
+          results[index] = compact({ status: 'failed', error: isFatalModelError(error) ? safeModelErrorMessage(error.code) : '此篇后台整理未完成。', error_code: error.code ?? 'ANALYSIS_FAILED' }, id, requestId)
           try { await store.put(failureKey(input.request_id, id), results[index], 0) }
           catch { results[index].warnings.push('逐篇失败状态未能保存；此批次不会自动重跑。') }
         }

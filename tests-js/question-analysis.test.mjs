@@ -158,6 +158,37 @@ test('call budget stops new extraction and keeps completed question groups inspe
   assert.equal(result.active_questions[0].answers.length, 2)
 })
 
+test('fatal quota persists its failed question group then stops later groups and synthesis', async t => {
+  const f = await fixture(t)
+  f.response = () => { throw Object.assign(new Error('provider raw quota detail must not be persisted'), { code: 'DIRECT_MODEL_QUOTA_EXHAUSTED' }) }
+  const result = await f.run({ notes: true, review: true })
+  assert.equal(result.status, 'failed')
+  assert.equal(result.error_code, 'DIRECT_MODEL_QUOTA_EXHAUSTED')
+  assert.equal(f.calls.length, 1)
+  assert.equal(f.kernel.filter(call => call.action === 'paper_analysis_batch').length, 1)
+  assert.equal(f.kernel.some(call => call.action === 'knowledge_draft_put'), false)
+  const group = await readQuestionGroup(f.store, questionKey('paper-a', 'run-a', 0, 0), true)
+  assert.equal(group.status, 'partial')
+  assert.equal(group.request_error.code, 'DIRECT_MODEL_QUOTA_EXHAUSTED')
+  assert.doesNotMatch(group.request_error.message, /raw quota detail/)
+  assert.equal(result.analysis_complete, false)
+})
+
+test('output truncation details persist safely and stop the current paper before later groups', async t => {
+  const f = await fixture(t)
+  f.response = () => { throw Object.assign(new Error('truncated'), { code: 'DIRECT_MODEL_OUTPUT_TRUNCATED', details: {
+    stop_reason: 'max_tokens', max_output_tokens: 16384, output_tokens: 16384, thinking_tokens: 12000, secret: 'do-not-copy',
+  } }) }
+  const result = await f.run({ notes: true, review: true })
+  assert.equal(result.status, 'failed')
+  assert.equal(result.error_code, 'DIRECT_MODEL_OUTPUT_TRUNCATED')
+  assert.equal(f.calls.length, 1)
+  assert.equal(f.kernel.filter(call => call.action === 'paper_analysis_batch').length, 1)
+  const group = await readQuestionGroup(f.store, questionKey('paper-a', 'run-a', 0, 0), true)
+  assert.deepEqual(group.request_error.details, { stop_reason: 'max_tokens', max_output_tokens: 16384, output_tokens: 16384, thinking_tokens: 12000 })
+  assert.doesNotMatch(JSON.stringify(group.request_error), /do-not-copy/)
+})
+
 test('historical job fingerprints remain readable and never replay under the new questionnaire', async t => {
   const f = await fixture(t)
   const hash = (await import('node:crypto')).createHash

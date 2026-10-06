@@ -134,6 +134,41 @@ test('a batch made only of partial question analyses remains partial', async () 
   assert.equal(result.counts.partial, 1)
 })
 
+test('fatal model quota preserves finished papers, blocks unstarted papers, and replays without calls', async () => {
+  const f = await fixture({ maxConcurrency: 1 })
+  f.handle.dispose()
+  f.calls.length = 0
+  f.agent = Object.assign(async input => {
+    f.calls.push(input)
+    if (input.analysisContext?.id === 'paper-b') throw Object.assign(new Error('private provider quota response'), { code: 'DIRECT_MODEL_QUOTA_EXHAUSTED' })
+    return JSON.stringify({ answers: input.analysisContext.question_ids.map(question_id => ({ question_id, choice: 'not_reported' })) })
+  }, { model: { provider: 'glm', model: 'synthetic-model' }, usage: () => ({ calls: f.calls.length }) })
+  f.options.agent = f.agent
+  f.handle = await createHeadlessAnalysis(f.options)
+  const input = { action: 'paper_analysis_run', ids: ['paper-a', 'paper-b', 'paper-c'], request_id: 'quota-fuse', mode: 'full', notes: false, review: false }
+  const first = await f.handle(input)
+  assert.equal(first.status, 'partial')
+  assert.deepEqual(first.results.map(row => row.status), ['complete', 'failed', 'skipped'])
+  assert.ok(first.results[2].error_code === 'DIRECT_MODEL_QUOTA_EXHAUSTED' && first.results[2].skipped_reason === 'DIRECT_MODEL_QUOTA_EXHAUSTED')
+  assert.equal(f.calls.length, 4)
+  const saved = [...f.records.values()].find(row => row.key.startsWith('analysis.headless-batch:'))
+  assert.equal(saved.value.status, 'partial')
+  assert.equal(saved.value.counts.complete, 1)
+  assert.equal(saved.value.counts.skipped, 1)
+  const replay = await f.handle(input)
+  assert.equal(replay.reused, true)
+  assert.deepEqual(replay.results.map(row => row.status), ['complete', 'failed', 'skipped'])
+  assert.equal(f.calls.length, 4)
+})
+
+test('K3 thinking with a too-small explicit output budget keeps its actionable config error', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'analysis-budget-config-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const path = join(root, 'kimi.json')
+  await writeFile(path, JSON.stringify({ provider: 'kimi', model: 'k3-256k', keyEnv: 'SYNTHETIC_KEY', thinking: 'default', reasoningEffort: 'high', maxOutputTokens: 8192 }))
+  await assert.rejects(loadModelConfig(path), { code: 'DIRECT_MODEL_OUTPUT_BUDGET_TOO_SMALL' })
+})
+
 test('changed configured provider/model or budgets conflict across processes', async () => {
   const f = await fixture(); await f.handle(request)
   const changedAgent = Object.assign(async input => f.agent(input), { model: { provider: 'kimi', model: 'other-model' } })
@@ -350,7 +385,7 @@ test('CLI waits for start and preserves failed batch JSON using only synthetic m
       if(input.action==='knowledge_draft_put'){const d={...input,id:'draft-a',status:'needs-review'};drafts.set(d.id,d);return d};
       if(input.action==='knowledge_draft_get')return drafts.get(input.id);
       throw new Error('Unexpected synthetic action'); }`
-  const direct = `export {directModelReasoningOptions} from ${JSON.stringify(new URL('../src/direct-model.mjs?actual', import.meta.url).href)}; export async function createDirectModelAgent(config){const fn=async()=>{await new Promise(r=>setTimeout(r,25));if(config.model==='synthetic-failure')throw new Error('Synthetic failure');return JSON.stringify({title:'Synthetic',body:'Synthetic',nodes:[],edges:[],assertions:[],metadata:{},field_sources:{}})};fn.model={provider:config.provider,model:config.model};return fn}`
+  const direct = `export {directModelReasoningOptions,directModelOutputBudget} from ${JSON.stringify(new URL('../src/direct-model.mjs?actual', import.meta.url).href)}; export async function createDirectModelAgent(config){const fn=async()=>{await new Promise(r=>setTimeout(r,25));if(config.model==='synthetic-failure')throw new Error('Synthetic failure');return JSON.stringify({title:'Synthetic',body:'Synthetic',nodes:[],edges:[],assertions:[],metadata:{},field_sources:{}})};fn.model={provider:config.provider,model:config.model};return fn}`
   const loader = join(home, 'loader.mjs')
   await writeFile(loader, `export async function load(url,context,next){if(url.endsWith('/src/bridge.mjs'))return{format:'module',shortCircuit:true,source:${JSON.stringify(bridge)}};if(url.endsWith('/src/direct-model.mjs'))return{format:'module',shortCircuit:true,source:${JSON.stringify(direct)}};return next(url,context)}`)
   const args = ['--no-warnings', '--loader', loader, 'src/cli.mjs', '--library', library, '--state-home', join(home, 'state'), '--model-config', config]

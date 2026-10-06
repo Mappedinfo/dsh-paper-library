@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { deflateSync } from 'node:zlib'
-import { createDirectModelAgent } from '../src/direct-model.mjs'
+import { createDirectModelAgent, directModelOutputBudget } from '../src/direct-model.mjs'
 import { validateAnalysisImages } from '../src/model-input-images.mjs'
 
 function response(payload, status = 200, headers = {}) {
@@ -131,7 +131,7 @@ test('Kimi still refuses tool blocks, unknown blocks, truncation and malformed f
     [{ ...kimiResult(), content: [...kimiResult().content, { type: 'tool_use', name: 'synthetic' }] }, 'DIRECT_MODEL_INCOMPLETE'],
     [{ ...kimiResult(), content: [...kimiResult().content, { type: 'unknown' }] }, 'DIRECT_MODEL_INCOMPLETE'],
     [{ ...kimiResult(), content: [...kimiResult().content, null] }, 'DIRECT_MODEL_INCOMPLETE'],
-    [kimiResult('{"title":"A paper"}', 'max_tokens'), 'DIRECT_MODEL_INCOMPLETE'],
+    [kimiResult('{"title":"A paper"}', 'max_tokens'), 'DIRECT_MODEL_OUTPUT_TRUNCATED'],
     [{ ...kimiResult(), content: [{ type: 'thinking', thinking: 'not a final answer' }] }, 'DIRECT_MODEL_INVALID_OUTPUT'],
     [{ ...kimiResult(), content: [{ type: 'text', text: 7 }] }, 'DIRECT_MODEL_INVALID_OUTPUT'],
   ]
@@ -210,9 +210,9 @@ test('maxCalls is atomic across concurrent calls and every attempt consumes budg
 
 test('HTTP, redirect, incomplete and malformed output errors are sanitized', async () => {
   for (const [mock, code, status] of [
-    [async () => response('private body with secret', 429), 'DIRECT_MODEL_HTTP_ERROR', 429],
+    [async () => response('private body with secret', 429), 'DIRECT_MODEL_RATE_LIMITED', 429],
     [async () => response('', 302, { location: 'https://elsewhere.invalid' }), 'DIRECT_MODEL_REDIRECT_REFUSED', 302],
-    [async () => response(glmResult('{"x":1}', 'length')), 'DIRECT_MODEL_INCOMPLETE', 502],
+    [async () => response(glmResult('{"x":1}', 'length')), 'DIRECT_MODEL_OUTPUT_TRUNCATED', 502],
     [async () => response(glmResult('not json')), 'DIRECT_MODEL_INVALID_OUTPUT', 502],
   ]) {
     const agent = await createDirectModelAgent({ provider: 'glm', model: 'm', keyEnv: 'K' }, { env: { K: 'sensitive-key' }, fetchImpl: mock })
@@ -226,6 +226,62 @@ test('route mismatch and oversized prompts reject before consuming call budget',
   await assert.rejects(agent({ prompt: 'ok', model: 'other' }), { code: 'DIRECT_MODEL_ROUTE_MISMATCH' })
   await assert.rejects(agent({ prompt: 'x'.repeat(128 * 1024 + 1) }), { code: 'DIRECT_MODEL_PROMPT_INVALID' })
   assert.equal(agent.usage().calls, 0)
+})
+
+test('Kimi shared thinking budget is resolved before credentials and rejects the old 8192 configuration', async () => {
+  const base = { provider: 'kimi', model: 'k3-256k', keyEnv: 'KEY', thinking: 'default', reasoningEffort: 'high' }
+  assert.deepEqual(directModelOutputBudget(base), { maxOutputTokens: 32768 })
+  assert.deepEqual(directModelOutputBudget({ ...base, reasoningEffort: 'low' }), { maxOutputTokens: 16384 })
+  assert.deepEqual(directModelOutputBudget({ ...base, maxOutputTokens: 20000 }), { maxOutputTokens: 20000 })
+  assert.deepEqual(directModelOutputBudget({ provider: 'glm' }), { maxOutputTokens: 8192 })
+  assert.deepEqual(directModelOutputBudget({ provider: 'kimi', thinking: 'disabled' }), { maxOutputTokens: 8192 })
+  let reads = 0, calls = 0, sent
+  for (const maxOutputTokens of [1, 8192, 16383]) {
+    await assert.rejects(createDirectModelAgent({ ...base, maxOutputTokens }, {
+      env: new Proxy({}, { get() { reads++; return 'synthetic-key' } }),
+      fetchImpl: async () => { calls++; return response(kimiResult()) },
+    }), { code: 'DIRECT_MODEL_OUTPUT_BUDGET_TOO_SMALL' })
+  }
+  assert.equal(reads, 0); assert.equal(calls, 0)
+  const agent = await createDirectModelAgent(base, { env: { KEY: 'synthetic-key' }, fetchImpl: async (_url, init) => {
+    sent = JSON.parse(init.body); return response(kimiResult())
+  } })
+  await agent({ prompt: 'Synthetic budget fixture' })
+  assert.equal(sent.max_tokens, 32768); assert.equal(sent.reasoning_effort, 'high')
+  assert.equal(Object.hasOwn(sent, 'thinking'), false)
+})
+
+test('truncated Kimi response records total and thinking use without accepting or exposing the unfinished answer', async () => {
+  const payload = { ...kimiResult('{"title":"unfinished', 'max_tokens'),
+    content: [{ type: 'thinking', thinking: 'PRIVATE hidden reasoning' }, { type: 'text', text: '{"title":"unfinished' }],
+    usage: { input_tokens: 9108, output_tokens: 8195, output_tokens_details: { thinking_tokens: 7305 } } }
+  let calls = 0
+  const agent = await createDirectModelAgent({ provider: 'kimi', model: 'k3-256k', keyEnv: 'KEY', thinking: 'default', maxOutputTokens: 16384 }, {
+    env: { KEY: 'synthetic-secret' }, fetchImpl: async () => { calls++; return response(payload) },
+  })
+  await assert.rejects(agent({ prompt: 'Synthetic truncation fixture' }), error => {
+    assert.equal(error.code, 'DIRECT_MODEL_OUTPUT_TRUNCATED')
+    assert.deepEqual(error.details, { stop_reason: 'max_tokens', max_output_tokens: 16384, output_tokens: 8195, thinking_tokens: 7305 })
+    assert.doesNotMatch(JSON.stringify(error), /PRIVATE|unfinished|synthetic-secret/)
+    return true
+  })
+  assert.equal(calls, 1)
+  assert.deepEqual(agent.usage(), { calls: 1, failures: 1, input_tokens: 9108, output_tokens: 8195 })
+})
+
+test('direct agent latches quota or credential rejection and never sends the next call', async () => {
+  for (const [payload, status, code] of [
+    [{ error: { type: 'permission_error', message: "You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends." } }, 403, 'DIRECT_MODEL_QUOTA_EXHAUSTED'],
+    [{ error: { type: 'authentication_error', message: 'synthetic-secret invalid' } }, 401, 'DIRECT_MODEL_AUTH_ERROR'],
+  ]) {
+    let calls = 0
+    const agent = await createDirectModelAgent({ provider: 'kimi', model: 'synthetic', keyEnv: 'KEY' }, {
+      env: { KEY: 'synthetic-secret' }, fetchImpl: async () => { calls++; return response(payload, status) },
+    })
+    await assert.rejects(agent({ prompt: 'first' }), { code })
+    await assert.rejects(agent({ prompt: 'next' }), { code })
+    assert.equal(calls, 1); assert.equal(agent.usage().calls, 1)
+  }
 })
 
 test('sends bounded image parts as native GLM data URLs and Kimi Anthropic base64 blocks', async () => {

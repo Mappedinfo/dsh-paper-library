@@ -5,6 +5,8 @@ import { analysisInputOptions, analysisQuestionOptions } from '../analysis-input
 import { validateAnalysisImages } from '../model-input-images.mjs'
 import { loadQuestionnaire, questionGroups } from '../reading-questions.mjs'
 import { runQuestionAnalysis, readQuestionBatch, readQuestionGroup, summarizeOptionCandidates } from './question-analysis.mjs'
+import { packNoteMaterial } from './note-material.mjs'
+import { isFatalModelError } from '../model-errors.mjs'
 import { renderNotePrompt as notePrompt, renderReviewPrompt as reviewPrompt, renderCoveragePrompt as coveragePrompt, renderMetadataPrompt, REVIEW_SECTIONS, promptTemplateManifest } from '../prompt-templates.mjs'
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -26,7 +28,6 @@ function validateMode(input) {
   if(input.notes!==undefined&&typeof input.notes!=='boolean')throw fail('精读笔记选项无效。')
   if(input.mode==='metadata'&&(input.notes===true||input.review===true))throw fail('元数据提取不生成精读笔记或全文评审。')
 }
-const NOTE_MATERIAL_BUDGET = 24000
 const REVIEW_BODY_BYTES = 64000
 const PROFILE_CHARACTERS = 8000
 const SOURCE_TYPES = new Set(['evidence', 'figure', 'formula'])
@@ -59,30 +60,9 @@ function exactOrWhitespaceQuote(source, quote, cache) {
 
 /** Project committed batch drafts into bounded reading-note material. The note
  * is grounded on reviewed-draft records, never on re-read PDF text. */
-function noteMaterial(batches, total = batches.length, coverage = {}, questionCoverage) {
-  const material = []
-  let characters = 0, partial = batches.length < total || Boolean(coverage.no_extractable_text_pages?.length || coverage.empty_markdown_pages?.length || questionCoverage && !questionCoverage.complete)
-  for (const batch of batches) {
-    const projection = {
-      ...(batch.answers ? { answers: batch.answers.map(({raw, ...answer}) => answer) } : {}),
-      batch: batch.index + 1, read_pages: batch.pages, summary: String(batch.draft.body || '').slice(0, 3000),
-      ...(batch.preprocessing ? { source_representation: batch.preprocessing.representation, raw_pdf_verbatim: false } : {}),
-      ...(batch.visual_coverage ? { visual_sent_pages: batch.visual_coverage.sent_pages || [], visual_observations_require_review: true } : {}),
-      nodes: (batch.draft.nodes || []).map(node => ({ id: `${node.type}:${node.id}`, label: node.label, ...(node.quote ? { quote: String(node.quote).slice(0, 500) } : {}), ...(node.source_id ? { source_id: node.source_id } : {}) })),
-      relations: [...(batch.draft.edges || []), ...(batch.draft.assertions || [])].map(relation => ({ subject: relation.subject, relation: relation.relation, object: relation.object, ...(relation.surface ? { note: String(relation.surface).slice(0, 200) } : {}) })),
-    }
-    const size = Buffer.byteLength(JSON.stringify(projection), 'utf8')
-    if (characters + size > NOTE_MATERIAL_BUDGET) { partial = true; break }
-    characters += size
-    material.push(projection)
-  }
-  return { material, partial }
-}
-
-function materialContext(job, stage, batches, material) {
-  const selected = batches.slice(0, material.length)
+function materialContext(job, stage, material) {
   return { id: job.id, request_id: job.request_id, stage,
-    source_ids: [...new Set(selected.flatMap(batch => batch.source_ids))],
+    source_ids: [...new Set(material.flatMap(batch => batch.source_ids))],
     pages: [...new Set(material.flatMap(batch => batch.read_pages))].sort((a, b) => a - b) }
 }
 
@@ -121,8 +101,9 @@ function existingMetadata(paper) {
  * cancellation is explicit and a host restart never reissues an uncertain model call.
  * Different papers may run in parallel up to maxConcurrency; batches within one
  * paper stay serial because the reading cursor is ordered. */
-export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, agent, library, python, execution = 'host', maxConcurrency = 2, reviewProfile = null, readFile = readFileRaw }) {
+export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, agent, library, python, execution = 'host', maxConcurrency = 2, reviewProfile = null, readFile = readFileRaw, modelTimeoutMs }) {
   if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1 || maxConcurrency > 4) throw new Error('Paper analysis concurrency must be an integer from 1 to 4')
+  modelTimeoutMs = Number.isSafeInteger(modelTimeoutMs) && modelTimeoutMs > 0 ? modelTimeoutMs : agent?.timeoutMs ?? 180000
   const flights = new Map()
   const starts = new Map(), applies = new Map()
   const kernel = (input, signal) => dispatch(input, { library, python, signal })
@@ -245,30 +226,15 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
     }
   }
 
-  async function boundMaterialSources(batches, projected, signal) {
-    const sourceIds = [], seen = new Set(), cache = new Map(), material = []
-    let characters = 0
-    for (const [index, projection] of projected.entries()) {
-      const ids = [...new Set(batches[index].source_ids)]
-      let additional = 0
-      for (const id of ids) {
-        signal?.throwIfAborted()
-        if (seen.has(id)) continue
-        if (!cache.has(id)) cache.set(id, await kernel({action:'knowledge_source_get',id},signal))
-        const source = cache.get(id)
-        additional += [...String(source.text || '')].length + [...String(source.comment ?? '')].length
-      }
-      const newIds = ids.filter(id => !seen.has(id))
-      if (characters + additional > 24000 || sourceIds.length + newIds.length > 40) break
-      characters += additional
-      for (const id of newIds) { sourceIds.push(id); seen.add(id) }
-      material.push(projection)
-    }
-    return {material,sourceIds,partial:material.length < projected.length}
+  async function packedBatchMaterial(job, batches, signal) {
+    return packNoteMaterial({ batches, totalBatches: job.batch_count || batches.length, paperId: job.id, signal,
+      coverage: job.coverage, questionCoverage: job.question_coverage,
+      getSource: id => kernel({ action: 'knowledge_source_get', id }, signal),
+      putExcerpt: input => kernel(input, signal) })
   }
 
-  /** One pending-review evidence-atlas draft per completed run. Mirrors the
-   * reading note: a failure is recorded as a warning and never fails the job. */
+  /** One pending-review evidence-atlas draft per completed run. Ordinary
+   * failures become visible warnings; quota/auth and output truncation stop the run. */
   async function evidenceReview(job, model, signal) {
     if (!model || typeof agent !== 'function') return null
     const total = job.batch_count || 0
@@ -276,21 +242,21 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
     const batches = []
     for (let index = 0; index < total; index++) {
       const saved = (await store.get(batchKey(job.id, job.request_id, index))).value
-      if (!saved?.draft_id) continue
-      const draft = await kernel({ action: 'knowledge_draft_get', id: saved.draft_id }, signal)
-      if (!draft?.id) continue
-      batches.push({ index, pages: saved.coverage?.read_pages || [], draft, answers: saved.question_keys ? (await readQuestionBatch(store, saved)).batch_answers.filter(answer => answer.valid) : undefined, source_ids: saved.source_ids || [], preprocessing: saved.preprocessing, visual_coverage: saved.visual_coverage })
+      if (!saved) continue
+      const draft = saved.draft_id ? await kernel({ action: 'knowledge_draft_get', id: saved.draft_id }, signal) : { body: '', nodes: [], edges: [], assertions: [] }
+      if (!draft) continue
+      const questionData = saved.question_keys ? await readQuestionBatch(store, saved) : {}
+      batches.push({ index, pages: saved.coverage?.read_pages || [], draft, answers: questionData.batch_answers || [], question_results: questionData.question_results || [],
+        compilation: saved.compilation, graph_error: saved.graph_error, source_ids: saved.source_ids || [], preprocessing: saved.preprocessing, visual_coverage: saved.visual_coverage })
     }
     if (!batches.length) return null
-    const projected = noteMaterial(batches,total,job.coverage,job.question_coverage)
-    if (!projected.material.length) return null
-    const bounded = await boundMaterialSources(batches,projected.material,signal)
-    const {material,sourceIds} = bounded, partial = projected.partial || bounded.partial
+    const packed = await packedBatchMaterial(job, batches, signal)
+    const { material, sourceIds, partial, coverage } = packed
     if (!sourceIds.length) throw fail('证据图谱评审没有可引用的来源。')
     const profile = await readReviewProfile()
     const paper = await kernel({ action: 'get', id: job.id }, signal)
-    const raw = await agent({ prompt: reviewPrompt(paper?.title, material, partial, total, profile) + coveragePrompt(job), ...model, signal,
-      analysisContext: materialContext(job, 'review', batches, material) })
+    const raw = await agent({ prompt: reviewPrompt(paper?.title, material, partial, total, profile, coverage) + coveragePrompt(job), ...model, signal: AbortSignal.any([signal, AbortSignal.timeout(modelTimeoutMs)]),
+      analysisContext: materialContext(job, 'review', material) })
     signal?.throwIfAborted()
     const output = outputOf(raw, 'note')
     if (output.title && !output.title.startsWith('证据图谱评审')) throw fail('评审草稿标题不符合约定。')
@@ -298,7 +264,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
     const missing = REVIEW_SECTIONS.filter(section => !output.body.includes(section))
     if (missing.length) throw fail(`评审草稿缺少必需小节：${missing.join('、')}`)
     const draft = await kernel({ action: 'knowledge_draft_put', entity: { kind: 'paper', id: job.id }, mode: 'note', title: output.title, body: output.body, nodes: [], edges: [], assertions: [], source_ids: sourceIds, request_id: `analysis-review-${hash([job.id, job.request_id])}`, origin: 'llm', model }, signal)
-    return { id: draft.id, coverage: { batches: material.length, batches_total: total, partial, sources: sourceIds.length },
+    return { id: draft.id, coverage: { batches: material.length, batches_total: total, partial, sources: sourceIds.length, packing: coverage },
       profile: profile ? { path: profile.path, characters: profile.characters, truncated: profile.truncated === true, error: profile.error } : null }
   }
 
@@ -310,24 +276,25 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
     const batches = []
     for (let index = 0; index < total; index++) {
       const saved = (await store.get(batchKey(job.id, job.request_id, index))).value
-      if (!saved?.draft_id) continue
-      const draft = await kernel({ action: 'knowledge_draft_get', id: saved.draft_id }, signal)
-      if (!draft?.id) continue
-      batches.push({ index, pages: saved.coverage?.read_pages || [], draft, answers: saved.question_keys ? (await readQuestionBatch(store, saved)).batch_answers.filter(answer => answer.valid) : undefined, source_ids: saved.source_ids || [], preprocessing: saved.preprocessing, visual_coverage: saved.visual_coverage })
+      if (!saved) continue
+      const draft = saved.draft_id ? await kernel({ action: 'knowledge_draft_get', id: saved.draft_id }, signal) : { body: '', nodes: [], edges: [], assertions: [] }
+      if (!draft) continue
+      const questionData = saved.question_keys ? await readQuestionBatch(store, saved) : {}
+      batches.push({ index, pages: saved.coverage?.read_pages || [], draft, answers: questionData.batch_answers || [], question_results: questionData.question_results || [],
+        compilation: saved.compilation, graph_error: saved.graph_error, source_ids: saved.source_ids || [], preprocessing: saved.preprocessing, visual_coverage: saved.visual_coverage })
     }
     if (!batches.length) return null
-    const projected = noteMaterial(batches,total,job.coverage,job.question_coverage)
-    if (!projected.material.length) return null
-    const bounded = await boundMaterialSources(batches,projected.material,signal)
-    const {material,sourceIds} = bounded, partial = projected.partial || bounded.partial
+    const packed = await packedBatchMaterial(job, batches, signal)
+    const { material, sourceIds, partial, coverage } = packed
     if (!sourceIds.length) throw fail('精读笔记没有可引用的来源。')
     const paper = await kernel({ action: 'get', id: job.id }, signal)
-    const raw = await agent({ prompt: notePrompt(paper?.title, material, partial, total) + coveragePrompt(job), ...model, signal,
-      analysisContext: materialContext(job, 'note', batches, material) })
+    const prompt = notePrompt(paper?.title, material, partial, total, coverage) + coveragePrompt(job)
+    const raw = await agent({ prompt, ...model, signal: AbortSignal.any([signal, AbortSignal.timeout(modelTimeoutMs)]),
+      analysisContext: materialContext(job, 'note', material) })
     signal?.throwIfAborted()
     const output = outputOf(raw, 'note')
     const draft = await kernel({ action: 'knowledge_draft_put', entity: { kind: 'paper', id: job.id }, mode: 'note', title: output.title, body: output.body, nodes: [], edges: [], assertions: [], source_ids: sourceIds, request_id: `analysis-note-${hash([job.id, job.request_id])}`, origin: 'llm', model }, signal)
-    return { id: draft.id, coverage: { batches: material.length, batches_total: total, partial } }
+    return { id: draft.id, coverage: { batches: material.length, batches_total: total, partial, sources: sourceIds.length, packing: coverage } }
   }
 
   async function run(record, abort) {
@@ -335,7 +302,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
     try {
       signal.throwIfAborted()
       if (record.value.mode !== 'metadata') {
-        await runQuestionAnalysis({ input:record.value, store, kernel, sourcePack, agent, signal, batchKey, readingNote, evidenceReview,
+        await runQuestionAnalysis({ input:record.value, store, kernel, sourcePack, agent, signal, batchKey, readingNote, evidenceReview, modelTimeoutMs,
           resolveModel:callSignal => typeof resolveModel === 'function' ? resolveModel({id:record.value.id,signal:callSignal}) : paperChat?.({action:'chat_ensure',id:record.value.id,...(record.value.source_session_id?{source_session_id:record.value.source_session_id}:{})},{signal:callSignal}).then(value=>value?.model),
           update:async patch => { record = await write(record,patch); return record.value } })
         return
@@ -376,7 +343,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
       if(pack.sources.length){
       hasText=true
       const raw = await agent({prompt:renderMetadataPrompt(pack,{id:input.id,input_format:input.input_format,imageInputs,existingMetadata:existingMetadata(pack.paper),
-        analysis:{id:input.id,source_ids:pack.source_ids,coverage:pack.coverage}}),...model,signal:batchSignal,
+        analysis:{id:input.id,source_ids:pack.source_ids,coverage:pack.coverage}}),...model,signal:AbortSignal.any([signal,AbortSignal.timeout(modelTimeoutMs)]),
         ...(pack.images.length?{images:pack.images}:{}),
         analysisContext:{id:input.id,request_id:input.request_id,stage:'batch',batch_index:index,source_ids:[...pack.source_ids],pages:[...pack.coverage.read_pages]}})
       if(pack.visual_coverage){
@@ -428,12 +395,14 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
       }
       signal.throwIfAborted()
       // One reviewable reading-note draft per completed run, grounded on the
-      // committed batch drafts. A note failure never fails the analysis job.
+      // committed batch drafts. Ordinary note failures are warnings; fatal
+      // quota/auth and truncated output stop the run with batch drafts kept.
       if (record.value.notes !== false) try {
         const note = await readingNote(record.value, model, signal)
         if (note) record = await write(record, { note_draft_id: note.id, note_coverage: note.coverage })
       } catch (error) {
         if (signal.aborted) throw error
+        if (isFatalModelError(error) || error?.code === 'DIRECT_MODEL_OUTPUT_TRUNCATED') throw error
         record = await write(record, { warnings: [...(record.value.warnings || []), `精读笔记草稿未生成：${String(error.message).slice(0, 400)}`] })
       }
       signal.throwIfAborted()
@@ -444,6 +413,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
         if (review) record = await write(record, { review_draft_id: review.id, review_coverage: review.coverage, review_profile: review.profile })
       } catch (error) {
         if (signal.aborted) throw error
+        if (isFatalModelError(error) || error?.code === 'DIRECT_MODEL_OUTPUT_TRUNCATED') throw error
         record = await write(record, { warnings: [...(record.value.warnings || []), `证据图谱评审未生成：${String(error.message).slice(0, 400)}`] })
       }
       signal.throwIfAborted()
