@@ -1,0 +1,60 @@
+{
+  "verified_at": "2026-10-06T02:47:02.417684+00:00",
+  "ok": true,
+  "scope": "Synthetic documents and model doubles; local source validation only, no real-paper batch or live API accuracy claim.",
+  "node": {
+    "command": "npm test",
+    "passed": 747,
+    "failed": 0,
+    "skipped": 1
+  },
+  "python": {
+    "command": "uv run --offline python -B -m pytest -q",
+    "passed": 397,
+    "failed": 0
+  },
+  "build": {
+    "command": "npm run build",
+    "passed": true
+  },
+  "publication_check_passed": true,
+  "integration": {
+    "command": "node --test tests-js/headless-analysis-integration.test.mjs",
+    "passed": true,
+    "synthetic_pdf_pages": [
+      13,
+      3
+    ],
+    "full_text_batches": 3,
+    "metadata_pages": [
+      1
+    ],
+    "checks": [
+      "real Python worker text extraction and pending-review drafts",
+      "same request reuses results without another generation",
+      "shared HTTP and CLI result reads without credentials",
+      "analysis preserves original and managed PDF bytes",
+      "explicit metadata writeback fills issued and preserves imported original"
+    ]
+  },
+  "source_sha256": {
+    "src/direct-model.mjs": "d29c32938be72bb472733f47e54b1fa05ab26f975a0fa51250d420f303fbd2ff",
+    "src/headless-analysis.mjs": "71d813c894049b8cdab8f103d57f96c1d15d784aac076d3f014615eeda4a5a89",
+    "src/cli.mjs": "c11ebc29d99d06951cd275b87da2829991b2e0a8de6241b7e5440ef291ae94e6",
+    "src/server.mjs": "adc434e678d1c7f7cb62f1d1002eafbbfa955dca34ff9db139c59625dbfb13ac",
+    "src/harness/paper-analysis.mjs": "631c6aa4a38b1d44a5260d1dca8ea08b1f9439baf85a60ab48baa4c7ce2bcd77",
+    "web/paper-analysis.js": "d1f819cd4bedcb6d13eccbd711ba52f625bfc389a1ae68a8d0900e2dab10397c",
+    "tests-js/headless-analysis-integration.test.mjs": "238b1520d573179e216fe364271076166fb613476d5ee3906e9022eb4bc4901a",
+    "tests-js/direct-model.test.mjs": "cb819922fe479b763601f92b7ce4ddcb1994361ac37c75655bfe9086a9d75a68",
+    "tests-js/headless-analysis.test.mjs": "50945e304c266e9b756efac8b2e045a0cb532d8ae3b31a8555907c4caa2e6d7e",
+    "tests-js/paper-analysis.test.mjs": "7ab0386eb0efa1d2d21ffffe692ddd17cff697ce6147fcecf454a735a09c68c1",
+    "tests-js/ui-settings.test.mjs": "de387d244bd0cbcc7d85f60d546d164ab12fb2edf867c30d9342f007a152de31"
+  },
+  "limits": [
+    "No real paper, credential file or provider request used in this validation.",
+    "Full text means extractable text; no OCR or figure interpretation.",
+    "Call and concurrency limits apply per background instance.",
+    "Interrupted batches are not resumed or replayed automatically.",
+    "RKOS compatibility remains an explicitly lossy export adapter, not bidirectional synchronization."
+  ]
+}

@@ -129,3 +129,36 @@ test('late analysis availability preference reads cannot re-enable newer disable
   assert.equal(get('analysis-auto').checked, false); assert.equal(get('analysis-fill').checked, false);
   assert.deepEqual(calls, []); analysis.dispose();
 });
+
+test('direct analysis keeps unconfirmed jobs polling, blocks reruns without showing cancel, and saves auto-review checkbox', async () => {
+  const ids = new Map(), calls = [], patches = [], timers = new Map(); let timerId = 0;
+  class Element {
+    constructor() { this.children = []; this.listeners = new Map(); this.classList = { toggle() {} }; this.checked = false; this.disabled = false; this.hidden = false; this.value = ''; }
+    set id(value) { this._id = value; ids.set(value, this); } get id() { return this._id; }
+    append(...values) { this.children.push(...values); } replaceChildren(...values) { this.children = values; }
+    setAttribute() {} addEventListener(type, fn) { this.listeners.set(type, fn); }
+    emit(type) { this.listeners.get(type)?.(); }
+  }
+  const get = id => ids.get(id) ?? Object.assign(new Element(), { id });
+  const document = { body: new Element(), hidden: false, createElement: () => new Element(), getElementById: id => get(id), addEventListener() {}, removeEventListener() {} };
+  const window = {};
+  vm.runInNewContext(analysisSource, { document, window, setTimeout: fn => { const id = ++timerId; timers.set(id, fn); return id; }, clearTimeout: id => timers.delete(id) });
+  let readCount = 0, currentStatus = 'unconfirmed';
+  const analysis = window.PaperAnalysis.create({
+    state: { active: { id: 'paper-a', title: 'Synthetic paper', pdf: 'paper.pdf' } },
+    api: async (action, args) => { calls.push({ action, args }); if (action === 'paper_analysis_get') { readCount++; return { id: 'paper-a', request_id: 'remote-run', status: currentStatus, stage: currentStatus === 'unconfirmed' ? '执行状态待确认' : '整理完成' }; } return {}; },
+    persistence: { get: async () => ({ auto_analysis: false }), patch: async (...args) => patches.push(args) },
+  });
+  await analysis.setAvailable(true); await flush();
+  assert.equal(get('analysis-start').disabled, true);
+  assert.equal(get('analysis-cancel').hidden, true);
+  assert.match(get('analysis-status').textContent, /可能仍在其他进程运行/);
+  assert.ok([...timers.values()].length, 'unconfirmed status schedules another read');
+  get('analysis-auto-review').checked = false; get('analysis-auto-review').emit('change'); await flush();
+  assert.equal(JSON.stringify(patches.find(([key]) => key === 'preferences')?.[1]), JSON.stringify({ auto_review: false }));
+  assert.ok(readCount >= 1); assert.equal(calls.some(call => call.action === 'paper_analysis_start'), false);
+  currentStatus = 'complete'; const poll = [...timers.values()].at(-1); timers.clear(); poll?.(); await flush();
+  assert.equal(get('analysis-start').disabled, false, 'a completed remote job allows a new explicit run');
+  assert.equal(get('analysis-cancel').hidden, true);
+  analysis.dispose();
+});

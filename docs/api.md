@@ -357,11 +357,17 @@ Records and word review remain available in standalone mode using the same local
 
 ## Selected-paper background analysis
 
-`status.paper_analysis` identifies the installed host route; the host must provide native `subagents` with the `spawn` provider, Agents and tool guards. `paper_analysis_records` also exists on the standalone server. Model identity comes from the paper's native Session; request-side provider/model overrides are ignored.
+`status.paper_analysis` 表示当前服务已接入生成入口。DSH 入口使用原生 `subagents`／Agent 与工具守卫，模型来自论文 Session；独立服务通过 `--model-config` 接入显式 GLM／Kimi 配置，无需 DSH。请求体不能覆盖模型路由。`paper_analysis_records` 在不配置模型的独立服务中也可用。下述原生 Agent／自动队列说明仅适用于 DSH；独立调用的预算与中断规则见[无界面分析](headless-analysis.md)。
+
+独立入口 `createHeadlessAnalysis` 和 CLI 另支持 `paper_analysis_run {ids:[...],request_id,mode?,pages?,notes?,review?,apply_metadata?}`（单篇可用 `id`）。最多 2000 个唯一 ID；调用等待整批完成，返回 `{status,counts,results,reused,usage,usage_scope:"headless_instance"}`。结果保留逐篇派生请求 ID、覆盖范围、草稿引用及失败信息。相同批次请求复用；变更选择、选项、模型或预算报冲突。模型配置只接受指定提供方、型号、凭据变量名及可选凭据文件，密钥不进入持久作业或输出。
+
+共享单篇内核新增 `mode:"full"|"metadata"`、`notes:boolean`。独立入口默认 `full`、`notes:true`、`review:false`、`apply_metadata:false`；`metadata` 默认第 1 页且不生成精读笔记或评审，只保存有原文出处的字段建议与 `mode:note` 待审阅资料笔记。显式 `pages` 可扩展范围。DSH 旧请求未提供新字段时保持原有默认值与请求指纹。HTTP `start` 立即返回，CLI `start` 等待完成；CLI 部分失败保留 JSON 并非零退出。
+
+独立作业增加 `execution:"direct"`；异进程看到仍在运行的状态时返回 `unconfirmed` 和 `stored_status`，不武断判为已中断，也不接管。`analysis.headless-batch:*` 记录批次指纹与汇总；`analysis.headless-failure:*` 保存启动失败。批次中断后未开始的条目也不自动执行。调用次数／并发上限按后台实例计，不跨进程共享；读取记录与明确应用已保存资料无需模型配置。
 
 | HTTP action | Input and result |
 | --- | --- |
-| `paper_analysis_start` | `{id,request_id,pages?,source_session_id?,apply_metadata?:true,review?:true,reuse?:false}`. One selected, active paper with a PDF; omitted pages means the full PDF. Returns queued immediately. Duplicate manual request IDs share the same work; changing their input fails. `reuse:true` admits an idle paper to the durable automatic queue when enabled, or returns its existing record, including failures, without rerunning. A new paper Session may inherit a source Session's public model selection; existing paper routing remains authoritative. |
+| `paper_analysis_start` | `{id,request_id,pages?,mode?,notes?,source_session_id?,apply_metadata?,review?,reuse?:false}`. One selected, active paper with a PDF; defaults depend on the entry above. Returns queued immediately over HTTP. Duplicate manual request IDs share the same work; changing their input fails. DSH `reuse:true` uses the durable automatic queue when enabled or returns an existing record; independent `reuse:true` only reads the latest record (or idle), never starts generation. A new paper Session may inherit a source Session's public model selection; existing paper routing remains authoritative. |
 | `paper_analysis_get` | `{id,request_id?,batch_index?}` reads the latest or specified record, including cumulative coverage, model, aggregate sourced metadata suggestions and one batch's graph draft. The zero-based batch index defaults to the latest committed batch; `batch_count` reports available batches. No source extraction or generation. |
 | `paper_analysis_cancel` | `{id,request_id?}` aborts the active native task and waits for owned cleanup. Already committed sources/drafts/metadata remain saved. |
 | `paper_analysis_apply` | `{id,request_id?}` applies the saved sourced suggestions to empty fields only, using the original metadata revision. Concurrent edits fail; no browser-supplied replacement values are accepted. Repeated completed applies reuse the receipt. |

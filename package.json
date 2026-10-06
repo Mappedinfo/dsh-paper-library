@@ -22,6 +22,7 @@
   "exports": {
     ".": "./src/harness/index.mjs",
     "./client": "./lib/client.js",
+    "./analysis": "./src/headless-analysis.mjs",
     "./package.json": "./package.json"
   },
   "files": [
@@ -40,6 +41,8 @@
     "CHANGELOG.md",
     "THIRD_PARTY.md",
     "docs/api.md",
+    "docs/headless-analysis.md",
+    "docs/research-os-compatibility.md",
     "docs/validation.md",
     "docs/annotation-reference-design.md",
     "docs/library-datasets-knowledge-design.md",

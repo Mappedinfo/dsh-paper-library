@@ -411,3 +411,52 @@ test('review:false skips the evidence-atlas generation entirely',async()=>{
   assert.equal(f.kernel.filter(c=>c.action==='knowledge_draft_put'&&String(c.title).startsWith('证据图谱评审')).length,0)
   await assert.rejects(createPaperAnalysis(f.options)({...request,review:'yes',request_id:'run-b'}),/评审选项无效/)
 })
+
+test('metadata mode uses an explicit model and only its selected first-page batch',async()=>{
+  const f=fixture();f.output={...f.output,nodes:[],edges:[],assertions:[]}
+  f.options.resolveModel=async()=>({provider:'direct-fixture',model:'small-fixture'})
+  f.handle=createPaperAnalysis(f.options)
+  await f.handle({...request,mode:'metadata'});const result=await f.done()
+  assert.equal(result.status,'complete');assert.equal(result.mode,'metadata')
+  assert.equal(f.routes.length,0,'No DSH conversation is created')
+  assert.equal(f.calls.length,1,'No reading note or review generation')
+  assert.equal(f.calls[0].model,'small-fixture')
+  assert.match(f.calls[0].prompt,/Extract ONLY missing bibliographic metadata/)
+  assert.deepEqual(f.kernel.find(v=>v.action==='paper_analysis_batch').pages,[1])
+  assert.equal(f.kernel.some(v=>v.action==='paper_analysis_apply_metadata'),false)
+  assert.deepEqual(result.metadata,{'container-title':'Synthetic Journal'})
+  assert.equal(result.draft.status,'needs-review')
+  assert.equal(result.draft.mode,'note','Metadata suggestions are a reviewable note, not an empty graph')
+})
+
+test('metadata mode rejects extra graph output and incompatible options before model calls',async()=>{
+  const f=fixture()
+  await assert.rejects(f.handle({...request,mode:'metadata',notes:true}),/元数据提取/)
+  await assert.rejects(f.handle({...request,mode:'metadata',review:true}),/元数据提取/)
+  await assert.rejects(f.handle({...request,mode:'wrong'}),/全文分析/)
+  await assert.rejects(f.handle({...request,notes:'yes'}),/精读笔记/)
+  assert.equal(f.calls.length,0);assert.equal(f.writes.length,0)
+  await f.handle({...request,mode:'metadata'});const result=await f.done()
+  assert.equal(result.status,'failed');assert.match(result.error,/范围外/)
+  assert.equal(f.drafts.size,0)
+})
+
+test('full analysis can skip optional summaries while keeping evidence graph drafts',async()=>{
+  const f=fixture();await f.handle({...request,mode:'full',notes:false,review:false});const result=await f.done()
+  assert.equal(result.status,'complete');assert.equal(f.calls.length,1)
+  assert.equal(result.note_draft_id,undefined);assert.equal(result.review_draft_id,undefined)
+  assert.ok(result.draft.nodes.length)
+  await assert.rejects(f.handle({...request,mode:'full',notes:true,review:false}),/请求内容已改变/)
+})
+
+test('another process does not falsely claim a direct job was interrupted or replay it',async()=>{
+  const f=fixture();f.agentGate=gate();f.options.execution='direct'
+  f.handle=createPaperAnalysis(f.options);await f.handle({...request,notes:false,review:false})
+  await until(()=>f.calls.length===1)
+  const observer=createPaperAnalysis(f.options)
+  const seen=await observer({action:'paper_analysis_get',id:request.id,request_id:request.request_id})
+  assert.equal(seen.status,'unconfirmed');assert.equal(seen.stored_status,'generating')
+  assert.equal((await observer({...request,notes:false,review:false})).status,'unconfirmed')
+  assert.equal(f.calls.length,1)
+  f.agentGate.resolve();assert.equal((await f.done()).status,'complete')
+})

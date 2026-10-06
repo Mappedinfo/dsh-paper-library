@@ -1,6 +1,6 @@
 # Paper Library
 
-Paper Library 是独立的 DeepSeek Harness 插件，将文献收集、PDF 阅读与批注、DSH 对话、知识整理和 LaTeX 写作放在同一个工作环境中。文献与数据集留在自己的资料库，模型功能沿用 DSH 当前配置；也可以打开独立本地界面管理和阅读文献。
+Paper Library 将文献收集、PDF 阅读与批注、知识整理和 LaTeX 写作放在同一个工作环境中，可以作为 DeepSeek Harness 插件使用，也可以独立运行。文献与数据集留在自己的资料库；DSH 对话沿用宿主模型配置，后台文献分析另支持显式配置的 GLM／Kimi API，无需打开界面。
 
 [DSH 社区介绍与讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/6623)包含合成演示截图与当前能力说明。
 
@@ -9,6 +9,8 @@ Paper Library 是独立的 DeepSeek Harness 插件，将文献收集、PDF 阅�
 **继续开发前先读 [项目交接](HANDOFF.md)**，其中记录当前能力、验证证据和待验证项。 版本变更见 [CHANGELOG](CHANGELOG.md)。
 
 本地资料维护另提供[基础元数据覆盖检查](docs/pdf-metadata-audit.md)：先复用 Zotero 和采集清单中的资料，再列出需要补全的文件，避免为已有字段重复调用模型。另有[独立模型 API 测试](docs/direct-model-probe.md)，用合成示例验证 GLM／Kimi 直连，无需运行 DSH。
+
+**无界面批量分析**：[独立后端使用说明](docs/headless-analysis.md)提供命令行与程序调用入口，支持首页元数据提取、全文分批阅读和待审阅笔记。结果保存在同一资料库，之后可在 Paper Library 查看、审阅及明确写回。默认不自动修改 PDF 资料；模型次数与并发均有上限。与 Research Knowledge OS 的文献、证据、论断图谱已有 `rkos-v3` 导出适配，完整边界见[兼容性说明](docs/research-os-compatibility.md)。
 
 ## 从收集文献到阅读、整理与写作
 

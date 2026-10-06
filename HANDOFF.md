@@ -1,3 +1,9 @@
+**无界面批量分析（2026-10-06）：** 新增 `src/headless-analysis.mjs`，复用现有逐页文本批次、持久作业、证据校验和待审阅草稿。`src/cli.mjs` 支持 `--model-config`／`--state-home`；`paper_analysis_run` 等待明确选定的 1–2000 篇文献，单篇 `start` 在 CLI 中也等待完成。独立服务可配置同一入口；DSH 仍用原宿主适配。GLM 使用 OpenAI 格式，Kimi Code 使用 Anthropic 格式，凭据仅从指定变量／文件读取，固定官方地址、拒绝重定向，不自动重试或轮换密钥。配置含实例级调用次数与并发上限，未知 token 用量保留 null。
+
+独立入口默认不写回资料、不生成额外评审；`full` 默认阅读全文并生成精读笔记，`metadata` 默认只读首页并保存待审阅资料笔记，不伪造空图谱。`reuse:true` 仅查看记录，不继承 DSH 自动整理队列；真实调用需手动开始或明确提交批次。完成／失败批次同 ID 复用，变化参数报冲突；异进程运行记录显示 `unconfirmed`，不自动接管、重放或续跑未开始项。来源与逐批覆盖可审阅，明确 `paper_analysis_apply` 才填补空字段。详见[使用说明](docs/headless-analysis.md)及 [API](docs/api.md)。
+
+合成端到端验证使用真实 Python PDF worker：13 页与 3 页练习共三批读取；首页提取只读第 1 页；重复批次不生成；CLI／HTTP 可共享读取草稿；分析不改 PDF，明确写回保留原件。未对真实文献或真实 API 进行本轮批量测试。RKOS 适配以当前上游纯解析器重新验证，未加载个人注册表／Wiki；支持部分已审阅记录导出，损失清单可见，不具备反向导入或无损往返。见[兼容性说明](docs/research-os-compatibility.md)与[合成适配回执](docs/validation/rkos-subset.json)。
+
 **独立模型 API 测试（2026-10-06）：** `scripts/probe-direct-metadata-api.py` 以合成解析样例测试 GLM 的 OpenAI Chat Completions 与 Kimi Code 的 Anthropic Messages 接口，不依赖 Harness。仅解析用户明确指定的凭据文件与变量，固定官方 HTTPS 地址并拒绝重定向，使用真实客户端标识，不自动重试、换 key 或切换模型。回执位于仓库外，认证头不落盘；JSON 可兼容唯一 `answer` 包装但不猜补字段。真实论文、目录与 PDF 写回不在此连接测试中。8 项合成测试覆盖凭据解析、脱敏、协议和输出；现场连接结果仅保存在私有回执，不作为套餐用途或批量准确率保证。见[独立调用说明](docs/direct-model-probe.md)。
 
 **本地 PDF 元数据清点（2026-10-06）：** 新增按明确文件清单运行的只读脚本 `scripts/audit-pdf-metadata.py`，对账当前目录、本地 Zotero、指定采集索引与内嵌 CSL。基础字段按标题、作者、发表年份计数；文件名占位和编辑／译者不冒充已整理的标题／作者，完全相同文件可复用已有记录。输出私有覆盖报告与按 SHA-256 去重的待补全草稿，不调用模型或改写 PDF。仅在文件身份一致时复用显式指定的探针缓存；Zotero 父条目使用 `/items/top` 并检查返回完整性。入口、限额和低成本补全边界见 [元数据检查说明](docs/pdf-metadata-audit.md)。
