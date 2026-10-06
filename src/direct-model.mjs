@@ -12,7 +12,9 @@ const MAX_ENV_FILE_BYTES = 1024 * 1024
 const ENDPOINTS = Object.freeze({
   glm: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
   kimi: 'https://api.kimi.com/coding/v1/messages',
+  deepseek: 'https://api.deepseek.com/chat/completions',
 })
+const usesChatCompletions = provider => provider === 'glm' || provider === 'deepseek'
 
 function safeError(code, status) {
   const error = new Error(code)
@@ -40,19 +42,19 @@ export function directModelReasoningOptions(config) {
 /** 思考与正文共用 max_tokens。这里限制总预算，不虚构服务未承诺的正文保留量。 */
 export function directModelOutputBudget(config) {
   const reasoning = directModelReasoningOptions(config)
-  const sharedThinking = config?.provider === 'kimi' && reasoning.thinking !== 'disabled'
+  const sharedThinking = ['kimi', 'deepseek'].includes(config?.provider) && reasoning.thinking !== 'disabled'
   const defaultTokens = sharedThinking ? (reasoning.reasoningEffort === 'low' ? 16384 : 32768) : 8192
   const maxOutputTokens = config?.maxOutputTokens ?? defaultTokens
   if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 32768) {
     throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
   }
-  // 已观察到 8192 的大部分被思考占用。显式小预算须先修改配置，不能静默增加费用。
-  if (sharedThinking && maxOutputTokens < 16384) throw safeError('DIRECT_MODEL_OUTPUT_BUDGET_TOO_SMALL', 400)
+  // Kimi 已观察到 8192 的大部分被思考占用。显式小预算须先修改配置，不能静默增加费用。
+  if (config?.provider === 'kimi' && sharedThinking && maxOutputTokens < 16384) throw safeError('DIRECT_MODEL_OUTPUT_BUDGET_TOO_SMALL', 400)
   return { maxOutputTokens }
 }
 
 function validateConfig(config) {
-  if (!config || !['glm', 'kimi'].includes(config.provider)) throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
+  if (!config || !Object.hasOwn(ENDPOINTS, config.provider)) throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
   if (typeof config.model !== 'string' || !config.model.trim() || config.model.length > 200) throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
   if (typeof config.keyEnv !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.keyEnv)) throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
   if (config.envFile !== undefined && (typeof config.envFile !== 'string' || !config.envFile)) throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
@@ -161,8 +163,8 @@ async function readBounded(response) {
 
 function recordTokenUsage(provider, data, state) {
   const usage = data?.usage || {}
-  const input = provider === 'glm' ? usage.prompt_tokens : usage.input_tokens
-  const output = provider === 'glm' ? usage.completion_tokens : usage.output_tokens
+  const input = usesChatCompletions(provider) ? usage.prompt_tokens : usage.input_tokens
+  const output = usesChatCompletions(provider) ? usage.completion_tokens : usage.output_tokens
   if (Number.isSafeInteger(input) && input >= 0) state.inputTokens += input
   else state.inputKnown = false
   if (Number.isSafeInteger(output) && output >= 0) state.outputTokens += output
@@ -170,7 +172,7 @@ function recordTokenUsage(provider, data, state) {
 }
 
 function parseModelResponse(provider, data) {
-  if (provider === 'glm') {
+  if (usesChatCompletions(provider)) {
     const choice = data?.choices?.[0]
     if (!choice || choice.finish_reason !== 'stop' || choice.message?.tool_calls?.length || choice.message?.function_call) {
       throw safeError('DIRECT_MODEL_INCOMPLETE', 502)
@@ -205,7 +207,7 @@ function toJsonText(text, key) {
   return serialized
 }
 
-/** Build a direct, bounded agent for the two explicitly supported official APIs. */
+/** 为显式指定的官方 API 创建有界适配器，不发现模型或凭据。 */
 export async function createDirectModelAgent(config, { fetchImpl = globalThis.fetch, env = process.env } = {}) {
   const effective = validateConfig(config)
   if (typeof fetchImpl !== 'function') throw safeError('DIRECT_MODEL_CONFIG_INVALID', 400)
@@ -230,13 +232,13 @@ export async function createDirectModelAgent(config, { fetchImpl = globalThis.fe
     const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
     let response, usageReceived = false
     try {
-      const headers = effective.provider === 'glm'
+      const headers = usesChatCompletions(effective.provider)
         ? { authorization: `Bearer ${key}`, 'content-type': 'application/json', 'user-agent': USER_AGENT }
         : { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'user-agent': USER_AGENT }
       const reasoning = { ...(effective.thinking === 'default' ? {} : { thinking: { type: effective.thinking } }),
         ...(effective.reasoningEffort !== undefined ? { reasoning_effort: effective.reasoningEffort } : {}) }
       let content = prompt
-      if (validatedImages) content = effective.provider === 'glm'
+      if (validatedImages) content = usesChatCompletions(effective.provider)
         ? [{ type: 'text', text: prompt }, ...validatedImages.flatMap(image => [
           { type: 'text', text: `PDF page ${image.page} rendered image:` },
           { type: 'image_url', image_url: { url: `data:${image.mime_type};base64,${image.data}` } },
@@ -245,7 +247,7 @@ export async function createDirectModelAgent(config, { fetchImpl = globalThis.fe
           { type: 'text', text: `PDF page ${image.page} rendered image:` },
           { type: 'image', source: { type: 'base64', media_type: image.mime_type, data: image.data } },
         ])]
-      const body = effective.provider === 'glm'
+      const body = usesChatCompletions(effective.provider)
         ? { model, messages: [{ role: 'user', content }], max_tokens: effective.maxOutputTokens, stream: false, ...reasoning, response_format: { type: 'json_object' } }
         : { model, max_tokens: effective.maxOutputTokens, messages: [{ role: 'user', content }], stream: false, ...reasoning }
       response = await fetchImpl(ENDPOINTS[effective.provider], { method: 'POST', headers, body: JSON.stringify(body), signal: requestSignal, redirect: 'manual' })

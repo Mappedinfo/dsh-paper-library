@@ -31,3 +31,17 @@ test('ordinary throttling and server errors stay nonfatal even if body mentions 
     assert.equal(isFatalModelError({ code }), expected === 'DIRECT_MODEL_AUTH_ERROR')
   }
 })
+
+test('DeepSeek balance, authentication, throttling and server errors keep fixed classifications', () => {
+  for (const [status, body, expected] of [
+    [402, { error: { message: 'Insufficient Balance' } }, 'DIRECT_MODEL_QUOTA_EXHAUSTED'],
+    [401, { error: { message: 'Authentication Fails' } }, 'DIRECT_MODEL_AUTH_ERROR'],
+    [429, { error: { message: 'Rate Limit Reached' } }, 'DIRECT_MODEL_RATE_LIMITED'],
+    [422, { error: { message: 'Invalid Parameters' } }, 'DIRECT_MODEL_HTTP_ERROR'],
+    [503, { error: { message: 'Server Overloaded' } }, 'DIRECT_MODEL_HTTP_ERROR'],
+  ]) {
+    const code = classifyModelHttpError('deepseek', status, JSON.stringify(body))
+    assert.equal(code, expected)
+    assert.equal(isFatalModelError({ code }), [401, 402].includes(status))
+  }
+})

@@ -31,6 +31,8 @@ Paper Library 的后台可以直接运行，不需要浏览器或 DSH。独立�
 
 GLM 使用官方 OpenAI Chat Completions 接口。Kimi Code 使用官方 Anthropic Messages 接口；使用上面的配置改为 Kimi 时，同时设置 `provider:"kimi"`、`model:"k3-256k"`、`keyEnv:"KIMI_TOKEN_PLAN_KEY"`、`thinking:"default"`、`reasoningEffort:"high"`、`maxOutputTokens:32768`。模型名称是可修改的示例，不代表价格、套餐适用或分析质量保证；先确认自己的服务支持所选用途。
 
+DeepSeek 官方 API 可配置 `provider:"deepseek"`、`model:"deepseek-flash"`、`keyEnv:"DEEPSEEK_PAPER_ANALYSIS_KEY"`、`thinking:"enabled"`、`reasoningEffort:"low"`、`maxOutputTokens:32768`。`keyEnv` 是调用者自定义的环境变量名，内容为普通 DeepSeek API key，通过标准 Bearer 认证；接口固定为 `https://api.deepseek.com/chat/completions`。官方说明 `deepseek-flash` 对应 V4.1 Flash，支持文字及图片；项目沿用每批最多两张图片的限制。[模型说明](https://api-docs.deepseek.com/news/news260910/)、[Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)、[图像输入](https://api-docs.deepseek.com/guides/vision/)。思考启用／默认时，未指定输出预算的 low 默认 16384，其余档位默认 32768；项目上限仍为 32768，未采用官方更大的上限。只处理最终正文，`reasoning_content` 不进入笔记或审计正文，不自动发现或轮换 key。
+
 `thinking` 接受 `disabled`／`enabled`／`default`；为兼容旧配置，省略时仍为 `disabled`。`default` 不发送思考开关，沿用模型服务默认设置。`reasoningEffort` 可选 `low`／`high`／`max`，不能与 `disabled` 同用。思考与最终输出共用服务的输出预算；截断仍报失败，不拼接思考内容充当答案。改变思考设置需要新的批次请求 ID。
 
 Kimi 启用或沿用默认思考时，总输出预算最低为 16384 tokens；未填写 `maxOutputTokens` 时，`low` 默认 16384，其他档位默认 32768。显式填写较小值会在读取凭据和发送请求前报 `DIRECT_MODEL_OUTPUT_BUDGET_TOO_SMALL`，不会静默增加调用费用。GLM 及关闭思考的旧配置仍默认 8192；所有配置上限仍为 32768。这是本项目针对已观察到的截断设置的预算策略，并非服务端保证的正文保留量。接口用一个 `max_tokens` 控制输出，官方的对应配置见 [Kimi 输出上限说明](https://www.kimi.com/code/docs/kimi-code-cli/configuration/config-files.html#models)。
@@ -39,7 +41,7 @@ Kimi 启用或沿用默认思考时，总输出预算最低为 16384 tokens；�
 
 截至 2026-10-06，[GLM 官方文档](https://docs.z.ai/guides/vlm/glm-5.3-flash)列出的 Flash 型号是 `glm-5.3-flash`／`glm-5.3-flashx`，只能启用思考。[Kimi 官方文档](https://www.kimi.com/code/docs/kimi-code/models.html)将 `kimi-for-coding` 映射到 K2.8 Preview，并说明 K3 关闭思考后会路由到 K2.8 Preview 无思考版。独立后端因此拒绝 K3 或 GLM-5.3-Flash 系列搭配 `disabled`，避免误把别名当作目标模型测试。服务可能更新别名和权限，切换前仍需核对。仅处理最终文字答案，Kimi 的思考块不作为资料内容保存；连接测试说明见[直连测试文档](direct-model-probe.md)。
 
-`envFile` 是可选项；省略时只读取当前进程的指定环境变量。明确指定文件时，该文件中的指定变量优先；相对路径相对模型配置文件解析。仅解析普通赋值或 `export NAME='value'`，不执行 shell、不展开变量，不尝试第二个 key，不自动换模型或重试请求。支持的两个 API 地址固定，拒绝重定向。
+`envFile` 是可选项；省略时只读取当前进程的指定环境变量。明确指定文件时，该文件中的指定变量优先；相对路径相对模型配置文件解析。仅解析普通赋值或 `export NAME='value'`，不执行 shell、不展开变量，不尝试第二个 key，不自动换模型或重试请求。支持的三个官方 API 地址固定，拒绝重定向。
 
 `maxCalls` 是单个后台实例的实际调用尝试上限（1–10000，默认 100），含失败尝试、精读笔记和评审；`maxConcurrency` 限制同时处理的文献数（1–4，默认 1）。额度按当前进程计算，不是账号费用上限，也不跨不同进程共享。服务返回的 token 用量会汇总；未知值保持 `null`。同一个服务承接多个批次时，`usage_scope:"headless_instance"` 表示实例累计用量，不冒充单批费用。
 
@@ -94,7 +96,7 @@ JSON
 ```
 
 - **文字**：固定版本 `pymupdf4llm==0.2.9` 按页生成 Markdown，再连接明确的软连字符断行。原始提取文本和规范化 Markdown 都保存在资料库私有 `derived` 缓存。缓存键绑定 PDF 文件版本、页码与提取器版本，内容另以 SHA-256 核对，不改 PDF。没有启动布局模型或 OCR。Markdown 引文逐字对应已保存的 Markdown 来源，不代表 PDF 原文逐字转录；特殊字形、公式和复杂表格仍需对照页面。
-- **图片**：独立 GLM／Kimi 后端每批最多附加 2 页 PNG，每张 ≤1 MiB、长边 ≤1600 像素，保留页码。每页单独传输，不拼成整篇长图；精细图表可能需要回到 PDF 放大检查。新 Markdown 与配图模式都排除 PDF 批注。`visual_coverage.rendered_pages` 与 `sent_pages` 分开记录；发送过页面也不代表模型读懂了所有细节。审计保留图片哈希及尺寸，不保存上传图片的 base64。
+- **图片**：独立 GLM／Kimi／DeepSeek 后端每批最多附加 2 页 PNG，每张 ≤1 MiB、长边 ≤1600 像素，保留页码。每页单独传输，不拼成整篇长图；精细图表可能需要回到 PDF 放大检查。新 Markdown 与配图模式都排除 PDF 批注。`visual_coverage.rendered_pages` 与 `sent_pages` 分开记录；发送过页面也不代表模型读懂了所有细节。审计保留图片哈希及尺寸，不保存上传图片的 base64。
 - **入口和覆盖**：原生 DSH 目前支持 Markdown 文本，图片请求会在读取和模型调用前拒绝，避免宿主静默丢图。纯扫描页没有文字证据时不启动模型，记录无可提取文字；混合文档及转换为空的页面不会计为完整文本覆盖。本次能力不包含扫描件 OCR 或独立视觉全文阅读。
 
 纯文字每批最多读取 8 页／8 个文本块／24000 字符，启用图片后每批最多 2 页；密集页继续按位置分段。图片增加输入用量及批次数，`maxCalls` 仍按显式模型配置限制。
@@ -171,7 +173,7 @@ node scripts/run-paper-analysis-batch.mjs \
   --plan /absolute/private/plan.json --out /absolute/private/new-run
 ```
 
-输出目录必须新建并位于源码仓库与资料库之外，保存私有运行清单、进度、结果和脱敏的模型响应。审计副本移除 GLM 思考正文及 Kimi 思考块内容，保留最终答案、用量和思考设置；无法解析的响应正文只保存省略标记。响应可能包含论文内容，不能提交到公开仓库。编排器不修改 PDF 资料，不自动重试失败生成或轮换 key。
+输出目录必须新建并位于源码仓库与资料库之外，保存私有运行清单、进度、结果和脱敏的模型响应。审计副本移除 GLM／DeepSeek 思考正文及 Kimi 思考块内容，保留最终答案、用量和思考设置；无法解析的响应正文只保存省略标记。响应可能包含论文内容，不能提交到公开仓库。编排器不修改 PDF 资料，不自动重试失败生成或轮换 key。
 
 调用回执包含后端生成的论文 ID、请求 ID、阶段、批次序号、来源 ID 和页码，以及实际提示词的 SHA-256、字节数和服务返回的模型名。提示词正文不另外保存；用户传入的同名上下文不能替代后端关联。回执中的 `succeeded` 只表示模型接口和答案解析通过，图谱、资料引用、整篇阅读和笔记是否成功仍需检查作业结果。
 

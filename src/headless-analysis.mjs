@@ -19,7 +19,7 @@ const configFields = new Set(['provider', 'model', 'keyEnv', 'envFile', 'maxOutp
 
 function validatedConfig(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config) || Object.keys(config).some(key => !configFields.has(key)) ||
-      !['glm', 'kimi'].includes(config.provider) || typeof config.model !== 'string' || !config.model.trim() ||
+      !['glm', 'kimi', 'deepseek'].includes(config.provider) || typeof config.model !== 'string' || !config.model.trim() ||
       config.model.length > 200 || /[\x00-\x1f]/.test(config.model) || typeof config.keyEnv !== 'string' ||
       !/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.keyEnv)) throw fail('DIRECT_MODEL_CONFIG_INVALID', '模型配置无效。')
   for (const [key, maximum] of [['maxOutputTokens', 32768], ['maxCalls', 10000], ['timeoutMs', 600000], ['maxConcurrency', 4]]) {

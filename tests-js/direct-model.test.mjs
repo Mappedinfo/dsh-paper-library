@@ -53,6 +53,34 @@ test('GLM uses fixed OpenAI endpoint, disabled thinking and bounded JSON text', 
   assert.deepEqual(agent.usage(), { calls: 1, input_tokens: 12, output_tokens: 4, failures: 0 })
 })
 
+test('DeepSeek uses the official Chat Completions endpoint, explicit alias and only final JSON content', async () => {
+  // Official contract: https://api-docs.deepseek.com/api/create-chat-completion/
+  let request
+  const data = glmResult('{"answer":{"title":"A paper"}}')
+  data.choices[0].message.reasoning_content = 'synthetic-secret and private reasoning'
+  data.usage.completion_tokens_details = { reasoning_tokens: 2 }
+  const agent = await createDirectModelAgent({ provider: 'deepseek', model: 'deepseek-flash', keyEnv: 'CUSTOM_KEY_NAME',
+    thinking: 'enabled', reasoningEffort: 'low', maxOutputTokens: 32768 }, {
+    env: { CUSTOM_KEY_NAME: 'synthetic-secret' }, fetchImpl: async (url, init) => { request = { url, init }; return response(data) },
+  })
+  assert.equal(await agent({ prompt: 'Return JSON' }), '{"title":"A paper"}')
+  assert.equal(request.url, 'https://api.deepseek.com/chat/completions')
+  assert.equal(request.init.redirect, 'manual')
+  assert.equal(request.init.headers.authorization, 'Bearer synthetic-secret')
+  assert.equal(Object.hasOwn(request.init.headers, 'x-api-key'), false)
+  const body = JSON.parse(request.init.body)
+  assert.equal(body.model, 'deepseek-flash')
+  assert.equal(body.messages[0].content, 'Return JSON')
+  assert.equal(body.max_tokens, 32768)
+  assert.equal(body.stream, false)
+  assert.deepEqual(body.thinking, { type: 'enabled' })
+  assert.equal(body.reasoning_effort, 'low')
+  assert.deepEqual(body.response_format, { type: 'json_object' })
+  assert.deepEqual(agent.model, { provider: 'deepseek', model: 'deepseek-flash' })
+  assert.deepEqual(agent.usage(), { calls: 1, input_tokens: 12, output_tokens: 4, failures: 0 })
+  assert.doesNotMatch(JSON.stringify({ model: agent.model, usage: agent.usage() }), /private reasoning|synthetic-secret/)
+})
+
 test('Kimi uses fixed Anthropic endpoint and unwraps only a single answer object', async () => {
   let request
   const agent = await createDirectModelAgent({ provider: 'kimi', model: 'kimi-for-coding', keyEnv: 'KIMI_KEY' }, {
@@ -68,12 +96,12 @@ test('Kimi uses fixed Anthropic endpoint and unwraps only a single answer object
   assert.deepEqual(agent.usage(), { calls: 1, input_tokens: 9, output_tokens: 3, failures: 0 })
 })
 
-test('explicit thinking modes preserve defaults or serialize enabled reasoning for both APIs', async () => {
-  for (const provider of ['glm', 'kimi']) for (const thinking of ['disabled', 'enabled', 'default']) {
+test('explicit thinking modes preserve defaults or serialize enabled reasoning for supported APIs', async () => {
+  for (const provider of ['glm', 'kimi', 'deepseek']) for (const thinking of ['disabled', 'enabled', 'default']) {
     let body
     const agent = await createDirectModelAgent({ provider, model: 'synthetic-model', keyEnv: 'KEY', thinking }, {
       env: { KEY: 'private-key' }, fetchImpl: async (_url, init) => {
-        body = JSON.parse(init.body); return response(provider === 'glm' ? glmResult() : kimiResult())
+        body = JSON.parse(init.body); return response(provider === 'kimi' ? kimiResult() : glmResult())
       },
     })
     await agent({ prompt: 'Synthetic JSON' })
@@ -81,9 +109,9 @@ test('explicit thinking modes preserve defaults or serialize enabled reasoning f
     else assert.deepEqual(body.thinking, { type: thinking })
     assert.equal(Object.hasOwn(body, 'reasoning_effort'), false)
   }
-  for (const reasoningEffort of ['low', 'high', 'max']) for (const thinking of ['enabled', 'default']) {
+  for (const provider of ['glm', 'deepseek']) for (const reasoningEffort of ['low', 'high', 'max']) for (const thinking of ['enabled', 'default']) {
     let body
-    const agent = await createDirectModelAgent({ provider: 'glm', model: 'glm-5.3-flash', keyEnv: 'KEY', thinking, reasoningEffort }, {
+    const agent = await createDirectModelAgent({ provider, model: provider === 'glm' ? 'glm-5.3-flash' : 'deepseek-flash', keyEnv: 'KEY', thinking, reasoningEffort }, {
       env: { KEY: 'private-key' }, fetchImpl: async (_url, init) => { body = JSON.parse(init.body); return response(glmResult()) },
     })
     await agent({ prompt: 'Synthetic JSON' })
@@ -251,6 +279,24 @@ test('Kimi shared thinking budget is resolved before credentials and rejects the
   assert.equal(Object.hasOwn(sent, 'thinking'), false)
 })
 
+test('DeepSeek thinking defaults share the output budget and retain explicitly bounded values', async () => {
+  const base = { provider: 'deepseek', model: 'deepseek-flash', keyEnv: 'KEY', thinking: 'enabled' }
+  assert.deepEqual(directModelOutputBudget(base), { maxOutputTokens: 32768 })
+  assert.deepEqual(directModelOutputBudget({ ...base, thinking: 'default', reasoningEffort: 'low' }), { maxOutputTokens: 16384 })
+  assert.deepEqual(directModelOutputBudget({ ...base, reasoningEffort: 'high' }), { maxOutputTokens: 32768 })
+  assert.deepEqual(directModelOutputBudget({ ...base, reasoningEffort: 'max' }), { maxOutputTokens: 32768 })
+  assert.deepEqual(directModelOutputBudget({ ...base, thinking: 'disabled' }), { maxOutputTokens: 8192 })
+  assert.deepEqual(directModelOutputBudget({ ...base, maxOutputTokens: 8192 }), { maxOutputTokens: 8192 })
+  let reads = 0, calls = 0
+  for (const maxOutputTokens of [0, 32769]) {
+    await assert.rejects(createDirectModelAgent({ ...base, maxOutputTokens }, {
+      env: new Proxy({}, { get() { reads++; return 'synthetic-key' } }),
+      fetchImpl: async () => { calls++; return response(glmResult()) },
+    }), { code: 'DIRECT_MODEL_CONFIG_INVALID' })
+  }
+  assert.equal(reads, 0); assert.equal(calls, 0)
+})
+
 test('truncated Kimi response records total and thinking use without accepting or exposing the unfinished answer', async () => {
   const payload = { ...kimiResult('{"title":"unfinished', 'max_tokens'),
     content: [{ type: 'thinking', thinking: 'PRIVATE hidden reasoning' }, { type: 'text', text: '{"title":"unfinished' }],
@@ -269,13 +315,30 @@ test('truncated Kimi response records total and thinking use without accepting o
   assert.deepEqual(agent.usage(), { calls: 1, failures: 1, input_tokens: 9108, output_tokens: 8195 })
 })
 
+test('truncated DeepSeek output retains counts and excludes reasoning and unfinished final content', async () => {
+  const payload = glmResult('{"title":"unfinished', 'length')
+  payload.choices[0].message.reasoning_content = 'PRIVATE hidden reasoning'
+  payload.usage = { prompt_tokens: 1200, completion_tokens: 8192, completion_tokens_details: { reasoning_tokens: 6100 } }
+  const agent = await createDirectModelAgent({ provider: 'deepseek', model: 'deepseek-flash', keyEnv: 'KEY',
+    thinking: 'enabled', reasoningEffort: 'low', maxOutputTokens: 8192 }, {
+    env: { KEY: 'synthetic-secret' }, fetchImpl: async () => response(payload),
+  })
+  await assert.rejects(agent({ prompt: 'Synthetic truncation fixture' }), error => {
+    assert.equal(error.code, 'DIRECT_MODEL_OUTPUT_TRUNCATED')
+    assert.deepEqual(error.details, { stop_reason: 'length', max_output_tokens: 8192, output_tokens: 8192, thinking_tokens: 6100 })
+    assert.doesNotMatch(JSON.stringify(error), /PRIVATE|unfinished|synthetic-secret/)
+    return true
+  })
+  assert.deepEqual(agent.usage(), { calls: 1, failures: 1, input_tokens: 1200, output_tokens: 8192 })
+})
+
 test('direct agent latches quota or credential rejection and never sends the next call', async () => {
-  for (const [payload, status, code] of [
+  for (const provider of ['glm', 'kimi', 'deepseek']) for (const [payload, status, code] of [
     [{ error: { type: 'permission_error', message: "You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends." } }, 403, 'DIRECT_MODEL_QUOTA_EXHAUSTED'],
     [{ error: { type: 'authentication_error', message: 'synthetic-secret invalid' } }, 401, 'DIRECT_MODEL_AUTH_ERROR'],
   ]) {
     let calls = 0
-    const agent = await createDirectModelAgent({ provider: 'kimi', model: 'synthetic', keyEnv: 'KEY' }, {
+    const agent = await createDirectModelAgent({ provider, model: 'synthetic', keyEnv: 'KEY' }, {
       env: { KEY: 'synthetic-secret' }, fetchImpl: async () => { calls++; return response(payload, status) },
     })
     await assert.rejects(agent({ prompt: 'first' }), { code })
@@ -284,16 +347,16 @@ test('direct agent latches quota or credential rejection and never sends the nex
   }
 })
 
-test('sends bounded image parts as native GLM data URLs and Kimi Anthropic base64 blocks', async () => {
+test('sends bounded image parts as native GLM/DeepSeek data URLs and Kimi Anthropic base64 blocks', async () => {
   const images=[image(png(),'image/png',2,3,2),image(jpeg(),'image/jpeg',4,5,7)]
-  for(const provider of ['glm','kimi']) {
+  for(const provider of ['glm','kimi','deepseek']) {
     let payload
-    const agent=await createDirectModelAgent({provider,model:'vision-model',keyEnv:'KEY'}, {env:{KEY:'synthetic-key'},fetchImpl:async(_url,init)=>{payload=JSON.parse(init.body);return response(provider==='glm'?glmResult():kimiResult())}})
+    const agent=await createDirectModelAgent({provider,model:'vision-model',keyEnv:'KEY'}, {env:{KEY:'synthetic-key'},fetchImpl:async(_url,init)=>{payload=JSON.parse(init.body);return response(provider==='kimi'?kimiResult():glmResult())}})
     assert.equal(agent.supportsImages,true)
     assert.equal(await agent({prompt:'Read the figures',images}),'{"title":"A paper"}')
     const content=payload.messages[0].content
     assert.deepEqual(content[0],{type:'text',text:'Read the figures'})
-    if(provider==='glm') {
+    if(provider!=='kimi') {
       assert.deepEqual(content.slice(1),images.flatMap(row=>[
         {type:'text',text:`PDF page ${row.page} rendered image:`},
         {type:'image_url',image_url:{url:`data:${row.mime_type};base64,${row.data}`}},

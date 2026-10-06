@@ -350,6 +350,26 @@ test('explicit model config validates reasoning compatibility without loading cr
   }
 })
 
+test('headless DeepSeek configuration validates without reading the explicitly named credential file', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'paper-headless-deepseek-')); t.after(() => rm(home, { recursive: true, force: true }))
+  const path = join(home, 'model.json'), base = { provider: 'deepseek', model: 'deepseek-flash', keyEnv: 'SYNTHETIC_CUSTOM_KEY',
+    envFile: join(home, 'not-created.env'), maxOutputTokens: 32768 }
+  for (const thinking of ['disabled', 'enabled', 'default']) {
+    const config = { ...base, thinking, ...(thinking === 'disabled' ? {} : { reasoningEffort: 'low' }) }
+    await writeFile(path, JSON.stringify(config))
+    assert.deepEqual(await loadModelConfig(path), config)
+    const handle = await createHeadlessAnalysis({ modelConfig: config })
+    handle.dispose()
+  }
+  for (const change of [{ thinking: 'enabled', reasoningEffort: 'medium' }, { thinking: 'disabled', reasoningEffort: 'low' },
+    { thinking: 'automatic' }, { maxOutputTokens: 32769 }]) {
+    const config = { ...base, ...change }
+    await writeFile(path, JSON.stringify(config))
+    await assert.rejects(loadModelConfig(path), { code: 'DIRECT_MODEL_CONFIG_INVALID' })
+    await assert.rejects(createHeadlessAnalysis({ modelConfig: config }), { code: 'DIRECT_MODEL_CONFIG_INVALID' })
+  }
+})
+
 async function cli(args, input) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, { stdio: ['pipe', 'pipe', 'pipe'] })
