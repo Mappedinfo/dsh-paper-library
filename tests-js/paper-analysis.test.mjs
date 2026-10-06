@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createPaperAnalysis } from '../src/harness/paper-analysis.mjs'
+import { promptOf } from '../src/harness/library-knowledge.mjs'
 
 const request = { action:'paper_analysis_start', id:'paper-a', request_id:'run-a', apply_metadata:false }
 function gate() { let resolve; const promise=new Promise(done=>{resolve=done}); return {promise,resolve} }
@@ -459,4 +460,135 @@ test('another process does not falsely claim a direct job was interrupted or rep
   assert.equal((await observer({...request,notes:false,review:false})).status,'unconfirmed')
   assert.equal(f.calls.length,1)
   f.agentGate.resolve();assert.equal((await f.done()).status,'complete')
+})
+
+test('paper prompts have one consistent 12-node / 20 combined-relation budget; generic default stays 20 / 40',async()=>{
+  const generic=promptOf({mode:'graph',entity:{kind:'paper',id:'paper-a'}},[])
+  assert.match(generic,/at most 20 nodes and 40 relations/)
+  assert.match(generic,/edges \+ assertions combined/)
+  const f=fixture();await f.handle({...request,notes:false,review:false});assert.equal((await f.done()).status,'complete')
+  const prompt=f.calls[0].prompt
+  assert.match(prompt,/at most 12 nodes and 20 relations \(edges \+ assertions combined\)/)
+  assert.match(prompt,/edges.length \+ assertions.length <= 20 combined/)
+  assert.match(prompt,/Prefer 4–8/)
+  assert.doesNotMatch(prompt,/20 nodes|40 relations/)
+  assert.match(prompt,/metadata and field_sources MUST have exactly the same field names/)
+  assert.match(prompt,/omit that field from BOTH objects/)
+})
+
+test('graph prompt spells out the Python schema rather than suggesting arbitrary scalar keys or relation pairs',()=>{
+  const prompt=promptOf({mode:'graph',entity:{kind:'paper',id:'paper-a'}},[],{maxNodes:12,maxRelations:20})
+  assert.ok(prompt.includes('^[a-z_]+$'))
+  assert.match(prompt,/at most 30 keys/);assert.match(prompt,/at most 8000 characters/)
+  assert.match(prompt,/string, finite number, boolean or null/);assert.match(prompt,/No nested objects or arrays/)
+  assert.match(prompt,/Prefer fields:\{\}/);assert.match(prompt,/never a key named "metric_r2"/)
+  assert.match(prompt,/Never create a paper or release node/);assert.match(prompt,/REQUEST_JSON.entity/)
+  assert.match(prompt,/top-level source_node/);assert.match(prompt,/source node actually present in this response/)
+  assert.match(prompt,/paper -> uses -> method\/dataset/)
+  assert.match(prompt,/observation -> measured_by -> metric/)
+  assert.match(prompt,/Assertion subjects are ONLY evidence\/figure\/formula\/observation; objects are ONLY claim\/gap/)
+  assert.match(prompt,/Empty edges:\[\] and assertions:\[\] are valid/)
+  assert.match(prompt,/Include at least one source-supported node/)
+  assert.match(prompt,/No duplicate \(category,subject,object,relation\) records/)
+})
+
+test('metadata prompt requests short original evidence without stitching or relaxed field validation',async()=>{
+  const f=fixture();f.output={...f.output,nodes:[],edges:[],assertions:[]}
+  await f.handle({...request,mode:'metadata'});assert.equal((await f.done()).status,'complete')
+  const prompt=f.calls[0].prompt
+  assert.match(prompt,/Each reference has ONLY source_id and quote keys/)
+  assert.match(prompt,/Proposing every missing field is not required/)
+  assert.match(prompt,/short directly copied evidence spans of 20–200 characters/)
+  assert.match(prompt,/1–4 separate short contiguous original excerpts/)
+  assert.match(prompt,/not stitched sentences/);assert.match(prompt,/never shorten with ellipses/)
+  assert.match(prompt,/omit abstract from BOTH objects/)
+  assert.match(prompt,/at most 12000 characters/);assert.match(prompt,/at most 24000 UTF-8 bytes/)
+  assert.match(prompt,/Keep nodes, edges and assertions empty/)
+  assert.doesNotMatch(prompt,/Prefer 4–8/)
+})
+
+function quotedFixture(text,quote,{graphType}={}){
+  const f=fixture();f.sources[0].text=text
+  f.output={title:'Synthetic quote fixture',body:'Only synthetic evidence.',nodes:[],edges:[],assertions:[],metadata:{title:'Synthetic'},field_sources:{title:[{source_id:'source-a',quote}]}}
+  if(graphType){f.output.metadata={};f.output.field_sources={};f.output.nodes=[{id:'sample',type:graphType,label:'Synthetic evidence',source_id:'source-a',quote}]}
+  return f
+}
+async function finishQuoted(f){await f.handle({...request,notes:false,review:false});return f.done()}
+
+test('unique PDF whitespace differences restore exact metadata quotations with durable receipts',async()=>{
+  const f=quotedFixture('Authors: Karen\n     Truong\nAbstract follows.','Karen Truong')
+  const result=await finishQuoted(f)
+  assert.equal(result.status,'complete')
+  assert.equal(result.field_sources.title[0].quote,'Karen\n     Truong')
+  assert.equal(f.output.field_sources.title[0].quote,'Karen Truong','Original synthetic model output is not mutated')
+  assert.deepEqual(result.quote_normalization,{method:'unique-whitespace-match-v1',count:1,metadata:1,graph:0})
+  const batch=[...f.records.values()].find(r=>r.key.startsWith('analysis.batch:')).value
+  assert.equal(batch.field_sources.title[0].quote,'Karen\n     Truong')
+  assert.equal(batch.quote_normalization.count,1)
+  const selected=await f.handle({action:'paper_analysis_get',id:request.id,request_id:request.request_id,batch_index:0})
+  assert.equal(selected.batch_quote_normalization.count,1)
+})
+
+test('evidence, figure and formula quotations share the same bounded exact recovery',async()=>{
+  for(const graphType of ['evidence','figure','formula']){
+    const f=quotedFixture('A method\r\n\t improves the result.','A method improves the result.',{graphType})
+    const result=await finishQuoted(f)
+    assert.equal(result.status,'complete')
+    assert.equal(result.draft.nodes[0].quote,'A method\r\n\t improves the result.')
+    assert.deepEqual(result.quote_normalization,{method:'unique-whitespace-match-v1',count:1,metadata:0,graph:1})
+    assert.equal(f.kernel.find(row=>row.action==='knowledge_draft_put').nodes[0].quote,result.draft.nodes[0].quote)
+  }
+})
+
+test('already exact repeated quotations remain exact and are not counted as recovered',async()=>{
+  const f=quotedFixture('Karen Truong and Karen Truong','Karen Truong')
+  const result=await finishQuoted(f)
+  assert.equal(result.status,'complete');assert.equal(result.quote_normalization.count,0)
+  assert.equal(result.field_sources.title[0].quote,'Karen Truong')
+})
+
+test('ambiguous whitespace matches, changed words and omitted content cannot be recovered',async()=>{
+  for(const [text,quote] of [
+    ['Karen\nTruong and Karen\tTruong','Karen Truong'],
+    ['Karen\nTruong','Karin Truong'],
+    ['Karen\nworks with\nTruong','Karen Truong'],
+    ['Karen\nworks with\nTruong','Karen ... Truong'],
+    ['Karen\n...\nTruong','Karen ... Truong'],
+    ['Karen\nTruong','Karen-Truong'],
+  ])for(const graphType of [undefined,'evidence']){
+    const f=quotedFixture(text,quote,{graphType}),result=await finishQuoted(f)
+    assert.equal(result.status,'failed',`${text} / ${quote}`)
+    assert.equal(f.drafts.size,0);assert.equal(f.kernel.some(row=>row.action==='paper_analysis_apply_metadata'),false)
+  }
+})
+
+test('quote recovery cannot cross selected sources or switch the declared source ID',async()=>{
+  for(const [first,second] of [['Karen','Truong'],['Other source text.','Karen\nTruong']]){
+    for(const graphType of [undefined,'figure']){
+      const f=quotedFixture(first,'Karen Truong',{graphType});f.sources[1].text=second
+      assert.equal((await finishQuoted(f)).status,'failed');assert.equal(f.drafts.size,0)
+    }
+  }
+})
+
+test('quote length is checked both before recovery and against the restored source substring',async()=>{
+  for(const graphType of [undefined,'formula']){
+    const valid=quotedFixture(`A${' '.repeat(1998)}B`,'A B',{graphType})
+    assert.equal((await finishQuoted(valid)).status,'complete')
+    for(const [text,quote] of [[`A${' '.repeat(1999)}B`,'A B'],['A B',`A${' '.repeat(1999)}B`]]){
+      const f=quotedFixture(text,quote,{graphType})
+      assert.equal((await finishQuoted(f)).status,'failed');assert.equal(f.drafts.size,0)
+    }
+  }
+})
+
+test('recovered metadata references still obey aggregate character and byte budgets',async()=>{
+  for(const [separator,count] of [[' '.repeat(1998),7],['\u3000'.repeat(1000),8]]){
+    const f=quotedFixture(`A${separator}B`,'A B')
+    const fields=['title','abstract','publisher','volume','issue','page','language','container-title'].slice(0,count)
+    f.output.metadata=Object.fromEntries(fields.map(field=>[field,'Synthetic']))
+    f.output.field_sources=Object.fromEntries(fields.map(field=>[field,[{source_id:'source-a',quote:'A B'}]]))
+    const result=await finishQuoted(f)
+    assert.equal(result.status,'failed');assert.match(result.error,/预算/);assert.equal(f.drafts.size,0)
+  }
 })

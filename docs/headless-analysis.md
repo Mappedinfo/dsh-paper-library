@@ -85,6 +85,8 @@ JSON
 
 元数据的 `field_sources` 保留实际来源标识和原文引用。模型草稿标为 `origin:llm`、`needs-review`，不自动变成人工核验的事实。读取 `batch_index` 可查看某一批结果；默认返回最后一批。审阅后明确提交 `paper_analysis_apply`（相同 `id`、`request_id`）才把有来源支持的缺失字段写回。使用原目录版本进行冲突检查，保留备份并原子替换管理副本；已有值、DOI、引用键和 JCR 不由模型改写，导入原件不改动。后续编辑改变了目录版本时应重新审阅，不覆盖冲突。
 
+引文校验只接受对应来源中的原文。模型仅改变换行或连续空白时，允许在同一来源内唯一匹配后恢复真实原文，并在批次与作业的 `quote_normalization` 中记录次数；改字、省略、跨来源和歧义匹配仍被拒绝。分析提示与校验统一为最多 12 个节点、20 条关系合计，不自动截断超限输出。
+
 使用相同资料库和状态根目录启动 Paper Library，即可打开已保存结果。默认状态位置沿用本机 DSH 路径解析，但不要求安装或运行 DSH；如使用 `--state-home /absolute/private/state`，CLI 和服务端应传入同一个路径。
 
 独立服务也能配置相同模型，沿用现有审阅界面：
@@ -105,6 +107,35 @@ node src/server.mjs --library /absolute/private/library \
 单篇取消只影响持有执行任务的同一后台实例；从另一个 CLI 进程读取或取消无法终止原服务中的任务。长批次宜用 CLI 执行、从同一服务提交并取消，或由程序保留句柄。新请求意味着新授权范围与新调用预算，不能把新 ID 当作无需计费的“继续”。
 
 ## 程序调用
+
+多模型的首批运行可以使用 `scripts/run-paper-analysis-batch.mjs`。准备一个仓库外的计划文件，明确分配文献 ID；同一篇不能同时分给两个入口：
+
+```json
+{
+  "library": "/absolute/private/library",
+  "request_id": "first-reading-batch",
+  "mode": "full",
+  "notes": true,
+  "review": false,
+  "routes": [
+    {"name": "glm", "config": "/absolute/private/glm-model.json", "ids": ["paper-id-a"]},
+    {"name": "kimi", "config": "/absolute/private/kimi-model.json", "ids": ["paper-id-b"]}
+  ]
+}
+```
+
+每份模型配置明确设置 `maxCalls` 和不超过 2 的 `maxConcurrency`。`maxCalls` 按入口分别计数，同一 key 配置多个入口时应合计各入口预算。编排器共用按实际凭据区分的并发限制，同一 key 的不同别名也最多 2 个在途请求；此保护涵盖本次编排，不控制其他应用独立发起的请求。
+
+```bash
+node scripts/run-paper-analysis-batch.mjs \
+  --plan /absolute/private/plan.json --out /absolute/private/new-run
+```
+
+输出目录必须新建并位于源码仓库与资料库之外，保存私有运行清单、进度、结果和脱敏的模型响应。原始响应可能包含论文内容，不能提交到公开仓库。编排器不修改 PDF 资料，不自动重试失败生成或轮换 key。
+
+从既有元数据清点挑选首批时，可使用 `scripts/prepare-paper-analysis-run.py --library … --audit … --out … --model-config … --model-config … --count 12`。它只选已有目录中有 DOI／基础来源元数据、6–24 页、当前字节与审计哈希一致的驻留 PDF，按哈希去重；这是便于初次检查的选择规则，不代表随机样本或整库覆盖。实际选中条目与依据只写入私有目录。
+
+运行结束后，使用 `scripts/inspect-paper-analysis-batch.mjs --plan … --run … --selection …` 检查每篇状态、全文覆盖、必需笔记的待审状态、本地 PDF 哈希和最后一批证据引文。报告保存在运行目录，不调用模型或下载文件；引文抽查只覆盖最后一批，不能代替全文内容审阅。上述三个脚本是源码仓库工具，npm 安装包仍使用 CLI 或下面的程序入口。
 
 包导出 `@mappedinfo/dsh-paper-library/analysis`，源码可直接导入 `src/headless-analysis.mjs`：
 
