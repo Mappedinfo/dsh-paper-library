@@ -1,0 +1,41 @@
+{
+  "id": "q6_research_question",
+  "title": "作者的研究问题",
+  "question": "本批文字中，作者明确提出了哪些待回答或检验的研究问题？",
+  "guidance": "一个回答只记录一个作者明确提出的研究疑问，保留对象和范围；不要求原文采用问号。不要把已报告结果、一般目标或读者新增问题混进来。没有明确研究问题时选 not_reported。",
+  "options": [
+    {
+      "id": "research_question",
+      "label": "作者明确提出的一个研究问题",
+      "coding": {
+        "definition": "作者原文明确说明研究要回答或检验的一项具体疑问。",
+        "include_when": "文字交代要解决什么疑问、比较什么或检验何种关系，不必使用问句。",
+        "exclude_when": "泛泛愿景、已报告结果、读者新增问题，或根据方法推测作者未提出的问题。"
+      },
+      "graph": {
+        "node_type": "question",
+        "source_status": "author-stated"
+      }
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "We ask whether checking sources before answering helps readers separate claims from observations.",
+      "choice": "research_question",
+      "judgment": "作者要检验回答前核对来源是否帮助区分主张与观察。",
+      "reason": "疑问由作者明确提出，尚不表明有正面效果。"
+    },
+    {
+      "source_text": "The study investigates which revision step writers choose first when the draft contains an unsupported claim.",
+      "choice": "research_question",
+      "judgment": "作者研究：草稿含缺少依据的主张时，作者首先选择哪一步修改。",
+      "reason": "没有问号仍明确给出待调查疑问，不混入修改步骤本身。"
+    },
+    {
+      "source_text": "Seven readers revised their initial answer.",
+      "choice": "not_reported",
+      "judgment": "本批报告七名读者修改初始答案，没有提出待回答的研究问题。",
+      "reason": "已有观察不能代替作者明确研究疑问。"
+    }
+  ]
+}

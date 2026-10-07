@@ -9,15 +9,13 @@ import { validateGraph } from '../scripts/probe-paper-analysis-decomposition.mjs
 
 const atomicConfig = loadQuestionnaire()
 const legacyIds = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']
-const atomicIds = ['q1_method', 'q1_dataset', 'q1_metric', 'q1_task', 'q2', 'q3', 'q4',
-  'q5_method_data', 'q5_method_result', 'q5_data_result', 'q5_metric_result', 'q5_task_result', 'q6']
+const atomicIds = ['q1_method', 'q1_dataset', 'q1_metric', 'q1_task', 'q2_author_claim', 'q2_reported_result', 'q2_reader_inference',
+  'q3_text', 'q3_figure', 'q3_table', 'q3_formula', 'q4_supports', 'q4_qualifies', 'q4_contradicts',
+  'q5_method_data', 'q5_method_result', 'q5_data_result', 'q5_metric_result', 'q5_task_result',
+  'q6_research_question', 'q6_study_limitation', 'q6_prior_gap', 'q6_reader_check']
+const originalV2Protocol = JSON.parse(await readFile(new URL('./fixtures/reading-protocol-v2.json', import.meta.url), 'utf8'))
 function legacyProtocol(protocol) {
-  const legacy = structuredClone(protocol)
-  legacy.version = 'reading-questions-v2'
-  delete legacy.question_ids
-  delete legacy.default_mode
-  legacy.default_groups = [['q1', 'q2'], ['q3', 'q4'], ['q5', 'q6']]
-  return legacy
+  return structuredClone(originalV2Protocol)
 }
 const legacyDirectory = await mkdtemp(join(tmpdir(), 'reading-legacy-v2-synthetic-'))
 await cp(new URL('../prompts/reading/', import.meta.url), legacyDirectory, { recursive: true })
@@ -234,14 +232,14 @@ test('whitespace restoration does not bypass the persisted quote character budge
   assert.equal(result.answers[0].evidence.length, 0)
 })
 
-test('v3 schedules thirteen independent question calls and preserves selected order by default', () => {
-  assert.equal(atomicConfig.version, 'reading-questions-v3')
+test('v4 schedules twenty-three independent question calls and preserves selected order by default', () => {
+  assert.equal(atomicConfig.version, 'reading-questions-v4')
   assert.equal(atomicConfig.protocol.default_mode, 'separate')
   assert.deepEqual(atomicConfig.questions.map(question => question.id), atomicIds)
   assert.deepEqual(questionGroups(atomicConfig), atomicIds.map(id => [id]))
-  assert.equal(questionGroups(atomicConfig).length, 13)
-  assert.deepEqual(questionGroups(atomicConfig, { question_ids: ['q6', 'q1_method'] }), [['q6'], ['q1_method']])
-  assert.deepEqual(questionGroups(atomicConfig, { question_ids: ['q6', 'q1_method'], question_mode: 'grouped' }), [['q1_method'], ['q6']])
+  assert.equal(questionGroups(atomicConfig).length, 23)
+  assert.deepEqual(questionGroups(atomicConfig, { question_ids: ['q6_reader_check', 'q1_method'] }), [['q6_reader_check'], ['q1_method']])
+  assert.deepEqual(questionGroups(atomicConfig, { question_ids: ['q6_reader_check', 'q1_method'], question_mode: 'grouped' }), [['q1_method'], ['q6_reader_check']])
   const input = pack(), returned = []
   for (const ids of questionGroups(atomicConfig)) {
     const prompt = makeReadingPrompt(input, ids, atomicConfig)
@@ -251,7 +249,7 @@ test('v3 schedules thirteen independent question calls and preserves selected or
     assert.deepEqual(result.missing, [])
     returned.push(...result.answers.map(item => item.question_id))
   }
-  assert.deepEqual(returned, atomicIds, 'all thirteen independent responses cover the requested questionnaire once')
+  assert.deepEqual(returned, atomicIds, 'all twenty-three independent responses cover the requested questionnaire once')
 })
 
 test('each atomic entity question accepts its own category and rejects the other three categories', () => {
@@ -291,7 +289,7 @@ test('an invalid atomic category and one missing question cannot erase separatel
   assert.equal(graph.nodes.some(node => node.type === 'metric' || node.type === 'task'), false)
 })
 
-test('v3 hashes active atomic assets and refuses unsafe or duplicate manifest identifiers', async t => {
+test('v4 hashes active atomic assets and refuses unsafe or duplicate manifest identifiers', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'reading-atomic-manifest-synthetic-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   await cp(new URL('../prompts/reading/', import.meta.url), directory, { recursive: true })

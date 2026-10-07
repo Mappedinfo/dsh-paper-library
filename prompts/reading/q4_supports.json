@@ -1,0 +1,55 @@
+{
+  "id": "q4_supports",
+  "title": "证据支持原文主张",
+  "question": "本批哪些依据为哪一条可定位的原文主张提供了支持？",
+  "guidance": "每条肯定回答或 other 必须单独给 target_claim:{source_id,quote}，目标是本批 S 页可唯一定位的一条连续原文主张；evidence 另给依据，judgment 只解释关系与理由，不充当目标。目标与依据可以来自不同 S 页，但对象与条件必须可比；中性项不提供 target_claim。找不到原文目标时选 not_reported，不能生成目标。证据若仅重复目标或仅是目标中的片段，就不构成额外依据；同一段落中的不同连续片段可以使用，包含目标但另有独立实据的上下文不因包含关系被拒绝。 一个回答只处理一条主张与一项相符依据。作者重复、语气强调和关联升级为因果不构成支持；限定与反驳由其他题记录，不用它们替代支持答案。",
+  "target_claim_required": true,
+  "options": [
+    {
+      "id": "supports",
+      "label": "依据支持 target_claim 的原文主张",
+      "coding": {
+        "definition": "在可比对象与条件下，依据为指定原文主张提供相符的观察、分析或论证。 一个回答只判定该证据与该目标这一对之间的本题关系。",
+        "include_when": "目标原文与依据均可定位，依据含有超出目标重复陈述的具体理由；如实保留支持范围。",
+        "exclude_when": "目标重复或强调，目标重复或目标子片段冒充额外依据，将关联扩为因果，或条件与对象不匹配。"
+      },
+      "graph": {
+        "node_type": "claim",
+        "relation": "supports"
+      },
+      "requires_judgment": true
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "We report that source checks occurred more often after the checklist in this exercise. Before the checklist, three of twelve drafts included a source check; after it, nine of twelve did.",
+      "choice": "supports",
+      "judgment": "前后计数与目标主张一致，支持本练习中来源核对出现得更频繁；不能单凭该对照证明因果。",
+      "reason": "目标和前后计数分开定位，计数提供额外依据，条件均限于本练习。",
+      "target_claim": {
+        "quote": "We report that source checks occurred more often after the checklist in this exercise."
+      },
+      "evidence_quote": "Before the checklist, three of twelve drafts included a source check; after it, nine of twelve did."
+    },
+    {
+      "source_text": "All six writers in this exercise revised at least one unsupported sentence. The revision log records one such correction for each of the six writers.",
+      "choice": "supports",
+      "judgment": "修改日志逐人记录修正，支持本练习中六名作者均至少修正一句缺少依据的句子。",
+      "reason": "日志说明提供可对应的额外依据，只支持原文指定的六人练习。",
+      "target_claim": {
+        "quote": "All six writers in this exercise revised at least one unsupported sentence."
+      },
+      "evidence_quote": "The revision log records one such correction for each of the six writers."
+    },
+    {
+      "source_text": "We argue that the question checklist causes deeper reflection. Readers who chose the checklist wrote longer reflections, but assignment was voluntary.",
+      "choice": "other",
+      "judgment": "所报关联涉及同一清单，但自愿选择可能引入差异，不能将它直接判为对因果主张的支持。",
+      "reason": "存在相关依据但不足以匹配本题支持码，保留目标与不确定性供人工核对。",
+      "target_claim": {
+        "quote": "We argue that the question checklist causes deeper reflection."
+      },
+      "evidence_quote": "Readers who chose the checklist wrote longer reflections, but assignment was voluntary."
+    }
+  ]
+}

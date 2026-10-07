@@ -31,7 +31,17 @@ window.PaperAnalysis = (() => {
       if(job.coverage){const c=job.coverage;result.append(node('p',`已读 PDF 页：${c.read_pages.join(', ')} · 已完成 ${c.completed_pages?.length??c.read_pages.length} / ${c.requested_pages?.length||c.page_count} 页 · ${c.characters} 字符 · ${job.batch_count||1} 批。${c.full_document?'全文文字已读完。':c.blank_pages?.length?'空白或扫描页未提取到文字；图像未作 OCR。':'尚未读取的文字不纳入结论。'}`,'small muted'));}
       if(job.batch_count>1){const label=node('label','查看图谱批次 ','analysis-batch'),select=node('select');select.id='analysis-batch';select.setAttribute('aria-label','图谱批次');for(let i=0;i<job.batch_count;i++){const option=node('option',`第 ${i+1} 批`);option.value=String(i);select.append(option);}select.value=String(job.batch_index??job.batch_count-1);select.addEventListener('change',()=>{batchIndex=Number(select.value);selected.clear();void persistence?.patch(`knowledge-draft:analysis:${paperId}`,{batch_index:batchIndex,node_ids:[]});void load();});label.append(select);result.append(label);if(job.batch_coverage)result.append(node('p',`本批 PDF 页：${job.batch_coverage.read_pages.join(', ')}`,'small muted'));}
       if(job.question_coverage){const detail=node('details');detail.append(node('summary',job.question_coverage.complete?'所选问题已答完（待核对）':'问题尚未全部完成'));for(const [id,row]of Object.entries(job.question_coverage.by_question||{}))detail.append(node('p',`${id}：${row.answered_batches}/${row.expected_batches} 批已回答；失败批次 ${(row.failed_batches||[]).map(n=>n+1).join(', ')||'无'}；无文字批次 ${(row.unread_batches||[]).map(n=>n+1).join(', ')||'无'}`,'small muted'));result.append(detail);}
-      if(job.batch_answers?.length){const detail=node('details');detail.append(node('summary','本批问题回答与定位原文'));for(const answer of job.batch_answers){detail.append(node('p',`${answer.question_id} · ${answer.choice} · ${answer.valid?'待核对':'引用或格式未通过'}：${answer.judgment||'仅记录当前所读范围'}`));for(const evidence of answer.evidence||[])detail.append(node('p',`PDF 第 ${evidence.page} 页`,'small muted'),node('blockquote',evidence.quote));for(const error of answer.errors||[])detail.append(node('p',error.message,'small muted'));}result.append(detail);}
+      if(job.batch_answers?.length){
+        const detail=node('details');detail.append(node('summary','本批问题回答与定位原文'));
+        for(const answer of job.batch_answers){
+          detail.append(node('p',`${answer.question_id} · ${answer.choice} · ${answer.valid?'待核对':'引用或格式未通过'}：${answer.judgment||'仅记录当前所读范围'}`));
+          if(answer.source_status==='inferred')detail.append(node('p','读者推断／待核对问题，尚未成为作者报告的事实','small muted'));
+          if(answer.target_claim)detail.append(node('p',`被评价主张 · PDF 第 ${answer.target_claim.page} 页`,'small muted'),node('blockquote',answer.target_claim.quote));
+          for(const evidence of answer.evidence||[])detail.append(node('p',`${answer.target_claim?'判断依据 · ':''}PDF 第 ${evidence.page} 页`,'small muted'),node('blockquote',evidence.quote));
+          for(const error of answer.errors||[])detail.append(node('p',error.message,'small muted'));
+        }
+        result.append(detail);
+      }
       if(job.question_results?.some(group=>group.errors?.length)){const detail=node('details');detail.append(node('summary','本批未完成项'));for(const group of job.question_results)for(const error of group.errors||[])detail.append(node('p',`${group.question_ids.join('、')}：${error.message||error.code}`,'small muted'));result.append(detail);}
       if(job.batch_compilation?.limitations?.length)result.append(node('p','部分关系仅保留文字判断与证据，当前图谱类型或明确端点不足，未自动连接。','small muted'));
       if(job.model)result.append(node('p',`${job.model.provider} / ${job.model.model}`,'small muted'));

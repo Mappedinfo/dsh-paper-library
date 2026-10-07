@@ -1,0 +1,41 @@
+{
+  "id": "q3_table",
+  "title": "表格的文字出处",
+  "question": "本批文字明确提供了哪些表格编号、标题、表注或对应正文说明？",
+  "guidance": "一个回答只记录一张表格及其实际提供的文字说明；复制编号、标题、表注或正文明确对应的说明。不得从图片或缺失单元格补写数值。图示由 q3_figure 记录。当前图谱用 figure 类型保存表格出处以兼容现有类型，不改变这道题的表格分类。",
+  "options": [
+    {
+      "id": "table",
+      "label": "一张表格及其可定位文字",
+      "coding": {
+        "definition": "提供文本中明确对应一张表格的编号、标题、表注或正文说明。",
+        "include_when": "文字明确对应表格，只记录文本实际给出的对象、数值或解释并保留条件。",
+        "exclude_when": "图示、公式，未提供文字或单元格的表格图片，或从版式和缺失内容推测数值。"
+      },
+      "graph": {
+        "node_type": "figure"
+      },
+      "requires_judgment": true
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "Table 1. Number of checked citations in the short-draft exercise.",
+      "choice": "table",
+      "judgment": "表 1 的标题说明其记录短草稿练习中已核对引用的数量。",
+      "reason": "只记录提供的表格标题，不能据标题猜测具体数量。"
+    },
+    {
+      "source_text": "The text accompanying Table 2 states that only drafts with at least one source note were counted.",
+      "choice": "table",
+      "judgment": "表 2 的对应正文说明：计数只包含至少有一条来源备注的草稿。",
+      "reason": "明确对应表格的计数条件可以记录，不推广到所有草稿。"
+    },
+    {
+      "source_text": "Figure 4. A diagram of the counterexample-checking routine.",
+      "choice": "not_reported",
+      "judgment": "本批提供图 4 的图注，没有表格的文字说明。",
+      "reason": "图示与表格分别提问，共用图谱类型不等于共用题目类别。"
+    }
+  ]
+}

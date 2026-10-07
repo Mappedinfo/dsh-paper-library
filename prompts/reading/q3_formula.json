@@ -1,0 +1,41 @@
+{
+  "id": "q3_formula",
+  "title": "公式的文字出处",
+  "question": "本批文字明确提供了哪些公式表达式或变量定义？",
+  "guidance": "一个回答只记录一个实际提供的表达式或一项变量定义，复制可定位的连续文字并保留适用条件。公式和变量定义不是性能结果；不能从图片恢复未提供的表达式，自行推导新公式或猜测符号含义。",
+  "options": [
+    {
+      "id": "formula",
+      "label": "一个公式表达式或变量定义",
+      "coding": {
+        "definition": "提供文本中明确给出的一个数学表达式或一项公式变量定义。",
+        "include_when": "文字直接给出表达式或变量含义，连同解释该项所必需的条件一起记录。",
+        "exclude_when": "从图片补造表达式，自行推导的式子，无依据的符号解释，或只有文字提及“公式”而没有表达式和变量定义。"
+      },
+      "graph": {
+        "node_type": "formula"
+      },
+      "requires_judgment": true
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "Revision rate = revised drafts / reviewed drafts.",
+      "choice": "formula",
+      "judgment": "修改率定义为已修改草稿数除以已审阅草稿数。",
+      "reason": "文字直接给出一个表达式，不据公式声称实际修改率提高。"
+    },
+    {
+      "source_text": "Here n denotes the number of short drafts with at least one source check; long drafts are excluded.",
+      "choice": "formula",
+      "judgment": "n 表示至少经过一次来源核对的短草稿数，长草稿不计入。",
+      "reason": "变量定义包含必要计数边界，不能把 n 改为全部草稿数量。"
+    },
+    {
+      "source_text": "The thinking exercise refers to a scoring formula, but this passage does not give the expression or define its variables.",
+      "choice": "not_reported",
+      "judgment": "本批提及评分公式，没有提供表达式或变量定义。",
+      "reason": "提及公式存在不能代替实际可定位的公式内容。"
+    }
+  ]
+}

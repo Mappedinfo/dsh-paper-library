@@ -9,6 +9,7 @@ import { validateGraph } from '../scripts/probe-paper-analysis-decomposition.mjs
 
 const config = loadQuestionnaire()
 const legacyIds = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']
+const originalV2Protocol = JSON.parse(await readFile(new URL('./fixtures/reading-protocol-v2.json', import.meta.url), 'utf8'))
 const resultMappings = {
   method_result: { subject_type: 'method', object_type: 'observation', relation: 'produced_by', direction: 'object-to-subject' },
   data_result: { subject_type: 'dataset', object_type: 'observation', relation: 'observed_on', direction: 'object-to-subject' },
@@ -52,7 +53,7 @@ async function editableQuestionnaire(t) {
 }
 
 test('actual atomic prompts include every selected code definition, boundary, projection and synthetic example', () => {
-  assert.equal(config.version, 'reading-questions-v3')
+  assert.equal(config.version, 'reading-questions-v4')
   assert.equal(config.protocol.codebook_required, true)
   const input = pack()
   for (const ids of questionGroups(config)) {
@@ -90,16 +91,17 @@ test('actual atomic prompts include every selected code definition, boundary, pr
   }
 })
 
-test('readonly projections describe observation reporting and preserve evidence direction and gap attribution', () => {
-  const rendered = promptQuestions(makeReadingPrompt(pack(), ['q2', 'q4', 'q6'], config))
+test('readonly projections describe independent result, relationship, author-gap and reader-question attribution', () => {
+  const ids = ['q2_reported_result', 'q4_supports', 'q4_qualifies', 'q4_contradicts', 'q6_study_limitation', 'q6_prior_gap', 'q6_reader_check', 'q6_research_question']
+  const rendered = promptQuestions(makeReadingPrompt(pack(), ids, config))
   const projection = (id, choice) => rendered.find(question => question.question_id === id).options.find(option => option.choice === choice).projection
-  assert.deepEqual(projection('q2', 'reported_result'), { node_type: 'observation', evidence_target_type: 'claim', evidence_relation: 'reports' })
+  assert.deepEqual(projection('q2_reported_result', 'reported_result'), { node_type: 'observation', evidence_target_type: 'claim', evidence_relation: 'reports' })
   for (const relation of ['supports', 'qualifies', 'contradicts']) {
-    assert.deepEqual(projection('q4', relation), { node_type: 'claim', evidence_target_type: 'claim', evidence_relation: relation })
+    assert.deepEqual(projection(`q4_${relation}`, relation), { node_type: 'claim', evidence_target_type: 'claim', evidence_relation: relation })
   }
-  assert.deepEqual(projection('q6', 'stated_gap'), { node_type: 'gap', evidence_target_type: 'gap', evidence_relation: 'identifies', source_status: 'author-stated' })
-  assert.deepEqual(projection('q6', 'inferred_gap'), { node_type: 'gap', evidence_target_type: 'gap', evidence_relation: 'reports', source_status: 'inferred' })
-  assert.deepEqual(projection('q6', 'research_question'), { node_type: 'question', source_status: 'author-stated' })
+  for (const choice of ['study_limitation','prior_gap']) assert.deepEqual(projection(`q6_${choice}`, choice), { node_type: 'gap', evidence_target_type: 'gap', evidence_relation: 'identifies', source_status: 'author-stated' })
+  assert.deepEqual(projection('q6_reader_check', 'reader_check'), { node_type: 'question', source_status: 'inferred' })
+  assert.deepEqual(projection('q6_research_question', 'research_question'), { node_type: 'question', source_status: 'author-stated' })
   const input = pack(), quote = input.sources[0].text
   for (const extra of [{ coding: {} }, { projection: {} }, { node_type: 'observation' }, { relation: 'produced_by' }]) {
     const result = parse([answer('method_result', quote, extra)], input)
@@ -227,7 +229,7 @@ test('exact evidence with a semantically wrong method-result code stays mechanic
 test('legacy v1 questionnaires without coding, examples or endpoints remain loadable and compile the original q5 mappings', async t => {
   const fixture = await editableQuestionnaire(t)
   for (const id of ['protocol', ...legacyIds]) {
-    const original = fixture.originals.get(id)
+    const original = id === 'protocol' ? originalV2Protocol : fixture.originals.get(id)
     const value = structuredClone(original)
     if (id === 'protocol') {
       value.version = 'reading-questions-v1'
@@ -332,11 +334,7 @@ test('atomic relation endpoints preserve recovered source text and cannot connec
 })
 
 test('legacy v2 relation alternatives retain their recorded endpoint handling and original grouping', async t => {
-  const fixture = await editableQuestionnaire(t), protocol = structuredClone(fixture.originals.get('protocol'))
-  protocol.version = 'reading-questions-v2'
-  delete protocol.question_ids
-  delete protocol.default_mode
-  protocol.default_groups = [['q1', 'q2'], ['q3', 'q4'], ['q5', 'q6']]
+  const fixture = await editableQuestionnaire(t), protocol = structuredClone(originalV2Protocol)
   await fixture.write('protocol', protocol)
   const legacy = loadQuestionnaire(fixture.url)
   assert.deepEqual(questionGroups(legacy), [['q1', 'q2'], ['q3', 'q4'], ['q5', 'q6']])

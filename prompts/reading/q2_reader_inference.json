@@ -1,0 +1,45 @@
+{
+  "id": "q2_reader_inference",
+  "title": "读者的一个候选解释",
+  "question": "基于本批明确证据，可以提出哪一个作者未直接陈述、仍需核实的候选解释？",
+  "guidance": "最多回答一条；不要求提出解释，也不声称穷尽可能解释。若有具体证据，judgment 用“一个可能解释是……；仍需核对……”明确标为读者候选，并说明原文不能确证它。作者已直接陈述的解释不属于本题；没有依据时选 not_reported，不能为填满答案猜测。",
+  "max_answers": 1,
+  "options": [
+    {
+      "id": "reader_inference",
+      "label": "一个有据但未确证的读者候选解释",
+      "coding": {
+        "definition": "读者基于可定位材料提出、作者未直接陈述的一项候选解释。",
+        "include_when": "有具体证据，明确说明这是读者候选和未確证之处；一个回答只提出一个解释。",
+        "exclude_when": "作者原文的解释或已报告结果，无依据猜测，或将候选解释称为事实、因果结论或所有可能解释。"
+      },
+      "graph": {
+        "node_type": "claim",
+        "relation": "reports",
+        "source_status": "inferred"
+      },
+      "requires_judgment": true
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "Readers who wrote more questions also spent more time checking sources; no intervention was assigned.",
+      "choice": "reader_inference",
+      "judgment": "一个可能解释是较多的提问伴随更深入的来源核对；仍需核对读者投入程度等因素，不能确认提问导致核对时间增加。",
+      "reason": "实际关联提供候选依据，但作者未直接提出这个解释，且没有因果识别。"
+    },
+    {
+      "source_text": "Four of six writers revised the introduction first, and two began with the conclusion; the exercise did not ask why.",
+      "choice": "reader_inference",
+      "judgment": "一个可能解释是部分作者优先调整读者最先看到的段落；仍需核对作者动机，本批未询问原因。",
+      "reason": "修改顺序支持一个有限的动机候选，不能把未询问的动机当成事实。"
+    },
+    {
+      "source_text": "The exercise used a blank worksheet.",
+      "choice": "not_reported",
+      "judgment": "本批只说明使用空白工作表，不足以提出具体的学习效果解释。",
+      "reason": "不因本题允许读者解释就凭空猜测工作表效果。"
+    }
+  ],
+  "source_status": "inferred"
+}

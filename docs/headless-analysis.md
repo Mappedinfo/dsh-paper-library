@@ -84,10 +84,10 @@ JSON
 | `notes` | 必须为 `false` | 默认 `true`，追加一次精读笔记调用 |
 | `review` | 必须为 `false` | 默认 `false`，启用后追加一次评审调用 |
 | `apply_metadata` | 默认 `false` | 不提取、不写回书目资料，旧 `true` 设置不生效 |
-| `question_ids` | 不适用 | 默认完整 13 题，可选非空子集；ID 见[题库](reading-questions.md) |
-| `question_mode` | 不适用 | 默认 `separate` 每题一次；`grouped` 按冻结题库分组（v3 也为单题） |
+| `question_ids` | 不适用 | 默认完整 23 题，可选非空子集；ID 见[题库](reading-questions.md) |
+| `question_mode` | 不适用 | 默认 `separate` 每题一次；`grouped` 按冻结题库分组（v4 也为单题） |
 
-这里的默认值属于独立入口；DSH 仍沿用笔记／评审偏好，但全文阅读也不再补全元数据。仅需问题回答、证据与图谱时，设置 `notes:false` 可省去总结调用。每个文本批次默认 13 次问题调用；同一批文字及可选图片会重复发送，计入提供方用量。新题库不自动上调 `maxCalls`，应按“所选题数 × 有文字批次数 + 笔记／评审次数”规划额度，耗尽后保留已保存结果。问题与选项、人工编辑步骤及“精确引文”的含义见[可审阅的论文阅读问题](reading-questions.md)。旧 v1/v2 作业按原快照读取和分组，不自动重跑。默认仍为 `input_format:"text"`、`include_images:false`。
+这里的默认值属于独立入口；DSH 仍沿用笔记／评审偏好，但全文阅读也不再补全元数据。仅需问题回答、证据与图谱时，设置 `notes:false` 可省去总结调用。每个文本批次默认 23 次问题调用；同一批文字及可选图片会重复发送，计入提供方用量。新题库不自动上调 `maxCalls`，应按“所选题数 × 有文字批次数 + 笔记／评审次数”规划额度，耗尽后保留已保存结果。问题与选项、人工编辑步骤及“精确引文”的含义见[可审阅的论文阅读问题](reading-questions.md)。旧 v1/v2/v3 作业按原快照读取和分组，不自动重跑。默认仍为 `input_format:"text"`、`include_images:false`。
 
 需要先整理栏序并配图时，在分析请求或编排计划中加入：
 

@@ -1,0 +1,41 @@
+{
+  "id": "q3_text",
+  "title": "正文事实的原文出处",
+  "question": "本批正文明确陈述了哪些可以逐条核对的事实？",
+  "guidance": "一个回答只记录一个明确事实陈述，evidence 复制足以核对它的连续正文，保留条件、数值、比较对象和限定词。这里核对的是作者文字如何陈述，不证明外部事实真实。不按“值得”或“重要”自行筛选；图注、表注和公式由其他题记录。",
+  "options": [
+    {
+      "id": "text",
+      "label": "一项事实陈述及其连续正文",
+      "coding": {
+        "definition": "本批正文中一个可以通过连续原文核对的具体事实陈述。",
+        "include_when": "文字明确报告对象、步骤、条件、数量或观察；一个回答只保留一项可定位陈述及必要上下文。",
+        "exclude_when": "图注、表注、表达式，无法定位的概括，拼接引文，或被删去关键条件的结论短语。"
+      },
+      "graph": {
+        "node_type": "evidence"
+      },
+      "requires_judgment": true
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "The reading exercise included twelve volunteers.",
+      "choice": "text",
+      "judgment": "阅读练习包含十二名志愿者。",
+      "reason": "一个明确样本数量可以由连续正文核对，不附加参与者特征。"
+    },
+    {
+      "source_text": "**Only for short drafts**, the writers checked each citation before revising the sentence.",
+      "choice": "text",
+      "judgment": "仅对短草稿，作者改句前逐条核对引用。",
+      "reason": "条件及 Markdown 都是所提供正文的一部分，不能改写为全部草稿。"
+    },
+    {
+      "source_text": "Figure 2. The loop begins with a question and ends with a source check.",
+      "choice": "not_reported",
+      "judgment": "本批提供图 2 的图注，没有单独的正文事实陈述。",
+      "reason": "图注由图示题记录，不能用另一类出处代替正文覆盖。"
+    }
+  ]
+}

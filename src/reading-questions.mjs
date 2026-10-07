@@ -42,7 +42,7 @@ function promptProjection(question, option) {
     node_type: type,
     ...(hasStatement ? { evidence_target_type: type === 'gap' ? 'gap' : 'claim',
       evidence_relation: ['claim', 'gap'].includes(type) ? option.graph.relation ?? 'reports' : 'reports' } : {}),
-    ...(option.graph.source_status ? { source_status: option.graph.source_status } : {}),
+    ...(option.graph.source_status || question.source_status ? { source_status: option.graph.source_status ?? question.source_status } : {}),
     ...(endpointProjection(question, option) ? { endpoints: endpointProjection(question, option) } : {}),
   }
 }
@@ -62,6 +62,7 @@ export function loadQuestionnaire(directory = DIRECTORY) {
   const questions = questionIds.map(id => read(`${id}.json`))
   if (!text(protocol.version, 100) || !Array.isArray(protocol.rules) || !protocol.rules.length || protocol.rules.some(rule => !text(rule)) || !isObject(protocol.templates)) throw fail('阅读协议缺少版本或规则。')
   if (protocol.codebook_required !== undefined && typeof protocol.codebook_required !== 'boolean') throw fail('codebook_required 必须是布尔值。')
+  if (protocol.exclusive_scope_answers !== undefined && typeof protocol.exclusive_scope_answers !== 'boolean') throw fail('范围答案互斥合同必须是布尔值。')
   for (const key of ['intro', 'questions_heading', 'rules_heading', 'output_heading', 'sources_heading', 'sources_end', 'scope_label', 'source_label']) {
     if (!text(protocol.templates[key], 500)) throw fail(`阅读协议缺少模板：${key}`)
   }
@@ -70,13 +71,17 @@ export function loadQuestionnaire(directory = DIRECTORY) {
   if (!Array.isArray(protocol.common_options) || !['other', 'not_reported', 'not_applicable'].every(id => protocol.common_options.some(option => option.id === id))) throw fail('公共选项必须包含其他、未报告与不适用。')
   for (const [index, question] of questions.entries()) {
     if (question.id !== questionIds[index] || !text(question.question) || !text(question.title, 100) || !text(question.guidance) || !Array.isArray(question.options) || !question.options.length || question.options.length > 20) throw fail('问题定义无效。')
+    if (question.max_answers !== undefined && (!Number.isInteger(question.max_answers) || question.max_answers < 1 || question.max_answers > protocol.limits.max_answers)) throw fail('单题回答上限无效。')
+    if (question.target_claim_required !== undefined && typeof question.target_claim_required !== 'boolean') throw fail('目标主张合同必须是布尔值。')
+    if (question.source_status !== undefined && !['author-stated', 'inferred'].includes(question.source_status)) throw fail('问题来源归属无效。')
     const ids = new Set()
     for (const option of [...question.options, ...protocol.common_options]) {
       if (!isObject(option) || !/^[a-z][a-z_]*$/.test(option.id) || ids.has(option.id) || !text(option.label, 500)) throw fail(`问题 ${question.id} 的选项标识无效或重复。`)
       ids.add(option.id)
       if (['not_reported', 'not_applicable'].includes(option.id) !== (option.neutral === true)) throw fail('仅未报告和不适用选项可免除证据要求。')
       if (!option.neutral && (!NODE_TYPES.has(option.graph?.node_type) || option.graph?.relation && !RELATIONS.has(option.graph.relation))) throw fail(`问题 ${question.id} 的图谱映射无效。`)
-      if (option.graph?.source_status && (!['author-stated', 'inferred'].includes(option.graph.source_status) || !['gap', 'question'].includes(option.graph.node_type))) throw fail('问题来源归属无效。')
+      if (option.graph?.source_status && (!['author-stated', 'inferred'].includes(option.graph.source_status) || !['claim', 'gap', 'question'].includes(option.graph.node_type))) throw fail('问题来源归属无效。')
+      if (question.target_claim_required && !option.neutral && (option.graph.node_type !== 'claim' || !['supports', 'qualifies', 'contradicts', 'reports'].includes(option.graph.relation) || option.graph.endpoints)) throw fail('目标主张仅用于有明确依据的证据关系题。')
       if (option.id === 'other' && option.requires_judgment !== true) throw fail('其他选项必须要求判断内容。')
       if (protocol.codebook_required || option.coding !== undefined) {
         if (!isObject(option.coding) || Object.keys(option.coding).some(key => !['definition', 'include_when', 'exclude_when'].includes(key)) ||
@@ -91,10 +96,13 @@ export function loadQuestionnaire(directory = DIRECTORY) {
     }
     if (protocol.codebook_required || question.examples !== undefined) {
       if (!Array.isArray(question.examples) || !question.examples.length || question.examples.length > 3 || question.examples.some(example =>
-        !isObject(example) || Object.keys(example).some(key => !['source_text', 'choice', 'judgment', 'reason', 'subject', 'object'].includes(key)) ||
+        !isObject(example) || Object.keys(example).some(key => !['source_text', 'choice', 'judgment', 'reason', 'subject', 'object', 'target_claim', 'evidence_quote'].includes(key)) ||
         !ids.has(example.choice) || ['source_text', 'judgment', 'reason'].some(key => !text(example[key], 1500)) ||
         (example.subject !== undefined || example.object !== undefined) && (!endpointProjection(question, question.options.find(option => option.id === example.choice) ?? {}) || !text(example.subject, 500) || !text(example.object, 500) ||
-          !example.source_text.includes(example.subject) || !example.source_text.includes(example.object)))) throw fail(`问题 ${question.id} 的合成编码示例无效。`)
+          !example.source_text.includes(example.subject) || !example.source_text.includes(example.object)) ||
+        example.evidence_quote !== undefined && (!text(example.evidence_quote, 1500) || uniqueIndex(example.source_text, example.evidence_quote) < 0) ||
+        example.target_claim !== undefined && (!question.target_claim_required || !isObject(example.target_claim) || Object.keys(example.target_claim).some(key => key !== 'quote') || !text(example.target_claim.quote, 1500) || uniqueIndex(example.source_text, example.target_claim.quote) < 0) ||
+        question.target_claim_required && (['not_reported', 'not_applicable'].includes(example.choice) ? example.target_claim !== undefined : example.target_claim === undefined))) throw fail(`问题 ${question.id} 的合成编码示例无效。`)
     }
   }
   const config = { version: protocol.version, protocol, questions }
@@ -131,6 +139,9 @@ export function makeReadingPrompt(pack, questionIds, config = loadQuestionnaire(
   const { aliases } = sourceMap(pack), { templates, rules } = config.protocol
   const questions = selectedQuestions(config, questionIds).map(question => ({
     question_id: question.id, question: question.question, guidance: question.guidance,
+    ...(question.max_answers !== undefined ? { max_answers: question.max_answers } : {}),
+    ...(question.source_status ? { source_status: question.source_status } : {}),
+    ...(question.target_claim_required ? { target_claim_required: true, target_claim_format: { source_id: 'S1', quote: '从当前来源连续复制的被评价主张' } } : {}),
     options: [...question.options, ...config.protocol.common_options].map(option => ({ choice: option.id, meaning: option.label,
       ...(option.coding ? { coding: option.coding } : {}), projection: promptProjection(question, option) })),
     ...(question.examples ? { coding_examples: question.examples } : {}),
@@ -140,7 +151,9 @@ export function makeReadingPrompt(pack, questionIds, config = loadQuestionnaire(
     representation: pack.preprocessing?.representation ?? 'extracted-text', raw_pdf_verbatim: pack.preprocessing?.raw_verbatim === true }
   const sources = [...aliases].map(([alias, source]) => `${templates.source_label} ${alias} | page=${source.locator?.page ?? 'unknown'}\n${source.text}\n`).join('\n')
   const renderedRules = rules.join('\n').replaceAll('{{max_answers}}', String(config.protocol.limits.max_answers))
-  const example = JSON.stringify(config.protocol.output_example).replaceAll('{{question_id}}', questions[0].question_id).replaceAll('{{choice}}', questions[0].options[0].choice)
+  const format = structuredClone(config.protocol.output_example)
+  if (questions[0].target_claim_required) format.answers[0].target_claim = { source_id: 'S1', quote: '从 S1 连续复制的被评价主张，与 evidence 中的实据分别定位' }
+  const example = JSON.stringify(format).replaceAll('{{question_id}}', questions[0].question_id).replaceAll('{{choice}}', questions[0].options[0].choice)
   return `${templates.intro}\n${templates.scope_label}: ${JSON.stringify(scope)}\n${templates.rules_heading}:\n${renderedRules}\n${templates.questions_heading}:\n${JSON.stringify(questions, null, 2)}\n${templates.output_heading}:\n${example}\n${templates.sources_heading}\n${sources}\n${templates.sources_end}`
 }
 
@@ -205,7 +218,10 @@ export function parseReadingAnswers(raw, pack, questionIds, config = loadQuestio
     if (!question) invalid('UNKNOWN_QUESTION', '回答引用了未请求的问题。')
     const option = question && [...question.options, ...config.protocol.common_options].find(option => option.id === item?.choice)
     if (!option) invalid('UNKNOWN_CHOICE', '选项不在当前问题的选项表中。')
-    if (isObject(item) && Object.keys(item).some(key => !['question_id', 'choice', 'judgment', 'free_text', 'evidence', 'subject', 'object'].includes(key))) invalid('UNEXPECTED_ANSWER_FIELDS', '回答包含协议之外的字段。')
+    if (question?.target_claim_required) record.target_claim_required = true
+    if (isObject(item) && Object.keys(item).some(key => !['question_id', 'choice', 'judgment', 'free_text', 'evidence', 'subject', 'object', ...(question?.target_claim_required ? ['target_claim'] : [])].includes(key))) invalid('UNEXPECTED_ANSWER_FIELDS', '回答包含协议之外的字段。')
+    if (question?.max_answers !== undefined && output.answers.filter(answer => answer.question_id === question.id).length >= question.max_answers) invalid('QUESTION_ANSWER_LIMIT', '本题的回答数量超出单题上限；多余回答保留为无效记录。')
+    if (question?.source_status || option?.graph?.source_status) record.source_status = question?.source_status ?? option.graph.source_status
     const judgment = item?.judgment ?? item?.free_text ?? ''
     if (typeof judgment !== 'string' || judgment.length > limits.max_judgment_characters || judgment.includes('\0')) invalid('INVALID_JUDGMENT', '判断不是文本或超出长度限制。')
     else record.judgment = judgment.trim()
@@ -224,6 +240,24 @@ export function parseReadingAnswers(raw, pack, questionIds, config = loadQuestio
         raw_pdf_verbatim: pack.preprocessing?.raw_verbatim === true })
     }
     if (!option?.neutral && !record.evidence.length) invalid('EVIDENCE_REQUIRED', '肯定回答至少需要一条可定位的证据。')
+    if (question?.target_claim_required) {
+      if (option?.neutral) {
+        if (item?.target_claim !== undefined) invalid('TARGET_CLAIM_NOT_APPLICABLE', '未报告或不适用的范围记录不能同时评价主张。')
+      } else {
+        const ref = item?.target_claim, source = aliases.get(ref?.source_id) ?? byId.get(ref?.source_id)
+        if (!isObject(ref) || Object.keys(ref).some(key => !['source_id', 'quote'].includes(key)) || !source || !text(ref.quote, limits.max_quote_characters)) invalid('TARGET_CLAIM_REQUIRED', '证据关系必须单独提供当前来源中的被评价主张。')
+        else {
+          const match = locateQuote(source, ref.quote, cache)
+          if (!match || match.quote.length > limits.max_quote_characters) invalid('TARGET_CLAIM_NOT_LOCATED', '被评价主张须是当前来源内唯一且预算内的连续原文或空白等价片段。')
+          else {
+            record.target_claim = { source_id: source.id, page: source.locator?.page ?? null, submitted_quote: ref.quote, ...match,
+              source_content_hash: source.content_hash ?? digest(source.text), representation: pack.preprocessing?.representation ?? 'extracted-text', raw_pdf_verbatim: pack.preprocessing?.raw_verbatim === true }
+            const targetText = match.quote.replace(/\s+/gu, ' ')
+            if (option?.id !== 'other' && record.evidence.length && record.evidence.every(evidence => targetText.includes(evidence.quote.replace(/\s+/gu, ' ')))) invalid('TARGET_RESTATEMENT_NOT_EVIDENCE', '重复目标主张或仅摘录其子句不能作为支持、限定或反驳的额外依据。')
+          }
+        }
+      }
+    }
     if (item?.subject !== undefined || item?.object !== undefined) {
       if (!(question?.id === 'q5' || question && option && endpointProjection(question, option)) || !text(item.subject, 500) || !text(item.object, 2000)) invalid('INVALID_ENDPOINTS', '仅具有关系端点合同的选码可同时提供有界 subject 和 object。')
       else {
@@ -238,6 +272,17 @@ export function parseReadingAnswers(raw, pack, questionIds, config = loadQuestio
     record.neutral = option?.neutral === true
     output.answers.push(record)
     if (record.errors.length) output.errors.push({ code: 'ANSWER_INVALID', index, answer_id: record.id, question_id: record.question_id, errors: record.errors })
+  }
+  // 新协议不允许“本批未报告”与同题肯定内容同时成立；历史快照保持原解释。
+  if (config.protocol.exclusive_scope_answers === true) for (const id of questionIds) {
+    const rows = output.answers.filter(answer => answer.question_id === id && answer.valid)
+    if (rows.some(answer => answer.neutral) && rows.some(answer => !answer.neutral) || new Set(rows.filter(answer => answer.neutral).map(answer => answer.choice)).size > 1) {
+      for (const record of rows) {
+        record.errors.push({ code: 'CONFLICTING_SCOPE_ANSWER', message: '同题不能同时回答未报告／不适用与肯定内容，也不能混用两个范围选项。' })
+        record.valid = false
+      }
+      output.errors.push({ code: 'CONFLICTING_SCOPE_ANSWER', question_id: id, message: '同题的范围答案互相矛盾。' })
+    }
   }
   output.missing = questionIds.filter(id => !output.answers.some(answer => answer.question_id === id))
   for (const id of output.missing) output.errors.push({ code: 'MISSING_QUESTION', question_id: id, message: '请求的问题没有回答。' })
@@ -260,7 +305,10 @@ export function compileReadingGraph(input, pack, config = loadQuestionnaire()) {
     const question = config.questions.find(question => question.id === answer.question_id)
     const option = question && [...question.options, ...config.protocol.common_options].find(option => option.id === answer.choice)
     if (!option || !answer.evidence?.length || answer.evidence.some(ref => !byId.has(ref.source_id) || byId.get(ref.source_id).text.slice(ref.start_utf16, ref.end_utf16) !== ref.quote)) { reject('evidence-no-longer-matches-selected-source'); continue }
+    const targetRef = answer.target_claim
+    if (question.target_claim_required && (!targetRef || !byId.has(targetRef.source_id) || byId.get(targetRef.source_id).text.slice(targetRef.start_utf16, targetRef.end_utf16) !== targetRef.quote)) { reject('target-claim-no-longer-matches-selected-source'); continue }
     const label = answer.judgment || answer.evidence[0].quote
+    const targetLabel = targetRef?.quote ?? label
     const fields = { question_id: answer.question_id, choice: answer.choice, answer_id: answer.id, questionnaire_version: config.version, questionnaire_hash: config.hash }
     const local = { nodes: [], edges: [], assertions: [] }
     const key = digest(answer.id).slice(0, 20)
@@ -277,12 +325,20 @@ export function compileReadingGraph(input, pack, config = loadQuestionnaire()) {
       source_id: answer.evidence[index].source_id, surface: `待审阅的 ${answer.question_id} 阅读判断；引文存在不等于判断已成立。` }))
     const type = option.graph.node_type
     if (!SOURCE_TYPES.has(type)) {
-      const target = node(type, label, 'judgment', {
+      const sourceStatus = answer.source_status ?? question.source_status ?? option.graph.source_status
+      const targetSource = targetRef ? node('evidence', '被评价主张原文', 'target-source', { source_id: targetRef.source_id, quote: targetRef.quote,
+        fields: { ...fields, page: targetRef.page, start_utf: targetRef.start_utf16, end_utf: targetRef.end_utf16, source_representation: targetRef.representation, raw_pdf_verbatim: targetRef.raw_pdf_verbatim } }) : null
+      const target = node(type, targetLabel, 'judgment', {
         ...(type === 'observation' ? { source_node: evidence[0] } : {}),
-        ...(option.graph.source_status ? { source_status: option.graph.source_status } : {}),
-        fields: { ...fields, evidence_node: evidence[0] },
+        ...(sourceStatus && ['gap', 'question'].includes(type) ? { source_status: sourceStatus } : {}),
+        fields: { ...fields, evidence_node: evidence[0], ...(sourceStatus ? { source_status: sourceStatus } : {}),
+          ...(targetRef ? { target_source_node: targetSource, target_source_id: targetRef.source_id, target_start_utf: targetRef.start_utf16, target_end_utf: targetRef.end_utf16, relation_reason: label } : {}) },
       })
-      if (['claim', 'gap'].includes(type)) assertion(target, option.graph.relation)
+      if (['claim', 'gap'].includes(type)) {
+        if (!question.target_claim_required || option.id !== 'other') assertion(target, option.graph.relation)
+        else graph.compilation.limitations.push({ answer_id: answer.id, code: 'EVIDENCE_RELATION_UNRESOLVED', message: '目标主张及依据已定位，但关系尚不能分类，未生成支持、限定或反驳断言。' })
+        if (targetSource) local.assertions.push({ subject: targetSource, object: target, relation: 'reports', source_id: targetRef.source_id, surface: '本批原文陈述了被评价主张；这条来源关系不证明该主张成立。' })
+      }
       else if (type !== 'question') {
         const claim = node('claim', label, 'reported-statement', { fields: { ...fields, extracted_node: target } })
         assertion(claim, 'reports')

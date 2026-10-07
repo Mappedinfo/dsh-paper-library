@@ -9,12 +9,17 @@ const unique = xs => [...new Set(xs)]
 const counts = xs => Object.fromEntries([...new Set(xs)].sort().map(x => [x, xs.filter(y => y === x).length]))
 const clip = (value, n) => [...String(value ?? '')].slice(0, n).join('')
 const fatal = (error, signal) => signal?.aborted || isFatalModelError(error) || error?.code === 'DIRECT_MODEL_OUTPUT_TRUNCATED'
+const needsTarget = answer => !answer.neutral && (answer.target_claim_required || ['q4_supports', 'q4_qualifies', 'q4_contradicts'].includes(answer.question_id))
 
 function candidateRows(batch) {
   const rows = []
   for (const [i, answer] of (batch.answers ?? []).entries()) {
     if (answer.valid !== true) continue
     const recordId = answer.id ?? `${answer.question_id ?? 'question'}:answer-${i}`
+    if (answer.target_claim?.source_id && answer.target_claim.quote) rows.push({
+      candidate_id: `${batch.index}:answer-target:${recordId}`, batch_index: batch.index, kind: 'answer_target',
+      record_id: recordId, question_id: answer.question_id, parent_source_id: answer.target_claim.source_id, original_quote: answer.target_claim.quote,
+    })
     for (const [j, ref] of (answer.evidence ?? []).entries()) if (ref?.source_id && ref?.quote) rows.push({
       candidate_id: `${batch.index}:answer:${recordId}:${j}`, batch_index: batch.index, kind: 'answer',
       record_id: recordId, question_id: answer.question_id ?? null, choice: answer.choice ?? null,
@@ -46,7 +51,8 @@ function cardFor(batch) {
   }
   const graph = batch.draft ?? {}
   const relation = r => ({ subject: clip(r.subject, 100), relation: clip(r.relation, 80), object: clip(r.object, 100), ...(r.surface ? { note: clip(r.surface, 100) } : {}) })
-  const nodes = (graph.nodes ?? []).map(n => ({ id: n.id, type: n.type, label: clip(n.label, 120) }))
+  const nodes = (graph.nodes ?? []).map(n => ({ id: n.id, type: n.type, label: clip(n.label, 120),
+    ...(n.source_status || n.fields?.source_status ? { source_status: n.source_status ?? n.fields.source_status } : {}) }))
   const relations = [...(graph.edges ?? []), ...(graph.assertions ?? [])].map(relation)
   return {
     batch: batch.index + 1, read_pages: unique(batch.pages ?? []), source_ids: [],
@@ -54,7 +60,9 @@ function cardFor(batch) {
     ...(batch.preprocessing ? { source_representation: batch.preprocessing.representation, raw_pdf_verbatim: batch.preprocessing.raw_verbatim === true } : {}),
     ...(batch.visual_coverage ? { visual_sent_pages: batch.visual_coverage.sent_pages ?? [], visual_observations_require_review: true } : {}),
     question_groups: (batch.question_results ?? []).map(result => ({ question_ids: result.question_ids ?? [], status: result.status ?? 'unknown', missing: result.missing ?? [], errors: counts((result.errors ?? []).map(e => e?.code ?? 'UNKNOWN')) })),
-    answers: valid.map(a => ({ id: a.id ?? `${a.question_id ?? 'question'}:answer-${answers.indexOf(a)}`, question_id: a.question_id, answer_status: 'valid', choice: a.choice, neutral: a.neutral === true, judgment: clip(a.judgment, 160), evidence: [] })),
+    answers: valid.map(a => ({ id: a.id ?? `${a.question_id ?? 'question'}:answer-${answers.indexOf(a)}`, question_id: a.question_id, answer_status: 'valid', choice: a.choice, neutral: a.neutral === true, judgment: clip(a.judgment, 160), evidence: [],
+      ...(a.source_status ? { source_status: a.source_status } : {}),
+      ...(a.target_claim || needsTarget(a) ? { target_claim: null } : {}) })),
     answer_counts: { total: answers.length, valid: valid.length, invalid: answers.length - valid.length, choices },
     nodes, relations,
     compilation: batch.compilation ? { truncated: batch.compilation.truncated === true, excluded: batch.compilation.excluded_answers?.length ?? 0 } : null,
@@ -150,6 +158,9 @@ export async function packNoteMaterial({ batches, totalBatches = batches.length,
         if (row.kind === 'answer') {
           const answer = card.answers.find(a => a.id === row.record_id && a.question_id === row.question_id)
           answer?.evidence.push({ source_id: binding.source_id, page: binding.page, quote: binding.quote, ...(truncated ? { quote_truncated: true } : {}) })
+        } else if (row.kind === 'answer_target') {
+          const answer = card.answers.find(a => a.id === row.record_id && a.question_id === row.question_id)
+          if (answer) answer.target_claim = { source_id: binding.source_id, page: binding.page, quote: binding.quote, ...(truncated ? { quote_truncated: true } : {}) }
         } else if (row.kind === 'graph_node') {
           const node = card.nodes.find(n => `${n.type}:${n.id}` === row.record_id)
           if (node) { node.source_id = binding.source_id; node.quote = binding.quote; if (truncated) node.quote_truncated = true }
@@ -158,13 +169,25 @@ export async function packNoteMaterial({ batches, totalBatches = batches.length,
     }
     card.source_ids = unique(card.source_ids)
     const answerRefs = card.answers.reduce((n, answer) => n + answer.evidence.length, 0)
-    const graphRefs = card.nodes.filter(node => node.source_id).length
-    card.answers = card.answers.filter(answer => ['not_reported', 'not_applicable'].includes(answer.choice) || answer.evidence.length > 0)
+    card.answers = card.answers.filter(answer => ['not_reported', 'not_applicable'].includes(answer.choice) || answer.evidence.length > 0 && answer.target_claim !== null)
     const representedAnswerIds = new Set(card.answers.map(a => a.id))
     card.omissions.answer_details = Math.max(0, (batch.answers ?? []).filter(a => a.valid && !['not_reported', 'not_applicable'].includes(a.choice) && !representedAnswerIds.has(a.id)).length)
     const graph = batch.draft ?? {}
+    const missingTargets = new Set((batch.answers ?? []).filter(answer => answer.valid && needsTarget(answer) && !representedAnswerIds.has(answer.id)).map(answer => answer.id))
+    const removedIds = new Set((graph.nodes ?? []).filter(node => missingTargets.has(node.fields?.answer_id)).map(node => `${node.type}:${node.id}`))
+    const removedSourceNodes = card.nodes.filter(node => removedIds.has(`${node.type}:${node.id}`) && SOURCE_TYPES.has(node.type)).length
+    let removedGraphRecords = 0
+    if (missingTargets.size) {
+      const nodesBefore = card.nodes.length, relationsBefore = card.relations.length
+      card.nodes = card.nodes.filter(node => !removedIds.has(`${node.type}:${node.id}`))
+      card.relations = card.relations.filter(relation => !removedIds.has(relation.subject) && !removedIds.has(relation.object))
+      removedGraphRecords = nodesBefore - card.nodes.length + relationsBefore - card.relations.length
+      card.generated_summary = ''
+      card.omissions.target_claims = missingTargets.size
+    }
+    const graphRefs = card.nodes.filter(node => node.source_id).length
     const sourceNodes = (graph.nodes ?? []).filter(node => SOURCE_TYPES.has(node?.type))
-    card.omissions.graph_records = Math.max(0, sourceNodes.length - graphRefs)
+    card.omissions.graph_records = removedGraphRecords + Math.max(0, sourceNodes.length - removedSourceNodes - graphRefs)
   }
 
   let material = ordered.map(b => cards.get(b.index))
@@ -178,26 +201,27 @@ export async function packNoteMaterial({ batches, totalBatches = batches.length,
   if (gapKeys.some(key => inputCoverage?.[key]?.length) || questionCoverage?.complete === false) reasons.push('INPUT_COVERAGE_INCOMPLETE')
   if (diagnostics.omitted_source_read_error || diagnostics.omitted_source_identity || diagnostics.omitted_quote_mismatch || diagnostics.omitted_quote_out_of_page_scope || diagnostics.omitted_source_budget || diagnostics.omitted_excerpt_write_error) reasons.push('SOURCE_OR_QUOTE_OMITTED')
   if (material.some(c => c.omissions.quote_refs || c.omissions.graph_records || c.omissions.answer_details)) reasons.push('DETAILS_COMPACTED')
+  if (material.some(card => card.omissions.target_claims)) reasons.push('TARGET_CLAIM_OMITTED')
 
   const coverage = { version: 'balanced-excerpt-v2', budget_bytes: budgetBytes, source_budget_characters: sourceBudgetCharacters,
     source_limit: maxSources, sources: materialSources.size, source_characters: [...materialSources.values()].reduce((n, x) => n + x.characters, 0),
     batches_total: totalBatches, batches_available: ordered.length, batches_represented: material.length, batch_indices: material.map(c => c.batch),
     answers_total: ordered.reduce((n, b) => n + (b.answers?.length ?? 0), 0), valid_answers_total: ordered.reduce((n, b) => n + (b.answers ?? []).filter(a => a.valid).length, 0),
     graph_nodes_total: ordered.reduce((n, b) => n + (b.draft?.nodes?.length ?? 0), 0), graph_edges_total: ordered.reduce((n, b) => n + (b.draft?.edges?.length ?? 0), 0),
-    graph_assertions_total: ordered.reduce((n, b) => n + (b.draft?.assertions?.length ?? 0), 0), verified_quotes: material.reduce((n, c) => n + c.answers.reduce((m, answer) => m + answer.evidence.length, 0) + c.nodes.filter(node => node.source_id).length, 0),
+    graph_assertions_total: ordered.reduce((n, b) => n + (b.draft?.assertions?.length ?? 0), 0), verified_quotes: material.reduce((n, c) => n + c.answers.reduce((m, answer) => m + answer.evidence.length + (answer.target_claim ? 1 : 0), 0) + c.nodes.filter(node => node.source_id).length, 0),
     omitted_quotes: material.reduce((n, c) => n + c.omissions.quote_refs, 0), source_diagnostics: diagnostics, partial_reasons: reasons, partial: reasons.length > 0, material_bytes: 0 }
   const clippedContent = ordered.some(b => (b.answers ?? []).some(a => clip(a.judgment, 160) !== String(a.judgment ?? '')) ||
     (b.draft?.body && clip(b.draft.body, 500) !== b.draft.body) || (b.draft?.nodes ?? []).some(n => clip(n.label, 120) !== String(n.label ?? '')) ||
     [...(b.draft?.edges ?? []), ...(b.draft?.assertions ?? [])].some(r => clip(r.subject, 100) !== String(r.subject ?? '') || clip(r.relation, 80) !== String(r.relation ?? '') || clip(r.object, 100) !== String(r.object ?? '') || clip(r.surface, 100) !== String(r.surface ?? '')))
-  if (clippedContent || material.some(c => c.answers.some(answer => answer.evidence.some(ref => ref.quote_truncated)) || c.nodes.some(node => node.quote_truncated))) coverage.partial_reasons = unique([...coverage.partial_reasons, 'CONTENT_COMPACTED'])
+  if (clippedContent || material.some(c => c.answers.some(answer => answer.evidence.some(ref => ref.quote_truncated) || answer.target_claim?.quote_truncated) || c.nodes.some(node => node.quote_truncated))) coverage.partial_reasons = unique([...coverage.partial_reasons, 'CONTENT_COMPACTED'])
   // 最终来源、计数及其字段字节都参与每次预算判断，避免循环结束后才更新导致超限。
   const refreshCoverage = () => {
     for (const card of material) card.source_ids = unique([...(card.scope_context?.source_id ? [card.scope_context.source_id] : []),
-      ...card.answers.flatMap(answer => answer.evidence.map(ref => ref.source_id)), ...card.nodes.map(node => node.source_id).filter(Boolean)]).filter(id => materialSources.has(id))
+      ...card.answers.flatMap(answer => [...answer.evidence.map(ref => ref.source_id), ...(answer.target_claim ? [answer.target_claim.source_id] : [])]), ...card.nodes.map(node => node.source_id).filter(Boolean)]).filter(id => materialSources.has(id))
     const ids = unique(material.flatMap(card => card.source_ids))
     coverage.sources = ids.length
     coverage.source_characters = ids.reduce((n, id) => n + (materialSources.get(id)?.characters ?? 0), 0)
-    coverage.verified_quotes = material.reduce((n, card) => n + card.answers.reduce((m, answer) => m + answer.evidence.length, 0) + card.nodes.filter(node => node.source_id).length, 0)
+    coverage.verified_quotes = material.reduce((n, card) => n + card.answers.reduce((m, answer) => m + answer.evidence.length + (answer.target_claim ? 1 : 0), 0) + card.nodes.filter(node => node.source_id).length, 0)
     coverage.omitted_quotes = Math.max(0, selected.filter(row => row.original_quote).length - coverage.verified_quotes)
     coverage.group_details_omitted = material.reduce((n, card) => n + card.omissions.group_details, 0)
     coverage.answer_count_details_omitted = material.reduce((n, card) => n + card.omissions.answer_count_details, 0)
@@ -214,7 +238,7 @@ export async function packNoteMaterial({ batches, totalBatches = batches.length,
   while (coverage.material_bytes > budgetBytes) {
     const ranked = [...material].sort((a, b) => bytes({ card: b }) - bytes({ card: a }))
     let removed = false
-    const evidenceCount = card => card.answers.reduce((n, answer) => n + answer.evidence.length, 0) + card.nodes.filter(node => node.source_id).length
+    const evidenceCount = card => card.answers.reduce((n, answer) => n + answer.evidence.length + (answer.target_claim ? 1 : 0), 0) + card.nodes.filter(node => node.source_id).length
     const protectedEvidenceCards = new Set(material.filter(card => evidenceCount(card)).map(card => card.batch))
     for (const card of ranked) {
       if (card.question_groups.length > 1) {
@@ -251,7 +275,7 @@ export async function packNoteMaterial({ batches, totalBatches = batches.length,
       const answerWithoutRef = card.answers.find(answer => !answer.evidence.length)
       if (answerWithoutRef) { card.answers.splice(card.answers.indexOf(answerWithoutRef), 1); card.omissions.answer_details++; removed = true; break }
       if (card.answers.length > 1 && evidenceCount(card) > 1) {
-        const answer = card.answers.pop(); card.omissions.answer_details++; card.omissions.quote_refs += answer.evidence.length; removed = true; break
+        const answer = card.answers.pop(); card.omissions.answer_details++; card.omissions.quote_refs += answer.evidence.length + (answer.target_claim ? 1 : 0); removed = true; break
       }
       if (card.relations.length) { card.relations.pop(); card.omissions.graph_records++; removed = true; break }
       const unsourcedNode = card.nodes.find(node => !node.source_id)

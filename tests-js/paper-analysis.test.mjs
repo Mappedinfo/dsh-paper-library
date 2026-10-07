@@ -26,7 +26,7 @@ function fixture() {
   const f={records:new Map(),drafts:new Map(),kernel:[],writes:[],calls:[],routes:[],readGate:null,routeGate:null,agentGate:null,applyGate:null,applyError:null,failComplete:false}
   f.paper={id:'paper-a',title:'Synthetic paper',pdf:true,modified:'revision-a',analysis_metadata_sources:{private:'UNSELECTED_METADATA_INTERNAL'}}
   const source=(id,page,text)=>({id,entity:{kind:'paper',id:'paper-a'},kind:'source-note',verification:'source-note',text,locator:{page},content_hash:`hash-${id}`})
-  f.sources=[source('source-a',2,'Selected exact evidence from Synthetic Journal.'),source('source-b',5,'UNSELECTED_PRIVATE_BODY')]
+  f.sources=[source('source-a',2,'Selected exact evidence from Synthetic Journal. Reading checks improve recall. Nine of twelve readers recalled the passage after a source check.'),source('source-b',5,'UNSELECTED_PRIVATE_BODY')]
   f.pack={paper:f.paper,expected_modified:'revision-a',sources:f.sources,source_ids:f.sources.map(s=>s.id),coverage:{read_pages:[2,5],completed_pages:[2,5],requested_pages:[2,5],full_document:false,page_count:20}}
   f.output={title:'Synthetic graph',body:'Bounded reading only.',nodes:[
     {id:'same',type:'evidence',label:'Selected finding',source_id:'source-a',quote:'Selected exact evidence'},
@@ -42,9 +42,13 @@ function fixture() {
   f.response=input=>{
     if(input.analysisContext?.question_ids)return {answers:input.analysisContext.question_ids.map(question_id=>{
       const choice=positiveChoices[question_id]
-      const source=f.sources.find(source=>source.id===(question_id==='q2'?input.analysisContext.source_ids.at(-1):input.analysisContext.source_ids[0]))
+      const source=f.sources.find(source=>source.id===(question_id==='q2_author_claim'?input.analysisContext.source_ids.at(-1):input.analysisContext.source_ids[0]))
+      const pageQuote = source.text.match(/^Evidence on page \d+\./)?.[0]
+      const target = 'Reading checks improve recall.'
+      const quote = question_id.startsWith('q4_') ? 'Nine of twelve readers recalled the passage after a source check.' : (pageQuote || source.text)
       return {question_id,choice,
-        judgment:question_id==='q2'?'UNSELECTED_CLAIM':`Selected bounded ${question_id} judgment`,evidence:[{source_id:source.id,quote:source.text}]}
+        ...(question_id.startsWith('q4_') ? {target_claim:{source_id:source.id,quote:target}} : {}),
+        judgment:question_id==='q2_author_claim'?'UNSELECTED_CLAIM':`Selected bounded ${question_id} judgment`,evidence:[{source_id:source.id,quote}]}
     })}
     if(input.analysisContext?.stage==='review'||input.prompt.includes('evidence-atlas'))return f.review
     if(input.analysisContext?.stage==='note'||input.prompt.includes('精读笔记'))return {title:'Synthetic 精读笔记',body:'## 一句话概括\n合成笔记。'}
@@ -97,7 +101,7 @@ test('simultaneous duplicate clicks and terminal saved runs never replay a gener
   const active=await f.handle(request)
   assert.equal(active.status,'generating')
   f.agentGate.resolve();const result=await f.done()
-  assert.equal(result.status,'partial','All 13 answers are saved; the bounded generated summary is compacted')
+  assert.equal(result.status,'partial','All 23 answers are saved; the bounded generated summary is compacted')
   assert.equal(result.question_coverage.complete,true)
   assert.deepEqual(f.calls.filter(call=>call.analysisContext?.question_ids).map(call=>call.analysisContext.question_ids),groups)
   assert.equal(result.batch_answers.length,questionIds.length)
@@ -329,7 +333,7 @@ test('invalid typed identities and page selections cause no state or kernel work
 })
 
 function multiBatch(f){
-  f.sources=Array.from({length:13},(_,i)=>({id:`source-${i+1}`,entity:{kind:'paper',id:'paper-a'},kind:'source-note',verification:'source-note',text:`Evidence on page ${i+1}.`,locator:{page:i+1},content_hash:`hash-${i+1}`}))
+  f.sources=Array.from({length:13},(_,i)=>({id:`source-${i+1}`,entity:{kind:'paper',id:'paper-a'},kind:'source-note',verification:'source-note',text:`Evidence on page ${i+1}. Reading checks improve recall. Nine of twelve readers recalled the passage after a source check.`,locator:{page:i+1},content_hash:`hash-${i+1}`}))
   f.batchPacks=[f.sources.slice(0,8),f.sources.slice(8)].map((sources,index)=>({paper:f.paper,expected_modified:'revision-a',file_version:{bytes:1},sources,source_ids:sources.map(s=>s.id),next_cursor:index===0?{index:8,offset:0}:null,
     coverage:{read_pages:sources.map(s=>s.locator.page),completed_pages:sources.map(s=>s.locator.page),requested_pages:Array.from({length:13},(_,i)=>i+1),page_count:13,characters:sources.reduce((n,s)=>n+s.text.length,0),blank_pages:[],truncated_pages:[],omitted_pages:[]}}))
   f.outputFor=input=>f.response(input)
@@ -373,12 +377,12 @@ test('failure in a later group retains prior answers and continues remaining gro
   await f.handle(input);const result=await f.done();assert.equal(result.status,'partial');assert.equal(result.batch_count,2)
   assert.equal((await f.handle({action:'paper_analysis_get',id:'paper-a',batch_index:0})).draft.id,'draft-a')
   assert.equal(result.question_coverage.by_question.q1_method.answered_batches,1)
-  assert.equal(result.question_coverage.by_question.q6.answered_batches,2)
+  assert.equal(result.question_coverage.by_question.q6_reader_check.answered_batches,2)
   assert.equal(result.analysis_complete,false)
   const restarted=createPaperAnalysis(f.options);assert.equal((await restarted(input)).status,'partial');assert.equal(f.calls.length,2*callsPerBatch+2,`Later groups and synthesis continue, without automatic request replay: ${JSON.stringify(result.warnings)}`)
 })
 
-test('all thirteen positive answers save a reviewable note with honest compacted coverage',async()=>{
+test('all twenty-three positive answers save a reviewable note with honest compacted coverage',async()=>{
   const f=fixture()
   f.outputFor=input=>input.analysisContext?.stage==='note'?{title:'Synthetic 精读笔记',body:'## 一句话概括\n合成笔记。'}:f.response(input)
   await f.handle(request);const result=await f.done()
@@ -565,10 +569,11 @@ function quotedFixture(text,quote,{graphType}={}){
   const f=fixture();f.sources[0].text=text
   f.output={title:'Synthetic quote fixture',body:'Only synthetic evidence.',nodes:[],edges:[],assertions:[],metadata:{title:'Synthetic'},field_sources:{title:[{source_id:'source-a',quote}]}}
   f.quotedMode=graphType?'full':'metadata'
-  if(graphType)f.outputFor=()=>({answers:[{question_id:'q3',choice:graphType==='evidence'?'text':graphType,judgment:'Synthetic evidence',evidence:[{source_id:'source-a',quote}]}]})
+  f.quotedQuestion=graphType==='evidence'?'q3_text':`q3_${graphType}`
+  if(graphType)f.outputFor=()=>({answers:[{question_id:f.quotedQuestion,choice:graphType==='evidence'?'text':graphType,judgment:'Synthetic evidence',evidence:[{source_id:'source-a',quote}]}]})
   return f
 }
-async function finishQuoted(f){await f.handle({...request,mode:f.quotedMode,notes:false,review:false,...(f.quotedMode==='full'?{question_ids:['q3']}:{})});return f.done()}
+async function finishQuoted(f){await f.handle({...request,mode:f.quotedMode,notes:false,review:false,...(f.quotedMode==='full'?{question_ids:[f.quotedQuestion]}:{})});return f.done()}
 
 test('unique PDF whitespace differences restore exact metadata quotations with durable receipts',async()=>{
   const f=quotedFixture('Authors: Karen\n     Truong\nAbstract follows.','Karen Truong')

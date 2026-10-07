@@ -1,0 +1,41 @@
+{
+  "id": "q2_author_claim",
+  "title": "作者明确提出的主张",
+  "question": "本批文字中，作者明确提出了哪些主张、假设、建议或设计目的？",
+  "guidance": "一个回答只记录作者明确提出的一项有限主张，说明它是论断、假设、建议、设计目的还是对结果的解释，保留条件与归属。不要把实测观察列为主张，也不要替作者提出解释；设计目的不证明实际效果。没有明确主张时选 not_reported。",
+  "options": [
+    {
+      "id": "author_claim",
+      "label": "作者明确提出的一项有限主张",
+      "coding": {
+        "definition": "作者原文表达的一项论断、假设、建议、设计目的或结果解释。",
+        "include_when": "作者明确表达该内容，且不是直接报告观察、测量或分析结果；保留它的陈述性质。",
+        "exclude_when": "直接报告的实际结果、读者自己新增的解释，或把设计目的、假设写成已验证事实。"
+      },
+      "graph": {
+        "node_type": "claim",
+        "relation": "reports"
+      }
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "We propose that checking the source before revising a sentence can help readers notice unsupported claims.",
+      "choice": "author_claim",
+      "judgment": "作者提出：改句前核对来源可能帮助读者发现缺少依据的主张。",
+      "reason": "can help 是作者提出的有限主张，不是本句报告的实测改善。"
+    },
+    {
+      "source_text": "The annotation routine was designed to help writers revisit some earlier comments; its effect on revision quality was not tested.",
+      "choice": "author_claim",
+      "judgment": "批注流程旨在帮助作者回看部分较早的评论，改稿质量效果尚未检验。",
+      "reason": "设计目的可以记录，但必须保留 some 和未检验效果，不能称已改善质量。"
+    },
+    {
+      "source_text": "In this thinking exercise, seven of ten readers listed a counterexample.",
+      "choice": "not_reported",
+      "judgment": "本批报告十名读者中的七人列出反例，没有另外提出作者主张。",
+      "reason": "实际计数属于 reported_result，不代替本题所问的作者主张。"
+    }
+  ]
+}

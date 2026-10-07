@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,12 +14,15 @@ const questionnaire = loadQuestionnaire()
 const questionIds = questionnaire.questions.map(question => question.id)
 const groups = questionGroups(questionnaire)
 const callsPerBatch = groups.length
+// e035446 的真实 v3 协议；旧题目资产保留供历史作业读取。
+const savedV2Protocol = JSON.parse(readFileSync(new URL('./fixtures/reading-protocol-v2.json', import.meta.url), 'utf8'))
+const savedV3Protocol = JSON.parse(readFileSync(new URL('./fixtures/reading-protocol-v3.json', import.meta.url), 'utf8'))
 
 async function fixture(t, override = {}) {
   const root = await mkdtemp(join(tmpdir(), 'question-analysis-'))
   const f = { root, calls: [], kernel: [], drafts: new Map(), modified: 'revision-1', pdfVersion: { size: 100, mtime_ns: '100' }, response: null }
   const source = page => ({ id: `source-${page}`, entity: { kind: 'paper', id: 'paper-a' }, locator: { page }, content_hash: `hash-${page}`,
-    text: `Reading exercise ${page}. Method A produced result B. Check the evidence before accepting a conclusion.` })
+    text: `Reading exercise ${page}. Method A produced result B. Check the evidence before accepting a conclusion. Reading checks improve recall. Nine of twelve readers recalled the passage after a source check.` })
   f.store = createLocalStateStore({ library: join(root, 'library'), home: join(root, 'state') })
   f.options = { store: f.store, library: join(root, 'library'), resolveModel: async () => ({ provider: 'synthetic', model: 'deterministic' }),
     dispatch: async request => {
@@ -44,7 +48,8 @@ async function fixture(t, override = {}) {
       f.calls.push(input)
       if (f.response) return f.response(input)
       return JSON.stringify({ answers: input.analysisContext.question_ids.map(question_id => ({ question_id, choice: 'other',
-        judgment: '检查证据后再接受结论。', evidence: [{ source_id: 'S1', quote: 'Check the evidence before accepting a conclusion.' }] })) })
+        ...(question_id.startsWith('q4_') ? { target_claim: { source_id: 'S1', quote: 'Reading checks improve recall.' } } : {}),
+        judgment: '检查证据后再接受结论。', evidence: [{ source_id: 'S1', quote: question_id.startsWith('q4_') ? 'Nine of twelve readers recalled the passage after a source check.' : 'Check the evidence before accepting a conclusion.' }] })) })
     }, ...override }
   f.handle = createPaperAnalysis(f.options)
   f.input = { action: 'paper_analysis_start', id: 'paper-a', request_id: 'run-a', notes: false, review: false }
@@ -53,14 +58,14 @@ async function fixture(t, override = {}) {
   return f
 }
 
-test('thirteen separate questions persist host-located evidence, raw replies and option candidates without metadata extraction', async t => {
+test('twenty-three separate questions persist host-located evidence, raw replies and option candidates without metadata extraction', async t => {
   const f = await fixture(t), result = await f.run({ apply_metadata: true })
   assert.equal(result.status, 'complete', JSON.stringify(result))
   assert.equal(result.analysis_complete, true)
   assert.equal(result.question_coverage.complete, true)
   assert.equal(result.coverage.full_document, true)
-  assert.equal(questionnaire.version, 'reading-questions-v3')
-  assert.deepEqual(questionIds, ['q1_method','q1_dataset','q1_metric','q1_task','q2','q3','q4','q5_method_data','q5_method_result','q5_data_result','q5_metric_result','q5_task_result','q6'])
+  assert.equal(questionnaire.version, 'reading-questions-v4')
+  assert.deepEqual(questionIds, ["q1_method","q1_dataset","q1_metric","q1_task","q2_author_claim","q2_reported_result","q2_reader_inference","q3_text","q3_figure","q3_table","q3_formula","q4_supports","q4_qualifies","q4_contradicts","q5_method_data","q5_method_result","q5_data_result","q5_metric_result","q5_task_result","q6_research_question","q6_study_limitation","q6_prior_gap","q6_reader_check"])
   assert.deepEqual(groups, questionIds.map(id => [id]))
   assert.equal(f.calls.length, 2 * callsPerBatch)
   assert.deepEqual(f.calls.map(call => call.analysisContext.question_ids), [...groups, ...groups])
@@ -92,9 +97,10 @@ test('one bad quote and one failed request retain valid answers and continue lat
   const f = await fixture(t)
   f.response = input => {
     const context = input.analysisContext
-    if (context.batch_index === 0 && context.question_ids.includes('q3')) throw new Error('synthetic provider failure')
+    if (context.batch_index === 0 && context.question_ids.includes('q3_text')) throw new Error('synthetic provider failure')
     return JSON.stringify({ answers: context.question_ids.map(question_id => ({ question_id, choice: 'other', judgment: '合成判断',
-      evidence: [{ source_id: 'S1', quote: context.batch_index === 0 && question_id === 'q1_method' ? 'invented text' : 'Method A produced result B.' }] })) })
+      ...(question_id.startsWith('q4_') ? { target_claim: { source_id: 'S1', quote: 'Reading checks improve recall.' } } : {}),
+      evidence: [{ source_id: 'S1', quote: context.batch_index === 0 && question_id === 'q1_method' ? 'invented text' : question_id.startsWith('q4_') ? 'Nine of twelve readers recalled the passage after a source check.' : 'Method A produced result B.' }] })) })
   }
   const result = await f.run()
   assert.equal(result.status, 'partial')
@@ -102,27 +108,47 @@ test('one bad quote and one failed request retain valid answers and continue lat
   assert.equal(result.coverage.full_document, true, 'text extraction completeness is distinct from successful answers')
   assert.equal(result.batch_count, 2)
   assert.equal(f.calls.length, 2 * callsPerBatch)
-  assert.equal(result.question_coverage.by_question.q2.answered_batches, 2, 'q2 remains usable when the separate method question fails')
+  assert.equal(result.question_coverage.by_question.q2_author_claim.answered_batches, 2, 'the author-claim question remains usable when the separate method question fails')
   assert.deepEqual(result.question_coverage.by_question.q1_method.failed_batches, [0])
-  assert.deepEqual(result.question_coverage.by_question.q3.failed_batches, [0])
+  assert.deepEqual(result.question_coverage.by_question.q3_text.failed_batches, [0])
   assert.equal(result.question_coverage.by_question.q5_method_result.answered_batches, 2)
   const first = await f.handle({ action: 'paper_analysis_get', id: 'paper-a', batch_index: 0, include_raw: true })
   assert.match(first.question_results[0].raw, /invented text/)
   assert.equal(first.batch_answers.find(answer => answer.question_id === 'q1_method').valid, false)
   assert.ok(first.draft.nodes.every(node => node.quote !== 'invented text'))
-  assert.equal(first.question_results.find(group => group.question_ids.includes('q3')).status, 'partial')
+  assert.equal(first.question_results.find(group => group.question_ids.includes('q3_text')).status, 'partial')
 })
 
 test('separate subset invokes only selected questions; neutral answers do not fabricate graph claims', async t => {
   const f = await fixture(t)
   f.response = input => JSON.stringify({ answers: input.analysisContext.question_ids.map(question_id => ({ question_id, choice: 'not_reported' })) })
-  const result = await f.run({ question_ids: ['q2', 'q6'], question_mode: 'separate' })
+  const result = await f.run({ question_ids: ['q2_author_claim', 'q6_reader_check'], question_mode: 'separate' })
   assert.equal(result.status, 'complete', JSON.stringify(result))
   assert.equal(result.question_coverage.full_questionnaire, false)
-  assert.deepEqual(f.calls.map(call => call.analysisContext.question_ids), [['q2'],['q6'],['q2'],['q6']])
+  assert.deepEqual(f.calls.map(call => call.analysisContext.question_ids), [['q2_author_claim'],['q6_reader_check'],['q2_author_claim'],['q6_reader_check']])
   assert.equal(f.kernel.filter(call => call.action === 'knowledge_draft_put' && call.nodes.length).length, 0)
   assert.ok(result.batch_answers.every(answer => answer.neutral && !answer.scope.full_document))
-  await assert.rejects(f.handle({ ...f.input, question_ids: ['q2'], question_mode: 'separate' }), { code: 'ANALYSIS_CONFLICT' })
+  await assert.rejects(f.handle({ ...f.input, question_ids: ['q2_author_claim'], question_mode: 'separate' }), { code: 'ANALYSIS_CONFLICT' })
+})
+
+test('the two reader-generated questions run independently and preserve inferred attribution', async t => {
+  const f = await fixture(t), ids = ['q2_reader_inference', 'q6_reader_check']
+  f.response = input => JSON.stringify({ answers: input.analysisContext.question_ids.map(question_id => ({
+    question_id, choice: questionnaire.questions.find(question => question.id === question_id).options[0].id,
+    judgment: question_id === 'q2_reader_inference' ? '读者推断：这项结果可能依赖参与者原有训练，尚待核对。' : '读者待核对：两组参与者的原有训练是否可比？',
+    evidence: [{ source_id: 'S1', quote: 'Nine of twelve readers recalled the passage after a source check.' }],
+  })) })
+  const result = await f.run({ question_ids: ids })
+  assert.equal(result.status, 'complete', JSON.stringify(result))
+  assert.deepEqual(f.calls.map(call => call.analysisContext.question_ids), [[ids[0]], [ids[1]], [ids[0]], [ids[1]]])
+  assert.equal(f.kernel.filter(call => call.action === 'paper_analysis_batch').length, 2, 'both reader questions reuse each extracted batch')
+  for (const id of ids) assert.equal(result.question_coverage.by_question[id].answered_batches, 2)
+  const first = await f.handle({ action: 'paper_analysis_get', id: 'paper-a', request_id: 'run-a', batch_index: 0, include_raw: true })
+  assert.equal(first.batch_answers.length, 2)
+  assert.ok(first.batch_answers.every(answer => answer.valid && answer.source_status === 'inferred'))
+  assert.ok(first.question_results.every(group => JSON.parse(group.raw).answers.length === 1))
+  assert.ok(first.draft.nodes.some(node => node.fields?.question_id === 'q2_reader_inference' && node.fields.source_status === 'inferred'))
+  assert.ok(first.draft.nodes.some(node => node.fields?.question_id === 'q6_reader_check' && node.type === 'question' && node.source_status === 'inferred'))
 })
 
 test('graph write failure does not erase saved answers or stop the next page', async t => {
@@ -142,11 +168,12 @@ test('graph budget omissions remain inspectable and cannot count as a complete d
     question_id: input.analysisContext.question_ids[index % input.analysisContext.question_ids.length], choice: 'other', judgment: `合成判断 ${index}`,
     evidence: [{ source_id: 'S1', quote: 'Method A produced result B.' }, { source_id: 'S1', quote: 'Check the evidence before accepting a conclusion.' }],
   })) })
-  const result = await f.run()
+  const selected = ['q1_method', 'q1_dataset', 'q1_metric', 'q1_task']
+  const result = await f.run({ question_ids: selected })
   assert.equal(result.status, 'partial')
   assert.equal(result.analysis_complete, false)
   assert.equal(result.question_coverage.complete, true)
-  assert.equal(result.batch_answers.length, 12 * callsPerBatch)
+  assert.equal(result.batch_answers.length, 12 * selected.length)
   assert.equal(result.batch_compilation.truncated, true)
   assert.ok(result.batch_compilation.excluded_answers.some(answer => answer.reason === 'graph-budget-whole-answer-omitted'))
 })
@@ -212,17 +239,20 @@ test('historical job fingerprints remain readable and never replay under the new
   assert.equal(f.calls.length, 0)
 })
 
-test('saved v1 and v2 questionnaire snapshots keep their omitted-mode signature and do not replay under v3', async t => {
+test('saved v1, v2 and genuine v3 questionnaire snapshots retain original question IDs and never replay under v4', async t => {
   const f = await fixture(t)
   const { createHash } = await import('node:crypto')
   const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
   const legacyIds = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']
   const legacyGroups = [['q1','q2'], ['q3','q4'], ['q5','q6']]
   const definitions = await Promise.all(legacyIds.map(id => readFile(new URL(`../prompts/reading/${id}.json`, import.meta.url), 'utf8').then(JSON.parse)))
-  for (const version of ['reading-questions-v1', 'reading-questions-v2']) {
-    const protocol = { ...structuredClone(questionnaire.protocol), version, default_groups: structuredClone(legacyGroups) }
-    delete protocol.question_ids; delete protocol.default_mode
-    const questions = structuredClone(definitions)
+  for (const version of ['reading-questions-v1', 'reading-questions-v2', 'reading-questions-v3']) {
+    const protocol = version.endsWith('v3') ? structuredClone(savedV3Protocol) : { ...structuredClone(savedV2Protocol), version }
+    if (!version.endsWith('v3')) { delete protocol.question_ids; delete protocol.default_mode }
+    const questions = version.endsWith('v3')
+      ? await Promise.all(protocol.question_ids.map(id => readFile(new URL(`../prompts/reading/${id}.json`, import.meta.url), 'utf8').then(JSON.parse)))
+      : structuredClone(definitions)
+    const savedGroups = version.endsWith('v3') ? savedV3Protocol.default_groups : legacyGroups
     if (version.endsWith('v1')) {
       delete protocol.codebook_required
       for (const question of questions) {
@@ -233,14 +263,20 @@ test('saved v1 and v2 questionnaire snapshots keep their omitted-mode signature 
     }
     const snapshot = { version, protocol, questions }
     snapshot.hash = digest(snapshot)
-    assert.deepEqual(questionGroups(snapshot), legacyGroups, 'old snapshots retain their own grouped default')
+    assert.deepEqual(questionGroups(snapshot), savedGroups, 'old snapshots retain their original grouped or separate default')
+    if (version.endsWith('v3')) {
+      assert.equal(questions.length, 13)
+      assert.equal(questions.find(question => question.id === 'q2').options.length, 3, 'the real unsplit author/result/inference question remains in the saved definition')
+      assert.ok(questions.some(question => question.id === 'q6'))
+      assert.equal(questions.some(question => question.id === 'q2_author_claim'), false)
+    }
     const historical = { id: 'paper-a', request_id: version, apply_metadata: false, review: false, notes: false }
     const key = `analysis.job:${digest(historical.id)}:${digest(historical.request_id)}`
     const saved = await f.store.put(key, { ...historical, fingerprint: digest(historical), status: 'complete',
-      questionnaire: { version, hash: snapshot.hash, groups: structuredClone(legacyGroups) }, questionnaire_snapshot: snapshot, analysis_complete: true }, 0)
+      questionnaire: { version, hash: snapshot.hash, groups: structuredClone(savedGroups) }, questionnaire_snapshot: snapshot, analysis_complete: true }, 0)
     const result = await f.handle({ action: 'paper_analysis_start', ...historical })
     assert.equal(result.status, 'complete')
-    assert.deepEqual(result.questionnaire, { version, hash: snapshot.hash, groups: legacyGroups })
+    assert.deepEqual(result.questionnaire, { version, hash: snapshot.hash, groups: savedGroups })
     const reread = await f.store.get(key)
     assert.equal(reread.revision, saved.revision)
     assert.deepEqual(reread.value.questionnaire_snapshot, snapshot)
@@ -266,7 +302,8 @@ test('a requested reading note with material-budget omissions cannot make full a
   f.response = input => input.analysisContext.stage === 'note'
     ? JSON.stringify({ title: '合成部分阅读笔记', body: '仅分析实际送入的批次。' })
     : JSON.stringify({ answers: input.analysisContext.question_ids.map(question_id => ({ question_id, choice: 'other',
-      judgment: '保持条件与证据。'.repeat(20), evidence: [{ source_id: 'S1', quote: 'Check the evidence before accepting a conclusion.' }] })) })
+      judgment: '保持条件与证据。'.repeat(20),
+      ...(question_id.startsWith('q4_') ? { target_claim: { source_id: 'S1', quote: 'Reading checks improve recall.' } } : {}), evidence: [{ source_id: 'S1', quote: question_id.startsWith('q4_') ? 'Nine of twelve readers recalled the passage after a source check.' : 'Check the evidence before accepting a conclusion.' }] })) })
   const result = await f.run({ notes: true })
   assert.equal(result.question_coverage.complete, true)
   assert.ok(result.note_draft_id, 'the smaller available material may still produce a reviewable note')

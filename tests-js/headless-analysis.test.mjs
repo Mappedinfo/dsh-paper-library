@@ -88,13 +88,13 @@ test('metadata batch uses first page and never applies metadata, reviews or read
   assert.ok(jobs.every(r => r.value.execution === 'direct' && r.value.review === false && r.value.notes === false))
 })
 
-test('full mode defaults to thirteen separate question calls and one reading note without automatic review or metadata writes', async () => {
+test('full mode defaults to twenty-three separate question calls and one reading note without automatic review or metadata writes', async () => {
   const f = await fixture(), result = await f.handle({ ...request, ids: ['paper-a'], mode: 'full' })
   assert.equal(result.status, 'complete'); assert.equal(f.calls.length, callsPerBatch + 1)
   assert.equal(Object.hasOwn(f.requests.find(r => r.action === 'paper_analysis_batch'), 'pages'), false)
   assert.ok(result.results[0].note_draft_id)
   assert.equal(result.results[0].review_draft_id, undefined)
-  assert.equal(result.results[0].questionnaire.version, 'reading-questions-v3')
+  assert.equal(result.results[0].questionnaire.version, 'reading-questions-v4')
   assert.equal(result.results[0].question_coverage.complete, true)
   assert.deepEqual(result.results[0].question_summary, { answers: questionIds.length, valid_answers: questionIds.length, invalid_answers: 0, other_answers: 0, projection_limitations: 0 })
   assert.equal(f.calls.filter(call => call.analysisContext?.question_ids).length, callsPerBatch)
@@ -124,13 +124,13 @@ test('identical concurrent batch requests share one job; changed selections or o
 })
 
 test('question controls participate in full-mode request identity', async () => {
-  const f = await fixture(), full = { ...request, ids: ['paper-a'], mode: 'full', question_ids: ['q1_method', 'q3'] }
+  const f = await fixture(), full = { ...request, ids: ['paper-a'], mode: 'full', question_ids: ['q1_method', 'q3_text'] }
   await f.handle(full)
-  assert.deepEqual(f.calls.filter(call => call.analysisContext?.question_ids).map(call => call.analysisContext.question_ids), [['q1_method'], ['q3']])
+  assert.deepEqual(f.calls.filter(call => call.analysisContext?.question_ids).map(call => call.analysisContext.question_ids), [['q1_method'], ['q3_text']])
   await assert.rejects(f.handle({ ...full, question_ids: ['q1_method'] }), { code: 'ANALYSIS_CONFLICT' })
   await assert.rejects(f.handle({ ...full, question_mode: 'separate' }), { code: 'ANALYSIS_CONFLICT' })
   const saved = [...f.records.values()].find(row => row.key.startsWith('analysis.headless-batch:'))
-  assert.deepEqual(saved.value.options.question_ids, ['q1_method', 'q3'])
+  assert.deepEqual(saved.value.options.question_ids, ['q1_method', 'q3_text'])
 })
 
 test('a batch made only of partial question analyses remains partial', async () => {
@@ -269,7 +269,7 @@ test('attempt budget bounds model calls and keeps earlier results', async () => 
   assert.match(result.results[1].error, /次数|预算/)
 })
 
-test('thirteen-question runtime stops at the explicit call budget without increasing it or extracting a later batch', async () => {
+test('twenty-three-question runtime stops at the explicit call budget without increasing it or extracting a later batch', async () => {
   const maxCalls = callsPerBatch - 1
   const f = await fixture({ maxCalls })
   const result = await f.handle({ ...request, ids: ['paper-a'], request_id: 'bounded-full', mode: 'full', notes: false, review: false })
@@ -284,7 +284,7 @@ test('thirteen-question runtime stops at the explicit call budget without increa
   assert.equal(f.calls.length, maxCalls)
 })
 
-test('a budget covering all thirteen answers does not silently add a reading-note call', async () => {
+test('a budget covering all twenty-three answers does not silently add a reading-note call', async () => {
   const f = await fixture({ maxCalls: callsPerBatch })
   const result = await f.handle({ ...request, ids: ['paper-a'], request_id: 'answers-only-budget', mode: 'full' })
   assert.equal(result.status, 'partial')

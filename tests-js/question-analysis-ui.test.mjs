@@ -40,7 +40,11 @@ test('question analysis UI renders partial answers and errors as text, never HTM
     coverage: { read_pages: [1], completed_pages: [1], requested_pages: [1, 2], page_count: 2, characters: 50, full_document: false, blank_pages: [], no_extractable_text_pages: [2] },
     question_coverage: { complete: false, by_question: { q1: { answered_batches: 0, expected_batches: 1, failed_batches: [0], unread_batches: [] } } },
     batch_answers: [{ question_id: 'q1', choice: 'method', valid: false, judgment: malicious,
-      evidence: [{ page: 1, quote: malicious }], errors: [{ message: 'Synthetic quote validation failed.' }] }],
+      evidence: [{ page: 1, quote: malicious }], errors: [{ message: 'Synthetic quote validation failed.' }] },
+      { question_id: 'q4_supports', choice: 'supports', valid: true, judgment: '有限练习中的判断理由。',
+        target_claim: { page: 1, quote: `Target ${malicious}` }, evidence: [{ page: 2, quote: `Basis ${malicious}` }], errors: [] },
+      { question_id: 'q6_reader_check', choice: 'reader_check', valid: true, judgment: '此练习是否包含长篇阅读，需要核查。',
+        source_status: 'inferred', evidence: [{ page: 2, quote: 'The exercise used short passages.' }], errors: [] }],
     question_results: [{ question_ids: ['q1', 'q2'], errors: [{ code: 'MODEL_REQUEST_FAILED', message: 'Synthetic group failed.' }] }],
   }
   const ui = window.PaperAnalysis.create({
@@ -56,6 +60,11 @@ test('question analysis UI renders partial answers and errors as text, never HTM
   assert.match(result.textContent, /引用或格式未通过/)
   assert.match(result.textContent, /Synthetic quote validation failed/)
   assert.match(result.textContent, /Synthetic group failed/)
+  assert.match(result.textContent, /被评价主张 · PDF 第 1 页/)
+  assert.match(result.textContent, /判断依据 · PDF 第 2 页/)
+  assert.ok(result.textContent.includes(`Target ${malicious}`))
+  assert.ok(result.textContent.includes(`Basis ${malicious}`))
+  assert.match(result.textContent, /读者推断／待核对问题，尚未成为作者报告的事实/)
   assert.ok(result.textContent.includes(malicious), 'untrusted strings appear as literal text')
   const dynamicElements = []
   const walk = element => { dynamicElements.push(element); for (const child of element.children) walk(child) }

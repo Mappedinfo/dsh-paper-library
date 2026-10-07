@@ -19,7 +19,7 @@ const callsPerBatch = groups.length
 const run = promisify(execFile)
 const digest = async path => createHash('sha256').update(await readFile(path)).digest('hex')
 
-test('large first answer batch still produces a note with late-batch evidence through the real Python source binder', { timeout: 120000 }, async () => {
+test('large first answer batch still produces a note with late-batch evidence through the real Python source binder', { timeout: 240000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'paper-note-budget-integration-'))
   const library = join(root, 'library'), localStateHome = join(root, 'state'), python = resolve('.venv/bin/python')
   let analysis
@@ -35,6 +35,8 @@ with fitz.open() as doc:
     for number in range(1, 97):
         page = doc.new_page()
         page.insert_text((40, 60), f'Synthetic reading methods exercise. Exact page {number} evidence.')
+        page.insert_text((40, 80), 'Reading checks improve recall.')
+        page.insert_text((40, 100), 'Nine of twelve readers recalled the passage after a source check.')
     doc.save(original)
 library = Library(root / 'library')
 paper = library.create({'title': 'Synthetic reading methods exercise'})
@@ -51,9 +53,10 @@ library.close()
       if (context.question_ids) {
         questionCalls.push(context.question_ids)
         const page = context.pages[0]
-        return JSON.stringify({ answers: context.question_ids.flatMap(question_id => Array.from({ length: 6 }, (_, index) => ({
-          question_id, choice: 'other', judgment: `合成学习方法判断 ${question_id}/${index}。` + '有限范围的阅读方法说明。'.repeat(100),
-          evidence: [{ source_id: context.source_ids[0], quote: `Synthetic reading methods exercise. Exact page ${page} evidence.` }],
+        return JSON.stringify({ answers: context.question_ids.flatMap(question_id => Array.from({ length: ['q2_reader_inference', 'q6_reader_check'].includes(question_id) ? 1 : 6 }, (_, index) => ({
+          question_id, choice: 'other',
+          ...(question_id.startsWith('q4_') ? { target_claim: { source_id: context.source_ids[0], quote: 'Reading checks improve recall.' } } : {}), judgment: `合成学习方法判断 ${question_id}/${index}。` + '有限范围的阅读方法说明。'.repeat(100),
+          evidence: [{ source_id: context.source_ids[0], quote: question_id.startsWith('q4_') ? 'Nine of twelve readers recalled the passage after a source check.' : `Synthetic reading methods exercise. Exact page ${page} evidence.` }],
         }))) })
       }
       assert.equal(context.stage, 'note')
@@ -63,6 +66,7 @@ library.close()
     agent.model = { provider: 'synthetic', model: 'deterministic' }
     // 合成测试明确配置所需上限；生产默认预算不随题数自动提高。
     const expectedCalls = 12 * callsPerBatch + 1
+    assert.equal(expectedCalls, 277, 'only this synthetic fixture explicitly authorizes 23 × 12 + 1 calls')
     analysis = await createHeadlessAnalysis({ library, python, localStateHome, agent,
       modelConfig: { provider: 'glm', model: 'deterministic', keyEnv: 'SYNTHETIC_TEST_KEY', maxCalls: expectedCalls } })
     const input = { action: 'paper_analysis_run', ids: [paper.id], request_id: 'synthetic-long-note', notes: true, review: false }

@@ -1,0 +1,51 @@
+{
+  "id": "q4_contradicts",
+  "title": "证据反驳原文主张",
+  "question": "本批哪些依据在可比条件下与哪一条可定位的原文主张不相容？",
+  "guidance": "每条肯定回答或 other 必须单独给 target_claim:{source_id,quote}，目标是本批 S 页可唯一定位的一条连续原文主张；evidence 另给依据，judgment 只解释关系与理由，不充当目标。目标与依据可以来自不同 S 页，但对象与条件必须可比；中性项不提供 target_claim。找不到原文目标时选 not_reported，不能生成目标。证据若仅重复目标或仅是目标中的片段，就不构成额外依据；同一段落中的不同连续片段可以使用，包含目标但另有独立实据的上下文不因包含关系被拒绝。 一个回答只处理一条原文主张与一项明确冲突或反例。保留被反驳的原目标，不把它改写成反驳结论；尚未检验、没有报告或未达显著本身不能判为反驳。",
+  "target_claim_required": true,
+  "options": [
+    {
+      "id": "contradicts",
+      "label": "依据反驳 target_claim 的原文主张",
+      "coding": {
+        "definition": "依据在可比条件下与指定原文主张不相容或构成反例。 一个回答只判定该证据与该目标这一对之间的本题关系。",
+        "include_when": "目标和依据可定位，对象、条件和断言范围匹配，依据确实冲突而非仅未确证。",
+        "exclude_when": "未报告、未检验、仅未达显著，不可比条件，或把反驳结论误写为目标。"
+      },
+      "graph": {
+        "node_type": "claim",
+        "relation": "contradicts"
+      },
+      "requires_judgment": true
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "Every reader in this exercise completed a source check. The log shows that reader 4 completed no source check in this exercise.",
+      "choice": "contradicts",
+      "judgment": "同一练习中第 4 名读者未完成来源核对，构成“每位读者均完成”的反例。",
+      "reason": "反例与普遍目标的范围一致，目标保留原文而不是写成“并非每位读者完成”。",
+      "target_claim": {
+        "quote": "Every reader in this exercise completed a source check."
+      },
+      "evidence_quote": "The log shows that reader 4 completed no source check in this exercise."
+    },
+    {
+      "source_text": "No short draft in this writing exercise contained an unsupported quotation. In the same exercise, two short drafts contained quotations with no cited source.",
+      "choice": "contradicts",
+      "judgment": "同一写作练习中的两份短草稿有缺少引用来源的引文，与“没有短草稿包含”相冲突。",
+      "reason": "对象与练习条件相同，明确出现的反例反驳零发生的目标断言。",
+      "target_claim": {
+        "quote": "No short draft in this writing exercise contained an unsupported quotation."
+      },
+      "evidence_quote": "In the same exercise, two short drafts contained quotations with no cited source."
+    },
+    {
+      "source_text": "We hypothesize that the counterexample routine improves reasoning. The small exercise did not detect a statistically significant difference.",
+      "choice": "not_reported",
+      "judgment": "未达显著没有直接证明原假设不成立，本批没有可判为反驳的依据。",
+      "reason": "不能把缺少显著结果当成与目标不相容，中性回答不填写 target_claim。"
+    }
+  ]
+}

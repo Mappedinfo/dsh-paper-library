@@ -1,0 +1,41 @@
+{
+  "id": "q2_reported_result",
+  "title": "文章实际报告的结果",
+  "question": "本批文字明确报告了哪些实际观察、测量或分析结果？",
+  "guidance": "一个回答只记录一项实际报告的结果，保留研究归属、样本、条件、比较对象和不确定性。估计的因果效果仅在原文确实报告该估计及其条件时如实记录；所报关联不能自行改成因果。不要把作者目标、假设或机制解释当结果。",
+  "options": [
+    {
+      "id": "reported_result",
+      "label": "实际报告的一项观察或分析结果",
+      "coding": {
+        "definition": "文章在明确条件下报告的一项实际观察、测量、计算或分析结果，包括明确报告的因果估计。",
+        "include_when": "来源直接报告观察行为、数值、比较或分析发现；保留数量、条件与研究归属。",
+        "exclude_when": "设计目的、预期效果、作者提出但未确证的机制解释，或把关联升级为因果效果。"
+      },
+      "graph": {
+        "node_type": "observation",
+        "relation": "reports"
+      }
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "In this reading exercise, eight of twelve readers checked at least one source before answering.",
+      "choice": "reported_result",
+      "judgment": "本阅读练习的十二名读者中，八人回答前核对了至少一个来源。",
+      "reason": "报告了实际行为计数，不能改成所有读者均核对全部来源。"
+    },
+    {
+      "source_text": "In the earlier writing exercise, the median draft length was 240 words; this study did not repeat that exercise.",
+      "choice": "reported_result",
+      "judgment": "此前写作练习的草稿长度中位数为 240 词，本研究没有重复该练习。",
+      "reason": "背景研究的实际结果仍可记录，但不能归为当前研究或把中位数改为平均数。"
+    },
+    {
+      "source_text": "We expect the counterexample checklist to improve critical thinking.",
+      "choice": "not_reported",
+      "judgment": "作者预期反例清单会改善批判性思考，本批未报告实际效果。",
+      "reason": "预期不是实际结果，不能据未来目标补造观察。"
+    }
+  ]
+}

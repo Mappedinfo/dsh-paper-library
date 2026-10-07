@@ -1,5 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { packNoteMaterial } from '../src/harness/note-material.mjs'
 import { loadQuestionnaire, questionGroups, parseReadingAnswers, compileReadingGraph } from '../src/reading-questions.mjs'
 
@@ -130,15 +132,25 @@ test('neutral answers keep only context scope and tiny budgets fail with a typed
   await assert.rejects(packNoteMaterial({ batches: [{ index: 0, pages: [1], source_ids: [], answers: [], draft: {} }], paperId: 'paper-x', getSource: async () => null, putExcerpt, budgetBytes: 64 }), e => e.code === 'NOTE_MATERIAL_BUDGET_EXCEEDED')
 })
 
-function atomicBatches(pageCounts = Array(12).fill(1), { missingQuestion, usePdfSnapshots = false, dense = false } = {}) {
-  const config = loadQuestionnaire(), sources = new Map(), batches = []
-  assert.equal(config.questions.length, 13, 'exercise the production atomic questionnaire rather than a shortened fixture')
+// 保留 e035446 的真实 v3 压力分布，新增题库不能重定义历史 13 题。
+const savedV3Protocol = JSON.parse(readFileSync(new URL('./fixtures/reading-protocol-v3.json', import.meta.url), 'utf8'))
+function savedV3Questionnaire() {
+  const protocol = structuredClone(savedV3Protocol)
+  const questions = protocol.question_ids.map(id => JSON.parse(readFileSync(new URL(`../prompts/reading/${id}.json`, import.meta.url), 'utf8')))
+  const snapshot = { version: protocol.version, protocol, questions }
+  return { ...snapshot, hash: createHash('sha256').update(JSON.stringify(snapshot)).digest('hex') }
+}
+
+function atomicBatches(pageCounts = Array(12).fill(1), { missingQuestion, usePdfSnapshots = false, dense = false, current = false } = {}) {
+  const config = current ? loadQuestionnaire() : savedV3Questionnaire(), sources = new Map(), batches = []
+  assert.equal(config.questions.length, current ? 23 : 13, 'the chosen version retains its actual question definitions')
   let page = 0
   for (const [index, pageCount] of pageCounts.entries()) {
     const selected = []
     for (let i = 0; i < pageCount; i++) {
       page++
-      const id = `source-${page}`, text = dense ? `阅读训练第${page}页。${'有限范围的阅读方法说明。'.repeat(80)}` : `Evidence on page ${page}.`
+      const id = `source-${page}`, text = dense ? `阅读训练第${page}页。${'有限范围的阅读方法说明。'.repeat(80)}`
+        : `Evidence on page ${page}.${current ? ' Reading checks improve recall. Nine of twelve readers recalled the passage after a source check.' : ''}`
       const source = usePdfSnapshots ? excerptSource(id, text, page)
         : { id, entity: { kind: 'paper', id: 'paper-x' }, text, locator: { page }, content_hash: `hash-${page}` }
       sources.set(id, source); selected.push(source)
@@ -150,12 +162,13 @@ function atomicBatches(pageCounts = Array(12).fill(1), { missingQuestion, usePdf
         question_results.push({ question_ids: ids, status: 'partial', missing: ids, errors: [{ code: 'MODEL_REQUEST_FAILED' }] })
         continue
       }
-      const response = { answers: ids.flatMap(question_id => Array.from({ length: dense ? 6 : 1 }, (_, answerIndex) => {
+      const response = { answers: ids.flatMap(question_id => Array.from({ length: config.questions.find(question => question.id === question_id).max_answers === 1 ? 1 : dense ? 6 : 1 }, (_, answerIndex) => {
         const source = selected[question_id === 'q2' ? selected.length - 1 : 0]
         return { question_id, choice: dense ? 'other' : config.questions.find(question => question.id === question_id).options[0].id,
+          ...(question_id.startsWith('q4_') ? { target_claim: { source_id: source.id, quote: 'Reading checks improve recall.' } } : {}),
           judgment: dense ? `合成学习方法判断 ${question_id}/${answerIndex} ${'有限范围的阅读方法说明。'.repeat(100)}`
             : question_id === 'q2' ? 'UNSELECTED_CLAIM' : `Selected bounded ${question_id} judgment`,
-          evidence: [{ source_id: source.id, quote: source.text }] }
+          evidence: [{ source_id: source.id, quote: question_id.startsWith('q4_') ? 'Nine of twelve readers recalled the passage after a source check.' : source.text }] }
       })) }
       const result = parseReadingAnswers(JSON.stringify(response), input, ids, config)
       assert.deepEqual(result.errors, [])
@@ -174,7 +187,7 @@ function assertExactMaterialBudget(result, budgetBytes = 24_000) {
   assert.ok(result.coverage.material_bytes <= budgetBytes)
 }
 
-test('twelve batches of thirteen affirmative production questions keep every batch and a bound quote under 24 KB', async () => {
+test('twelve batches of thirteen affirmative historical v3 questions keep every batch and a bound quote under 24 KB', async () => {
   const { batches, sources, questionIds } = atomicBatches(undefined, { usePdfSnapshots: true })
   const before = JSON.stringify(batches), { putExcerpt, saved } = excerptWriter(sources)
   const result = await packNoteMaterial({ batches, paperId: 'paper-x', getSource: async id => sources.get(id), putExcerpt })
@@ -265,4 +278,85 @@ test('twelve dense batches with seventy-eight affirmative answers and long Chine
   assert.ok(result.coverage.partial_reasons.includes('QUESTION_COUNTS_COMPACTED'))
   assert.ok(result.coverage.partial_reasons.includes('MATERIAL_BUDGET_COMPACTED'))
   assert.equal(JSON.stringify(batches), before, 'all 936 affirmative saved answers remain unchanged')
+})
+
+test('twelve current v4 batches retain all twenty-three saved question scopes under the unchanged note budget', async () => {
+  const { batches, sources, questionIds } = atomicBatches(undefined, { current: true, usePdfSnapshots: true })
+  const before = JSON.stringify(batches), { putExcerpt, saved } = excerptWriter(sources)
+  const result = await packNoteMaterial({ batches, paperId: 'paper-x', getSource: async id => sources.get(id), putExcerpt })
+  assertExactMaterialBudget(result)
+  assert.equal(result.material.length, 12)
+  assert.equal(result.coverage.answers_total, 12 * 23)
+  assert.equal(result.coverage.valid_answers_total, 12 * 23)
+  assert.deepEqual(result.coverage.batch_indices, Array.from({ length: 12 }, (_, index) => index + 1))
+  for (const card of result.material) {
+    const retainedIds = card.question_groups_summary?.question_ids ?? card.question_groups.flatMap(group => group.question_ids)
+    assert.deepEqual(retainedIds, questionIds)
+    const refs = [...card.answers.flatMap(answer => [...answer.evidence, ...(answer.target_claim ? [answer.target_claim] : [])]), ...card.nodes.filter(node => node.source_id)]
+    assert.ok(refs.length > 0, `v4 batch ${card.batch} keeps a bound citation`)
+    for (const ref of refs) assert.ok(saved.get(ref.source_id).text.includes(ref.quote))
+    for (const answer of card.answers.filter(answer => answer.question_id.startsWith('q4_') && !answer.neutral)) assert.ok(answer.target_claim)
+  }
+  assert.equal(result.partial, true, 'compacted details remain visible rather than fabricating full note coverage')
+  assert.equal(JSON.stringify(batches), before)
+})
+
+function targetClaimBatch() {
+  const sources = new Map([
+    ['target-source', excerptSource('target-source', 'Reading checks improve recall.', 1)],
+    ['evidence-source', excerptSource('evidence-source', 'Nine of twelve readers recalled the passage after a source check.', 2)],
+  ])
+  const config = loadQuestionnaire(), ids = ['q4_supports', 'q2_reader_inference']
+  const input = { paper: { id: 'paper-x' }, sources: [...sources.values()], source_ids: [...sources.keys()] }
+  const response = { answers: [
+    { question_id: ids[0], choice: 'supports', target_claim: { source_id: 'target-source', quote: sources.get('target-source').text },
+      judgment: '九名读者的回忆记录为原文所称的回忆改善提供相符依据，仍需核对对照与分配条件。',
+      evidence: [{ source_id: 'evidence-source', quote: sources.get('evidence-source').text }] },
+    { question_id: ids[1], choice: config.questions.find(question => question.id === ids[1]).options[0].id,
+      judgment: '读者推断：原有训练可能影响回忆结果，不能由这句计数直接证明因果。',
+      evidence: [{ source_id: 'evidence-source', quote: sources.get('evidence-source').text }] },
+  ] }
+  const parsed = parseReadingAnswers(JSON.stringify(response), input, ids, config)
+  assert.deepEqual(parsed.errors, [])
+  const batch = { index: 0, pages: [1, 2], source_ids: input.source_ids, answers: parsed.answers,
+    question_results: [{ question_ids: ids, status: 'complete', missing: [], errors: [] }],
+    draft: compileReadingGraph(parsed.answers, input, config) }
+  return { sources, batch }
+}
+
+test('notes bind the Q4 target and evidence separately while preserving reader inference and original answers', async () => {
+  const { sources, batch } = targetClaimBatch(), before = JSON.stringify(batch), { putExcerpt, saved } = excerptWriter(sources)
+  const result = await packNoteMaterial({ batches: [batch], paperId: 'paper-x', getSource: async id => sources.get(id), putExcerpt })
+  assertExactMaterialBudget(result)
+  const relation = result.material[0].answers.find(answer => answer.question_id === 'q4_supports')
+  const inference = result.material[0].answers.find(answer => answer.question_id === 'q2_reader_inference')
+  assert.ok(relation.target_claim)
+  assert.equal(relation.target_claim.quote, sources.get('target-source').text)
+  assert.equal(saved.get(relation.target_claim.source_id).pdf_snapshot.parent_source_id, 'target-source')
+  assert.equal(saved.get(relation.evidence[0].source_id).pdf_snapshot.parent_source_id, 'evidence-source')
+  assert.notEqual(relation.target_claim.source_id, relation.evidence[0].source_id)
+  assert.ok(result.sourceIds.includes(relation.target_claim.source_id) && result.sourceIds.includes(relation.evidence[0].source_id))
+  assert.equal(inference.source_status, 'inferred')
+  assert.equal(JSON.stringify(batch), before, 'packing cannot overwrite target quotes, source offsets or original source attribution')
+})
+
+test('a missing or unreadable Q4 target cannot enter note material as an untargeted relation', async () => {
+  for (const failure of ['missing-target', 'source-read-error']) {
+    const { sources, batch } = targetClaimBatch(), { putExcerpt } = excerptWriter(sources)
+    batch.answers = batch.answers.filter(answer => answer.question_id === 'q4_supports')
+    if (failure === 'missing-target') delete batch.answers[0].target_claim
+    const before = JSON.stringify(batch)
+    const rejectedNodeIds = new Set(batch.draft.nodes.filter(node => node.fields.question_id === 'q4_supports').map(node => `${node.type}:${node.id}`))
+    const result = await packNoteMaterial({ batches: [batch], paperId: 'paper-x', getSource: async id => {
+      if (failure === 'source-read-error' && id === 'target-source') throw new Error('synthetic source read failure')
+      return sources.get(id)
+    }, putExcerpt })
+    assert.equal(result.material[0].answers.some(answer => answer.question_id === 'q4_supports'), false, failure)
+    assert.ok(result.material[0].nodes.every(node => !rejectedNodeIds.has(`${node.type}:${node.id}`)), `${failure}: removed relation answers cannot survive through their compiled graph nodes`)
+    assert.ok(result.material[0].relations.every(relation => !rejectedNodeIds.has(relation.subject) && !rejectedNodeIds.has(relation.object)), `${failure}: a graph edge cannot restore an omitted relation`)
+    assert.doesNotMatch(result.material[0].generated_summary, /九名读者的回忆记录为原文所称的回忆改善/, `${failure}: a generated summary cannot restore an omitted relation`)
+    assert.equal(result.partial, true, failure)
+    assert.ok(result.material[0].omissions.answer_details >= 1, failure)
+    assert.equal(JSON.stringify(batch), before)
+  }
 })

@@ -1,0 +1,41 @@
+{
+  "id": "q3_figure",
+  "title": "图示的文字出处",
+  "question": "本批文字明确提供了哪些图示编号、标题、图注或对应正文说明？",
+  "guidance": "一个回答只记录一幅图示及其实际提供的文字说明；复制编号、标题、图注或正文明确对应的说明。只有图片而没有可定位文字时选 not_reported。不得从图片猜写未提供的数字、标签或趋势；表格由 q3_table 记录，不在本题合并。",
+  "options": [
+    {
+      "id": "figure",
+      "label": "一幅图示及其可定位文字",
+      "coding": {
+        "definition": "提供文本中明确对应一幅图示的编号、标题、图注或正文说明。",
+        "include_when": "原文明确对应图示；仅按提供的文字记录说明内容和范围。",
+        "exclude_when": "表格、公式，未提供文字的纯图片，或从视觉推测补写数值、标签与趋势。"
+      },
+      "graph": {
+        "node_type": "figure"
+      },
+      "requires_judgment": true
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "Figure 1. The reading loop moves from a passage to a question, a draft, and a source check.",
+      "choice": "figure",
+      "judgment": "图 1 的图注明确列出段落、问题、草稿和来源核对四个环节。",
+      "reason": "引文来自实际图注，不从图片补写环节或顺序。"
+    },
+    {
+      "source_text": "As described in Figure 3, the writing checklist contains a source check and a scope check; the diagram does not show measured effects.",
+      "choice": "figure",
+      "judgment": "对应图 3 的正文说明列出来源核对和范围核对，图示没有呈现实测效果。",
+      "reason": "明确对应的正文也可定位图示，流程说明不等于效果证据。"
+    },
+    {
+      "source_text": "Table 1. Counts of checked citations in each draft.",
+      "choice": "not_reported",
+      "judgment": "本批只提供表 1 的标题，没有图示文字说明。",
+      "reason": "表格标题属于表格题，不能冒充图示。"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "id": "q6_prior_gap",
+  "title": "先前文献明确的缺口",
+  "question": "本批文字中，作者明确指出了先前文献中的哪些具体未解决问题？",
+  "guidance": "一个回答只记录一项明确归属于先前文献的缺口，保留作者报告的研究范围、时间归属和限定词。不要把本研究局限、作者拟议贡献或读者猜测当先前缺口，也不把 some 改成整个领域。没有明确先前缺口时选 not_reported。",
+  "options": [
+    {
+      "id": "prior_gap",
+      "label": "作者明确指出的一项先前文献缺口",
+      "coding": {
+        "definition": "作者原文明确说明既有研究或某组先前文献仍缺少的对象、比较、解释或检验。",
+        "include_when": "原文明示先前文献的归属及具体未解决内容，保留数量、范围和历史限定。",
+        "exclude_when": "本研究自身的局限，只有新贡献而没有明确缺口，或读者因未读到某内容断言领域完全空白。"
+      },
+      "graph": {
+        "node_type": "gap",
+        "relation": "identifies",
+        "source_status": "author-stated"
+      }
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "Earlier reading studies described the checklist steps but did not compare the timing of source checks.",
+      "choice": "prior_gap",
+      "judgment": "作者指出此前阅读研究介绍过清单步骤，但没有比较来源核对的时机。",
+      "reason": "归属与未比较内容均明确，不宣称当前研究一定已经填补缺口。"
+    },
+    {
+      "source_text": "Some previously reviewed writing studies reported revision counts without examining why writers chose the first revision step.",
+      "choice": "prior_gap",
+      "judgment": "作者指出部分先前回顾的写作研究报告修改次数，却未考察首先选择修改步骤的原因。",
+      "reason": "保留 some 和 previously reviewed 的范围，不把局部文献缺口改成全领域无人研究。"
+    },
+    {
+      "source_text": "Our exercise did not evaluate whether the routine transfers to long essays.",
+      "choice": "not_reported",
+      "judgment": "本批说明本研究没有评价长篇迁移，未指出先前文献的缺口。",
+      "reason": "本研究未检验对象属于 study_limitation，不能自动推成既有领域空白。"
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "id": "q4_qualifies",
+  "title": "证据限定原文主张",
+  "question": "本批哪些依据限定了哪一条可定位原文主张的范围、条件或确定程度？",
+  "guidance": "每条肯定回答或 other 必须单独给 target_claim:{source_id,quote}，目标是本批 S 页可唯一定位的一条连续原文主张；evidence 另给依据，judgment 只解释关系与理由，不充当目标。目标与依据可以来自不同 S 页，但对象与条件必须可比；中性项不提供 target_claim。找不到原文目标时选 not_reported，不能生成目标。证据若仅重复目标或仅是目标中的片段，就不构成额外依据；同一段落中的不同连续片段可以使用，包含目标但另有独立实据的上下文不因包含关系被拒绝。 一个回答只处理一条目标主张的一项明确边界，说明依据把它限制在哪里。无关限定词不够；相同条件下的直接冲突属于反驳，不要改写目标成已经被限定的主张来掩盖方向。",
+  "target_claim_required": true,
+  "options": [
+    {
+      "id": "qualifies",
+      "label": "依据限定 target_claim 的范围或条件",
+      "coding": {
+        "definition": "依据缩小指定原文主张可成立的对象、条件、范围或确定程度。 一个回答只判定该证据与该目标这一对之间的本题关系。",
+        "include_when": "目标和依据可定位，依据明确给出适用边界、不确定性或例外，同时保留原目标作为被评价对象。",
+        "exclude_when": "无关的条件词，目标自带限定被重复记录为额外依据，或同一可比条件下的直接不相容。"
+      },
+      "graph": {
+        "node_type": "claim",
+        "relation": "qualifies"
+      },
+      "requires_judgment": true
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "The writing checklist can improve revision quality. The observed improvement was limited to short drafts; long essays were not evaluated.",
+      "choice": "qualifies",
+      "judgment": "所报改善只见于短草稿，长篇文章未评价，限制了目标主张能够支持的适用范围。",
+      "reason": "保持原目标不变，依据提供研究范围边界，而不是断言长篇文章无效。",
+      "target_claim": {
+        "quote": "The writing checklist can improve revision quality."
+      },
+      "evidence_quote": "The observed improvement was limited to short drafts; long essays were not evaluated."
+    },
+    {
+      "source_text": "The reflection score offers a reliable measure of reading practice. Reliability was estimated only for the ten-item version used by adult readers.",
+      "choice": "qualifies",
+      "judgment": "可靠性估计只覆盖成人读者使用的十题版本，不能直接推广到其他版本或人群。",
+      "reason": "对象仍是同一测量主张，依据限制已检验版本和人群。",
+      "target_claim": {
+        "quote": "The reflection score offers a reliable measure of reading practice."
+      },
+      "evidence_quote": "Reliability was estimated only for the ten-item version used by adult readers."
+    },
+    {
+      "source_text": "Three drafts contained a source note.",
+      "choice": "not_reported",
+      "judgment": "本批报告草稿计数，没有可定位的被限定目标主张及其范围依据。",
+      "reason": "不为关系题自行生成一个宽泛目标，中性回答不填写 target_claim。"
+    }
+  ]
+}

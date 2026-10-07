@@ -1,0 +1,42 @@
+{
+  "id": "q6_study_limitation",
+  "title": "本研究明确的局限",
+  "question": "本批文字中，作者明确说明了本研究哪些对象、条件或内容尚未检验或受限？",
+  "guidance": "一个回答只记录一项作者明说的本研究局限或适用边界，保留具体未检验对象和条件。不要把先前文献缺口、读者猜测或本批未见某内容当成本研究的局限；作者没有明说时选 not_reported。",
+  "options": [
+    {
+      "id": "study_limitation",
+      "label": "作者明确说明的一项本研究局限",
+      "coding": {
+        "definition": "作者明确交代本研究设计、材料、测量或结论的具体适用边界与未检验范围。",
+        "include_when": "原文指向本研究并具体说明受限条件、未评价对象或不确定性。",
+        "exclude_when": "先前文献的未解决问题，读者自行推断的缺陷，或因本批未提及而认定全文缺少检验。"
+      },
+      "graph": {
+        "node_type": "gap",
+        "relation": "identifies",
+        "source_status": "author-stated"
+      }
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "Our reading exercise used only short passages; long essays were not evaluated.",
+      "choice": "study_limitation",
+      "judgment": "本研究只用短段落，没有评价长篇文章。",
+      "reason": "作者明确指出本研究未检验对象，不能扩写为所有阅读情境无效。"
+    },
+    {
+      "source_text": "For this writing study, revision quality was rated by one reviewer, so agreement between reviewers could not be estimated.",
+      "choice": "study_limitation",
+      "judgment": "本写作研究由一名评阅者评分，无法估计评阅者之间的一致性。",
+      "reason": "局限明确属于本研究的测量配置，不推断评分本身必然错误。"
+    },
+    {
+      "source_text": "Earlier studies have not compared source-check routines with counterexample routines.",
+      "choice": "not_reported",
+      "judgment": "本批说明先前研究缺少流程比较，没有说明本研究自身的局限。",
+      "reason": "先前文献缺口由 prior_gap 题记录，不替代本研究局限。"
+    }
+  ]
+}

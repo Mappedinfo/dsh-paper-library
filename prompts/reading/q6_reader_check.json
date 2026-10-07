@@ -1,0 +1,44 @@
+{
+  "id": "q6_reader_check",
+  "title": "读者的一个待核对问题",
+  "question": "依据本批具体材料，哪一个作者未明确提出的问题还需要读者继续核对？",
+  "guidance": "最多回答一条；不要求提出问题，也不声称穷尽疑点。judgment 写一个具体待核对问题，并说明它由哪项材料触发及仍需读取的范围。不得仅因本批没见某内容就断言全文没有、研究有缺陷或存在文献缺口；作者明说的问题或局限由其他题记录。",
+  "max_answers": 1,
+  "options": [
+    {
+      "id": "reader_check",
+      "label": "一个有具体依据的读者待核对问题",
+      "coding": {
+        "definition": "读者由已读的具体材料触发、作者未明确提出的一项待核对疑问。",
+        "include_when": "明确标为读者疑问，具体说明来源依据及要继续核对的内容；不提前回答该疑问。",
+        "exclude_when": "无材料依据的泛泛问题，作者已直接提出的问题或局限，或将本批未见改写成全文未做。"
+      },
+      "graph": {
+        "node_type": "question",
+        "source_status": "inferred"
+      },
+      "requires_judgment": true
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "The exercise compares responses collected before the routine with responses collected one week after it.",
+      "choice": "reader_check",
+      "judgment": "读者待核对：前后两次回答是否来自同一批参与者？材料给出两次采集时间，但需继续查看参与者对应说明。",
+      "reason": "具体前后设计触发身份对应疑问，不断言研究没有交代。"
+    },
+    {
+      "source_text": "The writing exercise reports the average revision score separately for two groups of drafts.",
+      "choice": "reader_check",
+      "judgment": "读者待核对：两组草稿采用的评分标准是否相同？材料分组报告平均分，需继续查看评分规则。",
+      "reason": "具体组间比较触发可比性问题，不能推断评分标准必然不同。"
+    },
+    {
+      "source_text": "This passage lists the page numbers of the practice workbook.",
+      "choice": "not_reported",
+      "judgment": "仅有工作表页码，不足以提出本题要求的具体研究核对疑问。",
+      "reason": "不为生成问题而把任意局部材料解释成研究缺陷。"
+    }
+  ],
+  "source_status": "inferred"
+}
