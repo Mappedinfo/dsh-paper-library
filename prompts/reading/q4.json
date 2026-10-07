@@ -2,10 +2,15 @@
   "id": "q4",
   "title": "证据与主张的关系",
   "question": "给定证据对哪个具体主张构成支持、限定或反驳？",
-  "guidance": "judgment 填被评价的具体主张，choice 填引文对它的关系。例如引文限制了泛化范围，选择 qualifies；不要把被反驳的主张改写成反驳句再选择 contradicts，否则方向会颠倒。不能判断关系就选 other 并说明。",
+  "guidance": "judgment 填被评价的具体主张，choice 填引文对它的关系。例如引文限制了泛化范围，选择 qualifies；不要把被反驳的主张改写成反驳句再选择 contradicts，否则方向会颠倒。作者重复或强调同一主张不是独立支持。结合证据内容与适用条件判断，不能判断关系就选 other 并说明。",
   "options": [
-    {"id": "supports", "label": "证据支持 judgment 中的主张", "graph": {"node_type": "claim", "relation": "supports"}},
-    {"id": "qualifies", "label": "证据限定 judgment 中主张的条件或范围", "graph": {"node_type": "claim", "relation": "qualifies"}},
-    {"id": "contradicts", "label": "证据反驳 judgment 中的主张", "graph": {"node_type": "claim", "relation": "contradicts"}}
+    {"id": "supports", "label": "证据支持 judgment 中的主张", "coding": {"definition": "给定证据为具体主张提供相符的观察、分析或论证依据。", "include_when": "证据与主张的对象和条件相符；本论文数据也可支持，无需独立文献。", "exclude_when": "作者只重述或强调主张，相关结果被扩大为因果，或条件不匹配。"}, "graph": {"node_type": "claim", "relation": "supports"}},
+    {"id": "qualifies", "label": "证据限定 judgment 中主张的条件或范围", "coding": {"definition": "证据缩小主张可成立的对象、条件、范围或确定程度。", "include_when": "证据明确揭示适用边界、不确定性或例外，主张仍是被评价对象。", "exclude_when": "仅有无关限定词，或证据在同一条件下直接与主张冲突。"}, "graph": {"node_type": "claim", "relation": "qualifies"}},
+    {"id": "contradicts", "label": "证据反驳 judgment 中的主张", "coding": {"definition": "证据在可比条件下与具体主张不相容或给出反例。", "include_when": "明确写出被反驳的原主张，证据针对同一对象与条件产生冲突。", "exclude_when": "未报告、尚未检验、仅未达显著，或把反驳句当作被评价主张。"}, "graph": {"node_type": "claim", "relation": "contradicts"}}
+  ],
+  "examples": [
+    {"source_text": "In this exercise, nine of twelve drafts included a source check after the checklist, compared with three of twelve before it.", "choice": "supports", "judgment": "该练习中，清单使用后的草稿含来源核对的比例高于使用前。", "reason": "可比计数支持有限的前后观察，不足以单独证明清单造成变化。"},
+    {"source_text": "The improvement appeared only in short drafts; longer drafts were not tested.", "choice": "qualifies", "judgment": "改稿清单能提升写作表现。", "reason": "证据把可核对的改善限于短草稿，不能推广到未测长草稿。"},
+    {"source_text": "We argue that the checklist improves comprehension.", "choice": "other", "judgment": "待评价主张是“清单提高理解力”；该引文只是作者重复此主张，未提供独立支持。", "reason": "陈述与主张相同并不构成额外证据，不能据语气坚定选择 supports。"}
   ]
 }

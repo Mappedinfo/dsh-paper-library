@@ -7,6 +7,14 @@ const QUESTION_IDS = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']
 const SOURCE_TYPES = new Set(['evidence', 'figure', 'formula'])
 const NODE_TYPES = new Set(['claim', 'gap', 'question', 'method', 'dataset', 'metric', 'task', 'observation', ...SOURCE_TYPES])
 const RELATIONS = new Set(['reports', 'supports', 'qualifies', 'contradicts', 'identifies'])
+// v1 作业快照没有端点合同，仍按原映射读取；新题库把同一合同写入可编辑资产。
+const LEGACY_ENDPOINTS = freeze({
+  method_data: { subject_type: 'method', object_type: 'dataset', relation: null, direction: 'none' },
+  method_result: { subject_type: 'method', object_type: 'observation', relation: 'produced_by', direction: 'object-to-subject' },
+  data_result: { subject_type: 'dataset', object_type: 'observation', relation: 'observed_on', direction: 'object-to-subject' },
+  metric_result: { subject_type: 'metric', object_type: 'observation', relation: 'measured_by', direction: 'object-to-subject' },
+  task_result: { subject_type: 'task', object_type: 'observation', relation: 'for_task', direction: 'object-to-subject' },
+})
 const fail = message => Object.assign(new Error(message), { code: 'READING_PROTOCOL_INVALID', status: 400 })
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 const digest = value => createHash('sha256').update(typeof value === 'string' ? value : canonical(value)).digest('hex')
@@ -20,6 +28,21 @@ function freeze(value) {
   return value
 }
 function text(value, max = 4000) { return typeof value === 'string' && value.length <= max && !value.includes('\0') && !!value.trim() }
+function endpointProjection(question, option) {
+  return question.id === 'q5' ? option.graph?.endpoints ?? LEGACY_ENDPOINTS[option.id] : undefined
+}
+function promptProjection(question, option) {
+  if (option.neutral) return { graph_claim: false }
+  const type = option.graph.node_type
+  const hasStatement = !SOURCE_TYPES.has(type) && type !== 'question'
+  return {
+    node_type: type,
+    ...(hasStatement ? { evidence_target_type: type === 'gap' ? 'gap' : 'claim',
+      evidence_relation: ['claim', 'gap'].includes(type) ? option.graph.relation ?? 'reports' : 'reports' } : {}),
+    ...(option.graph.source_status ? { source_status: option.graph.source_status } : {}),
+    ...(endpointProjection(question, option) ? { endpoints: endpointProjection(question, option) } : {}),
+  }
+}
 
 /** 每次启动读取当前人工版本；运行中持有冻结对象与内容哈希，避免中途改题。 */
 export function loadQuestionnaire(directory = DIRECTORY) {
@@ -30,6 +53,7 @@ export function loadQuestionnaire(directory = DIRECTORY) {
   }
   const protocol = read('protocol.json'), questions = QUESTION_IDS.map(id => read(`${id}.json`))
   if (!text(protocol.version, 100) || !Array.isArray(protocol.rules) || !protocol.rules.length || protocol.rules.some(rule => !text(rule)) || !isObject(protocol.templates)) throw fail('阅读协议缺少版本或规则。')
+  if (protocol.codebook_required !== undefined && typeof protocol.codebook_required !== 'boolean') throw fail('codebook_required 必须是布尔值。')
   for (const key of ['intro', 'questions_heading', 'rules_heading', 'output_heading', 'sources_heading', 'sources_end', 'scope_label', 'source_label']) {
     if (!text(protocol.templates[key], 500)) throw fail(`阅读协议缺少模板：${key}`)
   }
@@ -46,6 +70,23 @@ export function loadQuestionnaire(directory = DIRECTORY) {
       if (!option.neutral && (!NODE_TYPES.has(option.graph?.node_type) || option.graph?.relation && !RELATIONS.has(option.graph.relation))) throw fail(`问题 ${question.id} 的图谱映射无效。`)
       if (option.graph?.source_status && (!['author-stated', 'inferred'].includes(option.graph.source_status) || !['gap', 'question'].includes(option.graph.node_type))) throw fail('问题来源归属无效。')
       if (option.id === 'other' && option.requires_judgment !== true) throw fail('其他选项必须要求判断内容。')
+      if (protocol.codebook_required || option.coding !== undefined) {
+        if (!isObject(option.coding) || Object.keys(option.coding).some(key => !['definition', 'include_when', 'exclude_when'].includes(key)) ||
+          ['definition', 'include_when', 'exclude_when'].some(key => !text(option.coding[key], 1500))) throw fail(`问题 ${question.id} 的编码手册缺少定义、适用或排除条件。`)
+      }
+      if (option.graph?.endpoints !== undefined) {
+        if (question.id !== 'q5' || option.graph.node_type !== 'claim' || option.graph.relation !== 'reports' ||
+          !Object.values(LEGACY_ENDPOINTS).some(value => canonical(value) === canonical(option.graph.endpoints)) ||
+          LEGACY_ENDPOINTS[option.id] && canonical(option.graph.endpoints) !== canonical(LEGACY_ENDPOINTS[option.id])) throw fail(`问题 ${question.id} 的关系端点类型或方向不受支持。`)
+      }
+      if (protocol.codebook_required && question.id === 'q5' && LEGACY_ENDPOINTS[option.id] && !option.graph?.endpoints) throw fail('q5 编码手册必须包含关系端点合同。')
+    }
+    if (protocol.codebook_required || question.examples !== undefined) {
+      if (!Array.isArray(question.examples) || !question.examples.length || question.examples.length > 3 || question.examples.some(example =>
+        !isObject(example) || Object.keys(example).some(key => !['source_text', 'choice', 'judgment', 'reason', 'subject', 'object'].includes(key)) ||
+        !ids.has(example.choice) || ['source_text', 'judgment', 'reason'].some(key => !text(example[key], 1500)) ||
+        (example.subject !== undefined || example.object !== undefined) && (question.id !== 'q5' || !text(example.subject, 500) || !text(example.object, 500) ||
+          !example.source_text.includes(example.subject) || !example.source_text.includes(example.object)))) throw fail(`问题 ${question.id} 的合成编码示例无效。`)
     }
   }
   const config = { version: protocol.version, protocol, questions }
@@ -80,7 +121,9 @@ export function makeReadingPrompt(pack, questionIds, config = loadQuestionnaire(
   const { aliases } = sourceMap(pack), { templates, rules } = config.protocol
   const questions = selectedQuestions(config, questionIds).map(question => ({
     question_id: question.id, question: question.question, guidance: question.guidance,
-    options: [...question.options, ...config.protocol.common_options].map(option => ({ choice: option.id, meaning: option.label })),
+    options: [...question.options, ...config.protocol.common_options].map(option => ({ choice: option.id, meaning: option.label,
+      ...(option.coding ? { coding: option.coding } : {}), projection: promptProjection(question, option) })),
+    ...(question.examples ? { coding_examples: question.examples } : {}),
   }))
   // 不传递整个 paper 对象：它可能带私人自定义字段或完整元数据。
   const scope = { pages: pack.sources.map(source => source.locator?.page ?? null), scope: 'only-provided-pages',
@@ -235,16 +278,16 @@ export function compileReadingGraph(input, pack, config = loadQuestionnaire()) {
         assertion(claim, 'reports')
       }
       if (answer.question_id === 'q5') {
-        const mapping = { method_result: ['method', 'produced_by'], data_result: ['dataset', 'observed_on'], metric_result: ['metric', 'measured_by'], task_result: ['task', 'for_task'] }[answer.choice]
-        if (answer.subject && answer.object && mapping) {
+        const mapping = endpointProjection(question, option)
+        if (answer.subject && answer.object && mapping?.direction === 'object-to-subject') {
           const relationIndex = answer.relation_evidence_index ?? 0
-          const entity = node(mapping[0], answer.subject, 'relation-subject')
-          const observation = node('observation', answer.object, 'relation-result', { source_node: evidence[relationIndex] })
-          local.edges.push({ subject: observation, object: entity, relation: mapping[1], source_id: answer.evidence[relationIndex].source_id, surface: label })
+          const entity = node(mapping.subject_type, answer.subject, 'relation-subject')
+          const observation = node(mapping.object_type, answer.object, 'relation-result', { source_node: evidence[relationIndex] })
+          local.edges.push({ subject: observation, object: entity, relation: mapping.relation, source_id: answer.evidence[relationIndex].source_id, surface: label })
         } else {
-          if (answer.subject && answer.object && answer.choice === 'method_data') {
-            node('method', answer.subject, 'relation-subject')
-            node('dataset', answer.object, 'relation-object')
+          if (answer.subject && answer.object && mapping?.direction === 'none') {
+            node(mapping.subject_type, answer.subject, 'relation-subject')
+            node(mapping.object_type, answer.object, 'relation-object')
           }
           graph.compilation.limitations.push({ answer_id: answer.id, code: answer.subject && answer.object ? 'NO_SAFE_TYPED_RELATION' : 'RELATION_ENDPOINTS_NOT_PROVIDED',
             message: '关系判断及证据已保留；现有图谱类型或明确端点不足，未猜测实体连线。' })

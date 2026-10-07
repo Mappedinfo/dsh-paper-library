@@ -4,8 +4,13 @@
   "question": "文章明确提出了哪些问题、局限或研究缺口？",
   "guidance": "区分作者明确陈述和读者推断。只将作者原文明确提出的问题或缺口归为前两个选项；本批没写不等于全文没写。",
   "options": [
-    {"id": "research_question", "label": "作者明确提出的研究问题", "graph": {"node_type": "question", "source_status": "author-stated"}},
-    {"id": "stated_gap", "label": "作者明确陈述的局限或研究缺口", "graph": {"node_type": "gap", "relation": "identifies", "source_status": "author-stated"}},
-    {"id": "inferred_gap", "label": "读者从现有材料推断的疑点，尚待核实", "graph": {"node_type": "gap", "relation": "reports", "source_status": "inferred"}}
+    {"id": "research_question", "label": "作者明确提出的研究问题", "coding": {"definition": "作者明确提出要回答或检验的研究问题。", "include_when": "材料说明研究要解决的疑问，不要求一定采用问句语气。", "exclude_when": "读者新增的问题、已报告结论或没有具体问题的泛泛愿景。"}, "graph": {"node_type": "question", "source_status": "author-stated"}},
+    {"id": "stated_gap", "label": "作者明确陈述的局限或研究缺口", "coding": {"definition": "作者明确指出的适用边界、未解决问题或研究缺口。", "include_when": "原文明确交代缺什么、未检验什么或在哪些条件下受限。", "exclude_when": "读者仅因本批未提及而断言作者或全文存在缺口。"}, "graph": {"node_type": "gap", "relation": "identifies", "source_status": "author-stated"}},
+    {"id": "inferred_gap", "label": "读者从现有材料推断的疑点，尚待核实", "coding": {"definition": "读者基于已读材料提出、作者未明确陈述的待核对疑点。", "include_when": "有具体来源依据，明确标为读者推断，并说明仍需核对的范围。", "exclude_when": "无依据猜测，作者已明确陈述的局限，或将局部缺失当成全文缺失。"}, "graph": {"node_type": "gap", "relation": "reports", "source_status": "inferred"}}
+  ],
+  "examples": [
+    {"source_text": "We ask whether a source-checking routine helps readers distinguish a claim from an observation.", "choice": "research_question", "judgment": "作者要检验来源核对流程是否帮助区分主张与观察。", "reason": "疑问由作者明确提出；疑问语气本身不代表已有正面结果。"},
+    {"source_text": "Our exercise used only short passages; long essays were not evaluated.", "choice": "stated_gap", "judgment": "作者明确说明未评价长篇文章，练习范围限于短段落。", "reason": "作者交代了具体未检验对象，不能改写为所有阅读情境均无效。"},
+    {"source_text": "This section describes the checklist steps for revising a sentence.", "choice": "inferred_gap", "judgment": "本节介绍步骤；效果对照是否在后文报告，需要继续核对。", "reason": "这是读者提出的核对疑点，不足以断言全文没有效果对照。"}
   ]
 }

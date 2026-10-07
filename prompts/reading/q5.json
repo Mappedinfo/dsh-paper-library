@@ -2,12 +2,17 @@
   "id": "q5",
   "title": "研究要素之间的联系",
   "question": "本批材料明确说明了方法、数据、指标、任务与结果之间的什么联系？",
-  "guidance": "用一句话写出联系两端和条件。可选 subject 和 object 字段，都是从同一条引文连续复制的简短文字：前者是方法、数据、指标或任务，后者是结果；method_data 时前者是方法，后者是数据。必须同时提供两端，否则只保留关系判断。只记录文本明确连接的要素，不能把不同实验配置拼成一条关系；程序不猜测要素名称之间的连接。",
+  "guidance": "用一句话写出联系两端和条件。可选 subject 和 object 都从同一条引文连续复制：subject 是方法、数据、指标或任务，object 是实际结果；method_data 时 object 是输入数据。必须同时提供两端，否则只保留判断。论文不是方法，输出图片不是输入数据；只记录文字明确连接的要素，不能拼接不同配置。仅说明设计目的时选 other，作为 claim 保留，不输出结果端点。projection 说明程序的编译类型和方向，不改变上述回答字段的顺序。",
   "options": [
-    {"id": "method_data", "label": "方法使用或处理某项数据", "graph": {"node_type": "claim", "relation": "reports"}},
-    {"id": "method_result", "label": "某种方法在给定条件下产生某结果", "graph": {"node_type": "claim", "relation": "reports"}},
-    {"id": "data_result", "label": "结果来自某项数据或子样本", "graph": {"node_type": "claim", "relation": "reports"}},
-    {"id": "metric_result", "label": "结果由某个指标测量", "graph": {"node_type": "claim", "relation": "reports"}},
-    {"id": "task_result", "label": "结果对应某项任务", "graph": {"node_type": "claim", "relation": "reports"}}
+    {"id": "method_data", "label": "方法使用或处理某项数据", "coding": {"definition": "明确的方法与其读取、处理或分析的输入数据之间的联系。", "include_when": "同一材料明确指出方法实际使用或处理某个数据集。", "exclude_when": "论文冒充方法、输出图片冒充输入数据，或仅凭要素相邻猜测使用关系。"}, "graph": {"node_type": "claim", "relation": "reports", "endpoints": {"subject_type": "method", "object_type": "dataset", "relation": null, "direction": "none"}}},
+    {"id": "method_result", "label": "某种方法在给定条件下产生某结果", "coding": {"definition": "实际结果归属于明确的研究或计算流程；produced_by 不代表因果识别。", "include_when": "方法与已报告结果有明确流程归属，保留配置和观察范围。", "exclude_when": "方法的目标、承诺或假设，或将流程归属扩大成已证实因果。"}, "graph": {"node_type": "claim", "relation": "reports", "endpoints": {"subject_type": "method", "object_type": "observation", "relation": "produced_by", "direction": "object-to-subject"}}},
+    {"id": "data_result", "label": "结果来自某项数据或子样本", "coding": {"definition": "已报告结果是在明确数据集或子样本上得到的观察。", "include_when": "材料明确把结果对应到该数据来源、样本或子集。", "exclude_when": "只有数据与结果名称共现，或把局部样本结果推广至全体数据。"}, "graph": {"node_type": "claim", "relation": "reports", "endpoints": {"subject_type": "dataset", "object_type": "observation", "relation": "observed_on", "direction": "object-to-subject"}}},
+    {"id": "metric_result", "label": "结果由某个指标测量", "coding": {"definition": "某项已报告结果由明确指标度量或表示。", "include_when": "材料给出结果与测量指标的对应，保留数值、单位及条件。", "exclude_when": "只定义指标但未报告结果，或将指标名称当成测得结果。"}, "graph": {"node_type": "claim", "relation": "reports", "endpoints": {"subject_type": "metric", "object_type": "observation", "relation": "measured_by", "direction": "object-to-subject"}}},
+    {"id": "task_result", "label": "结果对应某项任务", "coding": {"definition": "已报告结果对应明确执行或评价的任务。", "include_when": "材料说明结果来自哪项具体任务，且两端在同一证据中。", "exclude_when": "只有研究愿景、设计目的或尚未执行任务的预期结果。"}, "graph": {"node_type": "claim", "relation": "reports", "endpoints": {"subject_type": "task", "object_type": "observation", "relation": "for_task", "direction": "object-to-subject"}}}
+  ],
+  "examples": [
+    {"source_text": "For this reading exercise, the sentence-checking routine processed the practice-draft set.", "choice": "method_data", "judgment": "本阅读练习的句子核对流程处理练习草稿集。", "reason": "方法与输入数据明确相连；保留 claim 和两端节点，不创建直接关系边。", "subject": "sentence-checking routine", "object": "practice-draft set"},
+    {"source_text": "In the short-draft exercise, the sentence-checking routine produced five corrected citations.", "choice": "method_result", "judgment": "短草稿练习中，句子核对流程产出了五条修正后的引用。", "reason": "有实际产出；回答顺序是方法、结果，图谱 produced_by 的方向是结果指向方法。", "subject": "sentence-checking routine", "object": "five corrected citations"},
+    {"source_text": "This paper presents a sketching routine intended to clarify an argument. Figure 1 is its output illustration, not an input dataset.", "choice": "other", "judgment": "作者说明绘图流程的设计目的，尚未报告澄清论证的实测结果。", "reason": "目的保留为 claim，不给结果端点；论文不是方法，输出示意图也不是输入数据。"}
   ]
 }

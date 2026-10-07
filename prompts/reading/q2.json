@@ -4,8 +4,13 @@
   "question": "作者提出了哪些有限主张，报告了哪些观察或结果？",
   "guidance": "分别标记作者声称、报告的结果和你的解释。保留条件、比较对象、范围与不确定性；不能把宣称高效当作已经测得高效。",
   "options": [
-    {"id": "author_claim", "label": "作者明确提出的主张", "graph": {"node_type": "claim", "relation": "reports"}},
-    {"id": "reported_result", "label": "文章报告的观察或结果", "graph": {"node_type": "observation", "relation": "reports"}},
-    {"id": "reader_inference", "label": "基于所读证据的读者解释，尚待核实", "graph": {"node_type": "claim", "relation": "reports"}}
+    {"id": "author_claim", "label": "作者明确提出的主张", "coding": {"definition": "作者表达的论断、假设、建议、设计目的或结果解释。", "include_when": "表达主张、目标或对结果的解释；解释本身未由该引文直接确证。", "exclude_when": "直接报告的实测结果或估计量，或读者自己新增的解释。"}, "graph": {"node_type": "claim", "relation": "reports"}},
+    {"id": "reported_result", "label": "文章报告的观察或结果", "coding": {"definition": "文章在明确条件下报告的实际观察、测量或分析结果，包括测得的因果估计量。", "include_when": "有观察或计算依据的具体结果；保留条件，作者新增的机制解释另标主张。", "exclude_when": "仅有设计目的、作者宣称或预期；不能将所报关联自行升级为因果效果。"}, "graph": {"node_type": "observation", "relation": "reports"}},
+    {"id": "reader_inference", "label": "基于所读证据的读者解释，尚待核实", "coding": {"definition": "读者基于材料提出、但作者未直接报告的解释或推断。", "include_when": "明确标为读者判断，说明依据并保留不确定性。", "exclude_when": "作者原文主张或已报告结果，或没有来源依据的猜测。"}, "graph": {"node_type": "claim", "relation": "reports"}}
+  ],
+  "examples": [
+    {"source_text": "The checklist was designed to help readers check some previously described claims; we did not measure comprehension.", "choice": "author_claim", "judgment": "清单旨在帮助核对部分先前描述的主张，尚未测量理解力。", "reason": "设计目的不是理解力改善的实测结果，范围限定必须保留。"},
+    {"source_text": "In this exercise, most of the twelve readers revised one sentence after checking its source.", "choice": "reported_result", "judgment": "本练习的十二名读者中，多数人在核对来源后改写了一句。", "reason": "报告了观察行为；most 不是全部，先后顺序也不证明因果。"},
+    {"source_text": "Readers who made more notes also wrote longer drafts; no intervention was assigned.", "choice": "reader_inference", "judgment": "此处只能将笔记数量与草稿长度视为关联，不能确认记笔记使草稿变长。", "reason": "这是对所报关联的读者解释，不能升级为作者已验证的因果结论。"}
   ]
 }

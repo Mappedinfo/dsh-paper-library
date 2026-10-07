@@ -4,9 +4,14 @@
   "question": "本批文字明确出现了哪些方法、数据集、评价指标和任务？",
   "guidance": "逐个记录。背景中提到的方法与本研究实际使用的方法要在判断中区分；仅出现名称不证明本研究使用了它。",
   "options": [
-    {"id": "method", "label": "方法或处理流程", "graph": {"node_type": "method", "relation": "reports"}},
-    {"id": "dataset", "label": "数据集或数据来源", "graph": {"node_type": "dataset", "relation": "reports"}},
-    {"id": "metric", "label": "评价指标或测量标准", "graph": {"node_type": "metric", "relation": "reports"}},
-    {"id": "task", "label": "研究任务或应用问题", "graph": {"node_type": "task", "relation": "reports"}}
+    {"id": "method", "label": "方法或处理流程", "coding": {"definition": "用于操作、处理或推理的具体方法与步骤。", "include_when": "文字明确描述方法；判断中区分背景提及、拟议与实际使用。", "exclude_when": "论文题名、作者、研究目标或仅作为输出的图像。"}, "graph": {"node_type": "method", "relation": "reports"}},
+    {"id": "dataset", "label": "数据集或数据来源", "coding": {"definition": "供研究读取、处理或观察的材料集合、样本或数据来源。", "include_when": "明确说明作为数据的文档、记录、样本或集合。", "exclude_when": "结果数字、评价指标、论文整体或仅为展示结果生成的图片。"}, "graph": {"node_type": "dataset", "relation": "reports"}},
+    {"id": "metric", "label": "评价指标或测量标准", "coding": {"definition": "用于量化或判断表现的测量量、计算规则或标准。", "include_when": "明确给出评分、比例、计数或其他评价标准。", "exclude_when": "只有测得数值而未说明指标，或笼统宣称效果好。"}, "graph": {"node_type": "metric", "relation": "reports"}},
+    {"id": "task", "label": "研究任务或应用问题", "coding": {"definition": "方法要完成的操作或要解决的应用问题。", "include_when": "明确描述读者或系统需要完成的具体任务。", "exclude_when": "方法步骤本身、已产生的结果或没有具体操作对象的愿景。"}, "graph": {"node_type": "task", "relation": "reports"}}
+  ],
+  "examples": [
+    {"source_text": "We discuss some previously described source-checking routines; this exercise does not apply them.", "choice": "method", "judgment": "背景讨论了部分先前介绍的来源核对流程，本练习未使用它们。", "reason": "方法被明确提及；some 和 previously described 不可扩大为本研究使用的全部方法。"},
+    {"source_text": "The reading exercise uses a set of twelve practice passages as its input.", "choice": "dataset", "judgment": "输入数据是十二段练习文本组成的材料集。", "reason": "文本集合被明确作为输入，数量与用途都有依据。"},
+    {"source_text": "We measure revision accuracy as the proportion of revised sentences that retain the source meaning.", "choice": "metric", "judgment": "改稿准确率按保留原文含义的改写句比例测量。", "reason": "这里定义了测量标准，尚未报告该指标的实测值。"}
   ]
 }

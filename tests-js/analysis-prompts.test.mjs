@@ -123,6 +123,6 @@ test('npm tarball contains prompt assets and can load them without installation 
     assert.match(packaged.renderNotePrompt('Synthetic', [], false, 0), /compiled reading-answer records/)
     const questionnaire = packagedQuestions.loadQuestionnaire()
     assert.equal(questionnaire.questions.length, 6)
-    assert.equal(questionnaire.version, 'reading-questions-v1')
+    assert.equal(questionnaire.version, 'reading-questions-v2')
   } finally { await rm(temp, { recursive: true, force: true }) }
 })

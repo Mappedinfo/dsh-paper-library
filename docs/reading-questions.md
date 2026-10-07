@@ -19,9 +19,17 @@
 | q5 | 方法、数据、指标、任务与结果有什么明确联系？ | 方法–数据／方法–结果／数据–结果／指标–结果／任务–结果 | [q5.json](../prompts/reading/q5.json) |
 | q6 | 材料明确指出了哪些缺口、限制或待回答问题？ | 作者研究问题／作者局限或缺口／读者推断疑点 | [q6.json](../prompts/reading/q6.json) |
 
-所有问题都有 `other`（其他）、`not_reported`（本批未报告）、`not_applicable`（本批不适用）。共同规则、示例、分组、预算和版本在 [protocol.json](../prompts/reading/protocol.json)。表格是导览，实际措辞和选项以 JSON 为准。
+所有问题都有 `other`（其他）、`not_reported`（本批未报告）、`not_applicable`（本批不适用）。共同规则、分组、预算和版本在 [protocol.json](../prompts/reading/protocol.json)，每题的合成选码示例在相应 q*.json。表格是导览，实际措辞和选项以 JSON 为准。
 
-其他实际提示也外置在 [prompts/analysis](../prompts/analysis)：`note.json` 精读笔记、`review.json` 评审、`metadata.json` 独立资料提取、`knowledge.json` 手动知识工作流、`coverage.json` 缺失范围说明、`agent.json` 原生 DSH 分析代理的基础约束。JSON 是随软件发布的本地资产，无需把真实论文交给 AI 才能审阅提示。修改这些辅助模板后需重启已加载的服务；阅读题库在每个新作业启动时读取、冻结并保存版本及哈希。同一个请求标识复用原作业，不因文件变化再次计费；要用新题库分析须创建新请求。
+其他实际提示也外置在 [prompts/analysis](../prompts/analysis)：`note.json` 精读笔记、`review.json` 评审、`metadata.json` 独立资料提取、`knowledge.json` 手动知识工作流、`coverage.json` 缺失范围说明、`agent.json` 原生 DSH 分析代理的基础约束。JSON 是随软件发布的本地资产，无需把真实论文交给 AI 才能审阅提示。修改这些辅助模板后需重启已加载的服务；阅读题库在每个新作业启动时读取、冻结并保存版本及内容哈希。当前新作业冻结 `reading-questions-v2`；旧作业继续使用原快照，同一个请求标识不会因题库变化自动重放或再次计费。要用 v2 分析须创建新请求。
+
+## 选码手册与编译说明
+
+v2 的每个选项都有 `coding`：`definition` 定义其含义，`include_when` 说明何时选用，`exclude_when` 说明边界。模型同时收到选项的 `projection`，这是程序生成的只读编译说明，解释节点类型、关系语义和方向。选码依靠陈述的内容、对象、条件与证据，不能机械按语气或因果关键词分类；材料有相关内容却缺少足够语义依据时，应选 `other` 并说明。
+
+作者主张、设计目的和假设不能当作实测结果；实际报告的因果估计量仍可属于 `reported_result`，作者对结果新增的机制解释另标为主张。读者不能把所报关联升级为因果。`some`、`most`、`previously described` 等数量、范围和历史归属应保留。q4 的支持可以来自本论文数据、分析或论证，不要求另找独立文献；作者重复自己的主张本身不构成验证。只读了部分页面时，未报告与读者疑点都不能升级为对全文的否定。
+
+每题有 2–3 条通用阅读、思考与写作的合成示例，解释选码理由与常见边界。它们不是 S1 等本批来源，不可作为 `evidence` 引用。`coding`、`projection` 和示例都不增加答案字段，模型仍只返回 `answers`。代码册增加输入 token；现有回答数量、引文长度、输出字节和模型调用预算不变。此次改造没有调用真实模型或读取私有材料，也未验证真实模型的阅读质量。
 
 ## 分次提问如何使用上下文
 
@@ -35,7 +43,7 @@
 {
   "action": "paper_analysis_run",
   "ids": ["synthetic-paper-id"],
-  "request_id": "reading-q2-q4-v1",
+  "request_id": "reading-q2-q4-v2",
   "mode": "full",
   "question_ids": ["q2", "q4"],
   "question_mode": "separate",
@@ -67,9 +75,21 @@
 
 示例只使用合成学习文本。`judgment` 可省略；`other` 和需要具体被评价主张的 q4 要求填写。`free_text` 是兼容别名。肯定回答必须附原文；未报告和不适用可不附原文，它们只描述所读批次。
 
-“精确引文”指证据片段必须能在本批保存的文本中定位，不是要求模型生成 APA 参考文献。每页只有简短来源别名 S1、S2，不给每行加编号。程序恢复真实来源 ID、PDF 页码、内容哈希和 UTF-16 字符位置。只允许字面唯一匹配或唯一的空白等价匹配；不会悄悄改词、修断词、改变大小写、拼接不同句子或猜测重复片段的位置。Markdown 引文只对应保存的派生 Markdown，不能声称逐字对应 PDF 原始字符。
+“精确引文”指证据片段必须能在本批保存的文本中定位，不是要求模型生成 APA 参考文献。引文应短且足以核对判断，保留必要的条件句、比较对象和限定词；不能只摘结论短语而删掉适用范围。每页只有简短来源别名 S1、S2，不给每行加编号。程序恢复真实来源 ID、PDF 页码、内容哈希和 UTF-16 字符位置。只允许字面唯一匹配或唯一的空白等价匹配；不会悄悄改词、修断词、改变大小写、拼接不同句子或猜测重复片段的位置。Markdown 标记须按来源保留；引文只对应保存的派生 Markdown，不能声称逐字对应 PDF 原始字符。
 
-定位成功证明“这段文字存在”，不证明它支持模型判断。结果始终是待核对草稿。程序根据固定映射生成图谱 ID、节点和边。q5 可额外给出 `subject`、`object` 原文端点；只有同一证据片段包含两端、且现有图谱允许该类型关系时才连接。无法安全连接时保留回答和证据，并报告 `batch_compilation.limitations`。例如现有类型不允许直接创建 method→dataset 的 uses 边，不会虚构实验节点来绕过限制。
+定位成功证明“这段文字存在”，不证明它支持模型判断。结果始终是待核对草稿。程序根据固定映射生成图谱 ID、节点和边；例如 q2 的 `reported_result` 会生成 observation，同时保留同文的 claim 包装。模型不返回这些图谱对象。
+
+q5 可额外给出 `subject`、`object` 原文端点，两者须同时提供并出现在同一证据片段。回答字段的顺序和图谱边的方向是两个层面：
+
+| 选项 | subject 类型 | object 类型 | 图谱关系与方向 |
+| --- | --- | --- | --- |
+| `method_data` | method | dataset | 保留 claim 与两端节点，无直接关系边 |
+| `method_result` | method | observation | object → subject，`produced_by`：结果的研究或计算流程归属，不代表因果识别 |
+| `data_result` | dataset | observation | object → subject，`observed_on`：结果在该数据或样本上观察到 |
+| `metric_result` | metric | observation | object → subject，`measured_by`：结果由该指标测量 |
+| `task_result` | task | observation | object → subject，`for_task`：结果对应该任务 |
+
+论文不能充当方法，方法生成的输出图片不能充当输入数据。仅说明设计目的时用 `other`，作为 claim 保留，并省略结果端点。程序只连接文本明确关联且类型允许的要素；无法安全连接时保留回答和证据，并报告 `batch_compilation.limitations`。现有类型不允许直接创建 method→dataset 的 uses 边，不会虚构实验节点来绕过限制。
 
 ## 查看失败和候选选项
 

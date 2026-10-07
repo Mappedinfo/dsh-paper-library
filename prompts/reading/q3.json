@@ -4,8 +4,13 @@
   "question": "哪些原文、图表说明或公式说明值得作为后续核对的证据？",
   "guidance": "指出可定位材料及它能核对什么。图像观察不是已验证文字；图表和公式只能引用提供文本中真实出现的说明，不通过 OCR 想象补写。",
   "options": [
-    {"id": "text", "label": "正文的连续原文片段", "graph": {"node_type": "evidence"}},
-    {"id": "figure", "label": "图表及其可定位文字说明", "graph": {"node_type": "figure"}},
-    {"id": "formula", "label": "公式及其可定位文字说明", "graph": {"node_type": "formula"}}
+    {"id": "text", "label": "正文的连续原文片段", "coding": {"definition": "可在提供文本中定位、可供后续核对的连续正文。", "include_when": "片段保留判断所需条件、比较对象与限定词，Markdown 按原文复制。", "exclude_when": "拼接句子、改写摘录，或截去关键条件的孤立短语。"}, "graph": {"node_type": "evidence"}},
+    {"id": "figure", "label": "图表及其可定位文字说明", "coding": {"definition": "提供文本中可定位的图表标题、图注或正文说明。", "include_when": "文字明确对应图表，并说明它能核对的内容。", "exclude_when": "仅凭图像猜写数值、OCR 文字，或将视觉理解当作已定位引文。"}, "graph": {"node_type": "figure"}},
+    {"id": "formula", "label": "公式及其可定位文字说明", "coding": {"definition": "提供文本中可定位的公式、变量定义或公式说明。", "include_when": "文本明确给出表达式或解释，保留必要定义与适用条件。", "exclude_when": "从图像补造公式、自行推导的表达式或无依据的符号解释。"}, "graph": {"node_type": "formula"}}
+  ],
+  "examples": [
+    {"source_text": "**Only for short drafts**, the checklist reduced missing source notes in this exercise.", "choice": "text", "judgment": "这段文字可核对短草稿练习中的来源备注变化。", "reason": "引文需保留条件句与 Markdown，不能只截取 reduced missing source notes。"},
+    {"source_text": "Figure 1. The reading loop moves from a passage to a question, a draft, and a source check.", "choice": "figure", "judgment": "图 1 的文字说明可核对阅读循环的四个环节。", "reason": "使用实际提供的图注；不从图片补写未出现的内容。"},
+    {"source_text": "Revision rate = revised drafts / reviewed drafts; only drafts with source checks were counted.", "choice": "formula", "judgment": "修改率的分母是已审阅草稿，计数范围限于有来源核对的草稿。", "reason": "公式和计数条件共同决定含义，短引文仍需包含后半句。"}
   ]
 }

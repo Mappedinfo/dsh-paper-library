@@ -88,7 +88,7 @@ test('full mode defaults to the grouped question protocol and one reading note w
   assert.equal(Object.hasOwn(f.requests.find(r => r.action === 'paper_analysis_batch'), 'pages'), false)
   assert.ok(result.results[0].note_draft_id)
   assert.equal(result.results[0].review_draft_id, undefined)
-  assert.equal(result.results[0].questionnaire.version, 'reading-questions-v1')
+  assert.equal(result.results[0].questionnaire.version, 'reading-questions-v2')
   assert.equal(result.results[0].question_coverage.complete, true)
   assert.deepEqual(result.results[0].question_summary, { answers: 6, valid_answers: 6, invalid_answers: 0, other_answers: 0, projection_limitations: 0 })
   assert.equal(f.calls.filter(call => call.analysisContext?.question_ids).length, 3)
