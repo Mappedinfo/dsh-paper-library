@@ -1,0 +1,14 @@
+{
+  "id": "q1_task",
+  "title": "任务与应用问题",
+  "question": "本批文字明确提出了哪些需要完成的任务或应用问题？",
+  "guidance": "一个回答只记录一项有具体操作对象的任务或应用问题，说明要完成什么以及对象是什么。区分拟议任务与实际执行；任务目标本身不证明成功，也不代替方法或结果。不要列举操作步骤、指标或产出作为任务；没有明确任务时选 not_reported。任务与实测结果的联系另由对应关系题判断。",
+  "options": [
+    {"id": "task", "label": "研究任务或应用问题", "coding": {"definition": "读者、研究流程或系统需要完成的具体操作，或要解决的应用问题。", "include_when": "文字明确描述任务目标与操作对象，包括尚未执行但明确提出的具体任务。", "exclude_when": "方法步骤本身、已经产生的结果，或没有具体操作对象的愿景；不能把目标视为已完成。"}, "graph": {"node_type": "task", "relation": "reports"}}
+  ],
+  "examples": [
+    {"source_text": "The reading task is to distinguish the author's claim from the evidence in each practice paragraph.", "choice": "task", "judgment": "阅读任务是区分每段练习文字中的作者主张与证据。", "reason": "任务动作与操作对象明确，不需要在本题说明采用的方法。"},
+    {"source_text": "In the next exercise, students will check whether each quotation supports its adjacent sentence.", "choice": "task", "judgment": "下一次练习计划核对每条引文是否支持相邻句子。", "reason": "拟议任务同样有明确内容，但不能宣称已经执行或完成。"},
+    {"source_text": "The file contains two blue illustrations and three revised paragraphs.", "choice": "not_reported", "judgment": "本批列出了文件内容，没有明确提出需要完成的任务。", "reason": "文件内的产出或对象不能自动变成研究任务。"}
+  ]
+}

@@ -1,12 +1,18 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPaperAnalysis } from '../src/harness/paper-analysis.mjs'
 import { createLocalStateStore } from '../src/local-state.mjs'
 import { questionKey, readQuestionGroup } from '../src/harness/question-analysis.mjs'
 import { REVIEW_SECTIONS } from '../src/prompt-templates.mjs'
+import { loadQuestionnaire, questionGroups } from '../src/reading-questions.mjs'
+
+const questionnaire = loadQuestionnaire()
+const questionIds = questionnaire.questions.map(question => question.id)
+const groups = questionGroups(questionnaire)
+const callsPerBatch = groups.length
 
 async function fixture(t, override = {}) {
   const root = await mkdtemp(join(tmpdir(), 'question-analysis-'))
@@ -47,14 +53,17 @@ async function fixture(t, override = {}) {
   return f
 }
 
-test('grouped questions persist host-located evidence, raw replies and option candidates without metadata extraction', async t => {
+test('thirteen separate questions persist host-located evidence, raw replies and option candidates without metadata extraction', async t => {
   const f = await fixture(t), result = await f.run({ apply_metadata: true })
   assert.equal(result.status, 'complete', JSON.stringify(result))
   assert.equal(result.analysis_complete, true)
   assert.equal(result.question_coverage.complete, true)
   assert.equal(result.coverage.full_document, true)
-  assert.equal(f.calls.length, 6)
-  assert.deepEqual(f.calls.map(call => call.analysisContext.question_ids), [['q1','q2'],['q3','q4'],['q5','q6'],['q1','q2'],['q3','q4'],['q5','q6']])
+  assert.equal(questionnaire.version, 'reading-questions-v3')
+  assert.deepEqual(questionIds, ['q1_method','q1_dataset','q1_metric','q1_task','q2','q3','q4','q5_method_data','q5_method_result','q5_data_result','q5_metric_result','q5_task_result','q6'])
+  assert.deepEqual(groups, questionIds.map(id => [id]))
+  assert.equal(f.calls.length, 2 * callsPerBatch)
+  assert.deepEqual(f.calls.map(call => call.analysisContext.question_ids), [...groups, ...groups])
   assert.equal(f.kernel.filter(call => call.action === 'paper_analysis_batch').length, 2)
   assert.equal(f.kernel.some(call => call.action === 'paper_analysis_apply_metadata'), false)
   assert.deepEqual(result.metadata, {})
@@ -63,9 +72,9 @@ test('grouped questions persist host-located evidence, raw replies and option ca
     assert.match(call.prompt, /不提取原始 Abstract/)
   }
   const first = await f.handle({ action: 'paper_analysis_get', id: 'paper-a', request_id: 'run-a', batch_index: 0, include_raw: true })
-  assert.equal(first.question_results.length, 3)
-  assert.ok(first.question_results.every(group => JSON.parse(group.raw).answers.length === 2))
-  assert.equal(first.option_candidates.candidates.length, 6)
+  assert.equal(first.question_results.length, callsPerBatch)
+  assert.ok(first.question_results.every(group => JSON.parse(group.raw).answers.length === 1))
+  assert.equal(first.option_candidates.candidates.length, questionIds.length)
   assert.equal(first.option_candidates.active_config_changed, false)
   for (const answer of first.batch_answers) {
     assert.equal(answer.valid, true)
@@ -76,7 +85,7 @@ test('grouped questions persist host-located evidence, raw replies and option ca
   }
   const restarted = createPaperAnalysis(f.options)
   assert.equal((await restarted({ ...f.input, apply_metadata: true })).questionnaire.hash, result.questionnaire.hash)
-  assert.equal(f.calls.length, 6)
+  assert.equal(f.calls.length, 2 * callsPerBatch)
 })
 
 test('one bad quote and one failed request retain valid answers and continue later questions and pages', async t => {
@@ -85,23 +94,23 @@ test('one bad quote and one failed request retain valid answers and continue lat
     const context = input.analysisContext
     if (context.batch_index === 0 && context.question_ids.includes('q3')) throw new Error('synthetic provider failure')
     return JSON.stringify({ answers: context.question_ids.map(question_id => ({ question_id, choice: 'other', judgment: '合成判断',
-      evidence: [{ source_id: 'S1', quote: context.batch_index === 0 && question_id === 'q1' ? 'invented text' : 'Method A produced result B.' }] })) })
+      evidence: [{ source_id: 'S1', quote: context.batch_index === 0 && question_id === 'q1_method' ? 'invented text' : 'Method A produced result B.' }] })) })
   }
   const result = await f.run()
   assert.equal(result.status, 'partial')
   assert.equal(result.analysis_complete, false)
   assert.equal(result.coverage.full_document, true, 'text extraction completeness is distinct from successful answers')
   assert.equal(result.batch_count, 2)
-  assert.equal(f.calls.length, 6)
-  assert.equal(result.question_coverage.by_question.q2.answered_batches, 2, 'q2 remains usable when q1 fails in their shared response')
-  assert.deepEqual(result.question_coverage.by_question.q1.failed_batches, [0])
+  assert.equal(f.calls.length, 2 * callsPerBatch)
+  assert.equal(result.question_coverage.by_question.q2.answered_batches, 2, 'q2 remains usable when the separate method question fails')
+  assert.deepEqual(result.question_coverage.by_question.q1_method.failed_batches, [0])
   assert.deepEqual(result.question_coverage.by_question.q3.failed_batches, [0])
-  assert.equal(result.question_coverage.by_question.q5.answered_batches, 2)
+  assert.equal(result.question_coverage.by_question.q5_method_result.answered_batches, 2)
   const first = await f.handle({ action: 'paper_analysis_get', id: 'paper-a', batch_index: 0, include_raw: true })
   assert.match(first.question_results[0].raw, /invented text/)
-  assert.equal(first.batch_answers.find(answer => answer.question_id === 'q1').valid, false)
+  assert.equal(first.batch_answers.find(answer => answer.question_id === 'q1_method').valid, false)
   assert.ok(first.draft.nodes.every(node => node.quote !== 'invented text'))
-  assert.equal(first.question_results[1].status, 'partial')
+  assert.equal(first.question_results.find(group => group.question_ids.includes('q3')).status, 'partial')
 })
 
 test('separate subset invokes only selected questions; neutral answers do not fabricate graph claims', async t => {
@@ -122,7 +131,7 @@ test('graph write failure does not erase saved answers or stop the next page', a
   assert.equal(result.status, 'partial')
   assert.equal(result.question_coverage.complete, true)
   assert.equal(result.analysis_complete, false)
-  assert.equal(result.batch_answers.length, 6)
+  assert.equal(result.batch_answers.length, questionIds.length)
   assert.equal(result.batch_count, 2)
   assert.match(result.batch_graph_error, /synthetic graph persistence/)
 })
@@ -130,14 +139,14 @@ test('graph write failure does not erase saved answers or stop the next page', a
 test('graph budget omissions remain inspectable and cannot count as a complete deliverable', async t => {
   const f = await fixture(t)
   f.response = input => JSON.stringify({ answers: Array.from({ length: 12 }, (_, index) => ({
-    question_id: input.analysisContext.question_ids[index % 2], choice: 'other', judgment: `合成判断 ${index}`,
+    question_id: input.analysisContext.question_ids[index % input.analysisContext.question_ids.length], choice: 'other', judgment: `合成判断 ${index}`,
     evidence: [{ source_id: 'S1', quote: 'Method A produced result B.' }, { source_id: 'S1', quote: 'Check the evidence before accepting a conclusion.' }],
   })) })
   const result = await f.run()
   assert.equal(result.status, 'partial')
   assert.equal(result.analysis_complete, false)
   assert.equal(result.question_coverage.complete, true)
-  assert.equal(result.batch_answers.length, 36)
+  assert.equal(result.batch_answers.length, 12 * callsPerBatch)
   assert.equal(result.batch_compilation.truncated, true)
   assert.ok(result.batch_compilation.excluded_answers.some(answer => answer.reason === 'graph-budget-whole-answer-omitted'))
 })
@@ -155,7 +164,7 @@ test('call budget stops new extraction and keeps completed question groups inspe
   assert.equal(f.kernel.filter(call => call.action === 'paper_analysis_batch').length, 1)
   assert.equal(f.calls.length, 2)
   assert.equal(result.active_questions[0].status, 'complete')
-  assert.equal(result.active_questions[0].answers.length, 2)
+  assert.equal(result.active_questions[0].answers.length, groups[0].length)
 })
 
 test('fatal quota persists its failed question group then stops later groups and synthesis', async t => {
@@ -203,13 +212,50 @@ test('historical job fingerprints remain readable and never replay under the new
   assert.equal(f.calls.length, 0)
 })
 
+test('saved v1 and v2 questionnaire snapshots keep their omitted-mode signature and do not replay under v3', async t => {
+  const f = await fixture(t)
+  const { createHash } = await import('node:crypto')
+  const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+  const legacyIds = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']
+  const legacyGroups = [['q1','q2'], ['q3','q4'], ['q5','q6']]
+  const definitions = await Promise.all(legacyIds.map(id => readFile(new URL(`../prompts/reading/${id}.json`, import.meta.url), 'utf8').then(JSON.parse)))
+  for (const version of ['reading-questions-v1', 'reading-questions-v2']) {
+    const protocol = { ...structuredClone(questionnaire.protocol), version, default_groups: structuredClone(legacyGroups) }
+    delete protocol.question_ids; delete protocol.default_mode
+    const questions = structuredClone(definitions)
+    if (version.endsWith('v1')) {
+      delete protocol.codebook_required
+      for (const question of questions) {
+        delete question.examples
+        for (const option of question.options) { delete option.coding; if (option.graph) delete option.graph.endpoints }
+      }
+      for (const option of protocol.common_options) delete option.coding
+    }
+    const snapshot = { version, protocol, questions }
+    snapshot.hash = digest(snapshot)
+    assert.deepEqual(questionGroups(snapshot), legacyGroups, 'old snapshots retain their own grouped default')
+    const historical = { id: 'paper-a', request_id: version, apply_metadata: false, review: false, notes: false }
+    const key = `analysis.job:${digest(historical.id)}:${digest(historical.request_id)}`
+    const saved = await f.store.put(key, { ...historical, fingerprint: digest(historical), status: 'complete',
+      questionnaire: { version, hash: snapshot.hash, groups: structuredClone(legacyGroups) }, questionnaire_snapshot: snapshot, analysis_complete: true }, 0)
+    const result = await f.handle({ action: 'paper_analysis_start', ...historical })
+    assert.equal(result.status, 'complete')
+    assert.deepEqual(result.questionnaire, { version, hash: snapshot.hash, groups: legacyGroups })
+    const reread = await f.store.get(key)
+    assert.equal(reread.revision, saved.revision)
+    assert.deepEqual(reread.value.questionnaire_snapshot, snapshot)
+    assert.equal(f.calls.length, 0)
+    assert.equal(f.kernel.length, 0, 'reading a frozen saved job never extracts source pages or resolves a new model')
+  }
+})
+
 test('an unrequested invalid answer cannot leave the group partial while the overall job claims complete', async t => {
   const f = await fixture(t)
   f.response = input => JSON.stringify({ answers: [
     ...input.analysisContext.question_ids.map(question_id => ({ question_id, choice: 'not_reported' })),
     { question_id: 'q99', choice: 'not_reported' },
   ] })
-  const result = await f.run({ question_ids: ['q1'] })
+  const result = await f.run({ question_ids: ['q1_method'] })
   assert.equal(result.question_results[0].status, 'partial')
   assert.equal(result.status, 'partial')
   assert.equal(result.analysis_complete, false)
@@ -237,7 +283,7 @@ test('a response saved before an answer-checkpoint failure remains inspectable w
     return originalStore.put(key, value, revision)
   } }
   f.handle = createPaperAnalysis(f.options)
-  const result = await f.run({ question_ids: ['q1'] })
+  const result = await f.run({ question_ids: ['q1_method'] })
   assert.equal(result.status, 'failed')
   assert.equal(f.calls.length, 1)
   const group = await readQuestionGroup(originalStore, questionKey('paper-a', 'run-a', 0, 0), true)
@@ -266,10 +312,10 @@ test('synthesis cannot consume evidence whose sources exceed the persisted note 
     }
     f.handle = createPaperAnalysis(f.options)
     f.response = input => input.analysisContext.stage === 'batch'
-      ? JSON.stringify({ answers: [{ question_id: 'q1', choice: 'method', judgment: 'Method A', evidence: [{ source_id: 'S1', quote: 'Method A produced result B.' }] }] })
+      ? JSON.stringify({ answers: [{ question_id: 'q1_method', choice: 'method', judgment: 'Method A', evidence: [{ source_id: 'S1', quote: 'Method A produced result B.' }] }] })
       : JSON.stringify(stage === 'note' ? { title: '合成阅读笔记', body: '仅使用可保存出处的材料。' }
         : { title: '证据图谱评审：合成材料', body: REVIEW_SECTIONS.map(section => `## ${section}\n仅使用可保存出处的材料。`).join('\n') })
-    const result = await f.run({ question_ids: ['q1'], notes: stage === 'note', review: stage === 'review' })
+    const result = await f.run({ question_ids: ['q1_method'], notes: stage === 'note', review: stage === 'review' })
     assert.equal(result.question_coverage.complete, true)
     const call = f.calls.find(call => call.analysisContext.stage === stage)
     const saved = [...f.drafts.values()].find(draft => draft.id === result[`${stage}_draft_id`])

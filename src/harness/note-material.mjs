@@ -59,7 +59,7 @@ function cardFor(batch) {
     nodes, relations,
     compilation: batch.compilation ? { truncated: batch.compilation.truncated === true, excluded: batch.compilation.excluded_answers?.length ?? 0 } : null,
     graph_error: batch.graph_error?.code ?? graph.graph_error?.code ?? null,
-    omissions: { answer_details: 0, graph_records: 0, quote_refs: 0, unbound_quote_refs: 0 },
+    omissions: { answer_details: 0, graph_records: 0, quote_refs: 0, unbound_quote_refs: 0, group_details: 0, answer_count_details: 0 },
   }
 }
 
@@ -190,13 +190,55 @@ export async function packNoteMaterial({ batches, totalBatches = batches.length,
     (b.draft?.body && clip(b.draft.body, 500) !== b.draft.body) || (b.draft?.nodes ?? []).some(n => clip(n.label, 120) !== String(n.label ?? '')) ||
     [...(b.draft?.edges ?? []), ...(b.draft?.assertions ?? [])].some(r => clip(r.subject, 100) !== String(r.subject ?? '') || clip(r.relation, 80) !== String(r.relation ?? '') || clip(r.object, 100) !== String(r.object ?? '') || clip(r.surface, 100) !== String(r.surface ?? '')))
   if (clippedContent || material.some(c => c.answers.some(answer => answer.evidence.some(ref => ref.quote_truncated)) || c.nodes.some(node => node.quote_truncated))) coverage.partial_reasons = unique([...coverage.partial_reasons, 'CONTENT_COMPACTED'])
-  coverage.material_bytes = bytes({ batches: material, packing: coverage })
+  // 最终来源、计数及其字段字节都参与每次预算判断，避免循环结束后才更新导致超限。
+  const refreshCoverage = () => {
+    for (const card of material) card.source_ids = unique([...(card.scope_context?.source_id ? [card.scope_context.source_id] : []),
+      ...card.answers.flatMap(answer => answer.evidence.map(ref => ref.source_id)), ...card.nodes.map(node => node.source_id).filter(Boolean)]).filter(id => materialSources.has(id))
+    const ids = unique(material.flatMap(card => card.source_ids))
+    coverage.sources = ids.length
+    coverage.source_characters = ids.reduce((n, id) => n + (materialSources.get(id)?.characters ?? 0), 0)
+    coverage.verified_quotes = material.reduce((n, card) => n + card.answers.reduce((m, answer) => m + answer.evidence.length, 0) + card.nodes.filter(node => node.source_id).length, 0)
+    coverage.omitted_quotes = Math.max(0, selected.filter(row => row.original_quote).length - coverage.verified_quotes)
+    coverage.group_details_omitted = material.reduce((n, card) => n + card.omissions.group_details, 0)
+    coverage.answer_count_details_omitted = material.reduce((n, card) => n + card.omissions.answer_count_details, 0)
+    coverage.partial = coverage.partial_reasons.length > 0
+    // material_bytes 本身也是 JSON 的一部分；数位变化后继续计算到固定值。
+    let measured = bytes({ batches: material, packing: coverage })
+    while (coverage.material_bytes !== measured) {
+      coverage.material_bytes = measured
+      measured = bytes({ batches: material, packing: coverage })
+    }
+    return ids
+  }
+  refreshCoverage()
   while (coverage.material_bytes > budgetBytes) {
     const ranked = [...material].sort((a, b) => bytes({ card: b }) - bytes({ card: a }))
     let removed = false
     const evidenceCount = card => card.answers.reduce((n, answer) => n + answer.evidence.length, 0) + card.nodes.filter(node => node.source_id).length
     const protectedEvidenceCards = new Set(material.filter(card => evidenceCount(card)).map(card => card.batch))
     for (const card of ranked) {
+      if (card.question_groups.length > 1) {
+        const groups = card.question_groups
+        const errorCounts = {}
+        for (const group of groups) for (const [code, count] of Object.entries(group.errors)) errorCounts[code] = (errorCounts[code] ?? 0) + count
+        card.question_groups_summary = { total: groups.length, by_status: counts(groups.map(group => group.status)),
+          question_ids: unique(groups.flatMap(group => group.question_ids)),
+          incomplete_question_ids: unique(groups.filter(group => group.status !== 'complete').flatMap(group => group.question_ids)),
+          missing: counts(groups.flatMap(group => group.missing)), errors: errorCounts }
+        card.omissions.group_details += groups.length
+        card.question_groups = []
+        coverage.partial_reasons = unique([...coverage.partial_reasons, 'GROUP_DETAILS_COMPACTED'])
+        removed = true; break
+      }
+      if (Object.keys(card.answer_counts.choices ?? {}).length > 1) {
+        const choices = Object.values(card.answer_counts.choices), byChoice = {}
+        for (const counts of choices) for (const [choice, count] of Object.entries(counts.by_choice)) byChoice[choice] = (byChoice[choice] ?? 0) + count
+        card.answer_counts = { total: card.answer_counts.total, valid: card.answer_counts.valid, invalid: card.answer_counts.invalid,
+          neutral: choices.reduce((n, choice) => n + choice.neutral, 0), by_choice: byChoice }
+        card.omissions.answer_count_details += choices.length
+        coverage.partial_reasons = unique([...coverage.partial_reasons, 'QUESTION_COUNTS_COMPACTED'])
+        removed = true; break
+      }
       const answerWithExtraRef = card.answers.find(answer => answer.evidence.length > 1)
       if (answerWithExtraRef) { answerWithExtraRef.evidence.pop(); card.omissions.quote_refs++; removed = true; break }
       const answerWithRef = card.answers.find(answer => answer.evidence.length === 1)
@@ -227,23 +269,8 @@ export async function packNoteMaterial({ batches, totalBatches = batches.length,
       const error = new Error('NOTE_MATERIAL_BUDGET_EXCEEDED'); error.code = 'NOTE_MATERIAL_BUDGET_EXCEEDED'; throw error
     }
     coverage.partial_reasons = unique([...coverage.partial_reasons, 'MATERIAL_BUDGET_COMPACTED'])
-    for (const card of material) {
-      card.source_ids = unique([...(card.scope_context?.source_id ? [card.scope_context.source_id] : []), ...card.answers.flatMap(answer => answer.evidence.map(ref => ref.source_id)), ...card.nodes.map(node => node.source_id).filter(Boolean)])
-    }
-    coverage.material_bytes = bytes({ batches: material, packing: coverage })
+    refreshCoverage()
   }
-  coverage.partial = coverage.partial_reasons.length > 0 || coverage.material_bytes > budgetBytes
-  // Source IDs are derived from the final evidence, and never include orphaned bindings.
-  const finalIds = unique(material.flatMap(c => [...c.source_ids]))
-  const finalSourceIds = finalIds.filter(id => materialSources.has(id))
-  for (const card of material) card.source_ids = unique([...(card.scope_context?.source_id ? [card.scope_context.source_id] : []), ...card.answers.flatMap(answer => answer.evidence.map(ref => ref.source_id)), ...card.nodes.map(node => node.source_id).filter(Boolean)]).filter(id => finalSourceIds.includes(id))
-  const liveIds = new Set(material.flatMap(card => card.source_ids))
-  const prunedIds = finalSourceIds.filter(id => liveIds.has(id))
-  coverage.sources = prunedIds.length
-  coverage.source_characters = prunedIds.reduce((n, id) => n + (materialSources.get(id)?.characters ?? 0), 0)
-  coverage.verified_quotes = material.reduce((n, card) => n + card.answers.reduce((m, answer) => m + answer.evidence.length, 0) + card.nodes.filter(node => node.source_id).length, 0)
-  coverage.omitted_quotes = Math.max(0, selected.filter(row => row.original_quote).length - coverage.verified_quotes)
-  coverage.material_bytes = bytes({ batches: material, packing: coverage })
-  if (coverage.material_bytes > budgetBytes) { const error = new Error('NOTE_MATERIAL_BUDGET_EXCEEDED'); error.code = 'NOTE_MATERIAL_BUDGET_EXCEEDED'; throw error }
+  const prunedIds = refreshCoverage()
   return { material, sourceIds: prunedIds, sourceCharacters: coverage.source_characters, partial: coverage.partial, coverage }
 }

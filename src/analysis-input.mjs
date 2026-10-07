@@ -1,3 +1,5 @@
+import { loadQuestionnaire } from './reading-questions.mjs'
+
 /** 只保留非默认选项，兼容既有纯文字作业的请求身份。 */
 export function analysisInputOptions(input = {}) {
   if (input.input_format !== undefined && !['text', 'markdown'].includes(input.input_format) ||
@@ -8,9 +10,9 @@ export function analysisInputOptions(input = {}) {
     ...(input.include_images === true ? { include_images: true } : {}) }
 }
 
-const QUESTION_IDS = new Set(['q1', 'q2', 'q3', 'q4', 'q5', 'q6'])
+const LEGACY_IDS = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']
 
-/** Preserve only explicitly supplied question controls; grouped is the runtime default. */
+/** 只保留显式选项以维持旧请求身份；新作业按冻结题库检查归属和默认模式。 */
 export function analysisQuestionOptions(input = {}) {
   const hasIds = input.question_ids !== undefined
   const hasMode = input.question_mode !== undefined
@@ -19,9 +21,7 @@ export function analysisQuestionOptions(input = {}) {
   if ((hasIds || hasMode) && mode !== 'full') {
     throw Object.assign(new Error('阅读问题选项仅适用于完整分析。'), { code: 'ANALYSIS_INVALID', status: 400 })
   }
-  if (hasIds && (!Array.isArray(input.question_ids) || input.question_ids.length < 1 ||
-      input.question_ids.length > QUESTION_IDS.size || new Set(input.question_ids).size !== input.question_ids.length ||
-      input.question_ids.some(id => !QUESTION_IDS.has(id)))) {
+  if (hasIds && !validQuestionIds(input.question_ids)) {
     throw Object.assign(new Error('请选择不重复的有效阅读问题。'), { code: 'ANALYSIS_INVALID', status: 400 })
   }
   if (hasMode && !['grouped', 'separate'].includes(input.question_mode)) {
@@ -34,6 +34,9 @@ export function analysisQuestionOptions(input = {}) {
 }
 
 export function validQuestionIds(value) {
-  return Array.isArray(value) && value.length > 0 && value.length <= QUESTION_IDS.size &&
-    new Set(value).size === value.length && value.every(id => QUESTION_IDS.has(id))
+  if (!Array.isArray(value) || !value.length || value.length > 24 || new Set(value).size !== value.length) return false
+  const current = loadQuestionnaire().questions.map(question => question.id)
+  // 旧标识只允许通过入口的身份校验，供已保存请求读取；新请求随后须匹配当前题库。
+  const known = new Set([...current, ...LEGACY_IDS])
+  return value.length <= Math.max(current.length, LEGACY_IDS.length) && value.every(id => known.has(id))
 }

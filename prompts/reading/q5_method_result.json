@@ -1,0 +1,14 @@
+{
+  "id": "q5_method_result",
+  "title": "方法与实测结果的联系",
+  "question": "本批材料明确说明了哪个方法在什么条件下产生了哪个实际结果？",
+  "guidance": "一个回答只记录一个明确方法及其已报告结果，保留配置、比较对象和观察范围。可选 subject 是方法、object 是实际结果，两端须从同一条连续引文复制且同时提供，否则只保留判断。方法目标、承诺或假设不算结果；材料仅涉及设计目的但尚无实际结果时选 other 并说明，不输出结果端点；未报告本题联系时选 not_reported。流程归属不是因果识别，projection 将结果指向方法。不要在本题回答其他类型的联系。",
+  "options": [
+    {"id": "method_result", "label": "某种方法在给定条件下产生某结果", "coding": {"definition": "实际结果归属于明确的研究或计算流程；produced_by 不代表因果识别。", "include_when": "方法与已报告结果有明确流程归属，保留配置、研究归属和观察范围。", "exclude_when": "方法的目标、承诺或假设，将不同配置的结果拼接，或将流程归属扩大成已证实因果。"}, "graph": {"node_type": "claim", "relation": "reports", "endpoints": {"subject_type": "method", "object_type": "observation", "relation": "produced_by", "direction": "object-to-subject"}}}
+  ],
+  "examples": [
+    {"source_text": "In the short-draft exercise, the sentence-checking routine produced five corrected citations.", "choice": "method_result", "judgment": "短草稿练习中，句子核对流程产出了五条修正后的引用。", "reason": "有实际产出；回答端点是方法、结果，图谱边从结果指向方法。", "subject": "sentence-checking routine", "object": "five corrected citations"},
+    {"source_text": "In an earlier exercise, the comparison routine found discrepancies in some short drafts.", "choice": "method_result", "judgment": "此前练习的比较流程在部分短草稿中发现差异。", "reason": "可以记录历史实际结果，但不能改成当前研究结果或全部草稿表现。", "subject": "comparison routine", "object": "discrepancies in some short drafts"},
+    {"source_text": "This paper presents a sketching routine intended to clarify an argument.", "choice": "other", "judgment": "作者只说明绘图流程澄清论证的设计目的，尚未报告实际效果。", "reason": "设计目的作为 claim 保留，不选择 method_result，也不给实际结果端点。"}
+  ]
+}

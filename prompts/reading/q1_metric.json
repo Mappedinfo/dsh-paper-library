@@ -1,0 +1,14 @@
+{
+  "id": "q1_metric",
+  "title": "评价指标",
+  "question": "本批文字明确给出了哪些评价指标、测量量或判断标准？",
+  "guidance": "一个回答只记录一个明确的评价或测量标准；材料给出计算规则、单位、分母或适用条件时保留它们。只定义指标也可以回答本题，不要求已经报告实测值。不要把结果数值、笼统效果描述或研究目标当成指标；没有明确标准时选 not_reported。指标与实测结果的联系另由对应关系题判断。",
+  "options": [
+    {"id": "metric", "label": "评价指标或测量标准", "coding": {"definition": "用于量化或判断表现的测量量、计算规则或标准。", "include_when": "文字明确给出评分、比例、计数或其他评价标准，可仅定义标准而尚无实测结果。", "exclude_when": "只有未说明测量标准的数值，或笼统宣称效果好；指标定义不能冒充实测结果。"}, "graph": {"node_type": "metric", "relation": "reports"}}
+  ],
+  "examples": [
+    {"source_text": "We measure revision accuracy as the proportion of revised sentences that retain the source meaning.", "choice": "metric", "judgment": "改稿准确率按保留原文含义的改写句比例测量。", "reason": "明确给出指标与分母；尚无结果值也满足本题。"},
+    {"source_text": "For this exercise, citation errors are counted per paragraph before and after revision.", "choice": "metric", "judgment": "本练习按每段引用错误的计数比较改稿前后表现。", "reason": "计数对象和计量单位明确，计数也可以是指标。"},
+    {"source_text": "The revised paragraph is clearer and more persuasive.", "choice": "not_reported", "judgment": "本批只有笼统的效果描述，没有给出评价或测量标准。", "reason": "不能自行构造清晰度或说服力的评分指标。"}
+  ]
+}

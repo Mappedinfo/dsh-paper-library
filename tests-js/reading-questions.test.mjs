@@ -1,4 +1,4 @@
-import test from 'node:test'
+import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, cp, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -7,7 +7,24 @@ import { pathToFileURL } from 'node:url'
 import { loadQuestionnaire, questionGroups, makeReadingPrompt, parseReadingAnswers, compileReadingGraph, summarizeOptionCandidates } from '../src/reading-questions.mjs'
 import { validateGraph } from '../scripts/probe-paper-analysis-decomposition.mjs'
 
-const config = loadQuestionnaire()
+const atomicConfig = loadQuestionnaire()
+const legacyIds = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']
+const atomicIds = ['q1_method', 'q1_dataset', 'q1_metric', 'q1_task', 'q2', 'q3', 'q4',
+  'q5_method_data', 'q5_method_result', 'q5_data_result', 'q5_metric_result', 'q5_task_result', 'q6']
+function legacyProtocol(protocol) {
+  const legacy = structuredClone(protocol)
+  legacy.version = 'reading-questions-v2'
+  delete legacy.question_ids
+  delete legacy.default_mode
+  legacy.default_groups = [['q1', 'q2'], ['q3', 'q4'], ['q5', 'q6']]
+  return legacy
+}
+const legacyDirectory = await mkdtemp(join(tmpdir(), 'reading-legacy-v2-synthetic-'))
+await cp(new URL('../prompts/reading/', import.meta.url), legacyDirectory, { recursive: true })
+await writeFile(join(legacyDirectory, 'protocol.json'), JSON.stringify(legacyProtocol(atomicConfig.protocol)))
+const legacyUrl = pathToFileURL(`${legacyDirectory}/`)
+const config = loadQuestionnaire(legacyUrl)
+after(() => rm(legacyDirectory, { recursive: true, force: true }))
 function pack(text = 'Retrieval practice used StudySet and improved recall. The study reports a limited sample.') {
   const sources = [{ id: 'ks-synthetic-a', entity: { kind: 'paper', id: 'synthetic-paper' }, text, locator: { page: 3 }, kind: 'source-note' }]
   return { paper: { id: 'synthetic-paper', title: 'Synthetic learning exercise', abstract: 'PRIVATE ABSTRACT MUST NOT BE SERIALIZED', private_field: 'PRIVATE CUSTOM FIELD' },
@@ -16,17 +33,17 @@ function pack(text = 'Retrieval practice used StudySet and improved recall. The 
 function answer(question_id = 'q1', choice = 'method', overrides = {}) {
   return { question_id, choice, judgment: '检索练习', evidence: [{ source_id: 'S1', quote: 'Retrieval practice used StudySet and improved recall.' }], ...overrides }
 }
-function parse(answers, input = pack(), ids = [...new Set(answers.map(item => item.question_id))]) {
-  return parseReadingAnswers(JSON.stringify({ answers }), input, ids, config)
+function parse(answers, input = pack(), ids = [...new Set(answers.map(item => item.question_id))], selectedConfig = config) {
+  return parseReadingAnswers(JSON.stringify({ answers }), input, ids, selectedConfig)
 }
 async function assertGraphValid(graph, input) {
   const result = await validateGraph({ ...graph, entity: { kind: 'paper', id: input.paper.id }, mode: 'graph', origin: 'llm' }, input.sources)
   assert.equal(result.ok, true, result.error)
 }
 
-test('human question files load immutable content hashes; grouped and separate scopes are validated', () => {
-  assert.deepEqual(config.questions.map(question => question.id), ['q1', 'q2', 'q3', 'q4', 'q5', 'q6'])
-  assert.equal(config.hash, loadQuestionnaire().hash)
+test('legacy v2 question files retain immutable hashes and their original grouped and separate scopes', () => {
+  assert.deepEqual(config.questions.map(question => question.id), legacyIds)
+  assert.equal(config.hash, loadQuestionnaire(legacyUrl).hash)
   assert.ok(Object.isFrozen(config.questions[0].options[0]))
   assert.throws(() => { config.questions[0].question = 'changed' }, TypeError)
   assert.deepEqual(questionGroups(config), [['q1', 'q2'], ['q3', 'q4'], ['q5', 'q6']])
@@ -39,6 +56,7 @@ test('editing questions changes the content hash and invalid unsafe schema edits
   const root = await mkdtemp(join(tmpdir(), 'reading-questions-synthetic-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   await cp(new URL('../prompts/reading/', import.meta.url), root, { recursive: true })
+  await writeFile(join(root, 'protocol.json'), JSON.stringify(legacyProtocol(atomicConfig.protocol)))
   const file = join(root, 'q1.json'), value = JSON.parse(await readFile(file, 'utf8'))
   value.question += ' 保留应用范围。'
   await writeFile(file, JSON.stringify(value))
@@ -196,7 +214,7 @@ test('other choices form bounded human-review candidates without mutating active
   assert.equal(candidates.candidates[0].origins.length, 2)
   assert.equal(candidates.active_config_changed, false)
   assert.equal(candidates.candidates[0].status, 'needs-human-review')
-  assert.equal(config.hash, loadQuestionnaire().hash)
+  assert.equal(config.hash, loadQuestionnaire(legacyUrl).hash)
 })
 
 test('source selection and evidence offsets are rechecked when graph projection is requested', () => {
@@ -214,4 +232,82 @@ test('whitespace restoration does not bypass the persisted quote character budge
   const result = parse([answer('q3', 'text', { evidence: [{ source_id: 'S1', quote: 'A B' }] })], input)
   assert.equal(result.answers[0].valid, false)
   assert.equal(result.answers[0].evidence.length, 0)
+})
+
+test('v3 schedules thirteen independent question calls and preserves selected order by default', () => {
+  assert.equal(atomicConfig.version, 'reading-questions-v3')
+  assert.equal(atomicConfig.protocol.default_mode, 'separate')
+  assert.deepEqual(atomicConfig.questions.map(question => question.id), atomicIds)
+  assert.deepEqual(questionGroups(atomicConfig), atomicIds.map(id => [id]))
+  assert.equal(questionGroups(atomicConfig).length, 13)
+  assert.deepEqual(questionGroups(atomicConfig, { question_ids: ['q6', 'q1_method'] }), [['q6'], ['q1_method']])
+  assert.deepEqual(questionGroups(atomicConfig, { question_ids: ['q6', 'q1_method'], question_mode: 'grouped' }), [['q1_method'], ['q6']])
+  const input = pack(), returned = []
+  for (const ids of questionGroups(atomicConfig)) {
+    const prompt = makeReadingPrompt(input, ids, atomicConfig)
+    assert.equal((prompt.match(/"question_id":/g) ?? []).length, 2, 'each call contains one question and one response-format example')
+    const result = parse([answer(ids[0], 'not_reported', { judgment: '本批未见', evidence: [] })], input, ids, atomicConfig)
+    assert.deepEqual(result.errors, [])
+    assert.deepEqual(result.missing, [])
+    returned.push(...result.answers.map(item => item.question_id))
+  }
+  assert.deepEqual(returned, atomicIds, 'all thirteen independent responses cover the requested questionnaire once')
+})
+
+test('each atomic entity question accepts its own category and rejects the other three categories', () => {
+  const input = pack()
+  for (const type of ['method', 'dataset', 'metric', 'task']) {
+    const id = `q1_${type}`, question = atomicConfig.questions.find(item => item.id === id)
+    assert.deepEqual(question.options.map(option => option.id), [type])
+    for (const choice of ['method', 'dataset', 'metric', 'task']) {
+      const result = parse([answer(id, choice)], input, [id], atomicConfig)
+      assert.equal(result.answers[0].valid, choice === type, `${id}/${choice}`)
+      if (choice === type) {
+        const graph = compileReadingGraph(result, input, atomicConfig)
+        assert.ok(graph.nodes.some(node => node.type === type))
+      } else {
+        assert.ok(result.answers[0].errors.some(error => error.code === 'UNKNOWN_CHOICE'))
+        assert.deepEqual(compileReadingGraph(result, input, atomicConfig).nodes, [])
+      }
+    }
+    const oldQuestion = parse([answer('q1', type)], input, [id], atomicConfig)
+    assert.ok(oldQuestion.answers[0].errors.some(error => error.code === 'UNKNOWN_QUESTION'))
+    assert.deepEqual(oldQuestion.missing, [id], 'a legacy broad answer cannot stand in for the new atomic question')
+  }
+})
+
+test('an invalid atomic category and one missing question cannot erase separately valid entity answers', () => {
+  const input = pack(), ids = ['q1_method', 'q1_dataset', 'q1_metric', 'q1_task']
+  const result = parse([answer('q1_method', 'method'), answer('q1_dataset', 'dataset'), answer('q1_metric', 'dataset')], input, ids, atomicConfig)
+  assert.deepEqual(result.missing, ['q1_task'])
+  assert.deepEqual(result.answers.filter(item => item.valid).map(item => item.question_id), ['q1_method', 'q1_dataset'])
+  assert.equal(result.answers.find(item => item.question_id === 'q1_metric').valid, false)
+  assert.ok(result.errors.some(error => error.code === 'MISSING_QUESTION' && error.question_id === 'q1_task'))
+  const graph = compileReadingGraph(result, input, atomicConfig)
+  assert.equal(graph.compilation.included_answer_ids.length, 2)
+  assert.equal(graph.compilation.excluded_answers.length, 1)
+  assert.ok(graph.nodes.some(node => node.type === 'method'))
+  assert.ok(graph.nodes.some(node => node.type === 'dataset'))
+  assert.equal(graph.nodes.some(node => node.type === 'metric' || node.type === 'task'), false)
+})
+
+test('v3 hashes active atomic assets and refuses unsafe or duplicate manifest identifiers', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'reading-atomic-manifest-synthetic-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  await cp(new URL('../prompts/reading/', import.meta.url), directory, { recursive: true })
+  const url = pathToFileURL(`${directory}/`), baseline = loadQuestionnaire(url)
+  const oldFile = join(directory, 'q1.json'), oldQuestion = JSON.parse(await readFile(oldFile, 'utf8'))
+  oldQuestion.question += ' 旧快照材料修订。'
+  await writeFile(oldFile, JSON.stringify(oldQuestion))
+  assert.equal(loadQuestionnaire(url).hash, baseline.hash, 'inactive legacy assets do not change a new job input hash')
+  const activeFile = join(directory, 'q1_method.json'), activeQuestion = JSON.parse(await readFile(activeFile, 'utf8'))
+  activeQuestion.question += ' 仅核对当前方法。'
+  await writeFile(activeFile, JSON.stringify(activeQuestion))
+  assert.notEqual(loadQuestionnaire(url).hash, baseline.hash)
+  for (const ids of [[], ['q1_method', 'q1_method'], ['../q1'], ['q1_method.json'], Array(41).fill('q1_method')]) {
+    const protocol = structuredClone(atomicConfig.protocol)
+    protocol.question_ids = ids
+    await writeFile(join(directory, 'protocol.json'), JSON.stringify(protocol))
+    assert.throws(() => loadQuestionnaire(url), error => error.code === 'READING_PROTOCOL_INVALID', JSON.stringify(ids))
+  }
 })

@@ -1,0 +1,14 @@
+{
+  "id": "q5_data_result",
+  "title": "数据与实测结果的联系",
+  "question": "本批材料明确说明了哪个实际结果来自哪项数据、样本或子集？",
+  "guidance": "一个回答只记录一项数据与其明确对应的已报告结果，保留样本、子集和观察条件。可选 subject 是数据、object 是实际结果，两端须从同一条连续引文复制且同时提供，否则只保留判断。不要仅凭名称共现连接数据与结果，也不要把局部结果推广到全部数据；未报告本题联系时选 not_reported。projection 将结果指向数据。不要在本题回答方法、指标或任务与结果的联系。",
+  "options": [
+    {"id": "data_result", "label": "结果来自某项数据或子样本", "coding": {"definition": "已报告结果是在明确数据集或子样本上得到的观察。", "include_when": "材料明确把实际结果对应到该数据来源、样本或子集，保留其观察范围。", "exclude_when": "只有数据与结果名称共现、预期结果，或把局部样本结果推广至全体数据。"}, "graph": {"node_type": "claim", "relation": "reports", "endpoints": {"subject_type": "dataset", "object_type": "observation", "relation": "observed_on", "direction": "object-to-subject"}}}
+  ],
+  "examples": [
+    {"source_text": "On the practice-draft set, the exercise identified five unsupported quotations.", "choice": "data_result", "judgment": "练习在草稿集中识别出五条缺少支持的引文。", "reason": "数据来源与实际观察在同一句中明确对应。", "subject": "practice-draft set", "object": "five unsupported quotations"},
+    {"source_text": "Among the short-draft subset, discrepancies were found in three drafts; the remaining drafts were not examined.", "choice": "data_result", "judgment": "短草稿子集中有三份草稿发现差异，其余草稿未检查。", "reason": "结果只对应已检查子集，必须保留未检查其余材料的限制。", "subject": "short-draft subset", "object": "discrepancies were found in three drafts"},
+    {"source_text": "Twelve practice passages are listed in the appendix. A separate exercise produced five corrected citations.", "choice": "not_reported", "judgment": "本批没有把十二段文本与另一次练习的五条修正引用明确对应。", "reason": "数据名称与结果共现不构成数据—结果联系。"}
+  ]
+}

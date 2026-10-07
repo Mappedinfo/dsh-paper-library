@@ -1,0 +1,14 @@
+{
+  "id": "q1_method",
+  "title": "方法与流程",
+  "question": "本批文字明确提到了哪些方法或处理流程？",
+  "guidance": "一个回答只记录一个具体方法或流程，用引文核对名称或步骤。区分背景提及、拟议方法与实际使用，保留范围和历史归属；仅出现名称不证明本研究使用了它。不要在本题列举数据集、指标、任务或结果；没有明确方法时选 not_reported。",
+  "options": [
+    {"id": "method", "label": "方法或处理流程", "coding": {"definition": "用于操作、处理或推理的具体方法与步骤。", "include_when": "文字明确提及或描述一个方法；说明背景提及、拟议还是实际使用，不要求本批同时报告结果。", "exclude_when": "论文题名、作者、研究目标、评价指标或仅作为输出的图像；不要仅凭研究目标猜测方法。"}, "graph": {"node_type": "method", "relation": "reports"}}
+  ],
+  "examples": [
+    {"source_text": "In the revision exercise, we apply a sentence-checking routine to each paragraph.", "choice": "method", "judgment": "改稿练习实际使用逐段核对句子的流程。", "reason": "明确给出处理流程与使用状态，一个回答只记录这个流程。"},
+    {"source_text": "We discuss some previously described source-checking routines; this exercise does not apply them.", "choice": "method", "judgment": "背景讨论了部分先前介绍的来源核对流程，本练习未使用它们。", "reason": "背景方法仍被明确提及，须保留 some、previously described 和未使用的限制。"},
+    {"source_text": "The exercise produced two illustrations and a revised paragraph.", "choice": "not_reported", "judgment": "本批报告了产出，没有说明产生这些产出的具体方法。", "reason": "产出对象不能当成方法，也不能凭产出反推流程。"}
+  ]
+}

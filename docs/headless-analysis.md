@@ -84,10 +84,10 @@ JSON
 | `notes` | 必须为 `false` | 默认 `true`，追加一次精读笔记调用 |
 | `review` | 必须为 `false` | 默认 `false`，启用后追加一次评审调用 |
 | `apply_metadata` | 默认 `false` | 不提取、不写回书目资料，旧 `true` 设置不生效 |
-| `question_ids` | 不适用 | 默认 q1–q6，可选非空子集 |
-| `question_mode` | 不适用 | `grouped` 默认每次两题；`separate` 每题一次 |
+| `question_ids` | 不适用 | 默认完整 13 题，可选非空子集；ID 见[题库](reading-questions.md) |
+| `question_mode` | 不适用 | 默认 `separate` 每题一次；`grouped` 按冻结题库分组（v3 也为单题） |
 
-这里的默认值属于独立入口；DSH 仍沿用笔记／评审偏好，但全文阅读也不再补全元数据。仅需问题回答、证据与图谱时，设置 `notes:false` 可省去总结调用。每个文本批次默认三次题组调用，逐题模式六次；同一批文字及可选图片会重复发送，计入提供方用量。问题与选项、人工编辑步骤及“精确引文”的含义见[可审阅的论文阅读问题](reading-questions.md)。默认仍为 `input_format:"text"`、`include_images:false`。
+这里的默认值属于独立入口；DSH 仍沿用笔记／评审偏好，但全文阅读也不再补全元数据。仅需问题回答、证据与图谱时，设置 `notes:false` 可省去总结调用。每个文本批次默认 13 次问题调用；同一批文字及可选图片会重复发送，计入提供方用量。新题库不自动上调 `maxCalls`，应按“所选题数 × 有文字批次数 + 笔记／评审次数”规划额度，耗尽后保留已保存结果。问题与选项、人工编辑步骤及“精确引文”的含义见[可审阅的论文阅读问题](reading-questions.md)。旧 v1/v2 作业按原快照读取和分组，不自动重跑。默认仍为 `input_format:"text"`、`include_images:false`。
 
 需要先整理栏序并配图时，在分析请求或编排计划中加入：
 
@@ -192,7 +192,7 @@ node scripts/diagnose-paper-analysis-run.mjs \
   --out /absolute/private/new-diagnosis
 ```
 
-以下工具保留历史 `legacy-monolithic-v1` 协议，用于复核旧运行，**不是当前六题阅读协议的质量评测**。若要比较旧流程的“每批一次同时返回图谱、摘要和元数据”与“图谱加摘要、元数据分两次返回”，可运行 `scripts/probe-paper-analysis-decomposition.mjs`。计划必须只含一个模型路由、最多 3 个明确条目，并设置 `mode:"full"`、`notes:false`、`review:false`、`input_format:"markdown"`、`include_images:true`；模型配置的 `maxCalls` 至少为条目数的 3 倍。示例只含占位 ID：
+以下工具保留历史 `legacy-monolithic-v1` 协议，用于复核旧运行，**不是当前逐题阅读协议的质量评测**。若要比较旧流程的“每批一次同时返回图谱、摘要和元数据”与“图谱加摘要、元数据分两次返回”，可运行 `scripts/probe-paper-analysis-decomposition.mjs`。计划必须只含一个模型路由、最多 3 个明确条目，并设置 `mode:"full"`、`notes:false`、`review:false`、`input_format:"markdown"`、`include_images:true`；模型配置的 `maxCalls` 至少为条目数的 3 倍。示例只含占位 ID：
 
 ```json
 {
@@ -234,7 +234,7 @@ node scripts/compare-paper-analysis-runs.mjs \
 
 比较器按论文 ID 与完整请求 ID 关联调用，分别读取两份计划的状态目录，核对当前驻留 PDF 哈希，并保存每批草稿、引文检查、笔记范围、实际返回模型、用量和耗时。输出目录不得位于任何 Git 工作树或资料库内。无用量的调用保留未知；原始资料建议、回答和笔记只写入私有报告。精确引文匹配不等于语义正确，全文读取完成也不等于笔记覆盖全部批次；内容比较还需结合相同来源审阅，不能用通过率或输出长度代替质量判断。
 
-六题作业额外导出每批校验答案、题组状态、图谱编译限制及候选选项；按题汇总应答／已答／失败／未读批次、无效原因与肯定／中性／其他选项分布。`question_coverage_complete` 只统计问题覆盖；`analysis_complete` 另计整体交付。旧字段 `question_analysis_complete` 保留同时要求整体完成与全部问题通过的语义。未完成的 `active_questions` 单列，不混入已保存批次。相同请求错误不会因同时出现在两个状态字段中而重复计数。
+问题协议作业额外导出每批校验答案、题组状态、图谱编译限制及候选选项；按题汇总应答／已答／失败／未读批次、无效原因与肯定／中性／其他选项分布。`question_coverage_complete` 只统计问题覆盖；`analysis_complete` 另计整体交付。旧字段 `question_analysis_complete` 保留同时要求整体完成与全部问题通过的语义。未完成的 `active_questions` 单列，不混入已保存批次。相同请求错误不会因同时出现在两个状态字段中而重复计数。
 
 包导出 `@mappedinfo/dsh-paper-library/analysis`，源码可直接导入 `src/headless-analysis.mjs`：
 

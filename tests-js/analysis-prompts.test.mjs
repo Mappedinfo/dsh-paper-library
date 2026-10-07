@@ -8,6 +8,9 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { fileURLToPath } from 'node:url'
 import { renderAnalysisAgentPersona, renderCoveragePrompt, renderKnowledgePrompt, renderMetadataPrompt, renderNotePrompt, renderReviewPrompt, REVIEW_SECTIONS, promptTemplateManifest } from '../src/prompt-templates.mjs'
+import { loadQuestionnaire } from '../src/reading-questions.mjs'
+
+const questionIds = loadQuestionnaire().questions.map(question => question.id)
 
 const source = { id: 'src-1', entity: { kind: 'paper', id: 'paper-1' }, kind: 'pdf-text', text: 'A synthetic source excerpt.', locator: { page: 2 }, content_hash: 'abc123' }
 
@@ -112,7 +115,7 @@ test('npm tarball contains prompt assets and can load them without installation 
     assert.ok(packed.files.some(item => item.path === 'prompts/analysis/coverage.json'))
     assert.ok(packed.files.some(item => item.path === 'prompts/analysis/agent.json'))
     assert.ok(packed.files.some(item => item.path === 'prompts/reading/protocol.json'))
-    for (const id of ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']) assert.ok(packed.files.some(item => item.path === `prompts/reading/${id}.json`))
+    for (const id of [...questionIds, 'q1', 'q5']) assert.ok(packed.files.some(item => item.path === `prompts/reading/${id}.json`))
     const archive = join(temp, packed.filename)
     execFileSync('tar', ['-xf', archive, '-C', temp], { timeout: 30000 })
     const packaged = await import(pathToFileURL(join(temp, 'package/src/prompt-templates.mjs')).href)
@@ -122,7 +125,8 @@ test('npm tarball contains prompt assets and can load them without installation 
     assert.match(packaged.renderCoveragePrompt({ question_coverage: { complete: false, by_question: { q1: { failed_batches: [0] } } } }), /complete or partial/)
     assert.match(packaged.renderNotePrompt('Synthetic', [], false, 0), /compiled reading-answer records/)
     const questionnaire = packagedQuestions.loadQuestionnaire()
-    assert.equal(questionnaire.questions.length, 6)
-    assert.equal(questionnaire.version, 'reading-questions-v2')
+    assert.equal(questionnaire.questions.length, 13)
+    assert.deepEqual(questionnaire.questions.map(question => question.id), questionIds)
+    assert.equal(questionnaire.version, 'reading-questions-v3')
   } finally { await rm(temp, { recursive: true, force: true }) }
 })

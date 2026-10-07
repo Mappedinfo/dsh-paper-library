@@ -1,0 +1,14 @@
+{
+  "id": "q5_task_result",
+  "title": "任务与实测结果的联系",
+  "question": "本批材料明确说明了哪个实际结果对应哪项已执行或评价的任务？",
+  "guidance": "一个回答只记录一项具体任务与其明确对应的已报告结果，保留操作对象、执行条件和观察范围。可选 subject 是任务、object 是实际结果，两端须从同一条连续引文复制且同时提供，否则只保留判断。任务目标、愿景和未执行任务的预期效果不算结果；未报告本题联系时选 not_reported。projection 将结果指向任务。不要在本题回答方法、数据或指标与结果的联系。",
+  "options": [
+    {"id": "task_result", "label": "结果对应某项已执行或评价的任务", "coding": {"definition": "已报告结果对应明确执行或评价的具体任务。", "include_when": "材料说明实际结果来自哪项任务，任务与结果两端在同一证据中，保留执行与评价范围。", "exclude_when": "只有研究愿景、设计目的、未执行任务的预期结果，或把一个任务的结果移给另一个任务。"}, "graph": {"node_type": "claim", "relation": "reports", "endpoints": {"subject_type": "task", "object_type": "observation", "relation": "for_task", "direction": "object-to-subject"}}}
+  ],
+  "examples": [
+    {"source_text": "For the task of checking quotation support, students identified five unsupported quotations in the practice paragraph.", "choice": "task_result", "judgment": "检查引文支持关系的任务中，学生在练习段落识别出五条缺少支持的引文。", "reason": "具体任务与实际观察明确对应，图谱将结果指向任务。", "subject": "checking quotation support", "object": "five unsupported quotations"},
+    {"source_text": "In the timed task of comparing two argument outlines, three differences were identified; prose quality was not evaluated.", "choice": "task_result", "judgment": "限时比较两份论证提纲的任务中识别出三处差异，没有评价正文质量。", "reason": "保留计时条件和未评价范围，不把提纲比较结果当成写作质量结果。", "subject": "comparing two argument outlines", "object": "three differences were identified"},
+    {"source_text": "The next reading task will ask students to check quotation support; no students have completed it yet.", "choice": "not_reported", "judgment": "本批仅提出下一次阅读任务，尚未执行，没有报告任务结果。", "reason": "任务题可以记录该计划，任务—结果题不能据此推断成功或失败。"}
+  ]
+}

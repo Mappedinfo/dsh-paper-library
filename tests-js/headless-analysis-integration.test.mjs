@@ -9,11 +9,17 @@ import { join, resolve } from 'node:path'
 import { createHeadlessAnalysis } from '../src/headless-analysis.mjs'
 import { createFetchHandler } from '../src/http.mjs'
 import { dispatch } from '../src/bridge.mjs'
+import { loadQuestionnaire, questionGroups } from '../src/reading-questions.mjs'
+
+const questionnaire = loadQuestionnaire()
+const questionIds = questionnaire.questions.map(question => question.id)
+const groups = questionGroups(questionnaire)
+const callsPerBatch = groups.length
 
 const run = promisify(execFile)
 const digest = async path => createHash('sha256').update(await readFile(path)).digest('hex')
 
-test('large first answer batch still produces a note with late-batch evidence through the real Python source binder', { timeout: 60000 }, async () => {
+test('large first answer batch still produces a note with late-batch evidence through the real Python source binder', { timeout: 120000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'paper-note-budget-integration-'))
   const library = join(root, 'library'), localStateHome = join(root, 'state'), python = resolve('.venv/bin/python')
   let analysis
@@ -38,10 +44,12 @@ library.close()
 `, root], { env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONPATH: resolve('src') }, maxBuffer: 1024 * 1024 })
     const paper = JSON.parse(fixture.stdout), before = await Promise.all([paper.original, paper.managed].map(digest))
     let calls = 0, noteInput
+    const questionCalls = []
     const agent = async input => {
       calls++
       const context = input.analysisContext
       if (context.question_ids) {
+        questionCalls.push(context.question_ids)
         const page = context.pages[0]
         return JSON.stringify({ answers: context.question_ids.flatMap(question_id => Array.from({ length: 6 }, (_, index) => ({
           question_id, choice: 'other', judgment: `合成学习方法判断 ${question_id}/${index}。` + '有限范围的阅读方法说明。'.repeat(100),
@@ -53,15 +61,21 @@ library.close()
       return JSON.stringify({ title: '合成学习方法笔记', body: '## 一句话概括\n仅汇总保留的合成摘录。\n## 待核实与未覆盖\n细节压缩和图谱省略需逐批审阅。' })
     }
     agent.model = { provider: 'synthetic', model: 'deterministic' }
-    analysis = await createHeadlessAnalysis({ library, python, localStateHome, agent })
+    // 合成测试明确配置所需上限；生产默认预算不随题数自动提高。
+    const expectedCalls = 12 * callsPerBatch + 1
+    analysis = await createHeadlessAnalysis({ library, python, localStateHome, agent,
+      modelConfig: { provider: 'glm', model: 'deterministic', keyEnv: 'SYNTHETIC_TEST_KEY', maxCalls: expectedCalls } })
     const input = { action: 'paper_analysis_run', ids: [paper.id], request_id: 'synthetic-long-note', notes: true, review: false }
     const result = await analysis(input), row = result.results[0]
     assert.ok(row.note_draft_id, `note missing: ${(row.warnings ?? []).join('; ')}`)
-    assert.equal(calls, 37, 'twelve batches with three groups plus one note; no extra model summarization')
+    assert.equal(calls, expectedCalls, 'twelve batches of separate calls plus one note; no extra model summarization')
+    assert.deepEqual(questionCalls, Array.from({ length: 12 }, () => groups).flat())
     const saved = await analysis({ action: 'paper_analysis_get', id: paper.id, request_id: row.request_id, batch_index: 0 })
     assert.ok(Buffer.byteLength(JSON.stringify(saved.batch_answers)) > 24000, 'reproduces the old first-batch packing rejection')
     assert.equal(saved.note_coverage.batches, 12)
     assert.equal(saved.note_coverage.partial, true, 'all batch cards participating must not imply uncompressed full coverage')
+    assert.ok(saved.note_coverage.packing.material_bytes <= 24000, 'the final model material remains inside its original byte budget')
+    assert.deepEqual(saved.note_coverage.packing.batch_indices, Array.from({ length: 12 }, (_, index) => index + 1))
     assert.ok(noteInput.analysisContext.pages.includes(1) && noteInput.analysisContext.pages.includes(96))
     const note = await dispatch({ action: 'knowledge_draft_get', id: row.note_draft_id }, { library, python })
     const sources = await Promise.all(note.source_ids.map(id => dispatch({ action: 'knowledge_source_get', id }, { library, python })))
@@ -76,7 +90,7 @@ library.close()
     }
     assert.deepEqual(await Promise.all([paper.original, paper.managed].map(digest)), before)
     await analysis(input)
-    assert.equal(calls, 37, 'reading persisted partial results never replays model calls')
+    assert.equal(calls, expectedCalls, 'reading persisted partial results never replays model calls')
   } finally {
     analysis?.dispose()
     await rm(root, { recursive: true, force: true })
@@ -115,10 +129,11 @@ print(json.dumps(items))
     const files = papers.flatMap(paper => [paper.original, paper.managed])
     const before = await Promise.all(files.map(digest))
     let calls = 0
-    const seen = []
+    const seen = [], questionCalls = []
     const agent = async ({ prompt, analysisContext }) => {
       calls++
       if (analysisContext?.question_ids) {
+        questionCalls.push(analysisContext.question_ids)
         seen.push(analysisContext.pages)
         return JSON.stringify({ answers: analysisContext.question_ids.map(question_id => ({ question_id, choice: 'not_reported' })) })
       }
@@ -135,7 +150,8 @@ print(json.dumps(items))
     const input = { action: 'paper_analysis_run', ids: papers.map(paper => paper.id), request_id: 'learning-full', notes: false }
     const batch = await analysis(input)
     assert.equal(batch.status, 'complete', JSON.stringify(batch))
-    assert.equal(calls, 9, 'each of three page batches runs the three grouped reading-question calls')
+    assert.equal(calls, 3 * callsPerBatch, 'each of three page batches runs each selected question separately')
+    assert.deepEqual(questionCalls, [...groups, ...groups, ...groups])
     assert.deepEqual([...new Map(seen.map(pages => [JSON.stringify(pages), pages])).values()], [[1,2,3,4,5,6,7,8], [9,10,11,12,13], [1,2,3]])
     assert.equal(batch.results.length, 2)
     for (const result of batch.results) {
@@ -144,17 +160,17 @@ print(json.dumps(items))
       assert.equal(record.draft.status, 'needs-review')
       assert.equal(record.draft.origin, 'llm')
       assert.equal(record.question_coverage.complete, true)
-      assert.equal(record.question_summary.valid_answers, 6 * (result.id === papers[0].id ? 2 : 1))
-      assert.equal(record.batch_answers.length, 6, 'the job view exposes the latest batch answers; cumulative counts remain in question_summary')
+      assert.equal(record.question_summary.valid_answers, questionIds.length * (result.id === papers[0].id ? 2 : 1))
+      assert.equal(record.batch_answers.length, questionIds.length, 'the job view exposes the latest batch answers; cumulative counts remain in question_summary')
       assert.equal(record.metadata.issued, undefined, 'full reading questions do not run the separate metadata extractor')
       assert.equal((await dispatch({ action: 'get', id: result.id }, { library, python })).issued, undefined)
     }
     assert.equal((await analysis(input)).status, 'complete')
-    assert.equal(calls, 9, 'same request reuses persisted results')
+    assert.equal(calls, 3 * callsPerBatch, 'same request reuses persisted results')
 
     const metadata = await analysis({ action: 'paper_analysis_run', ids: [papers[0].id], request_id: 'learning-metadata', mode: 'metadata' })
     assert.equal(metadata.status, 'complete', JSON.stringify(metadata))
-    assert.equal(calls, 10)
+    assert.equal(calls, 3 * callsPerBatch + 1)
     assert.deepEqual(seen.at(-1), [1], 'metadata extraction defaults to the first page only')
     assert.equal(metadata.results[0].coverage.full_document, false)
     assert.deepEqual(await Promise.all(files.map(digest)), before, 'analysis never rewrites PDFs')

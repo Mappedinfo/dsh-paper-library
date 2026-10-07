@@ -1,0 +1,14 @@
+{
+  "id": "q1_dataset",
+  "title": "数据集与来源",
+  "question": "本批文字明确提到了哪些输入数据集、样本或数据来源？",
+  "guidance": "一个回答只记录一项供读取、处理或观察的材料集合、样本或数据来源，保留数量、版本、子集和用途。区分背景提及、计划收集与实际使用；本研究的输出图像或结果数字不自动成为输入数据。不要在本题列举方法、指标、任务或结果；没有明确数据对象时选 not_reported。",
+  "options": [
+    {"id": "dataset", "label": "数据集、样本或数据来源", "coding": {"definition": "供研究读取、处理或观察的材料集合、样本或数据来源。", "include_when": "文字明确将文档、记录、样本、图像或集合说明为数据对象，保留其实际或计划用途。", "exclude_when": "只有结果数字、评价指标、论文整体，或仅为展示本研究结果生成的图片；不能把输出当输入。"}, "graph": {"node_type": "dataset", "relation": "reports"}}
+  ],
+  "examples": [
+    {"source_text": "The reading exercise uses a set of twelve practice passages as its input.", "choice": "dataset", "judgment": "输入数据是十二段练习文本组成的材料集。", "reason": "文本集合、数量和输入用途都有明确依据。"},
+    {"source_text": "The writing exercise uses eight annotated illustrations from a practice booklet as input examples.", "choice": "dataset", "judgment": "写作练习将练习册中的八张带标记示意图作为输入示例。", "reason": "图像可以是数据，但本例有明确的输入角色，不能仅凭图像形式排除。"},
+    {"source_text": "Figure 1 is an illustration generated to display the revised argument; it is not an input dataset.", "choice": "not_reported", "judgment": "本批只说明展示结果的输出示意图，没有报告输入数据集。", "reason": "输出示意图不满足输入数据的定义；这个判断仅覆盖当前材料。"}
+  ]
+}

@@ -10,6 +10,11 @@ import { createHeadlessAnalysis } from '../src/headless-analysis.mjs'
 import { createPaperAnalysis } from '../src/harness/paper-analysis.mjs'
 import { createPaperAnalysisAgent } from '../src/harness/paper-analysis-agent.mjs'
 import { dispatch } from '../src/bridge.mjs'
+import { loadQuestionnaire, questionGroups } from '../src/reading-questions.mjs'
+
+const questionnaire = loadQuestionnaire()
+const groups = questionGroups(questionnaire)
+const callsPerBatch = groups.length
 
 const run = promisify(execFile)
 const hash = value => createHash('sha256').update(value).digest('hex')
@@ -56,7 +61,7 @@ finally:
     const sourceId = request.analysisContext.source_ids[0]
     const source = await dispatch({ action: 'knowledge_source_get', id: sourceId }, { library, python })
     calls.push({ ...request, sources: [{ id: source.id, text: source.text, locator: source.locator }] })
-    const answers = request.analysisContext.question_ids.map(question_id => question_id === 'q1'
+    const answers = request.analysisContext.question_ids.map(question_id => question_id === 'q1_method'
       ? { question_id, choice: 'method', judgment: '本练习明确将 reading 作为方法。', evidence: [{ source_id: 'S1', quote: 'The method is reading.' }] }
       : { question_id, choice: 'not_reported' })
     return JSON.stringify({ answers })
@@ -84,7 +89,9 @@ test('real worker sends bounded Markdown page images and saves traceable sources
   const f = await fixture(t)
   const result = await f.analysis({ ...f.input, input_format: 'markdown', include_images: true })
   assert.equal(result.status, 'complete', JSON.stringify(result))
-  assert.equal(f.calls.length, 6)
+  assert.equal(f.calls.length, 2 * callsPerBatch)
+  assert.deepEqual(f.calls.map(call => call.analysisContext.question_ids), [...groups, ...groups])
+  assert.equal(f.kernel.filter(call => call.action === 'paper_analysis_batch').length, 2)
   assert.deepEqual([...new Map(f.calls.map(call => [call.analysisContext.batch_index, call.analysisContext.pages])).values()], [[1, 2], [3]])
   assert.deepEqual([...new Map(f.calls.map(call => [call.analysisContext.batch_index, call.images.map(image => image.page)])).values()], [[1, 2], [3]])
   const requestId = result.results[0].request_id
@@ -158,7 +165,8 @@ test('default text analysis keeps its batch shape and request identity while opt
   const f = await fixture(t)
   const result = await f.analysis(f.input)
   assert.equal(result.status, 'complete', JSON.stringify(result))
-  assert.equal(f.calls.length, 3)
+  assert.equal(f.calls.length, callsPerBatch)
+  assert.deepEqual(f.calls.map(call => call.analysisContext.question_ids), groups)
   assert.deepEqual([...new Set(f.calls.map(call => JSON.stringify(call.analysisContext.pages)))].map(value => JSON.parse(value)), [[1, 2, 3]])
   assert.equal(Object.hasOwn(f.calls[0], 'images'), false)
   assert.equal(f.kernel.find(call => call.action === 'paper_analysis_batch').input_format, undefined)
@@ -174,7 +182,7 @@ test('default text analysis keeps its batch shape and request identity while opt
     await assert.rejects(f.analysis({ ...f.input, ...options }), { code: 'ANALYSIS_CONFLICT' })
     await assert.rejects(f.analysis({ ...child, ...options }), { code: 'ANALYSIS_CONFLICT' })
   }
-  assert.equal(f.calls.length, 3)
+  assert.equal(f.calls.length, callsPerBatch)
   assert.equal(f.kernel.filter(call => call.action === 'paper_analysis_batch').length, 1)
   assert.deepEqual(await Promise.all([f.paper.original, f.paper.managed].map(fileHash)), f.before)
 })

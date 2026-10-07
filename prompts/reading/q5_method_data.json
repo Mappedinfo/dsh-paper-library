@@ -1,0 +1,14 @@
+{
+  "id": "q5_method_data",
+  "title": "方法与输入数据的联系",
+  "question": "本批材料明确说明了哪个方法实际使用或处理了哪项输入数据？",
+  "guidance": "一个回答只记录一个方法与一项输入数据之间的明确联系，保留本研究或背景研究的归属以及配置和范围。可选 subject 是方法、object 是输入数据，两端必须从同一条连续引文复制且同时提供，否则只保留判断。论文不是方法，输出图片不是输入数据，共现不证明使用；没有报告本题联系时选 not_reported，有相关内容却缺少匹配依据时选 other。不要在本题回答方法与结果或其他联系。projection 不创建直接使用关系边。",
+  "options": [
+    {"id": "method_data", "label": "方法使用或处理某项输入数据", "coding": {"definition": "明确的方法与其实际读取、处理或分析的输入数据之间的联系。", "include_when": "同一材料明确指出方法实际使用或处理某个数据集、样本或数据来源，保留配置与研究归属。", "exclude_when": "论文冒充方法、输出图片冒充输入数据，仅凭要素相邻猜测使用，或把计划使用视为已经使用。"}, "graph": {"node_type": "claim", "relation": "reports", "endpoints": {"subject_type": "method", "object_type": "dataset", "relation": null, "direction": "none"}}}
+  ],
+  "examples": [
+    {"source_text": "For this reading exercise, the sentence-checking routine processed the practice-draft set.", "choice": "method_data", "judgment": "本阅读练习的句子核对流程处理练习草稿集。", "reason": "方法和输入数据明确相连，保留 claim 与两端节点，不创建直接关系边。", "subject": "sentence-checking routine", "object": "practice-draft set"},
+    {"source_text": "In an earlier writing exercise, the comparison routine used only the short-draft subset.", "choice": "method_data", "judgment": "此前写作练习的比较流程只使用短草稿子集。", "reason": "实际使用关系可以来自背景研究，但 earlier 和 only 的范围限制必须保留。", "subject": "comparison routine", "object": "short-draft subset"},
+    {"source_text": "The sketching routine generated Figure 1 to illustrate the revised argument; Figure 1 was not an input dataset.", "choice": "not_reported", "judgment": "本批说明绘图流程的输出，没有报告其使用的输入数据。", "reason": "方法生成图片不等于方法使用图片，不能倒置输入与输出。"}
+  ]
+}

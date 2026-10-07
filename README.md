@@ -10,7 +10,7 @@ Paper Library 将文献收集、PDF 阅读与批注、知识整理和 LaTeX 写�
 
 本地资料维护另提供[基础元数据覆盖检查](docs/pdf-metadata-audit.md)：先复用 Zotero 和采集清单中的资料，再列出需要补全的文件，避免为已有字段重复调用模型。另有[独立模型 API 测试](docs/direct-model-probe.md)，用合成示例验证 GLM／Kimi 直连，无需运行 DSH。
 
-**无界面批量分析**：[独立后端使用说明](docs/headless-analysis.md)提供命令行与程序调用入口，支持独立资料提取、六个问题的全文分批阅读和待审阅笔记。[可编辑问题与提示词](docs/reading-questions.md)采用选择项、可选自由判断和原文证据，由程序生成图谱；全文分析不再提取书目资料与原始 Abstract。默认文本路径保持不变；可显式选择 Markdown，并由独立 GLM／Kimi／DeepSeek 后端按页接收有界图像，原生 DSH 明确拒绝图像请求。结果保存在同一资料库，之后可在 Paper Library 查看、审阅及明确写回。默认不自动修改 PDF 资料；模型次数与并发均有上限。与 Research Knowledge OS 的文献、证据、论断图谱已有 `rkos-v3` 导出适配，完整边界见[兼容性说明](docs/research-os-compatibility.md)。
+**无界面批量分析**：[独立后端使用说明](docs/headless-analysis.md)提供命令行与程序调用入口，支持独立资料提取、13 个问题的逐题分批阅读和待审阅笔记。[可编辑问题与提示词](docs/reading-questions.md)采用选择项、可选自由判断和原文证据，由程序生成图谱；全文分析不再提取书目资料与原始 Abstract。默认文本路径保持不变；可显式选择 Markdown，并由独立 GLM／Kimi／DeepSeek 后端按页接收有界图像，原生 DSH 明确拒绝图像请求。结果保存在同一资料库，之后可在 Paper Library 查看、审阅及明确写回。默认不自动修改 PDF 资料；模型次数与并发均有上限。与 Research Knowledge OS 的文献、证据、论断图谱已有 `rkos-v3` 导出适配，完整边界见[兼容性说明](docs/research-os-compatibility.md)。
 
 ## 从收集文献到阅读、整理与写作
 

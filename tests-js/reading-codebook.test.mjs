@@ -8,6 +8,7 @@ import { loadQuestionnaire, questionGroups, makeReadingPrompt, parseReadingAnswe
 import { validateGraph } from '../scripts/probe-paper-analysis-decomposition.mjs'
 
 const config = loadQuestionnaire()
+const legacyIds = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']
 const resultMappings = {
   method_result: { subject_type: 'method', object_type: 'observation', relation: 'produced_by', direction: 'object-to-subject' },
   data_result: { subject_type: 'dataset', object_type: 'observation', relation: 'observed_on', direction: 'object-to-subject' },
@@ -23,7 +24,8 @@ function pack(text = 'Retrieval practice improved recall on StudySet. Recall acc
     coverage: { read_pages: [2], full_document: false } }
 }
 function answer(choice, quote, overrides = {}) {
-  return { question_id: 'q5', choice, judgment: '合成学习材料中的有限判断', evidence: [{ source_id: 'S1', quote }], ...overrides }
+  const question_id = choice === 'other' ? 'q5_method_result' : `q5_${choice}`
+  return { question_id, choice, judgment: '合成学习材料中的有限判断', evidence: [{ source_id: 'S1', quote }], ...overrides }
 }
 function parse(answers, input, selectedConfig = config) {
   return parseReadingAnswers(JSON.stringify({ answers }), input, [...new Set(answers.map(item => item.question_id))], selectedConfig)
@@ -43,14 +45,14 @@ async function editableQuestionnaire(t) {
   const directory = await mkdtemp(join(tmpdir(), 'reading-codebook-synthetic-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   await cp(new URL('../prompts/reading/', import.meta.url), directory, { recursive: true })
-  const originals = new Map(await Promise.all(['protocol', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6'].map(async id =>
+  const originals = new Map(await Promise.all([...new Set(['protocol', ...legacyIds, ...config.questions.map(question => question.id)])].map(async id =>
     [id, JSON.parse(await readFile(join(directory, `${id}.json`), 'utf8'))])))
   const url = pathToFileURL(`${directory}/`)
   return { url, originals, async write(id, value) { await writeFile(join(directory, `${id}.json`), JSON.stringify(value)) } }
 }
 
-test('actual grouped prompts include every selected code definition, boundary, projection and synthetic example', () => {
-  assert.equal(config.version, 'reading-questions-v2')
+test('actual atomic prompts include every selected code definition, boundary, projection and synthetic example', () => {
+  assert.equal(config.version, 'reading-questions-v3')
   assert.equal(config.protocol.codebook_required, true)
   const input = pack()
   for (const ids of questionGroups(config)) {
@@ -77,15 +79,15 @@ test('actual grouped prompts include every selected code definition, boundary, p
       }
     }
   }
-  const selected = promptQuestions(makeReadingPrompt(input, ['q5'], config))
-  assert.equal(selected.length, 1, 'a single question prompt cannot silently include the full six-question codebook')
-  const options = selected[0].options
   for (const [choice, endpoints] of Object.entries({ method_data: methodDataMapping, ...resultMappings })) {
-    assert.deepEqual(options.find(option => option.choice === choice).projection,
+    const id = `q5_${choice}`, selected = promptQuestions(makeReadingPrompt(input, [id], config))
+    assert.equal(selected.length, 1, 'a single question prompt cannot silently include another relation question')
+    assert.deepEqual(selected[0].options.map(option => option.choice), [choice, 'other', 'not_reported', 'not_applicable'])
+    assert.deepEqual(selected[0].options.find(option => option.choice === choice).projection,
       { node_type: 'claim', evidence_target_type: 'claim', evidence_relation: 'reports', endpoints })
+    assert.deepEqual(selected[0].options.find(option => option.choice === 'other').projection,
+      { node_type: 'claim', evidence_target_type: 'claim', evidence_relation: 'reports' })
   }
-  assert.deepEqual(options.find(option => option.choice === 'other').projection,
-    { node_type: 'claim', evidence_target_type: 'claim', evidence_relation: 'reports' })
 })
 
 test('readonly projections describe observation reporting and preserve evidence direction and gap attribution', () => {
@@ -106,7 +108,7 @@ test('readonly projections describe observation reporting and preserve evidence 
   }
 })
 
-test('q5 result endpoint contracts project to four legal Python graph relations in object-to-subject direction', async () => {
+test('atomic result endpoint contracts project to four legal Python graph relations in object-to-subject direction', async () => {
   const examples = [
     ['method_result', 'Retrieval practice improved recall.', 'Retrieval practice', 'improved recall'],
     ['data_result', 'StudySet showed improved recall.', 'StudySet', 'improved recall'],
@@ -117,7 +119,7 @@ test('q5 result endpoint contracts project to four legal Python graph relations 
     const input = pack(quote), result = parse([answer(choice, quote, { subject, object })], input)
     assert.deepEqual(result.errors, [], `${choice}: exact evidence and explicit endpoints should pass mechanical validation`)
     const graph = compileReadingGraph(result, input, config), mapping = resultMappings[choice]
-    assert.deepEqual(config.questions.find(question => question.id === 'q5').options.find(option => option.id === choice).graph.endpoints, mapping)
+    assert.deepEqual(config.questions.find(question => question.id === `q5_${choice}`).options[0].graph.endpoints, mapping)
     assert.equal(graph.edges.length, 1)
     const edge = graph.edges[0]
     const from = graph.nodes.find(node => `${node.type}:${node.id}` === edge.subject)
@@ -134,7 +136,7 @@ test('q5 result endpoint contracts project to four legal Python graph relations 
   }
 })
 
-test('q5 method-data retains both typed entities and a limitation without inventing a typed edge', async () => {
+test('atomic method-data retains both typed entities and a limitation without inventing a typed edge', async () => {
   const quote = 'Retrieval practice used StudySet for the learning exercise.', input = pack(quote)
   const result = parse([answer('method_data', quote, { subject: 'Retrieval practice', object: 'StudySet' })], input)
   assert.deepEqual(result.errors, [])
@@ -148,14 +150,14 @@ test('q5 method-data retains both typed entities and a limitation without invent
 })
 
 test('codebook edits change the immutable hash and make prior answer projections ineligible', async t => {
-  const fixture = await editableQuestionnaire(t), value = structuredClone(fixture.originals.get('q5'))
+  const fixture = await editableQuestionnaire(t), value = structuredClone(fixture.originals.get('q5_method_result'))
   const baseline = loadQuestionnaire(fixture.url)
   value.options.find(option => option.id === 'method_result').coding.exclude_when += ' 合成边界修订：设计目标须单独记录。'
-  await fixture.write('q5', value)
+  await fixture.write('q5_method_result', value)
   const edited = loadQuestionnaire(fixture.url)
   assert.equal(edited.version, baseline.version)
   assert.notEqual(edited.hash, baseline.hash)
-  assert.ok(Object.isFrozen(edited.questions[4].options[1].coding))
+  assert.ok(Object.isFrozen(edited.questions.find(question => question.id === 'q5_method_result').options[0].coding))
   const quote = 'Retrieval practice improved recall.', input = pack(quote)
   const parsed = parse([answer('method_result', quote, { subject: 'Retrieval practice', object: 'improved recall' })], input, baseline)
   const graph = compileReadingGraph(parsed, input, edited)
@@ -166,25 +168,25 @@ test('codebook edits change the immutable hash and make prior answer projections
 test('loading refuses incomplete codebooks, unsupported endpoints, changed direction and invalid synthetic examples', async t => {
   const fixture = await editableQuestionnaire(t)
   const cases = [
-    ['missing option codebook', 'q1', value => { delete value.options[0].coding }],
+    ['missing option codebook', 'q1_method', value => { delete value.options[0].coding }],
     ['missing common codebook', 'protocol', value => { delete value.common_options[0].coding }],
-    ['empty inclusion boundary', 'q1', value => { value.options[0].coding.include_when = '' }],
-    ['nontext exclusion boundary', 'q1', value => { value.options[0].coding.exclude_when = [] }],
-    ['unsupported codebook field', 'q1', value => { value.options[0].coding.confidence = 'certain' }],
-    ['unsupported graph node', 'q1', value => { value.options[0].graph.node_type = 'invented_node' }],
-    ['missing q5 endpoint contract', 'q5', value => { delete value.options.find(option => option.id === 'method_result').graph.endpoints }],
-    ['reversed q5 direction', 'q5', value => { value.options.find(option => option.id === 'method_result').graph.endpoints.direction = 'subject-to-object' }],
-    ['unsupported q5 endpoint node', 'q5', value => { value.options.find(option => option.id === 'method_result').graph.endpoints.subject_type = 'invented_node' }],
-    ['legal tuple assigned to wrong code', 'q5', value => { value.options.find(option => option.id === 'method_result').graph.endpoints = { ...resultMappings.data_result } }],
-    ['missing examples', 'q1', value => { delete value.examples }],
-    ['empty examples', 'q1', value => { value.examples = [] }],
-    ['too many examples', 'q1', value => { value.examples = Array(4).fill(value.examples[0]) }],
-    ['unknown example choice', 'q1', value => { value.examples[0].choice = 'invented_choice' }],
-    ['missing example reason', 'q1', value => { delete value.examples[0].reason }],
-    ['unknown example field', 'q1', value => { value.examples[0].evidence = [] }],
-    ['q5 one-sided example endpoints', 'q5', value => { value.examples[0].subject = 'not in source'; delete value.examples[0].object }],
-    ['q5 invented example endpoint', 'q5', value => { value.examples[0].subject = 'invented method'; value.examples[0].object = value.examples[0].source_text }],
-    ['non-q5 example endpoints', 'q1', value => { value.examples[0].subject = 'practice'; value.examples[0].object = 'recall' }],
+    ['empty inclusion boundary', 'q1_method', value => { value.options[0].coding.include_when = '' }],
+    ['nontext exclusion boundary', 'q1_method', value => { value.options[0].coding.exclude_when = [] }],
+    ['unsupported codebook field', 'q1_method', value => { value.options[0].coding.confidence = 'certain' }],
+    ['unsupported graph node', 'q1_method', value => { value.options[0].graph.node_type = 'invented_node' }],
+    ['missing atomic endpoint contract', 'q5_method_result', value => { delete value.options[0].graph.endpoints }],
+    ['reversed atomic direction', 'q5_method_result', value => { value.options[0].graph.endpoints.direction = 'subject-to-object' }],
+    ['unsupported atomic endpoint node', 'q5_method_result', value => { value.options[0].graph.endpoints.subject_type = 'invented_node' }],
+    ['legal tuple assigned to wrong code', 'q5_method_result', value => { value.options[0].graph.endpoints = { ...resultMappings.data_result } }],
+    ['missing examples', 'q1_method', value => { delete value.examples }],
+    ['empty examples', 'q1_method', value => { value.examples = [] }],
+    ['too many examples', 'q1_method', value => { value.examples = Array(4).fill(value.examples[0]) }],
+    ['unknown example choice', 'q1_method', value => { value.examples[0].choice = 'invented_choice' }],
+    ['missing example reason', 'q1_method', value => { delete value.examples[0].reason }],
+    ['unknown example field', 'q1_method', value => { value.examples[0].evidence = [] }],
+    ['atomic one-sided example endpoints', 'q5_method_result', value => { value.examples[0].subject = 'not in source'; delete value.examples[0].object }],
+    ['atomic invented example endpoint', 'q5_method_result', value => { value.examples[0].subject = 'invented method'; value.examples[0].object = value.examples[0].source_text }],
+    ['entity question example endpoints', 'q1_method', value => { value.examples[0].subject = 'practice'; value.examples[0].object = 'recall' }],
   ]
   for (const [label, id, mutate] of cases) {
     const value = structuredClone(fixture.originals.get(id))
@@ -196,9 +198,9 @@ test('loading refuses incomplete codebooks, unsupported endpoints, changed direc
   assert.equal(loadQuestionnaire(fixture.url).hash, config.hash, 'all failures leave the original human-maintained configuration recoverable')
 })
 
-test('q5 design-purpose statements correctly coded as other create no observation or produced_by edge', async () => {
+test('atomic design-purpose statements correctly coded as other create no observation or produced_by edge', async () => {
   const quote = 'Retrieval practice was designed to strengthen recall.', input = pack(quote)
-  const result = parse([answer('other', quote, { judgment: '句子表达练习的设计目的，尚未报告实测结果。', subject: 'Retrieval practice', object: 'strengthen recall' })], input)
+  const result = parse([answer('other', quote, { judgment: '句子表达练习的设计目的，尚未报告实测结果。' })], input)
   assert.deepEqual(result.errors, [])
   assert.equal(result.answers[0].status, 'needs-review')
   const graph = compileReadingGraph(result, input, config)
@@ -224,10 +226,14 @@ test('exact evidence with a semantically wrong method-result code stays mechanic
 
 test('legacy v1 questionnaires without coding, examples or endpoints remain loadable and compile the original q5 mappings', async t => {
   const fixture = await editableQuestionnaire(t)
-  for (const [id, original] of fixture.originals) {
+  for (const id of ['protocol', ...legacyIds]) {
+    const original = fixture.originals.get(id)
     const value = structuredClone(original)
     if (id === 'protocol') {
       value.version = 'reading-questions-v1'
+      delete value.question_ids
+      delete value.default_mode
+      value.default_groups = [['q1', 'q2'], ['q3', 'q4'], ['q5', 'q6']]
       delete value.codebook_required
       for (const option of value.common_options) delete option.coding
     } else {
@@ -246,7 +252,8 @@ test('legacy v1 questionnaires without coding, examples or endpoints remain load
     ['metric_result', 'Recall accuracy', 'the gain'], ['task_result', 'recall task', 'the gain'],
     ['method_data', 'Retrieval practice', 'StudySet'],
   ]
-  const result = parse(choices.map(([choice, subject, object]) => answer(choice, quote, { subject, object })), input, legacy)
+  assert.deepEqual(questionGroups(legacy), [['q1', 'q2'], ['q3', 'q4'], ['q5', 'q6']])
+  const result = parse(choices.map(([choice, subject, object]) => answer(choice, quote, { question_id: 'q5', subject, object })), input, legacy)
   assert.deepEqual(result.errors, [])
   const graph = compileReadingGraph(result, input, legacy)
   assert.deepEqual(graph.edges.map(edge => edge.relation), Object.values(resultMappings).map(mapping => mapping.relation))
@@ -277,4 +284,67 @@ test('codebook guidance never weakens Markdown marker or source alias quotation 
     assert.ok(result.answers[0].errors.some(error => error.code === code))
     assert.deepEqual(compileReadingGraph(result, input, config).nodes, [])
   }
+})
+
+test('each atomic relation rejects another relation code and endpoints on other or neutral answers', () => {
+  const quote = pack().sources[0].text, input = pack(quote)
+  const choices = ['method_data', ...Object.keys(resultMappings)]
+  for (const choice of choices) {
+    const id = `q5_${choice}`
+    for (const otherChoice of choices.filter(candidate => candidate !== choice)) {
+      const result = parse([answer(otherChoice, quote, { question_id: id })], input)
+      assert.equal(result.answers[0].valid, false, `${id}/${otherChoice}`)
+      assert.ok(result.answers[0].errors.some(error => error.code === 'UNKNOWN_CHOICE'))
+      assert.deepEqual(compileReadingGraph(result, input, config).edges, [])
+    }
+    for (const alternative of ['other', 'not_reported', 'not_applicable']) {
+      const result = parse([answer(alternative, quote, { question_id: id, subject: 'Retrieval practice', object: 'improved recall' })], input)
+      assert.equal(result.answers[0].valid, false, `${id}/${alternative}: endpoints must belong to this question's positive relation code`)
+      assert.ok(result.answers[0].errors.some(error => error.code === 'INVALID_ENDPOINTS'))
+      assert.deepEqual(compileReadingGraph(result, input, config).edges, [])
+    }
+  }
+  const entity = parse([answer('method', quote, { question_id: 'q1_method', subject: 'Retrieval practice', object: 'improved recall' })], input)
+  assert.ok(entity.answers[0].errors.some(error => error.code === 'INVALID_ENDPOINTS'))
+})
+
+test('atomic relation endpoints preserve recovered source text and cannot connect disconnected quotations', async () => {
+  const input = pack('Prefix. Retrieval practice\n   improved recall. End.'), before = input.sources[0].text
+  const result = parse([answer('method_result', 'Retrieval practice improved recall.', { subject: 'Retrieval practice', object: 'improved recall' })], input)
+  assert.deepEqual(result.errors, [])
+  const record = result.answers[0], ref = record.evidence[0]
+  assert.equal(ref.match, 'unique-whitespace')
+  assert.equal(ref.quote, 'Retrieval practice\n   improved recall.')
+  assert.equal(input.sources[0].text.slice(ref.start_utf16, ref.end_utf16), ref.quote)
+  assert.equal(record.relation_evidence_index, 0)
+  assert.equal(input.sources[0].text, before)
+  const graph = compileReadingGraph(result, input, config)
+  assert.equal(graph.edges[0].relation, 'produced_by')
+  assert.equal(graph.edges[0].source_id, input.sources[0].id)
+  await graphValid(graph, input)
+  const disconnected = pack('Retrieval practice was discussed. Another exercise improved recall.')
+  const invalid = parse([answer('method_result', '', { subject: 'Retrieval practice', object: 'improved recall', evidence: [
+    { source_id: 'S1', quote: 'Retrieval practice was discussed.' },
+    { source_id: 'S1', quote: 'Another exercise improved recall.' },
+  ] })], disconnected)
+  assert.ok(invalid.answers[0].errors.some(error => error.code === 'ENDPOINT_NOT_IN_EVIDENCE'))
+  assert.deepEqual(compileReadingGraph(invalid, disconnected, config).edges, [])
+})
+
+test('legacy v2 relation alternatives retain their recorded endpoint handling and original grouping', async t => {
+  const fixture = await editableQuestionnaire(t), protocol = structuredClone(fixture.originals.get('protocol'))
+  protocol.version = 'reading-questions-v2'
+  delete protocol.question_ids
+  delete protocol.default_mode
+  protocol.default_groups = [['q1', 'q2'], ['q3', 'q4'], ['q5', 'q6']]
+  await fixture.write('protocol', protocol)
+  const legacy = loadQuestionnaire(fixture.url)
+  assert.deepEqual(questionGroups(legacy), [['q1', 'q2'], ['q3', 'q4'], ['q5', 'q6']])
+  const quote = 'Retrieval practice was designed to strengthen recall.', input = pack(quote)
+  const result = parse([answer('other', quote, { question_id: 'q5', subject: 'Retrieval practice', object: 'strengthen recall', judgment: '句子说明设计目的，未报告结果。' })], input, legacy)
+  assert.deepEqual(result.errors, [], 'old alternatives with endpoints remain readable without changing their frozen contract')
+  const graph = compileReadingGraph(result, input, legacy)
+  assert.deepEqual(graph.edges, [])
+  assert.equal(graph.nodes.some(node => node.type === 'observation'), false)
+  await graphValid(graph, input)
 })

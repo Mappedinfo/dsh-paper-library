@@ -1,0 +1,14 @@
+{
+  "id": "q5_metric_result",
+  "title": "指标与实测结果的联系",
+  "question": "本批材料明确说明了哪个实际结果由哪个评价指标测量或表示？",
+  "guidance": "一个回答只记录一个指标及其明确对应的实测值或观察，保留单位、分母、配置和条件。可选 subject 是指标、object 是实际结果，两端须从同一条连续引文复制且同时提供，否则只保留判断。指标的定义、目标阈值或预期值不算实测结果；只定义指标但未报告其结果时选 not_reported。projection 将结果指向指标。不要在本题回答数据、方法或任务与结果的联系。",
+  "options": [
+    {"id": "metric_result", "label": "结果由某个指标测量", "coding": {"definition": "某项已报告结果由明确指标度量或表示。", "include_when": "材料给出实际结果与测量指标的对应，保留数值、单位、分母及条件。", "exclude_when": "只定义指标而未报告结果、目标阈值、预期值，或将指标名称当成测得结果。"}, "graph": {"node_type": "claim", "relation": "reports", "endpoints": {"subject_type": "metric", "object_type": "observation", "relation": "measured_by", "direction": "object-to-subject"}}}
+  ],
+  "examples": [
+    {"source_text": "In the short-draft exercise, the citation retention rate was 80 percent of the original citations.", "choice": "metric_result", "judgment": "短草稿练习的引用保留率为原始引用的百分之八十。", "reason": "指标与实测值、分母和适用练习明确相连。", "subject": "citation retention rate", "object": "80 percent of the original citations"},
+    {"source_text": "For the two revised paragraphs, citation errors per paragraph fell from three to one.", "choice": "metric_result", "judgment": "两段已改稿文本中，每段引用错误数从三降到一。", "reason": "给出计数指标与实际变化，不能推广至所有文本。", "subject": "citation errors per paragraph", "object": "fell from three to one"},
+    {"source_text": "Revision accuracy is defined as the proportion of revised sentences that retain the source meaning; no scores are reported in this section.", "choice": "not_reported", "judgment": "本批定义了改稿准确率，但没有报告该指标的实际结果。", "reason": "指标定义可以回答指标题，不能补出指标—结果联系。"}
+  ]
+}

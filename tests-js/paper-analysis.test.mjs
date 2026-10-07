@@ -2,6 +2,13 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createPaperAnalysis } from '../src/harness/paper-analysis.mjs'
 import { promptOf } from '../src/harness/library-knowledge.mjs'
+import { loadQuestionnaire, questionGroups } from '../src/reading-questions.mjs'
+
+const questionnaire = loadQuestionnaire()
+const questionIds = questionnaire.questions.map(question => question.id)
+const groups = questionGroups(questionnaire)
+const callsPerBatch = groups.length
+const positiveChoices = Object.fromEntries(questionnaire.questions.map(question => [question.id, question.options[0].id]))
 
 const request = { action:'paper_analysis_start', id:'paper-a', request_id:'run-a', apply_metadata:false, pages:[2,5] }
 function gate() { let resolve; const promise=new Promise(done=>{resolve=done}); return {promise,resolve} }
@@ -34,8 +41,9 @@ function fixture() {
   f.route={provider:'synthetic-provider',model:'paper-model',reasoningEffort:'high',prompt:'FORGED_ROUTE_PROMPT'}
   f.response=input=>{
     if(input.analysisContext?.question_ids)return {answers:input.analysisContext.question_ids.map(question_id=>{
+      const choice=positiveChoices[question_id]
       const source=f.sources.find(source=>source.id===(question_id==='q2'?input.analysisContext.source_ids.at(-1):input.analysisContext.source_ids[0]))
-      return {question_id,choice:{q1:'method',q2:'author_claim',q3:'text',q4:'supports',q5:'method_result',q6:'stated_gap'}[question_id],
+      return {question_id,choice,
         judgment:question_id==='q2'?'UNSELECTED_CLAIM':`Selected bounded ${question_id} judgment`,evidence:[{source_id:source.id,quote:source.text}]}
     })}
     if(input.analysisContext?.stage==='review'||input.prompt.includes('evidence-atlas'))return f.review
@@ -48,7 +56,7 @@ function fixture() {
       async get(key){return structuredClone(f.records.get(key)??{key,value:null,revision:0})},
       async put(key,value,expected){
         assertPlainTree(value)
-        if(f.failComplete&&key.startsWith('analysis.job:')&&value.status==='complete')throw new Error('Synthetic completion checkpoint failure')
+        if(f.failComplete&&key.startsWith('analysis.job:')&&['complete','partial'].includes(value.status))throw new Error('Synthetic completion checkpoint failure')
         assert.equal(expected,f.records.get(key)?.revision??0,'State writes must use CAS')
         const record={key,value:structuredClone(value),revision:++revision}
         f.records.set(key,record);f.writes.push(record);return structuredClone(record)
@@ -81,7 +89,7 @@ function fixture() {
   return f
 }
 
-test('simultaneous duplicate clicks and completed restart never replay a generation',async()=>{
+test('simultaneous duplicate clicks and terminal saved runs never replay a generation',async()=>{
   const f=fixture();f.agentGate=gate()
   const [first,duplicate]=await Promise.all([f.handle(request),f.handle(request)])
   assert.deepEqual(first,duplicate)
@@ -89,10 +97,16 @@ test('simultaneous duplicate clicks and completed restart never replay a generat
   const active=await f.handle(request)
   assert.equal(active.status,'generating')
   f.agentGate.resolve();const result=await f.done()
-  assert.equal(result.status,'complete')
+  assert.equal(result.status,'partial','All 13 answers are saved; the bounded generated summary is compacted')
+  assert.equal(result.question_coverage.complete,true)
+  assert.deepEqual(f.calls.filter(call=>call.analysisContext?.question_ids).map(call=>call.analysisContext.question_ids),groups)
+  assert.equal(result.batch_answers.length,questionIds.length)
+  assert.ok(result.note_draft_id);assert.ok(result.review_draft_id)
+  assert.equal(result.note_coverage.partial,true)
+  assert.ok(result.note_coverage.packing.partial_reasons.includes('CONTENT_COMPACTED'))
   const restarted=createPaperAnalysis(f.options)
-  assert.equal((await restarted(request)).status,'complete')
-  assert.equal(f.calls.length,5,'Three question groups plus the reading-note and evidence-atlas generations')
+  assert.equal((await restarted(request)).status,'partial')
+  assert.equal(f.calls.length,callsPerBatch+2,'Separate question calls plus the reading-note and evidence-atlas generations')
   assert.equal(f.kernel.filter(c=>c.action==='paper_analysis_batch').length,1)
   assert.equal(f.kernel.filter(c=>c.action==='knowledge_draft_put'&&c.mode==='graph').length,1)
   assert.equal(f.kernel.filter(c=>c.action==='knowledge_draft_put'&&c.mode==='note').length,2,'One reading note plus one evidence-atlas review')
@@ -110,7 +124,7 @@ test('restart reports an uncertain pending run without new work or a model repla
   assert.equal((await restarted(request)).status,'interrupted')
   assert.equal((await restarted({action:'paper_analysis_get',id:'paper-a'})).status,'interrupted')
   assert.equal(f.calls.length,1);assert.equal(f.kernel.length,before);assert.equal(f.writes.length,writes)
-  f.agentGate.resolve();assert.equal((await f.done()).status,'complete')
+  f.agentGate.resolve();assert.equal((await f.done()).status,'partial')
 })
 
 test('up to two documents run in parallel, a third waits, and changed duplicate options fail before more work',async()=>{
@@ -126,8 +140,8 @@ test('up to two documents run in parallel, a third waits, and changed duplicate 
   await until(()=>[...f.records.values()].some(record=>record.value.id==='paper-b'&&record.value.request_id==='run-b'&&record.value.status==='complete'))
   const next=await f.handle({...request,request_id:'run-a2'})
   assert.equal(next.status,'queued')
-  await until(()=>f.calls.filter(c=>c.analysisContext?.stage==='batch').length>=7)
-  await until(()=>[...f.records.values()].some(record=>record.value.request_id==='run-a2'&&record.value.status==='complete'))
+  await until(()=>f.calls.filter(c=>c.analysisContext?.stage==='batch').length>=2*callsPerBatch+1)
+  await until(()=>[...f.records.values()].some(record=>record.value.request_id==='run-a2'&&record.value.status==='partial'))
 })
 
 test('the concurrency bound is configurable and validated',async()=>{
@@ -140,7 +154,7 @@ test('the concurrency bound is configurable and validated',async()=>{
     await until(()=>f.kernel.some(c=>c.action==='paper_analysis_batch'))
     assert.equal(single.slots(),0)
     await assert.rejects(single({...request,id:'paper-b',request_id:'run-b'}),e=>e.code==='ANALYSIS_BUSY')
-    f.readGate.resolve();await until(()=>f.record()?.value.status==='complete')
+    f.readGate.resolve();await until(()=>f.record()?.value.status==='partial')
     assert.equal(single.slots(),1)
   }finally{single.dispose()}
 })
@@ -171,7 +185,7 @@ test('model and source scope come from the host while catalog metadata is absent
   const f=fixture();f.paper.abstract='PRIVATE_OVERSIZED_ABSTRACT'.repeat(500)
   f.output.entity={kind:'paper',id:'forged-paper'};f.output.origin='author';f.output.status='accepted'
   await f.handle({...request,provider:'forged',model:'forged',source_session_id:'source-current'});const result=await f.done()
-  assert.equal(result.status,'complete')
+  assert.equal(result.status,'partial')
   assert.equal(f.calls[0].provider,'synthetic-provider');assert.equal(f.calls[0].model,'paper-model')
   assert.equal(f.routes[0].source_session_id,'source-current')
   await assert.rejects(f.handle({...request,source_session_id:'bad\nvalue'}),/来源对话标识/)
@@ -247,7 +261,7 @@ test('manual apply duplicate clicks are coalesced and subsequent reads do not ap
 
 test('context uses typed selected nodes and only their evidence references, without sending chat',async()=>{
   const f=fixture();await f.handle(request);await f.done();const before=f.kernel.length
-  const nodes=f.drafts.get('draft-a').nodes.filter(node=>node.fields.question_id==='q1'&&['evidence','claim'].includes(node.type)).map(node=>`${node.type}:${node.id}`)
+  const nodes=f.drafts.get('draft-a').nodes.filter(node=>node.fields.question_id==='q1_method'&&['evidence','claim'].includes(node.type)).map(node=>`${node.type}:${node.id}`)
   const result=await f.handle({action:'paper_analysis_context',id:'paper-a',node_ids:nodes})
   const body=JSON.parse(result.text.split('\n')[2])
   assert.deepEqual(body.nodes.map(n=>`${n.type}:${n.id}`),nodes)
@@ -255,7 +269,7 @@ test('context uses typed selected nodes and only their evidence references, with
   assert.doesNotMatch(result.text,/UNSELECTED_PRIVATE_BODY|UNSELECTED_CLAIM|source-b/)
   assert.match(result.text,/尚未核对/);assert.match(result.text,/不是指令/)
   assert.deepEqual(f.kernel.slice(before).map(c=>c.action),['knowledge_draft_get','knowledge_source_get'])
-  assert.equal(f.calls.length,5);assert.deepEqual(f.routes,[{action:'chat_ensure',id:'paper-a'}])
+  assert.equal(f.calls.length,callsPerBatch+2);assert.deepEqual(f.routes,[{action:'chat_ensure',id:'paper-a'}])
   await assert.rejects(f.handle({action:'paper_analysis_context',id:'paper-a',node_ids:['same']}),/不属于/)
   await assert.rejects(f.handle({action:'paper_analysis_context',id:'paper-a',node_ids:[nodes[0],nodes[0]]}),/请选择/)
 })
@@ -268,7 +282,7 @@ test('rejected or oversized selected context is blocked without truncating or ex
   await assert.rejects(f.handle(input),e=>e.code==='ANALYSIS_CONTEXT_BUDGET')
   f.drafts.get('draft-a').status='rejected'
   await assert.rejects(f.handle(input),/否决/)
-  assert.equal(f.calls.length,5)
+  assert.equal(f.calls.length,callsPerBatch+2)
 })
 
 test('status reads are read-only; failed final persistence never triggers model replay',async()=>{
@@ -278,7 +292,7 @@ test('status reads are read-only; failed final persistence never triggers model 
   const restarted=createPaperAnalysis(f.options)
   for(let count=0;count<5;count++)await restarted({action:'paper_analysis_get',id:'paper-a'})
   assert.equal((await restarted(request)).status,'failed')
-  assert.equal(f.writes.length,writes);assert.equal(f.routes.length,routes);assert.equal(f.calls.length,5)
+  assert.equal(f.writes.length,writes);assert.equal(f.routes.length,routes);assert.equal(f.calls.length,callsPerBatch+2)
   assert.equal(f.kernel.slice(before).every(c=>c.action==='knowledge_draft_get'),true)
 })
 
@@ -288,12 +302,12 @@ test('reuse opens an existing result during another active job without new work'
   await until(()=>f.kernel.some(c=>c.action==='paper_analysis_batch'&&c.id==='paper-b'))
   const before=f.kernel.length,writes=f.writes.length
   const reused=await f.handle({...request,request_id:'view-existing',reuse:true})
-  assert.equal(reused.status,'complete');assert.equal(reused.request_id,'run-a')
+  assert.equal(reused.status,'partial');assert.equal(reused.request_id,'run-a')
   assert.equal(f.writes.length,writes)
   assert.equal(f.kernel.slice(before).every(c=>c.action==='knowledge_draft_get'),true)
   const cancel=f.handle({action:'paper_analysis_cancel',id:'paper-b',request_id:'run-b'})
   await new Promise(resolve=>setImmediate(resolve));f.readGate.resolve();await cancel
-  assert.equal(f.calls.length,5)
+  assert.equal(f.calls.length,callsPerBatch+2)
 })
 
 test('unavailable saved graph remains a visible read error without erasing question answers',async()=>{
@@ -304,8 +318,8 @@ test('unavailable saved graph remains a visible read error without erasing quest
   const result=await handle({action:'paper_analysis_get',id:'paper-a'})
   assert.match(result.draft_error,/saved graph missing/);assert.match(result.warnings.at(-1),/saved graph missing/)
   assert.deepEqual(result.metadata,{});assert.deepEqual(result.field_sources,{})
-  assert.equal(result.batch_answers.length,6)
-  assert.equal(f.writes.length,writes);assert.equal(f.calls.length,5)
+  assert.equal(result.batch_answers.length,questionIds.length)
+  assert.equal(f.writes.length,writes);assert.equal(f.calls.length,callsPerBatch+2)
 })
 
 test('invalid typed identities and page selections cause no state or kernel work',async()=>{
@@ -322,18 +336,20 @@ function multiBatch(f){
 }
 test('all thirteen pages are read serially in bounded batches and prior batch context remains inspectable',async()=>{
   const f=fixture();multiBatch(f);await f.handle({...request,pages:Array.from({length:13},(_,i)=>i+1)});const result=await f.done()
-  assert.equal(result.status,'complete');assert.equal(result.batch_count,2);assert.equal(result.coverage.full_document,true)
-  assert.deepEqual(result.coverage.read_pages,Array.from({length:13},(_,i)=>i+1));assert.equal(f.calls.length,8,'Six question groups plus the reading-note and evidence-atlas generations')
+  assert.equal(result.status,'partial');assert.equal(result.batch_count,2);assert.equal(result.coverage.full_document,true)
+  assert.deepEqual(result.coverage.read_pages,Array.from({length:13},(_,i)=>i+1));assert.equal(f.calls.length,2*callsPerBatch+2,'Two batches of separate question calls plus the reading-note and evidence-atlas generations')
   assert.equal(f.drafts.size,4);assert.equal(f.routes.length,1)
-  assert.ok(result.note_draft_id);assert.equal(result.note_coverage.batches,2);assert.equal(result.note_coverage.batches_total,2);assert.equal(result.note_coverage.partial,false);assert.ok(result.note_coverage.packing)
-  assert.match(f.calls[6].prompt,/All saved batches/)
+  assert.ok(result.note_draft_id);assert.equal(result.note_coverage.batches,2);assert.equal(result.note_coverage.batches_total,2);assert.equal(result.note_coverage.partial,true);assert.ok(result.note_coverage.packing)
+  assert.match(f.calls[2*callsPerBatch].prompt,/Only 2 of 2 reading batches/)
+  assert.deepEqual(result.note_coverage.packing.batch_indices,[1,2])
+  assert.ok(result.note_coverage.packing.material_bytes<=24000)
   const reads=f.kernel.filter(x=>x.action==='paper_analysis_batch');assert.deepEqual(reads[1].cursor,{index:8,offset:0});assert.deepEqual(reads[1].file_version,{bytes:1})
-  assert.equal(f.calls[0].prompt.includes('Evidence on page 13.'),false);assert.equal(f.calls[3].prompt.includes('Evidence on page 1.'),false)
+  assert.equal(f.calls[0].prompt.includes('Evidence on page 13.'),false);assert.equal(f.calls[callsPerBatch].prompt.includes('Evidence on page 1.'),false)
   const first=await f.handle({action:'paper_analysis_get',id:'paper-a',batch_index:0});assert.equal(first.draft.id,'draft-a')
   const node=first.draft.nodes.find(node=>node.type==='evidence')
   const context=await f.handle({action:'paper_analysis_context',id:'paper-a',batch_index:0,node_ids:[`evidence:${node.id}`]});assert.match(context.text,/source-1/);assert.doesNotMatch(context.text,/source-9/)
   await assert.rejects(f.handle({action:'paper_analysis_get',id:'paper-a',batch_index:2}),/批次/)
-  const restart=createPaperAnalysis(f.options);assert.equal((await restart({...request,pages:Array.from({length:13},(_,i)=>i+1)})).status,'complete')
+  const restart=createPaperAnalysis(f.options);assert.equal((await restart({...request,pages:Array.from({length:13},(_,i)=>i+1)})).status,'partial')
 })
 test('selected batch answers and evidence stay separate and full reading never writes bibliographic metadata',async()=>{
   const f=fixture();multiBatch(f)
@@ -352,23 +368,24 @@ test('selected batch answers and evidence stay separate and full reading never w
   assert.equal(f.writes.length,writes);assert.equal(f.calls.length,calls)
 })
 test('failure in a later group retains prior answers and continues remaining groups without replay on restart',async()=>{
-  const f=fixture();multiBatch(f);const respond=f.outputFor;f.outputFor=input=>{if(f.calls.length===4)throw Error('Synthetic later model failure');return respond(input)}
+  const f=fixture();multiBatch(f);const respond=f.outputFor;f.outputFor=input=>{if(f.calls.length===callsPerBatch+1)throw Error('Synthetic later model failure');return respond(input)}
   const input={...request,pages:undefined}
   await f.handle(input);const result=await f.done();assert.equal(result.status,'partial');assert.equal(result.batch_count,2)
   assert.equal((await f.handle({action:'paper_analysis_get',id:'paper-a',batch_index:0})).draft.id,'draft-a')
-  assert.equal(result.question_coverage.by_question.q1.answered_batches,1)
+  assert.equal(result.question_coverage.by_question.q1_method.answered_batches,1)
   assert.equal(result.question_coverage.by_question.q6.answered_batches,2)
   assert.equal(result.analysis_complete,false)
-  const restarted=createPaperAnalysis(f.options);assert.equal((await restarted(input)).status,'partial');assert.equal(f.calls.length,8,`Later groups and synthesis continue, without automatic request replay: ${JSON.stringify(result.warnings)}`)
+  const restarted=createPaperAnalysis(f.options);assert.equal((await restarted(input)).status,'partial');assert.equal(f.calls.length,2*callsPerBatch+2,`Later groups and synthesis continue, without automatic request replay: ${JSON.stringify(result.warnings)}`)
 })
 
-test('a completed run saves one reviewable reading-note draft from committed batches',async()=>{
+test('all thirteen positive answers save a reviewable note with honest compacted coverage',async()=>{
   const f=fixture()
   f.outputFor=input=>input.analysisContext?.stage==='note'?{title:'Synthetic 精读笔记',body:'## 一句话概括\n合成笔记。'}:f.response(input)
   await f.handle(request);const result=await f.done()
-  assert.equal(result.status,'complete')
+  assert.equal(result.status,'partial')
+  assert.equal(result.question_coverage.complete,true)
   assert.ok(result.note_draft_id,'Note draft identity is recorded on the job')
-  assert.equal(result.note_coverage.batches,1);assert.equal(result.note_coverage.batches_total,1);assert.equal(result.note_coverage.partial,false);assert.ok(result.note_coverage.packing)
+  assert.equal(result.note_coverage.batches,1);assert.equal(result.note_coverage.batches_total,1);assert.equal(result.note_coverage.partial,true);assert.ok(result.note_coverage.packing)
   const notePut=f.kernel.find(c=>c.action==='knowledge_draft_put'&&c.mode==='note')
   assert.ok(notePut);assert.equal(notePut.origin,'llm');assert.equal(notePut.title,'Synthetic 精读笔记')
   assert.deepEqual(notePut.source_ids,['source-a','source-b'],'Note lists the sources quoted by the batch draft')
@@ -390,9 +407,9 @@ test('reading-note failure leaves partial analysis and preserves batch graphs an
 
 test('the automatic evidence-atlas review saves one pending draft with bounded sources',async()=>{
   const f=fixture();await f.handle(request);const result=await f.done()
-  assert.equal(result.status,'complete')
+  assert.equal(result.status,'partial')
   assert.ok(result.review_draft_id,'The review draft is recorded on the job')
-  assert.equal(result.review_coverage.batches,1);assert.equal(result.review_coverage.batches_total,1);assert.equal(result.review_coverage.partial,false);assert.ok(result.review_coverage.packing)
+  assert.equal(result.review_coverage.batches,1);assert.equal(result.review_coverage.batches_total,1);assert.equal(result.review_coverage.partial,true);assert.ok(result.review_coverage.packing)
   assert.ok(result.review_coverage.sources>=1&&result.review_coverage.sources<=40)
   assert.equal(result.review_profile,null,'No profile is read unless configured')
   const saved=f.kernel.filter(c=>c.action==='knowledge_draft_put'&&String(c.title).startsWith('证据图谱评审'))
@@ -441,9 +458,9 @@ test('an unusable overlay and a malformed review report stay visible warnings',a
 
 test('review:false skips the evidence-atlas generation entirely',async()=>{
   const f=fixture();await f.handle({...request,review:false});const result=await f.done()
-  assert.equal(result.status,'complete');assert.equal(result.review_draft_id,undefined)
+  assert.equal(result.status,'partial');assert.equal(result.review_draft_id,undefined)
   assert.ok(!f.calls.some(c=>c.prompt.includes('evidence-atlas')),'No review generation is requested')
-  assert.equal(f.calls.length,4,'Three question groups plus reading note only')
+  assert.equal(f.calls.length,callsPerBatch+1,'Separate question calls plus reading note only')
   assert.equal(f.kernel.filter(c=>c.action==='knowledge_draft_put'&&String(c.title).startsWith('证据图谱评审')).length,0)
   await assert.rejects(createPaperAnalysis(f.options)({...request,review:'yes',request_id:'run-b'}),/评审选项无效/)
 })
@@ -479,7 +496,7 @@ test('metadata mode rejects extra graph output and incompatible options before m
 
 test('full analysis can skip optional summaries while keeping evidence graph drafts',async()=>{
   const f=fixture();await f.handle({...request,mode:'full',notes:false,review:false});const result=await f.done()
-  assert.equal(result.status,'complete');assert.equal(f.calls.length,3)
+  assert.equal(result.status,'complete');assert.equal(f.calls.length,callsPerBatch)
   assert.equal(result.note_draft_id,undefined);assert.equal(result.review_draft_id,undefined)
   assert.ok(result.draft.nodes.length)
   await assert.rejects(f.handle({...request,mode:'full',notes:true,review:false}),/请求内容已改变/)
@@ -510,7 +527,7 @@ test('full reading prompts ask question choices rather than graph schema or meta
   assert.match(prompt,/不提取原始 Abstract/)
   assert.doesNotMatch(prompt,/20 nodes|40 relations/)
   assert.doesNotMatch(prompt,/metadata and field_sources MUST|LIBRARY_KNOWLEDGE_JSON|top-level source_node/)
-  assert.deepEqual(f.calls.map(call=>call.analysisContext.question_ids),[['q1','q2'],['q3','q4'],['q5','q6']])
+  assert.deepEqual(f.calls.map(call=>call.analysisContext.question_ids),groups)
 })
 
 test('graph prompt spells out the Python schema rather than suggesting arbitrary scalar keys or relation pairs',()=>{

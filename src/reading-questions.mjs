@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 
 const DIRECTORY = new URL('../prompts/reading/', import.meta.url)
-const QUESTION_IDS = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']
+const LEGACY_QUESTION_IDS = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']
 const SOURCE_TYPES = new Set(['evidence', 'figure', 'formula'])
 const NODE_TYPES = new Set(['claim', 'gap', 'question', 'method', 'dataset', 'metric', 'task', 'observation', ...SOURCE_TYPES])
 const RELATIONS = new Set(['reports', 'supports', 'qualifies', 'contradicts', 'identifies'])
@@ -29,7 +29,10 @@ function freeze(value) {
 }
 function text(value, max = 4000) { return typeof value === 'string' && value.length <= max && !value.includes('\0') && !!value.trim() }
 function endpointProjection(question, option) {
-  return question.id === 'q5' ? option.graph?.endpoints ?? LEGACY_ENDPOINTS[option.id] : undefined
+  return option.graph?.endpoints ?? (question.id === 'q5' ? LEGACY_ENDPOINTS[option.id] : undefined)
+}
+function relationQuestion(question) {
+  return question.id === 'q5' || question.options.some(option => option.graph?.endpoints)
 }
 function promptProjection(question, option) {
   if (option.neutral) return { graph_claim: false }
@@ -51,7 +54,12 @@ export function loadQuestionnaire(directory = DIRECTORY) {
     if (Buffer.byteLength(raw) > 64000) throw fail(`问题配置过大：${name}`)
     return JSON.parse(raw)
   }
-  const protocol = read('protocol.json'), questions = QUESTION_IDS.map(id => read(`${id}.json`))
+  const protocol = read('protocol.json')
+  // 未声明清单的 v1/v2 配置沿用旧六题；新题库的文件清单与版本一起冻结。
+  const questionIds = protocol.question_ids ?? LEGACY_QUESTION_IDS
+  if (!Array.isArray(questionIds) || !questionIds.length || questionIds.length > 24 || new Set(questionIds).size !== questionIds.length ||
+      questionIds.some(id => typeof id !== 'string' || id.length > 64 || !/^q[1-9][0-9]*(?:_[a-z][a-z_]*)?$/.test(id))) throw fail('题库清单须为至多 24 个不重复的有界问题标识。')
+  const questions = questionIds.map(id => read(`${id}.json`))
   if (!text(protocol.version, 100) || !Array.isArray(protocol.rules) || !protocol.rules.length || protocol.rules.some(rule => !text(rule)) || !isObject(protocol.templates)) throw fail('阅读协议缺少版本或规则。')
   if (protocol.codebook_required !== undefined && typeof protocol.codebook_required !== 'boolean') throw fail('codebook_required 必须是布尔值。')
   for (const key of ['intro', 'questions_heading', 'rules_heading', 'output_heading', 'sources_heading', 'sources_end', 'scope_label', 'source_label']) {
@@ -61,7 +69,7 @@ export function loadQuestionnaire(directory = DIRECTORY) {
   for (const [key, maximum] of Object.entries(bounds)) if (!Number.isInteger(protocol.limits?.[key]) || protocol.limits[key] < 1 || protocol.limits[key] > maximum) throw fail(`阅读协议预算无效：${key}`)
   if (!Array.isArray(protocol.common_options) || !['other', 'not_reported', 'not_applicable'].every(id => protocol.common_options.some(option => option.id === id))) throw fail('公共选项必须包含其他、未报告与不适用。')
   for (const [index, question] of questions.entries()) {
-    if (question.id !== QUESTION_IDS[index] || !text(question.question) || !text(question.title, 100) || !text(question.guidance) || !Array.isArray(question.options) || !question.options.length || question.options.length > 20) throw fail('问题定义无效。')
+    if (question.id !== questionIds[index] || !text(question.question) || !text(question.title, 100) || !text(question.guidance) || !Array.isArray(question.options) || !question.options.length || question.options.length > 20) throw fail('问题定义无效。')
     const ids = new Set()
     for (const option of [...question.options, ...protocol.common_options]) {
       if (!isObject(option) || !/^[a-z][a-z_]*$/.test(option.id) || ids.has(option.id) || !text(option.label, 500)) throw fail(`问题 ${question.id} 的选项标识无效或重复。`)
@@ -75,17 +83,17 @@ export function loadQuestionnaire(directory = DIRECTORY) {
           ['definition', 'include_when', 'exclude_when'].some(key => !text(option.coding[key], 1500))) throw fail(`问题 ${question.id} 的编码手册缺少定义、适用或排除条件。`)
       }
       if (option.graph?.endpoints !== undefined) {
-        if (question.id !== 'q5' || option.graph.node_type !== 'claim' || option.graph.relation !== 'reports' ||
+        if (option.graph.node_type !== 'claim' || option.graph.relation !== 'reports' ||
           !Object.values(LEGACY_ENDPOINTS).some(value => canonical(value) === canonical(option.graph.endpoints)) ||
           LEGACY_ENDPOINTS[option.id] && canonical(option.graph.endpoints) !== canonical(LEGACY_ENDPOINTS[option.id])) throw fail(`问题 ${question.id} 的关系端点类型或方向不受支持。`)
       }
-      if (protocol.codebook_required && question.id === 'q5' && LEGACY_ENDPOINTS[option.id] && !option.graph?.endpoints) throw fail('q5 编码手册必须包含关系端点合同。')
+      if (protocol.codebook_required && LEGACY_ENDPOINTS[option.id] && !option.graph?.endpoints) throw fail('关系选码的编码手册必须包含关系端点合同。')
     }
     if (protocol.codebook_required || question.examples !== undefined) {
       if (!Array.isArray(question.examples) || !question.examples.length || question.examples.length > 3 || question.examples.some(example =>
         !isObject(example) || Object.keys(example).some(key => !['source_text', 'choice', 'judgment', 'reason', 'subject', 'object'].includes(key)) ||
         !ids.has(example.choice) || ['source_text', 'judgment', 'reason'].some(key => !text(example[key], 1500)) ||
-        (example.subject !== undefined || example.object !== undefined) && (question.id !== 'q5' || !text(example.subject, 500) || !text(example.object, 500) ||
+        (example.subject !== undefined || example.object !== undefined) && (!endpointProjection(question, question.options.find(option => option.id === example.choice) ?? {}) || !text(example.subject, 500) || !text(example.object, 500) ||
           !example.source_text.includes(example.subject) || !example.source_text.includes(example.object)))) throw fail(`问题 ${question.id} 的合成编码示例无效。`)
     }
   }
@@ -98,7 +106,9 @@ export function questionGroups(config, options = {}) {
   const available = config.questions.map(question => question.id)
   const selected = options.question_ids ?? available
   if (!Array.isArray(selected) || !selected.length || selected.length > available.length || new Set(selected).size !== selected.length || selected.some(id => !available.includes(id))) throw fail('question_ids 必须是非空、不重复的已知问题列表。')
-  const mode = options.question_mode ?? 'grouped'
+  const defaultMode = config.protocol.default_mode ?? 'grouped'
+  if (!['grouped', 'separate'].includes(defaultMode)) throw fail('题库默认模式只能是 grouped 或 separate。')
+  const mode = options.question_mode ?? defaultMode
   if (!['grouped', 'separate'].includes(mode)) throw fail('question_mode 只能是 grouped 或 separate。')
   const defaults = config.protocol.default_groups
   if (!Array.isArray(defaults) || defaults.some(group => !Array.isArray(group) || !group.length || group.length > 2) || canonical(defaults.flat().toSorted()) !== canonical(available.toSorted())) throw fail('默认分组必须恰好覆盖所有问题，每组至多两个。')
@@ -215,7 +225,7 @@ export function parseReadingAnswers(raw, pack, questionIds, config = loadQuestio
     }
     if (!option?.neutral && !record.evidence.length) invalid('EVIDENCE_REQUIRED', '肯定回答至少需要一条可定位的证据。')
     if (item?.subject !== undefined || item?.object !== undefined) {
-      if (item?.question_id !== 'q5' || !text(item.subject, 500) || !text(item.object, 2000)) invalid('INVALID_ENDPOINTS', '仅 q5 可同时提供有界 subject 和 object。')
+      if (!(question?.id === 'q5' || question && option && endpointProjection(question, option)) || !text(item.subject, 500) || !text(item.object, 2000)) invalid('INVALID_ENDPOINTS', '仅具有关系端点合同的选码可同时提供有界 subject 和 object。')
       else {
         const index = record.evidence.findIndex(ref => [item.subject, item.object].every(label => ref.quote.replace(/\s+/gu, ' ').includes(label.replace(/\s+/gu, ' '))))
         if (index < 0) invalid('ENDPOINT_NOT_IN_EVIDENCE', '关系两端必须原样出现在本回答的同一条已定位证据中。')
@@ -277,7 +287,7 @@ export function compileReadingGraph(input, pack, config = loadQuestionnaire()) {
         const claim = node('claim', label, 'reported-statement', { fields: { ...fields, extracted_node: target } })
         assertion(claim, 'reports')
       }
-      if (answer.question_id === 'q5') {
+      if (relationQuestion(question)) {
         const mapping = endpointProjection(question, option)
         if (answer.subject && answer.object && mapping?.direction === 'object-to-subject') {
           const relationIndex = answer.relation_evidence_index ?? 0
