@@ -425,9 +425,33 @@ window.PaperLatexWorkspace = (() => {
 
     async function renderEmpty() {
       file = null; revision = null; editor.value = ''; lineNumbers(); tree = null;
-      fileList.textContent = ''; errors.textContent = ''; setPreviewMessage('在 ☰ 菜单里新建一个项目，或登记已有文件夹。');
+      fileList.textContent = ''; errors.textContent = ''; renderEmptyState();
       mainLabel.textContent = ''; setSaveState(''); buildInfo.textContent = '';
       lastBuildOk = null; autoPaused = false;
+    }
+
+    /** No project yet: explain the folder model inline and offer both entry points. */
+    function renderEmptyState() {
+      preview.textContent = '';
+      pageCount = 0; pageLabel.textContent = '—';
+      const card = make('div', 'latex-preview-empty-card');
+      card.append(make('p', 'latex-preview-empty', '还没有 LaTeX 项目。'));
+      card.append(make('p', 'latex-preview-empty-hint',
+        '项目就是一个装着 .tex 和对应 PDF 的文件夹：可以新建一个，也可以登记磁盘上已有的文件夹——文件留在原处，插件只登记、不改动也不删除；文件夹里还没有 .tex 时，可勾选写入最小 main.tex。'));
+      const row = make('div', 'latex-preview-empty-actions');
+      const createButton = make('button', 'button', '新建项目…'); createButton.type = 'button';
+      const registerButton = make('button', 'button subtle', '登记已有文件夹…'); registerButton.type = 'button';
+      row.append(createButton, registerButton);
+      card.append(row);
+      preview.append(card);
+      const openMenuTo = target => {
+        menu.hidden = false;
+        menuButton.setAttribute('aria-expanded', 'true');
+        void refreshWorkspace();
+        target.focus();
+      };
+      createButton.addEventListener('click', event => { event.stopPropagation(); openMenuTo(createName); });
+      registerButton.addEventListener('click', event => { event.stopPropagation(); openMenuTo(newRoot); });
     }
 
     function setPreviewMessage(text) {
