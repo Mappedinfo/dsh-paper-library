@@ -14,9 +14,11 @@
  *   removed, reordered or rewritten, and a folder already covered by any source is
  *   reported instead of duplicated.
  */
+import { execFile } from 'node:child_process'
 import { copyFile, mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
+import { promisify } from 'node:util'
 
 const MAX_CONFIG_BYTES = 256 * 1024
 const MAX_NAME = 60
@@ -27,6 +29,42 @@ const SLUG = /[^\p{L}\p{N}_-]+/gu
 const fail = (message, code = 'LATEX_WORKSPACE_INVALID', status = 400) => Object.assign(new Error(message), { code, status })
 const now = () => new Date().toISOString().replace(/[:.]/g, '-')
 const trimSlashes = value => String(value).replace(/\/+$/, '')
+
+// ---- native folder chooser ---------------------------------------------------
+// The browser page cannot hand out absolute paths (that is exactly what the
+// sandbox denies), so the host opens the OS dialog itself and reports the pick.
+const execFileAsync = promisify(execFile)
+const PICK_TIMEOUT = 5 * 60 * 1000
+
+/** The folder-chooser command for each platform, or null when none is known. */
+function pickCommand(platform) {
+  if (platform === 'darwin') return { command: 'osascript', args: ['-e', 'tell application "System Events" to activate', '-e', 'POSIX path of (choose folder with prompt "选择要登记的 LaTeX 项目文件夹")'] }
+  if (platform === 'linux') return { command: 'zenity', args: ['--file-selection', '--directory', '--title=选择要登记的 LaTeX 项目文件夹'] }
+  if (platform === 'win32') return { command: 'powershell', args: ['-Sta', '-NoProfile', '-Command', 'Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = "选择要登记的 LaTeX 项目文件夹"; if ($d.ShowDialog() -eq "OK") { [Console]::Out.Write($d.SelectedPath) }'] }
+  return null
+}
+
+async function defaultPickRun(command, args) {
+  try {
+    const { stdout } = await execFileAsync(command, args, { timeout: PICK_TIMEOUT, maxBuffer: 64 * 1024 })
+    return { code: 0, stdout: String(stdout) }
+  } catch (error) {
+    if (error.code === 'ENOENT') throw fail('这台机器上没有可用的文件夹选择对话框，请直接粘贴绝对路径。', 'LATEX_PICK_UNAVAILABLE', 409)
+    if (error.killed || error.signal === 'SIGTERM') throw fail('文件夹选择对话框超时未响应，请直接粘贴绝对路径。', 'LATEX_PICK_TIMEOUT', 409)
+    // osascript and zenity exit 1 when the user cancels; PowerShell just prints nothing.
+    return { code: typeof error.code === 'number' ? error.code : 1, stdout: String(error.stdout || '') }
+  }
+}
+
+/** Open the OS folder chooser; report the picked folder, or that the user cancelled. */
+export async function pickFolder({ platform = process.platform, run = defaultPickRun } = {}) {
+  const command = pickCommand(platform)
+  if (!command) throw fail('这个平台还没有文件夹选择对话框，请直接粘贴绝对路径。', 'LATEX_PICK_UNAVAILABLE', 409)
+  const { stdout } = await run(command.command, command.args)
+  const trimmed = stdout.trim()
+  const picked = trimmed.length > 1 ? trimmed.replace(/\/+$/, '') : trimmed
+  return picked ? { cancelled: false, path: picked } : { cancelled: true }
+}
 
 /** Same home resolution order as the state store and `latexRoot`. */
 function dshHome(config) {
@@ -91,7 +129,7 @@ function uniqueField(sources, field, base) {
   throw fail(`数据同步服务里已有 ${base} 且后缀用尽，请手动整理配置。`, 'LATEX_SYNC_INVALID', 409)
 }
 
-export function createLatexWorkspace({ config = {}, dispatch, settings, library, python, fs = {} } = {}) {
+export function createLatexWorkspace({ config = {}, dispatch, settings, library, python, fs = {}, run } = {}) {
   const io = { readFile, writeFile, mkdir, stat, rename, copyFile, realpath, ...fs }
   if (typeof dispatch !== 'function') throw new Error('paper-library: the LaTeX workspace needs the library dispatch')
 
@@ -234,6 +272,7 @@ export function createLatexWorkspace({ config = {}, dispatch, settings, library,
     if (action === 'latex_ws_status') return status()
     if (action === 'latex_ws_create') return create({ ...input, signal })
     if (action === 'latex_ws_sync_attach') return attachSync({ root: input.root, strict: true })
+    if (action === 'latex_ws_pick_folder') return pickFolder(run ? { run } : {})
     throw fail('未知 LaTeX 工作区操作。')
   }
 }

@@ -87,7 +87,9 @@ window.PaperLatexWorkspace = (() => {
     const newStarter = make('input'); newStarter.id = 'latex-new-starter'; newStarter.type = 'checkbox';
     const starterLabel = make('label', 'latex-check'); starterLabel.append(newStarter, make('span', '', '没有 .tex 时写入最小 main.tex'));
     const newSubmit = make('button', 'button primary', '登记'); newSubmit.id = 'latex-new-submit'; newSubmit.type = 'button';
-    const registerLine = make('div', 'latex-menu-row'); registerLine.append(newRoot, newTitle, starterLabel, newSubmit);
+    // The browser cannot hand out absolute paths, so the host opens the OS dialog.
+    const newPick = make('button', 'button subtle', '选择…'); newPick.id = 'latex-new-pick'; newPick.type = 'button'; newPick.title = '打开系统文件夹选择对话框';
+    const registerLine = make('div', 'latex-menu-row'); registerLine.append(newRoot, newPick, newTitle, starterLabel, newSubmit);
     registerRow.append(registerLine);
 
     const compareRow = make('div', 'latex-menu-section');
@@ -690,6 +692,16 @@ window.PaperLatexWorkspace = (() => {
       } catch (error) {
         say(`新建失败：${error.message}`, true);
       } finally { createRun.disabled = false; }
+    });
+    newPick.addEventListener('click', async () => {
+      newPick.disabled = true;
+      try {
+        const picked = await api('latex_ws_pick_folder', {});
+        if (picked.cancelled) say('没有选择文件夹。');
+        else { newRoot.value = picked.path; newRoot.focus(); }
+      } catch (error) {
+        say(`无法打开文件夹选择对话框：${error.message}`, true);
+      } finally { newPick.disabled = false; }
     });
     newSubmit.addEventListener('click', async () => {
       const root = newRoot.value.trim();

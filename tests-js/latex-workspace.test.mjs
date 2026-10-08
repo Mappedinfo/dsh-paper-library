@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dispatch } from '../src/bridge.mjs'
 import { resolveConfig } from '../src/harness/config.mjs'
-import { createLatexWorkspace, projectSlug, syncSourceEntry, coveringSource } from '../src/harness/latex-workspace.mjs'
+import { createLatexWorkspace, pickFolder, projectSlug, syncSourceEntry, coveringSource } from '../src/harness/latex-workspace.mjs'
 
 const project = dirname(dirname(fileURLToPath(import.meta.url)))
 const python = existsSync(join(project, '.venv', 'bin', 'python')) ? join(project, '.venv', 'bin', 'python') : undefined
@@ -194,3 +194,22 @@ test('the sync entry matches what the sync service validates', async () => {
   assert.equal(coveringSource([{ id: 'same', root: '/Users/example/manuscripts' }], '/Users/example/manuscripts/').id, 'same')
   assert.equal(coveringSource([{ id: 'tilde', root: '~/manuscripts' }], join(process.env.HOME || '/Users/example', 'manuscripts')).id, 'tilde')
 })
+
+test('the folder picker reports the picked path, cancellation and unsupported platforms', async () => {
+  // macOS osascript prints the POSIX path with a trailing slash.
+  const picked = await pickFolder({ platform: 'darwin', run: async () => ({ code: 0, stdout: '/Users/example/论文文件夹/\n' }) })
+  assert.deepEqual(picked, { cancelled: false, path: '/Users/example/论文文件夹' })
+
+  // osascript/zenity exit 1 with no output on cancel; PowerShell prints nothing and exits 0.
+  assert.deepEqual(await pickFolder({ platform: 'darwin', run: async () => ({ code: 1, stdout: '' }) }), { cancelled: true })
+  assert.deepEqual(await pickFolder({ platform: 'win32', run: async () => ({ code: 0, stdout: '' }) }), { cancelled: true })
+
+  // A platform without a known dialog fails loudly so the path input stays the fallback.
+  await assert.rejects(pickFolder({ platform: 'freebsd', run: async () => ({ code: 0, stdout: '' }) }), /还没有文件夹选择对话框/)
+
+  // The workspace action uses the injected runner, so the host dialog stays mockable.
+  const fx = await fixture()
+  const withPicker = createLatexWorkspace({ config: fx.config, dispatch, settings: memorySettings(fx.preferences), library: fx.library, python, run: async () => ({ code: 0, stdout: '/tmp/picked/\n' }) })
+  assert.deepEqual(await withPicker({ action: 'latex_ws_pick_folder' }), { cancelled: false, path: '/tmp/picked' })
+})
+
