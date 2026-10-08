@@ -61,17 +61,36 @@
 - `latex_compare {a, b, path?}`：两个项目之间比较同一个相对路径（默认各自的主文件），
   用于「第一版 / 第二版」这类文件夹级对照。
 
+## SyncTeX 双向跳转（已实现）
+
+编译始终带 `-synctex=1`，项目 PDF 旁边的 `.synctex.gz` 由本机 `synctex` 命令行（随 TeX Live /
+MacTeX 安装，定位逻辑与 `latexmk` 相同）解读，两个动作都是只读：
+
+- `latex_synctex_edit {id, page, x, y}`（反向）：把页面上一点映射回源码。坐标是**显示态 PDF 点、
+  左上角原点**，与 `latex_pdf_pages` 报告的页面几何、预览位图同一套；synctex 是就近匹配，
+  点在空白处会吸附到最近的源码行而不是报错。返回的 `Input` 路径先 realpath 归一
+  （synctex 会原样带回编译时的 `./` 段），再校验必须落在项目目录内——落在 TeX 系统样式上
+  （项目外）就明确拒绝而不是跳出去读。
+- `latex_synctex_view {id, path, line, column?}`（正向）：把某个源文件的某一行映射到 PDF 的
+  页码与矩形框（`h/v/W/H` 与命中点 `x/y`，同一坐标系），并报告该页旋转角。
+- 带旋转的页两个方向都拒绝：SyncTeX 在未旋转坐标系里计数，映射会错位。
+- PDF 早于这次修改时，正向搜索可能命中旧位置——synctex 本身不知道文件已改，这与所有
+  SyncTeX 编辑器一致，重新编译即恢复精确。
+
+面板上：**双击 PDF** 反向跳到对应源码行（切换文件会先落盘未保存的改动，再选中整行并滚动到
+可视区）；预览页头的 `⇥` 按钮把编辑器光标所在行正向定位到 PDF 并闪烁高亮该矩形。
+
 ## 对外的工具与动作
 
 两个原生工具，读写分离，便于审批策略区分：
 
 | 工具 | 动作 |
 | --- | --- |
-| `library_latex`（只读） | `project_list` `project_get` `tree` `read` `pdf_pages` `pdf_page` `history` `diff` `compare` |
+| `library_latex`（只读） | `project_list` `project_get` `tree` `read` `pdf_pages` `pdf_page` `history` `diff` `compare` `synctex_edit` `synctex_view` |
 | `library_latex_edit`（写入） | `project_create` `project_update` `project_archive` `project_restore` `write` `compile` `clean` |
 
 两者都把 `input_json` 解析为一次调用，动作名变成 `latex_<operation>`，并且只允许
-`src/bridge.mjs` 白名单里的 16 个动作通过。浏览器面板通过同一个 `/api/paper-library/api`
+`src/bridge.mjs` 白名单里的 18 个动作通过。浏览器面板通过同一个 `/api/paper-library/api`
 动作面读写，因此编辑器与 Agent 走的是同一条经过校验的路径。
 
 ## 默认论文目录与同步（已实现）
