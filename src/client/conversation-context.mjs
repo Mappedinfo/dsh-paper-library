@@ -235,7 +235,12 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
   const origin = window.location.origin
   const frames = new Map()
   const mounted = new Map()
-  let snapshot = null
+  // Reader snapshots are keyed by the sidebar tab that hosts the iframe, so
+  // several library panes (split view, or whiteboard/LaTeX side tabs) restore
+  // their own paper instead of stealing each other's last state. Keyless
+  // callers share the 'default' slot, preserving single-pane behaviour.
+  const snapshots = new Map()
+  let lastActiveTarget = null
   let active = true
   let navigation = null
   let frameTimer = null
@@ -245,7 +250,10 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
 
   function relayReference() {
     if (!pendingReference) return
-    const target = [...frames].reverse().find(([, frame]) => frame.ready)?.[0]
+    // With several panes open, deliver to the pane the reader last touched;
+    // fall back to the most recent ready frame when that pane is gone.
+    const recent = lastActiveTarget !== null ? frames.get(lastActiveTarget) : undefined
+    const target = recent?.ready ? lastActiveTarget : [...frames].reverse().find(([, frame]) => frame.ready)?.[0]
     if (!target) return
     post(target, { type: 'paper-library:reference-open', ...pendingReference })
     pendingReference = null
@@ -341,13 +349,30 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
     if (data.type === 'paper-library:ready') {
       if (frame.ready) return
       frame.ready = true
-      if (snapshot) post(event.source, { type: 'paper-library:restore', snapshot })
+      const saved = snapshots.get(frame.key)
+      if (saved) post(event.source, { type: 'paper-library:restore', snapshot: saved })
       relayResult(event.source)
       relayReference()
       return
     }
     if (data.type === 'paper-library:reader-state') {
-      try { snapshot = readerSnapshot(data.snapshot) }
+      try {
+        snapshots.set(frame.key, readerSnapshot(data.snapshot))
+        lastActiveTarget = event.source
+      }
+      catch (error) { post(event.source, { type: 'paper-library:reader-state-error', error: error.message }) }
+      return
+    }
+    if (data.type === 'paper-library:open-pane') {
+      // Split view: the reader asks for a second library tab in a new pane, so
+      // two papers stay visible side by side. Page tabs deduplicate within a
+      // pane, so the new tab only coexists when the sidebar can actually split;
+      // otherwise this reveals the existing tab, navigated to the same paper.
+      try {
+        const paper = boundedString(data.id, 200)
+        if (!paper) throw new Error('文献标识无效')
+        ctx.sidebarRight.openTab('paper-library', { preferNewPane: true, params: { paper } })
+      }
       catch (error) { post(event.source, { type: 'paper-library:reader-state-error', error: error.message }) }
       return
     }
@@ -390,11 +415,19 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
       try { await openSession(sessionId) }
       catch (error) { pendingReference = null; throw error }
     },
-    /** Authorize exactly one generated iframe's WindowProxy until its pane unmounts. */
-    attach(target) {
-      const record = { ready: false, requests: new Map() }
+    /** Authorize exactly one generated iframe's WindowProxy until its pane unmounts.
+     *  `key` identifies the hosting sidebar tab, isolating its reader snapshot. */
+    attach(target, key) {
+      const record = { ready: false, requests: new Map(), key: typeof key === 'string' && key ? key : 'default' }
       frames.set(target, record)
       return () => { if (frames.get(target) === record) frames.delete(target) }
+    },
+    /** Navigate an already-mounted tab to a paper after the sidebar re-navigates it. */
+    openPaper(target, paperId) {
+      const frame = frames.get(target)
+      if (!frame?.ready) return false
+      post(target, { type: 'paper-library:open-paper', id: boundedString(paperId, 200) })
+      return true
     },
     /** Consume pending navigation after the target session's composer seat mounts. */
     mountedSession(sessionId) {
@@ -408,7 +441,7 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
       active = false
       window.removeEventListener('message', onMessage)
       finishNavigation(new Error('文献库插件已卸载'))
-      frames.clear(); mounted.clear(); snapshot = null; terminalRelay = null; pendingReference = null
+      frames.clear(); mounted.clear(); snapshots.clear(); lastActiveTarget = null; terminalRelay = null; pendingReference = null
     },
   }
 }

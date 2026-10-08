@@ -188,7 +188,7 @@ async function openPaper(id) {
   const ticket = ++state.itemTicket;
   state.openedId = id;
   ++state.pageTicket; state.pageWanted = null; clearPage(); state.annotations = []; state.annotationsTruncated = false; state.noteOffset = 0;
-  $('annotation-list').replaceChildren(); $('annotation-count').textContent = ''; $('feedback-list').replaceChildren(); $('feedback-status').textContent = ''; knowledgeGraphUI?.clear(); $('download-pdf').hidden = true;
+  $('annotation-list').replaceChildren(); $('annotation-count').textContent = ''; $('feedback-list').replaceChildren(); $('feedback-status').textContent = ''; knowledgeGraphUI?.clear(); $('download-pdf').hidden = true; $('open-in-pane').hidden = true;
   errorAt('detail-error', null);
   document.querySelector('.workspace').classList.add('show-detail');
   $('welcome').hidden = true; $('paper-detail').hidden = false;
@@ -225,6 +225,7 @@ async function openResource(item){if(!item)return;if(item.resource_kind==='datas
   const fileNotes = [item.pdf_filename ? `PDF：${item.pdf_filename}` : '', item.parse?.needs_review ? '自动识别的文献资料待核对' : ''].filter(Boolean);
   $('paper-file-meta').textContent = fileNotes.join(' · '); $('paper-file-meta').hidden = !fileNotes.length; $('paper-file-meta').classList.toggle('needs-review', Boolean(item.parse?.needs_review));
   $('download-pdf').hidden = !item.pdf; $('download-pdf').href = `./pdf/${encodeURIComponent(item.id)}`;
+  $('open-in-pane').hidden = window.parent === window;
   $('no-pdf').hidden = Boolean(item.pdf); $('reader-content').hidden = !item.pdf;
   workbenchUI?.header();
   readingShell?.sync();
@@ -885,6 +886,12 @@ function receiveHarnessContext(event) {
       return;
     }
     if (event.data.type === 'paper-library:reader-state-error') { toast(event.data.error || '阅读草稿暂未保存到主窗口。', true); return; }
+    if (event.data.type === 'paper-library:open-paper') {
+      // The host re-navigated this mounted tab to another paper (split panes).
+      const id = event.data.id;
+      if (typeof id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(id) && id !== state.active?.id) void openPaper(id).catch(error => toast(error.message, true));
+      return;
+    }
   }
   if (window.parent === window || event.source !== window.parent || event.origin !== window.location.origin) return;
   const data = event.data;
@@ -1195,7 +1202,13 @@ function entryView(){
   try{const view=new URLSearchParams(location.search).get('view');return view==='board'?'board':view==='latex'?'latex':'library';}
   catch{return 'library';}
 }
+/** A library tab opened for one specific paper (split-pane reading) carries it here. */
+function entryPaper(){
+  try{const id=new URLSearchParams(location.search).get('paper');return id&&/^[A-Za-z0-9_-]{1,160}$/.test(id)?id:null;}
+  catch{return null;}
+}
 const ENTRY_VIEW=entryView();
+const ENTRY_PAPER=entryPaper();
 /** Each entry surface is a pure page: open it and leave only it on screen. */
 async function applyEntryView(){
   if(ENTRY_VIEW==='board'&&boardUI){
@@ -1217,9 +1230,15 @@ async function initialize() {
   announceReady();await loadStatus();
   if(ENTRY_VIEW==='board'||ENTRY_VIEW==='latex'){await applyEntryView();return;}
   await loadList();
-  try{const saved=await persistence?.get('reader');if(saved?.paperId){const detail=saved.page?saved:await persistence.get(`reader:${saved.paperId}`);if(detail){readerRestore=detail;durableReaderLoaded=true;}}}
-  catch(error){toast(`阅读位置读取失败：${error.message}`,true);}
-  initializedReader=true;await restoreReaderState();
+  if(ENTRY_PAPER){
+    // This tab was opened for one paper; the global last-paper key belongs to the
+    // main library tab and must not pull this pane onto another document.
+    initializedReader=true;await openPaper(ENTRY_PAPER);
+  } else {
+    try{const saved=await persistence?.get('reader');if(saved?.paperId){const detail=saved.page?saved:await persistence.get(`reader:${saved.paperId}`);if(detail){readerRestore=detail;durableReaderLoaded=true;}}}
+    catch(error){toast(`阅读位置读取失败：${error.message}`,true);}
+    initializedReader=true;await restoreReaderState();
+  }
   if(pendingReferenceOpen){const value=pendingReferenceOpen;pendingReferenceOpen=null;await openReferencedPaper(value);}
   if(!paperChatUI?.available())loadModels();
 }
@@ -1630,4 +1649,11 @@ window.addEventListener('message', event => {
   if (event.source !== window.parent || event.origin !== window.location.origin || value?.type !== 'paper-library:reference-open' || value.version !== 1 || typeof value.paperId !== 'string' || !value.paperId || value.paperId.length > 160 || !Number.isInteger(value.page) || value.page < 1 || value.page > 2000) return;
   void openReferencedPaper(value).catch(error => toast(error.message, true));
 });
+{
+  const openPaneButton = $('open-in-pane');
+  if (openPaneButton) openPaneButton.addEventListener('click', () => {
+    if (!state.active?.id || window.parent === window) return;
+    window.parent.postMessage({ type: 'paper-library:open-pane', version: 1, id: state.active.id }, window.location.origin);
+  });
+}
 initialize();

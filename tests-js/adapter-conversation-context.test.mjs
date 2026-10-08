@@ -211,7 +211,7 @@ test('handwriting handoff accepts blank boards, full worker dimensions and Unico
 function environment() {
   const listeners = new Set(), frames = new Map(), timers = new Map(), messages = []
   let sequence = 0, current = 'source', state = { draft: '', phase: 'plain', occurrences: [], attachmentIds: [], draftRev: 1 }
-  const operations = [], inputEdits = []
+  const operations = [], inputEdits = [], tabOptions = []
   const window = {
     location: { origin: 'http://localhost:3080' },
     addEventListener: (_, listener) => listeners.add(listener),
@@ -236,7 +236,7 @@ function environment() {
       input: { for: actx => { assert.equal(actx, scope); return { state: { getSnapshot: () => state } } } },
       blocks: { storeFor: () => ({ getSnapshot: () => block }) },
     },
-    sidebarRight: { openTab: kind => operations.push(`tab:${current}:${kind}`) },
+    sidebarRight: { openTab: (kind, options) => { operations.push(`tab:${current}:${kind}`); tabOptions.push({ kind, options }) } },
   }
   const bridge = createConversationBridge({ window, ctx })
   const target = { postMessage: (value, origin) => messages.push({ value, origin }) }
@@ -246,7 +246,7 @@ function environment() {
   }
   const frame = () => { for (const [id, fn] of [...frames]) { frames.delete(id); fn() } }
   const action = (action, extra = {}) => message({ type: 'paper-library:conversation-action', requestId: 'request-1', action, sessionId: 'paper', ...extra })
-  return { window, ctx, bridge, target, detach, message, action, frame, timers, messages, operations, inputEdits, listeners,
+  return { window, ctx, bridge, target, detach, message, action, frame, timers, messages, operations, inputEdits, listeners, tabOptions,
     setState: value => { state = { ...state, ...value } },
     setCurrent: value => { current = value }, setBlock: value => { block = value }, setApplied: value => { applied = value },
   }
@@ -558,5 +558,66 @@ test('reference page navigation waits for an authorized ready iframe and never e
   assert.equal(e.inputEdits.length, 0)
   e.setCurrent('other')
   await assert.rejects(e.bridge.openReference({ sessionId: 'paper', paperId: 'paper-1', page: 8, snapshot_id: 'a'.repeat(64) }), /其他对话/)
+  e.bridge.dispose()
+})
+
+test('each sidebar tab restores only its own reading snapshot', () => {
+  const e = environment()
+  const a = [], b = []
+  const targetA = { postMessage: (value, origin) => a.push({ value, origin }) }
+  const targetB = { postMessage: (value, origin) => b.push({ value, origin }) }
+  const detachA = e.bridge.attach(targetA, 'tab-a')
+  const detachB = e.bridge.attach(targetB, 'tab-b')
+  e.message({ type: 'paper-library:reader-state', snapshot: { paperId: 'paper-1', page: 3 } }, targetA)
+  e.message({ type: 'paper-library:reader-state', snapshot: { paperId: 'paper-2', page: 7 } }, targetB)
+  detachA(); detachB()
+  const targetA2 = { postMessage: (value, origin) => a.push({ value, origin }) }
+  const targetB2 = { postMessage: (value, origin) => b.push({ value, origin }) }
+  e.bridge.attach(targetA2, 'tab-a')
+  e.bridge.attach(targetB2, 'tab-b')
+  e.message({ type: 'paper-library:ready' }, targetA2)
+  e.message({ type: 'paper-library:ready' }, targetB2)
+  assert.equal(a.at(-1).value.type, 'paper-library:restore')
+  assert.equal(a.at(-1).value.snapshot.paperId, 'paper-1')
+  assert.equal(b.at(-1).value.type, 'paper-library:restore')
+  assert.equal(b.at(-1).value.snapshot.paperId, 'paper-2')
+  e.bridge.dispose()
+})
+
+test('the reader may ask for a split pane, bounded to a paper id', () => {
+  const e = environment()
+  e.message({ type: 'paper-library:open-pane', id: 'paper-9' })
+  assert.deepEqual(e.tabOptions, [{ kind: 'paper-library', options: { preferNewPane: true, params: { paper: 'paper-9' } } }])
+  e.message({ type: 'paper-library:open-pane', id: '' })
+  e.message({ type: 'paper-library:open-pane', id: 'x'.repeat(201) })
+  assert.equal(e.tabOptions.length, 1)
+  assert.equal(e.messages.at(-1).value.type, 'paper-library:reader-state-error')
+  e.bridge.dispose()
+})
+
+test('the bridge navigates a ready tab to a re-requested paper only', () => {
+  const e = environment()
+  assert.equal(e.bridge.openPaper(e.target, 'paper-4'), false)
+  e.message({ type: 'paper-library:ready' })
+  assert.equal(e.bridge.openPaper(e.target, 'paper-4'), true)
+  assert.deepEqual(e.messages.at(-1).value, { type: 'paper-library:open-paper', version: 1, id: 'paper-4' })
+  e.bridge.dispose()
+})
+
+test('reference jumps land in the pane the reader last touched', async () => {
+  const e = environment()
+  const b = []
+  const targetB = { postMessage: (value, origin) => b.push({ value, origin }) }
+  e.bridge.attach(targetB, 'tab-b')
+  e.message({ type: 'paper-library:ready' })
+  e.message({ type: 'paper-library:ready' }, targetB)
+  // Without the activity hint the older bridge delivered to the newest frame (B).
+  e.message({ type: 'paper-library:reader-state', snapshot: { paperId: 'paper-1', page: 2 } })
+  e.setCurrent('paper'); e.bridge.mountedSession('paper')
+  const pending = e.bridge.openReference({ sessionId: 'paper', paperId: 'paper-1', page: 9, snapshot_id: 'a'.repeat(64) })
+  e.frame(); await pending
+  assert.equal(b.filter(m => m.value.type === 'paper-library:reference-open').length, 0)
+  assert.equal(e.messages.at(-1).value.type, 'paper-library:reference-open')
+  assert.equal(e.messages.at(-1).value.page, 9)
   e.bridge.dispose()
 })
