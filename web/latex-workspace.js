@@ -22,6 +22,7 @@ window.PaperLatexWorkspace = (() => {
   function create({api, toast = () => {}, getLibrary = () => '', rail = null}) {
     const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
     let projects = [], project = null, tree = null, file = null, revision = null, pageCount = 0, page = 1, tab = 'pdf';
+    let pageGeometry = []; let syncFlash = null;
     let dirty = false, saving = false, compiling = false, disposed = false, timer = null, compileTimer = null, generation = 0, saveQueue = Promise.resolve();
     let lastBuildOk = null, autoPaused = false, pendingCompile = false;
     const rendered = new Map();
@@ -145,7 +146,10 @@ window.PaperLatexWorkspace = (() => {
     const pagePrev = make('button', 'icon-button', '‹'); pagePrev.id = 'latex-page-prev'; pagePrev.type = 'button'; pagePrev.setAttribute('aria-label', '上一页');
     const pageNext = make('button', 'icon-button', '›'); pageNext.id = 'latex-page-next'; pageNext.type = 'button'; pageNext.setAttribute('aria-label', '下一页');
     const pageLabel = make('span', 'latex-page-label'); pageLabel.id = 'latex-page-label'; pageLabel.textContent = '—';
-    previewHead.append(pagePrev, pageLabel, pageNext);
+    const toPdf = make('button', 'icon-button', '⇥'); toPdf.id = 'latex-synctex-forward'; toPdf.type = 'button';
+    toPdf.title = '把编辑器光标所在行定位到 PDF（SyncTeX）；双击 PDF 可反向跳到源码';
+    toPdf.setAttribute('aria-label', '从光标行跳到 PDF 对应位置');
+    previewHead.append(pagePrev, pageLabel, pageNext, toPdf);
     const preview = make('div', 'latex-preview'); preview.id = 'latex-preview';
     const errors = make('ul', 'latex-errors'); errors.id = 'latex-errors';
     panePdf.append(previewHead, preview, errors);
@@ -463,7 +467,7 @@ window.PaperLatexWorkspace = (() => {
     async function loadLayout() {
       try {
         const layout = await api('latex_pdf_pages', { id: project.id });
-        pageCount = layout.page_count; page = Math.min(Math.max(1, page), Math.max(1, pageCount));
+        pageCount = layout.page_count; pageGeometry = layout.pages || []; page = Math.min(Math.max(1, page), Math.max(1, pageCount));
         await renderPage(page);
       } catch (error) {
         setPreviewMessage(`无法预览：${error.message}`);
@@ -484,12 +488,91 @@ window.PaperLatexWorkspace = (() => {
         if (rendered.size > MAX_RENDERED_PAGES) rendered.delete(rendered.keys().next().value);
       }
       preview.textContent = '';
+      const stage = make('div', 'latex-page-stage');
       const img = document.createElement('img'); img.className = 'latex-page'; img.alt = `第 ${page} 页`; img.src = image;
-      preview.append(img);
+      img.title = '双击跳转到对应的源码位置（SyncTeX）';
+      img.addEventListener('dblclick', event => void jumpToSource(event, img));
+      stage.append(img);
+      preview.append(stage);
     }
 
     pagePrev.addEventListener('click', () => void renderPage(page - 1));
     pageNext.addEventListener('click', () => void renderPage(page + 1));
+
+    // ---- SyncTeX: source and PDF jump to each other ------------------------------
+    // Coordinates are displayed PDF points with a top-left origin on both ends; the
+    // img's bounding box converts between bitmap pixels and those points. Rotated
+    // pages are refused because SyncTeX counts in the unrotated frame.
+    async function gotoSource(path, line) {
+      if (path !== file) { if (dirty) await flush('manual'); await openFile(path); }
+      const lines = editor.value.split('\n');
+      const target = Math.min(Math.max(1, line), lines.length);
+      let offset = 0;
+      for (let index = 0; index < target - 1; index += 1) offset += lines[index].length + 1;
+      editor.focus();
+      editor.setSelectionRange(offset, offset + lines[target - 1].length);
+      const lineHeight = parseFloat(getComputedStyle(editor).lineHeight) || 21;
+      editor.scrollTop = Math.max(0, (target - 1) * lineHeight - editor.clientHeight / 3);
+      gutter.scrollTop = editor.scrollTop;
+      say(`已跳到 ${path}:${target}`);
+    }
+
+    async function jumpToSource(event, img) {
+      if (!project) return;
+      const geometry = pageGeometry[page - 1];
+      if (!geometry) return;
+      if (geometry.rotation) { say('这一页带旋转，SyncTeX 坐标对不上，暂不支持跳转。', true); return; }
+      const rect = img.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const x = ((event.clientX - rect.left) / rect.width) * geometry.width;
+      const y = ((event.clientY - rect.top) / rect.height) * geometry.height;
+      try {
+        const result = await api('latex_synctex_edit', { id: project.id, page, x, y });
+        await gotoSource(result.path, result.line);
+      } catch (error) {
+        say(`SyncTeX 跳转：${error.message}`, true);
+      }
+    }
+
+    async function highlightPdf(result) {
+      const geometry = pageGeometry[result.page - 1];
+      const img = preview.querySelector('img.latex-page');
+      if (!geometry || !img) return;
+      if (geometry.rotation || result.rotation) { say('目标页带旋转，无法标注位置。', true); return; }
+      try { await img.decode(); } catch { /* a cached data URL is already decoded */ }
+      const rect = img.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const stage = img.parentElement;
+      const stale = stage.querySelector('.latex-sync-highlight');
+      if (stale) stale.remove();
+      const kx = rect.width / geometry.width, ky = rect.height / geometry.height;
+      const marker = make('div', 'latex-sync-highlight');
+      const left = (result.h ?? result.x ?? 0) * kx;
+      const top = Math.max(0, ((result.v ?? result.y ?? 0) - (result.H ?? 0)) * ky);
+      marker.style.left = `${left}px`;
+      marker.style.top = `${top}px`;
+      marker.style.width = `${Math.max(24, (result.W ?? 24) * kx)}px`;
+      marker.style.height = `${Math.max(14, (result.H ?? 8) * ky + 6)}px`;
+      stage.append(marker);
+      marker.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      clearTimeout(syncFlash);
+      syncFlash = setTimeout(() => marker.remove(), 2600);
+    }
+
+    async function jumpToPdf() {
+      if (!project || !file) { say('先在左侧打开一个源文件。', true); return; }
+      if (!pageCount) { say('还没有 PDF；先编译一次。', true); return; }
+      const line = editor.value.slice(0, editor.selectionStart).split('\n').length;
+      try {
+        const result = await api('latex_synctex_view', { id: project.id, path: file, line });
+        if (result.page !== page) await renderPage(result.page);
+        await highlightPdf(result);
+        say(`${file}:${line} → 第 ${result.page} 页`);
+      } catch (error) {
+        say(`SyncTeX 跳转：${error.message}`, true);
+      }
+    }
+    toPdf.addEventListener('click', () => void jumpToPdf());
 
     // ---- compiling ----------------------------------------------------------------
     function scheduleCompile() {
