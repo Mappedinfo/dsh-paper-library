@@ -567,6 +567,16 @@ def _latexmk() -> str:
     raise ValueError("找不到 latexmk；请安装 TeX Live / MacTeX 后再编译")
 
 
+def _synctex() -> str:
+    found = shutil.which("synctex")
+    if found:
+        return found
+    candidate = Path(TEXBIN) / "synctex"
+    if candidate.is_file():
+        return str(candidate)
+    raise ValueError("找不到 synctex；它随 TeX Live / MacTeX 一起安装，用于 PDF 与源码互跳")
+
+
 def _compile_env() -> dict:
     env = dict(os.environ)
     path = env.get("PATH", "")
@@ -709,6 +719,154 @@ def pdf_page(library, id=None, page=1, scale=1.25, include_archived=False):
         }
 
 
+def _synctex_sidecar(pdf: Path) -> Path:
+    return pdf.with_name(f"{pdf.stem}.synctex.gz")
+
+
+def _synctex_pairs(output: str) -> dict:
+    """The CLI prints `Key:value` lines between its result markers; unknown keys pass through."""
+    pairs = {}
+    inside = False
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped == "SyncTeX result begin":
+            inside = True
+            continue
+        if stripped == "SyncTeX result end":
+            break
+        if inside and ":" in line:
+            key, _, value = line.partition(":")
+            pairs.setdefault(key.strip(), value.strip())
+    return pairs
+
+
+def _finite_point(value, name: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name}必须是数字") from None
+    if not math.isfinite(number):
+        raise ValueError(f"{name}必须是有限数字")
+    return number
+
+
+def _synctex_ready(library, id, include_archived):
+    row = _project(library, id, include_archived)
+    root = Path(row["root"])
+    pdf = _project_pdf(library, row)
+    if not _synctex_sidecar(pdf).is_file():
+        raise ValueError("这个 PDF 没有 SyncTeX 数据；请重新编译（编译始终带 -synctex=1）")
+    return row, root, pdf
+
+
+def _synctex_run(arguments, cwd: Path) -> dict:
+    try:
+        completed = subprocess.run(
+            [_synctex(), *arguments],
+            cwd=str(cwd), env=_compile_env(), stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise ValueError("synctex 超过 15 秒未结束，已停止") from None
+    output = completed.stdout.decode("utf-8", "replace")
+    return _synctex_pairs(output)
+
+
+def synctex_edit(library, id=None, page=None, x=None, y=None, include_archived=False):
+    """Inverse search: one point on a PDF page back to its source file and line.
+
+    Coordinates are displayed PDF points with the origin at the top-left corner of
+    the page, exactly what pdf_pages reports and what the preview bitmap shows.
+    Rotated pages are refused because SyncTeX counts in the unrotated frame.
+    """
+    row, root, pdf = _synctex_ready(library, id, include_archived)
+    with library._open_pdf(pdf) as document:
+        current = library._page(document, page)
+        if current.rotation:
+            raise ValueError("这一页带旋转，SyncTeX 坐标对不上，暂不支持跳转")
+        width, height = current.rect.width, current.rect.height
+    x = _finite_point(x, "x 坐标")
+    y = _finite_point(y, "y 坐标")
+    if not (0 <= x <= width) or not (0 <= y <= height):
+        raise ValueError("坐标超出这一页")
+    pairs = _synctex_run(["edit", "-o", f"{int(page)}:{x:.3f}:{y:.3f}:{pdf.name}"], pdf.parent)
+    source_text = pairs.get("Input")
+    if not source_text:
+        raise ValueError("这一点没有对应的源码位置（可能落在空白、图片或系统样式上）")
+    source = Path(source_text)
+    if not source.is_absolute():
+        source = pdf.parent / source
+    source = Path(os.path.realpath(source))
+    if not source.is_relative_to(root):
+        raise ValueError("这一点对应项目目录之外的文件（通常是 TeX 系统的样式文件），无法跳转")
+    try:
+        line = int(pairs.get("Line", "0"))
+    except ValueError:
+        line = 0
+    if line < 1:
+        raise ValueError("这一点没有对应的源码行号")
+    column = None
+    try:
+        number = int(pairs.get("Column", "-1"))
+        if number >= 0:
+            column = number
+    except ValueError:
+        pass
+    return {
+        "id": row["id"], "page": int(page),
+        "path": source.relative_to(root).as_posix(),
+        "line": line, "column": column,
+    }
+
+
+def synctex_view(library, id=None, path=None, line=None, column=None, include_archived=False):
+    """Forward search: one source line to its page and rectangle on the PDF.
+
+    The returned box (h, v, W, H) and point (x, y) use the same displayed PDF
+    points as synctex_edit; rotation is reported so a caller can refuse to map
+    coordinates on a rotated page.
+    """
+    row, root, pdf = _synctex_ready(library, id, include_archived)
+    absolute, relative = _inside(root, path, "源文件路径")
+    if not absolute.is_file():
+        raise ValueError("源文件不存在")
+    try:
+        line = int(line)
+    except (TypeError, ValueError):
+        raise ValueError("行号必须是正整数") from None
+    if not 1 <= line <= 1_000_000:
+        raise ValueError("行号必须是正整数")
+    try:
+        column = int(column) if column is not None else 0
+    except (TypeError, ValueError):
+        raise ValueError("列号必须是非负整数") from None
+    if not 0 <= column <= 10_000:
+        raise ValueError("列号必须是非负整数")
+    input_name = os.path.relpath(absolute, pdf.parent)
+    pairs = _synctex_run(["view", "-i", f"{line}:{column}:{input_name}", "-o", pdf.name], pdf.parent)
+    if not pairs.get("Page"):
+        raise ValueError("这一行在 PDF 里没有对应位置（它可能不产生排版内容，或 PDF 早于这次修改）")
+    try:
+        page_number = int(pairs["Page"])
+    except ValueError:
+        raise ValueError("synctex 返回了无法解析的页码") from None
+    box = {}
+    for key in ("x", "y", "h", "v", "W", "H"):
+        try:
+            box[key] = float(pairs[key]) if pairs.get(key) not in (None, "") else None
+        except ValueError:
+            box[key] = None
+    with library._open_pdf(pdf) as document:
+        current = library._page(document, page_number)
+        rotation = current.rotation
+    return {
+        "id": row["id"], "path": relative, "line": line, "column": column,
+        "page": page_number, "rotation": rotation,
+        "x": box["x"], "y": box["y"],
+        "h": box["h"], "v": box["v"], "W": box["W"], "H": box["H"],
+    }
+
+
 def clean(library, id=None, include_archived=False):
     """Remove only well-known build side files; sources, PDFs and bibliography stay."""
     row = _project(library, id, include_archived)
@@ -745,6 +903,8 @@ ACTIONS = {
     "latex_history": (history, ("id", "path", "limit", "include_archived")),
     "latex_diff": (diff, ("id", "path", "from_revision", "to_revision", "include_archived")),
     "latex_compare": (compare, ("a", "b", "path", "include_archived")),
+    "latex_synctex_edit": (synctex_edit, ("id", "page", "x", "y", "include_archived")),
+    "latex_synctex_view": (synctex_view, ("id", "path", "line", "column", "include_archived")),
     "latex_clean": (clean, ("id", "include_archived")),
 }
 

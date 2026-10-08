@@ -12,6 +12,8 @@ from dsh_paper_library.latex import LatexConflict
 
 HAS_LATEXMK = bool(shutil.which("latexmk") or Path("/Library/TeX/texbin/latexmk").is_file())
 needs_latexmk = pytest.mark.skipif(not HAS_LATEXMK, reason="latexmk is required for the build checks")
+HAS_SYNCTEX = bool(shutil.which("synctex") or Path("/Library/TeX/texbin/synctex").is_file())
+needs_synctex = pytest.mark.skipif(not (HAS_LATEXMK and HAS_SYNCTEX), reason="latexmk and synctex are required for the jump checks")
 
 MINIMAL = r"""\documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}
@@ -251,6 +253,52 @@ def test_a_broken_document_reports_its_errors_instead_of_pretending(tmp_path):
     assert built["errors"] and any("thisIsNotACommand" in line or "Undefined control sequence" in line for line in built["errors"])
     assert built["pdf_path"] is None
     assert built["log_characters"] > 0 and built["log_tail"]
+
+
+def test_synctex_without_data_is_a_clear_error(tmp_path):
+    folder = make_project(tmp_path, with_pdf=True)
+    project = request(tmp_path, "latex_project_create", root=str(folder))["project"]
+    with pytest.raises(ValueError, match="没有 SyncTeX 数据"):
+        request(tmp_path, "latex_synctex_edit", id=project["id"], page=1, x=100, y=100)
+    with pytest.raises(ValueError, match="没有 SyncTeX 数据"):
+        request(tmp_path, "latex_synctex_view", id=project["id"], path="main.tex", line=2)
+
+
+@needs_synctex
+def test_synctex_round_trip_between_pdf_and_source(tmp_path):
+    folder = make_project(tmp_path)
+    project = request(tmp_path, "latex_project_create", root=str(folder))["project"]
+    built = request(tmp_path, "latex_compile", id=project["id"], timeout_seconds=120)
+    assert built["ok"]
+    forward = request(tmp_path, "latex_synctex_view", id=project["id"], path="main.tex", line=5)
+    assert forward["page"] == 1 and forward["rotation"] == 0
+    assert 0 < forward["y"] < 800 and 0 < forward["x"] < 620
+    assert forward["h"] is not None and forward["v"] is not None
+    back = request(tmp_path, "latex_synctex_edit", id=project["id"], page=forward["page"], x=forward["x"], y=forward["y"])
+    assert back["path"] == "main.tex"
+    assert abs(back["line"] - 5) <= 2
+    # synctex snaps an empty-margin click to the nearest source line instead of failing
+    margin = request(tmp_path, "latex_synctex_edit", id=project["id"], page=1, x=30, y=30)
+    assert margin["path"] == "main.tex" and margin["line"] >= 1
+
+
+@needs_synctex
+def test_synctex_guards_paths_and_numbers(tmp_path):
+    folder = make_project(tmp_path)
+    project = request(tmp_path, "latex_project_create", root=str(folder))["project"]
+    assert request(tmp_path, "latex_compile", id=project["id"], timeout_seconds=120)["ok"]
+    with pytest.raises(ValueError, match="超出项目目录"):
+        request(tmp_path, "latex_synctex_view", id=project["id"], path="../main.tex", line=1)
+    with pytest.raises(ValueError, match="源文件不存在"):
+        request(tmp_path, "latex_synctex_view", id=project["id"], path="nope.tex", line=1)
+    with pytest.raises(ValueError, match="行号必须是正整数"):
+        request(tmp_path, "latex_synctex_view", id=project["id"], path="main.tex", line=0)
+    with pytest.raises(ValueError, match="列号必须是非负整数"):
+        request(tmp_path, "latex_synctex_view", id=project["id"], path="main.tex", line=1, column=-2)
+    with pytest.raises(ValueError, match="坐标超出这一页"):
+        request(tmp_path, "latex_synctex_edit", id=project["id"], page=1, x=-5, y=100)
+    with pytest.raises(ValueError, match="必须是数字"):
+        request(tmp_path, "latex_synctex_edit", id=project["id"], page=1, x="soon", y=100)
 
 
 @needs_latexmk
