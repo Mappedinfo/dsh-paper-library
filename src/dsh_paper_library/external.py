@@ -586,4 +586,7 @@ def dispatch(library, request):
             raise ValueError("id must be a paper id")
         path = promote(library, paper_id)
         return {"id": paper_id, "path": str(path), "managed": True}
+    if action == "external_enrich":
+        from . import bulk_enrich
+        return bulk_enrich.dispatch(library, request)
     raise ValueError("Unknown external action")
