@@ -21,6 +21,24 @@ if (!isAbsolute(home) || !isAbsolute(harness)) throw new Error('Use absolute ins
 const cli = join(harness, 'apps/cli/lib/bin.js')
 await access(cli, constants.R_OK)
 
+// DSH 0.2.x ships some peers with .mjs/.cjs entries instead of lib/index.js,
+// so read each manifest and resolve the root export rather than guessing a path.
+const packageEntry = async directory => {
+  const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
+  const paths = []
+  const collect = value => {
+    if (typeof value === 'string') paths.push(value)
+    else if (value && typeof value === 'object') for (const nested of Object.values(value)) collect(nested)
+  }
+  for (const candidate of [manifest.exports?.['.'], manifest.main, manifest.module]) collect(candidate)
+  for (const candidate of paths) {
+    if (!/\.(?:mjs|cjs|js)$/.test(candidate)) continue
+    try { await access(join(directory, candidate), constants.R_OK); return candidate }
+    catch (error) { if (error.code !== 'ENOENT') throw error }
+  }
+  throw new Error(`No readable runtime entry declared by ${join(directory, 'package.json')}`)
+}
+
 // A link: package resolves ESM imports beside its source. Link only declared
 // runtime peers to the exact checkout, without installing stale registry peers.
 for (const [name, relative] of [
@@ -32,7 +50,7 @@ for (const [name, relative] of [
 ]) {
   const target = join(harness, relative)
   const link = join(project, 'node_modules', name)
-  await access(join(target, 'lib/index.js'), constants.R_OK)
+  await packageEntry(target)
   await mkdir(dirname(link), { recursive: true })
   try {
     const existing = await lstat(link)

@@ -1,6 +1,6 @@
 {
   "name": "@mappedinfo/dsh-paper-library",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Independent literature library with portable PDF annotations for DeepSeek Harness",
   "license": "MIT",
   "repository": {
@@ -116,17 +116,17 @@
   "peerDependencies": {
     "@deepseek-ai/schemastery": "^3.18.2",
     "@deepseek-ai/cordis": ">=4.0.1 <5",
-    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.2 <0.2.0",
-    "@deepseek-ai/dsh-llm": ">=0.1.5-rc.2 <0.2.0",
-    "@deepseek-ai/dsh-home-paths": ">=0.1.5-rc.2 <0.2.0",
-    "@deepseek-ai/dsh-atomic-write": ">=0.1.5-rc.2 <0.2.0",
-    "@deepseek-ai/dsh-client-connection": ">=0.1.5-rc.2 <0.2.0",
-    "@deepseek-ai/dsh-host-webserver": ">=0.1.5-rc.2 <0.2.0",
-    "@deepseek-ai/dsh-client-locale": ">=0.1.5-rc.2 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-sidebar-right": ">=0.1.5-rc.2 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-model-selection": ">=0.1.5-rc.2 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.5-rc.2 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-input-trigger": ">=0.1.5-rc.2 <0.2.0"
+    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-llm": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-home-paths": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-atomic-write": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-connection": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-host-webserver": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-locale": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-model-selection": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-input-trigger": ">=0.1.5-rc.2 <0.3.0-0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/schemastery": {

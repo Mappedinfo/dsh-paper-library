@@ -107,7 +107,8 @@ test('npm tarball contains prompt assets and can load them without installation 
   const root = fileURLToPath(new URL('..', import.meta.url))
   const temp = await mkdtemp(join(tmpdir(), 'paper-analysis-prompts-'))
   try {
-    const packed = JSON.parse(execFileSync('npm', ['pack', '--pack-destination', temp, '--json'], { cwd: root, encoding: 'utf8', timeout: 30000 }))[0]
+    // A private cache keeps the check independent of the caller's ~/.npm state.
+    const packed = JSON.parse(execFileSync('npm', ['pack', '--pack-destination', temp, '--cache', join(temp, 'npm-cache'), '--json'], { cwd: root, encoding: 'utf8', timeout: 30000 }))[0]
     assert.ok(packed.files.some(item => item.path === 'prompts/analysis/knowledge.json'))
     assert.ok(packed.files.some(item => item.path === 'prompts/analysis/note.json'))
     assert.ok(packed.files.some(item => item.path === 'prompts/analysis/review.json'))
