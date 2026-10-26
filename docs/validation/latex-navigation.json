@@ -3,11 +3,28 @@
   "base_commit": "762df88",
   "scope": "Existing LaTeX workspace; source-order sidebar, density-preserving PDF preview, inert project media preview and navigation protection",
   "automated": {
-    "python_full": {"passed": 490, "failed": 0},
-    "python_related_final": {"passed": 64, "failed": 0},
-    "node_full_serial": {"tests": 930, "passed": 929, "skipped": 1, "failed": 0},
-    "new_http_worker_integration_after_full_run": {"passed": 1, "failed": 0},
-    "node_related_final": {"passed": 25, "failed": 0},
+    "python_full": {
+      "passed": 490,
+      "failed": 0
+    },
+    "python_related_final": {
+      "passed": 64,
+      "failed": 0
+    },
+    "node_full_serial": {
+      "tests": 930,
+      "passed": 929,
+      "skipped": 1,
+      "failed": 0
+    },
+    "new_http_worker_integration_after_full_run": {
+      "passed": 1,
+      "failed": 0
+    },
+    "node_related_final": {
+      "passed": 25,
+      "failed": 0
+    },
     "build": "passed",
     "modified_javascript_syntax": "passed",
     "python_compile": "passed",
@@ -51,12 +68,32 @@
     ],
     "no_service_restart_or_plugin_install": true,
     "no_token_or_cookie_read": true,
-    "no_private_screenshot_saved_or_published": true
+    "no_private_screenshot_saved_or_published": true,
+    "final_reload": {
+      "ordinary_refresh": "Host briefly rendered its home view and then a blank page; service remained running",
+      "same_window_cache_bypass_refresh": "Recovered without service restart, credential read or another window",
+      "restored_existing_conversation_and_latex_tab": true,
+      "final_visible_state": [
+        "main.tex",
+        "fit width",
+        "7 pages",
+        "loaded save state",
+        "final Other text files group label"
+      ]
+    }
   },
   "owner_selected_manuscript_readonly_acceptance": {
     "catalog_location": "Temporary isolated library, not the live catalog",
-    "main": {"headings": 17, "referenced_files": 10, "proposal_included": false},
-    "draft": {"headings": 27, "referenced_files": 12, "proposal_included": true},
+    "main": {
+      "headings": 17,
+      "referenced_files": 10,
+      "proposal_included": false
+    },
+    "draft": {
+      "headings": 27,
+      "referenced_files": 12,
+      "proposal_included": true
+    },
     "formal_media_pdf_preview": "passed",
     "checked_source_and_media_bytes_unchanged": true
   },
