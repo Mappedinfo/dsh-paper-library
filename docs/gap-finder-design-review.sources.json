@@ -1,0 +1,804 @@
+{
+  "schema": "paper-library-design-review-sources.v1",
+  "review_date": "2026-10-26",
+  "review_type": "static-source-review",
+  "runtime_validation": false,
+  "scope": "仅覆盖选定源码和文档。哈希与 AST 检查不能证明运行时行为或模型质量。",
+  "handoff_snapshot": "Paper Library 的 HANDOFF.md 取审查前 HEAD，避免把本次审查入口纳入其自身依据。",
+  "repositories": {
+    "gap-finder": {
+      "head": "abacfd1d13625c6742b0d7836f23092be9a1db2a",
+      "source_count": 37,
+      "files": [
+        {
+          "path": "README.md",
+          "snapshot": "worktree",
+          "worktree_status_at_review": " M",
+          "sha256": "b8d42af9622475a280b91ad931dfbc88866114110cc4341e4b37fa3af1987e8e",
+          "lines": 161,
+          "evidence_ids": [
+            "G1"
+          ]
+        },
+        {
+          "path": "current-progress.md",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "c4887020197d0bdf63f2138d7a639e994b2ca4e7b9a32a823bab1a32729df0bb",
+          "lines": 126,
+          "evidence_ids": [
+            "G1"
+          ]
+        },
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "f416a4b386225c1ddf92746e9d92c4f55ae7b90fdfb67c651da7953980284a6c",
+          "lines": 96,
+          "evidence_ids": [
+            "G1"
+          ]
+        },
+        {
+          "path": "literature_lens_lite/README.md",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "??",
+          "sha256": "090e838cddea397b8efbe216e4c6c56ca3bc97377409848d206e9fd698f3b4cd",
+          "lines": 198,
+          "evidence_ids": [
+            "G12"
+          ]
+        },
+        {
+          "path": "literature_lens_lite/lit_lens.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "??",
+          "sha256": "cc754b33d229ebeac98bfc0059415806bf88f56ede2d5507f73ddb8e2d9920af",
+          "lines": 1020,
+          "evidence_ids": [
+            "G12"
+          ],
+          "anchors": [
+            {
+              "symbol": "merge_llm_tags",
+              "line": 529
+            },
+            {
+              "symbol": "filter_rows",
+              "line": 716
+            },
+            {
+              "symbol": "count_combinations",
+              "line": 744
+            }
+          ]
+        },
+        {
+          "path": "obsidian-literature-lens/README.md",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "??",
+          "sha256": "654467f68ddb2eb0bcdce2fbe98f6dea0c4db3c534b623162c994b0e66e2aab8",
+          "lines": 68,
+          "evidence_ids": [
+            "G12"
+          ]
+        },
+        {
+          "path": "obsidian-note-highlight/README.md",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "??",
+          "sha256": "53fa6cfb3f50c25d1d31b9a364b384690b9711fd7ec39c7fd5d155e3d738b8c0",
+          "lines": 82,
+          "evidence_ids": [
+            "G12"
+          ]
+        },
+        {
+          "path": "python_server/app/core/config.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": " M",
+          "sha256": "2f8cb26949ee8d62116ed7f15e154993b5149bccc1304c34ac85e3a8523d7436",
+          "lines": 117,
+          "evidence_ids": [
+            "G1"
+          ]
+        },
+        {
+          "path": "python_server/app/db/models.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": " M",
+          "sha256": "793f16ead7daf9b9897e515c5edce7a6792fc133b9b3e701da5170811caf6e62",
+          "lines": 632,
+          "evidence_ids": [
+            "G3",
+            "G5"
+          ],
+          "anchors": [
+            {
+              "symbol": "Node",
+              "line": 23
+            },
+            {
+              "symbol": "ClaimCard",
+              "line": 237
+            },
+            {
+              "symbol": "ClaimSource",
+              "line": 268
+            },
+            {
+              "symbol": "ClaimEvidence",
+              "line": 296
+            },
+            {
+              "symbol": "Project",
+              "line": 329
+            },
+            {
+              "symbol": "ProjectArtifact",
+              "line": 410
+            },
+            {
+              "symbol": "Task",
+              "line": 616
+            },
+            {
+              "symbol": "SkillResult",
+              "line": 123
+            }
+          ]
+        },
+        {
+          "path": "python_server/app/main.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": " M",
+          "sha256": "02862e3d5dcad5a8b9c34fb07ae3f072c805c7421a936ff36a26af7b2603428d",
+          "lines": 882,
+          "evidence_ids": [
+            "G2"
+          ],
+          "anchors": [
+            {
+              "symbol": "lifespan",
+              "line": 120
+            },
+            {
+              "symbol": "stream_events",
+              "line": 239
+            }
+          ]
+        },
+        {
+          "path": "python_server/app/orchestrator.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": " M",
+          "sha256": "5a6eca6f48b11ad95348cbaf1b340c6509d92d19a037183cc5ab060e33562e98",
+          "lines": 571,
+          "evidence_ids": [
+            "G2"
+          ]
+        },
+        {
+          "path": "python_server/app/services/agent_health.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "??",
+          "sha256": "2de7c1fe5fc501ba05eb7db2f8e8d73a92ac23ab27b73b60e9ac0625f434976f",
+          "lines": 59,
+          "evidence_ids": [
+            "G13"
+          ]
+        },
+        {
+          "path": "python_server/app/services/claim_card_service.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "0b96a92b55c20067138ca126d0b0f7e57ace445015a4c2cc5a88252037898d13",
+          "lines": 775,
+          "evidence_ids": [
+            "G4"
+          ],
+          "anchors": [
+            {
+              "symbol": "_create_sources",
+              "line": 168
+            },
+            {
+              "symbol": "extract_claim_cards",
+              "line": 233
+            },
+            {
+              "symbol": "link_claim_cards",
+              "line": 407
+            },
+            {
+              "symbol": "export_claim_cards",
+              "line": 699
+            }
+          ]
+        },
+        {
+          "path": "python_server/app/services/embedding_service.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "2cd6f1e0d770ae56dd78a94ca53cb964d1e524aab7338310446830ae2ed30e95",
+          "lines": 133,
+          "evidence_ids": [
+            "G14"
+          ]
+        },
+        {
+          "path": "python_server/app/services/gap_discovery_service.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "5aec0882bd6a8802ffe6e10672a203bf148fa66afa74a0d7d375c76440d4b07d",
+          "lines": 666,
+          "evidence_ids": [
+            "G9"
+          ],
+          "anchors": [
+            {
+              "symbol": "discover_gaps_from_document",
+              "line": 95
+            },
+            {
+              "symbol": "commit_discovered_gaps",
+              "line": 545
+            }
+          ]
+        },
+        {
+          "path": "python_server/app/services/gap_frontier_service.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "7d796dd73667b34be7873a5aac13d1240b28000ac7bee7424953adfa0f0423be",
+          "lines": 2368,
+          "evidence_ids": [
+            "G14"
+          ],
+          "anchors": [
+            {
+              "symbol": "stable_hash_vector",
+              "line": 297
+            },
+            {
+              "symbol": "weighted_score",
+              "line": 344
+            },
+            {
+              "symbol": "deterministic_gap_facets",
+              "line": 489
+            },
+            {
+              "symbol": "run_gap_frontier_analysis",
+              "line": 2127
+            }
+          ]
+        },
+        {
+          "path": "python_server/app/services/graph_rag.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "0d95b0e55f9f9af71920a9e48338c7cac8f2edc779183867c75fbcf28c86c3d8",
+          "lines": 178,
+          "evidence_ids": [
+            "G14"
+          ],
+          "anchors": [
+            {
+              "symbol": "GraphRAGPipeline",
+              "line": 19
+            },
+            {
+              "symbol": "run",
+              "line": 35
+            },
+            {
+              "symbol": "_generate_answer",
+              "line": 145
+            }
+          ]
+        },
+        {
+          "path": "python_server/app/services/literature_review_service.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "bdd16c84fe947538dd3ee63aafce09ef97a14302744b5859a5b04458311c87a3",
+          "lines": 982,
+          "evidence_ids": [
+            "G8"
+          ],
+          "anchors": [
+            {
+              "symbol": "_load_claim_cards",
+              "line": 134
+            },
+            {
+              "symbol": "_verify_evidence_list",
+              "line": 649
+            },
+            {
+              "symbol": "_verify_synthesis_evidence",
+              "line": 675
+            }
+          ]
+        },
+        {
+          "path": "python_server/app/services/pipeline_service.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "928ef23b818f151f5e7a94668602bae9be4767a0a51c2b43454009574cdf5254",
+          "lines": 4381,
+          "evidence_ids": [
+            "G13"
+          ],
+          "anchors": [
+            {
+              "symbol": "PipelineManager",
+              "line": 80
+            }
+          ]
+        },
+        {
+          "path": "python_server/app/services/project_service.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "0efe5fd49b44f8c179a759976a950e6737dcb6e2e1e1755c7855a7539cfe232b",
+          "lines": 2848,
+          "evidence_ids": [
+            "G6"
+          ],
+          "anchors": [
+            {
+              "symbol": "add_candidate_sources_to_project",
+              "line": 1499
+            },
+            {
+              "symbol": "build_project_context",
+              "line": 2522
+            },
+            {
+              "symbol": "chat_with_project",
+              "line": 2638
+            }
+          ]
+        },
+        {
+          "path": "python_server/app/services/reverse_gap_discovery_service.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "8008a7e981c8626aa165acb9dc264d45a3ce8eb83f1922e3f0fb9b9246d011c2",
+          "lines": 1014,
+          "evidence_ids": [
+            "G9"
+          ],
+          "anchors": [
+            {
+              "symbol": "extract_contributions",
+              "line": 150
+            }
+          ]
+        },
+        {
+          "path": "python_server/app/services/search/base.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "dc15e40bd80d071b1719a427dd62e664a7692f176320b6bfe17e3e17ad843ad1",
+          "lines": 129,
+          "evidence_ids": [
+            "G10"
+          ]
+        },
+        {
+          "path": "python_server/app/services/search/registry.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "5ec6f1dc850ca4c9718c1290a13a08931812fe09f4d831b7ffbc3f5ae9abfa4e",
+          "lines": 140,
+          "evidence_ids": [
+            "G10"
+          ],
+          "anchors": [
+            {
+              "symbol": "SearchEngineRegistry",
+              "line": 10
+            },
+            {
+              "symbol": "search_all",
+              "line": 52
+            }
+          ]
+        },
+        {
+          "path": "python_server/app/services/skill_result_service.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "1b4ff9f65c15e2a5480043f7775f33a94e06b3cdb2c08ab393e0b0e2316101cf",
+          "lines": 341,
+          "evidence_ids": [
+            "G5"
+          ]
+        },
+        {
+          "path": "python_server/app/services/terminology_service.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "f682cd35c061880219b9033c35fdd615c4a79f9351a25d06519008274d1c7a0b",
+          "lines": 788,
+          "evidence_ids": [
+            "G11"
+          ],
+          "anchors": [
+            {
+              "symbol": "TerminologyGraphBuilder",
+              "line": 119
+            }
+          ]
+        },
+        {
+          "path": "src-tauri/src/main.rs",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "1d22bd4185b29ff727ad5189927918bda6a5ff4e585a27e618322384fa086f1b",
+          "lines": 234,
+          "evidence_ids": [
+            "G2"
+          ]
+        },
+        {
+          "path": "web/src/App.tsx",
+          "snapshot": "worktree",
+          "worktree_status_at_review": " M",
+          "sha256": "61102ccf19d7e6484fcba834226c107f483187ec548f3a49c9d31b4a7a13c676",
+          "lines": 141,
+          "evidence_ids": [
+            "G3"
+          ]
+        },
+        {
+          "path": "web/src/components/workspace/ContextPanelHost.tsx",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "8f529075b83c86014b8c2a90929b6ac718f139863028523bcb3849ce44721946",
+          "lines": 462,
+          "evidence_ids": [
+            "G7"
+          ]
+        },
+        {
+          "path": "web/src/config/workflows.tsx",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "92b482c683aa53f02e339adcd9286a3ec0b71b5fef011810b34798af3cfbed89",
+          "lines": 226,
+          "evidence_ids": [
+            "G1"
+          ]
+        },
+        {
+          "path": "web/src/constants/publicationStages.ts",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "??",
+          "sha256": "0a2a7e29879bde96e5eb130bc71cd523b2d0ea1e006253287d2cc353f550327a",
+          "lines": 20,
+          "evidence_ids": [
+            "G13"
+          ]
+        },
+        {
+          "path": "web/src/hooks/useProjectScope.ts",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "cef07b3df605aac263595b1c53b5509de3d4abef733170233bba1bc2c2369d32",
+          "lines": 22,
+          "evidence_ids": [
+            "G6"
+          ]
+        },
+        {
+          "path": "web/src/pages/ClaimCardsPage.tsx",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "3fe409d884ce148016b95e7905c484d9d5711091f1c72ef82a57bb701304bd3a",
+          "lines": 932,
+          "evidence_ids": [
+            "G4"
+          ]
+        },
+        {
+          "path": "web/src/pages/ProjectDashboardPage.tsx",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "7d4538d68c66f6400c116dfd9aef958f3d9e432b00b6d86ec4701d25726b8165",
+          "lines": 365,
+          "evidence_ids": [
+            "G6"
+          ]
+        },
+        {
+          "path": "web/src/pages/PublicationPipelinePage.tsx",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "??",
+          "sha256": "6d110375f64a869a066588c240506ad7d91e488363a50cff6d3926b0e3c0aee2",
+          "lines": 425,
+          "evidence_ids": [
+            "G13"
+          ]
+        },
+        {
+          "path": "web/src/store/workspaceStore.ts",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "291e8dec223d5e27c844299124a1a4cf089b0dc0331f610ef74978ef1a78db97",
+          "lines": 152,
+          "evidence_ids": [
+            "G7"
+          ]
+        },
+        {
+          "path": "web/src/types/claimCard.ts",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "10767f4d99797f6bae2146437dee6041c44aad16a8a912e663bf8119f3e6b6aa",
+          "lines": 115,
+          "evidence_ids": [
+            "G4"
+          ]
+        },
+        {
+          "path": "web/vite.config.ts",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "0d1f3db812e9145f4464e4c3aae3fd4a01e1cafd7f6dbae0e0c765cb02f5f401",
+          "lines": 175,
+          "evidence_ids": [
+            "G2"
+          ]
+        }
+      ],
+      "root_license_candidates": []
+    },
+    "dsh-paper-library": {
+      "head": "ebcabbf134dba6ac5dcdc5d9829fbc0d6ed15444",
+      "source_count": 15,
+      "files": [
+        {
+          "path": "AGENTS.md",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "fd239aa87d68c8c80ed40a3606484c0ae8f91eb657283cc1803a9ae128b3b5b9",
+          "lines": 11,
+          "evidence_ids": [
+            "P1"
+          ]
+        },
+        {
+          "path": "HANDOFF.md",
+          "snapshot": "HEAD",
+          "worktree_status_at_review": " M",
+          "sha256": "29a6602b105eddff43761925b3361d0077bec3e81d17230d47414d5033f062aa",
+          "lines": 394,
+          "evidence_ids": [
+            "P1"
+          ]
+        },
+        {
+          "path": "docs/library-datasets-knowledge-design.md",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "33c0b438566073c713071b56fe9548f974fa219c70c20e5ae1474b7b50644e4a",
+          "lines": 100,
+          "evidence_ids": [
+            "P4"
+          ]
+        },
+        {
+          "path": "docs/research-challenge-mining-design.md",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "01108c42ad561307c91e38f7ed774164f0d695c5969ff60ffbd5c1e1c8eae134",
+          "lines": 166,
+          "evidence_ids": [
+            "P5"
+          ]
+        },
+        {
+          "path": "src/bridge.mjs",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "acd4436fde465f7a1a57650eadfd7c273a0b836853503f02bf8497c74311544e",
+          "lines": 507,
+          "evidence_ids": [
+            "P1"
+          ]
+        },
+        {
+          "path": "src/dsh_paper_library/challenges.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "d5e9ef806629247074529bc0c99941cb98203d7faab5ec2d25fbd78f82a5d8ee",
+          "lines": 1108,
+          "evidence_ids": [
+            "P5"
+          ],
+          "anchors": [
+            {
+              "symbol": "scan",
+              "line": 188
+            },
+            {
+              "symbol": "themes",
+              "line": 504
+            },
+            {
+              "symbol": "theme_review",
+              "line": 582
+            },
+            {
+              "symbol": "comparison",
+              "line": 925
+            },
+            {
+              "symbol": "review_packet",
+              "line": 1015
+            }
+          ]
+        },
+        {
+          "path": "src/dsh_paper_library/datasets.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "f2918e90b1dc26465324cf18865b63717b523008bdfd1333c23c026fb973efe1",
+          "lines": 758,
+          "evidence_ids": [
+            "P3"
+          ],
+          "anchors": [
+            {
+              "symbol": "list_resources",
+              "line": 301
+            }
+          ]
+        },
+        {
+          "path": "src/dsh_paper_library/library_knowledge.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "4e17b4ffc6728b2cfb02a25fd79b7b7df29423bad43c434be869d32af9693748",
+          "lines": 791,
+          "evidence_ids": [
+            "P4"
+          ],
+          "anchors": [
+            {
+              "symbol": "source_put",
+              "line": 184
+            },
+            {
+              "symbol": "validate_graph",
+              "line": 276
+            },
+            {
+              "symbol": "draft_review",
+              "line": 396
+            }
+          ]
+        },
+        {
+          "path": "src/dsh_paper_library/projects.py",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "705fbd70459b777891310553fb98dd5f14c59f788e95b9f4c49a4e74b88cda6a",
+          "lines": 300,
+          "evidence_ids": [
+            "P3"
+          ],
+          "anchors": [
+            {
+              "symbol": "create",
+              "line": 117
+            },
+            {
+              "symbol": "get",
+              "line": 150
+            },
+            {
+              "symbol": "link",
+              "line": 232
+            },
+            {
+              "symbol": "unlink",
+              "line": 257
+            }
+          ]
+        },
+        {
+          "path": "src/harness/latex-ai.mjs",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "8a02a81a0fe92c1c95e8bb4381e4341b4497b0343de234f6e7fe6b9a57be5464",
+          "lines": 261,
+          "evidence_ids": [
+            "P6"
+          ]
+        },
+        {
+          "path": "src/harness/library-knowledge.mjs",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "363ec7b276c83ab3c53f155efc5c5df6c1fdd36e6ec791fd407f203a3611f3bf",
+          "lines": 119,
+          "evidence_ids": [
+            "P2"
+          ]
+        },
+        {
+          "path": "src/harness/paper-analysis-queue.mjs",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "b35387dcd6d37f7646b559c3549535d236621b2a934d85295acfbc359e42d9b1",
+          "lines": 127,
+          "evidence_ids": [
+            "P2"
+          ]
+        },
+        {
+          "path": "src/local-state.mjs",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "e7699bf9dd5e0f774b61e364fd12a77b4521679656fe9495068eeee6adb75a29",
+          "lines": 211,
+          "evidence_ids": [
+            "P2"
+          ]
+        },
+        {
+          "path": "web/latex-workspace.js",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "c7111a076d5528a2c9db5ac90d160bbeccfacf1189bc573dc89f5dc842c04eb4",
+          "lines": 1325,
+          "evidence_ids": [
+            "P6"
+          ]
+        },
+        {
+          "path": "web/reading-panels.js",
+          "snapshot": "worktree",
+          "worktree_status_at_review": "  ",
+          "sha256": "3744c9db8c627df3b633e86261770118d15373b1c22969128aa3f5bbe596843e",
+          "lines": 195,
+          "evidence_ids": [
+            "P6"
+          ]
+        }
+      ]
+    }
+  },
+  "checks": {
+    "evidence_ids_resolved": [
+      "G1",
+      "G10",
+      "G11",
+      "G12",
+      "G13",
+      "G14",
+      "G2",
+      "G3",
+      "G4",
+      "G5",
+      "G6",
+      "G7",
+      "G8",
+      "G9",
+      "P1",
+      "P2",
+      "P3",
+      "P4",
+      "P5",
+      "P6"
+    ],
+    "relative_links_resolved": 17,
+    "python_anchor_definitions_resolved": 50
+  }
+}
