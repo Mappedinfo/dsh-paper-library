@@ -183,7 +183,7 @@ The plugin registers 35 tools through Harness's official tool registry. Optional
 | `library_feedback` | `id,annotation_ids?,provider?,model?,reasoning_effort?` | `ai_feedback` |
 | `library_sources` | none | `external_status` |
 | `library_sources_scan` | `operation?,source?,limit?` | `external_scan`/`external_prune` |
-| `library_latex` | `operation,input_json` (read-only operations) | `latex_project_list`/`latex_project_get`/`latex_tree`/`latex_read`/`latex_lint`/`latex_pdf_pages`/`latex_pdf_page`/`latex_history`/`latex_diff`/`latex_compare` |
+| `library_latex` | `operation,input_json` (read-only operations) | `latex_project_list`/`latex_project_get`/`latex_tree`/`latex_outline`/`latex_media_preview`/`latex_read`/`latex_lint`/`latex_pdf_pages`/`latex_pdf_page`/`latex_history`/`latex_diff`/`latex_compare` |
 | `library_latex_edit` | `operation,input_json` (editing operations) | `latex_project_create`/`latex_project_update`/`latex_project_archive`/`latex_project_restore`/`latex_write`/`latex_compile`/`latex_clean` |
 
 The panel's collaboration surface is registered into the library's shared reading rail (`PaperReadingPanels.registerPanel({id,label,element})` plus `setExternal(true)` while the LaTeX view is focused), so it uses the same side toggle, saved rail width and header as the annotation panel; without a rail instance it falls back to a tab inside the workspace.

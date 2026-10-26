@@ -1,0 +1,77 @@
+{
+  "verified_date": "2026-10-26",
+  "base_commit": "762df88",
+  "scope": "Existing LaTeX workspace; source-order sidebar, density-preserving PDF preview, inert project media preview and navigation protection",
+  "automated": {
+    "python_full": {"passed": 490, "failed": 0},
+    "python_related_final": {"passed": 64, "failed": 0},
+    "node_full_serial": {"tests": 930, "passed": 929, "skipped": 1, "failed": 0},
+    "new_http_worker_integration_after_full_run": {"passed": 1, "failed": 0},
+    "node_related_final": {"passed": 25, "failed": 0},
+    "build": "passed",
+    "modified_javascript_syntax": "passed",
+    "python_compile": "passed",
+    "diff_check": "passed",
+    "lint_typecheck_scripts": "This JavaScript/Python repository has no dedicated lint or TypeScript-check script; syntax, build and domain tests were used",
+    "initial_parallel_node_run": {
+      "passed": 928,
+      "skipped": 1,
+      "failed": 1,
+      "test": "quota fuses queued aliases for one actual key while a different key continues",
+      "observed": "peak [1,2], expected [2,2]; this analysis queue test is outside modified code",
+      "isolated_file_rerun": "12 passed",
+      "full_serial_rerun": "929 passed, 1 skipped"
+    }
+  },
+  "synthetic_checks": [
+    "Unicode and empty headings, nested titles, source-order include expansion, repeated/shared files and cycle termination",
+    "Main/draft separation, unused text grouping, comments/macros/literal examples and explicit dynamic/conditional warnings",
+    "Outline budgets and source bytes unchanged",
+    "scale=8 on a 600x800-point PDF returns 4800x6400 pixels without downsampling",
+    "Nonfinite, negative, invalid-page and extreme allocation requests fail explicitly",
+    "PNG/JPEG/SVG preview, unsupported asset reason, external path/symlink refusal, SVG scripts/events/external-content rejection",
+    "An entry without its own PDF cannot retain the preceding entry's PDF",
+    "Real read tool to bridge to Python worker to HTTP preview route",
+    "Save conflict blocks file/project/entry changes, compile and close while retaining unsaved input",
+    "Late file/page/media responses cannot replace a newer choice even when transport ignores abort",
+    "DPR/zoom density, render/media failure recovery and object URL release"
+  ],
+  "existing_host_observations": {
+    "origin": "http://127.0.0.1:3080/",
+    "identity": "DSH local build, existing authenticated Chrome PWA window",
+    "entry": "Start > LaTeX workspace; authenticated iframe /api/paper-library/?view=latex",
+    "plugin": "@mappedinfo/dsh-paper-library 0.2.3, web-profile source symlink to this repository",
+    "verified_via_supported_native_ui": [
+      "Save state was loaded; automatic compile was off; manuscript content was never typed or compiled",
+      "Chapter click selected the expected subsection at the reported source line",
+      "media/formal PDF opened in the media preview, dimensions/page count/path shown, 100% to 125% zoom worked",
+      "Switching main.tex to draft.tex added proposal/working-note headings and changed preview from 7 to 11 pages",
+      "Fit-width image 1117x1579; 125% 1340x1895; 200% 2158x3052; 400% 4316x6104",
+      "Restored main.tex, fit-width, 7-page PDF and loaded save state"
+    ],
+    "no_service_restart_or_plugin_install": true,
+    "no_token_or_cookie_read": true,
+    "no_private_screenshot_saved_or_published": true
+  },
+  "owner_selected_manuscript_readonly_acceptance": {
+    "catalog_location": "Temporary isolated library, not the live catalog",
+    "main": {"headings": 17, "referenced_files": 10, "proposal_included": false},
+    "draft": {"headings": 27, "referenced_files": 12, "proposal_included": true},
+    "formal_media_pdf_preview": "passed",
+    "checked_source_and_media_bytes_unchanged": true
+  },
+  "reproduce": [
+    ".venv/bin/python -m pytest -q",
+    "UV_CACHE_DIR=/tmp/dsh-latex-validation-cache UV_OFFLINE=1 node --test --test-concurrency=1 tests-js/*.test.mjs",
+    "node --test tests-js/latex-*.test.mjs",
+    "npm run build",
+    "git diff --check"
+  ],
+  "limits": [
+    "Navigation is lexical, not a full TeX interpreter; macros and conditional branches remain explicit limitations",
+    "Extreme full-page allocations are rejected at a documented memory boundary rather than silently downsampled; tiled rendering is not implemented",
+    "Transport races, failures and unsaved-edit protection were exercised in the deterministic shipped-panel DOM fixture, not injected into the owner's live manuscript",
+    "No private screenshots are included; live observations are recorded as text",
+    "No physical-device study, model request, push or publication"
+  ]
+}

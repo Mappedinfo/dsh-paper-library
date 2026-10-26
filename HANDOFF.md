@@ -1,3 +1,9 @@
+**LaTeX 章节导航与清晰预览（2026-10-26）：** 保留 `762df88` 的占位 lint。原工作台新增左侧章节／文件／媒体导航、当前文件面包屑和主入口切换。`latex_outline` 以静态 input/include 的展开位置保留章节、重复和共享文件顺序，循环／动态路径／条件／预算限制可见，不声称 TeX 宏解释；其他文本另组。入口没有 PDF 时不再保留上一稿的 PDF。`latex_media_preview` 按需返回一个 PNG，支持 PNG/JPEG/SVG/PDF，SVG 先拒绝脚本／事件／外部内容再光栅化，路径始终限制在项目内。PDF 按显示宽度、缩放与 DPR 请求实际像素，移除旧 scale≤2／160 万像素降质；极端分配显式拒绝，不静默降采样。只保留当前页和有界缓存，取消过期读取；保存失败／冲突时阻止切换、编译和关闭，保留当前文字。
+
+验证：[本轮回执](docs/validation/latex-navigation.json)。Python 全套 490 通过；Node 串行全套 930 项中 929 通过、1 既有跳过，随后新增 HTTP／真实 worker 集成 1 项通过，最终相关 Node 25／Python 64 全通过；构建、语法、diff 检查通过。首次 Node 并行轮有 1 项无关分析队列峰值时序断言失败，单文件 12 项和串行全套复核通过，首次日志未删除。没有专用 lint／TypeScript 脚本，不冒称已运行。只在合成 DOM 中注入竞态／保存冲突／媒体失败；没有向真实论文注入失败或未保存文字。
+
+已在用户现有、已登录的 3080 开发版 web LaTeX 工作台用受支持的原生 UI 验收：章节定位、formal PDF 媒体与缩放、main↔draft 及 RP 隔离；200% 2158×3052、400% 4316×6104，恢复 main／全宽／7 页。web profile 插件源链接指向本仓库，未改 Harness 源码、重装插件、读取登录 token、重启服务或发布。Paper1 另在临时目录登记只读验收：main 17 标题／10 源文件，draft 27／12，所检查源与素材字节不变。私人屏幕不保存或提交；详见回执的自动化与现场边界。[使用与预算](docs/latex-projects.md#章节文件与媒体侧栏)。
+
 **LaTeX 未完成内容 lint（2026-10-26）：** 新增只读 `latex_lint` action 与 `library_latex` 的 `lint` 操作，复用 JSON CLI／API。参数 `{id,mode?:"editing"|"submission",main_path?,paths?}`，检查保存的入口、静态 input/include、书目依赖与指定文本中的 `todo`、`\todo`、`xxxx`；写作期警告，投稿占位或覆盖不完整明确不通过，不影响保存和编译。单次入口覆盖兼容双稿共享 bib／素材，不改项目登记。报告 `paper-library-latex-lint.v1` 返回相对路径、Unicode 行列、有界上下文、分类／严重级别计数、文件修订号、覆盖状态与预算。注释仍检查，代码示例与占位渲染宏自身显示标签忽略，实际调用保留。没有新增工作台按钮、自动钩子、常驻服务或凭据。规则与命令见 [LaTeX lint](docs/latex-projects.md#未完成内容检查latex-lint)。lint 通过仅表示该占位检查通过，不代表科学内容可投稿。
 
 验证：最终 Python 全套 484 项通过（含 58 项 LaTeX 检查），最新相关 Node 工具／CLI／AI／工作目录回归 20 项通过；Node 全套 926 项中 925 通过、1 项既有跳过。首次 Node 运行因 uv 默认缓存目录在沙箱外失败，改用临时 `UV_CACHE_DIR` 并设置 `UV_OFFLINE=1` 后全套通过。客户端构建、修改文件语法检查与 `git diff --check` 通过。自动化均用合成资料，无真实模型请求、push、部署或发布。复现命令在上述文档。

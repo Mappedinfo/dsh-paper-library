@@ -83,11 +83,30 @@ body > #latex-view { height: 100dvh; }
 .latex-sync-state { font-size: 11px; color: var(--muted); }
 .latex-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 
+/* The project navigator stays independent from the editor's source/PDF split. */
+.latex-content { display: grid; grid-template-columns: 214px minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
+.latex-navigator { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: var(--surface); }
+.latex-nav-tabs { display: flex; align-items: center; gap: 2px; padding: 7px 6px; border-bottom: 1px solid var(--line); }
+.latex-nav-tab { border: 0; background: transparent; color: var(--muted); border-radius: 5px; padding: 5px 8px; cursor: pointer; }
+.latex-nav-tab[aria-selected=true] { background: var(--teal-light); color: var(--ink); }
+#latex-nav-refresh { margin-left: auto; }
+.latex-outline, .latex-media { flex: 1; min-height: 0; overflow: auto; padding: 6px; }
+.latex-navigator [hidden] { display: none; }
+.latex-nav-hint { padding: 8px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; border-top: 1px solid var(--line); }
+.latex-directory { margin: 2px 0 4px 8px; list-style: none; }
+.latex-directory summary { padding: 5px 2px; cursor: pointer; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.latex-directory .latex-directory { margin-left: 10px; }
+.latex-outline-file { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 4px; }
+.latex-outline-file .latex-file-open { color: var(--muted); font-size: 11px; }
+.latex-outline-heading .latex-file-open { font-family: inherit; }
+.latex-outline-warning .latex-file-open { color: var(--dsw-alias-state-warn-label); font-size: 11px; }
+.latex-breadcrumb { flex: 0 0 auto; padding: 8px 12px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; border-bottom: 1px solid var(--line); color: var(--muted); overflow-wrap: anywhere; }
+#latex-entry { max-width: 190px; }
 /* Source | divider | preview&collaboration */
 .latex-body {
   display: grid;
   grid-template-columns: minmax(160px, var(--latex-split, 50%)) 6px minmax(0, 1fr);
-  flex: 1 1 auto; min-height: 160px;
+  min-height: 0; min-width: 0;
 }
 .latex-editor-pane, .latex-preview-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .latex-splitter { cursor: col-resize; background: var(--line); touch-action: none; }
@@ -95,12 +114,13 @@ body > #latex-view { height: 100dvh; }
 .latex-splitter:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 
 .latex-files {
-  list-style: none; margin: 0; padding: 6px 8px; flex: 0 0 auto; max-height: 92px; overflow: auto;
-  border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px; background: var(--surface);
+  list-style: none; margin: 0; padding: 6px; flex: 1; min-height: 0; overflow: auto; background: var(--surface);
 }
+.latex-file { list-style: none; }
 .latex-file-open {
   font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-  padding: 2px 8px; border-radius: 999px; border: 1px solid transparent;
+  display: block; width: 100%; text-align: left; overflow-wrap: anywhere;
+  padding: 5px 8px; border-radius: 4px; border: 1px solid transparent;
   background: transparent; color: inherit; cursor: pointer;
 }
 .latex-file-open:hover { background: var(--dsw-alias-interactive-bg-hover); }
@@ -131,13 +151,18 @@ body > #latex-view { height: 100dvh; }
 .latex-pane[hidden] { display: none; }
 
 .latex-preview-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex: 0 0 auto; border-bottom: 1px solid var(--line); background: var(--surface); }
+.latex-preview-head { flex-wrap: wrap; }
+.latex-render-state { color: var(--muted); font-size: 10px; margin-left: auto; }
+#latex-zoom { font-size: 12px; max-width: 86px; }
+#latex-media-info { padding: 5px 12px; }
 .latex-page-label { font-size: 12px; color: var(--muted); }
 .latex-preview {
-  flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px; display: flex; justify-content: center;
+  flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px; display: flex; justify-content: flex-start;
   align-items: flex-start; background: var(--dsw-alias-bg-module-platform);
 }
-.latex-page-stage { position: relative; display: inline-block; max-width: 100%; }
-.latex-page { max-width: 100%; box-shadow: var(--shadow); background: #fff; }
+.latex-page-stage { position: relative; flex: 0 0 auto; margin: 0 auto; }
+.latex-page { width: 100%; max-width: none; box-shadow: var(--shadow); background: #fff; }
+.latex-media-image { display: block; flex: 0 0 auto; max-width: none; height: auto; margin: 0 auto; background: #fff; box-shadow: var(--shadow); }
 .latex-page-stage .latex-page { display: block; cursor: crosshair; }
 .latex-sync-highlight {
   position: absolute; pointer-events: none; border-radius: 3px;

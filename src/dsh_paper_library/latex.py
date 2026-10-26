@@ -19,7 +19,6 @@ Boundaries that keep it predictable:
 
 from __future__ import annotations
 
-import base64
 import difflib
 import hashlib
 import json
@@ -46,7 +45,7 @@ COMPILE_TIMEOUT = 120
 COMPILE_MAX_TIMEOUT = 600
 LOG_TAIL_CHARACTERS = 32_000
 TEXT_SUFFIXES = {".tex", ".bib", ".cls", ".sty", ".bst", ".cfg", ".def", ".tikz", ".txt", ".md"}
-ASSET_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".svg", ".eps", ".bmp", ".gif", ".csv", ".drawio", ".xlsx", ".ipynb"}
+ASSET_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".svg", ".eps", ".bmp", ".gif", ".webp", ".csv", ".drawio", ".xlsx", ".ipynb"}
 AUX_SUFFIXES = {".aux", ".log", ".out", ".toc", ".lof", ".lot", ".fls", ".fdb_latexmk", ".synctex.gz", ".bbl", ".blg", ".nav", ".snm", ".vrb", ".run.xml", ".bcf", ".idx", ".ilg", ".ind", ".xdv"}
 SKIP_DIRECTORIES = {".git", ".svn", ".hg", "node_modules", "__pycache__", ".venv", "site-packages", ".Trash", ".DS_Store", ".latex-history", ".latex-build", ".ipynb_checkpoints"}
 ENGINES = ("xelatex", "pdflatex", "lualatex")
@@ -322,10 +321,10 @@ def update(library, id=None, title=None, main_path=None, include_archived=False)
     project = _row(_project(library, row["id"], include_archived))
     if main_path is not None:
         pdf = _matching_pdf(Path(row["root"]), project["main_path"])
-        if pdf:
-            library.db.execute("UPDATE latex_projects SET pdf_path=? WHERE id=?", (pdf, row["id"]))
-            library.db.commit()
-            project = _row(_project(library, row["id"], include_archived))
+        # A different entry must never keep showing the preceding draft's PDF.
+        library.db.execute("UPDATE latex_projects SET pdf_path=? WHERE id=?", (pdf, row["id"]))
+        library.db.commit()
+        project = _row(_project(library, row["id"], include_archived))
     return {"project": project}
 
 
@@ -351,6 +350,10 @@ def tree(library, id=None, include_archived=False):
     if root.is_dir():
         for directory, dirnames, filenames in os.walk(root, followlinks=False):
             dirnames[:] = sorted(name for name in dirnames if name not in SKIP_DIRECTORIES and not name.startswith("."))
+            if len(Path(directory).relative_to(root).parts) >= MAX_TREE_DEPTH:
+                if dirnames:
+                    truncated = True
+                dirnames[:] = []
             for name in sorted(filenames):
                 full = Path(directory) / name
                 if full.is_symlink():
@@ -359,7 +362,7 @@ def tree(library, id=None, include_archived=False):
                 kind = "text" if suffix in TEXT_SUFFIXES else "asset" if suffix in ASSET_SUFFIXES else "other"
                 if kind == "other" and suffix in AUX_SUFFIXES:
                     kind = "build"
-                elif kind == "other":
+                elif kind == "other" and (name.startswith(".") or "media" not in full.relative_to(root).parts[:-1]):
                     continue
                 try:
                     relative = full.relative_to(root).as_posix()
@@ -379,10 +382,22 @@ def tree(library, id=None, include_archived=False):
                 if len(files) >= MAX_TREE_FILES:
                     truncated = True
                     break
-            if truncated:
+            if len(files) >= MAX_TREE_FILES:
                 break
     files.sort(key=lambda item: (item["kind"] != "text", item["path"]))
     return {"id": row["id"], "root": row["root"], "main_path": row["main_path"], "pdf_path": row["pdf_path"], "files": files, "truncated": truncated, "limits": {"files": MAX_TREE_FILES, "depth": MAX_TREE_DEPTH}}
+
+
+def outline(library, id=None, include_archived=False):
+    from .latex_outline import outline as build_outline
+    row = _project(library, id, include_archived)
+    snapshot = tree(library, id, include_archived)
+    return {"id": row["id"], **build_outline(Path(row["root"]), row["main_path"], snapshot["files"]), "tree_truncated": snapshot["truncated"]}
+
+
+def media_preview(library, id=None, path=None, page=1, scale=1, include_archived=False):
+    from .latex_media import preview
+    return preview(library, _project(library, id, include_archived), path, page, scale)
 
 
 def read(library, id=None, path=None, include_archived=False):
@@ -699,32 +714,16 @@ def pdf_pages(library, id=None, include_archived=False):
                 raise ValueError(f"PDF 第 {page.number + 1} 页尺寸无效")
             pages.append({"page": page.number + 1, "width": width, "height": height, "rotation": page.rotation})
         count = document.page_count
-    return {"id": row["id"], "path": row["pdf_path"], "page_count": count, "pages": pages, "coordinate_system": "displayed-pdf-points", "rotation_applied": True, "truncated": False, "limits": {"pages": 2000}}
+    stat = path.stat()
+    return {"id": row["id"], "path": row["pdf_path"], "version": f"{stat.st_mtime_ns}:{stat.st_size}", "page_count": count, "pages": pages, "coordinate_system": "displayed-pdf-points", "rotation_applied": True, "truncated": False, "limits": {"pages": 2000}}
 
 
 def pdf_page(library, id=None, page=1, scale=1.25, include_archived=False):
-    import pymupdf as fitz
+    from .latex_media import render
     row = _project(library, id, include_archived)
     path = _project_pdf(library, row)
-    try:
-        scale = float(scale)
-    except (TypeError, ValueError):
-        raise ValueError("渲染比例必须是数字")
-    if not math.isfinite(scale) or scale <= 0:
-        raise ValueError("渲染比例必须是正数")
-    scale = min(scale, 2.0)
     with library._open_pdf(path) as document:
-        current = library._page(document, page)
-        width, height = current.rect.width, current.rect.height
-        if width <= 0 or height <= 0:
-            raise ValueError("页面尺寸无效")
-        scale = min(scale, math.sqrt(1_600_000 / (width * height)), 3000 / width, 3000 / height)
-        pix = current.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-        return {
-            "id": row["id"], "path": row["pdf_path"], "page": int(page), "page_count": document.page_count,
-            "width": width, "height": height, "scale": scale, "rotation": current.rotation,
-            "image": base64.b64encode(pix.tobytes("png")).decode("ascii"),
-        }
+        return {"id": row["id"], "path": row["pdf_path"], **render(document, page, scale)}
 
 
 def _synctex_sidecar(pdf: Path) -> Path:
@@ -903,6 +902,8 @@ ACTIONS = {
     "latex_project_archive": (archive, ("id",)),
     "latex_project_restore": (restore, ("id",)),
     "latex_tree": (tree, ("id", "include_archived")),
+    "latex_outline": (outline, ("id", "include_archived")),
+    "latex_media_preview": (media_preview, ("id", "path", "page", "scale", "include_archived")),
     "latex_read": (read, ("id", "path", "include_archived")),
     "latex_lint": (lint, ("id", "mode", "main_path", "paths", "include_archived")),
     "latex_write": (write, ("id", "path", "content", "expected_revision", "origin", "include_archived")),
