@@ -16,7 +16,7 @@ import { createInkQueue } from './ink-queue.mjs';
 import { createInkDiagnostics } from './ink-diagnostics.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
-for (const name of ['workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css','local-state.js','language-learning.js','language-learning.css','theme.js','theme.css','latex-workspace.js','latex-workspace.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css','local-state.js','language-learning.js','language-learning.css','theme.js','theme.css','latex-workspace.js','latex-workspace.css','latex-review.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['resource-library.js','resource-library.css','knowledge-workflow.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['paper-analysis.js','paper-analysis.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['settings.js','settings.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
@@ -176,6 +176,15 @@ export function createFetchHandler(options = {}) {
         } finally { jsonRequests--; }
       }
       if (request.method !== 'GET' && request.method !== 'HEAD') return json({ok:false,error:'不支持的请求方法。'},405);
+      if (path.startsWith('latex-review-pdf/')) {
+        const id = decodeURIComponent(path.slice('latex-review-pdf/'.length));
+        if (!/^lt-[a-f0-9]{12}$/.test(id)) return new Response('Not found', {status:404});
+        const result = await dispatch({action:'latex_review_export', id, format:'pdf'}, {...options, signal:request.signal});
+        const info = await stat(result.path);
+        return new Response(request.method === 'HEAD' ? null : Readable.toWeb(createReadStream(result.path)), {
+          headers:{...baseHeaders,'Content-Type':'application/pdf','Content-Length':String(info.size),'Content-Disposition':'attachment; filename="manuscript-review.pdf"'},
+        });
+      }
       if (path.startsWith('pdf/')) {
         const id = decodeURIComponent(path.slice(4));
         if (!id || id.includes('/')) return new Response('Not found',{status:404});

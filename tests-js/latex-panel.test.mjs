@@ -3,13 +3,15 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import vm from 'node:vm'
 import { readFile } from 'node:fs/promises'
+import { webcrypto } from 'node:crypto'
 
 const source = await readFile(new URL('../web/latex-workspace.js', import.meta.url), 'utf8')
+const reviewSource = await readFile(new URL('../web/latex-review.js', import.meta.url), 'utf8')
 const tick = () => new Promise(done => setImmediate(done))
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
 const image = { image: 'aW1hZ2U=', width: 600, height: 800, pixel_width: 1200, pixel_height: 1600, page_count: 4, bytes: 5, supported: true }
 
-async function fixture(override = () => undefined) {
+async function fixture(override = () => undefined, { review = false } = {}) {
   const ids = new Map(), revoked = [], calls = [], urls = [], timers = new Map()
   class Element {
     constructor(tag = 'div') {
@@ -44,9 +46,12 @@ async function fixture(override = () => undefined) {
     if (action === 'latex_pdf_pages') return { page_count: 4, version: 'pdf-v1', pages: Array.from({ length: 4 }, () => ({ width: 600, height: 800 })) }
     if (action === 'latex_pdf_page' || action === 'latex_media_preview') return { ...image, ...args }
     if (action === 'latex_write') return { revision: 'new', changed: true, bytes: 10 }
+    if (action === 'latex_review_list') return { annotations: [] }
     throw new Error(`unexpected action ${action}`)
   }
-  vm.runInNewContext(source, { window, document, AbortController, Uint8Array, Blob, atob: value => Buffer.from(value, 'base64').toString('binary'), URL: { createObjectURL() { const url = `blob:${urls.length}`; urls.push(url); return url }, revokeObjectURL: url => revoked.push(url) }, setTimeout: (fn, ms) => { const id = timers.size + 1; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id), getComputedStyle: () => ({ lineHeight: '20' }) })
+  const globals = { window, document, crypto: webcrypto, AbortController, Uint8Array, Blob, atob: value => Buffer.from(value, 'base64').toString('binary'), URL: { createObjectURL() { const url = `blob:${urls.length}`; urls.push(url); return url }, revokeObjectURL: url => revoked.push(url) }, setTimeout: (fn, ms) => { const id = timers.size + 1; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id), getComputedStyle: () => ({ lineHeight: '20' }) }
+  if (review) vm.runInNewContext(reviewSource, globals)
+  vm.runInNewContext(source, globals)
   const ui = window.PaperLatexWorkspace.create({ api })
   await ui.open(); return { ui, ids, calls, revoked, urls, window }
 }
@@ -66,6 +71,26 @@ test('navigation keeps an unsaved conflict in place across file, project and clo
   assert.equal(f.ui.isOpen(), true)
   assert.equal(f.ids.get('latex-conflict').hidden, false)
   assert.equal(f.calls.some(call => ['latex_compile', 'latex_project_update'].includes(call.action)), false)
+  f.ui.dispose()
+})
+
+test('an unsaved review draft blocks entry/project changes, compilation, close and browser unload', async () => {
+  const f = await fixture(undefined, { review: true })
+  f.ui.testHooks.reviewer().beginSource()
+  f.ids.get('latex-review-comment').value = 'My unfinished thought'
+  await f.ui.testHooks.setProject('two')
+  f.ids.get('latex-entry').value = 'draft.tex'; await f.ids.get('latex-entry').dispatch('change')
+  await f.ui.testHooks.compile(); await f.ui.close()
+  let prevented = false
+  await f.window.dispatch('beforeunload', { preventDefault() { prevented = true } })
+  assert.equal(prevented, true)
+  assert.equal(f.ui.testHooks.state().project, 'one')
+  assert.equal(f.ui.isOpen(), true)
+  assert.equal(f.ids.get('latex-entry').value, 'main.tex')
+  assert.equal(f.ids.get('latex-review-comment').value, 'My unfinished thought')
+  assert.equal(f.calls.some(call => ['latex_compile', 'latex_project_update'].includes(call.action)), false)
+  await f.ids.get('latex-review-cancel').dispatch('click')
+  assert.equal(f.ui.testHooks.reviewer().hasDraft(), false)
   f.ui.dispose()
 })
 

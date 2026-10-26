@@ -64,10 +64,14 @@
 文件、入口或项目切换以及关闭工作台前，会等待保存完成；保存失败或冲突时留在原文件保留编辑。
 快速连续切换取消过期读取，即使旧传输未响应取消也不能覆盖新选择。失败状态提供原页重试。
 
+## 单人自审
+
+见 [单人自审工作流](latex-self-review.md)：真实 SyncTeX 双向定位、源码选段批注、PDF 原生高亮与区域便笺、统一列表和版本失效提示；复用 Paper Library 阅读与 PDF 对象工具，编译原 PDF 保留。
+
 ## 编译与预览
 
 `latex_compile` 调用**你本机的 `latexmk`**（默认 `/Library/TeX/texbin/latexmk`，找不到就直接报错
-而不是假装成功），参数为 `-xelatex|-pdflatex|-lualatex -interaction=nonstopmode -file-line-error -synctex=1`，
+而不是假装成功），参数为 `-g -xelatex|-pdflatex|-lualatex -interaction=nonstopmode -file-line-error -synctex=1`，
 工作目录就是项目文件夹，所以 PDF 与 `.tex` 同目录（符合原始习惯）。要点：
 
 - 超时默认 120 秒、上限 600 秒；进程 stdin 关闭，`PATH` 前置 TeX bin，不会挂在交互输入上。

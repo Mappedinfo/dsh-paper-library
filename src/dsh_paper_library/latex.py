@@ -622,7 +622,14 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
     timeout = COMPILE_TIMEOUT if timeout_seconds is None else int(timeout_seconds)
     if not 5 <= timeout <= COMPILE_MAX_TIMEOUT:
         raise ValueError(f"超时必须在 5–{COMPILE_MAX_TIMEOUT} 秒之间")
-    command = [_latexmk(), f"-{engine}", "-interaction=nonstopmode", "-file-line-error", "-synctex=1", absolute.name]
+    # A verified PDF/SyncTeX pair must come from this invocation, even when an
+    # external editor replaced an output which latexmk's cache considers fresh.
+    command = [_latexmk(), "-g", f"-{engine}", "-interaction=nonstopmode", "-file-line-error", "-synctex=1", absolute.name]
+    from .latex_review import source_snapshot, record_build
+    try:
+        before = source_snapshot(library, row)
+    except (OSError, ValueError):
+        before = {}
     started = datetime.now(timezone.utc)
     try:
         completed = subprocess.run(
@@ -662,6 +669,11 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
     elif pdf_relative:
         library.db.execute("UPDATE latex_projects SET modified=? WHERE id=?", (now(), row["id"]))
         library.db.commit()
+    if exit_code == 0 and not timed_out and pdf_relative:
+        try:
+            record_build(library, _project(library, row["id"]), before)
+        except (OSError, ValueError) as error:
+            warnings.append(f"编译已完成，自审映射未核验：{error}")
     return {
         "id": row["id"],
         "engine": engine,
@@ -715,15 +727,26 @@ def pdf_pages(library, id=None, include_archived=False):
             pages.append({"page": page.number + 1, "width": width, "height": height, "rotation": page.rotation})
         count = document.page_count
     stat = path.stat()
-    return {"id": row["id"], "path": row["pdf_path"], "version": f"{stat.st_mtime_ns}:{stat.st_size}", "page_count": count, "pages": pages, "coordinate_system": "displayed-pdf-points", "rotation_applied": True, "truncated": False, "limits": {"pages": 2000}}
+    from .latex_review import build_status
+    return {"id": row["id"], "path": row["pdf_path"], "version": f"{stat.st_mtime_ns}:{stat.st_size}", "build": build_status(library, row, path), "page_count": count, "pages": pages, "coordinate_system": "displayed-pdf-points", "rotation_applied": True, "truncated": False, "limits": {"pages": 2000}}
 
 
 def pdf_page(library, id=None, page=1, scale=1.25, include_archived=False):
     from .latex_media import render
+    from .latex_review import preview_path
     row = _project(library, id, include_archived)
     path = _project_pdf(library, row)
-    with library._open_pdf(path) as document:
-        return {"id": row["id"], "path": row["pdf_path"], **render(document, page, scale)}
+    with library._open_pdf(preview_path(library, row, path)) as document:
+        if isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= document.page_count:
+            raise ValueError("页码超出范围")
+        current = document[page - 1]
+        words = [[*list(library._rect(word[:4], current)), *word[4:]] for word in current.get_text("words")[:20000]]
+        from itertools import islice
+        annotations = []
+        for annotation in islice(current.annots() or [], 300):
+            value = library._annotation(current, annotation)
+            annotations.append({key: value[key] for key in ("id", "type", "rects", "color")})
+        return {"id": row["id"], "path": row["pdf_path"], **render(document, page, scale), "words": words, "annotations": annotations}
 
 
 def _synctex_sidecar(pdf: Path) -> Path:
@@ -763,6 +786,10 @@ def _synctex_ready(library, id, include_archived):
     pdf = _project_pdf(library, row)
     if not _synctex_sidecar(pdf).is_file():
         raise ValueError("这个 PDF 没有 SyncTeX 数据；请重新编译（编译始终带 -synctex=1）")
+    from .latex_review import build_status
+    state = build_status(library, row, pdf)
+    if not state["verified"]:
+        raise ValueError(state["reason"])
     return row, root, pdf
 
 
@@ -779,7 +806,7 @@ def _synctex_run(arguments, cwd: Path) -> dict:
     return _synctex_pairs(output)
 
 
-def synctex_edit(library, id=None, page=None, x=None, y=None, include_archived=False):
+def synctex_edit(library, id=None, page=None, x=None, y=None, pdf_version=None, include_archived=False):
     """Inverse search: one point on a PDF page back to its source file and line.
 
     Coordinates are displayed PDF points with the origin at the top-left corner of
@@ -787,6 +814,9 @@ def synctex_edit(library, id=None, page=None, x=None, y=None, include_archived=F
     Rotated pages are refused because SyncTeX counts in the unrotated frame.
     """
     row, root, pdf = _synctex_ready(library, id, include_archived)
+    from .latex_review import file_digest
+    if pdf_version is not None and pdf_version != file_digest(pdf):
+        raise ValueError("PDF 版本已变化；请重新载入预览")
     with library._open_pdf(pdf) as document:
         current = library._page(document, page)
         if current.rotation:
@@ -823,6 +853,7 @@ def synctex_edit(library, id=None, page=None, x=None, y=None, include_archived=F
         "id": row["id"], "page": int(page),
         "path": source.relative_to(root).as_posix(),
         "line": line, "column": column,
+        "source_revision": read(library, row["id"], source.relative_to(root).as_posix())["revision"],
     }
 
 
@@ -874,6 +905,26 @@ def synctex_view(library, id=None, path=None, line=None, column=None, include_ar
     }
 
 
+def review_list(library, **args):
+    from .latex_review import listing
+    return listing(library, **args)
+
+
+def review_put(library, **args):
+    from .latex_review import put
+    return put(library, **args)
+
+
+def review_export(library, **args):
+    from .latex_review import export
+    return export(library, **args)
+
+
+def review_delete(library, **args):
+    from .latex_review import delete
+    return delete(library, **args)
+
+
 def clean(library, id=None, include_archived=False):
     """Remove only well-known build side files; sources, PDFs and bibliography stay."""
     row = _project(library, id, include_archived)
@@ -904,6 +955,10 @@ ACTIONS = {
     "latex_tree": (tree, ("id", "include_archived")),
     "latex_outline": (outline, ("id", "include_archived")),
     "latex_media_preview": (media_preview, ("id", "path", "page", "scale", "include_archived")),
+    "latex_review_list": (review_list, ("id",)),
+    "latex_review_put": (review_put, ("id", "note_id", "anchor", "comment", "status", "expected_version", "type", "request_id")),
+    "latex_review_export": (review_export, ("id", "format")),
+    "latex_review_delete": (review_delete, ("id", "note_id", "expected_version")),
     "latex_read": (read, ("id", "path", "include_archived")),
     "latex_lint": (lint, ("id", "mode", "main_path", "paths", "include_archived")),
     "latex_write": (write, ("id", "path", "content", "expected_revision", "origin", "include_archived")),
@@ -913,7 +968,7 @@ ACTIONS = {
     "latex_history": (history, ("id", "path", "limit", "include_archived")),
     "latex_diff": (diff, ("id", "path", "from_revision", "to_revision", "include_archived")),
     "latex_compare": (compare, ("a", "b", "path", "include_archived")),
-    "latex_synctex_edit": (synctex_edit, ("id", "page", "x", "y", "include_archived")),
+    "latex_synctex_edit": (synctex_edit, ("id", "page", "x", "y", "pdf_version", "include_archived")),
     "latex_synctex_view": (synctex_view, ("id", "path", "line", "column", "include_archived")),
     "latex_clean": (clean, ("id", "include_archived")),
 }

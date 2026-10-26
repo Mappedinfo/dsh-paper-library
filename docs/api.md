@@ -183,8 +183,8 @@ The plugin registers 35 tools through Harness's official tool registry. Optional
 | `library_feedback` | `id,annotation_ids?,provider?,model?,reasoning_effort?` | `ai_feedback` |
 | `library_sources` | none | `external_status` |
 | `library_sources_scan` | `operation?,source?,limit?` | `external_scan`/`external_prune` |
-| `library_latex` | `operation,input_json` (read-only operations) | `latex_project_list`/`latex_project_get`/`latex_tree`/`latex_outline`/`latex_media_preview`/`latex_read`/`latex_lint`/`latex_pdf_pages`/`latex_pdf_page`/`latex_history`/`latex_diff`/`latex_compare` |
-| `library_latex_edit` | `operation,input_json` (editing operations) | `latex_project_create`/`latex_project_update`/`latex_project_archive`/`latex_project_restore`/`latex_write`/`latex_compile`/`latex_clean` |
+| `library_latex` | `operation,input_json` (read-only operations) | `latex_project_list`/`latex_project_get`/`latex_tree`/`latex_outline`/`latex_media_preview`/`latex_read`/`latex_lint`/`latex_pdf_pages`/`latex_pdf_page`/`latex_history`/`latex_diff`/`latex_compare`/`latex_synctex_view`/`latex_synctex_edit`/`latex_review_list`/`latex_review_export` |
+| `library_latex_edit` | `operation,input_json` (editing operations) | `latex_project_create`/`latex_project_update`/`latex_project_archive`/`latex_project_restore`/`latex_write`/`latex_compile`/`latex_clean`/`latex_review_put`/`latex_review_delete` |
 
 The panel's collaboration surface is registered into the library's shared reading rail (`PaperReadingPanels.registerPanel({id,label,element})` plus `setExternal(true)` while the LaTeX view is focused), so it uses the same side toggle, saved rail width and header as the annotation panel; without a rail instance it falls back to a tab inside the workspace.
 
@@ -201,6 +201,19 @@ Mutation tools pass through the configured native approval pipeline; `requireToo
 `pdf_path` returns the staged link for an external record; every write goes through `_writable_pdf`, which promotes the file into `pdfs/` first (`external_source.promoted`), so a synced directory is never modified. Sources may not live inside the library, staged paths may not escape their source directory, and an existing regular file at a staged path is refused rather than overwritten. Design and configuration: [external-sources.md](external-sources.md).
 
 ## LaTeX projects
+
+Single-reader review reuses native PDF annotations and the reading rail; [workflow/storage](latex-self-review.md).
+
+| Action | Input / result |
+| --- | --- |
+| `latex_review_list` | `{id}` → current `main_path`, `pdf_version`, bounded `annotations`, `truncated`; notes include CAS `version`, `status`, `anchor`, `stale` |
+| `latex_review_put` | New: `{id,anchor,comment,type?,request_id?}`; edit/status: `{id,note_id,expected_version,comment,status}`. `request_id` is 32 lowercase hex characters for idempotent new-note retries. |
+| `latex_review_export` | `{id,format:"json"|"markdown"|"pdf"}`; JSON uses `paper-library.annotations.v1`. PDF returns an exported path and embeds notebook JSON; compiler output stays unchanged. HTTP `GET latex-review-pdf/<id>` streams the download under the existing host authentication boundary. |
+| `latex_review_delete` | `{id,note_id,expected_version}` removes exactly one owned note; backup kept, external PDF objects preserved. |
+
+Source anchor: `{kind:"source",path,revision,start,end,text}`; offsets are Unicode codepoints, not UTF-16 units. PDF anchor: `{kind:"pdf",pdf_version,page,rects,text}`; `page` is 1-based, rectangles use displayed PDF points. New PDF types are `highlight`, `underline`, `note`. Source/build changes mark anchors stale and never relocate them automatically.
+
+`latex_pdf_pages` includes `build:{pdf_version,verified,reason,source_revisions?}`. `latex_pdf_page` includes bounded `words` and annotation geometry alongside its density-preserving image. Inverse `latex_synctex_edit` accepts `pdf_version` and returns `source_revision`; both mapping directions require verified PDF/SyncTeX/source fingerprints from a successful forced workbench build.
 
 `latex_lint {id,mode?:"editing"|"submission",main_path?,paths?}` is a read-only saved-source
 placeholder check, also exposed as `library_latex` operation `lint`. It follows static local
