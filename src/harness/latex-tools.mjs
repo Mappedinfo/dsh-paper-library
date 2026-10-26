@@ -8,7 +8,7 @@
 const text = (description, required = false) => ({ type: 'string', description, ...(required ? { required: true } : {}) })
 const operations = values => ({ type: 'string', enum: values, required: true })
 
-const READ_OPERATIONS = ['project_list', 'project_get', 'tree', 'read', 'pdf_pages', 'pdf_page', 'history', 'diff', 'compare', 'synctex_edit', 'synctex_view']
+const READ_OPERATIONS = ['project_list', 'project_get', 'tree', 'read', 'lint', 'pdf_pages', 'pdf_page', 'history', 'diff', 'compare', 'synctex_edit', 'synctex_view']
 const EDIT_OPERATIONS = ['project_create', 'project_update', 'project_archive', 'project_restore', 'write', 'compile', 'clean']
 
 export const LATEX_TOOL_SPECS = [
@@ -18,7 +18,7 @@ export const LATEX_TOOL_SPECS = [
     title: 'Read a LaTeX project folder',
     parameters: {
       operation: operations(READ_OPERATIONS),
-      input_json: text('JSON object for the chosen operation. project_list: {query?,include_archived?,limit?,offset?}; project_get: {id}; tree: {id}; read: {id,path?} (path defaults to the main file); pdf_pages: {id}; pdf_page: {id,page?,scale?}; history: {id,path?,limit?}; diff: {id,path?,from_revision?,to_revision?} where a revision is a history id, "current" or "previous"; compare: {a,b,path?} diffs the same project-relative file across two folders; synctex_edit: {id,page,x,y} maps one PDF point (displayed PDF points, top-left origin, as pdf_pages reports) back to its source file and line; synctex_view: {id,path,line,column?} maps a source line to its PDF page, box (h,v,W,H) and page rotation, so source and preview can be jumped between both ways. A project is a folder holding the .tex sources and the PDF they build to; nothing is copied into the library.', true),
+      input_json: text('JSON object for the chosen operation. project_list: {query?,include_archived?,limit?,offset?}; project_get: {id}; tree: {id}; read: {id,path?} (path defaults to the main file); lint: {id,mode?:"editing"|"submission",main_path?,paths?} checks saved source placeholders (todo, \\todo{}, xxxx); static input/include and bibliography dependencies plus optional extra text paths are checked within the project, with relative file/line/column/context and category counts. Editing marks warn; submission returns ok:false for markers or incomplete coverage, never gates saving/building, and does not ban academic AI terminology. main_path overrides only this check; pdf_pages: {id}; pdf_page: {id,page?,scale?}; history: {id,path?,limit?}; diff: {id,path?,from_revision?,to_revision?} where a revision is a history id, "current" or "previous"; compare: {a,b,path?} diffs the same project-relative file across two folders; synctex_edit: {id,page,x,y} maps one PDF point (displayed PDF points, top-left origin, as pdf_pages reports) back to its source file and line; synctex_view: {id,path,line,column?} maps a source line to its PDF page, box (h,v,W,H) and page rotation, so source and preview can be jumped between both ways. A project is a folder holding the .tex sources and the PDF they build to; nothing is copied into the library.', true),
     },
   },
   {

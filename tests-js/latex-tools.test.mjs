@@ -49,6 +49,12 @@ test('the bridge admits exactly the actions these tools produce', () => {
   const produced = new Set()
   for (const item of LATEX_TOOL_SPECS) for (const operation of item.parameters.operation.enum) produced.add(`latex_${operation}`)
   assert.deepEqual([...produced].sort(), [...BRIDGE_ACTIONS.latex].sort())
-  assert.equal(BRIDGE_ACTIONS.latex.size, 18)
+  assert.equal(BRIDGE_ACTIONS.latex.size, 19)
   for (const name of produced) assert.ok(BRIDGE_ACTIONS.latex.has(name), name)
+})
+
+test('lint is a read-only operation with per-call manuscript scope', () => {
+  const input = { id: 'lt-0123456789ab', mode: 'submission', main_path: 'formal.tex', paths: ['notes.md'] }
+  assert.deepEqual(requestFromTool(spec('library_latex'), { operation: 'lint', input_json: JSON.stringify(input) }, exec), { ...input, action: 'latex_lint' })
+  assert.throws(() => requestFromTool(spec('library_latex_edit'), { operation: 'lint', input_json: '{}' }, exec), /library_latex for reads/)
 })

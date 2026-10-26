@@ -53,6 +53,90 @@
 实测（本机 MacTeX 2025 basic，xelatex）：一篇含中文的单页 `article` 从 `latex_project_create`
 到编译完成 **0.30 秒**，产物 4 KB，页面位图通过既有管线正常返回。
 
+## 未完成内容检查（LaTeX lint）
+
+未完成内容统一用 `todo` 或 `xxxx` 标记，草稿和正式稿在写作期间都允许保留。
+`latex_lint` 是显式调用的只读检查，不改变保存、自动保存或编译行为，也不调用模型。
+它检查磁盘上已保存的文本；先按已有流程保存编辑内容，再发起检查。当前接入已有 JSON CLI、
+API 与 DSH 的 `library_latex` 只读工具；工作台没有新增按钮或自动检查钩子。
+
+```json
+{"action":"latex_lint","id":"lt-0123456789ab","mode":"editing","main_path":"draft.tex"}
+```
+
+将请求保存为 `lint-request.json`，运行：
+
+```sh
+node src/cli.mjs --library /absolute/library < lint-request.json
+```
+
+投稿前将 `mode` 改成 `submission`，将 `main_path` 改成正式稿入口（如 `formal.tex`）。
+`main_path` 只覆盖这次检查，不改项目登记的主文件；双入口可共用 `.bib` 与 `media/formal/`
+素材目录。DSH 中用 `library_latex` 的 `operation:"lint"`，将同一对象去掉 `action` 后作为
+`input_json` 传入。HTTP 也沿用既有 `/api/paper-library/api` JSON action 接口。
+
+参数：`id` 必填；`mode` 默认为 `editing`，另可选 `submission`；`main_path` 默认为登记的
+主文件；`paths` 可追加最多 100 个项目内文本路径，例如 `["notes.md","sections/appendix.tex"]`。
+默认沿主文件的静态 `\input`、`\include`、`\bibliography`、`\addbibresource` 引用检查，
+无扩展名时分别补 `.tex`／`.bib`。引用始终相对**项目根目录**，每个解析后的文件仅检查一次，
+循环／重复引用不会反复读取。不会遍历整个目录，也不会检查其他入口、未引用笔记、图片、
+构建产物或 TeX 系统包；需要的其他文本由 `paths` 明确加入。
+
+规则与忽略范围：
+
+- `todo` 不区分大小写，独立词与 `\todo{...}`／`\TODO[...]{...}` 都记录；连续至少四个
+  `x`（含 `XXXX`、`xxxxx`）也记录。两侧 ASCII 字母、数字、下划线阻止匹配，所以
+  `methodology`、`todos`、`todo_list`、`prefixxxxx` 不匹配；中文紧邻标记仍匹配。
+  分类为 `todo`、`todo_command`、`xxxx`，一个命令与其参数中的其他标记分别计数。
+- 普通 LaTeX `% TODO` 注释也检查；注释里的文件引用不跟进。正常学术 `AI` 字样不报错。
+- 自动忽略逐字／代码环境 `verbatim`、`verbatim*`、`Verbatim`、`BVerbatim`、`LVerbatim`、
+  `lstlisting`、`minted`、`comment`、`filecontents`、`filecontents*`；行内 `\verb`、`\Verb`、
+  `\lstinline`、`\mintinline` 与 `\detokenize`；URL／路径命令的路径参数、文件引用的文件名，
+  以及宏声明的名称。定义 `\todo` 等占位渲染宏时，宏正文中与宏名同类的普通显示标签
+  （如 `\texttt{todo:}`）不计作未完成事项；定义中的注释、实际 `\todo` 调用及其他类别占位
+  仍检查。普通宏正文与 `\href` 的显示文字仍检查。
+- 显式追加的 Markdown 文本忽略反引号行内代码与反引号／波浪线代码围栏；其他正文仍检查。
+  未闭合代码区域会报告范围不完整。LaTeX 不是完整宏解释器，不推断条件分支或 `includeonly`；
+  动态文件名、缺失依赖、编码错误和超预算都报告检查范围不完整。自定义导入宏需将实际文本
+  放进 `paths`，不会自动展开宏。
+- 普通文字或 `\texttt{todo}` 若是在说明标记约定，可在该行尾写
+  `% latex-lint: ignore-line -- literal example`，或在上一行写
+  `% latex-lint: ignore-next-line -- literal example`。只忽略对应行的占位标记，不隐藏引用
+  范围错误；没有整份文件或整个项目的静默忽略开关。
+
+结果使用稳定 schema `paper-library-latex-lint.v1`：
+
+```json
+{
+  "schema":"paper-library-latex-lint.v1",
+  "id":"lt-0123456789ab", "mode":"submission", "main_path":"formal.tex", "paths":[],
+  "ok":false, "status":"failed", "submission_ready":false, "complete":true,
+  "counts":{"findings":1,"markers":1,"todo":0,"todo_command":0,"xxxx":1,"scope":0,"warn":0,"submission_blocker":1},
+  "findings":[{"path":"formal.tex","line":12,"column":5,"context":"Text xxxx","category":"xxxx","severity":"submission_blocker","marker":"xxxx","message":"未完成内容占位符"}]
+}
+```
+
+另返回 `files:[{path,revision,bytes}]`、已读 `bytes`、`limits` 和 `truncated`。路径仅返回项目内
+相对路径，不返回项目根目录；行列从 1 起，列按 Unicode 字符计数，命令定位在反斜杠。
+上下文最多 200 字符，忽略的字面量留空，绝对路径字面量遮蔽。`revision` 与编辑器的文本
+sha256 一致，可用于判断报告对应的保存版本。这里的“投稿通过”仅指占位检查通过。
+
+`editing` 中标记为 `warn`，完整检查即 `ok:true`，有标记时 `status:"warnings"`；
+`submission` 中为 `submission_blocker`，有占位即 `ok:false,status:"failed"`。
+两种模式发现覆盖问题都返回 `ok:false,status:"incomplete",complete:false`；只有覆盖完整且
+没有占位才 `submission_ready:true`。CLI 的外层 `ok` 与结果一致，未通过退出码为 1，
+通过（含写作期占位警告）为 0；API／工具调用成功与 lint 通过不同，应读取结果中的 `ok`。
+
+预算：100 文件、单文件 1 MiB、合计 8 MiB、引用深度 32、最多 2,000 条文件引用；这些边界
+触发时不会声称完整通过。报告最多列出 1,000 条发现，超出用 `truncated:true` 表示，计数仍覆盖
+预算内已扫描的全部标记。路径、后缀和 UTF-8 都校验；拒绝项目外路径、绝对路径及指向外部的
+符号链接，不执行 TeX 宏。合成回归可重跑：
+
+```sh
+.venv/bin/python -m pytest -q tests/test_latex_lint.py tests/test_latex.py
+node --test tests-js/latex-lint.test.mjs tests-js/latex-tools.test.mjs tests-js/latex-ai.test.mjs tests-js/latex-workspace.test.mjs
+```
+
 ## 对比研究
 
 - `latex_history`：某文件的历史版本列表（含当前正文的 sha256）。
@@ -86,11 +170,11 @@ MacTeX 安装，定位逻辑与 `latexmk` 相同）解读，两个动作都是�
 
 | 工具 | 动作 |
 | --- | --- |
-| `library_latex`（只读） | `project_list` `project_get` `tree` `read` `pdf_pages` `pdf_page` `history` `diff` `compare` `synctex_edit` `synctex_view` |
+| `library_latex`（只读） | `project_list` `project_get` `tree` `read` `lint` `pdf_pages` `pdf_page` `history` `diff` `compare` `synctex_edit` `synctex_view` |
 | `library_latex_edit`（写入） | `project_create` `project_update` `project_archive` `project_restore` `write` `compile` `clean` |
 
 两者都把 `input_json` 解析为一次调用，动作名变成 `latex_<operation>`，并且只允许
-`src/bridge.mjs` 白名单里的 18 个动作通过。浏览器面板通过同一个 `/api/paper-library/api`
+`src/bridge.mjs` 白名单里的 19 个动作通过。浏览器面板通过同一个 `/api/paper-library/api`
 动作面读写，因此编辑器与 Agent 走的是同一条经过校验的路径。
 
 ## 默认论文目录与同步（已实现）

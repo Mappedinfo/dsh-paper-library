@@ -35,7 +35,7 @@ if (args.includes('--help')) {
       }
     } else result=await dispatch(request,{library,python});
     const generated=isAnalysis && ['paper_analysis_run','paper_analysis_start'].includes(request.action) && !(request.action==='paper_analysis_start' && request.reuse===true);
-    const ok=!generated || result.status==='complete' && !(result.warnings?.length);
+    const ok=request.action==='latex_lint' ? result.ok===true : !generated || result.status==='complete' && !(result.warnings?.length);
     console.log(JSON.stringify({ok,result}));
     if (!ok) process.exitCode=1;
   } catch(error) {

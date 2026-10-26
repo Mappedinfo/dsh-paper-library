@@ -412,6 +412,14 @@ def read(library, id=None, path=None, include_archived=False):
     }
 
 
+def lint(library, id=None, mode="editing", main_path=None, paths=None, include_archived=False):
+    """Read-only placeholder check; saving and compiling never depend on it."""
+    from .latex_lint import lint_project
+
+    row = _project(library, id, include_archived)
+    return {"id": row["id"], **lint_project(Path(row["root"]), row["main_path"] if main_path is None else main_path, mode, paths)}
+
+
 def _atomic_write(destination: Path, body: str):
     descriptor, temporary = tempfile.mkstemp(prefix=".latex-write-", suffix=".tmp", dir=destination.parent)
     try:
@@ -896,6 +904,7 @@ ACTIONS = {
     "latex_project_restore": (restore, ("id",)),
     "latex_tree": (tree, ("id", "include_archived")),
     "latex_read": (read, ("id", "path", "include_archived")),
+    "latex_lint": (lint, ("id", "mode", "main_path", "paths", "include_archived")),
     "latex_write": (write, ("id", "path", "content", "expected_revision", "origin", "include_archived")),
     "latex_compile": (compile_project, ("id", "engine", "timeout_seconds", "include_archived")),
     "latex_pdf_pages": (pdf_pages, ("id", "include_archived")),
