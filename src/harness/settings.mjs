@@ -20,6 +20,7 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   // new folder behaves like Overleaf; the split is the source pane width in percent.
   latex_starter: true,
   latex_auto_compile: true,
+  latex_engine: 'xelatex',
   latex_split: 50,
   latex_sync_folder: true,
 });
@@ -52,6 +53,7 @@ export function createPaperLibrarySettingsSchema(Schema) {
     external_sources: Schema.string().default(''),
     latex_starter: Schema.boolean().default(true),
     latex_auto_compile: Schema.boolean().default(true),
+    latex_engine: Schema.union([Schema.const('xelatex'), Schema.const('pdflatex'), Schema.const('lualatex')]).default('xelatex'),
     latex_split: Schema.number().default(50),
     latex_sync_folder: Schema.boolean().default(true),
   });
@@ -63,6 +65,8 @@ function validatePatch(patch) {
     if (!fields.includes(key)) throw invalid(`此字段不属于可编辑设置：${key}`);
     if (key === 'reading-panel-side') {
       if (!['left', 'right'].includes(value)) throw invalid('设置值无效：reading-panel-side');
+    } else if (key === 'latex_engine') {
+      if (!['xelatex', 'pdflatex', 'lualatex'].includes(value)) throw invalid('设置值无效：latex_engine');
     } else if (key === 'sync_config') {
       if (typeof value !== 'string' || value.length > 500) throw invalid('设置值无效：sync_config');
       const path = value.trim();

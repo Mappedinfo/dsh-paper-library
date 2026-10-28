@@ -55,6 +55,7 @@ test('schema exposes exactly the live preference fields with safe defaults', () 
   assert.equal(schema.sync_config.value, ''); assert.equal(schema.external_sources.value, '');
   // The LaTeX workspace defaults: starter file and idle recompiling on, split in the middle.
   assert.equal(schema.latex_starter.value, true); assert.equal(schema.latex_auto_compile.value, true);
+  assert.deepEqual(schema.latex_engine.values, ['xelatex', 'pdflatex', 'lualatex']); assert.equal(schema.latex_engine.value, 'xelatex');
   assert.equal(schema.latex_split.value, 50); assert.equal(schema.latex_sync_folder.value, true);
 });
 
@@ -63,7 +64,7 @@ test('migration respects explicit native false, normalizes legacy strings and re
   const f = await fixture(t, { legacy, user: { auto_analysis: false, future: 7 } });
   const view = await f.service.get();
   assert.equal(view.backend, 'dsh'); assert.equal(view.writable, true);
-  assert.deepEqual(view.value, { auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_split: 50, latex_sync_folder: true });
+  assert.deepEqual(view.value, { auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_split: 50, latex_sync_folder: true });
   assert.deepEqual((await f.store.get('preferences')).value, legacy);
   assert.deepEqual((await f.store.get(backup)).value, legacy);
   assert.equal(f.settings.raw().future, 7);
@@ -126,6 +127,19 @@ test('standalone never migrated deployments use host disk with cross-instance co
   const reset = await second.reset((await second.get()).revision); assert.equal(reset.value.analysis_fill, true);
 });
 
+test('compile engine persists across standalone and DSH clients and rejects unsupported engines', async t => {
+  for (const native of [false, true]) {
+    const f = await fixture(t, { native });
+    const first = await f.service.get();
+    const saved = await f.service.update({ latex_engine: 'lualatex' }, first.revision);
+    assert.equal(saved.value.latex_engine, 'lualatex');
+    assert.equal((await f.service.get()).value.latex_engine, 'lualatex');
+    assert.throws(() => f.service.update({ latex_engine: 'unknown' }, saved.revision), code('SETTINGS_INVALID'));
+    if (native) assert.equal(f.settings.raw().latex_engine, 'lualatex');
+    else assert.equal((await f.store.get('preferences')).value.latex_engine, 'lualatex');
+  }
+});
+
 test('a stranded migration record without a native descriptor falls back to the local store', async t => {
   // The released-DSH failure mode: a v1 marker written by the old provider remains
   // while the running DSH no longer mounts this namespace, so the library must
@@ -156,7 +170,7 @@ test('legacy-only edits preserve managed recovery values and mixed-store writes 
 
 test('invalid keys, values, revisions and omitted legacy fields reject before writes', async t => {
   const f = await fixture(t, { legacy: { old: 1 } }), first = await f.service.get();
-  for (const patch of [{ library: '/tmp/a' }, { provider: 'x' }, { auto_analysis: 'true' }, { 'reading-panel-side': 'top' }]) {
+  for (const patch of [{ library: '/tmp/a' }, { provider: 'x' }, { auto_analysis: 'true' }, { 'reading-panel-side': 'top' }, { latex_engine: 'tectonic' }]) {
     assert.throws(() => f.service.update(patch, first.revision), code('SETTINGS_INVALID'));
   }
   await assert.rejects(f.service.update({ auto_analysis: true }, undefined), code('SETTINGS_INVALID'));

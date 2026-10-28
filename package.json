@@ -30,6 +30,7 @@
     "src/**/*.py",
     "prompts/**/*.json",
     "lib/client.js",
+    "lib/latex-editor.js",
     "web",
     "mcp",
     "skills",
@@ -55,6 +56,7 @@
     "site",
     "docs/latex-projects.md",
     "docs/latex-self-review.md",
+    "docs/latex-workbench-design-review.md",
     "docs/external-sources.md",
     "docs/auto-parse-flow.md",
     "docs/paper-review-skill-design.md",
@@ -79,6 +81,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "prepack": "npm run build",
     "test": "node --test tests-js/*.test.mjs",
     "test:harness": "node tests-js/adapter-web-smoke.mjs",
     "test:paper-chat": "node tests-js/paper-chat-harness-smoke.mjs",
@@ -111,23 +114,31 @@
   "dependencies": {
     "@citation-js/core": "^0.7.18",
     "@citation-js/plugin-bibtex": "^0.7.18",
+    "@codemirror/autocomplete": "^6.20.4",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/legacy-modes": "^6.5.5",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@lezer/highlight": "^1.2.5",
     "citeproc": "^2.4.63",
     "zod": "^4.0.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/schemastery": "^3.18.2",
     "@deepseek-ai/cordis": ">=4.0.1 <5",
-    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.2 <0.3.0-0",
-    "@deepseek-ai/dsh-llm": ">=0.1.5-rc.2 <0.3.0-0",
-    "@deepseek-ai/dsh-home-paths": ">=0.1.5-rc.2 <0.3.0-0",
     "@deepseek-ai/dsh-atomic-write": ">=0.1.5-rc.2 <0.3.0-0",
     "@deepseek-ai/dsh-client-connection": ">=0.1.5-rc.2 <0.3.0-0",
-    "@deepseek-ai/dsh-host-webserver": ">=0.1.5-rc.2 <0.3.0-0",
     "@deepseek-ai/dsh-client-locale": ">=0.1.5-rc.2 <0.3.0-0",
-    "@deepseek-ai/dsh-client-ui-sidebar-right": ">=0.1.5-rc.2 <0.3.0-0",
-    "@deepseek-ai/dsh-client-ui-model-selection": ">=0.1.5-rc.2 <0.3.0-0",
     "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.5-rc.2 <0.3.0-0",
-    "@deepseek-ai/dsh-client-ui-input-trigger": ">=0.1.5-rc.2 <0.3.0-0"
+    "@deepseek-ai/dsh-client-ui-input-trigger": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-model-selection": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-home-paths": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-host-webserver": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-llm": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.2 <0.3.0-0",
+    "@deepseek-ai/schemastery": "^3.18.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/schemastery": {

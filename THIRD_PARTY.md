@@ -13,6 +13,7 @@ Project scaffolding was generated through the author's `academic-templates/dev-p
 | tabulate 0.10.0 | Table formatting used by the Markdown extraction dependency | [tabulate](https://github.com/astanin/python-tabulate) / MIT |
 | citeproc-js | CSL processor | [citeproc-js](https://github.com/Juris-M/citeproc-js) / CPAL-1.0-or-later or AGPL-3.0-or-later; default here uses the AGPL option, [upstream notice retained](licenses/citeproc-NOTICE.txt) |
 | Citation.js core and BibTeX plugin | BibLaTeX parsing and output | [Citation.js](https://github.com/citation-js/citation-js) / MIT |
+| CodeMirror 6、LaTeX 模式、Lezer 及配套包 | 本地打包的源码编辑器 | [CodeMirror](https://codemirror.net/) / MIT；依赖许可声明保存在 [codemirror-MIT.txt](licenses/codemirror-MIT.txt) |
 | Official APA CSL style | APA 7 rules | [CSL styles](https://github.com/citation-style-language/styles/blob/master/apa.csl) / CC BY-SA 3.0; embedded authors/rights retained |
 | CSL en-US locale | Citation localization | [CSL locales](https://github.com/citation-style-language/locales) / CC BY-SA 3.0; embedded authors/rights retained |
 | esbuild | Build the tiny Harness client adapter | [esbuild](https://github.com/evanw/esbuild) / MIT |

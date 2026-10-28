@@ -195,6 +195,10 @@ export function createFetchHandler(options = {}) {
           headers:{...baseHeaders,'Content-Type':'application/pdf','Content-Length':String(info.size),'Content-Disposition':`attachment; filename="paper.pdf"; filename*=UTF-8''${encodeURIComponent(filename)}`},
         });
       }
+      if (path === 'latex-editor.js') {
+        const body = await readFile(join(projectRoot, 'lib', 'latex-editor.js'));
+        return new Response(body, { headers: { ...baseHeaders, 'Content-Type': 'text/javascript;charset=utf-8' } });
+      }
       if (!Object.hasOwn(staticFiles,path)) return new Response('Not found',{status:404});
       const [file,mime] = staticFiles[path];
       const body = await readFile(join(projectRoot,'web',file));

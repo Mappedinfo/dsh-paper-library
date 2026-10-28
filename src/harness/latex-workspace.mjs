@@ -209,6 +209,7 @@ export function createLatexWorkspace({ config = {}, dispatch, settings, library,
       settings: {
         starter: preferences.latex_starter !== false,
         auto_compile: preferences.latex_auto_compile !== false,
+        engine: preferences.latex_engine || 'xelatex',
         split: Number.isSafeInteger(preferences.latex_split) ? preferences.latex_split : 50,
         sync_folder: preferences.latex_sync_folder !== false,
       },

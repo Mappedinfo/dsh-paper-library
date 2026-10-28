@@ -25,7 +25,7 @@ async function fixture(override = () => undefined, { review = false } = {}) {
     setAttribute(key, value) { this.attributes[key] = String(value) } getAttribute(key) { return this.attributes[key] }
     addEventListener(key, value) { if (!this.events.has(key)) this.events.set(key, []); this.events.get(key).push(value) }
     removeEventListener() {}
-    async dispatch(key, args = {}) { await Promise.all((this.events.get(key) || []).map(fn => fn({ target: this, preventDefault() {}, ...args }))) }
+    async dispatch(key, args = {}) { await Promise.all((this.events.get(key) || []).map(fn => fn({ target: this, preventDefault() {}, stopPropagation() {}, ...args }))) }
     querySelectorAll(selector) { const matches = node => selector === 'button[data-path]' ? node.tagName === 'BUTTON' && node.dataset.path : selector.startsWith('.') ? node.className?.split(' ').includes(selector.slice(1)) : node.tagName.toLowerCase() === selector; return this.children.flatMap(node => [...(matches(node) ? [node] : []), ...node.querySelectorAll(selector)]) }
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null }
     get selectedOptions() { return this.children.filter(node => node.value === this.value) }
@@ -94,6 +94,181 @@ test('an unsaved review draft blocks entry/project changes, compilation, close a
   f.ui.dispose()
 })
 
+test('engine choice is saved and shared by manual and automatic compilation', async () => {
+  let preferences = { latex_engine: 'xelatex', latex_auto_compile: false }
+  const f = await fixture((action, args) => {
+    if (action === 'settings_get') return { value: preferences, revision: '1' }
+    if (action === 'settings_update') { preferences = { ...preferences, ...args.patch }; return { value: preferences, revision: '2' } }
+    if (action === 'latex_compile') return { ok: false, engine: args.engine, duration_ms: 1, errors: [], warnings: [], log_tail: 'synthetic log', exit_code: 1 }
+  })
+  for (const engine of ['xelatex', 'pdflatex', 'lualatex']) {
+    f.ids.get('latex-setting-engine').value = engine
+    await f.ids.get('latex-setting-engine').dispatch('change'); await tick()
+    await f.ui.testHooks.compile('manual'); await f.ui.testHooks.compile('auto')
+    assert.deepEqual(f.calls.filter(call => call.action === 'latex_compile').slice(-2).map(call => call.engine), [engine, engine])
+  }
+  assert.equal(preferences.latex_engine, 'lualatex')
+  assert.equal(f.ids.get('latex-diagnostics-toggle').getAttribute('aria-expanded'), 'true')
+  assert.match(f.ids.get('latex-errors').textContent, /synthetic log/)
+  f.ui.dispose()
+})
+
+test('settings changes serialize and keep the newest choice until all writes complete', async () => {
+  const firstWrite = deferred(); let revision = 1
+  let preferences = { latex_engine: 'xelatex', latex_auto_compile: true }
+  let updates = 0
+  const f = await fixture((action, args) => {
+    if (action === 'settings_get') return { value: { ...preferences }, revision: String(revision) }
+    if (action === 'settings_update') {
+      assert.equal(args.expected_revision, String(revision))
+      updates++
+      if (updates === 1) return firstWrite.promise
+      preferences = { ...preferences, ...args.patch }; revision++
+      return { value: { ...preferences }, revision: String(revision) }
+    }
+    if (action === 'latex_compile') return { ok: false, engine: args.engine, duration_ms: 1, errors: [], warnings: [], exit_code: 1 }
+  })
+  f.ids.get('latex-setting-auto').checked = false
+  await f.ids.get('latex-setting-auto').dispatch('change')
+  f.ids.get('latex-setting-engine').value = 'pdflatex'
+  await f.ids.get('latex-setting-engine').dispatch('change')
+  await tick()
+  assert.equal(updates, 1, 'the second write must wait for the first')
+  assert.equal(f.ids.get('latex-setting-engine').value, 'pdflatex')
+  const compile = f.ui.testHooks.compile()
+  preferences = { ...preferences, latex_auto_compile: false }; revision++
+  firstWrite.resolve({ value: { ...preferences }, revision: String(revision) })
+  await compile
+  assert.equal(updates, 2)
+  assert.equal(preferences.latex_auto_compile, false)
+  assert.equal(preferences.latex_engine, 'pdflatex')
+  assert.equal(f.calls.find(call => call.action === 'latex_compile').engine, 'pdflatex')
+  f.ui.dispose()
+})
+
+test('compile waits for an engine selection queued during another settings save', async () => {
+  const firstWrite = deferred(), secondWrite = deferred(); let revision = 1, count = 0
+  let preferences = { latex_engine: 'xelatex', latex_auto_compile: true }
+  const f = await fixture((action, args) => {
+    if (action === 'settings_get') return { value: { ...preferences }, revision: String(revision) }
+    if (action === 'settings_update') {
+      count++
+      return count === 1 ? firstWrite.promise : secondWrite.promise
+    }
+    if (action === 'latex_compile') return { ok: false, engine: args.engine, duration_ms: 1, errors: [], warnings: [], exit_code: 1 }
+  })
+  f.ids.get('latex-setting-auto').checked = false
+  await f.ids.get('latex-setting-auto').dispatch('change'); await tick()
+  const compile = f.ui.testHooks.compile()
+  f.ids.get('latex-setting-engine').value = 'pdflatex'
+  await f.ids.get('latex-setting-engine').dispatch('change')
+  preferences.latex_auto_compile = false; revision++
+  firstWrite.resolve({ value: { ...preferences }, revision: String(revision) })
+  await tick()
+  assert.equal(count, 2)
+  assert.equal(f.calls.some(call => call.action === 'latex_compile'), false)
+  preferences.latex_engine = 'pdflatex'; revision++
+  secondWrite.resolve({ value: { ...preferences }, revision: String(revision) })
+  await compile
+  assert.equal(f.calls.find(call => call.action === 'latex_compile').engine, 'pdflatex')
+  f.ui.dispose()
+})
+
+test('external settings conflict rebases the chosen engine and preserves other fields', async () => {
+  let revision = 1, first = true
+  let preferences = { latex_engine: 'xelatex', latex_auto_compile: true }
+  const f = await fixture((action, args) => {
+    if (action === 'settings_get') return { value: { ...preferences }, revision: String(revision) }
+    if (action === 'settings_update') {
+      if (first) { first = false; revision++; preferences.latex_auto_compile = false; return Promise.reject(Object.assign(new Error('external change'), { code: 'STATE_CONFLICT' })) }
+      assert.equal(args.expected_revision, String(revision))
+      preferences = { ...preferences, ...args.patch }; revision++
+      return { value: { ...preferences }, revision: String(revision) }
+    }
+    if (action === 'latex_compile') return { ok: false, engine: args.engine, duration_ms: 1, errors: [], warnings: [], exit_code: 1 }
+  })
+  f.ids.get('latex-setting-engine').value = 'lualatex'
+  await f.ids.get('latex-setting-engine').dispatch('change')
+  await f.ui.testHooks.compile()
+  assert.equal(preferences.latex_engine, 'lualatex')
+  assert.equal(preferences.latex_auto_compile, false)
+  assert.equal(f.ids.get('latex-setting-auto').checked, false)
+  assert.equal(f.calls.find(call => call.action === 'latex_compile').engine, 'lualatex')
+  f.ui.dispose()
+})
+
+test('a failed engine save preserves the choice and requires retry before compiling', async () => {
+  let fail = true, revision = 1
+  let preferences = { latex_engine: 'xelatex' }
+  const f = await fixture((action, args) => {
+    if (action === 'settings_get') return { value: { ...preferences }, revision: String(revision) }
+    if (action === 'settings_update') {
+      if (fail) return Promise.reject(new Error('synthetic failure'))
+      preferences = { ...preferences, ...args.patch }; revision++
+      return { value: { ...preferences }, revision: String(revision) }
+    }
+    if (action === 'latex_compile') return { ok: false, engine: args.engine, duration_ms: 1, errors: [], warnings: [], exit_code: 1 }
+  })
+  f.ids.get('latex-setting-engine').value = 'pdflatex'
+  await f.ids.get('latex-setting-engine').dispatch('change')
+  await f.ui.testHooks.compile()
+  assert.equal(f.ids.get('latex-setting-engine').value, 'pdflatex')
+  assert.equal(f.ids.get('latex-settings-retry').hidden, false)
+  assert.equal(f.calls.some(call => call.action === 'latex_compile'), false)
+  fail = false
+  await f.ids.get('latex-settings-retry').dispatch('click')
+  await f.ui.testHooks.compile()
+  assert.equal(f.ids.get('latex-settings-retry').hidden, true)
+  assert.equal(f.calls.find(call => call.action === 'latex_compile').engine, 'pdflatex')
+  f.ui.dispose()
+})
+
+test('retry reloads the settings revision after the service was initially unavailable', async () => {
+  let reads = 0, saved = false
+  const f = await fixture((action, args) => {
+    if (action === 'settings_get') {
+      if (++reads <= 2) return Promise.reject(new Error('settings offline'))
+      return { value: { latex_engine: 'xelatex', latex_auto_compile: false }, revision: 'recovered' }
+    }
+    if (action === 'settings_update') {
+      assert.equal(args.expected_revision, 'recovered')
+      saved = true
+      return { value: { latex_engine: args.patch.latex_engine, latex_auto_compile: false }, revision: 'saved' }
+    }
+    if (action === 'latex_compile') return { ok: false, engine: args.engine, duration_ms: 1, errors: [], warnings: [], exit_code: 1 }
+  })
+  f.ids.get('latex-setting-engine').value = 'lualatex'
+  await f.ids.get('latex-setting-engine').dispatch('change')
+  await f.ui.testHooks.compile()
+  assert.equal(saved, false)
+  assert.equal(f.ids.get('latex-setting-engine').value, 'lualatex')
+  assert.equal(f.ids.get('latex-settings-retry').hidden, false)
+  await f.ids.get('latex-settings-retry').dispatch('click')
+  await f.ui.testHooks.compile()
+  assert.equal(saved, true)
+  assert.equal(f.calls.find(call => call.action === 'latex_compile').engine, 'lualatex')
+  f.ui.dispose()
+})
+
+test('diagnostics only link project files and preserve a conflicting draft when navigating', async () => {
+  const f = await fixture(action => {
+    if (action === 'latex_compile') return { ok: false, engine: 'xelatex', duration_ms: 1, errors: ['./a.tex:2: broken', '../outside.tex:1: unsafe', '! unknown'], warnings: [], log_tail: 'synthetic log', exit_code: 1 }
+    if (action === 'latex_write') return Promise.reject(Object.assign(new Error('changed elsewhere'), { code: 'STATE_CONFLICT', current: { revision: 'other', content: 'other' } }))
+  })
+  await f.ui.testHooks.compile()
+  const diagnostics = f.ids.get('latex-errors')
+  const links = diagnostics.querySelectorAll('button')
+  assert.equal(links.length, 1)
+  assert.match(links[0].textContent, /a.tex:2/)
+  assert.match(diagnostics.textContent, /outside.tex/)
+  await f.ui.testHooks.type('my unsaved writing')
+  await links[0].dispatch('click'); await tick(); await tick()
+  assert.equal(f.ui.testHooks.state().file, 'main.tex')
+  assert.equal(f.ids.get('latex-editor').value, 'my unsaved writing')
+  assert.equal(f.ids.get('latex-conflict').hidden, false)
+  f.ui.dispose()
+})
+
 test('late file reads cannot replace a newer selected file even if transport ignores abort', async () => {
   const a = deferred(), b = deferred()
   const f = await fixture((action, args) => action === 'latex_read' && args.path !== 'main.tex' ? (args.path === 'a.tex' ? a.promise : b.promise) : undefined)
@@ -104,6 +279,19 @@ test('late file reads cannot replace a newer selected file even if transport ign
   assert.equal(f.ids.get('latex-editor').value, 'B')
   assert.equal(f.ui.testHooks.state().file, 'b.tex')
   assert.equal(f.calls.find(call => call.path === 'a.tex').signal.aborted, true)
+  f.ui.dispose()
+})
+
+test('returning to the current file cancels an in-flight switch to another file', async () => {
+  const late = deferred()
+  const f = await fixture((action, args) => action === 'latex_read' && args.path === 'a.tex' ? late.promise : undefined)
+  const opening = f.ui.testHooks.openFile('a.tex'); await tick()
+  assert.equal(f.ids.get('latex-editor').disabled, true)
+  await f.ui.testHooks.openFile('main.tex')
+  late.resolve({ path: 'a.tex', content: 'late A', revision: 'a', bytes: 6, lines: 1 }); await opening
+  assert.equal(f.ui.testHooks.state().file, 'main.tex')
+  assert.equal(f.ids.get('latex-editor').disabled, false)
+  assert.notEqual(f.ids.get('latex-editor').value, 'late A')
   f.ui.dispose()
 })
 
@@ -145,5 +333,78 @@ test('media switches discard stale results, expose unsupported types and retry f
   assert.match(f.ids.get('latex-media-preview').textContent, /unsupported/)
   await f.ui.testHooks.openMedia('media/bad.svg')
   assert.match(f.ids.get('latex-media-info').textContent, /失败/)
+  f.ui.dispose()
+})
+
+test('navigation and focus modes preserve split and reveal a selected source or media', async () => {
+  const f = await fixture((action, args) => action === 'settings_update'
+    ? { value: { latex_auto_compile: false, ...args.patch }, revision: '2' }
+    : undefined)
+  const nav = f.ids.get('latex-navigator'), toggle = f.ids.get('latex-nav-toggle')
+  const source = f.ids.get('latex-current-file').parentElement
+  const preview = f.ids.get('latex-pane-pdf').parentElement
+  const splitter = f.ids.get('latex-splitter')
+
+  await splitter.dispatch('keydown', { key: 'ArrowRight' })
+  const split = f.ui.testHooks.state().split
+  await toggle.dispatch('click')
+  assert.equal(nav.hidden, true)
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false')
+  assert.equal(nav.parentElement.classList.contains('latex-nav-collapsed'), true)
+  await toggle.dispatch('click')
+  assert.equal(nav.hidden, false)
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true')
+
+  await f.ids.get('latex-layout-source').dispatch('click')
+  assert.equal(source.hidden, false)
+  assert.equal(preview.hidden, true)
+  assert.equal(splitter.hidden, true)
+  assert.equal(f.ids.get('latex-layout-source').getAttribute('aria-pressed'), 'true')
+  await f.ui.testHooks.openMedia('media/picture.png')
+  assert.equal(preview.hidden, false)
+  assert.equal(f.ids.get('latex-layout-split').getAttribute('aria-pressed'), 'true')
+  await f.ids.get('latex-layout-pdf').dispatch('click')
+  assert.equal(source.hidden, true)
+  assert.equal(preview.hidden, false)
+  const sourceButton = f.ids.get('latex-outline').querySelector('button')
+  await sourceButton.dispatch('click'); await tick(); await tick()
+  assert.equal(source.hidden, false)
+  assert.equal(f.ui.testHooks.state().file, 'a.tex')
+  assert.equal(f.ui.testHooks.state().split, split)
+  assert.equal(f.ids.get('latex-layout-split').getAttribute('aria-pressed'), 'true')
+  f.ui.dispose()
+})
+
+test('workspace title and return action share the main toolbar and retain the project menu', async () => {
+  const f = await fixture()
+  const title = f.ids.get('latex-workspace-title')
+  const toolbar = title.parentElement
+  assert.equal(toolbar.tagName, 'HEADER')
+  assert.equal(toolbar.getAttribute('aria-label'), 'LaTeX 工作台工具栏')
+  assert.equal(f.ids.get('latex-back').parentElement, toolbar)
+  assert.equal(f.ids.get('latex-project').parentElement, toolbar)
+  assert.equal(f.ids.get('latex-menu').parentElement, toolbar.parentElement)
+  await f.ids.get('latex-menu-open').dispatch('click', { stopPropagation() {} })
+  assert.equal(f.ids.get('latex-menu').hidden, false)
+  assert.equal(f.ids.get('latex-menu-open').getAttribute('aria-expanded'), 'true')
+  await f.ids.get('latex-back').dispatch('click')
+  await tick()
+  assert.equal(f.ui.isOpen(), false)
+  f.ui.dispose()
+})
+
+test('compile entry is selected from the project menu and the toolbar shows it once', async () => {
+  const f = await fixture((action, args) => action === 'latex_project_update'
+    ? { project: { id: args.id, title: args.id, main_path: args.main_path, pdf_present: false } }
+    : undefined)
+  const entry = f.ids.get('latex-entry'), main = f.ids.get('latex-main')
+  assert.equal(entry.parentElement.parentElement, f.ids.get('latex-menu'))
+  assert.equal(entry.getAttribute('aria-label'), '编译主文件')
+  assert.equal(main.textContent, '编译：main.tex')
+  assert.equal(f.ids.get('latex-project').selectedOptions[0].textContent, 'one')
+  entry.value = 'draft.tex'; await entry.dispatch('change')
+  assert.equal(main.textContent, '编译：draft.tex')
+  assert.equal(f.ids.get('latex-project').selectedOptions[0].textContent, 'one')
+  assert.equal(f.ui.testHooks.state().file, 'draft.tex')
   f.ui.dispose()
 })

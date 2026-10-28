@@ -6,7 +6,8 @@
  * plugin's own bridge. So the browser test exercises the shipped panel, the shipped
  * request surface and a real `latexmk` build — with no DSH host and no network.
  *
- * Run: PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node scripts/latex-workspace-fixture.mjs
+ * Run npm run build first, then:
+ * PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node scripts/latex-workspace-fixture.mjs
  * Writes docs/validation/latex-workspace-browser.json
  */
 import { createServer } from 'node:http'
@@ -21,6 +22,7 @@ import { createLatexWorkspace } from '../src/harness/latex-workspace.mjs'
 import { resolveConfig } from '../src/harness/config.mjs'
 
 const project = dirname(dirname(fileURLToPath(import.meta.url)))
+const output = process.env.LATEX_FIXTURE_OUTPUT || project
 const checks = []
 const record = value => { checks.push(value); console.log(`PASS ${value}`) }
 const until = async (read, accept, label, attempts = 200) => {
@@ -38,6 +40,8 @@ const PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><tit
 <link rel="stylesheet" href="./theme.css">
 <link rel="stylesheet" href="./latex-workspace.css"></head>
 <body><div class="topbar-actions"></div><main class="workspace" id="host"></main>
+<script src="./latex-editor.js"></script>
+<script src="./latex-review.js"></script>
 <script src="./latex-workspace.js"></script>
 <script>
 window.__calls = [];
@@ -129,8 +133,8 @@ async function startServer(library, latexAI, latexWorkspace, settings) {
       return
     }
     const name = url.pathname.replace(/^\//, '')
-    if (/^[\w.-]+\.(js|css)$/.test(name) && existsSync(join(project, 'web', name))) {
-      response.writeHead(200, { 'Content-Type': TYPES[extname(name)] }).end(await readFile(join(project, 'web', name)))
+    if (/^[\w.-]+\.(js|css)$/.test(name) && existsSync(join(project, name === 'latex-editor.js' ? 'lib' : 'web', name))) {
+      response.writeHead(200, { 'Content-Type': TYPES[extname(name)] }).end(await readFile(join(project, name === 'latex-editor.js' ? 'lib' : 'web', name)))
       return
     }
     response.writeHead(404).end('not found')
@@ -150,6 +154,8 @@ ${body}
 let server, browser, library
 try {
   const base = await mkdtemp(join(tmpdir(), 'latex-workspace-'))
+  await mkdir(join(output, 'docs', 'images'), { recursive: true })
+  await mkdir(join(output, 'docs', 'validation'), { recursive: true })
   library = join(base, 'library')
   const first = join(base, 'manuscript'), second = join(base, 'submission')
   await mkdir(join(first, 'sections'), { recursive: true })
@@ -189,7 +195,7 @@ try {
   server = started.server
   const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
   browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+  const page = await browser.newPage({ viewport: { width: 1512, height: 982 } })
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   await page.goto(started.origin, { waitUntil: 'load' })
@@ -200,9 +206,24 @@ try {
   if (!await page.evaluate(() => document.body.classList.contains('latex-focused'))) throw new Error('the workspace did not take the page')
   record('topbar-entry-opens-the-workspace-as-a-page')
 
-  await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('The reader types here.'), 'main.tex loaded')
+  await until(() => page.evaluate(() => document.getElementById('latex-editor').value), value => value.includes('The reader types here.'), 'main.tex loaded')
+  if (await page.locator('.cm-content').count() !== 1 || !await page.locator('#latex-editor').isHidden()) throw new Error('CodeMirror was not mounted')
+  await page.locator('#latex-source-search').click()
+  if (!await page.locator('.cm-search').isVisible()) throw new Error('search and replace panel did not open')
+  await page.locator('.cm-search [name="close"]').click()
+  const unicode = '\n% 😀 中文选段\n'
+  await page.evaluate(async value => {
+    const editor = document.getElementById('latex-editor')
+    await window.latexUI.testHooks.type(editor.value + value)
+    const start = editor.value.indexOf('中文选段')
+    editor.setSelectionRange(start, start + '中文选段'.length)
+  }, unicode)
+  await page.locator('#latex-source-note').click()
+  if (await page.locator('.latex-review-quote').first().textContent() !== '中文选段') throw new Error('Unicode selection did not reach self-review')
+  await page.locator('#latex-review-cancel').click()
+  record('codemirror-search-and-unicode-selection-are-available')
   const mainLabel = await page.locator('#latex-main').innerText()
-  const fileButtons = await page.locator('.latex-file-open').allInnerTexts()
+  const fileButtons = await page.locator('.latex-file-open').evaluateAll(nodes => nodes.map(node => node.dataset.path))
   if (!mainLabel.includes('main.tex')) throw new Error(`main file label missing: ${mainLabel}`)
   if (!fileButtons.some(text => text.includes('sections/intro.tex'))) throw new Error(`file list missing section file: ${fileButtons.join(', ')}`)
   record('panel-loads-the-project-tree-and-main-file')
@@ -218,9 +239,9 @@ try {
   const image = await until(() => page.locator('#latex-preview img').count(), count => count > 0, 'preview page')
   const label = await page.locator('#latex-page-label').innerText()
   if (!/第 1 \/ \d+ 页/.test(label)) throw new Error(`page label unexpected: ${label}`)
-  if (await page.locator('#latex-errors li').count() !== 0) throw new Error('compile reported errors for a valid document')
+  if (await page.locator('#latex-errors .latex-diagnostic').count() !== 0) throw new Error('compile reported errors for a valid document')
   if (image < 1) throw new Error('no rendered page')
-  await page.screenshot({ path: join(project, 'docs', 'images', 'latex-workspace.jpg'), type: 'jpeg', quality: 82 })
+  await page.screenshot({ path: join(output, 'docs', 'images', 'latex-workspace.jpg'), type: 'jpeg', quality: 82 })
   record('compile-produces-a-pdf-and-the-panel-renders-its-first-page')
 
   // Another editor writes the file behind the panel's back.
@@ -236,7 +257,7 @@ try {
   record('a-stale-save-is-refused-and-surfaced-without-overwriting')
 
   await page.locator('#latex-conflict-reload').click()
-  await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('Changed in another editor.'), 'reload newest')
+  await until(() => page.evaluate(() => document.getElementById('latex-editor').value), value => value.includes('Changed in another editor.'), 'reload newest')
   const stillExternal = await readFile(join(first, 'main.tex'), 'utf8')
   if (stillExternal !== externalBody) throw new Error('reloading the newest revision rewrote the file')
   record('reload-adopts-the-newer-revision-without-writing')
@@ -249,12 +270,13 @@ try {
   if (!diffText || diffText.includes('没有差异')) throw new Error(`diff was empty: ${diffText}`)
   record('panel-diffs-the-open-file-against-the-previous-revision')
 
-  await page.locator('.latex-file-open', { hasText: 'refs.bib' }).click()
-  await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('@article'), 'bib file loaded')
+  await page.locator('#latex-nav-files').click()
+  await page.locator('#latex-files [data-path="refs.bib"]').click()
+  await until(() => page.evaluate(() => document.getElementById('latex-editor').value), value => value.includes('@article'), 'bib file loaded')
   record('the-file-list-switches-between-project-files')
 
-  await page.locator('.latex-file-open', { hasText: 'main.tex' }).click()
-  await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('Changed in another editor.'), 'main file reloaded')
+  await page.locator('#latex-files [data-path="main.tex"]').click()
+  await until(() => page.evaluate(() => document.getElementById('latex-editor').value), value => value.includes('Changed in another editor.'), 'main file reloaded')
   await page.locator('#latex-menu-open').click()
   await page.locator('#latex-menu').waitFor({ state: 'visible' })
   await page.locator('#latex-compare').selectOption(other.project.id)
@@ -273,12 +295,12 @@ try {
   await until(() => page.locator('#latex-project option').allInnerTexts(), list => list.some(text => text.includes('appendix')), 'new project registered')
   const starter = await readFile(join(fresh, 'main.tex'), 'utf8')
   if (!starter.includes('\\documentclass')) throw new Error('starter main.tex was not written')
-  await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('\\documentclass'), 'starter loaded into the editor')
+  await until(() => page.evaluate(() => document.getElementById('latex-editor').value), value => value.includes('\\documentclass'), 'starter loaded into the editor')
   record('the-panel-registers-a-new-folder-and-writes-its-starter')
 
   // DSH questions and co-writing, driven through the shipped controls.
   await page.locator('#latex-project').selectOption(created.project.id)
-  await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('Changed in another editor.'), 'main project reselected')
+  await until(() => page.evaluate(() => document.getElementById('latex-editor').value), value => value.includes('Changed in another editor.'), 'main project reselected')
   await page.locator('#latex-tab-ai').click()
   await page.locator('#latex-pane-ai').waitFor({ state: 'visible' })
   await until(() => page.locator('#latex-ai-model option').count(), count => count > 0, 'model list loaded')
@@ -297,11 +319,11 @@ try {
   if (!shown.includes(ANCHOR)) throw new Error(`proposal did not show the anchor: ${shown}`)
   const afterPropose = await readFile(join(first, 'main.tex'), 'utf8')
   if (!afterPropose.includes(ANCHOR)) throw new Error('a proposal must not write to the file')
-  await page.screenshot({ path: join(project, 'docs', 'images', 'latex-workspace-ai.jpg'), type: 'jpeg', quality: 82 })
+  await page.screenshot({ path: join(output, 'docs', 'images', 'latex-workspace-ai.jpg'), type: 'jpeg', quality: 82 })
   record('a-proposal-is-shown-for-review-before-anything-is-written')
 
   await page.locator('#latex-ai-accept').click()
-  await until(() => page.locator('#latex-editor').inputValue(), value => value.includes('% reviewed'), 'accepted proposal reloaded')
+  await until(() => page.evaluate(() => document.getElementById('latex-editor').value), value => value.includes('% reviewed'), 'accepted proposal reloaded')
   const accepted = await readFile(join(first, 'main.tex'), 'utf8')
   if (!accepted.includes('% reviewed') || !accepted.includes(ANCHOR)) throw new Error('accepting the proposal did not write the file')
   const saveState = await page.locator('#latex-save-state').innerText()
@@ -359,11 +381,11 @@ try {
   record('the-sync-attach-is-idempotent')
 
   // The same surface in dark mode: text and chrome must not collapse into each other.
-  const lightInk = await page.evaluate(() => getComputedStyle(document.getElementById('latex-editor')).color)
+  const lightInk = await page.evaluate(() => getComputedStyle(document.querySelector('.cm-editor')).color)
   const lightPanel = await page.evaluate(() => getComputedStyle(document.querySelector('.latex-editor-wrap')).backgroundColor)
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.waitForTimeout(150)
-  const darkInk = await page.evaluate(() => getComputedStyle(document.getElementById('latex-editor')).color)
+  const darkInk = await page.evaluate(() => getComputedStyle(document.querySelector('.cm-editor')).color)
   const darkPanel = await page.evaluate(() => getComputedStyle(document.querySelector('.latex-editor-wrap')).backgroundColor)
   const darkBody = await page.evaluate(() => getComputedStyle(document.getElementById('latex-view')).backgroundColor)
   if (darkInk === lightInk) throw new Error(`editor ink did not follow the colour scheme (${darkInk})`)
@@ -371,7 +393,7 @@ try {
   const luminance = value => { const [r, g, b] = (value.match(/[\d.]+/g) || [0, 0, 0]).slice(0, 3).map(Number); return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 }
   if (Math.abs(luminance(darkInk) - luminance(darkBody)) < 0.25) throw new Error(`dark mode leaves text and surface too close: ${darkInk} on ${darkBody}`)
   await page.evaluate(() => window.scrollTo(0, 0))
-  await page.screenshot({ path: join(project, 'docs', 'images', 'latex-workspace-dark.jpg'), type: 'jpeg', quality: 82 })
+  await page.screenshot({ path: join(output, 'docs', 'images', 'latex-workspace-dark.jpg'), type: 'jpeg', quality: 82 })
   await page.emulateMedia({ colorScheme: 'light' })
   await page.evaluate(() => window.scrollTo(0, 0))
   record('the-surface-follows-light-and-dark-with-readable-contrast')
@@ -387,12 +409,12 @@ try {
   if (externalRequests) throw new Error(`panel requested ${externalRequests} external resources`)
   record('the-live-panel-made-no-external-requests')
 
-  const report = { verified_at: new Date().toISOString(), ok: true, checks, actions: [...new Set(calls)].sort(), external_requests: externalRequests, browser_errors: errors, limits: ['Local Chromium against a real Python worker and real latexmk; not a DSH host run', 'The fixture serves the panel and CSS from web/ verbatim; no build step is involved'] }
-  await writeFile(join(project, 'docs', 'validation', 'latex-workspace-browser.json'), JSON.stringify(report, null, 2) + '\n')
+  const report = { verified_at: new Date().toISOString(), ok: true, checks, actions: [...new Set(calls)].sort(), external_requests: externalRequests, browser_errors: errors, limits: ['Local Chromium against a real Python worker and real latexmk; not a DSH host run', 'The fixture serves the panel and CSS from web/ and the locally built CodeMirror bundle from lib/; run npm run build first'] }
+  await writeFile(join(output, 'docs', 'validation', 'latex-workspace-browser.json'), JSON.stringify(report, null, 2) + '\n')
   console.log(JSON.stringify(report, null, 2))
 } catch (error) {
   const report = { verified_at: new Date().toISOString(), ok: false, checks, error: String(error && error.message || error), limits: ['Local Chromium against a real Python worker and real latexmk'] }
-  try { await writeFile(join(project, 'docs', 'validation', 'latex-workspace-browser.json'), JSON.stringify(report, null, 2) + '\n') } catch {}
+  try { await writeFile(join(output, 'docs', 'validation', 'latex-workspace-browser.json'), JSON.stringify(report, null, 2) + '\n') } catch {}
   console.log(JSON.stringify(report, null, 2))
   process.exitCode = 1
 } finally {

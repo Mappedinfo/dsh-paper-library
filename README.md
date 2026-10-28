@@ -203,6 +203,8 @@ AI 按连续阅读方式回应释义、复述、追问、批判或联想，区�
 
 ## 文献工作台
 
+LaTeX 工作台现在使用本地打包的 CodeMirror：支持语法高亮、常用命令建议、撤销／重做及当前文件查找／替换。标题和操作合并为单行，导航可收起，并可选择并排、仅源码或仅 PDF。低频的「编译主文件」切换位于「项目与设置」菜单；同处可选择全局编译引擎（默认 XeLaTeX，另支持 pdfLaTeX／LuaLaTeX）。编译结果旁可展开诊断与日志，已确认的项目内错误位置支持点击定位。详见[使用与边界](docs/latex-projects.md#编辑器与预览面板已实现)及[设计审查](docs/latex-workbench-design-review.md)。
+
 LaTeX 未完成内容用 `todo` 或 `xxxx` 标记，草稿和正式稿写作期间都允许。
 现可通过 `library_latex` 的 `lint` 或 JSON action `latex_lint` 显式检查：写作期列警告，
 投稿检查发现占位或检查范围不完整时返回未通过，保存与编译照常。

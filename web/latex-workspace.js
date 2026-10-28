@@ -18,7 +18,7 @@ window.PaperLatexWorkspace = (() => {
   const MAX_RENDERED_PAGES = 3;
   const MAX_CACHED_BYTES = 48 * 1024 * 1024;
   const SPLIT_MIN = 25, SPLIT_MAX = 75;
-  const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_split: 50, latex_sync_folder: true };
+  const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_split: 50, latex_sync_folder: true };
 
   function create({api, toast = () => {}, getLibrary = () => '', rail = null}) {
     const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
@@ -30,6 +30,7 @@ window.PaperLatexWorkspace = (() => {
     let pendingConflict = null;
     let settings = { ...DEFAULT_SETTINGS };
     let settingsRevision = null;
+    let committedSettings = { ...DEFAULT_SETTINGS }, pendingSettings = [], settingsTail = Promise.resolve();
     let workspace = { root: null, sync: null };
     let outline = null, navMode = 'outline', fileRequest = 0, navRequest = 0, pageRequest = 0;
     let fileAbort = null, pageAbort = null, navAbort = null, mediaAbort = null, mediaRequest = 0;
@@ -55,31 +56,42 @@ window.PaperLatexWorkspace = (() => {
     view.hidden = true;
     view.textContent = '';
 
-    const header = make('header', 'latex-header');
-    const title = make('strong', '', 'LaTeX 工作台'); title.id = 'latex-workspace-title';
-    const subtitle = make('small', '', '项目就是一个装着 .tex 和对应 PDF 的文件夹');
-    const titleBox = make('div', 'latex-title'); titleBox.append(title, subtitle);
+    const title = make('strong', 'latex-title', 'LaTeX 工作台'); title.id = 'latex-workspace-title';
     const back = make('button', 'button subtle', '返回文献库'); back.id = 'latex-back'; back.type = 'button';
     back.title = '关闭工作台，回到文献库列表';
-    header.append(titleBox, back);
 
     // ---- toolbar: project, compile, and one menu for everything project-shaped ----
-    const toolbar = make('div', 'latex-toolbar');
+    const toolbar = make('header', 'latex-toolbar'); toolbar.setAttribute('aria-label', 'LaTeX 工作台工具栏');
     const projectSelect = make('select'); projectSelect.id = 'latex-project'; projectSelect.setAttribute('aria-label', '选择 LaTeX 项目');
     const compile = make('button', 'button primary', '编译'); compile.id = 'latex-compile'; compile.type = 'button';
+    const diagnosticsToggle = make('button', 'button subtle latex-diagnostics-toggle', '编译状态'); diagnosticsToggle.id = 'latex-diagnostics-toggle'; diagnosticsToggle.type = 'button';
+    diagnosticsToggle.setAttribute('aria-expanded', 'false'); diagnosticsToggle.setAttribute('aria-controls', 'latex-errors');
+    diagnosticsToggle.hidden = true;
     const autoLabel = make('span', 'latex-auto'); autoLabel.id = 'latex-auto-state';
     const mainLabel = make('span', 'latex-main'); mainLabel.id = 'latex-main';
-    const mainSelect = make('select'); mainSelect.id = 'latex-entry'; mainSelect.setAttribute('aria-label', '主入口');
+    const mainSelect = make('select'); mainSelect.id = 'latex-entry'; mainSelect.setAttribute('aria-label', '编译主文件');
     const saveState = make('span', 'latex-save-state'); saveState.id = 'latex-save-state'; saveState.setAttribute('role', 'status');
     const aiToggle = make('button', 'button subtle', 'DSH 写作'); aiToggle.id = 'latex-ai-open'; aiToggle.type = 'button';
     const reviewToggle = make('button', 'button subtle', '自审'); reviewToggle.id = 'latex-review-open'; reviewToggle.type = 'button';
+    const navToggle = make('button', 'button subtle', '收起导航'); navToggle.id = 'latex-nav-toggle'; navToggle.type = 'button';
+    navToggle.setAttribute('aria-controls', 'latex-navigator'); navToggle.setAttribute('aria-expanded', 'true');
+    const layoutControls = make('div', 'latex-layout-controls'); layoutControls.setAttribute('role', 'group'); layoutControls.setAttribute('aria-label', '工作区视图');
+    const layoutButtons = new Map();
+    for (const [mode, label] of [['split', '并排'], ['source', '仅源码'], ['pdf', '仅 PDF']]) {
+      const button = make('button', 'button subtle latex-layout-button', label); button.type = 'button'; button.id = `latex-layout-${mode}`;
+      button.setAttribute('aria-pressed', String(mode === 'split')); button.addEventListener('click', () => setLayout(mode));
+      layoutButtons.set(mode, button); layoutControls.append(button);
+    }
     aiToggle.title = '在侧栏里提问或让模型改稿';
     aiToggle.hidden = !rail;
     const menuButton = make('button', 'button subtle latex-menu-button', '☰'); menuButton.id = 'latex-menu-open'; menuButton.type = 'button';
     menuButton.setAttribute('aria-expanded', 'false'); menuButton.setAttribute('aria-controls', 'latex-menu'); menuButton.setAttribute('aria-label', '项目与设置'); menuButton.title = '项目与设置';
-    toolbar.append(projectSelect, mainLabel, mainSelect, saveState, autoLabel, compile, reviewToggle, aiToggle, menuButton);
+    toolbar.append(title, projectSelect, mainLabel, saveState, autoLabel, compile, diagnosticsToggle, navToggle, layoutControls, reviewToggle, aiToggle, menuButton, back);
 
     const menu = make('div', 'latex-menu'); menu.id = 'latex-menu'; menu.setAttribute('aria-label', '项目与设置'); menu.hidden = true;
+    const entryRow = make('div', 'latex-menu-section');
+    const entryLabel = make('label', 'latex-menu-label', '编译主文件'); entryLabel.htmlFor = 'latex-entry';
+    entryRow.append(entryLabel, mainSelect);
     const createRow = make('div', 'latex-menu-section');
     createRow.append(make('span', 'latex-menu-label', '新建项目（放在插件的论文目录里）'));
     const createName = make('input'); createName.id = 'latex-create-name'; createName.type = 'text'; createName.placeholder = '项目名称，例如 邻域效应-论文'; createName.autocomplete = 'off';
@@ -114,7 +126,11 @@ window.PaperLatexWorkspace = (() => {
     const settingStarterLabel = make('label', 'latex-check'); settingStarterLabel.append(settingStarter, make('span', '', '没有 .tex 时写入最小 main.tex'));
     const settingAuto = make('input'); settingAuto.id = 'latex-setting-auto'; settingAuto.type = 'checkbox';
     const settingAutoLabel = make('label', 'latex-check'); settingAutoLabel.append(settingAuto, make('span', '', '自动编译（停止输入后约 2.5 秒）'));
-    const settingsLine = make('div', 'latex-menu-row'); settingsLine.append(settingStarterLabel, settingAutoLabel);
+    const settingEngine = make('select'); settingEngine.id = 'latex-setting-engine'; settingEngine.setAttribute('aria-label', 'LaTeX 编译引擎（全部项目）');
+    for (const [value, label] of [['xelatex', 'XeLaTeX'], ['pdflatex', 'pdfLaTeX'], ['lualatex', 'LuaLaTeX']]) { const option = make('option', '', label); option.value = value; settingEngine.append(option); }
+    const engineLabel = make('label', 'latex-check'); engineLabel.append(make('span', '', '编译引擎（全部项目）'), settingEngine);
+    const settingsRetry = make('button', 'button subtle', '重试保存设置'); settingsRetry.id = 'latex-settings-retry'; settingsRetry.type = 'button'; settingsRetry.hidden = true;
+    const settingsLine = make('div', 'latex-menu-row'); settingsLine.append(settingStarterLabel, settingAutoLabel, engineLabel, settingsRetry);
     settingRow.append(settingsLine);
 
     const rootRow = make('div', 'latex-menu-section');
@@ -124,11 +140,11 @@ window.PaperLatexWorkspace = (() => {
     const syncAttach = make('button', 'button subtle', '纳入同步'); syncAttach.id = 'latex-sync-attach'; syncAttach.type = 'button';
     const rootLine = make('div', 'latex-menu-row'); rootLine.append(rootPath, syncState, syncAttach);
     rootRow.append(rootLine, make('p', 'latex-menu-hint', '论文目录由插件维护；数据同步服务会把它作为一个独立源备份（只新增，不删改其他源）。'));
-    menu.append(createRow, registerRow, compareRow, settingRow, rootRow);
+    menu.append(entryRow, createRow, registerRow, compareRow, settingRow, rootRow);
 
     // ---- body: source | divider | (pdf | dsh | versions) ----
     const content = make('div', 'latex-content');
-    const navigator = make('aside', 'latex-navigator'); navigator.setAttribute('aria-label', '项目导航');
+    const navigator = make('aside', 'latex-navigator'); navigator.id = 'latex-navigator'; navigator.setAttribute('aria-label', '项目导航');
     const navTabs = make('div', 'latex-nav-tabs'); navTabs.setAttribute('role', 'tablist');
     const navButtons = new Map();
     for (const [name, label] of [['outline', '章节'], ['files', '文件'], ['media', '媒体']]) {
@@ -148,15 +164,21 @@ window.PaperLatexWorkspace = (() => {
     const breadcrumb = make('div', 'latex-breadcrumb'); breadcrumb.id = 'latex-current-file';
     const currentFile = make('span', '', '选择源文件');
     const sourceNote = make('button', 'button subtle', '批注选段／当前行'); sourceNote.id = 'latex-source-note'; sourceNote.type = 'button';
-    breadcrumb.append(currentFile, sourceNote);
+    const sourceSearch = make('button', 'button subtle', '查找／替换'); sourceSearch.id = 'latex-source-search'; sourceSearch.type = 'button';
+    breadcrumb.append(currentFile, sourceSearch, sourceNote);
     const editorWrap = make('div', 'latex-editor-wrap');
     const gutter = make('div', 'latex-gutter'); gutter.id = 'latex-gutter'; gutter.setAttribute('aria-hidden', 'true');
     const editor = make('textarea'); editor.id = 'latex-editor'; editor.spellcheck = false; editor.autocomplete = 'off'; editor.setAttribute('aria-label', 'LaTeX 源文件内容');
     editorWrap.append(gutter, editor);
+    const sourceEditor = window.PaperLatexEditor?.create(editor, editorWrap) || null;
+    if (sourceEditor) { editorWrap.classList.add('latex-codemirror'); gutter.hidden = true; }
+    sourceSearch.hidden = !sourceEditor;
+    sourceSearch.addEventListener('click', () => sourceEditor?.openSearch());
     left.append(breadcrumb, editorWrap);
 
     const splitter = make('div', 'latex-splitter'); splitter.id = 'latex-splitter'; splitter.setAttribute('role', 'separator');
     splitter.setAttribute('aria-orientation', 'vertical'); splitter.setAttribute('aria-label', '调整源码与预览宽度'); splitter.tabIndex = 0;
+    splitter.setAttribute('aria-valuemin', String(SPLIT_MIN)); splitter.setAttribute('aria-valuemax', String(SPLIT_MAX));
 
     const right = make('section', 'latex-preview-pane'); right.setAttribute('aria-label', '预览与协作');
     const tabs = make('div', 'latex-tabs'); tabs.setAttribute('role', 'tablist');
@@ -192,8 +214,8 @@ window.PaperLatexWorkspace = (() => {
     toPdf.setAttribute('aria-label', '从光标行跳到 PDF 对应位置');
     previewHead.append(pagePrev, pageLabel, pageNext, zoomSelect, toPdf, renderState);
     const preview = make('div', 'latex-preview'); preview.id = 'latex-preview';
-    const errors = make('ul', 'latex-errors'); errors.id = 'latex-errors';
-    panePdf.append(previewHead, pdfTools, syncHint, preview, errors);
+    const errors = make('ul', 'latex-errors'); errors.id = 'latex-errors'; errors.hidden = true;
+    panePdf.append(previewHead, pdfTools, syncHint, preview);
     const paneMedia = make('div', 'latex-pane'); paneMedia.id = 'latex-pane-media'; paneMedia.setAttribute('role', 'tabpanel');
     const mediaHead = make('div', 'latex-preview-head');
     const mediaPrev = make('button', 'icon-button', '‹'); mediaPrev.id = 'latex-media-prev'; mediaPrev.type = 'button'; mediaPrev.setAttribute('aria-label', '媒体上一页');
@@ -248,7 +270,27 @@ window.PaperLatexWorkspace = (() => {
     conflictBar.append(conflictText, reload, overwrite);
     const footer = make('footer', 'latex-footer');
     footer.append(conflictBar, status);
-    view.append(header, toolbar, menu, content, footer);
+    const topbar = make('div', 'latex-topbar'); topbar.append(toolbar, menu);
+    view.append(topbar, errors, content, footer);
+    let layout = 'split';
+    function setLayout(mode) {
+      if (!layoutButtons.has(mode)) return;
+      layout = mode;
+      body.dataset.layout = mode;
+      left.hidden = mode === 'pdf';
+      right.hidden = mode === 'source';
+      splitter.hidden = mode !== 'split';
+      for (const [candidate, button] of layoutButtons) button.setAttribute('aria-pressed', String(candidate === mode));
+      if (mode === 'pdf') setTab('pdf');
+      if (mode !== 'source') requestResize();
+    }
+    navToggle.addEventListener('click', () => {
+      navigator.hidden = !navigator.hidden;
+      content.classList.toggle('latex-nav-collapsed', navigator.hidden);
+      navToggle.textContent = navigator.hidden ? '展开导航' : '收起导航';
+      navToggle.setAttribute('aria-expanded', String(!navigator.hidden));
+      if (layout !== 'source') requestResize();
+    });
     const reviewPanel = make('section', 'latex-review-panel'); reviewPanel.id = 'latex-review-panel'; reviewPanel.setAttribute('aria-label', '自审批注');
     if (!rail) { reviewPanel.hidden = true; content.append(reviewPanel); }
     const reviewer = window.PaperLatexReview?.create({ root: reviewPanel, api,
@@ -263,6 +305,7 @@ window.PaperLatexWorkspace = (() => {
       },
       revealPdf: async anchor => {
         if (anchor.pdf_version !== pdfBuild?.pdf_version) { say('批注属于旧编译，待重定位；未定位到当前 PDF。', true); return; }
+        if (layout === 'source') setLayout('split');
         setTab('pdf'); await renderPage(anchor.page);
         const rect = anchor.rects[0]; if (rect) await highlightPdf({ page: anchor.page, h: rect[0], v: rect[3], W: rect[2] - rect[0], H: rect[3] - rect[1] });
       },
@@ -291,6 +334,7 @@ window.PaperLatexWorkspace = (() => {
       if (name === 'pdf' && pageCount) requestResize();
     }
     function lineNumbers() {
+      if (sourceEditor) return; // CodeMirror renders only the visible gutter lines.
       const lines = editor.value.split('\n').length;
       const buffer = [];
       for (let index = 1; index <= lines; index += 1) buffer.push(String(index));
@@ -309,27 +353,65 @@ window.PaperLatexWorkspace = (() => {
       if (revision !== undefined) settingsRevision = revision;
       settingStarter.checked = settings.latex_starter !== false;
       settingAuto.checked = settings.latex_auto_compile !== false;
+      settingEngine.value = settings.latex_engine || 'xelatex';
       createStarter.checked = settings.latex_starter !== false;
       newStarter.checked = settings.latex_starter !== false;
       autoLabel.textContent = settings.latex_auto_compile === false ? '自动编译已关' : (autoPaused ? '自动编译已暂停' : '自动编译');
       setSplit(Number.isSafeInteger(settings.latex_split) ? settings.latex_split : 50, { persist: false });
     }
+    function showPendingSettings() {
+      const pending = Object.assign({}, ...pendingSettings.map(entry => entry.patch));
+      applySettings({ ...committedSettings, ...pending }, settingsRevision);
+      settingsRetry.hidden = !pendingSettings.some(entry => entry.failed);
+    }
+    function acceptSettings(snapshot) {
+      committedSettings = { ...DEFAULT_SETTINGS, ...snapshot.value };
+      settingsRevision = snapshot.revision;
+      showPendingSettings();
+    }
     async function loadSettings() {
-      try { const snapshot = await api('settings_get'); applySettings(snapshot.value, snapshot.revision); }
-      catch { applySettings(DEFAULT_SETTINGS, null); }
+      try { acceptSettings(await api('settings_get')); }
+      catch { acceptSettings({ value: DEFAULT_SETTINGS, revision: null }); }
     }
-    async function saveSetting(patch) {
-      applySettings(patch);
-      if (settingsRevision === null) { say('本次运行无法保存设置（未连接 DSH 设置服务）。', true); return; }
-      try {
-        const snapshot = await api('settings_update', { patch, expected_revision: settingsRevision });
-        applySettings(snapshot.value, snapshot.revision);
-        say('设置已保存');
-      } catch (error) {
-        say(`设置未保存：${error.message}`, true);
-        await loadSettings();
-      }
+    function saveSetting(patch) {
+      // A newer choice supersedes a failed, unsaved choice of the same field.
+      const keys = Object.keys(patch);
+      pendingSettings = pendingSettings.filter(entry => !entry.failed || !keys.some(key => Object.hasOwn(entry.patch, key)));
+      const entry = { patch, failed: false };
+      pendingSettings.push(entry);
+      showPendingSettings();
+      const save = async () => {
+        try {
+          if (settingsRevision === null) acceptSettings(await api('settings_get'));
+          if (settingsRevision === null) throw new Error('未连接设置服务');
+          let snapshot;
+          try { snapshot = await api('settings_update', { patch, expected_revision: settingsRevision }); }
+          catch (error) {
+            if (error.code !== 'STATE_CONFLICT') throw error;
+            // Another client changed settings. Rebase this explicit choice on the
+            // newest revision once; unrelated changes stay authoritative.
+            acceptSettings(await api('settings_get'));
+            snapshot = await api('settings_update', { patch, expected_revision: settingsRevision });
+          }
+          pendingSettings = pendingSettings.filter(item => item !== entry);
+          acceptSettings(snapshot);
+          if (!pendingSettings.some(item => item.failed)) say('设置已保存');
+          return true;
+        } catch (error) {
+          entry.failed = true;
+          showPendingSettings();
+          say(`设置未保存：${error.message}。选择已保留，请在写作设置中重试。`, true);
+          return false;
+        }
+      };
+      settingsTail = settingsTail.then(save, save);
+      return settingsTail;
     }
+    settingsRetry.addEventListener('click', () => {
+      const failed = pendingSettings.filter(entry => entry.failed).map(entry => entry.patch);
+      pendingSettings = pendingSettings.filter(entry => !entry.failed);
+      for (const patch of failed) void saveSetting(patch);
+    });
 
     function setSplit(percent, { persist = false } = {}) {
       const clamped = Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, Math.round(percent)));
@@ -495,7 +577,7 @@ window.PaperLatexWorkspace = (() => {
         const option = make('option', '', '还没有 LaTeX 项目'); option.value = ''; projectSelect.append(option);
       }
       for (const item of projects) {
-        const option = make('option', '', item.main_path ? `${item.title} · ${item.main_path}` : item.title);
+        const option = make('option', '', item.title);
         option.value = item.id; projectSelect.append(option);
       }
       compareSelect.textContent = '';
@@ -518,6 +600,7 @@ window.PaperLatexWorkspace = (() => {
       project = projects.find(item => item.id === id) || null;
       if (!project) { await renderEmpty(); return; }
       projectSelect.value = project.id;
+      errors.textContent = ''; errors.hidden = true; diagnosticsToggle.hidden = true; diagnosticsToggle.setAttribute('aria-expanded', 'false');
       reviewer?.reset(); pdfBuild = null; updateSyncHint();
       file = null; revision = null; editor.value = ''; editor.disabled = true; lineNumbers();
       pageCount = 0; pageGeometry = []; pdfVersion = ''; mediaPath = null; mediaGeometry = null;
@@ -548,6 +631,7 @@ window.PaperLatexWorkspace = (() => {
       fileList.textContent = ''; errors.textContent = ''; renderEmptyState();
       outlineList.textContent = ''; mediaList.textContent = ''; mainSelect.textContent = ''; currentFile.textContent = '选择源文件';
       mainLabel.textContent = ''; setSaveState(''); buildInfo.textContent = '';
+      errors.hidden = true; diagnosticsToggle.hidden = true; diagnosticsToggle.setAttribute('aria-expanded', 'false');
       lastBuildOk = null; autoPaused = false;
     }
 
@@ -655,7 +739,9 @@ window.PaperLatexWorkspace = (() => {
       tree = result;
       directoryTree(fileList, (tree.files || []).filter(item => item.kind === 'text'));
       directoryTree(mediaList, (tree.files || []).filter(item => item.kind === 'asset' || item.kind === 'other'), true);
-      mainLabel.textContent = '主入口'; mainSelect.textContent = '';
+      mainLabel.textContent = `编译：${project.main_path || '未设置'}`;
+      mainLabel.title = `编译主文件：${project.main_path || '未设置'}`;
+      mainSelect.textContent = '';
       const option = make('option', '', project.main_path || '未设置'); option.value = project.main_path || ''; mainSelect.append(option);
       await loadOutline();
     }
@@ -671,12 +757,12 @@ window.PaperLatexWorkspace = (() => {
       try {
         const result = await api('latex_project_update', { id: project.id, main_path: path });
         project = result.project; projects = projects.map(item => item.id === project.id ? project : item);
+        errors.textContent = ''; diagnosticsToggle.hidden = true; setDiagnosticsOpen(false);
         reviewer?.reset(); pdfBuild = null; updateSyncHint();
         file = null; revision = null; editor.value = ''; editor.disabled = true;
         page = 1; pageGeometry = []; setPreviewMessage('读取主入口…');
         await loadTree(); await openFile(path);
         if (project.pdf_present) await loadLayout(); else setPreviewMessage('这个主入口还没有 PDF；点「编译」生成。');
-        projectSelect.selectedOptions[0].textContent = `${project.title} · ${project.main_path}`;
         say(`已切换主入口 ${path}`);
         void reviewer?.refresh();
       } catch (error) { mainSelect.value = project.main_path; say(`切换入口失败：${error.message}`, true); }
@@ -684,7 +770,7 @@ window.PaperLatexWorkspace = (() => {
     });
 
     async function openFile(path, options = {}) {
-      if (path === file && !options.force) return true;
+      if (path === file && !options.force && !editor.disabled) return true;
       if (!project || !await savedBeforeLeaving()) return false;
       const id = project.id, ticket = ++fileRequest, epoch = generation;
       fileAbort?.abort(); fileAbort = new AbortController(); editor.disabled = true;
@@ -849,6 +935,7 @@ window.PaperLatexWorkspace = (() => {
     let mediaUrl = null;
     async function openMedia(path, { page: wanted = 1, refresh = false } = {}) {
       if (!project) return;
+      if (!refresh && layout === 'source') setLayout('split');
       if (!refresh && path !== mediaPath) { mediaZoom = 1; mediaGeometry = null; }
       if (wanted !== mediaPage) mediaGeometry = null;
       mediaPath = path; mediaPage = wanted; setTab('media'); setNav('media');
@@ -897,16 +984,19 @@ window.PaperLatexWorkspace = (() => {
     // img's bounding box converts between bitmap pixels and those points. Rotated
     // pages are refused because SyncTeX counts in the unrotated frame.
     async function gotoSource(path, line) {
-      if (path !== file && !await openFile(path)) return;
+      if ((path !== file || editor.disabled) && !await openFile(path)) return;
+      if (layout === 'pdf') setLayout('split');
       const lines = editor.value.split('\n');
       const target = Math.min(Math.max(1, line), lines.length);
       let offset = 0;
       for (let index = 0; index < target - 1; index += 1) offset += lines[index].length + 1;
       editor.focus();
       editor.setSelectionRange(offset, offset + lines[target - 1].length);
-      const lineHeight = parseFloat(getComputedStyle(editor).lineHeight) || 21;
-      editor.scrollTop = Math.max(0, (target - 1) * lineHeight - editor.clientHeight / 3);
-      gutter.scrollTop = editor.scrollTop;
+      if (!sourceEditor) {
+        const lineHeight = parseFloat(getComputedStyle(editor).lineHeight) || 21;
+        editor.scrollTop = Math.max(0, (target - 1) * lineHeight - editor.clientHeight / 3);
+        gutter.scrollTop = editor.scrollTop;
+      }
       say(`已跳到 ${path}:${target}`);
     }
 
@@ -963,6 +1053,8 @@ window.PaperLatexWorkspace = (() => {
       const line = editor.value.slice(0, editor.selectionStart).split('\n').length;
       try {
         const result = await api('latex_synctex_view', { id: project.id, path: file, line });
+        if (layout === 'source') setLayout('split');
+        setTab('pdf');
         if (result.page !== page) await renderPage(result.page);
         await highlightPdf(result);
         say(`${file}:${line} → 第 ${result.page} 页`);
@@ -973,6 +1065,54 @@ window.PaperLatexWorkspace = (() => {
     toPdf.addEventListener('click', () => void jumpToPdf());
 
     // ---- compiling ----------------------------------------------------------------
+    function setDiagnosticsOpen(open) {
+      errors.hidden = !open;
+      diagnosticsToggle.setAttribute('aria-expanded', String(open));
+    }
+    diagnosticsToggle.addEventListener('click', () => setDiagnosticsOpen(errors.hidden));
+
+    // Only make a location actionable if the compiler path resolves exactly to a
+    // text file in the current project tree. Unknown or external paths remain text.
+    function diagnosticLocation(line) {
+      const match = /^(.+):(\d+):\s/.exec(line);
+      if (!match) return null;
+      let path = match[1];
+      const root = (tree?.root || '').replace(/\/$/, '');
+      if (root && path.startsWith(`${root}/`)) path = path.slice(root.length + 1);
+      while (path.startsWith('./')) path = path.slice(2);
+      if (!path || path.startsWith('/') || path.split('/').some(part => part === '..' || part === '.')) return null;
+      if (!(tree?.files || []).some(item => item.kind === 'text' && item.path === path)) return null;
+      const targetLine = Number(match[2]);
+      return Number.isSafeInteger(targetLine) && targetLine > 0 ? { path, line: targetLine } : null;
+    }
+
+    function renderDiagnostics(result) {
+      errors.textContent = '';
+      const lines = Array.isArray(result.errors) ? result.errors : [];
+      for (const line of lines) {
+        const row = make('li', 'latex-diagnostic');
+        const location = diagnosticLocation(line);
+        if (location) {
+          const button = make('button', 'latex-diagnostic-link', line); button.type = 'button';
+          button.title = `定位 ${location.path}:${location.line}`;
+          button.addEventListener('click', () => void gotoSource(location.path, location.line));
+          row.append(button);
+        } else row.textContent = line;
+        errors.append(row);
+      }
+      for (const warning of result.warnings || []) errors.append(make('li', 'latex-diagnostic-warning', warning));
+      if (!result.ok && !lines.length) errors.append(make('li', '', '未识别到可定位的错误；请查看下面的编译日志。'));
+      if (result.log_tail) {
+        const row = make('li', 'latex-log-row');
+        const details = make('details', 'latex-log');
+        details.append(make('summary', '', '查看 latexmk 输出尾部'), make('pre', '', result.log_tail));
+        row.append(details); errors.append(row);
+      }
+      diagnosticsToggle.hidden = false;
+      diagnosticsToggle.textContent = result.ok ? `编译成功${lines.length ? ` · ${lines.length} 条错误` : ''}` : `编译失败 · ${lines.length} 条错误`;
+      setDiagnosticsOpen(!result.ok);
+    }
+
     function scheduleCompile() {
       clearTimeout(compileTimer);
       if (settings.latex_auto_compile === false || autoPaused || lastBuildOk !== true || !project) return;
@@ -981,15 +1121,25 @@ window.PaperLatexWorkspace = (() => {
 
     async function compileOnce(reason = 'manual') {
       if (!project || switching || compiling) { if (compiling) pendingCompile = true; return; }
+      // A new setting may be queued while an earlier save is in flight.
+      // Wait until the observed tail is still current before using the engine.
+      let observedTail;
+      do { observedTail = settingsTail; await observedTail; } while (observedTail !== settingsTail);
+      if (pendingSettings.some(entry => entry.failed && Object.hasOwn(entry.patch, 'latex_engine'))) {
+        say('编译引擎设置尚未保存；请先在写作设置中重试。', true); return;
+      }
+      const engine = committedSettings.latex_engine || 'xelatex';
+      if (!project || switching || compiling) { if (compiling) pendingCompile = true; return; }
       if (!await savedBeforeLeaving(true)) return;
+      if (!project || switching || compiling) { if (compiling) pendingCompile = true; return; }
       compiling = true; compile.disabled = true; compile.textContent = '编译中…';
-      errors.textContent = ''; buildInfo.textContent = reason === 'auto' ? '自动编译中…' : '';
+      errors.textContent = ''; diagnosticsToggle.hidden = true; setDiagnosticsOpen(false); buildInfo.textContent = reason === 'auto' ? '自动编译中…' : '';
       if (reason === 'manual') say(`正在用 latexmk 编译 ${project.main_path || '主文件'}…`);
       try {
-        const result = await api('latex_compile', { id: project.id, engine: 'xelatex', timeout_seconds: 120 });
+        const result = await api('latex_compile', { id: project.id, engine, timeout_seconds: 120 });
         buildInfo.dataset.build = String(Date.now());
         buildInfo.textContent = `${result.engine} · ${(result.duration_ms / 1000).toFixed(1)}s · ${result.pages ?? '—'} 页`;
-        for (const line of result.errors || []) errors.append(make('li', '', line));
+        renderDiagnostics(result);
         lastBuildOk = result.ok;
         if (result.ok) {
           autoPaused = false;
@@ -999,15 +1149,11 @@ window.PaperLatexWorkspace = (() => {
         } else {
           autoPaused = reason === 'auto';
           say(result.timed_out ? '编译超时，已停止。' : `编译失败（退出码 ${result.exit_code}）。请看错误与日志尾。${autoPaused ? ' 自动编译已暂停，手动编译成功后会恢复。' : ''}`, true);
-          if (result.log_tail) {
-            const details = make('details', 'latex-log');
-            details.append(make('summary', '', '查看 latexmk 输出尾部'), make('pre', '', result.log_tail));
-            errors.append(details);
-          }
         }
       } catch (error) {
         lastBuildOk = false;
         autoPaused = reason === 'auto';
+        renderDiagnostics({ ok: false, errors: [String(error.message || error)] });
         say(`编译未完成：${error.message}`, true);
       } finally {
         compiling = false; compile.disabled = false; compile.textContent = '编译';
@@ -1088,6 +1234,7 @@ window.PaperLatexWorkspace = (() => {
       }
     });
     settingStarter.addEventListener('change', () => void saveSetting({ latex_starter: settingStarter.checked }));
+    settingEngine.addEventListener('change', () => void saveSetting({ latex_engine: settingEngine.value }));
     settingAuto.addEventListener('change', () => {
       autoPaused = false;
       void saveSetting({ latex_auto_compile: settingAuto.checked });
@@ -1318,7 +1465,7 @@ window.PaperLatexWorkspace = (() => {
           ai: { available: ai.available, proposal: ai.proposal?.id || null },
         }),
       },
-      dispose() { disposed = true; reviewer?.dispose(); cancelReads(); clearRendered(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); resizeObserver?.disconnect(); window.removeEventListener('resize', requestResize); window.removeEventListener('beforeunload', protectDraft); clearTimeout(timer); clearTimeout(compileTimer); view.hidden = true; document.body.classList.remove('latex-focused'); },
+      dispose() { disposed = true; reviewer?.dispose(); sourceEditor?.destroy(); cancelReads(); clearRendered(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); resizeObserver?.disconnect(); window.removeEventListener('resize', requestResize); window.removeEventListener('beforeunload', protectDraft); clearTimeout(timer); clearTimeout(compileTimer); view.hidden = true; document.body.classList.remove('latex-focused'); },
     };
   }
   return { create };

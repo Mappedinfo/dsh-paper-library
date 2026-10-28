@@ -53,11 +53,11 @@ test('the status action reports the folder, the sync coverage and the live setti
   assert.equal(status.sync.configured, true)
   assert.equal(status.sync.covered, false)
   assert.equal(status.sync.coverable, true)
-  assert.deepEqual(status.settings, { starter: true, auto_compile: true, split: 50, sync_folder: true })
+  assert.deepEqual(status.settings, { starter: true, auto_compile: true, engine: 'xelatex', split: 50, sync_folder: true })
 
-  const configured = { ...f.preferences, latex_starter: false, latex_auto_compile: false, latex_split: 35, latex_sync_folder: false }
+  const configured = { ...f.preferences, latex_starter: false, latex_auto_compile: false, latex_engine: 'lualatex', latex_split: 35, latex_sync_folder: false }
   const folded = createLatexWorkspace({ config: f.config, dispatch, settings: memorySettings(configured), library: f.library, python })
-  assert.deepEqual((await folded({ action: 'latex_ws_status' })).settings, { starter: false, auto_compile: false, split: 35, sync_folder: false })
+  assert.deepEqual((await folded({ action: 'latex_ws_status' })).settings, { starter: false, auto_compile: false, engine: 'lualatex', split: 35, sync_folder: false })
 
   const missing = await fixture({ sync: false })
   const bare = await missing.call({ action: 'latex_ws_status' })

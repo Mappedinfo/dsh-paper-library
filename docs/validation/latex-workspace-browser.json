@@ -1,9 +1,10 @@
 {
-  "verified_at": "2026-09-23T03:25:51.870Z",
+  "verified_at": "2026-10-28T08:42:16.227Z",
   "ok": true,
   "checks": [
     "fixture-projects-register-two-folders-with-their-main-files",
     "topbar-entry-opens-the-workspace-as-a-page",
+    "codemirror-search-and-unicode-selection-are-available",
     "panel-loads-the-project-tree-and-main-file",
     "editing-persists-through-the-revision-checked-write",
     "compile-produces-a-pdf-and-the-panel-renders-its-first-page",
@@ -35,11 +36,13 @@
     "latex_compare",
     "latex_compile",
     "latex_diff",
+    "latex_outline",
     "latex_pdf_page",
     "latex_pdf_pages",
     "latex_project_create",
     "latex_project_list",
     "latex_read",
+    "latex_review_list",
     "latex_tree",
     "latex_write",
     "latex_ws_create",
@@ -53,6 +56,6 @@
   "browser_errors": [],
   "limits": [
     "Local Chromium against a real Python worker and real latexmk; not a DSH host run",
-    "The fixture serves the panel and CSS from web/ verbatim; no build step is involved"
+    "The fixture serves the panel and CSS from web/ and the locally built CodeMirror bundle from lib/; run npm run build first"
   ]
 }
