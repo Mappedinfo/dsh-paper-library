@@ -2,9 +2,9 @@
 
 A project is a real folder the reader already works in: the `.tex` sources, the
 bibliography and the matching PDF live side by side, and this module treats that
-folder as the unit of work. Nothing is copied into the library and nothing is
-deleted from it; the catalog only records which folder is a project and which
-file is its main document.
+folder as the unit of work. The catalog records the folder and main file; when
+explicitly requested, successful manual builds also create immutable versions in
+the library. The manuscript folder and its original sources are never deleted.
 
 Boundaries that keep it predictable:
 
@@ -126,7 +126,7 @@ def _resolve_root(value) -> Path:
 
 
 def _guard_root(library, root: Path) -> Path:
-    protected = [library.root / name for name in ("pdfs", "backups", "external", "exports")]
+    protected = [library.root / name for name in ("pdfs", "backups", "external", "exports", "latex-review", "latex-versions")]
     if root == library.root or any(root == item or root.is_relative_to(item) for item in protected):
         raise ValueError("项目目录不能是文献库的受管目录；请选择你自己的 LaTeX 文件夹")
     return root
@@ -184,6 +184,9 @@ def _row(row, library=None):
     value["exists"] = os.path.isdir(row["root"])
     value["main_present"] = bool(row["main_path"]) and os.path.isfile(os.path.join(row["root"], row["main_path"]))
     value["pdf_present"] = bool(row["pdf_path"]) and os.path.isfile(os.path.join(row["root"], row["pdf_path"]))
+    if library is not None:
+        link = library.db.execute("SELECT reading_project_id FROM latex_project_reading WHERE project_id=?", (row["id"],)).fetchone()
+        value["reading_project_id"] = link[0] if link else None
     return value
 
 
@@ -287,13 +290,13 @@ def listing(library, query=None, include_archived=False, limit=50, offset=0):
     base = "SELECT latex_projects.*, latex_archive.archived_at FROM latex_projects LEFT JOIN latex_archive ON latex_archive.project_id=latex_projects.id"
     total = library.db.execute(f"SELECT count(*) FROM ({base}{live}{match})", arguments).fetchone()[0]
     rows = library.db.execute(f"{base}{live}{match} ORDER BY latex_projects.title,latex_projects.id LIMIT ? OFFSET ?", (*arguments, limit, offset)).fetchall()
-    items = [_row(row) for row in rows]
+    items = [_row(row, library) for row in rows]
     return {"projects": items, "total": total, "limit": limit, "offset": offset, "truncated": offset + len(items) < total}
 
 
 def get(library, id=None, include_archived=False):
     row = _project(library, id, include_archived)
-    value = _row(row)
+    value = _row(row, library)
     if value["exists"]:
         value["files"] = len(tree(library, id, include_archived=True)["files"])
     return {"project": value}
@@ -610,8 +613,10 @@ def _compile_env() -> dict:
     return env
 
 
-def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, include_archived=False):
+def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, include_archived=False, save_version=False):
     row = _project(library, id, include_archived)
+    if not isinstance(save_version, bool):
+        raise ValueError("save_version 必须是布尔值")
     if engine not in ENGINES:
         raise ValueError(f"引擎必须是 {', '.join(ENGINES)} 之一")
     root = Path(row["root"])
@@ -626,6 +631,13 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
     # external editor replaced an output which latexmk's cache considers fresh.
     command = [_latexmk(), "-g", f"-{engine}", "-interaction=nonstopmode", "-file-line-error", "-synctex=1", absolute.name]
     from .latex_review import source_snapshot, record_build
+    version_sources, version_failure = None, None
+    if save_version:
+        from .latex_versions import capture_sources
+        try:
+            version_sources = capture_sources(library, row)
+        except (OSError, ValueError) as error:
+            version_failure = str(error)
     try:
         before = source_snapshot(library, row)
     except (OSError, ValueError):
@@ -674,7 +686,7 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
             record_build(library, _project(library, row["id"]), before)
         except (OSError, ValueError) as error:
             warnings.append(f"编译已完成，自审映射未核验：{error}")
-    return {
+    result = {
         "id": row["id"],
         "engine": engine,
         "command": " ".join(command),
@@ -690,6 +702,17 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
         "log_characters": len(output),
         "limits": {"timeout_seconds": timeout, "log_tail_characters": LOG_TAIL_CHARACTERS},
     }
+    if save_version:
+        result["version"] = None
+        if result["ok"] and not version_failure:
+            from .latex_versions import create as save_build_version
+            try:
+                result["version"] = save_build_version(library, row, engine, version_sources)
+            except Exception as error:
+                version_failure = str(error) or type(error).__name__
+        if result["ok"] and version_failure:
+            result["version_error"] = f"编译成功，但版本未保存：{version_failure}"
+    return result
 
 
 def _parse_errors(output: str):
@@ -945,6 +968,8 @@ def clean(library, id=None, include_archived=False):
     return {"id": row["id"], "removed": sorted(removed)[:500], "removed_count": len(removed), "kept": sorted(kept)[:200], "limits": {"listed": 500}}
 
 
+from . import latex_versions
+
 ACTIONS = {
     "latex_project_create": (create, ("root", "title", "main_path", "create_missing")),
     "latex_project_list": (listing, ("query", "include_archived", "limit", "offset")),
@@ -952,6 +977,13 @@ ACTIONS = {
     "latex_project_update": (update, ("id", "title", "main_path", "include_archived")),
     "latex_project_archive": (archive, ("id",)),
     "latex_project_restore": (restore, ("id",)),
+    "latex_project_link_reading": (latex_versions.link, ("id", "reading_project_id")),
+    "latex_version_list": (latex_versions.listing, ("id", "reading_project_id", "limit", "offset")),
+    "latex_version_get": (latex_versions.get, ("version_id", "review_pdf_version")),
+    "latex_version_pdf_pages": (latex_versions.pdf_pages, ("version_id", "review_pdf_version")),
+    "latex_version_pdf_page": (latex_versions.pdf_page, ("version_id", "review_pdf_version", "page", "scale")),
+    "latex_version_read": (latex_versions.source, ("version_id", "path")),
+    "latex_version_review": (latex_versions.review, ("version_id",)),
     "latex_tree": (tree, ("id", "include_archived")),
     "latex_outline": (outline, ("id", "include_archived")),
     "latex_media_preview": (media_preview, ("id", "path", "page", "scale", "include_archived")),
@@ -962,7 +994,7 @@ ACTIONS = {
     "latex_read": (read, ("id", "path", "include_archived")),
     "latex_lint": (lint, ("id", "mode", "main_path", "paths", "include_archived")),
     "latex_write": (write, ("id", "path", "content", "expected_revision", "origin", "include_archived")),
-    "latex_compile": (compile_project, ("id", "engine", "timeout_seconds", "include_archived")),
+    "latex_compile": (compile_project, ("id", "engine", "timeout_seconds", "include_archived", "save_version")),
     "latex_pdf_pages": (pdf_pages, ("id", "include_archived")),
     "latex_pdf_page": (pdf_page, ("id", "page", "scale", "include_archived")),
     "latex_history": (history, ("id", "path", "limit", "include_archived")),

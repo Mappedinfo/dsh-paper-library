@@ -16,7 +16,7 @@ import { createInkQueue } from './ink-queue.mjs';
 import { createInkDiagnostics } from './ink-diagnostics.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
-for (const name of ['workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css','local-state.js','language-learning.js','language-learning.css','theme.js','theme.css','latex-workspace.js','latex-workspace.css','latex-review.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css','local-state.js','language-learning.js','language-learning.css','theme.js','theme.css','latex-workspace.js','latex-workspace.css','latex-review.js','latex-versions.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['resource-library.js','resource-library.css','knowledge-workflow.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['paper-analysis.js','paper-analysis.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['settings.js','settings.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
@@ -25,6 +25,7 @@ for (const name of ['board.js','board.css','board-source.js','board-render.js','
 const languageActions = new Set(['language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
 for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js','ink-diagnostics.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
+staticFiles['fonts/silkscreen-regular.ttf']=['fonts/silkscreen-regular.ttf','font/ttf'];
 const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:'];
 function browserStateKey(key, listPrefix = false) {
   if (typeof key !== 'string' || !(key === 'preferences' || key === 'reader' || browserStatePrefixes.some(prefix => key.startsWith(prefix)) || /^migration:[a-f0-9]{64}$/.test(key) || (listPrefix && key === 'migration:'))) throw new LocalStateError('此状态类别不能直接从浏览器访问。', 'STATE_FORBIDDEN', 403);
@@ -183,6 +184,17 @@ export function createFetchHandler(options = {}) {
         const info = await stat(result.path);
         return new Response(request.method === 'HEAD' ? null : Readable.toWeb(createReadStream(result.path)), {
           headers:{...baseHeaders,'Content-Type':'application/pdf','Content-Length':String(info.size),'Content-Disposition':'attachment; filename="manuscript-review.pdf"'},
+        });
+      }
+      if (path.startsWith('latex-version-pdf/')) {
+        const version_id = decodeURIComponent(path.slice('latex-version-pdf/'.length));
+        if (!/^lv-[a-f0-9]{32}$/.test(version_id)) return new Response('Not found', {status:404});
+        const review_pdf_version = url.searchParams.get('review') || undefined;
+        if (review_pdf_version && !/^[a-f0-9]{64}$/.test(review_pdf_version)) return new Response('Not found', {status:404});
+        const result = await dispatch({action:'latex_version_get', version_id, review_pdf_version}, {...options, signal:request.signal});
+        const info = await stat(result.pdf_path);
+        return new Response(request.method === 'HEAD' ? null : Readable.toWeb(createReadStream(result.pdf_path)), {
+          headers:{...baseHeaders,'Content-Type':'application/pdf','Content-Length':String(info.size),'Content-Disposition':'inline; filename="manuscript-version.pdf"'},
         });
       }
       if (path.startsWith('pdf/')) {

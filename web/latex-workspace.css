@@ -2,6 +2,7 @@
  * Source left, PDF right — one draggable divider, project actions and settings behind
  * the ☰ menu, DSH collaboration and versions on the right pane's tabs. Every colour
  * comes from the plugin's theme bridge, so light and dark both read correctly. */
+@font-face { font-family: 'PaperPixel'; src: url('./fonts/silkscreen-regular.ttf') format('truetype'); font-style: normal; font-weight: 400; font-display: swap; }
 #latex-view {
   grid-column: 1 / -1;
   grid-row: 1;
@@ -15,6 +16,18 @@
   font-size: 13px;
 }
 #latex-view[hidden] { display: none; }
+#latex-view[data-latex-theme=parchment] {
+  color-scheme: light;
+  --paper: #faf8f2; --surface: #f4f0e6; --panel: #fffdf7; --ink: #262a28;
+  --muted: #626b65; --line: #d5d5ca; --teal: #27695b; --teal-light: #e3eee7;
+  --error: #a72e35; --dsw-alias-bg-module-platform: #e7e8e1;
+}
+#latex-view[data-latex-theme=midnight] {
+  color-scheme: dark;
+  --paper: #181d23; --surface: #222930; --panel: #1b222a; --ink: #edf1ee;
+  --muted: #b0bbb6; --line: #3b4849; --teal: #8bcbb9; --teal-light: #30483f;
+  --error: #ff9b9d; --dsw-alias-bg-module-platform: #161b20;
+}
 body.latex-focused .topbar, body.latex-focused .detail-pane,
 body.latex-focused .site-header, body.latex-focused .site-foot { display: none; }
 body.latex-focused { overflow: hidden; }
@@ -53,9 +66,11 @@ body > #latex-view { height: 100dvh; }
   padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface);
 }
 .latex-toolbar > * { flex-shrink: 0; white-space: nowrap; }
-.latex-toolbar select { min-width: 0; max-width: 160px; }
+.latex-toolbar select { min-width: 0; max-width: 160px; padding: 3px 24px 3px 8px; font-size: 12px; line-height: 18px; box-sizing: border-box; }
+.latex-toolbar .button, .latex-toolbar select { height: 30px; min-height: 30px; }
 .latex-toolbar .button { font-size: 12px; padding: 5px 7px; }
-.latex-layout-controls { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 6px; }
+.latex-layout-controls { display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 1px; border: 1px solid var(--line); border-radius: 6px; box-sizing: border-box; }
+.latex-toolbar .latex-layout-button { height: 26px; min-height: 26px; }
 .latex-layout-button[aria-pressed=true] { background: var(--teal-light); color: var(--ink); }
 .latex-menu-button { margin-left: auto; line-height: 1; }
 .latex-main { max-width: 140px; overflow: hidden; text-overflow: ellipsis; font-size: 12px; color: var(--muted); }
@@ -89,9 +104,10 @@ body > #latex-view { height: 100dvh; }
 .latex-content.latex-nav-collapsed { grid-template-columns: minmax(0, 1fr); }
 .latex-breadcrumb:has(#latex-source-note) { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 #latex-source-note { font: 11px/1.5 var(--sans); }
-.latex-pdf-tools { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 10px; background: var(--surface); }
-.latex-pdf-tools button { font-size: 11px; }
+.latex-pdf-tools { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; padding: 0; background: var(--surface); }
+.latex-pdf-tools button { font-size: 11px; min-height: 26px; padding: 4px 5px; white-space: nowrap; }
 .latex-pdf-tools [aria-pressed=true] { background: var(--teal-light); border-color: var(--teal); }
+.latex-pdf-tools[hidden] { display: none; }
 .latex-sync-hint { margin: 0; padding: 3px 12px 7px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--line); }
 .latex-text-layer { position: absolute; inset: 0; overflow: hidden; color: transparent; user-select: text; -webkit-user-select: text; }
 .latex-pdf-word { position: absolute; display: block; color: transparent; white-space: pre; font-family: Arial,sans-serif; line-height: 1; user-select: text; -webkit-user-select: text; }
@@ -132,11 +148,20 @@ body > #latex-view { height: 100dvh; }
 .latex-directory summary { padding: 5px 2px; cursor: pointer; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .latex-directory .latex-directory { margin-left: 10px; }
 .latex-outline-file { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 4px; }
-.latex-outline-file .latex-file-open { color: var(--muted); font-size: 11px; }
+.latex-outline-file .latex-file-open { color: var(--muted); font-size: 12px; font-family: 'PaperPixel', 'Andale Mono', Monaco, ui-monospace, monospace; }
 .latex-outline-heading .latex-file-open { font-family: inherit; }
 .latex-outline-warning .latex-file-open { color: var(--dsw-alias-state-warn-label); font-size: 11px; }
 .latex-breadcrumb { flex: 0 0 auto; padding: 8px 12px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; border-bottom: 1px solid var(--line); color: var(--muted); overflow-wrap: anywhere; }
 .latex-menu #latex-entry { width: 100%; max-width: none; }
+.latex-versions, #library-latex-versions { padding: 8px; }
+.latex-version-card { padding: 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.latex-version-card strong { font-size: 12px; }
+.latex-version-card p { margin: 5px 0; }
+.latex-version-actions, .latex-version-detail { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.latex-version-detail { margin-top: 8px; }
+.latex-version-detail select, .latex-version-detail p { flex: 1 1 100%; min-width: 0; }
+.latex-version-source { width: 100%; max-height: 320px; overflow: auto; white-space: pre-wrap; padding: 8px; background: var(--panel); color: var(--ink); font: 12px/1.6 ui-monospace, monospace; }
+#latex-version-current { align-self: flex-start; margin: 8px; }
 /* Source | divider | preview&collaboration */
 .latex-body {
   display: grid;
@@ -155,7 +180,7 @@ body > #latex-view { height: 100dvh; }
 }
 .latex-file { list-style: none; }
 .latex-file-open {
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 12px/1.5 'PaperPixel', 'Andale Mono', Monaco, ui-monospace, monospace;
   display: block; width: 100%; text-align: left; overflow-wrap: anywhere;
   padding: 5px 8px; border-radius: 4px; border: 1px solid transparent;
   background: transparent; color: inherit; cursor: pointer;
@@ -175,9 +200,16 @@ body > #latex-view { height: 100dvh; }
   font: inherit; tab-size: 2; background: transparent; color: var(--ink); white-space: pre; overflow: auto;
 }
 
+.latex-preview-toolbar { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 4px 6px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.latex-preview-toolbar > * { flex: 0 0 auto; }
+.latex-preview-toolbar .latex-build-info, .latex-preview-toolbar .latex-render-state { display: none; }
+.latex-preview-toolbar .latex-tab { padding: 4px 5px; font-size: 11px; }
+.latex-preview-toolbar .icon-button { width: 22px; min-width: 22px; height: 26px; min-height: 26px; padding: 2px; }
+.latex-preview-toolbar #latex-zoom { width: 62px; min-width: 62px; height: 28px; min-height: 28px; padding: 3px 15px 3px 5px; font-size: 11px; line-height: 16px; }
+.latex-preview-toolbar .latex-pdf-tools button { padding: 3px 4px; height: 28px; min-height: 28px; }
 .latex-tabs {
   display: flex; align-items: center; gap: 2px; flex: 0 0 auto;
-  padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--surface);
+  padding: 0; background: var(--surface);
 }
 .latex-tab {
   font-size: 12px; padding: 4px 10px; border: 1px solid transparent; border-radius: 999px;
@@ -185,19 +217,19 @@ body > #latex-view { height: 100dvh; }
 }
 .latex-tab:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--ink); }
 .latex-tab.active { border-color: var(--line); background: var(--teal-light); color: var(--ink); }
-.latex-build-info { margin-left: auto; font-size: 12px; color: var(--muted); }
+.latex-build-info { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .latex-pane { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: auto; }
 .latex-pane[hidden] { display: none; }
 
-.latex-preview-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex: 0 0 auto; border-bottom: 1px solid var(--line); background: var(--surface); }
-.latex-preview-head { flex-wrap: wrap; }
+.latex-preview-head { display: flex; align-items: center; gap: 4px; padding: 0; flex: 0 0 auto; background: var(--surface); }
+.latex-preview-head[hidden] { display: none; }
 .latex-render-state { color: var(--muted); font-size: 10px; margin-left: auto; }
 #latex-zoom { font-size: 12px; max-width: 86px; }
 #latex-media-info { padding: 5px 12px; }
 .latex-page-label { font-size: 12px; color: var(--muted); }
 .latex-preview {
   flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px; display: flex; justify-content: flex-start;
-  align-items: flex-start; background: var(--dsw-alias-bg-module-platform);
+  flex-direction: column; align-items: flex-start; background: var(--dsw-alias-bg-module-platform);
 }
 .latex-page-stage { position: relative; flex: 0 0 auto; margin: 0 auto; }
 .latex-page { width: 100%; max-width: none; box-shadow: var(--shadow); background: #fff; }

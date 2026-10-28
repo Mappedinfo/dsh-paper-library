@@ -23,7 +23,7 @@ const wait = async (read, predicate, label, attempts = 200) => {
 }
 await mkdir(join(manuscript, 'sections'), { recursive: true })
 await writeFile(join(manuscript, 'main.tex'), '\\documentclass{article}\n\\begin{document}\n\\input{sections/intro}\n\\end{document}\n')
-await writeFile(join(manuscript, 'sections', 'intro.tex'), '\\section{Synthetic}\nA test paragraph.\n')
+await writeFile(join(manuscript, 'sections', 'intro.tex'), '\\section{Synthetic}\nA test paragraph.\n' + Array.from({length: 6}, (_, i) => `\\newpage\nSynthetic continuous page ${i + 2}.\n`).join(''))
 
 let child, browser, page
 try {
@@ -39,6 +39,15 @@ try {
   }, Boolean, 'standalone host')
   const result = await fetch(`${origin}/api`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'latex_project_create', root: manuscript, title: '合成写作检查' }) }).then(response => response.json())
   if (!result.ok) throw new Error(`Register project: ${JSON.stringify(result)}`)
+  const latexId = result.result.project.id
+  const api = async (action, args = {}) => {
+    for(let attempt=0;attempt<20;attempt++){
+      const response = await fetch(`${origin}/api`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action,...args}) })
+      if(response.status===429){await new Promise(resolve=>setTimeout(resolve,100));continue}
+      const value=await response.json();if(!value.ok)throw new Error(value.error);return value.result
+    }
+    throw new Error('Synthetic polling could not obtain an API slot')
+  }
 
   const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
   browser = await chromium.launch({ headless: true })
@@ -76,8 +85,32 @@ try {
     if (!status.includes('完成')) throw new Error(`${engine} failed: ${status}`)
     if (engine !== 'xelatex') await page.locator('#latex-menu-open').click()
   }
-  await page.locator('#latex-preview img').waitFor({ state: 'visible' })
+  await page.locator('#latex-preview img').first().waitFor({ state: 'visible' })
   record('all three selected engines compile the same synthetic project')
+  await page.evaluate(() => { const preview = document.querySelector('#latex-preview'); preview.scrollTop = preview.scrollHeight; preview.dispatchEvent(new Event('scroll')) })
+  await wait(() => page.locator('#latex-page-label').innerText(), text => text.includes('7 / 7'), 'continuous last page')
+  if (await page.locator('#latex-preview img').count() > 3) throw new Error('continuous preview renders too many pages')
+  await page.evaluate(() => { const preview = document.querySelector('#latex-preview'); preview.scrollTop = 0; preview.dispatchEvent(new Event('scroll')) })
+  await wait(() => page.locator('#latex-page-label').innerText(), text => text.includes('1 / 7'), 'continuous first page')
+  record('continuous scroll reaches both ends while at most three page images are retained')
+  for (const [index, mode] of ['highlight','underline','strikeout','comment'].entries()) {
+    await page.locator('.latex-page-stage[data-page="1"] .latex-word-text').first().waitFor({state:'attached'})
+    await page.locator(`#latex-tool-${mode}`).click()
+    await page.evaluate(() => {
+      const word=document.querySelector('.latex-page-stage[data-page="1"] .latex-word-text'); const range=document.createRange(); range.selectNodeContents(word)
+      const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range)
+      word.closest('.latex-text-layer').dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0,pointerId:1}))
+    })
+    if(mode==='comment'){await page.locator('#latex-review-comment').fill('合成：直接选文批注');await page.locator('#latex-review-save').click()}
+    await wait(()=>page.locator('#latex-review-message').innerText(),text=>text.includes('批注已保存'),`${mode} save confirmation`)
+    await wait(()=>api('latex_review_list',{id:latexId}),value=>value.annotations.length===index+1,`${mode} native annotation`)
+    await page.locator('#latex-review-composer').waitFor({state:'hidden'})
+  }
+  await page.locator('#latex-tool-select').click()
+  await page.locator('#latex-compile').click()
+  await wait(()=>page.locator('#latex-compile').innerText(),text=>text==='编译','annotated manual snapshot')
+  await wait(()=>api('latex_version_list',{id:latexId}),value=>value.versions.some(version=>version.review_count===4),'annotated snapshot stored')
+  record('plain marks and direct text comments save as native objects and enter manual versions')
 
   const editor = page.locator('.cm-content')
   await page.locator('#latex-nav-files').click()
@@ -138,6 +171,38 @@ try {
   await wait(() => page.locator('#latex-diagnostics-toggle').innerText(), text => text.includes('成功'), 'recovered compile')
   await wait(() => page.locator('#latex-compile').innerText(), text => text === '编译', 'recovered preview finished')
   record('real compile errors locate the section and a corrected source compiles again')
+  const savedVersions = await api('latex_version_list',{id:latexId})
+  const newest = savedVersions.versions[0]
+  await page.locator('#latex-tab-version').click()
+  const versionCard = page.locator(`#latex-versions [data-version-id="${newest.id}"]`)
+  await versionCard.waitFor({state:'visible'})
+  await versionCard.getByRole('button',{name:'批注与源码',exact:true}).click()
+  await versionCard.locator('.latex-version-notes').waitFor({state:'attached'})
+  await versionCard.getByRole('button',{name:'预览 PDF',exact:true}).click()
+  await wait(()=>page.locator('#latex-sync-hint').innerText(),text=>text.includes('历史'),'history preview')
+  if(!await page.locator('#latex-tool-highlight').isDisabled())throw new Error('historical PDF is writable')
+  await page.locator('#latex-tab-version').click()
+  await versionCard.getByRole('button',{name:/批注 PDF/}).first().click()
+  await wait(()=>page.locator('#latex-sync-hint').innerText(),text=>text.includes('历史'),'annotated history preview')
+  await page.locator('#latex-back').click()
+  await wait(()=>page.locator('#project-select option').evaluateAll(nodes=>nodes.map(node=>node.value)),values=>values.includes(newest.reading_project_id),'shared reading project appears')
+  await page.locator('#project-select').selectOption(newest.reading_project_id)
+  await page.locator('#latex-version-shelf summary').click()
+  const libraryVersion = page.locator(`#library-latex-versions [data-version-id="${newest.id}"]`)
+  await libraryVersion.waitFor({state:'visible'})
+  await libraryVersion.getByRole('button',{name:'预览 PDF',exact:true}).click()
+  await wait(()=>page.locator('#latex-sync-hint').innerText(),text=>text.includes('历史'),'library entry opens same history')
+  record('workspace and reading project open the same immutable version and native review PDF')
+  await page.locator('#latex-menu-open').click()
+  for(const theme of ['parchment','midnight','system']){
+    await page.locator('#latex-setting-theme').selectOption(theme)
+    await wait(()=>api('settings_get'),value=>value.value.latex_theme===theme,`${theme} theme persisted`)
+  }
+  await page.locator('#latex-menu-open').click()
+  await page.evaluate(()=>document.fonts.load('12px PaperPixel'))
+  const dimensions = await page.evaluate(()=>({select:document.querySelector('#latex-project').getBoundingClientRect().height,button:document.querySelector('#latex-compile').getBoundingClientRect().height,font:document.fonts.check('12px PaperPixel')}))
+  if(Math.abs(dimensions.select-dimensions.button)>2 || !dimensions.font)throw new Error(`control/font mismatch: ${JSON.stringify(dimensions)}`)
+  record('themes persist locally, project control height matches and pixel font loads locally')
 
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.screenshot({ path: join(base, 'desktop-dark.png') })

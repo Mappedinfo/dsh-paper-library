@@ -157,3 +157,105 @@ def test_external_pdf_annotations_are_preserved_and_missing_mapping_is_honest(tm
         comments = [a.info["content"] for a in doc[0].annots()]
         assert sorted(comments) == ["Existing outside note", "External reply must survive"]
     assert (root / "main.pdf").read_bytes() == before
+
+
+@pytest.mark.skipif(not (shutil.which("latexmk") and shutil.which("pdflatex")), reason="Synthetic version test requires latexmk and pdflatex")
+def test_manual_version_keeps_old_native_reviews_and_shared_project_identity(tmp_path):
+    root, library, call = project(tmp_path)
+    reading = dispatch({"library": str(library), "action": "project_create", "title": "manuscript"})["project"]
+    source = call("latex_read", path="one.tex")
+    source_note = {"kind": "source", "path": "one.tex", "revision": source["revision"], "start": 0, "end": 10, "text": source["content"][:10]}
+    call("latex_review_put", anchor=source_note, comment="synthetic source review")
+    page = call("latex_pdf_page", page=1)
+    word = page["words"][0]
+    old_sha = call("latex_pdf_pages")["build"]["pdf_version"]
+    anchor = {"kind": "pdf", "pdf_version": old_sha, "page": 1, "rects": [word[:4]], "text": word[4]}
+    call("latex_review_put", anchor=anchor, type="strikeout", comment="synthetic deletion")
+    before_review = next(library.glob("latex-review/*/*/*.pdf")).read_bytes()
+    with fitz.open(stream=before_review, filetype="pdf") as doc:
+        page = doc[0]
+        assert next(page.annots()).type[1] == "StrikeOut"
+    (root / "two.tex").write_text("A different synthetic second page.\n")
+    snapshot_source = (root / "two.tex").read_bytes()
+    built = call("latex_compile", engine="pdflatex", save_version=True)
+    assert built["ok"] and built.get("version_error") is None
+    version = built["version"]
+    assert version["reading_project_id"] != reading["id"], "same-named projects must never be merged"
+    assert version["review_count"] == 2 and version["stale_review_count"] >= 1
+    assert {entry["pdf_version"] for entry in version["review_pdfs"]} == {old_sha}
+    assert (root / "two.tex").read_bytes() == snapshot_source
+    assert next(library.glob("latex-review/*/*/*.pdf")).read_bytes() == before_review
+    by_latex = call("latex_version_list")["versions"]
+    by_reading = dispatch({"library": str(library), "action": "latex_version_list", "reading_project_id": version["reading_project_id"]})["versions"]
+    assert by_latex[0]["id"] == by_reading[0]["id"] == version["id"]
+    assert call("latex_project_get")["project"]["reading_project_id"] == version["reading_project_id"]
+    data = dispatch({"library": str(library), "action": "latex_version_get", "version_id": version["id"]})
+    assert any(item["path"] == "two.tex" for item in data["sources"])
+    read = dispatch({"library": str(library), "action": "latex_version_read", "version_id": version["id"], "path": "two.tex"})
+    assert read["content"].encode() == snapshot_source
+    notes = dispatch({"library": str(library), "action": "latex_version_review", "version_id": version["id"]})
+    assert len(notes["annotations"]) == 2 and any(n["stale"] for n in notes["annotations"])
+    old = dispatch({"library": str(library), "action": "latex_version_get", "version_id": version["id"], "review_pdf_version": old_sha})
+    with fitz.open(old["pdf_path"]) as doc:
+        page = doc[0]
+        assert next(page.annots()).type[1] == "StrikeOut"
+    pages = dispatch({"library": str(library), "action": "latex_version_pdf_pages", "version_id": version["id"], "review_pdf_version": old_sha})
+    assert pages["page_count"] == 2 and not pages["build"]["verified"]
+    rendered = dispatch({"library": str(library), "action": "latex_version_pdf_page", "version_id": version["id"], "review_pdf_version": old_sha, "page": 1})
+    assert rendered["words"] and any(item["type"] == "strikeout" for item in rendered["annotations"])
+    with pytest.raises(ValueError, match="不属于"):
+        dispatch({"library": str(library), "action": "latex_version_get", "version_id": version["id"], "review_pdf_version": "0" * 64})
+    with pytest.raises(ValueError, match="不属于"):
+        dispatch({"library": str(library), "action": "latex_version_read", "version_id": version["id"], "path": "../outside"})
+    second = call("latex_compile", engine="pdflatex", save_version=True)["version"]
+    assert second["reading_project_id"] == version["reading_project_id"]
+    assert call("latex_version_list")["total"] == 2
+    linked = call("latex_project_link_reading", reading_project_id=reading["id"])
+    assert linked["project"]["reading_project_id"] == reading["id"]
+    assert dispatch({"library": str(library), "action": "latex_version_list", "reading_project_id": reading["id"]})["total"] == 2
+    assert dispatch({"library": str(library), "action": "latex_version_list", "reading_project_id": version["reading_project_id"]})["total"] == 0
+    third = call("latex_compile", engine="pdflatex", save_version=True)["version"]
+    assert third["reading_project_id"] == reading["id"]
+    assert dispatch({"library": str(library), "action": "latex_version_list", "reading_project_id": reading["id"]})["total"] == 3
+
+
+@pytest.mark.skipif(not (shutil.which("latexmk") and shutil.which("pdflatex")), reason="Synthetic version test requires latexmk and pdflatex")
+def test_version_failure_is_visible_without_claiming_saved_or_changing_sources(tmp_path, monkeypatch):
+    root, library, call = project(tmp_path)
+    from dsh_paper_library import latex_versions
+    before = (root / "main.tex").read_bytes()
+    def fail(*args):
+        raise ValueError("synthetic snapshot failure")
+    monkeypatch.setattr(latex_versions, "capture_sources", fail)
+    built = call("latex_compile", engine="pdflatex", save_version=True)
+    assert built["ok"] and built["version"] is None
+    assert "synthetic snapshot failure" in built["version_error"]
+    assert (root / "main.tex").read_bytes() == before
+    assert call("latex_version_list")["total"] == 0
+    assert dispatch({"library": str(library), "action": "project_list"})["total"] == 0
+
+
+@pytest.mark.skipif(not (shutil.which("latexmk") and shutil.which("pdflatex")), reason="Synthetic version test requires latexmk and pdflatex")
+def test_partial_version_copy_does_not_publish_a_record_or_project(tmp_path, monkeypatch):
+    root, library, call = project(tmp_path)
+    from dsh_paper_library import latex, latex_versions
+    from dsh_paper_library.core import Library
+    identifier = call("latex_project_get")["project"]["id"]
+    original_pdf = (root / "main.pdf").read_bytes()
+    original_tex = (root / "main.tex").read_bytes()
+    def fail(*args):
+        raise OSError("synthetic copy failure")
+    monkeypatch.setattr(latex_versions.shutil, "copyfile", fail)
+    db = Library(str(library))
+    try:
+        row = latex._project(db, identifier)
+        sources = latex_versions.capture_sources(db, row)
+        with pytest.raises(OSError, match="synthetic copy failure"):
+            latex_versions.create(db, row, "pdflatex", sources)
+    finally:
+        db.close()
+    assert call("latex_version_list")["total"] == 0
+    assert dispatch({"library": str(library), "action": "project_list"})["total"] == 0
+    assert not list((library / "latex-versions").iterdir())
+    assert (root / "main.tex").read_bytes() == original_tex
+    assert (root / "main.pdf").read_bytes() == original_pdf

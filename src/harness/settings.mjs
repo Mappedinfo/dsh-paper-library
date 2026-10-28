@@ -21,6 +21,7 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   latex_starter: true,
   latex_auto_compile: true,
   latex_engine: 'xelatex',
+  latex_theme: 'system',
   latex_split: 50,
   latex_sync_folder: true,
 });
@@ -54,6 +55,7 @@ export function createPaperLibrarySettingsSchema(Schema) {
     latex_starter: Schema.boolean().default(true),
     latex_auto_compile: Schema.boolean().default(true),
     latex_engine: Schema.union([Schema.const('xelatex'), Schema.const('pdflatex'), Schema.const('lualatex')]).default('xelatex'),
+    latex_theme: Schema.union([Schema.const('system'), Schema.const('parchment'), Schema.const('midnight')]).default('system'),
     latex_split: Schema.number().default(50),
     latex_sync_folder: Schema.boolean().default(true),
   });
@@ -67,6 +69,8 @@ function validatePatch(patch) {
       if (!['left', 'right'].includes(value)) throw invalid('设置值无效：reading-panel-side');
     } else if (key === 'latex_engine') {
       if (!['xelatex', 'pdflatex', 'lualatex'].includes(value)) throw invalid('设置值无效：latex_engine');
+    } else if (key === 'latex_theme') {
+      if (!['system', 'parchment', 'midnight'].includes(value)) throw invalid('设置值无效：latex_theme');
     } else if (key === 'sync_config') {
       if (typeof value !== 'string' || value.length > 500) throw invalid('设置值无效：sync_config');
       const path = value.trim();

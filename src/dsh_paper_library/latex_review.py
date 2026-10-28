@@ -298,8 +298,8 @@ def put(library, id=None, note_id=None, anchor=None, comment="", status="open", 
                 native.update()
             else:
                 from .latex import _inside
-                if type not in {"highlight", "note", "underline"}:
-                    raise ValueError("自审支持高亮、下划线或区域便笺")
+                if type not in {"highlight", "note", "underline", "strikeout"}:
+                    raise ValueError("自审支持高亮、下划线、删除线或区域便笺")
                 page = anchor.get("page")
                 if isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= doc.page_count:
                     raise ValueError("PDF 页码无效")

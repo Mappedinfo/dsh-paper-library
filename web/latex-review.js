@@ -29,9 +29,11 @@ window.PaperLatexReview = (() => {
     function say(text, error = false) { message.textContent = text; message.classList.toggle('error', error); }
     function label(value) { return value.kind === 'source' ? `${value.path}:${value.line || '选段'} · 源码` : `PDF 第 ${value.page} 页 · 编译 ${value.pdf_version.slice(0, 10)}`; }
     function key() { const current = context(); return `${current.id}:${current.main}`; }
-    function begin(value, type = 'note') {
+    function begin(value, type = 'note', { instant = false } = {}) {
       if (draft || saving) { show(); say('请先保存或取消当前批注，选段已保留。', true); return false; }
       draft = { key: key(), anchor: value, type, request_id: crypto.randomUUID().replaceAll('-', '') };
+      comment.value = '';
+      if (instant) { void saveDraft(); return true; }
       composer.hidden = false; anchor.textContent = label(value); quote.textContent = value.text || '区域便笺'; comment.value = ''; show(); comment.focus();
       say(value.kind === 'pdf' && context().dirty ? '此批注属于已编译 PDF；源码有未保存改动。' : '批注写入自审记录，正文不改动。');
       return true;
@@ -69,7 +71,10 @@ window.PaperLatexReview = (() => {
         await api('latex_review_put', { id: context().id, ...frozen });
         draft = null; composer.hidden = true; comment.value = ''; await refreshNotes(); await changed();
         say('批注已保存；正文与编译原 PDF 保留。');
-      } catch (error) { say(`批注未保存：${error.message}。当前文字和选段已保留；刷新后可复制内容，再取消旧草稿重试。`, true); }
+      } catch (error) {
+        if (draft?.anchor) { composer.hidden = false; anchor.textContent = label(draft.anchor); quote.textContent = draft.anchor.text || '区域便笺'; show(); comment.focus(); }
+        say(`批注未保存：${error.message}。当前文字和选段已保留，可重试或取消。`, true);
+      }
       finally { saving = false; save.disabled = false; cancel.disabled = false; }
     }
     async function setStatus(note) {
@@ -115,7 +120,7 @@ window.PaperLatexReview = (() => {
     save.addEventListener('click', () => void saveDraft());
     cancel.addEventListener('click', () => { if (!saving) { draft = null; comment.value = ''; composer.hidden = true; say('已取消未保存批注。'); } });
     refresh.addEventListener('click', () => void refreshNotes()); filter.addEventListener('change', render);
-    return { refresh: refreshNotes, beginSource, beginPdf: (anchor, type) => begin(anchor, type), hasDraft: () => Boolean(draft || saving),
+    return { refresh: refreshNotes, beginSource, beginPdf: (anchor, type, options) => begin(anchor, type, options), hasDraft: () => Boolean(draft || saving),
       reset() { if (draft || saving) return false; ++sequence; notes = []; render(); return true; },
       dispose() { disposed = true; ++sequence; }, testHooks: { saveDraft, edit, setStatus, notes: () => notes } };
   }

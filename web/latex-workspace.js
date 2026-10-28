@@ -18,9 +18,9 @@ window.PaperLatexWorkspace = (() => {
   const MAX_RENDERED_PAGES = 3;
   const MAX_CACHED_BYTES = 48 * 1024 * 1024;
   const SPLIT_MIN = 25, SPLIT_MAX = 75;
-  const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_split: 50, latex_sync_folder: true };
+  const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_split: 50, latex_sync_folder: true };
 
-  function create({api, toast = () => {}, getLibrary = () => '', rail = null}) {
+  function create({api, toast = () => {}, getLibrary = () => '', rail = null, onVersionSaved = () => {}}) {
     const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
     let projects = [], project = null, tree = null, file = null, revision = null, pageCount = 0, page = 1, tab = 'pdf';
     let pageGeometry = []; let syncFlash = null;
@@ -38,6 +38,7 @@ window.PaperLatexWorkspace = (() => {
     let mediaGeometry = null, resizeTimer = null, outlineTimer = null;
     let switching = false, entryRequest = 0;
     let pdfBuild = null, pdfTool = 'select';
+    let pdfSource = { kind: 'current' }, pdfSourceEpoch = 0, pdfSourceIntent = 0;
 
     // A standalone surface, like the whiteboard: the page itself becomes the workspace and
     // `?view=latex` opens it without the library, so a DSH tab can host it directly.
@@ -92,6 +93,11 @@ window.PaperLatexWorkspace = (() => {
     const entryRow = make('div', 'latex-menu-section');
     const entryLabel = make('label', 'latex-menu-label', '编译主文件'); entryLabel.htmlFor = 'latex-entry';
     entryRow.append(entryLabel, mainSelect);
+    const readingRow = make('div', 'latex-menu-section');
+    const readingLabel = make('label', 'latex-menu-label', '版本所属的阅读项目'); readingLabel.htmlFor = 'latex-reading-project';
+    const readingSelect = make('select'); readingSelect.id = 'latex-reading-project'; readingSelect.setAttribute('aria-label', '版本所属的阅读项目');
+    const readingLink = make('button', 'button subtle', '关联项目'); readingLink.type = 'button'; readingLink.id = 'latex-reading-link';
+    readingRow.append(readingLabel, readingSelect, readingLink);
     const createRow = make('div', 'latex-menu-section');
     createRow.append(make('span', 'latex-menu-label', '新建项目（放在插件的论文目录里）'));
     const createName = make('input'); createName.id = 'latex-create-name'; createName.type = 'text'; createName.placeholder = '项目名称，例如 邻域效应-论文'; createName.autocomplete = 'off';
@@ -129,8 +135,11 @@ window.PaperLatexWorkspace = (() => {
     const settingEngine = make('select'); settingEngine.id = 'latex-setting-engine'; settingEngine.setAttribute('aria-label', 'LaTeX 编译引擎（全部项目）');
     for (const [value, label] of [['xelatex', 'XeLaTeX'], ['pdflatex', 'pdfLaTeX'], ['lualatex', 'LuaLaTeX']]) { const option = make('option', '', label); option.value = value; settingEngine.append(option); }
     const engineLabel = make('label', 'latex-check'); engineLabel.append(make('span', '', '编译引擎（全部项目）'), settingEngine);
+    const settingTheme = make('select'); settingTheme.id = 'latex-setting-theme'; settingTheme.setAttribute('aria-label', 'LaTeX 工作台配色');
+    for (const [value, label] of [['system', '跟随宿主'], ['parchment', '纸色'], ['midnight', '夜色']]) { const option = make('option', '', label); option.value = value; settingTheme.append(option); }
+    const themeLabel = make('label', 'latex-check'); themeLabel.append(make('span', '', '工作台配色'), settingTheme);
     const settingsRetry = make('button', 'button subtle', '重试保存设置'); settingsRetry.id = 'latex-settings-retry'; settingsRetry.type = 'button'; settingsRetry.hidden = true;
-    const settingsLine = make('div', 'latex-menu-row'); settingsLine.append(settingStarterLabel, settingAutoLabel, engineLabel, settingsRetry);
+    const settingsLine = make('div', 'latex-menu-row'); settingsLine.append(settingStarterLabel, settingAutoLabel, engineLabel, themeLabel, settingsRetry);
     settingRow.append(settingsLine);
 
     const rootRow = make('div', 'latex-menu-section');
@@ -140,7 +149,7 @@ window.PaperLatexWorkspace = (() => {
     const syncAttach = make('button', 'button subtle', '纳入同步'); syncAttach.id = 'latex-sync-attach'; syncAttach.type = 'button';
     const rootLine = make('div', 'latex-menu-row'); rootLine.append(rootPath, syncState, syncAttach);
     rootRow.append(rootLine, make('p', 'latex-menu-hint', '论文目录由插件维护；数据同步服务会把它作为一个独立源备份（只新增，不删改其他源）。'));
-    menu.append(entryRow, createRow, registerRow, compareRow, settingRow, rootRow);
+    menu.append(entryRow, readingRow, createRow, registerRow, compareRow, settingRow, rootRow);
 
     // ---- body: source | divider | (pdf | dsh | versions) ----
     const content = make('div', 'latex-content');
@@ -182,7 +191,7 @@ window.PaperLatexWorkspace = (() => {
 
     const right = make('section', 'latex-preview-pane'); right.setAttribute('aria-label', '预览与协作');
     const tabs = make('div', 'latex-tabs'); tabs.setAttribute('role', 'tablist');
-    const tabSpecs = rail ? [['pdf', 'PDF'], ['media', '媒体预览'], ['version', '版本']] : [['pdf', 'PDF'], ['media', '媒体预览'], ['ai', 'DSH 协作'], ['version', '版本']];
+    const tabSpecs = rail ? [['pdf', 'PDF'], ['media', '媒体'], ['version', '版本']] : [['pdf', 'PDF'], ['media', '媒体'], ['ai', 'DSH 协作'], ['version', '版本']];
     const tabButtons = new Map();
     for (const [name, label] of tabSpecs) {
       const button = make('button', 'latex-tab', label); button.id = `latex-tab-${name}`; button.type = 'button';
@@ -202,10 +211,12 @@ window.PaperLatexWorkspace = (() => {
     for (const [value, label] of [['1', '全宽'], ['1.25', '125%'], ['1.5', '150%'], ['2', '200%'], ['3', '300%'], ['4', '400%']]) { const option = make('option', '', label); option.value = value; zoomSelect.append(option); }
     const renderState = make('span', 'latex-render-state'); renderState.id = 'latex-render-state'; renderState.setAttribute('role', 'status');
     const pdfTools = make('div', 'latex-pdf-tools');
-    for (const [mode, label] of [['select', '选择／双击定位'], ['highlight', '文字高亮'], ['note', '区域便笺']]) {
+    for (const [mode, label] of [['select', '选择'], ['highlight', '高亮'], ['underline', '下划线'], ['strikeout', '删除线'], ['comment', '批注'], ['note', '区域']]) {
       const button = make('button', 'button subtle', label); button.type = 'button'; button.id = `latex-tool-${mode}`;
+      const description = { select: '选择文字／双击定位源码', highlight: '文字高亮', underline: '文字下划线', strikeout: '文字删除线', comment: '选中文字添加批注', note: '添加区域便笺' }[mode];
+      button.title = description; button.setAttribute('aria-label', description);
       button.setAttribute('aria-pressed', String(mode === pdfTool));
-      button.addEventListener('click', () => { pdfTool = mode; preview.dataset.tool = mode; for (const item of pdfTools.querySelectorAll('button')) item.setAttribute('aria-pressed', String(item === button)); });
+      button.addEventListener('click', () => { if (pdfSource.kind === 'version' && mode !== 'select') return; pdfTool = mode; preview.dataset.tool = mode; for (const item of pdfTools.querySelectorAll('button')) item.setAttribute('aria-pressed', String(item === button)); });
       pdfTools.append(button);
     }
     const syncHint = make('p', 'latex-sync-hint'); syncHint.id = 'latex-sync-hint'; syncHint.setAttribute('role', 'status');
@@ -215,7 +226,7 @@ window.PaperLatexWorkspace = (() => {
     previewHead.append(pagePrev, pageLabel, pageNext, zoomSelect, toPdf, renderState);
     const preview = make('div', 'latex-preview'); preview.id = 'latex-preview';
     const errors = make('ul', 'latex-errors'); errors.id = 'latex-errors'; errors.hidden = true;
-    panePdf.append(previewHead, pdfTools, syncHint, preview);
+    panePdf.append(syncHint, preview);
     const paneMedia = make('div', 'latex-pane'); paneMedia.id = 'latex-pane-media'; paneMedia.setAttribute('role', 'tabpanel');
     const mediaHead = make('div', 'latex-preview-head');
     const mediaPrev = make('button', 'icon-button', '‹'); mediaPrev.id = 'latex-media-prev'; mediaPrev.type = 'button'; mediaPrev.setAttribute('aria-label', '媒体上一页');
@@ -228,7 +239,7 @@ window.PaperLatexWorkspace = (() => {
     const mediaCrumb = make('code', 'latex-breadcrumb'); mediaCrumb.id = 'latex-media-path';
     const mediaPreview = make('div', 'latex-preview'); mediaPreview.id = 'latex-media-preview';
     mediaPreview.textContent = '从左侧「媒体」选择项目内的文件。';
-    paneMedia.append(mediaHead, mediaCrumb, mediaInfo, mediaPreview);
+    paneMedia.append(mediaCrumb, mediaInfo, mediaPreview);
 
     const paneAi = make('div', 'latex-pane'); paneAi.id = 'latex-pane-ai'; paneAi.setAttribute('role', 'tabpanel'); paneAi.hidden = Boolean(rail);
     const aiSection = make('section', 'latex-ai'); aiSection.id = 'latex-ai';
@@ -250,15 +261,22 @@ window.PaperLatexWorkspace = (() => {
     paneAi.append(aiSection);
 
     const paneVersion = make('div', 'latex-pane'); paneVersion.id = 'latex-pane-version'; paneVersion.setAttribute('role', 'tabpanel');
+    const versionRoot = make('section', 'latex-versions'); versionRoot.id = 'latex-versions';
+    const returnCurrent = make('button', 'button subtle', '返回当前编译稿'); returnCurrent.id = 'latex-version-current'; returnCurrent.type = 'button'; returnCurrent.addEventListener('click', () => void showCurrentPdf());
+    const versions = window.PaperLatexVersions?.create({ root: versionRoot, api, scope: () => project ? { id: project.id } : null,
+      openVersion: (version, reviewPdfVersion) => showVersion(version.id, reviewPdfVersion) });
     const versionHead = make('div', 'latex-preview-head');
     const diffOpen = make('button', 'button subtle', '与上一版对比'); diffOpen.id = 'latex-diff-open'; diffOpen.type = 'button';
     const diffHint = make('span', 'latex-page-label', '当前文件与它上一个落库版本');
     versionHead.append(diffOpen, diffHint);
     const diff = make('pre', 'latex-diff'); diff.id = 'latex-diff';
     diff.textContent = '点「与上一版对比」查看这个文件的改动；菜单里的「与其他项目对比」结果显示在这里。';
-    paneVersion.append(versionHead, diff);
+    paneVersion.append(returnCurrent, versionRoot, versionHead, diff);
 
-    right.append(tabs, panePdf, paneMedia, paneAi, paneVersion);
+    const previewToolbar = make('div', 'latex-preview-toolbar');
+    previewToolbar.setAttribute('aria-label', '预览工具');
+    previewToolbar.append(tabs, previewHead, pdfTools, mediaHead);
+    right.append(previewToolbar, panePdf, paneMedia, paneAi, paneVersion);
     body.append(left, splitter, right);
     content.append(navigator, body);
 
@@ -304,12 +322,13 @@ window.PaperLatexWorkspace = (() => {
         editor.setSelectionRange(chars.slice(0, anchor.start).join('').length, chars.slice(0, anchor.end).join('').length);
       },
       revealPdf: async anchor => {
+        if (pdfSource.kind !== 'current' && !await showCurrentPdf()) return;
         if (anchor.pdf_version !== pdfBuild?.pdf_version) { say('批注属于旧编译，待重定位；未定位到当前 PDF。', true); return; }
         if (layout === 'source') setLayout('split');
         setTab('pdf'); await renderPage(anchor.page);
         const rect = anchor.rects[0]; if (rect) await highlightPdf({ page: anchor.page, h: rect[0], v: rect[3], W: rect[2] - rect[0], H: rect[3] - rect[1] });
       },
-      changed: async () => { clearRendered(); if (pageCount) await renderPage(page); },
+      changed: async () => { clearRendered(); if (pageCount) await renderPage(page, { scroll: false }); },
     });
     function showReview() {
       if (!reviewer) { say('自审组件尚未加载；请先刷新插件页面。', true); return; }
@@ -318,12 +337,13 @@ window.PaperLatexWorkspace = (() => {
     }
     reviewToggle.addEventListener('click', () => { showReview(); if (reviewer) void reviewer.refresh(); });
     sourceNote.addEventListener('click', () => reviewer?.beginSource());
-    function updateSyncHint() { syncHint.textContent = dirty ? '源码有未保存修改；PDF 仍属于上次编译，双击定位暂停。' : (pdfBuild?.reason || '编译后可双击正文定位源码；自审批注保存在审阅副本。'); }
+    function updateSyncHint() { syncHint.textContent = pdfSource.kind === 'version' ? '历史版本只读预览；当前源码不能与此 PDF 同步定位或写入批注。' : (dirty ? '源码有未保存修改；PDF 仍属于上次编译，双击定位暂停。' : (pdfBuild?.reason || '编译后可双击正文定位源码；自审批注保存在审阅副本。')); }
 
     function say(text, error = false) { status.textContent = text; status.classList.toggle('error', error); }
     function setSaveState(text, kind = '') { saveState.textContent = text; saveState.dataset.state = kind; }
     function setTab(name) {
       tab = name;
+      previewHead.hidden = name !== 'pdf'; pdfTools.hidden = name !== 'pdf'; mediaHead.hidden = name !== 'media';
       for (const [candidate, button] of tabButtons) {
         const active = candidate === name;
         button.classList.toggle('active', active);
@@ -331,6 +351,7 @@ window.PaperLatexWorkspace = (() => {
       }
       for (const [candidate, pane] of [['pdf', panePdf], ['media', paneMedia], ['ai', paneAi], ['version', paneVersion]]) pane.hidden = candidate !== name;
       if (name === 'ai' && project) void aiStatus();
+      if (name === 'version' && project) void versions?.refresh();
       if (name === 'pdf' && pageCount) requestResize();
     }
     function lineNumbers() {
@@ -354,6 +375,8 @@ window.PaperLatexWorkspace = (() => {
       settingStarter.checked = settings.latex_starter !== false;
       settingAuto.checked = settings.latex_auto_compile !== false;
       settingEngine.value = settings.latex_engine || 'xelatex';
+      settingTheme.value = settings.latex_theme || 'system';
+      view.dataset.latexTheme = settingTheme.value;
       createStarter.checked = settings.latex_starter !== false;
       newStarter.checked = settings.latex_starter !== false;
       autoLabel.textContent = settings.latex_auto_compile === false ? '自动编译已关' : (autoPaused ? '自动编译已暂停' : '自动编译');
@@ -476,7 +499,25 @@ window.PaperLatexWorkspace = (() => {
       event.stopPropagation();
       menu.hidden = !menu.hidden;
       menuButton.setAttribute('aria-expanded', String(!menu.hidden));
-      if (!menu.hidden) void refreshWorkspace();
+      if (!menu.hidden) { void refreshWorkspace(); void loadReadingProjects(); }
+    });
+    let readingRequest = 0;
+    async function loadReadingProjects() {
+      const id = project?.id, request = ++readingRequest; if (!id) return;
+      try {
+        const result = await api('project_list', { limit: 200 });
+        if (request !== readingRequest || project?.id !== id) return;
+        readingSelect.textContent = ''; const empty = make('option', '', '首次手动保存版本时新建同名阅读项目'); empty.value = ''; readingSelect.append(empty);
+        for (const item of result.projects || []) { const option = make('option', '', item.title); option.value = item.id; readingSelect.append(option); }
+        if (project.reading_project_id && !(result.projects || []).some(item => item.id === project.reading_project_id)) { const option = make('option', '', `已关联项目 ${project.reading_project_id}`); option.value = project.reading_project_id; readingSelect.append(option); }
+        readingSelect.value = project.reading_project_id || '';
+      } catch (error) { say(`阅读项目读取失败：${error.message}`, true); }
+    }
+    readingLink.addEventListener('click', async () => {
+      if (!project) return; const id = project.id; readingLink.disabled = true;
+      try { const result = await api('latex_project_link_reading', { id, reading_project_id: readingSelect.value || null }); if (project?.id === id) { project.reading_project_id = result.reading_project_id; say('版本所属的阅读项目已更新'); void versions?.refresh(); } }
+      catch (error) { say(`关联未保存：${error.message}`, true); }
+      finally { readingLink.disabled = false; }
     });
     menu.addEventListener('click', event => event.stopPropagation());
     view.addEventListener('click', () => closeMenu());
@@ -599,6 +640,7 @@ window.PaperLatexWorkspace = (() => {
       clearRendered();
       project = projects.find(item => item.id === id) || null;
       if (!project) { await renderEmpty(); return; }
+      resetPdfSource({ kind: 'current' });
       projectSelect.value = project.id;
       errors.textContent = ''; errors.hidden = true; diagnosticsToggle.hidden = true; diagnosticsToggle.setAttribute('aria-expanded', 'false');
       reviewer?.reset(); pdfBuild = null; updateSyncHint();
@@ -757,6 +799,7 @@ window.PaperLatexWorkspace = (() => {
       try {
         const result = await api('latex_project_update', { id: project.id, main_path: path });
         project = result.project; projects = projects.map(item => item.id === project.id ? project : item);
+        resetPdfSource({ kind: 'current' });
         errors.textContent = ''; diagnosticsToggle.hidden = true; setDiagnosticsOpen(false);
         reviewer?.reset(); pdfBuild = null; updateSyncHint();
         file = null; revision = null; editor.value = ''; editor.disabled = true;
@@ -792,21 +835,59 @@ window.PaperLatexWorkspace = (() => {
     }
 
     async function loadLayout() {
-      const id = project?.id, ticket = generation;
+      const id = project?.id, ticket = generation, source = pdfSource, sourceEpoch = pdfSourceEpoch;
       try {
-        const layout = await api('latex_pdf_pages', { id });
-        if (ticket !== generation || id !== project?.id || disposed) return;
+        const layout = source.kind === 'version'
+          ? await api('latex_version_pdf_pages', { version_id: source.versionId, ...(source.reviewPdfVersion ? { review_pdf_version: source.reviewPdfVersion } : {}) })
+          : await api('latex_pdf_pages', { id });
+        if (ticket !== generation || id !== project?.id || sourceEpoch !== pdfSourceEpoch || disposed) return;
         pdfVersion = layout.version || buildInfo.dataset.build || '';
-        pdfBuild = layout.build || null; updateSyncHint();
+        pdfBuild = source.kind === 'current' ? (layout.build || null) : null; updateSyncHint();
         pageCount = layout.page_count; pageGeometry = layout.pages || []; page = Math.min(Math.max(1, page), Math.max(1, pageCount));
         await renderPage(page);
       } catch (error) {
-        if (ticket !== generation) return;
+        if (ticket !== generation || sourceEpoch !== pdfSourceEpoch) return;
         setPreviewMessage(`无法预览：${error.message}`);
       }
     }
 
     function clearRendered() { for (const item of rendered.values()) URL.revokeObjectURL(item.url); rendered.clear(); }
+    function resetPdfSource(source) {
+      pdfSource = source; pdfSourceEpoch += 1; pdfSourceIntent += 1; pageRequest += 1; pageAbort?.abort(); clearRendered();
+      pdfVersion = ''; pdfBuild = null; page = 1; pageCount = 0; pageGeometry = []; pdfTool = 'select';
+      preview.dataset.tool = pdfTool;
+      for (const button of pdfTools.querySelectorAll('button')) {
+        button.disabled = source.kind === 'version' && button.id !== 'latex-tool-select';
+        button.setAttribute('aria-pressed', String(button.id === 'latex-tool-select'));
+      }
+      toPdf.disabled = source.kind === 'version'; updateSyncHint();
+    }
+    async function showVersion(versionId, reviewPdfVersion = null) {
+      const intent = ++pdfSourceIntent;
+      if (!project || !versionId || switching || compiling || !await savedBeforeLeaving(true) || intent !== pdfSourceIntent) return false;
+      const id = project.id, ticket = generation;
+      try {
+        const result = await api('latex_version_get', { version_id: versionId });
+        if (ticket !== generation || id !== project?.id || intent !== pdfSourceIntent) return false;
+        if (result.version?.project_id !== id) throw new Error('这个版本不属于当前 LaTeX 项目。');
+        resetPdfSource({ kind: 'version', versionId, reviewPdfVersion });
+        const sourceEpoch = pdfSourceEpoch;
+        setPreviewMessage('读取历史版本…'); if (layout === 'source') setLayout('split'); setTab('pdf');
+        await loadLayout();
+        if (ticket !== generation || sourceEpoch !== pdfSourceEpoch || !pageCount) return false;
+        say(`正在只读预览历史版本 ${versionId}。`); return true;
+      } catch (error) { if (intent === pdfSourceIntent) say(`无法打开历史版本：${error.message}`, true); return false; }
+    }
+    async function showCurrentPdf() {
+      const intent = ++pdfSourceIntent;
+      if (!project || switching || compiling || !await savedBeforeLeaving(true) || intent !== pdfSourceIntent) return false;
+      const id = project.id, ticket = generation;
+      resetPdfSource({ kind: 'current' });
+      const sourceEpoch = pdfSourceEpoch;
+      setPreviewMessage('读取当前编译稿…'); if (layout === 'source') setLayout('split'); setTab('pdf');
+      if (project.pdf_present || lastBuildOk) await loadLayout(); else { setPreviewMessage('还没有 PDF；点「编译」生成。'); return false; }
+      return ticket === generation && id === project?.id && sourceEpoch === pdfSourceEpoch && pageCount > 0;
+    }
     function imageUrl(result) {
       const bytes = Uint8Array.from(atob(result.image), char => char.charCodeAt(0));
       return { url: URL.createObjectURL(new Blob([bytes], { type: 'image/png' })), bytes: bytes.length + result.pixel_width * result.pixel_height * 4, width: result.pixel_width, height: result.pixel_height, words: result.words || [] };
@@ -820,49 +901,86 @@ window.PaperLatexWorkspace = (() => {
       // without ever requesting fewer pixels than the display needs.
       return Math.ceil(width * (window.devicePixelRatio || 1) / geometry.width * 8) / 8;
     }
-    async function renderPage(number) {
+    function pdfMetrics(width) {
+      let top = 0;
+      return pageGeometry.map(geometry => {
+        const height = width * geometry.height / geometry.width;
+        const metric = { top, height }; top += height + 16; return metric;
+      });
+    }
+    function pdfPageAt(metrics, point) {
+      let low = 0, high = metrics.length - 1;
+      while (low < high) { const mid = Math.floor((low + high + 1) / 2); if (metrics[mid].top <= point) low = mid; else high = mid - 1; }
+      return low + 1;
+    }
+    async function renderPage(number, { scroll = true } = {}) {
       if (!project || !pageCount) return;
       page = Math.min(Math.max(1, number), pageCount);
-      const wanted = page, id = project.id, epoch = generation, ticket = ++pageRequest;
+      const wanted = page, id = project.id, epoch = generation, ticket = ++pageRequest, source = pdfSource, sourceEpoch = pdfSourceEpoch;
       pageAbort?.abort(); pageAbort = new AbortController();
       const geometry = pageGeometry[wanted - 1];
       if (!geometry) return;
-      const width = previewWidth(preview, zoom), scale = density(width, geometry);
+      const width = previewWidth(preview, zoom);
+      const metrics = pdfMetrics(width), metric = metrics[wanted - 1];
+      const previousScroll = preview.scrollTop || 0;
       pageLabel.textContent = `第 ${wanted} / ${pageCount} 页`;
       pagePrev.disabled = page <= 1; pageNext.disabled = page >= pageCount;
-      const key = `${id}:${wanted}:${pdfVersion}:${scale}`;
-      const old = preview.querySelector('img');
-      if (old) old.style.visibility = 'hidden';
+      const nearby = [wanted - 1, wanted, wanted + 1].filter(value => value > 0 && value <= pageCount);
+      const sourceKey = source.kind === 'version' ? `version:${source.versionId}:${source.reviewPdfVersion || ''}` : 'current';
+      const keys = new Map(nearby.map(value => [value, `${id}:${sourceKey}:${value}:${pdfVersion}:${density(width, pageGeometry[value - 1])}`]));
+      for (const [key, value] of rendered) if (![...keys.values()].includes(key)) { URL.revokeObjectURL(value.url); rendered.delete(key); }
+      preview.textContent = '';
+      const before = make('div', 'latex-page-spacer'); before.style.height = `${metrics[nearby[0] - 1].top}px`; before.style.flex = '0 0 auto'; before.setAttribute('aria-hidden', 'true');
+      const after = make('div', 'latex-page-spacer');
+      const last = metrics[metrics.length - 1];
+      const final = metrics[nearby[nearby.length - 1] - 1];
+      after.style.height = `${Math.max(0, last.top + last.height - final.top - final.height)}px`; after.style.flex = '0 0 auto'; after.setAttribute('aria-hidden', 'true');
+      const stages = new Map(); preview.append(before);
+      for (const number of nearby) {
+        const item = metrics[number - 1], stage = make('div', 'latex-page-stage');
+        stage.style.width = `${width}px`; stage.style.height = `${item.height}px`;
+        stage.dataset.page = String(number); stages.set(number, stage); preview.append(stage);
+        if (number !== nearby[nearby.length - 1]) { const gap = make('div', 'latex-page-spacer'); gap.style.height = '16px'; gap.style.flex = '0 0 auto'; preview.append(gap); }
+      }
+      preview.append(after);
+      preview.scrollTop = scroll ? metric.top : previousScroll;
       renderState.textContent = '高清页加载中…'; preview.setAttribute('aria-busy', 'true');
-      try {
-        let image = rendered.get(key);
-        if (!image) {
-          const result = await api('latex_pdf_page', { id, page: wanted, scale }, { signal: pageAbort.signal });
-          if (ticket !== pageRequest || epoch !== generation || disposed) return;
-          image = imageUrl(result); rendered.set(key, image);
-        } else { rendered.delete(key); rendered.set(key, image); }
-        if (ticket !== pageRequest || epoch !== generation || disposed) return;
-        preview.textContent = '';
-        const stage = make('div', 'latex-page-stage'); stage.style.width = `${width}px`;
-        const img = document.createElement('img'); img.className = 'latex-page'; img.alt = `第 ${wanted} 页`; img.src = image.url;
-        img.dataset.scale = String(scale); img.dataset.page = String(wanted);
-        img.title = '双击跳转到对应的源码位置（SyncTeX）';
-        stage.append(img); preview.append(stage);
-        installReviewLayer(stage, img, image.words, geometry, wanted, width);
-        stage.addEventListener('dblclick', event => { if (pdfTool === 'select') void jumpToSource(event, img); });
-        let cachedBytes = [...rendered.values()].reduce((sum, value) => sum + value.bytes, 0);
-        for (const [oldKey, value] of rendered) {
-          if (oldKey === key || (rendered.size <= MAX_RENDERED_PAGES && cachedBytes <= MAX_CACHED_BYTES)) continue;
-          URL.revokeObjectURL(value.url); rendered.delete(oldKey); cachedBytes -= value.bytes;
+      const valid = () => ticket === pageRequest && epoch === generation && sourceEpoch === pdfSourceEpoch && !disposed;
+      const load = async number => {
+        const stage = stages.get(number), key = keys.get(number), pageInfo = pageGeometry[number - 1], pageScale = density(width, pageInfo);
+        try {
+          let image = rendered.get(key);
+          if (!image) {
+            const result = source.kind === 'version'
+              ? await api('latex_version_pdf_page', { version_id: source.versionId, ...(source.reviewPdfVersion ? { review_pdf_version: source.reviewPdfVersion } : {}), page: number, scale: pageScale }, { signal: pageAbort.signal })
+              : await api('latex_pdf_page', { id, page: number, scale: pageScale }, { signal: pageAbort.signal });
+            if (!valid()) return;
+            image = imageUrl(result);
+            let bytes = [...rendered.values()].reduce((sum, item) => sum + item.bytes, 0);
+            if (number === wanted) for (const [oldKey, old] of rendered) {
+              if (bytes + image.bytes <= MAX_CACHED_BYTES && rendered.size < MAX_RENDERED_PAGES) break;
+              URL.revokeObjectURL(old.url); rendered.delete(oldKey); bytes -= old.bytes;
+            }
+            if (number !== wanted && (rendered.size >= MAX_RENDERED_PAGES || bytes + image.bytes > MAX_CACHED_BYTES)) { URL.revokeObjectURL(image.url); return; }
+            rendered.set(key, image);
+          }
+          if (!valid()) return;
+          const img = document.createElement('img'); img.className = 'latex-page'; img.alt = `第 ${number} 页`; img.src = image.url;
+          img.dataset.scale = String(pageScale); img.dataset.page = String(number);
+          img.title = '双击跳转到对应的源码位置（SyncTeX）';
+          stage.append(img); installReviewLayer(stage, img, image.words, pageInfo, number, width);
+          stage.addEventListener('dblclick', event => { if (pdfTool === 'select') void jumpToSource(event, img); });
+          if (number === wanted) renderState.textContent = `${image.width} × ${image.height}`;
+        } catch (error) {
+          if (!valid() || error.name === 'AbortError') return;
+          stage.append(make('p', 'latex-preview-empty', `预览失败：${error.message}`));
+          const retry = make('button', 'button subtle', '重试此页'); retry.type = 'button'; retry.addEventListener('click', () => void renderPage(number, { scroll: false })); stage.append(retry);
+          if (number === wanted) renderState.textContent = '加载失败';
         }
-        renderState.textContent = `${image.width} × ${image.height}`;
-      } catch (error) {
-        if (ticket !== pageRequest || epoch !== generation || error.name === 'AbortError') return;
-        preview.textContent = '';
-        preview.append(make('p', 'latex-preview-empty', `预览失败：${error.message}`));
-        const retry = make('button', 'button subtle', '重试此页'); retry.type = 'button'; retry.addEventListener('click', () => void renderPage(wanted)); preview.append(retry);
-        renderState.textContent = '加载失败';
-      } finally { if (ticket === pageRequest) preview.setAttribute('aria-busy', 'false'); }
+      };
+      await load(wanted);
+      if (valid()) preview.setAttribute('aria-busy', 'false');
+      void (async () => { for (const number of nearby) if (number !== wanted && valid()) await load(number); })();
     }
 
     function installReviewLayer(stage, img, words, geometry, wanted, width) {
@@ -898,11 +1016,13 @@ window.PaperLatexWorkspace = (() => {
           if (rect[3] - rect[1] < 2) rect[3] = Math.min(geometry.height, rect[1] + 16);
           reviewer.beginPdf({ kind: 'pdf', page: wanted, pdf_version: pdfBuild?.pdf_version, rects: [rect], text: '' }, 'note'); return;
         }
-        if (pdfTool !== 'highlight') return;
+        if (!['highlight', 'underline', 'strikeout', 'comment'].includes(pdfTool)) return;
+        const tool = pdfTool;
         setTimeout(() => {
           const selection = window.getSelection(); if (!selection?.rangeCount || selection.isCollapsed) return;
           const range = selection.getRangeAt(0), bounds = img.getBoundingClientRect(), pieces = [];
           try {
+            if (!layer.contains(range.startContainer) || !layer.contains(range.endContainer)) { say('一次选文批注限于同一页，请在单页内重新选择。', true); return; }
             for (const span of layer.querySelectorAll('.latex-pdf-word')) {
               const run = span.firstChild; if (!range.intersectsNode(run)) continue;
               const part = document.createRange(); part.selectNodeContents(run);
@@ -913,7 +1033,7 @@ window.PaperLatexWorkspace = (() => {
               pieces.push([Math.max(box[0], (rect.left - bounds.left) / bounds.width * geometry.width), box[1], Math.min(box[2], (rect.right - bounds.left) / bounds.width * geometry.width), box[3], text]);
             }
             const value = window.PaperPDFReader?.mergeSelection(pieces, wanted);
-            if (value?.rects.length) reviewer.beginPdf({ kind: 'pdf', page: wanted, pdf_version: pdfBuild?.pdf_version, rects: value.rects, text: value.text }, 'highlight');
+            if (value?.rects.length) reviewer.beginPdf({ kind: 'pdf', page: wanted, pdf_version: pdfBuild?.pdf_version, rects: value.rects, text: value.text }, tool === 'comment' ? 'note' : tool, { instant: tool !== 'comment' });
           } catch (error) { say(`选区无法批注：${error.message}`, true); }
         }, 0);
       });
@@ -923,7 +1043,7 @@ window.PaperLatexWorkspace = (() => {
     function requestResize() {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
-        if (!view.hidden && tab === 'pdf' && pageCount) void renderPage(page);
+        if (!view.hidden && tab === 'pdf' && pageCount) void renderPage(page, { scroll: false });
         if (!view.hidden && tab === 'media' && mediaPath && mediaGeometry) void openMedia(mediaPath, { page: mediaPage, refresh: true });
       }, 180);
     }
@@ -931,6 +1051,12 @@ window.PaperLatexWorkspace = (() => {
     resizeObserver?.observe(right);
     window.addEventListener('resize', requestResize);
     zoomSelect.addEventListener('change', () => { zoom = Number(zoomSelect.value); void renderPage(page); });
+    preview.addEventListener('scroll', () => {
+      if (!pageCount || !project || tab !== 'pdf') return;
+      const metrics = pdfMetrics(previewWidth(preview, zoom));
+      const next = pdfPageAt(metrics, Math.max(0, (preview.scrollTop || 0) + (preview.clientHeight || 0) * .35));
+      if (next !== page) void renderPage(next, { scroll: false });
+    }, { passive: true });
 
     let mediaUrl = null;
     async function openMedia(path, { page: wanted = 1, refresh = false } = {}) {
@@ -1002,8 +1128,10 @@ window.PaperLatexWorkspace = (() => {
 
     async function jumpToSource(event, img) {
       if (!project) return;
+      if (pdfSource.kind !== 'current') { say('历史版本为只读预览，不能定位当前源码。', true); return; }
       if (dirty || saving) { say('源码有未保存修改；请先保存并编译，双击不会覆盖你的编辑。', true); return; }
-      const geometry = pageGeometry[page - 1];
+      const targetPage = Number(img.dataset.page) || page;
+      const geometry = pageGeometry[targetPage - 1];
       if (!geometry) return;
       if (geometry.rotation) { say('这一页带旋转，SyncTeX 坐标对不上，暂不支持跳转。', true); return; }
       const rect = img.getBoundingClientRect();
@@ -1012,7 +1140,7 @@ window.PaperLatexWorkspace = (() => {
       const y = ((event.clientY - rect.top) / rect.height) * geometry.height;
       try {
         const ticket = generation;
-        const result = await api('latex_synctex_edit', { id: project.id, page, x, y, pdf_version: pdfBuild?.pdf_version });
+        const result = await api('latex_synctex_edit', { id: project.id, page: targetPage, x, y, pdf_version: pdfBuild?.pdf_version });
         if (ticket !== generation || !await openFile(result.path, { force: true })) return;
         if (result.source_revision && revision !== result.source_revision) { say('目标源码已变化；定位暂停，请重新编译。', true); return; }
         await gotoSource(result.path, result.line);
@@ -1023,7 +1151,7 @@ window.PaperLatexWorkspace = (() => {
 
     async function highlightPdf(result) {
       const geometry = pageGeometry[result.page - 1];
-      const img = preview.querySelector('img.latex-page');
+      const img = preview.querySelector(`img.latex-page[data-page="${result.page}"]`);
       if (!geometry || !img) return;
       if (geometry.rotation || result.rotation) { say('目标页带旋转，无法标注位置。', true); return; }
       try { await img.decode(); } catch { /* a cached data URL is already decoded */ }
@@ -1048,6 +1176,7 @@ window.PaperLatexWorkspace = (() => {
 
     async function jumpToPdf() {
       if (!project || !file) { say('先在左侧打开一个源文件。', true); return; }
+      if (pdfSource.kind !== 'current') { say('历史版本为只读预览，请先返回当前编译稿。', true); return; }
       if (!pageCount) { say('还没有 PDF；先编译一次。', true); return; }
       if (dirty || saving) { say('请先保存并编译当前源码，再定位 PDF。', true); return; }
       const line = editor.value.slice(0, editor.selectionStart).split('\n').length;
@@ -1135,17 +1264,25 @@ window.PaperLatexWorkspace = (() => {
       compiling = true; compile.disabled = true; compile.textContent = '编译中…';
       errors.textContent = ''; diagnosticsToggle.hidden = true; setDiagnosticsOpen(false); buildInfo.textContent = reason === 'auto' ? '自动编译中…' : '';
       if (reason === 'manual') say(`正在用 latexmk 编译 ${project.main_path || '主文件'}…`);
+      const target = { id: project.id, main: project.main_path, generation };
       try {
-        const result = await api('latex_compile', { id: project.id, engine, timeout_seconds: 120 });
+        const result = await api('latex_compile', { id: target.id, engine, timeout_seconds: 120, ...(reason === 'manual' ? { save_version: true } : {}) });
+        if (target.id !== project?.id || target.main !== project.main_path || target.generation !== generation) { if (result.version) void onVersionSaved(result.version); return; }
         buildInfo.dataset.build = String(Date.now());
         buildInfo.textContent = `${result.engine} · ${(result.duration_ms / 1000).toFixed(1)}s · ${result.pages ?? '—'} 页`;
+        diagnosticsToggle.title = buildInfo.textContent;
         renderDiagnostics(result);
         lastBuildOk = result.ok;
         if (result.ok) {
           autoPaused = false;
-          clearRendered();
           say(`编译完成：${result.pdf_path}（${result.pages} 页，${result.duration_ms} 毫秒${reason === 'auto' ? '，自动' : ''}）`);
-          await loadLayout();
+          if (pdfSource.kind === 'current' || reason === 'manual') {
+            if (pdfSource.kind !== 'current') resetPdfSource({ kind: 'current' });
+            else clearRendered();
+            await loadLayout();
+          }
+          if (result.version) { project.reading_project_id = result.version.reading_project_id; void versions?.refresh(); void onVersionSaved(result.version); }
+          if (result.version_error) say(`${result.version_error}。原文件与批注保留。`, true);
         } else {
           autoPaused = reason === 'auto';
           say(result.timed_out ? '编译超时，已停止。' : `编译失败（退出码 ${result.exit_code}）。请看错误与日志尾。${autoPaused ? ' 自动编译已暂停，手动编译成功后会恢复。' : ''}`, true);
@@ -1235,6 +1372,7 @@ window.PaperLatexWorkspace = (() => {
     });
     settingStarter.addEventListener('change', () => void saveSetting({ latex_starter: settingStarter.checked }));
     settingEngine.addEventListener('change', () => void saveSetting({ latex_engine: settingEngine.value }));
+    settingTheme.addEventListener('change', () => void saveSetting({ latex_theme: settingTheme.value }));
     settingAuto.addEventListener('change', () => {
       autoPaused = false;
       void saveSetting({ latex_auto_compile: settingAuto.checked });
@@ -1384,7 +1522,7 @@ window.PaperLatexWorkspace = (() => {
         if (settingsRevision === null) await loadSettings();
         void refreshWorkspace();
         await refreshProjects(preferred);
-        const wanted = project?.id && projects.some(item => item.id === project.id) ? project.id : projects[0]?.id;
+        const wanted = preferred && projects.some(item => item.id === preferred) ? preferred : project?.id && projects.some(item => item.id === project.id) ? project.id : projects[0]?.id;
         if (wanted) await selectProject(wanted);
         else await renderEmpty();
       } catch (error) {
@@ -1437,7 +1575,7 @@ window.PaperLatexWorkspace = (() => {
     void renderEmpty();
 
     return {
-      open, close,
+      open, close, showVersion, showCurrentPdf,
       isOpen: () => !view.hidden,
       refresh: () => open(project?.id),
       /** Used by the acceptance fixture to drive the surface without a real keyboard. */
@@ -1459,7 +1597,7 @@ window.PaperLatexWorkspace = (() => {
         attachSync: () => api('latex_ws_sync_attach'),
         status: () => refreshWorkspace(),
         state: () => ({
-          project: project?.id || null, file, revision, dirty, pageCount, page, tab, split: settings.latex_split, rail: Boolean(rail), railOpen: Boolean(rail?.visible?.('latex-ai')),
+          project: project?.id || null, file, revision, dirty, pageCount, page, tab, pdfSource: { ...pdfSource }, split: settings.latex_split, rail: Boolean(rail), railOpen: Boolean(rail?.visible?.('latex-ai')),
           auto: settings.latex_auto_compile !== false, autoPaused, lastBuildOk, root: workspace.root,
           syncCovered: Boolean(workspace.sync?.covered), conflict: Boolean(pendingConflict),
           ai: { available: ai.available, proposal: ai.proposal?.id || null },

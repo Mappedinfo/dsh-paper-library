@@ -308,12 +308,71 @@ test('DPR and zoom increase requested density; latest page wins and failed page 
   const first = f.ui.testHooks.renderPage(2); await tick()
   await f.ui.testHooks.renderPage(3)
   late.resolve(image); await first
-  assert.equal(f.ids.get('latex-preview').querySelector('img').dataset.page, '3')
+  assert.ok(f.ids.get('latex-preview').querySelectorAll('img').some(img => img.dataset.page === '3'))
   await f.ui.testHooks.renderPage(4)
   assert.match(f.ids.get('latex-render-state').textContent, /失败/)
   fail = false; await f.ui.testHooks.renderPage(4)
-  assert.equal(f.ids.get('latex-preview').querySelector('img').dataset.page, '4')
+  assert.ok(f.ids.get('latex-preview').querySelectorAll('img').some(img => img.dataset.page === '4'))
   f.ui.dispose(); assert.equal(f.revoked.length, f.urls.length)
+})
+
+test('scrolling moves through PDF pages while rendering at most three nearby pages', async () => {
+  const f = await fixture()
+  const preview = f.ids.get('latex-preview')
+  preview.scrollTop = 2000
+  await preview.dispatch('scroll'); await tick(); await tick()
+  assert.equal(f.ui.testHooks.state().page, 3)
+  const pages = preview.querySelectorAll('img').map(img => Number(img.dataset.page))
+  assert.ok(pages.includes(3))
+  assert.ok(pages.length <= 3 && pages.every(number => Math.abs(number - 3) <= 1))
+  f.ui.dispose()
+})
+
+test('historical PDF preview isolates page requests and disables editing until current PDF returns', async () => {
+  const f = await fixture((action, args) => {
+    if (action === 'latex_version_get') return { version: { id: args.version_id, project_id: 'one' } }
+    if (action === 'latex_version_pdf_pages') return { version: 'historical', page_count: 2, pages: [{ width: 600, height: 800 }, { width: 600, height: 800 }] }
+    if (action === 'latex_version_pdf_page') return image
+  })
+  assert.equal(await f.ui.showVersion('v1', 'review-sha'), true)
+  assert.equal(f.ui.testHooks.state().pdfSource.kind, 'version')
+  assert.equal(f.ids.get('latex-tool-highlight').disabled, true)
+  assert.equal(f.ids.get('latex-synctex-forward').disabled, true)
+  assert.equal(f.calls.find(call => call.action === 'latex_version_pdf_page').review_pdf_version, 'review-sha')
+  assert.equal(await f.ui.showCurrentPdf(), true)
+  assert.equal(f.ui.testHooks.state().pdfSource.kind, 'current')
+  assert.equal(f.ids.get('latex-tool-highlight').disabled, false)
+  assert.equal(f.ids.get('latex-synctex-forward').disabled, false)
+  f.ui.dispose()
+})
+
+test('a delayed historical version cannot replace a newer requested version', async () => {
+  const old = deferred()
+  const f = await fixture((action, args) => {
+    if (action === 'latex_version_get') return args.version_id === 'old' ? old.promise : { version: { id: args.version_id, project_id: 'one' } }
+    if (action === 'latex_version_pdf_pages') return { version: 'historical', page_count: 1, pages: [{ width: 600, height: 800 }] }
+    if (action === 'latex_version_pdf_page') return image
+  })
+  const first = f.ui.showVersion('old'); await tick()
+  assert.equal(await f.ui.showVersion('new'), true)
+  old.resolve({ version: { id: 'old', project_id: 'one' } }); assert.equal(await first, false)
+  assert.equal(f.ui.testHooks.state().pdfSource.versionId, 'new')
+  f.ui.dispose()
+})
+
+test('a late historical page cannot overwrite the current PDF after returning', async () => {
+  const late = deferred()
+  const f = await fixture((action, args) => {
+    if (action === 'latex_version_get') return { version: { id: args.version_id, project_id: 'one' } }
+    if (action === 'latex_version_pdf_pages') return { version: 'historical', page_count: 1, pages: [{ width: 600, height: 800 }] }
+    if (action === 'latex_version_pdf_page') return late.promise
+  })
+  const opening = f.ui.showVersion('old'); await tick(); await tick()
+  assert.equal(await f.ui.showCurrentPdf(), true)
+  late.resolve(image); assert.equal(await opening, false)
+  assert.equal(f.ui.testHooks.state().pdfSource.kind, 'current')
+  assert.ok(f.ids.get('latex-preview').querySelectorAll('img').some(img => img.dataset.page === '1'))
+  f.ui.dispose()
 })
 
 test('media switches discard stale results, expose unsupported types and retry failures', async () => {
@@ -406,5 +465,38 @@ test('compile entry is selected from the project menu and the toolbar shows it o
   assert.equal(main.textContent, '编译：draft.tex')
   assert.equal(f.ids.get('latex-project').selectedOptions[0].textContent, 'one')
   assert.equal(f.ui.testHooks.state().file, 'draft.tex')
+  f.ui.dispose()
+})
+
+test('preview actions share a toolbar and switch with the active preview', async () => {
+  const f = await fixture()
+  const tabs = f.ids.get('latex-tab-pdf').parentElement
+  const bar = tabs.parentElement
+  assert.equal(f.ids.get('latex-page-prev').parentElement.parentElement, bar)
+  assert.equal(f.ids.get('latex-tool-highlight').parentElement.parentElement, bar)
+  assert.equal(f.ids.get('latex-media-prev').parentElement.parentElement, bar)
+  assert.equal(f.ids.get('latex-page-prev').parentElement.hidden, false)
+  assert.equal(f.ids.get('latex-media-prev').parentElement.hidden, true)
+  await f.ids.get('latex-tab-media').dispatch('click')
+  assert.equal(f.ids.get('latex-page-prev').parentElement.hidden, true)
+  assert.equal(f.ids.get('latex-tool-highlight').parentElement.hidden, true)
+  assert.equal(f.ids.get('latex-media-prev').parentElement.hidden, false)
+  f.ui.dispose()
+})
+
+test('workspace theme persists as a local preference without changing the host', async () => {
+  let preferences = { latex_theme: 'system', latex_auto_compile: false }
+  const f = await fixture((action, args) => {
+    if (action === 'settings_get') return { value: preferences, revision: '1' }
+    if (action === 'settings_update') { preferences = { ...preferences, ...args.patch }; return { value: preferences, revision: '2' } }
+  })
+  const theme = f.ids.get('latex-setting-theme')
+  theme.value = 'midnight'; await theme.dispatch('change'); await tick()
+  assert.equal(preferences.latex_theme, 'midnight')
+  assert.equal(f.ids.get('latex-view').dataset.latexTheme, 'midnight')
+  assert.equal(f.window.dataset.latexTheme, undefined)
+  theme.value = 'parchment'; await theme.dispatch('change'); await tick()
+  assert.equal(preferences.latex_theme, 'parchment')
+  assert.equal(f.ids.get('latex-view').dataset.latexTheme, 'parchment')
   f.ui.dispose()
 })

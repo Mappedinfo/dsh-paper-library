@@ -56,6 +56,7 @@ test('schema exposes exactly the live preference fields with safe defaults', () 
   // The LaTeX workspace defaults: starter file and idle recompiling on, split in the middle.
   assert.equal(schema.latex_starter.value, true); assert.equal(schema.latex_auto_compile.value, true);
   assert.deepEqual(schema.latex_engine.values, ['xelatex', 'pdflatex', 'lualatex']); assert.equal(schema.latex_engine.value, 'xelatex');
+  assert.deepEqual(schema.latex_theme.values, ['system', 'parchment', 'midnight']); assert.equal(schema.latex_theme.value, 'system');
   assert.equal(schema.latex_split.value, 50); assert.equal(schema.latex_sync_folder.value, true);
 });
 
@@ -64,12 +65,20 @@ test('migration respects explicit native false, normalizes legacy strings and re
   const f = await fixture(t, { legacy, user: { auto_analysis: false, future: 7 } });
   const view = await f.service.get();
   assert.equal(view.backend, 'dsh'); assert.equal(view.writable, true);
-  assert.deepEqual(view.value, { auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_split: 50, latex_sync_folder: true });
+  assert.deepEqual(view.value, { auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_split: 50, latex_sync_folder: true });
   assert.deepEqual((await f.store.get('preferences')).value, legacy);
   assert.deepEqual((await f.store.get(backup)).value, legacy);
   assert.equal(f.settings.raw().future, 7);
   assert.deepEqual((await f.service.localState.get('preferences')).value.unknown, { keep: true });
   assert.ok(!(await f.store.get(marker)).value.imported_fields.includes('auto_analysis'));
+});
+
+test('LaTeX theme persists independently and rejects unsupported theme names', async t => {
+  const f = await fixture(t), initial = await f.service.get();
+  const saved = await f.service.update({ latex_theme: 'midnight' }, initial.revision);
+  assert.equal(saved.value.latex_theme, 'midnight');
+  assert.equal((await f.service.get()).value.latex_theme, 'midnight');
+  assert.throws(() => f.service.update({ latex_theme: 'unknown' }, saved.revision), code('SETTINGS_INVALID'));
 });
 
 test('invalid legacy preference values stay backed up but never reach the native namespace', async t => {

@@ -104,6 +104,22 @@ class Papers:
           created TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS latex_revisions_file ON latex_revisions(project_id, path, created);
+        CREATE TABLE IF NOT EXISTS latex_versions(
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          reading_project_id TEXT NOT NULL,
+          main_path TEXT NOT NULL,
+          created TEXT NOT NULL,
+          engine TEXT NOT NULL,
+          pdf_version TEXT NOT NULL,
+          metadata TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS latex_versions_project ON latex_versions(project_id, created, id);
+        CREATE INDEX IF NOT EXISTS latex_versions_reading_project ON latex_versions(reading_project_id, created, id);
+        CREATE TABLE IF NOT EXISTS latex_project_reading(
+          project_id TEXT PRIMARY KEY,
+          reading_project_id TEXT NOT NULL
+        );
         """)
         indexed = self.db.execute("SELECT 1 FROM sqlite_master WHERE name='paper_search'").fetchone()
         # The search index stays on disk; neither search nor list opens a PDF.

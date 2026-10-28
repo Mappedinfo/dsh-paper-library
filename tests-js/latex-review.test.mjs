@@ -71,3 +71,22 @@ test('a stale note displays a disabled locator and remains editable', async () =
   f.ui.testHooks.edit(f.ui.testHooks.notes()[0])
   assert.equal(f.ids.get('latex-review-comment').value, 'thought')
 })
+
+test('PDF markup saves without a comment and preserves the selection on failure', async () => {
+  const calls = []; let failed = true
+  const f = fixture(async (action, args) => {
+    calls.push({ action, ...args })
+    if (action === 'latex_review_list') return { annotations: [] }
+    if (failed) throw new Error('offline')
+    return { saved: true }
+  })
+  const anchor = { kind: 'pdf', page: 1, pdf_version: 'test-version', rects: [[1, 1, 10, 10]], text: '选中的文字' }
+  f.ui.beginPdf(anchor, 'underline', { instant: true })
+  await new Promise(done => setImmediate(done))
+  assert.equal(calls[0].type, 'underline'); assert.equal(calls[0].comment, '')
+  assert.equal(f.ui.hasDraft(), true)
+  assert.equal(f.ids.get('latex-review-quote').textContent, '选中的文字')
+  failed = false; await f.ui.testHooks.saveDraft()
+  assert.equal(calls[1].request_id, calls[0].request_id)
+  assert.equal(f.ui.hasDraft(), false)
+})

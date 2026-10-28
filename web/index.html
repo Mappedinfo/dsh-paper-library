@@ -29,6 +29,7 @@
   <script src="./settings.js" defer></script>
   <script src="./latex-editor.js" defer></script>
   <script src="./latex-review.js" defer></script>
+  <script src="./latex-versions.js" defer></script>
   <script src="./latex-workspace.js" defer></script>
   <script src="./challenge-mining.js" defer></script>
   <script src="./annotation-threads.js" defer></script>
@@ -74,6 +75,7 @@
         <span id="project-status" class="small muted" role="status"></span>
       </div>
       <details id="board-shelf" class="board-shelf"><summary><span>画板</span><span id="board-shelf-count" class="count">—</span></summary><div id="board-shelf-list" class="board-shelf-list"></div><p class="small muted">画板与库逻辑解耦：它不绑定任何论文，但可以同时关联多篇论文或多个阅读项目。</p></details>
+      <details id="latex-version-shelf" class="board-shelf"><summary>写作版本</summary><div id="library-latex-versions"></div></details>
       <div class="list-heading"><span id="search-summary"></span></div>
       <div id="library-error" class="inline-error" role="alert" hidden></div>
       <div id="paper-list" class="paper-list" aria-live="polite"></div>

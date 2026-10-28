@@ -193,6 +193,20 @@ Host actions (not worker actions, reachable from the panel): `latex_ws_status` (
 `latex_engine` 是全部 LaTeX 项目共享的编译偏好，取值为 `xelatex`（默认）、`pdflatex` 或 `lualatex`。
 通过现有 `settings_update` 的 `patch` 写入，并继续使用 `expected_revision`；`latex_ws_status.settings.engine` 返回当前生效值。
 直接调用 `latex_compile` 的 `engine` 参数保持原接口；工作台会将已保存的偏好传入该参数。
+`latex_theme` 为工作台局部配色，取值 `system`（默认）、`parchment`、`midnight`，同样使用设置修订号保存。
+
+手动编译与共用版本接口：
+
+| Action | 输入与行为 |
+| --- | --- |
+| `latex_compile` | 追加可选 `save_version:true`；成功返回 `version`，快照失败另返回 `version_error`，不掩盖编译结果。工作台仅对手动编译传此标志。 |
+| `latex_project_link_reading` | `{id,reading_project_id}`，必须显式传已有阅读项目 ID 或 `null`；已有版本可随显式关联迁移，快照和 ID 不变。 |
+| `latex_version_list` | `{id?,reading_project_id?,limit?,offset?}`，两入口查询同一记录；每批最多 200 条。 |
+| `latex_version_get` | `{version_id}`，返回版本摘要、有界源码文件清单及批注 PDF 清单。 |
+| `latex_version_read` / `latex_version_review` | 分别以 `{version_id,path}` 读一个源码快照、以 `{version_id}` 读取保存时的自审记录与旧锚点状态。 |
+| `latex_version_pdf_pages` / `latex_version_pdf_page` | `{version_id,review_pdf_version?}`；页面另传 `page,scale?`。复用当前 PDF 的几何与有界渲染形状，历史稿不使用当前 SyncTeX。 |
+
+HTTP `GET latex-version-pdf/<version_id>?review=<可选编译哈希>` 下载当前版本或清单中的批注副本，继续使用宿主认证和受限路径。上述 `version_*` 也可经 `library_latex` 的同名操作读取；项目关联通过编辑工具完成。原始项目仍留在原目录，只有手动版本快照复制到私有 `latex-versions/`，不会写入原 PDF。
 
 Tool metadata is a closed subset: `title,type,citekey,DOI,URL,abstract,author,editor,container-title,publisher,volume,issue,page,issued,tags,publication_dates,journal_rankings`. Its person schema accepts `family,given,literal,ORCID,affiliation`, with affiliation `{name,ror?,source?}`. Tool `issued` uses CSL `date-parts`. Graph evidence uses the closed schema above. Paths and runtime state cannot enter structured metadata. Each tool request is capped at 128 KiB before dispatch; core field limits still apply. `library_annotate` requires `rects` for text markup or `paths` for Ink; note placement may omit `rects`.
 
@@ -230,7 +244,9 @@ coverage fail. The JSON CLI mirrors lint `ok` in its envelope and exits 1 on fai
 transport success alone does not mean submission readiness. Saving and compiling are unchanged.
 Rules, limits, literal examples and line ignores: [LaTeX lint](latex-projects.md#未完成内容检查latex-lint).
 
-`latex_projects(root UNIQUE, main_path, pdf_path)`, `latex_archive` and `latex_revisions(project_id, path, sha256, body, origin, created)` treat one real folder as the unit of work; nothing is copied into the library and archiving only hides the record. `latex_create` detects the main file (`main.tex`, then any file with `\documentclass`, then the first `.tex`) and its same-name PDF, and only writes a starter `main.tex` when `create_missing` is explicit. Every path is `realpath`-checked against the project root, so `..`, absolute paths and symlinks that leave the folder are refused for reads and writes alike. `latex_write` is atomic, capped at 2 MiB, keeps a 512 KiB/40-revision text history per file, and returns `STATE_CONFLICT` with the current body when `expected_revision` is stale. `latex_compile` runs the local `latexmk` (`-xelatex|-pdflatex|-lualatex -interaction=nonstopmode -file-line-error -synctex=1`) with the project folder as cwd, a 120 s default and 600 s maximum timeout, and reports exit code, extracted `-file-line-error` lines, log tail and page count instead of masking a failure; `latex_pdf_pages`/`latex_pdf_page` reuse the reader's bounded PDF pipeline, and `latex_clean` deletes only known build side files. Design: [latex-projects.md](latex-projects.md).
+`latex_projects(root UNIQUE, main_path, pdf_path)` 以真实文件夹为工作单元；`latex_archive` 仅隐藏项目，`latex_revisions` 保存逐文件历史，原稿留在原处。手动编译的独立快照才复制到私有版本目录，由 `latex_versions` 与阅读项目关联。主文件按 `main.tex`、含 `\documentclass` 的文件、首个 `.tex` 的顺序发现；只有显式允许 `create_missing` 才写 starter。所有源码读写均检查项目根目录与真实路径，拒绝越界路径及符号链接。`latex_write` 使用原子写入，单次上限 2 MiB，每文件保留 512 KiB／40 次历史；旧 `expected_revision` 返回携带当前内容的 `STATE_CONFLICT`。
+
+`latex_compile` 在项目目录调用本机 `latexmk`（`-xelatex|-pdflatex|-lualatex -interaction=nonstopmode -file-line-error -synctex=1`），默认超时 120 秒、最大 600 秒，返回真实退出码、错误行、日志尾和页数。PDF 页面复用有界渲染管线；`latex_clean` 只清理已知编译副产物。[设计与边界](latex-projects.md)。
 
 ## Reading projects
 
