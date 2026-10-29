@@ -60,7 +60,7 @@ window.PaperWorkbench = (() => {
     // Move the existing controls, retaining their event handlers and IDs.
     // Board controls for the current paper travel with the other per-paper actions; the
     // container below is removed, so anything not moved here would disappear at boot.
-    for (const id of ['copy-apa','export-bib','download-pdf','metadata-open','attach-open']) $('toolbar-actions').append($(id));
+    for (const id of ['copy-apa','export-bib','download-pdf','open-in-pane','metadata-open','attach-open']) $('toolbar-actions').append($(id));
     $('toolbar-actions').append(button('补全资料','metadata-enrich',enrich));
     $('toolbar-actions').append($('export-notes').closest('label'));
     $('toolbar-reader').append(document.querySelector('.page-controls'),$('page-note'));

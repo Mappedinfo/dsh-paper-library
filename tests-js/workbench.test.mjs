@@ -58,7 +58,7 @@ function environment({ respond, active = null, storage = new Map(), library = 's
   const dialog = element('metadata-dialog', 'dialog'); dialog.append(new Element('h2'), form);
   for (const id of ['edit-title', 'edit-authors', 'edit-year', 'edit-citekey', 'edit-tags']) { const label = new Element('label'); label.append(element(id, id === 'edit-authors' ? 'textarea' : 'input')); form.append(label); }
   const submit = new Element('button'); submit.type = 'submit'; form.append(submit);
-  for (const id of ['copy-apa','export-bib','download-pdf','metadata-open','attach-open']) selector('.paper-actions').append(element(id, id === 'download-pdf' ? 'a' : 'button'));
+  for (const id of ['copy-apa','export-bib','download-pdf','open-in-pane','metadata-open','attach-open']) selector('.paper-actions').append(element(id, id === 'download-pdf' ? 'a' : 'button'));
   const exportLabel = new Element('label'); exportLabel.append(element('export-notes', 'select')); body.append(exportLabel);
   const document = { body, getElementById: element, createElement: tag => new Element(tag), querySelector: selector, querySelectorAll: value => body.querySelectorAll(value) };
   const window = new Element('window');window.localStorage={getItem(){throw new Error('Use server state');},setItem(){throw new Error('Browser writes are forbidden');}};
@@ -80,6 +80,13 @@ const original = () => ({ id: 'paper-a', title: 'Synthetic title', pdf: true, ty
   author: [{ family: 'Example', given: 'Alice', ORCID: 'synthetic-orcid', affiliation: [{ name: 'Synthetic University', ror: 'synthetic-ror', source: 'Synthetic title page' }] }],
   issued: { 'date-parts': [[2026, 9, 1]] }, publication_dates: { published: '2026-09-01', received: '2025-10', accepted: '2026-08-02' },
   journal_rankings: [{ system: 'JCR', year: 2025, category: 'Synthetic category', quartile: 'Q2', source: 'Synthetic fixture', verified_at: '2026-09-14' }],
+});
+
+test('the split-pane action survives removal of the old per-paper action container', () => {
+  const f=environment({active:original()}),split=f.element('open-in-pane');
+  assert.equal(split.parentElement,f.element('toolbar-actions'));
+  assert.equal(f.selector('.paper-actions').parentElement,null);
+  f.workbench.header();assert.equal(split.disabled,false);
 });
 
 test('metadata service loading disables fields and a late paper response cannot replace the current editor',async()=>{
