@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "allowJs": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "plaindeck/core": ["vendor/plaindeck/packages/plaindeck/src/core/index.ts"],
+      "plaindeck/react": ["vendor/plaindeck/packages/plaindeck/src/react/index.tsx"],
+      "plaindeck/render": ["vendor/plaindeck/packages/plaindeck/src/render/index.ts"]
+    }
+  },
+  "include": ["src/slides/**/*.ts", "src/slides/**/*.tsx", "types/slides-env.d.ts"]
+}

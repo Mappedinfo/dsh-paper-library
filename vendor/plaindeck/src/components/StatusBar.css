@@ -1,0 +1,181 @@
+.app-shell > .statusbar {
+  position: relative;
+  z-index: 12;
+  min-width: 0;
+  min-height: 30px;
+  flex-wrap: wrap;
+  gap: 0 12px;
+}
+
+.app-shell > .statusbar .save-pill {
+  min-width: 0;
+  flex: 0 1 auto;
+  white-space: nowrap;
+}
+
+.app-shell > .statusbar .save-pill i,
+.app-shell > .statusbar svg {
+  flex-shrink: 0;
+}
+
+.app-shell > .statusbar .save-pill > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-shell > .statusbar .status-details {
+  min-width: 0;
+  flex: 1;
+}
+
+.app-shell > .statusbar .status-information {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  white-space: nowrap;
+}
+
+.app-shell > .statusbar .status-information > span,
+.app-shell > .statusbar .source-link {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.app-shell > .statusbar .status-dimensions {
+  margin-left: auto;
+}
+
+.app-shell > .statusbar .status-more {
+  display: none;
+}
+
+.app-shell > .statusbar .status-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 190px;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.app-shell > .statusbar .status-zoom input {
+  width: 90px;
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+}
+
+.app-shell > .statusbar .status-zoom button,
+.app-shell > .statusbar .status-more {
+  width: 26px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 3px;
+}
+
+.app-shell > .statusbar .status-zoom strong {
+  min-width: 34px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.app-shell > .statusbar button:hover {
+  color: var(--accent);
+  background: var(--panel-2);
+}
+
+.app-shell > .statusbar button:disabled {
+  opacity: .35;
+  cursor: default;
+}
+
+.app-shell > .statusbar :is(button, a, input):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.app-shell > .statusbar .status-error {
+  display: block;
+  flex: 0 0 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 0 6px;
+  color: #ff8b72;
+  line-height: 1.4;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell > .statusbar .status-error[aria-expanded='true'] {
+  max-height: min(100px, 25dvh);
+  overflow: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1050px) {
+  .app-shell > .statusbar .status-details {
+    flex: 0 0 auto;
+  }
+
+  .app-shell > .statusbar .status-more {
+    display: grid;
+  }
+
+  .app-shell > .statusbar .status-more[aria-expanded='true'] {
+    color: var(--accent);
+    background: var(--panel-2);
+  }
+
+  .app-shell > .statusbar .status-information {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 10px;
+    width: min(270px, calc(100vw - 20px));
+    max-height: min(360px, calc(100dvh - 90px));
+    overflow: auto;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-top: 2px solid var(--accent);
+    border-radius: 3px;
+    background: var(--panel);
+    box-shadow: 0 8px 28px #0008;
+    color: var(--muted);
+  }
+
+  .app-shell > .statusbar .status-details[data-open='true'] .status-information {
+    display: grid;
+    gap: 12px;
+  }
+
+  .app-shell > .statusbar .status-information > :is(span, a) {
+    min-height: 18px;
+  }
+
+  .app-shell > .statusbar .source-link {
+    min-height: 28px;
+    color: #ccc9bf;
+  }
+
+  .app-shell > .statusbar .status-dimensions {
+    margin-left: 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+  }
+
+}
+
+@media (max-width: 620px) {
+  .app-shell > .statusbar {
+    column-gap: 8px;
+  }
+
+  .app-shell > .statusbar .status-zoom {
+    flex: 1 1 150px;
+    max-width: 230px;
+  }
+}

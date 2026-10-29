@@ -5,7 +5,7 @@ import { Script } from 'node:vm'
 
 const bundle = new URL('../lib/client.js', import.meta.url)
 
-test('published client bundle mounts both entry tabs and releases hidden iframes', { skip: !existsSync(bundle) && 'Run npm run build before client bundle tests' }, () => {
+test('published client bundle registers entry tabs and preserves hidden slide drafts', { skip: !existsSync(bundle) && 'Run npm run build before client bundle tests' }, () => {
   let plugin
   const registrations = new Map()
   const tabs = new Map()
@@ -41,6 +41,9 @@ test('published client bundle mounts both entry tabs and releases hidden iframes
   // separate start-page capsules, so each opens its own tab next to the other.
   const libraryTab = tabs.get('@mappedinfo/dsh-paper-library')
   const canvasTab = tabs.get('@mappedinfo/dsh-paper-library/whiteboard')
+  const slidesTab = tabs.get('@mappedinfo/dsh-paper-library/slides')
+  assert.equal(slidesTab.kind, 'paper-library-slides')
+  assert.equal(slidesTab.guide[0].order, 18)
   assert.equal(libraryTab.kind, 'paper-library')
   assert.equal(canvasTab.kind, 'paper-library-whiteboard')
   assert.notEqual(canvasTab.kind, libraryTab.kind, 'two tab types may not share a kind')
@@ -89,6 +92,15 @@ test('published client bundle mounts both entry tabs and releases hidden iframes
   const canvasIframe = canvasFrame.type(canvasFrame.props)
   assert.equal(canvasIframe.props.src, '/api/paper-library/?view=board')
   assert.equal(canvasIframe.props.title, 'Whiteboard')
+  const slidesFrame = bodies.get(slidesTab.id).component({ useTabInfo: () => ({ tab: { visible: true } }) })
+  const slidesIframe = slidesFrame.type(slidesFrame.props)
+  assert.equal(slidesIframe.props.src, '/api/paper-library/slides.html')
+  assert.equal(slidesIframe.props.title, 'slides.title')
+  const hiddenSlides = bodies.get(slidesTab.id).component({ useTabInfo: () => ({ tab: { visible: false } }) })
+  const preservedSlides = hiddenSlides.type(hiddenSlides.props)
+  assert.equal(preservedSlides.type, 'iframe', 'switching host tabs keeps an unsaved slide draft mounted')
+  assert.equal(preservedSlides.props.src, slidesIframe.props.src)
+  assert.equal(preservedSlides.props.style.display, 'none')
   for (const dispose of effects.reverse()) dispose()
   assert.equal(sources.length, 0)
   assert.equal(registrations.size, 0)

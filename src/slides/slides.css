@@ -1,0 +1,42 @@
+/* Editor chrome follows Paper Library / DSH; slide colors remain owned by the deck. */
+:root {
+  --shell: var(--dsw-alias-bg-base); --panel: var(--dsw-alias-bg-layer-1); --panel-2: var(--dsw-alias-bg-layer-2);
+  --line: var(--dsw-alias-border-l2); --muted: var(--dsw-alias-label-secondary);
+  --accent: var(--dsw-alias-label-primary); --accent-hot: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-primary); background: var(--shell); font-family: var(--dsw-font-family);
+}
+.app-shell { color: var(--dsw-alias-label-primary); background: var(--shell); }
+.toolbar, .slide-panel, .inspector, .statusbar, .slide-actions { background: var(--panel); border-color: var(--line); box-shadow: none; }
+.brand-mark, .present-action { background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); border-color: transparent; }
+.canvas-workspace { background: var(--dsw-alias-bg-module-platform); background-image: none; }
+.canvas-label, .canvas-label strong, .panel-heading, .panel-heading strong, .slide-thumb, .zip-import { color: var(--dsw-alias-label-secondary); }
+.slide-thumb:hover, .slide-thumb.active, .tool-button:hover, .slide-actions button:hover, .icon-grid button:hover { background: var(--dsw-alias-interactive-bg-hover); border-color: var(--line); }
+.language-toggle, .text-action, .canvas-name-input { background: var(--panel-2); color: var(--dsw-alias-label-primary); border-color: var(--line); }
+.toolbar-spacer { min-width: 110px; }
+.slides-toolbar-context { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; font-size: 12px; }
+.slides-toolbar-context span { max-width: 160px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }
+.slides-toolbar-context a, .slides-chooser a { color: var(--dsw-alias-link); white-space: nowrap; }
+.status-information .source-link, .status-information > span:not(.status-dimensions) { display: none; }
+.slides-chooser { height: 100%; overflow: auto; padding: 28px; color: var(--dsw-alias-label-primary); background: var(--shell); }
+.slides-chooser header, .slides-guide header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.slides-chooser h1 { margin: 0; font-size: 22px; }.slides-chooser p { color: var(--muted); }
+.slides-create { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin: 24px 0 12px; }
+.slides-create label, .slides-guide label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+.slides-chooser :is(input,select,button), .slides-dialog button, .slides-guide :is(input,select,textarea,button), .slides-save-warning button {
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; color: var(--dsw-alias-label-primary); background: var(--panel); font: inherit;
+}
+.slides-chooser button, .slides-dialog button, .slides-guide button, .slides-save-warning button { cursor: pointer; }
+.slides-chooser button:disabled, .slides-guide button:disabled { opacity: .5; cursor: default; }
+.slides-projects { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.slides-projects button { display: grid; width: 100%; text-align: left; gap: 6px; padding: 14px; }
+.slides-projects span { color: var(--muted); font-size: 12px; }
+.slides-overlay { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 30px; background: var(--dsw-alias-bg-mask-1); }
+.slides-dialog, .slides-guide { max-height: 90vh; overflow: auto; color: var(--dsw-alias-label-primary); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 22px; box-shadow: 0 12px 40px #0003; }
+.slides-dialog { min-width: 320px; }.slides-dialog button { margin: 4px; }
+.slides-guide { width: min(900px, 95vw); }.slides-guide h2, .slides-guide h3 { margin: 0 0 10px; }.slides-guide p { color: var(--muted); }
+.slides-guide fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0; border: 0; }.slides-guide textarea { width: 100%; resize: vertical; }
+.slides-guide-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 14px 0; }.slides-guide-actions span { color: var(--muted); font-size: 12px; }
+.slides-guide details { margin: 12px 0; }.slides-guide summary { cursor: pointer; }.slides-guide ul { padding-left: 20px; }.slides-guide li { margin: 6px 0; }
+.slides-guide li button { text-align: left; }
+.slides-save-warning { position: fixed; right: 20px; bottom: 42px; z-index: 60; display: flex; align-items: center; gap: 8px; max-width: 680px; padding: 10px; background: var(--panel); border: 1px solid var(--dsw-alias-state-error-primary); border-radius: 6px; box-shadow: 0 4px 18px #0002; }
+@media print { .slides-overlay, .slides-save-warning { display: none !important; } }

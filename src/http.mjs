@@ -25,6 +25,7 @@ for (const name of ['board.js','board.css','board-source.js','board-render.js','
 const languageActions = new Set(['language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
 for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js','ink-diagnostics.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
+staticFiles['slides.html']=['slides.html','text/html;charset=utf-8'];
 staticFiles['fonts/silkscreen-regular.ttf']=['fonts/silkscreen-regular.ttf','font/ttf'];
 const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:'];
 function browserStateKey(key, listPrefix = false) {
@@ -100,6 +101,11 @@ export function createFetchHandler(options = {}) {
   const basePath = (options.basePath || '').replace(/\/$/, '');
   const store = options.localState || createLocalStateStore({ library: options.library || defaultLibrary, home: options.localStateHome });
   const settings = options.settings || createPaperLibrarySettings({store});
+  let slidesStore;
+  const slidesRequest = async input => {
+    slidesStore ??= import('./slides-store.mjs').then(({ createSlidesStore }) => createSlidesStore({ library: options.library || defaultLibrary }));
+    return (await slidesStore).handle(input);
+  };
   const localState = options.settings ? store : settings.localState;
   // Browsing saved learning data is local and does not initialize an AI route or
   // paper conversation. Only the host-injected adapter may generate new output.
@@ -153,6 +159,7 @@ export function createFetchHandler(options = {}) {
             : input?.action === 'settings_update' ? await settings.update(input.patch, input.expected_revision)
             : input?.action === 'settings_reset' ? await settings.reset(input.expected_revision)
             : stateAction ? await stateRequest(localState, input)
+            : typeof input?.action === 'string' && input.action.startsWith('slides_') ? await slidesRequest(input)
             : boardAction ? await handleBoardRequest(boards, input, { writer: 'user' })
             : typeof input?.action === 'string' && input.action.startsWith('paper_analysis_') ? await analysisRecords(input)
             : typeof input?.action === 'string' && (input.action.startsWith('challenge_extract_') || input.action.startsWith('challenge_theme_suggest_')) ? await challengeRecords(input, { signal: request.signal })
@@ -207,9 +214,9 @@ export function createFetchHandler(options = {}) {
           headers:{...baseHeaders,'Content-Type':'application/pdf','Content-Length':String(info.size),'Content-Disposition':`attachment; filename="paper.pdf"; filename*=UTF-8''${encodeURIComponent(filename)}`},
         });
       }
-      if (path === 'latex-editor.js') {
-        const body = await readFile(join(projectRoot, 'lib', 'latex-editor.js'));
-        return new Response(body, { headers: { ...baseHeaders, 'Content-Type': 'text/javascript;charset=utf-8' } });
+      if (['latex-editor.js', 'slides-editor.js', 'slides-editor.css'].includes(path)) {
+        const body = await readFile(join(projectRoot, 'lib', path));
+        return new Response(request.method === 'HEAD' ? null : body, { headers: { ...baseHeaders, 'Content-Type': path.endsWith('.css') ? 'text/css;charset=utf-8' : 'text/javascript;charset=utf-8' } });
       }
       if (!Object.hasOwn(staticFiles,path)) return new Response('Not found',{status:404});
       const [file,mime] = staticFiles[path];

@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises'
 import { build } from 'esbuild'
+import { buildSlides } from './build-slides.mjs'
 
 const packageId = '@mappedinfo/dsh-paper-library'
 await mkdir(new URL('../lib/', import.meta.url), { recursive: true })
@@ -25,4 +26,5 @@ await build({
   minify: true,
   legalComments: 'inline',
 })
-console.log('Built lazy Paper Library client module. Host entry remains native ESM.')
+await buildSlides()
+console.log('Built Paper Library client, LaTeX editor and PlainDeck slides. Host entry remains native ESM.')

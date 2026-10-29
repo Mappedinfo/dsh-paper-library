@@ -1210,6 +1210,12 @@ function entryPaper(){
 }
 const ENTRY_VIEW=entryView();
 const ENTRY_PAPER=entryPaper();
+// DSH opens its own slide tab; standalone uses the link's separate browser tab.
+$('slides-open')?.addEventListener('click', event => {
+  if (window.parent === window) return;
+  event.preventDefault();
+  window.parent.postMessage({ type: 'paper-library:open-slides', version: 1 }, window.location.origin);
+});
 /** Each entry surface is a pure page: open it and leave only it on screen. */
 async function applyEntryView(){
   if(ENTRY_VIEW==='board'&&boardUI){

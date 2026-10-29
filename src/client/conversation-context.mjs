@@ -363,6 +363,10 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
       catch (error) { post(event.source, { type: 'paper-library:reader-state-error', error: error.message }) }
       return
     }
+    if (data.type === 'paper-library:open-slides') {
+      ctx.sidebarRight.openTab('paper-library-slides', { preferNewPane: true })
+      return
+    }
     if (data.type === 'paper-library:open-pane') {
       // Split view: the reader asks for a second library tab in a new pane, so
       // two papers stay visible side by side. Page tabs deduplicate within a

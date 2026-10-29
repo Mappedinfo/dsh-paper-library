@@ -1,0 +1,105 @@
+{
+  "name": "plaindeck",
+  "version": "0.10.0",
+  "description": "Git-native slide format, Agent API, CLI, MCP server, and renderer",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mappedinfo/PlainDeck.git",
+    "directory": "packages/plaindeck"
+  },
+  "homepage": "https://mappedinfo.github.io/PlainDeck/",
+  "bugs": "https://github.com/Mappedinfo/PlainDeck/issues",
+  "keywords": [
+    "slides",
+    "presentation",
+    "git",
+    "json",
+    "ai-agent",
+    "cli",
+    "mcp",
+    "model-context-protocol",
+    "dsh-plugin"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "plaindeck.cordis.yml"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js"
+    },
+    "./render": {
+      "types": "./dist/render/index.d.ts",
+      "import": "./dist/render/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
+    },
+    "./remotion": {
+      "types": "./dist/remotion/index.d.ts",
+      "import": "./dist/remotion/index.js"
+    },
+    "./mcp": {
+      "types": "./dist/mcp/index.d.ts",
+      "import": "./dist/mcp/index.js"
+    }
+  },
+  "bin": {
+    "plaindeck": "dist/cli.js",
+    "plaindeck-mcp": "dist/mcp/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "4.4.3"
+  },
+  "peerDependencies": {
+    "playwright": ">=1.49.0",
+    "react": ">=19.0.0",
+    "react-dom": ">=19.0.0",
+    "remotion": ">=4.0.500"
+  },
+  "peerDependenciesMeta": {
+    "playwright": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "remotion": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.3",
+    "@types/react-dom": "^19.0.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "4.0.504"
+  }
+}

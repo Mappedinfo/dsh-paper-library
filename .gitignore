@@ -20,3 +20,4 @@ artifacts/
 *.log
 coverage/
 _site/
+/slides/

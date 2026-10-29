@@ -595,6 +595,16 @@ test('the reader may ask for a split pane, bounded to a paper id', () => {
   e.bridge.dispose()
 })
 
+test('the library opens the fixed slides workbench without forwarding page URLs or paths', () => {
+  const e = environment()
+  e.message({ type: 'paper-library:open-slides', url: 'https://invalid.test', root: '/private' })
+  assert.deepEqual(e.tabOptions, [{ kind: 'paper-library-slides', options: { preferNewPane: true } }])
+  e.detach()
+  e.message({ type: 'paper-library:open-slides' })
+  assert.equal(e.tabOptions.length, 1)
+  e.bridge.dispose()
+})
+
 test('the bridge navigates a ready tab to a re-requested paper only', () => {
   const e = environment()
   assert.equal(e.bridge.openPaper(e.target, 'paper-4'), false)

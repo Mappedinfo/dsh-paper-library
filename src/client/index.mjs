@@ -14,8 +14,8 @@ const referenceButtonStyle = {
   background: 'var(--dsw-alias-bg-base, transparent)', color: 'inherit',
   font: 'inherit', lineHeight: 1.4, whiteSpace: 'normal', overflowWrap: 'anywhere', cursor: 'pointer',
 }
-/** The whiteboard is a second entry of this plugin, not a second plugin: the same bundle
- *  registers two tab types, so the start page offers 文献库 and 画板 side by side and each
+/** The whiteboard is another entry of this plugin: the same bundle
+ *  registers separate tab types, so the start page offers 文献库 and 画板 side by side and each
  *  opens its own tab. Its iframe asks the page for the board-only view. */
 const CANVAS_ID = `${ID}/whiteboard`
 const CANVAS_KIND = 'paper-library-whiteboard'
@@ -23,6 +23,8 @@ const CANVAS_KIND = 'paper-library-whiteboard'
  *  same page with `?view=latex`, so writing stays open beside the library and the board. */
 const LATEX_ID = `${ID}/latex`
 const LATEX_KIND = 'paper-library-latex'
+const SLIDES_ID = `${ID}/slides`
+const SLIDES_KIND = 'paper-library-slides'
 /** Coloured sheet glyphs for the start page's capsules, drawn at the seat's size. */
 function LibraryGlyph({ size = 20, className }) {
   return createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', className, fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true' },
@@ -41,10 +43,16 @@ function LatexGlyph({ size = 20, className }) {
     createElement('path', { d: 'M14 3v5h5' }),
     createElement('path', { d: 'M8.5 13h7M8.5 16.5h7' }))
 }
+function SlidesGlyph({ size = 20, className }) {
+  return createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', className, fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true' },
+    createElement('rect', { x: 3, y: 3, width: 18, height: 13, rx: 1.5 }),
+    createElement('path', { d: 'M12 16v5m-4 0h8M7 8h10M7 11h6' }))
+}
 export const name = 'paper-library-client'
 export const inject = ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'modelDirectories', 'sessions', 'conversation', 'inputTriggers']
 
 /** The reader exists only while its pane is visible; no background PDF renderer.
+ *  The slide editor keeps its iframe mounted when hidden to protect editing drafts.
  *  `view` picks which surface this pane shows: the library, the whiteboard alone
  *  (`?view=board`), or the LaTeX workbench alone (`?view=latex`). A library tab may
  *  carry a target paper (`?paper=`), which is how several papers stay open in split
@@ -52,9 +60,10 @@ export const inject = ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'm
 export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailable, conversationBridge, bindTheme, bindSettings, view = 'library' }) {
   const canvas = view === 'board'
   const latex = view === 'latex'
+  const slides = view === 'slides'
   const { tab } = useTabInfo()
   const frame = useRef(null)
-  const requestedPaper = !canvas && !latex ? tab.navigation?.params?.paper : undefined
+  const requestedPaper = !canvas && !latex && !slides ? tab.navigation?.params?.paper : undefined
   const navigationRevision = tab.navigation?.revision ?? 0
   useEffect(() => {
     if (!tab.visible || !frame.current?.contentWindow) return undefined
@@ -79,20 +88,23 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
     if (!tab.visible || !frame.current?.contentWindow) return undefined
     return bindSettings(frame.current.contentWindow)
   }, [bindSettings, tab.visible])
-  if (!tab.visible) return null
+  // Slides contain a live editing draft. Preserve that iframe while hidden so a
+  // tab switch cannot discard typing before autosave, or a failed-save draft.
+  if (!tab.visible && !slides) return null
   const src = canvas ? '/api/paper-library/?view=board'
     : latex ? '/api/paper-library/?view=latex'
+    : slides ? '/api/paper-library/slides.html'
     : requestedPaper ? `/api/paper-library/?paper=${encodeURIComponent(requestedPaper)}`
     : '/api/paper-library/'
   return createElement('iframe', {
     ref: frame,
-    title: t(canvas ? 'canvas.title' : latex ? 'latex.title' : 'title'),
+    title: t(canvas ? 'canvas.title' : latex ? 'latex.title' : slides ? 'slides.title' : 'title'),
     src,
     loading: 'lazy',
     referrerPolicy: 'same-origin',
     allow: 'clipboard-write; fullscreen',
     allowFullScreen: true,
-    style: { width: '100%', height: '100%', minHeight: '480px', border: 0, background: 'var(--dsw-alias-bg-base, transparent)' },
+    style: { display: tab.visible ? undefined : 'none', width: '100%', height: '100%', minHeight: '480px', border: 0, background: 'var(--dsw-alias-bg-base, transparent)' },
   })
 }
 
@@ -203,8 +215,8 @@ export function apply(ctx) {
   ctx.effect(() => ctx.inputTriggers.registerSource(annotationReferences.source), 'paper-library: annotation references')
   ctx.effect(() => ctx.inputTriggers.registerSource(boardReferences.source), 'paper-library: board references')
   ctx.effect(() => ctx.locale.register(NS, {
-    zh: { title: '文献库', description: '检索、引用、PDF 批注与论文对话', 'canvas.title': '画板', 'canvas.description': '自由画布、连线与自动排版；可关联论文与阅读项目', 'latex.title': 'LaTeX 工作台', 'latex.description': '管理、编辑并编译本地 LaTeX 项目，与文献库并排写作', 'reference.title': '论文批注引用', 'reference.preview': '查看引用', 'reference.close': '收起', 'reference.loading': '正在读取引用快照…', 'reference.frozen': '发送材料快照', 'reference.notes': '条批注', 'reference.page': '第', 'reference.morePages': '其他页数：', 'board.title': '画板引用', 'board.close': '收起', 'board.loading': '正在读取画板快照…', 'board.frozen': '画板材料快照' },
-    en: { title: 'Paper Library', description: 'Search, cite, annotate PDFs and discuss each paper', 'canvas.title': 'Whiteboard', 'canvas.description': 'A free canvas with connectors and automatic layout; link papers and reading projects', 'latex.title': 'LaTeX Workbench', 'latex.description': 'Manage, edit and compile local LaTeX projects beside the library', 'reference.title': 'Paper annotation references', 'reference.preview': 'Inspect reference', 'reference.close': 'Close', 'reference.loading': 'Loading reference snapshot…', 'reference.frozen': 'Frozen reference material', 'reference.notes': 'annotations', 'reference.page': 'Page', 'reference.morePages': 'More pages:', 'board.title': 'Whiteboard references', 'board.close': 'Close', 'board.loading': 'Loading whiteboard snapshot…', 'board.frozen': 'Frozen whiteboard material' },
+    zh: { 'slides.title': 'Slides 工作台', 'slides.description': '使用 PlainDeck 制作、编辑与导出本地演示文稿', title: '文献库', description: '检索、引用、PDF 批注与论文对话', 'canvas.title': '画板', 'canvas.description': '自由画布、连线与自动排版；可关联论文与阅读项目', 'latex.title': 'LaTeX 工作台', 'latex.description': '管理、编辑并编译本地 LaTeX 项目，与文献库并排写作', 'reference.title': '论文批注引用', 'reference.preview': '查看引用', 'reference.close': '收起', 'reference.loading': '正在读取引用快照…', 'reference.frozen': '发送材料快照', 'reference.notes': '条批注', 'reference.page': '第', 'reference.morePages': '其他页数：', 'board.title': '画板引用', 'board.close': '收起', 'board.loading': '正在读取画板快照…', 'board.frozen': '画板材料快照' },
+    en: { 'slides.title': 'Slides Workbench', 'slides.description': 'Create, edit and export local presentations with PlainDeck', title: 'Paper Library', description: 'Search, cite, annotate PDFs and discuss each paper', 'canvas.title': 'Whiteboard', 'canvas.description': 'A free canvas with connectors and automatic layout; link papers and reading projects', 'latex.title': 'LaTeX Workbench', 'latex.description': 'Manage, edit and compile local LaTeX projects beside the library', 'reference.title': 'Paper annotation references', 'reference.preview': 'Inspect reference', 'reference.close': 'Close', 'reference.loading': 'Loading reference snapshot…', 'reference.frozen': 'Frozen reference material', 'reference.notes': 'annotations', 'reference.page': 'Page', 'reference.morePages': 'More pages:', 'board.title': 'Whiteboard references', 'board.close': 'Close', 'board.loading': 'Loading whiteboard snapshot…', 'board.frozen': 'Frozen whiteboard material' },
   }), 'paper-library: locale')
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.sidebarRightTabs.register({
@@ -230,6 +242,13 @@ export function apply(ctx) {
     title: () => t('latex.title'),
     guide: [{ order: 17, title: () => t('latex.title'), description: () => t('latex.description'), icon: LatexGlyph }],
   }), 'paper-library: latex tab type')
+  ctx.effect(() => ctx.sidebarRightTabs.register({
+    id: SLIDES_ID,
+    kind: SLIDES_KIND,
+    priority: 'extension',
+    title: () => t('slides.title'),
+    guide: [{ order: 18, title: () => t('slides.title'), description: () => t('slides.description'), icon: SlidesGlyph }],
+  }), 'paper-library: slides tab type')
   const paneProps = sessionId => ({
     sessionId,
     conversationBridge,
@@ -256,6 +275,12 @@ export function apply(ctx) {
     locale: NS,
     inject: paneProps,
   }, props => createElement(LibraryPane, { ...props, t, view: 'latex' }))), 'paper-library: latex tab body')
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+    name: 'sidebar.right.pane.tab',
+    key: SLIDES_ID,
+    locale: NS,
+    inject: paneProps,
+  }, props => createElement(LibraryPane, { ...props, t, view: 'slides' }))), 'paper-library: slides tab body')
   ctx.effect(() => ctx.slots.inject('conversation.input.overlay', () => ctx.slots.register({
     name: 'conversation.input.overlay',
     id: ID,

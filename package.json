@@ -62,7 +62,18 @@
     "docs/paper-review-skill-design.md",
     "docs/whiteboard-design.md",
     "docs/board-pages.md",
-    "docs/handwriting-interaction-design.md"
+    "docs/handwriting-interaction-design.md",
+    "lib/slides-editor.js",
+    "lib/slides-editor.css",
+    "lib/plaindeck-core.mjs",
+    "vendor/plaindeck",
+    "src/slides",
+    "scripts/build-slides.mjs",
+    "scripts/vendor-plaindeck.mjs",
+    "tsconfig.slides.json",
+    "types/slides-env.d.ts",
+    "docs/slides-workbench.md",
+    "!src/slides/*.test.mjs"
   ],
   "dsh": {
     "bundle": {
@@ -109,7 +120,9 @@
     "test:bibliography": "node scripts/bibliography-browser-fixture.mjs",
     "test:challenge-panel": "node scripts/challenge-panel-browser-fixture.mjs",
     "test:reference": "node scripts/reference-browser-fixture.mjs",
-    "verify:pages": "node scripts/verify-pages.mjs"
+    "verify:pages": "node scripts/verify-pages.mjs",
+    "typecheck:slides": "tsc -p tsconfig.slides.json",
+    "test:slides": "npm run build && node --test tests-js/slides-*.test.mjs src/slides/*.test.mjs"
   },
   "dependencies": {
     "@citation-js/core": "^0.7.18",
@@ -123,7 +136,12 @@
     "@codemirror/view": "^6.43.15",
     "@lezer/highlight": "^1.2.5",
     "citeproc": "^2.4.63",
-    "zod": "^4.0.0"
+    "jszip": "3.10.1",
+    "lucide-react": "0.468.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.6.7",
+    "zustand": "5.0.14"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.1 <5",
@@ -182,6 +200,9 @@
     }
   },
   "devDependencies": {
-    "esbuild": "^0.25.0"
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "esbuild": "^0.25.0",
+    "typescript": "5.7.3"
   }
 }
