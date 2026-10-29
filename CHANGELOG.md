@@ -6,6 +6,7 @@
 
 - 修复 [#2](https://github.com/Mappedinfo/dsh-paper-library/issues/2) 的原生 Windows 启动与保存阻断：跨进程写锁使用 filelock 原生后端；Windows 跳过目录 fsync，保留文件同步、原子替换与事务回滚，POSIX 同步错误继续上报。
 - 补齐 Windows 文件标志兼容和文件身份检查，Python 子进程协议固定 UTF-8，安装器支持 Windows `python` 命令并补齐旧环境的锁依赖。
+- 修复原生 Windows 回归进一步发现的 PDF 保存问题：临时文件使用可写句柄同步，验证完成后关闭源文档再原子替换，避免只读同步失败和文件占用；原稿与外部批注继续保留。
 - 增加 Windows／Linux 原生存储回归及平台说明，验证合成 CLI、跨进程冲突、PDF 批注与恢复、书目导出、知识笔记和数据预览。
 
 ## v0.2.4 — 2026-10-29

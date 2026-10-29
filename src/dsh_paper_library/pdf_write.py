@@ -12,6 +12,7 @@ to build `Library`, so this module cannot import `core` at module scope.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -39,6 +40,7 @@ def install_helpers(**helpers):
 
 class PdfWrites:
     @staticmethod
+    @contextmanager
     def _open_pdf(path, writing=False):
         import pymupdf as fitz
         doc = fitz.open(path)
@@ -69,10 +71,10 @@ class PdfWrites:
                         raise
                     if signature[0] != "null":
                         raise ValueError("Digitally signed PDF is read-only; use an unsigned working copy")
-            return doc
-        except Exception:
-            doc.close()
-            raise
+            yield doc
+        finally:
+            if not doc.is_closed:
+                doc.close()
 
     @classmethod
     def read_portable(cls, path):
@@ -199,6 +201,12 @@ class PdfWrites:
         doc.set_metadata(info)
 
     def _atomic_save(self, doc, destination, backup=True, backup_key=None):
+        """Serialize and verify, close the owned document, then atomically publish.
+
+        Closing the source before replacement is required on Windows. Callers
+        finish inspecting it before this method; _open_pdf tolerates this early
+        close when leaving its owning context.
+        """
         descriptor, tempname = tempfile.mkstemp(prefix=".pdf-write-", suffix=".pdf", dir=destination.parent)
         os.close(descriptor)
         try:
@@ -209,6 +217,7 @@ class PdfWrites:
             # Windows' CRT-backed fsync requires a writable file descriptor.
             with open(tempname, "r+b") as handle:
                 os.fsync(handle.fileno())
+            doc.close()
             if backup and destination.exists():
                 backup_path = self.root / "backups" / ((backup_key + ".pdf" if backup_key else destination.name) + ".bak")
                 shutil.copy2(destination, backup_path)

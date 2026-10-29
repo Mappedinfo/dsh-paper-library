@@ -1,5 +1,6 @@
 """Synthetic cross-platform locks and durable-write regression checks."""
 import os
+from contextlib import contextmanager
 from pathlib import Path
 import stat
 import subprocess
@@ -217,5 +218,95 @@ def test_pdf_file_flush_uses_a_descriptor_windows_can_commit(tmp_path, monkeypat
         library.attach(item["id"], str(source))
         assert opened and all(opened.values())
         assert library.pdf_path(item["id"]).is_file()
+    finally:
+        library.close()
+
+
+def test_pdf_replacement_closes_owned_source_before_publish(tmp_path, monkeypatch):
+    """Enforce Windows' no-replace-while-open rule on every test platform."""
+    import errno
+    source = tmp_path / "synthetic.pdf"
+    with fitz.open() as doc:
+        doc.new_page().insert_text((40, 60), "Synthetic source")
+        doc.save(source)
+    original = source.read_bytes()
+    library = Library(tmp_path / "library")
+    open_pdf, replace = library._open_pdf, os.replace
+    active, replaced = {}, []
+    @contextmanager
+    def tracked_pdf(path, writing=False):
+        path = Path(path).resolve()
+        with open_pdf(path, writing=writing) as doc:
+            active[path] = doc
+            try:
+                yield doc
+            finally:
+                active.pop(path, None)
+    def windows_replace(staged, target):
+        path = Path(target).resolve()
+        if path in active and not active[path].is_closed:
+            raise PermissionError(errno.EACCES, "Windows refuses to replace an open PDF")
+        if path.suffix.lower() == ".pdf":
+            replaced.append(path)
+        return replace(staged, target)
+    monkeypatch.setattr(library, "_open_pdf", tracked_pdf)
+    monkeypatch.setattr(os, "replace", windows_replace)
+    try:
+        item = library.create({"title": "Synthetic managed PDF"})
+        library.attach(item["id"], str(source))
+        library.annotate(item["id"], page=1, type="note", comment="Persisted with source closed")
+        assert replaced.count(library.pdf_path(item["id"]).resolve()) == 2
+        assert library.annotations(item["id"])["annotations"][0]["comment"] == "Persisted with source closed"
+        assert source.read_bytes() == original
+        assert not active
+    finally:
+        library.close()
+
+
+def test_pdf_validation_failure_closes_owned_document(tmp_path, monkeypatch):
+    source = tmp_path / "synthetic.png"
+    pixmap = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 10, 10), False)
+    pixmap.clear_with(220)
+    pixmap.save(source)
+    actual_open, opened = fitz.open, []
+    def tracked_open(*args, **kwargs):
+        doc = actual_open(*args, **kwargs)
+        opened.append(doc)
+        return doc
+    monkeypatch.setattr(fitz, "open", tracked_open)
+    with pytest.raises(ValueError, match="non-PDF"):
+        with pdf_write.PdfWrites._open_pdf(source):
+            pytest.fail("a non-PDF must not enter the owning context")
+    assert opened and all(doc.is_closed for doc in opened)
+
+
+def test_failed_pdf_verification_releases_source_and_preserves_original(tmp_path, monkeypatch):
+    source = tmp_path / "synthetic.pdf"
+    with fitz.open() as doc:
+        doc.new_page().insert_text((40, 60), "Synthetic source")
+        doc.save(source)
+    library = Library(tmp_path / "library")
+    try:
+        item = library.create({"title": "Synthetic original"})
+        library.attach(item["id"], str(source))
+        managed = library.pdf_path(item["id"])
+        before = managed.read_bytes()
+        original_open, writers = library._open_pdf, []
+        @contextmanager
+        def rejected_staging(path, writing=False):
+            if Path(path).name.startswith(".pdf-write-"):
+                raise ValueError("synthetic saved-PDF validation failure")
+            with original_open(path, writing=writing) as doc:
+                if writing:
+                    writers.append(doc)
+                yield doc
+        monkeypatch.setattr(library, "_open_pdf", rejected_staging)
+        with pytest.raises(ValueError, match="saved-PDF validation"):
+            library.annotate(item["id"], page=1, type="note", comment="Must not publish")
+        assert writers and all(doc.is_closed for doc in writers)
+        assert managed.read_bytes() == before
+        assert not list(managed.parent.glob(".pdf-write-*"))
+        with library.lock():
+            pass
     finally:
         library.close()

@@ -1,5 +1,6 @@
 """Synthetic page geometry and standard PDF markup portability contracts."""
 import base64
+from contextlib import contextmanager
 import hashlib
 import json
 from pathlib import Path
@@ -39,11 +40,12 @@ def test_page_layout_uses_geometry_only_and_closes_pdf_before_return(tmp_path, m
     original_open = Library._open_pdf
     opened = []
 
+    @contextmanager
     def tracked_open(path, writing=False):
         assert writing is False
-        doc = original_open(path, writing=writing)
-        opened.append(doc)
-        return doc
+        with original_open(path, writing=writing) as doc:
+            opened.append(doc)
+            yield doc
 
     def forbidden(*args, **kwargs):
         raise AssertionError("page_layout attempted pixel, text, image or annotation extraction")
