@@ -22,6 +22,11 @@ import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
 from .handwriting import HandwritingAccess
+
+READER_MAX_SCALE = 8.0
+READER_MAX_PIXELS = 16_000_000
+READER_MAX_SIDE = 8192
+READER_MAX_PNG_BYTES = 16 * 1024 * 1024
 from .linked_handwriting import LinkedHandwritingAccess, LINKED_KINDS
 
 def _constants():
@@ -405,7 +410,6 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         scale = float(scale)
         if not math.isfinite(scale) or scale <= 0:
             raise ValueError("Render scale must be positive and finite")
-        scale = min(scale, 2.0)
         with self._open_pdf(self.pdf_path(id)) as doc:
             # First-open geometry and its selected raster share one short-lived
             # worker/document. Only the explicitly selected page is extracted.
@@ -417,9 +421,27 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             if width <= 0 or height <= 0:
                 raise ValueError("Invalid page dimensions")
             if render_width is not None:
-                scale = min(render_width / width, 2.0)
-            scale = min(scale, math.sqrt(4_000_000 / (width * height)), 4000 / width, 4000 / height)
-            pix = current.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                scale = render_width / width
+            requested_scale = scale
+            scale = min(scale, READER_MAX_SCALE, math.sqrt(READER_MAX_PIXELS / (width * height)), READER_MAX_SIDE / width, READER_MAX_SIDE / height)
+            # A fractional page edge rounds upwards in the raster. Keep the
+            # allocation bounded after rounding, before asking the PDF engine.
+            while math.ceil(width * scale) * math.ceil(height * scale) > READER_MAX_PIXELS or max(math.ceil(width * scale), math.ceil(height * scale)) > READER_MAX_SIDE:
+                scale *= .999
+            byte_limited = False
+            for attempt in range(4):
+                pix = current.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                if pix.width * pix.height > READER_MAX_PIXELS or max(pix.width, pix.height) > READER_MAX_SIDE:
+                    raise ValueError("PDF raster exceeds the reading pixel budget")
+                image = pix.tobytes("png")
+                if len(image) <= READER_MAX_PNG_BYTES:
+                    break
+                byte_limited = True
+                scale *= min(.85, math.sqrt(READER_MAX_PNG_BYTES / len(image)) * .95)
+                if min(width, height) * scale < 1:
+                    raise ValueError("页面图像超过传输上限，请降低缩放后重试。")
+            else:
+                raise ValueError("页面图像超过传输上限，请降低缩放后重试。")
             words = []
             raw_words = current.get_text("words")
             for word in raw_words[:20000]:
@@ -435,7 +457,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                     annotation_truncated = True
                     break
                 annotations.append(value)
-            return {"page": int(page), "page_count": doc.page_count, "width": width, "height": height, "scale": scale, "image": base64.b64encode(pix.tobytes("png")).decode("ascii"), "words": words, "annotations": annotations, "words_truncated": len(raw_words) > 20000, "annotations_truncated": annotation_truncated, "rotation": current.rotation, **({"layout": layout} if layout is not None else {})}
+            return {"page": int(page), "page_count": doc.page_count, "width": width, "height": height, "scale": scale, "requested_scale": requested_scale, "limited": scale < requested_scale - 1e-6, "byte_limited": byte_limited, "pixel_width": pix.width, "pixel_height": pix.height, "limits": {"scale": READER_MAX_SCALE, "pixels": READER_MAX_PIXELS, "side": READER_MAX_SIDE, "png_bytes": READER_MAX_PNG_BYTES}, "image": base64.b64encode(image).decode("ascii"), "words": words, "annotations": annotations, "words_truncated": len(raw_words) > 20000, "annotations_truncated": annotation_truncated, "rotation": current.rotation, **({"layout": layout} if layout is not None else {})}
 
     def _add_annotation(self, doc, page, type="highlight", rects=None, text="", comment="", author="Reader", color="#ffdb66", extra=None, paths=None, width=2, annotation_id=None, parent_id=None):
         import pymupdf as fitz

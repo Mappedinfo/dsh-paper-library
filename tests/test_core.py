@@ -89,7 +89,7 @@ def test_rotated_words_annotations_and_render_cap(tmp_path, rotation):
     item = request(tmp_path, "import", path=str(original))["items"][0]
     page = request(tmp_path, "page", id=item["id"], scale=100)
     assert page["width"] == (500 if rotation in {90, 270} else 400)
-    assert page["scale"] <= 2
+    assert page["scale"] <= 8
     word = page["words"][0]
     annotation = request(tmp_path, "annotate", id=item["id"], page=1, rects=[word[:4]], text=word[4], comment="Rotation")["annotation"]
     assert annotation["rects"][0] == pytest.approx(word[:4], abs=0.001)

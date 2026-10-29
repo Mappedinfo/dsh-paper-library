@@ -79,13 +79,14 @@ window.PaperReadingShell = (() => {
     annotationTools.append(modeGroup,colorLabel,widthLabel,penSettings);
     const sidebar=button('reader-annotations','批注栏',()=>{panels()?.toggle('annotations');sync();});readerTools.append(sidebar);
     // Fit-width default with free zoom: steppers, an explicit percentage and reset.
-    let zoom=1;
+    let zoom=1, zoomSaveTimer=null;
     const zoomGroup=node('span',null,'reader-zoom');
     const zoomOut=button('reader-zoom-out','−',()=>setZoom(zoom/1.2));zoomOut.title='缩小';
     const percent=node('input');percent.id='reader-zoom-percent';percent.type='number';percent.min='25';percent.max='400';percent.step='5';percent.value='100';percent.setAttribute('aria-label','PDF 缩放百分比');percent.title='缩放百分比（25–400）';
     const zoomIn=button('reader-zoom-in','＋',()=>setZoom(zoom*1.2));zoomIn.title='放大';
     const zoomFit=button('reader-zoom-fit','全宽',()=>setZoom(1));zoomFit.title='恢复全宽自适应';
-    function setZoom(value){const applied=reader()?.setZoom(value);if(applied===undefined)return;zoom=applied;percent.value=String(Math.round(zoom*100));if(persistence)void patchLayout({zoom});}
+    function zoomChanged(value){if(!Number.isFinite(value))return;zoom=value;percent.value=String(Math.round(zoom*100));if(zoomSaveTimer!==null)window.clearTimeout(zoomSaveTimer);if(persistence)zoomSaveTimer=window.setTimeout(()=>{zoomSaveTimer=null;void patchLayout({zoom});},250);}
+    function setZoom(value){const applied=reader()?.setZoom(value);if(applied===undefined)return;zoomChanged(applied);}
     const commitZoom=()=>{const value=Number(percent.value);if(Number.isFinite(value))setZoom(value/100);percent.value=String(Math.round(zoom*100));};
     percent.addEventListener('change',commitZoom);
     percent.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();commitZoom();}});
@@ -249,8 +250,8 @@ window.PaperReadingShell = (() => {
     // Prevent a homepage link from discarding a question/metadata draft.
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
     sync();
-    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
-      dispose(){for(const {disclosure,update} of organizerDisclosures)disclosure.removeEventListener('toggle',update);window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placePenOptions);$('paper-tools').removeEventListener('scroll',placePenOptions);document.removeEventListener('click',closePenSettings);document.removeEventListener('keydown',penSettingsKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);document.removeEventListener('click',closeCitations);document.removeEventListener('keydown',citationKey,true);}};
+    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,zoomChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
+      dispose(){if(zoomSaveTimer!==null)window.clearTimeout(zoomSaveTimer);for(const {disclosure,update} of organizerDisclosures)disclosure.removeEventListener('toggle',update);window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placePenOptions);$('paper-tools').removeEventListener('scroll',placePenOptions);document.removeEventListener('click',closePenSettings);document.removeEventListener('keydown',penSettingsKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);document.removeEventListener('click',closeCitations);document.removeEventListener('keydown',citationKey,true);}};
   }
   return {create};
 })();

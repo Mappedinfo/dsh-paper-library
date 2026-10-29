@@ -1336,6 +1336,7 @@ readingPanels = window.PaperReadingPanels?.create({persistence,root:$('reading-w
 });
 workbenchUI?.setPanelHost({openMetadataPanel:()=>readingPanels?.show('metadata'),closeMetadataPanel:()=>readingPanels?.close('metadata')});
 pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPaper:()=>state.active,
+  onZoomChange:value=>{readingShell?.zoomChanged(value);publishReaderState();},
   onInkTrace:info=>inkDiagnostics?.record(info),
   onActivePage: (page,info) => {
     if(info.paperId!==state.active?.id)return;

@@ -77,7 +77,7 @@ def test_layout_dimensions_match_bounded_renderer_at_mixed_sizes_and_rotations(t
         width, height = struct.unpack(">II", image[16:24])
         assert width == pytest.approx(geometry["width"] * page["scale"], abs=1)
         assert height == pytest.approx(geometry["height"] * page["scale"], abs=1)
-        assert width * height <= 4_000_000
+        assert width * height <= 16_000_000
         for word in page["words"]:
             assert 0 <= word[0] < word[2] <= geometry["width"]
             assert 0 <= word[1] < word[3] <= geometry["height"]
@@ -120,7 +120,7 @@ def test_first_page_payload_clamps_a_restored_page_but_keeps_regular_page_valida
     source = synthetic_pdf(tmp_path / "source.pdf", [(300, 400, 0), (500, 250, 90)])
     item = request(tmp_path, "import", path=str(source))["items"][0]
     result = request(tmp_path, "page", id=item["id"], page=2000, include_layout=True, render_width=32000)
-    assert result["page"] == 2 and result["scale"] <= 2
+    assert result["page"] == 2 and result["scale"] <= 8
     assert len(result["layout"]["pages"]) == 2
     with pytest.raises(ValueError, match="outside document"):
         request(tmp_path, "page", id=item["id"], page=2000)
@@ -129,6 +129,56 @@ def test_first_page_payload_clamps_a_restored_page_but_keeps_regular_page_valida
             request(tmp_path, "page", id=item["id"], render_width=width)
     with pytest.raises(ValueError, match="boolean"):
         request(tmp_path, "page", id=item["id"], include_layout="true")
+
+
+def test_retina_render_is_sharp_and_preserves_pdf_point_geometry(tmp_path):
+    source = synthetic_pdf(tmp_path / "retina.pdf", [(595, 842, 0)])
+    item = request(tmp_path, "import", path=str(source))["items"][0]
+    baseline = request(tmp_path, "page", id=item["id"], scale=1)
+    rendered = request(tmp_path, "page", id=item["id"], render_width=2200)
+    assert rendered["scale"] > 3.6 and rendered["limited"] is False
+    assert rendered["pixel_width"] == 2200
+    assert rendered["pixel_height"] >= 3113
+    assert rendered["words"] == baseline["words"]
+    assert [a["rects"] for a in rendered["annotations"]] == [a["rects"] for a in baseline["annotations"]]
+
+
+@pytest.mark.parametrize("dimensions", [(595.3, 842.7, 0), (15000, 100, 0), (100, 15000, 90)])
+def test_zoom_raster_budgets_apply_to_rounded_pixel_dimensions(tmp_path, dimensions):
+    source = synthetic_pdf(tmp_path / "large.pdf", [dimensions])
+    item = request(tmp_path, "import", path=str(source))["items"][0]
+    rendered = request(tmp_path, "page", id=item["id"], scale=100)
+    image = base64.b64decode(rendered["image"])
+    width, height = struct.unpack(">II", image[16:24])
+    assert (width, height) == (rendered["pixel_width"], rendered["pixel_height"])
+    assert width * height <= 16_000_000 and max(width, height) <= 8192
+    assert rendered["scale"] <= 8 and rendered["requested_scale"] == 100
+    assert rendered["limited"] is True
+    assert len(image) <= rendered["limits"]["png_bytes"]
+
+
+def test_oversized_encoded_raster_fails_visibly_without_writing_pdf(tmp_path, monkeypatch):
+    import dsh_paper_library.annotations as renderer
+    source = synthetic_pdf(tmp_path / "encoded.pdf", [(300, 400, 0)])
+    item = request(tmp_path, "import", path=str(source))["items"][0]
+    original = source.read_bytes()
+    monkeypatch.setattr(renderer, "READER_MAX_PNG_BYTES", 1)
+    with pytest.raises(ValueError, match="传输上限"):
+        request(tmp_path, "page", id=item["id"], scale=2)
+    assert source.read_bytes() == original
+
+
+def test_encoded_raster_falls_back_within_a_byte_budget_and_reports_actual_scale(tmp_path, monkeypatch):
+    import dsh_paper_library.annotations as renderer
+    source = synthetic_pdf(tmp_path / "byte-limit.pdf", [(595, 842, 0)])
+    item = request(tmp_path, "import", path=str(source))["items"][0]
+    full = request(tmp_path, "page", id=item["id"], scale=4)
+    cap = int(len(base64.b64decode(full["image"])) * .6)
+    monkeypatch.setattr(renderer, "READER_MAX_PNG_BYTES", cap)
+    result = request(tmp_path, "page", id=item["id"], scale=4)
+    assert len(base64.b64decode(result["image"])) <= cap
+    assert result["byte_limited"] and result["limited"]
+    assert result["scale"] < full["scale"] and result["words"] == full["words"]
 
 
 def test_many_external_highlights_reuse_one_word_extraction_and_preserve_recovered_text(tmp_path, monkeypatch):
