@@ -206,7 +206,8 @@ class PdfWrites:
             with self._open_pdf(tempname) as verify:
                 if verify.page_count != doc.page_count:
                     raise ValueError("PDF validation failed after save")
-            with open(tempname, "rb") as handle:
+            # Windows' CRT-backed fsync requires a writable file descriptor.
+            with open(tempname, "r+b") as handle:
                 os.fsync(handle.fileno())
             if backup and destination.exists():
                 backup_path = self.root / "backups" / ((backup_key + ".pdf" if backup_key else destination.name) + ".bak")

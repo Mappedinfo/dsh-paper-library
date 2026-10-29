@@ -9,7 +9,7 @@ import time
 import pymupdf as fitz
 import pytest
 
-from dsh_paper_library import bibliography, library_knowledge, portable_io
+from dsh_paper_library import bibliography, library_knowledge, pdf_write, portable_io
 from dsh_paper_library.core import Library
 
 
@@ -189,3 +189,33 @@ def test_file_fsync_failure_does_not_replace_existing_data(tmp_path, monkeypatch
         bibliography._atomic_write(path, b"replacement")
     assert path.read_bytes() == b"preserved original"
     assert not list(tmp_path.glob("*.tmp-*"))
+
+
+def test_pdf_file_flush_uses_a_descriptor_windows_can_commit(tmp_path, monkeypatch):
+    """Emulate Windows _commit rejecting a read-only file descriptor on any OS."""
+    import builtins
+    import errno
+    original_sync, opened = os.fsync, {}
+    def track_open(*args, **kwargs):
+        handle = builtins.open(*args, **kwargs)
+        if Path(handle.name).name.startswith(".pdf-write-"):
+            opened[handle.fileno()] = handle.writable()
+        return handle
+    def strict_file_commit(fd):
+        if fd in opened and not opened[fd]:
+            raise OSError(errno.EBADF, "Windows cannot commit a read-only file descriptor")
+        original_sync(fd)
+    monkeypatch.setattr(pdf_write, "open", track_open, raising=False)
+    monkeypatch.setattr(os, "fsync", strict_file_commit)
+    source = tmp_path / "synthetic.pdf"
+    with fitz.open() as doc:
+        doc.new_page().insert_text((40, 60), "Synthetic content")
+        doc.save(source)
+    library = Library(tmp_path / "library")
+    try:
+        item = library.create({"title": "Synthetic commit"})
+        library.attach(item["id"], str(source))
+        assert opened and all(opened.values())
+        assert library.pdf_path(item["id"]).is_file()
+    finally:
+        library.close()
