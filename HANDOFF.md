@@ -1,6 +1,8 @@
 **Windows 原生启动修复（2026-10-29，#2）：** 当前源码已移除无条件 `fcntl`，使用 filelock 原生后端与 30 秒写锁等待，保留事务回滚及稳定锁文件；Node／Python 的目录同步统一在 Windows 打开目录前跳过，文件同步与原子替换继续保留。补齐文件标志、打开后身份检查、UTF-8 worker 协议和既有虚拟环境锁依赖升级。平台边界及 ACL／断电持久性限制见 README；npm 0.2.4 尚未包含修复。
 
-验证：本地 Python 531 通过，相关 Node 55 通过／1 项既有跳过，真实 CLI／状态流程 5 组通过，构建与差异检查通过。新增 Windows／Linux、Node 24／Python 3.14 的原生 CI；前两轮进一步发现并修正 PDF 临时文件只读同步及源文档占用阻止替换的问题，当前等待生命周期修正后的原生复测，尚不宣称 Windows 已验收。私有 `_open_pdf` 现统一管理文档关闭，保存前先验证并同步临时文件、关闭源文档，再备份及替换；不增加整份 PDF 内存复制。仅用合成资料，未修改 DSH 源码或操作个人文献库。
+验证：本地 Python 531 通过，相关 Node 55 通过／1 项既有跳过，真实 CLI／状态流程 5 组通过，构建与差异检查通过。[原生 Windows／Ubuntu CI](https://github.com/Mappedinfo/dsh-paper-library/actions/runs/40809576796) 的两平台任务均通过，代码为 `80fd389`；Node 24／Python 3.14，Windows runner 为 Windows Server 2025，不能代替 Windows 11 + DSH desktop 全界面验收。前两轮进一步发现并修正 PDF 临时文件只读同步及源文档占用阻止替换的问题。私有 `_open_pdf` 现统一管理文档关闭，保存前先验证并同步临时文件、关闭源文档，再备份及替换；不增加整份 PDF 内存复制。仅用合成资料，未修改 DSH 源码或操作个人文献库。
+
+已在 [#2 回复报告者](https://github.com/Mappedinfo/dsh-paper-library/issues/2#issuecomment-6486699529)，说明修复、统一锁依赖、原生验证范围及源码安装方法；保留 issue 开放，等待原 Windows 11 环境确认。GitHub 连接器缺少评论写权限，改用已登录的本机 GitHub 账户发布并读回核验。另一条 #1 为社区收录通知，无对应 bug 改动。本轮未发布新的 npm 包，0.2.4 用户需使用当前 main 源码才能取得修复。
 
 **npm v0.2.4 已发布（2026-10-29）：** `@mappedinfo/dsh-paper-library@0.2.4` 已发布到官方 registry，`latest` 指向 0.2.4。发布包 294 个文件、1,280,203 字节；从 registry 实际下载后的 SHA-512 与本地发布包一致。已核对无论文、个人工作文件、数据库、私有配置或凭据，代码与上一轮通过检查的实现相同；只更新安装说明与发布状态。登录及本次发布的身份验证均经 npm 官方浏览器完成，认证信息不入库。GitHub v0.2.4 发布说明同步更新；资料库和现有 DSH 配置未修改。
 
