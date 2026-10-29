@@ -1,3 +1,7 @@
+**LaTeX 导航高亮层级与配色（2026-10-29，未发布）：** 修复按文件路径把同文件全部标题标成 active 的逻辑；现在只有光标所在的最近标题强高亮，同文件其他项淡显，前导内容标记文件项。CodeMirror 光标、键盘选择、跨文件跳转和导航重读同步当前位置，保存冲突及迟到读取保留原选择。新增共享 `latex_accent` 偏好：默认跟随 DSH，工作台写作设置提供预设和自定义颜色，原生设置接受 `system` 或 `#RRGGBB`；样式仅作用于插件，不改变 PDF 批注颜色。操作及静态导航边界见 [使用说明](docs/latex-projects.md#章节文件与媒体侧栏)。
+
+验证：面板与设置 51 项通过、1 项既有宿主构建依赖跳过；主题及设置桥 29 项通过；`scripts/latex-outline-fixture.mjs` 的 5 组合成 Chromium 检查通过，覆盖唯一当前位置、真实光标联动、DSH 动态配色、自选颜色持久化及恢复、浅深色与相反宿主下的纸色／夜色对比度，浏览器错误和模型调用均为 0。1512×982 截图仅保留在临时目录。构建及差异检查通过。未读取或提交私人稿件，未修改 DSH 源码；未热重载正在使用的插件或刷新现有写作页面。已打开页面需先保存草稿，再热重载插件并刷新以使用新增设置；未发布 npm 版本。
+
 **v0.2.5 已发布（2026-10-29）：** [npm 0.2.5](https://www.npmjs.com/package/@mappedinfo/dsh-paper-library/v/0.2.5) 已发布，`latest` 指向 0.2.5；[GitHub v0.2.5](https://github.com/Mappedinfo/dsh-paper-library/releases/tag/v0.2.5) 及标签指向 `532ec29`。发布包 296 个文件、1,284,079 字节，从 registry 下载后的 SHA-512 与本地包一致，未包含私人稿件、运行配置或凭据。实现复用 Python 531 项、相关 Node 55 项及 Windows／Ubuntu 验证；[本次版本 CI](https://github.com/Mappedinfo/dsh-paper-library/actions/runs/40810562792) 两平台任务均通过。已在 #2 补充升级通知，保持开放等待 Windows 11 实机反馈；资料库和现有 DSH 配置未修改。
 
 **Windows 原生启动修复（2026-10-29，#2）：** 当前源码已移除无条件 `fcntl`，使用 filelock 原生后端与 30 秒写锁等待，保留事务回滚及稳定锁文件；Node／Python 的目录同步统一在 Windows 打开目录前跳过，文件同步与原子替换继续保留。补齐文件标志、打开后身份检查、UTF-8 worker 协议和既有虚拟环境锁依赖升级。平台边界及 ACL／断电持久性限制见 README；npm 0.2.4 尚未包含修复。

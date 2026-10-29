@@ -22,11 +22,12 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   latex_auto_compile: true,
   latex_engine: 'xelatex',
   latex_theme: 'system',
+  latex_accent: 'system',
   latex_path_font: 'pixel',
   latex_split: 50,
   latex_sync_folder: true,
 });
-export const TEXT_SETTINGS = Object.freeze(['sync_config', 'external_sources']);
+export const TEXT_SETTINGS = Object.freeze(['sync_config', 'external_sources', 'latex_accent']);
 export const NUMBER_SETTINGS = Object.freeze({ latex_split: { minimum: 25, maximum: 75 } });
 const fields = Object.keys(PAPER_LIBRARY_SETTINGS_DEFAULTS);
 const markerKey = 'settings.migration:paper-library';
@@ -57,6 +58,7 @@ export function createPaperLibrarySettingsSchema(Schema) {
     latex_auto_compile: Schema.boolean().default(true),
     latex_engine: Schema.union([Schema.const('xelatex'), Schema.const('pdflatex'), Schema.const('lualatex')]).default('xelatex'),
     latex_theme: Schema.union([Schema.const('system'), Schema.const('parchment'), Schema.const('midnight')]).default('system'),
+    latex_accent: Schema.string().default('system'),
     latex_path_font: Schema.union([Schema.const('pixel'), Schema.const('mono'), Schema.const('system')]).default('pixel'),
     latex_split: Schema.number().default(50),
     latex_sync_folder: Schema.boolean().default(true),
@@ -73,6 +75,8 @@ function validatePatch(patch) {
       if (!['xelatex', 'pdflatex', 'lualatex'].includes(value)) throw invalid('设置值无效：latex_engine');
     } else if (key === 'latex_theme') {
       if (!['system', 'parchment', 'midnight'].includes(value)) throw invalid('设置值无效：latex_theme');
+    } else if (key === 'latex_accent') {
+      if (typeof value !== 'string' || value !== 'system' && !/^#[0-9a-f]{6}$/i.test(value)) throw invalid('LaTeX 界面强调色需要 system（跟随 DSH）或 #RRGGBB 颜色。');
     } else if (key === 'latex_path_font') {
       if (!['pixel', 'mono', 'system'].includes(value)) throw invalid('设置值无效：latex_path_font');
     } else if (key === 'sync_config') {

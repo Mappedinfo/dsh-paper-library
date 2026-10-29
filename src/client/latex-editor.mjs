@@ -56,6 +56,7 @@ function create(textarea, container) {
     editable.of([EditorState.readOnly.of(false), EditorView.editable.of(true)]),
     EditorView.updateListener.of(update => {
       if (update.docChanged && !silent) textarea.dispatchEvent(new Event('input', { bubbles: true }))
+      if ((update.selectionSet || update.docChanged) && !silent) textarea.dispatchEvent(new Event('select'))
     }),
   ]
   const newState = text => EditorState.create({ doc: text, extensions })
@@ -84,7 +85,7 @@ function create(textarea, container) {
     const limit = view.state.doc.length
     view.dispatch({ selection: { anchor: Math.max(0, Math.min(start, limit)), head: Math.max(0, Math.min(end, limit)) }, scrollIntoView: true })
   }
-  return { view, openSearch: () => openSearchPanel(view), insert: (text, start, end) => {
+  return { view, cursorLine: () => view.state.doc.lineAt(view.state.selection.main.head).number, openSearch: () => openSearchPanel(view), insert: (text, start, end) => {
     if (disabled) return false
     view.dispatch({ changes: { from: start, to: end, insert: text }, selection: { anchor: start + text.length }, scrollIntoView: true, userEvent: 'input' })
     view.focus()

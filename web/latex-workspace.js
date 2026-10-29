@@ -18,7 +18,7 @@ window.PaperLatexWorkspace = (() => {
   const MAX_RENDERED_PAGES = 3;
   const MAX_CACHED_BYTES = 48 * 1024 * 1024;
   const SPLIT_MIN = 25, SPLIT_MAX = 75;
-  const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_path_font: 'pixel', latex_split: 50, latex_sync_folder: true };
+  const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_path_font: 'pixel', latex_accent: 'system', latex_split: 50, latex_sync_folder: true };
 
   function create({api, toast = () => {}, getLibrary = () => '', rail = null, onVersionSaved = () => {}}) {
     const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
@@ -142,8 +142,13 @@ window.PaperLatexWorkspace = (() => {
     const settingPathFont = make('select'); settingPathFont.id = 'latex-setting-path-font'; settingPathFont.setAttribute('aria-label', '文件路径字体');
     for (const [value, label] of [['pixel', '像素'], ['mono', '等宽'], ['system', '跟随界面']]) { const option = make('option', '', label); option.value = value; settingPathFont.append(option); }
     const pathFontLabel = make('label', 'latex-check'); pathFontLabel.append(make('span', '', '文件路径字体'), settingPathFont);
+    const accentPresets = [['system', '跟随 DSH'], ['#4176e6', '蓝色'], ['#27806b', '青绿'], ['#b7791f', '琥珀'], ['#8250c4', '紫色'], ['custom', '自定义…']];
+    const settingAccent = make('select'); settingAccent.id = 'latex-setting-accent'; settingAccent.setAttribute('aria-label', '界面高亮配色');
+    for (const [value, label] of accentPresets) { const option = make('option', '', label); option.value = value; settingAccent.append(option); }
+    const settingAccentColor = make('input'); settingAccentColor.id = 'latex-setting-accent-color'; settingAccentColor.type = 'color'; settingAccentColor.value = '#4176e6'; settingAccentColor.setAttribute('aria-label', '自定义界面高亮颜色'); settingAccentColor.hidden = true;
+    const accentLabel = make('label', 'latex-check'); accentLabel.append(make('span', '', '界面高亮'), settingAccent, settingAccentColor);
     const settingsRetry = make('button', 'button subtle', '重试保存设置'); settingsRetry.id = 'latex-settings-retry'; settingsRetry.type = 'button'; settingsRetry.hidden = true;
-    const settingsLine = make('div', 'latex-menu-row'); settingsLine.append(settingStarterLabel, settingAutoLabel, engineLabel, themeLabel, pathFontLabel, settingsRetry);
+    const settingsLine = make('div', 'latex-menu-row'); settingsLine.append(settingStarterLabel, settingAutoLabel, engineLabel, themeLabel, pathFontLabel, accentLabel, settingsRetry);
     settingRow.append(settingsLine);
 
     const rootRow = make('div', 'latex-menu-section');
@@ -379,8 +384,10 @@ window.PaperLatexWorkspace = (() => {
     editor.addEventListener('scroll', () => { gutter.scrollTop = editor.scrollTop; });
     editor.addEventListener('input', () => {
       dirty = true; pendingConflict = null; conflictBar.hidden = true; lineNumbers(); setSaveState('未保存', 'dirty'); scheduleSave();
-      updateSyncHint();
+      updateSyncHint(); if (!sourceEditor) updateNavigatorActive();
     });
+    editor.addEventListener('select', () => updateNavigatorActive());
+    if (!sourceEditor) for (const event of ['click', 'keyup']) editor.addEventListener(event, () => updateNavigatorActive());
     function writingContext() {
       return { id: project?.id, title: project?.title, path: file, revision, content: editor.value, selectionStart: editor.selectionStart || 0, selectionEnd: editor.selectionEnd || 0,
         blocked: !project || !file || editor.disabled || switching || Boolean(pendingConflict) };
@@ -423,6 +430,12 @@ window.PaperLatexWorkspace = (() => {
       view.dataset.latexTheme = settingTheme.value;
       settingPathFont.value = settings.latex_path_font || 'pixel';
       view.dataset.latexPathFont = settingPathFont.value;
+      const accent = /^#[a-f0-9]{6}$/i.test(settings.latex_accent) ? settings.latex_accent.toLowerCase() : 'system';
+      settingAccent.value = accentPresets.some(([value]) => value === accent) ? accent : 'custom';
+      settingAccentColor.hidden = settingAccent.value !== 'custom';
+      settingAccentColor.value = accent === 'system' ? '#4176e6' : accent;
+      view.dataset.latexAccent = accent === 'system' ? 'system' : 'custom';
+      view.style.setProperty('--latex-accent-color', settingAccentColor.value);
       createStarter.checked = settings.latex_starter !== false;
       newStarter.checked = settings.latex_starter !== false;
       autoLabel.textContent = settings.latex_auto_compile === false ? '自动编译已关' : (autoPaused ? '自动编译已暂停' : '自动编译');
@@ -759,12 +772,36 @@ window.PaperLatexWorkspace = (() => {
       for (const [mode, button] of navButtons) button.setAttribute('aria-selected', String(mode === name));
       outlineList.hidden = name !== 'outline'; fileList.hidden = name !== 'files'; mediaList.hidden = name !== 'media';
     }
-    function sourceButton(path, label = path, line = 1) {
+    function sourceButton(path, label = path, line = 1, kind = 'file') {
       const button = make('button', 'latex-file-open', label); button.type = 'button'; button.dataset.path = path; button.dataset.line = String(line);
+      button.dataset.navKind = kind;
       button.title = `${path}:${line}`;
       button.addEventListener('click', () => void gotoSource(path, line));
-      button.classList.toggle('active', path === file);
       return button;
+    }
+    function updateNavigatorActive(line) {
+      const cursorLine = Number.isSafeInteger(line) ? line : (sourceEditor?.cursorLine?.() || editor.value.slice(0, editor.selectionStart || 0).split('\n').length);
+      const outlineButtons = outlineList.querySelectorAll('button[data-path]');
+      let currentHeading = null, currentFileButton = null;
+      for (const button of outlineButtons) {
+        if (button.dataset.path !== file) continue;
+        if (button.dataset.navKind === 'file' && !currentFileButton) currentFileButton = button;
+        const candidate = Number(button.dataset.line);
+        if (button.dataset.navKind === 'heading' && candidate <= cursorLine && (!currentHeading || candidate > Number(currentHeading.dataset.line))) currentHeading = button;
+      }
+      for (const button of outlineButtons) {
+        const active = button === (currentHeading || currentFileButton);
+        button.classList.toggle('current-file', Boolean(file) && button.dataset.path === file);
+        button.classList.toggle('active', active);
+        const current = active ? 'location' : 'false';
+        if (button.getAttribute('aria-current') !== current) button.setAttribute('aria-current', current);
+      }
+      for (const button of fileList.querySelectorAll('button[data-path]')) {
+        const active = Boolean(file) && button.dataset.path === file;
+        button.classList.toggle('current-file', active); button.classList.toggle('active', active);
+        const current = active ? 'location' : 'false';
+        if (button.getAttribute('aria-current') !== current) button.setAttribute('aria-current', current);
+      }
     }
     function directoryTree(container, items, media = false) {
       container.textContent = '';
@@ -800,7 +837,7 @@ window.PaperLatexWorkspace = (() => {
         for (const item of result.events || []) {
           const row = make('div', `latex-outline-${item.kind}`);
           const label = item.kind === 'file' ? `${item.repeated ? '↳ ' : ''}${item.title}` : item.title;
-          const button = sourceButton(item.path, label, item.line);
+          const button = sourceButton(item.path, label, item.line, item.kind);
           if (item.kind === 'warning') button.title += item.target ? ` · ${item.target}` : '';
           if (item.kind === 'heading') button.style.paddingLeft = `${8 + Math.max(0, item.level - 2) * 12}px`;
           row.append(button); outlineList.append(row);
@@ -815,6 +852,7 @@ window.PaperLatexWorkspace = (() => {
         for (const path of candidates) { const option = make('option', '', path); option.value = path; mainSelect.append(option); }
         mainSelect.value = project.main_path;
         navHint.textContent = result.truncated || result.tree_truncated || !result.entry_scan_complete ? '导航达到读取预算，结果可能不完整；可用文件树打开。' : '按已保存源码顺序；宏与条件不展开。';
+        updateNavigatorActive();
       } catch (error) {
         if (ticket !== navRequest || error.name === 'AbortError') return;
         outlineList.textContent = `章节读取失败：${error.message}。可用「文件」导航，或点 ↻ 重试。`;
@@ -876,7 +914,7 @@ window.PaperLatexWorkspace = (() => {
       editor.value = read.content; lineNumbers(); editor.scrollTop = 0; gutter.scrollTop = 0;
       pendingConflict = null; conflictBar.hidden = true;
       setSaveState('已载入', 'saved');
-      for (const button of navigator.querySelectorAll('button[data-path]')) button.classList.toggle('active', button.dataset.path === file);
+      updateNavigatorActive();
       say(`${file} · ${read.bytes} 字节 · ${read.lines} 行 · 修订 ${read.revision.slice(0, 8)}`);
       return true;
     }
@@ -1219,6 +1257,7 @@ window.PaperLatexWorkspace = (() => {
       for (let index = 0; index < target - 1; index += 1) offset += lines[index].length + 1;
       editor.focus();
       editor.setSelectionRange(offset, offset + lines[target - 1].length);
+      updateNavigatorActive(target);
       if (!sourceEditor) {
         const lineHeight = parseFloat(getComputedStyle(editor).lineHeight) || 21;
         editor.scrollTop = Math.max(0, (target - 1) * lineHeight - editor.clientHeight / 3);
@@ -1475,6 +1514,11 @@ window.PaperLatexWorkspace = (() => {
     settingEngine.addEventListener('change', () => void saveSetting({ latex_engine: settingEngine.value }));
     settingTheme.addEventListener('change', () => void saveSetting({ latex_theme: settingTheme.value }));
     settingPathFont.addEventListener('change', () => void saveSetting({ latex_path_font: settingPathFont.value }));
+    settingAccent.addEventListener('change', () => {
+      if (settingAccent.value === 'custom') { settingAccentColor.hidden = false; settingAccentColor.focus(); }
+      else void saveSetting({ latex_accent: settingAccent.value });
+    });
+    settingAccentColor.addEventListener('change', () => void saveSetting({ latex_accent: settingAccentColor.value }));
     settingAuto.addEventListener('change', () => {
       autoPaused = false;
       void saveSetting({ latex_auto_compile: settingAuto.checked });
@@ -1692,6 +1736,7 @@ window.PaperLatexWorkspace = (() => {
         type: text => { editor.value = text; dirty = true; lineNumbers(); setSaveState('未保存', 'dirty'); return flush('manual'); },
         flush: () => flush('manual'),
         openFile,
+        gotoSource,
         openMedia,
         renderPage,
         loadOutline,

@@ -2,6 +2,11 @@
 
 本项目采用语义化版本。每个发布版本在 GitHub Releases 与 Git 标签中同时提供。
 
+## 未发布
+
+- 修复 LaTeX 章节导航把同一文件的所有标题同时强高亮的问题：仅光标所在标题强高亮，同文件其他项淡显；点击、键盘移动和跨文件定位保持同步，保存冲突时保留原选择。
+- 界面高亮默认跟随 DSH；写作设置可选择预设色或自定义颜色，与原生插件设置共用 `latex_accent` 偏好，不改变 PDF 批注颜色。
+
 ## v0.2.5 — 2026-10-29
 
 - 修复 [#2](https://github.com/Mappedinfo/dsh-paper-library/issues/2) 的原生 Windows 启动与保存阻断：跨进程写锁使用 filelock 原生后端；Windows 跳过目录 fsync，保留文件同步、原子替换与事务回滚，POSIX 同步错误继续上报。

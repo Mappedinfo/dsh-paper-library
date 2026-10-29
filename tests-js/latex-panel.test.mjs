@@ -563,3 +563,81 @@ test('workspace theme persists as a local preference without changing the host',
   assert.equal(f.ids.get('latex-view').dataset.latexTheme, 'parchment')
   f.ui.dispose()
 })
+
+function sectionOutline() {
+  return { events: [{ kind: 'file', path: 'main.tex', line: 1, title: 'main.tex' },
+    { kind: 'file', path: 'a.tex', line: 1, title: 'a.tex' },
+    ...[1, 4, 8].map(line => ({ kind: 'heading', path: 'a.tex', line, title: `Section ${line}`, level: 2 })),
+    { kind: 'file', path: 'b.tex', line: 1, title: 'b.tex' }, { kind: 'heading', path: 'b.tex', line: 1, title: 'Other section', level: 2 }],
+    entries: ['main.tex'], unreferenced: [], entry_scan_complete: true }
+}
+const sectionText = Array.from({ length: 10 }, (_, index) => `Synthetic line ${index + 1}`).join('\n')
+const outlineButtons = f => f.ids.get('latex-outline').querySelectorAll('button[data-path]')
+const strongOutline = f => outlineButtons(f).filter(button => button.classList.contains('active'))
+
+test('outline distinguishes one current heading from same-file context and follows the cursor', async () => {
+  const f = await fixture((action, args) => {
+    if (action === 'latex_outline') return sectionOutline()
+    if (action === 'latex_read') return { path: args.path, content: sectionText, revision: 'synthetic', bytes: sectionText.length, lines: 10 }
+  })
+  await f.ui.testHooks.gotoSource('a.tex', 4)
+  assert.equal(strongOutline(f).length, 1); assert.equal(strongOutline(f)[0].dataset.line, '4')
+  assert.equal(strongOutline(f)[0].getAttribute('aria-current'), 'location')
+  assert.equal(outlineButtons(f).filter(button => button.classList.contains('current-file')).length, 4)
+  const editor = f.ids.get('latex-editor'), offset = sectionText.split('\n').slice(0, 7).join('\n').length + 1
+  editor.setSelectionRange(offset, offset); await editor.dispatch('select')
+  assert.equal(strongOutline(f).length, 1); assert.equal(strongOutline(f)[0].dataset.line, '8')
+  await f.ui.testHooks.loadOutline()
+  assert.equal(strongOutline(f)[0].dataset.line, '8', 'navigation refresh keeps the current section')
+  await f.ui.testHooks.gotoSource('b.tex', 1)
+  assert.equal(strongOutline(f).length, 1); assert.equal(strongOutline(f)[0].dataset.path, 'b.tex')
+  assert.ok(outlineButtons(f).filter(button => button.dataset.path === 'a.tex').every(button => !button.classList.contains('current-file')))
+  f.ui.dispose()
+})
+
+test('a failed cross-file jump preserves the current heading and unsaved draft', async () => {
+  const f = await fixture((action, args) => {
+    if (action === 'latex_outline') return sectionOutline()
+    if (action === 'latex_read') return { path: args.path, content: sectionText, revision: 'synthetic', bytes: sectionText.length, lines: 10 }
+    if (action === 'latex_write') throw Object.assign(new Error('changed elsewhere'), { code: 'STATE_CONFLICT', current: { revision: 'other', content: 'external edit' } })
+  })
+  await f.ui.testHooks.gotoSource('a.tex', 4)
+  const editor = f.ids.get('latex-editor'); editor.value += '\nMy unsaved synthetic draft'; await editor.dispatch('input')
+  await f.ui.testHooks.gotoSource('b.tex', 1)
+  assert.equal(f.ui.testHooks.state().file, 'a.tex'); assert.equal(strongOutline(f).length, 1)
+  assert.equal(strongOutline(f)[0].dataset.path, 'a.tex'); assert.equal(strongOutline(f)[0].dataset.line, '4')
+  assert.match(editor.value, /My unsaved synthetic draft$/); assert.equal(f.ui.testHooks.state().dirty, true)
+  f.ui.dispose()
+})
+
+test('a late heading jump cannot steal highlight from a newer file', async () => {
+  const pending = deferred()
+  const f = await fixture((action, args) => {
+    if (action === 'latex_outline') return sectionOutline()
+    if (action === 'latex_read' && args.path === 'a.tex') return pending.promise
+    if (action === 'latex_read') return { path: args.path, content: sectionText, revision: 'synthetic', bytes: sectionText.length, lines: 10 }
+  })
+  const earlier = f.ui.testHooks.gotoSource('a.tex', 4); await tick()
+  await f.ui.testHooks.gotoSource('b.tex', 1)
+  pending.resolve({ path: 'a.tex', content: sectionText, revision: 'late', bytes: sectionText.length, lines: 10 }); await earlier
+  assert.equal(f.ui.testHooks.state().file, 'b.tex'); assert.equal(strongOutline(f).length, 1); assert.equal(strongOutline(f)[0].dataset.path, 'b.tex')
+  f.ui.dispose()
+})
+
+test('UI accent follows DSH by default and saves presets, custom colour and reset', async () => {
+  let preferences = { latex_accent: 'system', latex_auto_compile: false }, revision = 1
+  const f = await fixture((action, args) => {
+    if (action === 'settings_get') return { value: preferences, revision: String(revision) }
+    if (action === 'settings_update') { preferences = { ...preferences, ...args.patch }; return { value: preferences, revision: String(++revision) } }
+  })
+  const root = f.ids.get('latex-view'), select = f.ids.get('latex-setting-accent'), colour = f.ids.get('latex-setting-accent-color')
+  assert.equal(root.dataset.latexAccent, 'system'); assert.equal(select.value, 'system'); assert.equal(colour.hidden, true)
+  select.value = '#4176e6'; await select.dispatch('change'); await tick()
+  assert.equal(preferences.latex_accent, '#4176e6'); assert.equal(root.dataset.latexAccent, 'custom')
+  select.value = 'custom'; await select.dispatch('change'); assert.equal(colour.hidden, false)
+  colour.value = '#c13d82'; await colour.dispatch('change'); await tick()
+  assert.equal(preferences.latex_accent, '#c13d82'); assert.equal(root.style['--latex-accent-color'], '#c13d82')
+  select.value = 'system'; await select.dispatch('change'); await tick()
+  assert.equal(preferences.latex_accent, 'system'); assert.equal(root.dataset.latexAccent, 'system'); assert.equal(colour.hidden, true)
+  f.ui.dispose()
+})

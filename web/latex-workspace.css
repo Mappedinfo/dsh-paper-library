@@ -6,6 +6,11 @@
 #latex-view {
   --latex-path-font: 'PaperPixel', 'Andale Mono', Monaco, ui-monospace, monospace;
   --latex-pane-head-height: 38px;
+  --latex-accent-color: var(--ink);
+  --latex-active-bg: var(--dsw-specific-sidebar-nav-item-active, var(--teal-light));
+  --latex-context-bg: color-mix(in srgb, var(--dsw-specific-sidebar-nav-item-active, var(--ink)) 34%, var(--surface));
+  --latex-active-marker: var(--ink);
+  --latex-active-border: var(--dsw-alias-border-l4, var(--line));
   grid-column: 1 / -1;
   grid-row: 1;
   display: flex;
@@ -31,6 +36,19 @@
   --paper: #181d23; --surface: #222930; --panel: #1b222a; --ink: #edf1ee;
   --muted: #b0bbb6; --line: #3b4849; --teal: #8bcbb9; --teal-light: #30483f;
   --error: #ff9b9d; --dsw-alias-bg-module-platform: #161b20;
+}
+/* 本地明暗配色不依赖宿主当前的明暗模式，文字仍使用各自的高对比前景。 */
+#latex-view[data-latex-theme=parchment], #latex-view[data-latex-theme=midnight] {
+  --latex-active-bg: color-mix(in srgb, var(--ink) 12%, var(--surface));
+  --latex-context-bg: color-mix(in srgb, var(--ink) 4%, var(--surface));
+  --latex-active-border: var(--line);
+}
+#latex-view[data-latex-accent=custom] {
+  --latex-active-bg: color-mix(in srgb, var(--latex-accent-color) 18%, var(--surface));
+  --latex-context-bg: color-mix(in srgb, var(--latex-accent-color) 5%, var(--surface));
+  /* 与前景混合，避免自选纯白／纯黑时当前位置标记消失。 */
+  --latex-active-marker: color-mix(in srgb, var(--latex-accent-color) 55%, var(--ink));
+  --latex-active-border: color-mix(in srgb, var(--latex-accent-color) 45%, var(--line));
 }
 body.latex-focused .topbar, body.latex-focused .detail-pane,
 body.latex-focused .site-header, body.latex-focused .site-foot { display: none; }
@@ -78,7 +96,7 @@ body > #latex-view { height: 100dvh; }
 .latex-toolbar .button { font-size: 12px; padding: 5px 7px; }
 .latex-layout-controls { display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 1px; border: 1px solid var(--line); border-radius: 6px; box-sizing: border-box; }
 .latex-toolbar .latex-layout-button { height: 26px; min-height: 26px; }
-.latex-layout-button[aria-pressed=true] { background: var(--teal-light); color: var(--ink); }
+.latex-layout-button[aria-pressed=true] { background: var(--latex-active-bg); color: var(--ink); }
 .latex-menu-button { margin-left: auto; line-height: 1; }
 .latex-main { max-width: 140px; overflow: hidden; text-overflow: ellipsis; font-size: 12px; color: var(--muted); }
 .latex-auto { font-size: 12px; color: var(--muted); }
@@ -100,6 +118,7 @@ body > #latex-view { height: 100dvh; }
 .latex-menu-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .latex-menu-row input[type="text"] { flex: 1 1 200px; min-width: 140px; }
 .latex-menu-row select { flex: 1 1 160px; }
+.latex-menu-row input[type="color"] { flex: 0 0 42px; width: 42px; height: 30px; min-height: 30px; box-sizing: border-box; padding: 3px; cursor: pointer; }
 .latex-menu-hint { margin: 2px 0 0; font-size: 11px; color: var(--muted); }
 .latex-root { font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); background: var(--dsw-alias-interactive-bg-hover); padding: 2px 6px; border-radius: 6px; }
 .latex-sync-state { font-size: 11px; color: var(--muted); }
@@ -148,7 +167,7 @@ body > #latex-view { height: 100dvh; }
 #latex-source-note { font: 11px/1.5 var(--sans); }
 .latex-pdf-tools { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; padding: 0; background: var(--surface); }
 .latex-pdf-tools button { font-size: 11px; min-height: 26px; padding: 4px 5px; white-space: nowrap; }
-.latex-pdf-tools [aria-pressed=true] { background: var(--teal-light); border-color: var(--teal); }
+.latex-pdf-tools [aria-pressed=true] { background: var(--latex-active-bg); border-color: var(--latex-active-border); color: var(--ink); }
 .latex-pdf-tools[hidden] { display: none; }
 .latex-sync-hint { margin: 0; padding: 3px 12px 7px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--line); }
 .latex-text-layer { position: absolute; inset: 0; overflow: hidden; color: transparent; user-select: text; -webkit-user-select: text; }
@@ -168,7 +187,7 @@ body > #latex-view { height: 100dvh; }
 .latex-review-composer[hidden] { display: none; }
 .latex-review-composer textarea { width: 100%; resize: vertical; font: inherit; min-height: 72px; }
 .latex-review-anchor { color: var(--muted); margin: 0 0 5px; overflow-wrap: anywhere; }
-.latex-review-quote { margin: 5px 0; padding: 5px 8px; border-left: 2px solid var(--teal); background: var(--teal-light); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 130px; overflow: auto; }
+.latex-review-quote { margin: 5px 0; padding: 5px 8px; border-left: 2px solid var(--latex-active-marker); background: var(--latex-context-bg); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 130px; overflow: auto; }
 .latex-review-list { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 8px; }
 .latex-review-card { padding: 10px 2px; border-bottom: 1px solid var(--line); }
 .latex-review-location { display: block; text-align: left; border: 0; background: transparent; color: var(--teal); padding: 0; font: 11px/1.6 ui-monospace,monospace; overflow-wrap: anywhere; cursor: pointer; }
@@ -181,7 +200,7 @@ body > #latex-view { height: 100dvh; }
 .latex-navigator[hidden] { display: none; }
 .latex-nav-tabs { display: flex; align-items: center; gap: 2px; padding: 4px 6px; height: var(--latex-pane-head-height); box-sizing: border-box; flex-shrink: 0; border-bottom: 1px solid var(--line); }
 .latex-nav-tab { border: 0; background: transparent; color: var(--muted); border-radius: 5px; padding: 5px 8px; cursor: pointer; }
-.latex-nav-tab[aria-selected=true] { background: var(--teal-light); color: var(--ink); }
+.latex-nav-tab[aria-selected=true] { background: var(--latex-active-bg); color: var(--ink); }
 #latex-nav-refresh { margin-left: auto; }
 .latex-outline, .latex-media { flex: 1; min-height: 0; overflow: auto; padding: 6px; }
 .latex-navigator [hidden] { display: none; }
@@ -214,8 +233,8 @@ body > #latex-view { height: 100dvh; }
 .latex-editor-pane, .latex-preview-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
 .latex-editor-pane[hidden], .latex-preview-pane[hidden], .latex-splitter[hidden] { display: none; }
 .latex-splitter { cursor: col-resize; background: var(--line); touch-action: none; }
-.latex-splitter:hover, .latex-splitter.dragging { background: var(--teal); }
-.latex-splitter:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.latex-splitter:hover, .latex-splitter.dragging { background: var(--latex-active-marker); }
+.latex-splitter:focus-visible { outline: 2px solid var(--latex-active-marker); outline-offset: -2px; }
 
 .latex-files {
   list-style: none; margin: 0; padding: 6px; flex: 1; min-height: 0; overflow: auto; background: var(--surface);
@@ -228,7 +247,10 @@ body > #latex-view { height: 100dvh; }
   background: transparent; color: inherit; cursor: pointer;
 }
 .latex-file-open:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.latex-file-open.active { border-color: var(--teal); background: var(--teal-light); }
+.latex-file-open.current-file { background: var(--latex-context-bg); }
+.latex-file-open.current-file:hover { background: var(--latex-active-bg); }
+.latex-file-open.active { border-color: transparent; background: var(--latex-active-bg); box-shadow: inset 3px 0 var(--latex-active-marker); color: var(--ink); font-weight: 600; }
+.latex-outline-file .latex-file-open.active { color: var(--ink); }
 .latex-editor-wrap { display: flex; flex: 1; min-height: 0; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--panel);
   --latex-syntax-command: light-dark(#195b91, #8ecaff); --latex-syntax-atom: light-dark(#75511c, #e5bf7a);
 }
@@ -260,7 +282,7 @@ body > #latex-view { height: 100dvh; }
   background: transparent; color: var(--muted); cursor: pointer;
 }
 .latex-tab:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--ink); }
-.latex-tab.active { border-color: var(--line); background: var(--teal-light); color: var(--ink); }
+.latex-tab.active { border-color: var(--latex-active-border); background: var(--latex-active-bg); color: var(--ink); }
 .latex-build-info { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .latex-pane { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: auto; }
 .latex-pane[hidden] { display: none; }
@@ -281,8 +303,8 @@ body > #latex-view { height: 100dvh; }
 .latex-page-stage .latex-page { display: block; cursor: crosshair; }
 .latex-sync-highlight {
   position: absolute; pointer-events: none; border-radius: 3px;
-  background: color-mix(in srgb, var(--teal) 28%, transparent);
-  outline: 1px solid var(--teal);
+  background: color-mix(in srgb, var(--latex-active-marker) 24%, transparent);
+  outline: 1px solid var(--latex-active-marker);
 }
 .latex-preview-empty { color: var(--muted); font-size: 13px; }
 .latex-preview-empty-card { max-width: 460px; margin: 48px auto 0; padding: 0 16px; text-align: center; }
@@ -294,7 +316,7 @@ body > #latex-view { height: 100dvh; }
 .latex-errors[hidden] { display: none; }
 .latex-errors .latex-diagnostic-warning { color: var(--ink); }
 .latex-diagnostic-link { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; cursor: pointer; text-decoration: underline; }
-.latex-diagnostic-link:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.latex-diagnostic-link:focus-visible { outline: 2px solid var(--latex-active-marker); outline-offset: 2px; }
 .latex-errors .latex-log summary { cursor: pointer; color: var(--muted); }
 .latex-errors .latex-log pre { max-height: 150px; overflow: auto; margin: 4px 0 0; white-space: pre-wrap; color: var(--ink); }
 
