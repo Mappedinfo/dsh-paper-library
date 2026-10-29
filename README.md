@@ -304,7 +304,7 @@ PDF 上传和下载均使用流式处理，不做整份 Base64 拷贝。服务�
 
 ## 安装与开发
 
-**npm 当前已发布版本为 v0.2.3；GitHub 源码 v0.2.4 增加本轮 LaTeX 工作台改进。** 如需这些改动，请安装当前 `main` 源码；GitHub 更新不代表 npm 包已更新。
+**当前源码版本为 v0.2.4，包含本轮 LaTeX 工作台改进。** npm 的 `latest` 可用 `npm view @mappedinfo/dsh-paper-library version` 核对；也可按下方步骤安装当前 `main` 源码。
 
 Node `^22.19 || >=24`、Python `>=3.11`、`uv` 和已构建的本地 DeepSeek Harness。
 
