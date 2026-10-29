@@ -123,7 +123,8 @@
     "test:reference": "node scripts/reference-browser-fixture.mjs",
     "verify:pages": "node scripts/verify-pages.mjs",
     "typecheck:slides": "tsc -p tsconfig.slides.json",
-    "test:slides": "npm run build && node --test tests-js/slides-*.test.mjs src/slides/*.test.mjs"
+    "test:slides": "npm run build && node --test tests-js/slides-*.test.mjs src/slides/*.test.mjs",
+    "test:reader-layout": "node scripts/reader-layout-browser-fixture.mjs"
   },
   "dependencies": {
     "@citation-js/core": "^0.7.18",

@@ -1,6 +1,7 @@
 .paper-pdf-reader { position:relative; min-height:220px; height:100%; overflow:auto; overscroll-behavior:contain; overflow-anchor:none; scrollbar-gutter:stable; background:#e7e9e5; outline:none; }
 .paper-pdf-reader:focus-visible { outline:2px solid var(--teal,#286a61); outline-offset:-2px; }
 .pdr-pages { display:flex; flex-direction:column; align-items:center; gap:16px; padding:12px 0; min-height:100%; box-sizing:border-box; width:max-content; margin:0 auto; min-width:100%; }
+.pdr-spread { display:flex; flex:none; align-items:flex-start; gap:16px; }
 .pdr-page-slot { flex:none; min-width:0; margin:0; padding:0; position:relative; }
 .pdr-page-caption { height:24px; line-height:20px; font-size:10px; text-align:center; color:#788079; user-select:none; }
 .pdr-sheet { position:relative; width:100%; background:white; box-shadow:0 1px 5px #1b2c2425; overflow:hidden; }
@@ -19,9 +20,17 @@
 .pdr-ink-draft,.pdr-ink-overlay { position:absolute; inset:0; width:100%; height:100%; z-index:2; pointer-events:none; fill:none; stroke-linecap:round; stroke-linejoin:round; }
 .paper-pdf-reader[data-tool="highlight"] .pdr-word-layer,.paper-pdf-reader[data-tool="underline"] .pdr-word-layer,.paper-pdf-reader[data-tool="strikeout"] .pdr-word-layer { cursor:text; }
 .pdr-placeholder { position:absolute; inset:0; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; padding:20px; color:#899087; text-align:center; font-size:12px; }
+.pdr-sheet[data-loaded="false"] { background:linear-gradient(#f0f2ef 0 0) 10% 15%/80% 12px no-repeat,linear-gradient(#f0f2ef 0 0) 10% 20%/72% 8px no-repeat,linear-gradient(#f0f2ef 0 0) 10% 24%/80% 8px no-repeat,#fff; }
+.pdr-sheet[data-loading="true"]>.pdr-placeholder>span { visibility:hidden; }
+.pdr-loading-indicator { position:absolute; z-index:4; inset:0; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; pointer-events:none; font-size:12px; color:#515b54; }
+.pdr-sheet[data-loaded="true"]>.pdr-loading-indicator { inset:8px 8px auto auto; flex-direction:row; gap:6px; padding:5px 9px; border-radius:5px; background:#fffffff0; box-shadow:0 1px 4px #1b2c2420; }
+.pdr-spinner { display:inline-block; flex:none; width:22px; height:22px; box-sizing:border-box; border:2px solid #b8c6c0; border-top-color:var(--teal,#286a61); border-radius:50%; animation:pdr-loading-spin .8s linear infinite; }
+.pdr-sheet[data-loaded="true"] .pdr-spinner { width:14px; height:14px; }
 .pdr-pages>.pdr-placeholder { position:relative; min-height:220px; }
 .pdr-error,.pdr-layout-error { color:#983e31; font-size:12px; line-height:1.6; }
 .pdr-layout-error { padding:20px; overflow-wrap:anywhere; }
+@keyframes pdr-loading-spin { to { transform:rotate(360deg); } }
+@media(prefers-reduced-motion:reduce) { .pdr-spinner { animation:none; border-style:dotted; } }
 @media(max-width:620px) { .pdr-page-caption { font-size:9px; } .paper-pdf-reader { min-height:180px; } }
 
 /* Transient ring over saved markup when the rail reveals it. Hit-testing is

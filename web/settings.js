@@ -6,7 +6,7 @@ window.PaperLibrarySettings = (() => {
     ['auto_review', '整理完成后生成证据图谱评审草稿', '在精读笔记之后多一次受限模型调用，产出案例拆解、归因与联合覆盖审计的待审草稿；本地评审覆盖层由 reviewProfile 配置。'],
     ['auto-paper-conversation', '实时伴学：保存批注后自动回复', '有文字评论的新批注和修改会在主机排队，回复跟随原批注；使用本篇模型额度。历史批注不会批量重发。'],
   ];
-  function create({api,persistence,onChange=()=>{},getLibrary=()=>''}) {
+  function create({api,persistence,onChange=()=>{},getLibrary=()=>'',onLanguageSettings}) {
     let snapshot=null,busy=false,refreshing=null,refreshAgain=false,disposed=false,timer=null,pendingPatch=null,visibleTimer=null,generation=0,readingPreferences=0;
     const make=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
     const trigger=make('button','button subtle','设置');trigger.id='settings-open';trigger.type='button';trigger.title='Paper Library 设置';
@@ -28,13 +28,14 @@ window.PaperLibrarySettings = (() => {
     const extraCopy=make('span');extraCopy.append(make('strong','','额外外部文献源'),make('small','','JSON 数组，每项 {id, root}；根目录写绝对路径。扫描只建符号链接，不改动源目录，第一次写批注时才复制进来。'));
     extraRow.append(extraInput,extraCopy);controls.append(extraRow);inputs.set('external_sources',extraInput);
     extraInput.addEventListener('change',()=>void save({external_sources:extraInput.value.trim()}));
-    const storage=make('details','settings-storage'),summary=make('summary','','模型、外观与存储');storage.append(summary,make('p','','模型沿用每篇论文的 DSH 对话；主题与字号跟随 DSH 外观设置。'));
+    const storage=make('details','settings-storage'),summary=make('summary','','模型、外观与存储');storage.append(summary,make('p','','论文对话使用各自的 DSH 模型；语言工具默认跟随 DSH 默认模型，也可单独设置。主题与字号跟随 DSH 外观。'));
+    const languageSettings=make('button','button subtle','语言模型与提示词');languageSettings.id='settings-language';languageSettings.type='button';languageSettings.addEventListener('click',()=>{dialog.close();onLanguageSettings?.();});storage.append(languageSettings);
     const path=make('p','settings-path');storage.append(path,make('p','','文献、PDF、草稿和设置均保存在主机磁盘，不写入浏览器 localStorage。更换资料库目录需要修改部署配置，已有数据不会自动搬迁。'));
     const maintenance=make('section','settings-maintenance');maintenance.setAttribute('aria-label','导出与维护');
     maintenance.append(make('strong','','导出与维护'),make('p','','导出文献与数据集的 BibLaTeX 引用资料。演示文稿请在 Slides 工作台中导出。'));
     const exportLibrary=document.getElementById?.('export-library');if(exportLibrary)maintenance.append(exportLibrary);
     const footer=make('footer'),reload=make('button','button subtle','重新读取'),reset=make('button','button subtle','恢复默认');reload.type=reset.type='button';reload.addEventListener('click',()=>void refresh());reset.addEventListener('click',()=>void save(null));footer.append(reload,reset);
-    dialog.append(header,description,status,controls,storage,maintenance,footer);document.body.append(dialog);
+    dialog.append(header,description,status,languageSettings,controls,storage,maintenance,footer);document.body.append(dialog);
     function say(text,error=false){status.textContent=text;status.classList.toggle('error',error);}
     function render(){
       controls.disabled=busy||!snapshot?.writable;reset.disabled=busy||!snapshot?.writable;reload.disabled=busy;

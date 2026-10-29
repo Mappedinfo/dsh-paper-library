@@ -18,7 +18,7 @@ Project scaffolding was generated through the author's `academic-templates/dev-p
 | CodeMirror 6、LaTeX 模式、Lezer 及配套包 | 本地打包的源码编辑器 | [CodeMirror](https://codemirror.net/) / MIT；依赖许可声明保存在 [codemirror-MIT.txt](licenses/codemirror-MIT.txt) |
 | PlainDeck | Slides 编辑器、开放项目格式、模板与渲染器 | [PlainDeck](https://github.com/Mappedinfo/PlainDeck) / MIT；固定源码与原许可见 [子项目说明](vendor/plaindeck/README.md)，Juya 派生设计目录的原声明保留在子项目内 |
 | React、React DOM、zustand、Zod | 本地打包的 Slides 界面与校验 | MIT；分别保留在 [Slides 依赖许可](licenses/slides/) |
-| Lucide React | Slides 工具图标 | ISC；保留在 [lucide-react-LICENSE.txt](licenses/slides/lucide-react-LICENSE.txt) |
+| Lucide React | 文献库与 Slides 工具图标 | ISC；保留在 [lucide-react-LICENSE.txt](licenses/slides/lucide-react-LICENSE.txt) |
 | JSZip | 演示项目 ZIP 导入／导出 | 采用 MIT 许可选项；原双许可声明保留在 [jszip-LICENSE.txt](licenses/slides/jszip-LICENSE.txt) |
 | Silkscreen Regular | 用于文件路径的本地像素字体 | [Google Fonts](https://github.com/google/fonts/tree/main/ofl/silkscreen) / SIL Open Font License 1.1；[许可](licenses/silkscreen-OFL.txt) |
 | Official APA CSL style | APA 7 rules | [CSL styles](https://github.com/citation-style-language/styles/blob/master/apa.csl) / CC BY-SA 3.0; embedded authors/rights retained |

@@ -17,9 +17,10 @@
     if (evidence.annotation_id) parts.push(`批注：${evidence.annotation_id}`);
     return parts.length ? parts.join('\n') : '尚未补充原文依据';
   }
-  function create({ root, api, getPaper, openPaper, navigatePage, onAddToBoard, toast = () => {} }) {
+  function create({ root, api, getPaper, openPaper, navigatePage, navigatePaper, onOpenLibrary, scope = 'paper', onAddToBoard, toast = () => {} }) {
     if (!root) throw new Error('Knowledge graph requires a mount element');
-    let graph = { nodes: [], edges: [] }, selected = null, edgePage = 0, revision = 0, paperId = null, editing = null, busy = false;
+    const libraryScope = scope === 'library';
+    let graph = { nodes: [], edges: [] }, selected = null, edgePage = 0, revision = 0, paperId = null, editing = null, busy = false, catalogOffset = 0;
     root.classList.add('knowledge-graph');
     root.innerHTML = `<div class="kg-toolbar"><div><h3>知识图谱</h3><p>记录方法、数据、论点与论据之间的联系。</p></div><div class="kg-actions"><button type="button" class="button subtle" data-kg="add-board">加入画板</button><button type="button" class="button" data-kg="add-node">＋ 节点</button><button type="button" class="button" data-kg="add-edge">＋ 关系</button></div></div>
       <div class="kg-controls"><label>节点类型 <select data-kg="filter"><option value="">全部类型</option></select></label><button type="button" class="text-button" data-kg="reset">查看全部关系</button></div>
@@ -30,6 +31,16 @@
     const el = key => root.querySelector(`[data-kg="${key}"]`), form = el('form'), field = key => form.elements.namedItem(key);
     const dom = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     const option = (value, label) => { const node = dom('option', '', label); node.value = value; return node; };
+    root.querySelector('h3').textContent = libraryScope ? '全库图谱' : '本文图谱';
+    root.querySelector('.kg-toolbar p').textContent = libraryScope ? '跨文献浏览已保存的关系；按目录分批显示，原文依据保留在所属论文中。' : '当前论文的方法、数据、论点与论据。';
+    if (!libraryScope && onOpenLibrary) {
+      const globalButton=dom('button','button subtle','查看全库图谱');globalButton.type='button';globalButton.addEventListener('click',onOpenLibrary);root.querySelector('.kg-actions').prepend(globalButton);
+    }
+    for (const key of ['add-node','add-edge']) if(libraryScope)el(key).hidden=true;
+    if (!onAddToBoard) el('add-board').hidden=true;
+    const catalogPager=dom('div','kg-catalog-pager'),catalogPrevious=dom('button','button subtle','上一批文献'),catalogNext=dom('button','button subtle','下一批文献');
+    catalogPrevious.type=catalogNext.type='button';catalogPager.append(catalogPrevious,catalogNext);catalogPager.hidden=!libraryScope;el('status').after(catalogPager);
+    catalogPrevious.addEventListener('click',()=>void load(null,graph.scope?.previous_offset??0));catalogNext.addEventListener('click',()=>void load(null,graph.scope?.next_offset??0));
     for (const [value, label] of Object.entries(TYPES)) el('filter').append(option(value, label));
     for (const value of EDITABLE_TYPES) field('type').append(option(value, TYPES[value]));
     for (const value of EDITABLE_RELATIONS) field('relation').append(option(value, relationLabel(value)));
@@ -38,7 +49,10 @@
     function evidenceContent(parent, entry) {
       parent.append(dom('p', 'kg-provenance', entry.provenance === 'catalog-metadata' ? '来自文献资料 · 编辑资料可更新' : '读者记录 · 需要结合原文判断'));
       parent.append(dom('p', 'kg-evidence', evidenceSummary(entry.evidence)));
-      if (Number.isInteger(entry.evidence?.page) && entry.evidence.page > 0 && getPaper()?.pdf) parent.append(action(`返回 PDF 第 ${entry.evidence.page} 页`, () => navigatePage?.(entry.evidence.page)));
+      if (Number.isInteger(entry.evidence?.page) && entry.evidence.page > 0) {
+        if (libraryScope && entry.paper_id && navigatePaper) parent.append(action(`打开来源论文第 ${entry.evidence.page} 页`,()=>navigatePaper(entry.paper_id,entry.evidence.page)));
+        else if (!libraryScope && getPaper()?.pdf) parent.append(action(`返回 PDF 第 ${entry.evidence.page} 页`, () => navigatePage?.(entry.evidence.page)));
+      }
     }
     function renderInspector() {
       const host = el('inspector'), node = graph.nodes.find(node => node.id === selected);
@@ -49,7 +63,7 @@
       evidenceContent(host, node);
       if (node.identity_reliable === false) host.append(dom('p', 'kg-help', '同名作者尚缺少可区分的资料。补充 ORCID 或不同单位后，才可为其保存读者关系。'));
       if (node.type === 'paper' && node.id !== paperId) host.append(action('打开文献', () => openPaper?.(node.id)));
-      if (node.editable) {
+      if (node.editable && !libraryScope) {
         const actions = dom('div', 'kg-actions');
         actions.append(action('编辑节点', () => showEditor('node', node)), action('删除节点', () => remove('node', node), 'text-button danger')); host.append(actions);
       }
@@ -65,7 +79,7 @@
         const row = dom('details', 'kg-relation'), summary = dom('summary');
         summary.append(dom('span', 'kg-endpoint', nodeById.get(edge.source)?.label || edge.source), dom('strong', 'kg-relation-name', `— ${relationLabel(edge.relation)} →`), dom('span', 'kg-endpoint', nodeById.get(edge.target)?.label || edge.target));
         row.append(summary); const content = dom('div', 'kg-relation-content'); evidenceContent(content, edge);
-        if (edge.editable) { const actions = dom('div', 'kg-actions'); actions.append(action('编辑关系', () => showEditor('edge', edge)), action('删除关系', () => remove('edge', edge), 'text-button danger')); content.append(actions); }
+        if (edge.editable && !libraryScope) { const actions = dom('div', 'kg-actions'); actions.append(action('编辑关系', () => showEditor('edge', edge)), action('删除关系', () => remove('edge', edge), 'text-button danger')); content.append(actions); }
         else if (edge.legacy) content.append(dom('p', 'kg-help', '原有文献联系，已保留其说明与方向。'));
         row.append(content); host.append(row);
       }
@@ -104,14 +118,18 @@
       el('add-node').disabled = !paperId; el('add-edge').disabled = graph.nodes.length < 2;
       renderCanvas(); renderInspector(); renderRelations();
     }
-    async function load(item = getPaper()) {
-      const run = ++revision; paperId = item?.id || null; selected = null; edgePage = 0; closeEditor(); graph = { nodes: [], edges: [] }; render();
-      if (!paperId) { status('选择一篇文献查看知识图谱。'); return; }
-      const requestedId = paperId; status('正在读取当前文献图谱…');
+    async function load(item = getPaper(), offset = 0) {
+      catalogOffset=offset;
+      const run = ++revision; paperId = libraryScope ? null : item?.id || null; selected = null; edgePage = 0; closeEditor(); graph = { nodes: [], edges: [] }; render();
+      if (!paperId && !libraryScope) { status('选择一篇文献查看本文图谱，或从顶栏打开全库图谱。'); return; }
+      const requestedId = paperId; status(libraryScope ? '正在读取全库图谱…' : '正在读取本文图谱…');
       try {
-        const result = await api('graph', { id: requestedId, limit: 100 });
-        if (run !== revision || getPaper()?.id !== requestedId) return;
-        graph = result; render(); status(`${graph.nodes.length} 个节点 · ${graph.edges.length} 条关系。${graph.truncated ? ' 当前为部分图谱；最多显示 100 个节点，已保存记录仍保留。' : ' 点击节点查看关系和依据。'}${graph.warnings?.length ? ' ' + graph.warnings.join(' ') : ''}`);
+        catalogPrevious.disabled=catalogNext.disabled=true;
+        const result = await api('graph', { ...(libraryScope ? {offset} : {id:requestedId}), limit: 100 });
+        if (run !== revision || (!libraryScope && getPaper()?.id !== requestedId)) return;
+        graph = result; render();catalogPrevious.disabled=graph.scope?.previous_offset==null;catalogNext.disabled=graph.scope?.next_offset==null;
+        const range=libraryScope ? `全库目录 ${graph.scope?.paper_count ? offset+1 : 0}–${offset+(graph.scope?.paper_count||0)} / ${graph.scope?.total_papers||0} 篇 · ` : '本文 · ';
+        status(`${range}${graph.nodes.length} 个节点 · ${graph.edges.length} 条关系。${graph.truncated ? ' 当前为部分图谱；最多显示 100 个节点，已保存记录仍保留。' : ' 点击节点查看关系和依据。'}${graph.warnings?.length ? ' ' + graph.warnings.join(' ') : ''}`);
       } catch (error) { if (run === revision) status(`图谱读取失败：${error.message}`, true); }
     }
     function closeEditor() { if (el('dialog').open) el('dialog').close(); editing = null; }
@@ -164,7 +182,7 @@
     el('filter').addEventListener('change', renderCanvas); el('reset').addEventListener('click', () => { selected = null; edgePage = 0; render(); });
     el('previous').addEventListener('click', () => { edgePage = Math.max(0, edgePage - 1); renderRelations(); }); el('next').addEventListener('click', () => { edgePage++; renderRelations(); });
     function clear() { ++revision; paperId = null; selected = null; graph = { nodes: [], edges: [] }; closeEditor(); render(); status('选择一篇文献查看知识图谱。'); }
-    clear(); return { load, clear, selectedNode: () => graph.nodes.find(node => node.id === selected) ?? null };
+    clear(); return { load, reload:()=>load(getPaper(),catalogOffset), clear, selectedNode: () => graph.nodes.find(node => node.id === selected) ?? null };
   }
   window.PaperKnowledgeGraph = Object.freeze({ create, types: TYPES, relations: RELATIONS, evidenceSummary, scopedEdges, relationLabel });
 })();

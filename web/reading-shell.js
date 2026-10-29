@@ -32,7 +32,7 @@ window.PaperReadingShell = (() => {
     citations.append($('toolbar-actions'));$('paper-tools').append(citations);
     citations.addEventListener('toggle',()=>{if(citations.open)status('对当前论文复制引用，或导出文件与已保存的批注。');});
     // Metadata and chat stay within reading; graph is the only other paper surface.
-    $('metadata-open').textContent='资料';$('metadata-open').title='在侧栏快速编辑文献资料';
+    $('metadata-open').textContent='详情';$('metadata-open').title='查看与编辑文献详情';
     ribbon.append($('metadata-open'));
     const fullscreen=button('reader-fullscreen','全屏阅读 ⤢',()=>void toggleFullscreen());
     fullscreen.title='全屏阅读；Esc 返回';ribbon.append(fullscreen);
@@ -88,7 +88,16 @@ window.PaperReadingShell = (() => {
     percent.addEventListener('change',commitZoom);
     percent.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();commitZoom();}});
     zoomGroup.append(zoomOut,percent,zoomIn,zoomFit);readerTools.append(zoomGroup);
+    const layoutGroup=node('span',null,'reader-layout');layoutGroup.setAttribute('role','group');layoutGroup.setAttribute('aria-label','PDF 阅读布局');
+    const layoutButtons={};let layoutTouched=false;
+    function selectLayout(value){reader()?.setLayout?.(value);for(const[key,b]of Object.entries(layoutButtons))b.setAttribute('aria-pressed',String(key===value));}
+    for(const[value,label,icon]of [['single','单页','rectangle-vertical'],['spread','双页','columns-2']]){
+      const b=button(`reader-layout-${value}`,label,async()=>{if(beforeToolChange&&!await beforeToolChange())return;layoutTouched=true;selectLayout(value);void patchLayout({readerLayout:value});});
+      b.title=value==='spread'?'两页并排连续阅读':'单页连续阅读';window.PaperIcons?.decorate(b,icon);layoutButtons[value]=b;layoutGroup.append(b);
+    }
+    readerTools.append(layoutGroup);selectLayout(reader()?.getLayout?.()||'single');
     if(persistence)void persistence.get('reader:layout').then(value=>{
+      if(!layoutTouched&&['single','spread'].includes(value?.readerLayout))selectLayout(value.readerLayout);
       const saved=Number(value?.zoom);if(Number.isFinite(saved)&&saved!==1)setZoom(saved);
       if(typeof value?.color==='string'&&/^#[0-9a-f]{6}$/i.test(value.color))color=value.color;
       if(typeof value?.inkColor==='string'&&/^#[0-9a-f]{6}$/i.test(value.inkColor))inkColor=value.inkColor;
@@ -100,7 +109,7 @@ window.PaperReadingShell = (() => {
       sync();
     }).catch(()=>{});
     // One global import entry. Link intake belongs inside that same import surface.
-    $('import-open').textContent='＋ 导入';libraryTools.append($('import-open'),$('build-bibliography'),$('metadata-enrich'),$('catalog-archive'));
+    $('import-open').textContent='导入';libraryTools.append($('import-open'),$('build-bibliography'),$('metadata-enrich'),$('catalog-archive'));
     // The shelf disclosures keep their original IDs and toggle events. Their
     // content lives below the shared row so each expanded panel has full width.
     const organizerDisclosures=[['board-shelf','board-shelf-panel'],['latex-version-shelf','latex-version-shelf-panel']].map(([id,panelId])=>{

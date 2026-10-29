@@ -309,6 +309,10 @@ function requestPage(page) {
   state.pagePromise = renderPageQueue();
   return state.pagePromise;
 }
+function advancePage(delta){
+  const pending=pdfReader?.advance?pdfReader.advance(delta):requestPage(state.page+delta);
+  return pending?.catch(error=>{readingShell?.status(error.message,true);return false;});
+}
 async function refreshPage(page) {
   if (!state.active?.pdf) return;
   if (pdfReader) return pdfReader.refresh(page);
@@ -1080,7 +1084,7 @@ document.addEventListener('drop', handleDrop);
 $('metadata-open').addEventListener('click', openMetadata); $('metadata-form').addEventListener('submit', event => { if (!workbenchUI) return saveMetadata(event); });
 $('attach-open').addEventListener('click', () => { if (!state.active) return; $('attach-form').dataset.itemId = state.active.id; errorAt('attach-error', null); openDialog('attach-dialog'); }); $('attach-form').addEventListener('submit', attachPdf);
 $('copy-apa').addEventListener('click', () => cite('apa')); $('export-bib').addEventListener('click', () => cite('biblatex')); $('export-notes').addEventListener('change', exportNotes);
-$('previous-page').addEventListener('click', () => requestPage(state.page - 1)); $('next-page').addEventListener('click', () => requestPage(state.page + 1));
+$('previous-page').addEventListener('click', () => advancePage(-1)); $('next-page').addEventListener('click', () => advancePage(1));
 $('page-number').addEventListener('change', () => requestPage($('page-number').value));
 $('word-layer').addEventListener('pointerup', () => setTimeout(readSelection, 0)); $('word-layer').addEventListener('keyup', readSelection);
 $('clear-selection').addEventListener('click', () => {clearSelection();publishReaderState();}); $('annotate-selection').addEventListener('click', () => openAnnotation('highlight'));
@@ -1292,7 +1296,18 @@ workbenchUI = window.PaperWorkbench?.create({ state, api, persistence, loadList,
     else if (item && state.active?.id === item.id) { state.active=item; renderPaperHeader(); if(state.tab==='graph')void loadGraph(); }
   },
 });
-knowledgeGraphUI = window.PaperKnowledgeGraph?.create({root:$('graph-tab'),api,getPaper:()=>state.active,openPaper,navigatePage:async page=>{await switchTab('reader');await requestPage(page);},toast,onAddToBoard:node=>void boardUI?.addGraphNode(node.type==='paper'?{kind:'paper',label:node.label,paper:{id:node.paper_id||node.id,title:node.label}}:{kind:'concept',label:node.label})});
+const libraryGraphDialog=el('dialog','library-graph-dialog');libraryGraphDialog.id='library-graph-dialog';libraryGraphDialog.setAttribute('aria-label','全库知识图谱');
+const libraryGraphHeader=el('header','library-graph-header'),libraryGraphTitle=el('strong','','Paper Library · 全库视角'),libraryGraphClose=el('button','button subtle','关闭');libraryGraphClose.type='button';libraryGraphClose.addEventListener('click',()=>libraryGraphDialog.close());const libraryGraphRefresh=el('button','button subtle','刷新');libraryGraphRefresh.id='library-graph-refresh';libraryGraphRefresh.type='button';libraryGraphRefresh.addEventListener('click',()=>void libraryGraphUI?.reload());libraryGraphHeader.append(libraryGraphTitle,libraryGraphRefresh,libraryGraphClose);
+const libraryGraphRoot=el('section','library-graph-content');libraryGraphRoot.id='library-graph-content';libraryGraphDialog.append(libraryGraphHeader,libraryGraphRoot);document.body.append(libraryGraphDialog);
+async function openGraphSource(id,page){
+  libraryGraphDialog.close();await openPaper(id);const ticket=state.itemTicket;if(state.active?.id!==id)return;
+  await switchTab('reader');if(state.active?.id!==id||state.itemTicket!==ticket)return;await requestPage(page);
+}
+const libraryGraphUI=window.PaperKnowledgeGraph?.create({root:libraryGraphRoot,scope:'library',api,getPaper:()=>null,openPaper:id=>{libraryGraphDialog.close();void openPaper(id);},navigatePaper:openGraphSource,toast});
+libraryGraphDialog.addEventListener('close',()=>{if(!libraryGraphDialog.open)libraryGraphUI?.clear();});
+function openLibraryGraph(){if(!libraryGraphDialog.open)libraryGraphDialog.showModal();void libraryGraphUI?.load();}
+const libraryGraphOpen=el('button','button subtle','全库图谱');libraryGraphOpen.id='library-graph-open';libraryGraphOpen.type='button';libraryGraphOpen.title='跨文献浏览知识图谱';libraryGraphOpen.addEventListener('click',openLibraryGraph);document.querySelector('.topbar-actions').prepend(libraryGraphOpen);
+knowledgeGraphUI = window.PaperKnowledgeGraph?.create({root:$('graph-tab'),api,getPaper:()=>state.active,onOpenLibrary:openLibraryGraph,openPaper,navigatePage:async page=>{const id=state.active?.id,ticket=state.itemTicket;await switchTab('reader');if(state.active?.id===id&&state.itemTicket===ticket)await requestPage(page);},toast,onAddToBoard:node=>void boardUI?.addGraphNode(node.type==='paper'?{kind:'paper',label:node.label,paper:{id:node.paper_id||node.id,title:node.label}}:{kind:'concept',label:node.label})});
 paperChatUI = window.PaperLibraryChat?.create({ api, toast, persistence, getPaper: () => state.active, getContext: () => state.harnessContext,
   getAnnotations: () => state.annotations, getLibrary: () => state.library,
   navigate: switchTab, navigateReference: (paperId, page) => openReferencedPaper({ paperId, page }), changed: publishReaderState,
@@ -1369,7 +1384,7 @@ if ($('library-latex-versions')) libraryLatexVersions = window.PaperLatexVersion
   openVersion:async(version,reviewPdfVersion)=>{await latexUI?.open(version.project_id);await latexUI?.showVersion(version.id,reviewPdfVersion);},
 });
 $('latex-version-shelf')?.addEventListener('toggle',()=>{if($('latex-version-shelf').open)void libraryLatexVersions?.refresh();});
-settingsUI = window.PaperLibrarySettings?.create({api,persistence,getLibrary:()=>state.library,onChange:(value,descriptor)=>{
+settingsUI = window.PaperLibrarySettings?.create({onLanguageSettings:()=>languageUI?.showSettings(),api,persistence,getLibrary:()=>state.library,onChange:(value,descriptor)=>{
   preferences={...preferences,...value};
   analysisUI?.applyPreferences(value,descriptor.writable);
   paperChatUI?.applyPreferences(value,descriptor.writable);
@@ -1463,8 +1478,8 @@ async function currentPaper(){
   const id=currentPaperId(); if(!id)return null;
   try{return await api('get',{id});}catch{return null;}
 }
-const paperBoardNew=el('button','button subtle','＋ 画板');paperBoardNew.id='paper-board-new';paperBoardNew.type='button';paperBoardNew.title='新建一张画板并关联到这篇论文';
-const paperBoardOpen=el('button','button subtle','这张论文的画板 ');paperBoardOpen.id='paper-board-open';paperBoardOpen.type='button';
+const paperBoardNew=el('button','button subtle','画板');paperBoardNew.id='paper-board-new';paperBoardNew.type='button';paperBoardNew.title='新建一张画板并关联到这篇论文';
+const paperBoardOpen=el('button','button subtle','打开本文画板 ');paperBoardOpen.id='paper-board-open';paperBoardOpen.type='button';
 const paperBoardCount=el('span','count','0');paperBoardCount.id='paper-board-count';paperBoardOpen.append(paperBoardCount);
 const paperProjects=el('button','button subtle','项目 ');paperProjects.id='paper-projects';paperProjects.type='button';paperProjects.title='查看或修改这篇文献所属的阅读项目';
 const paperProjectCount=el('span','count','0');paperProjectCount.id='paper-project-count';paperProjects.append(paperProjectCount);
@@ -1696,4 +1711,7 @@ window.addEventListener('message', event => {
     window.parent.postMessage({ type: 'paper-library:open-pane', version: 1, id: state.active.id }, window.location.origin);
   });
 }
+// Shared local Lucide decoration survives later label/status updates.
+for(const[id,icon]of [['library-graph-open','waypoints'],['library-graph-refresh','refresh-cw'],['settings-open','settings'],['settings-language','languages'],['slides-open','presentation'],['latex-open','file-text'],['board-open','layout-dashboard'],['paper-board-new','plus'],['paper-board-open','layout-dashboard'],['import-open','upload'],['export-library','download'],['build-bibliography','file-text'],['catalog-archive','trash-2'],['metadata-open','circle-help'],['metadata-enrich','sparkles'],['ribbon-language','languages'],['ribbon-vocabulary','book-open'],['workspace-library','library'],['paper-datasets','layout-dashboard'],['knowledge-open','file-text'],['language-settings-open','settings'],['language-close','x'],['open-in-pane','panel-left'],['copy-apa','file-text'],['export-bib','download'],['project-new','plus'],['project-edit','pencil'],['project-archive','archive']]){const button=$(id);if(button&&window.PaperIcons){if(button.classList.contains('icon-button'))button.textContent='';window.PaperIcons.decorate(button,icon);}}
+for(const tab of document.querySelectorAll('[data-tab]')){const icon={reader:'book-open',annotations:'pencil',conversation:'sparkles',graph:'waypoints'}[tab.dataset.tab];if(icon)window.PaperIcons?.decorate(tab,icon);}
 initialize();

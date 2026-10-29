@@ -1,0 +1,37 @@
+/* Shared button decoration for the locally bundled Lucide icons. */
+.paper-icon-decorated { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.paper-icon-decorated::before {
+  content: ''; display: block; flex: none; width: 16px; height: 16px;
+  background: currentColor;
+  -webkit-mask: var(--paper-icon) center / contain no-repeat;
+  mask: var(--paper-icon) center / contain no-repeat;
+}
+
+/* A compact shared control treatment, limited to the workspace chrome. */
+:is(.topbar-actions, .reader-ribbon, .paper-tools, .library-organizer-row)
+  :is(.button, .icon-button, .tab, summary:not(#ink-queue-summary)) {
+  box-sizing: border-box; min-height: 32px; padding: 5px 8px;
+  border: 1px solid var(--dsw-alias-border-l2); border-radius: 4px;
+  background: transparent; color: var(--dsw-alias-label-primary); font-size: 12px; line-height: 1.35;
+}
+:is(.topbar-actions, .reader-ribbon, .paper-tools, .library-organizer-row) .icon-button {
+  width: 32px; height: 32px; padding: 4px; flex: none;
+}
+:is(.topbar-actions, .reader-ribbon, .paper-tools, .library-organizer-row)
+  :is(.button, .icon-button, .tab, summary:not(#ink-queue-summary)):hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover); border-color: var(--dsw-alias-border-l4);
+}
+:is(.topbar-actions, .reader-ribbon, .paper-tools, .library-organizer-row) [aria-pressed=true] {
+  color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-active); border-color: var(--dsw-alias-border-l4);
+}
+:is(.topbar-actions, .reader-ribbon, .paper-tools, .library-organizer-row)
+  :is(.button, .icon-button, .tab, summary):focus-visible {
+  outline: 2px solid var(--dsw-alias-link); outline-offset: 2px;
+}
+:is(.topbar-actions, .reader-ribbon, .paper-tools, .library-organizer-row) .button.primary {
+  background: var(--dsw-alias-button-primary-fill); border-color: transparent; color: var(--dsw-alias-label-primary-foreground);
+}
+:is(.topbar-actions, .reader-ribbon, .paper-tools, .library-organizer-row) .button.primary:hover:not(:disabled) {
+  background: var(--dsw-alias-button-primary-hover);
+}
+.paper-tools #catalog-archive, .paper-tools #catalog-archive:hover:not(:disabled) { color: var(--dsw-alias-state-error-primary); }

@@ -150,3 +150,22 @@ def test_indistinguishable_author_entries_cannot_silently_own_reader_relations(c
     assert all(node["identity_reliable"] is False for node in authors)
     with pytest.raises(ValueError, match="Indistinguishable author"):
         dispatch_graph(library, "graph_edge_put", {"id": paper["id"], "source": paper["id"], "target": authors[0]["id"], "relation": "related"})
+
+
+def test_global_graph_pages_catalog_without_opening_pdf(catalog, monkeypatch):
+    library, _ = catalog
+    library.import_items(items=[{"id": f"Window{i}", "title": f"Synthetic window {i}"} for i in range(43)])
+    monkeypatch.setattr(library, "pdf_path", lambda *_: pytest.fail("global graph must not open PDFs"))
+    first = get_graph(library, limit=100)
+    second = get_graph(library, limit=100, offset=first["scope"]["next_offset"])
+    assert first["scope"]["paper_count"] == 40
+    assert first["scope"]["total_papers"] == 45
+    assert second["scope"]["paper_count"] == 5
+    assert second["scope"]["previous_offset"] == 0
+    assert second["scope"]["next_offset"] is None
+    first_ids = {n["id"] for n in first["nodes"] if n["type"] == "paper"}
+    second_ids = {n["id"] for n in second["nodes"] if n["type"] == "paper"}
+    assert first_ids.isdisjoint(second_ids) and len(first_ids | second_ids) == 45
+    for offset in (-1, True, 10000001):
+        with pytest.raises(ValueError):
+            get_graph(library, offset=offset)

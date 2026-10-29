@@ -6,28 +6,29 @@ const script = await readFile(new URL('../web/language-learning.js', import.meta
 const clone = value => JSON.parse(JSON.stringify(value))
 const tick = () => new Promise(resolve => setImmediate(resolve))
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
-function fixture({ get, put, respond } = {}) {
+function fixture({ get, put, respond, geometryGet } = {}) {
   const elements = new Map(), requests = [], writes = [], storage = new Map(), toasts = [], chats = []
   let currentPaper = null, selection = null, serial = 0
   class Element {
-    constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.listeners = new Map(); this.value = ''; this.hidden = false; this.disabled = false; this.dataset = {}; this.classList = { toggle() {} } }
+    constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.listeners = new Map(); this.value = ''; this.hidden = false; this.disabled = false; this.dataset = {}; this.style = {}; this.classList = { toggle() {} } }
     set id(value) { this._id = value; if (value) elements.set(value, this) } get id() { return this._id }
     set textContent(value) { this.text = String(value); this.children = [] } get textContent() { return this.text || '' }
     append(...nodes) { for (const node of nodes) { this.children.push(node); node.parentElement = this } }
     replaceChildren(...nodes) { this.children = []; this.append(...nodes) }
     replaceWith(node) { const parent = this.parentElement; parent.children.splice(parent.children.indexOf(this), 1, node); node.parentElement = parent }
     setAttribute() {} focus() {}
+    getBoundingClientRect() { return { left: parseFloat(this.style.left) || 16, top: parseFloat(this.style.top) || 16, width: parseFloat(this.style.width) || 420, height: parseFloat(this.style.height) || 590 } }
     addEventListener(type, fn) { const listeners = this.listeners.get(type) || []; listeners.push(fn); this.listeners.set(type, listeners) }
-    async dispatch(type) { for (const fn of this.listeners.get(type) || []) await fn({ preventDefault() {} }) }
+    async dispatch(type, args = {}) { for (const fn of this.listeners.get(type) || []) await fn({ preventDefault() {}, currentTarget: this, ...args }) }
   }
   const element = id => { if (!elements.has(id)) { const node = new Element(); node.id = id; if (id === 'language-target') node.value = 'zh-CN' } return elements.get(id) }
   const document = { body: new Element('body'), createElement: tag => new Element(tag), getElementById: element }
-  const window = { crypto: { randomUUID: () => `request-${++serial}` } }
+  const window = { innerWidth: 1000, innerHeight: 800, crypto: { randomUUID: () => `request-${++serial}` } }
   vm.runInNewContext(script, { window, document, setTimeout, clearTimeout, navigator: { clipboard: { writeText: async () => {} } }, URL, Blob }, { filename: 'web/language-learning.js' })
   const result = args => ({ id: `result-${args.request_id}`, request_id: args.request_id, paper_id: args.id, page: args.page || null, mode: args.mode, source_text: args.text, result: 'Synthetic translated result', explanation: 'Synthetic explanation', model: { provider: 'dsh', model: 'current' }, vocabulary: [], status: 'complete' })
   const ui = window.PaperLanguageLearning.create({
     api: async (action, args) => { requests.push({ action, ...clone(args) }); const value = respond?.(action, args, result); if (value !== undefined) return value; return action === 'language_generate' ? result(args) : { items: [], total: 0 } },
-    persistence: { get: async key => get ? get(key) : clone(storage.get(key) || null), put: async (key, value) => { writes.push({ key, value: clone(value) }); if (put) await put(key, value); storage.set(key, clone(value)) }, flush: async () => {} },
+    persistence: { get: async key => key==='reader:language-window' ? geometryGet ? geometryGet(key) : clone(storage.get(key) || null) : get ? get(key) : clone(storage.get(key) || null), put: async (key, value) => { writes.push({ key, value: clone(value) }); if (put) await put(key, value); storage.set(key, clone(value)) }, flush: async () => {} },
     getPaper: () => currentPaper, getSelection: () => selection, toast: text => toasts.push(text), prepareChat: (...args) => chats.push(args),
   })
   ui.setAvailable(true)
@@ -40,6 +41,54 @@ function fixture({ get, put, respond } = {}) {
     async settle() { for (let i = 0; i < 20 && ui.snapshot().busy; i++) await tick() },
   }
 }
+
+test('window geometry restores within the viewport and keyboard movement is saved', async () => {
+  const f = fixture(); f.storage.set('reader:language-window', { x: 4000, y: -20, width: 1200, height: 900 });
+  f.ui.show(); await tick();
+  const panel = f.element('language-panel');
+  assert.equal(panel.style.width, '976px'); assert.equal(panel.style.height, '776px');
+  assert.equal(panel.style.left, '12px'); assert.equal(panel.style.top, '12px');
+  await f.element('language-drag').dispatch('keydown', { key: 'ArrowRight' }); await tick();
+  assert.equal(f.storage.get('reader:language-window').x, 12, 'the window remains inside the viewport');
+  f.ui.dispose();
+})
+
+test('pointer dragging persists a bounded position and late restore cannot undo it', async () => {
+  const pending = deferred(), f = fixture({ geometryGet: () => pending.promise });
+  f.ui.show();const handle=f.element('language-drag');
+  await handle.dispatch('pointerdown',{button:0,pointerId:1,clientX:16,clientY:16});
+  await handle.dispatch('pointermove',{pointerId:1,clientX:2000,clientY:2000});
+  await handle.dispatch('pointerup',{pointerId:1});
+  pending.resolve({ x: 20, y: 20, width: 300, height: 300 });await tick();
+  assert.equal(f.element('language-panel').style.left,'568px');
+  assert.equal(f.element('language-panel').style.top,'198px');
+  assert.equal(f.storage.get('reader:language-window').x,568);
+})
+
+test('settings show configured routes and save prompts with the loaded revision', async () => {
+  const f = fixture({ respond: (action, args) => {
+    if (action === 'language_settings_get') return { revision: 'rev-1', value: { model: null, translate_prompt: '旧翻译提示', polish_prompt: '' }, default_model: { provider: 'host', model: 'default' }, models: [{ provider: 'host', id: 'chosen', name: 'Chosen' }] }
+    if (action === 'language_settings_update') return { revision: 'rev-2', value: args.value }
+  } });
+  f.ui.showSettings(); await tick();
+  assert.equal(f.ui.snapshot().view, 'settings');
+  f.element('language-settings-model').value = '0';f.element('language-settings-translate').value = '保留术语';f.element('language-settings-polish').value = '简洁表达';
+  await f.click('language-settings-save');
+  const saved = f.requests.find(row => row.action === 'language_settings_update');
+  assert.deepEqual(saved.value, { model: { provider: 'host', model: 'chosen' }, translate_prompt: '保留术语', polish_prompt: '简洁表达' });
+  assert.equal(saved.expected_revision, 'rev-1');
+})
+
+test('settings conflict keeps the unsaved prompts available to copy', async () => {
+  const f = fixture({ respond: action => {
+    if(action==='language_settings_get')return {revision:'rev-1',value:{model:null,translate_prompt:'',polish_prompt:''},models:[]};
+    if(action==='language_settings_update')throw Object.assign(new Error('changed elsewhere'),{code:'STATE_CONFLICT'});
+  } });
+  f.ui.showSettings();await tick();f.element('language-settings-polish').value='Unsaved guidance';
+  await f.click('language-settings-save');
+  assert.equal(f.element('language-settings-polish').value,'Unsaved guidance');
+  assert.match(f.element('language-status').textContent,/本窗口内容仍保留/);
+})
 
 test('selection action waits for the shared paper draft read and cannot be overwritten by its late response', async () => {
   const load = deferred(); let reads = 0

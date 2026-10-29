@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createPortal } from 'react-dom'
+import { ArrowLeft, ArrowRight, FilePlus2, FolderOpen, Presentation as PresentationIcon, Upload, RefreshCw } from 'lucide-react'
 import type { DeckDocument } from 'plaindeck/core'
 import { Toolbar } from '../../vendor/plaindeck/src/components/Toolbar'
 import { SlideList } from '../../vendor/plaindeck/src/components/SlideList'
@@ -31,6 +32,25 @@ type Project = { id: string; title: string; slide_count: number; updated_at: str
 type Loaded = { project: Project; document: DeckDocument; revision: string | number }
 type Active = { id: string; revision: string | number; handle: DirectoryHandle }
 const types = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+const templates = [
+  { id: 'blank', label: '空白', detail: '从一张封面开始，自由组织内容。', pages: 1 },
+  { id: 'paper-reading', label: '论文阅读', detail: '围绕问题、贡献、证据与局限展开。', pages: 8 },
+  { id: 'nature-methods', label: '方法汇报', detail: '依次呈现问题、流程、图表与结论。', pages: 7 },
+  { id: 'data-story', label: '数据叙事', detail: '用关键数字和对照组织判断。', pages: 6 },
+  { id: 'course-lecture', label: '课程', detail: '从学习目标到概念、例证与回顾。', pages: 6 },
+  { id: 'flowchart', label: '流程', detail: '用流程、分支、回环和清单解释过程。', pages: 5 },
+  { id: 'pitch', label: '项目提案', detail: '说明问题、方案、证据与下一步。', pages: 5 },
+  { id: 'showcase', label: '展示', detail: '用于介绍、报告与作品展示的叙事骨架。', pages: 5 },
+] as const
+
+function BackToLibrary({ onClick }: { onClick(): void }) {
+  return <button type="button" className="slides-back" onClick={onClick}><ArrowLeft size={16} aria-hidden="true" />返回文献库</button>
+}
+
+function projectDate(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' }).format(date)
+}
 
 function Presentation({ onClose }: { onClose(): void }) {
   const { document: deck, activeSlidePath } = useEditor()
@@ -56,7 +76,7 @@ function ToolbarContext({ title, onLibrary }: { title: string; onLibrary(): void
     const labels = locale === 'zh' ? ['新建演示文稿', '打开演示项目'] : ['New presentation', 'Open presentation']
     for (let index = 0; index < 2; index++) if (buttons[index]) { buttons[index].title = labels[index]; buttons[index].setAttribute('aria-label', labels[index]) }
   }, [locale])
-  return host ? createPortal(<div className="slides-toolbar-context"><span title={title}>{title}</span><a href="./" onClick={event => { event.preventDefault(); onLibrary() }}>返回文献库</a></div>, host) : null
+  return host ? createPortal(<div className="slides-toolbar-context"><span title={title}>{title}</span><BackToLibrary onClick={onLibrary} /></div>, host) : null
 }
 
 function App() {
@@ -64,6 +84,7 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]), [offset, setOffset] = useState<number | null>(null)
   const [chooser, setChooser] = useState(true), [title, setTitle] = useState(''), [template, setTemplate] = useState('blank')
   const [message, setMessage] = useState('读取演示文稿…'), [busy, setBusy] = useState(false)
+  const [listLoading, setListLoading] = useState(true), [listError, setListError] = useState('')
   const [guiding, setGuiding] = useState(false), [present, setPresent] = useState(false), [exporting, setExporting] = useState(false)
   const [cards, setCards] = useState(false), [table, setTable] = useState(false), [dragging, setDragging] = useState(false)
   const active = useRef<Active | null>(null), saving = useRef<Promise<boolean> | null>(null), blocked = useRef(false), assetBusy = useRef(false), briefDirty = useRef(false), heldZip = useRef<File | null>(null)
@@ -71,10 +92,12 @@ function App() {
   const imageRef = useRef<HTMLInputElement>(null), zipRef = useRef<HTMLInputElement>(null), canvasRef = useRef<HTMLElement>(null)
 
   async function list(next: number | null = null) {
+    setListLoading(true); setListError('')
     try {
       const result = await api<{ projects: Project[]; next_offset: number | null }>('slides_list', { offset: next ?? 0, limit: 50 })
       setProjects(current => next == null ? result.projects : [...current, ...result.projects]); setOffset(result.next_offset ?? null); setMessage('')
-    } catch (error: any) { setMessage(`读取失败：${error.message}`) }
+    } catch (error: any) { setListError(error.message || '无法读取项目列表'); setMessage('') }
+    finally { setListLoading(false) }
   }
   useEffect(() => {
     const project = new URLSearchParams(location.search).get('project')
@@ -297,6 +320,7 @@ function App() {
     finally { endSwitch() }
   }
   const slide = state.document.slides[state.activeSlidePath]
+  const selectedTemplate = templates.find(item => item.id === template) || templates[0]
   const canvasPoint = (event: React.DragEvent) => {
     const surface = canvasRef.current?.querySelector<HTMLElement>('.canvas-sized > .slide-surface')
     if (!surface) return undefined
@@ -304,12 +328,28 @@ function App() {
     return { x: (event.clientX - rect.left) * canvas.width / rect.width, y: (event.clientY - rect.top) * canvas.height / rect.height }
   }
   return <>
-    {chooser ? <main className="slides-chooser" inert={busy || undefined}><header><div><h1>演示文稿</h1><p>项目保存在当前资料库的主机上。</p></div><div>{active.current && <button disabled={busy} onClick={() => setChooser(false)}>返回编辑</button>} <a href="./" onClick={event => { event.preventDefault(); void openLibrary() }}>返回文献库</a></div></header>
-      <div className="slides-create"><label>名称 <input value={title} onChange={event => setTitle(event.target.value)} placeholder="未命名演示文稿" /></label><label>模板 <select value={template} onChange={event => setTemplate(event.target.value)}><option value="blank">空白</option><option value="paper-reading">论文阅读</option><option value="nature-methods">方法汇报</option><option value="data-story">数据叙事</option><option value="course-lecture">课程</option><option value="flowchart">流程</option><option value="pitch">项目提案</option><option value="showcase">展示</option></select></label><button disabled={busy} onClick={() => void create()}>新建</button><button disabled={busy} onClick={() => zipRef.current?.click()}>导入 ZIP</button>{heldZip.current && <button disabled={busy} onClick={() => void importZip(heldZip.current)}>重试导入</button>}</div>
-      <p role="status">{message}</p><ul className="slides-projects">{projects.map(project => <li key={project.id}><button disabled={busy} onClick={() => void openProject(project.id)}><strong>{project.title}</strong><span>{project.slide_count} 页 · {project.updated_at}</span></button></li>)}</ul>{offset !== null && <button disabled={busy} onClick={() => void list(offset)}>加载更多</button>}{!projects.length && !message && <p>还没有演示文稿。选择模板新建，或导入 ZIP。</p>}
+    {chooser ? <main className="slides-chooser" inert={busy || undefined}>
+      <header className="slides-chooser-header"><div className="slides-chooser-identity"><span className="slides-chooser-mark"><PresentationIcon size={19} aria-hidden="true" /></span><div><h1>演示文稿</h1><p>创建新项目，或继续编辑已有演示。</p></div></div><div className="slides-chooser-navigation">{active.current && <button type="button" disabled={busy} onClick={() => setChooser(false)}>返回编辑</button>}<BackToLibrary onClick={() => void openLibrary()} /></div></header>
+      {message && !listLoading && <p className="slides-chooser-message" role="status">{message}</p>}
+      <div className="slides-chooser-grid">
+        <section className="slides-create" aria-labelledby="slides-create-title"><div className="slides-section-heading"><div><h2 id="slides-create-title">新建演示文稿</h2><p>选择适合内容的起点，之后都可以编辑。</p></div><FilePlus2 size={19} aria-hidden="true" /></div>
+          <label>名称 <input value={title} onChange={event => setTitle(event.target.value)} placeholder="未命名演示文稿" /></label>
+          <label>模板 <select value={template} onChange={event => setTemplate(event.target.value)}>{templates.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+          <div className="slides-template-preview"><div className="slides-template-thumbnail" aria-hidden="true"><span /><strong /><i /><i /></div><div><strong>{selectedTemplate.label}</strong><p>{selectedTemplate.detail}</p><small>{selectedTemplate.pages} 页起稿</small></div></div>
+          <div className="slides-create-actions"><button type="button" className="slides-primary" disabled={busy} onClick={() => void create()}><FilePlus2 size={16} aria-hidden="true" />新建</button><button type="button" disabled={busy} onClick={() => zipRef.current?.click()}><Upload size={16} aria-hidden="true" />导入 ZIP</button>{heldZip.current && <button type="button" disabled={busy} onClick={() => void importZip(heldZip.current)}>重试导入</button>}</div>
+        </section>
+        <section className="slides-recent" aria-labelledby="slides-projects-title"><div className="slides-section-heading"><div><h2 id="slides-projects-title">已有项目</h2><p>{projects.length ? `已加载 ${projects.length} 个项目` : '打开保存在当前资料库中的演示文稿。'}</p></div><FolderOpen size={19} aria-hidden="true" /></div>
+          {listLoading && <p className="slides-list-state" role="status">正在读取项目…</p>}
+          {listError && <div className="slides-list-state slides-list-error" role="alert"><span>读取失败：{listError}</span><button type="button" disabled={busy} onClick={() => void list()}><RefreshCw size={15} aria-hidden="true" />重新读取</button></div>}
+          <ul className="slides-projects">{projects.map(project => <li key={project.id}><button type="button" disabled={busy} onClick={() => void openProject(project.id)}><span className="slides-project-icon"><PresentationIcon size={17} aria-hidden="true" /></span><span className="slides-project-copy"><strong>{project.title}</strong><small>{project.slide_count} 页 · 更新于 {projectDate(project.updated_at)}</small></span><ArrowRight size={16} aria-hidden="true" /></button></li>)}</ul>
+          {offset !== null && <button type="button" className="slides-more" disabled={busy || listLoading} onClick={() => void list(offset)}>加载更多</button>}
+          {!projects.length && !listLoading && !listError && <div className="slides-list-state slides-empty"><PresentationIcon size={20} aria-hidden="true" /><p>还没有演示文稿。<br />在左侧选择模板新建，或导入 ZIP。</p></div>}
+        </section>
+      </div>
     </main> : <div className="app-shell" inert={busy || undefined}>
       <Toolbar onOpen={() => void openChooser()} onNew={() => void openChooser()} onImportZip={() => zipRef.current?.click()} onAddImage={() => imageRef.current?.click()} onAddCards={() => setCards(true)} onAddTable={() => setTable(true)} onGuide={() => setGuiding(true)} onExport={() => setExporting(true)} onPresent={() => setPresent(true)} onSave={() => void save(true)} />
       <ToolbarContext title={state.document.deck.title} onLibrary={() => void openLibrary()} />
+      {message && <div className="slides-navigation-notice" role="status"><span>{message}</span><button type="button" aria-label="关闭提示" onClick={() => setMessage('')}>×</button></div>}
       <main className="workspace"><SlideList /><section ref={canvasRef} className={`canvas-workspace ${dragging ? 'image-drop-active' : ''}`} onDragEnter={event => { if (hasTransferredImages(event.dataTransfer)) setDragging(true) }} onDragOver={event => { if (hasTransferredImages(event.dataTransfer)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }} onDrop={event => { const files = transferredImageFiles(event.dataTransfer); setDragging(false); if (files.length) { event.preventDefault(); void insertImages(files, canvasPoint(event)) } }}>
         <div className="canvas-label"><span>画布</span><SlideNameEditor key={state.activeSlidePath} name={slide.name ?? slide.id} onCommit={state.renameSlide} /></div><div className="canvas-scroller"><div className="canvas-sized" style={{ width: state.document.deck.canvas.width * state.zoom, height: state.document.deck.canvas.height * state.zoom }}><SlideSurface slide={slide} zoom={state.zoom} /></div></div><div className="image-drop-overlay"><strong>添加图片</strong><span>将图片拖到画布</span></div></section><Inspector /></main>
       <StatusBar />

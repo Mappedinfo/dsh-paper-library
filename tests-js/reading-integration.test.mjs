@@ -344,3 +344,11 @@ test('a removed annotation restores as an unsaved note without replacing a separ
   assert.equal(f.element('annotation-comment').value,'Preserve this unsaved note');
   assert.equal(f.calls.some(value=>value[0]==='draft'),false);
 });
+
+test('global graph source navigation cannot apply a page to a later paper', async () => {
+  const text=source.slice(source.indexOf('async function openGraphSource('),source.indexOf('const libraryGraphUI='));
+  const requests=[],state={active:null,itemTicket:1};
+  const context={state,libraryGraphDialog:{close(){}},openPaper:async id=>{state.active={id};state.itemTicket++;},switchTab:async()=>{state.active={id:'another-paper'};state.itemTicket++;},requestPage:async page=>requests.push({id:state.active.id,page})};
+  vm.createContext(context);vm.runInContext(text,context);await context.openGraphSource('source-paper',4);assert.deepEqual(requests,[]);
+  context.switchTab=async()=>{};await context.openGraphSource('source-paper',4);assert.deepEqual(requests,[{id:'source-paper',page:4}]);
+});

@@ -139,7 +139,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         return {}
 
     @classmethod
-    def _annotation(cls, page, annot, exact=False, handwriting=None):
+    def _annotation(cls, page, annot, exact=False, handwriting=None, raw_words=None):
         import pymupdf as fitz
         info = annot.info
         extra = cls._annotation_metadata(annot)
@@ -159,7 +159,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         kind = "highlight" if annot.type[0] == 8 else "note" if annot.type[0] == 0 else annot.type[1].lower()
         text = extra.get("text", "")
         if not text and kind in {"highlight", "underline", "strikeout", "squiggly"}:
-            words = page.get_text("words")
+            words = page.get_text("words") if raw_words is None else raw_words
             unrotated = [fitz.Rect(r) * page.derotation_matrix for r in rects]
             text = " ".join(word[4] for word in words if any(fitz.Rect(word[:4]).intersects(rect) for rect in unrotated))
             if not exact:
@@ -372,36 +372,52 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                     result.append(value)
         return {"annotations": result, "truncated": False}
 
+    @staticmethod
+    def _document_layout(doc, id):
+        pages = []
+        for page in doc:
+            width, height = page.rect.width, page.rect.height
+            if not all(math.isfinite(value) and value > 0 for value in (width, height)):
+                raise ValueError(f"Invalid dimensions on PDF page {page.number + 1}")
+            pages.append({"page": page.number + 1, "width": width, "height": height, "rotation": page.rotation})
+        return {"id": id, "page_count": doc.page_count, "pages": pages,
+                "coordinate_system": "displayed-pdf-points", "rotation_applied": True,
+                "truncated": False, "limits": {"pages": 2000}}
+
     def page_layout(self, id):
         """Page-tree geometry only; no page pixels, text, images or annotations.
 
         The worker retains at most 2,000 small geometry records and closes the
         PDF before returning. Coordinates share page()'s displayed point space.
         """
-        pages = []
         with self._open_pdf(self.pdf_path(id)) as doc:
             # _open_pdf rejects larger files before touching individual pages.
-            for page in doc:
-                width, height = page.rect.width, page.rect.height
-                if not all(math.isfinite(value) and value > 0 for value in (width, height)):
-                    raise ValueError(f"Invalid dimensions on PDF page {page.number + 1}")
-                pages.append({"page": page.number + 1, "width": width, "height": height, "rotation": page.rotation})
-            count = doc.page_count
-        return {"id": id, "page_count": count, "pages": pages,
-                "coordinate_system": "displayed-pdf-points", "rotation_applied": True,
-                "truncated": False, "limits": {"pages": 2000}}
+            return self._document_layout(doc, id)
 
-    def page(self, id, page=1, scale=1.25):
+    def page(self, id, page=1, scale=1.25, include_layout=False, render_width=None):
         import pymupdf as fitz
+        if not isinstance(include_layout, bool):
+            raise ValueError("include_layout must be a boolean")
+        if render_width is not None:
+            render_width = float(render_width)
+            if not math.isfinite(render_width) or render_width <= 0 or render_width > 32000:
+                raise ValueError("Render width must be positive and at most 32000 pixels")
         scale = float(scale)
         if not math.isfinite(scale) or scale <= 0:
             raise ValueError("Render scale must be positive and finite")
         scale = min(scale, 2.0)
         with self._open_pdf(self.pdf_path(id)) as doc:
+            # First-open geometry and its selected raster share one short-lived
+            # worker/document. Only the explicitly selected page is extracted.
+            layout = self._document_layout(doc, id) if include_layout else None
+            if include_layout:
+                page = max(1, min(doc.page_count, int(page)))
             current = self._page(doc, page)
             width, height = current.rect.width, current.rect.height
             if width <= 0 or height <= 0:
                 raise ValueError("Invalid page dimensions")
+            if render_width is not None:
+                scale = min(render_width / width, 2.0)
             scale = min(scale, math.sqrt(4_000_000 / (width * height)), 4000 / width, 4000 / height)
             pix = current.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
             words = []
@@ -413,13 +429,13 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             annotation_characters = 0
             annotation_truncated = False
             for a in islice(current.annots() or [], 1001):
-                value = self._annotation(current, a, handwriting=handwriting)
+                value = self._annotation(current, a, handwriting=handwriting, raw_words=raw_words)
                 annotation_characters += self._annotation_characters(value)
                 if len(annotations) >= 1000 or annotation_characters > 2_000_000:
                     annotation_truncated = True
                     break
                 annotations.append(value)
-            return {"page": int(page), "page_count": doc.page_count, "width": width, "height": height, "scale": scale, "image": base64.b64encode(pix.tobytes("png")).decode("ascii"), "words": words, "annotations": annotations, "words_truncated": len(raw_words) > 20000, "annotations_truncated": annotation_truncated, "rotation": current.rotation}
+            return {"page": int(page), "page_count": doc.page_count, "width": width, "height": height, "scale": scale, "image": base64.b64encode(pix.tobytes("png")).decode("ascii"), "words": words, "annotations": annotations, "words_truncated": len(raw_words) > 20000, "annotations_truncated": annotation_truncated, "rotation": current.rotation, **({"layout": layout} if layout is not None else {})}
 
     def _add_annotation(self, doc, page, type="highlight", rects=None, text="", comment="", author="Reader", color="#ffdb66", extra=None, paths=None, width=2, annotation_id=None, parent_id=None):
         import pymupdf as fitz

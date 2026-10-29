@@ -1,4 +1,9 @@
 .knowledge-graph { --kg-paper:#286a61; --kg-author:#5578a2; --kg-institution:#7461a0; --kg-method:#397e89; --kg-dataset:#857a36; --kg-claim:#b66a48; --kg-evidence:#668248; --kg-concept:#97738e; --kg-tag:#b29855; font-size:13px; }
+.library-graph-dialog{width:min(1240px,calc(100vw - 64px));height:min(850px,calc(100dvh - 64px));max-width:none;max-height:none;padding:0;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)}
+.library-graph-dialog::backdrop{background:var(--dsw-alias-bg-mask-1)}
+.library-graph-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line)}
+.library-graph-content{padding:18px;overflow:auto;height:calc(100% - 61px);box-sizing:border-box}
+.kg-catalog-pager{display:flex;gap:8px;margin:8px 0}.kg-catalog-pager[hidden]{display:none}
 .kg-toolbar,.kg-controls,.kg-actions,.kg-inspector-heading,.kg-relations-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .kg-toolbar { align-items:flex-start; flex-wrap:wrap; }
 .knowledge-graph h3 { font-family:var(--sans, sans-serif); font-size:17px; margin:0 0 4px; }

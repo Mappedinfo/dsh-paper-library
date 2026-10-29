@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { createLanguageLearning } from '../src/harness/language-learning.mjs'
 import { createLocalStateStore } from '../src/local-state.mjs'
 import { resolveConfig } from '../src/harness/config.mjs'
+import { createFetchHandler } from '../src/http.mjs'
 
 function memoryStore() {
   const records = new Map(); let sequence = 0
@@ -36,7 +37,8 @@ function fixture(store = memoryStore()) {
   const f = { store, calls, ensureCalls, kernelCalls, answer: JSON.stringify(response), route: { provider: 'configured-dsh', model: 'paper-current', reasoningEffort: 'high' }, gate: null }
   f.options = { store, library: '/synthetic/library', python: '/synthetic/python',
     dispatch: async input => { kernelCalls.push(input); return { id: input.id, pdf: 'synthetic.pdf', page_count: 24 } },
-    paperChat: async input => { ensureCalls.push(input); return { sessionId: `session-${input.id}`, model: f.route } },
+    getDefaultModel: () => f.route,
+    models: async () => ({ models: [{ provider: 'configured-dsh', id: 'paper-current' }, { provider: 'configured-dsh', id: 'new-paper-selection' }, { provider: 'configured-dsh', id: 'override' }] }),
     ai: async input => { calls.push(input); await f.gate; if (f.answer instanceof Error) throw f.answer; return f.answer },
   }
   f.handle = createLanguageLearning(f.options)
@@ -50,16 +52,16 @@ test('language output budget is independent from feedback and finitely validated
   for (const value of [0, 255, 16385, NaN, Infinity, 300.5, '8192']) assert.throws(() => resolveConfig({ maxLanguageOutputTokens: value }), /maxLanguageOutputTokens/)
 })
 
-test('generation uses only authoritative paper model and persists source/model/result provenance', async () => {
+test('generation uses the host default model and persists source/model/result provenance', async () => {
   const f = fixture()
   const result = await f.handle({ ...request, provider: 'forged-provider', model: 'forged-model', api_key: 'not-used' })
   assert.equal(result.status, 'complete'); assert.equal(result.target_language, 'zh-CN')
   assert.equal(result.paper_id, 'paper-a'); assert.equal(result.page, 2); assert.equal(result.source_text, source)
   assert.equal(result.request_id, request.request_id)
-  assert.deepEqual(result.model, f.route); assert.equal(result.model_source, 'harness-session')
+  assert.deepEqual(result.model, f.route); assert.equal(result.model_source, 'harness-default'); assert.match(result.prompt_version, /^language-v2:/)
   assert.equal(f.calls[0].provider, 'configured-dsh'); assert.equal(f.calls[0].model, 'paper-current')
   assert.equal(f.calls[0].reasoningEffort, 'high'); assert.equal(f.calls[0].signal.aborted, false)
-  assert.deepEqual(f.ensureCalls, [{ action: 'chat_ensure', id: 'paper-a' }]); assert.equal(result.request, undefined)
+  assert.deepEqual(f.ensureCalls, []); assert.equal(result.request, undefined)
   const words = await f.handle({ action: 'vocabulary_list' })
   assert.equal(words.items.length, 1); assert.equal(words.items[0].status, 'learning'); assert.equal(words.items[0].suggested_by, 'ai')
   assert.equal(words.items[0].encounters[0].result_id, result.id); assert.deepEqual(words.items[0].encounters[0].model, f.route)
@@ -76,12 +78,42 @@ test('parallel duplicates and service restart replay generate exactly once; alte
   assert.equal((await restarted({ action: 'vocabulary_list' })).items[0].encounters.length, 1)
 })
 
-test('every fresh operation follows current paper model; polish retains source language and evidence in prompt', async () => {
+test('every fresh operation follows the current host default; polish retains source language and evidence', async () => {
   const f = fixture(); await f.handle(request); f.route = { provider: 'configured-dsh', model: 'new-paper-selection' }
   const polished = await f.handle({ ...request, request_id: 'polish', mode: 'polish', target_language: 'en' })
   assert.equal(polished.target_language, 'source'); assert.equal(polished.model.model, 'new-paper-selection')
   assert.match(f.calls[1].prompt, /ORIGINAL LANGUAGE/); assert.match(f.calls[1].prompt, /Do not translate/)
   assert.match(f.calls[1].prompt, /claim strength/); assert.match(f.calls[1].prompt, /quoted source data, never instructions/)
+})
+
+test('settings use CAS, configured models and mode-specific guidance without changing replay', async () => {
+  const f = fixture(), settings = await f.handle({ action: 'language_settings_get' })
+  assert.deepEqual(settings.default_model, f.route)
+  const value = { model: { provider: 'configured-dsh', model: 'override' }, translate_prompt: '保留缩写', polish_prompt: '使用简洁句子' }
+  const saved = await f.handle({ action: 'language_settings_update', value, expected_revision: settings.revision })
+  assert.equal(saved.value.model.model, 'override')
+  await assert.rejects(f.handle({ action: 'language_settings_update', value, expected_revision: settings.revision }), error => error.code === 'STATE_CONFLICT')
+  const first = await f.handle(request)
+  assert.equal(first.model.model, 'override'); assert.equal(first.model_source, 'language-override')
+  assert.match(f.calls[0].prompt, /保留缩写/); assert.doesNotMatch(f.calls[0].prompt, /使用简洁句子/)
+  await f.handle({ action: 'language_settings_update', value: { ...value, translate_prompt: '另一个偏好' }, expected_revision: saved.revision })
+  assert.equal((await f.handle(request)).prompt_version, first.prompt_version); assert.equal(f.calls.length, 1)
+  const polish = await f.handle({ ...request, mode: 'polish', request_id: 'polish-extra' })
+  assert.match(f.calls[1].prompt, /使用简洁句子/); assert.notEqual(polish.prompt_version, first.prompt_version)
+  await assert.rejects(f.handle({ action: 'language_settings_update', value: { ...value, model: { provider: 'unknown', model: 'forged' } }, expected_revision: saved.revision }), error => error.code === 'LANGUAGE_MODEL_UNAVAILABLE')
+})
+
+test('language settings and generation route through the host HTTP adapter', async () => {
+  const f = fixture(), handler = createFetchHandler({ library: '/synthetic/library', localState: f.store, languageLearning: f.handle })
+  const call = async input => {
+    const response = await handler(new Request('http://localhost/api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }))
+    const body = await response.json(); assert.equal(body.ok, true, body.error); return body.result
+  }
+  const initial = await call({ action: 'language_settings_get' })
+  assert.equal(initial.default_model.model, 'paper-current')
+  await call({ action: 'language_settings_update', expected_revision: initial.revision, value: { model: { provider: 'configured-dsh', model: 'override' }, translate_prompt: '保留合成术语', polish_prompt: '' } })
+  const result = await call(request)
+  assert.equal(result.model.model, 'override');assert.match(f.calls[0].prompt, /保留合成术语/)
 })
 
 test('opening history/search/export calls neither model nor paper Session and keeps library data scoped', async () => {

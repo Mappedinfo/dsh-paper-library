@@ -83,6 +83,81 @@ def test_layout_dimensions_match_bounded_renderer_at_mixed_sizes_and_rotations(t
             assert 0 <= word[1] < word[3] <= geometry["height"]
 
 
+def test_first_page_payload_shares_one_document_open_and_only_extracts_the_selected_page(tmp_path, monkeypatch):
+    source = synthetic_pdf(tmp_path / "source.pdf", [(300, 400, 0), (500, 250, 90), (600, 300, 180)])
+    item = request(tmp_path, "import", path=str(source))["items"][0]
+    original_open, original_text, original_pixmap = Library._open_pdf, fitz.Page.get_text, fitz.Page.get_pixmap
+    opens, texts, pixels = [], [], []
+
+    @contextmanager
+    def tracked_open(path, writing=False):
+        with original_open(path, writing=writing) as doc:
+            opens.append(doc)
+            yield doc
+
+    def tracked_text(self, *args, **kwargs):
+        texts.append((self.number + 1, args[0]))
+        return original_text(self, *args, **kwargs)
+
+    def tracked_pixmap(self, *args, **kwargs):
+        pixels.append(self.number + 1)
+        return original_pixmap(self, *args, **kwargs)
+
+    monkeypatch.setattr(Library, "_open_pdf", staticmethod(tracked_open))
+    monkeypatch.setattr(fitz.Page, "get_text", tracked_text)
+    monkeypatch.setattr(fitz.Page, "get_pixmap", tracked_pixmap)
+    result = request(tmp_path, "page", id=item["id"], page=2, include_layout=True, render_width=375)
+    assert len(opens) == 1 and opens[0].is_closed
+    assert texts == [(2, "words")] and pixels == [2]
+    assert result["page"] == 2 and result["scale"] == 1.5
+    assert result["layout"]["page_count"] == 3
+    assert [(page["width"], page["height"]) for page in result["layout"]["pages"]] == [(300, 400), (250, 500), (600, 300)]
+    image = base64.b64decode(result["image"])
+    assert struct.unpack(">II", image[16:24]) == (375, 750)
+
+
+def test_first_page_payload_clamps_a_restored_page_but_keeps_regular_page_validation(tmp_path):
+    source = synthetic_pdf(tmp_path / "source.pdf", [(300, 400, 0), (500, 250, 90)])
+    item = request(tmp_path, "import", path=str(source))["items"][0]
+    result = request(tmp_path, "page", id=item["id"], page=2000, include_layout=True, render_width=32000)
+    assert result["page"] == 2 and result["scale"] <= 2
+    assert len(result["layout"]["pages"]) == 2
+    with pytest.raises(ValueError, match="outside document"):
+        request(tmp_path, "page", id=item["id"], page=2000)
+    for width in (0, -1, float("nan"), float("inf"), 32001):
+        with pytest.raises(ValueError, match="Render width"):
+            request(tmp_path, "page", id=item["id"], render_width=width)
+    with pytest.raises(ValueError, match="boolean"):
+        request(tmp_path, "page", id=item["id"], include_layout="true")
+
+
+def test_many_external_highlights_reuse_one_word_extraction_and_preserve_recovered_text(tmp_path, monkeypatch):
+    source = tmp_path / "highlighted.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page(width=600, height=800)
+        for row in range(30):
+            page.insert_text((35, 40 + row * 14), "Synthetic external annotation evidence", fontsize=9)
+        matches = page.search_for("Synthetic")
+        for index in range(80):
+            page.add_highlight_annot(matches[index % len(matches)])
+        doc.save(source)
+    item = request(tmp_path, "import", path=str(source))["items"][0]
+    expected = request(tmp_path, "annotations", id=item["id"])["annotations"]
+    original = fitz.Page.get_text
+    calls = []
+
+    def tracked(self, *args, **kwargs):
+        calls.append(args[0])
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(fitz.Page, "get_text", tracked)
+    rendered = request(tmp_path, "page", id=item["id"], page=1)
+    assert calls == ["words"]
+    assert rendered["annotations"] == expected
+    assert len(rendered["annotations"]) == 80
+    assert all(annotation["text"] == "Synthetic" for annotation in rendered["annotations"])
+
+
 def test_layout_rejects_no_pdf_archived_and_oversized_documents(tmp_path):
     item = request(tmp_path, "create", metadata={"title": "Synthetic empty record"})
     with pytest.raises(ValueError, match="no attached PDF"):

@@ -235,10 +235,11 @@ test('linked draft restoration retains its parent context and rejects malformed 
   assert.equal(buffer.getContext().parentId, value.parentId);
   buffer.clear(); buffer.restore({ ...value, parentId: undefined }); assert.equal(buffer.getContext(), null, 'Legacy unlinked drafts remain free ink');
 });
-function scheduler({ delayedInstall = false } = {}) {
+function scheduler({ delayedInstall = false, maxResident } = {}) {
   const requests = [], installed = new Map(), decoded = [], errors = [], evicted = [];
   let inFlight = 0, peakInFlight = 0, peakResident = 0;
   const queue = createPageWindow({
+    ...(maxResident === undefined ? {} : { maxResident }),
     load: job => new Promise((resolve, reject) => { inFlight++; peakInFlight = Math.max(peakInFlight, inFlight); requests.push({ ...job, resolve: result => { inFlight--; resolve(result ?? { ...job }); }, reject: error => { inFlight--; reject(error); } }); }),
     install: (page, result) => { installed.set(page, result); peakResident = Math.max(peakResident, installed.size); return delayedInstall ? new Promise((resolve, reject) => decoded.push({ page, resolve, reject })) : undefined; },
     evict: page => { installed.delete(page); evicted.push(page); },
@@ -312,6 +313,84 @@ test('duplicate and excessive viewport requests cannot expand the render window'
   assert.deepEqual(plain(h.queue.snapshot().wanted), [1, 2, 3]);
   h.requests[0].resolve(); await flush(); h.requests[1].resolve(); await flush(); h.requests[2].resolve(); await h.queue.idle();
   assert.equal(h.requests.length, 3); assert.equal(h.installed.size, 3);
+});
+
+test('spread renderer has four bounded residents and contracts safely to the single-page budget', async () => {
+  let capacity = 4;
+  const h = scheduler({ maxResident: () => capacity }); h.queue.reset('paper'); h.queue.want([2, 1, 3, 4, 5]);
+  assert.deepEqual(plain(h.queue.snapshot().wanted), [2, 1, 3, 4]);
+  for (let index = 0; index < 4; index++) { h.requests[index].resolve(); await flush(); }
+  await h.queue.idle(); assert.deepEqual(h.peaks(), { inFlight: 1, resident: 4 });
+  capacity = 3; h.queue.want([2, 3, 1, 4]);
+  assert.equal(h.installed.size, 3); assert.equal(h.installed.has(4), false);
+  h.queue.want([50, 51, 49]); const obsolete = h.queue.ready(50); await flush();
+  capacity = 4; h.queue.want([100, 99, 101, 102]); assert.equal(await obsolete, false);
+  h.requests[4].resolve(); await flush(); assert.equal(h.installed.has(50), false);
+  for (let index = 5; index < 9; index++) { h.requests[index].resolve(); await flush(); }
+  await h.queue.idle(); assert.deepEqual(plain(h.queue.snapshot().residents), [100, 99, 101, 102]);
+  assert.deepEqual(h.peaks(), { inFlight: 1, resident: 4 });
+});
+
+test('spread geometry pairs mixed page sizes without overlap and keeps an odd final page addressable', () => {
+  const pages = [{ page: 1, width: 600, height: 800 }, { page: 2, width: 800, height: 600 }, { page: 3, width: 600, height: 600 }, { page: 4, width: 600, height: 900 }, { page: 5, width: 400, height: 400 }];
+  const metrics = pageMetrics(pages, 300, 'spread');
+  assert.deepEqual(plain(metrics.map(page => [page.page, page.top, page.height, page.rowStart])), [[1, 12, 424, 1], [2, 12, 249, 1], [3, 452, 324, 3], [4, 452, 474, 3], [5, 942, 324, 5]]);
+  assert.equal(pageAt(metrics, 200), 1); assert.equal(pageAt(metrics, 500), 3); assert.equal(pageAt(metrics, 950), 5);
+  assert.deepEqual(plain(visibleWindow(metrics, 0, 600, 2, 'spread')), [2, 1, 3, 4]);
+  assert.deepEqual(plain(visibleWindow(metrics, 0, 600, 5, 'spread')), [5, 3, 4]);
+  assert.deepEqual(plain(visibleWindow(pageMetrics(pages.slice(0, 1), 300, 'spread'), 0, 600, 1, 'spread')), [1]);
+  const rotatedSelection = mergeSelection([[20, 30, 70, 50, 'Synthetic']], 2);
+  assert.deepEqual(plain(rotatedSelection.rects), [[20, 30, 70, 50]], 'Spread geometry never changes PDF point coordinates');
+});
+
+test('layout switching preserves the exact right-hand page and linked Ink points while finishing a partial stroke', async () => {
+  const pages = Array.from({ length: 5 }, (_, index) => ({ page: index + 1, width: 600, height: 800 })), buffer = createInkBuffer();
+  const origin = { paperId: 'paper-a', page: 2, parentId: 'parent-a' };
+  buffer.setContext(origin); buffer.start(origin, [10, 20], { width: 2, color: '#336699' }); buffer.append([30, 40]);
+  const metrics = pageMetrics(pages, 600), calls = [], root = { dataset: {}, scrollTop: metrics[1].top + metrics[1].height * .2 };
+  const scope = vm.createContext({ layout: 'single', root, pages, metrics, active: 2, layoutWidth: 600,
+    endInk: cancelled => { calls.push(['end-ink', cancelled]); buffer.end(cancelled); }, endMarkup() {}, endTouchPan() {}, nativeGesture: {}, inputEnded() {}, cancelNavigation() {},
+    arrangeSlots() {}, resize: anchor => { scope.metrics = pageMetrics(pages, scope.layout === 'spread' ? 300 : 600, scope.layout); root.scrollTop = scope.metrics[anchor.page - 1].top + anchor.fraction * scope.metrics[anchor.page - 1].height; },
+    queue: { want: values => calls.push(['want', plain(values)]) }, wantedPages: page => visibleWindow(scope.metrics, root.scrollTop, 600, page, scope.layout),
+    updateWindow: page => calls.push(['window', page]), announce() {}, paintInk() {}, paintOverlays() {}, goTo: page => Promise.resolve(Math.max(1, Math.min(5, page))) });
+  const start = readerSource.indexOf('    function setLayout('), end = readerSource.indexOf('    // Clearing a browser selection', start);
+  vm.runInContext(readerSource.slice(start, end), scope);
+  assert.equal(scope.setLayout('spread'), 'spread'); assert.equal(scope.active, 2);
+  assert.deepEqual(plain(buffer.snapshot()), { ...origin, paths: [[[10, 20], [30, 40]]], width: 2, color: '#336699', revision: 1 });
+  assert.ok(Math.abs(root.scrollTop - scope.metrics[1].top - scope.metrics[1].height * .2) < 1e-8);
+  assert.deepEqual(calls[0], ['end-ink', false]);
+  assert.equal(await scope.advance(1), 3); assert.equal(await scope.advance(-1), 1);
+  scope.active = 5; assert.equal(await scope.advance(1), 5); assert.equal(await scope.advance(-1), 3);
+  assert.equal(scope.setLayout('single'), 'single'); assert.equal(scope.active, 5);
+  assert.equal(await scope.advance(-1), 4); assert.throws(() => scope.setLayout('invented'), /布局/);
+});
+
+test('a hidden reader contracts the spread residency budget without relying on resize or scroll events', async () => {
+  const pages = Array.from({ length: 6 }, (_, index) => ({ page: index + 1, width: 600, height: 800 }));
+  const scope = vm.createContext({ layout: 'spread', pages, metrics: pageMetrics(pages, 300, 'spread'), active: 2, layoutWidth: 300,
+    root: { dataset: {}, scrollTop: 0, clientWidth: 0, clientHeight: 0 }, endInk() {}, endMarkup() {}, endTouchPan() {}, nativeGesture: null, inputEnded() {}, cancelNavigation() {}, arrangeSlots() {}, resize() {}, updateWindow() {}, announce() {}, paintInk() {}, paintOverlays() {} });
+  const installed = new Set(), evicted = [];
+  scope.queue = createPageWindow({ maxResident: () => scope.layout === 'spread' ? 4 : 3, load: async job => ({ page: job.page }), install: page => installed.add(page), evict: page => { installed.delete(page); evicted.push(page); } });
+  scope.wantedPages = page => visibleWindow(scope.metrics, 0, 0, page, scope.layout);
+  scope.queue.reset('paper'); scope.queue.want([2, 1, 3, 4]); await scope.queue.idle(); assert.equal(installed.size, 4);
+  const start = readerSource.indexOf('    function setLayout('), end = readerSource.indexOf('    // Clearing a browser selection', start); vm.runInContext(readerSource.slice(start, end), scope);
+  assert.equal(scope.setLayout('single'), 'single'); assert.equal(installed.size, 3); assert.deepEqual(evicted, [4]);
+  assert.deepEqual(plain(scope.queue.snapshot().wanted), [2, 3, 1]); await scope.queue.idle();
+});
+
+test('text fitting removes the previous transform from its measurement and batches layout reads before writes', () => {
+  const events = [], sizes = [{ box: 30, natural: 20 }, { box: 80, natural: 40 }];
+  const spans = sizes.map((size, index) => {
+    const run = { style: new Proxy({ transform: `scaleX(${index ? 2 : 1.5})` }, { set(target, key, value) { events.push('write'); target[key] = value; return true; } }), size };
+    return { run, dataset: { textScale: String(index ? 2 : 1.5) }, querySelector: () => run, getBoundingClientRect: () => { events.push('read'); return { width: size.box }; } };
+  });
+  const scope = vm.createContext({ textWidth: run => { events.push('read'); return run.size.natural * Number(/scaleX\(([^)]+)\)/.exec(run.style.transform)?.[1] || 1); } });
+  const start = readerSource.indexOf('    function fitWordLayer('), end = readerSource.indexOf('    /** A space run', start); vm.runInContext(readerSource.slice(start, end), scope);
+  const layer = { querySelectorAll: () => spans };
+  scope.fitWordLayer(layer); assert.deepEqual(spans.map(span => span.run.style.transform), ['scaleX(1.5)', 'scaleX(2)']);
+  assert.deepEqual(events, ['read', 'read', 'read', 'read', 'write', 'write']);
+  sizes.forEach(size => { size.box /= 2; size.natural /= 2; }); scope.fitWordLayer(layer);
+  assert.deepEqual(spans.map(span => Number(span.dataset.textScale)), [1.5, 2], 'Switching layout preserves the raster-to-glyph fit');
 });
 
 test('geometry-only layout supports 2000 pages, mixed orientation and stable scroll anchors', () => {

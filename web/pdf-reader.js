@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const MAX_PAGES = 2000, MAX_RESIDENT = 3, GAP = 16, CAPTION = 24, PADDING = 12;
+  const MAX_PAGES = 2000, MAX_RESIDENT = 3, MAX_SPREAD_RESIDENT = 4, GAP = 16, CAPTION = 24, PADDING = 12;
   const TOOLS = new Set(['select', 'highlight', 'underline', 'strikeout', 'note', 'ink']);
   const MARKUP_TOOLS = new Set(['highlight', 'underline', 'strikeout']);
   const MAX_INK_PATHS = 64, MAX_INK_POINTS = 4096;
@@ -175,9 +175,19 @@
       return { page: page.page, width: page.width, height: page.height };
     });
   }
-  function pageMetrics(pages, width) {
+  function pageMetrics(pages, width, layout = 'single') {
     let top = PADDING;
-    const metrics = pages.map(page => { const height = width * page.height / page.width + CAPTION; const result = { ...page, top, height }; top += height + GAP; return result; });
+    const metrics = [];
+    for (let index = 0; index < pages.length; index += layout === 'spread' ? 2 : 1) {
+      const row = pages.slice(index, index + (layout === 'spread' ? 2 : 1));
+      let rowHeight = 0;
+      for (const page of row) {
+        const height = width * page.height / page.width + CAPTION;
+        metrics.push({ ...page, top, height, ...(layout === 'spread' ? { rowStart: index + 1 } : {}) });
+        rowHeight = Math.max(rowHeight, height);
+      }
+      top += rowHeight + GAP;
+    }
     if (top > 20000000) throw new Error('连续页面高度超出浏览器显示范围，请使用外部 PDF 阅读器。');
     return metrics;
   }
@@ -185,11 +195,17 @@
     if (!metrics.length) return 1;
     let low = 0, high = metrics.length - 1;
     while (low < high) { const middle = Math.ceil((low + high) / 2); if (metrics[middle].top <= point) low = middle; else high = middle - 1; }
-    return metrics[low].page;
+    return metrics[low].rowStart || metrics[low].page;
   }
-  function visibleWindow(metrics, top, height, priority) {
+  function visibleWindow(metrics, top, height, priority, layout = 'single') {
     if (!metrics.length) return [];
     const center = priority || pageAt(metrics, top + Math.max(1, height) * .35);
+    if (layout === 'spread') {
+      const start = Math.floor((center - 1) / 2) * 2 + 1;
+      const adjacent = start + 2 <= metrics.length ? start + 2 : start - 2;
+      return [...new Set([center, center === start ? start + 1 : start, adjacent, adjacent + 1])]
+        .filter(page => page > 0 && page <= metrics.length).slice(0, MAX_SPREAD_RESIDENT);
+    }
     const candidates = [center, center + 1, center - 1, center + 2, center - 2];
     return [...new Set(candidates)].filter(page => page > 0 && page <= metrics.length).slice(0, MAX_RESIDENT);
   }
@@ -268,10 +284,11 @@
     return { page, text, rects, wordCount: pieces.length };
   }
   /** Serial scheduling owns page identities, never retains raster/word payloads. */
-  function createPageWindow({ load, install, evict, onError = () => {} }) {
+  function createPageWindow({ load, install, evict, onError = () => {}, onSettled = () => {}, maxResident = MAX_RESIDENT }) {
     let epoch = 0, id = null, wanted = [], running = null, inFlight = null, disposed = false;
     const residents = new Set(), failures = new Map(), revisions = new Map(), waiters = new Map(), dirty = new Set();
     const needs = page => (!residents.has(page) || dirty.has(page)) && !failures.has(page);
+    const capacity = () => Math.max(1, Math.min(MAX_SPREAD_RESIDENT, typeof maxResident === 'function' ? maxResident() : maxResident));
     const settle = (page, value, error) => { for (const waiter of waiters.get(page) || []) error ? waiter.reject(error) : waiter.resolve(value); waiters.delete(page); };
     function drop(page) { if (residents.delete(page)) evict(page); }
     function pump() {
@@ -284,22 +301,22 @@
           try {
             const result = await load(job);
             if (job.epoch !== epoch || job.id !== id || !wanted.includes(page) || job.revision !== (revisions.get(page) || 0)) continue;
-            // The wanted set has at most three entries. Evict before installing,
-            // including during rapid jumps, so no fourth raster becomes resident.
+            // Evict before installing, including during rapid layout changes.
+            // Single-page mode retains three pages; spreads retain at most four.
             for (const old of [...residents]) if (!wanted.includes(old)) drop(old);
-            if (!residents.has(page) && residents.size >= MAX_RESIDENT) drop([...residents].find(old => old !== page));
+            if (!residents.has(page) && residents.size >= capacity()) drop([...residents].find(old => old !== page));
             const installed = install(page, result, job); residents.add(page); await installed;
             if (job.current()) { dirty.delete(page); settle(page, true); }
             else if (job.epoch === epoch && !wanted.includes(page)) drop(page);
           } catch (error) {
             if (job.current()) { if (!job.preserved) drop(page); failures.set(page, error); onError(page, error, { preserved: job.preserved }); settle(page, false, error); }
-          } finally { if (inFlight === job) inFlight = null; }
+          } finally { if (inFlight === job) inFlight = null; onSettled(page, job); }
         }
       })().finally(() => { running = null; if (!disposed && id && wanted.some(needs)) void pump(); });
       return running;
     }
     function want(pages) {
-      wanted = [...new Set(pages)].filter(page => Number.isInteger(page) && page > 0).slice(0, MAX_RESIDENT);
+      wanted = [...new Set(pages)].filter(page => Number.isInteger(page) && page > 0).slice(0, capacity());
       for (const page of [...residents]) if (!wanted.includes(page)) drop(page);
       for (const page of [...failures.keys()]) if (!wanted.includes(page)) failures.delete(page);
       for (const page of [...waiters.keys()]) if (!wanted.includes(page)) settle(page, false);
@@ -313,7 +330,7 @@
   }
   function create({ root, api, getPaper, onActivePage = () => {}, onSelection = () => {}, onStatus: reportStatus = () => {}, onPageNote = () => {}, onAnnotationActivate = () => {}, onInkChange = () => {}, onInputChange = () => {}, onFocusChange = () => {}, onInkTrace = () => {} }) {
     if (!root) throw new Error('PDF reader requires a scroll viewport');
-    let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, flashTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', pendingRange = null, transport = Promise.resolve(), zoom = 1;
+    let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, flashTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', pendingRange = null, transport = Promise.resolve(), zoom = 1, layout = 'single', initialPage = null;
     const renderedScales = new Map(), pageAnnotations = new Map();
     const ink = createInkBuffer();
     const traceInk = createInkTrace(onInkTrace);
@@ -471,6 +488,8 @@
     function pointerDown(event) {
       input.observe(event);
       if (!(event.pointerType === 'touch' && (inkGesture || markupGesture))) cancelNavigation();
+      const clickedPage = Number(event.target.closest?.('.pdr-sheet')?.dataset.pdfPage);
+      if (pages[clickedPage - 1] && clickedPage !== active && !(event.pointerType === 'touch' && (inkGesture || markupGesture))) { active = clickedPage; announce(); }
       if (tool === 'select' && event.button === 0 && event.isPrimary !== false) {
         const sheet = event.target.closest?.('.pdr-sheet'); if (sheet && root.contains(sheet)) nativeGesture = { pointerId: event.pointerId, sheet };
       }
@@ -536,10 +555,12 @@
     function setPenOnly(value) { if (value) { if (inkGesture && inkGesture.pointerType !== 'pen') endInk(false, 'pen_only'); if (markupGesture && markupGesture.pointerType !== 'pen') endMarkup(true); } return input.setPenOnly(value); }
     const current = (id, ticket) => !disposed && id === paperId && id === getPaper()?.id && ticket === generation;
     function request(action, args, valid) { const task = transport.catch(() => {}).then(() => valid() ? api(action, args) : null); transport = task.catch(() => {}); return task; }
-    // zoom 1 is fit-width; wider layouts scroll horizontally. Raster density may
-    // rise with zoom (capped at 4) so magnified text stays sharp within budget.
-    const fitWidth = () => Math.max(1, Math.min(1100, (root.clientWidth || 664) - PADDING * 2));
-    function scaleFor(page) { const geometry = pages[page - 1]; const cap = Math.min(2 * Math.max(1, zoom), 4); return Math.max(.2, Math.min(cap, layoutWidth / geometry.width * Math.min(2, window.devicePixelRatio || 1))); }
+    // zoom 1 is fit-width; wider layouts scroll horizontally. Mirror the worker
+    // raster caps so resizing never requests a density it cannot return.
+    const fitWidth = () => Math.max(1, Math.min(1100, ((root.clientWidth || 664) - PADDING * 2 - (layout === 'spread' ? GAP : 0)) / (layout === 'spread' ? 2 : 1)));
+    const residentLimit = () => layout === 'spread' ? MAX_SPREAD_RESIDENT : MAX_RESIDENT;
+    const wantedPages = priority => visibleWindow(metrics, root.scrollTop, root.clientHeight, priority, layout);
+    function scaleFor(page) { const geometry = pages[page - 1]; return Math.min(2, Math.sqrt(4000000 / (geometry.width * geometry.height)), 4000 / geometry.width, 4000 / geometry.height, Math.max(.2, layoutWidth / geometry.width * Math.min(2, window.devicePixelRatio || 1))); }
     function announce(loaded = queue.snapshot().residents.includes(active) && slots[active - 1]?.sheet.dataset.loaded === 'true') { const geometry = pages[active - 1]; if (geometry) onActivePage(active, { paperId, pageCount: pages.length, width: geometry.width, height: geometry.height, loaded }); }
     function placeholder(page, message = '滚动到这里时载入', error = false) {
       const slot = slots[page - 1]; if (!slot) return;
@@ -549,9 +570,32 @@
       for (const image of slot.sheet.querySelectorAll('img')) image.removeAttribute('src');
       const note = dom('div', `pdr-placeholder${error ? ' pdr-error' : ''}`); note.append(dom('span', '', message));
       if (error) { const retry = dom('button', 'button subtle', '重试此页'); retry.type = 'button'; retry.dataset.retryPage = String(page); note.append(retry); }
-      slot.sheet.replaceChildren(note); slot.sheet.dataset.loaded = 'false';
+      slot.sheet.replaceChildren(note); slot.sheet.dataset.loaded = 'false'; slot.sheet.setAttribute('aria-busy', 'false'); slot.sheet.removeAttribute('data-loading');
       if (ink.preview()?.paperId === paperId && ink.preview()?.page === page) paintInk();
       paintOverlays(page);
+    }
+    function pageLoading(page, loading) {
+      const sheet = slots[page - 1]?.sheet; if (!sheet) return;
+      sheet.setAttribute('aria-busy', String(loading)); sheet.dataset.loading = String(loading);
+      for (const previous of sheet.querySelectorAll('.pdr-loading-indicator')) previous.remove();
+      if (!loading) return;
+      const indicator = dom('div', 'pdr-loading-indicator'); indicator.setAttribute('role', 'status');
+      indicator.append(dom('span', 'pdr-spinner'), dom('span', '', `正在载入第 ${page} 页…`));
+      sheet.append(indicator);
+    }
+    function arrangeSlots() {
+      root.dataset.layout = layout;
+      if (layout !== 'spread') { strip.replaceChildren(...slots.map(slot => slot.outer)); return; }
+      const rows = [];
+      for (let index = 0; index < slots.length; index += 2) {
+        const row = dom('div', 'pdr-spread'); row.append(...slots.slice(index, index + 2).map(slot => slot.outer)); rows.push(row);
+      }
+      strip.replaceChildren(...rows);
+    }
+    function sizeSlots(width) {
+      layoutWidth = width; metrics = pageMetrics(pages, width, layout);
+      for (const metric of metrics) { const slot = slots[metric.page - 1]; slot.outer.style.width = `${width}px`; slot.outer.style.height = `${metric.height}px`; slot.sheet.style.height = `${metric.height - CAPTION}px`; }
+      for (const row of strip.querySelectorAll('.pdr-spread')) row.style.width = `${width * 2 + GAP}px`;
     }
     /** One invisible text run per raster word.
      *
@@ -590,14 +634,18 @@
      * A run that cannot be measured keeps its natural width. */
     function fitWordLayer(layer) {
       if (!layer) return;
+      const fits = [];
       for (const span of layer.querySelectorAll('.pdr-word')) {
         const run = span.querySelector('.pdf-word-text');
         if (!run) continue;
-        const box = span.getBoundingClientRect().width, natural = textWidth(run);
+        const fitted = Number(span.dataset.textScale), previousScale = Number.isFinite(fitted) && fitted > 0 ? fitted : 1;
+        const box = span.getBoundingClientRect().width, natural = textWidth(run) / previousScale;
         const scale = box > 0 && natural > 0 ? Math.min(4, Math.max(.25, box / natural)) : 1;
-        run.style.transform = `scaleX(${scale})`;
-        span.dataset.textScale = String(scale);
+        fits.push({ run, span, scale });
       }
+      // Read all glyph geometry before applying transforms. Interleaving these
+      // writes with thousands of Range reads forces repeated browser layout.
+      for (const { run, span, scale } of fits) { run.style.transform = `scaleX(${scale})`; span.dataset.textScale = String(scale); }
     }
     /** A space run covering one real inter-word gap, positioned like its neighbours. */
     function gapRun(left, right, y0, y1, geometry, factor) {
@@ -613,7 +661,12 @@
       try { const range = document.createRange(); range.selectNodeContents(run); const rect = range.getBoundingClientRect(); return rect.width; } catch { return 0; }
     }
     const queue = createPageWindow({
-      load: job => { const ticket = generation, scale = scaleFor(job.page); job.requestedScale = scale; return request('page', { id: job.id, page: job.page, scale }, () => current(job.id, ticket)); },
+      maxResident: residentLimit,
+      load: job => {
+        const ticket = generation, scale = scaleFor(job.page); job.requestedScale = scale; job.loadingTicket = ticket; pageLoading(job.page, true);
+        if (initialPage?.page === job.page) { const result = initialPage; initialPage = null; job.requestedScale = result.scale; return result; }
+        return request('page', { id: job.id, page: job.page, scale }, () => current(job.id, ticket));
+      },
       async install(page, result, job) {
         const ticket = generation, id = paperId;
         const geometry = pages[page - 1];
@@ -625,7 +678,7 @@
         if (valid() && inputBusy(page)) traceInk('page_defer', { paperId: id, page, reason: 'active_input' });
         if (!await waitForInput(page, valid) || !valid()) return;
         // Decode off-DOM, then replace only between complete input gestures.
-        sheet.replaceChildren(image); renderWords(sheet, result.words, geometry); sheet.dataset.loaded = 'true'; paintInk();
+        sheet.replaceChildren(image); renderWords(sheet, result.words, geometry); sheet.dataset.loaded = 'true'; pageLoading(page, false); paintInk();
         // Saved annotations travel with the page payload so clicks can link the
         // raster markup to its rail entry without a second catalogue read.
         pageAnnotations.set(page, (result.annotations || []).filter(annotation => annotation && typeof annotation.id === 'string' && Array.isArray(annotation.rects) && annotation.rects.some(rect => Array.isArray(rect) && rect.length >= 4)));
@@ -639,24 +692,25 @@
       },
       evict: page => placeholder(page),
       onError: (page, error, info) => { if (!info?.preserved) placeholder(page, `第 ${page} 页读取失败：${error.message}`, true); if (page === active) onStatus(error.message, true); },
+      onSettled: (page, job) => { if (current(job.id, job.loadingTicket)) pageLoading(page, false); },
     });
     function updateWindow(priority) {
       if (!pages.length || disposed || root.clientHeight <= 0) return;
-      const next = pageAt(metrics, root.scrollTop + root.clientHeight * .35);
+      const row = pageAt(metrics, root.scrollTop + root.clientHeight * .35);
+      const next = layout === 'spread' && metrics[active - 1]?.rowStart === row ? active : row;
       if (next !== active) { active = next; announce(); }
       const busyPage = Number((inkGesture || markupGesture || nativeGesture)?.sheet.dataset.pdfPage);
-      const wanted = visibleWindow(metrics, root.scrollTop, root.clientHeight, priority || jumpTarget);
-      queue.want(busyPage ? [busyPage, ...wanted].slice(0, MAX_RESIDENT) : wanted);
+      const wanted = wantedPages(priority || jumpTarget);
+      queue.want(busyPage ? [busyPage, ...wanted].slice(0, residentLimit()) : wanted);
       inputEnded();
     }
     function scroll() { if (frame !== null) return; frame = window.requestAnimationFrame(() => { frame = null; updateWindow(); }); }
-    function resize() {
+    function resize(anchor) {
       if (!pages.length || root.clientWidth <= 0 || disposed) return;
       const width = Math.max(1, fitWidth() * zoom);
       if (Math.abs(width - layoutWidth) < 1) { updateWindow(); return; }
-      const oldPage = pageAt(metrics, root.scrollTop), previous = metrics[oldPage - 1], fraction = previous ? (root.scrollTop - previous.top) / previous.height : 0;
-      layoutWidth = width; metrics = pageMetrics(pages, width);
-      for (const metric of metrics) { const slot = slots[metric.page - 1]; slot.outer.style.width = `${width}px`; slot.outer.style.height = `${metric.height}px`; slot.sheet.style.height = `${metric.height - CAPTION}px`; }
+      const oldPage = anchor?.page || pageAt(metrics, root.scrollTop), previous = metrics[oldPage - 1], fraction = anchor?.fraction ?? (previous ? (root.scrollTop - previous.top) / previous.height : 0);
+      sizeSlots(width);
       for (const page of queue.snapshot().residents) {
         const sheet = slots[page - 1].sheet, factor = width / pages[page - 1].width;
         for (const span of sheet.querySelectorAll('.pdr-word')) span.style.fontSize = `${Number(span.dataset.height) * factor}px`;
@@ -679,7 +733,7 @@
       // The draft belongs to its original paper/page, not to the disposable
       // raster window. The caller offers save/discard before leaving the page.
       endInk(false, 'reader_clear'); endMarkup(true); endTouchPan(); nativeGesture = null; cancelNavigation(); returnPosition = null; overlays.clearRasters();
-      ++generation; paperId = null; jumpTarget = null; selection = null; lastSelection = ''; queue.reset(null); renderedScales.clear(); pageAnnotations.clear(); pages = []; metrics = []; slots = []; active = 1; layoutWidth = 0; layoutPromise = null; strip.replaceChildren(); root.scrollTop = 0;
+      ++generation; paperId = null; jumpTarget = null; selection = null; lastSelection = ''; queue.reset(null); renderedScales.clear(); pageAnnotations.clear(); pages = []; metrics = []; slots = []; active = 1; layoutWidth = 0; layoutPromise = null; initialPage = null; strip.replaceChildren(); root.scrollTop = 0; root.setAttribute('aria-busy', 'false');
       if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; } if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
       if (resizeTimer !== null) { window.clearTimeout(resizeTimer); resizeTimer = null; }
       if (flashTimer !== null) { window.clearTimeout(flashTimer); flashTimer = null; }
@@ -689,18 +743,23 @@
     }
     async function open(paper, { page = 1 } = {}) {
       clear(); if (!paper?.id || !paper.pdf || disposed) return false;
-      paperId = paper.id; queue.reset(paperId); const id = paperId, ticket = generation; onStatus('正在读取 PDF 页面尺寸…');
-      const loading = dom('div', 'pdr-placeholder', '正在准备连续阅读…'); strip.append(loading);
+      paperId = paper.id; queue.reset(paperId); const id = paperId, ticket = generation; onStatus('正在载入 PDF 首屏…');
+      root.setAttribute('aria-busy', 'true');
+      const loading = dom('div', 'pdr-placeholder pdr-initial-loading'); loading.setAttribute('role', 'status'); loading.append(dom('span', 'pdr-spinner'), dom('span', '', '正在准备连续阅读…')); strip.append(loading);
       layoutPromise = (async () => {
         try {
-          const layout = await request('page_layout', { id }, () => current(id, ticket)); if (!current(id, ticket)) return false;
-          pages = validateLayout(layout); slots = pages.map(geometry => { const outer = dom('section', 'pdr-page-slot'); outer.dataset.pdfPage = String(geometry.page); outer.setAttribute('aria-label', `PDF 第 ${geometry.page} 页`); const caption = dom('div', 'pdr-page-caption', `${geometry.page} / ${pages.length}`), sheet = dom('div', 'pdr-sheet'); sheet.dataset.pdfPage = String(geometry.page); outer.append(caption, sheet); return { outer, sheet }; });
-          strip.replaceChildren(...slots.map(slot => slot.outer)); paintInkContext(); for (const geometry of pages) placeholder(geometry.page);
-          layoutWidth = Math.max(1, fitWidth() * zoom); metrics = pageMetrics(pages, layoutWidth);
-          for (const metric of metrics) { const slot = slots[metric.page - 1]; slot.outer.style.width = `${layoutWidth}px`; slot.outer.style.height = `${metric.height}px`; slot.sheet.style.height = `${metric.height - CAPTION}px`; }
-          active = Math.max(1, Math.min(pages.length, Math.trunc(Number(page)) || 1)); announce(false); return true;
+          const first = await request('page', { id, page: Math.max(1, Math.trunc(Number(page)) || 1), include_layout: true, render_width: Math.max(1, fitWidth() * zoom * Math.min(2, window.devicePixelRatio || 1)) }, () => current(id, ticket)); if (!current(id, ticket)) return false;
+          pages = validateLayout(first?.layout); initialPage = first;
+          slots = pages.map(geometry => { const outer = dom('section', 'pdr-page-slot'); outer.dataset.pdfPage = String(geometry.page); outer.setAttribute('aria-label', `PDF 第 ${geometry.page} 页`); const caption = dom('div', 'pdr-page-caption', `${geometry.page} / ${pages.length}`), sheet = dom('div', 'pdr-sheet'); sheet.dataset.pdfPage = String(geometry.page); outer.append(caption, sheet); return { outer, sheet }; });
+          arrangeSlots(); paintInkContext(); for (const geometry of pages) placeholder(geometry.page);
+          sizeSlots(Math.max(1, fitWidth() * zoom));
+          active = Math.max(1, Math.min(pages.length, Math.trunc(Number(page)) || 1)); root.setAttribute('aria-busy', 'false'); announce(false); return true;
         } catch (error) {
-          if (current(id, ticket)) { strip.replaceChildren(dom('p', 'pdr-layout-error', `PDF 连续阅读暂不可用：${error.message}`)); onStatus(error.message, true); }
+          if (current(id, ticket)) {
+            root.setAttribute('aria-busy', 'false'); initialPage = null;
+            const failure = dom('div', 'pdr-layout-error'); failure.setAttribute('role', 'alert'); failure.append(dom('p', '', `PDF 连续阅读暂不可用：${error.message}`));
+            const retry = dom('button', 'button subtle', '重新载入 PDF'); retry.type = 'button'; retry.dataset.retryDocument = String(page); failure.append(retry); strip.replaceChildren(failure); onStatus(error.message, true);
+          }
           throw error;
         }
       })();
@@ -714,7 +773,13 @@
       if (!pages.length) return false;
       const page = Math.max(1, Math.min(pages.length, Math.trunc(Number(value)) || 1));
       if (markupGesture && Number(markupGesture.sheet.dataset.pdfPage) !== page) endMarkup(true);
-      jumpTarget = page; active = page; root.scrollTop = Math.max(0, metrics[page - 1].top - PADDING); announce(); queue.want(visibleWindow(metrics, root.scrollTop, root.clientHeight, page));
+      jumpTarget = page; active = page; root.scrollTop = Math.max(0, metrics[page - 1].top - PADDING);
+      if (layout === 'spread') {
+        const sheet = slots[page - 1].sheet.getBoundingClientRect(), viewport = root.getBoundingClientRect();
+        const left = root.scrollLeft + sheet.left - viewport.left - (root.clientLeft || 0);
+        root.scrollLeft = minimumScroll(left, left + sheet.width, root.scrollLeft, root.clientWidth, 0);
+      }
+      announce(); queue.want(wantedPages(page));
       try { return await queue.ready(page); }
       finally { if (current(id, ticket) && jumpTarget === page) { jumpTarget = null; updateWindow(); } }
     }
@@ -835,7 +900,7 @@
       paintFocus(); emitFocus(); flashTimer = window.setTimeout(() => { if (sequence === focusSequence) { focusState = null; clearFocus(); emitFocus(); } }, 1800);
     }
     function readingPosition() {
-      const page = pageAt(metrics, root.scrollTop), metric = metrics[page - 1];
+      const row = pageAt(metrics, root.scrollTop), page = layout === 'spread' && metrics[active - 1]?.rowStart === row ? active : row, metric = metrics[page - 1];
       return metric ? { paperId, page, fraction: (root.scrollTop - metric.top) / metric.height, horizontal: root.scrollLeft / layoutWidth, zoom } : null;
     }
     async function focusRegion(value, annotationId) {
@@ -850,7 +915,7 @@
         if (!await waitForInput(null, valid)) return false;
         jumpTarget = page;
         const dirty = dirtyPages.delete(page);
-        queue.want(visibleWindow(metrics, root.scrollTop, root.clientHeight, page));
+        queue.want(wantedPages(page));
         if (dirty) {
           queue.invalidate(page, { preserve: true });
           const list = refreshWaiters.get(page) || []; refreshWaiters.delete(page);
@@ -865,6 +930,7 @@
         const x0 = left + Math.min(...rects.map(rect => rect[0])) / geometry.width * sheet.width, x1 = left + Math.max(...rects.map(rect => rect[2])) / geometry.width * sheet.width;
         const y0 = top + Math.min(...rects.map(rect => rect[1])) / geometry.height * sheet.height, y1 = top + Math.max(...rects.map(rect => rect[3])) / geometry.height * sheet.height;
         root.scrollLeft = minimumScroll(x0, x1, root.scrollLeft, root.clientWidth); root.scrollTop = minimumScroll(y0, y1, root.scrollTop, root.clientHeight);
+        active = page; announce();
         focusState = { ...focusState, rects, tint: annotationTint(annotation, 1), loading: false, expires: Date.now() + 1800 }; paintFocus(); emitFocus();
         flashTimer = window.setTimeout(() => { flashTimer = null; if (valid()) { focusState = null; clearFocus(); emitFocus(); } }, 1800);
         return true;
@@ -883,7 +949,7 @@
       cancelNavigation(); const sequence = focusSequence, id = paperId, ticket = generation, valid = () => current(id, ticket) && focusSequence === sequence;
       if (!await waitForInput(null, valid)) return false;
       zoom = position.zoom; resize(); const metric = metrics[position.page - 1]; if (!metric || !valid()) return false;
-      root.scrollTop = metric.top + position.fraction * metric.height; root.scrollLeft = position.horizontal * layoutWidth;
+      active = position.page; root.scrollTop = metric.top + position.fraction * metric.height; root.scrollLeft = position.horizontal * layoutWidth;
       returnPosition = null; emitFocus(); updateWindow(position.page); return true;
     }
     function pointerUp(event) {
@@ -925,7 +991,11 @@
       const hit = annotationAt(page, (event.clientX - box.left) / box.width * geometry.width, (event.clientY - box.top) / box.height * geometry.height);
       if (hit) { flashAnnotation(page, hit.rects, hit); onAnnotationActivate(hit.id, { page }); }
     }
-    function click(event) { const retry = event.target.closest?.('[data-retry-page]'); if (retry && root.contains(retry)) void refresh(Number(retry.dataset.retryPage)).catch(() => {}); }
+    function click(event) {
+      const documentRetry = event.target.closest?.('[data-retry-document]');
+      if (documentRetry && root.contains(documentRetry)) { void open(getPaper(), { page: Number(documentRetry.dataset.retryDocument) }).catch(() => {}); return; }
+      const retry = event.target.closest?.('[data-retry-page]'); if (retry && root.contains(retry)) void refresh(Number(retry.dataset.retryPage)).catch(() => {});
+    }
     function setTool(value, nextColor) {
       if (!TOOLS.has(value)) throw new Error('Unsupported PDF annotation tool');
       const options = typeof nextColor === 'object' && nextColor !== null ? nextColor : { color: nextColor };
@@ -953,6 +1023,30 @@
       cancelNavigation();
       zoom = clamped; resize(); return zoom;
     }
+    function setLayout(value) {
+      if (value !== 'single' && value !== 'spread') throw new Error('阅读布局必须为单页或双页。');
+      if (layout === value) return layout;
+      // Finish sampled input before moving the sheets. The draft, saved-overlay
+      // identities and all selections remain in displayed PDF-point space.
+      endInk(false, 'layout_change'); endMarkup(true); endTouchPan(); nativeGesture = null; inputEnded(); cancelNavigation();
+      const page = active, previous = metrics[page - 1], fraction = previous ? (root.scrollTop - previous.top) / previous.height : 0;
+      layout = value; root.dataset.layout = layout;
+      if (pages.length) {
+        arrangeSlots();
+        layoutWidth = 0; resize({ page, fraction }); active = page;
+        root.scrollTop = Math.max(0, metrics[page - 1].top + fraction * metrics[page - 1].height);
+        // A hidden viewport cannot resize/update its window yet. Its resident
+        // budget still contracts immediately when switching back to single.
+        queue.want(wantedPages(page));
+        updateWindow(page); announce(); paintInk(); paintOverlays();
+      }
+      return layout;
+    }
+    function advance(direction) {
+      const delta = Math.sign(Number(direction)); if (!delta || !pages.length) return Promise.resolve(false);
+      const page = layout === 'spread' ? Math.floor((active - 1) / 2) * 2 + 1 + delta * 2 : active + delta;
+      return goTo(page);
+    }
     // Clearing a browser selection must permit choosing the same passage again.
     // Keep the frozen source available while toolbar/dialog focus collapses it.
     function selectionChanged() {
@@ -970,7 +1064,7 @@
     root.addEventListener('wheel', userNavigate, { passive: true }); root.addEventListener('keydown', userNavigate);
     document.addEventListener('selectionchange', selectionChanged); document.addEventListener('pointerup', nativePointerEnded); document.addEventListener('pointercancel', nativePointerEnded);
     function dispose() { clear(); disposed = true; ink.clear(); overlays.clear(); queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('pointerdown', pointerDown); root.removeEventListener('pointermove', pointerMove); root.removeEventListener('pointercancel', pointerCancel); root.removeEventListener('lostpointercapture', pointerCancel); root.removeEventListener('pointerleave', pointerLeave); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); root.removeEventListener('wheel', userNavigate); root.removeEventListener('keydown', userNavigate); document.removeEventListener('selectionchange', selectionChanged); document.removeEventListener('pointerup', nativePointerEnded); document.removeEventListener('pointercancel', nativePointerEnded); }
-    return { open, goTo, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, resize, revealAnnotation, revealRegion, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
+    return { open, goTo, advance, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, setLayout, getLayout: () => layout, resize, revealAnnotation, revealRegion, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, layout, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
   window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition });
 })();

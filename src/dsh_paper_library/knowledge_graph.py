@@ -182,7 +182,7 @@ def _active(library, paper_id):
         return None
 
 
-def get_graph(library, id=None, limit=100):
+def get_graph(library, id=None, limit=100, offset=0):
     _schema(library)
     if isinstance(limit, bool):
         raise ValueError("Graph limit must be an integer")
@@ -190,12 +190,14 @@ def get_graph(library, id=None, limit=100):
         limit = max(1, min(MAX_NODES, int(limit)))
     except (ValueError, TypeError):
         raise ValueError("Graph limit must be an integer") from None
+    if type(offset) is not int or not 0 <= offset <= 10000000:
+        raise ValueError("Graph offset must be an integer from 0 to 10000000")
     if id:
         current = library.get(id)
         items = [current]
     else:
         # The global view is deliberately a bounded catalog window.
-        listing = library.list(limit=min(limit, 40))
+        listing = library.list(limit=min(limit, 40), offset=offset)
         items = listing["items"]
     nodes, edges, seen = [], [], set()
     truncated = bool(not id and listing["total"] > len(items))
@@ -274,7 +276,10 @@ def get_graph(library, id=None, limit=100):
     if truncated:
         warnings.append("当前图谱只显示部分节点或关系；缩小范围或分别查看相关论文。")
     return {"nodes": nodes, "edges": unique_edges, "truncated": truncated, "warnings": warnings,
-            "scope": {"paper_id": id, "max_nodes": limit, "max_edges": MAX_EDGES},
+            "scope": {"paper_id": id, "max_nodes": limit, "max_edges": MAX_EDGES,
+                      **({"paper_offset": offset, "paper_count": len(items), "total_papers": listing["total"],
+                          "next_offset": offset + len(items) if offset + len(items) < listing["total"] else None,
+                          "previous_offset": max(0, offset - min(limit, 40)) if offset else None} if not id else {})},
             "semantics": "Reader-authored assertions and catalog metadata; no automatic scientific inference or person identity merging",
             "node_types": list(NODE_TYPES), "relations": list(RELATIONS)}
 

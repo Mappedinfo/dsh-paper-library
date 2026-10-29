@@ -2,10 +2,11 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { access, copyFile, mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { core } from '../src/bridge.mjs'
+import { paperSessionId } from '../src/harness/paper-chat.mjs'
 
 const project = dirname(dirname(fileURLToPath(import.meta.url)))
 const harness = resolve(process.env.DSH_CHECKOUT ?? join(project, '../../deepseek-ai/deepseek-harness'))
@@ -14,7 +15,7 @@ const profile = process.env.DSH_TEST_PROFILE ?? 'paper-chat-test'
 assert.ok(relative(join(project, '.local'), templateHome) && !relative(join(project, '.local'), templateHome).startsWith('..'), 'Only an ignored synthetic profile may be used')
 assert.match(profile, /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/)
 const run = join(templateHome, 'runs', `language-${randomUUID()}`), home = join(run, 'home'), source = join(run, 'source'), library = join(run, 'library')
-const python = join(project, '.venv/bin/python'), reportPath = join(project, 'docs/validation/language-harness.json')
+const python = join(project, '.venv/bin/python'), reportPath = process.env.LANGUAGE_FIXTURE_REPORT ?? join(project, 'docs/validation/language-harness.json')
 const checks = [], provider = 'paper-library-native-chat-fixture', model = 'deterministic-reader'
 let child, logs = '', startupTimer, phase = 0, report
 const record = value => { checks.push(value); console.log(`PASS ${value}`) }
@@ -64,25 +65,27 @@ try {
   let host = await startHost()
   assert.equal((await fetch(`${host.origin}/api/paper-library/api`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'language_history', id: paper.id }) })).status, 401)
   assert.equal((await host.api({ action: 'status' })).language_learning, true)
-  const ensured = await host.api({ action: 'chat_ensure', id: paper.id })
-  assert.deepEqual(ensured.model, { provider, model })
-  assert.equal((await host.observe(ensured.sessionId)).generations, 0)
-  record('authenticated-language-service-uses-configured-cold-paper-session')
+  const sessionId = paperSessionId(await realpath(library), paper.id)
+  const settings = await host.api({ action: 'language_settings_get' })
+  assert.deepEqual(settings.default_model, { provider, model })
+  assert.ok(settings.models.some(entry => entry.provider === provider && entry.id === model))
+  assert.equal((await host.observe(sessionId)).generations, 0)
+  record('authenticated-language-service-discovers-host-default-without-paper-session')
   const request = { action: 'language_generate', id: paper.id, mode: 'translate', text: 'Epistemic uncertainty remains in this estimate.', page: 2, request_id: 'native-language-translate-1', provider: 'forged-browser-route', model: 'forged-browser-model' }
   const translated = await host.api(request)
-  assert.equal(translated.status, 'complete'); assert.deepEqual(translated.model, ensured.model)
+  assert.equal(translated.status, 'complete'); assert.deepEqual(translated.model, { provider, model }); assert.equal(translated.model_source, 'harness-default'); assert.match(translated.prompt_version, /^language-v2:/)
   assert.equal(translated.result, '合成翻译：该估计仍存在认识不确定性。')
   const polished = await host.api({ ...request, mode: 'polish', request_id: 'native-language-polish-2' })
   assert.equal(polished.status, 'complete'); assert.equal(polished.result, request.text); assert.equal(polished.target_language, 'source')
-  const after = await host.observe(ensured.sessionId)
+  const after = await host.observe(sessionId)
   assert.equal(after.generations, 2); assert.deepEqual(after.observations, [{ sessionLoaded: false, agentLoaded: false }])
   assert.deepEqual(after.language.map(entry => entry.maxTokens), [8192, 8192]); assert.deepEqual(after.language.map(entry => entry.mode), ['translate', 'polish'])
-  record('two-language-operations-use-authoritative-model-and-8192-token-budget-without-starting-agents')
+  record('two-language-operations-use-host-default-and-8192-token-budget-without-starting-agents')
   assert.equal((await host.api(request)).replayed, true)
   assert.equal((await host.api({ action: 'language_history', id: paper.id })).items.length, 2)
   const words = await host.api({ action: 'vocabulary_list', query: 'epistemic' })
   assert.equal(words.total, 1); assert.equal(words.items[0].encounters_retained, 2)
-  assert.equal((await host.observe(ensured.sessionId)).generations, 2)
+  assert.equal((await host.observe(sessionId)).generations, 2)
   record('history-vocabulary-and-same-request-replay-make-no-additional-model-calls')
   const word = words.items[0]
   await host.api({ action: 'vocabulary_update', id: word.id, expected_revision: word.revision, status: 'mastered', meaning: 'Synthetic user-reviewed meaning' })
@@ -95,7 +98,7 @@ try {
   const replay = await host.api(request); assert.equal(replay.id, translated.id); assert.equal(replay.replayed, true)
   const mastered = await host.api({ action: 'vocabulary_list', status: 'mastered' })
   assert.equal(mastered.items[0].meaning, 'Synthetic user-reviewed meaning'); assert.equal(mastered.items[0].encounters_retained, 2)
-  const restarted = await host.observe(ensured.sessionId)
+  const restarted = await host.observe(sessionId)
   assert.equal(restarted.generations, 0); assert.deepEqual(restarted.observations, [{ sessionLoaded: false, agentLoaded: false }])
   record('fresh-host-restart-recovers-results-vocabulary-and-request-identity-with-zero-replay-generations')
   assert.deepEqual(await Promise.all(originalPaths.map(hash)), hashes)
