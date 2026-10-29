@@ -44,6 +44,7 @@ export const Config = Schema.object({
   latex_auto_compile: Schema.boolean().default(true).description('LaTeX 保存后自动编译。').volatile(),
   latex_engine: Schema.union([Schema.const('xelatex'), Schema.const('pdflatex'), Schema.const('lualatex')]).default('xelatex').description('LaTeX 编译引擎（xelatex / pdflatex / lualatex）。').volatile(),
   latex_theme: Schema.union([Schema.const('system'), Schema.const('parchment'), Schema.const('midnight')]).default('system').description('LaTeX 工作台配色（跟随宿主 / 纸色 / 夜色）。').volatile(),
+  latex_path_font: Schema.union([Schema.const('pixel'), Schema.const('mono'), Schema.const('system')]).default('pixel').description('LaTeX 文件路径字体（pixel 像素 / mono 等宽 / system 跟随界面）。').volatile(),
   latex_split: Schema.number().default(50).description('LaTeX 源码窗格宽度百分比（25–75）。').volatile(),
   latex_sync_folder: Schema.boolean().default(true).description('LaTeX 工作区同步到同步服务文件夹。').volatile(),
 })

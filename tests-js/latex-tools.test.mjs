@@ -49,7 +49,7 @@ test('the bridge admits exactly the actions these tools produce', () => {
   const produced = new Set()
   for (const item of LATEX_TOOL_SPECS) for (const operation of item.parameters.operation.enum) produced.add(`latex_${operation}`)
   assert.deepEqual([...produced].sort(), [...BRIDGE_ACTIONS.latex].sort())
-  assert.equal(BRIDGE_ACTIONS.latex.size, 32)
+  assert.equal(BRIDGE_ACTIONS.latex.size, 35)
   for (const name of produced) assert.ok(BRIDGE_ACTIONS.latex.has(name), name)
 })
 

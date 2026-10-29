@@ -4,6 +4,8 @@
  * comes from the plugin's theme bridge, so light and dark both read correctly. */
 @font-face { font-family: 'PaperPixel'; src: url('./fonts/silkscreen-regular.ttf') format('truetype'); font-style: normal; font-weight: 400; font-display: swap; }
 #latex-view {
+  --latex-path-font: 'PaperPixel', 'Andale Mono', Monaco, ui-monospace, monospace;
+  --latex-pane-head-height: 38px;
   grid-column: 1 / -1;
   grid-row: 1;
   display: flex;
@@ -16,6 +18,8 @@
   font-size: 13px;
 }
 #latex-view[hidden] { display: none; }
+#latex-view[data-latex-path-font=mono] { --latex-path-font: ui-monospace, SFMono-Regular, Menlo, monospace; }
+#latex-view[data-latex-path-font=system] { --latex-path-font: var(--sans); }
 #latex-view[data-latex-theme=parchment] {
   color-scheme: light;
   --paper: #faf8f2; --surface: #f4f0e6; --panel: #fffdf7; --ink: #262a28;
@@ -52,6 +56,9 @@ body.latex-focused .workspace[data-sidebar-side=left].shared-sidebar-open #latex
 body.latex-focused #reading-rail-resizer { z-index: 27; }
 /* The rail's own × is only offered in the focused reader by default; this view is focused too. */
 body.latex-focused .reading-sidebar-header #reading-sidebar-close { display: block; padding: 4px; }
+body.latex-focused .reading-sidebar-header { height: 43px; min-height: 43px; box-sizing: border-box; }
+body.latex-focused .reading-sidebar-tabs { align-items: center; }
+body.latex-focused .reading-sidebar-tabs .reading-panel-button { height: 30px; padding: 4px 7px; }
 /* Outside the workspace grid (a fixture or a bare host) the surface still owns the viewport. */
 body > #latex-view { height: 100dvh; }
 
@@ -102,7 +109,42 @@ body > #latex-view { height: 100dvh; }
 .latex-content { display: grid; grid-template-columns: 214px minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
 .latex-content { position: relative; }
 .latex-content.latex-nav-collapsed { grid-template-columns: minmax(0, 1fr); }
-.latex-breadcrumb:has(#latex-source-note) { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.latex-breadcrumb:has(#latex-source-note) { display: flex; align-items: center; gap: 3px; flex-wrap: nowrap; height: var(--latex-pane-head-height); box-sizing: border-box; padding: 4px 6px; }
+.latex-breadcrumb > span { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.latex-breadcrumb .button { flex: 0 0 auto; height: 28px; min-height: 28px; padding: 3px 5px; font: 11px/1.5 var(--sans); }
+.latex-source-tools-menu { position: absolute; z-index: 7; top: var(--latex-pane-head-height); right: 0; display: flex; flex-direction: column; gap: 4px; width: 290px; padding: 8px; border: 1px solid var(--line); background: var(--paper); border-radius: 6px; box-shadow: var(--shadow); }
+.latex-source-tools-menu[hidden] { display: none; }
+.latex-source-tools-menu .button { text-align: left; }
+.latex-source-tools-menu p { margin: 4px; color: var(--muted); font: 12px/1.6 var(--sans); }
+.latex-formula-panel { flex: 0 1 42%; min-height: 150px; overflow: auto; padding: 10px; border-bottom: 1px solid var(--line); background: var(--surface); font: 12px/1.6 var(--sans); }
+.latex-formula-panel[hidden] { display: none; }
+.latex-formula-head { display: flex; align-items: center; gap: 5px; }
+.latex-formula-head strong { margin-right: auto; }
+.latex-formula-head .button, .latex-formula-card .button, .latex-formula-issue .button { min-height: 28px; padding: 3px 6px; font-size: 11px; }
+.latex-formula-panel p { margin: 6px 0; }
+.latex-formula-status, .latex-formula-panel .muted { color: var(--muted); }
+.latex-formula-panel .error { color: var(--error); }
+.latex-formula-card, .latex-formula-findings { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.latex-formula-panel summary { cursor: pointer; overflow-wrap: anywhere; }
+.latex-formula-source { font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; background: var(--panel); border: 1px solid var(--line); }
+.latex-formula-issue { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; }
+.latex-formula-issue .button { flex: none; }
+.latex-writing-dialog { width: min(760px, calc(100vw - 48px)); max-height: calc(100dvh - 80px); overflow: auto; padding: 16px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); color: var(--ink); box-shadow: var(--shadow); font: 13px/1.6 var(--sans); }
+.latex-writing-dialog::backdrop { background: #0005; }
+.latex-writing-head, .latex-writing-actions, .latex-writing-options { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.latex-writing-head strong { margin-right: auto; }
+.latex-writing-dialog textarea { width: 100%; box-sizing: border-box; margin-block: 8px; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.latex-writing-status { color: var(--muted); margin: 8px 0; }
+.latex-writing-status.error { color: var(--error); }
+.latex-writing-dialog input[type=file] { margin: 7px 0; max-width: 100%; }
+.latex-writing-options label { display: inline-flex; align-items: center; gap: 5px; }
+.latex-writing-options input[type=text] { width: 170px; }
+.latex-table-grid { overflow: auto; max-height: 36dvh; margin-block: 10px; border: 1px solid var(--line); }
+.latex-table-grid table { border-collapse: collapse; }
+.latex-table-grid td, .latex-table-grid th { padding: 3px; border: 1px solid var(--line); }
+.latex-table-grid input { width: 120px; min-width: 70px; padding: 4px; font: inherit; }
+.latex-table-grid select { width: 128px; padding: 4px; font: inherit; }
+.latex-writing-dialog small { display: block; color: var(--muted); margin-block: 7px; }
 #latex-source-note { font: 11px/1.5 var(--sans); }
 .latex-pdf-tools { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; padding: 0; background: var(--surface); }
 .latex-pdf-tools button { font-size: 11px; min-height: 26px; padding: 4px 5px; white-space: nowrap; }
@@ -137,7 +179,7 @@ body > #latex-view { height: 100dvh; }
 .latex-review-exports { border-top: 1px solid var(--line); flex: 0 0 auto; }
 .latex-navigator { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: var(--surface); }
 .latex-navigator[hidden] { display: none; }
-.latex-nav-tabs { display: flex; align-items: center; gap: 2px; padding: 7px 6px; border-bottom: 1px solid var(--line); }
+.latex-nav-tabs { display: flex; align-items: center; gap: 2px; padding: 4px 6px; height: var(--latex-pane-head-height); box-sizing: border-box; flex-shrink: 0; border-bottom: 1px solid var(--line); }
 .latex-nav-tab { border: 0; background: transparent; color: var(--muted); border-radius: 5px; padding: 5px 8px; cursor: pointer; }
 .latex-nav-tab[aria-selected=true] { background: var(--teal-light); color: var(--ink); }
 #latex-nav-refresh { margin-left: auto; }
@@ -148,7 +190,7 @@ body > #latex-view { height: 100dvh; }
 .latex-directory summary { padding: 5px 2px; cursor: pointer; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .latex-directory .latex-directory { margin-left: 10px; }
 .latex-outline-file { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 4px; }
-.latex-outline-file .latex-file-open { color: var(--muted); font-size: 12px; font-family: 'PaperPixel', 'Andale Mono', Monaco, ui-monospace, monospace; }
+.latex-outline-file .latex-file-open { color: var(--muted); font-size: 12px; font-family: var(--latex-path-font); }
 .latex-outline-heading .latex-file-open { font-family: inherit; }
 .latex-outline-warning .latex-file-open { color: var(--dsw-alias-state-warn-label); font-size: 11px; }
 .latex-breadcrumb { flex: 0 0 auto; padding: 8px 12px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; border-bottom: 1px solid var(--line); color: var(--muted); overflow-wrap: anywhere; }
@@ -169,7 +211,7 @@ body > #latex-view { height: 100dvh; }
   min-height: 0; min-width: 0;
 }
 .latex-body[data-layout=source], .latex-body[data-layout=pdf] { grid-template-columns: minmax(0, 1fr); }
-.latex-editor-pane, .latex-preview-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.latex-editor-pane, .latex-preview-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
 .latex-editor-pane[hidden], .latex-preview-pane[hidden], .latex-splitter[hidden] { display: none; }
 .latex-splitter { cursor: col-resize; background: var(--line); touch-action: none; }
 .latex-splitter:hover, .latex-splitter.dragging { background: var(--teal); }
@@ -180,7 +222,7 @@ body > #latex-view { height: 100dvh; }
 }
 .latex-file { list-style: none; }
 .latex-file-open {
-  font: 12px/1.5 'PaperPixel', 'Andale Mono', Monaco, ui-monospace, monospace;
+  font: 12px/1.5 var(--latex-path-font);
   display: block; width: 100%; text-align: left; overflow-wrap: anywhere;
   padding: 5px 8px; border-radius: 4px; border: 1px solid transparent;
   background: transparent; color: inherit; cursor: pointer;
@@ -200,9 +242,11 @@ body > #latex-view { height: 100dvh; }
   font: inherit; tab-size: 2; background: transparent; color: var(--ink); white-space: pre; overflow: auto;
 }
 
-.latex-preview-toolbar { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 4px 6px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.latex-preview-toolbar { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; height: var(--latex-pane-head-height); box-sizing: border-box; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 4px 6px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .latex-preview-toolbar > * { flex: 0 0 auto; }
 .latex-preview-toolbar .latex-build-info, .latex-preview-toolbar .latex-render-state { display: none; }
+.latex-preview-toolbar .latex-page-label { display: none; } /* Current/total remains visible in the status row. */
+.latex-preview-toolbar #latex-synctex-forward { height: 28px; min-height: 28px; padding: 3px 5px; font: 11px/1.5 var(--sans); white-space: nowrap; }
 .latex-preview-toolbar .latex-tab { padding: 4px 5px; font-size: 11px; }
 .latex-preview-toolbar .icon-button { width: 22px; min-width: 22px; height: 26px; min-height: 26px; padding: 2px; }
 .latex-preview-toolbar #latex-zoom { width: 62px; min-width: 62px; height: 28px; min-height: 28px; padding: 3px 15px 3px 5px; font-size: 11px; line-height: 16px; }

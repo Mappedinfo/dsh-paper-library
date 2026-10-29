@@ -84,6 +84,11 @@ function create(textarea, container) {
     const limit = view.state.doc.length
     view.dispatch({ selection: { anchor: Math.max(0, Math.min(start, limit)), head: Math.max(0, Math.min(end, limit)) }, scrollIntoView: true })
   }
-  return { view, openSearch: () => openSearchPanel(view), destroy: () => view.destroy() }
+  return { view, openSearch: () => openSearchPanel(view), insert: (text, start, end) => {
+    if (disabled) return false
+    view.dispatch({ changes: { from: start, to: end, insert: text }, selection: { anchor: start + text.length }, scrollIntoView: true, userEvent: 'input' })
+    view.focus()
+    return true
+  }, destroy: () => view.destroy() }
 }
 window.PaperLatexEditor = { create }

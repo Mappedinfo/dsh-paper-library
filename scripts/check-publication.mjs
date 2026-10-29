@@ -36,7 +36,9 @@ for (const line of git('rev-list','--objects','--all').trim().split('\n')) {
   if (secret.test(git('cat-file','blob',oid))) findings.push({scope:'history',oid,path,reason:'credential signature'});
 }
 const cache = process.env.DSH_NPM_CACHE || join(tmpdir(),'dsh-paper-library-npm-cache');
-const packed = JSON.parse(execFileSync('npm',['pack','--dry-run','--json','--cache',cache],{encoding:'utf8',maxBuffer:4*1024*1024}))[0];
+// npm may mix lifecycle stdout into --json. Build once, then inspect a clean manifest.
+execFileSync('npm',['run','build'],{encoding:'utf8',maxBuffer:4*1024*1024});
+const packed = JSON.parse(execFileSync('npm',['pack','--dry-run','--json','--ignore-scripts','--cache',cache],{encoding:'utf8',maxBuffer:4*1024*1024}))[0];
 const paths = new Set(packed.files.map(file=>file.path));
 for (const path of ['LICENSE','THIRD_PARTY.md','licenses/AGPL-3.0.txt','licenses/citeproc-NOTICE.txt','skills/paper-library-fetch/SKILL.md','skills/paper-library-knowledge/SKILL.md','skills/paper-library-notes/SKILL.md','docs/annotation-reference-design.md','docs/library-datasets-knowledge-design.md']) assert.ok(paths.has(path),`Missing packaged notice/skill/design: ${path}`);
 for (const path of paths) if (excluded.test(path)) findings.push({scope:'package',path,reason:'runtime or private file type'});

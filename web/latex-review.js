@@ -66,10 +66,11 @@ window.PaperLatexReview = (() => {
     async function saveDraft() {
       if (!draft || saving || draft.key !== key()) return;
       saving = true; save.disabled = true; cancel.disabled = true;
+      say('正在保存批注…');
       const frozen = { ...draft, comment: comment.value }; delete frozen.key;
       try {
         await api('latex_review_put', { id: context().id, ...frozen });
-        draft = null; composer.hidden = true; comment.value = ''; await refreshNotes(); await changed();
+        draft = null; composer.hidden = true; comment.value = ''; await refreshNotes(); await changed({ annotations: notes });
         say('批注已保存；正文与编译原 PDF 保留。');
       } catch (error) {
         if (draft?.anchor) { composer.hidden = false; anchor.textContent = label(draft.anchor); quote.textContent = draft.anchor.text || '区域便笺'; show(); comment.focus(); }
@@ -120,7 +121,7 @@ window.PaperLatexReview = (() => {
     save.addEventListener('click', () => void saveDraft());
     cancel.addEventListener('click', () => { if (!saving) { draft = null; comment.value = ''; composer.hidden = true; say('已取消未保存批注。'); } });
     refresh.addEventListener('click', () => void refreshNotes()); filter.addEventListener('change', render);
-    return { refresh: refreshNotes, beginSource, beginPdf: (anchor, type, options) => begin(anchor, type, options), hasDraft: () => Boolean(draft || saving),
+    return { refresh: refreshNotes, annotations: () => notes, beginSource, beginPdf: (anchor, type, options) => begin(anchor, type, options), hasDraft: () => Boolean(draft || saving),
       reset() { if (draft || saving) return false; ++sequence; notes = []; render(); return true; },
       dispose() { disposed = true; ++sequence; }, testHooks: { saveDraft, edit, setStatus, notes: () => notes } };
   }

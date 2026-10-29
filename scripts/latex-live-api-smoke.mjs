@@ -6,6 +6,8 @@ import { mkdtemp, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 
 const launch = new URL(process.env.DSH_TEST_LAUNCH_URL || 'http://127.0.0.1:3080/')
@@ -42,20 +44,30 @@ try {
   }
   let ready = false
   for (let i = 0; i < 50; i++) {
-    try { await call({ action: 'latex_version_list', id: 'synthetic-probe-nonexistent', limit: 1 }); ready = true; break } catch {}
+    try { await call({ action: 'latex_version_list', id: 'lt-000000000000', limit: 1 }); ready = true; break } catch {}
     await new Promise(resolve => setTimeout(resolve, 200))
   }
   assert.ok(ready, 'the loaded plugin does not expose the new version API')
   const root = await mkdtemp(join(tmpdir(), 'dsh-latex-live-'))
-  const source = '\\documentclass{article}\n\\begin{document}\nSynthetic annotation workflow.\\newpage\nSecond synthetic page.\n\\end{document}\n'
+  const source = '\\documentclass{article}\n\\begin{document}\nSynthetic annotation workflow. Inline $x+1$.\\newpage\nSecond synthetic page.\n\\end{document}\n'
   await writeFile(join(root, 'main.tex'), source)
   project = (await call({ action: 'latex_project_create', root, title: `合成插件验收 ${Date.now()}` })).project
+  const formulas = await call({ action: 'latex_formula_check', id: project.id })
+  assert.equal(formulas.summary.formulas, 1); assert.equal(formulas.summary.errors, 0)
+  const workbook = execFileSync(fileURLToPath(new URL('../.venv/bin/python', import.meta.url)), ['-c', 'import base64,io;from openpyxl import Workbook;b=Workbook();b.active.append(["Synthetic",7]);s=io.BytesIO();b.save(s);print(base64.b64encode(s.getvalue()).decode())'], {encoding:'utf8'}).trim()
+  const table = await call({ action: 'latex_table_import', data_base64: workbook })
+  assert.deepEqual(table.rows, [['Synthetic','7']])
+  record('formula extraction and XLSX values load through the authenticated DSH endpoint')
   const first = await call({ action: 'latex_compile', id: project.id, engine: 'pdflatex', save_version: true })
   assert.ok(first.ok && first.version, first.version_error || 'manual build failed'); readingId = first.version.reading_project_id
   record('manual compilation saves a shared reading-project version')
   const before = createHash('sha256').update(await readFile(join(root, 'main.pdf'))).digest('hex')
   const layout = await call({ action: 'latex_pdf_pages', id: project.id })
   const page = await call({ action: 'latex_pdf_page', id: project.id, page: 1 })
+  const asset = await call({ action: 'latex_asset_import', id: project.id, name: 'synthetic-page.png', data_base64: page.image })
+  assert.ok(asset.path.startsWith('figures/')); assert.deepEqual(await readFile(join(root,asset.path)),Buffer.from(page.image,'base64'))
+  assert.equal(await readFile(join(root,'main.tex'),'utf8'),source)
+  record('image intake writes exact synthetic bytes within the project and preserves source')
   const word = page.words[0]
   for (const type of ['highlight', 'underline', 'strikeout', 'note']) {
     await call({ action: 'latex_review_put', id: project.id, type, request_id: randomUUID().replaceAll('-', ''),

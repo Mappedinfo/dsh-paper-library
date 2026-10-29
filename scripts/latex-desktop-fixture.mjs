@@ -53,6 +53,21 @@ try {
   browser = await chromium.launch({ headless: true })
   page = await browser.newPage({ viewport: { width: 1512, height: 982 } })
   const browserErrors = []
+  const rasterRequests = [], rasterByRequest = new Map()
+  let rasterEvent = 0
+  page.on('request', request => {
+    if (request.method() !== 'POST') return
+    try {
+      const payload = request.postDataJSON()
+      if (payload?.action !== 'latex_pdf_page') return
+      const call = { page: payload.page, start: ++rasterEvent, finish: null }
+      rasterRequests.push(call); rasterByRequest.set(request, call)
+    } catch { /* Other browser requests have no JSON action. */ }
+  })
+  page.on('response', response => {
+    const call = rasterByRequest.get(response.request())
+    if (call) call.finish = ++rasterEvent
+  })
   page.on('pageerror', error => browserErrors.push(error.message))
   await page.goto(`${origin}/?view=latex`, { waitUntil: 'networkidle' })
   await page.locator('#latex-view').waitFor({ state: 'visible' })
@@ -87,15 +102,28 @@ try {
   }
   await page.locator('#latex-preview img').first().waitFor({ state: 'visible' })
   record('all three selected engines compile the same synthetic project')
+  await wait(() => page.locator('#latex-preview img').evaluateAll(nodes => nodes.map(node => Number(node.dataset.page))), pages => [1, 2, 3].every(number => pages.includes(number)), 'initial three-page prefetch')
+  const firstRaster = rasterRequests.find(call => call.page === 1)
+  const nextRaster = rasterRequests.find(call => call.page === 2 && call.start > firstRaster.start)
+  if (!nextRaster || !(nextRaster.start < firstRaster.finish)) throw new Error('next page did not start before the first raster response')
+  record('the next PDF page preloads alongside the current raster before scrolling')
   await page.evaluate(() => { const preview = document.querySelector('#latex-preview'); preview.scrollTop = preview.scrollHeight; preview.dispatchEvent(new Event('scroll')) })
   await wait(() => page.locator('#latex-page-label').innerText(), text => text.includes('7 / 7'), 'continuous last page')
+  if (!(await page.locator('#latex-sync-hint').innerText()).startsWith('第 7 / 7 页 · ')) throw new Error('status row does not show the active last page')
   if (await page.locator('#latex-preview img').count() > 3) throw new Error('continuous preview renders too many pages')
   await page.evaluate(() => { const preview = document.querySelector('#latex-preview'); preview.scrollTop = 0; preview.dispatchEvent(new Event('scroll')) })
   await wait(() => page.locator('#latex-page-label').innerText(), text => text.includes('1 / 7'), 'continuous first page')
+  if (!(await page.locator('#latex-sync-hint').innerText()).startsWith('第 1 / 7 页 · ')) throw new Error('status row did not follow the return to page one')
   record('continuous scroll reaches both ends while at most three page images are retained')
+  await wait(() => page.locator('#latex-preview img').evaluateAll(nodes => nodes.map(node => Number(node.dataset.page))), pages => [1, 2, 3].every(number => pages.includes(number)), 'annotation prefetch settled')
   for (const [index, mode] of ['highlight','underline','strikeout','comment'].entries()) {
     await page.locator('.latex-page-stage[data-page="1"] .latex-word-text').first().waitFor({state:'attached'})
     await page.locator(`#latex-tool-${mode}`).click()
+    const rasterCount = rasterRequests.length
+    if (mode !== 'comment') await page.evaluate(() => {
+      const preview = document.querySelector('#latex-preview'), stage = preview.querySelector('.latex-page-stage[data-page="1"]')
+      window.__latexAnnotationProbe = { stage, image: stage.querySelector('img'), text: stage.querySelector('.latex-text-layer'), scroll: preview.scrollTop }
+    })
     await page.evaluate(() => {
       const word=document.querySelector('.latex-page-stage[data-page="1"] .latex-word-text'); const range=document.createRange(); range.selectNodeContents(word)
       const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range)
@@ -104,8 +132,18 @@ try {
     if(mode==='comment'){await page.locator('#latex-review-comment').fill('合成：直接选文批注');await page.locator('#latex-review-save').click()}
     await wait(()=>page.locator('#latex-review-message').innerText(),text=>text.includes('批注已保存'),`${mode} save confirmation`)
     await wait(()=>api('latex_review_list',{id:latexId}),value=>value.annotations.length===index+1,`${mode} native annotation`)
+    await wait(() => page.locator('#latex-review-save').isEnabled(), Boolean, `${mode} save completed`)
+    await wait(()=>page.locator('#latex-review-message').innerText(),text=>text.includes('批注已保存'),`${mode} final confirmation`)
     await page.locator('#latex-review-composer').waitFor({state:'hidden'})
+    if (mode !== 'comment') {
+      const stable = await page.evaluate(() => {
+        const previous = window.__latexAnnotationProbe, preview = document.querySelector('#latex-preview'), stage = preview.querySelector('.latex-page-stage[data-page="1"]')
+        return previous.stage === stage && previous.image === stage.querySelector('img') && previous.text === stage.querySelector('.latex-text-layer') && previous.scroll === preview.scrollTop && stage.querySelectorAll('.latex-saved-mark').length > 0
+      })
+      if (!stable || rasterRequests.length !== rasterCount) throw new Error(`${mode} replaced PDF nodes, moved scroll or requested another raster`)
+    }
   }
+  record('native markup saves patch overlays while keeping PDF images, selection layers and scroll stable')
   await page.locator('#latex-tool-select').click()
   await page.locator('#latex-compile').click()
   await wait(()=>page.locator('#latex-compile').innerText(),text=>text==='编译','annotated manual snapshot')
@@ -198,17 +236,30 @@ try {
     await page.locator('#latex-setting-theme').selectOption(theme)
     await wait(()=>api('settings_get'),value=>value.value.latex_theme===theme,`${theme} theme persisted`)
   }
+  for (const font of ['mono', 'pixel']) {
+    await page.locator('#latex-setting-path-font').selectOption(font)
+    await wait(() => api('settings_get'), value => value.value.latex_path_font === font, `${font} path font persisted`)
+    const applied = await page.locator('#latex-view').getAttribute('data-latex-path-font')
+    const family = await page.locator('.latex-file-open').first().evaluate(node => getComputedStyle(node).fontFamily)
+    if (applied !== font || family.includes('PaperPixel') !== (font === 'pixel')) throw new Error(`path font was not applied: ${font} ${family}`)
+  }
   await page.locator('#latex-menu-open').click()
   await page.evaluate(()=>document.fonts.load('12px PaperPixel'))
   const dimensions = await page.evaluate(()=>({select:document.querySelector('#latex-project').getBoundingClientRect().height,button:document.querySelector('#latex-compile').getBoundingClientRect().height,font:document.fonts.check('12px PaperPixel')}))
   if(Math.abs(dimensions.select-dimensions.button)>2 || !dimensions.font)throw new Error(`control/font mismatch: ${JSON.stringify(dimensions)}`)
-  record('themes persist locally, project control height matches and pixel font loads locally')
+  record('themes and mono/pixel path fonts persist locally with matching project control height')
 
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.screenshot({ path: join(base, 'desktop-dark.png') })
   await page.emulateMedia({ colorScheme: 'light' })
   await page.locator('#latex-review-open').click()
   await page.locator('#latex-review-panel').waitFor({ state: 'visible' })
+  const headerHeights = await page.evaluate(() => Object.fromEntries([
+    ['source', '#latex-current-file'], ['navigation', '.latex-nav-tabs'], ['preview', '.latex-preview-toolbar'],
+    ['sidebar', '.reading-sidebar-header'], ['workspace', '.latex-topbar'],
+  ].map(([key, selector]) => [key, document.querySelector(selector).getBoundingClientRect().height])))
+  if (['source', 'navigation', 'preview'].some(key => Math.abs(headerHeights[key] - 38) > 1) || Math.abs(headerHeights.sidebar - 43) > 1 || Math.abs(headerHeights.workspace - headerHeights.sidebar) > 1) throw new Error(`workspace headers are not aligned: ${JSON.stringify(headerHeights)}`)
+  record('source, navigation and preview headers align at 38px and shared rail matches the 43px toolbar')
   await page.screenshot({ path: join(base, 'desktop-review.png') })
   await page.locator('.latex-topbar').screenshot({ path: join(base, 'desktop-toolbar.png') })
   record('light, dark and review rail render at the target viewport')

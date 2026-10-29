@@ -18,7 +18,7 @@ const projectActions = new Set(['project_create','project_update','project_get',
 const externalActions = new Set(['external_status','external_scan','external_prune','external_promote']);
 // LaTeX projects edit the reader's own folder: writes are revision-checked and
 // compiling runs their local latexmk, so every action stays behind this list.
-const latexActions = new Set(['latex_project_create','latex_project_list','latex_project_get','latex_project_update','latex_project_archive','latex_project_restore','latex_project_link_reading','latex_version_list','latex_version_get','latex_version_pdf_pages','latex_version_pdf_page','latex_version_read','latex_version_review','latex_tree','latex_outline','latex_media_preview','latex_review_list','latex_review_put','latex_review_export','latex_review_delete','latex_read','latex_lint','latex_write','latex_compile','latex_pdf_pages','latex_pdf_page','latex_history','latex_diff','latex_compare','latex_synctex_edit','latex_synctex_view','latex_clean']);
+const latexActions = new Set(['latex_project_create','latex_project_list','latex_project_get','latex_project_update','latex_project_archive','latex_project_restore','latex_project_link_reading','latex_version_list','latex_version_get','latex_version_pdf_pages','latex_version_pdf_page','latex_version_read','latex_version_review','latex_tree','latex_asset_import','latex_table_import','latex_formula_check','latex_outline','latex_media_preview','latex_review_list','latex_review_put','latex_review_export','latex_review_delete','latex_read','latex_lint','latex_write','latex_compile','latex_pdf_pages','latex_pdf_page','latex_history','latex_diff','latex_compare','latex_synctex_edit','latex_synctex_view','latex_clean']);
 
 const libraryActions = new Set(['resource_list','resource_export','dataset_import','dataset_put','dataset_get','dataset_archive','dataset_restore','dataset_release_put','dataset_release_get','dataset_release_list','dataset_link_put','dataset_link_list','dataset_link_delete','dataset_asset_put','dataset_asset_list','dataset_asset_preview','dataset_graph_promote','knowledge_source_put','knowledge_source_get','knowledge_source_check','knowledge_source_list','knowledge_draft_put','knowledge_draft_get','knowledge_draft_list','knowledge_draft_review','knowledge_draft_lint','knowledge_note_put','knowledge_note_get','knowledge_note_list','knowledge_export']);
 /** Every action the reader bridge admits, grouped by the module that owns it.
@@ -105,7 +105,7 @@ function runSetup(command, args, label) {
 /** The published package ships pyproject.toml/uv.lock but no virtualenv.
  * Provision one on first use instead of asking the reader to run uv sync. */
 async function provisionVenv(python) {
-  const requirements = ['pymupdf>=1.26.6,<2', 'pymupdf4llm==0.2.9'];
+  const requirements = ['pymupdf>=1.26.6,<2', 'pymupdf4llm==0.2.9', 'openpyxl>=3.1.5,<4'];
   if (await commandExists('uv')) {
     try {
       await runSetup('uv', ['sync', '--no-dev'], 'uv sync');
@@ -124,6 +124,21 @@ async function provisionVenv(python) {
 }
 
 let venvProvisioning = null;
+const spreadsheetRuntimes = new Map();
+async function ensureSpreadsheetRuntime(python, install) {
+  if (!spreadsheetRuntimes.has(python)) spreadsheetRuntimes.set(python, (async () => {
+    const available = await new Promise(accept => {
+      const child = spawn(python, ['-c', 'import openpyxl'], { stdio: 'ignore' });
+      const timer = setTimeout(() => { child.kill(); accept(false); }, 10000);
+      child.on('error', () => { clearTimeout(timer); accept(false); }); child.on('close', code => { clearTimeout(timer); accept(code === 0); });
+    });
+    if (available) return;
+    if (!install) throw new Error('指定的 Python 缺少 XLSX 读取依赖，请在该环境安装 openpyxl>=3.1.5,<4。');
+    if (await commandExists('uv')) await runSetup('uv', ['pip', 'install', '--python', python, 'openpyxl>=3.1.5,<4'], 'XLSX dependencies');
+    else await runSetup(python, ['-m', 'pip', 'install', 'openpyxl>=3.1.5,<4'], 'XLSX dependencies');
+  })().catch(error => { spreadsheetRuntimes.delete(python); throw error; }));
+  return spreadsheetRuntimes.get(python);
+}
 async function ensureVenv() {
   const python = venvPython();
   if (existsSync(python)) return python;
@@ -136,6 +151,7 @@ async function ensureVenv() {
 
 async function runWorker(request, options) {
   const python = options.python || await ensureVenv();
+  if (request.action === 'latex_table_import') await ensureSpreadsheetRuntime(python, !options.python);
   return runProcess(python, ['-m', 'dsh_paper_library.worker'], { ...request, library: resolve(options.library || defaultLibrary) }, options);
 }
 

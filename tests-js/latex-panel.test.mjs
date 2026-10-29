@@ -328,6 +328,69 @@ test('scrolling moves through PDF pages while rendering at most three nearby pag
   f.ui.dispose()
 })
 
+test('the approaching page preloads before it enters and keeps visible raster nodes', async () => {
+  const f = await fixture()
+  await tick(); await tick()
+  const preview = f.ids.get('latex-preview')
+  const second = preview.querySelectorAll('.latex-page-stage').find(stage => stage.dataset.page === '2')
+  const image = second.querySelector('img')
+  assert.ok(image)
+  preview.scrollTop = 1153
+  await preview.dispatch('scroll'); await tick(); await tick()
+  assert.equal(f.ui.testHooks.state().page, 2, 'the fourth page loads while page two is still active')
+  assert.ok(f.calls.some(call => call.action === 'latex_pdf_page' && call.page === 4))
+  assert.equal(preview.querySelectorAll('.latex-page-stage').find(stage => stage.dataset.page === '2'), second)
+  assert.equal(second.querySelector('img'), image)
+  assert.ok(preview.querySelectorAll('img').length <= 3)
+  assert.match(f.ids.get('latex-sync-hint').textContent, /^第 2 \/ 4 页 · /)
+  f.ui.dispose()
+})
+
+test('scrolling into an in-flight prefetched page does not cancel or repeat its request', async () => {
+  const next = deferred()
+  const f = await fixture((action, args) => action === 'latex_pdf_page' && args.page === 2 ? next.promise : undefined)
+  const request = f.calls.find(call => call.action === 'latex_pdf_page' && call.page === 2)
+  assert.ok(request, 'the next page starts alongside the initial page')
+  f.ids.get('latex-preview').scrollTop = 650
+  await f.ids.get('latex-preview').dispatch('scroll')
+  assert.equal(f.ui.testHooks.state().page, 2)
+  assert.equal(request.signal.aborted, false)
+  assert.equal(f.calls.filter(call => call.action === 'latex_pdf_page' && call.page === 2).length, 1)
+  next.resolve(image); await tick(); await tick()
+  assert.ok(f.ids.get('latex-preview').querySelectorAll('img').some(img => img.dataset.page === '2'))
+  f.ui.dispose()
+})
+
+test('a confirmed PDF annotation patches only its overlay without reloading raster or selection layers', async () => {
+  let annotations = []
+  const anchor = { kind: 'pdf', page: 1, pdf_version: 'synthetic-sha', rects: [[10, 20, 50, 35]], text: 'synthetic selection' }
+  const f = await fixture((action, args) => {
+    if (action === 'latex_pdf_pages') return { page_count: 4, version: 'pdf-v1', build: { pdf_version: 'synthetic-sha', reason: 'SyncTeX 已核验' }, pages: Array.from({ length: 4 }, () => ({ width: 600, height: 800 })) }
+    if (action === 'latex_review_list') return { annotations }
+    if (action === 'latex_review_put') {
+      annotations = [{ id: `pdf:synthetic-sha:${args.request_id}`, type: args.type, text: anchor.text, comment: '', status: 'open', anchor, version: 'saved-native' }]
+      return { saved: true, pdf_version: 'synthetic-sha' }
+    }
+  }, { review: true })
+  await tick(); await tick()
+  const preview = f.ids.get('latex-preview')
+  preview.scrollTop = 120
+  const stage = preview.querySelectorAll('.latex-page-stage').find(stage => stage.dataset.page === '1')
+  const image = stage.querySelector('img'), layer = stage.querySelector('.latex-text-layer')
+  const rasterCalls = f.calls.filter(call => call.action === 'latex_pdf_page').length
+  const urls = f.urls.length
+  f.ui.testHooks.reviewer().beginPdf(anchor, 'highlight')
+  await f.ui.testHooks.reviewer().testHooks.saveDraft()
+  assert.equal(f.calls.filter(call => call.action === 'latex_pdf_page').length, rasterCalls)
+  assert.equal(f.urls.length, urls)
+  assert.equal(preview.scrollTop, 120)
+  assert.equal(stage.querySelector('img'), image)
+  assert.equal(stage.querySelector('.latex-text-layer'), layer)
+  assert.equal(stage.querySelectorAll('.latex-saved-mark').length, 1)
+  assert.equal(f.ui.testHooks.reviewer().hasDraft(), false)
+  f.ui.dispose()
+})
+
 test('historical PDF preview isolates page requests and disables editing until current PDF returns', async () => {
   const f = await fixture((action, args) => {
     if (action === 'latex_version_get') return { version: { id: args.version_id, project_id: 'one' } }

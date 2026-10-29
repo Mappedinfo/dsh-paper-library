@@ -224,6 +224,9 @@ Single-reader review reuses native PDF annotations and the reading rail; [workfl
 
 | Action | Input / result |
 | --- | --- |
+| `latex_asset_import` | `{id,name,data_base64}` → `{path,bytes,sha256,reused}`；接收至多 8 MiB PNG／JPEG，在项目 `figures/` 内新增内容标识文件，不覆盖既有文件；拒绝越界、无效图像和超过 5000 万像素的图片。 |
+| `latex_table_import` | `{data_base64,sheet?}` → `{sheets,sheet,rows,warnings}`；XLSX 至多 8 MiB／解压 16 MiB，单工作表 100 行／30 列／2000 单元格；openpyxl 只读已缓存值，不执行公式或外部链接。 |
+| `latex_formula_check` | `{id}` → `{project_id,files_checked,formulas,issues,summary,limited,...}`；按需提取保存的项目 `.tex`（也含未编译文件），返回相对路径、行号、源码及静态括号／标签提示；不展开宏或判断数学正确性。上限 100 文件／8 MiB 源码／500 公式／500 提示，达到上限时 `limited:true`。 |
 | `latex_review_list` | `{id}` → current `main_path`, `pdf_version`, bounded `annotations`, `truncated`; notes include CAS `version`, `status`, `anchor`, `stale` |
 | `latex_review_put` | New: `{id,anchor,comment,type?,request_id?}`; edit/status: `{id,note_id,expected_version,comment,status}`. `request_id` is 32 lowercase hex characters for idempotent new-note retries. |
 | `latex_review_export` | `{id,format:"json"|"markdown"|"pdf"}`; JSON uses `paper-library.annotations.v1`. PDF returns an exported path and embeds notebook JSON; compiler output stays unchanged. HTTP `GET latex-review-pdf/<id>` streams the download under the existing host authentication boundary. |

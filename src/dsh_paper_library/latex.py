@@ -968,7 +968,8 @@ def clean(library, id=None, include_archived=False):
     return {"id": row["id"], "removed": sorted(removed)[:500], "removed_count": len(removed), "kept": sorted(kept)[:200], "limits": {"listed": 500}}
 
 
-from . import latex_versions
+from . import latex_versions, latex_assets
+from .latex_formulas import latex_formula_check
 
 ACTIONS = {
     "latex_project_create": (create, ("root", "title", "main_path", "create_missing")),
@@ -985,6 +986,9 @@ ACTIONS = {
     "latex_version_read": (latex_versions.source, ("version_id", "path")),
     "latex_version_review": (latex_versions.review, ("version_id",)),
     "latex_tree": (tree, ("id", "include_archived")),
+    "latex_asset_import": (latex_assets.import_image, ("id", "name", "data_base64")),
+    "latex_table_import": (latex_assets.import_table, ("data_base64", "sheet")),
+    "latex_formula_check": (latex_formula_check, ("id",)),
     "latex_outline": (outline, ("id", "include_archived")),
     "latex_media_preview": (media_preview, ("id", "path", "page", "scale", "include_archived")),
     "latex_review_list": (review_list, ("id",)),
