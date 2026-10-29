@@ -12,6 +12,7 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 import uuid
+from .portable_io import fsync_directory
 
 MAX_TEXT = 24000
 MAX_BODY = 64000
@@ -132,11 +133,7 @@ def file_path(library, relative):
 
 
 def fsync_dir(path):
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    fsync_directory(path)
 
 
 def finish_note(library, intent):

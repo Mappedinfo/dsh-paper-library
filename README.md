@@ -52,7 +52,7 @@ DSH 0.1.7 起，插件把偏好字段声明为 cordis `Config` 的 `volatile` �
 
 **DSH 设置 → 插件 → 插件列表** 可查看已加载的 `@mappedinfo/dsh-paper-library`；全局插件可能默认折叠，也可按包名搜索。此列表表示本机已安装插件。社区展示见上述讨论链接。
 
-npm 安装的包不含 Python 虚拟环境；**首次执行文献操作时插件会自动安装**（优先 `uv sync`，否则创建 venv 并安装 PyMuPDF、固定版本 `pymupdf4llm==0.2.9` 与 XLSX 读取依赖 openpyxl），需要网络且只需一次。两者都不可用时按报错提示安装 uv 或 Python 3.11+ 后重试即可。既有插件环境在首次导入 XLSX 时按需补齐依赖；显式指定 Python 时按提示自行安装到该环境。
+npm 安装的包不含 Python 虚拟环境；**首次执行文献操作时插件会自动安装**（优先 `uv sync`，否则创建 venv 并安装 PyMuPDF、固定版本 `pymupdf4llm==0.2.9`、跨平台锁 filelock 与 XLSX 读取依赖 openpyxl），需要网络且只需一次。两者都不可用时按报错提示安装 uv 或 Python 3.11+ 后重试即可。既有插件环境会在首次操作前补齐核心锁依赖、首次导入 XLSX 时补齐表格依赖；显式指定 Python 时按提示自行安装到该环境。
 
 独立预览服务（`npm start`）始终可以保存本地设置。旧版本曾把"库已交给 DSH 管理但 DSH 端入口缺失"误判为只读；现在只要 DSH 没有真正接管该命名空间，预览页就回退到本库存储继续读写，避免形成死锁。不同浏览器访问同一个 DSH 服务时共享主机设置。
 
@@ -307,6 +307,10 @@ PDF 上传和下载均使用流式处理，不做整份 Base64 拷贝。服务�
 **当前源码版本为 v0.2.4，包含本轮 LaTeX 工作台改进。** npm 的 `latest` 可用 `npm view @mappedinfo/dsh-paper-library version` 核对；也可按下方步骤安装当前 `main` 源码。
 
 Node `^22.19 || >=24`、Python `>=3.11`、`uv` 和已构建的本地 DeepSeek Harness。
+
+原生 Windows、macOS 和 Linux 均为基础文献管理、PDF 批注和本地状态存储的维护目标。Windows 基础路径不要求 WSL；仓库提供 [Windows／Linux 原生回归](https://github.com/Mappedinfo/dsh-paper-library/actions/workflows/windows-compatibility.yml)，覆盖实际 CLI、中文路径、跨进程写锁、PDF 保存与恢复。该检查不代表完整桌面 GUI、Pencil 或 Windows TeX 工具链均已验收；LaTeX 编译仍需自行安装 `latexmk` 与 TeX 引擎。
+
+文件写入在各平台保留文件同步和同目录原子替换。POSIX 另同步目录；Windows 跳过普通文件 API 不支持的目录同步，因此不承诺相同的断电持久性。`0700`／`0600` 权限仅适用于 POSIX；Windows 沿用所在目录的文件系统 ACL。符号链接功能可能需要 Windows 开发者模式或相应权限。0.2.4 及更早 npm 包尚未包含这次 Windows 修复，暂请从当前源码安装并运行 `uv sync --locked`。
 
 ```sh
 git clone https://github.com/mappedinfo/dsh-paper-library.git

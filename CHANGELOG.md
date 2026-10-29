@@ -2,6 +2,12 @@
 
 本项目采用语义化版本。每个发布版本在 GitHub Releases 与 Git 标签中同时提供。
 
+## 未发布
+
+- 修复 [#2](https://github.com/Mappedinfo/dsh-paper-library/issues/2) 的原生 Windows 启动与保存阻断：跨进程写锁使用 filelock 原生后端；Windows 跳过目录 fsync，保留文件同步、原子替换与事务回滚，POSIX 同步错误继续上报。
+- 补齐 Windows 文件标志兼容和文件身份检查，Python 子进程协议固定 UTF-8，安装器支持 Windows `python` 命令并补齐旧环境的锁依赖。
+- 增加 Windows／Linux 原生存储回归及平台说明，验证合成 CLI、跨进程冲突、PDF 批注与恢复、书目导出、知识笔记和数据预览。
+
 ## v0.2.4 — 2026-10-29
 
 - 批注保存局部更新标记层，保留当前滚动、图像与选文层；连续预览提前准备下一页，状态行显示当前页／总页数。

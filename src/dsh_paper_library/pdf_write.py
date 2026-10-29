@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
+from .portable_io import fsync_directory
 
 # Filled in by `core.py` right after this module is imported: the catalog's own helpers and the
 # portable export name, which stay defined there because the rest of the library uses them too.
@@ -213,11 +214,7 @@ class PdfWrites:
                 os.chmod(backup_path, 0o600)
             os.replace(tempname, destination)
             os.chmod(destination, 0o600)
-            descriptor = os.open(destination.parent, os.O_RDONLY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
+            fsync_directory(destination.parent)
         finally:
             if os.path.exists(tempname):
                 os.unlink(tempname)
@@ -257,11 +254,7 @@ class PdfWrites:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, path)
-            directory = os.open(self.root, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+            fsync_directory(self.root)
         finally:
             if os.path.exists(temporary):
                 os.unlink(temporary)

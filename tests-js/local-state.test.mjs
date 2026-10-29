@@ -19,7 +19,8 @@ async function fixture(t) {
 function errorCode(code) { return error => error.code === code; }
 
 test('home selection matches DSH explicit, environment and tilde rules', () => {
-  assert.equal(resolveLocalStateHome('/private/tmp/explicit', {DSH_HOME:'/private/tmp/environment'}), '/private/tmp/explicit');
+  const explicit = join(tmpdir(), 'explicit'), environment = join(tmpdir(), 'environment');
+  assert.equal(resolveLocalStateHome(explicit, {DSH_HOME:environment}), explicit);
   assert.equal(resolveLocalStateHome(undefined, {DSH_HOME:'~/paper-state-home'}), join(homedir(),'paper-state-home'));
   assert.equal(resolveLocalStateHome(undefined, {DSH_HOME:'   '}), join(homedir(),'.dsh'));
   assert.equal(resolveLocalStateHome('~\\paper-state-home', {}), join(homedir(),'paper-state-home'));
@@ -65,8 +66,11 @@ test('canonical library aliases share state and different libraries stay isolate
 test('on-disk state is private and safely paginated without reading unrelated corrupt records', async t => {
   const f = await fixture(t);
   for (const key of ['chat:c','chat:a','chat:b','vocabulary:private']) await f.store.put(key, {key}, 0);
-  for (const directory of [join(f.home,'paper-library'),join(f.directory,'..'),f.directory]) assert.equal((await lstat(directory)).mode & 0o777, 0o700);
-  assert.equal((await lstat(f.file('chat:a'))).mode & 0o777, 0o600);
+  // Windows applies inherited ACLs, not POSIX mode bits.
+  if (process.platform !== 'win32') {
+    for (const directory of [join(f.home,'paper-library'),join(f.directory,'..'),f.directory]) assert.equal((await lstat(directory)).mode & 0o777, 0o700);
+    assert.equal((await lstat(f.file('chat:a'))).mode & 0o777, 0o600);
+  }
   await writeFile(f.file('vocabulary:private'), 'broken');
   const first = await f.store.list({prefix:'chat:',limit:2});
   assert.deepEqual(first.records.map(record=>record.key), ['chat:a','chat:b']);

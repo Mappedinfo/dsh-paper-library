@@ -9,7 +9,7 @@ already exists — and it holds the few module-level helpers the other clusters 
 from __future__ import annotations
 
 from contextlib import contextmanager
-import fcntl
+from filelock import FileLock, Timeout
 import hashlib
 import json
 import os
@@ -22,6 +22,7 @@ import uuid
 # patches them, so a single binding after import is enough. The cap constants that a suite *does*
 # patch (`MAX_ANNOTATIONS`, the reference budgets) are read live in `annotations.py` instead.
 MAX_IMPORT = PaperConflictError = clamp = csl_item = now = parse_ris = None
+LIBRARY_LOCK_TIMEOUT_SECONDS = 30
 
 
 def install_helpers(**helpers):
@@ -158,17 +159,21 @@ class Papers:
 
     @contextmanager
     def lock(self):
-        with open(self.root / ".write.lock", "a") as handle:
-            os.chmod(handle.name, 0o600)
-            fcntl.flock(handle, fcntl.LOCK_EX)
+        lock = FileLock(self.root / ".write.lock", timeout=LIBRARY_LOCK_TIMEOUT_SECONDS,
+                        mode=0o600, fallback_to_soft=False, preserve_lock_file=True)
+        try:
+            lock.acquire()
+        except Timeout as error:
+            raise ValueError(f"文献库写锁被其他进程占用，等待 {LIBRARY_LOCK_TIMEOUT_SECONDS} 秒后超时；请稍后重试。") from error
+        try:
             try:
                 yield
                 self.db.commit()
             except Exception:
                 self.db.rollback()
                 raise
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+        finally:
+            lock.release()
 
     def get(self, id, include_archived=False):
         if not isinstance(include_archived, bool):

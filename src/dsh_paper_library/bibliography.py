@@ -8,6 +8,7 @@ replacement, alongside managed PDFs but never over them.
 import json
 import os
 from datetime import datetime, timezone
+from .portable_io import fsync_directory
 
 MAX_RECORDS = 10000
 MAX_LISTED = 200
@@ -130,11 +131,7 @@ def _atomic_write(path, data):
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        fsync_directory(path.parent)
     finally:
         if temporary.exists():
             temporary.unlink()

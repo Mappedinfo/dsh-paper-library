@@ -1,0 +1,62 @@
+name: 原生文件系统兼容性
+
+on:
+  push:
+    branches: [main, 'codex/**']
+    paths:
+      - 'src/**'
+      - 'tests/test_portable_io.py'
+      - 'tests/test_core.py'
+      - 'tests/test_bibliography.py'
+      - 'tests/test_library_knowledge.py'
+      - 'tests/test_dataset_preview.py'
+      - 'tests-js/fs-portability.test.mjs'
+      - 'tests-js/local-state.test.mjs'
+      - 'scripts/portable-platform-smoke.mjs'
+      - 'package*.json'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/windows-compatibility.yml'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-filesystem:
+    name: ${{ matrix.os }} / Python 3.14 / Node 24
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - name: 安装测试依赖
+        run: |
+          python -m pip install uv
+          uv sync --locked --python 3.14
+          npm ci --ignore-scripts --legacy-peer-deps
+      - name: 真实 CLI 与状态持久化
+        run: node scripts/portable-platform-smoke.mjs
+      - name: 状态写入与路径保护
+        run: node --test tests-js/fs-portability.test.mjs tests-js/local-state.test.mjs
+      - name: PDF、日志与知识笔记写入回归
+        run: >-
+          uv run pytest -q
+          tests/test_portable_io.py
+          tests/test_core.py::test_portable_roundtrip_original_and_external_annotations
+          tests/test_core.py::test_concurrent_annotation_writes_and_atomic_failure
+          tests/test_core.py::test_renaming_preserves_annotations_and_recovers_before_and_after_catalog_switch
+          tests/test_bibliography.py::test_write_export_replaces_atomically_and_stays_inside_exports
+          tests/test_library_knowledge.py::test_note_crash_after_body_publication_recovers_durable_intent
+          tests/test_dataset_preview.py::test_large_csv_only_samples_rows_and_preserves_source

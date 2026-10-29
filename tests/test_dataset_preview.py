@@ -59,6 +59,25 @@ def test_quoted_multiline_csv_utf8_tsv_and_jsonl_columns(setup):
     assert preview(setup, asset)["rows"] == [[1, None], [2, "later"]]
 
 
+def test_preview_without_posix_open_flags_preserves_bytes_and_identity_guard(setup, monkeypatch):
+    import dsh_paper_library.dataset_preview as module
+    source, asset = register(setup, b"name,value\r\nSynthetic,7\r\n", binary=True)
+    monkeypatch.delattr(module.os, "O_NOFOLLOW", raising=False)
+    monkeypatch.delattr(module.os, "O_NONBLOCK", raising=False)
+    result = module.preview(asset)
+    assert result["columns"] == ["name", "value"] and result["rows"] == [["Synthetic", "7"]]
+    assert result["bytes_read"] == source.stat().st_size
+    original_open = module.os.open
+    def swap_before_open(path, flags):
+        replacement = source.with_suffix(".replacement")
+        replacement.write_bytes(b"name,value\r\nWrong,9\r\n")
+        replacement.replace(source)
+        return original_open(path, flags)
+    monkeypatch.setattr(module.os, "open", swap_before_open)
+    with pytest.raises(ValueError, match="changed while opening"):
+        module.preview(asset)
+
+
 @pytest.mark.parametrize("text,name,warning", [
     (b"name\n" + b"x" * 1000000, "long.csv", "64 KiB"),
     (b"name\n" + b"x" * 9000 + b"\n", "field.csv", "field"),

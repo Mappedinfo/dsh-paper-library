@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
+    "filelock>=3.32.7,<4",
     "openpyxl>=3.1.5,<4",
     "pymupdf>=1.26,<2",
     "pymupdf4llm==0.2.9",

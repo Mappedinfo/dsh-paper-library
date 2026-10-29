@@ -7,6 +7,7 @@ import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, opendir, realpath, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { syncDirectory } from './fs-portability.mjs';
 
 const MAX_RECORD_BYTES = 256 * 1024, MAX_LIST_BYTES = 8 * 1024 * 1024;
 const KEY = /^[A-Za-z][A-Za-z0-9_.-]*(?::[A-Za-z0-9_.-]+)*$/;
@@ -73,22 +74,29 @@ async function privateDirectory(path) {
   // Commit newly created state-tree directory entries as well as record data.
   await syncDirectory(path); await syncDirectory(dirname(path));
 }
-async function syncDirectory(path) {
-  const directory = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-  try { await directory.sync(); } finally { await directory.close(); }
-}
 async function safeFile(path, optional = false) {
   try { const info = await lstat(path); if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) throw new LocalStateError('状态文件不能是链接或特殊文件。', 'STATE_UNSAFE_PATH'); return info; }
   catch (error) { if (optional && error.code === 'ENOENT') return null; throw error; }
 }
-async function readEnvelope(path) {
+async function readEnvelope(path, attempt = 0) {
   let handle;
   try {
+    // O_NOFOLLOW is unavailable on Windows. Reject links before opening and
+    // compare file identity afterwards so a swapped leaf cannot redirect reads.
+    const expected = await safeFile(path, true);
+    if (!expected) return null;
     // NONBLOCK also prevents a planted FIFO from hanging before fstat can
     // reject it; it has no effect on ordinary disk-file reads.
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
     const info = await handle.stat();
     if (!info.isFile() || info.nlink !== 1) throw new LocalStateError('状态文件不是独立的普通文件。', 'STATE_UNSAFE_PATH');
+    if (info.dev !== expected.dev || info.ino !== expected.ino) {
+      // A concurrent atomic write may legitimately replace the leaf between
+      // lstat and open. Recheck once instead of following a swapped symlink.
+      await handle.close(); handle = null;
+      if (attempt === 0) return readEnvelope(path, 1);
+      throw new LocalStateError('状态文件在读取前持续变化，请重试。', 'STATE_BUSY', 503);
+    }
     if (info.size > MAX_RECORD_BYTES) throw new LocalStateError('已保存状态超过 256 KiB，请保留文件后人工检查。', 'STATE_CORRUPT');
     const buffer = Buffer.alloc(Math.min(MAX_RECORD_BYTES + 1, info.size + 1)); let size = 0;
     while (size < buffer.length) { const chunk = await handle.read(buffer, size, buffer.length - size, size); if (!chunk.bytesRead) break; size += chunk.bytesRead; }
@@ -105,7 +113,7 @@ async function readEnvelope(path) {
 async function fallbackLock(path, operation) {
   const lockPath = `${path}.lock`, deadline = Date.now() + 2000; let handle;
   while (!handle) {
-    try { handle = await open(lockPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600); }
+    try { handle = await open(lockPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600); }
     catch (error) {
       if (error.code !== 'EEXIST') throw error;
       if (Date.now() >= deadline) throw new LocalStateError('状态写锁仍被占用，请稍后重试；不会自动删除现有锁。', 'STATE_LOCKED', 503);
@@ -130,10 +138,11 @@ async function locked(path, operation) {
 async function writeDurable(path, text) {
   // The official writeFileAtomic currently excludes fsync by contract. Preserve
   // its sibling/exclusive-create/rename pattern, adding file-before-rename and
-  // directory-after-rename fsync before reporting success.
+  // directory-after-rename fsync on POSIX. Windows keeps the file flush and
+  // atomic replacement; directory-entry persistence remains OS/filesystem-owned.
   const temporary = `${path}.${randomUUID()}.tmp`; let handle;
   try {
-    handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
     await handle.writeFile(text, 'utf8'); await handle.sync(); await handle.close(); handle = null;
     await safeFile(path, true); await rename(temporary, path);
     await syncDirectory(dirname(path));

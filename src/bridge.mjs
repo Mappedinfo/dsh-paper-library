@@ -105,7 +105,7 @@ function runSetup(command, args, label) {
 /** The published package ships pyproject.toml/uv.lock but no virtualenv.
  * Provision one on first use instead of asking the reader to run uv sync. */
 async function provisionVenv(python) {
-  const requirements = ['pymupdf>=1.26.6,<2', 'pymupdf4llm==0.2.9', 'openpyxl>=3.1.5,<4'];
+  const requirements = ['pymupdf>=1.26.6,<2', 'pymupdf4llm==0.2.9', 'openpyxl>=3.1.5,<4', 'filelock>=3.32.7,<4'];
   if (await commandExists('uv')) {
     try {
       await runSetup('uv', ['sync', '--no-dev'], 'uv sync');
@@ -115,29 +115,32 @@ async function provisionVenv(python) {
     await runSetup('uv', ['pip', 'install', '--python', python, ...requirements], 'uv pip install PDF dependencies');
     return;
   }
-  if (await commandExists('python3')) {
-    await runSetup('python3', ['-m', 'venv', '.venv'], 'python3 -m venv');
-    await runSetup(python, ['-m', 'pip', 'install', ...requirements], 'pip install PDF dependencies');
-    return;
+  for (const command of process.platform === 'win32' ? ['python', 'python3'] : ['python3']) {
+    if (await commandExists(command)) {
+      await runSetup(command, ['-m', 'venv', '.venv'], `${command} -m venv`);
+      await runSetup(python, ['-m', 'pip', 'install', ...requirements], 'pip install PDF dependencies');
+      return;
+    }
   }
   throw new Error('文献内核需要 Python 3.11+：请安装 uv（https://docs.astral.sh/uv/）或 Python 后重试，插件会自动完成依赖安装。');
 }
 
 let venvProvisioning = null;
-const spreadsheetRuntimes = new Map();
-async function ensureSpreadsheetRuntime(python, install) {
-  if (!spreadsheetRuntimes.has(python)) spreadsheetRuntimes.set(python, (async () => {
+const dependencyRuntimes = new Map();
+async function ensurePythonDependency(python, moduleName, requirement, label, install, probe = `import ${moduleName}`) {
+  const identity = `${python}\0${moduleName}`;
+  if (!dependencyRuntimes.has(identity)) dependencyRuntimes.set(identity, (async () => {
     const available = await new Promise(accept => {
-      const child = spawn(python, ['-c', 'import openpyxl'], { stdio: 'ignore' });
+      const child = spawn(python, ['-c', probe], { stdio: 'ignore' });
       const timer = setTimeout(() => { child.kill(); accept(false); }, 10000);
       child.on('error', () => { clearTimeout(timer); accept(false); }); child.on('close', code => { clearTimeout(timer); accept(code === 0); });
     });
     if (available) return;
-    if (!install) throw new Error('指定的 Python 缺少 XLSX 读取依赖，请在该环境安装 openpyxl>=3.1.5,<4。');
-    if (await commandExists('uv')) await runSetup('uv', ['pip', 'install', '--python', python, 'openpyxl>=3.1.5,<4'], 'XLSX dependencies');
-    else await runSetup(python, ['-m', 'pip', 'install', 'openpyxl>=3.1.5,<4'], 'XLSX dependencies');
-  })().catch(error => { spreadsheetRuntimes.delete(python); throw error; }));
-  return spreadsheetRuntimes.get(python);
+    if (!install) throw new Error(`指定的 Python 缺少${label}，请在该环境安装 ${requirement}。`);
+    if (await commandExists('uv')) await runSetup('uv', ['pip', 'install', '--python', python, requirement], label);
+    else await runSetup(python, ['-m', 'pip', 'install', requirement], label);
+  })().catch(error => { dependencyRuntimes.delete(identity); throw error; }));
+  return dependencyRuntimes.get(identity);
 }
 async function ensureVenv() {
   const python = venvPython();
@@ -151,7 +154,11 @@ async function ensureVenv() {
 
 async function runWorker(request, options) {
   const python = options.python || await ensureVenv();
-  if (request.action === 'latex_table_import') await ensureSpreadsheetRuntime(python, !options.python);
+  // Old plugin-owned venvs survive package updates; provision new core imports
+  // once before starting a worker. Never mutate an explicitly selected runtime.
+  await ensurePythonDependency(python, 'filelock', 'filelock>=3.32.7,<4', '跨平台文件锁依赖', !options.python,
+    'import filelock; assert (3,32,7) <= tuple(map(int,filelock.__version__.split("."))) < (4,)');
+  if (request.action === 'latex_table_import') await ensurePythonDependency(python, 'openpyxl', 'openpyxl>=3.1.5,<4', 'XLSX 读取依赖', !options.python);
   return runProcess(python, ['-m', 'dsh_paper_library.worker'], { ...request, library: resolve(options.library || defaultLibrary) }, options);
 }
 
@@ -168,7 +175,7 @@ function runProcess(command, args, request, options) {
     if (options.signal?.aborted) return reject(new Error('操作已取消。'));
     const child = spawn(command, args, {
       cwd: projectRoot, stdio: ['pipe','pipe','pipe'],
-      env: { ...process.env, PYTHONPATH: join(projectRoot, 'src'), PYTHONDONTWRITEBYTECODE: '1' },
+      env: { ...process.env, PYTHONPATH: join(projectRoot, 'src'), PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' },
     });
     let stdout = '', stderr = '', bytes = 0, fail;
     const abort = () => { fail = new Error('操作已取消。'); child.kill(); };

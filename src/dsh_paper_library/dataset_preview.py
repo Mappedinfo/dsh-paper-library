@@ -78,9 +78,10 @@ def preview(asset):
         result["warnings"].append("File contents may have changed since registration; this is a fresh sample")
     if result["format"] not in {"csv", "tsv", "jsonl", "ndjson"}:
         return {**result, "status": "unsupported", "warnings": [*result["warnings"], "This format is listed as metadata only; no file contents were read"]}
-    # O_NOFOLLOW/O_NONBLOCK plus fstat prevent a swapped symlink/FIFO from
-    # turning a bounded local sample into another file read or an indefinite wait.
-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    # Use POSIX protections where available; Windows still verifies the opened
+    # regular-file identity below and must read bytes without CRT text conversion.
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, flags)
     started = time.monotonic()
     with os.fdopen(descriptor, "rb", buffering=0) as handle:
         opened = os.fstat(handle.fileno())
