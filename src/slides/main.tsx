@@ -46,13 +46,17 @@ const templates = [
 function BackToLibrary({ onClick }: { onClick(): void }) {
   return <button type="button" className="slides-back" onClick={onClick}><ArrowLeft size={16} aria-hidden="true" />返回文献库</button>
 }
+function BackToDsh({ onClick, disabled = false }: { onClick(): void; disabled?: boolean }) {
+  if (window.parent === window && !location.pathname.startsWith('/api/paper-library/')) return null
+  return <button type="button" className="slides-back" disabled={disabled} onClick={onClick}><ArrowLeft size={16} aria-hidden="true" />返回 DSH</button>
+}
 
 function projectDate(value: string) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' }).format(date)
 }
 
-function Presentation({ onClose }: { onClose(): void }) {
+function Presentation({ onClose, onDsh, busy }: { onClose(): void; onDsh(): void; busy: boolean }) {
   const { document: deck, activeSlidePath } = useEditor()
   const [index, setIndex] = useState(Math.max(0, deck.deck.slides.indexOf(activeSlidePath)))
   useEffect(() => {
@@ -64,10 +68,10 @@ function Presentation({ onClose }: { onClose(): void }) {
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key)
   }, [deck.deck.slides.length, onClose])
   const zoom = Math.min(window.innerWidth / deck.deck.canvas.width, window.innerHeight / deck.deck.canvas.height) * .94
-  return <div className="presentation" role="dialog" aria-label="放映"><button className="presentation-close" onClick={onClose}>退出放映</button><div className="presentation-stage" style={{ width: deck.deck.canvas.width * zoom, height: deck.deck.canvas.height * zoom }}><SlideSurface slide={deck.slides[deck.deck.slides[index]]} interactive={false} zoom={zoom} /></div><div className="presentation-nav"><button onClick={() => setIndex(i => Math.max(0, i - 1))}>上一页</button><span>{index + 1} / {deck.deck.slides.length}</span><button onClick={() => setIndex(i => Math.min(deck.deck.slides.length - 1, i + 1))}>下一页</button></div></div>
+  return <div className="presentation" role="dialog" aria-label="放映"><div className="presentation-controls"><BackToDsh onClick={onDsh} disabled={busy} /><button className="presentation-close" onClick={onClose}>退出放映</button></div><div className="presentation-stage" style={{ width: deck.deck.canvas.width * zoom, height: deck.deck.canvas.height * zoom }}><SlideSurface slide={deck.slides[deck.deck.slides[index]]} interactive={false} zoom={zoom} /></div><div className="presentation-nav"><button onClick={() => setIndex(i => Math.max(0, i - 1))}>上一页</button><span>{index + 1} / {deck.deck.slides.length}</span><button onClick={() => setIndex(i => Math.min(deck.deck.slides.length - 1, i + 1))}>下一页</button></div></div>
 }
 
-function ToolbarContext({ title, onLibrary }: { title: string; onLibrary(): void }) {
+function ToolbarContext({ title, onLibrary, onDsh, busy }: { title: string; onLibrary(): void; onDsh(): void; busy: boolean }) {
   const [host, setHost] = useState<Element | null>(null)
   const { locale } = useT()
   useEffect(() => {
@@ -76,7 +80,7 @@ function ToolbarContext({ title, onLibrary }: { title: string; onLibrary(): void
     const labels = locale === 'zh' ? ['新建演示文稿', '打开演示项目'] : ['New presentation', 'Open presentation']
     for (let index = 0; index < 2; index++) if (buttons[index]) { buttons[index].title = labels[index]; buttons[index].setAttribute('aria-label', labels[index]) }
   }, [locale])
-  return host ? createPortal(<div className="slides-toolbar-context"><span title={title}>{title}</span><BackToLibrary onClick={onLibrary} /></div>, host) : null
+  return host ? createPortal(<div className="slides-toolbar-context"><span title={title}>{title}</span><BackToLibrary onClick={onLibrary} /><BackToDsh onClick={onDsh} disabled={busy} /></div>, host) : null
 }
 
 function App() {
@@ -307,6 +311,17 @@ function App() {
     if (!reserveSwitch()) return
     try { if (await canSwitch()) location.assign(new URL('./', location.href).href) } finally { endSwitch() }
   }
+  const returnToDsh = async () => {
+    const embedded = window.parent !== window
+    if (!embedded && !location.pathname.startsWith('/api/paper-library/') || !reserveSwitch()) return
+    try {
+      if (!await canSwitch()) { setPresent(false); return }
+      if (document.fullscreenElement) await document.exitFullscreen()
+      if (embedded) window.parent.postMessage({ type: 'paper-library:return-to-dsh', version: 1 }, location.origin)
+      else location.assign('/')
+    } catch (error: any) { setPresent(false); setMessage(`无法返回 DSH：${error.message || error}。草稿仍在当前页面。`) }
+    finally { endSwitch() }
+  }
   const reloadLatest = async () => {
     if (!active.current || saving.current || assetBusy.current) return
     if (!window.confirm('将放弃本窗口未保存的演示草稿，重新读取资料库中的版本。是否继续？')) return
@@ -329,7 +344,7 @@ function App() {
   }
   return <>
     {chooser ? <main className="slides-chooser" inert={busy || undefined}>
-      <header className="slides-chooser-header"><div className="slides-chooser-identity"><span className="slides-chooser-mark"><PresentationIcon size={19} aria-hidden="true" /></span><div><h1>演示文稿</h1><p>创建新项目，或继续编辑已有演示。</p></div></div><div className="slides-chooser-navigation">{active.current && <button type="button" disabled={busy} onClick={() => setChooser(false)}>返回编辑</button>}<BackToLibrary onClick={() => void openLibrary()} /></div></header>
+      <header className="slides-chooser-header"><div className="slides-chooser-identity"><span className="slides-chooser-mark"><PresentationIcon size={19} aria-hidden="true" /></span><div><h1>演示文稿</h1><p>创建新项目，或继续编辑已有演示。</p></div></div><div className="slides-chooser-navigation">{active.current && <button type="button" disabled={busy} onClick={() => setChooser(false)}>返回编辑</button>}<BackToLibrary onClick={() => void openLibrary()} /><BackToDsh onClick={() => void returnToDsh()} disabled={busy} /></div></header>
       {message && !listLoading && <p className="slides-chooser-message" role="status">{message}</p>}
       <div className="slides-chooser-grid">
         <section className="slides-create" aria-labelledby="slides-create-title"><div className="slides-section-heading"><div><h2 id="slides-create-title">新建演示文稿</h2><p>选择适合内容的起点，之后都可以编辑。</p></div><FilePlus2 size={19} aria-hidden="true" /></div>
@@ -348,7 +363,7 @@ function App() {
       </div>
     </main> : <div className="app-shell" inert={busy || undefined}>
       <Toolbar onOpen={() => void openChooser()} onNew={() => void openChooser()} onImportZip={() => zipRef.current?.click()} onAddImage={() => imageRef.current?.click()} onAddCards={() => setCards(true)} onAddTable={() => setTable(true)} onGuide={() => setGuiding(true)} onExport={() => setExporting(true)} onPresent={() => setPresent(true)} onSave={() => void save(true)} />
-      <ToolbarContext title={state.document.deck.title} onLibrary={() => void openLibrary()} />
+      <ToolbarContext title={state.document.deck.title} onLibrary={() => void openLibrary()} onDsh={() => void returnToDsh()} busy={busy} />
       {message && <div className="slides-navigation-notice" role="status"><span>{message}</span><button type="button" aria-label="关闭提示" onClick={() => setMessage('')}>×</button></div>}
       <main className="workspace"><SlideList /><section ref={canvasRef} className={`canvas-workspace ${dragging ? 'image-drop-active' : ''}`} onDragEnter={event => { if (hasTransferredImages(event.dataTransfer)) setDragging(true) }} onDragOver={event => { if (hasTransferredImages(event.dataTransfer)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }} onDrop={event => { const files = transferredImageFiles(event.dataTransfer); setDragging(false); if (files.length) { event.preventDefault(); void insertImages(files, canvasPoint(event)) } }}>
         <div className="canvas-label"><span>画布</span><SlideNameEditor key={state.activeSlidePath} name={slide.name ?? slide.id} onCommit={state.renameSlide} /></div><div className="canvas-scroller"><div className="canvas-sized" style={{ width: state.document.deck.canvas.width * state.zoom, height: state.document.deck.canvas.height * state.zoom }}><SlideSurface slide={slide} zoom={state.zoom} /></div></div><div className="image-drop-overlay"><strong>添加图片</strong><span>将图片拖到画布</span></div></section><Inspector /></main>
@@ -359,7 +374,7 @@ function App() {
     <input ref={zipRef} hidden type="file" accept=".zip,application/zip" onChange={event => { const file = event.target.files?.[0] ?? null; event.currentTarget.value = ''; void importZip(file) }} />
     <input ref={imageRef} hidden type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange={event => { const files = Array.from(event.target.files ?? []); event.currentTarget.value = ''; void insertImages(files) }} />
     {guiding && active.current && <Guide projectId={active.current.id} onClose={() => setGuiding(false)} onDirty={value => { briefDirty.current = value }} />}
-    {present && <Presentation onClose={() => setPresent(false)} />}
+    {present && <Presentation onClose={() => setPresent(false)} onDsh={() => void returnToDsh()} busy={busy} />}
     {cards && <SummaryCardsDialog onClose={() => setCards(false)} />}{table && <TableDialog onClose={() => setTable(false)} />}
     {exporting && <div className="slides-overlay"><section className="slides-dialog" role="dialog" aria-modal="true" aria-label="导出"><h2>导出</h2><p>导出包含当前草稿；PDF 通过系统打印保存。</p><button onClick={() => void exportFile('html')}>HTML</button><button onClick={() => void exportFile('zip')}>ZIP 项目</button><button onClick={() => void exportFile('pdf')}>打印为 PDF</button><button onClick={() => setExporting(false)}>关闭</button></section></div>}
   </>

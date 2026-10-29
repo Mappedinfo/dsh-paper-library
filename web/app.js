@@ -32,6 +32,7 @@ let preferences = {};
 let durableReaderLoaded = false;
 let readerStateReady = false;
 const persistence = window.PaperLibraryLocalState?.create({api,onError:error=>toast(error.message || String(error),true)});
+const floatingWindows = window.PaperFloatingWindows?.start({persistence});
 const inkDiagnostics = window.PaperInkDiagnostics?.create({api});
 let readerPaperId = null;
 let readerRestore = null;
@@ -182,7 +183,7 @@ async function openPaper(id) {
   state.catalogSlideId=null;state.catalogSlideTitle=null;
   // Opening a paper takes over the detail column the board occupies; the board settles
   // its pending edits and is left without stealing focus from the chosen paper.
-  if (boardUI?.isOpen()) await boardUI.close({ focus: false });
+  if (boardUI?.isOpen() && !await boardUI.close({ focus: false })) return;
   resourceUI?.hide(); knowledgeUI?.hide();
   publishReaderState();
   readerStateReady=false;
@@ -1112,7 +1113,7 @@ $('feedback-model').addEventListener('change', () => { const model = manualModel
 $('link-open').addEventListener('click', openLink); $('link-form').addEventListener('submit', saveLink); $('link-search').addEventListener('input', debounce(loadLinkTargets));
 function activateGraphNode(event) { const node = event.target.closest('[data-graph-id]'); if (node && node.dataset.nodeType !== 'tag') openPaper(node.dataset.graphId); }
 $('graph-stage').addEventListener('click', activateGraphNode); $('graph-stage').addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateGraphNode(event); } });
-document.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if (handwritingUI?.isOpen()) { toast('请先保存或关闭手写便签。'); return; } for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close(); if(readingPanels&&state.active&&!workbenchUI?.isTable())readingPanels.showLibrary();else document.querySelector('.workspace').classList.remove('show-detail'); $('search').focus(); $('search').select(); } });
+document.addEventListener('keydown', async (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if (handwritingUI?.isOpen()) { toast('请先保存或关闭手写便签。'); return; } if($('resource-dialog')?.open&&resourceUI?.closeDialog&&!await resourceUI.closeDialog())return; for (const dialog of document.querySelectorAll('dialog[open]'))if(dialog.id!=='resource-dialog')dialog.close(); if(readingPanels&&state.active&&!workbenchUI?.isTable())readingPanels.showLibrary();else document.querySelector('.workspace').classList.remove('show-detail'); $('search').focus(); $('search').select(); } });
 function publishReaderState() {
   if (restoringReader || !state.active || state.active.resource_kind === 'dataset' || workbenchUI?.isTable() || (workbenchUI && readerPaperId !== state.active.id)) return true;
   const snapshot = { paperId: state.active.id, page: state.page, tab: state.tab, chatDraft: paperChatUI?.draft() || '', chatContext: paperChatUI?.context() || { annotationRefs: [] },
@@ -1655,6 +1656,29 @@ boardUI = window.PaperBoard?.create({root:$('board-view'),api,toast,
   getSessionId:()=>state.harnessContext?.sessionId||null,
   getActivePaperId:()=>state.active&&(state.active.resource_kind||'paper')==='paper'?state.active.id:null,
 });
+let returningToDsh = false;
+async function prepareReturnToDsh(){
+  if(returningToDsh)return false;
+  returningToDsh=true;
+  const wasInert=document.body.inert;document.body.inert=true;
+  try{
+    if(restoringReader||restoringInkDraft||inkSaveBusy||pdfReader?.isInking()||handwritingUI?.isOpen()){
+      toast('请先完成当前笔迹或关闭手写便签，再返回 DSH。',true);return false;
+    }
+    if(inkDraftStorageBlocked&&pdfReader?.getInkDraft()){toast('笔迹草稿尚未安全暂存，请先保存或导出。',true);return false;}
+    if(boardUI?.isOpen()&&!await boardUI.prepareLeave())return false;
+    if(document.fullscreenElement)await document.exitFullscreen();
+    if(latexUI?.isOpen()){await latexUI.close();if(latexUI.isOpen())return false;}
+    if(!publishReaderState()){toast('当前阅读草稿过大，无法安全保留；请先处理草稿。',true);return false;}
+    if(state.active?.id&&readerPaperId===state.active.id)await paperChatUI?.saveDraft();
+    await persistence?.flush();
+    if(pdfReader?.isInking()||boardUI?.isOpen()&&!await boardUI.prepareLeave()){toast('请先完成当前编辑，再返回 DSH。',true);return false;}
+    return true;
+  }catch(error){toast(`无法返回 DSH：${error.message||error}。草稿仍在当前页面。`,true);return false;}
+  finally{document.body.inert=wasInert;returningToDsh=false;}
+}
+for(const host of [document.querySelector('.topbar-actions'),document.querySelector('.board-toolbar'),document.querySelector('.latex-toolbar')])
+  window.PaperReturnToDsh?.create({host,prepare:prepareReturnToDsh,onError:error=>toast(error.message||String(error),true)});
 $('board-open').addEventListener('click',()=>{void boardUI?.open();});
 let boardPickerTicket=0,boardPickerTimer=null;
 for(const button of document.querySelectorAll('#board-paper-dialog .dialog-close'))button.addEventListener('click',()=>$('board-paper-dialog').close?.());
@@ -1714,7 +1738,7 @@ if(persistence){
   const backup=el('button','button subtle','导出未保存草稿');backup.type='button';backup.addEventListener('click',()=>{const values=persistence.exportPending?.()||[];const url=URL.createObjectURL(new Blob([JSON.stringify({schema:1,drafts:values},null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='paper-library-unsaved-drafts.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});saveStatus.append(label,retry,backup);document.body.append(saveStatus);
   const pending=new Map();persistence.subscribe(event=>{if(event.status==='saved')pending.delete(event.key);else pending.set(event.key,event);const errors=[...pending.values()].filter(value=>value.error);saveStatus.hidden=!errors.length;label.textContent=errors.some(value=>value.status==='conflict')?'另一浏览器已有修改，本窗口草稿尚未落盘。请导出并核对。':'本地保存暂未完成，草稿仍在当前窗口。';});
 }
-window.addEventListener('pagehide', () => { publishReaderState(); boardUI?.dispose(); companionUI?.dispose();settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); readingPanels?.dispose(); readingShell?.dispose(); });
+window.addEventListener('pagehide', () => { publishReaderState(); floatingWindows?.dispose(); boardUI?.dispose(); companionUI?.dispose();settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); readingPanels?.dispose(); readingShell?.dispose(); });
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){publishReaderState();void persistence?.flush({keepalive:true}).catch(()=>{});}});
 window.addEventListener('message', event => {
   receiveHarnessContext(event);

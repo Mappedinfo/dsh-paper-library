@@ -12,7 +12,7 @@ const react = {
   useEffect: callback => effects.push(callback),
 }
 new Function('require', 'module', 'exports', compiled.outputFiles[0].text)(name => { assert.equal(name, 'react'); return react }, module, module.exports)
-const { SETTINGS_DEFAULTS, SETTINGS_NAMESPACE, createSettingsCardModel, PaperLibrarySettingsCard, bindSettingsInvalidation, registerPaperLibrarySettings } = module.exports
+const { SETTINGS_DEFAULTS, SETTINGS_NAMESPACE, createSettingsCardModel, createHttpSettingsScope, createLanguageSettingsModel, PaperLibrarySettingsCard, PaperLibraryLanguageSettings, bindSettingsInvalidation, registerPaperLibrarySettings } = module.exports
 
 function scopeFixture(overrides = {}) {
   let snapshot = { status: 'ready', value: { ...SETTINGS_DEFAULTS }, base: { ...SETTINGS_DEFAULTS }, user: {}, revision: 1, writable: true, mode: 'host', ...overrides }
@@ -169,14 +169,9 @@ test('native registration is optional, uses the exact namespace, preserves unrel
   const window = windowFixture()
   assert.equal(typeof registerPaperLibrarySettings({}, window).bind, 'function')
   let provide
-  const bridge = registerPaperLibrarySettings({ inject: (dependencies, callback) => { assert.deepEqual(dependencies, ['settingsScope']); provide = callback } }, window)
-  const messages = []
-  const stop = bridge.bind({ postMessage: message => messages.push(message) })
-  assert.equal(messages.length, 0)
   const fixture = scopeFixture()
   const disposers = []
-  let definition
-  let component
+  const definitions = new Map()
   let localeNamespace
   const ctx = {
     settingsScope: { bind: spec => { assert.deepEqual(spec, { namespace: 'paper-library' }); return fixture.scope } },
@@ -186,17 +181,124 @@ test('native registration is optional, uses the exact namespace, preserves unrel
       bind: ns => { assert.equal(ns, localeNamespace); return key => key },
     },
     slots: {
-      inject: (name, callback) => { assert.equal(name, 'settings.plugin.item'); return callback() },
-      register: (def, render) => { definition = def; component = render; return () => { definition = undefined } },
+      inject: (name, callback) => { assert.ok(['settings.plugin.item', 'settings.section'].includes(name)); return callback() },
+      register: (def, render) => { definitions.set(def.name, { def, render }); return () => { definitions.delete(def.name) } },
     },
+    inject: (dependencies, callback) => { assert.deepEqual(dependencies, ['settingsScope']); provide = callback },
   }
+  const bridge = registerPaperLibrarySettings(ctx, window)
+  const messages = []
+  const stop = bridge.bind({ postMessage: message => messages.push(message) })
+  assert.equal(messages.length, 0)
+  assert.ok(definitions.has('settings.section'), 'section exists before optional legacy service')
   provide(ctx)
+  const { def: definition, render: component } = definitions.get('settings.plugin.item')
   assert.equal(definition.key, SETTINGS_NAMESPACE)
   assert.equal(definition.locale, 'paperLibrarySettings')
   assert.equal(component(definition.inject()).type, PaperLibrarySettingsCard)
+  const section = definitions.get('settings.section')
+  assert.equal(section.def.id, SETTINGS_NAMESPACE)
+  assert.equal(section.def.label(), 'title')
+  const content = walk(section.render(section.def.inject()))
+  assert.ok(content.some(node => node.type === PaperLibrarySettingsCard))
+  assert.ok(content.some(node => node.type === PaperLibraryLanguageSettings))
   assert.equal(messages.length, 1)
   stop(); assert.equal(fixture.listeners.size, 0)
   for (const dispose of disposers.reverse()) dispose?.()
-  assert.equal(definition, undefined)
+  assert.equal(definitions.size, 0)
   assert.equal(window.listeners.size, 0)
+})
+
+test('native HTTP settings use the server CAS revision and restrict writes to selected fields', async () => {
+  let current = { backend: 'dsh', available: true, writable: true, revision: 'remote-a', value: { ...SETTINGS_DEFAULTS }, user: {}, base: { ...SETTINGS_DEFAULTS } }
+  const calls = []
+  const scope = createHttpSettingsScope(async (action, args) => {
+    calls.push({ action, args })
+    if (action === 'settings_update') {
+      assert.equal(args.expected_revision, 'remote-a')
+      current = { ...current, revision: 'remote-b', value: { ...current.value, ...args.patch }, user: { ...current.user, ...args.patch } }
+    }
+    return current
+  })
+  await scope.refresh()
+  const model = createSettingsCardModel(scope)
+  assert.equal(await model.set('analysis_fill', false), true)
+  assert.deepEqual(calls[1].args.patch, { analysis_fill: false })
+  assert.equal(await model.reset(), false, 'HTTP cannot silently reset unrelated preferences')
+  assert.equal(calls.filter(call => call.action === 'settings_reset').length, 0)
+  scope.dispose(); model.dispose()
+})
+
+test('language settings use their own revisions and retain drafts across failures and stale writes', async () => {
+  let resolveSave
+  const requests = []
+  const model = createLanguageSettingsModel(async (action, args) => {
+    requests.push({ action, args })
+    if (action === 'language_settings_get') return { value: { model: null, translate_prompt: '', polish_prompt: '' }, revision: 7, models: [{ provider: 'host', id: 'mini' }], default_model: { provider: 'host', model: 'default' } }
+    return await new Promise(resolve => { resolveSave = resolve })
+  })
+  assert.equal(await model.load(), true)
+  model.set('translate_prompt', '保留语气')
+  const saving = model.save()
+  assert.equal(requests[1].args.expected_revision, 7)
+  assert.equal(requests[1].args.value.translate_prompt, '保留语气')
+  model.set('polish_prompt', '保留引用')
+  resolveSave({ revision: 8, value: requests[1].args.value })
+  assert.equal(await saving, true)
+  assert.equal(model.getSnapshot().revision, 8)
+  assert.equal(model.getSnapshot().value.polish_prompt, '保留引用')
+  assert.equal(model.getSnapshot().dirty, true)
+  model.dispose()
+})
+
+test('language settings conflict preserves editable text and requires an explicit reload', async () => {
+  const model = createLanguageSettingsModel(async action => {
+    if (action === 'language_settings_get') return { value: { model: null, translate_prompt: '', polish_prompt: '' }, revision: 2, models: [] }
+    throw Object.assign(new Error('stale'), { code: 'STATE_CONFLICT' })
+  })
+  await model.load(); model.set('translate_prompt', '保留数字')
+  assert.equal(await model.save(), false)
+  assert.equal(model.getSnapshot().status, 'conflict')
+  model.set('polish_prompt', '保留引用')
+  assert.equal(model.getSnapshot().status, 'conflict')
+  assert.equal(await model.save(), false)
+  assert.equal(model.getSnapshot().value.translate_prompt, '保留数字')
+  await model.load()
+  assert.equal(model.getSnapshot().value.translate_prompt, '')
+  model.dispose()
+})
+
+test('language settings refresh on remount only when there is no unsaved draft', () => {
+  let dirty = false, loads = 0
+  const model = {
+    getSnapshot: () => ({ status: 'ready', value: { model: null, translate_prompt: '', polish_prompt: '' }, models: [], dirty }),
+    subscribe: () => () => {}, load: () => { loads++ }, set: () => {}, save: () => {},
+  }
+  const mount = () => {
+    const before = effects.length
+    PaperLibraryLanguageSettings({ model, t: key => key })
+    assert.equal(effects.length, before + 1)
+    return effects.pop()()
+  }
+  mount()()
+  assert.equal(loads, 1)
+  mount()()
+  assert.equal(loads, 2, 'reopening observes changes made in the language window')
+  dirty = true
+  mount()()
+  assert.equal(loads, 2, 'reopening must not replace a dirty draft')
+})
+
+test('language settings always offer explicit reload, disabled during requests', () => {
+  const snapshot = { status: 'ready', value: { model: null, translate_prompt: '', polish_prompt: '' }, models: [] }
+  let loads = 0
+  const model = { getSnapshot: () => snapshot, subscribe: () => () => {}, load: () => { loads++ }, set: () => {}, save: () => {} }
+  const reload = () => walk(PaperLibraryLanguageSettings({ model, t: key => key })).find(node => node.type === 'button' && node.children.includes('language.reload'))
+  assert.equal(reload().props.disabled, false)
+  reload().props.onClick()
+  assert.equal(loads, 1)
+  snapshot.status = 'saving'
+  assert.equal(reload().props.disabled, true)
+  snapshot.status = 'loading'
+  assert.equal(reload().props.disabled, true)
 })

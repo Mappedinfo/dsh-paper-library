@@ -79,9 +79,9 @@ window.PaperReadingPanels = (() => {
     }
     function render(emit=true) {
       if(disposed)return;
-      root.dataset.readingSide=side;root.classList.toggle('has-reading-sidebar',Boolean(sidebar)&&(!libraryRoot||sidebar==='metadata'));
+      root.dataset.readingSide=side;root.classList.toggle('has-reading-sidebar',Boolean(sidebar)&&(!libraryRoot||sidebar==='metadata')&&!aside.classList.contains('paper-floating-positioned'));
       placeSidebar();
-      aside.hidden=!sidebar||(Boolean(libraryRoot)&&sidebar==='annotations');asideTitle.textContent=sidebar==='metadata'?'文献资料':'批注';
+      aside.hidden=!sidebar||(Boolean(libraryRoot)&&sidebar==='annotations');asideTitle.textContent=sidebar==='metadata'?'资料详情':'批注';
       move.textContent=side==='left'?'移至右侧':'移至左侧';
       annotationsRoot.hidden=sidebar!=='annotations'||(Boolean(libraryRoot)&&!readingActive);metadataRoot.hidden=sidebar!=='metadata';
       if(libraryRoot){
@@ -114,9 +114,11 @@ window.PaperReadingPanels = (() => {
       if(emit)notify();
     }
     function placeSidebar() {
-      const global=sidebar==='metadata'&&typeof root.getClientRects==='function'&&root.getClientRects().length===0;
-      globalHost.dataset.readingSide=side;globalHost.hidden=!global;
+      const global=sidebar==='metadata'&&(aside.classList.contains('paper-floating-positioned')||typeof root.getClientRects==='function'&&root.getClientRects().length===0);
+      const floatingChat=chat.classList.contains('paper-floating-positioned');
+      globalHost.dataset.readingSide=side;globalHost.hidden=!global&&!(floatingChat&&chatOpen);
       const host=global?globalHost:root;if(aside.parentNode!==host)host.append(aside);
+      if(floatingChat&&chat.parentNode!==globalHost)globalHost.append(chat);
     }
     function known(name) {if(!names.has(name)&&!extraPanels.has(name))throw new Error('Unknown reading panel');}
     function show(name) {
@@ -136,7 +138,7 @@ window.PaperReadingPanels = (() => {
     function toggle(name) {return visible(name)?close(name):show(name);}
     function setSide(value,{persist=true}={}) {
       if(!['left','right'].includes(value))throw new Error('Reading sidebar side must be left or right');
-      if(disposed)return;sideRevision++;if(side===value&&!persist)return;side=value;if(persist&&persistence)void persistence.patch('preferences',{'reading-panel-side':side}).catch(error=>toast?.(`侧栏偏好尚未保存：${error.message}`,true));render();
+      if(disposed)return;sideRevision++;if(side===value&&!persist)return;window.PaperFloatingWindows?.reset(aside);side=value;if(persist&&persistence)void persistence.patch('preferences',{'reading-panel-side':side}).catch(error=>toast?.(`侧栏偏好尚未保存：${error.message}`,true));render();
     }
     function paperChanged(value) {
       paper=value&&typeof value.id==='string'?{id:value.id,title:String(value.title||'').slice(0,500),archived:Boolean(value.archived)}:null;
@@ -172,6 +174,7 @@ window.PaperReadingPanels = (() => {
     const observer=typeof window.ResizeObserver==='function'?new window.ResizeObserver(resize):null;
     observer?.observe(root);listen(window,'resize',resize);resize();
     listen(metadataRoot,'close',()=>{if(sidebar==='metadata')close('metadata');});
+    for(const panel of [aside,chat])listen(panel,'paper-floating-positioned',()=>render(false));
     for(const panel of [aside,chat])listen(panel,'keydown',event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();close(panel===chat?'chat':sidebar);}});
     if(libraryRoot)listen(libraryRoot,'keydown',event=>{if(event.key==='Escape'&&sidebar==='annotations'&&!event.defaultPrevented){event.preventDefault();sharedOpen=false;close('annotations');}});
     render(false);

@@ -5,6 +5,7 @@ import { createConversationBridge } from './conversation-context.mjs'
 import { createAnnotationReferences, draftAnnotationReferences } from './annotation-references.mjs'
 import { createBoardReferences } from './board-references.mjs'
 import { registerPaperLibrarySettings } from './settings.mjs'
+import { bindReturnToDsh } from './return-to-dsh.mjs'
 
 const ID = '@mappedinfo/dsh-paper-library'
 const NS = 'paperLibrary'
@@ -57,7 +58,7 @@ export const inject = ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'm
  *  (`?view=board`), or the LaTeX workbench alone (`?view=latex`). A library tab may
  *  carry a target paper (`?paper=`), which is how several papers stay open in split
  *  panes; the bridge keys each tab's reading snapshot by its stable tab id. */
-export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailable, conversationBridge, bindTheme, bindSettings, view = 'library' }) {
+export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailable, conversationBridge, bindTheme, bindSettings, sidebarRight, view = 'library' }) {
   const canvas = view === 'board'
   const latex = view === 'latex'
   const slides = view === 'slides'
@@ -93,6 +94,10 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
     if (!tab.visible || !frame.current?.contentWindow) return undefined
     return bindSettings(frame.current.contentWindow)
   }, [bindSettings, tab.visible])
+  useEffect(() => {
+    if (!tab.visible || !frame.current?.contentWindow) return undefined
+    return bindReturnToDsh({ window, target: frame.current.contentWindow, tabId: tab.id, sessionId, sidebar: sidebarRight })
+  }, [sidebarRight, sessionId, tab.id, tab.visible])
   // Slides contain a live editing draft. Preserve that iframe while hidden so a
   // tab switch cannot discard typing before autosave, or a failed-save draft.
   if (!tab.visible && !slides) return null
@@ -261,6 +266,7 @@ export function apply(ctx) {
     conversationBridge,
     bindTheme,
     bindSettings,
+    sidebarRight: ctx.sidebarRight,
     directory: ctx.modelDirectories.directoryFor(sessionId),
     modelAvailable: ctx.sessions.subagentAddress(sessionId) === undefined,
   })

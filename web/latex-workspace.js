@@ -683,6 +683,7 @@ window.PaperLatexWorkspace = (() => {
 
     async function savedBeforeLeaving(checkReview = false) {
       if (checkReview && reviewer?.hasDraft()) { showReview(); say('自审批注尚未保存；请保存或取消后再切换、编译或关闭。', true); return false; }
+      if (checkReview && writingTools?.hasDraft()) { say('写作工具还有未完成的草稿；请先插入、复制或放弃草稿。', true); return false; }
       if (dirty || saving) await flush('manual');
       await saveQueue;
       if (dirty || pendingConflict) {

@@ -27,6 +27,10 @@ const locales = {
     conflict: '设置未保存，已显示主机的当前值。请核对后重试。', failed: '无法确认设置已保存。请检查连接后重试。',
     reset: '恢复默认设置', 'reset.hint': '清除这四项用户覆盖，恢复 DSH 配置中的默认值。',
     model: '模型、凭据、主题与字号继续由 DSH 管理。',
+    language: '语言模型与提示词', 'language.hint': '默认使用 DSH 当前默认模型；也可为翻译和润色单独指定模型与补充提示词。',
+    'language.default': '使用 DSH 当前默认模型', 'language.missing': '当前不可用', 'language.translate': '翻译补充提示词', 'language.polish': '润色补充提示词',
+    'language.save': '保存语言设置', 'language.reload': '重新读取（放弃本窗口未保存修改）', 'language.saved': '语言设置已保存。', 'language.conflict': '设置已在其他窗口更改，本窗口的输入仍保留。复制所需内容后可重新读取。',
+    'language.failed': '语言设置读取或保存失败，请检查连接后重试。', 'language.loading': '正在读取语言设置…', 'language.saving': '正在保存语言设置…',
   },
   en: {
     title: 'Paper Library', description: 'Shared with the library settings on the host. Open readers update when these choices change.',
@@ -39,6 +43,10 @@ const locales = {
     conflict: 'Settings were not saved. Current host values are shown; review them and retry.', failed: 'Could not confirm the save. Check the connection and retry.',
     reset: 'Restore defaults', 'reset.hint': 'Clears these four user overrides and restores the DSH configuration defaults.',
     model: 'Models, credentials, theme and font size remain managed by DSH.',
+    language: 'Language model and prompts', 'language.hint': 'Uses the current DSH default model unless a language-specific model is selected.',
+    'language.default': 'Use the current DSH default model', 'language.missing': 'Unavailable', 'language.translate': 'Additional translation instructions', 'language.polish': 'Additional polishing instructions',
+    'language.save': 'Save language settings', 'language.reload': 'Reload (discard unsaved changes here)', 'language.saved': 'Language settings saved.', 'language.conflict': 'Settings changed in another window. Your input remains here; copy it before reloading.',
+    'language.failed': 'Could not load or save language settings. Check the connection and retry.', 'language.loading': 'Loading language settings…', 'language.saving': 'Saving language settings…',
   },
 }
 
@@ -88,17 +96,131 @@ export function createSettingsCardModel(scope) {
 }
 
 const muted = { color: 'var(--dsw-alias-label-secondary, #606771)', fontSize: '12px', lineHeight: 1.5 }
-const control = { font: 'inherit', color: 'inherit', border: '1px solid var(--dsw-alias-border-l1, #d9dde2)', borderRadius: '7px', background: 'var(--dsw-alias-bg-base, transparent)', padding: '5px 8px' }
+const control = { font: 'inherit', color: 'inherit', border: '1px solid var(--dsw-alias-border-l1, #d9dde2)', borderRadius: '7px', background: 'var(--dsw-alias-bg-base, transparent)', padding: '5px 8px', boxSizing: 'border-box', minWidth: 0, maxWidth: '100%' }
+
+/** Language settings have their own revision; failed or concurrent saves retain the draft. */
+export function createLanguageSettingsModel(request) {
+  let snapshot = { status: 'idle', value: null, revision: null, models: [], defaultModel: null, dirty: false }
+  let disposed = false, editVersion = 0
+  const listeners = new Set()
+  const update = patch => { if (!disposed) { snapshot = { ...snapshot, ...patch }; for (const listener of listeners) listener() } }
+  return {
+    getSnapshot: () => snapshot,
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
+    async load() {
+      if (disposed || ['loading', 'saving'].includes(snapshot.status)) return false
+      update({ status: 'loading' })
+      try {
+        const result = await request('language_settings_get', {})
+        if (disposed) return false
+        editVersion++
+        update({ status: 'ready', value: result.value, revision: result.revision, models: result.models || [], defaultModel: result.default_model, dirty: false })
+        return true
+      } catch { update({ status: 'failed' }); return false }
+    },
+    set(key, value) {
+      if (disposed || !snapshot.value || !['model', 'translate_prompt', 'polish_prompt'].includes(key)) return
+      editVersion++
+      update({ value: { ...snapshot.value, [key]: value }, dirty: true, status: ['saving', 'conflict'].includes(snapshot.status) ? snapshot.status : 'ready' })
+    },
+    async save() {
+      if (disposed || !snapshot.value || snapshot.revision == null || ['loading', 'saving', 'conflict'].includes(snapshot.status)) return false
+      const value = snapshot.value, revision = snapshot.revision, version = editVersion
+      update({ status: 'saving' })
+      try {
+        const result = await request('language_settings_update', { value, expected_revision: revision })
+        if (disposed) return false
+        const changed = editVersion !== version
+        update({ revision: result.revision, value: changed ? snapshot.value : result.value, dirty: changed, status: changed ? 'ready' : 'saved' })
+        return true
+      } catch (error) { update({ status: error?.code === 'STATE_CONFLICT' ? 'conflict' : 'failed' }); return false }
+    },
+    dispose() { disposed = true; listeners.clear() },
+  }
+}
+
+/** Adapt the existing HTTP settings API to the card's revision-aware scope. */
+export function createHttpSettingsScope(request) {
+  let snapshot = { status: 'loading', mode: 'host', writable: false, revision: 0 }
+  let remoteRevision, disposed = false, busy = false
+  const listeners = new Set()
+  const publish = next => { if (!disposed) { snapshot = next; for (const listener of listeners) listener() } }
+  const accept = result => {
+    remoteRevision = result.revision
+    publish({ status: 'ready', mode: result.backend === 'dsh' && result.available ? 'host' : 'unavailable', writable: !!result.writable,
+      revision: snapshot.revision + 1, value: result.value || {}, user: result.user || {}, base: result.base || {} })
+  }
+  return {
+    getSnapshot: () => snapshot,
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
+    async refresh() {
+      if (busy || disposed) return
+      busy = true
+      try { accept(await request('settings_get', {})) } catch { publish({ ...snapshot, status: 'unavailable', writable: false }) } finally { busy = false }
+    },
+    async mutate(ops, revision) {
+      if (busy || disposed || revision !== snapshot.revision || ops.some(op => op.op !== 'set')) throw new Error('Settings changed')
+      busy = true
+      try {
+        const patch = Object.fromEntries(ops.map(op => [op.path[0], op.value]))
+        accept(await request('settings_update', { patch, expected_revision: remoteRevision }))
+      } catch (error) {
+        try { accept(await request('settings_get', {})) } catch { publish({ ...snapshot, status: 'unavailable', writable: false }) }
+        throw error
+      } finally { busy = false }
+    },
+    dispose() { disposed = true; listeners.clear() },
+  }
+}
+
+async function languageRequest(action, args) {
+  const response = await fetch('/api/paper-library/api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...args }) })
+  const body = await response.json()
+  if (!response.ok || !body.ok) throw Object.assign(new Error(body.error || 'Language settings request failed'), { code: body.code })
+  return body.result
+}
+
+export function PaperLibraryLanguageSettings({ model, t }) {
+  const [snapshot, setSnapshot] = useState(model.getSnapshot())
+  useEffect(() => {
+    const refresh = () => setSnapshot(model.getSnapshot())
+    const unsubscribe = model.subscribe(refresh)
+    refresh()
+    if (!model.getSnapshot().dirty) void model.load()
+    return unsubscribe
+  }, [model])
+  const { value, models, defaultModel, status } = snapshot
+  const busy = status === 'loading' || status === 'saving'
+  const selected = value?.model ? JSON.stringify([value.model.provider, value.model.model]) : ''
+  const choices = models.map(item => ({ key: JSON.stringify([item.provider, item.id]), name: `${item.provider} / ${item.name || item.id}`, model: { provider: item.provider, model: item.id } }))
+  const missing = selected && !choices.some(item => item.key === selected)
+  const statusKey = ['loading', 'saving', 'saved', 'failed', 'conflict'].includes(status) ? `language.${status}` : null
+  return h('section', { 'aria-label': t('language'), style: { marginTop: '20px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: '10px', minWidth: 0 } },
+    h('h3', { style: { margin: 0, fontSize: '15px' } }, t('language')),
+    h('p', { style: { ...muted, margin: 0 } }, t('language.hint')),
+    value ? h('label', { style: { display: 'grid', gap: '5px' } }, t('language'),
+      h('select', { value: selected, disabled: busy, style: control, onChange: event => model.set('model', choices.find(item => item.key === event.currentTarget.value)?.model || null) },
+        h('option', { value: '' }, `${t('language.default')}${defaultModel ? ` (${defaultModel.provider} / ${defaultModel.model})` : ''}`),
+        missing ? h('option', { value: selected }, `${value.model.provider} / ${value.model.model} (${t('language.missing')})`) : null,
+        ...choices.map(item => h('option', { key: item.key, value: item.key }, item.name)))) : null,
+    ...['translate', 'polish'].map(kind => value ? h('label', { key: kind, style: { display: 'grid', gap: '5px' } }, t(`language.${kind}`),
+      h('textarea', { value: value[`${kind}_prompt`] || '', maxLength: 2000, rows: 3, disabled: busy, style: { ...control, resize: 'vertical' }, onChange: event => model.set(`${kind}_prompt`, event.currentTarget.value) })) : null),
+    h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap' } },
+      h('button', { type: 'button', style: control, disabled: !value || busy || !!missing || status === 'conflict', onClick: () => void model.save() }, t('language.save')),
+      h('button', { type: 'button', style: control, disabled: busy, onClick: () => void model.load() }, t('language.reload'))),
+    statusKey ? h('p', { role: ['failed', 'conflict'].includes(status) ? 'alert' : 'status', style: { ...muted, margin: 0 } }, t(statusKey)) : null)
+}
 
 /** A keyed native settings card owns its chrome; no value imports from another plugin. */
-export function PaperLibrarySettingsCard({ model, t }) {
+export function PaperLibrarySettingsCard({ model, t, onMount, canReset = true }) {
   const [snapshot, setSnapshot] = useState(model.getSnapshot())
   useEffect(() => {
     const refresh = () => setSnapshot(model.getSnapshot())
     const dispose = model.subscribe(refresh)
     refresh()
+    onMount?.()
     return dispose
-  }, [model])
+  }, [model, onMount])
   const { scope, state, pending } = snapshot
   const disabled = !writable(scope) || state === 'saving'
   const status = scope.status === 'loading' ? 'loading' : scope.status !== 'ready' || scope.mode !== 'host'
@@ -122,7 +244,7 @@ export function PaperLibrarySettingsCard({ model, t }) {
         h('p', { id: `${id}-hint`, style: { ...muted, margin: '3px 0 0' } }, t(`${key}.hint`))), input)
   }),
   h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', marginTop: '12px' } },
-    h('button', { type: 'button', disabled, title: t('reset.hint'), style: { ...control, cursor: disabled ? 'default' : 'pointer' }, onClick: () => { void model.reset() } }, t('reset')),
+    canReset ? h('button', { type: 'button', disabled, title: t('reset.hint'), style: { ...control, cursor: disabled ? 'default' : 'pointer' }, onClick: () => { void model.reset() } }, t('reset')) : null,
     status ? h('span', { role: ['conflict', 'failed'].includes(status) ? 'alert' : 'status', style: { ...muted, color: ['conflict', 'failed'].includes(status) ? 'var(--dsw-alias-state-error-primary, #b33939)' : muted.color } }, t(status)) : null),
   h('p', { style: { ...muted, margin: '12px 0 0' } }, t('model')))
 }
@@ -153,27 +275,49 @@ export function bindSettingsInvalidation({ window, target, scope }) {
 
 /** The optional service and keyed slot do not gate the library tab on older/minimal deployments. */
 export function registerPaperLibrarySettings(ctx, window) {
-  let scope
+  const httpScope = createHttpSettingsScope(languageRequest)
+  const httpModel = createSettingsCardModel(httpScope)
+  const language = createLanguageSettingsModel(languageRequest)
+  let scope = httpScope
   const frames = new Set()
   const bind = target => {
     const binding = { target, dispose: scope ? bindSettingsInvalidation({ window, target, scope }) : undefined }
     frames.add(binding)
     return () => { binding.dispose?.(); frames.delete(binding) }
   }
+  const setScope = next => {
+    scope = next
+    for (const binding of frames) {
+      binding.dispose?.()
+      binding.dispose = bindSettingsInvalidation({ window, target: binding.target, scope })
+    }
+  }
+  if (ctx.effect && ctx.locale && ctx.slots) {
+    ctx.effect(() => ctx.locale.register(LOCALE, locales), 'paper-library: settings locale')
+    const t = ctx.locale.bind(LOCALE)
+    const refresh = () => { void httpScope.refresh() }
+    ctx.effect(() => ctx.slots.inject('settings.section', () => ctx.slots.register({
+      name: 'settings.section', id: SETTINGS_NAMESPACE, order: 35, label: () => t('title'), locale: LOCALE,
+      inject: () => ({ model: httpModel, language }),
+    }, props => h('div', { style: { maxWidth: '760px', padding: '16px', font: 'inherit' } },
+      h(PaperLibrarySettingsCard, { model: props.model, t, onMount: refresh, canReset: false }), h(PaperLibraryLanguageSettings, { model: props.language, t })))), 'paper-library: settings section')
+    ctx.effect(() => () => {
+      for (const binding of frames) { binding.dispose?.(); binding.dispose = undefined }
+      httpModel.dispose(); httpScope.dispose(); language.dispose()
+    }, 'paper-library: settings section cleanup')
+  }
   ctx.inject?.(['settingsScope'], settingsCtx => {
-    scope = settingsCtx.settingsScope.bind({ namespace: SETTINGS_NAMESPACE })
-    const model = createSettingsCardModel(scope)
-    settingsCtx.effect(() => settingsCtx.locale.register(LOCALE, locales), 'paper-library: settings locale')
+    const nativeScope = settingsCtx.settingsScope.bind({ namespace: SETTINGS_NAMESPACE })
+    const model = createSettingsCardModel(nativeScope)
     const t = settingsCtx.locale.bind(LOCALE)
     settingsCtx.effect(() => settingsCtx.slots.inject('settings.plugin.item', () => settingsCtx.slots.register({
       name: 'settings.plugin.item', key: SETTINGS_NAMESPACE, locale: LOCALE,
       inject: () => ({ model }),
     }, props => h(PaperLibrarySettingsCard, { ...props, t }))), 'paper-library: settings card')
     settingsCtx.effect(() => {
-      for (const binding of frames) binding.dispose = bindSettingsInvalidation({ window, target: binding.target, scope })
+      setScope(nativeScope)
       return () => {
-        for (const binding of frames) { binding.dispose?.(); binding.dispose = undefined }
-        model.dispose(); scope = undefined
+        model.dispose(); setScope(httpScope)
       }
     }, 'paper-library: settings bridge')
   })

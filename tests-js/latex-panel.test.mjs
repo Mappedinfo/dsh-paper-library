@@ -11,7 +11,7 @@ const tick = () => new Promise(done => setImmediate(done))
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
 const image = { image: 'aW1hZ2U=', width: 600, height: 800, pixel_width: 1200, pixel_height: 1600, page_count: 4, bytes: 5, supported: true }
 
-async function fixture(override = () => undefined, { review = false, spellChecker } = {}) {
+async function fixture(override = () => undefined, { review = false, spellChecker, writingTools } = {}) {
   const ids = new Map(), revoked = [], calls = [], urls = [], timers = new Map()
   class Element {
     constructor(tag = 'div') {
@@ -51,11 +51,20 @@ async function fixture(override = () => undefined, { review = false, spellChecke
   }
   const globals = { window, document, crypto: webcrypto, AbortController, Uint8Array, Blob, atob: value => Buffer.from(value, 'base64').toString('binary'), URL: { createObjectURL() { const url = `blob:${urls.length}`; urls.push(url); return url }, revokeObjectURL: url => revoked.push(url) }, setTimeout: (fn, ms) => { const id = timers.size + 1; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id), getComputedStyle: () => ({ lineHeight: '20' }) }
   if (spellChecker) window.PaperLatexSpelling = { checkSpelling: spellChecker }
+  if (writingTools) window.PaperLatexWritingTools = { create: () => writingTools }
   if (review) vm.runInNewContext(reviewSource, globals)
   vm.runInNewContext(source, globals)
   const ui = window.PaperLatexWorkspace.create({ api })
   await ui.open(); return { ui, ids, calls, revoked, urls, window, timers }
 }
+
+test('closing refuses to discard a writing-tool draft', async () => {
+  let pending = true
+  const f = await fixture(() => undefined, { writingTools: { hasDraft: () => pending, dispose() {} } })
+  await f.ui.close(); assert.equal(f.ui.isOpen(), true)
+  pending = false; await f.ui.close(); assert.equal(f.ui.isOpen(), false)
+  f.ui.dispose()
+})
 
 test('textarea fallback can turn on local spelling and navigate to a detected word', async () => {
   const f = await fixture(action => {

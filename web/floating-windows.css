@@ -1,0 +1,8 @@
+.paper-floating-header { cursor: grab; touch-action: none; }
+.paper-floating-dragging,.paper-floating-dragging .paper-floating-header { cursor: grabbing; }
+.paper-floating-grip { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 2px; margin-right: 4px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: 18px/1 var(--sans); cursor: grab; }
+.paper-floating-grip:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--ink); }
+.paper-floating-grip:focus-visible { outline: 2px solid var(--dsw-alias-link); outline-offset: 1px; }
+.paper-floating-grip:disabled { cursor: default; opacity: .4; }
+.paper-floating-positioned:not(:fullscreen):not(.is-expanded) { resize: both; }
+.paper-floating-positioned:has(>.reading-panel-body),.paper-floating-positioned:has(>.reading-chat-content) { display:flex; flex-direction:column; }

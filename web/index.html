@@ -21,6 +21,8 @@
   <link rel="stylesheet" href="./challenge-mining.css">
   <link rel="stylesheet" href="./board.css">
   <link rel="stylesheet" href="./latex-workspace.css">
+  <link rel="stylesheet" href="./floating-windows.css">
+  <script src="./floating-windows.js" defer></script>
   <script src="./board-source.js" defer></script>
   <script src="./board-render.js" defer></script>
   <script src="./board-bridge.js" defer></script>
@@ -39,6 +41,7 @@
   <script src="./paper-analysis.js" defer></script>
   <script src="./theme.js" defer></script>
   <script src="./icons.js" defer></script>
+  <script src="./return-to-dsh.js" defer></script>
   <script src="./local-state.js" defer></script>
   <script src="./paper-chat.js" defer></script>
   <script src="./companion.js" defer></script>
@@ -98,7 +101,7 @@
       <article id="paper-detail" hidden>
         <header class="paper-header">
           <button id="back-library" class="button subtle mobile-back">← 文献库</button>
-          <div class="paper-kicker"><span id="paper-type" class="eyebrow">PAPER</span><button id="metadata-open" class="button subtle">详情</button></div>
+          <div class="paper-kicker"><span id="paper-type" class="eyebrow">PAPER</span><button id="metadata-open" class="button subtle">资料详情</button></div>
           <h2 id="paper-title"></h2><p id="paper-authors" class="paper-authors"></p><div id="paper-tags" class="paper-tags"></div><p id="paper-file-meta" class="paper-file-meta" hidden></p>
           <div class="paper-actions"><button id="copy-apa" class="button">复制 APA 7</button><button id="export-bib" class="button">导出 BibLaTeX</button><a id="download-pdf" class="button" href="#" download>下载批注 PDF ↓</a><button id="open-in-pane" class="button" type="button" hidden title="在右侧新分栏打开本篇，两篇论文并排对照">⇱ 在新分栏打开</button></div>
         </header>

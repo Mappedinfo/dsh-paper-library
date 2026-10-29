@@ -371,6 +371,10 @@ test('a conflicting save keeps both sides and offers recovery instead of overwri
   assert.equal(harness.registry.get('board-conflict').hidden, false, 'the conflict is shown, not swallowed');
   assert.match(harness.registry.get('board-conflict-note').textContent, /没有被覆盖/);
   assert.equal(harness.registry.get('board-status').classList.contains('is-error'), true);
+  assert.equal(await harness.panel.prepareLeave(), false, 'return cannot discard a conflicted board');
+  assert.equal(await harness.panel.close(), false, 'closing preserves the visible conflict and local edit');
+  assert.equal(harness.panel.isOpen(), true);
+  assert.equal(harness.panel.board().nodes.length, 1);
 
   // "Load the saved version" adopts the other window's board.
   harness.registry.get('board-conflict-reload').dispatch('click');

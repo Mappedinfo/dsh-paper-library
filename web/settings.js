@@ -14,7 +14,7 @@ window.PaperLibrarySettings = (() => {
     const dialog=make('dialog','library-settings');dialog.id='library-settings';dialog.setAttribute('aria-labelledby','library-settings-title');
     const header=make('header'),title=make('strong','','Paper Library 设置');title.id='library-settings-title';
     const close=make('button','icon-button','×');close.type='button';close.setAttribute('aria-label','关闭设置');close.addEventListener('click',()=>dialog.close());header.append(title,close);
-    const description=make('p','settings-description','DSH 中的入口：设置 → 插件 → 插件配置 → Paper Library。');
+    const description=make('p','settings-description','DSH 中的入口：设置 → Paper Library（也保留插件配置入口）。');
     const status=make('p','settings-status');status.id='settings-status';status.setAttribute('role','status');
     const controls=make('fieldset'),legend=make('legend','','阅读与自动化');controls.append(legend);
     const inputs=new Map();
@@ -42,7 +42,7 @@ window.PaperLibrarySettings = (() => {
       const shown={...snapshot?.value,...pendingPatch};
       for(const[key,input]of inputs){if(input.type==='text'&&document.activeElement===input)continue;if(input.type==='checkbox')input.checked=shown[key]===true;else if(input.tagName==='SELECT')input.value=shown[key]||'left';else input.value=shown[key]??'';}
       path.textContent=`资料库：${getLibrary()||'正在读取…'}`;
-      description.textContent=snapshot?.backend==='dsh'&&snapshot.available===false?'设置由 DSH 管理。请在 DSH 的 Paper Library 面板或「设置 → 插件 → 插件配置」中修改。':snapshot?.backend==='local'?'独立运行：设置保存在本机。安装到 DSH 后，插件设置会接入 DSH 的统一设置。':'DSH 中的入口：设置 → 插件 → 插件配置 → Paper Library。两个入口共享同一份主机设置。';
+      description.textContent=snapshot?.backend==='dsh'&&snapshot.available===false?'设置由 DSH 管理。请在 DSH 的 Paper Library 面板或「设置 → Paper Library」中修改。':snapshot?.backend==='local'?'独立运行：设置保存在本机。安装到 DSH 后，插件设置会接入 DSH 的统一设置。':'DSH 中的入口：设置 → Paper Library（也保留插件配置入口）。两个入口共享同一份主机设置。';
     }
     function drainRefresh(){if(refreshAgain&&!disposed&&!busy&&!refreshing){refreshAgain=false;queueMicrotask(()=>void refresh());}}
     async function syncPreferences(){readingPreferences++;try{await persistence?.get('preferences');}finally{readingPreferences--;}}

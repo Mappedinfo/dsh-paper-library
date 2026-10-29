@@ -28,6 +28,8 @@
 .slides-back { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; background: var(--panel); color: var(--dsw-alias-label-primary); font: inherit; cursor: pointer; }
 .slides-back:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
 .slides-back:focus-visible { outline: 2px solid var(--dsw-alias-link); outline-offset: 2px; }
+.presentation-controls { position: absolute; top: 18px; right: 18px; display: flex; align-items: center; gap: 6px; z-index: 2; }
+.presentation-controls .presentation-close { position: static; }
 .app-shell > .statusbar .status-information .source-link, .app-shell > .statusbar .status-information > span:not(.status-dimensions) { display: none; }
 .slides-chooser { height: 100%; overflow: auto; padding: 28px clamp(24px, 4vw, 64px) 42px; color: var(--dsw-alias-label-primary); background: var(--shell); }
 .slides-chooser-header, .slides-guide header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }

@@ -16,24 +16,10 @@ window.PaperLanguageLearning = {
       <div id="language-words" hidden><div class="language-word-filters"><input id="vocabulary-query" type="search" placeholder="检索词语、释义" aria-label="检索难词"><select id="vocabulary-status" aria-label="学习状态"><option value="">全部</option><option value="learning">待学习</option><option value="mastered">已掌握</option></select><button id="vocabulary-refresh" class="button subtle" type="button">刷新</button></div><p class="small muted">从翻译与表述优化中自动积累。AI 释义待核对；掌握程度由你标记。</p><div id="vocabulary-list"></div><div class="language-pagination"><button id="vocabulary-prev" class="button subtle" type="button">上一页</button><span id="vocabulary-range"></span><button id="vocabulary-next" class="button subtle" type="button">下一页</button></div><div class="language-actions"><button id="vocabulary-export-json" class="button subtle" type="button">导出 JSON</button><button id="vocabulary-export-csv" class="button subtle" type="button">导出 CSV</button></div></div>`;
     document.body.append(panel);
     let available=false,paperId=null,loadTicket=0,viewTicket=0,view='work',busy=false,draftReady=false,sourcePage=null,lastResult=null,historyOffset=0,wordOffset=0,failedRequest=null,loadPromise=null,draftRevision=0,disposed=false;
-    let settingsRevision=null, settingsModels=[], geometryLoaded=false, geometryReady=false, geometryRevision=0, dragging=null, resizeTimer=null;
-    const rect=()=>panel.getBoundingClientRect?.();
-    function applyGeometry(value){
-      if(!panel.style||!value)return;
-      const width=Math.max(1,Math.min(Number(value.width)||420,Math.max(1,(window.innerWidth||1024)-24))),height=Math.max(1,Math.min(Number(value.height)||590,Math.max(1,(window.innerHeight||768)-24)));
-      const x=Math.max(12,Math.min(Number(value.x)||12,Math.max(12,(window.innerWidth||1024)-width-12))),y=Math.max(12,Math.min(Number(value.y)||12,Math.max(12,(window.innerHeight||768)-height-12)));
-      Object.assign(panel.style,{left:`${x}px`,top:`${y}px`,right:'auto',bottom:'auto',width:`${width}px`,height:`${height}px`});
-    }
-    function saveGeometry(){const box=rect();if(!geometryLoaded||panel.hidden||!box?.width||!box?.height)return;void persistence?.put('reader:language-window',{x:box.left,y:box.top,width:box.width,height:box.height}).catch(()=>{});}
-    async function restoreGeometry(){if(geometryLoaded)return;geometryLoaded=true;const revision=geometryRevision;try{const saved=await persistence?.get('reader:language-window');if(saved&&revision===geometryRevision&&!disposed)applyGeometry(saved);}catch{}finally{geometryReady=true;}}
-    function clampGeometry(){const box=rect();if(box?.width&&box?.height)applyGeometry({x:box.left,y:box.top,width:box.width,height:box.height});}
-    $('language-drag').addEventListener('pointerdown',event=>{if(event.button!==0)return;const box=rect();if(!box?.width)return;dragging={id:event.pointerId,x:event.clientX,y:event.clientY,left:box.left,top:box.top,width:box.width,height:box.height};++geometryRevision;event.currentTarget.setPointerCapture?.(event.pointerId);event.preventDefault();});
-    $('language-drag').addEventListener('pointermove',event=>{if(!dragging||dragging.id!==event.pointerId)return;applyGeometry({x:dragging.left+event.clientX-dragging.x,y:dragging.top+event.clientY-dragging.y,width:dragging.width,height:dragging.height});});
-    const dragEnd=event=>{if(dragging?.id!==event.pointerId)return;dragging=null;saveGeometry();};
-    $('language-drag').addEventListener('pointerup',dragEnd);$('language-drag').addEventListener('pointercancel',dragEnd);
-    $('language-drag').addEventListener('keydown',event=>{const delta={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[event.key];const box=rect();if(!delta||!box?.width)return;event.preventDefault();++geometryRevision;const step=event.shiftKey?40:10;applyGeometry({x:box.left+delta[0]*step,y:box.top+delta[1]*step,width:box.width,height:box.height});saveGeometry();});
-    const viewportChanged=()=>{if(!panel.hidden&&geometryReady){clampGeometry();saveGeometry();}};window.addEventListener?.('resize',viewportChanged);
-    const resizeObserver=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(panel.hidden||!geometryReady)return;clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{clampGeometry();saveGeometry();},200);}):null;resizeObserver?.observe(panel);
+    let settingsRevision=null, settingsModels=[];
+    const floating=window.PaperFloatingWindows?.attach(panel,{key:'reader:language-window',persistence});
+    const saveGeometry=()=>floating?.save();
+    const restoreGeometry=()=>floating?.restore();
     const status=(text,error=false)=>{$('language-status').textContent=text||'';$('language-status').classList.toggle('error',error);};
     const selected = ()=>{const s=getSelection();return s?.id===getPaper()?.id&&s.text ? s : null;};
     const draftValue=()=>({text:$('language-source').value,target_language:$('language-target').value,page:sourcePage,failed_request:failedRequest});
@@ -150,6 +136,6 @@ window.PaperLanguageLearning = {
     $('language-source').addEventListener('input',()=>{sourcePage=null;failedRequest=null;++draftRevision;remember();});$('language-target').addEventListener('change',()=>{failedRequest=null;++draftRevision;remember();});
     for(const [kind,load]of [['language-history',history],['vocabulary',words]])for(const [direction,delta]of [['prev',-20],['next',20]])$(`${kind}-${direction}`).addEventListener('click',()=>{if(kind==='language-history')historyOffset=Math.max(0,historyOffset+delta);else wordOffset=Math.max(0,wordOffset+delta);void load();});
     let searchTimer;$('vocabulary-query').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{wordOffset=0;void words();},250);});$('vocabulary-status').addEventListener('change',()=>{wordOffset=0;void words();});$('vocabulary-refresh').addEventListener('click',()=>void words());for(const format of ['json','csv'])$(`vocabulary-export-${format}`).addEventListener('click',()=>void exportWords(format));
-    return {paperChanged,useSelection,show,showSettings(){show('settings');},close(){remember();++viewTicket;panel.hidden=true;},setAvailable(value){available=Boolean(value);controls();},sync(){controls();for(const id of ['language-selection-translate','language-selection-polish','ribbon-language'])if($(id))$(id).disabled=!getPaper();},dispose(){remember();saveGeometry();disposed=true;clearTimeout(searchTimer);clearTimeout(resizeTimer);resizeObserver?.disconnect();window.removeEventListener?.('resize',viewportChanged);++loadTicket;++viewTicket;},snapshot:()=>({paperId,view,busy,lastResultId:lastResult?.id})};
+    return {paperChanged,useSelection,show,showSettings(){show('settings');},close(){remember();++viewTicket;panel.hidden=true;},setAvailable(value){available=Boolean(value);controls();},sync(){controls();for(const id of ['language-selection-translate','language-selection-polish','ribbon-language'])if($(id))$(id).disabled=!getPaper();},dispose(){remember();saveGeometry();disposed=true;clearTimeout(searchTimer);floating?.dispose();++loadTicket;++viewTicket;},snapshot:()=>({paperId,view,busy,lastResultId:lastResult?.id})};
   },
 };

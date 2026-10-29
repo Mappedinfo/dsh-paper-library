@@ -1269,11 +1269,20 @@
       applyReady();
     }
 
-    async function closeView({ focus = true } = {}) {
+    async function prepareLeave() {
       // A gesture in flight must not leave its preview behind in a view that is closing.
       cancelDrag();
       commitTextEdit();
       await settle({ keepalive: true });
+      if (saving || pendingSave || conflict) {
+        status('画板尚未保存，请先处理保存失败或冲突。', 'error');
+        return false;
+      }
+      return true;
+    }
+
+    async function closeView({ focus = true } = {}) {
+      if (!await prepareLeave()) return false;
       if (fullscreenTask) await fullscreenTask;
       if (doc.fullscreenElement === root) await doc.exitFullscreen?.().catch(() => {});
       open = false;
@@ -1282,6 +1291,7 @@
       setFocus(false);
       doc.body.classList.remove('board-mode');
       onClose({ focus });
+      return true;
     }
 
     function resize() {
@@ -1986,7 +1996,7 @@
 
     return {
       links, setLink, setFocus, setProjects,
-      open: openView, close: closeView, resize, load, refreshList, render,
+      open: openView, close: closeView, prepareLeave, resize, load, refreshList, render,
       isOpen: () => open,
       board: () => board,
       selection: () => [...selection],
