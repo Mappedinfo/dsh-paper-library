@@ -245,6 +245,7 @@ export function apply(ctx) {
   ctx.effect(() => ctx.sidebarRightTabs.register({
     id: SLIDES_ID,
     kind: SLIDES_KIND,
+    keepMounted: true,
     priority: 'extension',
     title: () => t('slides.title'),
     guide: [{ order: 18, title: () => t('slides.title'), description: () => t('slides.description'), icon: SlidesGlyph }],

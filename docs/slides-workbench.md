@@ -49,3 +49,5 @@ node --test tests-js/slides-store.test.mjs tests-js/slides-http.test.mjs src/sli
 检查范围包括合成项目持久化、并发保存冲突、路径边界、图片与简报、ZIP 往返和切换保护；代码检查不能代替实际的用户界面验收。
 
 合成 DOM 组件测试可设置 `JSDOM_MODULE=/path/to/jsdom` 复用已安装的 jsdom；未设置时明确跳过这两项，不下载浏览器、不连接用户标签页。
+
+运行中的 DSH 另有 `scripts/slides-live-fixture.mjs` 实际浏览器检查：通过进程环境提供 `DSH_TEST_LAUNCH_URL` 和已安装的 `PLAYWRIGHT_MODULE`，在隔离的 1512×982 Chromium 会话中验证编辑、保存、冲突恢复、图片、表格、卡片、简报、放映和导出，以及浅深色控件对比度。仅打开本轮创建的合成项目，截图和下载写入临时目录，不操作已有用户标签页；热重载由原生插件管理器单独执行。检查结束会报告本轮项目标识，供保留示例及限定清理。浏览器打印布局检查不代替系统打印对话框验收。

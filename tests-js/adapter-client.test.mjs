@@ -43,6 +43,7 @@ test('published client bundle registers entry tabs and preserves hidden slide dr
   const canvasTab = tabs.get('@mappedinfo/dsh-paper-library/whiteboard')
   const slidesTab = tabs.get('@mappedinfo/dsh-paper-library/slides')
   assert.equal(slidesTab.kind, 'paper-library-slides')
+  assert.equal(slidesTab.keepMounted, true, 'the host must retain the draft-bearing editor body too')
   assert.equal(slidesTab.guide[0].order, 18)
   assert.equal(libraryTab.kind, 'paper-library')
   assert.equal(canvasTab.kind, 'paper-library-whiteboard')

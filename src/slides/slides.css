@@ -12,11 +12,21 @@
 .canvas-label, .canvas-label strong, .panel-heading, .panel-heading strong, .slide-thumb, .zip-import { color: var(--dsw-alias-label-secondary); }
 .slide-thumb:hover, .slide-thumb.active, .tool-button:hover, .slide-actions button:hover, .icon-grid button:hover { background: var(--dsw-alias-interactive-bg-hover); border-color: var(--line); }
 .language-toggle, .text-action, .canvas-name-input { background: var(--panel-2); color: var(--dsw-alias-label-primary); border-color: var(--line); }
+/* 上游深色界面有硬编码底色；控件的底色和文字必须一起跟随宿主。 */
+.inspector :is(.element-search, .element-row, .metric-grid > div, .theme-presets > button, .hint-card) { background: var(--panel-2); color: var(--dsw-alias-label-primary); border-color: var(--line); }
+.inspector :is(.element-row:hover, .element-row.active, .theme-presets > button:hover, .theme-presets > button.active) { background: var(--dsw-alias-interactive-bg-hover); }
+.inspector :is(.field input, .field textarea, .field select, .footer-slot input, .footer-slot select) { background: var(--dsw-specific-input-major); color: var(--dsw-alias-label-primary); border-color: var(--line); }
+.inspector .element-search input { color: var(--dsw-alias-label-primary); }
+.inspector :is(h3, .section-heading > span, .element-select > svg, .element-select small, .element-empty, .element-index-hint, .footer-toggle, .footer-slot > span, .footer-color, .color-field code, .muted-copy, .hint-card p) { color: var(--muted); }
+.inspector .element-center { color: var(--muted) !important; border-color: var(--line) !important; }
+.app-shell .guide-action { background: var(--panel-2); color: var(--dsw-alias-label-primary); border-color: var(--line); }
+.app-shell .statusbar strong { color: var(--dsw-alias-label-primary); }
+.slide-element.selected:before { color: var(--dsw-alias-label-primary-foreground); }
 .toolbar-spacer { min-width: 110px; }
 .slides-toolbar-context { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; font-size: 12px; }
 .slides-toolbar-context span { max-width: 160px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }
 .slides-toolbar-context a, .slides-chooser a { color: var(--dsw-alias-link); white-space: nowrap; }
-.status-information .source-link, .status-information > span:not(.status-dimensions) { display: none; }
+.app-shell > .statusbar .status-information .source-link, .app-shell > .statusbar .status-information > span:not(.status-dimensions) { display: none; }
 .slides-chooser { height: 100%; overflow: auto; padding: 28px; color: var(--dsw-alias-label-primary); background: var(--shell); }
 .slides-chooser header, .slides-guide header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .slides-chooser h1 { margin: 0; font-size: 22px; }.slides-chooser p { color: var(--muted); }
