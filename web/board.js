@@ -462,6 +462,7 @@
     let tool = 'select';
     let selection = new Set();
     let open = false;
+    let fullscreenTask = null, fullscreenFocusBefore = null, ownsFullscreen = false;
     /** False until a board record has actually loaded. The canvas is interactive as soon as the
      *  view opens, and the first listing may still be waiting out the server's admission retry, so
      *  without this guard a shape drawn in that window lands on an unsaved board that the load
@@ -1089,6 +1090,7 @@
       if (typing) return;
       const meta = event.metaKey || event.ctrlKey;
       if (event.key === 'Escape') {
+        if (doc.fullscreenElement === root) { void toggleFullscreen(); return; }
         if (doc.body.classList.contains('board-focused')) { setFocus(false); return; }
         closeTextEdit(); connectFrom = null; select([]); render();
         return;
@@ -1272,6 +1274,8 @@
       cancelDrag();
       commitTextEdit();
       await settle({ keepalive: true });
+      if (fullscreenTask) await fullscreenTask;
+      if (doc.fullscreenElement === root) await doc.exitFullscreen?.().catch(() => {});
       open = false;
       closeTextEdit();
       root.hidden = true;
@@ -1333,14 +1337,26 @@
       scheduleSave();
     }
 
-    /** Fullscreen lets a narrow DSH sidebar grow into a real drawing surface. */
-    async function toggleFullscreen() {
-      const view = doc.defaultView;
-      if (!view) return;
-      if (doc.fullscreenElement) { await doc.exitFullscreen?.().catch(() => {}); return; }
-      if (!root.requestFullscreen) { toast('当前环境不支持全屏，请展开侧栏或在浏览器中打开。', true); return; }
-      try { await root.requestFullscreen({ navigationUI: 'hide' }); }
-      catch { toast('浏览器未允许全屏；可展开侧栏继续使用画板。', true); }
+    /** 浏览器全屏包含页面专注，离开时恢复进入前的窗口布局。 */
+    function toggleFullscreen() {
+      if (fullscreenTask) return fullscreenTask;
+      fullscreenTask = (async () => {
+        if (doc.fullscreenElement === root) {
+          try { await doc.exitFullscreen?.(); }
+          catch { toast('未能退出全屏，请按 Esc 重试。', true); }
+          return;
+        }
+        if (!root.requestFullscreen) { toast('当前环境不支持全屏，可使用「专注」隐藏其他区域。', true); return; }
+        fullscreenFocusBefore = doc.body.classList.contains('board-focused');
+        setFocus(true);
+        try { await root.requestFullscreen({ navigationUI: 'hide' }); }
+        catch {
+          const before = fullscreenFocusBefore; fullscreenFocusBefore = null;
+          if (before !== null) setFocus(before);
+          toast('浏览器未允许全屏；已恢复原布局，可使用「专注」。', true);
+        }
+      })().finally(() => { fullscreenTask = null; syncFullscreen(); });
+      return fullscreenTask;
     }
 
     /** Pure canvas: hide the app chrome so nothing but the board is on screen. */
@@ -1349,17 +1365,25 @@
       const button = $('board-focus');
       if (button) {
         button.setAttribute('aria-pressed', String(Boolean(on)));
-        button.textContent = on ? '退出专注 ⤡' : '专注 ⤢';
+        button.textContent = on ? '退出专注' : '专注';
+        button.title = on ? '恢复窗口内的其他区域；全屏中会同时退出全屏' : '只在当前窗口隐藏顶栏、文献库与阅读区，不进入浏览器全屏';
       }
       if (on) applyView();
     }
 
     function syncFullscreen() {
+      const focused = doc.fullscreenElement === root;
+      if (focused) { ownsFullscreen = true; setFocus(true); }
+      else if (ownsFullscreen) {
+        ownsFullscreen = false;
+        const before = fullscreenFocusBefore; fullscreenFocusBefore = null;
+        if (before !== null) setFocus(before);
+      }
       const button = $('board-fullscreen');
       if (!button) return;
-      const focused = Boolean(doc.fullscreenElement);
       button.setAttribute('aria-pressed', String(focused));
       button.textContent = focused ? '退出全屏 ⤡' : '全屏 ⤢';
+      button.title = focused ? '退出浏览器全屏，恢复进入前的窗口布局' : '在专注布局中进入浏览器全屏；Esc 退出并恢复原布局';
     }
 
     // ── Presentation, automatic layout and the readable source ────────────────────
@@ -1731,7 +1755,10 @@
       if (linkButton) linkButton.addEventListener('click', () => { const id = options.getActivePaperId?.(); if (id) setLink('papers', id, true); else toast('先在文献库里打开一篇论文。', true); });
       if (unlinkButton) unlinkButton.addEventListener('click', () => { const id = options.getActivePaperId?.(); if (id) setLink('papers', id, false); });
       const focusButton = $('board-focus');
-      if (focusButton) focusButton.addEventListener('click', () => setFocus(!doc.body.classList.contains('board-focused')));
+      if (focusButton) focusButton.addEventListener('click', () => {
+        if (doc.fullscreenElement === root) void toggleFullscreen().then(() => { if (doc.fullscreenElement !== root) setFocus(false); });
+        else setFocus(!doc.body.classList.contains('board-focused'));
+      });
       const sourceDialog = $('board-source-dialog');
       const sourceStatus = (message, error = false) => {
         const node = $('board-source-status');

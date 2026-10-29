@@ -30,8 +30,11 @@ window.PaperLibrarySettings = (() => {
     extraInput.addEventListener('change',()=>void save({external_sources:extraInput.value.trim()}));
     const storage=make('details','settings-storage'),summary=make('summary','','模型、外观与存储');storage.append(summary,make('p','','模型沿用每篇论文的 DSH 对话；主题与字号跟随 DSH 外观设置。'));
     const path=make('p','settings-path');storage.append(path,make('p','','文献、PDF、草稿和设置均保存在主机磁盘，不写入浏览器 localStorage。更换资料库目录需要修改部署配置，已有数据不会自动搬迁。'));
+    const maintenance=make('section','settings-maintenance');maintenance.setAttribute('aria-label','导出与维护');
+    maintenance.append(make('strong','','导出与维护'),make('p','','导出文献与数据集的 BibLaTeX 引用资料。演示文稿请在 Slides 工作台中导出。'));
+    const exportLibrary=document.getElementById?.('export-library');if(exportLibrary)maintenance.append(exportLibrary);
     const footer=make('footer'),reload=make('button','button subtle','重新读取'),reset=make('button','button subtle','恢复默认');reload.type=reset.type='button';reload.addEventListener('click',()=>void refresh());reset.addEventListener('click',()=>void save(null));footer.append(reload,reset);
-    dialog.append(header,description,status,controls,storage,footer);document.body.append(dialog);
+    dialog.append(header,description,status,controls,storage,maintenance,footer);document.body.append(dialog);
     function say(text,error=false){status.textContent=text;status.classList.toggle('error',error);}
     function render(){
       controls.disabled=busy||!snapshot?.writable;reset.disabled=busy||!snapshot?.writable;reload.disabled=busy;

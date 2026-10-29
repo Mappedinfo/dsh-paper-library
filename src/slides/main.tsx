@@ -76,7 +76,18 @@ function App() {
       setProjects(current => next == null ? result.projects : [...current, ...result.projects]); setOffset(result.next_offset ?? null); setMessage('')
     } catch (error: any) { setMessage(`读取失败：${error.message}`) }
   }
-  useEffect(() => { void list() }, [])
+  useEffect(() => {
+    const project = new URLSearchParams(location.search).get('project')
+    void (async () => { await list(); if (project && /^pd-[a-f0-9]{32}$/.test(project)) await openProject(project) })()
+    const navigate = (event: MessageEvent) => {
+      if (event.origin !== location.origin || event.source !== window.parent || event.data?.type !== 'paper-library:open-slide-project' || typeof event.data.id !== 'string' || !/^pd-[a-f0-9]{32}$/.test(event.data.id)) return
+      if (active.current?.id === event.data.id) return
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      queueMicrotask(() => void openProject(event.data.id))
+    }
+    window.addEventListener('message', navigate)
+    return () => window.removeEventListener('message', navigate)
+  }, [])
   useEffect(() => {
     const protect = (event: BeforeUnloadEvent) => {
       if (useEditor.getState().dirtyRevisions.size || saving.current || assetBusy.current || briefDirty.current) { event.preventDefault(); event.returnValue = '' }

@@ -70,6 +70,7 @@
     "src/slides",
     "scripts/build-slides.mjs",
     "scripts/vendor-plaindeck.mjs",
+    "scripts/rebind-external.py",
     "tsconfig.slides.json",
     "types/slides-env.d.ts",
     "docs/slides-workbench.md",

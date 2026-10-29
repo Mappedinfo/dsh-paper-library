@@ -100,7 +100,13 @@ window.PaperReadingShell = (() => {
       sync();
     }).catch(()=>{});
     // One global import entry. Link intake belongs inside that same import surface.
-    $('import-open').textContent='＋ 导入';libraryTools.append($('import-open'),$('export-library'),$('build-bibliography'),$('metadata-enrich'),$('catalog-archive'));
+    $('import-open').textContent='＋ 导入';libraryTools.append($('import-open'),$('build-bibliography'),$('metadata-enrich'),$('catalog-archive'));
+    // The shelf disclosures keep their original IDs and toggle events. Their
+    // content lives below the shared row so each expanded panel has full width.
+    const organizerDisclosures=[['board-shelf','board-shelf-panel'],['latex-version-shelf','latex-version-shelf-panel']].map(([id,panelId])=>{
+      const disclosure=$(id),panel=$(panelId);if(!disclosure||!panel)return null;const update=()=>{panel.hidden=!disclosure.open;};
+      disclosure.addEventListener('toggle',update);update();return {disclosure,update};
+    }).filter(Boolean);
     $('quick-import-form').hidden=true;
     const quick=$('quick-import-source');quick.disabled=true;
     $('paper-tools').append(annotationTools,libraryTools);
@@ -145,12 +151,13 @@ window.PaperReadingShell = (() => {
     function inkSaving(value,error=''){inkBusy=Boolean(value);inkError=error;inkBar.setAttribute('aria-busy',String(inkBusy));syncInk();}
     let inkQueue=null;
     const queueMenu=node('details',null,'ink-queue-menu');queueMenu.id='ink-queue-menu';queueMenu.hidden=true;
-    const queueSummary=node('summary','笔迹');queueSummary.id='ink-queue-summary';queueMenu.append(queueSummary);
+    const queueSummary=node('summary','笔迹');queueSummary.id='ink-queue-summary';queueSummary.setAttribute('aria-live','polite');queueMenu.append(queueSummary);
     const queuePanel=node('div',null,'ink-queue-panel');queuePanel.setAttribute('aria-label','手写保存进度');queueMenu.append(queuePanel);ribbon.insertBefore(queueMenu,fullscreen);
     function queueChanged(records){
       inkRecords=records;syncInk();
       const pending=records.filter(job=>job.status!=='saved');queueMenu.hidden=!records.length;queueSummary.textContent=pending.length?`笔迹 · ${pending.length} 待保存`:'笔迹已保存';
-      queueSummary.classList.toggle('error',pending.some(job=>['stage_failed','uncertain'].includes(job.status)));
+      const failed=pending.some(job=>['stage_failed','uncertain'].includes(job.status));
+      queueMenu.dataset.state=failed?'error':pending.length?'pending':'saved';queueSummary.classList.toggle('error',failed);
       queuePanel.replaceChildren();
       const shown=pending.length?pending:records.slice(-1);
       for(const job of shown){const row=node('div',null,'ink-queue-item');row.dataset.inkId=job.annotation_id;
@@ -193,7 +200,7 @@ window.PaperReadingShell = (() => {
       annotationTools.hidden=table||!pdf||surface!=='annotations';
       if(annotationTools.hidden)penSettings.open=false;
       $('toolbar-actions').hidden=false;libraryTools.hidden=surface!=='library'&&active;
-      $('import-open').disabled=false;$('export-library').disabled=false;$('build-bibliography').disabled=false;
+      $('import-open').disabled=false;$('build-bibliography').disabled=false;
       $('metadata-enrich').disabled=!active;$('catalog-archive').disabled=!active;
       for(const b of annotationTools.querySelectorAll('[data-reader-tool]'))b.setAttribute('aria-pressed',String(b.dataset.readerTool===tool));
       for(const [value,b] of Object.entries(modeButtons))b.setAttribute('aria-pressed',String(mode===value));
@@ -231,7 +238,7 @@ window.PaperReadingShell = (() => {
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
     sync();
     return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
-      dispose(){window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placePenOptions);$('paper-tools').removeEventListener('scroll',placePenOptions);document.removeEventListener('click',closePenSettings);document.removeEventListener('keydown',penSettingsKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);document.removeEventListener('click',closeCitations);document.removeEventListener('keydown',citationKey,true);}};
+      dispose(){for(const {disclosure,update} of organizerDisclosures)disclosure.removeEventListener('toggle',update);window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placePenOptions);$('paper-tools').removeEventListener('scroll',placePenOptions);document.removeEventListener('click',closePenSettings);document.removeEventListener('keydown',penSettingsKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);document.removeEventListener('click',closeCitations);document.removeEventListener('keydown',citationKey,true);}};
   }
   return {create};
 })();

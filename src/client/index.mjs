@@ -64,6 +64,8 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
   const { tab } = useTabInfo()
   const frame = useRef(null)
   const requestedPaper = !canvas && !latex && !slides ? tab.navigation?.params?.paper : undefined
+  const requestedSlides = slides && /^pd-[a-f0-9]{32}$/.test(tab.navigation?.params?.project || '') ? tab.navigation.params.project : undefined
+  const initialSlides = useRef(requestedSlides).current
   const navigationRevision = tab.navigation?.revision ?? 0
   useEffect(() => {
     if (!tab.visible || !frame.current?.contentWindow) return undefined
@@ -76,6 +78,9 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
     if (!tab.visible || !frame.current?.contentWindow || !requestedPaper) return
     conversationBridge.openPaper(frame.current.contentWindow, requestedPaper)
   }, [conversationBridge, tab.visible, navigationRevision, requestedPaper])
+  useEffect(() => {
+    if (tab.visible && frame.current?.contentWindow && requestedSlides) frame.current.contentWindow.postMessage({ type: 'paper-library:open-slide-project', id: requestedSlides }, window.location.origin)
+  }, [tab.visible, navigationRevision, requestedSlides])
   useEffect(() => {
     if (!tab.visible || !frame.current?.contentWindow) return undefined
     return bindModelContext({ window, target: frame.current.contentWindow, sessionId, directory, available: modelAvailable })
@@ -93,7 +98,7 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
   if (!tab.visible && !slides) return null
   const src = canvas ? '/api/paper-library/?view=board'
     : latex ? '/api/paper-library/?view=latex'
-    : slides ? '/api/paper-library/slides.html'
+    : slides ? `/api/paper-library/slides.html${initialSlides ? `?project=${encodeURIComponent(initialSlides)}` : ''}`
     : requestedPaper ? `/api/paper-library/?paper=${encodeURIComponent(requestedPaper)}`
     : '/api/paper-library/'
   return createElement('iframe', {
@@ -245,6 +250,7 @@ export function apply(ctx) {
   ctx.effect(() => ctx.sidebarRightTabs.register({
     id: SLIDES_ID,
     kind: SLIDES_KIND,
+    multiple: true,
     keepMounted: true,
     priority: 'extension',
     title: () => t('slides.title'),

@@ -605,6 +605,17 @@ test('the library opens the fixed slides workbench without forwarding page URLs 
   e.bridge.dispose()
 })
 
+test('catalog slide links use validated ids and independent tabs', () => {
+  const e = environment()
+  const id = 'pd-' + 'a'.repeat(32)
+  e.message({ type: 'paper-library:open-slides', id })
+  assert.deepEqual(e.tabOptions, [{ kind: 'paper-library-slides', options: { preferNewPane: true, revealIfOpened: false, params: { project: id } } }])
+  e.message({ type: 'paper-library:open-slides', id: '../../private' })
+  assert.equal(e.tabOptions.length, 1)
+  assert.equal(e.messages.at(-1).value.type, 'paper-library:reader-state-error')
+  e.bridge.dispose()
+})
+
 test('the bridge navigates a ready tab to a re-requested paper only', () => {
   const e = environment()
   assert.equal(e.bridge.openPaper(e.target, 'paper-4'), false)

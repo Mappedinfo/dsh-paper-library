@@ -13,9 +13,10 @@ export const defaultLibrary = join(homedir(), '.local', 'share', 'dsh-paper-libr
 const actions = new Set(['status','import','list','get','create','archive','restore','update','attach','page_layout','page','annotations','annotation_catalog','annotation_context_exact','annotate','annotation_update','annotation_delete','export_annotations','export_pdf','link','graph','graph_node_put','graph_node_delete','graph_edge_put','graph_edge_delete','feedback_context','save_feedback','feedback']);
 const challengeActions = new Set(['challenge_scan','challenge_themes','challenge_theme_list','challenge_theme_get','challenge_theme_review','challenge_theme_merge','challenge_theme_check','challenge_export','challenge_comparison','challenge_comparison_list','challenge_comparison_get','challenge_review_packet']);
 const projectActions = new Set(['project_create','project_update','project_get','project_list','project_archive','project_restore','project_link','project_unlink','project_for_paper']);
-// Synced corpora are indexed by symlink; roots come from deployment config or settings,
-// never from a request, and no action here copies or deletes an original file.
-const externalActions = new Set(['external_status','external_scan','external_prune','external_promote']);
+// Ordinary external sources come from deployment/settings. Management-only
+// external_rebind accepts an explicit repair plan; browsers cannot invoke it.
+// None of these actions deletes or moves an original PDF.
+const externalActions = new Set(['external_status','external_scan','external_prune','external_promote','external_rebind']);
 // LaTeX projects edit the reader's own folder: writes are revision-checked and
 // compiling runs their local latexmk, so every action stays behind this list.
 const latexActions = new Set(['latex_project_create','latex_project_list','latex_project_get','latex_project_update','latex_project_archive','latex_project_restore','latex_project_link_reading','latex_version_list','latex_version_get','latex_version_pdf_pages','latex_version_pdf_page','latex_version_read','latex_version_review','latex_tree','latex_asset_import','latex_table_import','latex_formula_check','latex_outline','latex_media_preview','latex_review_list','latex_review_put','latex_review_export','latex_review_delete','latex_read','latex_lint','latex_write','latex_compile','latex_pdf_pages','latex_pdf_page','latex_history','latex_diff','latex_compare','latex_synctex_edit','latex_synctex_view','latex_clean']);

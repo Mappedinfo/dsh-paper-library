@@ -267,6 +267,30 @@ test('a dataset title still routes to the dataset view instead of the reader', a
   assert.deepEqual(f.selections, ['dataset_synthetic'], 'Dataset titles keep their own selection route');
 });
 
+test('slides rows open through their own route and offer no paper or archive actions', async () => {
+  const f = environment({ active: original() });
+  const slide = { id: 'pd-' + 'a'.repeat(32), title: 'Synthetic talk', resource_kind: 'slides', slide_count: 2 };
+  f.state.items.push(slide); f.workbench.setTable(true);
+  const row = f.element('catalog-table').querySelectorAll('tr').find(n => n.dataset.paperId === slide.id);
+  assert.deepEqual(row.querySelectorAll('button').map(button => button.textContent), ['Synthetic talk', '打开']);
+  await row.querySelector('button').dispatch('click');
+  assert.deepEqual(f.opens, []); assert.deepEqual(f.selections, [slide.id]);
+  f.state.catalogSlideId = slide.id; f.state.catalogSlideTitle = slide.title; f.workbench.header();
+  assert.equal(f.element('metadata-open').disabled, true);
+  assert.equal(f.element('toolbar-paper').textContent, slide.title);
+});
+
+test('a selected slide does not block archiving another paper row', async () => {
+  const f = environment({ active: original() });
+  f.state.catalogSlideId = 'pd-' + 'a'.repeat(32); f.workbench.setTable(true);
+  const row = f.element('catalog-table').querySelectorAll('tr').find(n => n.dataset.paperId === 'paper-a');
+  await [...row.querySelectorAll('button')].find(button => button.textContent === '移入回收站').dispatch('click');
+  assert.deepEqual(f.requests, [{ action: 'archive', id: 'paper-a' }]);
+  f.requests.length = 0;
+  await f.element('catalog-archive').dispatch('click');
+  assert.deepEqual(f.requests, [], 'the toolbar cannot archive a stale paper selection');
+});
+
 test('editing a JCR year does not carry forward the previous ranking verification date', async () => {
   const paper = original(); const f = environment({ active: paper });
   f.workbench.edit(paper);

@@ -12,8 +12,8 @@ const until = async (predicate, label) => {
   for (let attempt = 0; attempt < 250; attempt++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 10)) }
   throw new Error(`Timed out: ${label}`)
 }
-test('editor serializes revisions, retains a conflict draft and blocks project switching', { skip: !JSDOM }, async () => {
-  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: 'http://127.0.0.1/slides.html', runScripts: 'outside-only', pretendToBeVisual: true })
+test('deep link opens its slide, serializes revisions, and retains a conflict draft on navigation', { skip: !JSDOM }, async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: 'http://127.0.0.1/slides.html?project=pd-00000000000000000000000000000000', runScripts: 'outside-only', pretendToBeVisual: true })
   const window = dom.window, calls = [], errors = []
   window.structuredClone = structuredClone
   window.ResizeObserver = class { observe() {} disconnect() {} }
@@ -37,10 +37,9 @@ test('editor serializes revisions, retains a conflict draft and blocks project s
   }
   try {
     window.eval(await readFile(new URL('../../lib/slides-editor.js', import.meta.url), 'utf8'))
-    await until(() => window.document.querySelector('.slides-projects button'), 'project list')
-    assert.equal(calls.find(call => call.action === 'slides_list').limit, 50)
-    window.document.querySelector('.slides-projects button').click()
     await until(() => window.document.querySelector('button[aria-label="添加文本"]'), 'editor opened')
+    assert.equal(calls.find(call => call.action === 'slides_list').limit, 50)
+    assert.equal(calls.find(call => call.action === 'slides_get').id, project.id)
     const add = window.document.querySelector('button[aria-label="添加文本"]')
     add.click()
     await until(() => calls.filter(call => call.action === 'slides_save').length === 1, 'first save')
@@ -53,6 +52,10 @@ test('editor serializes revisions, retains a conflict draft and blocks project s
     add.click()
     await until(() => window.document.querySelector('.slides-save-warning'), 'conflict message')
     assert.match(window.document.querySelector('.slides-save-warning').textContent, /草稿保留/)
+    window.dispatchEvent(new window.MessageEvent('message', { origin: window.location.origin, source: window, data: { type: 'paper-library:open-slide-project', id: 'pd-' + '1'.repeat(32) } }))
+    await new Promise(resolve => setTimeout(resolve, 50))
+    assert.equal(calls.filter(call => call.action === 'slides_get').length, 1, 'a conflicted draft blocks deep-link navigation')
+    assert.ok(window.document.querySelector('.slides-save-warning'), 'the unsaved draft remains visible')
     window.document.querySelector('button[aria-label="打开演示项目"]').click()
     await new Promise(resolve => setTimeout(resolve, 50))
     assert.equal(window.document.querySelector('.slides-chooser'), null)

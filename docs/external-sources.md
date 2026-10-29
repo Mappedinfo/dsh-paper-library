@@ -122,6 +122,53 @@ Paper Library 和数据同步服务**并列存在、可以各自独立安装**�
 需要在同步服务里排除 `external/**` 时也可以显式排除，但通常不必：
 `external/` 里只有链接，没有内容。
 
+## 显式修复旧索引链接（管理操作）
+
+目录已经搬动时，不要直接把旧源的根目录换成另一层目录再扫描：相对路径改变会形成新记录，旧批注、笔记和阅读项目仍关联原来的论文 ID。
+
+管理端的 `external_rebind` 接收明确映射，先预览，再以预览修订号执行。它只读索引元数据与目标文件 stat，不打开或计算 PDF 内容；保留 `paper_id`、引用键、私人笔记及其他关联。已经写过批注的 `pdfs/` 副本继续作为该记录的 PDF，不被源文件替代。未匹配的旧行原样保留，不把它们判为文件丢失。
+
+使用现有索引选择唯一的「相对路径后缀 + 记录大小」候选：
+
+```sh
+uv run python scripts/rebind-external.py \
+  --library /path/to/library \
+  --index /path/to/paper-assets-index.json \
+  --source legacy-source \
+  --target-id paperassets \
+  --target-root /path/to/PaperAssets
+```
+
+默认仅输出只读预览摘要。索引快照中已不存在、大小变化、路径不安全或不唯一的候选会单独计数，不进入修复。这个匹配依据不等于内容哈希核验；执行前仍需审阅目标目录和数量。确认预览后，在同一命令追加 `--apply-revision <预览的revision>`，才会执行写入。目录、索引行、论文元数据、目标 stat 或原链接身份变化时，旧修订号会拒绝执行。
+
+底层 JSON 管理入口为：
+
+```json
+{
+  "action": "external_rebind",
+  "source": "legacy-source",
+  "target_source": { "id": "paperassets", "root": "/path/to/PaperAssets" },
+  "mappings": [
+    { "paper_id": "existing-paper-id", "old_relative": "old/paper.pdf", "new_relative": "new/paper.pdf", "expected_size": 12345 }
+  ],
+  "apply": false
+}
+```
+
+`apply: true` 另需 `expected_revision`。一次最多 2,000 条映射、2 MiB 请求；只用于 CLI／管理调用，浏览器不能提交该操作。新源 ID 必须与旧源不同，根目录及新路径不能被其他源或记录占用。执行不会新增论文 ID；之后扫描新源会复用已经迁入的记录。其他尚未匹配的历史记录，仍需保留待核查，不能据此承诺整个语料零重复。
+
+执行持有库写锁和 SQLite 事务；新链接用 `symlink` 原子创建，任何后来出现的普通文件或链接都不会被覆盖。普通异常会回滚 SQL，并只撤销身份仍属于本次操作的链接；被他人替换的条目会保留并报告人工恢复。私有回执保存在 `<书库>/backups/external-rebind-<标识>.json`，权限为 `0600`，含旧源完整登记信息、原／目标路径、论文 ID、是否已有旧链接及是否保留受管副本。`--details` 会打印这些私人路径和 ID，只能在私人终端或受保护文件中使用，不要放入公开仓库。
+
+### `prepared` 回执的人工恢复
+
+文件系统链接与 SQLite 提交不构成断电级多文件事务。强杀、断电或回滚时发现他人替换的路径，可能留下 `prepared` 回执；这表示结果需要核对，不能单凭回执状态推断数据库是否提交。
+
+1. 暂停本轮修复，不要先扫描、prune、重跑旧的 apply 或删除回执。保留当前草稿和已有受管 PDF。
+2. 打开该私有回执，核对 `source_before`、`target_before` 及每条 `mappings` 的 `paper_id`、`old_staged`、`new_staged`、`old_target`、`new_target`、`old_link_present`。用 SQLite 的只读连接检查这些 ID 当前的 `external_files`、`papers.pdf_path` 与 `metadata.external_source`；不要读取 PDF 正文。
+3. 若所有映射仍归旧源，SQL 已回滚：仅补建原先存在、目前确实缺少的旧链接，并人工确认哪些新链接确属此次操作后再处理。若全部已归目标源，按已提交状态补齐缺少的新链接。补建使用不会覆盖已有路径的 `os.symlink(target, path)`；普通文件、目标不同的链接或身份不明的条目一律保留，不能强制替换。
+4. 若记录呈混合归属、受管副本路径变化或存在其他编辑，停止自动处理，结合回执和库备份逐条核对。不要重建论文 ID，不改 `pdfs/` 副本，不写源 PDF，也不要删除未匹配旧行。
+5. 确认目录链接与当前数据库归属一致后，重新生成预览，审阅新的范围和修订号，再决定后续操作。
+
 ## 限制
 
 - 索引不解析 PDF 内容，所以没有 DOI、摘要、期刊、页码；这些仍由既有的「补全资料」
@@ -129,4 +176,4 @@ Paper Library 和数据同步服务**并列存在、可以各自独立安装**�
 - 文件名可能不含作者或年份（例如 `0112110v1.pdf`），这类记录的元数据就是文件名本身，
   保持 `needs_review`，不会被编造。
 - 内容修改但大小与 mtime 都不变的文件不会被发现（没有哈希，这是性能上的取舍）。
-- 源目录改名或移动会让旧记录标记为 `missing`，需要用新的根目录重新扫描。
+- 源目录改名或移动会让旧记录标记为 `missing`；应先按上面的显式重绑定流程核对旧记录，再决定新源扫描范围，避免产生重复身份。

@@ -1066,6 +1066,46 @@ test('focus mode is a pure canvas and Escape leaves it', async () => {
   assert.equal(harness.doc.body.classList.contains('board-focused'), false, 'closing the board also leaves focus');
 });
 
+test('fullscreen includes focus and restores the previous window layout on exit', async () => {
+  for (const before of [false, true]) {
+    const h = loadPanel({ api: apiStub() }); await h.panel.open();
+    let requested = 0;
+    h.root.requestFullscreen = async () => { requested++; h.doc.fullscreenElement = h.root; h.doc.body.dispatch('fullscreenchange'); };
+    h.doc.exitFullscreen = async () => { h.doc.fullscreenElement = null; h.doc.body.dispatch('fullscreenchange'); };
+    h.panel.setFocus(before);
+    assert.equal(requested, 0, 'window focus never requests browser fullscreen');
+    h.registry.get('board-fullscreen').dispatch('click'); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requested, 1); assert.equal(h.doc.fullscreenElement, h.root);
+    assert.equal(h.doc.body.classList.contains('board-focused'), true);
+    assert.equal(h.registry.get('board-fullscreen').getAttribute('aria-pressed'), 'true');
+    await h.doc.exitFullscreen();
+    assert.equal(h.doc.body.classList.contains('board-focused'), before);
+    assert.equal(h.registry.get('board-fullscreen').getAttribute('aria-pressed'), 'false');
+    await h.panel.close();
+  }
+});
+
+test('fullscreen rejection restores focus and repeated clicks share an in-flight request', async () => {
+  const h = loadPanel({ api: apiStub() }); await h.panel.open();
+  h.root.requestFullscreen = async () => { throw new Error('denied'); };
+  h.registry.get('board-fullscreen').dispatch('click'); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.doc.body.classList.contains('board-focused'), false);
+  assert.match(h.messages.at(-1), /恢复原布局/);
+  let release, requests = 0;
+  const waiting = new Promise(resolve => { release = resolve; });
+  h.root.requestFullscreen = async () => { requests++; await waiting; h.doc.fullscreenElement = h.root; h.doc.body.dispatch('fullscreenchange'); };
+  h.doc.exitFullscreen = async () => { h.doc.fullscreenElement = null; h.doc.body.dispatch('fullscreenchange'); };
+  h.registry.get('board-fullscreen').dispatch('click'); h.registry.get('board-fullscreen').dispatch('click');
+  assert.equal(requests, 1);
+  release(); await new Promise(resolve => setImmediate(resolve));
+  h.doc.body.dispatch('keydown', { key: 'Escape' }); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.doc.fullscreenElement, null); assert.equal(h.doc.body.classList.contains('board-focused'), false);
+  h.registry.get('board-fullscreen').dispatch('click'); await new Promise(resolve => setImmediate(resolve));
+  await h.panel.close();
+  assert.equal(h.doc.fullscreenElement, null, 'closing the board leaves browser fullscreen');
+  assert.equal(h.doc.body.classList.contains('board-focused'), false);
+});
+
 test('a knowledge-graph node joins the board without inventing metadata', async () => {
   const { board } = loadPanel();
   const { nodeFromGraphPayload } = board;

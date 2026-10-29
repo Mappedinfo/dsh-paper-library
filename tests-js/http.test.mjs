@@ -12,6 +12,7 @@ test('HTTP rejects cross-origin mutations, non-JSON, forgery and path traversal'
   assert.equal((await handler(new Request('http://127.0.0.1/api',{method:'POST',headers:{origin:'https://evil.example','content-type':'application/json'},body:'{}'}))).status,403);
   assert.equal((await handler(new Request('http://127.0.0.1/api',{method:'POST',body:'{}'}))).status,415);
   assert.equal((await handler(new Request('http://127.0.0.1/api',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'save_feedback'})}))).status,403);
+  assert.equal((await handler(new Request('http://127.0.0.1/api',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'external_rebind',apply:true})}))).status,403);
   assert.equal((await handler(new Request('http://127.0.0.1/%2e%2e/pyproject.toml'))).status,404);
 });
 test('catalog API imports, searches and exports citations independent of Zotero',async()=>{

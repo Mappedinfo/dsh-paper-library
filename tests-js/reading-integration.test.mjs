@@ -10,12 +10,38 @@ const source=await readFile(new URL('../web/app.js',import.meta.url),'utf8');
 function snippet(name,endMarker){const start=source.indexOf(`async function ${name}(`),end=source.indexOf(endMarker,start);assert.ok(start>=0&&end>start);return source.slice(start,end);}
 const tabSource=snippet('switchTab','function requestPage(');
 const restoreSource=snippet('restoreReaderState','let pendingReferenceOpen');
-const referenceSource=snippet('openReferencedPaper','async function initialize(');
+const referenceSource=snippet('openReferencedPaper','function entryView(');
 const selectionSource=source.slice(source.indexOf('function showReaderSelection('),source.indexOf('async function loadAnnotations('));
 const inkSource=snippet('adoptInkHandoff','async function returnToInkDraft(');
+const resourceOpenSource=snippet('openResource','function renderPaperHeader(');
 const publishSource=source.slice(source.indexOf('function publishReaderState()'),source.indexOf('async function restoreReaderState()'));
 const inkModule=vm.createContext({window:{}});
 vm.runInContext(await readFile(new URL('../web/pdf-reader.js',import.meta.url),'utf8'),inkModule);
+test('project, type and search filters preserve the full-library count', () => {
+  const nodes=new Map(), node=()=>({textContent:'',append(){},replaceChildren(){}});
+  const get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);};
+  const state={items:[],libraryCount:430,query:'',archived:false,project:'synthetic-project',kind:'all',total:2,offset:0,limit:40};
+  get('item-count').textContent=430;
+  const context={state,$:get,document:{createDocumentFragment:node},emptyState:node,renderWelcome(){},workbenchUI:null};
+  vm.createContext(context);vm.runInContext(source.slice(source.indexOf('function renderList()'),source.indexOf('function renderWelcome()')),context);
+  for(const filter of [{project:'synthetic-project',kind:'all',query:''},{project:null,kind:'paper',query:''},{project:null,kind:'all',query:'synthetic'}]){
+    Object.assign(state,filter);context.renderList();assert.equal(state.libraryCount,430);assert.equal(get('item-count').textContent,430);
+  }
+  Object.assign(state,{project:null,kind:'all',query:'',total:431});context.renderList();assert.equal(state.libraryCount,431);assert.equal(get('item-count').textContent,431);
+});
+test('failed handwriting preparation never navigates to a slide project', async () => {
+  for (const embedded of [false, true]) {
+    const navigation=[], pending={location:{href:'about:blank'},close(){navigation.push('closed')}};
+    const window={location:{origin:'http://localhost'},open:(url)=>{navigation.push(url);return pending}};
+    window.parent=embedded?{postMessage:()=>navigation.push('posted')}:window;
+    const context={window,state:{itemTicket:1,active:{id:'paper-a'}},linkedHandwritingUI:{session:()=>({paperId:'paper-a'}),finish:async()=>false},toast(){}};
+    vm.createContext(context);vm.runInContext(resourceOpenSource,context);
+    await context.openResource({id:'pd-'+'a'.repeat(32),resource_kind:'slides'});
+    assert.deepEqual(navigation,embedded?[]:['about:blank','closed']);
+    assert.equal(pending.location.href,'about:blank');
+    assert.equal(context.state.active.id,'paper-a');
+  }
+});
 test('finishing or cancelling a jump clears only its own loading status',async()=>{
   const shell=await readFile(new URL('../web/reading-shell.js',import.meta.url),'utf8');
   const body=shell.match(/function focusChanged\(info\)\{[^\n]+\}/)[0];let value='';

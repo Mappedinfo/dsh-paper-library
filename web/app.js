@@ -117,7 +117,7 @@ async function loadList() {
   errorAt('library-error', null);
   if (!state.items.length) $('paper-list').replaceChildren(el('div', 'loading', '正在检索文献…'));
   try {
-    const result = await api('resource_list', { kind: state.kind, query: state.query, limit: state.limit, offset: state.offset, sort: state.sort, order: state.order, archived: state.archived, ...(state.project ? { project: state.project } : {}) });
+    const result = await api('catalog_resource_list', { kind: state.kind, query: state.query, limit: state.limit, offset: state.offset, sort: state.sort, order: state.order, archived: state.archived, ...(state.project ? { project: state.project } : {}) });
     if (ticket !== state.listTicket) return;
     state.items = result.items || []; state.total = result.total || 0;
     if (result.active_count !== undefined) { state.libraryCount = result.active_count; $('item-count').textContent = result.active_count; }
@@ -131,9 +131,10 @@ async function loadList() {
 function renderList() {
   const fragment = document.createDocumentFragment();
   for (const item of state.items) {
-    const card = el('button', `paper-card${state.active?.id === item.id ? ' selected' : ''}`);
-    card.title=[title(item),[authors(item),year(item)].filter(Boolean).join(' · '),item['container-title'],item.citekey].filter(Boolean).join('\n');
-    card.type = 'button'; card.dataset.id = item.id; card.dataset.resourceKind = item.resource_kind || 'paper'; card.setAttribute('aria-pressed', String(state.active?.id === item.id));
+    const selected=state.active?.id === item.id || state.catalogSlideId === item.id;
+    const card = el('button', `paper-card${selected ? ' selected' : ''}`);
+    card.title=item.resource_kind==='slides' ? `${title(item)}\n演示文稿 · ${item.slide_count} 页` : [title(item),[authors(item),year(item)].filter(Boolean).join(' · '),item['container-title'],item.citekey].filter(Boolean).join('\n');
+    card.type = 'button'; card.dataset.id = item.id; card.dataset.resourceKind = item.resource_kind || 'paper'; card.setAttribute('aria-pressed', String(selected));
     // Papers can be dragged straight onto the whiteboard; datasets are not board material.
     if ((item.resource_kind || 'paper') === 'paper') {
       card.draggable = true;
@@ -144,10 +145,11 @@ function renderList() {
         if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
       });
     }
-    card.append(el('h3', '', title(item)), el('p', '', `${item.resource_kind === 'dataset' ? item.publisher || '发布者未提供' : authors(item)}${year(item) ? ` · ${year(item)}` : ''}`));
-    card.append(el('p', 'card-journal', item.resource_kind === 'dataset' ? '数据集' : item['container-title'] || typeNames[item.type] || '文献资料'));
+    card.append(el('h3', '', title(item)), el('p', '', item.resource_kind==='slides' ? `${item.slide_count} 页` : `${item.resource_kind === 'dataset' ? item.publisher || '发布者未提供' : authors(item)}${year(item) ? ` · ${year(item)}` : ''}`));
+    card.append(el('p', 'card-journal', item.resource_kind === 'slides' ? '演示文稿' : item.resource_kind === 'dataset' ? '数据集' : item['container-title'] || typeNames[item.type] || '文献资料'));
     const footer = el('div', 'card-footer');
     if (item.resource_kind === 'dataset') footer.append(el('span', 'chip', '数据集'));
+    if (item.resource_kind === 'slides') footer.append(el('span', 'chip', '演示文稿'));
     if (item.pdf) footer.append(el('span', 'pdf-chip', 'PDF'));
     if (item.journal_rankings?.length) footer.append(el('span', 'chip', window.PaperWorkbench?.ranking(item)));
     if (item.citekey) footer.append(el('span', 'card-key', item.citekey));
@@ -155,13 +157,13 @@ function renderList() {
     if (!footer.children.length) footer.append(el('span', 'chip', item.citekey || typeNames[item.type] || '文献资料'));
     card.append(footer); fragment.append(card);
   }
-  if (!state.items.length) fragment.append(emptyState(state.query ? '没有匹配的文献' : '书架等待第一篇论文', state.query ? '试试更短的词、作者姓名或标签。' : '从 DOI、PDF 或已有文献库导入，开始积累阅读线索。'));
+  if (!state.items.length) fragment.append(emptyState('没有匹配的条目', state.project && state.kind==='slides' ? '演示文稿不属于阅读项目；切回全部条目查看。' : state.query ? '试试更短的检索词。' : '导入文献或数据集，或新建演示文稿。'));
   $('paper-list').replaceChildren(fragment);
-  $('search-summary').textContent = state.query ? `检索结果 · ${state.total}` : '全部文献';
-  if (!state.query && !state.archived && state.kind === 'all') { $('item-count').textContent = state.total; state.libraryCount = state.total; }
+  $('search-summary').textContent = state.query ? `检索结果 · ${state.total}` : '全部条目';
+  if (!state.query && !state.archived && !state.project && state.kind === 'all') { $('item-count').textContent = state.total; state.libraryCount = state.total; }
   renderWelcome();
   if(typeof refreshBoardShelf==='function')void refreshBoardShelf();
-  $('list-range').textContent = state.total ? `${state.offset + 1}–${Math.min(state.offset + state.limit, state.total)} / ${state.total}` : '0 篇';
+  $('list-range').textContent = state.total ? `${state.offset + 1}–${Math.min(state.offset + state.limit, state.total)} / ${state.total}` : '0 条';
   $('previous-list').disabled = state.offset === 0;
   $('next-list').disabled = state.offset + state.limit >= state.total;
   workbenchUI?.render();
@@ -177,6 +179,7 @@ function clearPage() {
 }
 async function openPaper(id) {
   if(linkedHandwritingUI?.session()?.paperId!==id && linkedHandwritingUI?.session() && !await linkedHandwritingUI.finish())return;
+  state.catalogSlideId=null;state.catalogSlideTitle=null;
   // Opening a paper takes over the detail column the board occupies; the board settles
   // its pending edits and is left without stealing focus from the chosen paper.
   if (boardUI?.isOpen()) await boardUI.close({ focus: false });
@@ -216,7 +219,31 @@ async function openPaper(id) {
     publishReaderState();
   } catch (error) { if (ticket === state.itemTicket) { $('paper-title').textContent = '文献未能打开'; errorAt('detail-error', error); } }
 }
-async function openResource(item){if(!item)return;if(item.resource_kind==='dataset')return resourceUI?.open(item.id);return openPaper(item.id);}function renderPaperHeader() {
+async function openResource(item){
+  if(!item)return;
+  if(item.resource_kind==='slides'){
+    if(!/^pd-[a-f0-9]{32}$/.test(item.id))return;
+    const embedded=window.parent!==window, ticket=state.itemTicket;
+    const pending=embedded?null:window.open('about:blank','_blank');
+    if(!embedded&&!pending){toast('浏览器阻止了新窗口，请允许弹出窗口后重试。',true);return;}
+    if(pending)pending.opener=null;
+    try {
+      if(linkedHandwritingUI?.session() && !await linkedHandwritingUI.finish()){pending?.close();return;}
+      if(ticket!==state.itemTicket){pending?.close();return;}
+      if(embedded)window.parent.postMessage({type:'paper-library:open-slides',version:1,id:item.id},window.location.origin);
+      else pending.location.href=`./slides.html?project=${encodeURIComponent(item.id)}`;
+    } catch(error){pending?.close();toast(error.message||'无法打开演示文稿。',true);return;}
+    publishReaderState();readerStateReady=false;readerPaperId=null;++state.itemTicket;++state.pageTicket;state.pageWanted=null;clearPage();
+    state.active=null;state.openedId=null;state.catalogSlideId=item.id;state.catalogSlideTitle=title(item);
+    resourceUI?.hide();knowledgeUI?.hide();paperChatUI?.visible(false);knowledgeGraphUI?.clear();
+    $('paper-detail').hidden=true;$('welcome').hidden=false;
+    workbenchUI?.paperChanged(null);workbenchUI?.header();readingPanels?.paperChanged(null);void languageUI?.paperChanged(null);readingShell?.sync();resourceUI?.sync();renderList();
+    return;
+  }
+  state.catalogSlideId=null;state.catalogSlideTitle=null;
+  if(item.resource_kind==='dataset')return resourceUI?.open(item.id);
+  return openPaper(item.id);
+}function renderPaperHeader() {
   const item = state.active; if (!item) return;
   $('paper-title').textContent = title(item);
   const details = [authors(item), year(item), item['container-title']].filter(Boolean);
@@ -827,16 +854,16 @@ async function exportLibrary() {
   const button = $('export-library'); button.disabled = true; button.textContent = '正在导出…';
   try {
     const result = await api('export_library', { format: 'biblatex' });
-    downloadText(result); toast(`已导出全部 ${result.count ?? state.libraryCount} 篇文献的 BibLaTeX`);
+    downloadText(result); toast(`已导出 ${result.count} 条文献与数据集引用资料的 BibLaTeX`);
   } catch (error) { toast(`文献库导出未完成：${error.message}`, true); }
   finally { button.disabled = false; button.textContent = '导出文献库'; }
 }
 async function buildBibliography() {
-  const button = $('build-bibliography'); button.disabled = true; button.textContent = '正在构建…';
+  const button = $('build-bibliography'); button.disabled = true; button.textContent = '正在生成…';
   try {
     const result = await api('bibliography_build', {});
     const lines = [
-      `已为 ${result.count} 条记录构建规范引用库。`, ``,
+      `已为 ${result.count} 条文献与数据集生成 BibTeX 引用文件；此操作不选择本次引用。`, ``,
       `references.bib：${result.bib_path}（${result.bib_bytes} 字节）`,
       `身份审计：${result.audit_path}`, ``,
       `引用键冲突：${result.conflicts}；DOI 重复：${result.doi_duplicates}；PDF 文件缺失：${result.pdf_missing}`,
@@ -846,10 +873,10 @@ async function buildBibliography() {
         : `未做在线 DOI 核验。需要时通过 library_bibliography 工具（verify:true，有界分批）显式触发；核验只比较公开登记信息，不回写目录。`,
       ...(result.warnings || []).map(warning => `注意：${warning}`),
     ];
-    $('copy-fallback').value = lines.join('\n'); $('text-dialog-title').textContent = '引用库构建与身份审计'; openDialog('text-dialog');
+    $('copy-fallback').value = lines.join('\n'); $('text-dialog-title').textContent = 'references.bib 与文献核对报告'; openDialog('text-dialog');
     toast(result.conflicts || result.doi_duplicates ? `引用库已构建，发现 ${result.conflicts + result.doi_duplicates} 处身份问题，请查看审计。` : '引用库与身份审计已写入文献库 exports 目录');
   } catch (error) { toast(`引用库构建未完成：${error.message}`, true); }
-  finally { button.disabled = false; button.textContent = '构建引用库'; }
+  finally { button.disabled = false; button.textContent = '生成 references.bib'; }
 }
 
 function currentHarnessRoute() {
@@ -1259,7 +1286,7 @@ refreshModels.type = 'button'; refreshModels.style.marginTop = '6px'; refreshMod
 refreshModels.addEventListener('click', () => { announceReady(); loadModels(); }); $('model-status').after(refreshModels);
 workbenchUI = window.PaperWorkbench?.create({ state, api, persistence, loadList, openPaper: id => openResource(state.items.find(item => item.id === id) || {id}), toast, el, resource: () => resourceUI,
   tableChanged: table => { paperChatUI?.visible(!table && state.tab!=='graph' && readerPaperId===state.active?.id && (readingPanels?.visible('chat') ?? state.tab==='conversation')); queueMicrotask(()=>{readingShell?.sync();resourceUI?.sync();}); },
-  selectPaper: item => { if(item.resource_kind === 'dataset'){void openResource(item);return;}resourceUI?.hide();knowledgeUI?.hide();publishReaderState();readerStateReady=false;++state.itemTicket; ++state.pageTicket; state.pageWanted=null; clearPage(); state.active=item; state.openedId=item.id; workbenchUI?.paperChanged(item); readingPanels?.paperChanged(item);void languageUI?.paperChanged(item);renderPaperHeader(); renderList(); },
+  selectPaper: item => { if(item.resource_kind === 'dataset'||item.resource_kind === 'slides'){void openResource(item);return;}state.catalogSlideId=null;state.catalogSlideTitle=null;resourceUI?.hide();knowledgeUI?.hide();publishReaderState();readerStateReady=false;++state.itemTicket; ++state.pageTicket; state.pageWanted=null; clearPage(); state.active=item; state.openedId=item.id; workbenchUI?.paperChanged(item); readingPanels?.paperChanged(item);void languageUI?.paperChanged(item);renderPaperHeader(); renderList(); },
   changed: (item, removedId) => {
     if (removedId && state.active?.id === removedId) { ++state.itemTicket; ++state.pageTicket; state.pageWanted=null; clearPage(); state.active=null; state.openedId=null;readerStateReady=false;void languageUI?.paperChanged(null);$('paper-detail').hidden=true; $('welcome').hidden=false; knowledgeGraphUI?.clear(); workbenchUI?.header(); readingPanels?.paperChanged(null); readingShell?.sync(); }
     else if (item && state.active?.id === item.id) { state.active=item; renderPaperHeader(); if(state.tab==='graph')void loadGraph(); }

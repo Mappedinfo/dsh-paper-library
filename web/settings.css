@@ -12,4 +12,7 @@
 .library-settings .settings-side{display:flex;align-items:center;justify-content:space-between;margin-top:10px;gap:16px}.library-settings select{width:auto;min-width:100px;padding:5px 10px;font-size:12px}
 .library-settings .settings-storage{border-top:1px solid var(--line);padding:12px 16px;font-size:12px;color:var(--muted)}
 .library-settings .settings-storage summary{cursor:pointer;color:var(--ink)}.library-settings .settings-storage p{margin:8px 0;overflow-wrap:anywhere}
+.library-settings .settings-maintenance{border-top:1px solid var(--line);padding:12px 16px}
+.library-settings .settings-maintenance strong{font-size:13px}
+.library-settings .settings-maintenance p{margin:5px 0 8px;font-size:12px;color:var(--muted)}
 .library-settings .button{min-height:28px;font-size:12px}.topbar-actions #settings-open{white-space:nowrap}

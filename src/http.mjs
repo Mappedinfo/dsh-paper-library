@@ -14,6 +14,7 @@ import { handleBoardRequest } from './harness/board-tools.mjs';
 import { createPaperLibrarySettings } from './harness/settings.mjs';
 import { createInkQueue } from './ink-queue.mjs';
 import { createInkDiagnostics } from './ink-diagnostics.mjs';
+import { catalogResources } from './catalog-resources.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
 for (const name of ['workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css','local-state.js','language-learning.js','language-learning.css','theme.js','theme.css','latex-workspace.js','latex-workspace.css','latex-review.js','latex-versions.js','latex-writing-tools.js','latex-formulas.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
@@ -137,7 +138,7 @@ export function createFetchHandler(options = {}) {
         try {
           const input = JSON.parse(await readBounded(request, 45*1024*1024));
           // Browser cannot forge AI output or arbitrary worker internals.
-          if (['save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','companion_excerpt','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
+          if (['save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','companion_excerpt','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata','external_rebind'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
           const companionAction=['companion_status','companion_retry','companion_cancel'].includes(input?.action);
           if(companionAction&&!options.companion)return json({ok:false,error:'实时伴学需要连接 DSH 服务。'},409);
           const chatAction = typeof input?.action === 'string' && input.action.startsWith('chat_');
@@ -158,6 +159,7 @@ export function createFetchHandler(options = {}) {
             : input?.action === 'settings_get' ? await settings.get()
             : input?.action === 'settings_update' ? await settings.update(input.patch, input.expected_revision)
             : input?.action === 'settings_reset' ? await settings.reset(input.expected_revision)
+            : input?.action === 'catalog_resource_list' ? await catalogResources(input, { slidesList: () => slidesRequest({ action: 'slides_catalog' }), resourceList: payload => dispatch(payload, { ...options, signal: request.signal }) })
             : stateAction ? await stateRequest(localState, input)
             : typeof input?.action === 'string' && input.action.startsWith('slides_') ? await slidesRequest(input)
             : boardAction ? await handleBoardRequest(boards, input, { writer: 'user' })

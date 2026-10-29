@@ -125,6 +125,20 @@ body.board-focused #board-view{grid-column:1}
 .board-shelf-row small{color:var(--muted);font-size:10px;white-space:nowrap}
 .board-shelf-row button{font-size:10px;padding:2px 6px;border:1px solid var(--line);border-radius:6px;background:transparent;color:inherit;cursor:pointer}
 .board-shelf-row.is-linked{border-color:var(--dsw-alias-link)}
+/* Project selection and the two shelf disclosures share one row. The content
+ * panels remain full-width siblings, including after the reading rail moves. */
+.library-organizer-row{display:flex;align-items:center;gap:6px;flex:none;min-width:0;padding:5px 10px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:thin;white-space:nowrap}
+.library-organizer-row .project-bar{flex:none;flex-wrap:nowrap;gap:4px;padding:0}
+.library-organizer-row .project-bar .field-inline{white-space:nowrap}
+.library-organizer-row .project-bar select{max-width:150px}
+.library-organizer-row .project-bar #project-status{flex:none;white-space:nowrap}
+.library-organizer-row .board-shelf{flex:none;border:0;padding:0}
+.library-organizer-row .board-shelf>summary{padding:5px 6px;border-radius:5px;color:var(--ink);font-size:12px;white-space:nowrap}
+.library-organizer-row .board-shelf>summary:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.library-organizer-row .board-shelf[open]>summary{background:var(--dsw-alias-interactive-bg-active)}
+.library-organizer-panel{flex:none;max-height:270px;overflow:auto;min-width:0;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--surface)}
+.library-organizer-panel[hidden]{display:none}
+.library-organizer-panel>p{margin:4px 0;line-height:1.5}
 /* A narrow pane cannot show a library column and a canvas at once, and the app's own
  * single-pane layout would stack the board under the shelf. Whenever the board is open in a
  * narrow container it takes the whole pane, so pressing 「画板」 in the library never leaves the

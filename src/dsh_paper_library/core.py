@@ -533,6 +533,10 @@ def dispatch(request):
     root = request.get("library")
     if not root or not Path(root).expanduser().is_absolute():
         raise ValueError("library must be an absolute local directory")
+    if request.get("action") == "external_rebind":
+        # Management previews must not initialize schemas or touch PDF bytes.
+        from . import external_rebind
+        return external_rebind.dispatch(root, request)
     library = Library(root)
     try:
         action = request.get("action")

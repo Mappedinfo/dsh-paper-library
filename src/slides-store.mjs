@@ -178,20 +178,29 @@ export function createSlidesStore({ library } = {}) {
     try { await safeInfo(path, false, true); } catch (error) { if (error.code === 'ENOENT') throw slidesError('演示项目不存在。', 'SLIDES_NOT_FOUND', 404); throw error; }
     return path;
   }
+  async function scanProjects() {
+    const directory = await opendir(await root()), projects = []; let scanned = 0, truncated = false;
+    for await (const entry of directory) {
+      if (!ID.test(entry.name)) continue;
+      if (++scanned > SLIDES_LIMITS.projectsScanned) { truncated = true; break; }
+      const path = await projectPath(entry.name);
+      const value = await withProjectLock(path, () => metadata(path));
+      if (value.id !== entry.name) throw slidesError('演示项目标识与目录不符。', 'SLIDES_CORRUPT', 409);
+      projects.push(value);
+    }
+    return { projects, truncated };
+  }
   async function handle(input) {
     switch (input?.action) {
+      case 'slides_catalog': {
+        const result = await scanProjects();
+        if (result.truncated) throw slidesError('演示项目超过 1000 项扫描上限，无法提供完整排序。', 'SLIDES_CATALOG_LIMIT', 413);
+        return result;
+      }
       case 'slides_list': {
         const offset = input.offset ?? 0, limit = input.limit ?? 30;
         if (!Number.isSafeInteger(offset) || offset < 0 || offset > SLIDES_LIMITS.projectsScanned || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw slidesError('项目分页要求 offset 0–1000、limit 1–50。');
-        const directory = await opendir(await root()), projects = []; let scanned = 0, truncated = false;
-        for await (const entry of directory) {
-          if (!ID.test(entry.name)) continue;
-          if (++scanned > SLIDES_LIMITS.projectsScanned) { truncated = true; break; }
-          const path = await projectPath(entry.name);
-          const value = await withProjectLock(path, () => metadata(path));
-          if (value.id !== entry.name) throw slidesError('演示项目标识与目录不符。', 'SLIDES_CORRUPT', 409);
-          projects.push(value);
-        }
+        const { projects, truncated } = await scanProjects();
         projects.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || a.id.localeCompare(b.id));
         const end = offset + limit;
         return { projects: projects.slice(offset, end), next_offset: end < projects.length ? end : null, truncated };

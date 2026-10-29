@@ -364,7 +364,11 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
       return
     }
     if (data.type === 'paper-library:open-slides') {
-      ctx.sidebarRight.openTab('paper-library-slides', { preferNewPane: true })
+      if (data.id !== undefined && (typeof data.id !== 'string' || !/^pd-[a-f0-9]{32}$/.test(data.id))) {
+        post(event.source, { type: 'paper-library:reader-state-error', error: '演示文稿标识无效' })
+        return
+      }
+      ctx.sidebarRight.openTab('paper-library-slides', data.id ? { preferNewPane: true, revealIfOpened: false, params: { project: data.id } } : { preferNewPane: true })
       return
     }
     if (data.type === 'paper-library:open-pane') {
