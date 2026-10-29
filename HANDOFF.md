@@ -1,3 +1,5 @@
+**v0.2.5（2026-10-29）：** 本版收录 #2 的 Windows 启动、写锁、UTF-8 协议和 PDF 保存修复，新增原生 Windows／Ubuntu 存储回归。实现与已通过 [原生 CI](https://github.com/Mappedinfo/dsh-paper-library/actions/runs/40809576796) 的 `80fd389` 相同；本轮只调整版本和发行说明，复用 Python 531 项、相关 Node 55 项及两平台验证结果。发布包继续排除论文、个人工作文件、运行配置与凭据；实际 npm 版本可用 `npm view @mappedinfo/dsh-paper-library version` 核对。
+
 **Windows 原生启动修复（2026-10-29，#2）：** 当前源码已移除无条件 `fcntl`，使用 filelock 原生后端与 30 秒写锁等待，保留事务回滚及稳定锁文件；Node／Python 的目录同步统一在 Windows 打开目录前跳过，文件同步与原子替换继续保留。补齐文件标志、打开后身份检查、UTF-8 worker 协议和既有虚拟环境锁依赖升级。平台边界及 ACL／断电持久性限制见 README；npm 0.2.4 尚未包含修复。
 
 验证：本地 Python 531 通过，相关 Node 55 通过／1 项既有跳过，真实 CLI／状态流程 5 组通过，构建与差异检查通过。[原生 Windows／Ubuntu CI](https://github.com/Mappedinfo/dsh-paper-library/actions/runs/40809576796) 的两平台任务均通过，代码为 `80fd389`；Node 24／Python 3.14，Windows runner 为 Windows Server 2025，不能代替 Windows 11 + DSH desktop 全界面验收。前两轮进一步发现并修正 PDF 临时文件只读同步及源文档占用阻止替换的问题。私有 `_open_pdf` 现统一管理文档关闭，保存前先验证并同步临时文件、关闭源文档，再备份及替换；不增加整份 PDF 内存复制。仅用合成资料，未修改 DSH 源码或操作个人文献库。

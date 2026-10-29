@@ -304,13 +304,13 @@ PDF 上传和下载均使用流式处理，不做整份 Base64 拷贝。服务�
 
 ## 安装与开发
 
-**当前源码版本为 v0.2.4，包含本轮 LaTeX 工作台改进。** npm 的 `latest` 可用 `npm view @mappedinfo/dsh-paper-library version` 核对；也可按下方步骤安装当前 `main` 源码。
+**当前源码版本为 v0.2.5，包含 Windows 启动与 PDF 保存兼容修复。** npm 的 `latest` 可用 `npm view @mappedinfo/dsh-paper-library version` 核对；也可按下方步骤安装当前 `main` 源码。
 
 Node `^22.19 || >=24`、Python `>=3.11`、`uv` 和已构建的本地 DeepSeek Harness。
 
 原生 Windows、macOS 和 Linux 均为基础文献管理、PDF 批注和本地状态存储的维护目标。Windows 基础路径不要求 WSL；仓库提供 [Windows／Linux 原生回归](https://github.com/Mappedinfo/dsh-paper-library/actions/workflows/windows-compatibility.yml)，覆盖实际 CLI、中文路径、跨进程写锁、PDF 保存与恢复。该检查不代表完整桌面 GUI、Pencil 或 Windows TeX 工具链均已验收；LaTeX 编译仍需自行安装 `latexmk` 与 TeX 引擎。
 
-文件写入在各平台保留文件同步和同目录原子替换。POSIX 另同步目录；Windows 跳过普通文件 API 不支持的目录同步，因此不承诺相同的断电持久性。`0700`／`0600` 权限仅适用于 POSIX；Windows 沿用所在目录的文件系统 ACL。符号链接功能可能需要 Windows 开发者模式或相应权限。0.2.4 及更早 npm 包尚未包含这次 Windows 修复，暂请从当前源码安装并运行 `uv sync --locked`。
+文件写入在各平台保留文件同步和同目录原子替换。POSIX 另同步目录；Windows 跳过普通文件 API 不支持的目录同步，因此不承诺相同的断电持久性。`0700`／`0600` 权限仅适用于 POSIX；Windows 沿用所在目录的文件系统 ACL。符号链接功能可能需要 Windows 开发者模式或相应权限。Windows 用户应使用 0.2.5 或之后版本；0.2.4 及更早 npm 包不包含这次修复。源码安装请运行 `uv sync --locked` 补齐依赖。
 
 ```sh
 git clone https://github.com/mappedinfo/dsh-paper-library.git
