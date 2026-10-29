@@ -11,7 +11,7 @@ const tick = () => new Promise(done => setImmediate(done))
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
 const image = { image: 'aW1hZ2U=', width: 600, height: 800, pixel_width: 1200, pixel_height: 1600, page_count: 4, bytes: 5, supported: true }
 
-async function fixture(override = () => undefined, { review = false } = {}) {
+async function fixture(override = () => undefined, { review = false, spellChecker } = {}) {
   const ids = new Map(), revoked = [], calls = [], urls = [], timers = new Map()
   class Element {
     constructor(tag = 'div') {
@@ -50,11 +50,80 @@ async function fixture(override = () => undefined, { review = false } = {}) {
     throw new Error(`unexpected action ${action}`)
   }
   const globals = { window, document, crypto: webcrypto, AbortController, Uint8Array, Blob, atob: value => Buffer.from(value, 'base64').toString('binary'), URL: { createObjectURL() { const url = `blob:${urls.length}`; urls.push(url); return url }, revokeObjectURL: url => revoked.push(url) }, setTimeout: (fn, ms) => { const id = timers.size + 1; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id), getComputedStyle: () => ({ lineHeight: '20' }) }
+  if (spellChecker) window.PaperLatexSpelling = { checkSpelling: spellChecker }
   if (review) vm.runInNewContext(reviewSource, globals)
   vm.runInNewContext(source, globals)
   const ui = window.PaperLatexWorkspace.create({ api })
-  await ui.open(); return { ui, ids, calls, revoked, urls, window }
+  await ui.open(); return { ui, ids, calls, revoked, urls, window, timers }
 }
+
+test('textarea fallback can turn on local spelling and navigate to a detected word', async () => {
+  const f = await fixture(action => {
+    if (action === 'state_get') return { value: null, revision: 0 }
+    if (action === 'state_put') return { revision: 'saved' }
+  }, { spellChecker: () => ({ items: [{ word: 'typoo', from: 0, to: 5 }], truncated: false }) })
+  const editor = f.ids.get('latex-editor'); editor.value = 'typoo in text';
+  await f.ids.get('latex-spell-toggle').dispatch('click')
+  const job = [...f.timers.values()].find(timer => timer.ms === 450); assert.ok(job); await job.fn()
+  const result = f.ids.get('latex-spelling-results'); assert.equal(result.hidden, false)
+  const button = result.querySelector('button'); assert.equal(button.textContent, 'typoo'); await button.dispatch('click')
+  assert.equal(editor.selectionStart, 0); assert.equal(editor.selectionEnd, 5)
+  assert.equal(f.calls.some(call => call.action === 'state_put' && call.key === 'reader:latex-spelling'), true)
+  f.ui.dispose()
+})
+
+test('translation sends only an unsaved selection and never writes the source', async () => {
+  const f = await fixture((action) => {
+    if (action === 'language_settings_get') return { models: [{ provider: 'host', id: 'mini', name: 'Mini' }] }
+    if (action === 'state_get') return { value: null, revision: 0 }
+    if (action === 'latex_ai_translate') return { answer: '合成译文', model: { provider: 'host', model: 'mini' }, prompt_version: 'latex-translate-v1:test' }
+  })
+  const editor = f.ids.get('latex-editor'); editor.value = 'UNSAVED draft selected text and private remainder'; editor.setSelectionRange(8, 27); await editor.dispatch('input')
+  await f.ids.get('latex-translate-selection').dispatch('click')
+  const request = f.calls.find(call => call.action === 'latex_ai_translate')
+  assert.equal(request.selection, 'draft selected text'); assert.equal(request.target_language, 'zh-CN')
+  assert.equal(f.calls.some(call => call.action === 'latex_write'), false)
+  assert.match(f.ids.get('latex-translation-results').textContent, /来源为编辑草稿/)
+  assert.equal(f.ui.testHooks.state().dirty, true); f.ui.dispose()
+})
+
+test('project translation settings persist an explicit model, language and prompt with CAS', async () => {
+  const f = await fixture((action, args) => {
+    if (action === 'language_settings_get') return { models: [{ provider: 'host', id: 'mini', name: 'Mini' }] }
+    if (action === 'state_get') return { value: null, revision: 0 }
+    if (action === 'state_put') return { value: args.value, revision: 'revision-new' }
+    if (action === 'project_list') return { projects: [] }
+    if (action === 'latex_ai_translate') return { answer: 'Synthetic translation', model: { provider: 'host', model: 'mini' }, prompt_version: 'latex-translate-v1:test' }
+  })
+  await f.ids.get('latex-menu-open').dispatch('click'); await tick()
+  f.ids.get('latex-translate-model').value = JSON.stringify({ provider: 'host', model: 'mini' })
+  f.ids.get('latex-translate-target').value = 'en'; f.ids.get('latex-translate-prompt').value = '保留缩写'
+  await f.ids.get('latex-translate-settings-save').dispatch('click')
+  const saved = f.calls.find(call => call.action === 'state_put' && call.key === 'reader:latex-translation-one')
+  assert.equal(saved.expected_revision, 0);assert.equal(saved.value.model.model, 'mini');assert.equal(saved.value.target_language, 'en')
+  const editor = f.ids.get('latex-editor');editor.value = '合成草稿';editor.setSelectionRange(0, 4)
+  await f.ids.get('latex-translate-selection').dispatch('click')
+  const request = f.calls.find(call => call.action === 'latex_ai_translate')
+  assert.equal(request.target_language, 'en');assert.equal(request.model_override.model, 'mini');assert.equal(request.prompt, '保留缩写')
+  f.ui.dispose()
+})
+
+test('changing files cancels translation and ignores a late response', async () => {
+  const late = deferred()
+  const f = await fixture(action => {
+    if (action === 'language_settings_get') return { models: [] }
+    if (action === 'state_get') return { value: null, revision: 0 }
+    if (action === 'latex_ai_translate') return late.promise
+  })
+  const editor = f.ids.get('latex-editor');editor.setSelectionRange(0, 4)
+  const pending = f.ids.get('latex-translate-selection').dispatch('click');await tick()
+  const request = f.calls.find(call => call.action === 'latex_ai_translate');assert.ok(request)
+  await f.ui.testHooks.openFile('a.tex');assert.equal(request.signal.aborted, true)
+  late.resolve({ answer: 'late result', model: { provider: 'host', model: 'default' }, prompt_version: 'v1' });await pending
+  assert.equal(f.ids.get('latex-translation-results').hidden, true)
+  assert.doesNotMatch(f.ids.get('latex-translation-results').textContent, /late result/)
+  f.ui.dispose()
+})
 
 test('navigation keeps an unsaved conflict in place across file, project and close actions', async () => {
   const f = await fixture(action => action === 'latex_write' ? Promise.reject(Object.assign(new Error('changed elsewhere'), { code: 'STATE_CONFLICT', current: { revision: 'other', content: 'other' } })) : undefined)

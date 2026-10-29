@@ -1,7 +1,8 @@
 {
-  "verified_at": "2026-09-20T13:01:46.046Z",
+  "verified_at": "2026-10-29T07:50:05.541Z",
   "scope": "Synthetic catalog in an isolated standalone server; reading-project creation, project-scoped library lists, many-to-many paper membership with create-and-join, rename and archive without deleting papers, and the board-to-project link. Zero model calls and zero external requests.",
   "checks": [
+    "compact-controls-fit-the-rail-and-handwriting-status-is-right-aligned",
     "the-toolbar-creates-reading-projects-in-the-catalog",
     "selecting-a-project-scopes-the-library-list",
     "the-ribbon-opens-membership-while-the-paper-is-still-loading",

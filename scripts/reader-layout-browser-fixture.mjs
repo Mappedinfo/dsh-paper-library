@@ -24,8 +24,8 @@ for i in range(5):
 doc.save(sys.argv[1]);doc.close()
 `, pdf], { encoding: 'utf8' });
 assert.equal(generated.status, 0, generated.stderr);
-await core({ action: 'import', items: Array.from({ length: 44 }, (_, i) => ({ id: `SyntheticGraph${i}`, title: `Synthetic graph paper ${i}` })) }, { library, python });
-const paper = (await core({ action: 'import', items: [{ id: 'SyntheticSpread', title: 'Synthetic spread reader', attachments: [{ path: pdf }] }] }, { library, python })).items[0];
+await core({ action: 'import', items: Array.from({ length: 44 }, (_, i) => ({ id: `SyntheticGraph${i}`, title: `Synthetic graph paper ${i}`, issued: { 'date-parts': [[2020 + i % 4]] }, ...(i % 3 === 0 ? { 'is-referenced-by-count': i * 2 } : {}) })) }, { library, python });
+const paper = (await core({ action: 'import', items: [{ id: 'SyntheticSpread', title: 'Synthetic spread reader', author: [{ family: '王', given: '小明' }], attachments: [{ path: pdf }] }] }, { library, python })).items[0];
 const store = createLocalStateStore({ library, home: join(run, 'home') });
 let aiCalls = 0;
 const languageLearning = createLanguageLearning({ store, dispatch, library, python,
@@ -62,6 +62,23 @@ try {
 
   await page.locator('#library-graph-open').click();
   await page.locator('#library-graph-content .kg-status').filter({ hasText: '/ 45' }).waitFor();
+  await page.locator('#library-graph-content .kg-statistics').filter({ hasText: '45 篇有效文献' }).waitFor();
+  assert.match(await page.locator('#library-graph-content .kg-statistics').innerText(), /年份缺失 1 篇/);
+  assert.match(await page.locator('#library-graph-content .kg-statistics').innerText(), /已采集引用量/);
+  const graphCanvas=page.locator('#library-graph-content .kg-canvas');
+  const zoomBefore=Number(await graphCanvas.getAttribute('data-zoom'));
+  await page.getByRole('button',{name:'放大图谱',exact:true}).click();
+  assert.ok(Number(await graphCanvas.getAttribute('data-zoom'))>zoomBefore);
+  await graphCanvas.locator('.kg-node').first().focus();await page.keyboard.press('Enter');
+  assert.equal(await graphCanvas.locator('.kg-node[aria-pressed="true"]').count(),1);
+  await page.locator('#library-graph-fullscreen').click();
+  await page.waitForFunction(()=>graphFullscreenTask===null);
+  const graphBounds=await page.locator('#library-graph-dialog').boundingBox();
+  await page.screenshot({ path: join(run, 'global-graph-1512.png') });
+  assert.ok(graphBounds.width>=1500&&graphBounds.height>=970);
+  await page.locator('#library-graph-fullscreen').click();
+  await page.waitForFunction(()=>graphFullscreenTask===null&&!graphWindowExpanded);
+  record('global graph supports fullscreen, zoom, selection and whole-library metadata charts');
   await page.getByRole('button', { name: '下一批文献', exact: true }).click();
   await page.locator('#library-graph-content .kg-status').filter({ hasText: '41–45 / 45' }).waitFor();
   assert.equal(await page.locator('#library-graph-content [data-kg="add-node"]').isVisible(), false);
@@ -71,6 +88,12 @@ try {
   await page.locator(`#paper-list .paper-card[data-id="${paper.id}"]`).click();
   await page.locator('#continuous-reader[aria-busy="true"] .pdr-spinner').waitFor();
   await page.locator('#continuous-reader .pdr-page-image').first().waitFor();
+  assert.match(await page.locator(`#paper-list .paper-card[data-id="${paper.id}"]`).innerText(),/王小明/);
+  await page.evaluate(id=>readingShell.queueChanged([{paperId:id,page:1,status:'saved',annotation_id:'00000000-0000-4000-8000-000000000000'}]),paper.id);
+  const chrome=await page.evaluate(()=>{const box=id=>document.getElementById(id).getBoundingClientRect();return {kind:box('catalog-kind').height,project:box('project-select').height,statusRight:box('ink-queue-summary').right,ribbonRight:document.querySelector('.reader-ribbon').getBoundingClientRect().right};});
+  assert.ok(chrome.kind>=27&&chrome.kind<=30&&Math.abs(chrome.kind-chrome.project)<1);
+  assert.ok(Math.abs(chrome.statusRight-chrome.ribbonRight)<20);
+  record('compact controls share heights, handwriting status stays right, and supplied Chinese names remain complete');
   assert.equal(actions.filter(input => input.action === 'page_layout').length, 0);
   assert.equal(actions.filter(input => input.action === 'page' && input.include_layout).length, 1);
   record('first screen shows a spinner and uses one combined page request');

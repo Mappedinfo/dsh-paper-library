@@ -16,6 +16,7 @@ Project scaffolding was generated through the author's `academic-templates/dev-p
 | citeproc-js | CSL processor | [citeproc-js](https://github.com/Juris-M/citeproc-js) / CPAL-1.0-or-later or AGPL-3.0-or-later; default here uses the AGPL option, [upstream notice retained](licenses/citeproc-NOTICE.txt) |
 | Citation.js core and BibTeX plugin | BibLaTeX parsing and output | [Citation.js](https://github.com/citation-js/citation-js) / MIT |
 | CodeMirror 6、LaTeX 模式、Lezer 及配套包 | 本地打包的源码编辑器 | [CodeMirror](https://codemirror.net/) / MIT；依赖许可声明保存在 [codemirror-MIT.txt](licenses/codemirror-MIT.txt) |
+| dictionary-en、nspell、is-buffer | 本地英文拼写字典及检查器 | [dictionary-en](https://github.com/wooorm/dictionaries) / MIT 和 BSD，[许可](licenses/dictionary-en.txt)；[nspell](https://github.com/wooorm/nspell) / [MIT](licenses/nspell.txt)；is-buffer / [MIT](licenses/is-buffer.txt) |
 | PlainDeck | Slides 编辑器、开放项目格式、模板与渲染器 | [PlainDeck](https://github.com/Mappedinfo/PlainDeck) / MIT；固定源码与原许可见 [子项目说明](vendor/plaindeck/README.md)，Juya 派生设计目录的原声明保留在子项目内 |
 | React、React DOM、zustand、Zod | 本地打包的 Slides 界面与校验 | MIT；分别保留在 [Slides 依赖许可](licenses/slides/) |
 | Lucide React | 文献库与 Slides 工具图标 | ISC；保留在 [lucide-react-LICENSE.txt](licenses/slides/lucide-react-LICENSE.txt) |

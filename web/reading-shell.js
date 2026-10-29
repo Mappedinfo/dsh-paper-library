@@ -24,6 +24,8 @@ window.PaperReadingShell = (() => {
     let inkBusy=false, inkError='', inkTitle='', linkedSession=null, linkedBusy=false, finishLinked=null, inkRecords=[];
     const applyTool=()=>reader()?.setTool(tool,tool==='ink'?{color:inkColor,width:inkWidth}:color);
     const ribbon=node('nav',null,'reader-ribbon');ribbon.setAttribute('aria-label','文献工作区');
+    const projectActions=document.querySelector('.project-actions');
+    projectActions?.addEventListener('click',event=>{if(event.target.closest('.project-actions-panel button'))projectActions.open=false;});
     const library=button('workspace-library','库',()=>{leaveFocus();$('catalog-expand').click();});
     library.title='展开或收起文献表格';ribbon.append(library);
     const tabs=document.querySelector('.tabs');for(const tab of [...tabs.children])ribbon.append(tab);tabs.remove();
@@ -161,7 +163,8 @@ window.PaperReadingShell = (() => {
     let inkQueue=null;
     const queueMenu=node('details',null,'ink-queue-menu');queueMenu.id='ink-queue-menu';queueMenu.hidden=true;
     const queueSummary=node('summary','笔迹');queueSummary.id='ink-queue-summary';queueSummary.setAttribute('aria-live','polite');queueMenu.append(queueSummary);
-    const queuePanel=node('div',null,'ink-queue-panel');queuePanel.setAttribute('aria-label','手写保存进度');queueMenu.append(queuePanel);ribbon.insertBefore(queueMenu,fullscreen);
+    const queuePanel=node('div',null,'ink-queue-panel');queuePanel.setAttribute('aria-label','手写保存进度');queueMenu.append(queuePanel);
+    const ribbonStatus=node('div',null,'reader-ribbon-status');ribbonStatus.setAttribute('role','group');ribbonStatus.setAttribute('aria-label','保存状态');ribbonStatus.append(queueMenu);ribbon.append(ribbonStatus);
     function queueChanged(records){
       inkRecords=records;syncInk();
       const pending=records.filter(job=>job.status!=='saved');queueMenu.hidden=!records.length;queueSummary.textContent=pending.length?`笔迹 · ${pending.length} 待保存`:'笔迹已保存';

@@ -36,7 +36,7 @@ try {
   clearTimeout(startTimer);
   const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
   browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 1512, height: 982 } });
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => { if (!request.url().startsWith(origin)) external.push(request.url()); });
   page.on('dialog', dialog => void dialog.accept());
@@ -79,9 +79,24 @@ try {
   await page.waitForFunction(() => document.getElementById('paper-projects')?.hidden === false);
   assert.equal(await page.locator('#paper-projects').isVisible(), true, 'the ribbon shows the project control when the catalog supports projects');
   assert.equal((await projects()).length, 0, 'a fresh catalog holds no projects');
+  const railGeometry = await page.evaluate(() => {
+    const row = document.querySelector('.library-organizer-row');
+    const controls = [...row.querySelectorAll('#project-select, .project-actions > summary, #board-shelf > summary, #latex-version-shelf > summary')];
+    const bounds = row.getBoundingClientRect();
+    return { fits: controls.every(element => { const r = element.getBoundingClientRect(); return r.left >= bounds.left && r.right <= bounds.right && r.top >= bounds.top && r.bottom <= bounds.bottom; }), selectHeight: document.querySelector('#project-select').getBoundingClientRect().height, hasOverflow: row.scrollWidth > row.clientWidth };
+  });
+  assert.equal(railGeometry.fits, true, 'all organizer controls remain visible in the narrow rail');
+  assert.equal(railGeometry.hasOverflow, false, 'organizer does not require horizontal scrolling');
+  assert.equal(railGeometry.selectHeight, 28, 'the project picker uses the shared control height');
+  await page.evaluate(() => { document.getElementById('ink-queue-menu').hidden = false; });
+  const statusAtRight = await page.evaluate(() => { const status = document.querySelector('.reader-ribbon-status').getBoundingClientRect(), ribbon = document.querySelector('.reader-ribbon').getBoundingClientRect(); return Math.abs(status.right - ribbon.right) < 2; });
+  assert.equal(statusAtRight, true, 'handwriting status is at the right edge of the ribbon');
+  await page.evaluate(() => { document.getElementById('ink-queue-menu').hidden = true; });
+  record('compact-controls-fit-the-rail-and-handwriting-status-is-right-aligned');
 
   // Create two projects from the toolbar dialog; the second is what makes the relation many-to-many.
   const createProject = async title => {
+    await page.locator('.project-actions > summary').click();
     await page.locator('#project-new').click();
     await page.locator('#project-title').fill(title);
     await page.locator('#project-save').click();
@@ -146,6 +161,7 @@ try {
   assert.ok(first, 'one project now holds the paper');
   await page.locator('#project-select').selectOption(first.id);
   await waitForCards(1);
+  await page.locator('.project-actions > summary').click();
   await page.locator('#project-edit').click();
   await page.locator('#project-title').fill('城市感知综述（改）');
   await page.locator('#project-save').click();
@@ -157,6 +173,7 @@ try {
   record('editing-a-project-renames-it-without-losing-memberships');
 
   // Archiving hides the project but never deletes its papers.
+  await page.locator('.project-actions > summary').click();
   await page.locator('#project-archive').click();
   await page.waitForFunction(() => /共 2 个项目/.test(document.getElementById('project-status')?.textContent || ''));
   assert.equal((await projects()).some(entry => entry.id === first.id), false, 'an archived project leaves the active list');

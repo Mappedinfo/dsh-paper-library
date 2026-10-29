@@ -80,6 +80,21 @@ test('a selection is sent instead of the whole file, and a stale selection is re
   await assert.rejects(() => call({ action: 'latex_ai_ask', id: project.id, selection: 'not in the file', question: 'x' }), /选中的文字不在当前文件里/)
 })
 
+test('translation sends only the explicit unsaved draft selection and follows the host default', async () => {
+  const { folder, project, library } = await fixture(['unused'])
+  const calls = [], store = inMemoryStore()
+  const handle = createLatexAI({ store, ai: async input => { calls.push(input); return '合成译文' }, getDefaultModel: () => ({ provider: 'host', model: 'default' }), models: async () => ({ models: [{ provider: 'host', id: 'mini' }] }), dispatch, library, python })
+  const selection = 'Unsaved draft with \\cite{source} and $x=1$.'
+  const result = await handle({ action: 'latex_ai_translate', id: project.id, path: 'main.tex', selection, target_language: 'zh-CN' })
+  assert.equal(result.answer, '合成译文'); assert.deepEqual(result.model, { provider: 'host', model: 'default' })
+  assert.equal(result.source, 'editor-selection'); assert.match(result.prompt_version, /^latex-translate-v1:/)
+  assert.ok(calls[0].prompt.includes(JSON.stringify({ text: selection }))); assert.ok(!calls[0].prompt.includes('neighbourhood'))
+  assert.equal(await readFile(join(folder, 'main.tex'), 'utf8'), BODY)
+  const override = await handle({ action: 'latex_ai_translate', id: project.id, selection, target_language: 'zh-CN', model_override: { provider: 'host', model: 'mini' }, prompt: '保留缩写' })
+  assert.equal(override.model.model, 'mini'); assert.match(calls[1].prompt, /保留缩写/)
+  await assert.rejects(handle({ action: 'latex_ai_translate', id: project.id, selection, target_language: 'zh-CN', model_override: { provider: 'host', model: 'unknown' } }), error => error.code === 'LATEX_AI_MODEL_REQUIRED')
+})
+
 test('a proposal is kept as verified replacements and applied only on accept', async () => {
   const reply = JSON.stringify({
     summary: '把断言改成有边界的表述',

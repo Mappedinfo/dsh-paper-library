@@ -13,6 +13,73 @@ RELATIONS = ("supports", "contradicts", "uses", "evaluates", "derived_from", "ex
 MAX_NODES = 200
 MAX_EDGES = 400
 MAX_PER_PAPER = 2000
+STATISTICS_YEARS = 200
+# Only these named source snapshots have an unambiguous inbound-citation
+# meaning. Generic citation_count, references and missing values stay unknown.
+CITATION_SOURCES = (
+    ("crossref", "Crossref", ('$."is-referenced-by-count"', '$.crossref."is-referenced-by-count"')),
+    ("openalex", "OpenAlex", ('$.openalex.cited_by_count',)),
+    ("semantic-scholar", "Semantic Scholar", ('$.semantic_scholar.citationCount',)),
+)
+
+
+def get_statistics(library):
+    """Aggregate saved active-catalog metadata, without PDF or network access.
+
+    One SQL statement gives a consistent snapshot across counts/distributions;
+    it returns at most 200 years and 18 citation buckets, never paper bodies.
+    Source snapshots are intentionally kept separate rather than summed.
+    """
+    def citation_value(paths):
+        values = [f"CASE WHEN json_type(metadata, '{path}')='integer' "
+                  f"AND json_extract(metadata, '{path}') BETWEEN 0 AND 1000000000 "
+                  f"THEN json_extract(metadata, '{path}') END" for path in paths]
+        return "COALESCE(" + ",".join(values) + ")" if len(values) > 1 else values[0]
+
+    aliases = ["crossref_count", "openalex_count", "semantic_count"]
+    fields = ",".join(f"{citation_value(paths)} AS {alias}" for (_, _, paths), alias in zip(CITATION_SOURCES, aliases))
+    citation_rows = " UNION ALL ".join(f"SELECT '{source}' AS source,{alias} AS value FROM valueset WHERE {alias} IS NOT NULL"
+                                       for (source, _, _), alias in zip(CITATION_SOURCES, aliases))
+    known = " OR ".join(f"{alias} IS NOT NULL" for alias in aliases)
+    row = library.db.execute(f"""
+        WITH catalog AS (
+          SELECT CASE WHEN json_valid(p.metadata) THEN p.metadata ELSE '{{}}' END AS metadata
+          FROM papers p WHERE NOT EXISTS(SELECT 1 FROM paper_archive a WHERE a.paper_id=p.id)
+        ), valueset AS (
+          SELECT CASE WHEN json_type(metadata,'$.issued."date-parts"[0][0]')='integer'
+                   AND json_extract(metadata,'$.issued."date-parts"[0][0]') BETWEEN 1 AND 9999
+                 THEN json_extract(metadata,'$.issued."date-parts"[0][0]') END AS year,
+                 {fields} FROM catalog
+        ), year_groups AS (
+          SELECT year,count(*) AS count FROM valueset WHERE year IS NOT NULL
+          GROUP BY year ORDER BY year DESC LIMIT {STATISTICS_YEARS}
+        ), citation_rows AS ({citation_rows}), citation_groups AS (
+          SELECT source,CASE WHEN value=0 THEN 0 WHEN value<10 THEN 1 WHEN value<50 THEN 2
+                 WHEN value<100 THEN 3 WHEN value<500 THEN 4 ELSE 5 END AS bucket,count(*) AS count
+          FROM citation_rows GROUP BY source,bucket
+        )
+        SELECT (SELECT count(*) FROM valueset) AS total,
+               (SELECT count(year) FROM valueset) AS year_known,
+               (SELECT count(*) FROM valueset WHERE {known}) AS citation_known,
+               (SELECT json_group_array(json_object('year',year,'count',count)) FROM year_groups) AS years,
+               (SELECT json_group_array(json_object('source',source,'bucket',bucket,'count',count)) FROM citation_groups) AS citations
+        """).fetchone()
+    total, year_known = row["total"], row["year_known"]
+    years = sorted(json.loads(row["years"]), key=lambda item: item["year"])
+    groups = {(item["source"], item["bucket"]): item["count"] for item in json.loads(row["citations"])}
+    sources = []
+    labels = ("0", "1–9", "10–49", "50–99", "100–499", "500+")
+    for source, label, paths in CITATION_SOURCES:
+        buckets = [{"label": name, "count": groups.get((source, index), 0)} for index, name in enumerate(labels)]
+        count = sum(item["count"] for item in buckets)
+        sources.append({"id": source, "label": label, "fields": [path.removeprefix("$.") for path in paths],
+                        "known": count, "missing": total - count, "buckets": buckets})
+    other = year_known - sum(item["count"] for item in years)
+    return {"scope": "active-library", "total_papers": total,
+            "years": {"known": year_known, "missing": total - year_known, "items": years,
+                      "other_count": other, "truncated": bool(other), "maximum_rows": STATISTICS_YEARS},
+            "citations": {"known_papers": row["citation_known"], "missing_papers": total - row["citation_known"], "sources": sources},
+            "semantics": "Saved catalog metadata only; citation sources are separate snapshots, missing is not zero; no PDF reading or online refresh"}
 
 
 def _now():

@@ -1,7 +1,7 @@
 """Synthetic metadata-only tests for evidence graph persistence and bounds."""
 import pytest
 from dsh_paper_library.core import Library, dispatch
-from dsh_paper_library.knowledge_graph import dispatch_graph, get_graph
+from dsh_paper_library.knowledge_graph import dispatch_graph, get_graph, get_statistics
 
 
 @pytest.fixture
@@ -17,6 +17,62 @@ def catalog(tmp_path):
 
 def put_node(library, paper, **extra):
     return dispatch_graph(library, "graph_node_put", {"id": paper["id"], "type": "claim", "label": "Synthetic claim", "evidence": {"page": 2, "quote": "A declared observation", "note": "Reader interpretation", "source": "section 2"}, **extra})
+
+
+def test_statistics_cover_the_whole_active_catalog_and_preserve_missing_citation_values(tmp_path, monkeypatch):
+    library = Library(tmp_path / "synthetic-statistics")
+    items = library.import_items(items=[
+        {"id": f"Statistics{index}", "title": f"Synthetic metadata {index}",
+         **({"issued": {"date-parts": [[2020 + index % 3]]}} if index < 45 else {}),
+         **({"is-referenced-by-count": 0} if index == 0 else {}),
+         **({"is-referenced-by-count": 15, "openalex": {"cited_by_count": 27}} if index == 44 else {}),
+         **({"semantic_scholar": {"citationCount": 600}} if index == 45 else {}),
+         **({"citation_count": 12345, "reference-count": 900} if index == 46 else {})}
+        for index in range(47)
+    ])["items"]
+    archived = library.create({"title": "Archived synthetic metadata", "issued": {"date-parts": [[1990]]}, "is-referenced-by-count": 999})
+    library.archive(archived["id"])
+    for name in ("pdf_path", "get", "list"):
+        monkeypatch.setattr(library, name, lambda *_args, **_kwargs: pytest.fail("statistics must only aggregate SQL metadata"))
+    statements = []
+    library.db.set_trace_callback(statements.append)
+    result = get_statistics(library)
+    library.db.set_trace_callback(None)
+    assert result["total_papers"] == 47 and len(items) == 47
+    assert result["years"] == {"known": 45, "missing": 2, "items": [{"year": year, "count": 15} for year in (2020, 2021, 2022)], "other_count": 0, "truncated": False, "maximum_rows": 200}
+    assert result["citations"]["known_papers"] == 3 and result["citations"]["missing_papers"] == 44
+    crossref, openalex, semantic = result["citations"]["sources"]
+    assert (crossref["known"], crossref["missing"]) == (2, 45)
+    assert [item["count"] for item in crossref["buckets"]] == [1, 0, 1, 0, 0, 0]
+    assert (openalex["known"], semantic["known"]) == (1, 1)
+    assert semantic["buckets"][-1]["count"] == 1
+    assert len(statements) == 1 and statements[0].lstrip().startswith("WITH catalog")
+    library.close()
+
+
+def test_statistics_ignore_untyped_counts_and_return_bounded_year_groups(tmp_path):
+    library = Library(tmp_path / "synthetic-statistics")
+    items = [{"id": f"Year{year}", "title": f"Synthetic year {year}", "issued": {"date-parts": [[year]]}} for year in range(1700, 1905)]
+    for offset in (0, 100, 200):
+        library.import_items(items=items, offset=offset)
+    for index, value in enumerate((True, False, -1, 1.5, "12", 1000000001, None)):
+        library.create({"title": f"Synthetic unknown count {index}", "is-referenced-by-count": value})
+    library.create({"title": "Synthetic nested snapshot", "crossref": {"is-referenced-by-count": 4}})
+    result = get_statistics(library)
+    assert len(result["years"]["items"]) == 200
+    assert result["years"]["items"][0]["year"] == 1705 and result["years"]["items"][-1]["year"] == 1904
+    assert result["years"]["known"] == 205 and result["years"]["other_count"] == 5 and result["years"]["truncated"] is True
+    assert result["years"]["missing"] == 8
+    assert result["citations"]["known_papers"] == 1
+    assert result["citations"]["sources"][0]["buckets"][1]["count"] == 1
+    library.close()
+
+
+def test_empty_statistics_are_unknown_not_zero_cited_papers(tmp_path):
+    result = dispatch({"action": "graph_statistics", "library": str(tmp_path / "synthetic-empty-statistics")})
+    assert result["total_papers"] == 0 and result["years"]["items"] == []
+    assert result["citations"]["known_papers"] == 0
+    assert all(source["known"] == 0 and all(bucket["count"] == 0 for bucket in source["buckets"]) for source in result["citations"]["sources"])
 
 
 def test_graph_projects_authors_units_and_preserves_legacy_without_reading_pdf(catalog, monkeypatch):

@@ -127,11 +127,24 @@ body.board-focused #board-view{grid-column:1}
 .board-shelf-row.is-linked{border-color:var(--dsw-alias-link)}
 /* Project selection and the two shelf disclosures share one row. The content
  * panels remain full-width siblings, including after the reading rail moves. */
-.library-organizer-row{display:flex;align-items:center;gap:6px;flex:none;min-width:0;padding:5px 10px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:thin;white-space:nowrap}
-.library-organizer-row .project-bar{flex:none;flex-wrap:nowrap;gap:4px;padding:0}
-.library-organizer-row .project-bar .field-inline{white-space:nowrap}
-.library-organizer-row .project-bar select{max-width:150px}
-.library-organizer-row .project-bar #project-status{flex:none;white-space:nowrap}
+.library-pane{container:library-rail / inline-size}
+.library-organizer-row{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;flex:none;min-width:0;padding:5px 10px;border-bottom:1px solid var(--line)}
+.library-organizer-row .project-bar{flex:none;flex-wrap:nowrap;gap:4px;padding:0;min-width:0}
+.library-organizer-row .project-bar .field-inline{display:flex;align-items:center;gap:4px;white-space:nowrap;min-width:0}
+.library-organizer-row .project-bar select{max-width:150px;min-width:0}
+.library-organizer-row #project-status{white-space:normal}
+.library-organizer-row .project-bar[hidden] ~ #project-status{display:none}
+.project-actions{position:relative;flex:none}
+.project-actions>summary{display:flex;align-items:center;justify-content:center;width:28px;height:28px;cursor:pointer;list-style:none;font-size:18px!important}
+.project-actions>summary::-webkit-details-marker{display:none}
+.project-actions-panel{position:absolute;z-index:40;top:calc(100% + 3px);right:0;display:grid;gap:2px;min-width:130px;padding:4px;background:var(--surface);border:1px solid var(--line);border-radius:5px;box-shadow:var(--shadow)}
+.project-actions-panel .button{justify-content:flex-start;white-space:nowrap;text-align:left}
+@container library-rail (max-width:460px){
+  .library-organizer-row .project-bar{flex:1 1 100%}
+  .library-organizer-row .project-bar .field-inline{flex:1}
+  .library-organizer-row .project-bar select{flex:1;max-width:none}
+  .library-organizer-row #project-status{flex:1 1 100%}
+}
 .library-organizer-row .board-shelf{flex:none;border:0;padding:0}
 .library-organizer-row .board-shelf>summary{padding:5px 6px;border-radius:5px;color:var(--ink);font-size:12px;white-space:nowrap}
 .library-organizer-row .board-shelf>summary:hover{background:var(--dsw-alias-interactive-bg-hover)}

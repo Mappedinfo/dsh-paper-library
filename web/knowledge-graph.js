@@ -5,8 +5,66 @@
   const EDITABLE_TYPES = ['method', 'dataset', 'claim', 'evidence', 'concept', 'author', 'institution'];
   const EDITABLE_RELATIONS = ['supports', 'contradicts', 'uses', 'evaluates', 'derived_from', 'explains', 'extends', 'cites', 'related', 'authored_by', 'affiliated_with', 'published_by'];
   const SVG = 'http://www.w3.org/2000/svg';
+  let instanceSequence = 0;
   const nodeName = node => `${TYPES[node.type] || node.type} · ${node.label}`;
   const relationLabel = relation => RELATIONS[relation] || relation;
+  // Approximate 16px system-font advances conservatively. Diagram columns are
+  // 180px apart; labels get 144px and the full name stays in title/inspector.
+  function labelWidth(value) {
+    let width = 0;
+    for (const character of value) {
+      if (/[\p{Mark}\u200d\ufe0f]/u.test(character)) continue;
+      width += /\s/u.test(character) ? 4 : /[ilIjtfr.,:;!'|]/.test(character) ? 5 : /[MWmw@#%&]/.test(character) ? 15 : /[A-Z0-9]/.test(character) ? 11 : /[a-z]/.test(character) ? 9 : 16;
+    }
+    return width;
+  }
+  function shortLabel(value, maximum = 144) {
+    if (labelWidth(value) <= maximum) return value;
+    let result = '', width = 0; const budget = Math.max(0, maximum - 16);
+    for (const character of value) { const next = labelWidth(character); if (width + next > budget) break; result += character; width += next; }
+    return result + '…';
+  }
+  function createViewport(bounds = { width: 640, height: 440 }, size = bounds) {
+    let width = Math.max(1, size.width || 640), height = Math.max(1, size.height || 440), zoom = 1, x = bounds.width / 2, y = bounds.height / 2;
+    function snapshot() {
+      const unit = Math.max(bounds.width / width, bounds.height / height) / zoom;
+      return { x: x - width * unit / 2, y: y - height * unit / 2, width: width * unit, height: height * unit, zoom };
+    }
+    function clamp() {
+      const view = snapshot(), visibleX = Math.min(bounds.width * .2, view.width * .75), visibleY = Math.min(bounds.height * .2, view.height * .75);
+      x = Math.max(-view.width / 2 + visibleX, Math.min(bounds.width + view.width / 2 - visibleX, x));
+      y = Math.max(-view.height / 2 + visibleY, Math.min(bounds.height + view.height / 2 - visibleY, y));
+    }
+    function setZoom(value, anchor = { x: .5, y: .5 }) {
+      if (!Number.isFinite(value)) return snapshot();
+      anchor = { x: Number.isFinite(anchor?.x) ? Math.max(0, Math.min(1, anchor.x)) : .5, y: Number.isFinite(anchor?.y) ? Math.max(0, Math.min(1, anchor.y)) : .5 };
+      const before = snapshot(); zoom = Math.max(.5, Math.min(8, value)); const after = snapshot();
+      x += (anchor.x - .5) * (before.width - after.width); y += (anchor.y - .5) * (before.height - after.height); clamp(); return snapshot();
+    }
+    function pan(dx, dy) { if (Number.isFinite(dx) && Number.isFinite(dy)) { x += dx; y += dy; clamp(); } return snapshot(); }
+    function resize(next) { if (Number.isFinite(next.width) && next.width > 0) width = next.width; if (Number.isFinite(next.height) && next.height > 0) height = next.height; return snapshot(); }
+    function fit() { zoom = 1; x = bounds.width / 2; y = bounds.height / 2; return snapshot(); }
+    return { snapshot, setZoom, pan, resize, fit };
+  }
+  function statisticsOf(value) {
+    const count = number => Number.isSafeInteger(number) && number >= 0;
+    const invalid = () => { throw new Error('统计结果不完整，请重新读取。'); };
+    if (!value || value.scope !== 'active-library' || !count(value.total_papers)) invalid();
+    const total = value.total_papers, years = value.years, citations = value.citations;
+    if (!years || !count(years.known) || !count(years.missing) || !count(years.other_count) || years.known + years.missing !== total || !Array.isArray(years.items) || years.items.length > 200) invalid();
+    const seenYears = new Set(); let yearSum = years.other_count;
+    for (const item of years.items) { if (!item || !Number.isInteger(item.year) || item.year < 1 || item.year > 9999 || !count(item.count) || item.count < 1 || seenYears.has(item.year)) invalid(); seenYears.add(item.year); yearSum += item.count; }
+    if (yearSum !== years.known || !citations || !count(citations.known_papers) || !count(citations.missing_papers) || citations.known_papers + citations.missing_papers !== total || !Array.isArray(citations.sources) || citations.sources.length > 3) invalid();
+    const seenSources = new Set(); let sourceSum = 0;
+    for (const source of citations.sources) {
+      if (!source || typeof source.id !== 'string' || !['crossref', 'openalex', 'semantic-scholar'].includes(source.id) || seenSources.has(source.id) || typeof source.label !== 'string' || source.label.length > 80 || !count(source.known) || !count(source.missing) || source.known + source.missing !== total || !Array.isArray(source.buckets) || source.buckets.length !== 6) invalid();
+      seenSources.add(source.id); let sum = 0;
+      for (const bucket of source.buckets) { if (!bucket || typeof bucket.label !== 'string' || bucket.label.length > 20 || !count(bucket.count)) invalid(); sum += bucket.count; }
+      if (sum !== source.known) invalid(); sourceSum += source.known;
+    }
+    if (citations.known_papers > sourceSum) invalid();
+    return value;
+  }
   function scopedEdges(graph, nodeId) { return nodeId ? graph.edges.filter(edge => edge.source === nodeId || edge.target === nodeId) : graph.edges; }
   function evidenceSummary(evidence = {}) {
     const parts = [];
@@ -21,6 +79,8 @@
     if (!root) throw new Error('Knowledge graph requires a mount element');
     const libraryScope = scope === 'library';
     let graph = { nodes: [], edges: [] }, selected = null, edgePage = 0, revision = 0, paperId = null, editing = null, busy = false, catalogOffset = 0;
+    let viewport = null, panGesture = null, statistics = null, statisticsFlight = null, statisticsRevision = 0, citationSource = '';
+    const markerId = `kg-arrow-${++instanceSequence}`;
     root.classList.add('knowledge-graph');
     root.innerHTML = `<div class="kg-toolbar"><div><h3>知识图谱</h3><p>记录方法、数据、论点与论据之间的联系。</p></div><div class="kg-actions"><button type="button" class="button subtle" data-kg="add-board">加入画板</button><button type="button" class="button" data-kg="add-node">＋ 节点</button><button type="button" class="button" data-kg="add-edge">＋ 关系</button></div></div>
       <div class="kg-controls"><label>节点类型 <select data-kg="filter"><option value="">全部类型</option></select></label><button type="button" class="text-button" data-kg="reset">查看全部关系</button></div>
@@ -31,6 +91,12 @@
     const el = key => root.querySelector(`[data-kg="${key}"]`), form = el('form'), field = key => form.elements.namedItem(key);
     const dom = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     const option = (value, label) => { const node = dom('option', '', label); node.value = value; return node; };
+    const canvas = el('canvas'); canvas.tabIndex = 0; canvas.setAttribute('role', 'group'); canvas.setAttribute('aria-label', '关系图；拖动空白或方向键平移，加减号缩放，0 适应全图，Tab 选择节点');
+    const viewTools = dom('div', 'kg-view-tools'), zoomOut = dom('button', 'button subtle', '−'), zoomIn = dom('button', 'button subtle', '＋'), fitButton = dom('button', 'button subtle', '适应全图'), zoomLabel = dom('output', 'kg-zoom', '100%'), selectionLabel = dom('span', 'kg-selection-label', '尚未选择节点');
+    zoomOut.type = zoomIn.type = fitButton.type = 'button'; zoomOut.setAttribute('aria-label', '缩小图谱'); zoomIn.setAttribute('aria-label', '放大图谱'); fitButton.dataset.kg = 'fit'; zoomLabel.setAttribute('aria-label', '图谱缩放比例'); selectionLabel.setAttribute('role', 'status');
+    viewTools.append(zoomOut, zoomLabel, zoomIn, fitButton, selectionLabel); canvas.before(viewTools);
+    const navigationHint = dom('p', 'kg-help kg-navigation-hint', '拖动空白平移 · Ctrl／⌘ + 滚轮缩放 · 方向键平移 · + / − 缩放 · 0 适应全图'); canvas.after(navigationHint);
+    const statisticsPanel = dom('section', 'kg-statistics'); statisticsPanel.hidden = !libraryScope; statisticsPanel.setAttribute('aria-label', '全库文献统计'); navigationHint.after(statisticsPanel);
     root.querySelector('h3').textContent = libraryScope ? '全库图谱' : '本文图谱';
     root.querySelector('.kg-toolbar p').textContent = libraryScope ? '跨文献浏览已保存的关系；按目录分批显示，原文依据保留在所属论文中。' : '当前论文的方法、数据、论点与论据。';
     if (!libraryScope && onOpenLibrary) {
@@ -46,6 +112,97 @@
     for (const value of EDITABLE_RELATIONS) field('relation').append(option(value, relationLabel(value)));
     function status(text, error = false) { el('status').textContent = text; el('status').classList.toggle('kg-error', error); }
     function action(label, callback, className = 'text-button') { const button = dom('button', className, label); button.type = 'button'; button.addEventListener('click', callback); return button; }
+    function applyViewport() {
+      const svg = canvas.querySelector('svg'); if (!svg || !viewport) return;
+      const value = viewport.snapshot(); svg.setAttribute('viewBox', `${value.x} ${value.y} ${value.width} ${value.height}`);
+      canvas.dataset.zoom = String(value.zoom); zoomLabel.value = zoomLabel.textContent = `${Math.round(value.zoom * 100)}%`;
+      zoomOut.disabled = value.zoom <= .5; zoomIn.disabled = value.zoom >= 8;
+    }
+    function resize() { if (viewport) { viewport.resize({ width: canvas.clientWidth || 640, height: canvas.clientHeight || 440 }); applyViewport(); } }
+    function fit() { if (viewport) { resize(); viewport.fit(); applyViewport(); } }
+    function changeZoom(factor, anchor) { if (viewport) { viewport.setZoom(viewport.snapshot().zoom * factor, anchor); applyViewport(); } }
+    zoomOut.addEventListener('click', () => changeZoom(1 / 1.25)); zoomIn.addEventListener('click', () => changeZoom(1.25)); fitButton.addEventListener('click', fit);
+    canvas.addEventListener('wheel', event => {
+      if ((!event.ctrlKey && !event.metaKey) || !viewport) return;
+      event.preventDefault(); const rect = canvas.getBoundingClientRect();
+      changeZoom(Math.exp(-Math.max(-100, Math.min(100, event.deltaY)) * .01), { x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height });
+    }, { passive: false });
+    canvas.addEventListener('keydown', event => {
+      if (!viewport || event.ctrlKey || event.metaKey || event.altKey) return;
+      const step = viewport.snapshot().width * .08, moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+      if (moves[event.key]) { event.preventDefault(); viewport.pan(...moves[event.key]); applyViewport(); }
+      else if (['+', '='].includes(event.key)) { event.preventDefault(); changeZoom(1.25); }
+      else if (event.key === '-') { event.preventDefault(); changeZoom(1 / 1.25); }
+      else if (event.key === '0' || event.key === 'Home') { event.preventDefault(); fit(); }
+    });
+    canvas.addEventListener('pointerdown', event => {
+      if (!viewport || event.button !== 0 || event.target.closest?.('.kg-node')) return;
+      panGesture = { id: event.pointerId, x: event.clientX, y: event.clientY }; canvas.classList.add('is-panning'); canvas.focus({ preventScroll: true });
+      try { canvas.setPointerCapture(event.pointerId); } catch {} event.preventDefault();
+    });
+    canvas.addEventListener('pointermove', event => {
+      if (!viewport || panGesture?.id !== event.pointerId) return;
+      const value = viewport.snapshot(); viewport.pan((panGesture.x - event.clientX) * value.width / (canvas.clientWidth || 640), (panGesture.y - event.clientY) * value.height / (canvas.clientHeight || 440));
+      panGesture.x = event.clientX; panGesture.y = event.clientY; applyViewport();
+    });
+    const endPan = event => { if (panGesture?.id !== event.pointerId) return; panGesture = null; canvas.classList.remove('is-panning'); try { if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId); } catch {} };
+    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(type, endPan);
+    function barChart(host, values, label) {
+      const svg = document.createElementNS(SVG, 'svg'); svg.setAttribute('viewBox', '0 0 900 230'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', label); svg.classList.add('kg-stat-chart');
+      const maximum = Math.max(1, ...values.map(value => value.count)), spacing = 840 / Math.max(1, values.length), stride = Math.max(1, Math.ceil(values.length / 14));
+      values.forEach((value, index) => {
+        const group = document.createElementNS(SVG, 'g'), bar = document.createElementNS(SVG, 'rect'), title = document.createElementNS(SVG, 'title');
+        const height = value.count / maximum * 155, x = 36 + index * spacing;
+        title.textContent = `${value.label}：${value.count} 篇`; bar.setAttribute('x', String(x)); bar.setAttribute('y', String(178 - height)); bar.setAttribute('width', String(Math.max(1, spacing * .7))); bar.setAttribute('height', String(height));
+        if (value.missing) bar.classList.add('is-missing'); group.append(title, bar);
+        if (index % stride === 0 || index === values.length - 1 || value.missing) {
+          const text = document.createElementNS(SVG, 'text'); text.textContent = value.label; text.setAttribute('x', String(x + spacing * .35)); text.setAttribute('y', '205'); text.style.textAnchor = index === 0 ? 'start' : index === values.length - 1 ? 'end' : 'middle'; group.append(text);
+          if (values.length < 20) { const number = document.createElementNS(SVG, 'text'); number.textContent = String(value.count); number.setAttribute('x', String(x + spacing * .35)); number.setAttribute('y', String(168 - height)); group.append(number); }
+        }
+        svg.append(group);
+      }); host.append(svg);
+      const details = dom('details', 'kg-stat-data'); details.append(dom('summary', '', '查看统计明细'));
+      const table = dom('table'), caption = dom('caption', '', label), head = dom('tr'); head.append(dom('th', '', '分组'), dom('th', '', '文献数')); const thead = dom('thead'); thead.append(head); const tbody = dom('tbody');
+      for (const value of values) { const row = dom('tr'); row.append(dom('td', '', value.label), dom('td', '', String(value.count))); tbody.append(row); }
+      table.append(caption, thead, tbody); details.append(table); host.append(details);
+    }
+    function renderStatistics(message = '', error = false) {
+      if (!libraryScope) return;
+      statisticsPanel.replaceChildren(); const heading = dom('div', 'kg-statistics-heading'); heading.append(dom('h4', '', '全库文献统计'));
+      if (statistics) heading.append(dom('span', 'kg-stat-total', `${statistics.total_papers} 篇有效文献`));
+      statisticsPanel.append(heading);
+      if (message) { const note = dom('p', `kg-status${error ? ' kg-error' : ''}`, message); note.setAttribute('role', 'status'); if (error) note.append(action('重新读取统计', () => void loadStatistics(true))); statisticsPanel.append(note); }
+      if (!statistics) return;
+      const cards = dom('div', 'kg-statistics-grid'), yearCard = dom('article', 'kg-stat-card'), citationCard = dom('article', 'kg-stat-card');
+      const years = statistics.years; yearCard.append(dom('h5', '', '发表年份'), dom('p', 'kg-stat-coverage', `已知 ${years.known} / ${statistics.total_papers} 篇 · 年份缺失 ${years.missing} 篇`));
+      const yearValues = [...(years.other_count ? [{ label: '较早年份合计', count: years.other_count }] : []), ...years.items.map(item => ({ label: String(item.year), count: item.count })), { label: '年份缺失', count: years.missing, missing: true }];
+      if (statistics.total_papers) barChart(yearCard, yearValues, '按已保存发表年份统计的文献数；缺失年份单列');
+      else yearCard.append(dom('p', 'kg-help', '文献库尚无有效文献。'));
+      if (years.other_count) yearCard.append(dom('p', 'kg-help', '图中列出最近 200 个已知年份，其余较早年份合并；全库条目均计入。'));
+      citationCard.append(dom('h5', '', '已采集引用量'), dom('p', 'kg-stat-coverage', `至少一个来源已知 ${statistics.citations.known_papers} / ${statistics.total_papers} 篇 · 未知 ${statistics.citations.missing_papers} 篇`));
+      const sources = statistics.citations.sources.filter(source => source.known > 0);
+      if (!sources.length) citationCard.append(dom('p', 'kg-stat-empty', '尚未采集带来源的引用量。未知不计为 0，也不会从当前图中的连线数量推算。'));
+      else {
+        if (!sources.some(source => source.id === citationSource)) citationSource = sources[0].id;
+        const sourceLabel = dom('label', 'kg-stat-source', '统计来源 '), sourceSelect = dom('select'); sourceSelect.setAttribute('aria-label', '引用量统计来源');
+        for (const source of sources) sourceSelect.append(option(source.id, `${source.label} · ${source.known} 篇`)); sourceSelect.value = citationSource; sourceLabel.append(sourceSelect); citationCard.append(sourceLabel);
+        const chart = dom('div'); citationCard.append(chart);
+        const draw = () => { const source = sources.find(value => value.id === citationSource); chart.replaceChildren(); chart.append(dom('p', 'kg-help', `${source.label}：已知 ${source.known} 篇，未采集 ${source.missing} 篇。不同来源分别统计，不相加。`)); barChart(chart, source.buckets, `${source.label} 已保存引用量区间的文献数`); };
+        sourceSelect.addEventListener('change', () => { citationSource = sourceSelect.value; draw(); }); draw();
+      }
+      cards.append(yearCard, citationCard); statisticsPanel.append(cards, dom('p', 'kg-help', '范围为整个有效文献目录，与当前图谱的文献批次无关；只读取已保存元数据，不联网更新。引用量是来源快照，可能随时间变化。'));
+    }
+    async function loadStatistics(force = false) {
+      if (!libraryScope) return;
+      if (statisticsFlight && !force) return statisticsFlight;
+      if (statistics && !force) return statistics;
+      const ticket = ++statisticsRevision; statisticsPanel.setAttribute('aria-busy', 'true'); renderStatistics('正在汇总全库已保存元数据…');
+      const task = (async () => {
+        try { const result = statisticsOf(await api('graph_statistics', {})); if (ticket === statisticsRevision) { statistics = result; renderStatistics(); } return result; }
+        catch (error) { if (ticket === statisticsRevision) renderStatistics(`${statistics ? '保留上次统计；' : ''}统计读取失败：${error.message}`, true); }
+        finally { if (ticket === statisticsRevision) { statisticsPanel.setAttribute('aria-busy', 'false'); statisticsFlight = null; } }
+      })(); statisticsFlight = task; return task;
+    }
     function evidenceContent(parent, entry) {
       parent.append(dom('p', 'kg-provenance', entry.provenance === 'catalog-metadata' ? '来自文献资料 · 编辑资料可更新' : '读者记录 · 需要结合原文判断'));
       parent.append(dom('p', 'kg-evidence', evidenceSummary(entry.evidence)));
@@ -87,30 +244,41 @@
     function renderCanvas() {
       const filter = el('filter').value, visible = graph.nodes.filter(node => !filter || node.type === filter || node.id === paperId);
       const host = el('canvas'); host.replaceChildren();
-      if (!visible.length) { host.append(dom('p', 'kg-help', '当前类型没有节点。')); return; }
-      const columns = Math.min(4, Math.max(1, Math.ceil(Math.sqrt(visible.length)))), rows = Math.ceil(visible.length / columns);
-      const width = 640, rowHeight = 88, height = Math.max(210, rows * rowHeight + 32), positions = new Map();
-      const svg = document.createElementNS(SVG, 'svg'); svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('role', 'group'); svg.setAttribute('aria-label', '文献知识图谱，使用 Tab 选择节点查看关系与来源');
-      svg.style.minHeight = `${Math.min(420, height)}px`;
+      selectionLabel.textContent = selected ? `已选：${graph.nodes.find(node => node.id === selected)?.label || ''}` : '尚未选择节点';
+      if (!visible.length) { viewport = null; host.append(dom('p', 'kg-help', '当前类型没有节点。')); return; }
+      const columns = Math.min(10, Math.max(1, Math.ceil(Math.sqrt(visible.length * 1.5)))), rows = Math.ceil(visible.length / columns);
+      const width = columns * 180 + 80, rowHeight = 100, height = Math.max(160, rows * rowHeight + 50), positions = new Map();
+      const svg = document.createElementNS(SVG, 'svg'); svg.setAttribute('role', 'group'); svg.setAttribute('aria-label', '文献知识图谱，使用 Tab 选择节点查看关系与来源');
       const defs = document.createElementNS(SVG, 'defs'), marker = document.createElementNS(SVG, 'marker'), arrow = document.createElementNS(SVG, 'path');
-      marker.setAttribute('id', 'kg-arrow'); marker.setAttribute('viewBox', '0 0 10 10'); marker.setAttribute('refX', '9'); marker.setAttribute('refY', '5'); marker.setAttribute('markerWidth', '5'); marker.setAttribute('markerHeight', '5'); marker.setAttribute('orient', 'auto-start-reverse'); arrow.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z'); marker.append(arrow); defs.append(marker); svg.append(defs);
-      visible.forEach((node, index) => positions.set(node.id, { x: (index % columns + .5) * width / columns, y: Math.floor(index / columns) * rowHeight + 48 }));
+      marker.setAttribute('id', markerId); marker.setAttribute('viewBox', '0 0 10 10'); marker.setAttribute('refX', '9'); marker.setAttribute('refY', '5'); marker.setAttribute('markerWidth', '5'); marker.setAttribute('markerHeight', '5'); marker.setAttribute('orient', 'auto-start-reverse'); arrow.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z'); marker.append(arrow); defs.append(marker); svg.append(defs);
+      visible.forEach((node, index) => positions.set(node.id, { x: (index % columns + .5) * 180 + 40, y: Math.floor(index / columns) * rowHeight + 38 }));
       for (const edge of graph.edges) {
         const source = positions.get(edge.source), target = positions.get(edge.target); if (!source || !target) continue;
         const dx = target.x - source.x, dy = target.y - source.y, distance = Math.hypot(dx, dy) || 1;
         const line = document.createElementNS(SVG, 'line');
-        line.setAttribute('x1', String(source.x + dx / distance * 17)); line.setAttribute('y1', String(source.y + dy / distance * 17)); line.setAttribute('x2', String(target.x - dx / distance * 21)); line.setAttribute('y2', String(target.y - dy / distance * 21)); line.setAttribute('marker-end', 'url(#kg-arrow)');
-        line.classList.add('kg-edge'); if (selected && (edge.source === selected || edge.target === selected)) line.classList.add('is-selected'); const title = document.createElementNS(SVG, 'title'); title.textContent = relationLabel(edge.relation); line.append(title); svg.append(line);
+        line.setAttribute('x1', String(source.x + dx / distance * 21)); line.setAttribute('y1', String(source.y + dy / distance * 21)); line.setAttribute('x2', String(target.x - dx / distance * 25)); line.setAttribute('y2', String(target.y - dy / distance * 25)); line.setAttribute('marker-end', `url(#${markerId})`);
+        line.classList.add('kg-edge'); if (selected) line.classList.add(edge.source === selected || edge.target === selected ? 'is-selected' : 'is-muted'); const title = document.createElementNS(SVG, 'title'); title.textContent = relationLabel(edge.relation); line.append(title); svg.append(line);
       }
       for (const node of visible) {
-        const pos = positions.get(node.id), group = document.createElementNS(SVG, 'g'); group.setAttribute('transform', `translate(${pos.x},${pos.y})`); group.setAttribute('tabindex', '0'); group.setAttribute('role', 'button'); group.setAttribute('aria-label', nodeName(node)); group.setAttribute('aria-pressed', String(selected === node.id)); group.classList.add('kg-node', `kg-type-${node.type}`); if (selected === node.id) group.classList.add('is-selected');
-        const circle = document.createElementNS(SVG, 'circle'); circle.setAttribute('r', '16');
+        const pos = positions.get(node.id), group = document.createElementNS(SVG, 'g'); group.dataset.nodeId = node.id; group.setAttribute('transform', `translate(${pos.x},${pos.y})`); group.setAttribute('tabindex', '0'); group.setAttribute('role', 'button'); group.setAttribute('aria-label', nodeName(node)); group.setAttribute('aria-pressed', String(selected === node.id)); group.classList.add('kg-node', `kg-type-${node.type}`); if (selected === node.id) group.classList.add('is-selected');
+        const ring = document.createElementNS(SVG, 'circle'); ring.setAttribute('r', '26'); ring.classList.add('kg-selection-ring'); const circle = document.createElementNS(SVG, 'circle'); circle.setAttribute('r', '20');
         const typeText = document.createElementNS(SVG, 'text'); typeText.textContent = TYPES[node.type] || node.type; typeText.setAttribute('y', '4'); typeText.classList.add('kg-node-type');
-        const label = document.createElementNS(SVG, 'text'); label.setAttribute('y', '35'); label.classList.add('kg-node-label'); label.textContent = node.label.length > 18 ? node.label.slice(0, 17) + '…' : node.label;
-        const title = document.createElementNS(SVG, 'title'); title.textContent = nodeName(node); group.append(circle, typeText, label, title);
-        const choose = () => { selected = node.id; edgePage = 0; render(); }; group.addEventListener('click', choose); group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(); } }); svg.append(group);
+        const label = document.createElementNS(SVG, 'text'); label.setAttribute('y', '46'); label.classList.add('kg-node-label'); label.textContent = shortLabel(node.label);
+        const title = document.createElementNS(SVG, 'title'); title.textContent = nodeName(node); group.append(ring, circle, typeText, label, title);
+        group.addEventListener('focus', () => {
+          if (!viewport) return; const view = viewport.snapshot(), margin = Math.min(60, view.width / 4, view.height / 4);
+          const dx = pos.x < view.x + margin ? pos.x - view.x - margin : pos.x > view.x + view.width - margin ? pos.x - view.x - view.width + margin : 0;
+          const dy = pos.y < view.y + margin ? pos.y - view.y - margin : pos.y > view.y + view.height - margin ? pos.y - view.y - view.height + margin : 0;
+          if (dx || dy) { viewport.pan(dx, dy); applyViewport(); }
+        });
+        const choose = () => { selected = node.id; edgePage = 0; render(); [...canvas.querySelectorAll('.kg-node')].find(value => value.dataset.nodeId === selected)?.focus({ preventScroll: true }); }; group.addEventListener('click', choose); group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(); } }); svg.append(group);
       }
       host.append(svg);
+      if (!viewport) {
+        const size = { width: host.clientWidth || 640, height: host.clientHeight || 440 }; viewport = createViewport({ width, height }, size);
+        viewport.setZoom(Math.max(1, Math.min(3, .8 * Math.max(width / size.width, height / size.height))));
+      }
+      applyViewport();
     }
     function render() {
       const types = new Set(graph.nodes.map(node => node.type)), legend = el('legend'); legend.replaceChildren();
@@ -120,7 +288,8 @@
     }
     async function load(item = getPaper(), offset = 0) {
       catalogOffset=offset;
-      const run = ++revision; paperId = libraryScope ? null : item?.id || null; selected = null; edgePage = 0; closeEditor(); graph = { nodes: [], edges: [] }; render();
+      const run = ++revision; paperId = libraryScope ? null : item?.id || null; selected = null; edgePage = 0; viewport = null; closeEditor(); graph = { nodes: [], edges: [] }; render();
+      if (libraryScope) void loadStatistics();
       if (!paperId && !libraryScope) { status('选择一篇文献查看本文图谱，或从顶栏打开全库图谱。'); return; }
       const requestedId = paperId; status(libraryScope ? '正在读取全库图谱…' : '正在读取本文图谱…');
       try {
@@ -179,10 +348,11 @@
     });
     el('cancel').addEventListener('click', closeEditor); form.addEventListener('submit', save);
     el('dialog').addEventListener('cancel', event => { if (busy) event.preventDefault(); else editing = null; });
-    el('filter').addEventListener('change', renderCanvas); el('reset').addEventListener('click', () => { selected = null; edgePage = 0; render(); });
+    el('filter').addEventListener('change', () => { viewport = null; const filter = el('filter').value, node = graph.nodes.find(value => value.id === selected); if (filter && node && node.type !== filter && node.id !== paperId) { selected = null; edgePage = 0; } render(); }); el('reset').addEventListener('click', () => { selected = null; edgePage = 0; render(); });
     el('previous').addEventListener('click', () => { edgePage = Math.max(0, edgePage - 1); renderRelations(); }); el('next').addEventListener('click', () => { edgePage++; renderRelations(); });
-    function clear() { ++revision; paperId = null; selected = null; graph = { nodes: [], edges: [] }; closeEditor(); render(); status('选择一篇文献查看知识图谱。'); }
-    clear(); return { load, reload:()=>load(getPaper(),catalogOffset), clear, selectedNode: () => graph.nodes.find(node => node.id === selected) ?? null };
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(resize) : null; observer?.observe(canvas);
+    function clear() { ++revision; ++statisticsRevision; statistics = null; statisticsFlight = null; statisticsPanel.setAttribute('aria-busy', 'false'); viewport = null; const gesture = panGesture; panGesture = null; canvas.classList.remove('is-panning'); try { if (gesture && canvas.hasPointerCapture(gesture.id)) canvas.releasePointerCapture(gesture.id); } catch {} paperId = null; selected = null; graph = { nodes: [], edges: [] }; closeEditor(); render(); renderStatistics(); status('选择一篇文献查看知识图谱。'); }
+    clear(); return { load, reload:()=>{ if(libraryScope)void loadStatistics(true);return load(getPaper(),catalogOffset); }, clear, resize, fit, resetView: fit, getViewport:()=>viewport?.snapshot() || null, selectedNode: () => graph.nodes.find(node => node.id === selected) ?? null };
   }
-  window.PaperKnowledgeGraph = Object.freeze({ create, types: TYPES, relations: RELATIONS, evidenceSummary, scopedEdges, relationLabel });
+  window.PaperKnowledgeGraph = Object.freeze({ create, createViewport, statisticsOf, shortLabel, labelWidth, types: TYPES, relations: RELATIONS, evidenceSummary, scopedEdges, relationLabel });
 })();

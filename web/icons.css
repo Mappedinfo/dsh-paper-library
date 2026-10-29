@@ -8,14 +8,15 @@
 }
 
 /* A compact shared control treatment, limited to the workspace chrome. */
+:root { --paper-control-height: 28px; --paper-control-gap: 4px; }
 :is(.topbar-actions, .reader-ribbon, .paper-tools, .library-organizer-row)
   :is(.button, .icon-button, .tab, summary:not(#ink-queue-summary)) {
-  box-sizing: border-box; min-height: 32px; padding: 5px 8px;
-  border: 1px solid var(--dsw-alias-border-l2); border-radius: 4px;
+  box-sizing: border-box; min-height: var(--paper-control-height); padding: 4px 7px;
+  border: 1px solid transparent; border-radius: 4px;
   background: transparent; color: var(--dsw-alias-label-primary); font-size: 12px; line-height: 1.35;
 }
 :is(.topbar-actions, .reader-ribbon, .paper-tools, .library-organizer-row) .icon-button {
-  width: 32px; height: 32px; padding: 4px; flex: none;
+  width: var(--paper-control-height); height: var(--paper-control-height); padding: 4px; flex: none;
 }
 :is(.topbar-actions, .reader-ribbon, .paper-tools, .library-organizer-row)
   :is(.button, .icon-button, .tab, summary:not(#ink-queue-summary)):hover:not(:disabled) {
@@ -35,3 +36,19 @@
   background: var(--dsw-alias-button-primary-hover);
 }
 .paper-tools #catalog-archive, .paper-tools #catalog-archive:hover:not(:disabled) { color: var(--dsw-alias-state-error-primary); }
+
+.topbar-actions, .reader-ribbon { gap: var(--paper-control-gap); }
+.reader-ribbon { align-items: center; }
+.paper-tools { gap: 6px; padding: 3px 0; min-height: 34px; }
+.library-organizer-row select, .catalog-controls select {
+  box-sizing: border-box; height: var(--paper-control-height); min-height: var(--paper-control-height);
+  padding: 3px 6px; font-size: 12px; line-height: 1.2;
+}
+.library-pane .pane-heading :is(#catalog-expand, #refresh) {
+  box-sizing: border-box; width: 28px; height: 28px; min-height: 28px; padding: 3px;
+  border: 1px solid transparent; border-radius: 4px;
+}
+.library-pane .pane-heading #catalog-expand { font-size: 0; }
+.catalog-expanded .library-pane .pane-heading #catalog-expand { width: auto; padding: 3px 7px; font-size: 12px; }
+.library-pane .pane-heading :is(#catalog-expand, #refresh):hover { background: var(--dsw-alias-interactive-bg-hover); }
+.library-pane .pane-heading :is(#catalog-expand, #refresh):focus-visible { outline: 2px solid var(--dsw-alias-link); outline-offset: 2px; }

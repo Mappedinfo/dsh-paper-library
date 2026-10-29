@@ -75,7 +75,8 @@ window.PaperLatexWorkspace = (() => {
     const saveState = make('span', 'latex-save-state'); saveState.id = 'latex-save-state'; saveState.setAttribute('role', 'status');
     const aiToggle = make('button', 'button subtle', 'DSH 写作'); aiToggle.id = 'latex-ai-open'; aiToggle.type = 'button';
     const reviewToggle = make('button', 'button subtle', '自审'); reviewToggle.id = 'latex-review-open'; reviewToggle.type = 'button';
-    const navToggle = make('button', 'button subtle', '收起导航'); navToggle.id = 'latex-nav-toggle'; navToggle.type = 'button';
+    const reviewDivider = make('span', 'latex-toolbar-divider'); reviewDivider.setAttribute('role', 'separator'); reviewDivider.setAttribute('aria-orientation', 'vertical');
+    const navToggle = make('button', 'button subtle latex-nav-toggle', '侧边导航'); navToggle.id = 'latex-nav-toggle'; navToggle.type = 'button';
     navToggle.setAttribute('aria-controls', 'latex-navigator'); navToggle.setAttribute('aria-expanded', 'true');
     const layoutControls = make('div', 'latex-layout-controls'); layoutControls.setAttribute('role', 'group'); layoutControls.setAttribute('aria-label', '工作区视图');
     const layoutButtons = new Map();
@@ -88,7 +89,7 @@ window.PaperLatexWorkspace = (() => {
     aiToggle.hidden = !rail;
     const menuButton = make('button', 'button subtle latex-menu-button', '☰'); menuButton.id = 'latex-menu-open'; menuButton.type = 'button';
     menuButton.setAttribute('aria-expanded', 'false'); menuButton.setAttribute('aria-controls', 'latex-menu'); menuButton.setAttribute('aria-label', '项目与设置'); menuButton.title = '项目与设置';
-    toolbar.append(title, projectSelect, mainLabel, saveState, autoLabel, compile, diagnosticsToggle, navToggle, layoutControls, reviewToggle, aiToggle, menuButton, back);
+    toolbar.append(title, projectSelect, mainLabel, saveState, autoLabel, compile, diagnosticsToggle, navToggle, layoutControls, reviewDivider, reviewToggle, aiToggle, menuButton, back);
 
     const menu = make('div', 'latex-menu'); menu.id = 'latex-menu'; menu.setAttribute('aria-label', '项目与设置'); menu.hidden = true;
     const entryRow = make('div', 'latex-menu-section');
@@ -151,6 +152,14 @@ window.PaperLatexWorkspace = (() => {
     const settingsLine = make('div', 'latex-menu-row'); settingsLine.append(settingStarterLabel, settingAutoLabel, engineLabel, themeLabel, pathFontLabel, accentLabel, settingsRetry);
     settingRow.append(settingsLine);
 
+    const translateSettings = make('div', 'latex-menu-section'); translateSettings.append(make('span', 'latex-menu-label', '本项目选文翻译'));
+    const translateModel = make('select'); translateModel.id = 'latex-translate-model'; translateModel.setAttribute('aria-label', '本项目翻译模型');
+    const translateTarget = make('select'); translateTarget.id = 'latex-translate-target'; translateTarget.setAttribute('aria-label', '本项目翻译目标语言');
+    for (const [value, label] of [['zh-CN', '译为中文'], ['en', '译为英文']]) { const option = make('option', '', label); option.value = value; translateTarget.append(option); }
+    const translatePrompt = make('textarea'); translatePrompt.id = 'latex-translate-prompt'; translatePrompt.rows = 2; translatePrompt.maxLength = 2000; translatePrompt.placeholder = '本项目补充提示词；留空跟随语言设置'; translatePrompt.setAttribute('aria-label', '本项目翻译补充提示词');
+    const translateSave = make('button', 'button subtle', '保存本项目翻译设置'); translateSave.id = 'latex-translate-settings-save'; translateSave.type = 'button';
+    translateSettings.append(translateModel, translateTarget, translatePrompt, translateSave, make('p', 'latex-menu-hint', '模型默认跟随语言设置。标为轻量的名称仅供选择；实际价格与延迟未知。'));
+
     const rootRow = make('div', 'latex-menu-section');
     rootRow.append(make('span', 'latex-menu-label', '论文目录'));
     const rootPath = make('code', 'latex-root'); rootPath.id = 'latex-root'; rootPath.textContent = '读取中…';
@@ -158,7 +167,7 @@ window.PaperLatexWorkspace = (() => {
     const syncAttach = make('button', 'button subtle', '纳入同步'); syncAttach.id = 'latex-sync-attach'; syncAttach.type = 'button';
     const rootLine = make('div', 'latex-menu-row'); rootLine.append(rootPath, syncState, syncAttach);
     rootRow.append(rootLine, make('p', 'latex-menu-hint', '论文目录由插件维护；数据同步服务会把它作为一个独立源备份（只新增，不删改其他源）。'));
-    menu.append(entryRow, readingRow, createRow, registerRow, compareRow, settingRow, rootRow);
+    menu.append(entryRow, readingRow, createRow, registerRow, compareRow, settingRow, translateSettings, rootRow);
 
     // ---- body: source | divider | (pdf | dsh | versions) ----
     const content = make('div', 'latex-content');
@@ -184,22 +193,27 @@ window.PaperLatexWorkspace = (() => {
     const sourceNote = make('button', 'button subtle', '批注'); sourceNote.id = 'latex-source-note'; sourceNote.type = 'button'; sourceNote.title = '批注选段／当前行';
     const sourceSearch = make('button', 'button subtle', '查找'); sourceSearch.id = 'latex-source-search'; sourceSearch.type = 'button'; sourceSearch.title = '当前文件查找／替换（⌘/Ctrl+F）';
     const sourceTools = make('button', 'button subtle', '插入'); sourceTools.id = 'latex-source-tools'; sourceTools.type = 'button'; sourceTools.setAttribute('aria-expanded', 'false'); sourceTools.setAttribute('aria-controls', 'latex-source-tools-menu');
-    breadcrumb.append(currentFile, sourceSearch, sourceNote, sourceTools);
+    const sourceTranslate = make('button', 'button subtle', '翻译选文'); sourceTranslate.id = 'latex-translate-selection'; sourceTranslate.type = 'button';
+    const sourceSpell = make('button', 'button subtle', '英文拼写'); sourceSpell.id = 'latex-spell-toggle'; sourceSpell.type = 'button'; sourceSpell.disabled = true; sourceSpell.setAttribute('aria-pressed', 'false');
+    breadcrumb.append(currentFile, sourceSearch, sourceNote, sourceTranslate, sourceSpell, sourceTools);
     const sourceToolsMenu = make('div', 'latex-source-tools-menu'); sourceToolsMenu.id = 'latex-source-tools-menu'; sourceToolsMenu.hidden = true;
     const figureInsert = make('button', 'button subtle', '插入图片模板　⌘/Ctrl+Shift+I'); figureInsert.id = 'latex-insert-figure'; figureInsert.type = 'button';
     const tableInsert = make('button', 'button subtle', '编辑表格　⌘/Ctrl+Shift+T'); tableInsert.id = 'latex-insert-table'; tableInsert.type = 'button';
     const formulaCheck = make('button', 'button subtle', '提取并检查公式'); formulaCheck.id = 'latex-formula-check'; formulaCheck.type = 'button';
     sourceToolsMenu.append(figureInsert, tableInsert, formulaCheck, make('p', '', '图片拖到源码区或粘贴截图，保存到项目 figures/。表格支持 Markdown、Excel 选区和 .xlsx 文件。'));
     const formulaHost = make('section', 'latex-formula-panel'); formulaHost.id = 'latex-formula-panel'; formulaHost.hidden = true;
+    const spellResults = make('div', 'latex-spelling-results'); spellResults.id = 'latex-spelling-results'; spellResults.hidden = true;
+    const translateResults = make('section', 'latex-translation-results'); translateResults.id = 'latex-translation-results'; translateResults.hidden = true;
     const editorWrap = make('div', 'latex-editor-wrap');
     const gutter = make('div', 'latex-gutter'); gutter.id = 'latex-gutter'; gutter.setAttribute('aria-hidden', 'true');
     const editor = make('textarea'); editor.id = 'latex-editor'; editor.spellcheck = false; editor.autocomplete = 'off'; editor.setAttribute('aria-label', 'LaTeX 源文件内容');
     editorWrap.append(gutter, editor);
-    const sourceEditor = window.PaperLatexEditor?.create(editor, editorWrap) || null;
+    let sourceEditor = null;
+    try { sourceEditor = window.PaperLatexEditor?.create?.(editor, editorWrap) || null; } catch { /* Keep the native textarea usable if the enhanced editor cannot mount. */ }
     if (sourceEditor) { editorWrap.classList.add('latex-codemirror'); gutter.hidden = true; }
     sourceSearch.hidden = !sourceEditor;
     sourceSearch.addEventListener('click', () => sourceEditor?.openSearch());
-    left.append(breadcrumb, sourceToolsMenu, formulaHost, editorWrap);
+    left.append(breadcrumb, sourceToolsMenu, formulaHost, spellResults, translateResults, editorWrap);
 
     const splitter = make('div', 'latex-splitter'); splitter.id = 'latex-splitter'; splitter.setAttribute('role', 'separator');
     splitter.setAttribute('aria-orientation', 'vertical'); splitter.setAttribute('aria-label', '调整源码与预览宽度'); splitter.tabIndex = 0;
@@ -321,7 +335,7 @@ window.PaperLatexWorkspace = (() => {
     navToggle.addEventListener('click', () => {
       navigator.hidden = !navigator.hidden;
       content.classList.toggle('latex-nav-collapsed', navigator.hidden);
-      navToggle.textContent = navigator.hidden ? '展开导航' : '收起导航';
+      navToggle.title = navigator.hidden ? '展开侧边导航' : '收起侧边导航';
       navToggle.setAttribute('aria-expanded', String(!navigator.hidden));
       if (layout !== 'source') requestResize();
     });
@@ -384,10 +398,46 @@ window.PaperLatexWorkspace = (() => {
     editor.addEventListener('scroll', () => { gutter.scrollTop = editor.scrollTop; });
     editor.addEventListener('input', () => {
       dirty = true; pendingConflict = null; conflictBar.hidden = true; lineNumbers(); setSaveState('未保存', 'dirty'); scheduleSave();
-      updateSyncHint(); if (!sourceEditor) updateNavigatorActive();
+      updateSyncHint(); if (!sourceEditor) updateNavigatorActive(); scheduleSpelling();
     });
     editor.addEventListener('select', () => updateNavigatorActive());
     if (!sourceEditor) for (const event of ['click', 'keyup']) editor.addEventListener(event, () => updateNavigatorActive());
+    let spellEnabled = false, spellTimer = null, spellRevision = 0, spellLoaded = false, spellEpoch = 0, spellingLoading = null;
+    function ensureSpelling() {
+      if (window.PaperLatexSpelling?.checkSpelling) return Promise.resolve(window.PaperLatexSpelling);
+      if (!spellingLoading) spellingLoading = new Promise((resolve, reject) => {
+        const script = make('script'); script.src = './latex-spelling.js'; script.async = true;
+        script.onload = () => window.PaperLatexSpelling?.checkSpelling ? resolve(window.PaperLatexSpelling) : reject(new Error('本地词典没有提供拼写检查'));
+        script.onerror = () => { script.remove(); reject(new Error('本地词典加载失败，请刷新后重试')); };
+        document.head.append(script);
+      }).catch(error => { spellingLoading = null; throw error; });
+      return spellingLoading;
+    }
+    async function loadSpelling() {
+      if (spellLoaded) return; spellLoaded = true;
+      try { const record = await api('state_get', { key: 'reader:latex-spelling' }); spellRevision = record.revision; spellEnabled = record.value?.enabled === true; sourceSpell.setAttribute('aria-pressed', String(spellEnabled)); scheduleSpelling(); } catch { /* An unavailable preference leaves checking off. */ } finally { sourceSpell.disabled = false; }
+    }
+    function scheduleSpelling() {
+      const epoch = ++spellEpoch; clearTimeout(spellTimer); spellResults.hidden = !spellEnabled;
+      if (!spellEnabled) { spellResults.textContent = ''; return; }
+      spellResults.textContent = '正在检查英文拼写…';
+      spellTimer = setTimeout(async () => {
+        try {
+          const checker = await ensureSpelling(); if (epoch !== spellEpoch || !spellEnabled || disposed) return;
+          const result = checker.checkSpelling(editor.value); spellResults.textContent = '';
+          spellResults.append(make('span', '', result.items.length ? '可能拼写有误：' : result.truncated ? '已检查范围未发现英文拼写问题。' : '未发现英文拼写问题。'));
+          if (result.truncated) spellResults.append(make('p', '', `已检查前 ${result.checkedCharacters} 字符、${result.checkedWords} 个英文词；达到${result.limitReason === 'results' ? '结果' : '扫描'}上限，后文尚未检查。`));
+          for (const item of result.items) { const button = make('button', 'button subtle', item.word); button.type = 'button'; button.title = '定位到源码中的此词'; button.addEventListener('click', () => { editor.setSelectionRange(item.from, item.to); editor.focus(); }); spellResults.append(button); }
+        } catch (error) { if (epoch === spellEpoch && spellEnabled && !disposed) spellResults.textContent = `本地拼写检查不可用：${error.message}`; }
+      }, 450);
+    }
+    sourceSpell.addEventListener('click', async () => {
+      sourceSpell.disabled = true;
+      spellEnabled = !spellEnabled; sourceSpell.setAttribute('aria-pressed', String(spellEnabled)); scheduleSpelling();
+      try { const record = await api('state_put', { key: 'reader:latex-spelling', value: { enabled: spellEnabled }, expected_revision: spellRevision }); spellRevision = record.revision; }
+      catch (error) { say(`拼写开关未能保存：${error.message}`, true); }
+      finally { sourceSpell.disabled = false; }
+    });
     function writingContext() {
       return { id: project?.id, title: project?.title, path: file, revision, content: editor.value, selectionStart: editor.selectionStart || 0, selectionEnd: editor.selectionEnd || 0,
         blocked: !project || !file || editor.disabled || switching || Boolean(pendingConflict) };
@@ -558,7 +608,7 @@ window.PaperLatexWorkspace = (() => {
       event.stopPropagation();
       menu.hidden = !menu.hidden;
       menuButton.setAttribute('aria-expanded', String(!menu.hidden));
-      if (!menu.hidden) { void refreshWorkspace(); void loadReadingProjects(); }
+      if (!menu.hidden) { void refreshWorkspace(); void loadReadingProjects(); void loadTranslationSettings(); }
     });
     let readingRequest = 0;
     async function loadReadingProjects() {
@@ -692,6 +742,7 @@ window.PaperLatexWorkspace = (() => {
     async function selectProject(id) {
       if (switching || compiling) { projectSelect.value = project?.id || ''; return; }
       if (!await savedBeforeLeaving(true)) { projectSelect.value = project?.id || ''; return; }
+      cancelTranslation();
       if (!id) { project = null; await renderEmpty(); return; }
       cancelReads();
       generation += 1;
@@ -909,9 +960,10 @@ window.PaperLatexWorkspace = (() => {
         return false;
       } finally { if (ticket === fileRequest) editor.disabled = !file; }
       if (ticket !== fileRequest || epoch !== generation || id !== project?.id || disposed) return false;
-      file = read.path; revision = read.revision; dirty = false;
+      cancelTranslation(); file = read.path; revision = read.revision; dirty = false;
       editor.disabled = false; currentFile.textContent = file;
       editor.value = read.content; lineNumbers(); editor.scrollTop = 0; gutter.scrollTop = 0;
+      scheduleSpelling();
       pendingConflict = null; conflictBar.hidden = true;
       setSaveState('已载入', 'saved');
       updateNavigatorActive();
@@ -1534,6 +1586,56 @@ window.PaperLatexWorkspace = (() => {
       const value = editor.value.slice(start, end);
       return value.trim() ? value : undefined;
     }
+    let translationConfig = null, translationProject = null, translationRevision = null, translationLoad = 0, translationBusy = false, translationRequest = 0, translationAbort = null;
+    function cancelTranslation() { ++translationRequest; translationAbort?.abort(); translationAbort = null; translationBusy = false; sourceTranslate.disabled = false; translateResults.hidden = true; translateResults.textContent = ''; }
+    const translationKey = id => `reader:latex-translation-${id}`;
+    async function loadTranslationSettings() {
+      const id = project?.id, ticket = ++translationLoad; if (!id) { translateSave.disabled = true; return false; }
+      translateSave.disabled = true;
+      try {
+        const [global, record] = await Promise.all([api('language_settings_get', {}), api('state_get', { key: translationKey(id) })]);
+        if (ticket !== translationLoad || project?.id !== id || disposed) return false;
+        translationConfig = record.value || { model: null, prompt: '' }; translationProject = id; translationRevision = record.revision;
+        translateModel.textContent = ''; const automatic = make('option', '', '跟随语言工具设置'); automatic.value = ''; translateModel.append(automatic);
+        const options = Array.isArray(global.models) ? global.models : [];
+        for (const model of options) {
+          const candidate = /(?:flash|mini|nano|small|lite|haiku)/i.test(`${model.id} ${model.name || ''}`);
+          const option = make('option', '', `${model.provider} / ${model.name || model.id}${candidate ? ' · 轻量候选（价格和速度未知）' : ''}`);
+          option.value = JSON.stringify({ provider: model.provider, model: model.id }); translateModel.append(option);
+        }
+        const selected = translationConfig.model ? JSON.stringify(translationConfig.model) : '';
+        if (selected && !options.some(model => JSON.stringify({ provider: model.provider, model: model.id }) === selected)) {
+          const missing = make('option', '', `${translationConfig.model.provider} / ${translationConfig.model.model}（当前不可用）`); missing.value = selected; translateModel.append(missing);
+        }
+        translateModel.value = selected; translateTarget.value = translationConfig.target_language === 'en' ? 'en' : 'zh-CN'; translatePrompt.value = translationConfig.prompt || ''; translateSave.disabled = false; return true;
+      } catch (error) { if (ticket === translationLoad) say(`翻译设置读取失败：${error.message}`, true); return false; }
+    }
+    translateSave.addEventListener('click', async () => {
+      const id = project?.id; if (!id || translationProject !== id) return;
+      let model = null; try { if (translateModel.value) model = JSON.parse(translateModel.value); } catch { say('请选择可用模型。', true); return; }
+      const value = { model, target_language: translateTarget.value === 'en' ? 'en' : 'zh-CN', prompt: translatePrompt.value }; translateSave.disabled = true;
+      try { const record = await api('state_put', { key: translationKey(id), value, expected_revision: translationRevision }); if (id !== project?.id) return; translationConfig = value; translationRevision = record.revision; say('本项目翻译设置已保存。'); }
+      catch (error) { say(`翻译设置未保存；输入仍保留：${error.message}`, true); }
+      finally { translateSave.disabled = false; }
+    });
+    sourceTranslate.addEventListener('click', async () => {
+      if (translationBusy || !project || !file) return;
+      const id = project.id, path = file, epoch = generation, sourceTicket = fileRequest, start = editor.selectionStart, end = editor.selectionEnd, selection = aiSelection();
+      if (!selection) { say('请先在源码中选择要翻译的文字。', true); return; }
+      if (selection.length > 8000) { say('选文超过 8000 字符，请缩小范围。', true); return; }
+      const ticket = ++translationRequest; translationAbort = new AbortController();
+      translationBusy = true; sourceTranslate.disabled = true; translateResults.hidden = false; translateResults.textContent = '正在翻译所选源码草稿…';
+      try {
+        if (translationProject !== id && !await loadTranslationSettings()) throw new Error('无法读取翻译设置。');
+        if (ticket !== translationRequest || project?.id !== id || file !== path || generation !== epoch || fileRequest !== sourceTicket) return;
+        const result = await api('latex_ai_translate', { id, path, selection, target_language: translationConfig?.target_language === 'en' ? 'en' : 'zh-CN', ...(translationConfig?.model ? { model_override: translationConfig.model } : {}), ...(translationConfig?.prompt ? { prompt: translationConfig.prompt } : {}) }, { signal: translationAbort.signal });
+        if (ticket !== translationRequest || project?.id !== id || file !== path || generation !== epoch || fileRequest !== sourceTicket || disposed) return;
+        translateResults.textContent = ''; translateResults.append(make('strong', '', `选文译文 · 来源为编辑草稿${editor.value.slice(start, end) !== selection ? '（源码已变化）' : ''}`), make('p', '', result.answer), make('small', '', `${result.model.provider} / ${result.model.model} · ${result.prompt_version}`));
+        const original = make('details'); original.append(make('summary', '', '查看送译原文'), make('p', '', selection)); translateResults.append(original);
+        const copy = make('button', 'button subtle', '复制译文'); copy.type = 'button'; copy.addEventListener('click', () => { if (!window.navigator?.clipboard) { say('复制不可用，请选择译文复制。', true); return; } void window.navigator.clipboard.writeText(result.answer).then(() => say('译文已复制。'), error => say(`复制失败：${error.message}`, true)); }); translateResults.append(copy);
+      } catch (error) { if (ticket === translationRequest && project?.id === id && file === path && error.name !== 'AbortError') translateResults.textContent = `翻译失败：${error.message}`; }
+      finally { if (ticket === translationRequest) { translationAbort = null; translationBusy = false; sourceTranslate.disabled = false; } }
+    });
     function aiRoute() {
       const choice = ai.models[Number(aiModel.value)];
       if (!choice) return {};
@@ -1666,6 +1768,7 @@ window.PaperLatexWorkspace = (() => {
 
     /** Enter the workspace: the page becomes the surface, library hidden like the board's focus. */
     async function open(preferred) {
+      void loadSpelling();
       view.hidden = false;
       document.body.classList.add('latex-focused');
       setTab('pdf');
@@ -1685,6 +1788,7 @@ window.PaperLatexWorkspace = (() => {
     async function close() {
       clearTimeout(timer); clearTimeout(compileTimer); closeMenu();
       if (!await savedBeforeLeaving(true)) return;
+      cancelTranslation();
       cancelReads();
       showRail(false);
       view.hidden = true;
@@ -1756,7 +1860,7 @@ window.PaperLatexWorkspace = (() => {
           ai: { available: ai.available, proposal: ai.proposal?.id || null },
         }),
       },
-      dispose() { disposed = true; reviewer?.dispose(); writingTools?.dispose(); formulas?.destroy(); sourceEditor?.destroy(); cancelReads(); clearRendered(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); resizeObserver?.disconnect(); window.removeEventListener('resize', requestResize); window.removeEventListener('beforeunload', protectDraft); clearTimeout(timer); clearTimeout(compileTimer); view.hidden = true; document.body.classList.remove('latex-focused'); },
+    dispose() { disposed = true; cancelTranslation(); reviewer?.dispose(); writingTools?.dispose(); formulas?.destroy(); sourceEditor?.destroy(); cancelReads(); clearRendered(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); resizeObserver?.disconnect(); window.removeEventListener('resize', requestResize); window.removeEventListener('beforeunload', protectDraft); clearTimeout(timer); clearTimeout(compileTimer); clearTimeout(spellTimer); view.hidden = true; document.body.classList.remove('latex-focused'); },
     };
   }
   return { create };

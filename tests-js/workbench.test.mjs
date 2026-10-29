@@ -354,3 +354,16 @@ test('table selection cannot publish the previous reader chat draft under the se
   assert.equal(messages[0].snapshot.paperId, 'selected-paper-b');
   assert.equal(messages[0].snapshot.chatDraft, 'Paper B draft');
 });
+
+test('author names retain full supplied names and flag filename-only surnames without guessing', () => {
+  const context={window:{}};vm.runInNewContext(source,context);const names=context.window.PaperWorkbench;
+  assert.equal(names.authorName({family:'王',given:'小明'}),'王小明');
+  assert.equal(names.authorName({family:'欧阳',given:'明'}),'欧阳明');
+  assert.equal(names.authorName({family:'Liu',given:'Rui'}),'Rui Liu');
+  assert.equal(names.authorName({literal:'中国科学院',family:'Ignored'}),'中国科学院');
+  assert.equal(names.authorName({family:'Beethoven',given:'Ludwig','non-dropping-particle':'van'}),'Ludwig van Beethoven');
+  const item={author:[{family:'Liu'}],parse:{field_sources:{author:'synced-filename'}}};
+  assert.equal(names.authorName(item.author[0]),'Liu');assert.equal(names.incompleteAuthor(item),true);
+  assert.equal(names.incompleteAuthor({...item,author:[{family:'Liu',given:'Rui'}]}),false);
+  assert.equal(names.incompleteAuthor({...item,parse:{}}),false);
+});

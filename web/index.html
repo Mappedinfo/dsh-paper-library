@@ -74,13 +74,15 @@
       <div class="library-organizer-row">
       <div class="project-bar">
         <label class="field-inline">阅读项目 <select id="project-select" aria-label="选择阅读项目"><option value="">全部文献</option></select></label>
-        <button id="project-new" class="icon-button" type="button" title="新建阅读项目" aria-label="新建阅读项目">＋</button>
-        <button id="project-edit" class="icon-button" type="button" title="编辑标题、说明与标签" aria-label="编辑阅读项目" disabled>✎</button>
-        <button id="project-archive" class="icon-button" type="button" title="归档所选项目（文献不受影响）" aria-label="归档阅读项目" disabled>⌫</button>
-        <span id="project-status" class="small muted" role="status"></span>
+        <details class="project-actions"><summary aria-label="阅读项目操作" aria-controls="project-actions-panel" title="新建、编辑或归档阅读项目">⋯</summary><div id="project-actions-panel" class="project-actions-panel">
+          <button id="project-new" class="button subtle" type="button" title="新建阅读项目" aria-label="新建阅读项目">新建项目</button>
+          <button id="project-edit" class="button subtle" type="button" title="编辑标题、说明与标签" aria-label="编辑阅读项目" disabled>编辑项目</button>
+          <button id="project-archive" class="button subtle" type="button" title="归档所选项目（文献不受影响）" aria-label="归档阅读项目" disabled>归档项目</button>
+        </div></details>
       </div>
       <details id="board-shelf" class="board-shelf"><summary aria-controls="board-shelf-panel"><span>画板</span><span id="board-shelf-count" class="count">—</span></summary></details>
       <details id="latex-version-shelf" class="board-shelf"><summary aria-controls="latex-version-shelf-panel">LaTeX 编译版本</summary></details>
+      <span id="project-status" class="small muted" role="status"></span>
       </div>
       <section id="board-shelf-panel" class="library-organizer-panel" aria-label="画板" hidden><div id="board-shelf-list" class="board-shelf-list"></div><p class="small muted">画板可关联多篇论文或多个阅读项目。</p></section>
       <section id="latex-version-shelf-panel" class="library-organizer-panel" aria-label="LaTeX 编译版本" hidden><p class="small muted">每次成功手动编译保存源码、PDF 和自审快照；这是写作版本，不是文献条目版本。</p><div id="library-latex-versions"></div></section>

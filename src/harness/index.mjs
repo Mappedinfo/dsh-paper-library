@@ -133,7 +133,7 @@ export function apply(ctx, rawConfig = {}) {
       agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens})})
     // LaTeX questions and co-writing reuse the language route and the local state
     // store; proposals hold replacements, never a second copy of the manuscript.
-    const latexAI = createLatexAI({ store: options.localState, ai: languageAI, config, dispatch, library: config.library, python: config.python })
+    const latexAI = createLatexAI({ store: options.localState, ai: languageAI, config, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python })
     // The workspace owns the manuscript folder under the DSH home and keeps it in the
     // sync service's own config; both are host-side jobs, so neither enters the worker.
     const latexWorkspace = createLatexWorkspace({ config, dispatch, settings, library: config.library, python: config.python })

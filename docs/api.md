@@ -25,6 +25,11 @@ Core actions:
 - `export_pdf` with `id` → `{path,filename}` (Node streams managed path, not browser-supplied path)
 - `link` with `source,target,relation='related'|'supports'|'contradicts'|'cites',note=''` → link
 - `graph` with `id?,limit=80,offset=0` → `{nodes,edges,truncated,warnings,scope:{paper_id,max_nodes,max_edges,paper_offset?,paper_count?,total_papers?,next_offset?,previous_offset?},semantics,node_types,relations}`。`limit` 限制为 1–200 个节点，最多 400 条关系；界面显式请求 100 个节点。省略 `id` 时按当前目录排序读取每批最多 `min(limit,40)` 篇有效文献，`offset` 接受 0–10,000,000 的整数；`scope` 额外返回当前偏移、该批篇数、有效文献总数以及上一批／下一批偏移，无对应批次时为 `null`。这些数量描述文献窗口，不能当作已完整显示的节点／关系数量；`truncated` 与 `warnings` 保留部分投影的提示。传入 `id` 则读取该论文图谱，不返回目录分页字段。节点和关系区分 `provenance:'catalog-metadata'|'user-asserted'` 与 `editable`，原有论文联系另标 `legacy:true`；该操作只投影已存资料与读者关系，不推断全库学术结论。
+- `graph_statistics {}` → `{scope:'active-library',total_papers,years:{known,missing,items:[{year,count}],other_count,truncated,maximum_rows:200},citations:{known_papers,missing_papers,sources:[{id,label,fields,known,missing,buckets:[{label,count}]}]},semantics}`。只读、单次 SQL 汇总整个有效文献目录，排除回收站，与 `graph` 当前 40 篇窗口无关；不读取 PDF、不调用模型或联网更新。
+
+  年份取已保存 `issued.date-parts[0][0]` 中 1–9999 的整数，无法识别的记入 `missing`。`items` 按年份升序返回最近最多 200 个不同年份，其余较早年份的文献数汇总到 `other_count`，不丢弃全库计数；存在该汇总时 `truncated:true`。`known + missing = total_papers`，`items[*].count` 之和加 `other_count` 等于 `known`。
+
+  引用量只识别保存的来源字段：Crossref 顶层 `is-referenced-by-count` 或 `crossref.is-referenced-by-count`（两者均有效时优先顶层）、OpenAlex 的 `openalex.cited_by_count`、Semantic Scholar 的 `semantic_scholar.citationCount`；`sources` 固定返回这 3 个来源，`fields` 列出所用路径。只接受 0–1,000,000,000 的整数，缺失、布尔值、数字字符串、负数、超限值及泛化的 `citation_count`／参考文献数量均不当作引用量。每个来源返回 `0`、`1–9`、`10–49`、`50–99`、`100–499`、`500+` 共 6 个区间及已知／未知覆盖数，最多 18 个区间；来源快照口径分别显示，不相加。`known_papers` 按至少一个来源已知的文献去重计数，不能累加来源的 `known` 得到；`missing_papers` 是全库尚无可识别引用量的文献数。无可识别元数据时显示尚未采集，不能把未知文献放进「0 次引用」区间；接口不核验这些已保存快照的时效。
 - `graph_node_put` with `id,node_id?,type,label,description?,evidence?` → editable node. Omit `node_id` to create; supply it to edit a node owned by that paper. Type accepts `method|dataset|claim|evidence|concept|author|institution`.
 - `graph_node_delete` with `id,node_id` → `{deleted:true,node_id,removed_edges}`; deletes that editable node and its attached reader-authored relationships.
 - `graph_edge_put` with `id,edge_id?,source,target,relation,evidence?` → editable directed edge. Omit `edge_id` to create. Endpoints must belong to the current paper graph; self-links and duplicate directed relationships fail. Relation accepts `supports|contradicts|uses|evaluates|derived_from|explains|extends|cites|related|authored_by|affiliated_with|published_by`.
@@ -189,6 +194,10 @@ The plugin registers 35 tools through Harness's official tool registry. Optional
 The panel's collaboration surface is registered into the library's shared reading rail (`PaperReadingPanels.registerPanel({id,label,element})` plus `setExternal(true)` while the LaTeX view is focused), so it uses the same side toggle, saved rail width and header as the annotation panel; without a rail instance it falls back to a tab inside the workspace.
 
 Host actions (not worker actions, reachable from the panel): `latex_ws_status` (folder, sync coverage, effective settings), `latex_ws_create` (make `<latexRoot>/<slug>`, register it through `latex_project_create`, optionally write the starter, optionally add the sync source) and `latex_ws_sync_attach` (add exactly one `paper-library-latex` source to the sync service's config after a timestamped backup; idempotent, additive only, and strict when called explicitly). `latex_ai_*` covers questions and co-writing. The deployment adds `latexRoot` (default `<DSH home>/manuscripts`) and the settings namespace adds `latex_starter`, `latex_auto_compile`, `latex_engine`, `latex_split` (25–75) and `latex_sync_folder`.
+
+`latex_ai_translate {id,selection,target_language:'zh-CN'|'en',model_override?,prompt?}` 翻译当前明确选择的编辑草稿，选文最多 8,000 字符，可含未保存改动；不读取整个源文件，也不写回源稿。项目覆盖优先于 `language.settings`，再跟随 DSH 默认模型；显式覆盖须匹配宿主已配置模型目录。补充提示词最多 2,000 字符，结果最多 8,000 字符；返回 `{id,answer,model,source:'editor-selection',prompt_version}`，界面先供查看和复制。项目模型、语言和提示词通过既有主机状态保存，界面只把名称包含 flash／mini 等的模型标为轻量候选；宿主未提供价格与延迟时不作最低价或最快保证。
+
+英语拼写检查完全在浏览器本地执行，开启时才加载 `latex-spelling.js` 中的 Hunspell 字典；不发送源文或调用模型。它只检查当前文件的有界自然语言片段，跳过常见 LaTeX 命令、数学与引用键，属于拼写提示而非语法或编译检查。
 
 `latex_engine` 是全部 LaTeX 项目共享的编译偏好，取值为 `xelatex`（默认）、`pdflatex` 或 `lualatex`。
 通过现有 `settings_update` 的 `patch` 写入，并继续使用 `expected_revision`；`latex_ws_status.settings.engine` 返回当前生效值。

@@ -216,7 +216,7 @@ export function createFetchHandler(options = {}) {
           headers:{...baseHeaders,'Content-Type':'application/pdf','Content-Length':String(info.size),'Content-Disposition':`attachment; filename="paper.pdf"; filename*=UTF-8''${encodeURIComponent(filename)}`},
         });
       }
-      if (['latex-editor.js', 'slides-editor.js', 'slides-editor.css'].includes(path)) {
+      if (['latex-editor.js', 'latex-spelling.js', 'slides-editor.js', 'slides-editor.css'].includes(path)) {
         const body = await readFile(join(projectRoot, 'lib', path));
         return new Response(request.method === 'HEAD' ? null : body, { headers: { ...baseHeaders, 'Content-Type': path.endsWith('.css') ? 'text/css;charset=utf-8' : 'text/javascript;charset=utf-8' } });
       }

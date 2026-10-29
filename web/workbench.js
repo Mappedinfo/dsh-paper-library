@@ -5,7 +5,13 @@
 window.PaperWorkbench = (() => {
   const $ = id => document.getElementById(id);
   const node = (tag, text, className) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (className) n.className = className; return n; };
-  const name = a => a.literal || [a.given, a.family].filter(Boolean).join(' ');
+  const name = a => {
+    if(a.literal)return a.literal;
+    const family=String(a.family||'').trim(),given=String(a.given||'').trim();
+    if(/^[\p{Script=Han}]+$/u.test(family)&&(!given||/^[\p{Script=Han}]+$/u.test(given)))return family+given;
+    return [given,a['non-dropping-particle'],family,a.suffix].filter(Boolean).join(' ');
+  };
+  const incompleteAuthor = item => item.parse?.field_sources?.author==='synced-filename'&&(item.author||[]).some(a=>!a.literal&&!a.given&&/^[\p{Script=Latin}'’-]+$/u.test(a.family||''));
   const institutions = item => [...new Set((item.author || []).flatMap(a => (a.affiliation || []).map(v => typeof v === 'string' ? v : v.name)).filter(Boolean))];
   const ranking = item => (item.journal_rankings || []).map(r => `${r.year} ${r.quartile} · ${r.category}`).join('；');
   const columns = [['title','标题'],['author','作者'],['year','年份'],['journal','期刊 / 出处'],['jcr','JCR'],['citekey','引用键'],[null,'DOI'],[null,'单位'],[null,'发表 / 收稿 / 接收'],[null,'类型 / 文件']];
@@ -69,7 +75,7 @@ window.PaperWorkbench = (() => {
     document.querySelector('.reader-toolbar').remove();
     const metadata = node('dl',undefined,'paper-metadata'); metadata.id='paper-metadata'; $('paper-authors').after(metadata);
     const file = node('details',undefined,'paper-file-disclosure'); file.append(node('summary','文件与解析信息'),$('paper-file-meta')); $('paper-tags').after(file);
-    const expand=button('展开表格 ⤢','catalog-expand',()=>{const selected=state.active;if(table&&selected&&!selected.archived&&(selected.id!==readingId||(selected.pdf&&!state.pageData))){void openPaper(selected.id);}else setTable(!table);}); expand.setAttribute('aria-expanded','false');expand.setAttribute('aria-label','展开表格');expand.title='展开表格';document.querySelector('.shelf-actions').prepend(expand);
+    const expand=button('展开表格','catalog-expand',()=>{const selected=state.active;if(table&&selected&&!selected.archived&&(selected.id!==readingId||(selected.pdf&&!state.pageData))){void openPaper(selected.id);}else setTable(!table);}); expand.setAttribute('aria-expanded','false');expand.setAttribute('aria-label','展开表格');expand.title='展开表格';document.querySelector('.shelf-actions').prepend(expand);
     const controls=node('div',undefined,'catalog-controls');
     const scope=node('select'); scope.id='catalog-scope'; scope.setAttribute('aria-label','文献范围');
     for(const [value,label] of [['active','在库条目'],['archived','回收站']]) { const o=node('option',label);o.value=value;scope.append(o); }
@@ -105,7 +111,7 @@ window.PaperWorkbench = (() => {
       row.dataset.original=JSON.stringify(value);row.append(button('移除',null,()=>{row.remove();dirty();}));$('ranking-rows').append(row);return row;
     }
     function sortBy(key,dir) {state.sort=key||'modified';state.order=dir||'desc';state.offset=0;sort.value=state.sort;order.textContent=state.order==='asc'?'升序 ↑':'降序 ↓';void loadList();}
-    function setTable(value) {if(value&&!table)readingId=state.active?.id;table=value;tableChanged?.(table);document.querySelector('.workspace').classList.toggle('catalog-expanded',table);$('catalog-table').hidden=!table;$('paper-list').hidden=table;expand.textContent=table?'收起表格 ⤡':'展开表格 ⤢';expand.setAttribute('aria-label',table?'收起表格':'展开表格');expand.title=table?'收起表格':'展开表格';expand.setAttribute('aria-expanded',String(table));render();header();}
+    function setTable(value) {if(value&&!table)readingId=state.active?.id;table=value;tableChanged?.(table);document.querySelector('.workspace').classList.toggle('catalog-expanded',table);$('catalog-table').hidden=!table;$('paper-list').hidden=table;expand.textContent=table?'收起表格':'展开表格';expand.setAttribute('aria-label',table?'收起表格':'展开表格');expand.title=table?'收起表格':'展开表格';expand.setAttribute('aria-expanded',String(table));render();header();}
     function render() {
       hideCellPreview();
       if(!table)return;
@@ -202,5 +208,5 @@ window.PaperWorkbench = (() => {
     }
     header();return {render,header,edit,setTable,isTable:()=>table,setPanelHost,paperChanged,metadataVisibility};
   }
-  return {create,institutions,ranking};
+  return {create,institutions,ranking,authorName:name,incompleteAuthor};
 })();

@@ -269,10 +269,22 @@ body > #latex-view { height: 100dvh; }
 .latex-preview-toolbar .latex-build-info, .latex-preview-toolbar .latex-render-state { display: none; }
 .latex-preview-toolbar .latex-page-label { display: none; } /* Current/total remains visible in the status row. */
 .latex-preview-toolbar #latex-synctex-forward { height: 28px; min-height: 28px; padding: 3px 5px; font: 11px/1.5 var(--sans); white-space: nowrap; }
-.latex-preview-toolbar .latex-tab { padding: 4px 5px; font-size: 11px; }
+.latex-preview-toolbar .latex-tab { padding: 4px 7px; font-size: 12px; }
 .latex-preview-toolbar .icon-button { width: 22px; min-width: 22px; height: 26px; min-height: 26px; padding: 2px; }
 .latex-preview-toolbar #latex-zoom { width: 62px; min-width: 62px; height: 28px; min-height: 28px; padding: 3px 15px 3px 5px; font-size: 11px; line-height: 16px; }
-.latex-preview-toolbar .latex-pdf-tools button { padding: 3px 4px; height: 28px; min-height: 28px; }
+.latex-preview-toolbar .latex-pdf-tools button { padding: 3px 7px; height: 28px; min-height: 28px; font-size: 12px; }
+.latex-toolbar-divider { flex: 0 0 1px; align-self: center; height: 18px; margin: 0 4px; background: var(--line); }
+.latex-nav-toggle { position: relative; padding-right: 35px !important; }
+.latex-nav-toggle::before { content: ''; position: absolute; right: 5px; top: calc(50% - 7px); width: 24px; height: 14px; border-radius: 8px; background: var(--latex-accent-color, var(--teal)); opacity: .7; }
+.latex-nav-toggle::after { content: ''; position: absolute; right: 7px; top: calc(50% - 5px); width: 10px; height: 10px; border-radius: 50%; background: var(--surface); box-shadow: 0 0 1px var(--ink); transition: transform .12s ease; }
+.latex-nav-toggle[aria-expanded=false]::before { background: var(--muted); opacity: .4; }
+.latex-nav-toggle[aria-expanded=false]::after { transform: translateX(-10px); }
+@media (prefers-reduced-motion: reduce) { .latex-nav-toggle::after { transition: none; } }
+.latex-spelling-results, .latex-translation-results { flex: 0 0 auto; max-height: 170px; overflow: auto; padding: 7px 10px; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 12px; }
+.latex-spelling-results[hidden], .latex-translation-results[hidden] { display: none; }
+.latex-spelling-results button { margin: 2px; padding: 2px 5px; }
+.latex-translation-results p { white-space: pre-wrap; overflow-wrap: anywhere; }
+#latex-translate-prompt { min-width: 220px; max-width: 100%; font: inherit; }
 .latex-tabs {
   display: flex; align-items: center; gap: 2px; flex: 0 0 auto;
   padding: 0; background: var(--surface);
