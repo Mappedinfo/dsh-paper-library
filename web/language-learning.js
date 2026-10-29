@@ -10,11 +10,12 @@ window.PaperLanguageLearning = {
     panel.innerHTML=`<header class="language-heading"><div><strong>读懂，也学会表达</strong><p id="language-paper" class="small muted"></p></div><div class="language-heading-actions"><button id="language-drag" class="icon-button" type="button" title="拖动窗口；方向键移动" aria-label="移动语言窗口">⠿</button><button id="language-settings-open" class="icon-button" type="button" title="语言设置" aria-label="语言设置">⚙</button><button id="language-close" class="icon-button" type="button" aria-label="关闭语言工具">×</button></div></header>
       <nav class="language-tabs" aria-label="语言工具"><button id="language-tab-work" class="button subtle" type="button">翻译与表述</button><button id="language-tab-history" class="button subtle" type="button">本篇记录</button><button id="language-tab-words" class="button subtle" type="button">难词本</button></nav>
       <p id="language-status" class="language-status" role="status"></p>
-      <div id="language-work"><label class="field">选文或你的草稿<textarea id="language-source" rows="4" maxlength="8000" placeholder="拖选论文中的文字，或在这里输入要翻译、优化的表达。"></textarea></label><div class="language-actions"><label>译成 <select id="language-target"><option value="zh-CN">中文</option><option value="en">英文</option></select></label><button id="language-translate" class="button primary" type="button">直接翻译</button><button id="language-polish" class="button" type="button">优化表述</button></div><p class="small muted">默认使用 DSH 当前默认模型，可在右上角设置指定模型。结果保存在本机，生成会使用模型额度。</p><div id="language-result"></div></div>
-      <div id="language-settings" hidden><p class="small muted">语言工具使用独立设置；不会改变宿主或论文对话的模型。</p><label class="field">模型<select id="language-settings-model"></select></label><label class="field">翻译补充提示词<textarea id="language-settings-translate" maxlength="2000" rows="3" placeholder="例如：保留常见缩写"></textarea></label><label class="field">润色补充提示词<textarea id="language-settings-polish" maxlength="2000" rows="3" placeholder="例如：优先使用简洁句子"></textarea></label><p class="small muted">补充要求不能覆盖忠于原文和结果结构的基本规则。</p><div class="language-actions"><button id="language-settings-save" class="button primary" type="button">保存设置</button><button id="language-settings-reload" class="button subtle" type="button">重新读取</button></div></div>
+      <div id="language-work"><label class="field">选文或你的草稿<textarea id="language-source" rows="4" maxlength="8000" placeholder="拖选论文中的文字，或在这里输入要翻译、优化的表达。"></textarea></label><div class="language-actions"><label>译成 <select id="language-target"><option value="">跟随语言设置</option><option value="auto">自动识别 · 中英互译</option><option value="zh-CN">中文</option><option value="en">英文</option></select></label><button id="language-translate" class="button primary" type="button">直接翻译</button><button id="language-polish" class="button" type="button">优化表述</button></div><p class="small muted">默认使用 DSH 当前默认模型，可在右上角设置指定模型。结果保存在本机，生成会使用模型额度。</p><div id="language-result"></div></div>
+      <div id="language-settings" hidden><p class="small muted">语言工具使用独立设置；不会改变宿主或论文对话的模型。</p><label class="field">模型<select id="language-settings-model"></select></label><label class="field">默认翻译方向<select id="language-settings-target"><option value="auto">自动识别 · 中文译英文，其他译中文</option><option value="zh-CN">始终译为中文</option><option value="en">始终译为英文</option></select></label><label class="field">翻译补充提示词<textarea id="language-settings-translate" maxlength="2000" rows="3" placeholder="例如：保留常见缩写"></textarea></label><label class="field">润色补充提示词<textarea id="language-settings-polish" maxlength="2000" rows="3" placeholder="例如：优先使用简洁句子"></textarea></label><p class="small muted">补充要求不能覆盖忠于原文和结果结构的基本规则。</p><div class="language-actions"><button id="language-settings-save" class="button primary" type="button">保存设置</button><button id="language-settings-reload" class="button subtle" type="button">重新读取</button></div></div>
       <div id="language-history" hidden><div id="language-history-list"></div><div class="language-pagination"><button id="language-history-prev" class="button subtle" type="button">上一页</button><span id="language-history-range"></span><button id="language-history-next" class="button subtle" type="button">下一页</button></div></div>
       <div id="language-words" hidden><div class="language-word-filters"><input id="vocabulary-query" type="search" placeholder="检索词语、释义" aria-label="检索难词"><select id="vocabulary-status" aria-label="学习状态"><option value="">全部</option><option value="learning">待学习</option><option value="mastered">已掌握</option></select><button id="vocabulary-refresh" class="button subtle" type="button">刷新</button></div><p class="small muted">从翻译与表述优化中自动积累。AI 释义待核对；掌握程度由你标记。</p><div id="vocabulary-list"></div><div class="language-pagination"><button id="vocabulary-prev" class="button subtle" type="button">上一页</button><span id="vocabulary-range"></span><button id="vocabulary-next" class="button subtle" type="button">下一页</button></div><div class="language-actions"><button id="vocabulary-export-json" class="button subtle" type="button">导出 JSON</button><button id="vocabulary-export-csv" class="button subtle" type="button">导出 CSV</button></div></div>`;
     document.body.append(panel);
+    $('language-target').value='';
     let available=false,paperId=null,loadTicket=0,viewTicket=0,view='work',busy=false,draftReady=false,sourcePage=null,lastResult=null,historyOffset=0,wordOffset=0,failedRequest=null,loadPromise=null,draftRevision=0,disposed=false;
     let settingsRevision=null, settingsModels=[];
     const floating=window.PaperFloatingWindows?.attach(panel,{key:'reader:language-window',persistence});
@@ -29,10 +30,10 @@ window.PaperLanguageLearning = {
     function paperChanged(item){
       if(paperId===item?.id){$('language-paper').textContent=item?.title||'先打开一篇论文';if(loadPromise)return loadPromise;if(draftReady)return Promise.resolve();}
       remember();paperId=item?.id||null;const ticket=++loadTicket;++viewTicket;++draftRevision;draftReady=false;sourcePage=null;failedRequest=null;lastResult=null;historyOffset=0;
-      $('language-paper').textContent=item?.title||'先打开一篇论文';$('language-source').value='';$('language-result').replaceChildren();$('language-history-list').replaceChildren();status('');controls();
+      $('language-paper').textContent=item?.title||'先打开一篇论文';$('language-source').value='';$('language-target').value='';$('language-result').replaceChildren();$('language-history-list').replaceChildren();status('');controls();
       if(!paperId){loadPromise=null;return Promise.resolve();}
       loadPromise=(async()=>{
-        try{const saved=await persistence?.get(`language-draft:${paperId}`);if(ticket!==loadTicket)return;if(saved&&typeof saved.text==='string'&&saved.text.length<=8000){$('language-source').value=saved.text;$('language-target').value=saved.target_language==='en'?'en':'zh-CN';sourcePage=Number.isInteger(saved.page)&&saved.page>0&&saved.page<=2000?saved.page:null;failedRequest=saved.failed_request||null;}draftReady=true;}
+        try{const saved=await persistence?.get(`language-draft:${paperId}`);if(ticket!==loadTicket)return;if(saved&&typeof saved.text==='string'&&saved.text.length<=8000){$('language-source').value=saved.text;$('language-target').value=['auto','zh-CN','en'].includes(saved.target_language)?saved.target_language:'';sourcePage=Number.isInteger(saved.page)&&saved.page>0&&saved.page<=2000?saved.page:null;failedRequest=saved.failed_request||null;}draftReady=true;}
         catch(error){if(ticket===loadTicket){status(`草稿读取失败：${error.message}`,true);$('language-status').append(button('language-retry-draft','重新读取草稿',()=>void paperChanged(getPaper())));}}
         finally{if(ticket===loadTicket){loadPromise=null;controls();}}
         if(ticket===loadTicket&&!panel.hidden&&view==='history')void history();
@@ -47,12 +48,15 @@ window.PaperLanguageLearning = {
       if(busy)return;const text=$('language-source').value.trim();if(!paperId||paperId!==getPaper()?.id||!text){status('请先打开对应论文并输入或选择要处理的文字。',true);return;}
       if(!available){status('请从 DSH 文献库面板打开并连接宿主模型。',true);return;}
       if(!draftReady){status('草稿尚未读取完成，请稍后重试。',true);return;}
-      const id=paperId,target_language=$('language-target').value,ticket=loadTicket,revision=draftRevision;
-      const payload={id,mode,text,target_language,...(sourcePage?{page:sourcePage}:{})};
-      const fingerprint=JSON.stringify(payload);const request_id=failedRequest?.fingerprint===fingerprint?failedRequest.request_id:window.crypto.randomUUID();
-      failedRequest={fingerprint,request_id};const saved=remember();busy=true;controls();status(mode==='translate'?'正在翻译并整理难词…':'正在优化表述并整理难词…');
+      const id=paperId,target=$('language-target').value,ticket=loadTicket,revision=draftRevision;
+      busy=true;controls();status(mode==='translate'?'正在翻译并整理难词…':'正在优化表述并整理难词…');
       try{
-        await saved;await persistence?.flush();
+        const preferences=mode==='translate'&&!target?await api('language_settings_get',{}):null;
+        if(disposed||id!==paperId||ticket!==loadTicket||revision!==draftRevision)return;
+        const target_language=target||(['auto','zh-CN','en'].includes(preferences?.value?.target_language)?preferences.value.target_language:'auto');
+        const payload={id,mode,text,target_language,...(sourcePage?{page:sourcePage}:{})};
+        const fingerprint=JSON.stringify(payload);const request_id=failedRequest?.fingerprint===fingerprint?failedRequest.request_id:window.crypto.randomUUID();
+        failedRequest={fingerprint,request_id};await remember();await persistence?.flush();
         const result=await api('language_generate',{...payload,request_id});
         if(disposed||id!==paperId||ticket!==loadTicket||revision!==draftRevision){toast('语言处理已完成，结果已保存在原论文的记录中。');return;}
         failedRequest=null;remember();renderResult(result);status('结果与难词已保存在本机。');
@@ -76,9 +80,11 @@ window.PaperLanguageLearning = {
         const value=result.value||{},select=$('language-settings-model');settingsRevision=result.revision;settingsModels=Array.isArray(result.models)?result.models:[];
         const defaultName=result.default_model?`${result.default_model.provider} / ${result.default_model.model}`:'尚未选择';
         const automatic=make('option',`使用 DSH 当前默认模型（${defaultName}）`);automatic.value='';select.replaceChildren(automatic);
-        for(let i=0;i<settingsModels.length;i++){const model=settingsModels[i],option=make('option',`${model.provider} / ${model.name||model.id}`);option.value=String(i);select.append(option);}
+        const groups=new Map();
+        for(let i=0;i<settingsModels.length;i++){const model=settingsModels[i];if(!groups.has(model.provider)){const group=make('optgroup');group.label=model.provider;groups.set(model.provider,group);select.append(group);}const option=make('option',model.name||model.id);option.value=String(i);groups.get(model.provider).append(option);}
         const selected=settingsModels.findIndex(model=>model.provider===value.model?.provider&&model.id===value.model?.model);
         if(value.model&&selected<0){const missing=make('option',`${value.model.provider} / ${value.model.model}（当前不可用）`);missing.value='missing';select.append(missing);select.value='missing';}else select.value=selected<0?'':String(selected);
+        $('language-settings-target').value=['auto','zh-CN','en'].includes(value.target_language)?value.target_language:'auto';
         $('language-settings-translate').value=value.translate_prompt||'';$('language-settings-polish').value=value.polish_prompt||'';
         $('language-settings-save').disabled=false;status('');
       }catch(error){if(ticket===viewTicket&&view==='settings')status(`读取设置失败：${error.message}`,true);}
@@ -87,7 +93,7 @@ window.PaperLanguageLearning = {
       if(settingsRevision===null)return;const selected=$('language-settings-model').value;
       if(selected==='missing'){status('所选模型当前不可用，请重新选择。',true);return;}
       const model=selected===''?null:settingsModels[Number(selected)];if(selected!==''&&!model){status('模型列表已变化，请重新读取。',true);return;}
-      const value={model:model?{provider:model.provider,model:model.id}:null,translate_prompt:$('language-settings-translate').value,polish_prompt:$('language-settings-polish').value};
+      const value={model:model?{provider:model.provider,model:model.id}:null,target_language:$('language-settings-target').value,translate_prompt:$('language-settings-translate').value,polish_prompt:$('language-settings-polish').value};
       $('language-settings-save').disabled=true;
       try{const result=await api('language_settings_update',{value,expected_revision:settingsRevision});settingsRevision=result.revision;status('语言设置已保存。');}
       catch(error){status(error.code==='STATE_CONFLICT'?`设置已在其他窗口更改；本窗口内容仍保留，请复制后重新读取。${error.message}`:error.message,true);}
@@ -106,7 +112,7 @@ window.PaperLanguageLearning = {
             show('work');
             if(complete){renderResult(value);return;}
             if($('language-source').value.trim()&&$('language-source').value.trim()!==value.source_text){status('当前仍有其他文字草稿，请先完成或清空后再恢复这条记录。',true);return;}
-            $('language-source').value=value.source_text;sourcePage=value.page||null;++draftRevision;$('language-target').value=value.target_language==='en'?'en':'zh-CN';
+            $('language-source').value=value.source_text;sourcePage=value.page||null;++draftRevision;$('language-target').value=value.requested_target_language==='auto'?'auto':value.target_language==='en'?'en':'zh-CN';
             const payload={id:paperId,mode:value.mode,text:value.source_text,target_language:$('language-target').value,...(sourcePage?{page:sourcePage}:{})};
             failedRequest=value.status!=='failed'&&value.request_id?{request_id:value.request_id,fingerprint:JSON.stringify(payload)}:null;remember();
             $('language-result').replaceChildren();status(value.status==='committing'?'点击同一操作继续保存，复用已有模型结果。':'原文已恢复。再次点击操作会核对请求状态或发起新请求。');

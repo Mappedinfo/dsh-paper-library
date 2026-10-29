@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createLanguageLearning } from '../src/harness/language-learning.mjs'
+import { createLanguageLearning, resolveTranslationTarget } from '../src/harness/language-learning.mjs'
 import { createLocalStateStore } from '../src/local-state.mjs'
 import { resolveConfig } from '../src/harness/config.mjs'
 import { createFetchHandler } from '../src/http.mjs'
@@ -101,6 +101,58 @@ test('settings use CAS, configured models and mode-specific guidance without cha
   const polish = await f.handle({ ...request, mode: 'polish', request_id: 'polish-extra' })
   assert.match(f.calls[1].prompt, /使用简洁句子/); assert.notEqual(polish.prompt_version, first.prompt_version)
   await assert.rejects(f.handle({ action: 'language_settings_update', value: { ...value, model: { provider: 'unknown', model: 'forged' } }, expected_revision: saved.revision }), error => error.code === 'LANGUAGE_MODEL_UNAVAILABLE')
+})
+
+test('translation target settings default to auto, retain legacy updates and enforce revisions', async () => {
+  const store = memoryStore()
+  const old = { model: null, translate_prompt: 'old', polish_prompt: '' }
+  await store.put('language.settings', old, 0)
+  const f = fixture(store), initial = await f.handle({ action: 'language_settings_get' })
+  assert.equal(initial.value.target_language, 'auto')
+  const updated = await f.handle({ action: 'language_settings_update', value: { ...old, target_language: 'en' }, expected_revision: initial.revision })
+  assert.equal(updated.value.target_language, 'en')
+  const legacy = await f.handle({ action: 'language_settings_update', value: { ...old, translate_prompt: 'legacy edit' }, expected_revision: updated.revision })
+  assert.equal(legacy.value.target_language, 'en')
+  await assert.rejects(f.handle({ action: 'language_settings_update', value: { ...old, target_language: 'auto' }, expected_revision: updated.revision }), error => error.code === 'STATE_CONFLICT')
+  await assert.rejects(f.handle({ action: 'language_settings_update', value: { ...old, target_language: 'fr' }, expected_revision: legacy.revision }), /翻译目标语言无效/)
+})
+
+test('automatic translation resolves bounded source script while old requests replay unchanged', async () => {
+  const f = fixture()
+  const chinese = await f.handle({ ...request, request_id: 'chinese', text: '请翻译模型训练结果。', target_language: 'auto' })
+  assert.equal(chinese.target_language, 'en')
+  assert.equal(chinese.requested_target_language, 'auto')
+  assert.match(f.calls[0].prompt, /into English/)
+  const english = await f.handle({ ...request, request_id: 'english', text: 'The estimate uses data from 中国.', target_language: 'auto' })
+  assert.equal(english.target_language, 'zh-CN')
+  assert.match(f.calls[1].prompt, /into Simplified Chinese/)
+  const forced = await f.handle({ ...request, request_id: 'explicit', text: '请翻译模型训练结果。', target_language: 'zh-CN' })
+  assert.equal(forced.target_language, 'zh-CN')
+  const legacy = await f.handle({ ...request, request_id: 'old-replay', text: '请翻译模型训练结果。' })
+  assert.equal(legacy.target_language, 'zh-CN')
+  const replay = await createLanguageLearning(f.options)({ ...request, request_id: 'old-replay', text: '请翻译模型训练结果。' })
+  assert.equal(replay.replayed, true)
+  assert.equal(f.calls.length, 4)
+})
+
+test('automatic language resolution ignores common TeX markup, citations, comments and formulas', () => {
+  const chinese = String.raw`\section{研究结果} % English comment with many distracting words
+\textbf{模型训练}，参见 \cite{very-long-english-citation-key}。$englishvariables + anotherformula$`
+  assert.equal(resolveTranslationTarget(chinese, 'auto'), 'en')
+  const english = String.raw`This method reports results in \textbf{English}. \cite{中文引用} $变量 + 公式$`
+  assert.equal(resolveTranslationTarget(english, 'auto'), 'zh-CN')
+  assert.equal(resolveTranslationTarget(chinese, 'zh-CN'), 'zh-CN')
+  assert.throws(() => resolveTranslationTarget(chinese, 'fr'), /翻译目标语言无效/)
+})
+
+test('automatic direction distinguishes Japanese and Korean script from traditional Chinese and mixed English', () => {
+  assert.equal(resolveTranslationTarget('この研究では都市の成長を分析します。', 'auto'), 'zh-CN')
+  assert.equal(resolveTranslationTarget('東京に行く。', 'auto'), 'zh-CN')
+  assert.equal(resolveTranslationTarget('이 연구에서는 도시의 성장과 文化 변화를 분석합니다.', 'auto'), 'zh-CN')
+  assert.equal(resolveTranslationTarget('本研究分析城市增長及其空間變化。', 'auto'), 'en')
+  assert.equal(resolveTranslationTarget('The paper discusses 中国 and 日本 with synthetic data.', 'auto'), 'zh-CN')
+  assert.equal(resolveTranslationTarget('城市研究引用あ這個符號。', 'auto'), 'en', 'one incidental kana should not determine the passage language')
+  assert.equal(resolveTranslationTarget(String.raw`\cite{かなかな} 本研究分析城市增長。`, 'auto'), 'en', 'citation keys are excluded')
 })
 
 test('language settings and generation route through the host HTTP adapter', async () => {

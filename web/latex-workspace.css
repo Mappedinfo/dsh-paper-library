@@ -335,7 +335,7 @@ body > #latex-view { height: 100dvh; }
 /* DSH questions and co-writing: its own tab, never stealing height from the panes. */
 .latex-ai { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
 .latex-ai-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.latex-ai-head select { max-width: 220px; }
+.latex-ai-head select { width: 100%; max-width: 220px; height: 28px; min-height: 28px; padding: 3px 25px 3px 8px; box-sizing: border-box; font: 12px/20px var(--sans); }
 .latex-ai-route { font-size: 12px; color: var(--muted); }
 .latex-ai-route.error { color: var(--error); }
 .latex-ai textarea { width: 100%; resize: vertical; font: 13px/1.55 var(--sans); }

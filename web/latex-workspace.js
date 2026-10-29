@@ -155,7 +155,7 @@ window.PaperLatexWorkspace = (() => {
     const translateSettings = make('div', 'latex-menu-section'); translateSettings.append(make('span', 'latex-menu-label', '本项目选文翻译'));
     const translateModel = make('select'); translateModel.id = 'latex-translate-model'; translateModel.setAttribute('aria-label', '本项目翻译模型');
     const translateTarget = make('select'); translateTarget.id = 'latex-translate-target'; translateTarget.setAttribute('aria-label', '本项目翻译目标语言');
-    for (const [value, label] of [['zh-CN', '译为中文'], ['en', '译为英文']]) { const option = make('option', '', label); option.value = value; translateTarget.append(option); }
+    for (const [value, label] of [['', '跟随语言设置'], ['auto', '自动识别 · 中英互译'], ['zh-CN', '译为中文'], ['en', '译为英文']]) { const option = make('option', '', label); option.value = value; translateTarget.append(option); }
     const translatePrompt = make('textarea'); translatePrompt.id = 'latex-translate-prompt'; translatePrompt.rows = 2; translatePrompt.maxLength = 2000; translatePrompt.placeholder = '本项目补充提示词；留空跟随语言设置'; translatePrompt.setAttribute('aria-label', '本项目翻译补充提示词');
     const translateSave = make('button', 'button subtle', '保存本项目翻译设置'); translateSave.id = 'latex-translate-settings-save'; translateSave.type = 'button';
     translateSettings.append(translateModel, translateTarget, translatePrompt, translateSave, make('p', 'latex-menu-hint', '模型默认跟随语言设置。标为轻量的名称仅供选择；实际价格与延迟未知。'));
@@ -1599,22 +1599,24 @@ window.PaperLatexWorkspace = (() => {
         translationConfig = record.value || { model: null, prompt: '' }; translationProject = id; translationRevision = record.revision;
         translateModel.textContent = ''; const automatic = make('option', '', '跟随语言工具设置'); automatic.value = ''; translateModel.append(automatic);
         const options = Array.isArray(global.models) ? global.models : [];
+        const groups = new Map();
         for (const model of options) {
+          if (!groups.has(model.provider)) { const group = make('optgroup'); group.label = model.provider; groups.set(model.provider, group); translateModel.append(group); }
           const candidate = /(?:flash|mini|nano|small|lite|haiku)/i.test(`${model.id} ${model.name || ''}`);
-          const option = make('option', '', `${model.provider} / ${model.name || model.id}${candidate ? ' · 轻量候选（价格和速度未知）' : ''}`);
-          option.value = JSON.stringify({ provider: model.provider, model: model.id }); translateModel.append(option);
+          const option = make('option', '', `${model.name || model.id}${candidate ? ' · 轻量候选' : ''}`);
+          option.value = JSON.stringify({ provider: model.provider, model: model.id }); groups.get(model.provider).append(option);
         }
         const selected = translationConfig.model ? JSON.stringify(translationConfig.model) : '';
         if (selected && !options.some(model => JSON.stringify({ provider: model.provider, model: model.id }) === selected)) {
           const missing = make('option', '', `${translationConfig.model.provider} / ${translationConfig.model.model}（当前不可用）`); missing.value = selected; translateModel.append(missing);
         }
-        translateModel.value = selected; translateTarget.value = translationConfig.target_language === 'en' ? 'en' : 'zh-CN'; translatePrompt.value = translationConfig.prompt || ''; translateSave.disabled = false; return true;
+        translateModel.value = selected; translateTarget.value = ['auto', 'zh-CN', 'en'].includes(translationConfig.target_language) ? translationConfig.target_language : ''; translatePrompt.value = translationConfig.prompt || ''; translateSave.disabled = false; return true;
       } catch (error) { if (ticket === translationLoad) say(`翻译设置读取失败：${error.message}`, true); return false; }
     }
     translateSave.addEventListener('click', async () => {
       const id = project?.id; if (!id || translationProject !== id) return;
       let model = null; try { if (translateModel.value) model = JSON.parse(translateModel.value); } catch { say('请选择可用模型。', true); return; }
-      const value = { model, target_language: translateTarget.value === 'en' ? 'en' : 'zh-CN', prompt: translatePrompt.value }; translateSave.disabled = true;
+      const value = { model, target_language: ['auto', 'zh-CN', 'en'].includes(translateTarget.value) ? translateTarget.value : null, prompt: translatePrompt.value }; translateSave.disabled = true;
       try { const record = await api('state_put', { key: translationKey(id), value, expected_revision: translationRevision }); if (id !== project?.id) return; translationConfig = value; translationRevision = record.revision; say('本项目翻译设置已保存。'); }
       catch (error) { say(`翻译设置未保存；输入仍保留：${error.message}`, true); }
       finally { translateSave.disabled = false; }
@@ -1629,7 +1631,7 @@ window.PaperLatexWorkspace = (() => {
       try {
         if (translationProject !== id && !await loadTranslationSettings()) throw new Error('无法读取翻译设置。');
         if (ticket !== translationRequest || project?.id !== id || file !== path || generation !== epoch || fileRequest !== sourceTicket) return;
-        const result = await api('latex_ai_translate', { id, path, selection, target_language: translationConfig?.target_language === 'en' ? 'en' : 'zh-CN', ...(translationConfig?.model ? { model_override: translationConfig.model } : {}), ...(translationConfig?.prompt ? { prompt: translationConfig.prompt } : {}) }, { signal: translationAbort.signal });
+        const result = await api('latex_ai_translate', { id, path, selection, ...(['auto', 'zh-CN', 'en'].includes(translationConfig?.target_language) ? { target_language: translationConfig.target_language } : {}), ...(translationConfig?.model ? { model_override: translationConfig.model } : {}), ...(translationConfig?.prompt ? { prompt: translationConfig.prompt } : {}) }, { signal: translationAbort.signal });
         if (ticket !== translationRequest || project?.id !== id || file !== path || generation !== epoch || fileRequest !== sourceTicket || disposed) return;
         translateResults.textContent = ''; translateResults.append(make('strong', '', `选文译文 · 来源为编辑草稿${editor.value.slice(start, end) !== selection ? '（源码已变化）' : ''}`), make('p', '', result.answer), make('small', '', `${result.model.provider} / ${result.model.model} · ${result.prompt_version}`));
         const original = make('details'); original.append(make('summary', '', '查看送译原文'), make('p', '', selection)); translateResults.append(original);

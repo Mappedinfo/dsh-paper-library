@@ -6,8 +6,9 @@ const script = await readFile(new URL('../web/language-learning.js', import.meta
 const clone = value => JSON.parse(JSON.stringify(value))
 const tick = () => new Promise(resolve => setImmediate(resolve))
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
-function fixture({ get, put, respond, geometryGet } = {}) {
+function fixture({ get, put, respond } = {}) {
   const elements = new Map(), requests = [], writes = [], storage = new Map(), toasts = [], chats = []
+  const floating = { attached: [], calls: [] }
   let currentPaper = null, selection = null, serial = 0
   class Element {
     constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.listeners = new Map(); this.value = ''; this.hidden = false; this.disabled = false; this.dataset = {}; this.style = {}; this.classList = { toggle() {} } }
@@ -21,18 +22,22 @@ function fixture({ get, put, respond, geometryGet } = {}) {
     addEventListener(type, fn) { const listeners = this.listeners.get(type) || []; listeners.push(fn); this.listeners.set(type, listeners) }
     async dispatch(type, args = {}) { for (const fn of this.listeners.get(type) || []) await fn({ preventDefault() {}, currentTarget: this, ...args }) }
   }
-  const element = id => { if (!elements.has(id)) { const node = new Element(); node.id = id; if (id === 'language-target') node.value = 'zh-CN' } return elements.get(id) }
+  const element = id => { if (!elements.has(id)) { const node = new Element(); node.id = id } return elements.get(id) }
   const document = { body: new Element('body'), createElement: tag => new Element(tag), getElementById: element }
-  const window = { innerWidth: 1000, innerHeight: 800, crypto: { randomUUID: () => `request-${++serial}` } }
+  const window = { innerWidth: 1000, innerHeight: 800, crypto: { randomUUID: () => `request-${++serial}` }, PaperFloatingWindows: { attach(panel, options) {
+    floating.attached.push({ panel, options })
+    return { restore() { floating.calls.push('restore') }, save() { floating.calls.push('save') }, dispose() { floating.calls.push('dispose') } }
+  } } }
   vm.runInNewContext(script, { window, document, setTimeout, clearTimeout, navigator: { clipboard: { writeText: async () => {} } }, URL, Blob }, { filename: 'web/language-learning.js' })
   const result = args => ({ id: `result-${args.request_id}`, request_id: args.request_id, paper_id: args.id, page: args.page || null, mode: args.mode, source_text: args.text, result: 'Synthetic translated result', explanation: 'Synthetic explanation', model: { provider: 'dsh', model: 'current' }, vocabulary: [], status: 'complete' })
   const ui = window.PaperLanguageLearning.create({
     api: async (action, args) => { requests.push({ action, ...clone(args) }); const value = respond?.(action, args, result); if (value !== undefined) return value; return action === 'language_generate' ? result(args) : { items: [], total: 0 } },
-    persistence: { get: async key => key==='reader:language-window' ? geometryGet ? geometryGet(key) : clone(storage.get(key) || null) : get ? get(key) : clone(storage.get(key) || null), put: async (key, value) => { writes.push({ key, value: clone(value) }); if (put) await put(key, value); storage.set(key, clone(value)) }, flush: async () => {} },
+    persistence: { get: async key => get ? get(key) : clone(storage.get(key) || null), put: async (key, value) => { writes.push({ key, value: clone(value) }); if (put) await put(key, value); storage.set(key, clone(value)) }, flush: async () => {} },
     getPaper: () => currentPaper, getSelection: () => selection, toast: text => toasts.push(text), prepareChat: (...args) => chats.push(args),
   })
   ui.setAvailable(true)
-  return { ui, element, requests, writes, storage, toasts, chats, result,
+  return { ui, element, requests, writes, storage, toasts, chats, result, floating,
+    actions(action) { return requests.filter(row => row.action === action) },
     async open(id) { currentPaper = { id, title: id }; return ui.paperChanged(currentPaper) },
     setCurrent(id) { currentPaper = id ? { id, title: id } : null; ui.sync() },
     select(text = 'Selected PDF source.', page = 2) { selection = { id: currentPaper.id, text, page } },
@@ -42,41 +47,89 @@ function fixture({ get, put, respond, geometryGet } = {}) {
   }
 }
 
-test('window geometry restores within the viewport and keyboard movement is saved', async () => {
-  const f = fixture(); f.storage.set('reader:language-window', { x: 4000, y: -20, width: 1200, height: 900 });
-  f.ui.show(); await tick();
-  const panel = f.element('language-panel');
-  assert.equal(panel.style.width, '976px'); assert.equal(panel.style.height, '776px');
-  assert.equal(panel.style.left, '12px'); assert.equal(panel.style.top, '12px');
-  await f.element('language-drag').dispatch('keydown', { key: 'ArrowRight' }); await tick();
-  assert.equal(f.storage.get('reader:language-window').x, 12, 'the window remains inside the viewport');
-  f.ui.dispose();
-})
-
-test('pointer dragging persists a bounded position and late restore cannot undo it', async () => {
-  const pending = deferred(), f = fixture({ geometryGet: () => pending.promise });
-  f.ui.show();const handle=f.element('language-drag');
-  await handle.dispatch('pointerdown',{button:0,pointerId:1,clientX:16,clientY:16});
-  await handle.dispatch('pointermove',{pointerId:1,clientX:2000,clientY:2000});
-  await handle.dispatch('pointerup',{pointerId:1});
-  pending.resolve({ x: 20, y: 20, width: 300, height: 300 });await tick();
-  assert.equal(f.element('language-panel').style.left,'568px');
-  assert.equal(f.element('language-panel').style.top,'198px');
-  assert.equal(f.storage.get('reader:language-window').x,568);
+test('language window connects to the shared geometry controller and releases it on disposal', async () => {
+  const f = fixture()
+  assert.equal(f.floating.attached.length, 1)
+  assert.equal(f.floating.attached[0].panel, f.element('language-panel'))
+  assert.equal(f.floating.attached[0].options.key, 'reader:language-window')
+  assert.equal(typeof f.floating.attached[0].options.persistence.get, 'function')
+  f.ui.show(); f.ui.showSettings(); await tick()
+  assert.deepEqual(f.floating.calls, ['restore', 'restore'])
+  f.ui.dispose()
+  assert.deepEqual(f.floating.calls, ['restore', 'restore', 'save', 'dispose'])
 })
 
 test('settings show configured routes and save prompts with the loaded revision', async () => {
   const f = fixture({ respond: (action, args) => {
-    if (action === 'language_settings_get') return { revision: 'rev-1', value: { model: null, translate_prompt: '旧翻译提示', polish_prompt: '' }, default_model: { provider: 'host', model: 'default' }, models: [{ provider: 'host', id: 'chosen', name: 'Chosen' }] }
+    if (action === 'language_settings_get') return { revision: 'rev-1', value: { model: null, translate_prompt: '旧翻译提示', polish_prompt: '', target_language: 'en' }, default_model: { provider: 'host', model: 'default' }, models: [{ provider: 'host', id: 'chosen', name: 'Chosen' }, { provider: 'other', id: 'second', name: 'Second' }, { provider: 'host', id: 'third', name: 'Third' }] }
     if (action === 'language_settings_update') return { revision: 'rev-2', value: args.value }
   } });
   f.ui.showSettings(); await tick();
   assert.equal(f.ui.snapshot().view, 'settings');
+  const groups = f.element('language-settings-model').children.filter(child => child.tagName === 'OPTGROUP')
+  assert.deepEqual(groups.map(group => group.label), ['host', 'other'])
+  assert.deepEqual(groups.map(group => group.children.length), [2, 1])
+  assert.equal(f.element('language-settings-target').value, 'en')
   f.element('language-settings-model').value = '0';f.element('language-settings-translate').value = '保留术语';f.element('language-settings-polish').value = '简洁表达';
   await f.click('language-settings-save');
   const saved = f.requests.find(row => row.action === 'language_settings_update');
-  assert.deepEqual(saved.value, { model: { provider: 'host', model: 'chosen' }, translate_prompt: '保留术语', polish_prompt: '简洁表达' });
+  assert.deepEqual(saved.value, { model: { provider: 'host', model: 'chosen' }, target_language: 'en', translate_prompt: '保留术语', polish_prompt: '简洁表达' });
   assert.equal(saved.expected_revision, 'rev-1');
+})
+
+test('translation follows the latest saved global target on each operation and defaults old settings to auto', async () => {
+  let target = 'en'
+  const f = fixture({ respond: action => action === 'language_settings_get' ? { value: target ? { target_language: target } : {} } : undefined })
+  await f.open('paper-a'); await f.type('Synthetic source.')
+  assert.equal(f.element('language-target').value, '')
+  for (const direction of ['en', 'zh-CN', null]) {
+    target = direction
+    await f.click('language-translate'); await f.settle()
+  }
+  assert.deepEqual(f.actions('language_generate').map(row => row.target_language), ['en', 'zh-CN', 'auto'])
+  assert.equal(f.actions('language_settings_get').length, 3)
+})
+
+test('manual direction overrides global settings without a settings request', async () => {
+  const f = fixture()
+  await f.open('paper-a'); await f.type('Synthetic source.')
+  for (const target of ['auto', 'en', 'zh-CN']) {
+    f.element('language-target').value = target; await f.element('language-target').dispatch('change')
+    await f.click('language-translate'); await f.settle()
+  }
+  assert.deepEqual(f.actions('language_generate').map(row => row.target_language), ['auto', 'en', 'zh-CN'])
+  assert.equal(f.actions('language_settings_get').length, 0)
+})
+
+test('late global-target read cannot submit the previous paper after navigation', async () => {
+  const pending = deferred(), f = fixture({ respond: action => action === 'language_settings_get' ? pending.promise : undefined })
+  await f.open('paper-a'); await f.type('Synthetic A source.')
+  await f.click('language-translate')
+  await f.open('paper-b'); await f.type('Synthetic B draft.')
+  pending.resolve({ value: { target_language: 'en' } }); await f.settle()
+  assert.equal(f.actions('language_generate').length, 0)
+  assert.equal(f.element('language-source').value, 'Synthetic B draft.')
+})
+
+test('restoring an unfinished automatic translation retries with the original direction and request identity', async () => {
+  for (const status of ['pending', 'committing']) {
+    const f = fixture({ respond: action => action === 'language_history' ? { items: [{ status, mode: 'translate', source_text: '中文原文', page: 2, target_language: 'en', requested_target_language: 'auto', request_id: 'old-request', created_at: '2026-01-01T00:00:00Z' }], total: 1 } : undefined })
+    await f.open('paper-a'); f.ui.show('history'); await tick()
+    await f.element('language-history-list').children[0].dispatch('click')
+    await f.click('language-translate'); await f.settle()
+    const retried = f.actions('language_generate')[0]
+    assert.equal(retried.target_language, 'auto')
+    assert.equal(retried.request_id, 'old-request')
+  }
+})
+
+test('global-target read failure preserves the draft and never sends a generation', async () => {
+  const f = fixture({ respond: action => { if (action === 'language_settings_get') throw new Error('Synthetic settings unavailable') } })
+  await f.open('paper-a'); await f.type('Synthetic draft.')
+  await f.click('language-translate'); await f.settle()
+  assert.equal(f.actions('language_generate').length, 0)
+  assert.equal(f.element('language-source').value, 'Synthetic draft.')
+  assert.match(f.element('language-status').textContent, /Synthetic settings unavailable/)
 })
 
 test('settings conflict keeps the unsaved prompts available to copy', async () => {
@@ -96,15 +149,15 @@ test('selection action waits for the shared paper draft read and cannot be overw
   const opening = f.open('paper-a'); f.select(); const translating = f.ui.useSelection('translate')
   assert.equal(f.element('language-source').disabled, true); assert.equal(f.requests.length, 0)
   load.resolve({ text: 'Previous durable draft.', target_language: 'en' }); await opening; await translating
-  assert.equal(reads, 1); assert.equal(f.requests[0].text, 'Selected PDF source.'); assert.equal(f.requests[0].page, 2)
+  assert.equal(reads, 1); assert.equal(f.actions('language_generate')[0].text, 'Selected PDF source.'); assert.equal(f.actions('language_generate')[0].page, 2)
   assert.equal(f.element('language-source').value, 'Selected PDF source.')
 })
 
 test('request identity write is awaited before the model request begins', async () => {
   const durable = deferred(); const f = fixture({ put: () => durable.promise })
   await f.open('paper-a'); await f.type('Text to translate.'); await f.click('language-translate')
-  assert.equal(f.requests.length, 0); durable.resolve(); await f.settle()
-  assert.equal(f.requests.length, 1); assert.equal(f.requests[0].request_id, f.writes.find(row => row.value.failed_request)?.value.failed_request.request_id)
+  assert.equal(f.actions('language_generate').length, 0); durable.resolve(); await f.settle()
+  assert.equal(f.actions('language_generate').length, 1); assert.equal(f.actions('language_generate')[0].request_id, f.writes.find(row => row.value.failed_request)?.value.failed_request.request_id)
 })
 
 test('editing while generation runs preserves new draft and does not render the stale result as current', async () => {
@@ -133,7 +186,8 @@ test('uncertain network retry keeps request identity but terminal failure permit
   } })
   await f.open('paper-a'); await f.type('Retry source.')
   for (let i = 0; i < 3; i++) { await f.click('language-translate'); await f.settle() }
-  assert.equal(f.requests[0].request_id, f.requests[1].request_id); assert.notEqual(f.requests[1].request_id, f.requests[2].request_id)
+  const calls = f.actions('language_generate')
+  assert.equal(calls[0].request_id, calls[1].request_id); assert.notEqual(calls[1].request_id, calls[2].request_id)
 })
 
 test('late history response cannot overwrite another active view status', async () => {
@@ -147,7 +201,7 @@ test('paper authority prevents stale generation and sending another paper result
   const f = fixture(); await f.open('paper-a'); await f.type('Source A.'); await f.click('language-translate'); await f.settle()
   f.setCurrent('paper-b'); assert.equal(f.element('language-translate').disabled, true)
   await f.click('language-discuss'); await f.click('language-translate')
-  assert.equal(f.chats.length, 0); assert.equal(f.requests.length, 1)
+  assert.equal(f.chats.length, 0); assert.equal(f.actions('language_generate').length, 1)
   f.setCurrent('paper-a'); await f.click('language-discuss')
   assert.equal(f.chats[0][1].paperId, 'paper-a')
 })

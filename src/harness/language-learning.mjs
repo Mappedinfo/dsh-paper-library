@@ -17,6 +17,26 @@ function paging(input, maximum = 50) {
   if (!Number.isSafeInteger(offset) || offset < 0 || offset > MAX_SCAN || !Number.isSafeInteger(limit) || limit < 1 || limit > maximum) throw fail('分页范围无效。')
   return { offset, limit }
 }
+/** Resolve the language from selected source only; this is a script heuristic,
+ * not a language identification model. Ignore common LaTeX markup and math. */
+export function resolveTranslationTarget(text, target = 'auto') {
+  if (!['auto', 'zh-CN', 'en'].includes(target)) throw fail('翻译目标语言无效。')
+  if (target !== 'auto') return target
+  const prose = String(text)
+    .replace(/(?<!\\)%[^\n]*/gu, ' ')
+    .replace(/\\begin\{(?:equation\*?|align\*?|math|displaymath)\}[\s\S]*?\\end\{(?:equation\*?|align\*?|math|displaymath)\}/gu, ' ')
+    .replace(/(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$|(?<!\\)\$[^\n$]*?(?<!\\)\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)/gu, ' ')
+    .replace(/\\(?:cite\w*|ref|eqref|autoref|label|url|href|begin|end)\*?(?:\[[^\]]*\])*\s*\{[^{}]*\}/giu, ' ')
+    .replace(/\\(?:[A-Za-z@]+|.)/gu, ' ')
+  const han = (prose.match(/\p{Script=Han}/gu) || []).length
+  const latin = (prose.match(/\p{Script=Latin}+/gu) || []).length
+  // Significant kana or Hangul signals a Japanese/Korean passage, even when
+  // its Han characters outnumber Latin words. Very short incidental mentions
+  // do not by themselves override the surrounding passage.
+  const kanaHangul = (prose.match(/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu) || []).length
+  if (kanaHangul >= Math.max(2, Math.ceil(han / 4), Math.ceil(latin / 2))) return 'zh-CN'
+  return han > latin ? 'en' : 'zh-CN'
+}
 function requestOf(input) {
   const id = paperId(input.id), mode = input.mode
   if (!['translate', 'polish'].includes(mode)) throw fail('请选择翻译或润色。')
@@ -24,8 +44,11 @@ function requestOf(input) {
   if (/[\x00-\x1f]/.test(request_id)) throw fail('请求标识无效。')
   const page = input.page ?? null
   if (page !== null && (!Number.isSafeInteger(page) || page < 1 || page > 2000)) throw fail('选文页码无效。')
-  if (input.target_language !== undefined && !['zh-CN', 'en', ...(mode === 'polish' ? ['source'] : [])].includes(input.target_language)) throw fail('翻译目标语言无效。')
-  return { id, mode, text, page, target_language: mode === 'polish' ? 'source' : input.target_language ?? 'zh-CN', request_id }
+  if (input.target_language !== undefined && !['auto', 'zh-CN', 'en', ...(mode === 'polish' ? ['source'] : [])].includes(input.target_language)) throw fail('翻译目标语言无效。')
+  // Omitted target keeps the legacy request fingerprint for durable replays.
+  const target = mode === 'polish' ? 'source' : resolveTranslationTarget(text, input.target_language ?? 'zh-CN')
+  return { id, mode, text, page, target_language: target, request_id,
+    ...(mode === 'translate' && input.target_language === 'auto' ? { requested_target_language: 'auto' } : {}) }
 }
 function containsTerm(source, term) {
   const sourceText = canonical(source), needle = canonical(term)
@@ -81,26 +104,30 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
   const flights = new Map()
   let admitted = 0, generating = 0
   const resultKey = request => `language.result:${hash(request.id)}:${hash(request.request_id)}`
-  const defaults = () => ({ model: null, translate_prompt: '', polish_prompt: '' })
+  const defaults = () => ({ model: null, translate_prompt: '', polish_prompt: '', target_language: 'auto' })
+  const settingsValue = value => ({ ...defaults(), ...(value || {}), target_language: ['auto', 'zh-CN', 'en'].includes(value?.target_language) ? value.target_language : 'auto' })
   async function settingsGet(signal) {
     const record = await store.get(SETTINGS_KEY)
     const available = typeof models === 'function' ? await models(signal) : { models: [] }
     let default_model = null
     try { if (typeof getDefaultModel === 'function') default_model = modelOf(await getDefaultModel()) } catch {}
-    return { value: record.value || defaults(), revision: record.revision, models: available.models || [], default_model }
+    return { value: settingsValue(record.value), revision: record.revision, models: available.models || [], default_model }
   }
   async function settingsUpdate(input, signal) {
     const value = input.value
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw fail('语言设置无效。')
     const translate_prompt = string(value.translate_prompt ?? '', '翻译补充提示词', 2000, false)
     const polish_prompt = string(value.polish_prompt ?? '', '润色补充提示词', 2000, false)
+    const current = await store.get(SETTINGS_KEY)
+    const target_language = value.target_language ?? settingsValue(current.value).target_language
+    if (!['auto', 'zh-CN', 'en'].includes(target_language)) throw fail('翻译目标语言无效。')
     let model = null
     if (value.model != null) {
       model = modelOf(value.model)
       const available = typeof models === 'function' ? await models(signal) : { models: [] }
       if (!(available.models || []).some(item => item.provider === model.provider && item.id === model.model)) throw fail('所选模型不在 DSH 当前可用模型列表中，请刷新后重新选择。', 'LANGUAGE_MODEL_UNAVAILABLE', 409)
     }
-    const saved = await store.put(SETTINGS_KEY, { model, translate_prompt, polish_prompt }, input.expected_revision)
+    const saved = await store.put(SETTINGS_KEY, { model, translate_prompt, polish_prompt, target_language }, input.expected_revision)
     return { value: saved.value, revision: saved.revision }
   }
   async function cas(key, transform) {
@@ -143,7 +170,7 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     generating++
     let record
     try {
-      try { record = await store.put(key, { id: hash(key), request_id: request.request_id, paper_id: request.id, page: request.page, mode: request.mode, target_language: request.target_language, source_text: request.text, status: 'pending', created_at: stamp(), fingerprint, request }, 0) }
+      try { record = await store.put(key, { id: hash(key), request_id: request.request_id, paper_id: request.id, page: request.page, mode: request.mode, target_language: request.target_language, ...(request.requested_target_language ? { requested_target_language: request.requested_target_language } : {}), source_text: request.text, status: 'pending', created_at: stamp(), fingerprint, request }, 0) }
       catch (error) { if (error.code === 'STATE_CONFLICT') return replay(key, await store.get(key), fingerprint); throw error }
       const item = await dispatch({ action: 'get', id: request.id }, { library, python, signal })
       if (request.page !== null && (!item.pdf || !Number.isSafeInteger(item.page_count) || request.page > item.page_count)) throw fail('选文页码超出当前论文 PDF。')

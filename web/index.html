@@ -181,7 +181,7 @@
 
       <div class="board-group board-menus">
         <button id="board-layout-open" class="button subtle board-menu-button" type="button" aria-expanded="false" aria-controls="board-layout-panel" title="自动排版：分层树／放射思维导图／分层图，方向与间距">排版 ▾</button>
-        <button id="board-project-open" class="button subtle board-menu-button" type="button" aria-expanded="false" aria-controls="board-project-panel" title="把这张画板关联到一个或多个阅读项目">项目 ▾</button>
+        <button id="board-project-open" class="button subtle board-menu-button" type="button" aria-expanded="false" aria-controls="board-project-panel" title="关联论文、阅读项目或 Slides">关联 ▾</button>
         <button id="board-menu-open" class="button subtle board-menu-button" type="button" aria-expanded="false" aria-controls="board-menu" aria-label="更多设置" title="更多设置：绑定文献、源文件与 Mermaid、内容与删除">☰</button>
       </div>
       <span id="board-status" class="board-status" role="status" aria-live="polite"></span>
@@ -255,15 +255,35 @@
         <span id="board-layout-status" class="board-status" role="status"></span>
       </div>
 
-      <div id="board-project-panel" class="board-menu" aria-label="阅读项目关联">
-        <span class="board-menu-label">阅读项目</span>
-        <div class="board-menu-row">
-          <label class="board-field">项目 <select id="board-project-select" aria-label="选择一个阅读项目"></select></label>
-          <button id="board-link-project" class="button subtle" type="button" title="把这张画板关联到所选阅读项目（多对多，不复制内容）">关联项目</button>
-          <button id="board-unlink-project" class="button subtle" type="button">解除项目</button>
+      <section id="board-project-panel" class="board-menu board-associations" aria-label="画板关联侧栏">
+        <header class="reading-sidebar-header">
+          <strong class="board-association-title">画板关联</strong>
+          <button id="board-association-close" class="reading-panel-button" type="button" aria-label="关闭画板关联">×</button>
+        </header>
+        <div class="reading-sidebar-tabs board-association-tabs" role="tablist" aria-label="关联类型">
+          <button id="board-association-papers" class="reading-panel-button" type="button" role="tab" aria-selected="true">论文</button>
+          <button id="board-association-projects" class="reading-panel-button" type="button" role="tab" aria-selected="false">阅读项目</button>
+          <button id="board-association-slides" class="reading-panel-button" type="button" role="tab" aria-selected="false">Slides</button>
         </div>
-        <span id="board-links" class="board-status" role="status"></span>
-      </div>
+        <div class="board-association-search">
+          <input id="board-association-query" type="search" maxlength="200" placeholder="查找目录中的标题" aria-label="查找关联对象">
+          <button id="board-association-search" class="button subtle" type="button">查找</button>
+        </div>
+        <label class="board-association-filter"><input id="board-association-linked" type="checkbox"> 只看已关联（包括失效条目）</label>
+        <p id="board-association-status" class="small muted" role="status" aria-live="polite"></p>
+        <div id="board-association-list" class="board-association-list" role="listbox" aria-label="选择关联对象"></div>
+        <div class="board-association-pager">
+          <button id="board-association-prev" class="button subtle" type="button">上一页</button>
+          <span id="board-association-page" class="small muted"></span>
+          <button id="board-association-next" class="button subtle" type="button">下一页</button>
+        </div>
+        <footer class="board-association-actions">
+          <p id="board-association-selected" class="small muted">先点选一项，再关联或解除。</p>
+          <button id="board-association-link" class="button subtle" type="button" disabled>关联所选</button>
+          <button id="board-association-unlink" class="button subtle" type="button" disabled>解除所选</button>
+          <span id="board-links" class="board-status" role="status"></span>
+        </footer>
+      </section>
 
       <div id="board-menu" class="board-menu" aria-label="更多设置">
         <div class="board-menu-section">

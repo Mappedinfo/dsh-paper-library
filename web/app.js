@@ -1418,7 +1418,7 @@ async function refreshBoardShelf(){
     const result=await api('board_list',{});
     boardSummaries=result.boards||[];
     cachedBoardLinks.clear();
-    for(const summary of boardSummaries){try{const record=await api('board_get',{id:summary.id});cachedBoardLinks.set(summary.id,{papers:[...(record.board.links?.papers??[])],projects:[...(record.board.links?.projects??[])]});}catch{cachedBoardLinks.set(summary.id,{papers:[],projects:[]});}}
+    for(const summary of boardSummaries){try{const record=await api('board_get',{id:summary.id});cachedBoardLinks.set(summary.id,{papers:[...(record.board.links?.papers??[])],projects:[...(record.board.links?.projects??[])],slides:[...(record.board.links?.slides??[])]});}catch{cachedBoardLinks.set(summary.id,{papers:[],projects:[]});}}
     $('board-shelf-count').textContent=String(boardSummaries.length);
     list.replaceChildren();
     if(!boardSummaries.length){list.append(el('p','small muted','还没有画板。打开「画板」即可新建，或从论文里点「＋ 画板」。'));}
@@ -1460,12 +1460,13 @@ const cachedBoardLinks=new Map();
  */
 async function linkBoardToPaper(id,paperId,on){
   const got=await api('board_get',{id});
-  const papers=[...(got.board.links?.papers??[])],projects=[...(got.board.links?.projects??[])];
+  const papers=[...(got.board.links?.papers??[])],projects=[...(got.board.links?.projects??[])],slides=[...(got.board.links?.slides??[])];
   if(papers.includes(paperId)===on)return;
   const next=on?[...papers,paperId]:papers.filter(value=>value!==paperId);
   const links={};
   if(next.length)links.papers=next;
   if(projects.length)links.projects=projects;
+  if(slides.length)links.slides=slides;
   await api('board_save',{id,board:{...got.board,links:Object.keys(links).length?links:undefined},expected_revision:got.revision});
 }
 async function syncPaperProjectCount(){

@@ -27,8 +27,9 @@ const locales = {
     conflict: '设置未保存，已显示主机的当前值。请核对后重试。', failed: '无法确认设置已保存。请检查连接后重试。',
     reset: '恢复默认设置', 'reset.hint': '清除这四项用户覆盖，恢复 DSH 配置中的默认值。',
     model: '模型、凭据、主题与字号继续由 DSH 管理。',
-    language: '语言模型与提示词', 'language.hint': '默认使用 DSH 当前默认模型；也可为翻译和润色单独指定模型与补充提示词。',
+    language: '语言模型与提示词', 'language.model': '模型', 'language.hint': '默认使用 DSH 当前默认模型；也可为翻译和润色单独指定模型与补充提示词。',
     'language.default': '使用 DSH 当前默认模型', 'language.missing': '当前不可用', 'language.translate': '翻译补充提示词', 'language.polish': '润色补充提示词',
+    'language.target': '默认翻译目标', 'language.target.auto': '自动：中文译为英文，其他译为中文', 'language.target.zh-CN': '中文', 'language.target.en': '英文',
     'language.save': '保存语言设置', 'language.reload': '重新读取（放弃本窗口未保存修改）', 'language.saved': '语言设置已保存。', 'language.conflict': '设置已在其他窗口更改，本窗口的输入仍保留。复制所需内容后可重新读取。',
     'language.failed': '语言设置读取或保存失败，请检查连接后重试。', 'language.loading': '正在读取语言设置…', 'language.saving': '正在保存语言设置…',
   },
@@ -43,8 +44,9 @@ const locales = {
     conflict: 'Settings were not saved. Current host values are shown; review them and retry.', failed: 'Could not confirm the save. Check the connection and retry.',
     reset: 'Restore defaults', 'reset.hint': 'Clears these four user overrides and restores the DSH configuration defaults.',
     model: 'Models, credentials, theme and font size remain managed by DSH.',
-    language: 'Language model and prompts', 'language.hint': 'Uses the current DSH default model unless a language-specific model is selected.',
+    language: 'Language model and prompts', 'language.model': 'Model', 'language.hint': 'Uses the current DSH default model unless a language-specific model is selected.',
     'language.default': 'Use the current DSH default model', 'language.missing': 'Unavailable', 'language.translate': 'Additional translation instructions', 'language.polish': 'Additional polishing instructions',
+    'language.target': 'Default translation target', 'language.target.auto': 'Automatic: Chinese to English, otherwise Chinese', 'language.target.zh-CN': 'Chinese', 'language.target.en': 'English',
     'language.save': 'Save language settings', 'language.reload': 'Reload (discard unsaved changes here)', 'language.saved': 'Language settings saved.', 'language.conflict': 'Settings changed in another window. Your input remains here; copy it before reloading.',
     'language.failed': 'Could not load or save language settings. Check the connection and retry.', 'language.loading': 'Loading language settings…', 'language.saving': 'Saving language settings…',
   },
@@ -119,7 +121,7 @@ export function createLanguageSettingsModel(request) {
       } catch { update({ status: 'failed' }); return false }
     },
     set(key, value) {
-      if (disposed || !snapshot.value || !['model', 'translate_prompt', 'polish_prompt'].includes(key)) return
+      if (disposed || !snapshot.value || !['model', 'translate_prompt', 'polish_prompt', 'target_language'].includes(key)) return
       editVersion++
       update({ value: { ...snapshot.value, [key]: value }, dirty: true, status: ['saving', 'conflict'].includes(snapshot.status) ? snapshot.status : 'ready' })
     },
@@ -192,17 +194,26 @@ export function PaperLibraryLanguageSettings({ model, t }) {
   const { value, models, defaultModel, status } = snapshot
   const busy = status === 'loading' || status === 'saving'
   const selected = value?.model ? JSON.stringify([value.model.provider, value.model.model]) : ''
-  const choices = models.map(item => ({ key: JSON.stringify([item.provider, item.id]), name: `${item.provider} / ${item.name || item.id}`, model: { provider: item.provider, model: item.id } }))
+  const choices = models.map(item => ({ key: JSON.stringify([item.provider, item.id]), name: item.name || item.id, model: { provider: item.provider, model: item.id } }))
+  const groups = new Map()
+  for (const item of choices) {
+    const group = groups.get(item.model.provider) || []
+    group.push(item); groups.set(item.model.provider, group)
+  }
   const missing = selected && !choices.some(item => item.key === selected)
   const statusKey = ['loading', 'saving', 'saved', 'failed', 'conflict'].includes(status) ? `language.${status}` : null
   return h('section', { 'aria-label': t('language'), style: { marginTop: '20px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: '10px', minWidth: 0 } },
     h('h3', { style: { margin: 0, fontSize: '15px' } }, t('language')),
     h('p', { style: { ...muted, margin: 0 } }, t('language.hint')),
-    value ? h('label', { style: { display: 'grid', gap: '5px' } }, t('language'),
+    value ? h('label', { style: { display: 'grid', gap: '5px' } }, t('language.model'),
       h('select', { value: selected, disabled: busy, style: control, onChange: event => model.set('model', choices.find(item => item.key === event.currentTarget.value)?.model || null) },
         h('option', { value: '' }, `${t('language.default')}${defaultModel ? ` (${defaultModel.provider} / ${defaultModel.model})` : ''}`),
         missing ? h('option', { value: selected }, `${value.model.provider} / ${value.model.model} (${t('language.missing')})`) : null,
-        ...choices.map(item => h('option', { key: item.key, value: item.key }, item.name)))) : null,
+        ...[...groups].map(([provider, items]) => h('optgroup', { key: provider, label: provider },
+          ...items.map(item => h('option', { key: item.key, value: item.key }, item.name)))))) : null,
+    value ? h('label', { style: { display: 'grid', gap: '5px' } }, t('language.target'),
+      h('select', { value: value.target_language || 'auto', disabled: busy, style: control, onChange: event => model.set('target_language', event.currentTarget.value) },
+        ...['auto', 'zh-CN', 'en'].map(target => h('option', { key: target, value: target }, t(`language.target.${target}`))))) : null,
     ...['translate', 'polish'].map(kind => value ? h('label', { key: kind, style: { display: 'grid', gap: '5px' } }, t(`language.${kind}`),
       h('textarea', { value: value[`${kind}_prompt`] || '', maxLength: 2000, rows: 3, disabled: busy, style: { ...control, resize: 'vertical' }, onChange: event => model.set(`${kind}_prompt`, event.currentTarget.value) })) : null),
     h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap' } },

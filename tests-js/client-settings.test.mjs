@@ -302,3 +302,19 @@ test('language settings always offer explicit reload, disabled during requests',
   snapshot.status = 'loading'
   assert.equal(reload().props.disabled, true)
 })
+
+test('native language settings group models by provider and expose the persisted default target', () => {
+  const fixture = {
+    getSnapshot: () => ({ status: 'ready', value: { model: null, translate_prompt: '', polish_prompt: '', target_language: 'en' }, models: [
+      { provider: 'first', id: 'one', name: 'One' }, { provider: 'second', id: 'two', name: 'Two' }, { provider: 'first', id: 'three', name: 'Three' },
+    ] }), subscribe: () => () => {}, load: () => {}, save: () => {}, set: () => {},
+  }
+  const nodes = walk(PaperLibraryLanguageSettings({ model: fixture, t: key => key }))
+  const groups = nodes.filter(node => node.type === 'optgroup')
+  assert.deepEqual(groups.map(node => node.props.label), ['first', 'second'])
+  assert.equal(groups[0].children.filter(child => child?.type === 'option').length, 2)
+  const selects = nodes.filter(node => node.type === 'select')
+  assert.equal(selects.length, 2)
+  assert.equal(selects[1].props.value, 'en')
+  assert.deepEqual(selects[1].children.filter(child => child?.type === 'option').map(option => option.props.value), ['auto', 'zh-CN', 'en'])
+})

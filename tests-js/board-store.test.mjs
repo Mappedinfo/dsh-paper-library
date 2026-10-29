@@ -63,6 +63,23 @@ test('a board round-trips through the real store with a stable summary and no mo
   assert.equal('angle' in perpendicular.board.edges[0], false, 'perpendicular is the default and is not stored');
 });
 
+test('board associations keep all three kinds through CAS and tolerate missing catalog targets', async t => {
+  const f = await fixture(t);
+  const links = { papers: ['paper_missing'], projects: ['project_missing'], slides: ['pd-missing'] };
+  const created = await f.store.create({ board: board({ links }) });
+  assert.deepEqual(created.board.links, links);
+  assert.equal(created.summary.linked_slides, 1);
+  const next = await f.store.save({ id: created.board.id, board: { ...created.board, title: '保留关联', links: { ...links, slides: ['pd-missing', 'pd-second'] } }, expectedRevision: created.revision });
+  assert.deepEqual(next.board.nodes, created.board.nodes);
+  assert.deepEqual(next.board.edges, created.board.edges);
+  assert.equal((await f.store.list()).boards[0].linked_slides, 2);
+  await assert.rejects(f.store.save({ id: created.board.id, board: created.board, expectedRevision: created.revision }), error => error.code === 'STATE_CONFLICT');
+  assert.deepEqual((await f.store.read(created.board.id)).board.links.slides, ['pd-missing', 'pd-second']);
+  assert.throws(() => validateBoard(board({ links: { slides: Array.from({ length: 21 }, (_, i) => `pd-${i}`) } })), /最多 20 项/);
+  assert.throws(() => validateBoard(board({ links: { slides: ['same', 'same'] } })), /重复/);
+  assert.throws(() => validateBoard(board({ links: { unknown: [] } })), /不支持的字段/);
+});
+
 test('board validation rejects dangling, duplicated, oversized and unsupported shapes', () => {
   const cases = [
     [board({ edges: [{ id: 'e-1', from: 'n-1', to: 'n-404' }] }), /端点不在本次画板中/],

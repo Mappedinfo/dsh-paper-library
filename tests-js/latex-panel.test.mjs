@@ -90,7 +90,7 @@ test('translation sends only an unsaved selection and never writes the source', 
   const editor = f.ids.get('latex-editor'); editor.value = 'UNSAVED draft selected text and private remainder'; editor.setSelectionRange(8, 27); await editor.dispatch('input')
   await f.ids.get('latex-translate-selection').dispatch('click')
   const request = f.calls.find(call => call.action === 'latex_ai_translate')
-  assert.equal(request.selection, 'draft selected text'); assert.equal(request.target_language, 'zh-CN')
+  assert.equal(request.selection, 'draft selected text'); assert.equal(request.target_language, undefined, 'the server resolves the current shared target')
   assert.equal(f.calls.some(call => call.action === 'latex_write'), false)
   assert.match(f.ids.get('latex-translation-results').textContent, /来源为编辑草稿/)
   assert.equal(f.ui.testHooks.state().dirty, true); f.ui.dispose()
@@ -114,6 +114,29 @@ test('project translation settings persist an explicit model, language and promp
   await f.ids.get('latex-translate-selection').dispatch('click')
   const request = f.calls.find(call => call.action === 'latex_ai_translate')
   assert.equal(request.target_language, 'en');assert.equal(request.model_override.model, 'mini');assert.equal(request.prompt, '保留缩写')
+  f.ui.dispose()
+})
+
+test('project translation can explicitly use auto or follow shared language settings', async () => {
+  const f = await fixture((action, args) => {
+    if (action === 'language_settings_get') return { value: { target_language: 'en' }, models: [{ provider: 'host', id: 'mini', name: 'Mini' }, { provider: 'other', id: 'basic', name: 'Basic' }] }
+    if (action === 'state_get') return { value: null, revision: 0 }
+    if (action === 'state_put') return { value: args.value, revision: 'next' }
+    if (action === 'project_list') return { projects: [] }
+    if (action === 'latex_ai_translate') return { answer: 'Synthetic', model: { provider: 'host', model: 'mini' }, target_language: 'en', prompt_version: 'test' }
+  })
+  await f.ids.get('latex-menu-open').dispatch('click'); await tick()
+  assert.deepEqual(f.ids.get('latex-translate-model').children.filter(node => node.tagName === 'OPTGROUP').map(node => node.label), ['host', 'other'])
+  f.ids.get('latex-translate-target').value = 'auto'
+  await f.ids.get('latex-translate-settings-save').dispatch('click')
+  const editor = f.ids.get('latex-editor'); editor.value = '合成选文'; editor.setSelectionRange(0, 4)
+  await f.ids.get('latex-translate-selection').dispatch('click')
+  assert.equal(f.calls.filter(call => call.action === 'latex_ai_translate').at(-1).target_language, 'auto')
+  f.ids.get('latex-translate-target').value = ''
+  await f.ids.get('latex-translate-settings-save').dispatch('click')
+  assert.equal(f.calls.filter(call => call.action === 'state_put' && call.key === 'reader:latex-translation-one').at(-1).value.target_language, null)
+  await f.ids.get('latex-translate-selection').dispatch('click')
+  assert.equal(f.calls.filter(call => call.action === 'latex_ai_translate').at(-1).target_language, undefined)
   f.ui.dispose()
 })
 

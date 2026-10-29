@@ -103,6 +103,10 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
     { id: 'board-project-select', tag: 'select' }, 'board-link-project', 'board-unlink-project',
     'board-files-open', 'board-files', 'board-file-list', 'board-files-label',
     'board-layout-open', 'board-layout-panel', 'board-project-open', 'board-project-panel',
+    'board-association-close', 'board-association-papers', 'board-association-projects', 'board-association-slides',
+    'board-association-query', 'board-association-search', 'board-association-linked', 'board-association-status',
+    'board-association-list', 'board-association-prev', 'board-association-next', 'board-association-page',
+    'board-association-selected', 'board-association-link', 'board-association-unlink',
     'board-menu-open', 'board-menu', 'board-inspector', 'board-inspector-node', 'board-inspector-edge',
   ];
   const { doc, registry, Element } = environment(ids);
@@ -916,6 +920,123 @@ test('the project picker is revealed by the catalog, not decided when the panel 
   assert.equal(full.registry.get('board-project-select').hidden, false);
   assert.equal(full.registry.get('board-link-project').disabled, false);
   assert.deepEqual([...full.registry.get('board-project-select').options].map(option => [option.value, option.textContent]), [['p-1', '城市感知综述（3）'], ['p-2', '方法复现（0）']]);
+});
+
+test('association sidebar searches and pages the catalog, then links only the selected item', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub({
+    resource_list: p => ({ items: Array.from({ length: p.offset ? 1 : 20 }, (_, i) => ({ id: `paper_${p.offset + i}`, title: `合成论文 ${p.offset + i}` })), total: 21 }),
+    project_list: p => ({ projects: [{ id: 'project-other', title: '完整目录中的阅读项目' }], total: 1 }),
+    catalog_resource_list: p => ({ items: [{ id: 'pd-synthetic', title: '合成 Slides' }], total: 1 }),
+  }) });
+  await harness.panel.open();
+  harness.panel.setProjects([]);
+  await harness.panel.searchAssociations({ query: '合成', linkedOnly: false });
+  assert.equal(state.at(-1).action, 'resource_list');
+  assert.equal(state.at(-1).payload.limit, 20);
+  assert.equal(state.at(-1).payload.query, '合成');
+  const rows = () => harness.registry.get('board-association-list').children;
+  assert.equal(rows().length, 20);
+  assert.equal(harness.registry.get('board-association-link').disabled, true);
+  rows()[0].dispatch('click');
+  assert.equal(harness.panel.links().papers.length, 0, 'selecting never writes a relationship');
+  harness.registry.get('board-association-link').dispatch('click');
+  assert.deepEqual([...harness.panel.links().papers], ['paper_0']);
+  await harness.panel.searchAssociations({ query: '合成', offset: 20, linkedOnly: false });
+  assert.equal(state.at(-1).payload.offset, 20);
+  assert.equal(rows()[0].title.includes('paper_20'), true);
+  assert.equal(harness.registry.get('board-association-next').disabled, true);
+  rows()[0].dispatch('click');
+  harness.registry.get('board-association-link').dispatch('click');
+  await harness.panel.searchAssociations({ kind: 'projects', query: '目录', linkedOnly: false });
+  assert.equal(state.at(-1).action, 'project_list');
+  assert.equal(state.at(-1).payload.include_archived, true);
+  rows()[0].dispatch('click');
+  harness.registry.get('board-association-link').dispatch('click');
+  await harness.panel.searchAssociations({ kind: 'slides', query: '合成', linkedOnly: false });
+  assert.equal(state.at(-1).action, 'catalog_resource_list');
+  assert.equal(state.at(-1).payload.kind, 'slides');
+  rows()[0].dispatch('click');
+  harness.registry.get('board-association-link').dispatch('click');
+  assert.deepEqual([...harness.panel.links().slides], ['pd-synthetic']);
+  assert.deepEqual([...harness.panel.links().projects], ['project-other']);
+  assert.deepEqual([...harness.panel.links().papers], ['paper_0', 'paper_20']);
+  await harness.runTimers();
+  const save = state.filter(call => call.action === 'board_save').at(-1);
+  assert.equal(save.payload.expected_revision, 'b'.repeat(64));
+  assert.deepEqual([...save.payload.board.links.slides], ['pd-synthetic']);
+});
+
+test('association page responses cannot select or link an old page or another board', async () => {
+  state.length = 0;
+  const waiting = [];
+  const harness = loadPanel({ api: apiStub({ resource_list: p => new Promise(resolve => waiting.push({ p, resolve })) }) });
+  await harness.panel.open();
+  const old = harness.panel.searchAssociations({ query: '旧检索', linkedOnly: false });
+  const latest = harness.panel.searchAssociations({ query: '新检索', linkedOnly: false });
+  waiting[1].resolve({ items: [{ id: 'paper_new', title: '新结果' }], total: 1 });
+  await latest;
+  waiting[0].resolve({ items: [{ id: 'paper_old', title: '旧结果' }], total: 100 });
+  assert.equal(await old, false);
+  const list = harness.registry.get('board-association-list');
+  assert.equal(list.children.length, 1);
+  assert.equal(list.children[0].title.includes('paper_new'), true);
+  list.children[0].dispatch('click');
+  const oldButton = list.children[0];
+  await harness.panel.load('b-another');
+  oldButton.dispatch('click');
+  harness.registry.get('board-association-link').dispatch('click');
+  assert.deepEqual([...harness.panel.links().papers], [], 'a detached row from the previous board has no authority');
+});
+
+test('unresolved saved associations remain visible by ID and unlinking retains the board content', async () => {
+  state.length = 0;
+  const original = { schema: 1, id: 'b-created', title: '失效关系', origin: 'user', status: 'saved', nodes: [{ id: 'n-kept', kind: 'text', x: 1, y: 2, text: '保留正文' }], edges: [], links: { papers: ['paper_missing'], projects: ['project_missing'], slides: ['pd-missing'] } };
+  const harness = loadPanel({ api: apiStub({ board_get: p => ({ board: { ...original, id: p.id }, revision: 'b'.repeat(64) }) }) });
+  await harness.panel.open();
+  const before = JSON.stringify(harness.panel.board().nodes);
+  for (const [kind, id] of [['papers', 'paper_missing'], ['projects', 'project_missing'], ['slides', 'pd-missing']]) {
+    await harness.panel.searchAssociations({ kind, query: '', linkedOnly: true });
+    const row = harness.registry.get('board-association-list').children[0];
+    assert.equal(row.title.includes(id), true);
+    row.dispatch('click');
+    harness.registry.get('board-association-unlink').dispatch('click');
+    assert.deepEqual([...harness.panel.links()[kind]], []);
+  }
+  assert.equal(JSON.stringify(harness.panel.board().nodes), before);
+  assert.equal(harness.panel.setLink('unsupported', 'valid', true), false);
+  await harness.runTimers();
+  assert.equal(state.filter(call => call.action === 'board_save').at(-1).payload.board.links, undefined);
+});
+
+test('a failed association save prevents cross-board navigation and keeps every local change', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub({ board_save: () => { throw Object.assign(new Error('合成冲突'), { code: 'STATE_CONFLICT' }); } }) });
+  await harness.panel.open();
+  harness.panel.setLink('slides', 'pd-kept', true);
+  const before = JSON.stringify(harness.panel.board());
+  assert.equal(await harness.panel.load('b-other'), false);
+  assert.equal(JSON.stringify(harness.panel.board()), before);
+  assert.equal(state.filter(call => call.action === 'board_get').some(call => call.payload.id === 'b-other'), false);
+  assert.equal(harness.registry.get('board-conflict').hidden, false);
+});
+
+test('a late board read cannot overwrite the newer board or its associations', async () => {
+  const waiting = new Map();
+  const base = { schema: 1, title: '合成', origin: 'user', status: 'saved', nodes: [], edges: [] };
+  const harness = loadPanel({ api: apiStub({ board_get: p => p.id === 'b-created' ? { board: { ...base, id: p.id }, revision: 'b'.repeat(64) } : new Promise(resolve => waiting.set(p.id, resolve)) }) });
+  await harness.panel.open();
+  const old = harness.panel.load('b-old');
+  const latest = harness.panel.load('b-latest');
+  await new Promise(resolve => setImmediate(resolve));
+  waiting.get('b-latest')({ board: { ...base, id: 'b-latest' }, revision: 'c'.repeat(64) });
+  assert.equal(await latest, true);
+  harness.panel.setLink('slides', 'pd-current', true);
+  // The old switch may be cancelled before it sends its read, or during the read.
+  waiting.get('b-old')?.({ board: { ...base, id: 'b-old' }, revision: 'd'.repeat(64) });
+  assert.equal(await old, false);
+  assert.equal(harness.panel.board().id, 'b-latest');
+  assert.deepEqual([...harness.panel.links().slides], ['pd-current']);
 });
 
 test('an unnamed shape is content: it keeps its place, saves, and is labelled by kind', async () => {

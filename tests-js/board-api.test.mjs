@@ -33,7 +33,8 @@ test('the authenticated HTTP surface creates, reads, lists, snapshots and delete
   const status = await call(f.handler, { action: 'status' });
   assert.equal(status.result.whiteboard, true, 'the panel can detect the capability without probing');
 
-  const created = await call(f.handler, { action: 'board_create', board: board() });
+  const associations = { papers: ['paper-unavailable'], projects: ['project-unavailable'], slides: ['pd-unavailable'] };
+  const created = await call(f.handler, { action: 'board_create', board: board({ links: associations }) });
   assert.equal(created.status, 200);
   const id = created.result.board.id;
   assert.equal(created.result.board.origin, 'user', 'a browser write is a reader write');
@@ -43,6 +44,8 @@ test('the authenticated HTTP surface creates, reads, lists, snapshots and delete
   assert.equal(read.result.board.title, 'HTTP 画板');
   assert.match(read.result.outline, /节点 n-1/);
   assert.equal(read.result.revision, created.result.revision);
+  assert.deepEqual(read.result.board.links, associations, 'associations are metadata and do not require a live catalog target');
+  assert.equal(created.result.summary.linked_slides, 1);
 
   const listing = await call(f.handler, { action: 'board_list' });
   assert.equal(listing.result.boards.length, 1);
@@ -54,12 +57,13 @@ test('the authenticated HTTP surface creates, reads, lists, snapshots and delete
   assert.equal(frozen.result.label, '画板 HTTP 画板');
 
   // A stale save reports the conflict and preserves the stored board.
-  const saved = await call(f.handler, { action: 'board_save', id, board: board({ title: 'HTTP 画板 v2' }), expected_revision: created.result.revision });
+  const saved = await call(f.handler, { action: 'board_save', id, board: board({ title: 'HTTP 画板 v2', links: associations }), expected_revision: created.result.revision });
   assert.equal(saved.status, 200);
   const stale = await call(f.handler, { action: 'board_save', id, board: board({ title: '过期' }), expected_revision: created.result.revision });
   assert.equal(stale.status, 409);
   assert.equal(stale.code, 'STATE_CONFLICT');
   assert.equal((await call(f.handler, { action: 'board_get', id })).result.board.title, 'HTTP 画板 v2');
+  assert.deepEqual((await call(f.handler, { action: 'board_get', id })).result.board.links, associations);
 
   const removed = await call(f.handler, { action: 'board_delete', id, expected_revision: saved.result.revision });
   assert.equal(removed.result.deleted, true);

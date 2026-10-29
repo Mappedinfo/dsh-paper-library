@@ -361,3 +361,17 @@ test('a superseded graph source open cannot reuse the newer ticket for the same 
   context.openPaper=async id=>{state.active={id};const oldTicket=++state.itemTicket;++state.itemTicket;return oldTicket;};
   await context.openGraphSource('source-paper',4);assert.deepEqual(requests,[]);
 });
+
+test('linking a paper from the library shelf preserves project and Slides associations', async () => {
+  for (const on of [true, false]) {
+    const original={id:'board-synthetic',nodes:[{id:'n1',text:'Synthetic content'}],links:{papers:on?[]:['paper-a'],projects:['project-a'],slides:['pd-'+'a'.repeat(32)]}},saved=[];
+    const context={api:async(action,args)=>{if(action==='board_get')return{board:structuredClone(original),revision:'cas-current'};saved.push(args);return{revision:'next'};}};
+    vm.createContext(context);vm.runInContext(snippet('linkBoardToPaper','async function syncPaperProjectCount('),context);
+    await context.linkBoardToPaper('board-synthetic','paper-a',on);
+    assert.equal(saved.length,1);assert.equal(saved[0].expected_revision,'cas-current');
+    assert.deepEqual(JSON.parse(JSON.stringify(saved[0].board.nodes)),original.nodes);
+    assert.deepEqual(Array.from(saved[0].board.links.projects),['project-a']);
+    assert.deepEqual(Array.from(saved[0].board.links.slides),original.links.slides);
+    assert.deepEqual(Array.from(saved[0].board.links.papers||[]),on?['paper-a']:[]);
+  }
+});

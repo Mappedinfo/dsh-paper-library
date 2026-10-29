@@ -511,6 +511,7 @@
     if (mode !== 'tree' || direction !== 'lr') source.layout = `${mode}-${direction}`;
     if (board.links?.papers?.length) source.papers = [...board.links.papers];
     if (board.links?.projects?.length) source.projects = [...board.links.projects];
+    if (board.links?.slides?.length) source.slides = [...board.links.slides];
     source.nodes = nodes.map(node => {
       const entry = { id: mapping.get(node.id), kind: node.kind };
       if (node.text) entry.text = node.text;
@@ -545,7 +546,7 @@
   }
 
   function validateSource(value) {
-    closed(value, '画板源文件', ['schema', 'title', 'layout', 'nodes', 'edges', 'note', 'papers', 'projects']);
+    closed(value, '画板源文件', ['schema', 'title', 'layout', 'nodes', 'edges', 'note', 'papers', 'projects', 'slides']);
     if (value.schema !== undefined && value.schema !== SOURCE_SCHEMA) fail(`画板源文件版本不受支持（需要 ${SOURCE_SCHEMA}）。`);
     const source = { schema: SOURCE_SCHEMA, title: text(value.title, '标题', LIMITS.title)?.trim() || '未命名画板' };
     if (value.layout !== undefined) {
@@ -554,7 +555,7 @@
     }
     // The board file also records where it sits: under papers and reading projects. The
     // links are associative only — the file itself stays one file.
-    for (const [key, label, maximum] of [['papers', '论文', 50], ['projects', '项目', 20]]) {
+    for (const [key, label, maximum] of [['papers', '论文', 50], ['projects', '项目', 20], ['slides', 'Slides', 20]]) {
       const list = value[key];
       if (list === undefined) continue;
       if (!Array.isArray(list) || list.length > maximum) fail(`${label}关联最多 ${maximum} 项。`);
@@ -776,6 +777,7 @@
     const links = {};
     if (source.papers?.length) links.papers = [...source.papers];
     if (source.projects?.length) links.projects = [...source.projects];
+    if (source.slides?.length) links.slides = [...source.slides];
     return {
       board: {
         schema: 1,

@@ -128,6 +128,13 @@ test('a generated board is exactly what the host accepts, so both validators agr
   assert.throws(() => source.validateSource({ ...sample(), papers: ['a', 'a'] }), /重复/);
   assert.throws(() => source.validateSource({ ...sample(), projects: Array.from({ length: 21 }, (_, index) => `p${index}`) }), /最多 20 项/);
   assert.throws(() => validateBoard({ ...converted.board, links: { papers: ['not an id'] } }, { id: 'b-000000000005' }), /必须是 1–60 位/);
+  const slideLinked = validateBoard({ ...converted.board, links: { papers: ['paper_a'], slides: ['pd-synthetic'] } }, { id: 'b-000000000006' });
+  const slideExport = source.toSource(slideLinked);
+  assert.deepEqual([...slideExport.source.slides], ['pd-synthetic']);
+  const slideImport = source.fromSource(slideExport.source, slideExport.style);
+  assert.deepEqual([...slideImport.board.links.slides], ['pd-synthetic']);
+  assert.deepEqual([...slideImport.board.links.papers], ['paper_a']);
+  assert.throws(() => source.validateSource({ ...sample(), slides: Array.from({ length: 21 }, (_, index) => `pd-${index}`) }), /最多 20 项/);
 
   // And an exported source validates against its own reader.
   const { source: content, style } = source.toSource(converted.board, {});

@@ -95,6 +95,34 @@ test('translation sends only the explicit unsaved draft selection and follows th
   await assert.rejects(handle({ action: 'latex_ai_translate', id: project.id, selection, target_language: 'zh-CN', model_override: { provider: 'host', model: 'unknown' } }), error => error.code === 'LATEX_AI_MODEL_REQUIRED')
 })
 
+test('translation uses the language preference, auto-detects prose and honours an explicit target', async () => {
+  const { folder, project, library } = await fixture(['unused'])
+  const store = inMemoryStore(), prompts = []
+  const handle = createLatexAI({ store, ai: async ({ prompt }) => { prompts.push(prompt); return '合成译文' }, getDefaultModel: () => ({ provider: 'host', model: 'stub' }), dispatch, library, python })
+  async function check(selection, target, expected, automatic) {
+    const request = { action: 'latex_ai_translate', id: project.id, selection, ...(target === undefined ? {} : { target_language: target }) }
+    const result = await handle(request)
+    assert.equal(result.target_language, expected)
+    assert.equal(result.requested_target_language, automatic ? 'auto' : undefined)
+    assert.match(prompts.at(-1), expected === 'en' ? /into English\./ : /into Simplified Chinese\./)
+    assert.ok(prompts.at(-1).includes(JSON.stringify({ text: selection })), 'the model receives the original selection with LaTeX intact')
+  }
+
+  await check('这是一段中文。', undefined, 'en', true) // no saved target defaults to auto
+  await check('A short English sentence.', undefined, 'zh-CN', true)
+  await store.put('language.settings', { target_language: 'en' }, 0)
+  await check('An English sentence.', undefined, 'en', false) // preference wins over detection
+  await store.put('language.settings', { target_language: 'zh-CN' }, 1)
+  await check('这是中文。', undefined, 'zh-CN', false)
+  await check('中文内容。', 'auto', 'en', true) // explicit auto overrides the saved direction
+  await check('English prose.', 'auto', 'zh-CN', true)
+  await check('English prose.', 'en', 'en', false)
+  await check('中文内容。', 'zh-CN', 'zh-CN', false)
+  await check('The result follows \\cite{中文中文中文中文} and $\\text{中文中文中文}$.', 'auto', 'zh-CN', true)
+  await check('这是中文说明。 \\cite{a-long-english-reference} $\\text{English math content}$', 'auto', 'en', true)
+  assert.equal(await readFile(join(folder, 'main.tex'), 'utf8'), BODY, 'translation never writes the manuscript')
+})
+
 test('a proposal is kept as verified replacements and applied only on accept', async () => {
   const reply = JSON.stringify({
     summary: '把断言改成有边界的表述',

@@ -457,6 +457,7 @@
     const stage = $('board-stage');
     let board = emptyBoard();
     let boardId = null;
+    let boardLoadTicket = 0;
     let revision = 0;
     let view = { x: 0, y: 0, zoom: 1 };
     let tool = 'select';
@@ -741,7 +742,7 @@
       if (!conflict) return;
       if (choice === 'reload') {
         conflict = null; renderConflict();
-        await load(boardId);
+        await load(boardId, { discard: true });
         toast('已载入另一窗口保存的版本');
         return;
       }
@@ -1205,12 +1206,30 @@
       }
     }
 
-    async function load(id) {
+    async function load(id, { discard = false } = {}) {
+      const ticket = ++boardLoadTicket;
       // Switching boards settles the outgoing board first; otherwise its last edit
       // would be written to the board being opened.
-      if (boardId && boardId !== id) await settle();
-      const result = await api('board_get', { id });
-      if (!live) return;
+      if (boardId && !discard) {
+        commitTextEdit();
+        await settle();
+        if (!live || ticket !== boardLoadTicket) return false;
+        if (saving || pendingSave || conflict) {
+          if (boardList) boardList.value = boardId;
+          status('画板尚未保存，请先处理保存失败或冲突。', 'error');
+          return false;
+        }
+      }
+      ready = false;
+      applyReady();
+      resetAssociationSelection();
+      let result;
+      try { result = await api('board_get', { id }); }
+      catch (error) {
+        if (live && ticket === boardLoadTicket) { ready = Boolean(boardId); applyReady(); renderAssociations(); }
+        throw error;
+      }
+      if (!live || ticket !== boardLoadTicket) return false;
       board = result.board;
       boardId = board.id;
       revision = result.revision;
@@ -1226,11 +1245,13 @@
       if (title) title.value = board.title;
       if (board.view) view = { x: board.view.x, y: board.view.y, zoom: board.view.zoom };
       else view = viewportFor(board.nodes, surfaceSize());
+      ready = true;
       render(); renderInspector(); writeLayoutControls(layoutBlock());
       if (boardList) boardList.value = boardId;
-      ready = true;
       applyReady();
       status('已载入');
+      if ($('board-project-panel')?.classList.contains('is-open')) void refreshAssociations();
+      return true;
     }
 
     async function openView() {
@@ -1286,6 +1307,8 @@
       if (fullscreenTask) await fullscreenTask;
       if (doc.fullscreenElement === root) await doc.exitFullscreen?.().catch(() => {});
       open = false;
+      ++boardLoadTicket;
+      resetAssociationSelection();
       closeTextEdit();
       root.hidden = true;
       setFocus(false);
@@ -1561,12 +1584,19 @@
      * Links are associative and many-to-many: a board may sit under several papers and
      * reading projects at once, and unlinking never touches the board's content.
      */
-    const LINKS = { papers: 50, projects: 20 };
+    const LINKS = { papers: 50, projects: 20, slides: 20 };
+    const LINK_LABELS = { papers: '论文', projects: '阅读项目', slides: 'Slides' };
+    const ASSOCIATION_PAGE = 20;
+    const association = { kind: 'papers', query: '', offset: 0, total: 0, items: [], selected: null, busy: false, error: '', ticket: 0, linkedOnly: false };
+    // Labels are a convenience only. A missing catalog item remains unlinkable by its saved ID.
+    const associationLabels = new Map();
     function links() {
-      return { papers: [...(board.links?.papers ?? [])], projects: [...(board.links?.projects ?? [])] };
+      return { papers: [...(board.links?.papers ?? [])], projects: [...(board.links?.projects ?? [])], slides: [...(board.links?.slides ?? [])] };
     }
 
     function setLink(kind, id, on) {
+      if (!Object.hasOwn(LINKS, kind)) { toast('关联类型无效。', true); return false; }
+      if (!ready) { toast('请等待画板读取完成。', true); return false; }
       if (id === undefined || id === null || id === '') { toast('先选择要关联的对象。', true); return false; }
       if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(id)) { toast('关联标识无效。', true); return false; }
       const current = links();
@@ -1574,14 +1604,138 @@
       const has = list.includes(id);
       if (on === has) { toast(on ? '已经关联过了。' : '没有关联这一项。'); return false; }
       const next = on ? [...list, id] : list.filter(value => value !== id);
-      if (next.length > LINKS[kind]) { toast(`一张画板最多关联 ${LINKS[kind]} 个${kind === 'papers' ? '论文' : '项目'}。`, true); return false; }
+      if (next.length > LINKS[kind]) { toast(`一张画板最多关联 ${LINKS[kind]} 个${LINK_LABELS[kind]}。`, true); return false; }
       const merged = { ...links(), [kind]: next };
       const linksValue = {};
-      if (merged.papers.length) linksValue.papers = merged.papers;
-      if (merged.projects.length) linksValue.projects = merged.projects;
+      for (const key of Object.keys(LINKS)) if (merged[key].length) linksValue[key] = merged[key];
       mutate(currentBoard => ({ ...currentBoard, links: Object.keys(linksValue).length ? linksValue : undefined }));
       renderLinks();
+      if (association.linkedOnly) void refreshAssociations();
       return true;
+    }
+
+    function associationSupported(kind) {
+      return kind === 'projects' ? capabilities.projects : capabilities.libraryPapers;
+    }
+
+    function resetAssociationSelection() {
+      ++association.ticket;
+      association.selected = null;
+      association.items = [];
+      association.busy = false;
+      association.error = '';
+      association.offset = 0;
+      association.total = 0;
+      renderAssociations();
+    }
+
+    function rememberAssociation(kind, item) {
+      const key = `${kind}:${item.id}`;
+      associationLabels.delete(key);
+      associationLabels.set(key, item.title || item.id);
+      if (associationLabels.size > 200) associationLabels.delete(associationLabels.keys().next().value);
+    }
+
+    function renderAssociations() {
+      const list = $('board-association-list');
+      if (!list) return;
+      for (const key of Object.keys(LINKS)) {
+        const tab = $(`board-association-${key}`);
+        if (tab) { tab.setAttribute('aria-selected', String(key === association.kind)); tab.disabled = !associationSupported(key); }
+      }
+      list.setAttribute('aria-busy', String(association.busy));
+      list.replaceChildren();
+      const linked = links()[association.kind];
+      for (const item of association.items) {
+        const rowTicket = association.ticket, rowOwner = boardId, rowKind = association.kind;
+        const row = el('button', 'board-association-row');
+        row.type = 'button';
+        row.setAttribute('role', 'option');
+        row.setAttribute('aria-selected', String(association.selected?.id === item.id));
+        row.disabled = association.busy || !ready;
+        row.title = `${item.title || item.id}\n${item.id}`;
+        row.append(el('strong', null, item.title || item.id), el('small', null, `${linked.includes(item.id) ? '已关联 · ' : ''}${item.unresolved ? '未在当前页解析 · ' : ''}${item.id}`));
+        row.addEventListener('click', () => {
+          if (association.busy || !ready || rowTicket !== association.ticket || rowOwner !== boardId || rowKind !== association.kind) return;
+          association.selected = { kind: association.kind, id: item.id, title: item.title || item.id, boardId };
+          renderAssociations();
+          [...list.children].find(child => child.getAttribute('aria-selected') === 'true')?.focus?.();
+        });
+        row.addEventListener('keydown', event => {
+          const rows = [...list.children].filter(child => child.getAttribute('role') === 'option');
+          const index = rows.indexOf(row);
+          const target = event.key === 'ArrowDown' ? Math.min(rows.length - 1, index + 1) : event.key === 'ArrowUp' ? Math.max(0, index - 1) : event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1 : -1;
+          if (target >= 0) { event.preventDefault(); rows[target]?.focus?.(); }
+        });
+        list.append(row);
+      }
+      if (!association.items.length) list.append(el('p', 'small muted', association.busy ? '正在查找…' : association.error || '没有匹配条目。'));
+      const label = $('board-association-status');
+      if (label) label.textContent = association.error || (association.busy ? '正在读取目录…' : `${association.linkedOnly ? '已关联' : '目录'} ${association.total} 项 · ${LINK_LABELS[association.kind]}`);
+      const page = $('board-association-page');
+      if (page) page.textContent = `第 ${Math.floor(association.offset / ASSOCIATION_PAGE) + 1} / ${Math.max(1, Math.ceil(association.total / ASSOCIATION_PAGE))} 页`;
+      const prev = $('board-association-prev'), next = $('board-association-next');
+      if (prev) prev.disabled = association.busy || association.offset === 0;
+      if (next) next.disabled = association.busy || association.offset + ASSOCIATION_PAGE >= association.total;
+      const selected = association.selected;
+      const valid = Boolean(ready && selected && selected.boardId === boardId && selected.kind === association.kind && !association.busy);
+      const selectedLabel = $('board-association-selected');
+      if (selectedLabel) selectedLabel.textContent = valid ? `已选：${selected.title}` : '先点选一项，再关联或解除。';
+      const add = $('board-association-link'), remove = $('board-association-unlink');
+      if (add) add.disabled = !valid || linked.includes(selected?.id);
+      if (remove) remove.disabled = !valid || !linked.includes(selected?.id);
+    }
+
+    async function refreshAssociations() {
+      const owner = boardId, kind = association.kind, query = association.query, offset = association.offset;
+      const ticket = ++association.ticket;
+      association.selected = null;
+      association.items = [];
+      association.error = '';
+      association.busy = true;
+      renderAssociations();
+      const current = () => live && ticket === association.ticket && owner === boardId;
+      try {
+        let items, total;
+        if (association.linkedOnly) {
+          const needle = query.toLocaleLowerCase();
+          const all = links()[kind].map(id => ({ id, title: associationLabels.get(`${kind}:${id}`) || id, unresolved: !associationLabels.has(`${kind}:${id}`) }))
+            .filter(item => !needle || `${item.title} ${item.id}`.toLocaleLowerCase().includes(needle));
+          total = all.length;
+          items = all.slice(offset, offset + ASSOCIATION_PAGE);
+        } else {
+          if (!associationSupported(kind)) throw new Error('当前环境不支持这一类目录。');
+          const result = kind === 'projects'
+            ? await api('project_list', { query, limit: ASSOCIATION_PAGE, offset, include_archived: true })
+            : await api(kind === 'slides' ? 'catalog_resource_list' : 'resource_list', { kind: kind === 'slides' ? 'slides' : 'paper', query, limit: ASSOCIATION_PAGE, offset, sort: 'title', order: 'asc' });
+          if (!current()) return false;
+          items = kind === 'projects' ? result.projects : result.items;
+          if (!Array.isArray(items) || !Number.isSafeInteger(result.total) || result.total < 0) throw new Error('目录返回的数据无效，请重试。');
+          items = items.slice(0, ASSOCIATION_PAGE).filter(item => typeof item?.id === 'string' && /^[A-Za-z0-9_-]{1,60}$/.test(item.id));
+          total = result.total;
+          for (const item of items) rememberAssociation(kind, item);
+        }
+        if (!current()) return false;
+        association.items = items;
+        association.total = total;
+      } catch (error) {
+        if (!current()) return false;
+        association.error = error.message || '无法读取目录，请重试。';
+        association.total = 0;
+      }
+      if (!current()) return false;
+      association.busy = false;
+      renderAssociations();
+      return !association.error;
+    }
+
+    function searchAssociations({ kind = association.kind, query = $('board-association-query')?.value ?? association.query, offset = 0, linkedOnly = $('board-association-linked')?.checked ?? association.linkedOnly } = {}) {
+      if (!Object.hasOwn(LINKS, kind)) return Promise.resolve(false);
+      association.kind = kind;
+      association.query = String(query).trim().slice(0, 200);
+      association.offset = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+      association.linkedOnly = Boolean(linkedOnly);
+      return refreshAssociations();
     }
 
     /** The project list belongs to the catalog; the panel only offers what it is given.
@@ -1590,11 +1744,13 @@
     function syncProjectControls() {
       const hidden = !capabilities.projects;
       for (const id of ['board-project-select', 'board-link-project', 'board-unlink-project']) { const control = $(id); if (control) control.hidden = hidden; }
+      renderAssociations();
     }
 
     function setProjects(list) {
       const select = $('board-project-select');
       capabilities.projects = Array.isArray(list);
+      for (const item of list ?? []) rememberAssociation('projects', item);
       syncProjectControls();
       if (!select) return;
       select.replaceChildren();
@@ -1617,16 +1773,18 @@
     function renderLinks() {
       const node = $('board-links');
       if (!node) return;
-      const { papers, projects } = links();
+      const { papers, projects, slides } = links();
       const parts = [];
       if (papers.length) parts.push(`关联论文 ${papers.length}`);
       if (projects.length) parts.push(`关联项目 ${projects.length}`);
-      node.textContent = parts.length ? parts.join(' · ') : '未关联任何论文或项目';
+      if (slides.length) parts.push(`关联 Slides ${slides.length}`);
+      node.textContent = parts.length ? parts.join(' · ') : '未关联论文、阅读项目或 Slides';
       const active = options.getActivePaperId?.();
       const linkButton = $('board-link-paper');
       if (linkButton) linkButton.disabled = !active || papers.includes(active);
       const unlinkButton = $('board-unlink-paper');
       if (unlinkButton) unlinkButton.disabled = !active || !papers.includes(active);
+      renderAssociations();
     }
 
     /** Build a new mind map from chosen papers; the host still owns validation and storage. */
@@ -1957,9 +2115,22 @@
           closeMenus(open ? panel : null);
           panel.classList.toggle('is-open', open);
           syncMenus();
+          if (open && panel.id === 'board-project-panel') void refreshAssociations();
         });
       }
-      doc.addEventListener('click', event => { if (!event.target?.closest?.('.board-bar')) closeMenus(null); });
+      doc.addEventListener('click', event => { if (!event.target?.closest?.('.board-bar')) closeMenus($('board-project-panel')); });
+      $('board-association-close')?.addEventListener('click', () => { closeMenus(null); $('board-project-open')?.focus?.(); });
+      for (const kind of Object.keys(LINKS)) $('board-association-' + kind)?.addEventListener('click', () => void searchAssociations({ kind }));
+      $('board-association-search')?.addEventListener('click', () => void searchAssociations());
+      $('board-association-query')?.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); void searchAssociations(); } });
+      $('board-association-linked')?.addEventListener('change', () => void searchAssociations());
+      $('board-association-prev')?.addEventListener('click', () => { if (association.offset > 0 && !association.busy) void searchAssociations({ offset: Math.max(0, association.offset - ASSOCIATION_PAGE) }); });
+      $('board-association-next')?.addEventListener('click', () => { if (association.offset + ASSOCIATION_PAGE < association.total && !association.busy) void searchAssociations({ offset: association.offset + ASSOCIATION_PAGE }); });
+      for (const [button, on] of [['board-association-link', true], ['board-association-unlink', false]]) $(button)?.addEventListener('click', () => {
+        const selected = association.selected;
+        if (association.busy || !selected || selected.boardId !== boardId || selected.kind !== association.kind) return;
+        setLink(selected.kind, selected.id, on);
+      });
       // The inspector only offers a shape change for a single node; paper nodes keep their binding.
       if (!capabilities.libraryPapers) for (const id of ['board-add-paper']) { const control = $(id); if (control) control.hidden = true; }
       if (!capabilities.conversation) for (const id of ['board-send']) { const control = $(id); if (control) control.hidden = true; }
@@ -1995,7 +2166,7 @@
     render();
 
     return {
-      links, setLink, setFocus, setProjects,
+      links, setLink, setFocus, setProjects, searchAssociations,
       open: openView, close: closeView, prepareLeave, resize, load, refreshList, render,
       isOpen: () => open,
       board: () => board,

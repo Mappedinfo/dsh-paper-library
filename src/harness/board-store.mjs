@@ -39,7 +39,7 @@ function edgeAngleValue(value, label) {
 const ARROWS = new Set(['forward', 'both', 'none'])
 const PAPER_FIELDS = new Set(['id', 'title', 'year', 'citekey'])
 const BOARD_FIELDS = new Set(['schema', 'id', 'title', 'created_at', 'updated_at', 'origin', 'status', 'view', 'nodes', 'edges', 'style', 'links'])
-const LINK_FIELDS = new Set(['papers', 'projects'])
+const LINK_FIELDS = new Set(['papers', 'projects', 'slides'])
 const LAYOUT_MODES = new Set(['tree', 'radial', 'layered'])
 const LAYOUT_DIRECTIONS = new Set(['lr', 'tb', 'rl', 'bt'])
 
@@ -132,7 +132,7 @@ function normalizeLinks(value) {
   if (value === undefined) return undefined
   closedObject(value, '画板关联', LINK_FIELDS)
   const links = {}
-  for (const [key, label, maximum] of [['papers', '论文', 50], ['projects', '项目', 20]]) {
+  for (const [key, label, maximum] of [['papers', '论文', 50], ['projects', '项目', 20], ['slides', 'Slides', 20]]) {
     const list = value[key]
     if (list === undefined) continue
     if (!Array.isArray(list) || list.length > maximum) throw boardError(`画板关联的${label}最多 ${maximum} 项。`)
@@ -421,6 +421,7 @@ export function boardSummary(board) {
     created_at: board.created_at ?? null, updated_at: board.updated_at ?? null,
     node_count: board.nodes.length, edge_count: board.edges.length,
     linked_papers: board.links?.papers?.length ?? 0, linked_projects: board.links?.projects?.length ?? 0,
+    linked_slides: board.links?.slides?.length ?? 0,
     paper_count: board.nodes.filter(node => node.paper).length,
     ai_node_count: board.nodes.filter(node => node.origin === 'llm').length,
     ai_edge_count: board.edges.filter(edge => edge.origin === 'llm').length,
