@@ -20,6 +20,7 @@
   <link rel="stylesheet" href="./settings.css">
   <link rel="stylesheet" href="./challenge-mining.css">
   <link rel="stylesheet" href="./board.css">
+  <link rel="stylesheet" href="./board-annotations.css">
   <link rel="stylesheet" href="./latex-workspace.css">
   <link rel="stylesheet" href="./floating-windows.css">
   <script src="./floating-windows.js" defer></script>
@@ -27,6 +28,7 @@
   <script src="./board-source.js" defer></script>
   <script src="./board-render.js" defer></script>
   <script src="./board-bridge.js" defer></script>
+  <script src="./board-annotations.js" defer></script>
   <script src="./board-mermaid.js" defer></script>
   <script src="./board-drawio.js" defer></script>
   <script src="./board.js" defer></script>
@@ -122,6 +124,7 @@
         </section>
         </div>
         <section id="annotations-tab" class="tab-content notes-content" hidden>
+          <div id="board-annotation-panel" hidden></div>
           <div class="section-toolbar"><div><h3>阅读留下的线索</h3><p>批注保存在 PDF 中，可随文件一起带走。</p></div><label class="export-menu">导出 <select id="export-notes" aria-label="导出批注"><option value="">选择格式</option><option value="markdown">Markdown</option><option value="xfdf">XFDF</option><option value="json">JSON</option></select></label></div>
           <div id="annotation-list" class="annotation-list"></div>
           <div id="annotation-chat-actions" class="paper-chat-shortcuts" hidden><button id="discuss-all-notes" class="button primary">选择批注并提问</button><button id="draft-all-notes" class="button">全部批注放入主输入框 ↗</button></div>
@@ -179,6 +182,7 @@
         </div>
         <button id="board-flow-open" class="button subtle" type="button" title="打开当前画板的论文流程编辑、比较与导入导出">论文流程</button>
         <button id="board-send" class="button subtle" type="button" title="把这张画板作为不可变引用放进 DSH 主输入框；只准备草稿，不会发送">放入对话</button>
+        <button id="board-annotations-open" class="button subtle" type="button">画板批注</button>
       </div>
 
       <div class="board-group board-menus">

@@ -459,7 +459,7 @@
     let boardId = null;
     let boardLoadTicket = 0;
     let flowUI = null, flowOpening = null;
-    const publishFlowWindow = active => { if (window.parent && window.parent !== window && window.location?.origin) window.parent.postMessage({type:'paper-library:flow-window',version:1,active}, window.location.origin); };
+    const publishFlowWindow = active => { if (window.parent && window.parent !== window && window.location?.origin) window.parent.postMessage({type:'paper-library:flow-window',version:1,active:active||Boolean(options.hasPendingAnnotations?.())}, window.location.origin); };
     let revision = 0;
     let view = { x: 0, y: 0, zoom: 1 };
     let tool = 'select';
@@ -768,6 +768,7 @@
     }
 
     function renderInspector() {
+      if (open && boardId && !flowUI?.isOpen()) options.onCanvasContext?.({ id: boardId, target: { kind: 'board', node_ids: selectedNodes().map(node => node.id) } });
       renderLinks();
       syncInspector();
       const relation = $('board-relation');
@@ -1210,6 +1211,7 @@
     }
 
     async function load(id, { discard = false } = {}) {
+      if (options.prepareAnnotationsLeave && !await options.prepareAnnotationsLeave()) { if (boardList) boardList.value = boardId; return false; }
       const ticket = ++boardLoadTicket;
       if (flowUI?.isOpen() && !await flowUI.close()) { if (boardList) boardList.value = boardId; return false; }
       if (!live || ticket !== boardLoadTicket) return false;
@@ -1270,7 +1272,9 @@
         const host = $('board-flow-view');
         if (!host) throw Error('流程工作区容器未就绪，请刷新页面。');
         flowUI ||= factory.create({ root: host, api, toast, prepareReturnToDsh: options.prepareReturnToDsh,
-          onClose() { publishFlowWindow(false); root.classList.remove('has-paper-flow'); host.hidden = true; stage.focus?.(); } });
+          ...(capabilities.conversation ? { sendSnapshot: (snapshot, sessionId) => bridge.sendSnapshot(snapshot, sessionId), getSessionId: options.getSessionId } : {}),
+          onCanvasContext: options.onCanvasContext, onAnnotations: options.onAnnotations,
+          onClose() { publishFlowWindow(false); root.classList.remove('has-paper-flow'); host.hidden = true; renderInspector(); stage.focus?.(); } });
         closeMenus(null);
         const ok = await flowUI.open({ id, title: board.title });
         if (!live || id !== boardId || ticket !== boardLoadTicket) { await flowUI.close(); return false; }
@@ -1317,7 +1321,8 @@
       applyReady();
     }
 
-    async function prepareLeave() {
+    async function prepareLeave({ annotations = true } = {}) {
+      if (annotations && options.prepareAnnotationsLeave && !await options.prepareAnnotationsLeave()) return false;
       if (flowUI?.isOpen() && !await flowUI.prepareLeave()) return false;
       // A gesture in flight must not leave its preview behind in a view that is closing.
       cancelDrag();
@@ -1342,6 +1347,7 @@
       root.hidden = true;
       setFocus(false);
       doc.body.classList.remove('board-mode');
+      options.onCanvasContext?.(null);
       onClose({ focus });
       return true;
     }
@@ -1352,6 +1358,7 @@
     }
 
     async function createBoard() {
+      if (options.prepareAnnotationsLeave && !await options.prepareAnnotationsLeave()) return;
       if (flowUI?.isOpen() && !await flowUI.close()) return;
       try {
         const result = await api('board_create', { board: { title: '未命名画板', nodes: [], edges: [] } });
@@ -1364,6 +1371,7 @@
 
     async function deleteBoard(target = boardId) {
       if (!target) return;
+      if (target === boardId && options.prepareAnnotationsLeave && !await options.prepareAnnotationsLeave()) return;
       if (target === boardId && flowUI?.isOpen() && !await flowUI.close()) return;
       const name = target === boardId ? board.title : (boardSummaries.find(summary => summary.id === target)?.title ?? target);
       if (typeof doc.defaultView?.confirm === 'function' && !doc.defaultView.confirm(`删除画板「${name}」？画板记录会保留在本地状态目录，可由人工恢复。`)) return;
@@ -2197,6 +2205,9 @@
     }
 
     const flowButton = $('board-flow-open');
+    $('board-annotations-open')?.addEventListener('click', () => {
+      if (ready && boardId) options.onAnnotations?.({ id: boardId, target: { kind: 'board', node_ids: selectedNodes().map(node => node.id) } });
+    });
     if (flowButton) {
       flowButton.hidden = capabilities.paperFlow === false || !(options.flowFactory || window.PaperBoardFlowLoader);
       flowButton.addEventListener('click', () => void openFlow());
@@ -2207,7 +2218,16 @@
     render();
 
     return {
-      links, setLink, setFocus, setProjects, searchAssociations, openFlow,
+      links, setLink, setFocus, setProjects, searchAssociations, openFlow, closeFlow: () => flowUI?.close() ?? true,
+      syncFlowWindow: () => publishFlowWindow(flowUI?.isOpen() === true),
+      focusAnnotation(target) {
+        if (!open || !ready) return false;
+        if (target.kind === 'flow') return flowUI?.focus?.(target) ?? false;
+        const nodes = board.nodes.filter(node => target.node_ids?.includes(node.id));
+        selection.clear(); for (const node of nodes) selection.add(node.id);
+        if (nodes.length) view = viewportFor(nodes, surfaceSize());
+        render(); renderInspector(); return true;
+      },
       open: openView, close: closeView, prepareLeave, resize, load, refreshList, render,
       isOpen: () => open,
       isFlowOpen: () => flowUI?.isOpen() === true,

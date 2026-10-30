@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFetchHandler } from '../src/http.mjs';
@@ -161,4 +161,152 @@ test('the native tool reads and writes boards, and its writes are reviewable pro
   assert.throws(() => requestFromTool(TOOL_SPECS.find(spec => spec.name === 'library_board'), { operation: 'create', input_json: `{"title":"${'x'.repeat(210 * 1024)}"}` }, {}), /210 KiB/);
   // The agent never creates conversation snapshots; only the reader does.
   await assert.rejects(handleBoardRequest(f.boards, { action: 'board_snapshot', id: 'b-000000000001' }, { writer: 'llm' }), error => error.code === 'BOARD_FORBIDDEN');
+});
+
+const flowDocument = () => ({
+  schemaVersion: 1, kind: 'paper-flow-document', paper: { id: 'synthetic', title: 'HTTP 合成流程文档' },
+  flows: [{ id: 'main', name: 'HTTP 合成流程', nodes: [
+    { id: 'input', label: '明确输入', type: 'data', ports: { in: {}, out: { data: { type: 'sample' } } }, detail: '合成输入说明' },
+    { id: 'operation', label: '明确步骤', type: 'method', ports: { in: { data: { type: 'sample' } }, out: {} }, evidence: '仅输入声明的合成依据' },
+  ], edges: [{ id: 'relation', from: 'input:data', to: 'operation:data', label: '明确关系' }] }],
+});
+
+test('HTTP canvas and flow annotation CRUD persists targets with CAS and never changes source records', async t => {
+  const f = await fixture(t);
+  // These local-state operations remain usable with no Python executable, PDF or model backend.
+  const handler = createFetchHandler({ ...f.options, python: join(f.home, 'worker-must-not-run') });
+  const parent = (await call(handler, { action: 'board_create', board: board() })).result;
+  const id = parent.board.id;
+  const flow = await call(handler, { action: 'board_flow_save', id, workspace: flowDocument(), expected_revision: 0 });
+  assert.equal(flow.status, 200);
+  const originalBoard = (await call(handler, { action: 'board_get', id })).result;
+  const originalFlow = (await call(handler, { action: 'board_flow_get', id })).result;
+  const empty = await call(handler, { action: 'board_annotations_list', id });
+  assert.equal(empty.status, 200);
+  assert.deepEqual(empty.result, { id, revision: 0, notes: [] });
+  const target = { kind: 'board', node_ids: ['n-1'], x: 10.123, y: -5.789 };
+  const canvas = await call(handler, { action: 'board_annotations_create', id, target, comment: '合成画布问题', label: '伪造标题', quote: '伪造原文', expected_revision: 0 });
+  assert.equal(canvas.status, 200);
+  assert.match(canvas.result.revision, /^[a-f0-9]{64}$/);
+  assert.deepEqual(canvas.result.notes[0].target, { ...target, x: 10.12, y: -5.79 });
+  assert.equal(canvas.result.notes[0].quote, '节点 n-1', 'source excerpts come from saved nodes, never caller-supplied labels');
+  const flowTarget = { kind: 'flow', paper_id: 'synthetic', flow_id: 'main', node_ids: ['input', 'operation'] };
+  const annotated = await call(handler, { action: 'board_annotations_create', id, target: flowTarget, comment: '合成流程问题', expected_revision: canvas.result.revision });
+  assert.equal(annotated.status, 200);
+  const note = annotated.result.notes[1];
+  assert.deepEqual(note.target, flowTarget);
+  assert.match(note.quote, /合成输入说明/);
+  assert.match(note.quote, /仅输入声明的合成依据/);
+  assert.equal(note.stale, false);
+  const fresh = createFetchHandler({ library: f.library, localStateHome: f.home, python: join(f.home, 'worker-must-not-run') });
+  assert.deepEqual((await call(fresh, { action: 'board_annotations_list', id })).result, annotated.result);
+  const missingRevision = await call(fresh, { action: 'board_annotations_update', id, note_id: note.id, comment: '缺少修订' });
+  assert.equal(missingRevision.status, 400);
+  const conflict = await call(fresh, { action: 'board_annotations_update', id, note_id: note.id, comment: '过期修改', expected_revision: canvas.result.revision });
+  assert.equal(conflict.status, 409);
+  assert.equal(conflict.code, 'STATE_CONFLICT');
+  const edited = await call(fresh, { action: 'board_annotations_update', id, note_id: note.id, comment: '保存补充问题', expected_revision: annotated.result.revision });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.result.notes[1].comment, '保存补充问题');
+  assert.deepEqual(edited.result.notes[1].target, flowTarget);
+  assert.equal((await call(fresh, { action: 'board_annotations_delete', id, note_id: note.id, expected_revision: annotated.result.revision })).status, 409);
+  const removed = await call(fresh, { action: 'board_annotations_delete', id, note_id: note.id, expected_revision: edited.result.revision });
+  assert.equal(removed.status, 200);
+  assert.equal(removed.result.notes.length, 1);
+  assert.deepEqual((await call(fresh, { action: 'board_get', id })).result, originalBoard);
+  assert.deepEqual((await call(fresh, { action: 'board_flow_get', id })).result, originalFlow);
+  assert.deepEqual(await readdir(f.library), [], 'no PDF, worker catalog, or derived library files were created');
+});
+
+test('HTTP annotations reject malformed/missing targets, preserve stale source snapshots and deny generic state bypasses', async t => {
+  const f = await fixture(t);
+  const parent = (await call(f.handler, { action: 'board_create', board: board() })).result;
+  const id = parent.board.id;
+  const saved = (await call(f.handler, { action: 'board_flow_save', id, workspace: flowDocument(), expected_revision: 0 })).result;
+  const target = { kind: 'flow', paper_id: 'synthetic', flow_id: 'main', node_id: 'operation' };
+  const annotated = (await call(f.handler, { action: 'board_annotations_create', id, target, comment: '保留问题', expected_revision: 0 })).result;
+  for (const invalid of [
+    { kind: 'flow', paper_id: 'synthetic' },
+    { ...target, node_ids: ['operation'] },
+    { kind: 'board', node_ids: ['n-1', 'n-1'] },
+    { kind: 'board', x: 10 },
+    { kind: 'board', arbitrary_source: '不得接受' },
+  ]) {
+    const rejected = await call(f.handler, { action: 'board_annotations_create', id, target: invalid, comment: '无效输入', expected_revision: annotated.revision });
+    assert.equal(rejected.status, 400);
+  }
+  for (const missing of [{ kind: 'board', node_ids: ['not-present'] }, { ...target, node_id: 'not-present' }, { ...target, flow_id: 'not-present' }]) {
+    const rejected = await call(f.handler, { action: 'board_annotations_create', id, target: missing, comment: '失效来源', expected_revision: annotated.revision });
+    assert.equal(rejected.status, 409);
+    assert.equal(rejected.code, 'BOARD_ANNOTATION_TARGET_MISSING');
+  }
+  for (const action of ['state_get', 'state_put']) {
+    const denied = await call(f.handler, { action, key: `board-annotations:${id}`, value: { notes: [] }, expected_revision: 0 });
+    assert.equal(denied.status, 403);
+  }
+  const changed = structuredClone(saved.workspace);
+  changed.documents[0].flows[0].nodes.pop(); changed.documents[0].flows[0].edges = [];
+  assert.equal((await call(f.handler, { action: 'board_flow_save', id, workspace: changed, expected_revision: saved.revision })).status, 200);
+  const stale = (await call(f.handler, { action: 'board_annotations_list', id })).result;
+  assert.equal(stale.notes.length, 1);
+  assert.equal(stale.notes[0].stale, true);
+  assert.deepEqual(stale.notes[0].target, target);
+  assert.equal(stale.notes[0].quote, annotated.notes[0].quote, 'removed source does not rewrite the original quote');
+  assert.equal(stale.revision, annotated.revision, 'read-time stale decoration is not a write');
+  assert.deepEqual((await call(f.handler, { action: 'board_get', id })).result.board, parent.board);
+});
+
+test('HTTP serves shared annotation assets and freezes selected flow through the existing snapshot retrieval API', async t => {
+  const f = await fixture(t);
+  for (const name of ['board-annotations.js', 'board-annotations.css', 'board-bridge.js']) {
+    const response = await f.handler(new Request(`http://127.0.0.1/${name}`));
+    assert.equal(response.status, 200, name);
+    assert.equal(await response.text(), await readFile(new URL(`../web/${name}`, import.meta.url), 'utf8'));
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.match(response.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /javascript/);
+  }
+  const page = await f.handler(new Request('http://127.0.0.1/'));
+  const html = await page.text();
+  assert.match(html, /board-annotations\.js/);
+  assert.match(html, /board-annotations\.css/);
+  const parent = (await call(f.handler, { action: 'board_create', board: board() })).result;
+  const id = parent.board.id;
+  const flow = (await call(f.handler, { action: 'board_flow_save', id, workspace: flowDocument(), expected_revision: 0 })).result;
+  const frozen = await call(f.handler, { action: 'board_flow_snapshot', id, paper_id: 'synthetic', flow_id: 'main', node_ids: ['operation'], expected_revision: flow.revision });
+  assert.equal(frozen.status, 200);
+  assert.match(frozen.result.text, /合成输入说明/);
+  assert.match(frozen.result.text, /仅输入声明的合成依据/);
+  assert.deepEqual(frozen.result.flow.node_ids, ['operation']);
+  const readback = await call(f.handler, { action: 'board_snapshot_get', snapshot_id: frozen.result.snapshot_id });
+  assert.equal(readback.status, 200);
+  assert.equal(readback.result.text, frozen.result.text);
+  const stale = await call(f.handler, { action: 'board_flow_snapshot', id, paper_id: 'synthetic', flow_id: 'main', node_id: 'operation', expected_revision: '0'.repeat(64) });
+  assert.equal(stale.status, 409);
+  const absent = await call(f.handler, { action: 'board_flow_snapshot', id, paper_id: 'synthetic', flow_id: 'missing', expected_revision: flow.revision });
+  assert.equal(absent.status, 404);
+  assert.deepEqual((await call(f.handler, { action: 'board_get', id })).result.board, parent.board);
+});
+
+test('HTTP corrupt flow sources fail visibly and cannot rewrite existing annotations or board content', async t => {
+  const f = await fixture(t);
+  const parent = (await call(f.handler, { action: 'board_create', board: board() })).result;
+  const id = parent.board.id;
+  const flow = (await call(f.handler, { action: 'board_flow_save', id, workspace: flowDocument(), expected_revision: 0 })).result;
+  const annotated = await call(f.handler, { action: 'board_annotations_create', id, target: { kind: 'flow', paper_id: 'synthetic', flow_id: 'main', node_id: 'input' }, comment: '保留的合成批注', expected_revision: 0 });
+  assert.equal(annotated.status, 200);
+  const notesBefore = await f.localState.get(`board-annotations:${id}`);
+  await f.localState.put(`board-flow:${id}`, { malformed: 'keep-original-for-recovery' }, flow.revision);
+  const corruptBefore = await f.localState.get(`board-flow:${id}`);
+  for (const input of [
+    { action: 'board_annotations_list', id },
+    { action: 'board_annotations_create', id, target: { kind: 'flow', paper_id: 'synthetic', flow_id: 'main', node_id: 'input' }, comment: '不能猜测失效来源', expected_revision: annotated.result.revision },
+    { action: 'board_flow_snapshot', id, paper_id: 'synthetic', flow_id: 'main', expected_revision: corruptBefore.revision },
+  ]) {
+    const rejected = await call(f.handler, input);
+    assert.equal(rejected.status, 500);
+    assert.equal(rejected.code, 'BOARD_FLOW_CORRUPT');
+  }
+  assert.deepEqual(await f.localState.get(`board-flow:${id}`), corruptBefore);
+  assert.deepEqual(await f.localState.get(`board-annotations:${id}`), notesBefore);
+  assert.deepEqual((await call(f.handler, { action: 'board_get', id })).result.board, parent.board);
 });

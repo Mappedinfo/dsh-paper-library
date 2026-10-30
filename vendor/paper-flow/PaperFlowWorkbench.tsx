@@ -15,8 +15,9 @@ import {
 } from "./document.js";
 import { combineSvg, compareFlows } from "./comparison.js";
 import { downloadFile } from "./canvas.js";
-import { FLOW_LIMITS } from "./budget.js";
 import { createImportGuard } from "./import-guard.js";
+import { selectionContexts } from "./selection-context.js";
+import { isFlowFileDrag, selectFlowImportFile } from "./import-files.js";
 import type {
   FlowDiagnostic,
   FlowDrawing,
@@ -33,12 +34,14 @@ export type PaperFlowWorkbenchHandle = {
   load(input: unknown): FlowParseResult;
   focus(ref: FlowRef, ids: string[]): void;
   snapshot(): FlowWorkspace;
+  exitFullscreen(): void;
 };
 export type PaperFlowWorkbenchProps = {
   workspace: FlowWorkspace;
   onWorkspaceChange: (workspace: FlowWorkspace) => void;
   services?: FlowServices;
-  renderNodeDetails?: (node: FlowNode, graph: FlowGraph) => ReactNode;
+  renderNodeDetails?: (node: FlowNode, graph: FlowGraph, contexts: { ref: FlowRef; nodeIds: string[]; side: string }[]) => ReactNode;
+  onNodeSelect?: (contexts: { ref: FlowRef; nodeIds: string[]; side: string }[]) => void;
   toolbar?: ReactNode;
 };
 const valueOf = (ref: FlowRef) => JSON.stringify(ref);
@@ -58,13 +61,13 @@ const mergedKey = (w: FlowWorkspace) =>
   ]);
 export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlowWorkbenchProps>(
   function PaperFlowWorkbench(
-    { workspace: w, onWorkspaceChange, services, renderNodeDetails, toolbar },
+    { workspace: w, onWorkspaceChange, services, renderNodeDetails, onNodeSelect, toolbar },
     ref,
   ) {
     const [editable, setEditable] = useState(false),
       [diagnostics, setDiagnostics] = useState<FlowDiagnostic[]>([]),
       [message, setMessage] = useState(""),
-      [detail, setDetail] = useState<{ node: FlowNode; graph: FlowGraph } | null>(null),
+      [detail, setDetail] = useState<{ node: FlowNode; graph: FlowGraph; contexts?: { ref: FlowRef; nodeIds: string[]; side: string }[] } | null>(null),
       [manual, setManual] = useState({
         kind: "node" as "node" | "group",
         a: "",
@@ -73,14 +76,18 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
       }),
       [fullscreen, setFullscreen] = useState(false),
       [pdfBusy, setPdfBusy] = useState(false),
-      [windows, setWindows] = useState<{ legend: boolean; report: string | null; manual: string | null }>({ legend: false, report: null, manual: null });
+      [dropActive, setDropActive] = useState(false),
+      [fileState, setFileState] = useState<{ name: string; ticket?: { generation: number; workspace: FlowWorkspace } }>({ name: "" }),
+      [windows, setWindows] = useState<{ legend: boolean; detailHelp: boolean; report: string | null; manual: string | null }>({ legend: false, detailHelp: false, report: null, manual: null });
     const drawings = useRef<Record<string, FlowDrawing>>({}),
       emptyDraft = useRef<FlowEditDraft>(blankDraft()).current,
       single = useRef<FlowCanvasHandle>(null),
       section = useRef<HTMLElement>(null),
+      fileInput = useRef<HTMLInputElement>(null),
+      dragDepth = useRef(0),
       pdfController = useRef<AbortController | null>(null);
     const windowPrefix = useRef(`paper-flow-popover-${++workbenchSerial}`).current;
-    const legendTrigger = useRef<HTMLButtonElement>(null), reportTrigger = useRef<HTMLButtonElement>(null), manualTrigger = useRef<HTMLButtonElement>(null);
+    const legendTrigger = useRef<HTMLButtonElement>(null), reportTrigger = useRef<HTMLButtonElement>(null), manualTrigger = useRef<HTMLButtonElement>(null), detailHelpTrigger = useRef<HTMLButtonElement>(null);
     const importGuard = useRef(createImportGuard(w)).current;
     importGuard.observe(w);
     useEffect(() => {
@@ -98,9 +105,9 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
       setWindows((value) => ({ ...value, report: null, manual: null }));
       setManual({ kind: "node", a: "", b: "", reason: "" });
     }, [selectionKey]);
-    const closeWindow = (name: "legend" | "report" | "manual") => {
-      setWindows((value) => ({ ...value, [name]: name === "legend" ? false : null }));
-      (name === "legend" ? legendTrigger : name === "report" ? reportTrigger : manualTrigger).current?.focus();
+    const closeWindow = (name: "legend" | "detailHelp" | "report" | "manual") => {
+      setWindows((value) => ({ ...value, [name]: name === "legend" || name === "detailHelp" ? false : null }));
+      (name === "legend" ? legendTrigger : name === "detailHelp" ? detailHelpTrigger : name === "report" ? reportTrigger : manualTrigger).current?.focus();
     };
     function change(next: FlowWorkspace) {
       importGuard.invalidate();
@@ -119,9 +126,28 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
       }
       return parsed;
     }
+    async function importFiles(files: FileList | readonly File[] | null | undefined) {
+      const ticket = importGuard.begin();
+      try {
+        const file = selectFlowImportFile(files);
+        setDiagnostics([]);
+        setFileState({ name: file.name || "JSON 文件", ticket });
+        const text = await file.text();
+        if (!importGuard.accepts(ticket)) return;
+        const parsed = load(text);
+        setFileState({ name: file.name || "JSON 文件" });
+        if (parsed.ok) setMessage(`已导入 ${file.name || "JSON 文件"}`);
+      } catch (error) {
+        if (!importGuard.accepts(ticket)) return;
+        setFileState({ name: "" });
+        setDiagnostics([{ severity: "error", code: "file.import", path: "$", message: error instanceof Error ? error.message : "无法读取工作区文件" }]);
+      }
+    }
+    const importing = !!fileState.ticket && importGuard.accepts(fileState.ticket);
     useImperativeHandle(ref, () => ({
       load,
       snapshot: () => structuredClone(w),
+      exitFullscreen: () => setFullscreen(false),
       focus: (flowRef, ids) => {
         if (!resolveFlow(w, flowRef)) {
           setMessage("指定论文或流程不在当前工作区中。");
@@ -139,7 +165,10 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
         else if (w.view.detail !== "full") change({ ...w, view: { ...w.view, detail: "full" } });
         const graph = resolveFlow(w, flowRef),
           node = graph?.nodes.find((n) => ids.includes(n.id));
-        if (node && graph) setDetail({ node, graph });
+        if (node && graph) {
+          const contexts = [{ ref: flowRef, nodeIds: ids.filter(id => graph.nodes.some(n => n.id === id)), side: rightMatch ? 'b' : 'a' }];
+          setDetail({ node, graph, contexts }); onNodeSelect?.(contexts);
+        }
         requestAnimationFrame(() => {
           const hosts = section.current?.querySelectorAll(".paper-flow-canvas");
           const host = hosts?.[rightMatch && w.view.mode === "parallel" ? 1 : 0];
@@ -169,12 +198,14 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
       onWorkspaceChange({ ...w, drafts: { ...w.drafts, [key]: value } });
     }
     function nodeDetails(lane: "a" | "b" | "merged", id: string) {
-      const graph = lane === "b" ? right : left;
+      const graph = lane === "merged" ? comparison?.merged : lane === "b" ? right : left;
       const node =
         graph?.nodes.find((n) => n.id === id) ||
         drawings.current[lane]?.layout.nodes.find((n: any) => n.id === id || n.node.id === id)
           ?.node;
-      if (node && graph && !(right && windows.manual === selectionKey)) setDetail({ node, graph });
+      const contexts = selectionContexts(w, lane, id, node, comparison?.merged);
+      onNodeSelect?.(contexts);
+      if (node && graph && !(right && windows.manual === selectionKey)) setDetail({ node, graph, contexts });
       if (lane !== "merged") setManual((m) => ({ ...m, [lane]: id }));
     }
     function svg() {
@@ -235,7 +266,12 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
         ref={section}
         className={`paper-flow-workbench${fullscreen ? " is-fullscreen" : ""}`}
         aria-label="通用论文流程工作台"
+        onDragEnter={(event) => { event.preventDefault(); if (isFlowFileDrag(event.dataTransfer)) { dragDepth.current++; setDropActive(true); } }}
+        onDragOver={(event) => { event.preventDefault(); if (isFlowFileDrag(event.dataTransfer)) { event.dataTransfer.dropEffect = "copy"; setDropActive(true); } }}
+        onDragLeave={(event) => { event.preventDefault(); if (--dragDepth.current <= 0) { dragDepth.current = 0; setDropActive(false); } }}
+        onDrop={(event) => { event.preventDefault(); event.stopPropagation(); dragDepth.current = 0; setDropActive(false); void importFiles(event.dataTransfer.files); }}
       >
+        {dropActive && <div className="paper-flow-drop-target" role="status"><strong>松开以导入 JSON</strong><span>一次一个文件，最大 192 KiB</span></div>}
         <div className="paper-flow-toolbar">
           <label>
             论文／流程 A
@@ -258,27 +294,26 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
               {options}
             </select>
           </label>
-          <label className="paper-flow-file">
-            导入 JSON
+          <div className="paper-flow-file">
+            <button type="button" onClick={() => fileInput.current?.click()} title="选择一个 JSON 文件，或将文件拖到流程面板">导入 JSON</button>
             <input
+              ref={fileInput}
+              className="paper-flow-file-input"
               type="file"
               accept="application/json,.json"
               aria-label="导入论文或工作区 JSON"
               onChange={async (e) => {
-                const file = e.target.files?.[0];
+                const files = Array.from(e.target.files || []);
                 e.target.value = "";
-                if (!file) return;
-                const ticket = importGuard.begin();
-                if (file.size > FLOW_LIMITS.workspaceBytes) {
-                  setDiagnostics([{ severity: "error", code: "budget.bytes", path: "$", message: "工作区超过 192 KiB 上限" }]);
-                  return;
-                }
-                try { const text = await file.text(); if (importGuard.accepts(ticket)) load(text); }
-                catch { if (importGuard.accepts(ticket)) setDiagnostics([{ severity: "error", code: "file.read", path: "$", message: "无法读取工作区文件" }]); }
+                if (files.length) await importFiles(files);
               }}
             />
-          </label>
+            <span className="paper-flow-file-name" role="status" title={fileState.name}>{importing ? `正在读取 ${fileState.name}…` : fileState.name || "或拖入面板"}</span>
+          </div>
           <button
+            type="button"
+            className="paper-flow-save-workspace"
+            title="下载当前工作区 JSON 备份；画板中的编辑另由宿主自动保存"
             onClick={() => {
               try {
                 downloadFile(
@@ -361,7 +396,13 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
               </label>
             </>
           )}
+          <div className="paper-flow-detail-control">
           <button
+            type="button"
+            role="switch"
+            aria-checked={w.view.detail === "full"}
+            aria-label="完整细节"
+            className="paper-flow-switch"
             onClick={() =>
               change({
                 ...w,
@@ -369,8 +410,13 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
               })
             }
           >
-            {w.view.detail === "full" ? "论文概览" : "完整细节"}
+            <span className="paper-flow-switch-track" aria-hidden="true"><span /></span>
+            完整细节
           </button>
+          <button ref={detailHelpTrigger} type="button" className="paper-flow-help" aria-label="完整细节与论文概览有什么区别"
+            aria-expanded={windows.detailHelp} aria-controls={`${windowPrefix}-detail-help`}
+            onClick={() => windows.detailHelp ? closeWindow("detailHelp") : setWindows((value) => ({ ...value, detailHelp: true }))}>?</button>
+          </div>
           <button
             onClick={() => change({ ...w, view: { ...w.view, grouping: !w.view.grouping } })}
             aria-pressed={w.view.grouping}
@@ -521,6 +567,11 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
         <FlowWindow id={`${windowPrefix}-legend`} kind="legend" title="图例" open={windows.legend} onClose={() => closeWindow("legend")}>
           <FlowLegend />
         </FlowWindow>
+        <FlowWindow id={`${windowPrefix}-detail-help`} kind="detail-help" title="完整细节与论文概览" open={windows.detailHelp} onClose={() => closeWindow("detailHelp")}>
+          <p><strong>完整细节：开启</strong>，逐个显示输入中声明的流程节点和关系，适合查看具体操作、产物与上下游。</p>
+          <p><strong>完整细节：关闭</strong>，显示论文概览：仅将输入中显式声明的 <code>paper_groups</code> 分组合并为概览节点；未分组的步骤继续显示。未声明分组时，两种视图可能相同。</p>
+          <p>这个开关只改变画布展示，不删除源数据，也不改变严格／逻辑比较使用的原始声明。两种视图分别保留自己的临时布局草稿。</p>
+        </FlowWindow>
         {right && comparison && <FlowWindow id={`${windowPrefix}-report`} kind="report" title="比较报告" open={windows.report === selectionKey} onClose={() => closeWindow("report")}>
           <FlowComparisonReport report={comparison.report} />
         </FlowWindow>}
@@ -640,7 +691,7 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
             <button onClick={() => setDetail(null)}>关闭详情 ×</button>
             <h3>{detail.node.label}</h3>
             <p>{detail.node.detail}</p>
-            {renderNodeDetails?.(detail.node, detail.graph)}
+            {renderNodeDetails?.(detail.node, detail.graph, detail.contexts || [])}
             <dl>
               <dt>来源</dt>
               <dd>{detail.node.evidence || "未提供来源说明"}</dd>

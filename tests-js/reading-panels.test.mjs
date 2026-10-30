@@ -196,6 +196,37 @@ test('annotation tab delegates initialization to its owner before opening shared
   f.panels.show('annotations');assert.equal(f.annotationsRoot.hidden,false);
 });
 
+test('a canvas annotation context enables shared notes without a paper, then leaving disables the tab',()=>{
+  let requests=0;const f=environment({sharedLibrary:true,onAnnotationsRequest:()=>requests++});
+  f.panels.setReadingActive(false);
+  const tab=f.ids.get('reading-sidebar-annotations'),library=f.ids.get('reading-sidebar-library-content');
+  assert.equal(tab.disabled,true);assert.equal(f.panels.show('annotations'),false);
+  f.panels.setAnnotationContext(true);
+  assert.equal(tab.disabled,false);
+  tab.click();assert.equal(requests,1,'The owner prepares board/flow notes in the existing shared pane');
+  assert.equal(f.panels.show('annotations'),true);
+  assert.equal(f.panels.visible('annotations'),true);assert.equal(f.annotationsRoot.hidden,false);
+  assert.equal(library.hidden,true);assert.equal(f.workspace.classList.contains('shared-sidebar-open'),true);
+  f.panels.paperChanged(null);
+  assert.equal(f.panels.visible('annotations'),true,'No selected paper does not close an active canvas context');
+  f.panels.setAnnotationContext(false);
+  assert.equal(tab.disabled,true);assert.equal(f.panels.visible('annotations'),false);
+  assert.equal(f.annotationsRoot.hidden,true);assert.equal(library.hidden,false);
+  assert.equal(f.workspace.classList.contains('shared-sidebar-open'),false);
+  tab.click();assert.equal(requests,1);
+});
+
+test('canvas context does not enable paper chat and returning to reading restores paper annotations',()=>{
+  const f=environment({sharedLibrary:true});f.panels.setReadingActive(false);f.panels.setAnnotationContext(true);
+  assert.equal(f.panels.show('annotations'),true);assert.equal(f.panels.show('chat'),false);
+  f.panels.paperChanged({...paper,archived:true});assert.equal(f.ids.get('reading-sidebar-annotations').disabled,false);
+  f.panels.setAnnotationContext(false);assert.equal(f.ids.get('reading-sidebar-annotations').disabled,true);
+  assert.equal(f.panels.visible('annotations'),false);
+  f.panels.paperChanged(paper);f.panels.setReadingActive(true);
+  assert.equal(f.ids.get('reading-sidebar-annotations').disabled,false);
+  assert.equal(f.panels.show('annotations'),true);assert.equal(f.annotationsRoot.hidden,false);
+});
+
 test('shared rail disposal restores original library children and annotation roots, then removes new handlers',()=>{
   const f=environment({sharedLibrary:true});f.panels.paperChanged(paper);f.panels.show('annotations');f.panels.setSide('right');
   const tabs=f.ids.get('reading-sidebar-library').parentNode,header=tabs.parentNode,content=f.ids.get('reading-sidebar-library-content');

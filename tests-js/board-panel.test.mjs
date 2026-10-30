@@ -90,7 +90,7 @@ function environment(ids = []) {
   return { doc, registry, Element };
 }
 
-function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, sessionId = null, flowFactory, flowLoader } = {}) {
+function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, sessionId = null, flowFactory, flowLoader, onCanvasContext, onAnnotations, prepareAnnotationsLeave, hasPendingAnnotations } = {}) {
   const ids = [
     'board-stage', 'board-select', 'board-status', 'board-zoom-label', 'board-zoom-in', 'board-zoom-out', 'board-fit',
     'board-undo', 'board-redo', 'board-delete', 'board-title', 'board-new', 'board-close', 'board-add-paper', 'board-send', 'board-tidy', 'board-fullscreen',
@@ -107,7 +107,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
     'board-association-query', 'board-association-search', 'board-association-linked', 'board-association-status',
     'board-association-list', 'board-association-prev', 'board-association-next', 'board-association-page',
     'board-association-selected', 'board-association-link', 'board-association-unlink',
-    'board-menu-open', 'board-menu', 'board-inspector', 'board-inspector-node', 'board-inspector-edge', 'board-flow-open', 'board-flow-view',
+    'board-menu-open', 'board-menu', 'board-inspector', 'board-inspector-node', 'board-inspector-edge', 'board-flow-open', 'board-flow-view', 'board-annotations-open',
   ];
   const { doc, registry, Element } = environment(ids);
   doc.defaultView.confirm = () => confirm;
@@ -141,14 +141,16 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
   frameWindow.inbox = inbox;
   if (parent) {
     const posted = [];
+    const postedOrigins = [];
     const parentWindow = {
       location: { origin: 'https://host.example' },
-      postMessage: message => { posted.push(message); },
+      postMessage: (message, origin) => { posted.push(message); postedOrigins.push(origin); },
       addEventListener: () => {},
       removeEventListener: () => {},
     };
     frameWindow.parent = parentWindow;
     frameWindow.__posted = posted;
+    frameWindow.__postedOrigins = postedOrigins;
   }
   const context = {
     window: frameWindow,
@@ -166,7 +168,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
   const board = context.window.PaperBoard;
   const boardSource = context.window.PaperBoardSource;
   if (canvas) { const original = Element.prototype; original.__canvas = canvas; }
-  const panel = board.create({ root, api: api || (async () => ({})), toast: (message) => messages.push(message), ...(capabilities ? { capabilities } : {}), ...(sessionId ? { getSessionId: () => sessionId } : {}), ...(flowFactory ? { flowFactory } : {}) });
+  const panel = board.create({ root, api: api || (async () => ({})), toast: (message) => messages.push(message), ...(capabilities ? { capabilities } : {}), ...(sessionId ? { getSessionId: () => sessionId } : {}), ...(flowFactory ? { flowFactory } : {}), onCanvasContext, onAnnotations, prepareAnnotationsLeave, hasPendingAnnotations });
   const stage = registry.get('board-stage');
   const svg = stage.children[0];
   return {
@@ -207,6 +209,7 @@ function syntheticFlowFactory() {
       isOpen: () => controller.open,
       async prepareLeave() { controller.prepareCount++; return !controller.blocked; },
       async close() { controller.closeCount++; if (controller.blocked) return false; controller.open = false; options.onClose(); return true; },
+      focus(target) { calls.push({ action: 'focus', target }); return true; },
       dispose() { calls.push({ action: 'dispose' }); },
     };
   } }, mounted: () => mounted };
@@ -256,6 +259,86 @@ test('flow save failure or conflict blocks board switching, closing and current-
   assert.equal(harness.panel.board().id, 'b-other');
   assert.equal(flow.controller.open, false);
   harness.panel.dispose();
+});
+
+test('board notes publish original node identities and focus without changing node coordinates', async () => {
+  const contexts=[],annotations=[];
+  const nodes=[{id:'original-left',kind:'rect',x:-240,y:690,w:140,h:60,text:'Synthetic left'},{id:'original-right',kind:'rect',x:930,y:-310,w:150,h:70,text:'Synthetic right'}];
+  const harness=loadPanel({api:apiStub({board_get:p=>({board:{schema:1,id:p.id,title:'Synthetic notes',origin:'user',status:'saved',view:{x:31,y:-42,zoom:2},nodes:structuredClone(nodes),edges:[]},revision:'b'.repeat(64)})}),onCanvasContext:value=>contexts.push(value),onAnnotations:value=>annotations.push(value)});
+  assert.equal(harness.panel.focusAnnotation({kind:'board',node_ids:['original-right']}),false,'A closed surface cannot receive a jump');
+  await harness.panel.open();
+  assert.deepEqual(JSON.parse(JSON.stringify(contexts.at(-1))),{id:'b-created',target:{kind:'board',node_ids:[]}});
+  const before=JSON.stringify(harness.panel.board().nodes);
+  assert.equal(harness.panel.focusAnnotation({kind:'board',node_ids:['original-right','missing']}),true);
+  assert.deepEqual([...harness.panel.selection()],['original-right']);
+  const expected=harness.board.geometry.viewportFor([nodes[1]],{width:800,height:520});
+  assert.equal(harness.svg.children[1].getAttribute('transform'),`translate(${expected.x},${expected.y}) scale(${expected.zoom})`);
+  assert.equal(JSON.stringify(harness.panel.board().nodes),before,'The jump only changes viewport and selection');
+  harness.registry.get('board-annotations-open').dispatch('click');
+  assert.deepEqual(JSON.parse(JSON.stringify(annotations.at(-1))),{id:'b-created',target:{kind:'board',node_ids:['original-right']}});
+  assert.deepEqual(JSON.parse(JSON.stringify(contexts.at(-1))),{id:'b-created',target:{kind:'board',node_ids:['original-right']}});
+  assert.equal(await harness.panel.close(),true);assert.equal(contexts.at(-1),null);
+  harness.panel.dispose();
+});
+
+test('unsaved canvas notes block board load, close, creation and current deletion before API writes', async () => {
+  state.length=0;let blocked=false,checks=0;
+  const flow=syntheticFlowFactory(),harness=loadPanel({api:apiStub(),flowFactory:flow.factory,prepareAnnotationsLeave:async()=>{checks++;return !blocked;}});
+  await harness.panel.open();await harness.panel.openFlow();
+  const before=JSON.stringify(harness.panel.board()),start=state.length,flowCloses=flow.controller.closeCount;
+  blocked=true;
+  assert.equal(await harness.panel.load('b-unopened'),false);
+  assert.equal(await harness.panel.close(),false);
+  harness.registry.get('board-new').dispatch('click');await new Promise(setImmediate);
+  harness.registry.get('board-delete').dispatch('click');await new Promise(setImmediate);
+  assert.equal(state.length,start,'No target load, board write, new record or delete begins after the notes guard refuses');
+  assert.equal(flow.controller.closeCount,flowCloses,'Guarded actions also keep the current flow visible');
+  assert.equal(JSON.stringify(harness.panel.board()),before);
+  assert.equal(harness.panel.isOpen(),true);assert.ok(checks>=4);
+  blocked=false;assert.equal(await harness.panel.load('b-next'),true);
+  assert.equal(harness.panel.board().id,'b-next');
+  harness.panel.dispose();
+});
+
+test('flow notes callbacks and original flow targets are forwarded by the board host', async () => {
+  const contexts=[],notes=[],flow=syntheticFlowFactory(),onCanvasContext=value=>contexts.push(value),onAnnotations=value=>notes.push(value);
+  const harness=loadPanel({api:apiStub(),flowFactory:flow.factory,onCanvasContext,onAnnotations});
+  await harness.panel.open();await harness.panel.openFlow();
+  assert.equal(flow.mounted().onCanvasContext,onCanvasContext);assert.equal(flow.mounted().onAnnotations,onAnnotations);
+  const context={id:'b-created',target:{kind:'flow',document_id:'synthetic-paper',flow_id:'synthetic-flow',node_ids:['source-original']}};
+  flow.mounted().onCanvasContext(context);flow.mounted().onAnnotations(context);
+  assert.equal(contexts.at(-1),context);assert.equal(notes.at(-1),context);
+  const before=JSON.stringify(harness.panel.board());
+  assert.equal(harness.panel.focusAnnotation(context.target),true);
+  assert.equal(flow.calls.at(-1).action,'focus');assert.equal(flow.calls.at(-1).target,context.target);
+  assert.equal(JSON.stringify(harness.panel.board()),before);
+  harness.panel.dispose();
+});
+
+test('pending canvas notes retain the iframe independently of flow and publish no content', async () => {
+  let pending=false;
+  const flow=syntheticFlowFactory(),harness=loadPanel({parent:true,api:apiStub(),flowFactory:flow.factory,hasPendingAnnotations:()=>pending});
+  await harness.panel.open();
+  const messages=()=>harness.window.__posted.filter(message=>message.type==='paper-library:flow-window');
+  pending=true;harness.panel.syncFlowWindow();
+  assert.equal(messages().at(-1).active,true,'Unsaved or busy notes alone keep the iframe alive');
+  pending=false;harness.panel.syncFlowWindow();
+  assert.equal(messages().at(-1).active,false,'Clean notes release retention when flow is closed');
+  await harness.panel.openFlow();harness.panel.syncFlowWindow();
+  assert.equal(messages().at(-1).active,true,'An open flow still retains the iframe with clean notes');
+  pending=true;assert.equal(await harness.panel.closeFlow(),true);
+  assert.equal(messages().at(-1).active,true,'Closing a flow does not release unsaved notes');
+  pending=false;harness.panel.syncFlowWindow();
+  assert.equal(messages().at(-1).active,false);
+  await harness.panel.openFlow();harness.panel.dispose();
+  assert.equal(messages().at(-1).active,false,'Disposal releases retention once the actual notes state is clean');
+  assert.ok(messages().length>=7);
+  for(const message of messages()){
+    assert.deepEqual(Object.keys(message).sort(),['active','type','version'],'The lifecycle signal carries no notes, IDs, graph or board content');
+    assert.equal(message.type,'paper-library:flow-window');assert.equal(message.version,1);
+    assert.equal(typeof message.active,'boolean');
+  }
+  assert.ok(harness.window.__postedOrigins.every(origin=>origin==='https://host.example'),'Lifecycle messages stay on the exact parent origin');
 });
 
 test('a lazy flow load cannot open the board that was switched away while loading', async () => {

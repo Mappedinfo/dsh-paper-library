@@ -21,6 +21,7 @@ let analysisUI;
 let settingsUI;
 let challengeUI;
 let boardUI;
+let canvasNotesUI, canvasNotesContext = null, canvasNotesPending = false;
 let latexUI;
 let libraryLatexVersions;
 let companionUI;
@@ -267,6 +268,7 @@ async function openResource(item){
   void syncPaperProjectCount();
 }
 async function switchTab(tab) {
+  if (tab === 'annotations' && canvasNotesContext && boardUI?.isOpen()) { await openCanvasNotes(canvasNotesContext); return; }
   if (state.active?.resource_kind === 'dataset') return;
   if (typeof knowledgeUI !== 'undefined') knowledgeUI?.hide();
   if (workbenchUI?.isTable() && state.active && !state.active.archived) {
@@ -775,6 +777,7 @@ function transferLinks(transfer) {
 }
 function handleDrop(event) {
   $('window-drop-overlay').hidden = true;
+  if (boardUI?.isFlowOpen()) { event.preventDefault(); toast('请将 JSON 文件拖到流程面板内。'); return; }
   const files = event.dataTransfer?.files;
   if (files?.length) { event.preventDefault(); enqueueFiles(files); return; }
   if (editableTarget(event.target) && !['quick-import-source', 'import-source'].includes(event.target.id)) return;
@@ -783,6 +786,7 @@ function handleDrop(event) {
   if ($('import-dialog').open) closeDialog('import-dialog');
 }
 function handleDragOver(event) {
+  if (boardUI?.isFlowOpen()) { event.preventDefault(); $('window-drop-overlay').hidden = true; return; }
   const types = Array.from(event.dataTransfer?.types || []);
   if (types.includes('Files')) { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; $('window-drop-overlay').hidden = false; }
   else if (!editableTarget(event.target) && (types.includes('text/uri-list') || types.includes('text/plain'))) event.preventDefault();
@@ -1331,7 +1335,7 @@ paperChatUI = window.PaperLibraryChat?.create({ api, toast, persistence, getPape
   navigate: switchTab, navigateReference: (paperId, page) => openReferencedPaper({ paperId, page }), changed: publishReaderState,
   savedFeedback: async id => { if (state.active?.id !== id) return; await loadFeedback(id); await loadAnnotations(id); if (state.active.pdf) await refreshPage(); },
 });
-readingPanels = window.PaperReadingPanels?.create({persistence,root:$('reading-workspace'),annotationsRoot:$('annotations-tab'),conversationRoot:$('conversation-tab'),metadataRoot:$('metadata-dialog'),libraryRoot:document.querySelector('.library-pane'),onAnnotationsRequest:()=>void switchTab('annotations'),
+readingPanels = window.PaperReadingPanels?.create({persistence,root:$('reading-workspace'),annotationsRoot:$('annotations-tab'),conversationRoot:$('conversation-tab'),metadataRoot:$('metadata-dialog'),libraryRoot:document.querySelector('.library-pane'),onAnnotationsRequest:()=>canvasNotesContext?void openCanvasNotes(canvasNotesContext):void switchTab('annotations'),
   onChatVisibility: visible => paperChatUI?.visible(visible && state.tab!=='graph' && !workbenchUI?.isTable()),
   onPanelChange: value => { workbenchUI?.metadataVisibility(value.sidebar==='metadata'); readingShell?.sync(); publishReaderState(); }, toast,
 });
@@ -1650,7 +1654,39 @@ async function openMembership(paperId){
     status.textContent=error.message||'无法读取项目；请稍后重试。';
   }
 }
+function canvasContextChanged(value) {
+  const previous = canvasNotesContext?.id;
+  canvasNotesContext = value;
+  $('annotations-tab').classList.toggle('canvas-annotations-active', !!value);
+  $('board-annotation-panel').hidden = !value;
+  readingPanels?.setAnnotationContext(!!value);
+  if (value && previous !== value.id && readingPanels?.visible('annotations')) void canvasNotesUI?.open();
+  else if (value) canvasNotesUI?.updateTarget(value.target);
+}
+async function openCanvasNotes(value) {
+  if (!value || !boardUI?.isOpen()) return;
+  try {
+    if (!await boardUI.prepareLeave({ annotations: false })) return;
+    if (document.fullscreenElement) await document.exitFullscreen();
+    boardUI.setFocus(false);
+    canvasContextChanged(value);
+    if (await canvasNotesUI?.open(value.target)) readingPanels?.show('annotations');
+  } catch (error) { toast(`打开画板批注失败：${error.message || error}`, true); }
+}
+canvasNotesUI = window.PaperBoardAnnotations?.create({root:$('board-annotation-panel'),
+  api:async(action,payload)=>{
+    if(action==='board_annotations_create'){
+      if(!await boardUI?.prepareLeave({annotations:false})||canvasNotesContext?.id!==payload.id)throw Error('画板尚未保存或已切换；批注文字仍保留。');
+    }
+    return api(action,payload);
+  },boardId:()=>canvasNotesContext?.id,target:()=>canvasNotesContext?.target,toast,
+  onChange:value=>{canvasNotesPending=value.dirty||value.busy;boardUI?.syncFlowWindow();},
+  onFocus:async target=>{if(!boardUI?.isOpen())return;if(target.kind==='flow'){if(!await boardUI.openFlow())return;}else if(boardUI.isFlowOpen()){if(!await boardUI.closeFlow())return;}boardUI.focusAnnotation(target);},
+});
+window.addEventListener('beforeunload',event=>{if(canvasNotesUI?.hasDraft()){event.preventDefault();event.returnValue='';}});
 boardUI = window.PaperBoard?.create({root:$('board-view'),api,toast,
+  onCanvasContext:canvasContextChanged,onAnnotations:value=>void openCanvasNotes(value),prepareAnnotationsLeave:()=>canvasNotesUI?.prepareLeave()??true,
+  hasPendingAnnotations:()=>canvasNotesPending,
   prepareReturnToDsh,
   onClose:({focus})=>{void refreshBoardShelf();if(focus)$('board-open').focus();},
   onRequestPapers:()=>openBoardPaperPicker(),

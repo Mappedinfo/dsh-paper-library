@@ -90,6 +90,19 @@
       }
     }
 
+    /** A validated flow snapshot uses the same immutable composer reference contract. */
+    async function sendSnapshot(frozen, sessionId) {
+      const view = doc.defaultView, id = options.boardId();
+      if (!options.capabilities().conversation || !view?.parent || view.parent === view) { options.toast(OUTSIDE_HOST, true); return false; }
+      if (!options.live() || !id || typeof sessionId !== 'string' || !sessionId.trim() || frozen?.board_id !== id || options.sessionId() !== sessionId) { options.toast('画板或 DSH 会话已切换，请重新加入引用。', true); return false; }
+      if (typeof frozen.snapshot_id !== 'string' || !/^[a-f0-9]{64}$/.test(frozen.snapshot_id)) { options.toast('流程引用快照无效，请重新加入。', true); return false; }
+      try {
+        await request('board_draft', { sessionId, board_id: id, snapshot_id: frozen.snapshot_id, title: String(frozen.board_title || options.board().title).slice(0, 200) });
+        options.toast('已放入 DSH 主输入框；可继续写问题，尚未发送。');
+        return true;
+      } catch (error) { options.toast(error.message || '放入对话失败', true); return false; }
+    }
+
     /** Start listening for the host's answers. */
     function listen() {
       doc.defaultView?.addEventListener?.('message', onResult);
@@ -108,6 +121,7 @@
       request,
       onResult,
       send,
+      sendSnapshot,
       listen,
       dispose,
       pendingCount: () => pending.size,

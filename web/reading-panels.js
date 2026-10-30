@@ -9,7 +9,7 @@ window.PaperReadingPanels = (() => {
     // Panels another surface owns (today the LaTeX workspace's DSH collaboration). They live in
     // the same rail, with the same side toggle, width and resizer as the annotation panel; the
     // reading tabs step aside while such a panel is active and come back untouched after.
-    let externalActive = false;
+    let externalActive = false, annotationContext = false;
     const extraPanels = new Map();
     const listeners = [], originals = [annotationsRoot,conversationRoot,metadataRoot].map(element=>({element,parent:element.parentNode,next:element.nextSibling,hidden:element.hidden,open:element.open}));
     const make = (tag,className,text) => {const element=document.createElement(tag);element.className=className;if(text!==undefined)element.textContent=text;return element;};
@@ -83,19 +83,20 @@ window.PaperReadingPanels = (() => {
       placeSidebar();
       aside.hidden=!sidebar||(Boolean(libraryRoot)&&sidebar==='annotations');asideTitle.textContent=sidebar==='metadata'?'资料详情':'批注';
       move.textContent=side==='left'?'移至右侧':'移至左侧';
-      annotationsRoot.hidden=sidebar!=='annotations'||(Boolean(libraryRoot)&&!readingActive);metadataRoot.hidden=sidebar!=='metadata';
+      const annotationActive = readingActive || annotationContext;
+      annotationsRoot.hidden=sidebar!=='annotations'||(Boolean(libraryRoot)&&!annotationActive);metadataRoot.hidden=sidebar!=='metadata';
       if(libraryRoot){
         const selectedExtra=externalActive&&extraPanels.has(sidebar)?sidebar:null;
-        const annotations=readingActive&&!externalActive&&sidebar==='annotations';
-        sharedHeader.hidden=!(readingActive||externalActive);
+        const annotations=annotationActive&&!externalActive&&sidebar==='annotations';
+        sharedHeader.hidden=!(annotationActive||externalActive);
         libraryContent.hidden=annotations||externalActive;
         libraryRoot.dataset.sidebarPanel=selectedExtra||(annotations?'annotations':'library');
-        libraryRoot.parentNode.classList.toggle('shared-sidebar-open',(readingActive||externalActive)&&sharedOpen);
-        libraryRoot.parentNode.dataset.sidebarSide=(readingActive||externalActive)?side:'left';
+        libraryRoot.parentNode.classList.toggle('shared-sidebar-open',(annotationActive||externalActive)&&sharedOpen);
+        libraryRoot.parentNode.dataset.sidebarSide=(annotationActive||externalActive)?side:'left';
         libraryTab.hidden=externalActive;
         annotationsTab.hidden=externalActive;
         libraryTab.setAttribute('aria-selected',String(!annotations&&!externalActive));libraryTab.tabIndex=annotations||externalActive?-1:0;
-        annotationsTab.setAttribute('aria-selected',String(annotations));annotationsTab.tabIndex=annotations?0:-1;annotationsTab.disabled=externalActive||!paper||paper.archived;
+        annotationsTab.setAttribute('aria-selected',String(annotations));annotationsTab.tabIndex=annotations?0:-1;annotationsTab.disabled=externalActive||(!annotationContext&&(!paper||paper.archived));
         for(const panel of extraPanels.values()){
           const active=selectedExtra===panel.id;
           panel.tab.hidden=!externalActive;panel.tab.setAttribute('aria-selected',String(active));panel.tab.tabIndex=active?0:-1;
@@ -103,7 +104,7 @@ window.PaperReadingPanels = (() => {
         }
         const direction=side==='left'?'移至右侧':'移至左侧';sharedMove.title=direction;sharedMove.setAttribute('aria-label',direction);
       }
-      if(resizer)resizer.hidden=!((readingActive||externalActive)&&sharedOpen);
+      if(resizer)resizer.hidden=!((annotationActive||externalActive)&&sharedOpen);
       if(metadataRoot.tagName==='DIALOG') {
         if(sidebar==='metadata'&&!metadataRoot.open)metadataRoot.show();
         else if(sidebar!=='metadata'&&metadataRoot.open)metadataRoot.close();
@@ -125,7 +126,7 @@ window.PaperReadingPanels = (() => {
       known(name);if(disposed)return false;
       // A panel another surface owns needs no paper: it belongs to that surface, not the reader.
       if(extraPanels.has(name)){externalActive=true;sidebar=name;sharedOpen=true;render();return true;}
-      if(name!=='metadata'&&(!paper||paper.archived)){toast?.('请先打开一篇可阅读的文献。',true);return false;}
+      if(name!=='metadata'&&!(name==='annotations'&&annotationContext)&&(!paper||paper.archived)){toast?.('请先打开一篇可阅读的文献。',true);return false;}
       if(name==='chat'){chatOpen=true;collapsed=false;}else {sidebar=name;if(name==='annotations')sharedOpen=true;}
       render();return true;
     }
@@ -142,7 +143,7 @@ window.PaperReadingPanels = (() => {
     }
     function paperChanged(value) {
       paper=value&&typeof value.id==='string'?{id:value.id,title:String(value.title||'').slice(0,500),archived:Boolean(value.archived)}:null;
-      if(!paper||paper.archived){sidebar=null;chatOpen=false;}
+      if(!paper||paper.archived){if(!annotationContext)sidebar=null;chatOpen=false;}
       render();
     }
     function setReadingActive(value){const next=Boolean(value);if(next===readingActive)return;readingActive=next;render(false);}
@@ -178,7 +179,7 @@ window.PaperReadingPanels = (() => {
     for(const panel of [aside,chat])listen(panel,'keydown',event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();close(panel===chat?'chat':sidebar);}});
     if(libraryRoot)listen(libraryRoot,'keydown',event=>{if(event.key==='Escape'&&sidebar==='annotations'&&!event.defaultPrevented){event.preventDefault();sharedOpen=false;close('annotations');}});
     render(false);
-    return {toggle,show,close,setSide,paperChanged,setReadingActive,showLibrary,visible,registerPanel,setExternal,ready:Promise.all([ready,layoutReady]).then(()=>undefined),dispose(){
+    return {toggle,show,close,setSide,paperChanged,setReadingActive,showLibrary,visible,registerPanel,setExternal,setAnnotationContext(value){annotationContext=Boolean(value);if(!annotationContext&&(!paper||paper.archived)&&sidebar==='annotations'){sidebar=null;sharedOpen=false;}render(false);},ready:Promise.all([ready,layoutReady]).then(()=>undefined),dispose(){
       if(disposed)return;disposed=true;observer?.disconnect();for(const off of listeners)off();
       if(lastChatVisible)onChatVisibility?.(false);
       for(const {element,parent,next,hidden,open} of originals){

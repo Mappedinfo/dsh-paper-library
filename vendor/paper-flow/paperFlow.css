@@ -50,13 +50,86 @@
   border-color: #0043ce;
 }
 .paper-flow-file {
-  border: 1px solid #8d8d8d;
-  padding: 3px 7px;
-  border-radius: 4px;
-  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
-.paper-flow-file input {
-  max-width: 210px;
+.paper-flow-toolbar .paper-flow-file-input {
+  display: none;
+}
+.paper-flow-file-name {
+  display: inline-block;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, #666);
+}
+.paper-flow-workbench .paper-flow-toolbar button.paper-flow-save-workspace {
+  color: var(--dsw-alias-label-primary, #15592b);
+  background: color-mix(in srgb, #54b27a 18%, var(--dsw-alias-bg-layer-1, #fff));
+  border-color: color-mix(in srgb, #388955 55%, var(--dsw-alias-border-l2, #ddd));
+}
+.paper-flow-workbench .paper-flow-toolbar button.paper-flow-save-workspace:hover {
+  background: color-mix(in srgb, #54b27a 28%, var(--dsw-alias-bg-layer-1, #fff));
+}
+.paper-flow-detail-control,
+.paper-flow-toolbar button.paper-flow-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.paper-flow-switch-track {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 26px;
+  height: 15px;
+  padding: 2px;
+  border-radius: 12px;
+  background: var(--dsw-alias-label-tertiary, #8d8d8d);
+}
+.paper-flow-switch-track > span {
+  display: block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+}
+.paper-flow-switch[aria-checked="true"] .paper-flow-switch-track {
+  background: var(--dsw-alias-link, #005ea8);
+  justify-content: flex-end;
+}
+.paper-flow-toolbar button.paper-flow-help {
+  width: 28px;
+  min-width: 28px;
+  padding: 3px;
+  border-radius: 50%;
+  font-weight: 600;
+}
+.paper-flow-drop-target {
+  position: absolute;
+  inset: 8px;
+  z-index: 1550;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  pointer-events: none;
+  border: 2px dashed var(--dsw-alias-link, #005ea8);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1, #fff) 92%, #005ea8);
+  color: var(--dsw-alias-label-primary, #161616);
+}
+.paper-flow-drop-target strong {
+  font-size: 18px;
+}
+.paper-flow-toolbar button:focus-visible {
+  outline: 2px solid var(--dsw-alias-link, #005ea8);
+  outline-offset: 2px;
 }
 .paper-flow-pair,
 .paper-flow-summaries {

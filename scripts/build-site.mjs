@@ -44,7 +44,7 @@ await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 await writeFile(join(output, 'index.html'), page);
 await writeFile(join(output, '.nojekyll'), '');
-for (const asset of ['board.js', 'board-flow.js', 'board-source.js', 'board-render.js', 'board-bridge.js', 'board-mermaid.js', 'board-drawio.js', 'board.css', 'theme.css', 'floating-windows.js', 'floating-windows.css']) await cp(join(project, 'web', asset), join(output, asset));
+for (const asset of ['board.js', 'board-flow.js', 'board-source.js', 'board-render.js', 'board-bridge.js', 'board-annotations.js', 'board-annotations.css', 'board-mermaid.js', 'board-drawio.js', 'board.css', 'theme.css', 'floating-windows.js', 'floating-windows.css']) await cp(join(project, 'web', asset), join(output, asset));
 for (const asset of ['paper-flow-editor.js', 'paper-flow-editor.css']) await cp(join(project, 'lib', asset), join(output, asset));
 await cp(join(project, 'site/standalone.js'), join(output, 'standalone.js'));
 await mkdir(join(output, 'licenses/paper-flow'), { recursive: true });
@@ -53,4 +53,4 @@ for (const name of ['DAGRE-LICENSE.txt', 'GRAPHLIB-LICENSE.txt', 'MATHJAX-LICENS
 for (const name of ['react-LICENSE.txt', 'react-dom-LICENSE.txt']) await cp(join(project, 'licenses/slides', name), join(output, 'licenses/paper-flow', name));
 await cp(join(project, 'site/boards'), join(output, 'boards'), { recursive: true });
 
-console.log(JSON.stringify({ output: '_site', markup_lines: markup.split('\n').length, assets: ['index.html', 'board.js', 'board-flow.js', 'board-source.js', 'board-render.js', 'board-bridge.js', 'board-mermaid.js', 'board-drawio.js', 'board.css', 'theme.css', 'floating-windows.js', 'floating-windows.css', 'paper-flow-editor.js', 'paper-flow-editor.css', 'standalone.js', 'boards/example.json', 'boards/example.style.json'] }));
+console.log(JSON.stringify({ output: '_site', markup_lines: markup.split('\n').length, assets: ['index.html', 'board.js', 'board-flow.js', 'board-source.js', 'board-render.js', 'board-bridge.js', 'board-annotations.js', 'board-annotations.css', 'board-mermaid.js', 'board-drawio.js', 'board.css', 'theme.css', 'floating-windows.js', 'floating-windows.css', 'paper-flow-editor.js', 'paper-flow-editor.css', 'standalone.js', 'boards/example.json', 'boards/example.style.json'] }));

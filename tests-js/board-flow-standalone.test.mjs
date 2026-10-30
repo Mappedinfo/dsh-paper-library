@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises'
 import { webcrypto } from 'node:crypto'
 import vm from 'node:vm'
 import { validateFlowWorkspace } from '../src/paper-flow/validation.mjs'
+import { createBoardAnnotationStore, handleBoardAnnotationRequest } from '../src/harness/board-annotations.mjs'
+import { normalizeBoardAnnotationRecord } from '../src/board-annotation-schema.mjs'
 
 const source = await readFile(new URL('../site/standalone.js', import.meta.url), 'utf8')
 const KEY = 'paper-library-whiteboard.v1'
@@ -11,6 +13,7 @@ const plain = value => JSON.parse(JSON.stringify(value))
 const flow = (title = '合成流程') => ({ schemaVersion: 1, kind: 'paper-flow-document', paper: { id: 'synthetic', title },
   flows: [{ id: 'main', name: 'Main', nodes: [{ id: 'n', label: 'Node', type: 'method', ports: { in: {}, out: {} } }], edges: [] }] })
 const newBoard = (title = '合成画板') => ({ action: 'board_create', board: { title, nodes: [{ id: 'n-original', kind: 'text', text: '原内容', x: 3, y: 4 }], edges: [] } })
+const annotationEngine = { createBoardAnnotationStore, handleBoardAnnotationRequest, normalizeBoardAnnotationRecord }
 
 function memoryStorage() {
   const data = new Map()
@@ -146,4 +149,48 @@ test('standalone corrupt flow envelopes cannot masquerade as an unwritten revisi
     for (const action of ['board_flow_get', 'board_flow_save']) await assert.rejects(local.handle({ action, id, workspace: flow(), expected_revision: 0 }), error => error.code === 'BOARD_FLOW_CORRUPT')
     assert.equal(storage.getItem(KEY), before)
   }
+})
+
+test('standalone annotations reuse the host store, enforce CAS, and survive backup ID remapping', async () => {
+  const storage = memoryStorage(), local = store(storage, { annotationEngine }), locks = lockManager()
+  const parent = await local.handle(newBoard()), id = parent.board.id
+  await local.handle({ action: 'board_flow_save', id, workspace: flow(), expected_revision: 0 })
+  const created = await local.handle({ action: 'board_annotations_create', id, target: { kind: 'flow', paper_id: 'synthetic', flow_id: 'main', node_id: 'n' }, comment: '合成节点问题', expected_revision: 0 })
+  assert.equal(created.notes[0].quote, 'Node')
+  assert.equal(created.notes[0].stale, false)
+  const before = storage.getItem(KEY)
+  await assert.rejects(local.handle({ action: 'board_annotations_update', id, note_id: created.notes[0].id, comment: '过期', expected_revision: 0 }), error => error.code === 'STATE_CONFLICT')
+  assert.equal(storage.getItem(KEY), before)
+  const updated = await store(storage, { annotationEngine, locks }).handle({ action: 'board_annotations_update', id, note_id: created.notes[0].id, comment: '已修改', expected_revision: created.revision })
+  assert.equal(updated.notes[0].comment, '已修改')
+  assert.equal(locks.calls.length, 1)
+  assert.deepEqual(plain((await local.handle({ action: 'board_get', id })).board), plain(parent.board))
+  const backup = local.exportAll()
+  assert.equal(backup.board_annotations[id].notes[0].comment, '已修改')
+  const result = await local.importAll(backup)
+  assert.equal(result.renamed, 1)
+  const restoredId = (await local.handle({ action: 'board_list' })).boards.find(item => item.id !== id).id
+  const restored = await local.handle({ action: 'board_annotations_list', id: restoredId })
+  assert.equal(restored.notes[0].comment, '已修改')
+  assert.equal(restored.notes[0].stale, false)
+  assert.deepEqual(plain(restored.notes[0].target), plain(created.notes[0].target))
+})
+
+test('standalone annotation failures preserve bytes and orphan targets remain readable as stale', async () => {
+  const storage = memoryStorage(), local = store(storage, { annotationEngine }), parent = await local.handle(newBoard()), id = parent.board.id
+  const added = await local.handle({ action: 'board_annotations_create', id, target: { kind: 'board', node_ids: ['n-original'] }, comment: '画板批注', expected_revision: 0 })
+  const before = storage.getItem(KEY)
+  storage.fail = true
+  await assert.rejects(local.handle({ action: 'board_annotations_delete', id, note_id: added.notes[0].id, expected_revision: added.revision }), error => error.code === 'BOARD_STORAGE')
+  assert.equal(storage.getItem(KEY), before)
+  storage.fail = false
+  await local.handle({ action: 'board_save', id, expected_revision: parent.revision, board: { ...parent.board, nodes: [] } })
+  const orphan = await local.handle({ action: 'board_annotations_list', id })
+  assert.equal(orphan.notes[0].stale, true)
+  assert.equal(orphan.notes[0].quote, '原内容')
+  const corrupt = JSON.parse(storage.getItem(KEY)); corrupt.board_annotations[id].revision = ''
+  storage.setItem(KEY, JSON.stringify(corrupt))
+  const corruptBytes = storage.getItem(KEY)
+  await assert.rejects(local.handle({ action: 'board_annotations_list', id }), error => error.code === 'BOARD_ANNOTATION_CORRUPT')
+  assert.equal(storage.getItem(KEY), corruptBytes)
 })

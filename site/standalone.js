@@ -63,13 +63,13 @@
         raw = storage.getItem(KEY);
         if (!raw) return { schema: 1, records: [], _raw: raw };
         const parsed = JSON.parse(raw);
-        if (!parsed || parsed.schema !== 1 || !Array.isArray(parsed.records) || (parsed.flow_workspaces !== undefined && (!parsed.flow_workspaces || typeof parsed.flow_workspaces !== 'object' || Array.isArray(parsed.flow_workspaces)))) throw new Error('unexpected shape');
+        if (!parsed || parsed.schema !== 1 || !Array.isArray(parsed.records) || ['flow_workspaces', 'board_annotations'].some(key => parsed[key] !== undefined && (!parsed[key] || typeof parsed[key] !== 'object' || Array.isArray(parsed[key])))) throw new Error('unexpected shape');
         return { ...parsed, _raw: raw };
       } catch { return { schema: 1, records: [], corrupt: true, _raw: raw }; }
     };
     const write = state => {
       if (state.corrupt) throw Object.assign(new Error('本地存储格式损坏，原内容已保留，请先检查备份。'), { code: 'STATE_CORRUPT', status: 500 });
-      const text = JSON.stringify({ schema: 1, records: state.records, ...(state.flow_workspaces ? { flow_workspaces: state.flow_workspaces } : {}) });
+      const text = JSON.stringify({ schema: 1, records: state.records, ...(state.flow_workspaces ? { flow_workspaces: state.flow_workspaces } : {}), ...(state.board_annotations ? { board_annotations: state.board_annotations } : {}) });
       if (text.length > MAX_BYTES) throw Object.assign(new Error('浏览器存储接近上限，请先导出 JSON 并删除不再需要的画板。'), { code: 'BOARD_TOO_LARGE', status: 413 });
       // 无 Web Locks 的浏览器至少在所有异步工作后复读；这不冒充跨标签事务。
       if (storage.getItem(KEY) !== state._raw) throw conflict({ value: null, revision: null });
@@ -124,6 +124,29 @@
     async function handle(input) {
         const state = read();
         const action = input?.action;
+        if (typeof action === 'string' && action.startsWith('board_annotations_')) {
+          const engine = options.annotationEngine || await window.PaperBoardFlowLoader?.load();
+          if (!engine?.createBoardAnnotationStore) throw flowFailure('批注组件尚未加载，请稍后重试。');
+          const localState = {
+            async get(key) {
+              const id = key.slice('board-annotations:'.length), latest = read(); flowParent(latest, id);
+              if (!Object.hasOwn(latest.board_annotations || {}, id)) return { value: null, revision: 0 };
+              const record = latest.board_annotations[id];
+              if (!record || !Object.hasOwn(record, 'value') || typeof record.revision !== 'string' || !/^[a-f0-9]{64}$/.test(record.revision)) throw flowFailure('已保存的画板批注记录损坏，原内容仍保留。', 'BOARD_ANNOTATION_CORRUPT', 500);
+              return record;
+            },
+            async put(key, value, expected) {
+              const id = key.slice('board-annotations:'.length), latest = read(); flowParent(latest, id);
+              const record = latest.board_annotations?.[id];
+              if ((record?.revision ?? 0) !== expected) throw conflict(record || { value: null, revision: 0 });
+              const revision = await digest(JSON.stringify({ value, nonce: nowId('note'), at: stamp() }));
+              latest.board_annotations = { ...(latest.board_annotations || {}), [id]: { value, revision } }; write(latest);
+              return { value, revision };
+            },
+          };
+          const annotations = engine.createBoardAnnotationStore({ localState, boards: { read: id => handle({ action: 'board_get', id }) }, flowStore: { get: id => handle({ action: 'board_flow_get', id }) } });
+          return engine.handleBoardAnnotationRequest(annotations, input);
+        }
         if (action === 'board_flow_get' || action === 'board_flow_save') {
           flowParent(state, input.id);
           const record = flowRecord(state, input.id);
@@ -192,19 +215,20 @@
           return { board: record.board, revision: record.revision, summary: summary(record), accepted };
         }
         // The standalone page has no composer, so it never freezes material for one.
-        if (action === 'board_snapshot' || action === 'board_snapshot_get') throw Object.assign(new Error('独立画板不提供对话引用；请在 DSH 插件的文献库面板中使用「放入对话」。'), { code: 'BOARD_FORBIDDEN', status: 403 });
+        if (action === 'board_snapshot' || action === 'board_snapshot_get' || action === 'board_flow_snapshot') throw Object.assign(new Error('独立画板不提供对话引用；请在 DSH 插件的文献库面板中使用「放入对话」。'), { code: 'BOARD_FORBIDDEN', status: 403 });
         throw Object.assign(new Error('不支持的画板操作。'), { code: 'BOARD_INVALID', status: 400 });
     }
 
     return {
       handle(input) {
-        return ['board_create', 'board_save', 'board_delete', 'board_accept', 'board_flow_save'].includes(input?.action) ? locked(() => handle(input)) : handle(input);
+        return ['board_create', 'board_save', 'board_delete', 'board_accept', 'board_flow_save', 'board_annotations_create', 'board_annotations_update', 'board_annotations_delete'].includes(input?.action) ? locked(() => handle(input)) : handle(input);
       },
       exportAll() {
         const state = read();
         const active = live(state);
         return { schema: 'paper-library-whiteboard.v1', exported_at: stamp(), boards: active.map(record => record.board),
-          flow_workspaces: Object.fromEntries(active.filter(record => flowRecord(state, record.board.id)).map(record => [record.board.id, flowRecord(state, record.board.id).workspace])) };
+          flow_workspaces: Object.fromEntries(active.filter(record => flowRecord(state, record.board.id)).map(record => [record.board.id, flowRecord(state, record.board.id).workspace])),
+          board_annotations: Object.fromEntries(active.filter(record => state.board_annotations?.[record.board.id]).map(record => [record.board.id, state.board_annotations[record.board.id].value])) };
       },
       importAll(payload) { return locked(async () => {
         const incoming = Array.isArray(payload?.boards) ? payload.boards : Array.isArray(payload) ? payload : null;
@@ -212,6 +236,8 @@
         if (incoming.length > MAX_BOARDS) throw Object.assign(new Error(`备份超过 ${MAX_BOARDS} 张画板上限，未写入任何内容。`), { code: 'BOARD_TOO_LARGE', status: 413 });
         const state = read();
         const incomingFlows = payload?.flow_workspaces ?? {};
+        const incomingNotes = payload?.board_annotations ?? {};
+        if (!incomingNotes || typeof incomingNotes !== 'object' || Array.isArray(incomingNotes) || Object.keys(incomingNotes).length > MAX_BOARDS) throw flowFailure('备份中的批注映射无效。');
         if (!incomingFlows || typeof incomingFlows !== 'object' || Array.isArray(incomingFlows) || Object.keys(incomingFlows).length > MAX_BOARDS) throw flowFailure('备份中的工作区映射无效。');
         const importedIds = new Map();
         let added = 0, renamed = 0;
@@ -219,7 +245,7 @@
           if (!value || typeof value !== 'object' || !Array.isArray(value.nodes) || !Array.isArray(value.edges)) continue;
           if (live(state).length >= MAX_BOARDS) throw Object.assign(new Error(`独立模式最多保存 ${MAX_BOARDS} 张画板，请先导出并清理。`), { code: 'BOARD_TOO_LARGE', status: 413 });
           const taken = state.records.some(record => record.board?.id === value.id);
-          if (importedIds.has(value.id) && Object.hasOwn(incomingFlows, value.id)) throw flowFailure('备份包含重复画板标识，无法确定工作区归属。');
+          if (importedIds.has(value.id) && (Object.hasOwn(incomingFlows, value.id) || Object.hasOwn(incomingNotes, value.id))) throw flowFailure('备份包含重复画板标识，无法确定工作区或批注归属。');
           const id = taken || !ID.test(String(value.id ?? '')) ? nowId('b') : String(value.id);
           if (taken) renamed++;
           const valueCopy = { ...value, schema: 1, id, title: String(value.title ?? '导入的画板').slice(0, 200), updated_at: stamp() };
@@ -233,6 +259,15 @@
           const workspace = await normalizedFlow(value);
           const revision = await digest(JSON.stringify({ workspace, nonce: nowId('flow'), at: stamp() }));
           state.flow_workspaces = { ...(state.flow_workspaces ?? {}), [importedIds.get(oldId)]: { workspace, revision } };
+        }
+        if (Object.keys(incomingNotes).length) {
+          const engine = options.annotationEngine || await window.PaperBoardFlowLoader?.load();
+          if (!engine?.normalizeBoardAnnotationRecord) throw flowFailure('批注校验器尚未加载，未导入任何内容。');
+          for (const [oldId, value] of Object.entries(incomingNotes)) {
+            if (!ID.test(oldId) || !importedIds.has(oldId)) throw flowFailure('备份批注没有对应的画板，未写入任何内容。');
+            const normalized = engine.normalizeBoardAnnotationRecord(value), revision = await digest(JSON.stringify({ normalized, nonce: nowId('note'), at: stamp() }));
+            state.board_annotations = { ...(state.board_annotations || {}), [importedIds.get(oldId)]: { value: normalized, revision } };
+          }
         }
         write(state);
         return { added, renamed };
@@ -263,11 +298,32 @@
     catch { document.getElementById('site-storage-status').textContent = '浏览器禁用了本地存储：这次改动无法保存，请改用导出文件。'; }
     const store = createStore(storage ?? { getItem: () => null, setItem: () => { throw new Error('storage disabled'); }, removeItem: () => {} });
     const boardList = document.getElementById('board-select');
-    const panel = api.create({
+    let noteContext = null, noteUI, panel;
+    const noteWindow = document.createElement('section'); noteWindow.className = 'board-standalone-notes'; noteWindow.hidden = true; noteWindow.setAttribute('aria-label', '画板与流程批注'); noteWindow.setAttribute('data-floating-min-layer', '1503');
+    const noteHeader = document.createElement('header'), noteTitle = document.createElement('strong'), noteClose = document.createElement('button'), noteBody = document.createElement('div');
+    noteTitle.textContent = '画板与流程批注'; noteClose.textContent = '×'; noteClose.type = 'button'; noteClose.setAttribute('aria-label', '关闭画板批注');
+    noteClose.addEventListener('click', () => { if (noteUI?.prepareLeave()) noteWindow.hidden = true; }); noteHeader.append(noteTitle, noteClose); noteWindow.append(noteHeader, noteBody); root.append(noteWindow);
+    const floatingNotes = window.PaperFloatingWindows?.attach(noteWindow);
+    const updateContext = value => { noteContext = value; if (value) noteUI?.updateTarget(value.target); };
+    const openNotes = async value => {
+      if (!value || !await panel.prepareLeave({ annotations: false })) return;
+      updateContext(value);
+      if (await noteUI?.open(value.target)) { noteWindow.hidden = false; floatingNotes?.refresh(); }
+    };
+    noteUI = window.PaperBoardAnnotations?.create({ root: noteBody, api: async (action, payload) => {
+      if (action === 'board_annotations_create' && (!await panel.prepareLeave({ annotations: false }) || noteContext?.id !== payload.id)) throw Error('画板尚未保存或已切换，批注文字仍保留。');
+      return store.handle({ action, ...payload });
+    }, boardId: () => noteContext?.id, target: () => noteContext?.target, toast, onFocus: async target => {
+      if (target.kind === 'flow') { if (!await panel.openFlow()) return; } else if (panel.isFlowOpen()) { if (!await panel.closeFlow()) return; }
+      panel.focusAnnotation(target);
+    } });
+    window.addEventListener('beforeunload', event => { if (noteUI?.hasDraft()) { event.preventDefault(); event.returnValue = ''; } });
+    panel = api.create({
       root,
       api: (action, payload) => store.handle({ action, ...payload }),
       toast,
       capabilities: { libraryPapers: false, conversation: false },
+      onCanvasContext: updateContext, onAnnotations: value => void openNotes(value), prepareAnnotationsLeave: () => noteUI?.prepareLeave() ?? true,
     });
 
     const download = (name, blob) => {

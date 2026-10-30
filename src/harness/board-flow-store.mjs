@@ -1,5 +1,9 @@
 /** 画板的独立 paperFlow 工作区；节点画板、源文件与引用快照各自保持原格式。 */
 
+import { createHash } from 'node:crypto'
+import { BOARD_SNAPSHOT_PREFIX } from './board-store.mjs'
+import { flowContextSelection, renderFlowContext } from './flow-context.mjs'
+
 export const BOARD_FLOW_KEY_PREFIX = 'board-flow:'
 export const BOARD_FLOW_LIMITS = Object.freeze({ workspaceBytes: 192 * 1024 })
 
@@ -65,5 +69,35 @@ export function createBoardFlowStore({ localState, boards }) {
     return { id, workspace: written.value, revision: written.revision }
   }
 
-  return { get, save }
+  /** 保存已核对版本的有界材料，复用画板引用的不可变快照与校验路径。 */
+  async function snapshot(input) {
+    const id = boardId(input.id)
+    revision(input.expected_revision)
+    const selection = flowContextSelection(input)
+    const record = await get(id)
+    if (!record.workspace) throw failure('尚无已保存的流程工作区。', 'BOARD_FLOW_TARGET_MISSING', 404)
+    if (record.revision !== input.expected_revision) throw failure('流程已在别处修改，请重新读取后再放入对话。', 'STATE_CONFLICT', 409)
+    const parent = await boards.read(id)
+    const outline = renderFlowContext(record.workspace, selection)
+    const content = {
+      schema: 1, board_id: id, board_title: parent.board.title, board_updated_at: parent.board.updated_at ?? null,
+      flow: { paper_id: selection.paper_id, flow_id: selection.flow_id, node_ids: outline.selected, revision: record.revision },
+      characters: outline.text.length, truncated: outline.truncated, omitted: outline.omitted,
+      partial: outline.partial, included: outline.included, totals: outline.totals, text: outline.text,
+    }
+    const snapshot_id = createHash('sha256').update(JSON.stringify(content)).digest('hex')
+    const key = BOARD_SNAPSHOT_PREFIX + snapshot_id
+    let stored = await localState.get(key)
+    if (!stored.value) {
+      try { stored = await localState.put(key, content, 0) }
+      catch (error) {
+        if (error?.code !== 'STATE_CONFLICT') throw error
+        stored = await localState.get(key)
+        if (!stored.value) throw error
+      }
+    }
+    return { ...stored.value, snapshot_id, frozen_at: stored.updated_at ?? null, label: '流程材料' }
+  }
+
+  return { get, save, snapshot }
 }
