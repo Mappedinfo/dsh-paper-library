@@ -182,7 +182,7 @@ const createRouting = function () {
   function bendFans(routes) {
     const groups = new Map();
     for (const r of [...routes].sort((a, b) => cmp(a.id, b.id))) {
-      if (!r.balance_terminals || r.points.length < 3) continue;
+      if (!r.balance_terminals || r.manual_route || r.points.length < 3) continue;
       for (const end of ["start", "end"]) {
         const side = r.sides[end],
           points = end === "start" ? r.points : [...r.points].reverse(),
@@ -267,7 +267,7 @@ const createRouting = function () {
     let best = cost();
     for (let sweep = 0; sweep < 3; sweep++)
       for (const row of sweep % 2 ? [...rows].reverse() : rows) {
-        if (row.nodes.length < 2) continue;
+        if (row.nodes.length < 2 || row.nodes.some((n) => n.fixed || n.node?.fixed || n.node?.layout?.optimizePosition === false)) continue;
         for (let i = 0; i < row.nodes.length - 1; i++) {
           [row.nodes[i], row.nodes[i + 1]] = [row.nodes[i + 1], row.nodes[i]];
           assign(row);
@@ -1183,6 +1183,7 @@ const createRouting = function () {
     for (const r of order) {
       if (r.points.length === 2 || (only && r.id !== only.id)) continue;
       for (const end of ["start", "end"]) {
+        if (r.manual_route || r.locked_ends?.[end]) continue;
         if (only?.end && only.end !== end) continue;
         const oriented = end === "start" ? r.points : [...r.points].reverse(),
           old = r.points,
@@ -1394,6 +1395,7 @@ const createRouting = function () {
     let best = null,
       bestQ = quality;
     for (const r of [...routes].sort((a, b) => cmp(a.id, b.id))) {
+      if (r.manual_route) continue;
       const old = r.points,
         rest = routes.filter((e) => e !== r).flatMap((e) => segments(e.points));
       for (const segment of segments(old)) {
@@ -1459,13 +1461,21 @@ const createRouting = function () {
     }
     return best;
   }
+  const nodeCandidateBudget = (layout) => layout.nodes.length > 40 ? 12 : 36;
   function nodeCandidates(layout, routes) {
     if (!layout.compact && !layout.flow_tree) return [];
-    const candidates = [];
-    for (const n of [...layout.nodes].sort((a, b) => a.y - b.y || cmp(a.id, b.id))) {
-      // Keep branch nodes in place unless their position is explicitly adjustable.
-      if (layout.flow_tree && !mayOptimizePosition(n.node)) continue;
+    const legacy = layout.conservative_node_search || layout.preserve_draft_geometry,
+      candidates = [], budget = legacy ? Infinity : nodeCandidateBudget(layout),
+      scores = new Map(routes.map((r) => [r.id, Math.max(0, r.points.length - 2)]));
+    if (!legacy) for (let i = 0; i < routes.length; i++) for (let j = i + 1; j < routes.length; j++) {
+      const q = pairEvents(routes[i], routes[j]), weight = q.crossings.length * 1000000 + q.overlap * 100;
+      if (weight) for (const r of [routes[i], routes[j]]) scores.set(r.id, scores.get(r.id) + weight);
+    }
+    const priority = (n) => routes.reduce((total, r) => total + (r.to === n ? 2 : r.from === n ? 1 : 0) * scores.get(r.id), 0);
+    for (const n of [...layout.nodes].sort((a, b) => (legacy ? 0 : priority(b) - priority(a)) || a.y - b.y || cmp(a.id, b.id))) {
+      if (legacy && layout.flow_tree && !mayOptimizePosition(n.node)) continue;
       if (
+        n.fixed || n.node?.fixed || n.node?.layout?.optimizePosition === false || (!legacy && n.compound) ||
         n.node?.swimlane ||
         ((!layout.flow_tree || layout.comparison_lanes) && n.node?.status === "shared") ||
         (layout.compact &&
@@ -1481,17 +1491,23 @@ const createRouting = function () {
       const adjacent = routes.filter((r) => r.from === n || r.to === n),
         neighbors = adjacent.map((r) => (r.from === n ? r.to : r.from)),
         lane = layout.comparison_lanes?.lanes.find((l) => l.id === n.node?.status),
-        lo = lane ? lane.left + n.width / 2 : 56 + n.width / 2,
-        hi = lane ? lane.right - n.width / 2 : layout.width - 56 - n.width / 2;
+        peers = layout.nodes.filter((p) => p !== n && Math.abs(n.y - p.y) < (n.height + p.height) / 2 + CLEAR),
+        lo = Math.max(lane ? lane.left + n.width / 2 : 56 + n.width / 2, ...(legacy ? [] : peers.filter((p) => p.x < n.x).map((p) => p.x + (n.width + p.width) / 2 + CLEAR))),
+        hi = Math.min(lane ? lane.right - n.width / 2 : layout.width - 56 - n.width / 2, ...(legacy ? [] : peers.filter((p) => p.x >= n.x).map((p) => p.x - (n.width + p.width) / 2 - CLEAR)));
+      if (!adjacent.length || adjacent.some((r) => r.manual_route || (r.from === n && r.locked_ends?.start) || (r.to === n && r.locked_ends?.end)) || (!legacy && adjacent.every((r) => r.points.length === 2 && !scores.get(r.id)))) continue;
       const parents = adjacent.filter((r) => r.to === n).map((r) => r.from.x);
-      if (layout.flow_tree && parents.length < 2) continue;
+      if (legacy && layout.flow_tree && parents.length < 2) continue;
       const ordered = [...parents].sort((a, b) => a - b),
         middle = ordered.length
           ? (ordered[Math.floor((ordered.length - 1) / 2)] +
               ordered[Math.floor(ordered.length / 2)]) /
             2
           : n.x,
-        anchors = unique([...neighbors.map((p) => p.x), middle]);
+        anchors = legacy
+          ? unique([...neighbors.map((p) => p.x), middle])
+          : unique([...neighbors.map((p) => p.x), middle, n.x - SPACE, n.x + SPACE,
+              n.x - Math.max(SPACE, n.width / 2 - SPACE), n.x + Math.max(SPACE, n.width / 2 - SPACE)])
+            .sort((a, b) => Math.abs(a - n.x) - Math.abs(b - n.x) || a - b).slice(0, 8);
       for (const x of anchors)
         if (
           Math.abs(x - n.x) > EPS &&
@@ -1505,8 +1521,48 @@ const createRouting = function () {
           )
         )
           candidates.push({ n, x });
+      if (candidates.length >= budget) break;
     }
-    return candidates;
+    return candidates.slice(0, budget);
+  }
+  // A downstream move can require both physical ports and the intermediate
+  // horizontal channel to change together. Bound the samples on each face and
+  // in the gap; the semantic endpoints remain the original edge endpoints.
+  function jointCorridors(r, path, routes, boxes) {
+    if (r.sides.start !== "bottom" || r.sides.end !== "top" || r.from.compound || r.to.compound || r.locked_ends?.start || r.locked_ends?.end) return [];
+    const sampleSlots = (end, otherX) => {
+      const node = end === "start" ? r.from : r.to,
+        side = end === "start" ? "bottom" : "top",
+        [lo, hi] = faceRange(node, side, 26),
+        existing = path[end === "start" ? 0 : path.length - 1],
+        available = slots(r, end, side, routes),
+        occupied = routes.flatMap((other) => ["start", "end"].filter((key) =>
+          other !== r && (key === "start" ? other.from : other.to) === node && other.sides[key] === side,
+        ).map((key) => other.points[key === "start" ? 0 : other.points.length - 1].x));
+      const otherNode = end === "start" ? r.to : r.from,
+        [otherLo, otherHi] = faceRange(otherNode, end === "start" ? "top" : "bottom", 26),
+        sharedLo = Math.max(lo, otherLo), sharedHi = Math.min(hi, otherHi),
+        shared = sharedLo <= sharedHi ? (sharedLo + sharedHi) / 2 : otherX;
+      for (const value of [lo + (hi - lo) / 4, lo + 3 * (hi - lo) / 4, otherX, shared])
+        if (value >= lo - EPS && value <= hi + EPS && occupied.every((x) => Math.abs(x - value) >= SPACE - EPS)) available.push(boundaryPoint(node, side, value));
+      const wishes = [existing.x, otherX, shared, lo + (hi - lo) / 4, lo + 3 * (hi - lo) / 4], result = [];
+      for (const wish of wishes) {
+        const best = [...available].sort((a, b) => Math.abs(a.x - wish) - Math.abs(b.x - wish) || a.x - b.x)[0];
+        if (best && !result.some((p) => distance(p, best) < EPS)) result.push(best);
+      }
+      return result.slice(0, 5);
+    };
+    const start = sampleSlots("start", path.at(-1).x), end = sampleSlots("end", path[0].x), result = [];
+    for (const s of start) for (const t of end) {
+      if (t.y - s.y < 2 * CLEAR) continue;
+      const ys = unique([(s.y + t.y) / 2, s.y + STUB, t.y - STUB, s.y + (t.y - s.y) / 4, s.y + 3 * (t.y - s.y) / 4]);
+      for (const y of ys) {
+        if (y <= s.y + EPS || y >= t.y - EPS) continue;
+        const candidate = simplify([s, { x: s.x, y }, { x: t.x, y }, t]);
+        if (valid(candidate, r, boxes) && outward(candidate, "bottom") && outward([...candidate].reverse(), "top")) result.push(candidate);
+      }
+    }
+    return result;
   }
   function nodeImprovement(layout, routes, quality, first = false) {
     let best = null,
@@ -1548,12 +1604,52 @@ const createRouting = function () {
               }
             }
             if (!chosen) {
-              feasible = false;
-              break;
+              if (!layout.conservative_node_search && !layout.preserve_draft_geometry && end === "end" && r.sides.start === "bottom" && side === "top" && !r.locked_ends?.start && !r.locked_ends?.end) {
+                const placeholder = [...oriented];
+                placeholder[0] = port;
+                chosen = placeholder.reverse();
+              } else {
+                feasible = false;
+                break;
+              }
             }
             p = chosen;
           }
         if (!feasible) break;
+        // Jointly reattach an upstream physical output after moving a downstream
+        // node. Keep semantic port identities unchanged; only geometry varies.
+        if (!layout.conservative_node_search && !layout.preserve_draft_geometry && r.to === n && r.from !== n && !r.manual_route && !r.locked_ends?.start) {
+          r.points = p;
+          const rest = routes.filter((e) => e !== r).flatMap((e) => segments(e.points)),
+            side = r.sides.start,
+            coord = side === "top" || side === "bottom" ? "x" : "y",
+            target = p.at(-1)[coord],
+            options = slots(r, "start", side, routes)
+              .sort((a, b) => Math.abs(a[coord] - target) - Math.abs(b[coord] - target) || a[coord] - b[coord])
+              .slice(0, 3);
+          let cost = valid(p, r, boxes) && outward(p, r.sides.start) && outward([...p].reverse(), r.sides.end) ? routeCost(p, rest) : Infinity, chosen = p;
+          for (const port of options) for (const path of grafts(p, port, side)) {
+            if (!valid(path, r, boxes) || !outward([...path].reverse(), r.sides.end)) continue;
+            const c = routeCost(path, rest);
+            if (c < cost - EPS) { chosen = path; cost = c; }
+          }
+          // Other incident routes not yet visited will move with the node;
+          // expose their translated endpoints while checking occupied slots.
+          const pending = affected.filter((other) => other !== r && other.points === saved.get(other)).map((other) => {
+            const old = other.points, points = old.map((point) => ({ ...point }));
+            if (other.from === n) points[0].x += dx;
+            if (other.to === n) points[points.length - 1].x += dx;
+            other.points = points;
+            return [other, old];
+          });
+          for (const path of jointCorridors(r, p, routes, boxes)) {
+            const c = routeCost(path, rest);
+            if (c < cost - EPS) { chosen = path; cost = c; }
+          }
+          for (const [other, old] of pending) other.points = old;
+          if (!Number.isFinite(cost)) { feasible = false; break; }
+          p = chosen;
+        }
         r.points = p;
       }
       if (feasible) {
@@ -1596,6 +1692,8 @@ const createRouting = function () {
         points: r.members[0].points.map((p) => ({ ...p })),
         sides: { ...r.members[0].sides },
         axis: r.members[0].axis,
+        manual_route: r.members[0].manual_route,
+        locked_ends: r.members[0].locked_ends,
         balance_terminals: !!layout.flow_tree,
       }))
       .map((r) => ({ ...r, start: r.points[0], end: r.points.at(-1) }));
@@ -1758,6 +1856,7 @@ const createRouting = function () {
         sweep_limit: sweepLimit,
         direct_repair_budget: routes.length,
         fan_repair_budget: routes.length,
+        node_candidate_budget_per_sweep: layout.conservative_node_search || layout.preserve_draft_geometry ? null : nodeCandidateBudget(layout),
         changes,
         remaining: lint,
       },
@@ -1847,6 +1946,7 @@ const createRouting = function () {
       changes = [];
     for (const n of [...layout.nodes].sort((a, b) => a.y - b.y || cmp(a.id, b.id))) {
       if (
+        n.fixed || n.node?.fixed || n.node?.layout?.optimizePosition === false ||
         n.node?.swimlane ||
         n.node?.status === "shared" ||
         layout.nodes.some(
@@ -1906,6 +2006,8 @@ const createRouting = function () {
         edge.points.length < 3 ||
         edge.from.compound ||
         edge.to.compound ||
+        edge.to.fixed || edge.to.node?.fixed || edge.to.node?.layout?.optimizePosition === false ||
+        edge.to.node?.swimlane || layout.comparison_lanes ||
         edge.from.y >= edge.to.y
       )
         continue;
@@ -2006,6 +2108,7 @@ const createRouting = function () {
       if (f.error <= f.tolerance) continue;
       const n = layout.nodes.find((n) => n.id === f.node),
         lane = layout.comparison_lanes?.lanes.find((l) => l.id === n.node?.status);
+      if (n.fixed || n.node?.fixed || n.node?.layout?.optimizePosition === false || n.node?.swimlane || n.compound || n.node?.status === "shared") continue;
       let lo = (lane?.left || 56) + n.width / 2,
         hi = (lane?.right || layout.width - 56) - n.width / 2;
       for (const p of layout.nodes.filter(
@@ -2087,6 +2190,10 @@ const createRouting = function () {
       : [];
   }
   function route(layout, graph) {
+    layout.preserve_draft_geometry = !!graph.preserve_draft_geometry;
+    // Finish the existing routing lifecycle before exploring the wider local
+    // neighborhood. No later reroute may invalidate the baseline comparison.
+    layout.conservative_node_search = true;
     const alignments = alignCompactRows(layout);
     routeOnce(layout, graph);
     if (layout.nodes.length <= 25) {
@@ -2109,6 +2216,38 @@ const createRouting = function () {
     const spines = alignHintedSpines(layout, graph);
     const fans = balanceFans(layout, graph);
     layout.routing.node_alignments = [...alignments, ...spines, ...fans];
+    layout.conservative_node_search = false;
+    if (!layout.preserve_draft_geometry && (layout.compact || layout.flow_tree)) {
+      const routes = qualityRoutes(layout, graph), before = analyze(routes),
+        positions = layout.nodes.map((node) => ({ node, x: node.x })), changes = [];
+      let after = before, accepted = false;
+      try {
+        for (let i = 0; i < 3; i++) {
+          const change = nodeImprovement(layout, routes, after);
+          if (!change) break;
+          applyNode(layout, routes, change);
+          after = analyze(routes);
+          changes.push(issue({ ...change, after }));
+        }
+        accepted = changes.length > 0 && improves(after, before);
+      } catch {
+        accepted = false;
+      }
+      if (accepted) {
+        syncRoutes(layout, routes);
+        layout.routing = { ...layout.routing, ...after };
+      } else {
+        for (const saved of positions) saved.node.x = saved.x;
+        after = before;
+      }
+      layout.routing.post_node_search = {
+        accepted, candidate_budget_per_pass: nodeCandidateBudget(layout), pass_limit: 3,
+        before: { crossings: before.crossings, close_parallel_length: before.close_parallel_length, bends: before.bends, length: before.length },
+        after: { crossings: after.crossings, close_parallel_length: after.close_parallel_length, bends: after.bends, length: after.length },
+        changes: accepted ? changes : [],
+      };
+    } else layout.routing.post_node_search = { accepted: false, skipped: layout.preserve_draft_geometry ? "draft" : "layout" };
+    delete layout.conservative_node_search;
     return layout;
   }
   function bridges(routes, nodes = []) {
@@ -2218,6 +2357,7 @@ const createRouting = function () {
     alignmentLint,
     qualityScore,
     directImprovement,
+    jointCorridors,
     bridges,
     path,
     segments,

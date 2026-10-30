@@ -210,10 +210,16 @@ export function mergeEdit(draft, patch) {
 export function previewEdit(layout, patch, router) {
   const draft = emptyDraft();
   for (const edge of layout.edges)
-    if (edge.manual_route || (edge.manual_style && edge.manual_style !== "auto"))
+    if (edge.manual_route || (edge.manual_style && edge.manual_style !== "auto") || edge.locked_ends?.start || edge.locked_ends?.end)
       draft.edges[edge.id] = {
         line: edge.manual_style,
         ...(edge.manual_route ? { route: edge.manual_route } : {}),
+        ...(edge.locked_ends?.start
+          ? { start: describeAnchor(edge.from, connectionPoint(edge, "start"), edge.sides.start) }
+          : {}),
+        ...(edge.locked_ends?.end
+          ? { end: describeAnchor(edge.to, connectionPoint(edge, "end"), edge.sides.end) }
+          : {}),
       };
   mergeEdit(draft, patch);
   return applyDraft(copy(layout), draft, router);

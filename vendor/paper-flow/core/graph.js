@@ -1,6 +1,6 @@
 import dagre from "./dagre.min.js";
 import { productPresentation } from "./products.js";
-import { applyDraft } from "./editing.js";
+import { applyDraft, hasDraft } from "./editing.js";
 import { nodeKind as defaultKind, nodeShape as defaultShape } from "./nodeKinds.js";
 import { layoutTrunks } from "./trunks.js";
 import routing from "./routing.js";
@@ -1341,6 +1341,7 @@ export const createGraph = function (dagre, R, S, profile = {}) {
         presentation_layout: graph.presentation_layout,
         collapsed: !!graph.collapsed,
         comparison_layout: graph.comparison_layout,
+        preserve_draft_geometry: graph.preserve_draft_geometry,
         stage_heights: graph.stage_heights,
         swimlanes: graph.swimlanes,
         routeEdges,
@@ -1353,6 +1354,8 @@ export const createGraph = function (dagre, R, S, profile = {}) {
           n.logical_common,
           n.comparison_parts,
           n.swimlane,
+          n.fixed,
+          n.layout,
           n.presentation_members,
           n.presentation_note,
         ]),
@@ -1366,6 +1369,7 @@ export const createGraph = function (dagre, R, S, profile = {}) {
           e.to_member,
           e.to_members,
           e.presentation_edges,
+          e.layout,
         ]),
       });
     if (layoutCache.has(key)) {
@@ -1476,24 +1480,28 @@ export const createGraph = function (dagre, R, S, profile = {}) {
       ...(result.routing.node_alignments || []),
       ...(result.routing.quality_optimizer?.changes || []),
       ...(result.routing.quality_optimizer?.remaining || []),
+      ...(result.routing.post_node_search?.changes || []),
     ])
       for (const k of ["from_x", "to_x"]) if (Number.isFinite(change[k])) change[k] += gutter;
     result.width += gutter;
     result.gutter = gutter;
+    const endpoints = new Map(result.nodes.map((n) => [n.id, n]));
+    for (const edge of result.edges) {
+      edge.from = endpoints.get(split(edge.edge.from)[0]);
+      edge.to = endpoints.get(split(edge.edge.to)[0]);
+    }
     connectChildren(result, R);
     if (layoutCache.size > 180) layoutCache.clear();
     layoutCache.set(key, clone(result));
     return result;
   }
   function layout(graph, routeEdges = true) {
-    return applyDraft(
-      automaticLayout(
-        { ...graph, presentation_edits: undefined, presentation_editor_lane: undefined },
-        routeEdges,
-      ),
-      graph.presentation_edits,
-      R,
+    const result = automaticLayout(
+      { ...graph, preserve_draft_geometry: !!hasDraft(graph.presentation_edits), presentation_edits: undefined, presentation_editor_lane: undefined },
+      routeEdges,
     );
+    // Stage measurement has no routed terminals to which an edit can attach.
+    return routeEdges ? applyDraft(result, graph.presentation_edits, R) : result;
   }
   const colors = {
     shared: { stroke: "#9c6b06", fill: "#fffdf5" },
