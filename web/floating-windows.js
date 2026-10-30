@@ -8,6 +8,20 @@ window.PaperFloatingWindows = (() => {
   const expanded = element => element.classList.contains('is-expanded') || document.fullscreenElement === element;
   const headerOf = element => element.querySelector(':scope > header,:scope > form > header,:scope > .dialog-heading,:scope > form > .dialog-heading,:scope > .summary-dialog-head,:scope > .dialog-header,:scope > .modal-header,:scope > h2,:scope > h3');
   const embedded = element => element.tagName === 'DIALOG' && Boolean(element.parentElement?.closest(selector));
+  // Small menus escape scrolling toolbars but stay below their own trigger.
+  // Feature owners still decide when a menu opens, closes or receives focus.
+  function placeBelow(trigger, panel) {
+    if (!trigger || !panel) return;
+    const anchor = trigger.getBoundingClientRect(), view = trigger.ownerDocument?.defaultView || window;
+    const gutter = 8, top = (anchor.bottom ?? anchor.top + anchor.height) + 5;
+    const width = Math.min(panel.getBoundingClientRect().width, Math.max(0, view.innerWidth - gutter * 2));
+    panel.style.position = 'fixed';
+    panel.style.top = `${top}px`;
+    panel.style.left = `${Math.max(gutter, Math.min(anchor.left, view.innerWidth - width - gutter))}px`;
+    panel.style.right = 'auto';
+    panel.style.maxWidth = `${Math.max(0, view.innerWidth - gutter * 2)}px`;
+    panel.style.maxHeight = `${Math.max(0, view.innerHeight - top - gutter)}px`;
+  }
   function attach(element, options = {}) {
     if (!element || embedded(element)) return null;
     if (states.has(element)) return states.get(element).api;
@@ -101,7 +115,7 @@ window.PaperFloatingWindows = (() => {
     if (!started) { started = true; observer = new MutationObserver(scan); observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden','open','class'] }); window.addEventListener('resize', viewportChanged); document.addEventListener('fullscreenchange', scan); scan(); }
     return { dispose() { observer?.disconnect(); window.removeEventListener('resize', viewportChanged); document.removeEventListener('fullscreenchange', scan); for (const state of [...states.values()]) state.api.dispose(); started = false; } };
   }
-  return { start, attach, reset(element) { states.get(element)?.api.reset(); } };
+  return { start, attach, placeBelow, reset(element) { states.get(element)?.api.reset(); } };
 })();
 if (document.body?.hasAttribute('data-floating-windows')) {
   const floating = window.PaperFloatingWindows.start();

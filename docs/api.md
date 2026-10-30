@@ -505,7 +505,7 @@ An independent deployment without a DSH migration marker uses local disk prefere
 
 ## 画板论文流程工作区
 
-文献／画板／写作目录及双向关联浏览使用独立的只读 `workspace_catalog`、`workspace_related`，分页、关系来源及有限扫描契约见[内容导航](workspace-navigation.md)。它们不修改画板、源文件、阅读项目或编译版本。
+文献／画板／写作／阅读项目目录及双向关联浏览使用独立的只读 `workspace_catalog`、`workspace_related`，分页、关系来源及有限扫描契约见[内容导航](workspace-navigation.md)。它们不修改画板、源文件、阅读项目或编译版本。
 
 `board_flow_snapshot {id,paper_id,flow_id,node_id? 或 node_ids?,expected_revision,max_characters?}` 只读出已保存且修订一致的源流程，生成不可变 `board-ref:` 材料。省略节点为整图；节点列表为原始节点标识，最多 100 个，沿显式关系提取全部可达上下游，环安全且不自动加入旁支。预算 500–24,000 字符，返回现有快照字段及 `flow`、`totals`、`included`、`partial`、`omitted`；截断声明不算完整覆盖。复用 `board_snapshot_get` 验证与既有 DSH 引用预算，读者入口不发送或调用模型。
 

@@ -28,8 +28,9 @@ function fixture(overrides = {}) {
     if (overrides.request) { const result = await overrides.request(input); if (result !== undefined) return result }
     if (input.action === 'get') { const paper = papers.find(item => item.id === input.id); if (!paper) throw Error('missing paper'); return plain(paper) }
     if (input.action === 'project_for_paper') return { projects: input.paper_id === 'p-main' ? plain(projects) : [], total: input.paper_id === 'p-main' ? projects.length : 0 }
-    if (input.action === 'project_list') return { projects: plain(projects), total: projects.length }
-    if (input.action === 'resource_list') return { items: plain(papers), total: papers.length }
+    if (input.action === 'project_get') { const project = projects.find(item => item.id === input.id); if (!project) throw Error('missing project'); return { project: plain(project), papers: plain(papers), total: papers.length } }
+    if (input.action === 'project_list') { const candidates = projects.filter(item => !input.query || item.title.includes(input.query)); return { projects: plain(candidates.slice(input.offset || 0, (input.offset || 0) + input.limit)), total: candidates.length } }
+    if (input.action === 'resource_list') return { items: plain(papers.slice(input.offset || 0, (input.offset || 0) + input.limit)), total: papers.length }
     if (input.action === 'latex_project_list') {
       const candidates = latex.filter(value => !input.query || value.title.includes(input.query))
       return { projects: plain(candidates.slice(input.offset, input.offset + input.limit)), total: candidates.length, truncated: input.offset + input.limit < candidates.length }
@@ -62,6 +63,7 @@ test('paper children use only explicit board bindings or explicit shared reading
   assert.match(via.relation, /通过阅读项目/)
   assert.equal(got.groups.latex.items.find(item => item.id === 'l-missing').missing, true)
   assert.equal(got.groups.paper.total, 0)
+  assert.deepEqual(got.groups.project.items.map(item => item.id), ['reading'])
   assert.deepEqual(plain({ papers: f.papers, boards: f.boardData, latex: f.latex }), before)
 })
 
@@ -117,4 +119,43 @@ test('input validation and cancellation fail before invoking metadata operations
   const abort = new AbortController(); abort.abort()
   await assert.rejects(f.service.handle({ action: 'workspace_related', kind: 'board', id: 'b-direct' }, { signal: abort.signal }), error => error.name === 'AbortError')
   assert.equal(f.calls.length, 0); assert.equal(f.reads.length, 0)
+})
+
+
+test('reading-project catalog uses native search and paging and separates study from writing projects', async () => {
+  const f = fixture()
+  f.projects.push(...Array.from({length: 25}, (_, i) => ({id: `reading-${i}`, title: `合成主题${i}`, description: '按主题阅读', paper_count: i})))
+  const got = await f.service.handle({action:'workspace_catalog',kind:'project',query:'合成主题',offset:20,limit:20})
+  assert.equal(got.total,25); assert.equal(got.items.length,5); assert.equal(got.items[0].kind,'project')
+  assert.equal(got.items[0].paper_count,20); assert.equal(got.items[0].description,'按主题阅读')
+  assert.deepEqual(f.calls,[{action:'project_list',query:'合成主题',include_archived:false,offset:20,limit:20}])
+  assert.deepEqual(f.reads,[])
+})
+
+test('reading-project contents paginate every declared member and reciprocate only explicit links', async () => {
+  const f = fixture()
+  f.papers.push(...Array.from({length: 50}, (_, i) => ({id:`member-${i}`,title:`合成成员${i}`,resource_kind:'paper'})))
+  const got = await f.service.handle({action:'workspace_related',kind:'project',id:'reading',group_kind:'paper',offset:40,limit:20})
+  assert.equal(got.focus.kind,'project'); assert.equal(got.focus.title,'合成阅读项目')
+  assert.equal(got.groups.paper.total,52); assert.equal(got.groups.paper.offset,40); assert.equal(got.groups.paper.items.length,12)
+  assert.equal(got.groups.paper.has_more,false); assert.equal(got.groups.paper.truncated,false)
+  assert.equal(got.groups.paper.items[0].id,'member-38')
+  assert.deepEqual(got.groups.board.items.map(item=>item.id).sort(),['b-direct','b-project'])
+  assert.deepEqual(got.groups.latex.items.map(item=>item.id).sort(),['l-main','l-missing'])
+  assert.equal(got.groups.project.items.length,0)
+  assert.deepEqual(f.calls.find(call=>call.action==='resource_list'),{action:'resource_list',kind:'paper',project:'reading',offset:40,limit:20})
+  assert.equal(f.calls.some(call=>/write|compile|pdf|tree/.test(call.action)),false)
+  const board = await f.service.handle({action:'workspace_related',kind:'board',id:'b-direct'})
+  assert.deepEqual(board.groups.project.items.map(item=>item.id),['reading'])
+  const latex = await f.service.handle({action:'workspace_related',kind:'latex',id:'l-main'})
+  assert.deepEqual(latex.groups.project.items.map(item=>item.id),['reading'])
+})
+
+test('unavailable reading-project metadata does not invent members or expose the underlying error', async () => {
+  const f = fixture({request: input=>{if(input.action==='project_get')throw Error('private filesystem source')}})
+  const got = await f.service.handle({action:'workspace_related',kind:'project',id:'missing'})
+  assert.equal(got.focus.missing,true); assert.equal(got.groups.paper.total,null)
+  assert.equal(got.groups.paper.items.length,0); assert.equal(got.groups.board.items.length,0)
+  assert.equal(JSON.stringify(got).includes('private filesystem source'),false)
+  assert.equal(f.calls.some(call=>call.action==='resource_list'),false)
 })

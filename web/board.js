@@ -876,8 +876,12 @@
     /** The toolbar's menus: one open at a time, closed by Escape or a click outside. */
     const MENU_IDS = Object.freeze([['board-files-open', 'board-files'], ['board-layout-open', 'board-layout-panel'], ['board-project-open', 'board-project-panel'], ['board-menu-open', 'board-menu']]);
     const menuEntries = () => MENU_IDS.map(([trigger, panel]) => ({ trigger: $(trigger), panel: $(panel) })).filter(entry => entry.trigger && entry.panel);
+    function positionMenus() {
+      for (const { trigger, panel } of menuEntries()) if (panel.classList.contains('is-open')) window.PaperFloatingWindows?.placeBelow(trigger, panel);
+    }
     function syncMenus() {
       for (const { trigger, panel } of menuEntries()) trigger.setAttribute('aria-expanded', String(panel.classList.contains('is-open')));
+      positionMenus();
     }
     function closeMenus(keep) {
       for (const { panel } of menuEntries()) if (panel !== keep) panel.classList.remove('is-open');
@@ -1092,6 +1096,10 @@
     function onKeyDown(event) {
       if (!open || flowUI?.isOpen()) return;
       const target = event.target;
+      if (event.key === 'Escape') {
+        const menu = menuEntries().find(({ panel }) => panel.classList.contains('is-open'));
+        if (menu) { event.preventDefault(); closeMenus(null); menu.trigger.focus(); return; }
+      }
       const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
       if (event.key === ' ') spaceDown = true;
       if (typing) return;
@@ -1382,6 +1390,7 @@
     function resize() {
       if (!open) return;
       applyView();
+      positionMenus();
     }
 
     async function createBoard() {
@@ -1488,6 +1497,7 @@
       button.setAttribute('aria-pressed', String(focused));
       button.textContent = focused ? '退出全屏 ⤡' : '全屏 ⤢';
       button.title = focused ? '退出浏览器全屏，恢复进入前的窗口布局' : '在专注布局中进入浏览器全屏；Esc 退出并恢复原布局';
+      positionMenus();
     }
 
     // ── Presentation, automatic layout and the readable source ────────────────────
@@ -2190,6 +2200,8 @@
         });
       }
       doc.addEventListener('click', event => { if (!event.target?.closest?.('.board-bar')) closeMenus($('board-project-panel')); });
+      doc.addEventListener('scroll', positionMenus, true);
+      doc.defaultView?.addEventListener('resize', positionMenus);
       $('board-association-close')?.addEventListener('click', () => { closeMenus(null); $('board-project-open')?.focus?.(); });
       for (const kind of Object.keys(LINKS)) $('board-association-' + kind)?.addEventListener('click', () => void searchAssociations({ kind }));
       $('board-association-search')?.addEventListener('click', () => void searchAssociations());
@@ -2293,6 +2305,8 @@
         doc.removeEventListener('keydown', onKeyDown);
         doc.removeEventListener('keyup', onKeyUp);
         doc.removeEventListener('fullscreenchange', syncFullscreen);
+        doc.removeEventListener('scroll', positionMenus, true);
+        doc.defaultView?.removeEventListener('resize', positionMenus);
       },
     };
   }

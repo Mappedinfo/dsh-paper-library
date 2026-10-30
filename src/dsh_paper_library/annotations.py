@@ -60,6 +60,26 @@ def install_helpers(**helpers):
 
 class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
     @staticmethod
+    def _readable_underline(doc, annot):
+        """加粗本插件下划线的标准外观，保留原生 QuadPoints 与文字范围。"""
+        if annot.type[0] != 9 or not annot.info.get("subject", "").startswith("paper-library:"):
+            return
+        # MuPDF does not accept set_border for text markup. Its generated
+        # underline appearance uses a font-height-dependent `w` operator;
+        # adjust that operator in the standard /AP/N stream instead.
+        kind, value = doc.xref_get_key(annot.xref, "AP/N")
+        if kind != "xref":
+            return
+        appearance = int(value.split()[0])
+        stream = doc.xref_stream(appearance)
+        def width(match):
+            current = float(match[1])
+            return f"{max(current, min(3.0, max(1.6, current * 1.8))):.4f} w".encode("ascii")
+        updated = re.sub(rb"(?m)(?<!\S)(\d*\.?\d+)\s+w(?=\s|$)", width, stream)
+        if updated != stream:
+            doc.update_stream(appearance, updated)
+
+    @staticmethod
     def _ink_paths(paths, page):
         import pymupdf as fitz
         if not isinstance(paths, list) or not 1 <= len(paths) <= MAX_INK_STROKES:
@@ -507,6 +527,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         annot.set_info(content=comment, title=author[:200], subject="paper-library:" + json.dumps(payload, ensure_ascii=False), creationDate="D:" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%SZ"), modDate="D:" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%SZ"))
         annot.set_colors(stroke=rgb)
         annot.update()
+        self._readable_underline(doc, annot)
         annotation_id = annotation_id or uuid.uuid4().hex
         doc.xref_set_key(annot.xref, "NM", fitz.get_pdf_str(annotation_id))
         if linked_parent is not None:
@@ -599,6 +620,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 raise ValueError("Use handwriting_save to update a handwritten note with its version and original board")
             annot.set_info(content=comment, modDate="D:" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%SZ"))
             annot.update()
+            self._readable_underline(doc, annot)
             return {"annotation": self._annotation(page, annot)}
         with self.lock():
             return self._write_pdf(id, operation)

@@ -20,7 +20,9 @@ function fixture(options = {}) {
   home.parentNode = { id: 'home-parent' }; home.after = node => { calls.push('nav:home'); node.parentNode = home.parentNode }; area.parentNode = home.parentNode
   const state = { active: options.active ?? { id: 'paper-source' }, project: 'old-reading-project' }
   const context = {
-    workspaceNavigationTransition: false, restoringReader: false, restoringInkDraft: false, inkSaveBusy: false, state,
+    workspaceNavigationTransition: false, restoringReader: false, restoringInkDraft: false, inkSaveBusy: false, annotationSaveBusy: options.annotationBusy || false, state,
+    dismissAnnotation: async () => options.dismissAnnotation !== false,
+    selectProject: async id => { calls.push(`project:select:${id}`); state.project = id },
     $: id => elements.get(id), document: { fullscreenElement: options.fullscreen ? {} : null, exitFullscreen: async () => { calls.push('fullscreen:exit') }, querySelector: selector => selector === '.library-pane' ? library : selector === '#latex-view .latex-topbar' ? writing : null },
     toast: message => alerts.push(message), pdfReader: { isInking: () => options.inking || false }, handwritingUI: { isOpen: () => false },
     linkedHandwritingUI: { session: () => options.linked ? { id: 'linked' } : null, finish: async () => { calls.push('ink:finish'); return options.finishInk !== false } },
@@ -31,7 +33,7 @@ function fixture(options = {}) {
     workbenchUI: { setTable: value => tables.push(value) }, readingPanels: { showLibrary: () => visible.push('library') },
     workspaceNavigationUI: { state: () => ({ current: options.current ?? null }), setCurrent: (...args) => contexts.push(plain(args)) },
     libraryLatexVersions: { clear: () => calls.push('versions:clear') },
-    api: async (action, args) => { calls.push({ action, ...plain(args) }); if (options.apiFailure) throw Error('synthetic missing target'); if (options.api) return options.api(action, args); const record = { id: args.id }; return action === 'board_get' ? { board: record } : action === 'latex_project_get' ? { project: record } : record },
+    api: async (action, args) => { calls.push({ action, ...plain(args) }); if (options.apiFailure) throw Error('synthetic missing target'); if (options.api) return options.api(action, args); const record = { id: args.id }; return action === 'board_get' ? { board: record } : ['latex_project_get','project_get'].includes(action) ? { project: record } : record },
     openPaper: async id => { calls.push(`paper:open:${id}`); if (options.openFailure) return; state.active = { id: options.wrongId ? 'wrong-target' : id }; return 7 },
     boardUI: { isOpen: () => boardOpen, current: () => boardCurrent, open: async input => { calls.push({ boardOpen: plain(input) }); if (options.openFailure) return false; boardOpen = true; boardCurrent = { kind: 'board', id: options.wrongId ? 'wrong-target' : input.id }; return true }, close: async () => { calls.push('board:close'); if (options.boardConflict) return false; boardOpen = false; return true } },
     latexUI: { isOpen: () => latexOpen, current: () => latexCurrent, open: async id => { calls.push(`latex:open:${id}`); if (options.openFailure) return false; latexOpen = true; latexCurrent = { kind: 'latex', id: options.wrongId ? 'wrong-target' : id }; return true }, close: async () => { calls.push('latex:close'); if (!options.latexConflict) latexOpen = false } },
@@ -87,6 +89,12 @@ test('same-kind preferred selection stays in its writer and success requires the
 })
 
 test('reader preflight preserves ink sessions and refuses failed draft persistence before navigating', async () => {
+  const saving = fixture({ annotationBusy: true })
+  assert.equal(await saving.context.prepareWorkspaceNavigation(), false)
+  assert.deepEqual(saving.calls, [])
+  const unsaved = fixture({ dismissAnnotation: false })
+  assert.equal(await unsaved.context.prepareWorkspaceNavigation(), false)
+  assert.deepEqual(unsaved.calls, [])
   const ink = fixture({ inking: true })
   assert.equal(await ink.context.prepareWorkspaceNavigation(), false)
   assert.deepEqual(ink.calls, [])
@@ -101,6 +109,18 @@ test('reader preflight preserves ink sessions and refuses failed draft persisten
   const refused = fixture({ publish: false })
   assert.equal(await refused.context.prepareWorkspaceNavigation(), false)
   assert.deepEqual(refused.calls, ['reader:publish'])
+})
+
+test('reading projects open their exact membership scope and missing projects retain the source surface', async () => {
+  const f = fixture({ boardOpen: true })
+  assert.equal(await f.context.openWorkspaceTarget({ kind: 'project', id: 'reading-topic' }), true)
+  assert.equal(f.state.project, 'reading-topic')
+  assert.deepEqual(f.calls[0], { action: 'project_get', id: 'reading-topic' })
+  assert.ok(f.calls.indexOf('board:close') < f.calls.indexOf('project:select:reading-topic'))
+  assert.deepEqual(f.tables, [true])
+  const missing = fixture({ boardOpen: true, api: () => ({ project: { id: 'another' } }) })
+  await assert.rejects(missing.context.openWorkspaceTarget({ kind: 'project', id: 'missing' }))
+  assert.equal(missing.calls.includes('board:close'), false)
 })
 
 test('context callbacks avoid feedback loops and blank writers keep their category without closing', () => {

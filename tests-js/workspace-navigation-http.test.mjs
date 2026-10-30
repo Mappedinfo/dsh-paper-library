@@ -44,6 +44,7 @@ test('HTTP real metadata projection retains reciprocal links without modifying b
   const service = createWorkspaceNavigation({ boards: f.boards, request: async (input, signal) => {
     calls.push(input); assert.equal(signal instanceof AbortSignal, true)
     if (input.action === 'get') return { id: 'synthetic-paper', title: '合成文献', resource_kind: 'paper' }
+    if (input.action === 'project_get') return { project: { id: 'synthetic-reading', title: '合成阅读项目' }, papers: [], total: 1 }
     if (input.action === 'project_for_paper' || input.action === 'project_list') return { projects: [{ id: 'synthetic-reading', title: '合成阅读项目' }], total: 1 }
     if (input.action === 'resource_list') return { items: [{ id: 'synthetic-paper', title: '合成文献', resource_kind: 'paper' }], total: 1 }
     if (input.action === 'latex_project_list') return { projects: [{ id: 'synthetic-latex', title: '合成写作项目', reading_project_id: 'synthetic-reading', exists: true, root: '/synthetic/private-root' }], total: 1 }
@@ -65,6 +66,10 @@ test('HTTP real metadata projection retains reciprocal links without modifying b
   const latex = await call({ action: 'workspace_related', kind: 'latex', id: 'synthetic-latex' })
   assert.equal(latex.groups.paper.items[0].id, 'synthetic-paper')
   assert.equal(latex.groups.board.items[0].id, created.board.id)
+  const reading = await call({ action: 'workspace_related', kind: 'project', id: 'synthetic-reading' })
+  assert.equal(reading.groups.paper.items[0].id, 'synthetic-paper'); assert.equal(reading.groups.board.items[0].id, created.board.id); assert.equal(reading.groups.latex.items[0].id, 'synthetic-latex')
+  const projects = await call({ action: 'workspace_catalog', kind: 'project', limit: 20, offset: 0 })
+  assert.equal(projects.items[0].kind, 'project'); assert.equal(projects.total, 1)
   assert.equal(JSON.stringify([paper, board, latex]).includes('/synthetic/private-root'), false)
   const unchanged = await f.boards.read(created.board.id)
   assert.equal(unchanged.revision, created.revision); assert.deepEqual(unchanged.board, created.board)

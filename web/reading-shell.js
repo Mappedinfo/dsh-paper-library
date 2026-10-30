@@ -15,23 +15,36 @@ window.PaperReadingShell = (() => {
     auto: { select: '拖选文字即按当前颜色直接着色，之后可在批注栏提问。', highlight: '拖选文字即高亮保存，不再弹出对话框。', underline: '拖选文字即保存下划线，不再弹出对话框。', strikeout: '拖选文字即保存删除线，不再弹出对话框。' },
     ask: { select: '拖选文字，可添加批注或放入论文对话。' },
   };
+  function placeMenu(disclosure, panel) {
+    if (!disclosure?.open || !panel) return;
+    window.PaperFloatingWindows?.placeBelow(disclosure.querySelector('summary'), panel);
+  }
   function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence, diagnostics, saveInk, returnToInk, beforeToolChange}) {
     const $ = id => document.getElementById(id);
     const node = (tag, text, className) => { const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n; };
     const button = (id, text, action) => {const n=node('button',text,'button subtle');n.type='button';n.id=id;n.addEventListener('click',action);return n;};
     const top=document.querySelector('.topbar'), workspace=document.querySelector('.workspace');
+    const menus=[];
+    const placeMenus=()=>{for(const {disclosure,panel} of menus)placeMenu(disclosure,panel);};
+    const bindMenu=(disclosure,panel)=>{
+      if(!disclosure||!panel)return;
+      const toggle=()=>{if(!disclosure.open)return;for(const other of menus)if(other.disclosure!==disclosure)other.disclosure.open=false;placeMenu(disclosure,panel);};
+      disclosure.addEventListener('toggle',toggle);menus.push({disclosure,panel,toggle});
+    };
     let context='reader', tool='select', color='#ffdb66', inkColor='#2455a4', inkWidth=2, mode='ask', markup='highlight', focused=false, saveLayoutTimer=null, penOnly=false;
     let inkBusy=false, inkError='', inkTitle='', linkedSession=null, linkedBusy=false, finishLinked=null, inkRecords=[];
     const applyTool=()=>reader()?.setTool(tool,tool==='ink'?{color:inkColor,width:inkWidth}:color);
     const ribbon=node('nav',null,'reader-ribbon');ribbon.setAttribute('aria-label','文献工作区');
     const projectActions=document.querySelector('.project-actions');
     projectActions?.addEventListener('click',event=>{if(event.target.closest('.project-actions-panel button'))projectActions.open=false;});
+    bindMenu(projectActions,$('project-actions-panel'));
     const library=button('workspace-library','库',()=>{leaveFocus();$('catalog-expand').click();});
     library.title='展开或收起文献表格';ribbon.append(library);
     const tabs=document.querySelector('.tabs');for(const tab of [...tabs.children])ribbon.append(tab);tabs.remove();
     const citations=node('details',null,'citation-tools');citations.id='citation-tools';
     citations.append(node('summary','引用与导出'));
     citations.append($('toolbar-actions'));$('paper-tools').append(citations);
+    bindMenu(citations,$('toolbar-actions'));
     citations.addEventListener('toggle',()=>{if(citations.open)status('对当前论文复制引用，或导出文件与已保存的批注。');});
     // Metadata and chat stay within reading; graph is the only other paper surface.
     $('metadata-open').textContent='资料详情';$('metadata-open').title='查看与编辑文献资料详情';
@@ -73,9 +86,8 @@ window.PaperReadingShell = (() => {
     if(diagnostics){const exportLog=button('reader-ink-diagnostics','导出手写诊断',async()=>{exportLog.disabled=true;try{const report=await diagnostics.exportReport(),url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='handwriting-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('手写诊断已导出，包含最近事件与笔数，不含正文或笔迹坐标。');}catch(error){toast(error.message,true);}finally{exportLog.disabled=false;}});penOptions.append(exportLog);}
     penCheck.addEventListener('change',()=>{penOnly=penCheck.checked;reader()?.setPenOnly?.(penOnly);void patchLayout({penOnly});status(hintFor());});
     function inputChanged(info){const labels={pen:'已识别：手写笔',touch:'已识别：触控',mouse:'收到：鼠标兼容输入',unknown:'输入类型未能识别'};inputKind.dataset.inputKind=info?.lastType||'';inputKind.textContent=labels[info?.lastType]||'在页面上用笔或手指操作后显示识别结果。';if(info?.seenPen&&info.lastType!=='pen')inputKind.textContent+=' · 已检测到手写笔';}
-    const placePenOptions=()=>{if(!penSettings.open)return;const rect=penSummary.getBoundingClientRect();penOptions.style.top=`${rect.bottom+8}px`;penOptions.style.right=`${Math.max(12,window.innerWidth-rect.right)}px`;penOptions.style.maxHeight=`${Math.max(100,window.innerHeight-rect.bottom-20)}px`;};
-    penSettings.addEventListener('toggle',()=>{if(penSettings.open){inputChanged(reader()?.getInputInfo?.());placePenOptions();}});
-    window.addEventListener('resize',placePenOptions);$('paper-tools').addEventListener('scroll',placePenOptions);
+    bindMenu(penSettings,penOptions);
+    penSettings.addEventListener('toggle',()=>{if(penSettings.open)inputChanged(reader()?.getInputInfo?.());});
     annotationTools.append(modeGroup,colorLabel,widthLabel,penSettings);
     const sidebar=button('reader-annotations','批注栏',()=>{panels()?.toggle('annotations');sync();});readerTools.append(sidebar);
     // Fit-width default with free zoom: steppers, an explicit percentage and reset.
@@ -128,7 +140,7 @@ window.PaperReadingShell = (() => {
     $('page-number').title='输入页码跳转，也可直接滚动阅读';
     const note=$('page-note');note.textContent='页便笺';annotationTools.append(note);
     const message=$('page-message');message.className='ribbon-status';message.setAttribute('role','status');message.setAttribute('aria-live','polite');
-    $('paper-tools').after(message);
+    const statusBar=node('div',null,'reader-status-bar');statusBar.id='reader-status-bar';$('paper-tools').after(statusBar);
     // Reserve one row for the whole handwriting session, including an empty
     // buffer between autosaves. Draft changes must never move the PDF beneath a pen.
     const inkBar=node('div',null,'reader-ink-draft');inkBar.id='reader-ink-draft';inkBar.hidden=true;
@@ -137,7 +149,7 @@ window.PaperReadingShell = (() => {
     const inkUndo=button('reader-ink-undo','撤销',()=>reader()?.undoInk());inkUndo.title='撤销一笔';inkUndo.setAttribute('aria-label','撤销一笔');
     const inkDiscard=button('reader-ink-discard','清除',()=>reader()?.clearInk());inkDiscard.setAttribute('aria-label','清除待存笔迹');
     const inkSave=button('reader-ink-save','完成手写',()=>{if(linkedSession){void finishLinked?.();return;}if(saveInk?.()&&!reader()?.getInkContext?.()){tool='select';applyTool();sync();}});
-    inkSave.classList.add('primary');inkBar.append(inkLabel,inkReturn,inkUndo,inkDiscard,inkSave);message.after(inkBar);
+    inkSave.classList.add('primary');inkBar.append(inkSave,inkReturn,inkUndo,inkDiscard,inkLabel);statusBar.append(inkBar,message);
     function syncInk(){
       const draft=reader()?.getInkDraft?.(),target=draft||linkedSession||reader()?.getInkContext?.()||{paperId:state.active?.id,page:state.page};
       const visible=tool==='ink'||Boolean(draft)||Boolean(linkedSession)||Boolean(reader()?.getInkContext?.());
@@ -165,6 +177,7 @@ window.PaperReadingShell = (() => {
     const queueMenu=node('details',null,'ink-queue-menu');queueMenu.id='ink-queue-menu';queueMenu.hidden=true;
     const queueSummary=node('summary','笔迹');queueSummary.id='ink-queue-summary';queueSummary.setAttribute('aria-live','polite');queueMenu.append(queueSummary);
     const queuePanel=node('div',null,'ink-queue-panel');queuePanel.setAttribute('aria-label','手写保存进度');queueMenu.append(queuePanel);
+    bindMenu(queueMenu,queuePanel);
     const ribbonStatus=node('div',null,'reader-ribbon-status');ribbonStatus.setAttribute('role','group');ribbonStatus.setAttribute('aria-label','保存状态');ribbonStatus.append(queueMenu);ribbon.append(ribbonStatus);
     function queueChanged(records){
       inkRecords=records;syncInk();
@@ -224,6 +237,7 @@ window.PaperReadingShell = (() => {
       message.hidden=!active||table;
       if(surface==='graph')status('选择节点查看联系与来源；有页码的依据可返回 PDF。');
       else status(hintFor());
+      placeMenus();
       contextChanged?.();
     }
     function setContext(value){context=value==='conversation'?'reader':value;sync();}
@@ -240,18 +254,17 @@ window.PaperReadingShell = (() => {
     }
     const fullscreenChange=()=>{if(!document.fullscreenElement&&focused){focused=false;document.body.classList.remove('reader-focused');sync();reader()?.resize();}};
     const keydown=e=>{if(e.key==='Escape'&&focused&&!document.querySelector('dialog[open]:not(#metadata-dialog)')){void toggleFullscreen();}};
-    const closeCitations=e=>{if(citations.open&&!citations.contains(e.target))citations.open=false;};
-    const citationKey=e=>{if(e.key==='Escape'&&citations.open){citations.open=false;citations.querySelector('summary').focus();e.stopImmediatePropagation();}};
-    const closePenSettings=e=>{if(penSettings.open&&!penSettings.contains(e.target))penSettings.open=false;};
-    const penSettingsKey=e=>{if(e.key==='Escape'&&penSettings.open){penSettings.open=false;penSummary.focus();e.stopImmediatePropagation();}};
-    document.addEventListener('click',closePenSettings);document.addEventListener('keydown',penSettingsKey,true);
-    document.addEventListener('click',closeCitations);document.addEventListener('keydown',citationKey,true);
+    const closeMenus=e=>{for(const {disclosure} of menus)if(disclosure.open&&!disclosure.contains(e.target))disclosure.open=false;};
+    const menuKey=e=>{if(e.key!=='Escape')return;const active=menus.find(({disclosure})=>disclosure.open);if(!active)return;active.disclosure.open=false;active.disclosure.querySelector('summary').focus();e.stopImmediatePropagation();};
+    document.addEventListener('click',closeMenus);document.addEventListener('keydown',menuKey,true);
+    document.addEventListener('scroll',placeMenus,true);window.addEventListener('resize',placeMenus);
+    const menuObserver=typeof ResizeObserver==='function'?new ResizeObserver(placeMenus):null;menuObserver?.observe(top);
     document.addEventListener('fullscreenchange',fullscreenChange);document.addEventListener('keydown',keydown);
     // Prevent a homepage link from discarding a question/metadata draft.
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
     sync();
     return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,zoomChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
-      dispose(){if(zoomSaveTimer!==null)window.clearTimeout(zoomSaveTimer);for(const {disclosure,update} of organizerDisclosures)disclosure.removeEventListener('toggle',update);window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placePenOptions);$('paper-tools').removeEventListener('scroll',placePenOptions);document.removeEventListener('click',closePenSettings);document.removeEventListener('keydown',penSettingsKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);document.removeEventListener('click',closeCitations);document.removeEventListener('keydown',citationKey,true);}};
+      dispose(){if(zoomSaveTimer!==null)window.clearTimeout(zoomSaveTimer);for(const {disclosure,update} of organizerDisclosures)disclosure.removeEventListener('toggle',update);for(const {disclosure,toggle} of menus)disclosure.removeEventListener('toggle',toggle);menuObserver?.disconnect();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placeMenus);document.removeEventListener('scroll',placeMenus,true);document.removeEventListener('click',closeMenus);document.removeEventListener('keydown',menuKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);}};
   }
   return {create};
 })();

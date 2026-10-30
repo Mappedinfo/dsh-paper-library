@@ -12,7 +12,7 @@
 .board-menus{margin-left:auto}
 .board-menu-button{white-space:nowrap}
 .board-menu-name{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}
-.board-menu{position:absolute;top:100%;left:8px;z-index:7;display:none;flex-direction:column;gap:8px;min-width:min(260px,calc(100vw - 24px));max-width:calc(100vw - 24px);max-height:62vh;overflow:auto;margin-top:2px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--paper);box-shadow:0 14px 30px rgba(30,40,30,.16)}
+.board-menu{position:fixed;z-index:65;box-sizing:border-box;display:none;flex-direction:column;gap:8px;min-width:min(260px,calc(100vw - 16px));max-width:calc(100vw - 16px);overflow:auto;margin:0;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--paper);box-shadow:0 14px 30px rgba(30,40,30,.16)}
 .board-menu.is-open{display:flex}
 .board-associations{left:auto;right:0;width:320px;min-width:0;max-width:100%;max-height:min(720px,calc(100vh - 120px));padding:0;gap:0;border-radius:0 0 0 8px;background:var(--surface,var(--paper));box-shadow:-8px 10px 22px rgba(30,40,30,.12);font-family:var(--dsw-font-family);font-size:12px}
 .board-association-title{flex:1;min-width:0;font-size:12px;font-weight:600}

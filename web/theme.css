@@ -59,7 +59,11 @@ body { font-family: var(--sans); font-size: var(--content-size); background: var
 * { scrollbar-color: var(--dsw-alias-scrollbar-bg-l1) transparent; }
 ::selection { background: var(--dsw-alias-interactive-bg-active); }
 button, input, select, textarea { font-family: var(--sans); }
-input, select, textarea { background: var(--white); border-color: var(--line); border-radius: 8px; }
+input, select, textarea { background: var(--white); color: var(--ink); border-color: var(--line); border-radius: 8px; }
+/* Native option menus need an opaque host surface; transparent active tokens
+ * otherwise mix with the OS popup and can make dark-mode labels unreadable. */
+select option, select optgroup { background-color: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+select option:disabled { color: var(--dsw-alias-label-tertiary); }
 input::placeholder, textarea::placeholder { color: var(--dsw-alias-label-tertiary); }
 button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible { outline-color: var(--dsw-alias-link); outline-offset: 2px; }
 input[type="checkbox"] { accent-color: var(--dsw-alias-button-primary-fill); }

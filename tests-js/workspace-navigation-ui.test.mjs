@@ -24,20 +24,21 @@ function fixture(options = {}) {
     focus() { document.activeElement = this }
   }
   const document = { createElement: tag => new Element(tag) }, root = new Element('div'), catalogRoot = new Element('div'), relatedRoot = new Element('div'), window = {}
+  const searchHome = new Element('div'), paperSearch = new Element('label'), paperInput = new Element('input'); paperInput.value = '原文献检索'; paperSearch.append(paperInput); searchHome.append(paperSearch);
   vm.runInNewContext(source, { window, document })
   const api = async (action, args) => { calls.push({ action, ...plain(args) }); return options.api ? options.api(action, args) : action === 'workspace_catalog' ? page([item(args.kind, 'synthetic-a')], { offset: args.offset }) : related({ kind: args.kind, id: args.id }) }
-  const nav = window.PaperWorkspaceNavigation.create({ root, catalogRoot, relatedRoot, api, onChange: value => changes.push(plain(value)), onRootChange: async value => { roots.push(value); return options.onRootChange?.(value) }, onNavigate: async value => { navigated.push(plain(value)); return options.onNavigate?.(value) }, prepare: options.prepare, toast: message => warnings.push(message) })
+  const nav = window.PaperWorkspaceNavigation.create({ root, catalogRoot, relatedRoot, api, paperSearch, onCreateProject: options.onCreateProject, onChange: value => changes.push(plain(value)), onRootChange: async value => { roots.push(value); return options.onRootChange?.(value) }, onNavigate: async value => { navigated.push(plain(value)); return options.onNavigate?.(value) }, prepare: options.prepare, toast: message => warnings.push(message) })
   const all = start => [start, ...start.children.flatMap(all)]
   const find = (className, start = root) => all(start).find(node => node.classes.has(className))
   const findAll = (className, start = root) => all(start).filter(node => node.classes.has(className))
   const text = start => all(start).map(node => node.textContent).filter(Boolean).join(' ')
-  return { nav, root, catalogRoot, relatedRoot, calls, changes, roots, warnings, navigated, all, find, findAll, text }
+  return { nav, paperSearch, paperInput, searchHome, root, catalogRoot, relatedRoot, calls, changes, roots, warnings, navigated, all, find, findAll, text }
 }
 
-test('three entrances are distinct and a refused root switch leaves the original view untouched', async () => {
+test('four entrances are distinct and a refused root switch leaves the original view untouched', async () => {
   let allowed = false
   const f = fixture({ prepare: async () => allowed })
-  assert.deepEqual(f.findAll('workspace-root-button').map(node => node.textContent), ['文献', '画板', 'LaTeX 写作'])
+  assert.deepEqual(f.findAll('workspace-root-button').map(node => node.textContent), ['文献', '画板', 'LaTeX 写作', '阅读项目'])
   assert.equal(f.catalogRoot.hidden, true)
   assert.equal(f.relatedRoot.hidden, true)
   assert.equal(f.findAll('workspace-root-button')[0].getAttribute('aria-current'), 'page')
@@ -64,7 +65,7 @@ test('catalog query and paging use bounded native requests and old responses can
   await wait()
   assert.equal(f.nav.state().section, 'latex')
   assert.doesNotMatch(f.text(f.catalogRoot), /late-old-board/)
-  const search = f.all(f.catalogRoot).find(node => node.tagName === 'INPUT'), form = search.parentNode
+  const search = f.all(f.find('workspace-catalog-search')).find(node => node.tagName === 'INPUT'), form = search.parentNode
   search.value = 'synthetic query'; form.dispatch('submit'); await wait()
   assert.equal(f.calls.at(-1).query, 'synthetic query')
   const next = f.findAll('workspace-nav-button', f.catalogRoot).find(node => node.textContent === '下一页 →')
@@ -77,7 +78,7 @@ test('catalog query and paging use bounded native requests and old responses can
 test('a catalog response preserves text typed into the search field while loading', async () => {
   const pending = deferred(), f = fixture({ api: () => pending.promise })
   await f.nav.selectRoot('board')
-  const search = f.all(f.catalogRoot).find(node => node.tagName === 'INPUT')
+  const search = f.all(f.find('workspace-catalog-search')).find(node => node.tagName === 'INPUT')
   search.value = 'not submitted yet'; search.dispatch('input')
   pending.resolve(page([item('board', 'first-response')]))
   await wait()
@@ -95,7 +96,7 @@ test('related children navigate reciprocally, preserve authoritative titles and 
   nav.setCurrent(a); await wait()
   assert.equal(f.catalogRoot.hidden, true)
   assert.equal(f.relatedRoot.hidden, false)
-  assert.equal(f.find('workspace-related', f.relatedRoot).open, undefined, 'related items start collapsed without forcing a large panel')
+  assert.equal(f.find('workspace-related', f.relatedRoot).open, false, 'related items start collapsed without forcing a large panel')
   await nav.navigate(b); await wait()
   assert.equal(nav.state().current.title, 'Board A loaded')
   assert.deepEqual(plain(nav.state().trail).map(value => value.id), ['paper-a', 'board-a'])
@@ -187,4 +188,35 @@ test('breadcrumb history is bounded and disposing suppresses all pending results
   assert.equal(g.catalogRoot.children.length, 0)
   assert.equal(g.relatedRoot.children.length, 0)
   assert.equal(await g.nav.navigate(item('board', 'no-after-dispose')), false)
+})
+
+
+test('navigation reuses the original paper search and preserves its state across category changes', async () => {
+  const f = fixture(), originalInput=f.paperInput
+  let inputs=0; originalInput.addEventListener('input',()=>inputs++)
+  assert.equal(f.paperSearch.parentNode,f.find('workspace-nav-search'))
+  assert.equal(f.paperSearch.hidden,false); assert.equal(f.find('workspace-catalog-search').hidden,true)
+  await f.nav.selectRoot('board'); await wait()
+  assert.equal(f.paperSearch.hidden,true); assert.equal(f.find('workspace-catalog-search').hidden,false)
+  assert.equal(f.find('workspace-catalog-search').parentNode,f.find('workspace-nav-search'))
+  assert.equal(f.all(f.catalogRoot).some(node=>node.tagName==='INPUT'),false)
+  await f.nav.selectRoot('paper'); await wait()
+  assert.equal(f.paperSearch.hidden,false); assert.equal(f.paperInput,originalInput); assert.equal(f.paperInput.value,'原文献检索')
+  f.paperInput.dispatch('input'); assert.equal(inputs,1)
+  f.nav.setCurrent(item('paper','p')); await wait(); assert.equal(f.paperSearch.hidden,false)
+  f.nav.dispose(); assert.equal(f.paperSearch.parentNode,f.searchHome); assert.equal(f.paperSearch.hidden,false)
+})
+
+test('reading projects have their own list, native create action and expanded linked content', async () => {
+  let created=0
+  const f=fixture({onCreateProject:()=>created++,api: async(action,args)=>action==='workspace_catalog'?page([{...item('project','reading','合成阅读项目'),paper_count:2,description:'学习方法练习'}]):related(item('project','reading'),{paper:page([item('paper','member')]),board:page([item('board','b')]),latex:page([item('latex','l')])})})
+  assert.equal(await f.nav.selectRoot('project'),true); await wait()
+  assert.deepEqual(f.calls[0],{action:'workspace_catalog',kind:'project',query:'',offset:0,limit:20})
+  assert.match(f.text(f.catalogRoot),/2 篇文献/); assert.match(f.text(f.catalogRoot),/LaTeX 写作是单独的写作项目/)
+  const create=f.findAll('workspace-nav-button',f.catalogRoot).find(node=>node.textContent==='新建阅读项目'); assert.equal(create.hidden,false); create.click(); assert.equal(created,1)
+  await f.nav.navigate(item('project','reading','合成阅读项目')); await wait()
+  assert.equal(f.nav.state().section,'project'); assert.equal(f.catalogRoot.hidden,true)
+  assert.equal(f.find('workspace-related',f.relatedRoot).open,true)
+  assert.match(f.text(f.relatedRoot),/项目内容/); assert.match(f.text(f.relatedRoot),/member/); assert.match(f.text(f.relatedRoot),/LaTeX 写作/)
+  assert.equal(f.find('workspace-nav-search').hidden,true)
 })

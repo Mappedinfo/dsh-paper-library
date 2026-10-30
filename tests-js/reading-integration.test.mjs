@@ -115,7 +115,7 @@ function environment({table=false,readerId='paper-a',paper={id:'paper-a',pdf:tru
     loadGraph:async()=>calls.push(['graph']),publishReaderState:()=>calls.push(['publish']),currentHarnessRoute:()=>null,toast:(...args)=>calls.push(['toast',...args]),
     openAnnotation:()=>{throw new Error('This fixture has no annotation dialog draft');},
     clearSelection:()=>{context.state.selection=null;element('selection-tools').hidden=true;},initializedReader:true,pendingReferenceOpen:null,pendingInkHandoff:null,inkQueue:null,
-    pdfReader:null,restoringInkDraft:false,inkSaveUncertain:false,
+    pdfReader:null,restoringInkDraft:false,inkSaveUncertain:false,canvasNotesContext:null,
   };
   vm.createContext(context);vm.runInContext(tabSource+'\n'+selectionSource+'\n'+restoreSource+'\n'+referenceSource,context,{filename:'web/app.js:reading-coordinators'});
   return {context,calls,visibility,panels,element,isTable:()=>table};

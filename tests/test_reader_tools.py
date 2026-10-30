@@ -321,3 +321,41 @@ def test_external_standard_markup_is_read_and_updated_without_replacing_its_iden
     assert updated["color"]["stroke"] == pytest.approx(external["color"]["stroke"])
     assert updated["source"] == "external-pdf" and updated["text"] == "Synthetic"
     assert hashlib.sha256(source.read_bytes()).hexdigest() == source_hash
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_reader_underline_has_a_portable_thicker_appearance_after_comment_edits(tmp_path, rotation):
+    source = synthetic_pdf(tmp_path / "source.pdf", [(400, 500, rotation)])
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    with fitz.open(source) as doc:
+        page = doc[0]
+        external = page.add_underline_annot(fitz.Rect(page.get_text("words")[0][:4]).quad)
+        external.set_info(content="External underline")
+        external.update()
+        external_id = external.info["id"]
+        external_ap = doc.xref_stream(int(doc.xref_get_key(external.xref, "AP/N")[1].split()[0]))
+        doc.save(tmp_path / "external-source.pdf")
+    external_source = tmp_path / "external-source.pdf"
+    item = request(tmp_path, "import", path=str(external_source))["items"][0]
+    word = request(tmp_path, "page", id=item["id"])["words"][1]
+    created = request(tmp_path, "annotate", id=item["id"], page=1, type="underline", rects=[word[:4]],
+                      text=word[4], comment="Reader underline", color="#3489CB")["annotation"]
+    managed = request(tmp_path, "export_pdf", id=item["id"])["path"]
+    first_width = None
+    for editing in (False, True):
+        if editing:
+            request(tmp_path, "annotation_update", id=item["id"], annotation_id=created["id"], comment="Revised interpretation")
+        with fitz.open(managed) as doc:
+            page = doc[0]
+            native = next(annot for annot in page.annots() if annot.info["id"] == created["id"])
+            assert native.type[0] == fitz.PDF_ANNOT_UNDERLINE
+            appearance = doc.xref_stream(int(doc.xref_get_key(native.xref, "AP/N")[1].split()[0]))
+            widths = [float(value) for value in re.findall(rb"([\d.]+)\s+w\b", appearance)]
+            assert widths and all(1.6 <= width <= 3.0 for width in widths)
+            if first_width is None:
+                first_width = widths
+            else:
+                assert widths == first_width, "Editing a comment must neither thin nor repeatedly thicken the underline"
+            external = next(annot for annot in page.annots() if annot.info["id"] == external_id)
+            assert doc.xref_stream(int(doc.xref_get_key(external.xref, "AP/N")[1].split()[0])) == external_ap
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == source_hash

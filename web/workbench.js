@@ -88,7 +88,7 @@ window.PaperWorkbench = (() => {
     controls.append(kind,scope,sort,order,button('＋ 文献','catalog-create',()=>edit(null)),button('＋ 数据集','dataset-create',()=>resource()?.edit()));
     document.querySelector('.list-heading').replaceWith(controls);
     // Existing list status ID remains available to the shared paginator.
-    const summary=node('span',undefined,'small muted');summary.id='search-summary';controls.after(summary);
+    const summary=node('span',undefined,'small muted');summary.id='search-summary';(controls.closest('.library-filterbar')||controls).after(summary);
     const archive=button('移入回收站','catalog-archive',()=>{if(!state.catalogSlideId)return archivePaper(state.active);},'button');
     $('toolbar-actions').append(archive);
     const oldForm=$('metadata-form');

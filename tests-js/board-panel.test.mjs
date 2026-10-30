@@ -9,6 +9,7 @@ const mermaidModule = await readFile(new URL('../web/board-mermaid.js', import.m
 const drawioModule = await readFile(new URL('../web/board-drawio.js', import.meta.url), 'utf8');
 const bridgeModule = await readFile(new URL('../web/board-bridge.js', import.meta.url), 'utf8');
 const renderModule = await readFile(new URL('../web/board-render.js', import.meta.url), 'utf8');
+const windowsModule = await readFile(new URL('../web/floating-windows.js', import.meta.url), 'utf8');
 
 class ClassList {
   /** `owner` ties this list to its element, the way the DOM does: adding a class here also changes
@@ -25,7 +26,7 @@ const classNames = value => String(value ?? '').split(/\s+/).filter(Boolean);
 /** Minimal DOM/SVG stand-in: enough for the panel, with no browser and no network. */
 function environment(ids = []) {
   const registry = new Map();
-  const doc = { defaultView: { confirm: () => true } };
+  const doc = { defaultView: { confirm: () => true, innerWidth: 1512, innerHeight: 982 } };
   class Element {
     constructor(tag = 'div', ns = null) {
       this.tagName = String(tag).toUpperCase(); this.namespaceURI = ns; this.children = []; this.parentNode = null;
@@ -73,7 +74,7 @@ function environment(ids = []) {
       return event;
     }
     get options() { return this.tagName === 'SELECT' ? this.children : undefined; }
-    focus() {} select() {}
+    focus() { doc.activeElement = this; } select() {}
     /** Textareas expose this in the DOM; the caret-seeded editor relies on it. */
     setSelectionRange(start, end) { this.selection = { start, end }; }
     get firstChild() { return this.children[0] || null; }
@@ -164,6 +165,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
   vm.runInContext(drawioModule, context);
   vm.runInContext(bridgeModule, context);
   vm.runInContext(renderModule, context);
+  vm.runInContext(windowsModule, context);
   vm.runInContext(source, context);
   const board = context.window.PaperBoard;
   const boardSource = context.window.PaperBoardSource;
@@ -1448,6 +1450,31 @@ test('the toolbar keeps one menu open at a time and the inspector follows the se
   harness.svg.dispatch('pointerdown', { clientX: b.x + b.w / 2, clientY: b.y + b.h / 2 });
   assert.equal(harness.registry.get('board-inspector-edge').hidden, false, 'selecting a link reveals the link settings');
   assert.equal(harness.registry.get('board-inspector-node').hidden, true);
+});
+
+test('board menus follow their own buttons and Escape closes one without clearing selection', async () => {
+  const harness = loadPanel({ api: apiStub() });
+  await harness.panel.open();
+  await harness.panel.addGraphNode({ label: 'Synthetic selected concept' });
+  harness.panel.focusAnnotation({ kind: 'board', node_ids: harness.panel.board().nodes.map(node => node.id) });
+  assert.equal(harness.panel.selection().length, 1);
+  const trigger = harness.registry.get('board-layout-open'), panel = harness.registry.get('board-layout-panel');
+  let anchor = { left: 740, top: 40, bottom: 70, width: 60, height: 30 };
+  trigger.getBoundingClientRect = () => anchor;
+  panel.getBoundingClientRect = () => ({ width: 280, height: 300 });
+  trigger.dispatch('click');
+  assert.equal(panel.style.top, '75px'); assert.equal(panel.style.left, '740px');
+  anchor = { ...anchor, left: 1010 };
+  harness.doc.body.dispatch('scroll');
+  assert.equal(panel.style.left, '1010px');
+  const selected = [...harness.panel.selection()];
+  harness.doc.body.dispatch('keydown', { key: 'Escape' });
+  assert.equal(panel.classList.contains('is-open'), false);
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+  assert.equal(harness.doc.activeElement, trigger);
+  assert.deepEqual([...harness.panel.selection()], selected);
+  harness.panel.dispose();
+  assert.equal(harness.doc.body.events.get('scroll')?.size, 0);
 });
 
 test('focus mode is a pure canvas and Escape leaves it', async () => {

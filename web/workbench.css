@@ -30,8 +30,25 @@
 #workspace-navigation-area{flex:0 0 auto;min-width:0;padding:0 10px;box-sizing:border-box}
 #workspace-navigation-home:empty{display:none}
 #workspace-catalog-body{flex:1;min-height:0;min-width:0;overflow:auto;padding:0 10px;box-sizing:border-box}
-.library-pane[data-workspace-section=board] .pane-heading,.library-pane[data-workspace-section=latex] .pane-heading{display:none}
+.library-pane[data-workspace-section=board] .pane-heading,.library-pane[data-workspace-section=latex] .pane-heading,.library-pane[data-workspace-section=project] .pane-heading{display:none}
 .latex-topbar>#workspace-navigation-area{border-bottom:1px solid var(--line,#ddd)}
 #workspace-versions{padding:6px 10px;border-bottom:1px solid var(--line,#ddd);font-size:12px}
 #workspace-versions>summary{cursor:pointer;font-weight:600;min-height:26px;line-height:26px}
 #workspace-version-list{max-height:34vh;overflow:auto;overscroll-behavior:contain}
+/* Navigation owns search; the shelf and its filters sit directly beneath it. */
+.library-pane #library-literature-content>.pane-heading{display:flex;align-items:center;justify-content:space-between;flex:none;padding:5px 10px;gap:8px}
+.library-pane #library-literature-content>.pane-heading .shelf-actions{margin-left:auto}
+.library-filterbar{display:flex;align-items:center;flex-wrap:wrap;flex:none;gap:6px 12px;padding:3px 10px 8px;border-bottom:1px solid var(--line,#ddd)}
+.library-filterbar>.library-organizer-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0;padding:0;border:0}
+.library-filterbar .project-bar{display:flex;align-items:center;gap:6px;margin:0;padding:0;border:0}
+.library-filterbar>.catalog-controls{display:flex;align-items:center;flex-wrap:wrap;flex:1 1 auto;gap:6px;margin:0;padding:0}
+#library-literature-content .library-filterbar select,#library-literature-content .library-filterbar .button{box-sizing:border-box;min-height:30px;height:30px;max-width:none;margin:0;padding:4px 8px;font-size:12px;line-height:20px}
+.library-filterbar .field-inline{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:12px}
+.library-filterbar #project-status{font-size:11px;white-space:nowrap}
+.library-filterbar+#search-summary{display:block;flex:none;padding:0 10px;font-size:11px}
+.library-filterbar+#search-summary:empty{display:none}
+.library-pane[data-workspace-focus=project] #workspace-navigation-area{display:flex;flex-direction:column;flex:1;min-height:0}
+.library-pane[data-workspace-focus=project] #workspace-related{display:flex;flex-direction:column;flex:1;min-height:0}
+.library-pane[data-workspace-focus=project] .workspace-related{display:flex;flex-direction:column;flex:1;min-height:0}
+.library-pane[data-workspace-focus=project] .workspace-related>summary{flex:none}
+.library-pane[data-workspace-focus=project] .workspace-related-body{flex:1;min-height:0;overflow:auto}
