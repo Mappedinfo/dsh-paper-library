@@ -13,6 +13,7 @@ import { createBoardStore } from './harness/board-store.mjs';
 import { createBoardFlowStore } from './harness/board-flow-store.mjs';
 import { handleBoardRequest } from './harness/board-tools.mjs';
 import { createBoardAnnotationStore, handleBoardAnnotationRequest } from './harness/board-annotations.mjs';
+import { createWorkspaceNavigation } from './harness/workspace-navigation.mjs';
 import { createPaperLibrarySettings } from './harness/settings.mjs';
 import { createInkQueue } from './ink-queue.mjs';
 import { createInkDiagnostics } from './ink-diagnostics.mjs';
@@ -26,6 +27,7 @@ for (const name of ['icons.js','icons.css','settings.js','settings.css']) static
 staticFiles['return-to-dsh.js']=['return-to-dsh.js','text/javascript;charset=utf-8'];
 for (const name of ['challenge-mining.js','challenge-mining.css','annotation-threads.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['board.js','board.css','board-flow.js','board-source.js','board-render.js','board-bridge.js','board-annotations.js','board-annotations.css','board-mermaid.js','board-drawio.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['workspace-navigation.js','workspace-navigation.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 const languageActions = new Set(['language_settings_get','language_settings_update','language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
 for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js','ink-diagnostics.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
@@ -120,6 +122,7 @@ export function createFetchHandler(options = {}) {
   const boards = options.boards || createBoardStore({ localState });
   const boardFlows = options.boardFlows || createBoardFlowStore({ localState, boards });
   const boardAnnotations = createBoardAnnotationStore({ localState, boards, flowStore: boardFlows });
+  const workspaceNavigation = options.workspaceNavigation || createWorkspaceNavigation({ boards, request: (payload, signal) => dispatch(payload, { ...options, signal }) });
   const inkQueue = options.inkQueue || createInkQueue({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python,autoStart:false});
   const inkDiagnostics = createInkDiagnostics({store:localState});
   const handle = async function handle(request) {
@@ -159,6 +162,7 @@ export function createFetchHandler(options = {}) {
           if (latexAIAction && !options.latexAI) return json({ok:false,error:'LaTeX 提问与合写需要连接 DSH 模型服务。'},409);
           if (latexWsAction && !options.latexWorkspace) return json({ok:false,error:'LaTeX 工作区需要连接 DSH 主机。'},409);
           let result = companionAction ? await options.companion.handle(input)
+            : ['workspace_catalog','workspace_related'].includes(input?.action) ? await workspaceNavigation.handle(input, { signal: request.signal })
             : ['ink_diagnostics_append','ink_diagnostics_get'].includes(input?.action) ? await inkDiagnostics.handle(input)
             : typeof input?.action === 'string' && input.action.startsWith('ink_queue_') ? await inkQueue.handle(input)
             : input?.action === 'settings_get' ? await settings.get()

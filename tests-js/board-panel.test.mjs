@@ -90,7 +90,7 @@ function environment(ids = []) {
   return { doc, registry, Element };
 }
 
-function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, sessionId = null, flowFactory, flowLoader, onCanvasContext, onAnnotations, prepareAnnotationsLeave, hasPendingAnnotations } = {}) {
+function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, sessionId = null, flowFactory, flowLoader, onCanvasContext, onAnnotations, prepareAnnotationsLeave, hasPendingAnnotations, onContext } = {}) {
   const ids = [
     'board-stage', 'board-select', 'board-status', 'board-zoom-label', 'board-zoom-in', 'board-zoom-out', 'board-fit',
     'board-undo', 'board-redo', 'board-delete', 'board-title', 'board-new', 'board-close', 'board-add-paper', 'board-send', 'board-tidy', 'board-fullscreen',
@@ -168,7 +168,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
   const board = context.window.PaperBoard;
   const boardSource = context.window.PaperBoardSource;
   if (canvas) { const original = Element.prototype; original.__canvas = canvas; }
-  const panel = board.create({ root, api: api || (async () => ({})), toast: (message) => messages.push(message), ...(capabilities ? { capabilities } : {}), ...(sessionId ? { getSessionId: () => sessionId } : {}), ...(flowFactory ? { flowFactory } : {}), onCanvasContext, onAnnotations, prepareAnnotationsLeave, hasPendingAnnotations });
+  const panel = board.create({ root, api: api || (async () => ({})), toast: (message) => messages.push(message), ...(capabilities ? { capabilities } : {}), ...(sessionId ? { getSessionId: () => sessionId } : {}), ...(flowFactory ? { flowFactory } : {}), onCanvasContext, onAnnotations, prepareAnnotationsLeave, hasPendingAnnotations, onContext });
   const stage = registry.get('board-stage');
   const svg = stage.children[0];
   return {
@@ -214,6 +214,79 @@ function syntheticFlowFactory() {
     };
   } }, mounted: () => mounted };
 }
+
+test('board context follows successful records and guarded close without exposing mutable board content', async () => {
+  const contexts = []; let pending = false;
+  const harness = loadPanel({ api: apiStub(), onContext: value => contexts.push(value && { ...value }), prepareAnnotationsLeave: () => !pending });
+  assert.equal(harness.panel.current(), null);
+  await harness.panel.load('hidden-board');
+  assert.equal(harness.panel.current(), null);
+  assert.equal(contexts.length, 0, 'loading a closed board cannot clear another surface context');
+  await harness.panel.open();
+  assert.deepEqual({ ...harness.panel.current() }, { kind: 'board', id: 'b-created', title: '画板' });
+  assert.deepEqual(contexts.at(-1), { ...harness.panel.current() });
+  const identity = harness.panel.current(); identity.title = 'not a board edit';
+  assert.equal(harness.panel.current().title, '画板');
+  pending = true; const count = contexts.length;
+  assert.equal(await harness.panel.load('blocked'), false);
+  assert.equal(await harness.panel.close(), false);
+  assert.equal(contexts.length, count);
+  pending = false;
+  await harness.panel.load('other-board');
+  assert.deepEqual(contexts.at(-1), { kind: 'board', id: 'other-board', title: '画板' });
+  assert.deepEqual(Object.keys(contexts.at(-1)).sort(), ['id', 'kind', 'title']);
+  assert.equal(await harness.panel.close(), true);
+  assert.equal(harness.panel.current(), null);
+  assert.equal(contexts.at(-1), null);
+  harness.panel.dispose();
+});
+
+test('opening an explicit board reads that identity without transiently opening the first listed board', async () => {
+  const contexts = [], reads = [];
+  const harness = loadPanel({ api: apiStub({
+    board_list: () => ({ boards: [{ id: 'first', title: 'First listed' }], total: 1 }),
+    board_get: payload => { reads.push(payload.id); return { board: { schema: 1, id: payload.id, title: payload.id, nodes: [], edges: [] }, revision: 'a'.repeat(64) }; },
+  }), onContext: value => contexts.push(value && { ...value }) });
+  assert.equal(await harness.panel.open({ id: 'beyond-list-page' }), true);
+  assert.deepEqual(reads, ['beyond-list-page']);
+  assert.deepEqual(contexts, [{ kind: 'board', id: 'beyond-list-page', title: 'beyond-list-page' }]);
+  assert.equal(harness.panel.current().id, 'beyond-list-page');
+  assert.equal(harness.registry.get('board-select').children.some(option => option.value === 'beyond-list-page'), true);
+  harness.panel.dispose();
+});
+
+test('a missing explicit board keeps the previous surface or stays closed, with no fallback', async () => {
+  const contexts = [], reads = [];
+  const harness = loadPanel({ api: apiStub({
+    board_list: () => ({ boards: [{ id: 'first', title: 'First listed' }], total: 1 }),
+    board_get: payload => {
+      reads.push(payload.id);
+      if (payload.id === 'missing') throw Error('synthetic missing board');
+      return { board: { schema: 1, id: payload.id, title: payload.id, nodes: [], edges: [] }, revision: 'a'.repeat(64) };
+    },
+  }), onContext: value => contexts.push(value && { ...value }) });
+  assert.equal(await harness.panel.open({ id: 'missing' }), false);
+  assert.equal(harness.panel.isOpen(), false);
+  assert.equal(harness.panel.current(), null);
+  assert.equal(contexts.length, 0);
+  assert.equal(await harness.panel.open({ id: 'known' }), true);
+  const before = contexts.length;
+  assert.equal(await harness.panel.open({ id: 'missing' }), false);
+  assert.equal(harness.panel.current().id, 'known');
+  assert.equal(contexts.length, before);
+  assert.equal(reads.includes('first'), false);
+  harness.panel.dispose();
+});
+
+test('a mismatched explicit board response cannot replace the requested surface', async () => {
+  const contexts = [];
+  const harness = loadPanel({ api: apiStub({ board_get: () => ({ board: { schema: 1, id: 'not-requested', title: 'Wrong board', nodes: [], edges: [] }, revision: 'a'.repeat(64) }) }), onContext: value => contexts.push(value) });
+  assert.equal(await harness.panel.open({ id: 'requested' }), false);
+  assert.equal(harness.panel.current(), null);
+  assert.equal(harness.panel.isOpen(), false);
+  assert.equal(contexts.length, 0);
+  harness.panel.dispose();
+});
 
 test('flow opens lazily for the active board and leaves freeboard content and shortcuts untouched', async () => {
   state.length = 0;

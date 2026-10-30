@@ -11,7 +11,7 @@ const tick = () => new Promise(done => setImmediate(done))
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
 const image = { image: 'aW1hZ2U=', width: 600, height: 800, pixel_width: 1200, pixel_height: 1600, page_count: 4, bytes: 5, supported: true }
 
-async function fixture(override = () => undefined, { review = false, spellChecker, writingTools } = {}) {
+async function fixture(override = () => undefined, { review = false, spellChecker, writingTools, onContext } = {}) {
   const ids = new Map(), revoked = [], calls = [], urls = [], timers = new Map()
   class Element {
     constructor(tag = 'div') {
@@ -54,7 +54,7 @@ async function fixture(override = () => undefined, { review = false, spellChecke
   if (writingTools) window.PaperLatexWritingTools = { create: () => writingTools }
   if (review) vm.runInNewContext(reviewSource, globals)
   vm.runInNewContext(source, globals)
-  const ui = window.PaperLatexWorkspace.create({ api })
+  const ui = window.PaperLatexWorkspace.create({ api, onContext })
   await ui.open(); return { ui, ids, calls, revoked, urls, window, timers }
 }
 
@@ -63,6 +63,113 @@ test('closing refuses to discard a writing-tool draft', async () => {
   const f = await fixture(() => undefined, { writingTools: { hasDraft: () => pending, dispose() {} } })
   await f.ui.close(); assert.equal(f.ui.isOpen(), true)
   pending = false; await f.ui.close(); assert.equal(f.ui.isOpen(), false)
+  f.ui.dispose()
+})
+
+test('writer context reports only active project identity and stays put when unsaved work blocks leaving', async () => {
+  const contexts = []; let pending = false
+  const f = await fixture(undefined, { onContext: value => contexts.push(value && { ...value }), writingTools: { hasDraft: () => pending, dispose() {} } })
+  assert.deepEqual({ ...f.ui.current() }, { kind: 'latex', id: 'one', title: 'one' })
+  assert.deepEqual(contexts.at(-1), { ...f.ui.current() })
+  pending = true
+  const before = contexts.length
+  await f.ui.testHooks.setProject('two'); await f.ui.close()
+  assert.equal(contexts.length, before)
+  assert.equal(f.ui.current().id, 'one')
+  pending = false
+  await f.ui.testHooks.setProject('two')
+  assert.equal(f.ui.current().id, 'two')
+  assert.equal(contexts.at(-1).id, 'two')
+  assert.deepEqual(Object.keys(contexts.at(-1)).sort(), ['id', 'kind', 'title'])
+  await f.ui.close()
+  assert.equal(f.ui.current(), null)
+  assert.equal(contexts.at(-1), null)
+  f.ui.dispose()
+})
+
+test('empty writer reports no project context and a selected project keeps its identity when navigation reading fails', async () => {
+  const emptyEvents = []
+  const empty = await fixture(action => action === 'latex_project_list' ? { projects: [] } : undefined, { onContext: value => emptyEvents.push(value) })
+  assert.equal(empty.ui.isOpen(), true)
+  assert.equal(empty.ui.current(), null)
+  assert.equal(emptyEvents.at(-1), null)
+  empty.ui.dispose()
+  const contexts = []
+  const f = await fixture(action => { if (action === 'latex_tree') throw Error('synthetic tree error') }, { onContext: value => contexts.push(value && { ...value }) })
+  assert.equal(f.ui.current().id, 'one')
+  assert.equal(contexts.at(-1).id, 'one')
+  assert.deepEqual(Object.keys(contexts.at(-1)).sort(), ['id', 'kind', 'title'])
+  f.ui.dispose()
+})
+
+test('an explicit missing writer project never falls back or clears an existing draft', async () => {
+  let rejectSave = false
+  const contexts = []
+  const f = await fixture((action, args) => {
+    if (action === 'latex_project_get') throw Error('synthetic project missing')
+    if (action === 'latex_write' && rejectSave) throw Error('synthetic unsaved draft')
+  }, { onContext: value => contexts.push(value && { ...value }) })
+  rejectSave = true
+  await f.ui.testHooks.type('unsaved source must stay here')
+  const original = { ...f.ui.current() }, before = contexts.length
+  assert.equal(await f.ui.open('missing'), false)
+  assert.deepEqual({ ...f.ui.current() }, original)
+  assert.equal(contexts.length, before)
+  assert.equal(f.ui.testHooks.state().dirty, true)
+  assert.equal(f.ids.get('latex-editor').value, 'unsaved source must stay here')
+  f.ui.dispose()
+})
+
+test('an exact writer project beyond the listing page is fetched by ID and an invalid identity is never selected', async () => {
+  const contexts = []
+  const f = await fixture((action, args) => {
+    if (action === 'latex_project_get') return { project: { id: args.id === 'third' ? 'third' : 'unrelated', title: 'Third project', main_path: 'main.tex', pdf_present: false } }
+  }, { onContext: value => contexts.push(value && { ...value }) })
+  assert.equal(await f.ui.open('third'), true)
+  assert.deepEqual({ ...f.ui.current() }, { kind: 'latex', id: 'third', title: 'Third project' })
+  assert.equal(f.calls.some(call => call.action === 'latex_project_get' && call.id === 'third'), true)
+  const before = contexts.length
+  assert.equal(await f.ui.open('not-third'), false)
+  assert.equal(f.ui.current().id, 'third')
+  assert.equal(contexts.length, before)
+  f.ui.dispose()
+})
+
+test('a missing or archived writer target cannot open a hidden workspace, and late lookup cannot reopen after close', async () => {
+  const lookup = deferred()
+  const f = await fixture((action, args) => {
+    if (action === 'latex_project_get') return args.id === 'late' ? lookup.promise : { project: { id: args.id, title: 'Archived', archived: true } }
+  })
+  await f.ui.close()
+  assert.equal(await f.ui.open('archived'), false)
+  assert.equal(f.ui.isOpen(), false)
+  assert.equal(f.ui.current(), null)
+  const opening = f.ui.open('late'); await tick()
+  await f.ui.close()
+  lookup.resolve({ project: { id: 'late', title: 'Late project', main_path: 'main.tex', pdf_present: false } })
+  assert.equal(await opening, false)
+  assert.equal(f.ui.isOpen(), false)
+  assert.equal(f.ui.current(), null)
+  f.ui.dispose()
+})
+
+test('an explicitly unavailable writer folder is refused before replacing the current draft', async () => {
+  let missingListedFolder = false, rejectSave = false
+  const contexts = []
+  const f = await fixture((action, args) => {
+    if (action === 'latex_project_list' && missingListedFolder) return { projects: [{ id: 'one', title: 'Unavailable folder', exists: false }] }
+    if (action === 'latex_project_get') return { project: { id: args.id, title: 'Unavailable folder', exists: false } }
+    if (action === 'latex_write' && rejectSave) throw Error('synthetic unsaved source')
+  }, { onContext: value => contexts.push(value && { ...value }) })
+  rejectSave = true; await f.ui.testHooks.type('keep the current draft')
+  const before = contexts.length
+  assert.equal(await f.ui.open('outside-list'), false)
+  missingListedFolder = true
+  assert.equal(await f.ui.open('one'), false)
+  assert.equal(contexts.length, before)
+  assert.equal(f.ui.current().id, 'one')
+  assert.equal(f.ids.get('latex-editor').value, 'keep the current draft')
+  assert.equal(f.ui.testHooks.state().dirty, true)
   f.ui.dispose()
 })
 

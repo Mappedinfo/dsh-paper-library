@@ -7,6 +7,7 @@
   <title>Paper Library</title>
   <link rel="stylesheet" href="./style.css">
   <link rel="stylesheet" href="./workbench.css">
+  <link rel="stylesheet" href="./workspace-navigation.css">
   <link rel="stylesheet" href="./knowledge-graph.css">
   <link rel="stylesheet" href="./pdf-reader.css">
   <link rel="stylesheet" href="./reading-panels.css">
@@ -29,6 +30,7 @@
   <script src="./board-render.js" defer></script>
   <script src="./board-bridge.js" defer></script>
   <script src="./board-annotations.js" defer></script>
+  <script src="./workspace-navigation.js" defer></script>
   <script src="./board-mermaid.js" defer></script>
   <script src="./board-drawio.js" defer></script>
   <script src="./board.js" defer></script>
@@ -77,6 +79,14 @@
     <section class="library-pane" aria-label="文献、数据集与演示文稿库">
       <div class="pane-heading"><div><p class="eyebrow">YOUR RESEARCH SHELF</p><h1>库 <span id="item-count" class="count">—</span></h1></div><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="检索文献、数据集与演示…" autocomplete="off" aria-label="检索文献、数据集与演示文稿"><kbd>⌘ K</kbd></label><div class="shelf-actions"><button id="build-bibliography" class="button subtle" title="根据文献库条目生成 references.bib 和引用信息核对报告，不会选择本次提问的引用">生成 references.bib</button><button id="export-library" class="button subtle" title="导出全部文献为 BibLaTeX">导出文献库</button><button id="refresh" class="icon-button" title="刷新文献库" aria-label="刷新文献库">↻</button></div></div>
       <form id="quick-import-form" class="quick-import"><label for="quick-import-source">粘贴论文链接或 DOI，自动保存</label><div><input id="quick-import-source" type="text" placeholder="https://… 或 10.…" autocomplete="off" aria-label="粘贴论文链接或 DOI 自动导入"><button type="submit" class="icon-button" aria-label="导入链接">↵</button></div><p>也可把一个或多个 PDF 拖到窗口任意位置。</p></form>
+      <div id="workspace-navigation-home"></div>
+      <section id="workspace-navigation-area" aria-label="内容导航">
+        <div id="workspace-navigation"></div>
+        <div id="workspace-related"></div>
+        <details id="workspace-versions" hidden><summary>编译版本</summary><div id="workspace-version-list"></div></details>
+      </section>
+      <div id="workspace-catalog-body" hidden></div>
+      <div id="library-literature-content">
       <div class="library-organizer-row">
       <div class="project-bar">
         <label class="field-inline">阅读项目 <select id="project-select" aria-label="选择阅读项目"><option value="">全部文献</option></select></label>
@@ -86,8 +96,8 @@
           <button id="project-archive" class="button subtle" type="button" title="归档所选项目（文献不受影响）" aria-label="归档阅读项目" disabled>归档项目</button>
         </div></details>
       </div>
-      <details id="board-shelf" class="board-shelf"><summary aria-controls="board-shelf-panel"><span>画板</span><span id="board-shelf-count" class="count">—</span></summary></details>
-      <details id="latex-version-shelf" class="board-shelf"><summary aria-controls="latex-version-shelf-panel">LaTeX 编译版本</summary></details>
+      <details id="board-shelf" class="board-shelf" hidden><summary aria-controls="board-shelf-panel"><span>画板</span><span id="board-shelf-count" class="count">—</span></summary></details>
+      <details id="latex-version-shelf" class="board-shelf" hidden><summary aria-controls="latex-version-shelf-panel">LaTeX 编译版本</summary></details>
       <span id="project-status" class="small muted" role="status"></span>
       </div>
       <section id="board-shelf-panel" class="library-organizer-panel" aria-label="画板" hidden><div id="board-shelf-list" class="board-shelf-list"></div><p class="small muted">画板可关联多篇论文或多个阅读项目。</p></section>
@@ -98,6 +108,7 @@
       <div id="catalog-table" class="catalog-table" hidden></div>
       <div class="pagination"><button id="previous-list" class="button subtle" disabled>← 上一页</button><span id="list-range" class="muted"></span><button id="next-list" class="button subtle" disabled>下一页 →</button></div>
       <footer class="library-footer"><span class="live-dot"></span>本地文献库<span title="PDF 中的标准批注随文件保存">PDF 原生批注</span></footer>
+      </div>
     </section>
     <section class="detail-pane" aria-label="论文详情">
       <div id="welcome" class="welcome"><div class="welcome-paper" aria-hidden="true"><span></span><span></span><span></span><span></span><i>“</i></div><p class="eyebrow">A PLACE FOR CLOSE READING</p><h2>让阅读留下线索。</h2><p>导入论文，标记值得追问的段落，<br>再把文献之间的联系串起来。</p><button id="welcome-import" class="button primary">导入第一篇文献 <span aria-hidden="true">↗</span></button><div class="welcome-footnote">PDF · DOI · Zotero JSON · CSL JSON · RIS · BibTeX</div></div>

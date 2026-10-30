@@ -1,20 +1,30 @@
 'use strict';
-/** One version list projected into the writing workspace and reading projects. */
+/** 写作项目及其关联内容复用同一份只读编译版本列表。 */
 window.PaperLatexVersions = (() => {
   function create({ root, api, scope, openVersion }) {
     const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
-    let ticket = 0, offset = 0, total = 0, items = [];
+    let ticket = 0, offset = 0, total = 0, items = [], scopeIdentity = null;
+    const detailRequests = new WeakMap();
+    const scopeKey = value => value ? JSON.stringify(Object.keys(value).sort().map(key => [key, value[key]])) : null;
+    const owns = owner => owner.ticket === ticket && owner.scope === scopeIdentity && owner.scope === scopeKey(scope());
     const refreshButton = make('button', 'button subtle', '刷新版本'); refreshButton.type = 'button';
     const message = make('p', 'latex-version-message'); message.setAttribute('role', 'status');
     const list = make('div', 'latex-version-list');
     const more = make('button', 'button subtle', '更多版本'); more.type = 'button'; more.hidden = true;
     root.append(refreshButton, message, list, more);
     function say(text) { message.textContent = text; }
+    function reset(text = '选择当前写作项目，查看编译版本。') {
+      offset = 0; total = 0; items = []; list.textContent = ''; more.hidden = true; more.disabled = false; refreshButton.disabled = false; say(text);
+    }
     async function details(version, card, button) {
       if (card.querySelector('.latex-version-detail')) return;
+      const owner = { ticket, scope: scopeKey(scope()) }, request = {};
+      if (!owns(owner) || !items.some(item => item.id === version.id)) return;
+      detailRequests.set(button, request);
       button.disabled = true;
       try {
         const result = await api('latex_version_get', { version_id: version.id });
+        if (!owns(owner)) return;
         const panel = make('div', 'latex-version-detail');
         for (const review of result.review_pdfs || result.version?.review_pdfs || []) {
           const preview = make('button', 'button subtle', `批注 PDF · ${(review.pdf_version || '').slice(0, 10)}${review.current ? ' · 本次编译' : ' · 原编译锚点'}`); preview.type = 'button';
@@ -23,6 +33,7 @@ window.PaperLatexVersions = (() => {
           panel.append(preview, download);
         }
         const reviews = await api('latex_version_review', { version_id: version.id });
+        if (!owns(owner)) return;
         if (reviews.annotations?.length) {
           const notes = make('details', 'latex-version-notes'); notes.append(make('summary', '', `自审批注（${reviews.annotations.length}）`));
           for (const note of reviews.annotations) {
@@ -36,15 +47,17 @@ window.PaperLatexVersions = (() => {
           for (const source of result.sources) select.append(new Option(source.path, source.path));
           const sourceText = make('pre', 'latex-version-source'); sourceText.hidden = true; let read = 0;
           select.addEventListener('change', async () => {
+            const sourceOwner = { ticket, scope: scopeKey(scope()) };
+            if (!owns(sourceOwner) || sourceOwner.scope !== owner.scope) return;
             const request = ++read; if (!select.value) { sourceText.hidden = true; return; }
             sourceText.hidden = false; sourceText.textContent = '读取快照…';
-            try { const value = await api('latex_version_read', { version_id: version.id, path: select.value }); if (request === read) sourceText.textContent = value.content; }
-            catch (error) { if (request === read) sourceText.textContent = `读取失败：${error.message}`; }
+            try { const value = await api('latex_version_read', { version_id: version.id, path: select.value }); if (request === read && owns(sourceOwner)) sourceText.textContent = value.content; }
+            catch (error) { if (request === read && owns(sourceOwner)) sourceText.textContent = `读取失败：${error.message}`; }
           }); panel.append(select, sourceText);
         }
         panel.append(make('p', 'small muted', '快照只读；旧批注保留原编译位置，不会自动迁移到新稿。')); card.append(panel);
-      } catch (error) { say(`版本读取失败：${error.message}`); }
-      finally { button.disabled = false; }
+      } catch (error) { if (owns(owner)) say(`版本读取失败：${error.message}`); }
+      finally { if (detailRequests.get(button) === request) button.disabled = false; }
     }
     function render() {
       list.textContent = '';
@@ -62,21 +75,24 @@ window.PaperLatexVersions = (() => {
       more.hidden = items.length >= total; say(total ? `共 ${total} 个手动编译版本` : '暂无版本；成功手动编译后会自动保存。');
     }
     async function refresh(append = false) {
-      const query = scope(); const current = ++ticket;
-      if (!query) { items = []; total = 0; list.textContent = ''; more.hidden = true; say('选择一个阅读项目，查看其写作版本。'); return; }
-      refreshButton.disabled = true; say('读取版本…');
+      const value = scope(), identity = scopeKey(value), current = ++ticket;
+      if (!value) { scopeIdentity = null; reset(); return; }
+      const query = { ...value };
+      if (scopeIdentity !== identity) { scopeIdentity = identity; reset(''); append = false; }
+      const owner = { ticket: current, scope: identity };
+      refreshButton.disabled = true; more.disabled = true; say('读取版本…');
       try {
         const result = await api('latex_version_list', { ...query, limit: 20, offset: append ? offset : 0 });
-        if (current !== ticket) return;
+        if (!owns(owner)) return;
         const next = result.versions || [];
         const unchanged = !append && items.length === next.length && items.every((item, index) => item.id === next[index].id);
         items = append ? [...items, ...next] : next; total = result.total || 0; offset = items.length;
-        if (unchanged) say(total ? `共 ${total} 个手动编译版本` : '暂无版本；成功手动编译后会自动保存。'); else render();
-      } catch (error) { if (current === ticket) say(`版本读取失败：${error.message}。可点刷新重试。`); }
-      finally { if (current === ticket) refreshButton.disabled = false; }
+        if (unchanged) { more.hidden = items.length >= total; say(total ? `共 ${total} 个手动编译版本` : '暂无版本；成功手动编译后会自动保存。'); } else render();
+      } catch (error) { if (owns(owner)) say(`版本读取失败：${error.message}。可点刷新重试。`); }
+      finally { if (owns(owner)) { refreshButton.disabled = false; more.disabled = false; } }
     }
     refreshButton.addEventListener('click', () => void refresh()); more.addEventListener('click', () => void refresh(true));
-    return { refresh, clear: () => { ++ticket; items = []; list.textContent = ''; } };
+    return { refresh, clear: () => { ++ticket; scopeIdentity = null; reset(); } };
   }
   return { create };
 })();

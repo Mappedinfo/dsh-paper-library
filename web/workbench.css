@@ -25,3 +25,13 @@
 @media(min-width:1250px){.workspace{grid-template-columns:278px minmax(0,1fr)}.toolbar-paper{max-width:230px}.paper-header h2{font-size:21px}.paper-metadata{grid-template-columns:repeat(5,minmax(0,1fr))}.paper-metadata>div:nth-child(5){grid-column:auto}.paper-metadata>div:last-child{grid-column:auto}.paper-header{padding-top:16px}.catalog-expanded{display:block}}
 @media(max-width:820px){.toolbar-paper{display:none}.topbar{padding:7px 12px 0}.topbar .status{display:none}.paper-header{padding:12px 14px 8px}.paper-header h2{font-size:18px}.workspace{grid-template-columns:228px minmax(0,1fr)}.tabs{padding:0 14px;gap:18px}.tab-content{padding:14px}.paper-metadata{grid-template-columns:repeat(3,minmax(0,1fr))}.catalog-expanded{display:block}}
 @media(max-width:620px){:root{--workbench-height:99px}.brand{font-size:18px}.topbar .button{font-size:11px}.workspace{display:block}.workspace.show-detail>.library-pane{display:none}.workspace:not(.show-detail)>.detail-pane{display:none}.workspace.catalog-expanded>.library-pane{display:flex}.workspace.catalog-expanded>.detail-pane{display:none}.paper-header h2{font-size:18px}.paper-card h3{font-size:13px}.paper-card{padding:9px 12px}.shelf-actions{flex-direction:row}.library-footer{display:none}.metadata-extra{grid-template-columns:1fr}.metadata-extra .full-width{grid-column:auto}.ranking-row{grid-template-columns:80px 65px 1fr}.paper-metadata{font-size:10px}.mobile-back{font-size:11px;padding:0 0 6px}.catalog-controls select{max-width:none}.catalog-table td:first-child{min-width:200px}}
+#library-literature-content{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;overflow:hidden}
+#library-literature-content[hidden],#workspace-catalog-body[hidden],#workspace-versions[hidden]{display:none!important}
+#workspace-navigation-area{flex:0 0 auto;min-width:0;padding:0 10px;box-sizing:border-box}
+#workspace-navigation-home:empty{display:none}
+#workspace-catalog-body{flex:1;min-height:0;min-width:0;overflow:auto;padding:0 10px;box-sizing:border-box}
+.library-pane[data-workspace-section=board] .pane-heading,.library-pane[data-workspace-section=latex] .pane-heading{display:none}
+.latex-topbar>#workspace-navigation-area{border-bottom:1px solid var(--line,#ddd)}
+#workspace-versions{padding:6px 10px;border-bottom:1px solid var(--line,#ddd);font-size:12px}
+#workspace-versions>summary{cursor:pointer;font-weight:600;min-height:26px;line-height:26px}
+#workspace-version-list{max-height:34vh;overflow:auto;overscroll-behavior:contain}

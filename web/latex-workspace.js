@@ -20,7 +20,7 @@ window.PaperLatexWorkspace = (() => {
   const SPLIT_MIN = 25, SPLIT_MAX = 75;
   const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_path_font: 'pixel', latex_accent: 'system', latex_split: 50, latex_sync_folder: true };
 
-  function create({api, toast = () => {}, getLibrary = () => '', rail = null, onVersionSaved = () => {}}) {
+  function create({api, toast = () => {}, getLibrary = () => '', rail = null, onVersionSaved = () => {}, onContext = () => {}}) {
     const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
     let projects = [], project = null, tree = null, file = null, revision = null, pageCount = 0, page = 1, tab = 'pdf';
     let pageGeometry = []; let syncFlash = null;
@@ -37,7 +37,7 @@ window.PaperLatexWorkspace = (() => {
     let fileAbort = null, pageAbort = null, navAbort = null, mediaAbort = null, mediaRequest = 0;
     let pdfVersion = '', zoom = 1, mediaPath = null, mediaPage = 1, mediaZoom = 1, mediaCount = 0;
     let mediaGeometry = null, resizeTimer = null, outlineTimer = null;
-    let switching = false, entryRequest = 0;
+    let switching = false, entryRequest = 0, openRequest = 0;
     let pdfBuild = null, pdfTool = 'select';
     let pdfSource = { kind: 'current' }, pdfSourceEpoch = 0, pdfSourceIntent = 0;
 
@@ -57,6 +57,8 @@ window.PaperLatexWorkspace = (() => {
     })();
     view.hidden = true;
     view.textContent = '';
+    const currentContext = () => !view.hidden && project ? { kind: 'latex', id: project.id, title: project.title || '未命名 LaTeX 项目' } : null;
+    const notifyContext = (closed = false) => { if (!disposed && (!view.hidden || closed)) onContext(currentContext()); };
 
     const title = make('strong', 'latex-title', 'LaTeX 工作台'); title.id = 'latex-workspace-title';
     const back = make('button', 'button subtle', '返回文献库'); back.id = 'latex-back'; back.type = 'button';
@@ -720,9 +722,17 @@ window.PaperLatexWorkspace = (() => {
     });
 
     // ---- projects -----------------------------------------------------------------
-    async function refreshProjects(preferred) {
+    async function refreshProjects(preferred, valid = () => !disposed) {
       const result = await api('latex_project_list', { limit: 200, include_archived: false });
-      projects = result.projects || [];
+      const listed = (result.projects || []).filter(item => item && !item.archived);
+      if (preferred && !listed.some(item => item.id === preferred)) {
+        const fetched = await api('latex_project_get', { id: preferred, include_archived: false });
+        if (!fetched?.project || fetched.project.id !== preferred || fetched.project.archived || fetched.project.exists === false) throw new Error('指定的 LaTeX 项目不存在、已归档或文件夹已不可用。');
+        listed.push(fetched.project);
+      }
+      if (preferred && listed.find(item => item.id === preferred)?.exists === false) throw new Error('指定的 LaTeX 项目文件夹已不可用，当前稿件仍保留。');
+      if (!valid()) return null;
+      projects = listed;
       projectSelect.textContent = '';
       if (!projects.length) {
         const option = make('option', '', '还没有 LaTeX 项目'); option.value = ''; projectSelect.append(option);
@@ -762,7 +772,7 @@ window.PaperLatexWorkspace = (() => {
       mediaPreview.textContent = '从左侧「媒体」选择项目内的文件。'; mediaCrumb.textContent = ''; mediaInfo.textContent = '';
       setPreviewMessage('读取项目…');
       try { await loadTree(); }
-      catch (error) { if (ticket === generation) say(`项目导航读取失败：${error.message}`, true); return; }
+      catch (error) { if (ticket === generation) { say(`项目导航读取失败：${error.message}`, true); notifyContext(); } return; }
       if (ticket !== generation) return;
       const main = project.main_path || (tree?.files || []).find(item => item.kind === 'text')?.path;
       if (main) await openFile(main);
@@ -778,6 +788,7 @@ window.PaperLatexWorkspace = (() => {
       ai.checked = false; aiAnswer.textContent = ''; aiProposal.textContent = '';
       // Whichever surface hosts the collaboration, a project switch re-reads its state.
       if (tab === 'ai' || rail?.visible?.('latex-ai')) void aiStatus();
+      notifyContext();
     }
 
     async function renderEmpty() {
@@ -787,6 +798,7 @@ window.PaperLatexWorkspace = (() => {
       mainLabel.textContent = ''; setSaveState(''); buildInfo.textContent = '';
       errors.hidden = true; diagnosticsToggle.hidden = true; diagnosticsToggle.setAttribute('aria-expanded', 'false');
       lastBuildOk = null; autoPaused = false;
+      if (!view.hidden) notifyContext();
     }
 
     /** No project yet: explain the folder model inline and offer both entry points. */
@@ -1771,24 +1783,31 @@ window.PaperLatexWorkspace = (() => {
 
     /** Enter the workspace: the page becomes the surface, library hidden like the board's focus. */
     async function open(preferred) {
-      void loadSpelling();
-      view.hidden = false;
-      document.body.classList.add('latex-focused');
-      setTab('pdf');
-      showRail(true);
+      const intent = ++openRequest, valid = () => intent === openRequest && !disposed;
+      if (switching || compiling) return false;
       try {
         if (settingsRevision === null) await loadSettings();
+        if (!valid()) return false;
+        if (!await refreshProjects(preferred, valid) || !valid()) return false;
+        const wanted = preferred || (project?.id && projects.some(item => item.id === project.id) ? project.id : projects[0]?.id);
+        if ((project || !view.hidden) && !await savedBeforeLeaving(true) || !valid()) return false;
+        void loadSpelling();
+        view.hidden = false;
+        document.body.classList.add('latex-focused');
+        setTab('pdf');
+        showRail(true);
         void refreshWorkspace();
-        await refreshProjects(preferred);
-        const wanted = preferred && projects.some(item => item.id === preferred) ? preferred : project?.id && projects.some(item => item.id === project.id) ? project.id : projects[0]?.id;
         if (wanted) await selectProject(wanted);
-        else await renderEmpty();
+        else { project = null; await renderEmpty(); }
+        return valid() && (!wanted || currentContext()?.id === wanted);
       } catch (error) {
-        say(`无法读取项目列表：${error.message}`, true);
+        if (valid()) { say(`无法打开 LaTeX 项目：${error.message}`, true); if (view.hidden) toast(`无法打开 LaTeX 项目：${error.message}`, true); }
+        return false;
       }
     }
 
     async function close() {
+      ++openRequest;
       clearTimeout(timer); clearTimeout(compileTimer); closeMenu();
       if (!await savedBeforeLeaving(true)) return;
       cancelTranslation();
@@ -1796,6 +1815,7 @@ window.PaperLatexWorkspace = (() => {
       showRail(false);
       view.hidden = true;
       document.body.classList.remove('latex-focused');
+      notifyContext(true);
     }
 
     /** The collaboration lives in the reading rail when there is one (same type as 批注). */
@@ -1836,6 +1856,7 @@ window.PaperLatexWorkspace = (() => {
     return {
       open, close, showVersion, showCurrentPdf,
       isOpen: () => !view.hidden,
+      current: currentContext,
       refresh: () => open(project?.id),
       /** Used by the acceptance fixture to drive the surface without a real keyboard. */
       testHooks: {

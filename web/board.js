@@ -514,6 +514,8 @@
 
     const byId = id => board.nodes.find(node => node.id === id);
     const selectedNodes = () => board.nodes.filter(node => selection.has(node.id));
+    const currentContext = () => open && ready && boardId ? { kind: 'board', id: boardId, title: board.title || '未命名画板' } : null;
+    const notifyContext = (closed = false) => { if (live && (open || closed)) options.onContext?.(currentContext()); };
     const surfaceSize = () => { const rect = stage.getBoundingClientRect?.(); return { width: Math.max(1, rect?.width || 800), height: Math.max(1, rect?.height || 520) }; };
 
     // ── Conversation bridge ────────────────────────────────────────────────────────
@@ -691,6 +693,7 @@
         conflict = null;
         renderConflict();
         status('已保存', 'saved');
+        notifyContext();
         if (result.board.status !== board.status) render();
       } catch (error) {
         if (!live) return;
@@ -1178,6 +1181,9 @@
         option.value = summary.id;
         boardList.append(option);
       }
+      if (ready && boardId && !result.boards.some(summary => summary.id === boardId)) {
+        const option = el('option', null, `${board.title || '未命名画板'}（当前）`); option.value = boardId; boardList.append(option);
+      }
       boardSummaries = result.boards;
       if (boardId) boardList.value = boardId;
       renderFileList(boardSummaries);
@@ -1231,7 +1237,10 @@
       applyReady();
       resetAssociationSelection();
       let result;
-      try { result = await api('board_get', { id }); }
+      try {
+        result = await api('board_get', { id });
+        if (!result?.board || result.board.id !== id) throw new Error('读取的画板与指定目标不一致，原画板仍保留。');
+      }
       catch (error) {
         if (live && ticket === boardLoadTicket) { ready = Boolean(boardId); applyReady(); renderAssociations(); }
         throw error;
@@ -1257,6 +1266,7 @@
       if (boardList) boardList.value = boardId;
       applyReady();
       status('已载入');
+      notifyContext();
       if ($('board-project-panel')?.classList.contains('is-open')) void refreshAssociations();
       return true;
     }
@@ -1285,7 +1295,23 @@
       return flowOpening;
     }
 
-    async function openView() {
+    async function openView({ id: preferred } = {}) {
+      if (preferred !== undefined) {
+        if (typeof preferred !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(preferred)) { toast('指定的画板标识无效。', true); return false; }
+        const wasOpen = open;
+        try {
+          if (!await load(preferred) || !live) return false;
+          if (!wasOpen) {
+            open = true; root.hidden = false; doc.body.classList.add('board-mode');
+            applyReady(); notifyContext(); svg.focus?.();
+          }
+          try { await refreshList(); } catch { /* 已知目标可直接读取，目录失败不改为打开其他画板。 */ }
+          return true;
+        } catch (error) {
+          if (live) { status(error.message || '无法打开指定画板', 'error'); toast(error.message || '无法打开指定画板', true); }
+          return false;
+        }
+      }
       open = true;
       root.hidden = false;
       doc.body.classList.add('board-mode');
@@ -1348,6 +1374,7 @@
       setFocus(false);
       doc.body.classList.remove('board-mode');
       options.onCanvasContext?.(null);
+      notifyContext(true);
       onClose({ focus });
       return true;
     }
@@ -2230,6 +2257,7 @@
       },
       open: openView, close: closeView, prepareLeave, resize, load, refreshList, render,
       isOpen: () => open,
+      current: currentContext,
       isFlowOpen: () => flowUI?.isOpen() === true,
       board: () => board,
       selection: () => [...selection],
