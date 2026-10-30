@@ -10,6 +10,7 @@ import { createLanguageLearning } from './harness/language-learning.mjs';
 import { createPaperAnalysis } from './harness/paper-analysis.mjs';
 import { createChallengeMining } from './harness/challenge-mining.mjs';
 import { createBoardStore } from './harness/board-store.mjs';
+import { createBoardFlowStore } from './harness/board-flow-store.mjs';
 import { handleBoardRequest } from './harness/board-tools.mjs';
 import { createPaperLibrarySettings } from './harness/settings.mjs';
 import { createInkQueue } from './ink-queue.mjs';
@@ -23,7 +24,7 @@ for (const name of ['paper-analysis.js','paper-analysis.css']) staticFiles[name]
 for (const name of ['icons.js','icons.css','settings.js','settings.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 staticFiles['return-to-dsh.js']=['return-to-dsh.js','text/javascript;charset=utf-8'];
 for (const name of ['challenge-mining.js','challenge-mining.css','annotation-threads.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
-for (const name of ['board.js','board.css','board-source.js','board-render.js','board-bridge.js','board-mermaid.js','board-drawio.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['board.js','board.css','board-flow.js','board-source.js','board-render.js','board-bridge.js','board-mermaid.js','board-drawio.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 const languageActions = new Set(['language_settings_get','language_settings_update','language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
 for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js','ink-diagnostics.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
@@ -116,6 +117,7 @@ export function createFetchHandler(options = {}) {
   const challengeRecords = options.challengeMining || createChallengeMining({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python});
   // Whiteboards are local state only: they never initialize a model route or the Python worker.
   const boards = options.boards || createBoardStore({ localState });
+  const boardFlows = options.boardFlows || createBoardFlowStore({ localState, boards });
   const inkQueue = options.inkQueue || createInkQueue({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python,autoStart:false});
   const inkDiagnostics = createInkDiagnostics({store:localState});
   const handle = async function handle(request) {
@@ -163,7 +165,7 @@ export function createFetchHandler(options = {}) {
             : input?.action === 'catalog_resource_list' ? await catalogResources(input, { slidesList: () => slidesRequest({ action: 'slides_catalog' }), resourceList: payload => dispatch(payload, { ...options, signal: request.signal }) })
             : stateAction ? await stateRequest(localState, input)
             : typeof input?.action === 'string' && input.action.startsWith('slides_') ? await slidesRequest(input)
-            : boardAction ? await handleBoardRequest(boards, input, { writer: 'user' })
+            : boardAction ? await handleBoardRequest(boards, input, { writer: 'user', flowStore: boardFlows })
             : typeof input?.action === 'string' && input.action.startsWith('paper_analysis_') ? await analysisRecords(input)
             : typeof input?.action === 'string' && (input.action.startsWith('challenge_extract_') || input.action.startsWith('challenge_theme_suggest_')) ? await challengeRecords(input, { signal: request.signal })
             : input?.action === 'knowledge_generate' ? await options.libraryKnowledge(input, { signal: request.signal })
@@ -217,7 +219,7 @@ export function createFetchHandler(options = {}) {
           headers:{...baseHeaders,'Content-Type':'application/pdf','Content-Length':String(info.size),'Content-Disposition':`attachment; filename="paper.pdf"; filename*=UTF-8''${encodeURIComponent(filename)}`},
         });
       }
-      if (['latex-editor.js', 'latex-spelling.js', 'slides-editor.js', 'slides-editor.css'].includes(path)) {
+      if (['latex-editor.js', 'latex-spelling.js', 'slides-editor.js', 'slides-editor.css', 'paper-flow-editor.js', 'paper-flow-editor.css'].includes(path)) {
         const body = await readFile(join(projectRoot, 'lib', path));
         return new Response(request.method === 'HEAD' ? null : body, { headers: { ...baseHeaders, 'Content-Type': path.endsWith('.css') ? 'text/css;charset=utf-8' : 'text/javascript;charset=utf-8' } });
       }

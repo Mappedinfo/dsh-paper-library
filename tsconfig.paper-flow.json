@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext", "moduleResolution": "Bundler", "jsx": "react-jsx",
+    "resolveJsonModule": true, "allowSyntheticDefaultImports": true,
+    "strict": true, "allowJs": true, "skipLibCheck": true, "noEmit": true
+  },
+  "include": ["src/paper-flow/**/*.ts", "src/paper-flow/**/*.tsx", "types/paper-flow-env.d.ts"]
+}

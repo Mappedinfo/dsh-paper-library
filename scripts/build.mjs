@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises'
 import { build } from 'esbuild'
 import { buildSlides } from './build-slides.mjs'
+import { buildPaperFlow } from './build-paper-flow.mjs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -41,4 +42,5 @@ await build({
   alias: Object.fromEntries(['aff', 'dic'].map(extension => [`dictionary-en/index.${extension}`, join(dirname(fileURLToPath(import.meta.resolve('dictionary-en'))), `index.${extension}`)])),
 })
 await buildSlides()
-console.log('Built Paper Library client, LaTeX editor and PlainDeck slides. Host entry remains native ESM.')
+await buildPaperFlow()
+console.log('Built Paper Library client, LaTeX editor and PlainDeck slides, plus the paper flow workbench. Host entry remains native ESM.')

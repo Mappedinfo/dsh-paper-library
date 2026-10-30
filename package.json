@@ -75,7 +75,16 @@
     "tsconfig.slides.json",
     "types/slides-env.d.ts",
     "docs/slides-workbench.md",
-    "!src/slides/*.test.mjs"
+    "!src/slides/*.test.mjs",
+    "vendor/paper-flow",
+    "src/paper-flow",
+    "examples/paper-flow-teaching.json",
+    "lib/paper-flow-editor.js",
+    "lib/paper-flow-editor.css",
+    "scripts/build-paper-flow.mjs",
+    "tsconfig.paper-flow.json",
+    "types/paper-flow-env.d.ts",
+    "docs/paper-flow.md"
   ],
   "dsh": {
     "bundle": {
@@ -125,7 +134,8 @@
     "verify:pages": "node scripts/verify-pages.mjs",
     "typecheck:slides": "tsc -p tsconfig.slides.json",
     "test:slides": "npm run build && node --test tests-js/slides-*.test.mjs src/slides/*.test.mjs",
-    "test:reader-layout": "node scripts/reader-layout-browser-fixture.mjs"
+    "test:reader-layout": "node scripts/reader-layout-browser-fixture.mjs",
+    "typecheck:paper-flow": "tsc -p tsconfig.paper-flow.json"
   },
   "dependencies": {
     "@citation-js/core": "^0.7.18",

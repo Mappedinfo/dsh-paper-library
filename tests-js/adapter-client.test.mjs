@@ -12,7 +12,8 @@ test('published client bundle registers entry tabs and preserves hidden slide dr
   const bodies = new Map()
   const sources = []
   const effects = []
-  const react = { createElement: (type, props) => ({ type, props }), useRef: value => ({ current: value }), useEffect: () => {}, useState: value => [value, () => {}] }
+  let flowActive = false
+  const react = { createElement: (type, props) => ({ type, props }), useRef: value => ({ current: value }), useEffect: () => {}, useState: value => [flowActive ? true : value, () => {}] }
   new Script(readFileSync(bundle, 'utf8')).runInNewContext({
     window: { location: { origin: 'http://localhost:3080' }, addEventListener: () => {}, removeEventListener: () => {}, __ModuleLoader__: { load: entry => {
       assert.equal(entry.id, '@mappedinfo/dsh-paper-library')
@@ -27,9 +28,9 @@ test('published client bundle registers entry tabs and preserves hidden slide dr
     sessions: { subagentAddress: () => undefined },
     inputTriggers: { registerSource: source => { sources.push(source); return () => { const index = sources.indexOf(source); if (index >= 0) sources.splice(index, 1) } } },
     slots: {
-      inject: (name, callback) => { assert.ok(['sidebar.right.pane.tab', 'conversation.input.overlay', 'conversation.input.dock'].includes(name)); return callback() },
+      inject: (name, callback) => { assert.ok(['sidebar.right.pane.tab', 'conversation.input.overlay', 'conversation.input.dock', 'settings.section'].includes(name)); return callback() },
       register: (definition, component) => {
-        const key = definition.name === 'sidebar.right.pane.tab' ? `body:${definition.key}` : definition.name === 'conversation.input.dock' ? `dock:${definition.id}` : 'mount'
+        const key = definition.name === 'sidebar.right.pane.tab' ? `body:${definition.key}` : definition.name === 'conversation.input.dock' ? `dock:${definition.id}` : definition.name === 'settings.section' ? `settings:${definition.id}` : 'mount'
         if (definition.name === 'sidebar.right.pane.tab') bodies.set(definition.key, { definition, component })
         registrations.set(key, { definition, component })
         return () => { registrations.delete(key); bodies.delete(definition.key) }
@@ -48,6 +49,8 @@ test('published client bundle registers entry tabs and preserves hidden slide dr
   assert.equal(slidesTab.guide[0].order, 18)
   assert.equal(libraryTab.kind, 'paper-library')
   assert.equal(canvasTab.kind, 'paper-library-whiteboard')
+  assert.equal(libraryTab.keepMounted, true, 'the library body keeps a live flow on tab switch')
+  assert.equal(canvasTab.keepMounted, true, 'the board body keeps a live flow on tab switch')
   assert.notEqual(canvasTab.kind, libraryTab.kind, 'two tab types may not share a kind')
   assert.equal(canvasTab.priority, 'extension')
   // Read the vm realm's arrays through a host-realm Array.from: a mapped result would carry
@@ -82,6 +85,11 @@ test('published client bundle registers entry tabs and preserves hidden slide dr
   const component = bodies.get(libraryTab.id).component
   const hidden = component({ useTabInfo: () => ({ tab: { visible: false } }) })
   assert.equal(hidden.type(hidden.props), null)
+  flowActive = true
+  const retainedElement = component({ useTabInfo: () => ({ tab: { visible: false } }) })
+  const retained = retainedElement.type(retainedElement.props)
+  assert.equal(retained.type, 'iframe'); assert.equal(retained.props.style.display, 'none')
+  flowActive = false
   const visible = component({ useTabInfo: () => ({ tab: { visible: true } }) })
   const iframe = visible.type(visible.props)
   assert.equal(iframe.type, 'iframe')

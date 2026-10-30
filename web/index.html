@@ -23,6 +23,7 @@
   <link rel="stylesheet" href="./latex-workspace.css">
   <link rel="stylesheet" href="./floating-windows.css">
   <script src="./floating-windows.js" defer></script>
+  <script src="./board-flow.js" defer></script>
   <script src="./board-source.js" defer></script>
   <script src="./board-render.js" defer></script>
   <script src="./board-bridge.js" defer></script>
@@ -176,6 +177,7 @@
           <button id="board-fullscreen" class="button subtle" type="button" aria-pressed="false" title="进入全屏并专注画板；退出全屏后恢复之前的专注状态">全屏 ⤢</button>
           <button id="board-focus" class="button subtle" type="button" aria-pressed="false" title="在当前窗口专注画板，隐藏顶栏、文献库与阅读批注（Esc 退出）">专注</button>
         </div>
+        <button id="board-flow-open" class="button subtle" type="button" title="打开当前画板的论文流程编辑、比较与导入导出">论文流程</button>
         <button id="board-send" class="button subtle" type="button" title="把这张画板作为不可变引用放进 DSH 主输入框；只准备草稿，不会发送">放入对话</button>
       </div>
 
@@ -347,6 +349,7 @@
         <button type="button" class="button dialog-close">关闭</button>
       </div>
     </dialog>
+    <div id="board-flow-view" hidden aria-label="论文流程工作区"></div>
   </section>
   <section id="latex-view" class="latex-view" hidden aria-label="LaTeX 工作台"></section>
   </main>

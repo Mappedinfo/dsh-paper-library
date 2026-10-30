@@ -59,8 +59,14 @@ function boardFrom(input) {
 }
 
 /** One request path for both callers; `writer` is 'user' or 'llm'. */
-export async function handleBoardRequest(store, input, { writer = 'user' } = {}) {
+export async function handleBoardRequest(store, input, { writer = 'user', flowStore } = {}) {
   const action = input?.action
+  if (action === 'board_flow_get' || action === 'board_flow_save') {
+    if (writer !== 'user') throw Object.assign(new Error('paperFlow 工作区目前只供读者本人操作。'), { code: 'BOARD_FORBIDDEN', status: 403 })
+    if (!flowStore) throw Object.assign(new Error('paperFlow 工作区存储尚未连接。'), { code: 'BOARD_FLOW_STORE_MISSING', status: 500 })
+    if (action === 'board_flow_get') return flowStore.get(input.id)
+    return flowStore.save({ id: input.id, workspace: input.workspace, expectedRevision: input.expected_revision })
+  }
   if (action === 'board_list') return store.list()
   if (action === 'board_get') return store.read(input.id)
   if (action === 'board_create') return store.create({ board: boardFrom(input) ?? {}, origin: writer })

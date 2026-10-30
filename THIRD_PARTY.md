@@ -18,6 +18,8 @@ Project scaffolding was generated through the author's `academic-templates/dev-p
 | CodeMirror 6、LaTeX 模式、Lezer 及配套包 | 本地打包的源码编辑器 | [CodeMirror](https://codemirror.net/) / MIT；依赖许可声明保存在 [codemirror-MIT.txt](licenses/codemirror-MIT.txt) |
 | dictionary-en、nspell、is-buffer | 本地英文拼写字典及检查器 | [dictionary-en](https://github.com/wooorm/dictionaries) / MIT 和 BSD，[许可](licenses/dictionary-en.txt)；[nspell](https://github.com/wooorm/nspell) / [MIT](licenses/nspell.txt)；is-buffer / [MIT](licenses/is-buffer.txt) |
 | PlainDeck | Slides 编辑器、开放项目格式、模板与渲染器 | [PlainDeck](https://github.com/Mappedinfo/PlainDeck) / MIT；固定源码与原许可见 [子项目说明](vendor/plaindeck/README.md)，Juya 派生设计目录的原声明保留在子项目内 |
+| paperFlow 通用组件 | 论文流程编辑、路由与比较 | 用户明确授权复制的通用源码；来源与授权边界见 [组件说明](vendor/paper-flow/README.md)，不含原研究适配器或资料 |
+| Dagre、内嵌 Graphlib、MathJax 3.2.2 | 流程布局与数学 SVG | 原 MIT、BSD-3-Clause、Apache-2.0 通知分别保留于 [组件 core 目录](vendor/paper-flow/core/)；不由项目 MIT 重新授权 |
 | React、React DOM、zustand、Zod | 本地打包的 Slides 界面与校验 | MIT；分别保留在 [Slides 依赖许可](licenses/slides/) |
 | Lucide React | 文献库与 Slides 工具图标 | ISC；保留在 [lucide-react-LICENSE.txt](licenses/slides/lucide-react-LICENSE.txt) |
 | JSZip | 演示项目 ZIP 导入／导出 | 采用 MIT 许可选项；原双许可声明保留在 [jszip-LICENSE.txt](licenses/slides/jszip-LICENSE.txt) |

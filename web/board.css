@@ -204,3 +204,8 @@ body.board-focused #board-view{grid-column:1}
   .board-menu{left:4px;right:4px;max-width:none}
   .board-inspector{left:4px;right:4px}
 }
+
+#board-view{position:relative}
+#board-flow-view{position:absolute;inset:0;z-index:30;min-width:0;min-height:0;background:var(--paper)}
+#board-flow-view[hidden]{display:none}
+#board-view.has-paper-flow>.board-bar,#board-view.has-paper-flow>.board-stage{visibility:hidden;pointer-events:none}

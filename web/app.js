@@ -1113,7 +1113,7 @@ $('feedback-model').addEventListener('change', () => { const model = manualModel
 $('link-open').addEventListener('click', openLink); $('link-form').addEventListener('submit', saveLink); $('link-search').addEventListener('input', debounce(loadLinkTargets));
 function activateGraphNode(event) { const node = event.target.closest('[data-graph-id]'); if (node && node.dataset.nodeType !== 'tag') openPaper(node.dataset.graphId); }
 $('graph-stage').addEventListener('click', activateGraphNode); $('graph-stage').addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateGraphNode(event); } });
-document.addEventListener('keydown', async (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if (handwritingUI?.isOpen()) { toast('请先保存或关闭手写便签。'); return; } if($('resource-dialog')?.open&&resourceUI?.closeDialog&&!await resourceUI.closeDialog())return; for (const dialog of document.querySelectorAll('dialog[open]'))if(dialog.id!=='resource-dialog')dialog.close(); if(readingPanels&&state.active&&!workbenchUI?.isTable())readingPanels.showLibrary();else document.querySelector('.workspace').classList.remove('show-detail'); $('search').focus(); $('search').select(); } });
+document.addEventListener('keydown', async (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if(boardUI?.isFlowOpen()&&!await boardUI.close({focus:false}))return; if (handwritingUI?.isOpen()) { toast('请先保存或关闭手写便签。'); return; } if($('resource-dialog')?.open&&resourceUI?.closeDialog&&!await resourceUI.closeDialog())return; for (const dialog of document.querySelectorAll('dialog[open]'))if(dialog.id!=='resource-dialog')dialog.close(); if(readingPanels&&state.active&&!workbenchUI?.isTable())readingPanels.showLibrary();else document.querySelector('.workspace').classList.remove('show-detail'); $('search').focus(); $('search').select(); } });
 function publishReaderState() {
   if (restoringReader || !state.active || state.active.resource_kind === 'dataset' || workbenchUI?.isTable() || (workbenchUI && readerPaperId !== state.active.id)) return true;
   const snapshot = { paperId: state.active.id, page: state.page, tab: state.tab, chatDraft: paperChatUI?.draft() || '', chatContext: paperChatUI?.context() || { annotationRefs: [] },
@@ -1651,6 +1651,7 @@ async function openMembership(paperId){
   }
 }
 boardUI = window.PaperBoard?.create({root:$('board-view'),api,toast,
+  prepareReturnToDsh,
   onClose:({focus})=>{void refreshBoardShelf();if(focus)$('board-open').focus();},
   onRequestPapers:()=>openBoardPaperPicker(),
   onOpenPaper:id=>{const item=state.items.find(value=>value.id===id);void openResource(item||{id});},

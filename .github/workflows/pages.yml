@@ -15,6 +15,12 @@ on:
       - 'site/**'
       - 'web/**'
       - 'scripts/build-site.mjs'
+      - 'scripts/build-paper-flow.mjs'
+      - 'src/paper-flow/**'
+      - 'vendor/paper-flow/**'
+      - 'examples/paper-flow-teaching.json'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -35,6 +41,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
+      - name: Install build dependencies
+        run: npm ci --ignore-scripts
       - name: Assemble the static whiteboard
         run: node scripts/build-site.mjs
       - uses: actions/configure-pages@v6

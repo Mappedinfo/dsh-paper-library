@@ -458,6 +458,8 @@
     let board = emptyBoard();
     let boardId = null;
     let boardLoadTicket = 0;
+    let flowUI = null, flowOpening = null;
+    const publishFlowWindow = active => { if (window.parent && window.parent !== window && window.location?.origin) window.parent.postMessage({type:'paper-library:flow-window',version:1,active}, window.location.origin); };
     let revision = 0;
     let view = { x: 0, y: 0, zoom: 1 };
     let tool = 'select';
@@ -1084,7 +1086,7 @@
     }
 
     function onKeyDown(event) {
-      if (!open) return;
+      if (!open || flowUI?.isOpen()) return;
       const target = event.target;
       const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
       if (event.key === ' ') spaceDown = true;
@@ -1144,6 +1146,7 @@
         const button = $(id);
         if (button) button.disabled = !ready;
       }
+      if ($('board-flow-open')) $('board-flow-open').disabled = !ready;
       stage.classList.toggle('is-loading', !ready);
     }
 
@@ -1208,6 +1211,8 @@
 
     async function load(id, { discard = false } = {}) {
       const ticket = ++boardLoadTicket;
+      if (flowUI?.isOpen() && !await flowUI.close()) { if (boardList) boardList.value = boardId; return false; }
+      if (!live || ticket !== boardLoadTicket) return false;
       // Switching boards settles the outgoing board first; otherwise its last edit
       // would be written to the board being opened.
       if (boardId && !discard) {
@@ -1254,6 +1259,28 @@
       return true;
     }
 
+    async function openFlow() {
+      if (!ready || !boardId) { toast('请先打开一张画板。', true); return false; }
+      if (flowOpening) return flowOpening;
+      const id = boardId, ticket = boardLoadTicket;
+      flowOpening = (async () => {
+        if (!await prepareLeave()) return false;
+        const factory = options.flowFactory || await window.PaperBoardFlowLoader?.load();
+        if (!factory || !live || id !== boardId || ticket !== boardLoadTicket) return false;
+        const host = $('board-flow-view');
+        if (!host) throw Error('流程工作区容器未就绪，请刷新页面。');
+        flowUI ||= factory.create({ root: host, api, toast, prepareReturnToDsh: options.prepareReturnToDsh,
+          onClose() { publishFlowWindow(false); root.classList.remove('has-paper-flow'); host.hidden = true; stage.focus?.(); } });
+        closeMenus(null);
+        const ok = await flowUI.open({ id, title: board.title });
+        if (!live || id !== boardId || ticket !== boardLoadTicket) { await flowUI.close(); return false; }
+        if (ok) { root.classList.add('has-paper-flow'); publishFlowWindow(true); }
+        return ok;
+      })().catch(error => { toast(error.message || '流程组件无法打开，请重试。', true); return false; })
+        .finally(() => { flowOpening = null; });
+      return flowOpening;
+    }
+
     async function openView() {
       open = true;
       root.hidden = false;
@@ -1291,6 +1318,7 @@
     }
 
     async function prepareLeave() {
+      if (flowUI?.isOpen() && !await flowUI.prepareLeave()) return false;
       // A gesture in flight must not leave its preview behind in a view that is closing.
       cancelDrag();
       commitTextEdit();
@@ -1304,6 +1332,7 @@
 
     async function closeView({ focus = true } = {}) {
       if (!await prepareLeave()) return false;
+      if (flowUI?.isOpen() && !await flowUI.close()) return false;
       if (fullscreenTask) await fullscreenTask;
       if (doc.fullscreenElement === root) await doc.exitFullscreen?.().catch(() => {});
       open = false;
@@ -1323,6 +1352,7 @@
     }
 
     async function createBoard() {
+      if (flowUI?.isOpen() && !await flowUI.close()) return;
       try {
         const result = await api('board_create', { board: { title: '未命名画板', nodes: [], edges: [] } });
         if (!live) return;
@@ -1334,6 +1364,7 @@
 
     async function deleteBoard(target = boardId) {
       if (!target) return;
+      if (target === boardId && flowUI?.isOpen() && !await flowUI.close()) return;
       const name = target === boardId ? board.title : (boardSummaries.find(summary => summary.id === target)?.title ?? target);
       if (typeof doc.defaultView?.confirm === 'function' && !doc.defaultView.confirm(`删除画板「${name}」？画板记录会保留在本地状态目录，可由人工恢复。`)) return;
       // Deleting another record leaves the open one alone.
@@ -1349,6 +1380,7 @@
       }
       // Deleting cancels the debounce instead of settling: a pending save would
       // otherwise write the board back and resurrect a record the reader removed.
+      const deletingWasPending = pendingSave;
       pendingSave = false;
       if (saveTimer !== null) { clearTimeout(saveTimer); saveTimer = null; }
       try {
@@ -1359,7 +1391,11 @@
         // openView re-lists and either loads the next board or creates a fresh one.
         await openView();
         toast('画板已删除');
-      } catch (error) { toast(error.message || '删除画板失败', true); }
+      } catch (error) {
+        pendingSave = deletingWasPending || pendingSave;
+        status('删除未完成；当前改动仍保留，请保存后重试。', 'error');
+        toast(error.message || '删除画板失败', true);
+      }
     }
 
     function renameBoard(value) {
@@ -2160,15 +2196,21 @@
       }
     }
 
+    const flowButton = $('board-flow-open');
+    if (flowButton) {
+      flowButton.hidden = capabilities.paperFlow === false || !(options.flowFactory || window.PaperBoardFlowLoader);
+      flowButton.addEventListener('click', () => void openFlow());
+    }
     bind();
     fillSelects();
     setTool('select');
     render();
 
     return {
-      links, setLink, setFocus, setProjects, searchAssociations,
+      links, setLink, setFocus, setProjects, searchAssociations, openFlow,
       open: openView, close: closeView, prepareLeave, resize, load, refreshList, render,
       isOpen: () => open,
+      isFlowOpen: () => flowUI?.isOpen() === true,
       board: () => board,
       selection: () => [...selection],
       flush,
@@ -2189,6 +2231,9 @@
       outline: (maximum) => outline({ ...board, title: board.title }, maximum),
       setTool,
       dispose() {
+        ++boardLoadTicket;
+        publishFlowWindow(false);
+        flowUI?.dispose();
         cancelDrag();
         commitTextEdit();
         closeTextEdit();

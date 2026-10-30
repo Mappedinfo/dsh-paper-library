@@ -1,0 +1,121 @@
+.paper-flow-workbench {
+  background: #fff;
+  color: #161616;
+  border: 1px solid #d4d4d4;
+  border-radius: 8px;
+  position: relative;
+  padding: 8px;
+  font-size: 14px;
+}
+.paper-flow-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  border-bottom: 1px solid #d4d4d4;
+}
+.paper-flow-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+}
+.paper-flow-toolbar select,
+.paper-flow-toolbar button,
+.paper-flow-toolbar input {
+  font: inherit;
+  min-height: 29px;
+  border: 1px solid #8d8d8d;
+  border-radius: 4px;
+  background: #fff;
+  color: #161616;
+  max-width: 260px;
+  padding: 3px 7px;
+}
+.paper-flow-toolbar button {
+  cursor: pointer;
+}
+.paper-flow-toolbar button[aria-pressed="true"] {
+  background: #0043ce;
+  color: white;
+  border-color: #0043ce;
+}
+.paper-flow-file {
+  border: 1px solid #8d8d8d;
+  padding: 3px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.paper-flow-file input {
+  max-width: 210px;
+}
+.paper-flow-pair,
+.paper-flow-summaries {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.paper-flow-pair > section {
+  min-width: 0;
+  border: 1px solid #d4d4d4;
+  border-top: 3px solid #005ea8;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.paper-flow-pair > section + section {
+  border-top-color: #b42c48;
+}
+.paper-flow-workbench h3 {
+  font-size: 15px;
+  margin: 8px 10px;
+}
+.paper-flow-workbench pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  max-height: 350px;
+  overflow: auto;
+}
+.paper-flow-summaries {
+  padding: 9px 4px;
+}
+.paper-flow-summaries p {
+  margin: 4px 0;
+  color: #525252;
+  font-size: 13px;
+}
+.paper-flow-report {
+  border: 1px solid #d4d4d4;
+  border-radius: 5px;
+  padding: 10px;
+  margin-top: 10px;
+}
+.paper-flow-report summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.paper-flow-details {
+  position: fixed;
+  right: 12px;
+  top: 80px;
+  bottom: 20px;
+  width: 420px;
+  max-width: 80vw;
+  overflow: auto;
+  padding: 18px;
+  background: white;
+  border: 1px solid #8d8d8d;
+  box-shadow: 0 5px 18px #0002;
+  z-index: 1500;
+}
+.paper-flow-details dd {
+  margin: 0;
+}
+.paper-flow-workbench.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  overflow: auto;
+  border-radius: 0;
+  z-index: 1400;
+}

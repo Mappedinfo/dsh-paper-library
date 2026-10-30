@@ -6,6 +6,7 @@ import { createAnnotationReferences, draftAnnotationReferences } from './annotat
 import { createBoardReferences } from './board-references.mjs'
 import { registerPaperLibrarySettings } from './settings.mjs'
 import { bindReturnToDsh } from './return-to-dsh.mjs'
+import { bindFlowWindow, retainFlowFrame } from './flow-lifecycle.mjs'
 
 const ID = '@mappedinfo/dsh-paper-library'
 const NS = 'paperLibrary'
@@ -52,7 +53,7 @@ function SlidesGlyph({ size = 20, className }) {
 export const name = 'paper-library-client'
 export const inject = ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'modelDirectories', 'sessions', 'conversation', 'inputTriggers']
 
-/** The reader exists only while its pane is visible; no background PDF renderer.
+/** A hidden reader is released unless it contains a live flow workspace.
  *  The slide editor keeps its iframe mounted when hidden to protect editing drafts.
  *  `view` picks which surface this pane shows: the library, the whiteboard alone
  *  (`?view=board`), or the LaTeX workbench alone (`?view=latex`). A library tab may
@@ -64,10 +65,14 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
   const slides = view === 'slides'
   const { tab } = useTabInfo()
   const frame = useRef(null)
+  const [flowActive, setFlowActive] = useState(false)
   const requestedPaper = !canvas && !latex && !slides ? tab.navigation?.params?.paper : undefined
   const requestedSlides = slides && /^pd-[a-f0-9]{32}$/.test(tab.navigation?.params?.project || '') ? tab.navigation.params.project : undefined
+  const paperForFrame = useRef(requestedPaper)
+  if (!flowActive) paperForFrame.current = requestedPaper
   const initialSlides = useRef(requestedSlides).current
   const navigationRevision = tab.navigation?.revision ?? 0
+  useEffect(() => bindFlowWindow({ window, getFrame: () => frame.current, onChange: setFlowActive }), [])
   useEffect(() => {
     if (!tab.visible || !frame.current?.contentWindow) return undefined
     return conversationBridge.attach(frame.current.contentWindow, tab.id)
@@ -98,13 +103,12 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
     if (!tab.visible || !frame.current?.contentWindow) return undefined
     return bindReturnToDsh({ window, target: frame.current.contentWindow, tabId: tab.id, sessionId, sidebar: sidebarRight })
   }, [sidebarRight, sessionId, tab.id, tab.visible])
-  // Slides contain a live editing draft. Preserve that iframe while hidden so a
-  // tab switch cannot discard typing before autosave, or a failed-save draft.
-  if (!tab.visible && !slides) return null
+  // Preserve a live flow or slide editor, including failed-save drafts, across tab switches.
+  if (!retainFlowFrame({ visible: tab.visible, slides, flowActive })) return null
   const src = canvas ? '/api/paper-library/?view=board'
     : latex ? '/api/paper-library/?view=latex'
     : slides ? `/api/paper-library/slides.html${initialSlides ? `?project=${encodeURIComponent(initialSlides)}` : ''}`
-    : requestedPaper ? `/api/paper-library/?paper=${encodeURIComponent(requestedPaper)}`
+    : paperForFrame.current ? `/api/paper-library/?paper=${encodeURIComponent(paperForFrame.current)}`
     : '/api/paper-library/'
   return createElement('iframe', {
     ref: frame,
@@ -232,6 +236,7 @@ export function apply(ctx) {
   ctx.effect(() => ctx.sidebarRightTabs.register({
     id: ID,
     kind: 'paper-library',
+    keepMounted: true,
     priority: 'extension',
     title: () => t('title'),
     guide: [{ order: 15, title: () => t('title'), description: () => t('description'), icon: LibraryGlyph }],
@@ -241,6 +246,7 @@ export function apply(ctx) {
   ctx.effect(() => ctx.sidebarRightTabs.register({
     id: CANVAS_ID,
     kind: CANVAS_KIND,
+    keepMounted: true,
     priority: 'extension',
     title: () => t('canvas.title'),
     guide: [{ order: 16, title: () => t('canvas.title'), description: () => t('canvas.description'), icon: CanvasGlyph }],

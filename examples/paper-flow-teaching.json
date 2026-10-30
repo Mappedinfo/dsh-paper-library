@@ -1,0 +1,228 @@
+{
+  "schemaVersion": 1,
+  "kind": "paper-flow-workspace",
+  "documents": [
+    {
+      "schemaVersion": 1,
+      "kind": "paper-flow-document",
+      "paper": {
+        "id": "teaching-a",
+        "title": "教学示例 A：文本清理",
+        "citation": "仅用于接口教学，非真实论文或实验结果"
+      },
+      "flows": [
+        {
+          "id": "main",
+          "name": "教学示例 A：文本清理",
+          "stages": [
+            {
+              "id": "materials",
+              "title": "准备材料"
+            },
+            {
+              "id": "analysis",
+              "title": "分析"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "input",
+              "label": "文本材料",
+              "type": "data",
+              "stage": "materials",
+              "ports": {
+                "in": {},
+                "out": {
+                  "text": {
+                    "type": "text"
+                  }
+                }
+              },
+              "semantic_key": "teaching.text",
+              "op": "load",
+              "config": {
+                "format": "utf8"
+              }
+            },
+            {
+              "id": "process",
+              "label": "清理空白字符",
+              "type": "method",
+              "stage": "analysis",
+              "ports": {
+                "in": {
+                  "text": {
+                    "type": "text"
+                  }
+                },
+                "out": {
+                  "text": {
+                    "type": "text"
+                  }
+                }
+              },
+              "semantic_key": "teaching.normalize",
+              "op": "trim_whitespace",
+              "config": {
+                "recipe": "trim_whitespace"
+              },
+              "logical": {
+                "key": "teaching.text_preparation",
+                "function": "normalize",
+                "label": "材料整理",
+                "constraints": {
+                  "material": "text"
+                }
+              },
+              "detail": "教学步骤；此处的功能对应不表示两种规则相同。"
+            },
+            {
+              "id": "result",
+              "label": "整理后文本",
+              "type": "representation",
+              "stage": "analysis",
+              "ports": {
+                "in": {
+                  "text": {
+                    "type": "text"
+                  }
+                },
+                "out": {}
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "to-process",
+              "from": "input:text",
+              "to": "process:text",
+              "label": "输入文本"
+            },
+            {
+              "id": "to-result",
+              "from": "process:text",
+              "to": "result:text",
+              "label": "整理产物"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "paper-flow-document",
+      "paper": {
+        "id": "teaching-b",
+        "title": "教学示例 B：文本规范化",
+        "citation": "仅用于接口教学，非真实论文或实验结果"
+      },
+      "flows": [
+        {
+          "id": "main",
+          "name": "教学示例 B：文本规范化",
+          "stages": [
+            {
+              "id": "materials",
+              "title": "准备材料"
+            },
+            {
+              "id": "analysis",
+              "title": "分析"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "input",
+              "label": "文本材料",
+              "type": "data",
+              "stage": "materials",
+              "ports": {
+                "in": {},
+                "out": {
+                  "text": {
+                    "type": "text"
+                  }
+                }
+              },
+              "semantic_key": "teaching.text",
+              "op": "load",
+              "config": {
+                "format": "utf8"
+              }
+            },
+            {
+              "id": "process",
+              "label": "Unicode 规范化",
+              "type": "method",
+              "stage": "analysis",
+              "ports": {
+                "in": {
+                  "text": {
+                    "type": "text"
+                  }
+                },
+                "out": {
+                  "text": {
+                    "type": "text"
+                  }
+                }
+              },
+              "semantic_key": "teaching.normalize",
+              "op": "unicode_normalization",
+              "config": {
+                "recipe": "unicode_normalization"
+              },
+              "logical": {
+                "key": "teaching.text_preparation",
+                "function": "normalize",
+                "label": "材料整理",
+                "constraints": {
+                  "material": "text"
+                }
+              },
+              "detail": "教学步骤；此处的功能对应不表示两种规则相同。"
+            },
+            {
+              "id": "result",
+              "label": "整理后文本",
+              "type": "representation",
+              "stage": "analysis",
+              "ports": {
+                "in": {
+                  "text": {
+                    "type": "text"
+                  }
+                },
+                "out": {}
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "to-process",
+              "from": "input:text",
+              "to": "process:text",
+              "label": "输入文本"
+            },
+            {
+              "id": "to-result",
+              "from": "process:text",
+              "to": "result:text",
+              "label": "整理产物"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "selection": {
+    "left": {
+      "documentId": "teaching-a",
+      "flowId": "main"
+    },
+    "right": {
+      "documentId": "teaching-b",
+      "flowId": "main"
+    }
+  }
+}

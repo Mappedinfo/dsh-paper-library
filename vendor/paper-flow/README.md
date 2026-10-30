@@ -1,0 +1,13 @@
+# 通用论文流程组件来源
+
+本目录按用户 2026-10-30 的明确指令，从其提供的 website/src/lib/paperFlow 工作树复制。源仓库基准提交为 826173c；复制的是当时的通用组件，不把未提交状态冒充该提交的文件内容。未复制 adapters、研究资产、报告或论文定义。教学 JSON 是原组件公开的合成示例。
+
+本项目接入时增加有界输入与复杂度检查、SVG 动态属性转义，并修复恶意关系样式可形成事件属性的问题；工作区持久化、并发修订与画板生命周期由 src/paper-flow 和 companion store 管理。React/CSS 及纯 Node 入口保持本地依赖，不加载来源项目的网络接口。
+
+来源根目录及组件目录没有独立的自有代码许可证文件。本次复制依据用户的明确授权；本说明不将来源历史代码重新表述为已受 MIT 授权。分发须继续保留本说明及以下原依赖通知。
+
+- Dagre：core/DAGRE-LICENSE.txt，MIT。
+- 内嵌 Graphlib：core/GRAPHLIB-LICENSE.txt，BSD-3-Clause；从已复制 dagre.min.js 内完整注释提取，原注释也保留。
+- MathJax 3.2.2：core/MATHJAX-LICENSE.txt，Apache-2.0；原打包文件和通知保留。
+
+此目录与原项目内容不自动同步；后续更新须显式提供来源并重新检查通用依赖边界及本地安全修复。

@@ -1,0 +1,532 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Paper Flow v1",
+  "description": "Structural contract. Reference integrity, groups and DAG constraints are checked by parseFlowInput. View/comparison defaults are filled on import.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/document"
+    },
+    {
+      "$ref": "#/$defs/workspace"
+    }
+  ],
+  "$defs": {
+    "port": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["type"]
+    },
+    "node": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[^:]+$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": ["data", "method", "model", "representation", "output", "decision"]
+        },
+        "ports": {
+          "type": "object",
+          "properties": {
+            "in": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/port"
+              },
+              "propertyNames": {
+                "pattern": "^[^:]+$"
+              }
+            },
+            "out": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/port"
+              },
+              "propertyNames": {
+                "pattern": "^[^:]+$"
+              }
+            }
+          },
+          "required": ["in", "out"]
+        },
+        "semantic_key": {
+          "type": "string"
+        },
+        "op": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string",
+          "minLength": 1
+        },
+        "config": {
+          "type": "object"
+        },
+        "logical": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "minLength": 1
+            },
+            "function": {
+              "type": "string",
+              "minLength": 1
+            },
+            "constraints": {
+              "type": "object"
+            }
+          },
+          "required": ["key", "function"]
+        }
+      },
+      "required": ["id", "label", "type", "ports"]
+    },
+    "edge": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from": {
+          "type": "string",
+          "pattern": "^[^:]+:[^:]+$"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^[^:]+:[^:]+$"
+        },
+        "label": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "semantic": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "from", "to"]
+    },
+    "stage": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["id", "title"]
+    },
+    "group": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "required": ["id", "label", "members"]
+    },
+    "graph": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          },
+          "minItems": 1
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edge"
+          }
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stage"
+          }
+        },
+        "paper_groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/group"
+          }
+        },
+        "detail_groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/group"
+          }
+        }
+      },
+      "required": ["id", "name", "nodes", "edges"]
+    },
+    "document": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "kind": {
+          "const": "paper-flow-document"
+        },
+        "paper": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "citation": {
+              "type": "string"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["id", "title"]
+        },
+        "flows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/graph"
+          },
+          "minItems": 1
+        }
+      },
+      "required": ["schemaVersion", "kind", "paper", "flows"]
+    },
+    "flowRef": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "flowId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["documentId", "flowId"]
+    },
+    "view": {
+      "type": "object",
+      "properties": {
+        "arrangement": {
+          "enum": ["trunks", "compact", "vertical"]
+        },
+        "treeLevels": {
+          "enum": ["expanded", "compact"]
+        },
+        "detail": {
+          "enum": ["full", "overview"]
+        },
+        "grouping": {
+          "type": "boolean"
+        },
+        "zoom": {
+          "oneOf": [
+            {
+              "const": "fit"
+            },
+            {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 4
+            }
+          ]
+        },
+        "hoverMotion": {
+          "type": "boolean"
+        },
+        "mode": {
+          "enum": ["parallel", "merged"]
+        }
+      },
+      "required": []
+    },
+    "comparison": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": ["strict", "logical"]
+        },
+        "correspondences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "a": {
+                "type": "string",
+                "minLength": 1
+              },
+              "b": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "enum": ["node", "group"]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["id", "a", "b", "kind", "reason"]
+          }
+        },
+        "exclusions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "string",
+                "minLength": 1
+              },
+              "b": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["a", "b"]
+          }
+        },
+        "stageMap": {
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "b": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "stages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/stage"
+              }
+            }
+          },
+          "required": ["a", "b", "stages"]
+        }
+      },
+      "required": []
+    },
+    "anchor": {
+      "type": "object",
+      "properties": {
+        "side": {
+          "enum": ["top", "right", "bottom", "left"]
+        },
+        "offset": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "fixed": {
+          "type": "boolean"
+        }
+      },
+      "required": ["side", "offset"]
+    },
+    "point": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50000
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50000
+        }
+      },
+      "required": ["x", "y"]
+    },
+    "draft": {
+      "type": "object",
+      "properties": {
+        "nodes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 50000
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 50000
+              },
+              "fixed": {
+                "type": "boolean"
+              }
+            },
+            "required": ["x", "y"]
+          }
+        },
+        "edges": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "line": {
+                "enum": ["auto", "solid", "dashed", "dotted"]
+              },
+              "start": {
+                "$ref": "#/$defs/anchor"
+              },
+              "end": {
+                "$ref": "#/$defs/anchor"
+              },
+              "route": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/point"
+                },
+                "minItems": 2,
+                "maxItems": 80
+              }
+            },
+            "required": []
+          }
+        },
+        "relations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "from": {
+                "type": "string",
+                "minLength": 1
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "from", "to"]
+          }
+        }
+      },
+      "required": ["nodes", "edges", "relations"]
+    },
+    "workspace": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "kind": {
+          "const": "paper-flow-workspace"
+        },
+        "documents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/document"
+          },
+          "minItems": 1
+        },
+        "selection": {
+          "type": "object",
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/flowRef"
+            },
+            "right": {
+              "$ref": "#/$defs/flowRef"
+            }
+          },
+          "required": ["left"]
+        },
+        "view": {
+          "$ref": "#/$defs/view"
+        },
+        "comparison": {
+          "$ref": "#/$defs/comparison"
+        },
+        "drafts": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/draft"
+          }
+        }
+      },
+      "required": ["schemaVersion", "kind", "documents", "selection"]
+    }
+  }
+}

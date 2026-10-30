@@ -8,7 +8,9 @@
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildPaperFlow } from './build-paper-flow.mjs';
 
+await buildPaperFlow();
 const project = dirname(dirname(fileURLToPath(import.meta.url)));
 const output = join(project, '_site');
 const shell = await readFile(join(project, 'web/index.html'), 'utf8');
@@ -22,7 +24,7 @@ const markup = shell.slice(start, end + '\n  </section>'.length);
 
 // A missing control would silently produce a half-working drawing page, so fail the build.
 const required = [
-  'id="board-stage"', 'id="board-tool-select"', 'id="board-tool-pan"', 'id="board-tool-text"', 'id="board-tool-note"',
+  'id="board-flow-view"', 'id="board-flow-open"', 'id="board-stage"', 'id="board-tool-select"', 'id="board-tool-pan"', 'id="board-tool-text"', 'id="board-tool-note"',
   'id="board-tool-rect"', 'id="board-tool-ellipse"', 'id="board-tool-diamond"', 'id="board-select"', 'id="board-title"',
   'id="board-new"', 'id="board-delete"', 'id="board-tidy"', 'id="board-undo"', 'id="board-redo"', 'id="board-zoom-in"',
   'id="board-zoom-out"', 'id="board-zoom-label"', 'id="board-fit"', 'id="board-fullscreen"', 'id="board-status"',
@@ -42,8 +44,13 @@ await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 await writeFile(join(output, 'index.html'), page);
 await writeFile(join(output, '.nojekyll'), '');
-for (const asset of ['board.js', 'board-source.js', 'board-render.js', 'board-bridge.js', 'board-mermaid.js', 'board-drawio.js', 'board.css', 'theme.css']) await cp(join(project, 'web', asset), join(output, asset));
+for (const asset of ['board.js', 'board-flow.js', 'board-source.js', 'board-render.js', 'board-bridge.js', 'board-mermaid.js', 'board-drawio.js', 'board.css', 'theme.css']) await cp(join(project, 'web', asset), join(output, asset));
+for (const asset of ['paper-flow-editor.js', 'paper-flow-editor.css']) await cp(join(project, 'lib', asset), join(output, asset));
 await cp(join(project, 'site/standalone.js'), join(output, 'standalone.js'));
+await mkdir(join(output, 'licenses/paper-flow'), { recursive: true });
+await cp(join(project, 'vendor/paper-flow/README.md'), join(output, 'licenses/paper-flow/README.txt'));
+for (const name of ['DAGRE-LICENSE.txt', 'GRAPHLIB-LICENSE.txt', 'MATHJAX-LICENSE.txt']) await cp(join(project, 'vendor/paper-flow/core', name), join(output, 'licenses/paper-flow', name));
+for (const name of ['react-LICENSE.txt', 'react-dom-LICENSE.txt']) await cp(join(project, 'licenses/slides', name), join(output, 'licenses/paper-flow', name));
 await cp(join(project, 'site/boards'), join(output, 'boards'), { recursive: true });
 
-console.log(JSON.stringify({ output: '_site', markup_lines: markup.split('\n').length, assets: ['index.html', 'board.js', 'board-source.js', 'board-render.js', 'board-bridge.js', 'board-mermaid.js', 'board-drawio.js', 'board.css', 'theme.css', 'standalone.js', 'boards/example.json', 'boards/example.style.json'] }));
+console.log(JSON.stringify({ output: '_site', markup_lines: markup.split('\n').length, assets: ['index.html', 'board.js', 'board-flow.js', 'board-source.js', 'board-render.js', 'board-bridge.js', 'board-mermaid.js', 'board-drawio.js', 'board.css', 'theme.css', 'paper-flow-editor.js', 'paper-flow-editor.css', 'standalone.js', 'boards/example.json', 'boards/example.style.json'] }));

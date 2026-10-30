@@ -15,6 +15,7 @@
   const KEY = 'paper-library-whiteboard.v1';
   const MAX_BOARDS = 40;
   const MAX_BYTES = 4 * 1024 * 1024;
+  const FLOW_BYTES = 192 * 1024;
   const ID = /^[A-Za-z0-9_-]{1,60}$/;
 
   const board = () => window.PaperBoard;
@@ -40,21 +41,41 @@
 
   const conflict = current => Object.assign(new Error('这个画板已在另一个标签页里改过。你的改动仍在这里，可另存为新画板。'), { code: 'STATE_CONFLICT', current });
 
-  function createStore(storage) {
+  function createStore(storage, options = {}) {
+    const validateFlow = options.validateFlow || (async value => {
+      const api = await window.PaperBoardFlowLoader?.load();
+      if (!api?.validateFlowWorkspace) throw new Error('paperFlow 校验器尚未加载，请稍后重试。');
+      return api.validateFlowWorkspace(value);
+    });
+    let pending = Promise.resolve();
+    const locked = task => {
+      const run = () => {
+        const locks = options.locks ?? window.navigator?.locks;
+        return locks?.request ? locks.request(KEY, { mode: 'exclusive' }, task) : task();
+      };
+      const result = pending.then(run, run);
+      pending = result.catch(() => {});
+      return result;
+    };
     const read = () => {
+      let raw = null;
       try {
-        const raw = storage.getItem(KEY);
-        if (!raw) return { schema: 1, records: [] };
+        raw = storage.getItem(KEY);
+        if (!raw) return { schema: 1, records: [], _raw: raw };
         const parsed = JSON.parse(raw);
-        if (!parsed || parsed.schema !== 1 || !Array.isArray(parsed.records)) throw new Error('unexpected shape');
-        return parsed;
-      } catch { return { schema: 1, records: [], corrupt: true }; }
+        if (!parsed || parsed.schema !== 1 || !Array.isArray(parsed.records) || (parsed.flow_workspaces !== undefined && (!parsed.flow_workspaces || typeof parsed.flow_workspaces !== 'object' || Array.isArray(parsed.flow_workspaces)))) throw new Error('unexpected shape');
+        return { ...parsed, _raw: raw };
+      } catch { return { schema: 1, records: [], corrupt: true, _raw: raw }; }
     };
     const write = state => {
-      const text = JSON.stringify({ schema: 1, records: state.records });
+      if (state.corrupt) throw Object.assign(new Error('本地存储格式损坏，原内容已保留，请先检查备份。'), { code: 'STATE_CORRUPT', status: 500 });
+      const text = JSON.stringify({ schema: 1, records: state.records, ...(state.flow_workspaces ? { flow_workspaces: state.flow_workspaces } : {}) });
       if (text.length > MAX_BYTES) throw Object.assign(new Error('浏览器存储接近上限，请先导出 JSON 并删除不再需要的画板。'), { code: 'BOARD_TOO_LARGE', status: 413 });
+      // 无 Web Locks 的浏览器至少在所有异步工作后复读；这不冒充跨标签事务。
+      if (storage.getItem(KEY) !== state._raw) throw conflict({ value: null, revision: null });
       try { storage.setItem(KEY, text); }
       catch (error) { throw Object.assign(new Error('浏览器存储写入失败，可能已满或被禁用；请先导出 JSON。'), { code: 'BOARD_STORAGE', status: 507 }); }
+      state._raw = text;
     };
     const live = state => state.records.filter(record => record?.board && record.board.deleted !== true);
     const find = (state, id) => state.records.find(record => record.board?.id === id && record.board.deleted !== true);
@@ -73,10 +94,56 @@
       return record;
     }
 
-    return {
-      async handle(input) {
+    const flowFailure = (message, code = 'BOARD_FLOW_INVALID', status = 400) => Object.assign(new Error(message), { code, status });
+    const flowParent = (state, id) => {
+      if (typeof id !== 'string' || !ID.test(id)) throw flowFailure('工作区的画板标识无效。');
+      if (state.corrupt) throw flowFailure('本地存储格式损坏，原内容已保留。', 'STATE_CORRUPT', 500);
+      if (!find(state, id)) throw flowFailure('工作区所属画板不存在或已删除。', 'BOARD_NOT_FOUND', 404);
+    };
+    const checkFlowBytes = value => {
+      let text;
+      try { text = JSON.stringify(value); } catch { throw flowFailure('工作区必须是可序列化的 JSON 对象。'); }
+      if (typeof text !== 'string') throw flowFailure('工作区必须是 JSON 对象。');
+      if (new TextEncoder().encode(text).byteLength > FLOW_BYTES) throw flowFailure('paperFlow 工作区超过 192 KiB，请拆分或导出后精简。', 'BOARD_FLOW_TOO_LARGE', 413);
+    };
+    const normalizedFlow = async value => {
+      checkFlowBytes(value);
+      let workspace;
+      try { workspace = await validateFlow(value); }
+      catch (error) { throw flowFailure(error.message || 'paperFlow 工作区格式无效。'); }
+      checkFlowBytes(workspace);
+      return workspace;
+    };
+    const flowRecord = (state, id) => {
+      if (!Object.hasOwn(state.flow_workspaces ?? {}, id)) return null;
+      const record = state.flow_workspaces[id];
+      if (!record || typeof record !== 'object' || Array.isArray(record) || !Object.hasOwn(record, 'workspace') || typeof record.revision !== 'string' || !/^[a-f0-9]{64}$/.test(record.revision)) throw flowFailure('已保存工作区的记录格式损坏，原内容已保留。', 'BOARD_FLOW_CORRUPT', 500);
+      return record;
+    };
+
+    async function handle(input) {
         const state = read();
         const action = input?.action;
+        if (action === 'board_flow_get' || action === 'board_flow_save') {
+          flowParent(state, input.id);
+          const record = flowRecord(state, input.id);
+          if (action === 'board_flow_get') {
+            if (!record) return { id: input.id, workspace: null, revision: 0 };
+            let workspace;
+            try { workspace = await normalizedFlow(record.workspace); }
+            catch { throw flowFailure('已保存的工作区格式损坏，原记录已保留。', 'BOARD_FLOW_CORRUPT', 500); }
+            flowParent(read(), input.id);
+            return { id: input.id, workspace, revision: record.revision };
+          }
+          const expected = input.expected_revision;
+          if (expected !== 0 && !(typeof expected === 'string' && /^[a-f0-9]{64}$/.test(expected))) throw flowFailure('保存工作区必须提供 expected_revision。');
+          if (expected !== (record?.revision ?? 0)) throw conflict({ value: record?.workspace ?? null, revision: record?.revision ?? 0 });
+          const workspace = await normalizedFlow(input.workspace);
+          const revision = await digest(JSON.stringify({ workspace, nonce: nowId('flow'), at: stamp() }));
+          state.flow_workspaces = { ...(state.flow_workspaces ?? {}), [input.id]: { workspace, revision } };
+          write(state);
+          return { id: input.id, workspace, revision };
+        }
         if (action === 'board_list') {
           const boards = live(state).map(summary).filter(Boolean);
           return { boards, scanned: state.records.length, total: state.records.length, truncated: false };
@@ -127,29 +194,49 @@
         // The standalone page has no composer, so it never freezes material for one.
         if (action === 'board_snapshot' || action === 'board_snapshot_get') throw Object.assign(new Error('独立画板不提供对话引用；请在 DSH 插件的文献库面板中使用「放入对话」。'), { code: 'BOARD_FORBIDDEN', status: 403 });
         throw Object.assign(new Error('不支持的画板操作。'), { code: 'BOARD_INVALID', status: 400 });
+    }
+
+    return {
+      handle(input) {
+        return ['board_create', 'board_save', 'board_delete', 'board_accept', 'board_flow_save'].includes(input?.action) ? locked(() => handle(input)) : handle(input);
       },
       exportAll() {
         const state = read();
-        return { schema: 'paper-library-whiteboard.v1', exported_at: stamp(), boards: live(state).map(record => record.board) };
+        const active = live(state);
+        return { schema: 'paper-library-whiteboard.v1', exported_at: stamp(), boards: active.map(record => record.board),
+          flow_workspaces: Object.fromEntries(active.filter(record => flowRecord(state, record.board.id)).map(record => [record.board.id, flowRecord(state, record.board.id).workspace])) };
       },
-      importAll(payload) {
+      importAll(payload) { return locked(async () => {
         const incoming = Array.isArray(payload?.boards) ? payload.boards : Array.isArray(payload) ? payload : null;
         if (!incoming) throw Object.assign(new Error('这个 JSON 不是画板导出文件。'), { code: 'BOARD_INVALID', status: 400 });
+        if (incoming.length > MAX_BOARDS) throw Object.assign(new Error(`备份超过 ${MAX_BOARDS} 张画板上限，未写入任何内容。`), { code: 'BOARD_TOO_LARGE', status: 413 });
         const state = read();
+        const incomingFlows = payload?.flow_workspaces ?? {};
+        if (!incomingFlows || typeof incomingFlows !== 'object' || Array.isArray(incomingFlows) || Object.keys(incomingFlows).length > MAX_BOARDS) throw flowFailure('备份中的工作区映射无效。');
+        const importedIds = new Map();
         let added = 0, renamed = 0;
         for (const value of incoming.slice(0, MAX_BOARDS)) {
           if (!value || typeof value !== 'object' || !Array.isArray(value.nodes) || !Array.isArray(value.edges)) continue;
-          const taken = live(state).some(record => record.board.id === value.id);
+          if (live(state).length >= MAX_BOARDS) throw Object.assign(new Error(`独立模式最多保存 ${MAX_BOARDS} 张画板，请先导出并清理。`), { code: 'BOARD_TOO_LARGE', status: 413 });
+          const taken = state.records.some(record => record.board?.id === value.id);
+          if (importedIds.has(value.id) && Object.hasOwn(incomingFlows, value.id)) throw flowFailure('备份包含重复画板标识，无法确定工作区归属。');
           const id = taken || !ID.test(String(value.id ?? '')) ? nowId('b') : String(value.id);
           if (taken) renamed++;
-          state.records.push({ board: { ...value, schema: 1, id, title: String(value.title ?? '导入的画板').slice(0, 200), updated_at: stamp() }, revision: '' });
+          const valueCopy = { ...value, schema: 1, id, title: String(value.title ?? '导入的画板').slice(0, 200), updated_at: stamp() };
+          state.records.push({ board: valueCopy, revision: await digest(JSON.stringify(valueCopy)) });
+          importedIds.set(value.id, id);
           added++;
         }
         if (!added) throw Object.assign(new Error('这个 JSON 里没有可导入的画板。'), { code: 'BOARD_INVALID', status: 400 });
-        for (const record of state.records) if (!record.revision) record.revision = '';
+        for (const [oldId, value] of Object.entries(incomingFlows)) {
+          if (!ID.test(oldId) || !importedIds.has(oldId)) throw flowFailure('备份工作区没有对应的画板，未写入任何内容。');
+          const workspace = await normalizedFlow(value);
+          const revision = await digest(JSON.stringify({ workspace, nonce: nowId('flow'), at: stamp() }));
+          state.flow_workspaces = { ...(state.flow_workspaces ?? {}), [importedIds.get(oldId)]: { workspace, revision } };
+        }
         write(state);
         return { added, renamed };
-      },
+      }); },
       capacity() {
         try { return { bytes: (storage.getItem(KEY) ?? '').length, corrupt: read().corrupt === true }; }
         catch { return { bytes: 0, unavailable: true }; }
@@ -195,10 +282,13 @@
     };
     const slug = () => String(panel.board()?.title ?? 'board').replace(/[\\/:*?"<>|\s]+/g, '-').slice(0, 60) || 'board';
 
-    document.getElementById('site-export-json').addEventListener('click', () => {
-      const payload = store.exportAll();
-      download(`paper-library-boards-${new Date().toISOString().slice(0, 10)}.json`, new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
-      toast(`已导出 ${payload.boards.length} 张画板；这个文件就是你的长期备份。`);
+    document.getElementById('site-export-json').addEventListener('click', async () => {
+      try {
+        if (await panel.prepareLeave() === false) { toast('还有未保存或冲突的改动，请先处理；可从流程窗口导出当前草稿。', true); return; }
+        const payload = store.exportAll();
+        download(`paper-library-boards-${new Date().toISOString().slice(0, 10)}.json`, new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+        toast(`已导出 ${payload.boards.length} 张画板及已保存流程；这个文件就是你的长期备份。`);
+      } catch (error) { toast(error.message || '备份导出失败，当前内容已保留。', true); }
     });
     const file = document.getElementById('site-import-file');
     document.getElementById('site-import-json').addEventListener('click', () => file.click());
@@ -207,8 +297,9 @@
       file.value = '';
       if (!chosen) return;
       try {
+        if (await panel.prepareLeave() === false) { toast('请先处理当前画板的未保存改动或冲突。', true); return; }
         const payload = JSON.parse(await chosen.text());
-        const result = store.importAll(payload);
+        const result = await store.importAll(payload);
         await panel.refreshList();
         const first = (await store.handle({ action: 'board_list' })).boards.at(-1);
         if (first) await panel.load(first.id);
@@ -233,7 +324,7 @@
       const status = document.getElementById('site-storage-status');
       if (!status) return;
       if (unavailable) { status.textContent = '浏览器存储不可用，改动不会保存。'; return; }
-      if (corrupt) { status.textContent = '本地存储内容无法识别，已按空画板继续；请勿覆盖后先导出。'; return; }
+      if (corrupt) { status.textContent = '本地存储内容无法识别，原内容已保留，写入已停止；请检查或恢复备份。'; return; }
       status.textContent = `本地已用 ${Math.round(bytes / 1024)} KiB（上限约 ${Math.round(MAX_BYTES / 1024 / 1024)} MiB）；${boardList ? boardList.options.length : 0} 张画板。`;
     };
     setInterval(report, 5000);
@@ -286,6 +377,7 @@
     window.addEventListener('pagehide', () => panel.dispose());
   }
 
+  window.PaperBoardStandalone = Object.freeze({ createStore });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => void boot());
   else void boot();
 })();

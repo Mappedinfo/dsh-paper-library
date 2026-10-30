@@ -90,7 +90,7 @@ function environment(ids = []) {
   return { doc, registry, Element };
 }
 
-function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, sessionId = null } = {}) {
+function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, sessionId = null, flowFactory, flowLoader } = {}) {
   const ids = [
     'board-stage', 'board-select', 'board-status', 'board-zoom-label', 'board-zoom-in', 'board-zoom-out', 'board-fit',
     'board-undo', 'board-redo', 'board-delete', 'board-title', 'board-new', 'board-close', 'board-add-paper', 'board-send', 'board-tidy', 'board-fullscreen',
@@ -107,7 +107,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
     'board-association-query', 'board-association-search', 'board-association-linked', 'board-association-status',
     'board-association-list', 'board-association-prev', 'board-association-next', 'board-association-page',
     'board-association-selected', 'board-association-link', 'board-association-unlink',
-    'board-menu-open', 'board-menu', 'board-inspector', 'board-inspector-node', 'board-inspector-edge',
+    'board-menu-open', 'board-menu', 'board-inspector', 'board-inspector-node', 'board-inspector-edge', 'board-flow-open', 'board-flow-view',
   ];
   const { doc, registry, Element } = environment(ids);
   doc.defaultView.confirm = () => confirm;
@@ -122,6 +122,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
   // test reaches the same frame through `window`. Building the view first and pointing both at it
   // is what makes `window === document.defaultView` true inside the sandbox too.
   const frameWindow = doc.defaultView;
+  if (flowLoader) frameWindow.PaperBoardFlowLoader = flowLoader;
   frameWindow.location = { origin: 'https://host.example' };
   frameWindow.parent = frameWindow;
   // The frame's own message channel, so `message` listeners registered on `window` are observable.
@@ -165,7 +166,7 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
   const board = context.window.PaperBoard;
   const boardSource = context.window.PaperBoardSource;
   if (canvas) { const original = Element.prototype; original.__canvas = canvas; }
-  const panel = board.create({ root, api: api || (async () => ({})), toast: (message) => messages.push(message), ...(capabilities ? { capabilities } : {}), ...(sessionId ? { getSessionId: () => sessionId } : {}) });
+  const panel = board.create({ root, api: api || (async () => ({})), toast: (message) => messages.push(message), ...(capabilities ? { capabilities } : {}), ...(sessionId ? { getSessionId: () => sessionId } : {}), ...(flowFactory ? { flowFactory } : {}) });
   const stage = registry.get('board-stage');
   const svg = stage.children[0];
   return {
@@ -195,6 +196,105 @@ const apiStub = (overrides = {}) => async (action, payload, options) => {
   if (action === 'board_save') return { board: payload.board, revision: 'c'.repeat(64), summary: {} };
   return {};
 };
+
+function syntheticFlowFactory() {
+  const calls = [], controller = { open: false, blocked: false, closeCount: 0, prepareCount: 0 };
+  let mounted;
+  return { calls, controller, factory: { create(options) {
+    calls.push({ action: 'create', root: options.root }); mounted = options;
+    return {
+      async open(board) { calls.push({ action: 'open', id: board.id }); controller.open = true; options.root.hidden = false; return true; },
+      isOpen: () => controller.open,
+      async prepareLeave() { controller.prepareCount++; return !controller.blocked; },
+      async close() { controller.closeCount++; if (controller.blocked) return false; controller.open = false; options.onClose(); return true; },
+      dispose() { calls.push({ action: 'dispose' }); },
+    };
+  } }, mounted: () => mounted };
+}
+
+test('flow opens lazily for the active board and leaves freeboard content and shortcuts untouched', async () => {
+  state.length = 0;
+  const flow = syntheticFlowFactory(), original = { schema: 1, id: 'b-created', title: '合成画板', origin: 'user', status: 'saved', view: { x: 0, y: 0, zoom: 1 }, nodes: [{ id: 'n1', kind: 'text', x: 10, y: 20, text: '原内容' }], edges: [], links: { papers: ['paper-a'] } };
+  const harness = loadPanel({ flowFactory: flow.factory, api: apiStub({ board_get: p => ({ board: { ...original, id: p.id }, revision: 'b'.repeat(64) }) }) });
+  assert.equal(flow.calls.length, 0, 'mounting the freeboard does not instantiate the flow workbench');
+  await harness.panel.open();
+  const before = JSON.stringify(harness.panel.board());
+  assert.equal(await harness.panel.openFlow(), true);
+  assert.equal(flow.calls.filter(call => call.action === 'create').length, 1);
+  assert.equal(flow.calls.find(call => call.action === 'open').id, 'b-created');
+  assert.equal(harness.root.classList.contains('has-paper-flow'), true);
+  assert.equal(flow.mounted().root, harness.registry.get('board-flow-view'));
+  const shortcut = harness.doc.body.dispatch('keydown', { key: 'a', metaKey: true });
+  assert.equal(shortcut.defaultPrevented, undefined, 'the flow handles its own keyboard commands');
+  assert.deepEqual([...harness.panel.selection()], []);
+  assert.equal(JSON.stringify(harness.panel.board()), before, 'opening flow never replaces original nodes or links');
+  assert.equal(await harness.panel.close(), true);
+  assert.equal(flow.controller.open, false);
+  harness.panel.dispose();
+  assert.ok(flow.calls.some(call => call.action === 'dispose'));
+});
+
+test('flow save failure or conflict blocks board switching, closing and current-board deletion', async () => {
+  state.length = 0;
+  const flow = syntheticFlowFactory(), harness = loadPanel({ flowFactory: flow.factory, api: apiStub() });
+  await harness.panel.open(); await harness.panel.openFlow();
+  const before = JSON.stringify(harness.panel.board());
+  flow.controller.blocked = true;
+  assert.equal(await harness.panel.prepareLeave(), false);
+  assert.equal(await harness.panel.load('b-other'), false);
+  assert.equal(await harness.panel.close(), false);
+  const creates = state.filter(call => call.action === 'board_create').length;
+  harness.registry.get('board-new').dispatch('click'); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.filter(call => call.action === 'board_create').length, creates, 'a failed flow save must not create a replacement board');
+  harness.registry.get('board-delete').dispatch('click'); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.some(call => call.action === 'board_delete'), false);
+  assert.equal(state.some(call => call.action === 'board_get' && call.payload.id === 'b-other'), false);
+  assert.equal(JSON.stringify(harness.panel.board()), before);
+  assert.equal(flow.controller.open, true); assert.equal(harness.panel.isOpen(), true);
+  flow.controller.blocked = false;
+  assert.equal(await harness.panel.load('b-other'), true);
+  assert.equal(harness.panel.board().id, 'b-other');
+  assert.equal(flow.controller.open, false);
+  harness.panel.dispose();
+});
+
+test('a lazy flow load cannot open the board that was switched away while loading', async () => {
+  let release;
+  const flow = syntheticFlowFactory(), loader = { load: () => new Promise(resolve => { release = resolve; }) };
+  const harness = loadPanel({ api: apiStub(), flowLoader: loader });
+  await harness.panel.open();
+  const opening = harness.panel.openFlow();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(typeof release, 'function');
+  assert.equal(await harness.panel.load('b-new'), true);
+  release(flow.factory);
+  assert.equal(await opening, false);
+  assert.equal(harness.panel.board().id, 'b-new');
+  assert.equal(flow.calls.length, 0, 'stale factory never creates or mounts the old flow');
+  assert.equal(harness.root.classList.contains('has-paper-flow'), false);
+  harness.panel.dispose();
+});
+
+test('a late flow workspace response is closed when another board has already opened', async () => {
+  let release, closed = 0, isOpen = false;
+  const factory = { create: () => ({
+    open: () => new Promise(resolve => { release = () => { isOpen = true; resolve(true); }; }),
+    isOpen: () => isOpen, prepareLeave: async () => true,
+    async close() { closed++; isOpen = false; return true; }, dispose() {},
+  }) };
+  const harness = loadPanel({ api: apiStub(), flowFactory: factory });
+  await harness.panel.open();
+  const opening = harness.panel.openFlow(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(typeof release, 'function');
+  assert.equal(await harness.panel.load('b-new'), true);
+  release();
+  assert.equal(await opening, false);
+  assert.equal(closed, 1);
+  assert.equal(isOpen, false);
+  assert.equal(harness.panel.board().id, 'b-new');
+  assert.equal(harness.root.classList.contains('has-paper-flow'), false);
+  harness.panel.dispose();
+});
 
 test('canvas geometry keeps hits, anchors and zoom stable without a browser', () => {
   const { board, boardSource } = loadPanel();
@@ -1019,6 +1119,31 @@ test('a failed association save prevents cross-board navigation and keeps every 
   assert.equal(JSON.stringify(harness.panel.board()), before);
   assert.equal(state.filter(call => call.action === 'board_get').some(call => call.payload.id === 'b-other'), false);
   assert.equal(harness.registry.get('board-conflict').hidden, false);
+});
+
+test('failed board deletion retains a pending node draft and failed save blocks navigation', async () => {
+  state.length = 0;
+  const harness = loadPanel({ api: apiStub({
+    board_delete: () => { throw new Error('合成删除失败'); },
+    board_save: () => { throw new Error('合成保存失败'); },
+  }) });
+  await harness.panel.open();
+  harness.panel.setTool('rect');
+  harness.svg.dispatch('pointerdown', { clientX: 100, clientY: 100 });
+  nameShape(harness, '未保存合成节点');
+  const before = JSON.stringify(harness.panel.board());
+  harness.registry.get('board-delete').dispatch('click');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.filter(call => call.action === 'board_delete').length, 1);
+  assert.equal(JSON.stringify(harness.panel.board()), before, 'failed deletion retains the local board');
+  assert.equal(await harness.panel.load('b-other'), false, 'failed draft save must prevent switching');
+  const save = state.filter(call => call.action === 'board_save').at(-1);
+  assert.ok(save, 'leaving attempts to save the preserved pending draft');
+  assert.equal(save.payload.board.nodes[0].text, '未保存合成节点');
+  assert.equal(state.some(call => call.action === 'board_get' && call.payload.id === 'b-other'), false);
+  assert.equal(await harness.panel.close(), false, 'failed retry must also keep the board open');
+  assert.equal(harness.panel.board().nodes[0].text, '未保存合成节点');
+  harness.panel.dispose();
 });
 
 test('a late board read cannot overwrite the newer board or its associations', async () => {
