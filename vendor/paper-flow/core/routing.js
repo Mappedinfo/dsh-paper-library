@@ -1,4 +1,5 @@
 import { boundaryPoint, faceRange, dataSkew } from "./nodeKinds.js";
+import { prefersStraight, mayOptimizePosition } from "./hints.js";
 const createRouting = function () {
   "use strict";
   const EPS = 1e-5,
@@ -1462,9 +1463,8 @@ const createRouting = function () {
     if (!layout.compact && !layout.flow_tree) return [];
     const candidates = [];
     for (const n of [...layout.nodes].sort((a, b) => a.y - b.y || cmp(a.id, b.id))) {
-      // Keep branch nodes in place; a separate bounded full reroute checks
-      // primary feature spines after the local terminal optimizer converges.
-      if (layout.flow_tree && n.node?.role !== "selection") continue;
+      // Keep branch nodes in place unless their position is explicitly adjustable.
+      if (layout.flow_tree && !mayOptimizePosition(n.node)) continue;
       if (
         n.node?.swimlane ||
         ((!layout.flow_tree || layout.comparison_lanes) && n.node?.status === "shared") ||
@@ -1897,15 +1897,10 @@ const createRouting = function () {
         "Parent-center distance decreases inside the original lane; reroute before comparing full wire quality.",
     }));
   }
-  function alignFeatureSpines(layout, graph) {
+  function alignHintedSpines(layout, graph) {
     if (!layout.flow_tree || layout.tree_levels === "compact") return [];
     const changes = [],
-      jobs = layout.edges.filter(
-        (r) =>
-          r.to?.node?.role === "training" &&
-          r.edge.kind === "data" &&
-          r.edge.to.split(":")[1] === "features",
-      );
+      jobs = layout.edges.filter((r) => prefersStraight(r.edge));
     for (const edge of jobs) {
       if (
         edge.points.length < 3 ||
@@ -1948,7 +1943,7 @@ const createRouting = function () {
         )
           throw Error("no improvement");
         changes.push({
-          rule: "feature-input-spine",
+          rule: "hinted-straight-spine",
           node: n.id,
           from_x: oldX,
           to_x: x,
@@ -2111,7 +2106,7 @@ const createRouting = function () {
       } else layout.routing.order = "long-first";
     }
     if (layout.compact || layout.flow_tree) optimizeQuality(layout, graph);
-    const spines = alignFeatureSpines(layout, graph);
+    const spines = alignHintedSpines(layout, graph);
     const fans = balanceFans(layout, graph);
     layout.routing.node_alignments = [...alignments, ...spines, ...fans];
     return layout;

@@ -245,7 +245,7 @@ export function createDiagramEditor({
             )}</select></label>${endpoint("start", "起点")}${endpoint("end", "终点")}<p>方形点拖动转折，线段中点拖出新转折。中间转折固定在画布；修改边界或位置会固定连接点。</p><button data-edit="auto-bends">恢复自动转折</button><button data-edit="edge-reset">${edge.draft_relation ? "删除临时关系" : "恢复该连线"}</button>`
         : ""
     }
-    <details class="editor-new"><summary>＋ 新建临时关系</summary><label>起点<select id="edit-from">${options(node?.id)}</select></label><label>终点<select id="edit-to">${options(model.drawing.layout.nodes.find((n) => n.id !== (node?.id || model.drawing.layout.nodes[0]?.id))?.id)}</select></label><label>名称<input id="edit-label" maxlength="160" value="自定义关系"></label><button data-edit="create">添加关系</button><p>临时关系仅作展示，不参与原实验匹配或训练。</p></details><div class="editor-actions"><button data-edit="save">下载编辑草稿</button><button data-edit="close">结束编辑</button></div><p class="editor-status" role="status">${esc(message)}</p></div></details>`;
+    <details class="editor-new"><summary>＋ 新建临时关系</summary><label>起点<select id="edit-from">${options(node?.id)}</select></label><label>终点<select id="edit-to">${options(model.drawing.layout.nodes.find((n) => n.id !== (node?.id || model.drawing.layout.nodes[0]?.id))?.id)}</select></label><label>名称<input id="edit-label" maxlength="160" value="自定义关系"></label><button data-edit="create">添加关系</button><p>临时关系仅作展示，不改变源流程或比较依据。</p></details><div class="editor-actions"><button data-edit="save">下载编辑草稿</button><button data-edit="close">结束编辑</button></div><p class="editor-status" role="status">${esc(message)}</p></div></details>`;
     root.querySelector("#canvas").append(el);
     const find = (id) => el.querySelector(id);
     el.querySelectorAll("[data-edit]").forEach(

@@ -2,7 +2,7 @@ import dagre from "./dagre.min.js";
 import { nodeKind } from "./nodeKinds.js";
 import { connectChildren } from "./grouping.js";
 // Data lineage is a presentation of the original DAG, never a replacement for
-// its matching, node IDs, supervision rules or exported JSON evidence.
+// its matching, node IDs, declared relations or exported JSON evidence.
 const id = (endpoint) => endpoint.split(":")[0];
 const members = (n) => n.presentation_members || n.members || [n];
 export function trunkRole(n) {
@@ -47,8 +47,7 @@ export function trunkPresentation(graph, classifier = trunkRole) {
       trunk_relation:
         e.trunk_relation ||
         (roles.get(id(e.from)).control ||
-        roles.get(id(e.to)).control ||
-        /target|parameter|selection/.test(e.kind)
+        roles.get(id(e.to)).control
           ? "secondary"
           : "lineage"),
     })),

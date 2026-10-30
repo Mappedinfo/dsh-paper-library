@@ -62,6 +62,8 @@
         "semantic_key": {
           "type": "string"
         },
+        "hover_role": { "type": "string" },
+        "trunk_control": { "type": "boolean" },
         "op": {
           "type": "string"
         },
@@ -72,23 +74,11 @@
         "config": {
           "type": "object"
         },
-        "logical": {
+        "layout": {
           "type": "object",
-          "properties": {
-            "key": {
-              "type": "string",
-              "minLength": 1
-            },
-            "function": {
-              "type": "string",
-              "minLength": 1
-            },
-            "constraints": {
-              "type": "object"
-            }
-          },
-          "required": ["key", "function"]
-        }
+          "properties": { "optimizePosition": { "type": "boolean" } }
+        },
+        "logical": { "$ref": "#/$defs/logical" }
       },
       "required": ["id", "label", "type", "ports"]
     },
@@ -114,11 +104,27 @@
           "type": "string",
           "minLength": 1
         },
-        "semantic": {
-          "type": "string"
+        "semantic": { "type": "string" },
+        "hover_key": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "layout": {
+          "type": "object",
+          "properties": { "preferStraight": { "type": "boolean" } }
         }
       },
       "required": ["id", "from", "to"]
+    },
+    "logical": {
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "function": { "type": "string", "minLength": 1 },
+        "constraints": { "type": "object" },
+        "compare_fields": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^(?!(?:.*\\.)?(?:__proto__|prototype|constructor|compare_fields)(?:\\.|$))[^.\\s\\[\\]]+(?:\\.[^.\\s\\[\\]]+)*$" }
+        }
+      },
+      "required": ["key", "function"]
     },
     "stage": {
       "type": "object",
@@ -153,7 +159,8 @@
           },
           "minItems": 1,
           "uniqueItems": true
-        }
+        },
+        "logical": { "$ref": "#/$defs/logical" }
       },
       "required": ["id", "label", "members"]
     },

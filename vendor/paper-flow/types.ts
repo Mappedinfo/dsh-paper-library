@@ -7,7 +7,10 @@ export type FlowNode = {
   ports: { in: Record<string, FlowPort>; out: Record<string, FlowPort> };
   op?: string;
   semantic_key?: string;
+  hover_role?: string;
+  trunk_control?: boolean;
   stage?: string;
+  layout?: { optimizePosition?: boolean; [key: string]: unknown };
   config?: Record<string, unknown>;
   detail?: string;
   evidence?: string;
@@ -15,6 +18,7 @@ export type FlowNode = {
     key: string;
     function: string;
     constraints?: Record<string, unknown>;
+    compare_fields?: string[];
     [key: string]: unknown;
   };
   [key: string]: unknown;
@@ -26,9 +30,11 @@ export type FlowEdge = {
   kind?: string;
   semantic?: string;
   label?: string;
+  hover_key?: string;
+  layout?: { preferStraight?: boolean; [key: string]: unknown };
   [key: string]: unknown;
 };
-export type FlowGroup = { id: string; label: string; members: string[]; [key: string]: unknown };
+export type FlowGroup = { id: string; label: string; members: string[]; logical?: FlowNode['logical']; [key: string]: unknown };
 export type FlowGraph = {
   id: string;
   name: string;

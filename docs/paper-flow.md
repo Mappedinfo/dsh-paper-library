@@ -24,8 +24,18 @@
 
 本次未注入可选 PDF 导出服务，界面提供工作区 JSON 与 SVG。流程视图没有自动替换自由画板的节点或对话引用；两份流程的人工对应也不自动成为科学等价。
 
+## 比较依据与可选展示提示
+
+核心不按论文 ID、领域、角色名称或端口名称推断时空范围、训练关系或结果可比性。严格比较使用已声明的操作签名；逻辑比较要求双方明确提供 `logical.key` 和 `logical.function`，默认比较其余已声明的逻辑字段（端口映射另用于关系比较）。缺失、空值或 `unknown` 等未确认值不能作为一致的证据。同名阶段 ID 只有在完整定义一致时才可自动对齐；冲突定义在合并图分别保留，未声明的阶段定义不会借用另一侧名称。显式阶段映射中的未映射阶段分别保留，未分阶段节点继续标为未分阶段。
+
+需要按部分逻辑字段对齐时，双方可声明相同的 `logical.compare_fields` 路径列表，例如 `["key", "function", "constraints.material"]`；路径相对于 `logical`，顺序不影响含义，`key` 和 `function` 始终必需。所选字段须在两侧明确已知且一致；其余字段不参与匹配，但已有差异仍保留并显示。比较报告提供 `comparedFields`、`notCompared` 与 `declaredDifferences`；字段匹配仅描述输入声明，不证明事实正确、整体等价或性能可排名。未配对不表示另一侧不存在相同步骤，也不推断上游声明变化会影响下游结果。合并的节点与关系保留另一侧原声明和差异。
+
+视觉偏好由输入显式声明，独立于比较结论：`edge.layout.preferStraight: true` 优先拉直该边，`node.layout.optimizePosition: true` 允许布局调整其位置；`edge.hover_key` 指定跨图联动提示，只有两侧明确声明相同已知值时生效。未提供悬停键时可按已声明的关系类型联动；这只是查看提示。关系样式沿用显式 `trunk_relation`／`trunk_control`，核心不根据训练、参数或选择等名称赋予特殊含义。旧文档无需补提示即可导入，提示只影响展示，不补写科学字段。
+
+领域适配留在调用侧。授权的本地样例可继续由原适配器生成通用文档，并显式补充展示提示；这类研究输入、适配副本与回执存放在 Git 忽略目录，不进入源码、npm 包或静态站。
+
 ## 来源与检查
 
-组件来源、复制边界与原依赖许可见 [vendor 说明](../vendor/paper-flow/README.md) 和 [第三方清单](../THIRD_PARTY.md)。本地修改包括导入预算、动态 SVG 属性转义及宿主持久化；未复制原项目适配器、研究数据或报告。
+组件来源、复制边界与原依赖许可见 [vendor 说明](../vendor/paper-flow/README.md) 和 [第三方清单](../THIRD_PARTY.md)。本地修改包括导入预算、动态 SVG 属性转义、显式比较契约与展示提示及宿主持久化；分发内容不含原项目适配器、研究数据或报告。
 
 相关合成测试覆盖解析／比较／草稿往返、恶意文本与预算、双窗修订、保存与切换失败、异步响应、标签生命周期、独立站备份及原画板兼容。运行 node --test tests-js/paper-flow-*.test.mjs tests-js/board-flow*.test.mjs tests-js/flow-lifecycle.test.mjs tests-js/board-panel.test.mjs；构建 npm run build，类型检查 npm run typecheck:paper-flow，静态站 npm run build:site。默认完成代码检查，界面由用户手动检查。

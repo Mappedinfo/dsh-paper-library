@@ -36,7 +36,7 @@ export function productPresentation(graph) {
         trunk_control: !!description.control,
         product_owner: n.id,
         presentation_aliases: [owner],
-        detail: description.detail || `「${n.label}」的具名输出；参数和来源见原步骤。`,
+        detail: description.detail || `「${n.label}」的具名输出；规格和来源见原步骤。`,
         evidence: n.evidence,
         source_ids: n.source_ids,
       });

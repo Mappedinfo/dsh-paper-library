@@ -127,11 +127,16 @@ export function FlowCompare(props: FlowCompareProps) {
           比较报告 · {current.report.pairs.length} 个规则匹配 ·{" "}
           {current.report.correspondences.length} 个人工对应
         </summary>
-        <p>对应仅说明流程关系；具体数据、方法和评价条件分别保留。结构对应不表示性能可直接排名。</p>
+        <p>比较仅依据输入声明；匹配项列出所用字段，其余声明分别保留。字段对应不证明科学等价或结果可直接排名。</p>
         <ul>
           {current.report.pairs.map((p: any) => (
             <li key={p.a + "/" + p.b}>
               {p.a} ↔ {p.b}：{p.reason}
+              <details>
+                <summary>比较依据与范围</summary>
+                <p>已比较：{p.comparedFields?.join("、") || "无"}</p>
+                <p>未作为匹配依据：{p.notCompared?.join("、") || "无"}</p>
+              </details>
               {p.spec_differences.length > 0 && (
                 <details>
                   <summary>具体规格差异</summary>
@@ -157,6 +162,22 @@ export function FlowCompare(props: FlowCompareProps) {
             <li key={i}>{n}</li>
           ))}
         </ul>
+        {current.report.edgePairs.length > 0 && (
+          <details>
+            <summary>匹配关系 · {current.report.edgePairs.length}</summary>
+            <ul>
+              {current.report.edgePairs.map((p: any) => (
+                <li key={p.a + "/" + p.b}>
+                  {p.a} ↔ {p.b}：{p.reason}
+                  <p>未作为匹配依据：{p.notCompared?.join("、") || "无"}</p>
+                  {p.declaredDifferences?.length > 0 && (
+                    <pre>{JSON.stringify(p.declaredDifferences, null, 2)}</pre>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
       </details>
     </>
   );

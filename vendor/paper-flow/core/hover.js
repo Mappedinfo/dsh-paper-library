@@ -1,4 +1,5 @@
 import graph from "./graph.js";
+import { hoverKey } from "./hints.js";
 
 // One-hop dependencies only: hovering a neighbour must not trace the whole pipeline.
 export function graphNeighborhood(g, target) {
@@ -180,15 +181,16 @@ export function wireGraphHover(view, g, signal, onChange = () => {}) {
   return { peer };
 }
 
-// Functional references for hover only. These never enter G.match or its counts:
-// for example validation selection and paper test-based selection remain different.
+// Explicit keys supplement matched pairs for hover only; they do not affect match counts.
+const knownText = (value) => typeof value === "string" && !!value.trim() &&
+  !/^(unknown|unverified|未知|未核实)$/i.test(value.trim());
 const nodeKeys = (node) =>
   new Set(
     [node, ...(node.members || [])].flatMap((n) =>
       [
-        n.semantic_key && "semantic:" + n.semantic_key,
-        n.logical?.key && "logical:" + n.logical.key,
-        n.hover_role && "function:" + n.hover_role,
+        knownText(n?.semantic_key) && "semantic:" + n.semantic_key,
+        knownText(n?.logical?.key) && "logical:" + n.logical.key,
+        knownText(n?.hover_role) && "function:" + n.hover_role,
       ].filter(Boolean),
     ),
   );
@@ -214,22 +216,18 @@ export function comparisonPeers(current) {
     for (const b of current.b.nodes)
       if (a.stage === b.stage && [...keys.get(a)].some((key) => keys.get(b).has(key)))
         add("nodes", a.id, b.id);
-  const edgeKind = (e, g) => {
-    if (e.kind.includes("target") || e.kind === "reference_test_selection") return e.kind;
-    const role = (endpoint) => g.nodes.find((n) => n.id === graph.split(endpoint)[0])?.hover_role;
-    const a = role(e.from),
-      b = role(e.to);
-    if (a === "task_fit" && b === "parameter_selection") return "fitted_parameters";
-    if (a === "parameter_selection" && b === "model_forward") return "selected_parameters";
-    if (a === "model_forward" && b === "prediction") return "prediction_output";
-    return e.kind;
+  const sameEdgeHint = (a, b) => {
+    const left = hoverKey(a), right = hoverKey(b);
+    return left !== null || right !== null
+      ? knownText(left) && knownText(right) && left === right
+      : knownText(a.kind) && knownText(b.kind) && a.kind === b.kind;
   };
   for (const a of current.a.edges)
     for (const b of current.b.edges)
       if (
         index.a.nodes.get(graph.split(a.from)[0])?.has(graph.split(b.from)[0]) &&
         index.a.nodes.get(graph.split(a.to)[0])?.has(graph.split(b.to)[0]) &&
-        edgeKind(a, current.a) === edgeKind(b, current.b)
+        sameEdgeHint(a, b)
       )
         add("edges", a.id, b.id);
   return (lane, related) => {

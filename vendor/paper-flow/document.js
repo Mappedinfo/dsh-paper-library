@@ -4,9 +4,20 @@ import { compareFlows, prepareGraph } from "./comparison.js";
 import engine from "./core/graph.js";
 import { emptyDraft } from "./core/editing.js";
 import { budgetFlowInput } from "./budget.js";
+import { validCompareField } from "./core/hints.js";
 const copy = (value) => structuredClone(value);
 const object = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 const text = (v) => typeof v === "string" && !!v.trim();
+function checkLogical(logical, path, add, code) {
+  if (logical === undefined) return;
+  if (!object(logical) || !text(logical.key) || !text(logical.function)) {
+    add(code, path, "比较契约需声明 key 和 function");
+    return;
+  }
+  const fields = logical.compare_fields;
+  if (fields !== undefined && (!Array.isArray(fields) || !fields.length || !fields.every(validCompareField) || new Set(fields).size !== fields.length))
+    add(code, path + ".compare_fields", "比较字段需为非空且不重复的安全点分路径");
+}
 export const flowKey = (ref) => JSON.stringify([ref.documentId, ref.flowId]);
 export const draftKey = (ref, view) =>
   JSON.stringify([
@@ -70,13 +81,15 @@ export function validateGraph(g, path = "graph") {
     for (const key of ["op", "semantic_key", "detail", "evidence"])
       if (n[key] !== undefined && typeof n[key] !== "string")
         add("node.field", p + "." + key, "需为文本");
+    if (n.hover_role !== undefined && typeof n.hover_role !== "string")
+      add("node.field", p + ".hover_role", "悬停角色需为文本");
+    if (n.trunk_control !== undefined && typeof n.trunk_control !== "boolean")
+      add("node.field", p + ".trunk_control", "主干控制提示需为布尔值");
     if (n.config !== undefined && !object(n.config))
       add("node.config", p + ".config", "config 需为对象");
-    if (
-      n.logical !== undefined &&
-      (!object(n.logical) || !text(n.logical.key) || !text(n.logical.function))
-    )
-      add("node.logical", p + ".logical", "比较契约需声明 key 和 function");
+    if (n.layout !== undefined && (!object(n.layout) || (n.layout.optimizePosition !== undefined && typeof n.layout.optimizePosition !== "boolean")))
+      add("node.field", p + ".layout", "布局提示需为对象，optimizePosition 需为布尔值");
+    checkLogical(n.logical, p + ".logical", add, "node.logical");
     if (n.display_outputs !== undefined) {
       if (!object(n.display_outputs))
         add("product.shape", p + ".display_outputs", "具名产物需为端口到说明的对象");
@@ -114,6 +127,10 @@ export function validateGraph(g, path = "graph") {
     for (const key of ["kind", "semantic", "label"])
       if (e[key] !== undefined && typeof e[key] !== "string")
         add("edge.field", p + "." + key, "需为文本");
+    if (e.hover_key !== undefined && !text(e.hover_key))
+      add("edge.field", p + ".hover_key", "悬停键需为非空文本");
+    if (e.layout !== undefined && (!object(e.layout) || (e.layout.preferStraight !== undefined && typeof e.layout.preferStraight !== "boolean")))
+      add("edge.field", p + ".layout", "布局提示需为对象，preferStraight 需为布尔值");
     if (e.trunk_relation !== undefined && !["lineage", "secondary", "technology"].includes(e.trunk_relation))
       add("edge.field", p + ".trunk_relation", "关系样式无效");
     if (edgeIds.has(e.id)) add("edge.duplicate", p + ".id", "重复关系 ID");
@@ -146,6 +163,7 @@ export function validateGraph(g, path = "graph") {
       if (groups.has(group.id) || nodeIds.has(group.id))
         add("group.duplicate", p + ".id", "分组 ID 重复或与节点冲突");
       groups.add(group.id);
+      checkLogical(group.logical, p + ".logical", add, "group.logical");
       for (const member of group.members) {
         if (!nodeIds.has(member)) add("group.member", p + ".members", "分组成员不存在：" + member);
         if (used.has(member))

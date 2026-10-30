@@ -6,6 +6,7 @@ import { layoutTrunks } from "./trunks.js";
 import routing from "./routing.js";
 import svgMath from "./math-svg.min.js";
 import { groupPresentation, childLayout, connectChildren } from "./grouping.js";
+import { prefersStraight } from "./hints.js";
 export const createGraph = function (dagre, R, S, profile = {}) {
   const nodeKind = profile.nodeKind || defaultKind;
   const shape = (n, ...args) => defaultShape({ ...n, visual_kind: nodeKind(n) }, ...args);
@@ -268,25 +269,18 @@ export const createGraph = function (dagre, R, S, profile = {}) {
     };
   }
   function logicalScope(n) {
-    const l = n.logical;
-    return l
-      ? {
-          comparison_level: l.comparison_level || "spatiotemporal",
-          key: l.key,
-          function: l.function,
-          position: l.position,
-          space: l.space,
-          time: l.time,
-          ports: l.ports || {},
-          constraints: l.constraints,
-        }
-      : null;
+    if (!n.logical) return null;
+    const scope = clone(n.logical);
+    if (Array.isArray(scope.compare_fields)) scope.compare_fields.sort();
+    return scope;
   }
   function signature(n) {
     return canonical({
       logical_scope: logicalScope(n),
-      stage: n.stage || null,
+      stage: n.stage === "@unassigned" ? null : n.stage || null,
       type: n.type,
+      semantic_key: n.semantic_key,
+      role: n.role,
       op: n.op,
       config: n.config || {},
       ports: n.ports,
@@ -294,25 +288,30 @@ export const createGraph = function (dagre, R, S, profile = {}) {
   }
   function neighborhood(g, n) {
     const by = Object.fromEntries(g.nodes.map((n) => [n.id, n]));
-    return canonical(
-      g.edges
+    const neighbors = g.edges
         .filter((e) => split(e.from)[0] === n.id || split(e.to)[0] === n.id)
         .map((e) => {
           const [a, ap] = split(e.from),
             [b, bp] = split(e.to);
-          const other = by[a === n.id ? b : a];
+          const out = a === n.id, other = by[out ? b : a];
+          const stage = stageEvidence(g, other);
+          if (!strictReady(other) || (stage.present && !stage.valid) ||
+            !portType(n, out ? "out" : "in", out ? ap : bp) ||
+            !portType(other, out ? "in" : "out", out ? bp : ap) ||
+            (e.kind && !known(e.kind)) || (e.semantic && !known(e.semantic))) return null;
           return {
-            direction: a === n.id ? "out" : "in",
-            selfPort: a === n.id ? ap : bp,
-            otherPort: a === n.id ? bp : ap,
+            direction: out ? "out" : "in",
+            selfPort: out ? ap : bp,
+            otherPort: out ? bp : ap,
             semantic: e.semantic,
             kind: e.kind,
             otherKey: other.semantic_key,
             otherSignature: signature(other),
+            otherStage: stage.present ? stage.definition : null,
           };
-        })
-        .sort((a, b) => canonical(a).localeCompare(canonical(b), "en")),
-    );
+        });
+    if (neighbors.some((item) => item === null)) return null;
+    return canonical(neighbors.sort((a, b) => canonical(a).localeCompare(canonical(b), "en")));
   }
   function changes(a, b, path = "") {
     if (canonical(a) === canonical(b)) return [];
@@ -329,72 +328,109 @@ export const createGraph = function (dagre, R, S, profile = {}) {
         .flatMap((k) => changes(a[k], b[k], path ? path + "." + k : k));
     return [path || "value"];
   }
-  function knownLogical(n) {
-    const l = n.logical;
-    const values = l
-      ? l.space || l.time
-        ? [
-            l.key,
-            l.function,
-            l.position,
-            l.space?.scope,
-            l.space?.grain,
-            l.time?.scope,
-            l.time?.grain,
-          ]
-        : [l.key, l.function]
-      : [];
-    return (
-      values.length > 0 &&
-      values.every(
-        (v) => typeof v === "string" && v.trim() && !/^(unknown|unverified|未知|未核实)$/i.test(v),
-      )
-    );
+  const known = (value) => {
+    if (typeof value === "string") return !!value.trim() && !/^(unknown|unverified|未知|未核实)$/i.test(value.trim());
+    if (typeof value === "number") return Number.isFinite(value);
+    if (typeof value === "boolean") return true;
+    if (Array.isArray(value)) return value.length > 0 && value.every(known);
+    if (value && typeof value === "object") return Object.keys(value).length > 0 && Object.values(value).every(known);
+    return false;
+  };
+  const safePath = (path) => typeof path === "string" && path.split(".").every((part) =>
+    !!part && !/[\s.\[\]]/u.test(part) && !["__proto__", "prototype", "constructor", "compare_fields"].includes(part));
+  const readPath = (object, path) => path.split(".").reduce((value, part) =>
+    value && typeof value === "object" && Object.hasOwn(value, part) ? value[part] : undefined, object);
+  function leafPaths(value, prefix = "") {
+    if (!value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length) return prefix ? [prefix] : [];
+    return Object.keys(value).sort().flatMap((key) => leafPaths(value[key], prefix ? prefix + "." + key : key));
   }
+  function logicalDescriptor(n) {
+    const l = n.logical;
+    if (!l || typeof l.key !== "string" || typeof l.function !== "string" || !known(l.key) || !known(l.function)) return null;
+    const explicit = Object.hasOwn(l, "compare_fields");
+    if (explicit && (!Array.isArray(l.compare_fields) || !l.compare_fields.length || l.compare_fields.some((path) => !safePath(path)))) return null;
+    // Functional port roles are compared separately as edges, unless explicitly selected.
+    const selected = explicit ? [...new Set(l.compare_fields)].sort() : leafPaths(Object.fromEntries(Object.entries(l).filter(([key]) => key !== "compare_fields" && key !== "ports")));
+    const paths = [...new Set(["key", "function", ...selected])].sort();
+    if (paths.some((path) => !safePath(path) || !known(readPath(l, path)))) return null;
+    return { strategy: explicit ? selected : null, paths, values: paths.map((path) => [path, readPath(l, path)]) };
+  }
+  const knownLogical = (n) => !!logicalDescriptor(n);
   function structuralRole(g, n) {
     const input = g.edges.some((e) => split(e.to)[0] === n.id),
       output = g.edges.some((e) => split(e.from)[0] === n.id);
     return input ? (output ? "transform" : "sink") : output ? "source" : "isolated";
   }
+  function stageEvidence(g, n) {
+    if (!n.stage || n.stage === "@unassigned") return { present: false };
+    const definition = g.stages?.find((stage) => stage.id === n.stage);
+    if (!definition || !known(definition)) return { present: true, valid: false };
+    return { present: true, valid: true, definition };
+  }
+  function stagesCompatible(a, an, b, bn) {
+    const left = stageEvidence(a, an), right = stageEvidence(b, bn);
+    if (!left.present && !right.present) return true;
+    return !!left.valid && !!right.valid && canonical(left.definition) === canonical(right.definition);
+  }
   function logicalSignature(g, n) {
-    if (!knownLogical(n)) return null;
-    const l = n.logical;
+    const descriptor = logicalDescriptor(n);
+    if (!descriptor) return null;
+    const stage = stageEvidence(g, n);
+    if (stage.present && !stage.valid) return null;
     return canonical({
-      stage: n.stage || null,
+      stage: stage.present ? stage.definition : null,
       type: n.type,
-      key: l.key,
-      function: l.function,
-      position: l.position,
-      constraints: l.constraints,
-      comparison_level: l.comparison_level || "spatiotemporal",
-      ...(l.comparison_level === "evaluation_function" ? {} : { space: l.space, time: l.time }),
+      strategy: descriptor.strategy,
+      logical: descriptor.values,
       role: n.role || null,
       structure: structuralRole(g, n),
     });
   }
+  function portType(n, direction, port) {
+    const type = n.ports?.[direction]?.[port]?.type;
+    return typeof type === "string" && known(type) ? type : null;
+  }
+  function explicitPortRole(n, direction, port) {
+    const role = n.logical?.ports?.[direction]?.[port];
+    return typeof role === "string" && known(role) ? role : null;
+  }
   function portRole(n, direction, port) {
-    return n.logical?.ports?.[direction]?.[port] || port + ":" + n.ports[direction][port].type;
+    const role = explicitPortRole(n, direction, port);
+    if (role) return { kind: "role", value: role };
+    const type = portType(n, direction, port);
+    return type ? { kind: "port", name: port, type } : null;
+  }
+  function comparePorts(left, leftName, right, rightName, direction) {
+    const leftRole = explicitPortRole(left, direction, leftName), rightRole = explicitPortRole(right, direction, rightName);
+    const leftType = portType(left, direction, leftName), rightType = portType(right, direction, rightName);
+    const physical = leftName === rightName && !!leftType && leftType === rightType;
+    if (leftRole && rightRole) return leftRole === rightRole ? { physical, role: true, leftType, rightType } : null;
+    return physical ? { physical: true, role: false, leftType, rightType } : null;
   }
   function logicalNeighborhood(g, n) {
     const by = new Map(g.nodes.map((n) => [n.id, n]));
-    return canonical(
-      g.edges
+    const neighbors = g.edges
         .filter((e) => split(e.from)[0] === n.id || split(e.to)[0] === n.id)
         .map((e) => {
           const [a, ap] = split(e.from),
             [b, bp] = split(e.to),
             out = a === n.id,
             other = by.get(out ? b : a);
+          const self = portRole(n, out ? "out" : "in", out ? ap : bp);
+          const stage = stageEvidence(g, other);
+          const otherSignature = logicalSignature(g, other) || (strictReady(other) && (!stage.present || stage.valid)
+            ? canonical([other.semantic_key, signature(other), stage.present ? stage.definition : null]) : null);
+          if (!self || !otherSignature || (e.kind && !known(e.kind)) || (e.semantic && !known(e.semantic))) return null;
           return {
             direction: out ? "out" : "in",
-            self: portRole(n, out ? "out" : "in", out ? ap : bp),
-            other: logicalSignature(g, other) || other.semantic_key + "|" + signature(other),
+            self,
+            other: otherSignature,
             kind: e.kind,
             semantic: e.semantic,
           };
-        })
-        .sort((a, b) => canonical(a).localeCompare(canonical(b), "en")),
-    );
+        });
+    if (neighbors.some((item) => item === null)) return null;
+    return canonical(neighbors.sort((a, b) => canonical(a).localeCompare(canonical(b), "en")));
   }
   function createsCycle(a, b, pairs, an, bn) {
     const pa = new Map(),
@@ -430,12 +466,17 @@ export const createGraph = function (dagre, R, S, profile = {}) {
   function specObject(n) {
     return {
       logical_scope: logicalScope(n),
-      stage: n.stage,
+      stage: n.stage === "@unassigned" ? undefined : n.stage,
       type: n.type,
+      role: n.role,
       semantic_key: n.semantic_key,
       op: n.op,
       config: n.config,
       ports: n.ports,
+      label: n.label,
+      detail: n.detail,
+      evidence: n.evidence,
+      state: n.state,
     };
   }
   function specDifferences(a, b) {
@@ -447,6 +488,43 @@ export const createGraph = function (dagre, R, S, profile = {}) {
       a: read(aa, field) ?? "未提供",
       b: read(bb, field) ?? "未提供",
     }));
+  }
+  function strictReady(n, requireSemantic = true) {
+    if (!known(n.op) || (requireSemantic && !known(n.semantic_key))) return false;
+    for (const direction of ["in", "out"])
+      for (const port of Object.values(n.ports?.[direction] || {}))
+        if (typeof port?.type !== "string" || !known(port.type)) return false;
+    if (n.stage && !known(n.stage) || n.role && !known(n.role)) return false;
+    if (n.config && Object.keys(n.config).length && !known(n.config)) return false;
+    if (n.logical) {
+      const fields = Object.fromEntries(Object.entries(n.logical).filter(([key]) => key !== "compare_fields" && key !== "ports"));
+      if (Object.keys(fields).length && !known(fields)) return false;
+      for (const direction of ["in", "out"])
+        for (const role of Object.values(n.logical.ports?.[direction] || {}))
+          if (typeof role !== "string" || !known(role)) return false;
+    }
+    return true;
+  }
+  function basis(an, bn, equivalence, graphA, graphB) {
+    const compared = ["type"], omitted = [];
+    const declared = (key) => known(an[key]) && known(bn[key]);
+    for (const key of ["semantic_key", "op", "role", "config"]) {
+      if (equivalence === "strict" && declared(key)) compared.push(key);
+      else if (equivalence === "logical" && key === "role" && declared(key)) compared.push(key);
+      else omitted.push(key);
+    }
+    for (const key of ["label", "detail", "evidence", "state"]) if (known(an[key]) || known(bn[key])) omitted.push(key);
+    if (stageEvidence(graphA, an).valid && stageEvidence(graphB, bn).valid) compared.push("stage.definition");
+    else omitted.push("stage");
+    if (equivalence === "strict") compared.push("ports");
+    else { compared.push("structure"); omitted.push("ports"); }
+    const l = an.logical || {}, r = bn.logical || {};
+    const selected = equivalence === "logical" ? logicalDescriptor(an)?.paths || []
+      : [...new Set([...leafPaths(l), ...leafPaths(r)])].filter((p) => p !== "compare_fields" && known(readPath(l, p)) && known(readPath(r, p)));
+    compared.push(...selected.map((p) => "logical." + p));
+    const declaredPaths = [...new Set([...leafPaths(l), ...leafPaths(r)])].filter((p) => p !== "compare_fields");
+    for (const path of declaredPaths) if (!selected.includes(path) && !selected.some((p) => path.startsWith(p + "."))) omitted.push("logical." + path);
+    return { comparedFields: [...new Set(compared)], notCompared: [...new Set(omitted)] };
   }
   function match(a, b, overrides = [], options = {}) {
     if (!Array.isArray(overrides)) {
@@ -464,6 +542,7 @@ export const createGraph = function (dagre, R, S, profile = {}) {
       rejected = new Set();
     const add = (an, bn, reason, equivalence = "strict") => {
       if (options.exclusions?.some((p) => p.a === an.id && p.b === bn.id)) return;
+      if (!stagesCompatible(a, an, b, bn)) return;
       if (equivalence === "logical" && createsCycle(a, b, pairs, an, bn)) {
         notes.push("逻辑候选合并会产生环，保守未匹配 " + an.id + " ↔ " + bn.id);
         rejected.add("a:" + an.id);
@@ -472,19 +551,23 @@ export const createGraph = function (dagre, R, S, profile = {}) {
       }
       usedA.add(an.id);
       usedB.add(bn.id);
+      const evidence = basis(an, bn, equivalence, a, b), differences = specDifferences(an, bn);
+      const substantiveDifference = differences.some((item) => !["label", "detail", "evidence", "state"].includes(item.field));
       pairs.push({
         a: an.id,
         b: bn.id,
         semantic_key: an.semantic_key,
-        reason,
+        reason: `${reason}；比较依据：${evidence.comparedFields.join("、")}${differences.length ? "；其他声明有差异，分别保留" : ""}；不代表科学等价`,
         equivalence,
         local_equal: equivalence === "strict",
-        logical_equal: true,
-        spec_differences: specDifferences(an, bn),
+        logical_equal: equivalence === "logical" ? true : undefined,
+        ...evidence,
+        declaredDifferences: differences,
+        spec_differences: differences,
         logical_contract: equivalence === "logical" ? clone(an.logical) : undefined,
-        impacted: equivalence === "logical",
-        ...(equivalence === "logical"
-          ? { impact_reason: "逻辑同类但具体规格不同，数值/方法仍分别保留" }
+        impacted: equivalence === "logical" && substantiveDifference,
+        ...(equivalence === "logical" && substantiveDifference
+          ? { impact_reason: "按所选逻辑字段对齐，其他声明分别保留" }
           : {}),
       });
     };
@@ -495,7 +578,7 @@ export const createGraph = function (dagre, R, S, profile = {}) {
         notes.push("覆写无效或重复 " + canonical(o));
         continue;
       }
-      if (signature(an) === signature(bn)) add(an, bn, "用户显式覆写；操作签名一致");
+      if (strictReady(an, false) && strictReady(bn, false) && signature(an) === signature(bn)) add(an, bn, "用户显式覆写；已声明的操作签名一致");
       else if (
         mode === "logical" &&
         logicalSignature(a, an) &&
@@ -506,13 +589,13 @@ export const createGraph = function (dagre, R, S, profile = {}) {
     }
     const groups = new Map();
     for (const an of sorted(a.nodes)) {
-      if (!an.semantic_key || !an.op) continue;
+      if (!strictReady(an)) continue;
       const key = an.semantic_key + "|" + signature(an);
       if (!groups.has(key)) groups.set(key, { a: [], b: [] });
       groups.get(key).a.push(an);
     }
     for (const bn of sorted(b.nodes)) {
-      if (!bn.semantic_key || !bn.op) continue;
+      if (!strictReady(bn)) continue;
       const key = bn.semantic_key + "|" + signature(bn);
       if (!groups.has(key)) groups.set(key, { a: [], b: [] });
       groups.get(key).b.push(bn);
@@ -521,14 +604,14 @@ export const createGraph = function (dagre, R, S, profile = {}) {
       const aa = g.a.filter((n) => !usedA.has(n.id)),
         bb = g.b.filter((n) => !usedB.has(n.id));
       if (aa.length === 1 && bb.length === 1) {
-        add(aa[0], bb[0], "阶段 + 稳定语义键 + 类型 + 操作/配置/端口签名一致");
+        add(aa[0], bb[0], "已声明的操作签名一致");
         continue;
       }
       for (const an of aa) {
         const ns = neighborhood(a, an),
           ac = aa.filter((n) => neighborhood(a, n) === ns),
           bc = bb.filter((n) => !usedB.has(n.id) && neighborhood(b, n) === ns);
-        if (ac.length === 1 && bc.length === 1)
+        if (ns !== null && ac.length === 1 && bc.length === 1)
           add(an, bc[0], "重复语义键经上下游端口与邻居签名消歧");
       }
     }
@@ -551,9 +634,7 @@ export const createGraph = function (dagre, R, S, profile = {}) {
           add(
             aa[0],
             bb[0],
-            aa[0].logical.comparison_level === "evaluation_function"
-              ? "评价功能对齐：同阶段、输出角色与误差评价功能；样本空间/时间支持和指标集合分别保留，不能直接排名"
-              : "逻辑同类：阶段、功能、流程角色、城市范围与空间/时间粒度一致；保留具体规格差异",
+            "按双方所选的已声明逻辑字段对齐",
             "logical",
           );
           continue;
@@ -563,7 +644,7 @@ export const createGraph = function (dagre, R, S, profile = {}) {
           const ns = logicalNeighborhood(a, an),
             ac = aa.filter((n) => logicalNeighborhood(a, n) === ns),
             bc = bb.filter((n) => !usedB.has(n.id) && logicalNeighborhood(b, n) === ns);
-          if (ac.length === 1 && bc.length === 1)
+          if (ns !== null && ac.length === 1 && bc.length === 1)
             add(an, bc[0], "逻辑契约一致；重复候选经上下游功能端口消歧", "logical");
         }
       }
@@ -573,79 +654,88 @@ export const createGraph = function (dagre, R, S, profile = {}) {
       usedE = new Set(),
       byA = new Map(a.nodes.map((n) => [n.id, n])),
       byB = new Map(b.nodes.map((n) => [n.id, n]));
-    const esig = (e, map, by, logical) => {
-      const [an, ap] = split(e.from),
-        [bn, bp] = split(e.to);
-      if (!map.has(an) || !map.has(bn)) return null;
-      return canonical({
-        from: [map.get(an), logical ? portRole(by.get(an), "out", ap) : ap],
-        to: [map.get(bn), logical ? portRole(by.get(bn), "in", bp) : bp],
-        kind: e.kind,
-        semantic: e.semantic,
-        config: e.config || {},
-        condition: e.condition || null,
-      });
+    const fieldStatus = (value) => {
+      if (value == null || value === "" || (value && typeof value === "object" && !Object.keys(value).length)) return "missing";
+      return known(value) ? "known" : "unknown";
     };
-    const identityB = new Map(b.nodes.map((n) => [n.id, n.id]));
+    const compareEdge = (ae, be) => {
+      const [af, ap] = split(ae.from), [at, aq] = split(ae.to), [bf, bp] = split(be.from), [bt, bq] = split(be.to);
+      if (amap.get(af) !== bf || amap.get(at) !== bt) return null;
+      const from = comparePorts(byA.get(af), ap, byB.get(bf), bp, "out"), to = comparePorts(byA.get(at), aq, byB.get(bt), bq, "in");
+      if (!from || !to || (mode === "strict" && (!from.physical || !to.physical))) return null;
+      const comparedFields = ["from", "to", "direction"], notCompared = [], declaredDifferences = [];
+      if (from.physical && to.physical) comparedFields.push("ports");
+      else {
+        if (!from.physical && !to.physical) comparedFields.push("logical.ports");
+        else {
+          comparedFields.push(from.physical ? "from.port/type" : "from.logical_role");
+          comparedFields.push(to.physical ? "to.port/type" : "to.logical_role");
+        }
+        notCompared.push("ports");
+        if (ap !== bp) declaredDifferences.push({ field: "from.port", a: ap, b: bp });
+        if (aq !== bq) declaredDifferences.push({ field: "to.port", a: aq, b: bq });
+        if (from.leftType !== from.rightType) declaredDifferences.push({ field: "from.type", a: from.leftType || "未提供", b: from.rightType || "未提供" });
+        if (to.leftType !== to.rightType) declaredDifferences.push({ field: "to.type", a: to.leftType || "未提供", b: to.rightType || "未提供" });
+      }
+      for (const field of ["kind", "semantic", "config", "condition"]) {
+        if (["kind", "semantic"].includes(field) && [ae[field], be[field]].some((value) => value != null && typeof value !== "string")) return null;
+        const left = fieldStatus(ae[field]), right = fieldStatus(be[field]);
+        if (left === "unknown" || right === "unknown" || left !== right) return null;
+        if (left === "known") {
+          if (canonical(ae[field]) !== canonical(be[field])) return null;
+          comparedFields.push(field);
+        } else notCompared.push(field);
+      }
+      // Without a declared relation kind, retain the original edges separately.
+      if (notCompared.includes("kind")) return null;
+      const excluded = new Set(["id", "from", "to", "kind", "semantic", "config", "condition"]);
+      const read = (value, path) => path.split(".").reduce((current, key) => current?.[key], value);
+      for (const field of [...new Set([...Object.keys(ae), ...Object.keys(be)])].sort()) {
+        if (excluded.has(field)) continue;
+        notCompared.push(field);
+        for (const path of changes(ae[field], be[field], field)) declaredDifferences.push({
+          field: path, a: read(ae, path) ?? "未提供", b: read(be, path) ?? "未提供",
+        });
+      }
+      return { comparedFields, notCompared, declaredDifferences, physical: from.physical && to.physical };
+    };
     for (const ae of sorted(a.edges)) {
-      const sig = esig(ae, amap, byA, mode === "logical");
-      if (sig === null) continue;
-      const candidates = b.edges.filter(
-        (be) => !usedE.has(be.id) && esig(be, identityB, byB, mode === "logical") === sig,
-      );
+      const candidates = b.edges.filter((be) => !usedE.has(be.id)).map((be) => ({ edge: be, basis: compareEdge(ae, be) })).filter((candidate) => candidate.basis);
       if (candidates.length === 1) {
-        const be = candidates[0],
-          exact = esig(ae, amap, byA, false) === esig(be, identityB, byB, false);
+        const { edge: be, basis: { physical: exact, comparedFields, notCompared, declaredDifferences } } = candidates[0];
         usedE.add(be.id);
         edgePairs.push({
           a: ae.id,
           b: be.id,
           equivalence: exact ? "strict" : "logical",
-          reason: exact
-            ? "两端已匹配，端口/方向/边语义/配置一致"
-            : "两端逻辑匹配，功能端口/方向/边语义一致；原端口与数据规格分别保留",
+          comparedFields, notCompared, declaredDifferences, spec_differences: declaredDifferences,
+          reason: `${exact ? "两端的端口名称与类型按声明对齐" : "两端按已声明端口依据对齐，原端口分别保留"}；比较依据：${comparedFields.join("、")}${declaredDifferences.length ? "；其他声明有差异，分别保留" : ""}；不代表科学等价`,
         });
       }
     }
     const commonAEdges = new Set(edgePairs.map((p) => p.a)),
       commonBEdges = new Set(edgePairs.map((p) => p.b));
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const p of pairs) {
-        if (p.impacted) continue;
-        const ae = a.edges.filter((e) => split(e.to)[0] === p.a),
-          be = b.edges.filter((e) => split(e.to)[0] === p.b),
-          incomingDiff =
-            ae.some((e) => !commonAEdges.has(e.id)) || be.some((e) => !commonBEdges.has(e.id)),
-          upstream = ae.some((e) => pairs.find((q) => q.a === split(e.from)[0])?.impacted);
-        if (incomingDiff || upstream) {
-          p.impacted = true;
-          p.impact_reason = incomingDiff ? "输入边或上游节点不同" : "规格变化沿上游依赖传播";
-          changed = true;
-        }
-      }
-    }
     function exclusive(g, n, other, lane) {
       if (rejected.has(lane + ":" + n.id)) return "候选逻辑合并会产生环，保守未匹配";
       if (mode === "logical" && knownLogical(n)) {
         const candidates = other.nodes.filter((x) => x.logical?.key === n.logical.key);
         if (candidates.length) {
-          if (candidates.some((x) => logicalSignature(other, x) === logicalSignature(g, n)))
+          if (logicalSignature(g, n) && candidates.some((x) => logicalSignature(other, x) === logicalSignature(g, n)))
             return "重复逻辑候选仍歧义，保守未匹配";
           return (
-            "同类功能但抽象层级/阶段/流程位置或空间时间范围、粒度不兼容：" +
+            "同逻辑键候选未通过所选字段、阶段或结构核对：" +
             changes(n.logical, candidates[0].logical).join(", ")
           );
         }
       }
+      if (!known(n.semantic_key)) return "缺少明确可用的语义键或逻辑契约，保守未匹配";
       const candidates = other.nodes.filter((x) => x.semantic_key === n.semantic_key),
-        prefix = mode === "logical" && !knownLogical(n) ? "缺少已核实逻辑契约，保留严格判断；" : "";
+        prefix = mode === "logical" && !knownLogical(n) ? "缺少明确可用的逻辑契约，保留严格判断；" : "";
       if (!candidates.length) return prefix + "另一图无此语义节点";
       if (candidates.some((x) => signature(x) === signature(n)))
-        return prefix + "重复语义/结构仍歧义，保守未匹配";
+        return prefix + "同语义键候选未通过完整依据核对，保守未匹配";
       return (
-        prefix + "同语义但不同：" + changes(specObject(n), specObject(candidates[0])).join(", ")
+        prefix + "同语义键候选的声明有差异：" + changes(specObject(n), specObject(candidates[0])).join(", ")
       );
     }
     return {
@@ -660,10 +750,10 @@ export const createGraph = function (dagre, R, S, profile = {}) {
       edgePairs,
       aOnlyEdges: sorted(a.edges)
         .filter((e) => !commonAEdges.has(e.id))
-        .map((e) => ({ id: e.id, reason: "端点未匹配，或功能端口/方向/语义/配置不同" })),
+        .map((e) => ({ id: e.id, reason: "未能按已声明信息唯一对齐；保留两侧关系" })),
       bOnlyEdges: sorted(b.edges)
         .filter((e) => !commonBEdges.has(e.id))
-        .map((e) => ({ id: e.id, reason: "端点未匹配，或功能端口/方向/语义/配置不同" })),
+        .map((e) => ({ id: e.id, reason: "未能按已声明信息唯一对齐；保留两侧关系" })),
       notes,
     };
   }
@@ -745,7 +835,9 @@ export const createGraph = function (dagre, R, S, profile = {}) {
       for (const e of g.edges) {
         if (status === "b" && common.has(e.id)) continue;
         const [an, ap] = split(e.from),
-          [bn, bp] = split(e.to);
+          [bn, bp] = split(e.to),
+          matched = common.get(e.id),
+          other = status === "a" && matched ? b.edges.find((edge) => edge.id === matched.b) : undefined;
         edges.push({
           ...clone(e),
           id: status + "_" + e.id,
@@ -753,6 +845,7 @@ export const createGraph = function (dagre, R, S, profile = {}) {
           to: map.get(bn) + ":" + (loose.has(bn) ? status + "__" : "") + bp,
           status: common.has(e.id) ? "shared" : status,
           equivalence: common.get(e.id)?.equivalence,
+          ...(other ? { other: clone(other), declaredDifferences: clone(matched.declaredDifferences || []), spec_differences: clone(matched.declaredDifferences || []), comparedFields: clone(matched.comparedFields || []), notCompared: clone(matched.notCompared || []), match_reason: matched.reason } : {}),
           source_ids: common.has(e.id)
             ? { a: common.get(e.id).a, b: common.get(e.id).b }
             : { [status]: e.id },
@@ -1412,11 +1505,11 @@ export const createGraph = function (dagre, R, S, profile = {}) {
   function comparisonHeaders(l, top, mode) {
     if (!l.comparison_lanes) return "";
     const { lanes, has_sides, center } = l.comparison_lanes;
-    return `<g class="comparison-lanes" data-center="${center}" aria-label="共有居中，A左B右">${lanes
+    return `<g class="comparison-lanes" data-center="${center}" aria-label="对齐居中，A左B右">${lanes
       .filter((lane) => has_sides || lane.id === "shared")
       .map(
         (lane) =>
-          `<g class="comparison-lane" data-lane="${esc(lane.id)}" data-left="${lane.left}" data-right="${lane.right}"><text x="${lane.center}" y="${top - 16}" text-anchor="middle" font-size="23" font-weight="600" style="fill:${colors[safeStatus(lane.id)].stroke}">${lane.id === "a" ? "A 独有 · 左侧" : lane.id === "b" ? "B 独有 · 右侧" : mode === "logical" ? "共有 / 逻辑对齐 · 中央" : "严格共有 · 中央"}</text></g>`,
+          `<g class="comparison-lane" data-lane="${esc(lane.id)}" data-left="${lane.left}" data-right="${lane.right}"><text x="${lane.center}" y="${top - 16}" text-anchor="middle" font-size="23" font-weight="600" style="fill:${colors[safeStatus(lane.id)].stroke}">${lane.id === "a" ? "A 未配对 · 左侧" : lane.id === "b" ? "B 未配对 · 右侧" : mode === "logical" ? "所选字段对齐 · 中央" : "签名对齐 · 中央"}</text></g>`,
       )
       .join("")}</g>`;
   }
@@ -1428,13 +1521,13 @@ export const createGraph = function (dagre, R, S, profile = {}) {
   function nodeContent(obj, n, x, y, c, status) {
     const badge =
       n.equivalence === "logical"
-        ? "逻辑同类 · 规格不同"
-        : n.impacted
-          ? "同法 · 上游影响"
+        ? (n.spec_differences?.length ? "逻辑对齐 · 声明有差异" : "逻辑对齐 · 所选字段一致")
+        : n.equivalence === "strict"
+          ? (n.spec_differences?.length ? "签名对齐 · 声明有差异" : "签名字段一致")
           : status === "a"
-            ? "A 独有 · " + n.state.slice(0, 6)
+            ? "A 未配对 · " + n.state.slice(0, 6)
             : status === "b"
-              ? "B 独有 · " + n.state.slice(0, 6)
+              ? "B 未配对 · " + n.state.slice(0, 6)
               : n.state.slice(0, 10);
     if (!obj.compound)
       return `<g class="outline" stroke="${c.stroke}" fill="${c.fill}" ${status === "a" || status === "b" ? 'stroke-dasharray="8 5"' : ""}>${shape(n, x, y, obj.width, obj.height)}</g>${obj.lines
@@ -1460,7 +1553,7 @@ export const createGraph = function (dagre, R, S, profile = {}) {
     for (const [i, p] of parts.entries()) {
       const px = x + 18 + i * (childW + 20),
         pc = colors[safeStatus(p.lane)];
-      text += `<g class="comparison-part ${esc(p.lane)}" data-node-part="${esc(p.lane)}" role="button" tabindex="0" aria-label="${esc(String(p.lane).toUpperCase())}差异：${esc(p.label)}"><g fill="${pc.fill}" stroke="${pc.stroke}" stroke-width="2" stroke-dasharray="8 5">${nodeKind(n) === "model" ? shape(n, px, childY, childW, partH) : `<rect x="${px}" y="${childY}" width="${childW}" height="${partH}" rx="5"/>`}</g><text x="${px + childW / 2}" y="${childY + 24}" text-anchor="middle" font-size="20" font-weight="700" style="fill:${pc.stroke}">${esc(String(p.lane).toUpperCase())} · 差异</text>${p.lines.map((line, j) => `<text class="variant-label" x="${px + childW / 2}" y="${childY + 55 + j * 35}" text-anchor="middle" font-size="30">${esc(line)}</text>`).join("")}</g>`;
+      text += `<g class="comparison-part ${esc(p.lane)}" data-node-part="${esc(p.lane)}" role="button" tabindex="0" aria-label="${esc(String(p.lane).toUpperCase())}原声明：${esc(p.label)}"><g fill="${pc.fill}" stroke="${pc.stroke}" stroke-width="2" stroke-dasharray="8 5">${nodeKind(n) === "model" ? shape(n, px, childY, childW, partH) : `<rect x="${px}" y="${childY}" width="${childW}" height="${partH}" rx="5"/>`}</g><text x="${px + childW / 2}" y="${childY + 24}" text-anchor="middle" font-size="20" font-weight="700" style="fill:${pc.stroke}">${esc(String(p.lane).toUpperCase())} · 原声明</text>${p.lines.map((line, j) => `<text class="variant-label" x="${px + childW / 2}" y="${childY + 55 + j * 35}" text-anchor="middle" font-size="30">${esc(line)}</text>`).join("")}</g>`;
     }
     return (
       text +
@@ -1533,7 +1626,7 @@ export const createGraph = function (dagre, R, S, profile = {}) {
         draw = R.path(ed.points, jump.assigned.get(ed.id), top),
         members = ed.bundle.map((e) => e.id),
         title = ed.bundle
-          .map((e) => (e.label || e.semantic) + "：" + e.from + " → " + e.to + " · " + e.kind)
+          .map((e) => (e.label || e.semantic || "关系") + "：" + e.from + " → " + e.to + " · " + (e.kind || "未声明"))
           .join("\n"),
         attributes = `data-layout-edge-id="${esc(ed.id)}" data-edge-id="${esc(e.id)}" data-edge-members="${esc(JSON.stringify(members))}" tabindex="0" role="button" aria-label="${esc(title)}"`,
         line = { solid: "none", dashed: "8 5", dotted: "2 6" }[ed.manual_style],
@@ -1554,11 +1647,9 @@ export const createGraph = function (dagre, R, S, profile = {}) {
           c,
           attributes,
           priority:
-            e.kind === "data" &&
-            e.to.split(":")[1] === "features" &&
-            ed.to?.node?.role === "training"
+            prefersStraight(e)
               ? -1
-              : ed.bundle.length > 1 || e.kind.endsWith("target")
+              : ed.bundle.length > 1
                 ? 0
                 : 1,
         });
@@ -1730,9 +1821,9 @@ export const createGraph = function (dagre, R, S, profile = {}) {
     if (options.title !== false)
       out += `<text x="30" y="29" font-size="23" font-weight="600">${esc(options.title || graph.name)}</text><text x="30" y="53" font-size="13">${esc(graph.subtitle || profile.subtitle?.(graph) || "")}</text>`;
     if (l.flow_tree) {
-      out += `<g class="data-trunk-headings"><text x="${l.gutter + 30}" y="${top + 30}" font-size="22">${l.tree_levels === "compact" ? "紧凑层级 · 依赖按箭头读取（含回接）" : "数据流 ↓ · 分支与汇合"}</text></g>`;
+      out += `<g class="data-trunk-headings"><text x="${l.gutter + 30}" y="${top + 30}" font-size="22">${l.tree_levels === "compact" ? "紧凑层级 · 依赖按箭头读取（含回接）" : "流程 ↓ · 分支与汇合"}</text></g>`;
     } else if (l.data_trunks) {
-      out += `<g class="data-trunk-headings">${l.trunks.map((lane) => `<text x="${(lane.left + lane.right) / 2}" y="${top + 30}" text-anchor="middle" font-size="25" font-weight="600">${esc(lane.title)}</text><text x="${lane.x}" y="${top + 62}" text-anchor="middle" font-size="20">数据 ↓ · 技术在侧</text><line x1="${lane.x}" y1="${top + 80}" x2="${lane.x}" y2="${l.height + top}" stroke="#cbd1d8" stroke-width="1"/>`).join("")}</g>`;
+      out += `<g class="data-trunk-headings">${l.trunks.map((lane) => `<text x="${(lane.left + lane.right) / 2}" y="${top + 30}" text-anchor="middle" font-size="25" font-weight="600">${esc(lane.title)}</text><text x="${lane.x}" y="${top + 62}" text-anchor="middle" font-size="20">流程 ↓</text><line x1="${lane.x}" y1="${top + 80}" x2="${lane.x}" y2="${l.height + top}" stroke="#cbd1d8" stroke-width="1"/>`).join("")}</g>`;
     }
     for (const band of l.stages || []) {
       if (l.flow_tree) continue;
@@ -1783,24 +1874,24 @@ export const createGraph = function (dagre, R, S, profile = {}) {
       const aliases = n.presentation_aliases || n.presentation_members?.map((m) => m.id) || [],
         detailIds = aliases.length ? aliases : [n.id],
         displayId = n.presentation_aliases?.[0] || n.id;
-      out += `<g class="node ${status} ${esc(n.trunk_role || "")}" data-input-resource="${inputs.has(obj.id)}" data-product-resource="${!!n.product_owner}" data-layout-node-id="${esc(obj.layout_owner || obj.id)}" data-detail-ids="${esc(JSON.stringify(detailIds))}" data-node-members="${esc(JSON.stringify(aliases))}" data-artifact-id="${n.presentation_aliases ? esc(n.id) : ""}" data-node-id="${esc(displayId)}" data-visual-kind="${esc(nodeKind(n))}" data-semantic-key="${esc(n.semantic_key)}" data-stage="${esc(n.stage || "")}" data-swimlane="${esc(n.swimlane || "")}" data-equivalence="${esc(n.equivalence || "")}" data-impacted="${!!n.impacted}" tabindex="0" role="button" aria-label="${esc(n.label)}"><title>${esc(n.detail || n.semantic_key)}</title>${nodeContent(obj, n, x, y, c, status)}${n.product_owner ? `<g class="artifact-inspect" data-artifact-action="${esc(n.id)}" tabindex="0" role="button" aria-label="查看或保存${esc(n.label)}的产物说明"><title>查看产物规格、来源并保存说明；实际数组或权重依来源检查</title><rect x="${x + 14}" y="${y + obj.height - 35}" width="25" height="25" rx="4" fill="#f8f4fc" stroke="#745094"/><path d="M${x + 21} ${y + obj.height - 30} h10 v15 h-10z M${x + 24} ${y + obj.height - 26} h4 M${x + 24} ${y + obj.height - 22} h4" fill="none" stroke="#745094" stroke-width="1.5"/></g>` : ""}${inputs.has(obj.id) ? `<g class="input-resource-badge"><rect x="${obj.x - 48}" y="${y - 23}" width="96" height="21" rx="4" fill="#fff3c4" stroke="#ad7c00"/><text x="${obj.x}" y="${y - 7}" text-anchor="middle" font-size="15" style="fill:#161616">输入资源</text></g>` : ""}</g>`;
+      out += `<g class="node ${status} ${esc(n.trunk_role || "")}" data-input-resource="${inputs.has(obj.id)}" data-product-resource="${!!n.product_owner}" data-layout-node-id="${esc(obj.layout_owner || obj.id)}" data-detail-ids="${esc(JSON.stringify(detailIds))}" data-node-members="${esc(JSON.stringify(aliases))}" data-artifact-id="${n.presentation_aliases ? esc(n.id) : ""}" data-node-id="${esc(displayId)}" data-visual-kind="${esc(nodeKind(n))}" data-semantic-key="${esc(n.semantic_key)}" data-stage="${esc(n.stage || "")}" data-swimlane="${esc(n.swimlane || "")}" data-equivalence="${esc(n.equivalence || "")}" data-impacted="${!!n.impacted}" tabindex="0" role="button" aria-label="${esc(n.label)}"><title>${esc(n.detail || n.semantic_key)}</title>${nodeContent(obj, n, x, y, c, status)}${n.product_owner ? `<g class="artifact-inspect" data-artifact-action="${esc(n.id)}" tabindex="0" role="button" aria-label="查看或保存${esc(n.label)}的产物说明"><title>查看产物规格、来源并保存说明；产物是否生成需核对来源</title><rect x="${x + 14}" y="${y + obj.height - 35}" width="25" height="25" rx="4" fill="#f8f4fc" stroke="#745094"/><path d="M${x + 21} ${y + obj.height - 30} h10 v15 h-10z M${x + 24} ${y + obj.height - 26} h4 M${x + 24} ${y + obj.height - 22} h4" fill="none" stroke="#745094" stroke-width="1.5"/></g>` : ""}${inputs.has(obj.id) ? `<g class="input-resource-badge"><rect x="${obj.x - 48}" y="${y - 23}" width="96" height="21" rx="4" fill="#fff3c4" stroke="#ad7c00"/><text x="${obj.x}" y="${y - 7}" text-anchor="middle" font-size="15" style="fill:#161616">输入资源</text></g>` : ""}</g>`;
     }
     const fy = H - foot + 36;
     if (l.data_trunks)
-      out += `<g font-size="20"><text x="30" y="${fy - 14}">数据大致向下分支、汇合；节点与箭头保留真实步骤及依赖。短虚线＝监督／参数。</text></g>`;
+      out += `<g font-size="20"><text x="30" y="${fy - 14}">箭头表示输入中声明的关系；线型由展示设置决定。</text></g>`;
     const comparisonLegend = graph.standalone
       ? `<text x="30" y="${fy + 5}">独立流程 · 箭头表示已声明的步骤依赖</text>`
-      : `<line x1="30" y1="${fy}" x2="70" y2="${fy}" stroke="${colors.shared.stroke}" stroke-width="2.1"/><text x="79" y="${fy + 5}">${graph.matching_mode === "logical" ? "逻辑对齐 · 依显式契约" : "严格共有 · 操作/配置一致"}</text><line x1="600" y1="${fy}" x2="640" y2="${fy}" stroke="${colors.a.stroke}" stroke-width="2.1" stroke-dasharray="8 5"/><text x="650" y="${fy + 5}">A独有</text><line x1="820" y1="${fy}" x2="860" y2="${fy}" stroke="${colors.b.stroke}" stroke-width="2.1" stroke-dasharray="8 5"/><text x="870" y="${fy + 5}">B独有</text>`;
-    out += `<g font-size="20">${comparisonLegend}${nodeKinds.map(([kind, title], index) => `<g class="node-shape-key" data-visual-kind="${kind}"><g stroke="#364e59" fill="white" stroke-width="1.5">${shape({ type: kind }, 30 + index * 195, fy + 23, 42, 26)}</g><text x="${84 + index * 195}" y="${fy + 44}">${title}</text></g>`).join("")}<text x="30" y="${fy + 81}">${graph.standalone ? "独立展示；未提供的来源与规格不作自动推断。" : graph.matching_mode === "logical" ? "逻辑对齐≠相同数据/方法/评价支持；A/B规格与时空差异分别保留。" : "严格共有≠相同权重/张量/结果；上游影响单独标明。"}</text><text x="30" y="${fy + 115}">小桥表示跨线不连接；只有箭头接入节点才建立依赖。</text></g></svg>`;
+      : `<line x1="30" y1="${fy}" x2="70" y2="${fy}" stroke="${colors.shared.stroke}" stroke-width="2.1"/><text x="79" y="${fy + 5}">${graph.matching_mode === "logical" ? "逻辑对齐 · 依声明字段" : "严格对齐 · 依声明签名"}</text><line x1="600" y1="${fy}" x2="640" y2="${fy}" stroke="${colors.a.stroke}" stroke-width="2.1" stroke-dasharray="8 5"/><text x="650" y="${fy + 5}">A未配对</text><line x1="820" y1="${fy}" x2="860" y2="${fy}" stroke="${colors.b.stroke}" stroke-width="2.1" stroke-dasharray="8 5"/><text x="870" y="${fy + 5}">B未配对</text>`;
+    out += `<g font-size="20">${comparisonLegend}${nodeKinds.map(([kind, title], index) => `<g class="node-shape-key" data-visual-kind="${kind}"><g stroke="#364e59" fill="white" stroke-width="1.5">${shape({ type: kind }, 30 + index * 195, fy + 23, 42, 26)}</g><text x="${84 + index * 195}" y="${fy + 44}">${title}</text></g>`).join("")}<text x="30" y="${fy + 81}">${graph.standalone ? "独立展示；未提供的来源与规格不作自动推断。" : "对齐仅依据已声明字段；未比较的内容和差异分别保留。"}</text><text x="30" y="${fy + 115}">小桥表示跨线不连接；只有箭头接入节点才建立依赖。</text></g></svg>`;
     if (inputs.size)
       out = out.replace(
         /<\/svg>$/,
-        `<text x="30" y="${H - (l.draft ? 54 : 18) - (products ? 36 : 0)}" font-size="20">浅金底＝实验输入资源；标签旁短线与空心点指向对应连线，不代表新增数据关系。</text></svg>`,
+        `<text x="30" y="${H - (l.draft ? 54 : 18) - (products ? 36 : 0)}" font-size="20">浅金底＝已声明的输入资源；标签指向对应连线，不代表新增关系。</text></svg>`,
       );
     if (products)
       out = out.replace(
         /<\/svg>$/,
-        `<text x="30" y="${H - (l.draft ? 54 : 18)}" font-size="20">浅紫底与左下文档图标＝具名产物，可检查规格与来源、保存产物说明；不代表已生成实际数组或权重。</text></svg>`,
+        `<text x="30" y="${H - (l.draft ? 54 : 18)}" font-size="20">浅紫底与文档图标＝已声明的产物；可查看规格与来源，不代表产物已生成。</text></svg>`,
       );
     if (l.draft)
       out = out.replace(
@@ -1841,7 +1932,7 @@ export const createGraph = function (dagre, R, S, profile = {}) {
       }
     } else for (const n of sorted(g.nodes)) out += emit(n);
     for (const e of sorted(g.edges))
-      out += `  ${split(e.from)[0]} -->|"${e.kind}: ${e.semantic}"| ${split(e.to)[0]}\n`;
+      out += `  ${split(e.from)[0]} -->|"${e.kind || "未声明"}: ${e.semantic || ""}"| ${split(e.to)[0]}\n`;
     return out;
   }
   function alignStageLayouts(a, b) {

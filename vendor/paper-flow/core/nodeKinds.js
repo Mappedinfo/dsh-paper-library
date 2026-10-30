@@ -2,7 +2,7 @@ export const nodeKinds = [
   ["data", "数据"],
   ["method", "方法"],
   ["model", "模型"],
-  ["representation", "特征／参数"],
+  ["representation", "表示"],
   ["output", "结果"],
   ["decision", "条件"],
 ];

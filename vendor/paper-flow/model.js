@@ -14,7 +14,7 @@ export function normalizeGraph(source) {
   return {
     ...copy(source),
     stages: source.stages?.length
-      ? [...copy(source.stages), ...(missing ? [{ id: "@unassigned", title: "未分阶段" }] : [])]
+      ? [...copy(source.stages), ...(missing && !source.stages.some((s) => s.id === "@unassigned") ? [{ id: "@unassigned", title: "未分阶段" }] : [])]
       : undefined,
     nodes: source.nodes.map((n) => ({
       ...copy(n),
@@ -26,10 +26,6 @@ export function normalizeGraph(source) {
       op: n.op || "",
       semantic_key: n.semantic_key || "",
     })),
-    edges: source.edges.map((e) => ({
-      ...copy(e),
-      kind: e.kind || "data",
-      semantic: e.semantic || "",
-    })),
+    edges: source.edges.map(copy),
   };
 }
