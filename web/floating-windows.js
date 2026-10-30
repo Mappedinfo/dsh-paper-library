@@ -42,7 +42,7 @@ window.PaperFloatingWindows = (() => {
       if (!store || !key) return;
       try { const saved = await store?.get(key); if (!state.disposed && state.revision === revision && saved && ['x','y','width','height'].every(k => Number.isFinite(saved[k]))) { state.position = saved; apply(saved); } } catch { /* Geometry loss cannot block document work. */ }
     }
-    function front() { if (!expanded(element)) { const layer = String(++nextLayer); element.style.zIndex = layer; const host = element.closest('.reading-panels-global-host'); if (host) host.style.zIndex = layer; } }
+    function front() { if (!expanded(element)) { const floor = Number(element.dataset?.floatingMinLayer); nextLayer = Math.max(nextLayer + 1, Number.isFinite(floor) ? floor : 0); const layer = String(nextLayer); element.style.zIndex = layer; const host = element.closest('.reading-panels-global-host'); if (host) host.style.zIndex = layer; } }
     function refresh() {
       if (state.disposed) return;
       if (expanded(element)) { if (!state.suspended) { state.suspended = true; restoreStyles(); } }

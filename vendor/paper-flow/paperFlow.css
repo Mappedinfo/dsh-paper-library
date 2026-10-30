@@ -1,4 +1,11 @@
 .paper-flow-workbench {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
   background: #fff;
   color: #161616;
   border: 1px solid #d4d4d4;
@@ -14,6 +21,7 @@
   flex-wrap: wrap;
   padding: 6px 0;
   border-bottom: 1px solid #d4d4d4;
+  flex: 0 0 auto;
 }
 .paper-flow-toolbar label {
   display: flex;
@@ -53,15 +61,49 @@
 .paper-flow-pair,
 .paper-flow-summaries {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
 }
-.paper-flow-pair > section {
+.paper-flow-pair,
+.paper-flow-single {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+}
+.paper-flow-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+.paper-flow-pair > section,
+.paper-flow-single > section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   min-width: 0;
   border: 1px solid #d4d4d4;
   border-top: 3px solid #005ea8;
   border-radius: 6px;
   overflow: hidden;
+}
+.paper-flow-canvas {
+  display: block;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.paper-flow-workbench > h3,
+.paper-flow-pair > section > h3,
+.paper-flow-single > section > h3,
+.paper-flow-summaries {
+  flex: 0 0 auto;
+}
+.paper-flow-workbench > :is(.error-box, [role="status"]) {
+  flex: 0 0 auto;
+  max-height: 25%;
+  overflow: auto;
 }
 .paper-flow-pair > section + section {
   border-top-color: #b42c48;
@@ -78,22 +120,111 @@
   overflow: auto;
 }
 .paper-flow-summaries {
-  padding: 9px 4px;
+  padding: 5px 4px;
+  min-height: 0;
+  max-height: min(18%, 140px);
+  overflow: auto;
 }
 .paper-flow-summaries p {
   margin: 4px 0;
   color: #525252;
   font-size: 13px;
 }
-.paper-flow-report {
-  border: 1px solid #d4d4d4;
-  border-radius: 5px;
-  padding: 10px;
-  margin-top: 10px;
+.paper-flow-popover {
+  position: fixed;
+  top: min(150px, 15dvh);
+  right: 20px;
+  z-index: 1500;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(680px, calc(100vw - 32px));
+  height: min(560px, calc(100dvh - 160px));
+  min-width: min(340px, calc(100vw - 16px));
+  min-height: min(220px, calc(100dvh - 16px));
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  resize: both;
+  overflow: hidden;
+  border: 1px solid var(--dsw-alias-border-l2, #c9c9c9);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  color: var(--dsw-alias-label-primary, #161616);
+  box-shadow: 0 12px 40px #0003;
+  font-size: 14px;
+  line-height: 1.6;
 }
-.paper-flow-report summary {
+.paper-flow-popover-legend {
+  width: min(520px, calc(100vw - 32px));
+}
+.paper-flow-popover-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  min-height: 30px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2, #ddd);
+}
+.paper-flow-popover-header strong {
+  flex: 1;
+  min-width: 0;
+}
+.paper-flow-popover button {
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--dsw-alias-border-l2, #ccc);
+  border-radius: 4px;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  padding: 3px 8px;
+  min-height: 28px;
+  cursor: pointer;
+}
+.paper-flow-popover button:hover {
+  background: var(--dsw-alias-interactive-bg-hover, #eee);
+}
+.paper-flow-popover button:focus-visible,
+.paper-flow-popover summary:focus-visible {
+  outline: 2px solid var(--dsw-alias-link, #005ea8);
+  outline-offset: 2px;
+}
+.paper-flow-popover-body {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.paper-flow-popover-body p {
+  margin: 0 0 10px;
+}
+.paper-flow-popover-body li {
+  margin-bottom: 8px;
+}
+.paper-flow-popover-body summary {
   cursor: pointer;
   font-weight: 600;
+}
+.paper-flow-popover-manual .paper-flow-toolbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  border: 0;
+}
+.paper-flow-popover-manual label {
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  font-size: inherit;
+}
+.paper-flow-popover-manual label:has(input) {
+  grid-column: 1 / -1;
+}
+.paper-flow-popover-manual :is(input, select) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
 }
 .paper-flow-details {
   position: fixed;
@@ -115,7 +246,7 @@
 .paper-flow-workbench.is-fullscreen {
   position: fixed;
   inset: 0;
-  overflow: auto;
+  overflow: hidden;
   border-radius: 0;
   z-index: 1400;
 }

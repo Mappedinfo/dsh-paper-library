@@ -1,7 +1,7 @@
 import dagre from "./dagre.min.js";
 import { productPresentation } from "./products.js";
 import { applyDraft } from "./editing.js";
-import { nodeKind as defaultKind, nodeShape as defaultShape, nodeKinds } from "./nodeKinds.js";
+import { nodeKind as defaultKind, nodeShape as defaultShape } from "./nodeKinds.js";
 import { layoutTrunks } from "./trunks.js";
 import routing from "./routing.js";
 import svgMath from "./math-svg.min.js";
@@ -1804,9 +1804,8 @@ export const createGraph = function (dagre, R, S, profile = {}) {
           )
           .map((n) => n.id),
       ),
-      products = l.nodes.some((n) => n.node.product_owner),
       top = (options.title === false ? 10 : 72) + (l.comparison_lanes ? 44 : 0),
-      foot = 165 + (l.draft ? 40 : 0) + (inputs.size ? 36 : 0) + (products ? 36 : 0),
+      foot = 28,
       W = Math.max(l.width, graph.aligned_width || 0, 1240),
       H = l.height + top + foot,
       physical = Math.max(183, (7.5 * 25.4 * W) / (30 * 72));
@@ -1876,28 +1875,7 @@ export const createGraph = function (dagre, R, S, profile = {}) {
         displayId = n.presentation_aliases?.[0] || n.id;
       out += `<g class="node ${status} ${esc(n.trunk_role || "")}" data-input-resource="${inputs.has(obj.id)}" data-product-resource="${!!n.product_owner}" data-layout-node-id="${esc(obj.layout_owner || obj.id)}" data-detail-ids="${esc(JSON.stringify(detailIds))}" data-node-members="${esc(JSON.stringify(aliases))}" data-artifact-id="${n.presentation_aliases ? esc(n.id) : ""}" data-node-id="${esc(displayId)}" data-visual-kind="${esc(nodeKind(n))}" data-semantic-key="${esc(n.semantic_key)}" data-stage="${esc(n.stage || "")}" data-swimlane="${esc(n.swimlane || "")}" data-equivalence="${esc(n.equivalence || "")}" data-impacted="${!!n.impacted}" tabindex="0" role="button" aria-label="${esc(n.label)}"><title>${esc(n.detail || n.semantic_key)}</title>${nodeContent(obj, n, x, y, c, status)}${n.product_owner ? `<g class="artifact-inspect" data-artifact-action="${esc(n.id)}" tabindex="0" role="button" aria-label="查看或保存${esc(n.label)}的产物说明"><title>查看产物规格、来源并保存说明；产物是否生成需核对来源</title><rect x="${x + 14}" y="${y + obj.height - 35}" width="25" height="25" rx="4" fill="#f8f4fc" stroke="#745094"/><path d="M${x + 21} ${y + obj.height - 30} h10 v15 h-10z M${x + 24} ${y + obj.height - 26} h4 M${x + 24} ${y + obj.height - 22} h4" fill="none" stroke="#745094" stroke-width="1.5"/></g>` : ""}${inputs.has(obj.id) ? `<g class="input-resource-badge"><rect x="${obj.x - 48}" y="${y - 23}" width="96" height="21" rx="4" fill="#fff3c4" stroke="#ad7c00"/><text x="${obj.x}" y="${y - 7}" text-anchor="middle" font-size="15" style="fill:#161616">输入资源</text></g>` : ""}</g>`;
     }
-    const fy = H - foot + 36;
-    if (l.data_trunks)
-      out += `<g font-size="20"><text x="30" y="${fy - 14}">箭头表示输入中声明的关系；线型由展示设置决定。</text></g>`;
-    const comparisonLegend = graph.standalone
-      ? `<text x="30" y="${fy + 5}">独立流程 · 箭头表示已声明的步骤依赖</text>`
-      : `<line x1="30" y1="${fy}" x2="70" y2="${fy}" stroke="${colors.shared.stroke}" stroke-width="2.1"/><text x="79" y="${fy + 5}">${graph.matching_mode === "logical" ? "逻辑对齐 · 依声明字段" : "严格对齐 · 依声明签名"}</text><line x1="600" y1="${fy}" x2="640" y2="${fy}" stroke="${colors.a.stroke}" stroke-width="2.1" stroke-dasharray="8 5"/><text x="650" y="${fy + 5}">A未配对</text><line x1="820" y1="${fy}" x2="860" y2="${fy}" stroke="${colors.b.stroke}" stroke-width="2.1" stroke-dasharray="8 5"/><text x="870" y="${fy + 5}">B未配对</text>`;
-    out += `<g font-size="20">${comparisonLegend}${nodeKinds.map(([kind, title], index) => `<g class="node-shape-key" data-visual-kind="${kind}"><g stroke="#364e59" fill="white" stroke-width="1.5">${shape({ type: kind }, 30 + index * 195, fy + 23, 42, 26)}</g><text x="${84 + index * 195}" y="${fy + 44}">${title}</text></g>`).join("")}<text x="30" y="${fy + 81}">${graph.standalone ? "独立展示；未提供的来源与规格不作自动推断。" : "对齐仅依据已声明字段；未比较的内容和差异分别保留。"}</text><text x="30" y="${fy + 115}">小桥表示跨线不连接；只有箭头接入节点才建立依赖。</text></g></svg>`;
-    if (inputs.size)
-      out = out.replace(
-        /<\/svg>$/,
-        `<text x="30" y="${H - (l.draft ? 54 : 18) - (products ? 36 : 0)}" font-size="20">浅金底＝已声明的输入资源；标签指向对应连线，不代表新增关系。</text></svg>`,
-      );
-    if (products)
-      out = out.replace(
-        /<\/svg>$/,
-        `<text x="30" y="${H - (l.draft ? 54 : 18)}" font-size="20">浅紫底与文档图标＝已声明的产物；可查看规格与来源，不代表产物已生成。</text></svg>`,
-      );
-    if (l.draft)
-      out = out.replace(
-        /<\/svg>$/,
-        `<text x="30" y="${H - 18}" font-size="20" fill="#6f42c1">临时展示草稿：移动 ${l.draft.nodes} 个节点，修改 ${l.draft.edges} 条线，新增 ${l.draft.relations} 条临时关系；不计入科学匹配。</text></svg>`,
-      );
+    out += "</svg>";
     return {
       svg: out,
       layout: l,

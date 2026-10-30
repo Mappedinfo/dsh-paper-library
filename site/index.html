@@ -8,6 +8,7 @@
   <meta name="description" content="独立运行的文献画板：自由画布、思维导图整理、PNG 与 JSON 导出。DSH 插件里的画板与它共用同一份画布代码。">
   <link rel="stylesheet" href="./theme.css">
   <link rel="stylesheet" href="./board.css">
+  <link rel="stylesheet" href="./floating-windows.css">
   <style>
     html, body { height: 100%; }
     body { margin: 0; display: flex; flex-direction: column; background: var(--paper); color: var(--ink); font: 14px/1.6 var(--sans, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif); }
@@ -24,7 +25,7 @@
     .standalone-status { color: var(--dsw-alias-state-warn-label, #88520f); }
   </style>
 </head>
-<body>
+<body data-floating-windows>
   <header class="site-header">
     <div>
       <h1>文献画板</h1>
@@ -46,6 +47,7 @@
   </footer>
   <div id="toast" class="toast" role="status" hidden></div>
   <script src="./board-flow.js" defer></script>
+  <script src="./floating-windows.js" defer></script>
   <script src="./board-source.js" defer></script>
   <script src="./board-render.js" defer></script>
   <script src="./board-bridge.js" defer></script>

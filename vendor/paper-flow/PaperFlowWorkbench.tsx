@@ -1,7 +1,9 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { FlowCanvas, type FlowCanvasHandle } from "./FlowCanvas";
-import { FlowCompare } from "./FlowCompare";
+import { FlowCompare, FlowComparisonReport } from "./FlowCompare";
+import { FlowLegend } from "./FlowLegend";
+import { FlowWindow } from "./FlowWindow";
 import {
   blankDraft,
   draftKey,
@@ -11,7 +13,7 @@ import {
   serializeWorkspace,
   defaultComparison,
 } from "./document.js";
-import { combineSvg } from "./comparison.js";
+import { combineSvg, compareFlows } from "./comparison.js";
 import { downloadFile } from "./canvas.js";
 import { FLOW_LIMITS } from "./budget.js";
 import { createImportGuard } from "./import-guard.js";
@@ -40,6 +42,7 @@ export type PaperFlowWorkbenchProps = {
   toolbar?: ReactNode;
 };
 const valueOf = (ref: FlowRef) => JSON.stringify(ref);
+let workbenchSerial = 0;
 const mergedKey = (w: FlowWorkspace) =>
   JSON.stringify([
     "@comparison",
@@ -69,11 +72,15 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
         reason: "",
       }),
       [fullscreen, setFullscreen] = useState(false),
-      [pdfBusy, setPdfBusy] = useState(false);
+      [pdfBusy, setPdfBusy] = useState(false),
+      [windows, setWindows] = useState<{ legend: boolean; report: string | null; manual: string | null }>({ legend: false, report: null, manual: null });
     const drawings = useRef<Record<string, FlowDrawing>>({}),
+      emptyDraft = useRef<FlowEditDraft>(blankDraft()).current,
       single = useRef<FlowCanvasHandle>(null),
       section = useRef<HTMLElement>(null),
       pdfController = useRef<AbortController | null>(null);
+    const windowPrefix = useRef(`paper-flow-popover-${++workbenchSerial}`).current;
+    const legendTrigger = useRef<HTMLButtonElement>(null), reportTrigger = useRef<HTMLButtonElement>(null), manualTrigger = useRef<HTMLButtonElement>(null);
     const importGuard = useRef(createImportGuard(w)).current;
     importGuard.observe(w);
     useEffect(() => {
@@ -82,6 +89,19 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
     }, [importGuard]);
     const left = resolveFlow(w, w.selection.left)!,
       right = w.selection.right ? resolveFlow(w, w.selection.right) : undefined;
+    const selectionKey = JSON.stringify([w.selection.left, w.selection.right || null]);
+    const previousSelection = useRef(selectionKey);
+    const comparison = useMemo(() => right ? compareFlows(left, right, w.comparison) : null, [left, right, w.comparison]);
+    useEffect(() => {
+      if (previousSelection.current === selectionKey) return;
+      previousSelection.current = selectionKey;
+      setWindows((value) => ({ ...value, report: null, manual: null }));
+      setManual({ kind: "node", a: "", b: "", reason: "" });
+    }, [selectionKey]);
+    const closeWindow = (name: "legend" | "report" | "manual") => {
+      setWindows((value) => ({ ...value, [name]: name === "legend" ? false : null }));
+      (name === "legend" ? legendTrigger : name === "report" ? reportTrigger : manualTrigger).current?.focus();
+    };
     function change(next: FlowWorkspace) {
       importGuard.invalidate();
       setDetail(null);
@@ -154,7 +174,7 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
         graph?.nodes.find((n) => n.id === id) ||
         drawings.current[lane]?.layout.nodes.find((n: any) => n.id === id || n.node.id === id)
           ?.node;
-      if (node && graph) setDetail({ node, graph });
+      if (node && graph && !(right && windows.manual === selectionKey)) setDetail({ node, graph });
       if (lane !== "merged") setManual((m) => ({ ...m, [lane]: id }));
     }
     function svg() {
@@ -394,6 +414,15 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
           >
             方向动画 · {w.view.hoverMotion ? "开" : "关"}
           </button>
+          <button ref={legendTrigger} type="button" className="paper-flow-popover-trigger"
+            aria-expanded={windows.legend} aria-controls={`${windowPrefix}-legend`}
+            onClick={() => windows.legend ? closeWindow("legend") : setWindows((value) => ({ ...value, legend: true }))}>图例</button>
+          {right && <button ref={reportTrigger} type="button" className="paper-flow-popover-trigger"
+            aria-expanded={windows.report === selectionKey} aria-controls={`${windowPrefix}-report`}
+            onClick={() => windows.report === selectionKey ? closeWindow("report") : setWindows((value) => ({ ...value, report: selectionKey }))}>比较报告</button>}
+          {right && <button ref={manualTrigger} type="button" className="paper-flow-popover-trigger"
+            aria-expanded={windows.manual === selectionKey} aria-controls={`${windowPrefix}-manual`}
+            onClick={() => { if (windows.manual === selectionKey) closeWindow("manual"); else { setDetail(null); setWindows((value) => ({ ...value, manual: selectionKey })); } }}>人工对应与排除</button>}
           <button onClick={() => setFullscreen(!fullscreen)}>
             {fullscreen ? "退出全屏" : "全屏"}
           </button>
@@ -451,12 +480,13 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
             a={left}
             b={right}
             spec={w.comparison}
+            comparison={comparison || undefined}
             options={w.view}
             identityA={flowKey(w.selection.left)}
             identityB={flowKey(w.selection.right!)}
-            draftA={w.drafts[draftKey(w.selection.left, w.view)] || blankDraft()}
-            draftB={w.drafts[draftKey(w.selection.right!, w.view)] || blankDraft()}
-            mergedDraft={w.drafts[mergedKey(w)] || blankDraft()}
+            draftA={w.drafts[draftKey(w.selection.left, w.view)] || emptyDraft}
+            draftB={w.drafts[draftKey(w.selection.right!, w.view)] || emptyDraft}
+            mergedDraft={w.drafts[mergedKey(w)] || emptyDraft}
             editable={editable}
             onEditingChange={setEditable}
             onDraftChange={draft}
@@ -467,14 +497,15 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
             onZoomChange={(zoom) => change({ ...w, view: { ...w.view, zoom } })}
           />
         ) : (
-          <>
+          <div className="paper-flow-single">
+            <section aria-label={left.name}>
             <h3>{left.name}</h3>
             <FlowCanvas
               ref={single}
               identity={flowKey(w.selection.left)}
               graph={left}
               options={w.view}
-              draft={w.drafts[draftKey(w.selection.left, w.view)] || blankDraft()}
+              draft={w.drafts[draftKey(w.selection.left, w.view)] || emptyDraft}
               editable={editable}
               onEditingChange={setEditable}
               onDraftChange={(d) => draft("a", d)}
@@ -484,11 +515,17 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
               }}
               onZoomChange={(zoom) => change({ ...w, view: { ...w.view, zoom } })}
             />
-          </>
+            </section>
+          </div>
         )}
+        <FlowWindow id={`${windowPrefix}-legend`} kind="legend" title="图例" open={windows.legend} onClose={() => closeWindow("legend")}>
+          <FlowLegend />
+        </FlowWindow>
+        {right && comparison && <FlowWindow id={`${windowPrefix}-report`} kind="report" title="比较报告" open={windows.report === selectionKey} onClose={() => closeWindow("report")}>
+          <FlowComparisonReport report={comparison.report} />
+        </FlowWindow>}
         {right && (
-          <details className="paper-flow-report">
-            <summary>人工对应与排除</summary>
+          <FlowWindow id={`${windowPrefix}-manual`} kind="manual" title="人工对应与排除" open={windows.manual === selectionKey} onClose={() => closeWindow("manual")}>
             <p>
               可点击两侧节点选取。规格不同的步骤保留各自内容；多步骤对应请先在 JSON 中声明分组。
             </p>
@@ -596,7 +633,7 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
                 </li>
               ))}
             </ul>
-          </details>
+          </FlowWindow>
         )}
         {detail && (
           <aside className="paper-flow-details" aria-label="节点详情">

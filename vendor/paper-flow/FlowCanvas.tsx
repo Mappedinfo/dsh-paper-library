@@ -52,7 +52,7 @@ export const FlowCanvas = forwardRef<FlowCanvasHandle, FlowCanvasProps>(
       const css = root.ownerDocument.createElement("style");
       css.textContent =
         style +
-        `\n:host{display:block;--font-ui:14px;--font-caption:13px}.canvas{height:620px;min-height:300px;display:block;padding:0}.graph-wrap{height:100%;max-height:none;width:100%;border:0}.graph-content{min-width:max-content}.canvas-error{position:absolute;top:10px;left:12px;right:12px;background:white;color:#b42318;padding:12px;border:1px solid #b42318}`;
+        `\n:host{display:block;height:100%;min-height:0;--font-ui:14px;--font-caption:13px}.canvas{height:100%;min-height:0;display:block;padding:0}.graph-wrap{height:100%;min-height:0;max-height:none;width:100%;border:0;box-sizing:border-box}.graph-content{min-width:max-content}.canvas-error{position:absolute;top:10px;left:12px;right:12px;background:white;color:#b42318;padding:12px;border:1px solid #b42318}`;
       root.prepend(css);
       return () => {
         api.current?.dispose();

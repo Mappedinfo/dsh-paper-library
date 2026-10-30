@@ -17,6 +17,7 @@ export type FlowCompareProps = {
   identityB: string;
   options: FlowViewOptions;
   spec: FlowComparisonSpec;
+  comparison?: ReturnType<typeof compareFlows>;
   draftA: FlowEditDraft;
   draftB: FlowEditDraft;
   mergedDraft: FlowEditDraft;
@@ -31,8 +32,8 @@ export function FlowCompare(props: FlowCompareProps) {
   const a = useRef<FlowCanvasHandle>(null),
     b = useRef<FlowCanvasHandle>(null);
   const current = useMemo(
-    () => compareFlows(props.a, props.b, props.spec),
-    [props.a, props.b, props.spec],
+    () => props.comparison || compareFlows(props.a, props.b, props.spec),
+    [props.a, props.b, props.spec, props.comparison],
   );
   const peer = useMemo(() => {
     const manual = current.report.correspondences.flatMap((p: any) =>
@@ -98,7 +99,7 @@ export function FlowCompare(props: FlowCompareProps) {
   );
   return (
     <>
-      <div className={props.options.mode === "parallel" ? "paper-flow-pair" : ""}>
+      <div className={props.options.mode === "parallel" ? "paper-flow-pair" : "paper-flow-single"}>
         {props.options.mode === "parallel" ? (
           <>
             <section aria-label="论文 A">
@@ -122,14 +123,18 @@ export function FlowCompare(props: FlowCompareProps) {
           </section>
         )}
       </div>
-      <details className="paper-flow-report">
-        <summary>
-          比较报告 · {current.report.pairs.length} 个规则匹配 ·{" "}
-          {current.report.correspondences.length} 个人工对应
-        </summary>
+    </>
+  );
+}
+
+/** Report content can be shown without changing or remounting either canvas. */
+export function FlowComparisonReport({ report }: { report: ReturnType<typeof compareFlows>["report"] }) {
+  return (
+      <div className="paper-flow-report-content">
+        <p>规则匹配 {report.pairs.length} 项 · 人工对应 {report.correspondences.length} 项</p>
         <p>比较仅依据输入声明；匹配项列出所用字段，其余声明分别保留。字段对应不证明科学等价或结果可直接排名。</p>
         <ul>
-          {current.report.pairs.map((p: any) => (
+          {report.pairs.map((p: any) => (
             <li key={p.a + "/" + p.b}>
               {p.a} ↔ {p.b}：{p.reason}
               <details>
@@ -145,28 +150,28 @@ export function FlowCompare(props: FlowCompareProps) {
               )}
             </li>
           ))}
-          {current.report.correspondences.map((p: any) => (
+          {report.correspondences.map((p: any) => (
             <li key={p.id}>
               {p.a} ↔ {p.b}：人工对应 · {p.reason}
             </li>
           ))}
           {[
-            ...current.report.aOnly.map((p: any) => ({ ...p, lane: "A" })),
-            ...current.report.bOnly.map((p: any) => ({ ...p, lane: "B" })),
+            ...report.aOnly.map((p: any) => ({ ...p, lane: "A" })),
+            ...report.bOnly.map((p: any) => ({ ...p, lane: "B" })),
           ].map((p: any) => (
             <li key={p.lane + p.id}>
               {p.lane} · {p.id}：{p.reason}
             </li>
           ))}
-          {current.report.notes.map((n: string, i: number) => (
+          {report.notes.map((n: string, i: number) => (
             <li key={i}>{n}</li>
           ))}
         </ul>
-        {current.report.edgePairs.length > 0 && (
+        {report.edgePairs.length > 0 && (
           <details>
-            <summary>匹配关系 · {current.report.edgePairs.length}</summary>
+            <summary>匹配关系 · {report.edgePairs.length}</summary>
             <ul>
-              {current.report.edgePairs.map((p: any) => (
+              {report.edgePairs.map((p: any) => (
                 <li key={p.a + "/" + p.b}>
                   {p.a} ↔ {p.b}：{p.reason}
                   <p>未作为匹配依据：{p.notCompared?.join("、") || "无"}</p>
@@ -178,7 +183,6 @@ export function FlowCompare(props: FlowCompareProps) {
             </ul>
           </details>
         )}
-      </details>
-    </>
+      </div>
   );
 }
