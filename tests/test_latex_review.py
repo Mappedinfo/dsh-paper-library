@@ -58,6 +58,73 @@ def test_real_synctex_build_input_file_page_mapping_and_stale_source(tmp_path):
 
 
 @pytest.mark.skipif(not all(shutil.which(tool) for tool in ("latexmk", "pdflatex", "synctex")), reason="Synthetic SyncTeX test requires TeX tools")
+def test_synctex_keeps_verified_targets_with_generated_input_and_large_inventory(tmp_path):
+    root, _, call = project(tmp_path, compile=False)
+    chapter = root / "two.tex"
+    main_lines = [
+        r"\begin{filecontents*}{generated.tex}",
+        "Generated synthetic text.",
+        r"\end{filecontents*}",
+        r"\documentclass{article}",
+        r"\begin{document}",
+        "Main synthetic text.",
+        r"\IfFileExists{optional.bib}{\bibliography{optional}}{}",
+        r"\clearpage",
+        r"\input{two.tex}",
+        r"\clearpage",
+        r"\input{generated.tex}",
+        r"\end{document}",
+    ]
+    (root / "main.tex").write_text("\n".join(main_lines) + "\n")
+    (root / "00-large-unrelated.md").write_bytes(b"x" * (1024 * 1024 + 1))
+    for index in range(305):
+        (root / f"00-unrelated-{index}.txt").write_text("Unrelated.")
+    assert not (root / "generated.tex").exists()
+
+    build = call("latex_compile", engine="pdflatex")
+    assert build["ok"], build["log_tail"]
+    layout = call("latex_pdf_pages")
+    status = layout["build"]
+    assert status["verified"] and layout["page_count"] == 3
+    assert set(status["source_revisions"]) == {"main.tex", "two.tex"}
+    for source, line, page in (("main.tex", 6, 1), ("two.tex", 1, 2)):
+        forward = call("latex_synctex_view", path=source, line=line)
+        assert forward["page"] == page
+        backward = call("latex_synctex_edit", page=page, x=forward["x"], y=forward["y"], pdf_version=status["pdf_version"])
+        assert (backward["path"], backward["line"]) == (source, line)
+
+    with pytest.raises(ValueError, match="目标源码.*核验"):
+        call("latex_synctex_view", path="generated.tex", line=1)
+    with fitz.open(root / "main.pdf") as pdf:
+        x0, y0, x1, y1, *_ = pdf[2].get_text("words")[0]
+    with pytest.raises(ValueError, match="目标源码.*核验"):
+        call("latex_synctex_edit", page=3, x=(x0 + x1) / 2, y=(y0 + y1) / 2)
+
+    chapter.write_text("Changed synthetic chapter.\n")
+    assert not call("latex_pdf_pages")["build"]["verified"]
+    with pytest.raises(ValueError, match="源码已改"):
+        call("latex_synctex_view", path="main.tex", line=6)
+
+
+@pytest.mark.skipif(not (shutil.which("latexmk") and shutil.which("pdflatex")), reason="Synthetic SyncTeX test requires TeX tools")
+def test_synctex_does_not_reverify_old_artifacts_after_output_directory_changes(tmp_path):
+    root, _, call = project(tmp_path)
+    original = call("latex_pdf_pages")["build"]
+    assert original["verified"]
+
+    (root / ".latexmkrc").write_text("$out_dir = 'output';\n")
+    (root / "one.tex").write_text("New synthetic text.\n")
+    build = call("latex_compile", engine="pdflatex", save_version=True)
+    assert (root / "output" / "main.pdf").is_file()
+    assert build["version"] is None
+    status = call("latex_pdf_pages")["build"]
+    assert status["pdf_version"] == original["pdf_version"]
+    assert not status["verified"]
+    with pytest.raises(ValueError, match="源码已改"):
+        call("latex_synctex_view", path="one.tex", line=1)
+
+
+@pytest.mark.skipif(not all(shutil.which(tool) for tool in ("latexmk", "pdflatex", "synctex")), reason="Synthetic SyncTeX test requires TeX tools")
 def test_synctex_verifies_local_targets_when_compilation_includes_external_source(tmp_path, monkeypatch):
     root = tmp_path / "review"
     shared = tmp_path / "shared"

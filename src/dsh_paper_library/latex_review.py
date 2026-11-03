@@ -18,6 +18,8 @@ MAX_BYTES = 2 * 1024 * 1024
 MAX_NOTES = 300
 MAX_BUILDS = 12
 MAX_PDF_BYTES = 250 * 1024 * 1024
+MAX_BUILD_SOURCES = 300
+MAX_BUILD_SOURCE_BYTES = 16 * 1024 * 1024
 MAX_RELOCATION_PAGES = 80
 MAX_RELOCATION_WORDS = 120000
 MAX_RELOCATION_CHARACTERS = 1000000
@@ -34,8 +36,12 @@ def file_digest(path, maximum=MAX_PDF_BYTES):
     if path.stat().st_size > maximum:
         raise ValueError("文件超过自审读取预算")
     h = hashlib.sha256()
+    remaining = maximum
     with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
+        while block := stream.read(min(1024 * 1024, remaining + 1)):
+            remaining -= len(block)
+            if remaining < 0:
+                raise ValueError("文件超过自审读取预算")
             h.update(block)
     return h.hexdigest()
 
@@ -77,21 +83,32 @@ def write_json(path, value):
 
 
 def source_snapshot(library, row):
-    from .latex import tree, _inside
+    from .latex import MAX_FILE_BYTES, tree, _inside
+    root = Path(row["root"])
+    main = row["main_path"]
+    paths = [item["path"] for item in tree(library, row["id"])["files"]
+             if item["kind"] == "text" and item["path"] != main]
+    paths.sort(key=lambda path: Path(path).suffix.lower() in {".txt", ".md"})
     result, total = {}, 0
-    for item in tree(library, row["id"])["files"]:
-        if item["kind"] != "text":
-            continue
-        total += item["bytes"]
-        if len(result) >= 300 or total > 16 * 1024 * 1024:
+    for path in [main, *paths]:
+        if len(result) >= MAX_BUILD_SOURCES or total >= MAX_BUILD_SOURCE_BYTES:
             break
-        path, relative = _inside(Path(row["root"]), item["path"])
-        result[relative] = file_digest(path, 1024 * 1024)
+        try:
+            source, relative = _inside(root, path)
+            if not source.is_file():
+                continue
+            size = source.stat().st_size
+            if size > min(MAX_FILE_BYTES, MAX_BUILD_SOURCE_BYTES - total):
+                continue
+            total += size
+            result[relative] = file_digest(source, size)
+        except (OSError, ValueError):
+            continue
     return result
 
 
 def record_build(library, row, before):
-    from .latex import _project_pdf, _synctex_sidecar, _inside, TEXT_SUFFIXES
+    from .latex import MAX_FILE_BYTES, _project_pdf, _synctex_sidecar, _inside, TEXT_SUFFIXES
     pdf = _project_pdf(library, row)
     sidecar = _synctex_sidecar(pdf)
     actual = {row["main_path"]}
@@ -116,40 +133,45 @@ def record_build(library, row, before):
             external_relative = True
     # Bibliographies are not necessarily listed in SyncTeX's Input records.
     from .latex_lint import _tex
-    for relative in list(actual):
-        path, _ = _inside(Path(row["root"]), relative)
-        if path.suffix == ".tex" and path.stat().st_size <= 1024 * 1024:
-            for _, command, value in _tex(path.read_text(encoding="utf-8", errors="replace"))[1]:
-                if command not in {"input", "include", "bibliography", "addbibresource"}:
+    for relative in sorted(actual.intersection(before)):
+        try:
+            path, _ = _inside(Path(row["root"]), relative)
+            if path.suffix.lower() != ".tex" or not path.is_file():
+                continue
+            with path.open("rb") as stream:
+                body = stream.read(MAX_FILE_BYTES + 1)
+        except (OSError, ValueError):
+            continue
+        if len(body) > MAX_FILE_BYTES or hashlib.sha256(body).hexdigest() != before[relative]:
+            continue
+        for _, command, value in _tex(body.decode("utf-8", "replace"))[1]:
+            if command not in {"input", "include", "bibliography", "addbibresource"}:
+                continue
+            suffix = ".bib" if command in {"bibliography", "addbibresource"} else ".tex"
+            for name in value.split(","):
+                name = name.strip()
+                if not name or re.search(r"[\\#{}$]", name):
                     continue
-                for value in value.split(","):
-                    if re.search(r"[\\#{}$]", value):
-                        continue
-                    value = value.strip()
-                    if value:
-                        suffix = ".bib" if command in {"bibliography", "addbibresource"} else ".tex"
-                        value = value if Path(value).suffix else value + suffix
-                        try:
-                            _, target = _inside(Path(row["root"]), (Path(row["main_path"]).parent / value).as_posix())
-                            if suffix == ".bib":
-                                actual.add(target)
-                        except ValueError:
-                            external_relative = True
-    # Only project sources can be jump targets. External inputs may affect
-    # typesetting, but their presence does not invalidate in-project mappings
-    # in this exact PDF/SyncTeX pair.
-    sources, verified = {}, True
-    for relative in sorted(actual):
+                name = name if Path(name).suffix else name + suffix
+                try:
+                    dependency, target = _inside(Path(row["root"]), (Path(row["main_path"]).parent / name).as_posix())
+                    if suffix == ".bib" and (target in before or dependency.is_file()):
+                        actual.add(target)
+                except ValueError:
+                    external_relative = True
+    # Only expose targets whose exact bytes were captured on both sides of
+    # this build. Generated or unsnapshotted inputs do not invalidate others.
+    sources = {}
+    for relative in sorted(actual.intersection(before)):
         try:
             path, relative = _inside(Path(row["root"]), relative)
-            sha = file_digest(path, 1024 * 1024)
-            sources[relative] = sha
-            verified = verified and before.get(relative) == sha
+            if path.is_file() and file_digest(path, MAX_FILE_BYTES) == before.get(relative):
+                sources[relative] = before[relative]
         except (OSError, ValueError):
-            verified = False
+            continue
     value = {"pdf": file_digest(pdf), "synctex": file_digest(sidecar, 8 * 1024 * 1024), "sources": sources,
-             "main_path": row["main_path"], "verified": verified, "scope_checked": True,
-             "external_source": external_relative}
+             "main_path": row["main_path"], "verified": row["main_path"] in sources, "scope_checked": True,
+             "external_source": external_relative, "unverified_sources": len(actual) - len(sources)}
     write_json(directory(library, row, True) / "build.json", value)
 
 
@@ -163,10 +185,17 @@ def build_status(library, row, pdf=None):
     if not sidecar.is_file():
         result["reason"] = "缺少 SyncTeX 数据；请在工作台编译一次（保留原稿后再编译）"
         return result
+    if not manifest:
+        return result
     if not manifest.get("scope_checked"):
         result["reason"] = "编译记录尚未核验引用范围；请重新编译"
         return result
-    if manifest.get("pdf") != sha or not manifest.get("verified") or manifest.get("main_path") != row["main_path"]:
+    if manifest.get("pdf") != sha or manifest.get("main_path") != row["main_path"]:
+        result["reason"] = "当前 PDF 与工作台的编译记录不匹配；请重新编译"
+        return result
+    if not manifest.get("verified") or row["main_path"] not in manifest.get("sources", {}):
+        if "unverified_sources" in manifest and row["main_path"] not in manifest.get("sources", {}):
+            result["reason"] = "主文件未通过编译前后的内容核验；请保存后重新编译"
         return result
     if manifest.get("synctex") != file_digest(sidecar, 8 * 1024 * 1024):
         result["reason"] = "SyncTeX 已变化，当前映射待重新核验；请重新编译"
@@ -178,6 +207,8 @@ def build_status(library, row, pdf=None):
     result.update(source_revisions=manifest.get("sources", {}), verified=not changed)
     if changed:
         result["reason"] = "源码已改，PDF 仍是旧编译；请保存并重新编译"
+    elif manifest.get("unverified_sources"):
+        result["reason"] = "SyncTeX 已核验部分项目内源码；双击正文定位"
     elif manifest.get("external_source"):
         result["reason"] = "SyncTeX 已核验项目内源码，双击正文定位"
     else:

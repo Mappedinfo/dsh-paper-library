@@ -639,6 +639,14 @@ def _compile_env() -> dict:
     return env
 
 
+def _artifact_stamp(path):
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+
 def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, include_archived=False, save_version=False):
     row = _project(library, id, include_archived)
     if not isinstance(save_version, bool):
@@ -668,6 +676,10 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
         before = source_snapshot(library, row)
     except (OSError, ValueError):
         before = {}
+    candidate = absolute.with_suffix(".pdf")
+    sidecar = _synctex_sidecar(candidate)
+    previous_pdf = _artifact_stamp(candidate)
+    previous_sidecar = _artifact_stamp(sidecar)
     started = datetime.now(timezone.utc)
     try:
         completed = subprocess.run(
@@ -685,8 +697,8 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
     pdf_relative = None
     pages = None
     warnings = []
-    candidate = root / Path(main).with_suffix(".pdf")
-    if candidate.is_file() and candidate.stat().st_mtime >= started.timestamp() - 1:
+    pdf_updated = candidate.is_file() and _artifact_stamp(candidate) != previous_pdf
+    if pdf_updated:
         pdf_relative = candidate.relative_to(root).as_posix()
         try:
             with library._open_pdf(candidate) as document:
@@ -707,11 +719,14 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
     elif pdf_relative:
         library.db.execute("UPDATE latex_projects SET modified=? WHERE id=?", (now(), row["id"]))
         library.db.commit()
-    if exit_code == 0 and not timed_out and pdf_relative:
-        try:
-            record_build(library, _project(library, row["id"]), before)
-        except (OSError, ValueError) as error:
-            warnings.append(f"编译已完成，自审映射未核验：{error}")
+    if exit_code == 0 and not timed_out and pdf_updated and pages is not None:
+        if not sidecar.is_file() or _artifact_stamp(sidecar) == previous_sidecar:
+            warnings.append("本次编译没有更新对应的 SyncTeX 数据，当前 PDF 暂不能精确定位")
+        else:
+            try:
+                record_build(library, _project(library, row["id"]), before)
+            except (OSError, ValueError) as error:
+                warnings.append(f"编译已完成，自审映射未核验：{error}")
     result = {
         "id": row["id"],
         "engine": engine,
@@ -730,6 +745,8 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
     }
     if save_version:
         result["version"] = None
+        if result["ok"] and (not pdf_updated or pages is None):
+            version_failure = "本次编译没有更新可读的预览 PDF"
         if result["ok"] and not version_failure:
             from .latex_versions import create as save_build_version
             try:
@@ -907,7 +924,7 @@ def synctex_edit(library, id=None, page=None, x=None, y=None, pdf_version=None, 
         raise ValueError("这一点对应项目目录之外的文件，SyncTeX 只跳转到当前项目内的源码")
     relative = source.relative_to(root).as_posix()
     if relative not in sources:
-        raise ValueError("目标源码未在这次编译中核验，请重新编译后再跳转")
+        raise ValueError("目标源码未在这次编译中核验，可能是在编译期间生成或改写的文件")
     try:
         line = int(pairs.get("Line", "0"))
     except ValueError:
@@ -951,7 +968,7 @@ def synctex_view(library, id=None, path=None, line=None, column=None, include_ar
     if not absolute.is_file():
         raise ValueError("源文件不存在")
     if relative not in sources:
-        raise ValueError("目标源码未在这次编译中核验，请重新编译后再跳转")
+        raise ValueError("目标源码未在这次编译中核验，可能是在编译期间生成或改写的文件")
     try:
         line = int(line)
     except (TypeError, ValueError):
