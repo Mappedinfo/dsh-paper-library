@@ -11,7 +11,7 @@ const tick = () => new Promise(done => setImmediate(done))
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
 const image = { image: 'aW1hZ2U=', width: 600, height: 800, pixel_width: 1200, pixel_height: 1600, page_count: 4, bytes: 5, supported: true }
 
-async function fixture(override = () => undefined, { review = false, spellChecker, writingTools, onContext } = {}) {
+async function fixture(override = () => undefined, { review = false, spellChecker, writingTools, onContext, rail } = {}) {
   const ids = new Map(), revoked = [], calls = [], urls = [], timers = new Map()
   class Element {
     constructor(tag = 'div') {
@@ -54,7 +54,7 @@ async function fixture(override = () => undefined, { review = false, spellChecke
   if (writingTools) window.PaperLatexWritingTools = { create: () => writingTools }
   if (review) vm.runInNewContext(reviewSource, globals)
   vm.runInNewContext(source, globals)
-  const ui = window.PaperLatexWorkspace.create({ api, onContext })
+  const ui = window.PaperLatexWorkspace.create({ api, onContext, rail })
   await ui.open(); return { ui, ids, calls, revoked, urls, window, timers }
 }
 
@@ -63,6 +63,55 @@ test('closing refuses to discard a writing-tool draft', async () => {
   const f = await fixture(() => undefined, { writingTools: { hasDraft: () => pending, dispose() {} } })
   await f.ui.close(); assert.equal(f.ui.isOpen(), true)
   pending = false; await f.ui.close(); assert.equal(f.ui.isOpen(), false)
+  f.ui.dispose()
+})
+
+test('manual annotations and DSH writing share one rail while retaining their original controls and drafts', async () => {
+  const registered = []; let active = null
+  const rail = {
+    registerPanel(panel) { registered.push(panel); panel.element.hidden = true },
+    setExternal(value) { if (!value) active = null },
+    show(id) { active = id }, close(id) { if (active === id) active = null }, visible: id => active === id,
+  }
+  const f = await fixture(undefined, { review: true, rail })
+  assert.equal(registered.length, 1)
+  assert.equal(registered[0].id, 'latex-ai')
+  assert.equal(registered[0].label, '批注与写作')
+  assert.deepEqual(Array.from(registered[0].aliases), ['latex-review'])
+  const panel = registered[0].element
+  assert.equal(f.ids.get('latex-review-panel').parentElement, panel)
+  assert.equal(f.ids.get('latex-ai').parentElement, panel)
+  assert.equal(f.ids.get('latex-review-open').hidden, true)
+  assert.equal(f.ids.get('latex-ai-open').textContent, '批注与写作')
+  assert.equal(f.ids.get('latex-review-export-pdf').type, 'button')
+  f.ids.get('latex-ai-input').value = 'Synthetic writing question'
+  await f.ids.get('latex-source-note').dispatch('click')
+  f.ids.get('latex-review-comment').value = 'Synthetic manual annotation'
+  assert.equal(active, 'latex-ai')
+  assert.equal(f.ids.get('latex-review-composer').hidden, false)
+  await f.ids.get('latex-ai-open').dispatch('click')
+  assert.equal(active, null)
+  await f.ids.get('latex-ai-open').dispatch('click')
+  assert.equal(active, 'latex-ai')
+  assert.equal(f.ids.get('latex-review-comment').value, 'Synthetic manual annotation')
+  assert.equal(f.ids.get('latex-ai-input').value, 'Synthetic writing question')
+  await f.ui.close()
+  assert.equal(f.ui.isOpen(), true, 'Hiding the combined rail never discards an unfinished manual note')
+  await f.ids.get('latex-review-cancel').dispatch('click')
+  await f.ui.close()
+  assert.equal(f.ui.isOpen(), false)
+  f.ui.dispose()
+})
+
+test('standalone review actions open the same combined preview instead of an additional overlay', async () => {
+  const f = await fixture(undefined, { review: true })
+  assert.equal(f.ui.testHooks.state().tab, 'pdf', 'Opening the writer still starts on its PDF')
+  await f.ids.get('latex-source-note').dispatch('click')
+  assert.equal(f.ui.testHooks.state().tab, 'ai')
+  assert.equal(f.ids.get('latex-tab-ai').textContent, '批注与写作')
+  assert.equal(f.ids.get('latex-review-panel').parentElement, f.ids.get('latex-writing-panel'))
+  assert.equal(f.ids.get('latex-ai').parentElement, f.ids.get('latex-writing-panel'))
+  assert.equal(f.ids.get('latex-review-composer').hidden, false)
   f.ui.dispose()
 })
 

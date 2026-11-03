@@ -109,13 +109,13 @@ function environment({table=false,readerId='paper-a',paper={id:'paper-a',pdf:tru
     readingPanels:{show:name=>{panels[name]=true;calls.push(['show',name]);},close:name=>{panels[name]=false;calls.push(['close',name]);},visible:name=>panels[name],setSide:side=>calls.push(['side',side])},
     paperChatUI:{visible:value=>visibility.push(value),available:()=>true,draft:()=>'',context:()=>({annotationRefs:[]}),restoreDraft:value=>calls.push(['draft',value]),restoreContext:value=>calls.push(['context',value])},
     readingShell:{setContext:value=>calls.push(['mode',value])},
-    openPaper:async id=>{calls.push(['openPaper',id]);table=false;context.readerPaperId=id;context.state.active={...paper,id};},
+    openPaper:async id=>{calls.push(['openPaper',id]);table=false;context.readerPaperId=id;context.state.active={...paper,id};return 1;},
     requestPage:async page=>{calls.push(['page',page]);context.state.page=page;context.state.pageData={width:600,height:800};},
     loadAnnotations:async id=>calls.push(['annotations',id]),renderAnnotations(){},loadFeedback:id=>calls.push(['feedback',id]),loadModels(){},
     loadGraph:async()=>calls.push(['graph']),publishReaderState:()=>calls.push(['publish']),currentHarnessRoute:()=>null,toast:(...args)=>calls.push(['toast',...args]),
     openAnnotation:()=>{throw new Error('This fixture has no annotation dialog draft');},
     clearSelection:()=>{context.state.selection=null;element('selection-tools').hidden=true;},initializedReader:true,pendingReferenceOpen:null,pendingInkHandoff:null,inkQueue:null,
-    pdfReader:null,restoringInkDraft:false,inkSaveUncertain:false,canvasNotesContext:null,
+    readerSurfaceActive:()=>true,pdfReader:null,restoringInkDraft:false,inkSaveUncertain:false,canvasNotesContext:null,
   };
   vm.createContext(context);vm.runInContext(tabSource+'\n'+selectionSource+'\n'+restoreSource+'\n'+referenceSource,context,{filename:'web/app.js:reading-coordinators'});
   return {context,calls,visibility,panels,element,isTable:()=>table};

@@ -18,9 +18,9 @@ function fixture(options = {}) {
   const elements = new Map(['workspace-navigation-area', 'workspace-navigation-home', 'library-literature-content', 'workspace-versions'].map(id => [id, { id, hidden: false, dataset: {}, parentNode: null }]))
   const home = elements.get('workspace-navigation-home'), area = elements.get('workspace-navigation-area'), writing = { prepend: node => { calls.push('nav:writing'); node.parentNode = writing } }, library = { dataset: {} }
   home.parentNode = { id: 'home-parent' }; home.after = node => { calls.push('nav:home'); node.parentNode = home.parentNode }; area.parentNode = home.parentNode
-  const state = { active: options.active ?? { id: 'paper-source' }, project: 'old-reading-project' }
+  const state = { active: options.active ?? { id: 'paper-source' }, project: 'old-reading-project', itemTicket: 0, pageTicket: 0 }
   const context = {
-    workspaceNavigationTransition: false, restoringReader: false, restoringInkDraft: false, inkSaveBusy: false, annotationSaveBusy: options.annotationBusy || false, state,
+    readerStateReady: true, title: item => item.title || item.id, workspaceNavigationTransition: false, restoringReader: false, restoringInkDraft: false, inkSaveBusy: false, annotationSaveBusy: options.annotationBusy || false, state,
     dismissAnnotation: async () => options.dismissAnnotation !== false,
     selectProject: async id => { calls.push(`project:select:${id}`); state.project = id },
     $: id => elements.get(id), document: { fullscreenElement: options.fullscreen ? {} : null, exitFullscreen: async () => { calls.push('fullscreen:exit') }, querySelector: selector => selector === '.library-pane' ? library : selector === '#latex-view .latex-topbar' ? writing : null },
@@ -36,10 +36,10 @@ function fixture(options = {}) {
     api: async (action, args) => { calls.push({ action, ...plain(args) }); if (options.apiFailure) throw Error('synthetic missing target'); if (options.api) return options.api(action, args); const record = { id: args.id }; return action === 'board_get' ? { board: record } : ['latex_project_get','project_get'].includes(action) ? { project: record } : record },
     openPaper: async id => { calls.push(`paper:open:${id}`); if (options.openFailure) return; state.active = { id: options.wrongId ? 'wrong-target' : id }; return 7 },
     boardUI: { isOpen: () => boardOpen, current: () => boardCurrent, open: async input => { calls.push({ boardOpen: plain(input) }); if (options.openFailure) return false; boardOpen = true; boardCurrent = { kind: 'board', id: options.wrongId ? 'wrong-target' : input.id }; return true }, close: async () => { calls.push('board:close'); if (options.boardConflict) return false; boardOpen = false; return true } },
-    latexUI: { isOpen: () => latexOpen, current: () => latexCurrent, open: async id => { calls.push(`latex:open:${id}`); if (options.openFailure) return false; latexOpen = true; latexCurrent = { kind: 'latex', id: options.wrongId ? 'wrong-target' : id }; return true }, close: async () => { calls.push('latex:close'); if (!options.latexConflict) latexOpen = false } },
+    latexUI: { isOpen: () => latexOpen, current: () => options.emptyLatex ? null : latexCurrent, open: async id => { calls.push(`latex:open:${id}`); if (options.openFailure) return false; latexOpen = true; latexCurrent = { kind: 'latex', id: options.wrongId ? 'wrong-target' : id }; return true }, close: async () => { calls.push('latex:close'); if (!options.latexConflict) latexOpen = false } },
   }
   vm.createContext(context)
-  for (const name of ['placeWorkspaceNavigation', 'applyWorkspaceNavigation', 'workspaceContextChanged', 'prepareWorkspaceNavigation', 'closeWorkspaceSurfaces', 'openWorkspaceRoot', 'openWorkspaceTarget']) vm.runInContext(functionSource(name), context)
+  for (const name of ['readerSurfaceActive', 'cancelReaderOpening', 'publishPaperWorkspace', 'placeWorkspaceNavigation', 'applyWorkspaceNavigation', 'workspaceContextChanged', 'prepareWorkspaceNavigation', 'closeWorkspaceSurfaces', 'openWorkspaceRoot', 'openWorkspaceTarget']) vm.runInContext(functionSource(name), context)
   return { context, calls, contexts, tables, visible, alerts, elements, area, home, writing, library, state }
 }
 
@@ -124,11 +124,11 @@ test('reading projects open their exact membership scope and missing projects re
 })
 
 test('context callbacks avoid feedback loops and blank writers keep their category without closing', () => {
-  const same = fixture({ current: { kind: 'board', id: 'b', title: 'Board' } })
-  same.context.workspaceContextChanged({ kind: 'board', id: 'b', title: 'Board' })
+  const same = fixture({ boardOpen: true, current: { kind: 'board', id: 'board-source', title: 'Source board' } })
+  same.context.workspaceContextChanged({ kind: 'board', id: 'board-source', title: 'Source board' })
   assert.deepEqual(same.contexts, [])
   assert.deepEqual(same.tables, [])
-  const writing = fixture({ latexOpen: true })
+  const writing = fixture({ latexOpen: true, emptyLatex: true })
   writing.context.workspaceContextChanged(null)
   assert.deepEqual(writing.contexts, [[null, { section: 'latex' }]])
   assert.equal(writing.area.parentNode, writing.writing)
@@ -136,8 +136,8 @@ test('context callbacks avoid feedback loops and blank writers keep their catego
   const busy = fixture({ latexOpen: true }); busy.context.workspaceNavigationTransition = true
   busy.context.workspaceContextChanged({ kind: 'paper', id: 'old', title: 'Late old callback' })
   assert.deepEqual(busy.contexts, [])
-  const normal = fixture(); normal.context.workspaceContextChanged({ kind: 'board', id: 'b', title: 'Board' })
-  assert.deepEqual(normal.contexts, [[{ kind: 'board', id: 'b', title: 'Board' }]])
+  const normal = fixture({ boardOpen: true }); normal.context.workspaceContextChanged({ kind: 'board', id: 'board-source', title: 'Source board' })
+  assert.deepEqual(normal.contexts, [[{ kind: 'board', id: 'board-source', title: 'Source board' }]])
   assert.deepEqual(normal.tables, [false])
   assert.deepEqual(normal.visible, ['library'])
 })
@@ -160,4 +160,33 @@ test('project-scoped versions are cleared on focus changes and never fall back t
   assert.deepEqual(plain(scope()), { id: 'selected-draft' })
   f.context.workspaceNavigationUI.state = () => ({ current: null })
   assert.equal(scope(), null)
+})
+
+
+test('visible writing owns context over delayed paper metadata and closing-surface notifications', () => {
+  const f = fixture({ latexOpen: true })
+  f.context.publishPaperWorkspace({ id: 'old-paper', title: 'Late metadata' })
+  assert.deepEqual(f.contexts, [])
+  f.context.workspaceContextChanged({ kind: 'paper', id: 'old-paper', title: 'Late metadata' })
+  assert.deepEqual(f.contexts, [[{ kind: 'latex', id: 'latex-source', title: 'Source draft' }]])
+  assert.equal(f.state.itemTicket, 1, 'entering writing invalidates the old paper request')
+  assert.equal(f.state.pageTicket, 1)
+  assert.equal(f.context.readerStateReady, false)
+  const stale = fixture()
+  stale.context.workspaceContextChanged({ kind: 'latex', id: 'closed-draft', title: 'Closed' })
+  assert.deepEqual(stale.contexts, [], 'closed surfaces cannot claim active navigation')
+  const canvas = fixture({ boardOpen: true })
+  canvas.context.publishPaperWorkspace({ id: 'old-paper' })
+  assert.deepEqual(canvas.contexts, [])
+})
+
+test('accepted root navigation cancels old paper reads while a refused surface close preserves them', async () => {
+  const accepted = fixture()
+  assert.equal(await accepted.context.openWorkspaceRoot('latex'), true)
+  assert.equal(accepted.state.itemTicket, 1)
+  assert.equal(accepted.state.pageTicket, 1)
+  const blocked = fixture({ latexOpen: true, latexConflict: true })
+  assert.equal(await blocked.context.openWorkspaceRoot('paper'), false)
+  assert.equal(blocked.state.itemTicket, 0)
+  assert.equal(blocked.state.pageTicket, 0)
 })

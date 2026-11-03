@@ -85,8 +85,9 @@ window.PaperLatexWorkspace = (() => {
     const mainLabel = make('span', 'latex-main'); mainLabel.id = 'latex-main';
     const mainSelect = make('select'); mainSelect.id = 'latex-entry'; mainSelect.setAttribute('aria-label', '编译主文件');
     const saveState = make('span', 'latex-save-state'); saveState.id = 'latex-save-state'; saveState.setAttribute('role', 'status');
-    const aiToggle = make('button', 'button subtle', 'DSH 写作'); aiToggle.id = 'latex-ai-open'; aiToggle.type = 'button';
+    const aiToggle = make('button', 'button subtle', '批注与写作'); aiToggle.id = 'latex-ai-open'; aiToggle.type = 'button';
     const reviewToggle = make('button', 'button subtle', '自审'); reviewToggle.id = 'latex-review-open'; reviewToggle.type = 'button';
+    reviewToggle.hidden = true; // Keep the old action addressable without a second toolbar entry.
     const reviewDivider = make('span', 'latex-toolbar-divider'); reviewDivider.setAttribute('role', 'separator'); reviewDivider.setAttribute('aria-orientation', 'vertical');
     const navToggle = make('button', 'button subtle latex-nav-toggle', '侧边导航'); navToggle.id = 'latex-nav-toggle'; navToggle.type = 'button';
     navToggle.setAttribute('aria-controls', 'latex-navigator'); navToggle.setAttribute('aria-expanded', 'true');
@@ -97,8 +98,7 @@ window.PaperLatexWorkspace = (() => {
       button.setAttribute('aria-pressed', String(mode === 'split')); button.addEventListener('click', () => setLayout(mode));
       layoutButtons.set(mode, button); layoutControls.append(button);
     }
-    aiToggle.title = '在侧栏里提问或让模型改稿';
-    aiToggle.hidden = !rail;
+    aiToggle.title = '查看批注、向 DSH 提问或审阅修改提案';
     const menuButton = make('button', 'button subtle latex-menu-button', '☰'); menuButton.id = 'latex-menu-open'; menuButton.type = 'button';
     menuButton.setAttribute('aria-expanded', 'false'); menuButton.setAttribute('aria-controls', 'latex-menu'); menuButton.setAttribute('aria-label', '项目与设置'); menuButton.title = '项目与设置';
     toolbar.append(title, projectSelect, mainLabel, saveState, autoLabel, compile, diagnosticsToggle, navToggle, layoutControls, reviewDivider, reviewToggle, aiToggle, menuButton, back);
@@ -244,7 +244,7 @@ window.PaperLatexWorkspace = (() => {
 
     const right = make('section', 'latex-preview-pane'); right.setAttribute('aria-label', '预览与协作');
     const tabs = make('div', 'latex-tabs'); tabs.setAttribute('role', 'tablist');
-    const tabSpecs = rail ? [['pdf', 'PDF'], ['media', '媒体'], ['version', '版本']] : [['pdf', 'PDF'], ['media', '媒体'], ['ai', 'DSH 协作'], ['version', '版本']];
+    const tabSpecs = rail ? [['pdf', 'PDF'], ['media', '媒体'], ['version', '版本']] : [['pdf', 'PDF'], ['media', '媒体'], ['ai', '批注与写作'], ['version', '版本']];
     const tabButtons = new Map();
     for (const [name, label] of tabSpecs) {
       const button = make('button', 'latex-tab', label); button.id = `latex-tab-${name}`; button.type = 'button';
@@ -295,7 +295,10 @@ window.PaperLatexWorkspace = (() => {
     paneMedia.append(mediaCrumb, mediaInfo, mediaPreview);
 
     const paneAi = make('div', 'latex-pane'); paneAi.id = 'latex-pane-ai'; paneAi.setAttribute('role', 'tabpanel'); paneAi.hidden = Boolean(rail);
+    const writingPanel = make('section', 'latex-writing-panel'); writingPanel.id = 'latex-writing-panel'; writingPanel.setAttribute('aria-label', '批注与写作');
     const aiSection = make('section', 'latex-ai'); aiSection.id = 'latex-ai';
+    aiSection.setAttribute('aria-label', 'DSH 写作');
+    const aiTitle = make('strong', 'latex-writing-section-title', 'DSH 写作');
     const aiHead = make('div', 'latex-ai-head');
     const aiModel = make('select'); aiModel.id = 'latex-ai-model'; aiModel.setAttribute('aria-label', 'DSH 模型');
     const aiAsk = make('button', 'button subtle', '问 DSH'); aiAsk.id = 'latex-ai-ask'; aiAsk.type = 'button';
@@ -310,8 +313,8 @@ window.PaperLatexWorkspace = (() => {
     const aiAccept = make('button', 'button primary', '接受并写入'); aiAccept.id = 'latex-ai-accept'; aiAccept.type = 'button';
     const aiDiscard = make('button', 'button subtle', '放弃'); aiDiscard.id = 'latex-ai-discard'; aiDiscard.type = 'button';
     const aiActions = make('div', 'latex-ai-actions'); aiActions.append(aiAccept, aiDiscard);
-    aiSection.append(aiHead, aiInput, aiAnswer, aiProposal, aiActions);
-    paneAi.append(aiSection);
+    aiSection.append(aiTitle, aiHead, aiInput, aiAnswer, aiProposal, aiActions);
+    paneAi.append(writingPanel);
 
     const paneVersion = make('div', 'latex-pane'); paneVersion.id = 'latex-pane-version'; paneVersion.setAttribute('role', 'tabpanel');
     const versionRoot = make('section', 'latex-versions'); versionRoot.id = 'latex-versions';
@@ -362,8 +365,8 @@ window.PaperLatexWorkspace = (() => {
       navToggle.setAttribute('aria-expanded', String(!navigator.hidden));
       if (layout !== 'source') requestResize();
     });
-    const reviewPanel = make('section', 'latex-review-panel'); reviewPanel.id = 'latex-review-panel'; reviewPanel.setAttribute('aria-label', '自审批注');
-    if (!rail) { reviewPanel.hidden = true; content.append(reviewPanel); }
+    const reviewPanel = make('section', 'latex-review-panel'); reviewPanel.id = 'latex-review-panel'; reviewPanel.setAttribute('aria-label', '我的批注');
+    writingPanel.append(reviewPanel, aiSection);
     const reviewer = window.PaperLatexReview?.create({ root: reviewPanel, api,
       context: () => ({ id: project?.id, main: project?.main_path, binding_generation: project?.binding_generation, file, revision, dirty, editor, build: pdfBuild }),
       show: () => showReview(),
@@ -385,10 +388,9 @@ window.PaperLatexWorkspace = (() => {
     });
     function showReview() {
       if (!reviewer) { say('自审组件尚未加载；请先刷新插件页面。', true); return; }
-      if (rail?.setExternal) { rail.setExternal(true); rail.show('latex-review'); }
-      else reviewPanel.hidden = false;
+      showRail(true);
     }
-    reviewToggle.addEventListener('click', () => { showReview(); if (reviewer) void reviewer.refresh(); });
+    reviewToggle.addEventListener('click', () => showReview());
     sourceNote.addEventListener('click', () => reviewer?.beginSource());
     function updateSyncHint() {
       const position = pageCount ? `第 ${page} / ${pageCount} 页 · ` : '';
@@ -399,6 +401,7 @@ window.PaperLatexWorkspace = (() => {
     function setSaveState(text, kind = '') { saveState.textContent = text; saveState.dataset.state = kind; }
     function setTab(name) {
       tab = name;
+      if (!rail) aiToggle.setAttribute('aria-pressed', String(name === 'ai'));
       previewHead.hidden = name !== 'pdf'; pdfTools.hidden = name !== 'pdf'; mediaHead.hidden = name !== 'media';
       for (const [candidate, button] of tabButtons) {
         const active = candidate === name;
@@ -1897,7 +1900,7 @@ window.PaperLatexWorkspace = (() => {
         view.hidden = false;
         document.body.classList.add('latex-focused');
         setTab('pdf');
-        showRail(true);
+        if (rail) showRail(true);
         void refreshWorkspace();
         if (wanted) await selectProject(wanted);
         else { project = null; await renderEmpty(); }
@@ -1921,23 +1924,28 @@ window.PaperLatexWorkspace = (() => {
       notifyContext(true);
     }
 
-    /** The collaboration lives in the reading rail when there is one (same type as 批注). */
+    /** Manual annotations and DSH collaboration share one rail and keep their own records. */
     if (rail?.registerPanel) {
-      try { rail.registerPanel({ id: 'latex-ai', label: 'DSH 写作', element: aiSection }); if (reviewer) rail.registerPanel({ id: 'latex-review', label: '自审', element: reviewPanel }); }
+      try { rail.registerPanel({ id: 'latex-ai', aliases: ['latex-review'], label: '批注与写作', element: writingPanel }); }
       catch (error) { say(`侧栏不可用：${error.message}`, true); }
     }
     function showRail(open) {
-      if (!rail?.setExternal) return;
+      if (!rail?.setExternal) {
+        if (open) { if (layout === 'source') setLayout('split'); setTab('ai'); void reviewer?.refresh(); }
+        else if (tab === 'ai') setTab('pdf');
+        syncRailToggle();
+        return;
+      }
       try {
         rail.setExternal(open);
-        if (open) { rail.show('latex-ai'); void aiStatus(); }
+        if (open) { rail.show('latex-ai'); void aiStatus(); void reviewer?.refresh(); }
         else rail.close('latex-ai');
         syncRailToggle();
       } catch (error) { say(`侧栏不可用：${error.message}`, true); }
     }
-    function syncRailToggle() { aiToggle.setAttribute('aria-pressed', String(Boolean(rail?.visible?.('latex-ai')))); }
+    function syncRailToggle() { aiToggle.setAttribute('aria-pressed', String(rail ? Boolean(rail.visible?.('latex-ai')) : tab === 'ai')); }
     aiToggle.addEventListener('click', () => {
-      const open = !(rail?.visible?.('latex-ai'));
+      const open = rail ? !rail.visible?.('latex-ai') : tab !== 'ai';
       showRail(open);
       if (open) void aiStatus();
     });

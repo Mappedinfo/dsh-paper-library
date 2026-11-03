@@ -16,15 +16,16 @@ window.PaperWorkspaceNavigation = (() => {
   }
   const count = value => value?.total === null ? `至少 ${value.known_total}` : String(value?.total ?? 0);
   function create(options) {
-    const { root, catalogRoot, relatedRoot, api, paperSearch } = options, doc = root.ownerDocument;
+    const { root, catalogRoot, relatedRoot, api, paperSearch, actions } = options, doc = root.ownerDocument;
     const paperSearchHome = paperSearch?.parentNode;
+    const actionsHome = actions?.parentNode;
     if (!root || !catalogRoot || !relatedRoot || typeof api !== 'function') throw Error('工作区导航需要导航、目录与关联内容容器。');
     let live = true, section = 'paper', current = null, trail = [], transition = false, intent = 0, pending = null, catalogSequence = 0, relatedSequence = 0;
     const catalogState = Object.fromEntries(['board', 'latex', 'project'].map(kind => [kind, { query: '', draft: '', offset: 0, page: null, busy: false, error: '', warnings: [] }]));
-    let related = { groups: {}, busy: false, error: '', warnings: [], truncated: false }, groupRequests = {};
+    let related = { groups: {}, busy: false, error: '', warnings: [], truncated: false }, groupRequests = {}, relatedLoaded = false, popup = null;
     const listeners = [];
     const el = (tag, className, text) => { const node = doc.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
-    const listen = (node, event, fn) => { node.addEventListener(event, fn); listeners.push(() => node.removeEventListener(event, fn)); };
+    const listen = (node, event, fn, options) => { node.addEventListener(event, fn, options); listeners.push(() => node.removeEventListener(event, fn, options)); };
     const button = (text, fn, className = 'workspace-nav-button') => { const node = el('button', className, text); node.type = 'button'; node.addEventListener('click', fn); return node; };
     const nav = el('nav', 'workspace-navigation'); nav.setAttribute('aria-label', '文献、画板、写作与阅读项目导航');
     const roots = el('div', 'workspace-navigation-roots'), crumbs = el('ol', 'workspace-breadcrumbs'); crumbs.setAttribute('aria-label', '关联内容路径');
@@ -33,7 +34,16 @@ window.PaperWorkspaceNavigation = (() => {
       if (roots.children.length) { const divider = el('span', 'workspace-root-divider', '/'); divider.setAttribute('aria-hidden', 'true'); roots.append(divider); }
       const control = button(label, () => void selectRoot(kind), 'workspace-root-button'); control.dataset.kind = kind; rootButtons[kind] = control; roots.append(control);
     }
-    const searchHost = el('div', 'workspace-nav-search'); nav.append(roots, searchHost, crumbs); root.replaceChildren(nav);
+    const searchHost = el('div', 'workspace-nav-search'), actionHost = el('div', 'workspace-nav-actions');
+    const pathButton = button('路径', () => togglePopup('path'), 'workspace-nav-button workspace-path-toggle');
+    const relatedButton = button('关联', () => togglePopup('related'), 'workspace-nav-button workspace-related-toggle');
+    const pathPopup = el('section', 'workspace-popup workspace-path-popup'); pathPopup.id = 'workspace-path-popup'; pathPopup.hidden = true; pathPopup.setAttribute('role', 'region'); pathPopup.setAttribute('aria-label', '关联内容路径');
+    const popupHeading = (title, close) => { const header = el('header', 'workspace-popup-heading'); header.append(el('strong', '', title), button('×', close, 'workspace-nav-button workspace-popup-close')); header.lastElementChild?.setAttribute('aria-label', '关闭'); return header; };
+    pathPopup.append(popupHeading('关联内容路径', () => closePopovers(true)), crumbs);
+    pathButton.setAttribute('aria-controls', pathPopup.id); relatedButton.setAttribute('aria-controls', 'workspace-related');
+    pathButton.setAttribute('aria-expanded', 'false'); relatedButton.setAttribute('aria-expanded', 'false');
+    actionHost.append(pathButton, relatedButton); if (actions) actionHost.append(actions);
+    nav.append(roots, searchHost, actionHost, pathPopup); root.replaceChildren(nav);
     const catalog = el('section', 'workspace-catalog'); catalog.setAttribute('aria-label', '工作区目录');
     const catalogHeader = el('header', 'workspace-section-header'), catalogTitle = el('strong'), catalogRefresh = button('刷新', () => void loadCatalog()); const projectCreate = button('新建阅读项目', () => options.onCreateProject?.()); projectCreate.hidden = true; catalogHeader.append(catalogTitle, projectCreate, catalogRefresh);
     const searchForm = el('form', 'workspace-catalog-search'), search = el('input'); search.type = 'search'; search.maxLength = 200; search.placeholder = '检索名称'; search.setAttribute('aria-label', '检索画板、写作或阅读项目');
@@ -45,7 +55,37 @@ window.PaperWorkspaceNavigation = (() => {
     const catalogDescription = el('p', 'workspace-nav-description'); catalogDescription.hidden = true;
     catalog.append(catalogHeader, catalogDescription, catalogStatus, catalogList, catalogPager); catalogRoot.replaceChildren(catalog);
     const relations = el('details', 'workspace-related'), relatedSummary = el('summary'), relatedBody = el('div', 'workspace-related-body');
-    relatedSummary.setAttribute('aria-label', '展开关联子内容'); relations.append(relatedSummary, relatedBody); relatedRoot.replaceChildren(relations);
+    relatedSummary.setAttribute('aria-label', '关联子内容'); relations.append(relatedSummary, relatedBody);
+    const relatedHeading = popupHeading('关联内容', () => closePopovers(true));
+    relatedRoot.id ||= 'workspace-related'; relatedRoot.replaceChildren(relatedHeading, relations);
+    const popupTrigger = value => value === 'path' ? pathButton : relatedButton;
+    function placePopovers() {
+      if (!popup) return;
+      window.PaperFloatingWindows?.placeBelow(popupTrigger(popup), popup === 'path' ? pathPopup : relatedRoot);
+    }
+    function closePopovers(focus = false) {
+      const previous = popup; popup = null; pathPopup.hidden = true;
+      if (current?.kind !== 'project') relatedRoot.hidden = true;
+      pathButton.setAttribute('aria-expanded', 'false'); relatedButton.setAttribute('aria-expanded', 'false');
+      if (focus && previous) popupTrigger(previous).focus();
+    }
+    function togglePopup(value) {
+      if (!live || transition || !current) return;
+      if (popup === value) { closePopovers(true); return; }
+      closePopovers(); popup = value;
+      pathPopup.hidden = value !== 'path'; if (value === 'related') relatedRoot.hidden = false;
+      popupTrigger(value).setAttribute('aria-expanded', 'true');
+      if (typeof window.CustomEvent === 'function') doc.dispatchEvent(new window.CustomEvent('paper-library:workspace-popup', { detail: { id: value === 'path' ? pathPopup.id : relatedRoot.id } }));
+      placePopovers();
+      if (value === 'related' && !relatedLoaded && !related.busy) void loadRelated();
+    }
+    if (doc.addEventListener) {
+      listen(doc, 'click', event => { if (popup && !pathPopup.contains(event.target) && !relatedRoot.contains(event.target) && !pathButton.contains(event.target) && !relatedButton.contains(event.target)) closePopovers(); });
+      listen(doc, 'keydown', event => { if (popup && event.key === 'Escape') { event.preventDefault(); closePopovers(true); } });
+      listen(doc, 'paper-library:workspace-popup', event => { if (![pathPopup.id, relatedRoot.id].includes(event.detail?.id)) closePopovers(); });
+      listen(doc, 'scroll', placePopovers, true);
+    }
+    if (window.addEventListener) listen(window, 'resize', placePopovers);
     const state = () => ({ section, current: current ? { ...current } : null, trail: trail.map(item => ({ ...item })) });
     const emit = () => { if (live) options.onChange?.(state()); };
     const warnings = value => Array.isArray(value) ? value.filter(text => typeof text === 'string').slice(0, 6).map(text => text.slice(0, 300)) : [];
@@ -67,6 +107,10 @@ window.PaperWorkspaceNavigation = (() => {
       searchForm.hidden = section === 'paper' || !!current; searchHost.hidden = section !== 'paper' && !!current;
       search.disabled = transition; if (paperSearch) paperSearch.setAttribute('aria-busy', String(transition));
       for (const [kind, control] of Object.entries(rootButtons)) { control.setAttribute('aria-pressed', String(section === kind)); control.disabled = transition; if (section === kind && !current) control.setAttribute('aria-current', 'page'); else control.removeAttribute('aria-current'); }
+      pathButton.hidden = !current; relatedButton.hidden = !current || current.kind === 'project'; actionHost.hidden = !current && (!actions || actions.hidden);
+      pathButton.disabled = transition; relatedButton.disabled = transition;
+      pathButton.title = current ? `${KINDS[current.kind]} · ${current.title}` : '关联内容路径';
+      relatedButton.title = '按需查看此条目的关联文献、画板、写作与阅读项目';
       crumbs.replaceChildren(); crumbs.hidden = !current;
       for (let i = 0; i < trail.length; i++) {
         const item = trail[i], part = el('li');
@@ -90,10 +134,16 @@ window.PaperWorkspaceNavigation = (() => {
       pager(catalogPager, value.page, offset => { value.offset = offset; void loadCatalog(); }, value.busy || transition);
     }
     function renderRelated() {
-      relatedRoot.hidden = !current; if (!current) return;
+      const project = current?.kind === 'project';
+      relatedRoot.hidden = !current || !project && popup !== 'related';
+      relatedRoot.classList.toggle('workspace-popup', !!current && !project); relatedRoot.classList.toggle('workspace-related-popup', !!current && !project);
+      relatedRoot.setAttribute('role', 'region'); relatedRoot.setAttribute('aria-label', project ? '阅读项目内容' : '关联内容'); relatedHeading.hidden = !current || project;
+      if (project && relatedRoot.style) for (const name of ['position', 'top', 'left', 'right', 'max-width', 'max-height']) relatedRoot.style.removeProperty?.(name);
+      if (!current) return;
       const labels = Object.entries(KINDS).filter(([kind]) => kind !== current.kind || related.groups[kind]?.items.length).map(([kind, label]) => related.groups[kind] ? `${label} ${count(related.groups[kind])}` : '').filter(Boolean);
       relatedSummary.textContent = `${current.kind === 'project' ? '项目内容' : '关联内容'}${labels.length ? ` · ${labels.join(' / ')}` : ''}`;
       relations.dataset.kind = current.kind;
+      relations.open = true;
       relatedBody.replaceChildren();
       if (current.kind === 'project') relatedBody.append(el('p', 'workspace-nav-description', [current.description, '按主题组织阅读与研究文献；LaTeX 写作是单独的写作项目。'].filter(Boolean).join(' ')));
       const status = el('p', 'workspace-nav-status', [related.busy ? '正在读取关联…' : '', related.error, ...related.warnings].filter(Boolean).join(' ')); status.setAttribute('role', 'status'); status.classList.toggle('is-error', !!related.error); relatedBody.append(status);
@@ -105,7 +155,8 @@ window.PaperWorkspaceNavigation = (() => {
         if (!result.items.length) group.append(el('p', 'workspace-nav-empty', result.truncated || related.truncated ? '当前范围未找到关联。' : '暂无已登记关联。'));
         const pagination = el('div', 'workspace-nav-pagination'); pager(pagination, result, offset => void loadRelated(kind, offset), related.busy || groupRequests[kind]?.busy || transition); group.append(pagination); relatedBody.append(group);
       }
-      if (!shown && !Object.keys(related.groups).length && !related.busy && !related.error) relatedBody.append(el('p', 'workspace-nav-empty', '暂无已登记关联。'));
+      if (!shown && !Object.keys(related.groups).length && !related.busy && !related.error) relatedBody.append(el('p', 'workspace-nav-empty', relatedLoaded ? '暂无已登记关联。' : '打开后读取已有联系。'));
+      placePopovers();
     }
     function render() { renderNavigation(); renderCatalog(); renderRelated(); }
     async function loadCatalog() {
@@ -131,7 +182,7 @@ window.PaperWorkspaceNavigation = (() => {
         if (result.focus && key(result.focus) !== focusKey) throw Error('关联内容与当前条目不一致。');
         const groups = {}; for (const kind of Object.keys(KINDS)) { if (result.groups?.[kind]) groups[kind] = page(result.groups[kind], kind); }
         related.groups = groupKind ? { ...related.groups, ...(groups[groupKind] ? { [groupKind]: groups[groupKind] } : {}) } : groups;
-        related.warnings = warnings(result.warnings); related.truncated = result.truncated === true; return true;
+        related.warnings = warnings(result.warnings); related.truncated = result.truncated === true; relatedLoaded = true; return true;
       } catch (error) { if (stillCurrent()) related.error = `${error.message || '读取关联失败'}${Object.keys(related.groups).length ? '；已有列表保留。' : ''}`; return false; }
       finally { if (stillCurrent()) { groupRequests[groupKind || '*'].busy = false; if (!groupKind) related.busy = false; renderRelated(); } }
     }
@@ -142,11 +193,12 @@ window.PaperWorkspaceNavigation = (() => {
       if (confirmedSection !== undefined && !Object.hasOwn(KINDS, confirmedSection)) throw Error('工作区类别无效。');
       if (next && transition && (!pending || key(pending.target) !== key(next))) { ++intent; pending = null; transition = false; }
       if (same && (confirmedSection === undefined || confirmedSection === section)) { if (next && next.title !== current.title) { current = next; trail[trail.length - 1] = next; renderNavigation(); emit(); } return true; }
-      ++catalogSequence; ++relatedSequence; groupRequests = {}; related = { groups: {}, busy: false, error: '', warnings: [], truncated: false };
+      closePopovers();
+      ++catalogSequence; ++relatedSequence; groupRequests = {}; relatedLoaded = false; related = { groups: {}, busy: false, error: '', warnings: [], truncated: false };
       if (next) { section = next.kind; trail = pending && key(pending.target) === key(next) ? pending.trail : [next]; current = next; }
       else { current = null; trail = []; if (confirmedSection) section = confirmedSection; }
       if (current?.kind === 'project') relations.open = true; else if (next) relations.open = false;
-      render(); emit(); if (current) void loadRelated(); return true;
+      render(); emit(); if (current?.kind === 'project') void loadRelated(); return true;
     }
     async function selectRoot(kind) {
       if (!Object.hasOwn(KINDS, kind) || !live || transition) return false;
@@ -154,7 +206,7 @@ window.PaperWorkspaceNavigation = (() => {
       try {
         if (await options.prepare?.() === false || !live || owner !== intent) return false;
         if (await options.onRootChange?.(kind) === false || !live || owner !== intent) return false;
-        section = kind; current = null; trail = []; ++catalogSequence; ++relatedSequence; groupRequests = {}; related = { groups: {}, busy: false, error: '', warnings: [], truncated: false }; render(); emit();
+        closePopovers(); section = kind; current = null; trail = []; ++catalogSequence; ++relatedSequence; groupRequests = {}; relatedLoaded = false; related = { groups: {}, busy: false, error: '', warnings: [], truncated: false }; render(); emit();
         if (kind !== 'paper') void loadCatalog(); return true;
       } catch (error) { options.toast?.(error.message || '切换工作区失败', true); return false; }
       finally { if (live && owner === intent) { transition = false; render(); } }
@@ -172,7 +224,7 @@ window.PaperWorkspaceNavigation = (() => {
       finally { if (owner === intent) { pending = null; transition = false; if (live) render(); } }
     }
     render();
-    return { setCurrent, selectRoot, navigate, refresh: () => { if (current) { ++relatedSequence; groupRequests = {}; return loadRelated(); } return loadCatalog(); }, state, dispose() { live = false; ++intent; ++catalogSequence; ++relatedSequence; for (const remove of listeners) remove(); if (paperSearch && paperSearchHome) { paperSearch.hidden = false; paperSearchHome.append(paperSearch); } root.replaceChildren(); catalogRoot.replaceChildren(); relatedRoot.replaceChildren(); } };
+    return { setCurrent, selectRoot, navigate, closePopovers, refresh: () => { if (current) { ++relatedSequence; groupRequests = {}; related.busy = false; relatedLoaded = false; if (current.kind === 'project' || popup === 'related') return loadRelated(); renderRelated(); return true; } return loadCatalog(); }, state, dispose() { closePopovers(); live = false; ++intent; ++catalogSequence; ++relatedSequence; for (const remove of listeners) remove(); if (paperSearch && paperSearchHome) { paperSearch.hidden = false; paperSearchHome.append(paperSearch); } if (actions && actionsHome) actionsHome.append(actions); root.replaceChildren(); catalogRoot.replaceChildren(); relatedRoot.replaceChildren(); } };
   }
   return Object.freeze({ create });
 })();

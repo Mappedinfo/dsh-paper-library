@@ -13,7 +13,7 @@ const related = (focus, groups = {}, extra = {}) => ({ focus, groups: { paper: p
 function fixture(options = {}) {
   const calls = [], changes = [], roots = [], warnings = [], navigated = []
   class Element {
-    constructor(tag) { this.tagName = tag.toUpperCase(); this.ownerDocument = document; this.children = []; this.dataset = {}; this.attributes = {}; this.events = new Map(); this.hidden = false; this.disabled = false; this.value = ''; this.textContent = ''; this.classes = new Set(); this.classList = { add: value => this.classes.add(value), toggle: (value, on) => { if (on === undefined) on = !this.classes.has(value); if (on) this.classes.add(value); else this.classes.delete(value); return on }, contains: value => this.classes.has(value) } }
+    constructor(tag) { this.tagName = tag.toUpperCase(); this.ownerDocument = document; this.children = []; this.dataset = {}; this.attributes = {}; this.events = new Map(); this.hidden = false; this.disabled = false; this.value = ''; this.textContent = ''; this.style = { removeProperty(name) { delete this[name]; } }; this.classes = new Set(); this.classList = { add: value => this.classes.add(value), toggle: (value, on) => { if (on === undefined) on = !this.classes.has(value); if (on) this.classes.add(value); else this.classes.delete(value); return on }, contains: value => this.classes.has(value) } }
     set className(value) { this.classes = new Set(value.split(/\s+/).filter(Boolean)) } get className() { return [...this.classes].join(' ') }
     append(...nodes) { for (const node of nodes) { if (node.parentNode) node.parentNode.children = node.parentNode.children.filter(value => value !== node); node.parentNode = this; this.children.push(node) } }
     replaceChildren(...nodes) { for (const node of this.children) node.parentNode = null; this.children = []; this.append(...nodes) }
@@ -22,17 +22,20 @@ function fixture(options = {}) {
     dispatch(name, properties = {}) { const event = { target: this, preventDefault() { this.defaultPrevented = true }, ...properties }; for (const listener of this.events.get(name) || []) listener(event); return event }
     click() { if (!this.disabled) this.dispatch('click') }
     focus() { document.activeElement = this }
+    contains(node) { return node === this || this.children.some(child => child.contains(node)) }
   }
-  const document = { createElement: tag => new Element(tag) }, root = new Element('div'), catalogRoot = new Element('div'), relatedRoot = new Element('div'), window = {}
+  const document = { createElement: tag => new Element(tag), events: new Map(), addEventListener: Element.prototype.addEventListener, removeEventListener: Element.prototype.removeEventListener, dispatch: Element.prototype.dispatch, dispatchEvent(event) { return this.dispatch(event.type, event) } }, root = new Element('div'), catalogRoot = new Element('div'), relatedRoot = new Element('div')
+  const positions = [], window = { events: new Map(), addEventListener: Element.prototype.addEventListener, removeEventListener: Element.prototype.removeEventListener, dispatch: Element.prototype.dispatch, CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail } }, PaperFloatingWindows: { placeBelow(trigger, panel) { positions.push({ trigger, panel }); panel.style.position = 'fixed'; } } }
+  const actionsHome = new Element('div'), actions = new Element('details'); actions.hidden = true; actionsHome.append(actions)
   const searchHome = new Element('div'), paperSearch = new Element('label'), paperInput = new Element('input'); paperInput.value = '原文献检索'; paperSearch.append(paperInput); searchHome.append(paperSearch);
   vm.runInNewContext(source, { window, document })
   const api = async (action, args) => { calls.push({ action, ...plain(args) }); return options.api ? options.api(action, args) : action === 'workspace_catalog' ? page([item(args.kind, 'synthetic-a')], { offset: args.offset }) : related({ kind: args.kind, id: args.id }) }
-  const nav = window.PaperWorkspaceNavigation.create({ root, catalogRoot, relatedRoot, api, paperSearch, onCreateProject: options.onCreateProject, onChange: value => changes.push(plain(value)), onRootChange: async value => { roots.push(value); return options.onRootChange?.(value) }, onNavigate: async value => { navigated.push(plain(value)); return options.onNavigate?.(value) }, prepare: options.prepare, toast: message => warnings.push(message) })
+  const nav = window.PaperWorkspaceNavigation.create({ root, catalogRoot, relatedRoot, api, paperSearch, actions, onCreateProject: options.onCreateProject, onChange: value => changes.push(plain(value)), onRootChange: async value => { roots.push(value); return options.onRootChange?.(value) }, onNavigate: async value => { navigated.push(plain(value)); return options.onNavigate?.(value) }, prepare: options.prepare, toast: message => warnings.push(message) })
   const all = start => [start, ...start.children.flatMap(all)]
   const find = (className, start = root) => all(start).find(node => node.classes.has(className))
   const findAll = (className, start = root) => all(start).filter(node => node.classes.has(className))
   const text = start => all(start).map(node => node.textContent).filter(Boolean).join(' ')
-  return { nav, paperSearch, paperInput, searchHome, root, catalogRoot, relatedRoot, calls, changes, roots, warnings, navigated, all, find, findAll, text }
+  return { nav, document, window, positions, actions, actionsHome, paperSearch, paperInput, searchHome, root, catalogRoot, relatedRoot, calls, changes, roots, warnings, navigated, all, find, findAll, text }
 }
 
 test('four entrances are distinct and a refused root switch leaves the original view untouched', async () => {
@@ -95,8 +98,11 @@ test('related children navigate reciprocally, preserve authoritative titles and 
   nav = f.nav
   nav.setCurrent(a); await wait()
   assert.equal(f.catalogRoot.hidden, true)
+  assert.equal(f.relatedRoot.hidden, true)
+  assert.equal(f.calls.length, 0, 'current context alone does not read relation metadata')
+  f.find('workspace-related-toggle').click(); await wait()
   assert.equal(f.relatedRoot.hidden, false)
-  assert.equal(f.find('workspace-related', f.relatedRoot).open, false, 'related items start collapsed without forcing a large panel')
+  assert.equal(f.find('workspace-related', f.relatedRoot).open, true, 'related content is available only inside the requested popover')
   await nav.navigate(b); await wait()
   assert.equal(nav.state().current.title, 'Board A loaded')
   assert.deepEqual(plain(nav.state().trail).map(value => value.id), ['paper-a', 'board-a'])
@@ -120,7 +126,7 @@ test('a failed item navigation preserves current selection and does not request 
 test('external context changes isolate late related reads and repeated contexts do not refetch', async () => {
   const old = deferred()
   const f = fixture({ api: async (_action, args) => args.id === 'first' ? old.promise : related(item(args.kind, args.id), { board: page([item('board', 'current-child')]) }) })
-  f.nav.setCurrent(item('paper', 'first')); f.nav.setCurrent(item('paper', 'second')); await wait()
+  f.nav.setCurrent(item('paper', 'first')); f.find('workspace-related-toggle').click(); f.nav.setCurrent(item('paper', 'second')); f.find('workspace-related-toggle').click(); await wait()
   old.resolve(related(item('paper', 'first'), { board: page([item('board', 'old-child')]) })); await wait()
   assert.match(f.text(f.relatedRoot), /current-child/)
   assert.doesNotMatch(f.text(f.relatedRoot), /old-child/)
@@ -137,7 +143,7 @@ test('group pagination changes only its requested group and partial counts stay 
     board: page([item('board', args.offset ? 'board-next' : 'board-first')], { offset: args.offset, total: null, known_total: 25, has_more: !args.offset, truncated: true }),
     latex: page([item('latex', args.group_kind ? 'not-the-requested-group' : 'keep-this-draft')]),
   }, { truncated: true, warnings: ['目录仍有未读取的部分。'] }) })
-  f.nav.setCurrent(focus); await wait()
+  f.nav.setCurrent(focus); f.find('workspace-related-toggle').click(); await wait()
   assert.match(f.text(f.relatedRoot), /至少 25/)
   const next = f.findAll('workspace-nav-button', f.relatedRoot).find(node => node.textContent === '下一页 →' && !node.disabled)
   next.click(); await wait()
@@ -151,7 +157,7 @@ test('group pagination changes only its requested group and partial counts stay 
 test('missing children remain visible but unavailable and source text stays inert', async () => {
   const label = '<script>synthetic()</script>'
   const f = fixture({ api: async (_action, args) => related(item(args.kind, args.id), { board: page([{ ...item('board', 'missing-board', label), missing: true, relation: '显式关联', via: { title: '<b>project</b>' } }]) }) })
-  f.nav.setCurrent(item('paper', 'p')); await wait()
+  f.nav.setCurrent(item('paper', 'p')); f.find('workspace-related-toggle').click(); await wait()
   const open = f.findAll('workspace-object-open', f.relatedRoot)[0]
   assert.equal(open.disabled, true)
   assert.equal(open.textContent, label)
@@ -162,7 +168,7 @@ test('missing children remain visible but unavailable and source text stays iner
 
 test('a reading-project relation describes its existing via title once', async () => {
   const f = fixture({ api: async (_action, args) => related(item(args.kind, args.id), { latex: page([{ ...item('latex', 'draft'), relation: '通过阅读项目：合成主题', via: { title: '合成主题' } }]) }) })
-  f.nav.setCurrent(item('paper', 'p')); await wait()
+  f.nav.setCurrent(item('paper', 'p')); f.find('workspace-related-toggle').click(); await wait()
   const copy = f.find('workspace-object-relation', f.relatedRoot).textContent
   assert.equal(copy, '通过阅读项目：合成主题')
 })
@@ -170,7 +176,7 @@ test('a reading-project relation describes its existing via title once', async (
 test('failed refresh preserves the current children and malformed categories never replace them', async () => {
   let fail = false
   const f = fixture({ api: async (_action, args) => { if (fail) return related(item(args.kind, args.id), { board: page([item('latex', 'wrong-category')]) }); return related(item(args.kind, args.id), { board: page([item('board', 'retained')]) }) } })
-  f.nav.setCurrent(item('paper', 'p')); await wait(); fail = true
+  f.nav.setCurrent(item('paper', 'p')); f.find('workspace-related-toggle').click(); await wait(); fail = true
   assert.equal(await f.nav.refresh(), false)
   assert.match(f.text(f.relatedRoot), /retained/)
   assert.match(f.text(f.relatedRoot), /已有列表保留/)
@@ -182,7 +188,7 @@ test('breadcrumb history is bounded and disposing suppresses all pending results
   for (let index = 0; index < 12; index++) await f.nav.navigate(item(index % 2 ? 'board' : 'paper', `synthetic-${index}`))
   assert.equal(f.nav.state().trail.length, 8)
   const pending = deferred(), g = fixture({ api: () => pending.promise })
-  g.nav.setCurrent(item('paper', 'p')); g.nav.dispose()
+  g.nav.setCurrent(item('paper', 'p')); g.find('workspace-related-toggle').click(); g.nav.dispose()
   pending.resolve(related(item('paper', 'p'), { board: page([item('board', 'late')]) })); await wait()
   assert.equal(g.root.children.length, 0)
   assert.equal(g.catalogRoot.children.length, 0)
@@ -219,4 +225,68 @@ test('reading projects have their own list, native create action and expanded li
   assert.equal(f.find('workspace-related',f.relatedRoot).open,true)
   assert.match(f.text(f.relatedRoot),/项目内容/); assert.match(f.text(f.relatedRoot),/member/); assert.match(f.text(f.relatedRoot),/LaTeX 写作/)
   assert.equal(f.find('workspace-nav-search').hidden,true)
+})
+
+test('paths and relations open on demand without adding permanent rows or reading unopened metadata', async () => {
+  const f = fixture()
+  f.nav.setCurrent(item('latex', 'draft', 'A long project title'))
+  await wait()
+  assert.equal(f.calls.length, 0)
+  assert.equal(f.relatedRoot.hidden, true)
+  assert.equal(f.find('workspace-path-popup').hidden, true)
+  assert.equal(f.find('workspace-breadcrumbs').parentNode, f.find('workspace-path-popup'))
+  assert.equal(f.actions.parentNode, f.find('workspace-nav-actions'))
+  f.find('workspace-path-toggle').click()
+  assert.equal(f.find('workspace-path-popup').hidden, false)
+  assert.equal(f.find('workspace-path-toggle').getAttribute('aria-expanded'), 'true')
+  assert.equal(f.calls.length, 0, 'opening a saved navigation path needs no metadata read')
+  assert.equal(f.positions.at(-1).trigger, f.find('workspace-path-toggle'))
+  f.find('workspace-related-toggle').click(); await wait()
+  assert.equal(f.find('workspace-path-popup').hidden, true)
+  assert.equal(f.relatedRoot.hidden, false)
+  assert.equal(f.calls.filter(call => call.action === 'workspace_related').length, 1)
+  f.nav.closePopovers()
+  f.find('workspace-related-toggle').click(); await wait()
+  assert.equal(f.calls.filter(call => call.action === 'workspace_related').length, 1, 'reopening keeps the bounded relation page')
+  f.nav.dispose()
+  assert.equal(f.actions.parentNode, f.actionsHome)
+})
+
+test('popover close controls, outside clicks, Escape and another workspace action preserve content and restore focus', async () => {
+  const f = fixture()
+  f.nav.setCurrent(item('paper', 'p'))
+  f.find('workspace-related-toggle').click(); await wait()
+  const before = f.calls.length
+  f.document.dispatch('click', { target: f.find('workspace-related-body', f.relatedRoot) })
+  assert.equal(f.relatedRoot.hidden, false, 'a click inside the requested panel must not dismiss it')
+  f.document.dispatch('click', { target: f.paperInput })
+  assert.equal(f.relatedRoot.hidden, true)
+  f.find('workspace-related-toggle').click()
+  const event = f.document.dispatch('keydown', { key: 'Escape' })
+  assert.equal(event.defaultPrevented, true)
+  assert.equal(f.document.activeElement, f.find('workspace-related-toggle'))
+  assert.equal(f.relatedRoot.hidden, true)
+  f.find('workspace-path-toggle').click()
+  f.document.dispatchEvent(new f.window.CustomEvent('paper-library:workspace-popup', { detail: { id: 'workspace-version-popup' } }))
+  assert.equal(f.find('workspace-path-popup').hidden, true)
+  f.find('workspace-path-toggle').click()
+  f.find('workspace-popup-close', f.find('workspace-path-popup')).click()
+  assert.equal(f.document.activeElement, f.find('workspace-path-toggle'))
+  assert.equal(f.find('workspace-path-popup').hidden, true)
+  assert.equal(f.calls.length, before, 'dismissing information never navigates, reloads or loses its current page')
+})
+
+test('a relation popup closes on context changes while a selected reading project keeps its primary list', async () => {
+  const f = fixture()
+  f.nav.setCurrent(item('board', 'b')); f.find('workspace-related-toggle').click(); await wait()
+  assert.equal(f.relatedRoot.style.position, 'fixed')
+  f.nav.setCurrent(item('project', 'topic')); await wait()
+  assert.equal(f.relatedRoot.hidden, false)
+  assert.equal(f.relatedRoot.style.position, undefined)
+  assert.equal(f.find('workspace-related-toggle').hidden, true)
+  assert.equal(f.relatedRoot.classes.has('workspace-popup'), false)
+  assert.equal(f.nav.state().current.id, 'topic')
+  f.find('workspace-path-toggle').click()
+  f.nav.closePopovers()
+  assert.equal(f.relatedRoot.hidden, false, 'closing the path does not hide project membership content')
 })

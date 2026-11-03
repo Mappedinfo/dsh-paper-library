@@ -21,6 +21,7 @@ function environment({width=741,storage=new Map(),sharedLibrary=false,onAnnotati
     dispatch(type,args={}){const e={target:this,preventDefault(){this.defaultPrevented=true;},...args};for(const fn of this.events.get(type)||[])fn(e);return e;}
     setAttribute(key,value){this.attributes[key]=String(value);}getAttribute(key){return this.attributes[key]??null;}
     removeAttribute(key){delete this.attributes[key];}
+    querySelector(selector){for(const child of this.children){if(selector.startsWith('.')&&child.className.split(/\s+/).includes(selector.slice(1)))return child;const nested=child.querySelector(selector);if(nested)return nested;}return null;}
     focus(){document.activeElement=this;}
     click(){if(!this.disabled)this.dispatch('click');}
     getClientRects(){for(let n=this;n;n=n.parentNode)if(n.hidden)return [];return [{}];}
@@ -45,6 +46,21 @@ function environment({width=741,storage=new Map(),sharedLibrary=false,onAnnotati
   return {panels,root,body,old,original,annotationsRoot,conversationRoot,metadataRoot,visibility,changes,toasts,ids,window,document,storage,observers,workspace,libraryRoot,libraryChildren,search,paperList};
 }
 const paper={id:'synthetic-a',title:'Synthetic paper'};
+
+test('merged writing panel aliases share one tab, content root and open state',()=>{
+  const f=environment({sharedLibrary:true});
+  const element=f.document.createElement('section');element.id='combined-writing';
+  f.panels.registerPanel({id:'latex-ai',aliases:['latex-review'],label:'批注与写作',element});
+  assert.ok(f.ids.get('reading-sidebar-latex-ai'));
+  assert.equal(f.ids.has('reading-sidebar-latex-review'),false,'An alias never adds a second sidebar tab');
+  f.panels.setExternal(true);f.panels.show('latex-review');
+  assert.equal(f.panels.visible('latex-ai'),true);assert.equal(f.panels.visible('latex-review'),true);
+  assert.equal(element.hidden,false);assert.equal(f.libraryRoot.dataset.sidebarPanel,'latex-ai');
+  f.panels.close('latex-review');assert.equal(f.panels.visible('latex-ai'),false);
+  f.panels.show('latex-ai');f.panels.setExternal(false);
+  assert.equal(element.hidden,true);assert.equal(f.panels.visible('latex-review'),false);
+  f.panels.dispose();assert.equal(element.parentNode,null);
+});
 
 test('reading sidebar moves original content and preserves listener identity while switching sides',()=>{
   const f=environment();let clicks=0;f.annotationsRoot.addEventListener('click',()=>clicks++);

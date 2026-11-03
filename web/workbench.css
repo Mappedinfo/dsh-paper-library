@@ -32,9 +32,15 @@
 #workspace-catalog-body{flex:1;min-height:0;min-width:0;overflow:auto;padding:0 10px;box-sizing:border-box}
 .library-pane[data-workspace-section=board] .pane-heading,.library-pane[data-workspace-section=latex] .pane-heading,.library-pane[data-workspace-section=project] .pane-heading{display:none}
 .latex-topbar>#workspace-navigation-area{border-bottom:1px solid var(--line,#ddd)}
-#workspace-versions{padding:6px 10px;border-bottom:1px solid var(--line,#ddd);font-size:12px}
-#workspace-versions>summary{cursor:pointer;font-weight:600;min-height:26px;line-height:26px}
-#workspace-version-list{max-height:34vh;overflow:auto;overscroll-behavior:contain}
+#workspace-versions{flex:none;padding:0;margin:0;border:0;font-size:12px}
+#workspace-versions>summary{box-sizing:border-box;cursor:pointer;list-style:none;white-space:nowrap;padding:5px 9px;border:1px solid var(--line,#ddd);border-radius:6px;font:inherit;min-height:30px;line-height:18px;background:var(--surface,#fff);color:var(--ink,#16181c)}
+#workspace-versions>summary::-webkit-details-marker{display:none}
+#workspace-versions[open]>summary{background:var(--dsw-alias-interactive-bg-active,#e9eef5)}
+#workspace-versions:not([open])>.workspace-version-popup{display:none}
+.workspace-version-popup{position:fixed;z-index:70;box-sizing:border-box;width:460px;max-width:calc(100vw - 16px);overflow:auto;padding:10px 12px;background:var(--surface,#fff);color:var(--ink,#16181c);border:1px solid var(--line,#ddd);border-radius:8px;box-shadow:var(--shadow,0 8px 24px #0002);white-space:normal}
+.workspace-version-popup>header{display:flex;align-items:center;gap:12px;justify-content:space-between;margin-bottom:8px;font-size:13px}
+.workspace-version-popup>header .icon-button{flex:none;width:28px;height:28px;min-height:28px;font-size:18px;padding:0}
+#workspace-version-list{overflow:auto;overscroll-behavior:contain}
 /* Navigation owns search; the shelf and its filters sit directly beneath it. */
 .library-pane #library-literature-content>.pane-heading{display:flex;align-items:center;justify-content:space-between;flex:none;padding:5px 10px;gap:8px}
 .library-pane #library-literature-content>.pane-heading .shelf-actions{margin-left:auto}

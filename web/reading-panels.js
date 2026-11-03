@@ -11,6 +11,7 @@ window.PaperReadingPanels = (() => {
     // reading tabs step aside while such a panel is active and come back untouched after.
     let externalActive = false, annotationContext = false;
     const extraPanels = new Map();
+    const panelAliases = new Map();
     const listeners = [], originals = [annotationsRoot,conversationRoot,metadataRoot].map(element=>({element,parent:element.parentNode,next:element.nextSibling,hidden:element.hidden,open:element.open}));
     const make = (tag,className,text) => {const element=document.createElement(tag);element.className=className;if(text!==undefined)element.textContent=text;return element;};
     const listen = (element,event,fn) => {element.addEventListener(event,fn);listeners.push(()=>element.removeEventListener(event,fn));};
@@ -121,9 +122,9 @@ window.PaperReadingPanels = (() => {
       const host=global?globalHost:root;if(aside.parentNode!==host)host.append(aside);
       if(floatingChat&&chat.parentNode!==globalHost)globalHost.append(chat);
     }
-    function known(name) {if(!names.has(name)&&!extraPanels.has(name))throw new Error('Unknown reading panel');}
+    function known(name) {const canonical=panelAliases.get(name)||name;if(!names.has(canonical)&&!extraPanels.has(canonical))throw new Error('Unknown reading panel');return canonical;}
     function show(name) {
-      known(name);if(disposed)return false;
+      name=known(name);if(disposed)return false;
       // A panel another surface owns needs no paper: it belongs to that surface, not the reader.
       if(extraPanels.has(name)){externalActive=true;sidebar=name;sharedOpen=true;render();return true;}
       if(name!=='metadata'&&!(name==='annotations'&&annotationContext)&&(!paper||paper.archived)){toast?.('请先打开一篇可阅读的文献。',true);return false;}
@@ -132,10 +133,10 @@ window.PaperReadingPanels = (() => {
     }
     function close(name) {
       if(name===null||name===undefined||disposed)return;
-      known(name);if(name==='chat')chatOpen=false;else if(sidebar===name)sidebar=null;else return;
+      name=known(name);if(name==='chat')chatOpen=false;else if(sidebar===name)sidebar=null;else return;
       render();
     }
-    function visible(name) {known(name);return !disposed&&(name==='chat'?chatOpen&&!collapsed:sidebar===name);}
+    function visible(name) {name=known(name);return !disposed&&(name==='chat'?chatOpen&&!collapsed:sidebar===name);}
     function toggle(name) {return visible(name)?close(name):show(name);}
     function setSide(value,{persist=true}={}) {
       if(!['left','right'].includes(value))throw new Error('Reading sidebar side must be left or right');
@@ -148,10 +149,11 @@ window.PaperReadingPanels = (() => {
     }
     function setReadingActive(value){const next=Boolean(value);if(next===readingActive)return;readingActive=next;render(false);}
     /** Register a rail panel another surface owns; nothing changes until it is shown. */
-    function registerPanel({id,label,element}={}) {
+    function registerPanel({id,label,element,aliases=[]}={}) {
       if(typeof id!=='string'||!id.trim()||typeof label!=='string'||!label.trim()||!element)throw new Error('A rail panel needs an id, a label and an element');
       if(disposed)throw new Error('Reading panels are disposed');
       if(extraPanels.has(id))return extraPanels.get(id);
+      if(panelAliases.has(id)||!Array.isArray(aliases)||new Set(aliases).size!==aliases.length||aliases.some(alias=>typeof alias!=='string'||!alias.trim()||alias===id||names.has(alias)||extraPanels.has(alias)||panelAliases.has(alias)))throw new Error('Panel aliases must be unique unused names');
       const tab=button(label,()=>{if(sidebar===id)close(id);else show(id);});
       tab.id=`reading-sidebar-${id}`;tab.setAttribute('role','tab');tab.setAttribute('aria-controls',element.id||id);
       if(!element.id)element.id=id;
@@ -160,7 +162,7 @@ window.PaperReadingPanels = (() => {
       if(tablist)tablist.append(tab);
       if(libraryRoot&&annotationsRoot.parentNode===libraryRoot)libraryRoot.insertBefore(element,annotationsRoot);
       else if(annotationsRoot.parentNode)annotationsRoot.parentNode.insertBefore(element,annotationsRoot.nextSibling);
-      const panel={id,label,element,tab};extraPanels.set(id,panel);render(false);return panel;
+      const panel={id,label,element,tab};extraPanels.set(id,panel);for(const alias of aliases)panelAliases.set(alias,id);render(false);return panel;
     }
     /** Hand the rail to an external surface (its tabs only) or give it back to reading. */
     function setExternal(value) {
@@ -190,6 +192,7 @@ window.PaperReadingPanels = (() => {
       annotationsRoot.classList.remove('reading-annotations-content');metadataRoot.classList.remove('reading-metadata-content');conversationRoot.classList.remove('reading-conversation-content');
       for(const panel of extraPanels.values()){panel.tab.remove();panel.element.remove();}
       extraPanels.clear();
+      panelAliases.clear();
       if(libraryRoot){libraryRoot.append(...libraryChildren);sharedHeader.remove();libraryContent.remove();libraryRoot.classList.remove('shared-reading-sidebar');delete libraryRoot.dataset.sidebarPanel;libraryRoot.parentNode.classList.remove('shared-sidebar-open');delete libraryRoot.parentNode.dataset.sidebarSide;annotationsRoot.removeAttribute('role');annotationsRoot.removeAttribute('aria-labelledby');}
       aside.remove();chat.remove();globalHost.remove();root.classList.remove('paper-reading-workspace','has-reading-sidebar','reading-panels-roomy');delete root.dataset.readingSide;
       if(resizer){resizer.remove();workspace.style?.removeProperty('--rail-width');}

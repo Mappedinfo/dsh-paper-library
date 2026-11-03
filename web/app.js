@@ -180,12 +180,25 @@ function clearPage() {
   state.pageData = null; $('page-image').removeAttribute('src'); $('word-layer').replaceChildren(); $('pdf-page').hidden = true;
   clearSelection();
 }
-async function openPaper(id) {
+function readerSurfaceActive() { return !latexUI?.isOpen() && !boardUI?.isOpen(); }
+function cancelReaderOpening() { ++state.itemTicket; ++state.pageTicket; state.pageWanted = null; readerStateReady = false; }
+function publishPaperWorkspace(item) {
+  if (!item || workspaceNavigationTransition || !readerSurfaceActive()) return;
+  workspaceNavigationUI?.setCurrent({ kind: 'paper', id: item.id, title: title(item) });
+}
+async function openPaper(id, { background = false } = {}) {
+  const mayRestore = () => readerSurfaceActive() && (!workspaceNavigationUI || workspaceNavigationUI.state().section === 'paper');
+  if (background && !mayRestore()) return;
   if(linkedHandwritingUI?.session()?.paperId!==id && linkedHandwritingUI?.session() && !await linkedHandwritingUI.finish())return;
+  if (background && !mayRestore()) return;
+  // A deliberate paper open leaves the writer through its existing save guard;
+  // delayed restoration must never take over the surface the user just chose.
+  if (latexUI?.isOpen()) { await latexUI.close(); if (latexUI.isOpen()) return; }
   state.catalogSlideId=null;state.catalogSlideTitle=null;
   // Opening a paper takes over the detail column the board occupies; the board settles
   // its pending edits and is left without stealing focus from the chosen paper.
   if (boardUI?.isOpen() && !await boardUI.close({ focus: false })) return;
+  if (!readerSurfaceActive()) return;
   resourceUI?.hide(); knowledgeUI?.hide();
   publishReaderState();
   readerStateReady=false;
@@ -193,6 +206,7 @@ async function openPaper(id) {
   paperChatUI?.visible(false);
   workbenchUI?.setTable(false);
   const ticket = ++state.itemTicket;
+  const current = () => ticket === state.itemTicket && readerSurfaceActive();
   state.openedId = id;
   ++state.pageTicket; state.pageWanted = null; clearPage(); state.annotations = []; state.annotationsTruncated = false; state.noteOffset = 0;
   $('annotation-list').replaceChildren(); $('annotation-count').textContent = ''; $('feedback-list').replaceChildren(); $('feedback-status').textContent = ''; knowledgeGraphUI?.clear(); $('download-pdf').hidden = true; $('open-in-pane').hidden = true;
@@ -205,25 +219,25 @@ async function openPaper(id) {
   workbenchUI?.header();
   $('reader-content').hidden = true; $('no-pdf').hidden = true;
   try {
-    const item = await api('get', { id }); if (ticket !== state.itemTicket) return;
+    const item = await api('get', { id }); if (!current()) return;
     state.active = item; renderPaperHeader(); renderList(); resourceUI?.sync();
     workbenchUI?.paperChanged(item); readingPanels?.paperChanged(item);
     const chatOpening=paperChatUI?.paperOpened(item);
     void languageUI?.paperChanged(item);
     readerPaperId = item.id;
     const savedReader=await persistence?.get(`reader:${item.id}`);
-    if(ticket!==state.itemTicket)return;
+    if(!current())return;
     await switchTab('reader');
     await chatOpening;
-    if(ticket!==state.itemTicket)return;
+    if(!current())return;
     readerStateReady=true;
     if(savedReader&&!restoringReader)await applyReaderSnapshot(savedReader,false);
-    if(ticket!==state.itemTicket)return;
+    if(!current())return;
     if (item.pdf) loadAnnotations(id); else renderAnnotations(); loadFeedback(id);
     publishReaderState();
-    if (!workspaceNavigationTransition) workspaceNavigationUI?.setCurrent({ kind: 'paper', id: item.id, title: title(item) });
+    publishPaperWorkspace(item);
     return ticket;
-  } catch (error) { if (ticket === state.itemTicket) { $('paper-title').textContent = '文献未能打开'; errorAt('detail-error', error); } }
+  } catch (error) { if (current()) { $('paper-title').textContent = '文献未能打开'; errorAt('detail-error', error); } }
 }
 async function openResource(item){
   if(!item)return;
@@ -1198,8 +1212,8 @@ async function restoreReaderState() {
   if (typeof snapshot.paperId !== 'string' || !snapshot.paperId || !Number.isInteger(snapshot.page) || snapshot.page < 1) return;
   restoringReader = true;pdfReader?.setInkEnabled(false);
   try {
-    await openPaper(snapshot.paperId);
-    if (state.active?.id !== snapshot.paperId) return;
+    const ticket = await openPaper(snapshot.paperId, { background: true });
+    if (ticket === undefined || state.active?.id !== snapshot.paperId || !readerSurfaceActive()) return;
     await applyReaderSnapshot(snapshot,!durableReaderLoaded);
   } finally {
     restoringReader = false;
@@ -1210,12 +1224,12 @@ async function restoreReaderState() {
 async function applyReaderSnapshot(snapshot,legacyChat=false) {
   const wasRestoring=restoringReader;restoringReader=true;pdfReader?.setInkEnabled(false);
   try {
-    if(!snapshot||snapshot.paperId!==state.active?.id)return;
+    if(!snapshot||snapshot.paperId!==state.active?.id||!readerSurfaceActive())return;
     if (state.active.pdf && snapshot.page !== state.page) await requestPage(snapshot.page);
-    if(snapshot.paperId!==state.active?.id)return;
+    if(snapshot.paperId!==state.active?.id||!readerSurfaceActive())return;
     if(legacyChat&&!paperChatUI?.hasStoredDraft?.()){paperChatUI?.restoreDraft(snapshot.chatDraft);paperChatUI?.restoreContext(snapshot.chatContext);}
     if (['reader', 'annotations', 'conversation', 'graph'].includes(snapshot.tab)) await switchTab(snapshot.panels && snapshot.tab!=='graph' ? 'reader' : snapshot.tab);
-    if(snapshot.paperId!==state.active?.id)return;
+    if(snapshot.paperId!==state.active?.id||!readerSurfaceActive())return;
     if (readingPanels && snapshot.panels) {
       readingPanels.setSide(snapshot.panels.side);
       if(snapshot.panels.annotations)readingPanels.show('annotations');else readingPanels.close('annotations');
@@ -1227,7 +1241,7 @@ async function applyReaderSnapshot(snapshot,legacyChat=false) {
     if (draft?.id === state.active.id && ['note', 'highlight', 'underline', 'strikeout', 'edit'].includes(draft.mode)) {
       if (draft.mode === 'edit') {
         await loadAnnotations(state.active.id);
-        if(snapshot.paperId!==state.active?.id)return;
+        if(snapshot.paperId!==state.active?.id||!readerSurfaceActive())return;
         const note = state.annotations.find(note => note.id === draft.note?.id);
         if (!note) { openAnnotation('note');toast('原批注已变化，未保存的文字保留为待保存便笺。',true); }
         else openAnnotation('edit', note);
@@ -1252,7 +1266,7 @@ async function applyReaderSnapshot(snapshot,legacyChat=false) {
     if(!pendingInkHandoff&&snapshot.linkedHandwriting?.paperId===state.active.id)await linkedHandwritingUI?.restore(snapshot.linkedHandwriting);
     if (snapshot.handwritingDraft?.id === state.active?.id) {
       await loadAnnotations(state.active.id);
-      if (snapshot.paperId !== state.active?.id) return;
+      if (snapshot.paperId !== state.active?.id || !readerSurfaceActive()) return;
       const note = state.annotations.find(value => value.id === snapshot.handwritingDraft.annotation_id);
       if (note) await handwritingUI?.open(state.active, note, snapshot.handwritingDraft);
       else toast('原手写便签所属批注已变化，未自动附到其他批注。', true);
@@ -1341,7 +1355,7 @@ refreshModels.type = 'button'; refreshModels.style.marginTop = '6px'; refreshMod
 refreshModels.addEventListener('click', () => { announceReady(); loadModels(); }); $('model-status').after(refreshModels);
 workbenchUI = window.PaperWorkbench?.create({ state, api, persistence, loadList, openPaper: id => openResource(state.items.find(item => item.id === id) || {id}), toast, el, resource: () => resourceUI,
   tableChanged: table => { paperChatUI?.visible(!table && state.tab!=='graph' && readerPaperId===state.active?.id && (readingPanels?.visible('chat') ?? state.tab==='conversation')); queueMicrotask(()=>{readingShell?.sync();resourceUI?.sync();}); },
-  selectPaper: item => { if(item.resource_kind === 'dataset'||item.resource_kind === 'slides'){void openResource(item);return;}state.catalogSlideId=null;state.catalogSlideTitle=null;resourceUI?.hide();knowledgeUI?.hide();publishReaderState();readerStateReady=false;++state.itemTicket; ++state.pageTicket; state.pageWanted=null; clearPage(); state.active=item; state.openedId=item.id; workbenchUI?.paperChanged(item); readingPanels?.paperChanged(item);void languageUI?.paperChanged(item);renderPaperHeader(); renderList();if(!workspaceNavigationTransition)workspaceNavigationUI?.setCurrent({kind:'paper',id:item.id,title:title(item)}); },
+  selectPaper: item => { if(item.resource_kind === 'dataset'||item.resource_kind === 'slides'){void openResource(item);return;}state.catalogSlideId=null;state.catalogSlideTitle=null;resourceUI?.hide();knowledgeUI?.hide();publishReaderState();readerStateReady=false;++state.itemTicket; ++state.pageTicket; state.pageWanted=null; clearPage(); state.active=item; state.openedId=item.id; workbenchUI?.paperChanged(item); readingPanels?.paperChanged(item);void languageUI?.paperChanged(item);renderPaperHeader(); renderList();publishPaperWorkspace(item); },
   changed: (item, removedId) => {
     if (removedId && state.active?.id === removedId) { ++state.itemTicket; ++state.pageTicket; state.pageWanted=null; clearPage(); state.active=null; state.openedId=null;readerStateReady=false;void languageUI?.paperChanged(null);$('paper-detail').hidden=true; $('welcome').hidden=false; knowledgeGraphUI?.clear(); workbenchUI?.header(); readingPanels?.paperChanged(null); readingShell?.sync(); }
     else if (item && state.active?.id === item.id) { state.active=item; renderPaperHeader(); if(state.tab==='graph')void loadGraph(); }
@@ -1448,10 +1462,10 @@ analysisUI = window.PaperAnalysis?.create({state,api,persistence,toast,openKnowl
 latexUI = window.PaperLatexWorkspace?.create({api,toast,getLibrary:()=>state.library,rail:readingPanels,onContext:workspaceContextChanged,onVersionSaved:()=>{void refreshProjects();if($('workspace-versions')?.open)void libraryLatexVersions?.refresh();}});
 if ($('library-latex-versions')) libraryLatexVersions = window.PaperLatexVersions?.create({ root:$('library-latex-versions'), api,
   scope:()=>{const target=workspaceNavigationUI?.state().current;return target?.kind==='latex'?{id:target.id}:null;},
-  openVersion:async(version,reviewPdfVersion)=>{if(await latexUI?.open(version.project_id)===false||latexUI?.current()?.id!==version.project_id)return;await latexUI?.showVersion(version.id,reviewPdfVersion);},
+  openVersion:async(version,reviewPdfVersion)=>{if(await latexUI?.open(version.project_id)===false||latexUI?.current()?.id!==version.project_id)return;await latexUI?.showVersion(version.id,reviewPdfVersion);closeWorkspaceVersions();},
 });
 $('latex-version-shelf')?.addEventListener('toggle',()=>{if($('latex-version-shelf').open)void libraryLatexVersions?.refresh();});
-$('workspace-versions')?.addEventListener('toggle',()=>{if($('workspace-versions').open)void libraryLatexVersions?.refresh();});
+bindWorkspaceVersions();
 settingsUI = window.PaperLibrarySettings?.create({onLanguageSettings:()=>languageUI?.showSettings(),api,persistence,getLibrary:()=>state.library,onChange:(value,descriptor)=>{
   preferences={...preferences,...value};
   analysisUI?.applyPreferences(value,descriptor.writable);
@@ -1750,6 +1764,27 @@ boardUI = window.PaperBoard?.create({root:$('board-view'),api,toast,
 });
 
 /** The same navigation DOM follows the active surface; related items remain references. */
+function closeWorkspaceVersions({focus=false}={}) {
+  const menu=$('workspace-versions');if(!menu?.open)return;
+  menu.open=false;const trigger=menu.querySelector('summary');trigger?.setAttribute('aria-expanded','false');if(focus)trigger?.focus();
+}
+function placeWorkspaceVersions() {
+  const menu=$('workspace-versions');if(menu?.open)window.PaperFloatingWindows?.placeBelow(menu.querySelector('summary'),$('workspace-version-popup'));
+}
+function bindWorkspaceVersions() {
+  const menu=$('workspace-versions');if(!menu||menu.dataset.bound)return;menu.dataset.bound='true';
+  menu.addEventListener('toggle',()=>{
+    menu.querySelector('summary')?.setAttribute('aria-expanded',String(menu.open));
+    if(!menu.open)return;
+    document.dispatchEvent(new CustomEvent('paper-library:workspace-popup',{detail:{id:'workspace-version-popup'}}));
+    placeWorkspaceVersions();void libraryLatexVersions?.refresh();
+  });
+  $('workspace-versions-close')?.addEventListener('click',()=>closeWorkspaceVersions({focus:true}));
+  document.addEventListener('pointerdown',event=>{if(menu.open&&!menu.contains(event.target))closeWorkspaceVersions();});
+  document.addEventListener('keydown',event=>{if(menu.open&&event.key==='Escape'){event.preventDefault();event.stopPropagation();closeWorkspaceVersions({focus:true});}});
+  document.addEventListener('paper-library:workspace-popup',event=>{if(event.detail?.id!=='workspace-version-popup')closeWorkspaceVersions();});
+  document.addEventListener('scroll',placeWorkspaceVersions,true);window.addEventListener('resize',placeWorkspaceVersions);
+}
 function placeWorkspaceNavigation(writing = false) {
   const area = $('workspace-navigation-area'), home = $('workspace-navigation-home');
   const writingBar = writing ? document.querySelector('#latex-view .latex-topbar') : null;
@@ -1766,15 +1801,25 @@ function applyWorkspaceNavigation(value) {
   placeWorkspaceNavigation(latexUI?.isOpen() === true);
 }
 function workspaceContextChanged(target) {
-  placeWorkspaceNavigation(latexUI?.isOpen() === true);
+  const writing = latexUI?.isOpen() === true, canvas = boardUI?.isOpen() === true;
+  // Context notifications may arrive after a metadata read or an old surface's
+  // close. The visible workspace owns navigation, not that callback's source.
+  if (writing) target = latexUI.current?.() || null;
+  else if (canvas) target = boardUI.current?.() || null;
+  else if (target && target.kind !== 'paper') return;
+  placeWorkspaceNavigation(writing);
   if (!workspaceNavigationUI || workspaceNavigationTransition) return;
   if (target) {
     const before = workspaceNavigationUI.state().current;
     if (before?.kind === target.kind && before.id === target.id && before.title === target.title) return;
+    if (target.kind !== 'paper') cancelReaderOpening();
     workbenchUI?.setTable(false);
     workspaceNavigationUI.setCurrent(target);
     if (target.kind === 'board') readingPanels?.showLibrary();
-  } else if (latexUI?.isOpen()) workspaceNavigationUI.setCurrent(null, { section: 'latex' });
+  } else if (writing || canvas) {
+    cancelReaderOpening();
+    workspaceNavigationUI.setCurrent(null, { section: writing ? 'latex' : 'board' });
+  }
   else {
     workspaceNavigationUI.setCurrent(null);
     workbenchUI?.setTable(true);
@@ -1803,6 +1848,7 @@ async function openWorkspaceRoot(kind) {
   workspaceNavigationTransition = true;
   try {
     if (!await closeWorkspaceSurfaces()) return false;
+    cancelReaderOpening();
     workbenchUI?.setTable(true); readingPanels?.showLibrary();
     return true;
   } finally { workspaceNavigationTransition = false; }
@@ -1810,12 +1856,13 @@ async function openWorkspaceRoot(kind) {
 async function openWorkspaceTarget(target) {
   workspaceNavigationTransition = true;
   try {
-    if (target.kind === 'board' && boardUI?.isOpen() && !latexUI?.isOpen()) { await boardUI.open({ id: target.id }); return boardUI.current()?.id === target.id; }
-    if (target.kind === 'latex' && latexUI?.isOpen() && !boardUI?.isOpen()) { if (await latexUI.open(target.id) === false) return false; return latexUI.current()?.id === target.id; }
+    if (target.kind === 'board' && boardUI?.isOpen() && !latexUI?.isOpen()) { cancelReaderOpening(); await boardUI.open({ id: target.id }); return boardUI.current()?.id === target.id; }
+    if (target.kind === 'latex' && latexUI?.isOpen() && !boardUI?.isOpen()) { cancelReaderOpening(); if (await latexUI.open(target.id) === false) return false; return latexUI.current()?.id === target.id; }
     const source = await api(target.kind === 'paper' ? 'get' : target.kind === 'board' ? 'board_get' : target.kind === 'project' ? 'project_get' : 'latex_project_get', { id: target.id });
     const resolved = target.kind === 'board' ? source.board : ['latex','project'].includes(target.kind) ? source.project : source;
     if (resolved?.id !== target.id || resolved.archived || resolved.exists === false || target.kind === 'paper' && resolved.resource_kind && resolved.resource_kind !== 'paper') throw Error('这条关联内容已不可用，请刷新目录后重试。');
     if (!await closeWorkspaceSurfaces()) return false;
+    cancelReaderOpening();
     if (target.kind === 'project') {
       await selectProject(target.id);
       workbenchUI?.setTable(true);readingPanels?.showLibrary();
@@ -1831,7 +1878,7 @@ async function openWorkspaceTarget(target) {
 if ($('workspace-navigation') && window.PaperWorkspaceNavigation) {
   const versions = $('library-latex-versions'); if (versions) $('workspace-version-list').append(versions);
   workspaceNavigationUI = window.PaperWorkspaceNavigation.create({root:$('workspace-navigation'),catalogRoot:$('workspace-catalog-body'),relatedRoot:$('workspace-related'),paperSearch:$('search').closest('label'),api,toast,
-    prepare:prepareWorkspaceNavigation,onRootChange:openWorkspaceRoot,onNavigate:openWorkspaceTarget,onChange:applyWorkspaceNavigation,onCreateProject:()=>projectDialogOpen(null)});
+    actions:$('workspace-versions'),prepare:prepareWorkspaceNavigation,onRootChange:openWorkspaceRoot,onNavigate:openWorkspaceTarget,onChange:applyWorkspaceNavigation,onCreateProject:()=>projectDialogOpen(null)});
   applyWorkspaceNavigation(workspaceNavigationUI.state());
   $('workspace-library')?.addEventListener('click',event=>{if(workspaceNavigationUI.state().section!=='paper'||boardUI?.isOpen()||latexUI?.isOpen()){event.preventDefault();event.stopImmediatePropagation();void workspaceNavigationUI.selectRoot('paper');}},true);
 }

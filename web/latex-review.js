@@ -5,7 +5,7 @@ window.PaperLatexReview = (() => {
     const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
     let notes = [], draft = null, saving = false, sequence = 0, disposed = false;
     const head = make('div', 'latex-review-head');
-    head.append(make('strong', '', '自审'));
+    head.append(make('strong', '', '我的批注'));
     const filter = make('select'); filter.id = 'latex-review-filter'; filter.setAttribute('aria-label', '批注筛选');
     for (const [value, label] of [['open', '待处理'], ['all', '全部'], ['resolved', '已解决'], ['stale', '待重定位'], ['source', '源码'], ['pdf', 'PDF']]) { const option = make('option', '', label); option.value = value; filter.append(option); }
     const refresh = make('button', 'button subtle', '刷新'); refresh.type = 'button'; refresh.id = 'latex-review-refresh';
@@ -14,7 +14,7 @@ window.PaperLatexReview = (() => {
     const composer = make('section', 'latex-review-composer'); composer.id = 'latex-review-composer'; composer.hidden = true;
     const anchor = make('p', 'latex-review-anchor'); anchor.id = 'latex-review-anchor';
     const quote = make('blockquote', 'latex-review-quote'); quote.id = 'latex-review-quote';
-    const comment = make('textarea'); comment.id = 'latex-review-comment'; comment.rows = 4; comment.maxLength = 8000; comment.placeholder = '记下疑问、推理或修改想法…'; comment.setAttribute('aria-label', '自审批注内容');
+    const comment = make('textarea'); comment.id = 'latex-review-comment'; comment.rows = 4; comment.maxLength = 8000; comment.placeholder = '记下疑问、推理或修改想法…'; comment.setAttribute('aria-label', '我的批注内容');
     const save = make('button', 'button primary', '保存批注'); save.id = 'latex-review-save'; save.type = 'button';
     const cancel = make('button', 'button subtle', '取消'); cancel.id = 'latex-review-cancel'; cancel.type = 'button';
     const actions = make('div', 'latex-review-actions'); actions.append(save, cancel);
