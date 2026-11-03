@@ -18,6 +18,10 @@ MAX_BYTES = 2 * 1024 * 1024
 MAX_NOTES = 300
 MAX_BUILDS = 12
 MAX_PDF_BYTES = 250 * 1024 * 1024
+MAX_RELOCATION_PAGES = 80
+MAX_RELOCATION_WORDS = 120000
+MAX_RELOCATION_CHARACTERS = 1000000
+MAX_RELOCATION_TOTAL_CHARACTERS = 8000000
 HEX = re.compile(r"^[0-9a-f]{64}$")
 NOTE = re.compile(r"^[0-9a-f]{32}$")
 
@@ -200,19 +204,149 @@ def source_anchor(library, row, value):
             "line": current["content"].count("\n", 0, start) + 1, "text": quote}
 
 
-def view(library, row, note, pdf_version):
+class Relocations:
+    """当前列表的有界、只读定位视图；原记录与 PDF 对象保持不变。"""
+
+    def __init__(self, library, row, pdf_version):
+        self.library, self.row, self.pdf_version = library, row, pdf_version
+        self.sources, self.prepared, self.results = {}, {}, {}
+        self.cached_characters = self.work = 0
+        self.pdf_index = None
+        self.pdf_error = None
+        self.migrated = read_json(directory(library, row) / "migrated-pdf-annotations.json", [])
+
+    def source(self, path):
+        from .latex import read
+        if path not in self.sources:
+            try:
+                value = read(self.library, self.row["id"], path)
+            except (ValueError, OSError):
+                value = None
+            size = len(value["content"]) if value else 0
+            if self.cached_characters + size <= MAX_RELOCATION_TOTAL_CHARACTERS:
+                self.sources[path] = value
+                self.cached_characters += size
+            else:
+                # Keep only the fingerprint for freshness checks; do not reread
+                # the same large file for every annotation after the cache fills.
+                self.sources[path] = {"path": value["path"], "revision": value["revision"], "content": None}
+        return self.sources[path]
+
+    def pdf(self):
+        if self.pdf_index is not None or self.pdf_error:
+            return self.pdf_index
+        from .latex import _project_pdf
+        try:
+            original = _project_pdf(self.library, self.row)
+            parts, words, offset = [], [], 0
+            with self.library._open_pdf(original) as doc:
+                if doc.page_count > MAX_RELOCATION_PAGES:
+                    self.pdf_error = {"status": "budget", "reason": "pdf_page_budget"}
+                    return None
+                for page in doc:
+                    raw = page.get_text("words")
+                    if len(words) + len(raw) > MAX_RELOCATION_WORDS:
+                        self.pdf_error = {"status": "budget", "reason": "pdf_word_budget"}
+                        return None
+                    for word in raw:
+                        text = str(word[4])
+                        if offset + len(text) + 1 > MAX_RELOCATION_CHARACTERS:
+                            self.pdf_error = {"status": "budget", "reason": "pdf_text_budget"}
+                            return None
+                        if not text:
+                            continue
+                        start = offset
+                        parts.append(text + " "); offset += len(text) + 1
+                        words.append((start, offset - 1, page.number + 1, list(self.library._rect(word[:4], page)), tuple(word[5:7])))
+                    parts.append("\n"); offset += 1
+            # Replacement while extracting must not produce an anchor for a
+            # different file than the returned complete PDF fingerprint.
+            if file_digest(original) != self.pdf_version:
+                self.pdf_error = {"status": "unmatched", "reason": "pdf_changed"}
+                return None
+            self.pdf_index = ("".join(parts), words)
+            return self.pdf_index
+        except (ValueError, OSError, RuntimeError):
+            self.pdf_error = {"status": "unsupported", "reason": "pdf_unavailable"}
+            return None
+
+    def match(self, scope, text, quote):
+        from .text_anchors import find_unique_anchor, prepare_anchor_text
+        identity = (*scope, quote)
+        if identity not in self.results:
+            if self.work + len(text) > MAX_RELOCATION_TOTAL_CHARACTERS:
+                return {"status": "budget", "reason": "listing_text_budget"}
+            self.work += len(text)
+            if scope not in self.prepared:
+                self.prepared[scope] = prepare_anchor_text(text)
+            self.results[identity] = find_unique_anchor(self.prepared[scope], quote)
+        return dict(self.results[identity])
+
+    def resolve(self, note):
+        anchor, quote = note["anchor"], str(note.get("text") or "")
+        if not quote.strip():
+            return {"status": "unsupported", "reason": "no_text"}
+        if anchor["kind"] == "source":
+            current = self.source(anchor["path"])
+            if not current:
+                return {"status": "unsupported", "reason": "source_unavailable"}
+            if current["content"] is None:
+                return {"status": "budget", "reason": "source_cache_budget"}
+            result = self.match(("source", anchor["path"]), current["content"], quote)
+            if result["status"] == "matched":
+                start, end = result["start"], result["end"]
+                result["anchor"] = {"kind": "source", "path": current["path"], "revision": current["revision"],
+                                    "start": start, "end": end, "line": current["content"].count("\n", 0, start) + 1,
+                                    "text": current["content"][start:end]}
+            return result
+        if note["id"] in self.migrated:
+            return {"status": "unsupported", "reason": "migrated_entry"}
+        from .text_anchors import find_unique_anchor
+        eligibility = find_unique_anchor("", quote, allow_fuzzy=False)
+        if eligibility["status"] in {"unsupported", "budget"}:
+            return eligibility
+        index = self.pdf()
+        if not index:
+            return dict(self.pdf_error)
+        text, words = index
+        result = self.match(("pdf", self.pdf_version), text, quote)
+        if result["status"] == "matched":
+            selected = [word for word in words if word[0] < result["end"] and word[1] > result["start"]]
+            anchors = []
+            previous = None
+            for word in selected:
+                if not anchors or anchors[-1]["page"] != word[2]:
+                    anchors.append({"kind": "pdf", "pdf_version": self.pdf_version, "page": word[2], "rects": []})
+                    previous = None
+                rects = anchors[-1]["rects"]
+                if previous == word[4]:
+                    rects[-1] = [min(rects[-1][0], word[3][0]), min(rects[-1][1], word[3][1]),
+                                 max(rects[-1][2], word[3][2]), max(rects[-1][3], word[3][3])]
+                else:
+                    rects.append(list(word[3])); previous = word[4]
+            if not anchors:
+                return {"status": "unmatched", "reason": "no_words"}
+            if sum(len(anchor["rects"]) for anchor in anchors) > 200:
+                return {"status": "budget", "reason": "pdf_rect_budget"}
+            result["anchors"] = anchors
+            result["anchor"] = {**anchors[0], "text": text[result["start"]:result["end"]]}
+        return result
+
+
+def view(library, row, note, pdf_version, relocations=None):
     from .latex import read
     value = {**note, "main_path": row["main_path"]}
     value["version"] = digest(note)
     anchor = note["anchor"]
     if anchor["kind"] == "source":
         try:
-            stale = read(library, row["id"], anchor["path"])["revision"] != anchor["revision"]
+            current = relocations.source(anchor["path"]) if relocations else read(library, row["id"], anchor["path"])
+            stale = not current or current["revision"] != anchor["revision"]
         except (ValueError, OSError):
             stale = True
     else:
         stale = anchor["pdf_version"] != pdf_version
-        migrated = read_json(directory(library, row) / "migrated-pdf-annotations.json", [])
+        migrated = relocations.migrated if relocations else read_json(directory(library, row) / "migrated-pdf-annotations.json", [])
         stale = stale or note["id"] in migrated
         if not stale and anchor.get("sources"):
             try:
@@ -221,6 +355,8 @@ def view(library, row, note, pdf_version):
             except (ValueError, OSError):
                 stale = True
     value["stale"] = stale
+    if stale and relocations:
+        value["relocation"] = relocations.resolve(note)
     return value
 
 
@@ -249,15 +385,18 @@ def listing(library, id=None):
     root = directory(library, row)
     sha = file_digest(_project_pdf(library, row)) if row["pdf_path"] else None
     source = read_json(root / "source.json", [])
-    notes = [view(library, row, note, sha) for note in source]
+    relocations = Relocations(library, row, sha)
+    notes = [view(library, row, note, sha, relocations) for note in source]
     for path in sorted(root.glob("*.pdf")) if root.is_dir() else []:
         if HEX.fullmatch(path.stem) and not path.is_symlink():
-            notes.extend(view(library, row, note, sha) for note in pdf_notes(library, path, path.stem))
+            notes.extend(view(library, row, note, sha, relocations) for note in pdf_notes(library, path, path.stem))
         if len(notes) >= MAX_NOTES:
             break
     notes.sort(key=lambda note: (note["status"] == "resolved", note["created"]), reverse=False)
     return {"id": id, "main_path": row["main_path"], "pdf_version": sha, "annotations": notes[:MAX_NOTES], "truncated": len(notes) > MAX_NOTES,
-            "limits": {"annotations": MAX_NOTES, "builds": MAX_BUILDS}}
+            "limits": {"annotations": MAX_NOTES, "builds": MAX_BUILDS, "relocation_pages": MAX_RELOCATION_PAGES,
+                       "relocation_words": MAX_RELOCATION_WORDS, "relocation_characters": MAX_RELOCATION_CHARACTERS,
+                       "relocation_total_characters": MAX_RELOCATION_TOTAL_CHARACTERS}}
 
 
 def put(library, id=None, note_id=None, anchor=None, comment="", status="open", expected_version=None, type="note", request_id=None):
@@ -367,7 +506,15 @@ def export(library, id=None, format="json"):
         for note in result["annotations"]:
             anchor = note["anchor"]
             location = f"{anchor['path']}:{anchor['line']}" if anchor["kind"] == "source" else f"PDF p.{anchor['page']} / {anchor['pdf_version'][:12]}"
-            lines.extend([f"## {location} · {note['status']}{' · 待重定位' if note['stale'] else ''}", "", "> " + note["text"].replace("\n", "\n> "), "", note["comment"], ""])
+            relocation = note.get("relocation", {})
+            matched = relocation.get("status") == "matched"
+            state = " · 已自动匹配当前位置（原锚点保留）" if matched else " · 待重定位" if note["stale"] else ""
+            lines.extend([f"## {location} · {note['status']}{state}", ""])
+            if matched:
+                target = relocation["anchor"]
+                current = f"{target['path']}:{target['line']}" if target["kind"] == "source" else f"PDF p.{target['page']} / {target['pdf_version'][:12]}"
+                lines.extend([f"自动匹配当前位置：{current} · 文字匹配 {relocation.get('score', 0):.1%}；原始位置如上。", ""])
+            lines.extend(["> " + note["text"].replace("\n", "\n> "), "", note["comment"], ""])
         return {"text": "\n".join(lines), "mime": "text/markdown", "filename": "manuscript-review.md"}
     if format != "pdf":
         raise ValueError("批注导出支持 json、markdown、pdf")

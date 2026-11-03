@@ -674,6 +674,40 @@ test('a confirmed PDF annotation patches only its overlay without reloading rast
   f.ui.dispose()
 })
 
+test('automatic matches project current PDF marks across pages while preserving the saved annotation anchor', async () => {
+  const original = { kind: 'pdf', page: 4, pdf_version: 'old-sha', rects: [[1, 1, 12, 15]] }
+  const anchors = [1, 2].map(page => ({ kind: 'pdf', page, pdf_version: 'current-sha', rects: [[20, 30, 120, 45]], text: 'Synthetic current quotation' }))
+  const note = { id: 'pdf:old-sha:synthetic', type: 'highlight', text: 'Synthetic original quotation', comment: 'preserved', status: 'open', stale: true, version: 'saved-version', anchor: original,
+    relocation: { status: 'matched', method: 'normalized', score: 1, anchor: anchors[0], anchors } }
+  const f = await fixture(action => {
+    if (action === 'latex_pdf_pages') return { page_count: 4, version: 'pdf-v1', build: { pdf_version: 'current-sha' }, pages: Array.from({ length: 4 }, () => ({ width: 600, height: 800, rotation: 90 })) }
+    if (action === 'latex_review_list') return { annotations: [note] }
+  }, { review: true })
+  await tick(); await tick(); await f.ui.testHooks.reviewer().refresh()
+  const stages = f.ids.get('latex-preview').querySelectorAll('.latex-page-stage')
+  for (const page of [1, 2]) {
+    const stage = stages.find(value => value.dataset.page === String(page)), marks = stage.querySelectorAll('.latex-saved-mark')
+    assert.equal(marks.length, 1); assert.match(marks[0].style.outline, /dashed/)
+    assert.equal(marks[0].style.left, `${20 / 600 * 100}%`)
+  }
+  assert.equal(f.ui.testHooks.reviewer().annotations()[0].anchor, original)
+  assert.equal(f.calls.some(call => call.action === 'latex_review_put'), false)
+  f.ui.dispose()
+})
+
+test('display-coordinate PDF anchors can flash on rotated pages while unconverted SyncTeX coordinates remain guarded', async () => {
+  const snippet = source.slice(source.indexOf('    async function highlightPdf('), source.indexOf('    async function jumpToPdf('))
+  const markers = [], messages = [], stage = { querySelector: () => null, append: value => markers.push(value) }
+  const img = { parentElement: stage, decode: async () => {}, getBoundingClientRect: () => ({ width: 300, height: 400 }) }
+  const context = vm.createContext({ pageGeometry: [{ width: 600, height: 800, rotation: 90 }], preview: { querySelector: () => img }, say: message => messages.push(message),
+    make: () => ({ style: {}, scrollIntoView() {}, remove() {} }), clearTimeout() {}, setTimeout: () => 1, syncFlash: null })
+  vm.runInContext(snippet, context)
+  const target = { page: 1, h: 20, v: 50, W: 40, H: 20 }
+  await context.highlightPdf(target); assert.equal(markers.length, 0); assert.equal(messages.length, 1)
+  await context.highlightPdf({ ...target, displayCoordinates: true })
+  assert.equal(markers.length, 1); assert.equal(markers[0].style.left, '10px'); assert.equal(markers[0].style.top, '15px')
+})
+
 test('historical PDF preview isolates page requests and disables editing until current PDF returns', async () => {
   const f = await fixture((action, args) => {
     if (action === 'latex_version_get') return { version: { id: args.version_id, project_id: 'one' } }

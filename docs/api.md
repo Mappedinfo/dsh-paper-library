@@ -197,6 +197,11 @@ Host actions (not worker actions, reachable from the panel): `latex_ws_status` (
 
 `latex_project_create` and `latex_project_update` accept `main_path` as an absolute or relative `.tex` path inside the selected project root; changing `root` requires an explicit `main_path`. A project exposes `binding_generation` through `latex_project_get`; pass it as `expected_binding_generation` on subsequent editing or build requests. After a root or main-entry change, mutating requests without the current generation are refused, so old windows cannot write to a different project location. Files are not moved by updating the registration.
 
+
+`latex_review_list` 对原锚点失效的记录附加只读 `relocation`，不改变 `anchor`、`stale`、`version` 或保存内容。`status` 为 `matched/ambiguous/unmatched/unsupported/budget`；成功包含 `method:exact|normalized|fuzzy`、0–1的 `score`、当前 `anchor`，跨页PDF另含每页 `anchors`（首个也是跳转位置）。偏移为原始Unicode码点，PDF矩形沿用显示坐标含页面旋转。UI只用这些字段恢复定位与虚线预览，不自动迁移原生PDF批注；JSON包含匹配结果，Markdown保留原始和当前匹配位置，PDF导出保留原版本对象及JSON附件。
+
+匹配仅限同一源码文件或当前完整PDF范围。唯一原文／NFC加空白规范化匹配至少16个字母或数字（含中文）；模糊路径至少48个、最多2,048字符，相似度和原引用覆盖率均不低于96%，另一处达到90%或分数过于接近即拒绝。输入文本≤1,000,000字符、引用≤20,000字符、候选≤256、单条比较预算12,000,000；PDF≤80页／120,000词／1,000,000字符，列表共享文本工作预算8,000,000字符。超限返回budget而非将局部扫描视作唯一；短引用、空引用、无法读取或其他入口迁移的PDF记录保持待重定位。此步骤无模型调用、不修改源码、原PDF或批注文件。
+
 `latex_ai_ask {id,path?,question,review_note?:{id,version}}` 与 `latex_ai_propose {id,path?,instruction,review_note?:{id,version}}` 可明确引用一条已保存的源码／PDF 批注，模型路由仍由当前设置传入。服务端按当前项目入口读取至多300条既有自审记录，核对批注ID与版本；不使用调用方附带的评论或摘录。模型前后均重新核对项目绑定和批注版本，删除、编辑或切换入口后拒绝迟到结果。批注引用不能与编辑器 `selection` 混用；源码批注只针对其 `anchor.path`，省略 `path` 时使用该文件，明确传入不同文件会拒绝；PDF批注必须明确指定当前讨论或修改的源码 `path`，不推测页码到源码的位置。旧锚点以历史材料说明，不能冒充当前来源位置。
 
 模型材料继续限制源码24,000字符，额外批注摘录与评论各最多8,000字符，截断有明确标记；仅把服务端保存内容作为不可信引用数据。结果的 `entry`、提案及最近4条协作日志携带 `review_note:{id,version,kind,stale}`，不另存批注正文副本；无改动的批注提案也保留一条0处改动记录。接受／放弃提案的日志保留同一批注身份，响应也返回该条 `entry`；`latex_ai_discard` 可带 `proposal_id` 核对待放弃的精确提案，旧按钮不会丢弃另一窗口生成的新提案。提案仍以唯一原文及源码修订CAS核验，只在明确接受后写源码，不自动解决原批注或改写PDF。

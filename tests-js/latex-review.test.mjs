@@ -83,6 +83,44 @@ test('a stale note displays a disabled locator and remains editable', async () =
   assert.equal(f.ids.get('latex-review-comment').value, 'thought')
 })
 
+test('a unique high-confidence match restores navigation while keeping the saved anchor and version', async () => {
+  const original = { kind: 'source', path: 'one.tex', line: 1, revision: 'old', start: 0, end: 30 }
+  const current = { ...original, line: 7, revision: 'current', start: 100, end: 130 }
+  const note = { id: 'source:a', version: 'saved-version', status: 'open', stale: true, anchor: original, text: 'Original sufficiently long quotation', comment: 'My original thought', relocation: { status: 'matched', anchor: current, method: 'fuzzy', score: .98 } }
+  let revealed, changed
+  const f = fixture(async () => ({ annotations: [note] }), { revealSource: anchor => { revealed = anchor }, changed: value => { changed = value } })
+  await f.ui.refresh()
+  const card = f.ids.get('latex-review-list').children[0]
+  assert.equal(card.children[0].disabled, false)
+  await card.children[0].events.get('click')()
+  assert.deepEqual(revealed, current)
+  assert.match(card.textContent, /自动匹配/); assert.match(card.textContent, /98%/); assert.match(card.textContent, /原始位置/)
+  assert.equal(f.ui.annotations()[0].anchor, original); assert.equal(f.ui.annotations()[0].version, 'saved-version')
+  assert.equal(changed.annotations[0], note)
+  f.ids.get('latex-review-filter').value = 'stale'; f.ids.get('latex-review-filter').events.get('change')()
+  assert.match(f.ids.get('latex-review-list').textContent, /暂无此类批注/)
+})
+
+test('ambiguous automatic matches keep the original locator disabled and explain the ambiguity', async () => {
+  const note = { id: 'source:a', version: 'v1', status: 'open', stale: true, anchor: { kind: 'source', path: 'one.tex', line: 1 }, text: 'Repeated source quotation', comment: 'thought', relocation: { status: 'ambiguous', reason: 'ambiguous' } }
+  const f = fixture(async () => ({ annotations: [note] }))
+  await f.ui.refresh()
+  const card = f.ids.get('latex-review-list').children[0]
+  assert.equal(card.children[0].disabled, true); assert.match(card.textContent, /多个相近位置/)
+  assert.equal(f.ui.annotations()[0].version, 'v1')
+})
+
+test('a matched PDF locator uses current page coordinates and still displays the original build', async () => {
+  const original = { kind: 'pdf', pdf_version: 'old-pdf', page: 1, rects: [[1, 1, 10, 10]] }
+  const current = { kind: 'pdf', pdf_version: 'current-pdf', page: 3, rects: [[20, 30, 120, 45]] }
+  let revealed
+  const f = fixture(async () => ({ annotations: [{ id: 'pdf:old:a', version: 'v1', status: 'open', stale: true, anchor: original, text: 'PDF quotation', comment: 'thought', relocation: { status: 'matched', method: 'normalized', score: 1, anchor: current } }] }), { revealPdf: anchor => { revealed = anchor } })
+  await f.ui.refresh(); const card = f.ids.get('latex-review-list').children[0]
+  await card.children[0].events.get('click')()
+  assert.deepEqual(revealed, current); assert.match(card.textContent, /第 3 页/); assert.match(card.textContent, /old-pdf/)
+  assert.equal(f.ui.annotations()[0].anchor, original)
+})
+
 test('PDF markup saves without a comment and preserves the selection on failure', async () => {
   const calls = []; let failed = true
   const f = fixture(async (action, args) => {

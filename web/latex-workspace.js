@@ -380,6 +380,7 @@ window.PaperLatexWorkspace = (() => {
         if (!await openFile(anchor.path, { force: true })) return;
         if (revision !== anchor.revision) { say('源码已变化，原批注待重定位；未按旧偏移选择。', true); void reviewer.refresh(); return; }
         await gotoSource(anchor.path, anchor.line);
+        if (file !== anchor.path || revision !== anchor.revision) { say('匹配后源码再次变化，请刷新批注定位。', true); return; }
         const chars = Array.from(editor.value);
         editor.setSelectionRange(chars.slice(0, anchor.start).join('').length, chars.slice(0, anchor.end).join('').length);
       },
@@ -388,7 +389,8 @@ window.PaperLatexWorkspace = (() => {
         if (anchor.pdf_version !== pdfBuild?.pdf_version) { say('批注属于旧编译，待重定位；未定位到当前 PDF。', true); return; }
         if (layout === 'source') setLayout('split');
         setTab('pdf'); await renderPage(anchor.page);
-        const rect = anchor.rects[0]; if (rect) await highlightPdf({ page: anchor.page, h: rect[0], v: rect[3], W: rect[2] - rect[0], H: rect[3] - rect[1] });
+        if (pdfSource.kind !== 'current' || anchor.pdf_version !== pdfBuild?.pdf_version) { say('匹配后 PDF 再次变化，请刷新批注定位。', true); return; }
+        const rect = anchor.rects[0]; if (rect) await highlightPdf({ page: anchor.page, h: rect[0], v: rect[3], W: rect[2] - rect[0], H: rect[3] - rect[1], displayCoordinates: true });
       },
       changed: ({ annotations }) => { if (pdfSource.kind === 'current') patchPdfAnnotations(annotations); },
     });
@@ -1224,8 +1226,11 @@ window.PaperLatexWorkspace = (() => {
       }
       overlay.textContent = '';
       for (const note of notes) {
-        if (note.anchor?.kind !== 'pdf' || note.anchor.page !== number || note.anchor.pdf_version !== pdfBuild?.pdf_version || stage.rasterAnnotationIds?.has(note.id.split(':').at(-1))) continue;
-        for (const rect of note.anchor.rects || []) {
+        const relocated = note.relocation?.status === 'matched' && note.relocation.anchor?.kind === 'pdf';
+        const targets = relocated && Array.isArray(note.relocation.anchors) ? note.relocation.anchors : [relocated ? note.relocation.anchor : note.anchor];
+        const anchor = targets.find(value => value?.kind === 'pdf' && value.page === number && value.pdf_version === pdfBuild?.pdf_version);
+        if (anchor?.kind !== 'pdf' || anchor.page !== number || anchor.pdf_version !== pdfBuild?.pdf_version || (!relocated && note.stale) || stage.rasterAnnotationIds?.has(note.id.split(':').at(-1))) continue;
+        for (const rect of anchor.rects || []) {
           const [x0, y0, x1, y1] = rect;
           const mark = make('span', `latex-saved-mark latex-saved-${note.type}`); mark.dataset.note = note.id;
           Object.assign(mark.style, { position: 'absolute', left: `${x0 / geometry.width * 100}%`, top: `${y0 / geometry.height * 100}%`, width: `${(x1 - x0) / geometry.width * 100}%`, height: `${(y1 - y0) / geometry.height * 100}%`, boxSizing: 'border-box' });
@@ -1233,6 +1238,7 @@ window.PaperLatexWorkspace = (() => {
           else if (note.type === 'underline') mark.style.borderBottom = '2px solid #d59800';
           else if (note.type === 'strikeout') mark.style.background = 'linear-gradient(transparent 45%, #d59800 45%, #d59800 55%, transparent 55%)';
           else { mark.style.border = '1px solid #d59800'; mark.style.background = 'rgba(255, 210, 64, .12)'; }
+          if (relocated) { mark.classList.add('latex-relocated-mark'); mark.style.outline = '1px dashed #967100'; mark.style.outlineOffset = '1px'; }
           overlay.append(mark);
         }
       }
@@ -1410,7 +1416,7 @@ window.PaperLatexWorkspace = (() => {
       const geometry = pageGeometry[result.page - 1];
       const img = preview.querySelector(`img.latex-page[data-page="${result.page}"]`);
       if (!geometry || !img) return;
-      if (geometry.rotation || result.rotation) { say('目标页带旋转，无法标注位置。', true); return; }
+      if (!result.displayCoordinates && (geometry.rotation || result.rotation)) { say('目标页带旋转，无法标注位置。', true); return; }
       try { await img.decode(); } catch { /* a cached data URL is already decoded */ }
       const rect = img.getBoundingClientRect();
       if (!rect.width || !rect.height) return;

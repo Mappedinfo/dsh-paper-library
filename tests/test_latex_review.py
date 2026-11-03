@@ -359,3 +359,157 @@ def test_partial_version_copy_does_not_publish_a_record_or_project(tmp_path, mon
     assert not list((library / "latex-versions").iterdir())
     assert (root / "main.tex").read_bytes() == original_tex
     assert (root / "main.pdf").read_bytes() == original_pdf
+
+
+@pytest.mark.parametrize("edited", [False, True])
+def test_source_relocation_is_read_only_and_retains_original_identity(tmp_path, edited):
+    root, library, call = project(tmp_path, compile=False)
+    quote = "A unique synthetic sentence preserves the original annotation identity."
+    (root / "one.tex").write_text(quote + "\n")
+    current = call("latex_read", path="one.tex")
+    note = call("latex_review_put", anchor={"kind": "source", "path": "one.tex", "revision": current["revision"],
+                "start": 0, "end": len(quote), "text": quote}, comment="Preserve this thought")["annotation"]
+    saved = next(library.glob("latex-review/*/*/source.json")); saved_bytes = saved.read_bytes()
+    moved = "A new introduction.\n\n" + quote.replace("synthetic sentence", "synthetic\n  sentence") + "\n"
+    if edited:
+        moved = moved.replace("identity.", "identity!")
+    (root / "one.tex").write_text(moved)
+    result = call("latex_review_list")["annotations"][0]; match = result["relocation"]
+    assert result["stale"] and result["anchor"] == note["anchor"] and result["version"] == note["version"]
+    assert match["status"] == "matched" and 0.96 <= match["score"] <= 1
+    assert (match["score"] == 1) is not edited
+    assert match["anchor"]["path"] == "one.tex" and match["anchor"]["line"] == 3
+    assert match["anchor"]["revision"] == call("latex_read", path="one.tex")["revision"]
+    assert moved[match["anchor"]["start"]:match["anchor"]["end"]] == match["anchor"]["text"]
+    assert saved.read_bytes() == saved_bytes and (root / "one.tex").read_text() == moved
+    assert "自动匹配当前位置：one.tex:3" in call("latex_review_export", format="markdown")["text"]
+    updated = call("latex_review_put", note_id=note["id"], expected_version=note["version"], comment="Updated thought")["annotation"]
+    assert updated["anchor"] == note["anchor"] and updated["comment"] == "Updated thought"
+
+
+def test_source_relocation_rejects_duplicate_short_and_missing_text(tmp_path):
+    root, _, call = project(tmp_path, compile=False)
+    quote = "The complete synthetic quotation occurs at precisely one place."
+    (root / "one.tex").write_text(quote + "\nIntroduction\n")
+    current = call("latex_read", path="one.tex")
+    for start, text in [(0, quote), (len(quote) + 1, "Introduction")]:
+        call("latex_review_put", anchor={"kind": "source", "path": "one.tex", "revision": current["revision"],
+             "start": start, "end": start + len(text), "text": text})
+    (root / "one.tex").write_text(quote + "\n" + quote + "\nIntroduction\n")
+    notes = call("latex_review_list")["annotations"]
+    assert next(note for note in notes if note["text"] == quote)["relocation"]["status"] == "ambiguous"
+    assert next(note for note in notes if note["text"] == "Introduction")["relocation"]["status"] == "unsupported"
+    (root / "one.tex").unlink()
+    assert all(note["relocation"]["reason"] == "source_unavailable" for note in call("latex_review_list")["annotations"])
+
+
+def relocation_pdf(root, texts, rotation=0):
+    target = root / "replacement.pdf"
+    with fitz.open() as doc:
+        for text in texts:
+            page = doc.new_page(width=500, height=300)
+            page.insert_text((40, 65), text, fontsize=10)
+            page.set_rotation(rotation)
+        doc.save(target)
+    target.replace(root / "main.pdf")
+
+
+def create_pdf_relocation_note(root, call, quote):
+    relocation_pdf(root, [quote])
+    call("latex_project_update", main_path="main.tex")
+    words = call("latex_pdf_page", page=1)["words"]
+    version = call("latex_pdf_pages")["build"]["pdf_version"]
+    call("latex_review_put", anchor={"kind": "pdf", "page": 1, "pdf_version": version,
+         "rects": [word[:4] for word in words], "text": quote}, type="highlight", comment="Keep PDF provenance")
+    return call("latex_review_list")["annotations"][0]
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_pdf_relocation_projects_display_rects_without_migrating_native_notes(tmp_path, rotation):
+    root, library, call = project(tmp_path, compile=False)
+    quote = "Unique synthetic quotation keeps its original PDF evidence."
+    note = create_pdf_relocation_note(root, call, quote)
+    review = next(library.glob("latex-review/*/*/*.pdf")); review_bytes = review.read_bytes()
+    relocation_pdf(root, ["An unrelated new first page.", quote], rotation)
+    current_bytes = (root / "main.pdf").read_bytes()
+    result = call("latex_review_list")["annotations"][0]; relocation = result["relocation"]
+    assert result["id"] == note["id"] and result["version"] == note["version"] and result["anchor"] == note["anchor"]
+    assert result["stale"] and relocation["status"] == "matched" and relocation["anchor"]["page"] == 2
+    assert relocation["anchor"]["pdf_version"] == hashlib.sha256(current_bytes).hexdigest()
+    with fitz.open(root / "main.pdf") as doc:
+        page = doc[1]; expected = fitz.Rect()
+        for word in page.get_text("words"):
+            expected |= fitz.Rect(word[:4]) * page.rotation_matrix
+        assert len(relocation["anchor"]["rects"]) == 1
+        assert relocation["anchor"]["rects"][0] == pytest.approx(list(expected))
+        assert page.rect.contains(fitz.Rect(relocation["anchor"]["rects"][0]))
+    assert review.read_bytes() == review_bytes and (root / "main.pdf").read_bytes() == current_bytes
+    exported = json.loads(call("latex_review_export", format="json")["text"])["annotations"][0]
+    assert exported["anchor"] == note["anchor"] and exported["relocation"] == relocation
+    assert "自动匹配当前位置：PDF p.2" in call("latex_review_export", format="markdown")["text"]
+    call("latex_review_put", note_id=note["id"], expected_version=note["version"], comment="Edited original thought")
+    updated = call("latex_review_list")["annotations"][0]
+    assert updated["anchor"] == note["anchor"] and updated["comment"] == "Edited original thought"
+    assert (root / "main.pdf").read_bytes() == current_bytes
+
+
+def test_pdf_relocation_requires_global_uniqueness_and_complete_scan_budget(tmp_path, monkeypatch):
+    from dsh_paper_library import latex_review
+    root, _, call = project(tmp_path, compile=False)
+    quote = "Unique synthetic quotation keeps its original PDF evidence."
+    create_pdf_relocation_note(root, call, quote)
+    relocation_pdf(root, [quote, quote])
+    assert call("latex_review_list")["annotations"][0]["relocation"]["status"] == "ambiguous"
+    monkeypatch.setattr(latex_review, "MAX_RELOCATION_PAGES", 1)
+    assert call("latex_review_list")["annotations"][0]["relocation"] == {"status": "budget", "reason": "pdf_page_budget"}
+
+
+def test_pdf_relocation_rejects_migrated_entry_and_region_only_notes(tmp_path):
+    root, library, call = project(tmp_path, compile=False)
+    quote = "Unique synthetic quotation keeps its original PDF evidence."
+    note = create_pdf_relocation_note(root, call, quote)
+    call("latex_review_put", anchor={"kind": "pdf", "page": 1, "pdf_version": note["anchor"]["pdf_version"],
+         "rects": [[10, 10, 25, 25]], "text": ""}, type="note", comment="Region without text")
+    folder = next(library.glob("latex-review/*/*"))
+    (folder / "migrated-pdf-annotations.json").write_text(json.dumps([note["id"]]))
+    relocation_pdf(root, ["New page prefix.", quote])
+    notes = call("latex_review_list")["annotations"]
+    assert next(value for value in notes if value["id"] == note["id"])["relocation"] == {"status": "unsupported", "reason": "migrated_entry"}
+    assert next(value for value in notes if value["comment"] == "Region without text")["relocation"] == {"status": "unsupported", "reason": "no_text"}
+
+
+def test_pdf_relocation_can_project_a_unique_quote_across_current_page_break(tmp_path):
+    root, _, call = project(tmp_path, compile=False)
+    quote = "Unique synthetic quotation keeps its original PDF evidence."
+    create_pdf_relocation_note(root, call, quote)
+    relocation_pdf(root, ["Unique synthetic quotation keeps", "its original PDF evidence."])
+    relocation = call("latex_review_list")["annotations"][0]["relocation"]
+    assert relocation["status"] == "matched" and relocation["anchor"]["page"] == 1
+    assert [anchor["page"] for anchor in relocation["anchors"]] == [1, 2]
+    assert all(anchor["rects"] for anchor in relocation["anchors"])
+
+
+def test_source_relocation_cache_budget_keeps_freshness_and_reads_each_file_once(tmp_path, monkeypatch):
+    from dsh_paper_library import latex, latex_review
+    root, _, call = project(tmp_path, compile=False)
+    quotes = ["First synthetic quotation remains independently identifiable.",
+              "Second synthetic quotation has another unique textual context."]
+    content = "\n".join(quotes)
+    (root / "one.tex").write_text(content)
+    current = call("latex_read", path="one.tex")
+    for quote in quotes:
+        start = content.index(quote)
+        call("latex_review_put", anchor={"kind": "source", "path": "one.tex", "revision": current["revision"],
+             "start": start, "end": start + len(quote), "text": quote})
+    monkeypatch.setattr(latex_review, "MAX_RELOCATION_TOTAL_CHARACTERS", 64)
+    original, reads = latex.read, []
+    def tracked(*args, **kwargs):
+        reads.append(args[2] if len(args) > 2 else kwargs.get("path"))
+        return original(*args, **kwargs)
+    monkeypatch.setattr(latex, "read", tracked)
+    assert all(not note["stale"] for note in call("latex_review_list")["annotations"])
+    assert reads == ["one.tex"]
+    reads.clear(); (root / "one.tex").write_text("New heading.\n" + content)
+    assert all(note["relocation"] == {"status": "budget", "reason": "source_cache_budget"}
+               for note in call("latex_review_list")["annotations"])
+    assert reads == ["one.tex"]

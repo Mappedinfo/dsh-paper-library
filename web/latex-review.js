@@ -55,8 +55,8 @@ window.PaperLatexReview = (() => {
       try {
         const result = await api('latex_review_list', { id: current.id });
         if (disposed || ticket !== sequence || identity !== key()) return;
-        notes = result.annotations || []; render();
-        if (!draft) say(result.truncated ? '列表达到上限，请导出核对完整记录。' : `${notes.filter(note => note.status === 'open').length} 条待处理 · ${notes.filter(note => note.stale).length} 条待重定位`);
+        notes = result.annotations || []; render(); changed({ annotations: notes });
+        if (!draft) say(result.truncated ? '列表达到上限，请导出核对完整记录。' : `${notes.filter(note => note.status === 'open').length} 条待处理 · ${notes.filter(note => matchedAnchor(note)).length} 条自动匹配 · ${notes.filter(note => note.stale && !matchedAnchor(note)).length} 条待重定位`);
       } catch (error) { if (ticket === sequence) say(`批注读取失败：${error.message}。可点刷新重试。`, true); }
     }
     function edit(note) {
@@ -135,17 +135,32 @@ window.PaperLatexReview = (() => {
         detail.append(make('p', 'latex-review-collaboration-body', String(content || '协作操作已记录。').slice(0, 12000))); card.append(detail);
       }
     }
+    function matchedAnchor(note) {
+      const anchor = note.relocation?.status === 'matched' ? note.relocation.anchor : null;
+      return anchor?.kind === note.anchor?.kind ? anchor : null;
+    }
+    function relocationHint(note) {
+      const reason = note.relocation?.reason;
+      const hints = { ambiguous: '找到多个相近位置，无法唯一确定；请在新位置建立批注后再解决此条。', short: '引用文字过短，无法可靠自动定位；请在新位置建立批注。', no_text: '此批注没有可匹配的文字，请手动定位。', budget: '当前文档超过自动匹配范围，尚未确认唯一位置。' };
+      return hints[reason] || (reason?.includes('short') ? hints.short : reason === 'migrated_entry' ? '此批注来自原项目入口，未自动关联到当前入口，请核对原始位置。' : note.relocation?.status === 'ambiguous' ? hints.ambiguous : note.relocation?.status === 'budget' ? hints.budget : '原锚点已变化，尚未找到唯一且足够相似的位置；请在新位置建立批注后再解决此条。');
+    }
     function render() {
       list.textContent = '';
-      const visible = notes.filter(note => filter.value === 'all' || filter.value === note.status || filter.value === note.anchor.kind || filter.value === 'stale' && note.stale);
+      const visible = notes.filter(note => filter.value === 'all' || filter.value === note.status || filter.value === note.anchor.kind || filter.value === 'stale' && note.stale && !matchedAnchor(note));
       for (const note of visible) {
         const card = make('article', 'latex-review-card'); card.dataset.note = note.id;
-        const location = make('button', 'latex-review-location', label(note.anchor)); location.type = 'button';
-        location.disabled = note.stale;
-        location.addEventListener('click', () => void (note.anchor.kind === 'source' ? revealSource(note.anchor) : revealPdf(note.anchor)));
-        const state = make('span', 'latex-review-state', `${note.status === 'resolved' ? '已解决' : '待处理'}${note.stale ? ' · 待重定位' : ''}`);
+        const relocated = matchedAnchor(note), target = relocated || note.anchor;
+        const location = make('button', 'latex-review-location', label(target)); location.type = 'button';
+        location.disabled = note.stale && !relocated;
+        location.addEventListener('click', () => void (target.kind === 'source' ? revealSource(target) : revealPdf(target)));
+        const state = make('span', 'latex-review-state', `${note.status === 'resolved' ? '已解决' : '待处理'}${relocated ? ' · 自动匹配' : note.stale ? ' · 待重定位' : ''}`);
         card.append(location, state, make('blockquote', 'latex-review-quote', note.text.slice(0, 1200)), make('p', 'latex-review-body', note.comment));
-        if (note.stale) card.append(make('small', '', '原锚点已变化：请在新位置建立批注，再解决此条；不会自动猜位置。'));
+        if (relocated) {
+          const score = Number.isFinite(note.relocation.score) ? ` · ${Math.round(note.relocation.score * 100)}%` : '';
+          const pages = note.relocation.anchors?.length > 1 ? ` · 跨 ${note.relocation.anchors.length} 页，定位到开头` : '';
+          card.append(make('small', 'latex-review-relocated', `已按唯一${note.relocation.method === 'fuzzy' ? '高相似度文本' : '原文'}匹配到当前版本${score}${pages}；用于定位和预览，原批注和旧锚点保留。`));
+          const original = make('details', 'latex-review-original-anchor'); original.append(make('summary', '', '原始位置'), make('p', '', label(note.anchor))); card.append(original);
+        } else if (note.stale) card.append(make('small', '', relocationHint(note)));
         const row = make('div', 'latex-review-actions latex-review-card-actions');
         const editButton = make('button', 'button subtle', '编辑'); editButton.type = 'button'; editButton.addEventListener('click', () => edit(note));
         const resolve = make('button', 'button subtle', note.status === 'resolved' ? '重新打开' : '解决'); resolve.type = 'button'; resolve.addEventListener('click', () => void setStatus(note));

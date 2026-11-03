@@ -209,6 +209,9 @@ body > #latex-view { height: 100dvh; }
 .latex-review-state { color: var(--muted); font-size: 11px; }
 .latex-review-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
 .latex-review-card small, .latex-review-empty { color: var(--muted); }
+.latex-review-original-anchor{font-size:11px;color:var(--muted);margin:4px 0}
+.latex-review-original-anchor>summary{cursor:pointer}
+.latex-review-original-anchor p{margin:4px 0;overflow-wrap:anywhere}
 .latex-review-exports { border-top: 1px solid var(--line); flex: 0 0 auto; }
 .latex-review-exports .button { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); padding: 5px 8px; min-height: 30px; }
 .latex-review-exports .button:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); border-color: var(--dsw-alias-border-l4,var(--line)); }
