@@ -57,30 +57,74 @@ def test_real_synctex_build_input_file_page_mapping_and_stale_source(tmp_path):
         assert rebuilt.page_count == 2 and "Synthetic replacement" not in rebuilt[0].get_text()
 
 
-@pytest.mark.skipif(not (shutil.which("latexmk") and shutil.which("pdflatex")), reason="Synthetic SyncTeX test requires latexmk and pdflatex")
-def test_build_verification_rejects_project_external_source_and_old_manifest(tmp_path):
+@pytest.mark.skipif(not all(shutil.which(tool) for tool in ("latexmk", "pdflatex", "synctex")), reason="Synthetic SyncTeX test requires TeX tools")
+def test_synctex_verifies_local_targets_when_compilation_includes_external_source(tmp_path, monkeypatch):
     root = tmp_path / "review"
     shared = tmp_path / "shared"
     root.mkdir()
     shared.mkdir()
-    (root / "main.tex").write_text("\\documentclass{article}\n\\begin{document}\n\\input{../shared/body.tex}\n\\end{document}\n")
-    (shared / "body.tex").write_text("External synthetic source.\n")
+    (root / "main.tex").write_text(
+        "\\documentclass{article}\n\\input{../shared/preamble.tex}\n"
+        "\\begin{document}\n\\input{local.tex}\n\\clearpage\n"
+        "\\input{../shared/body.tex}\n\\end{document}\n"
+    )
+    local = root / "local.tex"
+    local.write_bytes(b"Local synthetic source.\r\n")
+    (shared / "preamble.tex").write_text("\\setlength{\\parindent}{0pt}\n")
+    external = shared / "body.tex"
+    external.write_text("External synthetic source.\n")
     config = {"library": str(tmp_path / "library")}
     project_id = dispatch({**config, "action": "latex_project_create", "root": str(root)})["project"]["id"]
     def call(action, **kw):
         return dispatch({**config, "action": action, "id": project_id, **kw})
 
     built = call("latex_compile", engine="pdflatex")
-    assert built["ok"]
+    assert built["ok"], built["log_tail"]
     status = call("latex_pdf_pages")["build"]
-    assert not status["verified"] and "上级目录" in status["reason"]
-    with pytest.raises(ValueError, match="上级目录"):
-        call("latex_synctex_view", path="main.tex", line=3)
+    assert status["verified"] and "项目内源码" in status["reason"]
+    assert set(status["source_revisions"]) == {"main.tex", "local.tex"}
+    forward = call("latex_synctex_view", path="local.tex", line=1)
+    assert forward["page"] == 1
+    back = call("latex_synctex_edit", page=1, x=forward["x"], y=forward["y"], pdf_version=status["pdf_version"])
+    assert (back["path"], back["line"]) == ("local.tex", 1)
+    assert back["source_revision"] == call("latex_read", path="local.tex")["revision"]
+    with fitz.open(root / "main.pdf") as pdf:
+        x0, y0, x1, y1, *_ = pdf[1].get_text("words")[0]
+    with pytest.raises(ValueError, match="项目目录之外"):
+        call("latex_synctex_edit", page=2, x=(x0 + x1) / 2, y=(y0 + y1) / 2)
+    with pytest.raises(ValueError, match="超出项目目录"):
+        call("latex_synctex_view", path="../shared/body.tex", line=1)
 
-    # A build record created before scope checking must not be trusted either.
+    external.write_text("Changed external source.\n")
+    assert call("latex_pdf_pages")["build"]["verified"]
+    from dsh_paper_library import latex
+    synctex_run = latex._synctex_run
+
+    def edit_source_after_lookup(*args):
+        location = synctex_run(*args)
+        local.write_text("Changed local source.\n")
+        return location
+
+    with monkeypatch.context() as patch:
+        patch.setattr(latex, "_synctex_run", edit_source_after_lookup)
+        with pytest.raises(ValueError, match="目标源码已变化"):
+            call("latex_synctex_edit", page=1, x=forward["x"], y=forward["y"])
+    with pytest.raises(ValueError, match="源码已改"):
+        call("latex_synctex_view", path="local.tex", line=1)
+
+    # Previously blocked manifests do not prove that the local sources were
+    # identical before and after the build. Rebuild in the same registration.
     manifest_path = next((tmp_path / "library").glob("latex-review/*/*/build.json"))
     manifest = json.loads(manifest_path.read_text())
-    manifest["verified"] = True
+    manifest["verified"] = False
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    status = call("latex_pdf_pages")["build"]
+    assert not status["verified"] and "编译一次" in status["reason"]
+    assert call("latex_compile", engine="pdflatex")["ok"]
+    assert call("latex_pdf_pages")["build"]["verified"]
+
+    # A build record created before scope checking must not be trusted either.
+    manifest = json.loads(manifest_path.read_text())
     manifest.pop("scope_checked")
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     status = call("latex_pdf_pages")["build"]

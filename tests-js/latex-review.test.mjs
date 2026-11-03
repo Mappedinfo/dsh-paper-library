@@ -183,7 +183,7 @@ test('collaboration replies attach only by exact note identity and label older a
   const card = f.ids.get('latex-review-list').children[0]
   assert.match(card.textContent, /来自较早批注版本/)
   assert.match(card.textContent, /Earlier model answer/)
-  assert.match(card.textContent, /确认后才会修改源码/)
+  assert.match(card.textContent, /在「写作记录」中审阅待确认的提案/)
   assert.equal(card.textContent.includes('Must not appear'), false)
   assert.equal(f.ui.annotations()[0].comment, note.comment)
   f.state.binding_generation = 1
@@ -235,7 +235,7 @@ test('enabled but unused retrieval is not described as a completed search', asyn
   assert.match(f.ids.get('latex-review-list').textContent, /当前项目：已调用工具，未取得可引用来源/)
 })
 
-test('freeform comments become source annotations and retain the original input on write failure', async () => {
+test('source annotations retain the original input on write failure', async () => {
   let failed = true, calls = []
   const f = fixture(async (action, args) => {
     calls.push({ action, ...args })
@@ -243,15 +243,16 @@ test('freeform comments become source annotations and retain the original input 
     if (failed) throw Error('Synthetic save failure')
     return { annotation: { id: 'saved-comment' } }
   })
-  assert.equal(await f.ui.createSourceComment('  '), false)
-  assert.equal(await f.ui.createSourceComment('x'.repeat(8001)), false)
+  assert.equal(f.ui.beginSource(), true)
+  const comment = f.ids.get('latex-review-comment')
   assert.equal(calls.length, 0)
-  assert.equal(await f.ui.createSourceComment('A freeform thought'), false)
-  assert.equal(f.ids.get('latex-review-comment').value, 'A freeform thought')
+  comment.value = 'A freeform thought'
+  assert.equal(await f.ui.testHooks.saveDraft(), false)
+  assert.equal(comment.value, 'A freeform thought')
   assert.equal(f.ui.hasDraft(), true)
   assert.equal(calls[0].anchor.text, '😀选段')
-  assert.equal(await f.ui.createSourceComment('Do not replace the draft'), false)
-  assert.equal(f.ids.get('latex-review-comment').value, 'A freeform thought')
+  assert.equal(f.ui.beginSource(), false)
+  assert.equal(comment.value, 'A freeform thought')
   failed = false
   const result = await f.ui.testHooks.saveDraft()
   assert.equal(result.id, 'saved-comment'); assert.equal(f.ui.hasDraft(), false)
@@ -262,10 +263,12 @@ test('unsaved source cannot become a source comment and late writes cannot clear
   let release, called = 0
   const f = fixture(async () => { called++; return new Promise(done => { release = done }) })
   f.state.dirty = true
-  assert.equal(await f.ui.createSourceComment('Comment on dirty source'), false)
+  assert.equal(f.ui.beginSource(), false)
   assert.equal(called, 0)
   f.state.dirty = false
-  const pending = f.ui.createSourceComment('Keep this text')
+  assert.equal(f.ui.beginSource(), true)
+  f.ids.get('latex-review-comment').value = 'Keep this text'
+  const pending = f.ui.testHooks.saveDraft()
   f.state.binding_generation = 2
   release({ annotation: { id: 'old-binding-note' } })
   assert.equal(await pending, false)

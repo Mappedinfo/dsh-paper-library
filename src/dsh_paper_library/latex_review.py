@@ -135,7 +135,10 @@ def record_build(library, row, before):
                                 actual.add(target)
                         except ValueError:
                             external_relative = True
-    sources, verified = {}, not external_relative
+    # Only project sources can be jump targets. External inputs may affect
+    # typesetting, but their presence does not invalidate in-project mappings
+    # in this exact PDF/SyncTeX pair.
+    sources, verified = {}, True
     for relative in sorted(actual):
         try:
             path, relative = _inside(Path(row["root"]), relative)
@@ -163,9 +166,6 @@ def build_status(library, row, pdf=None):
     if not manifest.get("scope_checked"):
         result["reason"] = "编译记录尚未核验引用范围；请重新编译"
         return result
-    if manifest.get("external_source"):
-        result["reason"] = "引用的源码超出项目目录；请登记包含共享文件的上级目录后重新编译"
-        return result
     if manifest.get("pdf") != sha or not manifest.get("verified") or manifest.get("main_path") != row["main_path"]:
         return result
     if manifest.get("synctex") != file_digest(sidecar, 8 * 1024 * 1024):
@@ -176,7 +176,12 @@ def build_status(library, row, pdf=None):
     except (OSError, ValueError):
         changed = ["源文件缺失或读取受限"]
     result.update(source_revisions=manifest.get("sources", {}), verified=not changed)
-    result["reason"] = "源码已改，PDF 仍是旧编译；请保存并重新编译" if changed else "SyncTeX 已核验；双击正文定位源码"
+    if changed:
+        result["reason"] = "源码已改，PDF 仍是旧编译；请保存并重新编译"
+    elif manifest.get("external_source"):
+        result["reason"] = "SyncTeX 已核验项目内源码，双击正文定位"
+    else:
+        result["reason"] = "SyncTeX 已核验；双击正文定位源码"
     return result
 
 

@@ -95,6 +95,23 @@ window.PaperLatexReview = (() => {
     return details;
   }
 
+  function collaborationDetails(entry, { previousVersion = false, showContext = false } = {}) {
+    const detail = make('details', 'latex-review-collaboration');
+    const heading = { ask: 'DSH 回复', propose: 'DSH 修改提案', proposal: 'DSH 修改提案', accept: 'DSH 修改已确认', accepted: 'DSH 修改已确认', discarded: 'DSH 提案已放弃' };
+    const title = Object.hasOwn(heading, entry.kind) ? heading[entry.kind] : 'DSH 协作记录';
+    const old = previousVersion ? ' · 来自较早批注版本' : '';
+    detail.append(make('summary', '', `${title}${old}${entry.model ? ` · ${entry.model}` : ''}`));
+    if (showContext && entry.path) detail.append(make('p', 'latex-retrieval-meta', `源码 ${entry.path}`));
+    if (showContext && entry.question && !entry.review_note) detail.append(make('p', '', entry.question));
+    const content = entry.kind === 'ask' ? entry.answer : [entry.summary, entry.notes].filter(Boolean).join('\n');
+    detail.append(make('p', 'latex-review-collaboration-body', String(content || '协作操作已记录。').slice(0, 12000)));
+    if (!showContext && entry.kind !== 'ask' && entry.path) detail.append(make('p', '', `目标源码 ${entry.path}`));
+    if (!showContext && ['propose', 'proposal'].includes(entry.kind)) detail.append(make('p', '', '可在「写作记录」中审阅待确认的提案。'));
+    const sources = retrievalDetails(entry.retrieval);
+    if (sources) detail.append(sources);
+    return detail;
+  }
+
   function create({ root, api, context, revealSource, revealPdf, changed = () => {}, show = () => {}, onAsk, onPropose, onStop }) {
     let notes = [], draft = null, saving = false, sequence = 0, disposed = false, collaborating = null, collaboration = [];
     let collaborationKey = null;
@@ -191,14 +208,6 @@ window.PaperLatexReview = (() => {
       } catch (error) { say(`状态未保存：${error.message}，请刷新后重试。`, true); }
       finally { saving = false; }
     }
-    async function createSourceComment(value) {
-      if (typeof value !== 'string' || !value.trim()) { say('请先填写批注内容。', true); return false; }
-      if (value.length > 8000) { say('批注内容最多 8000 字符，请缩短后保存。', true); return false; }
-      if (draft || saving || collaborating) { say('请先完成当前批注或 DSH 操作。', true); show(); return false; }
-      if (!beginSource()) return false;
-      comment.value = value;
-      return saveDraft();
-    }
     async function runNote(kind, note) {
       const run = kind === 'ask' ? onAsk : onPropose;
       if (disposed || collaborating || typeof run !== 'function') return false;
@@ -209,7 +218,7 @@ window.PaperLatexReview = (() => {
       try {
         const result = await run(JSON.parse(JSON.stringify(note)));
         if (disposed || owner.key !== key() || collaborating !== owner) return false;
-        say(result === false ? 'DSH 操作未完成；请查看协作区提示后重试。' : kind === 'ask' ? 'DSH 回复已生成。' : '修改提案已生成；确认后才会写入源码。', result === false);
+        say(result === false ? 'DSH 操作未完成，请重试。' : kind === 'ask' ? 'DSH 回复已生成。' : '提案处理已完成，可在「写作记录」查看。', result === false);
         return result !== false;
       } catch (error) { if (!disposed && owner.key === key() && collaborating === owner) say(`DSH 操作未完成：${error.message}。批注仍保留，可重试。`, true); return false; }
       finally { if (collaborating === owner) { collaborating = null; if (!disposed && owner.key === key()) render(); } }
@@ -229,14 +238,7 @@ window.PaperLatexReview = (() => {
     function renderCollaboration(note, card) {
       if (collaborationKey !== key()) return;
       for (const entry of collaboration.filter(value => value.review_note.id === note.id).slice(0, 3)) {
-        const detail = make('details', 'latex-review-collaboration');
-        const old = entry.review_note.version !== note.version ? ' · 来自较早批注版本' : '';
-        const heading = entry.kind === 'ask' ? 'DSH 回复' : ['propose', 'proposal'].includes(entry.kind) ? 'DSH 修改提案' : ['accept', 'accepted'].includes(entry.kind) ? 'DSH 修改已确认' : entry.kind === 'discarded' ? 'DSH 提案已放弃' : 'DSH 协作记录';
-        detail.append(make('summary', '', `${heading}${old}${entry.model ? ` · ${entry.model}` : ''}`));
-        const content = entry.kind === 'ask' ? entry.answer : [entry.summary, entry.notes, entry.path ? `目标源码：${entry.path}` : '', ['propose', 'proposal'].includes(entry.kind) ? '请在写作区审阅提案，确认后才会修改源码。' : ''].filter(Boolean).join('\n');
-        detail.append(make('p', 'latex-review-collaboration-body', String(content || '协作操作已记录。').slice(0, 12000)));
-        const sources = retrievalDetails(entry.retrieval); if (sources) detail.append(sources);
-        card.append(detail);
+        card.append(collaborationDetails(entry, { previousVersion: entry.review_note.version !== note.version }));
       }
     }
     function matchedAnchor(note) {
@@ -295,9 +297,9 @@ window.PaperLatexReview = (() => {
     save.addEventListener('click', () => void saveDraft());
     cancel.addEventListener('click', () => { if (!saving) { draft = null; comment.value = ''; composer.hidden = true; say('已取消未保存批注。'); } });
     refresh.addEventListener('click', () => void refreshNotes()); filter.addEventListener('change', render);
-    return { refresh: refreshNotes, annotations: () => notes, beginSource, createSourceComment, setCollaboration, cancelCollaboration, beginPdf: (anchor, type, options) => begin(anchor, type, options), hasDraft: () => Boolean(draft || saving),
+    return { refresh: refreshNotes, annotations: () => notes, beginSource, setCollaboration, cancelCollaboration, beginPdf: (anchor, type, options) => begin(anchor, type, options), hasDraft: () => Boolean(draft || saving),
       reset() { if (draft || saving) return false; ++sequence; notes = []; collaborating = null; collaboration = []; collaborationKey = null; render(); return true; },
       dispose() { disposed = true; ++sequence; collaborating = null; collaboration = []; }, testHooks: { saveDraft, edit, setStatus, runNote, notes: () => notes } };
   }
-  return { create, retrievalDetails };
+  return { create, retrievalDetails, collaborationDetails };
 })();

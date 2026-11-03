@@ -184,9 +184,8 @@ body > #latex-view { height: 100dvh; }
 .latex-review-panel[hidden] { display: none; }
 .latex-writing-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; height: 100%; overflow: hidden; color: var(--ink); background: var(--surface); }
 .latex-writing-panel[hidden] { display: none; }
-.latex-writing-panel > .latex-review-panel { flex: 1 1 55%; height: auto; min-height: 140px; }
-.latex-writing-panel > .latex-ai { flex: 0 1 auto; min-height: 140px; max-height: 48%; overflow: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); }
-.latex-writing-panel .latex-writing-section-title { font-size: 12px; font-weight: 600; }
+.latex-writing-panel > .latex-review-panel { flex: 1 1 auto; height: auto; }
+.latex-writing-panel > .latex-ai { flex: 0 1 auto; max-height: 48%; min-height: 0; border-top: 1px solid var(--line); }
 .latex-writing-panel .latex-review-message:empty { display: none; }
 .latex-writing-panel .latex-review-head, .latex-writing-panel .latex-review-exports { padding: 6px 10px; }
 .latex-writing-panel .latex-review-list { padding: 4px 10px; }
@@ -199,7 +198,7 @@ body > #latex-view { height: 100dvh; }
 .latex-content > .latex-review-panel { position: absolute; inset: 0 0 0 auto; width: min(340px, 80%); z-index: 6; border-left: 1px solid var(--line); box-shadow: var(--shadow); }
 .latex-review-head, .latex-review-actions, .latex-review-exports { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px; }
 .latex-review-head strong { margin-right: auto; }
-.latex-review-head select { max-width: 110px; }
+.latex-review-head select { width: auto; min-width: 0; max-width: 90px; height: 27px; min-height: 27px; padding-block: 2px; padding-inline-start: 6px; box-sizing: border-box; font-size: 12px; }
 .latex-review-message { margin: 0; padding: 6px 10px; color: var(--muted); white-space: pre-wrap; }
 .latex-review-message.error { color: var(--error); }
 .latex-review-composer { flex: 0 0 auto; padding: 6px 10px; border-block: 1px solid var(--line); max-height: 45%; overflow: auto; }
@@ -356,19 +355,15 @@ body > #latex-view { height: 100dvh; }
 .latex-errors .latex-log summary { cursor: pointer; color: var(--muted); }
 .latex-errors .latex-log pre { max-height: 150px; overflow: auto; margin: 4px 0 0; white-space: pre-wrap; color: var(--ink); }
 
-/* DSH questions and co-writing: its own tab, never stealing height from the panes. */
-.latex-ai { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
-.latex-ai-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 8px; }
-.latex-ai-heading .latex-ai-scope { min-height: 24px; padding: 2px 6px; font-size: 11px; }
-.latex-ai-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.latex-ai { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 6px 10px; }
+.latex-writing-history-toggle { flex: none; }
+.latex-writing-history-body { min-height: 0; align-self: stretch; overflow: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
+.latex-writing-history-body[hidden] { display: none; }
 .latex-ai-stop[hidden] { display: none; }
 #latex-writing-model-settings select { width: min(320px,100%); height: 30px; min-height: 30px; padding: 4px 25px 4px 8px; box-sizing: border-box; font: 12px/20px var(--sans); }
-.latex-ai-route { font-size: 12px; color: var(--muted); }
+.latex-ai-route { margin: 0 0 4px; font-size: 12px; color: var(--muted); }
+.latex-ai-route:empty { display: none; }
 .latex-ai-route.error { color: var(--error); }
-.latex-ai textarea { width: 100%; resize: vertical; font: 13px/1.55 var(--sans); }
-.latex-ai-answer { font-size: 13px; }
-.latex-ai-question { margin: 0 0 4px; color: var(--muted); font-style: italic; }
-.latex-ai-text { margin: 0; white-space: pre-wrap; }
 .latex-ai-proposal { font-size: 13px; }
 .latex-ai-summary { margin: 0 0 6px; font-weight: 600; }
 .latex-ai-replacements { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }

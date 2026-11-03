@@ -82,7 +82,10 @@ def test_outline_skips_comments_definitions_and_examples_and_reports_uncertainty
 def test_outline_resolves_from_main_directory_with_safe_nested_fallback(tmp_path):
     root, call = fixture(tmp_path, {
         "main.tex": "\\documentclass{article}\n",
-        "review/main.tex": "\\documentclass{book}\n\\input{../shared/preamble.tex}\n\\input{chapters/body}\n\\input{../../outside}\n\\input{escape}\n",
+        "review/main.tex": (
+            "\\documentclass{book}\n\\input{../shared/preamble.tex}\n\\input{chapters/body}\n"
+            "\\input{../../outside}\n\\input{escape}\n\\input{/invalid.tex}\n"
+        ),
         "shared/preamble.tex": "\\section{Shared preamble}\n",
         "review/chapters/body.tex": "\\input{choice}\n\\input{local}\n",
         "review/choice.tex": "\\section{Main directory wins}\n",
@@ -97,8 +100,12 @@ def test_outline_resolves_from_main_directory_with_safe_nested_fallback(tmp_path
     assert headings == [("shared/preamble.tex", "Shared preamble"),
                         ("review/choice.tex", "Main directory wins"),
                         ("review/chapters/local.tex", "Nested fallback")]
-    warnings = [e for e in result["events"] if e["kind"] == "warning"]
-    assert {e["target"] for e in warnings if "超出项目" in e["title"]} == {"../../outside", "escape"}
+    warnings = {e["target"]: e["title"] for e in result["events"] if e["kind"] == "warning"}
+    assert warnings == {
+        "../../outside": "引用路径超出项目目录",
+        "escape": "引用路径超出项目目录",
+        "/invalid.tex": "引用路径必须是项目内的相对路径",
+    }
 
 
 def test_outline_and_tree_budgets_report_incomplete_coverage(tmp_path, monkeypatch):

@@ -859,7 +859,7 @@ def _synctex_ready(library, id, include_archived):
     state = build_status(library, row, pdf)
     if not state["verified"]:
         raise ValueError(state["reason"])
-    return row, root, pdf
+    return row, root, pdf, state["source_revisions"]
 
 
 def _synctex_run(arguments, cwd: Path) -> dict:
@@ -882,7 +882,7 @@ def synctex_edit(library, id=None, page=None, x=None, y=None, pdf_version=None, 
     the page, exactly what pdf_pages reports and what the preview bitmap shows.
     Rotated pages are refused because SyncTeX counts in the unrotated frame.
     """
-    row, root, pdf = _synctex_ready(library, id, include_archived)
+    row, root, pdf, sources = _synctex_ready(library, id, include_archived)
     from .latex_review import file_digest
     if pdf_version is not None and pdf_version != file_digest(pdf):
         raise ValueError("PDF 版本已变化；请重新载入预览")
@@ -904,7 +904,10 @@ def synctex_edit(library, id=None, page=None, x=None, y=None, pdf_version=None, 
         source = pdf.parent / source
     source = Path(os.path.realpath(source))
     if not source.is_relative_to(root):
-        raise ValueError("这一点对应项目目录之外的文件（通常是 TeX 系统的样式文件），无法跳转")
+        raise ValueError("这一点对应项目目录之外的文件，SyncTeX 只跳转到当前项目内的源码")
+    relative = source.relative_to(root).as_posix()
+    if relative not in sources:
+        raise ValueError("目标源码未在这次编译中核验，请重新编译后再跳转")
     try:
         line = int(pairs.get("Line", "0"))
     except ValueError:
@@ -918,11 +921,21 @@ def synctex_edit(library, id=None, page=None, x=None, y=None, pdf_version=None, 
             column = number
     except ValueError:
         pass
+    # The editor hashes decoded text, whereas the build manifest hashes bytes.
+    # Derive the editor revision only from bytes that match the verified build.
+    source, _ = _inside(root, relative, "源文件路径")
+    if not source.is_file():
+        raise ValueError("目标源码无法读取，请检查文件后重新编译")
+    with source.open("rb") as stream:
+        data = stream.read(MAX_FILE_BYTES + 1)
+    if len(data) > MAX_FILE_BYTES or hashlib.sha256(data).hexdigest() != sources[relative]:
+        raise ValueError("目标源码已变化，请重新编译后再跳转")
+    body = data.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
     return {
         "id": row["id"], "page": int(page),
-        "path": source.relative_to(root).as_posix(),
+        "path": relative,
         "line": line, "column": column,
-        "source_revision": read(library, row["id"], source.relative_to(root).as_posix())["revision"],
+        "source_revision": _digest(body),
     }
 
 
@@ -933,10 +946,12 @@ def synctex_view(library, id=None, path=None, line=None, column=None, include_ar
     points as synctex_edit; rotation is reported so a caller can refuse to map
     coordinates on a rotated page.
     """
-    row, root, pdf = _synctex_ready(library, id, include_archived)
+    row, root, pdf, sources = _synctex_ready(library, id, include_archived)
     absolute, relative = _inside(root, path, "源文件路径")
     if not absolute.is_file():
         raise ValueError("源文件不存在")
+    if relative not in sources:
+        raise ValueError("目标源码未在这次编译中核验，请重新编译后再跳转")
     try:
         line = int(line)
     except (TypeError, ValueError):

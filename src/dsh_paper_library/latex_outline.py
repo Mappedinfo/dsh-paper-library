@@ -147,12 +147,12 @@ def outline(root: Path, main_path, files):
                     # the source file's directory is a navigation fallback.
                     bases = dict.fromkeys((Path(main).parent, Path(path).parent))
                     for base in bases:
-                        absolute, target = _inside(root, (base / candidate).as_posix())
+                        absolute, target = _inside(root, (base / candidate).as_posix(), "引用路径")
                         if absolute.is_file():
                             break
                     visit(target, [*stack, path], (path, line))
-                except ValueError:
-                    emit("warning", path, line, title="引用超出项目或路径无效；请登记包含共享文件的上级目录", target=value[:200])
+                except ValueError as error:
+                    emit("warning", path, line, title=str(error), target=value[:200])
             elif command in LEVELS or (command == "begin" and value == "abstract"):
                 title = re.sub(r"%[^\n]*", "", value or "").strip()
                 title = re.sub(r"\s+", " ", title)
