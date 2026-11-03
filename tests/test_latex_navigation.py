@@ -79,6 +79,28 @@ def test_outline_skips_comments_definitions_and_examples_and_reports_uncertainty
     assert any("超出项目" in e["title"] for e in call("latex_outline")["events"])
 
 
+def test_outline_resolves_from_main_directory_with_safe_nested_fallback(tmp_path):
+    root, call = fixture(tmp_path, {
+        "main.tex": "\\documentclass{article}\n",
+        "review/main.tex": "\\documentclass{book}\n\\input{../shared/preamble.tex}\n\\input{chapters/body}\n\\input{../../outside}\n\\input{escape}\n",
+        "shared/preamble.tex": "\\section{Shared preamble}\n",
+        "review/chapters/body.tex": "\\input{choice}\n\\input{local}\n",
+        "review/choice.tex": "\\section{Main directory wins}\n",
+        "review/chapters/choice.tex": "\\section{Nested choice}\n",
+        "review/chapters/local.tex": "\\section{Nested fallback}\n",
+    })
+    (tmp_path / "outside.tex").write_text("\\section{Outside}\n", encoding="utf-8")
+    (root / "review" / "escape.tex").symlink_to(tmp_path / "outside.tex")
+    call("latex_project_update", main_path="review/main.tex")
+    result = call("latex_outline")
+    headings = [(e["path"], e["title"]) for e in result["events"] if e["kind"] == "heading"]
+    assert headings == [("shared/preamble.tex", "Shared preamble"),
+                        ("review/choice.tex", "Main directory wins"),
+                        ("review/chapters/local.tex", "Nested fallback")]
+    warnings = [e for e in result["events"] if e["kind"] == "warning"]
+    assert {e["target"] for e in warnings if "超出项目" in e["title"]} == {"../../outside", "escape"}
+
+
 def test_outline_and_tree_budgets_report_incomplete_coverage(tmp_path, monkeypatch):
     from dsh_paper_library import latex_outline
     root, call = fixture(tmp_path, {"main.tex": "\\input{a}\n" * 20, "a.tex": "\\section{A}\n"})

@@ -89,30 +89,41 @@ def record_build(library, row, before):
         data = stream.read(8 * 1024 * 1024 + 1)
     if len(data) > 8 * 1024 * 1024:
         raise ValueError("SyncTeX 记录超过 8 MiB，无法核验映射")
+    external_relative = False
     for line in data.decode("utf-8", "replace").splitlines():
         if not line.startswith("Input:"):
             continue
         name = line.split(":", 2)[-1]
         path = Path(name)
-        path = path if path.is_absolute() else pdf.parent / path
+        is_relative = not path.is_absolute()
+        path = path if not is_relative else pdf.parent / path
         path = path.resolve()
         if path.is_relative_to(Path(row["root"])) and path.suffix.lower() in TEXT_SUFFIXES:
             actual.add(path.relative_to(Path(row["root"])).as_posix())
+        elif (is_relative or ".." in Path(name).parts) and path.suffix.lower() in TEXT_SUFFIXES:
+            external_relative = True
     # Bibliographies are not necessarily listed in SyncTeX's Input records.
     from .latex_lint import _tex
     for relative in list(actual):
         path, _ = _inside(Path(row["root"]), relative)
         if path.suffix == ".tex" and path.stat().st_size <= 1024 * 1024:
             for _, command, value in _tex(path.read_text(encoding="utf-8", errors="replace"))[1]:
-                if command not in {"bibliography", "addbibresource"}:
+                if command not in {"input", "include", "bibliography", "addbibresource"}:
                     continue
                 for value in value.split(","):
                     if re.search(r"[\\#{}$]", value):
                         continue
                     value = value.strip()
                     if value:
-                        actual.add(value if value.endswith(".bib") else value + ".bib")
-    sources, verified = {}, True
+                        suffix = ".bib" if command in {"bibliography", "addbibresource"} else ".tex"
+                        value = value if Path(value).suffix else value + suffix
+                        try:
+                            _, target = _inside(Path(row["root"]), (Path(row["main_path"]).parent / value).as_posix())
+                            if suffix == ".bib":
+                                actual.add(target)
+                        except ValueError:
+                            external_relative = True
+    sources, verified = {}, not external_relative
     for relative in sorted(actual):
         try:
             path, relative = _inside(Path(row["root"]), relative)
@@ -122,7 +133,8 @@ def record_build(library, row, before):
         except (OSError, ValueError):
             verified = False
     value = {"pdf": file_digest(pdf), "synctex": file_digest(sidecar, 8 * 1024 * 1024), "sources": sources,
-             "main_path": row["main_path"], "verified": verified}
+             "main_path": row["main_path"], "verified": verified, "scope_checked": True,
+             "external_source": external_relative}
     write_json(directory(library, row, True) / "build.json", value)
 
 
@@ -135,6 +147,12 @@ def build_status(library, row, pdf=None):
     sidecar = _synctex_sidecar(pdf)
     if not sidecar.is_file():
         result["reason"] = "缺少 SyncTeX 数据；请在工作台编译一次（保留原稿后再编译）"
+        return result
+    if not manifest.get("scope_checked"):
+        result["reason"] = "编译记录尚未核验引用范围；请重新编译"
+        return result
+    if manifest.get("external_source"):
+        result["reason"] = "引用的源码超出项目目录；请登记包含共享文件的上级目录后重新编译"
         return result
     if manifest.get("pdf") != sha or not manifest.get("verified") or manifest.get("main_path") != row["main_path"]:
         return result

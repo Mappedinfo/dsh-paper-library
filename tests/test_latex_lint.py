@@ -166,6 +166,35 @@ def test_explicit_markdown_notes_ignore_fenced_and_inline_code(tmp_path):
     assert result["counts"]["markers"] == 1 and result["findings"][0]["line"] == 8
 
 
+def test_nested_main_resolves_dependencies_from_compile_directory(tmp_path):
+    _, _, call = project(tmp_path, extra={
+        "review/main.tex": "\\input{../shared/preamble}\n\\input{sections/intro}\n\\bibliography{refs}\n",
+        "shared/preamble.tex": "Shared todo\n",
+        "review/sections/intro.tex": "\\input{sections/method}\n",
+        "review/sections/method.tex": "Method xxxx\n",
+        "review/refs.bib": "@article{sample,title={Example}}\n",
+    })
+    result = call(main_path="review/main.tex")
+    assert result["complete"] and result["counts"]["markers"] == 2
+    assert [f["path"] for f in result["files"]] == [
+        "review/main.tex", "shared/preamble.tex", "review/sections/intro.tex",
+        "review/refs.bib", "review/sections/method.tex",
+    ]
+
+
+def test_nested_main_still_rejects_dependencies_outside_project(tmp_path):
+    root, _, call = project(tmp_path, extra={
+        "review/main.tex": "\\input{../../private}\n\\input{linked}\n",
+    })
+    outside = tmp_path / "private.tex"
+    outside.write_text("SECRET todo", encoding="utf-8")
+    (root / "review/linked.tex").symlink_to(outside)
+    result = call(main_path="review/main.tex", mode="submission")
+    assert not result["complete"] and result["counts"]["scope"] == 2
+    assert {f["category"] for f in result["findings"]} == {"dependency_unsafe"}
+    assert "SECRET" not in json.dumps(result)
+
+
 def test_unsafe_paths_never_read_or_echo_external_targets(tmp_path):
     root, _, call = project(tmp_path)
     outside = tmp_path / "private.tex"

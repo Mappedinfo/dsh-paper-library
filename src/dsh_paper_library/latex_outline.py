@@ -142,12 +142,17 @@ def outline(root: Path, main_path, files):
                     continue
                 candidate = value if Path(value).suffix else value + ".tex"
                 try:
-                    absolute, target = _inside(root, candidate)
-                    if not absolute.is_file() and Path(path).parent != Path("."):
-                        absolute, target = _inside(root, (Path(path).parent / candidate).as_posix())
+                    # TeX is run from the main file's directory. Prefer its
+                    # interpretation even inside an included subdirectory;
+                    # the source file's directory is a navigation fallback.
+                    bases = dict.fromkeys((Path(main).parent, Path(path).parent))
+                    for base in bases:
+                        absolute, target = _inside(root, (base / candidate).as_posix())
+                        if absolute.is_file():
+                            break
                     visit(target, [*stack, path], (path, line))
                 except ValueError:
-                    emit("warning", path, line, title="引用超出项目或路径无效", target=value[:200])
+                    emit("warning", path, line, title="引用超出项目或路径无效；请登记包含共享文件的上级目录", target=value[:200])
             elif command in LEVELS or (command == "begin" and value == "abstract"):
                 title = re.sub(r"%[^\n]*", "", value or "").strip()
                 title = re.sub(r"\s+", " ", title)

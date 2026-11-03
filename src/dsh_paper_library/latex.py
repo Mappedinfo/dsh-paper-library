@@ -20,6 +20,7 @@ Boundaries that keep it predictable:
 from __future__ import annotations
 
 import difflib
+import gzip
 import hashlib
 import json
 import math
@@ -645,7 +646,7 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
     started = datetime.now(timezone.utc)
     try:
         completed = subprocess.run(
-            command, cwd=str(root), env=_compile_env(), stdin=subprocess.DEVNULL,
+            command, cwd=str(absolute.parent), env=_compile_env(), stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False,
         )
         output = completed.stdout.decode("utf-8", "replace")
@@ -776,6 +777,26 @@ def _synctex_sidecar(pdf: Path) -> Path:
     return pdf.with_name(f"{pdf.stem}.synctex.gz")
 
 
+def _synctex_input_name(pdf: Path, source: Path) -> str:
+    """Use the recorded spelling: SyncTeX may not normalize `..` in input names."""
+    with gzip.open(_synctex_sidecar(pdf), "rb") as stream:
+        data = stream.read(8 * 1024 * 1024 + 1)
+    if len(data) > 8 * 1024 * 1024:
+        raise ValueError("SyncTeX 记录超过 8 MiB，无法核验映射")
+    for line in data.decode("utf-8", "replace").splitlines():
+        if not line.startswith("Input:"):
+            continue
+        parts = line.split(":", 2)
+        if len(parts) < 3:
+            continue
+        name = parts[2]
+        recorded = Path(name)
+        recorded = recorded if recorded.is_absolute() else pdf.parent / recorded
+        if Path(os.path.realpath(recorded)) == source:
+            return name
+    return os.path.relpath(source, pdf.parent)
+
+
 def _synctex_pairs(output: str) -> dict:
     """The CLI prints `Key:value` lines between its result markers; unknown keys pass through."""
     pairs = {}
@@ -903,7 +924,7 @@ def synctex_view(library, id=None, path=None, line=None, column=None, include_ar
         raise ValueError("列号必须是非负整数") from None
     if not 0 <= column <= 10_000:
         raise ValueError("列号必须是非负整数")
-    input_name = os.path.relpath(absolute, pdf.parent)
+    input_name = _synctex_input_name(pdf, absolute)
     pairs = _synctex_run(["view", "-i", f"{line}:{column}:{input_name}", "-o", pdf.name], pdf.parent)
     if not pairs.get("Page"):
         raise ValueError("这一行在 PDF 里没有对应位置（它可能不产生排版内容，或 PDF 早于这次修改）")

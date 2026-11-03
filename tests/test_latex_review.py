@@ -57,6 +57,60 @@ def test_real_synctex_build_input_file_page_mapping_and_stale_source(tmp_path):
         assert rebuilt.page_count == 2 and "Synthetic replacement" not in rebuilt[0].get_text()
 
 
+@pytest.mark.skipif(not (shutil.which("latexmk") and shutil.which("pdflatex")), reason="Synthetic SyncTeX test requires latexmk and pdflatex")
+def test_build_verification_rejects_project_external_source_and_old_manifest(tmp_path):
+    root = tmp_path / "review"
+    shared = tmp_path / "shared"
+    root.mkdir()
+    shared.mkdir()
+    (root / "main.tex").write_text("\\documentclass{article}\n\\begin{document}\n\\input{../shared/body.tex}\n\\end{document}\n")
+    (shared / "body.tex").write_text("External synthetic source.\n")
+    config = {"library": str(tmp_path / "library")}
+    project_id = dispatch({**config, "action": "latex_project_create", "root": str(root)})["project"]["id"]
+    def call(action, **kw):
+        return dispatch({**config, "action": action, "id": project_id, **kw})
+
+    built = call("latex_compile", engine="pdflatex")
+    assert built["ok"]
+    status = call("latex_pdf_pages")["build"]
+    assert not status["verified"] and "上级目录" in status["reason"]
+    with pytest.raises(ValueError, match="上级目录"):
+        call("latex_synctex_view", path="main.tex", line=3)
+
+    # A build record created before scope checking must not be trusted either.
+    manifest_path = next((tmp_path / "library").glob("latex-review/*/*/build.json"))
+    manifest = json.loads(manifest_path.read_text())
+    manifest["verified"] = True
+    manifest.pop("scope_checked")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    status = call("latex_pdf_pages")["build"]
+    assert not status["verified"] and "范围" in status["reason"]
+
+
+@pytest.mark.skipif(not (shutil.which("latexmk") and shutil.which("pdflatex") and shutil.which("bibtex")), reason="Synthetic bibliography test requires TeX tools")
+def test_nested_main_tracks_project_internal_shared_bibliography(tmp_path):
+    root = tmp_path / "project"
+    (root / "review").mkdir(parents=True)
+    (root / "shared").mkdir()
+    (root / "review" / "main.tex").write_text(
+        "\\documentclass{article}\n\\begin{document}\nCitation \\cite{sample}.\n"
+        "\\bibliographystyle{plain}\n\\bibliography{../shared/refs}\n\\end{document}\n"
+    )
+    refs = root / "shared" / "refs.bib"
+    refs.write_text("@article{sample,author={A. Example},title={Synthetic},journal={Test},year={2024}}\n")
+    config = {"library": str(tmp_path / "library")}
+    project_id = dispatch({**config, "action": "latex_project_create", "root": str(root), "main_path": "review/main.tex"})["project"]["id"]
+    def call(action, **kw):
+        return dispatch({**config, "action": action, "id": project_id, **kw})
+
+    result = call("latex_compile", engine="pdflatex")
+    assert result["ok"], result["log_tail"]
+    status = call("latex_pdf_pages")["build"]
+    assert status["verified"] and "shared/refs.bib" in status["source_revisions"]
+    refs.write_text(refs.read_text().replace("Synthetic", "Changed"))
+    assert not call("latex_pdf_pages")["build"]["verified"]
+
+
 def test_source_anchor_unicode_cas_status_stale_and_dual_entry_isolation(tmp_path):
     root, library, call = project(tmp_path, compile=False)
     (root / "one.tex").write_text("中文😀选段\nNext line\n")

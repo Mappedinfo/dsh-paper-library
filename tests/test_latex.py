@@ -244,6 +244,34 @@ def test_compile_builds_a_pdf_that_the_reader_can_page_through(tmp_path):
     assert cleaned["removed_count"] >= 1
 
 
+@needs_synctex
+def test_nested_main_compiles_from_its_directory_and_synctex_resolves_shared_source(tmp_path):
+    folder = tmp_path / "manuscript"
+    (folder / "review").mkdir(parents=True)
+    (folder / "shared").mkdir()
+    # A same-named file at the project root must not be compiled by accident.
+    (folder / "main.tex").write_text("wrong main file\n", encoding="utf-8")
+    (folder / "review" / "main.tex").write_text(
+        "\\documentclass{article}\n\\begin{document}\n\\input{../shared/body.tex}\n\\end{document}\n",
+        encoding="utf-8",
+    )
+    (folder / "shared" / "body.tex").write_text("Shared synthetic source sentence.\n", encoding="utf-8")
+    project = request(tmp_path, "latex_project_create", root=str(folder), main_path="review/main.tex")["project"]
+
+    built = request(tmp_path, "latex_compile", id=project["id"], engine="pdflatex")
+    assert built["ok"], built["log_tail"][-2000:]
+    assert built["pdf_path"] == "review/main.pdf"
+    with fitz.open(folder / "review" / "main.pdf") as pdf:
+        assert "Shared synthetic source sentence" in pdf[0].get_text()
+    layout = request(tmp_path, "latex_pdf_pages", id=project["id"])
+    assert layout["build"]["verified"]
+    forward = request(tmp_path, "latex_synctex_view", id=project["id"], path="shared/body.tex", line=1)
+    back = request(tmp_path, "latex_synctex_edit", id=project["id"], page=forward["page"], x=forward["x"], y=forward["y"])
+    assert back["path"] == "shared/body.tex" and back["line"] == 1
+    (folder / "shared" / "body.tex").write_text("Changed shared synthetic source.\n", encoding="utf-8")
+    assert not request(tmp_path, "latex_pdf_pages", id=project["id"])["build"]["verified"]
+
+
 @needs_latexmk
 def test_a_broken_document_reports_its_errors_instead_of_pretending(tmp_path):
     folder = make_project(tmp_path, body="\\documentclass{article}\n\\begin{document}\n\\thisIsNotACommand\n\\end{document}\n")

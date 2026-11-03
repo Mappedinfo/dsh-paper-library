@@ -356,7 +356,9 @@ def lint_project(root: Path, main_path, mode="editing", paths=None):
                 if not Path(target).suffix:
                     target += DEPENDENCIES[command]
                 try:
-                    child, target = _inside(root, target)
+                    # latexmk runs from the main file's directory, even when a
+                    # dependency is referenced inside another included file.
+                    child, target = _inside(root, (Path(main).parent / target).as_posix())
                     if child.suffix.lower() not in TEXT_SUFFIXES:
                         raise ValueError("non-text")
                 except ValueError:
