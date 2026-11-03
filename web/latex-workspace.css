@@ -120,6 +120,11 @@ body > #latex-view { height: 100dvh; }
 .latex-menu-row select { flex: 1 1 160px; }
 .latex-menu-row input[type="color"] { flex: 0 0 42px; width: 42px; height: 30px; min-height: 30px; box-sizing: border-box; padding: 3px; cursor: pointer; }
 .latex-menu-hint { margin: 2px 0 0; font-size: 11px; color: var(--muted); }
+.latex-retrieval-settings { gap: 7px; }
+.latex-retrieval-settings .latex-menu-check { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.latex-retrieval-public-options { display: grid; gap: 4px; }
+.latex-retrieval-public-options[hidden] { display: none; }
+.latex-retrieval-public-options textarea { box-sizing: border-box; width: 100%; font: 12px/1.5 var(--sans); resize: vertical; }
 .latex-root { font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); background: var(--dsw-alias-interactive-bg-hover); padding: 2px 6px; border-radius: 6px; }
 .latex-sync-state { font-size: 11px; color: var(--muted); }
 .latex-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
@@ -353,7 +358,10 @@ body > #latex-view { height: 100dvh; }
 
 /* DSH questions and co-writing: its own tab, never stealing height from the panes. */
 .latex-ai { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
+.latex-ai-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 8px; }
+.latex-ai-heading .latex-ai-scope { min-height: 24px; padding: 2px 6px; font-size: 11px; }
 .latex-ai-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.latex-ai-stop[hidden] { display: none; }
 #latex-writing-model-settings select { width: min(320px,100%); height: 30px; min-height: 30px; padding: 4px 25px 4px 8px; box-sizing: border-box; font: 12px/20px var(--sans); }
 .latex-ai-route { font-size: 12px; color: var(--muted); }
 .latex-ai-route.error { color: var(--error); }
@@ -376,6 +384,16 @@ body > #latex-view { height: 100dvh; }
 .latex-ai-notes { margin: 6px 0 0; color: var(--muted); }
 .latex-ai-actions { display: flex; gap: 8px; }
 .latex-ai-actions [hidden] { display: none; }
+.latex-retrieval-details { margin-top: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.latex-retrieval-details summary { cursor: pointer; font-weight: 600; }
+.latex-retrieval-details p { margin: 4px 0 0; }
+.latex-retrieval-hint, .latex-retrieval-meta { color: var(--muted); }
+.latex-retrieval-sources { list-style: none; margin: 6px 0 0; padding: 0; }
+.latex-retrieval-source { padding: 5px 0; border-top: 1px solid var(--line); }
+.latex-retrieval-id { margin-inline-end: 6px; font: 600 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.latex-retrieval-source p { margin: 2px 0 0; }
+.latex-retrieval-outcomes { margin: 4px 0 0; padding-inline-start: 18px; }
+.latex-retrieval-trace { margin-top: 6px; }
 
 .latex-diff {
   margin: 0; flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px 12px;

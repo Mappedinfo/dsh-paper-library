@@ -5,7 +5,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BRIDGE_ACTIONS } from '../src/bridge.mjs'
+import { BRIDGE_ACTIONS, LATEX_RETRIEVAL_ACTIONS } from '../src/bridge.mjs'
 import { LATEX_TOOL_SPECS, latexToolRequest } from '../src/harness/latex-tools.mjs'
 import { TOOL_SPECS, requestFromTool } from '../src/harness/tools.mjs'
 
@@ -45,12 +45,12 @@ test('latex requests map to worker actions and never carry deployment paths', ()
   assert.equal(latexToolRequest(edit, { operation: 'project_create', input_json: JSON.stringify({ root: '/Users/example/papers/manuscript', create_missing: true }) }).action, 'latex_project_create')
 })
 
-test('the bridge admits exactly the actions these tools produce', () => {
+test('the bridge admits native actions and keeps writing retrieval request-local', () => {
   const produced = new Set()
   for (const item of LATEX_TOOL_SPECS) for (const operation of item.parameters.operation.enum) produced.add(`latex_${operation}`)
-  assert.deepEqual([...produced].sort(), [...BRIDGE_ACTIONS.latex].sort())
-  assert.equal(BRIDGE_ACTIONS.latex.size, 35)
-  for (const name of produced) assert.ok(BRIDGE_ACTIONS.latex.has(name), name)
+  const panelOnly = new Set(['latex_version_review_export', ...LATEX_RETRIEVAL_ACTIONS])
+  assert.deepEqual([...produced, ...panelOnly].sort(), [...BRIDGE_ACTIONS.latex].sort())
+  for (const action of LATEX_RETRIEVAL_ACTIONS) assert.throws(() => latexToolRequest(spec('library_latex'), { operation: action.slice(6), input_json: '{}' }), /Unsupported LaTeX operation/)
 })
 
 test('lint is a read-only operation with per-call manuscript scope', () => {

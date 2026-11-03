@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFetchHandler } from '../src/http.mjs';
-import { dispatch } from '../src/bridge.mjs';
+import { dispatch, LATEX_RETRIEVAL_ACTIONS } from '../src/bridge.mjs';
 
 test('HTTP rejects cross-origin mutations, non-JSON, forgery and path traversal',async()=>{
   const handler=createFetchHandler({loopbackOnly:true});
@@ -13,6 +13,7 @@ test('HTTP rejects cross-origin mutations, non-JSON, forgery and path traversal'
   assert.equal((await handler(new Request('http://127.0.0.1/api',{method:'POST',body:'{}'}))).status,415);
   assert.equal((await handler(new Request('http://127.0.0.1/api',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'save_feedback'})}))).status,403);
   assert.equal((await handler(new Request('http://127.0.0.1/api',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'external_rebind',apply:true})}))).status,403);
+  for (const action of LATEX_RETRIEVAL_ACTIONS) assert.equal((await handler(new Request('http://127.0.0.1/api',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action})}))).status,403);
   assert.equal((await handler(new Request('http://127.0.0.1/%2e%2e/pyproject.toml'))).status,404);
 });
 test('catalog API imports, searches and exports citations independent of Zotero',async()=>{

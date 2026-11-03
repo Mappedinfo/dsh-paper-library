@@ -1014,7 +1014,7 @@ def clean(library, id=None, include_archived=False):
     return {"id": row["id"], "removed": sorted(removed)[:500], "removed_count": len(removed), "kept": sorted(kept)[:200], "limits": {"listed": 500}}
 
 
-from . import latex_versions, latex_assets
+from . import latex_versions, latex_assets, latex_retrieval
 from .latex_formulas import latex_formula_check
 
 ACTIONS = {
@@ -1043,6 +1043,10 @@ ACTIONS = {
     "latex_review_export": (review_export, ("id", "format")),
     "latex_review_delete": (review_delete, ("id", "note_id", "expected_version")),
     "latex_read": (read, ("id", "path", "include_archived", "expected_root", "expected_binding_generation")),
+    "latex_retrieval_list": (latex_retrieval.listing, ("id", "path", "offset", "limit", "expected_root", "expected_binding_generation")),
+    "latex_search": (latex_retrieval.search, ("id", "query", "path", "glob", "case_sensitive", "limit", "expected_root", "expected_binding_generation")),
+    "latex_retrieval_read": (latex_retrieval.read, ("id", "path", "start_line", "lines", "expected_root", "expected_binding_generation")),
+    "latex_pdf_text": (latex_retrieval.pdf_text, ("id", "path", "page", "pages", "expected_root", "expected_binding_generation")),
     "latex_lint": (lint, ("id", "mode", "main_path", "paths", "include_archived")),
     "latex_write": (write, ("id", "path", "content", "expected_revision", "origin", "include_archived")),
     "latex_compile": (compile_project, ("id", "engine", "timeout_seconds", "include_archived", "save_version")),

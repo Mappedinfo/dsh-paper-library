@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dispatch } from '../src/bridge.mjs'
 import { createLatexAI } from '../src/harness/latex-ai.mjs'
+import { createLatexResearch } from '../src/harness/latex-research.mjs'
 
 const project = dirname(dirname(fileURLToPath(import.meta.url)))
 const python = existsSync(join(project, '.venv', 'bin', 'python')) ? join(project, '.venv', 'bin', 'python') : undefined
@@ -39,7 +40,7 @@ const inMemoryStore = () => {
   }
 }
 
-async function fixture(replies) {
+async function fixture(replies, run) {
   const base = await mkdtemp(join(tmpdir(), 'latex-ai-'))
   const library = join(base, 'library')
   const folder = join(base, 'manuscript')
@@ -49,9 +50,64 @@ async function fixture(replies) {
   const prompts = []
   let index = 0
   const ai = async ({ prompt }) => { prompts.push(prompt); return replies[Math.min(index++, replies.length - 1)] }
-  const module = createLatexAI({ store: inMemoryStore(), ai, config: { provider: 'stub', model: 'stub-1' }, dispatch, library, python })
+  const research = run && createLatexResearch({ run, dispatch, library, python })
+  const module = createLatexAI({ store: inMemoryStore(), ai, research, config: { provider: 'stub', model: 'stub-1' }, dispatch, library, python })
   return { base, library, folder, project: created.project, call: (input, options) => module(input, options), prompts }
 }
+
+test('a saved note can retrieve evidence beyond main.tex without copying tool excerpts to its history', async () => {
+  const sentence = 'SYNTHETIC_CHAPTER_EVIDENCE remains in its own file.'
+  const f = await fixture([], async ({ executeTool, prompt }) => {
+    assert.match(prompt, /REVIEW_NOTE_JSON/)
+    assert.ok(!prompt.includes(sentence))
+    const found = await executeTool('search_project', { query: 'SYNTHETIC_CHAPTER_EVIDENCE' })
+    assert.deepEqual(found.matches.map(item => [item.path, item.line]), [['chapters/results.tex', 2]])
+    const opened = await executeTool('read_project_file', { path: found.matches[0].path, start_line: 2, lines: 2 })
+    assert.match(opened.content, /SYNTHETIC_CHAPTER_EVIDENCE/)
+    return { text: `依据结果章节 [${opened.source_id}]。`, trace: [{ name: 'search_project', status: 'ok', round: 1 }, { name: 'read_project_file', status: 'ok', round: 2 }], rounds: 3, calls: 2, usedTools: true, truncated: false }
+  })
+  await mkdir(join(f.folder, 'chapters'))
+  await writeFile(join(f.folder, 'chapters', 'results.tex'), `\\section{Synthetic results}\n${sentence}\n`)
+  const note = await sourceNote(f)
+  const result = await f.call({ action: 'latex_ai_ask', id: f.project.id, review_note: { id: note.id, version: note.version }, question: '请检查另一章节。', retrieval: { project: true, public_queries: [] } })
+  assert.deepEqual(f.prompts, [])
+  const source = result.retrieval.sources.find(item => item.path === 'chapters/results.tex')
+  assert.ok(source.revision)
+  assert.match(result.answer, /\[F\d+\]/)
+  assert.equal(source.line, 2)
+  const history = (await f.call({ action: 'latex_ai_status', id: f.project.id })).entries
+  assert.equal(history[0].review_note.id, note.id)
+  assert.deepEqual(history[0].retrieval.sources, result.retrieval.sources)
+  assert.doesNotMatch(JSON.stringify(history), /SYNTHETIC_CHAPTER_EVIDENCE/)
+  assert.equal(await readFile(join(f.folder, 'main.tex'), 'utf8'), BODY)
+  assert.equal(await readFile(join(f.folder, 'chapters', 'results.tex'), 'utf8'), `\\section{Synthetic results}\n${sentence}\n`)
+})
+
+test('a retrieved file is evidence, never a new proposal target', async () => {
+  const f = await fixture([], async ({ executeTool }) => {
+    const source = await executeTool('read_project_file', { path: 'chapter.tex' })
+    assert.match(source.content, /Synthetic chapter only/)
+    return { text: JSON.stringify({ summary: `基于 [${source.source_id}]`, replacements: [{ find: 'Synthetic chapter only', replace: 'Other text' }] }), trace: [], rounds: 2, calls: 1, usedTools: true }
+  })
+  await writeFile(join(f.folder, 'chapter.tex'), 'Synthetic chapter only\n')
+  await assert.rejects(f.call({ action: 'latex_ai_propose', id: f.project.id, path: 'main.tex', instruction: '核对内容', retrieval: { project: true, public_queries: [] } }), error => error.code === 'LATEX_AI_ANCHOR')
+  assert.equal((await f.call({ action: 'latex_ai_status', id: f.project.id })).proposal, null)
+  assert.equal(await readFile(join(f.folder, 'chapter.tex'), 'utf8'), 'Synthetic chapter only\n')
+})
+
+test('cancelled retrieval saves neither a late response nor a pending proposal', async () => {
+  const abort = new AbortController()
+  const f = await fixture([], async ({ executeTool, signal }) => {
+    await executeTool('read_project_file', { path: 'main.tex' })
+    abort.abort(new Error('Synthetic cancel'))
+    assert.equal(signal.aborted, true)
+    return { text: 'late reply', trace: [], usedTools: true }
+  })
+  await assert.rejects(f.call({ action: 'latex_ai_ask', id: f.project.id, question: '请核对。', retrieval: { project: true, public_queries: [] } }, { signal: abort.signal }), /Synthetic cancel/)
+  const status = await f.call({ action: 'latex_ai_status', id: f.project.id })
+  assert.deepEqual(status.entries, [])
+  assert.equal(status.proposal, null)
+})
 
 async function sourceNote(f, path = 'main.tex') {
   const file = await dispatch({ action: 'latex_read', id: f.project.id, path }, { library: f.library, python })

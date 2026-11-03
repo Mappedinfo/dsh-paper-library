@@ -206,6 +206,12 @@ Host actions (not worker actions, reachable from the panel): `latex_ws_status` (
 
 模型材料继续限制源码24,000字符，额外批注摘录与评论各最多8,000字符，截断有明确标记；仅把服务端保存内容作为不可信引用数据。结果的 `entry`、提案及最近4条协作日志携带 `review_note:{id,version,kind,stale}`，不另存批注正文副本；无改动的批注提案也保留一条0处改动记录。接受／放弃提案的日志保留同一批注身份，响应也返回该条 `entry`；`latex_ai_discard` 可带 `proposal_id` 核对待放弃的精确提案，旧按钮不会丢弃另一窗口生成的新提案。提案仍以唯一原文及源码修订CAS核验，只在明确接受后写源码，不自动解决原批注或改写PDF。
 
+提问与提案可传 `retrieval:{project:boolean,public_queries:string[]}`。旧请求省略该字段或关闭两类检索时沿用单次模型调用。工作台默认启用 `project`；公开检索仅接受本次明确填写的至多 3 条单行关键词（每条 ≤200 字符）。模型只可按编号选择这些词，项目内容、批注和问句不会自动发往公开检索服务。
+
+写作工具只在本次对话中提供。`list_project_files`、`search_project`、`read_project_file` 和 `read_project_pdf` 分别对应内部 `latex_retrieval_list`、`latex_search`、`latex_retrieval_read`、`latex_pdf_text`；服务端固定项目 ID、根目录和绑定代次。读取已保存的相对路径，逐级拒绝符号链接、隐藏与常见凭据文件；不支持安全打开文件的平台不启用项目检索。列表每批最多 50 项；扫描最多 2,000 项／2 秒，字面搜索最多 4 MiB／20 条命中，单文本 ≤1 MiB，读取 ≤200 行；单 PDF ≤64 MiB、每次至多 3 页，仅提取已有文字。`scholar_search` 每词最多 5 条 Crossref／arXiv 结果，只返回题录或摘要，不下载全文，不跟随检索重定向。
+
+本次模型检索最多 4 轮、8 次工具请求、120 秒，工具结果累计最多 32,000 字符。`entry.retrieval` 与提案携带 `sources`（实际返回的 `[F#]` 文件／PDF 位置、修订或 `[S#]` 公开文献身份）、`trace`、`public_search` 状态和截断标记；不另存工具参数、正文、摘要或检索词。未成功调用工具时报告失败；未返回的证据编号不允许入库。回答与提案不因检索扩大写入目标；停止、项目绑定或批注版本改变可阻止迟到结果。检索动作不加入全局 DSH 工具目录，也不接受浏览器直接提交。
+
 `latex_ai_translate {id,selection,target_language?:'auto'|'zh-CN'|'en',model_override?,prompt?}` 翻译当前明确选择的编辑草稿，选文最多 8,000 字符，可含未保存改动；不读取整个源文件，也不写回源稿。项目覆盖优先于 `language.settings`，再跟随 DSH 默认模型；显式覆盖须匹配宿主已配置模型目录。补充提示词最多 2,000 字符，结果最多 8,000 字符；省略目标语言时跟随语言设置（缺省自动识别），中文正文译为英文，其他正文译为中文，显式方向覆盖该判断。返回 `{id,answer,model,source:'editor-selection',target_language,prompt_version}`，界面先供查看和复制。项目模型、语言和提示词通过既有主机状态保存，界面只把名称包含 flash／mini 等的模型标为轻量候选；宿主未提供价格与延迟时不作最低价或最快保证。
 
 英语拼写检查完全在浏览器本地执行，开启时才加载 `latex-spelling.js` 中的 Hunspell 字典；不发送源文或调用模型。它只检查当前文件的有界自然语言片段，跳过常见 LaTeX 命令、数学与引用键，属于拼写提示而非语法或编译检查。

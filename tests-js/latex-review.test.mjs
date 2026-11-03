@@ -190,6 +190,51 @@ test('collaboration replies attach only by exact note identity and label older a
   assert.equal(f.ui.setCollaboration(entries, { id: 'project', main: 'main.tex', binding_generation: 0 }), false)
 })
 
+test('annotation provenance renders bounded source records and only safe HTTPS scholarly links', async () => {
+  const note = savedNote(), f = fixture(async () => ({ annotations: [note] }))
+  await f.ui.refresh()
+  const links = [
+    'https://doi.org/10.1234/synthetic', 'https://arxiv.org/abs/2601.00001v2',
+    'javascript:alert(1)', 'http://doi.org/10.1234/synthetic', 'https://doi.org.evil.invalid/10.1234/synthetic',
+    'https://alice:secret@doi.org/10.1234/synthetic', 'https://doi.org:8443/10.1234/synthetic',
+    'https://arxiv.org/pdf/2601.00001', 'https://doi.org/10.1234/synthetic?token=synthetic',
+  ]
+  const retrieval = {
+    project: true, rounds: 1, calls: 2, used_tools: true,
+    sources: [
+      { id: 'F1', kind: 'file', path: 'notes/synthetic.tex', line: 3, end_line: 6, revision: 'revision-123', evidence_level: 'project-text' },
+      ...links.map((url, index) => ({ id: `S${index + 1}`, kind: 'scholar', title: `Synthetic title ${index + 1}`, url, evidence_level: 'metadata' })),
+    ],
+    trace: [{ name: 'read_project_file', status: 'ok', round: 1 }, { name: 'scholar_search', status: 'ok', round: 1 }],
+    public_search: { requested: 1, attempted: 1, outcomes: [{ index: 1, status: 'partial', providers: [{ provider: 'crossref', status: 'ok', count: 2 }, { provider: 'arxiv', status: 'error', error: { code: 'timeout', message: 'raw provider text should not render' } }] }] },
+  }
+  const entry = { kind: 'ask', review_note: { id: note.id, version: note.version }, answer: 'Synthetic answer', retrieval }
+  assert.equal(f.ui.setCollaboration([entry]), true)
+  const card = f.ids.get('latex-review-list').children[0]
+  const detail = card.children.find(node => node.className === 'latex-review-collaboration')
+  const sourcePanel = detail.children.find(node => node.className === 'latex-retrieval-details')
+  assert.match(sourcePanel.textContent, /notes\/synthetic\.tex:3–6.*revision-123/)
+  assert.match(sourcePanel.textContent, /部分来源不可用.*Crossref：2 条；arXiv：不可用/)
+  assert.doesNotMatch(sourcePanel.textContent, /raw provider text should not render/)
+  const collectLinks = node => [...(node.tagName === 'a' ? [node] : []), ...node.children.flatMap(collectLinks)]
+  assert.deepEqual(collectLinks(sourcePanel).map(link => link.href), links.slice(0, 2))
+  assert.ok(collectLinks(sourcePanel).every(link => link.rel === 'noopener noreferrer' && link.target === '_blank'))
+})
+
+test('enabled but unused retrieval is not described as a completed search', async () => {
+  const note = savedNote(), f = fixture(async () => ({ annotations: [note] }))
+  await f.ui.refresh()
+  const entry = { kind: 'ask', review_note: { id: note.id, version: note.version }, answer: 'A reply with no retrieval', retrieval: { project: true, sources: [], trace: [], used_tools: false, rounds: 0, calls: 0, public_search: { requested: 2, attempted: 0, outcomes: [] } } }
+  f.ui.setCollaboration([entry])
+  const card = f.ids.get('latex-review-list').children[0]
+  assert.match(card.textContent, /当前项目：已开启，未调用/)
+  assert.match(card.textContent, /公开学术：已提供 2 条检索词，未调用/)
+  assert.match(card.textContent, /没有取得可引用/)
+  assert.doesNotMatch(card.textContent, /已取得来源|有结果/)
+  f.ui.setCollaboration([{ ...entry, retrieval: { ...entry.retrieval, trace: [{ name: 'search_project', status: 'ok', round: 1 }], used_tools: true, rounds: 1, calls: 1 } }])
+  assert.match(f.ids.get('latex-review-list').textContent, /当前项目：已调用工具，未取得可引用来源/)
+})
+
 test('freeform comments become source annotations and retain the original input on write failure', async () => {
   let failed = true, calls = []
   const f = fixture(async (action, args) => {

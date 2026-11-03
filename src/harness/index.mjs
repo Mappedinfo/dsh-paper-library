@@ -1,5 +1,5 @@
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import * as dshTools from '@deepseek-ai/dsh-tools'
+import * as dshLlm from '@deepseek-ai/dsh-llm'
 import { core, dispatch } from '../bridge.mjs'
 import { createFetchHandler } from '../http.mjs'
 import { resolveConfig } from './config.mjs'
@@ -19,11 +19,17 @@ import { createPaperAnalysisAgent } from './paper-analysis-agent.mjs'
 import { createQueuedPaperAnalysis } from './paper-analysis-queue.mjs'
 import { createChallengeMining } from './challenge-mining.mjs'
 import { createLatexAI } from './latex-ai.mjs'
+import { createLatexResearch } from './latex-research.mjs'
+import { createScholarlySearch } from './scholarly-search.mjs'
+import { createHarnessToolAI } from './tool-ai.mjs'
 import { createLatexWorkspace } from './latex-workspace.mjs'
 import { createBoardStore } from './board-store.mjs'
 import { createCompanionQueue } from './companion-queue.mjs'
 import Schema from '@deepseek-ai/schemastery'
 import { createPaperLibrarySettings, createPaperLibrarySettingsSchema } from './settings.mjs'
+
+const { defineTool, assertSupportedJsonSchema, validateJsonSchemaValue } = dshTools
+const { createUserMessage, createAssistantMessage, createToolResultMessage, BlockAssembler } = dshLlm
 
 export const name = 'paper-library'
 export const inject = ['tools', 'llm']
@@ -133,7 +139,11 @@ export function apply(ctx, rawConfig = {}) {
       agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens})})
     // LaTeX questions and co-writing reuse the language route and the local state
     // store; proposals hold replacements, never a second copy of the manuscript.
-    const latexAI = createLatexAI({ store: options.localState, ai: languageAI, config, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python })
+    const research = createLatexResearch({
+      run: createHarnessToolAI(ctx.llm, { createUserMessage, createAssistantMessage, createToolResultMessage, BlockAssembler, assertSupportedJsonSchema, validateJsonSchemaValue }, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }),
+      search: createScholarlySearch(), dispatch, library: config.library, python: config.python,
+    })
+    const latexAI = createLatexAI({ store: options.localState, ai: languageAI, research, config, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python })
     // The workspace owns the manuscript folder under the DSH home and keeps it in the
     // sync service's own config; both are host-side jobs, so neither enters the worker.
     const latexWorkspace = createLatexWorkspace({ config, dispatch, settings, library: config.library, python: config.python })

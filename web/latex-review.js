@@ -1,8 +1,101 @@
 'use strict';
 /** One reader's source/PDF review, projected through the existing annotation model. */
 window.PaperLatexReview = (() => {
-  function create({ root, api, context, revealSource, revealPdf, changed = () => {}, show = () => {}, onAsk, onPropose }) {
-    const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
+  const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
+  const boundedText = (value, limit = 500) => typeof value === 'string' ? value.slice(0, limit) : '';
+  const positiveInt = value => Number.isSafeInteger(value) && value > 0 ? value : 0;
+  const toolNames = { list_project_files: '查看项目文件', search_project: '搜索项目文件', read_project_file: '读取项目片段', read_project_pdf: '读取项目 PDF', scholar_search: '公开学术检索' };
+  const providerLabels = { crossref: 'Crossref', arxiv: 'arXiv' };
+  const providerErrors = { unsafe_dns: '网络解析受限', timeout: '超时', rate_limited: '来源限速', response_too_large: '响应过大', redirect_rejected: '来源重定向', invalid_response: '无法读取响应' };
+  const toolName = name => typeof name === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(name) ? (Object.hasOwn(toolNames, name) ? toolNames[name] : name) : '检索工具';
+  function scholarlyLink(value) {
+    if (typeof value !== 'string' || value.length > 1000) return null;
+    try {
+      const url = new URL(value);
+      if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash) return null;
+      if (url.hostname === 'doi.org' && /^\/10\.\d{4,9}\/[^\s?#\x00-\x1f\x7f]+$/i.test(decodeURIComponent(url.pathname))) return url.href;
+      if (url.hostname === 'arxiv.org' && /^\/abs\/(?:\d{4}\.\d{4,5}|[a-z][a-z.-]*(?:\.[A-Z]{2})?\/\d{7})(?:v\d+)?$/i.test(url.pathname)) return url.href;
+    } catch { /* Plain text remains visible for malformed links. */ }
+    return null;
+  }
+  function retrievalDetails(retrieval) {
+    if (!retrieval || typeof retrieval !== 'object') return null;
+    const rawSources = Array.isArray(retrieval.sources) ? retrieval.sources : [];
+    const sources = rawSources.slice(0, 60).filter(source => source && typeof source.id === 'string' && /^[FS]\d{1,3}$/.test(source.id) && ['file', 'pdf', 'scholar'].includes(source.kind));
+    const trace = Array.isArray(retrieval.trace) ? retrieval.trace.slice(0, 24).filter(step => step && typeof step.name === 'string') : [];
+    const publicSearch = retrieval.public_search;
+    const requested = positiveInt(publicSearch?.requested), attempted = positiveInt(publicSearch?.attempted);
+    const outcomes = Array.isArray(publicSearch?.outcomes) ? publicSearch.outcomes.slice(0, 3).filter(result => result && positiveInt(result.index)) : [];
+    const details = make('details', 'latex-retrieval-details');
+    details.append(make('summary', '', `检索来源 · ${sources.length} 条${retrieval.truncated || rawSources.length > 60 ? ' · 已截断' : ''}`));
+    const localAttempt = trace.some(step => step.name !== 'scholar_search' && Object.hasOwn(toolNames, step.name));
+    const localSources = sources.some(source => source.kind === 'file' || source.kind === 'pdf');
+    const local = retrieval.project === true ? (localSources ? '已取得来源' : localAttempt ? '已调用工具，未取得可引用来源' : '已开启，未调用') : '未开启';
+    const publicScope = requested ? (attempted ? `已尝试 ${attempted}/${requested} 条检索词` : `已提供 ${requested} 条检索词，未调用`) : '未开启';
+    details.append(make('p', 'latex-retrieval-hint', `当前项目：${local}。公开学术：${publicScope}。`));
+    if (!sources.length) details.append(make('p', 'latex-retrieval-hint', '本次没有取得可引用的检索来源。'));
+    if (requested || sources.some(source => source.kind === 'scholar')) details.append(make('p', 'latex-retrieval-hint', '学术来源仅为题录或摘要；未读取论文全文。'));
+    if (outcomes.length) {
+      const statusLabels = { ok: '有结果', empty: '无结果', partial: '部分来源不可用', unavailable: '检索不可用' };
+      const outcomeList = make('ul', 'latex-retrieval-outcomes');
+      for (const outcome of outcomes) {
+        const providers = Array.isArray(outcome.providers) ? outcome.providers.slice(0, 2).filter(provider => provider && Object.hasOwn(providerLabels, provider.provider)).map(provider => {
+          const status = provider.status === 'ok' ? `${positiveInt(provider.count)} 条` : provider.status === 'empty' ? '无结果' : '不可用';
+          const reason = provider.status === 'error' && Object.hasOwn(providerErrors, provider.error?.code) ? `（${providerErrors[provider.error.code]}）` : '';
+          return `${providerLabels[provider.provider]}：${status}${reason}`;
+        }) : [];
+        const status = Object.hasOwn(statusLabels, outcome.status) ? statusLabels[outcome.status] : '结果未确认';
+        outcomeList.append(make('li', '', `检索词 ${outcome.index} · ${status}${providers.length ? `（${providers.join('；')}）` : ''}`));
+      }
+      details.append(outcomeList);
+    }
+    if (sources.length) {
+      const list = make('ol', 'latex-retrieval-sources');
+      for (const source of sources) {
+        const row = make('li', 'latex-retrieval-source');
+        const label = make('span', 'latex-retrieval-id', `[${source.id}]`);
+        if (source.kind === 'scholar') {
+          const title = boundedText(source.title) || '未提供标题';
+          const href = scholarlyLink(source.url);
+          const name = make(href ? 'a' : 'strong', '', title);
+          if (href) { name.href = href; name.target = '_blank'; name.rel = 'noopener noreferrer'; }
+          row.append(label, name);
+          const authors = Array.isArray(source.authors) ? source.authors.slice(0, 12).map(value => boundedText(value, 120)).filter(Boolean).join('、') : '';
+          const provider = Object.hasOwn(providerLabels, source.provider) ? providerLabels[source.provider] : '';
+          const doi = boundedText(source.doi, 250);
+          const meta = [source.evidence_level === 'abstract' ? '摘要' : '题录', provider, authors, positiveInt(source.year), doi ? `DOI ${doi}` : ''].filter(Boolean);
+          row.append(make('p', 'latex-retrieval-meta', meta.join(' · ')));
+        } else {
+          const path = boundedText(source.path, 600) || (source.kind === 'pdf' ? '编译 PDF' : '项目文件');
+          const line = positiveInt(source.line), end = positiveInt(source.end_line), page = positiveInt(source.page);
+          const locator = source.kind === 'pdf' ? (page ? ` · 第 ${page} 页` : '') : (line ? `:${line}${end > line ? `–${end}` : ''}` : '');
+          row.append(label, make('code', '', path + locator));
+          const version = boundedText(source.kind === 'pdf' ? source.pdf_version : source.revision, 80);
+          row.append(make('p', 'latex-retrieval-meta', `${source.kind === 'pdf' ? '项目 PDF 片段' : '项目文本片段'}${version ? ` · ${source.kind === 'pdf' ? '编译' : '修订'} ${version}` : ''}`));
+        }
+        list.append(row);
+      }
+      details.append(list);
+    }
+    if (trace.length) {
+      const steps = make('details', 'latex-retrieval-trace');
+      const calls = positiveInt(retrieval.calls), rounds = positiveInt(retrieval.rounds);
+      steps.append(make('summary', '', `检索步骤 · ${calls || trace.length} 次${rounds ? ` / ${rounds} 轮` : ''}`));
+      const used = retrieval.used_tools === true ? [...new Set(trace.filter(step => step.status === 'ok').map(step => toolName(step.name)))] : [];
+      if (used.length) steps.append(make('p', 'latex-retrieval-meta', used.join('、')));
+      const statuses = { ok: '已返回', empty: '无结果', error: '未成功', failed: '未成功', denied: '未获授权', invalid: '参数无效', unavailable: '不可用', skipped: '未执行', partial: '部分返回' };
+      const stepList = make('ol', 'latex-retrieval-outcomes');
+      for (const step of trace) {
+        const status = Object.hasOwn(statuses, step.status) ? statuses[step.status] : '已记录';
+        const round = positiveInt(step.round);
+        stepList.append(make('li', '', `${round ? `第 ${round} 轮 · ` : ''}${toolName(step.name)}：${status}${step.truncated ? ' · 已截断' : ''}`));
+      }
+      steps.append(stepList); details.append(steps);
+    }
+    return details;
+  }
+
+  function create({ root, api, context, revealSource, revealPdf, changed = () => {}, show = () => {}, onAsk, onPropose, onStop }) {
     let notes = [], draft = null, saving = false, sequence = 0, disposed = false, collaborating = null, collaboration = [];
     let collaborationKey = null;
     const head = make('div', 'latex-review-head');
@@ -10,7 +103,10 @@ window.PaperLatexReview = (() => {
     const filter = make('select'); filter.id = 'latex-review-filter'; filter.setAttribute('aria-label', '批注筛选');
     for (const [value, label] of [['open', '待处理'], ['all', '全部'], ['resolved', '已解决'], ['stale', '待重定位'], ['source', '源码'], ['pdf', 'PDF']]) { const option = make('option', '', label); option.value = value; filter.append(option); }
     const refresh = make('button', 'button subtle', '刷新'); refresh.type = 'button'; refresh.id = 'latex-review-refresh';
-    head.append(filter, refresh);
+    const stop = make('button', 'button latex-ai-stop', '停止'); stop.type = 'button'; stop.id = 'latex-review-ai-stop'; stop.hidden = true;
+    stop.setAttribute('aria-label', '停止当前批注的 DSH 操作');
+    stop.addEventListener('click', () => onStop?.());
+    head.append(filter, refresh, stop);
     const message = make('p', 'latex-review-message'); message.id = 'latex-review-message'; message.setAttribute('role', 'status');
     const composer = make('section', 'latex-review-composer'); composer.id = 'latex-review-composer'; composer.hidden = true;
     const anchor = make('p', 'latex-review-anchor'); anchor.id = 'latex-review-anchor';
@@ -115,8 +211,14 @@ window.PaperLatexReview = (() => {
         if (disposed || owner.key !== key() || collaborating !== owner) return false;
         say(result === false ? 'DSH 操作未完成；请查看协作区提示后重试。' : kind === 'ask' ? 'DSH 回复已生成。' : '修改提案已生成；确认后才会写入源码。', result === false);
         return result !== false;
-      } catch (error) { if (!disposed && owner.key === key()) say(`DSH 操作未完成：${error.message}。批注仍保留，可重试。`, true); return false; }
+      } catch (error) { if (!disposed && owner.key === key() && collaborating === owner) say(`DSH 操作未完成：${error.message}。批注仍保留，可重试。`, true); return false; }
       finally { if (collaborating === owner) { collaborating = null; if (!disposed && owner.key === key()) render(); } }
+    }
+    function cancelCollaboration(message = '') {
+      if (!collaborating) return false;
+      collaborating = null;
+      if (!disposed) { render(); if (message) say(message); }
+      return true;
     }
     function setCollaboration(entries, identity = context()) {
       const scope = { ...identity, binding_generation: identity.binding_generation ?? context().binding_generation ?? 0 };
@@ -132,7 +234,9 @@ window.PaperLatexReview = (() => {
         const heading = entry.kind === 'ask' ? 'DSH 回复' : ['propose', 'proposal'].includes(entry.kind) ? 'DSH 修改提案' : ['accept', 'accepted'].includes(entry.kind) ? 'DSH 修改已确认' : entry.kind === 'discarded' ? 'DSH 提案已放弃' : 'DSH 协作记录';
         detail.append(make('summary', '', `${heading}${old}${entry.model ? ` · ${entry.model}` : ''}`));
         const content = entry.kind === 'ask' ? entry.answer : [entry.summary, entry.notes, entry.path ? `目标源码：${entry.path}` : '', ['propose', 'proposal'].includes(entry.kind) ? '请在写作区审阅提案，确认后才会修改源码。' : ''].filter(Boolean).join('\n');
-        detail.append(make('p', 'latex-review-collaboration-body', String(content || '协作操作已记录。').slice(0, 12000))); card.append(detail);
+        detail.append(make('p', 'latex-review-collaboration-body', String(content || '协作操作已记录。').slice(0, 12000)));
+        const sources = retrievalDetails(entry.retrieval); if (sources) detail.append(sources);
+        card.append(detail);
       }
     }
     function matchedAnchor(note) {
@@ -146,6 +250,7 @@ window.PaperLatexReview = (() => {
     }
     function render() {
       list.textContent = '';
+      stop.hidden = !collaborating || typeof onStop !== 'function';
       const visible = notes.filter(note => filter.value === 'all' || filter.value === note.status || filter.value === note.anchor.kind || filter.value === 'stale' && note.stale && !matchedAnchor(note));
       for (const note of visible) {
         const card = make('article', 'latex-review-card'); card.dataset.note = note.id;
@@ -190,9 +295,9 @@ window.PaperLatexReview = (() => {
     save.addEventListener('click', () => void saveDraft());
     cancel.addEventListener('click', () => { if (!saving) { draft = null; comment.value = ''; composer.hidden = true; say('已取消未保存批注。'); } });
     refresh.addEventListener('click', () => void refreshNotes()); filter.addEventListener('change', render);
-    return { refresh: refreshNotes, annotations: () => notes, beginSource, createSourceComment, setCollaboration, beginPdf: (anchor, type, options) => begin(anchor, type, options), hasDraft: () => Boolean(draft || saving),
+    return { refresh: refreshNotes, annotations: () => notes, beginSource, createSourceComment, setCollaboration, cancelCollaboration, beginPdf: (anchor, type, options) => begin(anchor, type, options), hasDraft: () => Boolean(draft || saving),
       reset() { if (draft || saving) return false; ++sequence; notes = []; collaborating = null; collaboration = []; collaborationKey = null; render(); return true; },
       dispose() { disposed = true; ++sequence; collaborating = null; collaboration = []; }, testHooks: { saveDraft, edit, setStatus, runNote, notes: () => notes } };
   }
-  return { create };
+  return { create, retrievalDetails };
 })();

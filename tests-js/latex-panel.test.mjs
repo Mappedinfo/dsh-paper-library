@@ -49,7 +49,11 @@ async function fixture(override = () => undefined, { review = false, spellChecke
     if (action === 'latex_review_list') return { annotations: [] }
     throw new Error(`unexpected action ${action}`)
   }
-  const globals = { window, document, crypto: webcrypto, AbortController, Uint8Array, Blob, atob: value => Buffer.from(value, 'base64').toString('binary'), URL: { createObjectURL() { const url = `blob:${urls.length}`; urls.push(url); return url }, revokeObjectURL: url => revoked.push(url) }, setTimeout: (fn, ms) => { const id = timers.size + 1; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id), getComputedStyle: () => ({ lineHeight: '20' }) }
+  const FixtureURL = class extends URL {
+    static createObjectURL() { const url = `blob:${urls.length}`; urls.push(url); return url }
+    static revokeObjectURL(url) { revoked.push(url) }
+  }
+  const globals = { window, document, crypto: webcrypto, AbortController, Uint8Array, Blob, atob: value => Buffer.from(value, 'base64').toString('binary'), URL: FixtureURL, setTimeout: (fn, ms) => { const id = timers.size + 1; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id), getComputedStyle: () => ({ lineHeight: '20' }) }
   if (spellChecker) window.PaperLatexSpelling = { checkSpelling: spellChecker }
   if (writingTools) window.PaperLatexWritingTools = { create: () => writingTools }
   if (review) vm.runInNewContext(reviewSource, globals)
@@ -1139,5 +1143,127 @@ test('an older collaboration status cannot erase a newly generated note proposal
   status.resolve({ configured: true, proposal: null, entries: [] }); await tick()
   assert.equal(f.ui.testHooks.state().ai.proposal, 'note-proposal')
   assert.match(f.ids.get('latex-review-list').textContent, /DSH 修改提案/)
+  f.ui.dispose()
+})
+
+const writingAnswer = (answer = 'Synthetic writing answer', retrieval) => ({ answer, model: { provider: 'synthetic', model: 'small' }, entry: { kind: 'ask', answer, retrieval } })
+const requestScope = call => JSON.parse(JSON.stringify(call.retrieval))
+
+test('public queries require explicit one-use input and never fall back to the question or selected source', async () => {
+  const f = await fixture(action => action === 'latex_ai_ask' ? writingAnswer() : undefined, { review: true })
+  const input = f.ids.get('latex-ai-input'), local = f.ids.get('latex-retrieval-project'), external = f.ids.get('latex-retrieval-public'), queries = f.ids.get('latex-retrieval-queries');
+  assert.equal(local.checked, true); assert.equal(external.checked, false)
+  assert.equal(f.ids.get('latex-retrieval-public-options').hidden, true)
+  input.value = 'Synthetic private question'; f.ids.get('latex-editor').setSelectionRange(0, 8)
+  await f.ids.get('latex-ai-ask').dispatch('click'); await tick()
+  let requests = f.calls.filter(call => call.action === 'latex_ai_ask')
+  assert.deepEqual(requestScope(requests[0]), { project: true, public_queries: [] })
+  assert.equal(requests[0].selection, 'main.tex')
+  await f.ids.get('latex-ai-scope').dispatch('click')
+  assert.equal(f.ids.get('latex-menu').hidden, false)
+  local.checked = false; await local.dispatch('change')
+  external.checked = true; await external.dispatch('change')
+  assert.equal(f.ids.get('latex-retrieval-public-options').hidden, false)
+  queries.value = '  synthetic graph theory  \n\nsynthetic networks'
+  await f.ids.get('latex-ai-ask').dispatch('click'); await tick()
+  requests = f.calls.filter(call => call.action === 'latex_ai_ask')
+  assert.deepEqual(requestScope(requests[1]), { project: false, public_queries: ['synthetic graph theory', 'synthetic networks'] })
+  assert.equal(requests[1].question, 'Synthetic private question')
+  assert.equal(external.checked, false); assert.equal(queries.value, '')
+  await f.ids.get('latex-ai-ask').dispatch('click'); await tick()
+  requests = f.calls.filter(call => call.action === 'latex_ai_ask')
+  assert.deepEqual(requestScope(requests[2]), { project: false, public_queries: [] })
+  assert.equal(f.calls.some(call => ['state_put', 'settings_update'].includes(call.action)), false)
+  f.ui.dispose()
+})
+
+test('empty or over-limit public queries block the request without silently trimming away a line', async () => {
+  const f = await fixture()
+  f.ids.get('latex-ai-input').value = 'Synthetic question'
+  const external = f.ids.get('latex-retrieval-public'), queries = f.ids.get('latex-retrieval-queries');
+  external.checked = true; await external.dispatch('change')
+  for (const invalid of ['', 'one\ntwo\nthree\nfour', 'x'.repeat(201), 'invalid\tterm', '???']) {
+    queries.value = invalid
+    await f.ids.get('latex-ai-ask').dispatch('click'); await tick()
+    assert.equal(queries.value, invalid)
+    assert.match(f.ids.get('latex-ai-route').textContent, /公开检索词/)
+  }
+  assert.equal(f.calls.some(call => call.action === 'latex_ai_ask'), false)
+  f.ui.dispose()
+})
+
+test('ordinary answers and proposals retain provenance without exposing source body or raw search terms', async () => {
+  const retrieval = {
+    project: true, truncated: true, rounds: 2, calls: 3, used_tools: true,
+    sources: [
+      { id: 'F1', kind: 'file', path: 'sections/synthetic.tex', line: 4, end_line: 7, revision: 'file-rev', evidence_level: 'project-text', text: 'source content should not render' },
+      { id: 'F2', kind: 'pdf', page: 3, pdf_version: 'pdf-version', evidence_level: 'project-text' },
+      { id: 'S1', kind: 'scholar', title: 'Synthetic paper', authors: ['Alice Example'], year: 2025, doi: '10.1234/synthetic', url: 'https://doi.org/10.1234/synthetic', evidence_level: 'abstract', abstract: 'abstract text should not render' },
+    ],
+    trace: [{ name: 'search_project', status: 'ok', round: 1, args: { query: 'trace query should not render' } }, { name: 'scholar_search', status: 'ok', round: 2 }],
+    public_search: { requested: 2, attempted: 2, outcomes: [{ index: 1, status: 'ok', providers: [{ provider: 'crossref', status: 'ok', count: 1 }] }, { index: 2, status: 'unavailable', providers: [{ provider: 'arxiv', status: 'error', count: 0 }] }] },
+  }
+  const f = await fixture(action => {
+    if (action === 'latex_ai_ask') return writingAnswer('Evidence summary', retrieval)
+    if (action === 'latex_ai_propose') return { changed: true, proposal: { id: 'synthetic', path: 'main.tex', summary: 'Synthetic revision', replacements: [{ find: 'before', replace: 'after' }], model: { provider: 'synthetic', model: 'small' }, retrieval } }
+  }, { review: true })
+  f.ids.get('latex-ai-input').value = 'Use project evidence'
+  await f.ids.get('latex-ai-ask').dispatch('click'); await tick()
+  const answer = f.ids.get('latex-ai-answer');
+  assert.match(answer.textContent, /\[F1\]sections\/synthetic\.tex:4–7/)
+  assert.match(answer.textContent, /第 3 页.*pdf-version/)
+  assert.match(answer.textContent, /Alice Example.*2025.*10\.1234\/synthetic/)
+  assert.match(answer.textContent, /题录或摘要；未读取论文全文/)
+  assert.match(answer.textContent, /检索不可用/); assert.match(answer.textContent, /已截断/)
+  assert.doesNotMatch(answer.textContent, /should not render/)
+  assert.equal(answer.querySelector('a').href, 'https://doi.org/10.1234/synthetic')
+  await f.ids.get('latex-ai-propose').dispatch('click'); await tick()
+  assert.match(f.ids.get('latex-ai-proposal').textContent, /检索来源 · 3 条/)
+  assert.deepEqual(requestScope(f.calls.find(call => call.action === 'latex_ai_propose')), { project: true, public_queries: [] })
+  f.ui.dispose()
+})
+
+test('stop, project switch, workspace close and disposal abort in-flight writing calls and ignore late responses', async () => {
+  let pending;
+  const f = await fixture(action => {
+    if (action === 'latex_ai_ask' || action === 'latex_ai_propose') { pending = deferred(); return pending.promise }
+  }, { review: true })
+  f.ids.get('latex-ai-input').value = 'Synthetic question'
+  const stop = f.ids.get('latex-ai-stop');
+  for (const [kind, leave] of [
+    ['ask', () => stop.dispatch('click')],
+    ['propose', () => f.ui.testHooks.setProject('two')],
+    ['ask', () => f.ui.close()],
+    ['ask', () => f.ui.dispose()],
+  ]) {
+    if (!f.ui.isOpen()) assert.equal(await f.ui.open('two'), true)
+    await f.ids.get(`latex-ai-${kind}`).dispatch('click'); await tick()
+    const request = f.calls.filter(call => call.action === `latex_ai_${kind}`).at(-1)
+    assert.equal(stop.hidden, false); assert.equal(request.signal.aborted, false)
+    await leave(); assert.equal(request.signal.aborted, true)
+    pending.resolve(kind === 'propose' ? { changed: true, proposal: { id: 'late', path: 'main.tex', summary: 'Late proposal must not appear', replacements: [], model: { provider: 'synthetic', model: 'small' } } } : writingAnswer('Late result must not appear')); await tick()
+    assert.doesNotMatch(f.ids.get('latex-ai-answer').textContent, /Late result/)
+    assert.doesNotMatch(f.ids.get('latex-ai-proposal').textContent, /Late proposal/)
+    assert.equal(stop.hidden, true)
+  }
+})
+
+test('a note-specific stop aborts its request and immediately re-enables the saved annotation actions', async () => {
+  const pending = deferred(), note = savedReview()
+  const f = await fixture(action => {
+    if (action === 'latex_review_list') return { annotations: [note] }
+    if (action === 'latex_ai_ask') return pending.promise
+  }, { review: true })
+  f.ids.get('latex-review-filter').value = 'open'; await f.ui.testHooks.reviewer().refresh()
+  const asking = f.ui.testHooks.reviewer().testHooks.runNote('ask', note); await tick()
+  const stop = f.ids.get('latex-review-ai-stop'); assert.equal(stop.hidden, false)
+  await stop.dispatch('click')
+  const request = f.calls.find(call => call.action === 'latex_ai_ask')
+  assert.equal(request.signal.aborted, true); assert.equal(stop.hidden, true)
+  assert.match(f.ids.get('latex-review-message').textContent, /已停止/)
+  const row = f.ids.get('latex-review-list').querySelector('.latex-review-card-actions')
+  assert.equal(row.children[2].disabled, false)
+  pending.reject(Error('Late transport error')); assert.equal(await asking, false)
+  assert.doesNotMatch(f.ids.get('latex-review-message').textContent, /Late transport error/)
   f.ui.dispose()
 })
