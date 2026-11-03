@@ -7,11 +7,12 @@ import { webcrypto } from 'node:crypto'
 
 const source = await readFile(new URL('../web/latex-workspace.js', import.meta.url), 'utf8')
 const reviewSource = await readFile(new URL('../web/latex-review.js', import.meta.url), 'utf8')
+const searchSource = await readFile(new URL('../web/latex-search.js', import.meta.url), 'utf8')
 const tick = () => new Promise(done => setImmediate(done))
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
 const image = { image: 'aW1hZ2U=', width: 600, height: 800, pixel_width: 1200, pixel_height: 1600, page_count: 4, bytes: 5, supported: true }
 
-async function fixture(override = () => undefined, { review = false, spellChecker, writingTools, onContext, rail } = {}) {
+async function fixture(override = () => undefined, { review = false, spellChecker, writingTools, sourceEditor, onContext, rail } = {}) {
   const ids = new Map(), revoked = [], calls = [], urls = [], timers = new Map()
   class Element {
     constructor(tag = 'div') {
@@ -56,11 +57,93 @@ async function fixture(override = () => undefined, { review = false, spellChecke
   const globals = { window, document, crypto: webcrypto, AbortController, Uint8Array, Blob, atob: value => Buffer.from(value, 'base64').toString('binary'), URL: FixtureURL, setTimeout: (fn, ms) => { const id = timers.size + 1; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id), getComputedStyle: () => ({ lineHeight: '20' }) }
   if (spellChecker) window.PaperLatexSpelling = { checkSpelling: spellChecker }
   if (writingTools) window.PaperLatexWritingTools = { create: () => writingTools }
+  if (sourceEditor) window.PaperLatexEditor = { create: () => sourceEditor }
   if (review) vm.runInNewContext(reviewSource, globals)
+  vm.runInNewContext(searchSource, globals)
   vm.runInNewContext(source, globals)
   const ui = window.PaperLatexWorkspace.create({ api, onContext, rail })
   await ui.open(); return { ui, ids, calls, revoked, urls, window, timers }
 }
+
+async function submitWorkspaceSearch(f, scope, query) {
+  const panel = f.ids.get('latex-workspace-search');
+  if (panel.hidden) await f.ids.get('latex-workspace-search-open').dispatch('click');
+  const select = f.ids.get('latex-workspace-search-scope');
+  select.value = scope;
+  await select.dispatch('change');
+  f.ids.get('latex-workspace-search-query').value = query;
+  await panel.querySelector('form').dispatch('submit');
+  await tick();
+}
+
+test('workspace PDF search skips empty batches and places an active highlight on the matching page', async () => {
+  const f = await fixture((action, args) => {
+    if (action !== 'latex_pdf_search') return;
+    assert.equal(args.expected_version, 'pdf-v1');
+    if (args.start_page === 1) return { version: 'pdf-v1', matches: [], next_page: 3 };
+    assert.equal(args.start_page, 3);
+    return { version: 'pdf-v1', matches: [{ page: 4, rects: [[60, 240, 180, 320]] }] };
+  });
+  await submitWorkspaceSearch(f, 'pdf', 'needle');
+  assert.deepEqual(f.calls.filter(call => call.action === 'latex_pdf_search').map(call => call.start_page), [1, 3]);
+  assert.equal(f.ui.testHooks.state().page, 4);
+  const stage = f.ids.get('latex-preview').querySelectorAll('.latex-page-stage').find(item => item.dataset.page === '4');
+  const highlight = stage.querySelector('.latex-search-pdf-hit');
+  assert.match(highlight.className, /\bactive\b/);
+  assert.equal(highlight.style.left, '10%');
+  assert.equal(highlight.style.top, '30%');
+  await f.ids.get('latex-workspace-search-open').dispatch('click');
+  assert.equal(stage.querySelector('.latex-search-pdf-hit'), null);
+  f.ui.dispose();
+});
+
+test('workspace source search opens the matching file, converts Unicode ranges, and clears marks on edit', async () => {
+  const content = '😀 first line\n😀needle end';
+  const start = content.indexOf('needle');
+  const codepoint = Array.from(content.slice(0, start)).length;
+  const hit = { path: 'b.tex', revision: 'saved-b', line: 2, column: 2, start: codepoint, end: codepoint + 6, text: '😀needle end' };
+  const applied = [];
+  const f = await fixture((action, args) => {
+    if (action === 'latex_source_search') return { matches: [hit] };
+    if (action === 'latex_read' && args.path === hit.path) return { path: hit.path, content, revision: hit.revision, bytes: 32, lines: 2 };
+  }, { sourceEditor: { setProjectSearchMatches: matches => applied.push(matches), destroy() {} } });
+  await submitWorkspaceSearch(f, 'source', 'needle');
+  assert.equal(f.ui.testHooks.state().file, hit.path);
+  const editor = f.ids.get('latex-editor');
+  assert.equal(editor.selectionStart, start);
+  assert.equal(editor.value.slice(editor.selectionStart, editor.selectionEnd), 'needle');
+  assert.equal(applied.at(-1)[0].from, start);
+  assert.equal(applied.at(-1)[0].active, true);
+  editor.value = 'unsaved';
+  await editor.dispatch('input');
+  assert.equal(applied.at(-1).length, 0);
+  assert.equal(f.ids.get('latex-workspace-search-results').hidden, true);
+  assert.equal(f.calls.some(call => call.action === 'latex_write'), false);
+  f.ui.dispose();
+});
+
+test('workspace source search cannot restore results from before a project location rebind', async () => {
+  const pending = deferred();
+  const project = { id: 'one', title: 'One', root: '/old/project', main_path: 'main.tex', binding_generation: 0 };
+  const f = await fixture(action => {
+    if (action === 'latex_project_list') return { projects: [project] };
+    if (action === 'latex_source_search') return pending.promise;
+    if (action === 'latex_project_update') return { project: { ...project, root: '/new/project', main_path: 'draft.tex', binding_generation: 1 } };
+  });
+  await submitWorkspaceSearch(f, 'source', 'old');
+  const request = f.calls.find(call => call.action === 'latex_source_search');
+  assert.equal(request.expected_binding_generation, 0);
+  f.ids.get('latex-location-root').value = '/new/project';
+  f.ids.get('latex-location-main').value = 'draft.tex';
+  await f.ids.get('latex-location-save').dispatch('click');
+  assert.equal(request.signal.aborted, true);
+  pending.resolve({ matches: [{ path: 'b.tex', revision: 'revision', line: 1, column: 1, start: 0, end: 3, text: 'old' }] });
+  await tick();
+  assert.equal(f.ui.testHooks.state().file, 'draft.tex');
+  assert.equal(f.ids.get('latex-workspace-search-results').hidden, true);
+  assert.equal(f.calls.some(call => call.action === 'latex_read' && call.path === 'b.tex'), false);
+  f.ui.dispose();
+});
 
 test('closing refuses to discard a writing-tool draft', async () => {
   let pending = true

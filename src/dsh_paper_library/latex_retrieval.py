@@ -6,6 +6,7 @@ import fnmatch
 import hashlib
 import os
 from pathlib import Path
+import re
 import stat
 import time
 
@@ -202,6 +203,16 @@ def read(library, id=None, path=None, start_line=None, lines=None, expected_root
 
 
 def search(library, id=None, query=None, path=None, glob=None, case_sensitive=False, limit=None, expected_root=None, expected_binding_generation=None):
+    return _search(library, id, query, path, glob, case_sensitive, limit, expected_root, expected_binding_generation)
+
+
+def source_search(library, id=None, query=None, expected_root=None, expected_binding_generation=None):
+    """Editor search with one result per literal occurrence and codepoint offsets."""
+    return _search(library, id, query, None, None, False, MAX_SEARCH_MATCHES,
+                   expected_root, expected_binding_generation, editor=True)
+
+
+def _search(library, id, query, path, glob, case_sensitive, limit, expected_root, expected_binding_generation, *, editor=False):
     row, root = _project(library, id, expected_root, expected_binding_generation)
     if not isinstance(query, str) or not query.strip() or len(query) > 200 or any(char in query for char in "\0\r\n"):
         raise ValueError("检索词须为1–200字符的单行文字，按字面检索")
@@ -214,8 +225,14 @@ def search(library, id=None, query=None, path=None, glob=None, case_sensitive=Fa
     files, truncated, scanned = _inventory(root, path, deadline=deadline)
     matches, read_files, scanned_bytes, emitted, skipped = [], 0, 0, 0, 0
     needle = query if case_sensitive else query.lower()
-    for file in files:
-        if file["kind"] != "text" or glob and not fnmatch.fnmatchcase(file["path"], glob):
+    pattern = re.compile(re.escape(query), re.IGNORECASE) if editor else None
+    candidates = [file for file in files if file["kind"] == "text"
+                  and (not glob or fnmatch.fnmatchcase(file["path"], glob))
+                  and (not editor or Path(file["path"]).suffix.lower() == ".tex")]
+    for file in candidates:
+        if editor and file["bytes"] > MAX_TEXT_BYTES:
+            skipped += 1
+            truncated = True
             continue
         if scanned_bytes + file["bytes"] > MAX_SEARCH_BYTES or time.monotonic() > deadline:
             truncated = True; break
@@ -224,23 +241,34 @@ def search(library, id=None, query=None, path=None, glob=None, case_sensitive=Fa
         except ValueError:
             skipped += 1; truncated = True; continue
         scanned_bytes += size; read_files += 1
+        line_start = 0
         for line, content in enumerate(_lines(body), 1):
             if line % 128 == 0 and time.monotonic() > deadline:
                 truncated = True; break
-            found = (content if case_sensitive else content.lower()).find(needle)
-            if found < 0:
-                continue
-            begin = max(0, found - 120)
-            snippet = content[begin:begin + MAX_CONTEXT_CHARACTERS]
-            if emitted + len(snippet) > MAX_SEARCH_CHARACTERS or len(matches) >= maximum:
-                truncated = True; break
-            matches.append({"kind": "project_text", "path": file["path"], "line": line, "end_line": line, "text": snippet,
-                            "revision": revision, "truncated": begin > 0 or begin + len(snippet) < len(content)})
-            emitted += len(snippet)
+            if pattern is not None:
+                spans = (match.span() for match in pattern.finditer(content))
+            else:
+                found = (content if case_sensitive else content.lower()).find(needle)
+                spans = [(found, found + len(needle))] if found >= 0 else []
+            for start, end in spans:
+                begin = max(0, start - 120)
+                snippet = content[begin:begin + MAX_CONTEXT_CHARACTERS]
+                if emitted + len(snippet) > MAX_SEARCH_CHARACTERS or len(matches) >= maximum:
+                    truncated = True
+                    break
+                match = {"kind": "project_text", "path": file["path"], "line": line, "end_line": line, "text": snippet,
+                         "revision": revision, "truncated": begin > 0 or begin + len(snippet) < len(content)}
+                if editor:
+                    match.update(start=line_start + start, end=line_start + end, column=start + 1)
+                matches.append(match)
+                emitted += len(snippet)
+            line_start += len(content) + 1
+            if len(matches) >= maximum or emitted >= MAX_SEARCH_CHARACTERS:
+                break
         if len(matches) >= maximum or emitted >= MAX_SEARCH_CHARACTERS or time.monotonic() > deadline:
             truncated = True; break
     return {"id": row["id"], "kind": "project_search", "query": query, "matches": matches, "truncated": truncated,
-            "scanned_files": read_files, "candidate_files": sum(file["kind"] == "text" and (not glob or fnmatch.fnmatchcase(file["path"], glob)) for file in files),
+            "scanned_files": read_files, "candidate_files": len(candidates),
             "scanned_entries": scanned, "scanned_bytes": scanned_bytes, "skipped_files": skipped,
             "limits": {"entries": MAX_ENTRIES, "file_bytes": MAX_TEXT_BYTES, "search_bytes": MAX_SEARCH_BYTES,
                        "matches": MAX_SEARCH_MATCHES, "characters": MAX_SEARCH_CHARACTERS, "seconds": SCAN_SECONDS}}

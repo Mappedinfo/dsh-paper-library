@@ -17,6 +17,7 @@ window.PaperLatexWorkspace = (() => {
   const AUTOCOMPILE_MS = 2500;
   const MAX_RENDERED_PAGES = 3;
   const MAX_CACHED_BYTES = 48 * 1024 * 1024;
+  const MAX_PDF_SEARCH_HITS = 120;
   const SPLIT_MIN = 25, SPLIT_MAX = 75;
   const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_path_font: 'pixel', latex_accent: 'system', latex_split: 50, latex_sync_folder: true };
 
@@ -50,6 +51,7 @@ window.PaperLatexWorkspace = (() => {
     let switching = false, entryRequest = 0, openRequest = 0;
     let pdfBuild = null, pdfTool = 'select';
     let pdfSource = { kind: 'current' }, pdfSourceEpoch = 0, pdfSourceIntent = 0;
+    let projectSearch = null;
 
     // A standalone surface, like the whiteboard: the page itself becomes the workspace and
     // `?view=latex` opens it without the library, so a DSH tab can host it directly.
@@ -102,7 +104,7 @@ window.PaperLatexWorkspace = (() => {
     const menuButton = make('button', 'button subtle latex-menu-button', '⚙'); menuButton.id = 'latex-menu-open'; menuButton.type = 'button';
     menuButton.setAttribute('aria-expanded', 'false'); menuButton.setAttribute('aria-controls', 'latex-menu'); menuButton.setAttribute('aria-label', '设置'); menuButton.title = '设置';
     if (window.PaperIcons) { menuButton.textContent = ''; window.PaperIcons.decorate(menuButton, 'settings'); }
-    toolbar.append(title, projectSelect, mainLabel, saveState, autoLabel, compile, diagnosticsToggle, navToggle, layoutControls, reviewDivider, reviewToggle, aiToggle, menuButton, back);
+    toolbar.append(title, projectSelect, mainLabel, saveState, autoLabel, compile, diagnosticsToggle, navToggle, layoutControls, reviewDivider, reviewToggle, aiToggle);
 
     const menu = make('div', 'latex-menu'); menu.id = 'latex-menu'; menu.setAttribute('aria-label', '项目与设置'); menu.hidden = true;
     const entryRow = make('div', 'latex-menu-section');
@@ -442,6 +444,7 @@ window.PaperLatexWorkspace = (() => {
     editor.addEventListener('scroll', () => { gutter.scrollTop = editor.scrollTop; });
     editor.addEventListener('input', () => {
       dirty = true; pendingConflict = null; conflictBar.hidden = true; lineNumbers(); setSaveState('未保存', 'dirty'); scheduleSave();
+      projectSearch?.reset('source');
       updateSyncHint(); if (!sourceEditor) updateNavigatorActive(); scheduleSpelling();
     });
     editor.addEventListener('select', () => updateNavigatorActive());
@@ -738,6 +741,7 @@ window.PaperLatexWorkspace = (() => {
     }
 
     function cancelReads() {
+      projectSearch?.reset();
       fileRequest += 1; pageRequest += 1; navRequest += 1; mediaRequest += 1;
       for (const controller of [fileAbort, pageAbort, navAbort, mediaAbort]) controller?.abort();
       clearTimeout(outlineTimer); clearTimeout(resizeTimer); clearTimeout(compileTimer);
@@ -886,6 +890,7 @@ window.PaperLatexWorkspace = (() => {
     }
 
     function setPreviewMessage(text) {
+      projectSearch?.reset('pdf');
       preview.textContent = '';
       const note = make('p', 'latex-preview-empty', text);
       preview.append(note); pageCount = 0; pageLabel.textContent = '—';
@@ -1026,9 +1031,10 @@ window.PaperLatexWorkspace = (() => {
     });
 
     async function openFile(path, options = {}) {
-      if (switching && !options.duringSwitch) return false;
+      const isCurrent = options.isCurrent || (() => true);
+      if (!isCurrent() || (switching && !options.duringSwitch)) return false;
       if (path === file && !options.force && !editor.disabled) return true;
-      if (!project || !await savedBeforeLeaving()) return false;
+      if (!project || !await savedBeforeLeaving() || !isCurrent()) return false;
       const id = project.id, ticket = ++fileRequest, epoch = generation;
       fileAbort?.abort(); fileAbort = new AbortController(); editor.disabled = true;
       let read;
@@ -1037,10 +1043,11 @@ window.PaperLatexWorkspace = (() => {
         if (ticket === fileRequest && error.name !== 'AbortError') say(`文件读取失败：${error.message}`, true);
         return false;
       } finally { if (ticket === fileRequest) editor.disabled = !file; }
-      if (ticket !== fileRequest || epoch !== generation || id !== project?.id || disposed) return false;
+      if (ticket !== fileRequest || epoch !== generation || id !== project?.id || disposed || !isCurrent()) return false;
       cancelTranslation(); file = read.path; revision = read.revision; dirty = false;
       editor.disabled = false; currentFile.textContent = file;
       editor.value = read.content; lineNumbers(); editor.scrollTop = 0; gutter.scrollTop = 0;
+      patchSourceSearch();
       scheduleSpelling();
       pendingConflict = null; conflictBar.hidden = true;
       setSaveState('已载入', 'saved');
@@ -1056,7 +1063,9 @@ window.PaperLatexWorkspace = (() => {
           ? await api('latex_version_pdf_pages', { version_id: source.versionId, ...(source.reviewPdfVersion ? { review_pdf_version: source.reviewPdfVersion } : {}) })
           : await api('latex_pdf_pages', { id });
         if (ticket !== generation || id !== project?.id || sourceEpoch !== pdfSourceEpoch || disposed) return;
-        pdfVersion = layout.version || buildInfo.dataset.build || '';
+        const version = layout.version || buildInfo.dataset.build || '';
+        if (version !== pdfVersion) projectSearch?.reset('pdf');
+        pdfVersion = version;
         pdfBuild = source.kind === 'current' ? (layout.build || null) : null; updateSyncHint();
         pageCount = layout.page_count; pageGeometry = layout.pages || []; page = Math.min(Math.max(1, page), Math.max(1, pageCount));
         await renderPage(page);
@@ -1068,6 +1077,7 @@ window.PaperLatexWorkspace = (() => {
 
     function clearRendered() { for (const item of rendered.values()) URL.revokeObjectURL(item.url); rendered.clear(); pdfWindowKey = ''; }
     function resetPdfSource(source) {
+      projectSearch?.reset('pdf');
       pdfSource = source; pdfSourceEpoch += 1; pdfSourceIntent += 1; pageRequest += 1; pageAbort?.abort(); clearRendered();
       pdfVersion = ''; pdfBuild = null; page = 1; pageCount = 0; pageGeometry = []; pdfTool = 'select';
       preview.dataset.tool = pdfTool;
@@ -1174,6 +1184,7 @@ window.PaperLatexWorkspace = (() => {
         const stage = old?.dataset.renderKey === keys.get(number) && rendered.has(keys.get(number)) ? old : make('div', 'latex-page-stage');
         stage.style.width = `${width}px`; stage.style.height = `${item.height}px`;
         stage.dataset.page = String(number); stage.dataset.renderKey = keys.get(number); stages.set(number, stage); preview.append(stage);
+        patchPdfSearch(stage);
         if (number !== nearby[nearby.length - 1]) { const gap = make('div', 'latex-page-spacer'); gap.style.height = '16px'; gap.style.flex = '0 0 auto'; preview.append(gap); }
       }
       preview.append(after);
@@ -1378,6 +1389,135 @@ window.PaperLatexWorkspace = (() => {
     pagePrev.addEventListener('click', () => void renderPage(page - 1));
     pageNext.addEventListener('click', () => void renderPage(page + 1));
 
+    async function searchProject(scope, query, { signal, cursor }) {
+      if (!project || project.exists === false || switching) throw new Error('请先打开可用的 LaTeX 项目。');
+      const id = project.id;
+      if (scope === 'source') {
+        const result = await api('latex_source_search', { id, query }, { signal });
+        return {
+          matches: result.matches.map(hit => ({ ...hit, label: `${hit.path}:${hit.line}:${hit.column} · ${hit.text}` })),
+          summary: result.truncated ? '结果达到扫描或显示上限' : '',
+        };
+      }
+      if (!pageCount || !pdfVersion) throw new Error('请先生成或打开一份 PDF。');
+      if (compiling && pdfSource.kind === 'current') throw new Error('请等待编译完成后再搜索 PDF。');
+      const source = pdfSource, version = pdfVersion, epoch = pdfSourceEpoch;
+      const args = { id, query, expected_version: version };
+      if (source.kind === 'version') {
+        args.version_id = source.versionId;
+        if (source.reviewPdfVersion) args.review_pdf_version = source.reviewPdfVersion;
+      }
+      let start = cursor ?? 1;
+      let truncated = false;
+      const hits = [];
+      // Accumulate bounded results across the document, including late hits.
+      while (true) {
+        signal.throwIfAborted();
+        const result = await api('latex_pdf_search', { ...args, start_page: start }, { signal });
+        signal.throwIfAborted();
+        if (project?.id !== id || epoch !== pdfSourceEpoch || version !== pdfVersion || result.version !== version) throw new Error('预览已变化，请重新搜索。');
+        let next = Number.isSafeInteger(result.next_page) && result.next_page > start && result.next_page <= pageCount ? result.next_page : null;
+        if (hits.length && hits.length + result.matches.length > MAX_PDF_SEARCH_HITS) {
+          next = start;
+        } else {
+          hits.push(...result.matches);
+          truncated ||= result.truncated;
+          if (next !== null && hits.length < MAX_PDF_SEARCH_HITS) { start = next; continue; }
+        }
+        const summary = [truncated ? '部分页面或匹配超出搜索上限' : '', next ? '还有后续页' : ''].filter(Boolean).join(' · ');
+        return {
+          matches: hits.map(hit => ({ ...hit, label: `第 ${hit.page} 页${hit.text ? ` · ${hit.text}` : ''}` })),
+          summary,
+          next_cursor: next,
+        };
+      }
+    }
+
+    function sourceSearchRanges() {
+      if (!projectSearch || !file || dirty) return [];
+      const { matches, active } = projectSearch.results('source');
+      const hits = matches.filter(hit => hit.path === file && hit.revision === revision && Number.isSafeInteger(hit.start) && Number.isSafeInteger(hit.end) && hit.start >= 0 && hit.end > hit.start);
+      if (!hits.length) return [];
+      const text = editor.value;
+      const points = [...new Set(hits.flatMap(hit => [hit.start, hit.end]))].sort((a, b) => a - b);
+      const offsets = new Map();
+      let point = 0, offset = 0;
+      for (const wanted of points) {
+        while (point < wanted && offset < text.length) {
+          offset += text.codePointAt(offset) > 0xffff ? 2 : 1;
+          point++;
+        }
+        if (point === wanted) offsets.set(wanted, offset);
+      }
+      return hits.filter(hit => offsets.has(hit.end)).map(hit => ({ hit, from: offsets.get(hit.start), to: offsets.get(hit.end), active: hit === active }));
+    }
+
+    function patchSourceSearch() {
+      if (!disposed) sourceEditor?.setProjectSearchMatches?.(sourceSearchRanges());
+    }
+
+    function patchPdfSearch(stage) {
+      const number = Number(stage.dataset.page), geometry = pageGeometry[number - 1];
+      const results = projectSearch?.results('pdf');
+      const hits = results?.matches.filter(hit => hit.page === number) || [];
+      if (stage.searchMarks) stage.searchMarks.textContent = '';
+      if (!geometry || !hits.length) return;
+      if (!stage.searchMarks) {
+        stage.searchMarks = make('div', 'latex-search-pdf-marks');
+        stage.searchMarks.setAttribute('aria-hidden', 'true');
+        stage.append(stage.searchMarks);
+      }
+      for (const hit of hits) for (const [x0, y0, x1, y1] of hit.rects) {
+        const mark = make('span', hit === results.active ? 'latex-search-pdf-hit active' : 'latex-search-pdf-hit');
+        Object.assign(mark.style, {
+          left: `${x0 / geometry.width * 100}%`, top: `${y0 / geometry.height * 100}%`,
+          width: `${(x1 - x0) / geometry.width * 100}%`, height: `${(y1 - y0) / geometry.height * 100}%`,
+        });
+        stage.searchMarks.append(mark);
+      }
+    }
+
+    async function revealSearchHit(scope, hit, isCurrent) {
+      if (scope === 'source') {
+        if (dirty || saving || pendingConflict) throw new Error('请保存当前源码后再定位已保存的搜索结果。');
+        if (!await openFile(hit.path, { isCurrent, force: hit.path === file && revision !== hit.revision })) {
+          if (isCurrent()) throw new Error('无法打开这条结果的源码。');
+          return;
+        }
+        if (!isCurrent()) return;
+        const range = sourceSearchRanges().find(item => item.hit === hit);
+        if (!range) throw new Error('源码修订已变化，请重新搜索。');
+        if (layout === 'pdf') setLayout('split');
+        editor.setSelectionRange(range.from, range.to);
+        if (!sourceEditor) {
+          editor.focus();
+          editor.scrollTop = Math.max(0, (hit.line - 1) * (parseFloat(getComputedStyle(editor).lineHeight) || 21) - editor.clientHeight / 3);
+          gutter.scrollTop = editor.scrollTop;
+        }
+        updateNavigatorActive(hit.line);
+        return;
+      }
+      if (layout === 'source') setLayout('split');
+      setTab('pdf');
+      await renderPage(hit.page);
+      if (!isCurrent()) return;
+      const geometry = pageGeometry[hit.page - 1], rect = hit.rects[0];
+      const metric = pdfMetrics(previewWidth(preview, zoom))[hit.page - 1];
+      if (geometry && metric && rect) {
+        const center = (rect[1] + rect[3]) / (2 * geometry.height);
+        preview.scrollTop = Math.max(0, metric.top + center * metric.height - preview.clientHeight / 2);
+      }
+    }
+
+    projectSearch = window.PaperLatexSearch?.create({
+      toolbar, topbar, search: searchProject, reveal: revealSearchHit,
+      changed: () => {
+        patchSourceSearch();
+        for (const stage of preview.querySelectorAll('.latex-page-stage')) patchPdfSearch(stage);
+      },
+    });
+    toolbar.append(menuButton, back);
+
     // ---- SyncTeX: source and PDF jump to each other ------------------------------
     // Coordinates are displayed PDF points with a top-left origin on both ends; the
     // img's bounding box converts between bitmap pixels and those points. Rotated
@@ -1537,6 +1677,7 @@ window.PaperLatexWorkspace = (() => {
       if (!await savedBeforeLeaving(true)) return;
       if (!project || switching || compiling) { if (compiling) pendingCompile = true; return; }
       compiling = true; compile.disabled = true; compile.textContent = '编译中…';
+      if (pdfSource.kind === 'current') projectSearch?.reset('pdf');
       errors.textContent = ''; diagnosticsToggle.hidden = true; setDiagnosticsOpen(false); buildInfo.textContent = reason === 'auto' ? '自动编译中…' : '';
       if (reason === 'manual') say(`正在用 latexmk 编译 ${project.main_path || '主文件'}…`);
       const target = { id: project.id, main: project.main_path, generation };
@@ -2031,6 +2172,7 @@ window.PaperLatexWorkspace = (() => {
       if (!await savedBeforeLeaving(true)) return;
       clearPublicRetrieval();
       cancelTranslation();
+      projectSearch?.close();
       cancelReads();
       showRail(false);
       view.hidden = true;

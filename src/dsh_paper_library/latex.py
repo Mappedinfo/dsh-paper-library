@@ -1046,7 +1046,7 @@ def clean(library, id=None, include_archived=False):
     return {"id": row["id"], "removed": sorted(removed)[:500], "removed_count": len(removed), "kept": sorted(kept)[:200], "limits": {"listed": 500}}
 
 
-from . import latex_versions, latex_assets, latex_retrieval
+from . import latex_versions, latex_assets, latex_retrieval, latex_pdf_search
 from .latex_formulas import latex_formula_check
 
 ACTIONS = {
@@ -1077,6 +1077,7 @@ ACTIONS = {
     "latex_read": (read, ("id", "path", "include_archived", "expected_root", "expected_binding_generation")),
     "latex_retrieval_list": (latex_retrieval.listing, ("id", "path", "offset", "limit", "expected_root", "expected_binding_generation")),
     "latex_search": (latex_retrieval.search, ("id", "query", "path", "glob", "case_sensitive", "limit", "expected_root", "expected_binding_generation")),
+    "latex_source_search": (latex_retrieval.source_search, ("id", "query", "expected_root", "expected_binding_generation")),
     "latex_retrieval_read": (latex_retrieval.read, ("id", "path", "start_line", "lines", "expected_root", "expected_binding_generation")),
     "latex_pdf_text": (latex_retrieval.pdf_text, ("id", "path", "page", "pages", "expected_root", "expected_binding_generation")),
     "latex_lint": (lint, ("id", "mode", "main_path", "paths", "include_archived")),
@@ -1084,6 +1085,7 @@ ACTIONS = {
     "latex_compile": (compile_project, ("id", "engine", "timeout_seconds", "include_archived", "save_version")),
     "latex_pdf_pages": (pdf_pages, ("id", "include_archived")),
     "latex_pdf_page": (pdf_page, ("id", "page", "scale", "include_archived")),
+    "latex_pdf_search": (latex_pdf_search.search, ("id", "query", "start_page", "expected_version", "version_id", "review_pdf_version")),
     "latex_history": (history, ("id", "path", "limit", "include_archived")),
     "latex_diff": (diff, ("id", "path", "from_revision", "to_revision", "include_archived")),
     "latex_compare": (compare, ("a", "b", "path", "include_archived")),

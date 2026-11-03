@@ -1,5 +1,5 @@
-import { EditorState, Compartment } from '@codemirror/state'
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
+import { EditorState, Compartment, StateEffect, StateField } from '@codemirror/state'
+import { Decoration, EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { StreamLanguage, syntaxHighlighting, HighlightStyle, bracketMatching } from '@codemirror/language'
 import { searchKeymap, openSearchPanel } from '@codemirror/search'
@@ -34,6 +34,17 @@ const highlighting = syntaxHighlighting(HighlightStyle.define([
   { tag: [tags.number, tags.atom], color: 'var(--latex-syntax-atom)' },
 ]))
 
+const setProjectSearchMarks = StateEffect.define()
+const projectSearchMarks = StateField.define({
+  create: () => Decoration.none,
+  update(marks, transaction) {
+    if (transaction.docChanged) marks = Decoration.none
+    for (const effect of transaction.effects) if (effect.is(setProjectSearchMarks)) marks = effect.value
+    return marks
+  },
+  provide: field => EditorView.decorations.from(field),
+})
+
 /** Provide the workspace's existing textarea contract while CodeMirror owns input. */
 function create(textarea, container) {
   const editable = new Compartment()
@@ -41,7 +52,7 @@ function create(textarea, container) {
   let silent = false
   const extensions = [
     lineNumbers(), highlightActiveLine(), highlightActiveLineGutter(), history(), bracketMatching(),
-    StreamLanguage.define(stex), highlighting, theme, EditorView.lineWrapping,
+    StreamLanguage.define(stex), highlighting, theme, EditorView.lineWrapping, projectSearchMarks,
     EditorState.phrases.of({
       Find: '查找', Replace: '替换', next: '下一个', previous: '上一个', all: '全选匹配',
       'match case': '区分大小写', regexp: '正则表达式', 'by word': '全词匹配',
@@ -85,7 +96,14 @@ function create(textarea, container) {
     const limit = view.state.doc.length
     view.dispatch({ selection: { anchor: Math.max(0, Math.min(start, limit)), head: Math.max(0, Math.min(end, limit)) }, scrollIntoView: true })
   }
-  return { view, cursorLine: () => view.state.doc.lineAt(view.state.selection.main.head).number, openSearch: () => openSearchPanel(view), insert: (text, start, end) => {
+  return { view, cursorLine: () => view.state.doc.lineAt(view.state.selection.main.head).number, openSearch: () => openSearchPanel(view), setProjectSearchMatches(ranges) {
+    const length = view.state.doc.length
+    const marks = ranges.filter(({ from, to }) => Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to > from && to <= length)
+      .map(({ from, to, active }) => Decoration.mark({ class: active ? 'latex-search-source-hit active' : 'latex-search-source-hit' }).range(from, to))
+    // A document update already clears this field before the input callback.
+    if (!marks.length && view.state.field(projectSearchMarks) === Decoration.none) return
+    view.dispatch({ effects: setProjectSearchMarks.of(Decoration.set(marks, true)) })
+  }, insert: (text, start, end) => {
     if (disabled) return false
     view.dispatch({ changes: { from: start, to: end, insert: text }, selection: { anchor: start + text.length }, scrollIntoView: true, userEvent: 'input' })
     view.focus()

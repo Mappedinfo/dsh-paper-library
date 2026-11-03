@@ -94,6 +94,16 @@ body > #latex-view { height: 100dvh; }
 .latex-toolbar select { min-width: 0; max-width: 160px; padding: 3px 24px 3px 8px; font-size: 12px; line-height: 18px; box-sizing: border-box; }
 .latex-toolbar .button, .latex-toolbar select { height: 30px; min-height: 30px; }
 .latex-toolbar .button { font-size: 12px; padding: 5px 7px; }
+.latex-workspace-search { padding: 5px 8px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.latex-workspace-search[hidden] { display: none; }
+.latex-workspace-search-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 0; font-size: 12px; }
+.latex-workspace-search-controls :is(input, select, button) { min-height: 28px; font-size: inherit; }
+.latex-workspace-search-controls input { flex: 0 1 230px; min-width: 100px; }
+.latex-workspace-search-results { max-width: min(100%, 320px); text-overflow: ellipsis; }
+.latex-workspace-search-status { color: var(--muted); }
+.latex-workspace-search-status.error { color: var(--error); }
+.latex-search-source-hit { background: color-mix(in srgb, #e9aa26 26%, transparent); border-radius: 2px; }
+.latex-search-source-hit.active { background: color-mix(in srgb, #e9aa26 48%, transparent); }
 .latex-layout-controls { display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 1px; border: 1px solid var(--line); border-radius: 6px; box-sizing: border-box; }
 .latex-toolbar .latex-layout-button { height: 26px; min-height: 26px; }
 .latex-layout-button[aria-pressed=true] { background: var(--latex-active-bg); color: var(--ink); }
@@ -336,6 +346,9 @@ body > #latex-view { height: 100dvh; }
 .latex-page { width: 100%; max-width: none; box-shadow: var(--shadow); background: #fff; }
 .latex-media-image { display: block; flex: 0 0 auto; max-width: none; height: auto; margin: 0 auto; background: #fff; box-shadow: var(--shadow); }
 .latex-page-stage .latex-page { display: block; cursor: crosshair; }
+.latex-search-pdf-marks { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.latex-search-pdf-hit { position: absolute; border-radius: 2px; background: rgba(255, 213, 54, .34); }
+.latex-search-pdf-hit.active { background: rgba(255, 177, 36, .50); outline: 1px solid #b86b0d; }
 .latex-sync-highlight {
   position: absolute; pointer-events: none; border-radius: 3px;
   background: color-mix(in srgb, var(--latex-active-marker) 24%, transparent);

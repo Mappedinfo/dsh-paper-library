@@ -79,6 +79,30 @@ def test_search_reads_related_files_and_is_literal_case_and_scope_aware(project)
     assert call("latex_search", query="evidence", glob="*.bib")["matches"][0]["path"] == "refs.bib"
 
 
+def test_editor_search_returns_exact_offsets_for_repeated_literal_matches(project):
+    root, _, call, _ = project
+    path = "chapters/repeated.TEX"
+    (root / path).write_bytes("第一行😀\r\n🔎 [m-p]+ 和 [M-P]+\r\n".encode())
+    (root / "ignored.bib").write_text("[m-p]+", encoding="utf-8")
+    (root / "credentials.tex").write_text("[m-p]+", encoding="utf-8")
+    saved = call("latex_read", path=path)
+
+    result = call("latex_source_search", query="[m-p]+")
+    assert [(hit["path"], hit["line"], hit["column"]) for hit in result["matches"]] == [(path, 2, 3), (path, 2, 12)]
+    assert [saved["content"][hit["start"]:hit["end"]] for hit in result["matches"]] == ["[m-p]+", "[M-P]+"]
+    assert all(hit["revision"] == saved["revision"] for hit in result["matches"])
+    assert result["truncated"] is False
+
+
+def test_editor_search_bounds_repeated_matches_and_skips_oversized_files(project):
+    root, _, call, _ = project
+    (root / "00-large.tex").write_bytes(b"x" * (4 * 1024 * 1024 + 1))
+    (root / "repeated.tex").write_text("hit " * 25, encoding="utf-8")
+    result = call("latex_source_search", query="hit")
+    assert [hit["column"] for hit in result["matches"]] == list(range(1, 81, 4))
+    assert result["truncated"] and result["skipped_files"] == 1
+
+
 def test_read_and_search_report_character_match_and_scan_budgets(project, monkeypatch):
     root, _, call, _ = project
     (root / "long.tex").write_text("x" * 15000, encoding="utf-8")
@@ -111,6 +135,7 @@ def test_binary_oversize_and_total_byte_budget_are_explicitly_incomplete(project
 
 @pytest.mark.parametrize("action,arguments", [
     ("latex_retrieval_list", {}), ("latex_search", {"query": "evidence"}),
+    ("latex_source_search", {"query": "evidence"}),
     ("latex_retrieval_read", {"path": "main.tex"}), ("latex_pdf_text", {"path": "references/source.pdf"}),
 ])
 def test_all_retrieval_actions_require_current_root_and_generation(project, action, arguments):
