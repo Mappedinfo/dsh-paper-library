@@ -274,6 +274,52 @@ def test_manual_version_keeps_old_native_reviews_and_shared_project_identity(tmp
 
 
 @pytest.mark.skipif(not (shutil.which("latexmk") and shutil.which("pdflatex")), reason="Synthetic version test requires latexmk and pdflatex")
+def test_version_review_export_preserves_snapshot_native_and_all_review_records(tmp_path):
+    from dsh_paper_library import latex, latex_versions
+    from dsh_paper_library.core import Library
+
+    root, library, call = project(tmp_path)
+    def add_pdf_note(comment):
+        word = call("latex_pdf_page", page=1)["words"][0]
+        sha = call("latex_pdf_pages")["build"]["pdf_version"]
+        call("latex_review_put", anchor={"kind": "pdf", "pdf_version": sha, "page": 1,
+                                         "rects": [word[:4]], "text": word[4]},
+             type="highlight", comment=comment)
+
+    add_pdf_note("old PDF anchor")
+    (root / "two.tex").write_text("Changed second page for next build.\n")
+    assert call("latex_compile", engine="pdflatex")["ok"]
+    add_pdf_note("current PDF anchor")
+    source = call("latex_read", path="one.tex")
+    call("latex_review_put", anchor={"kind": "source", "path": "one.tex", "revision": source["revision"],
+                                     "start": 0, "end": 5, "text": source["content"][:5]}, comment="source note")
+    identifier = call("latex_project_get")["project"]["id"]
+    db = Library(str(library))
+    try:
+        row = latex._project(db, identifier)
+        version = latex_versions.create(db, row, "pdflatex", latex_versions.capture_sources(db, row))
+    finally:
+        db.close()
+    snapshot = library / "latex-versions" / version["id"]
+    preview_before = (snapshot / "preview.pdf").read_bytes()
+    review_before = (snapshot / "review.json").read_bytes()
+    assert version["current_pdf_annotated"]
+
+    # Later live comments must not appear in the immutable version export.
+    add_pdf_note("later live note")
+    result = dispatch({"library": str(library), "action": "latex_version_review_export", "version_id": version["id"]})
+    with fitz.open(result["path"]) as doc:
+        page = doc[0]
+        assert [a.info["content"] for a in page.annots()] == ["current PDF anchor"]
+        record = json.loads(doc.embfile_get("paper-library.latex-review.json"))
+        assert record["schema"] == "paper-library.annotations.v1" and record["version_id"] == version["id"]
+        assert {note["comment"] for note in record["annotations"]} == {"old PDF anchor", "current PDF anchor", "source note"}
+        assert any(note["stale"] and note["comment"] == "old PDF anchor" for note in record["annotations"])
+    assert (snapshot / "preview.pdf").read_bytes() == preview_before
+    assert (snapshot / "review.json").read_bytes() == review_before
+
+
+@pytest.mark.skipif(not (shutil.which("latexmk") and shutil.which("pdflatex")), reason="Synthetic version test requires latexmk and pdflatex")
 def test_version_failure_is_visible_without_claiming_saved_or_changing_sources(tmp_path, monkeypatch):
     root, library, call = project(tmp_path)
     from dsh_paper_library import latex_versions

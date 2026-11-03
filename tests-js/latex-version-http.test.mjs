@@ -20,6 +20,12 @@ test('one synthetic manual version is available from project queries and bounded
   const python = fileURLToPath(new URL('../.venv/bin/python', import.meta.url))
   const options = { library, python, localStateHome: join(base, 'state') }
   const project = (await dispatch({ action: 'latex_project_create', root }, options)).project
+  const source = await dispatch({ action: 'latex_read', id: project.id, path: 'main.tex' }, options)
+  const start = source.content.indexOf('Synthetic version')
+  await dispatch({ action: 'latex_review_put', id: project.id, anchor: {
+    kind: 'source', path: 'main.tex', revision: source.revision,
+    start, end: start + 'Synthetic version'.length, text: 'Synthetic version',
+  }, comment: 'Synthetic review' }, options)
   const built = await dispatch({ action: 'latex_compile', id: project.id, engine: 'pdflatex', save_version: true }, options)
   assert.equal(built.ok, true, JSON.stringify(built)); assert.ok(built.version, built.version_error)
   const byManuscript = await dispatch({ action: 'latex_version_list', id: project.id }, options)
@@ -29,6 +35,15 @@ test('one synthetic manual version is available from project queries and bounded
   const response = await handler(new Request(`http://127.0.0.1/latex-version-pdf/${built.version.id}`))
   assert.equal(response.status, 200); assert.match(response.headers.get('content-type'), /application\/pdf/)
   assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 5).toString(), '%PDF-')
+  const annotatedUrl = `http://127.0.0.1/latex-version-pdf/${built.version.id}?annotated=1`
+  const annotated = await handler(new Request(annotatedUrl))
+  assert.equal(annotated.status, 200)
+  assert.match(annotated.headers.get('content-disposition'), /^attachment;.*annotated-version\.pdf/)
+  assert.equal(Buffer.from(await annotated.arrayBuffer()).subarray(0, 5).toString(), '%PDF-')
+  const head = await handler(new Request(annotatedUrl, { method: 'HEAD' }))
+  assert.equal(head.status, 200); assert.ok(Number(head.headers.get('content-length')) > 0)
+  assert.equal((await handler(new Request(`${annotatedUrl}&review=${'0'.repeat(64)}`))).status, 404)
+  assert.equal((await handler(new Request(`http://127.0.0.1/latex-version-pdf/${built.version.id}?annotated=bad`))).status, 404)
   const invalid = await handler(new Request(`http://127.0.0.1/latex-version-pdf/${built.version.id}?review=${'0'.repeat(64)}`))
   assert.notEqual(invalid.status, 200)
   const pages = await dispatch({ action: 'latex_version_pdf_pages', version_id: built.version.id }, options)

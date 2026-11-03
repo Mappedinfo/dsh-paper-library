@@ -1006,6 +1006,7 @@ ACTIONS = {
     "latex_version_pdf_page": (latex_versions.pdf_page, ("version_id", "review_pdf_version", "page", "scale")),
     "latex_version_read": (latex_versions.source, ("version_id", "path")),
     "latex_version_review": (latex_versions.review, ("version_id",)),
+    "latex_version_review_export": (latex_versions.review_export, ("version_id",)),
     "latex_tree": (tree, ("id", "include_archived")),
     "latex_asset_import": (latex_assets.import_image, ("id", "name", "data_base64")),
     "latex_table_import": (latex_assets.import_table, ("data_base64", "sheet")),

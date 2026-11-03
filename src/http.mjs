@@ -208,6 +208,15 @@ export function createFetchHandler(options = {}) {
       if (path.startsWith('latex-version-pdf/')) {
         const version_id = decodeURIComponent(path.slice('latex-version-pdf/'.length));
         if (!/^lv-[a-f0-9]{32}$/.test(version_id)) return new Response('Not found', {status:404});
+        const annotated = url.searchParams.get('annotated');
+        if (annotated !== null && (annotated !== '1' || url.searchParams.has('review'))) return new Response('Not found', {status:404});
+        if (annotated === '1') {
+          const result = await dispatch({action:'latex_version_review_export', version_id}, {...options, signal:request.signal});
+          const info = await stat(result.path);
+          return new Response(request.method === 'HEAD' ? null : Readable.toWeb(createReadStream(result.path)), {
+            headers:{...baseHeaders,'Content-Type':'application/pdf','Content-Length':String(info.size),'Content-Disposition':'attachment; filename="annotated-version.pdf"'},
+          });
+        }
         const review_pdf_version = url.searchParams.get('review') || undefined;
         if (review_pdf_version && !/^[a-f0-9]{64}$/.test(review_pdf_version)) return new Response('Not found', {status:404});
         const result = await dispatch({action:'latex_version_get', version_id, review_pdf_version}, {...options, signal:request.signal});

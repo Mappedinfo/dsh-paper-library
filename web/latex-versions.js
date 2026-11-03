@@ -70,7 +70,9 @@ window.PaperLatexVersions = (() => {
         const preview = make('button', 'button subtle', '预览 PDF'); preview.type = 'button'; preview.addEventListener('click', () => void openVersion(version));
         const show = make('button', 'button subtle', '批注与源码'); show.type = 'button'; show.addEventListener('click', () => void details(version, card, show));
         const download = make('a', 'button subtle', '下载 PDF'); download.href = `./latex-version-pdf/${encodeURIComponent(version.id)}`; download.download = 'manuscript-version.pdf';
-        actions.append(preview, show, download); card.append(actions); list.append(card);
+        const annotated = make('a', 'button subtle', '下载带有批注的 PDF'); annotated.href = `./latex-version-pdf/${encodeURIComponent(version.id)}?annotated=1`; annotated.download = 'manuscript-version-annotated.pdf';
+        annotated.title = '保留该版本保存时的原生 PDF 批注；源码批注与旧锚点记录附在 PDF 中。';
+        actions.append(preview, show, download, annotated); card.append(actions); list.append(card);
       }
       more.hidden = items.length >= total; say(total ? `共 ${total} 个手动编译版本` : '暂无版本；成功手动编译后会自动保存。');
     }

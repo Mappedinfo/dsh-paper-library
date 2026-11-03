@@ -241,6 +241,29 @@ def review(library, version_id=None):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def review_export(library, version_id=None):
+    """Export the frozen preview and its own review records, never live notes."""
+    version_id = _id(version_id)
+    destination = library.root / "exports" / f"{version_id}-review.pdf"
+    if destination.parent.is_symlink() or destination.is_symlink():
+        raise ValueError("导出路径不能是符号链接")
+    destination.parent.mkdir(exist_ok=True, mode=0o700)
+    with library.lock():
+        found = get(library, version_id)
+        notes = review(library, version_id)
+        version = found["version"]
+        value = {"schema": "paper-library.annotations.v1",
+                 "item": {"title": version["project_title"], "citekey": version["project_id"]},
+                 "version_id": version_id, **notes}
+        with library._open_pdf(found["pdf_path"]) as doc:
+            name = "paper-library.latex-review.json"
+            if name in doc.embfile_names():
+                doc.embfile_del(name)
+            doc.embfile_add(name, json.dumps(value, ensure_ascii=False).encode(), filename=name)
+            library._atomic_save(doc, destination, backup=False)
+    return {"path": str(destination), "filename": "annotated-version.pdf"}
+
+
 def pdf_pages(library, version_id=None, review_pdf_version=None):
     found = get(library, version_id, review_pdf_version)
     path = Path(found["pdf_path"])

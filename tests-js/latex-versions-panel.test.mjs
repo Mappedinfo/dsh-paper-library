@@ -96,3 +96,16 @@ test('unchanged version IDs still update pagination visibility and restore contr
   assert.equal(f.list.children[0], card)
   assert.equal(f.more.hidden, true); assert.equal(f.more.disabled, false); assert.equal(f.refresh.disabled, false)
 })
+
+test('each version offers a direct annotated PDF download beside its ordinary PDF', async () => {
+  const f = fixture(action => action === 'latex_version_list' ? { versions: [version('first'), version('second')], total: 2 } : undefined)
+  await f.ui.refresh()
+  for (const [index, id] of ['first', 'second'].entries()) {
+    const actions = f.list.children[index].children[2].children
+    assert.equal(actions[2].textContent, '下载 PDF')
+    assert.equal(actions[2].href, `./latex-version-pdf/${id}`)
+    assert.equal(actions[3].textContent, '下载带有批注的 PDF')
+    assert.equal(actions[3].href, `./latex-version-pdf/${id}?annotated=1`)
+    assert.match(actions[3].title, /源码批注与旧锚点记录附在 PDF 中/)
+  }
+})
