@@ -814,6 +814,30 @@ test('compile entry is selected from the project menu and the toolbar shows it o
   f.ui.dispose()
 })
 
+test('writing model selection belongs to settings and remains the route for DSH questions', async () => {
+  const f = await fixture(action => {
+    if (action === 'models') return { models: [{ provider: 'first', id: 'basic', name: 'Basic' }, { provider: 'second', id: 'chosen', name: 'Chosen' }] }
+    if (action === 'latex_ai_status') return { configured: false, entries: [] }
+    if (action === 'latex_ai_ask') return { answer: 'Synthetic answer', model: { provider: 'second', model: 'chosen' }, material: { truncated: false } }
+  })
+  const selector = f.ids.get('latex-ai-model'), settings = f.ids.get('latex-writing-model-settings')
+  assert.equal(selector.parentElement, settings)
+  assert.equal(settings.parentElement, f.ids.get('latex-menu'))
+  assert.equal(f.ids.get('latex-ai').querySelectorAll('select').length, 0)
+  assert.equal(f.ids.get('latex-menu-open').getAttribute('aria-label'), '设置')
+  assert.equal(f.ids.get('latex-menu-open').title, '设置')
+  await f.ids.get('latex-ai-open').dispatch('click'); await tick()
+  selector.value = '1'
+  await f.ids.get('latex-menu-open').dispatch('click'); await tick()
+  await f.ids.get('latex-menu-open').dispatch('click'); await tick()
+  assert.equal(selector.value, '1', 'Toggling settings must retain the original selector and its current value')
+  f.ids.get('latex-ai-input').value = 'Synthetic question'
+  await f.ids.get('latex-ai-ask').dispatch('click'); await tick()
+  const request = f.calls.find(call => call.action === 'latex_ai_ask')
+  assert.equal(request.provider, 'second'); assert.equal(request.model, 'chosen')
+  f.ui.dispose()
+})
+
 test('registering a folder sends the explicitly chosen nested main file', async () => {
   const nested = { id: 'nested', title: 'Nested', root: '/synthetic/project', main_path: 'review/main.tex', pdf_present: false }
   let registered = false
@@ -981,5 +1005,105 @@ test('UI accent follows DSH by default and saves presets, custom colour and rese
   assert.equal(preferences.latex_accent, '#c13d82'); assert.equal(root.style['--latex-accent-color'], '#c13d82')
   select.value = 'system'; await select.dispatch('change'); await tick()
   assert.equal(preferences.latex_accent, 'system'); assert.equal(root.dataset.latexAccent, 'system'); assert.equal(colour.hidden, true)
+  f.ui.dispose()
+})
+
+function savedReview(id = 'note-source', kind = 'source') {
+  return { id, version: 'note-v1', status: 'open', text: 'Synthetic original excerpt', comment: 'Explain this saved annotation', stale: kind === 'pdf',
+    anchor: kind === 'source' ? { kind, path: 'a.tex', line: 1, revision: 'revision', start: 0, end: 5, text: 'a.tex' } : { kind, page: 1, pdf_version: 'old-build', rects: [[1, 2, 10, 12]] } }
+}
+function reviewAiResponse(action, note) {
+  const review_note = { id: note.id, version: note.version, kind: note.anchor.kind, stale: note.stale }, model = { provider: 'synthetic', model: 'small' }
+  const entry = { kind: action === 'latex_ai_ask' ? 'ask' : 'proposal', created: 'synthetic-time', review_note, answer: 'Synthetic note-specific reply', summary: 'Synthetic revision', path: 'a.tex', model: 'synthetic/small' }
+  if (action === 'latex_ai_ask') return { answer: entry.answer, model, material: {}, review_note, entry }
+  return { changed: true, proposal: { id: 'note-proposal', path: 'a.tex', summary: entry.summary, replacements: [{ find: 'a.tex', replace: 'revised' }], model, review_note }, entry }
+}
+
+test('saved note actions use their own reference and source file instead of unrelated editor selection', async () => {
+  const note = savedReview()
+  const f = await fixture((action) => {
+    if (action === 'latex_review_list') return { annotations: [note] }
+    if (action === 'latex_ai_status') return { configured: true, entries: [] }
+    if (action === 'models') return [{ provider: 'synthetic', id: 'small' }]
+    if (action === 'latex_ai_ask') return reviewAiResponse(action, note)
+  }, { review: true })
+  await tick(); f.ids.get('latex-review-filter').value = 'open'; await f.ui.testHooks.reviewer().refresh()
+  const editor = f.ids.get('latex-editor'); editor.setSelectionRange(0, 4)
+  assert.equal(await f.ui.testHooks.reviewer().testHooks.runNote('ask', note), true)
+  const request = f.calls.find(call => call.action === 'latex_ai_ask')
+  assert.equal(request.path, 'a.tex'); assert.equal(request.review_note.id, note.id); assert.equal(request.review_note.version, note.version)
+  assert.equal(Object.hasOwn(request, 'selection'), false)
+  assert.match(f.ids.get('latex-review-list').textContent, /Synthetic note-specific reply/)
+  assert.equal(f.calls.some(call => call.action === 'latex_write'), false)
+  f.ui.dispose()
+})
+
+test('a historical PDF note explicitly targets current source and proposal acceptance opens the proposed file', async () => {
+  const note = savedReview('note-pdf', 'pdf')
+  const f = await fixture(action => {
+    if (action === 'latex_review_list') return { annotations: [note] }
+    if (action === 'latex_ai_status') return { configured: true, entries: [] }
+    if (action === 'models') return [{ provider: 'synthetic', id: 'small' }]
+    if (action === 'latex_ai_propose') return reviewAiResponse(action, note)
+    if (action === 'latex_ai_accept') return { origin: 'ai:synthetic/small', written: { bytes: 20 } }
+  }, { review: true })
+  await tick(); f.ids.get('latex-review-filter').value = 'open'; await f.ui.testHooks.reviewer().refresh()
+  assert.equal(await f.ui.testHooks.reviewer().testHooks.runNote('propose', note), true)
+  const request = f.calls.find(call => call.action === 'latex_ai_propose')
+  assert.equal(request.path, 'main.tex'); assert.equal(Object.hasOwn(request, 'selection'), false)
+  assert.match(f.ids.get('latex-ai-proposal').textContent, /目标源码 a\.tex/)
+  await f.ids.get('latex-ai-accept').dispatch('click'); await tick()
+  assert.equal(f.ui.testHooks.state().file, 'a.tex')
+  f.ui.dispose()
+})
+
+test('late note answers cannot attach to a different writing project', async () => {
+  const pending = deferred(), note = savedReview()
+  const f = await fixture(action => {
+    if (action === 'latex_review_list') return { annotations: [note] }
+    if (action === 'latex_ai_status') return { configured: true, entries: [] }
+    if (action === 'models') return [{ provider: 'synthetic', id: 'small' }]
+    if (action === 'latex_ai_ask') return pending.promise
+  }, { review: true })
+  await tick(); f.ids.get('latex-review-filter').value = 'open'; await f.ui.testHooks.reviewer().refresh()
+  const asking = f.ui.testHooks.reviewer().testHooks.runNote('ask', note); await tick()
+  await f.ui.testHooks.setProject('two'); await tick()
+  pending.resolve(reviewAiResponse('latex_ai_ask', note)); assert.equal(await asking, false)
+  assert.doesNotMatch(f.ids.get('latex-review-list').textContent, /Synthetic note-specific reply/)
+  assert.equal(f.ids.get('latex-ai-ask').disabled, false)
+  f.ui.dispose()
+})
+
+test('freeform writing input can be saved as a manual source note with four actions', async () => {
+  let notes = []
+  const f = await fixture((action, args) => {
+    if (action === 'latex_review_list') return { annotations: notes }
+    if (action === 'latex_ai_status') return { configured: true, entries: [] }
+    if (action === 'models') return [{ provider: 'synthetic', id: 'small' }]
+    if (action === 'latex_review_put') { const note = { ...savedReview(), anchor: args.anchor, text: args.anchor.text, comment: args.comment }; notes = [note]; return { annotation: note } }
+  }, { review: true })
+  await tick(); f.ids.get('latex-review-filter').value = 'open'; f.ids.get('latex-ai-input').value = 'Synthetic saved comment'
+  await f.ids.get('latex-ai-add-note').dispatch('click'); await tick()
+  assert.equal(notes[0].comment, 'Synthetic saved comment'); assert.equal(notes[0].anchor.path, 'main.tex')
+  assert.equal(f.ids.get('latex-ai-input').value, '')
+  const actions = f.ids.get('latex-review-list').querySelector('.latex-review-card-actions')
+  assert.deepEqual(actions.children.map(child => child.textContent), ['编辑', '解决', '问 DSH', '生成修改提案'])
+  assert.equal(f.calls.some(call => call.action === 'latex_ai_ask' || call.action === 'latex_ai_propose'), false)
+  f.ui.dispose()
+})
+
+test('an older collaboration status cannot erase a newly generated note proposal or its card entry', async () => {
+  const status = deferred(), note = savedReview()
+  const f = await fixture(action => {
+    if (action === 'latex_review_list') return { annotations: [note] }
+    if (action === 'latex_ai_status') return status.promise
+    if (action === 'models') return [{ provider: 'synthetic', id: 'small' }]
+    if (action === 'latex_ai_propose') return reviewAiResponse(action, note)
+  }, { review: true })
+  f.ids.get('latex-review-filter').value = 'open'; await f.ui.testHooks.reviewer().refresh()
+  assert.equal(await f.ui.testHooks.reviewer().testHooks.runNote('propose', note), true)
+  status.resolve({ configured: true, proposal: null, entries: [] }); await tick()
+  assert.equal(f.ui.testHooks.state().ai.proposal, 'note-proposal')
+  assert.match(f.ids.get('latex-review-list').textContent, /DSH 修改提案/)
   f.ui.dispose()
 })

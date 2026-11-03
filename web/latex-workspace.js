@@ -99,8 +99,9 @@ window.PaperLatexWorkspace = (() => {
       layoutButtons.set(mode, button); layoutControls.append(button);
     }
     aiToggle.title = '查看批注、向 DSH 提问或审阅修改提案';
-    const menuButton = make('button', 'button subtle latex-menu-button', '☰'); menuButton.id = 'latex-menu-open'; menuButton.type = 'button';
-    menuButton.setAttribute('aria-expanded', 'false'); menuButton.setAttribute('aria-controls', 'latex-menu'); menuButton.setAttribute('aria-label', '项目与设置'); menuButton.title = '项目与设置';
+    const menuButton = make('button', 'button subtle latex-menu-button', '⚙'); menuButton.id = 'latex-menu-open'; menuButton.type = 'button';
+    menuButton.setAttribute('aria-expanded', 'false'); menuButton.setAttribute('aria-controls', 'latex-menu'); menuButton.setAttribute('aria-label', '设置'); menuButton.title = '设置';
+    if (window.PaperIcons) { menuButton.textContent = ''; window.PaperIcons.decorate(menuButton, 'settings'); }
     toolbar.append(title, projectSelect, mainLabel, saveState, autoLabel, compile, diagnosticsToggle, navToggle, layoutControls, reviewDivider, reviewToggle, aiToggle, menuButton, back);
 
     const menu = make('div', 'latex-menu'); menu.id = 'latex-menu'; menu.setAttribute('aria-label', '项目与设置'); menu.hidden = true;
@@ -175,6 +176,7 @@ window.PaperLatexWorkspace = (() => {
     const settingsLine = make('div', 'latex-menu-row'); settingsLine.append(settingStarterLabel, settingAutoLabel, engineLabel, themeLabel, pathFontLabel, accentLabel, settingsRetry);
     settingRow.append(settingsLine);
 
+    const writingModelSettings = make('div', 'latex-menu-section'); writingModelSettings.id = 'latex-writing-model-settings';
     const translateSettings = make('div', 'latex-menu-section'); translateSettings.append(make('span', 'latex-menu-label', '本项目选文翻译'));
     const translateModel = make('select'); translateModel.id = 'latex-translate-model'; translateModel.setAttribute('aria-label', '本项目翻译模型');
     const translateTarget = make('select'); translateTarget.id = 'latex-translate-target'; translateTarget.setAttribute('aria-label', '本项目翻译目标语言');
@@ -190,7 +192,7 @@ window.PaperLatexWorkspace = (() => {
     const syncAttach = make('button', 'button subtle', '纳入同步'); syncAttach.id = 'latex-sync-attach'; syncAttach.type = 'button';
     const rootLine = make('div', 'latex-menu-row'); rootLine.append(rootPath, syncState, syncAttach);
     rootRow.append(rootLine, make('p', 'latex-menu-hint', '论文目录由插件维护；数据同步服务会把它作为一个独立源备份（只新增，不删改其他源）。'));
-    menu.append(entryRow, locationRow, readingRow, createRow, registerRow, compareRow, settingRow, translateSettings, rootRow);
+    menu.append(entryRow, locationRow, readingRow, createRow, registerRow, compareRow, settingRow, writingModelSettings, translateSettings, rootRow);
 
     // ---- body: source | divider | (pdf | dsh | versions) ----
     const content = make('div', 'latex-content');
@@ -300,20 +302,23 @@ window.PaperLatexWorkspace = (() => {
     aiSection.setAttribute('aria-label', 'DSH 写作');
     const aiTitle = make('strong', 'latex-writing-section-title', 'DSH 写作');
     const aiHead = make('div', 'latex-ai-head');
-    const aiModel = make('select'); aiModel.id = 'latex-ai-model'; aiModel.setAttribute('aria-label', 'DSH 模型');
+    const aiModel = make('select'); aiModel.id = 'latex-ai-model'; aiModel.setAttribute('aria-label', 'DSH 写作模型');
+    const writingModelLabel = make('label', 'latex-menu-label', 'DSH 写作模型'); writingModelLabel.htmlFor = aiModel.id;
+    writingModelSettings.append(writingModelLabel, aiModel, make('p', 'latex-menu-hint', '用于批注提问与修改提案；翻译模型在下方单独设置。'));
     const aiAsk = make('button', 'button subtle', '问 DSH'); aiAsk.id = 'latex-ai-ask'; aiAsk.type = 'button';
     const aiPropose = make('button', 'button subtle', '生成修改提案'); aiPropose.id = 'latex-ai-propose'; aiPropose.type = 'button';
+    const aiAddNote = make('button', 'button subtle', '添加批注'); aiAddNote.id = 'latex-ai-add-note'; aiAddNote.type = 'button'; aiAddNote.title = '保存为当前源码选段或当前行的批注，不调用模型';
     const aiStatusLine = make('span', 'latex-ai-route'); aiStatusLine.id = 'latex-ai-route';
-    aiHead.append(aiModel, aiAsk, aiPropose, aiStatusLine);
+    aiHead.append(aiAddNote, aiAsk, aiPropose, aiStatusLine);
     const aiInput = make('textarea'); aiInput.id = 'latex-ai-input'; aiInput.rows = 3; aiInput.spellcheck = false;
-    aiInput.placeholder = '问一个问题，或说明想怎么改；先在编辑器里选中一段就只处理这一段。';
+    aiInput.placeholder = '写下批注、问题或修改要求；添加批注会绑定当前源码选段或当前行。'; aiInput.maxLength = 8000;
     aiInput.setAttribute('aria-label', '给 DSH 的问题或写作要求');
     const aiAnswer = make('div', 'latex-ai-answer'); aiAnswer.id = 'latex-ai-answer';
     const aiProposal = make('div', 'latex-ai-proposal'); aiProposal.id = 'latex-ai-proposal';
     const aiAccept = make('button', 'button primary', '接受并写入'); aiAccept.id = 'latex-ai-accept'; aiAccept.type = 'button';
     const aiDiscard = make('button', 'button subtle', '放弃'); aiDiscard.id = 'latex-ai-discard'; aiDiscard.type = 'button';
     const aiActions = make('div', 'latex-ai-actions'); aiActions.append(aiAccept, aiDiscard);
-    aiSection.append(aiTitle, aiHead, aiInput, aiAnswer, aiProposal, aiActions);
+    aiSection.append(aiTitle, aiInput, aiHead, aiAnswer, aiProposal, aiActions);
     paneAi.append(writingPanel);
 
     const paneVersion = make('div', 'latex-pane'); paneVersion.id = 'latex-pane-version'; paneVersion.setAttribute('role', 'tabpanel');
@@ -370,6 +375,7 @@ window.PaperLatexWorkspace = (() => {
     const reviewer = window.PaperLatexReview?.create({ root: reviewPanel, api,
       context: () => ({ id: project?.id, main: project?.main_path, binding_generation: project?.binding_generation, file, revision, dirty, editor, build: pdfBuild }),
       show: () => showReview(),
+      onAsk: note => aiRun('ask', note), onPropose: note => aiRun('propose', note),
       revealSource: async anchor => {
         if (!await openFile(anchor.path, { force: true })) return;
         if (revision !== anchor.revision) { say('源码已变化，原批注待重定位；未按旧偏移选择。', true); void reviewer.refresh(); return; }
@@ -790,6 +796,7 @@ window.PaperLatexWorkspace = (() => {
       clearRendered();
       formulas?.clear(); formulas?.close();
       project = projects.find(item => item.id === id) || null;
+      ++aiRequest; aiBusy(false); ai.entries = []; ai.proposal = null; ai.checked = false; aiAnswer.textContent = ''; renderProposal();
       if (!project) { await renderEmpty(); return; }
       syncLocationFields();
       resetPdfSource({ kind: 'current' });
@@ -807,7 +814,7 @@ window.PaperLatexWorkspace = (() => {
         mainSelect.textContent = '';
         const option = make('option', '', project.main_path || '未设置'); option.value = project.main_path || ''; mainSelect.append(option);
         compile.disabled = true; mainSelect.disabled = true; lastBuildOk = null; autoPaused = false;
-        ai.checked = false; ai.proposal = null; aiAnswer.textContent = ''; aiProposal.textContent = ''; renderProposal();
+        ++aiRequest; aiBusy(false); ai.entries = []; ai.checked = false; ai.proposal = null; aiAnswer.textContent = ''; aiProposal.textContent = ''; renderProposal();
         const hint = '项目文件夹已不可用；打开「项目与设置」，修改当前项目位置和主文件。';
         setPreviewMessage(hint); say(hint, true); notifyContext();
         return;
@@ -827,7 +834,7 @@ window.PaperLatexWorkspace = (() => {
       // built needs one manual compile first, so a broken document cannot loop.
       lastBuildOk = project.pdf_present ? true : null;
       autoPaused = false;
-      ai.checked = false; aiAnswer.textContent = ''; aiProposal.textContent = '';
+      ++aiRequest; aiBusy(false); ai.entries = []; ai.checked = false; aiAnswer.textContent = ''; aiProposal.textContent = '';
       // Whichever surface hosts the collaboration, a project switch re-reads its state.
       if (tab === 'ai' || rail?.visible?.('latex-ai')) void aiStatus();
       notifyContext();
@@ -1695,7 +1702,16 @@ window.PaperLatexWorkspace = (() => {
     });
 
     // ---- DSH questions and co-writing ----------------------------------------------
-    const ai = { available: false, busy: false, models: [], proposal: null, checked: false, lastRoute: null };
+    const ai = { available: false, busy: false, models: [], proposal: null, checked: false, lastRoute: null, entries: [] };
+    let aiRequest = 0;
+    function aiOwner(path = file) { return { id: project?.id, main: project?.main_path, root: project?.root, binding_generation: project?.binding_generation, epoch: generation, path }; }
+    function ownsAi(owner) { return !disposed && !view.hidden && owner.id === project?.id && owner.main === project?.main_path && owner.root === project?.root && owner.binding_generation === project?.binding_generation && owner.epoch === generation; }
+    function showCollaboration(owner = aiOwner()) { if (ownsAi(owner)) reviewer?.setCollaboration?.(ai.entries, owner); }
+    function rememberCollaboration(entry, owner) {
+      if (!entry || !ownsAi(owner)) return;
+      const identity = value => JSON.stringify([value.kind, value.created, value.review_note?.id, value.review_note?.version, value.question, value.summary]);
+      ai.entries = [entry, ...ai.entries.filter(value => identity(value) !== identity(entry))].slice(0, 4); showCollaboration(owner);
+    }
 
     function aiSelection() {
       const start = editor.selectionStart, end = editor.selectionEnd;
@@ -1763,7 +1779,7 @@ window.PaperLatexWorkspace = (() => {
     function aiSay(text, error = false) { aiStatusLine.textContent = text; aiStatusLine.classList.toggle('error', error); }
     function aiBusy(on) {
       ai.busy = on;
-      aiAsk.disabled = on; aiPropose.disabled = on; aiAccept.disabled = on; aiDiscard.disabled = on;
+      aiAsk.disabled = on; aiPropose.disabled = on; aiAddNote.disabled = on; aiModel.disabled = on; aiAccept.disabled = on; aiDiscard.disabled = on;
     }
 
     async function loadModels() {
@@ -1788,16 +1804,22 @@ window.PaperLatexWorkspace = (() => {
 
     async function aiStatus() {
       if (!project || ai.checked) return;
+      const owner = aiOwner(), request = aiRequest;
+      const active = () => ownsAi(owner) && request === aiRequest && !ai.busy;
       try {
-        const snapshot = await api('latex_ai_status', { id: project.id });
-        ai.checked = true; ai.available = true;
+        const snapshot = await api('latex_ai_status', { id: owner.id });
+        if (!active()) return;
         if (!ai.models.length) await loadModels();
+        if (!active()) return;
+        ai.checked = true; ai.available = true;
         ai.proposal = snapshot.proposal || null;
+        ai.entries = Array.isArray(snapshot.entries) ? snapshot.entries : []; showCollaboration(owner);
         renderProposal();
         if (snapshot.proposal) aiSay('有一份待确认的提案');
         else if (snapshot.entries?.length) aiSay(`${snapshot.entries.length} 条协作记录`);
         else aiSay(snapshot.configured ? '模型来自插件配置' : '请选择模型');
       } catch (error) {
+        if (!active()) return;
         ai.available = false;
         aiSay(error.code === 'LATEX_AI_INVALID' ? '当前主机未连接 DSH 模型服务' : error.message, true);
       }
@@ -1808,7 +1830,7 @@ window.PaperLatexWorkspace = (() => {
       aiProposal.textContent = '';
       aiAccept.hidden = !proposal; aiDiscard.hidden = !proposal;
       if (!proposal) return;
-      aiProposal.append(make('p', 'latex-ai-summary', `${proposal.summary} · ${proposal.replacements.length} 处改动 · ${proposal.model.provider}/${proposal.model.model}`));
+      aiProposal.append(make('p', 'latex-ai-summary', `${proposal.summary} · 目标源码 ${proposal.path} · ${proposal.replacements.length} 处改动 · ${proposal.model.provider}/${proposal.model.model}`));
       const list = make('ul', 'latex-ai-replacements');
       for (const { find, replace } of proposal.replacements.slice(0, 20)) {
         const item = make('li');
@@ -1819,58 +1841,91 @@ window.PaperLatexWorkspace = (() => {
       if (proposal.notes) aiProposal.append(make('p', 'latex-ai-notes', proposal.notes));
     }
 
-    async function aiRun(kind) {
-      if (ai.busy || !file || !project) return;
-      const value = aiInput.value.trim();
-      const selection = aiSelection();
-      if (!value) { aiSay(kind === 'ask' ? '请先写下问题。' : '请先说明想怎么改。', true); return; }
+    async function aiRun(kind, note = null) {
+      if (ai.busy || !file || !project) return false;
+      if (kind === 'propose' && ai.proposal) { aiSay('请先接受或放弃当前修改提案。', true); return false; }
+      if (note && (dirty || saving || pendingConflict)) { aiSay('当前源码尚未保存，请先保存后再依据批注提问或生成提案。', true); return false; }
+      const value = note ? (kind === 'ask' ? '请根据这条已保存批注与原引用，回答其中的问题并解释相关内容。' : '请依据这条已保存批注，为指定的当前源码提出必要修改；保留原意、引文与证据强度，不猜测旧 PDF 的源码位置。') : aiInput.value.trim();
+      const selection = note ? undefined : aiSelection();
+      if (!value) { aiSay(kind === 'ask' ? '请先写下问题。' : '请先说明想怎么改。', true); return false; }
+      const owner = aiOwner(note?.anchor.kind === 'source' ? note.anchor.path : file), request = ++aiRequest;
+      const args = { id: owner.id, path: owner.path, ...(selection ? { selection } : {}), ...(note ? { review_note: { id: note.id, version: note.version } } : {}), ...aiRoute() };
       aiBusy(true);
-      aiSay((kind === 'ask' ? '正在问 DSH…' : '正在生成修改提案…') + (selection ? '（只发送选中的片段）' : ''));
+      aiSay((kind === 'ask' ? '正在问 DSH…' : '正在生成修改提案…') + (note ? `（批注参考；目标源码 ${owner.path}${note.stale ? '；原锚点已变化' : ''}）` : selection ? '（只发送选中的片段）' : ''));
       try {
         if (kind === 'ask') {
-          const result = await api('latex_ai_ask', { id: project.id, path: file, question: value, ...(selection ? { selection } : {}), ...aiRoute() });
+          const result = await api('latex_ai_ask', { ...args, question: value });
+          if (!ownsAi(owner) || request !== aiRequest) return false;
+          rememberCollaboration(result.entry, owner);
           aiAnswer.textContent = '';
-          aiAnswer.append(make('p', 'latex-ai-question', value), make('p', 'latex-ai-text', result.answer));
-          aiSay(`回答来自 ${result.model.provider}/${result.model.model}${result.material.truncated ? '（材料已截断）' : ''}`);
+          if (!note) aiAnswer.append(make('p', 'latex-ai-question', value), make('p', 'latex-ai-text', result.answer));
+          aiSay(`回答来自 ${result.model.provider}/${result.model.model}${note ? '，已附在对应批注下' : ''}${result.material?.truncated ? '（材料已截断）' : ''}`);
         } else {
-          const result = await api('latex_ai_propose', { id: project.id, path: file, instruction: value, ...(selection ? { selection } : {}), ...aiRoute() });
+          const result = await api('latex_ai_propose', { ...args, instruction: value });
+          if (!ownsAi(owner) || request !== aiRequest) return false;
+          rememberCollaboration(result.entry, owner);
           if (!result.changed) { ai.proposal = null; renderProposal(); aiSay('模型认为不需要改动。'); }
           else { ai.proposal = result.proposal; renderProposal(); aiSay(`提案：${result.proposal.replacements.length} 处改动，等待你确认`); }
         }
+        return true;
       } catch (error) {
+        if (!ownsAi(owner) || request !== aiRequest) return false;
         aiSay(`${kind === 'ask' ? '提问' : '生成提案'}失败：${error.message}`, true);
         if (error.status === 409 || error.code === 'LATEX_AI_MODEL_REQUIRED') toast?.(error.message);
+        return false;
       } finally {
-        aiBusy(false);
+        if (ownsAi(owner) && request === aiRequest) aiBusy(false);
       }
+    }
+
+    async function addWritingComment() {
+      if (ai.busy || !project || !file || !reviewer?.createSourceComment) return false;
+      const value = aiInput.value.trim(); if (!value) { aiSay('请先写下批注。', true); return false; }
+      const owner = aiOwner(), input = aiInput.value; aiBusy(true);
+      try {
+        if (!await savedBeforeLeaving(true) || !ownsAi(owner) || file !== owner.path) return false;
+        if (!await reviewer.createSourceComment(value) || !ownsAi(owner)) return false;
+        if (aiInput.value === input) aiInput.value = '';
+        aiSay('批注已添加，可在该条批注上编辑、解决、问 DSH 或生成修改提案。'); return true;
+      } finally { if (ownsAi(owner)) aiBusy(false); }
     }
 
     async function aiAcceptProposal() {
       if (ai.busy || !ai.proposal) return;
+      if (dirty || saving || pendingConflict || reviewer?.hasDraft()) { aiSay('请先保存或取消当前源码和批注草稿，再接受提案。', true); return; }
+      const owner = aiOwner(ai.proposal.path), pending = ai.proposal, request = ++aiRequest;
       aiBusy(true); aiSay('正在写入…');
       try {
-        const result = await api('latex_ai_accept', { id: project.id, proposal_id: ai.proposal.id });
+        const result = await api('latex_ai_accept', { id: owner.id, proposal_id: pending.id });
+        if (!ownsAi(owner)) return;
+        rememberCollaboration(result.entry, owner);
         ai.proposal = null; renderProposal();
-        await openFile(file, { force: true });
+        if (!await openFile(owner.path, { force: true })) { if(ownsAi(owner))aiSay('提案已写入；本窗口还有未保存内容，请保留草稿并处理保存冲突。', true);return; }
+        if (!ownsAi(owner)) return;
         setSaveState('已接受 AI 建议', 'saved');
         aiSay(`已写入（${result.origin}）：${result.written.bytes} 字节`);
         scheduleCompile();
       } catch (error) {
+        if (!ownsAi(owner)) return;
         if (error.code === 'STATE_CONFLICT' && error.current) {
           pendingConflict = { path: error.current.path, content: editor.value, current: error.current };
           conflictText.textContent = '提案基于的版本已经变了：请载入最新内容后重新生成提案。';
           conflictBar.hidden = false;
           aiSay('文件已被改动，提案没有写入。', true);
         } else aiSay(`接受提案失败：${error.message}`, true);
-      } finally { aiBusy(false); }
+      } finally { if (ownsAi(owner) && request === aiRequest) aiBusy(false); }
     }
 
     aiAsk.addEventListener('click', () => void aiRun('ask'));
     aiPropose.addEventListener('click', () => void aiRun('propose'));
+    aiAddNote.addEventListener('click', () => void addWritingComment());
     aiAccept.addEventListener('click', () => void aiAcceptProposal());
     aiDiscard.addEventListener('click', async () => {
-      if (!ai.proposal) return;
-      try { await api('latex_ai_discard', { id: project.id }); } catch { /* the local copy is dropped either way */ }
+      if (ai.busy || !ai.proposal) return;
+      const owner = aiOwner(), pending = ai.proposal, request = ++aiRequest; aiBusy(true);
+      try { const result = await api('latex_ai_discard', { id: owner.id, proposal_id: pending.id }); if (!ownsAi(owner)) return; rememberCollaboration(result.entry, owner); }
+      catch(error) { if(ownsAi(owner))aiSay(`提案未能放弃：${error.message}`,true);return; }
+      finally { if(ownsAi(owner) && request === aiRequest)aiBusy(false); }
       ai.proposal = null; renderProposal(); aiSay('已放弃这份提案');
     });
     aiInput.addEventListener('keydown', event => {

@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { webcrypto } from 'node:crypto'
 
 const source = await readFile(new URL('../web/latex-review.js', import.meta.url), 'utf8')
-function fixture(api) {
+function fixture(api, options = {}) {
   const ids = new Map(), clicked = []
   class Element {
     constructor(tag) { this.tagName = tag; this.children = []; this.events = new Map(); this.value = ''; this.hidden = false; this.dataset = {}; this.classList = { toggle() {} } }
@@ -19,7 +19,7 @@ function fixture(api) {
   const document = { createElement: tag => new Element(tag) }, window = {}
   vm.runInNewContext(source, { window, document, crypto: webcrypto, setTimeout, URL, Blob })
   const state = { id: 'project', main: 'main.tex', file: 'one.tex', revision: 'source-rev', dirty: false, editor: { value: '中文😀选段\nNext', selectionStart: 2, selectionEnd: 6 } }
-  const ui = window.PaperLatexReview.create({ root: new Element('section'), api, context: () => state, revealSource() {}, revealPdf() {} })
+  const ui = window.PaperLatexReview.create({ root: new Element('section'), api, context: () => state, revealSource() {}, revealPdf() {}, ...options })
   ids.get('latex-review-filter').value = 'open'
   return { ui, ids, state, clicked }
 }
@@ -100,4 +100,92 @@ test('PDF markup saves without a comment and preserves the selection on failure'
   failed = false; await f.ui.testHooks.saveDraft()
   assert.equal(calls[1].request_id, calls[0].request_id)
   assert.equal(f.ui.hasDraft(), false)
+})
+
+const savedNote = () => ({ id: 'source:a', version: 'v1', status: 'open', stale: true, anchor: { kind: 'source', path: 'one.tex', line: 1, revision: 'old-source' }, text: 'Original source quotation', comment: 'Why this claim?' })
+
+test('each saved annotation has four actions and stale notes can ask DSH with a frozen identity', async () => {
+  const note = savedNote(); let release, received
+  const f = fixture(async () => ({ annotations: [note] }), { onAsk: value => { received = value; return new Promise(done => { release = done }) }, onPropose: async () => true })
+  await f.ui.refresh()
+  const row = f.ids.get('latex-review-list').children[0].children.find(node => node.className === 'latex-review-actions latex-review-card-actions')
+  assert.deepEqual(row.children.map(button => button.textContent), ['编辑', '解决', '问 DSH', '生成修改提案'])
+  const pending = f.ui.testHooks.runNote('ask', note)
+  assert.equal(received.id, 'source:a'); assert.equal(received.version, 'v1'); assert.equal(received.stale, true)
+  received.comment = 'Changed callback copy'
+  assert.equal(note.comment, 'Why this claim?')
+  const busy = f.ids.get('latex-review-list').children[0].children.find(node => node.className === 'latex-review-actions latex-review-card-actions')
+  assert.equal(busy.children.every(button => button.disabled), true)
+  assert.equal(await f.ui.testHooks.runNote('propose', note), false)
+  f.ui.testHooks.edit(note); assert.equal(f.ui.hasDraft(), false)
+  release(true); assert.equal(await pending, true)
+  assert.match(f.ids.get('latex-review-message').textContent, /回复已生成/)
+})
+
+test('DSH callback failures preserve the annotation and allow retry without touching its comment', async () => {
+  const note = savedNote(); let fail = true
+  const f = fixture(async () => ({ annotations: [note] }), { onAsk: async () => { if (fail) throw Error('Synthetic model failure'); return true } })
+  await f.ui.refresh()
+  assert.equal(await f.ui.testHooks.runNote('ask', note), false)
+  assert.match(f.ids.get('latex-review-message').textContent, /Synthetic model failure/)
+  assert.equal(f.ui.annotations()[0].comment, 'Why this claim?')
+  fail = false; assert.equal(await f.ui.testHooks.runNote('ask', note), true)
+})
+
+test('collaboration replies attach only by exact note identity and label older annotation versions', async () => {
+  const note = savedNote(), f = fixture(async () => ({ annotations: [note] }))
+  await f.ui.refresh()
+  const entries = [
+    { kind: 'ask', review_note: { id: 'source:a', version: 'v0' }, answer: 'Earlier model answer', model: 'synthetic/light' },
+    { kind: 'proposal', review_note: { id: 'source:a', version: 'v1' }, summary: 'A candidate revision', path: 'one.tex' },
+    { kind: 'ask', review_note: { id: 'another-note', version: 'v1' }, answer: 'Must not appear' },
+  ]
+  assert.equal(f.ui.setCollaboration(entries, { id: 'another-project', main: 'main.tex' }), false)
+  assert.equal(f.ui.setCollaboration(entries, { id: 'project', main: 'main.tex' }), true)
+  const card = f.ids.get('latex-review-list').children[0]
+  assert.match(card.textContent, /来自较早批注版本/)
+  assert.match(card.textContent, /Earlier model answer/)
+  assert.match(card.textContent, /确认后才会修改源码/)
+  assert.equal(card.textContent.includes('Must not appear'), false)
+  assert.equal(f.ui.annotations()[0].comment, note.comment)
+  f.state.binding_generation = 1
+  assert.equal(f.ui.setCollaboration(entries, { id: 'project', main: 'main.tex', binding_generation: 0 }), false)
+})
+
+test('freeform comments become source annotations and retain the original input on write failure', async () => {
+  let failed = true, calls = []
+  const f = fixture(async (action, args) => {
+    calls.push({ action, ...args })
+    if (action === 'latex_review_list') return { annotations: [] }
+    if (failed) throw Error('Synthetic save failure')
+    return { annotation: { id: 'saved-comment' } }
+  })
+  assert.equal(await f.ui.createSourceComment('  '), false)
+  assert.equal(await f.ui.createSourceComment('x'.repeat(8001)), false)
+  assert.equal(calls.length, 0)
+  assert.equal(await f.ui.createSourceComment('A freeform thought'), false)
+  assert.equal(f.ids.get('latex-review-comment').value, 'A freeform thought')
+  assert.equal(f.ui.hasDraft(), true)
+  assert.equal(calls[0].anchor.text, '😀选段')
+  assert.equal(await f.ui.createSourceComment('Do not replace the draft'), false)
+  assert.equal(f.ids.get('latex-review-comment').value, 'A freeform thought')
+  failed = false
+  const result = await f.ui.testHooks.saveDraft()
+  assert.equal(result.id, 'saved-comment'); assert.equal(f.ui.hasDraft(), false)
+  assert.equal(calls[0].request_id, calls[1].request_id)
+})
+
+test('unsaved source cannot become a source comment and late writes cannot clear another binding', async () => {
+  let release, called = 0
+  const f = fixture(async () => { called++; return new Promise(done => { release = done }) })
+  f.state.dirty = true
+  assert.equal(await f.ui.createSourceComment('Comment on dirty source'), false)
+  assert.equal(called, 0)
+  f.state.dirty = false
+  const pending = f.ui.createSourceComment('Keep this text')
+  f.state.binding_generation = 2
+  release({ annotation: { id: 'old-binding-note' } })
+  assert.equal(await pending, false)
+  assert.equal(f.ids.get('latex-review-comment').value, 'Keep this text')
+  assert.equal(f.ui.hasDraft(), true)
 })
