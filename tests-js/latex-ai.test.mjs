@@ -182,6 +182,35 @@ test('an accepted proposal never overwrites a file that moved on', async () => {
   assert.equal((await call({ action: 'latex_ai_proposal', id: project.id })).proposal, null)
 })
 
+test('a proposal cannot be accepted after the project binding changes and returns', async () => {
+  const reply = JSON.stringify({ summary: '改动', replacements: [{ find: 'small.', replace: 'modest.' }] })
+  const { call, project, library, folder } = await fixture([reply])
+  const proposed = await call({ action: 'latex_ai_propose', id: project.id, instruction: 'x', expected_binding_generation: 0 })
+  await writeFile(join(folder, 'other.tex'), BODY)
+  const other = (await dispatch({ action: 'latex_project_update', id: project.id, main_path: 'other.tex', expected_binding_generation: 0 }, { library, python })).project
+  const returned = (await dispatch({ action: 'latex_project_update', id: project.id, main_path: 'main.tex', expected_binding_generation: other.binding_generation }, { library, python })).project
+  assert.equal(returned.binding_generation, 2)
+  await assert.rejects(() => call({ action: 'latex_ai_accept', id: project.id, proposal_id: proposed.proposal.id, expected_binding_generation: 2 }), /没有待确认的提案/)
+  assert.equal(await readFile(join(folder, 'main.tex'), 'utf8'), BODY)
+})
+
+test('a delayed proposal cannot replace one for a newly selected entry', async () => {
+  const reply = JSON.stringify({ summary: '改动', replacements: [{ find: 'small.', replace: 'modest.' }] })
+  let release
+  const delayed = new Promise(resolve => { release = resolve })
+  const { call, project, library, folder, prompts } = await fixture([delayed, reply])
+  const old = call({ action: 'latex_ai_propose', id: project.id, instruction: 'old', expected_binding_generation: 0 })
+  for (let i = 0; i < 100 && !prompts.length; i++) await new Promise(resolve => setTimeout(resolve, 10))
+  assert.equal(prompts.length, 1)
+  await writeFile(join(folder, 'other.tex'), BODY)
+  const changed = (await dispatch({ action: 'latex_project_update', id: project.id, main_path: 'other.tex', expected_binding_generation: 0 }, { library, python })).project
+  const current = await call({ action: 'latex_ai_propose', id: project.id, instruction: 'new', expected_binding_generation: changed.binding_generation })
+  release(reply)
+  await assert.rejects(old, /绑定已变化/)
+  const pending = await call({ action: 'latex_ai_proposal', id: project.id, expected_binding_generation: changed.binding_generation })
+  assert.equal(pending.proposal.id, current.proposal.id)
+})
+
 test('the model route comes from the request, the deployment, or a clear refusal', async () => {
   const configured = await fixture(['ok'])
   await assert.rejects(() => configured.call({ action: 'latex_ai_ask', id: configured.project.id, question: 'x', provider: 42 }), /模型提供方无效/)

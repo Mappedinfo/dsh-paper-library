@@ -37,8 +37,16 @@ def file_digest(path, maximum=MAX_PDF_BYTES):
 
 
 def directory(library, row, create=False):
-    path = library.root / "latex-review" / row["id"] / hashlib.sha256(row["main_path"].encode()).hexdigest()[:20]
-    for parent in [library.root / "latex-review", path.parent, path]:
+    binding = library.db.execute("SELECT namespace FROM latex_review_locations WHERE project_id=? AND root=?", (row["id"], row["root"])).fetchone()
+    namespace = binding[0] if binding else ""
+    if namespace and not re.fullmatch(r"[0-9a-f]{64}", namespace):
+        raise ValueError("自审目录标识无效")
+    base = library.root / "latex-review" / row["id"]
+    parents = [library.root / "latex-review", base]
+    if namespace:
+        parents.extend([base / "locations", base / "locations" / namespace])
+    path = parents[-1] / hashlib.sha256(row["main_path"].encode()).hexdigest()[:20]
+    for parent in [*parents, path]:
         if parent.is_symlink():
             raise ValueError("自审目录不能是符号链接")
         if create:
@@ -204,6 +212,8 @@ def view(library, row, note, pdf_version):
             stale = True
     else:
         stale = anchor["pdf_version"] != pdf_version
+        migrated = read_json(directory(library, row) / "migrated-pdf-annotations.json", [])
+        stale = stale or note["id"] in migrated
         if not stale and anchor.get("sources"):
             try:
                 from .latex import _inside

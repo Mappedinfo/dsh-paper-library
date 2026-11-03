@@ -57,4 +57,18 @@ test('outline and media are bounded read actions through all existing request la
   assert.equal(Buffer.from(await pdfExport.arrayBuffer()).subarray(0, 5).toString(), '%PDF-')
   const removed = await call({ action: 'latex_review_delete', id: project.id, note_id: note.id, expected_version: note.version })
   assert.equal(removed.status, 200)
+  const changed = await dispatch({ action: 'latex_project_update', id: project.id, main_path: 'chapter.tex', expected_binding_generation: 0 }, options)
+  const returned = await dispatch({ action: 'latex_project_update', id: project.id, main_path: 'main.tex', expected_binding_generation: changed.project.binding_generation }, options)
+  assert.equal(returned.project.binding_generation, 2)
+  const stale = await handler(new Request(`http://127.0.0.1/latex-review-pdf/${project.id}?binding_generation=0`))
+  assert.notEqual(stale.status, 200)
+  const missing = await handler(new Request(`http://127.0.0.1/latex-review-pdf/${project.id}`))
+  assert.notEqual(missing.status, 200)
+  const valid = await handler(new Request(`http://127.0.0.1/latex-review-pdf/${project.id}?binding_generation=2`))
+  assert.equal(valid.status, 200)
+  assert.equal(Buffer.from(await valid.arrayBuffer()).subarray(0, 5).toString(), '%PDF-')
+  for (const value of ['-1', '1.5', 'true', '9007199254740992']) {
+    const invalid = await handler(new Request(`http://127.0.0.1/latex-review-pdf/${project.id}?binding_generation=${value}`))
+    assert.equal(invalid.status, 404)
+  }
 })

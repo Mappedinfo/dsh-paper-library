@@ -209,7 +209,7 @@ def test_update_changes_title_main_and_pdf_pair(tmp_path):
     assert updated["title"] == "改名" and updated["main_path"] == "appendix.tex" and updated["pdf_path"] == "appendix.pdf"
     assert request(tmp_path, "latex_read", id=project["id"])["path"] == "appendix.tex"
     with pytest.raises(ValueError, match="没有需要修改的字段"):
-        request(tmp_path, "latex_project_update", id=project["id"])
+        request(tmp_path, "latex_project_update", id=project["id"], expected_binding_generation=updated["binding_generation"])
 
 
 def test_unknown_actions_and_identifiers_are_refused(tmp_path):
@@ -290,6 +290,73 @@ def test_synctex_without_data_is_a_clear_error(tmp_path):
         request(tmp_path, "latex_synctex_edit", id=project["id"], page=1, x=100, y=100)
     with pytest.raises(ValueError, match="没有 SyncTeX 数据"):
         request(tmp_path, "latex_synctex_view", id=project["id"], path="main.tex", line=2)
+
+
+def test_project_rebind_supports_nested_absolute_main_and_isolates_histories(tmp_path):
+    parent = tmp_path / "workspace"
+    root = parent / "review"
+    root.mkdir(parents=True)
+    main = root / "main.tex"
+    main.write_text("Original source.\n", encoding="utf-8")
+    project = request(tmp_path, "latex_project_create", root=str(root), main_path=str(main))["project"]
+    identity = project["id"]
+    current = request(tmp_path, "latex_read", id=identity)
+    request(tmp_path, "latex_write", id=identity, path="main.tex", content="Changed source.\n", expected_revision=current["revision"])
+    note_read = request(tmp_path, "latex_read", id=identity)
+    anchor = {"kind": "source", "path": "main.tex", "revision": note_read["revision"], "start": 0, "end": 7, "text": "Changed"}
+    request(tmp_path, "latex_review_put", id=identity, anchor=anchor, comment="old review")
+    changed = request(tmp_path, "latex_project_update", id=identity, root=str(parent), main_path=str(main))["project"]
+    assert changed["id"] == identity and changed["main_path"] == "review/main.tex"
+    assert request(tmp_path, "latex_history", id=identity, path="review/main.tex")["revisions"]
+    notes = request(tmp_path, "latex_review_list", id=identity)["annotations"]
+    assert len(notes) == 1 and notes[0]["anchor"]["path"] == "review/main.tex" and not notes[0]["stale"]
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "main.tex").write_text("Changed source.\n", encoding="utf-8")
+    switched = request(tmp_path, "latex_project_update", id=identity, root=str(other), main_path="main.tex", expected_binding_generation=changed["binding_generation"])["project"]
+    assert switched["root"] == str(other)
+    assert not request(tmp_path, "latex_history", id=identity, path="main.tex")["revisions"]
+    assert not request(tmp_path, "latex_review_list", id=identity)["annotations"]
+    request(tmp_path, "latex_project_update", id=identity, root=str(root), main_path="main.tex", expected_binding_generation=switched["binding_generation"])
+    assert request(tmp_path, "latex_review_list", id=identity)["annotations"][0]["comment"] == "old review"
+    assert request(tmp_path, "latex_history", id=identity, path="main.tex")["revisions"]
+    assert main.read_text(encoding="utf-8") == "Changed source.\n"
+
+
+def test_project_rebind_rejects_invalid_main_and_duplicate_root(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir(); second.mkdir()
+    (first / "main.tex").write_text("First", encoding="utf-8")
+    (second / "main.tex").write_text("Second", encoding="utf-8")
+    one = request(tmp_path, "latex_project_create", root=str(first))["project"]
+    request(tmp_path, "latex_project_create", root=str(second))
+    with pytest.raises(ValueError, match="已经是"):
+        request(tmp_path, "latex_project_update", id=one["id"], root=str(second), main_path="main.tex")
+    with pytest.raises(ValueError, match="超出项目"):
+        request(tmp_path, "latex_project_update", id=one["id"], root=str(tmp_path), main_path=str(tmp_path.parent / "outside.tex"))
+    assert request(tmp_path, "latex_project_get", id=one["id"])["project"]["root"] == str(first)
+
+
+def test_project_rebind_preserves_native_pdf_review_for_the_same_main(tmp_path):
+    parent = tmp_path / "workspace"
+    root = parent / "review"
+    root.mkdir(parents=True)
+    (root / "main.tex").write_text("Synthetic source.\n", encoding="utf-8")
+    with fitz.open() as document:
+        document.new_page().insert_text((50, 50), "Synthetic page")
+        document.save(root / "main.pdf")
+    identity = request(tmp_path, "latex_project_create", root=str(root))["project"]["id"]
+    layout = request(tmp_path, "latex_pdf_pages", id=identity)
+    word = request(tmp_path, "latex_pdf_page", id=identity, page=1)["words"][0]
+    request(tmp_path, "latex_review_put", id=identity, type="highlight", comment="PDF note",
+            anchor={"kind": "pdf", "pdf_version": layout["build"]["pdf_version"], "page": 1, "rects": [word[:4]], "text": word[4]})
+    rebound = request(tmp_path, "latex_project_update", id=identity, root=str(parent), main_path="review/main.tex")["project"]
+    note = request(tmp_path, "latex_review_list", id=identity)["annotations"][0]
+    assert note["comment"] == "PDF note" and note["stale"]
+    output = request(tmp_path, "latex_review_export", id=identity, format="pdf", expected_binding_generation=rebound["binding_generation"])
+    with fitz.open(output["path"]) as exported:
+        assert [annot.info["content"] for annot in exported[0].annots()] == ["PDF note"]
 
 
 @needs_synctex

@@ -126,15 +126,15 @@ def test_source_anchor_unicode_cas_status_stale_and_dual_entry_isolation(tmp_pat
         call("latex_review_put", note_id=note["id"], expected_version=note["version"], comment="stale write")
     assert call("latex_review_list")["annotations"][0]["comment"] == "已核对"
     assert (root / "one.tex").read_bytes() == before
-    call("latex_project_update", main_path="draft.tex")
+    draft = call("latex_project_update", main_path="draft.tex")["project"]
     assert call("latex_review_list")["annotations"] == []
-    call("latex_project_update", main_path="main.tex")
+    current = call("latex_project_update", main_path="main.tex", expected_binding_generation=draft["binding_generation"])["project"]
     (root / "one.tex").write_text("New first line\n中文😀选段\nNext line\n")
     assert call("latex_review_list")["annotations"][0]["stale"]
     with pytest.raises(ValueError, match="源码修订"):
-        call("latex_review_put", anchor=anchor, comment="old selection")
+        call("latex_review_put", anchor=anchor, comment="old selection", expected_binding_generation=current["binding_generation"])
     with pytest.raises(ValueError, match="超出项目"):
-        call("latex_review_put", anchor={**anchor, "path": "../private.tex"}, comment="escape")
+        call("latex_review_put", anchor={**anchor, "path": "../private.tex"}, comment="escape", expected_binding_generation=current["binding_generation"])
 
 
 @pytest.mark.skipif(not (shutil.which("latexmk") and shutil.which("pdflatex")), reason="Synthetic PDF review test requires latexmk and pdflatex")

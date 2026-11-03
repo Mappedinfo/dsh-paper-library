@@ -199,7 +199,9 @@ export function createFetchHandler(options = {}) {
       if (path.startsWith('latex-review-pdf/')) {
         const id = decodeURIComponent(path.slice('latex-review-pdf/'.length));
         if (!/^lt-[a-f0-9]{12}$/.test(id)) return new Response('Not found', {status:404});
-        const result = await dispatch({action:'latex_review_export', id, format:'pdf'}, {...options, signal:request.signal});
+        const values = url.searchParams.getAll('binding_generation');
+        if (values.length > 1 || (values.length && (!/^(0|[1-9]\d*)$/.test(values[0]) || !Number.isSafeInteger(Number(values[0]))))) return new Response('Not found', {status:404});
+        const result = await dispatch({action:'latex_review_export', id, format:'pdf', ...(values.length ? {expected_binding_generation:Number(values[0])} : {})}, {...options, signal:request.signal});
         const info = await stat(result.path);
         return new Response(request.method === 'HEAD' ? null : Readable.toWeb(createReadStream(result.path)), {
           headers:{...baseHeaders,'Content-Type':'application/pdf','Content-Length':String(info.size),'Content-Disposition':'attachment; filename="manuscript-review.pdf"'},

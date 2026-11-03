@@ -6,7 +6,7 @@ import { webcrypto } from 'node:crypto'
 
 const source = await readFile(new URL('../web/latex-review.js', import.meta.url), 'utf8')
 function fixture(api) {
-  const ids = new Map()
+  const ids = new Map(), clicked = []
   class Element {
     constructor(tag) { this.tagName = tag; this.children = []; this.events = new Map(); this.value = ''; this.hidden = false; this.dataset = {}; this.classList = { toggle() {} } }
     set id(value) { this._id = value; ids.set(value, this) }
@@ -14,14 +14,25 @@ function fixture(api) {
     append(...nodes) { this.children.push(...nodes) }
     setAttribute() {} focus() {}
     addEventListener(type, fn) { this.events.set(type, fn) }
+    click() { clicked.push(this) }
   }
   const document = { createElement: tag => new Element(tag) }, window = {}
   vm.runInNewContext(source, { window, document, crypto: webcrypto, setTimeout, URL, Blob })
   const state = { id: 'project', main: 'main.tex', file: 'one.tex', revision: 'source-rev', dirty: false, editor: { value: '中文😀选段\nNext', selectionStart: 2, selectionEnd: 6 } }
   const ui = window.PaperLatexReview.create({ root: new Element('section'), api, context: () => state, revealSource() {}, revealPdf() {} })
   ids.get('latex-review-filter').value = 'open'
-  return { ui, ids, state }
+  return { ui, ids, state, clicked }
 }
+
+test('PDF export binds the active project generation including zero', async () => {
+  const f = fixture(async () => ({}))
+  f.state.binding_generation = 0
+  f.ids.get('latex-review-export-pdf').events.get('click')()
+  assert.equal(f.clicked[0].href, './latex-review-pdf/project?binding_generation=0')
+  f.state.binding_generation = 8
+  f.ids.get('latex-review-export-pdf').events.get('click')()
+  assert.equal(f.clicked[1].href, './latex-review-pdf/project?binding_generation=8')
+})
 
 test('source selection uses codepoint offsets and a failed save preserves exact draft/request identity', async () => {
   let failed = true; const calls = []

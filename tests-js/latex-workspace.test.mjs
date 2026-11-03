@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dispatch } from '../src/bridge.mjs'
 import { resolveConfig } from '../src/harness/config.mjs'
-import { createLatexWorkspace, pickFolder, projectSlug, syncSourceEntry, coveringSource } from '../src/harness/latex-workspace.mjs'
+import { createLatexWorkspace, pickFolder, pickTex, projectSlug, syncSourceEntry, coveringSource } from '../src/harness/latex-workspace.mjs'
 
 const project = dirname(dirname(fileURLToPath(import.meta.url)))
 const python = existsSync(join(project, '.venv', 'bin', 'python')) ? join(project, '.venv', 'bin', 'python') : undefined
@@ -211,5 +211,21 @@ test('the folder picker reports the picked path, cancellation and unsupported pl
   const fx = await fixture()
   const withPicker = createLatexWorkspace({ config: fx.config, dispatch, settings: memorySettings(fx.preferences), library: fx.library, python, run: async () => ({ code: 0, stdout: '/tmp/picked/\n' }) })
   assert.deepEqual(await withPicker({ action: 'latex_ws_pick_folder' }), { cancelled: false, path: '/tmp/picked' })
+})
+
+test('the main-file picker returns only a selected TeX file and handles cancellation', async () => {
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    const selected = await pickTex({ platform, run: async (command, args) => {
+      assert.ok(command && args.length)
+      return { code: 0, stdout: '/Users/example/project/review/main.tex\n' }
+    } })
+    assert.deepEqual(selected, { cancelled: false, path: '/Users/example/project/review/main.tex' })
+  }
+  assert.deepEqual(await pickTex({ platform: 'darwin', run: async () => ({ code: 1, stdout: '' }) }), { cancelled: true })
+  await assert.rejects(pickTex({ platform: 'darwin', run: async () => ({ code: 0, stdout: '/tmp/not.pdf' }) }), /\.tex/)
+  await assert.rejects(pickTex({ platform: 'freebsd' }), /没有文件选择/)
+  const fx = await fixture()
+  const workspace = createLatexWorkspace({ config: fx.config, dispatch, settings: memorySettings(fx.preferences), library: fx.library, python, run: async () => ({ code: 0, stdout: '/tmp/nested/main.tex' }) })
+  assert.deepEqual(await workspace({ action: 'latex_ws_pick_tex' }), { cancelled: false, path: '/tmp/nested/main.tex' })
 })
 

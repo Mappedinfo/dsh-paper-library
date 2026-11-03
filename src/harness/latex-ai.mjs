@@ -58,8 +58,8 @@ export function createLatexAI({ store, ai, config = {}, dispatch, library, pytho
     return { provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) }
   }
 
-  async function read(id, path) {
-    const file = await dispatch({ action: 'latex_read', id, path }, { library, python })
+  async function read(id, path, project) {
+    const file = await dispatch({ action: 'latex_read', id, path, expected_root: project.root, expected_binding_generation: project.binding_generation }, { library, python })
     return file
   }
 
@@ -132,7 +132,9 @@ MATERIAL
     return { summary, notes: notes || null, replacements, proposed: next }
   }
 
-  const proposalKey = id => `latex.ai:proposal:${digest(id).slice(0, 32)}`
+  // Keep pre-binding-change keys compatible, while isolating proposals from
+  // different bindings even if an earlier model response arrives late.
+  const proposalKey = (id, generation = 0) => `latex.ai:proposal:${digest(generation ? `${id}\0${generation}` : id).slice(0, 32)}`
   const logKey = id => `latex.ai:log:${digest(id).slice(0, 32)}`
 
   async function readLog(id) {
@@ -151,19 +153,23 @@ MATERIAL
     return []
   }
 
-  async function projectOf(id) {
+  async function projectOf(id, expectedRoot, expectedGeneration) {
     const project = (await dispatch({ action: 'latex_project_get', id }, { library, python })).project
+    if (project.binding_generation > 0 && expectedGeneration === undefined) throw fail('项目绑定已变化；请重新打开项目后再操作。', 'LATEX_AI_STALE_PROJECT', 409)
+    if (expectedRoot !== undefined && expectedRoot !== project.root) throw fail('项目文件夹已变化；请重新打开项目。', 'LATEX_AI_STALE_PROJECT', 409)
+    if (expectedGeneration !== undefined && expectedGeneration !== project.binding_generation) throw fail('项目绑定已变化；请重新打开项目。', 'LATEX_AI_STALE_PROJECT', 409)
     return project
   }
 
   async function ask(request, signal) {
     const id = identifier(request.id, '项目标识')
-    const project = await projectOf(id)
-    const file = await read(id, request.path ?? project.main_path)
+    const project = await projectOf(id, request.expected_root, request.expected_binding_generation)
+    const file = await read(id, request.path ?? project.main_path, project)
     const question = text(request.question, '问题', MAX_QUESTION, true)
     const material = materialOf(file.content, request.selection)
     const route = routeOf(request)
     const answer = await ai({ prompt: askPrompt({ path: file.path, question, material, project }), ...route, signal })
+    await projectOf(id, project.root, project.binding_generation)
     const bounded = String(answer || '').slice(0, MAX_ANSWER)
     const entry = { kind: 'ask', path: file.path, question, answer: bounded, model: `${route.provider}/${route.model}`, revision: file.revision, material: { kind: material.kind, characters: material.characters, truncated: material.truncated }, created: now() }
     await appendLog(id, entry)
@@ -172,7 +178,7 @@ MATERIAL
 
   async function translate(request, signal) {
     const id = identifier(request.id, '项目标识')
-    await projectOf(id)
+    await projectOf(id, request.expected_root, request.expected_binding_generation)
     const selection = text(request.selection, '选文', MAX_SELECTION, true)
     const global = (await store.get('language.settings')).value || {}
     const requestedTarget = request.target_language ?? global.target_language ?? 'auto'
@@ -193,16 +199,19 @@ MATERIAL
 
   async function propose(request, signal) {
     const id = identifier(request.id, '项目标识')
-    const project = await projectOf(id)
-    const file = await read(id, request.path ?? project.main_path)
+    const project = await projectOf(id, request.expected_root, request.expected_binding_generation)
+    const file = await read(id, request.path ?? project.main_path, project)
     const instruction = text(request.instruction, '写作要求', MAX_INSTRUCTION, true)
     const material = materialOf(file.content, request.selection)
     const route = routeOf(request)
     const output = await ai({ prompt: proposePrompt({ path: file.path, instruction, material, project }), ...route, signal })
+    await projectOf(id, project.root, project.binding_generation)
     const parsed = parseProposal(output, file.content)
     const proposal = {
       id: 'lp-' + digest(`${file.revision}\0${now()}\0${parsed.summary}`).slice(0, 12),
       project: id,
+      root: project.root,
+      binding_generation: project.binding_generation,
       path: file.path,
       revision: file.revision,
       summary: parsed.summary,
@@ -216,25 +225,31 @@ MATERIAL
     if (!parsed.replacements.length) {
       return { proposal: { ...proposal, status: 'empty' }, changed: false }
     }
-    const record = await store.get(proposalKey(id))
-    await store.put(proposalKey(id), { proposal }, record.revision)
+    const record = await store.get(proposalKey(id, project.binding_generation))
+    await store.put(proposalKey(id, project.binding_generation), { proposal }, record.revision)
     await appendLog(id, { kind: 'proposal', path: file.path, summary: parsed.summary, replacements: parsed.replacements.length, model: `${route.provider}/${route.model}`, created: proposal.created })
     return { proposal: { ...proposal, status: 'pending' }, changed: true, proposed_characters: parsed.proposed.length }
   }
 
   async function pending(request) {
     const id = identifier(request.id, '项目标识')
-    const record = await store.get(proposalKey(id))
+    const project = await projectOf(id, request.expected_root, request.expected_binding_generation)
+    const record = await store.get(proposalKey(id, project.binding_generation))
     return { id, proposal: record.value?.proposal || null }
   }
 
   async function accept(request, signal) {
     const id = identifier(request.id, '项目标识')
-    const record = await store.get(proposalKey(id))
+    const project = await projectOf(id, request.expected_root, request.expected_binding_generation)
+    const key = proposalKey(id, project.binding_generation)
+    const record = await store.get(key)
     const proposal = record.value?.proposal
     if (!proposal) throw fail('没有待确认的提案。', 'LATEX_AI_NO_PROPOSAL', 404)
     if (request.proposal_id && request.proposal_id !== proposal.id) throw fail('提案已被新的提案替换；请重新查看。', 'LATEX_AI_STALE_PROPOSAL', 409)
-    const file = await read(id, proposal.path)
+    const proposalGeneration = Number.isInteger(proposal.binding_generation) ? proposal.binding_generation : 0
+    const proposalRoot = proposal.root || (project.binding_generation === 0 ? project.root : null)
+    if (project.root !== proposalRoot || project.binding_generation !== proposalGeneration) throw fail('提案所属的项目绑定已变化；请重新生成提案。', 'LATEX_AI_STALE_PROJECT', 409)
+    const file = await read(id, proposal.path, project)
     if (file.revision !== proposal.revision) {
       const error = fail('文件在这次提案之后被改过；请重新生成提案或手动合并。', 'STATE_CONFLICT', 409)
       error.current = { path: file.path, revision: file.revision, content: file.content }
@@ -250,24 +265,27 @@ MATERIAL
       next = next.replace(find, replace)
     }
     const origin = `ai:${proposal.model.provider}/${proposal.model.model}`
-    const written = await dispatch({ action: 'latex_write', id, path: proposal.path, content: next, expected_revision: proposal.revision, origin }, { library, python, signal })
-    await store.put(proposalKey(id), null, record.revision)
+    const written = await dispatch({ action: 'latex_write', id, path: proposal.path, content: next, expected_revision: proposal.revision, expected_root: proposalRoot, expected_binding_generation: proposalGeneration, origin }, { library, python, signal })
+    await store.put(key, null, record.revision)
     await appendLog(id, { kind: 'accepted', path: proposal.path, summary: proposal.summary, replacements: proposal.replacements.length, model: origin, revision: written.revision, created: now() })
     return { id, written, proposal_id: proposal.id, origin, revision: written.revision }
   }
 
   async function discard(request) {
     const id = identifier(request.id, '项目标识')
-    const record = await store.get(proposalKey(id))
+    const project = await projectOf(id, request.expected_root, request.expected_binding_generation)
+    const key = proposalKey(id, project.binding_generation)
+    const record = await store.get(key)
     if (!record.value?.proposal) return { id, discarded: false }
-    await store.put(proposalKey(id), null, record.revision)
+    await store.put(key, null, record.revision)
     await appendLog(id, { kind: 'discarded', path: record.value.proposal.path, summary: record.value.proposal.summary, created: now() })
     return { id, discarded: true }
   }
 
   async function status(request) {
     const id = identifier(request.id, '项目标识')
-    const [record, log] = await Promise.all([store.get(proposalKey(id)), readLog(id)])
+    const project = await projectOf(id, request.expected_root, request.expected_binding_generation)
+    const [record, log] = await Promise.all([store.get(proposalKey(id, project.binding_generation)), readLog(id)])
     const configured = Boolean(config.provider && config.model)
     return { id, proposal: record.value?.proposal || null, entries: log.entries, configured, limits: { material: MAX_MATERIAL, selection: MAX_SELECTION, question: MAX_QUESTION, replacements: MAX_REPLACEMENTS } }
   }

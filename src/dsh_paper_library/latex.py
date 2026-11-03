@@ -156,6 +156,13 @@ def _inside(root: Path, value, name="文件路径", required=True) -> tuple[Path
     return absolute, relative
 
 
+def _main_inside(root: Path, value) -> tuple[Path, str]:
+    """Accept an absolute main-file selection only when it resolves inside root."""
+    if isinstance(value, str) and Path(value.strip()).expanduser().is_absolute():
+        value = os.path.relpath(Path(value.strip()).expanduser(), root)
+    return _inside(root, value, "主文件")
+
+
 def _project(library, project_id, include_archived=False):
     project_id = _identifier(project_id)
     row = library.db.execute(
@@ -179,6 +186,7 @@ def _row(row, library=None):
         "pdf_path": row["pdf_path"],
         "created": row["created"],
         "modified": row["modified"],
+        "binding_generation": row["binding_generation"],
         "archived": bool(row["archived_at"]) if "archived_at" in row.keys() else False,
         "archived_at": row["archived_at"] if "archived_at" in row.keys() else None,
     }
@@ -249,7 +257,7 @@ def create(library, root=None, title=None, main_path=None, create_missing=False)
         raise ValueError(f"LaTeX 项目最多 {MAX_PROJECTS} 个")
     main = None
     if main_path is not None:
-        absolute, main = _inside(path, main_path, "主文件")
+        absolute, main = _main_inside(path, main_path)
         if absolute.suffix.lower() != ".tex":
             raise ValueError("主文件必须是 .tex")
         if not absolute.is_file():
@@ -303,18 +311,40 @@ def get(library, id=None, include_archived=False):
     return {"project": value}
 
 
-def update(library, id=None, title=None, main_path=None, include_archived=False):
+def update(library, id=None, title=None, main_path=None, root=None, include_archived=False):
     row = _project(library, id, include_archived)
     changes, values = [], []
+    new_root = _guard_root(library, _resolve_root(root)) if root is not None else Path(row["root"])
+    root_changed = str(new_root) != row["root"]
+    if root_changed:
+        if main_path is None:
+            raise ValueError("修改项目目录时请指定新的主文件")
+        existing = library.db.execute("SELECT id FROM latex_projects WHERE root=? AND id<>?", (str(new_root), row["id"])).fetchone()
+        if existing:
+            raise ValueError("这个文件夹已经是 LaTeX 项目")
     if title is not None:
         changes.append("title=?")
         values.append(_text(title, "项目标题", MAX_TITLE, required=True))
     if main_path is not None:
-        absolute, relative = _inside(Path(row["root"]), main_path, "主文件")
+        absolute, relative = _main_inside(new_root, main_path)
         if absolute.suffix.lower() != ".tex" or not absolute.is_file():
             raise ValueError("主文件必须存在且是 .tex")
         changes.append("main_path=?")
         values.append(relative)
+    if root_changed:
+        old_main, _ = _inside(Path(row["root"]), row["main_path"], "主文件")
+        same_main = old_main == absolute
+        from .latex_location import relocate
+        relocate(library, row, new_root, relative, same_main)
+        changes.append("root=?")
+        values.append(str(new_root))
+    if root_changed or (main_path is not None and relative != row["main_path"]):
+        changes.append("binding_generation=binding_generation+1")
+    if main_path is not None:
+        # Entry and PDF must switch atomically: an interrupted update must not
+        # leave a prior entry's PDF bound to the newly selected manuscript.
+        changes.append("pdf_path=?")
+        values.append(_matching_pdf(new_root, relative))
     if not changes:
         raise ValueError("没有需要修改的字段")
     changes.append("modified=?")
@@ -322,14 +352,7 @@ def update(library, id=None, title=None, main_path=None, include_archived=False)
     values.append(row["id"])
     library.db.execute(f"UPDATE latex_projects SET {', '.join(changes)} WHERE id=?", values)
     library.db.commit()
-    project = _row(_project(library, row["id"], include_archived))
-    if main_path is not None:
-        pdf = _matching_pdf(Path(row["root"]), project["main_path"])
-        # A different entry must never keep showing the preceding draft's PDF.
-        library.db.execute("UPDATE latex_projects SET pdf_path=? WHERE id=?", (pdf, row["id"]))
-        library.db.commit()
-        project = _row(_project(library, row["id"], include_archived))
-    return {"project": project}
+    return {"project": _row(_project(library, row["id"], include_archived))}
 
 
 def archive(library, id=None):
@@ -404,8 +427,10 @@ def media_preview(library, id=None, path=None, page=1, scale=1, include_archived
     return preview(library, _project(library, id, include_archived), path, page, scale)
 
 
-def read(library, id=None, path=None, include_archived=False):
+def read(library, id=None, path=None, include_archived=False, expected_root=None, expected_binding_generation=None):
     row = _project(library, id, include_archived)
+    from .latex_project_guard import check_binding
+    check_binding(row, expected_root, expected_binding_generation)
     root = Path(row["root"])
     relative = path if path is not None else row["main_path"]
     absolute, relative = _inside(root, relative, "文件路径")
@@ -996,7 +1021,7 @@ ACTIONS = {
     "latex_project_create": (create, ("root", "title", "main_path", "create_missing")),
     "latex_project_list": (listing, ("query", "include_archived", "limit", "offset")),
     "latex_project_get": (get, ("id", "include_archived")),
-    "latex_project_update": (update, ("id", "title", "main_path", "include_archived")),
+    "latex_project_update": (update, ("id", "title", "main_path", "root", "include_archived")),
     "latex_project_archive": (archive, ("id",)),
     "latex_project_restore": (restore, ("id",)),
     "latex_project_link_reading": (latex_versions.link, ("id", "reading_project_id")),
@@ -1017,7 +1042,7 @@ ACTIONS = {
     "latex_review_put": (review_put, ("id", "note_id", "anchor", "comment", "status", "expected_version", "type", "request_id")),
     "latex_review_export": (review_export, ("id", "format")),
     "latex_review_delete": (review_delete, ("id", "note_id", "expected_version")),
-    "latex_read": (read, ("id", "path", "include_archived")),
+    "latex_read": (read, ("id", "path", "include_archived", "expected_root", "expected_binding_generation")),
     "latex_lint": (lint, ("id", "mode", "main_path", "paths", "include_archived")),
     "latex_write": (write, ("id", "path", "content", "expected_revision", "origin", "include_archived")),
     "latex_compile": (compile_project, ("id", "engine", "timeout_seconds", "include_archived", "save_version")),
@@ -1038,4 +1063,35 @@ def dispatch(library, request):
     if handler is None:
         raise ValueError("Unknown LaTeX action")
     function, keys = handler
-    return function(library, **{key: request[key] for key in keys if key in request})
+    args = {key: request[key] for key in keys if key in request}
+    if "id" not in args:
+        return function(library, **args)
+    # Rebinding is serialized with short writes and rejected while a build is
+    # active; reading and saving stay available during long TeX builds.
+    from .latex_project_guard import check_binding, project_lock
+    project_id = _identifier(args["id"])
+    def verify():
+        row = _project(library, project_id, include_archived=True)
+        guarded = {"latex_write", "latex_compile", "latex_project_update", "latex_project_archive", "latex_project_restore", "latex_project_link_reading",
+                   "latex_asset_import", "latex_review_put", "latex_review_delete", "latex_review_export", "latex_clean"}
+        if action in guarded and row["binding_generation"] and "expected_binding_generation" not in request:
+            raise ValueError("项目绑定已变化；请重新打开项目后再操作。未保存的内容仍在当前编辑器中。")
+        if "expected_binding_generation" in request and (isinstance(request["expected_binding_generation"], bool) or not isinstance(request["expected_binding_generation"], int)):
+            raise ValueError("项目绑定已变化；请重新打开项目。未保存的内容仍在当前编辑器中。")
+        check_binding(row, request.get("expected_root"), request.get("expected_binding_generation"))
+    if action == "latex_compile":
+        with project_lock(library, project_id, compiling=True):
+            verify()
+            return function(library, **args)
+    if action == "latex_project_update":
+        with project_lock(library, project_id):
+            with project_lock(library, project_id, compiling=True, wait=0):
+                verify()
+                return function(library, **args)
+    if action in {"latex_write", "latex_project_archive", "latex_project_restore", "latex_project_link_reading",
+                  "latex_asset_import", "latex_review_put", "latex_review_delete", "latex_review_export", "latex_clean"}:
+        with project_lock(library, project_id):
+            verify()
+            return function(library, **args)
+    verify()
+    return function(library, **args)

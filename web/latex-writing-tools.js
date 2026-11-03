@@ -90,7 +90,7 @@ window.PaperLatexWritingTools = (() => {
     }
     async function importImage(file, target = expected) {
       if (busy || disposed) return; busy = true;
-      try { if (file.size > MAX_BYTES) throw new Error('图片超过 8 MiB。'); say('正在保存图片…'); const blob = await imageBlob(file); if (blob.size > MAX_BYTES) throw new Error('转换后图片超过 8 MiB。'); const result = await api('latex_asset_import', { id: target.id, name: file.name || 'pasted-image.png', data_base64: await base64(blob) }); if (disposed) return; expected = target; const text = figureLatex(result.path); output.value = text; void onAssetsChanged(target.id); say(`图片已保存：${result.path}`); deliver(text); } catch (error) { if (!disposed) say(`图片未插入：${error.message}。当前源码保留。`, true); } finally { busy = false; fileInput.value = ''; }
+      try { if (file.size > MAX_BYTES) throw new Error('图片超过 8 MiB。'); say('正在保存图片…'); const blob = await imageBlob(file); if (blob.size > MAX_BYTES) throw new Error('转换后图片超过 8 MiB。'); const result = await api('latex_asset_import', { id: target.id, ...(target.root ? { expected_root: target.root } : {}), ...(Number.isSafeInteger(target.binding_generation) ? { expected_binding_generation: target.binding_generation } : {}), name: file.name || 'pasted-image.png', data_base64: await base64(blob) }); if (disposed) return; expected = target; const text = figureLatex(result.path); output.value = text; void onAssetsChanged(target.id); say(`图片已保存：${result.path}`); deliver(text); } catch (error) { if (!disposed) say(`图片未插入：${error.message}。当前源码保留。`, true); } finally { busy = false; fileInput.value = ''; }
     }
     async function importXlsx(file, selectedSheet) {
       if (busy || disposed) return; busy = true;

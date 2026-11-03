@@ -92,9 +92,14 @@ class Papers:
           main_path TEXT,
           pdf_path TEXT,
           created TEXT NOT NULL,
-          modified TEXT NOT NULL
+          modified TEXT NOT NULL,
+          binding_generation INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS latex_archive(project_id TEXT PRIMARY KEY, archived_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS latex_review_locations(
+          project_id TEXT NOT NULL, root TEXT NOT NULL, namespace TEXT NOT NULL,
+          PRIMARY KEY(project_id, root)
+        );
         CREATE TABLE IF NOT EXISTS latex_revisions(
           id TEXT PRIMARY KEY,
           project_id TEXT NOT NULL,
@@ -122,6 +127,13 @@ class Papers:
           reading_project_id TEXT NOT NULL
         );
         """)
+        if "binding_generation" not in {row["name"] for row in self.db.execute("PRAGMA table_info(latex_projects)").fetchall()}:
+            try:
+                self.db.execute("ALTER TABLE latex_projects ADD COLUMN binding_generation INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                # A concurrent worker may have completed the same migration.
+                if "binding_generation" not in {row["name"] for row in self.db.execute("PRAGMA table_info(latex_projects)").fetchall()}:
+                    raise
         indexed = self.db.execute("SELECT 1 FROM sqlite_master WHERE name='paper_search'").fetchone()
         # The search index stays on disk; neither search nor list opens a PDF.
         search_expression = "new.title || ' ' || new.citekey || ' ' || coalesce(json_extract(new.metadata,'$.author'),'') || ' ' || coalesce(json_extract(new.metadata,'$.tags'),'') || ' ' || coalesce(json_extract(new.metadata,'$.abstract'),'') || ' ' || coalesce(new.doi,'') || ' ' || coalesce(json_extract(new.metadata,'$.issued'),'') || ' ' || coalesce(json_extract(new.metadata,'$.container-title'),'') || ' ' || coalesce(json_extract(new.metadata,'$.publication_dates'),'')"

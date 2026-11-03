@@ -173,6 +173,32 @@ test('an explicitly unavailable writer folder is refused before replacing the cu
   f.ui.dispose()
 })
 
+test('a project whose folder moved remains selectable for safe location repair', async () => {
+  const missing = { id: 'moved', title: 'Moved', root: '/old/project', main_path: 'main.tex', binding_generation: 0, exists: false, pdf_present: false }
+  const f = await fixture((action, args) => {
+    if (action === 'latex_project_get' && args.id === 'moved') return { project: missing }
+    if (action === 'latex_project_update') return { project: { ...missing, root: '/new/project', main_path: 'review/main.tex', binding_generation: 1, exists: true } }
+  })
+  assert.equal(await f.ui.open('moved'), true)
+  assert.equal(f.ui.current().id, 'moved')
+  assert.equal(f.ids.get('latex-location-root').value, '/old/project')
+  assert.equal(f.ids.get('latex-location-main').value, 'main.tex')
+  assert.equal(f.ids.get('latex-editor').disabled, true)
+  assert.equal(f.ids.get('latex-compile').disabled, true)
+  assert.equal(f.calls.some(call => call.id === 'moved' && ['latex_tree', 'latex_read'].includes(call.action)), false)
+  assert.match(f.ids.get('latex-status').textContent, /项目文件夹已不可用/)
+  await f.ids.get('latex-compile').dispatch('click')
+  assert.equal(f.calls.some(call => call.id === 'moved' && call.action === 'latex_compile'), false)
+  f.ids.get('latex-location-root').value = '/new/project'
+  f.ids.get('latex-location-main').value = 'review/main.tex'
+  await f.ids.get('latex-location-save').dispatch('click')
+  assert.equal(f.ui.testHooks.state().file, 'review/main.tex')
+  assert.equal(f.ids.get('latex-compile').disabled, false)
+  const request = f.calls.find(call => call.action === 'latex_project_update')
+  assert.equal(request.expected_root, '/old/project'); assert.equal(request.expected_binding_generation, 0)
+  f.ui.dispose()
+})
+
 test('textarea fallback can turn on local spelling and navigate to a detected word', async () => {
   const f = await fixture(action => {
     if (action === 'state_get') return { value: null, revision: 0 }
@@ -736,6 +762,65 @@ test('compile entry is selected from the project menu and the toolbar shows it o
   assert.equal(main.textContent, '编译：draft.tex')
   assert.equal(f.ids.get('latex-project').selectedOptions[0].textContent, 'one')
   assert.equal(f.ui.testHooks.state().file, 'draft.tex')
+  f.ui.dispose()
+})
+
+test('registering a folder sends the explicitly chosen nested main file', async () => {
+  const nested = { id: 'nested', title: 'Nested', root: '/synthetic/project', main_path: 'review/main.tex', pdf_present: false }
+  let registered = false
+  const f = await fixture((action, args) => {
+    if (action === 'latex_project_create') { registered = true; return { project: nested } }
+    if (action === 'latex_project_list' && registered) return { projects: [nested] }
+    if (action === 'latex_ws_pick_tex') return { path: '/synthetic/project/review/main.tex' }
+  })
+  f.ids.get('latex-new-root').value = '/synthetic/project'
+  await f.ids.get('latex-new-main-pick').dispatch('click'); await tick()
+  assert.equal(f.ids.get('latex-new-main').value, '/synthetic/project/review/main.tex')
+  await f.ids.get('latex-new-submit').dispatch('click')
+  const call = f.calls.find(call => call.action === 'latex_project_create')
+  assert.equal(call.root, '/synthetic/project'); assert.equal(call.main_path, '/synthetic/project/review/main.tex')
+  assert.equal(f.ui.testHooks.state().file, 'review/main.tex')
+  f.ui.dispose()
+})
+
+test('updating project location protects drafts and locks the workspace until the new root is loaded', async () => {
+  const pending = deferred(); let failSave = true
+  const initial = { id: 'one', title: 'one', root: '/old/project', main_path: 'main.tex', binding_generation: 0, pdf_present: true }
+  const f = await fixture((action, args) => {
+    if (action === 'latex_project_list') return { projects: [initial, { ...initial, id: 'two', title: 'two' }] }
+    if (action === 'latex_write' && failSave) throw Error('synthetic unsaved draft')
+    if (action === 'latex_project_update') return pending.promise
+  })
+  f.ids.get('latex-location-root').value = '/new/project'
+  f.ids.get('latex-location-main').value = 'review/main.tex'
+  await f.ui.testHooks.type('unsaved source')
+  await f.ids.get('latex-location-save').dispatch('click')
+  assert.equal(f.calls.some(call => call.action === 'latex_project_update'), false)
+  assert.equal(f.ids.get('latex-editor').value, 'unsaved source')
+  failSave = false
+  const update = f.ids.get('latex-location-save').dispatch('click'); await tick()
+  const request = f.calls.find(call => call.action === 'latex_project_update')
+  assert.equal(request.root, '/new/project'); assert.equal(request.main_path, 'review/main.tex'); assert.equal(request.expected_root, '/old/project'); assert.equal(request.expected_binding_generation, 0)
+  const write = f.calls.filter(call => call.action === 'latex_write').at(-1); assert.equal(write.expected_root, '/old/project'); assert.equal(write.expected_binding_generation, 0)
+  await f.ids.get('latex-compile').dispatch('click'); await f.ui.testHooks.setProject('two'); await f.ui.close()
+  assert.equal(f.ui.current().id, 'one'); assert.equal(f.ui.isOpen(), true)
+  assert.equal(f.calls.some(call => call.action === 'latex_compile'), false)
+  pending.resolve({ project: { ...initial, root: '/new/project', main_path: 'review/main.tex', binding_generation: 1, pdf_present: false } })
+  await update
+  assert.equal(f.ui.testHooks.state().file, 'review/main.tex')
+  const read = f.calls.filter(call => call.action === 'latex_read').at(-1)
+  assert.equal(read.expected_root, '/new/project'); assert.equal(read.expected_binding_generation, 1)
+  assert.equal(f.ids.get('latex-location-root').value, '/new/project')
+  f.ui.dispose()
+})
+
+test('a delayed main file picker cannot replace a different project location', async () => {
+  const pick = deferred()
+  const f = await fixture(action => action === 'latex_ws_pick_tex' ? pick.promise : undefined)
+  f.ids.get('latex-location-main-pick').dispatch('click'); await tick()
+  await f.ui.testHooks.setProject('two')
+  pick.resolve({ path: '/old/review/main.tex' }); await tick()
+  assert.equal(f.ids.get('latex-location-main').value, 'main.tex')
   f.ui.dispose()
 })
 

@@ -20,9 +20,19 @@ window.PaperLatexWorkspace = (() => {
   const SPLIT_MIN = 25, SPLIT_MAX = 75;
   const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_path_font: 'pixel', latex_accent: 'system', latex_split: 50, latex_sync_folder: true };
 
-  function create({api, toast = () => {}, getLibrary = () => '', rail = null, onVersionSaved = () => {}, onContext = () => {}}) {
+  function create({api: transport, toast = () => {}, getLibrary = () => '', rail = null, onVersionSaved = () => {}, onContext = () => {}}) {
     const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
     let projects = [], project = null, tree = null, file = null, revision = null, pageCount = 0, page = 1, tab = 'pdf';
+    // Bind project actions to the location this window opened. A different
+    // window may have changed it since this editor loaded its source.
+    const api = (action, args = {}, options) => {
+      const scoped = action.startsWith('latex_') && !action.startsWith('latex_ws_') && args.id && args.id === project?.id;
+      if (!scoped) return transport(action, args, options);
+      const expected = {};
+      if (project.root && !Object.hasOwn(args, 'expected_root')) expected.expected_root = project.root;
+      if (Number.isSafeInteger(project.binding_generation) && !Object.hasOwn(args, 'expected_binding_generation')) expected.expected_binding_generation = project.binding_generation;
+      return transport(action, { ...expected, ...args }, options);
+    };
     let pageGeometry = []; let syncFlash = null;
     let dirty = false, saving = false, compiling = false, disposed = false, timer = null, compileTimer = null, generation = 0, saveQueue = Promise.resolve();
     let lastBuildOk = null, autoPaused = false, pendingCompile = false;
@@ -97,6 +107,15 @@ window.PaperLatexWorkspace = (() => {
     const entryRow = make('div', 'latex-menu-section');
     const entryLabel = make('label', 'latex-menu-label', '编译主文件'); entryLabel.htmlFor = 'latex-entry';
     entryRow.append(entryLabel, mainSelect);
+    const locationRow = make('div', 'latex-menu-section');
+    locationRow.append(make('span', 'latex-menu-label', '修改当前项目位置'));
+    const locationRoot = make('input'); locationRoot.id = 'latex-location-root'; locationRoot.type = 'text'; locationRoot.placeholder = '项目文件夹的绝对路径'; locationRoot.autocomplete = 'off'; locationRoot.spellcheck = false; locationRoot.setAttribute('aria-label', '当前项目文件夹');
+    const locationPick = make('button', 'button subtle', '选择…'); locationPick.id = 'latex-location-pick'; locationPick.type = 'button'; locationPick.title = '选择项目文件夹';
+    const locationMain = make('input'); locationMain.id = 'latex-location-main'; locationMain.type = 'text'; locationMain.placeholder = '主文件路径，例如 review/main.tex'; locationMain.autocomplete = 'off'; locationMain.spellcheck = false; locationMain.setAttribute('aria-label', '当前项目主文件路径');
+    const locationMainPick = make('button', 'button subtle', '选择主文件…'); locationMainPick.id = 'latex-location-main-pick'; locationMainPick.type = 'button';
+    const locationSave = make('button', 'button primary', '保存项目位置'); locationSave.id = 'latex-location-save'; locationSave.type = 'button';
+    const locationLine = make('div', 'latex-menu-row'); locationLine.append(locationRoot, locationPick, locationMain, locationMainPick, locationSave);
+    locationRow.append(locationLine, make('p', 'latex-menu-hint', '主文件需位于项目文件夹内，可填绝对路径或相对路径；修改登记不会移动或覆盖文件。'));
     const readingRow = make('div', 'latex-menu-section');
     const readingLabel = make('label', 'latex-menu-label', '版本所属的阅读项目'); readingLabel.htmlFor = 'latex-reading-project';
     const readingSelect = make('select'); readingSelect.id = 'latex-reading-project'; readingSelect.setAttribute('aria-label', '版本所属的阅读项目');
@@ -115,12 +134,14 @@ window.PaperLatexWorkspace = (() => {
     registerRow.append(make('span', 'latex-menu-label', '登记已有文件夹（绝对路径，文件留在原处）'));
     const newRoot = make('input'); newRoot.id = 'latex-new-root'; newRoot.type = 'text'; newRoot.placeholder = '/绝对/路径/到/你的/论文文件夹'; newRoot.autocomplete = 'off'; newRoot.spellcheck = false;
     const newTitle = make('input'); newTitle.id = 'latex-new-title'; newTitle.type = 'text'; newTitle.placeholder = '标题（可留空）'; newTitle.autocomplete = 'off';
+    const newMain = make('input'); newMain.id = 'latex-new-main'; newMain.type = 'text'; newMain.placeholder = '主文件路径（可留空自动寻找）'; newMain.autocomplete = 'off'; newMain.spellcheck = false; newMain.setAttribute('aria-label', '登记项目主文件路径');
+    const newMainPick = make('button', 'button subtle', '选择主文件…'); newMainPick.id = 'latex-new-main-pick'; newMainPick.type = 'button';
     const newStarter = make('input'); newStarter.id = 'latex-new-starter'; newStarter.type = 'checkbox';
     const starterLabel = make('label', 'latex-check'); starterLabel.append(newStarter, make('span', '', '没有 .tex 时写入最小 main.tex'));
     const newSubmit = make('button', 'button primary', '登记'); newSubmit.id = 'latex-new-submit'; newSubmit.type = 'button';
     // The browser cannot hand out absolute paths, so the host opens the OS dialog.
     const newPick = make('button', 'button subtle', '选择…'); newPick.id = 'latex-new-pick'; newPick.type = 'button'; newPick.title = '打开系统文件夹选择对话框';
-    const registerLine = make('div', 'latex-menu-row'); registerLine.append(newRoot, newPick, newTitle, starterLabel, newSubmit);
+    const registerLine = make('div', 'latex-menu-row'); registerLine.append(newRoot, newPick, newMain, newMainPick, newTitle, starterLabel, newSubmit);
     registerRow.append(registerLine);
 
     const compareRow = make('div', 'latex-menu-section');
@@ -169,7 +190,7 @@ window.PaperLatexWorkspace = (() => {
     const syncAttach = make('button', 'button subtle', '纳入同步'); syncAttach.id = 'latex-sync-attach'; syncAttach.type = 'button';
     const rootLine = make('div', 'latex-menu-row'); rootLine.append(rootPath, syncState, syncAttach);
     rootRow.append(rootLine, make('p', 'latex-menu-hint', '论文目录由插件维护；数据同步服务会把它作为一个独立源备份（只新增，不删改其他源）。'));
-    menu.append(entryRow, readingRow, createRow, registerRow, compareRow, settingRow, translateSettings, rootRow);
+    menu.append(entryRow, locationRow, readingRow, createRow, registerRow, compareRow, settingRow, translateSettings, rootRow);
 
     // ---- body: source | divider | (pdf | dsh | versions) ----
     const content = make('div', 'latex-content');
@@ -344,7 +365,7 @@ window.PaperLatexWorkspace = (() => {
     const reviewPanel = make('section', 'latex-review-panel'); reviewPanel.id = 'latex-review-panel'; reviewPanel.setAttribute('aria-label', '自审批注');
     if (!rail) { reviewPanel.hidden = true; content.append(reviewPanel); }
     const reviewer = window.PaperLatexReview?.create({ root: reviewPanel, api,
-      context: () => ({ id: project?.id, main: project?.main_path, file, revision, dirty, editor, build: pdfBuild }),
+      context: () => ({ id: project?.id, main: project?.main_path, binding_generation: project?.binding_generation, file, revision, dirty, editor, build: pdfBuild }),
       show: () => showReview(),
       revealSource: async anchor => {
         if (!await openFile(anchor.path, { force: true })) return;
@@ -441,12 +462,12 @@ window.PaperLatexWorkspace = (() => {
       finally { sourceSpell.disabled = false; }
     });
     function writingContext() {
-      return { id: project?.id, title: project?.title, path: file, revision, content: editor.value, selectionStart: editor.selectionStart || 0, selectionEnd: editor.selectionEnd || 0,
+      return { id: project?.id, root: project?.root, binding_generation: project?.binding_generation, title: project?.title, path: file, revision, content: editor.value, selectionStart: editor.selectionStart || 0, selectionEnd: editor.selectionEnd || 0,
         blocked: !project || !file || editor.disabled || switching || Boolean(pendingConflict) };
     }
     function insertWriting(text, expected) {
       const current = writingContext();
-      if (disposed || current.blocked || !expected || current.id !== expected.id || current.path !== expected.path || current.content !== expected.content) {
+      if (disposed || current.blocked || !expected || current.id !== expected.id || current.root !== expected.root || current.binding_generation !== expected.binding_generation || current.path !== expected.path || current.content !== expected.content) {
         say('源码已切换或发生改动；插入内容保留在工具中，请确认后再复制。', true); return false;
       }
       const start = Math.min(expected.selectionStart || 0, editor.value.length), end = Math.min(expected.selectionEnd || start, editor.value.length);
@@ -701,6 +722,12 @@ window.PaperLatexWorkspace = (() => {
       clearTimeout(outlineTimer); clearTimeout(resizeTimer); clearTimeout(compileTimer);
     }
 
+    function syncLocationFields() {
+      locationRoot.value = project?.root || '';
+      locationMain.value = project?.main_path || '';
+      locationRoot.disabled = locationMain.disabled = locationPick.disabled = locationMainPick.disabled = locationSave.disabled = !project || switching;
+    }
+
     reload.addEventListener('click', () => {
       if (!pendingConflict) return;
       editor.value = pendingConflict.current.content || '';
@@ -727,10 +754,9 @@ window.PaperLatexWorkspace = (() => {
       const listed = (result.projects || []).filter(item => item && !item.archived);
       if (preferred && !listed.some(item => item.id === preferred)) {
         const fetched = await api('latex_project_get', { id: preferred, include_archived: false });
-        if (!fetched?.project || fetched.project.id !== preferred || fetched.project.archived || fetched.project.exists === false) throw new Error('指定的 LaTeX 项目不存在、已归档或文件夹已不可用。');
+        if (!fetched?.project || fetched.project.id !== preferred || fetched.project.archived) throw new Error('指定的 LaTeX 项目不存在或已归档。');
         listed.push(fetched.project);
       }
-      if (preferred && listed.find(item => item.id === preferred)?.exists === false) throw new Error('指定的 LaTeX 项目文件夹已不可用，当前稿件仍保留。');
       if (!valid()) return null;
       projects = listed;
       projectSelect.textContent = '';
@@ -738,7 +764,7 @@ window.PaperLatexWorkspace = (() => {
         const option = make('option', '', '还没有 LaTeX 项目'); option.value = ''; projectSelect.append(option);
       }
       for (const item of projects) {
-        const option = make('option', '', item.title);
+        const option = make('option', '', `${item.title}${item.exists === false ? '（文件夹不可用）' : ''}`);
         option.value = item.id; projectSelect.append(option);
       }
       compareSelect.textContent = '';
@@ -762,6 +788,7 @@ window.PaperLatexWorkspace = (() => {
       formulas?.clear(); formulas?.close();
       project = projects.find(item => item.id === id) || null;
       if (!project) { await renderEmpty(); return; }
+      syncLocationFields();
       resetPdfSource({ kind: 'current' });
       projectSelect.value = project.id;
       errors.textContent = ''; errors.hidden = true; diagnosticsToggle.hidden = true; diagnosticsToggle.setAttribute('aria-expanded', 'false');
@@ -770,6 +797,18 @@ window.PaperLatexWorkspace = (() => {
       pageCount = 0; pageGeometry = []; pdfVersion = ''; mediaPath = null; mediaGeometry = null;
       if (mediaUrl) { URL.revokeObjectURL(mediaUrl); mediaUrl = null; }
       mediaPreview.textContent = '从左侧「媒体」选择项目内的文件。'; mediaCrumb.textContent = ''; mediaInfo.textContent = '';
+      tree = null; fileList.textContent = ''; outlineList.textContent = ''; mediaList.textContent = ''; currentFile.textContent = '选择源文件';
+      compile.disabled = false; mainSelect.disabled = false;
+      if (project.exists === false) {
+        mainLabel.textContent = `编译：${project.main_path || '未设置'}`;
+        mainSelect.textContent = '';
+        const option = make('option', '', project.main_path || '未设置'); option.value = project.main_path || ''; mainSelect.append(option);
+        compile.disabled = true; mainSelect.disabled = true; lastBuildOk = null; autoPaused = false;
+        ai.checked = false; ai.proposal = null; aiAnswer.textContent = ''; aiProposal.textContent = ''; renderProposal();
+        const hint = '项目文件夹已不可用；打开「项目与设置」，修改当前项目位置和主文件。';
+        setPreviewMessage(hint); say(hint, true); notifyContext();
+        return;
+      }
       setPreviewMessage('读取项目…');
       try { await loadTree(); }
       catch (error) { if (ticket === generation) { say(`项目导航读取失败：${error.message}`, true); notifyContext(); } return; }
@@ -792,6 +831,7 @@ window.PaperLatexWorkspace = (() => {
     }
 
     async function renderEmpty() {
+      syncLocationFields();
       file = null; revision = null; editor.value = ''; lineNumbers(); tree = null;
       fileList.textContent = ''; errors.textContent = ''; renderEmptyState();
       outlineList.textContent = ''; mediaList.textContent = ''; mainSelect.textContent = ''; currentFile.textContent = '选择源文件';
@@ -948,12 +988,13 @@ window.PaperLatexWorkspace = (() => {
       try {
         const result = await api('latex_project_update', { id: project.id, main_path: path });
         project = result.project; projects = projects.map(item => item.id === project.id ? project : item);
+        syncLocationFields();
         resetPdfSource({ kind: 'current' });
         errors.textContent = ''; diagnosticsToggle.hidden = true; setDiagnosticsOpen(false);
         reviewer?.reset(); pdfBuild = null; updateSyncHint();
         file = null; revision = null; editor.value = ''; editor.disabled = true;
         page = 1; pageGeometry = []; setPreviewMessage('读取主入口…');
-        await loadTree(); await openFile(path);
+        await loadTree(); await openFile(path, { duringSwitch: true });
         if (project.pdf_present) await loadLayout(); else setPreviewMessage('这个主入口还没有 PDF；点「编译」生成。');
         say(`已切换主入口 ${path}`);
         void reviewer?.refresh();
@@ -962,6 +1003,7 @@ window.PaperLatexWorkspace = (() => {
     });
 
     async function openFile(path, options = {}) {
+      if (switching && !options.duringSwitch) return false;
       if (path === file && !options.force && !editor.disabled) return true;
       if (!project || !await savedBeforeLeaving()) return false;
       const id = project.id, ticket = ++fileRequest, epoch = generation;
@@ -1454,6 +1496,7 @@ window.PaperLatexWorkspace = (() => {
     }
 
     async function compileOnce(reason = 'manual') {
+      if (project?.exists === false) { say('项目文件夹已不可用；请先修改项目位置。', true); return; }
       if (!project || switching || compiling) { if (compiling) pendingCompile = true; return; }
       // A new setting may be queued while an earlier save is in flight.
       // Wait until the observed tail is still current before using the engine.
@@ -1536,6 +1579,64 @@ window.PaperLatexWorkspace = (() => {
     });
 
     projectSelect.addEventListener('change', () => void selectProject(projectSelect.value));
+    locationPick.addEventListener('click', async () => {
+      const id = project?.id, epoch = generation;
+      if (!id || switching || compiling) return;
+      locationPick.disabled = true;
+      try {
+        const picked = await api('latex_ws_pick_folder', {});
+        if (id !== project?.id || epoch !== generation || disposed) return;
+        if (picked.cancelled) say('没有选择文件夹。');
+        else { locationRoot.value = picked.path; locationRoot.focus(); }
+      } catch (error) { if (id === project?.id && epoch === generation) say(`无法打开文件夹选择对话框：${error.message}`, true); }
+      finally { locationPick.disabled = !project; }
+    });
+    async function pickMainFile(input, button, boundProject = false) {
+      const id = project?.id, epoch = generation;
+      if (boundProject && (!id || switching || compiling)) return;
+      button.disabled = true;
+      try {
+        const picked = await api('latex_ws_pick_tex', {});
+        if (disposed || (boundProject && (id !== project?.id || epoch !== generation))) return;
+        if (picked.cancelled) say('没有选择主文件。');
+        else { input.value = picked.path; input.focus(); }
+      } catch (error) { if (!disposed && (!boundProject || id === project?.id && epoch === generation)) say(`无法打开主文件选择对话框：${error.message}`, true); }
+      finally { button.disabled = boundProject && !project; }
+    }
+    locationMainPick.addEventListener('click', () => void pickMainFile(locationMain, locationMainPick, true));
+    newMainPick.addEventListener('click', () => void pickMainFile(newMain, newMainPick));
+    locationSave.addEventListener('click', async () => {
+      const root = locationRoot.value.trim(), main = locationMain.value.trim(), id = project?.id;
+      if (!id || switching || compiling) return;
+      if (!root || !main) { say('请填写项目文件夹和主文件路径。', true); return; }
+      if (ai.busy || ai.proposal) { say('DSH 写作正在运行或有待处理的修改提案；请先完成或放弃。', true); return; }
+      const previousDisabled = editor.disabled;
+      switching = true; editor.disabled = true; locationRoot.disabled = locationMain.disabled = locationPick.disabled = locationMainPick.disabled = locationSave.disabled = true; mainSelect.disabled = true; compile.disabled = true;
+      let changed = false;
+      try {
+        if (!await savedBeforeLeaving(true) || id !== project?.id || disposed) return;
+        cancelTranslation(); cancelReads(); generation += 1;
+        const result = await api('latex_project_update', { id, root, main_path: main });
+        if (disposed || id !== project?.id) return;
+        project = result.project; projects = projects.map(item => item.id === id ? project : item);
+        changed = true; syncLocationFields();
+        resetPdfSource({ kind: 'current' });
+        errors.textContent = ''; diagnosticsToggle.hidden = true; setDiagnosticsOpen(false);
+        reviewer?.reset(); formulas?.clear(); formulas?.close(); pdfBuild = null; updateSyncHint();
+        file = null; revision = null; editor.value = ''; editor.disabled = true;
+        page = 1; pageGeometry = []; setPreviewMessage('读取项目…');
+        await loadTree();
+        if (!await openFile(project.main_path, { duringSwitch: true })) throw new Error('主文件未能载入');
+        if (project.pdf_present) await loadLayout(); else setPreviewMessage('这个主入口还没有 PDF；点「编译」生成。');
+        lastBuildOk = project.pdf_present ? true : null; autoPaused = false;
+        say(`已更新项目位置：${project.main_path}`); void reviewer?.refresh();
+      } catch (error) {
+        if (!disposed) say(changed ? `项目位置已更新，但读取失败：${error.message}。可刷新项目导航。` : `项目位置未修改：${error.message}`, true);
+      } finally {
+        switching = false; locationRoot.disabled = locationMain.disabled = locationPick.disabled = locationMainPick.disabled = locationSave.disabled = !project; mainSelect.disabled = compile.disabled = project?.exists === false;
+        if (!changed) editor.disabled = previousDisabled;
+      }
+    });
     createRun.addEventListener('click', async () => {
       const name = createName.value.trim();
       if (!name) { say('请填写项目名称。', true); return; }
@@ -1566,8 +1667,8 @@ window.PaperLatexWorkspace = (() => {
       const root = newRoot.value.trim();
       if (!root) { say('请填写项目文件夹的绝对路径。', true); return; }
       try {
-        const created = await api('latex_project_create', { root, ...(newTitle.value.trim() ? { title: newTitle.value.trim() } : {}), create_missing: newStarter.checked });
-        newRoot.value = ''; newTitle.value = ''; closeMenu();
+        const created = await api('latex_project_create', { root, ...(newMain.value.trim() ? { main_path: newMain.value.trim() } : {}), ...(newTitle.value.trim() ? { title: newTitle.value.trim() } : {}), create_missing: newStarter.checked });
+        newRoot.value = ''; newMain.value = ''; newTitle.value = ''; closeMenu();
         await refreshProjects(created.project.id);
         await selectProject(created.project.id);
         say(`已登记 ${created.project.root}`);
@@ -1790,7 +1891,8 @@ window.PaperLatexWorkspace = (() => {
         if (!valid()) return false;
         if (!await refreshProjects(preferred, valid) || !valid()) return false;
         const wanted = preferred || (project?.id && projects.some(item => item.id === project.id) ? project.id : projects[0]?.id);
-        if ((project || !view.hidden) && !await savedBeforeLeaving(true) || !valid()) return false;
+        if ((project || !view.hidden) && !await savedBeforeLeaving(true)) { projectSelect.value = project?.id || ''; return false; }
+        if (!valid()) return false;
         void loadSpelling();
         view.hidden = false;
         document.body.classList.add('latex-focused');
@@ -1807,6 +1909,7 @@ window.PaperLatexWorkspace = (() => {
     }
 
     async function close() {
+      if (switching) { say('正在更新项目，请稍候再关闭。', true); return; }
       ++openRequest;
       clearTimeout(timer); clearTimeout(compileTimer); closeMenu();
       if (!await savedBeforeLeaving(true)) return;

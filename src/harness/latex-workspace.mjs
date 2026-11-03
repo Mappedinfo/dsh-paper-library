@@ -44,13 +44,20 @@ function pickCommand(platform) {
   return null
 }
 
+function pickTexCommand(platform) {
+  if (platform === 'darwin') return { command: 'osascript', args: ['-e', 'tell application "System Events" to activate', '-e', 'POSIX path of (choose file with prompt "选择 LaTeX 主文件（.tex）")'] }
+  if (platform === 'linux') return { command: 'zenity', args: ['--file-selection', '--title=选择 LaTeX 主文件', '--file-filter=LaTeX 文件 | *.tex'] }
+  if (platform === 'win32') return { command: 'powershell', args: ['-Sta', '-NoProfile', '-Command', 'Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = "选择 LaTeX 主文件"; $d.Filter = "LaTeX (*.tex)|*.tex"; if ($d.ShowDialog() -eq "OK") { [Console]::Out.Write($d.FileName) }'] }
+  return null
+}
+
 async function defaultPickRun(command, args) {
   try {
     const { stdout } = await execFileAsync(command, args, { timeout: PICK_TIMEOUT, maxBuffer: 64 * 1024 })
     return { code: 0, stdout: String(stdout) }
   } catch (error) {
-    if (error.code === 'ENOENT') throw fail('这台机器上没有可用的文件夹选择对话框，请直接粘贴绝对路径。', 'LATEX_PICK_UNAVAILABLE', 409)
-    if (error.killed || error.signal === 'SIGTERM') throw fail('文件夹选择对话框超时未响应，请直接粘贴绝对路径。', 'LATEX_PICK_TIMEOUT', 409)
+    if (error.code === 'ENOENT') throw fail('这台机器上没有可用的选择对话框，请直接粘贴路径。', 'LATEX_PICK_UNAVAILABLE', 409)
+    if (error.killed || error.signal === 'SIGTERM') throw fail('选择对话框超时未响应，请直接粘贴路径。', 'LATEX_PICK_TIMEOUT', 409)
     // osascript and zenity exit 1 when the user cancels; PowerShell just prints nothing.
     return { code: typeof error.code === 'number' ? error.code : 1, stdout: String(error.stdout || '') }
   }
@@ -64,6 +71,17 @@ export async function pickFolder({ platform = process.platform, run = defaultPic
   const trimmed = stdout.trim()
   const picked = trimmed.length > 1 ? trimmed.replace(/\/+$/, '') : trimmed
   return picked ? { cancelled: false, path: picked } : { cancelled: true }
+}
+
+/** Select a main TeX file; containment is checked by the project worker. */
+export async function pickTex({ platform = process.platform, run = defaultPickRun } = {}) {
+  const command = pickTexCommand(platform)
+  if (!command) throw fail('这个平台还没有文件选择对话框，请直接填写主文件路径。', 'LATEX_PICK_UNAVAILABLE', 409)
+  const { stdout } = await run(command.command, command.args)
+  const picked = stdout.trim()
+  if (!picked) return { cancelled: true }
+  if (!/\.tex$/i.test(picked)) throw fail('请选择 .tex 主文件。', 'LATEX_PICK_INVALID', 400)
+  return { cancelled: false, path: picked }
 }
 
 /** Same home resolution order as the state store and `latexRoot`. */
@@ -274,6 +292,7 @@ export function createLatexWorkspace({ config = {}, dispatch, settings, library,
     if (action === 'latex_ws_create') return create({ ...input, signal })
     if (action === 'latex_ws_sync_attach') return attachSync({ root: input.root, strict: true })
     if (action === 'latex_ws_pick_folder') return pickFolder(run ? { run } : {})
+    if (action === 'latex_ws_pick_tex') return pickTex(run ? { run } : {})
     throw fail('未知 LaTeX 工作区操作。')
   }
 }

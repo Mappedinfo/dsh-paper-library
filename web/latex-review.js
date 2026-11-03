@@ -110,7 +110,9 @@ window.PaperLatexReview = (() => {
       if (draft || saving) { say('先保存或取消批注，再导出。', true); return; }
       try {
         if (format === 'pdf') {
-          const link = make('a'); link.href = `./latex-review-pdf/${encodeURIComponent(context().id)}`; link.download = 'manuscript-review.pdf'; link.click();
+          const current = context();
+          const binding = Number.isSafeInteger(current.binding_generation) ? `?binding_generation=${current.binding_generation}` : '';
+          const link = make('a'); link.href = `./latex-review-pdf/${encodeURIComponent(current.id)}${binding}`; link.download = 'manuscript-review.pdf'; link.click();
           say('正在导出当前编译的批注 PDF；源码批注附为 JSON，不修改原 PDF。'); return;
         }
         const result = await api('latex_review_export', { id: context().id, format });
