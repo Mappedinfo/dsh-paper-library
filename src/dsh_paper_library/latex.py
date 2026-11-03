@@ -1088,10 +1088,6 @@ def dispatch(library, request):
             with project_lock(library, project_id, compiling=True, wait=0):
                 verify()
                 return function(library, **args)
-    if action in {"latex_write", "latex_project_archive", "latex_project_restore", "latex_project_link_reading",
-                  "latex_asset_import", "latex_review_put", "latex_review_delete", "latex_review_export", "latex_clean"}:
-        with project_lock(library, project_id):
-            verify()
-            return function(library, **args)
-    verify()
-    return function(library, **args)
+    with project_lock(library, project_id):
+        verify()
+        return function(library, **args)
