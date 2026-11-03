@@ -53,10 +53,14 @@ test('merged writing panel aliases share one tab, content root and open state',(
   f.panels.registerPanel({id:'latex-ai',aliases:['latex-review'],label:'批注与写作',element});
   assert.ok(f.ids.get('reading-sidebar-latex-ai'));
   assert.equal(f.ids.has('reading-sidebar-latex-review'),false,'An alias never adds a second sidebar tab');
+  f.panels.setReadingActive(false);
+  f.panels.setSide('right');
   f.panels.setExternal(true);f.panels.show('latex-review');
   assert.equal(f.panels.visible('latex-ai'),true);assert.equal(f.panels.visible('latex-review'),true);
   assert.equal(element.hidden,false);assert.equal(f.libraryRoot.dataset.sidebarPanel,'latex-ai');
   f.panels.close('latex-review');assert.equal(f.panels.visible('latex-ai'),false);
+  assert.equal(f.workspace.classList.contains('shared-sidebar-open'),false);
+  assert.equal(f.workspace.dataset.sidebarSide,'right');
   f.panels.show('latex-ai');f.panels.setExternal(false);
   assert.equal(element.hidden,true);assert.equal(f.panels.visible('latex-review'),false);
   f.panels.dispose();assert.equal(element.parentNode,null);

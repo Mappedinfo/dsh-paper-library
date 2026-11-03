@@ -155,10 +155,14 @@ test('closing refuses to discard a writing-tool draft', async () => {
 
 test('the combined rail keeps drafts and collapses writing to one history button', async () => {
   const registered = []; let active = null
+  const setActive = id => {
+    active = id
+    for (const item of registered) item.element.hidden = item.id !== active
+  }
   const rail = {
     registerPanel(panel) { registered.push(panel); panel.element.hidden = true },
-    setExternal(value) { if (!value) active = null },
-    show(id) { active = id }, close(id) { if (active === id) active = null }, visible: id => active === id,
+    setExternal(value) { if (!value) setActive(null) },
+    show: setActive, close(id) { if (active === id) setActive(null) }, visible: id => active === id,
   }
   const f = await fixture(undefined, { review: true, rail })
   assert.equal(registered.length, 1)
@@ -166,6 +170,13 @@ test('the combined rail keeps drafts and collapses writing to one history button
   assert.equal(registered[0].label, '批注与写作')
   assert.deepEqual(Array.from(registered[0].aliases), ['latex-review'])
   const panel = registered[0].element
+  const navigator = f.ids.get('latex-navigator'), navToggle = f.ids.get('latex-nav-toggle')
+  assert.equal(panel.hidden, false)
+  assert.equal(navigator.hidden, false)
+  await navToggle.dispatch('click')
+  assert.equal(navigator.hidden, true)
+  assert.equal(panel.hidden, false, 'Collapsing project navigation keeps annotations visible')
+  await navToggle.dispatch('click')
   assert.equal(f.ids.get('latex-review-panel').parentElement, panel)
   assert.equal(f.ids.get('latex-ai').parentElement, panel)
   assert.equal(f.ids.get('latex-review-open').hidden, true)
@@ -185,6 +196,8 @@ test('the combined rail keeps drafts and collapses writing to one history button
   assert.equal(f.ids.get('latex-review-composer').hidden, false)
   await f.ids.get('latex-ai-open').dispatch('click')
   assert.equal(active, null)
+  assert.equal(panel.hidden, true)
+  assert.equal(navigator.hidden, false, 'Closing annotations keeps project navigation visible')
   await f.ids.get('latex-ai-open').dispatch('click')
   assert.equal(active, 'latex-ai')
   assert.equal(f.ids.get('latex-review-comment').value, 'Synthetic manual annotation')
@@ -873,19 +886,26 @@ test('navigation and focus modes preserve split and reveal a selected source or 
     ? { value: { latex_auto_compile: false, ...args.patch }, revision: '2' }
     : undefined)
   const nav = f.ids.get('latex-navigator'), toggle = f.ids.get('latex-nav-toggle')
+  const view = f.ids.get('latex-view')
+  const surface = view.querySelector('.latex-editor-surface')
   const source = f.ids.get('latex-current-file').parentElement
   const preview = f.ids.get('latex-pane-pdf').parentElement
   const splitter = f.ids.get('latex-splitter')
+  assert.equal(nav.parentElement, view)
+  assert.equal(surface.parentElement, view)
+  assert.equal(surface.querySelector('.latex-topbar').parentElement, surface)
+  assert.equal(surface.querySelector('.latex-footer').parentElement, surface)
 
   await splitter.dispatch('keydown', { key: 'ArrowRight' })
   const split = f.ui.testHooks.state().split
   await toggle.dispatch('click')
   assert.equal(nav.hidden, true)
   assert.equal(toggle.getAttribute('aria-expanded'), 'false')
-  assert.equal(nav.parentElement.classList.contains('latex-nav-collapsed'), true)
+  assert.equal(view.classList.contains('latex-nav-collapsed'), true)
   await toggle.dispatch('click')
   assert.equal(nav.hidden, false)
   assert.equal(toggle.getAttribute('aria-expanded'), 'true')
+  assert.equal(view.classList.contains('latex-nav-collapsed'), false)
 
   await f.ids.get('latex-layout-source').dispatch('click')
   assert.equal(source.hidden, false)

@@ -190,3 +190,27 @@ test('accepted root navigation cancels old paper reads while a refused surface c
   assert.equal(blocked.state.itemTicket, 0)
   assert.equal(blocked.state.pageTicket, 0)
 })
+
+test('one guarded return button follows writing navigation, including the direct-entry fallback', () => {
+  const f = fixture()
+  const container = () => ({ prepend(node) { node.parentNode = this } })
+  const libraryToolbar = container(), writingToolbar = container(), navigation = container()
+  const returnButton = { parentNode: libraryToolbar }
+  const query = f.context.document.querySelector
+  f.context.document.querySelector = selector => selector === '.topbar-actions' ? libraryToolbar : query(selector)
+  f.elements.set('library-return-to-dsh', returnButton)
+  f.area.querySelector = () => navigation
+  f.writing.querySelector = () => writingToolbar
+
+  f.context.placeWorkspaceNavigation(true)
+  assert.equal(f.area.parentNode, f.writing)
+  assert.equal(returnButton.parentNode, navigation)
+
+  f.context.placeWorkspaceNavigation(false)
+  assert.equal(f.area.parentNode, f.home.parentNode)
+  assert.equal(returnButton.parentNode, libraryToolbar)
+
+  f.area.querySelector = () => null
+  f.context.placeWorkspaceNavigation(true)
+  assert.equal(returnButton.parentNode, writingToolbar)
+})

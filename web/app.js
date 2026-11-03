@@ -1788,8 +1788,14 @@ function bindWorkspaceVersions() {
 function placeWorkspaceNavigation(writing = false) {
   const area = $('workspace-navigation-area'), home = $('workspace-navigation-home');
   const writingBar = writing ? document.querySelector('#latex-view .latex-topbar') : null;
-  if (writingBar) { if (area.parentNode !== writingBar) writingBar.prepend(area); }
-  else if (home?.parentNode && area.parentNode !== home.parentNode) home.after(area);
+  if (area && writingBar) { if (area.parentNode !== writingBar) writingBar.prepend(area); }
+  else if (area && home?.parentNode && area.parentNode !== home.parentNode) home.after(area);
+  const returnButton = $('library-return-to-dsh');
+  if (!returnButton) return;
+  const returnHost = writingBar
+    ? area?.querySelector('.workspace-navigation') || writingBar.querySelector('.latex-toolbar')
+    : document.querySelector('.topbar-actions');
+  if (returnHost && returnButton.parentNode !== returnHost) returnHost.prepend(returnButton);
 }
 function applyWorkspaceNavigation(value) {
   const pane = document.querySelector('.library-pane');
@@ -1904,8 +1910,11 @@ async function prepareReturnToDsh(){
   }catch(error){toast(`无法返回 DSH：${error.message||error}。草稿仍在当前页面。`,true);return false;}
   finally{document.body.inert=wasInert;returningToDsh=false;}
 }
-for(const host of [document.querySelector('.topbar-actions'),document.querySelector('.board-toolbar'),document.querySelector('.latex-toolbar')])
-  window.PaperReturnToDsh?.create({host,prepare:prepareReturnToDsh,onError:error=>toast(error.message||String(error),true)});
+for(const host of [document.querySelector('.topbar-actions'),document.querySelector('.board-toolbar')]) {
+  const button = window.PaperReturnToDsh?.create({host,prepare:prepareReturnToDsh,onError:error=>toast(error.message||String(error),true)});
+  if (button && host.classList.contains('topbar-actions')) button.id = 'library-return-to-dsh';
+}
+placeWorkspaceNavigation(latexUI?.isOpen() === true);
 $('board-open').addEventListener('click',()=>{void boardUI?.open();});
 let boardPickerTicket=0,boardPickerTimer=null;
 for(const button of document.querySelectorAll('#board-paper-dialog .dialog-close'))button.addEventListener('click',()=>$('board-paper-dialog').close?.());

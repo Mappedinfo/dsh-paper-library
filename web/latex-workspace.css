@@ -6,6 +6,7 @@
 #latex-view {
   --latex-path-font: 'PaperPixel', 'Andale Mono', Monaco, ui-monospace, monospace;
   --latex-pane-head-height: 38px;
+  --latex-nav-width: clamp(168px, 16vw, 214px);
   --latex-accent-color: var(--ink);
   --latex-active-bg: var(--dsw-specific-sidebar-nav-item-active, var(--teal-light));
   --latex-context-bg: color-mix(in srgb, var(--dsw-specific-sidebar-nav-item-active, var(--ink)) 34%, var(--surface));
@@ -13,8 +14,10 @@
   --latex-active-border: var(--dsw-alias-border-l4, var(--line));
   grid-column: 1 / -1;
   grid-row: 1;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: var(--latex-nav-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: 'navigator editor';
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -23,6 +26,8 @@
   font-size: 13px;
 }
 #latex-view[hidden] { display: none; }
+#latex-view.latex-nav-collapsed { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'editor'; }
+.latex-editor-surface { grid-area: editor; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 #latex-view[data-latex-path-font=mono] { --latex-path-font: ui-monospace, SFMono-Regular, Menlo, monospace; }
 #latex-view[data-latex-path-font=system] { --latex-path-font: var(--sans); }
 #latex-view[data-latex-theme=parchment] {
@@ -71,6 +76,11 @@ body.latex-focused .workspace[data-sidebar-side=right].shared-sidebar-open > .li
 body.latex-focused .workspace[data-sidebar-side=left].shared-sidebar-open > .library-pane.shared-reading-sidebar { grid-column: 1; }
 body.latex-focused #latex-view { grid-column: 1; grid-row: 1; height: 100%; }
 body.latex-focused .workspace[data-sidebar-side=left].shared-sidebar-open #latex-view { grid-column: 2; }
+body.latex-focused .workspace[data-sidebar-side=right] #latex-view:not(.latex-nav-collapsed) {
+  grid-template-columns: minmax(0, 1fr) var(--latex-nav-width);
+  grid-template-areas: 'editor navigator';
+}
+body.latex-focused .workspace[data-sidebar-side=right] .latex-navigator { border-left: 1px solid var(--line); border-right: 0; }
 body.latex-focused #reading-rail-resizer { z-index: 27; }
 /* The rail's own × is only offered in the focused reader by default; this view is focused too. */
 body.latex-focused .reading-sidebar-header #reading-sidebar-close { display: block; padding: 4px; }
@@ -139,10 +149,7 @@ body > #latex-view { height: 100dvh; }
 .latex-sync-state { font-size: 11px; color: var(--muted); }
 .latex-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 
-/* The project navigator stays independent from the editor's source/PDF split. */
-.latex-content { display: grid; grid-template-columns: 214px minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
-.latex-content { position: relative; }
-.latex-content.latex-nav-collapsed { grid-template-columns: minmax(0, 1fr); }
+.latex-content { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 1 auto; min-height: 0; position: relative; }
 .latex-breadcrumb:has(#latex-source-note) { display: flex; align-items: center; gap: 3px; flex-wrap: nowrap; height: var(--latex-pane-head-height); box-sizing: border-box; padding: 4px 6px; }
 .latex-breadcrumb > span { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .latex-breadcrumb .button { flex: 0 0 auto; height: 28px; min-height: 28px; padding: 3px 5px; font: 11px/1.5 var(--sans); }
@@ -229,9 +236,9 @@ body > #latex-view { height: 100dvh; }
 .latex-review-exports { border-top: 1px solid var(--line); flex: 0 0 auto; }
 .latex-review-exports .button { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); padding: 5px 8px; min-height: 30px; }
 .latex-review-exports .button:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); border-color: var(--dsw-alias-border-l4,var(--line)); }
-.latex-navigator { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: var(--surface); }
+.latex-navigator { grid-area: navigator; display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: var(--surface); }
 .latex-navigator[hidden] { display: none; }
-.latex-nav-tabs { display: flex; align-items: center; gap: 2px; padding: 4px 6px; height: var(--latex-pane-head-height); box-sizing: border-box; flex-shrink: 0; border-bottom: 1px solid var(--line); }
+.latex-nav-tabs { display: flex; align-items: center; gap: 2px; padding: 4px 6px; height: 43px; box-sizing: border-box; flex-shrink: 0; border-bottom: 1px solid var(--line); }
 .latex-nav-tab { border: 0; background: transparent; color: var(--muted); border-radius: 5px; padding: 5px 8px; cursor: pointer; }
 .latex-nav-tab[aria-selected=true] { background: var(--latex-active-bg); color: var(--ink); }
 #latex-nav-refresh { margin-left: auto; }

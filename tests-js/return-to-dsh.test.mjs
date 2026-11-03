@@ -65,7 +65,7 @@ test('library return checks the active workbench and preserves the page after a 
   assert.ok(start >= 0 && end > start)
   const errors = [], state = { active: null }, document = { body: { inert: false }, fullscreenElement: null }
   let boardSaved = true, latexOpen = false, flushFails = false, chatCalls = 0
-  const context = { state, document, readerPaperId: null, restoringReader: false, restoringInkDraft: false, inkSaveBusy: false, inkDraftStorageBlocked: false,
+  const context = { state, document, readerPaperId: null, annotationSaveBusy: false, restoringReader: false, restoringInkDraft: false, inkSaveBusy: false, inkDraftStorageBlocked: false,
     pdfReader: { isInking: () => false }, handwritingUI: { isOpen: () => false },
     boardUI: { isOpen: () => true, prepareLeave: async () => boardSaved },
     latexUI: { isOpen: () => latexOpen, close: async () => {} },

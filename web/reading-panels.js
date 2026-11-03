@@ -133,7 +133,12 @@ window.PaperReadingPanels = (() => {
     }
     function close(name) {
       if(name===null||name===undefined||disposed)return;
-      name=known(name);if(name==='chat')chatOpen=false;else if(sidebar===name)sidebar=null;else return;
+      name=known(name);
+      if(name==='chat')chatOpen=false;
+      else if(sidebar===name){
+        sidebar=null;
+        if(extraPanels.has(name))sharedOpen=false;
+      }else return;
       render();
     }
     function visible(name) {name=known(name);return !disposed&&(name==='chat'?chatOpen&&!collapsed:sidebar===name);}

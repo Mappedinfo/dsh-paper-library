@@ -1,4 +1,5 @@
 .workspace-navigation{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;min-width:0;padding:5px 0;color:var(--ink,#16181c);font:13px/1.45 var(--sans,system-ui,sans-serif);border-bottom:1px solid var(--line,#ddd)}
+.workspace-navigation>.return-to-dsh{flex:none;min-height:30px;padding:5px 7px;font-size:12px;white-space:nowrap}
 .workspace-navigation-roots{display:flex;align-items:center;flex-wrap:wrap;gap:4px;flex:0 1 auto;min-width:0;max-width:100%}.workspace-root-divider{color:var(--muted,#61666b);padding:0 3px}
 .workspace-root-button,.workspace-crumb-button,.workspace-nav-button{box-sizing:border-box;min-height:30px;padding:5px 9px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted,#61666b);font:inherit;cursor:pointer;white-space:nowrap}
 .workspace-root-button:hover:not(:disabled),.workspace-crumb-button:hover:not(:disabled),.workspace-nav-button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,#f1f3f5);color:var(--ink,#16181c)}

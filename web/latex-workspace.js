@@ -351,7 +351,7 @@ window.PaperLatexWorkspace = (() => {
     previewToolbar.append(tabs, previewHead, pdfTools, mediaHead);
     right.append(previewToolbar, panePdf, paneMedia, paneAi, paneVersion);
     body.append(left, splitter, right);
-    content.append(navigator, body);
+    content.append(body);
 
     const status = make('p', 'latex-status'); status.id = 'latex-status'; status.setAttribute('role', 'status');
     const conflictBar = make('div', 'latex-conflict'); conflictBar.id = 'latex-conflict'; conflictBar.hidden = true;
@@ -362,7 +362,9 @@ window.PaperLatexWorkspace = (() => {
     const footer = make('footer', 'latex-footer');
     footer.append(conflictBar, status);
     const topbar = make('div', 'latex-topbar'); topbar.append(toolbar, menu);
-    view.append(topbar, errors, content, footer);
+    const editorSurface = make('div', 'latex-editor-surface');
+    editorSurface.append(topbar, errors, content, footer);
+    view.append(navigator, editorSurface);
     let layout = 'split';
     function setLayout(mode) {
       if (!layoutButtons.has(mode)) return;
@@ -377,7 +379,7 @@ window.PaperLatexWorkspace = (() => {
     }
     navToggle.addEventListener('click', () => {
       navigator.hidden = !navigator.hidden;
-      content.classList.toggle('latex-nav-collapsed', navigator.hidden);
+      view.classList.toggle('latex-nav-collapsed', navigator.hidden);
       navToggle.title = navigator.hidden ? '展开侧边导航' : '收起侧边导航';
       navToggle.setAttribute('aria-expanded', String(!navigator.hidden));
       if (layout !== 'source') requestResize();
@@ -2174,7 +2176,7 @@ window.PaperLatexWorkspace = (() => {
       cancelTranslation();
       projectSearch?.close();
       cancelReads();
-      showRail(false);
+      showRail(false, { release: true });
       view.hidden = true;
       document.body.classList.remove('latex-focused');
       notifyContext(true);
@@ -2185,7 +2187,7 @@ window.PaperLatexWorkspace = (() => {
       try { rail.registerPanel({ id: 'latex-ai', aliases: ['latex-review'], label: '批注与写作', element: writingPanel }); }
       catch (error) { say(`侧栏不可用：${error.message}`, true); }
     }
-    function showRail(open) {
+    function showRail(open, { release = false } = {}) {
       if (!open) cancelAiRun();
       if (!rail?.setExternal) {
         if (open) { if (layout === 'source') setLayout('split'); setTab('ai'); void reviewer?.refresh(); }
@@ -2194,9 +2196,15 @@ window.PaperLatexWorkspace = (() => {
         return;
       }
       try {
-        rail.setExternal(open);
-        if (open) { rail.show('latex-ai'); void aiStatus(); void reviewer?.refresh(); }
-        else rail.close('latex-ai');
+        if (open) {
+          rail.setExternal(true);
+          rail.show('latex-ai');
+          void aiStatus();
+          void reviewer?.refresh();
+        } else {
+          rail.close('latex-ai');
+          if (release) rail.setExternal(false);
+        }
         syncRailToggle();
       } catch (error) { say(`侧栏不可用：${error.message}`, true); }
     }
