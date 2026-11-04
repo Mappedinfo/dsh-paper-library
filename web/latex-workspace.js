@@ -16,7 +16,8 @@ window.PaperLatexWorkspace = (() => {
   const AUTOSAVE_MS = 900;
   const AUTOCOMPILE_MS = 2500;
   const MAX_RENDERED_PAGES = 3;
-  const MAX_CACHED_BYTES = 48 * 1024 * 1024;
+  const MAX_PREFETCH_DISPLAY_BYTES = 48 * 1024 * 1024;
+  const PDF_PAGE_GAP = 16, PDF_PREVIEW_PADDING = 12;
   const MAX_PDF_SEARCH_HITS = 120;
   const SPLIT_MIN = 25, SPLIT_MAX = 75;
   const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_path_font: 'pixel', latex_accent: 'system', latex_split: 50, latex_sync_folder: true };
@@ -39,7 +40,7 @@ window.PaperLatexWorkspace = (() => {
     let lastBuildOk = null, autoPaused = false, pendingCompile = false;
     const rendered = new Map();
     const pdfLoads = new Map();
-    let pdfWindowKey = '', pdfStages = new Map(), pdfScrollTop = 0, pdfScrollDirection = 1;
+    let pdfWindowKey = '', pdfStages = new Map(), pdfPriority = new Set(), pdfScrollTop = 0, pdfScrollDirection = 1;
     let pendingConflict = null;
     let settings = { ...DEFAULT_SETTINGS };
     let settingsRevision = null;
@@ -84,17 +85,18 @@ window.PaperLatexWorkspace = (() => {
     const diagnosticsToggle = make('button', 'button subtle latex-diagnostics-toggle', '编译状态'); diagnosticsToggle.id = 'latex-diagnostics-toggle'; diagnosticsToggle.type = 'button';
     diagnosticsToggle.setAttribute('aria-expanded', 'false'); diagnosticsToggle.setAttribute('aria-controls', 'latex-errors');
     diagnosticsToggle.hidden = true;
-    const autoToggle = make('button', 'button subtle latex-auto-toggle', '自动编译');
+    const autoToggle = make('button', 'button subtle latex-switch', '自动编译');
     autoToggle.id = 'latex-auto-state'; autoToggle.type = 'button';
     autoToggle.setAttribute('role', 'switch'); autoToggle.setAttribute('aria-label', '自动编译');
     const mainLabel = make('span', 'latex-main'); mainLabel.id = 'latex-main';
     const mainSelect = make('select'); mainSelect.id = 'latex-entry'; mainSelect.setAttribute('aria-label', '编译主文件');
     const saveState = make('span', 'latex-save-state'); saveState.id = 'latex-save-state'; saveState.setAttribute('role', 'status');
-    const aiToggle = make('button', 'button subtle', '批注与写作'); aiToggle.id = 'latex-ai-open'; aiToggle.type = 'button';
+    const aiToggle = make('button', 'button subtle latex-switch', '批注与写作'); aiToggle.id = 'latex-ai-open'; aiToggle.type = 'button';
+    aiToggle.setAttribute('role', 'switch'); aiToggle.setAttribute('aria-checked', 'false'); aiToggle.setAttribute('aria-controls', 'latex-writing-panel');
     const reviewToggle = make('button', 'button subtle', '自审'); reviewToggle.id = 'latex-review-open'; reviewToggle.type = 'button';
     reviewToggle.hidden = true; // Keep the old action addressable without a second toolbar entry.
     const reviewDivider = make('span', 'latex-toolbar-divider'); reviewDivider.setAttribute('role', 'separator'); reviewDivider.setAttribute('aria-orientation', 'vertical');
-    const navToggle = make('button', 'button subtle latex-nav-toggle', '侧边导航'); navToggle.id = 'latex-nav-toggle'; navToggle.type = 'button';
+    const navToggle = make('button', 'button subtle latex-switch', '侧边导航'); navToggle.id = 'latex-nav-toggle'; navToggle.type = 'button';
     navToggle.setAttribute('aria-controls', 'latex-navigator'); navToggle.setAttribute('aria-expanded', 'true');
     const layoutControls = make('div', 'latex-layout-controls'); layoutControls.setAttribute('role', 'group'); layoutControls.setAttribute('aria-label', '工作区视图');
     const layoutButtons = new Map();
@@ -335,24 +337,19 @@ window.PaperLatexWorkspace = (() => {
 
     const paneAi = make('div', 'latex-pane'); paneAi.id = 'latex-pane-ai'; paneAi.setAttribute('role', 'tabpanel'); paneAi.hidden = Boolean(rail);
     const writingPanel = make('section', 'latex-writing-panel'); writingPanel.id = 'latex-writing-panel'; writingPanel.setAttribute('aria-label', '批注与写作');
-    const aiSection = make('section', 'latex-ai'); aiSection.id = 'latex-ai';
-    const historyButton = make('button', 'button subtle latex-writing-history-toggle', '写作记录');
-    historyButton.id = 'latex-writing-history'; historyButton.type = 'button';
-    const historyBody = make('div', 'latex-writing-history-body');
-    historyBody.id = 'latex-writing-history-body'; historyBody.hidden = true;
-    historyButton.setAttribute('aria-controls', historyBody.id);
-    historyButton.setAttribute('aria-expanded', 'false');
     const aiModel = make('select'); aiModel.id = 'latex-ai-model'; aiModel.setAttribute('aria-label', 'DSH 写作模型');
     const writingModelLabel = make('label', 'latex-menu-label', 'DSH 写作模型'); writingModelLabel.htmlFor = aiModel.id;
-    writingModelSettings.append(writingModelLabel, aiModel, make('p', 'latex-menu-hint', '用于批注提问与修改提案；翻译模型在下方单独设置。'));
-    const aiStatusLine = make('p', 'latex-ai-route'); aiStatusLine.id = 'latex-ai-route'; aiStatusLine.setAttribute('role', 'status');
-    const historyList = make('div', 'latex-writing-history-list'); historyList.id = 'latex-writing-history-list';
+    const aiStatusLine = make('p', 'latex-menu-hint'); aiStatusLine.id = 'latex-ai-route'; aiStatusLine.hidden = true;
+    writingModelSettings.append(writingModelLabel, aiModel, make('p', 'latex-menu-hint', '用于批注提问与修改提案；翻译模型在下方单独设置。'), aiStatusLine);
+    const detachedProposal = make('div', 'latex-menu-section'); detachedProposal.id = 'latex-detached-proposal'; detachedProposal.hidden = true;
+    detachedProposal.append(make('strong', 'latex-menu-label', '待处理的旧提案'), make('p', 'latex-menu-hint', '原批注不可用，可在这里处理这份提案。'));
+    menu.append(detachedProposal);
+    const proposalBox = make('section', 'latex-review-pending-proposal');
     const aiProposal = make('div', 'latex-ai-proposal'); aiProposal.id = 'latex-ai-proposal';
     const aiAccept = make('button', 'button primary', '接受并写入'); aiAccept.id = 'latex-ai-accept'; aiAccept.type = 'button';
     const aiDiscard = make('button', 'button subtle', '放弃'); aiDiscard.id = 'latex-ai-discard'; aiDiscard.type = 'button';
     const aiActions = make('div', 'latex-ai-actions'); aiActions.append(aiAccept, aiDiscard);
-    historyBody.append(aiStatusLine, aiProposal, aiActions, historyList);
-    aiSection.append(historyButton, historyBody);
+    proposalBox.append(aiProposal, aiActions);
     paneAi.append(writingPanel);
 
     const paneVersion = make('div', 'latex-pane'); paneVersion.id = 'latex-pane-version'; paneVersion.setAttribute('role', 'tabpanel');
@@ -407,12 +404,16 @@ window.PaperLatexWorkspace = (() => {
       navToggle.setAttribute('aria-expanded', String(!navigator.hidden));
       if (layout !== 'source') requestResize();
     });
-    const reviewPanel = make('section', 'latex-review-panel'); reviewPanel.id = 'latex-review-panel'; reviewPanel.setAttribute('aria-label', '我的批注');
-    writingPanel.append(reviewPanel, aiSection);
+    const reviewPanel = make('section', 'latex-review-panel'); reviewPanel.id = 'latex-review-panel'; reviewPanel.setAttribute('aria-label', '批注');
+    writingPanel.append(reviewPanel);
     const reviewer = window.PaperLatexReview?.create({ root: reviewPanel, api,
       context: () => ({ id: project?.id, main: project?.main_path, binding_generation: project?.binding_generation, file, revision, dirty, editor, build: pdfBuild }),
       show: () => showReview(),
       onAsk: note => aiRun('ask', note), onPropose: note => aiRun('propose', note), onStop: () => cancelAiRun(),
+      onDetachedProposal(element) {
+        detachedProposal.hidden = !element;
+        if (element && element.parentElement !== detachedProposal) detachedProposal.append(element);
+      },
       revealSource: async anchor => {
         if (!await openFile(anchor.path, { force: true })) return;
         if (revision !== anchor.revision) { say('源码已变化，原批注待重定位；未按旧偏移选择。', true); void reviewer.refresh(); return; }
@@ -447,7 +448,7 @@ window.PaperLatexWorkspace = (() => {
     function setTab(name) {
       if (name !== 'pdf') clearPdfSelection();
       tab = name;
-      if (!rail) aiToggle.setAttribute('aria-pressed', String(name === 'ai'));
+      if (!rail) syncRailToggle();
       previewHead.hidden = name !== 'pdf'; pdfTools.hidden = name !== 'pdf'; mediaHead.hidden = name !== 'media';
       for (const [candidate, button] of tabButtons) {
         const active = candidate === name;
@@ -681,7 +682,7 @@ window.PaperLatexWorkspace = (() => {
       event.stopPropagation();
       menu.hidden = !menu.hidden;
       menuButton.setAttribute('aria-expanded', String(!menu.hidden));
-      if (!menu.hidden) { void refreshWorkspace(); void loadReadingProjects(); void loadTranslationSettings(); }
+      if (!menu.hidden) { void refreshWorkspace(); void loadReadingProjects(); void loadTranslationSettings(); void aiStatus(); }
     });
     let readingRequest = 0;
     async function loadReadingProjects() {
@@ -1117,6 +1118,7 @@ window.PaperLatexWorkspace = (() => {
     function clearRendered() {
       clearPdfSelection();
       pdfStages.clear(); cancelPdfLoads(); pdfWindowKey = '';
+      pdfPriority.clear();
       pdfScrollTop = 0; pdfScrollDirection = 1;
       preview.setAttribute('aria-busy', 'false');
       for (const item of rendered.values()) URL.revokeObjectURL(item.url);
@@ -1165,7 +1167,7 @@ window.PaperLatexWorkspace = (() => {
     }
     function previewWidth(element, factor = 1) {
       const width = element.clientWidth || right.clientWidth || 600;
-      return Math.max(80, width - 24) * factor;
+      return Math.max(80, width - PDF_PREVIEW_PADDING * 2) * factor;
     }
     function density(width, geometry) {
       // Round upwards into small buckets: repeated splitter movements reuse pages
@@ -1176,7 +1178,7 @@ window.PaperLatexWorkspace = (() => {
       let top = 0;
       return pageGeometry.map(geometry => {
         const height = width * geometry.height / geometry.width;
-        const metric = { top, height }; top += height + 16; return metric;
+        const metric = { top, height }; top += height + PDF_PAGE_GAP; return metric;
       });
     }
     function pdfPageAt(metrics, point) {
@@ -1185,15 +1187,20 @@ window.PaperLatexWorkspace = (() => {
       return low + 1;
     }
     function pdfNearby(metrics, wanted, scroll) {
-      const top = scroll ? metrics[wanted - 1].top : (preview.scrollTop || 0);
+      const top = (scroll ? metrics[wanted - 1].top : (preview.scrollTop || 0)) - PDF_PREVIEW_PADDING;
       const first = pdfPageAt(metrics, top), firstMetric = metrics[first - 1];
       const visibleStart = firstMetric.top + firstMetric.height <= top && first < pageCount ? first + 1 : first;
-      const last = pdfPageAt(metrics, top + Math.max(1, preview.clientHeight) - .01);
+      const bottom = top + Math.max(1, preview.clientHeight);
+      const last = pdfPageAt(metrics, bottom - .01);
+      // The incoming page becomes urgent as soon as the gap reaches the viewport.
+      const gapNeighbor = pdfPageAt(metrics, bottom + PDF_PAGE_GAP);
       // Keep the outgoing page until it leaves the viewport. Use the freed
       // slot for the approaching page while the current one is still visible.
       const approaching = pdfScrollDirection < 0 ? Math.min(visibleStart, Math.max(visibleStart - 1, last - MAX_RENDERED_PAGES + 1)) : visibleStart;
       const start = Math.max(1, wanted - MAX_RENDERED_PAGES + 1, Math.min(wanted, approaching, pageCount - MAX_RENDERED_PAGES + 1));
-      return Array.from({ length: Math.min(MAX_RENDERED_PAGES, pageCount - start + 1) }, (_, index) => start + index);
+      const pages = Array.from({ length: Math.min(MAX_RENDERED_PAGES, pageCount - start + 1) }, (_, index) => start + index);
+      const priorityStart = pdfScrollDirection < 0 ? first : visibleStart;
+      return { pages, priority: new Set([wanted, ...pages.filter(number => number >= priorityStart && number <= gapNeighbor)]) };
     }
     async function renderPage(number, { scroll = true, retry = false } = {}) {
       if (!project || !pageCount) return;
@@ -1209,7 +1216,8 @@ window.PaperLatexWorkspace = (() => {
       pageLabel.textContent = `第 ${wanted} / ${pageCount} 页`;
       updateSyncHint();
       pagePrev.disabled = page <= 1; pageNext.disabled = page >= pageCount;
-      const nearby = pdfNearby(metrics, wanted, scroll);
+      const { pages: nearby, priority } = pdfNearby(metrics, wanted, scroll);
+      pdfPriority = priority;
       const sourceKey = source.kind === 'version' ? `version:${source.versionId}:${source.reviewPdfVersion || ''}` : 'current';
       const keys = new Map(nearby.map(value => [value, `${id}:${sourceKey}:${value}:${pdfVersion}:${density(width, pageGeometry[value - 1])}`]));
       const windowKey = `${width}:${[...keys.values()].join('|')}`;
@@ -1233,7 +1241,7 @@ window.PaperLatexWorkspace = (() => {
           stage.style.width = `${width}px`; stage.style.height = `${item.height}px`;
           stage.dataset.page = String(number); stage.dataset.renderKey = keys.get(number); pdfStages.set(number, stage); preview.append(stage);
           patchPdfSearch(stage);
-          if (number !== nearby[nearby.length - 1]) { const gap = make('div', 'latex-page-spacer'); gap.style.height = '16px'; gap.style.flex = '0 0 auto'; preview.append(gap); }
+          if (number !== nearby[nearby.length - 1]) { const gap = make('div', 'latex-page-spacer'); gap.style.height = `${PDF_PAGE_GAP}px`; gap.style.flex = '0 0 auto'; preview.append(gap); }
         }
         preview.append(after);
         cancelPdfLoads();
@@ -1259,15 +1267,19 @@ window.PaperLatexWorkspace = (() => {
             try { result = await resultPromise; } finally { pdfLoads.delete(stage); }
             if (!valid()) return;
             image = imageUrl(result);
-            let bytes = [...rendered.values()].reduce((sum, item) => sum + item.bytes, 0);
-            if (number === page) for (const [oldKey, old] of rendered) {
-              if (bytes + image.bytes <= MAX_CACHED_BYTES && rendered.size < MAX_RENDERED_PAGES) break;
-              URL.revokeObjectURL(old.url); rendered.delete(oldKey); bytes -= old.bytes;
-            }
-            if (number !== page && (rendered.size >= MAX_RENDERED_PAGES || bytes + image.bytes > MAX_CACHED_BYTES)) { URL.revokeObjectURL(image.url); stage.dataset.renderState = 'idle'; return; }
             rendered.set(key, image);
           }
           if (!valid()) return;
+          if (!pdfPriority.has(number)) {
+            const mountedBytes = [...pdfStages.values()].reduce((sum, item) =>
+              sum + (item.dataset.renderState === 'ready' ? rendered.get(item.dataset.renderKey)?.bytes || 0 : 0), 0);
+            // Retain the compressed raster in the bounded window. A visible
+            // seam can promote it without another request or blanking its neighbor.
+            if (mountedBytes + image.bytes > MAX_PREFETCH_DISPLAY_BYTES) {
+              stage.dataset.renderState = 'prefetched';
+              return;
+            }
+          }
           const img = document.createElement('img'); img.className = 'latex-page'; img.alt = `第 ${number} 页`; img.src = image.url;
           img.dataset.scale = String(pageScale); img.dataset.page = String(number);
           img.title = '双击跳转到对应的源码位置（SyncTeX）';
@@ -1300,10 +1312,11 @@ window.PaperLatexWorkspace = (() => {
         return stage.loadPromise;
       }
       const currentLoad = ensureLoad(wanted, scroll || retry);
+      for (const number of priority) if (number !== wanted) void ensureLoad(number);
       if (changed) {
         const after = nearby.filter(number => number > wanted), before = nearby.filter(number => number < wanted).reverse();
-        const priority = pdfScrollDirection < 0 ? [...before, ...after] : [...after, ...before];
-        for (const number of priority) void ensureLoad(number);
+        const prefetch = pdfScrollDirection < 0 ? [...before, ...after] : [...after, ...before];
+        for (const number of prefetch) if (!priority.has(number)) void ensureLoad(number);
       }
       updatePdfRenderState(stages.get(wanted));
       await currentLoad;
@@ -2005,29 +2018,15 @@ window.PaperLatexWorkspace = (() => {
     let aiRequest = 0, aiAbort = null;
     function aiOwner(path = file) { return { id: project?.id, main: project?.main_path, root: project?.root, binding_generation: project?.binding_generation, epoch: generation, path }; }
     function ownsAi(owner) { return !disposed && !view.hidden && owner.id === project?.id && owner.main === project?.main_path && owner.root === project?.root && owner.binding_generation === project?.binding_generation && owner.epoch === generation; }
-    function showCollaboration(owner = aiOwner()) { if (ownsAi(owner)) reviewer?.setCollaboration?.(ai.entries, owner); }
-    function renderHistory() {
-      historyList.textContent = '';
-      if (!ai.entries.length) historyList.append(make('p', 'latex-ai-route', '暂无写作记录。'));
-      for (const entry of ai.entries) {
-        const detail = window.PaperLatexReview?.collaborationDetails?.(entry, { showContext: true });
-        if (detail) historyList.append(detail);
-      }
+    function showCollaboration(owner = aiOwner()) {
+      if (!ownsAi(owner)) return;
+      const proposal = ai.proposal;
+      reviewer?.setCollaboration(ai.entries, owner, proposal ? { noteId: proposal.review_note?.id, created: proposal.created, element: proposalBox } : null);
     }
-    function setHistoryOpen(open) {
-      historyBody.hidden = !open;
-      historyButton.setAttribute('aria-expanded', String(open));
-      if (open) renderHistory();
-    }
-    historyButton.addEventListener('click', () => {
-      setHistoryOpen(historyBody.hidden);
-      if (!historyBody.hidden) void aiStatus();
-    });
     function rememberCollaboration(entry, owner) {
       if (!entry || !ownsAi(owner)) return;
       const identity = value => JSON.stringify([value.kind, value.created, value.review_note?.id, value.review_note?.version, value.question, value.summary]);
       ai.entries = [entry, ...ai.entries.filter(value => identity(value) !== identity(entry))].slice(0, 4); showCollaboration(owner);
-      if (!historyBody.hidden) renderHistory();
     }
 
     function updateRetrievalScope() {
@@ -2113,7 +2112,6 @@ window.PaperLatexWorkspace = (() => {
       if (!choice) return {};
       return { provider: choice.provider, model: choice.id, ...(choice.reasoningEffort ? { reasoningEffort: choice.reasoningEffort } : {}) };
     }
-    function aiSay(text, error = false) { aiStatusLine.textContent = text; aiStatusLine.classList.toggle('error', error); }
     function aiBusy(on) {
       ai.busy = on;
       aiModel.disabled = on; aiAccept.disabled = on; aiDiscard.disabled = on;
@@ -2122,13 +2120,12 @@ window.PaperLatexWorkspace = (() => {
       if (!aiAbort) return false;
       const active = aiAbort; aiAbort = null; ++aiRequest; active.abort(); aiBusy(false);
       reviewer?.cancelCollaboration?.(quiet ? '' : '已停止这条批注的 DSH 操作。');
-      if (!quiet) aiSay('已停止 DSH 操作。');
       return true;
     }
     function resetAiState() {
       cancelAiRun({ quiet: true }); ++aiRequest; aiBusy(false);
       ai.entries = []; ai.proposal = null; ai.checked = false;
-      setHistoryOpen(false); renderHistory(); renderProposal(); aiSay(''); clearPublicRetrieval();
+      renderProposal(); aiStatusLine.hidden = true; clearPublicRetrieval();
     }
     function appendRetrieval(container, retrieval) {
       const details = window.PaperLatexReview?.retrievalDetails?.(retrieval);
@@ -2149,9 +2146,9 @@ window.PaperLatexWorkspace = (() => {
         });
         const preferred = ai.models.findIndex(model => `${model.provider}/${model.id}` === ai.lastRoute);
         aiModel.value = String(preferred >= 0 ? preferred : 0);
-      } catch (error) {
+      } catch {
         ai.models = [];
-        aiSay(`无法读取模型列表：${error.message}`, true);
+        const option = make('option', '', '模型列表不可用'); option.value = ''; aiModel.textContent = ''; aiModel.append(option);
       }
     }
 
@@ -2165,25 +2162,24 @@ window.PaperLatexWorkspace = (() => {
         if (!ai.models.length) await loadModels();
         if (!active()) return;
         ai.checked = true; ai.available = true;
+        aiStatusLine.hidden = true;
         ai.proposal = snapshot.proposal || null;
-        ai.entries = Array.isArray(snapshot.entries) ? snapshot.entries : []; showCollaboration(owner);
+        ai.entries = Array.isArray(snapshot.entries) ? snapshot.entries : [];
         renderProposal();
-        if (!historyBody.hidden) renderHistory();
-        if (snapshot.proposal) aiSay('有一份待确认的提案');
-        else aiSay('');
       } catch (error) {
         if (!active()) return;
         ai.available = false;
-        aiSay(error.code === 'LATEX_AI_INVALID' ? '当前主机未连接 DSH 模型服务' : error.message, true);
+        aiStatusLine.textContent = error.code === 'LATEX_AI_INVALID' ? '当前主机未连接 DSH 模型服务' : error.message;
+        aiStatusLine.hidden = false;
       }
     }
 
     function renderProposal() {
       const proposal = ai.proposal;
       aiProposal.textContent = '';
-      aiAccept.hidden = !proposal; aiDiscard.hidden = !proposal;
-      if (!proposal) return;
-      aiProposal.append(make('p', 'latex-ai-summary', `${proposal.summary} · 目标源码 ${proposal.path} · ${proposal.replacements.length} 处改动 · ${proposal.model.provider}/${proposal.model.model}`));
+      proposalBox.hidden = !proposal;
+      if (!proposal) { detachedProposal.hidden = true; showCollaboration(); return; }
+      aiProposal.append(make('strong', 'latex-review-author', `${proposal.model.provider}/${proposal.model.model} · 修改提案（待确认）`), make('p', 'latex-ai-summary', `${proposal.summary} · 目标源码 ${proposal.path} · ${proposal.replacements.length} 处改动`));
       const list = make('ul', 'latex-ai-replacements');
       for (const { find, replace } of proposal.replacements.slice(0, 20)) {
         const item = make('li');
@@ -2193,13 +2189,13 @@ window.PaperLatexWorkspace = (() => {
       aiProposal.append(list);
       if (proposal.notes) aiProposal.append(make('p', 'latex-ai-notes', proposal.notes));
       appendRetrieval(aiProposal, proposal.retrieval);
+      showCollaboration();
     }
 
     async function aiRun(kind, note) {
       if (ai.busy || !file || !project || switching || view.hidden || disposed) return false;
       if (kind === 'propose' && ai.proposal) {
-        setHistoryOpen(true);
-        throw new Error('请在「写作记录」中接受或放弃当前提案。');
+        throw new Error(detachedProposal.hidden ? '请在对应批注下接受或放弃当前提案。' : '请在「设置」中接受或放弃待处理的旧提案。');
       }
       if (dirty || saving || pendingConflict) throw new Error('请先保存当前源码。');
       const value = kind === 'ask' ? '请根据这条已保存批注与原引用，回答其中的问题并解释相关内容。' : '请依据这条已保存批注，为指定的当前源码提出必要修改；保留原意、引文与证据强度，不猜测旧 PDF 的源码位置。';
@@ -2209,29 +2205,24 @@ window.PaperLatexWorkspace = (() => {
       const controller = new AbortController(); aiAbort = controller;
       if (retrieval.public_queries.length) clearPublicRetrieval();
       aiBusy(true);
-      aiSay(kind === 'ask' ? '正在问 DSH…' : '正在生成修改提案…');
       try {
         if (kind === 'ask') {
           const result = await api('latex_ai_ask', { ...args, question: value }, { signal: controller.signal });
           if (!ownsAi(owner) || request !== aiRequest) return false;
           rememberCollaboration(result.entry, owner);
-          aiSay(`已回复批注${result.material?.truncated ? '（材料已截断）' : ''}`);
         } else {
           const result = await api('latex_ai_propose', { ...args, instruction: value }, { signal: controller.signal });
           if (!ownsAi(owner) || request !== aiRequest) return false;
           rememberCollaboration(result.entry, owner);
           if (!result.changed) {
-            ai.proposal = null; renderProposal(); aiSay('模型认为不需要改动。');
+            ai.proposal = null; renderProposal(); say('模型认为不需要改动。');
           } else {
             ai.proposal = { ...result.proposal, retrieval: result.proposal.retrieval ?? result.entry?.retrieval }; renderProposal();
-            setHistoryOpen(true);
-            aiSay(`提案：${result.proposal.replacements.length} 处改动，等待你确认`);
           }
         }
         return true;
       } catch (error) {
         if (!ownsAi(owner) || request !== aiRequest) return false;
-        aiSay(`${kind === 'ask' ? '提问' : '生成提案'}失败：${error.message}`, true);
         throw error;
       } finally {
         if (ownsAi(owner) && request === aiRequest) { aiAbort = null; aiBusy(false); }
@@ -2240,18 +2231,18 @@ window.PaperLatexWorkspace = (() => {
 
     async function aiAcceptProposal() {
       if (ai.busy || !ai.proposal) return;
-      if (dirty || saving || pendingConflict || reviewer?.hasDraft()) { aiSay('请先保存或取消当前源码和批注草稿，再接受提案。', true); return; }
+      if (dirty || saving || pendingConflict || reviewer?.hasDraft()) { say('请先保存或取消当前源码和批注草稿，再接受提案。', true); return; }
       const owner = aiOwner(ai.proposal.path), pending = ai.proposal, request = ++aiRequest;
-      aiBusy(true); aiSay('正在写入…');
+      aiBusy(true); say('正在写入…');
       try {
         const result = await api('latex_ai_accept', { id: owner.id, proposal_id: pending.id });
         if (!ownsAi(owner)) return;
         rememberCollaboration(result.entry, owner);
         ai.proposal = null; renderProposal();
-        if (!await openFile(owner.path, { force: true })) { if(ownsAi(owner))aiSay('提案已写入；本窗口还有未保存内容，请保留草稿并处理保存冲突。', true);return; }
+        if (!await openFile(owner.path, { force: true })) { if(ownsAi(owner))say('提案已写入；本窗口还有未保存内容，请保留草稿并处理保存冲突。', true);return; }
         if (!ownsAi(owner)) return;
         setSaveState('已接受 AI 建议', 'saved');
-        aiSay(`已写入（${result.origin}）：${result.written.bytes} 字节`);
+        say(`已写入（${result.origin}）：${result.written.bytes} 字节`);
         scheduleCompile();
       } catch (error) {
         if (!ownsAi(owner)) return;
@@ -2259,8 +2250,8 @@ window.PaperLatexWorkspace = (() => {
           pendingConflict = { path: error.current.path, content: editor.value, current: error.current };
           conflictText.textContent = '提案基于的版本已经变了：请载入最新内容后重新生成提案。';
           conflictBar.hidden = false;
-          aiSay('文件已被改动，提案没有写入。', true);
-        } else aiSay(`接受提案失败：${error.message}`, true);
+          say('文件已被改动，提案没有写入。', true);
+        } else say(`接受提案失败：${error.message}`, true);
       } finally { if (ownsAi(owner) && request === aiRequest) aiBusy(false); }
     }
 
@@ -2269,9 +2260,9 @@ window.PaperLatexWorkspace = (() => {
       if (ai.busy || !ai.proposal) return;
       const owner = aiOwner(), pending = ai.proposal, request = ++aiRequest; aiBusy(true);
       try { const result = await api('latex_ai_discard', { id: owner.id, proposal_id: pending.id }); if (!ownsAi(owner)) return; rememberCollaboration(result.entry, owner); }
-      catch(error) { if(ownsAi(owner))aiSay(`提案未能放弃：${error.message}`,true);return; }
+      catch(error) { if(ownsAi(owner))say(`提案未能放弃：${error.message}`,true);return; }
       finally { if(ownsAi(owner) && request === aiRequest)aiBusy(false); }
-      ai.proposal = null; renderProposal(); aiSay('已放弃这份提案');
+      ai.proposal = null; renderProposal(); say('已放弃这份提案');
     });
 
     view.addEventListener('keydown', event => {
@@ -2350,7 +2341,7 @@ window.PaperLatexWorkspace = (() => {
         syncRailToggle();
       } catch (error) { say(`侧栏不可用：${error.message}`, true); }
     }
-    function syncRailToggle() { aiToggle.setAttribute('aria-pressed', String(rail ? Boolean(rail.visible?.('latex-ai')) : tab === 'ai')); }
+    function syncRailToggle() { aiToggle.setAttribute('aria-checked', String(rail ? Boolean(rail.visible?.('latex-ai')) : tab === 'ai')); }
     aiToggle.addEventListener('click', () => {
       const open = rail ? !rail.visible?.('latex-ai') : tab !== 'ai';
       showRail(open);

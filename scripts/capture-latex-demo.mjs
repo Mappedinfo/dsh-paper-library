@@ -125,13 +125,14 @@ try {
   assert.equal(await page.locator('#latex-errors li').count(), 0);
   checks.push('The visible Compile action runs the real local latexmk/xelatex and renders its successfully generated one-page PDF.');
 
-  assert.equal(await page.locator('#latex-writing-history-body').isHidden(), true);
-  await page.locator('#latex-writing-history').click();
+  assert.equal(await page.locator('#latex-writing-history').count(), 0);
+  await page.locator('#latex-menu-open').click();
   await page.waitForFunction(() => /需要连接 DSH 模型服务|未连接 DSH 模型服务/.test(document.querySelector('#latex-ai-route')?.textContent || ''));
-  assert.equal(await page.locator('#latex-writing-history-list .latex-review-collaboration').count(), 0);
-  assert.equal((await page.locator('#latex-ai-proposal').innerText()).trim(), '');
+  assert.equal(await page.locator('#latex-review-list .latex-review-collaboration').count(), 0);
+  assert.equal(await page.locator('.latex-review-pending-proposal').count(), 0);
+  await page.locator('#latex-menu-open').click();
   assert.ok(!actions.some(action => ['latex_ai_ask', 'latex_ai_propose', 'latex_ai_accept'].includes(action)));
-  checks.push('The standalone collaboration rail truthfully reports its missing DSH model connection; no answer or proposal is fabricated.');
+  checks.push('Writing settings report the missing DSH model connection and annotation cards show only stored replies.');
 
   assert.equal(await hash(sourcePath), sourceHash);
   assert.deepEqual(errors, []);

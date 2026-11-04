@@ -157,7 +157,7 @@ test('each saved annotation has four actions and stale notes can ask DSH with a 
   assert.equal(await f.ui.testHooks.runNote('propose', note), false)
   f.ui.testHooks.edit(note); assert.equal(f.ui.hasDraft(), false)
   release(true); assert.equal(await pending, true)
-  assert.match(f.ids.get('latex-review-message').textContent, /回复已生成/)
+  assert.match(f.ids.get('latex-review-message').textContent, /回复已添加到对应批注/)
 })
 
 test('DSH callback failures preserve the annotation and allow retry without touching its comment', async () => {
@@ -183,7 +183,8 @@ test('collaboration replies attach only by exact note identity and label older a
   const card = f.ids.get('latex-review-list').children[0]
   assert.match(card.textContent, /来自较早批注版本/)
   assert.match(card.textContent, /Earlier model answer/)
-  assert.match(card.textContent, /在「写作记录」中审阅待确认的提案/)
+  assert.match(card.textContent, /用户.*synthetic\/light · 回复/)
+  assert.match(card.textContent, /A candidate revision/)
   assert.equal(card.textContent.includes('Must not appear'), false)
   assert.equal(f.ui.annotations()[0].comment, note.comment)
   f.state.binding_generation = 1

@@ -89,12 +89,12 @@ try {
   if (!await page.locator('#latex-setting-starter').isVisible()) throw new Error('the menu does not expose the starter setting')
   record('project-actions-and-settings-live-in-the-hamburger-menu')
 
-  // DSH 写作 lives in the same rail as the annotation panel, not inside the workspace.
+  // Annotation replies live with their source annotations in the same rail.
   await page.locator('#reading-sidebar-latex-ai').waitFor({ state: 'visible' })
-  if (!await page.locator('#latex-ai').isVisible()) throw new Error('the collaboration panel is not in the rail')
+  if (!await page.locator('#latex-review-panel').isVisible() || await page.locator('#latex-writing-history').count()) throw new Error('the rail should contain the annotation list without a separate history')
   if (await page.locator('#reading-sidebar-library').isVisible()) throw new Error('the library tab should step aside for this panel')
   if (await page.locator('#reading-sidebar-annotations').isVisible()) throw new Error('the annotations tab should step aside for this panel')
-  await until(() => page.locator('#latex-ai-route').innerText(), value => /DSH|模型服务|不可用/.test(value), 'collaboration availability reported')
+  await until(() => page.locator('#latex-ai-route').textContent(), value => /DSH|模型服务|不可用/.test(value), 'collaboration availability reported in settings')
   record('the-collaboration-panel-shares-the-library-rail')
 
   // Closing the rail must not leave an empty column behind: the surface takes the width.
@@ -128,7 +128,7 @@ try {
   if (rightClosed.view !== rightClosed.workspace || rightClosed.columns.includes(' ')) throw new Error(`right-side rail left an empty column: ${JSON.stringify(rightClosed)}`)
   record('the-layout-holds-with-the-rail-on-the-right-too')
 
-  await until(() => page.locator('#latex-ai-route').innerText(), value => /DSH|模型服务|不可用/.test(value), 'collaboration availability reported')
+  await until(() => page.locator('#latex-ai-route').textContent(), value => /DSH|模型服务|不可用/.test(value), 'collaboration availability reported in settings')
   record('a-host-without-dsh-reports-collaboration-unavailable-instead-of-offering-it')
 
   const external = await page.evaluate(() => performance.getEntriesByType('resource').filter(entry => /^https?:\/\//.test(entry.name) && !entry.name.startsWith(location.origin)).length)

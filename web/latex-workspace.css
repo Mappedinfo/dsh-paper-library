@@ -133,6 +133,7 @@ body > #latex-view { height: 100dvh; }
 }
 .latex-menu[hidden] { display: none; }
 .latex-menu-section { display: flex; flex-direction: column; gap: 4px; }
+#latex-detached-proposal[hidden], .latex-review-pending-proposal[hidden] { display: none; }
 .latex-menu-label { font-size: 11px; letter-spacing: .3px; color: var(--muted); }
 .latex-menu-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .latex-menu-row input[type="text"] { flex: 1 1 200px; min-width: 140px; }
@@ -201,7 +202,6 @@ body > #latex-view { height: 100dvh; }
 .latex-writing-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; height: 100%; overflow: hidden; color: var(--ink); background: var(--surface); }
 .latex-writing-panel[hidden] { display: none; }
 .latex-writing-panel > .latex-review-panel { flex: 1 1 auto; height: auto; }
-.latex-writing-panel > .latex-ai { flex: 0 1 auto; max-height: 48%; min-height: 0; border-top: 1px solid var(--line); }
 .latex-writing-panel .latex-review-message:empty { display: none; }
 .latex-writing-panel .latex-review-head, .latex-writing-panel .latex-review-exports { padding: 6px 10px; }
 .latex-writing-panel .latex-review-list { padding: 4px 10px; }
@@ -213,7 +213,7 @@ body > #latex-view { height: 100dvh; }
 #latex-pane-ai { min-height: 0; height: 100%; }
 .latex-content > .latex-review-panel { position: absolute; inset: 0 0 0 auto; width: min(340px, 80%); z-index: 6; border-left: 1px solid var(--line); box-shadow: var(--shadow); }
 .latex-review-head, .latex-review-actions, .latex-review-exports { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px; }
-.latex-review-head strong { margin-right: auto; }
+.latex-review-author { color: var(--muted); font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
 .latex-review-head select { width: auto; min-width: 0; max-width: 90px; height: 27px; min-height: 27px; padding-block: 2px; padding-inline-start: 6px; box-sizing: border-box; font-size: 12px; }
 .latex-review-message { margin: 0; padding: 6px 10px; color: var(--muted); white-space: pre-wrap; }
 .latex-review-message.error { color: var(--error); }
@@ -313,12 +313,12 @@ body > #latex-view { height: 100dvh; }
 .latex-preview-toolbar #latex-zoom { width: 62px; min-width: 62px; height: 28px; min-height: 28px; padding: 3px 15px 3px 5px; font-size: 11px; line-height: 16px; }
 .latex-preview-toolbar .latex-pdf-tools button { padding: 3px 7px; height: 28px; min-height: 28px; font-size: 12px; }
 .latex-toolbar-divider { flex: 0 0 1px; align-self: center; height: 18px; margin: 0 4px; background: var(--line); }
-:is(.latex-nav-toggle, .latex-auto-toggle) { position: relative; padding-right: 35px !important; }
-:is(.latex-nav-toggle, .latex-auto-toggle)::before { content: ''; position: absolute; right: 5px; top: calc(50% - 7px); width: 24px; height: 14px; border-radius: 8px; background: var(--latex-accent-color, var(--teal)); opacity: .7; }
-:is(.latex-nav-toggle, .latex-auto-toggle)::after { content: ''; position: absolute; right: 7px; top: calc(50% - 5px); width: 10px; height: 10px; border-radius: 50%; background: var(--surface); box-shadow: 0 0 1px var(--ink); transition: transform .12s ease; }
-:is(.latex-nav-toggle[aria-expanded=false], .latex-auto-toggle[aria-checked=false])::before { background: var(--muted); opacity: .4; }
-:is(.latex-nav-toggle[aria-expanded=false], .latex-auto-toggle[aria-checked=false])::after { transform: translateX(-10px); }
-@media (prefers-reduced-motion: reduce) { :is(.latex-nav-toggle, .latex-auto-toggle)::after { transition: none; } }
+.latex-switch { position: relative; padding-right: 35px !important; }
+.latex-switch::before { content: ''; position: absolute; right: 5px; top: calc(50% - 7px); width: 24px; height: 14px; border-radius: 8px; background: var(--latex-accent-color, var(--teal)); opacity: .7; }
+.latex-switch::after { content: ''; position: absolute; right: 7px; top: calc(50% - 5px); width: 10px; height: 10px; border-radius: 50%; background: var(--surface); box-shadow: 0 0 1px var(--ink); transition: transform .12s ease; }
+.latex-switch:is([aria-expanded=false], [aria-checked=false])::before { background: var(--muted); opacity: .4; }
+.latex-switch:is([aria-expanded=false], [aria-checked=false])::after { transform: translateX(-10px); }
+@media (prefers-reduced-motion: reduce) { .latex-switch::after { transition: none; } }
 .latex-spelling-results, .latex-translation-results { flex: 0 0 auto; max-height: 170px; overflow: auto; padding: 7px 10px; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 12px; }
 .latex-spelling-results[hidden], .latex-translation-results[hidden] { display: none; }
 .latex-spelling-results button { margin: 2px; padding: 2px 5px; }
@@ -379,15 +379,9 @@ body > #latex-view { height: 100dvh; }
 .latex-errors .latex-log summary { cursor: pointer; color: var(--muted); }
 .latex-errors .latex-log pre { max-height: 150px; overflow: auto; margin: 4px 0 0; white-space: pre-wrap; color: var(--ink); }
 
-.latex-ai { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 6px 10px; }
-.latex-writing-history-toggle { flex: none; }
-.latex-writing-history-body { min-height: 0; align-self: stretch; overflow: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
-.latex-writing-history-body[hidden] { display: none; }
+.latex-review-pending-proposal { margin-top: 8px; padding-block: 8px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .latex-ai-stop[hidden] { display: none; }
 #latex-writing-model-settings select { width: min(320px,100%); height: 30px; min-height: 30px; padding: 4px 25px 4px 8px; box-sizing: border-box; font: 12px/20px var(--sans); }
-.latex-ai-route { margin: 0 0 4px; font-size: 12px; color: var(--muted); }
-.latex-ai-route:empty { display: none; }
-.latex-ai-route.error { color: var(--error); }
 .latex-ai-proposal { font-size: 13px; }
 .latex-ai-summary { margin: 0 0 6px; font-weight: 600; }
 .latex-ai-replacements { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -401,8 +395,7 @@ body > #latex-view { height: 100dvh; }
   text-decoration: none; display: block; white-space: pre-wrap; border-radius: 4px; padding: 2px 4px;
 }
 .latex-ai-notes { margin: 6px 0 0; color: var(--muted); }
-.latex-ai-actions { display: flex; gap: 8px; }
-.latex-ai-actions [hidden] { display: none; }
+.latex-ai-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .latex-retrieval-details { margin-top: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .latex-retrieval-details summary { cursor: pointer; font-weight: 600; }
 .latex-retrieval-details p { margin: 4px 0 0; }

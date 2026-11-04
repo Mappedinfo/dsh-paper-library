@@ -95,28 +95,25 @@ window.PaperLatexReview = (() => {
     return details;
   }
 
-  function collaborationDetails(entry, { previousVersion = false, showContext = false } = {}) {
+  function collaborationDetails(entry, previousVersion) {
     const detail = make('details', 'latex-review-collaboration');
-    const heading = { ask: 'DSH 回复', propose: 'DSH 修改提案', proposal: 'DSH 修改提案', accept: 'DSH 修改已确认', accepted: 'DSH 修改已确认', discarded: 'DSH 提案已放弃' };
-    const title = Object.hasOwn(heading, entry.kind) ? heading[entry.kind] : 'DSH 协作记录';
+    const heading = { ask: '回复', propose: '修改提案', proposal: '修改提案', accept: '接受修改', accepted: '接受修改', discarded: '放弃提案' };
+    const title = Object.hasOwn(heading, entry.kind) ? heading[entry.kind] : '协作记录';
+    const author = ['accept', 'accepted', 'discarded'].includes(entry.kind) ? '用户' : entry.model || 'DSH';
     const old = previousVersion ? ' · 来自较早批注版本' : '';
-    detail.append(make('summary', '', `${title}${old}${entry.model ? ` · ${entry.model}` : ''}`));
-    if (showContext && entry.path) detail.append(make('p', 'latex-retrieval-meta', `源码 ${entry.path}`));
-    if (showContext && entry.question && !entry.review_note) detail.append(make('p', '', entry.question));
+    detail.append(make('summary', '', `${author} · ${title}${old}`));
     const content = entry.kind === 'ask' ? entry.answer : [entry.summary, entry.notes].filter(Boolean).join('\n');
     detail.append(make('p', 'latex-review-collaboration-body', String(content || '协作操作已记录。').slice(0, 12000)));
-    if (!showContext && entry.kind !== 'ask' && entry.path) detail.append(make('p', '', `目标源码 ${entry.path}`));
-    if (!showContext && ['propose', 'proposal'].includes(entry.kind)) detail.append(make('p', '', '可在「写作记录」中审阅待确认的提案。'));
+    if (entry.kind !== 'ask' && entry.path) detail.append(make('p', '', `目标源码 ${entry.path}`));
     const sources = retrievalDetails(entry.retrieval);
     if (sources) detail.append(sources);
     return detail;
   }
 
-  function create({ root, api, context, revealSource, revealPdf, changed = () => {}, show = () => {}, onAsk, onPropose, onStop }) {
+  function create({ root, api, context, revealSource, revealPdf, changed = () => {}, show = () => {}, onAsk, onPropose, onStop, onDetachedProposal = () => {} }) {
     let notes = [], draft = null, saving = false, sequence = 0, disposed = false, collaborating = null, collaboration = [];
-    let collaborationKey = null;
+    let collaborationKey = null, pendingProposal = null;
     const head = make('div', 'latex-review-head');
-    head.append(make('strong', '', '我的批注'));
     const filter = make('select'); filter.id = 'latex-review-filter'; filter.setAttribute('aria-label', '批注筛选');
     for (const [value, label] of [['open', '待处理'], ['all', '全部'], ['resolved', '已解决'], ['stale', '待重定位'], ['source', '源码'], ['pdf', 'PDF']]) { const option = make('option', '', label); option.value = value; filter.append(option); }
     const refresh = make('button', 'button subtle', '刷新'); refresh.type = 'button'; refresh.id = 'latex-review-refresh';
@@ -128,7 +125,7 @@ window.PaperLatexReview = (() => {
     const composer = make('section', 'latex-review-composer'); composer.id = 'latex-review-composer'; composer.hidden = true;
     const anchor = make('p', 'latex-review-anchor'); anchor.id = 'latex-review-anchor';
     const quote = make('blockquote', 'latex-review-quote'); quote.id = 'latex-review-quote';
-    const comment = make('textarea'); comment.id = 'latex-review-comment'; comment.rows = 4; comment.maxLength = 8000; comment.placeholder = '记下疑问、推理或修改想法…'; comment.setAttribute('aria-label', '我的批注内容');
+    const comment = make('textarea'); comment.id = 'latex-review-comment'; comment.rows = 4; comment.maxLength = 8000; comment.placeholder = '记下疑问、推理或修改想法…'; comment.setAttribute('aria-label', '批注内容');
     const save = make('button', 'button primary', '保存批注'); save.id = 'latex-review-save'; save.type = 'button';
     const cancel = make('button', 'button subtle', '取消'); cancel.id = 'latex-review-cancel'; cancel.type = 'button';
     const actions = make('div', 'latex-review-actions'); actions.append(save, cancel);
@@ -218,7 +215,7 @@ window.PaperLatexReview = (() => {
       try {
         const result = await run(JSON.parse(JSON.stringify(note)));
         if (disposed || owner.key !== key() || collaborating !== owner) return false;
-        say(result === false ? 'DSH 操作未完成，请重试。' : kind === 'ask' ? 'DSH 回复已生成。' : '提案处理已完成，可在「写作记录」查看。', result === false);
+        say(result === false ? 'DSH 操作未完成，请重试。' : kind === 'ask' ? '回复已添加到对应批注。' : '提案处理已完成。', result === false);
         return result !== false;
       } catch (error) { if (!disposed && owner.key === key() && collaborating === owner) say(`DSH 操作未完成：${error.message}。批注仍保留，可重试。`, true); return false; }
       finally { if (collaborating === owner) { collaborating = null; if (!disposed && owner.key === key()) render(); } }
@@ -229,16 +226,20 @@ window.PaperLatexReview = (() => {
       if (!disposed) { render(); if (message) say(message); }
       return true;
     }
-    function setCollaboration(entries, identity = context()) {
+    function setCollaboration(entries, identity = context(), proposal = null) {
       const scope = { ...identity, binding_generation: identity.binding_generation ?? context().binding_generation ?? 0 };
       if (disposed || key(scope) !== key() || !Array.isArray(entries)) return false;
       collaborationKey = key(); collaboration = entries.filter(entry => entry && typeof entry === 'object' && typeof entry.review_note?.id === 'string').slice(0, 40);
+      pendingProposal = proposal;
       render(); return true;
     }
     function renderCollaboration(note, card) {
       if (collaborationKey !== key()) return;
-      for (const entry of collaboration.filter(value => value.review_note.id === note.id).slice(0, 3)) {
-        card.append(collaborationDetails(entry, { previousVersion: entry.review_note.version !== note.version }));
+      const pending = pendingProposal?.noteId === note.id ? pendingProposal : null;
+      if (pending) card.append(pending.element);
+      for (const entry of collaboration) {
+        if (entry.review_note.id !== note.id || pending?.created && entry.kind === 'proposal' && pending.created === entry.created) continue;
+        card.append(collaborationDetails(entry, entry.review_note.version !== note.version));
       }
     }
     function matchedAnchor(note) {
@@ -253,7 +254,10 @@ window.PaperLatexReview = (() => {
     function render() {
       list.textContent = '';
       stop.hidden = !collaborating || typeof onStop !== 'function';
-      const visible = notes.filter(note => filter.value === 'all' || filter.value === note.status || filter.value === note.anchor.kind || filter.value === 'stale' && note.stale && !matchedAnchor(note));
+      const proposal = collaborationKey === key() ? pendingProposal : null;
+      const proposalNote = proposal && notes.find(note => note.id === proposal.noteId);
+      onDetachedProposal(proposal && !proposalNote ? proposal.element : null);
+      const visible = notes.filter(note => note === proposalNote || filter.value === 'all' || filter.value === note.status || filter.value === note.anchor.kind || filter.value === 'stale' && note.stale && !matchedAnchor(note));
       for (const note of visible) {
         const card = make('article', 'latex-review-card'); card.dataset.note = note.id;
         const relocated = matchedAnchor(note), target = relocated || note.anchor;
@@ -261,7 +265,8 @@ window.PaperLatexReview = (() => {
         location.disabled = note.stale && !relocated;
         location.addEventListener('click', () => void (target.kind === 'source' ? revealSource(target) : revealPdf(target)));
         const state = make('span', 'latex-review-state', `${note.status === 'resolved' ? '已解决' : '待处理'}${relocated ? ' · 自动匹配' : note.stale ? ' · 待重定位' : ''}`);
-        card.append(location, state, make('blockquote', 'latex-review-quote', note.text.slice(0, 1200)), make('p', 'latex-review-body', note.comment));
+        card.append(location, state, make('blockquote', 'latex-review-quote', note.text.slice(0, 1200)));
+        if (note.comment) card.append(make('span', 'latex-review-author', '用户'), make('p', 'latex-review-body', note.comment));
         if (relocated) {
           const score = Number.isFinite(note.relocation.score) ? ` · ${Math.round(note.relocation.score * 100)}%` : '';
           const pages = note.relocation.anchors?.length > 1 ? ` · 跨 ${note.relocation.anchors.length} 页，定位到开头` : '';
@@ -298,8 +303,8 @@ window.PaperLatexReview = (() => {
     cancel.addEventListener('click', () => { if (!saving) { draft = null; comment.value = ''; composer.hidden = true; say('已取消未保存批注。'); } });
     refresh.addEventListener('click', () => void refreshNotes()); filter.addEventListener('change', render);
     return { refresh: refreshNotes, annotations: () => notes, beginSource, setCollaboration, cancelCollaboration, beginPdf: (anchor, type, options) => begin(anchor, type, options), hasDraft: () => Boolean(draft || saving),
-      reset() { if (draft || saving) return false; ++sequence; notes = []; collaborating = null; collaboration = []; collaborationKey = null; render(); return true; },
+      reset() { if (draft || saving) return false; ++sequence; notes = []; collaborating = null; collaboration = []; collaborationKey = null; pendingProposal = null; render(); return true; },
       dispose() { disposed = true; ++sequence; collaborating = null; collaboration = []; }, testHooks: { saveDraft, edit, setStatus, runNote, notes: () => notes } };
   }
-  return { create, retrievalDetails, collaborationDetails };
+  return { create, retrievalDetails };
 })();

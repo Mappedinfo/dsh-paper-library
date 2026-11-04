@@ -304,8 +304,7 @@ try {
   await page.locator('#latex-tab-ai').click()
   await page.locator('#latex-pane-ai').waitFor({ state: 'visible' })
   await until(() => page.locator('#latex-ai-model option').count(), count => count > 0, 'model list loaded')
-  await page.locator('#latex-writing-history').waitFor({ state: 'visible' })
-  if (await page.locator('#latex-writing-history-body').isVisible()) throw new Error('writing history opened without an action')
+  if (await page.locator('#latex-writing-history').count()) throw new Error('the standalone writing history should not be present')
   // This fixture runs an offline stub without research tools.
   await page.locator('#latex-menu-open').click()
   await page.locator('#latex-retrieval-project').uncheck()
@@ -329,9 +328,8 @@ try {
   record('a-question-answers-inline-and-leaves-the-file-alone')
 
   await note.getByRole('button', { name: '生成修改提案', exact: true }).click()
-  await page.locator('#latex-writing-history-body').waitFor({ state: 'visible' })
-  await until(() => page.locator('.latex-ai-replacements li').count(), count => count > 0, 'proposal rendered')
-  const shown = await page.locator('.latex-ai-replacements li').first().innerText()
+  await note.locator('.latex-review-pending-proposal').waitFor({ state: 'visible' })
+  const shown = await note.locator('.latex-ai-replacements li').first().innerText()
   if (!shown.includes(ANCHOR)) throw new Error(`proposal did not show the anchor: ${shown}`)
   const afterPropose = await readFile(join(first, 'main.tex'), 'utf8')
   if (!afterPropose.includes(ANCHOR)) throw new Error('a proposal must not write to the file')

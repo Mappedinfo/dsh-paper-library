@@ -155,7 +155,7 @@ test('closing refuses to discard a writing-tool draft', async () => {
   f.ui.dispose()
 })
 
-test('the combined rail keeps drafts and collapses writing to one history button', async () => {
+test('the annotation rail keeps drafts without a separate writing panel', async () => {
   const registered = []; let active = null
   const setActive = id => {
     active = id
@@ -180,27 +180,26 @@ test('the combined rail keeps drafts and collapses writing to one history button
   assert.equal(panel.hidden, false, 'Collapsing project navigation keeps annotations visible')
   await navToggle.dispatch('click')
   assert.equal(f.ids.get('latex-review-panel').parentElement, panel)
-  assert.equal(f.ids.get('latex-ai').parentElement, panel)
+  assert.deepEqual(panel.children.map(child => child.id), ['latex-review-panel'])
   assert.equal(f.ids.get('latex-review-open').hidden, true)
   assert.equal(f.ids.get('latex-ai-open').textContent, '批注与写作')
   assert.equal(f.ids.get('latex-review-export-pdf').type, 'button')
-  const history = f.ids.get('latex-writing-history'), historyBody = f.ids.get('latex-writing-history-body')
-  assert.equal(history.textContent, '写作记录')
-  assert.equal(historyBody.hidden, true)
-  for (const id of ['latex-ai-input', 'latex-ai-ask', 'latex-ai-propose', 'latex-ai-add-note', 'latex-ai-scope']) assert.equal(f.ids.has(id), false)
-  await history.dispatch('click')
-  assert.equal(historyBody.hidden, false)
-  await history.dispatch('click')
-  assert.equal(historyBody.hidden, true)
+  for (const id of ['latex-writing-history', 'latex-writing-history-body', 'latex-ai-input', 'latex-ai-ask', 'latex-ai-propose', 'latex-ai-add-note', 'latex-ai-scope']) assert.equal(f.ids.has(id), false)
+  assert.doesNotMatch(panel.textContent, /我的批注/)
   await f.ids.get('latex-source-note').dispatch('click')
   f.ids.get('latex-review-comment').value = 'Synthetic manual annotation'
   assert.equal(active, 'latex-ai')
   assert.equal(f.ids.get('latex-review-composer').hidden, false)
-  await f.ids.get('latex-ai-open').dispatch('click')
+  const reviewSwitch = f.ids.get('latex-ai-open')
+  assert.equal(reviewSwitch.getAttribute('role'), 'switch')
+  assert.equal(reviewSwitch.getAttribute('aria-checked'), 'true')
+  await reviewSwitch.dispatch('click')
+  assert.equal(reviewSwitch.getAttribute('aria-checked'), 'false')
   assert.equal(active, null)
   assert.equal(panel.hidden, true)
   assert.equal(navigator.hidden, false, 'Closing annotations keeps project navigation visible')
-  await f.ids.get('latex-ai-open').dispatch('click')
+  await reviewSwitch.dispatch('click')
+  assert.equal(reviewSwitch.getAttribute('aria-checked'), 'true')
   assert.equal(active, 'latex-ai')
   assert.equal(f.ids.get('latex-review-comment').value, 'Synthetic manual annotation')
   await f.ui.close()
@@ -218,7 +217,7 @@ test('standalone review actions open the same combined preview instead of an add
   assert.equal(f.ui.testHooks.state().tab, 'ai')
   assert.equal(f.ids.get('latex-tab-ai').textContent, '批注与写作')
   assert.equal(f.ids.get('latex-review-panel').parentElement, f.ids.get('latex-writing-panel'))
-  assert.equal(f.ids.get('latex-ai').parentElement, f.ids.get('latex-writing-panel'))
+  assert.equal(f.ids.has('latex-ai'), false)
   assert.equal(f.ids.get('latex-review-composer').hidden, false)
   f.ui.dispose()
 })
@@ -829,6 +828,34 @@ test('scrolling into an in-flight prefetched page does not cancel or repeat its 
   f.ui.dispose()
 })
 
+test('an over-budget prefetched raster mounts at the first visible gap while the previous page is still active', async () => {
+  const next = deferred(), large = { ...image, pixel_width: 2800, pixel_height: 3720 }
+  const f = await fixture((action, args) => {
+    if (action !== 'latex_pdf_page') return undefined
+    if (args.page === 1) return large
+    if (args.page === 2) return next.promise
+  })
+  const preview = f.ids.get('latex-preview')
+  const stage = number => preview.querySelectorAll('.latex-page-stage').find(item => Number(item.dataset.page) === number)
+  const outgoing = stage(1).querySelector('img')
+  next.resolve(large); await tick()
+  assert.equal(stage(2).dataset.renderState, 'prefetched')
+  assert.equal(stage(2).querySelector('img'), null, 'the offscreen page avoids the decoded-memory budget')
+
+  // Page one ends at 768 px, plus 12 px of preview padding. The viewport
+  // bottom crosses that edge while the 35% active-page marker is still on page one.
+  preview.scrollTop = 179; await preview.dispatch('scroll')
+  assert.equal(stage(2).querySelector('img'), null)
+  preview.scrollTop = 181; await preview.dispatch('scroll'); await tick()
+  assert.equal(f.ui.testHooks.state().page, 1)
+  assert.equal(stage(1).querySelector('img'), outgoing)
+  assert.ok(stage(2).querySelector('img'), 'the raster appears at the gap')
+  assert.equal(f.calls.filter(call => call.action === 'latex_pdf_page' && call.page === 2).length, 1)
+  assert.ok(preview.querySelectorAll('img').length <= 3)
+  f.ui.dispose()
+  assert.equal(f.revoked.length, f.urls.length)
+})
+
 test('turning a page keeps the visible and pending stages across a PDF render window change', async () => {
   const next = deferred()
   const f = await fixture((action, args) => action === 'latex_pdf_page' && args.page === 2 ? next.promise : undefined)
@@ -840,7 +867,7 @@ test('turning a page keeps the visible and pending stages across a PDF render wi
   await preview.dispatch('scroll')
   assert.equal(f.ui.testHooks.state().page, 2)
   assert.equal(stage(1).querySelector('img'), firstImage, 'the last visible part of page one stays drawn')
-  preview.scrollTop = 769
+  preview.scrollTop = 781
   await preview.dispatch('scroll'); await tick()
   assert.equal(stage(1), undefined)
   assert.equal(stage(2), pending)
@@ -1150,7 +1177,7 @@ test('writing model selection belongs to settings and remains the route for DSH 
   const selector = f.ids.get('latex-ai-model'), settings = f.ids.get('latex-writing-model-settings')
   assert.equal(selector.parentElement, settings)
   assert.equal(settings.parentElement, f.ids.get('latex-menu'))
-  assert.equal(f.ids.get('latex-ai').querySelectorAll('select').length, 0)
+  assert.deepEqual(f.ids.get('latex-writing-panel').querySelectorAll('select').map(item => item.id), ['latex-review-filter'])
   assert.equal(f.ids.get('latex-menu-open').getAttribute('aria-label'), '设置')
   assert.equal(f.ids.get('latex-menu-open').title, '设置')
   await f.ids.get('latex-ai-open').dispatch('click'); await tick()
@@ -1343,7 +1370,7 @@ function reviewAiResponse(action, note) {
   const review_note = { id: note.id, version: note.version, kind: note.anchor.kind, stale: note.stale }, model = { provider: 'synthetic', model: 'small' }
   const entry = { kind: action === 'latex_ai_ask' ? 'ask' : 'proposal', created: 'synthetic-time', review_note, answer: 'Synthetic note-specific reply', summary: 'Synthetic revision', path: 'a.tex', model: 'synthetic/small' }
   if (action === 'latex_ai_ask') return { answer: entry.answer, model, material: {}, review_note, entry }
-  return { changed: true, proposal: { id: 'note-proposal', path: 'a.tex', summary: entry.summary, replacements: [{ find: 'a.tex', replace: 'revised' }], model, review_note }, entry }
+  return { changed: true, proposal: { id: 'note-proposal', path: 'a.tex', summary: entry.summary, replacements: [{ find: 'a.tex', replace: 'revised' }], model, review_note, created: entry.created }, entry }
 }
 
 test('saved note actions use their own reference and source file instead of unrelated editor selection', async () => {
@@ -1379,9 +1406,36 @@ test('a historical PDF note explicitly targets current source and proposal accep
   const request = f.calls.find(call => call.action === 'latex_ai_propose')
   assert.equal(request.path, 'main.tex'); assert.equal(Object.hasOwn(request, 'selection'), false)
   assert.match(f.ids.get('latex-ai-proposal').textContent, /目标源码 a\.tex/)
-  assert.equal(f.ids.get('latex-writing-history-body').hidden, false)
+  const list = f.ids.get('latex-review-list')
+  assert.equal(list.querySelector('.latex-review-pending-proposal')?.parentElement?.dataset.note, note.id)
+  assert.equal(list.querySelectorAll('.latex-review-collaboration').length, 0, 'The active proposal is displayed once')
+  const filter = f.ids.get('latex-review-filter')
+  filter.value = 'source'; await filter.dispatch('change')
+  assert.equal(list.querySelector('.latex-review-pending-proposal')?.parentElement?.dataset.note, note.id, 'The reviewable proposal stays accessible when filtered')
   await f.ids.get('latex-ai-accept').dispatch('click'); await tick()
   assert.equal(f.ui.testHooks.state().file, 'a.tex')
+  assert.equal(list.querySelector('.latex-review-pending-proposal'), null)
+  f.ui.dispose()
+})
+
+test('an older pending proposal without an annotation remains actionable in settings only', async () => {
+  const note = savedReview()
+  const legacy = { ...reviewAiResponse('latex_ai_propose', note).proposal, id: 'legacy-proposal', review_note: undefined }
+  const f = await fixture(action => {
+    if (action === 'latex_review_list') return { annotations: [note] }
+    if (action === 'latex_ai_status') return { proposal: legacy, entries: [] }
+    if (action === 'models') return [{ provider: 'synthetic', id: 'small' }]
+    if (action === 'project_list') return { projects: [] }
+    if (action === 'latex_ai_discard') return {}
+  }, { review: true })
+  await f.ids.get('latex-menu-open').dispatch('click'); await tick()
+  const detached = f.ids.get('latex-detached-proposal')
+  assert.equal(detached.hidden, false)
+  assert.equal(f.ids.get('latex-review-list').querySelector('.latex-review-pending-proposal'), null)
+  assert.ok(detached.contains(f.ids.get('latex-ai-discard')))
+  await f.ids.get('latex-ai-discard').dispatch('click')
+  assert.equal(f.calls.find(call => call.action === 'latex_ai_discard').proposal_id, legacy.id)
+  assert.equal(detached.hidden, true)
   f.ui.dispose()
 })
 
@@ -1435,7 +1489,7 @@ test('an older collaboration status cannot erase a newly generated note proposal
   assert.equal(await f.ui.testHooks.reviewer().testHooks.runNote('propose', note), true)
   status.resolve({ configured: true, proposal: null, entries: [] }); await tick()
   assert.equal(f.ui.testHooks.state().ai.proposal, 'note-proposal')
-  assert.match(f.ids.get('latex-review-list').textContent, /DSH 修改提案/)
+  assert.match(f.ids.get('latex-review-list').textContent, /synthetic\/small · 修改提案（待确认）/)
   f.ui.dispose()
 })
 
@@ -1494,7 +1548,7 @@ test('empty or over-limit public queries block the request without silently trim
   f.ui.dispose()
 })
 
-test('writing history displays earlier answers and proposals with their recorded provenance', async () => {
+test('annotation cards display their exact earlier answers and proposals with their recorded provenance', async () => {
   const retrieval = {
     project: true, truncated: true, rounds: 2, calls: 3, used_tools: true,
     sources: [
@@ -1508,7 +1562,10 @@ test('writing history displays earlier answers and proposals with their recorded
   const note = savedReview()
   const f = await fixture(action => {
     if (action === 'latex_review_list') return { annotations: [note] }
-    if (action === 'latex_ai_status') return { configured: true, entries: [writingAnswer('Evidence summary', retrieval).entry] }
+    if (action === 'latex_ai_status') return { configured: true, entries: [
+      { ...writingAnswer('Evidence summary', retrieval).entry, model: 'synthetic/small', review_note: { id: note.id, version: note.version } },
+      { ...writingAnswer('Unanchored legacy reply').entry, path: note.anchor.path, revision: note.anchor.revision },
+    ] }
     if (action === 'models') return [{ provider: 'synthetic', id: 'small' }]
     if (action === 'latex_ai_propose') {
       const response = reviewAiResponse(action, note)
@@ -1516,8 +1573,12 @@ test('writing history displays earlier answers and proposals with their recorded
       return response
     }
   }, { review: true })
-  await f.ids.get('latex-writing-history').dispatch('click'); await tick()
-  const answer = f.ids.get('latex-writing-history-list')
+  await f.ids.get('latex-ai-open').dispatch('click'); await tick()
+  const reviewer = f.ui.testHooks.reviewer()
+  f.ids.get('latex-review-filter').value = 'open'; await reviewer.refresh()
+  const answer = f.ids.get('latex-review-list').querySelector('.latex-review-card')
+  assert.match(answer.textContent, /用户.*synthetic\/small · 回复/)
+  assert.doesNotMatch(answer.textContent, /Unanchored legacy reply/)
   assert.match(answer.textContent, /Evidence summary/)
   assert.match(answer.textContent, /\[F1\]sections\/synthetic\.tex:4–7/)
   assert.match(answer.textContent, /第 3 页.*pdf-version/)
@@ -1526,8 +1587,6 @@ test('writing history displays earlier answers and proposals with their recorded
   assert.match(answer.textContent, /检索不可用/); assert.match(answer.textContent, /已截断/)
   assert.doesNotMatch(answer.textContent, /should not render/)
   assert.equal(answer.querySelector('a').href, 'https://doi.org/10.1234/synthetic')
-  const reviewer = f.ui.testHooks.reviewer()
-  await reviewer.refresh()
   assert.equal(await reviewer.testHooks.runNote('propose', note), true)
   assert.match(f.ids.get('latex-ai-proposal').textContent, /检索来源 · 3 条/)
   assert.deepEqual(requestScope(f.calls.find(call => call.action === 'latex_ai_propose')), { project: true, public_queries: [] })
@@ -1557,7 +1616,7 @@ test('stop, project switch, workspace close and disposal abort in-flight writing
     await leave(); assert.equal(request.signal.aborted, true)
     pending.resolve(kind === 'propose' ? { changed: true, proposal: { id: 'late', path: 'main.tex', summary: 'Late proposal must not appear', replacements: [], model: { provider: 'synthetic', model: 'small' } } } : writingAnswer('Late result must not appear'))
     assert.equal(await running, false)
-    assert.doesNotMatch(f.ids.get('latex-writing-history-list').textContent, /Late result/)
+    assert.doesNotMatch(f.ids.get('latex-review-list').textContent, /Late result/)
     assert.doesNotMatch(f.ids.get('latex-ai-proposal').textContent, /Late proposal/)
     if (f.ui.isOpen()) assert.equal(stop.hidden, true)
   }

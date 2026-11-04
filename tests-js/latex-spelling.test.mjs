@@ -33,6 +33,24 @@ test('escaped percentages preserve prose and later real comments still stop chec
   for (const item of result.items) assert.equal(source.slice(item.from, item.to), item.word)
 })
 
+test('LaTeX configuration and resource arguments are skipped while displayed prose is checked', async () => {
+  const checkSpelling = await checker()
+  const source = String.raw`\documentclass[twocolumn, fontsize={notaword[notaword]}]{scrartcl}
+\bibliographystyle{abbrvnat}
+\bibliography{refs/mainbib}
+\addbibresource[location=remotedb]{research.bib}
+\graphicspath{{figures/diagrms/}{figures/archve/}}
+\newcommand{\custommacro}{An exampel}
+\section[Short sentense]{A systme}
+\textcolor[HTML]{aabbcc}{A mispelled word} \href{https://examplle.invalid}{An acheivement}
+\begin{table}[htbp]\caption{An exampel}\end{table}
+\begin{tabularx}{\linewidth}{lX}\textbf{A systme}\end{tabularx}
+\citep[see][p.~1]{authorkey} [An exampel] \parencite{anotherkey}`
+  const result = checkSpelling(source)
+  assert.deepEqual(Array.from(result.items, item => item.word), ['exampel', 'sentense', 'systme', 'mispelled', 'acheivement', 'exampel', 'systme', 'exampel'])
+  for (const item of result.items) assert.equal(source.slice(item.from, item.to), item.word)
+})
+
 test('correct prose still stops at the word budget and large sources report incomplete coverage', async () => {
   const checkSpelling = await checker()
   const words = checkSpelling('sentence '.repeat(6000) + 'mispeling')
@@ -45,7 +63,7 @@ test('correct prose still stops at the word budget and large sources report inco
 test('distributed dictionary runs independently when the enhanced editor is unavailable', async () => {
   const window = {}, source = await readFile(new URL('../lib/latex-spelling.js', import.meta.url), 'utf8')
   vm.runInNewContext(source, { window })
-  const result = window.PaperLatexSpelling.checkSpelling('A mispelled sentence.')
-  assert.equal(result.items[0].word, 'mispelled')
+  const result = window.PaperLatexSpelling.checkSpelling(String.raw`\bibliographystyle{abbrvnat} A mispelled sentence.`)
+  assert.deepEqual(Array.from(result.items, item => item.word), ['mispelled'])
   assert.equal(window.PaperLatexEditor, undefined)
 })
