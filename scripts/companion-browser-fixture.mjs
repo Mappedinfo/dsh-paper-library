@@ -18,7 +18,7 @@ const call=request=>core(request,{library,python}),paper=(await call({action:'im
 const store=createLocalStateStore({library,home:join(run,'home')}),settings=createPaperLibrarySettings({store})
 const snapshots=new Map(),feedback=[],checks=[],errors=[];let generations=0,companion
 const chat=async r=>{
-  if(r.action==='chat_catalog')return call({action:'annotation_catalog',id:r.id})
+  if(r.action==='chat_catalog')return call({action:'annotation_catalog',id:r.id,...(r.annotation_id?{annotation_id:r.annotation_id}:{})})
   if(r.action==='chat_context'){const snapshot_id=randomUUID();snapshots.set(snapshot_id,r);return{snapshot_id}}
   if(r.action==='chat_history')return{feedback}
   if(r.action==='chat_send'){
@@ -42,7 +42,7 @@ try{
   await context.addInitScript(()=>{Storage.prototype.setItem=()=>{throw Error('No browser storage')}})
   let page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(origin)
   await page.locator(`.paper-card[data-id="${paper.id}"]`).click();await page.locator('#companion-toggle').click()
-  await page.waitForFunction(()=>document.querySelector('#companion-toggle').getAttribute('aria-pressed')==='true')
+  await page.waitForFunction(()=>document.querySelector('#companion-toggle').getAttribute('aria-checked')==='true')
   const result=await page.evaluate(async id=>{const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'annotate',id,page:1,type:'note',comment:'What evidence supports this claim?'})});return r.json()},paper.id)
   assert.equal(result.result.companion.status,'queued');checks.push('toolbar-enables-shared-settings-and-human-save-enters-host-queue')
   await page.close();await new Promise(r=>setTimeout(r,1800))
@@ -54,9 +54,16 @@ try{
   await page.locator('.annotation-reply > summary').click();assert.match(await page.locator('.annotation-reply-body').textContent(),/understanding remains unverified/)
   for(const width of [511,681]){await page.setViewportSize({width,height:620});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);await page.screenshot({path:join(run,`dark-${width}.png`)})}
   checks.push('narrow-reader-displays-compact-toggle-and-source-linked-response')
-  await page.locator('#companion-toggle').click();await page.waitForFunction(()=>document.querySelector('#companion-toggle').getAttribute('aria-pressed')==='false')
-  const off=await page.evaluate(async id=>(await (await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'annotate',id,page:1,type:'note',comment:'A paused companion question'})})).json()).result.companion.status,paper.id)
-  assert.equal(off,'off');assert.equal(generations,1);checks.push('pausing-retains-human-note-without-model-call');assert.deepEqual(errors,[])
+  await page.locator('#companion-toggle').click();await page.waitForFunction(()=>document.querySelector('#companion-toggle').getAttribute('aria-checked')==='false')
+  const off=await page.evaluate(async id=>(await (await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'annotate',id,page:1,type:'note',comment:'A paused companion question'})})).json()).result,paper.id)
+  assert.equal(off.companion.status,'off');assert.equal(generations,1);checks.push('pausing-retains-human-note-without-model-call')
+  await page.reload();await page.locator(`.paper-card[data-id="${paper.id}"]`).click();await page.locator('[data-tab="annotations"]').click()
+  const asked=page.locator(`#annotation-list > .annotation-card[data-annotation-id="${off.annotation.id}"]`)
+  await asked.getByRole('button',{name:'问 DSH'}).click()
+  await asked.locator('.annotation-reply').waitFor()
+  assert.match(await asked.locator('.annotation-reply > summary').textContent(),/AI 批注 · fixture\/companion/)
+  assert.equal(await page.locator('#companion-toggle').getAttribute('aria-checked'),'false')
+  assert.equal(generations,2);checks.push('manual-ask-while-paused-saves-a-labeled-reply-under-only-its-source');assert.deepEqual(errors,[])
   await writeFile('docs/validation/companion-browser.json',JSON.stringify({verified_at:new Date().toISOString(),ok:true,checks,deterministicGenerations:generations,externalModelRequests:0,browserErrors:errors,screenshots:[511,681].map(w=>relative(project,join(run,`dark-${w}.png`))),limitations:['Synthetic adapter; native DSH completion is covered by paper-chat-harness.json.']},null,2)+'\n')
   console.log(JSON.stringify({ok:true,checks}))
 }finally{companion.dispose();settings.dispose();await browser?.close();await new Promise(r=>server.close(r))}

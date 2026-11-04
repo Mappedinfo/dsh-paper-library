@@ -148,8 +148,8 @@ export function createFetchHandler(options = {}) {
           const input = JSON.parse(await readBounded(request, 45*1024*1024));
           // Browser cannot forge AI output or arbitrary worker internals.
           if (LATEX_RETRIEVAL_ACTIONS.has(input?.action) || ['save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','companion_excerpt','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata','external_rebind'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
-          const companionAction=['companion_status','companion_retry','companion_cancel'].includes(input?.action);
-          if(companionAction&&!options.companion)return json({ok:false,error:'实时伴学需要连接 DSH 服务。'},409);
+          const companionAction=['companion_status','companion_ask','companion_retry','companion_cancel'].includes(input?.action);
+          if(companionAction&&!options.companion)return json({ok:false,error:'批注提问需要连接 DSH 服务。'},409);
           const chatAction = typeof input?.action === 'string' && input.action.startsWith('chat_');
           const stateAction = typeof input?.action === 'string' && input.action.startsWith('state_');
           const boardAction = typeof input?.action === 'string' && input.action.startsWith('board_');

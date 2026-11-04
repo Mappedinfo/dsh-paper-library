@@ -94,6 +94,17 @@ test('standalone chat is unavailable and browsers cannot forge persisted native 
   assert.equal(called,false,'private worker actions must not reach even an installed native adapter');
 });
 
+test('per-annotation asks reach only the native companion adapter',async()=>{
+  const input={action:'companion_ask',id:'paper-a',annotation_id:'note-a'};
+  const request=()=>new Request('http://localhost/api',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input)});
+  assert.equal((await createFetchHandler()(request())).status,409);
+  const row={status:'queued',annotation_id:'note-a',request_id:'fixture',manual:true};
+  const handler=createFetchHandler({companion:{handle:async payload=>{assert.deepEqual(payload,input);return row;}}});
+  const response=await handler(request());
+  assert.equal(response.status,200);
+  assert.deepEqual((await response.json()).result,row);
+});
+
 test('the registered chat script is served under standalone and Harness paths before app bootstrap',async()=>{
   const expected=await readFile(new URL('../web/paper-chat.js',import.meta.url),'utf8');
   for(const basePath of ['', '/api/paper-library']) {

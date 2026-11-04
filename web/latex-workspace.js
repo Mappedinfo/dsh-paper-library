@@ -85,18 +85,18 @@ window.PaperLatexWorkspace = (() => {
     const diagnosticsToggle = make('button', 'button subtle latex-diagnostics-toggle', '编译状态'); diagnosticsToggle.id = 'latex-diagnostics-toggle'; diagnosticsToggle.type = 'button';
     diagnosticsToggle.setAttribute('aria-expanded', 'false'); diagnosticsToggle.setAttribute('aria-controls', 'latex-errors');
     diagnosticsToggle.hidden = true;
-    const autoToggle = make('button', 'button subtle latex-switch', '自动编译');
+    const autoToggle = make('button', 'button subtle paper-switch', '自动编译');
     autoToggle.id = 'latex-auto-state'; autoToggle.type = 'button';
     autoToggle.setAttribute('role', 'switch'); autoToggle.setAttribute('aria-label', '自动编译');
     const mainLabel = make('span', 'latex-main'); mainLabel.id = 'latex-main';
     const mainSelect = make('select'); mainSelect.id = 'latex-entry'; mainSelect.setAttribute('aria-label', '编译主文件');
     const saveState = make('span', 'latex-save-state'); saveState.id = 'latex-save-state'; saveState.setAttribute('role', 'status');
-    const aiToggle = make('button', 'button subtle latex-switch', '批注与写作'); aiToggle.id = 'latex-ai-open'; aiToggle.type = 'button';
+    const aiToggle = make('button', 'button subtle paper-switch', '批注与写作'); aiToggle.id = 'latex-ai-open'; aiToggle.type = 'button';
     aiToggle.setAttribute('role', 'switch'); aiToggle.setAttribute('aria-checked', 'false'); aiToggle.setAttribute('aria-controls', 'latex-writing-panel');
     const reviewToggle = make('button', 'button subtle', '自审'); reviewToggle.id = 'latex-review-open'; reviewToggle.type = 'button';
     reviewToggle.hidden = true; // Keep the old action addressable without a second toolbar entry.
     const reviewDivider = make('span', 'latex-toolbar-divider'); reviewDivider.setAttribute('role', 'separator'); reviewDivider.setAttribute('aria-orientation', 'vertical');
-    const navToggle = make('button', 'button subtle latex-switch', '侧边导航'); navToggle.id = 'latex-nav-toggle'; navToggle.type = 'button';
+    const navToggle = make('button', 'button subtle paper-switch', '侧边导航'); navToggle.id = 'latex-nav-toggle'; navToggle.type = 'button';
     navToggle.setAttribute('aria-controls', 'latex-navigator'); navToggle.setAttribute('aria-expanded', 'true');
     const layoutControls = make('div', 'latex-layout-controls'); layoutControls.setAttribute('role', 'group'); layoutControls.setAttribute('aria-label', '工作区视图');
     const layoutButtons = new Map();

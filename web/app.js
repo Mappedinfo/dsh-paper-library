@@ -456,14 +456,16 @@ function renderAnnotations() {
   const {notes,replies,unlinked}=annotationThreads(state.annotations);
   function replyCard(reply){
     const details=el('details','annotation-reply');details.dataset.annotationId=reply.id;
-    details.append(el('summary','',`AI 回复${reply.annotation_ids?.length>1?` · 涉及 ${reply.annotation_ids.length} 条批注`:''}`));
-    details.append(el('p','small muted',[reply.model,displayDate(reply.generated||reply.created)].filter(Boolean).join(' · ')));
+    details.append(el('summary','',['AI 批注',reply.model,reply.annotation_ids?.length>1?`涉及 ${reply.annotation_ids.length} 条批注`:''].filter(Boolean).join(' · ')));
+    details.append(el('p','small muted',displayDate(reply.generated||reply.created)));
     const body=(reply.comment||reply.content||reply.text||'').replace(/^AI-generated (?:conversation )?feedback[^\n]*\n\n/,'');
     details.append(el('p','annotation-reply-body',body));
     const actions=el('div','annotation-actions'),remove=el('button','button subtle delete-note','删除回复');remove.dataset.noteAction='delete';actions.append(remove);details.append(actions);return details;
   }
   for (const note of notes.slice(state.noteOffset, state.noteOffset + 40)) {
-    const card = el('article', 'annotation-card'); card.dataset.annotationId = note.id;
+    const card = el('article', 'annotation-card'); card.dataset.annotationId = note.id; card.dataset.paperId = state.active?.id || '';
+    if(note.version)card.dataset.annotationVersion=note.version;
+    card.dataset.companionText=String([note.text,note.comment,note.content,note.handwriting?.transcript,note.linked_ink?.transcript].some(value=>typeof value==='string'&&value.trim()));
     const meta = el('div', 'annotation-meta'); const pageLink = el('button', 'page-link', `第 ${note.page} 页`); pageLink.dataset.noteAction = 'page';
     meta.append(pageLink, el('span', '', displayDate(note.modified || note.created)), el('span', 'note-type', note.kind === 'ai-feedback' || note.type === 'ai_feedback' || note.ai_generated ? 'AI 生成' : ({highlight:'高亮',underline:'下划线',strikeout:'删除线',note:'便笺',ink:'手写'})[note.type] || '批注'));
     card.append(meta);

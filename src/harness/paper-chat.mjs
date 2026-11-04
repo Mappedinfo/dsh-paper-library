@@ -27,6 +27,10 @@ function requestOf(input) {
   const id = boundedString(input.id, '文献标识', 160, true)
   if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('文献标识无效。')
   const request = { action: input.action, id }
+  if (input.action === 'chat_catalog' && input.annotation_id !== undefined) {
+    request.annotation_id = boundedString(input.annotation_id, '批注标识', 160, true)
+    if (request.annotation_id !== input.annotation_id || /[\x00-\x1f]/.test(request.annotation_id)) throw new Error('批注标识无效。')
+  }
   if (input.source_session_id !== undefined && input.source_session_id !== null) {
     request.source_session_id = boundedString(input.source_session_id, '当前对话标识', 200, true)
     if (/[\x00-\x1f]/.test(request.source_session_id)) throw new Error('当前对话标识无效。')
@@ -346,7 +350,7 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
     const { snapshot, ...session } = ensured
     if (request.action === 'chat_ensure') return session
     if (request.action === 'chat_catalog') {
-      const catalog = paper.item.pdf ? await kernel({ action: 'annotation_catalog', id: request.id }, signal) : { annotations: [], total: 0, total_exact: true, truncated: false }
+      const catalog = paper.item.pdf ? await kernel({ action: 'annotation_catalog', id: request.id, ...(request.annotation_id ? { annotation_id: request.annotation_id } : {}) }, signal) : { annotations: [], total: 0, total_exact: true, truncated: false }
       const state = await durableUsage(snapshot)
       const annotations = catalog.annotations.map(note => {
         const previous = Object.hasOwn(state.usage, note.id) ? state.usage[note.id] : undefined

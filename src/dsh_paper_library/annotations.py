@@ -251,8 +251,10 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 "selection_characters": 8000, "preview_characters": _constants().REFERENCE_PREVIEW_CHARACTERS,
                 "scanned_annotations": _constants().REFERENCE_SCAN_LIMIT, "annotation_bytes": _constants().REFERENCE_ANNOTATION_BYTES}
 
-    def annotation_catalog(self, id):
+    def annotation_catalog(self, id, annotation_id=None):
         """Bounded current-paper metadata for selection; never a resident index."""
+        if annotation_id is not None and (not isinstance(annotation_id, str) or not 1 <= len(annotation_id) <= 160 or re.search(r"[\x00-\x1f]", annotation_id)):
+            raise ValueError("Annotation identity is invalid")
         item = self.get(id)
         values, seen, duplicate_ids = [], set(), set()
         total, scanned, characters, total_exact = 0, 0, 0, True
@@ -260,20 +262,29 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             with self._open_pdf(self.pdf_path(id)) as doc:
                 stop = False
                 for page in doc:
-                    handwriting = self._handwriting_page(page)
+                    handwriting = self._handwriting_page(page) if annotation_id is None else None
                     for annot in page.annots() or []:
                         if scanned >= _constants().REFERENCE_SCAN_LIMIT:
                             total_exact, stop = False, True
                             break
                         scanned += 1
+                        if annotation_id is not None:
+                            if (annot.info.get("id") or f"external-{page.number + 1}-{annot.xref}") != annotation_id:
+                                continue
+                            if annotation_id in seen:
+                                duplicate_ids.add(annotation_id)
+                            seen.add(annotation_id)
                         if self._annotation_metadata(annot).get("kind") in {"ai-feedback", "handwriting-note"} | LINKED_KINDS:
                             continue
                         total += 1
+                        if handwriting is None:
+                            handwriting = self._handwriting_page(page)
                         value = self._reference_annotation(self._annotation(page, annot, exact=True, handwriting=handwriting), bool(annot.info.get("id")))
                         characters += value["source_characters"]
-                        if value["id"] in seen:
-                            duplicate_ids.add(value["id"])
-                        seen.add(value["id"])
+                        if annotation_id is None:
+                            if value["id"] in seen:
+                                duplicate_ids.add(value["id"])
+                            seen.add(value["id"])
                         if len(values) < _constants().REFERENCE_CATALOG_LIMIT:
                             projected = {key: value[key] for key in ("id", "version", "page", "type", "source", "identity_reliable", "identity_source", "text_characters", "comment_characters", "source_characters")}
                             projected.update({key: value[key][:_constants().REFERENCE_PREVIEW_CHARACTERS] for key in ("text", "comment")})
@@ -291,6 +302,8 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         for value in values:
             if value["id"] in duplicate_ids:
                 value.update(identity_reliable=False, identity_source="duplicate-pdf-nm")
+            elif annotation_id is not None and not total_exact:
+                value.update(identity_reliable=False, identity_source="incomplete-pdf-scan")
         return {"annotations": values, "total": total, "returned": len(values),
                 "total_exact": total_exact, "truncated": not total_exact or total > len(values),
                 "source_characters": characters, "source_characters_exact": total_exact,

@@ -109,10 +109,15 @@ def test_catalog_reports_omission_and_scan_uncertainty(tmp_path, monkeypatch):
         assert catalog["total"] == 4 and catalog["returned"] == 2
         assert catalog["truncated"] and catalog["total_exact"]
         assert catalog["source_characters"] == sum(len(f"Reader note {i}") for i in range(4))
+        exact = library.annotation_catalog(item["id"], annotation_id="note-3")
+        assert exact["total"] == exact["returned"] == 1 and exact["total_exact"]
+        assert exact["annotations"][0]["id"] == "note-3" and exact["annotations"][0]["identity_reliable"]
         monkeypatch.setattr(core, "REFERENCE_SCAN_LIMIT", 2)
         catalog = library.annotation_catalog(item["id"])
         assert catalog["truncated"] and not catalog["total_exact"]
         assert not catalog["source_characters_exact"]
+        exact = library.annotation_catalog(item["id"], annotation_id="note-0")
+        assert not exact["total_exact"] and not exact["annotations"][0]["identity_reliable"]
         with pytest.raises(ValueError, match="ANNOTATION_SCAN_LIMIT"):
             library.annotation_context_exact(item["id"], refs(catalog))
     finally:
@@ -135,6 +140,9 @@ def test_missing_and_duplicate_pdf_identity_are_visible(tmp_path):
         assert not catalog["annotations"][0]["identity_reliable"]
         assert catalog["ambiguous_ids"] == ["duplicated"]
         assert catalog["annotations"][1]["identity_source"] == "duplicate-pdf-nm"
+        exact = library.annotation_catalog(item["id"], annotation_id="duplicated")
+        assert exact["ambiguous_ids"] == ["duplicated"]
+        assert all(not note["identity_reliable"] for note in exact["annotations"])
         with pytest.raises(ValueError, match="ANNOTATION_AMBIGUOUS"):
             library.annotation_context_exact(item["id"], refs(catalog)[1:2])
     finally:
