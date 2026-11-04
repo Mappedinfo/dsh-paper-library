@@ -200,14 +200,20 @@
   function visibleWindow(metrics, top, height, priority, layout = 'single') {
     if (!metrics.length) return [];
     const center = priority || pageAt(metrics, top + Math.max(1, height) * .35);
-    if (layout === 'spread') {
-      const start = Math.floor((center - 1) / 2) * 2 + 1;
-      const adjacent = start + 2 <= metrics.length ? start + 2 : start - 2;
-      return [...new Set([center, center === start ? start + 1 : start, adjacent, adjacent + 1])]
-        .filter(page => page > 0 && page <= metrics.length).slice(0, MAX_SPREAD_RESIDENT);
+    const rowSize = layout === 'spread' ? 2 : 1;
+    const rowLimit = layout === 'spread' ? MAX_SPREAD_RESIDENT / rowSize : MAX_RESIDENT;
+    const start = Math.floor((center - 1) / rowSize) * rowSize + 1;
+    const candidates = [];
+    for (let offset = rowSize; offset < rowSize * rowLimit; offset += rowSize) {
+      if (start + offset <= metrics.length) candidates.push(start + offset);
+      if (start - offset > 0) candidates.push(start - offset);
     }
-    const candidates = [center, center + 1, center - 1, center + 2, center - 2];
-    return [...new Set(candidates)].filter(page => page > 0 && page <= metrics.length).slice(0, MAX_RESIDENT);
+    const rowPages = page => metrics.slice(page - 1, page - 1 + rowSize);
+    // A change in the active page number must not evict a row still on screen.
+    // Fill spare slots ahead of the reader only after keeping the visible rows.
+    const visible = candidates.filter(page => rowPages(page).some(metric => metric.top < top + height && metric.top + metric.height > top));
+    const rows = [...new Set([start, ...visible, ...candidates])].slice(0, rowLimit);
+    return [...new Set([center, ...rows.flatMap(page => rowPages(page).map(metric => metric.page))])];
   }
   /** Clip每个被选中的词框到真实选区：横向取该词被选中字符的矩形，纵向沿用词框
    * （与栅格文字一致）。只要这个词确实被选中且有文字，就绝不丢弃——否则界面
@@ -352,10 +358,18 @@
     const dom = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     root.classList.add('paper-pdf-reader'); root.tabIndex = 0; root.setAttribute('aria-label', 'PDF 连续阅读区域');
     const strip = dom('div', 'pdr-pages'); root.replaceChildren(strip);
-    function inputBusy(page) { return [inkGesture, markupGesture, nativeGesture].some(gesture => gesture && (!page || Number(gesture.sheet.dataset.pdfPage) === page)) || !!touchPan || touchPoints.size > 0 || !!browserPinch; }
-    function waitForInput(page, valid) { if (!valid()) return Promise.resolve(false); if (!inputBusy(page)) return Promise.resolve(true); return new Promise(resolve => inputWaiters.add({ page, valid, resolve })); }
+    function inputBusy(page, allowPan = false) {
+      const editing = [inkGesture, markupGesture, nativeGesture].some(gesture => gesture && (!page || Number(gesture.sheet.dataset.pdfPage) === page));
+      const touching = !!touchPan || touchPoints.size > 0;
+      return editing || !!browserPinch || (touching && !(allowPan && touchPan));
+    }
+    function waitForInput(page, valid, allowPan = false) {
+      if (!valid()) return Promise.resolve(false);
+      if (!inputBusy(page, allowPan)) return Promise.resolve(true);
+      return new Promise(resolve => inputWaiters.add({ page, valid, allowPan, resolve }));
+    }
     function inputEnded() {
-      for (const waiter of inputWaiters) if (!waiter.valid() || !inputBusy(waiter.page)) { inputWaiters.delete(waiter); waiter.resolve(waiter.valid()); }
+      for (const waiter of inputWaiters) if (!waiter.valid() || !inputBusy(waiter.page, waiter.allowPan)) { inputWaiters.delete(waiter); waiter.resolve(waiter.valid()); }
       scheduleRefresh();
     }
     function paintOverlays(onlyPage) {
@@ -754,9 +768,11 @@
         image.alt = `PDF 第 ${page} 页`; image.draggable = false; image.decoding = 'async'; image.dataset.pdfPage = String(page); image.src = `data:image/png;base64,${result.image}`;
         if (image.decode) await image.decode();
         const valid = () => current(id, ticket) && job.current();
-        if (valid() && inputBusy(page)) traceInk('page_defer', { paperId: id, page, reason: 'active_input' });
-        if (!await waitForInput(page, valid) || !valid()) return;
-        // Decode off-DOM, then replace only between complete input gestures.
+        // A first paint can arrive during a scroll gesture. Replacing an
+        // existing raster and selection layer still waits for input to end.
+        const allowPan = sheet.dataset.loaded !== 'true';
+        if (valid() && inputBusy(page, allowPan)) traceInk('page_defer', { paperId: id, page, reason: 'active_input' });
+        if (!await waitForInput(page, valid, allowPan) || !valid()) return;
         sheet.replaceChildren(image); renderWords(sheet, result.words, geometry); sheet.dataset.loaded = 'true'; pageLoading(page, false); paintInk();
         // Saved annotations travel with the page payload so clicks can link the
         // raster markup to its rail entry without a second catalogue read.
@@ -781,7 +797,7 @@
       if (next !== active) { active = next; announce(); }
       const busyPage = Number((inkGesture || markupGesture || nativeGesture)?.sheet.dataset.pdfPage);
       const wanted = wantedPages(priority || jumpTarget);
-      queue.want(busyPage ? [busyPage, ...wanted].slice(0, residentLimit()) : wanted);
+      queue.want(busyPage ? [busyPage, ...wanted] : wanted);
       inputEnded();
     }
     function scroll() { if (frame !== null) return; frame = window.requestAnimationFrame(() => { frame = null; updateWindow(); }); }

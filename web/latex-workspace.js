@@ -38,14 +38,15 @@ window.PaperLatexWorkspace = (() => {
     let dirty = false, saving = false, compiling = false, disposed = false, timer = null, compileTimer = null, generation = 0, saveQueue = Promise.resolve();
     let lastBuildOk = null, autoPaused = false, pendingCompile = false;
     const rendered = new Map();
-    let pdfWindowKey = '';
+    const pdfLoads = new Map();
+    let pdfWindowKey = '', pdfStages = new Map(), pdfScrollTop = 0, pdfScrollDirection = 1;
     let pendingConflict = null;
     let settings = { ...DEFAULT_SETTINGS };
     let settingsRevision = null;
     let committedSettings = { ...DEFAULT_SETTINGS }, pendingSettings = [], settingsTail = Promise.resolve();
     let workspace = { root: null, sync: null };
-    let outline = null, navMode = 'outline', fileRequest = 0, navRequest = 0, pageRequest = 0;
-    let fileAbort = null, pageAbort = null, navAbort = null, mediaAbort = null, mediaRequest = 0;
+    let outline = null, navMode = 'outline', fileRequest = 0, navRequest = 0;
+    let fileAbort = null, navAbort = null, mediaAbort = null, mediaRequest = 0;
     let pdfVersion = '', zoom = 1, mediaPath = null, mediaPage = 1, mediaZoom = 1, mediaCount = 0;
     let mediaGeometry = null, resizeTimer = null, outlineTimer = null;
     let switching = false, entryRequest = 0, openRequest = 0;
@@ -744,8 +745,10 @@ window.PaperLatexWorkspace = (() => {
 
     function cancelReads() {
       projectSearch?.reset();
-      fileRequest += 1; pageRequest += 1; navRequest += 1; mediaRequest += 1;
-      for (const controller of [fileAbort, pageAbort, navAbort, mediaAbort]) controller?.abort();
+      fileRequest += 1; navRequest += 1; mediaRequest += 1;
+      for (const controller of [fileAbort, navAbort, mediaAbort]) controller?.abort();
+      pdfStages.clear(); cancelPdfLoads(); pdfWindowKey = '';
+      preview.setAttribute('aria-busy', 'false');
       clearTimeout(outlineTimer); clearTimeout(resizeTimer); clearTimeout(compileTimer);
     }
 
@@ -869,6 +872,7 @@ window.PaperLatexWorkspace = (() => {
 
     /** No project yet: explain the folder model inline and offer both entry points. */
     function renderEmptyState() {
+      clearRendered();
       preview.textContent = '';
       pageCount = 0; pageLabel.textContent = '—';
       const card = make('div', 'latex-preview-empty-card');
@@ -893,6 +897,7 @@ window.PaperLatexWorkspace = (() => {
 
     function setPreviewMessage(text) {
       projectSearch?.reset('pdf');
+      clearRendered();
       preview.textContent = '';
       const note = make('p', 'latex-preview-empty', text);
       preview.append(note); pageCount = 0; pageLabel.textContent = '—';
@@ -1077,10 +1082,22 @@ window.PaperLatexWorkspace = (() => {
       }
     }
 
-    function clearRendered() { for (const item of rendered.values()) URL.revokeObjectURL(item.url); rendered.clear(); pdfWindowKey = ''; }
+    function cancelPdfLoads() {
+      for (const [stage, job] of pdfLoads) {
+        if (pdfStages.get(Number(stage.dataset.page)) === stage) continue;
+        job.controller.abort(); pdfLoads.delete(stage);
+      }
+    }
+    function clearRendered() {
+      pdfStages.clear(); cancelPdfLoads(); pdfWindowKey = '';
+      pdfScrollTop = 0; pdfScrollDirection = 1;
+      preview.setAttribute('aria-busy', 'false');
+      for (const item of rendered.values()) URL.revokeObjectURL(item.url);
+      rendered.clear();
+    }
     function resetPdfSource(source) {
       projectSearch?.reset('pdf');
-      pdfSource = source; pdfSourceEpoch += 1; pdfSourceIntent += 1; pageRequest += 1; pageAbort?.abort(); clearRendered();
+      pdfSource = source; pdfSourceEpoch += 1; pdfSourceIntent += 1; clearRendered();
       pdfVersion = ''; pdfBuild = null; page = 1; pageCount = 0; pageGeometry = []; pdfTool = 'select';
       preview.dataset.tool = pdfTool;
       for (const button of pdfTools.querySelectorAll('button')) {
@@ -1142,14 +1159,16 @@ window.PaperLatexWorkspace = (() => {
     }
     function pdfNearby(metrics, wanted, scroll) {
       const top = scroll ? metrics[wanted - 1].top : (preview.scrollTop || 0);
-      const first = pdfPageAt(metrics, top), ahead = pdfPageAt(metrics, top + (preview.clientHeight || 600) * 2);
-      let start = Math.max(1, wanted - 1);
-      // Prepare the approaching page a viewport before it enters. Keep the
-      // visible leading page and at most three raster/selection layers.
-      if (ahead > start + 2) start = Math.min(wanted, first, ahead - 2);
-      return Array.from({ length: Math.min(3, pageCount - start + 1) }, (_, index) => start + index);
+      const first = pdfPageAt(metrics, top), firstMetric = metrics[first - 1];
+      const visibleStart = firstMetric.top + firstMetric.height <= top && first < pageCount ? first + 1 : first;
+      const last = pdfPageAt(metrics, top + Math.max(1, preview.clientHeight) - .01);
+      // Keep the outgoing page until it leaves the viewport. Use the freed
+      // slot for the approaching page while the current one is still visible.
+      const approaching = pdfScrollDirection < 0 ? Math.min(visibleStart, Math.max(visibleStart - 1, last - MAX_RENDERED_PAGES + 1)) : visibleStart;
+      const start = Math.max(1, wanted - MAX_RENDERED_PAGES + 1, Math.min(wanted, approaching, pageCount - MAX_RENDERED_PAGES + 1));
+      return Array.from({ length: Math.min(MAX_RENDERED_PAGES, pageCount - start + 1) }, (_, index) => start + index);
     }
-    async function renderPage(number, { scroll = true } = {}) {
+    async function renderPage(number, { scroll = true, retry = false } = {}) {
       if (!project || !pageCount) return;
       page = Math.min(Math.max(1, number), pageCount);
       const wanted = page, id = project.id, epoch = generation, source = pdfSource, sourceEpoch = pdfSourceEpoch;
@@ -1158,6 +1177,8 @@ window.PaperLatexWorkspace = (() => {
       const width = previewWidth(preview, zoom);
       const metrics = pdfMetrics(width), metric = metrics[wanted - 1];
       const previousScroll = preview.scrollTop || 0;
+      const delta = (scroll ? metric.top : previousScroll) - pdfScrollTop;
+      if (delta) pdfScrollDirection = Math.sign(delta);
       pageLabel.textContent = `第 ${wanted} / ${pageCount} 页`;
       updateSyncHint();
       pagePrev.disabled = page <= 1; pageNext.disabled = page >= pageCount;
@@ -1165,52 +1186,57 @@ window.PaperLatexWorkspace = (() => {
       const sourceKey = source.kind === 'version' ? `version:${source.versionId}:${source.reviewPdfVersion || ''}` : 'current';
       const keys = new Map(nearby.map(value => [value, `${id}:${sourceKey}:${value}:${pdfVersion}:${density(width, pageGeometry[value - 1])}`]));
       const windowKey = `${width}:${[...keys.values()].join('|')}`;
-      const existing = new Map(Array.from(preview.querySelectorAll('.latex-page-stage'), stage => [Number(stage.dataset.page), stage]));
-      if (windowKey === pdfWindowKey && (existing.get(wanted)?.querySelector('img') || existing.get(wanted)?.dataset.renderState === 'loading')) {
-        if (scroll) preview.scrollTop = metric.top;
-        return;
+      const changed = windowKey !== pdfWindowKey;
+      if (changed) {
+        pdfWindowKey = windowKey;
+        const kept = new Set(keys.values());
+        for (const [key, value] of rendered) if (!kept.has(key)) { URL.revokeObjectURL(value.url); rendered.delete(key); }
+        const existing = pdfStages; pdfStages = new Map();
+        preview.textContent = '';
+        const before = make('div', 'latex-page-spacer'); before.style.height = `${metrics[nearby[0] - 1].top}px`; before.style.flex = '0 0 auto'; before.setAttribute('aria-hidden', 'true');
+        const after = make('div', 'latex-page-spacer');
+        const last = metrics[metrics.length - 1];
+        const final = metrics[nearby[nearby.length - 1] - 1];
+        after.style.height = `${Math.max(0, last.top + last.height - final.top - final.height)}px`; after.style.flex = '0 0 auto'; after.setAttribute('aria-hidden', 'true');
+        preview.append(before);
+        for (const number of nearby) {
+          const item = metrics[number - 1], old = existing.get(number);
+          const stage = old?.dataset.renderKey === keys.get(number) && old.style.width === `${width}px` ? old : make('div', 'latex-page-stage');
+          stage.style.width = `${width}px`; stage.style.height = `${item.height}px`;
+          stage.dataset.page = String(number); stage.dataset.renderKey = keys.get(number); pdfStages.set(number, stage); preview.append(stage);
+          patchPdfSearch(stage);
+          if (number !== nearby[nearby.length - 1]) { const gap = make('div', 'latex-page-spacer'); gap.style.height = '16px'; gap.style.flex = '0 0 auto'; preview.append(gap); }
+        }
+        preview.append(after);
+        cancelPdfLoads();
       }
-      const ticket = ++pageRequest;
-      pageAbort?.abort(); pageAbort = new AbortController();
-      pdfWindowKey = windowKey;
-      for (const [key, value] of rendered) if (![...keys.values()].includes(key)) { URL.revokeObjectURL(value.url); rendered.delete(key); }
-      preview.textContent = '';
-      const before = make('div', 'latex-page-spacer'); before.style.height = `${metrics[nearby[0] - 1].top}px`; before.style.flex = '0 0 auto'; before.setAttribute('aria-hidden', 'true');
-      const after = make('div', 'latex-page-spacer');
-      const last = metrics[metrics.length - 1];
-      const final = metrics[nearby[nearby.length - 1] - 1];
-      after.style.height = `${Math.max(0, last.top + last.height - final.top - final.height)}px`; after.style.flex = '0 0 auto'; after.setAttribute('aria-hidden', 'true');
-      const stages = new Map(); preview.append(before);
-      for (const number of nearby) {
-        const item = metrics[number - 1], old = existing.get(number);
-        const stage = old?.dataset.renderKey === keys.get(number) && rendered.has(keys.get(number)) ? old : make('div', 'latex-page-stage');
-        stage.style.width = `${width}px`; stage.style.height = `${item.height}px`;
-        stage.dataset.page = String(number); stage.dataset.renderKey = keys.get(number); stages.set(number, stage); preview.append(stage);
-        patchPdfSearch(stage);
-        if (number !== nearby[nearby.length - 1]) { const gap = make('div', 'latex-page-spacer'); gap.style.height = '16px'; gap.style.flex = '0 0 auto'; preview.append(gap); }
-      }
-      preview.append(after);
-      preview.scrollTop = scroll ? metric.top : previousScroll;
-      renderState.textContent = '高清页加载中…'; preview.setAttribute('aria-busy', 'true');
-      const valid = () => ticket === pageRequest && epoch === generation && sourceEpoch === pdfSourceEpoch && !disposed;
-      const load = async number => {
-        const stage = stages.get(number), key = keys.get(number), pageInfo = pageGeometry[number - 1], pageScale = density(width, pageInfo);
+      if (scroll || changed) preview.scrollTop = scroll ? metric.top : previousScroll;
+      pdfScrollTop = preview.scrollTop || 0;
+      const stages = pdfStages;
+      const load = async (number, stage) => {
+        const key = keys.get(number), pageInfo = pageGeometry[number - 1], pageScale = density(width, pageInfo);
+        const valid = () => pdfStages.get(number) === stage && epoch === generation && sourceEpoch === pdfSourceEpoch && !disposed;
         try {
-          if (stage.querySelector('img')) return;
           stage.dataset.renderState = 'loading';
           let image = rendered.get(key);
           if (!image) {
-            const result = source.kind === 'version'
-              ? await api('latex_version_pdf_page', { version_id: source.versionId, ...(source.reviewPdfVersion ? { review_pdf_version: source.reviewPdfVersion } : {}), page: number, scale: pageScale }, { signal: pageAbort.signal })
-              : await api('latex_pdf_page', { id, page: number, scale: pageScale }, { signal: pageAbort.signal });
+            while (valid() && pdfLoads.size >= 2) await Promise.race([...pdfLoads.values()].map(job => job.result.catch(() => {})));
+            if (!valid()) return;
+            const controller = new AbortController();
+            const resultPromise = source.kind === 'version'
+              ? api('latex_version_pdf_page', { version_id: source.versionId, ...(source.reviewPdfVersion ? { review_pdf_version: source.reviewPdfVersion } : {}), page: number, scale: pageScale }, { signal: controller.signal })
+              : api('latex_pdf_page', { id, page: number, scale: pageScale }, { signal: controller.signal });
+            pdfLoads.set(stage, { controller, result: resultPromise });
+            let result;
+            try { result = await resultPromise; } finally { pdfLoads.delete(stage); }
             if (!valid()) return;
             image = imageUrl(result);
             let bytes = [...rendered.values()].reduce((sum, item) => sum + item.bytes, 0);
-            if (number === wanted) for (const [oldKey, old] of rendered) {
+            if (number === page) for (const [oldKey, old] of rendered) {
               if (bytes + image.bytes <= MAX_CACHED_BYTES && rendered.size < MAX_RENDERED_PAGES) break;
               URL.revokeObjectURL(old.url); rendered.delete(oldKey); bytes -= old.bytes;
             }
-            if (number !== wanted && (rendered.size >= MAX_RENDERED_PAGES || bytes + image.bytes > MAX_CACHED_BYTES)) { URL.revokeObjectURL(image.url); stage.dataset.renderState = 'idle'; return; }
+            if (number !== page && (rendered.size >= MAX_RENDERED_PAGES || bytes + image.bytes > MAX_CACHED_BYTES)) { URL.revokeObjectURL(image.url); stage.dataset.renderState = 'idle'; return; }
             rendered.set(key, image);
           }
           if (!valid()) return;
@@ -1220,22 +1246,42 @@ window.PaperLatexWorkspace = (() => {
           stage.append(img); stage.rasterAnnotationIds = new Set(image.annotations.map(annotation => annotation.id));
           patchPdfPageAnnotations(stage, reviewer?.annotations?.() || []);
           installReviewLayer(stage, img, image.words, pageInfo, number, width);
-          stage.dataset.renderState = 'ready';
+          stage.dataset.renderState = 'ready'; stage.rasterSize = `${image.width} × ${image.height}`;
           stage.addEventListener('dblclick', event => { if (pdfTool === 'select') void jumpToSource(event, img); });
-          if (number === wanted) renderState.textContent = `${image.width} × ${image.height}`;
         } catch (error) {
           if (!valid() || error.name === 'AbortError') return;
           stage.dataset.renderState = 'failed';
           stage.append(make('p', 'latex-preview-empty', `预览失败：${error.message}`));
-          const retry = make('button', 'button subtle', '重试此页'); retry.type = 'button'; retry.addEventListener('click', () => void renderPage(number, { scroll: false })); stage.append(retry);
-          if (number === wanted) renderState.textContent = '加载失败';
+          const retryButton = make('button', 'button subtle', '重试此页'); retryButton.type = 'button'; retryButton.addEventListener('click', () => void renderPage(number, { scroll: false, retry: true })); stage.append(retryButton);
+        } finally {
+          if (valid() && number === page) updatePdfRenderState(stage);
         }
       };
-      const priority = [...nearby.filter(number => number > wanted), ...nearby.filter(number => number < wanted).reverse()];
-      const currentLoad = load(wanted), adjacentLoad = priority.length ? load(priority.shift()) : Promise.resolve();
+      function ensureLoad(number, allowRetry) {
+        const stage = stages.get(number);
+        if (stage.loadPromise || stage.dataset.renderState === 'ready') return stage.loadPromise;
+        if (stage.dataset.renderState === 'failed') {
+          if (!allowRetry) return;
+          stage.textContent = ''; stage.searchMarks = null; stage.savedMarks = null;
+          patchPdfSearch(stage);
+        }
+        stage.loadPromise = load(number, stage).finally(() => { stage.loadPromise = null; });
+        return stage.loadPromise;
+      }
+      const currentLoad = ensureLoad(wanted, scroll || retry);
+      if (changed) {
+        const after = nearby.filter(number => number > wanted), before = nearby.filter(number => number < wanted).reverse();
+        const priority = pdfScrollDirection < 0 ? [...before, ...after] : [...after, ...before];
+        for (const number of priority) void ensureLoad(number);
+      }
+      updatePdfRenderState(stages.get(wanted));
       await currentLoad;
-      if (valid()) preview.setAttribute('aria-busy', 'false');
-      void (async () => { await adjacentLoad; for (const number of priority) if (valid()) await load(number); })();
+    }
+
+    function updatePdfRenderState(stage) {
+      const state = stage.dataset.renderState;
+      renderState.textContent = state === 'ready' ? stage.rasterSize : state === 'failed' ? '加载失败' : '高清页加载中…';
+      preview.setAttribute('aria-busy', String(state === 'loading'));
     }
 
     function patchPdfPageAnnotations(stage, notes) {

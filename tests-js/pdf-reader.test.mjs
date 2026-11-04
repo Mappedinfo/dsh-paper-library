@@ -343,6 +343,57 @@ test('spread geometry pairs mixed page sizes without overlap and keeps an odd fi
   assert.deepEqual(plain(rotatedSelection.rects), [[20, 30, 70, 50]], 'Spread geometry never changes PDF point coordinates');
 });
 
+test('the outgoing and incoming spreads remain rendered together across a vertical page seam', async () => {
+  const pages = Array.from({ length: 6 }, (_, index) => ({ page: index + 1, width: 600, height: 900 }));
+  const metrics = pageMetrics(pages, 300, 'spread');
+  const seam = metrics[2].top, height = 300;
+  const h = scheduler({ maxResident: 4 });
+  h.queue.reset('synthetic');
+  const scroll = top => h.queue.want(visibleWindow(metrics, top, height, undefined, 'spread'));
+
+  scroll(seam - height - 20);
+  for (let index = 0; index < 4; index++) { h.requests[index].resolve(); await flush(); }
+  assert.deepEqual([...h.installed.keys()], [1, 2, 3, 4], 'The next spread is prepared before the seam is visible');
+
+  scroll(seam - 80);
+  assert.deepEqual(plain(h.queue.snapshot().wanted), [3, 4, 1, 2]);
+  assert.deepEqual(h.evicted, [], 'Changing the active page must not blank the outgoing spread');
+
+  scroll(seam); await flush();
+  assert.deepEqual(h.evicted, [1, 2]);
+  assert.equal(h.requests[4].page, 5, 'Preload the following spread once the outgoing spread leaves');
+  h.requests[4].resolve(); await flush(); h.requests[5].resolve(); await h.queue.idle();
+  assert.deepEqual(h.peaks(), { inFlight: 1, resident: 4 });
+});
+
+test('short pages at the bottom of a zoomed-out viewport take priority over offscreen neighbors', () => {
+  const pages = [1200, 180, 50, 700, 700].map((height, index) => ({ page: index + 1, width: 600, height }));
+  const metrics = pageMetrics(pages, 600);
+  assert.deepEqual(plain(visibleWindow(metrics, metrics[1].top, 400)), [2, 3, 4]);
+});
+
+test('a new page can finish during touch scrolling while replacement and pinch still wait', async () => {
+  const scope = vm.createContext({
+    inkGesture: null, markupGesture: null, nativeGesture: null, browserPinch: null,
+    touchPan: { pointerId: 1 }, touchPoints: new Set([1]), inputWaiters: new Set(), scheduleRefresh() {},
+  });
+  const start = readerSource.indexOf('    function inputBusy(');
+  vm.runInContext(readerSource.slice(start, readerSource.indexOf('    function paintOverlays(', start)), scope);
+  const valid = () => true;
+  const replacement = scope.waitForInput(1, valid);
+  assert.equal(scope.inputWaiters.size, 1);
+  assert.equal(await scope.waitForInput(2, valid, true), true);
+
+  scope.touchPan = null; scope.touchPoints.add(2);
+  const firstPaint = scope.waitForInput(3, valid, true);
+  assert.equal(scope.inputWaiters.size, 2);
+  scope.touchPoints.delete(2); scope.touchPan = { pointerId: 1 }; scope.inputEnded();
+  assert.equal(await firstPaint, true);
+  assert.equal(scope.inputWaiters.size, 1);
+  scope.touchPan = null; scope.touchPoints.clear(); scope.inputEnded();
+  assert.equal(await replacement, true);
+});
+
 test('layout switching preserves the exact right-hand page and linked Ink points while finishing a partial stroke', async () => {
   const pages = Array.from({ length: 5 }, (_, index) => ({ page: index + 1, width: 600, height: 800 })), buffer = createInkBuffer();
   const origin = { paperId: 'paper-a', page: 2, parentId: 'parent-a' };

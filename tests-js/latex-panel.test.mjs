@@ -750,6 +750,46 @@ test('scrolling into an in-flight prefetched page does not cancel or repeat its 
   f.ui.dispose()
 })
 
+test('turning a page keeps the visible and pending stages across a PDF render window change', async () => {
+  const next = deferred()
+  const f = await fixture((action, args) => action === 'latex_pdf_page' && args.page === 2 ? next.promise : undefined)
+  const preview = f.ids.get('latex-preview')
+  const stage = number => preview.querySelectorAll('.latex-page-stage').find(item => Number(item.dataset.page) === number)
+  const firstImage = stage(1).querySelector('img'), pending = stage(2)
+  const request = f.calls.find(call => call.action === 'latex_pdf_page' && call.page === 2)
+  preview.scrollTop = 760
+  await preview.dispatch('scroll')
+  assert.equal(f.ui.testHooks.state().page, 2)
+  assert.equal(stage(1).querySelector('img'), firstImage, 'the last visible part of page one stays drawn')
+  preview.scrollTop = 769
+  await preview.dispatch('scroll'); await tick()
+  assert.equal(stage(1), undefined)
+  assert.equal(stage(2), pending)
+  assert.equal(request.signal.aborted, false)
+  assert.equal(f.calls.filter(call => call.action === 'latex_pdf_page' && call.page === 2).length, 1)
+  assert.ok(f.calls.some(call => call.action === 'latex_pdf_page' && call.page === 4))
+  next.resolve(image); await tick()
+  assert.ok(pending.querySelector('img'))
+  assert.equal(preview.getAttribute('aria-busy'), 'false')
+  assert.equal(f.ids.get('latex-render-state').textContent, '1200 × 1600')
+  f.ui.dispose()
+})
+
+test('scrolling back preloads the preceding PDF page before it reenters the viewport', async () => {
+  const f = await fixture(action => action === 'latex_pdf_pages' ? { page_count: 6, version: 'pdf-v1', pages: Array.from({ length: 6 }, () => ({ width: 600, height: 800 })) } : undefined)
+  const preview = f.ids.get('latex-preview')
+  await f.ui.testHooks.renderPage(3); await tick()
+  assert.ok(preview.querySelectorAll('img').every(item => item.dataset.page !== '2'))
+  preview.scrollTop = 1700; await preview.dispatch('scroll'); await tick()
+  preview.scrollTop = 1572; await preview.dispatch('scroll'); await tick()
+  assert.equal(f.ui.testHooks.state().page, 3)
+  const preceding = preview.querySelectorAll('img').find(item => item.dataset.page === '2')
+  assert.ok(preceding, 'page two is available before its bottom at 1552')
+  preview.scrollTop = 1500; await preview.dispatch('scroll'); await tick()
+  assert.ok(preview.querySelectorAll('img').includes(preceding))
+  f.ui.dispose()
+})
+
 test('a confirmed PDF annotation patches only its overlay without reloading raster or selection layers', async () => {
   let annotations = []
   const anchor = { kind: 'pdf', page: 1, pdf_version: 'synthetic-sha', rects: [[10, 20, 50, 35]], text: 'synthetic selection' }
