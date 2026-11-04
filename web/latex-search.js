@@ -1,6 +1,6 @@
 'use strict';
 window.PaperLatexSearch = (() => {
-  function create({ toolbar, topbar, search, reveal, changed = () => {} }) {
+  function create({ toolbar, topbar, search, listFolders, reveal, changed = () => {} }) {
     const make = (tag, cls, text) => {
       const node = document.createElement(tag);
       if (cls) node.className = cls;
@@ -32,6 +32,19 @@ window.PaperLatexSearch = (() => {
       scope.append(option);
     }
     scope.value = 'pdf';
+    const folder = make('input', 'latex-workspace-search-folder');
+    folder.id = 'latex-workspace-search-folder';
+    folder.type = 'text';
+    folder.maxLength = 500;
+    folder.autocomplete = 'off';
+    folder.spellcheck = false;
+    folder.placeholder = '文件夹（默认排除历史）';
+    folder.setAttribute('aria-label', '搜索文件夹');
+    const folderHint = '留空搜索项目源码并排除历史目录，也可选择或输入项目内的相对文件夹路径。';
+    folder.title = folderHint;
+    const folderOptions = make('datalist');
+    folderOptions.id = 'latex-workspace-search-folders';
+    folder.setAttribute('list', 'latex-workspace-search-folders');
     const input = make('input');
     input.id = 'latex-workspace-search-query';
     input.type = 'search';
@@ -55,7 +68,7 @@ window.PaperLatexSearch = (() => {
     const status = make('span', 'latex-workspace-search-status');
     status.id = 'latex-workspace-search-status';
     status.setAttribute('role', 'status');
-    controls.append(scope, input, submit, previous, next, choices, more, status);
+    controls.append(scope, folder, folderOptions, input, submit, previous, next, choices, more, status);
     panel.append(controls);
     toolbar.append(toggle);
     topbar.append(panel);
@@ -66,12 +79,15 @@ window.PaperLatexSearch = (() => {
     let activeIndex = -1;
     let cursor = null;
     let summary = '';
+    let folderRequest = null;
+    let foldersLoaded = false;
 
     function say(message, error = false) {
       status.textContent = message;
       status.classList.toggle('error', error);
     }
     function syncControls() {
+      folder.hidden = folder.disabled = scope.value !== 'source';
       previous.disabled = Boolean(request) || activeIndex <= 0;
       next.disabled = Boolean(request) || activeIndex >= matches.length - 1;
       choices.disabled = Boolean(request) || !matches.length;
@@ -102,11 +118,50 @@ window.PaperLatexSearch = (() => {
       replaceMatches([]);
       say('');
     }
+    function cancelFolders() {
+      folderRequest?.abort();
+      folderRequest = null;
+    }
+    async function loadFolders() {
+      if (panel.hidden || folder.hidden || foldersLoaded || folderRequest) return;
+      const controller = new AbortController();
+      folderRequest = controller;
+      try {
+        const result = await listFolders({ signal: controller.signal });
+        if (folderRequest !== controller) return;
+        folderOptions.textContent = '';
+        for (const path of result.folders) {
+          const option = make('option');
+          option.value = path;
+          folderOptions.append(option);
+        }
+        foldersLoaded = true;
+        folder.title = result.truncated ? '文件夹建议达到上限。可直接输入完整的项目相对路径。' : folderHint;
+      } catch {
+        if (folderRequest === controller) folder.title = '暂时无法列出文件夹。可直接输入项目相对路径。';
+      } finally {
+        if (folderRequest === controller) folderRequest = null;
+      }
+    }
+    function resetProject() {
+      cancelFolders();
+      foldersLoaded = false;
+      folder.value = '';
+      folderOptions.textContent = '';
+      folder.title = folderHint;
+      reset();
+    }
     function setOpen(open) {
       panel.hidden = !open;
       toggle.setAttribute('aria-expanded', String(open));
-      if (open) input.focus();
-      else reset();
+      if (open) {
+        input.focus();
+        void loadFolders();
+      } else {
+        cancelFolders();
+        foldersLoaded = false;
+        reset();
+      }
     }
     async function activate(index) {
       const hit = matches[index];
@@ -141,6 +196,7 @@ window.PaperLatexSearch = (() => {
       try {
         const result = await search(scope.value, query, {
           signal: controller.signal,
+          ...(scope.value === 'source' && folder.value.trim() ? { path: folder.value.trim() } : {}),
           ...(nextCursor != null ? { cursor: nextCursor } : {}),
         });
         if (request !== controller) return;
@@ -168,7 +224,14 @@ window.PaperLatexSearch = (() => {
     });
     controls.addEventListener('submit', event => { event.preventDefault(); void run(); });
     input.addEventListener('input', () => reset());
-    scope.addEventListener('change', () => { reset(); input.focus(); });
+    scope.addEventListener('change', () => {
+      reset();
+      if (scope.value === 'source') void loadFolders();
+      else cancelFolders();
+      input.focus();
+    });
+    folder.addEventListener('focus', () => void loadFolders());
+    folder.addEventListener('input', () => reset('source'));
     previous.addEventListener('click', () => void activate(activeIndex - 1));
     next.addEventListener('click', () => void activate(activeIndex + 1));
     choices.addEventListener('change', () => void activate(Number(choices.value)));
@@ -177,6 +240,7 @@ window.PaperLatexSearch = (() => {
 
     return {
       reset,
+      resetProject,
       close: () => setOpen(false),
       results: requestedScope => requestedScope === scope.value
         ? { matches, active: matches[activeIndex] ?? null }

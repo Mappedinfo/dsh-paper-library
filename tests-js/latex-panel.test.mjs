@@ -44,6 +44,7 @@ async function fixture(override = () => undefined, { review = false, spellChecke
     if (action === 'latex_ws_status') return { root: '/synthetic', sync: {} }
     if (action === 'latex_project_list') return { projects: ['one', 'two'].map(id => ({ id, title: id, main_path: 'main.tex', pdf_present: true })) }
     if (action === 'latex_tree') return { files: ['main.tex', 'draft.tex', 'a.tex', 'b.tex'].map(path => ({ path, kind: 'text' })) }
+    if (action === 'latex_source_folders') return { folders: ['chapters', 'revisions'], truncated: false }
     if (action === 'latex_outline') return { events: [{ kind: 'heading', path: 'a.tex', line: 2, title: '第一章', level: 2 }], entries: ['main.tex', 'draft.tex'], unreferenced: [], entry_scan_complete: true }
     if (action === 'latex_read') return { path: args.path, content: `${args.path}\nsecond line`, revision: 'revision', bytes: 10, lines: 2 }
     if (action === 'latex_pdf_pages') return { page_count: 4, version: 'pdf-v1', pages: Array.from({ length: 4 }, () => ({ width: 600, height: 800 })) }
@@ -125,24 +126,34 @@ test('workspace source search opens the matching file, converts Unicode ranges, 
 });
 
 test('workspace source search cannot restore results from before a project location rebind', async () => {
-  const pending = deferred();
+  const pending = deferred(), folders = deferred();
   const project = { id: 'one', title: 'One', root: '/old/project', main_path: 'main.tex', binding_generation: 0 };
   const f = await fixture(action => {
     if (action === 'latex_project_list') return { projects: [project] };
     if (action === 'latex_source_search') return pending.promise;
+    if (action === 'latex_source_folders') return folders.promise;
     if (action === 'latex_project_update') return { project: { ...project, root: '/new/project', main_path: 'draft.tex', binding_generation: 1 } };
   });
+  const folder = f.ids.get('latex-workspace-search-folder');
+  folder.value = 'chapters';
   await submitWorkspaceSearch(f, 'source', 'old');
   const request = f.calls.find(call => call.action === 'latex_source_search');
+  const folderRequest = f.calls.find(call => call.action === 'latex_source_folders');
   assert.equal(request.expected_binding_generation, 0);
+  assert.equal(request.path, 'chapters');
+  assert.equal(folderRequest.expected_root, project.root);
   f.ids.get('latex-location-root').value = '/new/project';
   f.ids.get('latex-location-main').value = 'draft.tex';
   await f.ids.get('latex-location-save').dispatch('click');
   assert.equal(request.signal.aborted, true);
+  assert.equal(folderRequest.signal.aborted, true);
+  folders.resolve({ folders: ['chapters'] });
   pending.resolve({ matches: [{ path: 'b.tex', revision: 'revision', line: 1, column: 1, start: 0, end: 3, text: 'old' }] });
   await tick();
   assert.equal(f.ui.testHooks.state().file, 'draft.tex');
   assert.equal(f.ids.get('latex-workspace-search-results').hidden, true);
+  assert.equal(folder.value, '');
+  assert.equal(f.ids.get('latex-workspace-search-folders').children.length, 0);
   assert.equal(f.calls.some(call => call.action === 'latex_read' && call.path === 'b.tex'), false);
   f.ui.dispose();
 });

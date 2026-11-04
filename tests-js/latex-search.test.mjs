@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 const script = await readFile(new URL('../web/latex-search.js', import.meta.url), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-function fixture({ search, reveal }) {
+function fixture({ search, reveal, listFolders = async () => ({ folders: [] }) }) {
   const ids = new Map();
   class Element {
     constructor(tag) {
@@ -29,7 +29,7 @@ function fixture({ search, reveal }) {
   const window = {};
   vm.runInNewContext(script, { window, document: { createElement: tag => new Element(tag) }, AbortController });
   const toolbar = new Element('header'), topbar = new Element('div');
-  const ui = window.PaperLatexSearch.create({ toolbar, topbar, search, reveal });
+  const ui = window.PaperLatexSearch.create({ toolbar, topbar, search, reveal, listFolders });
   const get = suffix => ids.get(suffix ? `latex-workspace-search-${suffix}` : 'latex-workspace-search');
   const form = get().children[0];
   return { ui, get, form };
@@ -67,6 +67,42 @@ test('workspace search reveals the first match and navigates each returned batch
   assert.equal(get('more').hidden, true);
   assert.deepEqual(requests, [['pdf', 'needle', undefined], ['pdf', 'needle', cursor]]);
   assert.deepEqual(revealed, [['pdf', initial[0]], ['pdf', initial[1]], ['pdf', initial[0]], ['pdf', later]]);
+});
+
+test('source folder suggestions allow exact relative paths and reset stale results', async () => {
+  const requests = [], revealed = [];
+  const { get, form } = fixture({
+    listFolders: async () => ({ folders: ['chapters', 'revisions'], truncated: true }),
+    search: (scope, query, options) => new Promise(resolve => requests.push({ scope, query, ...options, resolve })),
+    reveal: (scope, hit) => revealed.push(hit),
+  });
+  get('open').fire('click');
+  assert.equal(get('folder').hidden, true);
+  get('scope').value = 'source';
+  get('scope').fire('change');
+  await tick();
+  assert.equal(get('folder').hidden, false);
+  assert.deepEqual(get('folders').children.map(option => option.value), ['chapters', 'revisions']);
+  assert.match(get('folder').title, /直接输入/);
+  get('query').value = 'needle';
+  form.fire('submit');
+  assert.equal(requests[0].path, undefined);
+  get('folder').value = 'revisions/draft';
+  get('folder').fire('input');
+  assert.equal(requests[0].signal.aborted, true);
+  requests[0].resolve({ matches: [{ label: 'old' }] });
+  form.fire('submit');
+  assert.equal(requests[1].path, 'revisions/draft');
+  const hit = { label: 'scoped' };
+  requests[1].resolve({ matches: [hit] });
+  await tick();
+  assert.deepEqual(revealed, [hit]);
+  get('scope').value = 'pdf';
+  get('scope').fire('change');
+  assert.equal(get('folder').hidden, true);
+  form.fire('submit');
+  assert.equal(requests[2].scope, 'pdf');
+  assert.equal(requests[2].path, undefined);
 });
 
 test('scope changes and closing cancel lookups and invalidate outstanding reveal callbacks', async () => {

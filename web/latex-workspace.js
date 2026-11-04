@@ -774,7 +774,7 @@ window.PaperLatexWorkspace = (() => {
     }
 
     function cancelReads() {
-      projectSearch?.reset();
+      projectSearch?.resetProject();
       clearPdfSelection();
       fileRequest += 1; navRequest += 1; mediaRequest += 1;
       for (const controller of [fileAbort, navAbort, mediaAbort]) controller?.abort();
@@ -891,6 +891,7 @@ window.PaperLatexWorkspace = (() => {
     }
 
     async function renderEmpty() {
+      projectSearch?.resetProject();
       syncLocationFields();
       file = null; revision = null; editor.value = ''; lineNumbers(); tree = null;
       fileList.textContent = ''; errors.textContent = ''; renderEmptyState();
@@ -1528,14 +1529,19 @@ window.PaperLatexWorkspace = (() => {
     pagePrev.addEventListener('click', () => void renderPage(page - 1));
     pageNext.addEventListener('click', () => void renderPage(page + 1));
 
-    async function searchProject(scope, query, { signal, cursor }) {
+    function listSearchFolders({ signal }) {
+      if (!project || project.exists === false || switching) throw new Error('请先打开可用的 LaTeX 项目。');
+      return api('latex_source_folders', { id: project.id }, { signal });
+    }
+
+    async function searchProject(scope, query, { signal, cursor, path }) {
       if (!project || project.exists === false || switching) throw new Error('请先打开可用的 LaTeX 项目。');
       const id = project.id;
       if (scope === 'source') {
-        const result = await api('latex_source_search', { id, query }, { signal });
+        const result = await api('latex_source_search', { id, query, ...(path ? { path } : {}) }, { signal });
         return {
           matches: result.matches.map(hit => ({ ...hit, label: `${hit.path}:${hit.line}:${hit.column} · ${hit.text}` })),
-          summary: result.truncated ? '结果达到扫描或显示上限' : '',
+          summary: result.truncated ? '达到搜索上限，可缩小文件夹范围或细化关键词' : '',
         };
       }
       if (!pageCount || !pdfVersion) throw new Error('请先生成或打开一份 PDF。');
@@ -1649,7 +1655,7 @@ window.PaperLatexWorkspace = (() => {
     }
 
     projectSearch = window.PaperLatexSearch?.create({
-      toolbar, topbar, search: searchProject, reveal: revealSearchHit,
+      toolbar, topbar, search: searchProject, listFolders: listSearchFolders, reveal: revealSearchHit,
       changed: () => {
         patchSourceSearch();
         for (const stage of preview.querySelectorAll('.latex-page-stage')) patchPdfSearch(stage);

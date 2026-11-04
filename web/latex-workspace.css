@@ -109,6 +109,8 @@ body > #latex-view { height: 100dvh; }
 .latex-workspace-search-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 0; font-size: 12px; }
 .latex-workspace-search-controls :is(input, select, button) { min-height: 28px; font-size: inherit; }
 .latex-workspace-search-controls input { flex: 0 1 230px; min-width: 100px; }
+.latex-workspace-search-controls .latex-workspace-search-folder { flex-basis: 172px; width: 172px; }
+.latex-workspace-search-folder[hidden] { display: none; }
 .latex-workspace-search-results { max-width: min(100%, 320px); text-overflow: ellipsis; }
 .latex-workspace-search-status { color: var(--muted); }
 .latex-workspace-search-status.error { color: var(--error); }
