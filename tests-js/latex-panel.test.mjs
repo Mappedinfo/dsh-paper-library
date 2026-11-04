@@ -44,7 +44,6 @@ async function fixture(override = () => undefined, { review = false, spellChecke
     if (action === 'latex_ws_status') return { root: '/synthetic', sync: {} }
     if (action === 'latex_project_list') return { projects: ['one', 'two'].map(id => ({ id, title: id, main_path: 'main.tex', pdf_present: true })) }
     if (action === 'latex_tree') return { files: ['main.tex', 'draft.tex', 'a.tex', 'b.tex'].map(path => ({ path, kind: 'text' })) }
-    if (action === 'latex_source_folders') return { folders: ['chapters', 'revisions'], truncated: false }
     if (action === 'latex_outline') return { events: [{ kind: 'heading', path: 'a.tex', line: 2, title: '第一章', level: 2 }], entries: ['main.tex', 'draft.tex'], unreferenced: [], entry_scan_complete: true }
     if (action === 'latex_read') return { path: args.path, content: `${args.path}\nsecond line`, revision: 'revision', bytes: 10, lines: 2 }
     if (action === 'latex_pdf_pages') return { page_count: 4, version: 'pdf-v1', pages: Array.from({ length: 4 }, () => ({ width: 600, height: 800 })) }
@@ -107,7 +106,21 @@ test('workspace source search opens the matching file, converts Unicode ranges, 
   const hit = { path: 'b.tex', revision: 'saved-b', line: 2, column: 2, start: codepoint, end: codepoint + 6, text: '😀needle end' };
   const applied = [];
   const f = await fixture((action, args) => {
-    if (action === 'latex_source_search') return { matches: [hit] };
+    if (action === 'latex_outline') return {
+      events: [
+        { kind: 'file', path: 'main.tex', title: 'main.tex', line: 1 },
+        { kind: 'file', path: 'b.tex', title: 'b.tex', line: 1 },
+        { kind: 'heading', path: 'b.tex', title: '方法', level: 2, line: 2 },
+        { kind: 'warning', path: 'missing.tex', title: '文件不存在', line: 1 },
+        { kind: 'file', path: 'a.tex', title: 'a.tex', line: 1 },
+      ],
+      unreferenced: ['revisions/old.tex', 'other.tex'],
+      entry_scan_complete: true,
+    };
+    if (action === 'latex_source_search') {
+      assert.deepEqual(Array.from(args.paths), ['main.tex', 'b.tex', 'a.tex']);
+      return { matches: [hit] };
+    }
     if (action === 'latex_read' && args.path === hit.path) return { path: hit.path, content, revision: hit.revision, bytes: 32, lines: 2 };
   }, { sourceEditor: { setProjectSearchMatches: matches => applied.push(matches), destroy() {} } });
   await submitWorkspaceSearch(f, 'source', 'needle');
@@ -126,35 +139,51 @@ test('workspace source search opens the matching file, converts Unicode ranges, 
 });
 
 test('workspace source search cannot restore results from before a project location rebind', async () => {
-  const pending = deferred(), folders = deferred();
+  const pending = deferred();
   const project = { id: 'one', title: 'One', root: '/old/project', main_path: 'main.tex', binding_generation: 0 };
-  const f = await fixture(action => {
+  const f = await fixture((action, args) => {
     if (action === 'latex_project_list') return { projects: [project] };
-    if (action === 'latex_source_search') return pending.promise;
-    if (action === 'latex_source_folders') return folders.promise;
+    if (action === 'latex_outline') return {
+      events: [{ kind: 'file', path: args.expected_binding_generation === 1 ? 'draft.tex' : 'main.tex', title: '入口', line: 1 }],
+      entry_scan_complete: true,
+    };
+    if (action === 'latex_source_search') return args.expected_binding_generation === 0 ? pending.promise : { matches: [] };
     if (action === 'latex_project_update') return { project: { ...project, root: '/new/project', main_path: 'draft.tex', binding_generation: 1 } };
   });
-  const folder = f.ids.get('latex-workspace-search-folder');
-  folder.value = 'chapters';
   await submitWorkspaceSearch(f, 'source', 'old');
   const request = f.calls.find(call => call.action === 'latex_source_search');
-  const folderRequest = f.calls.find(call => call.action === 'latex_source_folders');
   assert.equal(request.expected_binding_generation, 0);
-  assert.equal(request.path, 'chapters');
-  assert.equal(folderRequest.expected_root, project.root);
+  assert.deepEqual(Array.from(request.paths), ['main.tex']);
   f.ids.get('latex-location-root').value = '/new/project';
   f.ids.get('latex-location-main').value = 'draft.tex';
   await f.ids.get('latex-location-save').dispatch('click');
   assert.equal(request.signal.aborted, true);
-  assert.equal(folderRequest.signal.aborted, true);
-  folders.resolve({ folders: ['chapters'] });
   pending.resolve({ matches: [{ path: 'b.tex', revision: 'revision', line: 1, column: 1, start: 0, end: 3, text: 'old' }] });
   await tick();
   assert.equal(f.ui.testHooks.state().file, 'draft.tex');
   assert.equal(f.ids.get('latex-workspace-search-results').hidden, true);
-  assert.equal(folder.value, '');
-  assert.equal(f.ids.get('latex-workspace-search-folders').children.length, 0);
   assert.equal(f.calls.some(call => call.action === 'latex_read' && call.path === 'b.tex'), false);
+  await submitWorkspaceSearch(f, 'source', 'new');
+  assert.deepEqual(Array.from(f.calls.filter(call => call.action === 'latex_source_search').at(-1).paths), ['draft.tex']);
+  f.ui.dispose();
+});
+
+test('a changed chapter list cancels searches against the previous outline', async () => {
+  const pending = deferred();
+  let chapter = 'a.tex';
+  const f = await fixture(action => {
+    if (action === 'latex_outline') return { events: [{ kind: 'file', path: chapter, title: chapter, line: 1 }], entry_scan_complete: true };
+    if (action === 'latex_source_search') return pending.promise;
+  });
+  await submitWorkspaceSearch(f, 'source', 'needle');
+  const request = f.calls.find(call => call.action === 'latex_source_search');
+  chapter = 'b.tex';
+  await f.ui.testHooks.loadOutline();
+  assert.equal(request.signal.aborted, true);
+  pending.resolve({ matches: [{ path: 'a.tex', revision: 'revision', line: 1, column: 1, start: 0, end: 1, text: 'old' }] });
+  await tick();
+  assert.equal(f.ids.get('latex-workspace-search-results').hidden, true);
+  assert.equal(f.calls.some(call => call.action === 'latex_read' && call.path === 'a.tex'), false);
   f.ui.dispose();
 });
 

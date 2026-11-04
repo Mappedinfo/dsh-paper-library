@@ -46,7 +46,7 @@ window.PaperLatexWorkspace = (() => {
     let settingsRevision = null;
     let committedSettings = { ...DEFAULT_SETTINGS }, pendingSettings = [], settingsTail = Promise.resolve();
     let workspace = { root: null, sync: null };
-    let outline = null, navMode = 'outline', fileRequest = 0, navRequest = 0;
+    let chapterScope = null, navMode = 'outline', fileRequest = 0, navRequest = 0;
     let fileAbort = null, navAbort = null, mediaAbort = null, mediaRequest = 0;
     let pdfVersion = '', zoom = 1, mediaPath = null, mediaPage = 1, mediaZoom = 1, mediaCount = 0;
     let mediaGeometry = null, resizeTimer = null, outlineTimer = null;
@@ -774,7 +774,7 @@ window.PaperLatexWorkspace = (() => {
     }
 
     function cancelReads() {
-      projectSearch?.resetProject();
+      projectSearch?.reset();
       clearPdfSelection();
       fileRequest += 1; navRequest += 1; mediaRequest += 1;
       for (const controller of [fileAbort, navAbort, mediaAbort]) controller?.abort();
@@ -844,6 +844,7 @@ window.PaperLatexWorkspace = (() => {
       resetAiState();
       if (!id) { project = null; await renderEmpty(); return; }
       cancelReads();
+      chapterScope = null;
       generation += 1;
       const ticket = generation;
       clearRendered();
@@ -891,7 +892,8 @@ window.PaperLatexWorkspace = (() => {
     }
 
     async function renderEmpty() {
-      projectSearch?.resetProject();
+      chapterScope = null;
+      projectSearch?.reset();
       syncLocationFields();
       file = null; revision = null; editor.value = ''; lineNumbers(); tree = null;
       fileList.textContent = ''; errors.textContent = ''; renderEmptyState();
@@ -1001,8 +1003,10 @@ window.PaperLatexWorkspace = (() => {
       try {
         const result = await api('latex_outline', { id }, { signal: navAbort.signal });
         if (ticket !== navRequest || id !== project?.id || disposed) return;
-        outline = result; outlineList.textContent = '';
+        const chapterPaths = new Set();
+        outlineList.textContent = '';
         for (const item of result.events || []) {
+          if (['file', 'heading'].includes(item.kind) && /\.tex$/i.test(item.path)) chapterPaths.add(item.path);
           const row = make('div', `latex-outline-${item.kind}`);
           const label = item.kind === 'file' ? `${item.repeated ? '↳ ' : ''}${item.title}` : item.title;
           const button = sourceButton(item.path, label, item.line, item.kind);
@@ -1015,6 +1019,14 @@ window.PaperLatexWorkspace = (() => {
           for (const path of result.unreferenced) group.append(sourceButton(path));
           outlineList.append(group);
         }
+        const paths = [...chapterPaths];
+        const previousPaths = chapterScope?.paths;
+        const truncated = Boolean(result.truncated);
+        if (previousPaths && (truncated !== chapterScope.truncated || paths.length !== previousPaths.length
+            || paths.some((path, index) => path !== previousPaths[index]))) {
+          projectSearch?.reset('source');
+        }
+        chapterScope = { paths, truncated };
         const candidates = [...new Set([project.main_path, ...(result.entries || [])].filter(Boolean))];
         mainSelect.textContent = '';
         for (const path of candidates) { const option = make('option', '', path); option.value = path; mainSelect.append(option); }
@@ -1023,6 +1035,8 @@ window.PaperLatexWorkspace = (() => {
         updateNavigatorActive();
       } catch (error) {
         if (ticket !== navRequest || error.name === 'AbortError') return;
+        chapterScope = null;
+        projectSearch?.reset('source');
         outlineList.textContent = `章节读取失败：${error.message}。可用「文件」导航，或点 ↻ 重试。`;
       }
     }
@@ -1053,6 +1067,7 @@ window.PaperLatexWorkspace = (() => {
       try {
         const result = await api('latex_project_update', { id: project.id, main_path: path });
         project = result.project; projects = projects.map(item => item.id === project.id ? project : item);
+        chapterScope = null; outlineList.textContent = '';
         resetAiState();
         syncLocationFields();
         resetPdfSource({ kind: 'current' });
@@ -1529,19 +1544,21 @@ window.PaperLatexWorkspace = (() => {
     pagePrev.addEventListener('click', () => void renderPage(page - 1));
     pageNext.addEventListener('click', () => void renderPage(page + 1));
 
-    function listSearchFolders({ signal }) {
-      if (!project || project.exists === false || switching) throw new Error('请先打开可用的 LaTeX 项目。');
-      return api('latex_source_folders', { id: project.id }, { signal });
-    }
-
-    async function searchProject(scope, query, { signal, cursor, path }) {
+    async function searchProject(scope, query, { signal, cursor }) {
       if (!project || project.exists === false || switching) throw new Error('请先打开可用的 LaTeX 项目。');
       const id = project.id;
       if (scope === 'source') {
-        const result = await api('latex_source_search', { id, query, ...(path ? { path } : {}) }, { signal });
+        const chapters = chapterScope;
+        if (!chapters) throw new Error('章节列表尚未载入。请等待，或刷新章节后重试。');
+        if (!chapters.paths.length) return { matches: [], summary: '章节列表暂无可搜索的源码。' };
+        const result = await api('latex_source_search', { id, query, paths: chapters.paths }, { signal });
+        const summary = [
+          chapters.truncated ? '章节列表达到读取上限' : '',
+          result.truncated ? '达到搜索上限，可细化关键词' : '',
+        ].filter(Boolean).join(' · ');
         return {
           matches: result.matches.map(hit => ({ ...hit, label: `${hit.path}:${hit.line}:${hit.column} · ${hit.text}` })),
-          summary: result.truncated ? '达到搜索上限，可缩小文件夹范围或细化关键词' : '',
+          summary,
         };
       }
       if (!pageCount || !pdfVersion) throw new Error('请先生成或打开一份 PDF。');
@@ -1655,7 +1672,7 @@ window.PaperLatexWorkspace = (() => {
     }
 
     projectSearch = window.PaperLatexSearch?.create({
-      toolbar, topbar, search: searchProject, listFolders: listSearchFolders, reveal: revealSearchHit,
+      toolbar, topbar, search: searchProject, reveal: revealSearchHit,
       changed: () => {
         patchSourceSearch();
         for (const stage of preview.querySelectorAll('.latex-page-stage')) patchPdfSearch(stage);
@@ -1952,6 +1969,7 @@ window.PaperLatexWorkspace = (() => {
         const result = await api('latex_project_update', { id, root, main_path: main });
         if (disposed || id !== project?.id) return;
         project = result.project; projects = projects.map(item => item.id === id ? project : item);
+        chapterScope = null; outlineList.textContent = '';
         changed = true; syncLocationFields();
         resetPdfSource({ kind: 'current' });
         errors.textContent = ''; diagnosticsToggle.hidden = true; setDiagnosticsOpen(false);

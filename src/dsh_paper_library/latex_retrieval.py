@@ -10,10 +10,11 @@ import re
 import stat
 import time
 
+from .latex_outline import MAX_FILES as MAX_CHAPTER_FILES
+
 
 TEXT_SUFFIXES = {".tex", ".bib", ".cls", ".sty", ".bst", ".def", ".tikz", ".txt", ".md"}
 PRIVATE_NAMES = {"credential", "credentials", "secret", "secrets", "password", "passwords", "id_rsa", "id_ed25519", "private_key", "api_key", "apikey"}
-HISTORY_DIRECTORIES = {"archive", "archives", "revisions", "snapshots", "versions"}
 MAX_ENTRIES, MAX_DEPTH, SCAN_SECONDS = 2000, 8, 2.0
 MAX_TEXT_BYTES, MAX_SEARCH_BYTES, MAX_PDF_BYTES = 1024 * 1024, 4 * 1024 * 1024, 64 * 1024 * 1024
 MAX_READ_CHARACTERS, MAX_SEARCH_CHARACTERS, MAX_PDF_CHARACTERS = 12000, 12000, 18000
@@ -46,7 +47,7 @@ def _blocked(part):
     return name.startswith(".") or name in PRIVATE_NAMES or name in SKIP_DIRECTORIES or name in {"node_modules", "__pycache__", "site-packages", "build", "dist"} or Path(name).stem in PRIVATE_NAMES
 
 
-def _relative(root, value, *, allow_root=False):
+def _relative(root, value, *, allow_root=False, check_depth=True):
     if allow_root and value in (None, "", "."):
         return root, ""
     if not isinstance(value, str) or not value.strip() or len(value) > 500 or "\x00" in value or "\\" in value:
@@ -54,7 +55,7 @@ def _relative(root, value, *, allow_root=False):
     logical = Path(value)
     if not logical.parts or logical.is_absolute() or any(part in {"..", "."} or _blocked(part) for part in logical.parts):
         raise ValueError("检索路径包含不允许访问的目录或文件")
-    if len(logical.parts) > MAX_DEPTH + 1:
+    if check_depth and len(logical.parts) > MAX_DEPTH + 1:
         raise ValueError("检索路径超出目录深度限制")
     current = root
     for part in logical.parts:
@@ -129,28 +130,21 @@ def _lines(body):
     return lines
 
 
-def _inventory(root, path=None, *, deadline=None, editor=False, folders=None):
+def _inventory(root, path=None, *, deadline=None):
     location, relative = _relative(root, path, allow_root=True)
-    parts = Path(relative).parts
-    if editor and len(parts) > MAX_DEPTH:
-        raise ValueError("检索路径超出目录深度限制")
     with _descriptor(root, relative) as descriptor:
         metadata = os.fstat(descriptor)
         if stat.S_ISREG(metadata.st_mode):
-            if editor:
-                raise ValueError("LaTeX 搜索范围须为项目内的文件夹")
             kind = "text" if location.suffix.lower() in TEXT_SUFFIXES else "pdf" if location.suffix.lower() == ".pdf" else None
             if not kind:
                 raise ValueError("检索只支持保存的文本源码、文献条目和 PDF")
             return [{"path": relative, "kind": kind, "bytes": metadata.st_size}], False, 1
         if not stat.S_ISDIR(metadata.st_mode):
             raise ValueError("检索只支持项目内的普通文件或目录")
-    include_history = any(part.casefold() in HISTORY_DIRECTORIES for part in parts)
-    pending, history, files = [relative], [], []
-    scanned, truncated = 0, False
+    pending, files, scanned, truncated = [relative], [], 0, False
     deadline = deadline if deadline is not None else time.monotonic() + SCAN_SECONDS
-    while pending or history:
-        directory = (pending or history).pop()
+    while pending:
+        directory = pending.pop()
         try:
             with _descriptor(root, directory) as descriptor, os.scandir(descriptor) as entries:
                 for entry in entries:
@@ -164,21 +158,12 @@ def _inventory(root, path=None, *, deadline=None, editor=False, folders=None):
                         continue
                     depth = len(full.parts)
                     if entry.is_dir(follow_symlinks=False):
-                        historical = editor and not include_history and entry.name.casefold() in HISTORY_DIRECTORIES
-                        if historical and folders is None:
-                            continue
-                        if depth > MAX_DEPTH:
+                        if depth <= MAX_DEPTH:
+                            pending.append(full.as_posix())
+                        else:
                             truncated = True
-                            continue
-                        if folders is not None:
-                            folders.append(full.as_posix())
-                        # Find ordinary folders first so an archive's contents
-                        # cannot exhaust the picker budget before live folders.
-                        (history if historical else pending).append(full.as_posix())
-                    elif folders is None and entry.is_file(follow_symlinks=False):
+                    elif entry.is_file(follow_symlinks=False):
                         suffix = full.suffix.lower()
-                        if editor and suffix != ".tex":
-                            continue
                         kind = "text" if suffix in TEXT_SUFFIXES else "pdf" if suffix == ".pdf" else None
                         if kind:
                             files.append({"path": full.as_posix(), "kind": kind, "bytes": entry.stat(follow_symlinks=False).st_size})
@@ -223,21 +208,17 @@ def search(library, id=None, query=None, path=None, glob=None, case_sensitive=Fa
     return _search(library, id, query, path, glob, case_sensitive, limit, expected_root, expected_binding_generation)
 
 
-def source_folders(library, id=None, path=None, expected_root=None, expected_binding_generation=None):
-    row, root = _project(library, id, expected_root, expected_binding_generation)
-    folders = []
-    _, truncated, _ = _inventory(root, path, editor=True, folders=folders)
-    folders.sort(key=lambda path: (any(part.casefold() in HISTORY_DIRECTORIES for part in Path(path).parts), path))
-    return {"id": row["id"], "folders": folders, "truncated": truncated}
+def source_search(library, id=None, query=None, expected_root=None, expected_binding_generation=None, paths=None):
+    """Search the displayed chapter paths in order, with codepoint offsets."""
+    if not isinstance(paths, list) or len(paths) > MAX_CHAPTER_FILES:
+        raise ValueError(f"源码检索需要当前章节文件列表，最多 {MAX_CHAPTER_FILES} 个文件；请刷新工作台")
+    if any(not isinstance(path, str) or len(path) > 500 or Path(path).suffix.lower() != ".tex" for path in paths):
+        raise ValueError("章节文件列表只支持项目内的 .tex 文件")
+    return _search(library, id, query, None, None, False, MAX_SEARCH_MATCHES,
+                   expected_root, expected_binding_generation, chapter_paths=paths)
 
 
-def source_search(library, id=None, query=None, expected_root=None, expected_binding_generation=None, path=None):
-    """Editor search with one result per literal occurrence and codepoint offsets."""
-    return _search(library, id, query, path, None, False, MAX_SEARCH_MATCHES,
-                   expected_root, expected_binding_generation, editor=True)
-
-
-def _search(library, id, query, path, glob, case_sensitive, limit, expected_root, expected_binding_generation, *, editor=False):
+def _search(library, id, query, path, glob, case_sensitive, limit, expected_root, expected_binding_generation, *, chapter_paths=None):
     row, root = _project(library, id, expected_root, expected_binding_generation)
     if not isinstance(query, str) or not query.strip() or len(query) > 200 or any(char in query for char in "\0\r\n"):
         raise ValueError("检索词须为1–200字符的单行文字，按字面检索")
@@ -247,21 +228,25 @@ def _search(library, id, query, path, glob, case_sensitive, limit, expected_root
         raise ValueError("文件筛选须为项目内的相对 glob")
     maximum = _integer(limit, 10, 1, MAX_SEARCH_MATCHES, "检索结果条数")
     deadline = time.monotonic() + SCAN_SECONDS
-    files, truncated, scanned = _inventory(root, path, deadline=deadline, editor=editor)
+    editor = chapter_paths is not None
+    if editor:
+        candidates = [(path, None) for path in dict.fromkeys(chapter_paths)]
+        scanned, truncated = len(candidates), False
+    else:
+        files, truncated, scanned = _inventory(root, path, deadline=deadline)
+        candidates = [(file["path"], file["bytes"]) for file in files if file["kind"] == "text"
+                      and (not glob or fnmatch.fnmatchcase(file["path"], glob))]
     matches, read_files, scanned_bytes, emitted, skipped = [], 0, 0, 0, 0
     needle = query if case_sensitive else query.lower()
     pattern = re.compile(re.escape(query), re.IGNORECASE) if editor else None
-    candidates = [file for file in files if file["kind"] == "text"
-                  and (not glob or fnmatch.fnmatchcase(file["path"], glob))]
-    for file in candidates:
-        if editor and file["bytes"] > MAX_TEXT_BYTES:
-            skipped += 1
-            truncated = True
-            continue
-        if scanned_bytes + file["bytes"] > MAX_SEARCH_BYTES or time.monotonic() > deadline:
+    for relative, size in candidates:
+        remaining = MAX_SEARCH_BYTES - scanned_bytes
+        if (size is not None and size > remaining) or time.monotonic() > deadline:
             truncated = True; break
         try:
-            body, revision, size = _text(root, file["path"], MAX_SEARCH_BYTES - scanned_bytes)
+            if editor:
+                _, relative = _relative(root, relative, check_depth=False)
+            body, revision, size = _text(root, relative, remaining)
         except ValueError:
             skipped += 1; truncated = True; continue
         scanned_bytes += size; read_files += 1
@@ -280,7 +265,7 @@ def _search(library, id, query, path, glob, case_sensitive, limit, expected_root
                 if emitted + len(snippet) > MAX_SEARCH_CHARACTERS or len(matches) >= maximum:
                     truncated = True
                     break
-                match = {"kind": "project_text", "path": file["path"], "line": line, "end_line": line, "text": snippet,
+                match = {"kind": "project_text", "path": relative, "line": line, "end_line": line, "text": snippet,
                          "revision": revision, "truncated": begin > 0 or begin + len(snippet) < len(content)}
                 if editor:
                     match.update(start=line_start + start, end=line_start + end, column=start + 1)
@@ -294,7 +279,7 @@ def _search(library, id, query, path, glob, case_sensitive, limit, expected_root
     return {"id": row["id"], "kind": "project_search", "query": query, "matches": matches, "truncated": truncated,
             "scanned_files": read_files, "candidate_files": len(candidates),
             "scanned_entries": scanned, "scanned_bytes": scanned_bytes, "skipped_files": skipped,
-            "limits": {"entries": MAX_ENTRIES, "file_bytes": MAX_TEXT_BYTES, "search_bytes": MAX_SEARCH_BYTES,
+            "limits": {"entries": MAX_CHAPTER_FILES if editor else MAX_ENTRIES, "file_bytes": MAX_TEXT_BYTES, "search_bytes": MAX_SEARCH_BYTES,
                        "matches": MAX_SEARCH_MATCHES, "characters": MAX_SEARCH_CHARACTERS, "seconds": SCAN_SECONDS}}
 
 

@@ -87,7 +87,7 @@ def test_editor_search_returns_exact_offsets_for_repeated_literal_matches(projec
     (root / "credentials.tex").write_text("[m-p]+", encoding="utf-8")
     saved = call("latex_read", path=path)
 
-    result = call("latex_source_search", query="[m-p]+")
+    result = call("latex_source_search", query="[m-p]+", paths=[path])
     assert [(hit["path"], hit["line"], hit["column"]) for hit in result["matches"]] == [(path, 2, 3), (path, 2, 12)]
     assert [saved["content"][hit["start"]:hit["end"]] for hit in result["matches"]] == ["[m-p]+", "[M-P]+"]
     assert all(hit["revision"] == saved["revision"] for hit in result["matches"])
@@ -98,67 +98,49 @@ def test_editor_search_bounds_repeated_matches_and_skips_oversized_files(project
     root, _, call, _ = project
     (root / "00-large.tex").write_bytes(b"x" * (4 * 1024 * 1024 + 1))
     (root / "repeated.tex").write_text("hit " * 25, encoding="utf-8")
-    result = call("latex_source_search", query="hit")
+    result = call("latex_source_search", query="hit", paths=["00-large.tex", "repeated.tex"])
     assert [hit["column"] for hit in result["matches"]] == list(range(1, 81, 4))
     assert result["truncated"] and result["skipped_files"] == 1
 
 
-def test_editor_search_defaults_to_live_sources_and_can_target_archive_folders(project):
+def test_editor_search_uses_chapter_paths_in_display_order_without_scanning_other_files(project, monkeypatch):
     root, _, call, _ = project
-    paths = [
-        "revisions/old/src/chapter.tex", "chapters/Revisions/old/chapter.tex",
-        "chapters/nested/live.tex", "chapters/other.tex", "chapters-extra/nearby.tex",
-    ]
-    for path in paths:
+    deep = "/".join(["nested"] * 10 + ["text.tex"])
+    chapter_paths = ["chapters/z.tex", "revisions/linked-in-manuscript.tex", "chapters/a.tex", deep]
+    for path in chapter_paths + ["revisions/old.tex", "chapters/unreferenced.tex"]:
         target = root / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("Synthetic discussion", encoding="utf-8")
 
-    def matches(path=None):
-        result = call("latex_source_search", query="discussion", path=path)
-        return [hit["path"] for hit in result["matches"]]
+    def unexpected_scan(*args, **kwargs):
+        pytest.fail("Editor chapter search must not scan the project")
 
-    assert matches() == sorted(paths[2:])
-    assert matches("chapters") == sorted(paths[2:4])
-    assert matches("chapters/nested") == [paths[2]]
-    assert matches("revisions") == [paths[0]]
-    assert matches("chapters/Revisions/old") == [paths[1]]
-    assert call("latex_search", query="discussion", path="revisions")["matches"][0]["path"] == paths[0]
-
-
-def test_folder_scan_skips_archive_contents_for_live_search_and_prioritizes_live_choices(project, monkeypatch):
-    root, _, call, _ = project
-    (root / "revisions").mkdir()
-    (root / "chapters/deep").mkdir()
-    (root / "chapters/deep/live.tex").write_text("Synthetic discussion", encoding="utf-8")
-    for index in range(15):
-        target = root / "revisions" / f"round-{index}"
-        target.mkdir()
-        (target / "old.tex").write_text("Synthetic discussion", encoding="utf-8")
-    monkeypatch.setattr(latex_retrieval, "MAX_ENTRIES", 12)
-
-    result = call("latex_source_search", query="discussion")
-    assert [hit["path"] for hit in result["matches"]] == ["chapters/deep/live.tex"]
+    monkeypatch.setattr(latex_retrieval, "_inventory", unexpected_scan)
+    result = call("latex_source_search", query="discussion", paths=[*chapter_paths, chapter_paths[0]])
+    assert [hit["path"] for hit in result["matches"]] == chapter_paths
+    assert result["candidate_files"] == result["scanned_files"] == len(chapter_paths)
     assert result["truncated"] is False
-    discovered = call("latex_source_folders")
-    assert discovered["folders"][:4] == ["chapters", "chapters/deep", "references", "revisions"]
-    assert discovered["truncated"] is True
-    assert call("latex_source_folders", path="chapters")["folders"] == ["chapters/deep"]
-    scoped = call("latex_source_search", query="discussion", path="revisions/round-14")
-    assert [hit["path"] for hit in scoped["matches"]] == ["revisions/round-14/old.tex"]
-    assert scoped["truncated"] is False
+    assert call("latex_source_search", query="discussion", paths=[])["matches"] == []
 
 
-def test_source_folder_scopes_refuse_files_links_and_unsafe_paths(project, tmp_path):
+@pytest.mark.parametrize("paths", [None, "main.tex", [1], ["chapters"], ["refs.bib"], ["a" * 500 + ".tex"], ["main.tex"] * 101])
+def test_editor_search_requires_a_bounded_list_of_tex_paths(project, paths):
+    _, _, call, _ = project
+    with pytest.raises(ValueError, match="章节文件列表"):
+        call("latex_source_search", query="evidence", paths=paths)
+
+
+def test_editor_search_reports_unavailable_paths_and_keeps_other_chapters(project, tmp_path):
     root, _, call, _ = project
-    (root / "linked").symlink_to(tmp_path, target_is_directory=True)
-    (root / ".hidden").mkdir()
-    assert call("latex_source_folders")["folders"] == ["chapters", "references"]
-    for path in ("../outside", str(tmp_path), "linked", ".hidden", "main.tex", "missing"):
-        with pytest.raises(ValueError):
-            call("latex_source_folders", path=path)
-        with pytest.raises(ValueError):
-            call("latex_source_search", path=path, query="discussion")
+    outside = tmp_path / "outside.tex"
+    outside.write_text("Unique outside", encoding="utf-8")
+    (root / "linked.tex").symlink_to(outside)
+    (root / "credentials.tex").write_text("Unique hidden", encoding="utf-8")
+    (root / "directory.tex").mkdir()
+    paths = ["../outside.tex", str(outside), "linked.tex", "credentials.tex", "directory.tex", "missing.tex"]
+    result = call("latex_source_search", query="Unique", paths=[*paths, "chapters/evidence.tex"])
+    assert [hit["path"] for hit in result["matches"]] == ["chapters/evidence.tex"]
+    assert result["truncated"] is True and result["skipped_files"] == len(paths)
 
 
 def test_read_and_search_report_character_match_and_scan_budgets(project, monkeypatch):
@@ -193,7 +175,7 @@ def test_binary_oversize_and_total_byte_budget_are_explicitly_incomplete(project
 
 @pytest.mark.parametrize("action,arguments", [
     ("latex_retrieval_list", {}), ("latex_search", {"query": "evidence"}),
-    ("latex_source_folders", {}), ("latex_source_search", {"query": "evidence"}),
+    ("latex_source_search", {"query": "evidence", "paths": ["chapters/evidence.tex"]}),
     ("latex_retrieval_read", {"path": "main.tex"}), ("latex_pdf_text", {"path": "references/source.pdf"}),
 ])
 def test_all_retrieval_actions_require_current_root_and_generation(project, action, arguments):
