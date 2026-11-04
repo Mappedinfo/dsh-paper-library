@@ -196,6 +196,8 @@ def build_status(library, row, pdf=None):
     if not manifest.get("verified") or row["main_path"] not in manifest.get("sources", {}):
         if "unverified_sources" in manifest and row["main_path"] not in manifest.get("sources", {}):
             result["reason"] = "主文件未通过编译前后的内容核验；请保存后重新编译"
+        else:
+            result["reason"] = "当前 PDF 的旧编译记录未核验；请保存源码后在工作台重新编译一次"
         return result
     if manifest.get("synctex") != file_digest(sidecar, 8 * 1024 * 1024):
         result["reason"] = "SyncTeX 已变化，当前映射待重新核验；请重新编译"

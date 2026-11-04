@@ -26,7 +26,14 @@ test('one synthetic manual version is available from project queries and bounded
     kind: 'source', path: 'main.tex', revision: source.revision,
     start, end: start + 'Synthetic version'.length, text: 'Synthetic version',
   }, comment: 'Synthetic review' }, options)
-  const built = await dispatch({ action: 'latex_compile', id: project.id, engine: 'pdflatex', save_version: true }, options)
+  const workerDeadlines = [], realSetTimeout = globalThis.setTimeout
+  const timer = t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+    workerDeadlines.push(delay)
+    return realSetTimeout(callback, delay, ...args)
+  })
+  const built = await dispatch({ action: 'latex_compile', id: project.id, engine: 'pdflatex', timeout_seconds: 180, save_version: true }, options)
+  timer.mock.restore()
+  assert.deepEqual(workerDeadlines, [240_000], 'the worker allows TeX to report its own timeout, with room for lock and snapshots')
   assert.equal(built.ok, true, JSON.stringify(built)); assert.ok(built.version, built.version_error)
   const byManuscript = await dispatch({ action: 'latex_version_list', id: project.id }, options)
   const byReading = await dispatch({ action: 'latex_version_list', reading_project_id: built.version.reading_project_id }, options)

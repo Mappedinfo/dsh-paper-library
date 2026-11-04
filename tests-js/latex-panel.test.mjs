@@ -22,7 +22,9 @@ async function fixture(override = () => undefined, { review = false, spellChecke
     }
     set id(value) { this._id = value; ids.set(value, this) } get id() { return this._id }
     set textContent(value) { this._text = value; this.children = [] } get textContent() { return this._text || this.children.map(x => x.textContent).join('') }
-    append(...nodes) { for (const node of nodes) { node.parentElement = this; this.children.push(node) } }
+    append(...nodes) { for (const node of nodes) { if (node.parentElement) node.parentElement.children = node.parentElement.children.filter(child => child !== node); node.parentElement = this; this.children.push(node) } }
+    get firstChild() { return this.children[0] || null }
+    contains(node) { return this === node || this.children.some(child => child.contains(node)) }
     setAttribute(key, value) { this.attributes[key] = String(value) } getAttribute(key) { return this.attributes[key] }
     addEventListener(key, value) { if (!this.events.has(key)) this.events.set(key, []); this.events.get(key).push(value) }
     removeEventListener() {}
@@ -31,10 +33,10 @@ async function fixture(override = () => undefined, { review = false, spellChecke
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null }
     get selectedOptions() { return this.children.filter(node => node.value === this.value) }
     focus() {} setSelectionRange(a, b) { this.selectionStart = a; this.selectionEnd = b }
-    getBoundingClientRect() { return { left: 0, top: 0, width: this.clientWidth, height: this.clientHeight } }
+    getBoundingClientRect() { return { left: 0, top: 0, right: this.clientWidth, bottom: this.clientHeight, width: this.clientWidth, height: this.clientHeight } }
   }
   const body = new Element('body'), window = new Element('window'); window.devicePixelRatio = 2
-  const document = { body, createElement: tag => new Element(tag), getElementById: id => ids.get(id), querySelector: () => null }
+  const document = Object.assign(new Element('document'), { body, createElement: tag => new Element(tag), getElementById: id => ids.get(id), querySelector: () => null })
   const api = async (action, args, options) => {
     calls.push({ action, ...args, signal: options?.signal })
     const response = override(action, args, options); if (response !== undefined) return await response
@@ -54,7 +56,7 @@ async function fixture(override = () => undefined, { review = false, spellChecke
     static createObjectURL() { const url = `blob:${urls.length}`; urls.push(url); return url }
     static revokeObjectURL(url) { revoked.push(url) }
   }
-  const globals = { window, document, crypto: webcrypto, AbortController, Uint8Array, Blob, atob: value => Buffer.from(value, 'base64').toString('binary'), URL: FixtureURL, setTimeout: (fn, ms) => { const id = timers.size + 1; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id), getComputedStyle: () => ({ lineHeight: '20' }) }
+  const globals = { window, document, crypto: webcrypto, AbortController, Uint8Array, Blob, Range: { START_TO_START: 0, END_TO_END: 2 }, atob: value => Buffer.from(value, 'base64').toString('binary'), URL: FixtureURL, setTimeout: (fn, ms) => { const id = timers.size + 1; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id), getComputedStyle: () => ({ lineHeight: '20' }) }
   if (spellChecker) window.PaperLatexSpelling = { checkSpelling: spellChecker }
   if (writingTools) window.PaperLatexWritingTools = { create: () => writingTools }
   if (sourceEditor) window.PaperLatexEditor = { create: () => sourceEditor }
@@ -62,7 +64,7 @@ async function fixture(override = () => undefined, { review = false, spellChecke
   vm.runInNewContext(searchSource, globals)
   vm.runInNewContext(source, globals)
   const ui = window.PaperLatexWorkspace.create({ api, onContext, rail })
-  await ui.open(); return { ui, ids, calls, revoked, urls, window, timers }
+  await ui.open(); return { ui, ids, calls, revoked, urls, window, document, timers }
 }
 
 async function submitWorkspaceSearch(f, scope, query) {
@@ -381,7 +383,29 @@ test('translation sends only an unsaved selection and never writes the source', 
   assert.equal(request.selection, 'draft selected text'); assert.equal(request.target_language, undefined, 'the server resolves the current shared target')
   assert.equal(f.calls.some(call => call.action === 'latex_write'), false)
   assert.match(f.ids.get('latex-translation-results').textContent, /来源为编辑草稿/)
+  await f.ids.get('latex-translation-close').dispatch('click')
+  assert.equal(f.ids.get('latex-translation-results').hidden, true)
+  assert.doesNotMatch(f.ids.get('latex-translation-results').textContent, /合成译文/)
   assert.equal(f.ui.testHooks.state().dirty, true); f.ui.dispose()
+})
+
+test('closing a pending translation ignores its late answer', async () => {
+  const late = deferred()
+  const f = await fixture(action => {
+    if (action === 'language_settings_get') return { models: [] }
+    if (action === 'state_get') return { value: null, revision: 0 }
+    if (action === 'latex_ai_translate') return late.promise
+  })
+  const editor = f.ids.get('latex-editor'), translate = f.ids.get('latex-translate-selection')
+  editor.setSelectionRange(0, 4)
+  const pending = translate.dispatch('click'); await tick()
+  await f.ids.get('latex-translation-close').dispatch('click')
+  assert.equal(f.calls.find(call => call.action === 'latex_ai_translate').signal.aborted, true)
+  late.resolve({ answer: 'late result' }); await pending
+  assert.equal(f.ids.get('latex-translation-results').hidden, true)
+  assert.doesNotMatch(f.ids.get('latex-translation-results').textContent, /late result/)
+  assert.equal(translate.disabled, false)
+  f.ui.dispose()
 })
 
 test('project translation settings persist an explicit model, language and prompt with CAS', async () => {
@@ -484,11 +508,11 @@ test('an unsaved review draft blocks entry/project changes, compilation, close a
 })
 
 test('engine choice is saved and shared by manual and automatic compilation', async () => {
-  let preferences = { latex_engine: 'xelatex', latex_auto_compile: false }
+  let preferences = { latex_engine: 'xelatex', latex_auto_compile: true }, fail = false
   const f = await fixture((action, args) => {
     if (action === 'settings_get') return { value: preferences, revision: '1' }
     if (action === 'settings_update') { preferences = { ...preferences, ...args.patch }; return { value: preferences, revision: '2' } }
-    if (action === 'latex_compile') return { ok: false, engine: args.engine, duration_ms: 1, errors: [], warnings: [], log_tail: 'synthetic log', exit_code: 1 }
+    if (action === 'latex_compile') return { ok: !fail, engine: args.engine, duration_ms: 1, errors: [], warnings: [], log_tail: 'synthetic log', exit_code: fail ? 1 : 0, pdf_path: 'main.pdf', pages: 4 }
   })
   for (const engine of ['xelatex', 'pdflatex', 'lualatex']) {
     f.ids.get('latex-setting-engine').value = engine
@@ -497,8 +521,63 @@ test('engine choice is saved and shared by manual and automatic compilation', as
     assert.deepEqual(f.calls.filter(call => call.action === 'latex_compile').slice(-2).map(call => call.engine), [engine, engine])
   }
   assert.equal(preferences.latex_engine, 'lualatex')
+  fail = true
+  await f.ui.testHooks.compile('auto')
+  assert.match(f.ids.get('latex-auto-state').textContent, /暂停/)
   assert.equal(f.ids.get('latex-diagnostics-toggle').getAttribute('aria-expanded'), 'true')
   assert.match(f.ids.get('latex-errors').textContent, /synthetic log/)
+  f.ui.dispose()
+})
+
+test('the toolbar switch shares the saved auto-compile setting and cancels a queued compile', async () => {
+  let preferences = { latex_auto_compile: false }, revision = 1
+  const f = await fixture((action, args) => {
+    if (action === 'settings_get') return { value: preferences, revision: String(revision) }
+    if (action === 'settings_update') {
+      assert.equal(args.expected_revision, String(revision))
+      preferences = { ...preferences, ...args.patch }
+      return { value: preferences, revision: String(++revision) }
+    }
+  })
+  const toggle = f.ids.get('latex-auto-state'), setting = f.ids.get('latex-setting-auto')
+  assert.equal(toggle.getAttribute('role'), 'switch')
+  assert.equal(toggle.getAttribute('aria-checked'), 'false')
+  await toggle.dispatch('click'); await tick()
+  assert.equal(toggle.getAttribute('aria-checked'), 'true')
+  assert.equal(setting.checked, true)
+  assert.equal(preferences.latex_auto_compile, true)
+  const scheduled = [...f.timers.values()].find(timer => timer.ms === 2500)
+  assert.ok(scheduled)
+  await toggle.dispatch('click'); await tick()
+  assert.equal(toggle.getAttribute('aria-checked'), 'false')
+  assert.equal(setting.checked, false)
+  assert.equal(preferences.latex_auto_compile, false)
+  assert.equal([...f.timers.values()].some(timer => timer.ms === 2500), false)
+  scheduled.fn(); await tick()
+  assert.equal(f.calls.some(call => call.action === 'latex_compile'), false)
+  f.ui.dispose()
+})
+
+test('successful compilation reports verification separately and clears an old SyncTeX failure after recovery', async () => {
+  let builds = 0
+  const f = await fixture((action, args) => {
+    if (action === 'latex_compile') {
+      builds++
+      return { ok: true, engine: args.engine, duration_ms: 1, pdf_path: 'main.pdf', pages: 4, warnings: [] }
+    }
+    if (action === 'latex_pdf_pages') return {
+      version: `pdf-${builds}`, page_count: 4, pages: Array.from({ length: 4 }, () => ({ width: 600, height: 800 })),
+      build: builds < 2 ? { verified: false, reason: '本次编译没有生成新的 SyncTeX 数据' } : { verified: true, reason: 'SyncTeX 已核验；双击正文定位源码' },
+    }
+  })
+  const diagnostics = f.ids.get('latex-diagnostics-toggle'), status = f.ids.get('latex-status')
+  await f.ui.testHooks.compile()
+  assert.match(diagnostics.textContent, /编译成功 · SyncTeX 待核验/)
+  assert.match(status.textContent, /没有生成新的 SyncTeX 数据/)
+  await f.ui.testHooks.compile()
+  assert.equal(diagnostics.textContent, '编译成功')
+  assert.match(status.textContent, /编译完成/)
+  assert.match(f.ids.get('latex-sync-hint').textContent, /SyncTeX 已核验/)
   f.ui.dispose()
 })
 
@@ -789,6 +868,65 @@ test('scrolling back preloads the preceding PDF page before it reenters the view
   assert.ok(preview.querySelectorAll('img').includes(preceding))
   f.ui.dispose()
 })
+
+test('select-mode PDF text exposes one-click highlighting while historical pages stay read-only', async () => {
+  const layout = { page_count: 1, version: 'pdf-v1', build: { pdf_version: 'synthetic-sha' }, pages: [{ width: 600, height: 800 }] };
+  const f = await fixture((action, args) => {
+    if (action === 'latex_pdf_pages' || action === 'latex_version_pdf_pages') return layout;
+    if (action === 'latex_pdf_page' || action === 'latex_version_pdf_page') return { ...image, ...args, words: [[10, 20, 50, 35, 'Synthetic']] };
+    if (action === 'latex_review_put') return { saved: true };
+    if (action === 'latex_synctex_edit') return { path: 'main.tex', line: 1 };
+    if (action === 'latex_version_get') return { version: { id: args.version_id, project_id: 'one' } };
+  }, { review: true });
+  const readerSource = await readFile(new URL('../web/pdf-reader.js', import.meta.url), 'utf8');
+  vm.runInNewContext(readerSource, { window: f.window });
+  const preview = f.ids.get('latex-preview');
+  async function selectWord() {
+    const layer = preview.querySelector('.latex-text-layer'), word = layer.querySelector('.latex-pdf-word').firstChild;
+    const rect = { left: 10, right: 50, top: 15, bottom: 28, width: 40, height: 13 };
+    f.document.createRange = () => ({ selectNodeContents() {}, toString: () => 'Synthetic', getBoundingClientRect: () => rect });
+    const range = {
+      startContainer: word, endContainer: word, startOffset: 0, endOffset: 9,
+      intersectsNode: node => node === word, compareBoundaryPoints: () => 0,
+      getBoundingClientRect: () => rect, cloneRange() { return { ...this }; },
+    };
+    const selection = { rangeCount: 1, isCollapsed: false, getRangeAt: () => range, removeAllRanges() { this.rangeCount = 0; this.isCollapsed = true; } };
+    f.window.getSelection = () => selection;
+    await layer.dispatch('pointerdown', { button: 0 });
+    await layer.dispatch('pointerup', { button: 0 });
+    for (const [id, timer] of f.timers) if (timer.ms === 0) { f.timers.delete(id); timer.fn(); }
+    return selection;
+  }
+  const selection = await selectWord();
+  const highlight = preview.querySelector('.latex-selection-highlight');
+  assert.equal(highlight.hidden, false);
+  assert.equal(f.calls.some(call => call.action === 'latex_review_put'), false);
+  await highlight.dispatch('click'); await tick();
+  const [saved] = f.calls.filter(call => call.action === 'latex_review_put');
+  assert.equal(saved.type, 'highlight');
+  assert.deepEqual(JSON.parse(JSON.stringify(saved.anchor)), { kind: 'pdf', page: 1, pdf_version: 'synthetic-sha', rects: [[10, 20, 50, 35]], text: 'Synthetic' });
+  assert.equal(highlight.hidden, true);
+  assert.equal(selection.isCollapsed, true);
+  assert.equal(f.ids.get('latex-tool-select').getAttribute('aria-pressed'), 'true');
+
+  const nextSelection = await selectWord();
+  assert.equal(highlight.hidden, false);
+  nextSelection.removeAllRanges();
+  await f.document.dispatch('selectionchange');
+  assert.equal(highlight.hidden, true);
+
+  await selectWord();
+  await preview.querySelector('.latex-page-stage').dispatch('dblclick', { clientX: 20, clientY: 20 });
+  assert.equal(highlight.hidden, true);
+  assert.ok(f.calls.some(call => call.action === 'latex_synctex_edit' && call.page === 1));
+
+  assert.equal(await f.ui.showVersion('synthetic-version'), true);
+  await selectWord();
+  assert.equal(preview.querySelector('.latex-selection-highlight'), null);
+  await highlight.dispatch('click');
+  assert.equal(f.calls.filter(call => call.action === 'latex_review_put').length, 1);
+  f.ui.dispose();
+});
 
 test('a confirmed PDF annotation patches only its overlay without reloading raster or selection layers', async () => {
   let annotations = []

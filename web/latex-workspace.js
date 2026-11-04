@@ -50,7 +50,7 @@ window.PaperLatexWorkspace = (() => {
     let pdfVersion = '', zoom = 1, mediaPath = null, mediaPage = 1, mediaZoom = 1, mediaCount = 0;
     let mediaGeometry = null, resizeTimer = null, outlineTimer = null;
     let switching = false, entryRequest = 0, openRequest = 0;
-    let pdfBuild = null, pdfTool = 'select';
+    let pdfBuild = null, pdfTool = 'select', pdfSelection = null, pdfSelectionTimer = null;
     let pdfSource = { kind: 'current' }, pdfSourceEpoch = 0, pdfSourceIntent = 0;
     let projectSearch = null;
 
@@ -84,7 +84,9 @@ window.PaperLatexWorkspace = (() => {
     const diagnosticsToggle = make('button', 'button subtle latex-diagnostics-toggle', '编译状态'); diagnosticsToggle.id = 'latex-diagnostics-toggle'; diagnosticsToggle.type = 'button';
     diagnosticsToggle.setAttribute('aria-expanded', 'false'); diagnosticsToggle.setAttribute('aria-controls', 'latex-errors');
     diagnosticsToggle.hidden = true;
-    const autoLabel = make('span', 'latex-auto'); autoLabel.id = 'latex-auto-state';
+    const autoToggle = make('button', 'button subtle latex-auto-toggle', '自动编译');
+    autoToggle.id = 'latex-auto-state'; autoToggle.type = 'button';
+    autoToggle.setAttribute('role', 'switch'); autoToggle.setAttribute('aria-label', '自动编译');
     const mainLabel = make('span', 'latex-main'); mainLabel.id = 'latex-main';
     const mainSelect = make('select'); mainSelect.id = 'latex-entry'; mainSelect.setAttribute('aria-label', '编译主文件');
     const saveState = make('span', 'latex-save-state'); saveState.id = 'latex-save-state'; saveState.setAttribute('role', 'status');
@@ -105,7 +107,7 @@ window.PaperLatexWorkspace = (() => {
     const menuButton = make('button', 'button subtle latex-menu-button', '⚙'); menuButton.id = 'latex-menu-open'; menuButton.type = 'button';
     menuButton.setAttribute('aria-expanded', 'false'); menuButton.setAttribute('aria-controls', 'latex-menu'); menuButton.setAttribute('aria-label', '设置'); menuButton.title = '设置';
     if (window.PaperIcons) { menuButton.textContent = ''; window.PaperIcons.decorate(menuButton, 'settings'); }
-    toolbar.append(title, projectSelect, mainLabel, saveState, autoLabel, compile, diagnosticsToggle, navToggle, layoutControls, reviewDivider, reviewToggle, aiToggle);
+    toolbar.append(title, projectSelect, mainLabel, saveState, compile, autoToggle, diagnosticsToggle, navToggle, layoutControls, reviewDivider, reviewToggle, aiToggle);
 
     const menu = make('div', 'latex-menu'); menu.id = 'latex-menu'; menu.setAttribute('aria-label', '项目与设置'); menu.hidden = true;
     const entryRow = make('div', 'latex-menu-section');
@@ -245,6 +247,14 @@ window.PaperLatexWorkspace = (() => {
     const formulaHost = make('section', 'latex-formula-panel'); formulaHost.id = 'latex-formula-panel'; formulaHost.hidden = true;
     const spellResults = make('div', 'latex-spelling-results'); spellResults.id = 'latex-spelling-results'; spellResults.hidden = true;
     const translateResults = make('section', 'latex-translation-results'); translateResults.id = 'latex-translation-results'; translateResults.hidden = true;
+    const translateHeading = make('strong', '', '选文译文'); translateHeading.id = 'latex-translation-heading';
+    translateResults.setAttribute('aria-labelledby', translateHeading.id);
+    const translateClose = make('button', 'button subtle', '关闭'); translateClose.id = 'latex-translation-close'; translateClose.type = 'button';
+    translateClose.setAttribute('aria-label', '关闭译文');
+    const translateHeader = make('header', 'latex-translation-header'); translateHeader.append(translateHeading, translateClose);
+    const translateBody = make('div');
+    translateResults.append(translateHeader, translateBody);
+    sourceTranslate.setAttribute('aria-controls', translateResults.id);
     const editorWrap = make('div', 'latex-editor-wrap');
     const gutter = make('div', 'latex-gutter'); gutter.id = 'latex-gutter'; gutter.setAttribute('aria-hidden', 'true');
     const editor = make('textarea'); editor.id = 'latex-editor'; editor.spellcheck = false; editor.autocomplete = 'off'; editor.setAttribute('aria-label', 'LaTeX 源文件内容');
@@ -287,7 +297,7 @@ window.PaperLatexWorkspace = (() => {
       const description = { select: '选择文字／双击定位源码', highlight: '文字高亮', underline: '文字下划线', strikeout: '文字删除线', comment: '选中文字添加批注', note: '添加区域便笺' }[mode];
       button.title = description; button.setAttribute('aria-label', description);
       button.setAttribute('aria-pressed', String(mode === pdfTool));
-      button.addEventListener('click', () => { if (pdfSource.kind === 'version' && mode !== 'select') return; pdfTool = mode; preview.dataset.tool = mode; for (const item of pdfTools.querySelectorAll('button')) item.setAttribute('aria-pressed', String(item === button)); });
+      button.addEventListener('click', () => { if (pdfSource.kind === 'version' && mode !== 'select') return; clearPdfSelection(); pdfTool = mode; preview.dataset.tool = mode; for (const item of pdfTools.querySelectorAll('button')) item.setAttribute('aria-pressed', String(item === button)); });
       pdfTools.append(button);
     }
     const syncHint = make('p', 'latex-sync-hint'); syncHint.id = 'latex-sync-hint'; syncHint.setAttribute('role', 'status');
@@ -296,6 +306,17 @@ window.PaperLatexWorkspace = (() => {
     toPdf.setAttribute('aria-label', '从光标行跳到 PDF 对应位置');
     previewHead.append(pagePrev, pageLabel, pageNext, zoomSelect, toPdf, renderState);
     const preview = make('div', 'latex-preview'); preview.id = 'latex-preview';
+    const selectionHighlight = make('button', 'button latex-selection-highlight', '添加高亮');
+    selectionHighlight.type = 'button'; selectionHighlight.hidden = true;
+    selectionHighlight.addEventListener('pointerdown', event => event.preventDefault());
+    selectionHighlight.addEventListener('click', () => {
+      if (!pdfSelection) return;
+      const { stage, anchor } = pdfSelection;
+      if (pdfTool !== 'select' || !canAnnotateStage(stage, anchor.page) || anchor.pdf_version !== pdfBuild.pdf_version) { clearPdfSelection(); return; }
+      if (reviewer.beginPdf(anchor, 'highlight', { instant: true })) {
+        clearPdfSelection(); window.getSelection()?.removeAllRanges();
+      }
+    });
     const errors = make('ul', 'latex-errors'); errors.id = 'latex-errors'; errors.hidden = true;
     panePdf.append(syncHint, preview);
     const paneMedia = make('div', 'latex-pane'); paneMedia.id = 'latex-pane-media'; paneMedia.setAttribute('role', 'tabpanel');
@@ -369,6 +390,7 @@ window.PaperLatexWorkspace = (() => {
     let layout = 'split';
     function setLayout(mode) {
       if (!layoutButtons.has(mode)) return;
+      if (mode === 'source') clearPdfSelection();
       layout = mode;
       body.dataset.layout = mode;
       left.hidden = mode === 'pdf';
@@ -423,6 +445,7 @@ window.PaperLatexWorkspace = (() => {
     function say(text, error = false) { status.textContent = text; status.classList.toggle('error', error); }
     function setSaveState(text, kind = '') { saveState.textContent = text; saveState.dataset.state = kind; }
     function setTab(name) {
+      if (name !== 'pdf') clearPdfSelection();
       tab = name;
       if (!rail) aiToggle.setAttribute('aria-pressed', String(name === 'ai'));
       previewHead.hidden = name !== 'pdf'; pdfTools.hidden = name !== 'pdf'; mediaHead.hidden = name !== 'media';
@@ -538,7 +561,7 @@ window.PaperLatexWorkspace = (() => {
       view.style.setProperty('--latex-accent-color', settingAccentColor.value);
       createStarter.checked = settings.latex_starter !== false;
       newStarter.checked = settings.latex_starter !== false;
-      autoLabel.textContent = settings.latex_auto_compile === false ? '自动编译已关' : (autoPaused ? '自动编译已暂停' : '自动编译');
+      updateAutoToggle();
       setSplit(Number.isSafeInteger(settings.latex_split) ? settings.latex_split : 50, { persist: false });
     }
     function showPendingSettings() {
@@ -745,6 +768,7 @@ window.PaperLatexWorkspace = (() => {
 
     function cancelReads() {
       projectSearch?.reset();
+      clearPdfSelection();
       fileRequest += 1; navRequest += 1; mediaRequest += 1;
       for (const controller of [fileAbort, navAbort, mediaAbort]) controller?.abort();
       pdfStages.clear(); cancelPdfLoads(); pdfWindowKey = '';
@@ -834,7 +858,7 @@ window.PaperLatexWorkspace = (() => {
         mainLabel.textContent = `编译：${project.main_path || '未设置'}`;
         mainSelect.textContent = '';
         const option = make('option', '', project.main_path || '未设置'); option.value = project.main_path || ''; mainSelect.append(option);
-        compile.disabled = true; mainSelect.disabled = true; lastBuildOk = null; autoPaused = false;
+        compile.disabled = true; mainSelect.disabled = true; lastBuildOk = null; autoPaused = false; updateAutoToggle();
         const hint = '项目文件夹已不可用；打开「项目与设置」，修改当前项目位置和主文件。';
         setPreviewMessage(hint); say(hint, true); notifyContext();
         return;
@@ -853,7 +877,7 @@ window.PaperLatexWorkspace = (() => {
       // An existing PDF means idle recompiling can start safely; a folder that has never
       // built needs one manual compile first, so a broken document cannot loop.
       lastBuildOk = project.pdf_present ? true : null;
-      autoPaused = false;
+      autoPaused = false; updateAutoToggle();
       // Whichever surface hosts the collaboration, a project switch re-reads its state.
       if (tab === 'ai' || rail?.visible?.('latex-ai')) void aiStatus();
       notifyContext();
@@ -866,7 +890,7 @@ window.PaperLatexWorkspace = (() => {
       outlineList.textContent = ''; mediaList.textContent = ''; mainSelect.textContent = ''; currentFile.textContent = '选择源文件';
       mainLabel.textContent = ''; setSaveState(''); buildInfo.textContent = '';
       errors.hidden = true; diagnosticsToggle.hidden = true; diagnosticsToggle.setAttribute('aria-expanded', 'false');
-      lastBuildOk = null; autoPaused = false;
+      lastBuildOk = null; autoPaused = false; updateAutoToggle();
       if (!view.hidden) notifyContext();
     }
 
@@ -1069,16 +1093,18 @@ window.PaperLatexWorkspace = (() => {
         const layout = source.kind === 'version'
           ? await api('latex_version_pdf_pages', { version_id: source.versionId, ...(source.reviewPdfVersion ? { review_pdf_version: source.reviewPdfVersion } : {}) })
           : await api('latex_pdf_pages', { id });
-        if (ticket !== generation || id !== project?.id || sourceEpoch !== pdfSourceEpoch || disposed) return;
+        if (ticket !== generation || id !== project?.id || sourceEpoch !== pdfSourceEpoch || disposed) return false;
         const version = layout.version || buildInfo.dataset.build || '';
         if (version !== pdfVersion) projectSearch?.reset('pdf');
         pdfVersion = version;
         pdfBuild = source.kind === 'current' ? (layout.build || null) : null; updateSyncHint();
         pageCount = layout.page_count; pageGeometry = layout.pages || []; page = Math.min(Math.max(1, page), Math.max(1, pageCount));
         await renderPage(page);
+        return ticket === generation && id === project?.id && sourceEpoch === pdfSourceEpoch && !disposed;
       } catch (error) {
         if (ticket !== generation || sourceEpoch !== pdfSourceEpoch) return;
         setPreviewMessage(`无法预览：${error.message}`);
+        return false;
       }
     }
 
@@ -1089,6 +1115,7 @@ window.PaperLatexWorkspace = (() => {
       }
     }
     function clearRendered() {
+      clearPdfSelection();
       pdfStages.clear(); cancelPdfLoads(); pdfWindowKey = '';
       pdfScrollTop = 0; pdfScrollDirection = 1;
       preview.setAttribute('aria-busy', 'false');
@@ -1188,6 +1215,7 @@ window.PaperLatexWorkspace = (() => {
       const windowKey = `${width}:${[...keys.values()].join('|')}`;
       const changed = windowKey !== pdfWindowKey;
       if (changed) {
+        clearPdfSelection();
         pdfWindowKey = windowKey;
         const kept = new Set(keys.values());
         for (const [key, value] of rendered) if (!kept.has(key)) { URL.revokeObjectURL(value.url); rendered.delete(key); }
@@ -1247,7 +1275,10 @@ window.PaperLatexWorkspace = (() => {
           patchPdfPageAnnotations(stage, reviewer?.annotations?.() || []);
           installReviewLayer(stage, img, image.words, pageInfo, number, width);
           stage.dataset.renderState = 'ready'; stage.rasterSize = `${image.width} × ${image.height}`;
-          stage.addEventListener('dblclick', event => { if (pdfTool === 'select') void jumpToSource(event, img); });
+          stage.addEventListener('dblclick', event => {
+            if (pdfTool !== 'select' || event.target === selectionHighlight) return;
+            clearPdfSelection(); void jumpToSource(event, img);
+          });
         } catch (error) {
           if (!valid() || error.name === 'AbortError') return;
           stage.dataset.renderState = 'failed';
@@ -1315,6 +1346,35 @@ window.PaperLatexWorkspace = (() => {
     }
     function patchPdfAnnotations(notes) { for (const stage of preview.querySelectorAll('.latex-page-stage')) patchPdfPageAnnotations(stage, notes); }
 
+    function canAnnotateStage(stage, page) {
+      return !disposed && !view.hidden && tab === 'pdf' && layout !== 'source' && !!project && !switching && !compiling
+        && pdfSource.kind === 'current' && !!pdfBuild?.pdf_version && pdfStages.get(page) === stage;
+    }
+    function clearPdfSelection() {
+      clearTimeout(pdfSelectionTimer); pdfSelectionTimer = null;
+      pdfSelection = null; selectionHighlight.hidden = true;
+    }
+    function pdfSelectionChanged() {
+      if (!pdfSelection) return;
+      const selection = window.getSelection(), previous = pdfSelection.range;
+      const current = selection?.rangeCount && !selection.isCollapsed ? selection.getRangeAt(0) : null;
+      if (!current || current.startContainer !== previous.startContainer || current.endContainer !== previous.endContainer
+        || current.startOffset !== previous.startOffset || current.endOffset !== previous.endOffset) clearPdfSelection();
+    }
+    document.addEventListener('selectionchange', pdfSelectionChanged);
+    function showPdfSelection(stage, range, anchor) {
+      const bounds = range.getBoundingClientRect(), page = stage.getBoundingClientRect(), viewport = preview.getBoundingClientRect();
+      stage.append(selectionHighlight); selectionHighlight.hidden = false;
+      const { width, height } = selectionHighlight.getBoundingClientRect();
+      const left = Math.max(viewport.left, page.left), right = Math.min(viewport.right, page.right);
+      const top = Math.max(viewport.top, page.top), bottom = Math.min(viewport.bottom, page.bottom);
+      const x = Math.max(left, Math.min(bounds.left, right - width));
+      const y = bounds.bottom + height + 6 <= bottom ? bounds.bottom + 6 : Math.max(top, bounds.top - height - 6);
+      selectionHighlight.style.left = `${x - page.left}px`;
+      selectionHighlight.style.top = `${y - page.top}px`;
+      pdfSelection = { stage, anchor, range: range.cloneRange() };
+    }
+
     function installReviewLayer(stage, img, words, geometry, wanted, width) {
       if (!reviewer) return;
       const layer = make('div', 'latex-text-layer'); layer.setAttribute('aria-label', 'PDF 正文选区');
@@ -1337,10 +1397,12 @@ window.PaperLatexWorkspace = (() => {
       let drag = null;
       const point = event => { const rect = img.getBoundingClientRect(); return [Math.max(0, Math.min(geometry.width, (event.clientX - rect.left) / rect.width * geometry.width)), Math.max(0, Math.min(geometry.height, (event.clientY - rect.top) / rect.height * geometry.height))]; };
       layer.addEventListener('pointerdown', event => {
+        clearPdfSelection();
         if (pdfTool !== 'note' || event.button !== 0) return;
         event.preventDefault(); drag = point(event); layer.setPointerCapture(event.pointerId);
       });
       layer.addEventListener('pointerup', event => {
+        if (event.button !== 0 || !canAnnotateStage(stage, wanted)) { drag = null; return; }
         if (pdfTool === 'note' && drag) {
           const end = point(event), start = drag; drag = null;
           const rect = [Math.min(start[0], end[0]), Math.min(start[1], end[1]), Math.max(start[0], end[0]), Math.max(start[1], end[1])];
@@ -1348,13 +1410,19 @@ window.PaperLatexWorkspace = (() => {
           if (rect[3] - rect[1] < 2) rect[3] = Math.min(geometry.height, rect[1] + 16);
           reviewer.beginPdf({ kind: 'pdf', page: wanted, pdf_version: pdfBuild?.pdf_version, rects: [rect], text: '' }, 'note'); return;
         }
-        if (!['highlight', 'underline', 'strikeout', 'comment'].includes(pdfTool)) return;
-        const tool = pdfTool;
-        setTimeout(() => {
+        if (pdfTool === 'note') return;
+        const tool = pdfTool, version = pdfBuild.pdf_version;
+        clearTimeout(pdfSelectionTimer);
+        pdfSelectionTimer = setTimeout(() => {
+          pdfSelectionTimer = null;
+          if (pdfTool !== tool || !canAnnotateStage(stage, wanted) || version !== pdfBuild.pdf_version) return;
           const selection = window.getSelection(); if (!selection?.rangeCount || selection.isCollapsed) return;
           const range = selection.getRangeAt(0), bounds = img.getBoundingClientRect(), pieces = [];
           try {
-            if (!layer.contains(range.startContainer) || !layer.contains(range.endContainer)) { say('一次选文批注限于同一页，请在单页内重新选择。', true); return; }
+            if (!layer.contains(range.startContainer) || !layer.contains(range.endContainer)) {
+              if (tool !== 'select') say('一次选文批注限于同一页，请在单页内重新选择。', true);
+              return;
+            }
             for (const span of layer.querySelectorAll('.latex-pdf-word')) {
               const run = span.firstChild; if (!range.intersectsNode(run)) continue;
               const part = document.createRange(); part.selectNodeContents(run);
@@ -1365,11 +1433,14 @@ window.PaperLatexWorkspace = (() => {
               pieces.push([Math.max(box[0], (rect.left - bounds.left) / bounds.width * geometry.width), box[1], Math.min(box[2], (rect.right - bounds.left) / bounds.width * geometry.width), box[3], text]);
             }
             const value = window.PaperPDFReader?.mergeSelection(pieces, wanted);
-            if (value?.rects.length) reviewer.beginPdf({ kind: 'pdf', page: wanted, pdf_version: pdfBuild?.pdf_version, rects: value.rects, text: value.text }, tool === 'comment' ? 'note' : tool, { instant: tool !== 'comment' });
+            if (!value?.rects.length) return;
+            const anchor = { kind: 'pdf', page: wanted, pdf_version: version, rects: value.rects, text: value.text };
+            if (tool === 'select') showPdfSelection(stage, range, anchor);
+            else reviewer.beginPdf(anchor, tool === 'comment' ? 'note' : tool, { instant: tool !== 'comment' });
           } catch (error) { say(`选区无法批注：${error.message}`, true); }
         }, 0);
       });
-      layer.addEventListener('pointercancel', () => { drag = null; });
+      layer.addEventListener('pointercancel', () => { drag = null; clearPdfSelection(); });
     }
 
     function requestResize() {
@@ -1384,6 +1455,7 @@ window.PaperLatexWorkspace = (() => {
     window.addEventListener('resize', requestResize);
     zoomSelect.addEventListener('change', () => { zoom = Number(zoomSelect.value); void renderPage(page); });
     preview.addEventListener('scroll', () => {
+      clearPdfSelection();
       if (!pageCount || !project || tab !== 'pdf') return;
       const metrics = pdfMetrics(previewWidth(preview, zoom));
       const next = pdfPageAt(metrics, Math.max(0, (preview.scrollTop || 0) + (preview.clientHeight || 0) * .35));
@@ -1700,13 +1772,24 @@ window.PaperLatexWorkspace = (() => {
         row.append(details); errors.append(row);
       }
       diagnosticsToggle.hidden = false;
-      diagnosticsToggle.textContent = result.ok ? `编译成功${lines.length ? ` · ${lines.length} 条错误` : ''}` : `编译失败 · ${lines.length} 条错误`;
+      diagnosticsToggle.textContent = result.ok ? `编译成功${result.syncUnverified ? ' · SyncTeX 待核验' : ''}${lines.length ? ` · ${lines.length} 条错误` : ''}` : `编译失败 · ${lines.length} 条错误`;
       setDiagnosticsOpen(!result.ok);
     }
 
+    function updateAutoToggle() {
+      const enabled = settings.latex_auto_compile !== false;
+      autoToggle.setAttribute('aria-checked', String(enabled));
+      autoToggle.textContent = enabled && autoPaused ? '自动编译已暂停' : '自动编译';
+      autoToggle.title = enabled && (autoPaused || lastBuildOk !== true) && project?.exists !== false
+        ? '手动编译成功后，停止输入约 2.5 秒会自动编译'
+        : '自动编译会在停止输入约 2.5 秒后运行';
+    }
+    function canAutoCompile() {
+      return !!project && project.exists !== false && settings.latex_auto_compile !== false && !autoPaused && lastBuildOk === true;
+    }
     function scheduleCompile() {
       clearTimeout(compileTimer);
-      if (settings.latex_auto_compile === false || autoPaused || lastBuildOk !== true || !project) return;
+      if (!canAutoCompile()) return;
       compileTimer = setTimeout(() => { void compileOnce('auto'); }, AUTOCOMPILE_MS);
     }
 
@@ -1717,12 +1800,14 @@ window.PaperLatexWorkspace = (() => {
       // Wait until the observed tail is still current before using the engine.
       let observedTail;
       do { observedTail = settingsTail; await observedTail; } while (observedTail !== settingsTail);
+      if (reason === 'auto' && (!canAutoCompile() || committedSettings.latex_auto_compile === false)) return;
       if (pendingSettings.some(entry => entry.failed && Object.hasOwn(entry.patch, 'latex_engine'))) {
         say('编译引擎设置尚未保存；请先在写作设置中重试。', true); return;
       }
       const engine = committedSettings.latex_engine || 'xelatex';
       if (!project || switching || compiling) { if (compiling) pendingCompile = true; return; }
       if (!await savedBeforeLeaving(true)) return;
+      if (reason === 'auto' && !canAutoCompile()) return;
       if (!project || switching || compiling) { if (compiling) pendingCompile = true; return; }
       compiling = true; compile.disabled = true; compile.textContent = '编译中…';
       if (pdfSource.kind === 'current') projectSearch?.reset('pdf');
@@ -1740,30 +1825,37 @@ window.PaperLatexWorkspace = (() => {
         if (result.ok) {
           autoPaused = false;
           say(`编译完成：${result.pdf_path}（${result.pages} 页，${result.duration_ms} 毫秒${reason === 'auto' ? '，自动' : ''}）`);
+          let syncIssue = '';
           if (pdfSource.kind === 'current' || reason === 'manual') {
             if (pdfSource.kind !== 'current') resetPdfSource({ kind: 'current' });
             else clearRendered();
-            await loadLayout();
+            if (await loadLayout() && pdfBuild?.verified === false) {
+              syncIssue = pdfBuild.reason || '当前 PDF 的源码定位尚未核验。';
+              renderDiagnostics({ ...result, syncUnverified: true, warnings: [...new Set([...(result.warnings || []), syncIssue])] });
+            }
           }
           if (result.version) { project.reading_project_id = result.version.reading_project_id; void versions?.refresh(); void onVersionSaved(result.version); }
-          if (result.version_error) say(`${result.version_error}。原文件与批注保留。`, true);
+          if (syncIssue || result.version_error) say([syncIssue, result.version_error].filter(Boolean).join(' · '), true);
         } else {
-          autoPaused = reason === 'auto';
-          say(result.timed_out ? '编译超时，已停止。' : `编译失败（退出码 ${result.exit_code}）。请看错误与日志尾。${autoPaused ? ' 自动编译已暂停，手动编译成功后会恢复。' : ''}`, true);
+          autoPaused ||= reason === 'auto';
+          const failure = result.timed_out ? '编译超时，已停止。'
+            : result.exit_code === 0 ? (result.warnings?.[0] || '编译未生成新的可读 PDF。')
+            : `编译失败（退出码 ${result.exit_code}）。请看错误与日志尾。`;
+          say(failure + (autoPaused ? ' 自动编译已暂停，手动编译成功后会恢复。' : ''), true);
         }
       } catch (error) {
         lastBuildOk = false;
-        autoPaused = reason === 'auto';
+        autoPaused ||= reason === 'auto';
         renderDiagnostics({ ok: false, errors: [String(error.message || error)] });
         say(`编译未完成：${error.message}`, true);
       } finally {
         compiling = false; compile.disabled = false; compile.textContent = '编译';
-        autoLabel.textContent = settings.latex_auto_compile === false ? '自动编译已关' : (autoPaused ? '自动编译已暂停' : '自动编译');
+        updateAutoToggle();
         if (pendingCompile) { pendingCompile = false; scheduleCompile(); }
       }
     }
     // A manual compile is also how the reader resumes from a failed automatic one.
-    compile.addEventListener('click', () => { autoPaused = false; void compileOnce('manual'); });
+    compile.addEventListener('click', () => { void compileOnce('manual'); });
 
     // ---- versions -----------------------------------------------------------------
     async function showDiff() {
@@ -1844,7 +1936,7 @@ window.PaperLatexWorkspace = (() => {
         await loadTree();
         if (!await openFile(project.main_path, { duringSwitch: true })) throw new Error('主文件未能载入');
         if (project.pdf_present) await loadLayout(); else setPreviewMessage('这个主入口还没有 PDF；点「编译」生成。');
-        lastBuildOk = project.pdf_present ? true : null; autoPaused = false;
+        lastBuildOk = project.pdf_present ? true : null; autoPaused = false; updateAutoToggle();
         say(`已更新项目位置：${project.main_path}`); void reviewer?.refresh();
       } catch (error) {
         if (!disposed) say(changed ? `项目位置已更新，但读取失败：${error.message}。可刷新项目导航。` : `项目位置未修改：${error.message}`, true);
@@ -1901,11 +1993,12 @@ window.PaperLatexWorkspace = (() => {
       else void saveSetting({ latex_accent: settingAccent.value });
     });
     settingAccentColor.addEventListener('change', () => void saveSetting({ latex_accent: settingAccentColor.value }));
-    settingAuto.addEventListener('change', () => {
-      autoPaused = false;
-      void saveSetting({ latex_auto_compile: settingAuto.checked });
-      if (settingAuto.checked) scheduleCompile();
-    });
+    function setAutoCompile(enabled) {
+      void saveSetting({ latex_auto_compile: enabled });
+      scheduleCompile();
+    }
+    settingAuto.addEventListener('change', () => { void setAutoCompile(settingAuto.checked); });
+    autoToggle.addEventListener('click', () => { void setAutoCompile(settings.latex_auto_compile === false); });
 
     // ---- DSH questions and co-writing ----------------------------------------------
     const ai = { available: false, busy: false, models: [], proposal: null, checked: false, lastRoute: null, entries: [] };
@@ -1961,7 +2054,8 @@ window.PaperLatexWorkspace = (() => {
       return value.trim() ? value : undefined;
     }
     let translationConfig = null, translationProject = null, translationRevision = null, translationLoad = 0, translationBusy = false, translationRequest = 0, translationAbort = null;
-    function cancelTranslation() { ++translationRequest; translationAbort?.abort(); translationAbort = null; translationBusy = false; sourceTranslate.disabled = false; translateResults.hidden = true; translateResults.textContent = ''; }
+    function cancelTranslation() { ++translationRequest; translationAbort?.abort(); translationAbort = null; translationBusy = false; sourceTranslate.disabled = false; translateResults.hidden = true; translateBody.textContent = ''; }
+    translateClose.addEventListener('click', () => { cancelTranslation(); sourceTranslate.focus(); });
     const translationKey = id => `reader:latex-translation-${id}`;
     async function loadTranslationSettings() {
       const id = project?.id, ticket = ++translationLoad; if (!id) { translateSave.disabled = true; return false; }
@@ -2000,16 +2094,18 @@ window.PaperLatexWorkspace = (() => {
       if (!selection) { say('请先在源码中选择要翻译的文字。', true); return; }
       if (selection.length > 8000) { say('选文超过 8000 字符，请缩小范围。', true); return; }
       const ticket = ++translationRequest; translationAbort = new AbortController();
-      translationBusy = true; sourceTranslate.disabled = true; translateResults.hidden = false; translateResults.textContent = '正在翻译所选源码草稿…';
+      translationBusy = true; sourceTranslate.disabled = true; translateResults.hidden = false;
+      translateHeading.textContent = '选文译文'; translateBody.textContent = '正在翻译所选源码草稿…';
       try {
         if (translationProject !== id && !await loadTranslationSettings()) throw new Error('无法读取翻译设置。');
         if (ticket !== translationRequest || project?.id !== id || file !== path || generation !== epoch || fileRequest !== sourceTicket) return;
         const result = await api('latex_ai_translate', { id, path, selection, ...(['auto', 'zh-CN', 'en'].includes(translationConfig?.target_language) ? { target_language: translationConfig.target_language } : {}), ...(translationConfig?.model ? { model_override: translationConfig.model } : {}), ...(translationConfig?.prompt ? { prompt: translationConfig.prompt } : {}) }, { signal: translationAbort.signal });
         if (ticket !== translationRequest || project?.id !== id || file !== path || generation !== epoch || fileRequest !== sourceTicket || disposed) return;
-        translateResults.textContent = ''; translateResults.append(make('strong', '', `选文译文 · 来源为编辑草稿${editor.value.slice(start, end) !== selection ? '（源码已变化）' : ''}`), make('p', '', result.answer), make('small', '', `${result.model.provider} / ${result.model.model} · ${result.prompt_version}`));
-        const original = make('details'); original.append(make('summary', '', '查看送译原文'), make('p', '', selection)); translateResults.append(original);
-        const copy = make('button', 'button subtle', '复制译文'); copy.type = 'button'; copy.addEventListener('click', () => { if (!window.navigator?.clipboard) { say('复制不可用，请选择译文复制。', true); return; } void window.navigator.clipboard.writeText(result.answer).then(() => say('译文已复制。'), error => say(`复制失败：${error.message}`, true)); }); translateResults.append(copy);
-      } catch (error) { if (ticket === translationRequest && project?.id === id && file === path && error.name !== 'AbortError') translateResults.textContent = `翻译失败：${error.message}`; }
+        translateHeading.textContent = `选文译文 · 来源为编辑草稿${editor.value.slice(start, end) !== selection ? '（源码已变化）' : ''}`;
+        translateBody.textContent = ''; translateBody.append(make('p', '', result.answer), make('small', '', `${result.model.provider} / ${result.model.model} · ${result.prompt_version}`));
+        const original = make('details'); original.append(make('summary', '', '查看送译原文'), make('p', '', selection)); translateBody.append(original);
+        const copy = make('button', 'button subtle', '复制译文'); copy.type = 'button'; copy.addEventListener('click', () => { if (!window.navigator?.clipboard) { say('复制不可用，请选择译文复制。', true); return; } void window.navigator.clipboard.writeText(result.answer).then(() => say('译文已复制。'), error => say(`复制失败：${error.message}`, true)); }); translateBody.append(copy);
+      } catch (error) { if (ticket === translationRequest && project?.id === id && file === path && error.name !== 'AbortError') translateBody.textContent = `翻译失败：${error.message}`; }
       finally { if (ticket === translationRequest) { translationAbort = null; translationBusy = false; sourceTranslate.disabled = false; } }
     });
     function aiRoute() {
@@ -2183,7 +2279,7 @@ window.PaperLatexWorkspace = (() => {
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && ['i', 't'].includes(event.key.toLowerCase()) && !writingContext().blocked) {
         event.preventDefault(); event.key.toLowerCase() === 'i' ? writingTools?.figure({ templateOnly: true }) : writingTools?.table();
       }
-      if (event.key === 'Escape') closeSourceTools();
+      if (event.key === 'Escape') { closeSourceTools(); clearPdfSelection(); }
     });
 
     /** Enter the workspace: the page becomes the surface, library hidden like the board's focus. */
@@ -2307,7 +2403,7 @@ window.PaperLatexWorkspace = (() => {
           ai: { available: ai.available, proposal: ai.proposal?.id || null },
         }),
       },
-    dispose() { disposed = true; cancelAiRun({ quiet: true }); clearPublicRetrieval(); cancelTranslation(); reviewer?.dispose(); writingTools?.dispose(); formulas?.destroy(); sourceEditor?.destroy(); cancelReads(); clearRendered(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); resizeObserver?.disconnect(); window.removeEventListener('resize', requestResize); window.removeEventListener('beforeunload', protectDraft); clearTimeout(timer); clearTimeout(compileTimer); clearTimeout(spellTimer); view.hidden = true; document.body.classList.remove('latex-focused'); },
+    dispose() { disposed = true; cancelAiRun({ quiet: true }); clearPublicRetrieval(); cancelTranslation(); reviewer?.dispose(); writingTools?.dispose(); formulas?.destroy(); sourceEditor?.destroy(); cancelReads(); clearRendered(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); resizeObserver?.disconnect(); window.removeEventListener('resize', requestResize); window.removeEventListener('beforeunload', protectDraft); document.removeEventListener('selectionchange', pdfSelectionChanged); clearTimeout(timer); clearTimeout(compileTimer); clearTimeout(spellTimer); view.hidden = true; document.body.classList.remove('latex-focused'); },
     };
   }
   return { create };

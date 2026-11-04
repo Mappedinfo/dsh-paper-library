@@ -172,7 +172,21 @@ function citationJob(request, options) {
   return result;
 }
 
+function workerTimeout(request) {
+  if (request.action === 'latex_compile') {
+    const configured = request.timeout_seconds;
+    const numeric = typeof configured === 'number' || typeof configured === 'string';
+    const seconds = configured == null ? 120 : numeric ? Math.trunc(Number(configured)) : NaN;
+    // Python caps TeX at 600 s. Leave time for the build lock and snapshots
+    // so it can return compiler diagnostics and register the verified PDF.
+    if (seconds >= 5 && seconds <= 600) return (seconds + 60) * 1000;
+  }
+  const retrieval = LATEX_RETRIEVAL_ACTIONS.has(request.action) || ['latex_source_search', 'latex_pdf_search'].includes(request.action);
+  return request.action === 'dataset_asset_preview' || retrieval ? 15000 : 90000;
+}
+
 function runProcess(command, args, request, options) {
+  const timeoutMs = workerTimeout(request);
   return new Promise((accept, reject) => {
     if (options.signal?.aborted) return reject(new Error('操作已取消。'));
     const child = spawn(command, args, {
@@ -181,8 +195,6 @@ function runProcess(command, args, request, options) {
     });
     let stdout = '', stderr = '', bytes = 0, fail;
     const abort = () => { fail = new Error('操作已取消。'); child.kill(); };
-    const retrieval = LATEX_RETRIEVAL_ACTIONS.has(request.action) || ['latex_source_search', 'latex_pdf_search'].includes(request.action);
-    const timeoutMs = request.action === 'dataset_asset_preview' || retrieval ? 15000 : 90000;
     const timeout = setTimeout(() => { fail = new Error(`操作超过 ${timeoutMs / 1000} 秒；请缩小读取范围或检查文件。`); child.kill(); }, timeoutMs);
     options.signal?.addEventListener('abort', abort, { once: true });
     child.stdout.on('data', chunk => {

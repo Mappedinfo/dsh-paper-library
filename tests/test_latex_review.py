@@ -116,6 +116,8 @@ def test_synctex_does_not_reverify_old_artifacts_after_output_directory_changes(
     (root / "one.tex").write_text("New synthetic text.\n")
     build = call("latex_compile", engine="pdflatex", save_version=True)
     assert (root / "output" / "main.pdf").is_file()
+    assert build["exit_code"] == 0 and not build["ok"]
+    assert any("仍显示上一份预览" in warning for warning in build["warnings"])
     assert build["version"] is None
     status = call("latex_pdf_pages")["build"]
     assert status["pdf_version"] == original["pdf_version"]
@@ -186,7 +188,7 @@ def test_synctex_verifies_local_targets_when_compilation_includes_external_sourc
     manifest["verified"] = False
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     status = call("latex_pdf_pages")["build"]
-    assert not status["verified"] and "编译一次" in status["reason"]
+    assert not status["verified"] and "旧编译记录未核验" in status["reason"]
     assert call("latex_compile", engine="pdflatex")["ok"]
     assert call("latex_pdf_pages")["build"]["verified"]
 

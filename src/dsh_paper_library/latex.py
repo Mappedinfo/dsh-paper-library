@@ -707,7 +707,9 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
             warnings.append(f"生成的 PDF 无法读取：{error}")
     elif candidate.is_file():
         pdf_relative = candidate.relative_to(root).as_posix()
-        warnings.append("PDF 没有在这次编译中更新")
+        warnings.append("本次编译没有更新主文件旁的 PDF，工作台仍显示上一份预览；请检查 latexmk 的输出目录。")
+    elif exit_code == 0:
+        warnings.append("本次编译没有在主文件旁生成 PDF；请检查 latexmk 的输出目录。")
     if exit_code not in (0, None) and not warnings:
         warnings.append(f"latexmk 退出码 {exit_code}")
     if timed_out:
@@ -732,7 +734,7 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
         "engine": engine,
         "command": " ".join(command),
         "exit_code": exit_code,
-        "ok": exit_code == 0 and not timed_out and bool(pdf_relative),
+        "ok": exit_code == 0 and not timed_out and pdf_updated and pages is not None,
         "timed_out": timed_out,
         "duration_ms": duration_ms,
         "pdf_path": pdf_relative,
@@ -745,8 +747,6 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
     }
     if save_version:
         result["version"] = None
-        if result["ok"] and (not pdf_updated or pages is None):
-            version_failure = "本次编译没有更新可读的预览 PDF"
         if result["ok"] and not version_failure:
             from .latex_versions import create as save_build_version
             try:

@@ -256,9 +256,13 @@ def test_nested_main_compiles_from_its_directory_and_synctex_resolves_shared_sou
         encoding="utf-8",
     )
     (folder / "shared" / "body.tex").write_text("Shared synthetic source sentence.\n", encoding="utf-8")
-    project = request(tmp_path, "latex_project_create", root=str(folder), main_path="review/main.tex")["project"]
+    project = request(tmp_path, "latex_project_create", root=str(folder))["project"]
+    project = request(tmp_path, "latex_project_update", id=project["id"], main_path="review/main.tex", expected_binding_generation=project["binding_generation"])["project"]
+    binding = {"expected_root": project["root"], "expected_binding_generation": project["binding_generation"]}
 
-    built = request(tmp_path, "latex_compile", id=project["id"], engine="pdflatex")
+    with pytest.raises(ValueError, match="项目绑定已变化"):
+        request(tmp_path, "latex_compile", id=project["id"], engine="xelatex", expected_binding_generation=0)
+    built = request(tmp_path, "latex_compile", id=project["id"], engine="xelatex", **binding)
     assert built["ok"], built["log_tail"][-2000:]
     assert built["pdf_path"] == "review/main.pdf"
     with fitz.open(folder / "review" / "main.pdf") as pdf:
