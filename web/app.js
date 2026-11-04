@@ -1461,7 +1461,9 @@ analysisUI = window.PaperAnalysis?.create({state,api,persistence,toast,openKnowl
   if(combined.length>4000)throw new Error('合并后超过对话草稿预算，请减少选中节点或先处理已有草稿。');
   paperChatUI.restoreDraft(combined);await paperChatUI.saveDraft();toast('选定材料已加入论文对话草稿；可编辑后发送，也可放入 DSH 主输入框。');
 }});
-latexUI = window.PaperLatexWorkspace?.create({api,toast,getLibrary:()=>state.library,rail:readingPanels,onContext:workspaceContextChanged,onVersionSaved:()=>{void refreshProjects();if($('workspace-versions')?.open)void libraryLatexVersions?.refresh();}});
+latexUI = window.PaperLatexWorkspace?.create({api,toast,getLibrary:()=>state.library,rail:readingPanels,onContext:workspaceContextChanged,
+  onSettingsClose:()=>{workspaceNavigationUI?.closePopovers();closeWorkspaceVersions();},
+  onVersionSaved:()=>{void refreshProjects();if($('workspace-versions')?.open)void libraryLatexVersions?.refresh();}});
 if ($('library-latex-versions')) libraryLatexVersions = window.PaperLatexVersions?.create({ root:$('library-latex-versions'), api,
   scope:()=>{const target=workspaceNavigationUI?.state().current;return target?.kind==='latex'?{id:target.id}:null;},
   openVersion:async(version,reviewPdfVersion)=>{if(await latexUI?.open(version.project_id)===false||latexUI?.current()?.id!==version.project_id)return;await latexUI?.showVersion(version.id,reviewPdfVersion);closeWorkspaceVersions();},
@@ -1792,6 +1794,7 @@ function placeWorkspaceNavigation(writing = false) {
   const writingBar = writing ? document.querySelector('#latex-view .latex-topbar') : null;
   if (area && writingBar) { if (area.parentNode !== writingBar) writingBar.prepend(area); }
   else if (area && home?.parentNode && area.parentNode !== home.parentNode) home.after(area);
+  workspaceNavigationUI?.mountActions(writingBar ? $('latex-navigation-actions') || undefined : undefined);
   const returnButton = $('library-return-to-dsh');
   if (!returnButton) return;
   const returnHost = writingBar

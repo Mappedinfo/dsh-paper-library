@@ -15,7 +15,7 @@ function fixture(options = {}) {
   const calls = [], contexts = [], tables = [], visible = [], alerts = []
   let boardOpen = options.boardOpen ?? false, latexOpen = options.latexOpen ?? false
   let boardCurrent = { kind: 'board', id: 'board-source', title: 'Source board' }, latexCurrent = { kind: 'latex', id: 'latex-source', title: 'Source draft' }
-  const elements = new Map(['workspace-navigation-area', 'workspace-navigation-home', 'library-literature-content', 'workspace-versions'].map(id => [id, { id, hidden: false, dataset: {}, parentNode: null }]))
+  const elements = new Map(['workspace-navigation-area', 'workspace-navigation-home', 'library-literature-content', 'workspace-versions', 'latex-navigation-actions'].map(id => [id, { id, hidden: false, dataset: {}, parentNode: null }]))
   const home = elements.get('workspace-navigation-home'), area = elements.get('workspace-navigation-area'), writing = { prepend: node => { calls.push('nav:writing'); node.parentNode = writing } }, library = { dataset: {} }
   home.parentNode = { id: 'home-parent' }; home.after = node => { calls.push('nav:home'); node.parentNode = home.parentNode }; area.parentNode = home.parentNode
   const state = { active: options.active ?? { id: 'paper-source' }, project: 'old-reading-project', itemTicket: 0, pageTicket: 0 }
@@ -31,7 +31,7 @@ function fixture(options = {}) {
     persistence: { flush: async () => { calls.push('state:flush'); if (options.saveFailure) throw Error('synthetic persistence conflict') } },
     resourceUI: { hide: () => calls.push('resource:hide') }, knowledgeUI: { hide: () => calls.push('knowledge:hide') },
     workbenchUI: { setTable: value => tables.push(value) }, readingPanels: { showLibrary: () => visible.push('library') },
-    workspaceNavigationUI: { state: () => ({ current: options.current ?? null }), setCurrent: (...args) => contexts.push(plain(args)) },
+    workspaceNavigationUI: { state: () => ({ current: options.current ?? null }), setCurrent: (...args) => contexts.push(plain(args)), mountActions: host => { elements.get('workspace-navigation-area').actionsHost = host } },
     libraryLatexVersions: { clear: () => calls.push('versions:clear') },
     api: async (action, args) => { calls.push({ action, ...plain(args) }); if (options.apiFailure) throw Error('synthetic missing target'); if (options.api) return options.api(action, args); const record = { id: args.id }; return action === 'board_get' ? { board: record } : ['latex_project_get','project_get'].includes(action) ? { project: record } : record },
     openPaper: async id => { calls.push(`paper:open:${id}`); if (options.openFailure) return; state.active = { id: options.wrongId ? 'wrong-target' : id }; return 7 },
@@ -204,10 +204,12 @@ test('one guarded return button follows writing navigation, including the direct
 
   f.context.placeWorkspaceNavigation(true)
   assert.equal(f.area.parentNode, f.writing)
+  assert.equal(f.area.actionsHost, f.elements.get('latex-navigation-actions'))
   assert.equal(returnButton.parentNode, navigation)
 
   f.context.placeWorkspaceNavigation(false)
   assert.equal(f.area.parentNode, f.home.parentNode)
+  assert.equal(f.area.actionsHost, undefined)
   assert.equal(returnButton.parentNode, libraryToolbar)
 
   f.area.querySelector = () => null

@@ -12,7 +12,7 @@ const tick = () => new Promise(done => setImmediate(done))
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
 const image = { image: 'aW1hZ2U=', width: 600, height: 800, pixel_width: 1200, pixel_height: 1600, page_count: 4, bytes: 5, supported: true }
 
-async function fixture(override = () => undefined, { review = false, spellChecker, writingTools, sourceEditor, onContext, rail } = {}) {
+async function fixture(override = () => undefined, { review = false, spellChecker, writingTools, sourceEditor, onContext, rail, onSettingsClose } = {}) {
   const ids = new Map(), revoked = [], calls = [], urls = [], timers = new Map()
   class Element {
     constructor(tag = 'div') {
@@ -63,7 +63,7 @@ async function fixture(override = () => undefined, { review = false, spellChecke
   if (review) vm.runInNewContext(reviewSource, globals)
   vm.runInNewContext(searchSource, globals)
   vm.runInNewContext(source, globals)
-  const ui = window.PaperLatexWorkspace.create({ api, onContext, rail })
+  const ui = window.PaperLatexWorkspace.create({ api, onContext, rail, onSettingsClose })
   await ui.open(); return { ui, ids, calls, revoked, urls, window, document, timers }
 }
 
@@ -1189,6 +1189,26 @@ test('writing model selection belongs to settings and remains the route for DSH 
   assert.equal(await f.ui.testHooks.reviewer().testHooks.runNote('ask', note), true)
   const request = f.calls.find(call => call.action === 'latex_ai_ask')
   assert.equal(request.provider, 'second'); assert.equal(request.model, 'chosen')
+  f.ui.dispose()
+})
+
+test('settings keeps workspace popup actions usable and dismisses them when closed', async () => {
+  let closed = 0
+  const f = await fixture(undefined, { onSettingsClose: () => { closed++ } })
+  const menu = f.ids.get('latex-menu'), trigger = f.ids.get('latex-menu-open'), view = f.ids.get('latex-view')
+  assert.equal(f.ids.get('latex-navigation-actions').parentElement, menu)
+  await trigger.dispatch('click')
+  await view.dispatch('click', { target: f.ids.get('latex-navigation-actions') })
+  await view.dispatch('click', { target: { closest: () => ({ id: 'workspace-related' }) } })
+  assert.equal(menu.hidden, false)
+  assert.equal(closed, 0)
+  await trigger.dispatch('click')
+  assert.equal(menu.hidden, true)
+  assert.equal(closed, 1)
+  await trigger.dispatch('click')
+  await view.dispatch('keydown', { key: 'Escape' })
+  assert.equal(menu.hidden, true)
+  assert.equal(closed, 2)
   f.ui.dispose()
 })
 

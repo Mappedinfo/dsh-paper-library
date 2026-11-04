@@ -133,6 +133,7 @@ body > #latex-view { height: 100dvh; }
 }
 .latex-menu[hidden] { display: none; }
 .latex-menu-section { display: flex; flex-direction: column; gap: 4px; }
+#latex-navigation-actions { display: contents; }
 #latex-detached-proposal[hidden], .latex-review-pending-proposal[hidden] { display: none; }
 .latex-menu-label { font-size: 11px; letter-spacing: .3px; color: var(--muted); }
 .latex-menu-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

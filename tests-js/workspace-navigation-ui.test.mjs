@@ -16,6 +16,7 @@ function fixture(options = {}) {
     constructor(tag) { this.tagName = tag.toUpperCase(); this.ownerDocument = document; this.children = []; this.dataset = {}; this.attributes = {}; this.events = new Map(); this.hidden = false; this.disabled = false; this.value = ''; this.textContent = ''; this.style = { removeProperty(name) { delete this[name]; } }; this.classes = new Set(); this.classList = { add: value => this.classes.add(value), toggle: (value, on) => { if (on === undefined) on = !this.classes.has(value); if (on) this.classes.add(value); else this.classes.delete(value); return on }, contains: value => this.classes.has(value) } }
     set className(value) { this.classes = new Set(value.split(/\s+/).filter(Boolean)) } get className() { return [...this.classes].join(' ') }
     append(...nodes) { for (const node of nodes) { if (node.parentNode) node.parentNode.children = node.parentNode.children.filter(value => value !== node); node.parentNode = this; this.children.push(node) } }
+    insertBefore(node, next) { this.append(node); this.children.pop(); this.children.splice(this.children.indexOf(next), 0, node) }
     replaceChildren(...nodes) { for (const node of this.children) node.parentNode = null; this.children = []; this.append(...nodes) }
     setAttribute(key, value) { this.attributes[key] = String(value) } getAttribute(key) { return this.attributes[key] ?? null } removeAttribute(key) { delete this.attributes[key] }
     addEventListener(name, fn) { if (!this.events.has(name)) this.events.set(name, new Set()); this.events.get(name).add(fn) } removeEventListener(name, fn) { this.events.get(name)?.delete(fn) }
@@ -135,6 +136,27 @@ test('external context changes isolate late related reads and repeated contexts 
   assert.equal(f.nav.state().current, null)
   assert.equal(f.nav.state().section, 'latex')
   assert.equal(f.relatedRoot.hidden, true)
+})
+
+test('writing settings can host the original path, relations and versions controls', async () => {
+  const f = fixture()
+  const nav = f.find('workspace-navigation'), actions = f.find('workspace-nav-actions')
+  const settings = f.document.createElement('div')
+  f.nav.setCurrent(item('latex', 'draft'))
+  f.actions.hidden = false
+  const related = f.find('workspace-related-toggle')
+  related.click(); await wait()
+  assert.equal(f.relatedRoot.hidden, false)
+  f.nav.mountActions(settings)
+  assert.equal(f.find('workspace-nav-actions'), undefined)
+  assert.equal(actions.parentNode, settings)
+  assert.equal(f.actions.parentNode, actions)
+  assert.equal(f.relatedRoot.hidden, true, 'moving the controls dismisses a popup anchored to their old position')
+  related.click(); await wait()
+  assert.equal(f.relatedRoot.hidden, false)
+  f.nav.mountActions()
+  assert.equal(f.relatedRoot.hidden, true)
+  assert.equal(actions.parentNode, nav)
 })
 
 test('group pagination changes only its requested group and partial counts stay explicitly lower bounds', async () => {

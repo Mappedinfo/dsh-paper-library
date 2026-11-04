@@ -22,7 +22,7 @@ window.PaperLatexWorkspace = (() => {
   const SPLIT_MIN = 25, SPLIT_MAX = 75;
   const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_path_font: 'pixel', latex_accent: 'system', latex_split: 50, latex_sync_folder: true };
 
-  function create({api: transport, toast = () => {}, getLibrary = () => '', rail = null, onVersionSaved = () => {}, onContext = () => {}}) {
+  function create({api: transport, toast = () => {}, getLibrary = () => '', rail = null, onVersionSaved = () => {}, onContext = () => {}, onSettingsClose = () => {}}) {
     const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
     let projects = [], project = null, tree = null, file = null, revision = null, pageCount = 0, page = 1, tab = 'pdf';
     // Bind project actions to the location this window opened. A different
@@ -112,6 +112,7 @@ window.PaperLatexWorkspace = (() => {
     toolbar.append(title, projectSelect, mainLabel, saveState, compile, autoToggle, diagnosticsToggle, navToggle, layoutControls, reviewDivider, reviewToggle, aiToggle);
 
     const menu = make('div', 'latex-menu'); menu.id = 'latex-menu'; menu.setAttribute('aria-label', '项目与设置'); menu.hidden = true;
+    const navigationActions = make('div'); navigationActions.id = 'latex-navigation-actions'; menu.append(navigationActions);
     const entryRow = make('div', 'latex-menu-section');
     const entryLabel = make('label', 'latex-menu-label', '编译主文件'); entryLabel.htmlFor = 'latex-entry';
     entryRow.append(entryLabel, mainSelect);
@@ -677,12 +678,16 @@ window.PaperLatexWorkspace = (() => {
       } finally { syncAttach.disabled = false; }
     });
 
-    function closeMenu() { menu.hidden = true; menuButton.setAttribute('aria-expanded', 'false'); }
+    function closeMenu() {
+      if (menu.hidden) return;
+      menu.hidden = true; menuButton.setAttribute('aria-expanded', 'false'); onSettingsClose();
+    }
     menuButton.addEventListener('click', event => {
       event.stopPropagation();
-      menu.hidden = !menu.hidden;
-      menuButton.setAttribute('aria-expanded', String(!menu.hidden));
-      if (!menu.hidden) { void refreshWorkspace(); void loadReadingProjects(); void loadTranslationSettings(); void aiStatus(); }
+      if (!menu.hidden) { closeMenu(); return; }
+      menu.hidden = false;
+      menuButton.setAttribute('aria-expanded', 'true');
+      void refreshWorkspace(); void loadReadingProjects(); void loadTranslationSettings(); void aiStatus();
     });
     let readingRequest = 0;
     async function loadReadingProjects() {
@@ -702,9 +707,10 @@ window.PaperLatexWorkspace = (() => {
       catch (error) { say(`关联未保存：${error.message}`, true); }
       finally { readingLink.disabled = false; }
     });
-    menu.addEventListener('click', event => event.stopPropagation());
-    view.addEventListener('click', () => closeMenu());
-    view.addEventListener('keydown', event => { if (event.key === 'Escape' && !menu.hidden) closeMenu(); });
+    view.addEventListener('click', event => {
+      if (!menu.hidden && !menu.contains(event.target) && !event.target.closest?.('#workspace-path-popup, #workspace-related')) closeMenu();
+    });
+    view.addEventListener('keydown', event => { if (event.key === 'Escape' && !menu.hidden) { closeMenu(); menuButton.focus(); } });
 
     // ---- saving ------------------------------------------------------------------
     function scheduleSave() {

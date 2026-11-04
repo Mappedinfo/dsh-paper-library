@@ -69,6 +69,12 @@ window.PaperWorkspaceNavigation = (() => {
       pathButton.setAttribute('aria-expanded', 'false'); relatedButton.setAttribute('aria-expanded', 'false');
       if (focus && previous) popupTrigger(previous).focus();
     }
+    function mountActions(host = nav) {
+      if (actionHost.parentNode === host) return;
+      closePopovers();
+      if (host === nav) nav.insertBefore(actionHost, pathPopup);
+      else host.append(actionHost);
+    }
     function togglePopup(value) {
       if (!live || transition || !current) return;
       if (popup === value) { closePopovers(true); return; }
@@ -224,7 +230,7 @@ window.PaperWorkspaceNavigation = (() => {
       finally { if (owner === intent) { pending = null; transition = false; if (live) render(); } }
     }
     render();
-    return { setCurrent, selectRoot, navigate, closePopovers, refresh: () => { if (current) { ++relatedSequence; groupRequests = {}; related.busy = false; relatedLoaded = false; if (current.kind === 'project' || popup === 'related') return loadRelated(); renderRelated(); return true; } return loadCatalog(); }, state, dispose() { closePopovers(); live = false; ++intent; ++catalogSequence; ++relatedSequence; for (const remove of listeners) remove(); if (paperSearch && paperSearchHome) { paperSearch.hidden = false; paperSearchHome.append(paperSearch); } if (actions && actionsHome) actionsHome.append(actions); root.replaceChildren(); catalogRoot.replaceChildren(); relatedRoot.replaceChildren(); } };
+    return { setCurrent, selectRoot, navigate, mountActions, closePopovers, refresh: () => { if (current) { ++relatedSequence; groupRequests = {}; related.busy = false; relatedLoaded = false; if (current.kind === 'project' || popup === 'related') return loadRelated(); renderRelated(); return true; } return loadCatalog(); }, state, dispose() { closePopovers(); mountActions(); live = false; ++intent; ++catalogSequence; ++relatedSequence; for (const remove of listeners) remove(); if (paperSearch && paperSearchHome) { paperSearch.hidden = false; paperSearchHome.append(paperSearch); } if (actions && actionsHome) actionsHome.append(actions); root.replaceChildren(); catalogRoot.replaceChildren(); relatedRoot.replaceChildren(); } };
   }
   return Object.freeze({ create });
 })();
