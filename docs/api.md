@@ -303,7 +303,9 @@ Authenticated browser actions (same `/api/paper-library/api` envelope; all are a
 - HTTP 使用 `POST /api`（独立服务）或 `POST /api/paper-library/api`（DSH）和 `Content-Type: application/json`。成功响应为 PPTX 二进制附件，文件名取自 `Content-Disposition`，`X-PlainDeck-Export-Warnings` 返回逗号分隔的提示代码。可附完整 `document` 导出未保存草稿。错误仍使用 JSON 和 HTTP 状态码。
 - 命令行用 `paper-library --library /path/to/library < request.json`。DSH 工具用 `library_slides_export_pptx({id, expected_revision?})`。两者导出已保存稿，返回 `id`、`title`、`path`、`filename`、`slide_count`、`revision`、`size`（字节）及 `warnings`；导出副本固定为项目下的 `exports/presentation.pptx`。
 
-提示包括 `static_motion`（动画或镜头转为静态）、`table_rotation`（表格转为水平）、`color_fallback`（无法解析的颜色使用默认值）、`footer_space`（空间不足时省略页脚）及 `image_first_frame`（转换时保留图像首帧）。版式及资源限制见 [Slides 工作台](slides-workbench.md#让-ai-导出-powerpoint)。
+元素入场动画与镜头缩放写入原生 PresentationML 时间轴，所有导出入口默认启用，无需新增参数。帧数按 30 fps 换算；镜头与入场的几何变换合并为关键帧，保留对象的可编辑性。当前版本不再产生 `static_motion` 提示。
+
+提示包括 `table_rotation`（表格转为水平）、`color_fallback`（无法解析的颜色使用默认值）、`footer_space`（空间不足时省略页脚）及 `image_first_frame`（转换时保留图像首帧）。动态播放方式、版式及资源限制见 [Slides 工作台](slides-workbench.md#让-ai-导出-powerpoint)。
 
 ## Literature whiteboard
 

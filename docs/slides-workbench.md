@@ -19,7 +19,13 @@ Paper Library 内集成 PlainDeck，用于本机制作演示文稿。DSH「开�
 
 在 DSH 对话中，`library_slides_list` 可查找已保存的演示项目。让 AI 用 `library_slides_export_pptx` 传入项目 `id` 即可导出。可选的 `expected_revision` 要求导出指定的已保存修订，遇到版本冲突时工具会报错。工具返回 `path`、`filename`、`slide_count`、`revision` 和 `warnings`。文件固定写入主机资料库的 `slides/<id>/exports/presentation.pptx`，再次导出会替换该副本。若 DSH 配置要求批准工具写入，沿用现有批准流程。
 
-独立服务和 DSH 的 HTTP 接口支持直接下载。也可在终端通过 `paper-library --library /path/to/library` 传入同一 JSON 请求，无需启动服务。调用方式见 [PPTX 导出 API](api.md#plaindeck-pptx-export)。文字、形状、线条、原生表格和图片保留为 PowerPoint 对象。页脚、页序和画布比例随稿导出。动画与镜头以静态版式交付，旋转的表格导出为水平表格，页脚日期和页码在导出时确定。文字排版受 PowerPoint 和打开文件的设备字体影响，建议交付前打开检查。WebP 转为 PNG，动画 WebP 使用首帧。
+独立服务和 DSH 的 HTTP 接口支持直接下载。也可在终端通过 `paper-library --library /path/to/library` 传入同一 JSON 请求，无需启动服务。调用方式见 [PPTX 导出 API](api.md#plaindeck-pptx-export)。文字、形状、线条、原生表格和图片保留为 PowerPoint 对象。页脚、页序和画布比例随稿导出。旋转的表格导出为水平表格，页脚日期和页码在导出时确定。文字排版受 PowerPoint 和打开文件的设备字体影响，建议交付前打开检查。WebP 转为 PNG，动画 WebP 使用首帧。
+
+PPTX 现在保留动态入场和镜头缩放。`fade`、四个方向的渐入与 `scale` 转为原生动画；镜头围绕画布中心缩放，同时带动对象、页脚和页面背景。编辑视图仍显示原始版式，在放映视图播放动画。各对象的延迟与时长按 **30 fps** 换算（30 帧为 1 秒），默认入场 18 帧、镜头 180 帧。位移和缩放以关键帧近似源缓动曲线；镜头与入场合并计算，避免分组动画冻结子对象。导出的文件没有视频依赖。
+
+不同播放器对缓动及首次触发的支持可能不同；若进入页面后未开始，可单击启动本页时间轴，再自动依次播放。镜头缩放支持 0.001–100 倍，单项延迟或时长最多 24 小时，越界会明确报错并保留已有导出文件。动态图像自身的逐帧播放不属于元素入场动画。可运行 `node scripts/slides-motion-smoke.mjs /tmp/pd-motion-demo` 生成含六种入场、放大／缩小镜头、表格与图片的两页合成验收文件。
+
+格式依据：[Microsoft PresentationML 动画说明](https://learn.microsoft.com/en-us/office/open-xml/presentation/working-with-animation)。关键帧控制原生对象的位置和尺寸，淡入使用原生动画效果；PDF 与编辑视图不能用于判断播放效果。
 
 导出最多处理 32 MiB 的图片（按图片使用次数累计）、单帧 1,600 万像素和 20,000 个表格单元格，文件最多 40 MiB。导出只读取当前项目的本地图片及文档内允许的嵌入图，图片缺失或超限时会报错。PPTX 导入暂不支持。
 

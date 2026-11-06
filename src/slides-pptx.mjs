@@ -2,6 +2,7 @@ import PptxGenJS from 'pptxgenjs';
 import JSZip from 'jszip';
 import Color from 'colorjs.io';
 import sharp from 'sharp';
+import { addSlideMotion } from './slides-pptx-motion.mjs';
 import {
   PLACEHOLDER_IMAGE_SRC, footerPresentation, resolveSlideBackground, shapeLabelStyle,
   tableCellStyle, tableColumnWidths, tableContentStyle, textContentStyle,
@@ -101,13 +102,11 @@ export async function buildSlidesPptx(document, readAsset, { signal } = {}) {
     const source = document.slides[path];
     const slide = pptx.addSlide();
     slide.background = color(resolveSlideBackground(document, path), 1, '#FFFFFF');
-    if (source.motion?.camera) warnings.add('static_motion');
 
     for (const element of [...source.elements].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))) {
       signal?.throwIfAborted();
       const opacity = element.opacity ?? 1;
       if (opacity === 0) continue;
-      if (element.animation?.enter && element.animation.enter !== 'none') warnings.add('static_motion');
       const rotate = ((element.rotation ?? 0) % 360 + 360) % 360;
       const frame = { ...frameOf(element.frame), rotate, objectName: clean(element.id) };
 
@@ -209,7 +208,9 @@ export async function buildSlidesPptx(document, readAsset, { signal } = {}) {
     const path = `ppt/slides/slide${index}.xml`;
     let shapeId = 0;
     const xml = await zip.file(path).async('string');
-    zip.file(path, xml.replace(/<p:cNvPr id="\d+"/g, () => `<p:cNvPr id="${++shapeId}"`));
+    const numbered = xml.replace(/<p:cNvPr id="\d+"/g, () => `<p:cNvPr id="${++shapeId}"`);
+    zip.file(path, addSlideMotion(numbered, document.slides[deck.slides[index - 1]], deck.canvas,
+      { width: Math.round(inches(width) * 914400), height: Math.round(inches(height) * 914400) }, color(theme.colors.background).color));
   }
   const bytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
   signal?.throwIfAborted();

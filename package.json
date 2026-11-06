@@ -70,6 +70,7 @@
     "vendor/plaindeck",
     "src/slides",
     "scripts/build-slides.mjs",
+    "scripts/slides-motion-smoke.mjs",
     "scripts/vendor-plaindeck.mjs",
     "scripts/rebind-external.py",
     "tsconfig.slides.json",
