@@ -1,5 +1,21 @@
 const apiUrl = new URL('api', location.href)
 
+export async function downloadPptx(id: string, document: unknown) {
+  const response = await fetch(apiUrl, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'slides_export_pptx', id, document }),
+  })
+  if (!response.ok) {
+    const data = await response.json()
+    throw new Error(typeof data.error === 'string' ? data.error : `请求失败 (${response.status})`)
+  }
+  const encoded = response.headers.get('Content-Disposition')?.match(/filename\*=UTF-8''([^;]+)/)?.[1]
+  return {
+    blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : 'presentation.pptx',
+    warnings: response.headers.get('X-PlainDeck-Export-Warnings')?.split(',').filter(Boolean) ?? [],
+  }
+}
+
 export async function api<T = any>(action: string, input: Record<string, unknown> = {}): Promise<T> {
   const response = await fetch(apiUrl, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },

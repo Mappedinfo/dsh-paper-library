@@ -4,6 +4,7 @@ import { BOARD_TOOL_SPECS, boardToolRequest, handleBoardRequest } from './board-
 import { PROJECT_TOOL_SPECS, projectToolRequest } from './project-tools.mjs'
 import { LATEX_TOOL_SPECS, latexToolRequest } from './latex-tools.mjs'
 import { SOURCE_TOOL_SPECS, handleSourceRequest } from './external-sources.mjs'
+import { defaultLibrary } from '../bridge.mjs'
 
 const string = (description, required = false) => ({ type: 'string', description, ...(required ? { required: true } : {}) })
 const ids = { type: 'array', items: { type: 'string' } }
@@ -32,6 +33,8 @@ export const TOOL_SPECS = [
   ...RESOURCE_TOOL_SPECS,
   ...PROJECT_TOOL_SPECS,
   ...BOARD_TOOL_SPECS,
+  { name: 'library_slides_list', action: 'slides_list', slides: true, title: 'List saved PlainDeck projects', parameters: { offset: { type: 'integer', description: 'Pagination offset, 0–1000' }, limit: { type: 'integer', description: '1–50 projects, default 30' } } },
+  { name: 'library_slides_export_pptx', action: 'slides_export_pptx', slides: true, title: 'Export a saved PlainDeck project to an editable PPTX and return its local path', mutate: true, parameters: { id: string('Saved project ID (pd-…)', true), expected_revision: string('Optional exact saved document revision') } },
   { name: 'library_search', action: 'list', title: 'Search papers', parameters: { query: string('Title, author, tag, DOI or indexed text'), limit: { type: 'integer', description: '1–200 records; default 40' }, offset: { type: 'integer', description: 'Pagination offset, 0–10000000' }, sort: choice(['title', 'author', 'year', 'journal', 'modified', 'created', 'citekey', 'jcr'], 'Catalog sort; JCR uses latest reported year and its worst supplied category quartile'), order: choice(['asc', 'desc'], 'Requires a sort field'), archived: { type: 'boolean', description: 'Read trash instead of active papers; default false' } } },
   { name: 'library_get', action: 'get', title: 'Read paper metadata', parameters: { id: string('Library paper ID', true), include_archived: { type: 'boolean', description: 'Inspect archived metadata; does not restore or open the PDF' } } },
   { name: 'library_create', action: 'create', title: 'Create paper metadata', mutate: true, parameters: { metadata: { ...metadata, properties: { ...metadata.properties, title: string('Paper title', true) } } } },
@@ -105,6 +108,7 @@ function validateStructured(schema, value, path) {
 /** Register tools through the normal Harness policy/approval pipeline. */
 export function registerLibraryTools(ctx, defineTool, dispatch, options, config) {
   const disposers = []
+  let slidesStore
   try {
     if (config.requireToolApproval) {
       const mutations = new Set(TOOL_SPECS.filter(spec => spec.mutate).map(spec => spec.name))
@@ -135,6 +139,12 @@ export function registerLibraryTools(ctx, defineTool, dispatch, options, config)
           if (spec.board) {
             if (!options.boards) throw new Error('Whiteboards require the local state store')
             return handleBoardRequest(options.boards, request, { writer: 'llm' })
+          }
+          if (spec.slides) {
+            slidesStore ??= import('../slides-store.mjs').then(({ createSlidesStore }) => createSlidesStore({ library: options.library || defaultLibrary }))
+            const store = await slidesStore
+            if (spec.action === 'slides_list') return store.handle(request)
+            return store.exportPptx(request, { persist: true, signal: exec.signal })
           }
           if (spec.action === 'import' && Number(Boolean(request.path)) + Number(Boolean(request.doi)) + Number(Boolean(request.url)) !== 1) throw new Error('Specify exactly one local path, DOI or paper URL')
           const selected = exec.agent?.options

@@ -19,6 +19,8 @@ const SLIDE = /^\.\/slides\/[A-Za-z0-9][A-Za-z0-9._-]{0,100}\.json$/;
 const ASSET = /^\.\/assets\/[a-f0-9]{64}\.(?:png|jpg|webp|gif)$/;
 const META = '.paper-library.json', BRIEF = '.presentation-brief.json', LOCK = '.paper-library.lock';
 const MIME = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+const INLINE_IMAGE = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/;
+let pptxBusy = false;
 const hash = value => createHash('sha256').update(value).digest('hex');
 export const slidesError = (message, code = 'SLIDES_INVALID', status = 400, current) => Object.assign(new Error(message), { code, status, ...(current === undefined ? {} : { current }) });
 const unsafe = () => slidesError('演示项目路径不是独立的普通文件或目录，已保留原文件。', 'SLIDES_UNSAFE_PATH', 409);
@@ -54,7 +56,7 @@ function documentValue(input) {
     for (const element of slide.elements) if (element.type === 'image') {
       const src = element.src;
       if (src === 'placeholder:image' || src === PLACEHOLDER_IMAGE_SRC || ASSET.test(src)) continue;
-      const data = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(src);
+      const data = INLINE_IMAGE.exec(src);
       if (!data) throw slidesError('图片只能使用项目内图片或嵌入的 PNG、JPEG、WebP、GIF；不加载远程地址或任意 SVG。');
       imageBytes(data[2], data[1]);
     }
@@ -190,6 +192,46 @@ export function createSlidesStore({ library } = {}) {
     }
     return { projects, truncated };
   }
+  async function readAsset(path, relative) {
+    const bytes = await readSafe(await sourcePath(path, relative), SLIDES_LIMITS.assetBytes);
+    const extension = relative.split('.').at(-1);
+    const mime = Object.keys(MIME).find(key => MIME[key] === extension);
+    imageBytes(bytes.toString('base64'), mime);
+    return { mime, bytes };
+  }
+  async function exportPptx(input, { persist = false, signal } = {}) {
+    if (pptxBusy) throw slidesError('已有 PPTX 正在导出，请稍后重试。', 'SLIDES_PPTX_BUSY', 429);
+    pptxBusy = true;
+    try {
+      if (persist && input.document !== undefined) throw slidesError('主机文件导出只接受已保存的演示项目。');
+      if (input.expected_revision !== undefined) revisionValue(input.expected_revision);
+      const path = await projectPath(input.id);
+      return await withProjectLock(path, async () => {
+        signal?.throwIfAborted();
+        const project = await metadata(path);
+        const saved = input.document === undefined || input.expected_revision !== undefined ? await readDocument(path) : null;
+        if (input.expected_revision !== undefined && input.expected_revision !== saved.revision) {
+          throw slidesError('演示已更新，请重新读取后导出。', 'STATE_CONFLICT', 409, { revision: saved.revision, project });
+        }
+        const document = input.document === undefined ? saved.document : documentValue(input.document);
+        const { buildSlidesPptx, PPTX_MIME } = await import('./slides-pptx.mjs');
+        const { bytes, warnings } = await buildSlidesPptx(document, async src => {
+          const inline = INLINE_IMAGE.exec(src);
+          if (inline) return imageBytes(inline[2], inline[1]);
+          return (await readAsset(path, src)).bytes;
+        }, { signal });
+        const filename = `${document.deck.title.replace(/[\x00-\x1f\x7f/\\:*?"<>|]/g, '_').trim().slice(0, 100).toWellFormed() || project.id}.pptx`;
+        const result = { id: project.id, title: document.deck.title, slide_count: document.deck.slides.length, filename, warnings };
+        if (!persist) return { ...result, bytes, mime: PPTX_MIME };
+        const directory = join(path, 'exports');
+        await privateDirectory(directory);
+        const output = join(directory, 'presentation.pptx');
+        signal?.throwIfAborted();
+        await writeAtomic(output, bytes);
+        return { ...result, path: output, size: bytes.length, revision: saved.revision };
+      });
+    } finally { pptxBusy = false; }
+  }
   async function handle(input) {
     switch (input?.action) {
       case 'slides_catalog': {
@@ -245,7 +287,11 @@ export function createSlidesStore({ library } = {}) {
       case 'slides_asset_get': {
         if (typeof input.path !== 'string' || !ASSET.test(input.path)) throw slidesError('图片路径必须是当前项目内上传的图片。');
         const path = await projectPath(input.id);
-        return withProjectLock(path, async () => { await metadata(path); const bytes = await readSafe(await sourcePath(path, input.path), SLIDES_LIMITS.assetBytes); const extension = input.path.split('.').at(-1), mime = Object.keys(MIME).find(key => MIME[key] === extension); imageBytes(bytes.toString('base64'), mime); return { mime, content_base64: bytes.toString('base64') }; });
+        return withProjectLock(path, async () => {
+          await metadata(path);
+          const { mime, bytes } = await readAsset(path, input.path);
+          return { mime, content_base64: bytes.toString('base64') };
+        });
       }
       case 'slides_brief_get': {
         const path = await projectPath(input.id);
@@ -264,5 +310,5 @@ export function createSlidesStore({ library } = {}) {
       default: throw slidesError('未知的演示项目操作。');
     }
   }
-  return { handle };
+  return { handle, exportPptx };
 }

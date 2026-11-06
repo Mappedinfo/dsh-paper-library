@@ -296,6 +296,15 @@ Authenticated browser actions (same `/api/paper-library/api` envelope; all are a
 
 `resource_list` accepts an optional `project` filter, which restricts the result to `kind='paper'` members of that project and composes with `query`, `sort`, `order`, paging and `archived`. An unknown project id is an error rather than an unfiltered listing. 画板关联通过整板 `board_save` 与 `expected_revision` 保存，`links` 可含 `papers`（最多 50）、`projects`（最多 20）、`slides`（最多 20）三个 ID 数组，summary 增加 `linked_slides`。关联侧栏复用 `resource_list`、`project_list`、`catalog_resource_list` 检索与分页，每页 20 条；论文查询活动目录，阅读项目包含归档。点击候选只选中，明确关联／解除才修改；目标删除后保留 ID 以便解除，不阻断画板保存。可读源文件同样支持顶层 `slides` 数组往返；关联和解除不复制或修改目标与画板内容。
 
+## PlainDeck PPTX export
+
+`slides_export_pptx` 接受 `{ "action": "slides_export_pptx", "id": "pd-…" }`。可传入 `expected_revision` 核对已保存版本，版本不一致返回 `STATE_CONFLICT`。先用 `slides_list` 获取项目 ID，或用 `slides_get` 获取其当前修订。
+
+- HTTP 使用 `POST /api`（独立服务）或 `POST /api/paper-library/api`（DSH）和 `Content-Type: application/json`。成功响应为 PPTX 二进制附件，文件名取自 `Content-Disposition`，`X-PlainDeck-Export-Warnings` 返回逗号分隔的提示代码。可附完整 `document` 导出未保存草稿。错误仍使用 JSON 和 HTTP 状态码。
+- 命令行用 `paper-library --library /path/to/library < request.json`。DSH 工具用 `library_slides_export_pptx({id, expected_revision?})`。两者导出已保存稿，返回 `id`、`title`、`path`、`filename`、`slide_count`、`revision`、`size`（字节）及 `warnings`；导出副本固定为项目下的 `exports/presentation.pptx`。
+
+提示包括 `static_motion`（动画或镜头转为静态）、`table_rotation`（表格转为水平）、`color_fallback`（无法解析的颜色使用默认值）、`footer_space`（空间不足时省略页脚）及 `image_first_frame`（转换时保留图像首帧）。版式及资源限制见 [Slides 工作台](slides-workbench.md#让-ai-导出-powerpoint)。
+
 ## Literature whiteboard
 
 Boards are host-owned records in the plugin's private state store, keyed `board:<id>`, so they inherit the same 256 KiB record cap, revision-checked writes and atomic replacement as every other record. A board holds `{schema:1,id,title,origin,status,view,nodes,edges}` with node kinds `text|note|concept|paper|rect|ellipse|diamond`, edge kinds `arrow|line|elbow` and relations `related|supports|contradicts|cites|explains|extends`. An edge may carry `angle`: the incidence at which the drawn line meets the side it lands on, an integer from 30 to 90 (90 is the perpendicular default and is omitted from the record), which is what keeps an arrowhead from running along the node it points at. Bounds are enforced before any write: 400 nodes, 800 edges, 2,000 characters of node text, coordinates within ±1e6 and zoom 0.2–4. Listing reads a bounded window of at most 50 records and reports `{boards,scanned,total,truncated}`; a larger archive is stated, never presented as complete. Deleting tombstones the record (`{deleted:true,deleted_at}`) so it stays recoverable by hand.

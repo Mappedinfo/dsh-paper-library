@@ -109,10 +109,11 @@ export function createFetchHandler(options = {}) {
   const store = options.localState || createLocalStateStore({ library: options.library || defaultLibrary, home: options.localStateHome });
   const settings = options.settings || createPaperLibrarySettings({store});
   let slidesStore;
-  const slidesRequest = async input => {
+  const getSlidesStore = () => {
     slidesStore ??= import('./slides-store.mjs').then(({ createSlidesStore }) => createSlidesStore({ library: options.library || defaultLibrary }));
-    return (await slidesStore).handle(input);
+    return slidesStore;
   };
+  const slidesRequest = async input => (await getSlidesStore()).handle(input);
   const localState = options.settings ? store : settings.localState;
   // Browsing saved learning data is local and does not initialize an AI route or
   // paper conversation. Only the host-injected adapter may generate new output.
@@ -146,6 +147,15 @@ export function createFetchHandler(options = {}) {
         jsonRequests++;
         try {
           const input = JSON.parse(await readBounded(request, 45*1024*1024));
+          if (input?.action === 'slides_export_pptx') {
+            const { bytes, mime, filename, warnings } = await (await getSlidesStore()).exportPptx(input, { signal: request.signal });
+            const encoded = encodeURIComponent(filename).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16)}`);
+            return new Response(bytes, { headers: {
+              ...baseHeaders, 'Content-Type': mime,
+              'Content-Disposition': `attachment; filename="presentation.pptx"; filename*=UTF-8''${encoded}`,
+              'X-PlainDeck-Export-Warnings': warnings.join(','),
+            } });
+          }
           // Browser cannot forge AI output or arbitrary worker internals.
           if (LATEX_RETRIEVAL_ACTIONS.has(input?.action) || ['save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','companion_excerpt','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata','external_rebind'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
           const companionAction=['companion_status','companion_ask','companion_retry','companion_cancel'].includes(input?.action);

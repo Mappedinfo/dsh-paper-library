@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import { dispatch } from './bridge.mjs';
+import { defaultLibrary, dispatch } from './bridge.mjs';
 import { createHeadlessAnalysis, loadModelConfig } from './headless-analysis.mjs';
 
 // JSON on stdin keeps paths/Unicode and batch requests shell-quoting independent.
 const args=process.argv.slice(2);
 if (args.includes('--help')) {
-  console.log('paper-library [--library /path] [--python /path] [--state-home /path] [--model-config /path/config.json] < request.json\nRequest: {"action":"list","query":"urban"}\nBatch: {"action":"paper_analysis_run","ids":["paper-id"],"request_id":"batch-id","mode":"metadata"}\nSee docs/api.md for actions.');
+  console.log('paper-library [--library /path] [--python /path] [--state-home /path] [--model-config /path/config.json] < request.json\nRequest: {"action":"list","query":"urban"}\nBatch: {"action":"paper_analysis_run","ids":["paper-id"],"request_id":"batch-id","mode":"metadata"}\nPPTX: {"action":"slides_export_pptx","id":"pd-…"}\nSee docs/api.md for actions.');
 } else {
   let headless, isAnalysis = false, parsed = false;
   try {
@@ -33,6 +33,10 @@ if (args.includes('--help')) {
         await headless.wait(request.id,request.request_id);
         result=await headless({action:'paper_analysis_get',id:request.id,request_id:request.request_id});
       }
+    } else if (typeof request?.action === 'string' && request.action.startsWith('slides_')) {
+      const { createSlidesStore } = await import('./slides-store.mjs');
+      const store = createSlidesStore({ library: library || defaultLibrary });
+      result = request.action === 'slides_export_pptx' ? await store.exportPptx(request, { persist: true }) : await store.handle(request);
     } else result=await dispatch(request,{library,python});
     const generated=isAnalysis && ['paper_analysis_run','paper_analysis_start'].includes(request.action) && !(request.action==='paper_analysis_start' && request.reuse===true);
     const ok=request.action==='latex_lint' ? result.ok===true : !generated || result.status==='complete' && !(result.warnings?.length);

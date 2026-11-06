@@ -11,9 +11,17 @@ Paper Library 内集成 PlainDeck，用于本机制作演示文稿。DSH「开�
 - 停止编辑约 700 ms 后自动保存；保存按钮或 `⌘/Ctrl-S` 立即保存。项目标题显示在工作台中，可返回项目列表或文献库。
 - 图片可从工具栏选择、拖入画布或粘贴，保存到项目的 `assets/`；支持 PNG、JPEG、WebP、GIF，每张最多 8 MiB。SVG 图片暂不导入，上游的固定图片占位符继续可用。
 - 「制作指导」提供听众、目的、时长、核心主张和证据深度，生成可复制的制作提示词，列出可定位的审阅提示；简报保存在当前主机项目中。提示不代表内容已经人工核验，也不发起模型请求。
-- 「放映」支持方向键切页、Esc 退出。「导出」提供可独立打开的 HTML、可重新编辑的 PlainDeck ZIP，以及浏览器打印／保存 PDF。导出包含当前草稿。没有 PPTX 或视频导出入口。
+- 「放映」支持方向键切页、Esc 退出。「导出」提供可编辑的 PowerPoint（`.pptx`）、独立 HTML、可重新编辑的 PlainDeck ZIP，以及浏览器打印／保存 PDF。工作台导出包含当前草稿。
 
 项目位于当前资料库的 `slides/pd-<标识>/`，保持 `deck.json`、`theme.json`、`slides/*.json` 和 `assets/` 的 PlainDeck 布局；项目登记和制作简报分别保存在隐藏的 `.paper-library.json`、`.presentation-brief.json`。没有把演示内容保存在 localStorage、IndexedDB、OPFS 或浏览器缓存中。无需额外服务进程。
+
+## 让 AI 导出 PowerPoint
+
+在 DSH 对话中，`library_slides_list` 可查找已保存的演示项目。让 AI 用 `library_slides_export_pptx` 传入项目 `id` 即可导出。可选的 `expected_revision` 要求导出指定的已保存修订，遇到版本冲突时工具会报错。工具返回 `path`、`filename`、`slide_count`、`revision` 和 `warnings`。文件固定写入主机资料库的 `slides/<id>/exports/presentation.pptx`，再次导出会替换该副本。若 DSH 配置要求批准工具写入，沿用现有批准流程。
+
+独立服务和 DSH 的 HTTP 接口支持直接下载。也可在终端通过 `paper-library --library /path/to/library` 传入同一 JSON 请求，无需启动服务。调用方式见 [PPTX 导出 API](api.md#plaindeck-pptx-export)。文字、形状、线条、原生表格和图片保留为 PowerPoint 对象。页脚、页序和画布比例随稿导出。动画与镜头以静态版式交付，旋转的表格导出为水平表格，页脚日期和页码在导出时确定。文字排版受 PowerPoint 和打开文件的设备字体影响，建议交付前打开检查。WebP 转为 PNG，动画 WebP 使用首帧。
+
+导出最多处理 32 MiB 的图片（按图片使用次数累计）、单帧 1,600 万像素和 20,000 个表格单元格，文件最多 40 MiB。导出只读取当前项目的本地图片及文档内允许的嵌入图，图片缺失或超限时会报错。PPTX 导入暂不支持。
 
 ## 打开既有 PlainDeck 项目
 

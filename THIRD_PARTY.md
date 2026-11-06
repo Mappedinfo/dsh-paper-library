@@ -23,6 +23,7 @@ Project scaffolding was generated through the author's `academic-templates/dev-p
 | React、React DOM、zustand、Zod | 本地打包的 Slides 界面与校验 | MIT；分别保留在 [Slides 依赖许可](licenses/slides/) |
 | Lucide React | 文献库与 Slides 工具图标 | ISC；保留在 [lucide-react-LICENSE.txt](licenses/slides/lucide-react-LICENSE.txt) |
 | JSZip | 演示项目 ZIP 导入／导出 | 采用 MIT 许可选项；原双许可声明保留在 [jszip-LICENSE.txt](licenses/slides/jszip-LICENSE.txt) |
+| PptxGenJS、Color.js、sharp / libvips | 生成 PowerPoint 原生对象、转换 CSS 颜色和处理图片 | [PptxGenJS](https://github.com/gitbrent/PptxGenJS) / MIT；[Color.js](https://github.com/color-js/color.js) / MIT；[sharp](https://github.com/lovell/sharp) / Apache-2.0，libvips / LGPL-2.1-or-later。运行依赖单独安装，原许可由各包保留 |
 | Silkscreen Regular | 用于文件路径的本地像素字体 | [Google Fonts](https://github.com/google/fonts/tree/main/ofl/silkscreen) / SIL Open Font License 1.1；[许可](licenses/silkscreen-OFL.txt) |
 | Official APA CSL style | APA 7 rules | [CSL styles](https://github.com/citation-style-language/styles/blob/master/apa.csl) / CC BY-SA 3.0; embedded authors/rights retained |
 | CSL en-US locale | Citation localization | [CSL locales](https://github.com/citation-style-language/locales) / CC BY-SA 3.0; embedded authors/rights retained |

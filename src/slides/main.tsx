@@ -19,7 +19,7 @@ import { exportHtml } from '../../vendor/plaindeck/src/export/html'
 import { saveBlob } from '../../vendor/plaindeck/src/export/download'
 import { waitForPrintResources } from '../../vendor/plaindeck/src/export/print'
 import { createProjectZip } from '../../vendor/plaindeck/src/storage/zipStorage'
-import { api } from './api'
+import { api, downloadPptx } from './api'
 import { Guide } from './Guide'
 import { readAsset, releaseAssets, writeImageAsset, MAX_IMAGE_BYTES, type DirectoryHandle } from './storage'
 import { inspectZip } from './zip'
@@ -32,6 +32,11 @@ type Project = { id: string; title: string; slide_count: number; updated_at: str
 type Loaded = { project: Project; document: DeckDocument; revision: string | number }
 type Active = { id: string; revision: string | number; handle: DirectoryHandle }
 const types = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+const pptxWarnings: Record<string, string> = {
+  static_motion: '动画和镜头使用静态画面', table_rotation: '表格保留为水平布局',
+  color_fallback: '无法解析的颜色使用默认值', footer_space: '页脚空间不足，已省略页脚',
+  image_first_frame: '动态图像转换时仅保留首帧',
+}
 const templates = [
   { id: 'blank', label: '空白', detail: '从一张封面开始，自由组织内容。', pages: 1 },
   { id: 'paper-reading', label: '论文阅读', detail: '围绕问题、贡献、证据与局限展开。', pages: 8 },
@@ -90,6 +95,7 @@ function App() {
   const [message, setMessage] = useState('读取演示文稿…'), [busy, setBusy] = useState(false)
   const [listLoading, setListLoading] = useState(true), [listError, setListError] = useState('')
   const [guiding, setGuiding] = useState(false), [present, setPresent] = useState(false), [exporting, setExporting] = useState(false)
+  const [exportBusy, setExportBusy] = useState(false), [exportError, setExportError] = useState('')
   const [cards, setCards] = useState(false), [table, setTable] = useState(false), [dragging, setDragging] = useState(false)
   const active = useRef<Active | null>(null), saving = useRef<Promise<boolean> | null>(null), blocked = useRef(false), assetBusy = useRef(false), briefDirty = useRef(false), heldZip = useRef<File | null>(null)
   const transition = useRef(createTransitionGuard<Active | null>())
@@ -292,16 +298,28 @@ function App() {
     window.addEventListener('paste', paste); return () => window.removeEventListener('paste', paste)
   }, [chooser, guiding, insertImages])
 
-  async function exportFile(format: 'html' | 'zip' | 'pdf') {
-    const selected = active.current; if (!selected) return
+  function openExport() {
+    setExportError('')
+    setExporting(true)
+  }
+  async function exportFile(format: 'html' | 'zip' | 'pdf' | 'pptx') {
+    const selected = active.current; if (!selected || exportBusy) return
+    setExportBusy(true)
+    setExportError('')
     try {
       const document = useEditor.getState().document
       assertSafeDocument(document)
       if (format === 'html') await exportHtml(document, selected.handle as any)
       if (format === 'zip') { const zip = await createProjectZip(document, path => readAsset(selected.handle, path)); saveBlob(await zip.generateAsync({ type: 'blob' }), `${document.deck.id}.zip`) }
       if (format === 'pdf') { await waitForPrintResources(globalThis.document.querySelector('.print-deck') ?? globalThis.document); window.print() }
+      if (format === 'pptx') {
+        const { blob, filename, warnings } = await downloadPptx(selected.id, document)
+        saveBlob(blob, filename)
+        if (warnings.length) setMessage(`PPTX 已下载。${warnings.map(code => pptxWarnings[code] ?? code).join('；')}。`)
+      }
       setExporting(false)
-    } catch (error: any) { useEditor.getState().setSaveState('error', `导出失败：${error.message}`) }
+    } catch (error: any) { setExportError(`导出失败：${error.message}`) }
+    finally { setExportBusy(false) }
   }
   const openChooser = async () => {
     if (!reserveSwitch()) return
@@ -362,13 +380,13 @@ function App() {
         </section>
       </div>
     </main> : <div className="app-shell" inert={busy || undefined}>
-      <Toolbar onOpen={() => void openChooser()} onNew={() => void openChooser()} onImportZip={() => zipRef.current?.click()} onAddImage={() => imageRef.current?.click()} onAddCards={() => setCards(true)} onAddTable={() => setTable(true)} onGuide={() => setGuiding(true)} onExport={() => setExporting(true)} onPresent={() => setPresent(true)} onSave={() => void save(true)} />
+      <Toolbar onOpen={() => void openChooser()} onNew={() => void openChooser()} onImportZip={() => zipRef.current?.click()} onAddImage={() => imageRef.current?.click()} onAddCards={() => setCards(true)} onAddTable={() => setTable(true)} onGuide={() => setGuiding(true)} onExport={openExport} onPresent={() => setPresent(true)} onSave={() => void save(true)} />
       <ToolbarContext title={state.document.deck.title} onLibrary={() => void openLibrary()} onDsh={() => void returnToDsh()} busy={busy} />
       {message && <div className="slides-navigation-notice" role="status"><span>{message}</span><button type="button" aria-label="关闭提示" onClick={() => setMessage('')}>×</button></div>}
       <main className="workspace"><SlideList /><section ref={canvasRef} className={`canvas-workspace ${dragging ? 'image-drop-active' : ''}`} onDragEnter={event => { if (hasTransferredImages(event.dataTransfer)) setDragging(true) }} onDragOver={event => { if (hasTransferredImages(event.dataTransfer)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }} onDrop={event => { const files = transferredImageFiles(event.dataTransfer); setDragging(false); if (files.length) { event.preventDefault(); void insertImages(files, canvasPoint(event)) } }}>
         <div className="canvas-label"><span>画布</span><SlideNameEditor key={state.activeSlidePath} name={slide.name ?? slide.id} onCommit={state.renameSlide} /></div><div className="canvas-scroller"><div className="canvas-sized" style={{ width: state.document.deck.canvas.width * state.zoom, height: state.document.deck.canvas.height * state.zoom }}><SlideSurface slide={slide} zoom={state.zoom} /></div></div><div className="image-drop-overlay"><strong>添加图片</strong><span>将图片拖到画布</span></div></section><Inspector /></main>
       <StatusBar />
-      {state.saveState === 'error' && <div className="slides-save-warning" role="alert"><span>{state.error}</span><button onClick={() => void save(true)}>重试保存</button><button onClick={() => setExporting(true)}>导出草稿</button>{state.dirtyRevisions.size > 0 && <button onClick={() => void reloadLatest()}>放弃草稿并重新读取</button>}</div>}
+      {state.saveState === 'error' && <div className="slides-save-warning" role="alert"><span>{state.error}</span><button onClick={() => void save(true)}>重试保存</button><button onClick={openExport}>导出草稿</button>{state.dirtyRevisions.size > 0 && <button onClick={() => void reloadLatest()}>放弃草稿并重新读取</button>}</div>}
       <div className="print-deck">{state.document.deck.slides.map(path => <div className="print-page" key={path}><SlideSurface slide={state.document.slides[path]} interactive={false} zoom={1} /></div>)}</div>
     </div>}
     <input ref={zipRef} hidden type="file" accept=".zip,application/zip" onChange={event => { const file = event.target.files?.[0] ?? null; event.currentTarget.value = ''; void importZip(file) }} />
@@ -376,7 +394,15 @@ function App() {
     {guiding && active.current && <Guide projectId={active.current.id} onClose={() => setGuiding(false)} onDirty={value => { briefDirty.current = value }} />}
     {present && <Presentation onClose={() => setPresent(false)} onDsh={() => void returnToDsh()} busy={busy} />}
     {cards && <SummaryCardsDialog onClose={() => setCards(false)} />}{table && <TableDialog onClose={() => setTable(false)} />}
-    {exporting && <div className="slides-overlay"><section className="slides-dialog" role="dialog" aria-modal="true" aria-label="导出"><h2>导出</h2><p>导出包含当前草稿；PDF 通过系统打印保存。</p><button onClick={() => void exportFile('html')}>HTML</button><button onClick={() => void exportFile('zip')}>ZIP 项目</button><button onClick={() => void exportFile('pdf')}>打印为 PDF</button><button onClick={() => setExporting(false)}>关闭</button></section></div>}
+    {exporting && <div className="slides-overlay"><section className="slides-dialog" role="dialog" aria-modal="true" aria-label="导出">
+      <h2>导出</h2><p>导出包含当前草稿。PDF 通过系统打印保存。</p>
+      <button disabled={exportBusy} onClick={() => void exportFile('pptx')}>PowerPoint（.pptx）</button>
+      <button disabled={exportBusy} onClick={() => void exportFile('html')}>HTML</button>
+      <button disabled={exportBusy} onClick={() => void exportFile('zip')}>ZIP 项目</button>
+      <button disabled={exportBusy} onClick={() => void exportFile('pdf')}>打印为 PDF</button>
+      <button disabled={exportBusy} onClick={() => setExporting(false)}>关闭</button>
+      {exportBusy && <p role="status">正在准备导出…</p>}{exportError && <p role="alert">{exportError}</p>}
+    </section></div>}
   </>
 }
 

@@ -150,14 +150,20 @@
     "@codemirror/view": "^6.43.15",
     "@lezer/highlight": "^1.2.5",
     "citeproc": "^2.4.63",
+    "colorjs.io": "0.6.1",
     "dictionary-en": "^4.0.0",
     "jszip": "3.10.1",
     "lucide-react": "0.468.0",
     "nspell": "^2.1.5",
+    "pptxgenjs": "4.0.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "sharp": "0.35.5",
     "zod": "4.6.7",
     "zustand": "5.0.14"
+  },
+  "overrides": {
+    "pptxgenjs": { "image-size": "2.0.4" }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.1 <5",
