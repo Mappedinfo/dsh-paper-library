@@ -1,8 +1,10 @@
-**PlainDeck 动态 PowerPoint 导出（2026-11-06，未发布）：** Slides「导出 → PowerPoint」、HTTP、CLI 与 DSH 原生工具 `library_slides_export_pptx` 共用转换器；文字、形状、线条、图片和表格仍为可编辑对象。六种入场动画及镜头放大／缩小现在写入原生时间轴，保留延迟与时长，按 30 fps 换算。镜头、入场与页脚／背景合并计算几何关键帧，修复分组冻结、动画背景遮挡及零高度连接线消失。编辑视图显示原始版式，动态需进入放映查看；部分播放器需要单击启动本页。详见 [Slides 工作台](docs/slides-workbench.md) 和 [导出 API](docs/api.md#plaindeck-pptx-export)。
+**PlainDeck 动态 PowerPoint 导出（2026-11-06，未发布）：** Slides「导出 → PowerPoint」、HTTP、CLI 与 DSH 原生工具 `library_slides_export_pptx` 共用转换器；文字、形状、线条、图片和表格仍为可编辑对象。六种入场动画及镜头放大／缩小写入原生时间轴，延迟与时长按 30 fps 换算。镜头、入场与页脚／背景合并计算几何关键帧。详见 [Slides 工作台](docs/slides-workbench.md) 和 [导出 API](docs/api.md#plaindeck-pptx-export)。
 
-验证：25 项 Slides 测试通过，2 项可选 DOM 夹具未配置；类型检查通过。两页合成稿通过 PresentationML XSD 校验，LibreOffice 实际导入并导出 SVG 播放，检查了六种入场、放大／缩小镜头、原生表格、图片、连接线与页脚；修复后复看终态，独立目视复核无阻断问题。关键帧测试核对方向、延迟、时长、比例组合、对象标识、层级、静态稿与越界拒绝。合成夹具可用 `node scripts/slides-motion-smoke.mjs /tmp/pd-motion-demo` 重跑；491 文件打包检查包含动态模块与夹具，不含本机回执或样例。
+PowerPoint 兼容修复：旧版虽通过 XSD 与 LibreOffice 检查，但用户报告 PowerPoint／WPS 没有动画标记。以 PowerPoint 16.113.3 自建淡入及缩放文件为对照，补齐主序列下的延迟分组、自动开始条件及 `bldLst`，为同一对象的各效果分配独立 `grpId`，按文档顺序编号时间节点。仅补分组时原生接口把两页合并为 10／8 个效果；完整修复后为 16／12 个，PowerPoint 保存后仍保留全部 40／31 条几何轨道。已通过 AppleScript 实际打开、保存并启动放映；用户现场确认淡入与镜头缩放均正常。桌面截图工具仍不可用，未独立截图验证；WPS 尚未实测，不宣称通过。
 
-3080 实机验收：原生会话空闲、手写队列无待写批次后通过 Plugin Manager 热重载，返回 applied 且无警告。宿主 kimi-coding / k3-256k 实际调用原生导出工具，按本次用户授权给予具体调用一次性确认；最终生成 2 页、40,369 字节、空警告 PPTX，源稿修订一致，两页 XML 与本地已验证版本逐字一致，会话正常结束。合成源稿、运行回执和交付文件留在本机，不纳入源码提交。PowerPoint 应用界面不可用，尚未在 PowerPoint 内直接播放或手动编辑验收；不能把 SVG 播放检查表述为 PowerPoint 应用验收。
+验证：26 项 Slides 测试通过，2 项可选 DOM 夹具未配置；两页通过 PresentationML XSD 校验。新增回归检查原生分组层级、自动触发、效果与构建记录一一对应及顺序编号；既有测试核对方向、延迟、时长、比例组合、对象标识、层级、静态稿与越界拒绝。合成夹具可用 `node scripts/slides-motion-smoke.mjs /tmp/pd-motion-demo` 重跑。
+
+3080：原生会话空闲且手写队列无批次后，Plugin Manager 热重载返回 applied、无警告。同一 AI 创建的合成项目按原修订经认证 HTTP 重新导出 2 页、40,732 字节、空警告 PPTX，两页 XML 与修复版夹具一致，最终文件再次在 PowerPoint 读出 16／12 个效果。此前宿主 kimi-coding / k3-256k 原生工具调用链已跑通，本轮修复后重验的是 HTTP 共用转换器路径，没有重复调用模型。交付文件位于本机 Downloads/PlainDeck-animation-check/PlainDeck-fixed.pptx；PowerPoint 保存的对照副本为同目录 PowerPoint-roundtrip.pptx，原生淡入基准为 native-oracle.pptx。样例和本机回执不纳入源码提交。
 
 **LaTeX 源码搜索范围（2026-11-04，未发布）：** 「搜索 → LaTeX 源码」按左侧章节顺序检索当前主入口及其列出的已保存源码，重复引用去重，排除「其他文本文件」中的未引用稿件。文件夹筛选已移除。162 项 LaTeX Python、155 项 LaTeX Node 测试及构建通过。合成 HTTP 流程核对了章节顺序、重复引用和未引用旧稿的排除。3080 已热重载，三份前端资源与本地一致。保存草稿后刷新插件页。见 [LaTeX 自审](docs/latex-self-review.md)。
 

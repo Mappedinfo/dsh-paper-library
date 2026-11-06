@@ -52,10 +52,14 @@ export function addSlideMotion(xml, source, canvas, emu, themeBackground) {
     // 不遵循 spTree 顺序。背景必须先于内容，不能在末尾盖住内容。
     shapes.unshift({ id: bgId, x: .5, y: .5, w: 1, h: 1 });
   }
-  let timeId = 4;
-  const effects = [];
+  let timeId = 5;
+  const effects = [], builds = [];
   const behavior = (spid, duration, attributes = [], filter) => `<p:cBhvr additive="base"><p:cTn id="${timeId++}" dur="${duration}" fill="hold"${filter ? ` tmFilter="${filter}"` : ''}/><p:tgtEl><p:spTgt spid="${spid}"/></p:tgtEl>${attributes.length ? `<p:attrNameLst>${attributes.map(a => `<p:attrName>${a}</p:attrName>`).join('')}</p:attrNameLst>` : ''}</p:cBhvr>`;
-  const parallel = (delay, children, preset, kind = 'entr') => `<p:par><p:cTn id="${timeId++}" presetID="${preset}" presetClass="${kind}" presetSubtype="0" fill="hold" grpId="0" nodeType="${effects.length ? 'withEffect' : 'afterEffect'}">${condition(delay)}<p:childTnLst>${children}</p:childTnLst></p:cTn></p:par>`;
+  const parallel = (spid, delay, children, preset, kind = 'entr') => {
+    const group = builds.length;
+    builds.push(`<p:bldP spid="${spid}" grpId="${group}"/>`);
+    return `<p:par><p:cTn id="${timeId++}" presetID="${preset}" presetClass="${kind}" presetSubtype="0" fill="hold" grpId="${group}" nodeType="withEffect">${condition(delay)}<p:childTnLst>${children}</p:childTnLst></p:cTn></p:par>`;
+  };
   for (const shape of shapes) {
     const animation = shape.element?.animation;
     const enter = animation?.enter ?? 'none';
@@ -64,7 +68,7 @@ export function addSlideMotion(xml, source, canvas, emu, themeBackground) {
     if (enter !== 'none') {
       const visible = `<p:set>${behavior(shape.id, 1, ['style.visibility'])}<p:to><p:strVal val="visible"/></p:to></p:set>`;
       const fade = `<p:animEffect transition="in" filter="fade">${behavior(shape.id, duration, [], entranceFilter)}</p:animEffect>`;
-      effects.push(parallel(delay, visible + fade, 10));
+      effects.push(parallel(shape.id, delay, visible + fade, 10));
     }
     if (!camera && !offsets[enter] && enter !== 'scale') continue;
     const start = camera ? 0 : delay;
@@ -93,9 +97,12 @@ export function addSlideMotion(xml, source, canvas, emu, themeBackground) {
       const unique = [...new Map(keys.map(k => [k.tm, k])).values()];
       children += `<p:anim calcmode="lin" valueType="num">${behavior(shape.id, Math.round(end - start), [`ppt_${axis}`])}<p:tavLst>${unique.map(k => `<p:tav tm="${k.tm}"><p:val><p:fltVal val="${number(k[axis])}"/></p:val></p:tav>`).join('')}</p:tavLst></p:anim>`;
     }
-    if (children) effects.push(parallel(start, children, 0, 'emph'));
+    if (children) effects.push(parallel(shape.id, start, children, 0, 'emph'));
   }
   if (!effects.length) return xml;
-  const timing = `<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"><p:childTnLst><p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq"><p:childTnLst><p:par><p:cTn id="3" fill="hold">${condition(0)}<p:childTnLst>${effects.join('')}</p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn><p:prevCondLst><p:cond evt="onPrev" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:prevCondLst><p:nextCondLst><p:cond evt="onNext" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:nextCondLst></p:seq></p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>`;
-  return xml.replace('</p:sld>', timing + '</p:sld>');
+  const timing = `<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"><p:childTnLst><p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq"><p:childTnLst><p:par><p:cTn id="3" fill="hold"><p:stCondLst><p:cond delay="indefinite"/><p:cond evt="onBegin" delay="0"><p:tn val="2"/></p:cond></p:stCondLst><p:childTnLst><p:par><p:cTn id="4" fill="hold">${condition(0)}<p:childTnLst>${effects.join('')}</p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn><p:prevCondLst><p:cond evt="onPrev" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:prevCondLst><p:nextCondLst><p:cond evt="onNext" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:nextCondLst></p:seq></p:childTnLst></p:cTn></p:par></p:tnLst><p:bldLst>${builds.join('')}</p:bldLst></p:timing>`;
+  // PowerPoint 按对象与 grpId 合并效果；每个效果必须有独立构建记录。
+  // 按文档顺序编号，与 PowerPoint 原生保存的时间轴保持一致。
+  let orderedId = 0;
+  return xml.replace('</p:sld>', timing.replace(/<p:cTn id="\d+"/g, () => `<p:cTn id="${++orderedId}"`) + '</p:sld>');
 }

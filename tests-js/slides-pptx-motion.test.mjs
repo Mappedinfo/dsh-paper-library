@@ -103,3 +103,20 @@ test('static slides remain static; unsupported timing/scale fails explicitly', a
     documentWith([], { fromScale: 1, toScale: 1e20 }),
   ]) await assert.rejects(exportXml(doc), { code: 'SLIDES_PPTX_EXPORT', status: 422 });
 });
+
+test('PowerPoint-native timing hierarchy and distinct effect builds survive camera plus entrance', async () => {
+  const xml = await exportXml(documentWith([text('entry', 'fade')], { fromScale: .8, toScale: 1.2 }));
+  // 与 PowerPoint 16.113.3 原生创建的 with-previous 淡入时间轴对照。
+  // 缺少延迟分组时 PowerPoint 会把各 behavior 当作独立效果；
+  // 相同对象复用 grpId 会把入场和镜头合并，破坏动画窗格与对象模型。
+  assert.match(xml, /<p:cTn id="3" fill="hold"><p:stCondLst><p:cond delay="indefinite"\/><p:cond evt="onBegin" delay="0"><p:tn val="2"\/><\/p:cond><\/p:stCondLst><p:childTnLst><p:par><p:cTn id="4" fill="hold">/);
+  const builds = [...xml.matchAll(/<p:bldP spid="(\d+)" grpId="(\d+)"\/>/g)];
+  const effects = [...xml.matchAll(/<p:cTn[^>]+presetID="[^>]+grpId="(\d+)"[^>]*>/g)];
+  assert.equal(effects.length, 3, 'background camera, entrance and element camera');
+  assert.equal(builds.length, effects.length);
+  assert.equal(new Set(builds.map(m => `${m[1]}:${m[2]}`)).size, builds.length);
+  assert.deepEqual(effects.map(m => m[1]), builds.map(m => m[2]));
+  assert.equal(builds.filter(m => Number(m[1]) === shapeId(xml, 'entry')).length, 2);
+  const ids = [...xml.matchAll(/<p:cTn id="(\d+)"/g)].map(m => Number(m[1]));
+  assert.deepEqual(ids, ids.map((_, i) => i + 1));
+});
