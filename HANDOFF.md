@@ -1,6 +1,8 @@
 **PlainDeck 导出 PowerPoint（2026-11-06，未发布）：** Slides 工作台「导出 → PowerPoint」下载当前草稿。DSH 工具 `library_slides_list` 查找项目，`library_slides_export_pptx` 导出指定已保存稿并返回文件路径。独立命令行同样支持 `slides_export_pptx`，副本写入项目的 `exports/presentation.pptx`。文字、形状、线条、图片和表格保留为 PowerPoint 对象，动画及镜头使用静态画面。详见 [Slides 工作台](docs/slides-workbench.md) 和 [导出 API](docs/api.md#plaindeck-pptx-export)。
 
-验证：Slides 构建、类型检查和 21 项测试通过，2 项可选 DOM 夹具未配置。合成流程覆盖 HTTP 下载、CLI 落盘、真实 DSH 原生工具执行、草稿和版本冲突。LibreOffice 打开全部 8 种模板，页数一致，加载本机中文字体后抽看方法和流程页。两个旧宿主夹具在基线同样因缺执行器／模型包失败。本轮未热重载运行服务。
+验证：Slides 构建、类型检查和 21 项测试通过，2 项可选 DOM 夹具未配置。合成流程覆盖 HTTP 下载、CLI 落盘、真实 DSH 原生工具执行、草稿和版本冲突。LibreOffice 打开全部 8 种模板，页数一致，加载本机中文字体后抽看方法和流程页。两个旧宿主夹具在基线同样因缺执行器／模型包失败。
+
+3080 实机验收：确认原生会话空闲、手写队列无待写批次后，通过 Plugin Manager 热重载，返回 applied 且无警告；提供的编辑器脚本与本地构建一致。新建 3 页合成 PlainDeck 项目和独立 DSH 会话，宿主已配置的 kimi-coding / k3-256k 实际发起 `library_slides_export_pptx`，按用户本次授权给予该调用一次性确认。工具成功生成 22,101 字节 PPTX、3 页、空警告，修订一致；会话正常结束。解包确认存在原生文字、形状与 1 张表格，LibreOffice 打开并渲染全部 3 页，中文与布局目视检查通过。运行回执、合成源稿及交付文件留在本机，不纳入源码提交。尚未通过 PowerPoint 应用手动编辑验收。
 
 **LaTeX 源码搜索范围（2026-11-04，未发布）：** 「搜索 → LaTeX 源码」按左侧章节顺序检索当前主入口及其列出的已保存源码，重复引用去重，排除「其他文本文件」中的未引用稿件。文件夹筛选已移除。162 项 LaTeX Python、155 项 LaTeX Node 测试及构建通过。合成 HTTP 流程核对了章节顺序、重复引用和未引用旧稿的排除。3080 已热重载，三份前端资源与本地一致。保存草稿后刷新插件页。见 [LaTeX 自审](docs/latex-self-review.md)。
 
