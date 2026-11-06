@@ -15,6 +15,8 @@ let pdfReader;
 let readingPanels;
 let readingShell;
 let languageUI;
+let annotationTranslationAvailable = false;
+const translatingAnnotations = new Set(), failedTranslations = new Set();
 let resourceUI;
 let knowledgeUI;
 let analysisUI;
@@ -105,6 +107,7 @@ async function loadStatus() {
     paperChatUI?.setHostCompanion(result.realtime_companion);
     companionUI?.setAvailable(result.realtime_companion);
     languageUI?.setAvailable(result.language_learning);
+    annotationTranslationAvailable = result.language_learning === true;
     handwritingAvailable = result.handwriting_recognition === true;
     knowledgeUI?.setAvailable(result.knowledge_generation);
     void analysisUI?.setAvailable(result.paper_analysis);
@@ -455,8 +458,8 @@ function renderAnnotations() {
   const fragment = document.createDocumentFragment();
   const {notes,replies,unlinked}=annotationThreads(state.annotations);
   function replyCard(reply){
-    const details=el('details','annotation-reply');details.dataset.annotationId=reply.id;
-    details.append(el('summary','',['AI 批注',reply.model,reply.annotation_ids?.length>1?`涉及 ${reply.annotation_ids.length} 条批注`:''].filter(Boolean).join(' · ')));
+    const details=el('details','annotation-reply');details.dataset.annotationId=reply.id;details.open=reply.source_kind==='annotation-translation';
+    details.append(el('summary','',[reply.source_kind === 'annotation-translation' ? '翻译：AI 译文' : 'AI 批注',reply.model,reply.annotation_ids?.length>1?`涉及 ${reply.annotation_ids.length} 条批注`:''].filter(Boolean).join(' · ')));
     details.append(el('p','small muted',displayDate(reply.generated||reply.created)));
     const body=(reply.comment||reply.content||reply.text||'').replace(/^AI-generated (?:conversation )?feedback[^\n]*\n\n/,'');
     details.append(el('p','annotation-reply-body',body));
@@ -468,6 +471,14 @@ function renderAnnotations() {
     card.dataset.companionText=String([note.text,note.comment,note.content,note.handwriting?.transcript,note.linked_ink?.transcript].some(value=>typeof value==='string'&&value.trim()));
     const meta = el('div', 'annotation-meta'); const pageLink = el('button', 'page-link', `第 ${note.page} 页`); pageLink.dataset.noteAction = 'page';
     meta.append(pageLink, el('span', '', displayDate(note.modified || note.created)), el('span', 'note-type', note.kind === 'ai-feedback' || note.type === 'ai_feedback' || note.ai_generated ? 'AI 生成' : ({highlight:'高亮',underline:'下划线',strikeout:'删除线',note:'便笺',ink:'手写'})[note.type] || '批注'));
+    if (annotationTranslationAvailable && !window.PaperAnnotationThreads?.isAi(note)) {
+      const translate = el('button', 'button subtle annotation-translate', translatingAnnotations.has(`${state.active?.id}:${note.id}`) ? '翻译中…' : '翻译');
+      translate.type = 'button'; translate.dataset.noteAction = 'translate';
+      translate.title = '翻译这条批注的文字，并作为「翻译：」AI 批注保存到 PDF';
+      if (!note.version) translate.title = '批注文字超过 8000 字符或内容不完整，请缩小后再翻译';
+      translate.disabled = !note.version || translatingAnnotations.has(`${state.active?.id}:${note.id}`) || card.dataset.companionText !== 'true';
+      meta.append(translate);
+    }
     card.append(meta);
     if (note.text) { const quote=el('button','annotation-quote',note.text);quote.type='button';quote.dataset.noteAction='page';quote.setAttribute('aria-label',`定位原文：${note.text}`);card.append(quote); }
     if (note.comment || note.content) card.append(el('p', 'annotation-comment', note.comment || note.content));
@@ -659,6 +670,19 @@ async function handleNoteAction(event) {
   if (action === 'page') { await switchTab('reader'); await pdfReader?.revealAnnotation(note.id,{page:note.page});return; }
   if (action === 'linked-ink') { await linkedHandwritingUI?.reveal(note,button.dataset.regionId);return; }
   if (action === 'ink-retry') { try{await inkQueue?.retry(button.dataset.inkId);}catch(error){toast(error.message,true);}return; }
+  if (action === 'translate') {
+    const id = state.active?.id, key = `${id}:${note.id}`;
+    if (!id || translatingAnnotations.has(key)) return;
+    translatingAnnotations.add(key); renderAnnotations();
+    try {
+      const result = await api('annotation_translate', { id, annotation_id: note.id, version: note.version, retry: failedTranslations.has(key) });
+      failedTranslations.delete(key);
+      toast(result.duplicate ? '已有译文保存在原批注下。' : '译文已作为 PDF 批注保存。');
+      if (state.active?.id === id) { await loadAnnotations(id); await refreshPage(note.page); }
+    } catch (error) { failedTranslations.add(key); toast(`翻译未完成：${error.message}`, true); }
+    finally { translatingAnnotations.delete(key); if (state.active?.id === id) renderAnnotations(); }
+    return;
+  }
   if (action === 'edit') openAnnotation('edit', note);
   if (action === 'handwriting') { await linkedHandwritingUI?.toggle(state.active, note); return; }
   if (action === 'handwriting-legacy') { await handwritingUI?.open(state.active,note);return; }

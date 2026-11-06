@@ -312,3 +312,5 @@ dialog blockquote { background: var(--dsw-alias-interactive-bg-hover); border-co
 :root:is([data-palette="jade"],[data-palette="navy"]) .tabs .tab.active { background:var(--pl-role-soft,var(--pl-active)); border-color:var(--pl-role,var(--pl-primary)); box-shadow:inset 0 -2px var(--pl-role,var(--pl-primary)); font-weight:600; }
 :root:is([data-palette="jade"],[data-palette="navy"]) .paper-card.selected { box-shadow:inset 3px 0 var(--pl-reading); }
 :root:is([data-palette="jade"],[data-palette="navy"]) #import-open { background:var(--pl-reading); }
+
+.annotation-meta .annotation-translate { margin-left:auto; font-size:inherit; padding:3px 7px; min-height:26px; white-space:nowrap; }

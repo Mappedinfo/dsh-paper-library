@@ -456,6 +456,36 @@ class Library(Papers, PdfWrites, AnnotationAccess):
         rows = self.db.execute("SELECT payload FROM feedback WHERE paper_id=? LIMIT 100", (id,)).fetchall()
         return {"feedback": [json.loads(row[0]) for row in rows]}
 
+    def annotation_translation_result(self, id, annotation_ref, request_key, text=None, model=""):
+        """核对完整来源版本；译文以原生 PDF 回复保存，重试按请求键去重。"""
+        if not isinstance(request_key, str) or not re.fullmatch(r"[a-f0-9]{64}", request_key):
+            raise ValueError("Invalid translation request key")
+        if text is not None and (not isinstance(text, str) or not text.strip() or len(text) > 16000):
+            raise ValueError("Translation requires 1–16000 characters")
+        with self.lock():
+            context = self.annotation_context_exact(id, [annotation_ref], max_characters=8000)
+            source = context["annotations"][0]
+            count = 0
+            with self._open_pdf(self.pdf_path(id)) as doc:
+                for page in doc:
+                    for annot in page.annots() or []:
+                        count += 1
+                        if count > MAX_ANNOTATIONS:
+                            raise ValueError("PDF annotation limit prevents a complete translation check")
+                        extra = self._annotation_metadata(annot)
+                        if extra.get("source_kind") == "annotation-translation" and extra.get("source_message_id") == request_key and extra.get("annotation_ids") == [source["id"]]:
+                            return {"saved": True, "duplicate": True, "annotation": self._annotation(page, annot)}
+            if text is None:
+                return {"saved": False}
+            if count >= MAX_ANNOTATIONS:
+                raise ValueError("PDF annotation limit reached")
+            extra = {"kind": "ai-feedback", "source_kind": "annotation-translation", "source_message_id": request_key,
+                     "annotation_ids": [source["id"]], "generated": now(), "model": str(model)[:200]}
+            result = self._write_pdf(id, lambda doc: self._add_annotation(doc, source["page"], "note",
+                comment="翻译：" + text.strip() + "\n\nAI 翻译 · " + extra["model"], author="AI 翻译 · Paper Library",
+                color="#91bad6", extra=extra))
+            return {"saved": True, "duplicate": False, "annotation": result["annotation"]}
+
     def save_conversation_feedback(self, id, text, model, annotation_ids, source_session_id, source_message_id, page=1, source_snapshot_ids=None):
         """Persist an explicitly saved, host-verified native assistant message.
 
@@ -585,6 +615,7 @@ def dispatch(request):
             path = library.pdf_path(request["id"])
             return {"path": str(path), "filename": path.name}
         actions = {
+            "annotation_translation_result": ("id", "annotation_ref", "request_key", "text", "model"),
             "list": ("query", "limit", "offset", "sort", "order", "archived"), "get": ("id", "include_archived"), "create": ("metadata",), "archive": ("id",), "restore": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page_layout": ("id",), "page": ("id", "page", "scale", "include_layout", "render_width"),
             "annotations": ("id",), "annotate": ("id", "page", "type", "rects", "paths", "width", "annotation_id", "parent_id", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment"), "annotation_delete": ("id", "annotation_id"),
             "linked_handwriting_text": ("id", "parent_id", "transcript", "transcription_source", "expected_version", "request_id"),

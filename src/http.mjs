@@ -1,3 +1,4 @@
+import { createAnnotationTranslation } from './harness/annotation-translation.mjs';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { Readable, Transform } from 'node:stream';
@@ -118,6 +119,7 @@ export function createFetchHandler(options = {}) {
   // Browsing saved learning data is local and does not initialize an AI route or
   // paper conversation. Only the host-injected adapter may generate new output.
   const learningRecords = options.languageLearning || createLanguageLearning({ store: localState, dispatch, library: options.library || defaultLibrary, python: options.python });
+  const annotationTranslation = createAnnotationTranslation({ store: localState, languageLearning: learningRecords, dispatch, library: options.library || defaultLibrary, python: options.python });
   const analysisRecords = options.paperAnalysis || createPaperAnalysis({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python});
   const challengeRecords = options.challengeMining || createChallengeMining({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python});
   // Whiteboards are local state only: they never initialize a model route or the Python worker.
@@ -157,7 +159,7 @@ export function createFetchHandler(options = {}) {
             } });
           }
           // Browser cannot forge AI output or arbitrary worker internals.
-          if (LATEX_RETRIEVAL_ACTIONS.has(input?.action) || ['save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','companion_excerpt','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata','external_rebind'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
+          if (LATEX_RETRIEVAL_ACTIONS.has(input?.action) || ['annotation_translation_result','save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','companion_excerpt','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata','external_rebind'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
           const companionAction=['companion_status','companion_ask','companion_retry','companion_cancel'].includes(input?.action);
           if(companionAction&&!options.companion)return json({ok:false,error:'批注提问需要连接 DSH 服务。'},409);
           const chatAction = typeof input?.action === 'string' && input.action.startsWith('chat_');
@@ -167,12 +169,13 @@ export function createFetchHandler(options = {}) {
           const latexAIAction = typeof input?.action === 'string' && input.action.startsWith('latex_ai_');
           const latexWsAction = typeof input?.action === 'string' && input.action.startsWith('latex_ws_');
           if (chatAction && !options.paperChat) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板打开论文对话。'},400);
-          if (input?.action === 'language_generate' && !options.languageLearning) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
+          if (['annotation_translate','language_generate'].includes(input?.action) && !options.languageLearning) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
           if (input?.action === 'handwriting_recognize' && !options.handwriting) return json({ok:false,error:'转文字需要 DSH 中支持图片的模型；笔迹可继续保存。'},409);
           if (input?.action === 'knowledge_generate' && !options.libraryKnowledge) return json({ok:false,error:'尚未连接 DSH 模型服务；已保存的来源和知识笔记仍可查看。'},409);
           if (latexAIAction && !options.latexAI) return json({ok:false,error:'LaTeX 提问与合写需要连接 DSH 模型服务。'},409);
           if (latexWsAction && !options.latexWorkspace) return json({ok:false,error:'LaTeX 工作区需要连接 DSH 主机。'},409);
-          let result = companionAction ? await options.companion.handle(input)
+          let result = input?.action === 'annotation_translate' ? await annotationTranslation(input, { signal: request.signal })
+            : companionAction ? await options.companion.handle(input)
             : ['workspace_catalog','workspace_related'].includes(input?.action) ? await workspaceNavigation.handle(input, { signal: request.signal })
             : ['ink_diagnostics_append','ink_diagnostics_get'].includes(input?.action) ? await inkDiagnostics.handle(input)
             : typeof input?.action === 'string' && input.action.startsWith('ink_queue_') ? await inkQueue.handle(input)

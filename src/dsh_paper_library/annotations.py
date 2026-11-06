@@ -404,6 +404,12 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                     if len(result) >= _constants().MAX_ANNOTATIONS:
                         return {"annotations": result, "truncated": True}
                     value = self._annotation(page, annot, handwriting=handwriting)
+                    # 短批注携带与精确引用相同的版本；超长/截断几何仍可阅读，但不能直接翻译。
+                    if self._annotation_characters(value) <= 8000 and value.get("kind") != "ai-feedback":
+                        try:
+                            value["version"] = self._reference_annotation(value, bool(annot.info.get("id")))["version"]
+                        except ValueError:
+                            value["translation_unavailable"] = "批注内容或几何超过完整引用范围"
                     characters += self._annotation_characters(value)
                     if characters > 2_000_000:
                         return {"annotations": result, "truncated": True}
