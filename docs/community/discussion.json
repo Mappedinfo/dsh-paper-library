@@ -1,6 +1,6 @@
 {
   "ok": true,
-  "mode": "verified",
+  "mode": "updated",
   "id": "D_kwDOT3T1g84ApPu5",
   "number": 6623,
   "url": "https://github.com/deepseek-ai/deepseek-harness/discussions/6623",
@@ -11,8 +11,8 @@
   "category": "Show Your Plugins!",
   "categoryId": "DIC_kwDOT3T1g84DDSUe",
   "createdAt": "2026-09-14T12:22:10Z",
-  "updatedAt": "2026-10-04T03:09:44Z",
-  "verifiedAt": "2026-10-04T03:11:19.986Z",
-  "bodySha256": "ad03178b53fdd34bbfeb3b564a23f51e3941468bb91298a03eedbf96583439f9",
+  "updatedAt": "2026-11-06T10:01:31Z",
+  "verifiedAt": "2026-11-06T10:01:33.261Z",
+  "bodySha256": "bac154e0bf13e974119bd9503ff6bfbb9d31dcf63c39a57fb46d0941d0e68e24",
   "bodyHashNormalization": "lf-trim-end"
 }
