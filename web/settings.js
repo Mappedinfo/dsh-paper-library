@@ -17,6 +17,14 @@ window.PaperLibrarySettings = (() => {
     const description=make('p','settings-description','DSH 中的入口：设置 → Paper Library（也保留插件配置入口）。');
     const status=make('p','settings-status');status.id='settings-status';status.setAttribute('role','status');
     const controls=make('fieldset'),legend=make('legend','','阅读与自动化');controls.append(legend);
+    const paletteControls=make('fieldset','settings-palettes'),paletteLegend=make('legend','','界面配色');paletteControls.append(paletteLegend);
+    const paletteInputs=new Map();
+    for(const [value,label,help] of [['jade','墨绿铜金','温暖纸面 · 墨绿操作'],['navy','深海蓝灰','清亮白底 · 海蓝操作'],['system','跟随 DSH','沿用宿主配色']]){
+      const row=make('label','settings-palette'),input=make('input'),swatches=make('span','palette-swatches'),copy=make('span');
+      row.setAttribute('data-palette-option',value);input.type='radio';input.name='paper-library-palette';input.value=value;input.id=`setting-palette-${value}`;swatches.setAttribute('aria-hidden','true');
+      copy.append(make('strong','',label),make('small','',help));row.append(input,swatches,copy);paletteControls.append(row);paletteInputs.set(value,{input,row});input.addEventListener('change',()=>{if(input.checked)void save({ui_palette:value});});
+    }
+    paletteControls.append(make('p','palette-legend','阅读 · 墨绿　知识 · 紫色　写作 · 海蓝　演示 · 铜金。明暗随 DSH；PDF 批注保留原色。'));
     const inputs=new Map();
     for(const [key,label,help] of fields){const row=make('label','settings-option'),input=make('input');input.type='checkbox';input.id=`setting-${key}`;const copy=make('span');copy.append(make('strong','',label),make('small','',help));row.append(input,copy);controls.append(row);inputs.set(key,input);input.addEventListener('change',()=>void save({[key]:input.checked}));}
     const sideRow=make('label','settings-side'),side=make('select');side.id='setting-reading-panel-side';side.setAttribute('aria-label','阅读侧栏位置');for(const [value,label]of[['left','左侧'],['right','右侧']]){const option=make('option','',label);option.value=value;side.append(option);}sideRow.append(make('span','','阅读侧栏'),side);controls.append(sideRow);inputs.set('reading-panel-side',side);side.addEventListener('change',()=>void save({'reading-panel-side':side.value}));
@@ -28,18 +36,20 @@ window.PaperLibrarySettings = (() => {
     const extraCopy=make('span');extraCopy.append(make('strong','','额外外部文献源'),make('small','','JSON 数组，每项 {id, root}；根目录写绝对路径。扫描只建符号链接，不改动源目录，第一次写批注时才复制进来。'));
     extraRow.append(extraInput,extraCopy);controls.append(extraRow);inputs.set('external_sources',extraInput);
     extraInput.addEventListener('change',()=>void save({external_sources:extraInput.value.trim()}));
-    const storage=make('details','settings-storage'),summary=make('summary','','模型、外观与存储');storage.append(summary,make('p','','论文对话使用各自的 DSH 模型；语言工具默认跟随 DSH 默认模型，也可单独设置。主题与字号跟随 DSH 外观。'));
+    const storage=make('details','settings-storage'),summary=make('summary','','模型、外观与存储');storage.append(summary,make('p','','论文对话使用各自的 DSH 模型；语言工具默认跟随 DSH 默认模型，也可单独设置。明暗模式与字号跟随 DSH，界面配色可在上方选择。'));
     const languageSettings=make('button','button subtle','语言模型与提示词');languageSettings.id='settings-language';languageSettings.type='button';languageSettings.addEventListener('click',()=>{dialog.close();onLanguageSettings?.();});storage.append(languageSettings);
     const path=make('p','settings-path');storage.append(path,make('p','','文献、PDF、草稿和设置均保存在主机磁盘，不写入浏览器 localStorage。更换资料库目录需要修改部署配置，已有数据不会自动搬迁。'));
     const maintenance=make('section','settings-maintenance');maintenance.setAttribute('aria-label','导出与维护');
     maintenance.append(make('strong','','导出与维护'),make('p','','导出文献与数据集的 BibLaTeX 引用资料。演示文稿请在 Slides 工作台中导出。'));
     const exportLibrary=document.getElementById?.('export-library');if(exportLibrary)maintenance.append(exportLibrary);
     const footer=make('footer'),reload=make('button','button subtle','重新读取'),reset=make('button','button subtle','恢复默认');reload.type=reset.type='button';reload.addEventListener('click',()=>void refresh());reset.addEventListener('click',()=>void save(null));footer.append(reload,reset);
-    dialog.append(header,description,status,languageSettings,controls,storage,maintenance,footer);document.body.append(dialog);
+    dialog.append(header,description,status,languageSettings,paletteControls,controls,storage,maintenance,footer);document.body.append(dialog);
     function say(text,error=false){status.textContent=text;status.classList.toggle('error',error);}
     function render(){
       controls.disabled=busy||!snapshot?.writable;reset.disabled=busy||!snapshot?.writable;reload.disabled=busy;
       const shown={...snapshot?.value,...pendingPatch};
+      paletteControls.disabled=busy||!snapshot?.writable;
+      for(const [value,{input,row}]of paletteInputs){input.checked=value===(shown.ui_palette||'jade');row.classList.toggle('is-selected',input.checked);}
       for(const[key,input]of inputs){if(input.type==='text'&&document.activeElement===input)continue;if(input.type==='checkbox')input.checked=shown[key]===true;else if(input.tagName==='SELECT')input.value=shown[key]||'left';else input.value=shown[key]??'';}
       path.textContent=`资料库：${getLibrary()||'正在读取…'}`;
       description.textContent=snapshot?.backend==='dsh'&&snapshot.available===false?'设置由 DSH 管理。请在 DSH 的 Paper Library 面板或「设置 → Paper Library」中修改。':snapshot?.backend==='local'?'独立运行：设置保存在本机。安装到 DSH 后，插件设置会接入 DSH 的统一设置。':'DSH 中的入口：设置 → Paper Library（也保留插件配置入口）。两个入口共享同一份主机设置。';

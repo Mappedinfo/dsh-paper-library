@@ -252,3 +252,63 @@ dialog blockquote { background: var(--dsw-alias-interactive-bg-hover); border-co
 }
 .reader-mode{border-right-color:var(--dsw-alias-border-l2,#dfe1d6)}
 .reader-mode[data-mode=auto] .button#reader-mode-auto,.reader-mode[data-mode=ask] .button#reader-mode-ask{color:var(--ink);background:var(--dsw-alias-interactive-bg-active);outline-color:var(--dsw-alias-border-l2)}
+
+/* 两套可选工作台配色；只覆盖界面语义，不触碰 PDF 像素或批注颜色。 */
+:root[data-palette="jade"], :root[data-palette="navy"] {
+  --pl-reading: light-dark(#245c49, #8dceb0);
+  --pl-knowledge: light-dark(#695187, #c4afe3);
+  --pl-writing: light-dark(#285a80, #9bc4e5);
+  --pl-slides: light-dark(#885526, #e3bc86);
+  --pl-reading-soft: light-dark(#eaf3ed, #233c33);
+  --pl-knowledge-soft: light-dark(#f1edf7, #342c43);
+  --pl-writing-soft: light-dark(#eaf1f8, #23394b);
+  --pl-slides-soft: light-dark(#faf0e2, #423324);
+  --pl-primary: light-dark(#245c49, #8dceb0);
+  --pl-primary-hover: light-dark(#174334, #afe0c8);
+  --pl-active: light-dark(#eaf3ed, #233c33);
+  --pl-base: light-dark(#fffefa, #161c1b);
+  --pl-surface: light-dark(#ffffff, #202927);
+  --dsw-alias-bg-base: var(--pl-base) !important;
+  --dsw-alias-bg-layer-1: var(--pl-surface) !important;
+  --dsw-alias-bg-layer-2: var(--pl-surface) !important;
+  --dsw-specific-input-major: var(--pl-surface) !important;
+  --dsw-specific-sidebar-fill: var(--pl-base) !important;
+  --dsw-alias-label-primary: light-dark(#192620, #edf4f0) !important;
+  --dsw-alias-label-secondary: light-dark(#52635b, #b9c9c1) !important;
+  --dsw-alias-label-tertiary: light-dark(#63736b, #9eafa6) !important;
+  --dsw-alias-label-primary-foreground: light-dark(#ffffff, #14221b) !important;
+  --dsw-alias-border-l2: light-dark(#d8e1dc, #3c4b44) !important;
+  --dsw-alias-border-l4: light-dark(#a6b9ae, #758c7e) !important;
+  --dsw-alias-link: var(--pl-primary) !important;
+  --dsw-alias-button-primary-fill: var(--pl-primary) !important;
+  --dsw-alias-button-primary-hover: var(--pl-primary-hover) !important;
+  --dsw-alias-interactive-bg-active: var(--pl-active) !important;
+  --dsw-specific-sidebar-nav-item-active: var(--pl-active) !important;
+  --dsw-alias-interactive-bg-hover-solid: var(--pl-active) !important;
+  --dsw-specific-sidebar-nav-item-hover: var(--pl-active) !important;
+  --teal: var(--pl-reading);
+}
+:root[data-palette="navy"] {
+  --pl-primary: light-dark(#254e70, #a3c9e9);
+  --pl-primary-hover: light-dark(#183b58, #c3dff5);
+  --pl-active: light-dark(#eaf1f8, #23394b);
+  --pl-base: light-dark(#ffffff, #151c24);
+  --pl-surface: light-dark(#ffffff, #202b37);
+  --dsw-alias-label-primary: light-dark(#172635, #edf3fa) !important;
+  --dsw-alias-label-secondary: light-dark(#506477, #bacada) !important;
+  --dsw-alias-label-tertiary: light-dark(#62768a, #a0b5c8) !important;
+  --dsw-alias-border-l2: light-dark(#d6e0eb, #3e5062) !important;
+  --dsw-alias-border-l4: light-dark(#a4b8cc, #7896b0) !important;
+}
+:root:is([data-palette="jade"],[data-palette="navy"]) .topbar { border-top:3px solid var(--pl-primary); }
+:root:is([data-palette="jade"],[data-palette="navy"]) .brand { color:var(--pl-primary); letter-spacing:.02em; }
+:root:is([data-palette="jade"],[data-palette="navy"]) :is([data-kind="paper"],[data-tab="reader"],[data-tab="annotations"],#import-open) { --pl-role:var(--pl-reading); --pl-role-soft:var(--pl-reading-soft); }
+:root:is([data-palette="jade"],[data-palette="navy"]) :is([data-kind="board"],[data-kind="project"],[data-tab="graph"],[data-tab="conversation"],#board-open) { --pl-role:var(--pl-knowledge); --pl-role-soft:var(--pl-knowledge-soft); }
+:root:is([data-palette="jade"],[data-palette="navy"]) :is([data-kind="latex"],#latex-open) { --pl-role:var(--pl-writing); --pl-role-soft:var(--pl-writing-soft); }
+:root:is([data-palette="jade"],[data-palette="navy"]) #slides-open { --pl-role:var(--pl-slides); --pl-role-soft:var(--pl-slides-soft); }
+:root:is([data-palette="jade"],[data-palette="navy"]) :is(.workspace-root-button,#board-open,#latex-open,#slides-open) { color:var(--pl-role); border:1px solid color-mix(in srgb,var(--pl-role) 24%,transparent); background:var(--pl-role-soft); font-weight:600; }
+:root:is([data-palette="jade"],[data-palette="navy"]) :is(.workspace-root-button,#board-open,#latex-open,#slides-open)[aria-pressed="true"] { color:var(--dsw-alias-label-primary-foreground); background:var(--pl-role); border-color:var(--pl-role); box-shadow:inset 0 -2px rgb(0 0 0 / .15); }
+:root:is([data-palette="jade"],[data-palette="navy"]) .tabs .tab { color:var(--pl-role,var(--muted)); }
+:root:is([data-palette="jade"],[data-palette="navy"]) .tabs .tab.active { background:var(--pl-role-soft,var(--pl-active)); border-color:var(--pl-role,var(--pl-primary)); box-shadow:inset 0 -2px var(--pl-role,var(--pl-primary)); font-weight:600; }
+:root:is([data-palette="jade"],[data-palette="navy"]) .paper-card.selected { box-shadow:inset 3px 0 var(--pl-reading); }
+:root:is([data-palette="jade"],[data-palette="navy"]) #import-open { background:var(--pl-reading); }

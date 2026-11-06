@@ -67,7 +67,7 @@ test('migration respects explicit native false, normalizes legacy strings and re
   const f = await fixture(t, { legacy, user: { auto_analysis: false, future: 7 } });
   const view = await f.service.get();
   assert.equal(view.backend, 'dsh'); assert.equal(view.writable, true);
-  assert.deepEqual(view.value, { auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_accent: 'system', latex_path_font: 'pixel', latex_split: 50, latex_sync_folder: true });
+  assert.deepEqual(view.value, { auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', ui_palette: 'jade', sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_accent: 'system', latex_path_font: 'pixel', latex_split: 50, latex_sync_folder: true });
   assert.deepEqual((await f.store.get('preferences')).value, legacy);
   assert.deepEqual((await f.store.get(backup)).value, legacy);
   assert.equal(f.settings.raw().future, 7);
@@ -331,4 +331,15 @@ test('plugin Config exports volatile preference fields with defaults and passes 
     assert.equal(typeof out[key]?.get, 'function', `${key} resolves to a volatile ref`);
     assert.deepEqual(out[key].get(), value, `${key} keeps its documented default`);
   }
+});
+
+for (const native of [true, false]) test(`workspace palettes persist and reject arbitrary CSS (${native ? 'DSH' : 'standalone'})`, async t => {
+  const f = await fixture(t, { native }), initial = await f.service.get();
+  assert.equal(initial.value.ui_palette, 'jade');
+  let state = initial;
+  for (const ui_palette of ['navy', 'system', 'jade']) {
+    state = await f.service.update({ ui_palette }, state.revision);
+    assert.equal((await f.service.get()).value.ui_palette, ui_palette);
+  }
+  assert.throws(() => f.service.update({ ui_palette: 'url(https://example.com)' }, state.revision), code('SETTINGS_INVALID'));
 });

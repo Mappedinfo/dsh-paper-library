@@ -1472,6 +1472,7 @@ $('latex-version-shelf')?.addEventListener('toggle',()=>{if($('latex-version-she
 bindWorkspaceVersions();
 settingsUI = window.PaperLibrarySettings?.create({onLanguageSettings:()=>languageUI?.showSettings(),api,persistence,getLibrary:()=>state.library,onChange:(value,descriptor)=>{
   preferences={...preferences,...value};
+  window.PaperLibraryTheme?.setPalette(value.ui_palette);
   analysisUI?.applyPreferences(value,descriptor.writable);
   paperChatUI?.applyPreferences(value,descriptor.writable);
   companionUI?.applyPreferences(value,descriptor.writable);

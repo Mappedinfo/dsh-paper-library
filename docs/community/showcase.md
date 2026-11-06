@@ -2,11 +2,23 @@
 
 项目地址 [Mappedinfo/dsh-paper-library](https://github.com/Mappedinfo/dsh-paper-library) · [安装与使用](https://github.com/Mappedinfo/dsh-paper-library#安装与开发) · [独立画板](https://mappedinfo.github.io/dsh-paper-library/)
 
-**Paper Library 是 DeepSeek Harness 里的本地文献与研究工作台。** 它把文献收集、PDF 阅读与批注、AI 对话、知识整理、文献画板和 LaTeX 写作放在同一个插件里。
+**Paper Library 是 DeepSeek Harness 里的本地文献与研究工作台。** 它把文献收集、PDF 阅读与批注、AI 对话、知识整理、文献画板、LaTeX 写作和 Slides 放在同一个插件里。
 
 日常使用可以从一篇 PDF 开始。把论文导入文献库，阅读时留下批注，把需要追问的段落带进这篇论文的 DSH 对话；读过的文献按项目组织，把概念和证据放到图谱或画板，最后在 LaTeX 工作台里继续写作。论文、数据集、引用和阅读记录都可以在这个过程中反复使用。
 
 插件独立于 Zotero 运行，也支持导入 Zotero 导出的资料；复用 DSH 的模型服务、会话和 Web 认证，无需修改 Harness 源码。
+
+### 可下载的使用说明与 Slides 示例
+
+把 [8 页 PDF 手册](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/demo/guide.pdf)导入文献库阅读批注；把 [PlainDeck ZIP](https://github.com/Mappedinfo/dsh-paper-library/raw/refs/heads/main/docs/demo/slides.zip)导入 Slides，修改内容再导出。另提供 [10 页动态可编辑 PPTX](https://github.com/Mappedinfo/dsh-paper-library/raw/refs/heads/main/docs/demo/slides.pptx)、[静态 PDF](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/demo/slides.pdf) 和[带批注的手册副本](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/demo/guide-annotated.pdf)。说明本身就是演示材料，不含私人资料。[主稿与复现方法](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/demo/README.md)
+
+Slides 集成 PlainDeck，支持主题、原生表格、制作指导、放映以及 PPTX／HTML／ZIP 导出。DSH 原生工具可查找并导出已保存项目。PPTX 保留可编辑对象、入场动画与镜头缩放；独立合成稿已由用户在 PowerPoint 放映确认，WPS 尚未验收。ZIP 可以重新导入，PPTX 导入目前不支持。
+
+设置中可切换墨绿铜金、深海蓝灰或跟随 DSH。阅读、知识、写作和 Slides 分别使用墨绿、紫色、海蓝与铜金；明暗跟随宿主，PDF 保持原色。新增功能以当前源码为准，不代表 npm 已发布同等版本。
+
+![墨绿铜金主题](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/demo/theme-jade.png)
+
+![深海蓝灰主题](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/demo/theme-navy.png)
 
 ### 文献收集、管理与引用
 
@@ -83,7 +95,7 @@
 
 安装后从 DSH 右侧面板打开「文献库」或「画板」。插件提供文献、引用、批注、画板等工具和配套技能，可以在 DSH 会话中直接调用；设置中的偏好与插件界面共用。
 
-**完整体验本文展示的当前功能，请按 [README](https://github.com/Mappedinfo/dsh-paper-library#安装与开发) 安装 `main` 源码。** 截至 2026-10-04，npm 的 `@mappedinfo/dsh-paper-library@0.2.2` 已发布，但不包含这轮手写更新。源码安装需要 Node、Python、uv 和已构建的本地 DSH checkout。
+**完整体验本文展示的当前功能，请按 [README](https://github.com/Mappedinfo/dsh-paper-library#安装与开发) 安装 `main` 源码。** 本文新增主题与动态演示对应 2026-11-06 源码，npm 发版与源码进度分别维护，功能以实际安装版本为准。源码安装需要 Node、Python、uv 和已构建的本地 DSH checkout。
 
 资料和状态保存在运行 DSH 的本机；使用模型功能时，相应原文、批注或稿件会提交给已配置的 DSH 模型服务。PDF 处理按需运行，阅读时只渲染附近页面；没有常驻向量模型，不会在后台自动解析现有全库 PDF。自动整理针对导入或选中的论文，扫描页尚无全文 OCR。元数据检索、AI 草稿和真实模型质量的验证范围见[验证记录](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/validation.md)。
 

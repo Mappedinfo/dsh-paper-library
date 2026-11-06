@@ -12,6 +12,7 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   auto_review: true,
   'auto-paper-conversation': false,
   'reading-panel-side': 'left',
+  ui_palette: 'jade',
   // Optional adapter to a separate data-sync service: a config file it owns, or
   // extra absolute folders. Both default to empty, so the library never needs it.
   sync_config: '',
@@ -52,6 +53,7 @@ export function createPaperLibrarySettingsSchema(Schema) {
     auto_review: Schema.boolean().default(true),
     'auto-paper-conversation': Schema.boolean().default(false),
     'reading-panel-side': Schema.union([Schema.const('left'), Schema.const('right')]).default('left'),
+    ui_palette: Schema.union([Schema.const('jade'), Schema.const('navy'), Schema.const('system')]).default('jade'),
     sync_config: Schema.string().default(''),
     external_sources: Schema.string().default(''),
     latex_starter: Schema.boolean().default(true),
@@ -71,6 +73,8 @@ function validatePatch(patch) {
     if (!fields.includes(key)) throw invalid(`此字段不属于可编辑设置：${key}`);
     if (key === 'reading-panel-side') {
       if (!['left', 'right'].includes(value)) throw invalid('设置值无效：reading-panel-side');
+    } else if (key === 'ui_palette') {
+      if (!['jade', 'navy', 'system'].includes(value)) throw invalid('设置值无效：ui_palette');
     } else if (key === 'latex_engine') {
       if (!['xelatex', 'pdflatex', 'lualatex'].includes(value)) throw invalid('设置值无效：latex_engine');
     } else if (key === 'latex_theme') {

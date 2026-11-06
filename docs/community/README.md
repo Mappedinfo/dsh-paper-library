@@ -57,3 +57,9 @@ latest remote copy immediately before the request. A retry after uncertain
 readback recognizes an already-applied update and does not submit it again.
 The tool compares public image bytes, title, body, author, repository and category
 before recording success. `--verify` reads the saved topic without changing it.
+
+## 使用说明演示与主题更新（2026-11-06）
+
+`docs/demo/` 的说明主稿、PDF、PlainDeck 源项目与 PPTX 共用公开的使用说明。`scripts/build-user-guide.mjs` 生成文件，`scripts/capture-guide-demo.mjs` 用隔离合成库操作实际主题开关并写入一条 PDF 批注。[复现与验证边界](../demo/README.md)。
+
+`update-2026-11-06.md` 是现有讨论下的新进展评论，`update-2026-11-06.json` 保存发布回执；旧发版评论保持原样。当前 `showcase.json` 指向这份新评论，仍由 `announce-release.mjs --publish` 发布并读回核对。主帖由 `publish-discussion.mjs --update` 更新。先推送演示文件，再发布下载链接。

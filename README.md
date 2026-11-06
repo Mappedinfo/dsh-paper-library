@@ -4,6 +4,8 @@ Paper Library 将文献收集、PDF 阅读与批注、知识整理和 LaTeX 写�
 
 [DSH 社区介绍与讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/6623)包含合成演示截图与当前能力说明。
 
+**把使用说明当作演示来试用**：[PDF 手册](docs/demo/guide.pdf) · [带批注 PDF 示例](docs/demo/guide-annotated.pdf) · [可编辑动态 PPTX](docs/demo/slides.pptx) · [PlainDeck 项目 ZIP](docs/demo/slides.zip) · [Slides 静态 PDF](docs/demo/slides.pdf)。导入手册阅读批注，导入 ZIP 修改并再次导出；[主稿与复现说明](docs/demo/README.md)记录内容和验证范围。
+
 项目原创代码采用 [MIT](LICENSE)。默认 PDF 引擎 PyMuPDF 采用 AGPL/商业许可，CSL 等第三方组件保留原许可；完整安装的依赖栈并非仅受 MIT 约束。详见 [第三方许可](THIRD_PARTY.md)。
 
 **继续开发前先读 [项目交接](HANDOFF.md)**，其中记录当前能力、验证证据和待验证项。 版本变更见 [CHANGELOG](CHANGELOG.md)。
@@ -46,6 +48,8 @@ LaTeX 工作台支持并排编辑源码和预览编译结果，继续完成写�
 [安装与开发](#安装与开发)说明当前源码与已发布 npm 版本的区别。
 
 ## 设置
+
+**设置 → 界面配色** 可选「墨绿铜金」「深海蓝灰」或「跟随 DSH」。两套主题都使用固定功能色：阅读为墨绿，知识与画板为紫色，写作为海蓝，Slides 为铜金；明暗模式随宿主，PDF 页面和已有批注保留原色。主题与阅读偏好一起保存，切换即时生效。
 
 插件右上角 **设置** 可调整阅读与自动化偏好；**DSH 设置 → 左侧 Paper Library** 提供共享的阅读偏好，以及语言模型、翻译和润色补充提示词。语言设置也可从插件「设置 → 语言模型与提示词」或语言窗右上角进入，几个入口使用同一份主机设置，模型按供应商分组。默认翻译方向为自动识别：中文译为英文，其他语言译为中文，也可固定译为中文或英文；语言窗口的常用方向选择可临时覆盖。LaTeX 专用选项位于工作台的「项目与设置」，外观继续跟随 DSH。
 

@@ -1,0 +1,2039 @@
+{
+  "theme": {
+    "fonts": {
+      "title": "PingFang SC",
+      "body": "PingFang SC",
+      "mono": "Menlo"
+    },
+    "fontSizes": {
+      "title": 76,
+      "body": 28,
+      "heading": 48,
+      "caption": 19
+    },
+    "colors": {
+      "background": "#FFFEFA",
+      "text": "#192620",
+      "muted": "#52635B",
+      "accent": "#245C49",
+      "surface": "#FFFFFF"
+    },
+    "spacing": {
+      "page": 80,
+      "small": 16,
+      "medium": 30,
+      "large": 64
+    }
+  },
+  "slides": {
+    "./slides/001.json": {
+      "id": "guide-1",
+      "name": "从一份 PDF，走到一份可演示的成果",
+      "background": {
+        "color": "#173B30"
+      },
+      "motion": {
+        "camera": {
+          "fromScale": 0.96,
+          "toScale": 1,
+          "delayFrames": 0,
+          "durationFrames": 150
+        }
+      },
+      "elements": [
+        {
+          "id": "t7",
+          "color": "#D8C49B",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 55,
+            "w": 1400,
+            "h": 45
+          },
+          "text": "PAPER LIBRARY / DSH 社区插件",
+          "fit": "none",
+          "fontSize": 23,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "t8",
+          "color": "#FFFFFF",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 125,
+            "w": 1400,
+            "h": 110
+          },
+          "text": "从一份 PDF，走到一份可演示的成果",
+          "fit": "none",
+          "fontSize": 52,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "t1",
+          "color": "#E1EBE5",
+          "type": "text",
+          "frame": {
+            "x": 95,
+            "y": 270,
+            "w": 1360,
+            "h": 100
+          },
+          "text": "阅读、提问、整理、写作与演示，围绕同一份本地资料继续工作。",
+          "fit": "none",
+          "fontSize": 36,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "s2",
+          "type": "shape",
+          "frame": {
+            "x": 95,
+            "y": 440,
+            "w": 290,
+            "h": 170
+          },
+          "text": "读",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#245C49",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 0,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s3",
+          "type": "shape",
+          "frame": {
+            "x": 465,
+            "y": 440,
+            "w": 290,
+            "h": 170
+          },
+          "text": "想",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#695187",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 12,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s4",
+          "type": "shape",
+          "frame": {
+            "x": 835,
+            "y": 440,
+            "w": 290,
+            "h": 170
+          },
+          "text": "写",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#285A80",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 24,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s5",
+          "type": "shape",
+          "frame": {
+            "x": 1205,
+            "y": 440,
+            "w": 290,
+            "h": 170
+          },
+          "text": "讲",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#885526",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 36,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "t6",
+          "color": "#D7E5DC",
+          "type": "text",
+          "frame": {
+            "x": 95,
+            "y": 690,
+            "w": 1380,
+            "h": 80
+          },
+          "text": "本演示的内容就是使用说明；页面、表格与流程节点可以继续编辑。",
+          "fit": "none",
+          "fontSize": 28,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t9",
+          "color": "#D7E5DC",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 840,
+            "w": 1200,
+            "h": 40
+          },
+          "text": "PAPER LIBRARY · 使用说明",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t10",
+          "color": "#D7E5DC",
+          "type": "text",
+          "frame": {
+            "x": 1400,
+            "y": 840,
+            "w": 140,
+            "h": 40
+          },
+          "text": "1 / 10",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        }
+      ]
+    },
+    "./slides/002.json": {
+      "id": "guide-2",
+      "name": "先导入，再核对资料",
+      "background": {
+        "color": "#FFFEFA"
+      },
+      "elements": [
+        {
+          "id": "t20",
+          "color": "#885526",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 55,
+            "w": 1400,
+            "h": 45
+          },
+          "text": "01 / 开始使用",
+          "fit": "none",
+          "fontSize": 23,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "t21",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 125,
+            "w": 1400,
+            "h": 110
+          },
+          "text": "先导入，再核对资料",
+          "fit": "none",
+          "fontSize": 52,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "s11",
+          "type": "shape",
+          "frame": {
+            "x": 95,
+            "y": 290,
+            "w": 380,
+            "h": 130
+          },
+          "text": "导入 PDF",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#245C49",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 0,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "l12",
+          "color": "#245C49",
+          "type": "line",
+          "frame": {
+            "x": 500,
+            "y": 355,
+            "w": 90,
+            "h": 1
+          },
+          "strokeWidth": 4,
+          "arrowEnd": true
+        },
+        {
+          "id": "s13",
+          "type": "shape",
+          "frame": {
+            "x": 615,
+            "y": 290,
+            "w": 380,
+            "h": 130
+          },
+          "text": "核对元数据",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#245C49",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 15,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "l14",
+          "color": "#245C49",
+          "type": "line",
+          "frame": {
+            "x": 1020,
+            "y": 355,
+            "w": 90,
+            "h": 1
+          },
+          "strokeWidth": 4,
+          "arrowEnd": true
+        },
+        {
+          "id": "s15",
+          "type": "shape",
+          "frame": {
+            "x": 1135,
+            "y": 290,
+            "w": 370,
+            "h": 130
+          },
+          "text": "阅读与引用",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#245C49",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 30,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "t16",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 100,
+            "y": 460,
+            "w": 380,
+            "h": 145
+          },
+          "text": "PDF、DOI、公开链接\nJSON、RIS、BibTeX",
+          "fit": "none",
+          "fontSize": 32,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t17",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 620,
+            "y": 460,
+            "w": 380,
+            "h": 145
+          },
+          "text": "标题、作者、日期、DOI\n缺失项保留待核对",
+          "fit": "none",
+          "fontSize": 32,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t18",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 1140,
+            "y": 460,
+            "w": 370,
+            "h": 145
+          },
+          "text": "检索与阅读项目\nAPA 7 与 BibLaTeX",
+          "fit": "none",
+          "fontSize": 32,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t19",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 95,
+            "y": 700,
+            "w": 1400,
+            "h": 70
+          },
+          "text": "练习：把配套 PDF 手册导入文献库，作为工具文档阅读。",
+          "fit": "none",
+          "fontSize": 30,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t22",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 840,
+            "w": 1200,
+            "h": 40
+          },
+          "text": "PAPER LIBRARY · 使用说明",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t23",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 1400,
+            "y": 840,
+            "w": 140,
+            "h": 40
+          },
+          "text": "2 / 10",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        }
+      ]
+    },
+    "./slides/003.json": {
+      "id": "guide-3",
+      "name": "把具体问题留在原文旁",
+      "background": {
+        "color": "#FFFEFA"
+      },
+      "elements": [
+        {
+          "id": "t30",
+          "color": "#885526",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 55,
+            "w": 1400,
+            "h": 45
+          },
+          "text": "02 / 阅读与批注",
+          "fit": "none",
+          "fontSize": 23,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "t31",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 125,
+            "w": 1400,
+            "h": 110
+          },
+          "text": "把具体问题留在原文旁",
+          "fit": "none",
+          "fontSize": 52,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "s24",
+          "type": "shape",
+          "frame": {
+            "x": 95,
+            "y": 285,
+            "w": 900,
+            "h": 145
+          },
+          "text": "批注随管理副本 PDF 导出",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#245C49",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 0,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "t25",
+          "color": "#245C49",
+          "type": "text",
+          "frame": {
+            "x": 100,
+            "y": 480,
+            "w": 850,
+            "h": 70
+          },
+          "text": "选中这句话 → 高亮 → 写下问题",
+          "fit": "none",
+          "fontSize": 38,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "t26",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 100,
+            "y": 585,
+            "w": 880,
+            "h": 120
+          },
+          "text": "“换一个阅读器，还能看到这条批注吗？”",
+          "fit": "none",
+          "fontSize": 33,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "s27",
+          "type": "shape",
+          "frame": {
+            "x": 1100,
+            "y": 285,
+            "w": 400,
+            "h": 145
+          },
+          "text": "问 DSH",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#695187",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 18,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "t28",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 1100,
+            "y": 480,
+            "w": 410,
+            "h": 200
+          },
+          "text": "回复关联原批注\n标明 AI 来源\n继续对照原文核实",
+          "fit": "none",
+          "fontSize": 32,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t29",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 95,
+            "y": 755,
+            "w": 1400,
+            "h": 50
+          },
+          "text": "原文件保持不变；实时伴学可选开启，会使用模型额度。",
+          "fit": "none",
+          "fontSize": 26,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t32",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 840,
+            "w": 1200,
+            "h": 40
+          },
+          "text": "PAPER LIBRARY · 使用说明",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t33",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 1400,
+            "y": 840,
+            "w": 140,
+            "h": 40
+          },
+          "text": "3 / 10",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        }
+      ]
+    },
+    "./slides/004.json": {
+      "id": "guide-4",
+      "name": "项目整理资料，画板表达关系",
+      "background": {
+        "color": "#FFFEFA"
+      },
+      "elements": [
+        {
+          "id": "t42",
+          "color": "#885526",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 55,
+            "w": 1400,
+            "h": 45
+          },
+          "text": "03 / 知识与画板",
+          "fit": "none",
+          "fontSize": 23,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "t43",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 125,
+            "w": 1400,
+            "h": 110
+          },
+          "text": "项目整理资料，画板表达关系",
+          "fit": "none",
+          "fontSize": 52,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "s34",
+          "type": "shape",
+          "frame": {
+            "x": 115,
+            "y": 330,
+            "w": 360,
+            "h": 130
+          },
+          "text": "读说明",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#695187",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 0,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "l35",
+          "color": "#695187",
+          "type": "line",
+          "frame": {
+            "x": 500,
+            "y": 395,
+            "w": 120,
+            "h": 1
+          },
+          "strokeWidth": 4,
+          "arrowEnd": true
+        },
+        {
+          "id": "s36",
+          "type": "shape",
+          "frame": {
+            "x": 645,
+            "y": 330,
+            "w": 360,
+            "h": 130
+          },
+          "text": "写问题",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#695187",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 15,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "l37",
+          "color": "#695187",
+          "type": "line",
+          "frame": {
+            "x": 1030,
+            "y": 395,
+            "w": 100,
+            "h": 1
+          },
+          "strokeWidth": 4,
+          "arrowEnd": true
+        },
+        {
+          "id": "s38",
+          "type": "shape",
+          "frame": {
+            "x": 1155,
+            "y": 330,
+            "w": 330,
+            "h": 130
+          },
+          "text": "试导出",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#695187",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 30,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "t39",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 110,
+            "y": 535,
+            "w": 640,
+            "h": 190
+          },
+          "text": "阅读项目\n文献可属于多个主题。\n移出项目只解除关联。",
+          "fit": "none",
+          "fontSize": 32,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t40",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 855,
+            "y": 535,
+            "w": 640,
+            "h": 190
+          },
+          "text": "文献画板\n文字、便签与连线；文献节点可返回阅读器。",
+          "fit": "none",
+          "fontSize": 32,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t41",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 110,
+            "y": 765,
+            "w": 1390,
+            "h": 50
+          },
+          "text": "AI 知识图谱与精读笔记是待审阅草稿，保留出处后再采用。",
+          "fit": "none",
+          "fontSize": 26,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t44",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 840,
+            "w": 1200,
+            "h": 40
+          },
+          "text": "PAPER LIBRARY · 使用说明",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t45",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 1400,
+            "y": 840,
+            "w": 140,
+            "h": 40
+          },
+          "text": "4 / 10",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        }
+      ]
+    },
+    "./slides/005.json": {
+      "id": "guide-5",
+      "name": "写作提案经检查后才落到文件",
+      "background": {
+        "color": "#FFFEFA"
+      },
+      "elements": [
+        {
+          "id": "t53",
+          "color": "#885526",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 55,
+            "w": 1400,
+            "h": 45
+          },
+          "text": "04 / LATEX 工作台",
+          "fit": "none",
+          "fontSize": 23,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "t54",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 125,
+            "w": 1400,
+            "h": 110
+          },
+          "text": "写作提案经检查后才落到文件",
+          "fit": "none",
+          "fontSize": 52,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "s46",
+          "type": "shape",
+          "frame": {
+            "x": 95,
+            "y": 300,
+            "w": 420,
+            "h": 130
+          },
+          "text": "编辑与保存",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#285A80",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 0,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s47",
+          "type": "shape",
+          "frame": {
+            "x": 590,
+            "y": 300,
+            "w": 420,
+            "h": 130
+          },
+          "text": "编译并看 PDF",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#285A80",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 15,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s48",
+          "type": "shape",
+          "frame": {
+            "x": 1085,
+            "y": 300,
+            "w": 420,
+            "h": 130
+          },
+          "text": "自审与提问",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#285A80",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 30,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "t49",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 100,
+            "y": 480,
+            "w": 420,
+            "h": 150
+          },
+          "text": "源码 / PDF 并排\n章节与源码搜索",
+          "fit": "none",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t50",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 595,
+            "y": 480,
+            "w": 420,
+            "h": 150
+          },
+          "text": "本机 latexmk + TeX\n错误与历史版本可回查",
+          "fit": "none",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t51",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 1090,
+            "y": 480,
+            "w": 410,
+            "h": 150
+          },
+          "text": "比较具体替换内容\n接受提案后写入",
+          "fit": "none",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t52",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 95,
+            "y": 720,
+            "w": 1410,
+            "h": 90
+          },
+          "text": "另一窗口已修改时会提示版本冲突；先保留草稿，再比较和恢复。",
+          "fit": "none",
+          "fontSize": 30,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t55",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 840,
+            "w": 1200,
+            "h": 40
+          },
+          "text": "PAPER LIBRARY · 使用说明",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t56",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 1400,
+            "y": 840,
+            "w": 140,
+            "h": 40
+          },
+          "text": "5 / 10",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        }
+      ]
+    },
+    "./slides/006.json": {
+      "id": "guide-6",
+      "name": "说明本身就是可编辑的 Slides 项目",
+      "background": {
+        "color": "#FFFEFA"
+      },
+      "motion": {
+        "camera": {
+          "fromScale": 0.96,
+          "toScale": 1,
+          "delayFrames": 0,
+          "durationFrames": 150
+        }
+      },
+      "elements": [
+        {
+          "id": "t63",
+          "color": "#885526",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 55,
+            "w": 1400,
+            "h": 45
+          },
+          "text": "05 / PLAINDECK",
+          "fit": "none",
+          "fontSize": 23,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "t64",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 125,
+            "w": 1400,
+            "h": 110
+          },
+          "text": "说明本身就是可编辑的 Slides 项目",
+          "fit": "none",
+          "fontSize": 52,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "s57",
+          "type": "shape",
+          "frame": {
+            "x": 95,
+            "y": 310,
+            "w": 420,
+            "h": 130
+          },
+          "text": "导入本套 ZIP",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#885526",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 0,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s58",
+          "type": "shape",
+          "frame": {
+            "x": 590,
+            "y": 310,
+            "w": 420,
+            "h": 130
+          },
+          "text": "修改一句话",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#885526",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 15,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s59",
+          "type": "shape",
+          "frame": {
+            "x": 1085,
+            "y": 310,
+            "w": 420,
+            "h": 130
+          },
+          "text": "保存并导出",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#885526",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 30,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "t60",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 100,
+            "y": 510,
+            "w": 650,
+            "h": 180
+          },
+          "text": "文字 · 图片 · 原生表格\n制作指导 · 主题 · 放映",
+          "fit": "none",
+          "fontSize": 35,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t61",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 870,
+            "y": 510,
+            "w": 630,
+            "h": 180
+          },
+          "text": "入场动画 + 镜头缩放\nPPTX 中进入放映查看",
+          "fit": "none",
+          "fontSize": 35,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t62",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 95,
+            "y": 755,
+            "w": 1400,
+            "h": 60
+          },
+          "text": "PlainDeck ZIP 可重新导入；PPTX 导入目前不支持。",
+          "fit": "none",
+          "fontSize": 28,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t65",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 840,
+            "w": 1200,
+            "h": 40
+          },
+          "text": "PAPER LIBRARY · 使用说明",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t66",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 1400,
+            "y": 840,
+            "w": 140,
+            "h": 40
+          },
+          "text": "6 / 10",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        }
+      ]
+    },
+    "./slides/007.json": {
+      "id": "guide-7",
+      "name": "按交付用途选择导出格式",
+      "background": {
+        "color": "#FFFEFA"
+      },
+      "elements": [
+        {
+          "id": "t68",
+          "color": "#885526",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 55,
+            "w": 1400,
+            "h": 45
+          },
+          "text": "06 / 文件互通",
+          "fit": "none",
+          "fontSize": 23,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "t69",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 125,
+            "w": 1400,
+            "h": 110
+          },
+          "text": "按交付用途选择导出格式",
+          "fit": "none",
+          "fontSize": 52,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "formats",
+          "type": "table",
+          "frame": {
+            "x": 95,
+            "y": 295,
+            "w": 1410,
+            "h": 430
+          },
+          "cells": [
+            [
+              "格式",
+              "适合做什么",
+              "继续编辑 / 动画"
+            ],
+            [
+              "PPTX",
+              "交付、演讲、对象编辑",
+              "原生对象；支持入场与镜头"
+            ],
+            [
+              "PDF",
+              "阅读、打印、批注",
+              "静态页面"
+            ],
+            [
+              "HTML",
+              "离线查看与翻页",
+              "不等同于 PPTX 动画播放"
+            ],
+            [
+              "ZIP",
+              "保留 PlainDeck 项目",
+              "可重新导入并继续编辑"
+            ]
+          ],
+          "headerRows": 1,
+          "columnWidths": [
+            1,
+            2,
+            2.5
+          ],
+          "style": "rules",
+          "textColor": "#192620",
+          "headerTextColor": "#FFFFFF",
+          "headerFill": "#245C49",
+          "ruleColor": "#C8D5CD",
+          "cellPadding": 20,
+          "fontSize": 30,
+          "animation": {
+            "enter": "fade",
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "t67",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 95,
+            "y": 765,
+            "w": 1410,
+            "h": 50
+          },
+          "text": "PowerPoint 已有合成放映验证；WPS 尚未完成实机验收。",
+          "fit": "none",
+          "fontSize": 26,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t70",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 840,
+            "w": 1200,
+            "h": 40
+          },
+          "text": "PAPER LIBRARY · 使用说明",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t71",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 1400,
+            "y": 840,
+            "w": 140,
+            "h": 40
+          },
+          "text": "7 / 10",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        }
+      ]
+    },
+    "./slides/008.json": {
+      "id": "guide-8",
+      "name": "两套配色，四种功能含义",
+      "background": {
+        "color": "#FFFEFA"
+      },
+      "elements": [
+        {
+          "id": "t81",
+          "color": "#885526",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 55,
+            "w": 1400,
+            "h": 45
+          },
+          "text": "07 / 可切换工作台主题",
+          "fit": "none",
+          "fontSize": 23,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "t82",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 125,
+            "w": 1400,
+            "h": 110
+          },
+          "text": "两套配色，四种功能含义",
+          "fit": "none",
+          "fontSize": 52,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "s72",
+          "type": "shape",
+          "frame": {
+            "x": 100,
+            "y": 290,
+            "w": 650,
+            "h": 100
+          },
+          "text": "墨绿铜金",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#245C49",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 0,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s73",
+          "type": "shape",
+          "frame": {
+            "x": 850,
+            "y": 290,
+            "w": 650,
+            "h": 100
+          },
+          "text": "深海蓝灰",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#254E70",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 12,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "t74",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 110,
+            "y": 425,
+            "w": 630,
+            "h": 80
+          },
+          "text": "温暖纸面与墨绿操作色",
+          "fit": "none",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t75",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 860,
+            "y": 425,
+            "w": 630,
+            "h": 80
+          },
+          "text": "清亮白底与海蓝操作色",
+          "fit": "none",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "s76",
+          "type": "shape",
+          "frame": {
+            "x": 100,
+            "y": 565,
+            "w": 300,
+            "h": 100
+          },
+          "text": "阅读",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#245C49",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 0,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s77",
+          "type": "shape",
+          "frame": {
+            "x": 465,
+            "y": 565,
+            "w": 300,
+            "h": 100
+          },
+          "text": "知识",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#695187",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 9,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s78",
+          "type": "shape",
+          "frame": {
+            "x": 830,
+            "y": 565,
+            "w": 300,
+            "h": 100
+          },
+          "text": "写作",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#285A80",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 18,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s79",
+          "type": "shape",
+          "frame": {
+            "x": 1195,
+            "y": 565,
+            "w": 300,
+            "h": 100
+          },
+          "text": "Slides",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#885526",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 27,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "t80",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 100,
+            "y": 755,
+            "w": 1400,
+            "h": 60
+          },
+          "text": "设置 → 界面配色。明暗随 DSH；PDF 和批注颜色保持原样。",
+          "fit": "none",
+          "fontSize": 28,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t83",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 840,
+            "w": 1200,
+            "h": 40
+          },
+          "text": "PAPER LIBRARY · 使用说明",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t84",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 1400,
+            "y": 840,
+            "w": 140,
+            "h": 40
+          },
+          "text": "8 / 10",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        }
+      ]
+    },
+    "./slides/009.json": {
+      "id": "guide-9",
+      "name": "让 DSH 找到已保存项目并导出",
+      "background": {
+        "color": "#FFFEFA"
+      },
+      "elements": [
+        {
+          "id": "t92",
+          "color": "#885526",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 55,
+            "w": 1400,
+            "h": 45
+          },
+          "text": "08 / AI 调用",
+          "fit": "none",
+          "fontSize": 23,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "t93",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 125,
+            "w": 1400,
+            "h": 110
+          },
+          "text": "让 DSH 找到已保存项目并导出",
+          "fit": "none",
+          "fontSize": 52,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "t85",
+          "color": "#245C49",
+          "type": "text",
+          "frame": {
+            "x": 100,
+            "y": 285,
+            "w": 1400,
+            "h": 155
+          },
+          "text": "“找到「Paper Library 使用说明」，导出为 PowerPoint，\n返回文件位置和导出提示。”",
+          "fit": "none",
+          "fontSize": 40,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "s86",
+          "type": "shape",
+          "frame": {
+            "x": 100,
+            "y": 500,
+            "w": 420,
+            "h": 110
+          },
+          "text": "查找项目",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#245C49",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 0,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s87",
+          "type": "shape",
+          "frame": {
+            "x": 590,
+            "y": 500,
+            "w": 420,
+            "h": 110
+          },
+          "text": "导出已保存版本",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#245C49",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 15,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s88",
+          "type": "shape",
+          "frame": {
+            "x": 1080,
+            "y": 500,
+            "w": 420,
+            "h": 110
+          },
+          "text": "读取文件与提示",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#245C49",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 30,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "t89",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 100,
+            "y": 650,
+            "w": 440,
+            "h": 65
+          },
+          "text": "library_slides_list",
+          "fit": "none",
+          "fontSize": 28,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t90",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 590,
+            "y": 650,
+            "w": 490,
+            "h": 65
+          },
+          "text": "library_slides_export_pptx",
+          "fit": "none",
+          "fontSize": 27,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t91",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 1080,
+            "y": 650,
+            "w": 440,
+            "h": 65
+          },
+          "text": "path · revision · warnings",
+          "fit": "none",
+          "fontSize": 27,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t94",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 840,
+            "w": 1200,
+            "h": 40
+          },
+          "text": "PAPER LIBRARY · 使用说明",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t95",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 1400,
+            "y": 840,
+            "w": 140,
+            "h": 40
+          },
+          "text": "9 / 10",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        }
+      ]
+    },
+    "./slides/010.json": {
+      "id": "guide-10",
+      "name": "从本套示例开始，保留自己的文件",
+      "background": {
+        "color": "#FFFEFA"
+      },
+      "elements": [
+        {
+          "id": "t100",
+          "color": "#885526",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 55,
+            "w": 1400,
+            "h": 45
+          },
+          "text": "09 / 上手练习",
+          "fit": "none",
+          "fontSize": 23,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "t101",
+          "color": "#192620",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 125,
+            "w": 1400,
+            "h": 110
+          },
+          "text": "从本套示例开始，保留自己的文件",
+          "fit": "none",
+          "fontSize": 52,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 600
+        },
+        {
+          "id": "s96",
+          "type": "shape",
+          "frame": {
+            "x": 100,
+            "y": 290,
+            "w": 1400,
+            "h": 110
+          },
+          "text": "1  导入手册 PDF 并批注",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#245C49",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 0,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s97",
+          "type": "shape",
+          "frame": {
+            "x": 100,
+            "y": 435,
+            "w": 1400,
+            "h": 110
+          },
+          "text": "2  导入 Slides ZIP，修改一句话",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#285A80",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 15,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "s98",
+          "type": "shape",
+          "frame": {
+            "x": 100,
+            "y": 580,
+            "w": 1400,
+            "h": 110
+          },
+          "text": "3  导出 PPTX，进入放映检查",
+          "textColor": "#FFFFFF",
+          "fontSize": 34,
+          "fontFamily": "PingFang SC",
+          "shape": "rounded-rectangle",
+          "fill": "#885526",
+          "radius": 12,
+          "animation": {
+            "enter": "fade-up",
+            "delayFrames": 30,
+            "durationFrames": 24
+          }
+        },
+        {
+          "id": "t99",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 100,
+            "y": 750,
+            "w": 1400,
+            "h": 65
+          },
+          "text": "安装与完整说明：github.com/Mappedinfo/dsh-paper-library",
+          "fit": "none",
+          "fontSize": 28,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t102",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 90,
+            "y": 840,
+            "w": 1200,
+            "h": 40
+          },
+          "text": "PAPER LIBRARY · 使用说明",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        },
+        {
+          "id": "t103",
+          "color": "#52635B",
+          "type": "text",
+          "frame": {
+            "x": 1400,
+            "y": 840,
+            "w": 140,
+            "h": 40
+          },
+          "text": "10 / 10",
+          "fit": "none",
+          "fontSize": 22,
+          "fontFamily": "PingFang SC",
+          "fontWeight": 400
+        }
+      ]
+    }
+  },
+  "deck": {
+    "schemaVersion": "0.1",
+    "id": "paper-library",
+    "title": "Paper Library 使用说明",
+    "canvas": {
+      "width": 1600,
+      "height": 900
+    },
+    "theme": "./theme.json",
+    "footer": {
+      "left": {
+        "type": "none"
+      },
+      "center": {
+        "type": "none"
+      },
+      "right": {
+        "type": "none"
+      }
+    },
+    "slides": [
+      "./slides/001.json",
+      "./slides/002.json",
+      "./slides/003.json",
+      "./slides/004.json",
+      "./slides/005.json",
+      "./slides/006.json",
+      "./slides/007.json",
+      "./slides/008.json",
+      "./slides/009.json",
+      "./slides/010.json"
+    ]
+  }
+}

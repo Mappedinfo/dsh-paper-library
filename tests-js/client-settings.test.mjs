@@ -111,13 +111,13 @@ test('card subscribes to cross-surface accepted snapshots and releases subscript
 })
 
 function walk(node) { return [node, ...(node?.children ?? []).flatMap(child => child && typeof child === 'object' ? walk(child) : [])] }
-test('native card exposes all four labelled controls, quota descriptions and honest persistence states', () => {
+test('native card exposes all labelled controls, quota descriptions and honest persistence states', () => {
   const fixture = scopeFixture({ status: 'loading' })
   const model = createSettingsCardModel(fixture.scope)
   const rendered = PaperLibrarySettingsCard({ model, t: key => key })
   const nodes = walk(rendered)
   const controls = nodes.filter(node => ['input', 'select'].includes(node.type))
-  assert.equal(controls.length, 4)
+  assert.equal(controls.length, 5)
   for (const control of controls) {
     assert.equal(control.props.disabled, true)
     assert.ok(nodes.some(node => node.type === 'label' && node.props.htmlFor === control.props.id))

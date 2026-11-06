@@ -16,3 +16,10 @@
 .library-settings .settings-maintenance strong{font-size:13px}
 .library-settings .settings-maintenance p{margin:5px 0 8px;font-size:12px;color:var(--muted)}
 .library-settings .button{min-height:28px;font-size:12px}.topbar-actions #settings-open{white-space:nowrap}
+.settings-palettes{display:grid;gap:8px}.settings-palette{display:grid;grid-template-columns:18px 66px 1fr;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);cursor:pointer}
+.settings-palette.is-selected{border-color:var(--dsw-alias-link);box-shadow:inset 3px 0 var(--dsw-alias-link)}.settings-palette:focus-within{outline:2px solid var(--dsw-alias-link);outline-offset:2px}
+.settings-palette input{width:15px;height:15px;margin:0;accent-color:var(--dsw-alias-link)}.settings-palette strong{font-size:13px}.settings-palette small{margin-top:1px}
+.palette-swatches{height:24px;border-radius:5px;border:1px solid rgb(0 0 0 / .15);background:linear-gradient(90deg,#245c49 0 34%,#b58b53 34% 67%,#fffefa 67%)}
+[data-palette-option="navy"] .palette-swatches{background:linear-gradient(90deg,#254e70 0 34%,#70869b 34% 67%,#fff 67%)}
+[data-palette-option="system"] .palette-swatches{background:linear-gradient(90deg,var(--dsw-alias-label-primary) 0 34%,var(--dsw-alias-label-secondary) 34% 67%,var(--dsw-alias-bg-base) 67%)}
+.palette-legend{font-size:12px;line-height:1.65;color:var(--muted);margin:3px 0 0}

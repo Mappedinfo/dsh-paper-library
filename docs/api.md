@@ -500,6 +500,8 @@ The audit (`paper-library-bibliography-audit.v1`) reports totals, per-field miss
 
 `settings_get` returns `{namespace, backend, available, writable, revision, value, base, user, native_revision}`. The namespace is `paper-library`. The HTTP revision is an opaque 64-character digest; it is distinct from the numeric revision used by DSH's native settings scope.
 
+`ui_palette` 为 `jade`（默认墨绿铜金）、`navy`（深海蓝灰）或 `system`（跟随 DSH），由同一设置接口保存；非法值拒绝写入。功能色、明暗模式与 PDF 原色的关系见 [设置](../README.md#设置)。
+
 `settings_update` 接收 `{patch, expected_revision}`；`settings_reset` 接收 `{expected_revision}`。可编辑项包括阅读自动化与侧栏偏好、`sync_config`／`external_sources` 外部源配置，以及 `latex_*` 工作台偏好；完整字段、默认值及校验以 [settings.mjs](../src/harness/settings.mjs) 为准。更新只覆盖提交的字段；未知字段和过期修订在写入前拒绝。HTTP 恢复默认会清除全部这些用户覆盖，包括外部源与 LaTeX 偏好，因此新原生阅读设置页不展示该重置按钮。模型、凭据与执行权限不通过此接口设置；语言模型及提示词使用独立的语言设置接口。
 
 With the native provider, updates call `ctx.settings.update/mutate` and use its persistence, change events and revision fences. The old `state_get/state_put` interface for `preferences` projects these four fields from the same native namespace; other state records keep their original storage contract. First migration retains the old record, a private backup and a migration receipt. Explicit native values take precedence and reset fields are never reimported.

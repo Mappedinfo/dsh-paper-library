@@ -85,5 +85,9 @@
     return { dispose }
   }
 
-  window.PaperLibraryTheme = { create, tokens: TOKENS, instance: create() }
+  const setPalette = value => {
+    if (['jade', 'navy', 'system'].includes(value)) window.document.documentElement.dataset.palette = value
+  }
+  setPalette('jade')
+  window.PaperLibraryTheme = { create, tokens: TOKENS, instance: create(), setPalette }
 })()

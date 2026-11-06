@@ -7,10 +7,11 @@ export const SETTINGS_DEFAULTS = Object.freeze({
   analysis_fill: true,
   'auto-paper-conversation': false,
   'reading-panel-side': 'left',
+  ui_palette: 'jade',
 })
 const fields = Object.keys(SETTINGS_DEFAULTS)
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value ?? {}, key)
-const valid = (key, value) => key === 'reading-panel-side'
+const valid = (key, value) => key === 'ui_palette' ? ['jade', 'navy', 'system'].includes(value) : key === 'reading-panel-side'
   ? value === 'left' || value === 'right' : fields.includes(key) && typeof value === 'boolean'
 const writable = snapshot => snapshot.status === 'ready' && snapshot.mode === 'host'
   && snapshot.writable && Number.isSafeInteger(snapshot.revision)
@@ -22,11 +23,12 @@ const locales = {
     analysis_fill: '后台整理后补齐空缺资料', 'analysis_fill.hint': '按有原文依据的 AI 建议补缺，保留已有值；新增资料仍需核对。',
     'auto-paper-conversation': '实时伴学：保存批注后自动回复', 'auto-paper-conversation.hint': '有文字评论的新批注和修改会在主机排队，回复跟随原批注，使用本篇 DSH 模型额度。历史批注不批量重发。',
     'reading-panel-side': '阅读侧栏位置', 'reading-panel-side.hint': '文献库与批注共用的侧栏。', left: '左侧', right: '右侧',
+    ui_palette: '界面配色', 'ui_palette.hint': '功能色对应阅读、知识、写作和演示；明暗随 DSH。', jade: '墨绿铜金', navy: '深海蓝灰', system: '跟随 DSH',
     loading: '正在读取主机设置…', unavailable: '当前连接不提供持久化插件设置。可在 Paper Library 内打开设置，使用主机保存。',
     readonly: '主机设置当前只读。', saving: '正在保存到主机…', saved: '已同步到主机',
     conflict: '设置未保存，已显示主机的当前值。请核对后重试。', failed: '无法确认设置已保存。请检查连接后重试。',
-    reset: '恢复默认设置', 'reset.hint': '清除这四项用户覆盖，恢复 DSH 配置中的默认值。',
-    model: '模型、凭据、主题与字号继续由 DSH 管理。',
+    reset: '恢复默认设置', 'reset.hint': '清除这些用户覆盖，恢复 DSH 配置中的默认值。',
+    model: '模型、凭据、明暗模式与字号继续由 DSH 管理。',
     language: '语言模型与提示词', 'language.model': '模型', 'language.hint': '默认使用 DSH 当前默认模型；也可为翻译和润色单独指定模型与补充提示词。',
     'language.default': '使用 DSH 当前默认模型', 'language.missing': '当前不可用', 'language.translate': '翻译补充提示词', 'language.polish': '润色补充提示词',
     'language.target': '默认翻译目标', 'language.target.auto': '自动：中文译为英文，其他译为中文', 'language.target.zh-CN': '中文', 'language.target.en': '英文',
@@ -34,6 +36,7 @@ const locales = {
     'language.failed': '语言设置读取或保存失败，请检查连接后重试。', 'language.loading': '正在读取语言设置…', 'language.saving': '正在保存语言设置…',
   },
   en: {
+    ui_palette: 'Workspace palette', 'ui_palette.hint': 'Functional colors for reading, knowledge, writing and slides. Light/dark follows DSH.', jade: 'Jade & brass', navy: 'Navy & slate', system: 'Follow DSH',
     title: 'Paper Library', description: 'Shared with the library settings on the host. Open readers update when these choices change.',
     auto_analysis: 'Organize imported or selected papers', 'auto_analysis.hint': 'Newly imported or selected PDFs without a prior analysis enter a serial full-text queue. Uses the paper’s DSH model and model quota.',
     analysis_fill: 'Fill missing metadata after analysis', 'analysis_fill.hint': 'Uses source-backed AI suggestions and preserves existing values. Added metadata still needs review.',
@@ -42,8 +45,8 @@ const locales = {
     loading: 'Loading host settings…', unavailable: 'This connection does not expose durable plugin settings. Open settings inside Paper Library to save on the host.',
     readonly: 'Host settings are read-only.', saving: 'Saving to the host…', saved: 'Synced to the host',
     conflict: 'Settings were not saved. Current host values are shown; review them and retry.', failed: 'Could not confirm the save. Check the connection and retry.',
-    reset: 'Restore defaults', 'reset.hint': 'Clears these four user overrides and restores the DSH configuration defaults.',
-    model: 'Models, credentials, theme and font size remain managed by DSH.',
+    reset: 'Restore defaults', 'reset.hint': 'Clears these user overrides and restores the DSH configuration defaults.',
+    model: 'Models, credentials, light/dark mode and font size remain managed by DSH.',
     language: 'Language model and prompts', 'language.model': 'Model', 'language.hint': 'Uses the current DSH default model unless a language-specific model is selected.',
     'language.default': 'Use the current DSH default model', 'language.missing': 'Unavailable', 'language.translate': 'Additional translation instructions', 'language.polish': 'Additional polishing instructions',
     'language.target': 'Default translation target', 'language.target.auto': 'Automatic: Chinese to English, otherwise Chinese', 'language.target.zh-CN': 'Chinese', 'language.target.en': 'English',
@@ -246,7 +249,9 @@ export function PaperLibrarySettingsCard({ model, t, onMount, canReset = true })
   ...fields.map(key => {
     const id = `paper-library-setting-${key}`
     const value = own(pending, key) ? pending[key] : valid(key, scope.value?.[key]) ? scope.value[key] : SETTINGS_DEFAULTS[key]
-    const input = key === 'reading-panel-side'
+    const input = key === 'ui_palette'
+      ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, event.currentTarget.value) } }, ...['jade', 'navy', 'system'].map(value => h('option', { key: value, value }, t(value))))
+      : key === 'reading-panel-side'
       ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, event.currentTarget.value) } },
         h('option', { value: 'left' }, t('left')), h('option', { value: 'right' }, t('right')))
       : h('input', { id, type: 'checkbox', checked: value, disabled, 'aria-describedby': `${id}-hint`, style: { margin: 0, flex: 'none', accentColor: 'var(--dsw-alias-brand-primary, #171a1f)' }, onChange: event => { void model.set(key, event.currentTarget.checked) } })

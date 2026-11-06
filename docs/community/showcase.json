@@ -13,8 +13,10 @@
     "docs/images/project-latex.jpg",
     "docs/images/handwriting-inline.jpg",
     "docs/images/handwriting-preview.jpg",
-    "docs/images/handwriting-locate.jpg"
+    "docs/images/handwriting-locate.jpg",
+    "docs/demo/theme-jade.png",
+    "docs/demo/theme-navy.png"
   ],
-  "releaseBodyFile": "docs/community/release-v0.2.0.md",
-  "releaseReceiptFile": "docs/community/discussion-comments.json"
+  "releaseBodyFile": "docs/community/update-2026-11-06.md",
+  "releaseReceiptFile": "docs/community/update-2026-11-06.json"
 }
