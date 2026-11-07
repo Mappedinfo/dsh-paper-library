@@ -82,7 +82,7 @@
     let viewport = null, panGesture = null, statistics = null, statisticsFlight = null, statisticsRevision = 0, citationSource = '', focusPaperId = null;
     const markerId = `kg-arrow-${++instanceSequence}`;
     root.classList.add('knowledge-graph');
-    root.innerHTML = `<div class="kg-toolbar"><div><h3>知识图谱</h3><p>记录方法、数据、论点与论据之间的联系。</p></div><div class="kg-actions"><button type="button" class="button subtle" data-kg="add-board">加入画板</button><button type="button" class="button" data-kg="add-node">＋ 节点</button><button type="button" class="button" data-kg="add-edge">＋ 关系</button></div></div>
+    root.innerHTML = `<div class="kg-toolbar"><div><h3>知识图谱</h3><p>记录方法、数据、论点与论据之间的联系。</p></div><div class="kg-actions"><button type="button" class="button subtle" data-kg="extract-references">提取参考文献</button><button type="button" class="button subtle" data-kg="add-board">加入画板</button><button type="button" class="button" data-kg="add-node">＋ 节点</button><button type="button" class="button" data-kg="add-edge">＋ 关系</button></div></div>
       <div class="kg-controls"><label>节点类型 <select data-kg="filter"><option value="">全部类型</option></select></label><button type="button" class="text-button" data-kg="reset">取消聚焦</button></div>
       <div class="kg-legend" data-kg="legend"></div><p class="kg-status" role="status" data-kg="status"></p>
       <div class="kg-canvas" data-kg="canvas"></div><section class="kg-inspector" data-kg="inspector" hidden></section>
@@ -207,7 +207,7 @@
       })(); statisticsFlight = task; return task;
     }
     function evidenceContent(parent, entry) {
-      parent.append(dom('p', 'kg-provenance', entry.provenance === 'ai-analysis' ? `AI 分析 · ${entry.review_status==='accepted'?'已核对':'待核对'}` : ['catalog-metadata','catalog-reference'].includes(entry.provenance) ? '来自已保存文献资料' : '读者记录 · 需要结合原文判断'));
+      parent.append(dom('p', 'kg-provenance', entry.provenance === 'pdf-reference' ? '来自 PDF 参考文献原文 · 未补造题录字段' : entry.provenance === 'ai-analysis' ? `AI 分析 · ${entry.review_status==='accepted'?'已核对':'待核对'}` : ['catalog-metadata','catalog-reference'].includes(entry.provenance) ? '来自已保存文献资料' : '读者记录 · 需要结合原文判断'));
       parent.append(dom('p', 'kg-evidence', evidenceSummary(entry.evidence)));
       if (Number.isInteger(entry.evidence?.page) && entry.evidence.page > 0) {
         if (libraryScope && entry.paper_id && navigatePaper) parent.append(action(`打开来源论文第 ${entry.evidence.page} 页`,()=>navigatePaper(entry.paper_id,entry.evidence.page)));
@@ -219,10 +219,11 @@
       host.replaceChildren(); host.hidden = !node;
       if (!node) return;
       const heading = dom('div', 'kg-inspector-heading'); heading.append(dom('h4', '', nodeName(node)), action('收起', () => { selected = null; render(); })); host.append(heading);
+      if (node.external_reference) host.append(dom('p', 'kg-help', '被引文献尚未匹配库内条目；可以查看参考文献原文与来源页。'));
       if (node.description) host.append(dom('p', 'kg-description', node.description));
       evidenceContent(host, node);
       if (node.identity_reliable === false) host.append(dom('p', 'kg-help', '同名作者尚缺少可区分的资料。补充 ORCID 或不同单位后，才可为其保存读者关系。'));
-      if (node.type === 'paper' && node.id !== paperId) host.append(action('打开文献', () => openPaper?.(node.id)));
+      if (node.type === 'paper' && !node.external_reference && node.id !== paperId) host.append(action('打开文献', () => openPaper?.(node.id)));
       if (node.editable && !libraryScope) {
         const actions = dom('div', 'kg-actions');
         actions.append(action('编辑节点', () => showEditor('node', node)), action('删除节点', () => remove('node', node), 'text-button danger')); host.append(actions);
@@ -290,6 +291,7 @@
     function render() {
       const types = new Set(graph.nodes.map(node => node.type)), legend = el('legend'); legend.replaceChildren();
       for (const [type, label] of Object.entries(TYPES)) if (types.has(type)) { const item = dom('span', `kg-legend-item kg-type-${type}`); item.append(dom('i'), document.createTextNode(label)); legend.append(item); }
+      el('extract-references').hidden = libraryScope; el('extract-references').disabled = busy || !paperId || !getPaper()?.pdf;
       el('add-node').disabled = !paperId; el('add-edge').disabled = graph.nodes.length < 2;
       el('reset').disabled=!selected&&!focusPaperId&&!el('filter').value;
       renderCanvas(); renderInspector(); renderRelations();
@@ -354,6 +356,17 @@
       if (!node) { toast('请先在知识图谱里选中一个节点。', true); return; }
       if (typeof onAddToBoard !== 'function') { toast('画板尚未连接。', true); return; }
       onAddToBoard(node);
+    });
+    el('extract-references').addEventListener('click', async () => {
+      if (busy || !paperId || !getPaper()?.pdf) return;
+      const id = paperId; busy = true; el('extract-references').disabled = true; status('正在读取当前 PDF 的参考文献…');
+      try {
+        const result = await api('graph_references_extract', { id });
+        if (getPaper()?.id !== id) return;
+        graphMode.value = 'citations'; el('filter').value = ''; await load(getPaper());
+        toast(`已保存 ${result.count} 条真实参考文献，来源 PDF 第 ${result.reference_pages.join('、')} 页。`);
+      } catch (error) { if (getPaper()?.id === id) status(`参考文献未更新：${error.message}`, true); }
+      finally { busy = false; el('extract-references').disabled = !paperId || !getPaper()?.pdf; }
     });
     el('cancel').addEventListener('click', closeEditor); form.addEventListener('submit', save);
     el('dialog').addEventListener('cancel', event => { if (busy) event.preventDefault(); else editing = null; });

@@ -373,6 +373,8 @@ def draft_put(library, request):
         raise ValueError("KNOWLEDGE_INVALID: graph draft contains no records")
     if len(encoded(value).encode("utf-8")) > 200000:
         raise ValueError("KNOWLEDGE_INVALID: draft exceeds persistence budget")
+    if request.get("supersedes_draft_id") is not None:
+        value["supersedes_draft_id"] = text(request["supersedes_draft_id"], "supersedes_draft_id", 200)
     # A generation's deterministic ID makes interrupted final persistence replay safe.
     request_id = text(request.get("request_id", ""), "request_id", 160, True)
     value["id"] = "kd-" + (digest(encoded([entity, request_id])) if request_id else uuid.uuid4().hex)
@@ -386,6 +388,14 @@ def draft_put(library, request):
             if existing["fingerprint"] != fingerprint:
                 raise ValueError("KNOWLEDGE_REQUEST_CONFLICT: draft request content changed")
             return existing
+        if value.get("supersedes_draft_id"):
+            previous = get(library, "drafts", value["supersedes_draft_id"])
+            if previous["entity"] != entity or sorted(previous["source_ids"]) != sorted(value["source_ids"]):
+                raise ValueError("KNOWLEDGE_INVALID: replacement draft must keep the same entity and sources")
+            if previous["status"] in {"accepted", "rejected"}:
+                raise ValueError("KNOWLEDGE_INVALID: reviewed draft cannot be superseded automatically")
+            if previous["id"] == value["id"]:
+                raise ValueError("KNOWLEDGE_INVALID: draft cannot supersede itself")
         library.db.execute("INSERT INTO knowledge_drafts VALUES(?,?,?,?,?,?,?)", (value["id"], entity["kind"], entity["id"], encoded(value), 1, value["status"], value["created_at"]))
     return value
 

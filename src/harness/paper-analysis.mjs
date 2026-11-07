@@ -13,12 +13,12 @@ const hash = value => createHash('sha256').update(JSON.stringify(value)).digest(
 const now = () => new Date().toISOString()
 const fail = (message, code = 'ANALYSIS_INVALID', status = 400) => Object.assign(new Error(message), { code, status })
 const runningStates = new Set(['queued', 'reading', 'generating', 'committing'])
-const actions = new Set(['paper_analysis_start', 'paper_analysis_resume', 'paper_analysis_get', 'paper_analysis_cancel', 'paper_analysis_apply', 'paper_analysis_context'])
+const actions = new Set(['paper_analysis_start', 'paper_analysis_resume', 'paper_analysis_repair', 'paper_analysis_get', 'paper_analysis_cancel', 'paper_analysis_apply', 'paper_analysis_context'])
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value)
 const metadataFields = new Set(['title','author','abstract','container-title','publisher','volume','issue','page','issued','publication_dates','language'])
 // Legacy calls keep their exact request fingerprint, including historical defaults.
 const requestOf = input => ({ id:input.id, request_id:input.request_id, ...(input.source_session_id ? {source_session_id:input.source_session_id} : {}),
-  ...(input.resume_from ? {resume_from:input.resume_from} : {}),
+  ...(input.resume_from ? {resume_from:input.resume_from} : {}), ...(input.repair_from ? {repair_from:input.repair_from} : {}),
   ...(input.pages !== undefined ? {pages:[...input.pages]} : input.mode==='metadata' ? {pages:[1]} : {}),
   apply_metadata:input.apply_metadata!==false, review:input.mode==='metadata'?false:input.review!==false,
   ...(input.mode!==undefined?{mode:input.mode}:{}), ...(input.mode==='metadata'?{notes:false}:input.notes!==undefined?{notes:input.notes}:{}), ...analysisInputOptions(input), ...analysisQuestionOptions(input) })
@@ -139,7 +139,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
     const result = { id: value.id, request_id: value.request_id, status: value.status, stage: value.stage,
       created_at: value.created_at, completed_at: value.completed_at, coverage: value.coverage, model: value.model, mode:value.mode||'full',
       questionnaire:value.questionnaire, question_coverage:value.question_coverage, question_summary:value.question_summary,
-      analysis_complete:value.analysis_complete, batch_answers:value.batch_answers, question_results:value.question_results,
+      analysis_complete:value.analysis_complete, repair_from:value.repair_from, source_basis:value.repair_from?'saved-snapshots':'current-pdf', batch_answers:value.batch_answers, question_results:value.question_results,
       batch_compilation:value.batch_compilation, batch_graph_error:value.batch_graph_error, option_candidates:value.option_candidates, prompt_templates:value.prompt_templates,
       metadata: value.metadata, metadata_result: value.metadata_result, warnings: value.warnings || [], error: value.error, error_code:value.error_code,
       batch_metadata:value.batch_metadata,batch_field_sources:value.batch_field_sources,
@@ -449,7 +449,17 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
       if (disposed) throw fail('后台服务已停止。','ANALYSIS_UNAVAILABLE',409)
       if(paper.archived||!paper.pdf)throw fail('请选择在库且已关联 PDF 的文献。')
       const config = input.mode === 'metadata' ? null : loadQuestionnaire()
-      let resume
+      let resume,repair
+      if(input.repair_from){
+        if(input.resume_from)throw fail('修订任务中断后请明确重试修订，不混用全文续跑。')
+        if(!validId(input.repair_from)||input.repair_from===input.request_id)throw fail('修订来源无效。')
+        repair=(await read(input.id,input.repair_from))?.value
+        if(!repair?.questionnaire_snapshot||!['complete','partial'].includes(repair.status)||!repair.batch_count||repair.include_images)throw fail('只能修订已结束的文字分析；中断任务请先继续。')
+        if(repair.questionnaire.hash!==config?.hash)throw fail('题库已改变，不能混用修订。')
+        const scope=value=>{const {request_id,resume_from,repair_from,notes,review,apply_metadata,...rest}=requestOf(value);return rest}
+        if(hash(scope(repair))!==hash(scope(input)))throw fail('修订不能改变原分析范围。')
+        if(!repair.question_summary?.invalid_answers&&!repair.question_summary?.repair_unresolved)throw fail('没有未通过或未解决的判断。')
+      }
       if (input.resume_from) {
         if (!validId(input.resume_from) || input.resume_from === input.request_id) throw fail('恢复来源无效。')
         resume = (await read(input.id,input.resume_from))?.value
@@ -460,7 +470,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
         if (resume.expected_modified && resume.expected_modified !== paper.modified) throw fail('文献已改变，请重新整理。','ANALYSIS_SOURCE_CHANGED',409)
       }
       const protocol = config ? {questionnaire:{version:config.version,hash:config.hash,groups:questionGroups(config,input)},questionnaire_snapshot:config,analysis_complete:false,metadata:{},field_sources:{}} : {}
-      const record=await store.put(key,{...request,...protocol,...(resume?.model?{resume_model:resume.model}:{}),prompt_templates:promptTemplateManifest(),fingerprint:hash(request),status:'queued',stage:'已排队',created_at:now(),...(execution==='direct'?{execution:'direct'}:{})},0)
+      const record=await store.put(key,{...request,...protocol,...(resume?.model?{resume_model:resume.model}:{}),...(repair?{resume_model:repair.model,repair_batch_count:repair.batch_count,repair_expected_modified:repair.expected_modified}:{}),prompt_templates:promptTemplateManifest(),fingerprint:hash(request),status:'queued',stage:'已排队',created_at:now(),...(execution==='direct'?{execution:'direct'}:{})},0)
       const pointer=await store.get(latestKey(input.id))
       await store.put(latestKey(input.id),{request_id:input.request_id},pointer.revision)
       if (disposed) throw fail('后台服务已停止。','ANALYSIS_UNAVAILABLE',409)
@@ -474,11 +484,12 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
     if(!actions.has(input?.action)||!validId(input.id)||input.id.startsWith('dataset_'))throw fail('请选择文献。')
     if(input.request_id!==undefined&&!validId(input.request_id))throw fail('请求标识无效。')
     if(input.source_session_id!==undefined&&(typeof input.source_session_id!=='string'||!input.source_session_id||input.source_session_id.length>200||/[\x00-\x1f]/.test(input.source_session_id)))throw fail('来源对话标识无效。')
-    if(input.action==='paper_analysis_resume'){
+    if(input.action==='paper_analysis_resume'||input.action==='paper_analysis_repair'){
       const saved=await read(input.id,input.request_id)
       if(!saved?.value)throw fail('没有可继续的任务。')
       if(input.new_request_id!==undefined&&!validId(input.new_request_id))throw fail('新请求标识无效。')
-      return handle({...requestOf(saved.value),action:'paper_analysis_start',reuse:false,resume_from:saved.value.request_id,request_id:input.new_request_id||randomUUID()})
+      const {resume_from,repair_from,...original}=requestOf(saved.value)
+      return handle({...original,action:'paper_analysis_start',reuse:false,...(input.action==='paper_analysis_repair'?{repair_from:saved.value.request_id,notes:false,review:false,apply_metadata:false}:{resume_from:saved.value.request_id}),request_id:input.new_request_id||randomUUID()})
     }
     if(input.action==='paper_analysis_start'){
       validateMode(input)

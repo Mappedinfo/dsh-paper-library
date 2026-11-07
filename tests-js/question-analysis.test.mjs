@@ -415,3 +415,56 @@ test('resume after a failed group preserves the first response and calls only un
   assert.equal(f.calls.length,5)
   assert.equal(result.question_summary.reused_groups,1)
 })
+
+test('repair uses immutable snapshots, changes only failed answers, and supersedes drafts without changing old jobs',async t=>{
+ const f=await fixture(t);const chosen=['q1_method'];
+ f.response=input=>JSON.stringify({answers:[{question_id:chosen[0],choice:'method',judgment:'合成方法。',evidence:[{source_id:'S1',quote:'Method A produced result B.'}]},...(input.analysisContext.batch_index===0?[{question_id:chosen[0],choice:'method',judgment:'需修正的合成方法。',evidence:[{source_id:'S1',quote:'fabricated quote'}]}]:[])]})
+ const old=await f.run({question_ids:chosen});assert.equal(old.question_summary.invalid_answers,1)
+ const oldBatch=await f.handle({action:'paper_analysis_get',id:'paper-a',request_id:'run-a',batch_index:0,include_raw:true})
+ const invalid=oldBatch.batch_answers.find(a=>!a.valid),before=f.calls.length,reads=f.kernel.filter(x=>x.action==='paper_analysis_batch').length
+ f.modified='annotation-only-change'
+ f.response=()=>JSON.stringify({repairs:[{answer_id:invalid.id,reason:'按快照纠正引文。',answer:{question_id:chosen[0],choice:'method',judgment:'需修正的合成方法。',evidence:[{source_id:'S1',quote:'Check the evidence before accepting a conclusion.'}]}}]})
+ await f.handle({action:'paper_analysis_repair',id:'paper-a',request_id:'run-a',new_request_id:'repair-a'});await f.handle.wait('paper-a','repair-a')
+ const repaired=await f.handle({action:'paper_analysis_get',id:'paper-a',request_id:'repair-a',batch_index:0})
+ assert.equal(repaired.question_summary.invalid_answers,0,JSON.stringify(repaired));assert.equal(repaired.question_summary.repair_repaired,1)
+ assert.equal(repaired.source_basis,'saved-snapshots');assert.equal(f.calls.length,before+1)
+ assert.equal(f.kernel.filter(x=>x.action==='paper_analysis_batch').length,reads)
+ assert.equal(repaired.batch_answers[0].id,oldBatch.batch_answers[0].id)
+ assert.equal((await f.handle({action:'paper_analysis_get',id:'paper-a',request_id:'run-a'})).question_summary.invalid_answers,1)
+ assert.ok(f.kernel.filter(x=>x.action==='knowledge_draft_put'&&x.supersedes_draft_id).length===2)
+ await f.handle({action:'paper_analysis_repair',id:'paper-a',request_id:'run-a',new_request_id:'repair-a'});assert.equal(f.calls.length,before+1)
+})
+
+test('failed repair preserves the original valid and invalid answers',async t=>{
+ const f=await fixture(t),chosen=['q1_method'];
+ f.response=()=>JSON.stringify({answers:[{question_id:chosen[0],choice:'method',judgment:'保留。',evidence:[{source_id:'S1',quote:'Method A produced result B.'}]},{question_id:chosen[0],choice:'method',judgment:'未通过。',evidence:[{source_id:'S1',quote:'fabricated quote'}]}]})
+ const old=await f.run({question_ids:chosen});f.response=()=>{throw new Error('synthetic model failure')}
+ await f.handle({action:'paper_analysis_repair',id:'paper-a',request_id:'run-a',new_request_id:'repair-failed'});await f.handle.wait('paper-a','repair-failed')
+ const result=await f.handle({action:'paper_analysis_get',id:'paper-a',request_id:'repair-failed'})
+ assert.equal(result.question_summary.answers,old.question_summary.answers)
+ assert.equal(result.question_summary.valid_answers,old.question_summary.valid_answers)
+ assert.equal(result.question_summary.invalid_answers,old.question_summary.invalid_answers)
+ assert.equal(result.question_summary.repair_unresolved,2)
+})
+
+test('retry accepts unresolved semantic review with zero invalid quotes and preserves it on another failure',async t=>{
+ const f=await fixture(t);const chosen=['q1_method'];
+ f.response=()=>JSON.stringify({answers:[{question_id:chosen[0],choice:'method',judgment:'合成方法。',evidence:[{source_id:'S1',quote:'Method A produced result B.'}]}]});
+ const initial=await f.run({question_ids:chosen});
+ // 模拟旧修订在来源定位恢复后发生请求失败的持久状态。
+ const {createHash}=await import('node:crypto'),hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+ const key=`analysis.job:${hash('paper-a')}:${hash('run-a')}`,job=await f.store.get(key);
+ await f.store.put(key,{...job.value,status:'partial',question_summary:{...initial.question_summary,repair_unresolved:1}},job.revision);
+ const groupKey=questionKey('paper-a','run-a',0,0),group=await f.store.get(groupKey);
+ const savedGroup=await readQuestionGroup(f.store,groupKey,true),answer=savedGroup.answers[0],rawAnswer=JSON.parse(savedGroup.raw).answers[0];
+ await f.store.put(groupKey,{...group.value,status:'partial',request_error:{code:'MODEL_REQUEST_FAILED',message:'Synthetic failure'},repair_log:[{previous_id:answer.id,status:'unresolved',reason:'Semantic review incomplete'}]},group.revision);
+ f.response=()=>{throw new Error('Synthetic retry failure')};
+ await f.handle({action:'paper_analysis_repair',id:'paper-a',request_id:'run-a',new_request_id:'retry-failed'});await f.handle.wait('paper-a','retry-failed');
+ const failed=await f.handle({action:'paper_analysis_get',id:'paper-a'});
+ assert.equal(failed.question_summary.invalid_answers,0);assert.equal(failed.question_summary.repair_unresolved,1);
+ const before=f.calls.length;
+ f.response=()=>JSON.stringify({repairs:[{answer_id:answer.id,reason:'按来源确认本项。',answer:rawAnswer}]});
+ await f.handle({action:'paper_analysis_repair',id:'paper-a',request_id:'retry-failed',new_request_id:'retry-complete'});await f.handle.wait('paper-a','retry-complete');
+ const final=await f.handle({action:'paper_analysis_get',id:'paper-a'});
+ assert.equal(final.question_summary.repair_unresolved,0);assert.equal(final.question_summary.repair_revalidated,1);assert.equal(final.status,'complete');assert.equal(f.calls.length,before+1);
+});

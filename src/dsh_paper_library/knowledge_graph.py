@@ -253,7 +253,7 @@ def _draft_projection(library, paper_id):
     """投影已保存、有来源的分析草稿；不读 PDF、不调用模型、不自动核准。"""
     if not library.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_drafts'").fetchone():
         return [], [], False
-    rows = library.db.execute("SELECT payload FROM knowledge_drafts WHERE entity_kind='paper' AND entity_id=? AND status!='rejected' AND json_array_length(payload,'$.nodes')>0 ORDER BY created DESC,id DESC LIMIT 21", (paper_id,)).fetchall()
+    rows = library.db.execute("SELECT old.payload FROM knowledge_drafts old WHERE old.entity_kind='paper' AND old.entity_id=? AND old.status!='rejected' AND json_array_length(old.payload,'$.nodes')>0 AND (old.status='accepted' OR NOT EXISTS(SELECT 1 FROM knowledge_drafts newer WHERE newer.entity_kind=old.entity_kind AND newer.entity_id=old.entity_id AND newer.status!='rejected' AND json_array_length(newer.payload,'$.nodes')>0 AND json_extract(newer.payload,'$.supersedes_draft_id')=old.id)) ORDER BY old.created DESC,old.id DESC LIMIT 21", (paper_id,)).fetchall()
     nodes, edges = [], []
     for row in rows[:20]:
         draft = json.loads(row["payload"])
@@ -325,7 +325,7 @@ def get_graph(library, id=None, limit=100, offset=0, focus_id=None, view="all"):
         items = [focus] + [item for item in items if item["id"] != focus_id]
     nodes, edges, seen = [], [], set()
     truncated = bool(not id and listing["total"] > len(items))
-    warnings = []
+    warnings, reference_snapshots = [], []
 
     def append_node(node):
         nonlocal truncated
@@ -365,6 +365,16 @@ def get_graph(library, id=None, limit=100, offset=0, focus_id=None, view="all"):
                      "editable": False, "provenance": "catalog-metadata", "evidence": {"page": None, "source": "title"}})
     for item in items:
         paper_id = item["id"]
+        # 引用先于分析／作者投影，避免有效参考文献被普通知识节点耗尽预算。
+        from .paper_references import project as project_references
+        reference_nodes, reference_edges, reference_snapshot = project_references(library, item)
+        if reference_snapshot:
+            reference_snapshots.append(reference_snapshot)
+            warnings.extend(reference_snapshot['warnings'])
+        for node in reference_nodes:
+            append_node(node)
+        for edge in reference_edges:
+            append_edge(edge)
         if view == "all":
             rows = library.db.execute("SELECT * FROM knowledge_nodes WHERE paper_id=? ORDER BY created,id LIMIT ?", (paper_id, limit + 1)).fetchall()
             truncated |= len(rows) > limit
@@ -415,7 +425,7 @@ def get_graph(library, id=None, limit=100, offset=0, focus_id=None, view="all"):
                           "next_offset": offset + window_count if offset + window_count < listing["total"] else None,
                           "previous_offset": max(0, offset - min(limit, 40)) if offset else None} if not id else {})},
             "semantics": "Catalog metadata, reader assertions and explicitly labeled saved AI analysis drafts; no person identity merging",
-            "node_types": list(NODE_TYPES), "relations": list(RELATIONS)}
+            "reference_snapshots": reference_snapshots, "node_types": list(NODE_TYPES), "relations": list(RELATIONS)}
 
 
 def _endpoint(library, paper_id, node_id):

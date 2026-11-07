@@ -602,6 +602,10 @@ def dispatch(request):
             # Indexing of corpora another tool syncs: symlinks in, no copies out.
             from . import external
             return external.dispatch(library, request)
+        if action in {"graph_references_extract", "graph_references_get"}:
+            from . import paper_references
+            library.get(request.get("id"))
+            return paper_references.extract(library, request) if action.endswith("extract") else paper_references.saved(library, request["id"])
         if action == "graph_statistics":
             from .knowledge_graph import get_statistics
             return get_statistics(library)

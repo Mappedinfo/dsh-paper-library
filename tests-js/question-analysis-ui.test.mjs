@@ -107,3 +107,19 @@ test('stopped analysis exposes an explicit resume action with the saved request 
   assert.deepEqual(calls.find(c=>c.action==='paper_analysis_resume'),{action:'paper_analysis_resume',id:'paper-a',request_id:'old-run',new_request_id:'next-run'});
   assert.equal(calls.some(c=>c.action==='paper_analysis_start'),false);ui.dispose();
 });
+
+test('partial analysis offers targeted repair using the original request identity',async()=>{
+  const document=documentFixture(),window={},calls=[];
+  vm.runInNewContext(readFileSync(new URL('../web/paper-analysis.js',import.meta.url),'utf8'),{window,document,setTimeout,clearTimeout,crypto:{randomUUID:()=> 'repair-run'}});
+  const ui=window.PaperAnalysis.create({state:{active:{id:'paper-a',pdf:true,title:'Synthetic'}},api:async(action,args)=>{calls.push({action,...args});return action==='paper_analysis_repair'?{status:'queued',request_id:'repair-run'}:{status:'partial',request_id:'original',questionnaire:{version:'synthetic'},question_summary:{answers:3,valid_answers:2,invalid_answers:1}};},persistence:{get:async()=>({auto_analysis:false}),patch:async()=>{},flush:async()=>{}},toast(){}});
+  await ui.setAvailable(true);await settle();document.getElementById('analysis-repair').listeners.click();await settle();
+  assert.deepEqual(calls.find(c=>c.action==='paper_analysis_repair'),{action:'paper_analysis_repair',id:'paper-a',request_id:'original',new_request_id:'repair-run'});ui.dispose();
+});
+
+test('zero invalid quotes does not hide a failed semantic repair',async()=>{
+ const document=documentFixture(),window={},calls=[];
+ vm.runInNewContext(readFileSync(new URL('../web/paper-analysis.js',import.meta.url),'utf8'),{window,document,setTimeout,clearTimeout,crypto:{randomUUID:()=> 'retry-run'}});
+ const ui=window.PaperAnalysis.create({state:{active:{id:'paper-a',pdf:true,title:'Synthetic'}},api:async(action,args)=>{calls.push({action,...args});return action==='paper_analysis_repair'?{status:'queued',request_id:'retry-run'}:{status:'partial',request_id:'failed-repair',repair_from:'original',questionnaire:{version:'synthetic'},question_summary:{answers:3,valid_answers:3,invalid_answers:0,repair_unresolved:1}};},persistence:{get:async()=>({auto_analysis:false}),patch:async()=>{},flush:async()=>{}},toast(){}});
+ await ui.setAvailable(true);await settle();assert.match(document.getElementById('analysis-result').textContent,/未解决 1/);document.getElementById('analysis-repair').listeners.click();await settle();
+ assert.equal(calls.find(c=>c.action==='paper_analysis_repair').request_id,'failed-repair');ui.dispose();
+});

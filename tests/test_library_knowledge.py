@@ -285,3 +285,18 @@ def test_invalid_paths_and_source_credentials_fail_closed(catalog):
         source(catalog, url="https://name:password@example.org/data")
     with pytest.raises(ValueError, match="identifier"):
         call(catalog, "knowledge_source_get", id="../catalog.sqlite3")
+
+
+def test_replacement_draft_keeps_sources_and_preserves_old_record(catalog):
+    first_source = source(catalog)
+    first = draft(catalog, first_source)
+    replacement = draft(catalog, first_source, request_id='graph-repair', supersedes_draft_id=first['id'])
+    assert replacement['supersedes_draft_id'] == first['id']
+    assert call(catalog, 'knowledge_draft_get', id=first['id'])['status'] == 'needs-review'
+    assert draft(catalog, first_source, request_id='graph-repair', supersedes_draft_id=first['id'])['id'] == replacement['id']
+    second_source = source(catalog, text='A different synthetic excerpt.')
+    with pytest.raises(ValueError, match='same entity and sources'):
+        draft(catalog, second_source, request_id='wrong-source', supersedes_draft_id=first['id'])
+    accept(catalog, first)
+    with pytest.raises(ValueError, match='reviewed draft'):
+        draft(catalog, first_source, request_id='reviewed-repair', supersedes_draft_id=first['id'])

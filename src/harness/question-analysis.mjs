@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
+import { repairAnswers, repairTargetIds } from './answer-repair.mjs'
 import { analysisInputOptions } from '../analysis-input.mjs'
 import { questionGroups, makeReadingPrompt, parseReadingAnswers, compileReadingGraph, summarizeOptionCandidates } from '../reading-questions.mjs'
 import { isFatalModelError, safeModelErrorMessage, safeTruncationDetails } from '../model-errors.mjs'
@@ -13,12 +14,16 @@ export const questionKey = (id, requestId, batch, group) => `analysis.question:$
 /** 回答与原始响应分开保存，避免一个 256 KiB 状态条目重复塞入引文。 */
 async function saveResponse(store, record, parsed) {
   const key = record.key
+  const {repair_raw,...recordValue}=record.value
+  const repairRaw=typeof repair_raw==='string'?repair_raw:''
+  const repairKeys=Array.from({length:Math.ceil(repairRaw.length/16000)},(_,index)=>`${key}:repair-raw:${index}`)
   const raw = typeof parsed.raw === 'string' ? parsed.raw : ''
   const rawKeys = Array.from({ length: Math.ceil(raw.length / 16000) }, (_, index) => `${key}:raw:${index}`)
   const answerKeys = parsed.answers.map((_, index) => `${key}:answer:${index}`)
   // 先公布预期清单。中途断电或写失败时，读取端能报告缺片而不是隐藏已写响应。
-  const manifest = await store.put(key, clone({ ...record.value, status: 'saving', answer_keys: answerKeys, raw_keys: rawKeys,
+  const manifest = await store.put(key, clone({ ...recordValue, status: 'saving', answer_keys: answerKeys, raw_keys: rawKeys, ...(repairKeys.length?{repair_raw_keys:repairKeys,repair_raw_sha256:hash(repairRaw)}:{}),
     raw_sha256: hash(raw), raw_truncated: parsed.raw_truncated === true }), record.revision)
+  for(const [index,part] of repairKeys.entries())await store.put(part,{text:repairRaw.slice(index*16000,(index+1)*16000)},0)
   for (const [index, part] of rawKeys.entries()) {
     await store.put(part, { text: raw.slice(index * 16000, (index + 1) * 16000) }, 0)
   }
@@ -49,9 +54,11 @@ export async function readQuestionGroup(store, key, includeRaw = false) {
     }
     if (value.raw_sha256 && hash(raw) !== value.raw_sha256) missingParts.push('RAW_HASH_MISMATCH')
   }
-  const { answer_keys, raw_keys, ...publicValue } = value
+  let repairRaw
+  if(includeRaw&&value.repair_raw_keys){repairRaw='';for(const key of value.repair_raw_keys){const part=(await store.get(key)).value;if(typeof part?.text==='string')repairRaw+=part.text;else missingParts.push(key)}if(hash(repairRaw)!==value.repair_raw_sha256)missingParts.push('REPAIR_RAW_HASH_MISMATCH')}
+  const { answer_keys, raw_keys, repair_raw_keys, repair_raw_sha256, ...publicValue } = value
   return { ...publicValue, answers, ...(missingParts.length ? { status: 'partial', stored_status: value.status, missing_parts: missingParts } : {}),
-    ...(includeRaw ? { raw, raw_complete: Boolean(value.raw_sha256) && !missingParts.length && !value.raw_truncated } : {}) }
+    ...(includeRaw ? { raw, ...(repairRaw ? {repair_raw:repairRaw} : {}), raw_complete: Boolean(value.raw_sha256) && !missingParts.length && !value.raw_truncated } : {}) }
 }
 
 export async function readQuestionBatch(store, batch, { includeRaw = false } = {}) {
@@ -70,7 +77,7 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
     by_question: Object.fromEntries(ids.map(id => [id, { expected_batches: 0, answered_batches: 0, failed_batches: [], unread_batches: [], valid_answers: 0 }])) }
   let coverage = { read_pages: [], completed_pages: [], blank_pages: [], truncated_pages: [], omitted_pages: [], no_extractable_text_pages: [], empty_markdown_pages: [], characters: 0, full_document: false }
   let cursor, version, expected, model, hasText = false, batchCount = 0, projectionFailures = 0
-  const summary = { answers: 0, valid_answers: 0, invalid_answers: 0, other_answers: 0, projection_limitations: 0, reused_groups: 0 }
+  const summary = { answers: 0, valid_answers: 0, invalid_answers: 0, other_answers: 0, projection_limitations: 0, reused_groups: 0, repair_revalidated:0, repair_repaired:0, repair_withdrawn:0, repair_unresolved:0 }
   let visual, job = input
   const patch = async value => { job = await update(value); return job }
   const warnings = []
@@ -79,7 +86,12 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
     if (index >= 10000) throw problem('阅读批次数达到上限；已保存内容保留。')
     await patch({ status: 'reading', stage: `读取第 ${index + 1} 批` })
     const readSignal = AbortSignal.any([signal, AbortSignal.timeout(180000)])
-    const pack = sourcePack(await kernel({ action: 'paper_analysis_batch', id: input.id, ...analysisInputOptions(input),
+    const originalBatch = input.repair_from ? (await store.get(batchKey(input.id,input.repair_from,index))).value : null
+    if(input.repair_from && !originalBatch)throw problem('原批次快照缺失，不能修订。')
+    const snapshotPack = originalBatch ? {paper:{id:input.id},expected_modified:input.repair_expected_modified,file_version:{snapshot:input.repair_from},
+      sources:await Promise.all(originalBatch.source_ids.map(id=>kernel({action:'knowledge_source_get',id},readSignal))), source_ids:originalBatch.source_ids,coverage:originalBatch.coverage,preprocessing:originalBatch.preprocessing,
+      next_cursor:index+1<input.repair_batch_count?{index:index+1,offset:0}:null} : null
+    const pack = sourcePack(snapshotPack || await kernel({ action: 'paper_analysis_batch', id: input.id, ...analysisInputOptions(input),
       ...(input.pages ? { pages: input.pages } : {}), ...(cursor ? { cursor } : {}), ...(version ? { file_version: version } : {}) }, readSignal), input.id, input)
     signal.throwIfAborted()
     if (expected && (pack.expected_modified !== expected || version && !isDeepStrictEqual(pack.file_version, version))) throw problem('读取期间文献资料或 PDF 已改变，已完成批次保留；请重新整理。')
@@ -113,24 +125,33 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
         questionKeys.push(key)
         // 先保存题组入口。进程在请求途中退出时，仍可读取已经完成的组，不自动重放。
         await patch({ batch_index: index, active_question_keys: questionKeys })
-        let parsed, requestError
+        let parsed, requestError, saved
         try {
           const callTimeout = Number.isSafeInteger(modelTimeoutMs) ? modelTimeoutMs
             : Number.isSafeInteger(agent.modelTimeoutMs) ? agent.modelTimeoutMs : 180000
           const callSignal = AbortSignal.any([signal, AbortSignal.timeout(callTimeout)])
-          const saved = input.resume_from ? await readQuestionGroup(store, questionKey(input.id,input.resume_from,index,groupIndex),true) : null
+          const priorId=input.repair_from||input.resume_from
+          saved = priorId ? await readQuestionGroup(store, questionKey(input.id,priorId,index,groupIndex),true) : null
           const reusable = saved?.raw_complete && saved.raw && !saved.request_error && ['complete','partial'].includes(saved.status)
           if (saved && (saved.prompt_hash !== hash(prompt) || saved.questionnaire_hash !== config.hash || !isDeepStrictEqual(saved.source_ids,pack.source_ids))) throw Object.assign(problem('恢复时来源或提示已改变，请重新整理。'),{code:'ANALYSIS_SOURCE_CHANGED'})
-          const raw = reusable ? saved.raw : await agent({ prompt, ...model, signal: callSignal, ...(pack.images.length ? { images: pack.images } : {}),
+          const invoke = text => agent({ prompt:text, ...model, signal: callSignal, ...(pack.images.length ? { images: pack.images } : {}),
             analysisContext: { id: input.id, request_id: input.request_id, stage: 'batch', batch_index: index, question_ids: questionIds,
               source_ids: [...pack.source_ids], pages: [...pack.coverage.read_pages] } })
-          if(reusable){reusedGroups++;summary.reused_groups++;groupRecord={...groupRecord,value:{...groupRecord.value,reused_from:input.resume_from}}}
+          let raw
+          if(input.repair_from){
+            const repaired=await repairAnswers(saved,pack,questionIds,config,invoke)
+            parsed=repaired.parsed;raw=parsed.raw
+            groupRecord={...groupRecord,value:{...groupRecord.value,repair_from:input.repair_from,repair_log:repaired.log,...(repaired.raw?{repair_raw:repaired.raw}:{})}}
+            for(const row of repaired.log)summary[`repair_${row.status}`]++
+            if(!repaired.raw)summary.reused_groups++
+          }else raw=reusable?saved.raw:await invoke(prompt)
+          if(reusable&&!input.repair_from){reusedGroups++;summary.reused_groups++;groupRecord={...groupRecord,value:{...groupRecord.value,reused_from:input.resume_from}}}
           signal.throwIfAborted()
           if (visual) {
             pack.visual_coverage.sent_pages = pack.images.map(image => image.page)
             visual.sent_pages = union(visual.sent_pages, pack.visual_coverage.sent_pages)
           }
-          parsed = parseReadingAnswers(raw, pack, questionIds, config)
+          parsed ||= parseReadingAnswers(raw, pack, questionIds, config)
         } catch (error) {
           if (signal.aborted) throw error
           if (error.code === 'ANALYSIS_SOURCE_CHANGED') throw error
@@ -138,7 +159,11 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
           const details = safeTruncationDetails(error)
           requestError = { code, message: isFatalModelError({ code }) || code === 'DIRECT_MODEL_OUTPUT_TRUNCATED'
             ? safeModelErrorMessage(code) : String(error.message).slice(0, 1200), ...(details ? { details } : {}) }
-          parsed = { answers: [], errors: [requestError], missing: questionIds, raw: '' }
+          if(input.repair_from && saved?.raw_complete){
+            parsed=parseReadingAnswers(saved.raw,pack,questionIds,config);parsed.errors.push(requestError)
+            const log=[...repairTargetIds(saved)].map(id=>({previous_id:id,status:'unresolved',reason:requestError.message}))
+            summary.repair_unresolved+=log.length;groupRecord={...groupRecord,value:{...groupRecord.value,repair_log:log}}
+          }else parsed = { answers: [], errors: [requestError], missing: questionIds, raw: '' }
         }
         groupRecord = await saveResponse(store, groupRecord, parsed)
         const complete = !parsed.errors.length && !parsed.missing.length && parsed.answers.length > 0
@@ -176,7 +201,7 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
       try {
         const previousBatch = input.resume_from && reusedGroups === groups.length ? (await store.get(batchKey(input.id,input.resume_from,index))).value : null
         draft = previousBatch?.draft_id && !previousBatch.graph_error ? await kernel({action:'knowledge_draft_get',id:previousBatch.draft_id},signal) : await kernel({ action: 'knowledge_draft_put', entity: { kind: 'paper', id: input.id }, mode: content.nodes.length ? 'graph' : 'note',
-          ...content, source_ids: pack.source_ids, request_id: `analysis-${hash([input.id, input.request_id, index])}`, origin: 'llm', model }, signal)
+          ...content, source_ids: pack.source_ids, ...(input.repair_from && originalBatch.draft_id ? {supersedes_draft_id:originalBatch.draft_id} : {}), request_id: `analysis-${hash([input.id, input.request_id, index])}`, origin: 'llm', model }, signal)
       } catch (error) {
         if (signal.aborted) throw error
         projectionFailures++

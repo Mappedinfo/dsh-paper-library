@@ -170,7 +170,23 @@ function uniqueIndex(text, quote) {
   const index = text.indexOf(quote)
   return index >= 0 && text.indexOf(quote, index + 1) < 0 ? index : -1
 }
-/** 只恢复唯一空白匹配，不改字符、标点、断词或 Markdown。偏移使用 JS UTF-16。 */
+// 仅处理 PDF 排版：固定拉丁连字、行末断词。始终映射回原始 UTF-16 范围。
+function pdfTypography(text, removeHyphen) {
+  const ligatures = { 'ﬀ':'ff', 'ﬁ':'fi', 'ﬂ':'fl', 'ﬃ':'ffi', 'ﬄ':'ffl', 'ﬅ':'st', 'ﬆ':'st' }
+  let value = '', starts = [], ends = []
+  for (let i = 0; i < text.length;) {
+    const broken = i > 0 && /[A-Za-z]/.test(text[i-1]) && text.slice(i).match(/^-[ \t]*\r?\n[ \t]*(?=[A-Za-z])/)
+    let end = i + 1, part
+    if (broken) { end = i + broken[0].length; part = removeHyphen ? '' : '-' }
+    else if (/\s/u.test(text[i])) { const space = text.slice(i).match(/^\s+/u)[0]; end = i + space.length; part = ' ' }
+    else part = ligatures[text[i]] || text[i]
+    value += part
+    for (let n = 0; n < part.length; n++) { starts.push(i); ends.push(end) }
+    i = end
+  }
+  return { value, starts, ends }
+}
+/** 只恢复唯一的空白／PDF 排版等价片段，不做语义或拼写模糊匹配。 */
 function locateQuote(source, submitted, cache) {
   let start = uniqueIndex(source.text, submitted)
   if (start >= 0) return { quote: submitted, start_utf16: start, end_utf16: start + submitted.length, match: 'exact' }
@@ -179,7 +195,23 @@ function locateQuote(source, submitted, cache) {
   if (!cache.has(source.id)) cache.set(source.id, collapsed(source.text))
   const mapped = cache.get(source.id), normalized = submitted.replace(/\s+/gu, ' ')
   const index = uniqueIndex(mapped.value, normalized)
-  if (index < 0) return null
+  if (index < 0) {
+    const spans = new Map()
+    for (const removeHyphen of [false, true]) {
+      const key = `${source.id}:pdf:${removeHyphen}`
+      if (!cache.has(key)) cache.set(key, pdfTypography(source.text, removeHyphen))
+      const pdf = cache.get(key), wanted = pdfTypography(submitted, removeHyphen).value
+      let offset = pdf.value.indexOf(wanted), count = 0
+      while (wanted && offset >= 0) {
+        const start = pdf.starts[offset], end = pdf.ends[offset + wanted.length - 1]
+        const quote = source.text.slice(start,end)
+        if (pdfTypography(quote,removeHyphen).value === wanted) spans.set(`${start}:${end}`, { quote, start_utf16:start, end_utf16:end, match:'unique-pdf-typography' })
+        if (++count > 1 || spans.size > 1) return null
+        offset = pdf.value.indexOf(wanted,offset+1)
+      }
+    }
+    return spans.size === 1 ? [...spans.values()][0] : null
+  }
   start = mapped.starts[index]
   const end = mapped.ends[index + normalized.length - 1]
   if (start === undefined || end === undefined) return null
@@ -234,7 +266,7 @@ export function parseReadingAnswers(raw, pack, questionIds, config = loadQuestio
       const source = aliases.get(ref?.source_id) ?? byId.get(ref?.source_id)
       if (!isObject(ref) || Object.keys(ref).some(key => !['source_id', 'quote'].includes(key)) || !source || !text(ref.quote, limits.max_quote_characters)) { invalid('INVALID_SOURCE', '证据缺少当前来源或有效引文。'); continue }
       const match = locateQuote(source, ref.quote, cache)
-      if (!match || match.quote.length > limits.max_quote_characters) { invalid('QUOTE_NOT_LOCATED', '引文不是当前来源内唯一且预算内的原文或空白等价片段。'); continue }
+      if (!match || match.quote.length > limits.max_quote_characters) { invalid('QUOTE_NOT_LOCATED', '引文不是当前来源内唯一且预算内的原文、空白或 PDF 排版等价片段。'); continue }
       record.evidence.push({ source_id: source.id, page: source.locator?.page ?? null, submitted_quote: ref.quote, ...match,
         source_content_hash: source.content_hash ?? digest(source.text), representation: pack.preprocessing?.representation ?? 'extracted-text',
         raw_pdf_verbatim: pack.preprocessing?.raw_verbatim === true })
@@ -248,7 +280,7 @@ export function parseReadingAnswers(raw, pack, questionIds, config = loadQuestio
         if (!isObject(ref) || Object.keys(ref).some(key => !['source_id', 'quote'].includes(key)) || !source || !text(ref.quote, limits.max_quote_characters)) invalid('TARGET_CLAIM_REQUIRED', '证据关系必须单独提供当前来源中的被评价主张。')
         else {
           const match = locateQuote(source, ref.quote, cache)
-          if (!match || match.quote.length > limits.max_quote_characters) invalid('TARGET_CLAIM_NOT_LOCATED', '被评价主张须是当前来源内唯一且预算内的连续原文或空白等价片段。')
+          if (!match || match.quote.length > limits.max_quote_characters) invalid('TARGET_CLAIM_NOT_LOCATED', '被评价主张须是当前来源内唯一且预算内的连续原文、空白或 PDF 排版等价片段。')
           else {
             record.target_claim = { source_id: source.id, page: source.locator?.page ?? null, submitted_quote: ref.quote, ...match,
               source_content_hash: source.content_hash ?? digest(source.text), representation: pack.preprocessing?.representation ?? 'extracted-text', raw_pdf_verbatim: pack.preprocessing?.raw_verbatim === true }

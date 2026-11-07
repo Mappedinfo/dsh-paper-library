@@ -270,3 +270,19 @@ def test_saved_ai_analysis_is_projected_with_evidence_and_review_status(catalog)
     assert any(e['relation'] == 'supports' for e in graph['edges'])
     call('knowledge_draft_review', id=draft['id'], decision='rejected', reviewed_by='user', expected_revision=draft['revision'])
     assert not any(n.get('provenance') == 'ai-analysis' for n in get_graph(library, first['id'])['nodes'])
+
+
+def test_replacement_graph_hides_old_draft_without_deleting_it(catalog):
+    from dsh_paper_library import library_knowledge as knowledge
+    library, (paper, _) = catalog
+    def call(action, **args):
+        return knowledge.dispatch(library, {'action': action, **args})
+    entity = {'kind': 'paper', 'id': paper['id']}
+    source = call('knowledge_source_put', entity=entity, kind='user-text', text='Synthetic source text.')
+    args = dict(entity=entity, origin='llm', source_ids=[source['id']], nodes=[{'id': 'method', 'type': 'method', 'label': 'Synthetic method'}])
+    first = call('knowledge_draft_put', request_id='old-draft', **args)
+    new = call('knowledge_draft_put', request_id='new-draft', supersedes_draft_id=first['id'], **args)
+    assert {n['draft_id'] for n in get_graph(library, paper['id'])['nodes'] if n.get('draft_id')} == {new['id']}
+    assert call('knowledge_draft_get', id=first['id'])['status'] == 'needs-review'
+    call('knowledge_draft_review', id=new['id'], decision='rejected', reviewed_by='user', expected_revision=new['revision'])
+    assert {n['draft_id'] for n in get_graph(library, paper['id'])['nodes'] if n.get('draft_id')} == {first['id']}

@@ -84,3 +84,26 @@ test('paper graph exposes explicit full-text analysis and passes its identity to
   [...root.querySelectorAll('button')].find(b=>b.textContent==='查看全库图谱').click();assert.deepEqual(opened,{focus_id:'paper-a'});
   dom.window.close();
 });
+
+test('explicit PDF bibliography extraction opens a nonempty citation graph and external targets retain evidence navigation', {skip:!JSDOM}, async()=>{
+  const dom=new JSDOM('<div id="graph"></div>',{runScripts:'outside-only',url:'http://synthetic.invalid/'});
+  const {window}=dom,root=window.document.getElementById('graph'),calls=[],opened=[],pages=[];
+  window.eval(source); let extracted=false;
+  const paper={id:'paper',title:'Synthetic source',pdf:true};
+  const ui=window.PaperKnowledgeGraph.create({root,getPaper:()=>paper,openPaper:id=>opened.push(id),navigatePage:page=>pages.push(page),toast(){},api:async(action,args)=>{
+    calls.push({action,...plain(args)});
+    if(action==='graph_references_extract'){extracted=true;return {count:1,reference_pages:[2]};}
+    return {nodes:[{id:'paper',type:'paper',label:'Source'},...(extracted?[{id:'reference:one',paper_id:'paper',type:'paper',label:'[1] Synthetic cited study.',external_reference:true,provenance:'pdf-reference',evidence:{page:2,quote:'[1] Synthetic cited study.'}}]:[])],edges:extracted?[{id:'cite1',source:'paper',target:'reference:one',relation:'cites',provenance:'pdf-reference',evidence:{page:2,quote:'[1] Synthetic cited study.'}}]:[],scope:{}};
+  }});
+  await ui.load(paper);root.querySelector('[data-kg="extract-references"]').click();
+  for(let i=0;i<6;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(calls.filter(c=>c.action==='graph_references_extract').length,1);
+  assert.equal(calls.at(-1).view,'citations');
+  assert.equal(root.querySelectorAll('.kg-edge').length,1);
+  root.querySelector('[data-node-id="reference:one"]').dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+  const inspector=root.querySelector('.kg-inspector');
+  assert.match(inspector.textContent,/来自 PDF 参考文献原文/);assert.match(inspector.textContent,/尚未匹配库内条目/);
+  assert.equal([...inspector.querySelectorAll('button')].some(b=>b.textContent==='打开文献'),false);
+  [...inspector.querySelectorAll('button')].find(b=>b.textContent==='返回 PDF 第 2 页').click();assert.deepEqual(pages,[2]);assert.deepEqual(opened,[]);
+  dom.window.close();
+});

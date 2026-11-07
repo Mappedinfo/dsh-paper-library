@@ -561,3 +561,10 @@ An independent deployment without a DSH migration marker uses local disk prefere
 `POST /api/paper-library/state`（独立模式为 `/state`）仅接受 `state_get/put/list`，沿用认证、同源检查、状态命名空间与修订冲突保护。请求上限 512 KiB，并发上限 8；普通 `/api` 的两个长任务名额不占用该入口。浏览器新增允许精确的 `workspace:last:<main 或文献 ID>` 状态键，其他内部命名空间仍不可读写。客户端控制并发 keepalive 总量，不自动覆盖其他窗口的冲突；读取失败后可用重试／flush 恢复。
 
 插件对话渲染使用本地构建的 Marked／DOMPurify；允许文本 Markdown 结构，禁用脚本、嵌入框架与图片，链接仅保留 HTTP(S)／mailto。选文或普通问题的已记录来源快照也能触发完整回答的自动 PDF 保存；无来源的其他主对话消息不继承上一轮批注。
+
+### PDF 参考文献与定向修订
+
+- `graph_references_extract {id,pages?}`：显式读取一篇在库 PDF 的编号参考文献；默认末 12 页，可选升序连续的至多 40 页，总文字上限 256000 字符、200 条参考文献。只识别 References／Bibliography／参考文献标题下从 `[1]` 开始的连续编号，须读到文末或附录边界；失败不覆盖旧结果。输出 `references`（原文、分页面片段、首个页码、实际出现的 DOI/arXiv 标识）、`reference_pages`、覆盖范围和警告。相同来源指纹返回 `duplicate:true`。不上传 PDF、不改原件、不猜书目字段。
+- `graph_references_get {id}`：读取已保存快照。`graph {id?,focus_id?,view:"citations",limit?}` 将快照绘为明确方向的 `cites` 边；唯一 DOI 可匹配库内论文，未匹配的作品使用 `external_reference:true` 的论文节点，来源页仍属于引用它的论文。库外节点不提供无效的“打开文献”动作。图谱读取不重新解析 PDF，不把出边数当作入站引用量。
+- `paper_analysis_repair {id,request_id?,new_request_id?}`：针对已结束文字分析的未通过项发起新任务；省略原请求时使用最新任务。使用原题库、范围、模型和已保存来源快照，不重读可能已经变化的 PDF。每组只给模型待修订回答及原文，响应必须逐项对应旧 ID，允许有理由的撤回；其他有效回答不得改变或因冲突失效。原任务保留，`repair_from` 和 `source_basis:"saved-snapshots"` 明示来源；`repair_log` 记录原／新 ID、原因和状态。请求失败保留原组，原始修订响应分片保存，`include_raw:true` 可查看。仍未通过的修订不会自动采用。
+- `knowledge_draft_put` 可带 `supersedes_draft_id`：旧稿必须属于同一实体、同一来源列表，且未被接受／否决。旧稿不删除；新非否决图谱在浏览时替代旧稿，否决新稿后旧稿恢复显示。不能自动替代人工已经审阅的决定。

@@ -99,9 +99,9 @@ test('invented sources, altered characters, ambiguous quotes and invalid rows ca
   const input = pack('The ﬁnding is bounded. Repeat. Repeat. Word-\nwrap remains.')
   const cases = [
     { source_id: 'ks-outside', quote: 'The ﬁnding is bounded.' },
-    { source_id: 'S1', quote: 'The finding is bounded.' },
+    { source_id: 'S1', quote: 'The findings are bounded.' },
     { source_id: 'S1', quote: 'Repeat.' },
-    { source_id: 'S1', quote: 'Wordwrap remains.' },
+    { source_id: 'S1', quote: 'Word wrap remains.' },
     { source_id: 'S1', quote: 'The ﬁnding is bounded!' },
   ]
   const result = parse([answer('q2', 'author_claim', { evidence: [{ source_id: 'S1', quote: 'The ﬁnding is bounded.' }] }),
