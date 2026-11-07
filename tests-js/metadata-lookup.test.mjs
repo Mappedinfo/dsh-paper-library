@@ -81,7 +81,7 @@ test('a record without DOI requires normalized exact title before proposing miss
 
 test('lookup refuses missing identifiers, unavailable metadata and mismatched DOI without catalog mutation',async t=>{
   const f=await fixture(t);
-  await assert.rejects(dispatch({action:'metadata_lookup',id:f.item.id},{library:f.library}),/填写并保存 DOI/);
+  await assert.rejects(dispatch({action:'metadata_lookup',id:f.item.id},{library:f.library,fetchOptions:{resolver,transport:async()=>response('{}')}}),/未取得可用文献资料/);
   await assert.rejects(dispatch({action:'metadata_lookup'},{library:f.library}),/请选择一篇文献/);
   const current=await dispatch({action:'update',id:f.item.id,metadata:{DOI:'10.1234/metadata'}},{library:f.library});
   await assert.rejects(dispatch({action:'metadata_lookup',id:f.item.id},{library:f.library,fetchOptions:crossrefFixture({DOI:'10.1234/different'},meta('citation_doi','10.1234/different'))}),/未取得可用文献资料.*核对 DOI/);
@@ -145,4 +145,26 @@ test('bridge graph mutation allowlist reaches bounded core operations and preser
   assert.equal(removedNode.deleted,true);
   await assert.rejects(dispatch({action:'graph_node_put',id:f.item.id,type:'unknown',label:'Invalid'},{library:f.library}),/Unsupported graph node type/);
   await assert.rejects(dispatch({action:'untrusted_action',id:f.item.id},{library:f.library}),/未知文献操作/);
+});
+
+test('missing identifiers use exact title matches from free Crossref without writing catalog',async t=>{
+ const f=await fixture(t,{author:[{family:'Reader'}]});let requests=0;
+ const fetchOptions={resolver,transport:async ({url})=>{requests++;assert.match(String(url),/api\.crossref\.org\/works\?query.title=/);return response(JSON.stringify({message:{items:[{DOI:'10.1234/title',title:[title],author:[{family:'Reader',given:'Alice'}],published:{'date-parts':[[2024]]}}]}}));}};
+ const result=await dispatch({action:'metadata_lookup',id:f.item.id},{library:f.library,fetchOptions});
+ assert.equal(result.item.DOI,'10.1234/title');assert.equal(result.item.author[0].given,'Alice');assert.equal(requests,1);
+ assert.equal((await core({action:'get',id:f.item.id},{library:f.library})).DOI,undefined);
+});
+
+test('ambiguous title candidates never select an arbitrary DOI',async t=>{
+ const f=await fixture(t);
+ const fetchOptions={resolver,transport:async()=>response(JSON.stringify({message:{items:[{DOI:'10.1234/a',title:[title]},{DOI:'10.1234/b',title:[title]}]}}))};
+ await assert.rejects(dispatch({action:'metadata_lookup',id:f.item.id},{library:f.library,fetchOptions}),/多个 DOI/);
+});
+
+test('single-paper identifier probing reads synthetic PDF locally and preserves original bytes',async t=>{
+ const f=await fixture(t);const path=join(f.directory,'synthetic-id.pdf');
+ const generated=spawnSync(join(projectRoot,'.venv/bin/python'),['-c','import pymupdf,sys; d=pymupdf.open(); p=d.new_page(); p.insert_text((50,60),"Synthetic identifier probe\\narXiv:2006.11239\\n10.1234/synthetic-probe"); d.save(sys.argv[1]); d.close()',path],{encoding:'utf8'});assert.equal(generated.status,0,generated.stderr);
+ const before=hash(await readFile(path));await dispatch({action:'attach',id:f.item.id,path},{library:f.library});
+ const result=await core({action:'metadata_probe',id:f.item.id},{library:f.library});
+ assert.equal(result.arxiv,'2006.11239');assert.equal(result.doi,'10.1234/synthetic-probe');assert.equal(hash(await readFile(path)),before);assert.equal(result.text,undefined);
 });

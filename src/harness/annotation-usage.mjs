@@ -12,7 +12,7 @@ const referenceSourceSchema = z.object({
   paperId: identifier, sessionId: z.string().min(1).max(200), snapshot_id: revision,
   annotation_refs: z.array(referenceSchema).max(1000), body_hash: revision,
 })
-const sourceSchema = z.object({ kind: z.literal('plugin'), plugin: z.literal(ANNOTATION_REFERENCE_PLUGIN), paperLibraryReference: referenceSourceSchema })
+const sourceSchema = z.object({ kind: z.enum(['paper-library-annotation', 'plugin']), plugin: z.literal(ANNOTATION_REFERENCE_PLUGIN), paperLibraryReference: referenceSourceSchema })
 const usageSchema = z.object({
   sessionId: z.string(), revision: z.number().int(), truncated: z.boolean(),
   usage: z.record(identifier, revision).refine(value => Object.keys(value).length <= MAX_USAGE),
@@ -23,7 +23,7 @@ const textOf = content => Array.isArray(content) ? content.filter(block => block
 
 /** A source token alone is never evidence that its snapshot reached the log. */
 export function loggedAnnotationReference(event, sessionId) {
-  if (event.type !== 'user/message' || event.data?.source?.kind !== 'plugin' || event.data.source.plugin !== ANNOTATION_REFERENCE_PLUGIN) return null
+  if (event.type !== 'user/message' || !['paper-library-annotation', 'plugin'].includes(event.data?.source?.kind) || event.data.source.plugin !== ANNOTATION_REFERENCE_PLUGIN) return null
   const parsed = sourceSchema.safeParse(event.data.source)
   if (!parsed.success) return null
   const source = parsed.data.paperLibraryReference
@@ -64,7 +64,7 @@ export const annotationUsageProjection = {
 /** Metadata stays in the log source envelope instead of consuming model tokens. */
 export function annotationReferenceSource(snapshot, snapshotId) {
   return sourceSchema.parse({
-    kind: 'plugin', plugin: ANNOTATION_REFERENCE_PLUGIN,
+    kind: 'paper-library-annotation', plugin: ANNOTATION_REFERENCE_PLUGIN,
     paperLibraryReference: { version: 1,
       paperId: snapshot.paperId, sessionId: snapshot.sessionId, snapshot_id: snapshotId,
       annotation_refs: snapshot.annotation_refs,

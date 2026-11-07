@@ -1,3 +1,4 @@
+import { createEncyclopedia } from './encyclopedia.mjs';
 import { createAnnotationTranslation } from './harness/annotation-translation.mjs';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -22,7 +23,7 @@ import { catalogResources } from './catalog-resources.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
 staticFiles['latex-search.js'] = ['latex-search.js', 'text/javascript;charset=utf-8'];
-for (const name of ['workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css','local-state.js','floating-windows.js', 'floating-windows.css', 'language-learning.js','language-learning.css','theme.js','theme.css','latex-workspace.js','latex-workspace.css','latex-review.js','latex-versions.js','latex-writing-tools.js','latex-formulas.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['encyclopedia.js','workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css','local-state.js','floating-windows.js', 'floating-windows.css', 'language-learning.js','language-learning.css','theme.js','theme.css','latex-workspace.js','latex-workspace.css','latex-review.js','latex-versions.js','latex-writing-tools.js','latex-formulas.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['resource-library.js','resource-library.css','knowledge-workflow.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['paper-analysis.js','paper-analysis.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['icons.js','icons.css','settings.js','settings.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
@@ -119,6 +120,7 @@ export function createFetchHandler(options = {}) {
   // Browsing saved learning data is local and does not initialize an AI route or
   // paper conversation. Only the host-injected adapter may generate new output.
   const learningRecords = options.languageLearning || createLanguageLearning({ store: localState, dispatch, library: options.library || defaultLibrary, python: options.python });
+  const encyclopedia=createEncyclopedia({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python});
   const annotationTranslation = createAnnotationTranslation({ store: localState, languageLearning: learningRecords, dispatch, library: options.library || defaultLibrary, python: options.python });
   const analysisRecords = options.paperAnalysis || createPaperAnalysis({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python});
   const challengeRecords = options.challengeMining || createChallengeMining({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python});
@@ -159,7 +161,7 @@ export function createFetchHandler(options = {}) {
             } });
           }
           // Browser cannot forge AI output or arbitrary worker internals.
-          if (LATEX_RETRIEVAL_ACTIONS.has(input?.action) || ['annotation_translation_result','save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','companion_excerpt','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata','external_rebind'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
+          if (LATEX_RETRIEVAL_ACTIONS.has(input?.action) || ['annotation_translation_result','save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','metadata_probe','companion_excerpt','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata','external_rebind'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
           const companionAction=['companion_status','companion_ask','companion_retry','companion_cancel'].includes(input?.action);
           if(companionAction&&!options.companion)return json({ok:false,error:'批注提问需要连接 DSH 服务。'},409);
           const chatAction = typeof input?.action === 'string' && input.action.startsWith('chat_');
@@ -175,6 +177,7 @@ export function createFetchHandler(options = {}) {
           if (latexAIAction && !options.latexAI) return json({ok:false,error:'LaTeX 提问与合写需要连接 DSH 模型服务。'},409);
           if (latexWsAction && !options.latexWorkspace) return json({ok:false,error:'LaTeX 工作区需要连接 DSH 主机。'},409);
           let result = input?.action === 'annotation_translate' ? await annotationTranslation(input, { signal: request.signal })
+            : ['encyclopedia_list','encyclopedia_put'].includes(input?.action) ? await encyclopedia(input)
             : companionAction ? await options.companion.handle(input)
             : ['workspace_catalog','workspace_related'].includes(input?.action) ? await workspaceNavigation.handle(input, { signal: request.signal })
             : ['ink_diagnostics_append','ink_diagnostics_get'].includes(input?.action) ? await inkDiagnostics.handle(input)

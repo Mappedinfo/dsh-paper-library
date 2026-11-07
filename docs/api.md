@@ -41,7 +41,7 @@ Core actions:
 
 Node additions:
 
-- `metadata_lookup` with `id` → `{item,warnings,provenance}`. Reads the current item, resolves its saved DOI or URL and returns an editable draft without catalog updates or PDF writes. Existing DOI requires an exact DOI match; otherwise the normalized title must match exactly and contain at least eight characters. It fills only missing bibliographic values/date keys, keeps manual authors and JCR, and adds missing author affiliations only when both lists have one exact name match. It rereads current metadata after the network request so intervening manual edits survive; changed DOI/URL requires retry. Missing identifiers, unavailable metadata, identity mismatch and drafts above 256 KiB return actionable errors. Save reviewed fields through `update`; lookup alone never saves them.
+- `metadata_lookup` with `id` → `{item,author_candidates,warnings,provenance}`。查询选中文献已保存的 DOI、URL 或 arXiv 标识；缺失时按需本地检查 PDF 前 3 页标识符，再以题名查询 Crossref／arXiv（每源最多 5 个候选）。不发送 PDF 正文。DOI 必须一致，其他路径要求唯一的精确规范化题名匹配；歧义结果不自动选择。仅填缺失字段，保留人工资料及 JCR；缺名作者仅在姓氏唯一匹配时补全。完整远端作者表另供用户明确采用。返回编辑草稿，调用本身不写目录或 PDF；网络期间资料变化会核对，草稿上限 256 KiB。固定题录服务遇本地代理 198.18/15 Fake-IP 时，使用 Cloudflare 加密 DNS 解析真实公网地址，继续执行公网校验与连接地址固定；一般 URL、重定向和显式测试解析器无此例外。
 - `cite` with `ids:[...],format='apa'|'biblatex'|'csl-json'` → `{text,html?,filename,mime}`
 - `export_library` with `format='biblatex'|'csl-json'` → `{text,filename,mime,count}`; consistent metadata snapshot, citation formatter batches100 in short-lived processes, max10000 records
 - `import` with exactly one of `doi`, `url`, `path`, `items`, or `content_base64`. `url` accepts public HTTP(S), DOI and arXiv identifiers. A downloaded PDF is parsed before catalog insertion. Local PDFs use bounded inspection, optionally enrich from Crossref only after exact normalized parsed-title matching, and preserve portable user metadata. Results extend the core envelope with `acquisition:{status:'downloaded'|'metadata_only'|'reused',...}` and warnings. Always use `item.pdf` to determine whether a managed PDF exists. Metadata-only imports do not imply a saved full text.
@@ -545,3 +545,9 @@ An independent deployment without a DSH migration marker uses local disk prefere
 画板和流程的读者批注使用 `board_annotations_list {id}`、`board_annotations_create {id,target,comment,expected_revision}`、`board_annotations_update {id,note_id,comment,expected_revision}`、`board_annotations_delete {id,note_id,expected_revision}`，返回 `{id,revision,notes}`。目标为 `{kind:'board',node_ids?:[最多40个画板节点],x?,y?}` 或 `{kind:'flow',paper_id,flow_id,node_id? 或 node_ids?:[最多100个流程节点]}`，省略节点为整图。创建时从已保存源提取标题与摘录；列表增加 `stale` 标记，目标删除不抹掉旧摘录。每条文字最多4,000字符、摘录2,000字符，每板200条／240KiB；独立 `board-annotations:` 记录与 CAS，不改变 PDF、画板或流程。通用 `state_*` 拒绝此命名空间，模型工具不能代替读者写批注。
 
 `board_flow_get {id}` 与 `board_flow_save {id,workspace,expected_revision}` 管理独立的 paper-flow-workspace，返回 `{id,workspace,revision}`。首次为空工作区与修订 0；保存采用既有本地存储的锁、原子替换与 CAS。父画板必须存在，删除父板不清除附属记录，通用 `state_*` 不放行此命名空间。192 KiB 与图复杂度在校验／布局前检查，规范化后再次检查保存大小；读取和保存不调用 PDF worker 或模型。旧节点板、源文件与引用格式保持原语义。完整契约、恢复边界与复现入口见 [paper-flow.md](paper-flow.md)。
+
+## 阅读百科
+
+- `encyclopedia_list`：`query?`、`offset=0`、`limit=30`（最多 50），返回 `{items,total,offset,hasMore,truncated}`。本地扫描上限 5000，匹配词条、别名和释义；括号缩写分别匹配，不调用模型或外部服务。仅读取当前页完整条目。
+- `encyclopedia_put`：`term`（200 字符）、`kind`（term / concept / organization / abbreviation / person）、`aliases`（最多 20 条）、`definition`（12000 字符）、`expected_revision`（新建为 0）、可选 `source:{paper_id,page,annotation_id?,quote}`。每条最多 60 个来源，引用最多 2000 字符；重复来源合并，过期修订拒绝覆盖。按规范化词条去重，保存为人工整理，来源原文不自动冒充释义。
+- 词条保存在既有资料库隔离的本地状态中，与 PDF 原批注独立。Wiki 浏览器共用 `vocabulary_list/update` 展示难词，保留 AI／人工释义标记。`[[词条名]]` 是本地词条检索链接。

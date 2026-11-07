@@ -36,7 +36,7 @@ test('real native user messages expand canonical references to immutable context
   const context = messages[1]
   assert.equal(context.role, 'user')
   assert.notEqual(context.id, original.id)
-  assert.equal(context.source.kind, 'plugin')
+  assert.equal(context.source.kind, 'paper-library-annotation')
   assert.equal(context.source.plugin, 'Paper Library')
   assert.equal(context.source.paperLibraryReference.snapshot_id, saved.id)
   assert.equal(context.source.paperLibraryReference.body_hash, annotationBodyHash(saved.snapshot.text))

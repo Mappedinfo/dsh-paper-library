@@ -36,7 +36,7 @@ export const boardReferenceBodyHash = text => createHash('sha256').update(typeof
 /** Plugin-owned provenance: enough to re-verify the material without storing it twice. */
 export function boardReferenceSource(snapshot, snapshotId) {
   return {
-    kind: 'plugin', plugin: BOARD_REFERENCE_PLUGIN,
+    kind: 'paper-library-board', plugin: BOARD_REFERENCE_PLUGIN,
     paperLibraryBoard: {
       version: 1,
       board_id: snapshot.board_id,
@@ -109,7 +109,7 @@ export async function prepareBoardReferenceMessages(messages, { boards, maxChara
 /** Whether a logged message carries a verifiable board reference (used by tests and audits). */
 export function loggedBoardReference(event) {
   const source = event?.data?.source
-  if (event?.type !== 'user/message' || source?.kind !== 'plugin' || source?.plugin !== BOARD_REFERENCE_PLUGIN) return null
+  if (event?.type !== 'user/message' || !['paper-library-board', 'plugin'].includes(source?.kind) || source?.plugin !== BOARD_REFERENCE_PLUGIN) return null
   const board = source.paperLibraryBoard
   if (!board || board.version !== 1) return null
   const text = textOf(event.data.content)

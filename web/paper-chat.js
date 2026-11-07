@@ -350,6 +350,9 @@ window.PaperLibraryChat = {
         if (setReferences([current])) toast(`已加入本次引用 · 共 ${chat.notes.length} 条`);
       } catch (error) { toast(error.message, true); }
     }
+    const prompts=document.createElement('div');prompts.className='paper-chat-suggestions';prompts.setAttribute('aria-label','常见论文问题');
+    for(const [label,question] of [['主要贡献','这篇论文的主要贡献是什么？请区分作者主张和原文证据。'],['数据集','这篇论文使用了哪些数据集？规模、来源和获取方式是什么？'],['方法','请解释这篇论文的方法和关键假设。'],['实验结果','主要实验结果是什么？与哪些基线比较？'],['局限','这篇论文有哪些局限和尚未解决的问题？']]){const b=document.createElement('button');b.type='button';b.className='button subtle';b.textContent=label;b.addEventListener('click',()=>{$('paper-chat-input').value=question;remember();$('paper-chat-input').focus();});prompts.append(b);}
+    $('paper-chat-form').prepend(prompts);
     $('paper-chat-form').addEventListener('submit', event => { event.preventDefault(); void send(); });
     $('paper-chat-input').addEventListener('input', remember);
     $('paper-chat-open').addEventListener('click', () => openMain());

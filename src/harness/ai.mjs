@@ -46,7 +46,7 @@ export function createHarnessAI(llm, createUserMessage, config, { attachments } 
       content = await service.admitPromptContent([...content, { type: 'image', mediaType: 'image/png', data: images[0].data, name: 'handwriting.png' }])
       signal?.throwIfAborted()
     }
-    const message = createUserMessage({ content, source: { kind: 'plugin', plugin: 'paper-library' } })
+    const message = createUserMessage({ content, source: { kind: 'paper-library-ai', plugin: 'paper-library' } })
     const options = { ...(prepared?.config || call), messages: [message], signal }
     return collectFeedback(prepared ? prepared.stream(options) : llm.stream(options), signal)
   }

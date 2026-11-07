@@ -10,7 +10,7 @@ window.PaperLibrarySettings = (() => {
     let snapshot=null,busy=false,refreshing=null,refreshAgain=false,disposed=false,timer=null,pendingPatch=null,visibleTimer=null,generation=0,readingPreferences=0;
     const make=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
     const trigger=make('button','button subtle','设置');trigger.id='settings-open';trigger.type='button';trigger.title='Paper Library 设置';
-    document.querySelector('.topbar-actions').append(trigger);
+    (document.querySelector('#topbar-end')||document.querySelector('.topbar-actions')).append(trigger);
     const dialog=make('dialog','library-settings');dialog.id='library-settings';dialog.setAttribute('aria-labelledby','library-settings-title');
     const header=make('header'),title=make('strong','','Paper Library 设置');title.id='library-settings-title';
     const close=make('button','icon-button','×');close.type='button';close.setAttribute('aria-label','关闭设置');close.addEventListener('click',()=>dialog.close());header.append(title,close);

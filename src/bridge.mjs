@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveAndFetch, resolveMetadata } from './paper-fetch.mjs';
+import { resolveAndFetch, resolveMetadata, resolveTitleMetadata } from './paper-fetch.mjs';
 import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
 import { createTranslationServerClient } from './translation-server.mjs';
 
@@ -298,6 +298,12 @@ function metadataDraft(current, fetched) {
   if (current.author?.length && incoming.author?.length) {
     const matches = (left,right) => authorIdentities(left).some(name=>authorIdentities(right).includes(name));
     item.author = current.author.map(person=>{
+      // 缺少名字的姓氏只在远端唯一匹配时补齐；已填写的名字不覆盖。
+      if(person.family&&!person.given&&!person.literal){
+        const family=normalizedIdentity(person.family);
+        const candidates=incoming.author.filter(candidate=>normalizedIdentity(candidate.family)===family||candidate.literal&&(normalizedIdentity(candidate.literal).endsWith(' '+family)||normalizedIdentity(candidate.literal)===family));
+        if(candidates.length===1&&current.author.filter(other=>normalizedIdentity(other.family)===family).length===1){const candidate=candidates[0];return {...structuredClone(person),...(candidate.literal?{literal:candidate.literal}:candidate.given?{given:candidate.given}:{}),...(missingMetadata(person.affiliation)&&candidate.affiliation?{affiliation:structuredClone(candidate.affiliation)}:{})};}
+      }
       if (!missingMetadata(person.affiliation)) return structuredClone(person);
       const candidates = incoming.author.filter(candidate=>matches(person,candidate));
       const localMatches = current.author.filter(candidate=>matches(person,candidate));
@@ -313,10 +319,17 @@ async function lookupMetadata(request, options) {
   if (typeof request.id !== 'string' || !request.id || request.id.length > 200) throw new Error('请选择一篇文献，再刷新资料。');
   let current = await core({action:'get',id:request.id},options);
   const doi = canonicalDOI(current.DOI);
-  const target = doi || (typeof current.URL === 'string' && current.URL.trim());
-  if (!target) throw new Error('请先在资料中填写并保存 DOI 或论文页面链接，再刷新资料。');
-  const result = await resolveMetadata(target,{...options.fetchOptions,signal:options.signal});
-  if (!result.metadata && options.translationServer) {
+  let target = doi || (typeof current.URL === 'string' && current.URL.trim()) || (String(current.archive||'').toLowerCase()==='arxiv'&&current.archive_location);
+  let detected=false;
+  if(!target&&current.pdf){
+    const probe=await core({action:'metadata_probe',id:request.id},options);
+    target=probe.doi||probe.arxiv;detected=Boolean(target);
+  }
+  const fetchOptions={...options.fetchOptions,signal:options.signal};
+  let result=target?await resolveMetadata(target,fetchOptions):await resolveTitleMetadata(current.title,fetchOptions);
+  if(detected&&(!result.metadata||normalizedIdentity(result.metadata.title)!==normalizedIdentity(current.title)))result=await resolveTitleMetadata(current.title,fetchOptions);
+
+  if (!result.metadata && target && options.translationServer) {
     // Optional loopback Zotero translation-server: translators supply candidate
     // metadata for identifiers/pages the primary path could not resolve. The
     // same identity gates apply; candidates that fail them are discarded.
@@ -341,7 +354,7 @@ async function lookupMetadata(request, options) {
   if (!result.metadata) throw new Error(`未取得可用文献资料；请核对 DOI 或论文页面链接，也可以手工编辑。${result.warnings?.length?' '+result.warnings.join('；'):''}`);
   // Network latency must not put an older manual edit back into the editor.
   const latest = await core({action:'get',id:request.id},options);
-  if (canonicalDOI(latest.DOI) !== doi || !doi && latest.URL !== current.URL) throw new Error('获取期间 DOI 或论文链接发生变化；请按最新资料重新刷新。');
+  if (canonicalDOI(latest.DOI) !== doi || !doi && (latest.URL !== current.URL || latest.title !== current.title)) throw new Error('获取期间 DOI 或论文链接发生变化；请按最新资料重新刷新。');
   current = latest;
   if (doi) {
     if (canonicalDOI(result.metadata.DOI) !== doi) throw new Error('在线资料的 DOI 与当前文献不一致，未生成补全草稿；请核对当前 DOI。');
@@ -349,7 +362,7 @@ async function lookupMetadata(request, options) {
     const title = normalizedIdentity(current.title);
     if (title.length < 8 || title !== normalizedIdentity(result.metadata.title)) throw new Error('在线题名与当前文献不能准确匹配，未生成补全草稿；请核对题名，或保存 DOI 后重试。');
   }
-  return {item:metadataDraft(current,result.metadata),warnings:result.warnings || [],provenance:result.provenance};
+  return {item:metadataDraft(current,result.metadata),author_candidates:result.metadata.author||[],warnings:result.warnings || [],provenance:result.provenance};
 }
 
 /** Parse one reply per annotation. Returns null when the model answered with a

@@ -20,7 +20,7 @@ function fixture(options = {}) {
   home.parentNode = { id: 'home-parent' }; home.after = node => { calls.push('nav:home'); node.parentNode = home.parentNode }; area.parentNode = home.parentNode
   const state = { active: options.active ?? { id: 'paper-source' }, project: 'old-reading-project', itemTicket: 0, pageTicket: 0 }
   const context = {
-    readerStateReady: true, title: item => item.title || item.id, workspaceNavigationTransition: false, restoringReader: false, restoringInkDraft: false, inkSaveBusy: false, annotationSaveBusy: options.annotationBusy || false, state,
+    initializedReader:false, ENTRY_PAPER:'', readerStateReady: true, title: item => item.title || item.id, workspaceNavigationTransition: false, restoringReader: false, restoringInkDraft: false, inkSaveBusy: false, annotationSaveBusy: options.annotationBusy || false, state,
     dismissAnnotation: async () => options.dismissAnnotation !== false,
     selectProject: async id => { calls.push(`project:select:${id}`); state.project = id },
     $: id => elements.get(id), document: { fullscreenElement: options.fullscreen ? {} : null, exitFullscreen: async () => { calls.push('fullscreen:exit') }, querySelector: selector => selector === '.library-pane' ? library : selector === '#latex-view .latex-topbar' ? writing : null },
@@ -191,21 +191,22 @@ test('accepted root navigation cancels old paper reads while a refused surface c
   assert.equal(blocked.state.pageTicket, 0)
 })
 
-test('one guarded return button follows writing navigation, including the direct-entry fallback', () => {
+test('guarded return stays with settings at the topbar end across writing navigation', () => {
   const f = fixture()
-  const container = () => ({ prepend(node) { node.parentNode = this } })
+  const container = () => ({ append(node) { node.parentNode = this } })
   const libraryToolbar = container(), writingToolbar = container(), navigation = container()
   const returnButton = { parentNode: libraryToolbar }
   const query = f.context.document.querySelector
   f.context.document.querySelector = selector => selector === '.topbar-actions' ? libraryToolbar : query(selector)
   f.elements.set('library-return-to-dsh', returnButton)
+  f.elements.set('topbar-end', libraryToolbar)
   f.area.querySelector = () => navigation
   f.writing.querySelector = () => writingToolbar
 
   f.context.placeWorkspaceNavigation(true)
   assert.equal(f.area.parentNode, f.writing)
   assert.equal(f.area.actionsHost, f.elements.get('latex-navigation-actions'))
-  assert.equal(returnButton.parentNode, navigation)
+  assert.equal(returnButton.parentNode, libraryToolbar)
 
   f.context.placeWorkspaceNavigation(false)
   assert.equal(f.area.parentNode, f.home.parentNode)
@@ -214,5 +215,5 @@ test('one guarded return button follows writing navigation, including the direct
 
   f.area.querySelector = () => null
   f.context.placeWorkspaceNavigation(true)
-  assert.equal(returnButton.parentNode, writingToolbar)
+  assert.equal(returnButton.parentNode, libraryToolbar)
 })

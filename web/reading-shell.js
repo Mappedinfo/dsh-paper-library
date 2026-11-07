@@ -89,7 +89,6 @@ window.PaperReadingShell = (() => {
     bindMenu(penSettings,penOptions);
     penSettings.addEventListener('toggle',()=>{if(penSettings.open)inputChanged(reader()?.getInputInfo?.());});
     annotationTools.append(modeGroup,colorLabel,widthLabel,penSettings);
-    const sidebar=button('reader-annotations','批注栏',()=>{panels()?.toggle('annotations');sync();});readerTools.append(sidebar);
     // Fit-width default with free zoom: steppers, an explicit percentage and reset.
     let zoom=1, zoomSaveTimer=null;
     const zoomGroup=node('span',null,'reader-zoom');
@@ -102,8 +101,8 @@ window.PaperReadingShell = (() => {
     const commitZoom=()=>{const value=Number(percent.value);if(Number.isFinite(value))setZoom(value/100);percent.value=String(Math.round(zoom*100));};
     percent.addEventListener('change',commitZoom);
     percent.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();commitZoom();}});
-    zoomGroup.append(zoomOut,percent,zoomIn,zoomFit);readerTools.append(zoomGroup);
-    const layoutGroup=node('span',null,'reader-layout');layoutGroup.setAttribute('role','group');layoutGroup.setAttribute('aria-label','PDF 阅读布局');
+    zoomGroup.append(zoomOut,percent,zoomIn);readerTools.append(zoomGroup);
+    const layoutGroup=node('span',null,'reader-layout');layoutGroup.setAttribute('role','group');layoutGroup.setAttribute('aria-label','PDF 阅读布局');layoutGroup.append(zoomFit);
     const layoutButtons={};let layoutTouched=false;
     function selectLayout(value){reader()?.setLayout?.(value);for(const[key,b]of Object.entries(layoutButtons))b.setAttribute('aria-pressed',String(key===value));}
     for(const[value,label,icon]of [['single','单页','rectangle-vertical'],['spread','双页','columns-2']]){
@@ -233,7 +232,6 @@ window.PaperReadingShell = (() => {
       modeGroup.dataset.mode=mode;
       modeGroup.hidden=tool==='ink';widthLabel.hidden=tool!=='ink';
       input.value=tool==='ink'?inkColor:color;widthInput.value=String(inkWidth);syncInk();
-      sidebar.setAttribute('aria-pressed',String(Boolean(panels()?.visible('annotations'))));
       message.hidden=!active||table;
       if(surface==='graph')status('选择节点查看联系与来源；有页码的依据可返回 PDF。');
       else status(hintFor());

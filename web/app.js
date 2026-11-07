@@ -461,7 +461,8 @@ function renderAnnotations() {
     const details=el('details','annotation-reply');details.dataset.annotationId=reply.id;details.open=reply.source_kind==='annotation-translation';
     details.append(el('summary','',[reply.source_kind === 'annotation-translation' ? '翻译：AI 译文' : 'AI 批注',reply.model,reply.annotation_ids?.length>1?`涉及 ${reply.annotation_ids.length} 条批注`:''].filter(Boolean).join(' · ')));
     details.append(el('p','small muted',displayDate(reply.generated||reply.created)));
-    const body=(reply.comment||reply.content||reply.text||'').replace(/^AI-generated (?:conversation )?feedback[^\n]*\n\n/,'');
+    let body=(reply.comment||reply.content||reply.text||'').replace(/^AI-generated (?:conversation )?feedback[^\n]*\n\n/,'');
+    if(reply.source_kind==='annotation-translation')body=body.replace(/\n\nAI 翻译 · [^\n]*\s*$/,'');
     details.append(el('p','annotation-reply-body',body));
     const actions=el('div','annotation-actions'),remove=el('button','button subtle delete-note','删除回复');remove.dataset.noteAction='delete';actions.append(remove);details.append(actions);return details;
   }
@@ -487,6 +488,7 @@ function renderAnnotations() {
     const actions = el('div', 'annotation-actions'); const edit = el('button', 'button subtle', '编辑'); edit.dataset.noteAction = 'edit'; const remove = el('button', 'button subtle delete-note', '删除'); remove.dataset.noteAction = 'delete'; actions.append(edit, remove);
     if (note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const handwriting = el('button', 'button subtle', '手写'); handwriting.dataset.noteAction = 'handwriting'; actions.prepend(handwriting); if(note.handwriting){const legacy=el('button','button subtle','打开原便签');legacy.dataset.noteAction='handwriting-legacy';actions.append(legacy);} }
     if (paperChatUI?.available() && note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const discuss = el('button', 'button subtle', paperChatUI.hasAnnotation(note.id) ? '移出本次引用' : '加入本次引用'); discuss.dataset.noteAction = 'discuss'; actions.append(discuss); }
+    const phrase=(note.text||note.comment||note.content||'').trim();if(phrase&&phrase.length<=200){const entry=el('button','button subtle','词条');entry.type='button';entry.title='匹配百科词条或创建带来源的词条';entry.addEventListener('click',()=>wikiUI.show('encyclopedia',phrase,{paper_id:state.active.id,title:state.active.title,page:note.page,annotation_id:note.id,quote:phrase}));actions.append(entry);}
     card.append(actions);for(const reply of replies.get(note.id)||[])card.append(replyCard(reply)); fragment.append(card);
   }
   if (!notes.length) fragment.append(emptyState('第一条批注，从一个问题开始', '在阅读页选择文字以高亮，或添加一条整页笔记。'));
@@ -987,9 +989,9 @@ function announceReady() {
 function receiveHarnessContext(event) {
   if (event.origin === window.location.origin && event.source === window.parent && window.parent !== window && event.data?.version === 1) {
     if (event.data.type === 'paper-library:restore') {
-      if(durableReaderLoaded)return;
+      if(durableReaderLoaded){if(initializedReader&&event.data.snapshot?.workspace)void restoreWorkspaceSnapshot(event.data.snapshot.workspace);return;}
       readerRestore = event.data.snapshot;
-      if (initializedReader) void restoreReaderState();
+      if (initializedReader) void restoreReaderState().then(()=>restoreWorkspaceSnapshot(event.data.snapshot?.workspace));
       return;
     }
     if (event.data.type === 'paper-library:reader-state-error') { toast(event.data.error || '阅读草稿暂未保存到主窗口。', true); return; }
@@ -1159,7 +1161,8 @@ document.addEventListener('dragend', () => { $('window-drop-overlay').hidden = t
 document.addEventListener('drop', handleDrop);
 $('metadata-open').addEventListener('click', openMetadata); $('metadata-form').addEventListener('submit', event => { if (!workbenchUI) return saveMetadata(event); });
 $('attach-open').addEventListener('click', () => { if (!state.active) return; $('attach-form').dataset.itemId = state.active.id; errorAt('attach-error', null); openDialog('attach-dialog'); }); $('attach-form').addEventListener('submit', attachPdf);
-$('copy-apa').addEventListener('click', () => cite('apa')); $('export-bib').addEventListener('click', () => cite('biblatex')); $('export-notes').addEventListener('change', exportNotes);
+$('copy-apa').addEventListener('click', () => cite('apa'));
+const headerCitation=el('button','button subtle','复制 APA 7');headerCitation.id='toolbar-copy-apa';headerCitation.type='button';headerCitation.title='复制当前文献的 APA 7 引用';headerCitation.addEventListener('click',()=>void cite('apa'));$('toolbar-paper').after(headerCitation); $('export-bib').addEventListener('click', () => cite('biblatex')); $('export-notes').addEventListener('change', exportNotes);
 $('previous-page').addEventListener('click', () => advancePage(-1)); $('next-page').addEventListener('click', () => advancePage(1));
 $('page-number').addEventListener('change', () => requestPage($('page-number').value));
 $('word-layer').addEventListener('pointerup', () => setTimeout(readSelection, 0)); $('word-layer').addEventListener('keyup', readSelection);
@@ -1202,9 +1205,14 @@ document.addEventListener('keydown', async (event) => {
   else document.querySelector('.workspace').classList.remove('show-detail');
   $('search').focus();$('search').select();
 });
+function publishWorkspaceState(workspace){void persistence?.put(`workspace:last:${ENTRY_PAPER||'main'}`,workspace).catch(()=>{});if(window.parent!==window)window.parent.postMessage({type:'paper-library:workspace-state',version:1,workspace},window.location.origin);}
+function workspaceSnapshot(){const current=latexUI?.isOpen()?latexUI.current?.():boardUI?.isOpen()?boardUI.current?.():workspaceNavigationUI?.state().current;return {section:workspaceNavigationUI?.state().section||'paper',current:current?{kind:current.kind,id:current.id,title:current.title}:null,table:workbenchUI?.isTable()===true};}
+async function restoreWorkspaceSnapshot(value){if(!value||!['paper','board','latex','project'].includes(value.section))return;try{if(value.current&&['board','latex'].includes(value.current.kind)){await workspaceNavigationUI?.navigate(value.current);}else if(value.table||value.section!=='paper'){await workspaceNavigationUI?.selectRoot(value.section);}}catch(error){toast(`工作区恢复失败：${error.message}`,true);}}
 function publishReaderState() {
+  if(initializedReader&&!restoringReader)publishWorkspaceState(workspaceSnapshot());
+
   if (restoringReader || !state.active || state.active.resource_kind === 'dataset' || workbenchUI?.isTable() || (workbenchUI && readerPaperId !== state.active.id)) return true;
-  const snapshot = { paperId: state.active.id, page: state.page, tab: state.tab, chatDraft: paperChatUI?.draft() || '', chatContext: paperChatUI?.context() || { annotationRefs: [] },
+  const snapshot = { workspace:workspaceSnapshot(), paperId: state.active.id, page: state.page, tab: state.tab, chatDraft: paperChatUI?.draft() || '', chatContext: paperChatUI?.context() || { annotationRefs: [] },
     ...(readingPanels ? {panels:{annotations:readingPanels.visible('annotations'),metadata:readingPanels.visible('metadata'),chat:readingPanels.visible('chat'),side:$('reading-workspace').dataset.readingSide || 'left'}} : {}),
     ...(state.selection?.id===state.active.id ? {readerSelection:{page:state.selection.page,text:state.selection.text,rects:state.selection.rects}} : {}),
   };
@@ -1359,6 +1367,7 @@ async function initialize() {
   announceReady();await loadStatus();
   if(ENTRY_VIEW==='board'||ENTRY_VIEW==='latex'){await applyEntryView();return;}
   await loadList();
+  let savedWorkspace;try{savedWorkspace=readerRestore?.workspace||await persistence?.get(`workspace:last:${ENTRY_PAPER||'main'}`);}catch{}
   if(ENTRY_PAPER){
     // This tab was opened for one paper; the global last-paper key belongs to the
     // main library tab and must not pull this pane onto another document.
@@ -1368,6 +1377,7 @@ async function initialize() {
     catch(error){toast(`阅读位置读取失败：${error.message}`,true);}
     initializedReader=true;await restoreReaderState();
   }
+  await restoreWorkspaceSnapshot(savedWorkspace);
   if(pendingReferenceOpen){const value=pendingReferenceOpen;pendingReferenceOpen=null;await openReferencedPaper(value);}
   if(!paperChatUI?.available())loadModels();
 }
@@ -1458,7 +1468,9 @@ readingShell?.setInkQueue(inkQueue);
 void restoreInkDraft().then(()=>inkQueue?.refresh()).then(()=>linkedHandwritingUI?.restore()).then(()=>inkQueue&&state.active?.id?loadAnnotations(state.active.id):null).catch(error=>toast(error.message,true));
 handwritingUI = window.PaperHandwritingNote?.create({ api, persistence, toast, draftChanged: publishReaderState, available: () => handwritingAvailable, changed: async (id, page) => { if (state.active?.id === id) { await loadAnnotations(id); await paperChatUI?.annotationsChanged(id); await refreshPage(page); } } });
 companionUI=window.PaperCompanion?.create({api,persistence,getPaper:()=>state.active,refreshAnnotations:loadAnnotations,toast});
-languageUI=window.PaperLanguageLearning?.create({api,persistence,getPaper:()=>state.active,getSelection:()=>state.selection,toast,openReference:openReferencedPaper,
+const wikiUI=window.PaperEncyclopedia.create({api,toast,openReference:openReferencedPaper});
+const wikiButton=el('button','button subtle','百科');wikiButton.id='ribbon-encyclopedia';wikiButton.type='button';wikiButton.addEventListener('click',()=>wikiUI.show());document.querySelector('.reader-ribbon').insertBefore(wikiButton,$('reader-fullscreen'));
+languageUI=window.PaperLanguageLearning?.create({api,persistence,openVocabulary:()=>wikiUI.show('words'),getPaper:()=>state.active,getSelection:()=>state.selection,toast,openReference:openReferencedPaper,
   beforeOpen:()=>readingPanels?.close('chat'),prepareChat:async(text,source)=>{
     if(source?.paperId!==state.active?.id){toast('请先返回这条语言记录所属的论文。',true);return;}
     await switchTab('conversation');
@@ -1470,7 +1482,7 @@ languageUI=window.PaperLanguageLearning?.create({api,persistence,getPaper:()=>st
   }});
 if(languageUI){
   const languageButton=el('button','button subtle','语言');languageButton.id='ribbon-language';languageButton.type='button';languageButton.addEventListener('click',()=>{void languageUI.paperChanged(state.active);languageUI.show();});document.querySelector('.reader-ribbon').insertBefore(languageButton,$('reader-fullscreen'));
-  const wordsButton=el('button','button subtle','难词本');wordsButton.id='ribbon-vocabulary';wordsButton.type='button';wordsButton.addEventListener('click',()=>languageUI.show('words'));document.querySelector('.reader-ribbon').insertBefore(wordsButton,$('reader-fullscreen'));
+  const wordsButton=el('button','button subtle','难词本');wordsButton.id='ribbon-vocabulary';wordsButton.type='button';wordsButton.addEventListener('click',()=>wikiUI.show('words'));document.querySelector('.reader-ribbon').insertBefore(wordsButton,$('reader-fullscreen'));
   for(const[mode,label]of [['translate','直接翻译'],['polish','优化表述']]){const b=el('button','button',label);b.type='button';b.id=`language-selection-${mode}`;b.addEventListener('click',()=>void languageUI.useSelection(mode));$('selection-tools').insertBefore(b,$('clear-selection'));}
   languageUI.sync();
 }
@@ -1822,12 +1834,11 @@ function placeWorkspaceNavigation(writing = false) {
   workspaceNavigationUI?.mountActions(writingBar ? $('latex-navigation-actions') || undefined : undefined);
   const returnButton = $('library-return-to-dsh');
   if (!returnButton) return;
-  const returnHost = writingBar
-    ? area?.querySelector('.workspace-navigation') || writingBar.querySelector('.latex-toolbar')
-    : document.querySelector('.topbar-actions');
-  if (returnHost && returnButton.parentNode !== returnHost) returnHost.prepend(returnButton);
+  const returnHost = $('topbar-end') || document.querySelector('.topbar-actions');
+  if (returnHost && returnButton.parentNode !== returnHost) returnHost.append(returnButton);
 }
 function applyWorkspaceNavigation(value) {
+  if(initializedReader&&!restoringReader)publishWorkspaceState({section:value.section,current:value.current,table:workbenchUI?.isTable()===true});
   const pane = document.querySelector('.library-pane');
   if (pane) { pane.dataset.workspaceSection = value.section; pane.dataset.workspaceFocus = value.current?.kind || ''; }
   $('library-literature-content').hidden = value.section !== 'paper';
@@ -2023,3 +2034,5 @@ window.addEventListener('message', event => {
 for(const[id,icon]of [['library-graph-open','waypoints'],['library-graph-refresh','refresh-cw'],['library-graph-fullscreen','layout-dashboard'],['catalog-expand','layout-dashboard'],['refresh','refresh-cw'],['settings-open','settings'],['settings-language','languages'],['slides-open','presentation'],['latex-open','file-text'],['board-open','layout-dashboard'],['paper-board-new','plus'],['paper-board-open','layout-dashboard'],['import-open','download'],['export-library','download'],['build-bibliography','file-text'],['catalog-archive','trash-2'],['metadata-open','circle-help'],['metadata-enrich','sparkles'],['ribbon-language','languages'],['ribbon-vocabulary','book-open'],['workspace-library','library'],['paper-datasets','layout-dashboard'],['knowledge-open','file-text'],['language-settings-open','settings'],['language-close','x'],['open-in-pane','panel-left'],['copy-apa','file-text'],['export-bib','download'],['project-new','plus'],['project-edit','pencil'],['project-archive','archive']]){const button=$(id);if(button&&window.PaperIcons){if(button.classList.contains('icon-button'))button.textContent='';window.PaperIcons.decorate(button,icon);}}
 for(const tab of document.querySelectorAll('[data-tab]')){const icon={reader:'book-open',annotations:'pencil',conversation:'sparkles',graph:'waypoints'}[tab.dataset.tab];if(icon)window.PaperIcons?.decorate(tab,icon);}
 initialize();
+
+for(const id of ['paper-datasets','knowledge-open']){const control=$(id);if(control&&$('ribbon-language'))document.querySelector('.reader-ribbon').insertBefore(control,$('ribbon-language'));}

@@ -123,3 +123,11 @@ test('the registered chat script is served under standalone and Harness paths be
     assert.ok(html.indexOf('src="./paper-chat.js"')<html.indexOf('src="./app.js"'));
   }
 });
+
+test('encyclopedia reader script is served before app bootstrap',async()=>{
+ const handler=createFetchHandler({basePath:'/api/paper-library'});
+ const response=await handler(new Request('http://localhost/api/paper-library/encyclopedia.js'));
+ assert.equal(response.status,200);assert.match(await response.text(),/PaperEncyclopedia/);
+ const html=await (await handler(new Request('http://localhost/api/paper-library/'))).text();
+ assert.ok(html.indexOf('./encyclopedia.js')<html.indexOf('./app.js'));
+});

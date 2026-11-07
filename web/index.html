@@ -64,12 +64,13 @@
   <script src="./language-learning.js" defer></script>
   <script src="./resource-library.js" defer></script>
   <script src="./knowledge-workflow.js" defer></script>
+  <script src="./encyclopedia.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="./" aria-label="Paper Library 首页"><span class="brand-mark" aria-hidden="true">P<span>↗</span></span><span>Paper Library<small>阅读 · 批注 · 连接</small></span></a>
-    <div class="topbar-actions"><span id="library-status" class="status">正在连接文献库…</span><a id="slides-open" class="button subtle" href="slides.html" target="_blank" rel="noopener" title="打开 Slides 工作台：使用 PlainDeck 制作演示文稿">Slides</a><button id="board-open" class="button subtle" type="button" title="打开文献画板：自由摆放节点与连线，可整理成思维导图">画板</button><button id="latex-open" class="button subtle" type="button" title="打开 LaTeX 工作台：编辑项目文件夹里的 .tex 并查看它编译出的 PDF">LaTeX</button><button id="queue-toggle" class="button subtle" hidden>导入进度</button><button id="import-open" class="button primary">＋ 导入文献</button></div>
+    <div class="topbar-actions"><span id="library-status" class="status">正在连接文献库…</span><a id="slides-open" class="button subtle" href="slides.html" target="_blank" rel="noopener" title="打开 Slides 工作台：使用 PlainDeck 制作演示文稿">Slides</a><button id="board-open" class="button subtle" type="button" title="打开文献画板：自由摆放节点与连线，可整理成思维导图">画板</button><button id="latex-open" class="button subtle" type="button" title="打开 LaTeX 工作台：编辑项目文件夹里的 .tex 并查看它编译出的 PDF">LaTeX</button><button id="queue-toggle" class="button subtle" hidden>导入进度</button><button id="import-open" class="button primary">＋ 导入文献</button><span id="topbar-end" class="topbar-end"></span></div>
     <div id="paper-tools" class="paper-tools" aria-label="当前文献工具栏">
       <span id="toolbar-paper" class="toolbar-paper">选择一篇文献</span>
       <div id="toolbar-actions" class="toolbar-actions"></div>
@@ -87,7 +88,7 @@
       </section>
       <div id="workspace-catalog-body" hidden></div>
       <div id="library-literature-content">
-      <div class="pane-heading"><div><p class="eyebrow">YOUR RESEARCH SHELF</p><h1>库 <span id="item-count" class="count">—</span></h1></div><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="检索文献、数据集与演示…" autocomplete="off" aria-label="检索文献、数据集与演示文稿"><kbd>⌘ K</kbd></label><div class="shelf-actions"><button id="build-bibliography" class="button subtle" title="根据文献库条目生成 references.bib 和引用信息核对报告，不会选择本次提问的引用">生成 references.bib</button><button id="export-library" class="button subtle" title="导出全部文献为 BibLaTeX">导出文献库</button><button id="refresh" class="icon-button" title="刷新文献库" aria-label="刷新文献库">↻</button></div></div>
+      <div class="pane-heading"><div><h1>文献 · <span id="item-count" class="count">—</span></h1></div><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="检索文献、数据集与演示…" autocomplete="off" aria-label="检索文献、数据集与演示文稿"><kbd>⌘ K</kbd></label><div class="shelf-actions"><button id="build-bibliography" class="button subtle" title="根据文献库条目生成 references.bib 和引用信息核对报告，不会选择本次提问的引用">生成 references.bib</button><button id="export-library" class="button subtle" title="导出全部文献为 BibLaTeX">导出文献库</button><button id="refresh" class="icon-button" title="刷新文献库" aria-label="刷新文献库">↻</button></div></div>
       <div class="library-filterbar" aria-label="阅读项目与文献筛选">
       <div class="library-organizer-row">
       <div class="project-bar">

@@ -116,6 +116,10 @@ export function readerSnapshot(value) {
     tab: ['reader', 'annotations', 'conversation', 'graph'].includes(value.tab) ? value.tab : 'reader',
     chatDraft: boundedString(value.chatDraft ?? '', TEXT_LIMIT),
   }
+  if(value.workspace && ['paper','board','latex','project'].includes(value.workspace.section)) {
+    const current=value.workspace.current;
+    snapshot.workspace={section:value.workspace.section,table:value.workspace.table===true,current:current&&['paper','board','latex','project'].includes(current.kind)?{kind:current.kind,id:boundedString(current.id,200),title:boundedString(current.title||'',500)}:null};
+  }
   if (value.panels != null) {
     const panels = value.panels
     if (!panels || typeof panels !== 'object' || !['left', 'right'].includes(panels.side)) throw new Error('阅读侧栏位置无效')
@@ -354,6 +358,10 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
       relayResult(event.source)
       relayReference()
       return
+    }
+    if(data.type==='paper-library:workspace-state') {
+      try {const previous=snapshots.get(frame.key)||{paperId:null,page:1};snapshots.set(frame.key,readerSnapshot({...previous,workspace:data.workspace}));}catch(error){post(event.source,{type:'paper-library:reader-state-error',error:error.message});}
+      return;
     }
     if (data.type === 'paper-library:reader-state') {
       try {

@@ -133,7 +133,7 @@ export function createHarnessToolAI(llm, {
     const timeout = setTimeout(() => deadline.abort(fail('TOOL_AI_TIMEOUT', '本次只读检索超时，已停止。', 408)), DEADLINE_MS)
     timeout.unref?.()
     const call = { provider, model, maxTokens: config.maxOutputTokens, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }
-    const user = text => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin', plugin: 'paper-library' } })
+    const user = text => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'paper-library-ai', plugin: 'paper-library' } })
     const messages = [user(prompt)]
     const ids = new Set()
     const trace = []

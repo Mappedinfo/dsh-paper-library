@@ -642,3 +642,18 @@ test('reference jumps land in the pane the reader last touched', async () => {
   assert.equal(e.messages.at(-1).value.page, 9)
   e.bridge.dispose()
 })
+
+test('reader handoff preserves the current board surface separately from PDF position',()=>{
+ const workspace={section:'board',current:{kind:'board',id:'synthetic-board',title:'Synthetic board'},table:false};
+ const snapshot=readerSnapshot({paperId:'paper-1',page:8,tab:'annotations',workspace});
+ assert.deepEqual(snapshot.workspace,workspace);assert.equal(snapshot.page,8);
+ assert.deepEqual(readerSnapshot({paperId:null,page:1,workspace}).workspace,workspace);
+});
+
+test('board switch survives frame recreation without overwriting retained annotation draft',()=>{
+ const e=environment(),workspace={section:'board',current:{kind:'board',id:'synthetic-board',title:'Synthetic board'},table:false};
+ e.message({type:'paper-library:reader-state',snapshot:{paperId:'paper-1',page:3,chatDraft:'kept draft'}});
+ e.message({type:'paper-library:workspace-state',workspace});
+ e.detach();e.bridge.attach(e.target);e.message({type:'paper-library:ready'});
+ const restored=e.messages.at(-1).value.snapshot;assert.deepEqual(restored.workspace,workspace);assert.equal(restored.chatDraft,'kept draft');assert.equal(restored.page,3);
+});

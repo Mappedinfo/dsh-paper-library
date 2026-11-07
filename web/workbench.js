@@ -67,7 +67,7 @@ window.PaperWorkbench = (() => {
     // Board controls for the current paper travel with the other per-paper actions; the
     // container below is removed, so anything not moved here would disappear at boot.
     for (const id of ['copy-apa','export-bib','download-pdf','open-in-pane','metadata-open','attach-open']) $('toolbar-actions').append($(id));
-    $('toolbar-actions').append(button('补全资料','metadata-enrich',enrich));
+    $('toolbar-actions').append(button('补全资料','metadata-enrich',enrich));$('metadata-enrich').title='选中文献后，按标识符或题名查询 Crossref / arXiv；PDF 正文不上传。';
     $('toolbar-actions').append($('export-notes').closest('label'));
     $('toolbar-reader').append(document.querySelector('.page-controls'),$('page-note'));
     $('paper-tools').prepend($('toolbar-reader'));
@@ -117,16 +117,16 @@ window.PaperWorkbench = (() => {
       if(!table)return;
       const grid=node('table');grid.setAttribute('aria-label','文献、数据集与演示文稿资料表');const widths=node('colgroup');for(const field of ['title','author','year','journal','jcr','citekey','doi','institution','dates','kind','actions']){const col=node('col');col.className=`catalog-column-${field}`;widths.append(col);}grid.append(widths);const head=node('thead');const headerRow=node('tr');
       for(const [key,label] of columns){const th=node('th');th.scope='col';if(key){th.setAttribute('aria-sort',state.sort===key?(state.order==='asc'?'ascending':'descending'):'none');th.append(button(`${label}${state.sort===key?(state.order==='asc'?' ↑':' ↓'):''}`,null,()=>sortBy(key,state.sort===key&&state.order==='asc'?'desc':'asc')));}else th.textContent=label;headerRow.append(th);}headerRow.append(node('th','操作'));head.append(headerRow);grid.append(head);
-      const body=node('tbody');for(const item of state.items){const selected=state.active?.id===item.id||state.catalogSlideId===item.id;const row=node('tr',undefined,selected?'selected':'');row.dataset.paperId=item.id;
+      const body=node('tbody');for(const item of state.items){const selected=state.active?.id===item.id||state.catalogSlideId===item.id;const row=node('tr',undefined,selected?'selected':'');row.dataset.paperId=item.id;row.tabIndex=0;row.setAttribute('aria-selected',String(selected));const choose=()=>selectPaper(item);row.addEventListener('click',e=>{if(!e.target.closest('button,a,input,select,textarea'))choose();});row.addEventListener('keydown',e=>{if(e.target===row&&(e.key==='Enter'||e.key===' ')){e.preventDefault();choose();}});
         const dates=item.publication_dates||{};const values=[item.title,(item.author||[]).map(name).join(' · '),item.issued?.['date-parts']?.[0]?.[0],item.resource_kind==='dataset'?item.publisher:item['container-title'],ranking(item),item.citekey,item.DOI,institutions(item).join('；'),[dates.published||dates.online||dates.print,dates.received,dates.accepted].map(v=>v||'—').join(' / '),item.resource_kind==='slides'?'演示文稿':item.resource_kind==='dataset'?'数据集':item.pdf?'PDF':'文献'];
-        values.forEach((value,i)=>{const td=node('td'),text=String(value||'—');if(i===0){const b=button(value||'未命名条目',null,()=>{if(item.resource_kind==='slides'||item.resource_kind==='dataset'){selectPaper(item);return;}setTable(false);void openPaper(item.id);}, 'table-title');b.setAttribute('aria-pressed',String(selected));b.title=b.textContent;td.append(b);}else{const textNode=node('span',text,'table-cell-text');textNode.title=text;td.append(textNode);}row.append(td);});
+        values.forEach((value,i)=>{const td=node('td'),text=String(value||'—');if(i===0){const b=button(value||'未命名条目',null,()=>selectPaper(item), 'table-title');b.setAttribute('aria-pressed',String(selected));b.title=b.textContent;td.append(b);}else{const textNode=node('span',text,'table-cell-text');textNode.title=text;td.append(textNode);}row.append(td);});
         const actions=node('td',undefined,'table-row-actions');if(item.resource_kind==='slides')actions.append(button('打开',null,()=>selectPaper(item)));else if(state.archived)actions.append(button('恢复',null,()=>archivePaper(item)));else actions.append(button(item.resource_kind==='dataset'?'浏览':'阅读',null,()=>{setTable(false);void openPaper(item.id);}),button('编辑',null,()=>item.resource_kind==='dataset'?resource()?.edit(item):edit(item)),button('移入回收站',null,()=>archivePaper(item)));row.append(actions);body.append(row);
       }grid.append(body);$('catalog-table').replaceChildren(grid);if(!state.items.length)$('catalog-table').append(node('p',state.archived?'回收站为空。':state.project&&state.kind==='slides'?'演示文稿不属于阅读项目；切回全部条目查看。':'没有匹配的条目。','empty-state'));
     }
     function header() {
       const item=state.active;const enabled=Boolean(item&&!item.archived&&!state.catalogSlideId);
       document.querySelectorAll('[data-tab]').forEach(n=>n.disabled=!enabled);
-      $('toolbar-paper').textContent=state.catalogSlideTitle||item?.title||'选择一篇文献';$('toolbar-paper').title=state.catalogSlideTitle||item?.title||'';
+      $('toolbar-paper').textContent=state.catalogSlideTitle||(item?[item.title,item.issued?.['date-parts']?.[0]?.[0]].filter(Boolean).join(' · '):'选择一篇文献');const copy=$('toolbar-copy-apa');if(copy)copy.hidden=!enabled;$('toolbar-paper').title=state.catalogSlideTitle||item?.title||'';
       for(const n of $('toolbar-actions').querySelectorAll('button'))n.disabled=!enabled;
       $('download-pdf').hidden=!enabled||!item.pdf;
       $('export-notes').disabled=!enabled||!item.pdf;
@@ -149,6 +149,7 @@ window.PaperWorkbench = (() => {
       }).catch(error=>{if(ticket===revision){loadingEditId=null;setEditorLoading(false);editorVisible=false;if(closeMetadataPanel)closeMetadataPanel();else $('metadata-dialog').close();toast(`无法读取资料草稿，已有内容仍保留：${error.message}`,true);}return false;});
     }
     function renderEditor(item,saved,lookup) {
+      $('metadata-author-candidates')?.remove();
       // Row editing selects metadata only. Its summary and toolbar must describe
       // the same record that Save will update, even if another PDF was open.
       if(item?.id&&state.active?.id!==item.id&&selectPaper){
@@ -203,7 +204,9 @@ window.PaperWorkbench = (() => {
     }
     async function enrich() {
       const item=state.active;if(!item||!rememberDraft())return;const id=item.id;const token=++revision;$('metadata-enrich').disabled=true;$('metadata-enrich').textContent='正在查找…';
-      try{const result=await api('metadata_lookup',{id});if(token!==revision||state.active?.id!==id)return;if(!await edit(result.item,{lookup:true}))return;toast('已将可核验资料填入编辑表单，请核对后保存。');if(result.warnings?.length){$('metadata-error').textContent=result.warnings.join('；');$('metadata-error').hidden=false;}}
+      try{const result=await api('metadata_lookup',{id});if(token!==revision||state.active?.id!==id)return;if(!await edit(result.item,{lookup:true}))return;
+      $('metadata-author-candidates')?.remove();if(result.author_candidates?.length&&JSON.stringify(result.author_candidates)!==JSON.stringify(result.item.author)){const candidates=node('div',undefined,'small');candidates.id='metadata-author-candidates';candidates.append(node('p',`检索到的作者：${result.author_candidates.map(name).join('；')}`),button('采用完整作者列表（保存后生效）',null,()=>{$('edit-authors').value=result.author_candidates.map(person=>person.literal||[person.family,person.given].filter(Boolean).join(', ')).join('\n');editing.author=structuredClone(result.author_candidates);editing._authorsText=$('edit-authors').value;$('edit-affiliations').value=editing.author.map((a,i)=>{const names=(a.affiliation||[]).map(v=>typeof v==='string'?v:v.name).filter(Boolean);return names.length?`${i+1} | ${names.join('；')}`:'';}).filter(Boolean).join('\n');editing._affiliationsText=$('edit-affiliations').value;$('edit-authors').dispatchEvent(new Event('input',{bubbles:true}));candidates.remove();}));$('edit-authors').closest('label').after(candidates);}
+      toast('已将可核验资料填入编辑表单，请核对后保存。');if(result.warnings?.length){$('metadata-error').textContent=result.warnings.join('；');$('metadata-error').hidden=false;}}
       catch(e){toast(e.message,true);}finally{$('metadata-enrich').textContent='补全资料';header();}
     }
     header();return {render,header,edit,setTable,isTable:()=>table,setPanelHost,paperChanged,metadataVisibility};

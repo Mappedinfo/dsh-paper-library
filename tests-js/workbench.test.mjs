@@ -155,7 +155,7 @@ test('a stale metadata lookup cannot reopen the editor after selecting a differe
   f.state.active = { ...paper, id: 'paper-b', title: 'B' }; f.workbench.header();
   lookup.resolve({ item: { ...paper, title: 'Enriched A' } }); await pending;
   assert.equal(f.element('metadata-dialog').open, false);
-  assert.equal(f.element('toolbar-paper').textContent, 'B');
+  assert.equal(f.element('toolbar-paper').textContent, 'B · 2026');
   assert.equal(f.element('metadata-enrich').disabled, false);
 });
 
@@ -177,7 +177,7 @@ test('editing a different table row aligns its summary and save target without o
   const f=environment({active:a});f.state.items.push(b);f.workbench.edit(a);f.element('edit-title').value='Unsaved A';await f.form.dispatch('input');f.workbench.setTable(true);
   const row=f.element('catalog-table').querySelectorAll('tr').find(n=>n.dataset.paperId===b.id);
   await row.querySelectorAll('button').find(n=>n.textContent==='编辑').dispatch('click');
-  assert.equal(f.state.active.id,b.id);assert.equal(f.element('toolbar-paper').textContent,b.title);assert.equal(f.element('edit-title').value,b.title);
+  assert.equal(f.state.active.id,b.id);assert.equal(f.element('toolbar-paper').textContent,`${b.title} · 2026`);assert.equal(f.element('edit-title').value,b.title);
   assert.equal(f.element('paper-metadata').querySelectorAll('dd')[0].textContent,'B Institute');
   assert.deepEqual(f.selections,[b.id],'Editor-triggered selection must not recurse through paperChanged');assert.deepEqual(f.opens,[]);assert.deepEqual(f.requests,[]);
   await f.form.dispatch('submit');assert.equal(f.requests[0].id,b.id);
@@ -250,14 +250,14 @@ test('unsaved new entries and ranking removals are restored without inventing ve
   assert.equal(f.element('ranking-rows').children.length,0);await f.form.dispatch('submit');assert.equal(f.requests[0].action,'create');
 });
 
-test('a catalog title click opens the reader while row actions keep selection-only semantics', async () => {
+test('catalog title and row selection keep the table open for metadata enrichment', async () => {
   const f = environment({ active: original() });
   const b = { ...original(), id: 'paper-b', title: 'Second paper', pdf: false };
   f.state.items.push(b); f.workbench.setTable(true);
   const row = f.element('catalog-table').querySelectorAll('tr').find(n => n.dataset.paperId === b.id);
-  // Title click opens the reading surface for the chosen paper directly.
+  // 单击题名只选择，阅读由独立操作触发。
   await row.querySelector('button').dispatch('click');
-  assert.deepEqual(f.opens, ['paper-b']); assert.deepEqual(f.selections, [], 'A title click is not a bare selection');
+  assert.deepEqual(f.opens, []); assert.deepEqual(f.selections, ['paper-b']);assert.equal(f.workbench.isTable(),true);
   // The edit action still selects in place without opening the reader.
   f.opens.length = 0;
   await [...row.querySelectorAll('button')].find(button => button.textContent === '编辑').dispatch('click');
@@ -337,7 +337,7 @@ test('table selection cannot publish the previous reader chat draft under the se
   const end = appSource.indexOf('async function restoreReaderState()', start);
   assert.ok(start >= 0 && end > start);
   const messages = [];
-  const context = { inkQueue:null,handwritingUI:null,linkedHandwritingUI:null,pdfReader:null,inkSaveIdentity:null,inkSaveUncertain:false,inkDraftUpdatedAt:0,pendingInkHandoff:null,persistence:null,readerStateReady:false,readingPanels:null, restoringReader: false, readerPaperId: 'reader-paper-a', state: { active: { id: 'selected-paper-b' }, page: 3, tab: 'conversation' },
+  const context = { initializedReader:false,workspaceSnapshot:()=>({section:'paper',current:null,table:false}),inkQueue:null,handwritingUI:null,linkedHandwritingUI:null,pdfReader:null,inkSaveIdentity:null,inkSaveUncertain:false,inkDraftUpdatedAt:0,pendingInkHandoff:null,persistence:null,readerStateReady:false,readingPanels:null, restoringReader: false, readerPaperId: 'reader-paper-a', state: { active: { id: 'selected-paper-b' }, page: 3, tab: 'conversation' },
     workbenchUI: { isTable: () => true }, paperChatUI: { draft: () => 'Private draft for previous paper A', context: () => ({ annotationRefs: [{ id: 'note-from-A' }] }) },
     window: { parent: { postMessage: message => messages.push(message) }, location: { origin: 'http://localhost:43121' } },
     $: () => ({ open: false }), Blob,
@@ -366,4 +366,13 @@ test('author names retain full supplied names and flag filename-only surnames wi
   assert.equal(names.authorName(item.author[0]),'Liu');assert.equal(names.incompleteAuthor(item),true);
   assert.equal(names.incompleteAuthor({...item,author:[{family:'Liu',given:'Rui'}]}),false);
   assert.equal(names.incompleteAuthor({...item,parse:{}}),false);
+});
+
+test('plain catalog cells and keyboard select the row before metadata enrichment',async()=>{
+ const a=original(),b={...original(),id:'paper-b',title:'Another synthetic paper'};
+ const f=environment({active:a});f.state.items=[a,b];f.workbench.setTable(true);
+ const row=f.element('catalog-table').querySelectorAll('tr').find(node=>node.dataset.paperId==='paper-b');
+ await row.dispatch('click',{target:row.children[1]});
+ assert.equal(f.state.active.id,b.id);assert.equal(f.element('metadata-enrich').disabled,false);assert.deepEqual(f.opens,[]);
+ await row.dispatch('keydown',{target:row,key:'Enter'});assert.equal(f.selections.at(-1),b.id);assert.equal(f.workbench.isTable(),true);
 });

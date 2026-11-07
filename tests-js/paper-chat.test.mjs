@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createPaperChat, paperSessionId, projectPaperHistory } from '../src/harness/paper-chat.mjs'
 import { createLocalStateStore } from '../src/local-state.mjs'
 
-async function fixture(t, preparedStore, automatic=false) {
+async function fixture(t, preparedStore, automatic=false, fixtureSettings={}) {
   const directory = await mkdtemp(join(tmpdir(), 'paper-chat-test-'))
   const library = await realpath(directory)
   t.after(() => rm(directory, { recursive: true, force: true }))
@@ -27,10 +27,10 @@ async function fixture(t, preparedStore, automatic=false) {
     sessions: {
       get: id => attached.get(id),
       flush: async () => true,
-      prepare: (id, { meta }) => {
-        if (preparedStore) return preparedStore.prepare(id, { meta })
-        const events = []
-        return { header: { id, version: 3, cwd: meta.cwd, createdAt: Date.now(), isSeeded: false }, append: (type, data) => events.push({ seq: events.length, time: Date.now(), type, data }), snapshotEvents: () => events.slice() }
+      prepare: (id, { meta, seed }) => {
+        if (preparedStore) return preparedStore.prepare(id, { meta, seed })
+        const events = [...(seed || [])]
+        return { header: { id, version: 3, cwd: meta.cwd, createdAt: Date.now(), isSeeded: false }, append: () => { throw Error('Cannot append to detached session') }, snapshotEvents: () => events.slice() }
       },
     },
     sessionPersistence: {
@@ -91,10 +91,11 @@ async function fixture(t, preparedStore, automatic=false) {
   const annotations = [{ id: 'note-1', page: 2, text: 'quoted paper text', comment: 'Why?', author: 'Reader', version: createHash('sha256').update('fixture version1').digest('hex') }]
   const kernel = async request => {
     switch (request.action) {
-      case 'get': return { id: request.id, title: 'A synthetic paper', citekey: request.id, pdf: true, page_count: 3 }
+      case 'get': return { id: request.id, title: 'A synthetic paper', citekey: request.id, pdf: true, ...(fixtureSettings.missingPageCount?{}:{page_count:3}) }
       case 'annotations': return { annotations }
       case 'annotation_catalog': return { annotations, total: annotations.length, total_exact: true, truncated: false }
       case 'annotation_context_exact': {
+        if(request.selection?.page>3)throw Error('选文页码超出当前 PDF');
         const selected = request.annotation_refs.map(ref => {
           const annotation = annotations.find(note => note.id === ref.id)
           if (!annotation) throw new Error('ANNOTATION_MISSING')
@@ -407,8 +408,15 @@ test('cold paper seeds validate through the actual built Harness Session and per
     const result = await f.chat({ action: 'chat_ensure', id: 'native-paper' })
     const stored = f.stored.get(result.sessionId)
     assert.equal(native.sessions.get(result.sessionId), undefined)
-    assert.equal(validateStoredEvents(stored.header, stored.events).length, 2)
-    assert.deepEqual(stored.events.map(event => event.type), ['session/title', 'model/selection'])
+    assert.equal(validateStoredEvents(stored.header, stored.events).length, 3)
+    assert.deepEqual(stored.events.map(event => event.type), ['session/title', 'model/selection', 'session/end-seed'])
     assert.deepEqual(stored.events[1].data, result.model)
   } finally { await native.fiber.dispose() }
 })
+
+
+test('paper selection reaches actual PDF validation when external catalog omits page count',async t=>{
+  const f=await fixture(t,undefined,false,{missingPageCount:true});
+  const result=await f.chat({action:'chat_context',id:'paper-a',annotation_ids:[],selection:{page:2,text:'Synthetic selected text'}});
+  assert.ok(result);
+});

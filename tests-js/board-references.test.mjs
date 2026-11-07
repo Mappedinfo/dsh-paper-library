@@ -44,7 +44,7 @@ test('the host expands a board token into frozen material with plugin provenance
   assert.equal(textOf(prepared[0]), '请比较这些方向：\n〔引用画板 技术路线〕');
   assert.equal(prepared[0].content[0].text.includes('[[paper-library-board:'), false, 'no raw token survives into the model context');
   const source = prepared[1].source;
-  assert.deepEqual(source.kind, 'plugin');
+  assert.deepEqual(source.kind, 'paper-library-board');
   assert.equal(source.plugin, 'Paper Library');
   assert.equal(source.paperLibraryBoard.board_id, f.board.id);
   assert.equal(source.paperLibraryBoard.snapshot_id, f.frozen.snapshot_id);

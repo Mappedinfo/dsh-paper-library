@@ -608,6 +608,14 @@ def dispatch(request):
             return {"count": counts["total"] - counts["archived"], "archived_count": counts["archived"], "total_count": counts["total"], "library": str(library.root), "storage": "SQLite + portable native PDF annotations", "worker": "on-demand", "schema": 3, "projects": True, "external_indexed": int(synced["indexed"] or 0), "external_missing": int(synced["missing"] or 0)}
         if action == "import":
             return library.import_items(request.get("items"), request.get("path"), request.get("limit", 100), request.get("offset", 0), request.get("metadata"), request.get("metadata_source"), request.get("metadata_verified", False))
+        if action == "metadata_probe":
+            # 仅在用户请求单篇补全时读取前三页，正文不离开本机。
+            import re
+            inspection = library.inspect_pdf(library.pdf_path(request["id"]))
+            candidates = inspection.get("doi_candidates", [])
+            excerpt = inspection.get("parse", {}).get("text_excerpt", "")
+            arxiv = re.search(r"arXiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)", excerpt, re.I)
+            return {"doi": candidates[0] if len(candidates) == 1 else None, "arxiv": arxiv.group(1) if arxiv else None}
         if action == "inspect_pdf":
             return library.inspect_pdf(request["path"])
         if action == "export_pdf":

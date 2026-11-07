@@ -64,7 +64,7 @@ test('an explicitly resent newer version replaces only its annotation and leaves
 test('source metadata stays outside model text and prototype-like annotation IDs remain ordinary own data', () => {
   const value = snapshot([{ id: '__proto__', version }, { id: 'constructor', version }])
   const source = annotationReferenceSource(value, snapshotId)
-  assert.equal(source.kind, 'plugin')
+  assert.equal(source.kind, 'paper-library-annotation')
   assert.equal(source.plugin, 'Paper Library')
   assert.equal(source.paperLibraryReference.body_hash, annotationBodyHash(value.text))
   assert.equal(value.text.includes(snapshotId), false)

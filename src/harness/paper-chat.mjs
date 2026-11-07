@@ -242,12 +242,14 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
       // prepare does not register a Session or start an Agent. The persistence
       // service validates, stores and owns the log until this handle closes.
       // Only a later native prompt/main-conversation open activates the Agent.
-      const prepared = ctx.sessions.prepare(sessionId, { meta: { cwd: directory } })
-      prepared.append('session/title', { title: `阅读 · ${String(item.title || item.citekey || '论文').replace(/\s+/g, ' ').slice(0, 180)}`, messageSeqs: [], source: { kind: 'user' } })
+      const time = Date.now()
+      const seed = [{ seq: 0, time, type: 'session/title', data: { title: `阅读 · ${String(item.title || item.citekey || '论文').replace(/\s+/g, ' ').slice(0, 180)}`, messageSeqs: [], source: { kind: 'user' } } }]
       const source = request.source_session_id ? ctx.sessions.get(request.source_session_id) : undefined
       const sourceSelection = source ? ctx.sessionProjections.stateOf(source, 'modelSelection') : undefined
       const initialModel = modelOf(sourceSelection?.pending) ?? modelOf(sourceSelection?.lastUsed) ?? modelOf(ctx.agentDefaultModel.currentSelection())
-      if (initialModel) prepared.append('model/selection', initialModel)
+      if (initialModel) seed.push({ seq: seed.length, time, type: 'model/selection', data: initialModel })
+      // prepare 创建只读待持久化对象；初始事件必须通过 seed 回放，不能 append。
+      const prepared = ctx.sessions.prepare(sessionId, { seed, meta: { cwd: directory, createdAt: time } })
       const handle = await ctx.sessionPersistence.create(prepared.header, { signal })
       try {
         await handle.append(prepared.snapshotEvents(), { signal })
@@ -274,7 +276,8 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
   async function context(paper, request, signal) {
     const { item } = paper
     const selection = request.selection
-    if (selection && (!item.pdf || !Number.isSafeInteger(item.page_count) || selection.page > item.page_count)) throw new Error('选文页码超出当前 PDF；请重新选择原文。')
+    // 页码由下方 annotation_context_exact 对实际 PDF 校验，目录页数可能缺失。
+    if (selection && !item.pdf) throw new Error('选文页码超出当前 PDF；请重新选择原文。')
     let refs = request.annotation_refs ?? (request.annotation_ids?.length === 0 ? [] : undefined)
     // Older callers specify IDs. Resolve them once during snapshot creation;
     // retry bindings below ensure later attempts never re-read changed notes.

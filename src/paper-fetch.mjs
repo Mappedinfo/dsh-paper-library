@@ -135,7 +135,14 @@ async function requestPublic(value, ctx, kind) {
     let response
     try {
       const hostname = url.hostname.replace(/^\[|\]$/g, '')
-      const answers = isIP(hostname) ? [{ address: hostname, family: isIP(hostname) }] : await abortable(ctx.resolver(hostname), ctx.signal)
+      let answers = isIP(hostname) ? [{ address: hostname, family: isIP(hostname) }] : await abortable(ctx.resolver(hostname), ctx.signal)
+      // 部分本地代理用 198.18/15 作为 Fake-IP。仅对固定题录服务
+      // 通过加密 DNS 取得真实公网地址，随后仍校验并固定连接地址。
+      if(!ctx.options.resolver && ['api.crossref.org','export.arxiv.org'].includes(hostname) && answers.length && answers.every(answer=>isIP(answer.address)===4&&v4In(answer.address,'198.18.0.0',15))) {
+        const dnsSignal=AbortSignal.any([ctx.signal,AbortSignal.timeout(6000)]);
+        const dns=await pinnedRequest({url:new URL(`https://1.1.1.1/dns-query?name=${encodeURIComponent(hostname)}&type=A`),address:'1.1.1.1',family:4,signal:dnsSignal,headers:{Accept:'application/dns-json'}});
+        try {if(dns.statusCode!==200)throw Error('公开题录 DNS 查询失败');const data=JSON.parse(await readText({...dns,signal:dnsSignal},16384));answers=(data.Answer||[]).filter(row=>row.type===1).map(row=>({address:row.data,family:4}));record.dns_provider='Cloudflare DoH';}finally{dns.close();}
+      }
       if (!Array.isArray(answers) || !answers.length || answers.some(answer => !isPublicAddress(answer.address) || isLocalInterface(answer.address) || isIP(answer.address) !== answer.family)) throw new Error('DNS resolved to a private, local, reserved, or invalid address')
       const { address, family } = answers.find(answer => answer.family === 4) ?? answers[0]
       const requestSignal = AbortSignal.any([ctx.signal, AbortSignal.timeout(15_000)])
@@ -268,6 +275,29 @@ async function doiMetadata(doi, ctx) {
   candidates.push(`https://doi.org/${doi}`)
   const landingCandidates = [data.message.resource?.primary?.URL, data.message.URL, `https://doi.org/${doi}`].filter(value => typeof value === 'string')
   return { metadata, candidates, landingCandidates }
+}
+
+/** 用户明确补全当前条目时，按题名检索公开题录；不发送 PDF 文本。 */
+export async function resolveTitleMetadata(title, options = {}) {
+  if(typeof title!=='string'||title.trim().length<8||title.length>1000)throw new Error('题名过短或过长，请先核对文献标题。')
+  const ctx=context(options,title), identity=value=>clean(value).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'');
+  let metadata;
+  try {
+    const response=await requestPublic(`https://api.crossref.org/works?query.title=${encodeURIComponent(title)}&rows=5`,ctx,'metadata');
+    const data=JSON.parse(await readText(response));
+    const matches=(data.message?.items||[]).filter(item=>identity(first(item.title))===identity(title)&&item.DOI);
+    if(matches.length===1)metadata=crossrefCSL(matches[0],normalizeDOI(matches[0].DOI),ctx);
+    else if(matches.length>1)ctx.warnings.push('题名对应多个 DOI，请指定 DOI 后再补全。');
+    if(matches.length>1)return {metadata,provenance:ctx.provenance,warnings:ctx.warnings};
+  }catch(error){warn(ctx,error)}
+  if(!metadata)try{
+    const response=await requestPublic(`https://export.arxiv.org/api/query?search_query=${encodeURIComponent('ti:"'+title.replace(/"/g,'')+'"')}&max_results=5`,ctx,'metadata');
+    const xml=await readText(response);if(/<!DOCTYPE|<!ENTITY/i.test(xml))throw new Error('Unexpected XML document entities');
+    const matches=[...xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)].map(match=>match[1]).filter(entry=>identity(entry.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||'')===identity(title));
+    if(matches.length===1){const id=arxivID(clean(matches[0].match(/<id[^>]*>([\s\S]*?)<\/id>/i)?.[1]));if(id)metadata=await arxivMetadata(id,ctx);}
+    else if(matches.length>1)ctx.warnings.push('arXiv 返回多个同题名条目，请指定论文链接。');
+  }catch(error){warn(ctx,error)}
+  return {metadata,provenance:ctx.provenance,warnings:ctx.warnings};
 }
 
 /** Resolve a recognized DOI for local-PDF enrichment; does not download a PDF. */

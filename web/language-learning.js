@@ -2,7 +2,7 @@
 
 /** Reading language tools. Results and vocabulary live on the host; this view holds one page. */
 window.PaperLanguageLearning = {
-  create({ api, persistence, getPaper, getSelection, toast, openReference, prepareChat, beforeOpen }) {
+  create({ api, persistence, getPaper, getSelection, toast, openReference, prepareChat, beforeOpen, openVocabulary }) {
     const $ = id => document.getElementById(id);
     const make = (tag, text, cls) => { const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n; };
     const button = (id,text,fn) => {const b=make('button',text,'button subtle');b.id=id;b.type='button';b.addEventListener('click',fn);return b;};
@@ -26,7 +26,7 @@ window.PaperLanguageLearning = {
     const draftValue=()=>({text:$('language-source').value,target_language:$('language-target').value,page:sourcePage,failed_request:failedRequest});
     function remember(){if(persistence&&paperId&&draftReady)return persistence.put(`language-draft:${paperId}`,draftValue()).catch(()=>{});return Promise.resolve();}
     function controls(){for(const id of ['language-translate','language-polish'])$(id).disabled=busy||!available||!paperId||!draftReady||paperId!==getPaper()?.id;$('language-target').disabled=busy||!draftReady;$('language-source').disabled=!draftReady||!paperId;}
-    function show(next='work'){beforeOpen?.();++viewTicket;panel.hidden=false;void restoreGeometry();view=next;for(const name of ['work','history','words','settings']){$(`language-${name}`).hidden=name!==next;if(name!=='settings')$(`language-tab-${name}`).setAttribute('aria-pressed',String(name===next));}if(next==='history')void history();if(next==='words')void words();if(next==='settings')void loadSettings();controls();}
+    function show(next='work'){if(next==='words'&&openVocabulary){openVocabulary();return;}beforeOpen?.();++viewTicket;panel.hidden=false;void restoreGeometry();view=next;for(const name of ['work','history','words','settings']){$(`language-${name}`).hidden=name!==next;if(name!=='settings')$(`language-tab-${name}`).setAttribute('aria-pressed',String(name===next));}if(next==='history')void history();if(next==='words')void words();if(next==='settings')void loadSettings();controls();}
     function paperChanged(item){
       if(paperId===item?.id){$('language-paper').textContent=item?.title||'先打开一篇论文';if(loadPromise)return loadPromise;if(draftReady)return Promise.resolve();}
       remember();paperId=item?.id||null;const ticket=++loadTicket;++viewTicket;++draftRevision;draftReady=false;sourcePage=null;failedRequest=null;lastResult=null;historyOffset=0;
