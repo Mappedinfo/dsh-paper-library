@@ -40,3 +40,8 @@ test('standalone rejects translation and browser cannot forge a saved translatio
     const r=await handler(new Request('http://localhost/api',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...input,action})}));assert.equal(r.status,status)
   }
 })
+
+test('a fresh model failure is not immediately resubmitted even when the client requested retry',async()=>{
+  const f=fixture();f.generationError=Object.assign(Error('synthetic generation failed'),{code:'LANGUAGE_FAILED'})
+  await assert.rejects(f.handle({...input,retry:true}),/synthetic generation failed/);assert.equal(f.calls.length,1)
+})

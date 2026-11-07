@@ -26,8 +26,8 @@ export function createAnnotationTranslation({ store, languageLearning, dispatch,
       let result
       try { result = await languageLearning(request(attempt.value.request_id), { signal }) }
       catch (error) {
-        // 只有用户再次点击且旧请求确实失败，才允许新一轮模型调用。
-        if (input.retry !== true || error.code !== 'LANGUAGE_FAILED') throw error
+        // 此次点击只重试已确认失败的旧请求；本次刚失败或状态未知时不连发。
+        if (error.code !== 'LANGUAGE_FAILED' || error.replayed !== true) throw error
         attempt = await store.put(stateKey, { request_id: `annotation-translation:${randomUUID()}` }, attempt.revision)
         result = await languageLearning(request(attempt.value.request_id), { signal })
       }

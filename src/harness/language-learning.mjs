@@ -159,7 +159,7 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
       try { return await finish(key, record, true) }
       catch (error) { throw Object.assign(error, { code: 'LANGUAGE_COMMIT_RETRY', status: 503, generation_status: 'committing', retry_with_new_request: false }) }
     }
-    if (record.value.status === 'failed') throw Object.assign(fail(record.value.error, 'LANGUAGE_FAILED', 409), { generation_status: 'failed', retry_with_new_request: true })
+    if (record.value.status === 'failed') throw Object.assign(fail(record.value.error, 'LANGUAGE_FAILED', 409), { generation_status: 'failed', retry_with_new_request: true, replayed: true })
     throw Object.assign(fail('此请求正在生成，或曾在生成时中断。请稍后查看历史；确认要重新调用模型时请发起新请求。', 'LANGUAGE_PENDING', 409), { generation_status: 'pending', retry_with_new_request: false })
   }
   async function generate(request, signal) {
@@ -173,7 +173,12 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
       try { record = await store.put(key, { id: hash(key), request_id: request.request_id, paper_id: request.id, page: request.page, mode: request.mode, target_language: request.target_language, ...(request.requested_target_language ? { requested_target_language: request.requested_target_language } : {}), source_text: request.text, status: 'pending', created_at: stamp(), fingerprint, request }, 0) }
       catch (error) { if (error.code === 'STATE_CONFLICT') return replay(key, await store.get(key), fingerprint); throw error }
       const item = await dispatch({ action: 'get', id: request.id }, { library, python, signal })
-      if (request.page !== null && (!item.pdf || !Number.isSafeInteger(item.page_count) || request.page > item.page_count)) throw fail('选文页码超出当前论文 PDF。')
+      if (request.page !== null) {
+        if (!item.pdf) throw fail('当前文献没有可读取的 PDF。')
+        // 外部同步和旧条目可能没有页数缓存；实际 PDF 页树才是页码依据。
+        const layout = await dispatch({ action: 'page_layout', id: request.id }, { library, python, signal })
+        if (!Number.isSafeInteger(layout.page_count) || request.page > layout.page_count) throw fail('选文页码超出当前论文 PDF。')
+      }
       const settings = (await store.get(SETTINGS_KEY)).value || defaults()
       const model = modelOf(settings.model || await getDefaultModel())
       if (settings.model && typeof models === 'function') {

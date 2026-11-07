@@ -317,3 +317,10 @@ test('long-running word encounters retain a finite provenance window and report 
   const before = f.calls.length; await f.handle({ ...request, request_id: 'repeat-61' })
   assert.equal(f.calls.length, before); assert.equal((await f.handle({ action: 'vocabulary_list' })).items[0].encounters_retained, 60)
 })
+
+for (const cached of [undefined, 0, 1, 99, '24']) test(`page validation reads the PDF rather than cached page_count=${cached}`, async () => {
+  const f = fixture(); f.options.dispatch = async input => input.action === 'get' ? {pdf:true,page_count:cached} : {page_count:24}; f.handle=createLanguageLearning(f.options)
+  assert.equal((await f.handle(request)).status,'complete')
+  await assert.rejects(f.handle({...request,request_id:'beyond-real-file',page:25}), /页码/)
+  assert.equal(f.calls.length,1)
+})
