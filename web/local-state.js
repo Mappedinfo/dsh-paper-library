@@ -7,13 +7,13 @@ window.PaperLibraryLocalState = (() => {
   const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
   const byteLength=value=>new TextEncoder().encode(JSON.stringify(value)).byteLength;
   function create({api,onError}) {
-    const entries=new Map(),listeners=new Set();
+    const entries=new Map(),listeners=new Set();let keepaliveBytes=0;
     function emit(entry,status,error=null){entry.status=status;entry.error=error;for(const fn of listeners)fn({key:entry.key,status,error});if(error)onError?.(error,{key:entry.key,status});}
-    function trim(){for(const [key,entry] of entries){if(entries.size<=WORKING_KEYS)break;if(!entry.dirty&&!entry.running&&!entry.loading)entries.delete(key);}}
+    function trim(){for(const [key,entry] of entries){if(entries.size<=WORKING_KEYS)break;if(!entry.dirty&&!entry.running&&!entry.loading&&!entry.error&&!entry.updating&&!entry.waiters.length)entries.delete(key);}}
     function entryFor(key){
       if(typeof key!=='string'||!key||key.length>240)throw new Error('本地状态名称无效');
       let entry=entries.get(key);
-      if(!entry){trim();if(entries.size>=WORKING_KEYS&&[...entries.values()].every(v=>v.dirty||v.running||v.loading))throw new Error('有过多草稿等待保存，请先恢复本地服务连接。');entry={key,value:null,revision:0,loaded:false,loading:null,running:null,dirty:false,sequence:0,waiters:[],status:'idle',error:null};}
+      if(!entry){trim();if(entries.size>=WORKING_KEYS&&[...entries.values()].every(v=>v.dirty||v.running||v.loading||v.error||v.updating))throw new Error('有过多草稿等待保存，请先恢复本地服务连接。');entry={key,value:null,revision:0,loaded:false,loading:null,running:null,dirty:false,sequence:0,waiters:[],status:'idle',error:null,updating:0};}
       entries.delete(key);entries.set(key,entry);return entry;
     }
     function validate(record,key){if(!record||record.key!==key||!(record.revision===0||typeof record.revision==='string'&&/^[a-f0-9]{64}$/.test(record.revision))||!Object.hasOwn(record,'value'))throw new Error('本地服务返回了无效的状态记录');return record;}
@@ -39,7 +39,8 @@ window.PaperLibraryLocalState = (() => {
           // Set keepalive before dispatch: pagehide cannot retrofit an in-flight
           // ordinary fetch. Larger writes need the page to remain connected.
           const payload={key:entry.key,value,expected_revision:expected};
-          try{record=validate(await api('state_put',payload,{keepalive:byteLength(payload)<60000}),entry.key);if(!equal(record.value,value))throw new Error('本地服务未确认这次保存');}
+          const size=byteLength(payload),keepalive=size+keepaliveBytes<60000;if(keepalive)keepaliveBytes+=size;
+          try{try{record=validate(await api('state_put',payload,{keepalive}),entry.key);}finally{if(keepalive)keepaliveBytes-=size;}if(!equal(record.value,value))throw new Error('本地服务未确认这次保存');}
           catch(error){
             // A response can be lost after an atomic write. Read back once before
             // retrying the same revision; different remote content is a conflict.
@@ -53,7 +54,8 @@ window.PaperLibraryLocalState = (() => {
       return entry.running;
     }
     async function update(key,value,merge){
-      const entry=entryFor(key);
+      const entry=entryFor(key);entry.updating++;
+      try {
       try{await load(entry);}catch(error){const pending=merge?{...(entry.value||{}),...copy(value)}:copy(value);if(byteLength(pending)>LIMIT)throw new Error('这份草稿超过 256 KiB，请缩短内容后保存。');entry.value=pending;entry.dirty=true;++entry.sequence;emit(entry,'error',error);throw error;}
       const next=merge?{...(entry.value&&typeof entry.value==='object'&&!Array.isArray(entry.value)?entry.value:{}),...copy(value)}:copy(value);
       if(byteLength(next)>LIMIT)throw new Error('这份草稿超过 256 KiB，请缩短内容后保存。');
@@ -61,10 +63,11 @@ window.PaperLibraryLocalState = (() => {
       entry.value=next;entry.dirty=true;const sequence=++entry.sequence;
       if(entry.conflict){const error=conflict(entry);throw error;}
       emit(entry,'pending');const pending=new Promise((resolve,reject)=>entry.waiters.push({sequence,resolve,reject}));void run(entry);return pending;
+      }finally{entry.updating--;}
     }
     async function get(key){const entry=entryFor(key);await load(entry,true);return copy(entry.value);}
     async function flush(_options={}){
-      await Promise.all([...entries.values()].map(async entry=>{if(entry.loading)await entry.loading;if(entry.dirty&&!entry.conflict)await run(entry);if(entry.error)throw entry.error;}));
+      await Promise.all([...entries.values()].map(async entry=>{if(entry.loading)await entry.loading;if(entry.error&&!entry.dirty&&!entry.conflict)await load(entry,true);if(entry.dirty&&!entry.conflict)await run(entry);if(entry.error)throw entry.error;}));
     }
     async function migrateLegacy(getLibrary){
       let legacy;try{legacy=window.localStorage;}catch{return {migrated:0,backedUp:0,retained:0};}if(!legacy)return {migrated:0,backedUp:0,retained:0};
@@ -99,7 +102,7 @@ window.PaperLibraryLocalState = (() => {
     return {get,put:(key,value)=>update(key,value,false),patch:(key,value)=>update(key,value,true),flush,migrateLegacy,
       exportPending:()=>[...entries.values()].filter(entry=>entry.dirty).map(entry=>({key:entry.key,value:copy(entry.value),...(entry.error?{error:entry.error.message}:{})})),
       subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},status:key=>{const entry=entries.get(key);return entry?{status:entry.status,error:entry.error,dirty:entry.dirty}:{status:'idle',dirty:false};},
-      async retry(key){const entry=entryFor(key);if(entry.conflict)throw entry.error;if(entry.dirty)await run(entry);if(entry.error)throw entry.error;return copy(entry.value);},
+      async retry(key){const entry=entryFor(key);if(entry.conflict)throw entry.error;if(entry.error&&!entry.dirty)await load(entry,true);if(entry.dirty)await run(entry);if(entry.error)throw entry.error;return copy(entry.value);},
       // The caller must explicitly choose a reconciled value before invoking this.
       async reconcile(key,value){const entry=entryFor(key);if(entry.running)await entry.running;const remote=validate(await api('state_get',{key}),key);entry.revision=remote.revision;entry.conflict=false;entry.error=null;entry.loaded=true;return update(key,value,false);},
     };

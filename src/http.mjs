@@ -38,7 +38,7 @@ staticFiles['slides.html']=['slides.html','text/html;charset=utf-8'];
 staticFiles['fonts/silkscreen-regular.ttf']=['fonts/silkscreen-regular.ttf','font/ttf'];
 const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:'];
 function browserStateKey(key, listPrefix = false) {
-  if (typeof key !== 'string' || !(key === 'preferences' || key === 'reader' || browserStatePrefixes.some(prefix => key.startsWith(prefix)) || /^migration:[a-f0-9]{64}$/.test(key) || (listPrefix && key === 'migration:'))) throw new LocalStateError('此状态类别不能直接从浏览器访问。', 'STATE_FORBIDDEN', 403);
+  if (typeof key !== 'string' || !(key === 'preferences' || key === 'reader' || /^workspace:last:[A-Za-z0-9_-]{1,160}$/.test(key) || browserStatePrefixes.some(prefix => key.startsWith(prefix)) || /^migration:[a-f0-9]{64}$/.test(key) || (listPrefix && key === 'migration:'))) throw new LocalStateError('此状态类别不能直接从浏览器访问。', 'STATE_FORBIDDEN', 403);
   return key;
 }
 async function stateRequest(store, input) {
@@ -63,7 +63,7 @@ const baseHeaders = {
 function json(result, status=200) { return new Response(JSON.stringify(result), { status, headers: { ...baseHeaders, 'Content-Type':'application/json;charset=utf-8' } }); }
 const MAX_PDF_BYTES = 250 * 1024 * 1024;
 let uploads = 0;
-let jsonRequests = 0;
+let jsonRequests = 0, stateRequests = 0;
 
 /** Stream a browser File to disk with backpressure; never encode a whole PDF as JSON. */
 async function importUpload(request, url, options) {
@@ -143,6 +143,13 @@ export function createFetchHandler(options = {}) {
     const path = url.pathname.slice(basePath.length).replace(/^\//,'');
     try {
       if (path === 'upload' && request.method === 'POST') return await importUpload(request,url,options);
+      // 小体积草稿独立限流，不被长时间模型调用占满；仍校验命名空间与修订。
+      if(path==='state'&&request.method==='POST'){
+        if(!request.headers.get('content-type')?.startsWith('application/json'))return json({ok:false,error:'需要 application/json 请求。'},415);
+        if(stateRequests>=8)return json({ok:false,error:'草稿保存繁忙，请稍后重试。'},429);
+        stateRequests++;
+        try{const input=JSON.parse(await readBounded(request,512*1024));if(!['state_get','state_put','state_list'].includes(input?.action))return json({ok:false,error:'此入口仅用于本地草稿。'},403);return json({ok:true,result:await stateRequest(localState,input)});}finally{stateRequests--;}
+      }
       if (path === 'api' && request.method === 'POST') {
         if (!request.headers.get('content-type')?.startsWith('application/json')) return json({ok:false,error:'需要 application/json 请求。'},415);
         // Reserve admission before reading bodies, so parallel large JSON uploads

@@ -20,7 +20,7 @@ async function call(handler,input,headers={}) {
 
 test('HTTP state writes survive handler reload and expose actionable CAS conflicts', async t => {
   const f=await fixture(t), handler=createFetchHandler(f.options);
-  for (const key of ['preferences','reader','reader:paper_a','reader:language-window','chat:paper_a','metadata:new','language-draft:request_a',`migration:${'a'.repeat(64)}`]) {
+  for (const key of ['preferences','reader','reader:paper_a','reader:language-window','workspace:last:main','workspace:last:paper_a','chat:paper_a','metadata:new','language-draft:request_a',`migration:${'a'.repeat(64)}`]) {
     const missing=await call(handler,{action:'state_get',key}); assert.equal(missing.result.revision,0);
     const saved=await call(handler,{action:'state_put',key,value:{text:'preserved',page:3},expected_revision:0});
     assert.equal(saved.status,200); assert.match(saved.result.revision,/^[a-f0-9]{64}$/);
@@ -101,4 +101,20 @@ test('deployment-only state-home overrides are validated and retained',()=>{
   assert.equal(resolveConfig({library:'/private/tmp/library',localStateHome:'/private/tmp/state-home'}).localStateHome,'/private/tmp/state-home');
   assert.equal(resolveConfig({library:'/private/tmp/library'}).localStateHome,undefined);
   for (const localStateHome of ['',1,'relative']) assert.throws(()=>resolveConfig({localStateHome}));
+});
+
+test('draft endpoint remains writable while two long language requests occupy normal admission',async t=>{
+ const f=await fixture(t);let entered=0,notify,release;
+ const both=new Promise(resolve=>notify=resolve),gate=new Promise(resolve=>release=resolve);
+ const handler=createFetchHandler({...f.options,languageLearning:async()=>{if(++entered===2)notify();await gate;return {status:'complete'};}});
+ const running=[call(handler,{action:'language_generate'}),call(handler,{action:'language_generate'})];
+ const state=async input=>{const r=await handler(new Request('http://127.0.0.1/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input)}));return {status:r.status,...await r.json()};};
+ try{
+  await both;
+  assert.equal((await call(handler,{action:'state_get',key:'reader'})).status,429);
+  const saved=await state({action:'state_put',key:'workspace:last:main',value:{section:'board',current:{kind:'board',id:'synthetic'}},expected_revision:0});
+  assert.equal(saved.status,200);assert.equal((await state({action:'state_get',key:'workspace:last:main'})).result.value.section,'board');
+  assert.equal((await state({action:'state_put',key:'language.settings',value:{},expected_revision:0})).status,403);
+  assert.equal((await state({action:'language_generate'})).status,403);
+ }finally{release();await Promise.all(running);}
 });

@@ -98,3 +98,14 @@ body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-
 .wiki-prose .button{padding:0;color:var(--dsw-alias-link);text-decoration:underline}.wiki-sources{border-top:1px solid var(--line);margin-top:24px;padding-top:10px}
 .wiki-sources blockquote{font-size:12px;color:var(--muted);border-left:2px solid var(--line);margin:8px 0 16px;padding-left:12px}
 .wiki-pagination{display:flex;gap:8px;margin-top:18px}
+
+.wiki-header .wiki-tabs{flex:1;border:0;padding:0;gap:4px}
+.wiki-header .wiki-tabs .button{font-size:17px;padding:5px 12px;font-weight:600}
+.wiki-search select{max-width:140px;flex:none}
+.paper-chat-heading{gap:8px;align-items:center;margin-bottom:8px}
+.paper-chat-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:0}
+.paper-chat-meta #paper-chat-model{font-size:11px;overflow-wrap:anywhere}
+.paper-chat-meta #paper-chat-status{margin:0;padding:0;font-size:11px;min-height:0}
+.paper-chat-meta #paper-chat-status:not(:empty)::before{content:'· ';color:var(--muted)}
+.paper-chat-meta #paper-chat-status.error{flex-basis:100%;font-size:12px}
+.paper-chat-heading>#paper-chat-open{flex:none;white-space:nowrap;padding:4px 6px}

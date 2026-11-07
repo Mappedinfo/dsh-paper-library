@@ -245,11 +245,11 @@ window.PaperLibraryChat = {
       }
       $('paper-chat-history-note').textContent = result.hasMore ? '这里只显示最近的消息，完整历史保留在 DSH 主对话。' : '';
       const model = result.model;
-      $('paper-chat-model').textContent = model?.provider && (model.model || model.id) ? `论文对话模型 · ${model.provider} / ${model.model || model.id}${model.reasoningEffort ? ` · ${model.reasoningEffort}` : ''}` : '模型由这篇论文的 DSH 对话管理，可在主页面切换。';
-      if (result.running) status('DSH 正在回复。工具执行、权限确认和停止操作可在主对话中处理。');
+      $('paper-chat-model').textContent = model?.model || model?.id || '宿主模型';$('paper-chat-model').title=[model?.provider,model?.model||model?.id,model?.reasoningEffort].filter(Boolean).join(' / ');
+      if (result.running) status('回复中…');
       else if (result.error) status(result.error, true);
       else if (result.outcome && !['completed', 'complete', 'success', 'stop'].includes(result.outcome)) status('这轮回复已停止或未完成，请打开主对话查看原因并继续。', true);
-      else if (!chat.busy && !chat.failed) status('与 DSH 主对话同步。');
+      else if (!chat.busy && !chat.failed) status('已同步');
     }
     async function history() {
       if (!chat.available || !chat.paperId || chat.historyLoading) return;

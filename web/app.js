@@ -57,7 +57,7 @@ async function api(action, args = {}, options = {}) {
   // The server rejects excess requests before reading or dispatching them. Retry
   // only that explicit admission response; an uncertain mutation is never replayed.
   for (let attempt = 0; attempt < 5; attempt++) {
-    response = await fetch('./api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...args }),...(options.keepalive?{keepalive:true}:{}),...(options.signal?{signal:options.signal}:{}) });
+    response = await fetch(action.startsWith('state_')?'./state':'./api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...args }),...(options.keepalive?{keepalive:true}:{}),...(options.signal?{signal:options.signal}:{}) });
     if (response.status !== 429 || attempt === 4) break;
     await response.text();
     await new Promise(resolve => setTimeout(resolve, 250 * 2 ** attempt));
@@ -2013,7 +2013,7 @@ if(persistence){
   const saveStatus=el('div','local-save-status');saveStatus.id='local-save-status';saveStatus.hidden=true;saveStatus.setAttribute('role','status');
   const label=el('span');const retry=el('button','button subtle','重试保存');retry.type='button';retry.addEventListener('click',()=>void persistence.flush().catch(()=>{}));
   const backup=el('button','button subtle','导出未保存草稿');backup.type='button';backup.addEventListener('click',()=>{const values=persistence.exportPending?.()||[];const url=URL.createObjectURL(new Blob([JSON.stringify({schema:1,drafts:values},null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='paper-library-unsaved-drafts.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});saveStatus.append(label,retry,backup);document.body.append(saveStatus);
-  const pending=new Map();persistence.subscribe(event=>{if(event.status==='saved')pending.delete(event.key);else pending.set(event.key,event);const errors=[...pending.values()].filter(value=>value.error);saveStatus.hidden=!errors.length;label.textContent=errors.some(value=>value.status==='conflict')?'另一浏览器已有修改，本窗口草稿尚未落盘。请导出并核对。':'本地保存暂未完成，草稿仍在当前窗口。';});
+  const pending=new Map();persistence.subscribe(event=>{if(event.status==='saved')pending.delete(event.key);else pending.set(event.key,event);const errors=[...pending.values()].filter(value=>value.error);saveStatus.hidden=!errors.length;label.textContent=errors.some(value=>value.status==='conflict')?'另一浏览器已有修改，本窗口草稿尚未落盘。请导出并核对。':`本地保存未完成${errors.length?`（${errors.length} 项）：${errors[0].error?.message||'请重试'}`:''}，草稿仍保留。`;});
 }
 window.addEventListener('pagehide', () => { publishReaderState(); floatingWindows?.dispose(); boardUI?.dispose(); companionUI?.dispose();settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); readingPanels?.dispose(); readingShell?.dispose(); });
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){publishReaderState();void persistence?.flush({keepalive:true}).catch(()=>{});}});

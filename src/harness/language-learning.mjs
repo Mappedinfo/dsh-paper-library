@@ -1,3 +1,4 @@
+import { entryOrder } from '../entry-order.mjs'
 import { createHash } from 'node:crypto'
 
 const ACTIONS = new Set(['language_generate', 'language_history', 'language_settings_get', 'language_settings_update', 'vocabulary_list', 'vocabulary_update', 'vocabulary_delete', 'vocabulary_export'])
@@ -100,6 +101,14 @@ function publicWord(record) {
  * A pending request is never automatically resent after process failure. Once
  * validated output is durable, replay completes vocabulary writes without AI.
  */
+export function preferredTranslationModel(available=[]) {
+  // 仅在已配置模型中选轻量路线；显式语言设置优先，不自动换供应商重试。
+  for(const [provider,id,reasoningEffort]of [['deepseek-official','deepseek-flash','off'],['kimi-coding','kimi-for-coding-highspeed','low'],['deepseek-account','deepseek-flash','off']]){
+    if(available.some(model=>model.provider===provider&&model.id===id))return {provider,model:id,reasoningEffort};
+  }
+  return null;
+}
+
 export function createLanguageLearning({ store, ai, getDefaultModel, models, dispatch, library, python }) {
   const flights = new Map()
   let admitted = 0, generating = 0
@@ -111,7 +120,7 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     const available = typeof models === 'function' ? await models(signal) : { models: [] }
     let default_model = null
     try { if (typeof getDefaultModel === 'function') default_model = modelOf(await getDefaultModel()) } catch {}
-    return { value: settingsValue(record.value), revision: record.revision, models: available.models || [], default_model }
+    return { value: settingsValue(record.value), revision: record.revision, models: available.models || [], default_model,translation_default_model:preferredTranslationModel(available.models)||default_model }
   }
   async function settingsUpdate(input, signal) {
     const value = input.value
@@ -180,9 +189,10 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
         if (!Number.isSafeInteger(layout.page_count) || request.page > layout.page_count) throw fail('选文页码超出当前论文 PDF。')
       }
       const settings = (await store.get(SETTINGS_KEY)).value || defaults()
-      const model = modelOf(settings.model || await getDefaultModel())
+      const available=typeof models==='function'?await models(signal):{models:[]};
+      const fastModel=!settings.model&&request.mode==='translate'?preferredTranslationModel(available.models):null;
+      const model = modelOf(settings.model || fastModel || await getDefaultModel())
       if (settings.model && typeof models === 'function') {
-        const available = await models(signal)
         if (!(available.models || []).some(item => item.provider === model.provider && item.id === model.model)) throw fail('语言设置中的模型当前不可用，请重新选择。', 'LANGUAGE_MODEL_UNAVAILABLE', 409)
       }
       const deadline = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(120000)])
@@ -190,7 +200,7 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
       const output = outputOf(await ai({ prompt: promptOf(request, settings), ...model, signal: deadline }), request.text)
       deadline.throwIfAborted()
       const extra = request.mode === 'translate' ? settings.translate_prompt : settings.polish_prompt
-      record = await store.put(key, { ...record.value, ...output, model, model_source: settings.model ? 'language-override' : 'harness-default', prompt_version: `${PROMPT_VERSION}:${hash(extra || '').slice(0, 16)}`, status: 'committing', generated_at: stamp() }, record.revision)
+      record = await store.put(key, { ...record.value, ...output, model, model_source: settings.model ? 'language-override' : fastModel?'translation-lightweight':'harness-default', prompt_version: `${PROMPT_VERSION}:${hash(extra || '').slice(0, 16)}`, status: 'committing', generated_at: stamp() }, record.revision)
       return await finish(key, record, false)
     } catch (error) {
       // Leave a durable validated response recoverable when a later vocabulary
@@ -237,10 +247,11 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     return value => value && !value.deleted && (!status || value.status === status) && (!query || canonical(`${value.term} ${value.meaning}`).includes(query))
   }
   async function vocabularyList(input) {
-    const { offset, limit } = paging(input), matches = vocabularyFilter(input), items = []
-    let total = 0
-    const scope = await scan('vocabulary:', record => { if (matches(record.value)) { if (total >= offset && items.length < limit) items.push(publicWord(record)); total++ } })
-    return { items, total, offset, limit, hasMore: offset + items.length < total, ...scope, order: 'id' }
+    const { offset, limit } = paging(input), matches = vocabularyFilter(input), rows = [],items=[];
+    const order=input.sort??'id',compare=entryOrder(order);
+    const scope=await scan('vocabulary:',record=>{if(matches(record.value)){const v=record.value;rows.push({key:record.key,id:v.id,term:v.term,created_at:v.created_at,updated_at:v.updated_at});}});
+    rows.sort(compare);for(const row of rows.slice(offset,offset+limit))items.push(publicWord(await store.get(row.key)));
+    return {items,total:rows.length,offset,limit,hasMore:offset+items.length<rows.length,...scope,order};
   }
   async function vocabularyMutation(input) {
     const id = string(input.id, '词汇标识', 64)

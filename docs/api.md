@@ -437,10 +437,10 @@ Browser-addressable keys are `preferences`, `reader`, `reader:<paper>`, `chat:<p
 
 - `annotation_translate {id, annotation_id, version, retry?}` 翻译一条完整批注并写为 PDF 回复，返回 `{saved, duplicate, annotation}`。版本来自 `annotations` 返回的短批注；缺少版本、来源已改变或来源超过 8000 字符时拒绝生成／写回。目标语言和模型复用语言设置，不接受客户端传入译文。每次明确调用可恢复已确认失败的旧语言请求，刷新后无需额外的重试标志；本次刚失败或状态不明的请求不自动连发，已生成结果继续复用。页码按当前 PDF 页树核验，不依赖目录中的 `page_count` 缓存。
 - 标准 PDF 回复的 `source_kind` 为 `annotation-translation`，正文以「翻译：」开头，带模型标识、原生回复关系与去重键。内部 `annotation_translation_result` 只供宿主适配器调用，HTTP 直调拒绝。保存时持有同一资料库锁重新核对来源版本，再备份并原子替换 PDF。
-- `language_settings_get {}` 返回 `{value:{model,target_language,translate_prompt,polish_prompt},revision,models,default_model}`。`model:null` 表示使用 DSH 当前默认模型；`default_model` 是读取时的默认选择，未配置或当前无法读取时为 `null`；`models` 是当前可用目录。设置保存在当前资料库对应的主机状态中，所有论文共用，不按论文会话选择模型。目标语言缺省为 `auto`；旧客户端更新时省略该字段会保留已有值，设置修订冲突不覆盖输入。
+- `language_settings_get {}` 返回 `{value:{model,target_language,translate_prompt,polish_prompt},revision,models,default_model,translation_default_model}`。`model:null` 表示翻译优先已配置的轻量路线、润色沿用 DSH 默认模型；轻量路线依次为 deepseek-official/deepseek-flash（off）、kimi-coding/kimi-for-coding-highspeed（low）、deepseek-account/deepseek-flash（off），没有这些模型时回退宿主；不自动跨模型重试失败请求。`translation_default_model` 返回自动翻译的实际候选，显式语言模型始终优先。`default_model` 是读取时的默认选择，未配置或当前无法读取时为 `null`；`models` 是当前可用目录。设置保存在当前资料库对应的主机状态中，所有论文共用，不按论文会话选择模型。目标语言缺省为 `auto`；旧客户端更新时省略该字段会保留已有值，设置修订冲突不覆盖输入。
 - `language_settings_update {value:{model:null|{provider,model,reasoningEffort?},target_language?:'auto'|'zh-CN'|'en',translate_prompt,polish_prompt},expected_revision}` 返回 `{value,revision}`。指定模型必须存在于 DSH 当前可用目录；生成前也会复核，失效时返回 `LANGUAGE_MODEL_UNAVAILABLE`。修订冲突沿用 `STATE_CONFLICT`，保留待保存设置并重新读取。`translate_prompt` 与 `polish_prompt` 分别用于翻译和润色，每项最多 2,000 字符，首尾空白会去除；它们作为用户风格要求加入提示，不得覆盖忠于原文及结构化输出要求。实际模型和所用补充提示词版本随新结果保存；未设置默认模型且无专属覆盖时返回 `LANGUAGE_MODEL_REQUIRED`。
 - `language_history {id,offset=0,limit=20}` returns paginated records, including explicitly pending/failed states. Looking at history does not call a model.
-- `vocabulary_list {query?,status?:'learning'|'mastered',offset=0,limit=20}` returns terms with revision, meaning, learning status, AI suggestion/meaning provenance and recent source encounters. Limits are explicit; the history retains the full generated result.
+- `vocabulary_list {query?,sort?:'id'|'term_asc'|'term_desc'|'created_desc'|'created_asc'|'updated_desc',status?:'learning'|'mastered',offset=0,limit=20}` returns terms with revision, meaning, learning status, AI suggestion/meaning provenance and recent source encounters. Limits are explicit; the history retains the full generated result.
 - `vocabulary_update {id,meaning?,status?,expected_revision}` retains user corrections and mastery across later encounters. `vocabulary_delete {id,expected_revision}` preserves a deletion marker so later automatic accumulation does not immediately re-add a deliberately removed term.
 - `vocabulary_export {format:'json'|'csv',query?,status?}` returns `{filename,mime_type,content,count,truncated}`; export is bounded to 2,000 words / 8 MiB and CSV neutralizes spreadsheet formula prefixes.
 
@@ -548,6 +548,10 @@ An independent deployment without a DSH migration marker uses local disk prefere
 
 ## 阅读百科
 
-- `encyclopedia_list`：`query?`、`offset=0`、`limit=30`（最多 50），返回 `{items,total,offset,hasMore,truncated}`。本地扫描上限 5000，匹配词条、别名和释义；括号缩写分别匹配，不调用模型或外部服务。仅读取当前页完整条目。
+- `encyclopedia_list`：`query?`、`sort?`（term_asc / term_desc / created_desc / created_asc / updated_desc）、`offset=0`、`limit=30`（最多 50），返回 `{items,total,offset,hasMore,truncated}`。本地扫描上限 5000，匹配词条、别名和释义；括号缩写分别匹配，不调用模型或外部服务。仅读取当前页完整条目。
 - `encyclopedia_put`：`term`（200 字符）、`kind`（term / concept / organization / abbreviation / person）、`aliases`（最多 20 条）、`definition`（12000 字符）、`expected_revision`（新建为 0）、可选 `source:{paper_id,page,annotation_id?,quote}`。每条最多 60 个来源，引用最多 2000 字符；重复来源合并，过期修订拒绝覆盖。按规范化词条去重，保存为人工整理，来源原文不自动冒充释义。
 - 词条保存在既有资料库隔离的本地状态中，与 PDF 原批注独立。Wiki 浏览器共用 `vocabulary_list/update` 展示难词，保留 AI／人工释义标记。`[[词条名]]` 是本地词条检索链接。
+
+### 草稿保存专用入口
+
+`POST /api/paper-library/state`（独立模式为 `/state`）仅接受 `state_get/put/list`，沿用认证、同源检查、状态命名空间与修订冲突保护。请求上限 512 KiB，并发上限 8；普通 `/api` 的两个长任务名额不占用该入口。浏览器新增允许精确的 `workspace:last:<main 或文献 ID>` 状态键，其他内部命名空间仍不可读写。客户端控制并发 keepalive 总量，不自动覆盖其他窗口的冲突；读取失败后可用重试／flush 恢复。

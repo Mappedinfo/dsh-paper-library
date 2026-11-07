@@ -146,9 +146,7 @@
           <details id="legacy-feedback" class="feedback-panel"><summary>PDF 中已保存的 AI 反馈</summary><div id="legacy-feedback-controls"><p class="feedback-description">独立反馈使用已配置模型；在 DSH 中可切到「对话」继续同一篇论文的阅读讨论。</p><div class="feedback-controls"><label>模型<select id="feedback-model" aria-label="反馈模型"><option value="">正在读取可用模型…</option></select></label><button id="request-feedback" class="button primary">根据批注获取反馈 ↗</button></div><label class="checkbox-label"><input id="auto-feedback" type="checkbox">每次保存批注后自动请求 AI 反馈</label><p id="model-status" class="small muted"></p></div><div id="feedback-status" role="status"></div><div id="feedback-list"></div></details>
         </section>
         <section id="conversation-tab" class="tab-content paper-chat" hidden>
-          <div class="section-toolbar"><div><h3>这篇论文的对话</h3><p id="paper-chat-description">插件内与 DSH 主页面共享同一段对话。</p></div><button id="paper-chat-open" class="button">打开主对话 ↗</button></div>
-          <p id="paper-chat-model" class="small muted"></p>
-          <div id="paper-chat-status" class="paper-chat-status" role="status" aria-live="polite"></div>
+          <div class="section-toolbar paper-chat-heading"><div class="paper-chat-meta"><span id="paper-chat-model" class="small muted"></span><span id="paper-chat-status" class="paper-chat-status" role="status" aria-live="polite"></span></div><button id="paper-chat-open" class="button subtle" title="在 DSH 主页面打开同一段对话">主对话 ↗</button></div>
           <div id="paper-chat-messages" class="paper-chat-messages" aria-label="论文对话消息"></div>
           <p id="paper-chat-history-note" class="small muted"></p>
           <div class="paper-reference-toolbar"><span class="small muted">添加批注</span><div class="paper-reference-presets"><button id="paper-chat-new" class="button subtle">新增与更新</button><button id="paper-chat-choose" class="button subtle">选择…</button><button id="paper-chat-all" class="button subtle">全部</button></div></div>

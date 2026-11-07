@@ -29,3 +29,16 @@ test('normal small writes already use keepalive and request sizing includes UTF-
   await assert.rejects(a.store.put('metadata:oversize',{title:'中'.repeat(90000)}),/256 KiB/);
   assert.equal(remote.records.has('metadata:oversize'),false);
 });
+
+test('retry and flush recover read-only failures and clear their error status',async()=>{
+ const remote=server();let offline=true;const a=client(remote,{api:async(action,args)=>{if(offline)throw Error('Temporary outage');return remote.api(action,args);}});
+ await assert.rejects(a.store.get('workspace:last:main'));offline=false;await a.store.flush();assert.equal(a.store.status('workspace:last:main').status,'saved');
+ offline=true;await assert.rejects(a.store.get('reader'));offline=false;await a.store.retry('reader');assert.equal(a.store.status('reader').status,'saved');
+});
+
+test('parallel drafts share the browser keepalive byte budget without dropping writes',async()=>{
+ const remote=server();let release,notify,entered=0;const gate=new Promise(r=>release=r),both=new Promise(r=>notify=r),modes=[];
+ const a=client(remote,{api:async(action,args,options)=>{if(action==='state_put'){modes.push(options.keepalive);if(++entered===2)notify();await gate;}return remote.api(action,args);}});
+ const writes=[a.store.put('chat:a',{draft:'x'.repeat(35000)}),a.store.put('chat:b',{draft:'x'.repeat(35000)})];await both;release();await Promise.all(writes);
+ assert.deepEqual(modes,[true,false]);assert.equal(remote.records.size,2);
+});

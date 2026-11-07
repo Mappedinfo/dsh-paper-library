@@ -23,3 +23,11 @@ test('encyclopedia persists aliases, cross-paper sources and human authorship wi
  await assert.rejects(wiki({...draft,expected_revision:third.revision,source:{paper_id:'../private',page:1,quote:'x'}}),/来源无效/);
  await assert.rejects(wiki({...draft,expected_revision:third.revision,kind:'invented'}),/类型无效/);
 });
+
+test('encyclopedia date and name sort is stable across pages',async t=>{
+ const directory=await mkdtemp(join(tmpdir(),'wiki-sort-'));t.after(()=>rm(directory,{recursive:true,force:true}));const store=createLocalStateStore({library:directory,home:join(directory,'home')}),wiki=createEncyclopedia({store});
+ for(const [i,term]of ['Zulu','alpha','Beta'].entries()){const record=await wiki({action:'encyclopedia_put',term,aliases:[],definition:'Synthetic entry',expected_revision:0});await store.put(`encyclopedia:${record.id}`,{...record,created_at:`2026-01-0${i+1}`,updated_at:`2026-02-0${3-i}`},record.revision);}
+ assert.equal((await wiki({action:'encyclopedia_list',sort:'term_asc',offset:1,limit:1})).items[0].term,'Beta');
+ assert.equal((await wiki({action:'encyclopedia_list',sort:'created_desc',limit:1})).items[0].term,'Beta');
+ assert.equal((await wiki({action:'encyclopedia_list',sort:'updated_desc',limit:1})).items[0].term,'Zulu');
+});

@@ -204,9 +204,8 @@ window.PaperWorkbench = (() => {
     }
     async function enrich() {
       const item=state.active;if(!item||!rememberDraft())return;const id=item.id;const token=++revision;$('metadata-enrich').disabled=true;$('metadata-enrich').textContent='正在查找…';
-      try{const result=await api('metadata_lookup',{id});if(token!==revision||state.active?.id!==id)return;if(!await edit(result.item,{lookup:true}))return;
-      $('metadata-author-candidates')?.remove();if(result.author_candidates?.length&&JSON.stringify(result.author_candidates)!==JSON.stringify(result.item.author)){const candidates=node('div',undefined,'small');candidates.id='metadata-author-candidates';candidates.append(node('p',`检索到的作者：${result.author_candidates.map(name).join('；')}`),button('采用完整作者列表（保存后生效）',null,()=>{$('edit-authors').value=result.author_candidates.map(person=>person.literal||[person.family,person.given].filter(Boolean).join(', ')).join('\n');editing.author=structuredClone(result.author_candidates);editing._authorsText=$('edit-authors').value;$('edit-affiliations').value=editing.author.map((a,i)=>{const names=(a.affiliation||[]).map(v=>typeof v==='string'?v:v.name).filter(Boolean);return names.length?`${i+1} | ${names.join('；')}`:'';}).filter(Boolean).join('\n');editing._affiliationsText=$('edit-affiliations').value;$('edit-authors').dispatchEvent(new Event('input',{bubbles:true}));candidates.remove();}));$('edit-authors').closest('label').after(candidates);}
-      toast('已将可核验资料填入编辑表单，请核对后保存。');if(result.warnings?.length){$('metadata-error').textContent=result.warnings.join('；');$('metadata-error').hidden=false;}}
+      try{const result=await api('metadata_lookup',{id});if(token!==revision||state.active?.id!==id)return;const draft=result.author_candidates?.length?{...result.item,author:result.author_candidates}:result.item;if(!await edit(draft,{lookup:true}))return;
+            toast('已将可核验资料填入编辑表单，请核对后保存。');if(result.warnings?.length){$('metadata-error').textContent=result.warnings.join('；');$('metadata-error').hidden=false;}}
       catch(e){toast(e.message,true);}finally{$('metadata-enrich').textContent='补全资料';header();}
     }
     header();return {render,header,edit,setTable,isTable:()=>table,setPanelHost,paperChanged,metadataVisibility};

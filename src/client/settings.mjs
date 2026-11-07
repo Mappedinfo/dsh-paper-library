@@ -29,8 +29,8 @@ const locales = {
     conflict: '设置未保存，已显示主机的当前值。请核对后重试。', failed: '无法确认设置已保存。请检查连接后重试。',
     reset: '恢复默认设置', 'reset.hint': '清除这些用户覆盖，恢复 DSH 配置中的默认值。',
     model: '模型、凭据、明暗模式与字号继续由 DSH 管理。',
-    language: '语言模型与提示词', 'language.model': '模型', 'language.hint': '默认使用 DSH 当前默认模型；也可为翻译和润色单独指定模型与补充提示词。',
-    'language.default': '使用 DSH 当前默认模型', 'language.missing': '当前不可用', 'language.translate': '翻译补充提示词', 'language.polish': '润色补充提示词',
+    language: '语言模型与提示词', 'language.model': '模型', 'language.hint': '翻译优先使用已配置的轻量模型，润色跟随 DSH；也可指定语言模型与补充提示词。',
+    'language.default': '自动：轻量翻译／DSH 润色', 'language.missing': '当前不可用', 'language.translate': '翻译补充提示词', 'language.polish': '润色补充提示词',
     'language.target': '默认翻译目标', 'language.target.auto': '自动：中文译为英文，其他译为中文', 'language.target.zh-CN': '中文', 'language.target.en': '英文',
     'language.save': '保存语言设置', 'language.reload': '重新读取（放弃本窗口未保存修改）', 'language.saved': '语言设置已保存。', 'language.conflict': '设置已在其他窗口更改，本窗口的输入仍保留。复制所需内容后可重新读取。',
     'language.failed': '语言设置读取或保存失败，请检查连接后重试。', 'language.loading': '正在读取语言设置…', 'language.saving': '正在保存语言设置…',
@@ -47,8 +47,8 @@ const locales = {
     conflict: 'Settings were not saved. Current host values are shown; review them and retry.', failed: 'Could not confirm the save. Check the connection and retry.',
     reset: 'Restore defaults', 'reset.hint': 'Clears these user overrides and restores the DSH configuration defaults.',
     model: 'Models, credentials, light/dark mode and font size remain managed by DSH.',
-    language: 'Language model and prompts', 'language.model': 'Model', 'language.hint': 'Uses the current DSH default model unless a language-specific model is selected.',
-    'language.default': 'Use the current DSH default model', 'language.missing': 'Unavailable', 'language.translate': 'Additional translation instructions', 'language.polish': 'Additional polishing instructions',
+    language: 'Language model and prompts', 'language.model': 'Model', 'language.hint': 'Translation prefers a configured lightweight model; polishing follows DSH. An explicit language model overrides both.',
+    'language.default': 'Auto: fast translation / DSH polishing', 'language.missing': 'Unavailable', 'language.translate': 'Additional translation instructions', 'language.polish': 'Additional polishing instructions',
     'language.target': 'Default translation target', 'language.target.auto': 'Automatic: Chinese to English, otherwise Chinese', 'language.target.zh-CN': 'Chinese', 'language.target.en': 'English',
     'language.save': 'Save language settings', 'language.reload': 'Reload (discard unsaved changes here)', 'language.saved': 'Language settings saved.', 'language.conflict': 'Settings changed in another window. Your input remains here; copy it before reloading.',
     'language.failed': 'Could not load or save language settings. Check the connection and retry.', 'language.loading': 'Loading language settings…', 'language.saving': 'Saving language settings…',
@@ -194,7 +194,7 @@ export function PaperLibraryLanguageSettings({ model, t }) {
     if (!model.getSnapshot().dirty) void model.load()
     return unsubscribe
   }, [model])
-  const { value, models, defaultModel, status } = snapshot
+  const { value, models, status } = snapshot
   const busy = status === 'loading' || status === 'saving'
   const selected = value?.model ? JSON.stringify([value.model.provider, value.model.model]) : ''
   const choices = models.map(item => ({ key: JSON.stringify([item.provider, item.id]), name: item.name || item.id, model: { provider: item.provider, model: item.id } }))
@@ -210,7 +210,7 @@ export function PaperLibraryLanguageSettings({ model, t }) {
     h('p', { style: { ...muted, margin: 0 } }, t('language.hint')),
     value ? h('label', { style: { display: 'grid', gap: '5px' } }, t('language.model'),
       h('select', { value: selected, disabled: busy, style: control, onChange: event => model.set('model', choices.find(item => item.key === event.currentTarget.value)?.model || null) },
-        h('option', { value: '' }, `${t('language.default')}${defaultModel ? ` (${defaultModel.provider} / ${defaultModel.model})` : ''}`),
+        h('option', { value: '' }, t('language.default')),
         missing ? h('option', { value: selected }, `${value.model.provider} / ${value.model.model} (${t('language.missing')})`) : null,
         ...[...groups].map(([provider, items]) => h('optgroup', { key: provider, label: provider },
           ...items.map(item => h('option', { key: item.key, value: item.key }, item.name)))))) : null,

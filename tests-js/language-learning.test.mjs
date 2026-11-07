@@ -324,3 +324,20 @@ for (const cached of [undefined, 0, 1, 99, '24']) test(`page validation reads th
   await assert.rejects(f.handle({...request,request_id:'beyond-real-file',page:25}), /页码/)
   assert.equal(f.calls.length,1)
 })
+
+test('automatic translation chooses configured Flash without reasoning; polish and explicit choices retain their route',async()=>{
+ const f=fixture();f.options.models=async()=>({models:[{provider:'deepseek-official',id:'deepseek-flash'},{provider:f.route.provider,id:f.route.model}]});const handle=createLanguageLearning(f.options);
+ const translated=await handle({...request,request_id:'quick-translate'});assert.deepEqual(translated.model,{provider:'deepseek-official',model:'deepseek-flash',reasoningEffort:'off'});assert.equal(translated.model_source,'translation-lightweight');
+ const polished=await handle({...request,mode:'polish',request_id:'normal-polish'});assert.deepEqual(polished.model,f.route);
+ const settings=await handle({action:'language_settings_get'});assert.equal(settings.translation_default_model.model,'deepseek-flash');
+ await handle({action:'language_settings_update',expected_revision:settings.revision,value:{model:f.route,translate_prompt:'',polish_prompt:''}});
+ const explicit=await handle({...request,request_id:'explicit-translate'});assert.deepEqual(explicit.model,f.route);assert.equal(explicit.model_source,'language-override');
+});
+
+test('vocabulary ordering applies to the whole matched set before pagination',async()=>{
+ const f=fixture();for(const [i,term]of ['Zulu','alpha','Beta'].entries()){const id=String(i).padStart(64,'0');await f.store.put(`vocabulary:${id}`,{id,term,meaning:'Synthetic',status:'learning',encounters:[],created_at:`2026-01-0${i+1}`,updated_at:`2026-02-0${i+1}`},0);}
+ assert.equal((await f.handle({action:'vocabulary_list',sort:'term_asc',offset:1,limit:1})).items[0].term,'Beta');
+ assert.equal((await f.handle({action:'vocabulary_list',sort:'created_desc',limit:1})).items[0].term,'Beta');
+ assert.equal((await f.handle({action:'vocabulary_list',sort:'created_asc',limit:1})).items[0].term,'Zulu');
+ await assert.rejects(f.handle({action:'vocabulary_list',sort:'invalid'}),/排序/);
+});

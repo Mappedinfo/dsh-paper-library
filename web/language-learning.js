@@ -79,7 +79,7 @@ window.PaperLanguageLearning = {
         const result=await api('language_settings_get',{});if(ticket!==viewTicket||view!=='settings'||panel.hidden)return;
         const value=result.value||{},select=$('language-settings-model');settingsRevision=result.revision;settingsModels=Array.isArray(result.models)?result.models:[];
         const defaultName=result.default_model?`${result.default_model.provider} / ${result.default_model.model}`:'尚未选择';
-        const automatic=make('option',`使用 DSH 当前默认模型（${defaultName}）`);automatic.value='';select.replaceChildren(automatic);
+        const automatic=make('option',`自动：轻量翻译（${result.translation_default_model?.model||defaultName}）／DSH 润色`);automatic.value='';select.replaceChildren(automatic);
         const groups=new Map();
         for(let i=0;i<settingsModels.length;i++){const model=settingsModels[i];if(!groups.has(model.provider)){const group=make('optgroup');group.label=model.provider;groups.set(model.provider,group);select.append(group);}const option=make('option',model.name||model.id);option.value=String(i);groups.get(model.provider).append(option);}
         const selected=settingsModels.findIndex(model=>model.provider===value.model?.provider&&model.id===value.model?.model);

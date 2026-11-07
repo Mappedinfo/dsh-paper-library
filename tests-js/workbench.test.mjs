@@ -376,3 +376,10 @@ test('plain catalog cells and keyboard select the row before metadata enrichment
  assert.equal(f.state.active.id,b.id);assert.equal(f.element('metadata-enrich').disabled,false);assert.deepEqual(f.opens,[]);
  await row.dispatch('keydown',{target:row,key:'Enter'});assert.equal(f.selections.at(-1),b.id);assert.equal(f.workbench.isTable(),true);
 });
+
+test('metadata lookup adopts the complete author list in the review draft without another button',async()=>{
+ const paper=original(),authors=[{given:'Alice',family:'Example'},{given:'Bob',family:'Writer',affiliation:[{name:'Synthetic Institute'}]}];
+ const f=environment({active:paper,respond:action=>action==='metadata_lookup'?{item:paper,author_candidates:authors}:null});
+ await f.element('metadata-enrich').dispatch('click');
+ assert.equal(f.element('edit-authors').value,'Example, Alice\nWriter, Bob');assert.match(f.element('edit-affiliations').value,/2 \| Synthetic Institute/);assert.equal(f.requests.some(r=>r.action==='update'),false);
+});

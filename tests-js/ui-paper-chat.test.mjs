@@ -21,11 +21,14 @@ function environment({ api: respond, created = false, notes = [], storage: persi
   let serial = 0, timerSerial = 0, currentPaper = null;
   class Element {
     constructor(tag = 'div') {
-      this.tagName = tag.toUpperCase(); this.children = []; this.listeners = new Map();
+      this.tagName = tag.toUpperCase(); this.children = []; this.listeners = new Map();this.attributes={};
       this.value = ''; this.textContent = ''; this.hidden = false; this.disabled = false; this.checked = false;
       const classes = new Set();
       this.classList = { toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name), contains: name => classes.has(name) };
     }
+    setAttribute(key,value){this.attributes[key]=String(value);}
+    getAttribute(key){return this.attributes[key]??null;}
+    prepend(...nodes){this.children.unshift(...nodes);for(const node of nodes)node.parentElement=this;}
     get childNodes() { return this.children; }
     append(...nodes) {
       for (const node of nodes) {
@@ -239,14 +242,14 @@ test('unchanged history preserves message DOM and reading position while model a
   assert.equal(list.children[0], card, 'equivalent message data must not replace DOM on every poll');
   assert.equal(button.disabled, true, 'polling must preserve an in-flight PDF-save control');
   assert.equal(list.scrollTop, 120, 'polling must not reset the reader to the latest message');
-  assert.match(fixture.element('paper-chat-model').textContent, /test \/ second/);
+  assert.equal(fixture.element('paper-chat-model').textContent,'second');assert.match(fixture.element('paper-chat-model').title,/test \/ second/);
   assert.match(fixture.element('paper-chat-status').textContent, /停止或未完成/);
   assert.equal(fixture.element('paper-chat-status').classList.contains('error'), true);
   result = { ...result, outcome: 'completed', hasMore: false };
   await fixture.advance(4000);
   assert.equal(list.children[0], card);
   assert.equal(fixture.element('paper-chat-history-note').textContent, '');
-  assert.match(fixture.element('paper-chat-status').textContent, /与 DSH 主对话同步/);
+  assert.match(fixture.element('paper-chat-status').textContent, /已同步/);
   assert.equal(fixture.element('paper-chat-status').classList.contains('error'), false);
 });
 
