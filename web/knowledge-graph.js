@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const TYPES = Object.freeze({ paper: '文献', author: '作者', institution: '单位', method: '方法', dataset: '数据', claim: '论点', evidence: '论据', concept: '概念', tag: '标签', observation: '观察', question: '问题', gap: '缺口', metric: '指标', experiment: '实验', task: '任务', topic: '主题', idea: '思路', figure: '图', formula: '公式', project: '项目', expert: '专家' });
-  const RELATIONS = Object.freeze({ supports: '支持', contradicts: '矛盾', uses: '使用', evaluates: '评估', derived_from: '源自', explains: '解释', extends: '扩展', cites: '引用', related: '相关', authored_by: '作者为', affiliated_with: '隶属于', published_by: '出版方为', tagged: '标签为', contains: '包含', addresses:'针对', proposes:'提出', reports:'报告', qualifies:'限定', assumes:'假设', defines:'定义', identifies:'识别', motivates:'动机', justifies:'说明依据', measures:'测量', observed_on:'观察于', produces:'产出', mentions:'提及', describes:'描述' });
+  const RELATIONS = Object.freeze({ supports: '支持', contradicts: '矛盾', uses: '使用', evaluates: '评估', derived_from: '源自', explains: '解释', extends: '扩展', cites: '引用', related: '相关', authored_by: '作者为', affiliated_with: '隶属于', published_by: '出版方为', tagged: '标签为', contains: '包含', addresses:'针对', proposes:'提出', reports:'报告', qualifies:'限定', assumes:'假设', defines:'定义', identifies:'识别', motivates:'动机', justifies:'说明依据', measures:'测量', observed_on:'观察于', produced_by:'产生于', measured_by:'以此衡量', for_task:'针对任务', produces:'产出', mentions:'提及', describes:'描述' });
   const EDITABLE_TYPES = ['method', 'dataset', 'claim', 'evidence', 'concept', 'author', 'institution'];
   const EDITABLE_RELATIONS = ['supports', 'contradicts', 'uses', 'evaluates', 'derived_from', 'explains', 'extends', 'cites', 'related', 'authored_by', 'affiliated_with', 'published_by'];
   const SVG = 'http://www.w3.org/2000/svg';
@@ -80,6 +80,7 @@
     const libraryScope = scope === 'library';
     let graph = { nodes: [], edges: [] }, selected = null, edgePage = 0, revision = 0, paperId = null, editing = null, busy = false, catalogOffset = 0;
     let viewport = null, panGesture = null, statistics = null, statisticsFlight = null, statisticsRevision = 0, citationSource = '', focusPaperId = null;
+    let readingCursor = {}, readingQuestionOffset = 0;
     const markerId = `kg-arrow-${++instanceSequence}`;
     root.classList.add('knowledge-graph');
     root.innerHTML = `<div class="kg-toolbar"><div><h3>知识图谱</h3><p>记录方法、数据、论点与论据之间的联系。</p></div><div class="kg-actions"><button type="button" class="button subtle" data-kg="extract-references">提取参考文献</button><button type="button" class="button subtle" data-kg="add-board">加入画板</button><button type="button" class="button" data-kg="add-node">＋ 节点</button><button type="button" class="button" data-kg="add-edge">＋ 关系</button></div></div>
@@ -102,8 +103,10 @@
     if (!libraryScope && onOpenLibrary) {
       const globalButton=dom('button','button subtle','查看全库图谱');globalButton.type='button';globalButton.addEventListener('click',()=>onOpenLibrary({focus_id:paperId}));root.querySelector('.kg-actions').prepend(globalButton);
     }
-    const graphMode=dom('select');graphMode.setAttribute('aria-label','图谱模式');graphMode.dataset.kg='mode';graphMode.append(option('all','全部关系'),option('citations','论文引用'));el('filter').parentElement.before(graphMode);
-    graphMode.addEventListener('change',()=>{el('filter').value='';void load(getPaper(),catalogOffset);});
+    const graphMode=dom('select');graphMode.setAttribute('aria-label','图谱模式');graphMode.dataset.kg='mode';if(!libraryScope)graphMode.append(option('reading','全文判断'));graphMode.append(option('all','全部关系'),option('citations','论文引用'));el('filter').parentElement.before(graphMode);
+    graphMode.addEventListener('change',()=>{el('filter').value='';readingCursor={};readingQuestionOffset=0;void load(getPaper(),catalogOffset);});
+    const readingNav=dom('nav','kg-reading-nav'),readingList=dom('section','kg-reading-list');readingNav.setAttribute('aria-label','全文判断导航');readingList.setAttribute('aria-label','全文判断内容');el('status').after(readingNav);el('inspector').after(readingList);
+    const retryButton=action('重试读取图谱',()=>void load(getPaper(),catalogOffset),'button subtle');retryButton.hidden=true;el('status').after(retryButton);
     if(!libraryScope&&onAnalyze){const analyze=action('全文分析建图',async()=>{analyze.disabled=true;try{await onAnalyze();}catch(error){status(error.message,true);}finally{analyze.disabled=false;}},'button');analyze.dataset.kg='analyze';root.querySelector('.kg-actions').prepend(analyze);}
     for (const key of ['add-node','add-edge']) if(libraryScope)el(key).hidden=true;
     if (!onAddToBoard) el('add-board').hidden=true;
@@ -207,7 +210,7 @@
       })(); statisticsFlight = task; return task;
     }
     function evidenceContent(parent, entry) {
-      parent.append(dom('p', 'kg-provenance', entry.provenance === 'pdf-reference' ? '来自 PDF 参考文献原文 · 未补造题录字段' : entry.provenance === 'ai-analysis' ? `AI 分析 · ${entry.review_status==='accepted'?'已核对':'待核对'}` : ['catalog-metadata','catalog-reference'].includes(entry.provenance) ? '来自已保存文献资料' : '读者记录 · 需要结合原文判断'));
+      parent.append(dom('p', 'kg-provenance', entry.provenance === 'pdf-reference' ? '来自 PDF 参考文献原文 · 未补造题录字段' : ['ai-analysis','analysis-answer','analysis-group'].includes(entry.provenance) ? `AI 分析 · ${entry.review_status==='accepted'?'已核对':'待核对'}` : ['catalog-metadata','catalog-reference'].includes(entry.provenance) ? '来自已保存文献资料' : '读者记录 · 需要结合原文判断'));
       parent.append(dom('p', 'kg-evidence', evidenceSummary(entry.evidence)));
       if (Number.isInteger(entry.evidence?.page) && entry.evidence.page > 0) {
         if (libraryScope && entry.paper_id && navigatePaper) parent.append(action(`打开来源论文第 ${entry.evidence.page} 页`,()=>navigatePaper(entry.paper_id,entry.evidence.page)));
@@ -221,12 +224,54 @@
       const heading = dom('div', 'kg-inspector-heading'); heading.append(dom('h4', '', nodeName(node)), action('收起', () => { selected = null; render(); })); host.append(heading);
       if (node.external_reference) host.append(dom('p', 'kg-help', '被引文献尚未匹配库内条目；可以查看参考文献原文与来源页。'));
       if (node.description) host.append(dom('p', 'kg-description', node.description));
-      evidenceContent(host, node);
+      if(node.reading_target)host.append(action(node.reading_target.answer_id?'查看判断图谱':'展开问题',()=>void openReading(node.reading_target),'button'));
+      if(node.provenance!=='analysis-group')evidenceContent(host, node);
       if (node.identity_reliable === false) host.append(dom('p', 'kg-help', '同名作者尚缺少可区分的资料。补充 ORCID 或不同单位后，才可为其保存读者关系。'));
       if (node.type === 'paper' && !node.external_reference && node.id !== paperId) host.append(action('打开文献', () => openPaper?.(node.id)));
       if (node.editable && !libraryScope) {
         const actions = dom('div', 'kg-actions');
         actions.append(action('编辑节点', () => showEditor('node', node)), action('删除节点', () => remove('node', node), 'text-button danger')); host.append(actions);
+      }
+    }
+    function openReading(target = {}) {
+      if(libraryScope||graphMode.value!=='reading')return;
+      if(target.answer_id)readingQuestionOffset=graph.reading?.offset??readingQuestionOffset;
+      readingCursor={...(readingCursor.request_id?{request_id:readingCursor.request_id}:{}),...target};
+      return load(getPaper());
+    }
+    function renderReading() {
+      const reading=graph.reading,isReading=!libraryScope&&graphMode.value==='reading';
+      readingNav.hidden=readingList.hidden=!isReading;readingNav.replaceChildren();readingList.replaceChildren();
+      if(!isReading)return;
+      readingNav.append(action('问题总览',()=>void openReading(), 'button subtle'));
+      if(reading?.question_id){const title=reading.questions?.find(q=>q.id===reading.question_id)?.title||reading.question_id;readingNav.append(dom('span','kg-reading-separator','/'),action(title,()=>void openReading({question_id:reading.question_id,offset:readingQuestionOffset}),'button subtle'));}
+      if(reading?.level==='answer')readingNav.append(dom('span','kg-reading-separator','/'),dom('span','','判断与原文证据'));
+      const refresh=action('刷新全文图谱',()=>{readingCursor={};readingQuestionOffset=0;void load(getPaper());},'button subtle');refresh.classList.add('kg-reading-refresh');readingNav.append(refresh);
+      if(!reading)return;
+      if(reading.level==='question'){
+        const pager=dom('div','kg-reading-pager'),previous=action('上一页判断',()=>void openReading({question_id:reading.question_id,offset:reading.previous_offset}),'button subtle'),next=action('下一页判断',()=>void openReading({question_id:reading.question_id,offset:reading.next_offset}),'button subtle');previous.disabled=reading.previous_offset==null;next.disabled=reading.next_offset==null;
+        pager.append(previous,dom('span','',`第 ${reading.total?Number(reading.offset||0)+1:0}–${Math.min(Number(reading.offset||0)+Number(reading.limit||12),reading.total||0)} 项 / ${reading.total||0} 项`),next);readingNav.append(pager);
+      }
+      if(reading.level==='overview'){
+        const groups=dom('div','kg-reading-groups');
+        for(const question of reading.questions||[]){const control=action(`${question.title} · ${question.total} 项`,()=>void openReading({question_id:question.id,offset:0}),'button subtle');control.dataset.questionId=question.id;groups.append(control);}readingList.append(groups);
+      }else if(reading.level==='question'){
+        for(const entry of graph.nodes.filter(node=>node.reading_target?.answer_id)){
+          const card=dom('article','kg-reading-answer');card.dataset.answerId=entry.reading_target.answer_id;
+          if(entry.valid===false)card.append(dom('span','kg-reading-check kg-error','未通过原文／结构检查'));
+          else if(entry.neutral)card.append(dom('span','kg-reading-check','未报告／不适用'));
+          else card.append(dom('span','kg-reading-check','AI 判断 · 待核对'));
+          card.append(dom('p','kg-reading-judgment',entry.description||entry.label));
+          if(entry.evidence?.page)card.append(dom('span','kg-help',`PDF 第 ${entry.evidence.page} 页`));
+          card.append(action('查看判断图谱',()=>void openReading(entry.reading_target),'button subtle'));readingList.append(card);
+        }
+        if(!reading.total)readingList.append(dom('p','kg-help','此问题没有已保存判断。未完成或撤回的回答不会补成肯定结论。'));
+      }else if(reading.level==='answer'){
+        const seen=new Set(),nodes=graph.nodes.filter(node=>{if(!node.evidence?.quote)return false;const key=JSON.stringify([node.evidence.page,node.evidence.source,node.evidence.quote]);if(seen.has(key))return false;seen.add(key);return true;});
+        if(reading.answer?.judgment&&!nodes.some(n=>n.label===reading.answer.judgment))readingList.append(dom('p','kg-reading-judgment',reading.answer.judgment));
+        if(reading.answer?.source_status==='inferred')readingList.append(dom('p','kg-help','读者推断／待核对问题，尚非作者报告事实。'));
+        for(const entry of nodes){const card=dom('article','kg-reading-source');card.append(dom('h4','',entry.label));evidenceContent(card,entry);readingList.append(card);}
+        for(const item of reading.limitations||[]){const text=typeof item==='string'?item:item.message||item.reason||item.code;readingList.append(dom('p','kg-help',text));}
       }
     }
     function renderRelations() {
@@ -235,7 +280,7 @@
       el('relations-heading').textContent = `${selected ? '此节点的关系' : '关系'} · ${values.length}`;
       el('page').textContent = `${edgePage + 1} / ${pages}`; el('previous').disabled = edgePage <= 0; el('next').disabled = edgePage >= pages - 1;
       const host = el('relations'); host.replaceChildren();
-      if (!values.length) { host.append(dom('p', 'kg-help', '尚无关系。添加节点后，可以明确记录谁支持谁、使用什么方法或数据。')); return; }
+      if (!values.length) { host.append(dom('p', 'kg-help', graphMode.value==='reading'?'当前层级没有可绘制关系；未报告、撤回或尚未明确的关系不会推测连线。':'尚无关系。添加节点后，可以明确记录谁支持谁、使用什么方法或数据。')); return; }
       for (const edge of values.slice(edgePage * 20, (edgePage + 1) * 20)) {
         const row = dom('details', 'kg-relation'), summary = dom('summary');
         summary.append(dom('span', 'kg-endpoint', nodeById.get(edge.source)?.label || edge.source), dom('strong', 'kg-relation-name', `— ${relationLabel(edge.relation)} →`), dom('span', 'kg-endpoint', nodeById.get(edge.target)?.label || edge.target));
@@ -250,15 +295,17 @@
       const display=displayGraph(),visible=display.nodes;
       const focusEdges=selected?display.edges.filter(e=>e.source===selected||e.target===selected):focusPaperId?display.edges.filter(e=>e.paper_id===focusPaperId||e.source===focusPaperId||e.target===focusPaperId):[];
       const focusNodes=new Set([selected||focusPaperId,...focusEdges.flatMap(e=>[e.source,e.target])]);const focusIds=new Set(focusEdges.map(e=>e.id)),focused=Boolean(selected||focusPaperId);
-      const host = el('canvas'); host.replaceChildren();
+      const host = el('canvas'),readingDetail=!libraryScope&&graphMode.value==='reading'&&graph.reading?.level==='answer';host.classList.toggle('is-reading-detail',readingDetail);host.replaceChildren();
       selectionLabel.textContent = selected ? `已选：${graph.nodes.find(node => node.id === selected)?.label || ''}` : focusPaperId?'已高亮本文关系，其他节点淡化':'尚未选择节点';
       if (!visible.length) { viewport = null; host.append(dom('p', 'kg-help', '当前类型没有节点。')); return; }
       const columns = Math.min(10, Math.max(1, Math.ceil(Math.sqrt(visible.length * 1.5)))), rows = Math.ceil(visible.length / columns);
-      const width = columns * 180 + 80, rowHeight = 100, height = Math.max(160, rows * rowHeight + 50), positions = new Map();
+      const rowHeight=100,gridWidth=columns*180+80,gridHeight=Math.max(160,rows*rowHeight+50);
+      // 单项证据图保持正常字号；适应视图只收缩大图，不把两三个节点放大成海报。
+      const width=readingDetail?Math.max(gridWidth,640,host.clientWidth||0):gridWidth,height=readingDetail?Math.max(gridHeight,300,host.clientHeight||0):gridHeight,positions=new Map();
       const svg = document.createElementNS(SVG, 'svg'); svg.setAttribute('role', 'group'); svg.setAttribute('aria-label', '文献知识图谱，使用 Tab 选择节点查看关系与来源');
       const defs = document.createElementNS(SVG, 'defs'), marker = document.createElementNS(SVG, 'marker'), arrow = document.createElementNS(SVG, 'path');
       marker.setAttribute('id', markerId); marker.setAttribute('viewBox', '0 0 10 10'); marker.setAttribute('refX', '9'); marker.setAttribute('refY', '5'); marker.setAttribute('markerWidth', '5'); marker.setAttribute('markerHeight', '5'); marker.setAttribute('orient', 'auto-start-reverse'); arrow.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z'); marker.append(arrow); defs.append(marker); svg.append(defs);
-      visible.forEach((node, index) => positions.set(node.id, { x: (index % columns + .5) * 180 + 40, y: Math.floor(index / columns) * rowHeight + 38 }));
+      visible.forEach((node,index)=>{const row=Math.floor(index/columns),column=index%columns,rowCount=Math.min(columns,visible.length-row*columns);positions.set(node.id,readingDetail?{x:width/2+(column-(rowCount-1)/2)*180,y:height/2+(row-(rows-1)/2)*rowHeight-12}:{x:(column+.5)*180+40,y:row*rowHeight+38});});
       for (const edge of display.edges) {
         const source = positions.get(edge.source), target = positions.get(edge.target); if (!source || !target) continue;
         const dx = target.x - source.x, dy = target.y - source.y, distance = Math.hypot(dx, dy) || 1;
@@ -267,7 +314,7 @@
         line.classList.add('kg-edge'); if (focused) line.classList.add(focusIds.has(edge.id) ? 'is-selected' : 'is-muted'); const title = document.createElementNS(SVG, 'title'); title.textContent = relationLabel(edge.relation); line.append(title); svg.append(line);
       }
       for (const node of visible) {
-        const pos = positions.get(node.id), group = document.createElementNS(SVG, 'g'); group.dataset.nodeId = node.id; group.setAttribute('transform', `translate(${pos.x},${pos.y})`); group.setAttribute('tabindex', '0'); group.setAttribute('role', 'button'); group.setAttribute('aria-label', nodeName(node)); group.setAttribute('aria-pressed', String(selected === node.id)); group.classList.add('kg-node', `kg-type-${node.type}`); if (selected === node.id) group.classList.add('is-selected');if(focused)group.classList.add(focusNodes.has(node.id)?'is-highlighted':'is-muted');if(node.provenance==='ai-analysis'&&node.review_status!=='accepted')group.classList.add('is-ai-draft');
+        const pos = positions.get(node.id), group = document.createElementNS(SVG, 'g'); group.dataset.nodeId = node.id; group.setAttribute('transform', `translate(${pos.x},${pos.y})`); group.setAttribute('tabindex', '0'); group.setAttribute('role', 'button'); group.setAttribute('aria-label', nodeName(node)); group.setAttribute('aria-pressed', String(selected === node.id)); group.classList.add('kg-node', `kg-type-${node.type}`); if (selected === node.id) group.classList.add('is-selected');if(focused)group.classList.add(focusNodes.has(node.id)?'is-highlighted':'is-muted');if(['ai-analysis','analysis-answer','analysis-group'].includes(node.provenance)&&node.review_status!=='accepted')group.classList.add('is-ai-draft');
         const ring = document.createElementNS(SVG, 'circle'); ring.setAttribute('r', '26'); ring.classList.add('kg-selection-ring'); const circle = document.createElementNS(SVG, 'circle'); circle.setAttribute('r', '20');
         const typeText = document.createElementNS(SVG, 'text'); typeText.textContent = TYPES[node.type] || node.type; typeText.setAttribute('y', '4'); typeText.classList.add('kg-node-type');
         const label = document.createElementNS(SVG, 'text'); label.setAttribute('y', '46'); label.classList.add('kg-node-label'); label.textContent = shortLabel(node.label);
@@ -292,29 +339,35 @@
       const types = new Set(graph.nodes.map(node => node.type)), legend = el('legend'); legend.replaceChildren();
       for (const [type, label] of Object.entries(TYPES)) if (types.has(type)) { const item = dom('span', `kg-legend-item kg-type-${type}`); item.append(dom('i'), document.createTextNode(label)); legend.append(item); }
       el('extract-references').hidden = libraryScope; el('extract-references').disabled = busy || !paperId || !getPaper()?.pdf;
+      const readingMode=!libraryScope&&graphMode.value==='reading';
+      el('filter').parentElement.hidden=readingMode;el('add-node').hidden=el('add-edge').hidden=libraryScope||readingMode;
       el('add-node').disabled = !paperId; el('add-edge').disabled = graph.nodes.length < 2;
       el('reset').disabled=!selected&&!focusPaperId&&!el('filter').value;
-      renderCanvas(); renderInspector(); renderRelations();
+      renderCanvas(); renderInspector(); renderRelations();renderReading();
     }
     async function load(item = getPaper(), offset = 0) {
       catalogOffset=offset;
+      if(!libraryScope&&paperId!==item?.id){readingCursor={};readingQuestionOffset=0;}
+      const requestedMode=graphMode.value;retryButton.hidden=true;
       const run = ++revision; paperId = libraryScope ? null : item?.id || null; selected = null; edgePage = 0; viewport = null; closeEditor(); graph = { nodes: [], edges: [] }; render();
       if (libraryScope) void loadStatistics();
       if (!paperId && !libraryScope) { status('选择一篇文献查看本文图谱，或从顶栏打开全库图谱。'); return; }
       const requestedId = paperId; status(libraryScope ? '正在读取全库图谱…' : '正在读取本文图谱…');
       try {
         catalogPrevious.disabled=catalogNext.disabled=true;
-        const result = await api('graph', { ...(libraryScope ? {offset,...(focusPaperId?{focus_id:focusPaperId}:{})} : {id:requestedId}), view:graphMode.value||'all', limit: 100 });
-        if (run !== revision || (!libraryScope && getPaper()?.id !== requestedId)) return;
+        const result = requestedMode==='reading'&&!libraryScope?await api('paper_analysis_graph',{id:requestedId,...readingCursor}):await api('graph', { ...(libraryScope ? {offset,...(focusPaperId?{focus_id:focusPaperId}:{})} : {id:requestedId}), view:requestedMode||'all', limit: 100 });
+        if (run !== revision || requestedMode!==graphMode.value || (!libraryScope && getPaper()?.id !== requestedId)) return;
+        if(requestedMode==='reading'&&result.reading?.request_id)readingCursor.request_id=result.reading.request_id;
         graph = result; render();catalogPrevious.disabled=graph.scope?.previous_offset==null;catalogNext.disabled=graph.scope?.next_offset==null;
         if(graphMode.value==='citations'&&!graph.edges.length)graph.warnings=[...(graph.warnings||[]),'当前范围尚无已记录的论文引用；共同作者或关键词不作为引用。'];
+        if(requestedMode==='reading'){const r=graph.reading;if(!r||r.status==='idle'){status('尚无全文分析记录。点击「全文分析建图」生成，已有记录将直接展示，无需重复调用模型。');return;}if(r.status==='unsupported'){status('这次旧版分析没有逐题判断记录；可切换「全部关系」查看已保存草稿，或点击「全文分析建图」重新分析。');return;}const title=r.questions?.find(q=>q.id===r.question_id)?.title||'';status(`全文 ${r.total_answers||0} 项判断 · ${r.valid_answers||0} 项通过原文校验 · ${r.level==='overview'?'按问题展开查看全部判断':r.level==='question'?`${title} · 当前 ${graph.nodes.filter(n=>n.reading_target?.answer_id).length} / ${r.total||0} 项`:'单项判断的完整证据与关系'}。AI 分析待核对。${graph.warnings?.length?' '+graph.warnings.join(' '):''}`);return;}
         const range=libraryScope ? `全库目录 ${graph.scope?.paper_count ? offset+1 : 0}–${offset+(graph.scope?.paper_count||0)} / ${graph.scope?.total_papers||0} 篇 · ` : '本文 · ';
         status(`${range}${graph.nodes.length} 个节点 · ${graph.edges.length} 条关系。${graph.nodes.some(n=>n.provenance==='ai-analysis'&&n.review_status!=='accepted')?' 虚线节点为 AI 分析草稿，待核对。':''}${graph.truncated ? ' 当前为部分图谱；最多显示 100 个节点，已保存记录仍保留。' : ' 点击节点查看关系和依据。'}${graph.warnings?.length ? ' ' + graph.warnings.join(' ') : ''}`);
-      } catch (error) { if (run === revision) status(`图谱读取失败：${error.message}`, true); }
+      } catch (error) { if (run === revision&&requestedMode===graphMode.value&&(!requestedId||getPaper()?.id===requestedId)){status(`图谱读取失败：${error.message}`, true);retryButton.hidden=false;} }
     }
     function closeEditor() { if (el('dialog').open) el('dialog').close(); editing = null; }
     function showEditor(kind, value = null) {
-      if (busy || !paperId) return;
+      if (busy || !paperId || graphMode.value==='reading') return;
       editing = { kind, value, paperId }; form.reset(); el('error').hidden = true;
       el('form-title').textContent = `${value ? '编辑' : '添加'}${kind === 'node' ? '节点' : '关系'}`;
       el('node-fields').hidden = kind !== 'node'; el('edge-fields').hidden = kind !== 'edge'; field('label').required = kind === 'node';
@@ -373,8 +426,8 @@
     el('filter').addEventListener('change', () => { viewport = null; const filter = el('filter').value, node = graph.nodes.find(value => value.id === selected); if (filter && node && node.type !== filter && node.id !== paperId) { selected = null; edgePage = 0; } render(); }); el('reset').addEventListener('click', () => { selected = null; focusPaperId=null;el('filter').value='';viewport=null;edgePage = 0; render();fit(); });
     el('previous').addEventListener('click', () => { edgePage = Math.max(0, edgePage - 1); renderRelations(); }); el('next').addEventListener('click', () => { edgePage++; renderRelations(); });
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(resize) : null; observer?.observe(canvas);
-    function clear() { ++revision; ++statisticsRevision; statistics = null; statisticsFlight = null; statisticsPanel.setAttribute('aria-busy', 'false'); viewport = null; const gesture = panGesture; panGesture = null; canvas.classList.remove('is-panning'); try { if (gesture && canvas.hasPointerCapture(gesture.id)) canvas.releasePointerCapture(gesture.id); } catch {} paperId = null; selected = null; graph = { nodes: [], edges: [] }; closeEditor(); render(); renderStatistics(); status('选择一篇文献查看知识图谱。'); }
-    clear(); return { load, focusPaper:async id=>{focusPaperId=id||null;graphMode.value='all';el('filter').value='';return load(null,0);}, reload:()=>{ if(libraryScope)void loadStatistics(true);return load(getPaper(),catalogOffset); }, clear, resize, fit, resetView: fit, getViewport:()=>viewport?.snapshot() || null, selectedNode: () => graph.nodes.find(node => node.id === selected) ?? null };
+    function clear() { readingCursor={};readingQuestionOffset=0;retryButton.hidden=true;++revision; ++statisticsRevision; statistics = null; statisticsFlight = null; statisticsPanel.setAttribute('aria-busy', 'false'); viewport = null; const gesture = panGesture; panGesture = null; canvas.classList.remove('is-panning'); try { if (gesture && canvas.hasPointerCapture(gesture.id)) canvas.releasePointerCapture(gesture.id); } catch {} paperId = null; selected = null; graph = { nodes: [], edges: [] }; closeEditor(); render(); renderStatistics(); status('选择一篇文献查看知识图谱。'); }
+    clear(); return { load, showReading:()=>{if(libraryScope)return;graphMode.value='reading';readingCursor={};readingQuestionOffset=0;el('filter').value='';return load(getPaper());}, focusPaper:async id=>{focusPaperId=id||null;graphMode.value='all';el('filter').value='';return load(null,0);}, reload:()=>{ readingCursor={};readingQuestionOffset=0;if(libraryScope)void loadStatistics(true);return load(getPaper(),catalogOffset); }, clear, resize, fit, resetView: fit, getViewport:()=>viewport?.snapshot() || null, selectedNode: () => graph.nodes.find(node => node.id === selected) ?? null };
   }
   window.PaperKnowledgeGraph = Object.freeze({ create, createViewport, statisticsOf, shortLabel, labelWidth, types: TYPES, relations: RELATIONS, evidenceSummary, scopedEdges, relationLabel });
 })();

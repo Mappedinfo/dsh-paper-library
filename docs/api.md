@@ -568,3 +568,15 @@ An independent deployment without a DSH migration marker uses local disk prefere
 - `graph_references_get {id}`：读取已保存快照。`graph {id?,focus_id?,view:"citations",limit?}` 将快照绘为明确方向的 `cites` 边；唯一 DOI 可匹配库内论文，未匹配的作品使用 `external_reference:true` 的论文节点，来源页仍属于引用它的论文。库外节点不提供无效的“打开文献”动作。图谱读取不重新解析 PDF，不把出边数当作入站引用量。
 - `paper_analysis_repair {id,request_id?,new_request_id?}`：针对已结束文字分析的未通过项发起新任务；省略原请求时使用最新任务。使用原题库、范围、模型和已保存来源快照，不重读可能已经变化的 PDF。每组只给模型待修订回答及原文，响应必须逐项对应旧 ID，允许有理由的撤回；其他有效回答不得改变或因冲突失效。原任务保留，`repair_from` 和 `source_basis:"saved-snapshots"` 明示来源；`repair_log` 记录原／新 ID、原因和状态。请求失败保留原组，原始修订响应分片保存，`include_raw:true` 可查看。仍未通过的修订不会自动采用。
 - `knowledge_draft_put` 可带 `supersedes_draft_id`：旧稿必须属于同一实体、同一来源列表，且未被接受／否决。旧稿不删除；新非否决图谱在浏览时替代旧稿，否决新稿后旧稿恢复显示。不能自动替代人工已经审阅的决定。
+
+### 分层全文图谱
+
+`paper_analysis_graph {id,request_id?,question_id?,offset?,answer_id?,batch_index?}` 在宿主、独立服务与 headless 入口只读完整的保存判断，不发起模型调用、不重新解析 PDF，也不覆盖旧草稿。省略 request_id 读取当前任务，响应返回的 request_id 用于后续分页固定快照。
+
+- 不传 question_id：问题总览（论文中心与所有问题组）。reading.questions 包含全篇各问题 total/valid/invalid/neutral，以及全文总计；统计所有已保存批次，不受摘要图或画布节点上限截断。活动任务仅包含已提交批次，status/completed_batches 标明状态。
+- question_id + offset：按批次和回答保存顺序分页，每页固定至多 12 项，返回 next_offset/previous_offset；每项 reading_target 保留问题、回答及批次身份。不会依照首屏节点重算总数。
+- question_id + answer_id + batch_index：读取该项的完整证据图，用保存的题库和来源快照重新核对引文与类型映射；不增加原编译预算。原文缺失、身份错误、跨度不匹配或单项编译不完整时显式失败。neutral／invalid 仅展示记录与提示，不生成事实关系。
+
+reading.legacy_budget_omissions 是旧摘要图因预算省略的判断数；reading.relation_limitations 是关系类型提示数，两者不能当成同一种“遗漏项”。新任务 question_summary 分别提供 graph_budget_omissions / relation_limitations，旧 projection_limitations 总和保留兼容。摘要图的有界显示不再单独导致新任务 partial；回答缺失、来源未覆盖或保存失败仍保留真实未完成状态。旧任务状态和响应不迁改。
+
+目录只缓存轻量计数和题组位置；正文按所选页／单项读取。旧任务按需兼容，新任务保存 graph_counts 避免总览重复读取全部回答正文。选择不存在的任务、跨题／跨批回答或越界页报错；缺失片段不会作为零项跳过。

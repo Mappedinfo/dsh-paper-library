@@ -94,3 +94,20 @@
 .kg-node.is-muted{opacity:.18}.kg-node.is-highlighted circle{stroke:var(--ink);stroke-width:2px}.kg-edge{fill:none}.kg-edge.is-muted{opacity:.12}.kg-edge.is-selected{opacity:1;stroke-width:2.5px}
 
 .kg-node.is-ai-draft circle:not(.kg-selection-ring){stroke-dasharray:3 2}.kg-type-observation,.kg-type-figure,.kg-type-formula{--kg-node:var(--kg-evidence)}.kg-type-question,.kg-type-gap{--kg-node:var(--kg-claim)}.kg-type-metric,.kg-type-experiment,.kg-type-task{--kg-node:var(--kg-method)}.kg-type-topic,.kg-type-idea,.kg-type-project,.kg-type-expert{--kg-node:var(--kg-concept)}
+
+/* 全文判断按问题与单项证据逐层展开，节点预算只限制当前视图。 */
+.kg-reading-nav { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:8px 0 12px; font-size:12px; }
+.kg-reading-nav[hidden],.kg-reading-list[hidden] { display:none; }
+.kg-reading-refresh { margin-left:auto; }
+.kg-reading-pager { display:flex; align-items:center; gap:12px; width:100%; }
+.kg-reading-separator { color:var(--muted); }
+.kg-reading-groups { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:12px 0; }
+.kg-reading-groups button { text-align:left;justify-content:flex-start;white-space:normal; }
+.kg-reading-answer,.kg-reading-source { padding:10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere; }
+.kg-reading-answer .kg-reading-judgment { margin:0 0 6px;white-space:pre-wrap; }
+.kg-reading-answer button { margin-left:10px; }
+.kg-reading-source h4 { font-size:13px;margin:0 0 6px; }
+.kg-reading-source .kg-evidence { white-space:pre-wrap; }
+.kg-reading-check { display:block;font-size:11px;color:var(--muted);margin-bottom:5px; }
+.kg-reading-check.kg-error { color:var(--danger,#a33c32); }
+.knowledge-graph .kg-canvas.is-reading-detail { height:300px; }

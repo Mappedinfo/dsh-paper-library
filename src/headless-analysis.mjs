@@ -13,7 +13,7 @@ const hash = value => createHash('sha256').update(JSON.stringify(value)).digest(
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value)
 const fail = (code, message = '后台整理请求无效。', status = 400) => Object.assign(new Error(message), { code, status })
 const active = new Set(['queued', 'reading', 'generating', 'committing'])
-const actions = new Set(['paper_analysis_start', 'paper_analysis_get', 'paper_analysis_cancel', 'paper_analysis_apply', 'paper_analysis_context', 'paper_analysis_run'])
+const actions = new Set(['paper_analysis_start', 'paper_analysis_get', 'paper_analysis_graph', 'paper_analysis_cancel', 'paper_analysis_apply', 'paper_analysis_context', 'paper_analysis_run'])
 const clone = value => JSON.parse(JSON.stringify(value))
 const configFields = new Set(['provider', 'model', 'keyEnv', 'envFile', 'maxOutputTokens', 'maxCalls', 'timeoutMs', 'maxConcurrency', 'thinking', 'reasoningEffort'])
 

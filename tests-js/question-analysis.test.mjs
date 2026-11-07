@@ -162,7 +162,7 @@ test('graph write failure does not erase saved answers or stop the next page', a
   assert.match(result.batch_graph_error, /synthetic graph persistence/)
 })
 
-test('graph budget omissions remain inspectable and cannot count as a complete deliverable', async t => {
+test('summary graph budgets do not omit judgments from the complete progressive graph', async t => {
   const f = await fixture(t)
   f.response = input => JSON.stringify({ answers: Array.from({ length: 12 }, (_, index) => ({
     question_id: input.analysisContext.question_ids[index % input.analysisContext.question_ids.length], choice: 'other', judgment: `合成判断 ${index}`,
@@ -170,12 +170,18 @@ test('graph budget omissions remain inspectable and cannot count as a complete d
   })) })
   const selected = ['q1_method', 'q1_dataset', 'q1_metric', 'q1_task']
   const result = await f.run({ question_ids: selected })
-  assert.equal(result.status, 'partial')
-  assert.equal(result.analysis_complete, false)
+  assert.equal(result.status, 'complete')
+  assert.equal(result.analysis_complete, true)
   assert.equal(result.question_coverage.complete, true)
   assert.equal(result.batch_answers.length, 12 * selected.length)
   assert.equal(result.batch_compilation.truncated, true)
   assert.ok(result.batch_compilation.excluded_answers.some(answer => answer.reason === 'graph-budget-whole-answer-omitted'))
+  const overview=await f.handle({action:'paper_analysis_graph',id:'paper-a'})
+  assert.equal(overview.reading.total_answers,96)
+  assert.equal(overview.reading.legacy_budget_omissions,result.question_summary.graph_budget_omissions)
+  const excluded=result.batch_compilation.excluded_answers.find(a=>a.reason==='graph-budget-whole-answer-omitted'),answer=result.batch_answers.find(a=>a.id===excluded.answer_id)
+  const detail=await f.handle({action:'paper_analysis_graph',id:'paper-a',request_id:'run-a',question_id:answer.question_id,answer_id:answer.id,batch_index:1})
+  assert.ok(detail.nodes.length>1);assert.equal(detail.reading.answer.id,answer.id)
 })
 
 test('call budget stops new extraction and keeps completed question groups inspectable', async t => {

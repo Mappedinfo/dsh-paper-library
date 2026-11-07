@@ -8,7 +8,7 @@ window.PaperAnalysis = (() => {
   const activeStates=new Set(['queued','reading','generating','committing']);
   const names={evidence:'原文证据',claim:'论点',method:'方法',dataset:'数据集',observation:'观察',concept:'概念',question:'问题',gap:'缺口'};
   function parsePages(value){const raw=value.trim();if(!raw||/^(all|全部)$/i.test(raw))return undefined;const pages=[];for(const part of raw.split(/[,，\s]+/)){const match=part.match(/^(\d+)(?:[-–](\d+))?$/);if(!match)throw new Error('请输入页码或范围，例如 1-5,8；留空表示全部。');const start=Number(match[1]),end=Number(match[2]??match[1]);if(start<1||end>2000||end<start)throw new Error('页码必须在 1–2000 之间，范围从小到大。');for(let n=start;n<=end;n++)pages.push(n);}if(pages.length>2000||new Set(pages).size!==pages.length)throw new Error('页码不能重复。');return pages;}
-  function create({state,api,persistence,toast,prepareChat,openKnowledge,metadataChanged,graphChanged}) {
+  function create({state,api,persistence,toast,prepareChat,openKnowledge,metadataChanged,graphChanged,onOpenGraph}) {
     let available=false,paperId=null,epoch=0,job=null,timer=null,autoTimer=null,working=false,disposed=false,preferences={auto_analysis:true,analysis_fill:true,auto_review:true},settingsWritable=true,preferenceRevision=0,batchIndex,savingPreference=false;
     const selected=new Set();
     const trigger=button('paper-analysis-open','后台整理',()=>show());
@@ -32,6 +32,7 @@ window.PaperAnalysis = (() => {
       const failures=[...new Set(groups.flatMap(errorsOf))];
       status([job.stage||job.status,job.status==='unconfirmed'?'该任务可能仍在其他进程运行，正在刷新状态。':job.error,...(!job.error&&failures.length?[failures[0]]:[]),...(job.warnings||[])].filter(Boolean).join(' · '),['failed','partial','cancelled','interrupted'].includes(job.status));
       if(job.question_summary){const s=job.question_summary;result.append(node('p',`已保存 ${s.answers} 项判断 · ${s.valid_answers} 项通过原文校验 · ${s.invalid_answers} 项待修正。通过校验的内容仍需人工核对。`,'small muted'));}
+      if(job.questionnaire&&job.batch_count&&onOpenGraph)result.append(button('analysis-full-graph','查看完整全文图谱',()=>{panel.hidden=true;void onOpenGraph();}));
       if(job.questionnaire&&!job.repair_from&&['cancelled','interrupted','failed'].includes(job.status)){const control=button('analysis-resume','继续未完成任务',()=>void resume());control.disabled=working||!available;control.title='复用已保存的完整回答，只重新调用未完成的请求；范围、原文或题库改变时拒绝恢复。';result.append(control);}
       if(job.repair_from)result.append(node('p',`基于原分析的固定来源修订 · 原文定位复核 ${job.question_summary?.repair_revalidated||0} · 已改正 ${job.question_summary?.repair_repaired||0} · 撤回 ${job.question_summary?.repair_withdrawn||0} · 未解决 ${job.question_summary?.repair_unresolved||0}`,'small muted'));
       if(job.questionnaire&&(['complete','partial'].includes(job.status)&&(job.question_summary?.invalid_answers||job.question_summary?.repair_unresolved)||job.repair_from&&['cancelled','interrupted','failed'].includes(job.status))){const control=button('analysis-repair','修订未通过判断',()=>void repair());control.disabled=working||!available;control.title='只复查未通过的判断，保留原任务；使用该任务固定的原文快照。';result.append(control);}

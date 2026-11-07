@@ -5,6 +5,7 @@ import { analysisInputOptions, analysisQuestionOptions } from '../analysis-input
 import { validateAnalysisImages } from '../model-input-images.mjs'
 import { loadQuestionnaire, questionGroups } from '../reading-questions.mjs'
 import { runQuestionAnalysis, readQuestionBatch, readQuestionGroup, summarizeOptionCandidates } from './question-analysis.mjs'
+import { createReadingGraph } from './reading-graph.mjs'
 import { packNoteMaterial } from './note-material.mjs'
 import { isFatalModelError } from '../model-errors.mjs'
 import { renderNotePrompt as notePrompt, renderReviewPrompt as reviewPrompt, renderCoveragePrompt as coveragePrompt, renderMetadataPrompt, REVIEW_SECTIONS, promptTemplateManifest } from '../prompt-templates.mjs'
@@ -13,7 +14,7 @@ const hash = value => createHash('sha256').update(JSON.stringify(value)).digest(
 const now = () => new Date().toISOString()
 const fail = (message, code = 'ANALYSIS_INVALID', status = 400) => Object.assign(new Error(message), { code, status })
 const runningStates = new Set(['queued', 'reading', 'generating', 'committing'])
-const actions = new Set(['paper_analysis_start', 'paper_analysis_resume', 'paper_analysis_repair', 'paper_analysis_get', 'paper_analysis_cancel', 'paper_analysis_apply', 'paper_analysis_context'])
+const actions = new Set(['paper_analysis_start', 'paper_analysis_resume', 'paper_analysis_repair', 'paper_analysis_get', 'paper_analysis_graph', 'paper_analysis_cancel', 'paper_analysis_apply', 'paper_analysis_context'])
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value)
 const metadataFields = new Set(['title','author','abstract','container-title','publisher','volume','issue','page','issued','publication_dates','language'])
 // Legacy calls keep their exact request fingerprint, including historical defaults.
@@ -111,6 +112,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
   const latestKey = id => `analysis.latest:${hash(id)}`
   const jobKey = (id, requestId) => `analysis.job:${hash(id)}:${hash(requestId)}`
   const batchKey = (id, requestId, index) => `analysis.batch:${hash([id,requestId])}:${index}`
+  const readingGraph = createReadingGraph({store,kernel,batchKey})
   let admission = false, disposed = false
   const slots = () => Math.max(0, maxConcurrency - flights.size - (admission ? 1 : 0))
 
@@ -505,6 +507,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
       try{return await promise}finally{starts.delete(key)}
     }
     let record=await read(input.id,input.request_id)
+    if(input.action==='paper_analysis_graph')return readingGraph(input,record)
     if(input.action==='paper_analysis_get'){
       const result = await publicRecord(record,input.batch_index)
       if(input.include_raw===true && record?.value?.questionnaire){

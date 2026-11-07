@@ -20,8 +20,10 @@ async function saveResponse(store, record, parsed) {
   const raw = typeof parsed.raw === 'string' ? parsed.raw : ''
   const rawKeys = Array.from({ length: Math.ceil(raw.length / 16000) }, (_, index) => `${key}:raw:${index}`)
   const answerKeys = parsed.answers.map((_, index) => `${key}:answer:${index}`)
+  const graphCounts={}
+  for(const answer of parsed.answers){const row=graphCounts[answer.question_id]||={total:0,valid:0,invalid:0,neutral:0};row.total++;row[answer.valid?'valid':'invalid']++;if(answer.neutral)row.neutral++}
   // 先公布预期清单。中途断电或写失败时，读取端能报告缺片而不是隐藏已写响应。
-  const manifest = await store.put(key, clone({ ...recordValue, status: 'saving', answer_keys: answerKeys, raw_keys: rawKeys, ...(repairKeys.length?{repair_raw_keys:repairKeys,repair_raw_sha256:hash(repairRaw)}:{}),
+  const manifest = await store.put(key, clone({ ...recordValue, status: 'saving', graph_counts:graphCounts, answer_keys: answerKeys, raw_keys: rawKeys, ...(repairKeys.length?{repair_raw_keys:repairKeys,repair_raw_sha256:hash(repairRaw)}:{}),
     raw_sha256: hash(raw), raw_truncated: parsed.raw_truncated === true }), record.revision)
   for(const [index,part] of repairKeys.entries())await store.put(part,{text:repairRaw.slice(index*16000,(index+1)*16000)},0)
   for (const [index, part] of rawKeys.entries()) {
@@ -77,7 +79,7 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
     by_question: Object.fromEntries(ids.map(id => [id, { expected_batches: 0, answered_batches: 0, failed_batches: [], unread_batches: [], valid_answers: 0 }])) }
   let coverage = { read_pages: [], completed_pages: [], blank_pages: [], truncated_pages: [], omitted_pages: [], no_extractable_text_pages: [], empty_markdown_pages: [], characters: 0, full_document: false }
   let cursor, version, expected, model, hasText = false, batchCount = 0, projectionFailures = 0
-  const summary = { answers: 0, valid_answers: 0, invalid_answers: 0, other_answers: 0, projection_limitations: 0, reused_groups: 0, repair_revalidated:0, repair_repaired:0, repair_withdrawn:0, repair_unresolved:0 }
+  const summary = { answers: 0, valid_answers: 0, invalid_answers: 0, other_answers: 0, projection_limitations: 0, graph_budget_omissions: 0, relation_limitations: 0, reused_groups: 0, repair_revalidated:0, repair_repaired:0, repair_withdrawn:0, repair_unresolved:0 }
   let visual, job = input
   const patch = async value => { job = await update(value); return job }
   const warnings = []
@@ -191,9 +193,10 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
       const graph = compileReadingGraph(allAnswers, pack, config)
       compilation = graph.compilation
       if (compilation.truncated) {
-        projectionFailures++
-        if (warnings.length < 30) warnings.push(`第 ${index + 1} 批图谱达到预算上限；未投影的回答仍保留在问题记录中。`)
+        if (warnings.length < 30) warnings.push(`第 ${index + 1} 批摘要图按预算显示部分内容；全部判断可在全文判断图谱中分层展开。`)
       }
+      summary.graph_budget_omissions += compilation.excluded_answers.filter(answer => answer.reason === 'graph-budget-whole-answer-omitted').length
+      summary.relation_limitations += compilation.limitations.length
       summary.projection_limitations += compilation.limitations.length + compilation.excluded_answers.filter(answer => !['neutral-scope-record-no-graph-claim', 'invalid-or-different-questionnaire'].includes(answer.reason)).length
       const { compilation: omitted, ...content } = graph
       if (!content.nodes.length) content.body = '本批阅读回答及未完成项保存在问题记录中；未生成肯定的图谱主张。'
