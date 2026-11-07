@@ -368,3 +368,50 @@ test('synthesis cannot consume evidence whose sources exceed the persisted note 
     assert.equal(result.status, 'partial')
   }
 })
+
+test('missing host analysis service stops after one request instead of failing every question and batch', async t => {
+  const f = await fixture(t)
+  f.response = () => { throw Object.assign(Error('old host interface'), { code: 'PAPER_ANALYSIS_UNAVAILABLE' }) }
+  const result = await f.run()
+  assert.equal(result.status, 'failed')
+  assert.equal(f.calls.length, 1)
+  assert.match(JSON.stringify(result), /后台分析接口不可用/)
+  assert.equal(f.kernel.filter(x => x.action === 'paper_analysis_batch').length, 1)
+})
+
+test('explicit resume reuses complete responses without another model call or duplicate graph draft', async t => {
+  const f = await fixture(t)
+  await f.run()
+  // Simulate a stop after saved batches, before finalization.
+  const keys=await f.store.list({prefix:'analysis.job:'})
+  const key=keys.records[0].key
+  const saved=await f.store.get(key)
+  await f.store.put(key,{...saved.value,status:'cancelled'},saved.revision)
+  const calls=f.calls.length,drafts=f.drafts.size
+  await f.handle({action:'paper_analysis_resume',id:'paper-a',request_id:'run-a',new_request_id:'run-resumed'})
+  await f.handle.wait('paper-a','run-resumed')
+  const result=await f.handle({action:'paper_analysis_get',id:'paper-a',request_id:'run-resumed'})
+  assert.equal(result.status,'complete',JSON.stringify(result))
+  assert.equal(f.calls.length,calls)
+  assert.equal(f.drafts.size,drafts)
+  assert.equal(result.question_summary.reused_groups,groups.length*2)
+  f.modified='changed-paper'
+  await assert.rejects(f.handle({action:'paper_analysis_resume',id:'paper-a',request_id:'run-a',new_request_id:'run-changed'}),{code:'ANALYSIS_SOURCE_CHANGED'})
+})
+
+test('resume after a failed group preserves the first response and calls only unfinished groups', async t => {
+  const f=await fixture(t)
+  const ids=questionIds.slice(0,2)
+  f.response=input=>{
+    if(f.calls.length===2)throw Object.assign(Error('host unavailable'),{code:'PAPER_ANALYSIS_UNAVAILABLE'})
+    return JSON.stringify({answers:input.analysisContext.question_ids.map(question_id=>({question_id,choice:'not_reported',judgment:'本批未报告。',evidence:[]}))})
+  }
+  assert.equal((await f.run({question_ids:ids})).status,'failed')
+  f.response=null
+  await f.handle({action:'paper_analysis_resume',id:'paper-a',request_id:'run-a',new_request_id:'resume-after-failure'})
+  await f.handle.wait('paper-a','resume-after-failure')
+  const result=await f.handle({action:'paper_analysis_get',id:'paper-a'})
+  assert.equal(result.status,'complete',JSON.stringify(result))
+  assert.equal(f.calls.length,5)
+  assert.equal(result.question_summary.reused_groups,1)
+})

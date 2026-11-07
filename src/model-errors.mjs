@@ -32,7 +32,7 @@ export function classifyModelHttpError(provider, status, body) {
 }
 
 export function isFatalModelError(error) {
-  return ['DIRECT_MODEL_QUOTA_EXHAUSTED', 'DIRECT_MODEL_AUTH_ERROR'].includes(error?.code)
+  return ['DIRECT_MODEL_QUOTA_EXHAUSTED', 'DIRECT_MODEL_AUTH_ERROR', 'PAPER_ANALYSIS_UNAVAILABLE', 'PAPER_ANALYSIS_IMAGES_UNSUPPORTED', 'PAPER_ANALYSIS_MODEL_REQUIRED'].includes(error?.code)
 }
 
 /** 截断诊断只携带固定停止原因和计数，不传播供应商正文。 */
@@ -48,6 +48,9 @@ export function safeTruncationDetails(error) {
 }
 
 export function safeModelErrorMessage(code) {
+  if (code === 'PAPER_ANALYSIS_UNAVAILABLE') return '当前 DSH 后台分析接口不可用；已停止，请更新插件后重试。'
+  if (code === 'PAPER_ANALYSIS_IMAGES_UNSUPPORTED') return '当前宿主分析不支持页面图像；已停止，请使用文字分析。'
+  if (code === 'PAPER_ANALYSIS_MODEL_REQUIRED') return '请为这篇论文选择有效的宿主模型；已停止。'
   if (code === 'DIRECT_MODEL_QUOTA_EXHAUSTED') return '模型服务额度已耗尽；本轮停止后续请求。'
   if (code === 'DIRECT_MODEL_AUTH_ERROR') return '模型服务认证失败；本轮停止后续请求。'
   if (code === 'DIRECT_MODEL_RATE_LIMITED') return '模型服务暂时限流。'

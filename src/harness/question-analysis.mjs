@@ -70,7 +70,7 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
     by_question: Object.fromEntries(ids.map(id => [id, { expected_batches: 0, answered_batches: 0, failed_batches: [], unread_batches: [], valid_answers: 0 }])) }
   let coverage = { read_pages: [], completed_pages: [], blank_pages: [], truncated_pages: [], omitted_pages: [], no_extractable_text_pages: [], empty_markdown_pages: [], characters: 0, full_document: false }
   let cursor, version, expected, model, hasText = false, batchCount = 0, projectionFailures = 0
-  const summary = { answers: 0, valid_answers: 0, invalid_answers: 0, other_answers: 0, projection_limitations: 0 }
+  const summary = { answers: 0, valid_answers: 0, invalid_answers: 0, other_answers: 0, projection_limitations: 0, reused_groups: 0 }
   let visual, job = input
   const patch = async value => { job = await update(value); return job }
   const warnings = []
@@ -92,11 +92,12 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
     }
     await patch({ expected_modified: expected, ...(pack.preprocessing ? { preprocessing: pack.preprocessing } : {}), ...(visual ? { visual_coverage: visual } : {}) })
     const questionKeys = [], allAnswers = []
+    let reusedGroups = 0
     let draft, compilation, saveError
     if (pack.sources.length) {
       hasText = true
       if (!model) {
-        const route = await resolveModel(readSignal)
+        const route = input.resume_model || await resolveModel(readSignal)
         signal.throwIfAborted()
         if (typeof route?.provider !== 'string' || !route.provider || typeof route.model !== 'string' || !route.model) throw problem('请为这次分析配置有效模型。')
         model = { provider: route.provider, model: route.model, ...(route.reasoningEffort ? { reasoningEffort: route.reasoningEffort } : {}) }
@@ -117,9 +118,13 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
           const callTimeout = Number.isSafeInteger(modelTimeoutMs) ? modelTimeoutMs
             : Number.isSafeInteger(agent.modelTimeoutMs) ? agent.modelTimeoutMs : 180000
           const callSignal = AbortSignal.any([signal, AbortSignal.timeout(callTimeout)])
-          const raw = await agent({ prompt, ...model, signal: callSignal, ...(pack.images.length ? { images: pack.images } : {}),
+          const saved = input.resume_from ? await readQuestionGroup(store, questionKey(input.id,input.resume_from,index,groupIndex),true) : null
+          const reusable = saved?.raw_complete && saved.raw && !saved.request_error && ['complete','partial'].includes(saved.status)
+          if (saved && (saved.prompt_hash !== hash(prompt) || saved.questionnaire_hash !== config.hash || !isDeepStrictEqual(saved.source_ids,pack.source_ids))) throw Object.assign(problem('恢复时来源或提示已改变，请重新整理。'),{code:'ANALYSIS_SOURCE_CHANGED'})
+          const raw = reusable ? saved.raw : await agent({ prompt, ...model, signal: callSignal, ...(pack.images.length ? { images: pack.images } : {}),
             analysisContext: { id: input.id, request_id: input.request_id, stage: 'batch', batch_index: index, question_ids: questionIds,
               source_ids: [...pack.source_ids], pages: [...pack.coverage.read_pages] } })
+          if(reusable){reusedGroups++;summary.reused_groups++;groupRecord={...groupRecord,value:{...groupRecord.value,reused_from:input.resume_from}}}
           signal.throwIfAborted()
           if (visual) {
             pack.visual_coverage.sent_pages = pack.images.map(image => image.page)
@@ -128,6 +133,7 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
           parsed = parseReadingAnswers(raw, pack, questionIds, config)
         } catch (error) {
           if (signal.aborted) throw error
+          if (error.code === 'ANALYSIS_SOURCE_CHANGED') throw error
           const code = error.code || 'MODEL_REQUEST_FAILED'
           const details = safeTruncationDetails(error)
           requestError = { code, message: isFatalModelError({ code }) || code === 'DIRECT_MODEL_OUTPUT_TRUNCATED'
@@ -168,7 +174,8 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
       if (!content.nodes.length) content.body = '本批阅读回答及未完成项保存在问题记录中；未生成肯定的图谱主张。'
       await patch({ status: 'committing', stage: `保存第 ${index + 1} 批问题回答` })
       try {
-        draft = await kernel({ action: 'knowledge_draft_put', entity: { kind: 'paper', id: input.id }, mode: content.nodes.length ? 'graph' : 'note',
+        const previousBatch = input.resume_from && reusedGroups === groups.length ? (await store.get(batchKey(input.id,input.resume_from,index))).value : null
+        draft = previousBatch?.draft_id && !previousBatch.graph_error ? await kernel({action:'knowledge_draft_get',id:previousBatch.draft_id},signal) : await kernel({ action: 'knowledge_draft_put', entity: { kind: 'paper', id: input.id }, mode: content.nodes.length ? 'graph' : 'note',
           ...content, source_ids: pack.source_ids, request_id: `analysis-${hash([input.id, input.request_id, index])}`, origin: 'llm', model }, signal)
       } catch (error) {
         if (signal.aborted) throw error

@@ -37,6 +37,7 @@ test('question analysis UI renders partial answers and errors as text, never HTM
   const malicious = '<img src=x onerror="alert(1)">'
   const job = {
     id: 'synthetic-paper', request_id: 'synthetic-job', status: 'partial', stage: 'partial review',
+    question_summary: { answers: 3, valid_answers: 2, invalid_answers: 1 },
     coverage: { read_pages: [1], completed_pages: [1], requested_pages: [1, 2], page_count: 2, characters: 50, full_document: false, blank_pages: [], no_extractable_text_pages: [2] },
     question_coverage: { complete: false, by_question: { q1: { answered_batches: 0, expected_batches: 1, failed_batches: [0], unread_batches: [] } } },
     batch_answers: [{ question_id: 'q1', choice: 'method', valid: false, judgment: malicious,
@@ -56,6 +57,8 @@ test('question analysis UI renders partial answers and errors as text, never HTM
   await ui.setAvailable(true); await settle()
   const result = document.getElementById('analysis-result')
   assert.match(result.textContent, /问题尚未全部完成/)
+  assert.match(result.textContent, /已保存 3 项判断 · 2 项通过原文校验 · 1 项待修正/)
+  assert.match(document.getElementById('analysis-status').textContent, /Synthetic group failed/)
   assert.match(result.textContent, /q1：0\/1 批已回答；失败批次 1/)
   assert.match(result.textContent, /引用或格式未通过/)
   assert.match(result.textContent, /Synthetic quote validation failed/)
@@ -92,4 +95,15 @@ test('switching papers during graph-start preparation never starts analysis on t
   const ui=window.PaperAnalysis.create({state,api:async(action,args)=>{calls.push({action,...args});if(block&&args.id==='a')await new Promise(resolve=>{release=resolve;});return {status:'idle'};},persistence:{get:async()=>({auto_analysis:false}),patch:async()=>{},flush:async()=>{}},toast(){}});
   await ui.setAvailable(true);await settle();block=true;const start=ui.startFullGraph();await settle();state.active={id:'b',pdf:true,title:'B'};ui.sync();release();await start;await settle();
   assert.equal(calls.filter(c=>c.action==='paper_analysis_start').length,0);ui.dispose();
+});
+
+test('stopped analysis exposes an explicit resume action with the saved request identity',async()=>{
+  const document=documentFixture(),window={},calls=[];
+  vm.runInNewContext(readFileSync(new URL('../web/paper-analysis.js',import.meta.url),'utf8'),{window,document,setTimeout,clearTimeout,crypto:{randomUUID:()=> 'next-run'}});
+  const state={active:{id:'paper-a',pdf:true,title:'Synthetic'}};
+  const ui=window.PaperAnalysis.create({state,api:async(action,args)=>{calls.push({action,...args});return action==='paper_analysis_resume'?{status:'queued',request_id:'next-run'}:{status:'cancelled',request_id:'old-run',questionnaire:{version:'synthetic'}};},persistence:{get:async()=>({auto_analysis:false}),patch:async()=>{},flush:async()=>{}},toast(){}});
+  await ui.setAvailable(true);await settle();
+  const button=document.getElementById('analysis-resume');assert.ok(button);button.listeners.click();await settle();
+  assert.deepEqual(calls.find(c=>c.action==='paper_analysis_resume'),{action:'paper_analysis_resume',id:'paper-a',request_id:'old-run',new_request_id:'next-run'});
+  assert.equal(calls.some(c=>c.action==='paper_analysis_start'),false);ui.dispose();
 });

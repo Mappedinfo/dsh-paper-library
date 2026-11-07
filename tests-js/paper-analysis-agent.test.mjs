@@ -161,3 +161,19 @@ test('child disposal failure still disposes parent and removes guard', async () 
   await assert.rejects(f.handle(input), error => error.code === 'PAPER_ANALYSIS_CLEANUP_FAILED')
   assert.deepEqual(f.events.slice(-3), ['dispose-child', 'dispose-parent', 'unguard'])
 })
+
+test('host text generation works without the removed subagent service and keeps source bounds', async () => {
+  const calls = []
+  const handle = createPaperAnalysisAgent({ get() { throw Error('No subagent API access expected') } }, {
+    cwd: '/synthetic/library', generate: async request => { calls.push(request); return '```json\n{"answers":[]}\n```' },
+  })
+  assert.deepEqual(JSON.parse(await handle(input)), { answers: [] })
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].provider, input.provider)
+  assert.equal(calls[0].model, input.model)
+  assert.equal(calls[0].reasoningEffort, 'high')
+  assert.ok(calls[0].prompt.endsWith(input.prompt))
+  assert.match(calls[0].prompt, /Do not use tools/)
+  await assert.rejects(handle({ ...input, signal: AbortSignal.abort(Error('cancelled')) }), /cancelled/)
+  assert.equal(calls.length, 1)
+})

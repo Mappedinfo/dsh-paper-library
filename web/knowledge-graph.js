@@ -282,7 +282,8 @@
       host.append(svg);
       if (!viewport) {
         const size = { width: host.clientWidth || 640, height: host.clientHeight || 440 }; viewport = createViewport({ width, height }, size);
-        viewport.setZoom(Math.max(1, Math.min(3, .8 * Math.max(width / size.width, height / size.height))));
+        // 首次载入完整入框；自动放大会把第一行（包括聚焦论文）裁到画布外。
+        viewport.fit();
       }
       applyViewport();
     }

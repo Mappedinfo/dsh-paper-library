@@ -21,7 +21,7 @@ flowchart TB
   B0 -- "是" --> C1["② 自动队列 admission<br/>key analysis.queue:v1<br/>request_id = import 加 id 哈希<br/>已有任务或已有结果则跳过"]
   C1 --> C2["② 持久队列与 drain<br/>最多 2000 条 · 200 KB 以内<br/>并发等于分析服务槽位<br/>同一篇文献内批次串行"]
   C2 --> D1["③ 切批 paper_analysis_batch<br/>每批最多 8 页 · 每页最多 8000 字符<br/>每批最多 24000 字符"]
-  D1 --> D2["③ 隔离 spawn agent<br/>只接收本批文本<br/>工具按生成代次收回"]
+  D1 --> D2["③ 宿主无工具模型调用<br/>只接收本批文本<br/>复用本篇已配置模型"]
   D2 --> D3["③ 知识图谱草稿<br/>knowledge_drafts mode=graph<br/>每批最多 12 节点 · 20 条关系与断言<br/>同时冻结 knowledge_sources 证据快照"]
   D3 --> D4["③ 元数据补齐 analysis_fill<br/>只填空缺字段并记录 field_sources<br/>不臆造作者 · 日期 · DOI"]
   D4 --> D5["③ 阅读笔记草稿<br/>knowledge_drafts mode=note"]

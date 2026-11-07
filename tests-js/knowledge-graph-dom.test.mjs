@@ -31,6 +31,7 @@ test('global graph selects clearly, keeps keyboard and pan/zoom controls, and re
   assert.equal(root.querySelectorAll('.kg-stat-chart').length, 1, 'Unknown citations have a message, not a zero-citation plot');
   assert.match(root.querySelector('.kg-stat-data table').textContent, /年份缺失2/);
   const initial = reader.getViewport().zoom;
+  assert.equal(initial, 1, 'initial graph fits every node instead of clipping the focused paper');
   root.querySelector('[aria-label="放大图谱"]').click(); assert.ok(reader.getViewport().zoom > initial);
   const zoomed = reader.getViewport().zoom; root.querySelector('.kg-node').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   assert.equal(root.querySelectorAll('.kg-node.is-selected').length, 1); assert.equal(root.querySelector('.kg-node.is-selected').getAttribute('aria-pressed'), 'true');

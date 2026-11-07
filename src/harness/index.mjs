@@ -133,11 +133,11 @@ export function apply(ctx, rawConfig = {}) {
       },
     })
     const paperAnalysis = createQueuedPaperAnalysis({store:options.localState,settings,analysis:createPaperAnalysis({store:options.localState,dispatch,paperChat,library:config.library,python:config.python,maxConcurrency:config.analysisConcurrency,reviewProfile:config.reviewProfile,
-      agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens})})})
+      agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens,generate:languageAI})})})
     automaticAnalysis=paperAnalysis
     web.effect(()=>()=>{automaticAnalysis=undefined;paperAnalysis.dispose()},'paper-library: background analysis lifecycle')
     const challengeMining = createChallengeMining({store:options.localState,dispatch,paperChat,library:config.library,python:config.python,
-      agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens})})
+      agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens,generate:languageAI})})
     // LaTeX questions and co-writing reuse the language route and the local state
     // store; proposals hold replacements, never a second copy of the manuscript.
     const research = createLatexResearch({

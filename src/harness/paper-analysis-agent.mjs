@@ -23,22 +23,27 @@ function completeJson(result) {
   return text
 }
 
-/** A native one-shot spawn, owned entirely by this plugin.
- * The temporary parent never receives a prompt and is not the paper/main Agent.
- * Its own native Session receives the child catalog; neither main transcript nor
- * inbox is touched. Native handles remove resident Agents on child-first disposal;
- * their private Session logs remain governed by DSH persistence.
+/** 固定材料的一次完整 JSON 分析。生产入口使用无工具的宿主 LLM 调用，
+ * 不进入论文主对话。旧宿主适配器仍可明确使用隔离 spawn 兼容路径。
  */
-export function createPaperAnalysisAgent(ctx, { cwd, maxOutputTokens = 8192 } = {}) {
+export function createPaperAnalysisAgent(ctx, { cwd, maxOutputTokens = 8192, generate } = {}) {
   if (!isAbsolute(cwd ?? '') || !Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 16384) throw new Error('Paper analysis requires an absolute library path and bounded output tokens')
   const analyze = async ({ prompt, provider, model, reasoningEffort, signal, images } = {}) => {
-    // 原生 spawn 的公开接口接收持久附件引用，但不能绑定已经核验图像能力的
-    // preparedCall。宿主可能把图片转换为纯文字占位符；在持久附件、会话或
-    // 模型调用产生之前明确拒绝，不能把未看图的结果当作多模态分析。
+    // 该适配器仅承诺文字输入；不得把未看图的结果当作多模态分析。
     if (images !== undefined && (!Array.isArray(images) || images.length > 0)) throw fail('当前 DSH 原生分析接口尚不能保证页面图像传给视觉模型。请使用支持图片的独立模型入口，或明确改用纯文字分析。', 'PAPER_ANALYSIS_IMAGES_UNSUPPORTED', 409)
     if (typeof prompt !== 'string' || !prompt.trim() || Buffer.byteLength(prompt) > MAX_PROMPT_BYTES) throw fail('所选材料为空或超过后台分析预算。', 'PAPER_ANALYSIS_INVALID', 400)
     for (const [name, value] of [['provider', provider], ['model', model], ['reasoningEffort', reasoningEffort]]) {
       if ((name !== 'reasoningEffort' || value !== undefined) && (typeof value !== 'string' || !value.trim() || value.length > 200 || /[\x00-\x1f]/.test(value))) throw fail('请选择这篇论文的有效 DSH 模型。', 'PAPER_ANALYSIS_MODEL_REQUIRED', 409)
+    }
+    // 固定来源分析只需要一次无工具模型调用。复用宿主 LLM 路由，避免依赖
+    // 已在新版 DSH 移除的 subagents.start 及子代理策略继承细节。
+    if (typeof generate === 'function') {
+      const deadline = AbortSignal.any([AbortSignal.timeout(120000), ...(signal ? [signal] : [])])
+      deadline.throwIfAborted()
+      const text = await generate({ prompt: `${renderAnalysisAgentPersona()}\n\n${prompt}`, provider, model,
+        ...(reasoningEffort ? { reasoningEffort } : {}), signal: deadline })
+      deadline.throwIfAborted()
+      return completeJson({ stopReason: 'completed', output: [{ type: 'text', text }] })
     }
     const subagents = ctx.get('subagents'), agents = ctx.get('agents'), tools = ctx.get('tools')
     if (!subagents?.list?.().includes('spawn') || typeof subagents.start !== 'function' || typeof agents?.create !== 'function' || typeof agents.withoutInitiator !== 'function' || typeof tools?.guard !== 'function') throw fail('当前 DSH 未加载原生 spawn 子代理或工具隔离服务。')
