@@ -420,3 +420,15 @@ test('paper selection reaches actual PDF validation when external catalog omits 
   const result=await f.chat({action:'chat_context',id:'paper-a',annotation_ids:[],selection:{page:2,text:'Synthetic selected text'}});
   assert.ok(result);
 });
+
+test('selection-only and direct plugin questions auto-save once without inheriting unrelated annotation parents',async t=>{
+  const f=await fixture(t,undefined,true),ensured=await f.chat({action:'chat_ensure',id:'paper-a'}),record=f.stored.get(ensured.sessionId);
+  const append=(type,data)=>{record.events.push({seq:record.events.length,type,data});};
+  append('turn/start',{turn:1});
+  await f.chat({action:'chat_send',id:'paper-a',request_id:'selection-only',annotation_ids:[],selection:{page:2,text:'Selected synthetic text'},question:'Explain this'});
+  append('assistant/message',{message:{content:[{type:'text',text:'A complete answer'}]}});append('turn/end',{reason:{kind:'completed'}});
+  await f.chat({action:'chat_history',id:'paper-a'});assert.equal(f.saves.length,1);assert.deepEqual(f.saves[0].annotation_ids,[]);assert.equal(f.saves[0].page,2);
+  append('turn/start',{turn:2});await f.chat({action:'chat_send',id:'paper-a',request_id:'plain-question',annotation_ids:[],question:'What are the limitations?'});
+  append('assistant/message',{message:{content:[{type:'text',text:'Another complete answer'}]}});append('turn/end',{reason:{kind:'completed'}});
+  await f.chat({action:'chat_history',id:'paper-a'});assert.equal(f.saves.length,2);assert.deepEqual(f.saves[1].annotation_ids,[]);
+});

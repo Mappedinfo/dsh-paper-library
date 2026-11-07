@@ -200,7 +200,9 @@ window.PaperLibraryChat = {
         if (!['user', 'assistant'].includes(message.role) || typeof message.text !== 'string' || remaining <= 0) continue;
         const text = message.text.slice(0, Math.min(6000, remaining)); remaining -= text.length;
         const card = element('article', `paper-chat-message ${message.role}`);
-        card.append(element('header', '', message.role === 'user' ? '你' : 'DSH · AI 回复'), element('p', '', text));
+        const body = element('div', 'paper-markdown');
+        if(window.PaperMarkdown)window.PaperMarkdown.render(body,text);else body.textContent=text;
+        card.append(element('header', '', message.role === 'user' ? '你' : 'DSH · AI 回复'), body);
         for (const reference of (message.references || []).slice(0, 8)) {
           if (!reference.snapshot_id) continue;
           const referencePaper = reference.paperId || chat.paperId;

@@ -314,9 +314,9 @@ class Library(Papers, PdfWrites, AnnotationAccess):
             self.db.execute("INSERT INTO links VALUES(:source,:target,:relation,:note,:provenance,:created) ON CONFLICT(source,target,relation) DO UPDATE SET note=excluded.note", value)
         return value
 
-    def graph(self, id=None, limit=80, offset=0):
+    def graph(self, id=None, limit=80, offset=0, focus_id=None, view="all"):
         from .knowledge_graph import get_graph
-        return get_graph(self, id=id, limit=limit, offset=offset)
+        return get_graph(self, id=id, limit=limit, offset=offset, focus_id=focus_id, view=view)
 
     def feedback_context(self, id, annotation_ids=None):
         item = self.get(id)
@@ -552,7 +552,31 @@ class Library(Papers, PdfWrites, AnnotationAccess):
             if annotation_ids:
                 page = sources[annotation_ids[0]]
             extra = {"kind": "ai-feedback", "model": str(model)[:200], "annotation_ids": annotation_ids, "source_snapshot_ids": source_snapshot_ids, "generated": now(), "source_kind": "dsh-conversation", "source_session_id": source_session_id, "source_message_id": source_message_id}
-            result = self._write_pdf(id, lambda doc: self._add_annotation(doc, page, "note", comment="AI-generated conversation feedback · " + extra["model"] + "\n\n" + text, author="AI · Paper Library", color="#8b9cff", extra=extra))
+            def write_reply(doc):
+                current = self._page(doc, page)
+                x, y = 20, 20
+                if annotation_ids:
+                    parent_page, parent = self._find_annotation(doc, annotation_ids[0])
+                    anchor = self._annotation(parent_page, parent)["rect"]
+                    x, y = max(4, min(anchor[2] + 6, current.rect.width - 24)), max(4, min(anchor[1], current.rect.height - 24))
+                # 保持回复靠近原文，并避开已有便笺图标；一条消息只写一个对象。
+                occupied = [self._annotation(current, note)["rect"] for note in current.annots() or [] if note.type[0] == 0]
+                for _ in range(min(len(occupied) + 1, 100)):
+                    if not any(abs(r[0] - x) < 22 and abs(r[1] - y) < 22 for r in occupied):
+                        break
+                    y += 24
+                    if y > current.rect.height - 24:
+                        y = 20
+                        x = max(4, x - 24)
+                result = self._add_annotation(doc, page, "note", rects=[[x, y, x + 20, y + 20]], comment="AI-generated conversation feedback · " + extra["model"] + "\n\n" + text, author="AI · Paper Library", color="#8b9cff", extra=extra)
+                if annotation_ids:
+                    # 外部 PDF 批注可能没有 /NM；使用已核验的 xref 关联。
+                    parent_page, parent = self._find_annotation(doc, annotation_ids[0])
+                    child = parent_page.load_annot(result["annotation"]["id"])
+                    child.set_irt_xref(parent.xref)
+                    result = {"annotation": self._annotation(parent_page, child)}
+                return result
+            result = self._write_pdf(id, write_reply)
             value = result["annotation"]
             return {**value, "annotation_id": value["id"], "duplicate": False}
 
@@ -629,7 +653,7 @@ def dispatch(request):
             "linked_handwriting_text": ("id", "parent_id", "transcript", "transcription_source", "expected_version", "request_id"),
             "handwriting_get": ("id", "annotation_id"), "handwriting_save": ("id", "annotation_id", "board", "transcript", "transcription_source", "expected_version", "request_id"),
             "annotation_catalog": ("id", "annotation_id"), "annotation_context_exact": ("id", "annotation_refs", "selection", "max_characters"), "companion_excerpt": ("id", "page"),
-            "export_annotations": ("id", "format"), "link": ("source", "target", "relation", "note"), "graph": ("id", "limit", "offset"), "feedback_context": ("id", "annotation_ids"), "save_feedback": ("id", "text", "model", "annotation_ids", "expected_context_hash", "replies"), "feedback": ("id",),
+            "export_annotations": ("id", "format"), "link": ("source", "target", "relation", "note"), "graph": ("id", "limit", "offset", "focus_id", "view"), "feedback_context": ("id", "annotation_ids"), "save_feedback": ("id", "text", "model", "annotation_ids", "expected_context_hash", "replies"), "feedback": ("id",),
             "save_conversation_feedback": ("id", "text", "model", "annotation_ids", "source_session_id", "source_message_id", "page", "source_snapshot_ids"),
         }
         if action not in actions:

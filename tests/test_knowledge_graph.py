@@ -225,3 +225,48 @@ def test_global_graph_pages_catalog_without_opening_pdf(catalog, monkeypatch):
     for offset in (-1, True, 10000001):
         with pytest.raises(ValueError):
             get_graph(library, offset=offset)
+
+
+def test_citation_mode_uses_directed_links_and_exact_saved_reference_dois(catalog):
+    library, (first, second) = catalog
+    # Metadata references are factual saved input, not inferred similarity.
+    library.update(second['id'], {'DOI': '10.0000/synthetic-target'})
+    library.update(first['id'], {'reference': [{'DOI': '10.0000/synthetic-target'}]})
+    library.link(first['id'], second['id'], 'supports', 'not a citation')
+    graph = get_graph(library, view='citations')
+    assert all(node['type'] == 'paper' for node in graph['nodes'])
+    assert len(graph['edges']) == 1
+    assert (graph['edges'][0]['source'], graph['edges'][0]['target'], graph['edges'][0]['relation']) == (first['id'], second['id'], 'cites')
+    assert graph['edges'][0]['provenance'] == 'catalog-reference'
+
+
+def test_focus_paper_outside_catalog_window_keeps_its_relations(catalog):
+    library, (first, second) = catalog
+    node = put_node(library, first)
+    graph = get_graph(library, offset=1, limit=10, focus_id=first['id'])
+    assert graph['scope']['focus_id'] == first['id']
+    assert graph['scope']['paper_count'] == 1
+    assert any(n['id'] == node['id'] for n in graph['nodes'])
+    assert graph['nodes'][0]['id'] == first['id']
+
+
+def test_saved_ai_analysis_is_projected_with_evidence_and_review_status(catalog):
+    from dsh_paper_library import library_knowledge as knowledge
+    library, (first, _) = catalog
+    def call(action, **args):
+        return knowledge.dispatch(library, {'action': action, **args})
+    entity = {'kind': 'paper', 'id': first['id']}
+    source = call('knowledge_source_put', entity=entity, kind='user-text', text='Synthetic method uses twelve samples.', locator={'page': 2})
+    draft = call('knowledge_draft_put', entity=entity, origin='llm', request_id='synthetic-analysis', source_ids=[source['id']], nodes=[
+        {'id': 'method', 'type': 'method', 'label': 'Synthetic method'},
+        {'id': 'quote', 'type': 'evidence', 'label': 'Twelve samples', 'source_id': source['id'], 'quote': 'twelve samples'},
+        {'id': 'claim', 'type': 'claim', 'label': 'Synthetic claim'},
+    ], edges=[{'subject': 'paper:' + first['id'], 'relation': 'uses', 'object': 'method:method'}], assertions=[{'subject': 'evidence:quote', 'relation': 'supports', 'object': 'claim:claim'}])
+    graph = get_graph(library, first['id'])
+    projected = [n for n in graph['nodes'] if n.get('provenance') == 'ai-analysis']
+    assert len(projected) == 3 and all(n['review_status'] == 'needs-review' and not n['editable'] for n in projected)
+    evidence = next(n for n in projected if n['type'] == 'evidence')
+    assert evidence['evidence']['page'] == 2 and evidence['evidence']['quote'] == 'twelve samples'
+    assert any(e['relation'] == 'supports' for e in graph['edges'])
+    call('knowledge_draft_review', id=draft['id'], decision='rejected', reviewed_by='user', expected_revision=draft['revision'])
+    assert not any(n.get('provenance') == 'ai-analysis' for n in get_graph(library, first['id'])['nodes'])

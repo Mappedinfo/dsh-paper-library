@@ -109,3 +109,11 @@ body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-
 .paper-chat-meta #paper-chat-status:not(:empty)::before{content:'· ';color:var(--muted)}
 .paper-chat-meta #paper-chat-status.error{flex-basis:100%;font-size:12px}
 .paper-chat-heading>#paper-chat-open{flex:none;white-space:nowrap;padding:4px 6px}
+
+.paper-markdown{white-space:normal;overflow-wrap:anywhere;line-height:1.65}
+.paper-markdown p{white-space:normal;margin:.5em 0}.paper-markdown p:first-child{margin-top:0}
+.paper-markdown pre{white-space:pre;overflow:auto;padding:10px;background:var(--bg);border:1px solid var(--line);border-radius:4px}
+.paper-markdown blockquote{margin:.6em 0;padding-left:12px;border-left:3px solid var(--line)}
+.paper-markdown ul,.paper-markdown ol{padding-left:24px}.paper-markdown table{display:block;max-width:100%;overflow:auto;border-collapse:collapse}
+.paper-markdown td,.paper-markdown th{padding:5px 8px;border:1px solid var(--line)}
+.paper-markdown h1,.paper-markdown h2,.paper-markdown h3{font-size:1.12em;margin:1em 0 .4em}

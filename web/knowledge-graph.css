@@ -90,3 +90,7 @@
 .kg-stat-data caption { text-align:left;margin-bottom:8px;color:var(--muted,#616c65); }
 @media(prefers-reduced-motion:reduce) { .knowledge-graph * { scroll-behavior:auto;transition:none;animation:none; } }
 @media(max-width:600px) { .kg-toolbar h3 { font-size:15px; } .kg-relations-heading { align-items:flex-start; flex-wrap:wrap; } .kg-dialog { padding:14px; } }
+
+.kg-node.is-muted{opacity:.18}.kg-node.is-highlighted circle{stroke:var(--ink);stroke-width:2px}.kg-edge{fill:none}.kg-edge.is-muted{opacity:.12}.kg-edge.is-selected{opacity:1;stroke-width:2.5px}
+
+.kg-node.is-ai-draft circle:not(.kg-selection-ring){stroke-dasharray:3 2}.kg-type-observation,.kg-type-figure,.kg-type-formula{--kg-node:var(--kg-evidence)}.kg-type-question,.kg-type-gap{--kg-node:var(--kg-claim)}.kg-type-metric,.kg-type-experiment,.kg-type-task{--kg-node:var(--kg-method)}.kg-type-topic,.kg-type-idea,.kg-type-project,.kg-type-expert{--kg-node:var(--kg-concept)}

@@ -38,3 +38,5 @@ The APA style and en-US locale are supplied by the [Citation Style Language proj
 `vendor/csl/manifest.json` records retrieval date, upstream URLs and exact SHA-256 hashes. `scripts/fetch-csl.mjs` refreshes assets explicitly; tests verify recorded hashes. Lockfiles pin installed package versions. Third-party Python/Node runtime packages are installed separately, not vendored in this source repository. Preserve their full notices when distributing them.
 
 The bundled `paper-library-fetch` is adapted for this plugin from the user's canonical `paper-fetch-skill`. Its source revision, retained behavior and independent-library changes are recorded in [the skill provenance manifest](docs/upstream-manifest.md).
+
+对话 Markdown 使用 [Marked](https://marked.js.org/)（MIT）与 [DOMPurify](https://github.com/cure53/DOMPurify)（Apache-2.0／MPL-2.0 双许可）；原始许可保留在 `licenses/markdown/`，构建保留许可注释。

@@ -15,7 +15,7 @@ export function annotationReplySources(snapshot) {
     if(source){if(references.size<4||references.has(source.snapshot_id))references.set(source.snapshot_id,source);continue}
     if(event.type==='assistant/message'&&event.data.interrupted!==true){
       const groups=[...references.values()],ids=[...new Set(groups.flatMap(source=>source.annotation_refs.map(ref=>ref.id)))]
-      if(ids.length&&ids.length<=1000&&new Set(groups.map(source=>source.paperId)).size===1){
+      if(groups.length&&ids.length<=1000&&new Set(groups.map(source=>source.paperId)).size===1){
         const reply={paperId:groups[0].paperId,annotation_ids:ids,source_snapshot_ids:groups.map(source=>source.snapshot_id),completed:false}
         replies.set(String(event.seq),reply);turnReplies.push(reply)
       }

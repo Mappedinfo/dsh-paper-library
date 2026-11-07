@@ -448,7 +448,7 @@ function annotationThreads(annotations) {
   const notes=list.filter(note=>!ai(note)&&!['handwriting-note','linked-handwriting','linked-handwriting-transcript'].includes(note.kind)),replies=new Map(notes.map(note=>[note.id,[]])),unlinked=[];
   for(const reply of list.filter(ai)){
     const declared=(Array.isArray(reply.annotation_ids)&&reply.annotation_ids.length?reply.annotation_ids:[reply.reply_to]).filter(id=>typeof id==='string'&&replies.has(id));
-    const parents=declared.length?(reply.source_kind==='dsh-conversation'?declared:[declared[0]]):[];
+    const anchor=replies.has(reply.reply_to)?reply.reply_to:declared[0],parents=anchor?[anchor]:[];
     if(!parents.length)unlinked.push(reply);else for(const id of parents)replies.get(id).push(reply);
   }
   return {notes,replies,unlinked};
@@ -463,7 +463,7 @@ function renderAnnotations() {
     details.append(el('p','small muted',displayDate(reply.generated||reply.created)));
     let body=(reply.comment||reply.content||reply.text||'').replace(/^AI-generated (?:conversation )?feedback[^\n]*\n\n/,'');
     if(reply.source_kind==='annotation-translation')body=body.replace(/\n\nAI 翻译 · [^\n]*\s*$/,'');
-    details.append(el('p','annotation-reply-body',body));
+    const rendered=el('div','annotation-reply-body paper-markdown');if(window.PaperMarkdown)window.PaperMarkdown.render(rendered,body);else rendered.textContent=body;details.append(rendered);
     const actions=el('div','annotation-actions'),remove=el('button','button subtle delete-note','删除回复');remove.dataset.noteAction='delete';actions.append(remove);details.append(actions);return details;
   }
   for (const note of notes.slice(state.noteOffset, state.noteOffset + 40)) {
@@ -1421,9 +1421,9 @@ async function openGraphSource(id,page){
 }
 const libraryGraphUI=window.PaperKnowledgeGraph?.create({root:libraryGraphRoot,scope:'library',api,getPaper:()=>null,openPaper:id=>{void closeLibraryGraph().then(closed=>{if(closed)void openPaper(id);});},navigatePaper:openGraphSource,toast});
 libraryGraphDialog.addEventListener('close',()=>{if(!libraryGraphDialog.open){graphWindowExpanded=false;graphWasFullscreen=false;syncGraphFullscreen();libraryGraphUI?.clear();}});
-function openLibraryGraph(){if(!libraryGraphDialog.open)libraryGraphDialog.showModal();void libraryGraphUI?.load();}
+function openLibraryGraph(options={}){if(!libraryGraphDialog.open)libraryGraphDialog.showModal();void libraryGraphUI?.focusPaper(options.focus_id||null);}
 const libraryGraphOpen=el('button','button subtle','全库图谱');libraryGraphOpen.id='library-graph-open';libraryGraphOpen.type='button';libraryGraphOpen.title='跨文献浏览知识图谱';libraryGraphOpen.addEventListener('click',openLibraryGraph);document.querySelector('.topbar-actions').prepend(libraryGraphOpen);
-knowledgeGraphUI = window.PaperKnowledgeGraph?.create({root:$('graph-tab'),api,getPaper:()=>state.active,onOpenLibrary:openLibraryGraph,openPaper,navigatePage:async page=>{const id=state.active?.id,ticket=state.itemTicket;await switchTab('reader');if(state.active?.id===id&&state.itemTicket===ticket)await requestPage(page);},toast,onAddToBoard:node=>void boardUI?.addGraphNode(node.type==='paper'?{kind:'paper',label:node.label,paper:{id:node.paper_id||node.id,title:node.label}}:{kind:'concept',label:node.label})});
+knowledgeGraphUI = window.PaperKnowledgeGraph?.create({root:$('graph-tab'),api,getPaper:()=>state.active,onOpenLibrary:openLibraryGraph,onAnalyze:()=>analysisUI?.startFullGraph(),openPaper,navigatePage:async page=>{const id=state.active?.id,ticket=state.itemTicket;await switchTab('reader');if(state.active?.id===id&&state.itemTicket===ticket)await requestPage(page);},toast,onAddToBoard:node=>void boardUI?.addGraphNode(node.type==='paper'?{kind:'paper',label:node.label,paper:{id:node.paper_id||node.id,title:node.label}}:{kind:'concept',label:node.label})});
 paperChatUI = window.PaperLibraryChat?.create({ api, toast, persistence, getPaper: () => state.active, getContext: () => state.harnessContext,
   getAnnotations: () => state.annotations, getLibrary: () => state.library,
   navigate: switchTab, navigateReference: (paperId, page) => openReferencedPaper({ paperId, page }), changed: publishReaderState,
@@ -1489,7 +1489,7 @@ if(languageUI){
 resourceUI = window.ResourceLibrary?.create({state,api,persistence,toast,loadList,openPaper,workbench:()=>workbenchUI,readingShell:()=>readingShell,knowledge:()=>knowledgeUI,prepare:()=>{publishReaderState();readerStateReady=false;readerPaperId=null;++state.itemTicket;state.pageWanted=null;clearPage();paperChatUI?.visible(false);readingPanels?.close('chat');readingPanels?.close('metadata');readingPanels?.setReadingActive(false);void languageUI?.paperChanged(null);},changed:()=>{renderList();readingShell?.sync();resourceUI?.sync();}});
 knowledgeUI = window.LibraryKnowledge?.create({state,api,persistence,toast,getSelection:()=>state.selection,getAnnotations:()=>state.annotations,openPaper,readingPanels:()=>readingPanels,resource:()=>resourceUI});
 challengeUI = window.ChallengeMining?.create({state,api,toast});
-analysisUI = window.PaperAnalysis?.create({state,api,persistence,toast,openKnowledge:()=>knowledgeUI?.show(state.active),metadataChanged:async id=>{const item=await api('get',{id});if(state.active?.id===id){state.active=item;renderPaperHeader();}await loadList();},prepareChat:async(text,id)=>{
+analysisUI = window.PaperAnalysis?.create({state,api,persistence,toast,graphChanged:async id=>{if(state.active?.id===id)await knowledgeGraphUI?.reload();if(libraryGraphDialog.open)await libraryGraphUI?.reload();},openKnowledge:()=>knowledgeUI?.show(state.active),metadataChanged:async id=>{const item=await api('get',{id});if(state.active?.id===id){state.active=item;renderPaperHeader();}await loadList();},prepareChat:async(text,id)=>{
   if(state.active?.id!==id)throw new Error('请先返回这条整理结果所属的论文。');
   await switchTab('conversation');
   if(state.active?.id!==id||readerPaperId!==id||!paperChatUI||$('paper-chat-input').disabled)throw new Error('论文对话草稿尚未恢复，请稍后重试。');

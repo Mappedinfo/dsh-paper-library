@@ -41,6 +41,7 @@ await build({
   loader: { '.aff': 'text', '.dic': 'text' },
   alias: Object.fromEntries(['aff', 'dic'].map(extension => [`dictionary-en/index.${extension}`, join(dirname(fileURLToPath(import.meta.resolve('dictionary-en'))), `index.${extension}`)])),
 })
+await build({ entryPoints: [new URL('../src/client/markdown.mjs', import.meta.url).pathname], outfile: new URL('../lib/paper-markdown.js', import.meta.url).pathname, bundle: true, format: 'iife', platform: 'browser', target: 'es2022', minify: true, legalComments: 'inline' })
 await buildSlides()
 await buildPaperFlow()
 console.log('Built Paper Library client, LaTeX editor and PlainDeck slides, plus the paper flow workbench. Host entry remains native ESM.')

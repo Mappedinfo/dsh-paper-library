@@ -145,14 +145,14 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
     if(!text||text.length>28000)throw new Error('该回复为空或超过 PDF 批注保存上限。')
     const association=annotationReplySources(snapshot).get(messageId)
     if(association&&association.paperId!==paper.item.id)throw new Error('回复引用属于另一篇论文。')
-    const verified=[]
-    for(const id of association?.source_snapshot_ids||[]){const frozen=await snapshots.load(id,{paperId:paper.item.id,sessionId:paper.sessionId});verified.push(...frozen.annotation_refs.map(ref=>ref.id))}
+    const verified=[];let sourcePage=1
+    for(const id of association?.source_snapshot_ids||[]){const frozen=await snapshots.load(id,{paperId:paper.item.id,sessionId:paper.sessionId});verified.push(...frozen.annotation_refs.map(ref=>ref.id));sourcePage=frozen.annotation_refs[0]?.page||frozen.selection?.page||sourcePage}
     if(association&&JSON.stringify([...new Set(verified)])!==JSON.stringify(association.annotation_ids))throw new Error('回复引用记录与原始快照不一致，暂不关联批注。')
     const attached=ctx.sessions.get(paper.sessionId)
     if(attached&&await ctx.sessions.flush(attached)!==true)throw new Error('DSH 尚未确认回复已保存，暂不写入 PDF。')
     let usedModel
     for(const row of snapshot.records)if(row.type==='event'&&row.event.seq<=event.seq&&row.event.type==='request/header')usedModel=modelOf(row.event.data.header?.config)
-    return core({action:'save_conversation_feedback',id:paper.item.id,text,model:usedModel?`${usedModel.provider}/${usedModel.model}`:'DSH · model not available in this history window',annotation_ids:association?.annotation_ids||[],source_snapshot_ids:association?.source_snapshot_ids||[],source_session_id:paper.sessionId,source_message_id:messageId,page:1},{library,python,signal})
+    return core({action:'save_conversation_feedback',id:paper.item.id,text,model:usedModel?`${usedModel.provider}/${usedModel.model}`:'DSH · model not available in this history window',annotation_ids:association?.annotation_ids||[],source_snapshot_ids:association?.source_snapshot_ids||[],source_session_id:paper.sessionId,source_message_id:messageId,page:sourcePage},{library,python,signal})
   }
 
   async function automaticReplies(paper,snapshot,signal) {

@@ -52,3 +52,34 @@ test('global graph selects clearly, keeps keyboard and pan/zoom controls, and re
   reader.clear(); assert.equal(root.querySelector('.kg-statistics').getAttribute('aria-busy'), 'false');
   dom.window.close();
 });
+
+test('paper focus highlights its nodes in the global graph; clearing focus and citation mode have visible effects', { skip: !JSDOM }, async () => {
+  const dom = new JSDOM('<div id="graph"></div>', {runScripts:'outside-only',url:'http://synthetic.invalid/'});
+  const {window}=dom,root=window.document.getElementById('graph'),calls=[];
+  window.eval(source);
+  const nodes=[{id:'a',paper_id:'a',type:'paper',label:'Paper A'},{id:'b',paper_id:'b',type:'paper',label:'Paper B'},{id:'author',paper_id:'a',type:'author',label:'Synthetic Author'},{id:'c',paper_id:'c',type:'paper',label:'Paper C'}];
+  const edges=[{id:'author-edge',paper_id:'a',source:'a',target:'author',relation:'authored_by'},{id:'citation',paper_id:'a',source:'a',target:'b',relation:'cites'}];
+  const ui=window.PaperKnowledgeGraph.create({root,scope:'library',getPaper:()=>null,api:async(action,args)=>{if(action==='graph_statistics')return statistics();calls.push(plain(args));return {nodes,edges,scope:{paper_count:3,total_papers:3}};}});
+  await ui.focusPaper('a');
+  assert.equal(calls[0].focus_id,'a');
+  assert.equal(root.querySelectorAll('.kg-node.is-muted').length,1);
+  assert.equal(root.querySelectorAll('.kg-node.is-highlighted').length,3);
+  assert.equal(root.querySelector('[data-kg="reset"]').disabled,false);
+  root.querySelector('[data-kg="reset"]').click();
+  assert.equal(root.querySelectorAll('.kg-node.is-muted').length,0);
+  assert.equal(root.querySelector('[data-kg="reset"]').disabled,true);
+  const mode=root.querySelector('[data-kg="mode"]');mode.value='citations';mode.dispatchEvent(new window.Event('change'));
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(calls.at(-1).view,'citations');assert.equal(root.querySelectorAll('.kg-node').length,3);assert.equal(root.querySelectorAll('.kg-edge').length,1);
+  assert.equal(root.querySelectorAll('.kg-relation').length,1);assert.match(root.querySelector('.kg-relation').textContent,/引用/);
+  dom.window.close();
+});
+
+test('paper graph exposes explicit full-text analysis and passes its identity to the global view', {skip:!JSDOM}, async()=>{
+  const dom=new JSDOM('<div id="graph"></div>',{runScripts:'outside-only'}),{window}=dom,root=window.document.getElementById('graph');window.eval(source);
+  let analyzed=0,opened;
+  const ui=window.PaperKnowledgeGraph.create({root,getPaper:()=>({id:'paper-a'}),api:async()=>({nodes:[],edges:[]}),onAnalyze:async()=>{analyzed++;},onOpenLibrary:value=>{opened=plain(value);}});
+  await ui.load();root.querySelector('[data-kg="analyze"]').click();await new Promise(resolve=>setImmediate(resolve));assert.equal(analyzed,1);
+  [...root.querySelectorAll('button')].find(b=>b.textContent==='查看全库图谱').click();assert.deepEqual(opened,{focus_id:'paper-a'});
+  dom.window.close();
+});

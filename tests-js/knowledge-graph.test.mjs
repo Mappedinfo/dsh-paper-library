@@ -35,10 +35,10 @@ test('global graph loads a bounded catalog window without requiring an active pa
   const text=await readFile(new URL('../web/knowledge-graph.js',import.meta.url),'utf8');
   const load=text.slice(text.indexOf('    async function load('),text.indexOf('    function closeEditor('));
   const calls=[],messages=[];
-  const scope={libraryScope:true,revision:0,paperId:null,selected:null,edgePage:0,graph:{},getPaper:()=>null,closeEditor(){},render(){},loadStatistics(){},status:value=>messages.push(value),catalogPrevious:{},catalogNext:{},
+  const scope={graphMode:{value:'all'},focusPaperId:null,libraryScope:true,revision:0,paperId:null,selected:null,edgePage:0,graph:{},getPaper:()=>null,closeEditor(){},render(){},loadStatistics(){},status:value=>messages.push(value),catalogPrevious:{},catalogNext:{},
     api:async(action,args)=>{calls.push({action,...args});return {nodes:[],edges:[],scope:{paper_count:5,total_papers:45,previous_offset:0,next_offset:null},truncated:true};}};
   vm.createContext(scope);vm.runInContext(load,scope);await scope.load(null,40);
-  assert.deepEqual(calls,[{action:'graph',offset:40,limit:100}]);
+  assert.deepEqual(calls,[{action:'graph',offset:40,view:'all',limit:100}]);
   assert.equal(scope.catalogPrevious.disabled,false);assert.equal(scope.catalogNext.disabled,true);
   assert.match(messages.at(-1),/41–45 \/ 45/);
 });
@@ -47,7 +47,7 @@ test('late paper graph results cannot replace another paper', async () => {
   const text=await readFile(new URL('../web/knowledge-graph.js',import.meta.url),'utf8');
   const load=text.slice(text.indexOf('    async function load('),text.indexOf('    function closeEditor('));
   let resolve;const response=new Promise(yes=>resolve=yes),current={id:'first'};
-  const scope={libraryScope:false,revision:0,paperId:null,selected:null,edgePage:0,graph:{},getPaper:()=>current,closeEditor(){},render(){},status(){},catalogPrevious:{},catalogNext:{},api:()=>response};
+  const scope={graphMode:{value:'all'},focusPaperId:null,libraryScope:false,revision:0,paperId:null,selected:null,edgePage:0,graph:{},getPaper:()=>current,closeEditor(){},render(){},status(){},catalogPrevious:{},catalogNext:{},api:()=>response};
   vm.createContext(scope);vm.runInContext(load,scope);const pending=scope.load(current);current.id='second';resolve({nodes:[{id:'first'}],edges:[]});await pending;
   assert.equal(scope.graph.nodes.length,0);
 });

@@ -249,8 +249,61 @@ def _active(library, paper_id):
         return None
 
 
-def get_graph(library, id=None, limit=100, offset=0):
+def _draft_projection(library, paper_id):
+    """投影已保存、有来源的分析草稿；不读 PDF、不调用模型、不自动核准。"""
+    if not library.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_drafts'").fetchone():
+        return [], [], False
+    rows = library.db.execute("SELECT payload FROM knowledge_drafts WHERE entity_kind='paper' AND entity_id=? AND status!='rejected' AND json_array_length(payload,'$.nodes')>0 ORDER BY created DESC,id DESC LIMIT 21", (paper_id,)).fetchall()
+    nodes, edges = [], []
+    for row in rows[:20]:
+        draft = json.loads(row["payload"])
+        mapping = {f"{node['type']}:{node['id']}": _identifier("analysis", draft["id"], node["type"], node["id"]) for node in draft.get("nodes", [])}
+        mapping[f"paper:{paper_id}"] = paper_id
+        sources = {}
+        for source_id in draft.get("source_ids", [])[:40]:
+            source = library.db.execute("SELECT payload FROM knowledge_sources WHERE id=? AND entity_kind='paper' AND entity_id=?", (source_id, paper_id)).fetchone()
+            if source:
+                sources[source_id] = json.loads(source[0])
+        by_id = {f"{node['type']}:{node['id']}": node for node in draft.get("nodes", [])}
+        provenance = "ai-analysis" if draft.get("origin") == "llm" else "user-asserted"
+        common = {"paper_id": paper_id, "editable": False, "provenance": provenance, "review_status": draft["status"], "draft_id": draft["id"]}
+        def evidence(value):
+            support = by_id.get(value.get("source_node"), value)
+            source = sources.get(support.get("source_id"), {})
+            return {"page": source.get("locator", {}).get("page"), "quote": support.get("quote", ""), "note": value.get("surface", ""), "source": support.get("source_id", draft["id"])}
+        for node in draft.get("nodes", []):
+            node_id = mapping[f"{node['type']}:{node['id']}"]
+            nodes.append({**common, "id": node_id, "type": node["type"], "label": node["label"][:500], "description": "\n".join(f"{k}: {v}" for k, v in node.get("fields", {}).items())[:4000], "evidence": evidence(node)})
+            edges.append({**common, "id": _identifier("analysis-contains", node_id), "source": paper_id, "target": node_id, "relation": "contains", "evidence": evidence(node)})
+        for edge in draft.get("edges", []) + draft.get("assertions", []):
+            source, target = mapping.get(edge["subject"]), mapping.get(edge["object"])
+            if source and target:
+                edges.append({**common, "id": _identifier("analysis-edge", draft["id"], edge["id"]), "source": source, "target": target, "relation": edge["relation"], "evidence": evidence(edge)})
+    return nodes, edges, len(rows) > 20
+
+
+def _reference_links(library, item):
+    """仅以已保存参考文献的精确 DOI 匹配库内论文，不将共同作者视为引用。"""
+    refs = item.get("reference", item.get("crossref", {}).get("reference", []) if isinstance(item.get("crossref"), dict) else [])
+    if not isinstance(refs, list):
+        return []
+    result = []
+    for ref in refs[:200]:
+        if not isinstance(ref, dict):
+            continue
+        doi = str(ref.get("DOI", ref.get("doi", ""))).strip().lower().removeprefix("https://doi.org/")
+        if not doi.startswith("10.") or len(doi) > 300:
+            continue
+        matches = library.db.execute("SELECT id FROM papers WHERE lower(json_extract(metadata,'$.DOI'))=? AND NOT EXISTS(SELECT 1 FROM paper_archive WHERE paper_id=papers.id) LIMIT 2", (doi,)).fetchall()
+        if len(matches) == 1 and matches[0]["id"] != item["id"]:
+            result.append({"source": item["id"], "target": matches[0]["id"], "relation": "cites", "note": "已保存参考文献 DOI: " + doi, "provenance": "catalog-reference"})
+    return result
+
+
+def get_graph(library, id=None, limit=100, offset=0, focus_id=None, view="all"):
     _schema(library)
+    if view not in {"all", "citations"}:
+        raise ValueError("Graph view must be all or citations")
     if isinstance(limit, bool):
         raise ValueError("Graph limit must be an integer")
     try:
@@ -266,6 +319,10 @@ def get_graph(library, id=None, limit=100, offset=0):
         # The global view is deliberately a bounded catalog window.
         listing = library.list(limit=min(limit, 40), offset=offset)
         items = listing["items"]
+    window_count = len(items)
+    if focus_id and not id:
+        focus = library.get(focus_id)
+        items = [focus] + [item for item in items if item["id"] != focus_id]
     nodes, edges, seen = [], [], set()
     truncated = bool(not id and listing["total"] > len(items))
     warnings = []
@@ -308,23 +365,32 @@ def get_graph(library, id=None, limit=100, offset=0):
                      "editable": False, "provenance": "catalog-metadata", "evidence": {"page": None, "source": "title"}})
     for item in items:
         paper_id = item["id"]
-        rows = library.db.execute("SELECT * FROM knowledge_nodes WHERE paper_id=? ORDER BY created,id LIMIT ?", (paper_id, limit + 1)).fetchall()
-        truncated |= len(rows) > limit
-        for row in rows[:limit]:
-            node = _node(row)
-            if append_node(node):
-                append_edge({"id": _identifier("contains", paper_id, node["id"]), "paper_id": paper_id,
-                             "source": paper_id, "target": node["id"], "relation": "contains", "editable": False,
-                             "provenance": "user-asserted", "evidence": node["evidence"]})
-        derived_nodes, derived_edges, clipped = _metadata_projection(item)
-        truncated |= clipped
-        for node in derived_nodes:
-            append_node(node)
-        for edge in derived_edges:
-            append_edge(edge)
+        if view == "all":
+            rows = library.db.execute("SELECT * FROM knowledge_nodes WHERE paper_id=? ORDER BY created,id LIMIT ?", (paper_id, limit + 1)).fetchall()
+            truncated |= len(rows) > limit
+            for row in rows[:limit]:
+                node = _node(row)
+                if append_node(node):
+                    append_edge({"id": _identifier("contains", paper_id, node["id"]), "paper_id": paper_id,
+                                 "source": paper_id, "target": node["id"], "relation": "contains", "editable": False,
+                                 "provenance": "user-asserted", "evidence": node["evidence"]})
+            analysis_nodes, analysis_edges, clipped = _draft_projection(library, paper_id) if len(nodes) < limit else ([], [], True)
+            truncated |= clipped
+            for node in analysis_nodes:
+                append_node(node)
+            for edge in analysis_edges:
+                append_edge(edge)
+            derived_nodes, derived_edges, clipped = _metadata_projection(item)
+            truncated |= clipped
+            for node in derived_nodes:
+                append_node(node)
+            for edge in derived_edges:
+                append_edge(edge)
         links = library.db.execute("SELECT * FROM links WHERE source=? OR target=? ORDER BY created,source,target LIMIT ?", (paper_id, paper_id, MAX_EDGES + 1)).fetchall()
         truncated |= len(links) > MAX_EDGES
-        for row in links[:MAX_EDGES]:
+        for row in [dict(row) for row in links[:MAX_EDGES]] + _reference_links(library, item):
+            if view == "citations" and row["relation"] != "cites":
+                continue
             other_id = row["target"] if row["source"] == paper_id else row["source"]
             if other_id not in seen:
                 other = _active(library, other_id)
@@ -338,16 +404,17 @@ def get_graph(library, id=None, limit=100, offset=0):
         stored_edges = library.db.execute("SELECT * FROM knowledge_edges WHERE paper_id=? ORDER BY created,id LIMIT ?", (paper_id, MAX_EDGES + 1)).fetchall()
         truncated |= len(stored_edges) > MAX_EDGES
         for row in stored_edges[:MAX_EDGES]:
-            append_edge(_edge(row))
+            if view == "all" or row["relation"] == "cites" and all(any(n["id"] == end and n["type"] == "paper" for n in nodes) for end in (row["source"], row["target"])):
+                append_edge(_edge(row))
     unique_edges = list({edge["id"]: edge for edge in edges}.values())
     if truncated:
         warnings.append("当前图谱只显示部分节点或关系；缩小范围或分别查看相关论文。")
     return {"nodes": nodes, "edges": unique_edges, "truncated": truncated, "warnings": warnings,
-            "scope": {"paper_id": id, "max_nodes": limit, "max_edges": MAX_EDGES,
-                      **({"paper_offset": offset, "paper_count": len(items), "total_papers": listing["total"],
-                          "next_offset": offset + len(items) if offset + len(items) < listing["total"] else None,
+            "scope": {"paper_id": id, "focus_id": focus_id, "view": view, "max_nodes": limit, "max_edges": MAX_EDGES,
+                      **({"paper_offset": offset, "paper_count": window_count, "total_papers": listing["total"],
+                          "next_offset": offset + window_count if offset + window_count < listing["total"] else None,
                           "previous_offset": max(0, offset - min(limit, 40)) if offset else None} if not id else {})},
-            "semantics": "Reader-authored assertions and catalog metadata; no automatic scientific inference or person identity merging",
+            "semantics": "Catalog metadata, reader assertions and explicitly labeled saved AI analysis drafts; no person identity merging",
             "node_types": list(NODE_TYPES), "relations": list(RELATIONS)}
 
 

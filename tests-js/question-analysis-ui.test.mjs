@@ -72,3 +72,24 @@ test('question analysis UI renders partial answers and errors as text, never HTM
   assert.ok(dynamicElements.every(element => element.innerHTML === ''), 'no answer or error content was assigned through innerHTML')
   ui.dispose()
 })
+
+test('graph entry starts explicit full-document analysis and refreshes the drawing from saved batches',async()=>{
+  const document=documentFixture(),window={},calls=[],refreshed=[];
+  vm.runInNewContext(readFileSync(new URL('../web/paper-analysis.js',import.meta.url),'utf8'),{window,document,setTimeout,clearTimeout,crypto:{randomUUID:()=> 'synthetic-graph'}});
+  const state={active:{id:'synthetic-paper',pdf:true,title:'Synthetic'}};
+  let job={status:'idle'};
+  const ui=window.PaperAnalysis.create({state,api:async(action,args)=>{calls.push({action,...args});if(action==='paper_analysis_start'){job={id:state.active.id,request_id:args.request_id,status:'queued'};}return job;},persistence:{get:async key=>key==='preferences'?{auto_analysis:false}:{pages:'1'},patch:async()=>{},flush:async()=>{}},toast(){},metadataChanged(){},graphChanged:async id=>refreshed.push(id)});
+  await ui.setAvailable(true);await settle();document.getElementById('analysis-pages').value='1';await ui.startFullGraph();
+  const start=calls.find(c=>c.action==='paper_analysis_start');assert.equal(start.mode,'full');assert.equal(start.pages,undefined);assert.equal(start.apply_metadata,false);assert.equal(start.notes,false);assert.equal(start.review,false);
+  job={...job,status:'complete',batch_count:1,draft_id:'synthetic-draft',coverage:{read_pages:[1,2],full_document:true}};
+  document.listeners.visibilitychange();await settle();assert.deepEqual(refreshed,['synthetic-paper']);ui.dispose();
+});
+
+test('switching papers during graph-start preparation never starts analysis on the new paper',async()=>{
+  const document=documentFixture(),window={},calls=[];let release,block=false;
+  vm.runInNewContext(readFileSync(new URL('../web/paper-analysis.js',import.meta.url),'utf8'),{window,document,setTimeout,clearTimeout,crypto:{randomUUID:()=> 'synthetic-graph'}});
+  const state={active:{id:'a',pdf:true,title:'A'}};
+  const ui=window.PaperAnalysis.create({state,api:async(action,args)=>{calls.push({action,...args});if(block&&args.id==='a')await new Promise(resolve=>{release=resolve;});return {status:'idle'};},persistence:{get:async()=>({auto_analysis:false}),patch:async()=>{},flush:async()=>{}},toast(){}});
+  await ui.setAvailable(true);await settle();block=true;const start=ui.startFullGraph();await settle();state.active={id:'b',pdf:true,title:'B'};ui.sync();release();await start;await settle();
+  assert.equal(calls.filter(c=>c.action==='paper_analysis_start').length,0);ui.dispose();
+});

@@ -775,3 +775,32 @@ def test_the_moved_clusters_still_reach_the_helpers_they_share_with_core():
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr("dsh_paper_library.core.REFERENCE_CATALOG_LIMIT", 2)
         assert annotations.AnnotationAccess._reference_limits()["annotations"] == 2
+
+
+def test_conversation_answer_creates_one_nearby_native_note_for_multiple_sources(tmp_path):
+    source = make_pdf(tmp_path / "multi-source.pdf")
+    before = source.read_bytes()
+    item = request(tmp_path, "import", path=str(source))["items"][0]
+    first = request(tmp_path, "annotate", id=item["id"], page=1, type="underline", rects=[[50, 250, 200, 265]], text="Synthetic anchor")["annotation"]
+    second = request(tmp_path, "annotate", id=item["id"], page=1, type="note", comment="Second source")["annotation"]
+    payload = {"id": item["id"], "text": "One combined answer", "model": "synthetic/model", "annotation_ids": [first["id"], second["id"]], "source_session_id": "synthetic-session", "source_message_id": "42"}
+    saved = request(tmp_path, "save_conversation_feedback", **payload)
+    assert saved["reply_to"] == first["id"]
+    assert abs(saved["rect"][1] - first["rect"][1]) < 25
+    assert saved["annotation_ids"] == payload["annotation_ids"]
+    assert len(request(tmp_path, "feedback", id=item["id"])["feedback"]) == 1
+    assert request(tmp_path, "save_conversation_feedback", **payload)["duplicate"]
+    assert source.read_bytes() == before
+
+
+def test_conversation_reply_links_external_annotation_without_native_name(tmp_path):
+    source = make_pdf(tmp_path / 'external-parent.pdf')
+    with fitz.open(source) as doc:
+        page = doc[0]
+        external = next(page.annots())
+        doc.xref_set_key(external.xref, 'NM', 'null')
+        doc.saveIncr()
+    item = request(tmp_path, 'import', path=str(source))['items'][0]
+    parent = next(a for a in request(tmp_path, 'annotations', id=item['id'])['annotations'] if a['id'].startswith('external-'))
+    saved = request(tmp_path, 'save_conversation_feedback', id=item['id'], text='External source response', model='synthetic/model', annotation_ids=[parent['id']], source_session_id='external-source', source_message_id='1')
+    assert saved['reply_to'] == parent['id']

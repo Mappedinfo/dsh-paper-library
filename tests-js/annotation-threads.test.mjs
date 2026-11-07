@@ -39,11 +39,11 @@ test('a combined feedback answer is shown once instead of copied under every ann
   assert.deepEqual(ids(unlinked), [])
 })
 
-test('a conversation reply keeps its documented shared placement under every cited annotation', () => {
+test('a conversation reply is shown once while preserving all cited annotation IDs', () => {
   const annotations = [note('a'), note('b'), ai('chat', { annotation_ids: ['a', 'b'], source_kind: 'dsh-conversation' })]
   const { replies } = threads(annotations)
   assert.deepEqual(ids(replies.get('a')), ['chat'])
-  assert.deepEqual(ids(replies.get('b')), ['chat'])
+  assert.deepEqual(ids(replies.get('b')), [])
 })
 
 test('replies fall back to /IRT provenance, skip unknown parents and survive empty input', () => {
