@@ -1106,8 +1106,9 @@
         if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
       }
       root.dataset.tool = tool;
-      // The selection must preview the colour that will be written to the PDF.
-      const tint = hexTint(color, .5);
+      // Preview the chosen hue with a light multiply wash over the raster.
+      // The saved annotation keeps its original colour and PDF appearance.
+      const tint = hexTint(color, .32);
       if (tint) root.style.setProperty('--pdr-selection', tint);
       lastSelection = '';
     }

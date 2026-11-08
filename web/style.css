@@ -694,6 +694,7 @@ select {
   user-select: text;
   cursor: text;
   line-height: 1;
+  mix-blend-mode: multiply;
 }
 
 .pdf-word {
@@ -721,9 +722,11 @@ select {
   text-align: left;
 }
 
-.pdf-word::selection {
-  background: var(--pdr-selection,#e8cd5880);
+.pdf-page { isolation: isolate; }
+.word-layer::selection, .word-layer ::selection {
+  background: var(--pdr-selection,rgba(65,118,230,.32));
   color: transparent;
+  text-shadow: none;
 }
 
 .page-message {

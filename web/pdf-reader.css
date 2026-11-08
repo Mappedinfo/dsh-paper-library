@@ -4,11 +4,14 @@
 .pdr-spread { display:flex; flex:none; align-items:flex-start; gap:16px; }
 .pdr-page-slot { flex:none; min-width:0; margin:0; padding:0; position:relative; }
 .pdr-page-caption { height:24px; line-height:20px; font-size:10px; text-align:center; color:#788079; user-select:none; }
-.pdr-sheet { position:relative; width:100%; background:white; box-shadow:0 1px 5px #1b2c2425; overflow:hidden; }
+.pdr-sheet { position:relative; width:100%; background:white; box-shadow:0 1px 5px #1b2c2425; overflow:hidden; isolation:isolate; }
 .pdr-page-image { position:absolute; inset:0; display:block; width:100%; height:100%; margin:0; pointer-events:none; user-select:none; }
-.pdr-word-layer { position:absolute; inset:0; width:100%; height:100%; overflow:hidden; line-height:1; cursor:text; z-index:1; }
+.pdr-word-layer { position:absolute; inset:0; width:100%; height:100%; overflow:hidden; line-height:1; cursor:text; z-index:1; mix-blend-mode:multiply; }
 .pdr-word { position:absolute; display:block; color:transparent; white-space:pre; font-family:Arial,sans-serif; line-height:1; transform-origin:left top; user-select:text; -webkit-user-select:text; }
-.pdr-word::selection { background:var(--pdr-selection,#5b93bd66); color:transparent; }
+/* Blend the text layer with its PDF raster, not the surrounding theme. Apply
+   selection styling to nested glyph spans too: global ::selection rules would
+   otherwise override highlight inheritance and can paint a pale opaque wash. */
+.pdr-word-layer::selection,.pdr-word-layer ::selection { background:var(--pdr-selection,rgba(65,118,230,.32)); color:transparent; text-shadow:none; }
 .paper-pdf-reader[data-tool="note"] .pdr-word-layer,.paper-pdf-reader[data-tool="note"] .pdr-word { user-select:none; -webkit-user-select:none; cursor:crosshair; }
 .paper-pdf-reader[data-tool="ink"] .pdr-sheet,.paper-pdf-reader[data-tool="ink"] .pdr-sheet * { user-select:none; -webkit-user-select:none; cursor:crosshair; }
 .paper-pdf-reader[data-tool="ink"][data-ink-context="linked"] .pdr-ink-target { outline:2px solid var(--teal,#286a61); outline-offset:-2px; }

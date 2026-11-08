@@ -180,7 +180,8 @@ input[type="checkbox"] { accent-color: var(--dsw-alias-button-primary-fill); }
 .pdr-error, .pdr-layout-error { color: var(--error); }
 .pdr-sheet, .pdf-page { background: white; box-shadow: 0 1px 5px rgb(0 0 0 / .16); color-scheme: light; }
 .pdr-page-image, .pdf-page > img { filter: none; }
-.pdr-word::selection, .pdf-word::selection { background: var(--pdr-selection, rgb(65 118 230 / .3)); color: transparent; }
+.pdr-word-layer::selection, .pdr-word-layer ::selection,
+.word-layer::selection, .word-layer ::selection { background: var(--pdr-selection, rgb(65 118 230 / .32)); color: transparent; text-shadow: none; }
 .selection-tools { border-color: var(--line); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); box-shadow: var(--shadow); }
 .selection-tools .button { font-size: 11px; }
 .selection-tools strong, .selection-tools p { font-size: 11px; font-family: var(--sans); }
