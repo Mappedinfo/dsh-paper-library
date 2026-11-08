@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -7,10 +8,11 @@ import { fileURLToPath } from 'node:url';
 import { resolveAndFetch, resolveMetadata, resolveTitleMetadata } from './paper-fetch.mjs';
 import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
 import { createTranslationServerClient } from './translation-server.mjs';
+import { workerScheduler } from './worker-scheduler.mjs';
 
 export const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const defaultLibrary = join(homedir(), '.local', 'share', 'dsh-paper-library');
-const actions = new Set(['status','import','list','get','create','archive','restore','update','paper_organization_update','paper_tags_list','attach','page_layout','page','annotations','annotation_preview','annotation_caption_result','annotation_catalog','annotation_context_exact','annotation_translation_result','annotate','annotation_reply_create','annotation_update','annotation_delete','export_annotations','export_pdf','link','graph','graph_statistics','graph_references_extract','graph_references_get','graph_node_put','graph_node_delete','graph_edge_put','graph_edge_delete','feedback_context','save_feedback','feedback']);
+const actions = new Set(['document_elements_scan','document_elements_clear','document_elements_list','document_element_preview','document_element_annotate','document_element_flow','status','import','list','get','create','archive','restore','update','paper_organization_update','paper_tags_list','attach','page_layout','page','annotations','annotation_preview','annotation_caption_result','annotation_catalog','annotation_context_exact','annotation_translation_result','annotate','annotation_reply_create','annotation_update','annotation_delete','export_annotations','export_pdf','link','graph','graph_statistics','graph_references_extract','graph_references_get','graph_node_put','graph_node_delete','graph_edge_put','graph_edge_delete','feedback_context','save_feedback','feedback']);
 const challengeActions = new Set(['challenge_scan','challenge_themes','challenge_theme_list','challenge_theme_get','challenge_theme_review','challenge_theme_merge','challenge_theme_check','challenge_export','challenge_comparison','challenge_comparison_list','challenge_comparison_get','challenge_review_packet']);
 const projectActions = new Set(['project_create','project_update','project_get','project_list','project_archive','project_restore','project_link','project_unlink','project_for_paper']);
 // Ordinary external sources come from deployment/settings. Management-only
@@ -26,7 +28,6 @@ const libraryActions = new Set(['resource_list','resource_export','dataset_impor
 /** Every action the reader bridge admits, grouped by the module that owns it.
  * Exported so a test can prove the tool surface and the bridge agree. */
 export const BRIDGE_ACTIONS = {core: actions, challenge: challengeActions, project: projectActions, library: libraryActions, external: externalActions, latex: latexActions};
-let pending = Promise.resolve();
 let importsPending = Promise.resolve();
 let importCount = 0;
 let importPayloadBytes = 0;
@@ -67,10 +68,22 @@ function enqueueImport(request,options) {
 }
 
 export function core(request, options = {}) {
-  // Serial workers bound aggregate native-memory cost and protect PDF writes.
-  const result = pending.catch(() => {}).then(() => runWorker(request, options));
-  pending = result.then(() => {}, () => {});
-  return result;
+  // 优先级只来自内部调用选项，不读取浏览器/工具请求正文的同名字段。
+  const background = request.action !== 'status' && (options.workerPriority === 'background'
+    || ['document_elements_scan', 'document_element_preview', 'document_element_flow'].includes(request.action));
+  const scan = request.action === 'document_elements_scan';
+  const key = scan ? scanKey(request, options) : undefined;
+  return workerScheduler.schedule(
+    ({ signal }) => runWorker(request, { ...options, signal }),
+    { priority: background ? 'background' : 'foreground', key, signal: options.signal, cancelRunning: scan },
+  );
+}
+
+function scanKey(request, options) {
+  const stable = value => Array.isArray(value) ? value.map(stable)
+    : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value;
+  const payload = { request, library: resolve(options.library || defaultLibrary), python: options.python || 'managed' };
+  return `scan:${createHash('sha256').update(JSON.stringify(stable(payload))).digest('hex')}`;
 }
 
 function venvPython() {
@@ -167,12 +180,14 @@ async function runWorker(request, options) {
 function citationJob(request, options) {
   // CSL can allocate a large temporary heap. Keep that heap out of Harness and
   // release it with process exit, even when V8 would otherwise retain RSS.
-  const result = pending.catch(() => {}).then(() => runProcess(process.execPath, [join(projectRoot,'src/citation-worker.mjs')], request, options));
-  pending = result.then(() => {}, () => {});
-  return result;
+  return workerScheduler.schedule(
+    ({ signal }) => runProcess(process.execPath, [join(projectRoot,'src/citation-worker.mjs')], request, { ...options, signal }),
+    { signal: options.signal, priority: options.workerPriority === 'background' ? 'background' : 'foreground' },
+  );
 }
 
 function workerTimeout(request) {
+  if (request.action === 'document_elements_scan') return 20000;
   if (request.action === 'latex_compile') {
     const configured = request.timeout_seconds;
     const numeric = typeof configured === 'number' || typeof configured === 'string';
@@ -187,24 +202,34 @@ function workerTimeout(request) {
 
 function runProcess(command, args, request, options) {
   const timeoutMs = workerTimeout(request);
+  const scan = request.action === 'document_elements_scan';
+  const boundedDocumentRead = ['document_elements_scan', 'document_elements_list', 'document_element_flow', 'document_element_preview'].includes(request.action);
+  const maxOutputBytes = boundedDocumentRead ? 8 * 1024 * 1024 : 32 * 1024 * 1024;
   return new Promise((accept, reject) => {
     if (options.signal?.aborted) return reject(new Error('操作已取消。'));
     const child = spawn(command, args, {
       cwd: projectRoot, stdio: ['pipe','pipe','pipe'],
       env: { ...process.env, PYTHONPATH: join(projectRoot, 'src'), PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' },
     });
-    let stdout = '', stderr = '', bytes = 0, fail;
-    const abort = () => { fail = new Error('操作已取消。'); child.kill(); };
-    const timeout = setTimeout(() => { fail = new Error(`操作超过 ${timeoutMs / 1000} 秒；请缩小读取范围或检查文件。`); child.kill(); }, timeoutMs);
+    let stdout = '', stderr = '', bytes = 0, fail, scanKillTimer;
+    const terminate = error => {
+      if (fail) return;
+      fail = error;
+      child.kill();
+      // 仅可重建的后台索引允许强杀兜底；正常 PDF 写入不采用此策略。
+      if (scan) scanKillTimer = setTimeout(() => child.kill('SIGKILL'), 1000);
+    };
+    const abort = () => terminate(new Error('操作已取消。'));
+    const timeout = setTimeout(() => terminate(new Error(`操作超过 ${timeoutMs / 1000} 秒；请缩小读取范围或检查文件。`)), timeoutMs);
     options.signal?.addEventListener('abort', abort, { once: true });
     child.stdout.on('data', chunk => {
       bytes += chunk.length;
-      if (bytes > 32 * 1024 * 1024) { fail = new Error('结果过大，请缩小批次。'); child.kill(); }
+      if (bytes > maxOutputBytes) terminate(new Error('结果过大，请缩小批次。'));
       else stdout += chunk;
     });
     child.stderr.on('data', chunk => { if (stderr.length < 4000) stderr += chunk; });
     child.stdin.on('error', () => {});
-    const cleanup = () => { clearTimeout(timeout); options.signal?.removeEventListener('abort', abort); };
+    const cleanup = () => { clearTimeout(timeout); clearTimeout(scanKillTimer); options.signal?.removeEventListener('abort', abort); };
     child.on('error', error => { cleanup(); reject(new Error(`无法运行文献内核（${error.code || error.message}）；自动安装可能未完成，请重试或在插件目录手动运行 uv sync。`)); });
     child.on('close', code => {
       cleanup();

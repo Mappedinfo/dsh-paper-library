@@ -69,6 +69,7 @@ function fixture() {
     async dispatch(input,options){
       f.kernel.push(structuredClone(input))
       assert.equal(options.library,'/synthetic/library');assert.equal(options.python,'/synthetic/python')
+      assert.equal(options.workerPriority,'background','Full-paper analysis kernel work must yield to foreground reading and annotation writes')
       if(input.action==='get')return {...f.paper,id:input.id}
       if(input.action==='paper_analysis_batch'){await f.readGate?.promise;const pack=structuredClone(f.batchPacks?f.batchPacks.shift():f.pack);if(input.id!=='paper-a'){pack.paper={...pack.paper,id:input.id};pack.sources=pack.sources.map(s=>({...s,entity:{kind:'paper',id:input.id}}))}return pack}
       if(input.action==='knowledge_draft_put'){

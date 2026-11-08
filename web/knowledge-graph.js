@@ -355,10 +355,23 @@
       const requestedId = paperId; status(libraryScope ? '正在读取全库图谱…' : '正在读取本文图谱…');
       try {
         catalogPrevious.disabled=catalogNext.disabled=true;
+        let referenceNotice='';
+        if(!libraryScope&&requestedMode==='citations'&&item?.pdf){
+          try {
+            const snapshot=await api('graph_references_get',{id:requestedId});
+            if(run!==revision||getPaper()?.id!==requestedId||requestedMode!==graphMode.value)return;
+            if(!snapshot||snapshot.stale||snapshot.parser_version!==2){
+              status('正在从 PDF 参考文献构建引用关系…');
+              const extracted=await api('graph_references_extract',{id:requestedId});
+              referenceNotice=`已解析 ${extracted.count} 条题录，可绘制 ${extracted.graph_count??extracted.count} 条引用。`;
+            }
+          } catch(error){referenceNotice=`参考文献未自动更新：${error.message}`;}
+          if(run!==revision||getPaper()?.id!==requestedId||requestedMode!==graphMode.value)return;
+        }
         const result = requestedMode==='reading'&&!libraryScope?await api('paper_analysis_graph',{id:requestedId,...readingCursor}):await api('graph', { ...(libraryScope ? {offset,...(focusPaperId?{focus_id:focusPaperId}:{})} : {id:requestedId}), view:requestedMode||'all', limit: 100 });
         if (run !== revision || requestedMode!==graphMode.value || (!libraryScope && getPaper()?.id !== requestedId)) return;
         if(requestedMode==='reading'&&result.reading?.request_id)readingCursor.request_id=result.reading.request_id;
-        graph = result; render();catalogPrevious.disabled=graph.scope?.previous_offset==null;catalogNext.disabled=graph.scope?.next_offset==null;
+        graph = result;if(referenceNotice)graph.warnings=[...(graph.warnings||[]),referenceNotice]; render();catalogPrevious.disabled=graph.scope?.previous_offset==null;catalogNext.disabled=graph.scope?.next_offset==null;
         if(graphMode.value==='citations'&&!graph.edges.length)graph.warnings=[...(graph.warnings||[]),'当前范围尚无已记录的论文引用；共同作者或关键词不作为引用。'];
         if(requestedMode==='reading'){const r=graph.reading;if(!r||r.status==='idle'){status('尚无全文分析记录。点击「全文分析建图」生成，已有记录将直接展示，无需重复调用模型。');return;}if(r.status==='unsupported'){status('这次旧版分析没有逐题判断记录；可切换「全部关系」查看已保存草稿，或点击「全文分析建图」重新分析。');return;}const title=r.questions?.find(q=>q.id===r.question_id)?.title||'';status(`全文 ${r.total_answers||0} 项判断 · ${r.valid_answers||0} 项通过原文校验 · ${r.level==='overview'?'按问题展开查看全部判断':r.level==='question'?`${title} · 当前 ${graph.nodes.filter(n=>n.reading_target?.answer_id).length} / ${r.total||0} 项`:'单项判断的完整证据与关系'}。AI 分析待核对。${graph.warnings?.length?' '+graph.warnings.join(' '):''}`);return;}
         const range=libraryScope ? `全库目录 ${graph.scope?.paper_count ? offset+1 : 0}–${offset+(graph.scope?.paper_count||0)} / ${graph.scope?.total_papers||0} 篇 · ` : '本文 · ';
@@ -417,7 +430,7 @@
         const result = await api('graph_references_extract', { id });
         if (getPaper()?.id !== id) return;
         graphMode.value = 'citations'; el('filter').value = ''; await load(getPaper());
-        toast(`已保存 ${result.count} 条真实参考文献，来源 PDF 第 ${result.reference_pages.join('、')} 页。`);
+        toast(`已保存 ${result.count} 条题录、${result.graph_count??result.count} 条引用关系，来源 PDF 第 ${result.reference_pages.join('、')} 页。`);
       } catch (error) { if (getPaper()?.id === id) status(`参考文献未更新：${error.message}`, true); }
       finally { busy = false; el('extract-references').disabled = !paperId || !getPaper()?.pdf; }
     });

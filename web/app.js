@@ -14,6 +14,7 @@ let organizationUI;
 let knowledgeGraphUI;
 let pdfReader;
 let readingPanels;
+let documentElementsUI;
 let readingShell;
 let languageUI;
 let annotationTranslationAvailable = false, annotationCaptionAvailable = false;
@@ -1260,7 +1261,7 @@ function publishReaderState() {
 
   if (restoringReader || !state.active || state.active.resource_kind === 'dataset' || workbenchUI?.isTable() || (workbenchUI && readerPaperId !== state.active.id)) return true;
   const snapshot = { workspace:workspaceSnapshot(), paperId: state.active.id, page: state.page, tab: state.tab, chatDraft: paperChatUI?.draft() || '', chatContext: paperChatUI?.context() || { annotationRefs: [] },
-    ...(readingPanels ? {panels:{annotations:readingPanels.visible('annotations'),metadata:readingPanels.visible('metadata'),chat:readingPanels.visible('chat'),side:$('reading-workspace').dataset.readingSide || 'left'}} : {}),
+    ...(readingPanels ? {panels:{elements:documentElementsUI?.selected(),annotations:readingPanels.visible('annotations'),metadata:readingPanels.visible('metadata'),chat:readingPanels.visible('chat'),side:$('reading-workspace').dataset.readingSide || 'left'}} : {}),
     ...(state.selection?.id===state.active.id ? {readerSelection:{page:state.selection.page,text:state.selection.text,rects:state.selection.rects}} : {}),
   };
   if ($('annotation-dialog').open && state.annotationDraft?.id === state.active.id) {
@@ -1316,6 +1317,7 @@ async function applyReaderSnapshot(snapshot,legacyChat=false) {
       if(snapshot.panels.annotations)readingPanels.show('annotations');else readingPanels.close('annotations');
       if(snapshot.panels.metadata)workbenchUI?.edit(state.active);else readingPanels.close('metadata');
       if(snapshot.panels.chat)readingPanels.show('chat');else readingPanels.close('chat');
+      if(snapshot.panels.elements)documentElementsUI?.restore(snapshot.panels.elements);
     }
     if(snapshot.readerSelection)showReaderSelection(snapshot.readerSelection);
     const draft = snapshot.annotationDraft;
@@ -1490,7 +1492,7 @@ paperChatUI = window.PaperLibraryChat?.create({ api, toast, persistence, getPape
 });
 readingPanels = window.PaperReadingPanels?.create({persistence,root:$('reading-workspace'),annotationsRoot:$('annotations-tab'),conversationRoot:$('conversation-tab'),metadataRoot:$('metadata-dialog'),libraryRoot:document.querySelector('.library-pane'),onAnnotationsRequest:()=>canvasNotesContext?void openCanvasNotes(canvasNotesContext):void switchTab('annotations'),
   onChatVisibility: visible => paperChatUI?.visible(visible && state.tab!=='graph' && !workbenchUI?.isTable()),
-  onPanelChange: value => { workbenchUI?.metadataVisibility(value.sidebar==='metadata'); readingShell?.sync(); publishReaderState(); }, toast,
+  onPanelChange: value => { documentElementsUI?.sync(value);workbenchUI?.metadataVisibility(value.sidebar==='metadata'); readingShell?.sync(); publishReaderState(); }, toast,
 });
 workbenchUI?.setPanelHost({openMetadataPanel:()=>readingPanels?.show('metadata'),closeMetadataPanel:()=>readingPanels?.close('metadata')});
 pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPaper:()=>state.active,
@@ -1517,6 +1519,10 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onStatus: (message,error,options) => readingShell?.status(message,error,options),
 });
 readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,contextChanged:()=>{resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
+documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPanels,getPaper:()=>state.active,toast,
+  navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');await pdfReader?.revealRegion(source);},
+  annotated:async(id,page)=>{if(state.active?.id!==id)return;await loadAnnotations(id);if(state.active?.id===id)await pdfReader?.refresh(page,{defer:true});},
+});
 inkQueue=window.PaperInkQueueClient?.create({api,persistence,
   onChange:records=>{pdfReader?.setInkEnabled(!inkQueue?.blocked()&&!inkSaveUncertain&&!pendingInkHandoff&&!restoringInkDraft&&!restoringReader);pdfReader?.setInkOverlays([...records.filter(job=>job.status!=='saved'),...records.filter(job=>job.status==='saved').slice(-16)]);readingShell?.queueChanged(records);if(state.active)renderAnnotations();publishReaderState();},
   onAccepted:async batch=>{inkDiagnostics?.record({event:'batch_accepted',paperId:batch.paperId,page:batch.page,annotationId:batch.annotation_id});if(!inkDraftStorageBlocked)await persistence?.put('reader:ink-draft',null);inkDraftUpdatedAt=Math.max(inkDraftUpdatedAt,batch.frozenAt||0);if(pendingInkHandoff&&!restoringReader){const record=pendingInkHandoff;setTimeout(()=>void adoptInkHandoff(record),0);}},
@@ -2079,7 +2085,7 @@ if(persistence){
   const backup=el('button','button subtle','导出未保存草稿');backup.type='button';backup.addEventListener('click',()=>{const values=persistence.exportPending?.()||[];const url=URL.createObjectURL(new Blob([JSON.stringify({schema:1,drafts:values},null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='paper-library-unsaved-drafts.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});saveStatus.append(label,retry,backup);$('notification-region').append(saveStatus);
   const pending=new Map();persistence.subscribe(event=>{if(event.status==='saved')pending.delete(event.key);else if(event.error||!pending.get(event.key)?.error)pending.set(event.key,event);const errors=[...pending.values()].filter(value=>value.error);saveStatus.hidden=!errors.length;label.textContent=errors.some(value=>value.status==='conflict')?'另一浏览器已有修改，本窗口草稿尚未落盘。请导出并核对。':`本地保存未完成${errors.length?`（${errors.length} 项）：${errors[0].error?.message||'请重试'}`:''}，草稿仍保留。`;});
 }
-window.addEventListener('pagehide', () => { publishReaderState(); floatingWindows?.dispose(); boardUI?.dispose(); companionUI?.dispose();settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); readingPanels?.dispose(); readingShell?.dispose(); });
+window.addEventListener('pagehide', () => { publishReaderState(); floatingWindows?.dispose(); boardUI?.dispose(); companionUI?.dispose();settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); documentElementsUI?.dispose();readingPanels?.dispose(); readingShell?.dispose(); });
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){publishReaderState();void persistence?.flush({keepalive:true}).catch(()=>{});}});
 window.addEventListener('message', event => {
   receiveHarnessContext(event);

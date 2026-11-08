@@ -35,7 +35,7 @@ window.PaperReadingPanels = (() => {
       annotationsTab=button('批注',()=>{if(onAnnotationsRequest)onAnnotationsRequest();else show('annotations');});annotationsTab.id='reading-sidebar-annotations';
       for(const [tab,panel] of [[libraryTab,libraryContent.id],[annotationsTab,annotationsRoot.id]]){tab.setAttribute('role','tab');tab.setAttribute('aria-controls',panel);}
       const selectTab=tab=>{tab.focus();tab.click();};
-      listen(tablist,'keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?libraryTab:event.key==='End'?annotationsTab:event.target===libraryTab?annotationsTab:libraryTab;if(!next.disabled)selectTab(next);});
+      listen(tablist,'keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const tabs=[libraryTab,annotationsTab,...[...extraPanels.values()].map(panel=>panel.tab)].filter(tab=>!tab.hidden&&!tab.disabled);const index=tabs.indexOf(event.target);const next=event.key==='Home'?tabs[0]:event.key==='End'?tabs.at(-1):tabs[(index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length];if(next)selectTab(next);});
       tablist.append(libraryTab,annotationsTab);
       sharedMove=button('⇄',()=>setSide(side==='left'?'right':'left'));sharedMove.id='reading-sidebar-side';
       sharedClose=button('×',()=>{sharedOpen=false;if(sidebar==='annotations'||extraPanels.has(sidebar))sidebar=null;render();});sharedClose.id='reading-sidebar-close';sharedClose.setAttribute('aria-label','收起阅读侧栏');
@@ -82,25 +82,25 @@ window.PaperReadingPanels = (() => {
       if(disposed)return;
       root.dataset.readingSide=side;root.classList.toggle('has-reading-sidebar',Boolean(sidebar)&&(!libraryRoot||sidebar==='metadata')&&!aside.classList.contains('paper-floating-positioned'));
       placeSidebar();
-      aside.hidden=!sidebar||(Boolean(libraryRoot)&&sidebar==='annotations');asideTitle.textContent=sidebar==='metadata'?'资料详情':'批注';
+      aside.hidden=!sidebar||(Boolean(libraryRoot)&&(sidebar==='annotations'||extraPanels.has(sidebar)));asideTitle.textContent=sidebar==='metadata'?'资料详情':'批注';
       move.textContent=side==='left'?'移至右侧':'移至左侧';
       const annotationActive = readingActive || annotationContext;
       annotationsRoot.hidden=sidebar!=='annotations'||(Boolean(libraryRoot)&&!annotationActive);metadataRoot.hidden=sidebar!=='metadata';
       if(libraryRoot){
-        const selectedExtra=externalActive&&extraPanels.has(sidebar)?sidebar:null;
+        const selectedExtra=extraPanels.has(sidebar)&&(externalActive||readingActive)?sidebar:null;
         const annotations=annotationActive&&!externalActive&&sidebar==='annotations';
         sharedHeader.hidden=!(annotationActive||externalActive);
-        libraryContent.hidden=annotations||externalActive;
+        libraryContent.hidden=annotations||externalActive||Boolean(selectedExtra);
         libraryRoot.dataset.sidebarPanel=selectedExtra||(annotations?'annotations':'library');
         libraryRoot.parentNode.classList.toggle('shared-sidebar-open',(annotationActive||externalActive)&&sharedOpen);
         libraryRoot.parentNode.dataset.sidebarSide=(annotationActive||externalActive)?side:'left';
         libraryTab.hidden=externalActive;
         annotationsTab.hidden=externalActive;
-        libraryTab.setAttribute('aria-selected',String(!annotations&&!externalActive));libraryTab.tabIndex=annotations||externalActive?-1:0;
+        libraryTab.setAttribute('aria-selected',String(!annotations&&!externalActive&&!selectedExtra));libraryTab.tabIndex=annotations||externalActive||selectedExtra?-1:0;
         annotationsTab.setAttribute('aria-selected',String(annotations));annotationsTab.tabIndex=annotations?0:-1;annotationsTab.disabled=externalActive||(!annotationContext&&(!paper||paper.archived));
         for(const panel of extraPanels.values()){
           const active=selectedExtra===panel.id;
-          panel.tab.hidden=!externalActive;panel.tab.setAttribute('aria-selected',String(active));panel.tab.tabIndex=active?0:-1;
+          panel.tab.hidden=panel.reading?externalActive:!externalActive;panel.tab.disabled=panel.reading&&(!paper||paper.archived);panel.tab.setAttribute('aria-selected',String(active));panel.tab.tabIndex=active?0:-1;
           panel.element.hidden=!active;
         }
         const direction=side==='left'?'移至右侧':'移至左侧';sharedMove.title=direction;sharedMove.setAttribute('aria-label',direction);
@@ -126,7 +126,7 @@ window.PaperReadingPanels = (() => {
     function show(name) {
       name=known(name);if(disposed)return false;
       // A panel another surface owns needs no paper: it belongs to that surface, not the reader.
-      if(extraPanels.has(name)){externalActive=true;sidebar=name;sharedOpen=true;render();return true;}
+      if(extraPanels.has(name)){const panel=extraPanels.get(name);if(panel.reading&&(!paper||paper.archived))return false;externalActive=!panel.reading;sidebar=name;sharedOpen=true;render();panel.onShow?.();return true;}
       if(name!=='metadata'&&!(name==='annotations'&&annotationContext)&&(!paper||paper.archived)){toast?.('请先打开一篇可阅读的文献。',true);return false;}
       if(name==='chat'){chatOpen=true;collapsed=false;}else {sidebar=name;if(name==='annotations')sharedOpen=true;}
       render();return true;
@@ -141,7 +141,7 @@ window.PaperReadingPanels = (() => {
       }else return;
       render();
     }
-    function visible(name) {name=known(name);return !disposed&&(name==='chat'?chatOpen&&!collapsed:sidebar===name);}
+    function visible(name) {name=known(name);return !disposed&&(name==='chat'?chatOpen&&!collapsed:sidebar===name&&(!extraPanels.get(name)?.reading||readingActive));}
     function toggle(name) {return visible(name)?close(name):show(name);}
     function setSide(value,{persist=true}={}) {
       if(!['left','right'].includes(value))throw new Error('Reading sidebar side must be left or right');
@@ -154,12 +154,12 @@ window.PaperReadingPanels = (() => {
     }
     function setReadingActive(value){const next=Boolean(value);if(next===readingActive)return;readingActive=next;render(false);}
     /** Register a rail panel another surface owns; nothing changes until it is shown. */
-    function registerPanel({id,label,element,aliases=[]}={}) {
+    function registerPanel({id,label,element,aliases=[],reading=false,onShow}={}) {
       if(typeof id!=='string'||!id.trim()||typeof label!=='string'||!label.trim()||!element)throw new Error('A rail panel needs an id, a label and an element');
       if(disposed)throw new Error('Reading panels are disposed');
       if(extraPanels.has(id))return extraPanels.get(id);
       if(panelAliases.has(id)||!Array.isArray(aliases)||new Set(aliases).size!==aliases.length||aliases.some(alias=>typeof alias!=='string'||!alias.trim()||alias===id||names.has(alias)||extraPanels.has(alias)||panelAliases.has(alias)))throw new Error('Panel aliases must be unique unused names');
-      const tab=button(label,()=>{if(sidebar===id)close(id);else show(id);});
+      const tab=button(label,()=>{if(sidebar===id&&!reading)close(id);else show(id);});
       tab.id=`reading-sidebar-${id}`;tab.setAttribute('role','tab');tab.setAttribute('aria-controls',element.id||id);
       if(!element.id)element.id=id;
       element.setAttribute('role','tabpanel');element.setAttribute('aria-labelledby',tab.id);element.hidden=true;
@@ -167,7 +167,7 @@ window.PaperReadingPanels = (() => {
       if(tablist)tablist.append(tab);
       if(libraryRoot&&annotationsRoot.parentNode===libraryRoot)libraryRoot.insertBefore(element,annotationsRoot);
       else if(annotationsRoot.parentNode)annotationsRoot.parentNode.insertBefore(element,annotationsRoot.nextSibling);
-      const panel={id,label,element,tab};extraPanels.set(id,panel);for(const alias of aliases)panelAliases.set(alias,id);render(false);return panel;
+      const panel={id,label,element,tab,reading:Boolean(reading),onShow};extraPanels.set(id,panel);for(const alias of aliases)panelAliases.set(alias,id);render(false);return panel;
     }
     /** Hand the rail to an external surface (its tabs only) or give it back to reading. */
     function setExternal(value) {
@@ -177,7 +177,7 @@ window.PaperReadingPanels = (() => {
       else if(extraPanels.has(sidebar))sidebar=null;
       render(false);
     }
-    function showLibrary(){if(disposed)return;sharedOpen=true;if(sidebar==='annotations')sidebar=null;render();}
+    function showLibrary(){if(disposed)return;sharedOpen=true;if(sidebar==='annotations'||extraPanels.get(sidebar)?.reading)sidebar=null;render();}
     const resize = () => {if(disposed)return;root.classList.toggle('reading-panels-roomy',root.clientWidth>=880);placeSidebar();};
     const observer=typeof window.ResizeObserver==='function'?new window.ResizeObserver(resize):null;
     observer?.observe(root);listen(window,'resize',resize);resize();

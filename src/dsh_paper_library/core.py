@@ -639,6 +639,9 @@ def dispatch(request):
             # Indexing of corpora another tool syncs: symlinks in, no copies out.
             from . import external
             return external.dispatch(library, request)
+        if action in {"document_elements_scan", "document_elements_clear", "document_elements_list", "document_element_preview", "document_element_annotate", "document_element_flow"}:
+            from . import document_elements
+            return document_elements.dispatch(library, request)
         if action in {"graph_references_extract", "graph_references_get"}:
             from . import paper_references
             library.get(request.get("id"))

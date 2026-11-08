@@ -583,8 +583,8 @@ An independent deployment without a DSH migration marker uses local disk prefere
 
 ### PDF 参考文献与定向修订
 
-- `graph_references_extract {id,pages?}`：显式读取一篇在库 PDF 的编号参考文献；默认末 12 页，可选升序连续的至多 40 页，总文字上限 256000 字符、200 条参考文献。只识别 References／Bibliography／参考文献标题下从 `[1]` 开始的连续编号，须读到文末或附录边界；失败不覆盖旧结果。输出 `references`（原文、分页面片段、首个页码、实际出现的 DOI/arXiv 标识）、`reference_pages`、覆盖范围和警告。相同来源指纹返回 `duplicate:true`。不上传 PDF、不改原件、不猜书目字段。
-- `graph_references_get {id}`：读取已保存快照。`graph {id?,focus_id?,view:"citations",limit?}` 将快照绘为明确方向的 `cites` 边；唯一 DOI 可匹配库内论文，未匹配的作品使用 `external_reference:true` 的论文节点，来源页仍属于引用它的论文。库外节点不提供无效的“打开文献”动作。图谱读取不重新解析 PDF，不把出边数当作入站引用量。
+- `graph_references_extract {id,pages?}`：读取一篇在库 PDF 的编号／作者年份参考文献；默认末 40 页，可选升序连续的至多 40 页，总文字上限 256000 字符、200 条参考文献。识别 References／Bibliography／参考文献标题下从 `[1]` 开始的连续编号或“姓, 首字母., 年份. 正文”明确语法，须读到文末或附录边界；失败不覆盖旧结果。输出 `references`（原文、分页面片段、首个页码、实际出现的 DOI/arXiv 标识）、`reference_pages`、覆盖范围和警告。相同来源指纹返回 `duplicate:true`。不上传 PDF、不改原件、不猜书目字段。
+- `graph_references_get {id}`：缺失返回 `null`，已有快照附 `stale`。按去批注底稿的 `source_version` 核对，正常批注不使其过期；旧无身份快照标记过期。提取返回 `parser_version:2`、`count` 与可绘制的 `graph_count`；无法确认的作者年份条目保留原文、`graph_eligible:false`，不生成引用边。`graph {id?,focus_id?,view:"citations",limit?}` 将快照绘为明确方向的 `cites` 边；唯一 DOI 可匹配库内论文，未匹配的作品使用 `external_reference:true` 的论文节点，来源页仍属于引用它的论文。库外节点不提供无效的“打开文献”动作。图谱读取不重新解析 PDF，不把出边数当作入站引用量。
 - `paper_analysis_repair {id,request_id?,new_request_id?}`：针对已结束文字分析的未通过项发起新任务；省略原请求时使用最新任务。使用原题库、范围、模型和已保存来源快照，不重读可能已经变化的 PDF。每组只给模型待修订回答及原文，响应必须逐项对应旧 ID，允许有理由的撤回；其他有效回答不得改变或因冲突失效。原任务保留，`repair_from` 和 `source_basis:"saved-snapshots"` 明示来源；`repair_log` 记录原／新 ID、原因和状态。请求失败保留原组，原始修订响应分片保存，`include_raw:true` 可查看。仍未通过的修订不会自动采用。
 - `knowledge_draft_put` 可带 `supersedes_draft_id`：旧稿必须属于同一实体、同一来源列表，且未被接受／否决。旧稿不删除；新非否决图谱在浏览时替代旧稿，否决新稿后旧稿恢复显示。不能自动替代人工已经审阅的决定。
 
@@ -612,3 +612,29 @@ reading.legacy_budget_omissions 是旧摘要图因预算省略的判断数；rea
 `list`、`resource_list`、`catalog_resource_list` 支持 `favorite:true` 与 `tag:"#方法"`，在分页前筛选，父级包含后代但不匹配仅共享字符前缀的其他标签。标签大小写敏感；来源标签和手动标签共同参与匹配。`false` 或空标签不限制结果；有组织筛选时数据集、Slides 不进入结果，可继续组合现有关键词、项目、类型及回收站条件（`list` 不支持项目参数）。
 
 `paper_tags_list` 接收 `query`（可选，最多 200 字符）、`offset`（默认 0）、`limit`（默认 40，最多 100），及可选 `favorite`、`archived`、`project`。返回 `{items:[{tag,count}],total,offset,limit,next_offset}`，含已有来源标签、手动标签和它们的父级。每级计数按匹配论文去重，搜索标签后分页，不解析 PDF。`%`、`_` 等搜索字符按字面处理。
+
+
+## PDF 结构阅读目录
+
+所有操作必须传当前文献 `id`；只处理本地管理 PDF，不联网、不调用模型。索引为私有资料库内的派生目录，PDF 原生批注仍是批注事实源。
+
+| action | 参数 | 结果 |
+| --- | --- | --- |
+| `document_elements_scan` | `id,start_page?,limit?`，默认 1 页，最多 6 页 | 本批 `elements`（前 40 项）、`batch_element_count`、`scanned_batch`、`cached_pages`、`lookahead_pages`；无 start_page 自动续扫 |
+| `document_elements_clear` | `id` | 清除当前篇派生结构索引，返回 `cleared,usage`；不清除原文、原生批注或其他阅读资料 |
+| `document_elements_list` | `id,kind?,subtype?,query?,offset?,limit?,warning_offset?` | `elements,total,offset,page_warnings`，每次最多 40 项；kind 为 formula／figure／table／algorithm，subtype 支持 flowchart |
+| `document_element_preview` | `id,element_id,render_width?`，64–640 | `image` 为裸 PNG base64，附 mime_type、width、height、page、rect、source_version；最长边 640、约 30 万像素、1 MiB 上限 |
+| `document_element_annotate` | `id,element_id` | 标准 Square `annotation`、`reused`；已标注同一候选直接复用，备份并原子写管理副本 |
+| `document_element_flow` | `id,element_id`（算法） | `element,flow,source_version`；flow 为 nodes／edges／source_lines／warnings／complete／status |
+
+scan/list 均附 `coverage:{page_count,scanned_pages,complete,next_page}`、`source_version`、`stale` 与 warnings。每篇最多 2000 页、单页最多 240 个候选；超预算显式提示。普通批注不会使目录失效；真实正文改变后旧 element_id 拒绝截图或写入。提词、绘图、表格检测均基于去批注底稿，防止 FreeText 或 Square 外观污染候选。
+
+元素包含 `id,kind,page,rect,title,text,caption,context,method,confidence,warnings`。rect 使用阅读器显示坐标；表格可含 rows（最多 50 行预览）和 rows_truncated；公式 context／definition 为邻近原文；算法 source_segments 记录最多相邻两页依据。流程图类别来自图题关键词，属于候选而非视觉分类保证。
+
+算法解析最多 160 节点、500 行、32000 字符，分支边区分 next／true／false／back。`complete` 只表示已识别控制结构闭合，非 PDF 全文无遗漏的证明；提取截断或缺页会标记 partial。所有标签为普通文本，前端复用画板几何排版绘制 SVG，不执行来源代码。
+
+结构扫描默认每批 1 个主页面；算法续页允许额外按需补读，单次实际页数最多 6。自动扫描仅在打开结构侧栏后启动，等待用户空闲 1.2 秒，批次间至少 2 秒；隐藏页面或离开侧栏后不继续下一批，可手动暂停。文献 Python / CSL worker 在同一宿主进程内共享一个并发额度，前台队列优先；全文整理内核通过内部 workerPriority 进入后台，浏览器请求不能自行设置优先级；后台空闲冷却 750 ms，等待队列最多 64 项（后台最多 16），同参数扫描合并。扫描 20 秒超时后退出，必要时强制终止只读派生扫描；普通原生 PDF 写入不会因取消等待被强杀。此限额不等于远程模型并发设置。
+
+scan/list 的 `usage` 提供派生索引计费：每页 2 MiB、每篇 16 MiB、全库 128 MiB，包括 JSON、检索文字与行开销估算；并非整个 SQLite 文件的物理大小上限。按页计数避免每批重读全库正文。保留至少 256 MiB 磁盘余量，创建底稿身份临时副本前再预留源文件大小。达到预算返回 `paused:true,budget_reason`，已完成页保留；用户可清除不需要的派生索引后续扫。SQLite 空闲页复用，不在阅读期间强制压缩数据库。
+
+浏览器最多同时请求 1 张结构预览，队列最多 40 张；缓存最多 12 张且估算解码占用不超过 12 MiB，离开侧栏释放图片来源。结构请求结果最多 8 MiB。自动扫描在解释页面前检查源文件、内容流、图像像素和对象数量；单页及请求结束回收 PDF 引擎缓存。`usage.memory_hard_limit:false` 表明这些是工作量／缓存预算，不是操作系统强制的进程内存上限。

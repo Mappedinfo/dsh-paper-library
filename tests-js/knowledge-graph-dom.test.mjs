@@ -92,7 +92,8 @@ test('explicit PDF bibliography extraction opens a nonempty citation graph and e
   const paper={id:'paper',title:'Synthetic source',pdf:true};
   const ui=window.PaperKnowledgeGraph.create({root,getPaper:()=>paper,openPaper:id=>opened.push(id),navigatePage:page=>pages.push(page),toast(){},api:async(action,args)=>{
     calls.push({action,...plain(args)});
-    if(action==='graph_references_extract'){extracted=true;return {count:1,reference_pages:[2]};}
+    if(action==='graph_references_get')return extracted?{parser_version:2,stale:false}:null;
+    if(action==='graph_references_extract'){extracted=true;return {count:1,graph_count:1,reference_pages:[2]};}
     return {nodes:[{id:'paper',type:'paper',label:'Source'},...(extracted?[{id:'reference:one',paper_id:'paper',type:'paper',label:'[1] Synthetic cited study.',external_reference:true,provenance:'pdf-reference',evidence:{page:2,quote:'[1] Synthetic cited study.'}}]:[])],edges:extracted?[{id:'cite1',source:'paper',target:'reference:one',relation:'cites',provenance:'pdf-reference',evidence:{page:2,quote:'[1] Synthetic cited study.'}}]:[],scope:{}};
   }});
   await ui.load(paper);root.querySelector('[data-kg="extract-references"]').click();
@@ -160,4 +161,11 @@ test('source-free judgments and inferred attribution stay readable without inven
  const api=async(_action,args)=>{if(args.answer_id)return {nodes:[{id:'neutral',type:'question',label:text}],edges:[],reading:{level:'answer',request_id:'saved-snapshot',question_id:'q_method',questions:[],total_answers:1,valid_answers:1,answer:{judgment:text,source_status:'inferred'},limitations:['未报告，不生成肯定事实。']}};return f.response(args)};
  const ui=window.PaperKnowledgeGraph.create({root,getPaper:()=>f.paper,api});await ui.load();root.querySelector('[data-question-id="q_method"]').click();await settle();root.querySelector('.kg-reading-answer button').click();await settle();
  assert.ok(root.querySelector('.kg-reading-list').textContent.includes(text));assert.match(root.querySelector('.kg-reading-list').textContent,/尚非作者报告事实/);assert.equal(root.querySelectorAll('.kg-reading-source').length,0);dom.window.close();
+});
+
+
+test('opening citation mode automatically builds missing author-year references and reuses a current snapshot', {skip:!JSDOM}, async()=>{
+  const dom=new JSDOM('<div id="graph"></div>',{runScripts:'outside-only',url:'http://synthetic.invalid/'}),w=dom.window,root=w.document.getElementById('graph');w.eval(source);
+  let stored=false;const calls=[],paper={id:'paper',title:'Synthetic',pdf:true};const ui=w.PaperKnowledgeGraph.create({root,getPaper:()=>paper,toast(){},api:async(action,args)=>{calls.push(action);if(action==='graph_references_get')return stored?{parser_version:2,stale:false}:null;if(action==='graph_references_extract'){stored=true;return {count:2,graph_count:2,reference_pages:[2]};}return {nodes:[{id:'paper',type:'paper',label:'Source'},{id:'ref',type:'paper',label:'Adams, A., 2020. A synthetic study.'}],edges:stored?[{id:'c1',source:'paper',target:'ref',relation:'cites',evidence:{page:2}}]:[],scope:{}};}});
+  await ui.load(paper);const mode=root.querySelector('[data-kg="mode"]');mode.value='citations';mode.dispatchEvent(new w.Event('change'));for(let i=0;i<6;i++)await new Promise(r=>setImmediate(r));assert.equal(calls.filter(a=>a==='graph_references_extract').length,1);assert.equal(root.querySelectorAll('.kg-edge').length,1);await ui.reload();assert.equal(calls.filter(a=>a==='graph_references_extract').length,1);dom.window.close();
 });

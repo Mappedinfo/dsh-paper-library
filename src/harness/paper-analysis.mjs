@@ -108,7 +108,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
   modelTimeoutMs = Number.isSafeInteger(modelTimeoutMs) && modelTimeoutMs > 0 ? modelTimeoutMs : agent?.timeoutMs ?? 180000
   const flights = new Map()
   const starts = new Map(), applies = new Map()
-  const kernel = (input, signal) => dispatch(input, { library, python, signal })
+  const kernel = (input, signal) => dispatch(input, { library, python, signal, workerPriority: 'background' })
   const latestKey = id => `analysis.latest:${hash(id)}`
   const jobKey = (id, requestId) => `analysis.job:${hash(id)}:${hash(requestId)}`
   const batchKey = (id, requestId, index) => `analysis.batch:${hash([id,requestId])}:${index}`
