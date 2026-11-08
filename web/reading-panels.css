@@ -45,7 +45,7 @@
 .reading-sidebar-header .reading-panel-button:disabled{opacity:.45;cursor:default}
 #reading-sidebar-side{font-size:15px;padding:4px}
 #reading-sidebar-close{display:none;box-sizing:border-box;min-inline-size:30px;min-block-size:30px;flex:none;font-size:16px}
-.library-pane.shared-reading-sidebar #annotations-tab{flex:1;min-height:0;min-width:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;padding:7px;box-sizing:border-box}
+.library-pane.shared-reading-sidebar #annotations-tab{flex:1;min-height:0;min-width:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;padding:0;box-sizing:border-box}
 .shared-reading-sidebar .annotation-list{gap:7px}
 .shared-reading-sidebar .annotation-card{padding:8px;margin:0;border-radius:6px}
 .shared-reading-sidebar .annotation-meta{font-size:10px;gap:5px;margin-bottom:7px;flex-wrap:wrap}
@@ -76,8 +76,8 @@ body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-
 
 /* 列表独立滚动，批注操作始终留在侧栏底部。 */
 .library-pane.shared-reading-sidebar #annotations-tab:not([hidden]){display:flex;flex-direction:column;overflow:hidden}
-.shared-reading-sidebar #annotation-list{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}
-.shared-reading-sidebar #annotation-chat-actions{flex:none;order:10;margin:0;padding:10px 0 2px;background:var(--paper,var(--dsw-alias-surface-bg))}
+.shared-reading-sidebar #annotation-list{margin:0;padding:4px;flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}
+.shared-reading-sidebar #annotation-chat-actions{flex:none;order:10;margin:0;padding:5px 4px;background:var(--paper,var(--dsw-alias-surface-bg))}
 .shared-reading-sidebar #legacy-feedback{flex:none;max-height:25%;overflow:auto}
 .paper-chat-suggestions{display:flex;gap:5px;flex-wrap:wrap;margin:5px 0 8px}
 #catalog-table tr[tabindex]{cursor:pointer}

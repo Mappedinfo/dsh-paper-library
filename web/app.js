@@ -16,7 +16,7 @@ let pdfReader;
 let readingPanels;
 let readingShell;
 let languageUI;
-let annotationTranslationAvailable = false;
+let annotationTranslationAvailable = false, annotationCaptionAvailable = false;
 const translatingAnnotations = new Set(), failedTranslations = new Set();
 let resourceUI;
 let knowledgeUI;
@@ -110,6 +110,7 @@ async function loadStatus() {
     companionUI?.setAvailable(result.realtime_companion);
     languageUI?.setAvailable(result.language_learning);
     annotationTranslationAvailable = result.language_learning === true;
+    annotationCaptionAvailable = result.annotation_caption === true;
     handwritingAvailable = result.handwriting_recognition === true;
     knowledgeUI?.setAvailable(result.knowledge_generation);
     void analysisUI?.setAvailable(result.paper_analysis);
@@ -467,12 +468,20 @@ function renderAnnotations() {
   const {notes,replies,unlinked,remarks=new Map()}=annotationThreads(state.annotations);
   function replyCard(reply){
     const details=el('details','annotation-reply');details.dataset.annotationId=reply.id;details.open=true;
-    details.append(el('summary','',[reply.source_kind === 'annotation-translation' ? '翻译：AI 译文' : 'AI 批注',reply.model,reply.annotation_ids?.length>1?`涉及 ${reply.annotation_ids.length} 条批注`:''].filter(Boolean).join(' · ')));
+    details.append(el('summary','',[reply.source_kind === 'annotation-translation' ? '翻译：AI 译文' : reply.source_kind === 'annotation-caption' ? 'AI 图像说明' : 'AI 批注',reply.model,reply.annotation_ids?.length>1?`涉及 ${reply.annotation_ids.length} 条批注`:''].filter(Boolean).join(' · ')));
     details.append(el('p','small muted',displayDate(reply.generated||reply.created)));
     let body=(reply.comment||reply.content||reply.text||'').replace(/^AI-generated (?:conversation )?feedback[^\n]*\n\n/,'');
     if(reply.source_kind==='annotation-translation')body=body.replace(/\n\nAI 翻译 · [^\n]*\s*$/,'');
+    if(reply.source_kind==='annotation-caption')body=body.replace(/^图像描述：/,'').replace(/\n\nAI 图像描述 · [^\n]*\s*$/,'');
     const rendered=el('div','annotation-reply-body paper-markdown');if(window.PaperMarkdown)window.PaperMarkdown.render(rendered,body);else rendered.textContent=body;rendered.classList.add('is-preview');details.append(rendered);const expand=el('button','button subtle','展开全文');expand.type='button';expand.setAttribute('aria-expanded','false');expand.addEventListener('click',()=>{const expanded=rendered.classList.toggle('is-preview');expand.textContent=expanded?'展开全文':'收起全文';expand.setAttribute('aria-expanded',String(!expanded));});details.append(expand);
-    const actions=el('div','annotation-actions'),remove=el('button','button subtle delete-note','删除回复');remove.dataset.noteAction='delete';actions.append(remove);details.append(actions);return details;
+    const actions=el('div','annotation-actions'),copy=el('button','button subtle','复制回复'),follow=el('button','button subtle','引用并追问'),remove=el('button','button subtle delete-note','删除回复');
+    copy.type=follow.type=remove.type='button';copy.addEventListener('click',()=>void copyText(body,{label:'AI 回复'}));
+    const parent=state.annotations.find(n=>n.id===reply.reply_to)||state.annotations.find(n=>reply.annotation_ids?.includes(n.id)&&!n.ai_generated&&n.kind!=='ai-feedback');
+    follow.disabled=!parent;let selected='';
+    const selectedReply=()=>{const selection=window.getSelection();return selection&&!selection.isCollapsed&&rendered.contains(selection.anchorNode)&&rendered.contains(selection.focusNode)?selection.toString():'';};
+    follow.addEventListener('pointerdown',()=>{selected=selectedReply();});
+    follow.addEventListener('click',()=>{const quote=selectedReply()||selected||body;selected='';if(quote.length>4000){toast('回复较长，请先选取需要追问的部分。',true);return;}if(parent&&typeof annotationEditor!=='undefined')void annotationEditor?.create('reply',{note:parent,page:parent.page,comment:`针对 AI 回复继续提问：\n${quote.split('\n').map(line=>'> '+line).join('\n')}\n\n我的问题：`});});
+    remove.dataset.noteAction='delete';actions.append(copy,follow,remove);details.append(actions);return details;
   }
   for (const note of notes.slice(state.noteOffset, state.noteOffset + 40)) {
     const card = el('article', 'annotation-card'); card.dataset.annotationId = note.id; card.dataset.paperId = state.active?.id || '';
@@ -489,7 +498,7 @@ function renderAnnotations() {
       meta.append(translate);
     }
     card.append(meta);
-    if (note.text) { const quote=el('button','annotation-quote',note.text);quote.type='button';quote.dataset.noteAction='page';quote.setAttribute('aria-label',`定位原文：${note.text}`);card.append(quote); }
+    if (note.text) { const excerpt=el('section','annotation-excerpt'),heading=el('div','annotation-excerpt-heading'),locate=el('button','button subtle','定位');locate.type='button';locate.dataset.noteAction='page';locate.setAttribute('aria-label',`定位原文：${note.text}`);heading.append(el('span','small muted','原文'),locate);excerpt.append(heading,el('p','annotation-quote',note.text));card.append(excerpt); }
     if (note.comment || note.content) card.append(el('p', 'annotation-comment', note.comment || note.content));
     if (note.handwriting) { const handwritten = el('div', 'annotation-handwriting'); handwritten.append(el('p', 'small muted', note.handwriting.transcription_source === 'model' ? '手写便签 · AI 识别待校对' : '手写便签 · 原笔迹已保留')); if (note.handwriting.transcript) handwritten.append(el('p', '', note.handwriting.transcript)); card.append(handwritten); }
     linkedHandwritingUI?.decorate(card,note);
@@ -1518,7 +1527,7 @@ linkedHandwritingUI=window.PaperLinkedHandwriting?.create({api,persistence,reade
 readingShell?.setInkQueue(inkQueue);
 void restoreInkDraft().then(()=>inkQueue?.refresh()).then(()=>linkedHandwritingUI?.restore()).then(()=>inkQueue&&state.active?.id?loadAnnotations(state.active.id):null).catch(error=>toast(error.message,true));
 handwritingUI = window.PaperHandwritingNote?.create({ api, persistence, toast, draftChanged: publishReaderState, available: () => handwritingAvailable, changed: async (id, page) => { if (state.active?.id === id) { await loadAnnotations(id); await paperChatUI?.annotationsChanged(id); await refreshPage(page); } } });
-annotationEditor=window.PaperAnnotationEditor?.create({api,persistence,getPaper:()=>state.active,getNotes:()=>state.annotations,
+annotationEditor=window.PaperAnnotationEditor?.create({api,persistence,captionAvailable:()=>annotationCaptionAvailable,getPaper:()=>state.active,getNotes:()=>state.annotations,
   show:annotationId=>{readingPanels?.show('annotations');if(annotationId){const grouped=annotationThreads(state.annotations),root=grouped.roots?.get(annotationId)||annotationId;const index=grouped.notes.findIndex(n=>n.id===root);if(index>=0){state.noteOffset=Math.floor(index/40)*40;renderAnnotations();}}},
   refresh:async(id,note,{reveal=false}={})=>{if(state.active?.id!==id)return;await loadAnnotations(id);if(state.active?.id===id){if(reveal)annotationEditor.focus(id,note.id);await refreshPage(note.page);await paperChatUI?.annotationsChanged(id);}},
   changed:()=>companionUI?.decorate(),toast});

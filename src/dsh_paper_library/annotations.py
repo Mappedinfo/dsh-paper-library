@@ -517,7 +517,9 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 scale *= .65
             else:
                 raise ValueError("Region preview exceeds the image byte budget")
-            return {"annotation_id": annotation_id, "page": int(page), "rect": list(rect), "width": pix.width, "height": pix.height, "mime_type": "image/png", "image": base64.b64encode(image).decode("ascii")}
+            # 视觉来源只包含几何与实际裁图；备注输入、笔色及无关批注不使描述失效。
+            source_version = hashlib.sha256(json.dumps([[round(v, 3) for v in found[0]], [round(v, 3) for v in rect], hashlib.sha256(image).hexdigest()], separators=(",", ":")).encode()).hexdigest()
+            return {"annotation_id": annotation_id, "page": int(page), "rect": list(rect), "width": pix.width, "height": pix.height, "source_version": source_version, "mime_type": "image/png", "image": base64.b64encode(image).decode("ascii")}
 
     def page(self, id, page=1, scale=1.25, include_layout=False, render_width=None):
         import pymupdf as fitz

@@ -58,9 +58,20 @@ test('human remarks render below one quote; AI replies preview six lines and pag
  w.eval(await readFile(new URL('../web/annotation-threads.js',import.meta.url),'utf8'));
  const pager=d.createElement('div');pager.id='annotation-pagination';d.body.prepend(pager);
  w.state.annotations=[{id:'root',type:'underline',text:'Same original',page:1},{id:'r2',kind:'reader-reply',reply_to:'root',text:'Same original',comment:'Follow up',page:1},{id:'ai',kind:'ai-feedback',reply_to:'r2',comment:'Long answer\n'.repeat(20),page:1},...Array.from({length:40},(_,i)=>({id:`other${i}`,type:'underline',page:2,text:'Other original'}))];
- w.renderAnnotations();assert.equal(d.querySelectorAll('#annotation-list > .annotation-card').length,40);assert.equal(d.querySelectorAll('[data-annotation-id="root"] > .annotation-quote').length,1);
+ w.renderAnnotations();assert.equal(d.querySelectorAll('#annotation-list > .annotation-card').length,40);assert.equal(d.querySelectorAll('[data-annotation-id="root"] > .annotation-excerpt > .annotation-quote').length,1);
  const remark=d.querySelector('.annotation-remark');assert.equal(remark.dataset.remarkNumber,'2');const reply=remark.querySelector('.annotation-reply');assert.equal(reply.open,true);assert.equal(reply.querySelector('.annotation-reply-body').classList.contains('is-preview'),true);
  const expand=[...reply.querySelectorAll('button')].find(n=>n.textContent==='展开全文');expand.click();assert.equal(reply.querySelector('.annotation-reply-body').classList.contains('is-preview'),false);
  assert.equal(d.querySelector('#annotation-list .pagination'),null);assert.equal(pager.querySelector('.pagination').textContent,'‹1/2›');
  await w.handleNoteAction({target:pager.querySelector('[data-note-action="next"]')});assert.equal(w.state.noteOffset,40);assert.equal(d.querySelectorAll('#annotation-list > .annotation-card').length,1);domClose(f);
+});
+
+test('AI reply copies full text and selected reply text becomes a new remark on the same underline', {skip:!JSDOM}, async()=>{
+ const f=fixture(),{window:w,document:d}=f,created=[];
+ w.annotationEditor={beforeRender:()=>()=>{},decorate(){},create:async(...args)=>created.push(args)};
+ w.state.annotations=[{id:'root',page:2,type:'underline',text:'Original source'},{id:'ai',page:2,kind:'ai-feedback',ai_generated:true,reply_to:'root',annotation_ids:['root'],comment:'First sentence.\nSecond sentence.'}];
+ w.renderAnnotations();const reply=d.querySelector('.annotation-reply'),buttons=[...reply.querySelectorAll('button')];
+ buttons.find(b=>b.textContent==='复制回复').click();await new Promise(r=>setImmediate(r));assert.deepEqual(f.copied,['First sentence.\nSecond sentence.']);
+ const rendered=reply.querySelector('.annotation-reply-body'),range=d.createRange();range.setStart(rendered.firstChild,0);range.setEnd(rendered.firstChild,15);w.getSelection().addRange(range);
+ buttons.find(b=>b.textContent==='引用并追问').click();assert.equal(created[0][0],'reply');assert.equal(created[0][1].note.id,'root');assert.match(created[0][1].comment,/> First sentence\./);assert.doesNotMatch(created[0][1].comment,/Second sentence/);
+ assert.equal(d.querySelector('.annotation-quote').tagName,'P');assert.equal(d.querySelector('.annotation-excerpt [data-note-action="page"]').textContent,'定位');domClose(f);
 });

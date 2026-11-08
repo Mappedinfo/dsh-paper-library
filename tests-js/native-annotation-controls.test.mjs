@@ -23,3 +23,15 @@ test('rectangle and free-stroke controls use native tools and share explicit col
   await click('reader-tool-select');assert.equal(doc.getElementById('reader-mode-group').hidden,false);assert.equal(width.parentElement.hidden,true);
   ui.dispose();dom.window.close();
 });
+
+test('reading display toggles restore independent preferences and do not switch annotation tools', {skip:!JSDOM}, async()=>{
+ const dom=new JSDOM(html,{runScripts:'outside-only',url:'http://synthetic.invalid/'}),w=dom.window,d=w.document,appearance=[],writes=[];
+ for(const id of ['metadata-enrich','catalog-archive']){const b=d.createElement('button');b.id=id;d.body.append(b);}w.eval(shell);
+ let restore;const persistence={get:()=>new Promise(r=>restore=r),patch:async(key,value)=>writes.push({key,...value})};
+ const ui=w.PaperReadingShell.create({state:{active:{id:'a',pdf:true},page:1,tab:'reader'},workbench:()=>({isTable:()=>false}),panels:()=>({visible:()=>false}),reader:()=>({setReadingAppearance:value=>appearance.push({...value}),setTool(){},getInkDraft:()=>null,getInkContext:()=>null,isInking:()=>false}),persistence,navigate(){},toast(){}});
+ restore({darkPdf:true,bionic:false});await new Promise(r=>setImmediate(r));
+ const dark=d.getElementById('reader-dark-pdf'),bionic=d.getElementById('reader-bionic');assert.equal(dark.checked,true);assert.equal(bionic.checked,false);
+ bionic.checked=true;bionic.dispatchEvent(new w.Event('change'));dark.checked=false;dark.dispatchEvent(new w.Event('change'));await new Promise(r=>setImmediate(r));
+ assert.deepEqual(appearance.at(-1),{darkPdf:false,bionic:true});assert.deepEqual(writes.map(v=>({darkPdf:v.darkPdf,bionic:v.bionic})),[{darkPdf:true,bionic:true},{darkPdf:false,bionic:true}]);assert.equal(ui.tool().type,'select');
+ assert.equal(d.getElementById('reader-appearance').closest('nav').className,'reader-ribbon');ui.dispose();w.close();
+});

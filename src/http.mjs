@@ -182,10 +182,13 @@ export function createFetchHandler(options = {}) {
           if (chatAction && !options.paperChat) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板打开论文对话。'},400);
           if (['annotation_translate','language_generate','vocabulary_create'].includes(input?.action) && !options.languageLearning) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
           if (input?.action === 'handwriting_recognize' && !options.handwriting) return json({ok:false,error:'转文字需要 DSH 中支持图片的模型；笔迹可继续保存。'},409);
+          if (input?.action === 'annotation_caption_result') return json({ok:false,error:'图像描述只能由宿主模型生成并写入。'},403);
+          if (input?.action === 'annotation_caption' && !options.annotationCaption) return json({ok:false,error:'图像描述需要 DSH 中支持图像输入的模型；矩形批注仍保留。',code:'ANNOTATION_CAPTION_MODEL_REQUIRED'},409);
           if (input?.action === 'knowledge_generate' && !options.libraryKnowledge) return json({ok:false,error:'尚未连接 DSH 模型服务；已保存的来源和知识笔记仍可查看。'},409);
           if (latexAIAction && !options.latexAI) return json({ok:false,error:'LaTeX 提问与合写需要连接 DSH 模型服务。'},409);
           if (latexWsAction && !options.latexWorkspace) return json({ok:false,error:'LaTeX 工作区需要连接 DSH 主机。'},409);
           let result = input?.action === 'annotation_translate' ? await annotationTranslation(input, { signal: request.signal })
+            : input?.action === 'annotation_caption' ? await options.annotationCaption(input, { signal: request.signal })
             : ['encyclopedia_list','encyclopedia_put'].includes(input?.action) ? await encyclopedia(input)
             : companionAction ? await options.companion.handle(input)
             : ['workspace_catalog','workspace_related'].includes(input?.action) ? await workspaceNavigation.handle(input, { signal: request.signal })
@@ -214,7 +217,7 @@ export function createFetchHandler(options = {}) {
             catch(error){result.companion={status:'failed',error:`批注已保存，伴学未入队：${error.message}`}}
           }
           if(input.action==='status')result={...result,realtime_companion:Boolean(options.companion)};
-          if(input.action==='status')result={...result,handwriting_recognition:Boolean(options.handwriting),durable_ink_queue:true};
+          if(input.action==='status')result={...result,handwriting_recognition:Boolean(options.handwriting),annotation_caption:Boolean(options.annotationCaption),durable_ink_queue:true};
           if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true, catalog_management: true, typed_graph: true, reading_workspace: true, durable_state: true, learning_records: true, language_learning: Boolean(options.languageLearning) };
           if (input.action === 'status') result = { ...result, latex_ai: Boolean(options.latexAI), latex_workspace: Boolean(options.latexWorkspace), latex_root: options.latexRoot || null };
           if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true, challenge_mining:Boolean(options.challengeMining), challenge_scan:true, challenge_themes:true, challenge_export:true, challenge_comparison:true, challenge_review_packet:true, whiteboard:true };

@@ -50,3 +50,14 @@
 .paper-pdf-reader[data-tool="square"] .pdr-sheet,.paper-pdf-reader[data-tool="square"] .pdr-sheet * { user-select:none; -webkit-user-select:none; cursor:crosshair; }
 .paper-pdf-reader[data-tool="square"],.paper-pdf-reader[data-tool="square"] .pdr-sheet { touch-action:none; }
 .pdr-square-draft { position:absolute; z-index:3; box-sizing:border-box; border:2px solid; background:transparent; pointer-events:none; }
+
+/* 阅读显示仅作用于显示副本，文字层、原生批注与 PDF 原件保持原样。 */
+.paper-pdf-reader.pdr-dark-pdf { background:#11171e; }
+.pdr-dark-pdf .pdr-sheet { background:#191e24; }
+.pdr-dark-pdf .pdr-page-image,.pdr-dark-pdf .pdr-bionic-layer { filter:invert(.9) hue-rotate(180deg); }
+.pdr-dark-pdf .pdr-word-layer { mix-blend-mode:screen; }
+.pdr-dark-pdf .pdr-page-caption { color:#aab6c4; }
+/* 原页像素覆盖层无文字节点、背景填充或命中区域，不进入复制内容。 */
+.pdr-bionic-layer { position:absolute; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; user-select:none; -webkit-user-select:none; mix-blend-mode:darken; }
+.pdr-bionic-layer * { pointer-events:none; user-select:none; -webkit-user-select:none; }
+.pdr-dark-pdf .pdr-bionic-layer { mix-blend-mode:lighten; }

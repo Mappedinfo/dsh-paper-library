@@ -459,6 +459,37 @@ class Library(Papers, PdfWrites, AnnotationAccess):
         rows = self.db.execute("SELECT payload FROM feedback WHERE paper_id=? LIMIT 100", (id,)).fetchall()
         return {"feedback": [json.loads(row[0]) for row in rows]}
 
+    def annotation_caption_result(self, id, annotation_id, page, source_version, text=None, model=""):
+        """矩形视觉描述按裁图版本去重；核对与原生回复写入共用锁。"""
+        if not isinstance(source_version, str) or not re.fullmatch(r"[a-f0-9]{64}", source_version):
+            raise ValueError("Invalid caption source version")
+        if text is not None and (not isinstance(text, str) or not text.strip() or len(text) > 4000):
+            raise ValueError("Caption requires 1–4000 characters")
+        with self.lock():
+            preview = self.annotation_preview(id, annotation_id, page, render_width=640)
+            if preview["source_version"] != source_version:
+                raise ValueError("ANNOTATION_STALE: 矩形区域或批注已改变，请刷新后重新生成图像描述。")
+            count = 0
+            with self._open_pdf(self.pdf_path(id)) as doc:
+                for current in doc:
+                    for annot in current.annots() or []:
+                        count += 1
+                        if count > MAX_ANNOTATIONS:
+                            raise ValueError("PDF annotation limit prevents a complete caption check")
+                        extra = self._annotation_metadata(annot)
+                        if extra.get("source_kind") == "annotation-caption" and extra.get("source_message_id") == source_version and extra.get("annotation_ids") == [annotation_id]:
+                            return {"saved": True, "duplicate": True, "annotation": self._annotation(current, annot)}
+            if text is None:
+                return {"saved": False}
+            if count >= MAX_ANNOTATIONS:
+                raise ValueError("PDF annotation limit reached")
+            extra = {"kind": "ai-feedback", "source_kind": "annotation-caption", "source_message_id": source_version,
+                     "annotation_ids": [annotation_id], "reply_to": annotation_id, "generated": now(), "model": str(model)[:200]}
+            result = self._write_pdf(id, lambda doc: self._add_annotation(doc, page, "note",
+                comment="图像描述：" + text.strip() + "\n\nAI 图像描述 · " + extra["model"], author="AI 图像描述 · Paper Library",
+                color="#91bad6", extra=extra))
+            return {"saved": True, "duplicate": False, "annotation": result["annotation"]}
+
     def annotation_translation_result(self, id, annotation_ref, request_key, text=None, model=""):
         """核对完整来源版本；译文以原生 PDF 回复保存，重试按请求键去重。"""
         if not isinstance(request_key, str) or not re.fullmatch(r"[a-f0-9]{64}", request_key):
@@ -657,6 +688,7 @@ def dispatch(request):
             path = library.pdf_path(request["id"])
             return {"path": str(path), "filename": path.name}
         actions = {
+            "annotation_caption_result": ("id", "annotation_id", "page", "source_version", "text", "model"),
             "annotation_translation_result": ("id", "annotation_ref", "request_key", "text", "model"),
             "list": ("query", "limit", "offset", "sort", "order", "archived", "favorite", "tag"), "get": ("id", "include_archived"), "create": ("metadata",), "archive": ("id",), "restore": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page_layout": ("id",), "page": ("id", "page", "scale", "include_layout", "render_width"),
             "annotations": ("id",), "annotation_preview": ("id", "annotation_id", "page", "render_width"), "annotate": ("id", "page", "type", "rects", "paths", "width", "annotation_id", "parent_id", "text", "comment", "author", "color"), "annotation_reply_create": ("id", "annotation_id", "reply_id", "comment"), "annotation_update": ("id", "annotation_id", "comment", "version"), "annotation_delete": ("id", "annotation_id"),

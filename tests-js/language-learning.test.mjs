@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createLanguageLearning, resolveTranslationTarget } from '../src/harness/language-learning.mjs'
+import { createAnnotationTranslation } from '../src/harness/annotation-translation.mjs'
 import { createLocalStateStore } from '../src/local-state.mjs'
 import { resolveConfig } from '../src/harness/config.mjs'
 import { createFetchHandler } from '../src/http.mjs'
@@ -58,7 +59,7 @@ test('generation uses the host default model and persists source/model/result pr
   assert.equal(result.status, 'complete'); assert.equal(result.target_language, 'zh-CN')
   assert.equal(result.paper_id, 'paper-a'); assert.equal(result.page, 2); assert.equal(result.source_text, source)
   assert.equal(result.request_id, request.request_id)
-  assert.deepEqual(result.model, f.route); assert.equal(result.model_source, 'harness-default'); assert.match(result.prompt_version, /^language-v2:/)
+  assert.deepEqual(result.model, f.route); assert.equal(result.model_source, 'harness-default'); assert.match(result.prompt_version, /^language-v3:/)
   assert.equal(f.calls[0].provider, 'configured-dsh'); assert.equal(f.calls[0].model, 'paper-current')
   assert.equal(f.calls[0].reasoningEffort, 'high'); assert.equal(f.calls[0].signal.aborted, false)
   assert.deepEqual(f.ensureCalls, []); assert.equal(result.request, undefined)
@@ -408,4 +409,75 @@ test('manual vocabulary HTTP action uses configured language handler', async () 
   const f = wordFixture(), handler = createFetchHandler({ library: '/synthetic/library', localState: f.store, languageLearning: f.handle })
   const response = await handler(new Request('http://localhost/api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(wordRequest) }))
   const body = await response.json(); assert.equal(body.ok, true, body.error); assert.equal(body.result.term, 'Epistemic')
+})
+
+
+test('translation collects complete academic phrases with exact bilingual source and paper provenance in one call', async () => {
+  const f = fixture(), sentence = 'We use relative location encoding.', text = `${sentence} The results remain uncertain.`
+  f.options.dispatch = async input => ({ id: input.id, title: 'Synthetic spatial study', pdf: 'synthetic.pdf', page_count: 2 })
+  f.handle = createLanguageLearning(f.options)
+  f.answer = JSON.stringify({ explanation: '忠实翻译。', result: '我们使用相对位置编码。结果仍不确定。', vocabulary: [
+    { term: 'relative location encoding', meaning: '相对位置编码', source_sentence: sentence, sentence_translation: '我们使用相对位置编码。' },
+    { term: 'uncertain', meaning: '不确定的', source_sentence: 'The results remain uncertain.', sentence_translation: '结果仍不确定。' },
+  ] })
+  await f.handle({ ...request, text })
+  const { items } = await f.handle({ action: 'vocabulary_list' })
+  assert.equal(f.calls.length, 1); assert.equal(items.length, 2)
+  const word = items.find(item => item.term === 'relative location encoding'), encounter = word.encounters[0]
+  assert.equal(encounter.source_sentence, sentence); assert.equal(encounter.sentence_translation, '我们使用相对位置编码。')
+  assert.equal(encounter.title, 'Synthetic spatial study'); assert.equal(encounter.paper_id, 'paper-a'); assert.equal(encounter.page, 2)
+  assert.equal(encounter.author_background.kind, 'unknown'); assert.equal(encounter.source_provenance, 'selected_text')
+  assert.match(f.calls[0].prompt, /sentence_translation/)
+})
+
+test('translation rejects invented context and malformed lexical fragments without rejecting useful scholarly words', async () => {
+  const f = fixture(), text = 'Evidence constrains the claim. See https://example.test. The model is uncertain.'
+  f.answer = JSON.stringify({ explanation: '忠实翻译。', result: '证据约束主张。参见链接。模型存在不确定性。', vocabulary: [
+    { term: 'Evidence', meaning: '证据', source_sentence: 'Evidence constrains the claim.', sentence_translation: '证据约束主张。' },
+    { term: 'uncertain', meaning: '不确定的', source_sentence: 'The model is uncertain on this task.', sentence_translation: '模型在此任务上不确定。' },
+    { term: 'model', meaning: '模型', source_sentence: 'the model is uncertain.', sentence_translation: '模型不确定。' },
+    { term: 'https://example.test', meaning: '链接', source_sentence: 'See https://example.test.', sentence_translation: '参见链接。' },
+    { term: 'The model is uncertain.', meaning: '模型不确定', source_sentence: 'The model is uncertain.', sentence_translation: '模型不确定。' },
+    { term: 'the', meaning: '这个', source_sentence: 'Evidence constrains the claim.', sentence_translation: '证据约束主张。' },
+  ] })
+  await f.handle({ ...request, text })
+  assert.deepEqual((await f.handle({ action: 'vocabulary_list' })).items.map(item => item.term), ['Evidence'])
+})
+
+test('legacy translation output reuses only an exact full-source translation and never a paragraph for a substring', async () => {
+  const f = fixture(), text = `${source} We need further evidence.`
+  f.answer = JSON.stringify(response)
+  await f.handle({ ...request, text })
+  const word = (await f.handle({ action: 'vocabulary_list' })).items[0]
+  assert.equal(word.encounters[0].sentence_translation, undefined)
+  await f.handle({ ...request, request_id: 'exact-source' })
+  assert.equal((await f.handle({ action: 'vocabulary_list' })).items[0].encounters[1].sentence_translation, response.result)
+})
+
+test('a translated standalone word is collected even when the model omits its vocabulary suggestion', async () => {
+  const f = fixture(); f.answer = JSON.stringify({ explanation: '词义对照。', result: '渗透；弥漫', vocabulary: [] })
+  await f.handle({ ...request, text: 'permeate' })
+  const word = (await f.handle({ action: 'vocabulary_list' })).items[0]
+  assert.equal(word.term, 'permeate'); assert.equal(word.meaning, '渗透；弥漫')
+  assert.equal(word.encounters[0].sentence_translation, '渗透；弥漫'); assert.equal(f.calls.length, 1)
+})
+
+test('native annotation translation accumulates vocabulary once and preserves manual edits across PDF retry and replay', async () => {
+  const f = fixture(); let failPdf = true, saved = false
+  const options = { store: f.store, languageLearning: f.handle, dispatch: async input => {
+    if (input.action === 'annotation_context_exact') return { annotations: [{ id: 'note-1', page: 2, text: source, comment: '' }] }
+    if (input.text) { if (failPdf) throw Error('synthetic PDF write failed'); saved = true }
+    return { saved, duplicate: saved && !input.text }
+  } }
+  const input = { action: 'annotation_translate', id: 'paper-a', annotation_id: 'note-1', version: 'a'.repeat(64) }
+  await assert.rejects(createAnnotationTranslation(options)(input), /synthetic PDF write failed/)
+  let word = (await f.handle({ action: 'vocabulary_list' })).items[0]
+  await f.handle({ action: 'vocabulary_update', id: word.id, expected_revision: word.revision, meaning: '用户保留的词义', status: 'mastered' })
+  failPdf = false
+  assert.equal((await createAnnotationTranslation(options)(input)).saved, true)
+  assert.equal((await createAnnotationTranslation(options)(input)).duplicate, true)
+  word = (await f.handle({ action: 'vocabulary_list' })).items[0]
+  assert.equal(f.calls.length, 1); assert.equal(word.encounters.length, 1)
+  assert.equal(word.meaning, '用户保留的词义'); assert.equal(word.status, 'mastered')
+  assert.equal(word.encounters[0].source_sentence, source); assert.equal(word.encounters[0].sentence_translation, response.result)
 })

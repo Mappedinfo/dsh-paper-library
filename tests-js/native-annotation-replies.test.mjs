@@ -25,3 +25,20 @@ with pymupdf.open() as d:
  const notes=(await send({action:'annotations',id})).annotations;assert.equal(notes.filter(n=>n.type==='underline').length,1);assert.equal(notes.filter(n=>n.kind==='reader-reply').length,1);
  assert.deepEqual(await readFile(path),original);
 });
+
+test('rectangle screenshot reaches the Python worker through HTTP and retries without touching original PDF',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'native-preview-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const python=resolve('.venv/bin/python'),path=join(root,'synthetic.pdf'),options={library:join(root,'library'),localStateHome:join(root,'home'),python};
+ execFileSync(python,['-c',`import pymupdf,sys
+with pymupdf.open() as d:
+ p=d.new_page();p.insert_text((50,80),'Synthetic figure.');d.save(sys.argv[1])`,path]);
+ const original=await readFile(path),id=(await core({action:'import',path},options)).items[0].id;
+ const note=(await core({action:'annotate',id,page:1,type:'square',rects:[[40,55,220,100]],comment:''},options)).annotation;
+ const handler=createFetchHandler(options);
+ for(let attempt=0;attempt<2;attempt++){
+  const response=await handler(new Request('http://localhost/api',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'annotation_preview',id,page:1,annotation_id:note.id,render_width:480})}));
+  const body=await response.json();assert.equal(body.ok,true,body.error);const result=body.result;
+  assert.equal(result.annotation_id,note.id);assert.equal(result.mime_type,'image/png');assert.ok(result.width<=640);assert.ok(result.height<=640);assert.equal(Buffer.from(result.image,'base64').subarray(1,4).toString(),'PNG');
+ }
+ assert.deepEqual(await readFile(path),original);
+});

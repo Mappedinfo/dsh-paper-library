@@ -32,7 +32,7 @@ window.PaperReadingShell = (() => {
       const toggle=()=>{if(!disclosure.open)return;for(const other of menus)if(other.disclosure!==disclosure)other.disclosure.open=false;placeMenu(disclosure,panel);};
       disclosure.addEventListener('toggle',toggle);menus.push({disclosure,panel,toggle});
     };
-    let context='reader', tool='select', color='#ffdb66', inkColor='#2455a4', inkWidth=2, mode='ask', markup='highlight', focused=false, saveLayoutTimer=null, penOnly=false;
+    let context='reader', tool='select', color='#ffdb66', inkColor='#2455a4', inkWidth=2, mode='ask', markup='highlight', focused=false, saveLayoutTimer=null, penOnly=false, darkPdf=false, bionic=false, appearanceTouched=false;
     let inkBusy=false, inkError='', inkTitle='', linkedSession=null, linkedBusy=false, finishLinked=null, inkRecords=[];
     const applyTool=()=>reader()?.setTool(tool,['ink','square'].includes(tool)?{color:inkColor,width:inkWidth}:color);
     const ribbon=node('nav',null,'reader-ribbon');ribbon.setAttribute('aria-label','文献工作区');
@@ -64,6 +64,17 @@ window.PaperReadingShell = (() => {
     let layoutQueue=Promise.resolve();
     const patchLayout=value=>{layoutQueue=layoutQueue.then(()=>persistence?persistence.patch('reader:layout',value):null).catch(()=>{});return layoutQueue;};
     const saveLayout=()=>patchLayout({mode,color,markup,inkColor,inkWidth});
+    const appearance=node('details',null,'reader-appearance');appearance.id='reader-appearance';
+    const appearanceSummary=node('summary','阅读显示');appearanceSummary.setAttribute('aria-controls','reader-appearance-options');appearance.append(appearanceSummary);
+    const appearanceOptions=node('div',null,'reader-pen-options');appearanceOptions.id='reader-appearance-options';
+    const darkCheck=node('input'),bionicCheck=node('input');darkCheck.type=bionicCheck.type='checkbox';darkCheck.id='reader-dark-pdf';bionicCheck.id='reader-bionic';
+    for(const [check,label] of [[darkCheck,'深色 PDF'],[bionicCheck,'仿生阅读（英文）']]){const row=node('label');row.append(check,document.createTextNode(label));appearanceOptions.append(row);}
+    bionicCheck.title='加粗英文单词前半部分；扫描页需要可用文字层。';darkCheck.title='仅调整页面显示，图表颜色也会变化；关闭可查看原色。';
+    appearance.append(appearanceOptions);ribbon.insertBefore(appearance,fullscreen);bindMenu(appearance,appearanceOptions);
+    const applyAppearance=()=>{darkCheck.checked=darkPdf;bionicCheck.checked=bionic;reader()?.setReadingAppearance?.({darkPdf,bionic});};
+    const changeAppearance=()=>{appearanceTouched=true;darkPdf=darkCheck.checked;bionic=bionicCheck.checked;applyAppearance();void patchLayout({darkPdf,bionic});};
+    darkCheck.addEventListener('change',changeAppearance);bionicCheck.addEventListener('change',changeAppearance);
+
     const saveLayoutLater=()=>{if(saveLayoutTimer!==null)window.clearTimeout(saveLayoutTimer);saveLayoutTimer=window.setTimeout(()=>{saveLayoutTimer=null;saveLayout();},150);};
     const hintFor=()=>tool==='ink'&&reader()?.getInkContext?.()?'直接在本页写画，笔迹绑定当前批注；再点侧栏手写按钮返回常规标注。':(MODE_HINTS[mode]||{})[tool]||hints[tool]||'';
     input.addEventListener('input',()=>{if(['ink','square'].includes(tool))inkColor=input.value;else color=input.value;applyTool();saveLayout();sync();});colorLabel.append(input);
@@ -117,6 +128,7 @@ window.PaperReadingShell = (() => {
       if(typeof value?.color==='string'&&/^#[0-9a-f]{6}$/i.test(value.color))color=value.color;
       if(typeof value?.inkColor==='string'&&/^#[0-9a-f]{6}$/i.test(value.inkColor))inkColor=value.inkColor;
       if([1,2,4].includes(value?.inkWidth))inkWidth=value.inkWidth;
+      if(!appearanceTouched){darkPdf=value?.darkPdf===true;bionic=value?.bionic===true;applyAppearance();}
       if(typeof value?.penOnly==='boolean'){penOnly=value.penOnly;penCheck.checked=penOnly;reader()?.setPenOnly?.(penOnly);}
       applyTool();
       if(typeof value?.markup==='string'&&['highlight','underline','strikeout'].includes(value.markup))markup=value.markup;
@@ -221,6 +233,7 @@ window.PaperReadingShell = (() => {
         tab.disabled=!active;tab.classList.toggle('active',Boolean(on));tab.setAttribute('aria-pressed',String(Boolean(on)));
       }
       $('metadata-open').disabled=!active;$('metadata-open').setAttribute('aria-pressed',String(Boolean(panels()?.visible('metadata'))));
+      appearance.hidden=!pdf;if(!pdf)appearance.open=false;
       fullscreen.disabled=!pdf;fullscreen.textContent=focused?'退出全屏 ⤡':'全屏阅读 ⤢';fullscreen.setAttribute('aria-pressed',String(focused));
       readerTools.hidden=table||!pdf||!['reader','annotations'].includes(surface);
       annotationTools.hidden=table||!pdf||surface!=='annotations';

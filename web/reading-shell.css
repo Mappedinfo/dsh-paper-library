@@ -76,7 +76,13 @@ body.handwriting-tools-visible{--workbench-height:145px}
 .annotation-card .annotation-actions .button[data-note-action="handwriting"][aria-pressed="true"]{background:var(--accent,#2455a4);color:var(--on-accent,#fff)}
 .linked-handwriting-summary textarea{display:block;width:100%;min-height:96px;margin-block:8px;resize:vertical}
 .linked-handwriting-summary p{white-space:pre-wrap;overflow-wrap:anywhere}
-.annotation-card .annotation-quote{display:block;width:100%;max-width:100%;min-width:0;text-align:left;white-space:normal;overflow-wrap:anywhere;border:0;border-left:3px solid var(--accent,#387658);padding:7px 10px;margin:10px 0;background:var(--surface);color:var(--ink);font:inherit;line-height:1.6;cursor:pointer}
+/* 原文作为可选取摘录展示，定位与复制是独立操作。 */
+.annotation-excerpt{margin:7px 0;padding:6px 9px;border:1px solid var(--line);border-radius:6px;background:var(--paper,var(--surface))}
+.annotation-excerpt-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.annotation-excerpt-heading .button{font-size:11px;padding:2px 4px}
+.annotation-card .annotation-quote{display:block;max-width:100%;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;border:0;padding:0;margin:3px 0;background:transparent;color:var(--ink);font:inherit;line-height:1.6;cursor:text;user-select:text;-webkit-user-select:text}
+.annotation-reply-body,.annotation-reply-body *{user-select:text;-webkit-user-select:text;cursor:text}
+
 .linked-ink-preview{display:block;width:100%;min-height:155px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#2455a4;padding:8px;cursor:pointer;text-align:right}
 .linked-ink-preview svg{display:block;width:100%;height:110px;pointer-events:none}
 .linked-ink-preview span{display:block;font-size:12px;padding:8px 2px 2px}
@@ -116,3 +122,11 @@ body.handwriting-tools-visible{--workbench-height:145px}
 
 .annotation-remark{border-top:1px solid var(--line);margin-top:12px;padding-top:10px}.annotation-remark .annotation-inline-editor{margin-top:0}.annotation-reply-body.is-preview{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6;max-height:9.6em;overflow:hidden}.annotation-reply-body:not(.is-preview){max-height:none;overflow:visible}.annotation-reply-body.paper-markdown{white-space:normal}
 .annotation-bulk-check{display:flex;align-items:center;gap:8px;min-height:34px;padding:6px 8px;margin-bottom:8px;border:1px solid var(--line);border-radius:5px;cursor:pointer;font-weight:600}.annotation-bulk-check input{width:18px;height:18px;accent-color:var(--accent,var(--ink))}.annotation-bulk-selected{outline:2px solid var(--dsw-alias-link);outline-offset:-2px}.annotation-bulk-selected .annotation-bulk-check{background:var(--dsw-alias-interactive-bg-hover)}
+
+.annotation-caption-status{display:block;overflow-wrap:anywhere;margin-top:4px}
+
+.reader-appearance{flex:none;font-size:11px;align-self:center}
+.reader-appearance>summary{cursor:pointer;list-style:none;padding:6px 8px;border-radius:4px}
+.reader-appearance>summary::after{content:' ▾'}
+.reader-appearance[open]>summary{background:var(--surface);color:var(--ink)}
+.reader-appearance .reader-pen-options{width:220px}

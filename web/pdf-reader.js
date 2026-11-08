@@ -4,6 +4,18 @@
   const TOOLS = new Set(['select', 'highlight', 'underline', 'strikeout', 'note', 'ink', 'square']);
   const MARKUP_TOOLS = new Set(['highlight', 'underline', 'strikeout']);
   const MAX_INK_PATHS = 64, MAX_INK_POINTS = 4096;
+  let appearanceSequence = 0;
+  /** 只强化英文词的前半段；标点、数字、混合公式及单字母不作为词重绘。 */
+  function bionicPrefix(text) {
+    if (typeof text !== 'string' || text.length > 160) return null;
+    const match = /^([("'“‘\[]*)([A-Za-z]+(?:['’-][A-Za-z]+)*)([.,;:!?"'”’\])]*?)$/.exec(text);
+    if (!match || /^(sin|cos|tan|cot|log|exp|lim|max|min)$/i.test(match[2])) return null;
+    const letters = match[2].replace(/[^A-Za-z]/g, '').length;
+    if (letters < 3) return null;
+    let end = 0, count = 0;
+    while (end < match[2].length && count < Math.ceil(letters / 2)) { if (/[A-Za-z]/.test(match[2][end])) count++; end++; }
+    return [match[1].length, match[1].length + end];
+  }
   const inkId = value => typeof value === 'string' && !!value.trim() && value.length <= 256 && !/[\u0000-\u001f]/.test(value);
   /** Diagnostic metadata is deliberately separate from PDF paths and text. */
   function createInkTrace(callback = () => {}) {
@@ -352,6 +364,8 @@
     if (!root) throw new Error('PDF reader requires a scroll viewport');
     let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, flashTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', pendingRange = null, transport = Promise.resolve(), zoom = 1, layout = 'single', initialPage = null;
     const renderedScales = new Map(), rasterCaps = new Map(), pageAnnotations = new Map(), pageLinks = new Map();
+    const appearanceId = ++appearanceSequence;
+    let readingAppearance = { darkPdf: false, bionic: false };
     const ink = createInkBuffer();
     const traceInk = createInkTrace(onInkTrace);
     const inkDetails = () => { const draft = ink.preview(); return draft ? { paperId: draft.paperId, page: draft.page, strokes: draft.paths.length, points: draft.paths.reduce((total, path) => total + path.length, 0), revision: draft.revision } : { paperId, strokes: 0, points: 0 }; };
@@ -769,6 +783,7 @@
       const layer = dom('div', 'word-layer pdr-word-layer'); layer.dataset.pdfPage = String(geometry.page); layer.setAttribute('aria-label', `PDF 第 ${geometry.page} 页可选文字`);
       const fragment = document.createDocumentFragment(), factor = layoutWidth / geometry.width;
       let previous = null, lineLast = null;
+      const mathLines = new Set(words.filter(word => Array.isArray(word) && Number.isFinite(word[1]) && typeof word[4] === 'string' && /[=+×÷∑∏√∫∂≤≥≠∞^_{}]/.test(word[4])).map(word => Math.round(word[1] * 2)));
       const flushTrailing = () => { if (!lineLast) return; const width = Math.max(6, (lineLast.y1 - lineLast.y0) * .6); fragment.append(gapRun(lineLast.x1, lineLast.x1 + width, lineLast.y0, lineLast.y1, geometry, factor)); lineLast = null; };
       for (const word of words) {
         if (!Array.isArray(word) || word.length < 5 || !word.slice(0, 4).every(Number.isFinite) || typeof word[4] !== 'string') continue;
@@ -776,6 +791,8 @@
         if (x1 <= x0 || y1 <= y0 || x0 < -1 || y0 < -1 || x1 > geometry.width + 1 || y1 > geometry.height + 1) { previous = null; flushTrailing(); continue; }
         const span = dom('span', 'pdf-word pdr-word'); span.dataset.rect = JSON.stringify([x0, y0, x1, y1]); span.dataset.pdfPage = String(geometry.page); span.dataset.height = String(y1 - y0);
         const run = dom('i', 'pdf-word-text', text);
+        const prefix = !mathLines.has(Math.round(y0 * 2)) && bionicPrefix(text);
+        if (prefix) span.dataset.bionicPrefix = JSON.stringify(prefix);
         span.append(run);
         Object.assign(span.style, { left: `${x0 / geometry.width * 100}%`, top: `${y0 / geometry.height * 100}%`, width: `${(x1 - x0) / geometry.width * 100}%`, height: `${(y1 - y0) / geometry.height * 100}%`, fontSize: `${(y1 - y0) * factor}px` });
         // The separator space gets its own run over the real gap. Without it a
@@ -788,7 +805,49 @@
         previous = { x1, y0, y1 }; lineLast = { x1, y0, y1 };
       }
       flushTrailing();
-      layer.append(fragment); sheet.append(layer); fitWordLayer(layer);
+      layer.append(fragment); sheet.append(layer); fitWordLayer(layer); paintBionicLayer(sheet, geometry);
+    }
+    /** 用原页像素作局部膨胀，避免估计字体覆盖、重复文字与光标节点变化。
+     * 前缀宽度沿用可选文字层的逐词拟合；无法测量的词保留原样。 */
+    function paintBionicLayer(sheet, geometry) {
+      sheet.querySelector('.pdr-bionic-layer')?.remove();
+      if (!readingAppearance.bionic || !geometry) return;
+      const image = sheet.querySelector('.pdr-page-image');
+      if (!image?.src) return;
+      const paths = [];
+      for (const span of sheet.querySelectorAll('.pdr-word[data-bionic-prefix]')) {
+        const run = span.querySelector('.pdf-word-text'), node = run?.firstChild;
+        if (node?.nodeType !== 3) continue;
+        const [start, end] = JSON.parse(span.dataset.bionicPrefix), [x0, y0, x1, y1] = JSON.parse(span.dataset.rect);
+        try {
+          const range = document.createRange(); range.selectNodeContents(run);
+          const full = range.getBoundingClientRect().width;
+          if (!(full > 0)) continue;
+          range.setStart(node, 0); range.setEnd(node, start); const leading = range.getBoundingClientRect().width;
+          range.setEnd(node, end); const prefix = range.getBoundingClientRect().width;
+          const left = x0 + (x1 - x0) * Math.max(0, Math.min(1, leading / full)), right = x0 + (x1 - x0) * Math.max(0, Math.min(1, prefix / full));
+          if (right > left) paths.push(`M${left.toFixed(3)} ${y0}H${right.toFixed(3)}V${y1}H${left.toFixed(3)}Z`);
+        } catch { /* 无文字测量能力时保留原页，不假造字形或区域。 */ }
+      }
+      if (!paths.length) return;
+      const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg'), defs = document.createElementNS(ns, 'defs');
+      const clip = document.createElementNS(ns, 'clipPath'), path = document.createElementNS(ns, 'path'), filter = document.createElementNS(ns, 'filter'), morphology = document.createElementNS(ns, 'feMorphology');
+      const key = `pdr-bionic-${appearanceId}-${geometry.page}`, copy = document.createElementNS(ns, 'image'), group = document.createElementNS(ns, 'g');
+      svg.classList.add('pdr-bionic-layer'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false'); svg.setAttribute('viewBox', `0 0 ${geometry.width} ${geometry.height}`); svg.setAttribute('preserveAspectRatio', 'none'); svg.dataset.bionicWords = String(paths.length);
+      clip.id = `${key}-clip`; clip.setAttribute('clipPathUnits', 'userSpaceOnUse'); path.setAttribute('d', paths.join('')); clip.append(path);
+      filter.id = `${key}-bold`; filter.setAttribute('color-interpolation-filters', 'sRGB'); filter.setAttribute('x', '0'); filter.setAttribute('y', '0'); filter.setAttribute('width', '100%'); filter.setAttribute('height', '100%');
+      morphology.setAttribute('operator', 'erode'); morphology.setAttribute('radius', String(Math.max(.22, .6 / Math.max(.01, layoutWidth / geometry.width)))); filter.append(morphology); defs.append(clip, filter);
+      copy.setAttribute('href', image.src); copy.setAttribute('width', String(geometry.width)); copy.setAttribute('height', String(geometry.height)); copy.setAttribute('preserveAspectRatio', 'none'); copy.setAttribute('filter', `url(#${key}-bold)`);
+      group.setAttribute('clip-path', `url(#${key}-clip)`); group.append(copy); svg.append(defs, group); sheet.append(svg);
+    }
+    function setReadingAppearance(value = {}) {
+      const next = { ...readingAppearance };
+      for (const key of ['darkPdf', 'bionic']) if (typeof value[key] === 'boolean') next[key] = value[key];
+      const changed = next.bionic !== readingAppearance.bionic;
+      readingAppearance = next;
+      root.classList.toggle('pdr-dark-pdf', next.darkPdf); root.classList.toggle('pdr-bionic', next.bionic);
+      if (changed) for (const page of queue.snapshot().residents) paintBionicLayer(slots[page - 1].sheet, pages[page - 1]);
+      return { ...readingAppearance };
     }
     function renderInternalLinks(sheet, page, values, geometry) {
       const links = normalizeInternalLinks(values, geometry, pages); pageLinks.set(page, links);
@@ -891,6 +950,7 @@
         const sheet = slots[page - 1].sheet, factor = width / pages[page - 1].width;
         for (const span of sheet.querySelectorAll('.pdr-word')) span.style.fontSize = `${Number(span.dataset.height) * factor}px`;
         fitWordLayer(sheet.querySelector('.pdr-word-layer'));
+        paintBionicLayer(sheet, pages[page - 1]);
       }
       if (previous) root.scrollTop = metrics[oldPage - 1].top + fraction * metrics[oldPage - 1].height;
       updateWindow();
@@ -1270,7 +1330,7 @@
     root.addEventListener('gesturestart', gestureStart, { passive: false }); root.addEventListener('gesturechange', gestureChange, { passive: false }); root.addEventListener('gestureend', gestureEnd, { passive: false });
     document.addEventListener('selectionchange', selectionChanged); document.addEventListener('pointerup', nativePointerEnded); document.addEventListener('pointercancel', nativePointerEnded);
     function dispose() { clear(); disposed = true; ink.clear(); overlays.clear(); queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('pointerdown', pointerDown); root.removeEventListener('pointermove', pointerMove); root.removeEventListener('pointercancel', pointerCancel); root.removeEventListener('lostpointercapture', pointerCancel); root.removeEventListener('pointerleave', pointerLeave); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); root.removeEventListener('wheel', wheel); root.removeEventListener('gesturestart', gestureStart); root.removeEventListener('gesturechange', gestureChange); root.removeEventListener('gestureend', gestureEnd); root.removeEventListener('keydown', userNavigate); document.removeEventListener('selectionchange', selectionChanged); document.removeEventListener('pointerup', nativePointerEnded); document.removeEventListener('pointercancel', nativePointerEnded); }
-    return { open, goTo, advance, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, setLayout, getLayout: () => layout, resize, revealAnnotation, revealRegion, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, layout, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
+    return { open, goTo, advance, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, setLayout, getLayout: () => layout, setReadingAppearance, getReadingAppearance: () => ({ ...readingAppearance }), resize, revealAnnotation, revealRegion, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, layout, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
-  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition, normalizeInternalLinks, internalLinkAt });
+  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition, normalizeInternalLinks, internalLinkAt, bionicPrefix });
 })();

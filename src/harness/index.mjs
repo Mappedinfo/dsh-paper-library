@@ -13,6 +13,7 @@ import { createLocalStateStore } from '../local-state.mjs'
 import { createInkQueue } from '../ink-queue.mjs'
 import { createLanguageLearning } from './language-learning.mjs'
 import { createHandwriting } from './handwriting.mjs'
+import { createAnnotationCaption } from './annotation-caption.mjs'
 import { createLibraryKnowledge } from './library-knowledge.mjs'
 import { createPaperAnalysis } from './paper-analysis.mjs'
 import { createPaperAnalysisAgent } from './paper-analysis-agent.mjs'
@@ -123,6 +124,7 @@ export function apply(ctx, rawConfig = {}) {
     const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python })
     const handwritingAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }, { attachments: () => ctx.get('attachments') })
     const handwriting = createHandwriting({ store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })
+    const annotationCaption = createAnnotationCaption({ store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })
     const libraryKnowledge = createLibraryKnowledge({ store: options.localState, ai: languageAI, paperChat, dispatch, library: config.library, python: config.python,
       getModel: async (entity, { signal } = {}) => {
         if (entity.kind === 'release') {
@@ -148,7 +150,7 @@ export function apply(ctx, rawConfig = {}) {
     // The workspace owns the manuscript folder under the DSH home and keeps it in the
     // sync service's own config; both are host-side jobs, so neither enters the worker.
     const latexWorkspace = createLatexWorkspace({ config, dispatch, settings, library: config.library, python: config.python })
-    const fetchHandler = createFetchHandler({ ...options, paperChat, companion, languageLearning, handwriting, libraryKnowledge, paperAnalysis, challengeMining, latexAI, latexWorkspace, basePath: '/api/paper-library' })
+    const fetchHandler = createFetchHandler({ ...options, paperChat, companion, languageLearning, handwriting, annotationCaption, libraryKnowledge, paperAnalysis, challengeMining, latexAI, latexWorkspace, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',
       path: '/api/paper-library',

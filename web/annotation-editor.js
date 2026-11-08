@@ -1,8 +1,9 @@
 'use strict';
 // 每条原生 PDF 批注独立编辑；草稿先存本地服务，保存成功后再清除。
-window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,refresh,changed,toast}) {
+window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,refresh,changed,toast,captionAvailable=()=>false}) {
   const papers=new Map(), delay=650;
-  const previews=window.PaperAnnotationPreviews?.create({api,getPaper});
+  const captions=window.PaperAnnotationCaptions?.create({api,getPaper,getNotes,available:captionAvailable,saved:refresh});
+  const previews=window.PaperAnnotationPreviews?.create({api,getPaper,onPreview:(box,note,result)=>captions?.decorate(box,note,result?.source_version)});
   // 仅窗口标识放在 sessionStorage；草稿正文仍保存到本地服务。
   // 不同窗口编辑同篇论文时，不争抢一个整篇草稿记录。
   let client=crypto.randomUUID();
@@ -160,13 +161,13 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
 }};
 
 // 矩形卡片只在进入视野后读取单个区域，最多并发两张，内存保留 16 张。
-window.PaperAnnotationPreviews={create({api,getPaper}){
+window.PaperAnnotationPreviews={create({api,getPaper,onPreview=()=>{}}){
   const cache=new Map(),pending=new Map();let active=0,queue=[];
   const observer=typeof IntersectionObserver==='function'?new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){observer.unobserve(entry.target);entry.target.loadPreview?.();}},{rootMargin:'120px'}):null;
   function pump(){
     queue=queue.filter(job=>{if(job.targets.some(target=>target.isConnected))return true;pending.delete(job.key);return false;});
     while(active<2&&queue.length){const job=queue.shift();active++;
-      void api('annotation_preview',{id:job.paperId,page:job.note.page,annotation_id:job.note.id,render_width:480}).then(result=>{
+      void api('annotation_preview',{id:job.paperId,page:job.note.page,annotation_id:job.note.id,render_width:640}).then(result=>{
         if(result?.annotation_id!==job.note.id||result.page!==job.note.page||typeof result.image!=='string'||result.image.length>1400000||result.mime_type!=='image/png')throw Error('区域预览返回无效，请重试。');
         cache.delete(job.key);cache.set(job.key,{result,time:Date.now()});while(cache.size>16)cache.delete(cache.keys().next().value);
         for(const target of job.targets)if(target.isConnected&&getPaper()?.id===job.paperId)display(target,result);
@@ -175,13 +176,13 @@ window.PaperAnnotationPreviews={create({api,getPaper}){
   }
   function display(box,result){
     const image=document.createElement('img');image.alt=`第 ${result.page} 页矩形框内的 PDF 内容`;image.width=result.width;image.height=result.height;image.decoding='async';image.src=`data:image/png;base64,${result.image}`;
-    box.querySelector('.annotation-preview-open').replaceChildren(image);box.querySelector('.annotation-preview-status').textContent='';box.querySelector('.annotation-preview-retry').hidden=true;
+    box.querySelector('.annotation-preview-open').replaceChildren(image);box.querySelector('.annotation-preview-status').textContent='';box.querySelector('.annotation-preview-retry').hidden=true;onPreview(box,box.previewNote,result);
   }
   function decorate(notes){
     observer?.disconnect();const paperId=getPaper()?.id;if(!paperId)return;
     for(const card of document.querySelectorAll('#annotation-list > .annotation-card')){
       const note=notes.find(n=>n.id===card.dataset.annotationId);if(note?.type!=='square'||card.querySelector('.annotation-region-preview'))continue;
-      const box=document.createElement('div');box.className='annotation-region-preview';
+      const box=document.createElement('div');box.className='annotation-region-preview';box.previewNote=note;
       const button=document.createElement('button');button.type='button';button.className='annotation-preview-open';button.dataset.noteAction='page';button.title='点击截图定位 PDF 中的矩形框';button.setAttribute('aria-label',`定位第 ${note.page} 页矩形框`);button.textContent='矩形区域预览';
       const status=document.createElement('span');status.className='annotation-preview-status small muted';status.setAttribute('role','status');status.textContent='等待加载截图…';
       const retry=document.createElement('button');retry.type='button';retry.className='button subtle annotation-preview-retry';retry.textContent='重试截图';retry.hidden=true;
@@ -197,6 +198,37 @@ window.PaperAnnotationPreviews={create({api,getPaper}){
       retry.addEventListener('click',event=>{event.stopPropagation();box.loadPreview();});
     }
     for(const box of document.querySelectorAll('#annotation-list .annotation-region-preview'))if(!box.querySelector('img')){if(observer)observer.observe(box);else box.loadPreview?.();}
+  }
+  return {decorate};
+}};
+
+// 截图成功且进入视野后才生成说明；一次只请求一个区域，失败由用户重试。
+window.PaperAnnotationCaptions={create({api,getPaper,getNotes,available,saved}){
+  const records=new Map();let running=false;const queue=[];
+  function paint(record){for(const box of record.boxes)if(box.isConnected){box.querySelector('.annotation-caption-status').textContent=record.status;const retry=box.querySelector('.annotation-caption-retry');retry.hidden=!record.error;retry.disabled=record.pending;}}
+  async function pump(){
+    if(running)return;
+    const record=queue.shift();if(!record)return;
+    if(getPaper()?.id!==record.paperId||!record.boxes.some(box=>box.isConnected)){record.pending=false;record.status='图像说明待生成';records.delete(record.key);pump();return;}
+    running=true;record.status='正在生成图像说明…';paint(record);
+    try{
+      const result=await api('annotation_caption',{id:record.paperId,annotation_id:record.note.id,page:record.note.page,...(record.retry?{retry:true}:{})});
+      if(!result?.saved||!result.annotation?.id)throw Error('图像说明尚未确认保存，请重试。');
+      record.status='AI 图像说明已保存';record.error=false;
+      if(getPaper()?.id===record.paperId)await saved(record.paperId,record.note);
+    }catch(error){record.status=`图像说明未完成：${error.message}`;record.error=true;}
+    finally{record.pending=false;paint(record);running=false;pump();}
+  }
+  function decorate(box,note,sourceVersion){
+    if(!available()||!note||box.querySelector('.annotation-caption-status'))return;
+    if(getNotes().some(n=>n.source_kind==='annotation-caption'&&(n.reply_to===note.id||n.annotation_ids?.includes(note.id))&&(!sourceVersion||n.source_message_id===sourceVersion)))return;
+    const paperId=getPaper()?.id,key=JSON.stringify([paperId,note.id,note.page,note.rects||note.rect,sourceVersion]);
+    const status=document.createElement('span');status.className='annotation-caption-status small muted';status.setAttribute('role','status');
+    const retry=document.createElement('button');retry.type='button';retry.className='button subtle annotation-caption-retry';retry.textContent='重试图像说明';retry.hidden=true;box.append(status,retry);
+    let record=records.get(key);if(!record){record={key,paperId,note,boxes:[],pending:true,error:false,status:'图像说明等待生成'};records.set(key,record);queue.push(record);}
+    record.boxes=record.boxes.filter(b=>b.isConnected);record.boxes.push(box);paint(record);
+    retry.addEventListener('click',event=>{event.stopPropagation();if(record.pending||getPaper()?.id!==paperId)return;record.pending=true;record.error=false;record.retry=true;record.status='图像说明等待生成';queue.push(record);paint(record);void pump();});
+    void pump();
   }
   return {decorate};
 }};
