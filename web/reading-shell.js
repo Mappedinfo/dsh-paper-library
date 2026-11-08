@@ -8,7 +8,8 @@ window.PaperReadingShell = (() => {
     underline: '拖选文字，保存为 PDF 下划线批注。',
     strikeout: '拖选文字，保存为 PDF 删除线批注。',
     note: '点击页面中的位置，添加一条便笺。',
-    ink: '用 Pencil 或鼠标直接写画；点「完成手写」继续阅读，笔迹自动保存。',
+    square: '拖框标记图片细节；可添加说明后保存为 PDF 矩形批注。',
+    ink: '用笔或鼠标自由写画；点「完成笔画」继续阅读，保存为 PDF 原生笔迹。',
   };
   const MODES = { auto: '自动着色', ask: '勾选后提问' };
   const MODE_HINTS = {
@@ -33,7 +34,7 @@ window.PaperReadingShell = (() => {
     };
     let context='reader', tool='select', color='#ffdb66', inkColor='#2455a4', inkWidth=2, mode='ask', markup='highlight', focused=false, saveLayoutTimer=null, penOnly=false;
     let inkBusy=false, inkError='', inkTitle='', linkedSession=null, linkedBusy=false, finishLinked=null, inkRecords=[];
-    const applyTool=()=>reader()?.setTool(tool,tool==='ink'?{color:inkColor,width:inkWidth}:color);
+    const applyTool=()=>reader()?.setTool(tool,['ink','square'].includes(tool)?{color:inkColor,width:inkWidth}:color);
     const ribbon=node('nav',null,'reader-ribbon');ribbon.setAttribute('aria-label','文献工作区');
     const projectActions=document.querySelector('.project-actions');
     projectActions?.addEventListener('click',event=>{if(event.target.closest('.project-actions-panel button'))projectActions.open=false;});
@@ -54,7 +55,7 @@ window.PaperReadingShell = (() => {
     top.insertBefore(ribbon,$('paper-tools'));
     const readerTools=$('toolbar-reader'), annotationTools=node('div',null,'annotation-tool-group'), libraryTools=node('div',null,'library-tool-group');
     annotationTools.id='toolbar-annotation';libraryTools.id='toolbar-library';
-    for(const [type,label] of [['select','选择'],['ink','手写'],['highlight','高亮'],['underline','下划线'],['strikeout','删除线'],['note','便笺']]){
+    for(const [type,label] of [['select','选择'],['ink','自由笔画'],['square','矩形框'],['highlight','高亮'],['underline','下划线'],['strikeout','删除线'],['note','便笺']]){
       const b=button(`reader-tool-${type}`,label,async()=>{if(beforeToolChange&&!await beforeToolChange(type))return;tool=type;context='annotations';if(['highlight','underline','strikeout'].includes(type)){markup=type;saveLayoutLater();}applyTool();sync();status(hintFor());});b.dataset.readerTool=type;annotationTools.append(b);
     }
     const colorLabel=node('label','颜色','reader-color');const input=node('input');input.type='color';input.id='reader-color';input.value=color;input.setAttribute('aria-label','批注颜色');
@@ -65,8 +66,8 @@ window.PaperReadingShell = (() => {
     const saveLayout=()=>patchLayout({mode,color,markup,inkColor,inkWidth});
     const saveLayoutLater=()=>{if(saveLayoutTimer!==null)window.clearTimeout(saveLayoutTimer);saveLayoutTimer=window.setTimeout(()=>{saveLayoutTimer=null;saveLayout();},150);};
     const hintFor=()=>tool==='ink'&&reader()?.getInkContext?.()?'直接在本页写画，笔迹绑定当前批注；再点侧栏手写按钮返回常规标注。':(MODE_HINTS[mode]||{})[tool]||hints[tool]||'';
-    input.addEventListener('input',()=>{if(tool==='ink')inkColor=input.value;else color=input.value;applyTool();saveLayout();sync();});colorLabel.append(input);
-    const widthLabel=node('label','粗细','reader-ink-width');const widthInput=node('select');widthInput.id='reader-ink-width';widthInput.setAttribute('aria-label','手写笔迹粗细');
+    input.addEventListener('input',()=>{if(['ink','square'].includes(tool))inkColor=input.value;else color=input.value;applyTool();saveLayout();sync();});colorLabel.append(input);
+    const widthLabel=node('label','粗细','reader-ink-width');const widthInput=node('select');widthInput.id='reader-ink-width';widthInput.setAttribute('aria-label','笔画与矩形边框粗细');
     for(const [value,label] of [[1,'细'],[2,'中'],[4,'粗']]){const option=node('option',label);option.value=String(value);widthInput.append(option);}widthInput.value=String(inkWidth);widthLabel.append(widthInput);
     widthInput.addEventListener('change',()=>{inkWidth=Number(widthInput.value);applyTool();saveLayout();});
     // Two reading habits: mark while reading (自动着色) or select then ask
@@ -147,7 +148,7 @@ window.PaperReadingShell = (() => {
     const inkReturn=button('reader-ink-return','返回',()=>void returnToInk?.());inkReturn.title='返回待存笔迹';inkReturn.setAttribute('aria-label','返回待存笔迹');
     const inkUndo=button('reader-ink-undo','撤销',()=>reader()?.undoInk());inkUndo.title='撤销一笔';inkUndo.setAttribute('aria-label','撤销一笔');
     const inkDiscard=button('reader-ink-discard','清除',()=>reader()?.clearInk());inkDiscard.setAttribute('aria-label','清除待存笔迹');
-    const inkSave=button('reader-ink-save','完成手写',()=>{if(linkedSession){void finishLinked?.();return;}if(saveInk?.()&&!reader()?.getInkContext?.()){tool='select';applyTool();sync();}});
+    const inkSave=button('reader-ink-save','完成笔画',()=>{if(linkedSession){void finishLinked?.();return;}if(saveInk?.()&&!reader()?.getInkContext?.()){tool='select';applyTool();sync();}});
     inkSave.classList.add('primary');inkBar.append(inkSave,inkReturn,inkUndo,inkDiscard,inkLabel);statusBar.append(inkBar,message);
     function syncInk(){
       const draft=reader()?.getInkDraft?.(),target=draft||linkedSession||reader()?.getInkContext?.()||{paperId:state.active?.id,page:state.page};
@@ -166,7 +167,7 @@ window.PaperReadingShell = (() => {
       inkDiscard.textContent=inkError?'放弃重试':'清除';
       inkDiscard.title=inkError?'仅移除草稿，已写入 PDF 的笔迹仍保留。':'清除待存笔迹，已保存的笔迹仍保留';
       input.disabled=tool==='ink'&&(inkBusy||Boolean(draft));widthInput.disabled=inkBusy||Boolean(draft);
-      inkSave.textContent=inkError&&!linkedSession?'重试保存':'完成手写';
+      inkSave.textContent=inkError&&!linkedSession?'重试保存':linkedSession?'完成手写':'完成笔画';
       if(!draft)inkError='';
     }
     function linkedChanged(session,{ending=false,starting=false,finish}={}){linkedSession=session?{...session}:null;linkedBusy=ending||starting;finishLinked=finish;syncInk();}
@@ -230,8 +231,8 @@ window.PaperReadingShell = (() => {
       for(const b of annotationTools.querySelectorAll('[data-reader-tool]'))b.setAttribute('aria-pressed',String(b.dataset.readerTool===tool));
       for(const [value,b] of Object.entries(modeButtons))b.setAttribute('aria-pressed',String(mode===value));
       modeGroup.dataset.mode=mode;
-      modeGroup.hidden=tool==='ink';widthLabel.hidden=tool!=='ink';
-      input.value=tool==='ink'?inkColor:color;widthInput.value=String(inkWidth);syncInk();
+      modeGroup.hidden=['ink','square'].includes(tool);widthLabel.hidden=!['ink','square'].includes(tool);
+      input.value=['ink','square'].includes(tool)?inkColor:color;widthInput.value=String(inkWidth);syncInk();
       message.hidden=!active||table;
       if(surface==='graph')status('选择节点查看联系与来源；有页码的依据可返回 PDF。');
       else status(hintFor());
@@ -261,7 +262,7 @@ window.PaperReadingShell = (() => {
     // Prevent a homepage link from discarding a question/metadata draft.
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
     sync();
-    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,zoomChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:tool==='ink'?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
+    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,zoomChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:['ink','square'].includes(tool)?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
       dispose(){if(zoomSaveTimer!==null)window.clearTimeout(zoomSaveTimer);for(const {disclosure,update} of organizerDisclosures)disclosure.removeEventListener('toggle',update);for(const {disclosure,toggle} of menus)disclosure.removeEventListener('toggle',toggle);menuObserver?.disconnect();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placeMenus);document.removeEventListener('scroll',placeMenus,true);document.removeEventListener('click',closeMenus);document.removeEventListener('keydown',menuKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);}};
   }
   return {create};

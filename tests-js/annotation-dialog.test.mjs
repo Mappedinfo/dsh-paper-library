@@ -105,3 +105,20 @@ test('generic backdrop handling routes only annotation to autosave and busy expl
   assert.match(source, /dialog\.id === 'annotation-dialog' && annotationSaveBusy\) return; dialog\.close\(\)/)
   assert.match(source, /'cancel', event => \{ if \(annotationSaveBusy\) event\.preventDefault\(\)/)
 })
+
+test('rectangle comments preserve region, stroke width and color; an empty region does not launch companion AI', async () => {
+  const f=fixture({mode:'square',comment:''});
+  Object.assign(f.state.annotationDraft,{width:4,selection:{page:3,text:'',rects:[[12,24,100,140]]}});
+  assert.equal(await f.submit(),true);
+  const request=f.calls.find(call=>call.action==='annotate');
+  assert.equal(request.type,'square');assert.deepEqual(request.rects,[[12,24,100,140]]);
+  assert.equal(request.width,4);assert.equal(request.color,'#3489cb');assert.equal(request.text,'');assert.equal(request.companion_skip,true);
+});
+
+test('failed rectangle save retains geometry and comment for retry; cancelling an empty frame writes nothing', async () => {
+  const f=fixture({mode:'square',api:()=>{throw Error('Synthetic write conflict')}});
+  Object.assign(f.state.annotationDraft,{width:1,selection:{page:3,text:'',rects:[[12,24,100,140]]}});
+  const draft=f.state.annotationDraft;assert.equal(await f.submit(),false);assert.equal(f.state.annotationDraft,draft);
+  assert.equal(f.nodes.get('annotation-dialog').open,true);assert.equal(f.nodes.get('annotation-comment').value,'Synthetic interpretation');
+  const empty=fixture({mode:'square',comment:''});assert.equal(await empty.context.dismissAnnotation(),true);assert.equal(empty.calls.some(c=>c.action),false);
+});

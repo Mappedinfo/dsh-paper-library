@@ -5,6 +5,13 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { appendConversationDraft, createConversationBridge, readerSnapshot } from '../src/client/conversation-context.mjs'
 
+test('rectangle draft and linked-handwriting return tool survive host tab handoff', () => {
+  const draft={mode:'square',id:'paper-1',page:2,color:'#2455a4',width:4,comment:'Figure detail',selection:{page:2,text:'',rects:[[10,20,80,90]]}};
+  const snapshot={paperId:'paper-1',page:2,annotationDraft:draft,linkedHandwriting:{paperId:'paper-1',page:2,parentId:'region-1',previousTool:'square'}};
+  const result=readerSnapshot(snapshot);assert.deepEqual(result.annotationDraft,draft);assert.equal(result.linkedHandwriting.previousTool,'square');
+  for(const width of [0,9,NaN,Infinity,'2',true])assert.throws(()=>readerSnapshot({...snapshot,annotationDraft:{...draft,width}}),/粗细/);
+});
+
 const tick = async () => { for (let i = 0; i < 6; i++) await Promise.resolve() }
 
 function handwrittenDraft() {

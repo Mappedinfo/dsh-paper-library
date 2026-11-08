@@ -26,7 +26,7 @@ function linkedParent(value) {
 
 function linkedHandwriting(value, paperId) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.paperId !== 'string' || !value.paperId.trim() || value.paperId !== paperId) throw new Error('关联手写的文献身份无效')
-  if (!['select', 'highlight', 'underline', 'strikeout', 'note'].includes(value.previousTool)) throw new Error('关联手写的原阅读工具无效')
+  if (!['select', 'highlight', 'underline', 'strikeout', 'note', 'square'].includes(value.previousTool)) throw new Error('关联手写的原阅读工具无效')
   return { paperId: value.paperId, page: pageNumber(value.page), parentId: linkedParent(value.parentId), previousTool: value.previousTool }
 }
 
@@ -154,7 +154,7 @@ export function readerSnapshot(value) {
   }
   if (value.annotationDraft != null) {
     const draft = value.annotationDraft
-    if (!['note', 'highlight', 'underline', 'strikeout', 'edit'].includes(draft.mode)) throw new Error('批注草稿类型无效')
+    if (!['note', 'highlight', 'underline', 'strikeout', 'square', 'edit'].includes(draft.mode)) throw new Error('批注草稿类型无效')
     snapshot.annotationDraft = {
       mode: draft.mode,
       id: boundedString(draft.id, 200),
@@ -164,6 +164,10 @@ export function readerSnapshot(value) {
     if (draft.color !== undefined) {
       if (typeof draft.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(draft.color)) throw new Error('批注草稿颜色无效')
       snapshot.annotationDraft.color = draft.color
+    }
+    if (draft.width !== undefined) {
+      if (!Number.isFinite(draft.width) || draft.width < 0.5 || draft.width > 8) throw new Error('矩形边框粗细无效')
+      snapshot.annotationDraft.width = draft.width
     }
     if (draft.quote !== undefined) snapshot.annotationDraft.quote = boundedString(draft.quote, TEXT_LIMIT)
     if (draft.note) {

@@ -12,10 +12,10 @@ function inputLifecycle() {
   const buffer = createInkBuffer(), paths = [], events = [], messages = [], style = { width: 2, color: '#336699' }, origin = { paperId: 'paper-a', page: 1 };
   let captured = true;
   const root = { hasPointerCapture: () => captured, releasePointerCapture: () => { captured = false; } };
-  const scope = vm.createContext({ ink: buffer, root, inkGesture: null, inkFrame: null, inkEnabled: true, markupGesture: null, touchPan: null, handledTouches: new Set(),
+  const scope = vm.createContext({ ink: buffer, root, inkGesture: null, inkFrame: null, inkEnabled: true, markupGesture: null, rectangleGesture: null, touchPan: null, handledTouches: new Set(),
     inkDetails: () => { const draft = buffer.preview(); return { ...origin, strokes: draft?.paths.length || 0, points: draft?.paths.reduce((sum, path) => sum + path.length, 0) || 0, revision: draft?.revision }; },
     traceInk: createInkTrace(value => events.push(plain(value))), inkChanged: () => paths.push(plain(buffer.snapshot())), paintInk() {}, inputEnded() {},
-    nativePointerEnded() {}, endTouchPan() {}, endTouch() {}, endMarkup() {}, onStatus: message => messages.push(message), window: { cancelAnimationFrame() {} } });
+    nativePointerEnded() {}, endTouchPan() {}, endTouch() {}, endMarkup() {}, endRectangle() {}, onStatus: message => messages.push(message), window: { cancelAnimationFrame() {} } });
   const extract = (start, end) => readerSource.slice(readerSource.indexOf(start), readerSource.indexOf(end, readerSource.indexOf(start)));
   vm.runInContext(extract('function endInk(', 'function appendInk(') + '\n' + extract('function pointerCancel(', 'function restoreInkDraft(') + '\n' + extract('function setInkEnabled(', 'function setPenOnly('), scope);
   function start(pointerType = 'pen') { captured = true; buffer.start(origin, [10, 20], style); buffer.append([30, 40]); scope.inkGesture = { pointerId: 7, pointerType }; }
@@ -374,7 +374,7 @@ test('short pages at the bottom of a zoomed-out viewport take priority over offs
 
 test('a new page can finish during touch scrolling while replacement and pinch still wait', async () => {
   const scope = vm.createContext({
-    inkGesture: null, markupGesture: null, nativeGesture: null, browserPinch: null,
+    inkGesture: null, markupGesture: null, rectangleGesture: null, nativeGesture: null, browserPinch: null,
     touchPan: { pointerId: 1 }, touchPoints: new Set([1]), inputWaiters: new Set(), scheduleRefresh() {},
   });
   const start = readerSource.indexOf('    function inputBusy(');
@@ -400,7 +400,7 @@ test('layout switching preserves the exact right-hand page and linked Ink points
   buffer.setContext(origin); buffer.start(origin, [10, 20], { width: 2, color: '#336699' }); buffer.append([30, 40]);
   const metrics = pageMetrics(pages, 600), calls = [], root = { dataset: {}, scrollTop: metrics[1].top + metrics[1].height * .2 };
   const scope = vm.createContext({ layout: 'single', root, pages, metrics, active: 2, layoutWidth: 600,
-    endInk: cancelled => { calls.push(['end-ink', cancelled]); buffer.end(cancelled); }, endMarkup() {}, endTouchPan() {}, resetTouchZoom() {}, nativeGesture: {}, inputEnded() {}, cancelNavigation() {},
+    endInk: cancelled => { calls.push(['end-ink', cancelled]); buffer.end(cancelled); }, endMarkup() {}, endRectangle() {}, endTouchPan() {}, resetTouchZoom() {}, nativeGesture: {}, inputEnded() {}, cancelNavigation() {},
     arrangeSlots() {}, resize: anchor => { scope.metrics = pageMetrics(pages, scope.layout === 'spread' ? 300 : 600, scope.layout); root.scrollTop = scope.metrics[anchor.page - 1].top + anchor.fraction * scope.metrics[anchor.page - 1].height; },
     queue: { want: values => calls.push(['want', plain(values)]) }, wantedPages: page => visibleWindow(scope.metrics, root.scrollTop, 600, page, scope.layout),
     updateWindow: page => calls.push(['window', page]), announce() {}, paintInk() {}, paintOverlays() {}, goTo: page => Promise.resolve(Math.max(1, Math.min(5, page))) });
@@ -419,7 +419,7 @@ test('layout switching preserves the exact right-hand page and linked Ink points
 test('a hidden reader contracts the spread residency budget without relying on resize or scroll events', async () => {
   const pages = Array.from({ length: 6 }, (_, index) => ({ page: index + 1, width: 600, height: 800 }));
   const scope = vm.createContext({ layout: 'spread', pages, metrics: pageMetrics(pages, 300, 'spread'), active: 2, layoutWidth: 300,
-    root: { dataset: {}, scrollTop: 0, clientWidth: 0, clientHeight: 0 }, endInk() {}, endMarkup() {}, endTouchPan() {}, resetTouchZoom() {}, nativeGesture: null, inputEnded() {}, cancelNavigation() {}, arrangeSlots() {}, resize() {}, updateWindow() {}, announce() {}, paintInk() {}, paintOverlays() {} });
+    root: { dataset: {}, scrollTop: 0, clientWidth: 0, clientHeight: 0 }, endInk() {}, endMarkup() {}, endRectangle() {}, endTouchPan() {}, resetTouchZoom() {}, nativeGesture: null, inputEnded() {}, cancelNavigation() {}, arrangeSlots() {}, resize() {}, updateWindow() {}, announce() {}, paintInk() {}, paintOverlays() {} });
   const installed = new Set(), evicted = [];
   scope.queue = createPageWindow({ maxResident: () => scope.layout === 'spread' ? 4 : 3, load: async job => ({ page: job.page }), install: page => installed.add(page), evict: page => { installed.delete(page); evicted.push(page); } });
   scope.wantedPages = page => visibleWindow(scope.metrics, 0, 0, page, scope.layout);
@@ -563,7 +563,7 @@ test('internal PDF links accept only bounded page destinations and keep point hi
 
 test('plain citation clicks take priority over annotation hits without consuming markup drags or ink', () => {
   const sheet = {}, calls = [];
-  const scope = vm.createContext({ handledTouches: new Set(), nativePointerEnded() {}, markupGesture: null, inkGesture: null, tool: 'select', MARKUP_TOOLS: new Set(['underline']),
+  const scope = vm.createContext({ handledTouches: new Set(), nativePointerEnded() {}, markupGesture: null, rectangleGesture: null, inkGesture: null, tool: 'select', MARKUP_TOOLS: new Set(['underline']),
     nativeGesture: { pointerId: 1, x: 25, y: 30, dragged: false }, selectionTimer: null,
     window: { getSelection: () => ({ isCollapsed: true }), setTimeout: () => 1, clearTimeout() {} },
     activateInternalLink: () => { calls.push('link'); return true; }, activateAnnotation: () => calls.push('annotation'), captureSelection: () => calls.push('selection'),

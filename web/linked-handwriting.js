@@ -68,7 +68,7 @@ window.PaperLinkedHandwriting = (() => {
       const restored=value||await persistence?.get('reader:linked-handwriting');
       const candidate=draft?.parentId?{paperId:draft.paperId,page:draft.page,parentId:draft.parentId,previousTool:restored?.parentId===draft.parentId?restored.previousTool:'highlight'}:restored;
       if(!candidate||typeof candidate.paperId!=='string'||typeof candidate.parentId!=='string'||!Number.isInteger(candidate.page))return;
-      try{reader()?.setInkContext(candidate);session={...candidate,previousTool:['select','highlight','underline','strikeout','note'].includes(candidate.previousTool)?candidate.previousTool:'highlight'};shell()?.setTool('ink');sync();schedule();}
+      try{reader()?.setInkContext(candidate);session={...candidate,previousTool:['select','highlight','underline','strikeout','note','square'].includes(candidate.previousTool)?candidate.previousTool:'highlight'};shell()?.setTool('ink');sync();schedule();}
       catch(error){toast(`关联手写待恢复：${error.message}`,true);}
     }
     function recognitionImage(group){

@@ -477,7 +477,7 @@ function renderAnnotations() {
     if(note.version)card.dataset.annotationVersion=note.version;
     card.dataset.companionText=String([note.text,note.comment,note.content,note.handwriting?.transcript,note.linked_ink?.transcript].some(value=>typeof value==='string'&&value.trim()));
     const meta = el('div', 'annotation-meta'); const pageLink = el('button', 'page-link', `第 ${note.page} 页`); pageLink.dataset.noteAction = 'page';
-    meta.append(pageLink, el('span', '', displayDate(note.modified || note.created)), el('span', 'note-type', note.kind === 'ai-feedback' || note.type === 'ai_feedback' || note.ai_generated ? 'AI 生成' : ({highlight:'高亮',underline:'下划线',strikeout:'删除线',note:'便笺',ink:'手写'})[note.type] || '批注'));
+    meta.append(pageLink, el('span', '', displayDate(note.modified || note.created)), el('span', 'note-type', note.kind === 'ai-feedback' || note.type === 'ai_feedback' || note.ai_generated ? 'AI 生成' : ({highlight:'高亮',underline:'下划线',strikeout:'删除线',note:'便笺',ink:'自由笔画',square:'矩形框'})[note.type] || '批注'));
     if (annotationTranslationAvailable && !window.PaperAnnotationThreads?.isAi(note)) {
       const translate = el('button', 'button subtle annotation-translate', translatingAnnotations.has(`${state.active?.id}:${note.id}`) ? '翻译中…' : '翻译');
       translate.type = 'button'; translate.dataset.noteAction = 'translate';
@@ -604,9 +604,10 @@ function openAnnotation(mode, note = null, options = {}) {
   if (!state.active?.pdf) return;
   const markup = ['highlight','underline','strikeout'].includes(mode);
   if (markup && !state.selection && !options.selection) return;
+  if (mode === 'square' && !options.selection?.rects?.length) return;
   const selection = options.selection || (markup ? state.selection : null);
-  state.annotationDraft = { mode, id: state.active.id, page: note?.page || selection?.page || state.page, note, selection, color: options.color || readingShell?.tool().color || '#ffdb66' };
-  $('annotation-dialog-title').textContent = ({edit:'编辑批注',highlight:'高亮并批注',underline:'下划线批注',strikeout:'删除线批注',note:'添加便笺'})[mode] || '添加批注';
+  state.annotationDraft = { mode, id: state.active.id, page: note?.page || selection?.page || state.page, note, selection, color: options.color || readingShell?.tool().color || '#ffdb66', ...(mode === 'square' ? {width: options.width ?? 2} : {}) };
+  $('annotation-dialog-title').textContent = ({edit:'编辑批注',highlight:'高亮并批注',underline:'下划线批注',strikeout:'删除线批注',square:'矩形框批注',note:'添加便笺'})[mode] || '添加批注';
   $('annotation-page-label').textContent = `第 ${state.annotationDraft.page} 页`;
   $('annotation-quote').textContent = note?.text || selection?.text || ''; $('annotation-quote').hidden = !$('annotation-quote').textContent;
   $('annotation-comment').value = note?.comment || note?.content || ''; $('annotation-comment').required = mode === 'note';
@@ -624,7 +625,7 @@ async function saveAnnotation(event) {
     try {
       result = draft.mode === 'edit'
         ? await api('annotation_update', { id: draft.id, annotation_id: draft.note.id, comment, companion_skip:handwriting||toDraft })
-        : await api('annotate', { id: draft.id, page: draft.page, type: draft.mode, text: draft.selection?.text || '', rects: draft.selection?.rects || [[20, 20, 40, 40]], comment, author: 'Reader', color: draft.color || '#ffdb66', companion_skip:handwriting||toDraft });
+        : await api('annotate', { id: draft.id, page: draft.page, type: draft.mode, text: draft.selection?.text || '', rects: draft.selection?.rects || [[20, 20, 40, 40]], comment, author: 'Reader', color: draft.color || '#ffdb66', ...(draft.mode === 'square' ? {width:draft.width ?? 2} : {}), companion_skip:handwriting||toDraft||draft.mode==='square'&&!comment.trim() });
     } catch (error) {
       if (state.annotationDraft === draft) { errorAt('annotation-error', error); if (!$('annotation-dialog').open) openDialog('annotation-dialog'); }
       else toast(`批注未保存：${error.message}`, true);
@@ -1228,7 +1229,7 @@ function publishReaderState() {
   };
   if ($('annotation-dialog').open && state.annotationDraft?.id === state.active.id) {
     const draft = state.annotationDraft;
-    snapshot.annotationDraft = { mode: draft.mode, id: draft.id, page: draft.page, color: draft.color, comment: $('annotation-comment').value,
+    snapshot.annotationDraft = { mode: draft.mode, id: draft.id, page: draft.page, color: draft.color, ...(draft.width !== undefined ? {width:draft.width} : {}), comment: $('annotation-comment').value,
       ...(draft.note ? { note: { id: draft.note.id, page: draft.note.page } } : {}),
       ...(draft.selection ? { selection: { page: draft.selection.page, text: draft.selection.text, rects: draft.selection.rects } } : {}),
     };
@@ -1282,7 +1283,7 @@ async function applyReaderSnapshot(snapshot,legacyChat=false) {
     }
     if(snapshot.readerSelection)showReaderSelection(snapshot.readerSelection);
     const draft = snapshot.annotationDraft;
-    if (draft?.id === state.active.id && ['note', 'highlight', 'underline', 'strikeout', 'edit'].includes(draft.mode)) {
+    if (draft?.id === state.active.id && ['note', 'highlight', 'underline', 'strikeout', 'square', 'edit'].includes(draft.mode)) {
       if (draft.mode === 'edit') {
         await loadAnnotations(state.active.id);
         if(snapshot.paperId!==state.active?.id||!readerSurfaceActive())return;
@@ -1291,7 +1292,7 @@ async function applyReaderSnapshot(snapshot,legacyChat=false) {
         else openAnnotation('edit', note);
       } else {
         if (draft.selection) state.selection = draft.selection;
-        openAnnotation(draft.mode, null, {selection:draft.selection,color:draft.color});
+        openAnnotation(draft.mode, null, {selection:draft.selection,color:draft.color,width:draft.width});
         // A queued page render may still be completing. The saved draft's page
         // is authoritative for this annotation, independent of the reader image.
         state.annotationDraft.page = draft.page;
@@ -1464,6 +1465,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
     if(readingShell?.mode()==='auto'){void autoMarkup(selection,intent);return;}
     if(['highlight','underline','strikeout'].includes(intent.intent))openAnnotation(intent.intent,null,{selection,color:intent.color});
   },
+  onRectangle: (selection,intent) => {if(selection.id===state.active?.id)openAnnotation('square',null,{selection,color:intent.color,width:intent.width});},
   onPageNote: (selection,intent) => {if(selection.id===state.active?.id)openAnnotation('note',null,{selection,color:intent.color});},
   onAnnotationActivate: (annotationId,info) => {if(info?.page&&state.active?.id&&annotationId){const note=state.annotations.find(value=>value.id===annotationId);linkAnnotationCard(note?.kind==='linked-handwriting'?note.parent_id:annotationId);}},
   onInkChange: inkDraftChanged,

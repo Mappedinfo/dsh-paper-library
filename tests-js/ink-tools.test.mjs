@@ -12,3 +12,10 @@ test('native ink tool carries nested stroke geometry and retry identity through 
   assert.deepEqual(requestFromTool(spec, { ...fields, library: '/private', action: 'delete' }, {}), { action: 'annotate', ...fields })
   assert.throws(() => requestFromTool(spec, { ...fields, paths: [Array.from({ length: 8000 }, () => [23.123456789, 42.123456789])] }, {}), /128 KiB/)
 })
+
+test('native rectangle tool carries a region and border style', () => {
+  const spec=TOOL_SPECS.find(value=>value.name==='library_annotate');
+  assert.ok(spec.parameters.type.enum.includes('square'));
+  const fields={id:'synthetic-paper',page:1,type:'square',rects:[[20,30,160,120]],width:4,color:'#2455a4',comment:'Figure detail'};
+  assert.deepEqual(requestFromTool(spec,fields,{}),{action:'annotate',...fields});
+});

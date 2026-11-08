@@ -197,7 +197,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 reply_to = parent.info.get("id") or f"external-{page.number + 1}-{parent.xref}"
             except (ValueError, RuntimeError):
                 pass
-        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids") if key in extra}}
+        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"width": annot.border.get("width", 1)} if kind == "square" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids") if key in extra}}
 
     def companion_excerpt(self, id, page):
         """One explicitly selected page, text only; no persistent index or OCR."""
@@ -223,6 +223,8 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         normalized = {"page": value["page"], "type": value["type"],
                       "text": text(value["text"]), "comment": text(value["comment"]),
                       "rects": [[round(float(v), 3) for v in rect] for rect in value["rects"]]}
+        if value["type"] == "square":
+            normalized.update(width=round(float(value["width"]), 3), color=value.get("color"))
         if value["type"] == "ink":
             if value.get("geometry_truncated"):
                 raise ValueError("ANNOTATION_GEOMETRY_LIMIT: an ink annotation exceeds the bounded geometry budget; split it in a PDF editor before referencing")
@@ -538,8 +540,8 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
     def _add_annotation(self, doc, page, type="highlight", rects=None, text="", comment="", author="Reader", color="#ffdb66", extra=None, paths=None, width=2, annotation_id=None, parent_id=None):
         import pymupdf as fitz
         current = self._page(doc, page)
-        if type not in {"highlight", "underline", "strikeout", "note", "ink"}:
-            raise ValueError("Supported annotation types are highlight, underline, strikeout, note and ink")
+        if type not in {"highlight", "underline", "strikeout", "note", "ink", "square"}:
+            raise ValueError("Supported annotation types are highlight, underline, strikeout, note, ink and square")
         linked_parent = None
         if parent_id is not None:
             if type != "ink":
@@ -550,12 +552,17 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             # Keep the annotation's owning Page alive throughout the mutation.
             current = parent_page
             extra = {**(extra or {}), "kind": "linked-handwriting"}
-        if type == "ink":
+        if type in {"ink", "square"}:
             if isinstance(width, bool) or not isinstance(width, (int, float)) or not 0.5 <= width <= 8:
-                raise ValueError("Ink width must be 0.5–8 PDF points")
+                raise ValueError(f"{'Ink' if type == 'ink' else 'Square'} width must be 0.5–8 PDF points")
+        if type == "ink":
             strokes = self._ink_paths(paths, current)
         else:
             rects = rects or ([[20, 20, 40, 40]] if type == "note" else [])
+            if type == "square" and (not isinstance(rects, list) or len(rects) != 1
+                    or not isinstance(rects[0], (list, tuple)) or len(rects[0]) != 4
+                    or any(isinstance(value, bool) for value in rects[0])):
+                raise ValueError("Square requires exactly one rectangle with four numeric coordinates")
             if not rects or len(rects) > 200:
                 raise ValueError("Provide 1–200 annotation rectangles")
             unrotated = [self._rect(rect, current, inverse=True) for rect in rects]
@@ -565,6 +572,10 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             raise ValueError("Color must be a six-digit hex string")
         if type == "ink":
             annot = current.add_ink_annot(strokes)
+            annot.set_border(width=float(width))
+        elif type == "square":
+            # 标准 /Square，只有边框；不以填色或图像遮盖框内细节。
+            annot = current.add_rect_annot(unrotated[0])
             annot.set_border(width=float(width))
         elif type != "note":
             # Markup quad order follows the native text baseline. Transforming
@@ -725,7 +736,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             warnings = []
             with self._open_pdf(self.pdf_path(id)) as doc:
                 for annotation in annotations:
-                    if annotation["type"] not in {"highlight", "note", "underline", "strikeout", "squiggly", "ink"} or annotation.get("geometry_truncated"):
+                    if annotation["type"] not in {"highlight", "note", "underline", "strikeout", "squiggly", "ink", "square"} or annotation.get("geometry_truncated"):
                         preservation = "PDF preserves the geometry; JSON marks geometry_truncated" if annotation.get("geometry_truncated") else "JSON/PDF preserve it"
                         if annotation.get("kind") == "handwriting-note":
                             preservation = "PDF preserves the original handwriting attachment; JSON preserves its transcript summary"
@@ -754,7 +765,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                         attributes["creationdate"] = annotation["created"]
                     if annotation["modified"]:
                         attributes["date"] = annotation["modified"]
-                    if annotation["type"] == "ink":
+                    if annotation["type"] in {"ink", "square"}:
                         attributes["width"] = str(annotation["width"])
                     elif annotation["type"] != "note":
                         points = []
