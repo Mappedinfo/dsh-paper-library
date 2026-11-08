@@ -396,6 +396,15 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 "coverage": {"requested": len(requested), "included": len(annotations), "total": total, "total_exact": total_exact, "all": len(annotations) == total},
                 "limits": self._reference_limits(max_characters)}
 
+    def _with_annotation_version(self, value, identity_reliable):
+        # 页面与列表使用同一版本规则；超长批注仍可阅读，不伪造完整引用版本。
+        if self._annotation_characters(value) <= 8000 and value.get("kind") != "ai-feedback":
+            try:
+                value["version"] = self._reference_annotation(value, identity_reliable)["version"]
+            except ValueError:
+                value["translation_unavailable"] = "批注内容或几何超过完整引用范围"
+        return value
+
     def annotations(self, id):
         result, characters = [], 0
         with self._open_pdf(self.pdf_path(id)) as doc:
@@ -405,12 +414,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                     if len(result) >= _constants().MAX_ANNOTATIONS:
                         return {"annotations": result, "truncated": True}
                     value = self._annotation(page, annot, handwriting=handwriting)
-                    # 短批注携带与精确引用相同的版本；超长/截断几何仍可阅读，但不能直接翻译。
-                    if self._annotation_characters(value) <= 8000 and value.get("kind") != "ai-feedback":
-                        try:
-                            value["version"] = self._reference_annotation(value, bool(annot.info.get("id")))["version"]
-                        except ValueError:
-                            value["translation_unavailable"] = "批注内容或几何超过完整引用范围"
+                    value = self._with_annotation_version(value, bool(annot.info.get("id")))
                     characters += self._annotation_characters(value)
                     if characters > 2_000_000:
                         return {"annotations": result, "truncated": True}
@@ -520,7 +524,9 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             annotation_characters = 0
             annotation_truncated = False
             for a in islice(current.annots() or [], 1001):
-                value = self._annotation(current, a, handwriting=handwriting, raw_words=raw_words)
+                value = self._with_annotation_version(
+                    self._annotation(current, a, handwriting=handwriting, raw_words=raw_words),
+                    bool(a.info.get("id")))
                 annotation_characters += self._annotation_characters(value)
                 if len(annotations) >= 1000 or annotation_characters > 2_000_000:
                     annotation_truncated = True

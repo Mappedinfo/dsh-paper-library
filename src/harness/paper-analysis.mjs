@@ -469,10 +469,12 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
         if (!resume?.questionnaire_snapshot || !stopped) throw fail('只能继续已停止的逐题分析。')
         const comparable = value => { const {request_id,resume_from,...rest}=requestOf(value);return rest }
         if (hash(comparable(resume)) !== hash(comparable(input)) || resume.questionnaire.hash !== config?.hash) throw fail('分析范围或题库已改变，请重新整理。','ANALYSIS_SOURCE_CHANGED',409)
-        if (resume.expected_modified && resume.expected_modified !== paper.modified) throw fail('文献已改变，请重新整理。','ANALYSIS_SOURCE_CHANGED',409)
+        // 全文只发送标题与固定正文；modified 也会因正常批注变化。
+        // 续跑在重读时核对正文指纹／旧来源与原提示，不以文件更新时间代替输入身份。
+        if (resume.analysis_title !== undefined && resume.analysis_title !== paper.title) throw fail('分析使用的文献标题已改变，请重新整理。','ANALYSIS_SOURCE_CHANGED',409)
       }
       const protocol = config ? {questionnaire:{version:config.version,hash:config.hash,groups:questionGroups(config,input)},questionnaire_snapshot:config,analysis_complete:false,metadata:{},field_sources:{}} : {}
-      const record=await store.put(key,{...request,...protocol,...(resume?.model?{resume_model:resume.model}:{}),...(repair?{resume_model:repair.model,repair_batch_count:repair.batch_count,repair_expected_modified:repair.expected_modified}:{}),prompt_templates:promptTemplateManifest(),fingerprint:hash(request),status:'queued',stage:'已排队',created_at:now(),...(execution==='direct'?{execution:'direct'}:{})},0)
+      const record=await store.put(key,{...request,...protocol,...(resume?.model?{resume_model:resume.model}:{}),...(resume?{...(resume.file_version?.schema==='pdf-content-v1'?{resume_file_version:resume.file_version}:{}),...(resume.analysis_title!==undefined?{resume_analysis_title:resume.analysis_title}:{}),...(Number.isInteger(resume.coverage?.page_count)?{resume_page_count:resume.coverage.page_count}:{})}:{}),...(repair?{resume_model:repair.model,repair_batch_count:repair.batch_count,repair_expected_modified:repair.expected_modified}:{}),prompt_templates:promptTemplateManifest(),fingerprint:hash(request),status:'queued',stage:'已排队',created_at:now(),...(execution==='direct'?{execution:'direct'}:{})},0)
       const pointer=await store.get(latestKey(input.id))
       await store.put(latestKey(input.id),{request_id:input.request_id},pointer.revision)
       if (disposed) throw fail('后台服务已停止。','ANALYSIS_UNAVAILABLE',409)

@@ -9,6 +9,25 @@ const hash = value => createHash('sha256').update(JSON.stringify(value)).digest(
 const clone = value => JSON.parse(JSON.stringify(value))
 const problem = message => Object.assign(new Error(message), { code: 'ANALYSIS_INVALID' })
 const union = (a = [], b = []) => [...new Set([...a, ...b])]
+const contentVersion = value => value?.schema === 'pdf-content-v1'
+const legacyVersion = value => value && !value.schema && Number.isInteger(value.device) && Number.isInteger(value.inode) && Number.isInteger(value.bytes) && typeof value.modified_ns === 'string'
+const sourceChanged = message => Object.assign(problem(message), { code: 'ANALYSIS_SOURCE_CHANGED' })
+
+// 旧版来源身份包含文件 stat。只有实际输入完全相同，才沿用旧的不可变来源。
+// 这只验证已读片段；未读页以本次建立的完整正文指纹作为后续基线。
+async function legacyResumePack(pack, savedIds, kernel, signal) {
+  if (!contentVersion(pack.file_version) || !Array.isArray(savedIds) || isDeepStrictEqual(savedIds, pack.source_ids)) return pack
+  if (savedIds.length !== pack.sources.length) throw sourceChanged('恢复时来源数量已改变，请重新整理。')
+  const old = await Promise.all(savedIds.map(id => kernel({ action: 'knowledge_source_get', id }, signal)))
+  const comparable = source => {
+    const { id, created_at, pdf_snapshot, ...body } = source
+    const { file_version, ...snapshot } = pdf_snapshot || {}
+    return { ...body, pdf_snapshot: snapshot }
+  }
+  if (!old.every((source, index) => source?.id === savedIds[index] && legacyVersion(source.pdf_snapshot?.file_version)
+    && isDeepStrictEqual(comparable(source), comparable(pack.sources[index])))) throw sourceChanged('恢复时正文、定位或提取方式已改变，请重新整理。')
+  return { ...pack, sources: old, source_ids: [...savedIds] }
+}
 export const questionKey = (id, requestId, batch, group) => `analysis.question:${hash([id, requestId])}:${batch}:${group}`
 
 /** 回答与原始响应分开保存，避免一个 256 KiB 状态条目重复塞入引文。 */
@@ -78,7 +97,7 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
   const questionCoverage = { question_ids: ids, complete: false, full_questionnaire: ids.length === config.questions.length,
     by_question: Object.fromEntries(ids.map(id => [id, { expected_batches: 0, answered_batches: 0, failed_batches: [], unread_batches: [], valid_answers: 0 }])) }
   let coverage = { read_pages: [], completed_pages: [], blank_pages: [], truncated_pages: [], omitted_pages: [], no_extractable_text_pages: [], empty_markdown_pages: [], characters: 0, full_document: false }
-  let cursor, version, expected, model, hasText = false, batchCount = 0, projectionFailures = 0
+  let cursor, version = input.resume_file_version, expected, analysisTitle = input.resume_analysis_title, model, hasText = false, batchCount = 0, projectionFailures = 0
   const summary = { answers: 0, valid_answers: 0, invalid_answers: 0, other_answers: 0, projection_limitations: 0, graph_budget_omissions: 0, relation_limitations: 0, reused_groups: 0, repair_revalidated:0, repair_repaired:0, repair_withdrawn:0, repair_unresolved:0 }
   let visual, job = input
   const patch = async value => { job = await update(value); return job }
@@ -93,18 +112,27 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
     const snapshotPack = originalBatch ? {paper:{id:input.id},expected_modified:input.repair_expected_modified,file_version:{snapshot:input.repair_from},
       sources:await Promise.all(originalBatch.source_ids.map(id=>kernel({action:'knowledge_source_get',id},readSignal))), source_ids:originalBatch.source_ids,coverage:originalBatch.coverage,preprocessing:originalBatch.preprocessing,
       next_cursor:index+1<input.repair_batch_count?{index:index+1,offset:0}:null} : null
-    const pack = sourcePack(snapshotPack || await kernel({ action: 'paper_analysis_batch', id: input.id, ...analysisInputOptions(input),
+    let pack = sourcePack(snapshotPack || await kernel({ action: 'paper_analysis_batch', id: input.id, ...analysisInputOptions(input),
       ...(input.pages ? { pages: input.pages } : {}), ...(cursor ? { cursor } : {}), ...(version ? { file_version: version } : {}) }, readSignal), input.id, input)
     signal.throwIfAborted()
-    if (expected && (pack.expected_modified !== expected || version && !isDeepStrictEqual(pack.file_version, version))) throw problem('读取期间文献资料或 PDF 已改变，已完成批次保留；请重新整理。')
+    if (version && !isDeepStrictEqual(pack.file_version, version)) throw sourceChanged('读取期间 PDF 正文已改变，已完成批次保留；请重新整理。')
+    if (!input.repair_from && analysisTitle !== undefined && pack.paper.title !== analysisTitle) throw sourceChanged('分析使用的文献标题已改变，请重新整理。')
+    if (input.resume_page_count !== undefined && pack.coverage.page_count !== input.resume_page_count) throw sourceChanged('恢复时 PDF 页数已改变，请重新整理。')
+    if (input.resume_from) {
+      const priorBatch = (await store.get(batchKey(input.id, input.resume_from, index))).value
+      const firstGroup = priorBatch ? null : (await store.get(questionKey(input.id, input.resume_from, index, 0))).value
+      const savedIds = priorBatch?.source_ids || firstGroup?.source_ids
+      if (savedIds) pack = sourcePack(await legacyResumePack(pack, savedIds, kernel, readSignal), input.id, input)
+    }
     version = pack.file_version; expected = pack.expected_modified
+    if (!input.repair_from) analysisTitle = pack.paper.title
     const imageInputs = pack.images.map(({ data, ...image }) => ({ ...image, bytes: Buffer.byteLength(data, 'base64') }))
     if (pack.visual_coverage) {
       pack.visual_coverage = { ...pack.visual_coverage, sent_pages: [] }
       visual = { ...pack.visual_coverage, sent_pages: visual?.sent_pages || [],
         rendered_pages: union(visual?.rendered_pages, pack.visual_coverage.rendered_pages), omitted_pages: union(visual?.omitted_pages, pack.visual_coverage.omitted_pages) }
     }
-    await patch({ expected_modified: expected, ...(pack.preprocessing ? { preprocessing: pack.preprocessing } : {}), ...(visual ? { visual_coverage: visual } : {}) })
+    await patch({ expected_modified: expected, file_version: version, ...(!input.repair_from ? { analysis_title: analysisTitle } : {}), ...(pack.preprocessing ? { preprocessing: pack.preprocessing } : {}), ...(visual ? { visual_coverage: visual } : {}) })
     const questionKeys = [], allAnswers = []
     let reusedGroups = 0
     let draft, compilation, saveError

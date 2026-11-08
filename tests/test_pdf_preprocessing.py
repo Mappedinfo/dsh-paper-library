@@ -139,8 +139,10 @@ def test_conversion_only_accesses_selected_original_page_and_has_no_ocr(document
     read = []
     insert = fitz.Document.insert_pdf
     def observed(doc, source, **kwargs):
-        if source.name:
+        if source.name and "from_page" in kwargs:
             read.extend(range(kwargs["from_page"], kwargs["to_page"] + 1))
+        elif source.name:
+            assert kwargs == {"links": False, "annots": False, "widgets": False}  # 底稿身份仅复制对象，不提词或渲染
         assert kwargs["annots"] is False
         return insert(doc, source, **kwargs)
     def forbidden(*args, **kwargs):
@@ -287,10 +289,9 @@ def test_cache_reuse_corruption_recovery_and_file_version_invalidation(document,
     assert calls == [2, 2] and repaired["source_ids"] == first["source_ids"]
     library.annotate(paper["id"], page=2, type="note", comment="Synthetic file version change")
     changed = batch(document, pages=[2])
-    assert changed["source_ids"] != first["source_ids"] and calls == [2, 2, 2]
-    assert changed["preprocessing"]["pages"][0]["cache_key"] != details["cache_key"]
-    with pytest.raises(ValueError, match="SOURCE_CHANGED"):
-        batch(document, pages=[2], file_version=first["file_version"])
+    assert changed["source_ids"] == first["source_ids"] and calls == [2, 2]
+    assert changed["preprocessing"]["pages"][0]["cache_key"] == details["cache_key"]
+    assert batch(document, pages=[2], file_version=first["file_version"])["file_version"] == first["file_version"]
 
 
 def test_cache_manifest_cannot_redirect_export_paths(document):
@@ -317,7 +318,7 @@ def test_derived_directory_symlink_is_rejected_without_writing_outside(document,
     assert list(outside.iterdir()) == []
 
 
-def test_file_change_during_conversion_rejects_before_saving_sources(document, monkeypatch):
+def test_annotation_during_conversion_preserves_sources(document, monkeypatch):
     library, paper, original = document
     before = preprocessing.digest(original.read_bytes())
     convert = preprocessing.markdown_page
@@ -326,10 +327,9 @@ def test_file_change_during_conversion_rejects_before_saving_sources(document, m
         library.annotate(paper["id"], page=number, type="note", comment="Concurrent synthetic annotation")
         return result
     monkeypatch.setattr(preprocessing, "markdown_page", changed)
-    with pytest.raises(ValueError, match="SOURCE_CHANGED"):
-        batch(document, pages=[2])
+    result = batch(document, pages=[2])
+    assert result["sources"]
     assert preprocessing.digest(original.read_bytes()) == before
-    assert not library.db.execute("SELECT 1 FROM sqlite_master WHERE name='knowledge_sources'").fetchone()
 
 
 def test_noisy_page_is_downscaled_to_png_byte_budget(tmp_path):
@@ -353,3 +353,21 @@ def test_invalid_options_rejected_before_opening_pdf(document, monkeypatch, valu
     monkeypatch.setattr(Library, "_open_pdf", lambda *a, **k: pytest.fail("Invalid options opened the PDF"))
     with pytest.raises(ValueError, match="PAPER_ANALYSIS_INVALID"):
         batch(document, **values)
+
+
+def test_body_change_during_conversion_rejects_before_publishing_sources(document, monkeypatch):
+    library, paper, _ = document
+    convert = preprocessing.markdown_page
+    def changed(doc, number):
+        result = convert(doc, number)
+        path = library.pdf_path(paper["id"])
+        with fitz.open(path) as current:
+            current[0].insert_text((30, 680), "Changed actual source body")
+            temporary = path.with_suffix(".next.pdf")
+            current.save(temporary)
+        temporary.replace(path)
+        return result
+    monkeypatch.setattr(preprocessing, "markdown_page", changed)
+    with pytest.raises(ValueError, match="SOURCE_CHANGED"):
+        batch(document, pages=[2])
+    assert not library.db.execute("SELECT 1 FROM sqlite_master WHERE name='knowledge_sources'").fetchone()

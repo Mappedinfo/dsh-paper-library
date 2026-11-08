@@ -8,6 +8,7 @@ import json
 from .core import PaperConflictError, normalize_research_metadata, now
 from . import library_knowledge as knowledge
 from . import pdf_preprocessing as preprocessing
+from . import pdf_analysis_identity as identity
 
 MAX_PAGES = 8
 DEFAULT_PAGES = 3
@@ -138,9 +139,7 @@ def batch(library, request):
     if not paper.get("pdf") or paper.get("archived"):
         raise ValueError("PAPER_ANALYSIS_INVALID: select an active paper with a PDF")
     path = library.pdf_path(paper["id"])
-    version = file_version(path)
-    if request.get("file_version") is not None and request["file_version"] != version:
-        raise ValueError("PAPER_ANALYSIS_SOURCE_CHANGED: PDF changed between batches; saved results are retained")
+    observed = identity.observed_file(path)
     extracted, read, completed, blank = [], [], [], []
     no_text, image_only, empty_markdown, page_details = [], [], [], {}
     images, image_warnings = [], ["Page images are bounded to 1600 pixels on the long edge; small text and fine figure details may require local PDF inspection."]
@@ -148,6 +147,9 @@ def batch(library, request):
     characters = 0
     index, offset = cursor["index"], cursor["offset"]
     with library._open_pdf(path) as doc:
+        version = identity.content_version(library, paper["id"], path, doc, observed)
+        if request.get("file_version") is not None and request["file_version"] != version:
+            raise ValueError("PAPER_ANALYSIS_SOURCE_CHANGED: PDF base changed between batches; saved results are retained")
         pages = pages if pages is not None else list(range(1, doc.page_count + 1))
         if len(pages) > 2000 or any(p > doc.page_count for p in pages) or index >= len(pages):
             raise ValueError("PAPER_ANALYSIS_INVALID: selected PDF page or cursor does not exist")
@@ -165,13 +167,8 @@ def batch(library, request):
                 elif not content:
                     empty_markdown.append(number)
             else:
-                if include_images:
-                    raw, has_images = preprocessing.raw_page(doc, number)
-                    content = raw.strip()
-                else:
-                    page = doc.load_page(number - 1)
-                    content = page.get_text("text", sort=True).strip()
-                    has_images = None
+                raw, has_images = preprocessing.raw_page(doc, number)
+                content = raw.strip()
                 if not content:
                     no_text.append(number)
                     if has_images:
@@ -198,10 +195,14 @@ def batch(library, request):
                 images.append(preprocessing.page_image(library, paper["id"], doc, number, version))
                 if images[-1]["reduced_for_byte_limit"]:
                     image_warnings.append(f"Page {number}: reduced resolution to fit the 1 MiB image limit")
-    if file_version(path) != version:
-        raise ValueError("PAPER_ANALYSIS_SOURCE_CHANGED: PDF changed during extraction")
+    after = identity.observed_file(path)
+    if after != observed:
+        with library._open_pdf(path) as current_doc:
+            current_version = identity.content_version(library, paper["id"], path, current_doc, after)
+        if current_version != version:
+            raise ValueError("PAPER_ANALYSIS_SOURCE_CHANGED: PDF base changed during extraction")
     current = library.get(paper["id"])
-    if current["modified"] != paper["modified"]:
+    if current.get("title") != paper.get("title") or current.get("archived"):
         raise PaperConflictError(current)
     knowledge.setup(library)
     saved = []

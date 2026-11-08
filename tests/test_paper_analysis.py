@@ -230,7 +230,7 @@ def test_batches_default_to_all_pages_and_keep_each_worker_bounded(catalog, monk
         start = len(reads)
         args = {} if result is None else {"cursor": result["next_cursor"], "file_version": result["file_version"]}
         result = call(library, "paper_analysis_batch", id=item["id"], **args)
-        assert isinstance(result["file_version"]["modified_ns"], str), "Nanoseconds must survive JavaScript JSON roundtrips exactly"
+        assert result["file_version"]["schema"] == "pdf-content-v1"
         assert len(reads) - start <= 8
         assert len(result["sources"]) <= 8
         assert result["coverage"]["characters"] <= 24000
@@ -238,7 +238,7 @@ def test_batches_default_to_all_pages_and_keep_each_worker_bounded(catalog, monk
         if not result["next_cursor"]:
             break
     assert pages == list(range(1, 13))
-    assert reads == list(range(12))
+    assert len(reads) == 12  # 每个选定页只在无批注副本中提词一次
     assert hashlib.sha256(original.read_bytes()).hexdigest() == before
 
 
@@ -263,13 +263,13 @@ def test_dense_page_continues_without_losing_unicode_text(catalog, monkeypatch):
     assert all(a[1] == b[0] for a, b in zip(offsets, offsets[1:]))
 
 
-def test_batch_rejects_changed_file_before_reading_next_part(catalog, monkeypatch):
+def test_batch_continues_after_annotation_only_atomic_replace(catalog):
     library, item, _ = catalog
     first = call(library, "paper_analysis_batch", id=item["id"])
     library.annotate(item["id"], page=1, type="note", comment="Changed between batches")
-    monkeypatch.setattr(Library, "_open_pdf", lambda *args, **kwargs: pytest.fail("Changed PDF was opened"))
-    with pytest.raises(ValueError, match="SOURCE_CHANGED"):
-        call(library, "paper_analysis_batch", id=item["id"], cursor=first["next_cursor"], file_version=first["file_version"])
+    second = call(library, "paper_analysis_batch", id=item["id"], cursor=first["next_cursor"], file_version=first["file_version"])
+    assert second["file_version"] == first["file_version"]
+    assert second["coverage"]["completed_pages"] == [9, 10, 11, 12]
 
 
 @pytest.mark.parametrize("values", [{"pages": [0]}, {"pages": [1, 1]}, {"cursor": {"index": 0, "offset": -1}}, {"cursor": {"index": True, "offset": 0}}])
@@ -278,3 +278,65 @@ def test_batch_rejects_invalid_scope_before_opening_pdf(catalog, monkeypatch, va
     monkeypatch.setattr(Library, "_open_pdf", lambda *args, **kwargs: pytest.fail("Invalid batch opened PDF"))
     with pytest.raises(ValueError, match="PAPER_ANALYSIS_INVALID"):
         call(library, "paper_analysis_batch", id=item["id"], **values)
+
+
+@pytest.mark.parametrize("annotation_type", ["underline", "highlight", "note", "freetext"])
+@pytest.mark.parametrize("mode", ["text", "markdown", "images"])
+def test_analysis_identity_ignores_annotation_content_in_all_modes(catalog, annotation_type, mode):
+    from dsh_paper_library import paper_analysis
+    library, item, original = catalog
+    options = {"input_format": "markdown"} if mode == "markdown" else {"include_images": True} if mode == "images" else {}
+    request = {"id": item["id"], "pages": [1], **options}
+    first = paper_analysis.batch(library, request)
+    original_bytes = original.read_bytes()
+    path = library.pdf_path(item["id"])
+    with fitz.open(path) as doc:
+        page = doc[0]
+        if annotation_type == "freetext":
+            page.add_freetext_annot(fitz.Rect(30, 70, 250, 120), "PRIVATE COMMENT IS NOT BODY")
+        elif annotation_type == "note":
+            page.add_text_annot((40, 80), "PRIVATE COMMENT IS NOT BODY")
+        else:
+            getattr(page, f"add_{annotation_type}_annot")(fitz.Rect(20, 20, 200, 50))
+        temporary = path.with_suffix(".next.pdf")
+        doc.save(temporary, garbage=4, deflate=True)
+    temporary.replace(path)
+    second = paper_analysis.batch(library, {**request, "file_version": first["file_version"]})
+    assert second["file_version"] == first["file_version"]
+    assert second["source_ids"] == first["source_ids"]
+    assert all("PRIVATE COMMENT" not in source["text"] for source in second["sources"])
+    if mode == "images":
+        assert [(v["sha256"], v["data"]) for v in second["images"]] == [(v["sha256"], v["data"]) for v in first["images"]]
+    assert original.read_bytes() == original_bytes
+
+
+@pytest.mark.parametrize("change", ["text", "geometry", "image", "pages"])
+def test_analysis_rejects_real_base_change(catalog, change):
+    from dsh_paper_library import paper_analysis
+    library, item, _ = catalog
+    first = paper_analysis.batch(library, {"id": item["id"], "pages": [1]})
+    path = library.pdf_path(item["id"])
+    with fitz.open(path) as doc:
+        if change == "text":
+            doc[0].insert_text((30, 140), "Changed actual body")
+        elif change == "geometry":
+            doc[0].set_rotation(90)
+        elif change == "pages":
+            doc.new_page()
+        else:
+            pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 10, 10), False)
+            pix.clear_with(64)
+            doc[0].insert_image(fitz.Rect(30, 150, 50, 170), pixmap=pix)
+        temporary = path.with_suffix(".next.pdf")
+        doc.save(temporary, garbage=4)
+    temporary.replace(path)
+    with pytest.raises(ValueError, match="SOURCE_CHANGED"):
+        paper_analysis.batch(library, {"id": item["id"], "pages": [1], "file_version": first["file_version"]})
+
+
+def test_analysis_rejects_unverifiable_legacy_stat_version(catalog):
+    from dsh_paper_library import paper_analysis
+    library, item, _ = catalog
+    legacy = paper_analysis.file_version(library.pdf_path(item["id"]))
+    with pytest.raises(ValueError, match="SOURCE_CHANGED"):
+        paper_analysis.batch(library, {"id": item["id"], "file_version": legacy})

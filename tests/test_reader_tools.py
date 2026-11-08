@@ -359,3 +359,21 @@ def test_reader_underline_has_a_portable_thicker_appearance_after_comment_edits(
             external = next(annot for annot in page.annots() if annot.info["id"] == external_id)
             assert doc.xref_stream(int(doc.xref_get_key(external.xref, "AP/N")[1].split()[0])) == external_ap
     assert hashlib.sha256(source.read_bytes()).hexdigest() == source_hash
+
+
+def test_page_annotation_versions_match_list_and_track_only_the_edited_content(tmp_path):
+    source = synthetic_pdf(tmp_path / "versions.pdf", [(300, 400, 0)])
+    item = request(tmp_path, "import", path=str(source))["items"][0]
+    created = request(tmp_path, "annotate", id=item["id"], page=1, type="note", comment="Synthetic note")["annotation"]
+
+    def versions():
+        page = request(tmp_path, "page", id=item["id"], page=1, scale=.5)["annotations"]
+        listing = request(tmp_path, "annotations", id=item["id"])["annotations"]
+        assert page == listing
+        return {a["id"]: a["version"] for a in page}
+
+    before = versions()
+    request(tmp_path, "annotation_update", id=item["id"], annotation_id=created["id"], comment="Edited synthetic note")
+    after = versions()
+    assert after[created["id"]] != before[created["id"]]
+    assert {k: v for k, v in after.items() if k != created["id"]} == {k: v for k, v in before.items() if k != created["id"]}

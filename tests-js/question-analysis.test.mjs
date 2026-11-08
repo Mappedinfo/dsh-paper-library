@@ -20,17 +20,17 @@ const savedV3Protocol = JSON.parse(readFileSync(new URL('./fixtures/reading-prot
 
 async function fixture(t, override = {}) {
   const root = await mkdtemp(join(tmpdir(), 'question-analysis-'))
-  const f = { root, calls: [], kernel: [], drafts: new Map(), modified: 'revision-1', pdfVersion: { size: 100, mtime_ns: '100' }, response: null }
+  const f = { root, calls: [], kernel: [], drafts: new Map(), modified: 'revision-1', title: 'Learning exercise', pdfVersion: { size: 100, mtime_ns: '100' }, response: null }
   const source = page => ({ id: `source-${page}`, entity: { kind: 'paper', id: 'paper-a' }, locator: { page }, content_hash: `hash-${page}`,
     text: `Reading exercise ${page}. Method A produced result B. Check the evidence before accepting a conclusion. Reading checks improve recall. Nine of twelve readers recalled the passage after a source check.` })
   f.store = createLocalStateStore({ library: join(root, 'library'), home: join(root, 'state') })
   f.options = { store: f.store, library: join(root, 'library'), resolveModel: async () => ({ provider: 'synthetic', model: 'deterministic' }),
     dispatch: async request => {
       f.kernel.push(request)
-      if (request.action === 'get') return { id: request.id, pdf: true, title: 'Learning exercise', modified: f.modified, abstract: 'DO_NOT_SEND_PRIVATE_METADATA' }
+      if (request.action === 'get') return { id: request.id, pdf: true, title: f.title, modified: f.modified, abstract: 'DO_NOT_SEND_PRIVATE_METADATA' }
       if (request.action === 'paper_analysis_batch') {
         const page = (request.cursor?.index || 0) + 1, sources = [source(page)]
-        return { paper: { id: request.id, title: 'Learning exercise', abstract: 'DO_NOT_SEND_PRIVATE_METADATA' }, expected_modified: f.modified,
+        return { paper: { id: request.id, title: f.title, abstract: 'DO_NOT_SEND_PRIVATE_METADATA' }, expected_modified: f.modified,
           file_version: structuredClone(f.pdfVersion), sources, source_ids: sources.map(item => item.id),
           coverage: { read_pages: [page], completed_pages: [page], requested_pages: [1, 2], page_count: 2, characters: sources[0].text.length },
           next_cursor: page === 1 ? { index: 1, offset: 0 } : null }
@@ -401,7 +401,7 @@ test('explicit resume reuses complete responses without another model call or du
   assert.equal(f.calls.length,calls)
   assert.equal(f.drafts.size,drafts)
   assert.equal(result.question_summary.reused_groups,groups.length*2)
-  f.modified='changed-paper'
+  f.title='Changed analysis title'
   await assert.rejects(f.handle({action:'paper_analysis_resume',id:'paper-a',request_id:'run-a',new_request_id:'run-changed'}),{code:'ANALYSIS_SOURCE_CHANGED'})
 })
 
@@ -474,3 +474,58 @@ test('retry accepts unresolved semantic review with zero invalid quotes and pres
  const final=await f.handle({action:'paper_analysis_get',id:'paper-a'});
  assert.equal(final.question_summary.repair_unresolved,0);assert.equal(final.question_summary.repair_revalidated,1);assert.equal(final.status,'complete');assert.equal(f.calls.length,before+1);
 });
+
+
+test('full-text analysis permits annotation modification timestamps but preserves its content baseline', async t => {
+  const f = await fixture(t)
+  f.pdfVersion = {schema:'pdf-content-v1',sha256:'stable-body',page_count:2}
+  f.response = input => {
+    f.modified = `annotation-${f.calls.length}`
+    return JSON.stringify({answers:input.analysisContext.question_ids.map(question_id=>({question_id,choice:'not_reported'}))})
+  }
+  const result = await f.run({question_ids:['q1_method']})
+  assert.equal(result.status,'complete',JSON.stringify(result))
+  assert.equal(result.coverage.full_document,true)
+  const key=(await f.store.list({prefix:'analysis.job:'})).records[0].key, old=await f.store.get(key)
+  await f.store.put(key,{...old.value,status:'cancelled'},old.revision)
+  f.pdfVersion={...f.pdfVersion,sha256:'changed-unread-page'}
+  const calls=f.calls.length
+  await f.handle({action:'paper_analysis_resume',id:'paper-a',request_id:'run-a',new_request_id:'changed-body'})
+  await f.handle.wait('paper-a','changed-body')
+  const resumed=await f.handle({action:'paper_analysis_get',id:'paper-a',request_id:'changed-body'})
+  assert.equal(resumed.status,'failed');assert.match(resumed.error,/正文已改变/);assert.equal(f.calls.length,calls)
+})
+
+test('legacy stat snapshots resume only after exact source equivalence and preserve old evidence identities', async t => {
+  const f = await fixture(t), dispatch=f.options.dispatch, oldSources=new Map()
+  let stable=false,changed=false
+  f.options.dispatch=async request=>{
+    if(request.action==='knowledge_source_get'&&oldSources.has(request.id))return structuredClone(oldSources.get(request.id))
+    const result=await dispatch(request)
+    if(request.action==='paper_analysis_batch'){
+      result.file_version=stable?{schema:'pdf-content-v1',sha256:'current-body',page_count:2}:{device:1,inode:2,bytes:300,modified_ns:'100'}
+      result.sources=result.sources.map(source=>({...source,id:`${stable?'new':'old'}-${source.id}`,text:source.text+(changed?' altered':''),created_at:stable?'later':'earlier',pdf_snapshot:{kind:'selected-pdf-page',file_version:result.file_version,character_start:0,character_end:source.text.length}}))
+      result.source_ids=result.sources.map(source=>source.id)
+      if(!stable)for(const source of result.sources)oldSources.set(source.id,structuredClone(source))
+    }
+    return result
+  }
+  f.handle.dispose();f.handle=createPaperAnalysis(f.options)
+  f.response=input=>JSON.stringify({answers:input.analysisContext.question_ids.map(question_id=>({question_id,choice:'not_reported'}))})
+  await f.run({question_ids:['q1_method']})
+  const key=(await f.store.list({prefix:'analysis.job:'})).records[0].key, old=await f.store.get(key)
+  const {file_version,analysis_title,...legacy}=old.value
+  await f.store.put(key,{...legacy,status:'failed'},old.revision)
+  stable=true;f.modified='new-annotation-timestamp'
+  const calls=f.calls.length
+  await f.handle({action:'paper_analysis_resume',id:'paper-a',request_id:'run-a',new_request_id:'legacy-resumed'})
+  await f.handle.wait('paper-a','legacy-resumed')
+  const resumed=await f.handle({action:'paper_analysis_get',id:'paper-a',request_id:'legacy-resumed',batch_index:0})
+  assert.equal(resumed.status,'complete',JSON.stringify(resumed));assert.equal(f.calls.length,calls)
+  assert.deepEqual(resumed.source_ids,['old-source-1']);assert.equal(resumed.question_summary.reused_groups,2)
+  changed=true
+  await f.handle({action:'paper_analysis_resume',id:'paper-a',request_id:'run-a',new_request_id:'legacy-changed'})
+  await f.handle.wait('paper-a','legacy-changed')
+  const rejected=await f.handle({action:'paper_analysis_get',id:'paper-a',request_id:'legacy-changed'})
+  assert.equal(rejected.status,'failed');assert.match(rejected.error,/正文、定位或提取方式已改变/);assert.equal(f.calls.length,calls)
+})
