@@ -1,12 +1,40 @@
+/** 等待期间也响应取消，避免不再 yield 的宿主适配器无限占住调用。 */
+export function awaitWithAbort(value, signal) {
+  if (!signal) return Promise.resolve(value)
+  return new Promise((resolve, reject) => {
+    const finish = (callback, result) => { signal.removeEventListener('abort', abort); callback(result) }
+    const abort = () => finish(reject, signal.reason)
+    signal.addEventListener('abort', abort, { once: true })
+    if (signal.aborted) abort()
+    // 即使取消先完成，也观察底层迟到的拒绝，避免 unhandled rejection。
+    Promise.resolve(value).then(result => finish(resolve, result), error => finish(reject, error))
+  })
+}
+
 /** Collect a complete plain-text response; partial/error streams are never saved. */
 export async function collectFeedback(chunks, signal) {
   const text = []
   let terminal
-  for await (const chunk of chunks) {
-    signal?.throwIfAborted()
-    if (chunk.type === 'block-end' && chunk.block.type === 'text') text.push(chunk.block.text)
-    if (chunk.type === 'finish') terminal = chunk.reason
+  signal?.throwIfAborted()
+  const iterator = chunks[Symbol.asyncIterator]()
+  let completed = false
+  try {
+    while (true) {
+      signal?.throwIfAborted()
+      const next = await awaitWithAbort(iterator.next(), signal)
+      signal?.throwIfAborted()
+      if (next.done) { completed = true; break }
+      const chunk = next.value
+      if (chunk.type === 'block-end' && chunk.block.type === 'text') text.push(chunk.block.text)
+      if (chunk.type === 'finish') terminal = chunk.reason
+    }
+  } finally {
+    if (!completed) {
+      // return() 可能排队等待挂起的 next()；不能让资源清理再次阻塞取消。
+      try { void Promise.resolve(iterator.return?.()).catch(() => {}) } catch { /* 保留原调用错误。 */ }
+    }
   }
+  signal?.throwIfAborted()
   if (!terminal) throw new Error('AI feedback stream ended without a finish event')
   if (terminal.kind !== 'stop') throw new Error(`AI feedback did not complete (${terminal.kind}): ${terminal.failure?.message ?? 'retry with a complete response'}`)
   const answer = text.join('').trim()
@@ -20,11 +48,12 @@ export function createHarnessAI(llm, createUserMessage, config, { attachments } 
   return async ({ prompt, provider = config.provider, model = config.model, reasoningEffort, signal, images }) => {
     if (!provider || !model) throw new Error('Select a configured Harness provider and model before requesting AI feedback')
     if (reasoningEffort !== undefined && (typeof reasoningEffort !== 'string' || !reasoningEffort.trim())) throw new Error('reasoningEffort must be a non-empty configured model effort')
+    signal?.throwIfAborted()
     const call = { provider, model, maxTokens: config.maxOutputTokens, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }
     // Prepared calls bind the image capability check to the exact adapter
     // generation that receives the image, even during host model hot-reloads.
-    const prepared = images !== undefined && typeof llm.prepareCall === 'function' ? await llm.prepareCall(call, signal) : null
-    const info = prepared || await llm.resolveModelInfo(provider, model, signal)
+    const prepared = images !== undefined && typeof llm.prepareCall === 'function' ? await awaitWithAbort(llm.prepareCall(call, signal), signal) : null
+    const info = prepared || await awaitWithAbort(llm.resolveModelInfo(provider, model, signal), signal)
     let content = [{ type: 'text', text: prompt }]
     if (images !== undefined) {
       const fail = (message, code) => Object.assign(new Error(message), { code, status: 409 })

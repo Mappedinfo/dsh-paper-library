@@ -177,3 +177,25 @@ test('host text generation works without the removed subagent service and keeps 
   await assert.rejects(handle({ ...input, signal: AbortSignal.abort(Error('cancelled')) }), /cancelled/)
   assert.equal(calls.length, 1)
 })
+
+test('host generation deadline rejects an adapter that ignores cancellation', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let received
+  const handle = createPaperAnalysisAgent({}, { cwd: '/synthetic/library', generate: request => {
+    received = request; return new Promise(() => {})
+  } })
+  const result = handle(input)
+  t.mock.timers.tick(120000)
+  await assert.rejects(result, /120 秒/)
+  assert.equal(received.signal.aborted, true)
+})
+
+test('host generation rejects caller cancellation without accepting a late complete JSON', async () => {
+  let finish
+  const controller = new AbortController()
+  const handle = createPaperAnalysisAgent({}, { cwd: '/synthetic/library', generate: () => new Promise(resolve => { finish = resolve }) })
+  const result = handle({ ...input, signal: controller.signal })
+  controller.abort(new Error('stop stalled generation'))
+  await assert.rejects(result, /stop stalled generation/)
+  finish('{"answers":[]}')
+})

@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { getEventListeners } from 'node:events'
 import { resolveConfig } from '../src/harness/config.mjs'
-import { collectFeedback, createHarnessAI, discoverModels } from '../src/harness/ai.mjs'
+import { awaitWithAbort, collectFeedback, createHarnessAI, discoverModels } from '../src/harness/ai.mjs'
 import { requestFromTool, TOOL_SPECS, registerLibraryTools } from '../src/harness/tools.mjs'
 
 test('deployment paths reject relative locations and malformed bounds', () => {
@@ -115,4 +116,47 @@ test('feedback tools follow the calling conversation route before deployment fal
   assert.equal(options.provider, 'fallback')
   assert.equal(options.model, 'fallback-model')
   dispose()
+})
+
+test('AI feedback aborts a stalled next and never accepts partial text or a hanging cleanup', async () => {
+  for (const sawFinish of [false, true]) {
+    const controller = new AbortController()
+    let step = 0, closing = 0, stallStarted
+    const stalled = new Promise(resolve => { stallStarted = resolve })
+    const stream = { [Symbol.asyncIterator]() { return this }, next() {
+      if (step++ === 0) return Promise.resolve({ value: { type: 'block-end', block: { type: 'text', text: 'partial' } } })
+      if (sawFinish && step === 2) return Promise.resolve({ value: { type: 'finish', reason: { kind: 'stop' } } })
+      stallStarted(); return new Promise(() => {})
+    }, return() { closing++; return new Promise(() => {}) } }
+    const result = collectFeedback(stream, controller.signal)
+    await stalled
+    controller.abort(new Error('synthetic abort of stalled stream'))
+    await assert.rejects(result, /synthetic abort of stalled stream/)
+    assert.equal(closing, 1)
+  }
+})
+
+test('AI aborts stalled model metadata lookup before dispatch', async () => {
+  const controller = new AbortController()
+  let started, streams = 0
+  const entered = new Promise(resolve => { started = resolve })
+  const llm = { resolveModelInfo() { started(); return new Promise(() => {}) }, stream() { streams++; return complete() } }
+  const ai = createHarnessAI(llm, message => message, { maxOutputTokens: 1600 })
+  const result = ai({ prompt: 'Synthetic prompt', provider: 'fixture', model: 'fixture', signal: controller.signal })
+  await entered; controller.abort(new Error('stop model lookup'))
+  await assert.rejects(result, /stop model lookup/)
+  assert.equal(streams, 0)
+})
+
+test('abort-raced waits remove listeners and observe late rejection', async () => {
+  const controller = new AbortController()
+  assert.equal(await awaitWithAbort(Promise.resolve('done'), controller.signal), 'done')
+  assert.equal(getEventListeners(controller.signal, 'abort').length, 0)
+  let rejectLate
+  const pending = awaitWithAbort(new Promise((resolve, reject) => { rejectLate = reject }), controller.signal)
+  controller.abort(new Error('cancel first'))
+  await assert.rejects(pending, /cancel first/)
+  assert.equal(getEventListeners(controller.signal, 'abort').length, 0)
+  rejectLate(new Error('late provider rejection'))
+  await new Promise(resolve => setImmediate(resolve))
 })

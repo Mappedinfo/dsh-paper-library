@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { awaitWithAbort } from './ai.mjs'
 import { isAbsolute } from 'node:path'
 import { renderAnalysisAgentPersona } from '../prompt-templates.mjs'
 
@@ -38,12 +39,16 @@ export function createPaperAnalysisAgent(ctx, { cwd, maxOutputTokens = 8192, gen
     // 固定来源分析只需要一次无工具模型调用。复用宿主 LLM 路由，避免依赖
     // 已在新版 DSH 移除的 subagents.start 及子代理策略继承细节。
     if (typeof generate === 'function') {
-      const deadline = AbortSignal.any([AbortSignal.timeout(120000), ...(signal ? [signal] : [])])
-      deadline.throwIfAborted()
-      const text = await generate({ prompt: `${renderAnalysisAgentPersona()}\n\n${prompt}`, provider, model,
-        ...(reasoningEffort ? { reasoningEffort } : {}), signal: deadline })
-      deadline.throwIfAborted()
-      return completeJson({ stopReason: 'completed', output: [{ type: 'text', text }] })
+      const controller = new AbortController(), timeout = setTimeout(() => controller.abort(new Error('后台分析超过 120 秒。')), 120000)
+      timeout.unref?.()
+      const deadline = AbortSignal.any([controller.signal, ...(signal ? [signal] : [])])
+      try {
+        deadline.throwIfAborted()
+        const text = await awaitWithAbort(generate({ prompt: `${renderAnalysisAgentPersona()}\n\n${prompt}`, provider, model,
+          ...(reasoningEffort ? { reasoningEffort } : {}), signal: deadline }), deadline)
+        deadline.throwIfAborted()
+        return completeJson({ stopReason: 'completed', output: [{ type: 'text', text }] })
+      } finally { clearTimeout(timeout) }
     }
     const subagents = ctx.get('subagents'), agents = ctx.get('agents'), tools = ctx.get('tools')
     if (!subagents?.list?.().includes('spawn') || typeof subagents.start !== 'function' || typeof agents?.create !== 'function' || typeof agents.withoutInitiator !== 'function' || typeof tools?.guard !== 'function') throw fail('当前 DSH 未加载原生 spawn 子代理或工具隔离服务。')
