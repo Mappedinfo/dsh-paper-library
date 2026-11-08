@@ -78,3 +78,12 @@ test('splitFeedbackReplies refuses mis-assignment instead of writing to the wron
   assert.throws(() => splitFeedbackReplies(build({ replies: [{ annotation_id: 'a', comment: 'x' }, { annotation_id: 'b', comment: 'y' }, { annotation_id: 'c', comment: 'z' }] }), annotations), /数量/)
   assert.throws(() => splitFeedbackReplies(build({ replies: ['nope'] }), annotations), /格式无效/)
 })
+
+test('numbered human remarks share one root highlight and every AI answer keeps its own remark',()=>{
+ const grouped=threads([note('root',{type:'underline'}),note('r2',{kind:'reader-reply',reply_to:'root'}),note('r3',{kind:'reader-reply',reply_to:'root'}),ai('a1',{reply_to:'root'}),ai('a2',{reply_to:'r2',annotation_ids:['root','r2']}),ai('a3',{reply_to:'r3'})]);
+ assert.deepEqual(ids(grouped.notes),['root']);assert.deepEqual(ids(grouped.remarks.get('root')),['r2','r3']);assert.equal(grouped.roots.get('r3'),'root');assert.deepEqual(ids(grouped.replies.get('r2')),['a2']);assert.deepEqual(ids(grouped.replies.get('root')),['a1']);
+});
+test('remarks remain visible when the parent is missing and external nested replies resolve to one root',()=>{
+ const grouped=threads([note('orphan',{kind:'reader-reply',reply_to:'missing'}),note('a'),note('b',{reply_to:'a'}),note('c',{reply_to:'b'})]);
+ assert.deepEqual(ids(grouped.notes),['orphan','a']);assert.deepEqual(ids(grouped.remarks.get('a')),['b','c']);
+});

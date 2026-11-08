@@ -39,7 +39,7 @@ window.PaperReadingPanels = (() => {
       tablist.append(libraryTab,annotationsTab);
       sharedMove=button('⇄',()=>setSide(side==='left'?'right':'left'));sharedMove.id='reading-sidebar-side';
       sharedClose=button('×',()=>{sharedOpen=false;if(sidebar==='annotations'||extraPanels.has(sidebar))sidebar=null;render();});sharedClose.id='reading-sidebar-close';sharedClose.setAttribute('aria-label','收起阅读侧栏');
-      sharedHeader.append(tablist,sharedMove,sharedClose);
+      const pager=make('div','annotation-pagination');pager.id='annotation-pagination';pager.setAttribute('aria-label','批注分页');pager.addEventListener('click',event=>{const action=event.target.closest('[data-note-action]')?.dataset.noteAction;if(action)annotationsRoot.dispatchEvent(new CustomEvent('annotation-page',{detail:action,bubbles:true}));});sharedHeader.append(tablist,pager,sharedMove,sharedClose);
       annotationsRoot.setAttribute('role','tabpanel');annotationsRoot.setAttribute('aria-labelledby',annotationsTab.id);
       libraryRoot.append(sharedHeader,libraryContent,annotationsRoot);libraryRoot.classList.add('shared-reading-sidebar');
     }

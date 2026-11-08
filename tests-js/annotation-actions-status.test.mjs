@@ -52,3 +52,15 @@ test('toast and unsaved warning share a stacked region; pending retries retain t
   assert.match(css,/\.notification-region\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/);assert.match(css,/\.toast\s*\{\s*position:\s*static;/);assert.match(localCss,/\.local-save-status\{position:static;/);domClose(f);
 });
 function domClose(f){f.dom.window.close();}
+
+test('human remarks render below one quote; AI replies preview six lines and pager lives in the header host',async()=>{
+ const f=fixture(),{window:w,document:d}=f;
+ w.eval(await readFile(new URL('../web/annotation-threads.js',import.meta.url),'utf8'));
+ const pager=d.createElement('div');pager.id='annotation-pagination';d.body.prepend(pager);
+ w.state.annotations=[{id:'root',type:'underline',text:'Same original',page:1},{id:'r2',kind:'reader-reply',reply_to:'root',text:'Same original',comment:'Follow up',page:1},{id:'ai',kind:'ai-feedback',reply_to:'r2',comment:'Long answer\n'.repeat(20),page:1},...Array.from({length:40},(_,i)=>({id:`other${i}`,type:'underline',page:2,text:'Other original'}))];
+ w.renderAnnotations();assert.equal(d.querySelectorAll('#annotation-list > .annotation-card').length,40);assert.equal(d.querySelectorAll('[data-annotation-id="root"] > .annotation-quote').length,1);
+ const remark=d.querySelector('.annotation-remark');assert.equal(remark.dataset.remarkNumber,'2');const reply=remark.querySelector('.annotation-reply');assert.equal(reply.open,true);assert.equal(reply.querySelector('.annotation-reply-body').classList.contains('is-preview'),true);
+ const expand=[...reply.querySelectorAll('button')].find(n=>n.textContent==='展开全文');expand.click();assert.equal(reply.querySelector('.annotation-reply-body').classList.contains('is-preview'),false);
+ assert.equal(d.querySelector('#annotation-list .pagination'),null);assert.equal(pager.querySelector('.pagination').textContent,'‹1/2›');
+ await w.handleNoteAction({target:pager.querySelector('[data-note-action="next"]')});assert.equal(w.state.noteOffset,40);assert.equal(d.querySelectorAll('#annotation-list > .annotation-card').length,1);domClose(f);
+});

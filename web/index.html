@@ -145,7 +145,7 @@
           <div id="board-annotation-panel" hidden></div>
           <div class="section-toolbar"><div><h3>阅读留下的线索</h3><p>批注保存在 PDF 中，可随文件一起带走。</p></div><label class="export-menu">导出 <select id="export-notes" aria-label="导出批注"><option value="">选择格式</option><option value="markdown">Markdown</option><option value="xfdf">XFDF</option><option value="json">JSON</option></select></label></div>
           <div id="annotation-list" class="annotation-list"></div>
-          <div id="annotation-chat-actions" class="paper-chat-shortcuts" hidden><button id="discuss-all-notes" class="button primary">选择批注并提问</button><button id="draft-all-notes" class="button">全部批注放入主输入框 ↗</button></div>
+          <div id="annotation-chat-actions" class="paper-chat-shortcuts" hidden><button id="discuss-all-notes" class="button primary">开始选取提问批注</button><button id="draft-all-notes" class="button">全部批注放入主输入框 ↗</button></div>
           <details id="legacy-feedback" class="feedback-panel"><summary>PDF 中已保存的 AI 反馈</summary><div id="legacy-feedback-controls"><p class="feedback-description">独立反馈使用已配置模型；在 DSH 中可切到「对话」继续同一篇论文的阅读讨论。</p><div class="feedback-controls"><label>模型<select id="feedback-model" aria-label="反馈模型"><option value="">正在读取可用模型…</option></select></label><button id="request-feedback" class="button primary">根据批注获取反馈 ↗</button></div><label class="checkbox-label"><input id="auto-feedback" type="checkbox">每次保存批注后自动请求 AI 反馈</label><p id="model-status" class="small muted"></p></div><div id="feedback-status" role="status"></div><div id="feedback-list"></div></details>
         </section>
         <section id="conversation-tab" class="tab-content paper-chat" hidden>

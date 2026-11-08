@@ -122,3 +122,5 @@ body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-
 .wiki-bilingual blockquote{font-size:14px;color:var(--ink);overflow-wrap:anywhere}
 .wiki-source{padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:14px}
 .wiki-word-form{display:grid;gap:12px}.wiki-word-form details{padding:10px 0}.wiki-word-form details[open] summary{margin-bottom:10px}
+
+.annotation-pagination{flex:none}.annotation-pagination .pagination{margin:0;padding:0;display:flex;align-items:center;gap:2px;font-size:11px;border:0}.annotation-pagination .button{padding:2px 5px;min-width:22px}.shared-reading-sidebar:not([data-sidebar-panel="annotations"]) .annotation-pagination{display:none}

@@ -3,10 +3,11 @@
 // This view projects one native Harness conversation. It never calls a model
 // directly and retains only a bounded recent transcript while the tab is visible.
 window.PaperLibraryChat = {
-  create({ api, toast, getPaper, getContext, getAnnotations, navigate, navigateReference, changed, savedFeedback, getLibrary, persistence }) {
+  create({ api, toast, getPaper, getContext, getAnnotations, navigate, navigateReference, changed, savedFeedback, getLibrary, persistence, beforeSendAnnotations }) {
     const $ = id => document.getElementById(id);
     const chat = { available: false, paperId: null, sessionId: null, visible: false, ticket: 0, notes: [], catalog: [], catalogReady: false, catalogTotal: 0, catalogTruncated: false, catalogPromise: null, offset: 0, selection: null, busy: false, timer: null, historyLoading: false, failed: null, ensure: null, suggestions: new Set(), draftLoading:false, storedDraft:false };
     const drafts = new Map();
+    let bulkSelecting=false,bulkBusy=false;
     let settingsWritable=true,autoPreferenceSaving=false,preferenceRevision=0,hostCompanion=false;
     const pending = new Map();
     const element = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
@@ -25,6 +26,7 @@ window.PaperLibraryChat = {
       $('annotation-chat-actions').hidden = !chat.available;
       $('legacy-feedback-controls').hidden = chat.available;
       $('legacy-feedback').hidden = chat.available;
+      decorateAnnotations();
     }
     function remember(publish = true) {
       if (!chat.paperId || chat.draftLoading) return;
@@ -53,6 +55,64 @@ window.PaperLibraryChat = {
       $('paper-chat-new-suggestion').hidden = suggestions.length === 0;
       $('paper-chat-new-suggestion-label').textContent = `又新增或更新 ${suggestions.length} 条，当前选择保持不变。`;
       if (!$('paper-reference-drawer').hidden) renderCatalog();
+      decorateAnnotations();
+    }
+    function decorateAnnotations() {
+      const toggle=$('discuss-all-notes'),cancel=$('annotation-bulk-cancel'),all=$('annotation-bulk-page');
+      $('draft-all-notes').hidden=bulkSelecting;
+      toggle.textContent=bulkSelecting?`提问（${chat.notes.length}）`:'开始选取提问批注';
+      toggle.setAttribute('aria-pressed',String(bulkSelecting));
+      toggle.title=bulkSelecting?'一次提问所有已勾选批注；使用论文对话中已有的问题，未填写时解读所选批注。':'开启侧栏批量勾选，选好后直接提问。';
+      toggle.disabled=!chat.available||chat.draftLoading||chat.busy||bulkBusy||(bulkSelecting&&!chat.notes.length);
+      if(cancel){cancel.hidden=!bulkSelecting;cancel.disabled=bulkBusy||chat.busy;}
+      if(all){all.hidden=!bulkSelecting;all.disabled=bulkBusy||chat.busy;}
+      const list=$('annotation-list');
+      for(const card of list?.querySelectorAll?.(':scope > .annotation-card')||[]) {
+        const id=card.dataset.annotationId,isCurrentPaper=card.dataset.paperId===chat.paperId;
+        let label=card.querySelector(':scope > .annotation-bulk-check');
+        if(!bulkSelecting||!isCurrentPaper){label?.remove();card.classList.remove('annotation-bulk-selected');continue;}
+        if(!label){
+          label=element('label','annotation-bulk-check');const box=element('input');box.type='checkbox';box.setAttribute('aria-label','选取这条批注提问');
+          label.append(box,element('span','','选取提问'));card.prepend(label);
+          box.addEventListener('change',()=>{
+            if(bulkBusy||chat.busy||card.dataset.paperId!==chat.paperId)return;
+            if(!box.checked){removeReference(id);return;}
+            const note=chat.catalog.find(value=>value.id===id);
+            if(note)setReferences([note]);else void useNote({id});
+            decorateAnnotations();
+          });
+        }
+        const box=label.querySelector('input');box.checked=chat.notes.some(ref=>ref.id===id);box.disabled=bulkBusy||chat.busy;
+        card.classList.toggle('annotation-bulk-selected',box.checked);
+      }
+    }
+    async function selectVisibleAnnotations() {
+      if(!bulkSelecting||bulkBusy||chat.busy)return;
+      const id=chat.paperId,ticket=chat.ticket;
+      const ids=[...($('annotation-list')?.querySelectorAll?.(':scope > .annotation-card')||[])].filter(card=>card.dataset.paperId===id).map(card=>card.dataset.annotationId);
+      try{const notes=await catalog(true);if(isCurrent(id,ticket))setReferences(notes.filter(note=>ids.includes(note.id)));}catch(error){toast(error.message,true);}
+    }
+    async function submitBulk() {
+      if(bulkBusy||chat.busy||!chat.notes.length)return;
+      const id=chat.paperId,ticket=chat.ticket,ids=chat.notes.map(ref=>ref.id);
+      bulkBusy=true;decorateAnnotations();
+      try{
+        await beforeSendAnnotations?.(id,ids);
+        if(!isCurrent(id,ticket))return;
+        const latest=await catalog(true);if(!isCurrent(id,ticket))return;
+        const notes=ids.map(id=>latest.find(note=>note.id===id));
+        if(notes.some(note=>!note?.version))throw new Error('部分已选批注已删除或尚未保存，请取消对应勾选后重试。');
+        if(!setReferences(notes))return;
+        const draft=$('paper-chat-input').value,question=draft.trim()||'请结合引用内容回应我的阅读批注，并指出值得核验的问题。';
+        const refs=notes.map(note=>({id:note.id,version:note.version}));
+        navigate('conversation');
+        if(await send(false,{id,question,annotation_refs:refs})&&isCurrent(id,ticket)){
+          chat.notes=chat.notes.filter(ref=>!refs.some(sent=>sent.id===ref.id&&sent.version===ref.version));
+          if($('paper-chat-input').value===draft)$('paper-chat-input').value='';
+          bulkSelecting=false;contextLabel();remember();
+        }
+      }catch(error){if(isCurrent(id,ticket))toast(error.message,true);}
+      finally{if(isCurrent(id,ticket)){bulkBusy=false;decorateAnnotations();}}
     }
     function validRefs(value) {
       if (!Array.isArray(value) || value.length > MAX_REFS) return [];
@@ -295,7 +355,7 @@ window.PaperLibraryChat = {
         if (!isCurrent(id, ticket)) return;
         chat.failed = null;
         if (!automatic && $('paper-chat-input').value === draft && JSON.stringify(requestArgs(question || '请结合引用内容回应我的阅读批注，并指出值得核验的问题。')) === fingerprint) { $('paper-chat-input').value = ''; chat.notes = []; chat.selection = null; contextLabel(); }
-        remember(); status('消息已交给 DSH；引用状态将在会话日志确认后更新。'); await history();
+        remember(); status('消息已交给 DSH；引用状态将在会话日志确认后更新。'); await history();return true;
       } catch (error) {
         if (isCurrent(id, ticket)) {
           chat.failed = submission.snapshotId ? submission : null; remember();
@@ -322,7 +382,7 @@ window.PaperLibraryChat = {
       // The outer reader has already selected the new paper. Keep the previous
       // draft locally without publishing it under the new paper's identity.
       remember(false); stopTimer();
-      chat.paperId = item.id; chat.sessionId = null; ++chat.ticket; chat.catalog = []; chat.catalogReady = false; chat.catalogTotal = 0; chat.catalogTruncated = false; chat.catalogPromise = null; chat.offset = 0; chat.usageRevision = null; chat.suggestions = new Set(); chat.busy = false;
+      bulkSelecting=false;bulkBusy=false;chat.paperId = item.id; chat.sessionId = null; ++chat.ticket; chat.catalog = []; chat.catalogReady = false; chat.catalogTotal = 0; chat.catalogTruncated = false; chat.catalogPromise = null; chat.offset = 0; chat.usageRevision = null; chat.suggestions = new Set(); chat.busy = false;
       const ticket=chat.ticket,preferenceTicket=preferenceRevision;let previous=drafts.get(item.id),preferences=null;
       chat.storedDraft=false;chat.draftLoading=Boolean(persistence);controls();
       if(persistence){
@@ -361,7 +421,15 @@ window.PaperLibraryChat = {
     $('paper-chat-draft').addEventListener('click', () => openMain(true));
     $('paper-chat-refresh').addEventListener('click', async () => { try { if(chat.draftLoading){await paperOpened(getPaper());return;}await catalog(true); await history(); } catch { /* status shown */ } });
     $('paper-chat-clear-context').addEventListener('click', () => { chat.notes = []; chat.selection = null; contextLabel(); remember(); });
-    $('discuss-all-notes').addEventListener('click', () => { navigate('conversation'); void openDrawer(); });
+    const bulkCancel=element('button','button subtle','取消选取');bulkCancel.id='annotation-bulk-cancel';bulkCancel.type='button';bulkCancel.hidden=true;bulkCancel.addEventListener('click',()=>{bulkSelecting=false;decorateAnnotations();});
+    const bulkPage=element('button','button subtle','本页全选');bulkPage.id='annotation-bulk-page';bulkPage.type='button';bulkPage.hidden=true;bulkPage.addEventListener('click',()=>void selectVisibleAnnotations());
+    $('annotation-chat-actions').append(bulkPage,bulkCancel);
+    $('discuss-all-notes').addEventListener('click', async () => {
+      if(bulkBusy||chat.busy||chat.draftLoading)return;
+      if(bulkSelecting){await submitBulk();return;}
+      bulkSelecting=true;decorateAnnotations();const id=chat.paperId,ticket=chat.ticket;
+      try{await catalog(true);if(isCurrent(id,ticket))decorateAnnotations();}catch(error){toast(error.message,true);}
+    });
     $('draft-all-notes').addEventListener('click', async () => { if (await addAll()) await openMain(true); });
     $('paper-chat-all').addEventListener('click', addAll);
     $('paper-chat-new').addEventListener('click', async () => { const id = chat.paperId, ticket = chat.ticket; try { const notes = await catalog(); if (!isCurrent(id, ticket)) return; setReferences(notes.filter(note => note.status !== 'sent')); await openDrawer('pending'); } catch { /* status shown */ } });
@@ -390,6 +458,7 @@ window.PaperLibraryChat = {
       hasStoredDraft:()=>chat.storedDraft,
       visible(value) { chat.visible = value; if (value) void history(); else stopTimer(); },
       useAnnotation: useNote,
+      decorateAnnotations,
       hasAnnotation: id => chat.notes.some(ref => ref.id === id),
       async annotationsChanged(id) { if (id === chat.paperId && chat.available) { try { await catalog(true); } catch { /* status shown */ } } },
       useSelection(selection) { if (!selection) return; if (selection.text.length > 8000) { toast('选文超过 8,000 字符，请缩小选择；尚未添加引用。', true); return; } chat.selection = { page: selection.page, text: selection.text }; contextLabel(); remember(); navigate('conversation'); $('paper-chat-input').focus(); },

@@ -20,10 +20,10 @@ window.PaperCompanion={create({api,persistence,getPaper,refreshAnnotations,befor
   });
   function decorate(){
     const newest=new Map(entries.map(e=>[e.annotation_id,e]));
-    for(const card of document.querySelectorAll('#annotation-list > .annotation-card')){
+    for(const card of document.querySelectorAll('#annotation-list .annotation-card, #annotation-list .annotation-remark')){
       const id=paperId, annotationId=card.dataset.annotationId, value=newest.get(annotationId);
-      card.querySelector('.companion-state')?.remove();
-      let ask=card.querySelector('.companion-ask');
+      card.querySelector(':scope > .companion-state')?.remove();
+      let ask=card.querySelector(':scope > .annotation-actions')?.querySelector('.companion-ask');
       if(!available||!id||card.dataset.paperId!==id){ask?.remove();continue;}
       const key=operationKey(id,annotationId);
       if(!ask){

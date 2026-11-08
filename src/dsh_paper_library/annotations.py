@@ -197,7 +197,14 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 reply_to = parent.info.get("id") or f"external-{page.number + 1}-{parent.xref}"
             except (ValueError, RuntimeError):
                 pass
-        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"width": annot.border.get("width", 1)} if kind == "square" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids") if key in extra}}
+        # 人工后续备注沿用原划线的选文与来源范围，但自身仍是原生 Text /IRT。
+        source_rects = extra.get("source_rects") if extra.get("kind") == "reader-reply" else None
+        if isinstance(source_rects, list) and 0 < len(source_rects) <= 200:
+            try:
+                rects = [list(cls._rect(rect, page, inverse=True) * page.rotation_matrix) for rect in source_rects]
+            except (TypeError, ValueError):
+                pass
+        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"width": annot.border.get("width", 1)} if kind == "square" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids", "parent_id") if key in extra}}
 
     def companion_excerpt(self, id, page):
         """One explicitly selected page, text only; no persistent index or OCR."""
@@ -739,6 +746,71 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 if (annot.info.get("id") or f"external-{page.number + 1}-{annot.xref}") == annotation_id:
                     return page, annot
         raise ValueError("Annotation not found (refresh annotations if the PDF changed externally)")
+
+    def annotation_reply_create(self, id, annotation_id, reply_id, comment=""):
+        """为同一划线追加原生回复；UUID 重试只读返回，不复制划线。"""
+        import pymupdf as fitz
+        if not isinstance(annotation_id, str) or not 1 <= len(annotation_id) <= 160 or re.search(r"[\x00-\x1f]", annotation_id):
+            raise ValueError("Parent annotation identity is invalid")
+        if not isinstance(reply_id, str) or not re.fullmatch(r"(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})", reply_id):
+            raise ValueError("reply_id must be a lowercase UUID")
+        if not isinstance(comment, str) or len(comment) > 30000:
+            raise ValueError("Comment must be text of at most 30000 characters")
+        identity = hashlib.sha256(json.dumps({"parent": annotation_id, "comment": comment}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+        def locate(doc):
+            parents, previous, scanned = [], [], 0
+            for page in doc:
+                for annot in page.annots() or []:
+                    scanned += 1
+                    if scanned > _constants().MAX_ANNOTATIONS:
+                        raise ValueError("Annotation reply exceeds the bounded annotation scan")
+                    name = annot.info.get("id") or f"external-{page.number + 1}-{annot.xref}"
+                    if name == annotation_id:
+                        parents.append((page, annot))
+                    if name == reply_id:
+                        previous.append((page, annot))
+            if previous:
+                page, annot = previous[0]
+                meta = self._annotation_metadata(annot)
+                if len(previous) != 1 or meta.get("kind") != "reader-reply" or meta.get("create_request_hash") != identity:
+                    raise ValueError("Reply reply_id already exists with different content")
+                return None, None, self._with_annotation_version(self._annotation(page, annot), True)
+            if len(parents) != 1:
+                raise ValueError("Parent annotation is missing or ambiguous; refresh annotations")
+            page, parent = parents[0]
+            if self._annotation_metadata(parent).get("kind") == "reader-reply":
+                if not parent.irt_xref:
+                    raise ValueError("Parent underline was deleted; choose an existing annotation")
+                parent = page.load_annot(parent.irt_xref)
+            if self._annotation_metadata(parent).get("kind") in {"reader-reply", "ai-feedback", "handwriting-note"} | LINKED_KINDS:
+                raise ValueError("Choose the original reader annotation to add a remark")
+            return page, parent, None
+
+        def operation(doc):
+            page, parent, duplicate = locate(doc)
+            if duplicate is not None:
+                return {"annotation": duplicate, "duplicate": True}
+            source = self._annotation(page, parent, exact=True)
+            if len(source["text"]) > 20000 or len(source["rects"]) > 200:
+                raise ValueError("Parent source exceeds the bounded reply source limit")
+            root_id = source["id"]
+            annot = page.add_text_annot(parent.rect.tl, comment, icon="Comment")
+            metadata = {"kind": "reader-reply", "parent_id": root_id, "text": source["text"],
+                        "source_rects": source["rects"], "create_request_hash": identity}
+            date = "D:" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%SZ")
+            annot.set_info(content=comment, title="Reader", subject="paper-library:" + json.dumps(metadata, ensure_ascii=False), creationDate=date, modDate=date)
+            doc.xref_set_key(annot.xref, "NM", fitz.get_pdf_str(reply_id))
+            annot.set_irt_xref(parent.xref)
+            annot.update()
+            return {"annotation": self._with_annotation_version(self._annotation(page, annot), True)}
+
+        with self.lock():
+            with self._open_pdf(self.pdf_path(id)) as doc:
+                _, _, previous = locate(doc)
+                if previous is not None:
+                    return {"annotation": previous, "duplicate": True}
+            return self._write_pdf(id, operation)
 
     def annotation_update(self, id, annotation_id, comment, version=None):
         if not isinstance(comment, str) or len(comment) > 30000:

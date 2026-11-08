@@ -11,9 +11,10 @@ function fixture(t,{request,stored}={}){
  const notes=[],calls=[],saved=[],messages=[],timers=new Map();let active={id:'paper-a',pdf:true},next=0,editor,ui;
  w.setTimeout=fn=>{timers.set(++next,fn);return next;};w.clearTimeout=id=>timers.delete(id);
  w.eval(source);w.eval(companion);
- function render(){const restore=editor?.beforeRender(),list=w.document.getElementById('annotation-list');list.replaceChildren();for(const note of notes){const card=w.document.createElement('article');card.className='annotation-card';card.dataset.paperId=active.id;card.dataset.annotationId=note.id;card.innerHTML='<div class="annotation-actions"></div>';list.append(card);}editor?.decorate();restore?.();ui?.decorate();}
+ function render(){const restore=editor?.beforeRender(),list=w.document.getElementById('annotation-list');list.replaceChildren();for(const note of notes){const card=w.document.createElement('article');card.className='annotation-card';card.dataset.paperId=active.id;card.dataset.annotationId=note.id;card.innerHTML='<div class="annotation-actions"></div>';const parent=note.reply_to&&[...list.children].find(n=>n.dataset.annotationId===note.reply_to);if(parent){card.className='annotation-remark';card.dataset.remarkNumber=String(parent.querySelectorAll('.annotation-remark').length+2);parent.append(card);}else list.append(card);}editor?.decorate();restore?.();ui?.decorate();}
  async function api(action,args){calls.push({action,...JSON.parse(JSON.stringify(args))});const custom=await request?.(action,args);if(custom!==undefined)return custom;
  if(action==='companion_status')return {entries:[],enabled:false};if(action==='companion_ask')return {request_id:'req',status:'queued',manual:true,annotation_id:args.annotation_id};
+ if(action==='annotation_reply_create'){const parent=notes.find(n=>n.id===args.annotation_id);return {annotation:{id:args.reply_id,page:parent.page,type:'note',kind:'reader-reply',reply_to:parent.id,text:parent.text,comment:args.comment,version:'reply-created'}};}
  const old=notes.find(n=>n.id===args.annotation_id);return {annotation:{...(old||{id:args.annotation_id,page:args.page,type:args.type,text:args.text}),comment:args.comment,version:`v${calls.length}`}};
  }
  editor=w.PaperAnnotationEditor.create({api,persistence:{get:async()=>stored,put:async(key,value)=>saved.push(JSON.parse(JSON.stringify({key,value})))},getPaper:()=>active,getNotes:()=>notes,show:()=>{},changed:()=>ui?.decorate(),refresh:async(id,note)=>{if(id!==active.id)return;const index=notes.findIndex(n=>n.id===note.id);if(index>=0)notes[index]=note;else notes.push(note);render();},toast:(...args)=>messages.push(args)});
@@ -83,4 +84,13 @@ test('long comments use the independent editing version and restored pending cre
  const note={id:'long',page:1,type:'note',text:'',comment:'Long note',edit_version:'edit-hash'};
  const f=fixture(t);f.notes.push(note);f.render();await f.input(note.id,'Edited long note');await f.editor.beforeAsk('paper-a',note.id);
  assert.equal(f.calls.find(c=>c.action==='annotation_update').version,'edit-hash');
+});
+
+test('new remarks use native reply creation and nested independent asks flush only their own input',async t=>{
+ const f=fixture(t);await f.editor.create('underline',{selection:{page:3,text:'Shared quote',rects:[[1,2,30,40]]}});const root=f.notes[0];
+ await f.editor.create('reply',{note:root,page:root.page});await f.editor.create('reply',{note:root,page:root.page});
+ assert.equal(f.calls.filter(c=>c.action==='annotate').length,1);assert.equal(f.calls.filter(c=>c.action==='annotation_reply_create').length,2);
+ assert.equal(f.w.document.querySelectorAll('#annotation-list > .annotation-card').length,1);const remarks=f.w.document.querySelectorAll('.annotation-remark');assert.equal(remarks.length,2);assert.match(remarks[0].querySelector('label').textContent,/备注 2/);
+ const reply=f.notes[1];await f.input(reply.id,'Follow up two');remarks[0].querySelector('.companion-ask').click();await tick();await tick();
+ const asked=f.calls.filter(c=>c.action==='companion_ask');assert.equal(asked.length,1);assert.equal(asked[0].annotation_id,reply.id);assert.equal(f.notes.find(n=>n.id===reply.id).comment,'Follow up two');assert.equal(root.comment,'');
 });

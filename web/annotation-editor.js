@@ -38,7 +38,7 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
     const {status,retry,input,compare}=r.ui;
     status.textContent=r.error?`${dirty(r)?'未保存':'PDF 已保存，草稿同步未完成'}：${r.error}`:r.running?'保存中…':dirty(r)?'等待自动保存…':'已保存';
     status.classList.toggle('error',Boolean(r.error));retry.hidden=!r.error;retry.disabled=Boolean(r.running);compare.hidden=!r.error||Boolean(r.payload);compare.disabled=Boolean(r.running);
-    const card=input.closest('.annotation-card');if(card){card.dataset.companionText=String(Boolean((r.note.text||'').trim()||r.comment.trim()||r.note.handwriting?.transcript||r.note.linked_ink?.transcript));if(r.note.version)card.dataset.annotationVersion=r.note.version;}
+    const card=input.closest('.annotation-remark, .annotation-card');if(card){card.dataset.companionText=String(Boolean((r.note.text||'').trim()||r.comment.trim()||r.note.handwriting?.transcript||r.note.linked_ink?.transcript));if(r.note.version)card.dataset.annotationVersion=r.note.version;}
   }
   function schedule(r) {
     clearTimeout(r.timer);r.timer=setTimeout(()=>{r.timer=null;void save(r);},delay);
@@ -87,7 +87,7 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
           await checkpoint(r.paper);
           const creating=Boolean(r.payload),comment=creating?r.payload.comment:r.comment;
           if(!creating&&!r.note.edit_version&&!r.note.version)throw Error('缺少批注版本，请核对 PDF 最新备注后再保存。');
-          const result=creating?await api('annotate',r.payload):await api('annotation_update',{id:r.id,annotation_id:r.note.id,comment,version:r.note.edit_version||r.note.version,companion_skip:true});
+          const result=creating?await api(r.payload.reply_id?'annotation_reply_create':'annotate',r.payload):await api('annotation_update',{id:r.id,annotation_id:r.note.id,comment,version:r.note.edit_version||r.note.version,companion_skip:true});
           if(!result?.annotation?.id)throw Error('保存结果缺少批注标识，请重试核对。');
           r.note=clone(result.annotation);r.saved=comment;r.payload=null;
           // A create retry may discover a note subsequently edited elsewhere.
@@ -100,19 +100,19 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
         }
         await checkpoint(r.paper);
       }catch(error){r.error=error.message;return false;}
-      try{await refresh(r.id,r.note,{reveal:document.activeElement?.closest('.annotation-card')?.dataset.annotationId===r.note.id});}catch(error){toast(`批注已保存，页面暂未刷新：${error.message}`,true);}
+      try{await refresh(r.id,r.note,{reveal:document.activeElement?.closest('.annotation-remark, .annotation-card')?.dataset.annotationId===r.note.id});}catch(error){toast(`批注已保存，页面暂未刷新：${error.message}`,true);}
       return true;
     })();paint(r);
     try{return await r.running;}finally{r.running=null;paint(r);changed?.();}
   }
   function mount(card,r) {
     const existing=card.querySelector(':scope > .annotation-comment');existing?.remove();
-    const actions=card.querySelector(':scope > .annotation-actions');card.insertBefore(editor(r),actions||null);paint(r);
+    const actions=card.querySelector(':scope > .annotation-actions');card.insertBefore(editor(r),actions||null);r.ui.root.querySelector('label').firstChild.textContent=`备注 ${card.dataset.remarkNumber||1}`;r.ui.input.setAttribute('aria-label',`第 ${r.note.page} 页备注 ${card.dataset.remarkNumber||1}`);paint(r);
   }
   function decorate() {
     const id=getPaper()?.id;if(!id)return;
     const p=paper(id),list=document.getElementById('annotation-list');if(!list)return;
-    for(const card of list.querySelectorAll(':scope > .annotation-card')) {
+    for(const card of list.querySelectorAll('.annotation-card, .annotation-remark')) {
       const note=getNotes().find(n=>n.id===card.dataset.annotationId);if(!note||note.ai_generated||note.kind==='ai-feedback'||note.type==='ai_feedback')continue;
       const r=row(id,note);
       if(!dirty(r)&&!r.running){r.note=clone(note);r.comment=r.saved=note.comment||note.content||'';if(r.ui)r.ui.input.value=r.comment;}
@@ -121,12 +121,12 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
     // Pending creates/edits stay reachable even on another page of the rail.
     for(const r of p.rows.values()) {
       if(!dirty(r)&&!r.error)continue;
-      if([...list.querySelectorAll(':scope > .annotation-card')].some(c=>c.dataset.annotationId===r.note.id))continue;
+      if([...list.querySelectorAll('.annotation-card, .annotation-remark')].some(c=>c.dataset.annotationId===r.note.id))continue;
       list.querySelector('.empty-state')?.remove();
       const card=node('article','annotation-card annotation-pending');card.dataset.annotationId=r.note.id;card.dataset.paperId=id;
       card.append(node('div','annotation-meta',`第 ${r.note.page} 页 · ${r.payload?'新批注':'待保存批注'}`));
       if(r.note.text)card.append(node('blockquote','annotation-quote',r.note.text));
-      card.append(node('div','annotation-actions'));mount(card,r);list.prepend(card);
+      card.append(node('div','annotation-actions'));mount(card,r);const parent=r.note.reply_to&&[...list.querySelectorAll(':scope > .annotation-card')].find(c=>c.dataset.annotationId===r.note.reply_to);if(parent){card.classList.remove('annotation-card');card.classList.add('annotation-remark');card.dataset.remarkNumber=String(parent.querySelectorAll('.annotation-remark').length+2);parent.append(card);mount(card,r);}else list.prepend(card);
     }
     previews?.decorate(getNotes());
   }
@@ -141,8 +141,8 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
     const id=getPaper()?.id;if(!id)return false;
     if(mode==='edit'){const r=row(id,note);focus(id,note.id);return true;}
     const annotationId=crypto.randomUUID(),pageNumber=page||selection?.page||note?.page||1;
-    const payload={id,annotation_id:annotationId,page:pageNumber,type:mode,text:selection?.text||note?.text||'',rects:selection?.rects||note?.rects||[note?.rect||[20,20,40,40]],color,width,comment,author:'Reader',companion_skip:true};
-    const r=row(id,{id:annotationId,page:pageNumber,type:mode,text:payload.text,comment},payload);
+    const payload=mode==='reply'?{id,annotation_id:note.reply_to||note.id,reply_id:annotationId,comment,companion_skip:true}:{id,annotation_id:annotationId,page:pageNumber,type:mode,text:selection?.text||note?.text||'',rects:selection?.rects||note?.rects||[note?.rect||[20,20,40,40]],color,width,comment,author:'Reader',companion_skip:true};
+    const r=row(id,{id:annotationId,page:pageNumber,type:mode==='reply'?'note':mode,text:payload.text||note?.text||'',comment,...(mode==='reply'?{kind:'reader-reply',reply_to:note.reply_to||note.id}:{})},payload);
     show();decorate();focus(id,annotationId);
     return save(r);
   }

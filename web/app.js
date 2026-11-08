@@ -464,14 +464,14 @@ function renderAnnotations() {
   const restoreEditorFocus = typeof annotationEditor!=='undefined'?annotationEditor?.beforeRender():null;
   linkedHandwritingUI?.beforeRender();
   const fragment = document.createDocumentFragment();
-  const {notes,replies,unlinked}=annotationThreads(state.annotations);
+  const {notes,replies,unlinked,remarks=new Map()}=annotationThreads(state.annotations);
   function replyCard(reply){
-    const details=el('details','annotation-reply');details.dataset.annotationId=reply.id;details.open=reply.source_kind==='annotation-translation';
+    const details=el('details','annotation-reply');details.dataset.annotationId=reply.id;details.open=true;
     details.append(el('summary','',[reply.source_kind === 'annotation-translation' ? '翻译：AI 译文' : 'AI 批注',reply.model,reply.annotation_ids?.length>1?`涉及 ${reply.annotation_ids.length} 条批注`:''].filter(Boolean).join(' · ')));
     details.append(el('p','small muted',displayDate(reply.generated||reply.created)));
     let body=(reply.comment||reply.content||reply.text||'').replace(/^AI-generated (?:conversation )?feedback[^\n]*\n\n/,'');
     if(reply.source_kind==='annotation-translation')body=body.replace(/\n\nAI 翻译 · [^\n]*\s*$/,'');
-    const rendered=el('div','annotation-reply-body paper-markdown');if(window.PaperMarkdown)window.PaperMarkdown.render(rendered,body);else rendered.textContent=body;details.append(rendered);
+    const rendered=el('div','annotation-reply-body paper-markdown');if(window.PaperMarkdown)window.PaperMarkdown.render(rendered,body);else rendered.textContent=body;rendered.classList.add('is-preview');details.append(rendered);const expand=el('button','button subtle','展开全文');expand.type='button';expand.setAttribute('aria-expanded','false');expand.addEventListener('click',()=>{const expanded=rendered.classList.toggle('is-preview');expand.textContent=expanded?'展开全文':'收起全文';expand.setAttribute('aria-expanded',String(!expanded));});details.append(expand);
     const actions=el('div','annotation-actions'),remove=el('button','button subtle delete-note','删除回复');remove.dataset.noteAction='delete';actions.append(remove);details.append(actions);return details;
   }
   for (const note of notes.slice(state.noteOffset, state.noteOffset + 40)) {
@@ -494,21 +494,28 @@ function renderAnnotations() {
     if (note.handwriting) { const handwritten = el('div', 'annotation-handwriting'); handwritten.append(el('p', 'small muted', note.handwriting.transcription_source === 'model' ? '手写便签 · AI 识别待校对' : '手写便签 · 原笔迹已保留')); if (note.handwriting.transcript) handwritten.append(el('p', '', note.handwriting.transcript)); card.append(handwritten); }
     linkedHandwritingUI?.decorate(card,note);
     const actions = el('div', 'annotation-actions'); const edit = el('button', 'button subtle', '编辑'); edit.dataset.noteAction = 'edit'; const remove = el('button', 'button subtle delete-note', '删除'); remove.dataset.noteAction = 'delete'; const copy = el('button', 'button subtle', '复制原文'); copy.type = 'button'; copy.dataset.noteAction = 'copy-source'; copy.disabled = typeof note.text !== 'string' || !note.text.trim(); copy.title = copy.disabled ? '这条批注没有选中的 PDF 原文' : '仅复制选中的 PDF 原文，不包含评论或 AI 回复'; actions.append(edit, remove, copy);
-    if (note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const handwriting = el('button', 'button subtle', '手写'); handwriting.dataset.noteAction = 'handwriting'; const primary=el('div','annotation-primary-actions');primary.append(handwriting,edit);actions.prepend(primary); const independent=el('button','button subtle','＋ 独立批注');independent.type='button';independent.dataset.noteAction='independent';independent.title='在同一位置新增独立批注，分别记录问题、分别问 DSH';actions.append(independent); if(note.handwriting){const legacy=el('button','button subtle','打开原便签');legacy.dataset.noteAction='handwriting-legacy';actions.append(legacy);} }
+    if (note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const handwriting = el('button', 'button subtle', '手写'); handwriting.dataset.noteAction = 'handwriting'; const primary=el('div','annotation-primary-actions');primary.append(handwriting,edit);actions.prepend(primary); const independent=el('button','button subtle','＋ 备注 / 追问');independent.type='button';independent.dataset.noteAction='remark';independent.title='在这处划线下追加备注，保留已有问答';actions.append(independent); if(note.handwriting){const legacy=el('button','button subtle','打开原便签');legacy.dataset.noteAction='handwriting-legacy';actions.append(legacy);} }
     if (paperChatUI?.available() && note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const selected = paperChatUI.hasAnnotation(note.id); const discuss = el('button', 'button subtle', selected ? '移出提问材料' : '选作提问材料'); discuss.dataset.noteAction = 'discuss'; discuss.title = '可多选批注作为提问材料，再到对话框统一发送；此按钮不会发送消息'; discuss.setAttribute('aria-pressed', String(selected)); actions.append(discuss); }
     const phrase=(note.text||note.comment||note.content||'').trim();if(phrase&&phrase.length<=200){const entry=el('button','button subtle','词条');entry.type='button';entry.title='匹配百科词条或创建带来源的词条';entry.addEventListener('click',()=>wikiUI.show('encyclopedia',phrase,{paper_id:state.active.id,title:state.active.title,page:note.page,annotation_id:note.id,quote:phrase}));actions.append(entry);}
-    card.append(actions);for(const reply of replies.get(note.id)||[])card.append(replyCard(reply)); fragment.append(card);
+    card.dataset.remarkNumber='1';card.append(actions);for(const reply of replies.get(note.id)||[])card.append(replyCard(reply));
+    for(const [index,remark]of (remarks.get(note.id)||[]).entries()){
+      const entry=el('article','annotation-remark');entry.dataset.annotationId=remark.id;entry.dataset.paperId=state.active?.id||'';entry.dataset.remarkNumber=String(index+2);entry.dataset.annotationVersion=remark.version||'';entry.dataset.companionText=String(Boolean(remark.text||remark.comment));
+      const tools=el('div','annotation-actions'),remove=el('button','button subtle','删除备注');remove.dataset.noteAction='delete';tools.append(remove);entry.append(tools);
+      for(const reply of replies.get(remark.id)||[])entry.append(replyCard(reply));card.append(entry);
+    }
+    fragment.append(card);
   }
   if (!notes.length) fragment.append(emptyState('第一条批注，从一个问题开始', '在阅读页选择文字以高亮，或添加一条整页笔记。'));
+  const pagerHost=$('annotation-pagination');pagerHost?.replaceChildren();
   if (notes.length > 40) {
-    const pagination = el('div', 'pagination'); const previous = el('button', 'button subtle', '← 上一页'); previous.disabled = state.noteOffset === 0; previous.dataset.noteAction = 'previous'; const next = el('button', 'button subtle', '下一页 →'); next.disabled = state.noteOffset + 40 >= notes.length; next.dataset.noteAction = 'next';
-    pagination.append(previous, el('span', 'muted', `${state.noteOffset + 1}–${Math.min(state.noteOffset + 40, notes.length)} / ${notes.length}`), next); fragment.append(pagination);
+    const pagination = el('div', 'pagination'); const previous = el('button', 'button subtle', '‹'); previous.title='上一页批注'; previous.disabled = state.noteOffset === 0; previous.dataset.noteAction = 'previous';previous.setAttribute('aria-label','上一页批注'); const next = el('button', 'button subtle', '›'); next.title='下一页批注'; next.disabled = state.noteOffset + 40 >= notes.length; next.dataset.noteAction = 'next';next.setAttribute('aria-label','下一页批注');
+    pagination.append(previous, el('span', 'muted', `${Math.floor(state.noteOffset/40)+1}/${Math.ceil(notes.length/40)}`), next); if(pagerHost)pagerHost.append(pagination);else fragment.prepend(pagination);
   }
   if(unlinked.length){const group=el('details','annotation-unlinked');group.append(el('summary','',`未关联回复 · ${unlinked.length}`),el('p','small muted','这类回复没有可核实的批注关联，或原批注已删除。已有内容仍保存在 PDF 中。'));for(const reply of unlinked)group.append(replyCard(reply));fragment.append(group);}
   if (state.annotationsTruncated) fragment.append(el('p', 'small muted', '批注数量或文本量已达读取上限，当前只显示已读取的部分。PDF 中的原始批注仍被保留。'));
   $('annotation-list').replaceChildren(fragment);
   if(typeof annotationEditor!=='undefined')annotationEditor?.decorate();restoreEditorFocus?.();
-  companionUI?.decorate();linkedHandwritingUI?.sync();linkedHandwritingUI?.afterRender();
+  companionUI?.decorate();paperChatUI?.decorateAnnotations?.();linkedHandwritingUI?.sync();linkedHandwritingUI?.afterRender();
 }
 /** 自动着色：拖选即按当前颜色写成自然批注（不弹对话框）。
  * Questioning stays available afterwards through the rail and the selection tools. */
@@ -691,7 +698,7 @@ function linkAnnotationCard(annotationId) {
 async function handleNoteAction(event) {
   const button = event.target.closest('[data-note-action]'); if (!button) return;
   const action = button.dataset.noteAction;
-  if (action === 'previous' || action === 'next') { state.noteOffset += action === 'next' ? 40 : -40; renderAnnotations(); return; }
+  if (action === 'previous' || action === 'next') { state.noteOffset += action === 'next' ? 40 : -40; renderAnnotations();$('annotation-list').scrollTop=0; return; }
   const note = state.annotations.find((entry) => entry.id === button.closest('[data-annotation-id]').dataset.annotationId); if (!note) return;
   if (action === 'copy-source') { if (typeof note.text === 'string' && note.text.trim()) await copyText(note.text, { label: '批注原文' }); return; }
   if (action === 'discuss') { await paperChatUI?.useAnnotation(note); if (state.active?.id) renderAnnotations(); return; }
@@ -712,7 +719,7 @@ async function handleNoteAction(event) {
     return;
   }
   if (action === 'edit') {openAnnotation('edit', note);return;}
-  if (action === 'independent') {await annotationEditor?.create(['highlight','underline','strikeout','square'].includes(note.type)?note.type:'note',{note,page:note.page});return;}
+  if (action === 'remark') {await annotationEditor?.create('reply',{note,page:note.page});return;}
   if (action === 'handwriting') { await linkedHandwritingUI?.toggle(state.active, note); return; }
   if (action === 'handwriting-legacy') { await handwritingUI?.open(state.active,note);return; }
   if (action === 'linked-recognize'||action === 'linked-recognize-new') { await linkedHandwritingUI?.recognize(state.active.id,note,{fresh:action==='linked-recognize-new'});return; }
@@ -1201,6 +1208,7 @@ $('discuss-selection').addEventListener('click', () => paperChatUI?.useSelection
 $('annotation-comment').addEventListener('input', publishReaderState);
 $('annotation-dialog').addEventListener('close', publishReaderState);
 $('page-note').addEventListener('click', () => openAnnotation('note')); $('annotation-form').addEventListener('submit', saveAnnotation); $('annotation-list').addEventListener('click', event=>void handleNoteAction(event).catch(error=>toast(error.message,true)));
+document.addEventListener('annotation-page',event=>{if(!['previous','next'].includes(event.detail))return;const total=annotationThreads(state.annotations).notes.length;state.noteOffset=Math.max(0,Math.min(Math.max(0,Math.ceil(total/40)-1)*40,state.noteOffset+(event.detail==='next'?40:-40)));renderAnnotations();$('annotation-list').scrollTop=0;});
 // Rail → PDF: clicking a card body (never its action buttons) reveals the
 // matching markup in the document and flashes it.
 $('annotation-list').addEventListener('click', event => {
@@ -1466,6 +1474,7 @@ function openLibraryGraph(options={}){if(!libraryGraphDialog.open)libraryGraphDi
 const libraryGraphOpen=el('button','button subtle','全库图谱');libraryGraphOpen.id='library-graph-open';libraryGraphOpen.type='button';libraryGraphOpen.title='跨文献浏览知识图谱';libraryGraphOpen.addEventListener('click',openLibraryGraph);document.querySelector('.topbar-actions').prepend(libraryGraphOpen);
 knowledgeGraphUI = window.PaperKnowledgeGraph?.create({root:$('graph-tab'),api,getPaper:()=>state.active,onOpenLibrary:openLibraryGraph,onAnalyze:()=>analysisUI?.startFullGraph(),openPaper,navigatePage:async page=>{const id=state.active?.id,ticket=state.itemTicket;await switchTab('reader');if(state.active?.id===id&&state.itemTicket===ticket)await requestPage(page);},toast,onAddToBoard:node=>void boardUI?.addGraphNode(node.type==='paper'?{kind:'paper',label:node.label,paper:{id:node.paper_id||node.id,title:node.label}}:{kind:'concept',label:node.label})});
 paperChatUI = window.PaperLibraryChat?.create({ api, toast, persistence, getPaper: () => state.active, getContext: () => state.harnessContext,
+  beforeSendAnnotations:async(id,ids)=>{for(const annotationId of ids)await annotationEditor?.beforeAsk(id,annotationId);},
   getAnnotations: () => state.annotations, getLibrary: () => state.library,
   navigate: switchTab, navigateReference: (paperId, page) => openReferencedPaper({ paperId, page }), changed: publishReaderState,
   savedFeedback: async id => { if (state.active?.id !== id) return; await loadFeedback(id); await loadAnnotations(id); if (state.active.pdf) await refreshPage(); },
@@ -1510,7 +1519,7 @@ readingShell?.setInkQueue(inkQueue);
 void restoreInkDraft().then(()=>inkQueue?.refresh()).then(()=>linkedHandwritingUI?.restore()).then(()=>inkQueue&&state.active?.id?loadAnnotations(state.active.id):null).catch(error=>toast(error.message,true));
 handwritingUI = window.PaperHandwritingNote?.create({ api, persistence, toast, draftChanged: publishReaderState, available: () => handwritingAvailable, changed: async (id, page) => { if (state.active?.id === id) { await loadAnnotations(id); await paperChatUI?.annotationsChanged(id); await refreshPage(page); } } });
 annotationEditor=window.PaperAnnotationEditor?.create({api,persistence,getPaper:()=>state.active,getNotes:()=>state.annotations,
-  show:annotationId=>{readingPanels?.show('annotations');if(annotationId){const index=annotationThreads(state.annotations).notes.findIndex(n=>n.id===annotationId);if(index>=0){state.noteOffset=Math.floor(index/40)*40;renderAnnotations();}}},
+  show:annotationId=>{readingPanels?.show('annotations');if(annotationId){const grouped=annotationThreads(state.annotations),root=grouped.roots?.get(annotationId)||annotationId;const index=grouped.notes.findIndex(n=>n.id===root);if(index>=0){state.noteOffset=Math.floor(index/40)*40;renderAnnotations();}}},
   refresh:async(id,note,{reveal=false}={})=>{if(state.active?.id!==id)return;await loadAnnotations(id);if(state.active?.id===id){if(reveal)annotationEditor.focus(id,note.id);await refreshPage(note.page);await paperChatUI?.annotationsChanged(id);}},
   changed:()=>companionUI?.decorate(),toast});
 companionUI=window.PaperCompanion?.create({api,persistence,getPaper:()=>state.active,refreshAnnotations:loadAnnotations,beforeAsk:(id,annotationId)=>annotationEditor?.beforeAsk(id,annotationId),toast});

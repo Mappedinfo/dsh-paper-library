@@ -113,3 +113,6 @@ body.handwriting-tools-visible{--workbench-height:145px}
 .reader-layout{display:inline-flex;align-items:center;gap:2px;margin-inline:4px;border:1px solid var(--line);border-radius:6px;padding:2px}
 .reader-layout .button{border:0;margin:0;background:transparent}
 .reader-layout .button[aria-pressed=true]{background:var(--dsw-alias-interactive-bg-active);color:var(--ink)}
+
+.annotation-remark{border-top:1px solid var(--line);margin-top:12px;padding-top:10px}.annotation-remark .annotation-inline-editor{margin-top:0}.annotation-reply-body.is-preview{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6;max-height:9.6em;overflow:hidden}.annotation-reply-body:not(.is-preview){max-height:none;overflow:visible}.annotation-reply-body.paper-markdown{white-space:normal}
+.annotation-bulk-check{display:flex;align-items:center;gap:8px;min-height:34px;padding:6px 8px;margin-bottom:8px;border:1px solid var(--line);border-radius:5px;cursor:pointer;font-weight:600}.annotation-bulk-check input{width:18px;height:18px;accent-color:var(--accent,var(--ink))}.annotation-bulk-selected{outline:2px solid var(--dsw-alias-link);outline-offset:-2px}.annotation-bulk-selected .annotation-bulk-check{background:var(--dsw-alias-interactive-bg-hover)}
