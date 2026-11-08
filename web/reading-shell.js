@@ -193,7 +193,7 @@ window.PaperReadingShell = (() => {
       }
       const refresh=button('','刷新保存状态',()=>void inkQueue?.refresh().catch(error=>toast(error.message,true)));queuePanel.append(refresh);
     }
-    const backPosition=button('reader-return-position','返回刚才位置',()=>void reader()?.returnToReadingPosition());backPosition.hidden=true;readerTools.append(backPosition);
+    const backPosition=button('reader-return-position','返回刚才位置',async()=>{if(await reader()?.returnToReadingPosition()){const value=reader()?.getLayout();selectLayout(value);void patchLayout({readerLayout:value});}});backPosition.hidden=true;readerTools.append(backPosition);
     function focusChanged(info){backPosition.hidden=!info?.canReturn;if(info?.pending)status('正在定位…');else status('',false,{clearIf:'正在定位…'});}
     const beforeUnload=event=>{if(reader()?.getInkDraft?.()||reader()?.isInking?.()||inkQueue?.blocked()){event.preventDefault();event.returnValue='';}};
     window.addEventListener('beforeunload',beforeUnload);

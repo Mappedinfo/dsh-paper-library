@@ -56,7 +56,7 @@
 .paper-organization-filters{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;flex-basis:100%}
 .paper-organization-filters [aria-pressed="true"]{color:var(--accent,var(--teal));background:var(--teal-light);font-weight:600}
 .paper-tag-picker{position:relative;font-size:12px}
-.paper-tag-picker>summary{cursor:pointer;padding:5px 8px;border:1px solid var(--line);border-radius:6px;list-style:none}
+.paper-tag-picker>button{cursor:pointer;padding:5px 8px;border:1px solid var(--line);border-radius:6px;list-style:none}
 .paper-tag-popup{position:fixed;z-index:130;width:245px;padding:10px;background:var(--paper,#fff);color:var(--ink);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px #0002}
 .paper-tag-popup input{box-sizing:border-box;width:100%;font-size:12px;min-height:30px}
 .paper-tag-results{display:flex;flex-direction:column;max-height:240px;overflow:auto;margin-top:6px}

@@ -334,10 +334,24 @@
     function dispose() { reset(null); disposed = true; }
     return { reset, want, ready, invalidate, dispose, idle: () => running || Promise.resolve(), snapshot: () => ({ id, residents: [...residents], wanted: [...wanted], inFlight: inFlight ? { id: inFlight.id, page: inFlight.page } : null }) };
   }
+  /** Internal destinations only; no URL execution and no invented citation matching. */
+  function normalizeInternalLinks(value, geometry, pages) {
+    if (!Array.isArray(value) || !geometry) return [];
+    return value.slice(0, 1000).flatMap(link => {
+      const target = pages[link?.page - 1];
+      if (!Number.isInteger(link?.page) || !target || !Array.isArray(link.rect) || link.rect.length !== 4 || !link.rect.every(Number.isFinite) || !Array.isArray(link.to) || link.to.length !== 2 || !link.to.every(Number.isFinite)) return [];
+      const rect = [Math.max(0, link.rect[0]), Math.max(0, link.rect[1]), Math.min(geometry.width, link.rect[2]), Math.min(geometry.height, link.rect[3])];
+      if (rect[2] <= rect[0] || rect[3] <= rect[1]) return [];
+      return [{ rect, page: link.page, to: [Math.max(0, Math.min(target.width, link.to[0])), Math.max(0, Math.min(target.height, link.to[1]))] }];
+    });
+  }
+  function internalLinkAt(links, x, y) {
+    return (links || []).find(({ rect }) => x >= rect[0] && x <= rect[2] && y >= rect[1] && y <= rect[3]) || null;
+  }
   function create({ root, api, getPaper, onActivePage = () => {}, onZoomChange = () => {}, onSelection = () => {}, onStatus: reportStatus = () => {}, onPageNote = () => {}, onAnnotationActivate = () => {}, onInkChange = () => {}, onInputChange = () => {}, onFocusChange = () => {}, onInkTrace = () => {} }) {
     if (!root) throw new Error('PDF reader requires a scroll viewport');
     let paperId = null, pages = [], metrics = [], slots = [], active = 1, selection = null, tool = 'select', color = '#ffdb66', generation = 0, jumpTarget = null, frame = null, selectionTimer = null, resizeTimer = null, flashTimer = null, disposed = false, layoutPromise = null, layoutWidth = 0, lastSelection = '', pendingRange = null, transport = Promise.resolve(), zoom = 1, layout = 'single', initialPage = null;
-    const renderedScales = new Map(), rasterCaps = new Map(), pageAnnotations = new Map();
+    const renderedScales = new Map(), rasterCaps = new Map(), pageAnnotations = new Map(), pageLinks = new Map();
     const ink = createInkBuffer();
     const traceInk = createInkTrace(onInkTrace);
     const inkDetails = () => { const draft = ink.preview(); return draft ? { paperId: draft.paperId, page: draft.page, strokes: draft.paths.length, points: draft.paths.reduce((total, path) => total + path.length, 0), revision: draft.revision } : { paperId, strokes: 0, points: 0 }; };
@@ -593,7 +607,7 @@
       if (event.pointerType === 'touch') { beginTouch(event); return; }
       if (['pen', 'mouse'].includes(event.pointerType) && (touchPoints.size || pendingZoom || browserPinch)) { flushZoom(); resetTouchZoom(); }
       if (tool === 'select' && event.button === 0 && event.isPrimary !== false) {
-        const sheet = event.target.closest?.('.pdr-sheet'); if (sheet && root.contains(sheet)) nativeGesture = { pointerId: event.pointerId, sheet };
+        const sheet = event.target.closest?.('.pdr-sheet'); if (sheet && root.contains(sheet)) nativeGesture = { pointerId: event.pointerId, sheet, x: event.clientX, y: event.clientY, dragged: false };
       }
       const annotating = tool === 'ink' || MARKUP_TOOLS.has(tool);
       if (annotating && !input.accepts(event)) { event.preventDefault(); onStatus(policyRejection, true); policyRejected = true; traceInk('input_blocked', { paperId, pointerType: event.pointerType, reason: 'pen_only' }); return; }
@@ -620,6 +634,7 @@
       } catch (error) { traceInk('input_blocked', { ...inkDetails(), pointerType: event.pointerType, reason: 'draft_conflict_or_limit' }); onStatus(error.message, true); }
     }
     function pointerMove(event) {
+      if (nativeGesture?.pointerId === event.pointerId && Math.hypot(event.clientX - nativeGesture.x, event.clientY - nativeGesture.y) > 3) nativeGesture.dragged = true;
       if (event.pointerType === 'touch' && handledTouches.has(event.pointerId)) { event.preventDefault(); moveTouch(event); return; }
       if (markupGesture?.pointerId === event.pointerId) { input.observe(event); event.preventDefault(); moveMarkup(event); } else if (inkGesture?.pointerId === event.pointerId) { input.observe(event); event.preventDefault(); appendInk(event); }
     }
@@ -658,7 +673,7 @@
     function placeholder(page, message = '滚动到这里时载入', error = false) {
       const slot = slots[page - 1]; if (!slot) return;
       if (markupGesture?.sheet === slot.sheet) endMarkup(true);
-      renderedScales.delete(page); pageAnnotations.delete(page);
+      renderedScales.delete(page); pageAnnotations.delete(page); pageLinks.delete(page);
       overlays.forget(paperId, page);
       for (const image of slot.sheet.querySelectorAll('img')) image.removeAttribute('src');
       const note = dom('div', `pdr-placeholder${error ? ' pdr-error' : ''}`); note.append(dom('span', '', message));
@@ -723,6 +738,18 @@
       flushTrailing();
       layer.append(fragment); sheet.append(layer); fitWordLayer(layer);
     }
+    function renderInternalLinks(sheet, page, values, geometry) {
+      const links = normalizeInternalLinks(values, geometry, pages); pageLinks.set(page, links);
+      links.forEach((link, index) => {
+        // Pointer events pass through to the text layer so dragging still selects
+        // words. Keyboard users get the same destination through a focusable link.
+        const node = dom('button', 'pdr-internal-link'); node.type = 'button';
+        node.dataset.internalLink = String(index); node.dataset.sourcePage = String(page);
+        node.setAttribute('role', 'link'); node.setAttribute('aria-label', `跳转到 PDF 第 ${link.page} 页引用位置`);
+        Object.assign(node.style, { left: `${link.rect[0] / geometry.width * 100}%`, top: `${link.rect[1] / geometry.height * 100}%`, width: `${(link.rect[2] - link.rect[0]) / geometry.width * 100}%`, height: `${(link.rect[3] - link.rect[1]) / geometry.height * 100}%` });
+        sheet.append(node);
+      });
+    }
     /** Fit each text run to its word box so the invisible layer matches the raster.
      * A run that cannot be measured keeps its natural width. */
     function fitWordLayer(layer) {
@@ -773,7 +800,7 @@
         const allowPan = sheet.dataset.loaded !== 'true';
         if (valid() && inputBusy(page, allowPan)) traceInk('page_defer', { paperId: id, page, reason: 'active_input' });
         if (!await waitForInput(page, valid, allowPan) || !valid()) return;
-        sheet.replaceChildren(image); renderWords(sheet, result.words, geometry); sheet.dataset.loaded = 'true'; pageLoading(page, false); paintInk();
+        sheet.replaceChildren(image); renderWords(sheet, result.words, geometry); renderInternalLinks(sheet, page, result.internal_links, geometry); sheet.dataset.loaded = 'true'; pageLoading(page, false); paintInk();
         // Saved annotations travel with the page payload so clicks can link the
         // raster markup to its rail entry without a second catalogue read.
         pageAnnotations.set(page, (result.annotations || []).filter(annotation => annotation && typeof annotation.id === 'string' && Array.isArray(annotation.rects) && annotation.rects.some(rect => Array.isArray(rect) && rect.length >= 4)));
@@ -829,7 +856,7 @@
       // The draft belongs to its original paper/page, not to the disposable
       // raster window. The caller offers save/discard before leaving the page.
       endInk(false, 'reader_clear'); endMarkup(true); resetTouchZoom(); nativeGesture = null; cancelNavigation(); returnPosition = null; overlays.clearRasters();
-      ++generation; paperId = null; jumpTarget = null; selection = null; lastSelection = ''; queue.reset(null); renderedScales.clear(); rasterCaps.clear(); pageAnnotations.clear(); pages = []; metrics = []; slots = []; active = 1; layoutWidth = 0; layoutPromise = null; initialPage = null; strip.replaceChildren(); root.scrollTop = 0; root.setAttribute('aria-busy', 'false');
+      ++generation; paperId = null; jumpTarget = null; selection = null; lastSelection = ''; queue.reset(null); renderedScales.clear(); rasterCaps.clear(); pageAnnotations.clear(); pageLinks.clear(); pages = []; metrics = []; slots = []; active = 1; layoutWidth = 0; layoutPromise = null; initialPage = null; strip.replaceChildren(); root.scrollTop = 0; root.setAttribute('aria-busy', 'false');
       if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; } if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
       if (resizeTimer !== null) { window.clearTimeout(resizeTimer); resizeTimer = null; }
       if (flashTimer !== null) { window.clearTimeout(flashTimer); flashTimer = null; }
@@ -997,7 +1024,7 @@
     }
     function readingPosition() {
       const row = pageAt(metrics, root.scrollTop), page = layout === 'spread' && metrics[active - 1]?.rowStart === row ? active : row, metric = metrics[page - 1];
-      return metric ? { paperId, page, fraction: (root.scrollTop - metric.top) / metric.height, horizontal: root.scrollLeft / layoutWidth, zoom } : null;
+      return metric ? { paperId, page, fraction: (root.scrollTop - metric.top) / metric.height, horizontal: root.scrollLeft / layoutWidth, zoom, layout, scrollTop: root.scrollTop, scrollLeft: root.scrollLeft, viewportWidth: root.clientWidth, viewportHeight: root.clientHeight } : null;
     }
     async function focusRegion(value, annotationId) {
       if (disposed || value?.paperId !== paperId || !Number.isInteger(value.page) || !pages[value.page - 1]) return false;
@@ -1044,9 +1071,11 @@
       const position = returnPosition; if (!position || position.paperId !== paperId) return false;
       cancelNavigation(); const sequence = focusSequence, id = paperId, ticket = generation, valid = () => current(id, ticket) && focusSequence === sequence;
       if (!await waitForInput(null, valid)) return false;
+      if (position.layout && position.layout !== layout) { layout = position.layout; arrangeSlots(); layoutWidth = 0; }
       zoom = position.zoom; resize(); const metric = metrics[position.page - 1]; if (!metric || !valid()) return false;
       active = position.page; root.scrollTop = metric.top + position.fraction * metric.height; root.scrollLeft = position.horizontal * layoutWidth;
-      returnPosition = null; emitFocus(); updateWindow(position.page); onZoomChange(zoom); return true;
+      if (position.viewportWidth === root.clientWidth && position.viewportHeight === root.clientHeight) { root.scrollTop = position.scrollTop; root.scrollLeft = position.scrollLeft; }
+      returnPosition = null; emitFocus(); updateWindow(position.page); announce(); onZoomChange(zoom); return true;
     }
     function pointerUp(event) {
       if (event.pointerType === 'touch' && handledTouches.has(event.pointerId)) { event.preventDefault(); if (!endTouch(event)) return; }
@@ -1058,7 +1087,7 @@
         endMarkup(outside);
         if (outside) { if (gesture.dragged) onStatus('请在同一 PDF 页内划选文字，再保存批注。', true); return; }
         if (gesture.dragged) captureSelection();
-        else activateAnnotation(gesture.sheet, event);
+        else if (!activateInternalLink(gesture.sheet, event)) activateAnnotation(gesture.sheet, event);
         return;
       }
       if (MARKUP_TOOLS.has(tool)) return;
@@ -1076,9 +1105,23 @@
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed) {
         const sheet = event.target.closest?.('.pdr-sheet');
-        activateAnnotation(sheet, event);
+        const plainClick = nativeGesture?.pointerId === event.pointerId && !nativeGesture.dragged && Math.hypot(event.clientX - nativeGesture.x, event.clientY - nativeGesture.y) <= 3;
+        if (!plainClick || !activateInternalLink(sheet, event)) activateAnnotation(sheet, event);
       }
       if (selectionTimer !== null) window.clearTimeout(selectionTimer); selectionTimer = window.setTimeout(() => { selectionTimer = null; captureSelection(); }, 0);
+    }
+    function followInternalLink(link) {
+      const geometry = pages[link.page - 1]; if (!geometry) return;
+      const x = Math.min(link.to[0], geometry.width - 1), y = Math.min(link.to[1], geometry.height - 1);
+      void revealRegion({ paperId, page: link.page, rects: [[x, y, Math.min(geometry.width, x + 120), Math.min(geometry.height, y + 20)]], focusId: `reference-${link.page}-${x}-${y}` }).catch(error => onStatus(`引用位置跳转失败：${error.message}`, true));
+    }
+    function activateInternalLink(sheet, event) {
+      if (event.button !== 0 || event.isPrimary === false || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || !sheet || !root.contains(sheet) || sheet.dataset.loaded !== 'true') return false;
+      const page = Number(sheet.dataset.pdfPage), geometry = pages[page - 1], box = sheet.getBoundingClientRect();
+      if (!geometry || !box.width || !box.height) return false;
+      const link = internalLinkAt(pageLinks.get(page), (event.clientX - box.left) / box.width * geometry.width, (event.clientY - box.top) / box.height * geometry.height);
+      if (!link) return false;
+      followInternalLink(link); return true;
     }
     function activateAnnotation(sheet, event) {
       if (!sheet || !root.contains(sheet) || sheet.dataset.loaded !== 'true') return;
@@ -1088,6 +1131,11 @@
       if (hit) { flashAnnotation(page, hit.rects, hit); onAnnotationActivate(hit.id, { page }); }
     }
     function click(event) {
+      const anchor = event.target.closest?.('[data-internal-link]');
+      if (anchor && root.contains(anchor) && event.detail === 0) {
+        event.preventDefault(); const link = pageLinks.get(Number(anchor.dataset.sourcePage))?.[Number(anchor.dataset.internalLink)];
+        if (link) followInternalLink(link); return;
+      }
       const documentRetry = event.target.closest?.('[data-retry-document]');
       if (documentRetry && root.contains(documentRetry)) { void open(getPaper(), { page: Number(documentRetry.dataset.retryDocument) }).catch(() => {}); return; }
       const retry = event.target.closest?.('[data-retry-page]'); if (retry && root.contains(retry)) void refresh(Number(retry.dataset.retryPage)).catch(() => {});
@@ -1167,5 +1215,5 @@
     function dispose() { clear(); disposed = true; ink.clear(); overlays.clear(); queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('pointerdown', pointerDown); root.removeEventListener('pointermove', pointerMove); root.removeEventListener('pointercancel', pointerCancel); root.removeEventListener('lostpointercapture', pointerCancel); root.removeEventListener('pointerleave', pointerLeave); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); root.removeEventListener('wheel', wheel); root.removeEventListener('gesturestart', gestureStart); root.removeEventListener('gesturechange', gestureChange); root.removeEventListener('gestureend', gestureEnd); root.removeEventListener('keydown', userNavigate); document.removeEventListener('selectionchange', selectionChanged); document.removeEventListener('pointerup', nativePointerEnded); document.removeEventListener('pointercancel', nativePointerEnded); }
     return { open, goTo, advance, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, setLayout, getLayout: () => layout, resize, revealAnnotation, revealRegion, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, layout, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
-  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition });
+  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition, normalizeInternalLinks, internalLinkAt });
 })();

@@ -548,3 +548,57 @@ test('selection and flash colours come from the picked and stored colours', () =
   assert.equal(annotationTint({ color: { stroke: [1, 2] } }), '');
   assert.equal(annotationTint(null), '');
 });
+
+test('internal PDF links accept only bounded page destinations and keep point hit testing exact', () => {
+  const { normalizeInternalLinks, internalLinkAt } = context.window.PaperPDFReader;
+  const pages = [{ width: 600, height: 800 }, { width: 800, height: 600 }];
+  const valid = { rect: [20, 30, 70, 45], page: 2, to: [40, 520] };
+  const links = normalizeInternalLinks([valid, { ...valid, page: 3 }, { ...valid, page: 0 }, { ...valid, to: [NaN, 10] }, { ...valid, rect: [70, 30, 20, 45] }, { uri: 'javascript:alert(1)' }], pages[0], pages);
+  assert.deepEqual(plain(links), [valid]);
+  assert.deepEqual(plain(internalLinkAt(links, 30, 35)), valid);
+  assert.equal(internalLinkAt(links, 71, 35), null);
+  assert.equal(internalLinkAt(links, 30, 46), null);
+  assert.equal(normalizeInternalLinks(Array(1200).fill(valid), pages[0], pages).length, 1000);
+});
+
+test('plain citation clicks take priority over annotation hits without consuming markup drags or ink', () => {
+  const sheet = {}, calls = [];
+  const scope = vm.createContext({ handledTouches: new Set(), nativePointerEnded() {}, markupGesture: null, inkGesture: null, tool: 'select', MARKUP_TOOLS: new Set(['underline']),
+    nativeGesture: { pointerId: 1, x: 25, y: 30, dragged: false }, selectionTimer: null,
+    window: { getSelection: () => ({ isCollapsed: true }), setTimeout: () => 1, clearTimeout() {} },
+    activateInternalLink: () => { calls.push('link'); return true; }, activateAnnotation: () => calls.push('annotation'), captureSelection: () => calls.push('selection'),
+    moveMarkup() {}, endMarkup: () => { scope.markupGesture = null; }, appendInk() {}, endInk: () => calls.push('ink') });
+  const start = readerSource.indexOf('    function pointerUp('), end = readerSource.indexOf('    function followInternalLink(', start);
+  vm.runInContext(readerSource.slice(start, end), scope);
+  const event = { pointerId: 1, pointerType: 'mouse', clientX: 25, clientY: 30, target: { closest: () => sheet }, preventDefault() {} };
+  scope.pointerUp(event); assert.deepEqual(calls, ['link']);
+  calls.length = 0; scope.nativeGesture.dragged = true; scope.pointerUp(event); assert.ok(!calls.includes('link'));
+  calls.length = 0; scope.window.getSelection = () => ({ isCollapsed: false }); scope.pointerUp(event); assert.deepEqual(calls, []);
+  calls.length = 0; scope.tool = 'ink'; scope.inkGesture = { pointerId: 1 }; scope.pointerUp(event); assert.deepEqual(calls, ['ink']);
+  calls.length = 0; scope.inkGesture = null; scope.tool = 'underline'; sheet.getBoundingClientRect = () => ({ left: 0, top: 0, right: 600, bottom: 800 });
+  scope.markupGesture = { pointerId: 1, sheet, dragged: true }; scope.pointerUp(event); assert.deepEqual(calls, ['selection']);
+  calls.length = 0; scope.markupGesture = { pointerId: 1, sheet, dragged: false }; scope.pointerUp(event); assert.deepEqual(calls, ['link']);
+});
+
+test('reference destination navigation restores exact original page, both scroll axes, zoom, layout and toolbar page callback', async () => {
+  const pages = Array.from({ length: 4 }, (_, i) => ({ page: i + 1, width: 600, height: 800 }));
+  const announcedPages = [];
+  const root = { scrollTop: 210, scrollLeft: 300, clientWidth: 900, clientHeight: 500, getBoundingClientRect: () => ({ left: 0, top: 0 }) };
+  const scope = vm.createContext({ paperId: 'synthetic-reference', pages, root, layout: 'spread', zoom: 1.84, layoutWidth: 600, metrics: pageMetrics(pages, 600, 'spread'), active: 2,
+    returnPosition: null, generation: 1, focusSequence: 0, focusCancelled: null, focusState: null, disposed: false, jumpTarget: null, flashTimer: null, pageAt, regionRects, minimumScroll,
+    current: () => true, waitForInput: async () => true, cancelNavigation: () => { scope.focusSequence++; }, emitFocus() {}, paintFocus() {}, clearFocus() {}, onActivePage: page => announcedPages.push(page),
+    window: { setTimeout: () => 1 }, dirtyPages: new Set(), refreshWaiters: new Map(), pageAnnotations: new Map(),
+    queue: { want() {}, ready: async () => true, snapshot: () => ({ residents: [1, 2, 3, 4] }) }, wantedPages: page => [page], annotationTint: () => '#333333', updateWindow() {}, onZoomChange() {}, arrangeSlots() {},
+    resize: () => { scope.layoutWidth = 600; scope.metrics = pageMetrics(pages, 600, scope.layout); } });
+  scope.slots = pages.map((page, i) => ({ sheet: { dataset: { loaded: 'true' }, getBoundingClientRect: () => ({ left: -root.scrollLeft, top: scope.metrics[i].top - root.scrollTop, width: 600, height: 800 }) } }));
+  const announceStart = readerSource.indexOf('    function announce('), announceEnd = readerSource.indexOf('    function placeholder(', announceStart);
+  vm.runInContext(readerSource.slice(announceStart, announceEnd), scope);
+  const start = readerSource.indexOf('    function readingPosition('), end = readerSource.indexOf('    function pointerUp(', start); vm.runInContext(readerSource.slice(start, end), scope);
+  assert.equal(await scope.revealRegion({ paperId: scope.paperId, page: 4, rects: [[80, 500, 200, 520]] }), true);
+  assert.equal(scope.active, 4); assert.equal(scope.returnPosition.page, 2); assert.ok(root.scrollTop > 210);
+  scope.layout = 'single'; scope.zoom = 1; root.scrollLeft = 0;
+  assert.equal(await scope.returnToReadingPosition(), true);
+  assert.equal(scope.active, 2); assert.equal(scope.layout, 'spread'); assert.equal(scope.zoom, 1.84);
+  assert.equal(root.scrollTop, 210); assert.equal(root.scrollLeft, 300); assert.equal(scope.returnPosition, null);
+  assert.deepEqual(announcedPages, [4, 2], 'Toolbar receives the restored page even when updateWindow sees active unchanged');
+});

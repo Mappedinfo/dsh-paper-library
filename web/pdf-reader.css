@@ -41,3 +41,7 @@
 .pdr-annotation-flash{position:absolute;pointer-events:none;z-index:3;box-sizing:border-box;border:2px solid var(--teal,#28675c);border-radius:3px;background:transparent;box-shadow:0 0 0 1px #fff;animation:pdr-annotation-flash 1.8s ease-out}
 @keyframes pdr-annotation-flash{0%{opacity:0}12%{opacity:1}72%{opacity:1}100%{opacity:0}}
 @media(prefers-reduced-motion:reduce){.pdr-annotation-flash{animation:none;opacity:1}}
+
+/* Focusable internal PDF destinations never intercept text selection or ink. */
+.pdr-internal-link { position:absolute; z-index:4; pointer-events:none; border:0; border-radius:2px; padding:0; margin:0; background:transparent; color:transparent; box-shadow:none; min-width:0; min-height:0; }
+.pdr-internal-link:focus-visible { outline:2px solid var(--teal,#28675c); outline-offset:2px; background:transparent; }

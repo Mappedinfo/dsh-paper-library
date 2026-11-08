@@ -27,6 +27,7 @@ READER_MAX_SCALE = 8.0
 READER_MAX_PIXELS = 16_000_000
 READER_MAX_SIDE = 8192
 READER_MAX_PNG_BYTES = 16 * 1024 * 1024
+READER_MAX_INTERNAL_LINKS = 1000
 from .linked_handwriting import LinkedHandwritingAccess, LINKED_KINDS
 
 def _constants():
@@ -438,6 +439,35 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             # _open_pdf rejects larger files before touching individual pages.
             return self._document_layout(doc, id)
 
+    @staticmethod
+    def _page_internal_links(doc, page):
+        """读取有界的原生内页链接；不返回或执行外部 URI、文件或脚本。"""
+        import pymupdf as fitz
+        links = []
+        link = page.first_link
+        inspected = 0
+        while link is not None and inspected < READER_MAX_INTERNAL_LINKS:
+            inspected += 1
+            try:
+                if not link.is_external and link.dest.kind in {fitz.LINK_GOTO, fitz.LINK_NAMED}:
+                    target_page, x, y = doc.resolve_link(link.uri)
+                    rect = link.rect
+                    if (isinstance(target_page, int) and 0 <= target_page < doc.page_count
+                            and all(math.isfinite(value) for value in (*rect, x, y))):
+                        # Link.rect / resolve_link 已是旋转、裁剪后的显示坐标，
+                        # 不可再次应用 word/annotation 使用的 rotation_matrix。
+                        rect = rect & page.rect
+                        if not rect.is_empty and not rect.is_infinite:
+                            target_rect = doc[target_page].rect
+                            links.append({"rect": list(rect), "page": target_page + 1,
+                                          "to": [max(0.0, min(target_rect.width, x)),
+                                                 max(0.0, min(target_rect.height, y))]})
+            except (ValueError, RuntimeError, TypeError, OverflowError):
+                # 损坏或无法解析的单条链接不能阻止页面阅读。
+                pass
+            link = link.next
+        return links, link is not None
+
     def page(self, id, page=1, scale=1.25, include_layout=False, render_width=None):
         import pymupdf as fitz
         if not isinstance(include_layout, bool):
@@ -496,7 +526,8 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                     annotation_truncated = True
                     break
                 annotations.append(value)
-            return {"page": int(page), "page_count": doc.page_count, "width": width, "height": height, "scale": scale, "requested_scale": requested_scale, "limited": scale < requested_scale - 1e-6, "byte_limited": byte_limited, "pixel_width": pix.width, "pixel_height": pix.height, "limits": {"scale": READER_MAX_SCALE, "pixels": READER_MAX_PIXELS, "side": READER_MAX_SIDE, "png_bytes": READER_MAX_PNG_BYTES}, "image": base64.b64encode(image).decode("ascii"), "words": words, "annotations": annotations, "words_truncated": len(raw_words) > 20000, "annotations_truncated": annotation_truncated, "rotation": current.rotation, **({"layout": layout} if layout is not None else {})}
+            internal_links, internal_links_truncated = self._page_internal_links(doc, current)
+            return {"page": int(page), "page_count": doc.page_count, "width": width, "height": height, "scale": scale, "requested_scale": requested_scale, "limited": scale < requested_scale - 1e-6, "byte_limited": byte_limited, "pixel_width": pix.width, "pixel_height": pix.height, "limits": {"scale": READER_MAX_SCALE, "pixels": READER_MAX_PIXELS, "side": READER_MAX_SIDE, "png_bytes": READER_MAX_PNG_BYTES, "internal_links": READER_MAX_INTERNAL_LINKS}, "image": base64.b64encode(image).decode("ascii"), "words": words, "annotations": annotations, "internal_links": internal_links, "internal_links_truncated": internal_links_truncated, "words_truncated": len(raw_words) > 20000, "annotations_truncated": annotation_truncated, "rotation": current.rotation, **({"layout": layout} if layout is not None else {})}
 
     def _add_annotation(self, doc, page, type="highlight", rects=None, text="", comment="", author="Reader", color="#ffdb66", extra=None, paths=None, width=2, annotation_id=None, parent_id=None):
         import pymupdf as fitz

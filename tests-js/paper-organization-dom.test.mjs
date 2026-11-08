@@ -30,13 +30,14 @@ test('favorite and tag chips filter together, reset pagination, and never open t
 test('tag search pages from server and discards stale responses', {skip:!JSDOM}, async()=>{
   let resolveFirst;let n=0;
   const f=fixture(async(action,args)=>{assert.equal(action,'paper_tags_list');if(++n===1)return new Promise(resolve=>resolveFirst=resolve);return {items:[{tag:'#New/Child',count:2}],total:1,next_offset:null};});
-  const picker=f.document.querySelector('details');picker.open=true;await new Promise(resolve=>setTimeout(resolve,10));
+  const picker=f.document.querySelector('#catalog-tag-picker');picker.click();await tick();
   const input=f.document.querySelector('input');input.value='New';input.dispatchEvent(new f.window.Event('input'));
   resolveFirst({items:[{tag:'#Old',count:4}],total:1});await tick();assert.equal(f.document.querySelectorAll('.paper-tag-option').length,0);
   await new Promise(resolve=>setTimeout(resolve,220));
   assert.equal(f.document.querySelector('.paper-tag-option').textContent,'#New/Child · 2');
+  f.window.dispatchEvent(new f.window.Event('resize'));assert.equal(picker.getAttribute('aria-expanded'),'true','Host pane resizing must preserve the open tag picker');
   assert.equal(f.calls.at(-1)[1].limit,30);assert.equal(f.calls.at(-1)[1].project,'project-a');
-  f.document.querySelector('.paper-tag-option').click();assert.equal(f.state.tag,'#New/Child');assert.equal(picker.open,false);f.dom.window.close();
+  f.document.querySelector('.paper-tag-option').click();assert.equal(f.state.tag,'#New/Child');assert.equal(picker.getAttribute('aria-expanded'),'false');f.dom.window.close();
 });
 test('manual tags preserve source tags, use latest revision, and retain the draft on failure', {skip:!JSDOM}, async()=>{
   let fail=true;
