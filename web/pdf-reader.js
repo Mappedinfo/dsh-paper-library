@@ -599,7 +599,7 @@
       inputEnded();
       return gesture;
     }
-    // 矩形只圈定当前页的显示坐标；文字编辑及真正写入由宿主弹窗处理。
+    // 矩形只圈定当前页的显示坐标；宿主负责保存并在批注栏编辑说明。
     function startRectangle(event, sheet) {
       const page = Number(sheet.dataset.pdfPage), geometry = pages[page - 1];
       const point = inkPoint(event, sheet.getBoundingClientRect(), geometry); if (!point) return;
@@ -626,15 +626,21 @@
     }
     function endRectangle(cancelled = true, event) {
       const g = rectangleGesture; if (!g) return;
-      rectangleGesture = null; g.preview.remove();
+      rectangleGesture = null;
       try { if (root.hasPointerCapture?.(g.pointerId)) root.releasePointerCapture(g.pointerId); } catch { /* 已释放。 */ }
       inputEnded();
-      if (cancelled || !g.sheet.isConnected || !event || g.pointerId !== event.pointerId) return;
+      if (cancelled || !g.sheet.isConnected || !event || g.pointerId !== event.pointerId) { g.preview.remove(); return; }
       const box = g.sheet.getBoundingClientRect();
-      if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY) || event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) { onStatus('请在同一 PDF 页内框选图片或细节。', true); return; }
+      if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY) || event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) { g.preview.remove(); onStatus('请在同一 PDF 页内框选图片或细节。', true); return; }
       const [x0, y0] = g.start, [x1, y1] = g.end;
-      if (Math.abs(x1 - x0) < 2 || Math.abs(y1 - y0) < 2 || Math.abs(x1 - x0) / g.geometry.width * box.width < 4 || Math.abs(y1 - y0) / g.geometry.height * box.height < 4) return;
-      onRectangle({ id: paperId, page: g.page, text: '', rects: [[Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)]] }, { intent: 'square', color: g.color, width: g.width });
+      if (Math.abs(x1 - x0) < 2 || Math.abs(y1 - y0) < 2 || Math.abs(x1 - x0) / g.geometry.width * box.width < 4 || Math.abs(y1 - y0) / g.geometry.height * box.height < 4) { g.preview.remove(); return; }
+      // 松手后保留透明边框，直到宿主完成保存与页刷新，避免写入期间看似消失。
+      // 失败由宿主批注栏保留草稿供重试；阅读器不自行重发写入。
+      try {
+        const completion = onRectangle({ id: paperId, page: g.page, text: '', rects: [[Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)]] }, { intent: 'square', color: g.color, width: g.width });
+        if (completion && typeof completion.then === 'function') void Promise.resolve(completion).catch(error => onStatus(`矩形框未保存：${error.message}`, true)).finally(() => g.preview.remove());
+        else g.preview.remove();
+      } catch (error) { g.preview.remove(); onStatus(`矩形框未保存：${error.message}`, true); }
     }
     function pointerDown(event) {
       input.observe(event);

@@ -34,10 +34,11 @@ for (const name of ['board.js','board.css','board-flow.js','board-source.js','bo
 for (const name of ['workspace-navigation.js','workspace-navigation.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 const languageActions = new Set(['language_settings_get','language_settings_update','language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
 for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js','ink-diagnostics.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+staticFiles['annotation-editor.js']=['annotation-editor.js','text/javascript;charset=utf-8'];
 staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
 staticFiles['slides.html']=['slides.html','text/html;charset=utf-8'];
 staticFiles['fonts/silkscreen-regular.ttf']=['fonts/silkscreen-regular.ttf','font/ttf'];
-const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:'];
+const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:', 'annotation-edits:'];
 function browserStateKey(key, listPrefix = false) {
   if (typeof key !== 'string' || !(key === 'preferences' || key === 'reader' || /^workspace:last:[A-Za-z0-9_-]{1,160}$/.test(key) || browserStatePrefixes.some(prefix => key.startsWith(prefix)) || /^migration:[a-f0-9]{64}$/.test(key) || (listPrefix && key === 'migration:'))) throw new LocalStateError('此状态类别不能直接从浏览器访问。', 'STATE_FORBIDDEN', 403);
   return key;

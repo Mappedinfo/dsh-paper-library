@@ -1,5 +1,5 @@
 'use strict';
-window.PaperCompanion={create({api,persistence,getPaper,refreshAnnotations,toast}){
+window.PaperCompanion={create({api,persistence,getPaper,refreshAnnotations,beforeAsk,toast}){
   let available=false,disposed=false,paperId=null,enabled=false,writable=false,timer,busy=false,again=false,entries=[],savedKey='';
   let entriesRevision=0,savedReadsFailed=0,savingToggle=false;
   const submitting=new Set();
@@ -63,6 +63,7 @@ window.PaperCompanion={create({api,persistence,getPaper,refreshAnnotations,toast
     if(disposed||!available||paperId!==id||submitting.has(key))return;
     submitting.add(key);decorate();
     try{
+      if(action==='companion_ask'&&beforeAsk){const version=await beforeAsk(id,annotationId);if(version)args={...args,version};}
       const value=await api(action,{id,...args});
       if(disposed||!available||paperId!==id)return;
       ++entriesRevision;

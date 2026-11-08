@@ -399,12 +399,15 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 "limits": self._reference_limits(max_characters)}
 
     def _with_annotation_version(self, value, identity_reliable):
-        # 页面与列表使用同一版本规则；超长批注仍可阅读，不伪造完整引用版本。
-        if self._annotation_characters(value) <= 8000 and value.get("kind") != "ai-feedback":
-            try:
-                value["version"] = self._reference_annotation(value, identity_reliable)["version"]
-            except ValueError:
-                value["translation_unavailable"] = "批注内容或几何超过完整引用范围"
+        # 编辑需要完整内容版本，即使备注已超过 AI 引用的 8000 字符预算。
+        # 继续沿用有界完整哈希；无法完整解析时不提供可用于覆盖的版本。
+        try:
+            value["edit_version"] = self._reference_annotation(value, identity_reliable)["version"]
+            if self._annotation_characters(value) <= 8000 and value.get("kind") != "ai-feedback":
+                value["version"] = value["edit_version"]
+        except ValueError:
+            value["edit_unavailable"] = "批注内容或几何超过完整编辑范围"
+            value["translation_unavailable"] = "批注内容或几何超过完整引用范围"
         return value
 
     def annotations(self, id):
@@ -607,14 +610,40 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 if parent.info.get("id") == extra["annotation_ids"][0]:
                     annot.set_irt_xref(parent.xref)
                     break
-        return {"annotation": self._annotation(current, annot)}
+        return {"annotation": self._with_annotation_version(self._annotation(current, annot), True)}
 
     def annotate(self, id, **kwargs):
         with self.lock():
             retry_id = kwargs.get("annotation_id")
             if retry_id is not None:
-                if kwargs.get("type") != "ink" or not isinstance(retry_id, str) or not re.fullmatch(r"(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})", retry_id):
-                    raise ValueError("Only ink accepts a lowercase UUID annotation_id")
+                if not isinstance(retry_id, str) or not re.fullmatch(r"(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})", retry_id):
+                    raise ValueError("annotation_id must be a lowercase UUID")
+                if kwargs.get("type", "highlight") != "ink":
+                    # 保存原始请求指纹，不以经过 PDF 序列化或后续编辑的
+                    # 矩形／内容来猜测重试。相同 UUID 永远只代表一次创建。
+                    defaults = {"page": None, "type": "highlight", "rects": None,
+                                "paths": None, "width": 2, "parent_id": None,
+                                "text": "", "comment": "", "author": "Reader", "color": "#ffdb66"}
+                    payload = {key: kwargs.get(key, default) for key, default in defaults.items()}
+                    identity = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False,
+                                                         separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+                    with self._open_pdf(self.pdf_path(id)) as doc:
+                        self._page(doc, kwargs["page"])
+                        matches, count = [], 0
+                        for page in doc:
+                            for annot in page.annots() or []:
+                                count += 1
+                                if count > _constants().MAX_ANNOTATIONS:
+                                    raise ValueError("Annotation retry exceeds the bounded annotation scan")
+                                if annot.info.get("id") == retry_id:
+                                    matches.append((self._annotation_metadata(annot).get("create_request_hash"),
+                                                    self._with_annotation_version(self._annotation(page, annot), True)))
+                        if matches:
+                            if len(matches) != 1 or matches[0][0] != identity:
+                                raise ValueError("Annotation annotation_id already exists with different content")
+                            return {"annotation": matches[0][1], "duplicate": True}
+                    kwargs["extra"] = {**(kwargs.get("extra") or {}), "create_request_hash": identity}
+                    return self._write_pdf(id, lambda doc: self._add_annotation(doc, **kwargs))
                 # A lost HTTP response must not turn retry into a second stroke.
                 # Check /NM while holding the same lock as the atomic write;
                 # returning an existing object leaves PDF bytes/timestamps alone.
@@ -676,20 +705,33 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                     return page, annot
         raise ValueError("Annotation not found (refresh annotations if the PDF changed externally)")
 
-    def annotation_update(self, id, annotation_id, comment):
+    def annotation_update(self, id, annotation_id, comment, version=None):
         if not isinstance(comment, str) or len(comment) > 30000:
             raise ValueError("Comment must be text of at most 30000 characters")
-        def operation(doc):
+        if version is not None and (not isinstance(version, str) or not re.fullmatch(r"[0-9a-f]{64}", version)):
+            raise ValueError("Annotation version must be a SHA-256 value")
+        def checked(doc):
             page, annot = self._find_annotation(doc, annotation_id)
             if self._annotation_metadata(annot).get("kind") == "linked-handwriting-transcript":
                 raise ValueError("Use linked_handwriting_text with the current group version to update a transcript")
             if self._is_handwriting(annot):
                 raise ValueError("Use handwriting_save to update a handwritten note with its version and original board")
+            value = self._with_annotation_version(self._annotation(page, annot), bool(annot.info.get("id")))
+            if value["comment"] != comment and version is not None and value.get("edit_version") != version:
+                raise ValueError("ANNOTATION_STALE: 批注已在其他窗口修改，草稿已保留；请核对最新内容后再保存。")
+            return page, annot, value
+        def operation(doc):
+            page, annot, _ = checked(doc)
             annot.set_info(content=comment, modDate="D:" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%SZ"))
             annot.update()
             self._readable_underline(doc, annot)
-            return {"annotation": self._annotation(page, annot)}
+            return {"annotation": self._with_annotation_version(self._annotation(page, annot), bool(annot.info.get("id")))}
         with self.lock():
+            # 已完成的更新重试不再生成备份、改时间戳或覆盖后续状态。
+            with self._open_pdf(self.pdf_path(id)) as doc:
+                _, _, value = checked(doc)
+                if value["comment"] == comment:
+                    return {"annotation": value, "duplicate": True}
             return self._write_pdf(id, operation)
 
     def annotation_delete(self, id, annotation_id):

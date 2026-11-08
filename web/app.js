@@ -29,6 +29,7 @@ let canvasNotesUI, canvasNotesContext = null, canvasNotesPending = false;
 let latexUI;
 let libraryLatexVersions;
 let companionUI;
+let annotationEditor;
 let handwritingUI;
 let linkedHandwritingUI;
 let inkQueue;
@@ -441,7 +442,7 @@ async function loadAnnotations(id) {
         return false;
       }
     }while(job.again&&id===state.active?.id);
-    if(loaded)void linkedHandwritingUI?.paperReady(id);return loaded;
+    if(loaded){void linkedHandwritingUI?.paperReady(id);if(typeof annotationEditor!=='undefined')void annotationEditor?.ready(id);}return loaded;
   })().finally(()=>annotationLoadJobs.delete(id));return job.promise;
 }
 // Threading lives in web/annotation-threads.js so the no-duplication rule is
@@ -460,6 +461,7 @@ function annotationThreads(annotations) {
   return {notes,replies,unlinked};
 }
 function renderAnnotations() {
+  const restoreEditorFocus = typeof annotationEditor!=='undefined'?annotationEditor?.beforeRender():null;
   linkedHandwritingUI?.beforeRender();
   const fragment = document.createDocumentFragment();
   const {notes,replies,unlinked}=annotationThreads(state.annotations);
@@ -492,7 +494,7 @@ function renderAnnotations() {
     if (note.handwriting) { const handwritten = el('div', 'annotation-handwriting'); handwritten.append(el('p', 'small muted', note.handwriting.transcription_source === 'model' ? '手写便签 · AI 识别待校对' : '手写便签 · 原笔迹已保留')); if (note.handwriting.transcript) handwritten.append(el('p', '', note.handwriting.transcript)); card.append(handwritten); }
     linkedHandwritingUI?.decorate(card,note);
     const actions = el('div', 'annotation-actions'); const edit = el('button', 'button subtle', '编辑'); edit.dataset.noteAction = 'edit'; const remove = el('button', 'button subtle delete-note', '删除'); remove.dataset.noteAction = 'delete'; const copy = el('button', 'button subtle', '复制原文'); copy.type = 'button'; copy.dataset.noteAction = 'copy-source'; copy.disabled = typeof note.text !== 'string' || !note.text.trim(); copy.title = copy.disabled ? '这条批注没有选中的 PDF 原文' : '仅复制选中的 PDF 原文，不包含评论或 AI 回复'; actions.append(edit, remove, copy);
-    if (note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const handwriting = el('button', 'button subtle', '手写'); handwriting.dataset.noteAction = 'handwriting'; const primary=el('div','annotation-primary-actions');primary.append(handwriting,edit);actions.prepend(primary); if(note.handwriting){const legacy=el('button','button subtle','打开原便签');legacy.dataset.noteAction='handwriting-legacy';actions.append(legacy);} }
+    if (note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const handwriting = el('button', 'button subtle', '手写'); handwriting.dataset.noteAction = 'handwriting'; const primary=el('div','annotation-primary-actions');primary.append(handwriting,edit);actions.prepend(primary); const independent=el('button','button subtle','＋ 独立批注');independent.type='button';independent.dataset.noteAction='independent';independent.title='在同一位置新增独立批注，分别记录问题、分别问 DSH';actions.append(independent); if(note.handwriting){const legacy=el('button','button subtle','打开原便签');legacy.dataset.noteAction='handwriting-legacy';actions.append(legacy);} }
     if (paperChatUI?.available() && note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const selected = paperChatUI.hasAnnotation(note.id); const discuss = el('button', 'button subtle', selected ? '移出提问材料' : '选作提问材料'); discuss.dataset.noteAction = 'discuss'; discuss.title = '可多选批注作为提问材料，再到对话框统一发送；此按钮不会发送消息'; discuss.setAttribute('aria-pressed', String(selected)); actions.append(discuss); }
     const phrase=(note.text||note.comment||note.content||'').trim();if(phrase&&phrase.length<=200){const entry=el('button','button subtle','词条');entry.type='button';entry.title='匹配百科词条或创建带来源的词条';entry.addEventListener('click',()=>wikiUI.show('encyclopedia',phrase,{paper_id:state.active.id,title:state.active.title,page:note.page,annotation_id:note.id,quote:phrase}));actions.append(entry);}
     card.append(actions);for(const reply of replies.get(note.id)||[])card.append(replyCard(reply)); fragment.append(card);
@@ -505,6 +507,7 @@ function renderAnnotations() {
   if(unlinked.length){const group=el('details','annotation-unlinked');group.append(el('summary','',`未关联回复 · ${unlinked.length}`),el('p','small muted','这类回复没有可核实的批注关联，或原批注已删除。已有内容仍保存在 PDF 中。'));for(const reply of unlinked)group.append(replyCard(reply));fragment.append(group);}
   if (state.annotationsTruncated) fragment.append(el('p', 'small muted', '批注数量或文本量已达读取上限，当前只显示已读取的部分。PDF 中的原始批注仍被保留。'));
   $('annotation-list').replaceChildren(fragment);
+  if(typeof annotationEditor!=='undefined')annotationEditor?.decorate();restoreEditorFocus?.();
   companionUI?.decorate();linkedHandwritingUI?.sync();linkedHandwritingUI?.afterRender();
 }
 /** 自动着色：拖选即按当前颜色写成自然批注（不弹对话框）。
@@ -581,7 +584,9 @@ async function returnToInkDraft(){
 }
 const MARKUP_LABELS = { highlight: '高亮', underline: '下划线', strikeout: '删除线' };
 async function autoMarkup(selection, intent = {}) {
-  if (autoMarkupBusy || !selection?.rects?.length || !selection.text?.trim()) return;
+  if (!selection?.rects?.length || !selection.text?.trim()) return;
+  if(typeof annotationEditor!=='undefined'&&annotationEditor){if(selection.id!==state.active?.id)return;const result=annotationEditor.create(['highlight','underline','strikeout'].includes(intent.intent)?intent.intent:(readingShell?.markup()||'highlight'),{selection,color:intent.color||readingShell?.tool().color||'#ffdb66'});clearSelection();return result;}
+  if(autoMarkupBusy)return;
   const type = ['highlight', 'underline', 'strikeout'].includes(intent.intent) ? intent.intent : (readingShell?.markup() || 'highlight');
   const color = intent.color || readingShell?.tool().color || '#ffdb66';
   autoMarkupBusy = true;
@@ -600,6 +605,7 @@ async function autoMarkup(selection, intent = {}) {
 }
 let annotationSaveBusy = false;
 function openAnnotation(mode, note = null, options = {}) {
+  if (typeof annotationEditor !== 'undefined' && annotationEditor) return annotationEditor.create(mode,{note,selection:options.selection||(['highlight','underline','strikeout'].includes(mode)?state.selection:null),color:options.color||readingShell?.tool().color||'#ffdb66',width:options.width??2,page:note?.page||options.selection?.page||state.page});
   if (annotationSaveBusy) { toast('正在保存批注，请稍候。'); return; }
   if (!state.active?.pdf) return;
   const markup = ['highlight','underline','strikeout'].includes(mode);
@@ -705,7 +711,8 @@ async function handleNoteAction(event) {
     finally { translatingAnnotations.delete(key); if (state.active?.id === id) renderAnnotations(); }
     return;
   }
-  if (action === 'edit') openAnnotation('edit', note);
+  if (action === 'edit') {openAnnotation('edit', note);return;}
+  if (action === 'independent') {await annotationEditor?.create(['highlight','underline','strikeout','square'].includes(note.type)?note.type:'note',{note,page:note.page});return;}
   if (action === 'handwriting') { await linkedHandwritingUI?.toggle(state.active, note); return; }
   if (action === 'handwriting-legacy') { await handwritingUI?.open(state.active,note);return; }
   if (action === 'linked-recognize'||action === 'linked-recognize-new') { await linkedHandwritingUI?.recognize(state.active.id,note,{fresh:action==='linked-recognize-new'});return; }
@@ -714,7 +721,7 @@ async function handleNoteAction(event) {
     if (button.dataset.confirm !== 'true') { button.dataset.confirm = 'true'; button.textContent = '确认删除'; setTimeout(() => { if (button.isConnected) { delete button.dataset.confirm; button.textContent = '删除'; } }, 5000); return; }
     if(linkedHandwritingUI?.active(state.active.id,note.id)&&!await linkedHandwritingUI.finish())return;
     const id = state.active.id; button.disabled = true;
-    try { await api('annotation_delete', { id, annotation_id: note.id }); toast('批注已删除'); if (state.active?.id === id) { await loadAnnotations(id); await paperChatUI?.annotationsChanged(id); await refreshPage(note.page); } }
+    try { await annotationEditor?.beforeAsk(id,note.id); await api('annotation_delete', { id, annotation_id: note.id }); annotationEditor?.discard(id,note.id); toast('批注已删除'); if (state.active?.id === id) { await loadAnnotations(id); await paperChatUI?.annotationsChanged(id); await refreshPage(note.page); } }
     catch (error) { toast(error.message, true); button.disabled = false; }
   }
 }
@@ -1296,6 +1303,11 @@ async function applyReaderSnapshot(snapshot,legacyChat=false) {
     if(snapshot.readerSelection)showReaderSelection(snapshot.readerSelection);
     const draft = snapshot.annotationDraft;
     if (draft?.id === state.active.id && ['note', 'highlight', 'underline', 'strikeout', 'square', 'edit'].includes(draft.mode)) {
+      if (typeof annotationEditor!=='undefined'&&annotationEditor) {
+        const note=draft.mode==='edit'?state.annotations.find(n=>n.id===draft.note?.id):null;
+        if(note){annotationEditor.focus(state.active.id,note.id);await annotationEditor.restoreDraft(state.active.id,note,draft.comment||'');}
+        else await annotationEditor.create(draft.mode==='edit'?'note':draft.mode,{selection:draft.selection,color:draft.color,width:draft.width,page:draft.page,comment:draft.comment||''});
+      } else {
       if (draft.mode === 'edit') {
         await loadAnnotations(state.active.id);
         if(snapshot.paperId!==state.active?.id||!readerSurfaceActive())return;
@@ -1311,6 +1323,7 @@ async function applyReaderSnapshot(snapshot,legacyChat=false) {
         $('annotation-page-label').textContent = `第 ${draft.page} 页`;
       }
       $('annotation-comment').value = draft.comment || '';
+      }
     }
     if(snapshot.inkDraftRecord?.draft?.paperId===state.active.id&&snapshot.inkDraftRecord.updatedAt>inkDraftUpdatedAt&&!inkSaveBusy){
       pendingInkHandoff=snapshot.inkDraftRecord;
@@ -1477,7 +1490,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
     if(readingShell?.mode()==='auto'){void autoMarkup(selection,intent);return;}
     if(['highlight','underline','strikeout'].includes(intent.intent))openAnnotation(intent.intent,null,{selection,color:intent.color});
   },
-  onRectangle: (selection,intent) => {if(selection.id===state.active?.id)openAnnotation('square',null,{selection,color:intent.color,width:intent.width});},
+  onRectangle: (selection,intent) => {if(selection.id===state.active?.id)return openAnnotation('square',null,{selection,color:intent.color,width:intent.width});},
   onPageNote: (selection,intent) => {if(selection.id===state.active?.id)openAnnotation('note',null,{selection,color:intent.color});},
   onAnnotationActivate: (annotationId,info) => {if(info?.page&&state.active?.id&&annotationId){const note=state.annotations.find(value=>value.id===annotationId);linkAnnotationCard(note?.kind==='linked-handwriting'?note.parent_id:annotationId);}},
   onInkChange: inkDraftChanged,
@@ -1496,7 +1509,11 @@ linkedHandwritingUI=window.PaperLinkedHandwriting?.create({api,persistence,reade
 readingShell?.setInkQueue(inkQueue);
 void restoreInkDraft().then(()=>inkQueue?.refresh()).then(()=>linkedHandwritingUI?.restore()).then(()=>inkQueue&&state.active?.id?loadAnnotations(state.active.id):null).catch(error=>toast(error.message,true));
 handwritingUI = window.PaperHandwritingNote?.create({ api, persistence, toast, draftChanged: publishReaderState, available: () => handwritingAvailable, changed: async (id, page) => { if (state.active?.id === id) { await loadAnnotations(id); await paperChatUI?.annotationsChanged(id); await refreshPage(page); } } });
-companionUI=window.PaperCompanion?.create({api,persistence,getPaper:()=>state.active,refreshAnnotations:loadAnnotations,toast});
+annotationEditor=window.PaperAnnotationEditor?.create({api,persistence,getPaper:()=>state.active,getNotes:()=>state.annotations,
+  show:annotationId=>{readingPanels?.show('annotations');if(annotationId){const index=annotationThreads(state.annotations).notes.findIndex(n=>n.id===annotationId);if(index>=0){state.noteOffset=Math.floor(index/40)*40;renderAnnotations();}}},
+  refresh:async(id,note,{reveal=false}={})=>{if(state.active?.id!==id)return;await loadAnnotations(id);if(state.active?.id===id){if(reveal)annotationEditor.focus(id,note.id);await refreshPage(note.page);await paperChatUI?.annotationsChanged(id);}},
+  changed:()=>companionUI?.decorate(),toast});
+companionUI=window.PaperCompanion?.create({api,persistence,getPaper:()=>state.active,refreshAnnotations:loadAnnotations,beforeAsk:(id,annotationId)=>annotationEditor?.beforeAsk(id,annotationId),toast});
 const wikiUI=window.PaperEncyclopedia.create({api,toast,openReference:openReferencedPaper});
 const wikiButton=el('button','button subtle','百科');wikiButton.id='ribbon-encyclopedia';wikiButton.type='button';wikiButton.addEventListener('click',()=>wikiUI.show());document.querySelector('.reader-ribbon').insertBefore(wikiButton,$('reader-fullscreen'));
 languageUI=window.PaperLanguageLearning?.create({api,persistence,openVocabulary:()=>wikiUI.show('words'),getPaper:()=>state.active,getSelection:()=>state.selection,toast,openReference:openReferencedPaper,

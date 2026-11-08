@@ -20,7 +20,7 @@ async function call(handler,input,headers={}) {
 
 test('HTTP state writes survive handler reload and expose actionable CAS conflicts', async t => {
   const f=await fixture(t), handler=createFetchHandler(f.options);
-  for (const key of ['preferences','reader','reader:paper_a','reader:language-window','workspace:last:main','workspace:last:paper_a','chat:paper_a','metadata:new','language-draft:request_a',`migration:${'a'.repeat(64)}`]) {
+  for (const key of ['preferences','reader','reader:paper_a','reader:language-window','workspace:last:main','workspace:last:paper_a','chat:paper_a','metadata:new','annotation-edits:paper-a:550e8400-e29b-41d4-a716-446655440000','language-draft:request_a',`migration:${'a'.repeat(64)}`]) {
     const missing=await call(handler,{action:'state_get',key}); assert.equal(missing.result.revision,0);
     const saved=await call(handler,{action:'state_put',key,value:{text:'preserved',page:3},expected_revision:0});
     assert.equal(saved.status,200); assert.match(saved.result.revision,/^[a-f0-9]{64}$/);

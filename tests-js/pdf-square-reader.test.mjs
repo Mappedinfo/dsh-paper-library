@@ -9,7 +9,7 @@ const source=await readFile(new URL('../web/pdf-reader.js',import.meta.url),'utf
 const css=await readFile(new URL('../web/pdf-reader.css',import.meta.url),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const plain=value=>JSON.parse(JSON.stringify(value));
-async function fixture({rotation=0,scale=1}={}){
+async function fixture({rotation=0,scale=1,completeRectangle}={}){
   const dom=new JSDOM(`<style>${css}</style><div id="reader"></div>`,{runScripts:'outside-only',pretendToBeVisual:true,url:'http://synthetic.invalid/'});
   const {window}=dom,root=window.document.querySelector('#reader'),calls=[],rectangles=[],selections=[],statuses=[],captured=new Set();
   const page={page:1,width:rotation%180?600:400,height:rotation%180?400:600,rotation};
@@ -22,7 +22,7 @@ async function fixture({rotation=0,scale=1}={}){
   const ui=window.PaperPDFReader.create({root,getPaper:()=>({id:'synthetic',pdf:'synthetic.pdf'}),api:async(action,args)=>{
     calls.push([action,plain(args)]);assert.equal(action,'page','Rectangle creation does not issue a write API call');
     return {...page,page_count:1,scale:1,image:'iVBORw0KGgo=',words:[],annotations:[],internal_links:[],layout:{page_count:1,pages:[page]}};
-  },onRectangle:(value,options)=>rectangles.push([plain(value),plain(options)]),onSelection:value=>selections.push(value),onStatus:(...value)=>statuses.push(value)});
+  },onRectangle:(value,options)=>{rectangles.push([plain(value),plain(options)]);return completeRectangle?.();},onSelection:value=>selections.push(value),onStatus:(...value)=>statuses.push(value)});
   await ui.open({id:'synthetic',pdf:'synthetic.pdf'});await tick();
   const sheet=root.querySelector('.pdr-sheet');
   sheet.getBoundingClientRect=()=>({left:20,top:30,width:page.width*scale,height:page.height*scale,right:20+page.width*scale,bottom:30+page.height*scale});
@@ -83,4 +83,50 @@ test('deferred page refresh waits for rectangle completion and then restores the
   const f=await fixture();f.start();const count=f.calls.length;const pending=f.ui.refresh(1);
   await new Promise(resolve=>setTimeout(resolve,280));assert.equal(f.calls.length,count);assert.ok(f.root.querySelector('.pdr-square-draft'));
   f.pointer('pointerup',80,100);await pending;assert.equal(f.calls.length,count+1);assert.equal(f.rectangles.length,1);assert.equal(f.sheet.dataset.loaded,'true');f.close();
+});
+
+test('trackpad mouse release uses final coordinates even when intermediate move events are coalesced', {skip:!JSDOM}, async()=>{
+  const f=await fixture({scale:1.84});f.ui.setTool('square',{color:'#336699',width:3});
+  // macOS trackpads report mouse pointers. A short drag need not deliver every
+  // intermediate point, and captured events target the viewport rather than PDF.
+  f.pointer('pointerdown',10,20);
+  f.pointer('pointerup',90,120,{target:f.root});
+  assert.deepEqual(f.rectangles,[[{id:'synthetic',page:1,text:'',rects:[[10,20,90,120]]},{intent:'square',color:'#336699',width:3}]]);
+  f.pointer('lostpointercapture',90,120,{target:f.root});
+  f.pointer('pointerup',90,120,{target:f.root});
+  assert.equal(f.rectangles.length,1,'post-release capture notifications never duplicate the annotation');
+  f.close();
+});
+
+test('captured mouse rectangles survive child capture notifications and only the matching pointer ends them', {skip:!JSDOM}, async()=>{
+  const f=await fixture();f.start();
+  f.pointer('lostpointercapture',80,100,{target:f.sheet});
+  f.pointer('pointerup',110,130,{pointerId:2,target:f.root});
+  assert.equal(f.rectangles.length,0);assert.ok(f.root.querySelector('.pdr-square-draft'));
+  f.pointer('pointerup',110,130,{target:f.root});
+  assert.deepEqual(f.rectangles[0][0].rects,[[10,20,110,130]]);
+  f.close();
+});
+
+
+test('a completed rectangle stays visible until its one save and page refresh promise settles', {skip:!JSDOM}, async()=>{
+  let finish;
+  const f=await fixture({completeRectangle:()=>new Promise(resolve=>{finish=resolve;})});
+  f.start();f.pointer('pointerup',80,100,{target:f.root});
+  assert.equal(f.rectangles.length,1);assert.equal(f.captured.size,0);
+  assert.ok(f.root.querySelector('.pdr-square-draft'),'release must not erase a pending rectangle');
+  f.pointer('pointerup',80,100,{target:f.root});assert.equal(f.rectangles.length,1);
+  finish(true);await tick();assert.equal(f.root.querySelector('.pdr-square-draft'),null);f.close();
+});
+
+test('failed rectangle saves settle their preview, report rejected callbacks, and never retry writes', {skip:!JSDOM}, async()=>{
+  for(const reject of [false,true]){
+    let finish;
+    const f=await fixture({completeRectangle:()=>new Promise((resolve,rejectPromise)=>{finish=reject?rejectPromise:resolve;})});
+    f.start();f.pointer('pointerup',80,100);assert.ok(f.root.querySelector('.pdr-square-draft'));
+    finish(reject?Error('Synthetic save failure'):false);await tick();
+    assert.equal(f.rectangles.length,1);assert.equal(f.root.querySelector('.pdr-square-draft'),null);
+    if(reject)assert.match(f.statuses.at(-1)[0],/矩形框未保存.*Synthetic save failure/);
+    f.close();
+  }
 });
