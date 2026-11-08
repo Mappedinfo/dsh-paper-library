@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import vm from 'node:vm'
+import {resolveTranslationTarget} from '../src/harness/language-learning.mjs'
 import { readFile } from 'node:fs/promises'
 const script = await readFile(new URL('../web/language-learning.js', import.meta.url), 'utf8')
 const clone = value => JSON.parse(JSON.stringify(value))
@@ -36,7 +37,7 @@ function fixture({ get, put, respond } = {}) {
     getPaper: () => currentPaper, getSelection: () => selection, toast: text => toasts.push(text), prepareChat: (...args) => chats.push(args),
   })
   ui.setAvailable(true)
-  return { ui, element, requests, writes, storage, toasts, chats, result, floating,
+  return { previewTarget:window.PaperLanguageLearning.previewTranslationTarget,ui, element, requests, writes, storage, toasts, chats, result, floating,
     actions(action) { return requests.filter(row => row.action === action) },
     async open(id) { currentPaper = { id, title: id }; return ui.paperChanged(currentPaper) },
     setCurrent(id) { currentPaper = id ? { id, title: id } : null; ui.sync() },
@@ -205,3 +206,27 @@ test('paper authority prevents stale generation and sending another paper result
   f.setCurrent('paper-a'); await f.click('language-discuss')
   assert.equal(f.chats[0][1].paperId, 'paper-a')
 })
+
+
+test('follow mode shows resolved target and updates with input without per-keystroke requests',async()=>{
+ let target='auto';const f=fixture({respond:action=>action==='language_settings_get'?{value:{target_language:target}}:undefined});
+ await f.open('paper-a');f.ui.show();await tick();assert.match(f.element('language-target-current').textContent,/输入后识别/);
+ await f.type('An English sentence.');assert.match(f.element('language-target-current').textContent,/检测目标：中文/);
+ await f.type('这是一段中文原句。');assert.match(f.element('language-target-current').textContent,/检测目标：英文/);assert.equal(f.actions('language_settings_get').length,1);
+ target='en';f.ui.show();await tick();await f.type('English stays here.');assert.match(f.element('language-target-current').textContent,/当前目标：英文/);
+ f.element('language-target').value='zh-CN';await f.element('language-target').dispatch('change');assert.match(f.element('language-target-current').textContent,/当前目标：中文/);
+ f.ui.dispose();
+});
+test('target preview matches server script rules including mixed text and formula markup',()=>{
+ const f=fixture();for(const text of ['English prose.','中文论文里的表达。','This 模型 uses Transformer embeddings.','日本語のテキストです。','한국어 문장입니다.','\\cite{中文标签} A method with $x+y$.',''])for(const target of ['auto','zh-CN','en'])assert.equal(f.previewTarget(text,target),resolveTranslationTarget(text,target));f.ui.dispose();
+});
+test('polish direction is persisted and sent only for polish, changing direction uses a new request',async()=>{
+ const f=fixture();await f.open('paper-a');await f.type('A synthetic expression.');await f.click('language-direction-concise');await f.click('language-polish');await f.settle();
+ const first=f.actions('language_generate')[0];assert.equal(first.polish_direction,'concise');assert.equal(f.writes.at(-1).value.polish_direction,'concise');
+ await f.click('language-direction-academic');await f.click('language-polish');await f.settle();const second=f.actions('language_generate')[1];assert.equal(second.polish_direction,'academic');assert.notEqual(first.request_id,second.request_id);
+ await f.click('language-translate');await f.settle();assert.equal(Object.hasOwn(f.actions('language_generate')[2],'polish_direction'),false);
+ await f.open('paper-b');await f.open('paper-a');await f.click('language-polish');await f.settle();assert.equal(f.actions('language_generate')[3].polish_direction,'academic');f.ui.dispose();
+});
+test('unavailable followed settings are shown as unknown without guessing a target',async()=>{
+ const f=fixture({respond:action=>{if(action==='language_settings_get')throw Error('offline');}});await f.open('paper-a');await f.type('English text.');f.ui.show();await tick();assert.match(f.element('language-target-current').textContent,/待读取/);assert.equal(f.actions('language_generate').length,0);f.ui.dispose();
+});

@@ -27,3 +27,6 @@
 .wiki-dialog .language-panel-embedded[hidden],.wiki-header .wiki-language-tabs[hidden],.wiki-dialog>.wiki-layout[hidden]{display:none!important}
 
 .wiki-header>button:last-child{margin-left:auto}.wiki-language-active>.wiki-header>button:last-child{margin-left:0}
+
+.language-polish-directions{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0 12px;grid-column:1}.language-polish-directions .button{font-size:12px;padding:4px 8px}.language-polish-directions .button[aria-pressed="true"]{background:var(--teal);color:var(--bg)}
+#language-target-current{display:inline-block;white-space:nowrap}.language-panel-embedded #language-result{grid-row:1 / span 4}

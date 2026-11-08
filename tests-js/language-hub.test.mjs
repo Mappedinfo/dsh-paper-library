@@ -8,8 +8,8 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function fixture(t){
  const dom=new JSDOM('',{url:'https://synthetic.invalid',runScripts:'outside-only'}),w=dom.window,doc=w.document,calls=[],writes=[],messages=[];
  let paper={id:'paper-a',title:'Synthetic paper'},selection={id:'paper-a',page:3,text:'A synthetic sentence.'};
- w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'));};w.confirm=()=>true;
- w.PaperFloatingWindows={attach(){assert.fail('Embedded language tools must not create another floating window');}};
+ w.HTMLDialogElement.prototype.showModal=function(){this.open=true;this.dataset.testModal='true';};w.HTMLDialogElement.prototype.show=function(){this.open=true;this.dataset.testModal='false';};w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'));};w.confirm=()=>true;
+ w.PaperFloatingWindows={attach(element){assert.equal(element.tagName,'DIALOG','Embedded language tools must not create another floating window');return {refresh(){}};}};
  for(const source of sources)w.eval(source);
  const api=async(action,args={})=>{calls.push({action,...args});
   if(action==='language_settings_get')return {revision:'settings-1',value:{target_language:'zh-CN'},models:[]};
@@ -64,4 +64,27 @@ test('declining to discard an edited word prevents selection translation from si
 test('shared floating geometry cannot resurrect the embedded panel as a small independent window',async t=>{
  const f=fixture(t);await f.open();f.w.eval(await readFile(new URL('../web/floating-windows.js',import.meta.url),'utf8'));const manager=f.w.PaperFloatingWindows.start();
  try{f.language.show();await tick();assert.equal(f.w.PaperFloatingWindows.attach(f.language.element),null);assert.equal(f.language.element.querySelector('.paper-floating-grip'),null);assert.equal(f.language.element.style.position,'');assert.ok(f.doc.querySelector('.wiki-header>.paper-floating-grip'));}finally{manager.dispose();}
+});
+
+test('side window uses nonmodal presentation and preserves translation draft through docking',async t=>{
+ const f=fixture(t);await f.open();f.language.show();const dialog=f.doc.querySelector('.wiki-dialog'),input=f.doc.getElementById('language-source'),toggle=f.doc.getElementById('wiki-dock');
+ input.value='Unfinished expression to keep.';input.dispatchEvent(new f.w.Event('input'));
+ assert.equal(dialog.dataset.testModal,'true');toggle.click();assert.equal(dialog.dataset.testModal,'false');assert.equal(dialog.getAttribute('aria-modal'),'false');assert.ok(dialog.classList.contains('wiki-docked'));assert.equal(toggle.textContent,'大窗口');assert.equal(f.doc.getElementById('language-source'),input);assert.equal(input.value,'Unfinished expression to keep.');
+ toggle.click();assert.equal(dialog.dataset.testModal,'true');assert.equal(dialog.getAttribute('aria-modal'),'true');assert.equal(input.value,'Unfinished expression to keep.');assert.equal(f.calls.some(call=>call.action==='language_generate'),false);
+});
+
+test('docked mode survives close and selection translation; Escape closes without losing draft',async t=>{
+ const f=fixture(t);await f.open();f.language.show();const dialog=f.doc.querySelector('.wiki-dialog');f.doc.getElementById('wiki-dock').click();
+ f.doc.dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));assert.equal(dialog.open,false);await f.language.useSelection('translate');assert.equal(dialog.open,true);assert.equal(dialog.dataset.testModal,'false');assert.equal(f.calls.filter(call=>call.action==='language_generate').length,1);
+ const formInput=f.doc.getElementById('language-source');formInput.value='A draft after translation';formInput.dispatchEvent(new f.w.Event('input'));f.doc.dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));f.language.show();assert.equal(formInput.value,'A draft after translation');
+});
+
+test('docking does not discard edited vocabulary and preserves its close confirmation',async t=>{
+ const f=fixture(t);await f.open();f.wiki.show('language');await tick();f.click('新建词条');const form=f.doc.querySelector('.wiki-word-form'),input=form.querySelector('input');input.value='unsaved term';input.dispatchEvent(new f.w.Event('input',{bubbles:true}));f.w.confirm=()=>false;
+ f.doc.getElementById('wiki-dock').click();assert.equal(f.doc.querySelector('.wiki-word-form'),form);assert.equal(input.value,'unsaved term');f.doc.dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));assert.equal(f.doc.querySelector('.wiki-dialog').open,true);
+});
+
+test('floating geometry is suspended in side mode and large-window placement remains available',async t=>{
+ const f=fixture(t);await f.open();f.w.eval(await readFile(new URL('../web/floating-windows.js',import.meta.url),'utf8'));const manager=f.w.PaperFloatingWindows.start();
+ try{f.language.show();await tick();const dialog=f.doc.querySelector('.wiki-dialog'),grip=dialog.querySelector('.paper-floating-grip');f.doc.getElementById('wiki-dock').click();await tick();assert.equal(grip.disabled,true);assert.equal(dialog.style.left,'');assert.equal(dialog.style.width,'');f.doc.getElementById('wiki-dock').click();await tick();assert.equal(grip.disabled,false);}finally{manager.dispose();}
 });

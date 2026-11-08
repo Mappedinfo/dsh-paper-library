@@ -1,7 +1,28 @@
 'use strict';
 
+// 与服务端规则保持一致；合成中英/数学样例做对照检查。
+function previewTranslationTarget(text, target = 'auto') {
+  if (!['auto', 'zh-CN', 'en'].includes(target)) throw new Error('翻译目标语言无效。')
+  if (target !== 'auto') return target
+  const prose = String(text)
+    .replace(/(?<!\\)%[^\n]*/gu, ' ')
+    .replace(/\\begin\{(?:equation\*?|align\*?|math|displaymath)\}[\s\S]*?\\end\{(?:equation\*?|align\*?|math|displaymath)\}/gu, ' ')
+    .replace(/(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$|(?<!\\)\$[^\n$]*?(?<!\\)\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)/gu, ' ')
+    .replace(/\\(?:cite\w*|ref|eqref|autoref|label|url|href|begin|end)\*?(?:\[[^\]]*\])*\s*\{[^{}]*\}/giu, ' ')
+    .replace(/\\(?:[A-Za-z@]+|.)/gu, ' ')
+  const han = (prose.match(/\p{Script=Han}/gu) || []).length
+  const latin = (prose.match(/\p{Script=Latin}+/gu) || []).length
+  // Significant kana or Hangul signals a Japanese/Korean passage, even when
+  // its Han characters outnumber Latin words. Very short incidental mentions
+  // do not by themselves override the surrounding passage.
+  const kanaHangul = (prose.match(/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu) || []).length
+  if (kanaHangul >= Math.max(2, Math.ceil(han / 4), Math.ceil(latin / 2))) return 'zh-CN'
+  return han > latin ? 'en' : 'zh-CN'
+}
+
 /** Reading language tools. Results and vocabulary live on the host; this view holds one page. */
 window.PaperLanguageLearning = {
+  previewTranslationTarget,
   create({ api, persistence, getPaper, getSelection, toast, openReference, prepareChat, beforeOpen, openVocabulary, embedded = false, onOpen, onClose }) {
     const $ = id => document.getElementById(id);
     const make = (tag, text, cls) => { const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n; };
@@ -10,30 +31,37 @@ window.PaperLanguageLearning = {
     panel.innerHTML=`<header class="language-heading"><div><strong>读懂，也学会表达</strong><p id="language-paper" class="small muted"></p></div><div class="language-heading-actions"><button id="language-drag" class="icon-button" type="button" title="拖动窗口；方向键移动" aria-label="移动语言窗口">⠿</button><button id="language-settings-open" class="icon-button" type="button" title="语言设置" aria-label="语言设置">⚙</button><button id="language-close" class="icon-button" type="button" aria-label="关闭语言工具">×</button></div></header>
       <nav class="language-tabs" aria-label="语言工具"><button id="language-tab-work" class="button subtle" type="button">翻译与表述</button><button id="language-tab-history" class="button subtle" type="button">本篇记录</button><button id="language-tab-words" class="button subtle" type="button">难词本</button></nav>
       <p id="language-status" class="language-status" role="status"></p>
-      <div id="language-work"><label class="field">选文或你的草稿<textarea id="language-source" rows="4" maxlength="8000" placeholder="拖选论文中的文字，或在这里输入要翻译、优化的表达。"></textarea></label><div class="language-actions"><label>译成 <select id="language-target"><option value="">跟随语言设置</option><option value="auto">自动识别 · 中英互译</option><option value="zh-CN">中文</option><option value="en">英文</option></select></label><button id="language-translate" class="button primary" type="button">直接翻译</button><button id="language-polish" class="button" type="button">优化表述</button></div><p class="small muted">译文与词条保存在本机；模型可在右上角设置，生成会使用模型额度。</p><div id="language-result"></div></div>
+      <div id="language-work"><label class="field">选文或你的草稿<textarea id="language-source" rows="4" maxlength="8000" placeholder="拖选论文中的文字，或在这里输入要翻译、优化的表达。"></textarea></label><div class="language-actions"><label>译成 <select id="language-target"><option value="">跟随语言设置</option><option value="auto">自动识别 · 中英互译</option><option value="zh-CN">中文</option><option value="en">英文</option></select><span id="language-target-current" class="small" role="status"></span></label><button id="language-translate" class="button primary" type="button">直接翻译</button><button id="language-polish" class="button" type="button">优化表述</button></div><div id="language-polish-directions" class="language-polish-directions" role="group" aria-label="优化方向"></div><p class="small muted">译文与词条保存在本机；模型可在右上角设置，生成会使用模型额度。</p><div id="language-result"></div></div>
       <div id="language-settings" hidden><p class="small muted">语言工具使用独立设置；不会改变宿主或论文对话的模型。</p><label class="field">模型<select id="language-settings-model"></select></label><label class="field">默认翻译方向<select id="language-settings-target"><option value="auto">自动识别 · 中文译英文，其他译中文</option><option value="zh-CN">始终译为中文</option><option value="en">始终译为英文</option></select></label><label class="field">翻译补充提示词<textarea id="language-settings-translate" maxlength="2000" rows="3" placeholder="例如：保留常见缩写"></textarea></label><label class="field">润色补充提示词<textarea id="language-settings-polish" maxlength="2000" rows="3" placeholder="例如：优先使用简洁句子"></textarea></label><p class="small muted">补充要求不能覆盖忠于原文和结果结构的基本规则。</p><div class="language-actions"><button id="language-settings-save" class="button primary" type="button">保存设置</button><button id="language-settings-reload" class="button subtle" type="button">重新读取</button></div></div>
       <div id="language-history" hidden><div id="language-history-list"></div><div class="language-pagination"><button id="language-history-prev" class="button subtle" type="button">上一页</button><span id="language-history-range"></span><button id="language-history-next" class="button subtle" type="button">下一页</button></div></div>
       <div id="language-words" hidden><div class="language-word-filters"><input id="vocabulary-query" type="search" placeholder="检索词语、释义" aria-label="检索难词"><select id="vocabulary-status" aria-label="学习状态"><option value="">全部</option><option value="learning">待学习</option><option value="mastered">已掌握</option></select><button id="vocabulary-refresh" class="button subtle" type="button">刷新</button></div><p class="small muted">从翻译与表述优化中自动积累。AI 释义待核对；掌握程度由你标记。</p><div id="vocabulary-list"></div><div class="language-pagination"><button id="vocabulary-prev" class="button subtle" type="button">上一页</button><span id="vocabulary-range"></span><button id="vocabulary-next" class="button subtle" type="button">下一页</button></div><div class="language-actions"><button id="vocabulary-export-json" class="button subtle" type="button">导出 JSON</button><button id="vocabulary-export-csv" class="button subtle" type="button">导出 CSV</button></div></div>`;
     document.body.append(panel);
     $('language-target').value='';
     let available=false,paperId=null,loadTicket=0,viewTicket=0,view='work',busy=false,draftReady=false,sourcePage=null,lastResult=null,historyOffset=0,wordOffset=0,failedRequest=null,loadPromise=null,draftRevision=0,disposed=false;
-    let settingsRevision=null, settingsModels=[];
+    let settingsRevision=null, settingsModels=[], knownTarget=null, targetTicket=0, polishDirection='general';
+    const directions={general:'通用',grammar:'语法纠错',concise:'精简表达',academic:'学术表达',cohesion:'逻辑衔接',plain:'通俗解释'},directionButtons=new Map();
+    for(const [value,label]of Object.entries(directions)){const b=button('language-direction-'+value,label,()=>{polishDirection=value;failedRequest=null;++draftRevision;controls();remember();});b.setAttribute('aria-pressed',String(value===polishDirection));directionButtons.set(value,b);$('language-polish-directions').append(b);}
+    function updateTarget(){const chosen=$('language-target').value;const target=chosen||knownTarget;
+      $('language-target-current').textContent=!target?' · 目标设置待读取':target==='auto'&&!$('language-source').value.trim()?' · 输入后识别目标':' · '+(target==='auto'?'检测目标：':'当前目标：')+(previewTranslationTarget($('language-source').value,target)==='en'?'英文':'中文');
+    }
+    async function refreshTarget(){const seq=++targetTicket;try{const r=await api('language_settings_get',{});if(disposed||seq!==targetTicket)return;knownTarget=['auto','zh-CN','en'].includes(r.value?.target_language)?r.value.target_language:'auto';updateTarget();}catch{if(!disposed&&seq===targetTicket){knownTarget=null;updateTarget();}}}
+
     const floating=embedded?null:window.PaperFloatingWindows?.attach(panel,{key:'reader:language-window',persistence});
     const saveGeometry=()=>floating?.save();
     const restoreGeometry=()=>floating?.restore();
     const status=(text,error=false)=>{$('language-status').textContent=text||'';$('language-status').classList.toggle('error',error);};
     const selected = ()=>{const s=getSelection();return s?.id===getPaper()?.id&&s.text ? s : null;};
-    const draftValue=()=>({text:$('language-source').value,target_language:$('language-target').value,page:sourcePage,failed_request:failedRequest});
+    const draftValue=()=>({text:$('language-source').value,target_language:$('language-target').value,page:sourcePage,polish_direction:polishDirection,failed_request:failedRequest});
     function remember(){if(persistence&&paperId&&draftReady)return persistence.put(`language-draft:${paperId}`,draftValue()).catch(()=>{});return Promise.resolve();}
-    function controls(){for(const id of ['language-translate','language-polish'])$(id).disabled=busy||!available||!paperId||!draftReady||paperId!==getPaper()?.id;$('language-target').disabled=busy||!draftReady;$('language-source').disabled=!draftReady||!paperId;}
-    function show(next='work'){if(next==='words'&&openVocabulary){openVocabulary();return;}if(onOpen?.(next)===false)return false;beforeOpen?.();++viewTicket;panel.hidden=false;void restoreGeometry();view=next;for(const name of ['work','history','words','settings']){$(`language-${name}`).hidden=name!==next;if(name!=='settings')$(`language-tab-${name}`).setAttribute('aria-pressed',String(name===next));}if(next==='history')void history();if(next==='words')void words();if(next==='settings')void loadSettings();controls();}
+    function controls(){updateTarget();for(const [key,b]of directionButtons){b.disabled=busy||!draftReady;b.setAttribute('aria-pressed',String(key===polishDirection));}for(const id of ['language-translate','language-polish'])$(id).disabled=busy||!available||!paperId||!draftReady||paperId!==getPaper()?.id;$('language-target').disabled=busy||!draftReady;$('language-source').disabled=!draftReady||!paperId;}
+    function show(next='work'){if(next==='words'&&openVocabulary){openVocabulary();return;}if(onOpen?.(next)===false)return false;beforeOpen?.();++viewTicket;panel.hidden=false;void restoreGeometry();view=next;for(const name of ['work','history','words','settings']){$(`language-${name}`).hidden=name!==next;if(name!=='settings')$(`language-tab-${name}`).setAttribute('aria-pressed',String(name===next));}if(next==='work')void refreshTarget();if(next==='history')void history();if(next==='words')void words();if(next==='settings')void loadSettings();controls();}
     function paperChanged(item){
       if(paperId===item?.id){$('language-paper').textContent=item?.title||'先打开一篇论文';if(loadPromise)return loadPromise;if(draftReady)return Promise.resolve();}
-      remember();paperId=item?.id||null;const ticket=++loadTicket;++viewTicket;++draftRevision;draftReady=false;sourcePage=null;failedRequest=null;lastResult=null;historyOffset=0;
+      remember();paperId=item?.id||null;const ticket=++loadTicket;++viewTicket;++draftRevision;draftReady=false;sourcePage=null;failedRequest=null;lastResult=null;historyOffset=0;polishDirection='general';
       $('language-paper').textContent=item?.title||'先打开一篇论文';$('language-source').value='';$('language-target').value='';$('language-result').replaceChildren();$('language-history-list').replaceChildren();status('');controls();
       if(!paperId){loadPromise=null;return Promise.resolve();}
       loadPromise=(async()=>{
-        try{const saved=await persistence?.get(`language-draft:${paperId}`);if(ticket!==loadTicket)return;if(saved&&typeof saved.text==='string'&&saved.text.length<=8000){$('language-source').value=saved.text;$('language-target').value=['auto','zh-CN','en'].includes(saved.target_language)?saved.target_language:'';sourcePage=Number.isInteger(saved.page)&&saved.page>0&&saved.page<=2000?saved.page:null;failedRequest=saved.failed_request||null;}draftReady=true;}
+        try{const saved=await persistence?.get(`language-draft:${paperId}`);if(ticket!==loadTicket)return;if(saved&&typeof saved.text==='string'&&saved.text.length<=8000){$('language-source').value=saved.text;$('language-target').value=['auto','zh-CN','en'].includes(saved.target_language)?saved.target_language:'';polishDirection=Object.hasOwn(directions,saved.polish_direction)?saved.polish_direction:'general';sourcePage=Number.isInteger(saved.page)&&saved.page>0&&saved.page<=2000?saved.page:null;failedRequest=saved.failed_request||null;}draftReady=true;}
         catch(error){if(ticket===loadTicket){status(`草稿读取失败：${error.message}`,true);$('language-status').append(button('language-retry-draft','重新读取草稿',()=>void paperChanged(getPaper())));}}
         finally{if(ticket===loadTicket){loadPromise=null;controls();}}
         if(ticket===loadTicket&&!panel.hidden&&view==='history')void history();
@@ -48,13 +76,14 @@ window.PaperLanguageLearning = {
       if(busy)return;const text=$('language-source').value.trim();if(!paperId||paperId!==getPaper()?.id||!text){status('请先打开对应论文并输入或选择要处理的文字。',true);return;}
       if(!available){status('请从 DSH 文献库面板打开并连接宿主模型。',true);return;}
       if(!draftReady){status('草稿尚未读取完成，请稍后重试。',true);return;}
-      const id=paperId,target=$('language-target').value,ticket=loadTicket,revision=draftRevision;
+      const id=paperId,target=$('language-target').value,direction=polishDirection,ticket=loadTicket,revision=draftRevision;
       busy=true;controls();status(mode==='translate'?'正在翻译并整理难词…':'正在优化表述并整理难词…');
       try{
         const preferences=mode==='translate'&&!target?await api('language_settings_get',{}):null;
         if(disposed||id!==paperId||ticket!==loadTicket||revision!==draftRevision)return;
+        if(preferences){++targetTicket;knownTarget=['auto','zh-CN','en'].includes(preferences.value?.target_language)?preferences.value.target_language:'auto';updateTarget();}
         const target_language=target||(['auto','zh-CN','en'].includes(preferences?.value?.target_language)?preferences.value.target_language:'auto');
-        const payload={id,mode,text,target_language,...(sourcePage?{page:sourcePage}:{})};
+        const payload={id,mode,text,target_language,...(mode==='polish'&&direction!=='general'?{polish_direction:direction}:{}),...(sourcePage?{page:sourcePage}:{})};
         const fingerprint=JSON.stringify(payload);const request_id=failedRequest?.fingerprint===fingerprint?failedRequest.request_id:window.crypto.randomUUID();
         failedRequest={fingerprint,request_id};await remember();await persistence?.flush();
         const result=await api('language_generate',{...payload,request_id});
@@ -65,7 +94,7 @@ window.PaperLanguageLearning = {
     }
     function renderResult(record){
       if(record.status!=='complete'){status('该记录尚未完整保存，请从本篇记录恢复。',true);return;}lastResult=record;const root=$('language-result');root.replaceChildren();
-      const head=make('header',undefined,'language-result-heading');head.append(make('strong',record.mode==='polish'?'优化后的表述':'译文'),make('span','AI 生成 · 已保存','small muted'));root.append(head,make('p',record.result||'','language-answer'));
+      const head=make('header',undefined,'language-result-heading');head.append(make('strong',record.mode==='polish'?'优化后的表述 · '+(directions[record.polish_direction]||'通用'):'译文'),make('span','AI 生成 · 已保存','small muted'));root.append(head,make('p',record.result||'','language-answer'));
       if(record.explanation){const notes=make('details');notes.append(make('summary','表达说明'),make('p',record.explanation,'language-answer'));root.append(notes);}
       const source=make('details');source.append(make('summary','对应原文'),make('p',record.source_text||'','language-answer'));root.append(source);
       const model=record.model;root.append(make('p',`${record.page?`第 ${record.page} 页 · `:''}${model?`${model.provider} / ${model.model||model.id}`:''}${record.prompt_version?` · ${record.prompt_version}`:''}`,'small muted'));
@@ -84,7 +113,7 @@ window.PaperLanguageLearning = {
         for(let i=0;i<settingsModels.length;i++){const model=settingsModels[i];if(!groups.has(model.provider)){const group=make('optgroup');group.label=model.provider;groups.set(model.provider,group);select.append(group);}const option=make('option',model.name||model.id);option.value=String(i);groups.get(model.provider).append(option);}
         const selected=settingsModels.findIndex(model=>model.provider===value.model?.provider&&model.id===value.model?.model);
         if(value.model&&selected<0){const missing=make('option',`${value.model.provider} / ${value.model.model}（当前不可用）`);missing.value='missing';select.append(missing);select.value='missing';}else select.value=selected<0?'':String(selected);
-        $('language-settings-target').value=['auto','zh-CN','en'].includes(value.target_language)?value.target_language:'auto';
+        $('language-settings-target').value=['auto','zh-CN','en'].includes(value.target_language)?value.target_language:'auto';++targetTicket;knownTarget=$('language-settings-target').value;updateTarget();
         $('language-settings-translate').value=value.translate_prompt||'';$('language-settings-polish').value=value.polish_prompt||'';
         $('language-settings-save').disabled=false;status('');
       }catch(error){if(ticket===viewTicket&&view==='settings')status(`读取设置失败：${error.message}`,true);}
@@ -95,7 +124,7 @@ window.PaperLanguageLearning = {
       const model=selected===''?null:settingsModels[Number(selected)];if(selected!==''&&!model){status('模型列表已变化，请重新读取。',true);return;}
       const value={model:model?{provider:model.provider,model:model.id}:null,target_language:$('language-settings-target').value,translate_prompt:$('language-settings-translate').value,polish_prompt:$('language-settings-polish').value};
       $('language-settings-save').disabled=true;
-      try{const result=await api('language_settings_update',{value,expected_revision:settingsRevision});settingsRevision=result.revision;status('语言设置已保存。');}
+      try{const result=await api('language_settings_update',{value,expected_revision:settingsRevision});settingsRevision=result.revision;++targetTicket;knownTarget=value.target_language;updateTarget();status('语言设置已保存。');}
       catch(error){status(error.code==='STATE_CONFLICT'?`设置已在其他窗口更改；本窗口内容仍保留，请复制后重新读取。${error.message}`:error.message,true);}
       finally{$('language-settings-save').disabled=false;}
     }
@@ -113,7 +142,8 @@ window.PaperLanguageLearning = {
             if(complete){renderResult(value);return;}
             if($('language-source').value.trim()&&$('language-source').value.trim()!==value.source_text){status('当前仍有其他文字草稿，请先完成或清空后再恢复这条记录。',true);return;}
             $('language-source').value=value.source_text;sourcePage=value.page||null;++draftRevision;$('language-target').value=value.requested_target_language==='auto'?'auto':value.target_language==='en'?'en':'zh-CN';
-            const payload={id:paperId,mode:value.mode,text:value.source_text,target_language:$('language-target').value,...(sourcePage?{page:sourcePage}:{})};
+            polishDirection=Object.hasOwn(directions,value.polish_direction)?value.polish_direction:'general';controls();
+            const payload={id:paperId,mode:value.mode,text:value.source_text,target_language:$('language-target').value,...(value.mode==='polish'&&polishDirection!=='general'?{polish_direction:polishDirection}:{}),...(sourcePage?{page:sourcePage}:{})};
             failedRequest=value.status!=='failed'&&value.request_id?{request_id:value.request_id,fingerprint:JSON.stringify(payload)}:null;remember();
             $('language-result').replaceChildren();status(value.status==='committing'?'点击同一操作继续保存，复用已有模型结果。':'原文已恢复。再次点击操作会核对请求状态或发起新请求。');
           });b.className='language-history-row';b.append(make('span',(value.source_text||'').slice(0,170)),make('p',(complete?value.result:value.error||'点击恢复原文与处理状态').slice(0,190)));root.append(b);
@@ -141,7 +171,7 @@ window.PaperLanguageLearning = {
     $('language-settings-open').addEventListener('click',()=>show('settings'));$('language-settings-reload').addEventListener('click',()=>void loadSettings());$('language-settings-save').addEventListener('click',()=>void saveSettings());
     for(const next of ['work','history','words'])$(`language-tab-${next}`).addEventListener('click',()=>show(next));
     $('language-translate').addEventListener('click',()=>void generate('translate'));$('language-polish').addEventListener('click',()=>void generate('polish'));
-    $('language-source').addEventListener('input',()=>{sourcePage=null;failedRequest=null;++draftRevision;remember();});$('language-target').addEventListener('change',()=>{failedRequest=null;++draftRevision;remember();});
+    $('language-source').addEventListener('input',()=>{sourcePage=null;failedRequest=null;++draftRevision;updateTarget();remember();});$('language-target').addEventListener('change',()=>{failedRequest=null;++draftRevision;updateTarget();if(!$('language-target').value)void refreshTarget();remember();});
     for(const [kind,load]of [['language-history',history],['vocabulary',words]])for(const [direction,delta]of [['prev',-20],['next',20]])$(`${kind}-${direction}`).addEventListener('click',()=>{if(kind==='language-history')historyOffset=Math.max(0,historyOffset+delta);else wordOffset=Math.max(0,wordOffset+delta);void load();});
     let searchTimer;$('vocabulary-query').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{wordOffset=0;void words();},250);});$('vocabulary-status').addEventListener('change',()=>{wordOffset=0;void words();});$('vocabulary-refresh').addEventListener('click',()=>void words());for(const format of ['json','csv'])$(`vocabulary-export-${format}`).addEventListener('click',()=>void exportWords(format));
     return {element:panel,navigation:panel.querySelector?.('.language-tabs'),settingsButton:$('language-settings-open'),paperChanged,useSelection,show,showSettings(){show('settings');},hide,close,setAvailable(value){available=Boolean(value);controls();},sync(){controls();for(const id of ['language-selection-translate','language-selection-polish','ribbon-language'])if($(id))$(id).disabled=!getPaper();},dispose(){remember();saveGeometry();disposed=true;clearTimeout(searchTimer);floating?.dispose();++loadTicket;++viewTicket;},snapshot:()=>({paperId,view,busy,lastResultId:lastResult?.id})};

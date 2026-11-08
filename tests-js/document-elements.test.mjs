@@ -39,3 +39,36 @@ test('automatic scanning waits for idle and stops between pages when the reader 
 test('updated resource policy changes next scan batch',async t=>{const batches=[];const env=setup(async(a,p)=>{if(a==='document_elements_scan'){batches.push(p.limit);return {coverage,paused:false};}return {elements:[],total:0,coverage:{page_count:1,scanned_pages:[],complete:false}};});t.after(env.close);env.ui.applyResources({batch_pages:4,preview_bytes:64*1048576,preview_count:64,batch_gap_ms:500,idle_ms:1200});env.panels.show('elements-formula');await settle();assert.deepEqual(batches,[4]);});
 
 test('resource pause on initial list stays visible and offers settings instead of retrying automatically',async t=>{let scans=0;const env=setup(async action=>{if(action==='document_elements_scan')scans++;return {elements:[],total:0,paused:true,stale:true,budget_reason:'磁盘空间不足：需要保留 512 MiB',coverage:{page_count:6,scanned_pages:[1],complete:false}};});t.after(env.close);env.panels.show('elements-formula');await settle();assert.equal(scans,0);assert.match(env.doc.querySelector('#document-elements-formula .document-elements-status').textContent,/磁盘空间不足.*512 MiB/);const adjust=[...env.doc.querySelectorAll('#document-elements-formula button')].find(b=>b.textContent==='调整资源设置');assert.equal(adjust.hidden,false);});
+
+function deferred(){let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};}
+test('scan batches append cards without replacing loaded previews, expanded text or current scroll',async t=>{
+ const firstScan=deferred(),secondScan=deferred();let scanned=1,scans=0,previews=0;
+ const env=setup(async action=>{
+  if(action==='document_elements_list')return {elements:Array.from({length:scanned},(_,i)=>({...element,id:'e'+i,kind:'figure',page:i+1})),total:scanned,source_version:'content-1',coverage:{page_count:3,scanned_pages:Array.from({length:scanned},(_,i)=>i+1),complete:scanned===3}};
+  if(action==='document_elements_scan'){const result=await (++scans===1?firstScan.promise:secondScan.promise);scanned=result;return {coverage:{page_count:3,scanned_pages:Array.from({length:scanned},(_,i)=>i+1),complete:scanned===3}};}
+  if(action==='document_element_preview'){previews++;return {mime_type:'image/png',image:'YWJj',width:300,height:200};}
+  throw Error(action);
+ });t.after(env.close);env.panels.show('elements-figure');await settle();
+ const list=env.doc.querySelector('#document-elements-figure .document-elements-list'),card=list.querySelector('article'),details=card.querySelector('details');details.open=true;
+ [...card.querySelectorAll('button')].find(b=>b.textContent==='预览裁剪').click();await settle();const image=card.querySelector('img'),src=image.src;list.scrollTop=173;
+ firstScan.resolve(2);await settle();assert.equal(list.querySelector('article'),card);assert.equal(card.querySelector('img'),image);assert.equal(image.src,src);assert.equal(details.open,true);assert.equal(list.scrollTop,173);assert.equal(list.querySelectorAll('article').length,2);assert.equal(previews,1);
+ secondScan.resolve(3);await settle();assert.equal(list.querySelector('article'),card);assert.equal(list.querySelectorAll('article').length,3);assert.equal(image.src,src);assert.equal(previews,1);
+});
+
+test('refresh keeps content while waiting and accepts the same card’s in-flight preview',async t=>{
+ const later=deferred(),preview=deferred();let lists=0;
+ const result={elements:[element],total:1,source_version:'source-a',coverage};
+ const env=setup(async action=>{if(action==='document_elements_list')return ++lists===1?result:later.promise;if(action==='document_element_preview')return preview.promise;throw Error(action);});t.after(env.close);
+ env.panels.show('elements-formula');await settle();const list=env.doc.querySelector('.document-elements-list'),card=list.querySelector('article');[...card.querySelectorAll('button')].find(b=>b.textContent==='预览裁剪').click();
+ const refreshing=env.ui.reload();assert.equal(list.querySelector('article'),card);list.scrollTop=241;
+ preview.resolve({mime_type:'image/png',image:'YWJj'});await settle();assert.equal(card.querySelector('img').hidden,false);
+ later.resolve(result);await refreshing;assert.equal(list.querySelector('article'),card);assert.equal(list.scrollTop,241);assert.equal(card.querySelector('img').hidden,false);
+});
+
+test('superseded search and removed-card previews cannot reappear in the filtered result',async t=>{
+ const oldSearch=deferred(),oldPreview=deferred();let lists=0;
+ const env=setup(async action=>{if(action==='document_elements_list'){lists++;if(lists===2)return oldSearch.promise;return {elements:lists===1?[element]:[{...element,id:'new',title:'Filtered equation'}],total:1,coverage};}if(action==='document_element_preview')return oldPreview.promise;throw Error(action);});t.after(env.close);
+ env.panels.show('elements-formula');await settle();const list=env.doc.querySelector('.document-elements-list'),oldCard=list.querySelector('article');[...oldCard.querySelectorAll('button')].find(b=>b.textContent==='预览裁剪').click();const stale=env.ui.reload(true);await env.ui.reload(true);
+ assert.equal(oldCard.isConnected,false);assert.match(list.textContent,/Filtered equation/);
+ oldSearch.resolve({elements:[element],total:1,coverage});oldPreview.resolve({mime_type:'image/png',image:'YWJj'});await stale;await settle();assert.match(list.textContent,/Filtered equation/);assert.equal(oldCard.querySelector('img').hasAttribute('src'),false);assert.equal(list.querySelectorAll('img[src]').length,0);
+});

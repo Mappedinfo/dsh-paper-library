@@ -7,7 +7,7 @@ const source = await readFile(new URL('../web/floating-windows.js', import.meta.
 const classes = () => ({ add() {}, remove() {}, contains: () => false })
 function element(floor) {
   const listeners = new Map()
-  const header = { classList: classes(), prepend() {} }
+  const header = { classList: classes(), prepend() {}, querySelector: () => null }
   return {
     tagName: 'SECTION', id: '', hidden: false, isConnected: true,
     dataset: floor === undefined ? {} : { floatingMinLayer: String(floor) },

@@ -5,6 +5,8 @@ window.PaperEncyclopedia={create({api,toast,openReference,getSource=()=>null}){
   const dialog=node('dialog',undefined,'wiki-dialog');dialog.setAttribute('aria-label','阅读百科与语言词条');
   const header=node('header',undefined,'wiki-header'),close=button('关闭',()=>leave());header.append(close);
   const tabs=node('nav',undefined,'wiki-tabs');tabs.setAttribute('aria-label','词条分类');header.prepend(tabs);
+  let docked=false;
+  const dock=button('侧边窗',()=>setDocked(!docked));dock.id='wiki-dock';dock.setAttribute('aria-pressed','false');dock.title='切换为侧边窗，继续在 PDF 中选取文字';header.prepend(dock);
   let language=null,languageView='words';
   let mode='encyclopedia',query='',sort='updated_desc',offset=0,ticket=0,selected=null,pendingSource=null,dirty=false;
   const queryInput=node('input');queryInput.type='search';queryInput.placeholder='检索词条、别名与释义';queryInput.setAttribute('aria-label','检索词条');
@@ -14,6 +16,15 @@ window.PaperEncyclopedia={create({api,toast,openReference,getSource=()=>null}){
   const tabButtons={};for(const [value,label]of [['encyclopedia','百科'],['words','语言与词条']]){tabButtons[value]=button(label,()=>showSection(value==='words'&&language?'language':value));tabs.append(tabButtons[value]);}
   function discard(){if(dirty&&!window.confirm('词条尚未保存，放弃本次编辑？'))return false;dirty=false;return true;}
   function leave(){if(!discard())return;++ticket;language?.hide();dialog.close();}
+  function dockPosition(){if(docked){const bottom=document.querySelector('.topbar')?.getBoundingClientRect().bottom||8;dialog.style.setProperty('--wiki-dock-top',`${Math.max(8,Math.min(bottom+8,window.innerHeight-240))}px`);}}
+  function openWindow(){dialog.setAttribute('aria-modal',String(!docked));dockPosition();if(!dialog.open){if(docked)dialog.show();else dialog.showModal();}}
+  function setDocked(value){
+    docked=value;const wasOpen=dialog.open;if(wasOpen)dialog.close();
+    dialog.classList.toggle('wiki-docked',docked);dock.textContent=docked?'大窗口':'侧边窗';dock.setAttribute('aria-pressed',String(docked));dock.title=docked?'切回大窗口':'切换为侧边窗，继续在 PDF 中选取文字';
+    if(wasOpen)openWindow();window.PaperFloatingWindows?.attach(dialog)?.refresh();dock.focus({preventScroll:true});
+  }
+  window.addEventListener('resize',dockPosition);
+  document.addEventListener('keydown',event=>{if(!docked||!dialog.open||event.defaultPrevented||event.key!=='Escape')return;const targetDialog=event.target.closest?.('dialog');if(targetDialog&&targetDialog!==dialog)return;event.preventDefault();leave();});
   function present(){
     const lexical=mode!=='language',inLanguage=mode!=='encyclopedia';
     search.hidden=status.hidden=layout.hidden=!lexical;
@@ -23,7 +34,7 @@ window.PaperEncyclopedia={create({api,toast,openReference,getSource=()=>null}){
       if(mode!=='language')language.hide();
       for(const name of ['work','history','words'])document.getElementById(`language-tab-${name}`).setAttribute('aria-pressed',String(inLanguage&&name===languageView));
     }
-    if(!dialog.open)dialog.showModal();
+    openWindow();
   }
   function showSection(next='encyclopedia',phrase='',source=null){
     if(next==='language'&&language&&languageView!=='words'){language.show(languageView);return;}

@@ -481,3 +481,42 @@ test('native annotation translation accumulates vocabulary once and preserves ma
   assert.equal(word.meaning, '用户保留的词义'); assert.equal(word.status, 'mastered')
   assert.equal(word.encounters[0].source_sentence, source); assert.equal(word.encounters[0].sentence_translation, response.result)
 })
+
+test('polish directions reach faithful prompts and persist in results and history', async () => {
+  const f = fixture()
+  const directions = { general: /minimal necessary edits/, grammar: /grammar, spelling, punctuation/, concise: /Remove redundancy/, academic: /neutral academic wording/, cohesion: /Do not invent causal or logical links/, plain: /Retain essential technical terms and all qualifications/ }
+  for (const [direction, expected] of Object.entries(directions)) {
+    const result = await f.handle({ ...request, mode: 'polish', polish_direction: direction, request_id: `direction-${direction}` })
+    const prompt = f.calls.at(-1).prompt
+    assert.match(prompt, expected); assert.match(prompt, /ORIGINAL LANGUAGE/); assert.match(prompt, /uncertainty and claim strength/); assert.match(prompt, /Do not invent facts or relationships/)
+    assert.equal(result.polish_direction, direction); assert.match(result.prompt_version, new RegExp(`^language-polish-v4:${direction}:`))
+    const stored = [...f.store.records.values()].find(row => row.value.request_id === `direction-${direction}`)
+    assert.equal(stored.value.polish_direction, direction)
+  }
+  const history = await f.handle({ action: 'language_history', id: request.id })
+  assert.deepEqual(new Set(history.items.map(row => row.polish_direction)), new Set(Object.keys(directions)))
+})
+
+test('polish default preserves legacy fingerprints while changing direction conflicts', async () => {
+  const f = fixture(), input = { ...request, mode: 'polish', request_id: 'legacy-polish' }
+  const first = await f.handle(input)
+  const stored = [...f.store.records.values()].find(row => row.value.request_id === input.request_id)
+  const legacy = { id: input.id, mode: 'polish', text: source, page: 2, target_language: 'source', request_id: input.request_id }
+  assert.deepEqual(stored.value.request, legacy)
+  assert.equal(stored.value.fingerprint, createHash('sha256').update(JSON.stringify(legacy)).digest('hex'))
+  // 模拟磁盘上的旧版完成记录，显式 general 仍能复用而不再次调用模型。
+  delete stored.value.polish_direction
+  const replayed = await createLanguageLearning(f.options)({ ...input, polish_direction: 'general' })
+  assert.equal(replayed.id, first.id); assert.equal(replayed.polish_direction, 'general'); assert.equal(replayed.replayed, true)
+  await assert.rejects(f.handle({ ...input, polish_direction: 'grammar' }), error => error.code === 'LANGUAGE_REQUEST_CONFLICT')
+  assert.equal(f.calls.length, 1)
+})
+
+test('invalid polish directions and translation misuse reject before calling a model', async () => {
+  const f = fixture()
+  for (const value of ['unknown', 'toString', null, 1, {}, ['grammar']]) {
+    await assert.rejects(f.handle({ ...request, mode: 'polish', polish_direction: value }), error => error.code === 'LANGUAGE_INVALID')
+  }
+  await assert.rejects(f.handle({ ...request, polish_direction: 'general' }), error => error.code === 'LANGUAGE_INVALID')
+  assert.equal(f.calls.length, 0); assert.equal(f.store.records.size, 0)
+})

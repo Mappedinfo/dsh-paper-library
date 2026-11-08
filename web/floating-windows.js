@@ -5,7 +5,7 @@ window.PaperFloatingWindows = (() => {
   const states = new Map(), properties = ['position','inset','left','top','right','bottom','margin','width','height','max-width','max-height','z-index','box-sizing'];
   let persistence, observer, nextLayer = 50, started = false;
   const visible = element => !element.hidden && (element.tagName !== 'DIALOG' || element.open) && element.getClientRects().length > 0;
-  const expanded = element => element.classList.contains('is-expanded') || document.fullscreenElement === element;
+  const expanded = element => element.classList.contains('is-expanded') || element.classList.contains('wiki-docked') || document.fullscreenElement === element;
   const headerOf = element => element.querySelector(':scope > header,:scope > form > header,:scope > .dialog-heading,:scope > form > .dialog-heading,:scope > .summary-dialog-head,:scope > .dialog-header,:scope > .modal-header,:scope > h2,:scope > h3');
   const embedded = element => element.classList.contains('language-panel-embedded') || element.tagName === 'DIALOG' && Boolean(element.parentElement?.closest(selector));
   // Small menus escape scrolling toolbars but stay below their own trigger.
