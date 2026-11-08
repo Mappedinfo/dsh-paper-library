@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import { RESOURCE_DEFAULTS,RESOURCE_FIELDS,RESOURCE_PROFILES,resolveResourcePolicy } from '../src/resource-policy.mjs';
 import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('../web/settings.js', import.meta.url), 'utf8');
@@ -169,4 +170,27 @@ for(const palette of ['neutral','rose','apricot'])test(`${palette} palette saves
   await f.ui.refresh();const input=f.ids.get(`setting-palette-${palette}`);assert.ok(input);input.checked=true;input.emit('change');await flush();
   const request=f.calls.find(call=>call.action==='settings_update');assert.equal(request.args.patch.ui_palette,palette);assert.equal(input.checked,true);
   assert.equal(f.changes.at(-1).value.ui_palette,palette);f.ui.dispose();
+});
+
+test('resource presets preview effective values and custom fields save together',async()=>{
+ let values={...RESOURCE_DEFAULTS},revision=1;const descriptor=()=>view(revision,values,{resource_policy:resolveResourcePolicy(values),resource_fields:RESOURCE_FIELDS,resource_profiles:RESOURCE_PROFILES});
+ const f=fixture({api:(action,args)=>{if(action==='settings_update'){values={...values,...args.patch};revision++;}return descriptor();}});await f.ui.refresh();
+ f.change('resource_profile','performance');assert.equal(f.ids.get('setting-resource_preview_mb').value,96);assert.equal(f.ids.get('setting-resource_preview_mb').disabled,true);assert.equal(f.calls.some(x=>x.action==='settings_update'),false);
+ f.change('resource_profile','custom');const preview=f.ids.get('setting-resource_preview_mb');assert.equal(preview.disabled,false);preview.value='64';preview.emit('input');const pages=f.ids.get('setting-resource_batch_pages');pages.value='3';pages.emit('input');
+ const resources=f.ids.get('settings-resources');resources.children.find(n=>n.textContent==='保存资源配置').emit('click');await flush();
+ const update=f.calls.find(x=>x.action==='settings_update');assert.equal(update.args.patch.resource_profile,'custom');assert.equal(update.args.patch.resource_preview_mb,64);assert.equal(update.args.patch.resource_batch_pages,3);assert.equal(Object.keys(update.args.patch).length,8);assert.match(f.status(),/已保存/);
+ f.change('resource_profile','eco');assert.equal(preview.value,16);resources.children.find(n=>n.textContent==='保存资源配置').emit('click');await flush();
+ f.change('resource_profile','custom');assert.equal(preview.value,64,'switching presets preserves stored custom budgets');assert.equal(pages.value,3);f.ui.dispose();
+});
+
+test('resource drafts keep their original CAS revision across polling and preserve conflicting edits',async()=>{
+ let values={...RESOURCE_DEFAULTS,resource_profile:'custom'},revision=1;
+ const descriptor=()=>view(revision,values,{resource_policy:resolveResourcePolicy(values),resource_fields:RESOURCE_FIELDS,resource_profiles:RESOURCE_PROFILES});
+ const f=fixture({api:(action,args)=>{if(action==='settings_update'){if(args.expected_revision!==descriptor().revision)throw new Error('另一窗口已有修改');values={...values,...args.patch};revision++;}return descriptor();}});
+ await f.ui.refresh();const preview=f.ids.get('setting-resource_preview_mb');preview.value='32';preview.emit('input');
+ values={...values,resource_preview_mb:80};revision=2;await f.ui.refresh();assert.equal(preview.value,32);
+ const resources=f.ids.get('settings-resources'),save=resources.children.find(n=>n.textContent==='保存资源配置'),restore=resources.children.find(n=>n.textContent==='恢复已保存');
+ save.emit('click');await flush();assert.equal(values.resource_preview_mb,80);assert.equal(preview.value,32);assert.match(f.status(),/资源草稿仍保留.*恢复已保存/);
+ await f.ui.refresh();save.emit('click');await flush();assert.ok(f.calls.filter(c=>c.action==='settings_update').every(c=>c.args.expected_revision===view(1).revision),'polling must not advance the resource draft revision');
+ restore.emit('click');await flush();assert.equal(preview.value,80);preview.value='64';preview.emit('input');save.emit('click');await flush();assert.equal(values.resource_preview_mb,64);assert.equal(f.calls.filter(c=>c.action==='settings_update').at(-1).args.expected_revision,view(2).revision);f.ui.dispose();
 });

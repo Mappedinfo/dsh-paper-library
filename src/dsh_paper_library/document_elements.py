@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 from contextlib import redirect_stdout
+from contextvars import ContextVar
 import hashlib
 import json
 import math
@@ -28,6 +29,36 @@ MAX_SOURCE_BYTES = 128 * 1024 * 1024
 MAX_PAGE_STREAM_BYTES = 8 * 1024 * 1024
 MAX_PAGE_DECODED_BYTES = 16 * 1024 * 1024
 MAX_IMAGE_PIXELS = 64_000_000
+
+_policy = ContextVar('document_resource_policy', default={})
+
+def _limit(key, fallback):
+    return _policy.get().get(key, fallback)
+
+def _validate_policy(value):
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError('Invalid resource policy')
+    bounds = {'memory_target_mb': (128, 2048), 'batch_pages': (1, 6),
+              'page_limit_bytes': (2 * 1048576, 8 * 1048576),
+              'index_limit_bytes': (4 * 1048576, 512 * 1048576),
+              'library_index_limit_bytes': (64 * 1048576, 8192 * 1048576),
+              'disk_reserve_bytes': (128 * 1048576, 4096 * 1048576),
+              'source_limit_bytes': (32 * 1048576, 512 * 1048576),
+              'stream_limit_bytes': (4 * 1048576, 32 * 1048576),
+              'decoded_limit_bytes': (8 * 1048576, 64 * 1048576),
+              'image_pixels': (128 * 32768, 2048 * 32768)}
+    checked = {}
+    for key, (low, high) in bounds.items():
+        item = value.get(key)
+        if isinstance(item, bool) or not isinstance(item, int) or not math.isfinite(item) or not low <= item <= high:
+            raise ValueError('Invalid resource policy field: ' + key)
+        checked[key] = int(item)
+    if checked['index_limit_bytes'] > checked['library_index_limit_bytes']:
+        raise ValueError('Per-paper resource budget exceeds library budget')
+    return checked
+
 CAPTION = re.compile(r'^\s*(Figure|Fig\.?|Table|Algorithm|图|表|算法)\s*([A-Z]?\d+(?:\.\d+)*)(?:[.：:\s]|$)', re.I)
 EQUATION_NUMBER = re.compile(r'\([A-Z]?\d+(?:\.\d+)*\)\s*$')
 MATH = re.compile(r'[=∑∏∫√≈≠≤≥∈∂∇⊂⊆→]|[α-ωΑ-Ω]')
@@ -43,8 +74,8 @@ def _disk_free(library):
 
 
 def _ensure_disk(library, reserve=0):
-    if _disk_free(library) < MIN_DISK_FREE_BYTES + reserve:
-        raise ElementBudgetError('磁盘空间不足：保留 256 MiB 安全余量后无法继续；已扫描内容保留。')
+    if _disk_free(library) < _limit('disk_reserve_bytes', MIN_DISK_FREE_BYTES) + reserve:
+        raise ElementBudgetError(f"磁盘空间不足：需要保留 {_limit('disk_reserve_bytes', MIN_DISK_FREE_BYTES) / 1048576:g} MiB；已扫描内容保留。可调整资源设置后继续。")
 
 
 def _index_bytes(library, paper_id=None, page=None):
@@ -55,7 +86,7 @@ def _index_bytes(library, paper_id=None, page=None):
         params.append(page)
     # 只聚合每页计费数字，不在每次自动批次重新读全库索引正文。
     return library.db.execute('SELECT coalesce(sum(coalesce(index_bytes,?)),0) FROM document_element_pages' + clause,
-                              [MAX_PAGE_BYTES, *params]).fetchone()[0]
+                              [_limit('page_limit_bytes', MAX_PAGE_BYTES), *params]).fetchone()[0]
 
 
 def _initialize_usage(library, paper_id):
@@ -71,21 +102,22 @@ def _initialize_usage(library, paper_id):
 
 
 def _usage(library, paper_id):
-    return {'index_bytes': _index_bytes(library, paper_id), 'index_limit_bytes': MAX_INDEX_BYTES,
-            'library_index_bytes': _index_bytes(library), 'library_index_limit_bytes': MAX_LIBRARY_INDEX_BYTES,
-            'page_limit_bytes': MAX_PAGE_BYTES, 'available_disk_bytes': _disk_free(library),
+    return {'index_bytes': _index_bytes(library, paper_id), 'index_limit_bytes': _limit('index_limit_bytes', MAX_INDEX_BYTES),
+            'library_index_bytes': _index_bytes(library), 'library_index_limit_bytes': _limit('library_index_limit_bytes', MAX_LIBRARY_INDEX_BYTES),
+            'page_limit_bytes': _limit('page_limit_bytes', MAX_PAGE_BYTES), 'available_disk_bytes': _disk_free(library),
             'estimated_legacy_pages': library.db.execute('SELECT count(*) FROM document_element_pages WHERE index_bytes IS NULL').fetchone()[0],
-            'accounting': 'derived-payload-with-row-overhead', 'memory_hard_limit': False}
+            'accounting': 'derived-payload-with-row-overhead', 'memory_hard_limit': False, 'memory_target_mb': _limit('memory_target_mb', 256),
+            'disk_reserve_bytes': _limit('disk_reserve_bytes', MIN_DISK_FREE_BYTES)}
 
 
 def _check_write_budget(library, paper_id, added, page_total):
-    if page_total > MAX_PAGE_BYTES:
-        raise ElementBudgetError('本页结构结果超过 2 MiB，已暂停；此前已扫描页保留。')
+    if page_total > _limit('page_limit_bytes', MAX_PAGE_BYTES):
+        raise ElementBudgetError(f"本页结构结果超过 {_limit('page_limit_bytes', MAX_PAGE_BYTES) / 1048576:g} MiB，已暂停；此前已扫描页保留。")
     usage = _usage(library, paper_id)
-    if usage['index_bytes'] + added > MAX_INDEX_BYTES:
-        raise ElementBudgetError('本篇结构索引达到 16 MiB 预算，已暂停；已有结果仍可阅读。')
-    if usage['library_index_bytes'] + added > MAX_LIBRARY_INDEX_BYTES:
-        raise ElementBudgetError('全库结构索引达到 128 MiB 预算，已暂停；可明确清除不再需要的派生索引。')
+    if usage['index_bytes'] + added > _limit('index_limit_bytes', MAX_INDEX_BYTES):
+        raise ElementBudgetError(f"本篇结构索引达到 {_limit('index_limit_bytes', MAX_INDEX_BYTES) / 1048576:g} MiB 预算，已暂停；可调整资源设置后继续。")
+    if usage['library_index_bytes'] + added > _limit('library_index_limit_bytes', MAX_LIBRARY_INDEX_BYTES):
+        raise ElementBudgetError(f"全库结构索引达到 {_limit('library_index_limit_bytes', MAX_LIBRARY_INDEX_BYTES) / 1048576:g} MiB 预算，已暂停；可调整资源设置或清除不需要的派生索引。")
     _ensure_disk(library, max(0, added) * 4)
 
 
@@ -104,7 +136,7 @@ def _preflight_page(doc, number):
     if len(contents) + len(forms) > 2048 or len(images) > 1000:
         raise ElementBudgetError(f'第 {number} 页对象过多，暂停自动扫描。')
     pixels = sum(max(0, image[2]) * max(0, image[3]) for image in images)
-    if pixels > 2 * MAX_IMAGE_PIXELS or any(image[2] * image[3] > MAX_IMAGE_PIXELS for image in images):
+    if pixels > 2 * _limit('image_pixels', MAX_IMAGE_PIXELS) or any(image[2] * image[3] > _limit('image_pixels', MAX_IMAGE_PIXELS) for image in images):
         raise ElementBudgetError(f'第 {number} 页图像像素超过预算，暂停以避免大图解码占满内存。')
     compressed = decoded = 0
     for xref in set(contents + [form[0] for form in forms]):
@@ -112,24 +144,24 @@ def _preflight_page(doc, number):
         if kind != 'int':
             raise ElementBudgetError(f'第 {number} 页内容流大小无法安全确认，暂停自动扫描。')
         compressed += int(length)
-        if compressed > MAX_PAGE_STREAM_BYTES:
-            raise ElementBudgetError(f'第 {number} 页内容流超过 8 MiB，暂停自动扫描。')
+        if compressed > _limit('stream_limit_bytes', MAX_PAGE_STREAM_BYTES):
+            raise ElementBudgetError(f"第 {number} 页内容流超过 {_limit('stream_limit_bytes', MAX_PAGE_STREAM_BYTES) / 1048576:g} MiB，暂停自动扫描。")
         _, filter_name = doc.xref_get_key(xref, 'Filter')
         if filter_name in ('/FlateDecode', '[/FlateDecode]'):
             raw = doc.xref_stream_raw(xref)
             try:
                 inflater = zlib.decompressobj()
-                value = inflater.decompress(raw, MAX_PAGE_DECODED_BYTES - decoded + 1)
+                value = inflater.decompress(raw, _limit('decoded_limit_bytes', MAX_PAGE_DECODED_BYTES) - decoded + 1)
             except zlib.error as exc:
                 raise ElementBudgetError(f'第 {number} 页内容流无法安全预检，暂停自动扫描。') from exc
             decoded += len(value)
-            if decoded > MAX_PAGE_DECODED_BYTES or not inflater.eof:
-                raise ElementBudgetError(f'第 {number} 页解压内容超过 16 MiB，暂停自动扫描。')
+            if decoded > _limit('decoded_limit_bytes', MAX_PAGE_DECODED_BYTES) or not inflater.eof:
+                raise ElementBudgetError(f"第 {number} 页解压内容超过 {_limit('decoded_limit_bytes', MAX_PAGE_DECODED_BYTES) / 1048576:g} MiB，暂停自动扫描。")
         elif filter_name in ('null', ''):
             decoded += int(length)
         else:
             raise ElementBudgetError(f'第 {number} 页内容流压缩方式无法有界预检，暂停自动扫描。')
-        if decoded > MAX_PAGE_DECODED_BYTES:
+        if decoded > _limit('decoded_limit_bytes', MAX_PAGE_DECODED_BYTES):
             raise ElementBudgetError(f'第 {number} 页内容流超过解压预算，暂停自动扫描。')
 
 
@@ -166,9 +198,9 @@ def _version(library, paper_id, path, doc):
         value = cached.get('version', {})
         if value.get('page_count') == doc.page_count and re.fullmatch('[a-f0-9]{64}', str(value.get('sha256', ''))):
             return SCHEMA + ':' + value['sha256']
-    if observed['bytes'] > MAX_SOURCE_BYTES or doc.xref_length() > 200000:
+    if observed['bytes'] > _limit('source_limit_bytes', MAX_SOURCE_BYTES) or doc.xref_length() > 200000:
         raise ElementBudgetError('PDF 体积或对象数超过自动结构索引预算；已扫描内容保留。')
-    _ensure_disk(library, observed['bytes'] * 2 + MAX_PAGE_BYTES)
+    _ensure_disk(library, observed['bytes'] * 2 + _limit('page_limit_bytes', MAX_PAGE_BYTES))
     return SCHEMA + ':' + content_version(library, paper_id, path, doc, observed)['sha256']
 
 
@@ -194,8 +226,8 @@ def _lines(page):
             text = ''.join(span['text'] for span in line['spans']).strip()
             if text:
                 text_bytes += len(text.encode())
-                if len(lines) >= 5000 or text_bytes > MAX_PAGE_BYTES:
-                    raise ElementBudgetError('单页文字超过 5000 行或 2 MiB，暂停结构扫描以限制内存和计算量。')
+                if len(lines) >= 5000 or text_bytes > _limit('page_limit_bytes', MAX_PAGE_BYTES):
+                    raise ElementBudgetError(f"单页文字超过 5000 行或 {_limit('page_limit_bytes', MAX_PAGE_BYTES) / 1048576:g} MiB，暂停结构扫描以限制内存和计算量。")
                 lines.append({'text': text, 'rect': fitz.Rect(line['bbox']), 'block': block_index,
                               'baseline': sum(s.get('origin', (0, line['bbox'][3]))[1] for s in line['spans']) / max(1, len(line['spans'])),
                               'math_font': any(re.search('math|symbol|cmsy|cmmi', s.get('font', ''), re.I) for s in line['spans'])})
@@ -250,8 +282,8 @@ def _extract(page, version, page_number=None):
         token = json.dumps([version, kind, value['page'], value['rect'], title], ensure_ascii=False)
         value['id'] = hashlib.sha256(token.encode()).hexdigest()[:32]
         result_bytes += _encoded(value)[2]
-        if result_bytes > MAX_PAGE_BYTES:
-            raise ElementBudgetError('单页结构结果超过 2 MiB，已暂停；此前已扫描页保留。')
+        if result_bytes > _limit('page_limit_bytes', MAX_PAGE_BYTES):
+            raise ElementBudgetError(f"单页结构结果超过 {_limit('page_limit_bytes', MAX_PAGE_BYTES) / 1048576:g} MiB，已暂停；此前已扫描页保留。")
         elements.append(value)
 
     # 图片直接从 PDF 图像放置几何提取，不解码整页图片。
@@ -485,7 +517,9 @@ def _status(library, paper_id, version, count):
 
 def _scan(library, paper_id, doc, version, request):
     count = doc.page_count
-    limit = _integer(request.get('limit', 1), 'limit', 1, 6)
+    limit = _integer(request.get('limit', _limit('batch_pages', 1)), 'limit', 1, 6)
+    if _policy.get():
+        limit = min(limit, _limit('batch_pages', 6))
     start = request.get('start_page')
     if start is None:
         start = _coverage(library, paper_id, version, count)['next_page']
@@ -504,7 +538,7 @@ def _scan(library, paper_id, doc, version, request):
             if exists:
                 cached.append(number)
                 continue
-            _ensure_disk(library, MAX_PAGE_BYTES)
+            _ensure_disk(library, _limit('page_limit_bytes', MAX_PAGE_BYTES))
             _preflight_page(doc, number)
             pending, batch_lookahead = [], []
             previous = library.db.execute("SELECT value FROM document_elements WHERE paper_id=? AND version=? AND page=? AND kind='algorithm'", (paper_id, version, number - 1)).fetchall()
@@ -533,7 +567,7 @@ def _scan(library, paper_id, doc, version, request):
             # 在写 SQLite / WAL 前核对本页、本篇、全库和磁盘预算。
             _check_write_budget(library, paper_id, added + sum(item[3] for item in pending), added)
             for candidate, _, _, delta in pending:
-                if _index_bytes(library, paper_id, candidate['page']) + delta > MAX_PAGE_BYTES:
+                if _index_bytes(library, paper_id, candidate['page']) + delta > _limit('page_limit_bytes', MAX_PAGE_BYTES):
                     raise ElementBudgetError('跨页算法使前页索引超过结果预算，已暂停；旧候选保留。')
             for candidate, text, search, _ in pending:
                 library.db.execute('UPDATE document_elements SET value=?,search_text=? WHERE paper_id=? AND version=? AND id=?', (text, search, paper_id, version, candidate['id']))
@@ -662,8 +696,10 @@ def _dispatch(library, request):
 
 
 def dispatch(library, request):
+    token = _policy.set(_validate_policy(request.get('_resource_policy')))
     try:
         return _dispatch(library, request)
     finally:
         # 官方 API 仅能收缩缓存，没有可用硬上限 setter；不常驻保留字体/图像。
         fitz.TOOLS.store_shrink(100)
+        _policy.reset(token)

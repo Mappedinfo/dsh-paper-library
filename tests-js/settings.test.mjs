@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { RESOURCE_DEFAULTS } from '../src/resource-policy.mjs';
 import { createLocalStateStore } from '../src/local-state.mjs';
 import { createPaperLibrarySettings, createPaperLibrarySettingsSchema, PAPER_LIBRARY_SETTINGS_DEFAULTS } from '../src/harness/settings.mjs';
 
@@ -67,7 +68,7 @@ test('migration respects explicit native false, normalizes legacy strings and re
   const f = await fixture(t, { legacy, user: { auto_analysis: false, future: 7 } });
   const view = await f.service.get();
   assert.equal(view.backend, 'dsh'); assert.equal(view.writable, true);
-  assert.deepEqual(view.value, { auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', ui_palette: 'jade', sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_accent: 'system', latex_path_font: 'pixel', latex_split: 50, latex_sync_folder: true });
+  assert.deepEqual(view.value, { ...RESOURCE_DEFAULTS, auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', ui_palette: 'jade', sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_accent: 'system', latex_path_font: 'pixel', latex_split: 50, latex_sync_folder: true });
   assert.deepEqual((await f.store.get('preferences')).value, legacy);
   assert.deepEqual((await f.store.get(backup)).value, legacy);
   assert.equal(f.settings.raw().future, 7);
@@ -343,3 +344,15 @@ for (const native of [true, false]) test(`workspace palettes persist and reject 
   }
   assert.throws(() => f.service.update({ ui_palette: 'url(https://example.com)' }, state.revision), code('SETTINGS_INVALID'));
 });
+
+for(const native of [true,false])test(`resource presets and atomic custom budgets persist (${native?'DSH':'local'})`,async t=>{
+ const f=await fixture(t,{native}),initial=await f.service.get();assert.equal(initial.resource_policy.memory_target_mb,512);assert.equal(initial.value.resource_profile,'balanced');
+ let saved=await f.service.update({resource_profile:'performance'},initial.revision);assert.equal(saved.resource_policy.preview_bytes,96*1048576);assert.equal(saved.resource_policy.batch_pages,4);
+ saved=await f.service.update({resource_profile:'custom',resource_memory_mb:256,resource_preview_mb:64,resource_batch_pages:3,resource_batch_gap_ms:700,resource_paper_index_mb:128,resource_library_index_mb:512},saved.revision);
+ assert.equal((await f.service.get()).resource_policy.preview_bytes,64*1048576);assert.equal(saved.resource_policy.batch_pages,3);assert.equal(saved.resource_policy.index_limit_bytes,128*1048576);assert.equal(saved.resource_policy.memory_hard_limit,false);
+ await assert.rejects(f.service.update({resource_preview_mb:65},saved.revision),/四分之一/);await assert.rejects(f.service.update({resource_library_index_mb:64},saved.revision),/全库/);
+ assert.throws(()=>f.service.update({resource_batch_pages:7},saved.revision),/1–6/);assert.throws(()=>f.service.update({resource_profile:'unlimited'},saved.revision),/档位/);
+ saved=await f.service.reset(saved.revision,Object.keys(RESOURCE_DEFAULTS));assert.equal(saved.resource_policy.memory_target_mb,512);
+});
+
+test('invalid cross-field native resource settings remain editable with visible safe fallback',async t=>{const f=await fixture(t,{user:{resource_profile:'custom',resource_memory_mb:128,resource_preview_mb:96}});const value=await f.service.get();assert.match(value.resource_warning,/四分之一/);assert.equal(value.resource_policy.profile,'balanced');const saved=await f.service.update({resource_preview_mb:16},value.revision);assert.equal(saved.resource_warning,undefined);assert.equal(saved.resource_policy.memory_target_mb,128);});

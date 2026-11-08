@@ -2,15 +2,15 @@
 
 /** Reading language tools. Results and vocabulary live on the host; this view holds one page. */
 window.PaperLanguageLearning = {
-  create({ api, persistence, getPaper, getSelection, toast, openReference, prepareChat, beforeOpen, openVocabulary }) {
+  create({ api, persistence, getPaper, getSelection, toast, openReference, prepareChat, beforeOpen, openVocabulary, embedded = false, onOpen, onClose }) {
     const $ = id => document.getElementById(id);
     const make = (tag, text, cls) => { const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n; };
     const button = (id,text,fn) => {const b=make('button',text,'button subtle');b.id=id;b.type='button';b.addEventListener('click',fn);return b;};
-    const panel=make('section',undefined,'language-panel');panel.id='language-panel';panel.hidden=true;panel.setAttribute('aria-label','翻译、表述与难词');
+    const panel=make('section',undefined,embedded?'language-panel language-panel-embedded':'language-panel');panel.id='language-panel';panel.hidden=true;panel.setAttribute('aria-label','翻译、表述与难词');
     panel.innerHTML=`<header class="language-heading"><div><strong>读懂，也学会表达</strong><p id="language-paper" class="small muted"></p></div><div class="language-heading-actions"><button id="language-drag" class="icon-button" type="button" title="拖动窗口；方向键移动" aria-label="移动语言窗口">⠿</button><button id="language-settings-open" class="icon-button" type="button" title="语言设置" aria-label="语言设置">⚙</button><button id="language-close" class="icon-button" type="button" aria-label="关闭语言工具">×</button></div></header>
       <nav class="language-tabs" aria-label="语言工具"><button id="language-tab-work" class="button subtle" type="button">翻译与表述</button><button id="language-tab-history" class="button subtle" type="button">本篇记录</button><button id="language-tab-words" class="button subtle" type="button">难词本</button></nav>
       <p id="language-status" class="language-status" role="status"></p>
-      <div id="language-work"><label class="field">选文或你的草稿<textarea id="language-source" rows="4" maxlength="8000" placeholder="拖选论文中的文字，或在这里输入要翻译、优化的表达。"></textarea></label><div class="language-actions"><label>译成 <select id="language-target"><option value="">跟随语言设置</option><option value="auto">自动识别 · 中英互译</option><option value="zh-CN">中文</option><option value="en">英文</option></select></label><button id="language-translate" class="button primary" type="button">直接翻译</button><button id="language-polish" class="button" type="button">优化表述</button></div><p class="small muted">默认使用 DSH 当前默认模型，可在右上角设置指定模型。结果保存在本机，生成会使用模型额度。</p><div id="language-result"></div></div>
+      <div id="language-work"><label class="field">选文或你的草稿<textarea id="language-source" rows="4" maxlength="8000" placeholder="拖选论文中的文字，或在这里输入要翻译、优化的表达。"></textarea></label><div class="language-actions"><label>译成 <select id="language-target"><option value="">跟随语言设置</option><option value="auto">自动识别 · 中英互译</option><option value="zh-CN">中文</option><option value="en">英文</option></select></label><button id="language-translate" class="button primary" type="button">直接翻译</button><button id="language-polish" class="button" type="button">优化表述</button></div><p class="small muted">译文与词条保存在本机；模型可在右上角设置，生成会使用模型额度。</p><div id="language-result"></div></div>
       <div id="language-settings" hidden><p class="small muted">语言工具使用独立设置；不会改变宿主或论文对话的模型。</p><label class="field">模型<select id="language-settings-model"></select></label><label class="field">默认翻译方向<select id="language-settings-target"><option value="auto">自动识别 · 中文译英文，其他译中文</option><option value="zh-CN">始终译为中文</option><option value="en">始终译为英文</option></select></label><label class="field">翻译补充提示词<textarea id="language-settings-translate" maxlength="2000" rows="3" placeholder="例如：保留常见缩写"></textarea></label><label class="field">润色补充提示词<textarea id="language-settings-polish" maxlength="2000" rows="3" placeholder="例如：优先使用简洁句子"></textarea></label><p class="small muted">补充要求不能覆盖忠于原文和结果结构的基本规则。</p><div class="language-actions"><button id="language-settings-save" class="button primary" type="button">保存设置</button><button id="language-settings-reload" class="button subtle" type="button">重新读取</button></div></div>
       <div id="language-history" hidden><div id="language-history-list"></div><div class="language-pagination"><button id="language-history-prev" class="button subtle" type="button">上一页</button><span id="language-history-range"></span><button id="language-history-next" class="button subtle" type="button">下一页</button></div></div>
       <div id="language-words" hidden><div class="language-word-filters"><input id="vocabulary-query" type="search" placeholder="检索词语、释义" aria-label="检索难词"><select id="vocabulary-status" aria-label="学习状态"><option value="">全部</option><option value="learning">待学习</option><option value="mastered">已掌握</option></select><button id="vocabulary-refresh" class="button subtle" type="button">刷新</button></div><p class="small muted">从翻译与表述优化中自动积累。AI 释义待核对；掌握程度由你标记。</p><div id="vocabulary-list"></div><div class="language-pagination"><button id="vocabulary-prev" class="button subtle" type="button">上一页</button><span id="vocabulary-range"></span><button id="vocabulary-next" class="button subtle" type="button">下一页</button></div><div class="language-actions"><button id="vocabulary-export-json" class="button subtle" type="button">导出 JSON</button><button id="vocabulary-export-csv" class="button subtle" type="button">导出 CSV</button></div></div>`;
@@ -18,7 +18,7 @@ window.PaperLanguageLearning = {
     $('language-target').value='';
     let available=false,paperId=null,loadTicket=0,viewTicket=0,view='work',busy=false,draftReady=false,sourcePage=null,lastResult=null,historyOffset=0,wordOffset=0,failedRequest=null,loadPromise=null,draftRevision=0,disposed=false;
     let settingsRevision=null, settingsModels=[];
-    const floating=window.PaperFloatingWindows?.attach(panel,{key:'reader:language-window',persistence});
+    const floating=embedded?null:window.PaperFloatingWindows?.attach(panel,{key:'reader:language-window',persistence});
     const saveGeometry=()=>floating?.save();
     const restoreGeometry=()=>floating?.restore();
     const status=(text,error=false)=>{$('language-status').textContent=text||'';$('language-status').classList.toggle('error',error);};
@@ -26,7 +26,7 @@ window.PaperLanguageLearning = {
     const draftValue=()=>({text:$('language-source').value,target_language:$('language-target').value,page:sourcePage,failed_request:failedRequest});
     function remember(){if(persistence&&paperId&&draftReady)return persistence.put(`language-draft:${paperId}`,draftValue()).catch(()=>{});return Promise.resolve();}
     function controls(){for(const id of ['language-translate','language-polish'])$(id).disabled=busy||!available||!paperId||!draftReady||paperId!==getPaper()?.id;$('language-target').disabled=busy||!draftReady;$('language-source').disabled=!draftReady||!paperId;}
-    function show(next='work'){if(next==='words'&&openVocabulary){openVocabulary();return;}beforeOpen?.();++viewTicket;panel.hidden=false;void restoreGeometry();view=next;for(const name of ['work','history','words','settings']){$(`language-${name}`).hidden=name!==next;if(name!=='settings')$(`language-tab-${name}`).setAttribute('aria-pressed',String(name===next));}if(next==='history')void history();if(next==='words')void words();if(next==='settings')void loadSettings();controls();}
+    function show(next='work'){if(next==='words'&&openVocabulary){openVocabulary();return;}if(onOpen?.(next)===false)return false;beforeOpen?.();++viewTicket;panel.hidden=false;void restoreGeometry();view=next;for(const name of ['work','history','words','settings']){$(`language-${name}`).hidden=name!==next;if(name!=='settings')$(`language-tab-${name}`).setAttribute('aria-pressed',String(name===next));}if(next==='history')void history();if(next==='words')void words();if(next==='settings')void loadSettings();controls();}
     function paperChanged(item){
       if(paperId===item?.id){$('language-paper').textContent=item?.title||'先打开一篇论文';if(loadPromise)return loadPromise;if(draftReady)return Promise.resolve();}
       remember();paperId=item?.id||null;const ticket=++loadTicket;++viewTicket;++draftRevision;draftReady=false;sourcePage=null;failedRequest=null;lastResult=null;historyOffset=0;
@@ -40,7 +40,7 @@ window.PaperLanguageLearning = {
       })();return loadPromise;
     }
     async function useSelection(mode){
-      const item=getPaper();await paperChanged(item);if(item?.id!==paperId||item?.id!==getPaper()?.id)return;show();const s=selected();
+      const item=getPaper();await paperChanged(item);if(item?.id!==paperId||item?.id!==getPaper()?.id)return;if(show()===false)return;const s=selected();
       if(s&&draftReady){$('language-source').value=s.text;sourcePage=s.page;failedRequest=null;++draftRevision;remember();await generate(mode);}
       else{status('先在 PDF 中选择文字，或在下方输入内容。');$('language-source').focus();}
     }
@@ -109,7 +109,7 @@ window.PaperLanguageLearning = {
         for(const row of rows){
           const value=row.value||row,complete=value.status==='complete';
           const b=button('',`${value.mode==='polish'?'表述优化':'翻译'} · ${complete?'已完成':value.status==='committing'?'待完成保存':value.status==='failed'?'生成未完成':'生成状态待确认'} · ${value.page?`第 ${value.page} 页 · `:''}${new Date(value.created_at).toLocaleDateString('zh-CN')}`,()=>{
-            show('work');
+            if(show('work')===false)return;
             if(complete){renderResult(value);return;}
             if($('language-source').value.trim()&&$('language-source').value.trim()!==value.source_text){status('当前仍有其他文字草稿，请先完成或清空后再恢复这条记录。',true);return;}
             $('language-source').value=value.source_text;sourcePage=value.page||null;++draftRevision;$('language-target').value=value.requested_target_language==='auto'?'auto':value.target_language==='en'?'en':'zh-CN';
@@ -135,13 +135,15 @@ window.PaperLanguageLearning = {
       const remove=button('','删除',()=>{const confirm=button('','确认删除此词',async()=>{try{await api('vocabulary_delete',{id:word.id,expected_revision:word.revision});await words();}catch(error){status(error.message,true);}});remove.replaceWith(confirm);});actions.append(remove);return card;
     }
     async function exportWords(format){try{const result=await api('vocabulary_export',{...filter(),format});const content=result.content??result.text??JSON.stringify(result.items??result,null,2);const url=URL.createObjectURL(new Blob([typeof content==='string'?content:JSON.stringify(content,null,2)],{type:format==='csv'?'text/csv;charset=utf-8':'application/json'}));const a=make('a');a.href=url;a.download=`paper-library-vocabulary.${format}`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);if(result.truncated)status('导出达到本次上限，请缩小检索范围后继续。');}catch(error){status(error.message,true);}}
-    $('language-close').addEventListener('click',()=>{remember();++viewTicket;panel.hidden=true;});
+    function hide(){remember();++viewTicket;panel.hidden=true;}
+    function close(){hide();onClose?.();}
+    $('language-close').addEventListener('click',close);
     $('language-settings-open').addEventListener('click',()=>show('settings'));$('language-settings-reload').addEventListener('click',()=>void loadSettings());$('language-settings-save').addEventListener('click',()=>void saveSettings());
     for(const next of ['work','history','words'])$(`language-tab-${next}`).addEventListener('click',()=>show(next));
     $('language-translate').addEventListener('click',()=>void generate('translate'));$('language-polish').addEventListener('click',()=>void generate('polish'));
     $('language-source').addEventListener('input',()=>{sourcePage=null;failedRequest=null;++draftRevision;remember();});$('language-target').addEventListener('change',()=>{failedRequest=null;++draftRevision;remember();});
     for(const [kind,load]of [['language-history',history],['vocabulary',words]])for(const [direction,delta]of [['prev',-20],['next',20]])$(`${kind}-${direction}`).addEventListener('click',()=>{if(kind==='language-history')historyOffset=Math.max(0,historyOffset+delta);else wordOffset=Math.max(0,wordOffset+delta);void load();});
     let searchTimer;$('vocabulary-query').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{wordOffset=0;void words();},250);});$('vocabulary-status').addEventListener('change',()=>{wordOffset=0;void words();});$('vocabulary-refresh').addEventListener('click',()=>void words());for(const format of ['json','csv'])$(`vocabulary-export-${format}`).addEventListener('click',()=>void exportWords(format));
-    return {paperChanged,useSelection,show,showSettings(){show('settings');},close(){remember();++viewTicket;panel.hidden=true;},setAvailable(value){available=Boolean(value);controls();},sync(){controls();for(const id of ['language-selection-translate','language-selection-polish','ribbon-language'])if($(id))$(id).disabled=!getPaper();},dispose(){remember();saveGeometry();disposed=true;clearTimeout(searchTimer);floating?.dispose();++loadTicket;++viewTicket;},snapshot:()=>({paperId,view,busy,lastResultId:lastResult?.id})};
+    return {element:panel,navigation:panel.querySelector?.('.language-tabs'),settingsButton:$('language-settings-open'),paperChanged,useSelection,show,showSettings(){show('settings');},hide,close,setAvailable(value){available=Boolean(value);controls();},sync(){controls();for(const id of ['language-selection-translate','language-selection-polish','ribbon-language'])if($(id))$(id).disabled=!getPaper();},dispose(){remember();saveGeometry();disposed=true;clearTimeout(searchTimer);floating?.dispose();++loadTicket;++viewTicket;},snapshot:()=>({paperId,view,busy,lastResultId:lastResult?.id})};
   },
 };

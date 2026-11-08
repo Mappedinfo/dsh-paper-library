@@ -7,7 +7,7 @@ window.PaperLibrarySettings = (() => {
     ['auto-paper-conversation', '实时伴学：保存批注后自动回复', '有文字评论的新批注和修改会在主机排队，回复跟随原批注；使用本篇模型额度。历史批注不会批量重发。'],
   ];
   function create({api,persistence,onChange=()=>{},getLibrary=()=>'',onLanguageSettings}) {
-    let snapshot=null,busy=false,refreshing=null,refreshAgain=false,disposed=false,timer=null,pendingPatch=null,visibleTimer=null,generation=0,readingPreferences=0;
+    let snapshot=null,busy=false,refreshing=null,refreshAgain=false,disposed=false,timer=null,pendingPatch=null,visibleTimer=null,generation=0,readingPreferences=0,resourceDraft=null,resourceDraftRevision=null;
     const make=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
     const trigger=make('button','button subtle','设置');trigger.id='settings-open';trigger.type='button';trigger.title='Paper Library 设置';
     (document.querySelector('#topbar-end')||document.querySelector('.topbar-actions')).append(trigger);
@@ -25,6 +25,23 @@ window.PaperLibrarySettings = (() => {
       copy.append(make('strong','',label),make('small','',help));row.append(input,swatches,copy);paletteControls.append(row);paletteInputs.set(value,{input,row});input.addEventListener('change',()=>{if(input.checked)void save({ui_palette:value});});
     }
     paletteControls.append(make('p','palette-legend','阅读 · 墨绿　知识 · 紫色　写作 · 海蓝　演示 · 铜金。明暗随 DSH；PDF 批注保留原色。'));
+    const resourceControls=make('fieldset','settings-resources');resourceControls.id='settings-resources';resourceControls.append(make('legend','','资源与性能'));
+    const resourceProfile=make('select');resourceProfile.id='setting-resource_profile';resourceProfile.setAttribute('aria-label','资源档位');
+    for(const [value,label]of [['eco','节能 · 256 MiB'],['balanced','均衡 · 512 MiB'],['performance','高性能 · 1024 MiB'],['custom','自定义']]){const option=make('option','',label);option.value=value;resourceProfile.append(option);}resourceControls.append(resourceProfile);
+    const resourceHelp=make('p','small','处理内存目标用于分配预览缓存与 PDF 处理预算，不是整个 DSH／浏览器的内存硬上限。磁盘索引预算单独设置；保存后下一批生效。切换预设不覆盖已保存的自定义参数。');resourceControls.append(resourceHelp);
+    const resourceGrid=make('div','settings-resource-grid'),resourceInputs=new Map();resourceControls.append(resourceGrid);
+    const resourceSummary=make('p','small');resourceSummary.setAttribute('role','status');resourceControls.append(resourceSummary);
+    const resourceApply=make('button','button','保存资源配置'),resourceReset=make('button','button subtle','恢复已保存');resourceApply.type=resourceReset.type='button';resourceControls.append(resourceApply,resourceReset);
+    function editResources(patch){if(!resourceDraft){resourceDraft={...snapshot.value};resourceDraftRevision=snapshot.revision;}Object.assign(resourceDraft,patch);}
+    function renderResources(){resourceControls.disabled=busy||!snapshot?.writable;const chosen=resourceDraft||snapshot?.value||{},profile=chosen.resource_profile||'balanced';resourceProfile.value=profile;
+      const effective=profile==='custom'?chosen:(snapshot?.resource_profiles?.[profile]?.values||snapshot?.resource_policy?.values||{});
+      for(const [key,rule]of Object.entries(snapshot?.resource_fields||{})){if(!resourceInputs.has(key)){const row=make('label','settings-resource-field'),input=make('input');input.type='number';input.id=`setting-${key}`;input.min=rule.minimum;input.max=rule.maximum;input.step='1';row.append(make('span','',rule.label),input);resourceGrid.append(row);resourceInputs.set(key,input);input.addEventListener('input',()=>editResources({resource_profile:'custom',[key]:Number(input.value)}));}const input=resourceInputs.get(key);input.disabled=profile!=='custom';if(document.activeElement!==input)input.value=effective[key]??rule.default;}
+      resourceSummary.textContent=snapshot?.resource_warning?`配置需要调整：${snapshot.resource_warning}；当前暂用均衡档。`:`当前预览 ${effective.resource_preview_mb??48} MiB · 每批 ${effective.resource_batch_pages??2} 页 · 间隔 ${effective.resource_batch_gap_ms??1000} ms。前台优先，后台处理保持串行。`;
+      if(resourceDraft&&snapshot&&resourceDraftRevision!==snapshot.revision)resourceSummary.textContent+=' 主机设置已更新，本窗口资源草稿仍保留；请核对后点击「恢复已保存」读取新值，再修改。';
+    }
+    resourceProfile.addEventListener('change',()=>{editResources({resource_profile:resourceProfile.value});renderResources();});
+    resourceReset.addEventListener('click',async()=>{await refresh();if(snapshot){resourceDraft=null;resourceDraftRevision=null;renderResources();}});
+    resourceApply.addEventListener('click',async()=>{const profile=resourceProfile.value,patch={resource_profile:profile};if(profile==='custom')for(const [key,input]of resourceInputs)patch[key]=Number(input.value);if(await save(patch,{expectedRevision:resourceDraftRevision??snapshot.revision,resource:true})){resourceDraft=null;resourceDraftRevision=null;renderResources();}});
     const inputs=new Map();
     for(const [key,label,help] of fields){const row=make('label','settings-option'),input=make('input');input.type='checkbox';input.id=`setting-${key}`;const copy=make('span');copy.append(make('strong','',label),make('small','',help));row.append(input,copy);controls.append(row);inputs.set(key,input);input.addEventListener('change',()=>void save({[key]:input.checked}));}
     const sideRow=make('label','settings-side'),side=make('select');side.id='setting-reading-panel-side';side.setAttribute('aria-label','阅读侧栏位置');for(const [value,label]of[['left','左侧'],['right','右侧']]){const option=make('option','',label);option.value=value;side.append(option);}sideRow.append(make('span','','阅读侧栏'),side);controls.append(sideRow);inputs.set('reading-panel-side',side);side.addEventListener('change',()=>void save({'reading-panel-side':side.value}));
@@ -43,9 +60,10 @@ window.PaperLibrarySettings = (() => {
     maintenance.append(make('strong','','导出与维护'),make('p','','导出文献与数据集的 BibLaTeX 引用资料。演示文稿请在 Slides 工作台中导出。'));
     const exportLibrary=document.getElementById?.('export-library');if(exportLibrary)maintenance.append(exportLibrary);
     const footer=make('footer'),reload=make('button','button subtle','重新读取'),reset=make('button','button subtle','恢复默认');reload.type=reset.type='button';reload.addEventListener('click',()=>void refresh());reset.addEventListener('click',()=>void save(null));footer.append(reload,reset);
-    dialog.append(header,description,status,languageSettings,paletteControls,controls,storage,maintenance,footer);document.body.append(dialog);
+    dialog.append(header,description,status,languageSettings,paletteControls,resourceControls,controls,storage,maintenance,footer);document.body.append(dialog);
     function say(text,error=false){status.textContent=text;status.classList.toggle('error',error);}
     function render(){
+      renderResources();
       controls.disabled=busy||!snapshot?.writable;reset.disabled=busy||!snapshot?.writable;reload.disabled=busy;
       const shown={...snapshot?.value,...pendingPatch};
       paletteControls.disabled=busy||!snapshot?.writable;
@@ -65,14 +83,14 @@ window.PaperLibrarySettings = (() => {
         await syncPreferences();if(disposed||ticket!==generation)return;snapshot=result;onChange(result.value||{},result);render();say(result.available===false?'当前页面未连接 DSH 设置服务。':'已与主机设置同步');
       }catch(error){if(!disposed&&ticket===generation){snapshot=null;onChange({},{writable:false,available:false});render();say(`设置读取失败：${error.message}`,true);}}finally{refreshing=null;drainRefresh();}})();return refreshing;
     }
-    async function save(patch){
+    async function save(patch,{expectedRevision=snapshot?.revision,resource=false}={}){
       if(disposed||busy||!snapshot?.writable){render();return;}busy=true;generation++;clearTimeout(timer);pendingPatch=patch;render();say('正在保存…');
-      try{const result=await api(patch?'settings_update':'settings_reset',{...(patch?{patch}:{}),expected_revision:snapshot.revision});
+      try{const result=await api(patch?'settings_update':'settings_reset',{...(patch?{patch}:{}),expected_revision:expectedRevision});
         if(disposed)return;await syncPreferences();if(disposed)return;snapshot=result;onChange(result.value||{},result);
         const confirmed=patch?Object.entries(patch).every(([key,value])=>result.value?.[key]===value):[...inputs.keys()].every(key=>!Object.hasOwn(result.user||{},key));
         if(!confirmed)throw new Error('设置已被另一窗口更新');
-        say(result.backend==='dsh'?'已保存到主机，DSH 设置同步生效':'已保存到本机');
-      }catch(error){if(!disposed)say(`未保存：${error.message}。请重新读取后再修改。`,true);}
+        say(result.backend==='dsh'?'已保存到主机，DSH 设置同步生效':'已保存到本机');return true;
+      }catch(error){if(!disposed)say(resource?`未保存：${error.message}。资源草稿仍保留；请核对后点击「恢复已保存」，再修改。`:`未保存：${error.message}。请重新读取后再修改。`,true);return false;}
       finally{busy=false;pendingPatch=null;if(!disposed)render();drainRefresh();}
     }
     const schedule=()=>{if(disposed)return;if(busy||refreshing){if(refreshing)generation++;refreshAgain=true;return;}clearTimeout(timer);timer=setTimeout(()=>void refresh(),50);};
@@ -86,7 +104,7 @@ window.PaperLibrarySettings = (() => {
     dialog.addEventListener('close',()=>{clearInterval(visibleTimer);visibleTimer=null;});
     if(window.parent!==window)window.parent.postMessage({type:'paper-library:settings-ready',version:1},window.location.origin);
     render();
-    return {refresh,dispose(){disposed=true;clearTimeout(timer);clearInterval(visibleTimer);unsubscribe?.();window.removeEventListener('message',receive);window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);}};
+    return {refresh,async showResources(){if(!dialog.open)dialog.showModal();clearInterval(visibleTimer);visibleTimer=setInterval(()=>{if(dialog.open&&!document.hidden)schedule();},3000);await refresh();resourceControls.scrollIntoView?.({block:'start'});resourceProfile.focus?.();},dispose(){disposed=true;clearTimeout(timer);clearInterval(visibleTimer);unsubscribe?.();window.removeEventListener('message',receive);window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);}};
   }
   return {create};
 })();

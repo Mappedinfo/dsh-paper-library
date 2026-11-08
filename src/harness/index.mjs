@@ -1,6 +1,7 @@
 import * as dshTools from '@deepseek-ai/dsh-tools'
 import * as dshLlm from '@deepseek-ai/dsh-llm'
 import { core, dispatch } from '../bridge.mjs'
+import { RESOURCE_FIELDS } from '../resource-policy.mjs'
 import { createFetchHandler } from '../http.mjs'
 import { resolveConfig } from './config.mjs'
 import { createExternalSources } from './external-sources.mjs'
@@ -46,6 +47,8 @@ export const Config = Schema.object({
   'auto-paper-conversation': Schema.boolean().default(false).description('实时伴学：保存批注后自动回复。').volatile(),
   'reading-panel-side': Schema.union([Schema.const('left'), Schema.const('right')]).default('left').description('阅读侧栏位置（left 左侧 / right 右侧）。').volatile(),
   ui_palette: Schema.union([Schema.const('jade'), Schema.const('navy'), Schema.const('neutral'), Schema.const('rose'), Schema.const('apricot'), Schema.const('system')]).default('jade').description('Paper Library 配色：jade 墨绿铜金 / navy 深海蓝灰 / neutral 石墨中性 / rose 樱粉柔光 / apricot 杏橙暖光 / system 跟随 DSH；明暗模式继续跟随宿主。').volatile(),
+  resource_profile: Schema.union(['eco','balanced','performance','custom'].map(value=>Schema.const(value))).default('balanced').description('资源档位：节能256 / 均衡512 / 高性能1024 MiB处理目标，custom自定义；不是整个DSH内存硬上限。').volatile(),
+  ...Object.fromEntries(Object.entries(RESOURCE_FIELDS).map(([key,rule])=>[key,Schema.number().default(rule.default).description(`${rule.label}：${rule.minimum}–${rule.maximum}，自定义档生效。`).volatile()])),
   sync_config: Schema.string().default('').description('数据同步服务配置文件（绝对路径，留空不启用）。').volatile(),
   external_sources: Schema.string().default('').description('额外外部文献源（JSON 数组文本，留空不启用）。').volatile(),
   latex_starter: Schema.boolean().default(true).description('新建 LaTeX 文件夹时生成 starter 文件。').volatile(),

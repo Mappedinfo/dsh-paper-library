@@ -7,7 +7,7 @@ window.PaperFloatingWindows = (() => {
   const visible = element => !element.hidden && (element.tagName !== 'DIALOG' || element.open) && element.getClientRects().length > 0;
   const expanded = element => element.classList.contains('is-expanded') || document.fullscreenElement === element;
   const headerOf = element => element.querySelector(':scope > header,:scope > form > header,:scope > .dialog-heading,:scope > form > .dialog-heading,:scope > .summary-dialog-head,:scope > .dialog-header,:scope > .modal-header,:scope > h2,:scope > h3');
-  const embedded = element => element.tagName === 'DIALOG' && Boolean(element.parentElement?.closest(selector));
+  const embedded = element => element.classList.contains('language-panel-embedded') || element.tagName === 'DIALOG' && Boolean(element.parentElement?.closest(selector));
   // Small menus escape scrolling toolbars but stay below their own trigger.
   // Feature owners still decide when a menu opens, closes or receives focus.
   function placeBelow(trigger, panel) {
@@ -66,7 +66,7 @@ window.PaperFloatingWindows = (() => {
         state.grip?.remove(); state.header = header;
         if (header) {
           header.classList.add('paper-floating-header');
-          const existing = element.querySelector('#language-drag');
+          const existing = header.querySelector('#language-drag');
           const grip = existing || document.createElement('button');
           if (!existing) { grip.type = 'button'; grip.textContent = '⠿'; header.prepend(grip); }
           grip.classList.add('paper-floating-grip'); grip.setAttribute('aria-label', '移动窗口'); grip.title = '拖动窗口；方向键移动，Shift 加速';

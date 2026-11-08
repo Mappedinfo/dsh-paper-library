@@ -32,3 +32,23 @@ with pymupdf.open() as d:
  assert.ok(scan.usage.index_bytes>0);const beforeClear=await send({action:'annotations'});const cleared=await send({action:'document_elements_clear'});assert.equal(cleared.usage.index_bytes,0);assert.equal((await send({action:'document_elements_list'})).total,0);assert.deepEqual(await send({action:'annotations'}),beforeClear);assert.deepEqual(await readFile(path),original);
  const missing=await handler(new Request('http://localhost/document-elements.js'));assert.equal(missing.status,200);assert.match(await missing.text(),/PaperDocumentElements/);
 });
+
+test('HTTP settings control real worker batches and ignore forged request policy',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'resource-policy-http-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const python=resolve('.venv/bin/python'),path=join(root,'synthetic.pdf'),options={library:join(root,'library'),localStateHome:join(root,'home'),python};
+ execFileSync(python,['-c',`import pymupdf,sys
+with pymupdf.open() as d:
+ for i in range(6):
+  p=d.new_page();p.insert_text((50,60),'y = x + 1 (1)')
+ d.save(sys.argv[1])`,path]);
+ const id=(await core({action:'import',path},options)).items[0].id,handler=createFetchHandler(options);
+ const send=async payload=>{const response=await handler(new Request('http://localhost/api',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...payload,id})}));const body=await response.json();assert.equal(body.ok,true,body.error);return body.result;};
+ let settings=await send({action:'settings_get'});
+ assert.equal(settings.resource_policy.memory_target_mb,512);
+ settings=await send({action:'settings_update',patch:{resource_profile:'eco'},expected_revision:settings.revision});
+ const first=await send({action:'document_elements_scan',limit:6,_resource_policy:{batch_pages:6,memory_target_mb:2048}});
+ assert.deepEqual(first.scanned_batch,[1]);assert.equal(first.usage.memory_target_mb,256);assert.equal(first.usage.page_limit_bytes,2*1048576);
+ await send({action:'settings_update',patch:{resource_profile:'performance'},expected_revision:settings.revision});
+ const next=await send({action:'document_elements_scan',limit:6});
+ assert.deepEqual(next.scanned_batch,[2,3,4,5]);assert.deepEqual(next.coverage.scanned_pages,[1,2,3,4,5]);assert.equal(next.usage.memory_target_mb,1024);assert.equal(next.usage.page_limit_bytes,8*1048576);
+});

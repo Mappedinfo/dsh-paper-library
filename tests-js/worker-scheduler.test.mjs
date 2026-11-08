@@ -191,3 +191,6 @@ test('internal analysis priority yields; request payload cannot change priority;
   await analysis;
   assert.deepEqual((await f.runs()).map(run => run.id), ['reading', 'status', 'analysis']);
 });
+
+
+test('configured per-job background cooldown still yields to foreground',async()=>{const f=fixture(),order=[];const low=f.schedule(()=>order.push('background'),{priority:'background',cooldownMs:250});await f.advance(200);assert.deepEqual(order,[]);await f.schedule(()=>order.push('foreground'));await f.advance(249);assert.deepEqual(order,['foreground']);await f.advance(1);await low;assert.deepEqual(order,['foreground','background']);});

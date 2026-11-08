@@ -1520,6 +1520,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
 });
 readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,contextChanged:()=>{resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
 documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPanels,getPaper:()=>state.active,toast,
+  openSettings:()=>settingsUI?.showResources(),
   navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');await pdfReader?.revealRegion(source);},
   annotated:async(id,page)=>{if(state.active?.id!==id)return;await loadAnnotations(id);if(state.active?.id===id)await pdfReader?.refresh(page,{defer:true});},
 });
@@ -1540,7 +1541,7 @@ annotationEditor=window.PaperAnnotationEditor?.create({api,persistence,captionAv
 companionUI=window.PaperCompanion?.create({api,persistence,getPaper:()=>state.active,refreshAnnotations:loadAnnotations,beforeAsk:(id,annotationId)=>annotationEditor?.beforeAsk(id,annotationId),toast});
 const wikiUI=window.PaperEncyclopedia.create({api,toast,openReference:openReferencedPaper,getSource:()=>state.active?{paper_id:state.active.id,title:state.active.title,page:state.selection?.id===state.active.id?state.selection.page:state.page,quote:state.selection?.id===state.active.id?state.selection.text:''}:null});
 const wikiButton=el('button','button subtle','百科');wikiButton.id='ribbon-encyclopedia';wikiButton.type='button';wikiButton.addEventListener('click',()=>wikiUI.show());document.querySelector('.reader-ribbon').insertBefore(wikiButton,$('reader-fullscreen'));
-languageUI=window.PaperLanguageLearning?.create({api,persistence,openVocabulary:()=>wikiUI.show('words'),getPaper:()=>state.active,getSelection:()=>state.selection,toast,openReference:openReferencedPaper,
+languageUI=window.PaperLanguageLearning?.create({api,persistence,embedded:true,onOpen:next=>wikiUI.openLanguage(next),onClose:()=>wikiUI.close(),openVocabulary:()=>wikiUI.show('words'),getPaper:()=>state.active,getSelection:()=>state.selection,toast,openReference:openReferencedPaper,
   beforeOpen:()=>readingPanels?.close('chat'),prepareChat:async(text,source)=>{
     if(source?.paperId!==state.active?.id){toast('请先返回这条语言记录所属的论文。',true);return;}
     await switchTab('conversation');
@@ -1551,8 +1552,8 @@ languageUI=window.PaperLanguageLearning?.create({api,persistence,openVocabulary:
     paperChatUI?.restoreDraft(combined);languageUI.close();
   }});
 if(languageUI){
-  const languageButton=el('button','button subtle','语言');languageButton.id='ribbon-language';languageButton.type='button';languageButton.addEventListener('click',()=>{void languageUI.paperChanged(state.active);languageUI.show();});document.querySelector('.reader-ribbon').insertBefore(languageButton,$('reader-fullscreen'));
-  const wordsButton=el('button','button subtle','难词本');wordsButton.id='ribbon-vocabulary';wordsButton.type='button';wordsButton.addEventListener('click',()=>wikiUI.show('words'));document.querySelector('.reader-ribbon').insertBefore(wordsButton,$('reader-fullscreen'));
+  wikiUI.attachLanguage(languageUI);
+  const wordsButton=el('button','button subtle','语言与词条');wordsButton.id='ribbon-vocabulary';wordsButton.type='button';wordsButton.addEventListener('click',()=>{void languageUI.paperChanged(state.active);wikiUI.show('language');});document.querySelector('.reader-ribbon').insertBefore(wordsButton,$('reader-fullscreen'));
   for(const[mode,label]of [['translate','直接翻译'],['polish','优化表述']]){const b=el('button','button',label);b.type='button';b.id=`language-selection-${mode}`;b.addEventListener('click',()=>void languageUI.useSelection(mode));$('selection-tools').insertBefore(b,$('clear-selection'));}
   languageUI.sync();
 }
@@ -1578,6 +1579,7 @@ $('latex-version-shelf')?.addEventListener('toggle',()=>{if($('latex-version-she
 bindWorkspaceVersions();
 settingsUI = window.PaperLibrarySettings?.create({onLanguageSettings:()=>languageUI?.showSettings(),api,persistence,getLibrary:()=>state.library,onChange:(value,descriptor)=>{
   preferences={...preferences,...value};
+  documentElementsUI?.applyResources(descriptor.resource_policy);
   window.PaperLibraryTheme?.setPalette(value.ui_palette);
   analysisUI?.applyPreferences(value,descriptor.writable);
   paperChatUI?.applyPreferences(value,descriptor.writable);

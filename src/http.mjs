@@ -211,7 +211,7 @@ export function createFetchHandler(options = {}) {
             : input?.action === 'handwriting_recognize' ? await options.handwriting(input, { signal: request.signal })
             : chatAction
             ? await options.paperChat(input, { signal: request.signal })
-            : await dispatch(input, { ...options, signal: request.signal });
+            : await dispatch(input, { ...options, settings, signal: request.signal });
           if(options.companion&&['annotate','annotation_update'].includes(input?.action)&&input.companion_skip!==true){
             try{result.companion=await options.companion.saved(input.id,result.annotation)}
             catch(error){result.companion={status:'failed',error:`批注已保存，伴学未入队：${error.message}`}}

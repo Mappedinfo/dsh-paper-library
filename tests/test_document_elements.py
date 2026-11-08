@@ -356,3 +356,48 @@ def test_library_quota_counts_other_papers_and_clear_releases_only_budget(tmp_pa
     cleared = call(library, first, 'document_elements_clear')
     assert cleared['usage']['library_index_bytes'] == 0
     assert not call(library, second, 'document_elements_scan')['paused']
+
+
+def resource_policy(**patch):
+    return {'memory_target_mb': 512, 'batch_pages': 2, 'page_limit_bytes': 4*1048576,
+            'index_limit_bytes': 64*1048576, 'library_index_limit_bytes': 1024*1048576,
+            'disk_reserve_bytes': 512*1048576, 'source_limit_bytes': 128*1048576,
+            'stream_limit_bytes': 8*1048576, 'decoded_limit_bytes': 16*1048576,
+            'image_pixels': 512*32768, **patch}
+
+
+def test_request_policy_limits_batch_and_updates_quota_without_rebuilding(tmp_path):
+    library, paper, _ = make_library(tmp_path)
+    low = resource_policy(index_limit_bytes=4*1048576)
+    first = call(library, paper, 'document_elements_scan', limit=6, _resource_policy=low)
+    assert first['scanned_batch'] == [1, 2]
+    assert first['usage']['memory_target_mb'] == 512
+    assert first['usage']['index_limit_bytes'] == 4*1048576
+    library.db.execute('UPDATE document_element_pages SET index_bytes=? WHERE paper_id=? AND page=1', (4*1048576, paper))
+    stopped = call(library, paper, 'document_elements_scan', _resource_policy=low)
+    assert stopped['paused'] and '4 MiB' in stopped['budget_reason']
+    high = resource_policy(index_limit_bytes=8*1048576, batch_pages=3)
+    continued = call(library, paper, 'document_elements_scan', _resource_policy=high)
+    assert continued['scanned_batch'] == [3, 4, 5]
+    assert not continued['paused']
+    assert continued['usage']['index_limit_bytes'] == 8*1048576
+    assert call(library, paper, 'document_elements_list', _resource_policy=high)['total'] > 0
+
+
+def test_configured_disk_reserve_changes_pause_threshold(tmp_path, monkeypatch):
+    from dsh_paper_library import document_elements as elements
+    library, paper, _ = make_library(tmp_path)
+    call(library, paper, 'document_elements_scan')
+    monkeypatch.setattr(elements, '_disk_free', lambda _: 300*1048576)
+    stopped = call(library, paper, 'document_elements_scan', _resource_policy=resource_policy())
+    assert stopped['paused'] and '512 MiB' in stopped['budget_reason']
+    continued = call(library, paper, 'document_elements_scan', _resource_policy=resource_policy(disk_reserve_bytes=128*1048576))
+    assert continued['scanned_batch'] == [2, 3]
+    assert not continued['paused']
+
+
+@pytest.mark.parametrize('field,value', [('batch_pages', 7), ('batch_pages', 1.5), ('memory_target_mb', True), ('index_limit_bytes', 1)])
+def test_invalid_resource_policy_rejected_before_scan(tmp_path, field, value):
+    library, paper, _ = make_library(tmp_path)
+    with pytest.raises(ValueError, match='resource policy'):
+        call(library, paper, 'document_elements_scan', _resource_policy=resource_policy(**{field: value}))

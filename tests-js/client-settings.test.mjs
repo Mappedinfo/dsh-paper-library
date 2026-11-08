@@ -117,7 +117,7 @@ test('native card exposes all labelled controls, quota descriptions and honest p
   const rendered = PaperLibrarySettingsCard({ model, t: key => key })
   const nodes = walk(rendered)
   const controls = nodes.filter(node => ['input', 'select'].includes(node.type))
-  assert.equal(controls.length, 5)
+  assert.equal(controls.length, 6)
   for (const control of controls) {
     assert.equal(control.props.disabled, true)
     assert.ok(nodes.some(node => node.type === 'label' && node.props.htmlFor === control.props.id))
@@ -330,4 +330,15 @@ test('native settings offer and persist all three additional workspace palettes'
     assert.equal(model.getSnapshot().scope.value.ui_palette,palette);
   }
   assert.equal(await model.set('ui_palette','not-a-theme'),false);
+});
+
+
+test('native resource profile uses shared host mutations and rejects unknown tiers',async()=>{
+ const fixture=scopeFixture();const model=createSettingsCardModel(fixture.scope);
+ for(const profile of ['eco','balanced','performance','custom']){
+   assert.equal(await model.set('resource_profile',profile),true);
+   assert.equal(model.getSnapshot().scope.value.resource_profile,profile);
+ }
+ assert.equal(await model.set('resource_profile','unbounded'),false);
+ model.dispose();
 });

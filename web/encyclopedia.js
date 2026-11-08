@@ -2,17 +2,43 @@
 window.PaperEncyclopedia={create({api,toast,openReference,getSource=()=>null}){
   const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
   const button=(label,action)=>{const b=node('button',label,'button subtle');b.type='button';b.addEventListener('click',action);return b;};
-  const dialog=node('dialog',undefined,'wiki-dialog');dialog.setAttribute('aria-label','阅读百科与难词本');
+  const dialog=node('dialog',undefined,'wiki-dialog');dialog.setAttribute('aria-label','阅读百科与语言词条');
   const header=node('header',undefined,'wiki-header'),close=button('关闭',()=>leave());header.append(close);
   const tabs=node('nav',undefined,'wiki-tabs');tabs.setAttribute('aria-label','词条分类');header.prepend(tabs);
+  let language=null,languageView='words';
   let mode='encyclopedia',query='',sort='updated_desc',offset=0,ticket=0,selected=null,pendingSource=null,dirty=false;
   const queryInput=node('input');queryInput.type='search';queryInput.placeholder='检索词条、别名与释义';queryInput.setAttribute('aria-label','检索词条');
   const search=node('form',undefined,'wiki-search');const submit=button('检索',()=>{query=queryInput.value.trim();offset=0;void load();});search.append(queryInput,submit,button('新建词条',()=>edit(null)));search.addEventListener('submit',event=>{event.preventDefault();query=queryInput.value.trim();offset=0;void load();});
   const sortControl=node('select');sortControl.setAttribute('aria-label','词条排序');for(const [value,label]of [['updated_desc','最近更新'],['created_desc','最新添加'],['created_asc','最早添加'],['term_asc','字母 A–Z'],['term_desc','字母 Z–A']]){const option=node('option',label);option.value=value;sortControl.append(option);}sortControl.value=sort;sortControl.addEventListener('change',()=>{sort=sortControl.value;offset=0;void load();});search.append(sortControl);
   const layout=node('div',undefined,'wiki-layout'),index=node('aside',undefined,'wiki-index'),article=node('article',undefined,'wiki-article'),status=node('p','', 'small muted');status.setAttribute('role','status');layout.append(index,article);dialog.append(header,search,status,layout);document.body.append(dialog);
-  const tabButtons={};for(const [value,label]of [['encyclopedia','百科'],['words','难词本']]){tabButtons[value]=button(label,()=>{if(!discard())return;mode=value;query='';queryInput.value='';offset=0;void load();});tabs.append(tabButtons[value]);}
+  const tabButtons={};for(const [value,label]of [['encyclopedia','百科'],['words','语言与词条']]){tabButtons[value]=button(label,()=>showSection(value==='words'&&language?'language':value));tabs.append(tabButtons[value]);}
   function discard(){if(dirty&&!window.confirm('词条尚未保存，放弃本次编辑？'))return false;dirty=false;return true;}
-  function leave(){if(!discard())return;++ticket;dialog.close();}
+  function leave(){if(!discard())return;++ticket;language?.hide();dialog.close();}
+  function present(){
+    const lexical=mode!=='language',inLanguage=mode!=='encyclopedia';
+    search.hidden=status.hidden=layout.hidden=!lexical;
+    dialog.classList.toggle('wiki-language-active',inLanguage);
+    for(const [key,b]of Object.entries(tabButtons))b.setAttribute('aria-pressed',String(key==='words'?inLanguage:!inLanguage));
+    if(language){language.navigation.hidden=!inLanguage;language.settingsButton.hidden=!inLanguage;
+      if(mode!=='language')language.hide();
+      for(const name of ['work','history','words'])document.getElementById(`language-tab-${name}`).setAttribute('aria-pressed',String(inLanguage&&name===languageView));
+    }
+    if(!dialog.open)dialog.showModal();
+  }
+  function showSection(next='encyclopedia',phrase='',source=null){
+    if(next==='language'&&language&&languageView!=='words'){language.show(languageView);return;}
+    if(!discard())return;
+    mode=next==='language'?'words':next;if(mode==='words')languageView='words';
+    query=phrase;queryInput.value=query;pendingSource=source||(mode==='words'?getSource():null);offset=0;present();void load();
+  }
+  function openLanguage(next){if(!discard())return false;++ticket;mode='language';languageView=next;present();return true;}
+  function attachLanguage(value){
+    language=value;dialog.append(language.element);header.insertBefore(language.navigation,close);header.insertBefore(language.settingsButton,close);
+    language.navigation.classList.add('wiki-language-tabs');language.navigation.hidden=true;language.settingsButton.hidden=true;
+    document.getElementById('language-tab-words').textContent='词条';
+    language.element.querySelector('.language-heading').hidden=true;
+    const context=node('div',undefined,'language-context-row');context.append(document.getElementById('language-paper'),document.getElementById('language-status'));language.element.insertBefore(context,language.element.firstChild);
+  }
   dialog.addEventListener('cancel',event=>{event.preventDefault();leave();});
   function markup(text){const root=node('div',undefined,'wiki-prose');for(const line of String(text||'尚未填写释义。').split('\n')){const p=node(line.startsWith('## ')?'h3':'p');let end=0;const raw=line.replace(/^## /,'');for(const match of raw.matchAll(/\[\[([^\]\n]{1,200})\]\]/g)){p.append(document.createTextNode(raw.slice(end,match.index)),button(match[1],()=>{if(!discard())return;query=match[1];queryInput.value=query;offset=0;void load();}));end=match.index+match[0].length;}p.append(document.createTextNode(raw.slice(end)));root.append(p);}return root;}
   async function load(){if(!discard())return;const seq=++ticket;status.textContent='正在读取词条…';for(const [key,b]of Object.entries(tabButtons))b.setAttribute('aria-pressed',String(key===mode));
@@ -74,5 +100,5 @@ window.PaperEncyclopedia={create({api,toast,openReference,getSource=()=>null}){
       finally{busy=false;save.disabled=false;for(const input of form.querySelectorAll('input,textarea,select'))input.disabled=false;}
     });
   }
-  return {show(next='encyclopedia',phrase='',source=null){if(!discard())return;mode=next;query=phrase;queryInput.value=query;pendingSource=source||(next==='words'?getSource():null);offset=0;if(!dialog.open)dialog.showModal();void load();},close:leave};
+  return {show:showSection,openLanguage,attachLanguage,close:leave};
 }};

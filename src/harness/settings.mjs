@@ -3,6 +3,7 @@
  * No second process opens or writes the DSH settings document here.
  */
 import { createHash } from 'node:crypto';
+import { RESOURCE_DEFAULTS, RESOURCE_FIELDS, RESOURCE_PROFILES, resolveResourcePolicy, validateResourceSettings } from '../resource-policy.mjs';
 import { LocalStateConflictError, LocalStateError } from '../local-state.mjs';
 
 export const PAPER_LIBRARY_SETTINGS_NAMESPACE = 'paper-library';
@@ -13,6 +14,7 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   'auto-paper-conversation': false,
   'reading-panel-side': 'left',
   ui_palette: 'jade',
+  ...RESOURCE_DEFAULTS,
   // Optional adapter to a separate data-sync service: a config file it owns, or
   // extra absolute folders. Both default to empty, so the library never needs it.
   sync_config: '',
@@ -29,7 +31,7 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   latex_sync_folder: true,
 });
 export const TEXT_SETTINGS = Object.freeze(['sync_config', 'external_sources', 'latex_accent']);
-export const NUMBER_SETTINGS = Object.freeze({ latex_split: { minimum: 25, maximum: 75 } });
+export const NUMBER_SETTINGS = Object.freeze({ latex_split: { minimum: 25, maximum: 75 }, ...RESOURCE_FIELDS });
 const fields = Object.keys(PAPER_LIBRARY_SETTINGS_DEFAULTS);
 const markerKey = 'settings.migration:paper-library';
 const backupKey = 'settings.backup:paper-library';
@@ -54,6 +56,8 @@ export function createPaperLibrarySettingsSchema(Schema) {
     'auto-paper-conversation': Schema.boolean().default(false),
     'reading-panel-side': Schema.union([Schema.const('left'), Schema.const('right')]).default('left'),
     ui_palette: Schema.union([Schema.const('jade'), Schema.const('navy'), Schema.const('neutral'), Schema.const('rose'), Schema.const('apricot'), Schema.const('system')]).default('jade'),
+    resource_profile: Schema.union(['eco','balanced','performance','custom'].map(value=>Schema.const(value))).default('balanced'),
+    ...Object.fromEntries(Object.entries(RESOURCE_FIELDS).map(([key,rule])=>[key,Schema.number().default(rule.default)])),
     sync_config: Schema.string().default(''),
     external_sources: Schema.string().default(''),
     latex_starter: Schema.boolean().default(true),
@@ -75,6 +79,8 @@ function validatePatch(patch) {
       if (!['left', 'right'].includes(value)) throw invalid('设置值无效：reading-panel-side');
     } else if (key === 'ui_palette') {
       if (!['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].includes(value)) throw invalid('设置值无效：ui_palette');
+    } else if (key === 'resource_profile') {
+      if (!['eco','balanced','performance','custom'].includes(value)) throw invalid('请选择有效的资源档位。');
     } else if (key === 'latex_engine') {
       if (!['xelatex', 'pdflatex', 'lualatex'].includes(value)) throw invalid('设置值无效：latex_engine');
     } else if (key === 'latex_theme') {
@@ -200,11 +206,14 @@ export function createPaperLibrarySettings({ store, settings, schema, base = {},
     const revision = hash({ legacy: legacy.revision, backend, namespace: current
       ? { revision: current.revision, value: current.value, user: current.user ?? null, base: current.base ?? null }
       : null });
+    let resourcePolicy, resourceWarning;
+    try { resourcePolicy=resolveResourcePolicy(resolved); } catch(error) { resourcePolicy=resolveResourcePolicy();resourceWarning=error.message; }
     const descriptor = {
       namespace, backend, available: true,
       writable: current ? settings.writable === true : true, revision,
       value: resolved, base: current?.base ?? defaults, user: current?.user ?? managed(value, { legacy: true }),
       native_revision: current?.revision ?? null,
+      resource_policy: resourcePolicy, ...(resourceWarning?{resource_warning:resourceWarning}:{}), resource_profiles: RESOURCE_PROFILES, resource_fields: RESOURCE_FIELDS,
     };
     return { legacy, current, descriptor, record: backend === 'local' ? clone(legacy) : {
       key: 'preferences', value: { ...extras(value), ...(resolved ?? {}) }, revision, updated_at: legacy.updated_at,
@@ -230,6 +239,9 @@ export function createPaperLibrarySettings({ store, settings, schema, base = {},
   }
   async function write(patch, expected, resetFields) {
     const current = await snapshot(); assertRevision(expected, current);
+    const nextResources={...current.descriptor.value,...patch};
+    for(const field of resetFields??[])nextResources[field]=defaults[field];
+    try { validateResourceSettings(nextResources); } catch(error) { throw invalid(error.message); }
     if (current.current) await nativeWrite(current, patch, resetFields);
     else {
       const value = { ...preferencesOf(current.legacy), ...patch };

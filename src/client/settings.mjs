@@ -8,10 +8,11 @@ export const SETTINGS_DEFAULTS = Object.freeze({
   'auto-paper-conversation': false,
   'reading-panel-side': 'left',
   ui_palette: 'jade',
+  resource_profile: 'balanced',
 })
 const fields = Object.keys(SETTINGS_DEFAULTS)
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value ?? {}, key)
-const valid = (key, value) => key === 'ui_palette' ? ['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].includes(value) : key === 'reading-panel-side'
+const valid = (key, value) => key === 'resource_profile' ? ['eco', 'balanced', 'performance', 'custom'].includes(value) : key === 'ui_palette' ? ['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].includes(value) : key === 'reading-panel-side'
   ? value === 'left' || value === 'right' : fields.includes(key) && typeof value === 'boolean'
 const writable = snapshot => snapshot.status === 'ready' && snapshot.mode === 'host'
   && snapshot.writable && Number.isSafeInteger(snapshot.revision)
@@ -24,6 +25,7 @@ const locales = {
     'auto-paper-conversation': '实时伴学：保存批注后自动回复', 'auto-paper-conversation.hint': '有文字评论的新批注和修改会在主机排队，回复跟随原批注，使用本篇 DSH 模型额度。历史批注不批量重发。',
     'reading-panel-side': '阅读侧栏位置', 'reading-panel-side.hint': '文献库与批注共用的侧栏。', left: '左侧', right: '右侧',
     ui_palette: '界面配色', 'ui_palette.hint': '功能色对应阅读、知识、写作和演示；明暗随 DSH。', jade: '墨绿铜金', navy: '深海蓝灰', neutral: '石墨中性', rose: '樱粉柔光', apricot: '杏橙暖光', system: '跟随 DSH',
+    resource_profile: '资源档位', 'resource_profile.hint': '处理目标预算，并非整个 DSH 的内存硬限制。详细数值可在 Paper Library → 设置 → 资源与性能调整。', eco: '节能 · 256 MiB', balanced: '均衡 · 512 MiB', performance: '高性能 · 1024 MiB', custom: '自定义',
     loading: '正在读取主机设置…', unavailable: '当前连接不提供持久化插件设置。可在 Paper Library 内打开设置，使用主机保存。',
     readonly: '主机设置当前只读。', saving: '正在保存到主机…', saved: '已同步到主机',
     conflict: '设置未保存，已显示主机的当前值。请核对后重试。', failed: '无法确认设置已保存。请检查连接后重试。',
@@ -42,6 +44,7 @@ const locales = {
     analysis_fill: 'Fill missing metadata after analysis', 'analysis_fill.hint': 'Uses source-backed AI suggestions and preserves existing values. Added metadata still needs review.',
     'auto-paper-conversation': 'Live companion: reply after saving a comment', 'auto-paper-conversation.hint': 'New or edited comments queue on the host and use this paper’s DSH model. Replies attach to their source annotations. Existing notes are not resent in bulk.',
     'reading-panel-side': 'Reading sidebar position', 'reading-panel-side.hint': 'The shared library and annotations sidebar.', left: 'Left', right: 'Right',
+    resource_profile: 'Resource profile', 'resource_profile.hint': 'Processing target, not a hard memory cap for DSH. Adjust detailed limits in Paper Library settings.', eco: 'Eco · 256 MiB', balanced: 'Balanced · 512 MiB', performance: 'Performance · 1024 MiB', custom: 'Custom',
     loading: 'Loading host settings…', unavailable: 'This connection does not expose durable plugin settings. Open settings inside Paper Library to save on the host.',
     readonly: 'Host settings are read-only.', saving: 'Saving to the host…', saved: 'Synced to the host',
     conflict: 'Settings were not saved. Current host values are shown; review them and retry.', failed: 'Could not confirm the save. Check the connection and retry.',
@@ -249,7 +252,9 @@ export function PaperLibrarySettingsCard({ model, t, onMount, canReset = true })
   ...fields.map(key => {
     const id = `paper-library-setting-${key}`
     const value = own(pending, key) ? pending[key] : valid(key, scope.value?.[key]) ? scope.value[key] : SETTINGS_DEFAULTS[key]
-    const input = key === 'ui_palette'
+    const input = key === 'resource_profile'
+      ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, event.currentTarget.value) } }, ...['eco', 'balanced', 'performance', 'custom'].map(value => h('option', { key: value, value }, t(value))))
+      : key === 'ui_palette'
       ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, event.currentTarget.value) } }, ...['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].map(value => h('option', { key: value, value }, t(value))))
       : key === 'reading-panel-side'
       ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, event.currentTarget.value) } },

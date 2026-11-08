@@ -7,3 +7,23 @@
 .language-history-row{display:block;width:100%;text-align:left;border-bottom:1px solid var(--line);padding:14px 4px;background:transparent;color:var(--teal);font-size:10px;white-space:normal}.language-history-row span{display:block;color:var(--muted);margin:5px 0;font-size:11px}.language-history-row p{font-size:12px;color:var(--ink);overflow-wrap:anywhere}.language-word-filters{display:flex;gap:5px;margin:10px 0}.language-word-filters input{width:100%;min-width:0;font-size:11px;padding:6px}.language-word-filters select{font-size:11px;padding:4px}.language-word-filters .button{font-size:10px;padding:3px}.vocabulary-card{padding:14px 0;border-bottom:1px solid var(--line)}.vocabulary-card strong{font-size:15px;color:var(--teal)}.vocabulary-card p{margin-top:5px;line-height:1.8;overflow-wrap:anywhere}.vocabulary-card blockquote{margin:8px 0 4px;padding-left:9px;border-left:2px solid #cabb82;color:var(--muted);font-size:11px;line-height:1.8;overflow-wrap:anywhere}.vocabulary-card details{margin-top:5px}.vocabulary-card textarea{margin-top:8px}#language-result:empty{display:none}
 @media(max-width:620px){.language-panel{right:10px;bottom:10px;width:calc(100vw - 20px);max-width:calc(100vw - 20px);padding:12px;resize:none}.language-heading p{max-width:calc(100vw - 110px)}}
 .local-save-status{position:static;box-sizing:border-box;overflow-wrap:anywhere;display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px;background:#fff2df;border:1px solid #d5ad74;border-radius:5px;color:#754819;font-size:11px}.local-save-status .button{font-size:11px;padding:3px 6px}
+
+/* 语言处理与词条共用大阅读窗口，不另开遮挡正文的小浮层。 */
+.wiki-header .wiki-language-tabs{border:0;padding:0;margin-left:auto;gap:4px;flex:none}
+.wiki-header .wiki-language-tabs .button{font-size:13px;padding:6px 10px}
+.wiki-header>.wiki-tabs{flex:0 1 auto}
+.wiki-dialog>.language-panel-embedded{position:static;inset:auto;z-index:auto;flex:1;width:auto;max-width:none;height:auto;min-height:0;max-height:none;min-width:0;margin:0;padding:20px 28px;border:0;border-radius:0;box-shadow:none;resize:none;overflow:auto;font-size:14px;background:transparent}
+.language-panel-embedded .field{font-size:14px;gap:8px}.language-panel-embedded textarea{font-size:14px;padding:12px;min-height:150px;line-height:1.7}
+.language-panel-embedded .small{font-size:12px}.language-panel-embedded summary,.language-panel-embedded .language-actions label,.language-panel-embedded select{font-size:13px}
+.language-panel-embedded select{height:34px}.language-panel-embedded .language-actions .button{font-size:13px;padding:7px 12px}
+.language-panel-embedded .language-status{font-size:13px;margin:0 0 12px}.language-panel-embedded .language-status:empty{margin:0}
+.language-panel-embedded #language-work{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:28px;align-content:start}
+.language-panel-embedded #language-work>.field{grid-column:1;margin-top:0}.language-panel-embedded #language-work>.language-actions{grid-column:1;align-self:start}.language-panel-embedded #language-work>p{grid-column:1}
+.language-panel-embedded #language-result{grid-column:2;grid-row:1 / span 3;min-width:0}.language-panel-embedded .language-result-heading{margin-top:0;padding-top:0;border-top:0}
+.language-panel-embedded .language-history-row{font-size:13px;padding:16px 4px}.language-panel-embedded .language-history-row span,.language-panel-embedded .language-history-row p{font-size:14px}
+.language-panel-embedded #language-settings{max-width:760px;margin:0 auto}.language-panel-embedded #language-settings textarea{min-height:96px}
+
+.language-context-row{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:16px}.language-context-row #language-paper{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0}.language-context-row .language-status{margin:0}
+.wiki-dialog .language-panel-embedded[hidden],.wiki-header .wiki-language-tabs[hidden],.wiki-dialog>.wiki-layout[hidden]{display:none!important}
+
+.wiki-header>button:last-child{margin-left:auto}.wiki-language-active>.wiki-header>button:last-child{margin-left:0}

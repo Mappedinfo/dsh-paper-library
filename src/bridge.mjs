@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { resolveAndFetch, resolveMetadata, resolveTitleMetadata } from './paper-fetch.mjs';
 import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
 import { createTranslationServerClient } from './translation-server.mjs';
+import { resourcePolicyFor } from './resource-policy.mjs';
 import { workerScheduler } from './worker-scheduler.mjs';
 
 export const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -67,7 +68,10 @@ function enqueueImport(request,options) {
   return result;
 }
 
-export function core(request, options = {}) {
+export async function core(request, options = {}) {
+  const documentAction = /^document_element/.test(request.action || '');
+  const resourcePolicy = documentAction ? await resourcePolicyFor(options) : null;
+  options = {...options, ...(resourcePolicy?{resourcePolicy}: {})};
   // 优先级只来自内部调用选项，不读取浏览器/工具请求正文的同名字段。
   const background = request.action !== 'status' && (options.workerPriority === 'background'
     || ['document_elements_scan', 'document_element_preview', 'document_element_flow'].includes(request.action));
@@ -75,14 +79,14 @@ export function core(request, options = {}) {
   const key = scan ? scanKey(request, options) : undefined;
   return workerScheduler.schedule(
     ({ signal }) => runWorker(request, { ...options, signal }),
-    { priority: background ? 'background' : 'foreground', key, signal: options.signal, cancelRunning: scan },
+    { priority: background ? 'background' : 'foreground', key, signal: options.signal, cancelRunning: scan, cooldownMs:resourcePolicy?.worker_idle_ms },
   );
 }
 
 function scanKey(request, options) {
   const stable = value => Array.isArray(value) ? value.map(stable)
     : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value;
-  const payload = { request, library: resolve(options.library || defaultLibrary), python: options.python || 'managed' };
+  const payload = { request, resourcePolicy: options.resourcePolicy, library: resolve(options.library || defaultLibrary), python: options.python || 'managed' };
   return `scan:${createHash('sha256').update(JSON.stringify(stable(payload))).digest('hex')}`;
 }
 
@@ -174,7 +178,7 @@ async function runWorker(request, options) {
   await ensurePythonDependency(python, 'filelock', 'filelock>=3.32.7,<4', '跨平台文件锁依赖', !options.python,
     'import filelock; assert (3,32,7) <= tuple(map(int,filelock.__version__.split("."))) < (4,)');
   if (request.action === 'latex_table_import') await ensurePythonDependency(python, 'openpyxl', 'openpyxl>=3.1.5,<4', 'XLSX 读取依赖', !options.python);
-  return runProcess(python, ['-m', 'dsh_paper_library.worker'], { ...request, library: resolve(options.library || defaultLibrary) }, options);
+  return runProcess(python, ['-m', 'dsh_paper_library.worker'], { ...request, _resource_policy: options.resourcePolicy || null, library: resolve(options.library || defaultLibrary) }, options);
 }
 
 function citationJob(request, options) {

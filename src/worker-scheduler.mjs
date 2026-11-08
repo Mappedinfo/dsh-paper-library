@@ -22,7 +22,7 @@ export function createWorkerScheduler({
     if (active) return;
     let job = foreground.shift();
     if (!job && background.length) {
-      const wait = Math.max(0, idleSince + cooldownMs - now());
+      const wait = Math.max(0, idleSince + (background[0].cooldownMs ?? cooldownMs) - now());
       if (wait > 0) { timer = setTimer(() => { timer = null; pump(); }, wait); return; }
       job = background.shift();
     }
@@ -41,7 +41,7 @@ export function createWorkerScheduler({
     idleSince = now();
     pump();
   }
-  function schedule(run, { priority = 'foreground', key, signal, cancelRunning = false } = {}) {
+  function schedule(run, { priority = 'foreground', key, signal, cancelRunning = false, cooldownMs: requestedCooldown } = {}) {
     if (signal?.aborted) return Promise.reject(error('操作已取消。', 'ABORT_ERR'));
     const low = priority === 'background';
     let job = key ? keyed.get(key) : undefined;
@@ -52,7 +52,7 @@ export function createWorkerScheduler({
         return Promise.reject(error('文献处理队列已满，请等待当前操作完成后重试。', 'WORKER_QUEUE_FULL'));
       }
       job = { run, priority: low ? 'background' : 'foreground', key, controller: new AbortController(),
-        started: false, cancelRunning, waiters: new Set() };
+        started: false, cancelRunning, cooldownMs:Number.isFinite(requestedCooldown)?Math.max(250,Math.min(10000,requestedCooldown)):undefined, waiters: new Set() };
       if (key) keyed.set(key, job);
       (low ? background : foreground).push(job);
     }
