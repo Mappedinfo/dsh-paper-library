@@ -318,3 +318,16 @@ test('native language settings group models by provider and expose the persisted
   assert.equal(selects[1].props.value, 'en')
   assert.deepEqual(selects[1].children.filter(child => child?.type === 'option').map(option => option.props.value), ['auto', 'zh-CN', 'en'])
 })
+
+test('native settings offer and persist all three additional workspace palettes',async()=>{
+  const fixture=scopeFixture(),model=createSettingsCardModel(fixture.scope);
+  const rendered=walk(PaperLibrarySettingsCard({model,t:key=>key}));
+  const select=rendered.find(node=>node.props.id==='paper-library-setting-ui_palette');
+  assert.ok(select);
+  assert.deepEqual(select.children.map(node=>node.props.value),['jade','navy','neutral','rose','apricot','system']);
+  for(const palette of ['neutral','rose','apricot']){
+    assert.equal(await model.set('ui_palette',palette),true);
+    assert.equal(model.getSnapshot().scope.value.ui_palette,palette);
+  }
+  assert.equal(await model.set('ui_palette','not-a-theme'),false);
+});

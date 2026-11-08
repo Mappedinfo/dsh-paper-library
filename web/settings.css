@@ -23,3 +23,7 @@
 [data-palette-option="navy"] .palette-swatches{background:linear-gradient(90deg,#254e70 0 34%,#70869b 34% 67%,#fff 67%)}
 [data-palette-option="system"] .palette-swatches{background:linear-gradient(90deg,var(--dsw-alias-label-primary) 0 34%,var(--dsw-alias-label-secondary) 34% 67%,var(--dsw-alias-bg-base) 67%)}
 .palette-legend{font-size:12px;line-height:1.65;color:var(--muted);margin:3px 0 0}
+
+[data-palette-option="neutral"] .palette-swatches{background:linear-gradient(90deg,#414953 0 34%,#89929b 34% 67%,#f7f8fa 67%)}
+[data-palette-option="rose"] .palette-swatches{background:linear-gradient(90deg,#9b3d67 0 34%,#e9bbcc 34% 67%,#fff8fb 67%)}
+[data-palette-option="apricot"] .palette-swatches{background:linear-gradient(90deg,#9a4b22 0 34%,#efc29e 34% 67%,#fff9f2 67%)}

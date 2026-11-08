@@ -11,7 +11,7 @@ export const SETTINGS_DEFAULTS = Object.freeze({
 })
 const fields = Object.keys(SETTINGS_DEFAULTS)
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value ?? {}, key)
-const valid = (key, value) => key === 'ui_palette' ? ['jade', 'navy', 'system'].includes(value) : key === 'reading-panel-side'
+const valid = (key, value) => key === 'ui_palette' ? ['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].includes(value) : key === 'reading-panel-side'
   ? value === 'left' || value === 'right' : fields.includes(key) && typeof value === 'boolean'
 const writable = snapshot => snapshot.status === 'ready' && snapshot.mode === 'host'
   && snapshot.writable && Number.isSafeInteger(snapshot.revision)
@@ -23,7 +23,7 @@ const locales = {
     analysis_fill: '后台整理后补齐空缺资料', 'analysis_fill.hint': '按有原文依据的 AI 建议补缺，保留已有值；新增资料仍需核对。',
     'auto-paper-conversation': '实时伴学：保存批注后自动回复', 'auto-paper-conversation.hint': '有文字评论的新批注和修改会在主机排队，回复跟随原批注，使用本篇 DSH 模型额度。历史批注不批量重发。',
     'reading-panel-side': '阅读侧栏位置', 'reading-panel-side.hint': '文献库与批注共用的侧栏。', left: '左侧', right: '右侧',
-    ui_palette: '界面配色', 'ui_palette.hint': '功能色对应阅读、知识、写作和演示；明暗随 DSH。', jade: '墨绿铜金', navy: '深海蓝灰', system: '跟随 DSH',
+    ui_palette: '界面配色', 'ui_palette.hint': '功能色对应阅读、知识、写作和演示；明暗随 DSH。', jade: '墨绿铜金', navy: '深海蓝灰', neutral: '石墨中性', rose: '樱粉柔光', apricot: '杏橙暖光', system: '跟随 DSH',
     loading: '正在读取主机设置…', unavailable: '当前连接不提供持久化插件设置。可在 Paper Library 内打开设置，使用主机保存。',
     readonly: '主机设置当前只读。', saving: '正在保存到主机…', saved: '已同步到主机',
     conflict: '设置未保存，已显示主机的当前值。请核对后重试。', failed: '无法确认设置已保存。请检查连接后重试。',
@@ -36,7 +36,7 @@ const locales = {
     'language.failed': '语言设置读取或保存失败，请检查连接后重试。', 'language.loading': '正在读取语言设置…', 'language.saving': '正在保存语言设置…',
   },
   en: {
-    ui_palette: 'Workspace palette', 'ui_palette.hint': 'Functional colors for reading, knowledge, writing and slides. Light/dark follows DSH.', jade: 'Jade & brass', navy: 'Navy & slate', system: 'Follow DSH',
+    ui_palette: 'Workspace palette', 'ui_palette.hint': 'Functional colors for reading, knowledge, writing and slides. Light/dark follows DSH.', jade: 'Jade & brass', navy: 'Navy & slate', neutral: 'Graphite neutral', rose: 'Soft rose', apricot: 'Warm apricot', system: 'Follow DSH',
     title: 'Paper Library', description: 'Shared with the library settings on the host. Open readers update when these choices change.',
     auto_analysis: 'Organize imported or selected papers', 'auto_analysis.hint': 'Newly imported or selected PDFs without a prior analysis enter a serial full-text queue. Uses the paper’s DSH model and model quota.',
     analysis_fill: 'Fill missing metadata after analysis', 'analysis_fill.hint': 'Uses source-backed AI suggestions and preserves existing values. Added metadata still needs review.',
@@ -250,7 +250,7 @@ export function PaperLibrarySettingsCard({ model, t, onMount, canReset = true })
     const id = `paper-library-setting-${key}`
     const value = own(pending, key) ? pending[key] : valid(key, scope.value?.[key]) ? scope.value[key] : SETTINGS_DEFAULTS[key]
     const input = key === 'ui_palette'
-      ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, event.currentTarget.value) } }, ...['jade', 'navy', 'system'].map(value => h('option', { key: value, value }, t(value))))
+      ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, event.currentTarget.value) } }, ...['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].map(value => h('option', { key: value, value }, t(value))))
       : key === 'reading-panel-side'
       ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, event.currentTarget.value) } },
         h('option', { value: 'left' }, t('left')), h('option', { value: 'right' }, t('right')))

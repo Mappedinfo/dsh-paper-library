@@ -1,10 +1,32 @@
 'use strict';
 // Durable state belongs to the local service. This client holds only a bounded
-// working set and never resolves a cross-browser conflict by overwriting it.
+// working set. Concurrent independent edits merge against the last confirmed
+// value; conflicting edits remain local until explicitly reconciled.
 window.PaperLibraryLocalState = (() => {
   const LIMIT=256*1024, WORKING_KEYS=32;
   const copy=value=>value===undefined?null:JSON.parse(JSON.stringify(value));
-  const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+  function equal(a,b){
+    if(a===b)return true;
+    if(Array.isArray(a)&&Array.isArray(b))return a.length===b.length&&a.every((value,index)=>equal(value,b[index]));
+    if(!object(a)||!object(b))return false;
+    const keys=Object.keys(a);return keys.length===Object.keys(b).length&&keys.every(key=>Object.hasOwn(b,key)&&equal(a[key],b[key]));
+  }
+  const missing=Symbol('missing');
+  // Deletions differ from null, and ordered arrays / text are atomic values.
+  function mergeThree(base,local,remote){
+    if(equal(local,remote))return {ok:true,value:local};
+    if(equal(local,base))return {ok:true,value:remote};
+    if(equal(remote,base))return {ok:true,value:local};
+    if(!object(local)||!object(remote)||!(object(base)||base===missing||base===null))return {ok:false};
+    const previous=object(base)?base:{},value={};
+    for(const key of new Set([...Object.keys(previous),...Object.keys(local),...Object.keys(remote)])){
+      const result=mergeThree(Object.hasOwn(previous,key)?previous[key]:missing,Object.hasOwn(local,key)?local[key]:missing,Object.hasOwn(remote,key)?remote[key]:missing);
+      if(!result.ok)return result;
+      if(result.value!==missing)Object.defineProperty(value,key,{value:result.value,enumerable:true,writable:true,configurable:true});
+    }
+    return {ok:true,value};
+  }
   const byteLength=value=>new TextEncoder().encode(JSON.stringify(value)).byteLength;
   function create({api,onError}) {
     const entries=new Map(),listeners=new Set();let keepaliveBytes=0;
@@ -13,7 +35,7 @@ window.PaperLibraryLocalState = (() => {
     function entryFor(key){
       if(typeof key!=='string'||!key||key.length>240)throw new Error('本地状态名称无效');
       let entry=entries.get(key);
-      if(!entry){trim();if(entries.size>=WORKING_KEYS&&[...entries.values()].every(v=>v.dirty||v.running||v.loading||v.error||v.updating))throw new Error('有过多草稿等待保存，请先恢复本地服务连接。');entry={key,value:null,revision:0,loaded:false,loading:null,running:null,dirty:false,sequence:0,waiters:[],status:'idle',error:null,updating:0};}
+      if(!entry){trim();if(entries.size>=WORKING_KEYS&&[...entries.values()].every(v=>v.dirty||v.running||v.loading||v.error||v.updating))throw new Error('有过多草稿等待保存，请先恢复本地服务连接。');entry={key,value:null,base:null,revision:0,loaded:false,loading:null,running:null,dirty:false,sequence:0,waiters:[],status:'idle',error:null,updating:0};}
       entries.delete(key);entries.set(key,entry);return entry;
     }
     function validate(record,key){if(!record||record.key!==key||!(record.revision===0||typeof record.revision==='string'&&/^[a-f0-9]{64}$/.test(record.revision))||!Object.hasOwn(record,'value'))throw new Error('本地服务返回了无效的状态记录');return record;}
@@ -22,20 +44,21 @@ window.PaperLibraryLocalState = (() => {
       if(entry.loading){await entry.loading;return entry;}
       if(entry.loaded&&!refresh)return entry;
       const sequence=entry.sequence;
-      entry.loading=(async()=>{try{const record=validate(await api('state_get',{key:entry.key}),entry.key);if(sequence===entry.sequence&&!entry.dirty){entry.value=copy(record.value);entry.revision=record.revision;entry.loaded=true;emit(entry,'saved');}}catch(error){emit(entry,'error',error);throw error;}finally{entry.loading=null;trim();}})();
+      entry.loading=(async()=>{try{const record=validate(await api('state_get',{key:entry.key}),entry.key);if(sequence===entry.sequence&&!entry.dirty){entry.value=copy(record.value);entry.base=copy(record.value);entry.revision=record.revision;entry.loaded=true;emit(entry,'saved');}}catch(error){emit(entry,'error',error);throw error;}finally{entry.loading=null;trim();}})();
       await entry.loading;return entry;
     }
     function settle(entry,through,error){const rest=[];for(const waiter of entry.waiters){if(waiter.sequence<=through){if(error)waiter.reject(error);else waiter.resolve(copy(entry.value));}else rest.push(waiter);}entry.waiters=rest;}
-    function conflict(entry){const error=new Error('另一浏览器已修改这份资料。本窗口的未保存内容仍保留，请先复制并核对修改后再重试。');error.code='STATE_CONFLICT';entry.conflict=true;emit(entry,'conflict',error);return error;}
+    function conflict(entry){const error=new Error('另一浏览器对同一项作出了不同修改，未自动合并。本窗口草稿仍保留，请核对冲突内容后再保存。');error.code='STATE_CONFLICT';entry.conflict=true;emit(entry,'conflict',error);return error;}
     function run(entry){
       if(entry.running||!entry.dirty||entry.conflict)return entry.running||Promise.resolve();
       entry.running=Promise.resolve().then(async()=>{
+        let rebases=0;
         if(!entry.loaded){
-          try{const remote=validate(await api('state_get',{key:entry.key}),entry.key);if(remote.value!==null&&!equal(remote.value,entry.value)){settle(entry,Infinity,conflict(entry));return;}entry.revision=remote.revision;entry.loaded=true;if(equal(remote.value,entry.value)){entry.dirty=false;settle(entry,Infinity,null);emit(entry,'saved');return;}}
+          try{const remote=validate(await api('state_get',{key:entry.key}),entry.key);if(remote.value!==null&&!equal(remote.value,entry.value)){settle(entry,Infinity,conflict(entry));return;}entry.revision=remote.revision;entry.base=copy(remote.value);entry.loaded=true;if(equal(remote.value,entry.value)){entry.dirty=false;settle(entry,Infinity,null);emit(entry,'saved');return;}}
           catch(error){emit(entry,'error',error);settle(entry,Infinity,error);return;}
         }
         while(entry.dirty&&!entry.conflict){
-          const value=copy(entry.value),sequence=entry.sequence,expected=entry.revision;let record;
+          const value=copy(entry.value),base=copy(entry.base),sequence=entry.sequence,expected=entry.revision;let record;
           // Set keepalive before dispatch: pagehide cannot retrofit an in-flight
           // ordinary fetch. Larger writes need the page to remain connected.
           const payload={key:entry.key,value,expected_revision:expected};
@@ -46,9 +69,28 @@ window.PaperLibraryLocalState = (() => {
             // retrying the same revision; different remote content is a conflict.
             let remote;try{remote=validate(await api('state_get',{key:entry.key}),entry.key);}catch{}
             if(remote&&remote.revision!==expected&&equal(remote.value,value))record=remote;
-            else{const isConflict=remote&&remote.revision!==expected||error.status===409||/CONFLICT/i.test(error.code||'');const failure=isConflict?conflict(entry):error;if(!isConflict)emit(entry,'error',failure);settle(entry,Infinity,failure);return;}
+            else{
+              if(remote&&remote.revision!==expected){
+                let merged=mergeThree(base,entry.value,remote.value);
+                // If a lost acknowledgement was followed by a remote change,
+                // the remote may already contain the submitted local edits.
+                // Rebase newer input only when that exact intent is present.
+                if(!merged.ok&&entry.sequence>sequence){
+                  const submitted=mergeThree(base,value,remote.value);
+                  if(submitted.ok&&equal(submitted.value,remote.value))merged=mergeThree(value,entry.value,remote.value);
+                }
+                if(merged.ok){
+                  if(byteLength(merged.value)>LIMIT){const failure=new Error('合并后的草稿超过 256 KiB，当前输入仍保留，请缩短后重试。');emit(entry,'error',failure);settle(entry,Infinity,failure);return;}
+                  if(rebases++>=3){const failure=new Error('其他窗口仍在连续修改，自动合并已暂停。本窗口草稿仍保留，请稍后重试。');emit(entry,'error',failure);settle(entry,Infinity,failure);return;}
+                  entry.value=copy(merged.value);entry.base=copy(remote.value);entry.revision=remote.revision;
+                  if(equal(entry.value,remote.value)){entry.dirty=false;settle(entry,Infinity,null);emit(entry,'saved');return;}
+                  emit(entry,'pending');continue;
+                }
+              }
+              const isConflict=remote&&remote.revision!==expected||error.status===409||/CONFLICT/i.test(error.code||'');const failure=isConflict?conflict(entry):error;if(!isConflict)emit(entry,'error',failure);settle(entry,Infinity,failure);return;
+            }
           }
-          entry.revision=record.revision;entry.loaded=true;entry.dirty=entry.sequence>sequence;settle(entry,sequence,null);emit(entry,entry.dirty?'pending':'saved');
+          entry.revision=record.revision;entry.base=copy(record.value);entry.loaded=true;entry.dirty=entry.sequence>sequence;settle(entry,sequence,null);emit(entry,entry.dirty?'pending':'saved');
         }
       }).finally(()=>{entry.running=null;trim();if(entry.dirty&&!entry.error&&!entry.conflict)void run(entry);});
       return entry.running;
@@ -104,7 +146,7 @@ window.PaperLibraryLocalState = (() => {
       subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},status:key=>{const entry=entries.get(key);return entry?{status:entry.status,error:entry.error,dirty:entry.dirty}:{status:'idle',dirty:false};},
       async retry(key){const entry=entryFor(key);if(entry.conflict)throw entry.error;if(entry.error&&!entry.dirty)await load(entry,true);if(entry.dirty)await run(entry);if(entry.error)throw entry.error;return copy(entry.value);},
       // The caller must explicitly choose a reconciled value before invoking this.
-      async reconcile(key,value){const entry=entryFor(key);if(entry.running)await entry.running;const remote=validate(await api('state_get',{key}),key);entry.revision=remote.revision;entry.conflict=false;entry.error=null;entry.loaded=true;return update(key,value,false);},
+      async reconcile(key,value){const entry=entryFor(key);if(entry.running)await entry.running;const remote=validate(await api('state_get',{key}),key);entry.revision=remote.revision;entry.base=copy(remote.value);entry.conflict=false;entry.error=null;entry.loaded=true;return update(key,value,false);},
     };
   }
   return {create,byteLength};

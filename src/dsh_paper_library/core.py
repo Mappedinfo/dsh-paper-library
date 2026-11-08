@@ -659,7 +659,7 @@ def dispatch(request):
         actions = {
             "annotation_translation_result": ("id", "annotation_ref", "request_key", "text", "model"),
             "list": ("query", "limit", "offset", "sort", "order", "archived", "favorite", "tag"), "get": ("id", "include_archived"), "create": ("metadata",), "archive": ("id",), "restore": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page_layout": ("id",), "page": ("id", "page", "scale", "include_layout", "render_width"),
-            "annotations": ("id",), "annotate": ("id", "page", "type", "rects", "paths", "width", "annotation_id", "parent_id", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment", "version"), "annotation_delete": ("id", "annotation_id"),
+            "annotations": ("id",), "annotation_preview": ("id", "annotation_id", "page", "render_width"), "annotate": ("id", "page", "type", "rects", "paths", "width", "annotation_id", "parent_id", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment", "version"), "annotation_delete": ("id", "annotation_id"),
             "linked_handwriting_text": ("id", "parent_id", "transcript", "transcription_source", "expected_version", "request_id"),
             "handwriting_get": ("id", "annotation_id"), "handwriting_save": ("id", "annotation_id", "board", "transcript", "transcription_source", "expected_version", "request_id"),
             "annotation_catalog": ("id", "annotation_id"), "annotation_context_exact": ("id", "annotation_refs", "selection", "max_characters"), "companion_excerpt": ("id", "page"),

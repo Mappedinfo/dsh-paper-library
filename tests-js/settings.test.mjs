@@ -337,7 +337,7 @@ for (const native of [true, false]) test(`workspace palettes persist and reject 
   const f = await fixture(t, { native }), initial = await f.service.get();
   assert.equal(initial.value.ui_palette, 'jade');
   let state = initial;
-  for (const ui_palette of ['navy', 'system', 'jade']) {
+  for (const ui_palette of ['navy', 'neutral', 'rose', 'apricot', 'system', 'jade']) {
     state = await f.service.update({ ui_palette }, state.revision);
     assert.equal((await f.service.get()).value.ui_palette, ui_palette);
   }

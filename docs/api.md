@@ -26,6 +26,7 @@ Core actions:
   `square` 为原生 `/Square` 矩形批注，要求恰好一个页内显示坐标矩形 `rects:[[x0,y0,x1,y1]]`；`width` 为 0.5–8 PDF 点，颜色沿用 `color`。仅描边、无填充，说明可为空；读回返回原生外边界（PDF 引擎可能为描边扩展边界）、颜色与线宽。支持评论编辑、删除、PDF 导出重导入及 XFDF `<square>`；不把框内图像栅格化为批注内容。
 
 - External Ink exceeding the geometry limits remains intact in PDF exports and raster rendering; its bounded projection returns `paths:[],geometry_truncated:true`, and XFDF omits it with a warning. JSON preserves that explicit truncation marker. Such annotations cannot be used as exact references until split in a PDF editor. Ink geometry contributes to the existing 2,000,000-character page/list response budget and has a separate 2,000,000-character exact-reference geometry budget. Reference versions include ink paths, width and color so a changed stroke cannot retain a stale reference version.
+- `annotation_preview {id,annotation_id,page,render_width?}`：只读获取原生 Square 对应区域的 PNG（base64）及显示坐标 `rect,width,height`。后端从指定页的原生批注取矩形，拒绝缺失／重复 ID 和其他类型；宽度默认 480，允许 64–640，像素与字节均有上限。排除页面批注的遮挡，不提取正文、不写回 PDF；旋转与裁剪按页面显示坐标处理。
 - `annotation_update` with `id,annotation_id,comment,version?` → `{annotation,duplicate?}`。`version` 核对 `edit_version`，旧内容不能覆盖其他窗口修改；相同内容重试不重复写 PDF。
 - `annotation_delete` with `id,annotation_id` → `{deleted:true}`
 - `export_annotations` with `id,format='xfdf'|'json'|'markdown'` → `{text,filename,mime}`

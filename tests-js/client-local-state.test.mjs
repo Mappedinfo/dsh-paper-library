@@ -42,3 +42,65 @@ test('parallel drafts share the browser keepalive byte budget without dropping w
  const writes=[a.store.put('chat:a',{draft:'x'.repeat(35000)}),a.store.put('chat:b',{draft:'x'.repeat(35000)})];await both;release();await Promise.all(writes);
  assert.deepEqual(modes,[true,false]);assert.equal(remote.records.size,2);
 });
+
+test('default three-way merge retains independent browser fields and nested changes',async()=>{
+ const remote=server(),a=client(remote),b=client(remote);
+ await a.store.put('preferences',{palette:'neutral',reader:{zoom:100,side:'left'},keep:true});await b.store.get('preferences');
+ await a.store.patch('preferences',{palette:'rose',reader:{zoom:125,side:'left'}});
+ const result=await b.store.patch('preferences',{reader:{zoom:100,side:'right'}});
+ assert.deepEqual(clone(result),{palette:'rose',reader:{zoom:125,side:'right'},keep:true});
+ assert.deepEqual(remote.records.get('preferences').value,clone(result));assert.equal(b.errors.length,0);assert.equal(b.store.exportPending().length,0);
+});
+test('object additions and deletions merge without resurrecting deleted values or treating null as missing',async()=>{
+ const remote=server(),a=client(remote),b=client(remote);
+ await a.store.put('metadata:merge',{title:'Keep',obsolete:'Remove',nested:{old:1,keep:2},nullable:'old'});await b.store.get('metadata:merge');
+ await a.store.put('metadata:merge',{title:'Keep',nested:{keep:2},nullable:'old',remote:'added'});
+ const result=await b.store.put('metadata:merge',{title:'New',obsolete:'Remove',nested:{old:1,keep:2,local:3},nullable:null});
+ assert.deepEqual(clone(result),{title:'New',nested:{keep:2,local:3},nullable:null,remote:'added'});
+});
+test('simultaneous initial records merge independent fields but not divergent text or arrays',async()=>{
+ const remote=server(),a=client(remote),b=client(remote);await Promise.all([a.store.get('reader'),b.store.get('reader')]);
+ await a.store.put('reader',{zoom:120});await b.store.put('reader',{layout:'double'});assert.deepEqual(remote.records.get('reader').value,{zoom:120,layout:'double'});
+ for(const initial of [{text:'initial'},{items:['first']},{group:{value:1}}]){
+  const key=`reader:test${remote.records.size}`,c=client(remote),d=client(remote);await c.store.put(key,initial);await d.store.get(key);
+  const left=initial.text?{text:'left'}:initial.items?{items:['first','left']}:{group:null};
+  const right=initial.text?{text:'right'}:initial.items?{items:['right','first']}:{group:{value:2}};
+  await c.store.put(key,left);await assert.rejects(d.store.put(key,right),/未自动合并/);assert.deepEqual(remote.records.get(key).value,left);assert.deepEqual(clone(d.store.exportPending()[0].value),right);
+ }
+});
+test('delete versus edit is a real conflict, while identical deletion is accepted without another write',async()=>{
+ const remote=server(),a=client(remote),b=client(remote);await a.store.put('metadata:delete',{field:'old',keep:1});await b.store.get('metadata:delete');
+ await a.store.put('metadata:delete',{keep:1});await assert.rejects(b.store.put('metadata:delete',{field:'edited',keep:1}),/未自动合并/);
+ const c=client(remote),d=client(remote);await c.store.put('metadata:identical',{field:'old'});await d.store.get('metadata:identical');
+ await c.store.put('metadata:identical',{});const before=remote.calls.filter(c=>c.action==='state_put').length;await d.store.put('metadata:identical',{});
+ assert.equal(remote.calls.filter(c=>c.action==='state_put').length,before+1);assert.equal(d.store.status('metadata:identical').status,'saved');
+});
+test('new input during conflict readback participates in the merged retry and all waiting callers finish',async()=>{
+ const remote=server();await remote.api('state_put',{key:'metadata:pending',value:{a:0,b:0,c:0},expected_revision:0});
+ let release,entered;const gate=new Promise(r=>release=r),started=new Promise(r=>entered=r);let first=true;
+ const a=client(remote,{api:async(action,args)=>{if(action==='state_put'&&first){first=false;entered();await gate;}return remote.api(action,args);}});await a.store.get('metadata:pending');
+ const pending=a.store.patch('metadata:pending',{a:1});await started;
+ const b=client(remote);await b.store.patch('metadata:pending',{b:2});const later=a.store.patch('metadata:pending',{c:3});release();await Promise.all([pending,later]);
+ assert.deepEqual(remote.records.get('metadata:pending').value,{a:1,b:2,c:3});assert.equal(a.store.status('metadata:pending').status,'saved');
+});
+test('lost acknowledgement plus a later remote edit preserves newer local input from the same send',async()=>{
+ const remote=server();await remote.api('state_put',{key:'reader:lost',value:{a:0,b:0},expected_revision:0});
+ let release,entered;const gate=new Promise(r=>release=r),started=new Promise(r=>entered=r);let first=true;
+ const a=client(remote,{api:async(action,args)=>{const result=await remote.api(action,args);if(action==='state_put'&&first){first=false;entered();await gate;throw Error('Lost reply');}return result;}});await a.store.get('reader:lost');
+ const pending=a.store.patch('reader:lost',{a:1});await started;
+ const b=client(remote);await b.store.patch('reader:lost',{b:2});const later=a.store.patch('reader:lost',{a:3});release();await Promise.all([pending,later]);
+ assert.deepEqual(remote.records.get('reader:lost').value,{a:3,b:2});assert.equal(a.errors.length,0);
+});
+test('repeated concurrent revisions stop after a bounded retry budget and remain explicitly retryable',async()=>{
+ const remote=server();await remote.api('state_put',{key:'reader:busy',value:{a:0,remote:0},expected_revision:0});let busy=true,count=0;
+ const a=client(remote,{api:async(action,args)=>{if(action==='state_put'&&busy){const old=remote.records.get(args.key);await remote.api('state_put',{key:args.key,value:{...old.value,remote:++count},expected_revision:old.revision});}return remote.api(action,args);}});await a.store.get('reader:busy');
+ await assert.rejects(a.store.patch('reader:busy',{a:1}),/自动合并已暂停/);assert.equal(count,4);assert.equal(a.store.status('reader:busy').dirty,true);assert.equal(a.store.exportPending()[0].value.a,1);
+ busy=false;await a.store.retry('reader:busy');assert.deepEqual(remote.records.get('reader:busy').value,{a:1,remote:4});assert.equal(a.store.status('reader:busy').status,'saved');
+});
+test('merged records still obey the byte budget and special JSON keys cannot change prototypes',async()=>{
+ const remote=server(),a=client(remote),b=client(remote);await a.store.put('metadata:large-merge',{});await b.store.get('metadata:large-merge');
+ await a.store.put('metadata:large-merge',{remote:'r'.repeat(140000)});await assert.rejects(b.store.put('metadata:large-merge',{local:'l'.repeat(140000)}),/256 KiB/);
+ assert.equal(remote.records.get('metadata:large-merge').value.local,undefined);assert.equal(b.store.exportPending()[0].value.local.length,140000);
+ const c=client(remote),d=client(remote);await c.store.put('reader:keys',{});await d.store.get('reader:keys');await c.store.put('reader:keys',JSON.parse('{"__proto__":{"injected":true}}'));await d.store.put('reader:keys',{local:true});
+ const value=remote.records.get('reader:keys').value;assert.equal(Object.hasOwn(value,'__proto__'),true);assert.deepEqual(value.__proto__,{injected:true});assert.equal({}.injected,undefined);assert.equal(value.local,true);
+});

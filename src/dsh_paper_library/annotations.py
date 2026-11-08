@@ -477,6 +477,41 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             link = link.next
         return links, link is not None
 
+    def annotation_preview(self, id, annotation_id, page, render_width=480):
+        """只读渲染单个原生矩形内的正文；不提词、不改 PDF、不包含遮挡批注。"""
+        import pymupdf as fitz
+        if not isinstance(annotation_id, str) or not 1 <= len(annotation_id) <= 160:
+            raise ValueError("Invalid annotation identifier")
+        if isinstance(render_width, bool) or not isinstance(render_width, (int, float)) or not math.isfinite(render_width) or not 64 <= render_width <= 640:
+            raise ValueError("Preview width must be between 64 and 640 pixels")
+        with self._open_pdf(self.pdf_path(id)) as doc:
+            current = self._page(doc, page)
+            found = []
+            for count, annot in enumerate(current.annots() or []):
+                if count >= _constants().MAX_ANNOTATIONS:
+                    raise ValueError("Preview exceeds the bounded page annotation scan")
+                if (annot.info.get("id") or f"external-{page}-{annot.xref}") == annotation_id:
+                    if annot.type[0] != fitz.PDF_ANNOT_SQUARE:
+                        raise ValueError("Only rectangle annotations have a region preview")
+                    found.append(fitz.Rect(annot.rect) * current.rotation_matrix)
+            if len(found) != 1:
+                raise ValueError("Rectangle annotation missing or ambiguous; refresh annotations")
+            rect = found[0] & current.rect
+            if rect.is_empty or rect.is_infinite:
+                raise ValueError("Rectangle lies outside the PDF page")
+            scale = min(render_width / rect.width, 4, 640 / max(rect.width, rect.height), math.sqrt(300000 / (rect.width * rect.height)))
+            for attempt in range(4):
+                pix = current.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=rect, colorspace=fitz.csRGB, alpha=False, annots=False)
+                if pix.width * pix.height > 303000 or max(pix.width, pix.height) > 642:
+                    raise ValueError("Region preview exceeds the pixel budget")
+                image = pix.tobytes("png")
+                if len(image) <= 1024 * 1024:
+                    break
+                scale *= .65
+            else:
+                raise ValueError("Region preview exceeds the image byte budget")
+            return {"annotation_id": annotation_id, "page": int(page), "rect": list(rect), "width": pix.width, "height": pix.height, "mime_type": "image/png", "image": base64.b64encode(image).decode("ascii")}
+
     def page(self, id, page=1, scale=1.25, include_layout=False, render_width=None):
         import pymupdf as fitz
         if not isinstance(include_layout, bool):

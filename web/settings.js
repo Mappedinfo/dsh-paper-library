@@ -19,7 +19,7 @@ window.PaperLibrarySettings = (() => {
     const controls=make('fieldset'),legend=make('legend','','阅读与自动化');controls.append(legend);
     const paletteControls=make('fieldset','settings-palettes'),paletteLegend=make('legend','','界面配色');paletteControls.append(paletteLegend);
     const paletteInputs=new Map();
-    for(const [value,label,help] of [['jade','墨绿铜金','温暖纸面 · 墨绿操作'],['navy','深海蓝灰','清亮白底 · 海蓝操作'],['system','跟随 DSH','沿用宿主配色']]){
+    for(const [value,label,help] of [['jade','墨绿铜金','温暖纸面 · 墨绿操作'],['navy','深海蓝灰','清亮白底 · 海蓝操作'],['neutral','石墨中性','中性灰阶 · 专业克制'],['rose','樱粉柔光','柔粉纸面 · 玫瑰操作'],['apricot','杏橙暖光','奶杏纸面 · 暖橙操作'],['system','跟随 DSH','沿用宿主配色']]){
       const row=make('label','settings-palette'),input=make('input'),swatches=make('span','palette-swatches'),copy=make('span');
       row.setAttribute('data-palette-option',value);input.type='radio';input.name='paper-library-palette';input.value=value;input.id=`setting-palette-${value}`;swatches.setAttribute('aria-hidden','true');
       copy.append(make('strong','',label),make('small','',help));row.append(input,swatches,copy);paletteControls.append(row);paletteInputs.set(value,{input,row});input.addEventListener('change',()=>{if(input.checked)void save({ui_palette:value});});

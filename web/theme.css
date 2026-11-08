@@ -254,8 +254,8 @@ dialog blockquote { background: var(--dsw-alias-interactive-bg-hover); border-co
 .reader-mode{border-right-color:var(--dsw-alias-border-l2,#dfe1d6)}
 .reader-mode[data-mode=auto] .button#reader-mode-auto,.reader-mode[data-mode=ask] .button#reader-mode-ask{color:var(--ink);background:var(--dsw-alias-interactive-bg-active);outline-color:var(--dsw-alias-border-l2)}
 
-/* 两套可选工作台配色；只覆盖界面语义，不触碰 PDF 像素或批注颜色。 */
-:root[data-palette="jade"], :root[data-palette="navy"] {
+/* 可选工作台配色；只覆盖界面语义，不触碰 PDF 像素或批注颜色。 */
+:root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) {
   --pl-reading: light-dark(#245c49, #8dceb0);
   --pl-knowledge: light-dark(#695187, #c4afe3);
   --pl-writing: light-dark(#285a80, #9bc4e5);
@@ -301,17 +301,58 @@ dialog blockquote { background: var(--dsw-alias-interactive-bg-hover); border-co
   --dsw-alias-border-l2: light-dark(#d6e0eb, #3e5062) !important;
   --dsw-alias-border-l4: light-dark(#a4b8cc, #7896b0) !important;
 }
-:root:is([data-palette="jade"],[data-palette="navy"]) .topbar { border-top:3px solid var(--pl-primary); }
-:root:is([data-palette="jade"],[data-palette="navy"]) .brand { color:var(--pl-primary); letter-spacing:.02em; }
-:root:is([data-palette="jade"],[data-palette="navy"]) :is([data-kind="paper"],[data-tab="reader"],[data-tab="annotations"],#import-open) { --pl-role:var(--pl-reading); --pl-role-soft:var(--pl-reading-soft); }
-:root:is([data-palette="jade"],[data-palette="navy"]) :is([data-kind="board"],[data-kind="project"],[data-tab="graph"],[data-tab="conversation"],#board-open) { --pl-role:var(--pl-knowledge); --pl-role-soft:var(--pl-knowledge-soft); }
-:root:is([data-palette="jade"],[data-palette="navy"]) :is([data-kind="latex"],#latex-open) { --pl-role:var(--pl-writing); --pl-role-soft:var(--pl-writing-soft); }
-:root:is([data-palette="jade"],[data-palette="navy"]) #slides-open { --pl-role:var(--pl-slides); --pl-role-soft:var(--pl-slides-soft); }
-:root:is([data-palette="jade"],[data-palette="navy"]) :is(.workspace-root-button,#board-open,#latex-open,#slides-open) { color:var(--pl-role); border:1px solid color-mix(in srgb,var(--pl-role) 24%,transparent); background:var(--pl-role-soft); font-weight:600; }
-:root:is([data-palette="jade"],[data-palette="navy"]) :is(.workspace-root-button,#board-open,#latex-open,#slides-open)[aria-pressed="true"] { color:var(--dsw-alias-label-primary-foreground); background:var(--pl-role); border-color:var(--pl-role); box-shadow:inset 0 -2px rgb(0 0 0 / .15); }
-:root:is([data-palette="jade"],[data-palette="navy"]) .tabs .tab { color:var(--pl-role,var(--muted)); }
-:root:is([data-palette="jade"],[data-palette="navy"]) .tabs .tab.active { background:var(--pl-role-soft,var(--pl-active)); border-color:var(--pl-role,var(--pl-primary)); box-shadow:inset 0 -2px var(--pl-role,var(--pl-primary)); font-weight:600; }
-:root:is([data-palette="jade"],[data-palette="navy"]) .paper-card.selected { box-shadow:inset 3px 0 var(--pl-reading); }
-:root:is([data-palette="jade"],[data-palette="navy"]) #import-open { background:var(--pl-reading); }
+
+/* 界面底色与主操作随主题变化；阅读、知识、写作、演示继续使用固定功能色。 */
+:root[data-palette="neutral"] {
+  --pl-primary: light-dark(#414953, #c2cbd6);
+  --pl-primary-hover: light-dark(#2d343d, #e0e5ec);
+  --pl-active: light-dark(#e9edf1, #343c46);
+  --pl-base: light-dark(#f7f8fa, #181b20);
+  --pl-surface: light-dark(#ffffff, #23282f);
+  --dsw-alias-label-primary: light-dark(#20252c, #edf0f4) !important;
+  --dsw-alias-label-secondary: light-dark(#565f6b, #bac3ce) !important;
+  --dsw-alias-label-tertiary: light-dark(#646e7a, #a7b1bd) !important;
+  --dsw-alias-label-primary-foreground: light-dark(#ffffff, #20252c) !important;
+  --dsw-alias-border-l2: light-dark(#d8dde3, #424c58) !important;
+  --dsw-alias-border-l4: light-dark(#a9b2bd, #7d8b9c) !important;
+}
+:root[data-palette="rose"] {
+  --pl-primary: light-dark(#9b3d67, #edb7cf);
+  --pl-primary-hover: light-dark(#7b2b50, #f8d2e2);
+  --pl-active: light-dark(#f7e6ee, #49313e);
+  --pl-base: light-dark(#fff8fb, #211b22);
+  --pl-surface: light-dark(#fffdfd, #30252e);
+  --dsw-alias-label-primary: light-dark(#392633, #f7edf3) !important;
+  --dsw-alias-label-secondary: light-dark(#74586a, #d7bdce) !important;
+  --dsw-alias-label-tertiary: light-dark(#806477, #bca3b3) !important;
+  --dsw-alias-label-primary-foreground: light-dark(#ffffff, #35212b) !important;
+  --dsw-alias-border-l2: light-dark(#ead4df, #5c4353) !important;
+  --dsw-alias-border-l4: light-dark(#c09aaa, #ad8297) !important;
+}
+:root[data-palette="apricot"] {
+  --pl-primary: light-dark(#9a4b22, #f1c09a);
+  --pl-primary-hover: light-dark(#783716, #ffdab9);
+  --pl-active: light-dark(#fae8d8, #49362c);
+  --pl-base: light-dark(#fff9f2, #241e1a);
+  --pl-surface: light-dark(#fffdf9, #312821);
+  --dsw-alias-label-primary: light-dark(#3b2a20, #f7eee5) !important;
+  --dsw-alias-label-secondary: light-dark(#755e4e, #d6c2b1) !important;
+  --dsw-alias-label-tertiary: light-dark(#806b5a, #bfa995) !important;
+  --dsw-alias-label-primary-foreground: light-dark(#ffffff, #35251c) !important;
+  --dsw-alias-border-l2: light-dark(#ebd8c7, #5d493b) !important;
+  --dsw-alias-border-l4: light-dark(#c5a88f, #ac896c) !important;
+}
+:root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) .topbar { border-top:3px solid var(--pl-primary); }
+:root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) .brand { color:var(--pl-primary); letter-spacing:.02em; }
+:root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) :is([data-kind="paper"],[data-tab="reader"],[data-tab="annotations"],#import-open) { --pl-role:var(--pl-reading); --pl-role-soft:var(--pl-reading-soft); }
+:root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) :is([data-kind="board"],[data-kind="project"],[data-tab="graph"],[data-tab="conversation"],#board-open) { --pl-role:var(--pl-knowledge); --pl-role-soft:var(--pl-knowledge-soft); }
+:root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) :is([data-kind="latex"],#latex-open) { --pl-role:var(--pl-writing); --pl-role-soft:var(--pl-writing-soft); }
+:root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) #slides-open { --pl-role:var(--pl-slides); --pl-role-soft:var(--pl-slides-soft); }
+:root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) :is(.workspace-root-button,#board-open,#latex-open,#slides-open) { color:var(--pl-role); border:1px solid color-mix(in srgb,var(--pl-role) 24%,transparent); background:var(--pl-role-soft); font-weight:600; }
+:root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) :is(.workspace-root-button,#board-open,#latex-open,#slides-open)[aria-pressed="true"] { color:var(--dsw-alias-label-primary-foreground); background:var(--pl-role); border-color:var(--pl-role); box-shadow:inset 0 -2px rgb(0 0 0 / .15); }
+:root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) .tabs .tab { color:var(--pl-role,var(--muted)); }
+:root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) .tabs .tab.active { background:var(--pl-role-soft,var(--pl-active)); border-color:var(--pl-role,var(--pl-primary)); box-shadow:inset 0 -2px var(--pl-role,var(--pl-primary)); font-weight:600; }
+:root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) .paper-card.selected { box-shadow:inset 3px 0 var(--pl-reading); }
+:root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) #import-open { background:var(--pl-reading); }
 
 .annotation-meta .annotation-translate { margin-left:auto; font-size:inherit; padding:3px 7px; min-height:26px; white-space:nowrap; }

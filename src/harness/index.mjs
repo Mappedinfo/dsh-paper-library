@@ -44,7 +44,7 @@ export const Config = Schema.object({
   auto_review: Schema.boolean().default(true).description('整理完成后生成证据图谱评审草稿（待审）。').volatile(),
   'auto-paper-conversation': Schema.boolean().default(false).description('实时伴学：保存批注后自动回复。').volatile(),
   'reading-panel-side': Schema.union([Schema.const('left'), Schema.const('right')]).default('left').description('阅读侧栏位置（left 左侧 / right 右侧）。').volatile(),
-  ui_palette: Schema.union([Schema.const('jade'), Schema.const('navy'), Schema.const('system')]).default('jade').description('Paper Library 配色：jade 墨绿铜金 / navy 深海蓝灰 / system 跟随 DSH；明暗模式继续跟随宿主。').volatile(),
+  ui_palette: Schema.union([Schema.const('jade'), Schema.const('navy'), Schema.const('neutral'), Schema.const('rose'), Schema.const('apricot'), Schema.const('system')]).default('jade').description('Paper Library 配色：jade 墨绿铜金 / navy 深海蓝灰 / neutral 石墨中性 / rose 樱粉柔光 / apricot 杏橙暖光 / system 跟随 DSH；明暗模式继续跟随宿主。').volatile(),
   sync_config: Schema.string().default('').description('数据同步服务配置文件（绝对路径，留空不启用）。').volatile(),
   external_sources: Schema.string().default('').description('额外外部文献源（JSON 数组文本，留空不启用）。').volatile(),
   latex_starter: Schema.boolean().default(true).description('新建 LaTeX 文件夹时生成 starter 文件。').volatile(),

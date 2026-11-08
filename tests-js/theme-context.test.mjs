@@ -175,3 +175,27 @@ test('host and browser share the exact presentation allowlist', () => {
   assert.deepEqual(Array.from(f.api.tokens), THEME_TOKENS)
   assert.equal(new Set(THEME_TOKENS).size, THEME_TOKENS.length)
 })
+
+test('all workspace palettes switch without changing host light/dark mode; unknown palettes are ignored', () => {
+  const f = child(); f.send(packet({}, 'dark'));
+  for (const palette of ['neutral', 'rose', 'apricot', 'navy', 'jade', 'system']) {
+    f.api.setPalette(palette); assert.equal(f.root.dataset.palette, palette); assert.equal(f.root.dataset.theme, 'dark');
+  }
+  f.api.setPalette('url(unsafe)'); assert.equal(f.root.dataset.palette, 'system');
+});
+
+test('new palette text and primary actions remain readable in both light and dark modes', async () => {
+  const css=readFileSync(new URL('../web/theme.css', import.meta.url),'utf8');
+  const luminance=hex=>{const values=hex.slice(1).match(/../g).map(n=>parseInt(n,16)/255).map(n=>n<=.04045?n/12.92:((n+.055)/1.055)**2.4);return values[0]*.2126+values[1]*.7152+values[2]*.0722;};
+  const contrast=(a,b)=>{const x=luminance(a),y=luminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
+  for(const palette of ['neutral','rose','apricot']) {
+    const block=css.match(new RegExp(`:root\\[data-palette="${palette}"\\] \\{([^}]+)\\}`))[1];
+    const tokens=Object.fromEntries([...block.matchAll(/(--[\w-]+): light-dark\((#[a-f0-9]{6}), (#[a-f0-9]{6})\)/g)].map(([,key,light,dark])=>[key,[light,dark]]));
+    for(const mode of [0,1]) {
+      for(const background of ['--pl-base','--pl-surface'])for(const text of ['--dsw-alias-label-primary','--dsw-alias-label-secondary','--dsw-alias-label-tertiary']) {
+        assert.ok(contrast(tokens[background][mode],tokens[text][mode])>=4.5,`${palette} ${mode} ${text} on ${background}`);
+      }
+      assert.ok(contrast(tokens['--pl-primary'][mode],tokens['--dsw-alias-label-primary-foreground'][mode])>=4.5,`${palette} ${mode} primary button`);
+    }
+  }
+});

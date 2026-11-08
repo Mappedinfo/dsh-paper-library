@@ -86,7 +86,7 @@
   }
 
   const setPalette = value => {
-    if (['jade', 'navy', 'system'].includes(value)) window.document.documentElement.dataset.palette = value
+    if (['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].includes(value)) window.document.documentElement.dataset.palette = value
   }
   setPalette('jade')
   window.PaperLibraryTheme = { create, tokens: TOKENS, instance: create(), setPalette }

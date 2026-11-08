@@ -2,6 +2,7 @@
 // 每条原生 PDF 批注独立编辑；草稿先存本地服务，保存成功后再清除。
 window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,refresh,changed,toast}) {
   const papers=new Map(), delay=650;
+  const previews=window.PaperAnnotationPreviews?.create({api,getPaper});
   // 仅窗口标识放在 sessionStorage；草稿正文仍保存到本地服务。
   // 不同窗口编辑同篇论文时，不争抢一个整篇草稿记录。
   let client=crypto.randomUUID();
@@ -127,6 +128,7 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
       if(r.note.text)card.append(node('blockquote','annotation-quote',r.note.text));
       card.append(node('div','annotation-actions'));mount(card,r);list.prepend(card);
     }
+    previews?.decorate(getNotes());
   }
   async function ready(id) {
     try{await load(id);if(getPaper()?.id===id)decorate();}catch(error){toast(`批注草稿暂未恢复：${error.message}`,true);}
@@ -155,4 +157,46 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
   window.addEventListener('beforeunload',event=>{if(pending().length){event.preventDefault();event.returnValue='';}});
   async function restoreDraft(id,note,comment){await load(id);const r=row(id,note);if(!dirty(r)){r.comment=comment;if(r.ui)r.ui.input.value=comment;await checkpoint(r.paper);}focus(id,note.id);}
   return {create,decorate,ready,focus,beforeAsk,beforeRender,discard,pending,restoreDraft};
+}};
+
+// 矩形卡片只在进入视野后读取单个区域，最多并发两张，内存保留 16 张。
+window.PaperAnnotationPreviews={create({api,getPaper}){
+  const cache=new Map(),pending=new Map();let active=0,queue=[];
+  const observer=typeof IntersectionObserver==='function'?new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){observer.unobserve(entry.target);entry.target.loadPreview?.();}},{rootMargin:'120px'}):null;
+  function pump(){
+    queue=queue.filter(job=>{if(job.targets.some(target=>target.isConnected))return true;pending.delete(job.key);return false;});
+    while(active<2&&queue.length){const job=queue.shift();active++;
+      void api('annotation_preview',{id:job.paperId,page:job.note.page,annotation_id:job.note.id,render_width:480}).then(result=>{
+        if(result?.annotation_id!==job.note.id||result.page!==job.note.page||typeof result.image!=='string'||result.image.length>1400000||result.mime_type!=='image/png')throw Error('区域预览返回无效，请重试。');
+        cache.delete(job.key);cache.set(job.key,{result,time:Date.now()});while(cache.size>16)cache.delete(cache.keys().next().value);
+        for(const target of job.targets)if(target.isConnected&&getPaper()?.id===job.paperId)display(target,result);
+      }).catch(error=>{for(const target of job.targets)if(target.isConnected&&getPaper()?.id===job.paperId){target.querySelector('.annotation-preview-status').textContent=`截图未加载：${error.message}`;target.querySelector('.annotation-preview-retry').hidden=false;}}).finally(()=>{pending.delete(job.key);active--;pump();});
+    }
+  }
+  function display(box,result){
+    const image=document.createElement('img');image.alt=`第 ${result.page} 页矩形框内的 PDF 内容`;image.width=result.width;image.height=result.height;image.decoding='async';image.src=`data:image/png;base64,${result.image}`;
+    box.querySelector('.annotation-preview-open').replaceChildren(image);box.querySelector('.annotation-preview-status').textContent='';box.querySelector('.annotation-preview-retry').hidden=true;
+  }
+  function decorate(notes){
+    observer?.disconnect();const paperId=getPaper()?.id;if(!paperId)return;
+    for(const card of document.querySelectorAll('#annotation-list > .annotation-card')){
+      const note=notes.find(n=>n.id===card.dataset.annotationId);if(note?.type!=='square'||card.querySelector('.annotation-region-preview'))continue;
+      const box=document.createElement('div');box.className='annotation-region-preview';
+      const button=document.createElement('button');button.type='button';button.className='annotation-preview-open';button.dataset.noteAction='page';button.title='点击截图定位 PDF 中的矩形框';button.setAttribute('aria-label',`定位第 ${note.page} 页矩形框`);button.textContent='矩形区域预览';
+      const status=document.createElement('span');status.className='annotation-preview-status small muted';status.setAttribute('role','status');status.textContent='等待加载截图…';
+      const retry=document.createElement('button');retry.type='button';retry.className='button subtle annotation-preview-retry';retry.textContent='重试截图';retry.hidden=true;
+      box.append(button,status,retry);card.querySelector('.annotation-meta')?.after(box);
+      const key=JSON.stringify([paperId,note.id,note.version||note.edit_version,note.rects||note.rect]);
+      box.loadPreview=()=>{
+        if(!box.isConnected||getPaper()?.id!==paperId)return;
+        const saved=cache.get(key);if(saved&&Date.now()-saved.time<60000){display(box,saved.result);return;}
+        status.textContent='正在读取矩形截图…';retry.hidden=true;
+        if(pending.has(key)){const targets=pending.get(key).targets;if(!targets.includes(box))targets.push(box);return;}
+        const job={key,paperId,note,targets:[box]};pending.set(key,job);queue.push(job);pump();
+      };
+      retry.addEventListener('click',event=>{event.stopPropagation();box.loadPreview();});
+    }
+    for(const box of document.querySelectorAll('#annotation-list .annotation-region-preview'))if(!box.querySelector('img')){if(observer)observer.observe(box);else box.loadPreview?.();}
+  }
+  return {decorate};
 }};

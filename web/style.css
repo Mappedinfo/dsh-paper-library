@@ -2307,3 +2307,8 @@ dialog .small {
 .annotation-inline-status { flex-wrap: wrap; }
 .annotation-conflict { padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
 .annotation-conflict p { max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.annotation-region-preview { margin: 10px 0; }
+.annotation-preview-open { display: block; width: 100%; padding: 0; border: 1px solid var(--border); background: white; color: #303640; border-radius: 4px; overflow: hidden; cursor: pointer; }
+.annotation-preview-open img { display: block; width: 100%; height: auto; object-fit: contain; }
+.annotation-preview-status { display: block; overflow-wrap: anywhere; }

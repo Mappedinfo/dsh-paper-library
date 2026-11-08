@@ -53,7 +53,7 @@ export function createPaperLibrarySettingsSchema(Schema) {
     auto_review: Schema.boolean().default(true),
     'auto-paper-conversation': Schema.boolean().default(false),
     'reading-panel-side': Schema.union([Schema.const('left'), Schema.const('right')]).default('left'),
-    ui_palette: Schema.union([Schema.const('jade'), Schema.const('navy'), Schema.const('system')]).default('jade'),
+    ui_palette: Schema.union([Schema.const('jade'), Schema.const('navy'), Schema.const('neutral'), Schema.const('rose'), Schema.const('apricot'), Schema.const('system')]).default('jade'),
     sync_config: Schema.string().default(''),
     external_sources: Schema.string().default(''),
     latex_starter: Schema.boolean().default(true),
@@ -74,7 +74,7 @@ function validatePatch(patch) {
     if (key === 'reading-panel-side') {
       if (!['left', 'right'].includes(value)) throw invalid('设置值无效：reading-panel-side');
     } else if (key === 'ui_palette') {
-      if (!['jade', 'navy', 'system'].includes(value)) throw invalid('设置值无效：ui_palette');
+      if (!['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].includes(value)) throw invalid('设置值无效：ui_palette');
     } else if (key === 'latex_engine') {
       if (!['xelatex', 'pdflatex', 'lualatex'].includes(value)) throw invalid('设置值无效：latex_engine');
     } else if (key === 'latex_theme') {

@@ -162,3 +162,11 @@ test('direct analysis keeps unconfirmed jobs polling, blocks reruns without show
   assert.equal(get('analysis-cancel').hidden, true);
   analysis.dispose();
 });
+
+for(const palette of ['neutral','rose','apricot'])test(`${palette} palette saves through the shared settings endpoint and stays selected`,async()=>{
+  let current=view(1,{ui_palette:'jade'});
+  const f=fixture({api:(action,args)=>action==='settings_update'?(current=view(2,args.patch)):current});
+  await f.ui.refresh();const input=f.ids.get(`setting-palette-${palette}`);assert.ok(input);input.checked=true;input.emit('change');await flush();
+  const request=f.calls.find(call=>call.action==='settings_update');assert.equal(request.args.patch.ui_palette,palette);assert.equal(input.checked,true);
+  assert.equal(f.changes.at(-1).value.ui_palette,palette);f.ui.dispose();
+});
