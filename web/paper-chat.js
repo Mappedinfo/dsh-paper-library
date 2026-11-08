@@ -272,7 +272,7 @@ window.PaperLibraryChat = {
     }
     async function send(automatic = false, explicitArgs = null) {
       if (chat.busy) {
-        if (automatic) toast('批注已保存，尚未发送。上一条消息正在提交；请稍后点击「加入本次引用」后发送。', true);
+        if (automatic) toast('批注已保存，尚未发送。上一条消息正在提交；请稍后点击「选作提问材料」后发送。', true);
         return;
       }
       if (!chat.available || !chat.paperId) return;
@@ -343,13 +343,13 @@ window.PaperLibraryChat = {
     }
     async function useNote(note) {
       if (!isUserNote(note)) return;
-      if (chat.notes.some(ref => ref.id === note.id)) { removeReference(note.id); toast('已从本次引用移除'); return; }
+      if (chat.notes.some(ref => ref.id === note.id)) { removeReference(note.id); toast('已移出提问材料'); return; }
       const id = chat.paperId, ticket = chat.ticket;
       try {
-        const notes = await catalog(); const current = notes.find(value => value.id === note.id);
+        const notes = await catalog(true); const current = notes.find(value => value.id === note.id);
         if (!isCurrent(id, ticket)) return;
         if (!current) throw new Error('当前引用目录未找到这条批注，请刷新批注后重试。');
-        if (setReferences([current])) toast(`已加入本次引用 · 共 ${chat.notes.length} 条`);
+        if (setReferences([current])) toast(`已选作提问材料 · 共 ${chat.notes.length} 条，尚未发送`);
       } catch (error) { toast(error.message, true); }
     }
     const prompts=document.createElement('div');prompts.className='paper-chat-suggestions';prompts.setAttribute('aria-label','常见论文问题');

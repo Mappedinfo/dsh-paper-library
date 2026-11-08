@@ -188,7 +188,7 @@ test('a second saved note during an automatic send reports it was not sent and p
   assert.equal(fixture.requests.filter(request => request.action === 'chat_send').length, 1);
   assert.deepEqual(fixture.requests.find(request => request.action === 'chat_context').annotation_refs, [{ id: 'saved-note-1', version: 'version-saved-note-1' }]);
   assert.match(fixture.toasts.at(-1).text, /批注已保存，尚未发送/);
-  assert.match(fixture.toasts.at(-1).text, /加入本次引用/);
+  assert.match(fixture.toasts.at(-1).text, /选作提问材料/);
   assert.equal(fixture.chat.draft(), 'Keep my unsent question about A.');
   assert.deepEqual(plain(fixture.chat.context()), { annotationRefs: [{ id: 'draft-context', version: 'version-draft-context' }] });
   // Completing A's outstanding send after navigating must not touch B or flush
@@ -459,4 +459,20 @@ test('history reference previews load on demand and page links return to the sou
   await sourceLink.dispatch('click'); assert.deepEqual(fixture.navigations, [{ id: 'paper-a', page: 3 }]);
   await button.dispatch('click');
   assert.equal(fixture.all(fixture.element('paper-chat-messages')).some(node => node.textContent.includes('exact saved content')), false, 'collapsing releases the full snapshot body');
+});
+
+
+test('explicit material selection refreshes a stale catalog and never sends a question', async t => {
+  const notes = [{ id: 'existing', version: 'v1' }];
+  const fixture = environment({ notes });
+  t.after(() => fixture.chat.dispose());
+  await fixture.open('paper-a');
+  notes.push({ id: 'newly-saved', version: 'v2' });
+  await fixture.chat.useAnnotation({ id: 'newly-saved' });
+  assert.deepEqual(plain(fixture.chat.context()), { annotationRefs: [{ id: 'newly-saved', version: 'v2' }] });
+  assert.equal(fixture.requests.filter(request => request.action === 'chat_catalog').length, 2);
+  assert.equal(fixture.requests.filter(request => request.action === 'chat_send').length, 0);
+  assert.match(fixture.toasts.at(-1).text, /尚未发送/);
+  await fixture.chat.useAnnotation({ id: 'newly-saved' });
+  assert.deepEqual(plain(fixture.chat.context()).annotationRefs, []);
 });

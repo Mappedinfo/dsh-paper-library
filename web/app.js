@@ -491,9 +491,9 @@ function renderAnnotations() {
     if (note.comment || note.content) card.append(el('p', 'annotation-comment', note.comment || note.content));
     if (note.handwriting) { const handwritten = el('div', 'annotation-handwriting'); handwritten.append(el('p', 'small muted', note.handwriting.transcription_source === 'model' ? '手写便签 · AI 识别待校对' : '手写便签 · 原笔迹已保留')); if (note.handwriting.transcript) handwritten.append(el('p', '', note.handwriting.transcript)); card.append(handwritten); }
     linkedHandwritingUI?.decorate(card,note);
-    const actions = el('div', 'annotation-actions'); const edit = el('button', 'button subtle', '编辑'); edit.dataset.noteAction = 'edit'; const remove = el('button', 'button subtle delete-note', '删除'); remove.dataset.noteAction = 'delete'; actions.append(edit, remove);
+    const actions = el('div', 'annotation-actions'); const edit = el('button', 'button subtle', '编辑'); edit.dataset.noteAction = 'edit'; const remove = el('button', 'button subtle delete-note', '删除'); remove.dataset.noteAction = 'delete'; const copy = el('button', 'button subtle', '复制原文'); copy.type = 'button'; copy.dataset.noteAction = 'copy-source'; copy.disabled = typeof note.text !== 'string' || !note.text.trim(); copy.title = copy.disabled ? '这条批注没有选中的 PDF 原文' : '仅复制选中的 PDF 原文，不包含评论或 AI 回复'; actions.append(edit, remove, copy);
     if (note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const handwriting = el('button', 'button subtle', '手写'); handwriting.dataset.noteAction = 'handwriting'; const primary=el('div','annotation-primary-actions');primary.append(handwriting,edit);actions.prepend(primary); if(note.handwriting){const legacy=el('button','button subtle','打开原便签');legacy.dataset.noteAction='handwriting-legacy';actions.append(legacy);} }
-    if (paperChatUI?.available() && note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const discuss = el('button', 'button subtle', paperChatUI.hasAnnotation(note.id) ? '移出本次引用' : '加入本次引用'); discuss.dataset.noteAction = 'discuss'; actions.append(discuss); }
+    if (paperChatUI?.available() && note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const selected = paperChatUI.hasAnnotation(note.id); const discuss = el('button', 'button subtle', selected ? '移出提问材料' : '选作提问材料'); discuss.dataset.noteAction = 'discuss'; discuss.title = '可多选批注作为提问材料，再到对话框统一发送；此按钮不会发送消息'; discuss.setAttribute('aria-pressed', String(selected)); actions.append(discuss); }
     const phrase=(note.text||note.comment||note.content||'').trim();if(phrase&&phrase.length<=200){const entry=el('button','button subtle','词条');entry.type='button';entry.title='匹配百科词条或创建带来源的词条';entry.addEventListener('click',()=>wikiUI.show('encyclopedia',phrase,{paper_id:state.active.id,title:state.active.title,page:note.page,annotation_id:note.id,quote:phrase}));actions.append(entry);}
     card.append(actions);for(const reply of replies.get(note.id)||[])card.append(replyCard(reply)); fragment.append(card);
   }
@@ -674,6 +674,7 @@ async function handleNoteAction(event) {
   const action = button.dataset.noteAction;
   if (action === 'previous' || action === 'next') { state.noteOffset += action === 'next' ? 40 : -40; renderAnnotations(); return; }
   const note = state.annotations.find((entry) => entry.id === button.closest('[data-annotation-id]').dataset.annotationId); if (!note) return;
+  if (action === 'copy-source') { if (typeof note.text === 'string' && note.text.trim()) await copyText(note.text, { label: '批注原文' }); return; }
   if (action === 'discuss') { await paperChatUI?.useAnnotation(note); if (state.active?.id) renderAnnotations(); return; }
   if (action === 'page') { await switchTab('reader'); await pdfReader?.revealAnnotation(note.id,{page:note.page});return; }
   if (action === 'linked-ink') { await linkedHandwritingUI?.reveal(note,button.dataset.regionId);return; }
@@ -919,18 +920,21 @@ function safeCitationHtml(html, plain) {
   }
   return [...doc.body.childNodes].map(clean).join('');
 }
+async function copyText(text, { label = '文本', html } = {}) {
+  try {
+    if (html !== undefined && navigator.clipboard?.write && window.ClipboardItem) await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([text], { type: 'text/plain' }), 'text/html': new Blob([safeCitationHtml(html, text)], { type: 'text/html' }) })]);
+    else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+    else throw new Error('clipboard unavailable');
+    toast(`${label}已复制`);
+  } catch { $('copy-fallback').value = text; $('text-dialog-title').textContent = label; openDialog('text-dialog'); $('copy-fallback').select(); }
+}
 async function cite(format) {
   if (!state.active) return;
   const button = format === 'apa' ? $('copy-apa') : $('export-bib'); button.disabled = true;
   try {
     const result = await api('cite', { ids: [state.active.id], format });
     if (format !== 'apa') { downloadText(result); toast('BibLaTeX 已导出'); return; }
-    try {
-      if (navigator.clipboard?.write && window.ClipboardItem) await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([result.text], { type: 'text/plain' }), 'text/html': new Blob([safeCitationHtml(result.html, result.text)], { type: 'text/html' }) })]);
-      else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(result.text);
-      else throw new Error('clipboard unavailable');
-      toast('APA 7 引用已复制');
-    } catch { $('copy-fallback').value = result.text; $('text-dialog-title').textContent = 'APA 7 引用'; openDialog('text-dialog'); $('copy-fallback').select(); }
+    await copyText(result.text, { label: 'APA 7 引用', html: result.html });
   } catch (error) { toast(error.message, true); } finally { button.disabled = false; }
 }
 async function exportNotes() {
@@ -2023,8 +2027,8 @@ if(persistence){
   legacyExport.addEventListener('click',async()=>{try{const result=await api('state_list',{prefix:'migration:',offset:legacyOffset,limit:20});const url=URL.createObjectURL(new Blob([JSON.stringify({schema:1,backups:result.records},null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download=`paper-library-legacy-drafts-${legacyOffset+1}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);legacyOffset=result.hasMore?result.next_offset:0;toast(result.hasMore?'本批备份已导出；再次点击可导出下一批。':'旧草稿备份已导出，原备份仍保存在本机。');}catch(error){toast(error.message,true);}});document.querySelector('.topbar-actions').prepend(legacyExport);
   const saveStatus=el('div','local-save-status');saveStatus.id='local-save-status';saveStatus.hidden=true;saveStatus.setAttribute('role','status');
   const label=el('span');const retry=el('button','button subtle','重试保存');retry.type='button';retry.addEventListener('click',()=>void persistence.flush().catch(()=>{}));
-  const backup=el('button','button subtle','导出未保存草稿');backup.type='button';backup.addEventListener('click',()=>{const values=persistence.exportPending?.()||[];const url=URL.createObjectURL(new Blob([JSON.stringify({schema:1,drafts:values},null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='paper-library-unsaved-drafts.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});saveStatus.append(label,retry,backup);document.body.append(saveStatus);
-  const pending=new Map();persistence.subscribe(event=>{if(event.status==='saved')pending.delete(event.key);else pending.set(event.key,event);const errors=[...pending.values()].filter(value=>value.error);saveStatus.hidden=!errors.length;label.textContent=errors.some(value=>value.status==='conflict')?'另一浏览器已有修改，本窗口草稿尚未落盘。请导出并核对。':`本地保存未完成${errors.length?`（${errors.length} 项）：${errors[0].error?.message||'请重试'}`:''}，草稿仍保留。`;});
+  const backup=el('button','button subtle','导出未保存草稿');backup.type='button';backup.addEventListener('click',()=>{const values=persistence.exportPending?.()||[];const url=URL.createObjectURL(new Blob([JSON.stringify({schema:1,drafts:values},null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='paper-library-unsaved-drafts.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});saveStatus.append(label,retry,backup);$('notification-region').append(saveStatus);
+  const pending=new Map();persistence.subscribe(event=>{if(event.status==='saved')pending.delete(event.key);else if(event.error||!pending.get(event.key)?.error)pending.set(event.key,event);const errors=[...pending.values()].filter(value=>value.error);saveStatus.hidden=!errors.length;label.textContent=errors.some(value=>value.status==='conflict')?'另一浏览器已有修改，本窗口草稿尚未落盘。请导出并核对。':`本地保存未完成${errors.length?`（${errors.length} 项）：${errors[0].error?.message||'请重试'}`:''}，草稿仍保留。`;});
 }
 window.addEventListener('pagehide', () => { publishReaderState(); floatingWindows?.dispose(); boardUI?.dispose(); companionUI?.dispose();settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); readingPanels?.dispose(); readingShell?.dispose(); });
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){publishReaderState();void persistence?.flush({keepalive:true}).catch(()=>{});}});
