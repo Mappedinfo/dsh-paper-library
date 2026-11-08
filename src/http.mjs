@@ -32,7 +32,7 @@ staticFiles['return-to-dsh.js']=['return-to-dsh.js','text/javascript;charset=utf
 for (const name of ['challenge-mining.js','challenge-mining.css','annotation-threads.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['board.js','board.css','board-flow.js','board-source.js','board-render.js','board-bridge.js','board-annotations.js','board-annotations.css','board-mermaid.js','board-drawio.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['workspace-navigation.js','workspace-navigation.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
-const languageActions = new Set(['language_settings_get','language_settings_update','language_generate','language_history','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
+const languageActions = new Set(['language_settings_get','language_settings_update','language_generate','language_history','vocabulary_create','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
 for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js','ink-diagnostics.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 staticFiles['annotation-editor.js']=['annotation-editor.js','text/javascript;charset=utf-8'];
 staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
@@ -180,7 +180,7 @@ export function createFetchHandler(options = {}) {
           const latexAIAction = typeof input?.action === 'string' && input.action.startsWith('latex_ai_');
           const latexWsAction = typeof input?.action === 'string' && input.action.startsWith('latex_ws_');
           if (chatAction && !options.paperChat) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板打开论文对话。'},400);
-          if (['annotation_translate','language_generate'].includes(input?.action) && !options.languageLearning) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
+          if (['annotation_translate','language_generate','vocabulary_create'].includes(input?.action) && !options.languageLearning) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
           if (input?.action === 'handwriting_recognize' && !options.handwriting) return json({ok:false,error:'转文字需要 DSH 中支持图片的模型；笔迹可继续保存。'},409);
           if (input?.action === 'knowledge_generate' && !options.libraryKnowledge) return json({ok:false,error:'尚未连接 DSH 模型服务；已保存的来源和知识笔记仍可查看。'},409);
           if (latexAIAction && !options.latexAI) return json({ok:false,error:'LaTeX 提问与合写需要连接 DSH 模型服务。'},409);

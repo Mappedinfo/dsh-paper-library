@@ -117,3 +117,8 @@ body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-
 .paper-markdown ul,.paper-markdown ol{padding-left:24px}.paper-markdown table{display:block;max-width:100%;overflow:auto;border-collapse:collapse}
 .paper-markdown td,.paper-markdown th{padding:5px 8px;border:1px solid var(--line)}
 .paper-markdown h1,.paper-markdown h2,.paper-markdown h3{font-size:1.12em;margin:1em 0 .4em}
+
+.wiki-bilingual{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:8px}
+.wiki-bilingual blockquote{font-size:14px;color:var(--ink);overflow-wrap:anywhere}
+.wiki-source{padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:14px}
+.wiki-word-form{display:grid;gap:12px}.wiki-word-form details{padding:10px 0}.wiki-word-form details[open] summary{margin-bottom:10px}

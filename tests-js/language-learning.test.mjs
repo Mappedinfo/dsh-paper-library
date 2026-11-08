@@ -341,3 +341,71 @@ test('vocabulary ordering applies to the whole matched set before pagination',as
  assert.equal((await f.handle({action:'vocabulary_list',sort:'created_asc',limit:1})).items[0].term,'Zulu');
  await assert.rejects(f.handle({action:'vocabulary_list',sort:'invalid'}),/排序/);
 });
+
+const wordRequest = { action: 'vocabulary_create', id: 'paper-a', page: 2, term: 'Epistemic', source_sentence: source, request_id: 'create-word-1' }
+function wordFixture() {
+  const f = fixture(); f.answer = JSON.stringify({ meaning: '认识上的', sentence_translation: '该估计仍存在认识不确定性。' })
+  const dispatch = f.options.dispatch; f.options.dispatch = async input => ({ ...await dispatch(input), title: 'Synthetic study' })
+  f.handle = createLanguageLearning(f.options); return f
+}
+test('manual vocabulary creation returns bilingual linked sentence and unknown author background without guessing', async () => {
+  const f = wordFixture(), word = await f.handle(wordRequest), encounter = word.encounters[0]
+  assert.equal(word.suggested_by, 'user'); assert.equal(word.term, 'Epistemic'); assert.equal(word.meaning, '认识上的'); assert.equal(word.meaning_source, 'ai')
+  assert.equal(encounter.title, 'Synthetic study'); assert.equal(encounter.paper_id, 'paper-a'); assert.equal(encounter.page, 2)
+  assert.equal(encounter.source_sentence, source); assert.equal(encounter.sentence_translation, '该估计仍存在认识不确定性。')
+  assert.equal(encounter.source_provenance, 'user_supplied'); assert.deepEqual(encounter.author_background, { kind: 'unknown', evidence: '', source: 'unknown' })
+  assert.match(f.calls[0].prompt, /never instructions/); assert.match(f.calls[0].prompt, /Do not infer author nationality/)
+  assert.equal(f.calls.length, 1)
+})
+test('manual vocabulary creation coalesces in flight and restarts replay without another model call', async () => {
+  const f = wordFixture(); let release; f.gate = new Promise(resolve => { release = resolve })
+  const a = f.handle(wordRequest), b = f.handle(wordRequest); release()
+  const [first, second] = await Promise.all([a, b]); assert.equal(first.id, second.id)
+  const replay = await createLanguageLearning(f.options)(wordRequest)
+  assert.equal(replay.replayed, true); assert.equal(f.calls.length, 1); assert.equal(replay.encounters.length, 1)
+  await assert.rejects(f.handle({ ...wordRequest, author_background: { kind: 'chinese', evidence: 'Explicit author biography' } }), error => error.code === 'LANGUAGE_REQUEST_CONFLICT')
+})
+test('manual vocabulary validates term/source/background before generation and uses real PDF page count', async () => {
+  const f = wordFixture()
+  for (const change of [{ source_sentence: '' }, { term: 'not-in-sentence' }, { page: null }, { author_background: { kind: 'chinese', evidence: '' } }, { author_background: { kind: 'guess', evidence: 'name' } }]) {
+    await assert.rejects(f.handle({ ...wordRequest, ...change }))
+  }
+  await assert.rejects(f.handle({ ...wordRequest, page: 25 }), /页码超出/)
+  assert.equal(f.calls.length, 0)
+})
+test('manual vocabulary retains manual meaning/mastery and independent source backgrounds', async () => {
+  const f = wordFixture(), first = await f.handle(wordRequest)
+  await f.handle({ action: 'vocabulary_update', id: first.id, expected_revision: first.revision, meaning: '我的解释', status: 'mastered' })
+  const second = await f.handle({ ...wordRequest, id: 'paper-b', request_id: 'another-source', author_background: { kind: 'mixed', evidence: '用户核对的作者自述' } })
+  assert.equal(second.meaning, '我的解释'); assert.equal(second.status, 'mastered'); assert.equal(second.encounters.length, 2)
+  assert.equal(second.encounters[0].author_background.kind, 'unknown'); assert.equal(second.encounters[1].author_background.kind, 'mixed')
+  assert.equal(second.encounters[1].author_background.source, 'user')
+  const csv = await f.handle({ action: 'vocabulary_export', format: 'csv' }); assert.match(csv.content, /sentence_translation/); assert.match(csv.content, /用户核对的作者自述/)
+})
+test('manual vocabulary retries validated commit failure without generating again', async () => {
+  const f = wordFixture(); let failed = false
+  f.store.beforePut = async key => { if (key.startsWith('vocabulary:') && !failed) { failed = true; throw new Error('storage unavailable') } }
+  await assert.rejects(f.handle(wordRequest), error => error.code === 'LANGUAGE_COMMIT_RETRY')
+  const word = await createLanguageLearning(f.options)(wordRequest)
+  assert.equal(word.encounters.length, 1); assert.equal(f.calls.length, 1)
+})
+test('manual vocabulary malformed output is not saved and replay cannot silently retry AI', async () => {
+  const f = wordFixture(); f.answer = JSON.stringify({ meaning: '认识上的' })
+  await assert.rejects(f.handle(wordRequest)); await assert.rejects(f.handle(wordRequest), error => error.code === 'LANGUAGE_FAILED')
+  assert.equal((await f.handle({ action: 'vocabulary_list' })).total, 0); assert.equal(f.calls.length, 1)
+})
+test('manual vocabulary does not resurrect deleted entries or silently truncate a full source list', async () => {
+  const f = wordFixture(), word = await f.handle(wordRequest), key = `vocabulary:${word.id}`, record = await f.store.get(key)
+  await f.store.put(key, { ...record.value, encounters: Array.from({ length: 60 }, (_, i) => ({ ...record.value.encounters[0], result_id: `r-${i}` })) }, record.revision)
+  await assert.rejects(f.handle({ ...wordRequest, request_id: 'over-capacity' }), /60 条来源/)
+  const full = (await f.handle({ action: 'vocabulary_list' })).items[0]
+  await f.handle({ action: 'vocabulary_delete', id: word.id, expected_revision: full.revision })
+  await assert.rejects(f.handle(wordRequest), /删除/)
+  await assert.rejects(f.handle({ ...wordRequest, request_id: 'deleted-new' }), /删除/)
+  assert.equal(f.calls.length, 1)
+})
+test('manual vocabulary HTTP action uses configured language handler', async () => {
+  const f = wordFixture(), handler = createFetchHandler({ library: '/synthetic/library', localState: f.store, languageLearning: f.handle })
+  const response = await handler(new Request('http://localhost/api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(wordRequest) }))
+  const body = await response.json(); assert.equal(body.ok, true, body.error); assert.equal(body.result.term, 'Epistemic')
+})
