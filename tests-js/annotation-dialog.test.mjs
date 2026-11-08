@@ -18,11 +18,11 @@ function fixture(options = {}) {
     openDialog: id => { nodes.get(id).open = true; calls.push('open') },
     clearSelection: () => { state.selection = null; calls.push('clear') },
     api: async (action, payload) => { calls.push({ action, ...payload }); return options.api ? options.api(action, payload) : { annotation: { id: 'saved-a' } } },
-    companionUI: { refresh: () => calls.push('companion:refresh') },
+    companionUI: { available: () => options.available !== false, refresh: () => calls.push('companion:refresh') },
     loadAnnotations: async id => { calls.push(`notes:${id}`); if (options.refreshFailure) throw Error('Synthetic refresh failure') },
     refreshPage: async page => calls.push(`page:${page}`), publishReaderState: () => calls.push('publish'),
     linkedHandwritingUI: { toggle: async () => calls.push('handwriting') },
-    paperChatUI: { available: () => true, savedAnnotation: async (...args) => calls.push({ chat: args }) },
+    paperChatUI: { available: () => true, savedAnnotation: async (...args) => calls.push({ chat: args }), annotationsChanged: async id => calls.push({ catalog: id }) },
     requestFeedback: () => calls.push('feedback'),
   }
   vm.createContext(context); vm.runInContext(section, context)
@@ -48,7 +48,9 @@ test('outside dismissal saves a nonempty draft to its captured PDF and closes on
   assert.equal(f.nodes.get('annotation-dialog').open, false)
   assert.equal(f.nodes.get('annotation-comment').readOnly, false)
   assert.equal(f.state.annotationDraft, null)
-  assert.equal(f.calls.filter(call => call.chat).length, 1)
+  assert.equal(f.calls.filter(call => call.chat).length, 0)
+  assert.equal(f.calls.filter(call => call.catalog).length, 1)
+  assert.equal(f.calls[0].companion_skip, true)
 })
 
 test('empty outside dismissal creates no record, including blank edited comments', async () => {
@@ -87,7 +89,7 @@ test('an edited annotation uses update and a refresh failure cannot recreate an 
 
 test('a completion for an old paper cannot clear a new selection or activate handwriting/chat there', async () => {
   let resolve
-  const f = fixture({ api: () => new Promise(done => { resolve = done }) }), pending = f.submit('annotation-save-handwriting')
+  const f = fixture({ api: () => new Promise(done => { resolve = done }) }), pending = f.submit()
   f.state.active = { id: 'paper-b', pdf: true }; f.state.selection = { id: 'paper-b' }
   const newDraft = { mode: 'note', id: 'paper-b', page: 1 }; f.state.annotationDraft = newDraft
   resolve({ annotation: { id: 'saved-a' } })
@@ -121,4 +123,87 @@ test('failed rectangle save retains geometry and comment for retry; cancelling a
   const draft=f.state.annotationDraft;assert.equal(await f.submit(),false);assert.equal(f.state.annotationDraft,draft);
   assert.equal(f.nodes.get('annotation-dialog').open,true);assert.equal(f.nodes.get('annotation-comment').value,'Synthetic interpretation');
   const empty=fixture({mode:'square',comment:''});assert.equal(await empty.context.dismissAnnotation(),true);assert.equal(empty.calls.some(c=>c.action),false);
+});
+
+
+test('save only skips host and standalone automatic AI even with a comment', async () => {
+  for (const mode of ['note', 'edit']) {
+    const f = fixture({ mode }); f.nodes.get('auto-feedback').checked = true;
+    assert.equal(await f.submit(), true);
+    assert.equal(f.calls[0].companion_skip, true);
+    assert.equal(f.calls.some(call => call.action === 'companion_ask' || call.chat || call === 'feedback'), false);
+  }
+});
+
+test('save and ask persists the question first, then admits exactly one request with saved identity', async () => {
+  let resolve;
+  const f = fixture({ api: action => action === 'annotate' ? new Promise(done => { resolve = done }) : { status:'queued' } });
+  const pending = f.submit('annotation-save-ask');
+  assert.equal(f.calls.some(call => call.action === 'companion_ask'), false);
+  assert.equal(await f.submit('annotation-save-ask'), false);
+  resolve({ annotation: { id:'new-note', version:'saved-version' } });
+  assert.equal(await pending, true);
+  const requests = f.calls.filter(call => call.action);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].comment, 'Synthetic interpretation');
+  assert.equal(requests[0].companion_skip, true);
+  assert.deepEqual(requests[1], { action:'companion_ask', id:'paper-a', annotation_id:'new-note', version:'saved-version' });
+});
+
+test('selected text can be asked without a question; an empty region needs a remark', async () => {
+  const f = fixture({ mode:'underline', comment:'' });
+  f.state.annotationDraft.selection = { text:'Synthetic quoted passage', rects:[[1,2,3,4]] };
+  assert.equal(await f.submit('annotation-save-ask'), true);
+  assert.equal(f.calls.filter(call => call.action === 'companion_ask').length, 1);
+  const blank = fixture({ mode:'square', comment:'' });
+  assert.equal(await blank.submit('annotation-save-ask'), false);
+  assert.equal(blank.calls.length, 0);
+  assert.equal(blank.nodes.get('annotation-dialog').open, true);
+  assert.match(blank.errors.at(-1)[1], /备注或问题/);
+});
+
+test('save failure never asks; ask failure leaves the successful save closed without recreating it', async () => {
+  const failedSave = fixture({ api: () => { throw Error('write conflict') } });
+  assert.equal(await failedSave.submit('annotation-save-ask'), false);
+  assert.equal(failedSave.calls.some(call => call.action === 'companion_ask'), false);
+  const f = fixture({ api: action => { if (action === 'companion_ask') throw Error('connection failed'); return { annotation:{id:'saved-a'} }; } });
+  assert.equal(await f.submit('annotation-save-ask'), true);
+  assert.equal(f.nodes.get('annotation-dialog').open, false);
+  assert.equal(f.state.annotationDraft, null);
+  assert.equal(await f.submit('annotation-save-ask'), false);
+  assert.equal(f.calls.filter(call => call.action === 'annotate').length, 1);
+  assert.match(f.messages.find(([text]) => text.includes('提问未完成'))[0], /卡片重试/);
+});
+
+test('refresh failure cannot suppress an explicit ask, and paper switching preserves its captured source', async () => {
+  const f = fixture({ refreshFailure:true });
+  assert.equal(await f.submit('annotation-save-ask'), true);
+  assert.equal(f.calls.filter(call => call.action === 'companion_ask').length, 1);
+  let resolve;
+  const switched = fixture({ api: action => action === 'annotate' ? new Promise(done => { resolve=done }) : {} });
+  const pending = switched.submit('annotation-save-ask');
+  switched.state.active = { id:'paper-b', pdf:true }; switched.state.selection = { id:'paper-b' };
+  resolve({ annotation:{id:'saved-a'} }); await pending;
+  assert.equal(switched.calls.find(call => call.action === 'companion_ask').id, 'paper-a');
+  assert.deepEqual(switched.state.selection, { id:'paper-b' });
+});
+
+test('unavailable DSH keeps the draft untouched and the modal offers two unambiguous save actions', async () => {
+  const f = fixture({ available:false });
+  assert.equal(await f.submit('annotation-save-ask'), false);
+  assert.equal(f.calls.length, 0);
+  const html = await readFile(new URL('../web/index.html', import.meta.url), 'utf8');
+  const modal = html.slice(html.indexOf('<dialog id="annotation-dialog"'), html.indexOf('</dialog>', html.indexOf('<dialog id="annotation-dialog"')));
+  assert.match(modal, /仅保存批注/); assert.match(modal, /保存并问 DSH/);
+  assert.doesNotMatch(modal, /保存并手写|保存并放入主对话/);
+});
+
+test('existing saved or failed requests report their real state instead of claiming a new send', async () => {
+  for (const status of ['saved', 'failed']) {
+    const f = fixture({ api: action => action === 'companion_ask' ? {status} : {annotation:{id:'saved-a'}} });
+    assert.equal(await f.submit('annotation-save-ask'), true);
+    assert.equal(f.calls.filter(call => call.action === 'companion_ask').length, 1);
+    assert.equal(f.messages.some(([text]) => text.includes('已提交 DSH')), false);
+    assert.equal(f.messages.some(([text]) => text.includes(status === 'saved' ? '已有 AI 回复' : '重试')), true);
+  }
 });

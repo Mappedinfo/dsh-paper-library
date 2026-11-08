@@ -9,7 +9,7 @@ window.PaperCompanion={create({api,persistence,getPaper,refreshAnnotations,toast
   const make=(tag,text,cls)=>{const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n;};
   const toggle=make('button','实时伴学','button subtle paper-switch');toggle.id='companion-toggle';toggle.type='button';toggle.hidden=true;
   toggle.setAttribute('role','switch');toggle.setAttribute('aria-checked','false');
-  toggle.title='保存或修改有文字评论的批注后自动回复；使用本篇 DSH 模型。';document.getElementById('paper-tools').append(toggle);
+  toggle.title='保存或修改有文字评论的批注后自动回复；弹窗选择「仅保存批注」时不提问。';document.getElementById('paper-tools').append(toggle);
   function show(){toggle.setAttribute('aria-checked',String(enabled));toggle.disabled=!writable||savingToggle;}
   toggle.addEventListener('click',async()=>{
     if(!writable||savingToggle)return;
@@ -28,7 +28,6 @@ window.PaperCompanion={create({api,persistence,getPaper,refreshAnnotations,toast
       const key=operationKey(id,annotationId);
       if(!ask){
         ask=make('button','问 DSH','button subtle companion-ask');ask.type='button';
-        ask.title='询问本篇 DSH 模型，回复会保存为这条批注下的 AI 批注';
         ask.addEventListener('click',event=>{
           event.stopPropagation();
           if(ask.disabled||paperId!==id||getPaper()?.id!==id)return;
@@ -38,7 +37,7 @@ window.PaperCompanion={create({api,persistence,getPaper,refreshAnnotations,toast
         card.querySelector(':scope > .annotation-actions')?.append(ask);
       }
       const hasText=card.dataset.companionText==='true';
-      if(!hasText)ask.title='写入批注文字或保存手写转录后可问 DSH';
+      ask.title=hasText?'直接解读选文；有备注或问题时一并回答。回复保存为这条批注下的 AI 批注。':'写入批注文字或保存手写转录后可问 DSH';
       ask.disabled=!hasText||submitting.has(key)||Boolean(waiting(value)||value?.status==='failed'||value?.recoverable);
       if(!value&&!submitting.has(key))continue;
       const box=make('div','','companion-state small');box.setAttribute('role','status');
@@ -101,7 +100,7 @@ window.PaperCompanion={create({api,persistence,getPaper,refreshAnnotations,toast
     paperId=id;entries=[];savedKey='';savedReadsFailed=0;++entriesRevision;decorate();void refresh();return true;
   }
   const visibility=()=>{if(document.hidden)clearTimeout(timer);else void refresh();};document.addEventListener('visibilitychange',visibility);
-  return {sync,decorate,refresh,setAvailable(v){
+  return {sync,decorate,refresh,available:()=>available&&!disposed,setAvailable(v){
     const wasAvailable=available;available=Boolean(v);
     if(!sync()&&available!==wasAvailable){decorate();if(available)void refresh();}
   },applyPreferences(value,canWrite){

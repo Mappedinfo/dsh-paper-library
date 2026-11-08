@@ -612,20 +612,23 @@ function openAnnotation(mode, note = null, options = {}) {
   $('annotation-quote').textContent = note?.text || selection?.text || ''; $('annotation-quote').hidden = !$('annotation-quote').textContent;
   $('annotation-comment').value = note?.comment || note?.content || ''; $('annotation-comment').required = mode === 'note';
   errorAt('annotation-error', null); openDialog('annotation-dialog');
-  $('annotation-save-draft').hidden = !paperChatUI?.available(); publishReaderState();
+  $('annotation-save-ask').hidden = !companionUI?.available(); publishReaderState();
 }
 async function saveAnnotation(event) {
   event.preventDefault(); const draft = state.annotationDraft; if (!draft || annotationSaveBusy) return false;
   const form = $('annotation-form'), comment = $('annotation-comment').value;
-  const handwriting = event.submitter?.id === 'annotation-save-handwriting';
-  const toDraft = event.submitter?.id === 'annotation-save-draft';
+  const ask = event.submitter?.id === 'annotation-save-ask';
+  if (ask && !companionUI?.available()) { errorAt('annotation-error', new Error('DSH 暂不可用，请仅保存批注，稍后从卡片提问。')); return false; }
+  if (ask && ![comment, draft.selection?.text, draft.note?.text, draft.note?.handwriting?.transcript, draft.note?.linked_ink?.transcript].some(value => value?.trim())) {
+    errorAt('annotation-error', new Error('这条批注没有选文，请先填写备注或问题再问 DSH。')); return false;
+  }
   annotationSaveBusy = true; setBusy(form, true); $('annotation-comment').readOnly = true; errorAt('annotation-error', null);
   try {
     let result;
     try {
       result = draft.mode === 'edit'
-        ? await api('annotation_update', { id: draft.id, annotation_id: draft.note.id, comment, companion_skip:handwriting||toDraft })
-        : await api('annotate', { id: draft.id, page: draft.page, type: draft.mode, text: draft.selection?.text || '', rects: draft.selection?.rects || [[20, 20, 40, 40]], comment, author: 'Reader', color: draft.color || '#ffdb66', ...(draft.mode === 'square' ? {width:draft.width ?? 2} : {}), companion_skip:handwriting||toDraft||draft.mode==='square'&&!comment.trim() });
+        ? await api('annotation_update', { id: draft.id, annotation_id: draft.note.id, comment, companion_skip:true })
+        : await api('annotate', { id: draft.id, page: draft.page, type: draft.mode, text: draft.selection?.text || '', rects: draft.selection?.rects || [[20, 20, 40, 40]], comment, author: 'Reader', color: draft.color || '#ffdb66', ...(draft.mode === 'square' ? {width:draft.width ?? 2} : {}), companion_skip:true });
     } catch (error) {
       if (state.annotationDraft === draft) { errorAt('annotation-error', error); if (!$('annotation-dialog').open) openDialog('annotation-dialog'); }
       else toast(`批注未保存：${error.message}`, true);
@@ -637,14 +640,23 @@ async function saveAnnotation(event) {
     if (state.active?.id === draft.id) clearSelection();
     toast('批注已保存到 PDF');
     if(result.companion?.error)toast(result.companion.error,true);
+    // Explicit asking is independent of page refresh and always targets the
+    // saved note. Suppress automatic admission above to avoid a second request.
+    if (ask) {
+      try {
+        const annotationId = result.annotation?.id || draft.note?.id;
+        if (!annotationId) throw new Error('未取得已保存批注的标识，请刷新批注后重试。');
+        const request = await api('companion_ask', { id:draft.id, annotation_id:annotationId, ...(result.annotation?.version ? {version:result.annotation.version} : {}) });
+        if (request?.status === 'failed' || request?.recoverable) toast('批注已保存；上次提问尚未完成，请从批注卡片点「重试」。', true);
+        else toast(request?.status === 'saved' ? '这条批注已有 AI 回复，可在批注卡片查看。' : '批注已保存，已提交 DSH；回复会保存在这条批注下。');
+      } catch (error) { toast(`批注已保存；提问未完成：${error.message} 可从批注卡片重试。`, true); }
+    }
     try {
       void companionUI?.refresh();
       if (state.active?.id === draft.id) { await loadAnnotations(draft.id); if (state.active?.id === draft.id) await refreshPage(draft.page); }
       publishReaderState();
       if (state.active?.id === draft.id) {
-        if (handwriting) await linkedHandwritingUI?.toggle({id:draft.id}, result.annotation || draft.note);
-        else if (paperChatUI?.available()) await paperChatUI.savedAnnotation(draft.id, result.annotation?.id || draft.note?.id, toDraft);
-        else if ($('auto-feedback').checked) requestFeedback(draft.id, true);
+        await paperChatUI?.annotationsChanged(draft.id);
       }
     } catch (error) { toast(`批注已保存；后续操作未完成：${error.message}`, true); }
     return true;
