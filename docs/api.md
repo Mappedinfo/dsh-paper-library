@@ -625,13 +625,15 @@ reading.legacy_budget_omissions 是旧摘要图因预算省略的判断数；rea
 | `document_elements_scan` | `id,start_page?,limit?`，默认 1 页，最多 6 页 | 本批 `elements`（前 40 项）、`batch_element_count`、`scanned_batch`、`cached_pages`、`lookahead_pages`；无 start_page 自动续扫 |
 | `document_elements_clear` | `id` | 清除当前篇派生结构索引，返回 `cleared,usage`；不清除原文、原生批注或其他阅读资料 |
 | `document_elements_list` | `id,kind?,subtype?,query?,offset?,limit?,warning_offset?` | `elements,total,offset,page_warnings`，每次最多 40 项；kind 为 formula／figure／table／algorithm，subtype 支持 flowchart |
-| `document_element_preview` | `id,element_id,render_width?`，64–640 | `image` 为裸 PNG base64，附 mime_type、width、height、page、rect、source_version；最长边 640、约 30 万像素、1 MiB 上限 |
+| `document_element_preview` | `id,element_id,render_width?`，64–640 | `image` 为裸 PNG base64，附 mime_type、width、height、page、rect、preview_rotation、source_version；最长边 640、约 30 万像素、1 MiB 上限 |
 | `document_element_annotate` | `id,element_id` | 标准 Square `annotation`、`reused`；已标注同一候选直接复用，备份并原子写管理副本 |
 | `document_element_flow` | `id,element_id`（算法） | `element,flow,source_version`；flow 为 nodes／edges／source_lines／warnings／complete／status |
 
 scan/list 均附 `coverage:{page_count,scanned_pages,complete,next_page}`、`source_version`、`stale` 与 warnings。每篇最多 2000 页、单页最多 240 个候选；超预算显式提示。普通批注不会使目录失效；真实正文改变后旧 element_id 拒绝截图或写入。提词、绘图、表格检测均基于去批注底稿，防止 FreeText 或 Square 外观污染候选。
 
 元素包含 `id,kind,page,rect,title,text,caption,context,method,confidence,warnings`。rect 使用阅读器显示坐标；表格可含 rows（最多 50 行预览）和 rows_truncated；公式 context／definition 为邻近原文；算法 source_segments 记录最多相邻两页依据。流程图类别来自图题关键词，属于候选而非视觉分类保证。
+
+旋转表格按表题的文字方向（90°／180°／270°）在单页临时矢量副本中转正检测，输出 `rect` 仍为原 PDF 阅读器显示坐标；`preview_rotation` 为截图转正角度，不改变原页或原生批注坐标。无竖线的三线表在表题下对齐长横线界定的范围内采用文本分行列，保留候选属性；复杂合并单元格仍需核对。提取版本升级为 `document-elements-v2`，旧派生索引按当前篇按需重建，不复用旧表头截图，不启动全库扫描。
 
 算法解析最多 160 节点、500 行、32000 字符，分支边区分 next／true／false／back。`complete` 只表示已识别控制结构闭合，非 PDF 全文无遗漏的证明；提取截断或缺页会标记 partial。所有标签为普通文本，前端复用画板几何排版绘制 SVG，不执行来源代码。
 

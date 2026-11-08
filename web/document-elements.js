@@ -82,7 +82,7 @@ window.PaperDocumentElements = (() => {
     }
     async function reload(reset=false){const v=views.get(active),id=getPaper()?.id;if(!v||!id||disposed)return;const run=++ticket;if(reset)v.offset=0;if(v.paperId!==id){clearView(v);v.paperId=id;v.offset=0;}status(v,record(id));
       try{const result=await api('document_elements_list',{id,kind:v.kind,query:v.input.value,offset:v.offset,limit:40,...(v.flowOnly?{subtype:'flowchart'}:{})});if(!valid(run,id)||active!==v.kind)return;
-        const r=record(id);r.coverage=result.coverage;r.usage=result.usage;if(result.paused){r.paused=true;r.notice='扫描已暂停：'+(result.budget_reason||'已达到资源预算');}status(v,r);if(result.stale&&!result.paused)v.status.textContent='PDF 内容已改变，将重新提取；旧结果暂不使用。';
+        const r=record(id);r.coverage=result.coverage;r.usage=result.usage;if(result.paused){r.paused=true;r.notice='扫描已暂停：'+(result.budget_reason||'已达到资源预算');}status(v,r);if(result.stale&&!result.paused)v.status.textContent='PDF 内容或提取版本已改变，将重新提取；旧结果暂不使用。';
         const elements=result.elements||[],total=result.total??elements.length;v.count.textContent=total?(v.offset+1)+'–'+(v.offset+elements.length)+' / '+total:'0 项';v.previous.disabled=v.offset===0;v.next.disabled=v.offset+elements.length>=total;
         // 在响应到达时读取位置，保留等待期间用户自己滚动后的最新位置。
         const scroll=reset?0:v.list.scrollTop;v.elements=elements;reconcile(v,elements,id,result.source_version,result);v.list.scrollTop=scroll;

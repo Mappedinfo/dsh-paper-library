@@ -17,7 +17,7 @@ import pymupdf as fitz
 from .pdf_analysis_identity import content_version, observed_file
 from . import pdf_preprocessing
 
-SCHEMA = 'document-elements-v1'
+SCHEMA = 'document-elements-v2'
 KINDS = {'figure', 'table', 'formula', 'algorithm'}
 MAX_PAGE_ELEMENTS = 240
 MAX_TEXT = 20000
@@ -228,7 +228,7 @@ def _lines(page):
                 text_bytes += len(text.encode())
                 if len(lines) >= 5000 or text_bytes > _limit('page_limit_bytes', MAX_PAGE_BYTES):
                     raise ElementBudgetError(f"单页文字超过 5000 行或 {_limit('page_limit_bytes', MAX_PAGE_BYTES) / 1048576:g} MiB，暂停结构扫描以限制内存和计算量。")
-                lines.append({'text': text, 'rect': fitz.Rect(line['bbox']), 'block': block_index,
+                lines.append({'text': text, 'rect': fitz.Rect(line['bbox']), 'block': block_index, 'direction': tuple(line.get('dir', (1, 0))),
                               'baseline': sum(s.get('origin', (0, line['bbox'][3]))[1] for s in line['spans']) / max(1, len(line['spans'])),
                               'math_font': any(re.search('math|symbol|cmsy|cmmi', s.get('font', ''), re.I) for s in line['spans'])})
     return sorted(lines, key=lambda line: (round(line['rect'].y0 / 3), line['rect'].x0))
@@ -247,8 +247,50 @@ def _nearby(lines, rect, distance=95):
 
 
 def _extract(page, version, page_number=None):
-    """所有检测使用未旋转坐标；输出统一转换到阅读器显示坐标。"""
+    # 只为有旋转表题的方向建立临时矢量页面，不改原 PDF，不栅格化整页。
     lines = _lines(page)
+    turns = set()
+    for line in lines:
+        match = CAPTION.match(line['text'])
+        if match and match.group(1).lower() in {'table', '表'}:
+            x, y = line['direction']
+            angle = math.degrees(math.atan2(y, x))
+            turn = round(-angle / 90) * 90 % 360
+            if turn and abs(((angle + turn + 180) % 360) - 180) < 2:
+                turns.add(turn)
+    values, warnings = _extract_upright(page, version, page_number, lines)
+    for turn in sorted(turns):
+        with fitz.open() as source, fitz.open() as normalized:
+            source.insert_pdf(page.parent, from_page=page.number, to_page=page.number,
+                              links=False, annots=False, widgets=False)
+            source[0].set_rotation(0)
+            bounds = source[0].rect
+            rotated = bounds * fitz.Matrix(turn)
+            transform = fitz.Matrix(turn) * fitz.Matrix(1, 0, 0, 1, -rotated.x0, -rotated.y0)
+            target = normalized.new_page(width=rotated.width, height=rotated.height)
+            target.show_pdf_page(target.rect, source, 0, rotate=-turn)
+            candidates, notes = _extract_upright(target, version, page_number or page.number + 1)
+            for item in candidates:
+                if item['kind'] != 'table' or not item['caption']:
+                    continue
+                native = fitz.Rect(item['rect']) * ~transform
+                item['rect'] = _box(native, page)
+                item['preview_rotation'] = (turn - page.rotation) % 360
+                item['orientation_method'] = 'caption-text-direction'
+                item['id'] = hashlib.sha256(json.dumps([version, 'table', item['page'], item['rect'], item['title']], ensure_ascii=False).encode()).hexdigest()[:32]
+                # 替换同一位置的窄表题或错误方向表格，保留该页其他结构。
+                values = [old for old in values if not (old['kind'] == 'table' and fitz.Rect(old['rect']).intersects(fitz.Rect(item['rect'])))]
+                values.append(item)
+            warnings.extend(note for note in notes if note not in warnings)
+    if len(values) > MAX_PAGE_ELEMENTS or sum(_encoded(v)[2] for v in values) > _limit('page_limit_bytes', MAX_PAGE_BYTES):
+        raise ElementBudgetError('旋转表格结果超过单页结构预算，暂停扫描。')
+    return values, warnings
+
+
+def _extract_upright(page, version, page_number=None, lines=None):
+    """所有检测使用未旋转坐标；输出统一转换到阅读器显示坐标。"""
+    if lines is None:
+        lines = _lines(page)
     page_number = page_number or page.number + 1
     warnings, elements, result_bytes = [], [], 0
     if len(lines) > 12000:
@@ -272,7 +314,7 @@ def _extract(page, version, page_number=None):
         value = {'kind': kind, 'page': page_number, 'rect': _box(rect, page),
                  'title': title[:300], 'text': text[:MAX_TEXT], 'caption': caption[:2000],
                  'context': context[:4000], 'method': method, 'confidence': confidence,
-                 'warnings': [], **(extra or {})}
+                 'warnings': [], **({'preview_rotation': (-page.rotation) % 360} if kind == 'table' else {}), **(extra or {})}
         if kind == 'figure' and re.search(r'flow\s*chart|workflow|roadmap|流程|路线图', caption, re.I):
             value['subtype'] = 'flowchart'
             value['subtype_method'] = 'caption-keywords'
@@ -316,7 +358,7 @@ def _extract(page, version, page_number=None):
     algorithm_ranges = []
     for index, line in enumerate(lines):
         match = CAPTION.match(line['text'])
-        if not match:
+        if not match or line['direction'][0] < .99:
             continue
         prefix = match.group(1).lower()
         kind = 'algorithm' if prefix in {'algorithm', '算法'} else 'table' if prefix in {'table', '表'} else 'figure'
@@ -378,10 +420,40 @@ def _extract(page, version, page_number=None):
             # MuPDF 首次调用提示不能污染 worker 的 stdout JSON 协议。
             with redirect_stdout(sys.stderr):
                 finder = page.find_tables()
-            for table in finder.tables[:30]:
-                rows = table.extract()[:150]
+            tables = [{'bbox': t.bbox, 'rows': t.extract(), 'row_count': len(t.rows)} for t in finder.tables[:30]]
+            # 三线表没有竖边框：以表题下方长横线限定范围，再让成熟文本检测器分列分行。
+            for cap in [e for e in elements if e['kind'] == 'table' and e['caption']][:30]:
+                caption_line = next((line for line in lines if line['text'] == cap['title']), None)
+                if caption_line is None:
+                    continue
+                top = caption_line['rect']
+                rules = []
+                for drawing in drawings:
+                    r = fitz.Rect(drawing['rect'])
+                    if r.height < 2 and r.width > max(80, top.width * .5) and r.y0 > top.y1 - 2 and r.x1 > top.x0 and r.x0 < top.x1:
+                        rules.append(r)
+                rules.sort(key=lambda r: r.y0)
+                if len(rules) < 2 or rules[0].y0 - top.y1 > 60:
+                    continue
+                next_caption = min((r.y0 for r in caption_ranges if r.y0 > top.y1), default=bounds.y1)
+                rules = [r for r in rules if r.y0 < next_caption and abs(r.x0 - rules[0].x0) < 8 and abs(r.x1 - rules[0].x1) < 8]
+                if len(rules) < 2:
+                    continue
+                clip = _union([r + (-1, -1, 1, 1) for r in rules]) + (-1, -1, 1, 1)
+                if any(fitz.Rect(t['bbox']).intersect(clip).get_area() > .8 * clip.get_area() and t['row_count'] >= 3 for t in tables):
+                    continue
+                with redirect_stdout(sys.stderr):
+                    text_finder = page.find_tables(clip=clip, strategy='text')
+                for t in text_finder.tables[:1]:
+                    rows = t.extract()
+                    populated = [r for r in rows if sum(bool(c and str(c).strip()) for c in r) >= 2]
+                    if len(populated) >= 3 and any(re.search(r'\d', str(c)) for r in populated[1:] for c in r):
+                        tables = [old for old in tables if not fitz.Rect(old['bbox']).intersects(clip)]
+                        tables.append({'bbox': tuple(clip), 'rows': rows, 'row_count': len(populated)})
+            for table in tables[:30]:
+                rows = [row for row in table['rows'] if any(str(cell or '').strip() for cell in row)][:150]
                 text = '\n'.join('\t'.join(str(cell or '')[:300] for cell in row[:30]) for row in rows)
-                table_rect = fitz.Rect(table.bbox)
+                table_rect = fitz.Rect(table['bbox'])
                 title, caption = f'表格 · 第 {page_number} 页', ''
                 # 检测器的几何和结构化行优先，不因先扫描到图题而丢弃。
                 for old in list(elements):
@@ -395,9 +467,9 @@ def _extract(page, version, page_number=None):
                         table_rect |= old_rect
                         elements.remove(old)
                 add('table', table_rect, title, text, caption,
-                    context=_nearby(lines, fitz.Rect(table.bbox), 40), method='pymupdf-table', confidence='geometry',
+                    context=_nearby(lines, fitz.Rect(table['bbox']), 40), method='pymupdf-table', confidence='geometry',
                     extra={'rows': [[str(cell or '')[:300] for cell in row[:30]] for row in rows[:50]],
-                           'rows_truncated': len(table.rows) > 50})
+                           'rows_truncated': table['row_count'] > 50})
         except ElementBudgetError:
             raise
         except Exception as exc:
@@ -512,7 +584,7 @@ def _status(library, paper_id, version, count):
     previous = library.db.execute('SELECT 1 FROM document_element_pages WHERE paper_id=? AND version<>? LIMIT 1', (paper_id, version)).fetchone()
     return {'source_version': version, 'coverage': coverage, 'stale': bool(previous), 'usage': _usage(library, paper_id),
             'warnings': ([] if coverage['complete'] else ['全文尚未扫描完；检索仅覆盖已扫描页。']) +
-                        (['PDF 正文已变化，旧索引不可用于定位；请重新扫描。'] if previous else [])}
+                        (['PDF 正文或提取版本已变化，旧索引不可用于定位；请重新扫描。'] if previous else [])}
 
 
 def _scan(library, paper_id, doc, version, request):
@@ -668,17 +740,19 @@ def _dispatch(library, request):
                 rect = fitz.Rect(value['rect'])
                 page = doc[value['page'] - 1]
                 _preflight_page(doc, value['page'])
-                scale = min(width / rect.width, 4, 640 / max(rect.width, rect.height), math.sqrt(300000 / rect.get_area()))
+                rotation = value.get('preview_rotation', 0)
+                upright_width = rect.height if rotation in (90, 270) else rect.width
+                scale = min(width / upright_width, 4, 640 / max(rect.width, rect.height), math.sqrt(300000 / rect.get_area()))
                 image = None
                 for _ in range(4):
-                    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=rect, colorspace=fitz.csRGB, alpha=False, annots=False)
+                    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale).prerotate(rotation), clip=rect, colorspace=fitz.csRGB, alpha=False, annots=False)
                     image = pix.tobytes('png')
                     if len(image) <= 1024 * 1024:
                         break
                     scale *= .65
                 if len(image) > 1024 * 1024:
                     raise ValueError('Document element preview exceeds image budget')
-                return {'element_id': value['id'], 'page': value['page'], 'rect': value['rect'], 'mime_type': 'image/png', 'image': base64.b64encode(image).decode(), 'width': pix.width, 'height': pix.height, 'source_version': version}
+                return {'element_id': value['id'], 'page': value['page'], 'rect': value['rect'], 'mime_type': 'image/png', 'image': base64.b64encode(image).decode(), 'width': pix.width, 'height': pix.height, 'preview_rotation': rotation, 'source_version': version}
             if action == 'document_element_annotate':
                 page = doc[value['page'] - 1]
                 for annot in page.annots() or []:

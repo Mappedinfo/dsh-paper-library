@@ -401,3 +401,82 @@ def test_invalid_resource_policy_rejected_before_scan(tmp_path, field, value):
     library, paper, _ = make_library(tmp_path)
     with pytest.raises(ValueError, match='resource policy'):
         call(library, paper, 'document_elements_scan', _resource_policy=resource_policy(**{field: value}))
+
+
+@pytest.mark.parametrize('content_turn,page_turn', [(0, 0), (90, 0), (270, 0), (180, 0), (90, 90), (270, 270)])
+@pytest.mark.parametrize('grid', [False, True])
+def test_sideways_table_full_body_preview_and_annotation(tmp_path, content_turn, page_turn, grid):
+    source = tmp_path / 'sideways.pdf'
+    with fitz.open() as upright, fitz.open() as doc:
+        table = upright.new_page(width=600, height=350)
+        table.insert_text((40, 48), 'Table A5. Synthetic comparison of model errors', fontsize=11)
+        for y in [60, 86, 246]:
+            table.draw_line((40, y), (550, y))
+        if grid:
+            for x in [40, 210, 380, 550]:
+                table.draw_line((x, 60), (x, 246))
+            for y in [114, 138, 162, 186, 210]:
+                table.draw_line((40, y), (550, y))
+        for x, label in [(50, 'Model'), (220, 'RMSE'), (390, 'MAE')]:
+            table.insert_text((x, 78), label, color=(1, 0, 0))
+        for i in range(6):
+            for x, text in [(50, 'Model-' + str(i)), (220, str(10 + i) + '.25'), (390, str(5 + i) + '.50')]:
+                table.insert_text((x, 108 + i * 24), text, color=(0, .6, 0) if i == 5 else (0, 0, 0))
+        page = doc.new_page(width=390 if content_turn in (90, 270) else 640,
+                            height=640 if content_turn in (90, 270) else 390)
+        page.show_pdf_page(fitz.Rect(20, 20, page.rect.width-20, page.rect.height-20), upright, 0, rotate=content_turn)
+        page.set_cropbox(fitz.Rect(10, 10, page.rect.width-10, page.rect.height-10))
+        page.set_rotation(page_turn)
+        doc.save(source)
+    root = tmp_path / 'table-library'
+    paper = core_dispatch({'library': str(root), 'action': 'import', 'path': str(source)})['items'][0]['id']
+    library = Library(root)
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    call(library, paper, 'document_elements_scan')
+    tables = call(library, paper, 'document_elements_list', kind='table')['elements']
+    assert len(tables) == 1
+    element = tables[0]
+    assert element['title'].startswith('Table A5.')
+    assert element['method'] == 'pymupdf-table'
+    rows = element['rows']
+    assert rows[0] == ['Model', 'RMSE', 'MAE']
+    assert rows[-1] == ['Model-5', '15.25', '10.50']
+    assert len(rows) == 7
+    # 区域必须包含最后一个数据单元格，而非仅表题；显示坐标供阅读器/批注使用。
+    with fitz.open(library.pdf_path(paper)) as doc:
+        page = doc[0]
+        last = page.search_for('10.50')[0] * page.rotation_matrix
+        assert fitz.Rect(element['rect']).contains(last)
+    preview = call(library, paper, 'document_element_preview', element_id=element['id'])
+    pix = fitz.Pixmap(base64.b64decode(preview['image']))
+    assert 1.8 < pix.width / pix.height < 3
+    assert pix.width * pix.height <= 303000
+    # 彩色表头必须在上，最后一行在下：宽高比本身不能证明不是倒置。
+    pixels = pix.samples
+    red_y, green_y = [], []
+    for offset in range(0, len(pixels), 3):
+        r, g, b = pixels[offset:offset+3]
+        if r > 120 and g < 80 and b < 80:
+            red_y.append((offset // 3) // pix.width)
+        if g > 70 and r < 60 and b < 60:
+            green_y.append((offset // 3) // pix.width)
+    assert red_y and green_y
+    assert max(red_y) < min(green_y)
+    result = call(library, paper, 'document_element_annotate', element_id=element['id'])
+    assert result['annotation']['rect'] == pytest.approx(list(fitz.Rect(element['rect']) + (-1,-1,1,1)), abs=.1)
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == digest
+
+
+def test_extractor_upgrade_invalidates_caption_only_cache(tmp_path, monkeypatch):
+    from dsh_paper_library import document_elements as module
+    library, paper, _ = make_library(tmp_path)
+    current = module.SCHEMA
+    monkeypatch.setattr(module, 'SCHEMA', 'document-elements-v1')
+    before = call(library, paper, 'document_elements_scan', limit=1)
+    monkeypatch.setattr(module, 'SCHEMA', current)
+    listing = call(library, paper, 'document_elements_list')
+    assert listing['stale'] and listing['total'] == 0
+    assert listing['coverage']['next_page'] == 1
+    after = call(library, paper, 'document_elements_scan', limit=1)
+    assert after['scanned_batch'] == [1] and after['cached_pages'] == []
+    assert before['source_version'] != after['source_version']
