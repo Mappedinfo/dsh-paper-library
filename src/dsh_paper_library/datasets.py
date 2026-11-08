@@ -329,6 +329,10 @@ def list_resources(library, request):
         args.append(project)
     if kind != "all":
         where.append("kind=?"); args.append(kind)
+    from .paper_organization import filters as organization_filters
+    extra, organization_args = organization_filters(request, "resources.id", "resources.metadata", "resources.kind")
+    where.extend(extra)
+    args.extend(organization_args)
     if query:
         if len(query) >= 3:
             phrase = '"' + query.replace('"', '""') + '"'

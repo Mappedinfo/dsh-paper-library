@@ -41,6 +41,8 @@ class Papers:
             (self.root / name).mkdir(exist_ok=True, mode=0o700)
         self.db = sqlite3.connect(self.root / "catalog.sqlite3", timeout=30)
         self.db.row_factory = sqlite3.Row
+        from .paper_organization import register
+        register(self.db)
         with self.lock():
             self._initialize_schema()
 
@@ -57,6 +59,8 @@ class Papers:
         CREATE TABLE IF NOT EXISTS feedback(id TEXT PRIMARY KEY, paper_id TEXT NOT NULL, payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS paper_archive(paper_id TEXT PRIMARY KEY, archived_at TEXT NOT NULL);
         """)
+        from .paper_organization import SCHEMA_SQL as organization_schema
+        self.db.executescript(organization_schema)
         # Synced corpora are indexed by symlink, never copied: external_files keeps the
         # size/mtime record that makes a rescan a walk plus lookups, and external_sources
         # records which roots were scanned and when. Neither table stores file contents.
@@ -199,6 +203,8 @@ class Papers:
         result.update(id=row["id"], citekey=row["citekey"], pdf=bool(row["pdf_path"]), created=row["created"], modified=row["modified"])
         result["pdf_filename"] = Path(row["pdf_path"]).name if row["pdf_path"] else None
         result.update(archived=bool(row["archived_at"]), archived_at=row["archived_at"])
+        from .paper_organization import get as organization_get
+        result.update(organization_get(self, id))
         return result
 
     def pdf_path(self, id):
@@ -219,7 +225,7 @@ class Papers:
             raise ValueError("Managed PDF is missing or outside library")
         return path
 
-    def list(self, query="", limit=40, offset=0, sort=None, order=None, archived=False):
+    def list(self, query="", limit=40, offset=0, sort=None, order=None, archived=False, favorite=False, tag=""):
         limit, offset = max(1, clamp(limit, 40, 200)), clamp(offset, 0, 10000000)
         if not isinstance(archived, bool):
             raise ValueError("archived must be boolean")
@@ -263,6 +269,11 @@ class Papers:
             if order is not None:
                 raise ValueError("Catalog order requires a sort field")
             sorting, direction = default_order, None
+        from .paper_organization import filters
+        clauses, organization_args = filters({"favorite": favorite, "tag": tag}, "papers.id", "papers.metadata")
+        if clauses:
+            where += " AND " + " AND ".join(clauses)
+            args += tuple(organization_args)
         total = self.db.execute("SELECT count(*) FROM " + source + where, args).fetchone()[0]
         rows = self.db.execute("SELECT papers.id FROM " + source + where + " ORDER BY " + sorting + " LIMIT ? OFFSET ?", args + (limit, offset)).fetchall()
         return {"items": [self.get(row[0], include_archived=archived) for row in rows], "total": total,
@@ -323,7 +334,7 @@ class Papers:
                 # A DOI metadata record may precede the successful PDF download.
                 # Keep its bibliography and user edits, but carry the actual
                 # attachment evidence into both the catalog and embedded CSL.
-                merged = {key: value for key, value in current.items() if key not in {"id", "pdf", "pdf_filename", "created", "modified", "archived", "archived_at"}}
+                merged = {key: value for key, value in current.items() if key not in {"id", "pdf", "pdf_filename", "created", "modified", "archived", "archived_at", "favorite", "manual_tags", "organization_modified"}}
                 for field in ("source_pdf_sha256", "parse", "acquisition"):
                     if item.get(field) not in (None, "", [], {}):
                         merged[field] = item[field]
@@ -522,7 +533,7 @@ class Papers:
             old = self.get(id)
             if expected_modified is not None and expected_modified != old["modified"]:
                 raise PaperConflictError(old)
-            protected = {"id", "pdf", "pdf_filename", "page_count", "created", "modified", "provenance", "archived", "archived_at"}
+            protected = {"id", "pdf", "pdf_filename", "page_count", "created", "modified", "provenance", "archived", "archived_at", "favorite", "manual_tags", "organization_modified"}
             merged = {k: v for k, v in old.items() if k not in protected}
             merged.update({k: v for k, v in metadata.items() if k not in protected})
             value = csl_item(merged)

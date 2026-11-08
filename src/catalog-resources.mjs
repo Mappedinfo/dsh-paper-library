@@ -54,14 +54,16 @@ export async function catalogResources(input, { resourceList, slidesList }) {
   if (!['all', 'paper', 'dataset', 'slides'].includes(kind)) throw new Error('不支持的目录类型。');
   if (typeof query !== 'string' || query.length > 500) throw new Error('检索词必须是 500 字以内的文本。');
   if (typeof archived !== 'boolean' || !sorts.has(sort) || !['asc', 'desc'].includes(order)) throw new Error('目录筛选或排序无效。');
+  if (input.favorite !== undefined && typeof input.favorite !== 'boolean' || input.tag !== undefined && (typeof input.tag !== 'string' || input.tag.length > 200)) throw new Error('收藏或标签筛选无效。');
   if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10000000 || !Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new Error('目录分页超出范围。');
   const params = { ...input, action: 'resource_list', kind, query, archived, sort, order };
   // Slides do not belong to reading projects or the paper/dataset recycle bin.
   // Avoid touching their metadata entirely when they cannot occur in the result.
-  if (kind === 'slides' && (archived || input.project)) {
+  const paperScope = input.favorite === true || Boolean(input.tag?.trim());
+  if (kind === 'slides' && (archived || input.project || paperScope)) {
     return { items: [], total: 0, offset, limit, truncated: false, next_offset: null, kind, archived, counts: {}, sort, order, search_mode: 'slides-title' };
   }
-  if (kind === 'paper' || kind === 'dataset' || archived || input.project) {
+  if (kind === 'paper' || kind === 'dataset' || archived || input.project || paperScope) {
     const { active_count: _partialActiveCount, ...result } = await resourceList({ ...params, offset, limit });
     return result;
   }

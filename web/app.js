@@ -3,13 +3,14 @@
 // Catalogs stay paginated; continuous reading retains at most three nearby PDF pages.
 const $ = (id) => document.getElementById(id);
 const state = {
-  items: [], total: 0, libraryCount: 0, offset: 0, limit: 40, query: '', sort: 'modified', order: 'desc', archived: false, kind: 'all', active: null, tab: 'reader',
+  items: [], total: 0, libraryCount: 0, offset: 0, limit: 40, query: '', sort: 'modified', order: 'desc', archived: false, kind: 'all', favorite: false, tag: '', active: null, tab: 'reader',
   page: 1, pageCount: 0, pageData: null, selection: null, annotations: [], noteOffset: 0,
   models: [], harnessContext: null, modelTicket: 0, library: '', project: '', listTicket: 0, itemTicket: 0, pageTicket: 0, metadataDraft: null, openedId: null,
   pageWanted: null, pageRunning: false, pagePromise: null, annotationDraft: null, aiBusy: false,
 };
 let paperChatUI;
 let workbenchUI;
+let organizationUI;
 let knowledgeGraphUI;
 let pdfReader;
 let readingPanels;
@@ -123,8 +124,11 @@ async function loadList() {
   errorAt('library-error', null);
   if (!state.items.length) $('paper-list').replaceChildren(el('div', 'loading', '正在检索文献…'));
   try {
-    const result = await api('catalog_resource_list', { kind: state.kind, query: state.query, limit: state.limit, offset: state.offset, sort: state.sort, order: state.order, archived: state.archived, ...(state.project ? { project: state.project } : {}) });
+    const result = await api('catalog_resource_list', { kind: state.kind, query: state.query, limit: state.limit, offset: state.offset, sort: state.sort, order: state.order, archived: state.archived, favorite: state.favorite, tag: state.tag, ...(state.project ? { project: state.project } : {}) });
     if (ticket !== state.listTicket) return;
+    // Removing a star/tag can empty the last filtered page; return to the last
+    // existing page rather than showing an impossible range such as 41–40.
+    if((state.favorite||state.tag)&&!result.items?.length&&state.offset>0){state.offset=Math.max(0,Math.floor(((result.total||1)-1)/state.limit)*state.limit);return loadList();}
     state.items = result.items || []; state.total = result.total || 0;
     if (result.active_count !== undefined) { state.libraryCount = result.active_count; $('item-count').textContent = result.active_count; }
     renderList();
@@ -159,14 +163,16 @@ function renderList() {
     if (item.pdf) footer.append(el('span', 'pdf-chip', 'PDF'));
     if (item.journal_rankings?.length) footer.append(el('span', 'chip', window.PaperWorkbench?.ranking(item)));
     if (item.citekey) footer.append(el('span', 'card-key', item.citekey));
-    for (const tag of tags(item).slice(0, 3)) footer.append(el('span', 'chip', tag));
+    if(item.resource_kind==='dataset')for (const tag of tags(item).slice(0, 3)) footer.append(el('span', 'chip', tag));
     if (!footer.children.length) footer.append(el('span', 'chip', item.citekey || typeNames[item.type] || '文献资料'));
-    card.append(footer); fragment.append(card);
+    card.append(footer);
+    if(organizationUI && (!item.resource_kind || item.resource_kind==='paper')){const entry=el('article',`paper-entry${selected?' selected':''}`);entry.append(card,organizationUI.actions(item,{compact:true}));fragment.append(entry);}else fragment.append(card);
   }
   if (!state.items.length) fragment.append(emptyState('没有匹配的条目', state.project && state.kind==='slides' ? '演示文稿不属于阅读项目；切回全部条目查看。' : state.query ? '试试更短的检索词。' : '导入文献或数据集，或新建演示文稿。'));
   $('paper-list').replaceChildren(fragment);
-  $('search-summary').textContent = state.query ? `检索结果 · ${state.total}` : '全部条目';
-  if (!state.query && !state.archived && !state.project && state.kind === 'all') { $('item-count').textContent = state.total; state.libraryCount = state.total; }
+  $('search-summary').textContent = state.query || state.favorite || state.tag ? `筛选结果 · ${state.total}` : '全部条目';
+  if (!state.query && !state.archived && !state.project && !state.favorite && !state.tag && state.kind === 'all') { $('item-count').textContent = state.total; state.libraryCount = state.total; }
+  organizationUI?.sync();
   renderWelcome();
   if(typeof refreshBoardShelf==='function')void refreshBoardShelf();
   $('list-range').textContent = state.total ? `${state.offset + 1}–${Math.min(state.offset + state.limit, state.total)} / ${state.total}` : '0 条';
@@ -272,7 +278,7 @@ async function openResource(item){
   const details = [authors(item), year(item), item['container-title']].filter(Boolean);
   $('paper-authors').textContent = details.join(' · ');
   $('paper-type').textContent = `${typeNames[item.type] || '文献'}${item.citekey ? ` / ${item.citekey}` : ''}`;
-  $('paper-tags').replaceChildren(...tags(item).map((tag) => el('span', 'chip', tag)));
+  $('paper-tags').replaceChildren(...(organizationUI?[organizationUI.actions(item)]:tags(item).map((tag) => el('span', 'chip', tag))));
   const fileNotes = [item.pdf_filename ? `PDF：${item.pdf_filename}` : '', item.parse?.needs_review ? '自动识别的文献资料待核对' : ''].filter(Boolean);
   $('paper-file-meta').textContent = fileNotes.join(' · '); $('paper-file-meta').hidden = !fileNotes.length; $('paper-file-meta').classList.toggle('needs-review', Boolean(item.parse?.needs_review));
   $('download-pdf').hidden = !item.pdf; $('download-pdf').href = `./pdf/${encodeURIComponent(item.id)}`;
@@ -1389,7 +1395,7 @@ const refreshModels = el('button', 'button subtle', '刷新模型');
 refreshModels.id = 'refresh-models';
 refreshModels.type = 'button'; refreshModels.style.marginTop = '6px'; refreshModels.style.padding = '3px 0'; refreshModels.style.fontSize = '10px';
 refreshModels.addEventListener('click', () => { announceReady(); loadModels(); }); $('model-status').after(refreshModels);
-workbenchUI = window.PaperWorkbench?.create({ state, api, persistence, loadList, openPaper: id => openResource(state.items.find(item => item.id === id) || {id}), toast, el, resource: () => resourceUI,
+workbenchUI = window.PaperWorkbench?.create({ state, api, persistence, loadList, organization: () => organizationUI, openPaper: id => openResource(state.items.find(item => item.id === id) || {id}), toast, el, resource: () => resourceUI,
   tableChanged: table => { paperChatUI?.visible(!table && state.tab!=='graph' && readerPaperId===state.active?.id && (readingPanels?.visible('chat') ?? state.tab==='conversation')); queueMicrotask(()=>{readingShell?.sync();resourceUI?.sync();}); },
   selectPaper: item => { if(item.resource_kind === 'dataset'||item.resource_kind === 'slides'){void openResource(item);return;}state.catalogSlideId=null;state.catalogSlideTitle=null;resourceUI?.hide();knowledgeUI?.hide();publishReaderState();readerStateReady=false;++state.itemTicket; ++state.pageTicket; state.pageWanted=null; clearPage(); state.active=item; state.openedId=item.id; workbenchUI?.paperChanged(item); readingPanels?.paperChanged(item);void languageUI?.paperChanged(item);renderPaperHeader(); renderList();publishPaperWorkspace(item); },
   changed: (item, removedId) => {
@@ -1397,6 +1403,11 @@ workbenchUI = window.PaperWorkbench?.create({ state, api, persistence, loadList,
     else if (item && state.active?.id === item.id) { state.active=item; renderPaperHeader(); if(state.tab==='graph')void loadGraph(); }
   },
 });
+organizationUI = window.PaperOrganization?.create({state,api,loadList,toast,root:document.querySelector('.library-filterbar'),onChanged:patch=>{
+  for(const item of state.items)if(item.id===patch.id)Object.assign(item,patch);
+  if(state.active?.id===patch.id){Object.assign(state.active,patch);$('paper-tags').replaceChildren(organizationUI.actions(state.active));}
+  renderList();
+}});
 const libraryGraphDialog=el('dialog','library-graph-dialog');libraryGraphDialog.id='library-graph-dialog';libraryGraphDialog.setAttribute('aria-label','全库知识图谱');
 const libraryGraphHeader=el('header','library-graph-header'),libraryGraphTitle=el('strong','','Paper Library · 全库视角'),libraryGraphClose=el('button','button subtle','关闭');libraryGraphClose.type='button';libraryGraphClose.addEventListener('click',()=>void closeLibraryGraph());const libraryGraphRefresh=el('button','button subtle','刷新');libraryGraphRefresh.id='library-graph-refresh';libraryGraphRefresh.type='button';libraryGraphRefresh.addEventListener('click',()=>void libraryGraphUI?.reload());libraryGraphHeader.append(libraryGraphTitle,libraryGraphRefresh,libraryGraphClose);
 const libraryGraphRoot=el('section','library-graph-content');libraryGraphRoot.id='library-graph-content';libraryGraphDialog.append(libraryGraphHeader,libraryGraphRoot);document.body.append(libraryGraphDialog);

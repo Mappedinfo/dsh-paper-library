@@ -6,11 +6,19 @@ import { join } from 'node:path'
 import { createFetchHandler } from '../src/http.mjs'
 import { catalogResources } from '../src/catalog-resources.mjs'
 
+test('catalog organization client is served through the static allowlist', async () => {
+  const handler = createFetchHandler()
+  const response = await handler(new Request('http://localhost/paper-organization.js'))
+  assert.equal(response.status, 200)
+  assert.match(response.headers.get('content-type'), /javascript/)
+  assert.match(await response.text(), /window\.PaperOrganization/)
+})
+
 test('scopes that exclude slides never read their metadata', async () => {
   let scanned = false
   const resourceList = async input => ({ items: [], total: 0, offset: input.offset, limit: input.limit, counts: {} })
   const slidesList = async () => { scanned = true; throw new Error('synthetic broken slide metadata') }
-  for (const input of [{ kind: 'paper' }, { kind: 'dataset' }, { kind: 'all', archived: true }, { kind: 'all', project: 'p-synthetic' }, { kind: 'slides', archived: true }, { kind: 'slides', project: 'p-synthetic' }]) {
+  for (const input of [{ kind: 'paper' }, { kind: 'dataset' }, { kind: 'all', archived: true }, { kind: 'all', project: 'p-synthetic' }, { kind: 'slides', archived: true }, { kind: 'slides', project: 'p-synthetic' }, {kind:'all',favorite:true}, {kind:'all',tag:'#method'}, {kind:'slides',favorite:true}, {kind:'slides',tag:'#method'}]) {
     const result = await catalogResources(input, { resourceList, slidesList })
     assert.equal(result.total, 0)
     assert.equal(scanned, false)
@@ -58,6 +66,17 @@ test('catalog merges synthetic papers, datasets and presentations before sorting
   const found = await call({ action: 'catalog_resource_list', kind: 'slides', query: 'A talk' })
   assert.deepEqual(found.items.map(item => item.id), [a.id])
   assert.equal((await call({ action: 'resource_list', kind: 'all' })).total, 2)
+  const paper = (await call({action:'resource_list',kind:'paper'})).items[0]
+  const organized = await call({action:'paper_organization_update',id:paper.id,favorite:true,tags:['#method/deep/model'],expected_organization_modified:null})
+  assert.deepEqual(organized.manual_tags, ['#method/deep/model'])
+  assert.equal((await call({action:'get',id:paper.id})).favorite,true)
+  for(const filter of [{favorite:true}, {tag:'#method'}, {tag:'#method/deep',favorite:true}]) {
+    const result = await call({action:'catalog_resource_list',kind:'all',...filter})
+    assert.equal(result.total,1)
+    assert.equal(result.items[0].id,paper.id)
+    assert.equal((await call({action:'catalog_resource_list',kind:'slides',...filter})).total,0)
+  }
+  assert.deepEqual((await call({action:'paper_tags_list',query:'method'})).items.map(value=>value.tag),['#method','#method/deep','#method/deep/model'])
   assert.equal((await call({ action: 'catalog_resource_list', kind: 'slides', archived: true })).total, 0)
   const project = (await call({ action: 'project_create', title: 'Synthetic reading project' })).project
   assert.equal((await call({ action: 'catalog_resource_list', kind: 'slides', project: project.id })).total, 0)

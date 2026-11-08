@@ -192,6 +192,9 @@ def csl_item(raw):
     if not isinstance(raw, dict):
         raise ValueError("metadata must be an object")
     item = dict(raw)
+    # User organization has its own catalog table, never embedded into source CSL.
+    for key in ("favorite", "manual_tags", "organization_modified"):
+        item.pop(key, None)
     zotero = "itemType" in item or "creators" in item
     if zotero:
         types = {"journalArticle": "article-journal", "conferencePaper": "paper-conference", "book": "book", "bookSection": "chapter", "thesis": "thesis", "report": "report", "preprint": "article", "webpage": "webpage", "dataset": "dataset"}
@@ -594,6 +597,9 @@ def dispatch(request):
     library = Library(root)
     try:
         action = request.get("action")
+        if action in {"paper_organization_update", "paper_tags_list"}:
+            from . import paper_organization
+            return paper_organization.update(library, request) if action.endswith("update") else paper_organization.listing(library, request)
         if isinstance(action, str) and action.startswith("latex_"):
             # LaTeX projects own a real folder, not the managed PDF tree.
             from . import latex
@@ -652,7 +658,7 @@ def dispatch(request):
             return {"path": str(path), "filename": path.name}
         actions = {
             "annotation_translation_result": ("id", "annotation_ref", "request_key", "text", "model"),
-            "list": ("query", "limit", "offset", "sort", "order", "archived"), "get": ("id", "include_archived"), "create": ("metadata",), "archive": ("id",), "restore": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page_layout": ("id",), "page": ("id", "page", "scale", "include_layout", "render_width"),
+            "list": ("query", "limit", "offset", "sort", "order", "archived", "favorite", "tag"), "get": ("id", "include_archived"), "create": ("metadata",), "archive": ("id",), "restore": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page_layout": ("id",), "page": ("id", "page", "scale", "include_layout", "render_width"),
             "annotations": ("id",), "annotate": ("id", "page", "type", "rects", "paths", "width", "annotation_id", "parent_id", "text", "comment", "author", "color"), "annotation_update": ("id", "annotation_id", "comment"), "annotation_delete": ("id", "annotation_id"),
             "linked_handwriting_text": ("id", "parent_id", "transcript", "transcription_source", "expected_version", "request_id"),
             "handwriting_get": ("id", "annotation_id"), "handwriting_save": ("id", "annotation_id", "board", "transcript", "transcription_source", "expected_version", "request_id"),

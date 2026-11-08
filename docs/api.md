@@ -580,3 +580,16 @@ An independent deployment without a DSH migration marker uses local disk prefere
 reading.legacy_budget_omissions 是旧摘要图因预算省略的判断数；reading.relation_limitations 是关系类型提示数，两者不能当成同一种“遗漏项”。新任务 question_summary 分别提供 graph_budget_omissions / relation_limitations，旧 projection_limitations 总和保留兼容。摘要图的有界显示不再单独导致新任务 partial；回答缺失、来源未覆盖或保存失败仍保留真实未完成状态。旧任务状态和响应不迁改。
 
 目录只缓存轻量计数和题组位置；正文按所选页／单项读取。旧任务按需兼容，新任务保存 graph_counts 避免总览重复读取全部回答正文。选择不存在的任务、跨题／跨批回答或越界页报错；缺失片段不会作为零项跳过。
+## 论文偏好与手动层级标签
+
+`paper_organization_update` 接收 `id` 以及可选 `favorite`（布尔值）、`tags`（字符串数组，替换该论文的手动标签）。两字段至少提供一个；只更新提供的字段。返回 `{id,favorite,manual_tags,organization_modified}`；论文 `get`、`list`、`resource_list` 也提供这些字段。该数据独立于来源 CSL 元数据，普通资料更新与外部同步不覆盖它，不写入 PDF。
+
+```json
+{"action":"paper_organization_update","id":"synthetic-paper-id","favorite":true,"tags":["#方法/深度学习/Transformer"]}
+```
+
+编辑器可提交 `expected_organization_modified`：首次保存使用 `null`，之后使用读取到的版本字符串；不匹配时拒绝更新并提示重新读取。省略时按最新记录仅修改指定字段。缺失、数据集或已归档论文不可更新。手动标签最多 100 个，单条含 `#` 最多 200 字符，最多 8 层；可省略开头 `#`，保存时补齐并去除各层两端空白、去重，拒绝空层和控制字符。
+
+`list`、`resource_list`、`catalog_resource_list` 支持 `favorite:true` 与 `tag:"#方法"`，在分页前筛选，父级包含后代但不匹配仅共享字符前缀的其他标签。标签大小写敏感；来源标签和手动标签共同参与匹配。`false` 或空标签不限制结果；有组织筛选时数据集、Slides 不进入结果，可继续组合现有关键词、项目、类型及回收站条件（`list` 不支持项目参数）。
+
+`paper_tags_list` 接收 `query`（可选，最多 200 字符）、`offset`（默认 0）、`limit`（默认 40，最多 100），及可选 `favorite`、`archived`、`project`。返回 `{items:[{tag,count}],total,offset,limit,next_offset}`，含已有来源标签、手动标签和它们的父级。每级计数按匹配论文去重，搜索标签后分页，不解析 PDF。`%`、`_` 等搜索字符按字面处理。
