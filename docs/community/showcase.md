@@ -1,6 +1,6 @@
 > **非官方项目，由社区成员独立开发和维护。**
 
-项目地址 [Mappedinfo/dsh-paper-library](https://github.com/Mappedinfo/dsh-paper-library) · [安装与使用](https://github.com/Mappedinfo/dsh-paper-library#安装与开发) · [独立画板](https://mappedinfo.github.io/dsh-paper-library/)
+项目地址 [Mappedinfo/dsh-paper-library](https://github.com/Mappedinfo/dsh-paper-library) · [安装与使用](https://github.com/Mappedinfo/dsh-paper-library#安装与开发) · [npm 包](https://www.npmjs.com/package/@mappedinfo/dsh-paper-library) · [独立画板](https://mappedinfo.github.io/dsh-paper-library/)
 
 **Paper Library 是 DeepSeek Harness 里的本地文献与研究工作台。** 它把文献收集、PDF 阅读与批注、AI 对话、知识整理、文献画板、LaTeX 写作和 Slides 放在同一个插件里。
 
@@ -8,13 +8,23 @@
 
 插件独立于 Zotero 运行，也支持导入 Zotero 导出的资料；复用 DSH 的模型服务、会话和 Web 认证，无需修改 Harness 源码。
 
+### 近期更新：把阅读中的问题留在原文旁
+
+当前 `main` 已加入以下功能（2026-11-09）。npm 发布版仍为 `0.2.5`；想体验这些更新，请使用源码安装。
+
+- **同一处划线，连续追问**：备注 1、备注 2 和 AI 回复都跟在原批注下，各有提问入口；也可以批量选中几条批注，一次提问。矩形框和自由笔画保存为原生 PDF 批注，区域截图帮助回看图片细节。
+- **按结构读论文**：侧栏直接浏览公式、图片、表格和算法，点击回到原页。支持旋转表格转正预览、流程图候选裁剪，以及从明确循环／分支伪代码构建流程图。提取依赖版面与文本规则，不依赖 LLM；复杂表格、扫描页及未识别结构仍需核对原页。
+- **把语言学习放在阅读旁边**：「语言与词条」支持大窗口／侧边窗切换，选文时保持打开；显示当前翻译目标，并提供语法纠错、精简表达、学术表达、逻辑衔接和通俗解释。翻译中有学习价值的词组可积累为双语词条，保留原句、译文和文献来源。
+- **更容易找回文献与证据**：收藏论文，用 `#方法/深度学习` 等层级标签筛选；全文分析结果逐层浏览，论文引用模式展示有原文依据的引用关系。参考文献按规则解析，无法可靠识别的条目保留原文，不猜测连线。
+- **后台工作可控**：结构扫描等阅读操作空闲后逐页运行，支持暂停与续扫。资源设置有节能 256 MiB、均衡 512 MiB、高性能 1024 MiB及自定义档位；这些是处理与缓存目标，不是整个 DSH 的内存硬上限。达到预算时显示原因并保留进度。
+
 ### 可下载的使用说明与 Slides 示例
 
 把 [8 页 PDF 手册](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/demo/guide.pdf)导入文献库阅读批注；把 [PlainDeck ZIP](https://github.com/Mappedinfo/dsh-paper-library/raw/refs/heads/main/docs/demo/slides.zip)导入 Slides，修改内容再导出。另提供 [10 页动态可编辑 PPTX](https://github.com/Mappedinfo/dsh-paper-library/raw/refs/heads/main/docs/demo/slides.pptx)、[静态 PDF](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/demo/slides.pdf) 和[带批注的手册副本](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/demo/guide-annotated.pdf)。说明本身就是演示材料，不含私人资料。[主稿与复现方法](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/demo/README.md)
 
 Slides 集成 PlainDeck，支持主题、原生表格、制作指导、放映以及 PPTX／HTML／ZIP 导出。DSH 原生工具可查找并导出已保存项目。PPTX 保留可编辑对象、入场动画与镜头缩放；独立合成稿已由用户在 PowerPoint 放映确认，WPS 尚未验收。ZIP 可以重新导入，PPTX 导入目前不支持。
 
-设置中可切换墨绿铜金、深海蓝灰或跟随 DSH。阅读、知识、写作和 Slides 分别使用墨绿、紫色、海蓝与铜金；明暗跟随宿主，PDF 保持原色。新增功能以当前源码为准，不代表 npm 已发布同等版本。
+设置中可切换墨绿铜金、深海蓝灰、石墨中性、樱粉柔光、杏橙暖光或跟随 DSH。阅读、知识、写作和 Slides 分别使用墨绿、紫色、海蓝与铜金；界面明暗跟随宿主，PDF 可单独开启深色显示和仿生阅读；显示切换不改原文件。新增功能以当前源码为准，不代表 npm 已发布同等版本。
 
 ![墨绿铜金主题](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/demo/theme-jade.png)
 
@@ -32,11 +42,11 @@ Slides 集成 PlainDeck，支持主题、原生表格、制作指导、放映以
 
 ### PDF 阅读、批注与论文对话
 
-阅读器支持连续滚动、缩放、全屏和可调整宽度的侧栏。高亮、下划线、删除线、便笺与评论写入管理副本 PDF；文中批注与侧栏条目可以互相定位。批注随 PDF 导出，导入的原文件保持不变。
+阅读器支持连续滚动、缩放、全屏和可调整宽度的侧栏。高亮、下划线、删除线、便笺、矩形框、自由笔画与评论写入管理副本 PDF；文中批注与侧栏条目可以互相定位。批注随 PDF 导出，导入的原文件保持不变。
 
-每篇论文有自己的 **DSH 对话**。可以选择几条批注、补上临时选文，一起放进主输入框，再写问题发送；插件内与 DSH 主页面使用同一段历史。关联的 AI 回复可以保存在对应批注下，明确标为 AI 内容，回看时仍能找到当时引用的原文。
+每篇论文有自己的 **DSH 对话**。可以对一条选文直接提问，也可先写备注，或批量选择几条批注一次提问；另有放入主输入框的草稿入口。插件内与 DSH 主页面使用同一段历史。关联的 AI 回复可以保存在对应批注下，明确标为 AI 内容，回看时仍能找到当时引用的原文。
 
-可选的 **实时伴学** 会在保存带文字评论的批注后回应释义、追问或联想。选文还可以直接翻译、优化表述，难词本保留原句、论文出处和可编辑释义。
+可选的 **实时伴学** 可按批注事件排队回应；侧栏备注自动保存本身不触发模型，点「问 DSH」才提交。选文可以直接翻译、优化表述；「语言与词条」保留原句、论文出处和可编辑释义。
 
 ![在阅读练习中高亮、划线，并记录自己的复述和问题](https://raw.githubusercontent.com/Mappedinfo/dsh-paper-library/main/docs/images/learning-annotations.jpg)
 
@@ -95,7 +105,7 @@ Slides 集成 PlainDeck，支持主题、原生表格、制作指导、放映以
 
 安装后从 DSH 右侧面板打开「文献库」或「画板」。插件提供文献、引用、批注、画板等工具和配套技能，可以在 DSH 会话中直接调用；设置中的偏好与插件界面共用。
 
-**完整体验本文展示的当前功能，请按 [README](https://github.com/Mappedinfo/dsh-paper-library#安装与开发) 安装 `main` 源码。** 本文新增主题与动态演示对应 2026-11-06 源码，npm 发版与源码进度分别维护，功能以实际安装版本为准。源码安装需要 Node、Python、uv 和已构建的本地 DSH checkout。
+**完整体验本文展示的当前功能，请按 [README](https://github.com/Mappedinfo/dsh-paper-library#安装与开发) 安装 `main` 源码。** 本文功能说明更新至 2026-11-09；npm 当前发布版为 `0.2.5`，源码与 npm 分别维护，功能以实际安装版本为准。现有演示截图和下载手册仍对应其复现记录中的版本。源码安装需要 Node、Python、uv 和已构建的本地 DSH checkout。
 
 资料和状态保存在运行 DSH 的本机；使用模型功能时，相应原文、批注或稿件会提交给已配置的 DSH 模型服务。PDF 处理按需运行，阅读时只渲染附近页面；没有常驻向量模型，不会在后台自动解析现有全库 PDF。自动整理针对导入或选中的论文，扫描页尚无全文 OCR。元数据检索、AI 草稿和真实模型质量的验证范围见[验证记录](https://github.com/Mappedinfo/dsh-paper-library/blob/main/docs/validation.md)。
 

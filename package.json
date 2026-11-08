@@ -232,5 +232,18 @@
     "@types/react-dom": "19.2.4",
     "esbuild": "^0.25.0",
     "typescript": "5.7.3"
-  }
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "deepseek-harness-plugin",
+    "paper-library",
+    "literature-management",
+    "pdf-annotation",
+    "ai-reading",
+    "knowledge-graph",
+    "citation-management",
+    "latex",
+    "plaindeck"
+  ]
 }

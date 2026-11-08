@@ -63,3 +63,9 @@ before recording success. `--verify` reads the saved topic without changing it.
 `docs/demo/` 的说明主稿、PDF、PlainDeck 源项目与 PPTX 共用公开的使用说明。`scripts/build-user-guide.mjs` 生成文件，`scripts/capture-guide-demo.mjs` 用隔离合成库操作实际主题开关并写入一条 PDF 批注。[复现与验证边界](../demo/README.md)。
 
 `update-2026-11-06.md` 是现有讨论下的新进展评论，`update-2026-11-06.json` 保存发布回执；旧发版评论保持原样。当前 `showcase.json` 指向这份新评论，仍由 `announce-release.mjs --publish` 发布并读回核对。主帖由 `publish-discussion.mjs --update` 更新。先推送演示文件，再发布下载链接。
+
+## 仓库首页与讨论更新（2026-11-09）
+
+README 顶部使用实时 npm 版本／下载量徽章，以及 DSH 社区插件、讨论和原创代码许可入口。GitHub About 的网站指向 Discussion #6623；Topics 包括 dsh、deepseek-harness、deepseek-harness-plugin、文献管理、PDF 批注、图谱、LaTeX 与 PlainDeck。包源码补齐 keywords，需下次 npm 发版才更新到 registry。
+
+本次原位更新 `showcase.md` 主帖与标题，保留既有截图及评论历史；没有另发重复宣传评论。近期功能说明以 main 为准，npm registry 核实仍为 0.2.5，未发布新包，也未修改 npm dist-tags。发布脚本读回核对后的回执仍保存在 `discussion.json`。
