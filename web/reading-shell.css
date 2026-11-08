@@ -71,7 +71,8 @@ body.handwriting-tools-visible{--workbench-height:145px}
 
 /* The linked target is still visible in its annotation card. */
 .annotation-card.is-handwriting{border-color:var(--accent,#2455a4);box-shadow:inset 3px 0 var(--accent,#2455a4)}
-.annotation-card .annotation-actions .button[data-note-action="handwriting"]{flex-basis:100%;width:100%;min-height:44px;padding:10px 14px;font-size:14px;line-height:1.4;font-weight:600;justify-content:center;border:1px solid var(--dsw-alias-link,var(--accent,#2455a4));background:var(--surface,#fff);color:var(--dsw-alias-link,var(--accent,#2455a4))}
+.annotation-primary-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;flex-basis:100%;width:100%}
+.annotation-card .annotation-primary-actions .button{box-sizing:border-box;width:100%;min-width:0;min-height:44px;padding:10px 14px;font-size:14px;line-height:1.4;font-weight:600;justify-content:center;border:1px solid var(--dsw-alias-link,var(--accent,#2455a4));background:var(--surface,#fff);color:var(--dsw-alias-link,var(--accent,#2455a4))}
 .annotation-card .annotation-actions .button[data-note-action="handwriting"][aria-pressed="true"]{background:var(--accent,#2455a4);color:var(--on-accent,#fff)}
 .linked-handwriting-summary textarea{display:block;width:100%;min-height:96px;margin-block:8px;resize:vertical}
 .linked-handwriting-summary p{white-space:pre-wrap;overflow-wrap:anywhere}
