@@ -105,12 +105,13 @@ window.PaperReadingShell = (() => {
     let zoom=1, zoomSaveTimer=null;
     const zoomGroup=node('span',null,'reader-zoom');
     const zoomOut=button('reader-zoom-out','−',()=>setZoom(zoom/1.2));zoomOut.title='缩小';
-    const percent=node('input');percent.id='reader-zoom-percent';percent.type='number';percent.min='25';percent.max='400';percent.step='5';percent.value='100';percent.setAttribute('aria-label','PDF 缩放百分比');percent.title='缩放百分比（25–400）';
+    const percent=node('input');percent.id='reader-zoom-percent';percent.type='number';percent.min='25';percent.max='400';percent.step='5';percent.value='';percent.placeholder='全宽';percent.setAttribute('aria-label','PDF 缩放百分比，相对于全宽');percent.title='相对于全宽的缩放百分比（25–400）；全宽随阅读区域自动适配';
     const zoomIn=button('reader-zoom-in','＋',()=>setZoom(zoom*1.2));zoomIn.title='放大';
-    const zoomFit=button('reader-zoom-fit','全宽',()=>setZoom(1));zoomFit.title='恢复全宽自适应';
-    function zoomChanged(value){if(!Number.isFinite(value))return;zoom=value;percent.value=String(Math.round(zoom*100));if(zoomSaveTimer!==null)window.clearTimeout(zoomSaveTimer);if(persistence)zoomSaveTimer=window.setTimeout(()=>{zoomSaveTimer=null;void patchLayout({zoom});},250);}
+    const zoomFit=button('reader-zoom-fit','全宽',()=>{const applied=reader()?.fitToWidth();if(applied!==undefined)zoomChanged(applied);});zoomFit.title='适配当前阅读区域宽度';zoomFit.setAttribute('aria-pressed','true');
+    function showZoom(){const fit=Math.abs(zoom-1)<.001;percent.value=fit?'':String(Math.round(zoom*100));zoomFit.setAttribute('aria-pressed',String(fit));}
+    function zoomChanged(value){if(!Number.isFinite(value))return;zoom=value;showZoom();if(zoomSaveTimer!==null)window.clearTimeout(zoomSaveTimer);if(persistence)zoomSaveTimer=window.setTimeout(()=>{zoomSaveTimer=null;void patchLayout({zoom});},250);}
     function setZoom(value){const applied=reader()?.setZoom(value);if(applied===undefined)return;zoomChanged(applied);}
-    const commitZoom=()=>{const value=Number(percent.value);if(Number.isFinite(value))setZoom(value/100);percent.value=String(Math.round(zoom*100));};
+    const commitZoom=()=>{if(percent.value.trim()){const value=Number(percent.value);if(Number.isFinite(value))setZoom(value/100);}showZoom();};
     percent.addEventListener('change',commitZoom);
     percent.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();commitZoom();}});
     zoomGroup.append(zoomOut,percent,zoomIn);readerTools.append(zoomGroup);

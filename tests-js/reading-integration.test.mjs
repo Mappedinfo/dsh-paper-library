@@ -104,7 +104,7 @@ function environment({table=false,readerId='paper-a',paper={id:'paper-a',pdf:tru
   const nodes=new Map(),calls=[],visibility=[],panels={annotations:false,metadata:false,chat:false,...panelValues};
   const element=id=>{if(!nodes.has(id))nodes.set(id,{hidden:false,open:false,value:'',dataset:{readingSide:'left'},classList:{toggle(){}},setAttribute(){},removeAttribute(){}});return nodes.get(id);};
   const context={state:{active:paper,tab:'reader',page:1,pageData:null,models:[],annotations:[]},readerPaperId:readerId,readerRestore:snapshot,restoringReader:false,durableReaderLoaded:false,persistence:null,readerStateReady:false,
-    $:element,document:{querySelectorAll:()=>[]},publishWorkspaceState(){},workspaceSnapshot:()=>({section:"paper",current:null,table}),
+    $:element,document:{querySelectorAll:()=>[]},documentElementsUI:null,publishWorkspaceState(){},workspaceSnapshot:()=>({section:"paper",current:null,table}),
     workbenchUI:{isTable:()=>table,setTable:value=>{table=value;calls.push(['table',value]);},header(){},edit:item=>{panels.metadata=true;calls.push(['edit',item.id]);}},
     readingPanels:{show:name=>{panels[name]=true;calls.push(['show',name]);},close:name=>{panels[name]=false;calls.push(['close',name]);},visible:name=>panels[name],setSide:side=>calls.push(['side',side])},
     paperChatUI:{visible:value=>visibility.push(value),available:()=>true,draft:()=>'',context:()=>({annotationRefs:[]}),restoreDraft:value=>calls.push(['draft',value]),restoreContext:value=>calls.push(['context',value])},

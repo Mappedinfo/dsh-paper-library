@@ -602,3 +602,29 @@ test('reference destination navigation restores exact original page, both scroll
   assert.equal(root.scrollTop, 210); assert.equal(root.scrollLeft, 300); assert.equal(scope.returnPosition, null);
   assert.deepEqual(announcedPages, [4, 2], 'Toolbar receives the restored page even when updateWindow sees active unchanged');
 });
+
+test('full width remeasures the pane, fills wide single/spread layouts and clears horizontal panning', () => {
+  const pages = [{page:1,width:595,height:842},{page:2,width:595,height:842}];
+  const root = {clientWidth:1512,scrollLeft:210,scrollTop:120};
+  const slots = pages.map(() => ({outer:{style:{}},sheet:{style:{}}})), row = {style:{}};
+  const scope = vm.createContext({root,pages,slots,strip:{querySelectorAll:()=>[row]},
+    PADDING:12,GAP:16,CAPTION:24,layout:'single',zoom:1,layoutWidth:1100,
+    metrics:pageMetrics(pages,1100),pageMetrics,pageAt,disposed:false,rectangleGesture:null,
+    resizeTimer:null,queue:{snapshot:()=>({residents:[]})},window:{setTimeout:()=>1,clearTimeout(){}},
+    updateWindow(){},endRectangle(){},cancelNavigation(){},onZoomChange(){}});
+  const extract = (start,end) => readerSource.slice(readerSource.indexOf(start),readerSource.indexOf(end,readerSource.indexOf(start)));
+  vm.runInContext(extract('const fitWidth =','const residentLimit =') + extract('function sizeSlots(','/** One invisible') + extract('function resize(anchor)','function clear()') + extract('function fitToWidth()','function setZoom('),scope);
+  scope.fitToWidth();
+  assert.equal(parseFloat(slots[0].outer.style.width),1488,'No 1100 px display cap');
+  assert.equal(root.scrollLeft,0);
+  const fraction=(root.scrollTop-scope.metrics[0].top)/scope.metrics[0].height;
+  root.clientWidth=800;scope.resize();
+  assert.equal(parseFloat(slots[0].outer.style.width),776,'Sidebar resize updates available width');
+  assert.ok(Math.abs((root.scrollTop-scope.metrics[0].top)/scope.metrics[0].height-fraction)<1e-9);
+  scope.layout='spread';scope.zoom=1.8;root.scrollLeft=170;scope.fitToWidth();
+  assert.equal(parseFloat(slots[0].outer.style.width),380);
+  assert.equal(parseFloat(row.style.width),776,'Both pages plus their gap fit inside the pane');
+  assert.equal(root.scrollLeft,0);
+  root.clientWidth=1200;scope.fitToWidth();
+  assert.equal(parseFloat(row.style.width),1176,'Repeated fit remeasures even at zoom 1');
+});

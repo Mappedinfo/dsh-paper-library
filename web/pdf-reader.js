@@ -728,9 +728,8 @@
     function setPenOnly(value) { if (value) { if (inkGesture && inkGesture.pointerType !== 'pen') endInk(false, 'pen_only'); if (markupGesture && markupGesture.pointerType !== 'pen') endMarkup(true); if (rectangleGesture && rectangleGesture.pointerType !== 'pen') endRectangle(true); } return input.setPenOnly(value); }
     const current = (id, ticket) => !disposed && id === paperId && id === getPaper()?.id && ticket === generation;
     function request(action, args, valid) { const task = transport.catch(() => {}).then(() => valid() ? api(action, args) : null); transport = task.catch(() => {}); return task; }
-    // zoom 1 is fit-width; wider layouts scroll horizontally. Mirror the worker
-    // raster caps so resizing never requests a density it cannot return.
-    const fitWidth = () => Math.max(1, Math.min(1100, ((root.clientWidth || 664) - PADDING * 2 - (layout === 'spread' ? GAP : 0)) / (layout === 'spread' ? 2 : 1)));
+    // 显示尺寸跟随阅读区；像素／内存上限由 scaleFor 单独约束。
+    const fitWidth = () => Math.max(1, ((root.clientWidth || 664) - PADDING * 2 - (layout === 'spread' ? GAP : 0)) / (layout === 'spread' ? 2 : 1));
     const residentLimit = () => layout === 'spread' ? MAX_SPREAD_RESIDENT : MAX_RESIDENT;
     const wantedPages = priority => visibleWindow(metrics, root.scrollTop, root.clientHeight, priority, layout);
     function scaleFor(page) { const geometry = pages[page - 1]; return Math.min(rasterCaps.get(page) || 8, 8, Math.sqrt(16000000 / (geometry.width * geometry.height)), 8192 / geometry.width, 8192 / geometry.height, Math.max(.2, layoutWidth / geometry.width * Math.min(3, window.devicePixelRatio || 1))); }
@@ -1277,6 +1276,13 @@
       if (tint) root.style.setProperty('--pdr-selection', tint);
       lastSelection = '';
     }
+    function fitToWidth() {
+      endRectangle(true); cancelNavigation();
+      zoom = 1;
+      // 即使缩放值未变，也重读当前容器尺寸并清除放大后的横向偏移。
+      resize(); root.scrollLeft = 0;
+      onZoomChange(zoom); return zoom;
+    }
     function setZoom(value, { anchor, point } = {}) {
       const next = Number(value);
       if (!Number.isFinite(next)) throw new Error('缩放比例无效');
@@ -1330,7 +1336,7 @@
     root.addEventListener('gesturestart', gestureStart, { passive: false }); root.addEventListener('gesturechange', gestureChange, { passive: false }); root.addEventListener('gestureend', gestureEnd, { passive: false });
     document.addEventListener('selectionchange', selectionChanged); document.addEventListener('pointerup', nativePointerEnded); document.addEventListener('pointercancel', nativePointerEnded);
     function dispose() { clear(); disposed = true; ink.clear(); overlays.clear(); queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('pointerdown', pointerDown); root.removeEventListener('pointermove', pointerMove); root.removeEventListener('pointercancel', pointerCancel); root.removeEventListener('lostpointercapture', pointerCancel); root.removeEventListener('pointerleave', pointerLeave); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); root.removeEventListener('wheel', wheel); root.removeEventListener('gesturestart', gestureStart); root.removeEventListener('gesturechange', gestureChange); root.removeEventListener('gestureend', gestureEnd); root.removeEventListener('keydown', userNavigate); document.removeEventListener('selectionchange', selectionChanged); document.removeEventListener('pointerup', nativePointerEnded); document.removeEventListener('pointercancel', nativePointerEnded); }
-    return { open, goTo, advance, refresh, clear, dispose, setTool, setZoom, getZoom: () => zoom, setLayout, getLayout: () => layout, setReadingAppearance, getReadingAppearance: () => ({ ...readingAppearance }), resize, revealAnnotation, revealRegion, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, layout, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
+    return { open, goTo, advance, refresh, clear, dispose, setTool, setZoom, fitToWidth, getZoom: () => zoom, setLayout, getLayout: () => layout, setReadingAppearance, getReadingAppearance: () => ({ ...readingAppearance }), resize, revealAnnotation, revealRegion, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, layout, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
   window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition, normalizeInternalLinks, internalLinkAt, bionicPrefix });
 })();
