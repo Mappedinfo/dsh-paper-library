@@ -702,16 +702,35 @@ async function dismissAnnotation() {
 /** Reader ↔ rail linking: the shared rail keeps its own cards, so linking only
  * scrolls and flashes the matching card and never rewrites the list. */
 let annotationLinkTimer = null;
-function linkAnnotationCard(annotationId) {
+function linkAnnotationCard(annotationId, {block='center'}={}) {
   const escaped = window.CSS?.escape ? window.CSS.escape(annotationId) : annotationId.replace(/["\\]/g, '\\$&');
   const card = document.querySelector(`#annotation-list > .annotation-card[data-annotation-id="${escaped}"]`);
   if (!card) return false;
   for (const other of document.querySelectorAll('#annotation-list > .annotation-card.is-linked')) other.classList.remove('is-linked');
   card.classList.add('is-linked');
-  if (readingPanels?.visible('annotations')) card.scrollIntoView({ block: 'center', inline: 'nearest' });
+  if (readingPanels?.visible('annotations')) card.scrollIntoView({ block, inline: 'nearest' });
   if (annotationLinkTimer !== null) window.clearTimeout(annotationLinkTimer);
   annotationLinkTimer = window.setTimeout(() => { annotationLinkTimer = null; if (card.isConnected) card.classList.remove('is-linked'); }, 2400);
   return true;
+}
+// 只同步批注侧栏，保持 PDF 当前页、缩放和阅读位置。
+function locateCurrentPageAnnotations() {
+  if(!state.active?.pdf)return;
+  const snapshot=pdfReader?.getSnapshot(),page=snapshot?.paperId===state.active.id?snapshot.page:state.page;
+  if(!Number.isInteger(page)||page<1)return;
+  const notes=annotationThreads(state.annotations).notes;
+  let index=-1;
+  for(let i=0;i<notes.length;i++){
+    const candidate=notes[i];if(!Number.isInteger(candidate.page)||candidate.page<1)continue;
+    if(index<0||Math.abs(candidate.page-page)<Math.abs(notes[index].page-page)||
+      (Math.abs(candidate.page-page)===Math.abs(notes[index].page-page)&&candidate.page<notes[index].page))index=i;
+  }
+  if(index<0){toast(state.annotationsTruncated?'已读取的批注中没有可定位的页码。':'当前文献暂无可定位的批注。');return;}
+  readerSearchUI?.clearAnnotationFilter();
+  readingPanels?.show('annotations');
+  state.noteOffset=Math.floor(index/40)*40;renderAnnotations();
+  linkAnnotationCard(notes[index].id,{block:'start'});
+  if(notes[index].page!==page||state.annotationsTruncated)toast(`已定位${state.annotationsTruncated?'已读取批注中':''}第 ${notes[index].page} 页的${notes[index].page===page?'':'最近'}批注。`);
 }
 async function handleNoteAction(event) {
   const button = event.target.closest('[data-note-action]'); if (!button) return;
@@ -1526,7 +1545,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onFocusChange: info => readingShell?.focusChanged(info),
   onStatus: (message,error,options) => readingShell?.status(message,error,options),
 });
-readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,contextChanged:()=>{readerSearchUI?.sync();resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
+readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,locateAnnotations:locateCurrentPageAnnotations,contextChanged:()=>{readerSearchUI?.sync();resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
 documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPanels,getPaper:()=>state.active,toast,sharedSearch:Boolean(window.PaperReaderSearch),
   openSettings:()=>settingsUI?.showResources(),
   navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');await pdfReader?.revealRegion(source);},

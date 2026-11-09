@@ -65,7 +65,7 @@ window.PaperReaderSearch = (() => {
       const supported=Boolean(labels[scope]);scopeToggle.hidden=!supported;scopeToggle.setAttribute('aria-expanded',String(expanded));scopeToggle.classList.toggle('active',Boolean(queries.get(scope)));scopeForm.hidden=!expanded||!supported||Boolean(header?.hidden);
       scopeInput.placeholder=`搜索${labels[scope]||''}${scope==='annotations'?'原文、备注与回复':''}`;scopeInput.setAttribute('aria-label',scopeInput.placeholder);
     }
-    sync();return {sync,filter:group=>filterThreads(group,queries.get('annotations')),dispose(){disposed=true;++ticket;document.removeEventListener('keydown',keydown);document.body.classList.remove('pdf-search-open');scopeToggle.remove();scopeForm.remove();pdfToggle.remove();pdfForm.remove();}};
+    sync();return {sync,clearAnnotationFilter(){queries.delete('annotations');if(scope==='annotations')scopeInput.value='';sync();},filter:group=>filterThreads(group,queries.get('annotations')),dispose(){disposed=true;++ticket;document.removeEventListener('keydown',keydown);document.body.classList.remove('pdf-search-open');scopeToggle.remove();scopeForm.remove();pdfToggle.remove();pdfForm.remove();}};
   }
   return {create,filterThreads};
 })();

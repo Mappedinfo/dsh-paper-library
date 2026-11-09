@@ -20,7 +20,7 @@ window.PaperReadingShell = (() => {
     if (!disclosure?.open || !panel) return;
     window.PaperFloatingWindows?.placeBelow(disclosure.querySelector('summary'), panel);
   }
-  function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence, diagnostics, saveInk, returnToInk, beforeToolChange}) {
+  function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence, diagnostics, saveInk, returnToInk, beforeToolChange, locateAnnotations}) {
     const $ = id => document.getElementById(id);
     const node = (tag, text, className) => { const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n; };
     const button = (id, text, action) => {const n=node('button',text,'button subtle');n.type='button';n.id=id;n.addEventListener('click',action);return n;};
@@ -128,6 +128,7 @@ window.PaperReadingShell = (() => {
       b.title=value==='spread'?'两页并排连续阅读':'单页连续阅读';window.PaperIcons?.decorate(b,icon);layoutButtons[value]=b;layoutGroup.append(b);
     }
     readerTools.append(layoutGroup);selectLayout(reader()?.getLayout?.()||'single');
+    const locateNotes=button('reader-locate-annotations','定位本页批注',()=>locateAnnotations?.());locateNotes.title='滚动批注栏到当前 PDF 页；无批注时定位最近页';readerTools.append(locateNotes);
     if(persistence)void persistence.get('reader:layout').then(value=>{
       if(!layoutTouched&&['single','spread'].includes(value?.readerLayout))selectLayout(value.readerLayout);
       const saved=Number(value?.zoom);if(Number.isFinite(saved)&&saved!==1)setZoom(saved);

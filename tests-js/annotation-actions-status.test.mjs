@@ -77,3 +77,26 @@ test('AI reply copies full text and selected reply text becomes a new remark on 
 });
 
 test('annotation search filters whole threads before pagination and has a truthful empty result', {skip:!JSDOM},async()=>{const f=fixture();try{const w=f.window;w.eval(await readFile(new URL('../web/reader-search.js',import.meta.url),'utf8'));w.state.annotations=Array.from({length:45},(_,i)=>({id:'a'+i,page:1,type:'underline',text:'Source '+i,comment:i===44?'needle':'other'}));w.state.noteOffset=40;w.readerSearchUI={filter:g=>w.PaperReaderSearch.filterThreads(g,'needle')};w.renderAnnotations();assert.equal(w.state.noteOffset,0);assert.equal(f.document.querySelectorAll('.annotation-card').length,1);assert.equal(f.document.querySelector('.annotation-card').dataset.annotationId,'a44');w.readerSearchUI={filter:g=>w.PaperReaderSearch.filterThreads(g,'missing')};w.renderAnnotations();assert.match(f.document.getElementById('annotation-list').textContent,/没有匹配的批注/);assert.doesNotMatch(f.document.getElementById('annotation-list').textContent,/第一条批注/);}finally{f.dom.window.close();}});
+
+test('locate current page clears filtering, opens the rail and crosses pagination without moving PDF', {skip:!JSDOM},()=>{
+ const f=fixture(),w=f.window,d=f.document;try{
+ let filtered=true,opened=false;const scrolls=[];
+ w.HTMLElement.prototype.scrollIntoView=function(options){scrolls.push([this.dataset.annotationId,options.block]);};
+ w.state.active.pdf=true;w.state.page=1;w.state.annotations=Array.from({length:45},(_,i)=>({id:'a'+i,page:i+1,type:'underline',text:'Source '+i}));
+ w.pdfReader={getSnapshot:()=>({paperId:'paper-a',page:43}),goTo:()=>assert.fail('PDF must not navigate')};
+ w.readingPanels={show:name=>{assert.equal(name,'annotations');opened=true;},visible:()=>opened};
+ w.readerSearchUI={filter:g=>filtered?{...g,notes:g.notes.slice(0,1)}:g,clearAnnotationFilter:()=>{filtered=false;}};
+ w.eval(source.slice(source.indexOf('let annotationLinkTimer ='),source.indexOf('async function handleNoteAction(')));
+ w.locateCurrentPageAnnotations();assert.equal(opened,true);assert.equal(filtered,false);assert.equal(w.state.noteOffset,40);assert.deepEqual(scrolls,[['a42','start']]);assert.equal(d.querySelector('.is-linked').dataset.annotationId,'a42');assert.equal(w.state.page,1);
+ }finally{w.close();}
+});
+test('locate nearest annotation prefers preceding page on a tie and reports absent page metadata', {skip:!JSDOM},()=>{
+ const f=fixture(),w=f.window;try{
+ w.HTMLElement.prototype.scrollIntoView=function(){};w.state.active.pdf=true;w.state.page=15;
+ w.pdfReader={getSnapshot:()=>({paperId:'another-paper',page:3})};w.readingPanels={show(){},visible:()=>true};
+ w.state.annotations=[{id:'later',page:17,type:'underline',text:'Later'},{id:'earlier',page:13,type:'underline',text:'Earlier'},{id:'bad',page:0,type:'note',comment:'No page'}];
+ w.eval(source.slice(source.indexOf('let annotationLinkTimer ='),source.indexOf('async function handleNoteAction(')));
+ w.locateCurrentPageAnnotations();assert.equal(f.document.querySelector('.is-linked').dataset.annotationId,'earlier');assert.match(f.messages.at(-1),/第 13 页.*最近/);
+ w.state.annotations=[{id:'bad',page:0}];w.locateCurrentPageAnnotations();assert.match(f.messages.at(-1),/暂无可定位/);
+ }finally{w.close();}
+});

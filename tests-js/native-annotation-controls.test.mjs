@@ -12,8 +12,9 @@ test('rectangle and free-stroke controls use native tools and share explicit col
   for(const id of ['metadata-enrich','catalog-archive']){const b=doc.createElement('button');b.id=id;doc.body.append(b);}
   window.eval(style);window.eval(shell);
   const reader={setTool:(...args)=>calls.push(args),getInkDraft:()=>null,getInkContext:()=>null,isInking:()=>false};
-  const ui=window.PaperReadingShell.create({state:{active:{id:'synthetic',pdf:true},page:1,tab:'reader'},workbench:()=>({isTable:()=>false}),panels:()=>({visible:()=>false}),reader:()=>reader,navigate(){},toast(){},beforeToolChange:async()=>true});
+  const ui=window.PaperReadingShell.create({state:{active:{id:'synthetic',pdf:true},page:1,tab:'reader'},workbench:()=>({isTable:()=>false}),panels:()=>({visible:()=>false}),reader:()=>reader,navigate(){},toast(){},locateAnnotations:()=>calls.push('locate-notes'),beforeToolChange:async()=>true});
   const click=async id=>{doc.getElementById(id).click();await new Promise(resolve=>setImmediate(resolve));};
+  await click('reader-locate-annotations');assert.equal(calls.at(-1),'locate-notes');
   await click('reader-tool-square');assert.equal(ui.tool().type,'square');assert.equal(doc.getElementById('reader-tool-square').textContent,'矩形框');
   assert.equal(doc.getElementById('reader-mode-group').hidden,true);assert.equal(doc.getElementById('reader-ink-width').parentElement.hidden,false);
   const color=doc.getElementById('reader-color'),width=doc.getElementById('reader-ink-width');

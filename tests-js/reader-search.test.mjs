@@ -52,3 +52,5 @@ test('search errors stay visible and retry uses the failed page',async t=>{
  f.get('#pdf-search-row input').value='test';f.submit('#pdf-search-row');await tick();assert.match(f.get('#pdf-search-row [role=status]').textContent,/synthetic error/);
  fail=false;f.get('[aria-label="继续搜索后续位置"]').click();await tick();assert.equal(f.calls.at(-1)[1].page,1);assert.match(f.get('#pdf-search-row [role=status]').textContent,/1 \/ 1 页/);
 });
+
+test('explicit page matching clears only the annotation filter and its visible field',async t=>{const f=fixture(t,async()=>({}));f.get('#sidebar-search-toggle').click();f.get('#sidebar-search-row input').value='word';f.submit('#sidebar-search-row');const group={notes:[{id:'a',text:'different'}],replies:new Map(),unlinked:[]};assert.equal(f.ui.filter(group).notes.length,0);f.ui.clearAnnotationFilter();assert.equal(f.get('#sidebar-search-row input').value,'');assert.equal(f.ui.filter(group).notes.length,1);});
