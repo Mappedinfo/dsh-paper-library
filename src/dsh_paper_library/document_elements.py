@@ -16,8 +16,9 @@ import pymupdf as fitz
 
 from .pdf_analysis_identity import content_version, observed_file
 from . import pdf_preprocessing
+from . import formula_detection
 
-SCHEMA = 'document-elements-v2'
+SCHEMA = 'document-elements-v3'
 KINDS = {'figure', 'table', 'formula', 'algorithm'}
 MAX_PAGE_ELEMENTS = 240
 MAX_TEXT = 20000
@@ -60,8 +61,7 @@ def _validate_policy(value):
     return checked
 
 CAPTION = re.compile(r'^\s*(Figure|Fig\.?|Table|Algorithm|图|表|算法)\s*([A-Z]?\d+(?:\.\d+)*)(?:[.：:\s]|$)', re.I)
-EQUATION_NUMBER = re.compile(r'\([A-Z]?\d+(?:\.\d+)*\)\s*$')
-MATH = re.compile(r'[=∑∏∫√≈≠≤≥∈∂∇⊂⊆→]|[α-ωΑ-Ω]')
+EQUATION_NUMBER = formula_detection.NUMBER
 CODE = re.compile(r'^\s*(?://|\d+\s+|for\b|while\b|if\b|else\b|end\b|return\b|input\b|output\b)', re.I)
 
 
@@ -177,6 +177,8 @@ def _schema(library):
       warnings TEXT NOT NULL, index_bytes INTEGER, PRIMARY KEY(paper_id,version,page))''')
     if 'index_bytes' not in {row['name'] for row in library.db.execute('PRAGMA table_info(document_element_pages)')}:
         library.db.execute('ALTER TABLE document_element_pages ADD COLUMN index_bytes INTEGER')
+    if 'reference_state' not in {row['name'] for row in library.db.execute('PRAGMA table_info(document_element_pages)')}:
+        library.db.execute('ALTER TABLE document_element_pages ADD COLUMN reference_state INTEGER')
     library.db.execute('''CREATE TABLE IF NOT EXISTS document_elements (
       paper_id TEXT NOT NULL, version TEXT NOT NULL, id TEXT NOT NULL,
       page INTEGER NOT NULL, kind TEXT NOT NULL, search_text TEXT NOT NULL,
@@ -246,9 +248,12 @@ def _nearby(lines, rect, distance=95):
     return '\n'.join(selected)
 
 
-def _extract(page, version, page_number=None):
+def _extract(page, version, page_number=None, reference_state=False, section_result=None):
     # 只为有旋转表题的方向建立临时矢量页面，不改原 PDF，不栅格化整页。
     lines = _lines(page)
+    excluded, end_state = formula_detection.reference_mask(lines, (page.rect * page.derotation_matrix).width, reference_state)
+    if section_result is not None:
+        section_result['state'] = end_state if reference_state is not None else None
     turns = set()
     for line in lines:
         match = CAPTION.match(line['text'])
@@ -258,7 +263,9 @@ def _extract(page, version, page_number=None):
             turn = round(-angle / 90) * 90 % 360
             if turn and abs(((angle + turn + 180) % 360) - 180) < 2:
                 turns.add(turn)
-    values, warnings = _extract_upright(page, version, page_number, lines)
+    values, warnings = _extract_upright(page, version, page_number, lines, excluded)
+    if reference_state is None:
+        warnings.append('前文区段尚未扫描，未确定区域的公式暂缓识别；顺序扫描后自动补检。')
     for turn in sorted(turns):
         with fitz.open() as source, fitz.open() as normalized:
             source.insert_pdf(page.parent, from_page=page.number, to_page=page.number,
@@ -287,10 +294,12 @@ def _extract(page, version, page_number=None):
     return values, warnings
 
 
-def _extract_upright(page, version, page_number=None, lines=None):
+def _extract_upright(page, version, page_number=None, lines=None, formula_excluded=None):
     """所有检测使用未旋转坐标；输出统一转换到阅读器显示坐标。"""
     if lines is None:
         lines = _lines(page)
+    if formula_excluded is None:
+        formula_excluded, _ = formula_detection.reference_mask(lines, (page.rect * page.derotation_matrix).width)
     page_number = page_number or page.number + 1
     warnings, elements, result_bytes = [], [], 0
     if len(lines) > 12000:
@@ -477,23 +486,26 @@ def _extract_upright(page, version, page_number=None, lines=None):
     else:
         warnings.append('本页路径较多，跳过线框表格检测；仍保留表题候选。')
     formula_used = set()
-    baselines = {}
+    formula_lines = [item for j, item in enumerate(lines) if j not in formula_excluded]
+    baselines, text_blocks = {}, {}
     for index, item in enumerate(lines):
         baselines.setdefault(round(item['baseline'] / 3), []).append((index, item))
+        text_blocks.setdefault(item['block'], []).append((index, item))
     for index, line in enumerate(lines):
-        if index in formula_used:
+        if index in formula_used or index in formula_excluded or formula_detection.non_formula(line['text']):
             continue
         text, rect = line['text'], line['rect']
         if any(r.intersects(rect) for r in caption_ranges + algorithm_ranges):
             continue
-        if not (MATH.search(text) or line['math_font'] or EQUATION_NUMBER.fullmatch(text)):
+        if not (formula_detection.MATH.search(text) or line['math_font'] or EQUATION_NUMBER.fullmatch(text)):
             continue
         # 排版引擎可能把公式主体、上下标和编号输出成多个文字块。
         # 仅合并同一基线的短片段，避免把跨栏正文拼成伪公式。
         key = round(line['baseline'] / 3)
         same_line = [pair for nearby in (key - 1, key, key + 1) for pair in baselines.get(nearby, [])]
         fragments = [(j, item) for j, item in same_line
-                     if abs(item['baseline'] - line['baseline']) < 3
+                     if j not in formula_excluded and not formula_detection.non_formula(item['text'])
+                     and abs(item['baseline'] - line['baseline']) < 3
                      and len(item['text']) < 200
                      and not any(r.intersects(item['rect']) for r in caption_ranges + algorithm_ranges)]
         if fragments:
@@ -502,20 +514,43 @@ def _extract_upright(page, version, page_number=None, lines=None):
             rect = _union([item['rect'] for _, item in fragments])
         math_font = any(item['math_font'] for _, item in fragments)
         # 带编号数学行，或含数学字体/算符的短独立行；正文长句不作为公式。
-        if (len(text) < 350 and MATH.search(text)
-                and (EQUATION_NUMBER.search(text) or math_font or (len(text) < 100 and '=' in text))):
+        if formula_detection.is_formula(text, math_font):
+            # 分式/上下标可能处于相邻基线：只补回同一文字块的短数学片段，
+            # 不把下面的自然语言定义塞入公式裁剪，也不把编码乱码伪装成 LaTeX。
+            blocks = {item['block'] for _, item in fragments} or {line['block']}
+            fragment_ids = {j for j, _ in fragments}
+            extras = [(j, item) for block in blocks for j, item in text_blocks.get(block, [])
+                      if j not in formula_excluded
+                      and (j in fragment_ids or not (formula_detection.is_formula(item['text'], item['math_font']) or EQUATION_NUMBER.fullmatch(item['text'])))
+                      and abs(item['baseline'] - line['baseline']) <= 22
+                      and item['rect'].x0 <= rect.x1 + 16 and item['rect'].x1 >= rect.x0 - 16
+                      and len(item['text']) <= 60
+                      and len(re.findall(r'\b[A-Za-z]{3,}\b', item['text'])) <= 2
+                      and not formula_detection.non_formula(item['text'])]
+            if extras:
+                rect = _union([rect, *(item['rect'] for _, item in extras)])
+                formula_used.update(j for j, _ in extras)
             number = EQUATION_NUMBER.search(text)
             label = '公式 ' + number.group(0) if number else f'公式候选 · 第 {page_number} 页'
-            add('formula', rect + (-3, -3, 3, 3), label, text, context=_nearby(lines, rect),
-                method='equation-text-and-font', extra={'definition': _nearby(lines, rect),
-                    'warnings': ['定义为相邻原文上下文，符号含义未自动推断。']})
+            if any(j not in fragment_ids for j, _ in extras):
+                parts = dict(fragments + extras)
+                text = '\n'.join(item['text'] for item in sorted(parts.values(), key=lambda item: (round(item['rect'].y0 / 3), item['rect'].x0)))
+            crop = rect + (-3, -3, 3, 3)
+            for block in blocks:
+                for j, item in text_blocks.get(block, []):
+                    if j not in formula_used and item['rect'].y0 >= rect.y1 - .1:
+                        crop.y1 = min(crop.y1, item['rect'].y0)
+            context = _nearby(formula_lines, rect)
+            add('formula', crop, label, text, context=context,
+                method='equation-text-font-section', extra={'definition': context,
+                    'warnings': ['定义为相邻原文上下文，符号含义未自动推断。', '公式文字来自 PDF 文本层，不是校正后的 LaTeX；乱码和分式次序请核对裁剪原图。']})
             formula_used.update(j for j, _ in fragments)
     warnings.append('版面规则提取候选；无编号公式、复杂跨栏图表与跨页算法可能遗漏，请核对原页。')
     return elements, warnings
 
 
 def _coverage(library, paper_id, version, count):
-    rows = library.db.execute('SELECT page FROM document_element_pages WHERE paper_id=? AND version=? ORDER BY page', (paper_id, version)).fetchall()
+    rows = library.db.execute('SELECT page FROM document_element_pages WHERE paper_id=? AND version=? AND reference_state IS NOT NULL ORDER BY page', (paper_id, version)).fetchall()
     pages = [row['page'] for row in rows]
     scanned = set(pages)
     return {'page_count': count, 'scanned_pages': pages, 'complete': len(pages) == count,
@@ -606,8 +641,8 @@ def _scan(library, paper_id, doc, version, request):
     inspected, budget_reason = set(planned), None
     for number in planned:
         try:
-            exists = library.db.execute('SELECT 1 FROM document_element_pages WHERE paper_id=? AND version=? AND page=?', (paper_id, version, number)).fetchone()
-            if exists:
+            exists = library.db.execute('SELECT reference_state FROM document_element_pages WHERE paper_id=? AND version=? AND page=?', (paper_id, version, number)).fetchone()
+            if exists and exists['reference_state'] is not None:
                 cached.append(number)
                 continue
             _ensure_disk(library, _limit('page_limit_bytes', MAX_PAGE_BYTES))
@@ -626,7 +661,10 @@ def _scan(library, paper_id, doc, version, request):
                     pending.append((candidate, text, search, size - before))
             with fitz.open() as base:
                 base.insert_pdf(doc, from_page=number - 1, to_page=number - 1, links=False, annots=False, widgets=False)
-                values, warnings = _extract(base[0], version, number)
+                prior = library.db.execute('SELECT reference_state FROM document_element_pages WHERE paper_id=? AND version=? AND page=?', (paper_id, version, number - 1)).fetchone()
+                state = False if number == 1 else bool(prior['reference_state']) if prior and prior['reference_state'] is not None else None
+                section_result = {}
+                values, warnings = _extract(base[0], version, number, state, section_result)
             rows, added = [], 0
             for value in values:
                 if value['kind'] == 'algorithm':
@@ -637,7 +675,7 @@ def _scan(library, paper_id, doc, version, request):
             warning_text = json.dumps(warnings, ensure_ascii=False)
             added += len(warning_text.encode()) + 256
             # 在写 SQLite / WAL 前核对本页、本篇、全库和磁盘预算。
-            _check_write_budget(library, paper_id, added + sum(item[3] for item in pending), added)
+            _check_write_budget(library, paper_id, added - (_index_bytes(library, paper_id, number) if exists else 0) + sum(item[3] for item in pending), added)
             for candidate, _, _, delta in pending:
                 if _index_bytes(library, paper_id, candidate['page']) + delta > _limit('page_limit_bytes', MAX_PAGE_BYTES):
                     raise ElementBudgetError('跨页算法使前页索引超过结果预算，已暂停；旧候选保留。')
@@ -646,8 +684,9 @@ def _scan(library, paper_id, doc, version, request):
             for candidate, _, _, delta in pending:
                 library.db.execute('UPDATE document_element_pages SET index_bytes=index_bytes+? WHERE paper_id=? AND version=? AND page=?',
                                    (delta, paper_id, version, candidate['page']))
+            library.db.execute('DELETE FROM document_elements WHERE paper_id=? AND version=? AND page=?', (paper_id, version, number))
             library.db.executemany('INSERT OR REPLACE INTO document_elements VALUES(?,?,?,?,?,?,?)', rows)
-            library.db.execute('INSERT INTO document_element_pages(paper_id,version,page,warnings,index_bytes) VALUES(?,?,?,?,?)', (paper_id, version, number, warning_text, added))
+            library.db.execute('INSERT OR REPLACE INTO document_element_pages(paper_id,version,page,warnings,index_bytes,reference_state) VALUES(?,?,?,?,?,?)', (paper_id, version, number, warning_text, added, section_result['state']))
             scanned.append(number)
             lookahead.extend(batch_lookahead)
             output.extend([item[0] for item in pending] + values)

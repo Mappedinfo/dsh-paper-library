@@ -1,0 +1,39 @@
+{
+  "baseline": "3e79a5d:src/dsh_paper_library/document_elements.py",
+  "source": "42 generated pages; no private PDFs",
+  "platform": "darwin",
+  "scope": "Full per-page structure extraction; 3 warm-process passes; parsing/table checks included, worker startup/SQLite/preview rendering excluded",
+  "results": [
+    {
+      "variant": "baseline",
+      "pages": 42,
+      "passes": 3,
+      "expected_formulas": 28,
+      "true_positives": 28,
+      "false_positives": 57,
+      "false_negatives": 0,
+      "median_ms_per_page": 9.017,
+      "p95_ms_per_page": 9.451,
+      "extraction_total_ms": 1137.68,
+      "process_peak_rss_mib": 63.84
+    },
+    {
+      "variant": "current",
+      "pages": 42,
+      "passes": 3,
+      "expected_formulas": 28,
+      "true_positives": 28,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "median_ms_per_page": 9.021,
+      "p95_ms_per_page": 9.29,
+      "extraction_total_ms": 1131.9,
+      "process_peak_rss_mib": 60.31
+    }
+  ],
+  "limitations": [
+    "Synthetic regression corpus, not general scientific accuracy",
+    "Peak RSS includes interpreter and PDF engine; not an application memory cap",
+    "No OCR/model benchmark; no model installed"
+  ]
+}

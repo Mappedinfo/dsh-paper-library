@@ -95,6 +95,8 @@ The reading sidebar has separate **Formulas**, **Figures**, **Tables**, and **Al
 
 These extraction paths use the local PDF engine and deterministic rules, without an LLM. A completed scan means the pages were visited, not that every object was recognized correctly. Complex layouts, unnumbered formulas, scanned pages without a text layer, and incomplete pseudocode may need manual inspection. Full-document OCR is not included.
 
+Formula detection excludes recognized bibliography sections and URL/DOI text, resumes at appendix headings, and combines nearby fraction and subscript fragments into crops. The v3 index rebuilds older cached results within the existing page budgets. Extracted text is not corrected LaTeX; inspect the source crop when PDF font mappings are garbled. See the [algorithm and synthetic performance comparison (Chinese)](docs/formula-detection.md).
+
 The index is derived data. Extracting it does not write PDF annotations; explicit region-marking actions do. Normal annotation edits do not invalidate the document's text identity and restart analysis. [Structure-reading API (Chinese)](docs/api.md#pdf-结构阅读目录)
 
 ## Evidence graphs and real citation relationships

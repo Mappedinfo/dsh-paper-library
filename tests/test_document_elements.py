@@ -285,10 +285,10 @@ def test_per_page_pause_commits_earlier_page_in_same_batch(tmp_path, monkeypatch
     from dsh_paper_library import document_elements as elements
     library, paper, _ = make_library(tmp_path)
     original = elements._extract
-    def extract(page, version, page_number=None):
+    def extract(page, version, page_number=None, *args, **kwargs):
         if page_number == 2:
             raise elements.ElementBudgetError('Synthetic page resource budget')
-        return original(page, version, page_number)
+        return original(page, version, page_number, *args, **kwargs)
     monkeypatch.setattr(elements, '_extract', extract)
     result = call(library, paper, 'document_elements_scan', limit=2)
     assert result['paused'] and result['scanned_batch'] == [1]
