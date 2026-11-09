@@ -69,3 +69,17 @@ before recording success. `--verify` reads the saved topic without changing it.
 README 顶部使用实时 npm 版本／下载量徽章，以及 DSH 社区插件、讨论和原创代码许可入口。GitHub About 的网站指向 Discussion #6623；Topics 包括 dsh、deepseek-harness、deepseek-harness-plugin、文献管理、PDF 批注、图谱、LaTeX 与 PlainDeck。包源码补齐 keywords，需下次 npm 发版才更新到 registry。
 
 本次原位更新 `showcase.md` 主帖与标题，保留既有截图及评论历史；没有另发重复宣传评论。近期功能说明以 main 为准，npm registry 核实仍为 0.2.5，未发布新包，也未修改 npm dist-tags。发布脚本读回核对后的回执仍保存在 `discussion.json`。
+
+## 英文介绍
+
+英文首页位于 [README.en.md](../../README.en.md)，中文首页保留并提供双向切换。英文宣传稿单独存放在 [showcase.en.md](showcase.en.md)，按用户选择作为现有 Discussion #6623 下的新评论发布，不替换中文主帖。下载演示仍为中文，英文稿已明确说明。
+
+以下命令复用现有发布器；不带 `--publish` 时只做预检，正文与回执参数必须成对指定。历史更新仍使用 `showcase.json` 中的默认路径。
+
+```sh
+node scripts/announce-release.mjs --body docs/community/showcase.en.md --receipt docs/community/discussion.en.json
+node scripts/announce-release.mjs --body docs/community/showcase.en.md --receipt docs/community/discussion.en.json --publish
+node scripts/announce-release.mjs --body docs/community/showcase.en.md --receipt docs/community/discussion.en.json --verify
+```
+
+发布后 `discussion.en.json` 保存评论地址与远端核对结果；重复运行相同正文不会再发一条评论。既有中文主帖与历史更新评论不被修改。

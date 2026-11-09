@@ -8,12 +8,19 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { parseArgs } from 'node:util';
 
-const options = new Set(process.argv.slice(2));
-assert.ok([...options].every(value => ['--publish', '--verify'].includes(value)), 'Unknown option');
+const { values } = parseArgs({ options: {
+  publish: { type: 'boolean' }, verify: { type: 'boolean' },
+  body: { type: 'string' }, receipt: { type: 'string' },
+} });
+assert.equal(Boolean(values.body), Boolean(values.receipt), '--body and --receipt must be supplied together');
+assert.ok(!(values.publish && values.verify), 'Choose --publish or --verify');
+const options = new Set(Object.keys(values).filter(key => values[key] === true).map(key => `--${key}`));
 const config = JSON.parse(await readFile('docs/community/showcase.json', 'utf8'));
 const discussion = JSON.parse(await readFile('docs/community/discussion.json', 'utf8'));
-const body = await readFile(config.releaseBodyFile, 'utf8');
+const bodyFile = values.body || config.releaseBodyFile;
+const body = await readFile(bodyFile, 'utf8');
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const bodyHash = sha256(Buffer.from(body));
 const graphql = (query, variables = {}) => {
@@ -25,7 +32,7 @@ const graphql = (query, variables = {}) => {
 };
 const viewer = graphql('query { viewer { login } }').viewer.login;
 assert.equal(discussion.author, viewer, 'The recorded discussion belongs to another account');
-const receiptFile = config.releaseReceiptFile;
+const receiptFile = values.receipt || config.releaseReceiptFile;
 let receipt = null;
 if (existsSync(receiptFile)) receipt = JSON.parse(await readFile(receiptFile, 'utf8'));
 
@@ -54,7 +61,7 @@ if (existing) {
   process.exit(0);
 }
 if (!options.has('--publish')) {
-  console.log(JSON.stringify({ ok: true, mode: 'preflight', author: viewer, discussion: discussion.url, releaseBody: config.releaseBodyFile, bodySha256: bodyHash, commentCount: read().comments.totalCount }));
+  console.log(JSON.stringify({ ok: true, mode: 'preflight', author: viewer, discussion: discussion.url, releaseBody: bodyFile, bodySha256: bodyHash, commentCount: read().comments.totalCount }));
   process.exit(0);
 }
 const created = graphql(`mutation($input:AddDiscussionCommentInput!) { addDiscussionComment(input:$input) { comment { id url createdAt } } }`,

@@ -10,6 +10,8 @@
 [![DSH discussion](https://img.shields.io/badge/DSH-Discussion_%236623-8c6bb1?logo=github)](https://github.com/deepseek-ai/deepseek-harness/discussions/6623)
 [![Original code MIT](https://img.shields.io/badge/Original_Code-MIT-b38a52)](LICENSE)
 
+**简体中文** · [English](README.en.md)
+
 [安装与开发](#安装与开发) · [使用说明](#使用) · [PDF / Slides 演示](docs/demo/README.md) · [DSH 社区讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/6623) · [问题反馈](https://github.com/Mappedinfo/dsh-paper-library/issues)
 
 </div>

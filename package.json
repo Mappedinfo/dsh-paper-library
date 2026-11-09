@@ -41,6 +41,7 @@
     "pyproject.toml",
     "uv.lock",
     "README.md",
+    "README.en.md",
     "HANDOFF.md",
     "CHANGELOG.md",
     "THIRD_PARTY.md",
