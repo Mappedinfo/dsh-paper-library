@@ -1,3 +1,9 @@
+**英文首页与独立英文宣传评论（2026-11-09）：**
+
+- 新增 README.en.md，覆盖英文使用路径、功能、安装、演示、数据与许可边界；中文首页保留并添加双向语言入口。英文首页已列入 npm 打包清单，未发布新 npm 版本。
+- 新增 docs/community/showcase.en.md。按用户选择在原 Discussion #6623 下新增英文介绍评论，保留中文主帖和历史评论：https://github.com/deepseek-ai/deepseek-harness/discussions/6623#discussioncomment-19481436。发布后读回正文与作者一致，回执见 docs/community/discussion.en.json。
+- 发布脚本支持成对指定 --body / --receipt，默认仍使用既有中文更新配置。127 个本地链接／锚点、英文 README 打包包含性、4 个远端入口和脚本语法通过；3 项无效参数检查通过，英文发布预检与真实发布读回通过。演示文件仍为中文，英文页面已标明。
+
 **仓库首页与 DSH 社区介绍（2026-11-09）：**
 
 - README 增加 npm 版本／下载量、DSH 插件／讨论、原创代码 MIT 五个徽章，以及安装、演示、反馈快捷入口和使用场景表；五个徽章均返回有效 SVG，内部链接和包元数据检查通过。

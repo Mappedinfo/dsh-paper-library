@@ -12,7 +12,7 @@
 
 **简体中文** · [English](README.en.md)
 
-[安装与开发](#安装与开发) · [使用说明](#使用) · [PDF / Slides 演示](docs/demo/README.md) · [DSH 社区讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/6623) · [问题反馈](https://github.com/Mappedinfo/dsh-paper-library/issues)
+[安装与开发](#安装与开发) · [使用说明](#使用) · [PDF / Slides 演示](docs/demo/README.md) · [DSH 社区讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/6623) · [英文介绍](https://github.com/deepseek-ai/deepseek-harness/discussions/6623#discussioncomment-19481436) · [问题反馈](https://github.com/Mappedinfo/dsh-paper-library/issues)
 
 </div>
 

@@ -12,7 +12,7 @@
 
 [简体中文](README.md) · **English**
 
-[Install](#installation) · [Start reading](#start-with-one-pdf) · [Try the demos](#try-the-demos) · [DSH community](https://github.com/deepseek-ai/deepseek-harness/discussions/6623) · [Report an issue](https://github.com/Mappedinfo/dsh-paper-library/issues)
+[Install](#installation) · [Start reading](#start-with-one-pdf) · [Try the demos](#try-the-demos) · [DSH community](https://github.com/deepseek-ai/deepseek-harness/discussions/6623) · [English introduction](https://github.com/deepseek-ai/deepseek-harness/discussions/6623#discussioncomment-19481436) · [Report an issue](https://github.com/Mappedinfo/dsh-paper-library/issues)
 
 </div>
 
