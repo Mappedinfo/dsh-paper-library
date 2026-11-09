@@ -5,11 +5,11 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{JSDOM}=require(process.env.JSDOM_MODULE||'jsdom');
 const sources=await Promise.all(['reading-panels.js','board-source.js','document-elements.js'].map(n=>readFile(new URL('../web/'+n,import.meta.url),'utf8')));
 const settle=()=>new Promise(r=>setTimeout(r,15));
-function setup(api,{liveIdle=false}={}){const dom=new JSDOM('<main><section id="library"></section><div id="reader"></div></main><section id="annotations"></section><section id="chat"></section><dialog id="metadata"></dialog>',{runScripts:'outside-only',url:'http://localhost/'}),w=dom.window;
+function setup(api,{liveIdle=false,sharedSearch=false}={}){const dom=new JSDOM('<main><section id="library"></section><div id="reader"></div></main><section id="annotations"></section><section id="chat"></section><dialog id="metadata"></dialog>',{runScripts:'outside-only',url:'http://localhost/'}),w=dom.window;
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'));};w.HTMLDialogElement.prototype.show=function(){this.open=true;};
  for(const s of sources)w.eval(s);
  let paper={id:'paper-a',title:'Synthetic',pdf:true},ui;const doc=w.document,panels=w.PaperReadingPanels.create({root:doc.getElementById('reader'),libraryRoot:doc.getElementById('library'),annotationsRoot:doc.getElementById('annotations'),conversationRoot:doc.getElementById('chat'),metadataRoot:doc.getElementById('metadata'),onPanelChange:v=>ui?.sync(v)});
- const navigation=[],writes=[],errors=[];panels.paperChanged(paper);ui=w.PaperDocumentElements.create({...(liveIdle?{}:{yieldWork:async()=>{}}),api,panels,getPaper:()=>paper,navigate:v=>navigation.push(v),annotated:(...v)=>writes.push(v),toast:(...v)=>errors.push(v)});
+ const navigation=[],writes=[],errors=[];panels.paperChanged(paper);ui=w.PaperDocumentElements.create({sharedSearch,...(liveIdle?{}:{yieldWork:async()=>{}}),api,panels,getPaper:()=>paper,navigate:v=>navigation.push(v),annotated:(...v)=>writes.push(v),toast:(...v)=>errors.push(v)});
  return {w,doc,panels,ui,navigation,writes,errors,setPaper:value=>{paper=value;panels.paperChanged(value);},close:()=>{ui.dispose();panels.dispose();w.close();}};
 }
 const coverage={page_count:1,scanned_pages:[1],complete:true,next_page:null};
@@ -72,3 +72,5 @@ test('superseded search and removed-card previews cannot reappear in the filtere
  assert.equal(oldCard.isConnected,false);assert.match(list.textContent,/Filtered equation/);
  oldSearch.resolve({elements:[element],total:1,coverage});oldPreview.resolve({mime_type:'image/png',image:'YWJj'});await stale;await settle();assert.match(list.textContent,/Filtered equation/);assert.equal(oldCard.querySelector('img').hasAttribute('src'),false);assert.equal(list.querySelectorAll('img[src]').length,0);
 });
+
+ test('shared sidebar search reuses element query, hides duplicate field and resets on paper change',async t=>{const calls=[];const env=setup(async(a,p)=>{calls.push([a,p]);return {elements:[],total:0,coverage};},{sharedSearch:true});t.after(env.close);env.panels.show('elements-table');await settle();assert.equal(env.doc.querySelector('#document-elements-table input').hidden,true);env.ui.search('table','RMSE');await settle();assert.equal(calls.at(-1)[1].query,'RMSE');assert.equal(calls.at(-1)[1].offset,0);env.setPaper({id:'paper-b',title:'Other',pdf:true});await settle();assert.equal(calls.at(-1)[1].query,'');});

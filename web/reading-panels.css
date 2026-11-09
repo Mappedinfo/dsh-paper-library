@@ -140,3 +140,13 @@ body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-
 .wiki-word-form{display:grid;gap:12px}.wiki-word-form details{padding:10px 0}.wiki-word-form details[open] summary{margin-bottom:10px}
 
 .annotation-pagination{flex:none}.annotation-pagination .pagination{margin:0;padding:0;display:flex;align-items:center;gap:2px;font-size:11px;border:0}.annotation-pagination .button{padding:2px 5px;min-width:22px}.shared-reading-sidebar:not([data-sidebar-panel="annotations"]) .annotation-pagination{display:none}
+
+/* 搜索只在用户展开后占一行；目录切换共用同一个输入框。 */
+.reader-search-row{display:flex;align-items:center;gap:4px;flex:none;margin:0;padding:5px 8px;border-bottom:1px solid var(--line);background:var(--surface);min-width:0}
+.reader-search-row[hidden]{display:none!important}
+.reader-search-row input{flex:1;min-width:60px;width:140px;font:inherit;padding:5px 7px}
+.reader-search-row .button{flex:none;padding:4px 7px;font-size:12px}
+#sidebar-search-toggle{display:inline-flex;align-items:center;padding:5px;flex:none}
+#sidebar-search-toggle.active{color:var(--accent);background:var(--surface)}
+#reader-find{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.pdf-search-row input{flex:0 1 260px}.pdf-search-row [role=status]{flex:1;min-width:60px;overflow-wrap:anywhere}.pdf-search-row [hidden]{display:none!important}

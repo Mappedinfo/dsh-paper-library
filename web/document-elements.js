@@ -30,7 +30,7 @@ window.PaperDocumentElements = (() => {
     }
     return svg;
   }
-  function create({api,panels,getPaper,navigate,annotated,toast,yieldWork,openSettings}) {
+  function create({api,panels,getPaper,navigate,annotated,toast,yieldWork,openSettings,sharedSearch=false}) {
     let active=null,disposed=false,ticket=0,previewCount=0,lastInput=Date.now(),lastBatch=0;const views=new Map(),papers=new Map(),previewQueue=[],images=[];
     let resources={preview_bytes:12*1048576,preview_count:12,batch_pages:1,batch_gap_ms:2000,idle_ms:1200};
     const touch=()=>{lastInput=Date.now();};
@@ -51,7 +51,7 @@ window.PaperDocumentElements = (() => {
       const root=node('section','document-elements-panel');root.id=`document-elements-${kind}`;
       const toolbar=node('form','document-elements-toolbar'),input=node('input');input.type='search';input.placeholder=`检索${label}与原文`;input.setAttribute('aria-label',`检索${label}`);
       const search=button('检索',()=>void reload(true)),scan=button('继续扫描',()=>{const id=getPaper()?.id;if(!id)return;const r=record(id);if(r.running){r.paused=true;r.notice='将在当前页批次完成后暂停';status(views.get(kind),r);}else{r.paused=false;r.notice='';void start(id);}});
-      const management=node('details','document-element-management');management.append(node('summary','','管理'));const clear=button('清除此篇提取索引',async()=>{const id=getPaper()?.id;if(!id||record(id).running)return;clear.disabled=true;try{await api('document_elements_clear',{id});if(getPaper()?.id===id){const r=record(id);r.paused=true;r.coverage=null;r.notice='提取索引已清除；原文和批注保留，可点继续扫描重建。';await reload(true);}}catch(error){toast?.(error.message,true);}finally{clear.disabled=false;}});management.append(clear);toolbar.append(input,search,scan,management);toolbar.addEventListener('submit',e=>{e.preventDefault();void reload(true);});
+      const management=node('details','document-element-management');management.append(node('summary','','管理'));const clear=button('清除此篇提取索引',async()=>{const id=getPaper()?.id;if(!id||record(id).running)return;clear.disabled=true;try{await api('document_elements_clear',{id});if(getPaper()?.id===id){const r=record(id);r.paused=true;r.coverage=null;r.notice='提取索引已清除；原文和批注保留，可点继续扫描重建。';await reload(true);}}catch(error){toast?.(error.message,true);}finally{clear.disabled=false;}});management.append(clear);input.hidden=search.hidden=sharedSearch;toolbar.append(input,search,scan,management);toolbar.addEventListener('submit',e=>{e.preventDefault();void reload(true);});
       const adjust=button('调整资源设置',()=>openSettings?.());adjust.hidden=true;root.append(adjust);
       const stat=node('p','small document-elements-status');stat.setAttribute('role','status');const pager=node('div','pagination'),count=node('span');
       const previous=button('←',()=>{const v=views.get(kind);v.offset=Math.max(0,v.offset-40);void reload();}),next=button('→',()=>{views.get(kind).offset+=40;void reload();});previous.setAttribute('aria-label','上一页');next.setAttribute('aria-label','下一页');pager.append(previous,count,next);
@@ -62,7 +62,7 @@ window.PaperDocumentElements = (() => {
       }
       panels.registerPanel({id:`elements-${kind}`,label,element:root,reading:true,onShow:()=>{if(active!==kind){activate(kind);void open();}}});
     }
-    async function open(){const id=getPaper()?.id;if(!id||disposed)return;for(const v of views.values())if(v.paperId!==id){clearView(v);v.paperId=id;v.offset=0;}const r=record(id);await reload();if(getPaper()?.id===id&&!r.paused&&!r.coverage?.complete)void start(id);}
+    async function open(){const id=getPaper()?.id;if(!id||disposed)return;for(const v of views.values())if(v.paperId!==id){clearView(v);v.paperId=id;v.offset=0;v.input.value='';}const r=record(id);await reload();if(getPaper()?.id===id&&!r.paused&&!r.coverage?.complete)void start(id);}
     // 按来源身份协调当前页；扫描进度变化不卸载已显示的卡片或图片。
     function reconcile(v,elements,id,sourceVersion,result){
       const wanted=new Set(elements.map(e=>e.id));
@@ -116,7 +116,7 @@ window.PaperDocumentElements = (() => {
     const observers=new Set();
     function showFlow(e,flow){const dialog=node('dialog','document-flow-dialog'),header=node('header'),close=button('关闭',()=>dialog.close());header.append(node('strong','',e.title||'算法流程图'),close);const status=node('p','small',`${flow.complete?'已识别控制结构':'部分流程，请核对原文'} · ${flow.nodes.length} 个步骤。 ${(flow.warnings||[]).join(' ')}`),viewport=node('div','document-flow-viewport');viewport.append(flowSVG(flow));const source=node('details');source.append(node('summary','','伪代码原文'),node('pre','document-element-text',e.text||''));dialog.append(header,status,viewport,source);document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.showModal();}
     function sync(value){const kind=value?.sidebar?.replace(/^elements-/,'');if(kinds[kind]){if(active!==kind||views.get(kind).paperId!==getPaper()?.id){activate(kind);void open();}}else{activate(null);}}
-    return {applyResources(policy){if(!policy)return;resources={...resources,...policy};let bytes=images.reduce((n,e)=>n+e.bytes,0);while(images.length>resources.preview_count||bytes>resources.preview_bytes){const entry=images.shift();bytes-=entry.bytes;entry.release();}if(active&&getPaper()?.id)status(views.get(active),record(getPaper().id));},sync,selected:()=>active,restore:kind=>{if(kinds[kind])panels.show(`elements-${kind}`);},reload,dispose(){disposed=true;for(const event of ['pointerdown','keydown','wheel'])document.removeEventListener(event,touch,{capture:true});document.removeEventListener('visibilitychange',visibility);for(const v of views.values())clearView(v);releaseImages();++ticket;previewQueue.length=0;for(const o of observers)o.disconnect();observers.clear();for(const r of papers.values())r.paused=true;document.querySelectorAll('.document-flow-dialog').forEach(d=>d.remove());}};
+    return {search(kind,query){const v=views.get(kind);if(!v)return;v.input.value=query;v.offset=0;if(active===kind)void reload(true);},applyResources(policy){if(!policy)return;resources={...resources,...policy};let bytes=images.reduce((n,e)=>n+e.bytes,0);while(images.length>resources.preview_count||bytes>resources.preview_bytes){const entry=images.shift();bytes-=entry.bytes;entry.release();}if(active&&getPaper()?.id)status(views.get(active),record(getPaper().id));},sync,selected:()=>active,restore:kind=>{if(kinds[kind])panels.show(`elements-${kind}`);},reload,dispose(){disposed=true;for(const event of ['pointerdown','keydown','wheel'])document.removeEventListener(event,touch,{capture:true});document.removeEventListener('visibilitychange',visibility);for(const v of views.values())clearView(v);releaseImages();++ticket;previewQueue.length=0;for(const o of observers)o.disconnect();observers.clear();for(const r of papers.values())r.paused=true;document.querySelectorAll('.document-flow-dialog').forEach(d=>d.remove());}};
   }
   return Object.freeze({create,flowSVG});
 })();

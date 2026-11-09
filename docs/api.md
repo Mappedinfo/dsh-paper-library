@@ -658,3 +658,9 @@ scan/list 的 `usage` 提供当前生效的派生索引预算。均衡档每页 
 资源设置共用 `settings_get/update` 及修订校验。`resource_profile` 为 `eco|balanced|performance|custom`，缺省 `balanced`；预设映射与范围以 [resource-policy.mjs](../src/resource-policy.mjs) 为唯一来源。`settings_get` 同时返回 `resource_policy`（实际生效值）、`resource_profiles` 与 `resource_fields`。自定义字段为 `resource_memory_mb`（128–2048）、`resource_preview_mb`（4–256）、`resource_batch_pages`（1–6）、`resource_batch_gap_ms`（250–10000）、`resource_paper_index_mb`（4–512）、`resource_library_index_mb`（64–8192）、`resource_disk_reserve_mb`（128–4096）；容量单位为 MiB。自定义预览不超过内存目标四分之一、每篇索引不超过全库预算。预设忽略保存的自定义数值，切回自定义可恢复；设置用于后续批次，不强杀当前写入。客户端不能通过 `_resource_policy` 覆盖主机策略。
 
 资源自定义表单在首次编辑时冻结修订号；后台轮询不会推进未保存草稿的修订号。同字段发生外部修改时拒绝旧草稿保存，保留输入，用户明确恢复已保存配置后才能以新修订编辑。
+
+## PDF 文内定位搜索
+
+`paper_text_find` 是阅读界面的只读操作：`id, query, page?, offset?, limit?, expected_version?`。`query` 为 1–200 字符；每次只读取一个物理页，`page` 默认 1，`offset` 默认 0，`limit` 默认 40、最多 100。返回 `page_count, source_version, matches:[{page,rects}], page_matches, next_offset, next_page, no_extractable_text`；矩形已转换到页面显示旋转坐标。存在 `next_offset` 时先续取本页，否则用 `next_page`。沿用 15 秒 worker 超时，不渲染图片、不写 PDF、不建索引、不调用模型或 OCR。
+
+前端逐页串行搜索，每批保留最多 200 个定位区域，达到上限后显式继续；停止、关闭或切换文献后忽略迟到返回，不发起下一页。多行短语可能返回多个定位区域，计数表示位置而非独立语义出现次数。

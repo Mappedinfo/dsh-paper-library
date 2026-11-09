@@ -15,6 +15,7 @@ let knowledgeGraphUI;
 let pdfReader;
 let readingPanels;
 let documentElementsUI;
+let readerSearchUI;
 let readingShell;
 let languageUI;
 let annotationTranslationAvailable = false, annotationCaptionAvailable = false;
@@ -462,12 +463,17 @@ function annotationThreads(annotations) {
   }
   return {notes,replies,unlinked};
 }
+function visibleAnnotationThreads() {
+  const grouped=annotationThreads(state.annotations);
+  return readerSearchUI?.filter(grouped)||grouped;
+}
 function renderAnnotations() {
   if(typeof annotationEditor!=='undefined'&&annotationEditor?.deferRender?.(renderAnnotations))return;
   const restoreEditorFocus = typeof annotationEditor!=='undefined'?annotationEditor?.beforeRender():null;
   linkedHandwritingUI?.beforeRender();
   const fragment = document.createDocumentFragment();
-  const {notes,replies,unlinked,remarks=new Map()}=annotationThreads(state.annotations);
+  const {notes,replies,unlinked,remarks=new Map()}=visibleAnnotationThreads();
+  state.noteOffset=Math.min(state.noteOffset,Math.max(0,Math.ceil(notes.length/40)-1)*40);
   function replyCard(reply){
     const details=el('details','annotation-reply');details.dataset.annotationId=reply.id;details.open=true;
     details.append(el('summary','',[reply.source_kind === 'annotation-translation' ? '翻译：AI 译文' : reply.source_kind === 'annotation-caption' ? 'AI 图像说明' : 'AI 批注',reply.model,reply.annotation_ids?.length>1?`涉及 ${reply.annotation_ids.length} 条批注`:''].filter(Boolean).join(' · ')));
@@ -517,7 +523,7 @@ function renderAnnotations() {
     }
     fragment.append(card);
   }
-  if (!notes.length) fragment.append(emptyState('第一条批注，从一个问题开始', '在阅读页选择文字以高亮，或添加一条整页笔记。'));
+  if (!notes.length&&!unlinked.length) fragment.append(state.annotations.length?el('p','small muted','没有匹配的批注。'):emptyState('第一条批注，从一个问题开始', '在阅读页选择文字以高亮，或添加一条整页笔记。'));
   const pagerHost=$('annotation-pagination');pagerHost?.replaceChildren();
   if (notes.length > 40) {
     const pagination = el('div', 'pagination'); const previous = el('button', 'button subtle', '‹'); previous.title='上一页批注'; previous.disabled = state.noteOffset === 0; previous.dataset.noteAction = 'previous';previous.setAttribute('aria-label','上一页批注'); const next = el('button', 'button subtle', '›'); next.title='下一页批注'; next.disabled = state.noteOffset + 40 >= notes.length; next.dataset.noteAction = 'next';next.setAttribute('aria-label','下一页批注');
@@ -1220,7 +1226,7 @@ $('discuss-selection').addEventListener('click', () => paperChatUI?.useSelection
 $('annotation-comment').addEventListener('input', publishReaderState);
 $('annotation-dialog').addEventListener('close', publishReaderState);
 $('page-note').addEventListener('click', () => openAnnotation('note')); $('annotation-form').addEventListener('submit', saveAnnotation); $('annotation-list').addEventListener('click', event=>void handleNoteAction(event).catch(error=>toast(error.message,true)));
-document.addEventListener('annotation-page',event=>{if(!['previous','next'].includes(event.detail))return;const total=annotationThreads(state.annotations).notes.length;state.noteOffset=Math.max(0,Math.min(Math.max(0,Math.ceil(total/40)-1)*40,state.noteOffset+(event.detail==='next'?40:-40)));renderAnnotations();$('annotation-list').scrollTop=0;});
+document.addEventListener('annotation-page',event=>{if(!['previous','next'].includes(event.detail))return;const total=visibleAnnotationThreads().notes.length;state.noteOffset=Math.max(0,Math.min(Math.max(0,Math.ceil(total/40)-1)*40,state.noteOffset+(event.detail==='next'?40:-40)));renderAnnotations();$('annotation-list').scrollTop=0;});
 // Rail → PDF: clicking a card body (never its action buttons) reveals the
 // matching markup in the document and flashes it.
 $('annotation-list').addEventListener('click', event => {
@@ -1520,11 +1526,15 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onFocusChange: info => readingShell?.focusChanged(info),
   onStatus: (message,error,options) => readingShell?.status(message,error,options),
 });
-readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,contextChanged:()=>{resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
-documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPanels,getPaper:()=>state.active,toast,
+readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,contextChanged:()=>{readerSearchUI?.sync();resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
+documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPanels,getPaper:()=>state.active,toast,sharedSearch:Boolean(window.PaperReaderSearch),
   openSettings:()=>settingsUI?.showResources(),
   navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');await pdfReader?.revealRegion(source);},
   annotated:async(id,page)=>{if(state.active?.id!==id)return;await loadAnnotations(id);if(state.active?.id===id)await pdfReader?.refresh(page,{defer:true});},
+});
+readerSearchUI=window.PaperReaderSearch?.create({api,getPaper:()=>state.active,reader:()=>pdfReader,navigate:()=>switchTab('reader'),getElements:()=>documentElementsUI,
+  onAnnotationSearch:()=>{state.noteOffset=0;renderAnnotations();},
+  onLibrarySearch:query=>{$('search').value=query;$('search').dispatchEvent(new Event('input',{bubbles:true}));},
 });
 inkQueue=window.PaperInkQueueClient?.create({api,persistence,
   onChange:records=>{pdfReader?.setInkEnabled(!inkQueue?.blocked()&&!inkSaveUncertain&&!pendingInkHandoff&&!restoringInkDraft&&!restoringReader);pdfReader?.setInkOverlays([...records.filter(job=>job.status!=='saved'),...records.filter(job=>job.status==='saved').slice(-16)]);readingShell?.queueChanged(records);if(state.active)renderAnnotations();publishReaderState();},
@@ -2089,7 +2099,7 @@ if(persistence){
   const backup=el('button','button subtle','导出未保存草稿');backup.type='button';backup.addEventListener('click',()=>{const values=persistence.exportPending?.()||[];const url=URL.createObjectURL(new Blob([JSON.stringify({schema:1,drafts:values},null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='paper-library-unsaved-drafts.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});saveStatus.append(label,retry,backup);$('notification-region').append(saveStatus);
   const pending=new Map();persistence.subscribe(event=>{if(event.status==='saved')pending.delete(event.key);else if(event.error||!pending.get(event.key)?.error)pending.set(event.key,event);const errors=[...pending.values()].filter(value=>value.error);saveStatus.hidden=!errors.length;label.textContent=errors.some(value=>value.status==='conflict')?'另一浏览器已有修改，本窗口草稿尚未落盘。请导出并核对。':`本地保存未完成${errors.length?`（${errors.length} 项）：${errors[0].error?.message||'请重试'}`:''}，草稿仍保留。`;});
 }
-window.addEventListener('pagehide', () => { publishReaderState(); floatingWindows?.dispose(); boardUI?.dispose(); companionUI?.dispose();settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); documentElementsUI?.dispose();readingPanels?.dispose(); readingShell?.dispose(); });
+window.addEventListener('pagehide', () => { publishReaderState(); floatingWindows?.dispose(); boardUI?.dispose(); companionUI?.dispose();settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); documentElementsUI?.dispose();readerSearchUI?.dispose();readingPanels?.dispose(); readingShell?.dispose(); });
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){publishReaderState();void persistence?.flush({keepalive:true}).catch(()=>{});}});
 window.addEventListener('message', event => {
   receiveHarnessContext(event);

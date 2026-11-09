@@ -145,3 +145,9 @@ body.handwriting-tools-visible{--workbench-height:145px}
 .annotation-style-panel input[type="color"]{width:42px;height:28px;padding:2px}
 .annotation-style-panel p:empty{display:none}
 .reader-color-presets-menu>summary{font-size:12px;cursor:pointer}
+
+body.pdf-search-open{--workbench-height:150px}
+body.pdf-search-open .topbar{grid-template-rows:28px 28px 32px 38px 19px}
+body.pdf-search-open.handwriting-tools-visible{--workbench-height:183px}
+body.pdf-search-open.handwriting-tools-visible .topbar{grid-template-rows:28px 28px 32px 38px 52px}
+#pdf-search-row{grid-column:1/-1;box-sizing:border-box;height:38px}
