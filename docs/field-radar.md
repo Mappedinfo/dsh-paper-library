@@ -50,3 +50,21 @@ npm run build
 ```
 
 浏览器脚本使用独立合成资料库和模型替身，覆盖本机入口、筛选、原文献导航、单次 AI 生成、结果恢复、完整雷达回链和窄屏；不访问用户 PDF 或远程模型。真实宿主模型与运行中的 DSH 加载状态须另外核验。
+
+## 后端绘图和图片导出
+
+图片可以直接由 Node 后端生成，不需要打开网页、启动浏览器或解锁桌面。页面的「后端导出 PNG」、原生 `library_field_radar_render` 工具和 CLI 共用同一个绘图服务；主题版本、关键词/任务/年份过滤与页面使用同一纯数据模块。
+
+支持 overview（研究地图）、timeline（作品时间线）、concepts（概念对照）、research-lines（研究脉络）、scholars（学者与机构）以及 PNG/SVG。每张图最多12条，1200–2400像素宽，返回总量、分页、来源ID、数据版本和生成时间；长字段显式省略，并在同名私有JSON中保留完整记录与来源。
+
+```
+node scripts/export-field-radar.mjs --library /absolute/path/to/library --id synthetic-topic --view timeline --format png --width 2400 --limit 12
+```
+
+可继续传 `--query`、`--task`、`--year`、`--offset`。只读取已保存主题，不发模型请求、不联网、不解析PDF，也不默认更新资料。图片及JSON保存于当前资料库的 `.paper-library/field-radar-exports/`，文件内容不可变并校验完整性，拒绝路径穿越、链接文件和超限输出。
+
+HTTP调用 `field_radar_render` 返回受控的同源下载地址；下载路由只接受内容标识与PNG/SVG格式，不接受文件路径。原生工具/CLI还返回本机路径，供调用者通过自己已授权的附件渠道发送图片。导图不会自动公开上传或给第三方发送数据。正在运行的宿主需要重新加载插件后才能使用新接口；离线CLI立即可用。
+
+Node consumers can import `renderFieldRadarSVG` and `createFieldRadarExporter` from `@mappedinfo/dsh-paper-library/field-radar-export`. The exporter accepts the existing library path and a topic-store adapter with `get(id)`; no browser or model is required.
+
+The UI sends `expected_revision`; a stale loaded topic returns 409 rather than silently exporting changed data. Native/HTTP callers can pass the same field, and the CLI supports `--expected-revision HASH`.

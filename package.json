@@ -23,7 +23,8 @@
     ".": "./src/harness/index.mjs",
     "./client": "./lib/client.js",
     "./analysis": "./src/headless-analysis.mjs",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./field-radar-export": "./src/harness/field-radar-export.mjs"
   },
   "files": [
     "src/**/*.mjs",
@@ -90,7 +91,8 @@
     "docs/paper-flow.md",
     "docs/workspace-navigation.md",
     "docs/field-radar.md",
-    "scripts/import-field-radar-snapshot.mjs"
+    "scripts/import-field-radar-snapshot.mjs",
+    "scripts/export-field-radar.mjs"
   ],
   "dsh": {
     "bundle": {

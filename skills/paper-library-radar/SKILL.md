@@ -34,3 +34,7 @@ Define the topic; distinguish adjacent concepts and tasks; map who studied what,
 ## Automation boundary
 
 These tools enable requested agent-driven workflows, not an autonomous schedule. Do not invent periodic checks, monitoring, downloads, publication, model runs or profile updates. The user must request recurring work before a scheduling system is used. Topic imports do not alter PDFs/catalog metadata. Model generation creates a separate durable draft only. No credentials or runtime configuration can be supplied in tool arguments.
+
+## Headless images
+
+Use `library_field_radar_render` for requested PNG/SVG research images from the saved topic. Pass topic ID, view, filters and pagination; rendering is local and does not call a model, fetch sources or require a browser. The receipt includes the exact local output path, evidence version, source IDs and coverage. Use the authorized attachment channel to send that existing file; never publish or claim delivery merely because rendering succeeded. Long text remains in the same private JSON sidecar. Reuse existing filters rather than silently expanding the corpus.
