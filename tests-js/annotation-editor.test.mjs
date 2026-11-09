@@ -11,7 +11,7 @@ function fixture(t,{request,stored}={}){
  const notes=[],calls=[],saved=[],messages=[],timers=new Map();let active={id:'paper-a',pdf:true},next=0,editor,ui;
  w.setTimeout=fn=>{timers.set(++next,fn);return next;};w.clearTimeout=id=>timers.delete(id);
  w.eval(source);w.eval(companion);
- function render(){const restore=editor?.beforeRender(),list=w.document.getElementById('annotation-list');list.replaceChildren();for(const note of notes){const card=w.document.createElement('article');card.className='annotation-card';card.dataset.paperId=active.id;card.dataset.annotationId=note.id;card.innerHTML='<div class="annotation-actions"></div>';const parent=note.reply_to&&[...list.children].find(n=>n.dataset.annotationId===note.reply_to);if(parent){card.className='annotation-remark';card.dataset.remarkNumber=String(parent.querySelectorAll('.annotation-remark').length+2);parent.append(card);}else list.append(card);}editor?.decorate();restore?.();ui?.decorate();}
+ function render(){if(editor?.deferRender(render))return;const restore=editor?.beforeRender(),list=w.document.getElementById('annotation-list');list.replaceChildren();for(const note of notes){const card=w.document.createElement('article');card.className='annotation-card';card.dataset.paperId=active.id;card.dataset.annotationId=note.id;card.innerHTML='<div class="annotation-actions"></div>';const parent=note.reply_to&&[...list.children].find(n=>n.dataset.annotationId===note.reply_to);if(parent){card.className='annotation-remark';card.dataset.remarkNumber=String(parent.querySelectorAll('.annotation-remark').length+2);parent.append(card);}else list.append(card);}editor?.decorate();restore?.();ui?.decorate();}
  async function api(action,args){calls.push({action,...JSON.parse(JSON.stringify(args))});const custom=await request?.(action,args);if(custom!==undefined)return custom;
  if(action==='companion_status')return {entries:[],enabled:false};if(action==='companion_ask')return {request_id:'req',status:'queued',manual:true,annotation_id:args.annotation_id};
  if(action==='annotation_reply_create'){const parent=notes.find(n=>n.id===args.annotation_id);return {annotation:{id:args.reply_id,page:parent.page,type:'note',kind:'reader-reply',reply_to:parent.id,text:parent.text,comment:args.comment,version:'reply-created'}};}
@@ -93,4 +93,22 @@ test('new remarks use native reply creation and nested independent asks flush on
  assert.equal(f.w.document.querySelectorAll('#annotation-list > .annotation-card').length,1);const remarks=f.w.document.querySelectorAll('.annotation-remark');assert.equal(remarks.length,2);assert.match(remarks[0].querySelector('label').textContent,/备注 2/);
  const reply=f.notes[1];await f.input(reply.id,'Follow up two');remarks[0].querySelector('.companion-ask').click();await tick();await tick();
  const asked=f.calls.filter(c=>c.action==='companion_ask');assert.equal(asked.length,1);assert.equal(asked[0].annotation_id,reply.id);assert.equal(f.notes.find(n=>n.id===reply.id).comment,'Follow up two');assert.equal(root.comment,'');
+});
+
+test('autosave and background rerenders keep the editing card connected, preserve IME and do not steal later focus',async t=>{
+ const f=fixture(t);await f.editor.create('note',{page:9,comment:'Original'});
+ const note=f.notes[0],input=await f.input(note.id,'正在输入新问题');input.focus();input.setSelectionRange(2,4);
+ const list=f.w.document.getElementById('annotation-list'),card=input.closest('.annotation-card');list.scrollTop=240;
+ let blurs=0;input.addEventListener('blur',()=>blurs++);
+ input.dispatchEvent(new f.w.CompositionEvent('compositionstart'));
+ f.render();f.editor.decorate();f.render();
+ assert.equal(input.closest('.annotation-card'),card);assert.equal(card.isConnected,true);
+ assert.equal(f.w.document.activeElement,input);assert.equal(input.selectionStart,2);assert.equal(blurs,0);assert.equal(list.scrollTop,240);
+ input.dispatchEvent(new f.w.CompositionEvent('compositionend'));await f.flush();
+ assert.equal(f.w.document.activeElement,input);assert.equal(input.closest('.annotation-card'),card);assert.equal(blurs,0);
+ assert.equal(f.notes.find(n=>n.id===note.id).comment,'正在输入新问题');
+ const other=f.w.document.createElement('input');f.w.document.body.append(other);other.focus();await f.flush();
+ assert.equal(f.w.document.activeElement,other,'A completed save must not refocus its old textarea');
+ assert.equal(list.scrollTop,240);assert.equal(list.querySelector('textarea').value,'正在输入新问题');
+ assert.equal(card.isConnected,false,'Deferred updates render once editing ends');
 });

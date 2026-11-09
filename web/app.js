@@ -463,6 +463,7 @@ function annotationThreads(annotations) {
   return {notes,replies,unlinked};
 }
 function renderAnnotations() {
+  if(typeof annotationEditor!=='undefined'&&annotationEditor?.deferRender?.(renderAnnotations))return;
   const restoreEditorFocus = typeof annotationEditor!=='undefined'?annotationEditor?.beforeRender():null;
   linkedHandwritingUI?.beforeRender();
   const fragment = document.createDocumentFragment();

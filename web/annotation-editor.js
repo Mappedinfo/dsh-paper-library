@@ -101,14 +101,14 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
         }
         await checkpoint(r.paper);
       }catch(error){r.error=error.message;return false;}
-      try{await refresh(r.id,r.note,{reveal:document.activeElement?.closest('.annotation-remark, .annotation-card')?.dataset.annotationId===r.note.id});}catch(error){toast(`批注已保存，页面暂未刷新：${error.message}`,true);}
+      try{await refresh(r.id,r.note,{reveal:false});}catch(error){toast(`批注已保存，页面暂未刷新：${error.message}`,true);}
       return true;
     })();paint(r);
     try{return await r.running;}finally{r.running=null;paint(r);changed?.();}
   }
   function mount(card,r) {
     const existing=card.querySelector(':scope > .annotation-comment');existing?.remove();
-    const actions=card.querySelector(':scope > .annotation-actions');card.insertBefore(editor(r),actions||null);r.ui.root.querySelector('label').firstChild.textContent=`备注 ${card.dataset.remarkNumber||1}`;r.ui.input.setAttribute('aria-label',`第 ${r.note.page} 页备注 ${card.dataset.remarkNumber||1}`);paint(r);
+    const actions=card.querySelector(':scope > .annotation-actions'),ui=editor(r);if(ui.parentElement!==card)card.insertBefore(ui,actions||null);r.ui.root.querySelector('label').firstChild.textContent=`备注 ${card.dataset.remarkNumber||1}`;r.ui.input.setAttribute('aria-label',`第 ${r.note.page} 页备注 ${card.dataset.remarkNumber||1}`);paint(r);
   }
   function decorate() {
     const id=getPaper()?.id;if(!id)return;
@@ -116,7 +116,7 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
     for(const card of list.querySelectorAll('.annotation-card, .annotation-remark')) {
       const note=getNotes().find(n=>n.id===card.dataset.annotationId);if(!note||note.ai_generated||note.kind==='ai-feedback'||note.type==='ai_feedback')continue;
       const r=row(id,note);
-      if(!dirty(r)&&!r.running){r.note=clone(note);r.comment=r.saved=note.comment||note.content||'';if(r.ui)r.ui.input.value=r.comment;}
+      if(!dirty(r)&&!r.running&&document.activeElement!==r.ui?.input){r.note=clone(note);r.comment=r.saved=note.comment||note.content||'';if(r.ui&&r.ui.input.value!==r.comment)r.ui.input.value=r.comment;}
       mount(card,r);
     }
     // Pending creates/edits stay reachable even on another page of the rail.
@@ -152,12 +152,22 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
     if(r&&!await save(r))throw Error('请先重试保存这条批注，再问 DSH。');
     return r?.note.version;
   }
-  function beforeRender(){const active=document.activeElement;if(!active?.classList.contains('annotation-inline-input'))return()=>{};const start=active.selectionStart,end=active.selectionEnd;return()=>{if(active.isConnected){active.focus({preventScroll:true});active.setSelectionRange(start,end);}};}
+  let pendingRender=null,renderTimer=null;
+  function deferRender(render){
+    const active=document.activeElement,card=active?.closest?.('.annotation-card');
+    if(active?.classList.contains('annotation-inline-input')&&card?.dataset.paperId===getPaper()?.id){pendingRender=render;return true;}
+    pendingRender=null;return false;
+  }
+  document.addEventListener('focusout',event=>{
+    if(!event.target?.classList.contains('annotation-inline-input')||!pendingRender)return;
+    clearTimeout(renderTimer);renderTimer=setTimeout(()=>{renderTimer=null;const render=pendingRender;if(render&&!deferRender(render))render();},0);
+  });
+  function beforeRender(){const list=document.getElementById('annotation-list'),top=list?.scrollTop,left=list?.scrollLeft,active=document.activeElement,start=active?.selectionStart,end=active?.selectionEnd;return()=>{if(active?.classList.contains('annotation-inline-input')&&active.isConnected){active.focus({preventScroll:true});active.setSelectionRange(start,end);}if(list){list.scrollTop=top;list.scrollLeft=left;}};}
   function discard(id,annotationId){const p=paper(id),r=p.rows.get(annotationId);if(r){clearTimeout(r.timer);p.rows.delete(annotationId);void checkpoint(p).catch(e=>toast(e.message,true));}}
   function pending(){return [...papers.values()].flatMap(p=>[...p.rows.values()].filter(dirty).map(r=>({paper_id:r.id,annotation_id:r.note.id,comment:r.comment,payload:r.payload})));}
   window.addEventListener('beforeunload',event=>{if(pending().length){event.preventDefault();event.returnValue='';}});
   async function restoreDraft(id,note,comment){await load(id);const r=row(id,note);if(!dirty(r)){r.comment=comment;if(r.ui)r.ui.input.value=comment;await checkpoint(r.paper);}focus(id,note.id);}
-  return {create,decorate,ready,focus,beforeAsk,beforeRender,discard,pending,restoreDraft};
+  return {create,decorate,ready,focus,beforeAsk,beforeRender,deferRender,discard,pending,restoreDraft};
 }};
 
 // 矩形卡片只在进入视野后读取单个区域，最多并发两张，内存保留 16 张。

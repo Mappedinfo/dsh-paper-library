@@ -628,3 +628,21 @@ test('full width remeasures the pane, fills wide single/spread layouts and clear
   root.clientWidth=1200;scope.fitToWidth();
   assert.equal(parseFloat(row.style.width),1176,'Repeated fit remeasures even at zoom 1');
 });
+
+test('fit page uses both viewport dimensions, preserves the current page and includes the taller spread page',()=>{
+ const pages=[{page:1,width:600,height:900},{page:2,width:600,height:1200}];
+ const root={clientWidth:1200,clientHeight:600,scrollLeft:300,scrollTop:200};
+ const scope=vm.createContext({pages,root,active:2,layout:'single',zoom:2.15,PADDING:12,CAPTION:24,GAP:16,
+  metrics:pageMetrics(pages,1176),pageMetrics,endRectangle(){},cancelNavigation(){},announce(){},updateWindow(){},onZoomChange(){}});
+ const extract=(start,end)=>readerSource.slice(readerSource.indexOf(start),readerSource.indexOf(end,readerSource.indexOf(start)));
+ vm.runInContext(extract('const fitWidth =','const residentLimit =')+'function resize(){metrics=pageMetrics(pages,fitWidth()*zoom,layout);}\n'+extract('function fitPage()','function setZoom('),scope);
+ scope.fitPage();assert.equal(scope.active,2);assert.equal(root.scrollLeft,0);
+ assert.ok(scope.zoom<.25,'Automatic page fit is not blocked by the manual zoom minimum');
+ assert.ok(scope.metrics[1].height+24<=root.clientHeight+.01);
+ assert.equal(root.scrollTop,scope.metrics[1].top-12);
+ scope.layout='spread';scope.active=1;scope.fitPage();
+ assert.ok(scope.metrics[1].height+24<=root.clientHeight+.01,'Tall neighbor also fits');
+ assert.ok(2*(1176-16)/2*scope.zoom+16<=root.clientWidth);
+ root.clientWidth=400;root.clientHeight=1600;scope.layout='single';scope.fitPage();
+ assert.equal(scope.zoom,1,'Width constrains a tall viewport');
+});

@@ -1283,6 +1283,17 @@
       resize(); root.scrollLeft = 0;
       onZoomChange(zoom); return zoom;
     }
+    function fitPage() {
+      if(!pages.length||root.clientWidth<=0||root.clientHeight<=0)return;
+      const page=active,start=layout==='spread'?Math.floor((page-1)/2)*2:page-1;
+      const row=pages.slice(start,start+(layout==='spread'?2:1));
+      const aspect=Math.max(...row.map(p=>p.height/p.width));
+      endRectangle(true);cancelNavigation();
+      zoom=Math.min(1,Math.max(1,root.clientHeight-PADDING*2-CAPTION)/(fitWidth()*aspect));
+      resize({page,fraction:0});root.scrollLeft=0;
+      root.scrollTop=Math.max(0,metrics[page-1].top-PADDING);
+      active=page;updateWindow(page);announce();onZoomChange(zoom);return zoom;
+    }
     function setZoom(value, { anchor, point } = {}) {
       const next = Number(value);
       if (!Number.isFinite(next)) throw new Error('缩放比例无效');
@@ -1336,7 +1347,7 @@
     root.addEventListener('gesturestart', gestureStart, { passive: false }); root.addEventListener('gesturechange', gestureChange, { passive: false }); root.addEventListener('gestureend', gestureEnd, { passive: false });
     document.addEventListener('selectionchange', selectionChanged); document.addEventListener('pointerup', nativePointerEnded); document.addEventListener('pointercancel', nativePointerEnded);
     function dispose() { clear(); disposed = true; ink.clear(); overlays.clear(); queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('pointerdown', pointerDown); root.removeEventListener('pointermove', pointerMove); root.removeEventListener('pointercancel', pointerCancel); root.removeEventListener('lostpointercapture', pointerCancel); root.removeEventListener('pointerleave', pointerLeave); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); root.removeEventListener('wheel', wheel); root.removeEventListener('gesturestart', gestureStart); root.removeEventListener('gesturechange', gestureChange); root.removeEventListener('gestureend', gestureEnd); root.removeEventListener('keydown', userNavigate); document.removeEventListener('selectionchange', selectionChanged); document.removeEventListener('pointerup', nativePointerEnded); document.removeEventListener('pointercancel', nativePointerEnded); }
-    return { open, goTo, advance, refresh, clear, dispose, setTool, setZoom, fitToWidth, getZoom: () => zoom, setLayout, getLayout: () => layout, setReadingAppearance, getReadingAppearance: () => ({ ...readingAppearance }), resize, revealAnnotation, revealRegion, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, layout, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
+    return { open, goTo, advance, refresh, clear, dispose, setTool, setZoom, fitToWidth, fitPage, getZoom: () => zoom, setLayout, getLayout: () => layout, setReadingAppearance, getReadingAppearance: () => ({ ...readingAppearance }), resize, revealAnnotation, revealRegion, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, layout, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
   window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition, normalizeInternalLinks, internalLinkAt, bionicPrefix });
 })();
