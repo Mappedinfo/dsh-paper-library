@@ -628,6 +628,9 @@ def dispatch(request):
     library = Library(root)
     try:
         action = request.get("action")
+        if action in {"paper_text_search", "paper_text_read"}:
+            from . import paper_retrieval
+            return paper_retrieval.dispatch(library, request)
         if action in {"paper_organization_update", "paper_tags_list"}:
             from . import paper_organization
             return paper_organization.update(library, request) if action.endswith("update") else paper_organization.listing(library, request)

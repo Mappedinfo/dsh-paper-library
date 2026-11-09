@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-11-07T03:49:17.592Z",
+  "verified_at": "2026-11-09T01:32:01.922Z",
   "ok": true,
   "checks": [
     "fresh-synthetic-library-and-native-page-two-annotation",
@@ -17,9 +17,10 @@
     "repeated-feedback-save-is-idempotent-and-browser-text-is-ignored",
     "native-main-composer-plain-token-resolves-and-updates-sent-baseline-without-plugin-send",
     "human-save-host-queue-coalesces-edits-and-automatically-replies-without-browser-chat",
-    "multiple-continuous-notes-each-gain-one-native-pdf-reply-with-durable-completion"
+    "multiple-continuous-notes-each-gain-one-native-pdf-reply-with-durable-completion",
+    "native-tool-loop-searches-current-pdf-reads-method-page-and-saves-exactly-one-reply"
   ],
-  "deterministicModelGenerations": 4,
+  "deterministicModelGenerations": 7,
   "externalModelRequestsMade": 0,
   "sourceData": "Fresh synthetic three-page PDFs generated per run",
   "limitations": [

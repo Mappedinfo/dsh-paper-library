@@ -72,6 +72,10 @@ Handwriting was developed for an Apple Pencil / Sidecar reading workflow, with b
 
 ## Ask DSH while reading
 
+When an annotation does not provide enough context, DSH can search the current PDF with `library_paper_search` and read relevant pages with `library_paper_read` before answering. The guidance requires checking the paper's own methods separately from background work and citing the physical PDF pages actually read. Existing replies are preserved; ask a follow-up to revisit them.
+
+These read-only tools do not build an index, render images, or start full-paper analysis. Search scans at most 20 pages per call; reading returns at most three pages and 4,000 characters per page, with continuation for long pages. The prompt suggests a typical six-call / 24,000-character budget; this is guidance, while per-call limits are enforced. Missing text layers and read failures remain visible. The integration makes retrieval available but does not guarantee a model's interpretation.
+
 Each paper has its own DSH conversation, shared between the plugin and the DSH main view. You can ask about a marked passage without first writing a question, write a specific question in a note, or select several annotations as material for one request. The separate **Put into main input** action prepares a draft rather than sending it.
 
 Optional live reading assistance queues responses to annotation events. Saving a sidebar note alone does not call a model. Relevant sources are captured before sending so later PDF edits do not silently change an earlier request. The main DSH conversation handles model selection, tool permissions, complete history, and stopping a response.

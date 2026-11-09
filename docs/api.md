@@ -183,6 +183,8 @@ The plugin registers 35 tools through Harness's official tool registry. Optional
 | `library_dataset` | `operation,input_json` | Allowlisted dataset actions; AI usage links forced pending |
 | `library_knowledge` | `operation,input_json` | Selected source/draft/read/lint/export actions; no accept or note overwrite |
 | `library_search` | `query?,limit?,offset?,sort?,order?,archived?` | `list` |
+| `library_paper_search` | `id,query,start_page?,page_limit?,expected_version?` | `paper_text_search` |
+| `library_paper_read` | `id,pages,text_offset?,expected_version?` | `paper_text_read` |
 | `library_get` | `id,include_archived?` | `get` |
 | `library_create` | `metadata` with required `title` | `create` |
 | `library_update` | `id,metadata` | `update` |
@@ -253,6 +255,15 @@ HTTP `GET latex-version-pdf/<version_id>?review=<可选编译哈希>` 下载当�
 Tool metadata is a closed subset: `title,type,citekey,DOI,URL,abstract,author,editor,container-title,publisher,volume,issue,page,issued,tags,publication_dates,journal_rankings`. Its person schema accepts `family,given,literal,ORCID,affiliation`, with affiliation `{name,ror?,source?}`. Tool `issued` uses CSL `date-parts`. Graph evidence uses the closed schema above. Paths and runtime state cannot enter structured metadata. Each tool request is capped at 128 KiB before dispatch; core field limits still apply. `library_annotate` requires `rects` for text markup or `paths` for Ink; note placement may omit `rects`.
 
 Mutation tools pass through the configured native approval pipeline; `requireToolApproval` defaults to true and preserves any existing denial. Read tools do not start a model. `library_feedback` uses the calling Agent's configured model route by default and remains the compatibility feedback operation, not `chat_send`. `metadata_lookup` is a Node/browser operation, not an additional registered native tool.
+
+### 当前论文正文补读
+
+`library_search` 只搜索目录资料与摘要。原生 DSH Agent 可用上述两个只读工具补读已入库 PDF，HTTP／worker 对应 action 同表。它们不写索引、不渲染、不调用其他模型，沿用共享 worker 调度，单次超时 15 秒。
+
+- `paper_text_search`：`query` 为 1–200 字符字面短语；`start_page` 从 1 开始，`page_limit` 默认 12、最大 20。返回各命中页一个归一化定位片段、`scanned_pages`、`next_page`、`no_text_pages`。未扫描页不算无命中，片段不能替代正文。
+- `paper_text_read`：`pages` 为 1–3 个不同的物理页码，每页最多 4,000 字符。返回 `text`、`page_characters`、`complete_page` 和 `next_offset`；用单页及 `text_offset` 续读长页。无文字页显式标记 `no_extractable_text`，不自动 OCR。
+- 两者返回 `source_version`；可用 `expected_version` 检查后续读取，文件在读取前后变化时返回 `PAPER_RETRIEVAL_CHANGED`，重新读取核对。批注变化也可能触发该检查，不影响后台全文分析的来源身份逻辑。
+- 新论文提问快照附带补读指引；已保存的旧快照和回复不改写。提示中的通常 6 次／约 24,000 字符为模型指引，单次页数和字符数为后端硬限制。单轮回复仍由既有会话落盘链保存一次，不需要模型另写 PDF 批注。
 
 ## External sources (synced corpora)
 
@@ -396,7 +407,7 @@ Public acquisition limits: default60-second total deadline, 15seconds/request, f
 
 Managed filename: `author-year-title--id8.pdf`, bounded to 210 UTF-8 bytes; collisions use the full stable id. Metadata edits use a recovery journal when renaming a managed file. Attaching a PDF to an existing metadata-only item preserves its bibliography/citekey and merges actual PDF parse, source hash and acquisition evidence. Original imported files remain unchanged.
 
-The plugin registers `skills/paper-library-fetch/SKILL.md` as `paper-library-fetch` with Harness's scoped skill registry, both model- and user-invocable. Its tools are the existing `library_import`, `library_get`, `library_cite`, `library_annotations` and `library_feedback`. It does not install or watch a global skills directory.
+插件通过 Harness 的 scoped skill registry 注册 `skills/paper-library-fetch/SKILL.md` 为 `paper-library-fetch`，支持模型和用户调用。获取与批注相关工具为 `library_import`、`library_get`、`library_cite`、`library_annotations`、`library_feedback`；按需正文补读使用 `library_paper_search` 和 `library_paper_read`。不安装或监听全局技能目录。
 
 The parent pane publishes version1 `paper-library:context` messages containing `sessionId,provider,model,reasoningEffort,status`. Both sides require the exact counterpart window and same origin. The frame announces `paper-library:ready`; the parent subscribes to the public model directory. This supplies first-creation context and the compatibility route, while an existing paper conversation's model remains authoritative for `chat_send`.
 

@@ -249,7 +249,10 @@ test('a question without newly quoted passages keeps the native user message con
   assert.equal(result.annotation_ids.length, 0)
   assert.equal(result.text.includes('原文：'), false)
   assert.equal(result.text.includes('quoted paper text'), false)
-  assert.ok(result.text.length < 250)
+  assert.ok(result.draft_text.length < 250)
+  assert.ok(result.text.length < 1800, 'Bounded retrieval instructions do not embed the full PDF')
+  assert.match(result.text, /library_paper_search/)
+  assert.match(result.text, /library_paper_read/)
   assert.match(result.text, /我的问题：What should I read next\?$/)
 })
 

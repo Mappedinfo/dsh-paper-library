@@ -240,7 +240,29 @@ try {
   checks.push('human-save-host-queue-coalesces-edits-and-automatically-replies-without-browser-chat')
   checks.push('multiple-continuous-notes-each-gain-one-native-pdf-reply-with-durable-completion')
 
-  const report = { verified_at: new Date().toISOString(), ok: true, checks, deterministicModelGenerations: afterAuto.generations, externalModelRequestsMade: 0, sourceData: 'Fresh synthetic three-page PDFs generated per run', limitations: ['No paid model-quality evaluation', 'No real-library migration or memory benchmark', 'Browser interaction is validated separately'] }
+  // 验证真实宿主工具循环：背景页与方法页不同，不能仅靠初始批注回答。
+  const retrievalPdf = join(run, 'synthetic-retrieval.pdf')
+  const generatedRetrieval = spawnSync(python, ['-c', 'import pymupdf as f,sys;d=f.open();[(d.new_page().insert_text((40,60),t)) for t in ["Background: previous methods used Word2Vec.","Synthetic intermediate page.","Method: our system uses a synthetic reconstruction objective."]];d.save(sys.argv[1])', retrievalPdf], {encoding:'utf8'})
+  assert.equal(generatedRetrieval.status,0,generatedRetrieval.stderr)
+  const retrievalImport = await core({action:'import',path:retrievalPdf},{library,python})
+  const retrievalPaper = retrievalImport.items[0]
+  const retrievalNote = await core({action:'annotate',id:retrievalPaper.id,page:1,type:'note',comment:'Does the synthetic method really use Word2Vec?',author:'Fixture reader'},{library,python})
+  const retrievalContext=await api({action:'chat_context',id:retrievalPaper.id,annotation_ids:[retrievalNote.annotation.id],question:'SYNTHETIC_CROSS_SECTION_RETRIEVAL: check the method beyond the background page.'})
+  await api({action:'chat_send',id:retrievalPaper.id,snapshot_id:retrievalContext.snapshot_id,request_id:'native-retrieval-1'})
+  const retrievalDeadline=Date.now()+30000
+  let retrievalReplies=[], retrievalHistory
+  do {
+    retrievalHistory=await api({action:'chat_history',id:retrievalPaper.id})
+    retrievalReplies=(await core({action:'feedback',id:retrievalPaper.id},{library,python})).feedback.filter(v=>v.source_kind==='dsh-conversation')
+    if(retrievalReplies.length&&!retrievalHistory.running)break
+    await new Promise(resolve=>setTimeout(resolve,150))
+  }while(Date.now()<retrievalDeadline)
+  assert.equal(retrievalReplies.length,1,JSON.stringify(retrievalHistory))
+  assert.equal(retrievalReplies[0].reply_to,retrievalNote.annotation.id)
+  assert.ok(retrievalHistory.messages.some(m=>m.role==='assistant'&&m.text.includes('physical PDF page 3')))
+  checks.push('native-tool-loop-searches-current-pdf-reads-method-page-and-saves-exactly-one-reply')
+
+  const report = { verified_at: new Date().toISOString(), ok: true, checks, deterministicModelGenerations: (await observe([])).generations, externalModelRequestsMade: 0, sourceData: 'Fresh synthetic three-page PDFs generated per run', limitations: ['No paid model-quality evaluation', 'No real-library migration or memory benchmark', 'Browser interaction is validated separately'] }
   await mkdir(dirname(reportPath), { recursive: true })
   await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n')
   console.log(JSON.stringify(report))

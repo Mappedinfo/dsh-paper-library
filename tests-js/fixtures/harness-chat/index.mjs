@@ -7,7 +7,7 @@ export const PROVIDER = 'paper-library-native-chat-fixture'
 export const MODEL = 'deterministic-reader'
 export const REPLY = 'Synthetic reading reply: the saved annotation is on PDF page 2. This fixture makes no scientific claim.'
 
-/** Deterministic model adapter: no provider SDK, credential access, network or tool calls. */
+/** Deterministic model adapter: no provider SDK, credential access or external network; the retrieval branch exercises native read tools. */
 class ReadingAdapter extends LlmAdapter {
   constructor(observation) { super(); this.observation = observation }
   providerInfo() { return { id: PROVIDER, name: 'Paper Library Native Chat Fixture' } }
@@ -24,7 +24,7 @@ class ReadingAdapter extends LlmAdapter {
       text: message.content.filter(block => block.type === 'text').map(block => block.text).join('\n').slice(0, 4000),
     })).slice(-8)
     // Board material arrives through its own plugin source. The offered tool names are
-    // recorded only to prove what a real host exposed; this adapter never calls a tool.
+    // recorded only to prove what a real host exposed; the retrieval branch below exercises native read tools.
     this.observation.boardReferences = options.messages.filter(message => message.source?.plugin === 'Paper Library' && message.source.paperLibraryBoard).map(message => ({
       boardId: message.source.paperLibraryBoard.board_id,
       snapshotId: message.source.paperLibraryBoard.snapshot_id,
@@ -33,6 +33,34 @@ class ReadingAdapter extends LlmAdapter {
     })).slice(-8)
     this.observation.tools = (options.tools ?? []).map(tool => tool.name).slice(0, 200)
     const prompt = options.messages.flatMap(message => message.content.filter(block => block.type === 'text').map(block => block.text)).join('\n')
+    if (prompt.includes('SYNTHETIC_CROSS_SECTION_RETRIEVAL')) {
+      const refs = options.messages.filter(m => m.source?.paperLibraryReference)
+      const paperId = refs.at(-1)?.source.paperLibraryReference.paperId
+      const sourceText = refs.at(-1)?.content.filter(b => b.type === 'text').map(b => b.text).join('\n') || ''
+      const id = paperId || JSON.parse(sourceText.match(/paper_id=("[^"]+")/)?.[1] || 'null')
+      if (!id || !prompt.includes('library_paper_search')) throw new Error('Retrieval identity/guidance absent')
+      const results = options.messages.filter(m => m.role === 'tool')
+      const toolText = JSON.stringify(results)
+      if (toolText.includes('isError":true')) throw new Error('Synthetic retrieval tool failed: ' + toolText.slice(-2000))
+      if (results.length < 2) {
+        const name = results.length ? 'library_paper_read' : 'library_paper_search'
+        if (!(options.tools || []).some(t => t.name === name)) throw new Error('Missing native retrieval schema: ' + name + '; offered: ' + (options.tools || []).map(t => t.name).join(','))
+        const args = results.length ? {id, pages:[3]} : {id, query:'reconstruction'}
+        const block={type:'tool-call',id:'synthetic-retrieve-'+results.length,name,arguments:JSON.stringify(args)}
+        yield {type:'block-start',index:0,blockType:'tool-call'}
+        yield {type:'tool-call-delta',index:0,id:block.id,name,argumentsDelta:block.arguments}
+        yield {type:'block-end',index:0,block}
+        yield {type:'finish',reason:{kind:'tool-calls'}}
+        return
+      }
+      if (!toolText.includes('synthetic reconstruction objective')) throw new Error('Method page evidence not returned')
+      const text='Synthetic evidence: background on page 1 mentions Word2Vec; the method on physical PDF page 3 uses a synthetic reconstruction objective. This is a test, not a claim about a real paper.'
+      yield {type:'block-start',index:0,blockType:'text'}
+      yield {type:'text-delta',index:0,text}
+      yield {type:'block-end',index:0,block:{type:'text',text}}
+      yield {type:'finish',reason:{kind:'stop'}}
+      return
+    }
     let reply = REPLY
     if (prompt.includes('REVIEW_METHOD: evidence-atlas')) {
       const material = JSON.parse(prompt.slice(prompt.lastIndexOf('READING_RECORDS_JSON:\n') + 'READING_RECORDS_JSON:\n'.length).split('\nEND_OF_READING_RECORDS')[0])
