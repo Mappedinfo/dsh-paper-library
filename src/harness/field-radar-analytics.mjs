@@ -1,5 +1,6 @@
 /** Deterministic, evidence-preserving corpus statistics. No remote lookups or inferred geocoding. */
 import '../../web/field-radar-data.js';
+import { createRadarLocale } from './field-radar-i18n.mjs';
 const list = v => Array.isArray(v) ? v : v == null || v === '' ? [] : [v];
 const unique = v => [...new Set(v)];
 const label = v => typeof v === 'string' ? v.trim() : v && typeof v === 'object' ? String(v.name || v.title || v.label || '').trim() : '';
@@ -36,9 +37,10 @@ export function validateRadarGeography(doc) {
     }
   }
 }
-export function projectFieldRadarAnalytics(doc, { filters = {}, group_by = 'subtopic', frequency_by = 'task',view } = {}) {
+export function projectFieldRadarAnalytics(doc, { filters = {}, group_by = 'subtopic', frequency_by = 'task',view,language='zh' } = {}) {
   const papers = globalThis.PaperFieldRadarData.filteredPapers(doc, filters), paperIds = new Set(papers.map(p => p.id)), knownSources = new Set((doc.sources || []).map(s => s.id));
-  const warnings = ['统计范围仅为当前主题与筛选，不代表完整领域；未知值不当作零。'];
+  const {ui}=createRadarLocale(doc,language);
+  const warnings = [ui('统计范围仅为当前主题与筛选，不代表完整领域；未知值不当作零。','Statistics cover this saved topic and its filters, not the whole field. Missing values are not zero.')];
   const warn=(scope,message)=>{if(!view||view===scope)warnings.push(message);};
   const grouped = new Map(), frequencyMissing = [];
   for (const p of papers) {
@@ -69,10 +71,10 @@ export function projectFieldRadarAnalytics(doc, { filters = {}, group_by = 'subt
   const areas=list(doc.study_areas).filter(linked), observations=list(doc.geo_observations).filter(linked), context=list(doc.map_context);
   const mappedIds=new Set([...areas,...observations].flatMap(r=>list(r.paper_ids)).filter(id=>paperIds.has(id)));
   const placeMentions=papers.flatMap(p=>list(p.datasets).filter(d=>d&&typeof d==='object'&&d.place).map(d=>({paper_id:p.id,dataset:d.name||'',place:d.place,source_ids:sourceIds(d.source_ids||p.source_ids,knownSources)})));
-  if (!edges.length) warn('citations','没有已核验的有向引用边；共著、任务相似、方法对照不代替引用。');
-  if (!citationCounts.length) warn('citations','未收录带提供方与日期的引用量，不绘制虚构排名。');
-  if (!areas.length && !observations.length) warn('geography','没有已核验的坐标或边界；地名文字不足以绘图，需补充有来源的空间资料。');
-  else if (!observations.length) warn('geography','仅显示有来源的研究区域或代表点；未取得原始移动数据，不代表轨迹、流量或精确采样边界。');
-  if (group_by==='research_group' && missingGroupIds.length) warn('publications','研究组只使用明确核验的成员/作品归属；主题分组与共同作者不自动当作研究组。');
+  if (!edges.length) warn('citations',ui('没有已核验的有向引用边；共著、任务相似、方法对照不代替引用。','No verified directed citation links are available. Coauthorship, task similarity and comparisons are not citations.'));
+  if (!citationCounts.length) warn('citations',ui('未收录带提供方与日期的引用量，不绘制虚构排名。','Citation counts with a provider and date have not been collected; no ranking is invented.'));
+  if (!areas.length && !observations.length) warn('geography',ui('没有已核验的坐标或边界；地名文字不足以绘图，需补充有来源的空间资料。','No verified coordinates or boundaries are available. Place names alone are insufficient; sourced geometry is needed.'));
+  else if (!observations.length) warn('geography',ui('仅显示有来源的研究区域或代表点；未取得原始移动数据，不代表轨迹、流量或精确采样边界。','Only sourced study areas or representative points are shown. Raw mobility data are unavailable; these are not trajectories, flows or exact sampling boundaries.'));
+  if (group_by==='research_group' && missingGroupIds.length) warn('publications',ui('研究组只使用明确核验的成员/作品归属；主题分组与共同作者不自动当作研究组。','Research groups require verified membership or paper attribution. Topic groups and coauthors are not automatically treated as labs.'));
   return { papers, source_ids:unique([...papers.flatMap(p=>sourceIds(p.source_ids,knownSources)),...groupSources]), frequency, publications, citations:{nodes:papers,edges,counts:citationCounts}, geography:{areas,observations,context,place_mentions:placeMentions}, coverage:{papers:papers.length,corpus_papers:doc.papers.length,frequency_missing:frequencyMissing.length,unknown_year:papers.filter(p=>p.year==null).length,unclassified:missingGroupIds.length,citation_edges:edges.length,citation_counts_known:unique(citationCounts.map(c=>c.paper_id)).length,citation_candidates_excluded:excludedCitations,mapped_papers:mappedIds.size,study_areas:areas.length,observations:observations.length,place_mentions:placeMentions.length}, warnings, memberships };
 }

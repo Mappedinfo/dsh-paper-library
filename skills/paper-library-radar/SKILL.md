@@ -50,3 +50,10 @@ Use the existing 「领域研究 → 图表与地图」 and `library_field_radar
 - `view:geography`: supplied coordinates/GeoJSON/spatial values only. If only study-area geometry exists, highlight that area and label it as study-area coverage, not observations. If only a place name is available, report missing geometry rather than invent coordinates, boundaries or density.
 
 Use `format:png|svg`. Inspect the returned `available`, `warnings`, `coverage` and source/version receipt before describing the chart. An unavailable-data figure is a useful gap report, not a completed citation network or empirical map. Existing timeline, concept, research-line and scholar views remain available. For executable CLI examples and input data conventions, read `docs/field-radar.md` in this plugin. Rendering and deterministic aggregation do not need an additional AI analysis request.
+
+
+## Presentation language editions
+
+For requested English presentations, pass `language:en` to `library_field_radar_render`; use `language:zh` for the Chinese-primary edition with original English terms. The integrated chart toolbar exposes the same choice. Preserve topic revision, filters, data, evidence markers and counting rules across editions.
+
+Before an English render, prepare faithful `document.translations.en.labels` mappings from exact saved source strings to English text when needed. Preserve names, quantities, affiliations, dates and uncertainty; translations must not add findings. Save mappings through the existing version-checked topic import, retaining original fields and source IDs. Rendering never calls a model or performs automatic translation. Unmapped Chinese fields are replaced by neutral entity IDs or `Translation unavailable` and reported as missing; tell the user what remains untranslated instead of presenting these placeholders as a finished translation. Inspect receipt.language and translation warnings, and verify the delivered English chart has no residual Chinese text. Keep original evidence in the private sidecar even when the figure is English-only.

@@ -1,5 +1,6 @@
 /** Explicit, bounded research imports. No model, remote fetch, PDF access or author-name merging. */
 import { createHash } from 'node:crypto'
+import { validateRadarTranslations } from './field-radar-i18n.mjs'
 import { validateRadarGeography } from './field-radar-analytics.mjs'
 import { constants } from 'node:fs'
 import { lstat, open } from 'node:fs/promises'
@@ -34,6 +35,7 @@ export function validateFieldRadarDocument(input) {
   for (const claim of doc.claims) { string(claim.text, '论断'); refs(claim) }
   const queue = [{ value: doc, depth: 0 }]; let count = 0
   while (queue.length) { const { value, depth } = queue.pop(); if (++count > 50000 || depth > 24) throw fail('资料嵌套过深或节点过多。'); if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) { if (['__proto__', 'constructor', 'prototype'].includes(key)) throw fail('资料包含不安全字段。'); if (key === 'url' || key.endsWith('_url')) safeURL(child); if (key === 'source_ids' && (!Array.isArray(child) || child.some(id => !collections.sources.has(id)))) throw fail('扩展研究记录引用未知来源。'); if (['paper_ids','scholar_ids'].includes(key) && (!Array.isArray(child) || child.some(id => !collections[key === 'paper_ids' ? 'papers' : 'scholars'].has(id)))) throw fail('研究关系引用未知实体。'); if (['source_paper_id','target_paper_id'].includes(key) && child != null && !collections.papers.has(child)) throw fail('研究关系引用未知论文。'); queue.push({ value: child, depth: depth + 1 }) } }
+  validateRadarTranslations(doc)
   validateRadarGeography(doc)
   return doc
 }

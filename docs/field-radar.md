@@ -104,3 +104,20 @@ node scripts/export-field-radar.mjs --library /absolute/path/to/library --id syn
 geometry 使用 WGS84 GeoJSON `Point|LineString|Polygon|MultiPolygon`，coordinates 顺序是经度、纬度。precision 说明位置精度及研究区性质；所有来源 ID 必须存在。每个空间集合最多 500 条，总坐标点最多 12000。当前使用等距圆柱投影；跨日期变更线的线/面须预先切分，不能用跨全球的直线代替真实边界。未获取原始空间数据时，允许只提供有来源的研究区几何并明确标注；无几何时保留地区提及和缺失说明。
 
 coverage 提供 papers、corpus_papers、frequency_missing、unknown_year、unclassified、citation_edges、citation_counts_known、mapped_papers、study_areas、observations、place_mentions，用于核对当前筛选与缺失范围。
+
+
+## 中文与全英文图表版本
+
+图表工具栏可选「中文为主 / Chinese + English」或「English only」。默认 `language:zh` 保留原有中文为主、英文术语混排；`language:en` 用于英文汇报。切换语言保留关键词、任务与年份筛选，图表回到第一页并要求重新预览。预览、PNG/SVG 导出及回执使用同一语言；此选项控制图表版本，不改写原始研究资料或其他阅读页面，当前界面会话中保留选择。
+
+```
+node scripts/export-field-radar.mjs --library /absolute/path/to/library --id synthetic-topic --view publications --language en --format svg
+```
+
+HTTP/原生工具同样传 `language:"en"`，回执返回 language。英文图中的实体/来源文字使用主题内的明确翻译映射：
+
+```json
+{"translations":{"en":{"labels":{"轨迹预测":"Trajectory prediction","城市研究组":"Urban research group"}}}}}
+```
+
+映射键必须对应保存证据中的原始字符串，译文忠实保留原意、数字、人物身份与不确定性。渲染是确定性的本机操作，不调用模型自动翻译。中文字段缺少映射时，全英文版使用中性实体 ID 或 `Translation unavailable` 并报告缺失，不把未翻译中文混进英文图，也不创造英文事实。为汇报准备翻译时，应核对证据并通过已有主题导入/版本校验保存映射，保留原始字段及来源不变。切勿将替代标记当成已完成译文。
