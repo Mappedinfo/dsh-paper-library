@@ -1,0 +1,38 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtemp, mkdir, rm, writeFile, symlink } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { createLocalStateStore } from '../src/local-state.mjs'
+import { createFieldRadarStore, validateFieldRadarDocument } from '../src/harness/field-radar.mjs'
+import { createFetchHandler } from '../src/http.mjs'
+const document = () => ({ schema_version: 1, topic: { id: 'synthetic-topic', title: 'Synthetic mobility', question: 'How is movement modelled?', scope: 'synthetic' }, sources: [{ id: 's1', url: 'https://example.org/paper', title: 'Synthetic source', evidence_level: 'metadata', accessed_at: null }], papers: [{ id: 'p1', title: 'Synthetic paper', doi: '10.1234/synthetic', year: null, task: ['prediction'], authors: ['A. Example'], source_ids: ['s1'] }], scholars: [{ id: 'a1', name: 'A. Example', identity_status: 'unverified', source_ids: ['s1'], contributions: [{ paper_id: 'p1', summary: 'Synthetic contribution', source_ids: ['s1'] }] }], claims: [{ id: 'c1', text: 'Synthetic claim', source_ids: ['s1'], confidence: 'tentative' }] })
+async function fixture(t, request = async () => ({ items: [], total: 0 })) { const root = await mkdtemp(join(tmpdir(), 'radar-synthetic-')), library = join(root, 'library'), home = join(root, 'home'); await mkdir(library); t.after(() => rm(root, { recursive: true, force: true })); const store = createLocalStateStore({ library, home }); return { root, library, home, store, radar: createFieldRadarStore({ store, request, library }) } }
+test('imports round trip, remain isolated, and retain immutable historical snapshots', async t => {
+  const f = await fixture(t), doc = document()
+  doc.extra = '中文'.repeat(60000)
+  const first = await f.radar.handle({ action: 'field_radar_import', document: doc, expected_revision: 0 })
+  assert.deepEqual((await f.radar.get(doc.topic.id)).document, doc)
+  const oldSnapshots = await f.store.list({ prefix: 'field-radar-snapshot:' })
+  doc.claims[0].text = 'Revised synthetic claim'
+  await f.radar.handle({ action: 'field_radar_import', document: doc, expected_revision: first.revision })
+  assert.equal((await f.store.list({ prefix: 'field-radar-snapshot:' })).total, 2)
+  assert.deepEqual(await f.store.get(oldSnapshots.records[0].key), oldSnapshots.records[0])
+  await assert.rejects(f.radar.handle({ action: 'field_radar_import', document: doc, expected_revision: first.revision }), { code: 'STATE_CONFLICT' })
+  const listed = await f.radar.handle({ action: 'field_radar_list' }); assert.equal(listed.topics.length, 1); assert.equal(listed.topics[0].counts.papers, 1)
+  const other = createFieldRadarStore({ store: createLocalStateStore({ library: join(f.root, 'other'), home: f.home }) }); assert.equal((await other.get(doc.topic.id)).document, null)
+})
+test('validates URL safety, duplicate IDs, references, size and extensions without merging names', () => {
+  const doc = document(); doc.scholars.push({ ...doc.scholars[0], id: 'a2' }); assert.equal(validateFieldRadarDocument(doc).scholars.length, 2)
+  for (const modify of [d => d.sources[0].url = 'javascript:alert(1)', d => d.papers[0].source_ids = ['missing'], d => d.scholars[0].contributions[0].paper_id = 'missing', d => d.papers.push(d.papers[0]), d => d.sources[0].accessed_at = 'made-up', d => d.topic.id = '../escape', d => d.extra = 'x'.repeat(1024 * 1024), d => d.topic.extra = 'x'.repeat(20000)]) { const next = document(); modify(next); assert.throws(() => validateFieldRadarDocument(next)) }
+})
+test('concurrent imports cannot silently overwrite the same topic', async t => { const f = await fixture(t); const outcomes = await Promise.allSettled([1, 2].map(i => f.radar.handle({ action: 'field_radar_import', expected_revision: 0, document: { ...document(), extra: i } }))); assert.equal(outcomes.filter(v => v.status === 'fulfilled').length, 1); assert.equal(outcomes.find(v => v.status === 'rejected').reason.code, 'STATE_CONFLICT') })
+test('metadata-only matching exposes duplicates, partial results and conflicting DOIs', async t => {
+  const calls = [], f = await fixture(t, async input => { calls.push(input); return { items: [{ id: 'lib1', title: 'Synthetic paper', DOI: '10.1234/synthetic', pdf: true }, { id: 'lib2', title: 'Synthetic paper', DOI: 'https://doi.org/10.1234/synthetic' }, { id: 'different', title: 'Synthetic paper', DOI: '10.1234/other' }], total: 3 } })
+  const result = await f.radar.handle({ action: 'field_radar_match', papers: document().papers }); assert.equal(result.matches[0].status, 'ambiguous'); assert.deepEqual(result.matches[0].candidates.map(row => row.id), ['lib1', 'lib2']); assert.ok(calls.every(row => row.action === 'resource_list' && row.limit === 50 && row.kind === 'paper'))
+  const partial = createFieldRadarStore({ store: f.store, request: async () => ({ items: [{ id: 'lib1', title: 'Synthetic paper' }], total: 80 }) }); assert.equal((await partial.handle({ action: 'field_radar_match', papers: document().papers })).matches[0].status, 'incomplete')
+})
+test('snapshot reader uses only fixed private path and rejects symlinks', async t => { const f = await fixture(t); assert.equal((await f.radar.handle({ action: 'field_radar_snapshot_get' })).snapshot, null); await mkdir(join(f.library, '.paper-library')); const path = join(f.library, '.paper-library', 'field-radar-snapshot.json'); await writeFile(path, JSON.stringify({ scholars: [], works: [] })); assert.deepEqual((await f.radar.handle({ action: 'field_radar_snapshot_get', path: '/ignored' })).snapshot, { scholars: [], works: [] }); await rm(path); await writeFile(join(f.root, 'secret'), '{}'); await symlink(join(f.root, 'secret'), path); await assert.rejects(f.radar.handle({ action: 'field_radar_snapshot_get' })) })
+test('shared HTTP API imports and reads radar while generic state routes cannot overwrite provenance', async t => { const f = await fixture(t), fetch = createFetchHandler({ library: f.library, localState: f.store }); const request = async body => { const response = await fetch(new Request('http://localhost/api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })); return { status: response.status, body: await response.json() } }; const saved = await request({ action: 'field_radar_import', document: document(), expected_revision: 0 }); assert.equal(saved.status, 200); assert.equal(saved.body.ok, true); assert.equal((await request({ action: 'field_radar_get', id: 'synthetic-topic' })).body.result.document.papers.length, 1); assert.equal((await request({ action: 'state_put', key: 'field-radar-topic:synthetic-topic', value: {}, expected_revision: saved.body.result.revision })).status, 403) })
+test('extended concepts and relationships cannot cite absent sources or entities',()=>{for(const row of [{source_ids:['absent']},{source_ids:['s1'],paper_ids:['absent']},{source_ids:['s1'],source_paper_id:'absent'}])assert.throws(()=>validateFieldRadarDocument({...document(),relationships:[row]}));});
+test('supplied library ids are read and mismatched titles remain explicit review candidates',async t=>{const calls=[],f=await fixture(t,async input=>{calls.push(input);return input.action==='get'?{id:'local-one',title:'Synthetic paper truncated',pdf:true}:{items:[],total:0};});const r=await f.radar.handle({action:'field_radar_match',papers:[{...document().papers[0],local_paper_id:'local-one'}]});assert.equal(r.matches[0].status,'ambiguous');assert.equal(r.matches[0].candidates[0].match_basis,'supplied-id-needs-review');assert.equal(calls[0].action,'get');assert.ok(!calls.some(c=>c.action.includes('text')||c.action==='page'));});

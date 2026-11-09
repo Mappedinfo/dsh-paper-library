@@ -1,3 +1,5 @@
+import { createFieldRadarAnalysis } from './harness/field-radar-analysis.mjs';
+import { createFieldRadarStore } from './harness/field-radar.mjs';
 import { createEncyclopedia } from './encyclopedia.mjs';
 import { createAnnotationTranslation } from './harness/annotation-translation.mjs';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
@@ -32,6 +34,7 @@ staticFiles['return-to-dsh.js']=['return-to-dsh.js','text/javascript;charset=utf
 for (const name of ['challenge-mining.js','challenge-mining.css','annotation-threads.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['board.js','board.css','board-flow.js','board-source.js','board-render.js','board-bridge.js','board-annotations.js','board-annotations.css','board-mermaid.js','board-drawio.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['workspace-navigation.js','workspace-navigation.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['field-radar.js','field-radar.css','field-radar-legacy.js','field-radar-legacy.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 const languageActions = new Set(['language_settings_get','language_settings_update','language_generate','language_history','language_vocabulary_sync','vocabulary_create','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
 for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js','ink-diagnostics.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 staticFiles['annotation-editor.js']=['annotation-editor.js','text/javascript;charset=utf-8'];
@@ -133,6 +136,8 @@ export function createFetchHandler(options = {}) {
   const workspaceNavigation = options.workspaceNavigation || createWorkspaceNavigation({ boards, request: (payload, signal) => dispatch(payload, { ...options, signal }) });
   const inkQueue = options.inkQueue || createInkQueue({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python,autoStart:false});
   const inkDiagnostics = createInkDiagnostics({store:localState});
+  const fieldRadar = options.fieldRadar || createFieldRadarStore({ store: localState, library: options.library || defaultLibrary, request: (payload, signal) => dispatch(payload, { ...options, signal }) });
+  const fieldRadarAnalysis = options.fieldRadarAnalysis || createFieldRadarAnalysis({ store: localState, radar: fieldRadar });
   const handle = async function handle(request) {
     const url = new URL(request.url);
     if (options.loopbackOnly) {
@@ -191,6 +196,8 @@ export function createFetchHandler(options = {}) {
             : input?.action === 'annotation_caption' ? await options.annotationCaption(input, { signal: request.signal })
             : ['encyclopedia_list','encyclopedia_put'].includes(input?.action) ? await encyclopedia(input)
             : companionAction ? await options.companion.handle(input)
+            : ['field_radar_analyze','field_radar_analysis_get'].includes(input?.action) ? await fieldRadarAnalysis.handle(input, { signal: request.signal })
+            : typeof input?.action === 'string' && input.action.startsWith('field_radar_') ? await fieldRadar.handle(input, { signal: request.signal })
             : ['workspace_catalog','workspace_related'].includes(input?.action) ? await workspaceNavigation.handle(input, { signal: request.signal })
             : ['ink_diagnostics_append','ink_diagnostics_get'].includes(input?.action) ? await inkDiagnostics.handle(input)
             : typeof input?.action === 'string' && input.action.startsWith('ink_queue_') ? await inkQueue.handle(input)

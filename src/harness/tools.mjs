@@ -1,3 +1,4 @@
+import { FIELD_RADAR_TOOL_SPECS, fieldRadarToolRequest, handleFieldRadarTool } from './field-radar-tools.mjs'
 import { resolve } from 'node:path'
 import { RESOURCE_TOOL_SPECS, resourceToolRequest } from './resource-tools.mjs'
 import { BOARD_TOOL_SPECS, boardToolRequest, handleBoardRequest } from './board-tools.mjs'
@@ -29,6 +30,7 @@ const graphRelations = ['supports', 'contradicts', 'uses', 'evaluates', 'derived
 
 /** Small schemas keep scope explicit and avoid exposing core write/feedback internals. */
 export const TOOL_SPECS = [
+  ...FIELD_RADAR_TOOL_SPECS,
   { name: 'library_paper_view', action: 'paper_visual_read', title: 'View the actual PDF page image to inspect figures, tables (including image/vector tables), formulas and scanned text; zoom into details with region instead of relying only on extracted text', parameters: { id: string('Exact library paper ID supplied by the question', true), page: { type: 'integer', required: true, description: 'One physical PDF page number' }, region: { type: 'array', items: { type: 'number' }, description: 'Optional crop [left,top,right,bottom], each 0–1 relative to the displayed page. Default full page. Use after viewing the page to inspect small details.' }, max_edge: { type: 'integer', description: '512–2048 pixels on longest side; default 1600. One PNG at most 2 MiB, annotations excluded.' }, expected_version: string('source_version from search/read/view; recheck if PDF changed') } },
   { name: 'library_paper_search', action: 'paper_text_search', title: 'Search text inside one current paper PDF before answering cross-section questions; follow next_page for unsearched pages, then read matching pages', parameters: { id: string('Exact library paper ID supplied by the question', true), query: string('Literal short term or phrase, 1–200 characters; not catalog search or a regex', true), start_page: { type: 'integer', description: 'First physical PDF page, default 1; follow returned next_page' }, page_limit: { type: 'integer', description: '1–20 pages per call, default 12' }, expected_version: string('source_version returned by a previous read/search; omit only when starting or explicitly rechecking a changed PDF') } },
   { name: 'library_paper_read', action: 'paper_text_read', title: 'Read source text from selected physical PDF pages to verify methods, objectives and claims beyond the annotation page', parameters: { id: string('Exact library paper ID', true), pages: { type: 'array', items: { type: 'integer' }, required: true, description: '1–3 unique physical page numbers; at most 4000 characters per page' }, text_offset: { type: 'integer', description: 'Continue one page using its returned next_offset; default 0' }, expected_version: string('source_version from search/read; changed versions must be rechecked') } },
@@ -69,6 +71,7 @@ export const TOOL_SPECS = [
 
 /** Pick only declared tool arguments, including on programmatic direct calls. */
 export function requestFromTool(spec, args, exec) {
+  if (spec.radar) return fieldRadarToolRequest(spec, args)
   if (spec.board) return boardToolRequest(spec, args)
   if (spec.action === 'project_tool') return projectToolRequest(spec, args)
   if (spec.action === 'latex_tool') return latexToolRequest(spec, args)
@@ -119,7 +122,7 @@ export function registerLibraryTools(ctx, defineTool, dispatch, options, config)
       disposers.push(ctx.on('tools/pre-execute', async (exec, next) => {
         const decision = await next()
         if (decision.kind !== 'allow' || !mutations.has(exec.name)) return decision
-        return { kind: 'ask', reason: exec.name === 'library_feedback' ? 'Send the selected annotation context to the chosen model and save its labelled feedback in the managed library.' : 'Apply the requested change to the managed paper library. Imported source files remain unchanged.' }
+        return { kind: 'ask', reason: exec.name === 'library_field_radar_analyze' ? 'Send this saved topic evidence to the configured DSH model once and save a separate AI draft; consumes model quota.' : exec.name === 'library_feedback' ? 'Send the selected annotation context to the chosen model and save its labelled feedback in the managed library.' : 'Apply the requested change to the managed paper library. Imported source files remain unchanged.' }
       }))
     }
     for (const spec of TOOL_SPECS) {
@@ -133,6 +136,7 @@ export function registerLibraryTools(ctx, defineTool, dispatch, options, config)
         execute: async (args, exec) => {
           exec.signal.throwIfAborted()
           const request = requestFromTool(spec, args, exec)
+          if (spec.radar) return handleFieldRadarTool(options, request, exec.signal)
           if (spec.action === 'paper_visual_read') return readPaperVisual(ctx, exec, request, dispatch, options)
           // Synced corpora are indexed through deployment-configured roots only.
           if (spec.sources) {

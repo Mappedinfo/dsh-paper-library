@@ -10,6 +10,7 @@ const state = {
 };
 let paperChatUI;
 let workbenchUI;
+let fieldRadarUI;
 let organizationUI;
 let knowledgeGraphUI;
 let pdfReader;
@@ -1987,11 +1988,12 @@ async function prepareWorkspaceNavigation() {
   if (restoringReader || restoringInkDraft || inkSaveBusy || pdfReader?.isInking() || handwritingUI?.isOpen()) { toast('请先完成当前笔迹或关闭手写便签。', true); return false; }
   if (linkedHandwritingUI?.session() && !await linkedHandwritingUI.finish()) return false;
   if (!publishReaderState()) return false;
-  await paperChatUI?.saveDraft();
+  if(state.active&&!state.active.archived&&state.active.resource_kind!=='dataset')await paperChatUI?.saveDraft();
   await persistence?.flush();
   return true;
 }
 async function closeWorkspaceSurfaces() {
+  fieldRadarUI?.hide();
   if (boardUI?.isOpen() && !await boardUI.close({ focus: false })) return false;
   if (latexUI?.isOpen()) { await latexUI.close(); if (latexUI.isOpen()) return false; }
   if (document.fullscreenElement) await document.exitFullscreen();
@@ -2036,6 +2038,12 @@ if ($('workspace-navigation') && window.PaperWorkspaceNavigation) {
   applyWorkspaceNavigation(workspaceNavigationUI.state());
   $('workspace-library')?.addEventListener('click',event=>{if(workspaceNavigationUI.state().section!=='paper'||boardUI?.isOpen()||latexUI?.isOpen()){event.preventDefault();event.stopImmediatePropagation();void workspaceNavigationUI.selectRoot('paper');}},true);
 }
+fieldRadarUI = window.PaperFieldRadar?.create({api,toast,persistence,
+  prepare: async () => { if (!await prepareWorkspaceNavigation()) return false; return closeWorkspaceSurfaces(); },
+  onOpenPaper: async id => { const ok = await workspaceNavigationUI?.navigate({kind:'paper',id,title:'文献'}); return ok !== false; },
+  onKnowledge: async id => { const ok = await workspaceNavigationUI?.navigate({kind:'paper',id,title:'文献'}); if(ok===false)return false; await knowledgeUI?.show(state.active); return true; },
+});
+for (const id of ['board-open','latex-open','import-open']) $(id)?.addEventListener('click',()=>fieldRadarUI?.hide(),{capture:true});
 let returningToDsh = false;
 async function prepareReturnToDsh(){
   if(returningToDsh)return false;

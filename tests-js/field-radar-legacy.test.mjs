@@ -1,0 +1,35 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {readFile, mkdtemp, writeFile, mkdir, symlink, rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {extractSnapshot, importSnapshot} from '../scripts/import-field-radar-snapshot.mjs';
+const code=await readFile(new URL('../web/field-radar-legacy.js',import.meta.url),'utf8');
+const context=vm.createContext({URL,AbortController});vm.runInContext(code,context);const radar=context.PaperFieldRadarLegacy;
+const fixture={snapshot:'2026-01-01',method:{topicScoreThreshold:.6},audit:{},health:{},manifest:[],people:[{id:'one',name:'Scholar One',area:'Mobility',unit:'University',identityVerified:true,works:[0,1]}],works:[{title:'Mobility prediction',year:2025,topic:'Mobility',score:.9},{title:'Historic study',year:2020,topic:'Other',score:.2}]};
+const html=data=>`<script id="radar-data" type="application/json">${JSON.stringify(data)}</script>`;
+test('complete snapshot data remains intact',()=>{assert.equal(extractSnapshot(html(fixture)).works.length,2);assert.equal(radar.worksFor(fixture.people[0],fixture).length,2);assert.equal(radar.worksFor(fixture.people[0],fixture,'Mobility').length,1);});
+test('topic, identity, query and activity filters retain original semantics',()=>{assert.equal(radar.filterPeople(fixture,{query:'prediction',recent:3}).length,1);assert.equal(radar.filterPeople(fixture,{query:'prediction',identity:'pending'}).length,0);assert.equal(radar.filterPeople(fixture,{query:'',activity:'recent',recent:1}).length,0);});
+test('unsafe URLs cannot become links',()=>{for(const url of ['file:///private/data','javascript:alert(1)','data:text/html,foo','https://secret@example.org'])assert.equal(radar.safeURL(url),'');assert.equal(radar.safeURL('https://example.org/evidence'),'https://example.org/evidence');});
+test('snapshot validation rejects missing and invalid assignments',()=>{assert.throws(()=>extractSnapshot('<html></html>'));assert.throws(()=>extractSnapshot(html({...fixture,people:[{works:[999]}]})));});
+test('UI scopes selectors and bounds per-person works to pages',()=>{assert.ok(!code.includes('document.'));assert.ok(code.includes('const paperSize = 25'));assert.ok(!code.includes('href="file:'));assert.ok(code.includes('onSearchPaper || onOpenPaper'));assert.ok(code.includes('abort.abort()'));});
+test('private importer writes snapshot only and rejects symlink destination',async()=>{const dir=await mkdtemp(path.join(os.tmpdir(),'radar-import-'));try{const source=path.join(dir,'source.html');await writeFile(source,html(fixture));const library=path.join(dir,'library');await mkdir(library);const result=await importSnapshot(source,library);assert.equal(result.works,2);assert.deepEqual(JSON.parse(await readFile(result.target,'utf8')),fixture);await rm(result.target);await symlink(source,result.target);await assert.rejects(importSnapshot(source,library),/symlink/);}finally{await rm(dir,{recursive:true,force:true});}});
+
+test('complete embedded create renders and paginates without global document access',()=>{
+  const elements=new Map();
+  const element=()=>({innerHTML:'',textContent:'',value:'',dataset:{},classList:{add(){},remove(){},toggle(){}},insertAdjacentHTML(_,s){this.innerHTML+=s;},setAttribute(){},addEventListener(type,fn){this[type]=fn;},replaceChildren(){this.innerHTML='';}});
+  const root=element();root.querySelector=selector=>{if(!elements.has(selector))elements.set(selector,element());return elements.get(selector);};root.querySelectorAll=()=>[];
+  const get=id=>root.querySelector(`[data-radar-id="${id}"]`);
+  const data=JSON.parse(JSON.stringify(fixture));
+  Object.assign(data,{trackingRun:'2026-01-01',generated:'2026-01-01',warnings:[],links:{},method:{...data.method,publicationWindow:[2020,2025]},audit:{exclusions:{}},health:{}});
+  data.works=Array.from({length:61},(_,i)=>({...data.works[0],title:`Synthetic work ${i}`,doi:`10.1234/example${i}`,date:'2025-01-01'}));
+  Object.assign(data.people[0],{works:data.works.map((_,i)=>i),pageChecks:[],sourceChecks:[],ranks:[],global:[],urls:[],classificationDate:'',identities:[],updates:[]});
+  let found=null;const view=radar.create({root,data,onSearchPaper:w=>{found=w;}});
+  assert.equal((get('detail').innerHTML.match(/data-radar-paper=/g)||[]).length,25);
+  assert.match(get('detail').innerHTML,/共 61 条/);
+  root.click({target:{closest:s=>s==='[data-radar-page]'?{dataset:{radarPage:'1'},disabled:false}:null}});
+  assert.match(get('detail').innerHTML,/2 \/ 3/);
+  root.click({target:{closest:s=>s==='[data-radar-paper]'?{dataset:{radarPaper:'0'}}:null}});
+  assert.equal(found.doi,'10.1234/example0');view.destroy();assert.equal(root.innerHTML,'');
+});

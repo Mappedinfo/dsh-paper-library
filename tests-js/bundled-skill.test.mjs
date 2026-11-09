@@ -16,7 +16,7 @@ test('bundled paper-library-fetch skill is discoverable and loadable through the
     await ctx.plugin(SkillRegistry);
     const dispose=registerBundledSkills(ctx);
     const list=await ctx.skills.list({cwd:'/tmp/synthetic-workspace'});
-    assert.deepEqual(list.map(s=>s.name).sort(),['paper-library-fetch','paper-library-knowledge','paper-library-notes','paper-library-review']);
+    assert.deepEqual(list.map(s=>s.name).sort(),['paper-library-fetch','paper-library-knowledge','paper-library-notes','paper-library-radar','paper-library-review']);
     const fetchEntry=list.find(s=>s.name==='paper-library-fetch');
     assert.equal(fetchEntry.path,skillPath);
     assert.deepEqual(fetchEntry.invocation,{modelInvocable:true,userInvocable:true});
@@ -29,7 +29,7 @@ test('bundled paper-library-fetch skill is discoverable and loadable through the
       const actual=await ctx.skills.get(expected.name,{});
       assert.equal(actual.path,expected.path);
       assert.equal(actual.content,expected.content);
-      assert.match(actual.content,/library_knowledge/);
+      assert.match(actual.content,expected.name==='paper-library-radar'?/library_field_radar/:/library_knowledge/);
     }
     // The bundled review skill carries the generic evidence-atlas methodology and
     // its references, and never a private overlay.

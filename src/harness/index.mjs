@@ -1,3 +1,5 @@
+import { createFieldRadarStore } from './field-radar.mjs'
+import { createFieldRadarAnalysis } from './field-radar-analysis.mjs'
 import * as dshTools from '@deepseek-ai/dsh-tools'
 import * as dshLlm from '@deepseek-ai/dsh-llm'
 import { core, dispatch } from '../bridge.mjs'
@@ -113,6 +115,15 @@ export function apply(ctx, rawConfig = {}) {
     latexRoot: config.latexRoot,
     onImported:items=>automaticAnalysis?.imported(items),
   }
+  options.fieldRadar = createFieldRadarStore({ store: localState, library: config.library, request: (payload, signal) => dispatch(payload, { library: config.library, python: config.python, signal }) })
+  options.fieldRadarAnalysis = createFieldRadarAnalysis({ store: localState, radar: options.fieldRadar,
+    ai: createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: Math.min(config.maxLanguageOutputTokens || 8192, 8192) }),
+    getModel: async () => {
+      let service
+      try { service = ctx.get('agentDefaultModel') } catch { /* Optional in command-line profiles. */ }
+      return (await service?.currentSelection?.()) || { provider: config.provider, model: config.model }
+    },
+  })
   ctx.effect(() => registerLibraryTools(ctx, defineTool, dispatch, options, config), 'paper-library: tools')
   ctx.inject(['skills'], scoped => {
     scoped.effect(() => registerBundledSkills(scoped), 'paper-library: bundled paper-fetch skill')

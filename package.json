@@ -88,7 +88,9 @@
     "tsconfig.paper-flow.json",
     "types/paper-flow-env.d.ts",
     "docs/paper-flow.md",
-    "docs/workspace-navigation.md"
+    "docs/workspace-navigation.md",
+    "docs/field-radar.md",
+    "scripts/import-field-radar-snapshot.mjs"
   ],
   "dsh": {
     "bundle": {

@@ -20,7 +20,7 @@ function fixture(options = {}) {
   home.parentNode = { id: 'home-parent' }; home.after = node => { calls.push('nav:home'); node.parentNode = home.parentNode }; area.parentNode = home.parentNode
   const state = { active: options.active ?? { id: 'paper-source' }, project: 'old-reading-project', itemTicket: 0, pageTicket: 0 }
   const context = {
-    initializedReader:false, ENTRY_PAPER:'', readerStateReady: true, title: item => item.title || item.id, workspaceNavigationTransition: false, restoringReader: false, restoringInkDraft: false, inkSaveBusy: false, annotationSaveBusy: options.annotationBusy || false, state,
+    fieldRadarUI:null, initializedReader:false, ENTRY_PAPER:'', readerStateReady: true, title: item => item.title || item.id, workspaceNavigationTransition: false, restoringReader: false, restoringInkDraft: false, inkSaveBusy: false, annotationSaveBusy: options.annotationBusy || false, state,
     dismissAnnotation: async () => options.dismissAnnotation !== false,
     selectProject: async id => { calls.push(`project:select:${id}`); state.project = id },
     $: id => elements.get(id), document: { fullscreenElement: options.fullscreen ? {} : null, exitFullscreen: async () => { calls.push('fullscreen:exit') }, querySelector: selector => selector === '.library-pane' ? library : selector === '#latex-view .latex-topbar' ? writing : null },
