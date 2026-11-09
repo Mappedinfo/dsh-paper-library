@@ -105,3 +105,15 @@ test('HTTP host caption → bridge → native PDF stores one /IRT reply; standal
   assert.equal((await post(standalone, body)).status, 409)
   assert.equal((await (await post(standalone, { action: 'status' })).json()).result.annotation_caption, false)
 })
+
+test('retry of failed image capability uses resolved visual route, records its model and does not switch chat', async () => {
+  const f = fixture(); f.modelError = Object.assign(Error('text only'), {code:'AI_IMAGE_MODEL_UNSUPPORTED'})
+  await assert.rejects(f.handle(input));f.modelError=null
+  let selections=0
+  f.options.selectModel=async(current,signal)=>{selections++;assert.equal(current.model,'vision');assert.equal(signal.aborted,false);return{provider:'deepseek-official',model:'deepseek-flash'}}
+  const handle=createAnnotationCaption(f.options)
+  assert.equal((await handle({...input,retry:true})).saved,true)
+  assert.equal(f.calls.at(-1).provider,'deepseek-official');assert.equal(f.calls.at(-1).model,'deepseek-flash');assert.equal(f.calls.at(-1).images[0].data,image)
+  assert.equal(f.workers.at(-1).model,'deepseek-official/deepseek-flash')
+  await handle({...input,retry:true});assert.equal(selections,1);assert.equal(f.calls.length,2)
+})

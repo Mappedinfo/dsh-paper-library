@@ -95,3 +95,31 @@ export async function discoverModels(llm, signal) {
   }
   return { providers, models: providers.flatMap(provider => provider.models.map(model => ({ ...model, provider: provider.id }))), configured: providers.some(provider => provider.models.length > 0) }
 }
+
+/** 为矩形图像说明选择已配置的视觉路线，不修改论文对话或宿主默认模型。 */
+export async function selectCaptionModel(llm, current, signal) {
+  const checked = new Set()
+  async function supports(route) {
+    if (!route?.provider || !route?.model) return false
+    const key = JSON.stringify([route.provider, route.model])
+    if (checked.has(key)) return false
+    checked.add(key)
+    signal?.throwIfAborted()
+    try {
+      const info = await awaitWithAbort(llm.resolveModelInfo(route.provider, route.model, signal), signal)
+      return info?.inputModalities?.includes('image') === true
+    } catch (error) { signal?.throwIfAborted(); return false }
+  }
+  if (await supports(current)) return current
+  const available = await awaitWithAbort(discoverModels(llm, signal), signal)
+  const candidates = [...available.models].sort((a, b) => {
+    const rank = value => value.id === 'deepseek-flash' ? (value.provider === 'deepseek-official' ? 0 : 1) : 2
+    return rank(a) - rank(b)
+  })
+  // 有界探测；模型列表仅为宿主公开的已配置路线，不扫描凭据。
+  for (const candidate of candidates.slice(0, 32)) {
+    const route = { provider: candidate.provider, model: candidate.id }
+    if (await supports(route)) return route
+  }
+  throw Object.assign(new Error('未找到已配置且支持图像输入的模型。请在 DSH 配置 DeepSeek Flash 或其他视觉模型后重试图像说明。'), { code: 'ANNOTATION_CAPTION_MODEL_REQUIRED', status: 409 })
+}

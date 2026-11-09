@@ -8,7 +8,7 @@ import { RESOURCE_FIELDS } from '../resource-policy.mjs'
 import { createFetchHandler } from '../http.mjs'
 import { resolveConfig } from './config.mjs'
 import { createExternalSources } from './external-sources.mjs'
-import { createHarnessAI, discoverModels } from './ai.mjs'
+import { createHarnessAI, discoverModels, selectCaptionModel } from './ai.mjs'
 import { createNodeHandler } from './http.mjs'
 import { registerLibraryTools } from './tools.mjs'
 import { registerBundledSkills } from './skills.mjs'
@@ -141,7 +141,7 @@ export function apply(ctx, rawConfig = {}) {
     const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python })
     const handwritingAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }, { attachments: () => ctx.get('attachments') })
     const handwriting = createHandwriting({ store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })
-    const annotationCaption = createAnnotationCaption({ store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })
+    const annotationCaption = createAnnotationCaption({ selectModel: (current, signal) => selectCaptionModel(ctx.llm, current, signal), store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })
     const libraryKnowledge = createLibraryKnowledge({ store: options.localState, ai: languageAI, paperChat, dispatch, library: config.library, python: config.python,
       getModel: async (entity, { signal } = {}) => {
         if (entity.kind === 'release') {

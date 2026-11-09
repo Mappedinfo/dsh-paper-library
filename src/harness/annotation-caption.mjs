@@ -33,7 +33,7 @@ function abortable(promise, signal) {
 
 /** 只描述明确请求的单个矩形。裁图由 worker 获取，模型结果先落盘再写 PDF；
  * PDF 重试复用结果，未知在途状态不再次发起模型调用。 */
-export function createAnnotationCaption({ store, ai, paperChat, dispatch, library, python, timeoutMs = 120000 }) {
+export function createAnnotationCaption({ store, ai, paperChat, selectModel, dispatch, library, python, timeoutMs = 120000 }) {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000) throw new Error('Caption timeout must be between 1 and 120000 milliseconds')
   const flights = new Map()
   let admitted = 0, generating = 0
@@ -64,7 +64,8 @@ export function createAnnotationCaption({ store, ai, paperChat, dispatch, librar
     generating++
     let providerPromise, providerSettled = false, ready = false, claimed = false
     try {
-      const route = await paperChat({ action: 'chat_ensure', id: request.id }, { signal: deadline }), model = route?.model
+      const route = await paperChat({ action: 'chat_ensure', id: request.id }, { signal: deadline })
+      const model = typeof selectModel === 'function' ? await selectModel(route?.model, deadline) : route?.model
       if (!model || typeof model.provider !== 'string' || !model.provider.trim() || model.provider.length > 200 || typeof model.model !== 'string' || !model.model.trim() || model.model.length > 200) throw fail('请在本篇论文对话中选择支持图像输入的模型。', 'ANNOTATION_CAPTION_MODEL_REQUIRED', 409)
       deadline.throwIfAborted()
       const value = { ...request, source_version: preview.source_version, status: 'pending', provider: model.provider, model: model.model }
