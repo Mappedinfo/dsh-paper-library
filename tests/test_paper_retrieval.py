@@ -1,5 +1,6 @@
 """合成跨章节证据：背景提到一种算法，方法页使用另一种目标。"""
 import hashlib
+import base64
 
 import pymupdf as fitz
 import pytest
@@ -90,6 +91,66 @@ def test_invalid_requests_are_bounded(fixture, action, args):
 def test_stale_pdf_version_is_visible(fixture):
     with pytest.raises(ValueError, match="PAPER_RETRIEVAL_CHANGED"):
         call(fixture, "paper_text_read", pages=[1], expected_version="old-version")
+
+
+def test_visual_read_includes_image_only_table_and_crops_rotated_display(tmp_path):
+    source = tmp_path / 'image-table.pdf'
+    with fitz.open() as table:
+        p = table.new_page(width=400, height=200)
+        p.draw_rect(fitz.Rect(0, 0, 200, 200), color=None, fill=(1, 0, 0))
+        p.draw_rect(fitz.Rect(200, 0, 400, 200), color=None, fill=(0, 0, 1))
+        p.insert_text((30, 50), 'Area | 42', color=(1, 1, 1), fontsize=18)
+        image = p.get_pixmap().tobytes('png')
+    with fitz.open() as doc:
+        p = doc.new_page(width=400, height=200)
+        p.insert_image(p.rect, stream=image)
+        # 大块批注不应遮挡提供给模型的原始图表。
+        note = p.add_rect_annot(fitz.Rect(0, 0, 400, 200))
+        note.set_colors(stroke=(0, 1, 0), fill=(0, 1, 0))
+        note.update()
+        p.set_rotation(90)
+        doc.save(source)
+    library = Library(tmp_path / 'library')
+    try:
+        paper = library.create({'title': 'Synthetic image-only table'})
+        paper = library.attach(paper['id'], str(source))
+        fixture = (library, paper, source)
+        paths = [source, library.pdf_path(paper['id'])]
+        before = [hashlib.sha256(p.read_bytes()).hexdigest() for p in paths]
+        text = call(fixture, 'paper_text_read', pages=[1])
+        assert text['pages'][0]['no_extractable_text']
+        full = call(fixture, 'paper_visual_read', page=1, expected_version=text['source_version'])
+        assert full['source_kind'] == 'pdf-page-image' and full['page_rotation'] == 90
+        assert full['height'] > full['width'] and full['full_page']
+        crop = call(fixture, 'paper_visual_read', page=1, region=[0, .5, 1, 1], max_edge=1024)
+        pix = fitz.Pixmap(base64.b64decode(crop['image']))
+        assert pix.pixel(pix.width // 2, pix.height // 2) == (0, 0, 255)
+        assert abs(pix.width - pix.height) <= 1 and max(pix.width, pix.height) <= 1024
+        assert not crop['annotations_included'] and not crop['full_page']
+        assert len(base64.b64decode(full['image'])) <= 2 * 1024 * 1024
+        assert before == [hashlib.sha256(p.read_bytes()).hexdigest() for p in paths]
+    finally:
+        library.close()
+
+
+@pytest.mark.parametrize('values', [
+    {'page': 0}, {'page': True}, {'page': 26}, {'page': 1, 'max_edge': 2049},
+    {'page': 1, 'region': [0, 0, 1]}, {'page': 1, 'region': [0, 0, 2, 1]},
+    {'page': 1, 'region': [0, 0, float('nan'), 1]}, {'page': 1, 'region': [1, 0, 0, 1]},
+])
+def test_visual_read_rejects_invalid_ranges_before_render(fixture, values, monkeypatch):
+    monkeypatch.setattr(fitz.Page, 'get_pixmap', lambda *a, **kw: pytest.fail('Invalid visual request rendered'))
+    with pytest.raises(ValueError, match='PAPER_RETRIEVAL_INVALID'):
+        call(fixture, 'paper_visual_read', **values)
+
+
+def test_visual_read_respects_version_and_preflight(fixture, monkeypatch):
+    with pytest.raises(ValueError, match='PAPER_RETRIEVAL_CHANGED'):
+        call(fixture, 'paper_visual_read', page=1, expected_version='stale')
+    monkeypatch.setattr(fitz.Page, 'get_pixmap', lambda *a, **kw: pytest.fail('Oversized input rendered'))
+    monkeypatch.setattr(fitz.Page, 'get_images', lambda *a, **kw: [(1, 0, 100000, 100000)])
+    with pytest.raises(ValueError, match='像素超过预算'):
+        call(fixture, 'paper_visual_read', page=1)
 
 
 def test_pdf_typography_search_normalization():

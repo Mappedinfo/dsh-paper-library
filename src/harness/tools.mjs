@@ -5,6 +5,7 @@ import { PROJECT_TOOL_SPECS, projectToolRequest } from './project-tools.mjs'
 import { LATEX_TOOL_SPECS, latexToolRequest } from './latex-tools.mjs'
 import { SOURCE_TOOL_SPECS, handleSourceRequest } from './external-sources.mjs'
 import { defaultLibrary } from '../bridge.mjs'
+import { paperVisualOutput, readPaperVisual } from './paper-visual.mjs'
 
 const string = (description, required = false) => ({ type: 'string', description, ...(required ? { required: true } : {}) })
 const ids = { type: 'array', items: { type: 'string' } }
@@ -28,6 +29,7 @@ const graphRelations = ['supports', 'contradicts', 'uses', 'evaluates', 'derived
 
 /** Small schemas keep scope explicit and avoid exposing core write/feedback internals. */
 export const TOOL_SPECS = [
+  { name: 'library_paper_view', action: 'paper_visual_read', title: 'View the actual PDF page image to inspect figures, tables (including image/vector tables), formulas and scanned text; zoom into details with region instead of relying only on extracted text', parameters: { id: string('Exact library paper ID supplied by the question', true), page: { type: 'integer', required: true, description: 'One physical PDF page number' }, region: { type: 'array', items: { type: 'number' }, description: 'Optional crop [left,top,right,bottom], each 0–1 relative to the displayed page. Default full page. Use after viewing the page to inspect small details.' }, max_edge: { type: 'integer', description: '512–2048 pixels on longest side; default 1600. One PNG at most 2 MiB, annotations excluded.' }, expected_version: string('source_version from search/read/view; recheck if PDF changed') } },
   { name: 'library_paper_search', action: 'paper_text_search', title: 'Search text inside one current paper PDF before answering cross-section questions; follow next_page for unsearched pages, then read matching pages', parameters: { id: string('Exact library paper ID supplied by the question', true), query: string('Literal short term or phrase, 1–200 characters; not catalog search or a regex', true), start_page: { type: 'integer', description: 'First physical PDF page, default 1; follow returned next_page' }, page_limit: { type: 'integer', description: '1–20 pages per call, default 12' }, expected_version: string('source_version returned by a previous read/search; omit only when starting or explicitly rechecking a changed PDF') } },
   { name: 'library_paper_read', action: 'paper_text_read', title: 'Read source text from selected physical PDF pages to verify methods, objectives and claims beyond the annotation page', parameters: { id: string('Exact library paper ID', true), pages: { type: 'array', items: { type: 'integer' }, required: true, description: '1–3 unique physical page numbers; at most 4000 characters per page' }, text_offset: { type: 'integer', description: 'Continue one page using its returned next_offset; default 0' }, expected_version: string('source_version from search/read; changed versions must be rechecked') } },
   ...SOURCE_TOOL_SPECS,
@@ -123,14 +125,15 @@ export function registerLibraryTools(ctx, defineTool, dispatch, options, config)
     for (const spec of TOOL_SPECS) {
       disposers.push(ctx.tools.register(defineTool({
         name: spec.name,
-        description: `${spec.title} in the independent Paper Library. Pages are one-based; rectangles use PDF points. Library configuration cannot be changed through tool arguments.`,
+        description: `${spec.title} in the independent Paper Library. Pages are one-based; ${spec.action === 'paper_visual_read' ? 'region uses normalized displayed-page coordinates (0–1)' : 'rectangles use PDF points'}. Library configuration cannot be changed through tool arguments.`,
         parameters: spec.parameters,
-        output,
+        output: spec.action === 'paper_visual_read' ? paperVisualOutput : output,
         // The shared catalog and managed PDF writer serialize all operations.
         isConcurrencySafe: () => false,
         execute: async (args, exec) => {
           exec.signal.throwIfAborted()
           const request = requestFromTool(spec, args, exec)
+          if (spec.action === 'paper_visual_read') return readPaperVisual(ctx, exec, request, dispatch, options)
           // Synced corpora are indexed through deployment-configured roots only.
           if (spec.sources) {
             if (!options.sources) throw new Error('Synced paper folders are not configured for this deployment')

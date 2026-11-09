@@ -21,7 +21,7 @@ test('retrieval tools expose a closed read-only scope and preserve continuation 
 test('guidance requires cross-section retrieval without broad scans or duplicate annotations',()=>{
   const guidance=paperRetrievalGuidance('synthetic-1')
   assert.match(guidance,/paper_id="synthetic-1"/)
-  for(const term of ['library_paper_search','library_paper_read','next_page','next_offset','expected_version','24000'])assert.ok(guidance.includes(term))
+  for(const term of ['library_paper_search','library_paper_read','library_paper_view','region=','next_page','next_offset','expected_version','24000'])assert.ok(guidance.includes(term))
   assert.match(companionQuestion,/主动检索、读取相关原文后再判断/)
   assert.match(guidance,/不另调用批注写入工具/)
 })

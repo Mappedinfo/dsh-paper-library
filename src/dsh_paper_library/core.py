@@ -628,7 +628,7 @@ def dispatch(request):
     library = Library(root)
     try:
         action = request.get("action")
-        if action in {"paper_text_find", "paper_text_search", "paper_text_read"}:
+        if action in {"paper_visual_read", "paper_text_find", "paper_text_search", "paper_text_read"}:
             from . import paper_retrieval
             return paper_retrieval.dispatch(library, request)
         if action in {"paper_organization_update", "paper_tags_list"}:

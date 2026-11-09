@@ -186,6 +186,7 @@ The plugin registers 35 tools through Harness's official tool registry. Optional
 | `library_search` | `query?,limit?,offset?,sort?,order?,archived?` | `list` |
 | `library_paper_search` | `id,query,start_page?,page_limit?,expected_version?` | `paper_text_search` |
 | `library_paper_read` | `id,pages,text_offset?,expected_version?` | `paper_text_read` |
+| `library_paper_view` | `id,page,region?,max_edge?,expected_version?` | `paper_visual_read` |
 | `library_get` | `id,include_archived?` | `get` |
 | `library_create` | `metadata` with required `title` | `create` |
 | `library_update` | `id,metadata` | `update` |
@@ -259,7 +260,9 @@ Mutation tools pass through the configured native approval pipeline; `requireToo
 
 ### 当前论文正文补读
 
-`library_search` 只搜索目录资料与摘要。原生 DSH Agent 可用上述两个只读工具补读已入库 PDF，HTTP／worker 对应 action 同表。它们不写索引、不渲染、不调用其他模型，沿用共享 worker 调度，单次超时 15 秒。
+`library_search` 只搜索目录资料与摘要。原生 DSH Agent 可用上述三个只读工具补读已入库 PDF，HTTP／worker 对应 action 同表。它们不写索引、不调用其他模型；文字工具不渲染，图像工具按需渲染单页。沿用共享 worker 调度，单次超时 15 秒。
+
+- `paper_visual_read`：`page` 为单个物理页码；`region` 可选 `[left,top,right,bottom]`，以旋转后显示页面左上角为原点，归一化到 0–1，默认整页；`max_edge` 为 512–2048，默认 1600。图像最多约 400 万像素、PNG 编码最多 2 MiB，先检查页面解码预算，排除批注覆盖。worker／HTTP 返回 `image` base64、`mime_type`、宽高及来源；原生 `library_paper_view` 校验当前请求模型的视觉能力并保存到宿主附件服务，输出 text 来源块 + image 附件块，不把 base64 放入模型文字上下文。缺少模型路由、视觉能力或附件服务均显式失败，不静默降为文本。每次一页，沿用串行 worker 及取消信号。
 
 - `paper_text_search`：`query` 为 1–200 字符字面短语；`start_page` 从 1 开始，`page_limit` 默认 12、最大 20。返回各命中页一个归一化定位片段、`scanned_pages`、`next_page`、`no_text_pages`。未扫描页不算无命中，片段不能替代正文。
 - `paper_text_read`：`pages` 为 1–3 个不同的物理页码，每页最多 4,000 字符。返回 `text`、`page_characters`、`complete_page` 和 `next_offset`；用单页及 `text_offset` 续读长页。无文字页显式标记 `no_extractable_text`，不自动 OCR。

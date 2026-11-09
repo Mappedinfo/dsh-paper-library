@@ -18,15 +18,19 @@ test('tool schemas register and execute through the actual built Harness runtime
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+    if (existsSync(join(root, 'packages/core/tool-executor-native/lib/index.js'))) await ctx.plugin(await load('packages/core/tool-executor-native/lib/index.js'))
+  const run = async input => existsSync(join(root, 'packages/core/tool-executor-native/lib/index.js'))
+    ? (await ctx.tools.execute({ signal: input.signal, calls: [{ type: 'tool-call', id: input.callId, name: input.name, arguments: JSON.stringify(input.arguments) }] })).results[0].result
+    : ctx.tools.execute(input)
   let received
   const config = resolveConfig({ library: '/tmp/library-test', requireToolApproval: false })
   const dispose = registerLibraryTools(ctx, defineTool, async (request, options) => { received = { request, library: options.library }; return { items: [], total: 0 } }, { library: config.library }, config)
   try {
     assert.equal(ctx.tools.schemas().length, TOOL_SPECS.length)
-    const result = await ctx.tools.execute({ callId: ToolCallId('paper-library-test'), name: 'library_search', arguments: { query: 'urban', library: '/wrong' }, signal: new AbortController().signal })
+    const result = await run({ callId: ToolCallId('paper-library-test'), name: 'library_search', arguments: { query: 'urban', library: '/wrong' }, signal: new AbortController().signal })
     assert.equal(result.isError, false)
     assert.deepEqual(received, { request: { action: 'list', query: 'urban' }, library: '/tmp/library-test' })
-    const execute = (name, args) => ctx.tools.execute({ callId: ToolCallId(`test-${name}`), name, arguments: args, signal: new AbortController().signal })
+    const execute = (name, args) => run({ callId: ToolCallId(`test-${name}`), name, arguments: args, signal: new AbortController().signal })
     const metadata = { title: 'Synthetic native paper', author: [{ given: 'Ada', family: 'Reader', affiliation: [{ name: 'Synthetic Institute' }] }], publication_dates: { accepted: '2026-09-01' }, journal_rankings: [{ system: 'JCR', year: 2025, category: 'Synthetic category', quartile: 'Q2', source: 'Synthetic verification source' }] }
     assert.equal((await execute('library_create', { metadata })).isError, false)
     assert.deepEqual(received.request, { action: 'create', metadata })
