@@ -130,3 +130,18 @@ body.handwriting-tools-visible{--workbench-height:145px}
 .reader-appearance>summary::after{content:' ▾'}
 .reader-appearance[open]>summary{background:var(--surface);color:var(--ink)}
 .reader-appearance .reader-pen-options{width:220px}
+
+/* 同一组常用色用于新批注与已保存批注，颜色不依赖当前界面主题。 */
+.annotation-color-presets{display:grid;grid-template-columns:repeat(5,30px);gap:8px;padding:6px 0}
+.annotation-color-swatch{width:28px;height:28px;padding:0;border:2px solid transparent;border-radius:50%;background:var(--swatch)!important;box-shadow:inset 0 0 0 1px #0002;cursor:pointer}
+.annotation-color-swatch[aria-pressed="true"]{outline:2px solid var(--ink);outline-offset:2px}
+.annotation-color-swatch:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.annotation-excerpt-heading>span{margin-right:auto}
+.annotation-style-menu{position:relative;font-size:12px}
+.annotation-style-menu>summary{list-style:none;cursor:pointer}
+.annotation-style-menu>summary::-webkit-details-marker{display:none}
+.annotation-style-panel{position:fixed;z-index:1000;width:236px;box-sizing:border-box;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--paper,var(--surface));color:var(--ink);box-shadow:0 5px 24px #0003}
+.annotation-style-panel label{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:9px 0}
+.annotation-style-panel input[type="color"]{width:42px;height:28px;padding:2px}
+.annotation-style-panel p:empty{display:none}
+.reader-color-presets-menu>summary{font-size:12px;cursor:pointer}

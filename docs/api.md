@@ -30,6 +30,7 @@ Core actions:
 - `annotation_caption {id,annotation_id,page,retry?:boolean}`（仅 DSH）→ `{saved:true,duplicate,annotation,caption?}`。从指定原生 Square 获取有界截图，使用本篇配置的图像模型生成最多 4000 字符说明；不接受客户端图像或描述正文。说明写为 `source_kind:'annotation-caption'` 的原生回复，同一裁图版本去重。生成前及写入时核对图像来源，正常备注修改不影响视觉来源。合格输出先持久化，PDF 保存重试复用输出；确认失败后以 `retry:true` 显式重试，不确定在途请求不重发。`status.annotation_caption` 标明宿主能力；没有图像模型时给出可恢复错误。内部 `annotation_caption_result` 禁止浏览器调用。
 
 - `annotation_update` with `id,annotation_id,comment,version?` → `{annotation,duplicate?}`。`version` 核对 `edit_version`，旧内容不能覆盖其他窗口修改；相同内容重试不重复写 PDF。
+- `annotation_style` with `id,annotation_id,color,line_style?,expected_version` → `{annotation,duplicate?}`。`color` 为六位十六进制颜色；下划线、删除线、矩形框、原生笔画支持 `solid/dashed/dotted`，高亮与便笺仅支持颜色。`expected_version` 取批注的 `style_version`，独立核对颜色与边框，允许并发保存备注；不覆盖内容、不触发伴学。样式写入原生 PDF 字典及外观，重复请求幂等。
 - `annotation_delete` with `id,annotation_id` → `{deleted:true}`
 - `export_annotations` with `id,format='xfdf'|'json'|'markdown'` → `{text,filename,mime}`
 - `export_pdf` with `id` → `{path,filename}` (Node streams managed path, not browser-supplied path)

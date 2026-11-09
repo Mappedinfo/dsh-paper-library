@@ -78,6 +78,10 @@ window.PaperReadingShell = (() => {
     const saveLayoutLater=()=>{if(saveLayoutTimer!==null)window.clearTimeout(saveLayoutTimer);saveLayoutTimer=window.setTimeout(()=>{saveLayoutTimer=null;saveLayout();},150);};
     const hintFor=()=>tool==='ink'&&reader()?.getInkContext?.()?'直接在本页写画，笔迹绑定当前批注；再点侧栏手写按钮返回常规标注。':(MODE_HINTS[mode]||{})[tool]||hints[tool]||'';
     input.addEventListener('input',()=>{if(['ink','square'].includes(tool))inkColor=input.value;else color=input.value;applyTool();saveLayout();sync();});colorLabel.append(input);
+    const presetsMenu=node('details',null,'reader-color-presets-menu'),presetsSummary=node('summary','常用配色');presetsMenu.append(presetsSummary);
+    const presetsPanel=node('div',null,'reader-pen-options');
+    const presets=window.PaperAnnotationStyle?.palette(input.value,value=>{input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));});
+    if(presets){presetsPanel.append(presets.element);presetsMenu.append(presetsPanel);bindMenu(presetsMenu,presetsPanel);presetsMenu.addEventListener('toggle',()=>{if(presetsMenu.open)presets.set(input.value);});input.addEventListener('input',()=>presets.set(input.value));}
     const widthLabel=node('label','粗细','reader-ink-width');const widthInput=node('select');widthInput.id='reader-ink-width';widthInput.setAttribute('aria-label','笔画与矩形边框粗细');
     for(const [value,label] of [[1,'细'],[2,'中'],[4,'粗']]){const option=node('option',label);option.value=String(value);widthInput.append(option);}widthInput.value=String(inkWidth);widthLabel.append(widthInput);
     widthInput.addEventListener('change',()=>{inkWidth=Number(widthInput.value);applyTool();saveLayout();});
@@ -100,7 +104,7 @@ window.PaperReadingShell = (() => {
     function inputChanged(info){const labels={pen:'已识别：手写笔',touch:'已识别：触控',mouse:'收到：鼠标兼容输入',unknown:'输入类型未能识别'};inputKind.dataset.inputKind=info?.lastType||'';inputKind.textContent=labels[info?.lastType]||'在页面上用笔或手指操作后显示识别结果。';if(info?.seenPen&&info.lastType!=='pen')inputKind.textContent+=' · 已检测到手写笔';}
     bindMenu(penSettings,penOptions);
     penSettings.addEventListener('toggle',()=>{if(penSettings.open)inputChanged(reader()?.getInputInfo?.());});
-    annotationTools.append(modeGroup,colorLabel,widthLabel,penSettings);
+    annotationTools.append(modeGroup,colorLabel);if(presets)annotationTools.append(presetsMenu);annotationTools.append(widthLabel,penSettings);
     // Fit-width default with free zoom: steppers, an explicit percentage and reset.
     let zoom=1, zoomSaveTimer=null;
     const zoomGroup=node('span',null,'reader-zoom');

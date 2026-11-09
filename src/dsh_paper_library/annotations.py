@@ -62,8 +62,8 @@ def install_helpers(**helpers):
 class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
     @staticmethod
     def _readable_underline(doc, annot):
-        """加粗本插件下划线的标准外观，保留原生 QuadPoints 与文字范围。"""
-        if annot.type[0] != 9 or not annot.info.get("subject", "").startswith("paper-library:"):
+        """同步标准线型外观，并加粗本插件下划线；保留原生几何与文字范围。"""
+        if annot.type[0] not in {9, 11, 4, 15}:
             return
         # MuPDF does not accept set_border for text markup. Its generated
         # underline appearance uses a font-height-dependent `w` operator;
@@ -76,7 +76,14 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         def width(match):
             current = float(match[1])
             return f"{max(current, min(3.0, max(1.6, current * 1.8))):.4f} w".encode("ascii")
-        updated = re.sub(rb"(?m)(?<!\S)(\d*\.?\d+)\s+w(?=\s|$)", width, stream)
+        updated = stream
+        if annot.type[0] == 9 and annot.info.get("subject", "").startswith("paper-library:"):
+            updated = re.sub(rb"(?m)(?<!\S)(\d*\.?\d+)\s+w(?=\s|$)", width, updated)
+        dashes = AnnotationAccess._style_border(annot).get("dashes") or []
+        if dashes:
+            command = ("[" + " ".join(str(float(v)) for v in dashes) + "] 0 d\n").encode("ascii")
+            updated = re.sub(rb"\[[^\]]*\]\s+[\d.]+\s+d\b", b"", updated)
+            updated = command + updated
         if updated != stream:
             doc.update_stream(appearance, updated)
 
@@ -204,7 +211,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 rects = [list(cls._rect(rect, page, inverse=True) * page.rotation_matrix) for rect in source_rects]
             except (TypeError, ValueError):
                 pass
-        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"width": annot.border.get("width", 1)} if kind == "square" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids", "parent_id") if key in extra}}
+        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, **cls._annotation_style(annot), "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"width": annot.border.get("width", 1)} if kind == "square" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids", "parent_id") if key in extra}}
 
     def companion_excerpt(self, id, page):
         """One explicitly selected page, text only; no persistent index or OCR."""
@@ -812,6 +819,65 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 _, _, previous = locate(doc)
                 if previous is not None:
                     return {"annotation": previous, "duplicate": True}
+            return self._write_pdf(id, operation)
+
+    @staticmethod
+    def _style_border(annot):
+        border = dict(annot.border)
+        # MuPDF 的 border 属性不投影文字标记的 BS，直接读取原生字典。
+        if annot.type[0] in {9, 11}:
+            kind, raw = annot.parent.parent.xref_get_key(annot.xref, "BS/D")
+            if kind == "array" and len(raw) <= 256:
+                values = re.findall(r"[+-]?(?:\d*\.)?\d+", raw)
+                if len(values) <= 16:
+                    border["dashes"] = [float(v) for v in values]
+        return border
+
+    @staticmethod
+    def _annotation_style(annot):
+        border = AnnotationAccess._style_border(annot)
+        dashes = border.get("dashes") or []
+        style = "dotted" if dashes and dashes[0] <= 2 else "dashed" if dashes else "solid"
+        signature = hashlib.sha256(json.dumps({"colors": annot.colors, "border": border}, sort_keys=True).encode()).hexdigest()
+        return {"line_style": style, "style_version": signature}
+
+    def annotation_style(self, id, annotation_id, color, line_style=None, expected_version=None):
+        if not isinstance(color, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+            raise ValueError("Color must be a six-digit hex string")
+        if line_style is not None and (not isinstance(line_style, str) or line_style not in {"solid", "dashed", "dotted"}):
+            raise ValueError("Unsupported line style")
+        if not isinstance(expected_version, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_version):
+            raise ValueError("请刷新批注后再修改样式。")
+        rgb = tuple(int(color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+        def checked(doc):
+            page, annot = self._find_annotation(doc, annotation_id)
+            if annot.type[0] not in {0, 4, 8, 9, 11, 15} or self._is_handwriting(annot):
+                raise ValueError("这类批注暂不支持修改样式。")
+            if line_style is not None and annot.type[0] not in {4, 9, 11, 15}:
+                raise ValueError("高亮与便笺仅支持修改颜色。")
+            style = self._annotation_style(annot)
+            old = annot.colors.get("stroke") or []
+            same = len(old) == 3 and all(abs(a-b) < 0.00001 for a, b in zip(old, rgb)) and (line_style is None or style["line_style"] == line_style)
+            if not same and style["style_version"] != expected_version:
+                raise ValueError("ANNOTATION_STALE: 批注样式已在其他窗口修改，请刷新后重试。")
+            return page, annot, same
+        def operation(doc):
+            page, annot, _ = checked(doc)
+            annot.set_colors(stroke=rgb)
+            if line_style is not None:
+                dash = {"solid": [], "dashed": [6, 3], "dotted": [1, 3]}[line_style]
+                # 标准 BS 保存线型；文字标记还需同步 AP，PDF 阅读器才能直接显示。
+                doc.xref_set_key(annot.xref, "BS/S", "/S" if not dash else "/D")
+                doc.xref_set_key(annot.xref, "BS/D", "[" + " ".join(map(str, dash)) + "]")
+            annot.set_info(modDate="D:" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%SZ"))
+            annot.update()
+            self._readable_underline(doc, annot)
+            return {"annotation": self._with_annotation_version(self._annotation(page, annot), bool(annot.info.get("id")))}
+        with self.lock():
+            with self._open_pdf(self.pdf_path(id)) as doc:
+                page, annot, same = checked(doc)
+                if same:
+                    return {"annotation": self._with_annotation_version(self._annotation(page, annot), bool(annot.info.get("id"))), "duplicate": True}
             return self._write_pdf(id, operation)
 
     def annotation_update(self, id, annotation_id, comment, version=None):

@@ -5,11 +5,12 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url);
 let JSDOM;try{({JSDOM}=require(process.env.JSDOM_MODULE||'jsdom'));}catch{}
 const html=await readFile(new URL('../web/index.html',import.meta.url),'utf8');
+const style=await readFile(new URL('../web/annotation-style.js',import.meta.url),'utf8');
 const shell=await readFile(new URL('../web/reading-shell.js',import.meta.url),'utf8');
 test('rectangle and free-stroke controls use native tools and share explicit color/width', {skip:!JSDOM}, async()=>{
   const dom=new JSDOM(html,{runScripts:'outside-only',url:'http://synthetic.invalid/'}),{window}=dom,doc=window.document,calls=[];
   for(const id of ['metadata-enrich','catalog-archive']){const b=doc.createElement('button');b.id=id;doc.body.append(b);}
-  window.eval(shell);
+  window.eval(style);window.eval(shell);
   const reader={setTool:(...args)=>calls.push(args),getInkDraft:()=>null,getInkContext:()=>null,isInking:()=>false};
   const ui=window.PaperReadingShell.create({state:{active:{id:'synthetic',pdf:true},page:1,tab:'reader'},workbench:()=>({isTable:()=>false}),panels:()=>({visible:()=>false}),reader:()=>reader,navigate(){},toast(){},beforeToolChange:async()=>true});
   const click=async id=>{doc.getElementById(id).click();await new Promise(resolve=>setImmediate(resolve));};
@@ -20,6 +21,7 @@ test('rectangle and free-stroke controls use native tools and share explicit col
   assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),['square',{color:'#336699',width:4}]);
   await click('reader-tool-ink');assert.equal(doc.getElementById('reader-tool-ink').textContent,'自由笔画');assert.equal(doc.getElementById('reader-ink-save').textContent,'完成笔画');
   assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),['ink',{color:'#336699',width:4}]);
+  doc.querySelector('.reader-color-presets-menu [aria-label=\"玫瑰\"]').click();assert.equal(color.value,'#df718b');assert.equal(calls.at(-1)[1].color,'#df718b');
   await click('reader-tool-select');assert.equal(doc.getElementById('reader-mode-group').hidden,false);assert.equal(width.parentElement.hidden,true);
   ui.dispose();dom.window.close();
 });
