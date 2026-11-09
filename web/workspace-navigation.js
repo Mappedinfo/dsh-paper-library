@@ -16,7 +16,8 @@ window.PaperWorkspaceNavigation = (() => {
   }
   const count = value => value?.total === null ? `至少 ${value.known_total}` : String(value?.total ?? 0);
   function create(options) {
-    const { root, catalogRoot, relatedRoot, api, paperSearch, actions } = options, doc = root.ownerDocument;
+    const { root, catalogRoot, relatedRoot, api, paperSearch, paperHeading, actions } = options, doc = root.ownerDocument;
+    const paperHeadingHome = paperHeading?.parentNode;
     const paperSearchHome = paperSearch?.parentNode;
     const actionsHome = actions?.parentNode;
     if (!root || !catalogRoot || !relatedRoot || typeof api !== 'function') throw Error('工作区导航需要导航、目录与关联内容容器。');
@@ -44,6 +45,7 @@ window.PaperWorkspaceNavigation = (() => {
     pathButton.setAttribute('aria-expanded', 'false'); relatedButton.setAttribute('aria-expanded', 'false');
     actionHost.append(pathButton, relatedButton); if (actions) actionHost.append(actions);
     nav.append(roots, searchHost, actionHost, pathPopup); root.replaceChildren(nav);
+    if(paperHeading){paperHeading.classList.add('workspace-paper-heading');nav.insertBefore(paperHeading,searchHost);}
     const catalog = el('section', 'workspace-catalog'); catalog.setAttribute('aria-label', '工作区目录');
     const catalogHeader = el('header', 'workspace-section-header'), catalogTitle = el('strong'), catalogRefresh = button('刷新', () => void loadCatalog()); const projectCreate = button('新建阅读项目', () => options.onCreateProject?.()); projectCreate.hidden = true; catalogHeader.append(catalogTitle, projectCreate, catalogRefresh);
     const searchForm = el('form', 'workspace-catalog-search'), search = el('input'); search.type = 'search'; search.maxLength = 200; search.placeholder = '检索名称'; search.setAttribute('aria-label', '检索画板、写作或阅读项目');
@@ -110,6 +112,7 @@ window.PaperWorkspaceNavigation = (() => {
     }
     function renderNavigation() {
       if (paperSearch) paperSearch.hidden = section !== 'paper';
+      if (paperHeading) paperHeading.hidden = section !== 'paper';
       searchForm.hidden = section === 'paper' || !!current; searchHost.hidden = section !== 'paper' && !!current;
       search.disabled = transition; if (paperSearch) paperSearch.setAttribute('aria-busy', String(transition));
       for (const [kind, control] of Object.entries(rootButtons)) { control.setAttribute('aria-pressed', String(section === kind)); control.disabled = transition; if (section === kind && !current) control.setAttribute('aria-current', 'page'); else control.removeAttribute('aria-current'); }
@@ -230,7 +233,7 @@ window.PaperWorkspaceNavigation = (() => {
       finally { if (owner === intent) { pending = null; transition = false; if (live) render(); } }
     }
     render();
-    return { setCurrent, selectRoot, navigate, mountActions, closePopovers, refresh: () => { if (current) { ++relatedSequence; groupRequests = {}; related.busy = false; relatedLoaded = false; if (current.kind === 'project' || popup === 'related') return loadRelated(); renderRelated(); return true; } return loadCatalog(); }, state, dispose() { closePopovers(); mountActions(); live = false; ++intent; ++catalogSequence; ++relatedSequence; for (const remove of listeners) remove(); if (paperSearch && paperSearchHome) { paperSearch.hidden = false; paperSearchHome.append(paperSearch); } if (actions && actionsHome) actionsHome.append(actions); root.replaceChildren(); catalogRoot.replaceChildren(); relatedRoot.replaceChildren(); } };
+    return { setCurrent, selectRoot, navigate, mountActions, closePopovers, refresh: () => { if (current) { ++relatedSequence; groupRequests = {}; related.busy = false; relatedLoaded = false; if (current.kind === 'project' || popup === 'related') return loadRelated(); renderRelated(); return true; } return loadCatalog(); }, state, dispose() { closePopovers(); mountActions(); live = false; ++intent; ++catalogSequence; ++relatedSequence; for (const remove of listeners) remove(); if (paperSearch && paperSearchHome) { paperSearch.hidden = false; paperSearchHome.append(paperSearch); } if(paperHeading&&paperHeadingHome){paperHeading.hidden=false;paperHeading.classList.remove('workspace-paper-heading');paperHeadingHome.prepend(paperHeading);} if (actions && actionsHome) actionsHome.append(actions); root.replaceChildren(); catalogRoot.replaceChildren(); relatedRoot.replaceChildren(); } };
   }
   return Object.freeze({ create });
 })();

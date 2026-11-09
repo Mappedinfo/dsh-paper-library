@@ -13,9 +13,10 @@ const related = (focus, groups = {}, extra = {}) => ({ focus, groups: { paper: p
 function fixture(options = {}) {
   const calls = [], changes = [], roots = [], warnings = [], navigated = []
   class Element {
-    constructor(tag) { this.tagName = tag.toUpperCase(); this.ownerDocument = document; this.children = []; this.dataset = {}; this.attributes = {}; this.events = new Map(); this.hidden = false; this.disabled = false; this.value = ''; this.textContent = ''; this.style = { removeProperty(name) { delete this[name]; } }; this.classes = new Set(); this.classList = { add: value => this.classes.add(value), toggle: (value, on) => { if (on === undefined) on = !this.classes.has(value); if (on) this.classes.add(value); else this.classes.delete(value); return on }, contains: value => this.classes.has(value) } }
+    constructor(tag) { this.tagName = tag.toUpperCase(); this.ownerDocument = document; this.children = []; this.dataset = {}; this.attributes = {}; this.events = new Map(); this.hidden = false; this.disabled = false; this.value = ''; this.textContent = ''; this.style = { removeProperty(name) { delete this[name]; } }; this.classes = new Set(); this.classList = { add: value => this.classes.add(value), remove: value => this.classes.delete(value), toggle: (value, on) => { if (on === undefined) on = !this.classes.has(value); if (on) this.classes.add(value); else this.classes.delete(value); return on }, contains: value => this.classes.has(value) } }
     set className(value) { this.classes = new Set(value.split(/\s+/).filter(Boolean)) } get className() { return [...this.classes].join(' ') }
     append(...nodes) { for (const node of nodes) { if (node.parentNode) node.parentNode.children = node.parentNode.children.filter(value => value !== node); node.parentNode = this; this.children.push(node) } }
+    prepend(node) { if(this.children.length)this.insertBefore(node,this.children[0]);else this.append(node) }
     insertBefore(node, next) { this.append(node); this.children.pop(); this.children.splice(this.children.indexOf(next), 0, node) }
     replaceChildren(...nodes) { for (const node of this.children) node.parentNode = null; this.children = []; this.append(...nodes) }
     setAttribute(key, value) { this.attributes[key] = String(value) } getAttribute(key) { return this.attributes[key] ?? null } removeAttribute(key) { delete this.attributes[key] }
@@ -29,14 +30,15 @@ function fixture(options = {}) {
   const positions = [], window = { events: new Map(), addEventListener: Element.prototype.addEventListener, removeEventListener: Element.prototype.removeEventListener, dispatch: Element.prototype.dispatch, CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail } }, PaperFloatingWindows: { placeBelow(trigger, panel) { positions.push({ trigger, panel }); panel.style.position = 'fixed'; } } }
   const actionsHome = new Element('div'), actions = new Element('details'); actions.hidden = true; actionsHome.append(actions)
   const searchHome = new Element('div'), paperSearch = new Element('label'), paperInput = new Element('input'); paperInput.value = '原文献检索'; paperSearch.append(paperInput); searchHome.append(paperSearch);
+  const paperHeading=new Element('div');paperHeading.append(new Element('h1'));searchHome.append(paperHeading);
   vm.runInNewContext(source, { window, document })
   const api = async (action, args) => { calls.push({ action, ...plain(args) }); return options.api ? options.api(action, args) : action === 'workspace_catalog' ? page([item(args.kind, 'synthetic-a')], { offset: args.offset }) : related({ kind: args.kind, id: args.id }) }
-  const nav = window.PaperWorkspaceNavigation.create({ root, catalogRoot, relatedRoot, api, paperSearch, actions, onCreateProject: options.onCreateProject, onChange: value => changes.push(plain(value)), onRootChange: async value => { roots.push(value); return options.onRootChange?.(value) }, onNavigate: async value => { navigated.push(plain(value)); return options.onNavigate?.(value) }, prepare: options.prepare, toast: message => warnings.push(message) })
+  const nav = window.PaperWorkspaceNavigation.create({ root, catalogRoot, relatedRoot, api, paperSearch, paperHeading, actions, onCreateProject: options.onCreateProject, onChange: value => changes.push(plain(value)), onRootChange: async value => { roots.push(value); return options.onRootChange?.(value) }, onNavigate: async value => { navigated.push(plain(value)); return options.onNavigate?.(value) }, prepare: options.prepare, toast: message => warnings.push(message) })
   const all = start => [start, ...start.children.flatMap(all)]
   const find = (className, start = root) => all(start).find(node => node.classes.has(className))
   const findAll = (className, start = root) => all(start).filter(node => node.classes.has(className))
   const text = start => all(start).map(node => node.textContent).filter(Boolean).join(' ')
-  return { nav, document, window, positions, actions, actionsHome, paperSearch, paperInput, searchHome, root, catalogRoot, relatedRoot, calls, changes, roots, warnings, navigated, all, find, findAll, text }
+  return { nav, document, window, positions, actions, actionsHome, paperHeading, paperSearch, paperInput, searchHome, root, catalogRoot, relatedRoot, calls, changes, roots, warnings, navigated, all, find, findAll, text }
 }
 
 test('four entrances are distinct and a refused root switch leaves the original view untouched', async () => {
@@ -312,3 +314,10 @@ test('a relation popup closes on context changes while a selected reading projec
   f.nav.closePopovers()
   assert.equal(f.relatedRoot.hidden, false, 'closing the path does not hide project membership content')
 })
+
+test('paper heading shares navigation and returns home on dispose',async()=>{
+  const f=fixture();assert.equal(f.paperHeading.parentNode,f.find('workspace-navigation'));assert.equal(f.paperHeading.hidden,false);
+  await f.nav.selectRoot('board');assert.equal(f.paperHeading.hidden,true);
+  await f.nav.selectRoot('paper');assert.equal(f.paperHeading.hidden,false);
+  f.nav.dispose();assert.equal(f.paperHeading.parentNode,f.searchHome);
+});

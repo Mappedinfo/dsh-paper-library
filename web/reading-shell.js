@@ -49,7 +49,7 @@ window.PaperReadingShell = (() => {
     citations.addEventListener('toggle',()=>{if(citations.open)status('对当前论文复制引用，或导出文件与已保存的批注。');});
     // Metadata and chat stay within reading; graph is the only other paper surface.
     $('metadata-open').textContent='资料详情';$('metadata-open').title='查看与编辑文献资料详情';
-    ribbon.append($('metadata-open'));
+    ribbon.append($('metadata-open'));if($('paper-reveal'))ribbon.append($('paper-reveal'));
     const fullscreen=button('reader-fullscreen','全屏阅读 ⤢',()=>void toggleFullscreen());
     fullscreen.title='全屏阅读；Esc 返回';ribbon.append(fullscreen);
     top.insertBefore(ribbon,$('paper-tools'));
@@ -143,7 +143,7 @@ window.PaperReadingShell = (() => {
       sync();
     }).catch(()=>{});
     // One global import entry. Link intake belongs inside that same import surface.
-    $('import-open').textContent='导入';libraryTools.append($('import-open'),$('build-bibliography'),$('metadata-enrich'),$('catalog-archive'));
+    $('import-open').textContent='导入';libraryTools.append($('import-open'),$('build-bibliography'),$('metadata-enrich'));
     // The shelf disclosures keep their original IDs and toggle events. Their
     // content lives below the shared row so each expanded panel has full width.
     const organizerDisclosures=[['board-shelf','board-shelf-panel'],['latex-version-shelf','latex-version-shelf-panel']].map(([id,panelId])=>{
@@ -247,7 +247,7 @@ window.PaperReadingShell = (() => {
       if(annotationTools.hidden)penSettings.open=false;
       $('toolbar-actions').hidden=false;libraryTools.hidden=surface!=='library'&&active;
       $('import-open').disabled=false;$('build-bibliography').disabled=false;
-      $('metadata-enrich').disabled=!active;$('catalog-archive').disabled=!active;
+      $('metadata-enrich').disabled=!active;
       for(const b of annotationTools.querySelectorAll('[data-reader-tool]'))b.setAttribute('aria-pressed',String(b.dataset.readerTool===tool));
       for(const [value,b] of Object.entries(modeButtons))b.setAttribute('aria-pressed',String(mode===value));
       modeGroup.dataset.mode=mode;

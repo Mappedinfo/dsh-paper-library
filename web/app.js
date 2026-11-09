@@ -1481,7 +1481,7 @@ workbenchUI = window.PaperWorkbench?.create({ state, api, persistence, loadList,
     else if (item && state.active?.id === item.id) { state.active=item; renderPaperHeader(); if(state.tab==='graph')void loadGraph(); }
   },
 });
-organizationUI = window.PaperOrganization?.create({state,api,loadList,toast,root:document.querySelector('.library-filterbar'),onChanged:patch=>{
+organizationUI = window.PaperOrganization?.create({state,api,loadList,toast,root:document.querySelector('.catalog-controls'),onChanged:patch=>{
   for(const item of state.items)if(item.id===patch.id)Object.assign(item,patch);
   if(state.active?.id===patch.id){Object.assign(state.active,patch);$('paper-tags').replaceChildren(organizationUI.actions(state.active));}
   renderList();
@@ -2031,7 +2031,7 @@ async function openWorkspaceTarget(target) {
 }
 if ($('workspace-navigation') && window.PaperWorkspaceNavigation) {
   const versions = $('library-latex-versions'); if (versions) $('workspace-version-list').append(versions);
-  workspaceNavigationUI = window.PaperWorkspaceNavigation.create({root:$('workspace-navigation'),catalogRoot:$('workspace-catalog-body'),relatedRoot:$('workspace-related'),paperSearch:$('search').closest('label'),api,toast,
+  workspaceNavigationUI = window.PaperWorkspaceNavigation.create({root:$('workspace-navigation'),catalogRoot:$('workspace-catalog-body'),relatedRoot:$('workspace-related'),paperSearch:$('search').closest('label'),paperHeading:document.querySelector('#library-literature-content>.pane-heading'),api,toast,
     actions:$('workspace-versions'),prepare:prepareWorkspaceNavigation,onRootChange:openWorkspaceRoot,onNavigate:openWorkspaceTarget,onChange:applyWorkspaceNavigation,onCreateProject:()=>projectDialogOpen(null)});
   applyWorkspaceNavigation(workspaceNavigationUI.state());
   $('workspace-library')?.addEventListener('click',event=>{if(workspaceNavigationUI.state().section!=='paper'||boardUI?.isOpen()||latexUI?.isOpen()){event.preventDefault();event.stopImmediatePropagation();void workspaceNavigationUI.selectRoot('paper');}},true);

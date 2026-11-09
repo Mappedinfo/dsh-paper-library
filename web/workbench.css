@@ -54,6 +54,8 @@
 .library-filterbar+#search-summary{display:block;flex:none;padding:0 10px;font-size:11px}
 .library-filterbar+#search-summary:empty{display:none}
 .paper-organization-filters{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;flex-basis:100%}
+.catalog-controls>.paper-organization-filters{flex:0 1 auto}
+.catalog-selection-actions{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;padding-left:6px;border-left:1px solid var(--line,#ddd)}
 .paper-organization-filters [aria-pressed="true"]{color:var(--accent,var(--teal));background:var(--teal-light);font-weight:600}
 .paper-tag-picker{position:relative;font-size:12px}
 .paper-tag-picker>button{cursor:pointer;padding:5px 8px;border:1px solid var(--line);border-radius:6px;list-style:none}

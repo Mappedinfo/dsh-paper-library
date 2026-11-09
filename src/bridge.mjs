@@ -10,6 +10,7 @@ import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
 import { createTranslationServerClient } from './translation-server.mjs';
 import { resourcePolicyFor } from './resource-policy.mjs';
 import { workerScheduler } from './worker-scheduler.mjs';
+import { revealPDF } from './reveal-pdf.mjs';
 
 export const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const defaultLibrary = join(homedir(), '.local', 'share', 'dsh-paper-library');
@@ -424,6 +425,11 @@ export function splitFeedbackReplies(text, annotations) {
 export async function dispatch(request, options = {}) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('请求必须是 JSON 对象。');
   const { library: ignoredLibrary, python: ignoredPython, ...safe } = request;
+  if (safe.action === 'paper_reveal') {
+    if (typeof safe.id !== 'string' || !safe.id || safe.id.length > 200) throw Error('请先选择一篇附有 PDF 的文献。');
+    const file = await core({ action: 'export_pdf', id: safe.id }, options);
+    return revealPDF(file.path, { signal: options.signal });
+  }
   if (['handwriting_get','handwriting_save','linked_handwriting_text'].includes(safe.action)) {
     if (Buffer.byteLength(JSON.stringify(safe), 'utf8') > 512 * 1024) throw new Error('手写便签超过 512 KiB，请缩短笔迹或文字。');
     return core(safe, options);

@@ -176,7 +176,7 @@ test('editing a different table row aligns its summary and save target without o
   const a=original(),b={...original(),id:'paper-b',title:'Second record',author:[{literal:'B Author',affiliation:[{name:'B Institute'}]}]};
   const f=environment({active:a});f.state.items.push(b);f.workbench.edit(a);f.element('edit-title').value='Unsaved A';await f.form.dispatch('input');f.workbench.setTable(true);
   const row=f.element('catalog-table').querySelectorAll('tr').find(n=>n.dataset.paperId===b.id);
-  await row.querySelectorAll('button').find(n=>n.textContent==='编辑').dispatch('click');
+  await row.querySelector('button').dispatch('click');await f.element('catalog-edit').dispatch('click');
   assert.equal(f.state.active.id,b.id);assert.equal(f.element('toolbar-paper').textContent,`${b.title} · 2026`);assert.equal(f.element('edit-title').value,b.title);
   assert.equal(f.element('paper-metadata').querySelectorAll('dd')[0].textContent,'B Institute');
   assert.deepEqual(f.selections,[b.id],'Editor-triggered selection must not recurse through paperChanged');assert.deepEqual(f.opens,[]);assert.deepEqual(f.requests,[]);
@@ -260,7 +260,7 @@ test('catalog title and row selection keep the table open for metadata enrichmen
   assert.deepEqual(f.opens, []); assert.deepEqual(f.selections, ['paper-b']);assert.equal(f.workbench.isTable(),true);
   // The edit action still selects in place without opening the reader.
   f.opens.length = 0;
-  await [...row.querySelectorAll('button')].find(button => button.textContent === '编辑').dispatch('click');
+  await f.element('catalog-edit').dispatch('click');
   assert.deepEqual(f.opens, [], 'Edit selects without leaving the table'); assert.deepEqual(f.selections, ['paper-b']);
 });
 
@@ -279,7 +279,7 @@ test('slides rows open through their own route and offer no paper or archive act
   const slide = { id: 'pd-' + 'a'.repeat(32), title: 'Synthetic talk', resource_kind: 'slides', slide_count: 2 };
   f.state.items.push(slide); f.workbench.setTable(true);
   const row = f.element('catalog-table').querySelectorAll('tr').find(n => n.dataset.paperId === slide.id);
-  assert.deepEqual(row.querySelectorAll('button').map(button => button.textContent), ['Synthetic talk', '打开']);
+  assert.deepEqual(row.querySelectorAll('button').map(button => button.textContent), ['Synthetic talk']);
   await row.querySelector('button').dispatch('click');
   assert.deepEqual(f.opens, []); assert.deepEqual(f.selections, [slide.id]);
   f.state.catalogSlideId = slide.id; f.state.catalogSlideTitle = slide.title; f.workbench.header();
@@ -291,9 +291,9 @@ test('a selected slide does not block archiving another paper row', async () => 
   const f = environment({ active: original() });
   f.state.catalogSlideId = 'pd-' + 'a'.repeat(32); f.workbench.setTable(true);
   const row = f.element('catalog-table').querySelectorAll('tr').find(n => n.dataset.paperId === 'paper-a');
-  await [...row.querySelectorAll('button')].find(button => button.textContent === '移入回收站').dispatch('click');
+  await row.querySelector('button').dispatch('click');f.state.catalogSlideId=null;await f.element('catalog-archive').dispatch('click');
   assert.deepEqual(f.requests, [{ action: 'archive', id: 'paper-a' }]);
-  f.requests.length = 0;
+  f.requests.length = 0;f.state.catalogSlideId='pd-'+ 'a'.repeat(32);
   await f.element('catalog-archive').dispatch('click');
   assert.deepEqual(f.requests, [], 'the toolbar cannot archive a stale paper selection');
 });
@@ -316,7 +316,7 @@ test('scope, table sorting and restore preserve query and only request metadata 
   f.element('catalog-sort').value = 'title'; await f.element('catalog-sort').dispatch('change');
   assert.equal(f.state.sort, 'title'); assert.equal(f.state.query, 'Synthetic');
   f.workbench.setTable(true); assert.equal(f.element('metadata-open').disabled, true);
-  const restore = f.element('catalog-table').querySelectorAll('button').find(n => n.textContent === '恢复');
+  const restore = f.element('catalog-archive');
   await restore.dispatch('click');
   assert.deepEqual(f.requests, [{ action: 'restore', id: archived.id }]);
   assert.deepEqual(f.changes.at(-1), [null, archived.id]);
@@ -382,4 +382,15 @@ test('metadata lookup adopts the complete author list in the review draft withou
  const f=environment({active:paper,respond:action=>action==='metadata_lookup'?{item:paper,author_candidates:authors}:null});
  await f.element('metadata-enrich').dispatch('click');
  assert.equal(f.element('edit-authors').value,'Example, Alice\nWriter, Bob');assert.match(f.element('edit-affiliations').value,/2 \| Synthetic Institute/);assert.equal(f.requests.some(r=>r.action==='update'),false);
+});
+
+test('shared folder action follows selection, refuses missing files and never accepts a browser path',async()=>{
+  const first={...original(),pdf:true};const second={...first,id:'paper-b'};const f=environment({active:first});f.state.items.push(second);f.workbench.setTable(true);
+  assert.equal(f.element('catalog-table').querySelectorAll('th').length,10);
+  await f.element('catalog-reveal').dispatch('click');assert.deepEqual(f.requests,[{action:'paper_reveal',id:first.id}]);
+  const row=f.element('catalog-table').querySelectorAll('tr').find(n=>n.dataset.paperId===second.id);await row.querySelector('button').dispatch('click');
+  await f.element('catalog-reveal').dispatch('click');assert.equal(f.requests.at(-1).id,second.id);
+  second.pdf=false;f.workbench.header();assert.equal(f.element('catalog-reveal').disabled,true);assert.equal(f.element('paper-reveal').disabled,true);
+  await f.element('catalog-reveal').dispatch('click');assert.equal(f.requests.length,2);
+  f.state.items=[];f.workbench.render();assert.equal(f.element('catalog-edit').disabled,true);await f.element('catalog-archive').dispatch('click');assert.equal(f.requests.length,2);
 });
