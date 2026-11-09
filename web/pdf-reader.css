@@ -40,7 +40,11 @@
    geometric, so this overlay never intercepts text selection or clicks. */
 .pdr-annotation-flash{position:absolute;pointer-events:none;z-index:3;box-sizing:border-box;border:2px solid var(--teal,#28675c);border-radius:3px;background:transparent;box-shadow:0 0 0 1px #fff;animation:pdr-annotation-flash 1.8s ease-out}
 @keyframes pdr-annotation-flash{0%{opacity:0}12%{opacity:1}72%{opacity:1}100%{opacity:0}}
-@media(prefers-reduced-motion:reduce){.pdr-annotation-flash{animation:none;opacity:1}}
+/* 搜索命中采用混色填充，保留 PDF 文字的可读性。 */
+.pdr-annotation-flash[data-focus-id="pdf-search"]{border:0;box-shadow:none;background:rgba(255,204,32,.65);mix-blend-mode:multiply;animation:pdr-search-flash 1.8s ease-in-out}
+.pdr-dark-pdf .pdr-annotation-flash[data-focus-id="pdf-search"]{background:rgba(255,204,32,.4);mix-blend-mode:screen}
+@keyframes pdr-search-flash{0%,32%,64%{opacity:1}16%,48%{opacity:.2}80%{opacity:1}100%{opacity:0}}
+@media(prefers-reduced-motion:reduce){.pdr-annotation-flash,.pdr-annotation-flash[data-focus-id="pdf-search"]{animation:none;opacity:1}}
 
 /* Focusable internal PDF destinations never intercept text selection or ink. */
 .pdr-internal-link { position:absolute; z-index:4; pointer-events:none; border:0; border-radius:2px; padding:0; margin:0; background:transparent; color:transparent; box-shadow:none; min-width:0; min-height:0; }
