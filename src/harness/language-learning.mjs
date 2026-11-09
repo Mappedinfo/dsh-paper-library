@@ -1,7 +1,7 @@
 import { entryOrder } from '../entry-order.mjs'
 import { createHash } from 'node:crypto'
 
-const ACTIONS = new Set(['language_generate', 'language_history', 'language_settings_get', 'language_settings_update', 'vocabulary_create', 'vocabulary_list', 'vocabulary_update', 'vocabulary_delete', 'vocabulary_export'])
+const ACTIONS = new Set(['language_generate', 'language_history', 'language_vocabulary_sync', 'language_settings_get', 'language_settings_update', 'vocabulary_create', 'vocabulary_list', 'vocabulary_update', 'vocabulary_delete', 'vocabulary_export'])
 const SETTINGS_KEY = 'language.settings', PROMPT_VERSION = 'language-v3'
 const POLISH_DIRECTIONS = Object.freeze({
   general: 'Improve clarity and natural wording with minimal necessary edits.',
@@ -13,7 +13,8 @@ const POLISH_DIRECTIONS = Object.freeze({
 })
 const MAX_SCAN = 5000, MAX_ENCOUNTERS = 60, MAX_EXPORT_BYTES = 8 * 1024 * 1024
 const hash = value => createHash('sha256').update(value).digest('hex')
-const canonical = value => value.normalize('NFKC').toLocaleLowerCase('und').replaceAll('ß', 'ss').replaceAll('ς', 'σ').replace(/\s+/gu, ' ').trim()
+const lexicalText = value => value.replace(/\u00ad/gu, '');
+const canonical = value => lexicalText(value).normalize('NFKC').toLocaleLowerCase('und').replaceAll('ß', 'ss').replaceAll('ς', 'σ').replace(/\s+/gu, ' ').trim()
 const stamp = () => new Date().toISOString()
 function fail(message, code = 'LANGUAGE_INVALID', status = 400) { return Object.assign(new Error(message), { code, status }) }
 function string(value, name, max, required = true) {
@@ -102,7 +103,13 @@ function outputOf(raw, source, mode = 'translate') {
   const vocabulary = [], seen = new Set()
   for (const candidate of value.vocabulary) {
     if (!candidate || typeof candidate !== 'object') throw fail('AI 词汇结构不完整。', 'LANGUAGE_INCOMPLETE', 502)
-    const term = string(candidate.term, '词汇', 80), meaning = string(candidate.meaning, '词义', 1000), source_sentence = string(candidate.source_sentence, '词汇原句', 1000)
+    const term = lexicalText(string(candidate.term, '词汇', 80)), meaning = string(candidate.meaning, '词义', 1000)
+    let source_sentence = string(candidate.source_sentence, '词汇原句', 1000)
+    // 允许模型忽略 PDF 软连字符，但记录仍保留实际原句，不能放宽为语义匹配。
+    if (!source.includes(source_sentence)) {
+      const pattern = [...lexicalText(source_sentence)].map(char => char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\u00ad*')
+      source_sentence = pattern ? source.match(new RegExp(pattern, 'u'))?.[0] || source_sentence : source_sentence
+    }
     const key = canonical(term)
     if (seen.has(key) || !lexicalTerm(term) || !containsTerm(source, term) || !containsTerm(source_sentence, term) || !source.includes(source_sentence)) continue
     const sentence_translation = candidate.sentence_translation === undefined
@@ -112,8 +119,8 @@ function outputOf(raw, source, mode = 'translate') {
     seen.add(key); vocabulary.push({ term, meaning, source_sentence, ...(sentence_translation ? { sentence_translation } : {}) })
   }
   // 单个选中词的完整译文即可作词义；不要将整段译文塞进任何子词词条。
-  if (mode === 'translate' && !vocabulary.length && /^[\p{L}][\p{L}’'-]{1,79}$/u.test(source) && lexicalTerm(source) && result.length <= 1000 && canonical(result) !== canonical(source)) {
-    vocabulary.push({ term: source, meaning: result, source_sentence: source, sentence_translation: result })
+  if (mode === 'translate' && !vocabulary.length && /^[\p{L}][\p{L}’'-]{1,79}$/u.test(lexicalText(source)) && lexicalTerm(source) && result.length <= 1000 && canonical(result) !== canonical(source)) {
+    vocabulary.push({ term: lexicalText(source), meaning: result, source_sentence: source, sentence_translation: result })
   }
   return { result, explanation, vocabulary }
 }
@@ -203,12 +210,29 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
   }
   async function finish(key, record, replayed) {
     for (const word of record.value.vocabulary) await accumulate(record.value, word)
-    const complete = await cas(key, current => current.status === 'complete' ? undefined : { ...current, status: 'complete', completed_at: stamp() })
+    const complete = await cas(key, current => current.status === 'complete' ? undefined : { ...current, status: 'complete', completed_at: stamp(), vocabulary_version: 2 })
     return publicResult(complete.value, replayed)
+  }
+  async function repairVocabulary(record) {
+    if (!record.value || record.value.status !== 'complete' || record.value.vocabulary_version === 2) return;
+    // 只复用已验证的译文，不重调模型，也不恢复用户删除的词条。
+    const value = record.value;
+    const vocabulary = value.request?.vocabulary_term ? value.vocabulary
+      : outputOf(JSON.stringify({ result: value.result, explanation: value.explanation || '', vocabulary: value.vocabulary || [] }), value.source_text, value.mode).vocabulary;
+    for (const word of vocabulary) await accumulate(value, word);
+    await cas(record.key, current => current.vocabulary_version === 2 ? undefined : { ...current, vocabulary, vocabulary_version: 2 });
+  }
+  async function syncVocabulary(input, signal) {
+    const id = paperId(input.id), { offset, limit } = paging(input, 20);
+    // 每次最多 20 条当前论文的语言记录；浏览器逐批请求，可随关闭或切换取消。
+    const page = await store.list({ prefix: `language.result:${hash(id)}:`, offset, limit });
+    for (const record of page.records) { signal?.throwIfAborted(); await repairVocabulary(record); }
+    const next_offset = offset + page.records.length;
+    return { scanned: page.records.length, next_offset, hasMore: Boolean(page.hasMore && next_offset < MAX_SCAN), truncated: Boolean(page.hasMore && next_offset >= MAX_SCAN) };
   }
   async function replay(key, record, fingerprint) {
     if (record.value.fingerprint !== fingerprint) throw fail('同一请求标识的原文或操作已改变，请使用新请求。', 'LANGUAGE_REQUEST_CONFLICT', 409)
-    if (record.value.status === 'complete') return publicResult(record.value, true)
+    if (record.value.status === 'complete') { await repairVocabulary({ ...record, key }); return publicResult((await store.get(key)).value, true) }
     if (record.value.status === 'committing') {
       try { return await finish(key, record, true) }
       catch (error) { throw Object.assign(error, { code: 'LANGUAGE_COMMIT_RETRY', status: 503, generation_status: 'committing', retry_with_new_request: false }) }
@@ -356,6 +380,7 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
         const promise = generate(request, signal); flights.set(key, { fingerprint, promise })
         try { return await view(await promise) } finally { flights.delete(key) }
       }
+      if (input.action === 'language_vocabulary_sync') return await syncVocabulary(input, signal)
       if (input.action === 'language_history') return await history(input)
       if (input.action === 'vocabulary_list') return await vocabularyList(input)
       if (input.action === 'vocabulary_export') return await vocabularyExport(input)

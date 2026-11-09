@@ -5,10 +5,10 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{JSDOM}=require(process.env.JSDOM_MODULE||'jsdom');
 const script=await readFile(new URL('../web/encyclopedia.js',import.meta.url),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-function fixture(t,create,{source={paper_id:'synthetic',title:'Synthetic paper',page:2,quote:'A synthetic sentence.'},items=[]}={}){
+function fixture(t,create,{source={paper_id:'synthetic',title:'Synthetic paper',page:2,quote:'A synthetic sentence.'},items=[],sync=()=>({hasMore:false})}={}){
  const dom=new JSDOM('',{url:'https://synthetic.invalid',runScripts:'outside-only'}),w=dom.window,calls=[],jumps=[];
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};w.confirm=()=>true;
- w.eval(script);const ui=w.PaperEncyclopedia.create({getSource:()=>source,toast:()=>{},openReference:ref=>jumps.push(ref),api:async(action,args)=>{calls.push({action,...args});if(action.endsWith('_list'))return {items,total:items.length};return create(args);}});
+ w.eval(script);const ui=w.PaperEncyclopedia.create({getSource:()=>source,toast:()=>{},openReference:ref=>jumps.push(ref),api:async(action,args)=>{calls.push({action,...args});if(action==='language_vocabulary_sync')return sync(args);if(action.endsWith('_list'))return {items,total:items.length};return create(args);}});
  t.after(()=>w.close());return {w,ui,calls,jumps,click:label=>[...w.document.querySelectorAll('button')].find(n=>n.textContent===label).click(),input:label=>[...w.document.querySelectorAll('label')].find(n=>n.firstChild.textContent===label).querySelector('input,textarea'),submit:()=>w.document.querySelector('.wiki-word-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}))};
 }
 const result=args=>({id:'word',term:args.term,meaning:'合成的',meaning_source:'ai',status:'learning',encounters:[{paper_id:args.id,title:'Synthetic paper',page:args.page,source_sentence:args.source_sentence,sentence_translation:'一个合成句子。',author_background:args.author_background,model:{provider:'synthetic',model:'mock'}}]});
@@ -35,4 +35,21 @@ test('late create result cannot replace a different tab and duplicate submits se
 });
 test('without a paper the UI requests a source rather than creating a fabricated association',async t=>{
  const f=fixture(t,()=>{}, {source:null});f.ui.show('words');await tick();f.click('新建词条');assert.match(f.w.document.querySelector('.wiki-article').textContent,/请先打开来源论文/);assert.equal(f.w.document.querySelector('.wiki-word-form'),null);
+});
+
+
+test('opening vocabulary repairs only the current paper in bounded batches before showing saved terms',async t=>{
+ const f=fixture(t,()=>{}, {items:[{id:'directionality',term:'directionality',meaning:'方向性',encounters:[]}],sync:args=>({hasMore:args.offset===0,next_offset:args.offset+20})});
+ f.ui.show('words');for(let i=0;i<10&&!f.w.document.querySelector('.wiki-index-item');i++)await new Promise(r=>setTimeout(r,5));
+ const syncs=f.calls.filter(x=>x.action==='language_vocabulary_sync');assert.deepEqual(syncs.map(x=>x.offset),[0,20]);assert.ok(syncs.every(x=>x.id==='synthetic'&&x.limit===20));
+ assert.equal(f.w.document.querySelector('.wiki-article h2').textContent,'directionality');assert.match(f.w.document.querySelector('.wiki-article').textContent,/方向性/);
+ f.click('检索');await tick();assert.equal(f.calls.filter(x=>x.action==='language_vocabulary_sync').length,2);
+});
+
+test('repair failure stays visible and search retries; switching tabs stops later batches',async t=>{
+ let fail=true;const f=fixture(t,()=>{}, {sync:()=>{if(fail)throw Error('synthetic storage unavailable');return {hasMore:false};}});
+ f.ui.show('words');await tick();assert.match(f.w.document.querySelector('[role=status]').textContent,/补登记未完成/);
+ fail=false;f.click('检索');await tick();assert.doesNotMatch(f.w.document.querySelector('[role=status]').textContent,/补登记未完成/);
+ let release;const g=fixture(t,()=>{}, {sync:()=>new Promise(r=>release=r)});g.ui.show('words');await tick();g.click('百科');release({hasMore:true,next_offset:20});await tick();
+ assert.equal(g.calls.filter(x=>x.action==='language_vocabulary_sync').length,1);assert.match(g.w.document.querySelector('.wiki-article').textContent,/创建百科词条/);
 });

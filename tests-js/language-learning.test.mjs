@@ -520,3 +520,64 @@ test('invalid polish directions and translation misuse reject before calling a m
   await assert.rejects(f.handle({ ...request, polish_direction: 'general' }), error => error.code === 'LANGUAGE_INVALID')
   assert.equal(f.calls.length, 0); assert.equal(f.store.records.size, 0)
 })
+
+test('soft-hyphen terms and model excerpts register with the exact PDF source and searchable spelling', async () => {
+  for (const suggestions of [[], [{term:'directionality',meaning:'方向性',source_sentence:'directionality'}]]) {
+    const f=fixture(); f.answer=JSON.stringify({result:'方向性',explanation:'',vocabulary:suggestions});
+    await f.handle({...request,text:'direction\u00adality'});
+    for(const query of ['directionality','direction\u00adality','方向性']) {
+      const words=await f.handle({action:'vocabulary_list',query});
+      assert.equal(words.total,1);assert.equal(words.items[0].term,'directionality');
+      assert.equal(words.items[0].encounters[0].source_sentence,'direction\u00adality');
+      assert.equal(words.items[0].encounters[0].sentence_translation,'方向性');
+    }
+  }
+  const f=fixture();f.answer=JSON.stringify({result:'方向性保持不变。',explanation:'',vocabulary:[
+    {term:'directionality',meaning:'方向性',source_sentence:'The directionality remains.'},
+    {term:'invented',meaning:'伪造',source_sentence:'An invented source.'}
+  ]});
+  await f.handle({...request,text:'The direction\u00adality remains.'});
+  const words=await f.handle({action:'vocabulary_list'});assert.equal(words.total,1);
+  assert.equal(words.items[0].encounters[0].source_sentence,'The direction\u00adality remains.');
+});
+
+test('old completed empty vocabulary is repaired in bounded current-paper batches without AI and survives disk reopening', async () => {
+  const directory=await mkdtemp(join(tmpdir(),'paper-vocabulary-repair-'));
+  try {
+    const library=join(directory,'library'),home=join(directory,'home');await mkdir(library);
+    const store=createLocalStateStore({library,home});const f=fixture(store);
+    f.answer=JSON.stringify({result:'方向性',explanation:'',vocabulary:[]});
+    // 合成旧版本结果：翻译已落盘，但词条被软连字符校验丢弃。
+    for(let index=0;index<21;index++) {
+      const id=index===20?'other-paper':request.id;
+      const key=`language.result:${createHash('sha256').update(id).digest('hex')}:${String(index).padStart(3,'0')}`;
+      await store.put(key,{id:`legacy-${index}`,paper_id:id,page:9,source_text:'direction\u00adality',mode:'translate',result:'方向性',explanation:'',vocabulary:[],status:'complete',created_at:'2026-01-01T00:00:00Z',model:{provider:'synthetic',model:'fixture'}},0);
+    }
+    const first=await f.handle({action:'language_vocabulary_sync',id:request.id,offset:0,limit:10});
+    assert.equal(first.scanned,10);assert.equal(first.hasMore,true);assert.equal(first.next_offset,10);
+    const second=await f.handle({action:'language_vocabulary_sync',id:request.id,offset:first.next_offset,limit:10});assert.equal(second.hasMore,false);
+    const reopened=createLanguageLearning({...f.options,store:createLocalStateStore({library,home})});
+    const word=(await reopened({action:'vocabulary_list',query:'directionality'})).items[0];
+    assert.equal(word.meaning,'方向性');assert.equal(word.encounters_retained,20);
+    assert.ok(word.encounters.every(e=>e.paper_id===request.id&&e.page===9));assert.equal(f.calls.length,0);
+    await reopened({action:'language_vocabulary_sync',id:request.id});
+    assert.equal((await reopened({action:'vocabulary_list'})).items[0].revision,word.revision);
+    await assert.rejects(reopened({action:'language_vocabulary_sync',id:request.id,limit:21}),/分页/);
+  } finally {await rm(directory,{recursive:true,force:true});}
+});
+
+test('repair resumes after storage failure, preserves manual meanings and never resurrects deleted words',async()=>{
+  const f=fixture();f.answer=JSON.stringify({result:'方向性',explanation:'',vocabulary:[]});
+  await f.handle({...request,text:'direction\u00adality'});
+  const entry=[...f.store.records.values()].find(r=>r.key.startsWith('language.result:'));
+  delete entry.value.vocabulary_version;entry.value.vocabulary=[];
+  let word=(await f.handle({action:'vocabulary_list'})).items[0];
+  await f.handle({action:'vocabulary_update',id:word.id,expected_revision:word.revision,meaning:'人工释义',status:'mastered'});
+  f.store.beforePut=async key=>{if(key===entry.key)throw Error('synthetic disk failure');};
+  await assert.rejects(f.handle({action:'language_vocabulary_sync',id:request.id}),/disk failure/);
+  f.store.beforePut=null;await f.handle({action:'language_vocabulary_sync',id:request.id});
+  word=(await f.handle({action:'vocabulary_list'})).items[0];assert.equal(word.meaning,'人工释义');assert.equal(word.status,'mastered');assert.equal(word.encounters_retained,1);
+  await f.handle({action:'vocabulary_delete',id:word.id,expected_revision:word.revision});
+  delete f.store.records.get(entry.key).value.vocabulary_version;
+  await f.handle({action:'language_vocabulary_sync',id:request.id});assert.equal((await f.handle({action:'vocabulary_list'})).total,0);assert.equal(f.calls.length,1);
+});
