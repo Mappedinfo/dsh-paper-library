@@ -1,6 +1,6 @@
 ---
 name: paper-library-radar
-description: "Build a rapid source-backed research view inside Paper Library: define a topic, distinguish concepts, trace researchers and institutions, import evidence, and request a reviewable AI analysis."
+description: "Build a rapid source-backed research view inside Paper Library: define a topic, distinguish concepts, trace researchers and institutions, import evidence, request a reviewable AI analysis, and render local frequency, yearly publication, citation and geographic charts."
 ---
 # Integrated research view
 
@@ -38,3 +38,15 @@ These tools enable requested agent-driven workflows, not an autonomous schedule.
 ## Headless images
 
 Use `library_field_radar_render` for requested PNG/SVG research images from the saved topic. Pass topic ID, view, filters and pagination; rendering is local and does not call a model, fetch sources or require a browser. The receipt includes the exact local output path, evidence version, source IDs and coverage. Use the authorized attachment channel to send that existing file; never publish or claim delivery merely because rendering succeeded. Long text remains in the same private JSON sidecar. Reuse existing filters rather than silently expanding the corpus.
+
+
+## Charts and spatial evidence
+
+Use the existing 「领域研究 → 图表与地图」 and `library_field_radar_render`, not a separate site or app. Keep the selected topic revision and query/task/year filters. Choose the chart that answers the user's question:
+
+- `view:frequency`, `frequency_by:task|method|dataset`: document-level label counts. Multiple labels can exceed the paper count. Do not treat a missing label as a measured zero.
+- `view:publications`, `group_by:subtopic|task|research_group`: stacked annual counts. Use explicit subtopic or group records; do not infer a stable group from shared authors or institutions. Overlapping memberships use fractional 1/k weights so each paper totals one; explain fractional bars. Missing years/groups remain visible.
+- `view:citations`: only sourced, verified, directed citation edges. Never substitute shared keywords, authors, lineage relations or aggregate citation counts for edges.
+- `view:geography`: supplied coordinates/GeoJSON/spatial values only. If only study-area geometry exists, highlight that area and label it as study-area coverage, not observations. If only a place name is available, report missing geometry rather than invent coordinates, boundaries or density.
+
+Use `format:png|svg`. Inspect the returned `available`, `warnings`, `coverage` and source/version receipt before describing the chart. An unavailable-data figure is a useful gap report, not a completed citation network or empirical map. Existing timeline, concept, research-line and scholar views remain available. For executable CLI examples and input data conventions, read `docs/field-radar.md` in this plugin. Rendering and deterministic aggregation do not need an additional AI analysis request.
