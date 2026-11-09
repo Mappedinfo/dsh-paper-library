@@ -150,3 +150,8 @@ body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-
 #sidebar-search-toggle.active{color:var(--accent);background:var(--surface)}
 #reader-find{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 .pdf-search-row input{flex:0 1 260px}.pdf-search-row [role=status]{flex:1;min-width:60px;overflow-wrap:anywhere}.pdf-search-row [hidden]{display:none!important}
+
+#sidebar-search-row{flex-wrap:wrap}
+.annotation-search-options{display:flex;align-items:center;gap:4px;flex:none}
+.annotation-search-options[hidden]{display:none!important}
+.annotation-search-options select{font:inherit;font-size:12px;max-width:135px;padding:4px;border:1px solid var(--line);border-radius:5px;background:var(--paper);color:var(--ink)}

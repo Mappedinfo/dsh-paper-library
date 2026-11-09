@@ -468,6 +468,7 @@ function visibleAnnotationThreads() {
   const grouped=annotationThreads(state.annotations);
   return readerSearchUI?.filter(grouped)||grouped;
 }
+let pendingAnnotationSearchId=null;
 function renderAnnotations() {
   if(typeof annotationEditor!=='undefined'&&annotationEditor?.deferRender?.(renderAnnotations))return;
   const restoreEditorFocus = typeof annotationEditor!=='undefined'?annotationEditor?.beforeRender():null;
@@ -537,6 +538,11 @@ function renderAnnotations() {
   $('annotation-list').replaceChildren(fragment);
   if(typeof annotationEditor!=='undefined')annotationEditor?.decorate();restoreEditorFocus?.();
   companionUI?.decorate();paperChatUI?.decorateAnnotations?.();linkedHandwritingUI?.sync();linkedHandwritingUI?.afterRender();
+  if(pendingAnnotationSearchId){
+    const target=[...$('annotation-list').querySelectorAll('[data-annotation-id]')].find(node=>node.dataset.annotationId===pendingAnnotationSearchId);
+    if(target){for(let parent=target.parentElement;parent&&parent!==$('annotation-list');parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;target.scrollIntoView({block:'start',inline:'nearest'});target.classList.add('is-linked');setTimeout(()=>target.classList.remove('is-linked'),2400);}
+    pendingAnnotationSearchId=null;
+  }
 }
 /** 自动着色：拖选即按当前颜色写成自然批注（不弹对话框）。
  * Questioning stays available afterwards through the rail and the selection tools. */
@@ -1555,7 +1561,8 @@ documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPan
   annotated:async(id,page)=>{if(state.active?.id!==id)return;await loadAnnotations(id);if(state.active?.id===id)await pdfReader?.refresh(page,{defer:true});},
 });
 readerSearchUI=window.PaperReaderSearch?.create({api,getPaper:()=>state.active,reader:()=>pdfReader,navigate:()=>switchTab('reader'),getElements:()=>documentElementsUI,
-  onAnnotationSearch:()=>{state.noteOffset=0;renderAnnotations();},
+  onAnnotationSearch:()=>{pendingAnnotationSearchId=null;state.noteOffset=0;renderAnnotations();},
+  onAnnotationNavigate:hit=>{pendingAnnotationSearchId=hit.id;state.noteOffset=hit.offset;renderAnnotations();},
   onLibrarySearch:query=>{$('search').value=query;$('search').dispatchEvent(new Event('input',{bubbles:true}));},
 });
 inkQueue=window.PaperInkQueueClient?.create({api,persistence,

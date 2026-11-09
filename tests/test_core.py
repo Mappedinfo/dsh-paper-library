@@ -804,3 +804,19 @@ def test_conversation_reply_links_external_annotation_without_native_name(tmp_pa
     parent = next(a for a in request(tmp_path, 'annotations', id=item['id'])['annotations'] if a['id'].startswith('external-'))
     saved = request(tmp_path, 'save_conversation_feedback', id=item['id'], text='External source response', model='synthetic/model', annotation_ids=[parent['id']], source_session_id='external-source', source_message_id='1')
     assert saved['reply_to'] == parent['id']
+
+
+def test_annotation_search_exposes_external_subject_without_changing_pdf(tmp_path):
+    original = make_pdf(tmp_path / "reading-label.pdf")
+    with fitz.open(original) as doc:
+        page = doc[0]
+        note = next(page.annots())
+        note.set_info(subject="AI 自主阅读", title="Synthetic reader")
+        note.update()
+        doc.saveIncr()
+    before = original.read_bytes()
+    item = request(tmp_path, "import", path=str(original))["items"][0]
+    notes = request(tmp_path, "annotations", id=item["id"])["annotations"]
+    assert notes[0]["subject"] == "AI 自主阅读"
+    assert notes[0]["author"] == "Synthetic reader"
+    assert original.read_bytes() == before

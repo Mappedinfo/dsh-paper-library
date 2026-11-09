@@ -2,26 +2,66 @@
 // 搜索按需启动；PDF 按页读取，侧栏复用各目录的检索，不加载整库。
 window.PaperReaderSearch = (() => {
   const normalize = value => String(value || '').normalize('NFKC').replace(/\u00ad/g,'').replace(/(\w)-\s*\n\s*(?=\w)/g,'$1').replace(/\s+/g,' ').toLocaleLowerCase().trim();
-  function filterThreads(group, query) {
-    const needle=normalize(query);if(!needle)return group;
-    const matches=note=>normalize([note.text,note.comment,note.content,note.handwriting?.transcript,note.linked_ink?.transcript].filter(Boolean).join(' ')).includes(needle);
-    const related=note=>matches(note)||(group.replies.get(note.id)||[]).some(matches);
-    return {...group,notes:group.notes.filter(note=>related(note)||(group.remarks?.get(note.id)||[]).some(related)),unlinked:group.unlinked.filter(matches)};
+  // 来源筛选只读取明确的标记；正文提到 AI 不改变批注归属。
+  function annotationSource(note) {
+    if(note.source_kind==='annotation-translation')return 'translation';
+    if(note.source_kind==='annotation-caption')return 'caption';
+    const declaration=normalize([note.author,note.subject].filter(Boolean).join(' '));
+    if(['autonomous-reading','ai-reading','paper-analysis'].includes(note.source_kind)||/(?:^|[\s·:：_-])ai[ ·:：_-]*(?:自主阅读|自动阅读|全文阅读|阅读批注|阅读|autonomous reading|close reading)(?=$|[\s·:：_-])/i.test(declaration))return 'reading';
+    if(note.kind==='ai-feedback'||note.type==='ai_feedback'||note.ai_generated===true)return 'reply';
+    return 'other';
   }
-  function create({api,getPaper,reader,navigate,getElements,onAnnotationSearch,onLibrarySearch}) {
+  function filterThreads(group, query, {source='all',match='all'}={}) {
+    const terms=[...new Set(normalize(query).split(/[\s,，;；]+/).filter(Boolean))];
+    if(!terms.length&&source==='all')return group;
+    const text=note=>[note.text,note.comment,note.content,note.author,note.subject,note.model,note.handwriting?.transcript,note.linked_ink?.transcript].filter(Boolean).join(' ');
+    const matches=entries=>{
+      const selected=source==='all'?entries:entries.filter(note=>annotationSource(note)===source);
+      if(!selected.length)return false;
+      const haystack=normalize(selected.map(text).join(' '));
+      return !terms.length||(match==='any'?terms.some(term=>haystack.includes(term)):terms.every(term=>haystack.includes(term)));
+    };
+    const related=note=>[note,...(group.replies.get(note.id)||[])];
+    return {...group,notes:group.notes.filter(note=>matches([...related(note),...(group.remarks?.get(note.id)||[]).flatMap(related)])),unlinked:group.unlinked.filter(note=>matches([note]))};
+  }
+  function create({api,getPaper,reader,navigate,getElements,onAnnotationSearch,onAnnotationNavigate,onLibrarySearch}) {
     const $=id=>document.getElementById(id), make=(tag,text)=>{const e=document.createElement(tag);if(text)e.textContent=text;return e;};
     const button=(text,label,fn)=>{const e=make('button',text);e.type='button';e.className='button subtle';e.setAttribute('aria-label',label);e.title=label;e.addEventListener('click',fn);return e;};
     const magnify=()=>{const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('width','16');svg.setAttribute('height','16');svg.setAttribute('aria-hidden','true');svg.innerHTML='<circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15 15 6 6" stroke="currentColor" stroke-width="2"/>';return svg;};
     let paperId=null,scope='library',expanded=false,disposed=false,ticket=0,busy=false,hits=[],index=-1,cursor=null,scanned=0,total=0,noText=0,searchQuery='';
+    let annotationSourceFilter='all',annotationMatch='all',annotationMatches=[],annotationIndex=-1;
     const queries=new Map(),labels={library:'文献库',annotations:'批注', 'elements-formula':'公式','elements-figure':'图片','elements-table':'表格','elements-algorithm':'算法'};
     const rail=document.querySelector('.shared-reading-sidebar'),header=rail?.querySelector('.reading-sidebar-header');
     const scopeToggle=button('','搜索当前侧栏',()=>{expanded=!expanded;sync();if(expanded)scopeInput.focus();});scopeToggle.id='sidebar-search-toggle';scopeToggle.append(magnify());scopeToggle.setAttribute('aria-controls','sidebar-search-row');
     const scopeForm=make('form');scopeForm.id='sidebar-search-row';scopeForm.className='reader-search-row';scopeForm.hidden=true;
     const scopeInput=make('input');scopeInput.type='search';scopeInput.maxLength=200;
     const scopeSubmit=make('button','搜索');scopeSubmit.type='submit';scopeSubmit.className='button subtle';
-    const clearScope=button('×','清除当前侧栏搜索',()=>{scopeInput.value='';submitScope();scopeInput.focus();});scopeForm.append(scopeInput,scopeSubmit,clearScope);
+    const clearScope=button('×','清除当前侧栏搜索',()=>{scopeInput.value='';if(scope==='annotations'){annotationSourceFilter='all';annotationMatch='all';}submitScope();scopeInput.focus();});scopeForm.append(scopeInput,scopeSubmit,clearScope);
+    const annotationOptions=make('span');annotationOptions.className='annotation-search-options';
+    const sourceSelect=make('select');sourceSelect.id='annotation-search-source';sourceSelect.setAttribute('aria-label','批注来源');
+    for(const [value,label] of [['all','全部批注'],['reading','AI 自主阅读'],['reply','AI 回复'],['translation','AI 翻译'],['caption','AI 图像说明']]){const option=make('option',label);option.value=value;sourceSelect.append(option);}
+    sourceSelect.title='AI 自主阅读按来源、作者或主题中的明确 AI 阅读标记筛选；未标记的旧批注可按关键词搜索。';
+    const matchSelect=make('select');matchSelect.id='annotation-search-match';matchSelect.setAttribute('aria-label','多关键词匹配方式');
+    for(const [value,label] of [['all','全部关键词'],['any','任一关键词']]){const option=make('option',label);option.value=value;matchSelect.append(option);}
+    matchSelect.title='多个关键词用空格、逗号或分号分隔';annotationOptions.append(sourceSelect,matchSelect);scopeForm.append(annotationOptions);
+    sourceSelect.addEventListener('change',()=>{annotationSourceFilter=sourceSelect.value;submitScope();});
+    matchSelect.addEventListener('change',()=>{annotationMatch=matchSelect.value;submitScope();});
+    const annotationNav=make('span');annotationNav.className='annotation-search-options';
+    const annotationPrevious=button('↑','上一个搜索批注',()=>moveAnnotation(-1)),annotationNext=button('↓','下一个搜索批注',()=>moveAnnotation(1));
+    const annotationCount=make('span');annotationCount.className='small';annotationCount.setAttribute('role','status');
+    annotationNav.append(annotationPrevious,annotationCount,annotationNext);scopeForm.append(annotationNav);
+    function updateAnnotationNav(){
+      annotationNav.hidden=scope!=='annotations'||(!queries.get('annotations')&&annotationSourceFilter==='all');
+      annotationPrevious.disabled=annotationNext.disabled=!annotationMatches.length;
+      annotationCount.textContent=`${annotationIndex<0?0:annotationIndex+1} / ${annotationMatches.length} 条`;
+    }
+    function moveAnnotation(delta){
+      if(!annotationMatches.length)return;
+      annotationIndex=annotationIndex<0?(delta>0?0:annotationMatches.length-1):(annotationIndex+delta+annotationMatches.length)%annotationMatches.length;
+      updateAnnotationNav();onAnnotationNavigate?.(annotationMatches[annotationIndex]);
+    }
     if(header){header.insertBefore(scopeToggle,$('reading-sidebar-side'));header.after(scopeForm);}
-    function submitScope(){queries.set(scope,scopeInput.value.trim());if(scope==='annotations')onAnnotationSearch(scopeInput.value.trim());else if(scope==='library')onLibrarySearch(scopeInput.value.trim());else getElements()?.search(scope.replace('elements-',''),scopeInput.value.trim());}
+    function submitScope(){annotationIndex=-1;annotationMatches=[];queries.set(scope,scopeInput.value.trim());if(scope==='annotations')onAnnotationSearch(scopeInput.value.trim());else if(scope==='library')onLibrarySearch(scopeInput.value.trim());else getElements()?.search(scope.replace('elements-',''),scopeInput.value.trim());sync();}
     scopeForm.addEventListener('submit',event=>{event.preventDefault();submitScope();});
     scopeInput.addEventListener('input',()=>{if(!scopeInput.value)submitScope();});
     scopeInput.addEventListener('keydown',event=>{if(event.key==='Escape'){expanded=false;sync();scopeToggle.focus();}});
@@ -59,13 +99,14 @@ window.PaperReaderSearch = (() => {
     input.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();close.click();}else if(event.key==='Enter'&&searchQuery===input.value.trim()&&hits.length){event.preventDefault();move(event.shiftKey?-1:1);}});
     function showPDF(){sync();if(pdfToggle.disabled)return;pdfForm.hidden=false;document.body.classList.add('pdf-search-open');pdfToggle.setAttribute('aria-expanded','true');input.focus();input.select();}
     const keydown=event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='f'&&!event.altKey&&!event.target.closest('input,textarea,[contenteditable=true]')&&!document.querySelector('dialog[open]')){sync();if(!pdfToggle.disabled){event.preventDefault();showPDF();}}};document.addEventListener('keydown',keydown);
-    function sync(){const paper=getPaper(),id=paper?.id||null;if(id!==paperId){paperId=id;++ticket;busy=false;hits=[];index=-1;cursor=null;input.value='';pdfForm.hidden=true;queries.clear();scopeInput.value='';onAnnotationSearch('');update();}
+    function sync(){const paper=getPaper(),id=paper?.id||null;if(id!==paperId){paperId=id;++ticket;busy=false;hits=[];index=-1;cursor=null;input.value='';pdfForm.hidden=true;queries.clear();annotationSourceFilter='all';annotationMatch='all';annotationMatches=[];annotationIndex=-1;scopeInput.value='';onAnnotationSearch('');update();}
       pdfToggle.disabled=!paper?.pdf||Boolean($('toolbar-reader')?.hidden);if(pdfToggle.disabled&&!pdfForm.hidden){++ticket;busy=false;pdfForm.hidden=true;}document.body.classList.toggle('pdf-search-open',!pdfForm.hidden);pdfToggle.setAttribute('aria-expanded',String(!pdfForm.hidden));
       const nextScope=rail?.dataset.sidebarPanel||'library';if(nextScope!==scope){scope=nextScope;scopeInput.value=queries.get(scope)||'';}
-      const supported=Boolean(labels[scope]);scopeToggle.hidden=!supported;scopeToggle.setAttribute('aria-expanded',String(expanded));scopeToggle.classList.toggle('active',Boolean(queries.get(scope)));scopeForm.hidden=!expanded||!supported||Boolean(header?.hidden);
-      scopeInput.placeholder=`搜索${labels[scope]||''}${scope==='annotations'?'原文、备注与回复':''}`;scopeInput.setAttribute('aria-label',scopeInput.placeholder);
+      const supported=Boolean(labels[scope]);scopeToggle.hidden=!supported;scopeToggle.setAttribute('aria-expanded',String(expanded));scopeToggle.classList.toggle('active',Boolean(queries.get(scope))||(scope==='annotations'&&annotationSourceFilter!=='all'));scopeForm.hidden=!expanded||!supported||Boolean(header?.hidden);
+      updateAnnotationNav();annotationOptions.hidden=scope!=='annotations';sourceSelect.value=annotationSourceFilter;matchSelect.value=annotationMatch;
+      scopeInput.placeholder=`搜索${labels[scope]||''}${scope==='annotations'?'原文、备注与回复；空格分隔关键词':''}`;scopeInput.setAttribute('aria-label',scopeInput.placeholder);
     }
-    sync();return {sync,clearAnnotationFilter(){queries.delete('annotations');if(scope==='annotations')scopeInput.value='';sync();},filter:group=>filterThreads(group,queries.get('annotations')),dispose(){disposed=true;++ticket;document.removeEventListener('keydown',keydown);document.body.classList.remove('pdf-search-open');scopeToggle.remove();scopeForm.remove();pdfToggle.remove();pdfForm.remove();}};
+    sync();return {sync,clearAnnotationFilter(){queries.delete('annotations');annotationSourceFilter='all';annotationMatch='all';if(scope==='annotations')scopeInput.value='';sync();},filter:group=>{const result=filterThreads(group,queries.get('annotations'),{source:annotationSourceFilter,match:annotationMatch});const selected=annotationMatches[annotationIndex]?.id;annotationMatches=[...result.notes.map((note,index)=>({id:note.id,offset:Math.floor(index/40)*40})),...result.unlinked.map(note=>({id:note.id,offset:0}))];annotationIndex=selected?annotationMatches.findIndex(note=>note.id===selected):-1;updateAnnotationNav();return result;},dispose(){disposed=true;++ticket;document.removeEventListener('keydown',keydown);document.body.classList.remove('pdf-search-open');scopeToggle.remove();scopeForm.remove();pdfToggle.remove();pdfForm.remove();}};
   }
   return {create,filterThreads};
 })();

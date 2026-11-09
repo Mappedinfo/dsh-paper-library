@@ -54,3 +54,54 @@ test('search errors stay visible and retry uses the failed page',async t=>{
 });
 
 test('explicit page matching clears only the annotation filter and its visible field',async t=>{const f=fixture(t,async()=>({}));f.get('#sidebar-search-toggle').click();f.get('#sidebar-search-row input').value='word';f.submit('#sidebar-search-row');const group={notes:[{id:'a',text:'different'}],replies:new Map(),unlinked:[]};assert.equal(f.ui.filter(group).notes.length,0);f.ui.clearAnnotationFilter();assert.equal(f.get('#sidebar-search-row input').value,'');assert.equal(f.ui.filter(group).notes.length,1);});
+
+test('AI reading source and multiple keywords filter marked notes without guessing from prose',t=>{
+ const f=fixture(t,async()=>({})),filter=f.w.PaperReaderSearch.filterThreads;
+ const human={id:'human',comment:'AI 自主阅读 attention loss'},reading={id:'reading',author:'AI 自主阅读',text:'Attention',comment:'Loss definition'},subject={id:'subject',author:'Reader',subject:'AI close reading',comment:'direction\u00adality'},structured={id:'structured',source_kind:'autonomous-reading',comment:'other'};
+ const group={notes:[human,reading,subject,structured],replies:new Map(),unlinked:[]};
+ assert.deepEqual(filter(group,'attention，loss',{source:'reading'}).notes,[reading]);
+ assert.deepEqual(filter(group,'directionality',{source:'reading'}).notes,[subject]);
+ assert.deepEqual(filter(group,'',{source:'reading'}).notes,[reading,subject,structured]);
+ assert.equal(filter(group,'attention absent',{source:'reading'}).notes.length,0);
+ assert.deepEqual(filter(group,'attention;absent',{source:'reading',match:'any'}).notes,[reading]);
+});
+test('source filter searches only matching AI content and retains whole parent discussion',t=>{
+ const f=fixture(t,async()=>({})),filter=f.w.PaperReaderSearch.filterThreads;
+ const parent={id:'a',comment:'human-only'},remark={id:'r',comment:'followup'},reply={id:'reply',kind:'ai-feedback',comment:'mechanism'},translation={kind:'ai-feedback',source_kind:'annotation-translation',comment:'方向性'};
+ const group={notes:[parent],remarks:new Map([['a',[remark]]]),replies:new Map([['a',[translation]],['r',[reply]]]),unlinked:[{kind:'ai-feedback',source_kind:'autonomous-reading',comment:'independent'}]};
+ const result=filter(group,'mechanism',{source:'reply'});assert.deepEqual(result.notes,[parent]);assert.equal(result.replies,group.replies);assert.equal(result.remarks,group.remarks);
+ assert.equal(filter(group,'human-only',{source:'reply'}).notes.length,0);
+ assert.equal(filter(group,'方向性',{source:'reply'}).notes.length,0);
+ assert.deepEqual(filter(group,'方向性',{source:'translation'}).notes,[parent]);
+ assert.equal(filter(group,'independent',{source:'reading'}).unlinked.length,1);
+ assert.deepEqual(filter(group,'human-only mechanism').notes,[parent]);
+});
+test('source controls reset pagination callback, survive scope switches and clear with paper or page matching',t=>{
+ const f=fixture(t,async()=>({}));f.get('#sidebar-search-toggle').click();
+ const source=f.get('#annotation-search-source'),mode=f.get('#annotation-search-match');
+ source.value='reading';source.dispatchEvent(new f.w.Event('change'));mode.value='any';mode.dispatchEvent(new f.w.Event('change'));
+ assert.deepEqual(f.filters.at(-1),['annotations','']);assert.equal(f.get('#sidebar-search-toggle').classList.contains('active'),true);
+ const group={notes:[{id:'a',author:'AI 自主阅读',comment:'alpha'},{id:'b',comment:'alpha'}],replies:new Map(),unlinked:[]};
+ f.get('#sidebar-search-row input').value='alpha beta';f.submit('#sidebar-search-row');assert.equal(f.ui.filter(group).notes.length,1);
+ f.setScope('elements-formula');assert.equal(source.parentElement.hidden,true);f.setScope('annotations');assert.equal(source.value,'reading');assert.equal(mode.value,'any');
+ f.ui.clearAnnotationFilter();assert.equal(source.value,'all');assert.equal(f.ui.filter(group).notes.length,2);
+ source.value='reading';source.dispatchEvent(new f.w.Event('change'));f.get('[aria-label="清除当前侧栏搜索"]').click();assert.equal(source.value,'all');
+ source.value='reading';source.dispatchEvent(new f.w.Event('change'));f.setPaper({id:'second',pdf:true});assert.equal(source.value,'all');assert.equal(mode.value,'all');assert.equal(f.calls.length,0);
+});
+
+test('annotation result navigation crosses pages, wraps and resets after edits or paper changes',t=>{
+ const f=fixture(t,async()=>({})),moves=[];
+ // Use a fresh control with a navigation callback; no PDF requests are needed.
+ f.ui.dispose();
+ const ui=f.w.PaperReaderSearch.create({api:async()=>{throw Error('unexpected API');},getPaper:()=>({id:'nav',pdf:true}),reader:()=>null,navigate:()=>{},getElements:()=>null,onAnnotationSearch:()=>{},onAnnotationNavigate:hit=>moves.push(hit),onLibrarySearch:()=>{}});
+ f.get('#sidebar-search-toggle').click();f.get('#sidebar-search-row input').value='reading';f.submit('#sidebar-search-row');
+ const group={notes:Array.from({length:43},(_,i)=>({id:`n${i}`,text:'reading'})),replies:new Map(),unlinked:[{id:'orphan',text:'reading'}]};
+ ui.filter(group);const next=f.get('[aria-label="下一个搜索批注"]'),prev=f.get('[aria-label="上一个搜索批注"]');
+ assert.match(f.get('#sidebar-search-row [role=status]').textContent,/0 \/ 44/);
+ for(let i=0;i<41;i++){next.click();ui.filter(group);}
+ assert.equal(moves.at(-1).id,'n40');assert.equal(moves.at(-1).offset,40);assert.match(f.get('#sidebar-search-row [role=status]').textContent,/41 \/ 44/);
+ next.click();next.click();next.click();assert.equal(moves.at(-1).id,'orphan');next.click();assert.equal(moves.at(-1).id,'n0');prev.click();assert.equal(moves.at(-1).id,'orphan');
+ ui.filter({...group,unlinked:[]});assert.match(f.get('#sidebar-search-row [role=status]').textContent,/0 \/ 43/);
+ f.get('#sidebar-search-row input').value='missing';f.submit('#sidebar-search-row');ui.filter(group);assert.equal(next.disabled,true);assert.equal(prev.disabled,true);
+ f.get('[aria-label="清除当前侧栏搜索"]').click();ui.filter(group);assert.equal(next.parentElement.hidden,true);assert.equal(f.revealed.length,0);ui.dispose();
+});
