@@ -2300,8 +2300,10 @@ dialog .small {
 /* 批注备注与 PDF 并排，每个来源独立保存与提问。 */
 .annotation-inline-editor { margin: 10px 0; }
 .annotation-inline-editor .field { gap: 5px; font-size: 12px; }
+.annotation-inline-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 5px; }
+.annotation-inline-heading .field { margin: 0; flex: none; }
 .annotation-inline-input { width: 100%; min-height: 78px; resize: vertical; font: inherit; line-height: 1.55; }
-.annotation-inline-status { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.annotation-inline-status { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin-left: auto; }
 .annotation-inline-status .error { overflow-wrap: anywhere; }
 .annotation-pending { border-style: dashed; }
 .annotation-inline-status { flex-wrap: wrap; }

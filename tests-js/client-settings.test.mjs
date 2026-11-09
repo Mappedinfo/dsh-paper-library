@@ -11,6 +11,16 @@ const react = {
   useState: initial => [initial, () => {}],
   useEffect: callback => effects.push(callback),
 }
+
+test('native annotation size control persists numeric values and rejects out of range sizes',async()=>{
+  const fixture=scopeFixture(),model=createSettingsCardModel(fixture.scope);
+  const select=walk(PaperLibrarySettingsCard({model,t:key=>key})).find(node=>node.props.id==='paper-library-setting-annotation_font_size');
+  assert.equal(select.children.length,13);
+  select.props.onChange({currentTarget:{value:'18'}});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(model.getSnapshot().scope.value.annotation_font_size,18);
+  for(const value of [11,25,13.5,'20'])assert.equal(await model.set('annotation_font_size',value),false);
+  model.dispose();
+});
 new Function('require', 'module', 'exports', compiled.outputFiles[0].text)(name => { assert.equal(name, 'react'); return react }, module, module.exports)
 const { SETTINGS_DEFAULTS, SETTINGS_NAMESPACE, createSettingsCardModel, createHttpSettingsScope, createLanguageSettingsModel, PaperLibrarySettingsCard, PaperLibraryLanguageSettings, bindSettingsInvalidation, registerPaperLibrarySettings } = module.exports
 
@@ -117,7 +127,7 @@ test('native card exposes all labelled controls, quota descriptions and honest p
   const rendered = PaperLibrarySettingsCard({ model, t: key => key })
   const nodes = walk(rendered)
   const controls = nodes.filter(node => ['input', 'select'].includes(node.type))
-  assert.equal(controls.length, 6)
+  assert.equal(controls.length, 7)
   for (const control of controls) {
     assert.equal(control.props.disabled, true)
     assert.ok(nodes.some(node => node.type === 'label' && node.props.htmlFor === control.props.id))

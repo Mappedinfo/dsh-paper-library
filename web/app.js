@@ -493,6 +493,8 @@ function renderAnnotations() {
   }
   for (const note of notes.slice(state.noteOffset, state.noteOffset + 40)) {
     const card = el('article', 'annotation-card'); card.dataset.annotationId = note.id; card.dataset.paperId = state.active?.id || '';
+    const stroke=note.color?.stroke;
+    if(Array.isArray(stroke)&&stroke.length===3&&stroke.every(Number.isFinite))card.style.setProperty('--annotation-card-color',`rgb(${stroke.map(value=>Math.round(Math.max(0,Math.min(1,value))*255)).join(',')})`);
     if(note.version)card.dataset.annotationVersion=note.version;
     card.dataset.companionText=String([note.text,note.comment,note.content,note.handwriting?.transcript,note.linked_ink?.transcript].some(value=>typeof value==='string'&&value.trim()));
     const meta = el('div', 'annotation-meta'); const pageLink = el('button', 'page-link', `第 ${note.page} 页`); pageLink.dataset.noteAction = 'page';
@@ -1612,6 +1614,8 @@ settingsUI = window.PaperLibrarySettings?.create({onLanguageSettings:()=>languag
   preferences={...preferences,...value};
   documentElementsUI?.applyResources(descriptor.resource_policy);
   window.PaperLibraryTheme?.setPalette(value.ui_palette);
+  const annotationSize=value.annotation_font_size;
+  document.documentElement.style.setProperty('--annotation-font-size',`${Number.isInteger(annotationSize)&&annotationSize>=12&&annotationSize<=24?annotationSize:14}px`);
   analysisUI?.applyPreferences(value,descriptor.writable);
   paperChatUI?.applyPreferences(value,descriptor.writable);
   companionUI?.applyPreferences(value,descriptor.writable);

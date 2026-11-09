@@ -151,3 +151,11 @@ body.pdf-search-open .topbar{grid-template-rows:28px 28px 32px 38px 19px}
 body.pdf-search-open.handwriting-tools-visible{--workbench-height:183px}
 body.pdf-search-open.handwriting-tools-visible .topbar{grid-template-rows:28px 28px 32px 38px 52px}
 #pdf-search-row{grid-column:1/-1;box-sizing:border-box;height:38px}
+
+/* 顶部颜色与 PDF 批注对应；字号仅调整阅读内容，不放大操作栏。 */
+#annotation-list > .annotation-card{border-top:4px solid var(--annotation-card-color,var(--accent,#687382))}
+#annotation-list .annotation-quote,
+#annotation-list .annotation-comment,
+#annotation-list .annotation-inline-input,
+#annotation-list .annotation-reply-body,
+#annotation-comment{font-size:var(--annotation-font-size,14px);line-height:1.6}

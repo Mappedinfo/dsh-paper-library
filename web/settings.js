@@ -43,6 +43,9 @@ window.PaperLibrarySettings = (() => {
     resourceReset.addEventListener('click',async()=>{await refresh();if(snapshot){resourceDraft=null;resourceDraftRevision=null;renderResources();}});
     resourceApply.addEventListener('click',async()=>{const profile=resourceProfile.value,patch={resource_profile:profile};if(profile==='custom')for(const [key,input]of resourceInputs)patch[key]=Number(input.value);if(await save(patch,{expectedRevision:resourceDraftRevision??snapshot.revision,resource:true})){resourceDraft=null;resourceDraftRevision=null;renderResources();}});
     const inputs=new Map();
+    const fontRow=make('label','settings-side'),fontSize=make('select');fontSize.id='setting-annotation_font_size';fontSize.setAttribute('aria-label','批注字号');
+    for(let size=12;size<=24;size++){const option=make('option','',`${size} px${size===14?'（默认）':''}`);option.value=String(size);fontSize.append(option);}
+    fontRow.append(make('span','','批注字号'),fontSize);controls.append(fontRow,make('p','small','用于批注原文、备注与 AI 回复。修改后自动保存，下次打开仍生效。'));inputs.set('annotation_font_size',fontSize);fontSize.addEventListener('change',()=>void save({annotation_font_size:Number(fontSize.value)}));
     for(const [key,label,help] of fields){const row=make('label','settings-option'),input=make('input');input.type='checkbox';input.id=`setting-${key}`;const copy=make('span');copy.append(make('strong','',label),make('small','',help));row.append(input,copy);controls.append(row);inputs.set(key,input);input.addEventListener('change',()=>void save({[key]:input.checked}));}
     const sideRow=make('label','settings-side'),side=make('select');side.id='setting-reading-panel-side';side.setAttribute('aria-label','阅读侧栏位置');for(const [value,label]of[['left','左侧'],['right','右侧']]){const option=make('option','',label);option.value=value;side.append(option);}sideRow.append(make('span','','阅读侧栏'),side);controls.append(sideRow);inputs.set('reading-panel-side',side);side.addEventListener('change',()=>void save({'reading-panel-side':side.value}));
     const syncRow=make('label','settings-option'),syncInput=make('input');syncInput.type='text';syncInput.id='setting-sync_config';syncInput.placeholder='/absolute/path/to/sync-service/config.json';syncInput.autocomplete='off';syncInput.spellcheck=false;
@@ -53,7 +56,7 @@ window.PaperLibrarySettings = (() => {
     const extraCopy=make('span');extraCopy.append(make('strong','','额外外部文献源'),make('small','','JSON 数组，每项 {id, root}；根目录写绝对路径。扫描只建符号链接，不改动源目录，第一次写批注时才复制进来。'));
     extraRow.append(extraInput,extraCopy);controls.append(extraRow);inputs.set('external_sources',extraInput);
     extraInput.addEventListener('change',()=>void save({external_sources:extraInput.value.trim()}));
-    const storage=make('details','settings-storage'),summary=make('summary','','模型、外观与存储');storage.append(summary,make('p','','论文对话使用各自的 DSH 模型；语言工具默认跟随 DSH 默认模型，也可单独设置。明暗模式与字号跟随 DSH，界面配色可在上方选择。'));
+    const storage=make('details','settings-storage'),summary=make('summary','','模型、外观与存储');storage.append(summary,make('p','','论文对话使用各自的 DSH 模型；语言工具默认跟随 DSH 默认模型，也可单独设置。明暗模式跟随 DSH；界面配色与批注字号可在上方调整。'));
     const languageSettings=make('button','button subtle','语言模型与提示词');languageSettings.id='settings-language';languageSettings.type='button';languageSettings.addEventListener('click',()=>{dialog.close();onLanguageSettings?.();});storage.append(languageSettings);
     const path=make('p','settings-path');storage.append(path,make('p','','文献、PDF、草稿和设置均保存在主机磁盘，不写入浏览器 localStorage。更换资料库目录需要修改部署配置，已有数据不会自动搬迁。'));
     const maintenance=make('section','settings-maintenance');maintenance.setAttribute('aria-label','导出与维护');
@@ -68,7 +71,7 @@ window.PaperLibrarySettings = (() => {
       const shown={...snapshot?.value,...pendingPatch};
       paletteControls.disabled=busy||!snapshot?.writable;
       for(const [value,{input,row}]of paletteInputs){input.checked=value===(shown.ui_palette||'jade');row.classList.toggle('is-selected',input.checked);}
-      for(const[key,input]of inputs){if(input.type==='text'&&document.activeElement===input)continue;if(input.type==='checkbox')input.checked=shown[key]===true;else if(input.tagName==='SELECT')input.value=shown[key]||'left';else input.value=shown[key]??'';}
+      for(const[key,input]of inputs){if(input.type==='text'&&document.activeElement===input)continue;if(input.type==='checkbox')input.checked=shown[key]===true;else if(input.tagName==='SELECT'||input===fontSize)input.value=String(shown[key]??(key==='annotation_font_size'?14:'left'));else input.value=shown[key]??'';}
       path.textContent=`资料库：${getLibrary()||'正在读取…'}`;
       description.textContent=snapshot?.backend==='dsh'&&snapshot.available===false?'设置由 DSH 管理。请在 DSH 的 Paper Library 面板或「设置 → Paper Library」中修改。':snapshot?.backend==='local'?'独立运行：设置保存在本机。安装到 DSH 后，插件设置会接入 DSH 的统一设置。':'DSH 中的入口：设置 → Paper Library（也保留插件配置入口）。两个入口共享同一份主机设置。';
     }

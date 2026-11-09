@@ -26,6 +26,8 @@ test('rectangle release creates a native note automatically without a modal and 
  const f=fixture(t);assert.equal(await f.editor.create('square',{page:8,selection:{page:8,rects:[[1,2,30,40]]},color:'#112233',width:4}),true);
  const create=f.calls.find(c=>c.action==='annotate');assert.equal(create.type,'square');assert.equal(create.comment,'');assert.equal(create.companion_skip,true);assert.equal(create.width,4);
  assert.match(create.annotation_id,/^[a-f0-9-]{36}$/);assert.equal(f.w.document.querySelectorAll('textarea').length,1);assert.equal(f.w.document.querySelectorAll('dialog').length,0);
+ const input=f.w.document.querySelector('textarea'),heading=f.w.document.querySelector('.annotation-inline-heading');
+ assert.equal(heading.querySelector('label').control,input);assert.equal(heading.querySelector('[role="status"]').textContent,'已保存');
  assert.equal(f.calls.some(c=>c.action==='companion_ask'),false);assert.equal(f.saved.at(-1).value.drafts.length,0);
 });
 test('same passage supports separate notes, independent inputs and one selected ask with the latest saved version',async t=>{

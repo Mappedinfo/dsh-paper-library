@@ -11,6 +11,17 @@ import { createPaperLibrarySettings, createPaperLibrarySettingsSchema, PAPER_LIB
 
 const NS = 'paper-library', marker = 'settings.migration:paper-library', backup = 'settings.backup:paper-library';
 const code = expected => error => error.code === expected;
+
+for (const native of [true,false]) test(`annotation font size persists across service reload (${native?'DSH':'standalone'})`,async t=>{
+  const f=await fixture(t,{native}),initial=await f.service.get();
+  assert.equal(initial.value.annotation_font_size,14);
+  const saved=await f.service.update({annotation_font_size:20},initial.revision);
+  for(const invalid of [11,25,14.5,'18'])assert.throws(()=>f.service.update({annotation_font_size:invalid},saved.revision),code('SETTINGS_INVALID'));
+  f.service.dispose();
+  const reopened=createPaperLibrarySettings({store:f.store,settings:f.settings,schema:{},watch:f.settings&&(fn=>f.settings.watch(fn))});
+  t.after(()=>reopened.dispose());await reopened.ready;
+  assert.equal((await reopened.get()).value.annotation_font_size,20);
+});
 function host({ user = {}, writable = true } = {}) {
   let revision = 0;
   const observers = new Set(), updates = [];
@@ -68,7 +79,7 @@ test('migration respects explicit native false, normalizes legacy strings and re
   const f = await fixture(t, { legacy, user: { auto_analysis: false, future: 7 } });
   const view = await f.service.get();
   assert.equal(view.backend, 'dsh'); assert.equal(view.writable, true);
-  assert.deepEqual(view.value, { ...RESOURCE_DEFAULTS, auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', ui_palette: 'jade', sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_accent: 'system', latex_path_font: 'pixel', latex_split: 50, latex_sync_folder: true });
+  assert.deepEqual(view.value, { ...RESOURCE_DEFAULTS, auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', ui_palette: 'jade', annotation_font_size: 14, sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_accent: 'system', latex_path_font: 'pixel', latex_split: 50, latex_sync_folder: true });
   assert.deepEqual((await f.store.get('preferences')).value, legacy);
   assert.deepEqual((await f.store.get(backup)).value, legacy);
   assert.equal(f.settings.raw().future, 7);

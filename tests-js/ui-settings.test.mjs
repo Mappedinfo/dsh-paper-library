@@ -7,6 +7,16 @@ import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../web/settings.js', import.meta.url), 'utf8');
 const analysisSource = await readFile(new URL('../web/paper-analysis.js', import.meta.url), 'utf8');
 const flush = async () => { await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve)); };
+
+test('annotation size change saves a number and restores the confirmed host value',async()=>{
+  let current=view(1);
+  const f=fixture({api:(action,args)=>action==='settings_update'?(current=view(2,args.patch)):current});
+  await f.ui.refresh();assert.equal(f.ids.get('setting-annotation_font_size').value,'14');
+  f.change('annotation_font_size','20');await flush();
+  assert.equal(f.calls.find(call=>call.action==='settings_update').args.patch.annotation_font_size,20);
+  await f.ui.refresh();assert.equal(f.ids.get('setting-annotation_font_size').value,'20');
+  assert.equal(f.changes.at(-1).value.annotation_font_size,20);f.ui.dispose();
+});
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 const view = (revision, patch = {}, extra = {}) => ({ namespace: 'paper-library', backend: 'dsh', available: true, writable: true,
   revision: String(revision).padStart(64, '0'), native_revision: revision,

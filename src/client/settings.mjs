@@ -8,17 +8,19 @@ export const SETTINGS_DEFAULTS = Object.freeze({
   'auto-paper-conversation': false,
   'reading-panel-side': 'left',
   ui_palette: 'jade',
+  annotation_font_size: 14,
   resource_profile: 'balanced',
 })
 const fields = Object.keys(SETTINGS_DEFAULTS)
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value ?? {}, key)
-const valid = (key, value) => key === 'resource_profile' ? ['eco', 'balanced', 'performance', 'custom'].includes(value) : key === 'ui_palette' ? ['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].includes(value) : key === 'reading-panel-side'
+const valid = (key, value) => key === 'annotation_font_size' ? Number.isInteger(value) && value >= 12 && value <= 24 : key === 'resource_profile' ? ['eco', 'balanced', 'performance', 'custom'].includes(value) : key === 'ui_palette' ? ['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].includes(value) : key === 'reading-panel-side'
   ? value === 'left' || value === 'right' : fields.includes(key) && typeof value === 'boolean'
 const writable = snapshot => snapshot.status === 'ready' && snapshot.mode === 'host'
   && snapshot.writable && Number.isSafeInteger(snapshot.revision)
 
 const locales = {
   zh: {
+    annotation_font_size: '批注字号', 'annotation_font_size.hint': '批注原文、备注和 AI 回复的字号，修改后自动保存。',
     title: 'Paper Library', description: '与资料库内的设置共用主机文件，修改后同步到已打开的阅读页。',
     auto_analysis: '新增或选中文献后自动整理', 'auto_analysis.hint': '新导入或选中且尚无整理记录的 PDF 会按全文分批排队。使用论文对应的 DSH 模型，会消耗模型额度。',
     analysis_fill: '后台整理后补齐空缺资料', 'analysis_fill.hint': '按有原文依据的 AI 建议补缺，保留已有值；新增资料仍需核对。',
@@ -30,7 +32,7 @@ const locales = {
     readonly: '主机设置当前只读。', saving: '正在保存到主机…', saved: '已同步到主机',
     conflict: '设置未保存，已显示主机的当前值。请核对后重试。', failed: '无法确认设置已保存。请检查连接后重试。',
     reset: '恢复默认设置', 'reset.hint': '清除这些用户覆盖，恢复 DSH 配置中的默认值。',
-    model: '模型、凭据、明暗模式与字号继续由 DSH 管理。',
+    model: '模型、凭据与明暗模式继续由 DSH 管理。批注字号可单独调整。',
     language: '语言模型与提示词', 'language.model': '模型', 'language.hint': '翻译优先使用已配置的轻量模型，润色跟随 DSH；也可指定语言模型与补充提示词。',
     'language.default': '自动：轻量翻译／DSH 润色', 'language.missing': '当前不可用', 'language.translate': '翻译补充提示词', 'language.polish': '润色补充提示词',
     'language.target': '默认翻译目标', 'language.target.auto': '自动：中文译为英文，其他译为中文', 'language.target.zh-CN': '中文', 'language.target.en': '英文',
@@ -38,6 +40,7 @@ const locales = {
     'language.failed': '语言设置读取或保存失败，请检查连接后重试。', 'language.loading': '正在读取语言设置…', 'language.saving': '正在保存语言设置…',
   },
   en: {
+    annotation_font_size: 'Annotation font size', 'annotation_font_size.hint': 'Text size for excerpts, notes and AI replies. Changes save automatically.',
     ui_palette: 'Workspace palette', 'ui_palette.hint': 'Functional colors for reading, knowledge, writing and slides. Light/dark follows DSH.', jade: 'Jade & brass', navy: 'Navy & slate', neutral: 'Graphite neutral', rose: 'Soft rose', apricot: 'Warm apricot', system: 'Follow DSH',
     title: 'Paper Library', description: 'Shared with the library settings on the host. Open readers update when these choices change.',
     auto_analysis: 'Organize imported or selected papers', 'auto_analysis.hint': 'Newly imported or selected PDFs without a prior analysis enter a serial full-text queue. Uses the paper’s DSH model and model quota.',
@@ -49,7 +52,7 @@ const locales = {
     readonly: 'Host settings are read-only.', saving: 'Saving to the host…', saved: 'Synced to the host',
     conflict: 'Settings were not saved. Current host values are shown; review them and retry.', failed: 'Could not confirm the save. Check the connection and retry.',
     reset: 'Restore defaults', 'reset.hint': 'Clears these user overrides and restores the DSH configuration defaults.',
-    model: 'Models, credentials, light/dark mode and font size remain managed by DSH.',
+    model: 'Models, credentials and light/dark mode remain managed by DSH. Annotation font size can be adjusted separately.',
     language: 'Language model and prompts', 'language.model': 'Model', 'language.hint': 'Translation prefers a configured lightweight model; polishing follows DSH. An explicit language model overrides both.',
     'language.default': 'Auto: fast translation / DSH polishing', 'language.missing': 'Unavailable', 'language.translate': 'Additional translation instructions', 'language.polish': 'Additional polishing instructions',
     'language.target': 'Default translation target', 'language.target.auto': 'Automatic: Chinese to English, otherwise Chinese', 'language.target.zh-CN': 'Chinese', 'language.target.en': 'English',
@@ -252,7 +255,9 @@ export function PaperLibrarySettingsCard({ model, t, onMount, canReset = true })
   ...fields.map(key => {
     const id = `paper-library-setting-${key}`
     const value = own(pending, key) ? pending[key] : valid(key, scope.value?.[key]) ? scope.value[key] : SETTINGS_DEFAULTS[key]
-    const input = key === 'resource_profile'
+    const input = key === 'annotation_font_size'
+      ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, Number(event.currentTarget.value)) } }, ...Array.from({length:13},(_,index)=>index+12).map(value=>h('option',{key:value,value},`${value} px`)))
+      : key === 'resource_profile'
       ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, event.currentTarget.value) } }, ...['eco', 'balanced', 'performance', 'custom'].map(value => h('option', { key: value, value }, t(value))))
       : key === 'ui_palette'
       ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, event.currentTarget.value) } }, ...['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].map(value => h('option', { key: value, value }, t(value))))

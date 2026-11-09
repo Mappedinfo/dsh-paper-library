@@ -14,6 +14,7 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   'auto-paper-conversation': false,
   'reading-panel-side': 'left',
   ui_palette: 'jade',
+  annotation_font_size: 14,
   ...RESOURCE_DEFAULTS,
   // Optional adapter to a separate data-sync service: a config file it owns, or
   // extra absolute folders. Both default to empty, so the library never needs it.
@@ -31,7 +32,7 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   latex_sync_folder: true,
 });
 export const TEXT_SETTINGS = Object.freeze(['sync_config', 'external_sources', 'latex_accent']);
-export const NUMBER_SETTINGS = Object.freeze({ latex_split: { minimum: 25, maximum: 75 }, ...RESOURCE_FIELDS });
+export const NUMBER_SETTINGS = Object.freeze({ annotation_font_size: { minimum: 12, maximum: 24 }, latex_split: { minimum: 25, maximum: 75 }, ...RESOURCE_FIELDS });
 const fields = Object.keys(PAPER_LIBRARY_SETTINGS_DEFAULTS);
 const markerKey = 'settings.migration:paper-library';
 const backupKey = 'settings.backup:paper-library';
@@ -56,6 +57,7 @@ export function createPaperLibrarySettingsSchema(Schema) {
     'auto-paper-conversation': Schema.boolean().default(false),
     'reading-panel-side': Schema.union([Schema.const('left'), Schema.const('right')]).default('left'),
     ui_palette: Schema.union([Schema.const('jade'), Schema.const('navy'), Schema.const('neutral'), Schema.const('rose'), Schema.const('apricot'), Schema.const('system')]).default('jade'),
+    annotation_font_size: Schema.number().default(14),
     resource_profile: Schema.union(['eco','balanced','performance','custom'].map(value=>Schema.const(value))).default('balanced'),
     ...Object.fromEntries(Object.entries(RESOURCE_FIELDS).map(([key,rule])=>[key,Schema.number().default(rule.default)])),
     sync_config: Schema.string().default(''),
