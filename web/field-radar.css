@@ -41,3 +41,28 @@ body.has-field-radar{--workbench-height:42px}.has-field-radar .topbar{height:42p
 .radar-relations-figure .mark:focus{outline:3px solid var(--teal,#288084);outline-offset:2px}
 .radar-relations-figure>p{color:#263238;padding:20px}
 #field-radar-relations .radar-toolbar>label{display:flex;align-items:center;gap:6px}
+.radar-relation-cards{align-items:start}
+.radar-relation-card{min-width:0;display:flex;flex-direction:column;gap:16px}
+.radar-relation-id{color:var(--muted);font:600 13px/1.5 ui-monospace,monospace}
+.radar-relation-card h3{font-size:18px;margin:4px 0 0;line-height:1.4}
+.radar-relation-card h3:focus-visible{outline:2px solid var(--teal);outline-offset:4px}
+.radar-relation-dimensions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:10px;margin:0}
+.radar-relation-dimensions>div{min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--paper)}
+.radar-relation-card dt{font-size:13px;font-weight:600;color:var(--muted);line-height:1.45}
+.radar-relation-card dd{margin:0}
+.radar-relation-dimensions dd{display:flex;align-items:baseline;flex-wrap:wrap;gap:5px;margin-top:6px}
+.radar-relation-chip{display:inline-flex;align-items:baseline;gap:6px;max-width:100%;padding:3px 7px;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--ink);line-height:1.4;font-size:14px}
+.radar-relation-chip[data-status=used],.radar-relation-chip[data-status=verified]{background:var(--teal-light);font-weight:600}
+.radar-relation-chip[data-status=needs_review],.radar-relation-chip[data-status=conflicting]{border-color:var(--ochre);font-weight:600}
+.radar-relation-swatch{flex:none;width:7px;height:7px;align-self:center;border-radius:50%}
+.radar-relation-evidence{padding-top:12px;border-top:1px solid var(--line)}
+.radar-relation-evidence summary{cursor:pointer;font-weight:600;color:var(--dsw-alias-link,var(--teal))}
+.radar-relation-evidence section{margin-top:12px;padding:10px 12px;border-left:2px solid var(--line);background:var(--paper);border-radius:0 5px 5px 0}
+.radar-relation-evidence h4{font-size:14px;margin:0 0 4px}
+.radar-relation-evidence p{margin:4px 0;white-space:pre-wrap}
+.radar-relation-evidence ul{padding-left:18px;margin:5px 0}
+.radar-relation-evidence li+li{margin-top:6px}
+.radar-relation-evidence-fields{margin:6px 0;display:grid;gap:7px}
+.radar-relation-evidence-fields dd{white-space:pre-wrap;line-height:1.55}
+.radar-relation-card .radar-relation-citation{display:block;margin-top:4px;font-size:13px;color:var(--muted)}
+.radar-relation-card .radar-paper-actions{margin-top:0;gap:8px 12px}
