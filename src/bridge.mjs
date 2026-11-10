@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveAndFetch, resolveMetadata, resolveTitleMetadata } from './paper-fetch.mjs';
+import { arxivID, isDirectPDFURL, resolveAndFetch, resolveMetadata, resolveTitleMetadata } from './paper-fetch.mjs';
 import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
 import { createTranslationServerClient } from './translation-server.mjs';
 import { resourcePolicyFor } from './resource-policy.mjs';
@@ -351,18 +351,44 @@ async function lookupMetadata(request, options, { forCitation = false, current }
   if (typeof request.id !== 'string' || !request.id || request.id.length > 200) throw new Error('请选择一篇文献，再刷新资料。');
   current ??= await core({action:'get',id:request.id},options);
   const doi = canonicalDOI(current.DOI);
-  let target = doi || (typeof current.URL === 'string' && current.URL.trim()) || (String(current.archive||'').toLowerCase()==='arxiv'&&current.archive_location);
+  const url = typeof current.URL === 'string' ? current.URL.trim() : '';
+  let pdfLink = isDirectPDFURL(url);
+  const publishedOnly = Boolean(current['container-title']) || ['article-journal','paper-conference','chapter','book'].includes(current.type);
+  let arxivHint;
+  if (pdfLink) try { arxivHint = arxivID(url); } catch { /* Unusable URLs are not lookup targets. */ }
+  let target = doi || (!pdfLink && url) || arxivHint || (String(current.archive||'').toLowerCase()==='arxiv'&&current.archive_location);
   let detected=false;
-  if(!target&&current.pdf){
-    const probe=await core({action:'metadata_probe',id:request.id},options);
-    target=probe.doi||probe.arxiv;detected=Boolean(target);
+  const warnings = [];
+  if(!target&&!pdfLink&&current.pdf){
+    try {
+      const probe=await core({action:'metadata_probe',id:request.id},options);
+      target=probe.doi||probe.arxiv;detected=Boolean(target);
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      warnings.push(`未能从本地 PDF 核对标识符：${String(error.message).slice(0,160)}`);
+    }
   }
   const allowTitle = !forCitation || Boolean(current['container-title'] || current.parse?.verified);
   if (!target && !allowTitle) throw new Error('请在资料详情中填写缺失项，或添加 DOI／公开论文链接以补全。');
-  const fetchOptions={...options.fetchOptions,signal:options.signal,...(forCitation?{timeoutMs:8000,crossrefOnly:Boolean(current['container-title'])}:{})};
-  let result=target?await resolveMetadata(target,fetchOptions):await resolveTitleMetadata(current.title,fetchOptions);
-  if(detected&&(!result.metadata||normalizedIdentity(result.metadata.title)!==normalizedIdentity(current.title))) {
-    result=allowTitle ? await resolveTitleMetadata(current.title,fetchOptions) : {...result,metadata:undefined};
+  const fetchOptions={timeoutMs:21000,...options.fetchOptions,signal:options.signal};
+  const targetOptions=!doi&&allowTitle ? {...fetchOptions,timeoutMs:Math.min(fetchOptions.timeoutMs,8000)} : fetchOptions;
+  let result=target?await resolveMetadata(target,targetOptions):{ warnings, provenance:{ kind:'metadata-refresh', requests:[] } };
+  pdfLink ||= Boolean(result.pdf_url && target === url);
+  const identity = normalizedIdentity(current.title);
+  const fitsTitle = item => identity.length >= 8 && normalizedIdentity(item?.title) === identity;
+  const fitsEdition = item => !publishedOnly || Boolean(item?.['container-title']) || (item?.type && item.type !== 'article');
+  if (detected && (!fitsTitle(result.metadata) || !fitsEdition(result.metadata))) result.metadata=undefined;
+  // A PDF URL, an unavailable landing page, or a landing page without a DOI
+  // must not prevent the registered-title search for this one work.
+  if (!doi && allowTitle && (!result.metadata?.DOI || !fitsTitle(result.metadata) || !fitsEdition(result.metadata))) {
+    try {
+      const byTitle = await resolveTitleMetadata(current.title,{...fetchOptions,publishedOnly});
+      if (fitsTitle(byTitle.metadata) && fitsEdition(byTitle.metadata)) result=byTitle;
+      else result = {...result, warnings:[...(result.warnings||[]),...byTitle.warnings]};
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      result.warnings = [...(result.warnings||[]),String(error.message).slice(0,160)];
+    }
   }
 
   if (!result.metadata && target && options.translationServer) {
@@ -387,7 +413,11 @@ async function lookupMetadata(request, options, { forCitation = false, current }
       result.warnings = [...(result.warnings || []), `translation-server 不可用：${String(error.message).slice(0, 300)}`];
     }
   }
-  if (!result.metadata) throw new Error(`未取得可用文献资料；请核对 DOI 或论文页面链接，也可以手工编辑。${result.warnings?.length?' '+result.warnings.join('；'):''}`);
+  if (!result.metadata) {
+    const error = new Error(`未取得可用文献资料。请核对题名、DOI 或正式出版页面，也可以手工编辑。${result.warnings?.length?' '+result.warnings.join('；'):''}`);
+    if (pdfLink) error.code = 'CITATION_PDF_LINK';
+    throw error;
+  }
   // Network latency must not put an older manual edit back into the editor.
   const latest = await core({action:'get',id:request.id},options);
   if (canonicalDOI(latest.DOI) !== doi || !doi && (latest.URL !== current.URL || latest.title !== current.title)) throw new Error('获取期间 DOI 或论文链接发生变化；请按最新资料重新刷新。');
@@ -399,7 +429,7 @@ async function lookupMetadata(request, options, { forCitation = false, current }
     if (title.length < 8 || title !== normalizedIdentity(result.metadata.title)) throw new Error('在线题名与当前文献不能准确匹配，未生成补全草稿；请核对题名，或保存 DOI 后重试。');
   }
   const fetched = result.metadata;
-  if (forCitation && current['container-title'] && !fetched['container-title'] && fetched.type === 'article') {
+  if (!fitsEdition(fetched)) {
     throw new Error('检索结果未能确认当前出版出处，请核对已发表版本的 DOI 或链接。');
   }
   if (forCitation && doi && fetched.title && normalizedIdentity(current.title) && normalizedIdentity(current.title) !== 'untitled' &&
@@ -408,6 +438,7 @@ async function lookupMetadata(request, options, { forCitation = false, current }
   }
   const item = metadataDraft(current, fetched);
   if (forCitation) {
+    if (pdfLink && fetched.URL && !isDirectPDFURL(fetched.URL)) item.URL = fetched.URL;
     if (fetched.type && fetched.type !== 'article' &&
         (!current.type || current.type === 'article' || current.parse?.field_sources?.type === 'default-record-type')) item.type = fetched.type;
     if (current.title === 'Untitled' && fetched.title) item.title = fetched.title;
@@ -583,18 +614,20 @@ export async function dispatch(request, options = {}) {
     if (safe.format === 'apa' && safe.prepare_metadata === true) {
       if (safe.ids.length !== 1) throw new Error('请逐篇核对并复制 APA 7 引用。');
       const [id] = safe.ids;
-      let item = await core({ action: 'get', id }, options), lookupMessage = '';
-      if (apaCopyReadiness(item).lookup) {
+      let item = await core({ action: 'get', id }, options), lookupMessage = '', pdfLink = false;
+      if (apaCopyReadiness(item).lookup || (!item.DOI && isDirectPDFURL(item.URL))) {
         try { ({ item } = await lookupMetadata({ id }, options, { forCitation: true, current: item })); }
         catch (error) {
           options.signal?.throwIfAborted();
           if (error.code === 'CITATION_IDENTITY_CONFLICT') throw error;
+          pdfLink = error.code === 'CITATION_PDF_LINK';
           lookupMessage = String(error.message).slice(0, 300);
           // Use the latest local data even if an online source was unavailable.
           item = await core({ action: 'get', id }, options);
         }
       }
       const { missing } = apaCopyReadiness(item);
+      if (!item.DOI && (pdfLink || isDirectPDFURL(item.URL))) missing.push('DOI 或已核对的出版页面');
       if (missing.length) return { prepared: true, missing_fields: missing, lookup_message: lookupMessage };
       const result = await citationJob({ action:'cite', items:[item], format:'apa' }, options);
       return { ...result, prepared: true };

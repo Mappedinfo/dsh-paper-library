@@ -84,7 +84,7 @@ test('lookup refuses missing identifiers, unavailable metadata and mismatched DO
   await assert.rejects(dispatch({action:'metadata_lookup',id:f.item.id},{library:f.library,fetchOptions:{resolver,transport:async()=>response('{}')}}),/未取得可用文献资料/);
   await assert.rejects(dispatch({action:'metadata_lookup'},{library:f.library}),/请选择一篇文献/);
   const current=await dispatch({action:'update',id:f.item.id,metadata:{DOI:'10.1234/metadata'}},{library:f.library});
-  await assert.rejects(dispatch({action:'metadata_lookup',id:f.item.id},{library:f.library,fetchOptions:crossrefFixture({DOI:'10.1234/different'},meta('citation_doi','10.1234/different'))}),/未取得可用文献资料.*核对 DOI/);
+  await assert.rejects(dispatch({action:'metadata_lookup',id:f.item.id},{library:f.library,fetchOptions:crossrefFixture({DOI:'10.1234/different'},meta('citation_doi','10.1234/different'))}),/未取得可用文献资料.*核对题名、DOI/);
   await assert.rejects(dispatch({action:'metadata_lookup',id:f.item.id},{library:f.library,fetchOptions:{resolver,transport:async()=>response('',503)}}),/未取得可用文献资料.*手工编辑/);
   assert.deepEqual(await core({action:'get',id:f.item.id},{library:f.library}),current);
 });
@@ -170,6 +170,61 @@ test('APA copy does not send title-only private records to an online provider', 
     library:f.library, fetchOptions:{ resolver, transport:async({url})=>{requests.push(url);return response('');} },
   });
   assert.equal(result.text,undefined);assert.ok(result.missing_fields.includes('作者'));assert.equal(requests.length,0);
+});
+
+test('a saved PDF URL falls back to title lookup for both metadata and APA without downloading the PDF', async t => {
+  const pdfURL = 'https://publisher.example/papers/example.pdf?download=1';
+  const f = await fixture(t, { type:'paper-conference', URL:pdfURL, 'container-title':'Synthetic Proceedings' });
+  const requests = [];
+  const options = { library:f.library, fetchOptions:{ resolver, transport:async ({ url }) => {
+    requests.push(url);
+    return response(JSON.stringify({ message:{ items:[{
+      DOI:'10.1234/preprint', type:'posted-content', title:[title],
+    }, {
+      DOI:'10.1234/proceedings', type:'proceedings-article', title:[title], 'container-title':['Synthetic Proceedings'],
+      author:[{given:'Alice',family:'Reader'}], published:{'date-parts':[[2026]]}, page:'22-29',
+    }] } }));
+  } } };
+  const draft = await dispatch({action:'metadata_lookup',id:f.item.id},options);
+  assert.equal(draft.item.DOI,'10.1234/proceedings');assert.equal(draft.item.URL,pdfURL);
+  const citation = await dispatch({action:'cite',ids:[f.item.id],format:'apa',prepare_metadata:true},options);
+  assert.match(citation.text,/https:\/\/doi\.org\/10\.1234\/proceedings/);assert.doesNotMatch(citation.text,/\.pdf/);
+  assert.equal(requests.length,2);assert.ok(requests.every(url=>url.hostname==='api.crossref.org'&&url.searchParams.get('query.title')===title));
+  assert.equal((await core({action:'get',id:f.item.id},{library:f.library})).DOI,undefined);
+});
+
+test('DataCite can recover a publication DOI after Crossref misses, without substituting a preprint', async t => {
+  const f = await fixture(t, { type:'article-journal', URL:'https://publisher.example/download.pdf', 'container-title':'Synthetic Journal',
+    author:[{given:'Alice',family:'Reader'}], issued:{'date-parts':[[2026]]}, page:'9-17' });
+  const datacite = (doi, type, extra={}) => ({ attributes:{ doi, titles:[{title}], types:{resourceTypeGeneral:type}, publicationYear:2026, ...extra } });
+  const preprint = datacite('10.48550/arxiv.1234.56789','Preprint');
+  const article = datacite('10.1234/datacite','JournalArticle', { relatedItems:[{relationType:'IsPublishedIn',titles:[{title:'Synthetic Journal'}], firstPage:'9', lastPage:'17', volume:'3', issue:'2'}] });
+  const requests=[];
+  const options = records => ({ library:f.library, fetchOptions:{resolver,transport:async({url})=>{
+    requests.push(url.hostname);
+    return response(JSON.stringify(url.hostname==='api.crossref.org'?{message:{items:[]}}:{data:records}));
+  }} });
+  const request={action:'cite',ids:[f.item.id],format:'apa',prepare_metadata:true};
+  const ready=await dispatch(request,options([preprint,article]));
+  assert.match(ready.text,/Synthetic Journal, 3\(2\), 9–17/);
+  assert.match(ready.text,/https:\/\/doi\.org\/10\.1234\/datacite/);
+  const blocked=await dispatch(request,options([preprint]));
+  assert.equal(blocked.text,undefined);assert.deepEqual(blocked.missing_fields,['DOI 或已核对的出版页面']);
+  assert.deepEqual(requests,['api.crossref.org','api.datacite.org','api.crossref.org','api.datacite.org']);
+});
+
+test('an opaque download URL identified as PDF is not copied as the citation URL', async t => {
+  const f=await fixture(t,{type:'article-journal',URL:'https://publisher.example/download?id=1','container-title':'Synthetic Journal',
+    author:[{family:'Reader'}],issued:{'date-parts':[[2026]]},volume:'1',issue:'2',page:'3-4'});
+  const requests=[];
+  const result=await dispatch({action:'cite',ids:[f.item.id],format:'apa',prepare_metadata:true},{library:f.library,fetchOptions:{resolver,transport:async({url})=>{
+    requests.push(url.hostname);
+    if(url.hostname==='publisher.example')return response('',200,{'content-type':'application/pdf'});
+    return response('{}');
+  }}});
+  assert.equal(result.text,undefined);
+  assert.deepEqual(result.missing_fields,['DOI 或已核对的出版页面']);
+  assert.deepEqual(requests,['publisher.example','api.crossref.org','api.datacite.org']);
 });
 
 test('bridge graph mutation allowlist reaches bounded core operations and preserves graph ownership',async t=>{

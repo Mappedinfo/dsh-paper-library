@@ -13,6 +13,16 @@ const PDF_LIMIT = 250 * 1024 * 1024
 const USER_AGENT = 'Mappedinfo-Paper-Library/0.1 (public scholarly PDF retrieval)'
 const ARXIV_ID = /^(?:\d{4}\.\d{4,5}|[a-z][a-z.-]*(?:\.[A-Z]{2})?\/\d{7})(?:v\d+)?$/i
 const DOI = /^10\.\d{4,9}\/[^\s?#]+$/i
+const PUBLIC_METADATA_HOSTS = new Set(['api.crossref.org', 'api.datacite.org', 'export.arxiv.org'])
+
+export function isDirectPDFURL(value) {
+  if (typeof value !== 'string') return false
+  try {
+    const url = new URL(value)
+    return /\.pdf$/i.test(decodeURIComponent(url.pathname)) ||
+      (['arxiv.org', 'www.arxiv.org', 'export.arxiv.org'].includes(url.hostname) && url.pathname.startsWith('/pdf/'))
+  } catch { return false }
+}
 
 function bounded(value, fallback, ceiling, label) {
   if (value === undefined) return fallback
@@ -125,27 +135,28 @@ function warn(ctx, error) {
   ctx.warnings.push(errorText(error))
 }
 
-async function requestPublic(value, ctx, kind) {
+async function requestPublic(value, ctx, kind, timeoutMs) {
   let url = publicURL(value)
+  const signal = timeoutMs ? AbortSignal.any([ctx.signal, AbortSignal.timeout(timeoutMs)]) : ctx.signal
   for (let redirects = 0; redirects <= 5; redirects++) {
-    ctx.signal.throwIfAborted()
+    signal.throwIfAborted()
     if (++ctx.requests > 16) throw new Error('Public request limit reached')
     const record = { url: url.href, kind }
     ctx.provenance.requests.push(record)
     let response
     try {
       const hostname = url.hostname.replace(/^\[|\]$/g, '')
-      let answers = isIP(hostname) ? [{ address: hostname, family: isIP(hostname) }] : await abortable(ctx.resolver(hostname), ctx.signal)
+      let answers = isIP(hostname) ? [{ address: hostname, family: isIP(hostname) }] : await abortable(ctx.resolver(hostname), signal)
       // 部分本地代理用 198.18/15 作为 Fake-IP。仅对固定题录服务
       // 通过加密 DNS 取得真实公网地址，随后仍校验并固定连接地址。
-      if(!ctx.options.resolver && ['api.crossref.org','export.arxiv.org'].includes(hostname) && answers.length && answers.every(answer=>isIP(answer.address)===4&&v4In(answer.address,'198.18.0.0',15))) {
-        const dnsSignal=AbortSignal.any([ctx.signal,AbortSignal.timeout(6000)]);
+      if(!ctx.options.resolver && PUBLIC_METADATA_HOSTS.has(hostname) && answers.length && answers.every(answer=>isIP(answer.address)===4&&v4In(answer.address,'198.18.0.0',15))) {
+        const dnsSignal=AbortSignal.any([signal,AbortSignal.timeout(6000)]);
         const dns=await pinnedRequest({url:new URL(`https://1.1.1.1/dns-query?name=${encodeURIComponent(hostname)}&type=A`),address:'1.1.1.1',family:4,signal:dnsSignal,headers:{Accept:'application/dns-json'}});
         try {if(dns.statusCode!==200)throw Error('公开题录 DNS 查询失败');const data=JSON.parse(await readText({...dns,signal:dnsSignal},16384));answers=(data.Answer||[]).filter(row=>row.type===1).map(row=>({address:row.data,family:4}));record.dns_provider='Cloudflare DoH';}finally{dns.close();}
       }
       if (!Array.isArray(answers) || !answers.length || answers.some(answer => !isPublicAddress(answer.address) || isLocalInterface(answer.address) || isIP(answer.address) !== answer.family)) throw new Error('DNS resolved to a private, local, reserved, or invalid address')
       const { address, family } = answers.find(answer => answer.family === 4) ?? answers[0]
-      const requestSignal = AbortSignal.any([ctx.signal, AbortSignal.timeout(15_000)])
+      const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(15_000)])
       response = await abortable(ctx.transport({ url, address, family, signal: requestSignal, headers: {
         'User-Agent': USER_AGENT, Accept: kind === 'metadata' ? 'application/json, application/atom+xml, application/xml;q=0.9' : kind === 'landing-metadata' ? 'text/html, application/xhtml+xml;q=0.9' : 'application/pdf, text/html;q=0.9, */*;q=0.1',
         'Accept-Encoding': 'identity',
@@ -173,7 +184,7 @@ async function requestPublic(value, ctx, kind) {
 async function readText(response, limit = TEXT_LIMIT, metadataOnly = false) {
   if (metadataOnly && /application\/pdf/i.test(response.headers['content-type'] ?? '')) {
     response.close?.()
-    throw new Error('Metadata refresh does not download PDFs; provide a DOI or article landing URL')
+    throw Object.assign(new Error('Metadata refresh does not download PDFs; provide a DOI or article landing URL'), { code:'PUBLIC_PDF_URL' })
   }
   const length = Number(response.headers['content-length'])
   if (Number.isFinite(length) && length > limit) { response.close?.(); throw new Error('Metadata or landing page exceeds 2 MiB limit') }
@@ -191,7 +202,7 @@ async function readText(response, limit = TEXT_LIMIT, metadataOnly = false) {
       chunks.push(Buffer.from(chunk))
       if (metadataOnly && !signatureChecked && size >= 5) {
         signatureChecked = true
-        if (Buffer.concat(chunks, size).subarray(0, 5).toString('ascii') === '%PDF-') throw new Error('Metadata refresh received a PDF; stopped after its signature')
+        if (Buffer.concat(chunks, size).subarray(0, 5).toString('ascii') === '%PDF-') throw Object.assign(new Error('Metadata refresh received a PDF; stopped after its signature'), { code:'PUBLIC_PDF_URL' })
       }
     }
     return Buffer.concat(chunks, size).toString('utf8')
@@ -277,23 +288,83 @@ async function doiMetadata(doi, ctx) {
   return { metadata, candidates, landingCandidates }
 }
 
+const dataciteTypes = {
+  JournalArticle:'article-journal', ConferencePaper:'paper-conference', Book:'book', BookChapter:'chapter',
+  Dissertation:'thesis', Report:'report', Preprint:'article', Text:'article', DataPaper:'article-journal',
+}
+function dataciteCSL(record) {
+  const a = record?.attributes, kind = a?.types?.resourceTypeGeneral
+  if (!Object.hasOwn(dataciteTypes, kind)) return undefined
+  const doi = normalizeDOI(a.doi), title = clean(a.titles?.[0]?.title)
+  if (!title) return undefined
+  const metadata = { type:dataciteTypes[kind], DOI:doi, title, URL:`https://doi.org/${doi}` }
+  const authors = Array.isArray(a.creators) ? a.creators.slice(0, 100).filter(Boolean).map(person => {
+    if (person.familyName && person.nameType !== 'Organizational') {
+      return { family:clean(person.familyName), ...(person.givenName ? { given:clean(person.givenName) } : {}) }
+    }
+    return { literal:clean(person.name) }
+  }).filter(person => person.family || person.literal) : []
+  if (authors.length) metadata.author = authors
+  const year = Number(a.publicationYear)
+  if (Number.isInteger(year) && year > 0 && year < 10000) metadata.issued = { 'date-parts':[[year]] }
+  const parents = Array.isArray(a.relatedItems) ? a.relatedItems.filter(item => item?.relationType === 'IsPublishedIn') : []
+  const parent = parents.length === 1 ? parents[0] : undefined
+  const first = clean(parent?.firstPage), last = clean(parent?.lastPage)
+  const publisher = parent?.publisher || (typeof a.publisher === 'string' ? a.publisher : a.publisher?.name)
+  for (const [key,value] of Object.entries({ 'container-title':parent?.titles?.[0]?.title, publisher, volume:parent?.volume,
+    issue:parent?.issue, page:first && last && first !== last ? `${first}-${last}` : first,
+    number:parent?.numberType === 'Article' ? parent.number : undefined })) {
+    if (value) metadata[key] = clean(value)
+  }
+  return metadata
+}
+
+function exactTitleRecords(rows, expected, titleOf, doiOf) {
+  const matches = new Map()
+  if (Array.isArray(rows)) for (const row of rows.slice(0, 5)) {
+    if (identityText(titleOf(row)) !== expected) continue
+    try { matches.set(normalizeDOI(doiOf(row)).toLowerCase(), row) } catch { /* Invalid identifiers are not candidates. */ }
+  }
+  return [...matches.values()]
+}
+
 /** 用户明确补全当前条目时，按题名检索公开题录；不发送 PDF 文本。 */
 export async function resolveTitleMetadata(title, options = {}) {
   if(typeof title!=='string'||title.trim().length<8||title.length>1000)throw new Error('题名过短或过长，请先核对文献标题。')
-  const ctx=context(options,title), identity=value=>clean(value).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'');
+  const ctx=context(options,title), expected=identityText(title);
   let metadata;
   try {
-    const response=await requestPublic(`https://api.crossref.org/works?query.title=${encodeURIComponent(title)}&rows=5`,ctx,'metadata');
+    const response=await requestPublic(`https://api.crossref.org/works?query.title=${encodeURIComponent(title)}&rows=5`,ctx,'metadata',11000);
     const data=JSON.parse(await readText(response));
-    const matches=(data.message?.items||[]).filter(item=>identity(first(item.title))===identity(title)&&item.DOI);
-    if(matches.length===1)metadata=crossrefCSL(matches[0],normalizeDOI(matches[0].DOI),ctx);
+    const matches=exactTitleRecords(data.message?.items,expected,item=>first(item?.title),item=>item?.DOI)
+      .filter(item=>!options.publishedOnly || item.type !== 'posted-content');
+    if(matches.length===1){
+      metadata=crossrefCSL(matches[0],normalizeDOI(matches[0].DOI),ctx);
+      if(matches[0].type==='posted-content')ctx.warnings.push('找到同题名的预印本或早期稿 DOI，请核对引用版本。');
+    }
     else if(matches.length>1)ctx.warnings.push('题名对应多个 DOI，请指定 DOI 后再补全。');
-    if(matches.length>1)return {metadata,provenance:ctx.provenance,warnings:ctx.warnings};
+    if(matches.length>1)return {metadata,ambiguous:true,provenance:ctx.provenance,warnings:ctx.warnings};
   }catch(error){warn(ctx,error)}
-  if(!metadata&&!options.crossrefOnly)try{
+  if (!metadata && !options.crossrefOnly) try {
+    // Phrase search supplies candidates. Accept only an exact title and a DOI
+    // registered for the requested version of the work.
+    const escaped = title.replace(/["\\]/g, ' ')
+    const response = await requestPublic(`https://api.datacite.org/dois?query=${encodeURIComponent(`titles.title:"${escaped}"`)}&page%5Bsize%5D=5`,ctx,'metadata',8000)
+    const data = JSON.parse(await readText(response))
+    const matches = exactTitleRecords(data.data,expected,row=>row?.attributes?.titles?.[0]?.title,row=>row?.attributes?.doi)
+      .filter(row=>!options.publishedOnly || !['Preprint','Text'].includes(row.attributes.types?.resourceTypeGeneral))
+      .map(dataciteCSL).filter(Boolean)
+    if (matches.length > 1) {
+      ctx.warnings.push('DataCite 找到多个同题名 DOI，请提供该出版版本的 DOI。')
+      return { metadata, ambiguous:true, provenance:ctx.provenance, warnings:ctx.warnings }
+    }
+    metadata = matches[0]
+    if (metadata?.type === 'article' && /^10\.48550\/arxiv\./i.test(metadata.DOI)) ctx.warnings.push('找到同题名的 arXiv 预印本 DOI，请核对引用版本。')
+  } catch(error) { warn(ctx,error) }
+  if(!metadata&&!options.crossrefOnly&&!options.publishedOnly)try{
     const response=await requestPublic(`https://export.arxiv.org/api/query?search_query=${encodeURIComponent('ti:"'+title.replace(/"/g,'')+'"')}&max_results=5`,ctx,'metadata');
     const xml=await readText(response);if(/<!DOCTYPE|<!ENTITY/i.test(xml))throw new Error('Unexpected XML document entities');
-    const matches=[...xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)].map(match=>match[1]).filter(entry=>identity(entry.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||'')===identity(title));
+    const matches=[...xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)].map(match=>match[1]).filter(entry=>identityText(entry.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||'')===expected);
     if(matches.length===1){const id=arxivID(clean(matches[0].match(/<id[^>]*>([\s\S]*?)<\/id>/i)?.[1]));if(id)metadata=await arxivMetadata(id,ctx);}
     else if(matches.length>1)ctx.warnings.push('arXiv 返回多个同题名条目，请指定论文链接。');
   }catch(error){warn(ctx,error)}
@@ -393,7 +464,7 @@ function mergeMetadata(primary, supplement, ctx) {
   return metadata
 }
 
-function arxivID(value) {
+export function arxivID(value) {
   let id = value.replace(/^arxiv:\s*/i, '')
   if (/^https?:\/\//i.test(id)) {
     const url = publicURL(id)
@@ -439,7 +510,7 @@ export async function resolveMetadata(target, options = {}) {
   if (typeof target !== 'string' || !target.trim() || target.length > 4096) throw new Error('Provide a DOI, arXiv ID, or public article landing URL')
   target = target.trim()
   const ctx = context(options, target)
-  let metadata, doi
+  let metadata, doi, pdfURL = false
   try { doi = normalizeDOI(target) } catch {}
   try {
     if (doi) {
@@ -448,6 +519,14 @@ export async function resolveMetadata(target, options = {}) {
         const result = await doiMetadata(doi, ctx)
         metadata = result.metadata
         candidates = result.landingCandidates
+      } catch (error) { warn(ctx, error) }
+      if (!metadata) try {
+        const response = await requestPublic(`https://api.datacite.org/dois/${encodeURIComponent(doi)}`, ctx, 'metadata')
+        const record = JSON.parse(await readText(response)).data
+        const item = dataciteCSL(record)
+        if (!item || item.DOI.toLowerCase() !== doi.toLowerCase()) throw new Error('DataCite returned no metadata for the requested DOI')
+        metadata = item
+        candidates = []
       } catch (error) { warn(ctx, error) }
       // One landing page can supply explicit editorial dates missing in Crossref.
       // PDF links are never followed by this metadata-only path.
@@ -477,11 +556,11 @@ export async function resolveMetadata(target, options = {}) {
         }
       }
     }
-  } catch (error) { warn(ctx, error) }
+  } catch (error) { pdfURL = error.code === 'PUBLIC_PDF_URL'; warn(ctx, error) }
   ctx.options.signal?.throwIfAborted()
   if (ctx.signal.aborted) ctx.warnings.push('Metadata refresh deadline reached')
   if (!metadata && !ctx.warnings.length) ctx.warnings.push('The article page exposed no supported bibliographic metadata')
-  return { status: metadata ? 'metadata_only' : 'unavailable', metadata, provenance: { ...ctx.provenance, kind: 'metadata-refresh' }, warnings: [...new Set(ctx.warnings)] }
+  return { status: metadata ? 'metadata_only' : 'unavailable', metadata, ...(pdfURL ? { pdf_url:true } : {}), provenance: { ...ctx.provenance, kind: 'metadata-refresh' }, warnings: [...new Set(ctx.warnings)] }
 }
 
 async function consumeCandidate(response, directory, ctx) {
