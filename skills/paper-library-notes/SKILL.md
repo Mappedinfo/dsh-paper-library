@@ -39,4 +39,6 @@ description: "用明确选择的本地来源写可理解、可追溯的知识笔
 
 跨页证据逐项引用，主锚点必须支持主问题。缺失结论与全篇总结明确标 `context-not-evidence` 或 `unanchored`，不冒充局部证据。唯一真实原文、物理页码及 quad 都要核验；多个换行 quad 可属于一个引文，重复出现须扩大到唯一上下文，不能直接收取全部搜索命中。覆盖审查逐题核对问题语义与证据，不只数题号或批注数量。
 
-采用仓库 `docs/question-placement.md` 的逐题计划和只读 `dsh_paper_library.placement_preflight` 检查；它不是自动语义判分，也不替代现有写入器的备份、锁内版本检查与原子替换。改写旧批注前精确限定批次/稳定ID及内容快照，保留非目标批注、正文和回复关系；并发变化立即停止。旧批次不自动重跑或修复。
+执行门槛：每次新建或改写原生 PDF 问答前，必须采用仓库 `docs/question-placement.md` 的逐题计划，并先运行只读 `dsh_paper_library.placement_preflight`；临时手写计划和少量示例也不能跳过。退出码非0或报告 `ok:false` 时停止写入并修复计划；拿不到该预检时报告阻塞，不改用未检查的批量脚本。通过后仍须人工或明确的语义审阅逐题核对证据。它不是自动语义判分，也不替代现有写入器的备份、锁内版本检查与原子替换。改写旧批注前精确限定批次/稳定ID及内容快照，保留非目标批注、正文和回复关系；并发变化立即停止。旧批次不自动重跑或修复。
+
+在仓库根目录执行：`PYTHONPATH=src .venv/bin/python -m dsh_paper_library.placement_preflight plan.json sources.json`。`sources.json` 仅含明确指定的来源ID到本地PDF路径映射。此为执行纪律，不表示运行中的写入器已强制集成；不要向用户声称旧批次已自动修复。
