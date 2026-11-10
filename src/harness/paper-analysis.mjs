@@ -1,3 +1,4 @@
+import { sessionContext } from './ai.mjs'
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile as readFileRaw } from 'node:fs/promises'
 import { outputOf } from './library-knowledge.mjs'
@@ -303,13 +304,22 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
     return { id: draft.id, coverage: { batches: material.length, batches_total: total, partial, sources: sourceIds.length, packing: coverage } }
   }
 
+  async function analysisRoute(input, signal) {
+    if (typeof resolveModel === 'function') return resolveModel({ id: input.id, signal })
+    const paper = await paperChat?.({ action: 'chat_ensure', id: input.id,
+      ...(input.source_session_id ? { source_session_id: input.source_session_id } : {}) }, { signal })
+    return paper?.model ? { provider: paper.model.provider, model: paper.model.model,
+      ...(paper.model.reasoningEffort ? { reasoningEffort: paper.model.reasoningEffort } : {}),
+      ...sessionContext(paper.sessionId) } : undefined
+  }
+
   async function run(record, abort) {
     const signal = abort.signal
     try {
       signal.throwIfAborted()
       if (record.value.mode !== 'metadata') {
         await runQuestionAnalysis({ input:record.value, store, kernel, sourcePack, agent, signal, batchKey, readingNote, evidenceReview, modelTimeoutMs,
-          resolveModel:callSignal => typeof resolveModel === 'function' ? resolveModel({id:record.value.id,signal:callSignal}) : paperChat?.({action:'chat_ensure',id:record.value.id,...(record.value.source_session_id?{source_session_id:record.value.source_session_id}:{})},{signal:callSignal}).then(value=>value?.model),
+          resolveModel:callSignal => analysisRoute(record.value, callSignal),
           update:async patch => { record = await write(record,patch); return record.value } })
         return
       }
@@ -328,12 +338,10 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
       if(expected&&pack.expected_modified!==expected)throw fail('读取期间文献资料已改变，已完成批次保留；请重新整理。','ANALYSIS_SOURCE_CHANGED',409)
       version=pack.file_version;expected=pack.expected_modified
       if(!model&&pack.sources.length){
-        const route=typeof resolveModel==='function'
-          ? await resolveModel({id:input.id,signal:batchSignal})
-          : (await paperChat?.({action:'chat_ensure',id:input.id,...(input.source_session_id?{source_session_id:input.source_session_id}:{})},{signal:batchSignal}))?.model
+        const route=await analysisRoute(input,batchSignal)
         signal.throwIfAborted()
         if(typeof route?.provider!=='string'||!route.provider||typeof route.model!=='string'||!route.model)throw fail('请为这次分析配置有效模型。')
-        model={provider:route.provider,model:route.model,...(route.reasoningEffort?{reasoningEffort:route.reasoningEffort}:{})}
+        model={...sessionContext(route.sessionId),provider:route.provider,model:route.model,...(route.reasoningEffort?{reasoningEffort:route.reasoningEffort}:{})}
       }
       const imageInputs=pack.images.map(({data,...image})=>({...image,bytes:Buffer.byteLength(data,'base64')}))
       if(pack.visual_coverage)pack.visual_coverage={...pack.visual_coverage,sent_pages:[]}

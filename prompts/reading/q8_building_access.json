@@ -1,0 +1,35 @@
+{
+  "id": "q8_building_access",
+  "title": "建筑数据获取",
+  "question": "本批材料明确报告了哪项建筑/建成环境数据是否公开、如何获取以及使用限制？",
+  "guidance": "区分原始数据、处理后数据、统计产品与代码；核对链接/仓库/DOI、版本、下载/申请/付费/受限/不公开和许可条件。仅保留原文实际给出的地址，不猜链接；论文提供链接不等于当前已核验可下载，代码开源不等于数据开放。没有说明公开性或许可时写未说明，不能认定不公开。 只回答本题维度，保留研究归属和页码来源，不重复泛化列举所有要素。即使看似不相关也须检查并回答：本批缺少报告用 not_reported（未说明）；确无适用对象才用 not_applicable 并说明理由。局部未提及不能推出整篇未使用。",
+  "options": [
+    {
+      "id": "access",
+      "label": "数据获取的有据记录",
+      "coding": {
+        "definition": "本批原文对一份建筑/建成环境数据的数据获取作出可定位说明。",
+        "include_when": "有直接来源支持该维度，包括明确说明未使用、受限或非公开；保留对象、范围和实际/计划/背景归属。",
+        "exclude_when": "仅在附近出现相关词、只说明其他维度或依据常识猜测；不能以没有提及证明全文没有使用。"
+      },
+      "graph": {
+        "node_type": "claim",
+        "relation": "reports"
+      }
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "The synthetic building footprints are openly downloadable under CC BY 4.0, but the underlying aerial images are not released.",
+      "choice": "access",
+      "judgment": "轮廓可公开下载、许可CC BY 4.0；底层航拍影像未发布。",
+      "reason": "合成材料明确支持本题维度；仅记录此数据及相应范围。"
+    },
+    {
+      "source_text": "This synthetic excerpt describes a reading exercise and gives no data details.",
+      "choice": "not_reported",
+      "judgment": "本批所读材料未说明该类数据的本题信息；不能判断全文是否使用。",
+      "reason": "缺少局部报告不是全篇不存在的证据。"
+    }
+  ]
+}

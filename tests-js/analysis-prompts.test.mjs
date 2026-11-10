@@ -107,8 +107,9 @@ test('npm tarball contains prompt assets and can load them without installation 
   const root = fileURLToPath(new URL('..', import.meta.url))
   const temp = await mkdtemp(join(tmpdir(), 'paper-analysis-prompts-'))
   try {
+    // Build is checked separately; suppress lifecycle logs so pack stdout stays valid JSON.
     // A private cache keeps the check independent of the caller's ~/.npm state.
-    const packed = JSON.parse(execFileSync('npm', ['pack', '--pack-destination', temp, '--cache', join(temp, 'npm-cache'), '--json'], { cwd: root, encoding: 'utf8', timeout: 30000 }))[0]
+    const packed = JSON.parse(execFileSync('npm', ['pack', '--ignore-scripts', '--pack-destination', temp, '--cache', join(temp, 'npm-cache'), '--json'], { cwd: root, encoding: 'utf8', timeout: 30000 }))[0]
     assert.ok(packed.files.some(item => item.path === 'prompts/analysis/knowledge.json'))
     assert.ok(packed.files.some(item => item.path === 'prompts/analysis/note.json'))
     assert.ok(packed.files.some(item => item.path === 'prompts/analysis/review.json'))
@@ -116,6 +117,7 @@ test('npm tarball contains prompt assets and can load them without installation 
     assert.ok(packed.files.some(item => item.path === 'prompts/analysis/coverage.json'))
     assert.ok(packed.files.some(item => item.path === 'prompts/analysis/agent.json'))
     assert.ok(packed.files.some(item => item.path === 'prompts/reading/protocol.json'))
+    assert.ok(packed.files.some(item => item.path === 'prompts/reading/protocol-v5.json'))
     for (const id of [...questionIds, 'q1', 'q2', 'q3', 'q4', 'q5', 'q6']) assert.ok(packed.files.some(item => item.path === `prompts/reading/${id}.json`))
     const archive = join(temp, packed.filename)
     execFileSync('tar', ['-xf', archive, '-C', temp], { timeout: 30000 })
@@ -126,8 +128,8 @@ test('npm tarball contains prompt assets and can load them without installation 
     assert.match(packaged.renderCoveragePrompt({ question_coverage: { complete: false, by_question: { q1: { failed_batches: [0] } } } }), /complete or partial/)
     assert.match(packaged.renderNotePrompt('Synthetic', [], false, 0), /compiled reading-answer records/)
     const questionnaire = packagedQuestions.loadQuestionnaire()
-    assert.equal(questionnaire.questions.length, 23)
+    assert.equal(questionnaire.questions.length, 36)
     assert.deepEqual(questionnaire.questions.map(question => question.id), questionIds)
-    assert.equal(questionnaire.version, 'reading-questions-v4')
+    assert.equal(questionnaire.version, 'reading-questions-v5')
   } finally { await rm(temp, { recursive: true, force: true }) }
 })

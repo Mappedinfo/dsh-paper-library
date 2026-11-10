@@ -43,9 +43,17 @@ export async function collectFeedback(chunks, signal) {
   return answer
 }
 
+/** Optional host routing identity, never a caller-supplied transport header. */
+export function sessionContext(sessionId) {
+  if (sessionId === undefined) return {}
+  if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 200 || sessionId.trim() !== sessionId || /[\x00-\x1f\x7f]/.test(sessionId)) throw new Error('Invalid Harness sessionId')
+  return { sessionId }
+}
+
 /** Reuse Harness provider services without reading or retaining credentials. */
 export function createHarnessAI(llm, createUserMessage, config, { attachments } = {}) {
-  return async ({ prompt, provider = config.provider, model = config.model, reasoningEffort, signal, images }) => {
+  return async ({ prompt, provider = config.provider, model = config.model, reasoningEffort, signal, images, sessionId }) => {
+    const context = sessionContext(sessionId)
     if (!provider || !model) throw new Error('Select a configured Harness provider and model before requesting AI feedback')
     if (reasoningEffort !== undefined && (typeof reasoningEffort !== 'string' || !reasoningEffort.trim())) throw new Error('reasoningEffort must be a non-empty configured model effort')
     signal?.throwIfAborted()
@@ -76,7 +84,7 @@ export function createHarnessAI(llm, createUserMessage, config, { attachments } 
       signal?.throwIfAborted()
     }
     const message = createUserMessage({ content, source: { kind: 'paper-library-ai', plugin: 'paper-library' } })
-    const options = { ...(prepared?.config || call), messages: [message], signal }
+    const options = { ...(prepared?.config || call), messages: [message], signal, ...context }
     return collectFeedback(prepared ? prepared.stream(options) : llm.stream(options), signal)
   }
 }

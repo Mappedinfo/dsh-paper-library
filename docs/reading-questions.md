@@ -8,7 +8,7 @@
 
 目前 PDF 内部没有摘要的条目，不保证能仅凭版式规则准确找出原始 Abstract。全文模型不会因此补写一个“摘要”。明确的 `mode:"metadata"` 仍保留为独立、可选的模型资料提取入口；它不会在全文流程中自动调用。`mode:"full"` 即使收到旧设置的 `apply_metadata:true`，也不提取和写回书目字段。
 
-## 23 个问题及编辑位置
+## 36 个问题及编辑位置（保留原23题，新增13题）
 
 | 编号 | 实际问题 | 主要选项 | 权威文件 |
 | --- | --- | --- | --- |
@@ -35,8 +35,21 @@
 | q6_study_limitation | 作者明确说明了本研究哪些对象、条件或内容尚未检验或受限？ | 本研究局限 | [q6_study_limitation.json](../prompts/reading/q6_study_limitation.json) |
 | q6_prior_gap | 作者明确指出了先前文献中的哪些具体未解决问题？ | 先前研究缺口 | [q6_prior_gap.json](../prompts/reading/q6_prior_gap.json) |
 | q6_reader_check | 哪一个作者未明确提出的问题还需要读者继续核对？ | 读者核对问题，至多一条 | [q6_reader_check.json](../prompts/reading/q6_reader_check.json) |
+| q7_mobility_source | 本批材料明确报告了哪些human mobility（人类出行/活动）数据、样本或数据来源，分别属于本研究实际使用、计划使用还是背景提及？ | 人类出行数据来源 | [q7_mobility_source.json](../prompts/reading/q7_mobility_source.json) |
+| q7_mobility_scope | 本批材料明确报告了哪项human mobility（人类出行/活动）数据的空间范围、时间范围、研究对象与样本数量？ | 人类出行数据范围 | [q7_mobility_scope.json](../prompts/reading/q7_mobility_scope.json) |
+| q7_mobility_granularity | 本批材料明确报告了哪项human mobility（人类出行/活动）数据的记录单位、空间粒度和时间粒度？ | 人类出行数据粒度 | [q7_mobility_granularity.json](../prompts/reading/q7_mobility_granularity.json) |
+| q7_mobility_creation | 本批材料明确报告了哪项human mobility（人类出行/活动）数据如何采集、制作或预处理？ | 人类出行数据制作 | [q7_mobility_creation.json](../prompts/reading/q7_mobility_creation.json) |
+| q7_mobility_access | 本批材料明确报告了哪项human mobility（人类出行/活动）数据是否公开、如何获取以及使用限制？ | 人类出行数据获取 | [q7_mobility_access.json](../prompts/reading/q7_mobility_access.json) |
+| q7_mobility_use | 本批材料明确报告了哪项human mobility（人类出行/活动）数据被哪个方法在什么阶段、以什么角色实际使用？ | 人类出行数据用途 | [q7_mobility_use.json](../prompts/reading/q7_mobility_use.json) |
+| q8_building_source | 本批材料明确报告了哪些建筑/建成环境数据、样本或数据来源，分别属于本研究实际使用、计划使用还是背景提及？ | 建筑数据来源 | [q8_building_source.json](../prompts/reading/q8_building_source.json) |
+| q8_building_scope | 本批材料明确报告了哪项建筑/建成环境数据的空间范围、时间范围、研究对象与样本数量？ | 建筑数据范围 | [q8_building_scope.json](../prompts/reading/q8_building_scope.json) |
+| q8_building_granularity | 本批材料明确报告了哪项建筑/建成环境数据的记录单位、空间粒度和时间粒度？ | 建筑数据粒度 | [q8_building_granularity.json](../prompts/reading/q8_building_granularity.json) |
+| q8_building_creation | 本批材料明确报告了哪项建筑/建成环境数据如何采集、制作或预处理？ | 建筑数据制作 | [q8_building_creation.json](../prompts/reading/q8_building_creation.json) |
+| q8_building_access | 本批材料明确报告了哪项建筑/建成环境数据是否公开、如何获取以及使用限制？ | 建筑数据获取 | [q8_building_access.json](../prompts/reading/q8_building_access.json) |
+| q8_building_use | 本批材料明确报告了哪项建筑/建成环境数据被哪个方法在什么阶段、以什么角色实际使用？ | 建筑数据用途 | [q8_building_use.json](../prompts/reading/q8_building_use.json) |
+| q9_method_naming | 本批材料中的方法准确名称、缩写全称是什么，作者为什么这样命名，名称与机制如何对应？ | 方法名称与命名依据 | [q9_method_naming.json](../prompts/reading/q9_method_naming.json) |
 
-所有问题都只含一种肯定选码，以及 `other`（其他）、`not_reported`（本批未报告）、`not_applicable`（本批不适用）。按单一要素、陈述、材料或关系逐条回答，分别统计缺题、错误选码和证据定位。某题有多个条目时可重复该题 ID；两个读者题每题最多一条，包括 `other`。共同规则、题目清单、分组、预算和版本在 [protocol.json](../prompts/reading/protocol.json)，每题有三个通用学习材料的合成示例。表格是导览，实际措辞和选项以 JSON 为准。
+所有问题都只含一种肯定选码，以及 `other`（其他）、`not_reported`（本批未报告）、`not_applicable`（本批不适用）。按单一要素、陈述、材料或关系逐条回答，分别统计缺题、错误选码和证据定位。某题有多个条目时可重复该题 ID；两个读者题每题最多一条，包括 `other`。共同规则、题目清单、分组、预算和版本在 [protocol-v5.json](../prompts/reading/protocol-v5.json)，每题有三个通用学习材料的合成示例。表格是导览，实际措辞和选项以 JSON 为准。
 
 ### 本轮消除的混合判断
 
@@ -49,11 +62,11 @@
 
 拆题改善可审阅性，不证明模型语义准确率已经提高。正文题仍是有界的出处候选集合，每条一个事实与必要条件；最多 12 条，不声称穷尽全文事实。读者两题评价依据、归属和推断强度，不评价是否列全所有可能解释。它们保留独立能力，也可用 `question_ids` 选择只提取作者明确内容。
 
-其他实际提示也外置在 [prompts/analysis](../prompts/analysis)：`note.json` 精读笔记、`review.json` 评审、`metadata.json` 独立资料提取、`knowledge.json` 手动知识工作流、`coverage.json` 缺失范围说明、`agent.json` 原生 DSH 分析代理的基础约束。JSON 是随软件发布的本地资产，无需把真实论文交给 AI 才能审阅提示。修改这些辅助模板后需重启已加载的服务；阅读题库在每个新作业启动时读取、冻结并保存版本及内容哈希。当前新作业冻结 `reading-questions-v4`；旧 v1/v2/v3 作业继续使用原快照、问题和分组，同一个请求标识不会因题库变化自动重放或再次计费。要用 v4 分析须创建新请求。旧 q1–q6 文件保留，旧宽题答案不能冒充已回答全部分题。
+其他实际提示也外置在 [prompts/analysis](../prompts/analysis)：`note.json` 精读笔记、`review.json` 评审、`metadata.json` 独立资料提取、`knowledge.json` 手动知识工作流、`coverage.json` 缺失范围说明、`agent.json` 原生 DSH 分析代理的基础约束。JSON 是随软件发布的本地资产，无需把真实论文交给 AI 才能审阅提示。修改这些辅助模板后需重启已加载的服务；阅读题库在每个新作业启动时读取、冻结并保存版本及内容哈希。当前新作业冻结 `reading-questions-v5`；旧 v1/v2/v3/v4 作业继续使用原快照、问题和分组，同一个请求标识不会因题库变化自动重放或再次计费。要用 v5 分析须创建新请求。旧 q1–q6 文件保留，旧宽题答案不能冒充已回答全部分题。
 
 ## 选码手册与编译说明
 
-应用 v4 时须同时更新后端代码和 `prompts/reading/` 资产，已加载旧后端的服务需重新加载代码后再启动 v4 作业。仅替换题库文件不能让旧代码识别新分题与目标主张合同。
+应用 v5 时须同时更新后端代码和 `prompts/reading/` 资产，已加载旧后端的服务需重新加载代码后再启动 v5 作业。仅替换题库文件不能让旧代码识别新分题与目标主张合同。
 
 自 v2 起每个选项都有 `coding`：`definition` 定义其含义，`include_when` 说明何时选用，`exclude_when` 说明边界。模型同时收到选项的 `projection`，这是程序生成的只读编译说明，解释节点类型、关系语义和方向。选码依靠陈述的内容、对象、条件与证据，不能机械按语气或因果关键词分类；材料有相关内容却缺少足够语义依据时，应选 `other` 并说明。
 
@@ -190,3 +203,15 @@ PDF 定位除了字面／空白等价匹配，还支持固定拉丁连字和单�
 完整浏览以保存的逐题判断为事实源，沿“问题总览 → 每页 12 项判断 → 单项证据与关系”逐层展开，不再要求把整批所有内容塞入同一个 80 节点摘要草稿。旧摘要草稿和全库画布的预算保持不变；每个判断可独立调用原编译器，完整核对该项的所有来源与关系。缺少安全关系映射时保留判断、证据及限制说明。中性回答也计入全文目录，但不冒充肯定主张。
 
 分页固定 request_id；刷新明确选择最新任务。接口覆盖 DSH／独立服务／headless，详见 [分层全文图谱](api.md#分层全文图谱)。新任务把摘要图预算省略与关系映射提示分开计数；仅摘要图分页不再把问题已答完的任务标成 partial，真正的未读、未答、保存失败和其他请求产物缺口仍照实报告。
+
+## v5 数据与方法补充检查
+
+原23题及其标识完整保留；q7/q8各分为来源、范围、粒度、制作、获取、用途六题，q9核对方法原名/全称及命名理由。数据详情逐维保留未说明，不把局部缺失升级为全文没有、不使用或不公开。用途区分训练、验证/选模、最终测试、校准、推断条件和参数来源；命名理由必须有作者来源，机制解释另标读者解释。
+
+新全文请求默认每批36次问题调用，比原23次多13次；不自动提高既有 `maxCalls`。已有文献的补充分析可用新 `request_id` 显式选择 q7/q8/q9 的13个问题，保留原任务/批注；覆盖会明确标为子集，不冒充36题已全部重读。未经用户请求不批量回填旧文献。
+
+精读笔记、评审、手动知识笔记及原生「问 DSH」/伴学均带数据与方法清单。原生问答仍按现有只读补读预算（通常6次、约24000字符），不为清单自动启动全文分析；新冻结引用才包含新指引，旧引用与回复不变。运行中宿主需安全重载后端及内置skills；请先保存草稿并确认会话、笔迹、伴学、分析队列空闲。题库结构测试及合成模型替身测试不等于真实论文回答质量已验证。
+
+当36题在多批材料中反复列出范围，最小笔记材料仍超出原24KB预算时，仅对完全相同的有序问题清单去重：每批的 `question_scope_index`（从0开始）指向 `packing.question_scopes`。失败、缺题与状态仍各批独立，引用和早晚批次仍保留，原始答案不改；记录 `balanced-excerpt-v3` 与 `QUESTION_SCOPE_DICTIONARY`，没有增加上下文或调用预算。
+
+兼容正在使用的旧宿主：`protocol.json`保留原v4的23题，新加载的后端默认读取`protocol-v5.json`的36题。因此新后台进程立即使用新题库，运行中的旧DSH仍可正常用原题库；不强制重载用户窗口。自定义题库目录继续使用该目录的`protocol.json`。原生问答/内置skills更新要等宿主以后正常重载才生效。

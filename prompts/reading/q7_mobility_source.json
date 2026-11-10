@@ -1,0 +1,35 @@
+{
+  "id": "q7_mobility_source",
+  "title": "人类出行数据来源",
+  "question": "本批材料明确报告了哪些human mobility（人类出行/活动）数据、样本或数据来源，分别属于本研究实际使用、计划使用还是背景提及？",
+  "guidance": "逐项记录原始名称、提供者和版本（如有）；区分原始观测、代理数据和合成数据。建筑、POI、土地利用或人口静态分布本身不能当作人的移动轨迹。建筑题明确检查轮廓、楼高/楼层、用途、年代、室内/BIM、街景/遥感或其他建成环境代理；POI与土地利用不自动等于单栋建筑实测。 只回答本题维度，保留研究归属和页码来源，不重复泛化列举所有要素。即使看似不相关也须检查并回答：本批缺少报告用 not_reported（未说明）；确无适用对象才用 not_applicable 并说明理由。局部未提及不能推出整篇未使用。",
+  "options": [
+    {
+      "id": "source",
+      "label": "数据来源的有据记录",
+      "coding": {
+        "definition": "本批原文对一份human mobility（人类出行/活动）数据的数据来源作出可定位说明。",
+        "include_when": "有直接来源支持该维度，包括明确说明未使用、受限或非公开；保留对象、范围和实际/计划/背景归属。",
+        "exclude_when": "仅在附近出现相关词、只说明其他维度或依据常识猜测；不能以没有提及证明全文没有使用。"
+      },
+      "graph": {
+        "node_type": "claim",
+        "relation": "reports"
+      }
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "The synthetic mobility study uses travel diaries collected from 120 adult volunteers.",
+      "choice": "source",
+      "judgment": "本研究实际使用120名成年志愿者的出行日记。",
+      "reason": "合成材料明确支持本题维度；仅记录此数据及相应范围。"
+    },
+    {
+      "source_text": "This synthetic excerpt describes a reading exercise and gives no data details.",
+      "choice": "not_reported",
+      "judgment": "本批所读材料未说明该类数据的本题信息；不能判断全文是否使用。",
+      "reason": "缺少局部报告不是全篇不存在的证据。"
+    }
+  ]
+}

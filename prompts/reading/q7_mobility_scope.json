@@ -1,0 +1,35 @@
+{
+  "id": "q7_mobility_scope",
+  "title": "人类出行数据范围",
+  "question": "本批材料明确报告了哪项human mobility（人类出行/活动）数据的空间范围、时间范围、研究对象与样本数量？",
+  "guidance": "一条回答绑定一份数据及其版本/子样本；记录地域/研究区、日期/时期/持续时间、纳入对象、样本数及筛选范围。分别写出已知与未说明字段，不把研究标题、地图底图、可下载地区或方法适用范围当成实际数据覆盖。 只回答本题维度，保留研究归属和页码来源，不重复泛化列举所有要素。即使看似不相关也须检查并回答：本批缺少报告用 not_reported（未说明）；确无适用对象才用 not_applicable 并说明理由。局部未提及不能推出整篇未使用。",
+  "options": [
+    {
+      "id": "scope",
+      "label": "数据范围的有据记录",
+      "coding": {
+        "definition": "本批原文对一份human mobility（人类出行/活动）数据的数据范围作出可定位说明。",
+        "include_when": "有直接来源支持该维度，包括明确说明未使用、受限或非公开；保留对象、范围和实际/计划/背景归属。",
+        "exclude_when": "仅在附近出现相关词、只说明其他维度或依据常识猜测；不能以没有提及证明全文没有使用。"
+      },
+      "graph": {
+        "node_type": "claim",
+        "relation": "reports"
+      }
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "The synthetic travel diaries cover District A during June 2024 and contain 120 adult volunteers.",
+      "choice": "scope",
+      "judgment": "出行日记覆盖A区、2024年6月、120名成年志愿者；不能扩为全市全人口。",
+      "reason": "合成材料明确支持本题维度；仅记录此数据及相应范围。"
+    },
+    {
+      "source_text": "This synthetic excerpt describes a reading exercise and gives no data details.",
+      "choice": "not_reported",
+      "judgment": "本批所读材料未说明该类数据的本题信息；不能判断全文是否使用。",
+      "reason": "缺少局部报告不是全篇不存在的证据。"
+    }
+  ]
+}

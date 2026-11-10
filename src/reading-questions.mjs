@@ -54,11 +54,13 @@ export function loadQuestionnaire(directory = DIRECTORY) {
     if (Buffer.byteLength(raw) > 64000) throw fail(`问题配置过大：${name}`)
     return JSON.parse(raw)
   }
-  const protocol = read('protocol.json')
+  // Keep protocol.json at v4 for a running old host; only newly loaded code selects v5.
+  // Explicit custom directories retain the historical protocol.json contract.
+  const protocol = read(directory === DIRECTORY ? 'protocol-v5.json' : 'protocol.json')
   // 未声明清单的 v1/v2 配置沿用旧六题；新题库的文件清单与版本一起冻结。
   const questionIds = protocol.question_ids ?? LEGACY_QUESTION_IDS
-  if (!Array.isArray(questionIds) || !questionIds.length || questionIds.length > 24 || new Set(questionIds).size !== questionIds.length ||
-      questionIds.some(id => typeof id !== 'string' || id.length > 64 || !/^q[1-9][0-9]*(?:_[a-z][a-z_]*)?$/.test(id))) throw fail('题库清单须为至多 24 个不重复的有界问题标识。')
+  if (!Array.isArray(questionIds) || !questionIds.length || questionIds.length > 40 || new Set(questionIds).size !== questionIds.length ||
+      questionIds.some(id => typeof id !== 'string' || id.length > 64 || !/^q[1-9][0-9]*(?:_[a-z][a-z_]*)?$/.test(id))) throw fail('题库清单须为至多 40 个不重复的有界问题标识。')
   const questions = questionIds.map(id => read(`${id}.json`))
   if (!text(protocol.version, 100) || !Array.isArray(protocol.rules) || !protocol.rules.length || protocol.rules.some(rule => !text(rule)) || !isObject(protocol.templates)) throw fail('阅读协议缺少版本或规则。')
   if (protocol.codebook_required !== undefined && typeof protocol.codebook_required !== 'boolean') throw fail('codebook_required 必须是布尔值。')

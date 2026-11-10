@@ -34,7 +34,7 @@ export function analysisQuestionOptions(input = {}) {
 }
 
 export function validQuestionIds(value) {
-  if (!Array.isArray(value) || !value.length || value.length > 24 || new Set(value).size !== value.length) return false
+  if (!Array.isArray(value) || !value.length || value.length > 40 || new Set(value).size !== value.length) return false
   const current = loadQuestionnaire().questions.map(question => question.id)
   // 旧标识只允许通过入口的身份校验，供已保存请求读取；新请求随后须匹配当前题库。
   const known = new Set([...current, ...LEGACY_IDS])

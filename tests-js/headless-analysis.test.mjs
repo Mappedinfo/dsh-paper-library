@@ -88,13 +88,13 @@ test('metadata batch uses first page and never applies metadata, reviews or read
   assert.ok(jobs.every(r => r.value.execution === 'direct' && r.value.review === false && r.value.notes === false))
 })
 
-test('full mode defaults to twenty-three separate question calls and one reading note without automatic review or metadata writes', async () => {
+test('full mode defaults to thirty-six separate question calls and one reading note without automatic review or metadata writes', async () => {
   const f = await fixture(), result = await f.handle({ ...request, ids: ['paper-a'], mode: 'full' })
   assert.equal(result.status, 'complete'); assert.equal(f.calls.length, callsPerBatch + 1)
   assert.equal(Object.hasOwn(f.requests.find(r => r.action === 'paper_analysis_batch'), 'pages'), false)
   assert.ok(result.results[0].note_draft_id)
   assert.equal(result.results[0].review_draft_id, undefined)
-  assert.equal(result.results[0].questionnaire.version, 'reading-questions-v4')
+  assert.equal(result.results[0].questionnaire.version, 'reading-questions-v5')
   assert.equal(result.results[0].question_coverage.complete, true)
   assert.deepEqual(result.results[0].question_summary, { answers: questionIds.length, valid_answers: questionIds.length, invalid_answers: 0, other_answers: 0, projection_limitations: 0, graph_budget_omissions: 0, relation_limitations: 0, reused_groups: 0, repair_revalidated: 0, repair_repaired: 0, repair_withdrawn: 0, repair_unresolved: 0 })
   const graph=await f.handle({action:'paper_analysis_graph',id:'paper-a',request_id:result.results[0].request_id})
@@ -271,7 +271,7 @@ test('attempt budget bounds model calls and keeps earlier results', async () => 
   assert.match(result.results[1].error, /次数|预算/)
 })
 
-test('twenty-three-question runtime stops at the explicit call budget without increasing it or extracting a later batch', async () => {
+test('thirty-six-question runtime stops at the explicit call budget without increasing it or extracting a later batch', async () => {
   const maxCalls = callsPerBatch - 1
   const f = await fixture({ maxCalls })
   const result = await f.handle({ ...request, ids: ['paper-a'], request_id: 'bounded-full', mode: 'full', notes: false, review: false })
@@ -286,7 +286,7 @@ test('twenty-three-question runtime stops at the explicit call budget without in
   assert.equal(f.calls.length, maxCalls)
 })
 
-test('a budget covering all twenty-three answers does not silently add a reading-note call', async () => {
+test('a budget covering all thirty-six answers does not silently add a reading-note call', async () => {
   const f = await fixture({ maxCalls: callsPerBatch })
   const result = await f.handle({ ...request, ids: ['paper-a'], request_id: 'answers-only-budget', mode: 'full' })
   assert.equal(result.status, 'partial')

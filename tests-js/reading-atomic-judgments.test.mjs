@@ -170,5 +170,5 @@ test('all current synthetic coding examples parse and compile through the real P
     else assert.equal(graph.nodes.length, 0)
     checked++
   }
-  assert.equal(checked, 69)
+  assert.equal(checked, config.questions.reduce((total, question) => total + question.examples.length, 0))
 })

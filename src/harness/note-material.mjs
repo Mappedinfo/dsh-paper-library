@@ -290,7 +290,38 @@ export async function packNoteMaterial({ batches, totalBatches = batches.length,
       if (card.generated_summary) { card.generated_summary = clip(card.generated_summary, Math.floor([...card.generated_summary].length / 2)); removed = true; break }
     }
     if (!removed) {
-      const error = new Error('NOTE_MATERIAL_BUDGET_EXCEEDED'); error.code = 'NOTE_MATERIAL_BUDGET_EXCEEDED'; throw error
+      // Many questions can make repeated scope IDs larger than the protected citations.
+      // Share only identical ordered ID lists; per-card failure/missing counts stay local.
+      const scopes = new Map()
+      for (const card of material) {
+        const ids = card.question_groups_summary?.question_ids
+        if (Array.isArray(ids)) {
+          const key = JSON.stringify(ids), scope = scopes.get(key) ?? { ids, cards: [] }
+          scope.cards.push(card.batch); scopes.set(key, scope)
+        }
+      }
+      const shared = [...scopes.values()].filter(scope => scope.cards.length > 1)
+      if (shared.length) {
+        const compact = structuredClone(material)
+        const dictionary = shared.map(scope => scope.ids)
+        for (const card of compact) {
+          const index = shared.findIndex(scope => scope.cards.includes(card.batch))
+          if (index < 0) continue
+          card.question_groups_summary.question_scope_index = index
+          delete card.question_groups_summary.question_ids
+        }
+        const candidate = { ...coverage, question_scopes: dictionary }
+        if (bytes({ batches: compact, packing: candidate }) < coverage.material_bytes) {
+          material = compact
+          coverage.question_scopes = dictionary
+          coverage.version = 'balanced-excerpt-v3'
+          coverage.partial_reasons = unique([...coverage.partial_reasons, 'QUESTION_SCOPE_DICTIONARY'])
+          removed = true
+        }
+      }
+      if (!removed) {
+        const error = new Error('NOTE_MATERIAL_BUDGET_EXCEEDED'); error.code = 'NOTE_MATERIAL_BUDGET_EXCEEDED'; throw error
+      }
     }
     coverage.partial_reasons = unique([...coverage.partial_reasons, 'MATERIAL_BUDGET_COMPACTED'])
     refreshCoverage()

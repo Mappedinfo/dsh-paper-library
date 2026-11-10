@@ -24,7 +24,7 @@ async function fixture(t, override = {}) {
   const source = page => ({ id: `source-${page}`, entity: { kind: 'paper', id: 'paper-a' }, locator: { page }, content_hash: `hash-${page}`,
     text: `Reading exercise ${page}. Method A produced result B. Check the evidence before accepting a conclusion. Reading checks improve recall. Nine of twelve readers recalled the passage after a source check.` })
   f.store = createLocalStateStore({ library: join(root, 'library'), home: join(root, 'state') })
-  f.options = { store: f.store, library: join(root, 'library'), resolveModel: async () => ({ provider: 'synthetic', model: 'deterministic' }),
+  f.options = { store: f.store, library: join(root, 'library'), resolveModel: async () => ({ provider: 'synthetic', model: 'deterministic', ...(f.sessionId === undefined ? {} : { sessionId: f.sessionId }) }),
     dispatch: async request => {
       f.kernel.push(request)
       if (request.action === 'get') return { id: request.id, pdf: true, title: f.title, modified: f.modified, abstract: 'DO_NOT_SEND_PRIVATE_METADATA' }
@@ -58,14 +58,14 @@ async function fixture(t, override = {}) {
   return f
 }
 
-test('twenty-three separate questions persist host-located evidence, raw replies and option candidates without metadata extraction', async t => {
+test('thirty-six separate questions persist host-located evidence, raw replies and option candidates without metadata extraction', async t => {
   const f = await fixture(t), result = await f.run({ apply_metadata: true })
   assert.equal(result.status, 'complete', JSON.stringify(result))
   assert.equal(result.analysis_complete, true)
   assert.equal(result.question_coverage.complete, true)
   assert.equal(result.coverage.full_document, true)
-  assert.equal(questionnaire.version, 'reading-questions-v4')
-  assert.deepEqual(questionIds, ["q1_method","q1_dataset","q1_metric","q1_task","q2_author_claim","q2_reported_result","q2_reader_inference","q3_text","q3_figure","q3_table","q3_formula","q4_supports","q4_qualifies","q4_contradicts","q5_method_data","q5_method_result","q5_data_result","q5_metric_result","q5_task_result","q6_research_question","q6_study_limitation","q6_prior_gap","q6_reader_check"])
+  assert.equal(questionnaire.version, 'reading-questions-v5')
+  assert.deepEqual(questionIds, ["q1_method","q1_dataset","q1_metric","q1_task","q2_author_claim","q2_reported_result","q2_reader_inference","q3_text","q3_figure","q3_table","q3_formula","q4_supports","q4_qualifies","q4_contradicts","q5_method_data","q5_method_result","q5_data_result","q5_metric_result","q5_task_result","q6_research_question","q6_study_limitation","q6_prior_gap","q6_reader_check","q7_mobility_source","q7_mobility_scope","q7_mobility_granularity","q7_mobility_creation","q7_mobility_access","q7_mobility_use","q8_building_source","q8_building_scope","q8_building_granularity","q8_building_creation","q8_building_access","q8_building_use","q9_method_naming"])
   assert.deepEqual(groups, questionIds.map(id => [id]))
   assert.equal(f.calls.length, 2 * callsPerBatch)
   assert.deepEqual(f.calls.map(call => call.analysisContext.question_ids), [...groups, ...groups])
@@ -245,20 +245,20 @@ test('historical job fingerprints remain readable and never replay under the new
   assert.equal(f.calls.length, 0)
 })
 
-test('saved v1, v2 and genuine v3 questionnaire snapshots retain original question IDs and never replay under v4', async t => {
+test('saved v1, v2, v3 and v4 questionnaire snapshots retain original question IDs and never replay under v5', async t => {
   const f = await fixture(t)
   const { createHash } = await import('node:crypto')
   const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
   const legacyIds = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']
   const legacyGroups = [['q1','q2'], ['q3','q4'], ['q5','q6']]
   const definitions = await Promise.all(legacyIds.map(id => readFile(new URL(`../prompts/reading/${id}.json`, import.meta.url), 'utf8').then(JSON.parse)))
-  for (const version of ['reading-questions-v1', 'reading-questions-v2', 'reading-questions-v3']) {
-    const protocol = version.endsWith('v3') ? structuredClone(savedV3Protocol) : { ...structuredClone(savedV2Protocol), version }
-    if (!version.endsWith('v3')) { delete protocol.question_ids; delete protocol.default_mode }
-    const questions = version.endsWith('v3')
+  for (const version of ['reading-questions-v1', 'reading-questions-v2', 'reading-questions-v3', 'reading-questions-v4']) {
+    const protocol = version.endsWith('v4') ? JSON.parse(await readFile(new URL('./fixtures/reading-protocol-v4.json', import.meta.url), 'utf8')) : version.endsWith('v3') ? structuredClone(savedV3Protocol) : { ...structuredClone(savedV2Protocol), version }
+    if (!['v3', 'v4'].some(suffix => version.endsWith(suffix))) { delete protocol.question_ids; delete protocol.default_mode }
+    const questions = ['v3', 'v4'].some(suffix => version.endsWith(suffix))
       ? await Promise.all(protocol.question_ids.map(id => readFile(new URL(`../prompts/reading/${id}.json`, import.meta.url), 'utf8').then(JSON.parse)))
       : structuredClone(definitions)
-    const savedGroups = version.endsWith('v3') ? savedV3Protocol.default_groups : legacyGroups
+    const savedGroups = ['v3', 'v4'].some(suffix => version.endsWith(suffix)) ? protocol.default_groups : legacyGroups
     if (version.endsWith('v1')) {
       delete protocol.codebook_required
       for (const question of questions) {
@@ -414,11 +414,14 @@ test('resume after a failed group preserves the first response and calls only un
   }
   assert.equal((await f.run({question_ids:ids})).status,'failed')
   f.response=null
+  f.sessionId='resolved-session-after-legacy-snapshot'
   await f.handle({action:'paper_analysis_resume',id:'paper-a',request_id:'run-a',new_request_id:'resume-after-failure'})
   await f.handle.wait('paper-a','resume-after-failure')
   const result=await f.handle({action:'paper_analysis_get',id:'paper-a'})
   assert.equal(result.status,'complete',JSON.stringify(result))
   assert.equal(f.calls.length,5)
+  assert.equal(f.calls[0].sessionId,undefined)
+  assert.ok(f.calls.slice(2).every(call=>call.sessionId==='resolved-session-after-legacy-snapshot'))
   assert.equal(result.question_summary.reused_groups,1)
 })
 

@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHarnessAI } from '../src/harness/ai.mjs'
 import { createPaperAnalysisAgent } from '../src/harness/paper-analysis-agent.mjs'
 import { renderAnalysisAgentPersona } from '../src/prompt-templates.mjs'
 
@@ -198,4 +199,38 @@ test('host generation rejects caller cancellation without accepting a late compl
   controller.abort(new Error('stop stalled generation'))
   await assert.rejects(result, /stop stalled generation/)
   finish('{"answers":[]}')
+})
+
+
+test('direct analysis forwards session identity to host generation and rejects malformed identities', async () => {
+  const calls = []
+  const analyze = createPaperAnalysisAgent({}, { cwd: '/synthetic/library', generate: async options => {
+    calls.push(options); return '{"title":"Synthetic"}'
+  } })
+  await analyze({ ...input, sessionId: 'paper-session-123' })
+  assert.equal(calls[0].sessionId, 'paper-session-123')
+  await analyze(input)
+  assert.equal(Object.hasOwn(calls[1], 'sessionId'), false)
+  for (const sessionId of ['', null, 4, ' bad', 'bad\nheader', 'x'.repeat(201)]) {
+    await assert.rejects(analyze({ ...input, sessionId }), /sessionId/)
+  }
+  assert.equal(calls.length, 2)
+})
+
+
+test('analysis adapter and Harness AI preserve session routing end to end with a synthetic host stream', async () => {
+  const sent = []
+  const llm = { resolveModelInfo: async () => ({}), async *stream(options) {
+    sent.push(options)
+    yield { type: 'block-end', block: { type: 'text', text: '{"title":"Synthetic"}' } }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  } }
+  const generate = createHarnessAI(llm, value => value, { maxOutputTokens: 8192 })
+  const analyze = createPaperAnalysisAgent({}, { cwd: '/synthetic/library', generate })
+  await analyze({ ...input, sessionId: 'actual-paper-session' })
+  assert.equal(sent[0].sessionId, 'actual-paper-session')
+  assert.equal(sent[0].provider, input.provider)
+  assert.equal(sent[0].model, input.model)
+  assert.equal(sent[0].maxTokens, 8192)
+  assert.equal(sent[0].tools, undefined)
 })

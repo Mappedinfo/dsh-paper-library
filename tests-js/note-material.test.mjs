@@ -143,7 +143,7 @@ function savedV3Questionnaire() {
 
 function atomicBatches(pageCounts = Array(12).fill(1), { missingQuestion, usePdfSnapshots = false, dense = false, current = false } = {}) {
   const config = current ? loadQuestionnaire() : savedV3Questionnaire(), sources = new Map(), batches = []
-  assert.equal(config.questions.length, current ? 23 : 13, 'the chosen version retains its actual question definitions')
+  assert.equal(config.questions.length, current ? 36 : 13, 'the chosen version retains its actual question definitions')
   let page = 0
   for (const [index, pageCount] of pageCounts.entries()) {
     const selected = []
@@ -280,20 +280,23 @@ test('twelve dense batches with seventy-eight affirmative answers and long Chine
   assert.equal(JSON.stringify(batches), before, 'all 936 affirmative saved answers remain unchanged')
 })
 
-test('twelve current v4 batches retain all twenty-three saved question scopes under the unchanged note budget', async () => {
+test('twelve current v5 batches retain all thirty-six saved question scopes under the unchanged note budget', async () => {
   const { batches, sources, questionIds } = atomicBatches(undefined, { current: true, usePdfSnapshots: true })
   const before = JSON.stringify(batches), { putExcerpt, saved } = excerptWriter(sources)
   const result = await packNoteMaterial({ batches, paperId: 'paper-x', getSource: async id => sources.get(id), putExcerpt })
   assertExactMaterialBudget(result)
   assert.equal(result.material.length, 12)
-  assert.equal(result.coverage.answers_total, 12 * 23)
-  assert.equal(result.coverage.valid_answers_total, 12 * 23)
+  assert.equal(result.coverage.version, 'balanced-excerpt-v3')
+  assert.ok(result.coverage.partial_reasons.includes('QUESTION_SCOPE_DICTIONARY'))
+  assert.deepEqual(result.coverage.question_scopes, [questionIds])
+  assert.equal(result.coverage.answers_total, 12 * 36)
+  assert.equal(result.coverage.valid_answers_total, 12 * 36)
   assert.deepEqual(result.coverage.batch_indices, Array.from({ length: 12 }, (_, index) => index + 1))
   for (const card of result.material) {
-    const retainedIds = card.question_groups_summary?.question_ids ?? card.question_groups.flatMap(group => group.question_ids)
+    const retainedIds = card.question_groups_summary?.question_ids ?? result.coverage.question_scopes?.[card.question_groups_summary?.question_scope_index] ?? card.question_groups.flatMap(group => group.question_ids)
     assert.deepEqual(retainedIds, questionIds)
     const refs = [...card.answers.flatMap(answer => [...answer.evidence, ...(answer.target_claim ? [answer.target_claim] : [])]), ...card.nodes.filter(node => node.source_id)]
-    assert.ok(refs.length > 0, `v4 batch ${card.batch} keeps a bound citation`)
+    assert.ok(refs.length > 0, `v5 batch ${card.batch} keeps a bound citation`)
     for (const ref of refs) assert.ok(saved.get(ref.source_id).text.includes(ref.quote))
     for (const answer of card.answers.filter(answer => answer.question_id.startsWith('q4_') && !answer.neutral)) assert.ok(answer.target_claim)
   }
@@ -359,4 +362,26 @@ test('a missing or unreadable Q4 target cannot enter note material as an untarge
     assert.ok(result.material[0].omissions.answer_details >= 1, failure)
     assert.equal(JSON.stringify(batch), before)
   }
+})
+
+test('shared v5 question scopes preserve each batch failure and never promote missing answers', async () => {
+  const { batches, sources, questionIds } = atomicBatches(undefined, { current: true, usePdfSnapshots: true, missingQuestion: { batch: 7, id: 'q8_building_use' } })
+  const before=JSON.stringify(batches), { putExcerpt }=excerptWriter(sources)
+  const result=await packNoteMaterial({batches,paperId:'paper-x',getSource:async id=>sources.get(id),putExcerpt,questionCoverage:{complete:false}})
+  assertExactMaterialBudget(result)
+  assert.ok(result.coverage.question_scopes?.length)
+  for(const card of result.material) {
+    const summary=card.question_groups_summary
+    const ids=summary?.question_ids ?? result.coverage.question_scopes?.[summary?.question_scope_index] ?? card.question_groups.flatMap(group=>group.question_ids)
+    assert.deepEqual(ids,questionIds)
+    if(card.batch===8) {
+      assert.deepEqual(summary.incomplete_question_ids,['q8_building_use'])
+      assert.deepEqual(summary.missing,{q8_building_use:1})
+      assert.deepEqual(summary.errors,{MODEL_REQUEST_FAILED:1})
+      assert.equal(card.answers.some(answer=>answer.question_id==='q8_building_use'),false)
+    }
+  }
+  assert.ok(result.coverage.partial_reasons.includes('QUESTION_GROUP_INCOMPLETE'))
+  assert.equal(result.coverage.valid_answers_total,12*36-1)
+  assert.equal(JSON.stringify(batches),before)
 })

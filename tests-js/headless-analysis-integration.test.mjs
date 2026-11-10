@@ -66,7 +66,7 @@ library.close()
     agent.model = { provider: 'synthetic', model: 'deterministic' }
     // 合成测试明确配置所需上限；生产默认预算不随题数自动提高。
     const expectedCalls = 12 * callsPerBatch + 1
-    assert.equal(expectedCalls, 277, 'only this synthetic fixture explicitly authorizes 23 × 12 + 1 calls')
+    assert.equal(expectedCalls, 433, 'only this synthetic fixture explicitly authorizes 36 × 12 + 1 calls')
     analysis = await createHeadlessAnalysis({ library, python, localStateHome, agent,
       modelConfig: { provider: 'glm', model: 'deterministic', keyEnv: 'SYNTHETIC_TEST_KEY', maxCalls: expectedCalls } })
     const input = { action: 'paper_analysis_run', ids: [paper.id], request_id: 'synthetic-long-note', notes: true, review: false }
@@ -150,7 +150,7 @@ print(json.dumps(items))
       })
     }
     agent.model = { provider: 'synthetic', model: 'deterministic' }
-    analysis = await createHeadlessAnalysis({ library, python, localStateHome, agent })
+    analysis = await createHeadlessAnalysis({ library, python, localStateHome, agent, modelConfig: { provider: 'glm', model: 'deterministic', keyEnv: 'SYNTHETIC_TEST_KEY', maxCalls: 3 * callsPerBatch + 2 } })
     const input = { action: 'paper_analysis_run', ids: papers.map(paper => paper.id), request_id: 'learning-full', notes: false }
     const batch = await analysis(input)
     assert.equal(batch.status, 'complete', JSON.stringify(batch))

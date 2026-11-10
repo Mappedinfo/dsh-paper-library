@@ -1,0 +1,35 @@
+{
+  "id": "q8_building_use",
+  "title": "建筑数据用途",
+  "question": "本批材料明确报告了哪项建筑/建成环境数据被哪个方法在什么阶段、以什么角色实际使用？",
+  "guidance": "一个回答绑定一份数据、一个方法及一个用途/阶段；同一数据多用途分条。严格区分训练 train（拟合权重）、验证 validation（调参/选模）、测试 test（最终评价）、校准 calibration（估计/拟合参数）、推断条件/输入 inference、参数来源（固定数值/分布/先验）、空间约束与背景说明。原文只说验证/validation而无法判定调参还是独立测试时保留原词并写阶段未说明；参数不自动等于训练，参与计算不等于校验。核对切分、时间/空间/个体独立性，未报告不猜泄漏结论。 只回答本题维度，保留研究归属和页码来源，不重复泛化列举所有要素。即使看似不相关也须检查并回答：本批缺少报告用 not_reported（未说明）；确无适用对象才用 not_applicable 并说明理由。局部未提及不能推出整篇未使用。",
+  "options": [
+    {
+      "id": "use",
+      "label": "数据用途的有据记录",
+      "coding": {
+        "definition": "本批原文对一份建筑/建成环境数据的数据用途作出可定位说明。",
+        "include_when": "有直接来源支持该维度，包括明确说明未使用、受限或非公开；保留对象、范围和实际/计划/背景归属。",
+        "exclude_when": "仅在附近出现相关词、只说明其他维度或依据常识猜测；不能以没有提及证明全文没有使用。"
+      },
+      "graph": {
+        "node_type": "claim",
+        "relation": "reports"
+      }
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "At inference, the synthetic model receives building footprints as spatial constraints; no weights are fitted from them.",
+      "choice": "use",
+      "judgment": "建筑轮廓仅作为推断条件/空间约束，不用于模型权重训练；不等于验证数据。",
+      "reason": "合成材料明确支持本题维度；仅记录此数据及相应范围。"
+    },
+    {
+      "source_text": "This synthetic excerpt describes a reading exercise and gives no data details.",
+      "choice": "not_reported",
+      "judgment": "本批所读材料未说明该类数据的本题信息；不能判断全文是否使用。",
+      "reason": "缺少局部报告不是全篇不存在的证据。"
+    }
+  ]
+}

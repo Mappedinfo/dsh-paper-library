@@ -1,3 +1,4 @@
+import { sessionContext } from './ai.mjs'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { repairAnswers, repairTargetIds } from './answer-repair.mjs'
@@ -139,10 +140,12 @@ export async function runQuestionAnalysis({ input, store, kernel, sourcePack, re
     if (pack.sources.length) {
       hasText = true
       if (!model) {
-        const route = input.resume_model || await resolveModel(readSignal)
+        // Re-resolve routing identity for old snapshots while preserving the saved model.
+        const current = await resolveModel(readSignal)
+        const route = input.resume_model ? { ...input.resume_model, ...sessionContext(current?.sessionId) } : current
         signal.throwIfAborted()
         if (typeof route?.provider !== 'string' || !route.provider || typeof route.model !== 'string' || !route.model) throw problem('请为这次分析配置有效模型。')
-        model = { provider: route.provider, model: route.model, ...(route.reasoningEffort ? { reasoningEffort: route.reasoningEffort } : {}) }
+        model = { ...sessionContext(route.sessionId), provider: route.provider, model: route.model, ...(route.reasoningEffort ? { reasoningEffort: route.reasoningEffort } : {}) }
         await patch({ model })
       }
       for (const [groupIndex, questionIds] of groups.entries()) {

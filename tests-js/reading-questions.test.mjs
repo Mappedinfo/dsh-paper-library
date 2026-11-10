@@ -12,7 +12,8 @@ const legacyIds = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']
 const atomicIds = ['q1_method', 'q1_dataset', 'q1_metric', 'q1_task', 'q2_author_claim', 'q2_reported_result', 'q2_reader_inference',
   'q3_text', 'q3_figure', 'q3_table', 'q3_formula', 'q4_supports', 'q4_qualifies', 'q4_contradicts',
   'q5_method_data', 'q5_method_result', 'q5_data_result', 'q5_metric_result', 'q5_task_result',
-  'q6_research_question', 'q6_study_limitation', 'q6_prior_gap', 'q6_reader_check']
+  'q6_research_question', 'q6_study_limitation', 'q6_prior_gap', 'q6_reader_check',
+  'q7_mobility_source', 'q7_mobility_scope', 'q7_mobility_granularity', 'q7_mobility_creation', 'q7_mobility_access', 'q7_mobility_use', 'q8_building_source', 'q8_building_scope', 'q8_building_granularity', 'q8_building_creation', 'q8_building_access', 'q8_building_use', 'q9_method_naming']
 const originalV2Protocol = JSON.parse(await readFile(new URL('./fixtures/reading-protocol-v2.json', import.meta.url), 'utf8'))
 function legacyProtocol(protocol) {
   return structuredClone(originalV2Protocol)
@@ -232,12 +233,12 @@ test('whitespace restoration does not bypass the persisted quote character budge
   assert.equal(result.answers[0].evidence.length, 0)
 })
 
-test('v4 schedules twenty-three independent question calls and preserves selected order by default', () => {
-  assert.equal(atomicConfig.version, 'reading-questions-v4')
+test('v5 schedules thirty-six independent question calls and preserves selected order by default', () => {
+  assert.equal(atomicConfig.version, 'reading-questions-v5')
   assert.equal(atomicConfig.protocol.default_mode, 'separate')
   assert.deepEqual(atomicConfig.questions.map(question => question.id), atomicIds)
   assert.deepEqual(questionGroups(atomicConfig), atomicIds.map(id => [id]))
-  assert.equal(questionGroups(atomicConfig).length, 23)
+  assert.equal(questionGroups(atomicConfig).length, 36)
   assert.deepEqual(questionGroups(atomicConfig, { question_ids: ['q6_reader_check', 'q1_method'] }), [['q6_reader_check'], ['q1_method']])
   assert.deepEqual(questionGroups(atomicConfig, { question_ids: ['q6_reader_check', 'q1_method'], question_mode: 'grouped' }), [['q1_method'], ['q6_reader_check']])
   const input = pack(), returned = []
@@ -249,7 +250,7 @@ test('v4 schedules twenty-three independent question calls and preserves selecte
     assert.deepEqual(result.missing, [])
     returned.push(...result.answers.map(item => item.question_id))
   }
-  assert.deepEqual(returned, atomicIds, 'all twenty-three independent responses cover the requested questionnaire once')
+  assert.deepEqual(returned, atomicIds, 'all thirty-six independent responses cover the requested questionnaire once')
 })
 
 test('each atomic entity question accepts its own category and rejects the other three categories', () => {
@@ -289,10 +290,11 @@ test('an invalid atomic category and one missing question cannot erase separatel
   assert.equal(graph.nodes.some(node => node.type === 'metric' || node.type === 'task'), false)
 })
 
-test('v4 hashes active atomic assets and refuses unsafe or duplicate manifest identifiers', async t => {
+test('v5 hashes active atomic assets and refuses unsafe or duplicate manifest identifiers', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'reading-atomic-manifest-synthetic-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   await cp(new URL('../prompts/reading/', import.meta.url), directory, { recursive: true })
+  await writeFile(join(directory, 'protocol.json'), JSON.stringify(atomicConfig.protocol))
   const url = pathToFileURL(`${directory}/`), baseline = loadQuestionnaire(url)
   const oldFile = join(directory, 'q1.json'), oldQuestion = JSON.parse(await readFile(oldFile, 'utf8'))
   oldQuestion.question += ' 旧快照材料修订。'

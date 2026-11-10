@@ -656,3 +656,32 @@ test('recovered metadata references still obey aggregate character and byte budg
     assert.equal(result.status,'failed');assert.match(result.error,/预算/);assert.equal(f.drafts.size,0)
   }
 })
+
+
+test('ensured paper session reaches questions, notes, review and metadata without using source session as routing identity', async () => {
+  for (const mode of ['questions', 'metadata']) {
+    const f = fixture()
+    f.options.paperChat = async () => ({ model: f.route, sessionId: 'actual-paper-session' })
+    f.handle = createPaperAnalysis(f.options)
+    if (mode === 'metadata') f.output = { ...f.output, nodes: [], edges: [], assertions: [] }
+    await f.handle({ ...request, ...(mode === 'metadata' ? { mode } : { question_ids: [questionIds[0]] }), source_session_id: 'caller-session' })
+    const result = await f.done()
+    assert.notEqual(result.status, 'failed', JSON.stringify(result))
+    assert.ok(f.calls.length >= (mode === 'metadata' ? 1 : 3))
+    for (const call of f.calls) assert.equal(call.sessionId, 'actual-paper-session')
+    f.handle.dispose()
+  }
+})
+
+test('explicit analysis routes preserve valid sessionId and reject malformed identity before generation', async () => {
+  for (const sessionId of ['explicit-session', 'bad\nheader']) {
+    const f = fixture()
+    f.options.resolveModel = async () => ({ provider: 'fixture', model: 'reader', sessionId })
+    f.handle = createPaperAnalysis(f.options)
+    await f.handle({ ...request, question_ids: [questionIds[0]], notes: false, review: false })
+    const result = await f.done()
+    if (sessionId === 'explicit-session') assert.equal(f.calls[0].sessionId, sessionId)
+    else { assert.equal(result.status, 'failed'); assert.equal(f.calls.length, 0); assert.match(result.error, /sessionId/) }
+    f.handle.dispose()
+  }
+})

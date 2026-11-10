@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { awaitWithAbort } from './ai.mjs'
+import { awaitWithAbort, sessionContext } from './ai.mjs'
 import { isAbsolute } from 'node:path'
 import { renderAnalysisAgentPersona } from '../prompt-templates.mjs'
 
@@ -29,7 +29,8 @@ function completeJson(result) {
  */
 export function createPaperAnalysisAgent(ctx, { cwd, maxOutputTokens = 8192, generate } = {}) {
   if (!isAbsolute(cwd ?? '') || !Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 16384) throw new Error('Paper analysis requires an absolute library path and bounded output tokens')
-  const analyze = async ({ prompt, provider, model, reasoningEffort, signal, images } = {}) => {
+  const analyze = async ({ prompt, provider, model, reasoningEffort, signal, images, sessionId } = {}) => {
+    const context = sessionContext(sessionId)
     // 该适配器仅承诺文字输入；不得把未看图的结果当作多模态分析。
     if (images !== undefined && (!Array.isArray(images) || images.length > 0)) throw fail('当前 DSH 原生分析接口尚不能保证页面图像传给视觉模型。请使用支持图片的独立模型入口，或明确改用纯文字分析。', 'PAPER_ANALYSIS_IMAGES_UNSUPPORTED', 409)
     if (typeof prompt !== 'string' || !prompt.trim() || Buffer.byteLength(prompt) > MAX_PROMPT_BYTES) throw fail('所选材料为空或超过后台分析预算。', 'PAPER_ANALYSIS_INVALID', 400)
@@ -45,7 +46,7 @@ export function createPaperAnalysisAgent(ctx, { cwd, maxOutputTokens = 8192, gen
       try {
         deadline.throwIfAborted()
         const text = await awaitWithAbort(generate({ prompt: `${renderAnalysisAgentPersona()}\n\n${prompt}`, provider, model,
-          ...(reasoningEffort ? { reasoningEffort } : {}), signal: deadline }), deadline)
+          ...(reasoningEffort ? { reasoningEffort } : {}), ...context, signal: deadline }), deadline)
         deadline.throwIfAborted()
         return completeJson({ stopReason: 'completed', output: [{ type: 'text', text }] })
       } finally { clearTimeout(timeout) }

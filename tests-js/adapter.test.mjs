@@ -160,3 +160,24 @@ test('abort-raced waits remove listeners and observe late rejection', async () =
   rejectLate(new Error('late provider rejection'))
   await new Promise(resolve => setImmediate(resolve))
 })
+
+
+test('plain and prepared image calls pass bounded host session identity without headers', async () => {
+  for (const images of [undefined, [{ mediaType: 'image/png', data: 'c3ludGhldGlj' }]]) {
+    const sent = []
+    const stream = options => { sent.push(options); return complete() }
+    const llm = { resolveModelInfo: async () => ({}), stream,
+      prepareCall: async config => ({ config, inputModalities: ['image'], stream }) }
+    const ai = createHarnessAI(llm, value => value, { provider: 'fixture', model: 'reader', maxOutputTokens: 100 },
+      { attachments: { admitPromptContent: async content => content } })
+    await ai({ prompt: 'Synthetic text', images, sessionId: 'paper-session-123' })
+    assert.equal(sent[0].sessionId, 'paper-session-123')
+    assert.equal(Object.hasOwn(sent[0], 'headers'), false)
+    await ai({ prompt: 'Legacy synthetic text', images })
+    assert.equal(Object.hasOwn(sent[1], 'sessionId'), false)
+    for (const sessionId of ['', ' ', ' padded', 'bad\nheader', 'bad\u007f', 'x'.repeat(201), null, 123, {}]) {
+      await assert.rejects(ai({ prompt: 'Synthetic text', images, sessionId }), /sessionId/)
+    }
+    assert.equal(sent.length, 2)
+  }
+})

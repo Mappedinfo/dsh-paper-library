@@ -1,0 +1,35 @@
+{
+  "id": "q8_building_creation",
+  "title": "建筑数据制作",
+  "question": "本批材料明确报告了哪项建筑/建成环境数据如何采集、制作或预处理？",
+  "guidance": "逐项核对来源链：采集/调查/传感器/遥感/合成、抽样、清洗、去重、隐私处理、匹配/地理编码、插补、推断、标注、聚合与质量核验。只记录本批有据步骤和版本；区分实测与估计/模拟，保留偏差与缺失，不把常见制作流程当本文事实。 只回答本题维度，保留研究归属和页码来源，不重复泛化列举所有要素。即使看似不相关也须检查并回答：本批缺少报告用 not_reported（未说明）；确无适用对象才用 not_applicable 并说明理由。局部未提及不能推出整篇未使用。",
+  "options": [
+    {
+      "id": "creation",
+      "label": "数据制作的有据记录",
+      "coding": {
+        "definition": "本批原文对一份建筑/建成环境数据的数据制作作出可定位说明。",
+        "include_when": "有直接来源支持该维度，包括明确说明未使用、受限或非公开；保留对象、范围和实际/计划/背景归属。",
+        "exclude_when": "仅在附近出现相关词、只说明其他维度或依据常识猜测；不能以没有提及证明全文没有使用。"
+      },
+      "graph": {
+        "node_type": "claim",
+        "relation": "reports"
+      }
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "Synthetic building footprints were segmented from aerial images and manually checked; missing heights were imputed.",
+      "choice": "creation",
+      "judgment": "航拍影像分割轮廓、人工核查，缺失高度为插补；轮廓与高度来源应分开。",
+      "reason": "合成材料明确支持本题维度；仅记录此数据及相应范围。"
+    },
+    {
+      "source_text": "This synthetic excerpt describes a reading exercise and gives no data details.",
+      "choice": "not_reported",
+      "judgment": "本批所读材料未说明该类数据的本题信息；不能判断全文是否使用。",
+      "reason": "缺少局部报告不是全篇不存在的证据。"
+    }
+  ]
+}

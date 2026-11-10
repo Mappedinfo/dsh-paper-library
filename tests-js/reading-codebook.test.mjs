@@ -46,6 +46,7 @@ async function editableQuestionnaire(t) {
   const directory = await mkdtemp(join(tmpdir(), 'reading-codebook-synthetic-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   await cp(new URL('../prompts/reading/', import.meta.url), directory, { recursive: true })
+  await writeFile(join(directory, 'protocol.json'), JSON.stringify(config.protocol))
   const originals = new Map(await Promise.all([...new Set(['protocol', ...legacyIds, ...config.questions.map(question => question.id)])].map(async id =>
     [id, JSON.parse(await readFile(join(directory, `${id}.json`), 'utf8'))])))
   const url = pathToFileURL(`${directory}/`)
@@ -53,7 +54,7 @@ async function editableQuestionnaire(t) {
 }
 
 test('actual atomic prompts include every selected code definition, boundary, projection and synthetic example', () => {
-  assert.equal(config.version, 'reading-questions-v4')
+  assert.equal(config.version, 'reading-questions-v5')
   assert.equal(config.protocol.codebook_required, true)
   const input = pack()
   for (const ids of questionGroups(config)) {

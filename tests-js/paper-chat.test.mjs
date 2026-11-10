@@ -216,6 +216,7 @@ test('context presents bounded page-linked annotations as readable quoted Markdo
   assert.equal(result.text.includes('SOURCE_DATA'), false)
   assert.equal(result.text.includes('source_kind'), false)
   assert.match(result.text, /How does this work/)
+  for (const term of ['human mobility', '建筑', '命名理由', 'train', 'validation', 'test', '参数来源', '未说明']) assert.ok(result.text.includes(term), term)
   assert.equal(f.sends.length, 0, 'Preparing a draft never spends model quota')
   await assert.rejects(f.chat({ action: 'chat_context', id: 'paper-a', selection: { page: 4, text: 'outside' } }), /页码超出/)
   await assert.rejects(f.chat({ action: 'chat_context', id: 'paper-a', selection: { page: 1, text: 'x'.repeat(8001) } }), /8000/)

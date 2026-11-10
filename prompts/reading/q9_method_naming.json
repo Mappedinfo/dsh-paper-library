@@ -1,0 +1,41 @@
+{
+  "id": "q9_method_naming",
+  "title": "方法名称与命名依据",
+  "question": "本批材料中的方法准确名称、缩写全称是什么，作者为什么这样命名，名称与机制如何对应？",
+  "guidance": "一个回答对应一个方法。保留原名、原文给出的全称/缩写、提出者/研究归属和方法版本；沿用 q1_method 的方法身份，不新造同义方法。分别说明作者明确给出的命名理由、可由所引机制解释的含义和仍未知的来源；机制解释须标读者解释，不能冒充作者命名依据。只有名字或展开式时，命名理由写未说明；不得反推缩写全称、词源、首创者或将方法名/算法名/架构/损失/工具混同。没有方法对象时仍回答本批未说明或不适用并给范围。",
+  "options": [
+    {
+      "id": "method_naming",
+      "label": "方法原名、全称与有据命名说明",
+      "coding": {
+        "definition": "一项方法的来源名称及可核对的命名信息，允许明确保留命名理由未说明。",
+        "include_when": "原文给出名字、缩写展开式或命名解释；只有名字时保留名字并标明其他信息未知。",
+        "exclude_when": "依据名字自行展开缩写、编造命名故事，或把读者机制解释写成作者原话。"
+      },
+      "graph": {
+        "node_type": "claim",
+        "relation": "reports"
+      }
+    }
+  ],
+  "examples": [
+    {
+      "source_text": "We call the synthetic method Two-Pass Reading (TPR) because it checks each passage twice.",
+      "choice": "method_naming",
+      "judgment": "方法原名Two-Pass Reading（TPR）；作者明确说因每篇检查两次而得名。",
+      "reason": "名称、缩写和作者命名理由都直接出现。"
+    },
+    {
+      "source_text": "The synthetic study applies the HOP method.",
+      "choice": "method_naming",
+      "judgment": "方法名HOP；缩写全称与命名理由均未说明。",
+      "reason": "不能按字母或研究领域猜全称或词源。"
+    },
+    {
+      "source_text": "This synthetic excerpt lists the materials only.",
+      "choice": "not_reported",
+      "judgment": "本批没有报告方法名称或命名信息。",
+      "reason": "范围只限本批，不否定整篇报告。"
+    }
+  ]
+}
