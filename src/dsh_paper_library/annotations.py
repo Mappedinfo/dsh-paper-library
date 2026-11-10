@@ -22,6 +22,7 @@ import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
 from .handwriting import HandwritingAccess
+from .ai_annotation_style import AI_BLUE, AI_WIDTH, apply_ai_reading_style, native_border, native_style, sync_dash_appearance
 
 READER_MAX_SCALE = 8.0
 READER_MAX_PIXELS = 16_000_000
@@ -86,6 +87,8 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             updated = command + updated
         if updated != stream:
             doc.update_stream(appearance, updated)
+        if native_style(annot)["ai_reading_style"]:
+            sync_dash_appearance(doc, annot, width=AI_WIDTH)
 
     @staticmethod
     def _ink_paths(paths, page):
@@ -211,7 +214,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 rects = [list(cls._rect(rect, page, inverse=True) * page.rotation_matrix) for rect in source_rects]
             except (TypeError, ValueError):
                 pass
-        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "subject": info.get("subject", "")[:1000] if not info.get("subject", "").startswith("paper-library:") else "", "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, **cls._annotation_style(annot), "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"width": annot.border.get("width", 1)} if kind == "square" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids", "parent_id", "question", "answered_at") if key in extra}}
+        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "subject": info.get("subject", "")[:1000] if not info.get("subject", "").startswith("paper-library:") else "", "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, **cls._annotation_style(annot), **native_style(annot), "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"width": annot.border.get("width", 1)} if kind == "square" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids", "parent_id", "question", "answered_at") if key in extra}}
 
     def companion_excerpt(self, id, page):
         """One explicitly selected page, text only; no persistent index or OCR."""
@@ -424,23 +427,37 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             value["translation_unavailable"] = "批注内容或几何超过完整引用范围"
         return value
 
-    def annotations(self, id):
+    def annotations(self, id, ai_reading_only=False):
+        if not isinstance(ai_reading_only, bool):
+            raise ValueError("ai_reading_only must be boolean")
         from .annotation_favorites import ids
         favorites = ids(self, id)
         result, characters = [], 0
+        def response(truncated):
+            values = result
+            if ai_reading_only:
+                selected = {a["id"] for a in values if a.get("ai_reading_style") is True}
+                # Include native /IRT descendants, not author/content/source labels.
+                while True:
+                    children = {a["id"] for a in values if a.get("reply_to") in selected}
+                    if children <= selected:
+                        break
+                    selected |= children
+                values = [a for a in values if a["id"] in selected]
+            return {"annotations": values, "truncated": truncated, "favorites": favorites}
         with self._open_pdf(self.pdf_path(id)) as doc:
             for page in doc:
                 handwriting = self._handwriting_page(page)
                 for annot in page.annots() or []:
                     if len(result) >= _constants().MAX_ANNOTATIONS:
-                        return {"annotations": result, "truncated": True, "favorites": favorites}
+                        return response(True)
                     value = self._annotation(page, annot, handwriting=handwriting)
                     value = self._with_annotation_version(value, bool(annot.info.get("id")))
                     characters += self._annotation_characters(value)
                     if characters > 2_000_000:
-                        return {"annotations": result, "truncated": True, "favorites": favorites}
+                        return response(True)
                     result.append(value)
-        return {"annotations": result, "truncated": False, "favorites": favorites}
+        return response(False)
 
     @staticmethod
     def _document_layout(doc, id):
@@ -593,9 +610,16 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             internal_links, internal_links_truncated = self._page_internal_links(doc, current)
             return {"page": int(page), "page_count": doc.page_count, "width": width, "height": height, "scale": scale, "requested_scale": requested_scale, "limited": scale < requested_scale - 1e-6, "byte_limited": byte_limited, "pixel_width": pix.width, "pixel_height": pix.height, "limits": {"scale": READER_MAX_SCALE, "pixels": READER_MAX_PIXELS, "side": READER_MAX_SIDE, "png_bytes": READER_MAX_PNG_BYTES, "internal_links": READER_MAX_INTERNAL_LINKS}, "image": base64.b64encode(image).decode("ascii"), "words": words, "annotations": annotations, "internal_links": internal_links, "internal_links_truncated": internal_links_truncated, "words_truncated": len(raw_words) > 20000, "annotations_truncated": annotation_truncated, "rotation": current.rotation, **({"layout": layout} if layout is not None else {})}
 
-    def _add_annotation(self, doc, page, type="highlight", rects=None, text="", comment="", author="Reader", color="#ffdb66", extra=None, paths=None, width=2, annotation_id=None, parent_id=None):
+    def _add_annotation(self, doc, page, type="highlight", rects=None, text="", comment="", author="Reader", color="#ffdb66", extra=None, paths=None, width=2, annotation_id=None, parent_id=None, annotation_profile=None):
         import pymupdf as fitz
         current = self._page(doc, page)
+        if annotation_profile not in {None, "ai-reading"}:
+            raise ValueError("Unsupported annotation profile")
+        if annotation_profile == "ai-reading":
+            type = {"highlight": "underline", "note": "square"}.get(type, type)
+            color, width = AI_BLUE, AI_WIDTH
+            if type == "square" and not rects:
+                rects = [[6, 6, 22, 22]]
         if type not in {"highlight", "underline", "strikeout", "note", "ink", "square"}:
             raise ValueError("Supported annotation types are highlight, underline, strikeout, note, ink and square")
         linked_parent = None
@@ -651,6 +675,8 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         annot.set_colors(stroke=rgb)
         annot.update()
         self._readable_underline(doc, annot)
+        if annotation_profile == "ai-reading":
+            apply_ai_reading_style(doc, annot)
         annotation_id = annotation_id or uuid.uuid4().hex
         doc.xref_set_key(annot.xref, "NM", fitz.get_pdf_str(annotation_id))
         if linked_parent is not None:
@@ -666,6 +692,9 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         return {"annotation": self._with_annotation_version(self._annotation(current, annot), True)}
 
     def annotate(self, id, **kwargs):
+        if kwargs.get("annotation_profile") == "ai-reading":
+            kwargs["type"] = {"highlight": "underline", "note": "square"}.get(kwargs.get("type", "highlight"), kwargs.get("type", "highlight"))
+            kwargs.update(color=AI_BLUE, width=AI_WIDTH)
         with self.lock():
             retry_id = kwargs.get("annotation_id")
             if retry_id is not None:
@@ -678,6 +707,8 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                                 "paths": None, "width": 2, "parent_id": None,
                                 "text": "", "comment": "", "author": "Reader", "color": "#ffdb66"}
                     payload = {key: kwargs.get(key, default) for key, default in defaults.items()}
+                    if kwargs.get("annotation_profile") is not None:
+                        payload["annotation_profile"] = kwargs["annotation_profile"]
                     identity = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False,
                                                          separators=(",", ":"), allow_nan=False).encode()).hexdigest()
                     with self._open_pdf(self.pdf_path(id)) as doc:
@@ -722,6 +753,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                                  and existing["text"] == kwargs.get("text", "") and existing["comment"] == kwargs.get("comment", "")
                                  and existing["author"] == kwargs.get("author", "Reader")[:200]
                                  and existing.get("parent_id") == kwargs.get("parent_id")
+                                 and (kwargs.get("annotation_profile") != "ai-reading" or existing.get("ai_reading_style") is True)
                                  and len(color) == 3 and len(existing["color"].get("stroke", [])) == 3
                                  and all(abs(a - b) < 0.00001 for a, b in zip(existing["color"]["stroke"], color))
                                  and len(paths) == len(saved_paths) and all(len(a) == len(b) for a, b in zip(paths, saved_paths))
@@ -826,13 +858,8 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
     @staticmethod
     def _style_border(annot):
         border = dict(annot.border)
-        # MuPDF 的 border 属性不投影文字标记的 BS，直接读取原生字典。
-        if annot.type[0] in {9, 11}:
-            kind, raw = annot.parent.parent.xref_get_key(annot.xref, "BS/D")
-            if kind == "array" and len(raw) <= 256:
-                values = re.findall(r"[+-]?(?:\d*\.)?\d+", raw)
-                if len(values) <= 16:
-                    border["dashes"] = [float(v) for v in values]
+        native = native_border(annot)
+        border.update(dashes=native["dashes"], width=native["width"])
         return border
 
     @staticmethod

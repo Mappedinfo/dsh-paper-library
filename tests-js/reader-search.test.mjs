@@ -56,20 +56,62 @@ test('search errors stay visible and retry uses the failed page',async t=>{
 
 test('explicit page matching clears only the annotation filter and its visible field',async t=>{const f=fixture(t,async()=>({}));f.get('#sidebar-search-toggle').click();f.get('#sidebar-search-row input').value='word';f.submit('#sidebar-search-row');const group={notes:[{id:'a',text:'different'}],replies:new Map(),unlinked:[]};assert.equal(f.ui.filter(group).notes.length,0);f.ui.clearAnnotationFilter();assert.equal(f.get('#sidebar-search-row input').value,'');assert.equal(f.ui.filter(group).notes.length,1);});
 
-test('AI reading source and multiple keywords filter marked notes without guessing from prose',t=>{
+test('AI reading filters only the strict native-style readback, never text or source declarations',t=>{
  const f=fixture(t,async()=>({})),filter=f.w.PaperReaderSearch.filterThreads;
- const human={id:'human',comment:'AI 自主阅读 attention loss'},reading={id:'reading',author:'AI 自主阅读',text:'Attention',comment:'Loss definition'},subject={id:'subject',author:'Reader',subject:'AI close reading',comment:'direction\u00adality'},structured={id:'structured',source_kind:'autonomous-reading',comment:'other'};
- const group={notes:[human,reading,subject,structured],replies:new Map(),unlinked:[]};
+ const reading={id:'reading',ai_reading_style:true,color:{stroke:[47/255,128/255,237/255]},border:{style:'D',dashes:[3,2]},author:'Reader',text:'Attention',comment:'Loss definition'};
+ const sameHumanStyle={id:'human-style',ai_reading_style:true,author:'Human reader',comment:'direction\u00adality'};
+ const excluded=[
+  {id:'body-spoof',comment:'AI 自主阅读 attention loss #2F80ED dashed [3,2]'},
+  {id:'author-spoof',author:'AI 自主阅读',comment:'attention loss'},
+  {id:'subject-spoof',subject:'AI close reading',comment:'attention loss'},
+  ...['autonomous-reading','ai-reading','paper-analysis'].map(source_kind=>({id:source_kind,source_kind,comment:'attention loss'})),
+  {id:'solid-blue',ai_reading_style:false,color:{stroke:[47/255,128/255,237/255]},border:{style:'S',dashes:[]},author:'AI 自主阅读'},
+  {id:'other-color-dashed',ai_reading_style:false,color:{stroke:[1,0,0]},border:{style:'D',dashes:[3,2]},subject:'AI close reading'},
+  {id:'unverified-style',color:{stroke:[47/255,128/255,237/255]},border:{style:'D',dashes:[3,2]}},
+  ...['true',1,{},[]].map((ai_reading_style,index)=>({id:`nonboolean-${index}`,ai_reading_style})),
+ ];
+ const group={notes:[...excluded,reading,sameHumanStyle],replies:new Map(),unlinked:[]};
+ assert.deepEqual(filter(group,'',{source:'reading'}).notes,[reading,sameHumanStyle]);
  assert.deepEqual(filter(group,'attention，loss',{source:'reading'}).notes,[reading]);
- assert.deepEqual(filter(group,'directionality',{source:'reading'}).notes,[subject]);
- assert.deepEqual(filter(group,'',{source:'reading'}).notes,[reading,subject,structured]);
+ assert.deepEqual(filter(group,'directionality',{source:'reading'}).notes,[sameHumanStyle]);
  assert.equal(filter(group,'attention absent',{source:'reading'}).notes.length,0);
  assert.deepEqual(filter(group,'attention;absent',{source:'reading',match:'any'}).notes,[reading]);
+ assert.ok(filter(group,'AI 自主阅读').notes.includes(excluded[0]),'keyword search remains independently available for old unstyled annotations');
+});
+test('native-style reading keeps whole discussions and does not replace other AI categories',t=>{
+ const f=fixture(t,async()=>({})),filter=f.w.PaperReaderSearch.filterThreads;
+ const reading={id:'reading',ai_reading_style:true,comment:'source passage'},human={id:'human',comment:'human passage'};
+ const remark={id:'remark',comment:'followup'},reply={id:'reply',kind:'ai-feedback',comment:'native reply'};
+ const styledReply={id:'styled-reply',ai_reading_style:true,kind:'ai-feedback',comment:'answer'};
+ const translation={id:'translation',ai_reading_style:true,kind:'ai-feedback',source_kind:'annotation-translation',comment:'translation'};
+ const caption={id:'caption',ai_reading_style:true,kind:'ai-feedback',source_kind:'annotation-caption',comment:'caption'};
+ const orphan={id:'orphan',ai_reading_style:true,comment:'independent'};
+ const group={notes:[reading,human],remarks:new Map([['reading',[remark]]]),replies:new Map([['reading',[reply,translation]],['remark',[caption]],['human',[styledReply]]]),unlinked:[orphan]};
+ const result=filter(group,'',{source:'reading'});
+ assert.deepEqual(result.notes,[reading,human]);assert.deepEqual(result.unlinked,[orphan]);
+ assert.equal(result.remarks,group.remarks);assert.equal(result.replies,group.replies);
+ assert.deepEqual(filter(group,'source passage',{source:'reading'}).notes,[reading]);
+ assert.equal(filter(group,'native reply',{source:'reading'}).notes.length,0,'keywords narrow the selected style rather than changing its classification');
+ assert.deepEqual(filter(group,'answer',{source:'reply'}).notes,[human]);
+ assert.deepEqual(filter(group,'translation',{source:'translation'}).notes,[reading]);
+ assert.deepEqual(filter(group,'caption',{source:'caption'}).notes,[reading]);
+ assert.equal(filter(group,'translation',{source:'reply'}).notes.length,0);
+});
+test('native reply grouping passes the root style through and keeps its replies after filtering',async t=>{
+ const f=fixture(t,async()=>({}));f.w.eval(await readFile(new URL('../web/annotation-threads.js',import.meta.url),'utf8'));
+ const root={id:'root',type:'underline',ai_reading_style:true,comment:'source'};
+ const remark={id:'remark',kind:'reader-reply',reply_to:'root',comment:'question'};
+ const reply={id:'reply',kind:'ai-feedback',reply_to:'remark',comment:'answer'};
+ const group=f.w.PaperAnnotationThreads.threads([root,remark,reply,{id:'other',comment:'unrelated'}]);
+ const result=f.w.PaperReaderSearch.filterThreads(group,'',{source:'reading'});
+ assert.deepEqual(Array.from(result.notes),[root]);assert.equal(result.remarks,group.remarks);assert.equal(result.replies,group.replies);
+ assert.deepEqual(Array.from(result.remarks.get('root')),[remark]);assert.deepEqual(Array.from(result.replies.get('remark')),[reply]);
+ assert.equal(result.roots.get('remark'),'root');assert.equal(result.unlinked.length,0);
 });
 test('source filter searches only matching AI content and retains whole parent discussion',t=>{
  const f=fixture(t,async()=>({})),filter=f.w.PaperReaderSearch.filterThreads;
  const parent={id:'a',comment:'human-only'},remark={id:'r',comment:'followup'},reply={id:'reply',kind:'ai-feedback',comment:'mechanism'},translation={kind:'ai-feedback',source_kind:'annotation-translation',comment:'方向性'};
- const group={notes:[parent],remarks:new Map([['a',[remark]]]),replies:new Map([['a',[translation]],['r',[reply]]]),unlinked:[{kind:'ai-feedback',source_kind:'autonomous-reading',comment:'independent'}]};
+ const group={notes:[parent],remarks:new Map([['a',[remark]]]),replies:new Map([['a',[translation]],['r',[reply]]]),unlinked:[{kind:'ai-feedback',ai_reading_style:true,comment:'independent'}]};
  const result=filter(group,'mechanism',{source:'reply'});assert.deepEqual(result.notes,[parent]);assert.equal(result.replies,group.replies);assert.equal(result.remarks,group.remarks);
  assert.equal(filter(group,'human-only',{source:'reply'}).notes.length,0);
  assert.equal(filter(group,'方向性',{source:'reply'}).notes.length,0);
@@ -80,9 +122,10 @@ test('source filter searches only matching AI content and retains whole parent d
 test('source controls reset pagination callback, survive scope switches and clear with paper or page matching',t=>{
  const f=fixture(t,async()=>({}));f.get('#sidebar-search-toggle').click();
  const source=f.get('#annotation-search-source'),mode=f.get('#annotation-search-match');
+ assert.equal(source.querySelector('[value=reading]').textContent,'AI 阅读（蓝色虚线）');assert.match(source.title,/#2F80ED/);assert.match(source.title,/3、2 pt/);assert.match(source.title,/不看作者或文字/);assert.match(source.title,/人工使用相同样式也会命中/);assert.match(source.title,/旧批注不自动改写/);
  source.value='reading';source.dispatchEvent(new f.w.Event('change'));mode.value='any';mode.dispatchEvent(new f.w.Event('change'));
  assert.deepEqual(f.filters.at(-1),['annotations','']);assert.equal(f.get('#sidebar-search-toggle').classList.contains('active'),true);
- const group={notes:[{id:'a',author:'AI 自主阅读',comment:'alpha'},{id:'b',comment:'alpha'}],replies:new Map(),unlinked:[]};
+ const group={notes:[{id:'a',ai_reading_style:true,comment:'alpha'},{id:'b',comment:'alpha'}],replies:new Map(),unlinked:[]};
  f.get('#sidebar-search-row input').value='alpha beta';f.submit('#sidebar-search-row');assert.equal(f.ui.filter(group).notes.length,1);
  f.setScope('elements-formula');assert.equal(source.parentElement.hidden,true);f.setScope('annotations');assert.equal(source.value,'reading');assert.equal(mode.value,'any');
  f.ui.clearAnnotationFilter();assert.equal(source.value,'all');assert.equal(f.ui.filter(group).notes.length,2);

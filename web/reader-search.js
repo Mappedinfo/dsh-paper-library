@@ -2,12 +2,10 @@
 // 搜索按需启动；PDF 按页读取，侧栏复用各目录的检索，不加载整库。
 window.PaperReaderSearch = (() => {
   const normalize = value => String(value || '').normalize('NFKC').replace(/\u00ad/g,'').replace(/(\w)-\s*\n\s*(?=\w)/g,'$1').replace(/\s+/g,' ').toLocaleLowerCase().trim();
-  // 来源筛选只读取明确的标记；正文提到 AI 不改变批注归属。
+  // AI 阅读仅按后端从 PDF 原生颜色与虚线读回的布尔值筛选，与回复等来源分类独立。
   function annotationSource(note) {
     if(note.source_kind==='annotation-translation')return 'translation';
     if(note.source_kind==='annotation-caption')return 'caption';
-    const declaration=normalize([note.author,note.subject].filter(Boolean).join(' '));
-    if(['autonomous-reading','ai-reading','paper-analysis'].includes(note.source_kind)||/(?:^|[\s·:：_-])ai[ ·:：_-]*(?:自主阅读|自动阅读|全文阅读|阅读批注|阅读|autonomous reading|close reading)(?=$|[\s·:：_-])/i.test(declaration))return 'reading';
     if(note.kind==='ai-feedback'||note.type==='ai_feedback'||note.ai_generated===true)return 'reply';
     return 'other';
   }
@@ -16,7 +14,7 @@ window.PaperReaderSearch = (() => {
     if(!terms.length&&source==='all')return group;
     const text=note=>[note.text,note.comment,note.content,note.author,note.subject,note.model,note.handwriting?.transcript,note.linked_ink?.transcript].filter(Boolean).join(' ');
     const matches=entries=>{
-      const selected=source==='all'?entries:entries.filter(note=>annotationSource(note)===source);
+      const selected=source==='all'?entries:entries.filter(note=>source==='reading'?note.ai_reading_style===true:annotationSource(note)===source);
       if(!selected.length)return false;
       const haystack=normalize(selected.map(text).join(' '));
       return !terms.length||(match==='any'?terms.some(term=>haystack.includes(term)):terms.every(term=>haystack.includes(term)));
@@ -39,8 +37,8 @@ window.PaperReaderSearch = (() => {
     const clearScope=button('×','清除当前侧栏搜索',()=>{scopeInput.value='';if(scope==='annotations'){annotationSourceFilter='all';annotationMatch='all';}submitScope();scopeInput.focus();});scopeForm.append(scopeInput,scopeSubmit,clearScope);
     const annotationOptions=make('span');annotationOptions.className='annotation-search-options';
     const sourceSelect=make('select');sourceSelect.id='annotation-search-source';sourceSelect.setAttribute('aria-label','批注来源');
-    for(const [value,label] of [['all','全部批注'],['reading','AI 自主阅读'],['reply','AI 回复'],['translation','AI 翻译'],['caption','AI 图像说明']]){const option=make('option',label);option.value=value;sourceSelect.append(option);}
-    sourceSelect.title='AI 自主阅读按来源、作者或主题中的明确 AI 阅读标记筛选；未标记的旧批注可按关键词搜索。';
+    for(const [value,label] of [['all','全部批注'],['reading','AI 阅读（蓝色虚线）'],['reply','AI 回复'],['translation','AI 翻译'],['caption','AI 图像说明']]){const option=make('option',label);option.value=value;sourceSelect.append(option);}
+    sourceSelect.title='AI 阅读按 PDF 原生蓝色（#2F80ED）与真实虚线同时匹配（新建为 3、2 pt），不看作者或文字；人工使用相同样式也会命中。旧批注不自动改写，关键词可另选。';
     const matchSelect=make('select');matchSelect.id='annotation-search-match';matchSelect.setAttribute('aria-label','多关键词匹配方式');
     for(const [value,label] of [['all','全部关键词'],['any','任一关键词']]){const option=make('option',label);option.value=value;matchSelect.append(option);}
     matchSelect.title='多个关键词用空格、逗号或分号分隔';annotationOptions.append(sourceSelect,matchSelect);scopeForm.append(annotationOptions);

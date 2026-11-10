@@ -9,7 +9,7 @@ test('native ink tool carries nested stroke geometry and retry identity through 
   assert.equal(spec.parameters.paths.items.items.items.type, 'number')
   const fields = { id: 'paper-one', page: 1, type: 'ink', paths: [[[20, 30], [40, 50]]], width: 2,
     annotation_id: 'ca9b4f7a-7575-4e96-8b19-31c4021b3ef2', color: '#305080' }
-  assert.deepEqual(requestFromTool(spec, { ...fields, library: '/private', action: 'delete' }, {}), { action: 'annotate', ...fields })
+  assert.deepEqual(requestFromTool(spec, { ...fields, library: '/private', action: 'delete' }, {}), { action: 'annotate', annotation_profile: 'ai-reading', ...fields })
   assert.throws(() => requestFromTool(spec, { ...fields, paths: [Array.from({ length: 8000 }, () => [23.123456789, 42.123456789])] }, {}), /128 KiB/)
 })
 
@@ -17,5 +17,14 @@ test('native rectangle tool carries a region and border style', () => {
   const spec=TOOL_SPECS.find(value=>value.name==='library_annotate');
   assert.ok(spec.parameters.type.enum.includes('square'));
   const fields={id:'synthetic-paper',page:1,type:'square',rects:[[20,30,160,120]],width:4,color:'#2455a4',comment:'Figure detail'};
-  assert.deepEqual(requestFromTool(spec,fields,{}),{action:'annotate',...fields});
+  assert.deepEqual(requestFromTool(spec,fields,{}),{action:'annotate',annotation_profile:'ai-reading',...fields});
+});
+
+
+test('AI annotation creation and read filter have explicit non-text contracts', () => {
+  const write = TOOL_SPECS.find(value => value.name === 'library_annotate');
+  assert.equal(requestFromTool(write, {id:'paper',page:1,type:'highlight',annotation_profile:'human'}, {}).annotation_profile,'ai-reading');
+  const read = TOOL_SPECS.find(value => value.name === 'library_annotations');
+  assert.equal(read.parameters.ai_reading_only.type,'boolean');
+  assert.deepEqual(requestFromTool(read,{id:'paper',ai_reading_only:true},{}),{action:'annotations',id:'paper',ai_reading_only:true});
 });
