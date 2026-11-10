@@ -248,7 +248,7 @@ function sourceDates(entries) {
   }))
 }
 
-function normalizeDOI(value) {
+export function normalizeDOI(value) {
   let doi = String(value).trim().replace(/^doi:\s*/i, '')
   if (/^https?:\/\/(?:dx\.)?doi\.org\//i.test(doi)) doi = decodeURIComponent(new URL(doi).pathname.slice(1))
   if (doi.length > 512 || !DOI.test(doi)) throw new Error('Invalid DOI')
@@ -279,6 +279,7 @@ async function doiMetadata(doi, ctx) {
   const response = await requestPublic(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, ctx, 'metadata')
   const data = JSON.parse(await readText(response))
   if (!data.message || typeof data.message !== 'object') throw new Error('Crossref response has no work metadata')
+  if (typeof data.message.DOI !== 'string' || !data.message.DOI.trim()) throw new Error('Crossref response has no DOI')
   const metadata = crossrefCSL(data.message, doi, ctx)
   const links = Array.isArray(data.message.link) ? data.message.link : []
   const candidates = links.filter(link => link?.['content-type'] === 'application/pdf' || /\.pdf(?:$|[?#])/i.test(link?.URL ?? '')).map(link => link.URL).filter(value => typeof value === 'string').slice(0, 3)

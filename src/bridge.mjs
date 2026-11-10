@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { arxivID, isDirectPDFURL, resolveAndFetch, resolveDOIMetadata, resolveMetadata, resolveTitleMetadata } from './paper-fetch.mjs';
+import { arxivID, isDirectPDFURL, normalizeDOI, resolveAndFetch, resolveDOIMetadata, resolveMetadata, resolveTitleMetadata } from './paper-fetch.mjs';
 import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
 import { createTranslationServerClient } from './translation-server.mjs';
 import { resourcePolicyFor } from './resource-policy.mjs';
@@ -305,6 +305,7 @@ async function importFile(request, options) {
 }
 
 const normalizedIdentity = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+const joinHan = value => value.replace(/(?<=\p{Script=Han}) (?=\p{Script=Han})/gu,'');
 const canonicalDOI = value => String(value || '').trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//i,'').replace(/^doi:\s*/i,'').toLowerCase();
 const doiTypes = new Set(['article-journal','paper-conference','preprint','dataset']);
 function lookupType(item) {
@@ -315,6 +316,29 @@ async function fillDoi(request, options) {
   const id=request.id, dataset=request.kind==='dataset';
   if(typeof id!=='string'||!id||id.length>160)throw Error('请选择要查 DOI 的条目。');
   const current=await core({action:dataset?'dataset_get':'get',id,include_details:false},options);
+  const fetchOptions={timeoutMs:19000,...options.fetchOptions,signal:options.signal};
+  const save=async DOI=>{
+    options.signal?.throwIfAborted();
+    const item=await core(dataset?
+      {action:'dataset_put',id,expected_revision:current.revision,metadata:{DOI}}:
+      {action:'update',id,expected_modified:current.modified,metadata:{DOI}},options);
+    return {status:'saved',DOI:item.DOI};
+  };
+  if(request.doi!==undefined){
+    const doi=request.doi;
+    if(current.DOI&&canonicalDOI(current.DOI)!==doi)
+      throw Error('此条目已有其他 DOI，请刷新后核对最新资料。');
+    if(!normalizedIdentity(current.title)||!current.author?.length)throw Error('请先在资料详情补齐标题和作者，再核对 DOI。');
+    const {metadata:registered}=await resolveMetadata(doi,fetchOptions);
+    if(canonicalDOI(registered?.DOI)!==doi)throw Error('未查到此 DOI 的可核对题录，请检查输入或稍后重试。');
+    if(!normalizedIdentity(registered.title)||!registered.author?.length)throw Error('此 DOI 的公开题录缺少标题或作者，暂时无法核对。');
+    const titleMatches=joinHan(normalizedIdentity(registered.title))===joinHan(normalizedIdentity(current.title));
+    const authorsMatch=sameAuthorList(current.author,registered.author);
+    if(!titleMatches||!authorsMatch)return {status:'mismatch',titleMatches,authorsMatch,registered:{title:registered.title,author:registered.author}};
+    if(dataset!==(registered.type==='dataset')||dataset&&registered.version)
+      throw Error('此 DOI 对应的资源类型或数据集版本与当前条目不一致。');
+    return current.DOI?{status:'saved',DOI:current.DOI}:save(doi);
+  }
   const type=lookupType(current);
   if(current.DOI||!doiTypes.has(type))return {status:current.DOI?'saved':'skipped',DOI:current.DOI};
   let arxiv, publicLink;
@@ -325,7 +349,7 @@ async function fillDoi(request, options) {
   }catch{}
   const publishedVenue=['article-journal','paper-conference'].includes(type)&&current['container-title'];
   if(request.manual!==true&&!publishedVenue&&!publicLink&&!arxiv)return {status:'needs-source'};
-  const fetchOptions={timeoutMs:19000,...options.fetchOptions,signal:options.signal,doiType:type};
+  fetchOptions.doiType=type;
   const result=type==='preprint'&&arxiv
     ? await resolveDOIMetadata(`10.48550/arXiv.${arxiv.replace(/v\d+$/,'')}`,fetchOptions)
     : await resolveTitleMetadata(current.title,fetchOptions);
@@ -339,10 +363,7 @@ async function fillDoi(request, options) {
       !(lookupType(found)===type||matchesArxiv)||currentYear&&foundYear&&currentYear!==foundYear||
       !(matchesArxiv||authorMatch||publisherMatch&&currentYear&&currentYear===foundYear))
     return {status:result.ambiguous?'ambiguous':DOI?'unverified':'not-found'};
-  const item=await core(dataset?
-    {action:'dataset_put',id,expected_revision:current.revision,metadata:{DOI}}:
-    {action:'update',id,expected_modified:current.modified,metadata:{DOI}},options);
-  return {status:'saved',DOI:item.DOI};
+  return save(DOI);
 }
 const missingMetadata = value => value === undefined || value === null || typeof value === 'string' && !value.trim() || Array.isArray(value) && !value.length || value && typeof value === 'object' && !Object.keys(value).length;
 
@@ -352,6 +373,18 @@ function authorIdentities(person) {
   const family = [person['non-dropping-particle'],person.family].filter(Boolean).join(' ');
   const given = [person.given,person['dropping-particle']].filter(Boolean).join(' ');
   return [[given,family,person.suffix],[family,given,person.suffix]].map(parts=>normalizedIdentity(parts.filter(Boolean).join(' '))).filter(Boolean);
+}
+
+function sameAuthorList(local, registered) {
+  if(local.length!==registered.length)return false;
+  const remaining=registered.map(person=>authorIdentities(person).map(joinHan));
+  for(const person of local){
+    const names=authorIdentities(person).filter(Boolean).map(joinHan);
+    const index=remaining.findIndex(variants=>variants.some(name=>names.includes(name)));
+    if(index===-1)return false;
+    remaining.splice(index,1);
+  }
+  return true;
 }
 
 function metadataDraft(current, fetched) {
@@ -558,10 +591,17 @@ export async function dispatch(request, options = {}) {
   if (safe.action === 'metadata_lookup') return lookupMetadata(safe,options);
   if (safe.action === 'catalog_doi_lookup') {
     if(typeof safe.id!=='string'||safe.id.length>160)throw Error('文献标识无效。');
-    const key=JSON.stringify([options.library||defaultLibrary,safe.id,safe.kind==='dataset']);
+    let doi;
+    if(safe.doi!==undefined){
+      try{
+        if(typeof safe.doi!=='string'||safe.doi.length>2048)throw Error();
+        doi=normalizeDOI(safe.doi).toLowerCase();
+      }catch{throw Error('请输入有效的 DOI 或 doi.org 链接。');}
+    }
+    const key=JSON.stringify([options.library||defaultLibrary,safe.id,safe.kind==='dataset',doi]);
     if(doiLookups.has(key))return doiLookups.get(key);
     if(doiLookups.size>=2)throw Error('DOI 查询繁忙，请稍后重试。');
-    const lookup=fillDoi(safe,options).finally(()=>doiLookups.delete(key));
+    const lookup=fillDoi({...safe,doi},options).finally(()=>doiLookups.delete(key));
     doiLookups.set(key,lookup);
     return lookup;
   }

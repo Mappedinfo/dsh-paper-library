@@ -71,6 +71,58 @@ test('preprint by identifier uses its registered DataCite DOI, and dataset versi
   assert.equal((await dispatch({action:'catalog_doi_lookup',id:dataset.id,kind:'dataset'},{library:f.library,fetchOptions})).DOI,'10.1234/family');
 });
 
+test('a typed DOI is saved only after the registered title and complete author list match',async t=>{
+  const author=[{given:'Alice',family:'Reader'},{literal:'Kai Chen'}];
+  const f=await fixture(t,{author,type:'article',abstract:'Keep manual abstract'});
+  const request={action:'catalog_doi_lookup',id:f.item.id,doi:'https://doi.org/10.1234/METADATA'};
+  const remote=[{given:'Kai',family:'Chen'},{given:'Alice',family:'Reader'}];
+  const opts=fetchOptions=>({library:f.library,fetchOptions});
+  for(const [message,titleMatches,authorsMatch] of [
+    [{title:['Unrelated title'],author:remote},false,true],
+    [{author:[remote[1],{given:'Other',family:'Person'}]},true,false],
+    [{author:[remote[1]]},true,false],
+  ]){
+    const result=await dispatch(request,opts(crossrefFixture(message)));
+    assert.equal(result.status,'mismatch');
+    assert.equal(result.titleMatches,titleMatches);
+    assert.equal(result.authorsMatch,authorsMatch);
+  }
+  await assert.rejects(dispatch(request,opts(crossrefFixture({author:[]}))),/公开题录缺少标题或作者/);
+  await assert.rejects(dispatch(request,opts(crossrefFixture({DOI:undefined,author:remote}))),/未查到此 DOI/);
+  const fetchOptions=crossrefFixture({title:['READING—metadata evidence'],author:remote,abstract:'Unrequested remote abstract'});
+  await assert.rejects(dispatch({...request,doi:'https://example.org/article'},opts(fetchOptions)),/请输入有效的 DOI/);
+  assert.equal(fetchOptions.requests.length,0);
+  assert.ok(!(await core({action:'get',id:f.item.id},opts(fetchOptions))).DOI);
+  assert.deepEqual(await dispatch(request,opts(fetchOptions)),{status:'saved',DOI:'10.1234/metadata'});
+  const saved=await core({action:'get',id:f.item.id},opts(fetchOptions));
+  assert.deepEqual(saved.author,author);assert.equal(saved.title,title);assert.equal(saved.abstract,'Keep manual abstract');
+  assert.match(fetchOptions.requests[0],/api\.crossref\.org\/works\/10\.1234%2Fmetadata$/i);
+  assert.ok(fetchOptions.requests.every(url=>!url.includes('query')));
+});
+
+test('a typed DOI verified against an old catalog revision cannot overwrite a concurrent edit',async t=>{
+  const author=[{given:'Alice',family:'Reader'}],f=await fixture(t,{author});
+  const fetchOptions={resolver,transport:async({url})=>{
+    if(url.hostname!=='api.crossref.org')return response('');
+    await core({action:'update',id:f.item.id,metadata:{title:'Concurrent title edit'}},{library:f.library});
+    return response(JSON.stringify({message:{DOI:'10.1234/metadata',title:[title],author}}));
+  }};
+  await assert.rejects(dispatch({action:'catalog_doi_lookup',id:f.item.id,doi:'10.1234/metadata'},{library:f.library,fetchOptions}),/modified|changed|conflict/i);
+  const latest=await core({action:'get',id:f.item.id},{library:f.library});
+  assert.equal(latest.title,'Concurrent title edit');assert.ok(!latest.DOI);
+});
+
+test('manual DOI verification falls back to DataCite and matches split Han names',async t=>{
+  const f=await fixture(t,{title:'合成 数据集',author:[{literal:'张三'}],type:'article'});
+  const doi='10.1234/han-record';
+  const fetchOptions={resolver,transport:async({url})=>{
+    if(url.hostname==='api.crossref.org')return response('{}',404);
+    assert.equal(url.hostname,'api.datacite.org');
+    return response(JSON.stringify({data:{attributes:{doi,titles:[{title:'合成数据集'}],types:{resourceTypeGeneral:'Preprint'},creators:[{familyName:'张',givenName:'三'}]}}}));
+  }};
+  assert.deepEqual(await dispatch({action:'catalog_doi_lookup',id:f.item.id,doi:`doi:${doi}`},{library:f.library,fetchOptions}),{status:'saved',DOI:doi});
+});
+
 test('metadata_lookup returns a review draft, preserves manual fields and JCR, and never changes a managed PDF or catalog item',async t=>{
   const ranking={system:'JCR',year:2025,category:'Example category',quartile:'Q2',source:'Licensed user export'};
   const f=await fixture(t,{DOI:'10.1234/metadata',title:'Manually corrected title',abstract:'Manual abstract',citekey:'keep-key',URL:'https://manual.example/article',

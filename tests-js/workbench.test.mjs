@@ -317,6 +317,28 @@ test('file format and citation type have independent columns and only the select
   assert.deepEqual(f.requests,[{action:'catalog_doi_lookup',id:paper.id,manual:false}]);
 });
 
+test('manual DOI entry targets its row, shows an author mismatch, and updates the row on retry', async () => {
+  const selected=original(),paper={...original(),id:'paper-b',title:'Synthetic second paper',type:'article'};
+  const f=environment({active:selected,respond:(action,input)=>{
+    assert.equal(action,'catalog_doi_lookup');
+    assert.equal(input.id,paper.id);
+    if(input.doi==='10.1234/wrong')return {status:'mismatch',titleMatches:true,authorsMatch:false,registered:{title:paper.title,author:[{given:'Other',family:'Author'}]}};
+    return {status:'saved',DOI:'10.1234/right'};
+  }});
+  f.state.items.push(paper);f.workbench.setTable(true);
+  const row=()=>f.element('catalog-table').querySelectorAll('tr').find(n=>n.dataset.paperId===paper.id);
+  await row().querySelectorAll('button').find(n=>n.textContent==='输入 DOI').dispatch('click');
+  const dialog=f.element('catalog-doi-dialog'),input=f.element('catalog-doi-input'),status=f.element('catalog-doi-status');
+  assert.equal(dialog.open,true);
+  input.value='10.1234/wrong';await dialog.querySelector('form').dispatch('submit');
+  assert.match(status.textContent,/登记作者与库内资料不一致/);
+  assert.match(status.textContent,/Other Author/);
+  assert.equal(input.value,'10.1234/wrong');assert.equal(paper.DOI,undefined);assert.equal(dialog.open,true);
+  input.value='https://doi.org/10.1234/right';await dialog.querySelector('form').dispatch('submit');
+  assert.equal(dialog.open,false);assert.equal(paper.DOI,'10.1234/right');assert.equal(selected.DOI,undefined);
+  assert.equal(row().children[6].children[0].textContent,'10.1234/right');assert.equal(f.loads.length,1);
+});
+
 test('a dataset title still routes to the dataset view instead of the reader', async () => {
   const f = environment({ active: original() });
   const dataset = { id: 'dataset_synthetic', title: 'Synthetic dataset', resource_kind: 'dataset', citekey: 'syntheticData' };

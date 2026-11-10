@@ -90,6 +90,11 @@
 .paper-tag-editor{width:min(480px,calc(100vw - 40px));padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--paper,#fff);color:var(--ink)}
 .paper-tag-editor>header{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .paper-tag-editor h2{font-size:16px;margin:0}.paper-tag-editor textarea{box-sizing:border-box;width:100%}
+.catalog-doi-actions{display:flex;align-items:center;flex-wrap:wrap;gap:2px 6px}
+#catalog-doi-dialog .catalog-doi-identity{font-weight:600;margin-bottom:3px}
+#catalog-doi-dialog form{display:grid;gap:10px;justify-items:start}
+#catalog-doi-dialog .field{width:100%}
+#catalog-doi-status{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .paper-tag-sources{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;max-height:100px;overflow:auto}
 .paper-tag-sources>span{flex-basis:100%}.paper-tag-editor .error:empty{display:none}
 .venue-rank-sources{display:flex;flex-wrap:wrap;gap:6px 12px}
