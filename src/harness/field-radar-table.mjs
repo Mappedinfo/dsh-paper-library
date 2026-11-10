@@ -29,11 +29,15 @@ const esc = v => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;',
 const badge = status => ({verified:'',needs_review:'〔AI 推断／待核〕',unverified:'〔未核验〕',unknown:'〔未知〕',conflicting:'〔证据冲突〕'}[status] || '〔未核验〕');
 function settings(input) {
   if (!object(input)) throw fail('Table options must be an object');
-  const {format='html',offset=0,limit=100,filters={}}=input;
+  const {format='html',offset=0,limit=100,all=false,filters={},column_filters={},sort_by='',sort_direction='asc'}=input;
   if (!['html','csv','tsv','markdown'].includes(format)) throw fail('Unsupported table format');
   if (!Number.isSafeInteger(offset)||offset<0||offset>10000||!Number.isSafeInteger(limit)||limit<1||limit>100) throw fail('Table pagination out of bounds');
   if (!object(filters)||Object.keys(filters).some(k=>!['query','task','year'].includes(k))||Object.values(filters).some(v=>typeof v!=='string'||v.length>500)) throw fail('Invalid table filters');
-  return {format,offset,limit,filters:{...filters}};
+  if (typeof all!=='boolean'||all&&offset!==0) throw fail('All-row mode requires offset 0');
+  const keys=FIELD_RADAR_TABLE_COLUMNS.map(c=>c.key);
+  if (!object(column_filters)||Object.keys(column_filters).some(k=>!keys.includes(k))||Object.values(column_filters).some(v=>typeof v!=='string'||v.length>500)||column_filters.od_generation&&!['yes','no','unknown'].includes(column_filters.od_generation)) throw fail('Invalid table column filters');
+  if (sort_by!==''&&!keys.includes(sort_by)||!['asc','desc'].includes(sort_direction)) throw fail('Invalid table sorting');
+  return {format,offset,limit,all,filters:{...filters},column_filters:{...column_filters},sort_by,sort_direction};
 }
 /** Validate a comparison independently so the topic importer and AI parser can share it. */
 export function validatePaperComparison(value, document, {forceReview=false}={}) {
@@ -96,13 +100,7 @@ function datasetCells(p,c,parentDraft) {
   });
   return cell(entries.map(v=>v.text).join('\n'),entries.every(v=>v.name.status==='verified'&&v.openness.status==='verified')?'verified':parentDraft?'needs_review':'unknown',entries.flatMap(v=>v.source_ids),{entries});
 }
-export function buildFieldRadarTable(record,input={}) {
-  const options=settings(input);
-  if (!record?.document) throw fail('Research topic not found',404);
-  if (input.expected_revision!==undefined&&(typeof input.expected_revision!=='string'||input.expected_revision!==record.revision)) throw fail('研究主题已变化，请刷新后再导出。',409);
-  const doc=tableDocument(record.document),papers=globalThis.PaperFieldRadarData.filteredPapers(doc,options.filters),records=papers.slice(options.offset,options.offset+options.limit);
-  let tableBytes=0;
-  const rows=records.map(p=>{
+function tableRow(p,doc) {
     const c=object(p.comparison)?p.comparison:{},pending=draft(p)||draft(c);
     let group=field(c.research_group,'',pending);
     if (!c.research_group) {
@@ -114,15 +112,36 @@ export function buildFieldRadarTable(record,input={}) {
     const comparisonRefs=[];const collect=v=>{if(!v||typeof v!=='object')return;comparisonRefs.push(...refs(v));Object.values(v).forEach(x=>{if(x&&typeof x==='object')collect(x);});};collect(c);
     const source_ids=unique([...refs(p),...comparisonRefs,...Object.values(cells).flatMap(v=>v.source_ids)]);
     const values=FIELD_RADAR_TABLE_COLUMNS.map(({key})=>{const v=cells[key];return `${v.text}${badge(v.status)}${v.source_ids.length?` [${v.source_ids.join(', ')}]`:''}`;});
-    tableBytes+=Buffer.byteLength(JSON.stringify({cells,values}));if(tableBytes>2*1024*1024)throw fail('Derived table exceeds 2 MiB; reduce page limit without truncating fields',413);
     return {paper_id:p.id,cells,values,source_ids,context_source_ids:refs(p),od_generation:cells.od_generation,evidence_scope:words(p.evidence_scope)||'仅已保存来源／摘录；不表示全文已读'};
-  });
-  const source_ids=unique(rows.flatMap(r=>r.source_ids)).sort(),coverage={papers:papers.length,exported:rows.length,od_yes:0,od_no:0,od_unknown:0,verified_cells:0,unknown_cells:0,needs_review_cells:0};
+}
+export function buildFieldRadarTable(record,input={}) {
+  const options=settings(input);
+  if (!record?.document) throw fail('Research topic not found',404);
+  if (input.expected_revision!==undefined&&(typeof input.expected_revision!=='string'||input.expected_revision!==record.revision)) throw fail('研究主题已变化，请刷新后再导出。',409);
+  const doc=tableDocument(record.document),scoped=globalThis.PaperFieldRadarData.filteredPapers(doc,options.filters);
+  const normalize=value=>String(value).normalize('NFKC').toLocaleLowerCase().trim();
+  const active=Object.entries(options.column_filters).filter(([,value])=>value.trim());
+  let sortBytes=0;
+  // Filter every matching paper before pagination. Retain records and bounded sort keys,
+  // not a second full table with repeated evidence, so paging still works for large tables.
+  let selected=scoped.map(p=>{
+    if(!active.length&&!options.sort_by)return {paper:p};
+    const row=tableRow(p,doc);
+    if(!active.every(([key,value])=>key==='od_generation'?row.od_generation.value===value:normalize(row.values[FIELD_RADAR_TABLE_COLUMNS.findIndex(c=>c.key===key)]).includes(normalize(value))))return null;
+    const sort=options.sort_by?row.cells[options.sort_by].text:'';
+    sortBytes+=Buffer.byteLength(sort);if(sortBytes>2*1024*1024)throw fail('Sort keys exceed 2 MiB; narrow filters or clear sorting',413);
+    return {paper:p,sort};
+  }).filter(Boolean);
+  if(options.sort_by){const collator=new Intl.Collator('zh-CN',{numeric:true,sensitivity:'base'});selected.sort((a,b)=>{if(options.sort_by==='year'&&(a.paper.year==null||b.paper.year==null))return Number(a.paper.year==null)-Number(b.paper.year==null);return collator.compare(a.sort,b.sort)*(options.sort_direction==='desc'?-1:1);});}
+  const papers=selected.map(item=>item.paper),records=options.all?papers:papers.slice(options.offset,options.offset+options.limit);
+  let tableBytes=0;
+  const rows=records.map(p=>{const row=tableRow(p,doc);tableBytes+=Buffer.byteLength(JSON.stringify({cells:row.cells,values:row.values}));if(tableBytes>2*1024*1024)throw fail('Derived table exceeds 2 MiB; choose a smaller page or narrow filters without truncating fields',413);return row;});
+  const source_ids=unique(rows.flatMap(r=>r.source_ids)).sort(),coverage={corpus_papers:doc.papers.length,scoped_papers:scoped.length,papers:papers.length,exported:rows.length,od_yes:0,od_no:0,od_unknown:0,verified_cells:0,unknown_cells:0,needs_review_cells:0};
   for(const row of rows){coverage[`od_${row.od_generation.value}`]++;for(const c of Object.values(row.cells)){if(c.status==='verified')coverage.verified_cells++;else if(c.status==='needs_review')coverage.needs_review_cells++;else coverage.unknown_cells++;}}
   const has_more=options.offset+rows.length<papers.length;
   const warnings=['仅整理已收录证据，不代表完整领域；论文级来源不证明每个单元格。','训练阶段使用历史 OD 不排除该任务；评估真值不等于推理输入。未知和 AI 待核项不作为已核验结论。'];
   if(has_more||options.offset)warnings.push(`分页导出：当前 ${rows.length} / ${papers.length} 篇，offset=${options.offset}；未静默截断字段，请继续分页。`);
-  return {columns:FIELD_RADAR_TABLE_COLUMNS.map(c=>({...c})),rows,records,sources:doc.sources.filter(s=>source_ids.includes(s.id)),source_ids,total:papers.length,count:rows.length,has_more,settings:options,warnings,coverage,topic_id:doc.topic.id,title:doc.topic.title,topic_revision:record.revision,data_updated_at:record.updated_at??null,evidence_scope:'已保存主题的来源／摘录；不意味着全文审阅或全领域覆盖'};
+  return {columns:FIELD_RADAR_TABLE_COLUMNS.map(c=>({...c})),rows,records,sources:doc.sources.filter(s=>source_ids.includes(s.id)),source_ids,corpus_total:doc.papers.length,scoped_total:scoped.length,total:papers.length,count:rows.length,has_more,settings:options,warnings,coverage,topic_id:doc.topic.id,title:doc.topic.title,topic_revision:record.revision,data_updated_at:record.updated_at??null,evidence_scope:'已保存主题的来源／摘录；不意味着全文审阅或全领域覆盖'};
 }
 // Neutralize formula-leading values including leading whitespace/control characters.
 const spreadsheet = v => /^[\s\u0000-\u001f]*[=+\-@]/u.test(v) ? `'${v}` : v;
@@ -130,7 +149,7 @@ const delimited = (v,sep) => {const s=spreadsheet(String(v));return s.includes(s
 const markdown = v => esc(spreadsheet(String(v))).replace(/\\/g,'\\\\').replace(/\|/g,'\\|').replace(/\r?\n/g,'<br>').replace(/`/g,'&#96;');
 export function renderFieldRadarTable(record,input={}) {
   const result=buildFieldRadarTable(record,input),{columns,rows,sources,settings}=result;
-  const notes=[`主题：${result.title}；主题 ID：${result.topic_id}；版本：${result.topic_revision??'未知'}；保存时间：${result.data_updated_at??'未知'}`,`导出范围：${result.count} / ${result.total} 篇；offset=${settings.offset}；has_more=${result.has_more}`,...result.warnings,`证据范围：${result.evidence_scope}`, ...rows.map(r=>`论文 ${r.paper_id}；${r.evidence_scope}；论文级背景来源（不作逐格核验）：${r.context_source_ids.join(', ')||'未记录'}`),...sources.map(s=>`[${s.id}] ${s.title}；${s.url}；核验日期：${s.accessed_at||'未知'}；证据范围：${words(s.evidence_scope)||words(s.evidence_level)||'未记录'}`)];
+  const notes=[`主题：${result.title}；主题 ID：${result.topic_id}；版本：${result.topic_revision??'未知'}；保存时间：${result.data_updated_at??'未知'}`,`导出范围：${result.count} / ${result.total} 篇；主题共 ${result.corpus_total} 篇；offset=${settings.offset}；has_more=${result.has_more}`,`筛选与排序：${JSON.stringify({filters:settings.filters,column_filters:settings.column_filters,sort_by:settings.sort_by,sort_direction:settings.sort_direction,all:settings.all})}`,...result.warnings,`证据范围：${result.evidence_scope}`, ...rows.map(r=>`论文 ${r.paper_id}；${r.evidence_scope}；论文级背景来源（不作逐格核验）：${r.context_source_ids.join(', ')||'未记录'}`),...sources.map(s=>`[${s.id}] ${s.title}；${s.url}；核验日期：${s.accessed_at||'未知'}；证据范围：${words(s.evidence_scope)||words(s.evidence_level)||'未记录'}`)];
   let content;
   if(settings.format==='html')content=`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>${esc(result.title)}</title><style>body{font:14px system-ui,sans-serif;color:#172f3a;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bcccd1;padding:9px;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}th{background:#edf4f4}li{white-space:pre-wrap}</style><h1>${esc(result.title)}</h1><table><thead><tr>${columns.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.values.map(v=>`<td>${esc(spreadsheet(v))}</td>`).join('')}</tr>`).join('')}</tbody></table><p>${result.count} / ${result.total} 篇；offset=${settings.offset}；版本 ${esc(result.topic_revision??'未知')}</p><ol>${notes.map(v=>`<li>${esc(v)}</li>`).join('')}</ol></html>`;
   else if(settings.format==='markdown')content=[`| ${columns.map(c=>markdown(c.label)).join(' | ')} |`,`| ${columns.map(()=>'---').join(' | ')} |`,...rows.map(r=>`| ${r.values.map(markdown).join(' | ')} |`),'',...notes.map(v=>`- ${markdown(v)}`)].join('\n');

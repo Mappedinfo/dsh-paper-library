@@ -148,7 +148,7 @@ PLAYWRIGHT_MODULE=/absolute/playwright/index.mjs node scripts/field-radar-relati
 
 ## 文献对照表：复制到 Slides 与本机导出
 
-「领域研究 → 文献对照表」根据当前主题和关键词／任务／年份筛选自动显示七列，包括**研究组、论文简称、具体解决／生成什么、数据集与开放性、方法、年份、推理无需目标区域历史 OD？**。每页 20 篇，每行依据和本页来源默认展开。切换主题、筛选、页码或草稿后自动载入对应表格。点「复制到 Slides」复制本页 HTML 表格与 TSV，也可分别导出 HTML、TSV、CSV 或 Markdown。富文本粘贴效果取决于目标软件，若只接受纯文本，可用 TSV 经电子表格中转。
+「领域研究 → 文献对照表」根据当前主题和关键词／任务／年份筛选自动显示七列，包括**研究组、论文简称、具体解决／生成什么、数据集与开放性、方法、年份、推理无需目标区域历史 OD？**。默认显示当前主题的**全部已保存文献**，也可切换每页 20／50／100 篇；每行依据和当前范围来源默认展开。上方七列筛选可组合，按全部匹配文献筛选后再分页，点击列名切换升序／降序。文本列按包含文字匹配，不区分大小写；OD 列仅按已核验的「是／否」及「未知／待核／冲突」筛选，不把草稿报告值当成已核验结论。切换主题、筛选、页码或草稿后自动载入对应表格。复制／导出范围默认「全部筛选结果」，也可明确选择「当前显示页」；HTML 富文本表格与 TSV 可复制到 Slides，也可分别导出 HTML、TSV、CSV 或 Markdown。富文本粘贴效果取决于目标软件，若只接受纯文本，可用 TSV 经电子表格中转。
 
 表格复用现有来源、`papers[].task/output/task_axes.output/method/datasets/dataset/year` 和明确核验的 `research_groups`。缺简称时保留全称；缺组名不由共同作者或单位补造；代码开源不等于数据开放。每格保留来源标识与核验状态，完整导出附来源和范围说明，同名私有 JSON 保留未截断原记录与逐格证据。剪贴板只复制七列表格，不把来源脚注误粘成额外数据行。
 
@@ -156,7 +156,7 @@ OD 标准固定为：**输出 OD 流量，推理目标区域时不输入其历�
 
 ### 自动提取与审阅边界
 
-已有结构化资料可直接整理，不需要模型。需要从保存的摘录中提取更多字段时，进入同一「AI 自动分析」显式调用已配置的宿主模型。新分析附 `paper_comparisons:[{paper_id,comparison}]`，每次最多 20 篇；输出预算不足或未覆盖的文献须保留缺口，建议按明确主题拆分。旧结果仍能查看，不自动重跑或覆盖。表格页勾选「使用已保存 AI 表格草稿」时，仅采用已完成且与当前主题版本一致的草稿，所有 AI 字段强制标为待核对，不自动变成已验证事实。重复查询／整理／导出不调用模型。
+已有结构化资料可直接整理，不需要模型。需要从保存的摘录中提取更多字段时，进入同一「AI 自动分析」显式调用已配置的宿主模型。新分析附 `paper_comparisons:[{paper_id,comparison}]`，**单次模型调用最多 20 篇**，只是模型输出预算，不是查看、筛选或导出上限；保存主题中的全部文献均可显示。输出预算不足或未覆盖的文献须保留缺口，建议按明确主题拆分。旧结果仍能查看，不自动重跑或覆盖。表格页勾选「使用已保存 AI 表格草稿」时，仅采用已完成且与当前主题版本一致的草稿，所有 AI 字段强制标为待核对，不自动变成已验证事实。重复查询／整理／导出不调用模型。
 
 这不是全库无人值守抓取：不解析未选 PDF，不搜凭据，不补造未提供的原文，不自动抓取数据访问条款。已有后台逐篇分析的证据可按原流程纳入主题，再整理；不足的来源明确补充后才核验。
 
@@ -172,14 +172,15 @@ OD 标准固定为：**输出 OD 流量，推理目标区域时不输入其历�
 
 - `library_field_radar_table` / HTTP `field_radar_table`：只读整理，返回表格 HTML、TSV、单元格、覆盖数、来源与缺失说明。
 - `library_field_radar_table_export` / HTTP `field_radar_table_export`：写入原有 `.paper-library/field-radar-exports/`，支持 `format:html|tsv|csv|markdown`。原生工具返回本机路径，HTTP 只返回受控同源下载地址。
-- 参数为 `{id,expected_revision?,analysis_request_id?,filters?:{query?,task?,year?},offset?:0,limit?:1..100}`，导出另加 format（默认 html）。`analysis_request_id` 可选，明确选择已有 AI 草稿；旧版本或未完成草稿拒绝。超限拒绝而不是静默截断，`count/total/has_more` 说明本页覆盖。
+- 参数为 `{id,expected_revision?,analysis_request_id?,filters?:{query?,task?,year?},column_filters?,sort_by?,sort_direction?:"asc"|"desc",all?:boolean,offset?:0,limit?:1..100}`，导出另加 format（默认 html）。`all:true` 返回当前主题的全部匹配项并要求 `offset:0`，沿用单主题最多 500 篇边界；省略 all 时保持原有有界分页。`column_filters` 可用 `research_group/short_name/task_output/datasets/method/year` 的包含文字条件及 `od_generation:"yes"|"no"|"unknown"`；`sort_by` 为同一组列名。多个列条件与主题筛选同时生效，排序先于分页。`analysis_request_id` 可选，明确选择已有 AI 草稿；旧版本或未完成草稿拒绝。超限拒绝而不是静默截断，`count/total/has_more` 说明本页覆盖。
 
 ```sh
-node scripts/export-field-radar.mjs --library /absolute/library --id topic-id --view literature-table --format html --limit 100
+node scripts/export-field-radar.mjs --library /absolute/library --id topic-id --view literature-table --format html --all true
+node scripts/export-field-radar.mjs --library /absolute/library --id topic-id --view literature-table --format csv --all true --column-filters '{"method":"gravity","od_generation":"unknown"}' --sort-by year --sort-direction desc
 node scripts/export-field-radar.mjs --library /absolute/library --id topic-id --view literature-table --format tsv --analysis-request-id saved-request-id --expected-revision HASH --state-home /absolute/dsh-home
 ```
 
-`--state-home` 可选，需与宿主 localStateHome 相同。CLI 复用当前资料库状态和安全导出实现，不启动浏览器、不调用模型。文件内容不可变，下载时核验完整性；表格 HTML 转义，CSV／TSV 防止公式注入。派生单元格合计最多 2 MiB，单个渲染格式最多 10 MiB；超限请减少本页 limit，不裁掉证据或字段。
+`--state-home` 可选，需与宿主 localStateHome 相同。CLI 复用当前资料库状态和安全导出实现，不启动浏览器、不调用模型。文件内容不可变，下载时核验完整性；表格 HTML 转义，CSV／TSV 防止公式注入。派生单元格合计最多 2 MiB，单个渲染格式最多 10 MiB；超限请缩小筛选范围或选择分页，不裁掉证据或字段。筛选与排序条件、主题总数和实际导出数写入完整导出及证据 JSON；「全部」仅指当前主题／筛选，不表示全库已分析。
 
 ```sh
 node --test tests-js/field-radar*.test.mjs tests-js/bundled-skill.test.mjs tests-js/workspace-host.test.mjs tests-js/workspace-navigation.test.mjs

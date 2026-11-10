@@ -24,3 +24,31 @@ test('bounded document and comparison inputs reject excess rather than truncate'
 
 test('conflicting comparison and mixed reviewed facts cannot produce a yes/no verdict',()=>{const r=compared(),c=r.document.papers[0].comparison;c.status='conflicting';assert.equal(od(r).value,'unknown');delete c.status;c.od_generation.target_history_at_inference=fact(true);c.od_generation.output_is_od.status='needs_review';assert.equal(od(r).value,'unknown');});
 test('training/evaluation-only citations and metadata remain in every export',()=>{const r=compared();r.document.sources.push({...source,id:'s2',title:'Training evidence'});r.document.papers[0].comparison.od_generation.training_history.source_ids=['s2'];for(const format of ['html','csv','tsv','markdown']){const t=renderFieldRadarTable(r,{format});assert.ok(t.source_ids.includes('s2'));assert.ok(t.content.includes('Training evidence'));assert.ok(t.content.includes('r1'));assert.ok(t.content.includes('Synthetic topic'));}});
+
+
+test('all-row mode includes every saved paper beyond both 20 and 100 without changing AI evidence status',()=>{
+  const r=compared();r.document.papers=Array.from({length:205},(_,i)=>({...r.document.papers[0],id:'p'+i,title:'Synthetic '+i,comparison:{...r.document.papers[0].comparison,status:i===204?'needs_review':'verified'}}));
+  for(const format of ['html','tsv','csv','markdown']){const t=renderFieldRadarTable(r,{all:true,format});assert.equal(t.count,205);assert.equal(t.total,205);assert.equal(t.has_more,false);assert.equal(t.records.at(-1).id,'p204');assert.equal(t.rows.at(-1).od_generation.value,'unknown');assert.equal(t.coverage.od_unknown,1);assert.equal(t.corpus_total,205);}
+  r.document.papers=Array.from({length:500},(_,i)=>({...r.document.papers[0],id:'p'+i}));assert.equal(buildFieldRadarTable(r,{all:true}).count,500);
+});
+test('seven column filters compose across the full scope before pagination and preserve source order',()=>{
+  const r=compared(),base=r.document.papers[0];r.document.papers=Array.from({length:69},(_,i)=>({...base,id:'p'+i,year:2000+i,comparison:{...base.comparison,short_name:fact('SYN '+i),research_group:fact(i<40?'First Lab':'Target Lab')}}));
+  const filters={research_group:'target',short_name:'SYN',task_output:'od flows',datasets:'公开获取',method:'gravity',year:'20',od_generation:'yes'};
+  const t=buildFieldRadarTable(r,{column_filters:filters,limit:20});assert.equal(t.total,29);assert.equal(t.count,20);assert.equal(t.records[0].id,'p40');assert.equal(t.records.at(-1).id,'p59');assert.equal(t.scoped_total,69);assert.equal(t.has_more,true);
+  const next=buildFieldRadarTable(r,{column_filters:filters,offset:20,limit:20});assert.equal(next.count,9);assert.equal(next.records[0].id,'p60');
+  const both=buildFieldRadarTable(r,{all:true,filters:{year:'2047'},column_filters:{short_name:'ＳＹＮ 47'}});assert.equal(both.total,1);assert.equal(both.records[0].id,'p47');
+  assert.equal(buildFieldRadarTable(r,{column_filters:{method:'absent'}}).total,0);
+});
+test('column sorting is stable, natural, applied before pages and keeps unknown years last',()=>{
+  const r=compared(),p=r.document.papers[0];r.document.papers=[10,2,1].map(i=>({...p,id:'p'+i,year:2020+i,comparison:{...p.comparison,short_name:fact('SYN '+i)}}));r.document.papers.push({...p,id:'unknown',year:null});
+  assert.deepEqual(buildFieldRadarTable(r,{sort_by:'short_name',limit:2}).records.map(p=>p.id),['unknown','p1']);
+  assert.deepEqual(buildFieldRadarTable(r,{sort_by:'year',sort_direction:'desc',all:true}).records.map(p=>p.id),['p10','p2','p1','unknown']);
+  assert.deepEqual(buildFieldRadarTable(r,{sort_by:'year',sort_direction:'asc',offset:2,limit:2}).records.map(p=>p.id),['p10','unknown']);
+});
+test('OD filters select verdicts only, never reported draft values or conflict text',()=>{
+  const r=compared(),p=r.document.papers[0];r.document.papers=[{...p,id:'yes'},{...p,id:'no',comparison:{...p.comparison,od_generation:{output_is_od:fact(false)}}},{...p,id:'draft',comparison:{...p.comparison,status:'needs_review'}},{...p,id:'conflict',comparison:{...p.comparison,status:'conflicting'}},{id:'missing',title:'Synthetic missing',source_ids:[]}];
+  for(const [value,ids]of [['yes',['yes']],['no',['no']],['unknown',['draft','conflict','missing']]])assert.deepEqual(buildFieldRadarTable(r,{all:true,column_filters:{od_generation:value}}).records.map(p=>p.id),ids);
+});
+test('all-row and per-column controls reject invalid options instead of silently widening a request',()=>{
+  for(const input of [{all:'true'},{all:true,offset:1},{column_filters:[]},{column_filters:{unexpected:'x'}},{column_filters:{method:1}},{column_filters:{method:'x'.repeat(501)}},{column_filters:{od_generation:'是'}},{sort_by:'unexpected'},{sort_direction:'descending'}])assert.throws(()=>buildFieldRadarTable(fixture(),input));
+});

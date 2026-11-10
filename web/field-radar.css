@@ -25,3 +25,11 @@ body.has-field-radar{--workbench-height:42px}.has-field-radar .topbar{height:42p
 .radar-literature-evidence details{max-width:min(680px,78vw);white-space:normal}
 .radar-literature-evidence summary{cursor:pointer;font-weight:600}
 .radar-literature-evidence p{margin:4px 0}
+
+.radar-table-tools{margin:12px 0 18px}.radar-table-tools[hidden]{display:none}
+.radar-table-tools .radar-toolbar label{display:flex;align-items:center;gap:8px}.radar-table-tools .radar-toolbar select{min-width:150px}
+.radar-table-column-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:12px}
+.radar-table-column-filters label{display:flex;flex-direction:column;gap:5px;font-size:12px}
+.radar-table-column-filters input,.radar-table-column-filters select{width:100%;min-width:0;box-sizing:border-box;padding:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.radar-literature-table th button{font:inherit;color:inherit;white-space:normal;text-align:left;width:100%}
+.radar-literature-evidence details,.radar-table-tools~.radar-content .radar-source{content-visibility:auto;contain-intrinsic-size:auto 80px}
