@@ -18,8 +18,8 @@ window.PaperWorkbench = (() => {
   function create({state,api,loadList,openPaper,selectPaper,changed,tableChanged,toast,el,resource,organization,openMetadataPanel,closeMetadataPanel,persistence}) {
     let table = false, editing = null, revision = 0, readingId = null;
     let editorVisible=false, initialFields=null, initialRankings=null, restoring=false, selectingForEdit=false, loadingEditId=null, drafts=new Map();
-    const draftFields=['title','authors','year','citekey','tags','type','journal','doi','url','published','online','print','received','accepted','affiliations'];
-    const metadataKeys=['id','title','author','issued','type','citekey','tags','container-title','DOI','URL','publication_dates','journal_rankings'];
+    const draftFields=['title','authors','year','citekey','tags','type','journal','volume','issue','page','publisher','doi','url','published','online','print','received','accepted','affiliations'];
+    const metadataKeys=['id','title','author','issued','type','citekey','tags','container-title','volume','issue','page','publisher','DOI','URL','publication_dates','journal_rankings'];
     const draftLimit=256*1024, draftCount=12;
     const draftId=item=>item?.id||'@new';
     const stateKey=id=>`metadata:${id==='@new'?'new':id}`;
@@ -108,7 +108,7 @@ window.PaperWorkbench = (() => {
     $('metadata-dialog').addEventListener('close',()=>metadataVisibility(false));
     $('metadata-dialog').querySelector('h2').id='metadata-dialog-title';
     const extra=node('div',undefined,'metadata-extra');
-    const fields=[['journal','期刊 / 出处'],['doi','DOI'],['url','论文链接'],['published','发表日期'],['online','在线发表'],['print','印刷发表'],['received','收稿日期'],['accepted','接收日期']];
+    const fields=[['journal','期刊 / 出处'],['volume','卷'],['issue','期'],['page','页码'],['publisher','出版社'],['doi','DOI'],['url','论文链接'],['published','发表日期'],['online','在线发表'],['print','印刷发表'],['received','收稿日期'],['accepted','接收日期']];
     for(const [id,label] of fields) { const field=node('label',label,'field');const input=node('input');input.id=`edit-${id}`;if(['published','online','print','received','accepted'].includes(id)){input.placeholder='YYYY 或 YYYY-MM 或 YYYY-MM-DD';input.pattern='[0-9]{4}(-[0-9]{2}(-[0-9]{2})?)?';}field.append(input);extra.append(field); }
     const typeLabel=node('label','文献类型','field');const type=node('select');type.id='edit-type';for(const [v,t] of [['article-journal','期刊论文'],['paper-conference','会议论文'],['book','图书'],['chapter','章节'],['thesis','学位论文'],['report','报告'],['document','文献']]) {const o=node('option',t);o.value=v;type.append(o);}typeLabel.append(type);extra.prepend(typeLabel);
     const affiliationLabel=node('label','作者单位','field full-width');
@@ -177,6 +177,7 @@ window.PaperWorkbench = (() => {
       $('edit-year').value=item?.issued?.['date-parts']?.[0]?.[0]||'';$('edit-citekey').value=item?.citekey||'';$('edit-tags').value=(item?.tags||[]).map(t=>typeof t==='string'?t:t.tag).filter(Boolean).join(', ');
       const typeValue=item?.type||'article-journal';if(![...type.options].some(o=>o.value===typeValue)){const o=node('option',typeValue);o.value=typeValue;type.append(o);}type.value=typeValue;
       $('edit-journal').value=item?.['container-title']||'';$('edit-doi').value=item?.DOI||'';$('edit-url').value=item?.URL||'';
+      for(const key of ['volume','issue','page','publisher'])$(`edit-${key}`).value=item?.[key]||'';
       for(const k of ['published','online','print','received','accepted'])$(`edit-${k}`).value=item?.publication_dates?.[k]||'';
       $('edit-affiliations').value=(item?.author||[]).map((a,i)=>{const names=(a.affiliation||[]).map(v=>typeof v==='string'?v:v.name).filter(Boolean);return names.length?`${i+1} | ${names.join('；')}`:'';}).filter(Boolean).join('\n');
       editing._affiliationsText=$('edit-affiliations').value;
@@ -206,6 +207,7 @@ window.PaperWorkbench = (() => {
         const journal_rankings=[...$('ranking-rows').children].map(row=>{const original=JSON.parse(row.dataset.original);const r={...original,system:'JCR'};for(const input of row.querySelectorAll('[data-rank-field]'))r[input.dataset.rankField]=input.dataset.rankField==='year'?Number(input.value):input.value.trim();if(['year','quartile','category','source'].some(k=>r[k]!==original[k]))delete r.verified_at;return r;});
         const publication_dates={};for(const k of ['published','online','print','received','accepted']){const v=$(`edit-${k}`).value.trim();if(v)publication_dates[k]=v;}
         const metadata={title:$('edit-title').value.trim(),author,type:type.value,issued:$('edit-year').value===editing._yearText?editing.issued||{}:$('edit-year').value?{'date-parts':[[Number($('edit-year').value)]]}:{},citekey:$('edit-citekey').value.trim(),tags:$('edit-tags').value.split(/[,，]/).map(t=>t.trim()).filter(Boolean),'container-title':$('edit-journal').value.trim(),DOI:$('edit-doi').value.trim(),URL:$('edit-url').value.trim(),publication_dates,journal_rankings};
+        for(const key of ['volume','issue','page','publisher'])metadata[key]=$(`edit-${key}`).value.trim();
         const result=await api(editId?'update':'create',{...(editId?{id:editId}:{}),metadata});
         if(JSON.stringify(drafts.get(savedDraftKey))===submittedDraft){drafts.delete(savedDraftKey);persistDraft(savedDraftKey,null);}
         if(editRevision===revision){editing=null;editorVisible=false;if(closeMetadataPanel)closeMetadataPanel();else $('metadata-dialog').close();}changed(result);await loadList();toast('文献资料已保存');

@@ -1,4 +1,4 @@
-import { resolveDOIMetadata } from './paper-fetch.mjs';
+import { resolveDOIMetadata, resolveTitleMetadata } from './paper-fetch.mjs';
 
 // Network metadata is data: never allow attachment paths or worker arguments to
 // arrive from a publisher response. Only bibliographic fields can be imported.
@@ -7,7 +7,7 @@ export function bibliographicMetadata(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   return Object.fromEntries(fields.filter(key => raw[key] !== undefined && raw[key] !== null).map(key => [key,raw[key]]));
 }
-const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+const normalize = value => String(value || '').normalize('NFKC').replace(/\u00ad/g,'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 
 /** A detected identifier can be a cited paper; require title evidence before enrichment. */
 export function metadataMatchesPDF(metadata, inspection) {
@@ -25,6 +25,8 @@ export async function importPDF(path, options, core, remote = {}) {
   const warnings = [...(remote.warnings || [])];
   let metadata = {}, source, enrichment;
   const portable = inspection.parse?.portable_metadata;
+  const local = inspection.metadata || {};
+  const incomplete = !local.DOI || !local.author?.length || !local.issued?.['date-parts']?.[0]?.[0] || !local['container-title'];
   let identity = {status:portable?'preserved_portable_metadata':'not_checked'};
   if (!portable && remote.metadata?.title) {
     if (metadataMatchesPDF(remote.metadata,inspection)) {
@@ -35,12 +37,16 @@ export async function importPDF(path, options, core, remote = {}) {
       warnings.push('下载页面的文献信息与 PDF 标题未能匹配；保留 PDF 本地解析结果，请核对资料。');
     }
   }
-  if (!portable && !source && !remote.metadata) {
+  if ((!portable || incomplete) && !source && !remote.metadata) {
     const candidates = inspection.doi_candidates || [];
     const doi = inspection.metadata?.DOI || (candidates.length === 1 ? candidates[0] : null);
-    if (doi) {
+    const titleLookup = !doi && normalize(local.title).length >= 8 && inspection.parse?.field_sources?.title !== 'filename-fallback';
+    if (doi || titleLookup) {
       try {
-        const result = await resolveDOIMetadata(doi,{...options.fetchOptions,signal:options.signal,timeoutMs:10000});
+        // One bounded public bibliographic lookup per import. Never send PDF
+        // text, scan the library or delay import on unavailable services.
+        const lookupOptions={...options.fetchOptions,signal:options.signal,timeoutMs:10000,crossrefOnly:true};
+        const result = doi ? await resolveDOIMetadata(doi,lookupOptions) : await resolveTitleMetadata(local.title,lookupOptions);
         warnings.push(...(result.warnings || []));
         enrichment = {...result.provenance,status:result.metadata?'resolved':'unavailable',warnings:[...(result.warnings || [])]};
         if (result.metadata && metadataMatchesPDF(result.metadata,inspection)) {
@@ -48,12 +54,12 @@ export async function importPDF(path, options, core, remote = {}) {
           identity = {status:'title_match',method:'parsed_title'};
         } else {
           identity = {status:'unmatched',method:'parsed_title'};
-          warnings.push('检测到 DOI，但未确认在线题名与 PDF 一致；资料保留为待核验。');
+          warnings.push(doi?'检测到 DOI，但未确认在线题名与 PDF 一致；资料保留为待核验。':'未找到唯一匹配题名的 DOI；已保留本地资料，可使用「补全资料」重试。');
         }
       } catch (error) {
         options.signal?.throwIfAborted();
         const detail = String(error?.message || error).slice(0,500);
-        enrichment = {target:doi,fetched_at:new Date().toISOString(),requests:[],status:'unavailable',warnings:[detail]};
+        enrichment = {target:doi||local.title,fetched_at:new Date().toISOString(),requests:[],status:'unavailable',warnings:[detail]};
         warnings.push(detail);
         warnings.push('在线资料补全暂不可用；PDF 将按本地解析结果保存。');
       }

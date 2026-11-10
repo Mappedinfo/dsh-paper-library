@@ -290,7 +290,7 @@ export async function resolveTitleMetadata(title, options = {}) {
     else if(matches.length>1)ctx.warnings.push('题名对应多个 DOI，请指定 DOI 后再补全。');
     if(matches.length>1)return {metadata,provenance:ctx.provenance,warnings:ctx.warnings};
   }catch(error){warn(ctx,error)}
-  if(!metadata)try{
+  if(!metadata&&!options.crossrefOnly)try{
     const response=await requestPublic(`https://export.arxiv.org/api/query?search_query=${encodeURIComponent('ti:"'+title.replace(/"/g,'')+'"')}&max_results=5`,ctx,'metadata');
     const xml=await readText(response);if(/<!DOCTYPE|<!ENTITY/i.test(xml))throw new Error('Unexpected XML document entities');
     const matches=[...xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)].map(match=>match[1]).filter(entry=>identity(entry.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||'')===identity(title));

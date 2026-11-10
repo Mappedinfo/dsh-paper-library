@@ -141,7 +141,7 @@ window.PaperReadingPanels = (() => {
       }else return;
       render();
     }
-    function visible(name) {name=known(name);return !disposed&&(name==='chat'?chatOpen&&!collapsed:sidebar===name&&(!extraPanels.get(name)?.reading||readingActive));}
+    function visible(name) {name=panelAliases.get(name)||name;if(!names.has(name)&&!extraPanels.has(name))return false;return !disposed&&(name==='chat'?chatOpen&&!collapsed:sidebar===name&&(!extraPanels.get(name)?.reading||readingActive));}
     function toggle(name) {return visible(name)?close(name):show(name);}
     function setSide(value,{persist=true}={}) {
       if(!['left','right'].includes(value))throw new Error('Reading sidebar side must be left or right');

@@ -80,3 +80,35 @@ test('remote PDF parsing is recorded separately when landing identity does not m
 test('bibliographic whitelist retains arXiv version fields and excludes source-controlled state',()=>{
   assert.deepEqual(bibliographicMetadata({archive:'arXiv',archive_location:'2401.01234v2',title:'Versioned paper',metadata_verified:true,acquisition:{validation:'trusted'},attachments:[{path:'/secret.pdf'}]}),{title:'Versioned paper',archive:'arXiv',archive_location:'2401.01234v2'});
 });
+
+test('import without a DOI resolves only a unique exact title and fills citation fields',async()=>{
+  const fixture=harness(inspection('Synthetic urban mobility study',null),{items:[{DOI:'10.5555/example',title:['Synthetic urban mobility study'],type:'journal-article',volume:'12',issue:'3',page:'1-9'}]});
+  await importPDF('/tmp/source.pdf',fixture.options,fixture.core);
+  const saved=fixture.requests.find(r=>r.action==='import');
+  assert.equal(saved.metadata_verified,true);assert.equal(saved.metadata.DOI,'10.5555/example');
+  assert.equal(saved.metadata.page,'1-9');assert.equal(saved.metadata.volume,'12');
+  assert.equal(saved.metadata.acquisition.enrichment.requests.length,1);
+});
+
+test('incomplete portable CSL gets a bounded lookup; full portable metadata does not',async()=>{
+  const local=inspection('Synthetic urban mobility study');local.parse.portable_metadata=true;
+  const fixture=harness(local,{DOI:'10.1234/paper',title:['Synthetic urban mobility study'],page:'1-9'});
+  await importPDF('/tmp/source.pdf',fixture.options,fixture.core);
+  assert.equal(fixture.requests.at(-1).metadata.page,'1-9');
+  local.metadata={...local.metadata,DOI:'10.1234/paper',author:[{family:'Example'}],issued:{'date-parts':[[2020]]},'container-title':'Examples'};
+  const full=harness(local,{});let fullCalls=0;full.options.fetchOptions.transport=()=>{fullCalls++;throw new Error('must not fetch')};
+  await importPDF('/tmp/source.pdf',full.options,full.core);
+  assert.equal(fullCalls,0);assert.equal(full.requests.at(-1).metadata?.acquisition?.enrichment,undefined);
+});
+
+test('ambiguous title matches do not attach another DOI and filename fallbacks never query',async()=>{
+  const title='Synthetic urban mobility study';
+  const fixture=harness(inspection(title,null),{items:[{DOI:'10.5555/a',title:[title]},{DOI:'10.5555/b',title:[title]}]});
+  const result=await importPDF('/tmp/source.pdf',fixture.options,fixture.core);
+  assert.equal(fixture.requests.at(-1).metadata.DOI,undefined);assert.match(result.warnings.join(' '),/多个 DOI/);
+  const local=inspection(title,null);local.parse.field_sources.title='filename-fallback';
+  const fallback=harness(local,{});let fallbackCalls=0;fallback.options.fetchOptions.transport=()=>{fallbackCalls++;throw new Error('must not fetch')};
+  await importPDF('/tmp/source.pdf',fallback.options,fallback.core);
+  assert.equal(fallbackCalls,0);assert.equal(fallback.requests.at(-1).metadata?.acquisition?.enrichment,undefined);
+  assert.equal(metadataMatchesPDF({title:'Synthetic directionality study'},inspection('Synthetic direction\u00adality study')),true);
+});

@@ -60,5 +60,13 @@ export async function cite(items, format = 'apa') {
   const text = engine.makeBibliography()[1].map(s => s.trim()).join('\n\n');
   engine.setOutputFormat('html');
   const html = safeCitationHtml(engine.makeBibliography()[1].join(''));
-  return { text, html, filename: 'references-apa.txt', mime: 'text/plain;charset=utf-8' };
+  const warnings=data.flatMap(item=>{
+    const missing=[];
+    if(!String(item.title||'').trim())missing.push('标题');
+    if(!item.author?.length)missing.push('作者');
+    if(!item.issued?.['date-parts']?.[0]?.[0]&&!item.issued?.literal)missing.push('年份');
+    if(['article-journal','paper-conference','chapter'].includes(item.type)&&!item['container-title'])missing.push('期刊 / 出处');
+    return missing.length?[`${item.id}：缺少${missing.join('、')}`]:[];
+  });
+  return { text, html, warnings, filename: 'references-apa.txt', mime: 'text/plain;charset=utf-8' };
 }

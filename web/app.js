@@ -1015,6 +1015,7 @@ async function cite(format) {
     const result = await api('cite', { ids: [state.active.id], format });
     if (format !== 'apa') { downloadText(result); toast('BibLaTeX 已导出'); return; }
     await copyText(result.text, { label: 'APA 7 引用', html: result.html });
+    if(result.warnings?.length)toast(`引用资料待补全：${result.warnings.join('；')}。可在「资料详情」修改或「补全资料」。`,true);
   } catch (error) { toast(error.message, true); } finally { button.disabled = false; }
 }
 async function exportNotes() {

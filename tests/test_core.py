@@ -83,6 +83,33 @@ def test_portable_roundtrip_original_and_external_annotations(tmp_path):
     assert len(request(tmp_path, "annotations", id=item["id"])["annotations"]) == 1
 
 
+def test_repeated_metadata_edits_preserve_multiple_embedded_files(tmp_path):
+    original = make_pdf(tmp_path / "attachments.pdf")
+    attachments = {"zotero-notes.html": b"<p>External note</p>", "zotero-package.json": b'{"external":true}'}
+    with fitz.open(original) as doc:
+        for name, content in attachments.items():
+            doc.embfile_add(name, content, filename=name)
+        doc.saveIncr()
+    before = original.read_bytes()
+    item = request(tmp_path, "import", path=str(original))["items"][0]
+    for title in ["Synthetic metadata edit", "Synthetic metadata edit", "Second title"]:
+        metadata = {"title": title, "author": [{"family": "Example", "given": "A."}], "DOI": "10.5555/synthetic", "volume": "12", "page": "1-8"}
+        item = request(tmp_path, "update", id=item["id"], metadata=metadata)
+        exported = request(tmp_path, "export_pdf", id=item["id"])
+        with fitz.open(exported["path"]) as doc:
+            assert set(doc.embfile_names()) == {*attachments, "paper-library.csl.json"}
+            for name, content in attachments.items():
+                assert doc.embfile_get(name) == content
+            payload = doc.embfile_get("paper-library.csl.json")
+            stored = json.loads(payload)
+            for key, value in metadata.items():
+                assert stored[key] == value
+            assert doc.embfile_info("paper-library.csl.json")["size"] == len(payload)
+            assert "External reader comment" in [annot.info["content"] for annot in doc[0].annots()]
+        assert request(tmp_path, "get", id=item["id"])["title"] == title
+    assert original.read_bytes() == before
+
+
 @pytest.mark.parametrize("rotation", [0, 90, 180, 270])
 def test_rotated_words_annotations_and_render_cap(tmp_path, rotation):
     original = make_pdf(tmp_path / "rotated.pdf", rotation)

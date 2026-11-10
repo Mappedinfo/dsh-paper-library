@@ -191,9 +191,19 @@ class PdfWrites:
         if len(payload) > 1024 * 1024:
             raise ValueError("Portable metadata exceeds 1 MB")
         if PORTABLE_NAME in doc.embfile_names():
-            # Recreate only our own embedded file; PyMuPDF 1.28 embfile_upd has a bytes-buffer regression.
-            doc.embfile_del(PORTABLE_NAME)
-        doc.embfile_add(PORTABLE_NAME, payload, filename=PORTABLE_NAME, desc="Portable CSL bibliographic metadata")
+            # Keep the file-spec/name tree intact. PyMuPDF 1.28 deletes the wrong
+            # name-array pair for non-first attachments, and embfile_upd(buffer)
+            # has a bytes-buffer regression. Its metadata-only call returns the
+            # existing stream xref; update that stream through the public API.
+            xref = doc.embfile_upd(PORTABLE_NAME)
+            if not isinstance(xref, int) or xref <= 0:
+                raise ValueError("Cannot locate portable metadata attachment stream")
+            doc.update_stream(xref, payload)
+            doc.xref_set_key(xref, "Params/Size", str(len(payload)))
+            doc.xref_set_key(xref, "DL", str(len(payload)))
+            doc.xref_set_key(xref, "Params/CheckSum", "<" + hashlib.md5(payload, usedforsecurity=False).hexdigest() + ">")
+        else:
+            doc.embfile_add(PORTABLE_NAME, payload, filename=PORTABLE_NAME, desc="Portable CSL bibliographic metadata")
         info = dict(doc.metadata)
         info["title"] = portable.get("title", "Untitled")
         keywords = re.sub(r"(?:^|;\s*)paper-library-citekey:[^;]*", "", info.get("keywords") or "").strip("; ")

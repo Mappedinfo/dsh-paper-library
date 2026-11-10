@@ -47,6 +47,15 @@ function environment({width=741,storage=new Map(),sharedLibrary=false,onAnnotati
 }
 const paper={id:'synthetic-a',title:'Synthetic paper'};
 
+test('visibility queries tolerate panels awaiting registration during reader startup',()=>{
+  const f=environment({sharedLibrary:true});
+  assert.equal(f.panels.visible('outline'),false);
+  assert.throws(()=>f.panels.show('outline'),/Unknown reading panel/);
+  f.panels.registerPanel({id:'outline',label:'大纲',element:f.document.createElement('section'),reading:true});
+  f.panels.paperChanged(paper);f.panels.setReadingActive(true);f.panels.show('outline');
+  assert.equal(f.panels.visible('outline'),true);
+});
+
 test('merged writing panel aliases share one tab, content root and open state',()=>{
   const f=environment({sharedLibrary:true});
   const element=f.document.createElement('section');element.id='combined-writing';

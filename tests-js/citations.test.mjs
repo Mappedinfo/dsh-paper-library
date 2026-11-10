@@ -10,6 +10,12 @@ test('APA uses official style: initials, date, journal/volume italics and DOI',a
   assert.match(result.text,/Learning Methods Examples, 12\(3\), 10–19/);
   assert.match(result.text,/https:\/\/doi\.org\/10\.5555\/example/);
   assert.match(result.html,/<i>Learning Methods Examples<\/i>/);
+  assert.deepEqual(result.warnings,[]);
+});
+test('incomplete APA metadata stays visible without inventing bibliographic fields',async()=>{
+  const result=await cite([{id:'incomplete',type:'article-journal',title:'Synthetic study'}]);
+  assert.match(result.warnings.join(' '),/作者、年份、期刊/);
+  assert.match(result.text,/n\.d\./);
 });
 test('BibLaTeX roundtrip keeps citekey, names and DOI',async()=>{
   const result=await cite([{...article,citekey:'custom-key:2020'}],'biblatex');

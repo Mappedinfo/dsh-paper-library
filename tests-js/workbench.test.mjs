@@ -106,7 +106,7 @@ test('closing metadata during service loading cancels the late editor without cr
 });
 
 test('metadata title edit preserves supplied affiliations, their provenance, full issued date and JCR verification', async () => {
-  const paper = original(); const f = environment({ active: paper });
+  const paper = {...original(),volume:'12',issue:'3',page:'10-19',publisher:'Example Press'}; const f = environment({ active: paper });
   f.workbench.edit(paper); f.element('edit-title').value = 'Revised title'; await f.form.dispatch('submit');
   const request = f.requests.find(r => r.action === 'update');
   assert.equal(request.id, paper.id);
@@ -115,6 +115,14 @@ test('metadata title edit preserves supplied affiliations, their provenance, ful
   assert.deepEqual(request.metadata.journal_rankings, paper.journal_rankings);
   assert.deepEqual(request.metadata.publication_dates, paper.publication_dates);
   assert.equal(request.metadata.title, 'Revised title');
+  for(const key of ['volume','issue','page','publisher'])assert.equal(request.metadata[key],paper[key]);
+});
+
+test('metadata editor saves corrected citation page range and publisher', async()=>{
+  const paper=original(), f=environment({active:paper});f.workbench.edit(paper);
+  f.element('edit-page').value='101-109';f.element('edit-publisher').value='Example Press';
+  await f.form.dispatch('submit');const saved=f.requests.find(r=>r.action==='update').metadata;
+  assert.equal(saved.page,'101-109');assert.equal(saved.publisher,'Example Press');
 });
 
 test('explicitly clearing an affiliation clears only that supplied affiliation', async () => {
