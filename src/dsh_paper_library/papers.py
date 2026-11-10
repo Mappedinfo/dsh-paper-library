@@ -232,12 +232,14 @@ class Papers:
         if not isinstance(archived, bool):
             raise ValueError("archived must be boolean")
         query = str(query).strip()[:500]
+        from .core import ranking_sort
         expressions = {
             "title": "papers.title COLLATE NOCASE",
             "author": "coalesce(json_extract(papers.metadata,'$.author[0].family'),json_extract(papers.metadata,'$.author[0].literal')) COLLATE NOCASE",
             "year": "coalesce(json_extract(papers.metadata,'$.issued.date-parts[0][0]'),CAST(substr(json_extract(papers.metadata,'$.publication_dates.published'),1,4) AS INTEGER))",
             "journal": "json_extract(papers.metadata,'$.container-title') COLLATE NOCASE",
             "modified": "papers.modified", "created": "papers.created", "citekey": "papers.citekey COLLATE NOCASE",
+            "ranking": ranking_sort("papers.metadata"),
             # For multiple categories, use the latest reported year and its worst
             # quartile, so sorting never silently chooses a journal's best category.
             "jcr": "(SELECT max(json_extract(r.value,'$.quartile')) FROM json_each(papers.metadata,'$.journal_rankings') r WHERE json_extract(r.value,'$.system')='JCR' AND json_extract(r.value,'$.year')=(SELECT max(json_extract(y.value,'$.year')) FROM json_each(papers.metadata,'$.journal_rankings') y WHERE json_extract(y.value,'$.system')='JCR'))",

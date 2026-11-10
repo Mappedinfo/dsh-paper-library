@@ -13,7 +13,7 @@ import stat
 from urllib.parse import urlsplit
 import uuid
 
-from .core import bounded_text, canonical_doi, csl_item, now
+from .core import bounded_text, canonical_doi, csl_item, now, ranking_sort
 
 RELATIONS = {"mentions", "cites", "uses", "produces", "describes"}
 STATUSES = {"needs-review", "accepted", "rejected"}
@@ -313,6 +313,7 @@ def list_resources(library, request):
                    "year": "json_extract(metadata,'$.issued.date-parts[0][0]')", "journal": "json_extract(metadata,'$.container-title') COLLATE NOCASE",
                    "publisher": "json_extract(metadata,'$.publisher') COLLATE NOCASE", "modified": "modified", "created": "created", "citekey": "citekey COLLATE NOCASE", "kind": "kind"}
     expressions["jcr"] = "(SELECT max(json_extract(r.value,'$.quartile')) FROM json_each(metadata,'$.journal_rankings') r WHERE json_extract(r.value,'$.system')='JCR' AND json_extract(r.value,'$.year')=(SELECT max(json_extract(y.value,'$.year')) FROM json_each(metadata,'$.journal_rankings') y WHERE json_extract(y.value,'$.system')='JCR'))"
+    expressions["ranking"] = ranking_sort("metadata")
     if sort not in expressions or order not in {"asc", "desc"}:
         raise ValueError("Unsupported resource sort/order")
     union = "SELECT p.id,'paper' AS kind,p.title,p.metadata,p.citekey,p.created,p.modified,a.archived_at FROM papers p LEFT JOIN paper_archive a ON a.paper_id=p.id UNION ALL SELECT id,'dataset',title,metadata,citekey,created,modified,archived_at FROM datasets"

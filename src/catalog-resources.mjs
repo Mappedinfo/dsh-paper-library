@@ -1,5 +1,5 @@
 /** Catalog-only aggregation. Citation/export APIs keep their original scope. */
-const sorts = new Set(['title', 'author', 'year', 'journal', 'publisher', 'modified', 'created', 'citekey', 'kind', 'jcr']);
+const sorts = new Set(['title', 'author', 'year', 'journal', 'publisher', 'modified', 'created', 'citekey', 'kind', 'jcr', 'ranking']);
 const asciiFold = value => value.replace(/[A-Z]/g, char => char.toLowerCase());
 const binaryCompare = (left, right) => Buffer.compare(Buffer.from(String(left)), Buffer.from(String(right)));
 const sqlNoCase = value => asciiFold(String(value));
@@ -26,6 +26,16 @@ function valueFor(item, sort) {
     if (!rows.length) return null;
     const year = Math.max(...rows.map(row => Number(row.year)));
     return rows.filter(row => Number(row.year) === year).map(row => row.quartile).filter(value => value != null).sort().at(-1) ?? null;
+  }
+  if (sort === 'ranking') {
+    const rows = item.journal_rankings || [];
+    const system = rows.map(row => row.system).sort(binaryCompare)[0];
+    if (!system) return null;
+    const group = rows.filter(row => row.system === system);
+    const year = Math.max(...group.map(row => row.year));
+    const grade = group.filter(row => row.year === year).map(row => row.grade === 'A*' ? '0' : row.quartile || row.grade)
+      .filter(Boolean).sort(binaryCompare).at(-1);
+    return grade ? `${system}:${grade}` : null;
   }
   return item[sort] ?? null;
 }

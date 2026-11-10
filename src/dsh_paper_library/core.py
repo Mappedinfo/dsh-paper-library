@@ -158,33 +158,50 @@ def normalize_research_metadata(item):
             raise ValueError("journal_rankings must be an array of at most 30 category/year records")
         clean = []
         for ranking in rankings:
-            if not isinstance(ranking, dict) or set(ranking) - {"system", "year", "category", "quartile", "source", "verified_at"}:
+            if not isinstance(ranking, dict) or set(ranking) - {"system", "year", "category", "quartile", "grade", "source", "verified_at", "release"}:
                 raise ValueError("Journal ranking has unsupported fields")
-            if ranking.get("system") != "JCR":
-                raise ValueError("Journal ranking system must be JCR")
+            system = ranking.get("system")
+            grade_scales = {"CCF": {"A", "B", "C"}, "ICORE": {"A*", "A", "B", "C"}}
+            if not isinstance(system, str) or system not in {"JCR", "OJR", "SJR", "CiteScore", *grade_scales}:
+                raise ValueError("Unsupported ranking system")
             year = ranking.get("year")
             if isinstance(year, bool) or not isinstance(year, int) or not 1900 <= year <= 9999:
-                raise ValueError("JCR year must be an integer from 1900 to 9999")
-            if ranking.get("quartile") not in {"Q1", "Q2", "Q3", "Q4"}:
-                raise ValueError("JCR quartile must be Q1, Q2, Q3 or Q4")
-            value = {"system": "JCR", "year": year, "quartile": ranking["quartile"],
-                     "category": bounded_text(ranking.get("category"), "JCR category", 500, required=True),
-                     "source": bounded_text(ranking.get("source"), "JCR source", 2000, required=True)}
+                raise ValueError("Ranking year must be an integer from 1900 to 9999")
+            field, scale = ("grade", grade_scales[system]) if system in grade_scales else ("quartile", {"Q1", "Q2", "Q3", "Q4"})
+            label = ranking.get(field)
+            if not isinstance(label, str) or label not in scale or ("grade" if field == "quartile" else "quartile") in ranking:
+                raise ValueError(f"Invalid {system} {field}")
+            value = {"system": system, "year": year, field: label,
+                     "category": bounded_text(ranking.get("category"), "Ranking category", 500, required=True),
+                     "source": bounded_text(ranking.get("source"), "Ranking source", 2000, required=True)}
+            if ranking.get("release") not in (None, ""):
+                value["release"] = bounded_text(ranking["release"], "Ranking release", 80, required=True)
             if ranking.get("verified_at") not in (None, ""):
-                verified = bounded_text(ranking["verified_at"], "JCR verified_at", 40)
+                verified = bounded_text(ranking["verified_at"], "Ranking verified_at", 40)
                 try:
                     if len(verified) <= 10:
-                        publication_date(verified, "JCR verified_at")
+                        publication_date(verified, "Ranking verified_at")
                     else:
                         datetime.fromisoformat(verified.replace("Z", "+00:00"))
                 except ValueError as exc:
-                    raise ValueError("JCR verified_at must be an ISO date or datetime") from exc
+                    raise ValueError("Ranking verified_at must be an ISO date or datetime") from exc
                 value["verified_at"] = verified
             clean.append(value)
         item["journal_rankings"] = clean
     if len(json.dumps(item, ensure_ascii=False, allow_nan=False).encode("utf-8")) > MAX_METADATA_BYTES:
         raise ValueError("Metadata exceeds 256 KiB; shorten long fields")
     return item
+
+
+def ranking_sort(metadata):
+    # Use the same system grouping before comparing values within a system.
+    system = "json_extract(r.value,'$.system')"
+    year = "json_extract(r.value,'$.year')"
+    grade = "coalesce(json_extract(r.value,'$.quartile'),json_extract(r.value,'$.grade'))"
+    order = f"CASE {grade} WHEN 'A*' THEN '0' ELSE {grade} END"
+    return (f"(SELECT {system} || ':' || {order} "
+            f"FROM json_each({metadata},'$.journal_rankings') r "
+            f"ORDER BY {system}, {year} DESC, {order} DESC LIMIT 1)")
 
 
 def csl_item(raw):

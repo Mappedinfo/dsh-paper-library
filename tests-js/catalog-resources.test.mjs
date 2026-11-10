@@ -67,6 +67,9 @@ test('catalog merges synthetic papers, datasets and presentations before sorting
   assert.deepEqual(found.items.map(item => item.id), [a.id])
   assert.equal((await call({ action: 'resource_list', kind: 'all' })).total, 2)
   const paper = (await call({action:'resource_list',kind:'paper'})).items[0]
+  await call({action:'update',id:paper.id,metadata:{journal_rankings:[{system:'OJR',year:2025,category:'Synthetic subject',quartile:'Q2',source:'Synthetic fixture'}]}})
+  const ranked = await call({action:'catalog_resource_list',kind:'all',sort:'ranking',order:'desc',limit:1})
+  assert.equal(ranked.items[0].id,paper.id)
   const organized = await call({action:'paper_organization_update',id:paper.id,favorite:true,tags:['#method/deep/model'],expected_organization_modified:null})
   assert.deepEqual(organized.manual_tags, ['#method/deep/model'])
   assert.equal((await call({action:'get',id:paper.id})).favorite,true)

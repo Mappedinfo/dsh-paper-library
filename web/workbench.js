@@ -13,13 +13,16 @@ window.PaperWorkbench = (() => {
   };
   const incompleteAuthor = item => item.parse?.field_sources?.author==='synced-filename'&&(item.author||[]).some(a=>!a.literal&&!a.given&&/^[\p{Script=Latin}'’-]+$/u.test(a.family||''));
   const institutions = item => [...new Set((item.author || []).flatMap(a => (a.affiliation || []).map(v => typeof v === 'string' ? v : v.name)).filter(Boolean))];
-  const ranking = item => (item.journal_rankings || []).map(r => `${r.year} ${r.quartile} · ${r.category}`).join('；');
+  const gradeScales = {CCF:['A','B','C'],ICORE:['A*','A','B','C']};
+  const quartiles = ['Q1','Q2','Q3','Q4'];
+  const ranking = item => [...(item.journal_rankings || [])].sort((a,b)=>a.system.localeCompare(b.system)||b.year-a.year)
+    .map(r => `${r.system} ${r.quartile||r.grade} · ${r.year} ${r.category}`).join('；');
   const types = {'article-journal':'期刊论文','paper-conference':'会议论文',preprint:'预印本',manuscript:'未发表稿件',book:'图书',chapter:'书籍章节',thesis:'学位论文',report:'报告',dataset:'数据集',speech:'演讲 / 报告',patent:'专利',standard:'标准','article-newspaper':'报纸文章','article-magazine':'杂志文章','post-weblog':'博客文章',webpage:'网页',article:'文章',document:'文档'};
   const typeOf = item => item.resource_kind==='slides'?'presentation':item.resource_kind==='dataset'?'dataset':
     item.type==='article'&&(/^preprint$/i.test(item.genre||'')||/^arxiv$/i.test(item.archive||''))?'preprint':item.type;
   const fileType = item => item.resource_kind==='slides'?'PlainDeck':item.pdf?'PDF':
     item.storage_formats?.length?item.storage_formats.slice(0,3).map(format=>/^[a-z0-9]+$/i.test(format)?format.toUpperCase():format).join(' / ')+(item.storage_formats.length>3?'…':''):'无附件';
-  const columns = [['title','标题'],['author','作者'],['year','年份'],['journal','期刊 / 出处'],['jcr','JCR'],['citekey','引用键'],[null,'DOI'],[null,'单位'],[null,'发表 / 收稿 / 接收'],[null,'文献类型'],[null,'文件格式']];
+  const columns = [['title','标题'],['author','作者'],['year','年份'],['journal','期刊 / 出处'],['ranking','文章分区'],['citekey','引用键'],[null,'DOI'],[null,'单位'],[null,'发表 / 收稿 / 接收'],[null,'文献类型'],[null,'文件格式']];
   function create({state,api,loadList,openPaper,selectPaper,changed,tableChanged,toast,el,resource,organization,openMetadataPanel,closeMetadataPanel,persistence,enableAutomaticDoi}) {
     let table = false, editing = null, revision = 0, readingId = null;
     let editorVisible=false, initialFields=null, initialRankings=null, restoring=false, selectingForEdit=false, loadingEditId=null, drafts=new Map();
@@ -90,6 +93,8 @@ window.PaperWorkbench = (() => {
     sort.addEventListener('change',()=>sortBy(sort.value,state.order));
     const order=button('降序 ↓','catalog-order',()=>sortBy(state.sort,state.order==='asc'?'desc':'asc'));
     const kind=node('select');kind.id='catalog-kind';kind.setAttribute('aria-label','条目类型');for(const [value,label] of [['all','全部类型'],['paper','文献'],['dataset','数据集'],['slides','演示文稿']]){const option=node('option',label);option.value=value;kind.append(option);}kind.addEventListener('change',()=>{state.kind=kind.value;state.offset=0;void loadList();});
+    const projectFilter=document.querySelector('.library-filterbar > .library-organizer-row');
+    if(projectFilter)controls.append(projectFilter);
     controls.append(kind,scope,sort,order,button('＋ 文献','catalog-create',()=>edit(null)),button('＋ 数据集','dataset-create',()=>resource()?.edit()));
     document.querySelector('.list-heading').replaceWith(controls);
     // Existing list status ID remains available to the shared paginator.
@@ -118,44 +123,62 @@ window.PaperWorkbench = (() => {
     rankTitle.id='venue-rank-title';
     const closeRank=button('关闭',null,()=>rankDialog.close());
     rankHeading.append(rankTitle,closeRank);
-    const rankForm=node('form'),rankField=node('label','会议或期刊名称','field'),rankInput=node('input');
+    const rankForm=node('form'),rankField=node('label','会议或期刊名称 / ISSN','field'),rankInput=node('input');
     rankInput.required=true;rankInput.maxLength=500;rankField.append(rankInput);
-    const searchRank=node('button','查 CCF','button primary');searchRank.type='submit';
+    const searchOjr=node('button','查开放分区','button primary');searchOjr.type='submit';
+    const searchCcf=node('button','查 CCF','button');searchCcf.type='submit';
     const rankStatus=node('p',undefined,'small');rankStatus.setAttribute('role','status');
     const rankResults=node('ul',undefined,'venue-rank-results');
     const rankSources=node('p',undefined,'venue-rank-sources small');
-    for(const [label,url] of [['CCF 目录','https://www.ccf.org.cn/Academic_Evaluation/By_category/'],['ICORE 会议评级','https://icore.dsi.uclm.es/'],['Clarivate JCR（需订阅）','https://jcr.clarivate.com/jcr/home']]){
+    for(const [label,url] of [['OpenJournalRank','https://openjournalrank.com/en/methodology/'],['CCF 目录','https://www.ccf.org.cn/Academic_Evaluation/By_category/'],['ICORE 会议评级','https://icore.dsi.uclm.es/'],['SCImago SJR','https://www.scimagojr.com/'],['Clarivate JCR（需订阅）','https://jcr.clarivate.com/jcr/home']]){
       const link=node('a',label);link.href=url;link.target='_blank';link.rel='noopener noreferrer';rankSources.append(link);
     }
-    rankForm.append(rankField,searchRank,rankStatus,rankResults);
-    rankDialog.append(rankHeading,rankForm,rankSources,node('p','JCR 分区可在「编辑文献资料」中按报告年份和学科录入。','small muted'));
+    rankForm.append(rankField,searchOjr,searchCcf,rankStatus,rankResults);
+    rankDialog.append(rankHeading,rankForm,rankSources,node('p','开放分区采用 OpenJournalRank 子领域的报告年份。可在资料中同时登记不同评级体系。','small muted'));
     document.body.append(rankDialog);
-    let rankRequest=0;
+    let rankRequest=0,rankItem=null,rankSystem='OJR';
+    const rankBusy=value=>{searchOjr.disabled=value;searchCcf.disabled=value;};
     rankDialog.addEventListener('close',()=>{++rankRequest;});
     function openVenueRanking(item){
+      rankItem=item;
+      rankSystem=item.type==='paper-conference'?'CCF':'OJR';
       rankInput.value=item['event-title']||item['container-title']||'';
-      rankStatus.textContent='';rankResults.replaceChildren();searchRank.disabled=false;
+      rankInput.value||=(Array.isArray(item.ISSN)?item.ISSN[0]:item.ISSN)||'';
+      rankStatus.textContent='';rankResults.replaceChildren();rankBusy(false);
       rankDialog.showModal();
       rankInput.focus();
-      if(rankInput.value.trim())void searchVenueRanking();
+      if(rankInput.value.trim())void searchVenueRanking(rankSystem);
     }
-    async function searchVenueRanking(){
-      const request=++rankRequest,venue=rankInput.value.trim();
-      searchRank.disabled=true;rankStatus.textContent='正在查 CCF 目录…';rankResults.replaceChildren();
+    async function searchVenueRanking(system){
+      const request=++rankRequest,venue=rankInput.value.trim(),item=rankItem;
+      rankSystem=system;rankBusy(true);rankStatus.textContent=`正在查 ${system}…`;rankResults.replaceChildren();
       try{
-        const result=await api('venue_ranking_lookup',{venue});
+        const originalVenue=item['event-title']||item['container-title']||'';
+        const result=await api('venue_ranking_lookup',{venue,system,...(venue===originalVenue?{type:item.type,...(item.ISSN?{issn:item.ISSN}:{})}:{})});
         if(request!==rankRequest)return;
         const matches=result.matches||[];
-        rankStatus.textContent=matches.length>1?`CCF ${result.year} 版有多个候选，请按全称和类型核对。`:
-          matches.length?`CCF ${result.year} 版`:`CCF ${result.year} 版未匹配。可试全称或官方简称。`;
+        rankStatus.textContent=matches.length?`${system} · ${matches.length} 条候选，请核对出处后填入资料。`:
+          system==='OJR'?'OpenJournalRank 未找到子领域分区，可试期刊全称或 ISSN。':'CCF 未匹配，可试会议或期刊的全称、官方简称。';
         for(const value of matches){
-          rankResults.append(node('li',`CCF ${value.rank} · ${value.kind==='journal'?'期刊':'会议'} · ${value.category} · ${value.name}${value.acronym?` (${value.acronym})`:''}`));
+          const record={system,year:value.year||result.year,category:value.category,source:value.source||result.source,
+            ...(system==='CCF'?{grade:value.rank}:{quartile:value.quartile}),...(value.release?{release:value.release}:{}),verified_at:new Date().toISOString()};
+          const line=node('li',`${system} ${record.quartile||record.grade} · ${record.year} · ${value.kind==='conference'?'会议':'期刊'} · ${value.category} · ${value.name}${value.acronym?` (${value.acronym})`:''}`);
+          if(value.release)line.append(node('small',` · 版本 ${value.release}`));
+          const source=node('a','来源');source.href=record.source;source.target='_blank';source.rel='noopener noreferrer';line.append(source);
+          line.append(button('填入资料',null,async()=>{
+            rankDialog.close();
+            if(!await edit(item))return;
+            const exists=formRankings().some(({fields})=>fields.system===record.system&&Number(fields.year)===record.year&&fields.category===record.category&&fields.quartile===(record.quartile||record.grade));
+            if(!exists){addRanking(record);dirty();}
+            $('ranking-rows').scrollIntoView?.({block:'nearest'});
+          }));
+          rankResults.append(line);
         }
-      }catch(error){if(request===rankRequest)rankStatus.textContent=`CCF 查询失败：${error.message}`;}
-      finally{if(request===rankRequest)searchRank.disabled=false;}
+      }catch(error){if(request===rankRequest)rankStatus.textContent=`${system} 查询失败：${error.message}`;}
+      finally{if(request===rankRequest)rankBusy(false);}
     }
-    rankForm.addEventListener('submit',event=>{event.preventDefault();void searchVenueRanking();});
-    rankInput.addEventListener('input',()=>{++rankRequest;rankStatus.textContent='';rankResults.replaceChildren();searchRank.disabled=false;});
+    rankForm.addEventListener('submit',event=>{event.preventDefault();void searchVenueRanking(event.submitter===searchCcf?'CCF':event.submitter===searchOjr?'OJR':rankSystem);});
+    rankInput.addEventListener('input',()=>{++rankRequest;rankStatus.textContent='';rankResults.replaceChildren();rankBusy(false);});
     const oldForm=$('metadata-form');
     oldForm.addEventListener('submit',save);
     oldForm.addEventListener('input',dirty);oldForm.addEventListener('change',dirty);
@@ -168,11 +191,27 @@ window.PaperWorkbench = (() => {
     const affiliationLabel=node('label','作者单位','field full-width');
     const affiliation=node('textarea');affiliation.id='edit-affiliations';affiliation.rows=3;affiliation.placeholder='作者序号 | 单位；另一单位\n1 | University of Example';
     affiliationLabel.append(node('span','每行填写一位作者，序号对应上方作者顺序。留空表示未提供。'),affiliation);extra.append(affiliationLabel);
-    const ranks=node('section',undefined,'ranking-editor full-width');ranks.append(node('h3','JCR 分区'),node('p','每条分区需注明报告年份、学科和来源。缺失时留空。','small muted'));const rows=node('div');rows.id='ranking-rows';ranks.append(rows,button('＋ 添加分区','ranking-add',()=>{addRanking();dirty();}));extra.append(ranks);
+    const ranks=node('section',undefined,'ranking-editor full-width');ranks.append(node('h3','文章分区'),node('p','每条记录填写评级体系、报告年份、学科和来源。','small muted'));const rows=node('div');rows.id='ranking-rows';ranks.append(rows,button('＋ 添加分区','ranking-add',()=>{addRanking();dirty();}));extra.append(ranks);
     $('edit-tags').closest('label').after(extra);
-    function addRanking(value={}) {
+    function addRanking(value={},draft={}) {
       const row=node('div',undefined,'ranking-row');
-      for(const [key,label] of [['year','报告年份'],['quartile','分区'],['category','学科'],['source','来源 URL 或书目']]) {const labelNode=node('label',label,'field');const input=node(key==='quartile'?'select':'input');input.dataset.rankField=key;input.setAttribute('aria-label',label);if(key==='quartile')for(const v of ['Q1','Q2','Q3','Q4']){const o=node('option',v);o.value=v;input.append(o);} if(key==='year'){input.type='number';input.min='1900';input.max='9999';}input.value=value[key]||'';input.required=true;labelNode.append(input);row.append(labelNode);}
+      const fields={};
+      for(const [key,label] of [['system','评级体系'],['year','报告年份'],['quartile','分区或等级'],['category','学科'],['source','来源 URL 或书目']]){
+        const labelNode=node('label',label,'field'),input=node(['system','quartile'].includes(key)?'select':'input');
+        input.dataset.rankField=key;input.setAttribute('aria-label',label);input.required=true;fields[key]=input;
+        if(key==='year'){input.type='number';input.min='1900';input.max='9999';}
+        labelNode.append(input);row.append(labelNode);
+      }
+      for(const system of ['JCR','OJR','SJR','CiteScore','CCF','ICORE']){const option=node('option',system);option.value=system;fields.system.append(option);}
+      function scale(selected=''){
+        const labels=gradeScales[fields.system.value]||quartiles;
+        fields.quartile.replaceChildren(...labels.map(label=>{const option=node('option',label);option.value=label;return option;}));
+        fields.quartile.value=labels.includes(selected)?selected:'';
+      }
+      fields.system.value=draft.system??value.system??'JCR';
+      scale(draft.quartile??value.quartile??value.grade);
+      fields.system.addEventListener('change',()=>scale(fields.quartile.value));
+      for(const key of ['year','category','source'])fields[key].value=draft[key]??value[key]??'';
       row.dataset.original=JSON.stringify(value);row.append(button('移除',null,()=>{row.remove();dirty();}));$('ranking-rows').append(row);return row;
     }
     function sortBy(key,dir) {state.sort=key||'modified';state.order=dir||'desc';state.offset=0;sort.value=state.sort;order.textContent=state.order==='asc'?'升序 ↑':'降序 ↓';void loadList();}
@@ -233,8 +272,8 @@ window.PaperWorkbench = (() => {
       $('toolbar-reader').hidden=!enabled||!item.pdf||table||state.tab!=='reader';
       $('attach-open').hidden=!enabled||Boolean(item.pdf);
       if(!item){metadata.replaceChildren();return;}
-      const dates=item.publication_dates||{};const publication=dates.published||dates.online||dates.print;const preprint=String(item.archive||'').toLowerCase()==='arxiv';const pairs=[['单位',institutions(item).join('；')||'未提供'],[item.type==='manuscript'?'稿件日期':!publication&&preprint?'预印本提交':'发表',publication||String(item.issued?.['date-parts']?.[0]?.join('-')||'未提供')],['收稿',dates.received||'未提供'],['接收',dates.accepted||'未提供'],['JCR',ranking(item)||'未提供'],['DOI',item.DOI||'未提供']];
-      metadata.replaceChildren();for(const [label,value] of pairs){const d=node('div');const dd=node('dd',value);if(label==='JCR'&&item.journal_rankings?.length)dd.title=item.journal_rankings.map(r=>`${r.year} ${r.category} ${r.quartile} · ${r.source}`).join('\n');d.append(node('dt',label),dd);metadata.append(d);}
+      const dates=item.publication_dates||{};const publication=dates.published||dates.online||dates.print;const preprint=String(item.archive||'').toLowerCase()==='arxiv';const pairs=[['单位',institutions(item).join('；')||'未提供'],[item.type==='manuscript'?'稿件日期':!publication&&preprint?'预印本提交':'发表',publication||String(item.issued?.['date-parts']?.[0]?.join('-')||'未提供')],['收稿',dates.received||'未提供'],['接收',dates.accepted||'未提供'],['文章分区',ranking(item)||'未提供'],['DOI',item.DOI||'未提供']];
+      metadata.replaceChildren();for(const [label,value] of pairs){const d=node('div');const dd=node('dd',value);if(label==='文章分区'&&item.journal_rankings?.length)dd.title=item.journal_rankings.map(r=>`${r.system} ${r.year} ${r.category} ${r.quartile||r.grade} · ${r.source}`).join('\n');d.append(node('dt',label),dd);metadata.append(d);}
       file.hidden=!item.pdf_filename&&!item.parse?.needs_review;
     }
     function edit(item=state.active,{lookup=false}={}) {
@@ -274,7 +313,7 @@ window.PaperWorkbench = (() => {
       if(saved){
         for(const key of draftFields)if(saved.fields[key]!==undefined&&(!lookup||saved.fields[key]!==saved.initialFields[key]))$(`edit-${key}`).value=saved.fields[key];
         if(!lookup||JSON.stringify(saved.rankings)!==JSON.stringify(saved.initialRankings)){
-          $('ranking-rows').replaceChildren();for(const value of saved.rankings){const row=addRanking(value.original);for(const input of row.querySelectorAll('[data-rank-field]'))input.value=value.fields[input.dataset.rankField]??'';}
+          $('ranking-rows').replaceChildren();for(const value of saved.rankings)addRanking(value.original,value.fields);
         }
         if(!lookup){initialFields=saved.initialFields;initialRankings=saved.initialRankings;}
       }
@@ -291,7 +330,15 @@ window.PaperWorkbench = (() => {
           for(const a of author)delete a.affiliation;
           const seen=new Set();for(const line of $('edit-affiliations').value.split('\n').filter(l=>l.trim())){const m=/^\s*(\d+)\s*\|\s*(.+)$/.exec(line);if(!m||!author[Number(m[1])-1]||seen.has(Number(m[1])))throw new Error('单位请填写「作者序号 | 单位」，每位作者一行，多个单位以分号分隔。');seen.add(Number(m[1]));const a=author[Number(m[1])-1];const matches=(editing.author||[]).filter(v=>name(v)===name(a));const previous=$('edit-authors').value===editing._authorsText?editing.author?.[Number(m[1])-1]:matches.length===1?matches[0]:null;a.affiliation=m[2].split(/[;；]/).map(v=>v.trim()).filter(Boolean).map(value=>structuredClone((previous?.affiliation||[]).find(v=>v.name===value)||{name:value}));}
         }
-        const journal_rankings=[...$('ranking-rows').children].map(row=>{const original=JSON.parse(row.dataset.original);const r={...original,system:'JCR'};for(const input of row.querySelectorAll('[data-rank-field]'))r[input.dataset.rankField]=input.dataset.rankField==='year'?Number(input.value):input.value.trim();if(['year','quartile','category','source'].some(k=>r[k]!==original[k]))delete r.verified_at;return r;});
+        const journal_rankings=formRankings().map(({original,fields})=>{
+          const field=gradeScales[fields.system]?'grade':'quartile';
+          const record={system:fields.system,year:Number(fields.year),category:fields.category.trim(),source:fields.source.trim(),[field]:fields.quartile};
+          if(Object.keys(record).every(key=>record[key]===original[key])){
+            if(original.verified_at)record.verified_at=original.verified_at;
+            if(original.release)record.release=original.release;
+          }
+          return record;
+        });
         const publication_dates={};for(const k of ['published','online','print','received','accepted']){const v=$(`edit-${k}`).value.trim();if(v)publication_dates[k]=v;}
         const metadata={title:$('edit-title').value.trim(),author,type:type.value,issued:$('edit-year').value===editing._yearText?editing.issued||{}:$('edit-year').value?{'date-parts':[[Number($('edit-year').value)]]}:{},citekey:$('edit-citekey').value.trim(),tags:$('edit-tags').value.split(/[,，]/).map(t=>t.trim()).filter(Boolean),'container-title':$('edit-journal').value.trim(),DOI:$('edit-doi').value.trim(),URL:$('edit-url').value.trim(),publication_dates,journal_rankings};
         for(const key of ['volume','issue','page','publisher'])metadata[key]=$(`edit-${key}`).value.trim();

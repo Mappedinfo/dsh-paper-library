@@ -9,6 +9,7 @@ import pymupdf as fitz
 import pytest
 
 from dsh_paper_library.core import Library, csl_item, dispatch
+from dsh_paper_library.worker import dispatch_request
 
 
 def request(tmp_path, action, **values):
@@ -104,6 +105,21 @@ def test_jcr_sort_uses_latest_year_worst_category_and_missing_last(tmp_path):
     missing = request(tmp_path, "create", metadata={"title": "Unknown"})
     assert [row["id"] for row in request(tmp_path, "list", sort="jcr")["items"]] == [second["id"], first["id"], missing["id"]]
     assert [row["id"] for row in request(tmp_path, "list", sort="jcr", order="desc")["items"]] == [first["id"], second["id"], missing["id"]]
+
+
+def test_article_rankings_keep_quartiles_and_grades_separate_and_sort_by_system(tmp_path):
+    ojr = {**ranking("Q2"), "system": "OJR", "release": "2025.2"}
+    ccf = {"system": "CCF", "grade": "B", "year": 2026, "category": "Synthetic conference category", "source": "Synthetic fixture"}
+    journal = request(tmp_path, "create", metadata={"title": "Synthetic journal paper", "journal_rankings": [ojr, ranking("Q3")]})
+    conference = request(tmp_path, "create", metadata={"title": "Synthetic conference paper", "journal_rankings": [ccf]})
+    unknown = request(tmp_path, "create", metadata={"title": "Unknown"})
+    assert request(tmp_path, "get", id=journal["id"])["journal_rankings"] == [ojr, ranking("Q3")]
+    assert request(tmp_path, "get", id=conference["id"])["journal_rankings"] == [ccf]
+    for action in ("list", "resource_list"):
+        items = dispatch_request({"action": action, "library": str(tmp_path / "library"), "sort": "ranking", "order": "asc"})["items"]
+        assert [item["id"] for item in items] == [conference["id"], journal["id"], unknown["id"]]
+    with pytest.raises(ValueError, match="Invalid CCF grade"):
+        request(tmp_path, "update", id=conference["id"], metadata={"journal_rankings": [{**ccf, "quartile": "Q1"}]})
 
 
 def test_rich_metadata_roundtrips_in_portable_pdf_and_archive_preserves_everything(tmp_path):

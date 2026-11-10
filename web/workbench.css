@@ -51,7 +51,7 @@
 .library-pane #library-literature-content>.pane-heading{display:flex;align-items:center;justify-content:space-between;flex:none;padding:5px 10px;gap:8px}
 .library-pane #library-literature-content>.pane-heading .shelf-actions{margin-left:auto}
 .library-filterbar{display:flex;align-items:center;flex-wrap:wrap;flex:none;gap:6px 12px;padding:3px 10px 8px;border-bottom:1px solid var(--line,#ddd)}
-.library-filterbar>.library-organizer-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0;padding:0;border:0}
+.library-filterbar .library-organizer-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0 4px 0 0;padding:0;border:0}
 .library-filterbar .project-bar{display:flex;align-items:center;gap:6px;margin:0;padding:0;border:0}
 .library-filterbar>.catalog-controls{display:flex;align-items:center;flex-wrap:wrap;flex:1 1 auto;gap:6px;margin:0;padding:0}
 #library-literature-content .library-filterbar select,#library-literature-content .library-filterbar .button{box-sizing:border-box;min-height:30px;height:30px;max-width:none;margin:0;padding:4px 8px;font-size:12px;line-height:20px}
@@ -95,6 +95,10 @@
 .venue-rank-sources{display:flex;flex-wrap:wrap;gap:6px 12px}
 .venue-rank-results{margin:6px 0 12px;padding-left:20px}
 .venue-rank-results:empty{display:none}
+.venue-rank-results li+li{margin-top:6px}
+.venue-rank-results li>a,.venue-rank-results li>button{margin-inline-start:6px}
+.ranking-editor .ranking-row{grid-template-columns:minmax(88px,1fr) minmax(74px,1fr) minmax(80px,1fr)}
+.ranking-editor .ranking-row>.field:nth-child(n+4){grid-column:1/-1}
 .library-pane[data-workspace-focus=project] #workspace-navigation-area{display:flex;flex-direction:column;flex:1;min-height:0}
 .library-pane[data-workspace-focus=project] #workspace-related{display:flex;flex-direction:column;flex:1;min-height:0}
 .library-pane[data-workspace-focus=project] .workspace-related{display:flex;flex-direction:column;flex:1;min-height:0}
