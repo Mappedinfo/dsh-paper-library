@@ -105,3 +105,12 @@ test('annotation result navigation crosses pages, wraps and resets after edits o
  f.get('#sidebar-search-row input').value='missing';f.submit('#sidebar-search-row');ui.filter(group);assert.equal(next.disabled,true);assert.equal(prev.disabled,true);
  f.get('[aria-label="清除当前侧栏搜索"]').click();ui.filter(group);assert.equal(next.parentElement.hidden,true);assert.equal(f.revealed.length,0);ui.dispose();
 });
+
+test('PDF search passes matching and case options on every page', async t => {
+ const f=fixture(t,async()=>({page:1,page_count:1,matches:[],next_page:null,next_offset:null}));
+ f.get('#pdf-search-row input[type=search]').value='Cat';
+ f.get('#pdf-search-row select').value='whole';
+ f.get('#pdf-search-row input[type=checkbox]').checked=true;
+ f.submit('#pdf-search-row');await until(()=>f.calls.length===1);
+ assert.equal(f.calls[0][1].match,'whole');assert.equal(f.calls[0][1].case_sensitive,true);
+});

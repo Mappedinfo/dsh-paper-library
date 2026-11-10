@@ -32,9 +32,9 @@ function fixture(t, request) {
     }
   }
   function addCard(annotationId, paperId = 'paper-a', companionText = 'true', annotationVersion) {
-    const card = element(), actions = element()
+    const card = element(), actions = element(), editor = element(), heading = element()
     card.dataset = { annotationId, paperId, companionText, annotationVersion }
-    actions.className = 'annotation-actions'; card.append(actions); cards.push(card)
+    actions.className = 'annotation-actions'; editor.className = 'annotation-inline-editor'; heading.className = 'annotation-inline-heading'; editor.append(heading); card.append(editor); card.append(actions); cards.push(card)
     return card
   }
   const document = {

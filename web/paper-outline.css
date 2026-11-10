@@ -4,3 +4,6 @@
 .outline-entry{display:flex;gap:12px;align-items:baseline;text-align:left;padding:9px 8px;border:0;border-radius:5px;background:transparent;color:inherit;cursor:pointer;}
 .outline-entry:hover,.outline-entry:focus-visible{background:var(--surface);}
 .outline-entry span{flex:1;overflow-wrap:anywhere;}.outline-entry small{opacity:.7;font-variant-numeric:tabular-nums;}
+
+.paper-outline nav[hidden],.outline-thumbnails[hidden]{display:none}.outline-entry.active{background:var(--surface);font-weight:700;box-shadow:inset 3px 0 var(--accent, #427a67)}
+.outline-modes{display:flex;gap:6px}.outline-modes button{padding:5px 10px;cursor:pointer}.outline-modes button[aria-pressed=true]{font-weight:700}.outline-thumbnails{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}.outline-thumbnails button{display:flex;flex-direction:column;align-items:center;gap:4px;min-height:110px;cursor:pointer}.outline-thumbnails img{width:100%;height:auto}

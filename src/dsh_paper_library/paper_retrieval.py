@@ -82,8 +82,34 @@ def dispatch(library, request):
             limit = integer(request, "limit", 40, 1, 100)
             page = doc.load_page(number - 1)
             needle = unicodedata.normalize("NFKC", query).replace("\u00ad", "").strip()
-            found = page.search_for(needle)
-            matches = [{"page": number, "rects": [list(rect * page.rotation_matrix)]} for rect in found[offset:offset + limit]]
+            match_mode = request.get("match", "partial")
+            case_sensitive = request.get("case_sensitive", False)
+            if match_mode not in ("partial", "whole") or not isinstance(case_sensitive, bool):
+                raise ValueError("PAPER_RETRIEVAL_INVALID: invalid search options")
+            if match_mode == "partial" and not case_sensitive:
+                found = [[rect] for rect in page.search_for(needle)]
+            else:
+                # Keep each character's original rectangle so matching does not guess coordinates.
+                chars = []
+                for block in page.get_text("rawdict")["blocks"]:
+                    for line in block.get("lines", []):
+                        for span in line.get("spans", []):
+                            for char in span.get("chars", []):
+                                chars.append((char["c"], char["bbox"]))
+                        chars.append(("\n", None))
+                text = "".join(c for c, _ in chars)
+                pattern = re.escape(needle)
+                if match_mode == "whole":
+                    pattern = r"(?<!\w)" + pattern + r"(?!\w)"
+                found = []
+                for hit in re.finditer(pattern, text, 0 if case_sensitive else re.IGNORECASE):
+                    boxes = [box for _, box in chars[hit.start():hit.end()] if box]
+                    if boxes:
+                        import pymupdf as fitz
+                        rect = fitz.Rect(boxes[0])
+                        for box in boxes[1:]: rect |= fitz.Rect(box)
+                        found.append([rect])
+            matches = [{"page": number, "rects": [list(rect * page.rotation_matrix) for rect in rects]} for rects in found[offset:offset + limit]]
             end = offset + len(matches)
             result.update(matches=matches, page=number, page_matches=len(found),
                           next_offset=end if end < len(found) else None,

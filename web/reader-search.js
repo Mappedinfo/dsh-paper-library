@@ -71,18 +71,21 @@ window.PaperReaderSearch = (() => {
     const pdfForm=make('form');pdfForm.id='pdf-search-row';pdfForm.className='reader-search-row pdf-search-row';pdfForm.hidden=true;
     const input=make('input');input.type='search';input.placeholder='搜索当前 PDF 文字';input.setAttribute('aria-label','搜索当前 PDF 文字');input.maxLength=200;
     const submit=make('button','搜索');submit.type='submit';submit.className='button subtle';
+    const match=make('select');match.setAttribute('aria-label','PDF 匹配方式');for(const [value,label] of [['partial','部分匹配'],['whole','完整词匹配']]){const option=make('option',label);option.value=value;match.append(option);}
+    const caseLabel=make('label','区分大小写');const caseBox=make('input');caseBox.type='checkbox';caseLabel.prepend(caseBox);
+    let searchMatch='partial',searchCase=false;
     const previous=button('‹','上一个匹配位置',()=>move(-1)),next=button('›','下一个匹配位置',()=>move(1));
     const more=button('继续','继续搜索后续位置',()=>{if(cursor&&!busy){hits=[];index=-1;void run();}});
     const stop=button('停止','停止 PDF 搜索',()=>{++ticket;busy=false;update();});
     const close=button('×','关闭 PDF 搜索',()=>{++ticket;busy=false;pdfForm.hidden=true;document.body.classList.remove('pdf-search-open');pdfToggle.setAttribute('aria-expanded','false');pdfToggle.focus();});
     const status=make('span');status.className='small';status.setAttribute('role','status');status.setAttribute('aria-live','polite');
-    pdfForm.append(input,submit,previous,next,more,stop,status,close);$('paper-tools')?.after(pdfForm);
+    pdfForm.append(input,match,caseLabel,submit,previous,next,more,stop,status,close);$('paper-tools')?.after(pdfForm);
     function update(){previous.disabled=!hits.length;next.disabled=!hits.length;more.hidden=busy||!cursor;stop.hidden=!busy;status.textContent=`${hits.length?index+1:0} / ${hits.length} 个位置${cursor?'（本批）':''} · ${busy?'搜索中 · ':''}${scanned} / ${total} 页${noText?' · '+noText+' 页无可选文字':''}`;}
     async function reveal(){const hit=hits[index],id=paperId;if(!hit)return;try{await navigate();if(!disposed&&getPaper()?.id===id&&hits[index]===hit)await reader()?.revealRegion({paperId:id,page:hit.page,rects:hit.rects,focusId:'pdf-search'});}catch(error){if(!disposed&&getPaper()?.id===id&&hits[index]===hit)status.textContent='定位未完成：'+error.message;}}
     function move(delta){if(!hits.length)return;index=(index+delta+hits.length)%hits.length;update();void reveal();}
     async function run(){const runId=++ticket,id=paperId;busy=true;update();
       try{while(cursor&&hits.length<200){
-        const result=await api('paper_text_find',{id,query:searchQuery,page:cursor.page,offset:cursor.offset,limit:Math.min(40,200-hits.length)});
+        const result=await api('paper_text_find',{id,query:searchQuery,match:searchMatch,case_sensitive:searchCase,page:cursor.page,offset:cursor.offset,limit:Math.min(40,200-hits.length)});
         if(disposed||runId!==ticket||getPaper()?.id!==id)return;
         total=result.page_count;hits.push(...result.matches);
         if(result.next_offset!=null)cursor={page:result.page,offset:result.next_offset};else{scanned=result.page;if(result.no_extractable_text)noText++;cursor=result.next_page?{page:result.next_page,offset:0}:null;}
@@ -93,7 +96,8 @@ window.PaperReaderSearch = (() => {
       finally{if(runId===ticket){busy=false;stop.hidden=true;more.hidden=!cursor;}}
       if(runId===ticket)update();
     }
-    function start(){++ticket;busy=false;hits=[];index=-1;scanned=0;total=0;noText=0;searchQuery=input.value.trim();cursor=searchQuery?{page:1,offset:0}:null;update();if(cursor)void run();}
+    function start(){++ticket;busy=false;hits=[];index=-1;scanned=0;total=0;noText=0;searchQuery=input.value.trim();searchMatch=match.value;searchCase=caseBox.checked;cursor=searchQuery?{page:1,offset:0}:null;update();if(cursor)void run();}
+    match.addEventListener('change',()=>{if(input.value.trim())start();});caseBox.addEventListener('change',()=>{if(input.value.trim())start();});
     pdfForm.addEventListener('submit',event=>{event.preventDefault();start();});
     input.addEventListener('input',()=>{++ticket;busy=false;cursor=null;hits=[];index=-1;update();status.textContent=input.value?'按 Enter 搜索':'输入要查找的文字';});
     input.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();close.click();}else if(event.key==='Enter'&&searchQuery===input.value.trim()&&hits.length){event.preventDefault();move(event.shiftKey?-1:1);}});

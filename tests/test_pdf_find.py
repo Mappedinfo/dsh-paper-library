@@ -36,3 +36,22 @@ def test_find_rotated_pages_and_continuation(tmp_path, rotation, monkeypatch):
         with pytest.raises(ValueError):call(**args)
     assert before==hashlib.sha256(path.read_bytes()).hexdigest()
     library.close()
+
+def test_find_matching_options(tmp_path):
+    source = tmp_path / 'synthetic.pdf'
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((40, 80), 'Cat cat catalogue cat.')
+        doc.save(source)
+    library = Library(tmp_path / 'lib')
+    item = library.attach(library.create({'title': 'Synthetic'})['id'], str(source))
+    def call(**args):
+        return dispatch_request({'library': str(library.root), 'id': item['id'], 'action': 'paper_text_find', 'query': 'cat', **args})
+    assert call(match='whole')['page_matches'] == 3
+    assert call(match='whole', case_sensitive=True)['page_matches'] == 2
+    assert call(match='partial', case_sensitive=True)['page_matches'] == 3
+    assert call()['page_matches'] == 4
+    assert call(match='whole')['matches'][0]['rects']
+    with pytest.raises(ValueError):
+        call(match='invalid')
+    library.close()

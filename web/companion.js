@@ -23,8 +23,10 @@ window.PaperCompanion={create({api,persistence,getPaper,refreshAnnotations,befor
     for(const card of document.querySelectorAll('#annotation-list .annotation-card, #annotation-list .annotation-remark')){
       const id=paperId, annotationId=card.dataset.annotationId, value=newest.get(annotationId);
       card.querySelector(':scope > .companion-state')?.remove();
-      let ask=card.querySelector(':scope > .annotation-actions')?.querySelector('.companion-ask');
-      if(!available||!id||card.dataset.paperId!==id){ask?.remove();continue;}
+      const heading=card.querySelector(':scope > .annotation-inline-editor')?.querySelector('.annotation-inline-heading');
+      let ask=heading?.querySelector('.companion-ask');
+      card.querySelector(':scope > .annotation-actions')?.querySelector('.companion-ask')?.remove();
+      if(!available||!id||card.dataset.paperId!==id||!heading){ask?.remove();continue;}
       const key=operationKey(id,annotationId);
       if(!ask){
         ask=make('button','问 DSH','button subtle companion-ask');ask.type='button';
@@ -34,7 +36,7 @@ window.PaperCompanion={create({api,persistence,getPaper,refreshAnnotations,befor
           const version=card.dataset.annotationVersion;
           void submit(id,annotationId,'companion_ask',{annotation_id:annotationId,...(version?{version}:{})});
         });
-        card.querySelector(':scope > .annotation-actions')?.append(ask);
+        heading.append(ask);
       }
       const hasText=card.dataset.companionText==='true';
       ask.title=hasText?'直接解读选文；有备注或问题时一并回答。回复保存为这条批注下的 AI 批注。':'写入批注文字或保存手写转录后可问 DSH';

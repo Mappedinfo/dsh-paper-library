@@ -1545,7 +1545,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onInkTrace:info=>inkDiagnostics?.record(info),
   onActivePage: (page,info) => {
     if(info.paperId!==state.active?.id)return;
-    state.page=page;state.pageCount=info.pageCount;state.pageData={width:info.width,height:info.height};
+    state.page=page;outlineUI?.setPage(page);state.pageCount=info.pageCount;state.pageData={width:info.width,height:info.height};
     $('page-number').value=page;$('page-number').max=info.pageCount;$('page-total').textContent=`/ ${info.pageCount}`;publishReaderState();
   },
   onSelection: (selection,intent) => {
@@ -1564,7 +1564,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onStatus: (message,error,options) => readingShell?.status(message,error,options),
 });
 readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,locateAnnotations:locateCurrentPageAnnotations,contextChanged:()=>{readerSearchUI?.sync();resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
-outlineUI=window.PaperOutline?.create({api,panels:readingPanels,getPaper:()=>state.active,navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');await pdfReader?.revealRegion({...source,rects:source.rects?.length?source.rects:[[0,0,2,2]]});}});
+outlineUI=window.PaperOutline?.create({api,panels:readingPanels,getPaper:()=>state.active,getPage:()=>state.page,navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');await pdfReader?.revealRegion({...source,rects:source.rects?.length?source.rects:[[0,0,2,2]]});}});
 documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPanels,getPaper:()=>state.active,toast,sharedSearch:Boolean(window.PaperReaderSearch),
   openSettings:()=>settingsUI?.showResources(),
   navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');await pdfReader?.revealRegion(source);},
