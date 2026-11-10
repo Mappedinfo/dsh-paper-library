@@ -367,6 +367,32 @@ test('arXiv entry keeps editor drafts, suppresses double submit and preserves in
   await dialog.querySelector('button').dispatch('click');assert.equal(dialog.open,false);assert.equal(attempt,2);
 });
 
+test('arXiv UI distinguishes unversioned inputs from resolved versions and keeps prior source records',async()=>{
+  for(const explicit of [false,true]){
+    const originalSource={input:'Prior source',requested_id:'2601.01234',requested_version:null,resolved_id:'2601.01234v1'};
+    const paper={...original(),archive:'arXiv',archive_location:'2601.01234',URL:'https://arxiv.org/abs/2601.01234',arxiv_sources:[originalSource]};
+    const requested=explicit?'2601.01234v2':'2601.01234';
+    const source={input:`https://arxiv.org/pdf/${requested}.pdf`,requested_id:requested,requested_version:explicit?'v2':null,resolved_id:'2601.01234v2'};
+    const f=environment({active:paper,respond:async()=>({status:'saved',arxiv:requested,resolved_arxiv:'2601.01234v2',...(explicit?{preserved_arxiv:'2601.01234'}:{}),source,metadata:{arxiv_sources:[originalSource,source]}})});
+    f.workbench.edit(paper);f.element('edit-title').value='Retained editor draft';f.workbench.setTable(true);
+    await f.element('catalog-table').querySelectorAll('button').find(n=>n.textContent==='输入 DOI 或预印本链接').dispatch('click');
+    f.element('catalog-doi-input').value=source.input;
+    await f.element('catalog-doi-dialog').querySelector('form').dispatch('submit');
+    assert.equal(paper.archive_location,'2601.01234');assert.equal(paper.URL,'https://arxiv.org/abs/2601.01234');
+    assert.equal(paper.arxiv_sources.length,2);assert.deepEqual(paper.arxiv_sources[0],originalSource);
+    assert.equal(f.element('edit-title').value,'Retained editor draft');
+    const spans=f.element('catalog-table').querySelectorAll('span'),label=spans.find(n=>n.textContent==='arXiv: 2601.01234');
+    assert.match(label.title,/本次解析：2601.01234v2/);
+    if(explicit){
+      assert.ok(spans.some(n=>n.textContent==='核对来源：2601.01234v2'));
+      assert.match(f.toasts[0][0],/原有标识 2601.01234 保持不变/);
+    }else{
+      assert.match(label.title,/指定版本：未指定/);assert.match(f.toasts[0][0],/未指定版本；本次解析 2601.01234v2/);
+      assert.ok(!spans.some(n=>n.textContent==='arXiv: 2601.01234v2'));
+    }
+  }
+});
+
 test('a dataset title still routes to the dataset view instead of the reader', async () => {
   const f = environment({ active: original() });
   const dataset = { id: 'dataset_synthetic', title: 'Synthetic dataset', resource_kind: 'dataset', citekey: 'syntheticData' };

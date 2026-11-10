@@ -327,35 +327,57 @@ async function fillDoi(request, options) {
   if(request.arxiv){
     if(dataset)throw Error('arXiv 链接对应预印本文献，不能保存到数据集条目。');
     if(current.DOI)throw Error('此条目已有 DOI，请在资料详情核对预印本关联。');
-    const existing=arxivID(current.archive_location)||arxivID(current.URL);
+    const sources=current.arxiv_sources===undefined?[]:current.arxiv_sources;
+    if(!Array.isArray(sources)||sources.length>32)throw Error('已有 arXiv 来源记录无法安全合并，请先在资料详情核对。');
+    const workID=value=>value.replace(/v\d+$/,'');
+    const version=value=>value.match(/v\d+$/)?.[0]||null;
+    const existingIDs=[arxivID(current.archive_location),arxivID(current.URL)].filter(Boolean);
+    const requested=request.arxiv, work=workID(requested);
     if(!missingMetadata(current.archive)&&!/^arxiv$/i.test(current.archive)||
         !missingMetadata(current.archive_location)&&!arxivID(current.archive_location))
       throw Error('此条目已有其他档案标识，请在资料详情核对后再保存。');
-    if(existing&&existing.replace(/v\d+$/,'')!==request.arxiv.replace(/v\d+$/,''))
+    // Older observations of "latest" are not pins. Explicit source versions and
+    // catalog links are pins, so a new lookup cannot mix another version into them.
+    const sourceIDs=sources.map(source=>arxivID(source?.requested_id)).filter(Boolean);
+    if([...existingIDs,...sourceIDs].some(value=>workID(value)!==work))
       throw Error('此条目已有其他 arXiv 标识，请在资料详情核对后再保存。');
-    // An unversioned retry respects an already pinned version. Explicit versions
-    // are checked by the resolver and never silently replace a different one.
-    const target=existing&&!/v\d+$/.test(request.arxiv)?existing:request.arxiv;
-    if(existing&&/v\d+$/.test(existing)&&/v\d+$/.test(target)&&existing!==target)
+    const pins=[...new Set([...existingIDs,...sourceIDs].filter(value=>version(value)))];
+    if(pins.length>1||version(requested)&&pins.some(value=>value!==requested))
       throw Error('此条目已关联其他 arXiv 版本，请在资料详情核对后再保存。');
     if(!normalizedIdentity(current.title))throw Error('请先补齐条目标题，再核对预印本。');
-    const {metadata:registered}=await resolveMetadata(target,fetchOptions);
-    const arxiv=arxivID(registered?.archive_location);
-    if(!arxiv||!normalizedIdentity(registered.title)||!registered.author?.length)
+    const {metadata:registered}=await resolveMetadata(requested,fetchOptions);
+    const resolved=arxivID(registered?.archive_location);
+    if(!resolved||!normalizedIdentity(registered.title)||!registered.author?.length)
       throw Error('未取得此 arXiv 预印本的完整题录，尚未保存。请检查链接或网络后重试。');
+    if(pins.some(value=>value!==resolved))
+      throw Error(`此链接当前解析为 ${resolved}，与已保存版本 ${pins[0]} 不同。原来源未改，请核对后重试。`);
     const titleMatches=joinHan(normalizedIdentity(registered.title))===joinHan(normalizedIdentity(current.title));
     const authorsMatch=!current.author?.length||sameAuthorList(current.author,registered.author);
     if(!titleMatches||!authorsMatch)return {status:'mismatch',titleMatches,authorsMatch,registered:{title:registered.title,author:registered.author}};
     const metadata={};
+    // The user's unversioned reference must stay unversioned. The API's current
+    // version is an observation stored separately, never an implicit source pin.
+    const incoming={...registered,archive_location:requested,URL:`https://arxiv.org/abs/${requested}`};
     // Do not copy arxiv:doi: it can identify a later published article rather than
     // this preprint. Never overwrite manual data or create a second catalog row.
     for(const field of ['archive','archive_location','URL','author','issued','abstract']){
-      if(missingMetadata(current[field])&&!missingMetadata(registered[field]))metadata[field]=registered[field];
+      if(missingMetadata(current[field])&&!missingMetadata(incoming[field]))metadata[field]=incoming[field];
     }
     if(current.type==='article'&&missingMetadata(current.genre))metadata.genre='preprint';
+    let source=sources.find(value=>value?.requested_id===requested&&value?.resolved_id===resolved);
+    if(!source){
+      if(sources.length>=32)throw Error('arXiv 来源记录已达 32 条，未覆盖旧来源，请先核对后再保存。');
+      source={input:request.identifier_input,requested_id:requested,work_id:work,requested_version:version(requested),
+        resolved_id:resolved,resolved_version:version(resolved),resolved_url:registered.URL,
+        retrieved_at:new Date().toISOString(),filled_fields:Object.keys(metadata)};
+      metadata.arxiv_sources=[...sources,source];
+      if(Buffer.byteLength(JSON.stringify(metadata.arxiv_sources),'utf8')>64*1024)throw Error('arXiv 来源记录超过 64 KiB，未覆盖旧来源。');
+    }
     options.signal?.throwIfAborted();
     if(Object.keys(metadata).length)await core({action:'update',id,expected_modified:current.modified,metadata},options);
-    return {status:'saved',arxiv,metadata};
+    const preserved=arxivID(current.archive_location)||arxivID(current.URL);
+    return {status:'saved',arxiv:requested,resolved_arxiv:resolved,source,metadata,
+      ...(preserved&&preserved!==requested?{preserved_arxiv:preserved}:{})};
   }
   if(request.doi!==undefined){
     const doi=request.doi;
@@ -637,7 +659,7 @@ export async function dispatch(request, options = {}) {
     const key=JSON.stringify([options.library||defaultLibrary,safe.id,safe.kind==='dataset',arxiv?`arxiv:${arxiv}`:doi]);
     if(doiLookups.has(key))return doiLookups.get(key);
     if(doiLookups.size>=2)throw Error('DOI 查询繁忙，请稍后重试。');
-    const lookup=fillDoi({...safe,doi,arxiv},options).finally(()=>doiLookups.delete(key));
+    const lookup=fillDoi({...safe,doi,arxiv,identifier_input:typeof input==='string'?input.trim():undefined},options).finally(()=>doiLookups.delete(key));
     doiLookups.set(key,lookup);
     return lookup;
   }

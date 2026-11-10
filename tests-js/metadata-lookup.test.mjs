@@ -147,8 +147,15 @@ test('manual arXiv URLs enrich only missing fields on the same catalog row and n
   assert.equal(saved.title,title);assert.equal(saved.abstract,'Keep manual abstract');assert.equal(saved.URL,'https://manual.example/article');assert.deepEqual(saved.tags,['manual']);
   assert.deepEqual(saved.issued,{'date-parts':[[2026,1,10]]});
   assert.equal(fetchOptions.requests.length,1);assert.match(fetchOptions.requests[0],/id_list=2601.01234v2$/);
+  assert.equal(saved.arxiv_sources[0].input,'https://arxiv.org/pdf/2601.01234v2.pdf?download=1#page=2');
+  assert.equal(saved.arxiv_sources[0].requested_version,'v2');assert.equal(saved.arxiv_sources[0].resolved_version,'v2');
+  await dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'arXiv:2601.01234v2'},options);
+  assert.deepEqual(await core({action:'get',id:f.item.id},options),saved,'equivalent repeat keeps the first original source and does not rewrite');
   await dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'arXiv:2601.01234'},options);
-  assert.deepEqual(await core({action:'get',id:f.item.id},options),saved,'repeat does not rewrite or replace the pinned version');
+  const repeated=await core({action:'get',id:f.item.id},options);
+  assert.equal(repeated.archive_location,saved.archive_location);assert.equal(repeated.URL,saved.URL);
+  assert.deepEqual(repeated.arxiv_sources[0],saved.arxiv_sources[0]);
+  assert.equal(repeated.arxiv_sources[1].requested_version,null);assert.equal(repeated.arxiv_sources[1].resolved_id,'2601.01234v2');
   assert.equal((await core({action:'list'},options)).total,1);
 });
 
@@ -158,6 +165,65 @@ test('manual arXiv can fill absent author and canonical landing URL, without cha
   const saved=await core({action:'get',id:f.item.id},{library:f.library});
   assert.deepEqual(saved.author,[{literal:'Alice Reader'}]);assert.equal(saved.URL,'https://arxiv.org/abs/2601.01234v2');
   assert.equal(saved.type,'paper-conference');assert.equal(saved['container-title'],'Manual Proceedings');assert.equal(saved.abstract,'Remote abstract');
+});
+
+test('unversioned arXiv references remain latest references while resolved versions are append-only observations',async t=>{
+  const f=await fixture(t,{author:[{literal:'Alice Reader'}]});
+  const input='https://arxiv.org/pdf/2601.01234.pdf?download=1#page=2';
+  const first=await dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:input},{library:f.library,fetchOptions:arxivFixture()});
+  assert.equal(first.arxiv,'2601.01234');assert.equal(first.resolved_arxiv,'2601.01234v2');
+  const saved=await core({action:'get',id:f.item.id},{library:f.library});
+  assert.equal(saved.archive_location,'2601.01234');assert.equal(saved.URL,'https://arxiv.org/abs/2601.01234');assert.equal(saved.DOI,undefined);
+  assert.equal(saved.arxiv_sources[0].input,input);assert.equal(saved.arxiv_sources[0].requested_version,null);
+  assert.equal(saved.arxiv_sources[0].resolved_version,'v2');assert.equal(saved.arxiv_sources[0].work_id,'2601.01234');
+  const nextOptions={library:f.library,fetchOptions:arxivFixture({id:'2601.01234v3'})};
+  await dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:input},nextOptions);
+  const next=await core({action:'get',id:f.item.id},{library:f.library});
+  assert.equal(next.archive_location,'2601.01234');assert.equal(next.URL,saved.URL);assert.equal(next.abstract,saved.abstract);
+  assert.deepEqual(next.arxiv_sources[0],saved.arxiv_sources[0]);assert.equal(next.arxiv_sources.length,2);
+  assert.equal(next.arxiv_sources[1].requested_version,null);assert.equal(next.arxiv_sources[1].resolved_version,'v3');
+  assert.match(nextOptions.fetchOptions.requests[0],/id_list=2601.01234$/);
+  await dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:input},nextOptions);
+  assert.deepEqual(await core({action:'get',id:f.item.id},{library:f.library}),next,'same observed version is idempotent');
+});
+
+test('explicit arXiv version is retained as an additional source beside an existing unversioned reference',async t=>{
+  const prior={note:'Existing imported source, do not alter'};
+  const f=await fixture(t,{author:[{literal:'Alice Reader'}],archive:'arXiv',archive_location:'2601.01234',URL:'https://arxiv.org/abs/2601.01234',arxiv_sources:[prior]});
+  const input='https://arxiv.org/html/2601.01234v2';
+  const result=await dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:input},{library:f.library,fetchOptions:arxivFixture()});
+  assert.equal(result.arxiv,'2601.01234v2');assert.equal(result.preserved_arxiv,'2601.01234');
+  const saved=await core({action:'get',id:f.item.id},{library:f.library});
+  assert.equal(saved.archive_location,'2601.01234');assert.equal(saved.URL,'https://arxiv.org/abs/2601.01234');
+  assert.deepEqual(saved.arxiv_sources[0],prior);assert.equal(saved.arxiv_sources[1].input,input);
+  assert.equal(saved.arxiv_sources[1].requested_id,'2601.01234v2');assert.equal(saved.arxiv_sources[1].requested_version,'v2');
+  const options={library:f.library,fetchOptions:arxivFixture({id:'2601.01234v3'})};
+  await assert.rejects(dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'2601.01234v3'},options),/其他 arXiv 版本/);
+  assert.equal(options.fetchOptions.requests.length,0);
+  await assert.rejects(dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'2601.01234'},options),/当前解析为.*v3.*已保存版本.*v2/);
+  assert.deepEqual(await core({action:'get',id:f.item.id},{library:f.library}),saved);
+});
+
+test('version checks include an existing URL pin and legacy identifiers keep explicit source versions without DOI',async t=>{
+  const f=await fixture(t,{author:[{literal:'Alice Reader'}],archive:'arXiv',archive_location:'hep-th/9901001',URL:'https://arxiv.org/abs/hep-th/9901001v1'});
+  const options={library:f.library,fetchOptions:arxivFixture({id:'hep-th/9901001v2'})};
+  await assert.rejects(dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'hep-th/9901001v2'},options),/其他 arXiv 版本/);
+  assert.equal(options.fetchOptions.requests.length,0);
+  const fresh=await fixture(t,{author:[{literal:'Alice Reader'}]});
+  const result=await dispatch({action:'catalog_doi_lookup',id:fresh.item.id,identifier:'https://arxiv.org/pdf/math.GT/0301001v2.pdf'},{library:fresh.library,fetchOptions:arxivFixture({id:'math.GT/0301001v2'})});
+  assert.equal(result.status,'saved');assert.equal(result.DOI,undefined);
+  const saved=await core({action:'get',id:fresh.item.id},{library:fresh.library});
+  assert.equal(saved.archive_location,'math.GT/0301001v2');assert.equal(saved.arxiv_sources[0].work_id,'math.GT/0301001');
+  assert.equal(saved.arxiv_sources[0].requested_version,'v2');assert.equal(saved.arxiv_sources[0].resolved_id,'math.GT/0301001v2');
+});
+
+test('malformed or full arXiv source history is never replaced or silently truncated',async t=>{
+  for(const arxiv_sources of [{source:'legacy object'},Array.from({length:32},(_,i)=>({note:`Original source ${i}`}))]){
+    const f=await fixture(t,{author:[{literal:'Alice Reader'}],arxiv_sources});
+    await assert.rejects(dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'2601.01234v2'},{library:f.library,fetchOptions:arxivFixture()}),/来源记录/);
+    const saved=await core({action:'get',id:f.item.id},{library:f.library});
+    assert.deepEqual(saved.arxiv_sources,arxiv_sources);assert.equal(saved.archive_location,undefined);
+  }
 });
 
 test('manual arXiv rejects bad input, dataset targets and conflicting identifiers before requesting metadata',async t=>{
@@ -199,7 +265,7 @@ test('manual arXiv uses revision checks and coalesces simultaneous normalized re
   const checks=[assert.rejects(first,/modified|changed|conflict/i),assert.rejects(second,/modified|changed|conflict/i)];release();await Promise.all(checks);
   assert.equal(fetchOptions.requests.length,1);
   const saved=await core({action:'get',id:f.item.id},options);
-  assert.equal(saved.abstract,'Concurrent manual edit');assert.equal(saved.archive_location,undefined);
+  assert.equal(saved.abstract,'Concurrent manual edit');assert.equal(saved.archive_location,undefined);assert.equal(saved.arxiv_sources,undefined);
 });
 
 test('metadata_lookup returns a review draft, preserves manual fields and JCR, and never changes a managed PDF or catalog item',async t=>{
