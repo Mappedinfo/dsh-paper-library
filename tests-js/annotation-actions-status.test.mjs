@@ -100,3 +100,28 @@ test('locate nearest annotation prefers preceding page on a tie and reports abse
  w.state.annotations=[{id:'bad',page:0}];w.locateCurrentPageAnnotations();assert.match(f.messages.at(-1),/暂无可定位/);
  }finally{w.close();}
 });
+
+test('translation stays beside its source and expands from the excerpt heading', {skip:!JSDOM},async()=>{
+ const f=fixture(),w=f.window,d=f.document;
+ try{
+  w.state.annotations=[{id:'root',page:1,type:'underline',text:'Source',edit_version:'a'.repeat(64),source:'paper-library'}, {id:'t',page:1,kind:'ai-feedback',source_kind:'annotation-translation',reply_to:'root',comment:'翻译：译文',model:'fixture'}];
+  w.renderAnnotations();const card=d.querySelector('.annotation-card'),excerpt=card.querySelector('.annotation-excerpt'),translation=excerpt.querySelector('.annotation-translations');
+  assert.equal(translation.hidden,true);assert.equal(card.querySelector(':scope > .annotation-reply'),null);
+  const toggle=[...excerpt.querySelectorAll('button')].find(b=>b.textContent==='展开翻译');toggle.click();assert.equal(translation.hidden,false);assert.match(translation.textContent,/译文/);assert.equal(toggle.getAttribute('aria-expanded'),'true');
+  assert.equal(excerpt.querySelector('[data-note-action=reselect]').textContent,'编辑原文范围');w.renderAnnotations();assert.equal(d.querySelector('.annotation-translations').hidden,false);
+ }finally{f.dom.window.close();}
+});
+
+test('range editing requires same page, saves selection and permits cancel', {skip:!JSDOM},async()=>{
+ const f=fixture(),w=f.window,d=f.document,calls=[];
+ try {
+  w.annotationRangeEdit={id:'paper-a',annotationId:'root',page:1,version:'v'};w.state.selection=null;
+  w.api=async(action,args)=>calls.push({action,args});w.loadAnnotations=async()=>{};w.refreshPage=async()=>{};w.clearSelection=()=>{w.state.selection=null};
+  w.eval(source.slice(source.indexOf('const rangeEditBar='),source.indexOf('outlineUI=window.PaperOutline')));
+  const bar=d.querySelector('.annotation-range-edit'),save=[...bar.querySelectorAll('button')].find(b=>b.textContent==='保存新范围');
+  save.click();await new Promise(r=>setImmediate(r));assert.equal(calls.length,0);assert.match(f.messages.at(-1),/选择文字/);
+  w.state.selection={id:'paper-a',page:2,text:'Other',rects:[[1,2,3,4]]};save.click();await new Promise(r=>setImmediate(r));assert.equal(calls.length,0);
+  w.state.selection={id:'paper-a',page:1,text:'New source',rects:[[1,2,3,4]]};save.click();await new Promise(r=>setImmediate(r));assert.equal(calls[0].action,'annotation_reselect');assert.equal(calls[0].args.expected_version,'v');assert.equal(w.annotationRangeEdit,null);
+  w.annotationRangeEdit={id:'paper-a'};bar.querySelectorAll('button')[1].click();assert.equal(w.annotationRangeEdit,null);
+ } finally {f.dom.window.close();}
+});

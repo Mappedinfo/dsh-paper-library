@@ -205,7 +205,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             except (ValueError, RuntimeError):
                 pass
         # 人工后续备注沿用原划线的选文与来源范围，但自身仍是原生 Text /IRT。
-        source_rects = extra.get("source_rects") if extra.get("kind") == "reader-reply" else None
+        source_rects = extra.get("source_rects") if extra.get("kind") == "reader-reply" or kind == "note" else None
         if isinstance(source_rects, list) and 0 < len(source_rects) <= 200:
             try:
                 rects = [list(cls._rect(rect, page, inverse=True) * page.rotation_matrix) for rect in source_rects]
@@ -907,6 +907,53 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 _, _, value = checked(doc)
                 if value["comment"] == comment:
                     return {"annotation": value, "duplicate": True}
+            return self._write_pdf(id, operation)
+
+    def annotation_reselect(self, id, annotation_id, page, rects, text, expected_version):
+        """Update one native annotation in place, retaining identity and replies."""
+        import pymupdf as fitz
+        if not isinstance(text, str) or not text.strip() or len(text) > 20000:
+            raise ValueError("请选择不超过 20000 字符的 PDF 原文。")
+        if not isinstance(rects, list) or not 1 <= len(rects) <= 200:
+            raise ValueError("请选择 1–200 个文字区域。")
+        if not isinstance(expected_version, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_version):
+            raise ValueError("缺少批注版本，请刷新后重试。")
+        def operation(doc):
+            current, annot = self._find_annotation(doc, annotation_id)
+            value = self._with_annotation_version(self._annotation(current, annot), bool(annot.info.get("id")))
+            if value.get("edit_version") != expected_version:
+                raise ValueError("ANNOTATION_STALE: 批注已改变，请刷新后重新选择。")
+            if isinstance(page, bool) or page != current.number + 1:
+                raise ValueError("请在原批注所在页选择文字。")
+            kind = value["type"]
+            extra = self._annotation_metadata(annot)
+            if not annot.info.get("id") or extra.get("kind") in {"reader-reply", "ai-feedback", "handwriting-note"} | LINKED_KINDS:
+                raise ValueError("此批注缺少稳定身份或不支持调整原文范围。")
+            if kind not in {"highlight", "underline", "strikeout", "note"} or (kind == "note" and not extra):
+                raise ValueError("此批注类型暂不支持调整原文范围。")
+            regions = [self._rect(rect, current, inverse=True) for rect in rects]
+            if kind == "note":
+                extra["source_rects"] = rects
+                origin = regions[0].tl
+                annot.set_rect(fitz.Rect(origin.x, origin.y, origin.x + annot.rect.width, origin.y + annot.rect.height))
+            else:
+                creator = {"highlight": current.add_highlight_annot, "underline": current.add_underline_annot,
+                           "strikeout": current.add_strikeout_annot}[kind]
+                temporary = creator([region.quad for region in regions])
+                for key in ("QuadPoints", "Rect"):
+                    datatype, raw = doc.xref_get_key(temporary.xref, key)
+                    if datatype != "array":
+                        raise ValueError("无法生成新的原生批注范围。")
+                    doc.xref_set_key(annot.xref, key, raw)
+                current.delete_annot(temporary)
+            if extra:
+                extra["text"] = text
+                annot.set_info(subject="paper-library:" + json.dumps(extra, ensure_ascii=False))
+            annot.set_info(modDate="D:" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%SZ"))
+            annot.update()
+            self._readable_underline(doc, annot)
+            return {"annotation": self._with_annotation_version(self._annotation(current, annot), True)}
+        with self.lock():
             return self._write_pdf(id, operation)
 
     def annotation_delete(self, id, annotation_id):

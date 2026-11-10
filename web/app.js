@@ -417,6 +417,7 @@ function readSelection() {
   $('selection-count').textContent = `第 ${state.page} 页 · ${words.length} 个词`;
   $('selection-preview').textContent = state.selection.text; $('selection-tools').hidden = false;
 }
+let annotationRangeEdit=null;
 function clearSelection() { state.selection = null; $('selection-tools').hidden = true; window.getSelection()?.removeAllRanges(); }
 function showReaderSelection(selection) {
   if (!selection) { clearSelection(); publishReaderState(); return; }
@@ -512,13 +513,17 @@ function renderAnnotations() {
     }
     if(!note.text){const style=window.PaperAnnotationStyle?.editor({note,paperId:state.active.id,api,onSaved:async()=>{if(state.active?.id===card.dataset.paperId){await loadAnnotations(state.active.id);await refreshPage(note.page);}}});if(style)meta.append(style);}
     card.append(meta);
+    const translations=(replies.get(note.id)||[]).filter(reply=>reply.source_kind==='annotation-translation');
     if (note.text) { const excerpt=el('section','annotation-excerpt'),heading=el('div','annotation-excerpt-heading'),locate=el('button','button subtle','定位');locate.type='button';locate.dataset.noteAction='page';locate.setAttribute('aria-label',`定位原文：${note.text}`);heading.append(el('span','small muted','原文'));const style=window.PaperAnnotationStyle?.editor({note,paperId:state.active.id,api,onSaved:async()=>{if(state.active?.id===card.dataset.paperId){await loadAnnotations(state.active.id);await refreshPage(note.page);}}});if(style)heading.append(style);heading.append(locate);
+      if(['highlight','underline','strikeout','note'].includes(note.type)&&note.edit_version&&!note.id.startsWith('external-')&&(note.type!=='note'||note.source==='paper-library')){const reselect=el('button','button subtle','编辑原文范围');reselect.type='button';reselect.dataset.noteAction='reselect';heading.append(reselect);}
       const quote=el('p','annotation-quote',note.text),expand=el('button','button subtle','展开原文');
       const expanded=state.expandedAnnotationExcerpts ||= new Set(),key=JSON.stringify([state.active.id,note.id]);
       quote.id=`annotation-excerpt-${crypto.randomUUID()}`;expand.type='button';expand.setAttribute('aria-controls',quote.id);
       const paintExcerpt=()=>{const open=expanded.has(key);quote.classList.toggle('is-collapsed',!open);expand.textContent=open?'收起原文':'展开原文';expand.setAttribute('aria-expanded',String(open));};
       expand.addEventListener('click',()=>{if(expanded.has(key))expanded.delete(key);else expanded.add(key);paintExcerpt();});
-      paintExcerpt();heading.append(expand);excerpt.append(heading,quote);card.append(excerpt); }
+      paintExcerpt();heading.append(expand);excerpt.append(heading,quote);
+      if(translations.length){const translated=el('div','annotation-translations'),toggle=el('button','button subtle','展开翻译');toggle.type='button';const openTranslations=state.expandedAnnotationTranslations ||= new Set();translated.id=`annotation-translations-${crypto.randomUUID()}`;toggle.setAttribute('aria-controls',translated.id);translated.append(el('p','small muted','AI 译文可能基于较早的原文范围，请对照核验。'));for(const reply of translations)translated.append(replyCard(reply));const paintTranslation=()=>{const open=openTranslations.has(key);translated.hidden=!open;toggle.textContent=open?'收起翻译':'展开翻译';toggle.setAttribute('aria-expanded',String(open));};toggle.addEventListener('click',()=>{if(openTranslations.has(key))openTranslations.delete(key);else openTranslations.add(key);paintTranslation();});paintTranslation();heading.append(toggle);excerpt.append(translated);}
+      card.append(excerpt); }
     if (note.comment || note.content) card.append(el('p', 'annotation-comment', note.comment || note.content));
     if (note.handwriting) { const handwritten = el('div', 'annotation-handwriting'); handwritten.append(el('p', 'small muted', note.handwriting.transcription_source === 'model' ? '手写便签 · AI 识别待校对' : '手写便签 · 原笔迹已保留')); if (note.handwriting.transcript) handwritten.append(el('p', '', note.handwriting.transcript)); card.append(handwritten); }
     linkedHandwritingUI?.decorate(card,note);
@@ -526,7 +531,7 @@ function renderAnnotations() {
     if (note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const handwriting = el('button', 'button subtle', '手写'); handwriting.dataset.noteAction = 'handwriting'; const primary=el('div','annotation-primary-actions');primary.append(handwriting,edit);actions.prepend(primary); const independent=el('button','button subtle','＋ 备注 / 追问');independent.type='button';independent.dataset.noteAction='remark';independent.title='在这处划线下追加备注，保留已有问答';actions.append(independent); if(note.handwriting){const legacy=el('button','button subtle','打开原便签');legacy.dataset.noteAction='handwriting-legacy';actions.append(legacy);} }
     if (paperChatUI?.available() && note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const selected = paperChatUI.hasAnnotation(note.id); const discuss = el('button', 'button subtle', selected ? '移出提问材料' : '选作提问材料'); discuss.dataset.noteAction = 'discuss'; discuss.title = '可多选批注作为提问材料，再到对话框统一发送；此按钮不会发送消息'; discuss.setAttribute('aria-pressed', String(selected)); actions.append(discuss); }
     const phrase=(note.text||note.comment||note.content||'').trim();if(phrase&&phrase.length<=200){const entry=el('button','button subtle','词条');entry.type='button';entry.title='匹配百科词条或创建带来源的词条';entry.addEventListener('click',()=>wikiUI.show('encyclopedia',phrase,{paper_id:state.active.id,title:state.active.title,page:note.page,annotation_id:note.id,quote:phrase}));actions.append(entry);}
-    card.dataset.remarkNumber='1';card.append(actions);for(const reply of replies.get(note.id)||[])card.append(replyCard(reply));
+    card.dataset.remarkNumber='1';card.append(actions);for(const reply of replies.get(note.id)||[])if(!note.text||reply.source_kind!=='annotation-translation')card.append(replyCard(reply));
     for(const [index,remark]of (remarks.get(note.id)||[]).entries()){
       const entry=el('article','annotation-remark');entry.dataset.annotationId=remark.id;entry.dataset.paperId=state.active?.id||'';entry.dataset.remarkNumber=String(index+2);entry.dataset.annotationVersion=remark.version||'';entry.dataset.companionText=String(Boolean(remark.text||remark.comment));
       const tools=el('div','annotation-actions'),remove=el('button','button subtle','删除备注');remove.dataset.noteAction='delete';tools.append(remove);entry.append(tools);
@@ -755,6 +760,10 @@ async function handleNoteAction(event) {
   const note = state.annotations.find((entry) => entry.id === button.closest('[data-annotation-id]').dataset.annotationId); if (!note) return;
   if (action === 'copy-source') { if (typeof note.text === 'string' && note.text.trim()) await copyText(note.text, { label: '批注原文' }); return; }
   if (action === 'discuss') { await paperChatUI?.useAnnotation(note); if (state.active?.id) renderAnnotations(); return; }
+  if (action === 'reselect') {
+    const id=state.active?.id;
+    try{const saved=await annotationEditor?.beforeAsk(id,note.id);if(state.active?.id!==id)return;const current=state.annotations.find(n=>n.id===note.id)||note;annotationRangeEdit={id,annotationId:note.id,page:note.page,version:saved||current.edit_version};clearSelection();await switchTab('reader');readingShell?.setTool('select');await pdfReader?.revealAnnotation(note.id,{page:note.page});rangeEditBar.hidden=false;toast('请在本页重新选择原文，再点「保存新范围」。已有译文和回复请重新核对。');}catch(error){toast(error.message,true);}return;
+  }
   if (action === 'page') { await switchTab('reader'); await pdfReader?.revealAnnotation(note.id,{page:note.page});return; }
   if (action === 'linked-ink') { await linkedHandwritingUI?.reveal(note,button.dataset.regionId);return; }
   if (action === 'ink-retry') { try{await inkQueue?.retry(button.dataset.inkId);}catch(error){toast(error.message,true);}return; }
@@ -765,6 +774,7 @@ async function handleNoteAction(event) {
     try {
       const result = await api('annotation_translate', { id, annotation_id: note.id, version: note.version, retry: failedTranslations.has(key) });
       failedTranslations.delete(key);
+      (state.expandedAnnotationTranslations ||= new Set()).add(JSON.stringify([id,note.id]));
       toast(result.duplicate ? '已有译文保存在原批注下。' : '译文已作为 PDF 批注保存。');
       if (state.active?.id === id) { await loadAnnotations(id); await refreshPage(note.page); }
     } catch (error) { failedTranslations.add(key); toast(`翻译未完成：${error.message}`, true); }
@@ -1545,13 +1555,16 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onInkTrace:info=>inkDiagnostics?.record(info),
   onActivePage: (page,info) => {
     if(info.paperId!==state.active?.id)return;
+    if(annotationRangeEdit&&annotationRangeEdit.id!==info.paperId){annotationRangeEdit=null;rangeEditBar.hidden=true;}
     state.page=page;outlineUI?.setPage(page);state.pageCount=info.pageCount;state.pageData={width:info.width,height:info.height};
     $('page-number').value=page;$('page-number').max=info.pageCount;$('page-total').textContent=`/ ${info.pageCount}`;publishReaderState();
   },
   onSelection: (selection,intent) => {
     if(!selection){showReaderSelection(null);return;}
     if(selection?.id!==state.active?.id)return;
+    if(annotationRangeEdit&&selection.id!==annotationRangeEdit.id){annotationRangeEdit=null;rangeEditBar.hidden=true;}
     showReaderSelection(selection);
+    if(annotationRangeEdit){if(selection.id!==annotationRangeEdit.id||selection.page!==annotationRangeEdit.page)toast('请在原批注所在页重新选择文字。',true);return;}
     if(readingShell?.mode()==='auto'){void autoMarkup(selection,intent);return;}
     if(['highlight','underline','strikeout'].includes(intent.intent))openAnnotation(intent.intent,null,{selection,color:intent.color});
   },
@@ -1564,6 +1577,16 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onStatus: (message,error,options) => readingShell?.status(message,error,options),
 });
 readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,locateAnnotations:locateCurrentPageAnnotations,contextChanged:()=>{readerSearchUI?.sync();resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
+const rangeEditBar=el('span','annotation-range-edit');rangeEditBar.hidden=true;
+const rangeEditLabel=el('span','','调整原文：在原页选择文字'),rangeEditSave=el('button','button subtle','保存新范围'),rangeEditCancel=el('button','button subtle','取消');rangeEditSave.type=rangeEditCancel.type='button';rangeEditBar.append(rangeEditLabel,rangeEditSave,rangeEditCancel);$('paper-tools').append(rangeEditBar);
+rangeEditCancel.addEventListener('click',()=>{annotationRangeEdit=null;rangeEditBar.hidden=true;clearSelection();});
+rangeEditSave.addEventListener('click',async()=>{
+  const edit=annotationRangeEdit,selection=state.selection;if(!edit||state.active?.id!==edit.id){annotationRangeEdit=null;rangeEditBar.hidden=true;return;}
+  if(!selection||selection.id!==edit.id||selection.page!==edit.page||!selection.text?.trim()){toast('请先在原批注所在页选择文字。',true);return;}
+  rangeEditSave.disabled=true;
+  try{await api('annotation_reselect',{id:edit.id,annotation_id:edit.annotationId,page:edit.page,rects:selection.rects,text:selection.text,expected_version:edit.version});annotationRangeEdit=null;rangeEditBar.hidden=true;clearSelection();if(state.active?.id===edit.id){await loadAnnotations(edit.id);await refreshPage(edit.page);}toast('原文范围已更新；已有译文和回复请重新核对。');}
+  catch(error){toast(`原文范围未更新：${error.message}`,true);}finally{rangeEditSave.disabled=false;}
+});
 outlineUI=window.PaperOutline?.create({api,panels:readingPanels,getPaper:()=>state.active,getPage:()=>state.page,navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');await pdfReader?.revealRegion({...source,rects:source.rects?.length?source.rects:[[0,0,2,2]]});}});
 documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPanels,getPaper:()=>state.active,toast,sharedSearch:Boolean(window.PaperReaderSearch),
   openSettings:()=>settingsUI?.showResources(),

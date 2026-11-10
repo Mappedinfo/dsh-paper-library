@@ -2316,3 +2316,7 @@ dialog .small {
 .annotation-preview-open { display: block; width: 100%; padding: 0; border: 1px solid var(--border); background: white; color: #303640; border-radius: 4px; overflow: hidden; cursor: pointer; }
 .annotation-preview-open img { display: block; width: 100%; height: auto; object-fit: contain; }
 .annotation-preview-status { display: block; overflow-wrap: anywhere; }
+
+.annotation-inline-input[hidden],.annotation-translations[hidden],.annotation-range-edit[hidden]{display:none!important}
+.annotation-range-edit{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;background:var(--surface);border-radius:5px}
+.annotation-translations{margin-top:8px}.annotation-translations>.annotation-reply{margin-top:4px}

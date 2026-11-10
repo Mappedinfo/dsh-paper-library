@@ -114,3 +114,10 @@ test('autosave and background rerenders keep the editing card connected, preserv
  assert.equal(list.scrollTop,240);assert.equal(list.querySelector('textarea').value,'正在输入新问题');
  assert.equal(card.isConnected,false,'Deferred updates render once editing ends');
 });
+
+test('empty remark remains collapsed until opened and nonempty remark remains visible',async t=>{
+ const f=fixture(t);const empty={id:'blank',page:1,text:'Source',comment:'',version:'v'};f.notes.push(empty);f.render();
+ const card=f.w.document.querySelector('[data-annotation-id="blank"]'),input=card.querySelector('textarea'),toggle=card.querySelector('.annotation-remark-expand');
+ assert.equal(input.hidden,true);assert.equal(toggle.textContent,'添加备注');toggle.click();assert.equal(input.hidden,false);assert.equal(f.w.document.activeElement,input);
+ input.value='A question';input.dispatchEvent(new f.w.Event('input',{bubbles:true}));assert.equal(input.hidden,false);
+});

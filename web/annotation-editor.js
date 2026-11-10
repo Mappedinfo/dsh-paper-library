@@ -37,6 +37,7 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
   function paint(r) {
     if(!r.ui)return;
     const {status,retry,input,compare}=r.ui;
+    if(r.comment.trim())r.ui.open();
     status.textContent=r.error?`${dirty(r)?'未保存':'PDF 已保存，草稿同步未完成'}：${r.error}`:r.running?'保存中…':dirty(r)?'等待自动保存…':'已保存';
     status.classList.toggle('error',Boolean(r.error));retry.hidden=!r.error;retry.disabled=Boolean(r.running);compare.hidden=!r.error||Boolean(r.payload);compare.disabled=Boolean(r.running);
     const card=input.closest('.annotation-remark, .annotation-card');if(card){card.dataset.companionText=String(Boolean((r.note.text||'').trim()||r.comment.trim()||r.note.handwriting?.transcript||r.note.linked_ink?.transcript));if(r.note.version)card.dataset.annotationVersion=r.note.version;}
@@ -52,9 +53,12 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
     input.setAttribute('aria-label',`第 ${r.note.page} 页批注的备注或问题`);
     const expand=node('button','button subtle annotation-remark-expand','展开');expand.type='button';
     expand.setAttribute('aria-controls',input.id);expand.setAttribute('aria-expanded','false');
-    let expanded=false;
+    let expanded=false,collapsed=!r.comment.trim()&&!r.payload;
+    function paintCollapse(){input.hidden=collapsed;expand.textContent=collapsed?'添加备注':expanded?'收起':'展开';expand.setAttribute('aria-expanded',String(!collapsed));}
     function sizeInput(){if(expanded){input.style.height='auto';input.style.height=`${Math.max(240,input.scrollHeight+2)}px`;}}
     expand.addEventListener('click',()=>{
+      if(collapsed){collapsed=false;paintCollapse();input.focus();return;}
+      if(!input.value.trim()){collapsed=true;expanded=false;paintCollapse();return;}
       expanded=!expanded;root.classList.toggle('is-expanded',expanded);expand.textContent=expanded?'收起':'展开';expand.setAttribute('aria-expanded',String(expanded));
       if(expanded)sizeInput();else input.style.height='';
     });
@@ -81,7 +85,7 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
     input.addEventListener('input',()=>{sizeInput();update();});
     input.addEventListener('blur',()=>{if(!composing&&dirty(r))void save(r);});
     const heading=node('div','annotation-inline-heading');
-    footer.append(status,retry,compare);heading.append(label,footer,expand);root.append(heading,input);r.ui={root,input,status,retry,compare};paint(r);return root;
+    footer.append(status,retry,compare);heading.append(label,footer,expand);root.append(heading,input);r.ui={root,input,status,retry,compare,open(){collapsed=false;paintCollapse();}};paintCollapse();paint(r);return root;
   }
   async function save(r) {
     clearTimeout(r.timer);r.timer=null;
@@ -146,7 +150,7 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
   }
   function focus(id,annotationId) {
     if(getPaper()?.id!==id)return;show(annotationId);decorate();const r=paper(id).rows.get(annotationId);
-    r?.ui?.root.scrollIntoView?.({block:'nearest'});r?.ui?.input.focus({preventScroll:true});
+    r?.ui?.open();r?.ui?.root.scrollIntoView?.({block:'nearest'});r?.ui?.input.focus({preventScroll:true});
   }
   async function create(mode,{note=null,selection=null,color='#ffdb66',width=2,page,comment=''}={}) {
     const id=getPaper()?.id;if(!id)return false;
