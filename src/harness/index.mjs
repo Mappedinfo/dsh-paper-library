@@ -131,7 +131,14 @@ export function apply(ctx, rawConfig = {}) {
     scoped.effect(() => registerBundledSkills(scoped), 'paper-library: bundled paper-fetch skill')
   })
   ctx.inject(['connection', 'webServer', 'sessionController', 'workspaceRegistry', 'sessionPersistence', 'sessionProjections', 'sessions', 'agents', 'agentDefaultModel'], web => {
-    const paperChat = createPaperChat(web, { library: config.library, python: config.python, dispatch, core, store:options.localState, boards, maxAnnotationCharacters: config.maxAnnotationCharacters })
+    const paperChat = createPaperChat(web, { library: config.library, python: config.python, dispatch, core, store:options.localState, boards, maxAnnotationCharacters: config.maxAnnotationCharacters,
+      validateModel: async (selection, signal) => {
+        const available = await options.models(signal)
+        if (!available.models.some(item => item.provider === selection.provider && item.id === selection.model)) throw new Error('所选模型不在 DSH 当前可用列表中，请重新读取。')
+        await ctx.llm.resolveCallConfig(selection)
+        signal?.throwIfAborted()
+      },
+    })
     paperChat.install()
     const companion = createCompanionQueue({store:options.localState,settings,paperChat,dispatch,library:config.library,python:config.python})
     paperChat.onFeedback(companion.feedback)

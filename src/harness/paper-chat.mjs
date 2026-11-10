@@ -7,7 +7,7 @@ import { preparePaperReferenceMessages } from './paper-reference-resolver.mjs'
 import { prepareBoardReferenceMessages } from './board-references.mjs'
 import { annotationReplySources } from './annotation-replies.mjs'
 
-const ACTIONS = new Set(['chat_ensure', 'chat_catalog', 'chat_context', 'chat_reference', 'chat_send', 'chat_history', 'chat_save_feedback'])
+const ACTIONS = new Set(['chat_model_update', 'chat_ensure', 'chat_catalog', 'chat_context', 'chat_reference', 'chat_send', 'chat_history', 'chat_save_feedback'])
 const MESSAGE_LIMIT = 20
 const MESSAGE_CHARACTERS = 6000
 const HISTORY_CHARACTERS = 48000
@@ -28,6 +28,9 @@ function requestOf(input) {
   const id = boundedString(input.id, '文献标识', 160, true)
   if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('文献标识无效。')
   const request = { action: input.action, id }
+  if (input.action === 'chat_model_update') {
+    request.model = { provider: boundedString(input.model?.provider, '模型服务商', 160, true), model: boundedString(input.model?.model, '模型名称', 200, true) }
+  }
   if (input.action === 'chat_catalog' && input.annotation_id !== undefined) {
     request.annotation_id = boundedString(input.annotation_id, '批注标识', 160, true)
     if (request.annotation_id !== input.annotation_id || /[\x00-\x1f]/.test(request.annotation_id)) throw new Error('批注标识无效。')
@@ -130,7 +133,7 @@ export function projectPaperHistory(snapshot) {
  * Bind one paper to a normal Harness Session. The returned action handler uses
  * only public Host services and never reads profile files or changes defaults.
  */
-export function createPaperChat(ctx, { library, python, dispatch, core = dispatch, store, boards, maxAnnotationCharacters = 24000 }) {
+export function createPaperChat(ctx, { library, python, dispatch, core = dispatch, store, boards, validateModel, maxAnnotationCharacters = 24000 }) {
   let feedbackListener,turnFailureListener
   const tails = new Map()
   let admitted = 0
@@ -353,6 +356,20 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
     const ensured = await ensure(paper, request, signal)
     const { snapshot, ...session } = ensured
     if (request.action === 'chat_ensure') return session
+    if (request.action === 'chat_model_update') {
+      if (typeof validateModel !== 'function' || typeof controller.resolveAgent !== 'function') throw new Error('当前 DSH 尚不支持在插件中切换模型，请更新宿主。')
+      await validateModel(request.model, signal)
+      const resolved = await controller.resolveAgent(paper.sessionId)
+      if (resolved.error) throw resolved.error
+      const agent = resolved.agent
+      signal?.throwIfAborted()
+      if (agent.status === 'running' || agent.inbox?.nextTurn?.length || agent.inbox?.nextStep?.length) throw new Error('论文对话仍在处理或排队，请完成后再切换模型。')
+      // Agent-owned append: never write to a detached Session and never call
+      // controller.selectModel, which also changes the global DSH default.
+      agent.model.select(request.model)
+      if (await ctx.sessions.flush(agent.session) !== true) throw new Error('模型选择尚未确认保存，请重新读取设置核对。')
+      return { ...session, model: modelOf(agent.model.current()) }
+    }
     if (request.action === 'chat_catalog') {
       const catalog = paper.item.pdf ? await kernel({ action: 'annotation_catalog', id: request.id, ...(request.annotation_id ? { annotation_id: request.annotation_id } : {}) }, signal) : { annotations: [], total: 0, total_exact: true, truncated: false }
       const state = await durableUsage(snapshot)

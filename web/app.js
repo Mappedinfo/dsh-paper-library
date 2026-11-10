@@ -16,6 +16,7 @@ let knowledgeGraphUI;
 let pdfReader;
 let readingPanels;
 let documentElementsUI;
+let outlineUI;
 let readerSearchUI;
 let readingShell;
 let languageUI;
@@ -235,7 +236,7 @@ async function openPaper(id, { background = false } = {}) {
   try {
     const item = await api('get', { id }); if (!current()) return;
     state.active = item; renderPaperHeader(); renderList(); resourceUI?.sync();
-    workbenchUI?.paperChanged(item); readingPanels?.paperChanged(item);
+    workbenchUI?.paperChanged(item); readingPanels?.paperChanged(item);outlineUI?.sync();
     const chatOpening=paperChatUI?.paperOpened(item);
     void languageUI?.paperChanged(item);
     readerPaperId = item.id;
@@ -271,7 +272,7 @@ async function openResource(item){
     state.active=null;state.openedId=null;state.catalogSlideId=item.id;state.catalogSlideTitle=title(item);
     resourceUI?.hide();knowledgeUI?.hide();paperChatUI?.visible(false);knowledgeGraphUI?.clear();
     $('paper-detail').hidden=true;$('welcome').hidden=false;
-    workbenchUI?.paperChanged(null);workbenchUI?.header();readingPanels?.paperChanged(null);void languageUI?.paperChanged(null);readingShell?.sync();resourceUI?.sync();renderList();
+    workbenchUI?.paperChanged(null);workbenchUI?.header();readingPanels?.paperChanged(null);outlineUI?.sync();void languageUI?.paperChanged(null);readingShell?.sync();resourceUI?.sync();renderList();
     return;
   }
   state.catalogSlideId=null;state.catalogSlideTitle=null;
@@ -1303,7 +1304,7 @@ function publishReaderState() {
 
   if (restoringReader || !state.active || state.active.resource_kind === 'dataset' || workbenchUI?.isTable() || (workbenchUI && readerPaperId !== state.active.id)) return true;
   const snapshot = { workspace:workspaceSnapshot(), paperId: state.active.id, page: state.page, tab: state.tab, chatDraft: paperChatUI?.draft() || '', chatContext: paperChatUI?.context() || { annotationRefs: [] },
-    ...(readingPanels ? {panels:{elements:documentElementsUI?.selected(),annotations:readingPanels.visible('annotations'),metadata:readingPanels.visible('metadata'),chat:readingPanels.visible('chat'),side:$('reading-workspace').dataset.readingSide || 'left'}} : {}),
+    ...(readingPanels ? {panels:{outline:readingPanels.visible('outline'),elements:documentElementsUI?.selected(),annotations:readingPanels.visible('annotations'),metadata:readingPanels.visible('metadata'),chat:readingPanels.visible('chat'),side:$('reading-workspace').dataset.readingSide || 'left'}} : {}),
     ...(state.selection?.id===state.active.id ? {readerSelection:{page:state.selection.page,text:state.selection.text,rects:state.selection.rects}} : {}),
   };
   if ($('annotation-dialog').open && state.annotationDraft?.id === state.active.id) {
@@ -1360,6 +1361,7 @@ async function applyReaderSnapshot(snapshot,legacyChat=false) {
       if(snapshot.panels.metadata)workbenchUI?.edit(state.active);else readingPanels.close('metadata');
       if(snapshot.panels.chat)readingPanels.show('chat');else readingPanels.close('chat');
       if(snapshot.panels.elements)documentElementsUI?.restore(snapshot.panels.elements);
+      if(snapshot.panels.outline)readingPanels.show('outline');
     }
     if(snapshot.readerSelection)showReaderSelection(snapshot.readerSelection);
     const draft = snapshot.annotationDraft;
@@ -1488,9 +1490,9 @@ refreshModels.type = 'button'; refreshModels.style.marginTop = '6px'; refreshMod
 refreshModels.addEventListener('click', () => { announceReady(); loadModels(); }); $('model-status').after(refreshModels);
 workbenchUI = window.PaperWorkbench?.create({ state, api, persistence, loadList, organization: () => organizationUI, openPaper: id => openResource(state.items.find(item => item.id === id) || {id}), toast, el, resource: () => resourceUI,
   tableChanged: table => { paperChatUI?.visible(!table && state.tab!=='graph' && readerPaperId===state.active?.id && (readingPanels?.visible('chat') ?? state.tab==='conversation')); queueMicrotask(()=>{readingShell?.sync();resourceUI?.sync();}); },
-  selectPaper: item => { if(item.resource_kind === 'dataset'||item.resource_kind === 'slides'){void openResource(item);return;}state.catalogSlideId=null;state.catalogSlideTitle=null;resourceUI?.hide();knowledgeUI?.hide();publishReaderState();readerStateReady=false;++state.itemTicket; ++state.pageTicket; state.pageWanted=null; clearPage(); state.active=item; state.openedId=item.id; workbenchUI?.paperChanged(item); readingPanels?.paperChanged(item);void languageUI?.paperChanged(item);renderPaperHeader(); renderList();publishPaperWorkspace(item); },
+  selectPaper: item => { if(item.resource_kind === 'dataset'||item.resource_kind === 'slides'){void openResource(item);return;}state.catalogSlideId=null;state.catalogSlideTitle=null;resourceUI?.hide();knowledgeUI?.hide();publishReaderState();readerStateReady=false;++state.itemTicket; ++state.pageTicket; state.pageWanted=null; clearPage(); state.active=item; state.openedId=item.id; workbenchUI?.paperChanged(item); readingPanels?.paperChanged(item);outlineUI?.sync();void languageUI?.paperChanged(item);renderPaperHeader(); renderList();publishPaperWorkspace(item); },
   changed: (item, removedId) => {
-    if (removedId && state.active?.id === removedId) { ++state.itemTicket; ++state.pageTicket; state.pageWanted=null; clearPage(); state.active=null; state.openedId=null;readerStateReady=false;void languageUI?.paperChanged(null);$('paper-detail').hidden=true; $('welcome').hidden=false; knowledgeGraphUI?.clear(); workbenchUI?.header(); readingPanels?.paperChanged(null); readingShell?.sync(); }
+    if (removedId && state.active?.id === removedId) { ++state.itemTicket; ++state.pageTicket; state.pageWanted=null; clearPage(); state.active=null; state.openedId=null;readerStateReady=false;void languageUI?.paperChanged(null);$('paper-detail').hidden=true; $('welcome').hidden=false; knowledgeGraphUI?.clear(); workbenchUI?.header(); readingPanels?.paperChanged(null);outlineUI?.sync(); readingShell?.sync(); }
     else if (item && state.active?.id === item.id) { state.active=item; renderPaperHeader(); if(state.tab==='graph')void loadGraph(); }
   },
 });
@@ -1534,7 +1536,7 @@ paperChatUI = window.PaperLibraryChat?.create({ api, toast, persistence, getPape
 });
 readingPanels = window.PaperReadingPanels?.create({persistence,root:$('reading-workspace'),annotationsRoot:$('annotations-tab'),conversationRoot:$('conversation-tab'),metadataRoot:$('metadata-dialog'),libraryRoot:document.querySelector('.library-pane'),onAnnotationsRequest:()=>canvasNotesContext?void openCanvasNotes(canvasNotesContext):void switchTab('annotations'),
   onChatVisibility: visible => paperChatUI?.visible(visible && state.tab!=='graph' && !workbenchUI?.isTable()),
-  onPanelChange: value => { documentElementsUI?.sync(value);workbenchUI?.metadataVisibility(value.sidebar==='metadata'); readingShell?.sync(); publishReaderState(); }, toast,
+  onPanelChange: value => { outlineUI?.sync();documentElementsUI?.sync(value);workbenchUI?.metadataVisibility(value.sidebar==='metadata'); readingShell?.sync(); publishReaderState(); }, toast,
 });
 workbenchUI?.setPanelHost({openMetadataPanel:()=>readingPanels?.show('metadata'),closeMetadataPanel:()=>readingPanels?.close('metadata')});
 pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPaper:()=>state.active,
@@ -1561,6 +1563,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onStatus: (message,error,options) => readingShell?.status(message,error,options),
 });
 readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,locateAnnotations:locateCurrentPageAnnotations,contextChanged:()=>{readerSearchUI?.sync();resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
+outlineUI=window.PaperOutline?.create({api,panels:readingPanels,getPaper:()=>state.active,navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');await pdfReader?.revealRegion({...source,rects:source.rects?.length?source.rects:[[0,0,2,2]]});}});
 documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPanels,getPaper:()=>state.active,toast,sharedSearch:Boolean(window.PaperReaderSearch),
   openSettings:()=>settingsUI?.showResources(),
   navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');await pdfReader?.revealRegion(source);},
@@ -1624,7 +1627,7 @@ if ($('library-latex-versions')) libraryLatexVersions = window.PaperLatexVersion
 });
 $('latex-version-shelf')?.addEventListener('toggle',()=>{if($('latex-version-shelf').open)void libraryLatexVersions?.refresh();});
 bindWorkspaceVersions();
-settingsUI = window.PaperLibrarySettings?.create({onLanguageSettings:()=>languageUI?.showSettings(),api,persistence,getLibrary:()=>state.library,onChange:(value,descriptor)=>{
+settingsUI = window.PaperLibrarySettings?.create({onLanguageSettings:()=>languageUI?.showSettings(),api,persistence,getPaper:()=>state.active,getLibrary:()=>state.library,onChange:(value,descriptor)=>{
   preferences={...preferences,...value};
   documentElementsUI?.applyResources(descriptor.resource_policy);
   window.PaperLibraryTheme?.setPalette(value.ui_palette);
@@ -2143,7 +2146,7 @@ if(persistence){
   const backup=el('button','button subtle','导出未保存草稿');backup.type='button';backup.addEventListener('click',()=>{const values=persistence.exportPending?.()||[];const url=URL.createObjectURL(new Blob([JSON.stringify({schema:1,drafts:values},null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='paper-library-unsaved-drafts.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});saveStatus.append(label,retry,backup);$('notification-region').append(saveStatus);
   const pending=new Map();persistence.subscribe(event=>{if(event.status==='saved')pending.delete(event.key);else if(event.error||!pending.get(event.key)?.error)pending.set(event.key,event);const errors=[...pending.values()].filter(value=>value.error);saveStatus.hidden=!errors.length;label.textContent=errors.some(value=>value.status==='conflict')?'另一浏览器已有修改，本窗口草稿尚未落盘。请导出并核对。':`本地保存未完成${errors.length?`（${errors.length} 项）：${errors[0].error?.message||'请重试'}`:''}，草稿仍保留。`;});
 }
-window.addEventListener('pagehide', () => { publishReaderState(); floatingWindows?.dispose(); boardUI?.dispose(); companionUI?.dispose();settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); documentElementsUI?.dispose();readerSearchUI?.dispose();readingPanels?.dispose(); readingShell?.dispose(); });
+window.addEventListener('pagehide', () => { publishReaderState(); floatingWindows?.dispose(); boardUI?.dispose(); companionUI?.dispose();settingsUI?.dispose();paperChatUI?.dispose(); languageUI?.dispose(); resourceUI?.dispose();knowledgeUI?.dispose();analysisUI?.dispose(); void persistence?.flush({keepalive:true}).catch(()=>{});pdfReader?.dispose(); outlineUI?.dispose();documentElementsUI?.dispose();readerSearchUI?.dispose();readingPanels?.dispose(); readingShell?.dispose(); });
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){publishReaderState();void persistence?.flush({keepalive:true}).catch(()=>{});}});
 window.addEventListener('message', event => {
   receiveHarnessContext(event);

@@ -29,3 +29,5 @@
 [data-palette-option="apricot"] .palette-swatches{background:linear-gradient(90deg,#9a4b22 0 34%,#efc29e 34% 67%,#fff9f2 67%)}
 
 .settings-resource-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}.settings-resource-field{display:flex;flex-direction:column;gap:5px;font-size:12px}.settings-resource-field input{width:100%;box-sizing:border-box}.settings-resources>select{width:100%}.settings-resources>button{margin-right:8px}
+
+.settings-models{display:grid;gap:8px;margin:12px 0;color:var(--ink)}.settings-models>label{display:grid;gap:6px;margin-top:8px}.settings-models select{width:100%;min-width:0}.settings-models>button{justify-self:start}.settings-models p{margin:0!important}

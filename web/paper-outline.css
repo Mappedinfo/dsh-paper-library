@@ -1,0 +1,6 @@
+.paper-outline{min-height:0;overflow:auto;padding:10px;flex:1;}
+.paper-outline[hidden]{display:none;}
+.paper-outline nav{display:flex;flex-direction:column;margin-top:8px;}
+.outline-entry{display:flex;gap:12px;align-items:baseline;text-align:left;padding:9px 8px;border:0;border-radius:5px;background:transparent;color:inherit;cursor:pointer;}
+.outline-entry:hover,.outline-entry:focus-visible{background:var(--surface);}
+.outline-entry span{flex:1;overflow-wrap:anywhere;}.outline-entry small{opacity:.7;font-variant-numeric:tabular-nums;}

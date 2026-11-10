@@ -435,3 +435,26 @@ test('selection-only and direct plugin questions auto-save once without inheriti
   append('assistant/message',{message:{content:[{type:'text',text:'Another complete answer'}]}});append('turn/end',{reason:{kind:'completed'}});
   await f.chat({action:'chat_history',id:'paper-a'});assert.equal(f.saves.length,2);assert.deepEqual(f.saves[1].annotation_ids,[]);
 });
+
+test('settings model switch uses the owning agent, persists per paper, and rejects busy or invalid routes', async t => {
+  const f = await fixture(t)
+  let selected = { provider: 'fixture-default', model: 'reader-default' }, writes = 0, flushed = 0
+  const agent = { status: 'idle', session: { id: 'owned' }, inbox: { nextTurn: [], nextStep: [] },
+    model: { current: () => selected, select: value => { selected = value; writes++ } } }
+  f.ctx.sessionController.resolveAgent = async () => ({ agent })
+  f.ctx.sessions.flush = async session => { assert.equal(session, agent.session); flushed++; return true }
+  const chat = createPaperChat(f.ctx, { ...f.options, validateModel: async model => { if(model.provider !== 'available') throw Error('unavailable') } })
+  const request = { action: 'chat_model_update', id: 'paper-model', model: { provider: 'available', model: 'reader-v2' } }
+  assert.deepEqual((await chat(request)).model, request.model)
+  assert.equal(writes, 1); assert.equal(flushed, 1)
+  assert.equal(f.ctx.agentDefaultModel.currentSelection().model, 'reader-default')
+  agent.status = 'running'
+  await assert.rejects(chat(request), /仍在处理/)
+  agent.status = 'idle';agent.inbox.nextTurn.push({})
+  await assert.rejects(chat(request), /排队/)
+  agent.inbox.nextTurn.length = 0
+  await assert.rejects(chat({...request, model: {provider:'missing',model:'x'}}), /unavailable/)
+  assert.equal(writes, 1)
+  f.ctx.sessions.flush = async () => false
+  await assert.rejects(chat(request), /尚未确认保存/)
+})
