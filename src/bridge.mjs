@@ -324,6 +324,39 @@ async function fillDoi(request, options) {
       {action:'update',id,expected_modified:current.modified,metadata:{DOI}},options);
     return {status:'saved',DOI:item.DOI};
   };
+  if(request.arxiv){
+    if(dataset)throw Error('arXiv 链接对应预印本文献，不能保存到数据集条目。');
+    if(current.DOI)throw Error('此条目已有 DOI，请在资料详情核对预印本关联。');
+    const existing=arxivID(current.archive_location)||arxivID(current.URL);
+    if(!missingMetadata(current.archive)&&!/^arxiv$/i.test(current.archive)||
+        !missingMetadata(current.archive_location)&&!arxivID(current.archive_location))
+      throw Error('此条目已有其他档案标识，请在资料详情核对后再保存。');
+    if(existing&&existing.replace(/v\d+$/,'')!==request.arxiv.replace(/v\d+$/,''))
+      throw Error('此条目已有其他 arXiv 标识，请在资料详情核对后再保存。');
+    // An unversioned retry respects an already pinned version. Explicit versions
+    // are checked by the resolver and never silently replace a different one.
+    const target=existing&&!/v\d+$/.test(request.arxiv)?existing:request.arxiv;
+    if(existing&&/v\d+$/.test(existing)&&/v\d+$/.test(target)&&existing!==target)
+      throw Error('此条目已关联其他 arXiv 版本，请在资料详情核对后再保存。');
+    if(!normalizedIdentity(current.title))throw Error('请先补齐条目标题，再核对预印本。');
+    const {metadata:registered}=await resolveMetadata(target,fetchOptions);
+    const arxiv=arxivID(registered?.archive_location);
+    if(!arxiv||!normalizedIdentity(registered.title)||!registered.author?.length)
+      throw Error('未取得此 arXiv 预印本的完整题录，尚未保存。请检查链接或网络后重试。');
+    const titleMatches=joinHan(normalizedIdentity(registered.title))===joinHan(normalizedIdentity(current.title));
+    const authorsMatch=!current.author?.length||sameAuthorList(current.author,registered.author);
+    if(!titleMatches||!authorsMatch)return {status:'mismatch',titleMatches,authorsMatch,registered:{title:registered.title,author:registered.author}};
+    const metadata={};
+    // Do not copy arxiv:doi: it can identify a later published article rather than
+    // this preprint. Never overwrite manual data or create a second catalog row.
+    for(const field of ['archive','archive_location','URL','author','issued','abstract']){
+      if(missingMetadata(current[field])&&!missingMetadata(registered[field]))metadata[field]=registered[field];
+    }
+    if(current.type==='article'&&missingMetadata(current.genre))metadata.genre='preprint';
+    options.signal?.throwIfAborted();
+    if(Object.keys(metadata).length)await core({action:'update',id,expected_modified:current.modified,metadata},options);
+    return {status:'saved',arxiv,metadata};
+  }
   if(request.doi!==undefined){
     const doi=request.doi;
     if(current.DOI&&canonicalDOI(current.DOI)!==doi)
@@ -591,17 +624,20 @@ export async function dispatch(request, options = {}) {
   if (safe.action === 'metadata_lookup') return lookupMetadata(safe,options);
   if (safe.action === 'catalog_doi_lookup') {
     if(typeof safe.id!=='string'||safe.id.length>160)throw Error('文献标识无效。');
-    let doi;
-    if(safe.doi!==undefined){
+    let doi, arxiv;
+    const input=safe.identifier!==undefined?safe.identifier:safe.doi;
+    if(safe.identifier!==undefined&&safe.doi!==undefined)throw Error('请一次输入一个 DOI 或预印本链接。');
+    if(input!==undefined){
       try{
-        if(typeof safe.doi!=='string'||safe.doi.length>2048)throw Error();
-        doi=normalizeDOI(safe.doi).toLowerCase();
-      }catch{throw Error('请输入有效的 DOI 或 doi.org 链接。');}
+        if(typeof input!=='string'||!input.trim()||input.length>2048)throw Error();
+        arxiv=arxivID(input);
+        if(!arxiv)doi=normalizeDOI(input).toLowerCase();
+      }catch{throw Error('请输入有效的 DOI、doi.org 链接或 arXiv 预印本链接 / 编号。');}
     }
-    const key=JSON.stringify([options.library||defaultLibrary,safe.id,safe.kind==='dataset',doi]);
+    const key=JSON.stringify([options.library||defaultLibrary,safe.id,safe.kind==='dataset',arxiv?`arxiv:${arxiv}`:doi]);
     if(doiLookups.has(key))return doiLookups.get(key);
     if(doiLookups.size>=2)throw Error('DOI 查询繁忙，请稍后重试。');
-    const lookup=fillDoi({...safe,doi},options).finally(()=>doiLookups.delete(key));
+    const lookup=fillDoi({...safe,doi,arxiv},options).finally(()=>doiLookups.delete(key));
     doiLookups.set(key,lookup);
     return lookup;
   }

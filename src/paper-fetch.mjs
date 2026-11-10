@@ -11,7 +11,7 @@ import { networkInterfaces } from 'node:os'
 const TEXT_LIMIT = 2 * 1024 * 1024
 const PDF_LIMIT = 250 * 1024 * 1024
 const USER_AGENT = 'Mappedinfo-Paper-Library/0.1 (public scholarly PDF retrieval)'
-const ARXIV_ID = /^(?:\d{4}\.\d{4,5}|[a-z][a-z.-]*(?:\.[A-Z]{2})?\/\d{7})(?:v\d+)?$/i
+const ARXIV_ID = /^(?:\d{2}(?:0[1-9]|1[0-2])\.\d{4,5}|[a-z]+(?:-[a-z]+)*(?:\.[A-Z]{2})?\/\d{2}(?:0[1-9]|1[0-2])\d{3})(?:v[1-9]\d*)?$/
 const DOI = /^10\.\d{4,9}\/[^\s?#]+$/i
 const PUBLIC_METADATA_HOSTS = new Set(['api.crossref.org', 'api.datacite.org', 'export.arxiv.org'])
 
@@ -484,11 +484,20 @@ function mergeMetadata(primary, supplement, ctx) {
 }
 
 export function arxivID(value) {
-  let id = value.replace(/^arxiv:\s*/i, '')
-  if (/^https?:\/\//i.test(id)) {
-    const url = publicURL(id)
-    if (!['arxiv.org', 'www.arxiv.org', 'export.arxiv.org'].includes(url.hostname)) return null
-    id = url.pathname.replace(/^\/(?:abs|pdf)\//, '').replace(/\.pdf$/, '')
+  if (typeof value !== 'string') return null
+  let id = value.trim()
+  if (/^arxiv:/i.test(id)) {
+    id = id.replace(/^arxiv:\s*/i, '')
+    return ARXIV_ID.test(id) ? id : null
+  }
+  // Match the raw authority/path before URL normalization: no credentials, ports,
+  // escaped hostnames, backslashes or dot segments may turn into a trusted URL.
+  const link = id.match(/^(?:https?:\/\/)?((?:www\.|export\.)?arxiv\.org)(\/[^?#]*)(?:[?#].*)?$/i)
+  if (link) {
+    if (/[\s\\\u0000-\u001f\u007f]/.test(id)) return null
+    const path = link[2].match(/^\/(?:abs|pdf|html)\/(.+?)(?:\.pdf)?\/?$/)
+    if (!path) return null
+    id = path[1]
   }
   return ARXIV_ID.test(id) ? id : null
 }

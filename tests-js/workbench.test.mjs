@@ -322,12 +322,12 @@ test('manual DOI entry targets its row, shows an author mismatch, and updates th
   const f=environment({active:selected,respond:(action,input)=>{
     assert.equal(action,'catalog_doi_lookup');
     assert.equal(input.id,paper.id);
-    if(input.doi==='10.1234/wrong')return {status:'mismatch',titleMatches:true,authorsMatch:false,registered:{title:paper.title,author:[{given:'Other',family:'Author'}]}};
+    if(input.identifier==='10.1234/wrong')return {status:'mismatch',titleMatches:true,authorsMatch:false,registered:{title:paper.title,author:[{given:'Other',family:'Author'}]}};
     return {status:'saved',DOI:'10.1234/right'};
   }});
   f.state.items.push(paper);f.workbench.setTable(true);
   const row=()=>f.element('catalog-table').querySelectorAll('tr').find(n=>n.dataset.paperId===paper.id);
-  await row().querySelectorAll('button').find(n=>n.textContent==='输入 DOI').dispatch('click');
+  await row().querySelectorAll('button').find(n=>n.textContent==='输入 DOI 或预印本链接').dispatch('click');
   const dialog=f.element('catalog-doi-dialog'),input=f.element('catalog-doi-input'),status=f.element('catalog-doi-status');
   assert.equal(dialog.open,true);
   input.value='10.1234/wrong';await dialog.querySelector('form').dispatch('submit');
@@ -337,6 +337,34 @@ test('manual DOI entry targets its row, shows an author mismatch, and updates th
   input.value='https://doi.org/10.1234/right';await dialog.querySelector('form').dispatch('submit');
   assert.equal(dialog.open,false);assert.equal(paper.DOI,'10.1234/right');assert.equal(selected.DOI,undefined);
   assert.equal(row().children[6].children[0].textContent,'10.1234/right');assert.equal(f.loads.length,1);
+});
+
+test('arXiv entry keeps editor drafts, suppresses double submit and preserves input after an offline failure',async()=>{
+  const pending=deferred(),paper={...original(),type:'article'},selected={...original(),id:'paper-b'};
+  let attempt=0;
+  const f=environment({active:paper,respond:async(action,input)=>{
+    assert.equal(action,'catalog_doi_lookup');assert.equal(input.identifier,'https://arxiv.org/pdf/2601.01234v2.pdf');
+    if(++attempt===1)return pending.promise;
+    return {status:'saved',arxiv:'2601.01234v2',metadata:{archive:'arXiv',archive_location:'2601.01234v2',URL:'https://arxiv.org/abs/2601.01234v2'}};
+  }});
+  f.workbench.edit(paper);f.element('edit-title').value='Unsaved manual draft';
+  f.workbench.setTable(true);
+  const enter=()=>f.element('catalog-table').querySelectorAll('button').find(n=>n.textContent==='输入 DOI 或预印本链接');
+  await enter().dispatch('click');
+  const dialog=f.element('catalog-doi-dialog'),input=f.element('catalog-doi-input'),form=dialog.querySelector('form');
+  input.value='https://arxiv.org/pdf/2601.01234v2.pdf';
+  const saving=form.dispatch('submit');await form.dispatch('submit');assert.equal(attempt,1);assert.equal(input.disabled,true);
+  let prevented=false;await dialog.dispatch('cancel',{preventDefault(){prevented=true;}});assert.equal(prevented,true);
+  pending.reject(Error('Network offline'));await saving;
+  assert.equal(dialog.open,true);assert.equal(input.disabled,false);assert.match(f.element('catalog-doi-status').textContent,/offline/);
+  assert.equal(input.value,'https://arxiv.org/pdf/2601.01234v2.pdf');assert.equal(paper.DOI,undefined);
+  // Selection changes during the dialog do not redirect the row's pending save.
+  f.state.active=selected;await form.dispatch('submit');
+  assert.equal(dialog.open,false);assert.equal(paper.archive_location,'2601.01234v2');assert.equal(paper.DOI,undefined);assert.equal(selected.archive_location,undefined);
+  assert.equal(f.element('edit-title').value,'Unsaved manual draft');
+  assert.ok(f.element('catalog-table').querySelectorAll('span').some(n=>n.textContent==='arXiv: 2601.01234v2'));
+  await enter().dispatch('click');assert.equal(input.value,'');assert.equal(f.element('catalog-doi-status').textContent.includes('offline'),false);
+  await dialog.querySelector('button').dispatch('click');assert.equal(dialog.open,false);assert.equal(attempt,2);
 });
 
 test('a dataset title still routes to the dataset view instead of the reader', async () => {

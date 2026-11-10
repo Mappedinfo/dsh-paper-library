@@ -123,6 +123,85 @@ test('manual DOI verification falls back to DataCite and matches split Han names
   assert.deepEqual(await dispatch({action:'catalog_doi_lookup',id:f.item.id,doi:`doi:${doi}`},{library:f.library,fetchOptions}),{status:'saved',DOI:doi});
 });
 
+const arxivFixture = ({id='2601.01234v2', name=title, authors=['Alice Reader'], extra='', transport}={}) => {
+  const requests=[];
+  return {requests,resolver,transport:async({url})=>{
+    requests.push(url.href);
+    assert.equal(url.hostname,'export.arxiv.org');
+    assert.equal(url.pathname,'/api/query');
+    if(transport)return transport(url);
+    return response(`<feed><entry><id>http://arxiv.org/abs/${id}</id><title>${name}</title>${authors.map(author=>`<author><name>${author}</name></author>`).join('')}<published>2026-01-10T00:00:00Z</published><summary>Remote abstract</summary>${extra}</entry></feed>`);
+  }};
+};
+
+test('manual arXiv URLs enrich only missing fields on the same catalog row and never manufacture a DOI',async t=>{
+  const author=[{given:'Alice',family:'Reader'}];
+  const f=await fixture(t,{author,type:'article',abstract:'Keep manual abstract',URL:'https://manual.example/article',tags:['manual']});
+  const fetchOptions=arxivFixture({extra:'<arxiv:doi>10.1234/published-version</arxiv:doi>'});
+  const options={library:f.library,fetchOptions};
+  const result=await dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'https://arxiv.org/pdf/2601.01234v2.pdf?download=1#page=2'},options);
+  assert.equal(result.status,'saved');assert.equal(result.arxiv,'2601.01234v2');assert.equal(result.DOI,undefined);
+  const saved=await core({action:'get',id:f.item.id},options);
+  assert.equal(saved.id,f.item.id);assert.equal(saved.archive,'arXiv');assert.equal(saved.archive_location,'2601.01234v2');
+  assert.equal(saved.genre,'preprint');assert.deepEqual(saved.author,author);assert.equal(saved.DOI,undefined);
+  assert.equal(saved.title,title);assert.equal(saved.abstract,'Keep manual abstract');assert.equal(saved.URL,'https://manual.example/article');assert.deepEqual(saved.tags,['manual']);
+  assert.deepEqual(saved.issued,{'date-parts':[[2026,1,10]]});
+  assert.equal(fetchOptions.requests.length,1);assert.match(fetchOptions.requests[0],/id_list=2601.01234v2$/);
+  await dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'arXiv:2601.01234'},options);
+  assert.deepEqual(await core({action:'get',id:f.item.id},options),saved,'repeat does not rewrite or replace the pinned version');
+  assert.equal((await core({action:'list'},options)).total,1);
+});
+
+test('manual arXiv can fill absent author and canonical landing URL, without changing an existing publication type',async t=>{
+  const f=await fixture(t,{type:'paper-conference','container-title':'Manual Proceedings'}),fetchOptions=arxivFixture();
+  await dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'arxiv.org/html/2601.01234v2'}, {library:f.library,fetchOptions});
+  const saved=await core({action:'get',id:f.item.id},{library:f.library});
+  assert.deepEqual(saved.author,[{literal:'Alice Reader'}]);assert.equal(saved.URL,'https://arxiv.org/abs/2601.01234v2');
+  assert.equal(saved.type,'paper-conference');assert.equal(saved['container-title'],'Manual Proceedings');assert.equal(saved.abstract,'Remote abstract');
+});
+
+test('manual arXiv rejects bad input, dataset targets and conflicting identifiers before requesting metadata',async t=>{
+  const f=await fixture(t,{author:[{literal:'Alice Reader'}]}),fetchOptions=arxivFixture();
+  const options={library:f.library,fetchOptions};
+  for(const identifier of ['',null,42,'https://arxiv.org.evil.test/abs/2601.01234','https://arxiv.org/abs/invalid','https://example.org/article','https://arxiv.org:443/abs/2601.01234','file:///abs/2601.01234','2601.01234v0'])
+    await assert.rejects(dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier},options),/请输入有效的 DOI/);
+  await assert.rejects(dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'2601.01234',doi:'10.1234/example'},options),/一次输入一个/);
+  const dataset=await core({action:'dataset_put',expected_revision:0,metadata:{title:'Synthetic dataset'}},options);
+  await assert.rejects(dispatch({action:'catalog_doi_lookup',id:dataset.id,kind:'dataset',identifier:'2601.01234'},options),/不能保存到数据集/);
+  await core({action:'update',id:f.item.id,metadata:{archive:'arXiv',archive_location:'2601.01234v1'}},options);
+  await assert.rejects(dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'2601.01234v2'},options),/其他 arXiv 版本/);
+  await assert.rejects(dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'2601.99999'},options),/其他 arXiv 标识/);
+  assert.equal(fetchOptions.requests.length,0);
+});
+
+test('manual arXiv mismatches, unavailable records and offline failures leave the catalog unchanged',async t=>{
+  const f=await fixture(t,{author:[{literal:'Alice Reader'}]});
+  const before=await core({action:'get',id:f.item.id},{library:f.library});
+  for(const [fixture,titleMatches,authorsMatch] of [[{name:'Different paper'},false,true],[{authors:['Other Author']},true,false]]){
+    const result=await dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'2601.01234v2'},{library:f.library,fetchOptions:arxivFixture(fixture)});
+    assert.equal(result.status,'mismatch');assert.equal(result.titleMatches,titleMatches);assert.equal(result.authorsMatch,authorsMatch);
+  }
+  for(const fixture of [{id:'2601.01234v1'},{id:'2601.99999v2'},{authors:[]},{transport:async()=>response('<feed/>')},{transport:async()=>{throw Error('offline');}}])
+    await assert.rejects(dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'2601.01234v2'},{library:f.library,fetchOptions:arxivFixture(fixture)}),/尚未保存/);
+  assert.deepEqual(await core({action:'get',id:f.item.id},{library:f.library}),before);
+});
+
+test('manual arXiv uses revision checks and coalesces simultaneous normalized requests',async t=>{
+  const f=await fixture(t,{author:[{literal:'Alice Reader'}]});
+  let release,started;
+  const pending=new Promise(resolve=>release=resolve),ready=new Promise(resolve=>started=resolve);
+  const fetchOptions=arxivFixture({transport:async()=>{started();await pending;return response(`<feed><entry><id>http://arxiv.org/abs/2601.01234v2</id><title>${title}</title><author><name>Alice Reader</name></author></entry></feed>`);}});
+  const options={library:f.library,fetchOptions};
+  const first=dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'https://arxiv.org/pdf/2601.01234v2.pdf'},options);
+  await ready;
+  const second=dispatch({action:'catalog_doi_lookup',id:f.item.id,identifier:'arXiv:2601.01234v2'},options);
+  await core({action:'update',id:f.item.id,metadata:{abstract:'Concurrent manual edit'}},options);
+  const checks=[assert.rejects(first,/modified|changed|conflict/i),assert.rejects(second,/modified|changed|conflict/i)];release();await Promise.all(checks);
+  assert.equal(fetchOptions.requests.length,1);
+  const saved=await core({action:'get',id:f.item.id},options);
+  assert.equal(saved.abstract,'Concurrent manual edit');assert.equal(saved.archive_location,undefined);
+});
+
 test('metadata_lookup returns a review draft, preserves manual fields and JCR, and never changes a managed PDF or catalog item',async t=>{
   const ranking={system:'JCR',year:2025,category:'Example category',quartile:'Q2',source:'Licensed user export'};
   const f=await fixture(t,{DOI:'10.1234/metadata',title:'Manually corrected title',abstract:'Manual abstract',citekey:'keep-key',URL:'https://manual.example/article',

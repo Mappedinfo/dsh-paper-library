@@ -22,7 +22,7 @@ window.PaperWorkbench = (() => {
     item.type==='article'&&(/^preprint$/i.test(item.genre||'')||/^arxiv$/i.test(item.archive||''))?'preprint':item.type;
   const fileType = item => item.resource_kind==='slides'?'PlainDeck':item.pdf?'PDF':
     item.storage_formats?.length?item.storage_formats.slice(0,3).map(format=>/^[a-z0-9]+$/i.test(format)?format.toUpperCase():format).join(' / ')+(item.storage_formats.length>3?'…':''):'无附件';
-  const columns = [['title','标题'],['author','作者'],['year','年份'],['journal','期刊 / 出处'],['ranking','文章分区'],['citekey','引用键'],[null,'DOI'],[null,'单位'],[null,'发表 / 收稿 / 接收'],[null,'文献类型'],[null,'文件格式']];
+  const columns = [['title','标题'],['author','作者'],['year','年份'],['journal','期刊 / 出处'],['ranking','文章分区'],['citekey','引用键'],[null,'DOI / 预印本'],[null,'单位'],[null,'发表 / 收稿 / 接收'],[null,'文献类型'],[null,'文件格式']];
   function create({state,api,loadList,openPaper,selectPaper,changed,tableChanged,toast,el,resource,organization,openMetadataPanel,closeMetadataPanel,persistence,enableAutomaticDoi,openAbstract}) {
     let table = false, editing = null, revision = 0, readingId = null;
     let editorVisible=false, initialFields=null, initialRankings=null, restoring=false, selectingForEdit=false, loadingEditId=null, drafts=new Map();
@@ -228,11 +228,11 @@ window.PaperWorkbench = (() => {
     const doiKey=item=>JSON.stringify([item.id,item.modified,item.revision]);
     let doiBusy=false;
     const doiDialog=node('dialog',undefined,'paper-tag-editor');doiDialog.id='catalog-doi-dialog';
-    const doiHeading=node('header'),doiTitle=node('h2','输入 DOI');doiTitle.id='catalog-doi-title';doiDialog.setAttribute('aria-labelledby',doiTitle.id);
+    const doiHeading=node('header'),doiTitle=node('h2','输入 DOI 或预印本链接');doiTitle.id='catalog-doi-title';doiDialog.setAttribute('aria-labelledby',doiTitle.id);
     const closeDoi=button('关闭',null,()=>doiDialog.close());doiHeading.append(doiTitle,closeDoi);
     const doiIdentity=node('p',undefined,'catalog-doi-identity'),doiAuthors=node('p',undefined,'small muted');
-    const doiForm=node('form'),doiLabel=node('label','DOI 或 doi.org 链接','field'),doiInput=node('input');
-    doiInput.id='catalog-doi-input';doiInput.required=true;doiInput.maxLength=2048;doiInput.spellcheck=false;doiInput.autocapitalize='off';doiInput.placeholder='10.… 或 https://doi.org/…';doiLabel.append(doiInput);
+    const doiForm=node('form'),doiLabel=node('label','DOI 或 arXiv 预印本链接 / 编号','field'),doiInput=node('input');
+    doiInput.id='catalog-doi-input';doiInput.required=true;doiInput.maxLength=2048;doiInput.spellcheck=false;doiInput.autocapitalize='off';doiInput.placeholder='10.… 或 https://arxiv.org/abs/2601.01234';doiLabel.append(doiInput);
     const doiSubmit=node('button','核对并保存','button primary');doiSubmit.type='submit';
     const doiStatus=node('p',undefined,'small');doiStatus.id='catalog-doi-status';doiStatus.setAttribute('role','status');
     doiForm.append(doiLabel,doiSubmit,doiStatus);doiDialog.append(doiHeading,doiIdentity,doiAuthors,doiForm);document.body.append(doiDialog);
@@ -240,7 +240,7 @@ window.PaperWorkbench = (() => {
     doiDialog.addEventListener('cancel',event=>{if(verifyingDoi)event.preventDefault();});
     function enterDoi(item){
       if(!canEnterDoi(item)||verifyingDoi)return;
-      doiItem=item;doiInput.value='';doiStatus.textContent='标题和作者均匹配后保存。';
+      doiItem=item;doiInput.value='';doiStatus.textContent='核对标题和已有作者后保存；arXiv 仅补充缺失资料，不作为 DOI 保存。';
       doiIdentity.textContent=item.title;doiAuthors.textContent=(item.author||[]).map(name).join(' · ')||'当前条目缺少作者';
       if(!doiDialog.open)doiDialog.showModal();doiInput.focus();
     }
@@ -250,18 +250,24 @@ window.PaperWorkbench = (() => {
     }
     doiForm.addEventListener('submit',async event=>{
       event.preventDefault();
-      const item=doiItem,doi=doiInput.value.trim();
-      if(!item||!doi||verifyingDoi)return;
+      const item=doiItem,identifier=doiInput.value.trim();
+      if(!item||!identifier||verifyingDoi)return;
       verifyingDoi=true;doiInput.disabled=doiSubmit.disabled=closeDoi.disabled=true;doiStatus.textContent='正在核对登记标题和作者…';
       try{
-        const result=await api('catalog_doi_lookup',{id:item.id,kind:item.resource_kind,doi});
+        const result=await api('catalog_doi_lookup',{id:item.id,kind:item.resource_kind,identifier});
         if(result.status==='mismatch'){
           const fields=[!result.titleMatches?'标题':'',!result.authorsMatch?'作者':''].filter(Boolean).join('和');
           doiStatus.textContent=`登记${fields}与库内资料不一致。\n登记标题：${result.registered.title}\n登记作者：${result.registered.author.map(name).join(' · ')}`;
           return;
         }
-        if(result.status!=='saved'||!result.DOI)throw Error('未能确认此 DOI，请核对后重试。');
-        await showSavedDoi(item,result.DOI);doiDialog.close();toast(`已核对并保存 DOI：${result.DOI}`);
+        if(result.status!=='saved'||!result.DOI&&!result.arxiv)throw Error('未能确认此 DOI 或预印本，请核对后重试。');
+        if(result.arxiv){
+          for(const entry of [state.active,...state.items])if(entry?.id===item.id){
+            for(const [key,value] of Object.entries(result.metadata||{}))if(entry[key]===undefined||entry[key]===null||entry[key]===''||Array.isArray(entry[key])&&!entry[key].length)entry[key]=structuredClone(value);
+          }
+        }else for(const entry of [state.active,...state.items])if(entry?.id===item.id&&!entry.DOI)entry.DOI=result.DOI;
+        doiDialog.close();toast(result.arxiv?`已核对并保存 arXiv：${result.arxiv}`:`已核对并保存 DOI：${result.DOI}`);
+        try{await loadList();}catch(error){toast(`资料已保存，但文献列表刷新失败：${error.message}`,true);}
       }catch(error){doiStatus.textContent=error.code==='STATE_CONFLICT'?'核对期间条目资料已更新。请刷新文献列表后重新核对。':error.message;}
       finally{verifyingDoi=false;doiInput.disabled=doiSubmit.disabled=closeDoi.disabled=false;render();header();}
     });
@@ -296,7 +302,8 @@ window.PaperWorkbench = (() => {
         values.forEach((value,i)=>{const td=node('td'),text=String(value||'—');if(i===0){const b=button(value||'未命名条目',null,()=>selectPaper(item), 'table-title');b.setAttribute('aria-pressed',String(selected));b.title=b.textContent;td.append(b);}else if(i===2&&!value&&isPaper(item)&&!item.archived){const addYear=button('填年份',null,async()=>{if(await edit(item))$('edit-year').focus();},'button subtle catalog-add-year');addYear.setAttribute('aria-label',`填写年份：${item.title}`);td.append(addYear);}else if(i===6&&canEnterDoi(item)){
           const controls=node('div',undefined,'catalog-doi-actions');
           if(doiEligible(item)){const search=button(doiAttempts.get(doiKey(item))||'查找 DOI',null,()=>void findDoi(item,true));search.title='使用题名或公开标识到 DOI 注册库核对';search.disabled=doiBusy;controls.append(search);}
-          const enter=button('输入 DOI',null,()=>enterDoi(item));enter.setAttribute('aria-haspopup','dialog');controls.append(enter);td.append(controls);
+          if(/^arxiv$/i.test(item.archive||'')&&item.archive_location)controls.append(node('span',`arXiv: ${item.archive_location}`,'table-cell-text'));
+          const enter=button('输入 DOI 或预印本链接',null,()=>enterDoi(item));enter.setAttribute('aria-haspopup','dialog');controls.append(enter);td.append(controls);
         }else{const textNode=node('span',text,'table-cell-text');textNode.title=text;td.append(textNode);}row.append(td);});
         body.append(row);
         const actions=isPaper(item)?organization?.()?.actions(item):null;
