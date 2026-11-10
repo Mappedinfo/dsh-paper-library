@@ -112,16 +112,81 @@ test('translation stays beside its source and expands from the excerpt heading',
  }finally{f.dom.window.close();}
 });
 
-test('range editing requires same page, saves selection and permits cancel', {skip:!JSDOM},async()=>{
+test('range handles update the draft without writing until the user saves', {skip:!JSDOM},async()=>{
  const f=fixture(),w=f.window,d=f.document,calls=[];
  try {
-  w.annotationRangeEdit={id:'paper-a',annotationId:'root',page:1,version:'v'};w.state.selection=null;
-  w.api=async(action,args)=>calls.push({action,args});w.loadAnnotations=async()=>{};w.refreshPage=async()=>{};w.clearSelection=()=>{w.state.selection=null};
-  w.eval(source.slice(source.indexOf('const rangeEditBar='),source.indexOf('outlineUI=window.PaperOutline')));
-  const bar=d.querySelector('.annotation-range-edit'),save=[...bar.querySelectorAll('button')].find(b=>b.textContent==='保存新范围');
-  save.click();await new Promise(r=>setImmediate(r));assert.equal(calls.length,0);assert.match(f.messages.at(-1),/选择文字/);
-  w.state.selection={id:'paper-a',page:2,text:'Other',rects:[[1,2,3,4]]};save.click();await new Promise(r=>setImmediate(r));assert.equal(calls.length,0);
-  w.state.selection={id:'paper-a',page:1,text:'New source',rects:[[1,2,3,4]]};save.click();await new Promise(r=>setImmediate(r));assert.equal(calls[0].action,'annotation_reselect');assert.equal(calls[0].args.expected_version,'v');assert.equal(w.annotationRangeEdit,null);
-  w.annotationRangeEdit={id:'paper-a'};bar.querySelectorAll('button')[1].click();assert.equal(w.annotationRangeEdit,null);
+  let moveHandle, closed=0, failSave=true;
+  w.annotationRangeEdit=null;
+  w.state.annotations=[{id:'root',page:1,type:'underline',text:'Original',edit_version:'v',rects:[[1,2,3,4]]}];
+  w.pdfReader={startRangeEdit:async(note,onChange)=>{assert.equal(note.id,'root');moveHandle=onChange;return true;},endRangeEdit:()=>closed++};
+  w.switchTab=async()=>{};w.readingShell={setTool:()=>{}};
+  w.api=async(action,args)=>{calls.push({action,args});if(failSave)throw Error('Temporary error');};w.loadAnnotations=async()=>{};w.refreshPage=async()=>{};w.clearSelection=()=>{w.state.selection=null};
+  w.eval(source.slice(source.indexOf('async function handleNoteAction('),source.indexOf('function fileBase64('))
+    + source.slice(source.indexOf('const rangeEditBar='),source.indexOf('outlineUI=window.PaperOutline')));
+  w.renderAnnotations();
+  w.annotationEditor={beforeAsk:async()=>undefined};
+  const edit=d.querySelector('[data-note-action=reselect]'),bar=d.querySelector('.annotation-range-edit'),[save,cancel]=bar.querySelectorAll('button');
+  await w.handleNoteAction({target:edit});
+  assert.equal(bar.hidden,false);assert.equal(save.disabled,true);
+  moveHandle({id:'paper-a',page:2,text:'Other',rects:[[1,2,3,4]]});assert.equal(save.disabled,true);
+  moveHandle({id:'paper-a',page:1,text:'New source',rects:[[1,2,3,4]]});
+  assert.equal(save.disabled,false);assert.equal(calls.length,0);
+  save.click();await new Promise(r=>setImmediate(r));
+  assert.equal(save.disabled,false);assert.match(f.messages.at(-1),/Temporary error/);
+  failSave=false;save.click();await new Promise(r=>setImmediate(r));
+  assert.equal(calls[1].action,'annotation_reselect');assert.equal(calls[1].args.expected_version,'v');assert.equal(calls[1].args.text,'New source');assert.equal(w.annotationRangeEdit,null);
+  await w.handleNoteAction({target:edit});cancel.click();
+  assert.equal(w.annotationRangeEdit,null);assert.equal(bar.hidden,true);assert.ok(closed);assert.equal(calls.length,2);
  } finally {f.dom.window.close();}
+});
+
+test('PDF range handles extend and shrink a saved selection with pointer input', {skip:!JSDOM}, async () => {
+  const dom = new JSDOM('<div id="reader"></div>', { runScripts:'outside-only' });
+  const w = dom.window, root = w.document.getElementById('reader');
+  const rect = (left, top, right, bottom) => ({ left, top, right, bottom, width: right-left, height: bottom-top });
+  Object.defineProperties(root, { clientWidth: { value: 424 }, clientHeight: { value: 400 } });
+  w.ResizeObserver = class { observe() {} disconnect() {} };
+  w.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.matches('.pdr-word')) return rect(...JSON.parse(this.dataset.rect));
+    if (this.matches('.pdr-range-handle')) {
+      const x = parseFloat(this.style.left) * 4, y = parseFloat(this.style.top) * 4;
+      return this.matches('.pdr-range-start') ? rect(x-22,y-12,x,y+12) : rect(x,y-12,x+22,y+12);
+    }
+    return rect(0,0,400,400);
+  };
+  w.HTMLElement.prototype.setPointerCapture = function () {};
+  w.Range.prototype.getClientRects = () => [];
+  const words = [[20,40,50,50,'One'], [55,40,85,50,'Two'], [90,40,140,50,'Three']];
+  const note = { id:'root', page:1, type:'underline', text:'Two', rects:[[55,40,85,50]] };
+  const paper = { id:'paper-a', pdf:true }, changes = [];
+  w.document.caretPositionFromPoint = x => {
+    const index = x < 55 ? 0 : x < 90 ? 1 : 2;
+    const offsetNode = root.querySelectorAll('.pdf-word-text')[index].firstChild;
+    return { offsetNode, offset: x <= words[index][0] ? 0 : offsetNode.length };
+  };
+  w.eval(await readFile(new URL('../web/pdf-reader.js',import.meta.url),'utf8'));
+  const reader = w.PaperPDFReader.create({ root, getPaper:()=>paper, api:async()=>({
+    page:1, page_count:1, width:400, height:400, image:'', scale:1, words, annotations:[note],
+    layout:{ page_count:1, pages:[{ page:1, width:400, height:400 }] },
+  }) });
+  try {
+    await reader.open(paper);
+    assert.equal(await reader.startRangeEdit(note,draft=>changes.push(draft?.text)),true);
+    const [start,end] = root.querySelectorAll('.pdr-range-handle');
+    const drag = (handle, from, to) => {
+      for (const [type,clientX] of [['pointerdown',from],['pointermove',to],['pointerup',to]]) {
+        const event = new w.MouseEvent(type,{bubbles:true,clientX,clientY:45});
+        Object.defineProperty(event,'pointerId',{value:1});
+        handle.dispatchEvent(event);
+      }
+    };
+    drag(end,95,150);
+    assert.equal(changes.at(-1),'Two Three');
+    drag(start,45,8);
+    assert.equal(changes.at(-1),'One Two Three');
+    drag(end,150,95);
+    assert.equal(changes.at(-1),'One Two');
+    reader.endRangeEdit();
+    assert.equal(root.querySelector('.pdr-range-edit'),null);
+  } finally { reader.dispose(); dom.window.close(); }
 });

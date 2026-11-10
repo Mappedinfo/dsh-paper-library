@@ -8,6 +8,17 @@ vm.runInContext(readerSource, context);
 const { createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition } = context.window.PaperPDFReader;
 const plain = value => JSON.parse(JSON.stringify(value));
 const flush = () => new Promise(resolve => setImmediate(resolve));
+test('saved range endpoints preserve partial words and disambiguate repeated text by location', () => {
+  const { annotationEndpoints } = context.window.PaperPDFReader;
+  const words = [
+    { text: 'Source', rect: [10, 10, 40, 20] }, { text: 'word', rect: [42, 10, 60, 20] },
+    { text: 'Source', rect: [200, 10, 230, 20] }, { text: 'word', rect: [232, 10, 250, 20] },
+  ];
+  const quote = { text: 'ource wo', type: 'underline', rects: [[205, 10, 242, 20]] };
+  assert.deepEqual(plain(annotationEndpoints(words, quote)), { start: { index: 2, offset: 1 }, end: { index: 3, offset: 2 } });
+  assert.equal(annotationEndpoints(words, { ...quote, rects: [[100, 10, 150, 20]] }), null);
+  assert.deepEqual(plain(annotationEndpoints(words.slice(0, 2), { ...quote, type: 'note' })), { start: { index: 0, offset: 1 }, end: { index: 1, offset: 2 } });
+});
 function inputLifecycle() {
   const buffer = createInkBuffer(), paths = [], events = [], messages = [], style = { width: 2, color: '#336699' }, origin = { paperId: 'paper-a', page: 1 };
   let captured = true;
@@ -374,7 +385,7 @@ test('short pages at the bottom of a zoomed-out viewport take priority over offs
 
 test('a new page can finish during touch scrolling while replacement and pinch still wait', async () => {
   const scope = vm.createContext({
-    inkGesture: null, markupGesture: null, rectangleGesture: null, nativeGesture: null, browserPinch: null,
+    inkGesture: null, markupGesture: null, rectangleGesture: null, nativeGesture: null, rangeDrag: null, browserPinch: null,
     touchPan: { pointerId: 1 }, touchPoints: new Set([1]), inputWaiters: new Set(), scheduleRefresh() {},
   });
   const start = readerSource.indexOf('    function inputBusy(');

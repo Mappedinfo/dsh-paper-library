@@ -301,6 +301,46 @@
     const text = joinSelection(pieces);
     return { page, text, rects, wordCount: pieces.length };
   }
+  const compactText = text => text.replace(/[\s\u00ad]/gu, '');
+  function annotationEndpoints(words, { text, rects, type }) {
+    const runs = [];
+    let pageText = '';
+    for (const [index, word] of words.entries()) {
+      const compact = compactText(word.text);
+      if (!compact) continue;
+      runs.push({ index, start: pageText.length });
+      pageText += compact;
+    }
+    function locate(position, end) {
+      let low = 0, high = runs.length - 1;
+      while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        if (runs[mid].start <= position) low = mid;
+        else high = mid - 1;
+      }
+      const { index, start } = runs[low], source = words[index].text;
+      let offset = 0;
+      for (let count = position - start; offset < source.length; offset++) {
+        if (!compactText(source[offset])) continue;
+        if (!count--) break;
+      }
+      return { index, offset: offset + Number(end) };
+    }
+    const overlaps = ([x0, y0, x1, y1], [a, b, c, d]) =>
+      Math.min(x1, c) > Math.max(x0, a) && Math.min(y1, d) - Math.max(y0, b) >= (y1 - y0) / 2;
+    const quote = compactText(text || ''), firstRect = rects?.[0], lastRect = rects?.at(-1);
+    if (!quote || !firstRect) return null;
+    let first = null, anchored = null, matches = 0, anchoredCount = 0;
+    for (let at = pageText.indexOf(quote); at >= 0; at = pageText.indexOf(quote, at + 1)) {
+      const start = locate(at, false), end = locate(at + quote.length - 1, true);
+      first ??= { start, end }; matches++;
+      if (overlaps(words[start.index].rect, firstRect) && (type === 'note' || overlaps(words[end.index].rect, lastRect))) {
+        anchored = { start, end }; anchoredCount++;
+      }
+    }
+    if (anchoredCount === 1) return anchored;
+    return matches === 1 ? first : null;
+  }
   /** Serial scheduling owns page identities, never retains raster/word payloads. */
   function createPageWindow({ load, install, evict, onError = () => {}, onSettled = () => {}, maxResident = MAX_RESIDENT }) {
     let epoch = 0, id = null, wanted = [], running = null, inFlight = null, disposed = false;
@@ -372,6 +412,7 @@
     const input = createInputPolicy(onInputChange), handledTouches = new Set();
     const overlays = createInkOverlays(), inputWaiters = new Set(), dirtyPages = new Set(), refreshWaiters = new Map();
     let nativeGesture = null, nativeEndTimer = null, refreshTimer = null, focusSequence = 0, focusState = null, returnPosition = null, focusCancelled = null;
+    let rangeEdit = null, rangeDrag = null, rangeEditRequest = 0;
     let inkWidth = 2, inkGesture = null, inkFrame = null, inkEnabled = true, markupGesture = null, rectangleGesture = null, touchPan = null, policyRejected = false;
     const touchPoints = new Map();
     let pinch = null, browserPinch = null, zoomFrame = null, pendingZoom = null, touchUsedPinch = false;
@@ -387,7 +428,7 @@
     root.classList.add('paper-pdf-reader'); root.tabIndex = 0; root.setAttribute('aria-label', 'PDF 连续阅读区域');
     const strip = dom('div', 'pdr-pages'); root.replaceChildren(strip);
     function inputBusy(page, allowPan = false) {
-      const editing = [inkGesture, markupGesture, rectangleGesture, nativeGesture].some(gesture => gesture && (!page || Number(gesture.sheet.dataset.pdfPage) === page));
+      const editing = [inkGesture, markupGesture, rectangleGesture, nativeGesture, rangeDrag].some(gesture => gesture && (!page || Number(gesture.sheet.dataset.pdfPage) === page));
       const touching = !!touchPan || touchPoints.size > 0;
       return editing || !!browserPinch || (touching && !(allowPan && touchPan));
     }
@@ -563,7 +604,7 @@
       queueZoom(browserPinch.zoom * scale / browserPinch.scale, browserPinch.anchor, { x: Number.isFinite(event.clientX) ? event.clientX : box.left + root.clientWidth / 2, y: Number.isFinite(event.clientY) ? event.clientY : box.top + root.clientHeight / 2 });
     }
     function gestureEnd(event) { if (pages.length) event.preventDefault(); flushZoom(); browserPinch = null; inputEnded(); }
-    function textCaret(sheet, x, y, nearStart = false) {
+    function textCaret(sheet, x, y, nearStart = false, wordsOnly = false) {
       const read = (left, top) => {
         let node, offset;
         try {
@@ -572,7 +613,8 @@
           else { const range = document.caretRangeFromPoint?.(left, top); node = range?.startContainer; offset = range?.startOffset; }
         } catch { return null; }
         const element = node?.nodeType === 3 ? node.parentElement : node;
-        return node?.nodeType === 3 && element?.closest?.('.pdr-word,.pdf-word-gap') && sheet.contains(node) ? { node, offset } : null;
+        const selector = wordsOnly ? '.pdr-word' : '.pdr-word,.pdf-word-gap';
+        return node?.nodeType === 3 && element?.closest?.(selector) && sheet.contains(node) ? { node, offset } : null;
       };
       const exact = read(x, y); if (exact) return exact;
       const words = [...sheet.querySelectorAll('.pdr-word')], boxes = words.map(word => word.getBoundingClientRect());
@@ -738,6 +780,10 @@
       const slot = slots[page - 1]; if (!slot) return;
       if (markupGesture?.sheet === slot.sheet) endMarkup(true);
       if (rectangleGesture?.sheet === slot.sheet) endRectangle(true);
+      if (rangeEdit?.page === page) {
+        endRangeDrag();
+        Object.assign(rangeEdit, { layer: null, spans: null, handles: null, previewLayer: null });
+      }
       renderedScales.delete(page); pageAnnotations.delete(page); pageLinks.delete(page);
       overlays.forget(paperId, page);
       for (const image of slot.sheet.querySelectorAll('img')) image.removeAttribute('src');
@@ -916,6 +962,7 @@
         pageAnnotations.set(page, (result.annotations || []).filter(annotation => annotation && typeof annotation.id === 'string' && Array.isArray(annotation.rects) && annotation.rects.some(rect => Array.isArray(rect) && rect.length >= 4)));
         const rasterIds = (result.annotations || []).map(annotation => annotation?.id).filter(value => typeof value === 'string'), retired = overlays.forPage(id, page).filter(batch => rasterIds.includes(batch.annotation_id));
         overlays.confirm(id, page, rasterIds); paintOverlays(page); paintFocus();
+        if (rangeEdit?.page === page) paintRangeEdit();
         traceInk('page_install', { paperId: id, page, count: rasterIds.length });
         for (const batch of retired) traceInk('overlay_retire', { paperId: id, page, annotationId: batch.annotation_id, reason: 'raster_confirmed' });
         renderedScales.set(page, Number.isFinite(result.scale) && result.scale > 0 ? result.scale : job.requestedScale);
@@ -932,7 +979,7 @@
       const row = pageAt(metrics, root.scrollTop + root.clientHeight * .35);
       const next = layout === 'spread' && metrics[active - 1]?.rowStart === row ? active : row;
       if (next !== active) { active = next; announce(); }
-      const busyPage = Number((inkGesture || markupGesture || rectangleGesture || nativeGesture)?.sheet.dataset.pdfPage);
+      const busyPage = Number((inkGesture || markupGesture || rectangleGesture || nativeGesture || rangeDrag)?.sheet.dataset.pdfPage);
       const wanted = wantedPages(priority || jumpTarget);
       queue.want(busyPage ? [busyPage, ...wanted] : wanted);
       inputEnded();
@@ -967,7 +1014,7 @@
     function clear() {
       // The draft belongs to its original paper/page, not to the disposable
       // raster window. The caller offers save/discard before leaving the page.
-      endInk(false, 'reader_clear'); endMarkup(true); endRectangle(true); resetTouchZoom(); nativeGesture = null; cancelNavigation(); returnPosition = null; overlays.clearRasters();
+      endInk(false, 'reader_clear'); endMarkup(true); endRectangle(true); endRangeEdit(); resetTouchZoom(); nativeGesture = null; cancelNavigation(); returnPosition = null; overlays.clearRasters();
       ++generation; paperId = null; jumpTarget = null; selection = null; lastSelection = ''; queue.reset(null); renderedScales.clear(); rasterCaps.clear(); pageAnnotations.clear(); pageLinks.clear(); pages = []; metrics = []; slots = []; active = 1; layoutWidth = 0; layoutPromise = null; initialPage = null; strip.replaceChildren(); root.scrollTop = 0; root.setAttribute('aria-busy', 'false');
       if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; } if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
       if (resizeTimer !== null) { window.clearTimeout(resizeTimer); resizeTimer = null; }
@@ -1049,8 +1096,158 @@
         return slice;
       } catch { return null; }
     }
+    function readRange(range, sheet, spans, page) {
+      const geometry = pages[page - 1], box = sheet?.getBoundingClientRect();
+      if (!geometry || !box?.width || !box?.height) return null;
+      const entries = [], scaleX = geometry.width / box.width, scaleY = geometry.height / box.height;
+      for (const span of spans) {
+        if (!range.intersectsNode(span)) continue;
+        const slice = sliceOf(range, span), text = slice?.toString();
+        if (!text?.trim()) continue;
+        const word = span.getBoundingClientRect();
+        const parts = typeof slice.getClientRects === 'function'
+          ? [...slice.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0).map(rect => [rect.left, rect.right])
+          : [];
+        entries.push({ box: [word.left, word.top, word.right, word.bottom], parts, text });
+      }
+      const selected = clipWords(entries).map(([left, top, right, bottom, text]) => [(left - box.left) * scaleX, (top - box.top) * scaleY, (right - box.left) * scaleX, (bottom - box.top) * scaleY, text]);
+      const result = mergeSelection(selected, page);
+      return result.rects.length && result.text.trim() ? result : null;
+    }
+    const sameEndpoint = (a, b) => a.index === b.index && a.offset === b.offset;
+    function rangePreview(sheet, spans, { start, end }, page) {
+      if (start.index > end.index || start.index === end.index && start.offset >= end.offset) return null;
+      const first = spans[start.index]?.firstChild?.firstChild, last = spans[end.index]?.firstChild?.firstChild;
+      if (!first || !last || start.offset > first.length || end.offset > last.length) return null;
+      const range = document.createRange();
+      range.setStart(first, start.offset);
+      range.setEnd(last, end.offset);
+      return readRange(range, sheet, spans.slice(start.index, end.index + 1), page);
+    }
+    function endRangeDrag(cancelled = false) {
+      if (!rangeDrag) return;
+      const { handle, pointerId, edge, original } = rangeDrag;
+      rangeDrag = null;
+      delete handle.dataset.dragging;
+      if (handle.hasPointerCapture?.(pointerId)) handle.releasePointerCapture(pointerId);
+      if (cancelled && rangeEdit) moveRangeEndpoint(edge, original);
+      inputEnded();
+    }
+    function endRangeEdit() {
+      rangeEditRequest++;
+      rangeEdit?.layer?.remove();
+      rangeEdit = null;
+      endRangeDrag();
+    }
+    function lockRangeEdit(locked) {
+      if (!rangeEdit) return;
+      if (locked) endRangeDrag();
+      rangeEdit.locked = locked;
+      for (const handle of Object.values(rangeEdit.handles || {})) handle.disabled = locked;
+    }
+    function moveRangeEndpoint(edge, point) {
+      const edit = rangeEdit, sheet = slots[edit.page - 1].sheet;
+      if (edit.locked || sameEndpoint(edit[edge], point)) return;
+      const endpoints = { start: edit.start, end: edit.end, [edge]: point };
+      try {
+        const preview = rangePreview(sheet, edit.spans, endpoints, edit.page);
+        if (!preview) return;
+        Object.assign(edit, endpoints, { preview });
+        paintRangeEdit();
+        const changed = !sameEndpoint(edit.start, edit.initial.start) || !sameEndpoint(edit.end, edit.initial.end);
+        edit.onChange(changed ? { ...preview, id: paperId } : null);
+      } catch (error) { onStatus(error.message, true); }
+    }
+    function paintRangeEdit() {
+      const edit = rangeEdit, sheet = slots[edit.page - 1]?.sheet, geometry = pages[edit.page - 1];
+      if (!sheet || !geometry) return;
+      if (!edit.layer || !sheet.contains(edit.layer)) {
+        edit.spans = [...sheet.querySelectorAll('.pdr-word')];
+        edit.layer = dom('div', 'pdr-range-edit');
+        edit.previewLayer = dom('div', 'pdr-range-preview');
+        edit.previewLayer.setAttribute('aria-hidden', 'true');
+        edit.layer.append(edit.previewLayer);
+        edit.handles = {};
+        for (const [edge, label] of [['start', '拖动起点'], ['end', '拖动终点']]) {
+          const handle = dom('button', `pdr-range-handle pdr-range-${edge}`);
+          handle.type = 'button';
+          handle.disabled = Boolean(edit.locked);
+          handle.setAttribute('aria-label', label);
+          handle.title = `${label}，也可用左右方向键调整`;
+          handle.addEventListener('pointerdown', event => {
+            if (event.button !== 0 || rangeDrag) return;
+            event.preventDefault(); event.stopPropagation();
+            const box = handle.getBoundingClientRect();
+            try { handle.setPointerCapture(event.pointerId); } catch { return; }
+            rangeDrag = { handle, sheet, edge, pointerId: event.pointerId, original: edit[edge],
+              x: event.clientX, y: event.clientY, moved: false,
+              dx: event.clientX - (edge === 'start' ? box.right : box.left), dy: event.clientY - box.top - box.height / 2 };
+            handle.dataset.dragging = 'true';
+          });
+          const drag = event => {
+            if (rangeDrag?.pointerId !== event.pointerId) return;
+            event.stopPropagation();
+            if (!rangeDrag.moved && Math.hypot(event.clientX - rangeDrag.x, event.clientY - rangeDrag.y) < 2) return;
+            rangeDrag.moved = true;
+            const x = event.clientX - rangeDrag.dx, y = event.clientY - rangeDrag.dy, box = sheet.getBoundingClientRect();
+            if (x < box.left || x > box.right || y < box.top || y > box.bottom) return;
+            const caret = textCaret(sheet, x, y, false, true);
+            const index = edit.spans.indexOf(caret?.node.parentElement.closest('.pdr-word'));
+            if (index >= 0) moveRangeEndpoint(edge, { index, offset: caret.offset });
+          };
+          handle.addEventListener('pointermove', drag);
+          handle.addEventListener('pointerup', event => {
+            if (rangeDrag?.pointerId !== event.pointerId) return;
+            drag(event); endRangeDrag();
+          });
+          for (const name of ['pointercancel', 'lostpointercapture']) handle.addEventListener(name, event => {
+            if (rangeDrag?.pointerId === event.pointerId) endRangeDrag(true);
+          });
+          handle.addEventListener('keydown', event => {
+            const direction = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
+            if (!direction) return;
+            event.preventDefault(); event.stopPropagation();
+            let { index, offset } = edit[edge];
+            const length = edit.spans[index].textContent.length;
+            if (direction < 0 && offset === 0 && index > 0) offset = edit.spans[--index].textContent.length;
+            else if (direction > 0 && offset === length && index + 1 < edit.spans.length) { index++; offset = 0; }
+            else offset = Math.max(0, Math.min(length, offset + direction));
+            moveRangeEndpoint(edge, { index, offset });
+          });
+          edit.handles[edge] = handle;
+          edit.layer.append(handle);
+        }
+        sheet.append(edit.layer);
+      }
+      const { rects } = edit.preview, percent = (n, size) => `${n / size * 100}%`;
+      edit.previewLayer.replaceChildren(...rects.map(([x, y, right, bottom]) => {
+        const mark = dom('div', 'pdr-range-mark');
+        Object.assign(mark.style, { left: percent(x, geometry.width), top: percent(y, geometry.height),
+          width: percent(right - x, geometry.width), height: percent(bottom - y, geometry.height) });
+        return mark;
+      }));
+      for (const [edge, rect] of [['start', rects[0]], ['end', rects.at(-1)]]) {
+        const handle = edit.handles[edge];
+        handle.style.left = percent(rect[edge === 'start' ? 0 : 2], geometry.width);
+        handle.style.top = percent((rect[1] + rect[3]) / 2, geometry.height);
+      }
+    }
+    async function startRangeEdit(note, onChange) {
+      endRangeEdit();
+      const id = paperId, ticket = generation, page = note.page, request = rangeEditRequest;
+      if (!await revealAnnotation(note.id, { page }) || !current(id, ticket) || request !== rangeEditRequest) return false;
+      const sheet = slots[page - 1].sheet, spans = [...sheet.querySelectorAll('.pdr-word')];
+      const endpoints = annotationEndpoints(spans.map(span => ({ text: span.textContent, rect: JSON.parse(span.dataset.rect) })), note);
+      if (!endpoints) return false;
+      const preview = rangePreview(sheet, spans, endpoints, page);
+      if (!preview) return false;
+      rangeEdit = { page, ...endpoints, initial: endpoints, onChange, preview };
+      scrollRegionIntoView(page, preview.rects);
+      paintRangeEdit();
+      return true;
+    }
     function captureSelection() {
-      if (tool === 'note' || tool === 'ink' || tool === 'square' || markupGesture || !paperId) return;
+      if (rangeEdit || tool === 'note' || tool === 'ink' || tool === 'square' || markupGesture || !paperId) return;
       const live = window.getSelection();
       // A drag can end over a non-text area (past the last word of a line, a
       // caption, the page margin): Chrome then resolves the caret to the layer
@@ -1067,29 +1264,9 @@
         return;
       }
       if (anchor !== focus) { selection = null; lastSelection = ''; onSelection(null, { intent: tool, color }); onStatus('选文跨越了多个 PDF 页面，请分别选择并保存每一页的批注。', true); return; }
-      const page = Number(anchor.dataset.pdfPage), geometry = pages[page - 1], sheet = anchor.closest?.('.pdr-sheet');
-      const range = value.getRangeAt(0), box = sheet?.getBoundingClientRect();
-      if (!geometry || !box?.width || !box?.height) return;
-      // Client rects describe what the reader actually dragged over, including a
-      // partial word; each overlapped word box is clipped to that coverage.
-      const entries = [], scaleX = geometry.width / box.width, scaleY = geometry.height / box.height;
-      for (const span of anchor.children) {
-        if (!value.containsNode(span, true)) continue;
-        const word = span.getBoundingClientRect();
-        // The slice is the exact selected part of this word; its own client
-        // rectangles describe where those characters are, in any page layout.
-        const slice = sliceOf(range, span);
-        const text = slice ? slice.toString() : span.textContent;
-        if (!text || !text.trim()) continue;
-        const parts = slice && typeof slice.getClientRects === 'function'
-          ? [...slice.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0).map(rect => [rect.left, rect.right])
-          : [];
-        entries.push({ box: [word.left, word.top, word.right, word.bottom], parts, text });
-      }
-      const selected = clipWords(entries).map(([left, top, right, bottom, text]) => [(left - box.left) * scaleX, (top - box.top) * scaleY, (right - box.left) * scaleX, (bottom - box.top) * scaleY, text]);
-      if (!selected.length) return;
+      const page = Number(anchor.dataset.pdfPage), sheet = anchor.closest?.('.pdr-sheet');
       try {
-        const result = mergeSelection(selected, page); if (!result.rects.length || !result.text.trim()) return;
+        const result = readRange(value.getRangeAt(0), sheet, anchor.children, page); if (!result) return;
         const digest = JSON.stringify([result.page, result.text, result.rects]); if (digest === lastSelection) return;
         lastSelection = digest; selection = { id: paperId, ...result }; onSelection(selection, { intent: tool, color });
       } catch (error) { selection = null; lastSelection = ''; onSelection(null, { intent: tool, color }); onStatus(error.message, true); }
@@ -1140,6 +1317,14 @@
       const row = pageAt(metrics, root.scrollTop), page = layout === 'spread' && metrics[active - 1]?.rowStart === row ? active : row, metric = metrics[page - 1];
       return metric ? { paperId, page, fraction: (root.scrollTop - metric.top) / metric.height, horizontal: root.scrollLeft / layoutWidth, zoom, layout, scrollTop: root.scrollTop, scrollLeft: root.scrollLeft, viewportWidth: root.clientWidth, viewportHeight: root.clientHeight } : null;
     }
+    function scrollRegionIntoView(page, rects) {
+      const geometry = pages[page - 1], sheet = slots[page - 1].sheet.getBoundingClientRect(), viewport = root.getBoundingClientRect();
+      const left = root.scrollLeft + sheet.left - viewport.left - (root.clientLeft || 0), top = root.scrollTop + sheet.top - viewport.top - (root.clientTop || 0);
+      const x0 = left + Math.min(...rects.map(rect => rect[0])) / geometry.width * sheet.width, x1 = left + Math.max(...rects.map(rect => rect[2])) / geometry.width * sheet.width;
+      const y0 = top + Math.min(...rects.map(rect => rect[1])) / geometry.height * sheet.height, y1 = top + Math.max(...rects.map(rect => rect[3])) / geometry.height * sheet.height;
+      root.scrollLeft = minimumScroll(x0, x1, root.scrollLeft, root.clientWidth);
+      root.scrollTop = minimumScroll(y0, y1, root.scrollTop, root.clientHeight);
+    }
     async function focusRegion(value, annotationId) {
       if (disposed || value?.paperId !== paperId || !Number.isInteger(value.page) || !pages[value.page - 1]) return false;
       const { page } = value, id = paperId, ticket = generation;
@@ -1162,11 +1347,7 @@
         const annotation = annotationId ? (pageAnnotations.get(page) || []).find(item => item.id === annotationId) : null;
         const geometry = pages[page - 1], rects = regionRects(annotationId ? annotation?.rects : value.rects, geometry, value.kind === 'ink' ? 3 : 1);
         if (!rects.length) return false;
-        const sheet = slots[page - 1].sheet.getBoundingClientRect(), viewport = root.getBoundingClientRect();
-        const left = root.scrollLeft + sheet.left - viewport.left - (root.clientLeft || 0), top = root.scrollTop + sheet.top - viewport.top - (root.clientTop || 0);
-        const x0 = left + Math.min(...rects.map(rect => rect[0])) / geometry.width * sheet.width, x1 = left + Math.max(...rects.map(rect => rect[2])) / geometry.width * sheet.width;
-        const y0 = top + Math.min(...rects.map(rect => rect[1])) / geometry.height * sheet.height, y1 = top + Math.max(...rects.map(rect => rect[3])) / geometry.height * sheet.height;
-        root.scrollLeft = minimumScroll(x0, x1, root.scrollLeft, root.clientWidth); root.scrollTop = minimumScroll(y0, y1, root.scrollTop, root.clientHeight);
+        scrollRegionIntoView(page, rects);
         active = page; announce();
         focusState = { ...focusState, rects, tint: annotationTint(annotation, 1), loading: false, expires: Date.now() + 1800 }; paintFocus(); emitFocus();
         flashTimer = window.setTimeout(() => { flashTimer = null; if (valid()) { focusState = null; clearFocus(); emitFocus(); } }, 1800);
@@ -1347,7 +1528,7 @@
     root.addEventListener('gesturestart', gestureStart, { passive: false }); root.addEventListener('gesturechange', gestureChange, { passive: false }); root.addEventListener('gestureend', gestureEnd, { passive: false });
     document.addEventListener('selectionchange', selectionChanged); document.addEventListener('pointerup', nativePointerEnded); document.addEventListener('pointercancel', nativePointerEnded);
     function dispose() { clear(); disposed = true; ink.clear(); overlays.clear(); queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('pointerdown', pointerDown); root.removeEventListener('pointermove', pointerMove); root.removeEventListener('pointercancel', pointerCancel); root.removeEventListener('lostpointercapture', pointerCancel); root.removeEventListener('pointerleave', pointerLeave); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); root.removeEventListener('wheel', wheel); root.removeEventListener('gesturestart', gestureStart); root.removeEventListener('gesturechange', gestureChange); root.removeEventListener('gestureend', gestureEnd); root.removeEventListener('keydown', userNavigate); document.removeEventListener('selectionchange', selectionChanged); document.removeEventListener('pointerup', nativePointerEnded); document.removeEventListener('pointercancel', nativePointerEnded); }
-    return { open, goTo, advance, refresh, clear, dispose, setTool, setZoom, fitToWidth, fitPage, getZoom: () => zoom, setLayout, getLayout: () => layout, setReadingAppearance, getReadingAppearance: () => ({ ...readingAppearance }), resize, revealAnnotation, revealRegion, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, layout, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
+    return { open, goTo, advance, refresh, clear, dispose, setTool, setZoom, fitToWidth, fitPage, getZoom: () => zoom, setLayout, getLayout: () => layout, setReadingAppearance, getReadingAppearance: () => ({ ...readingAppearance }), resize, revealAnnotation, revealRegion, startRangeEdit, endRangeEdit, lockRangeEdit, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, layout, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
-  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition, normalizeInternalLinks, internalLinkAt, bionicPrefix });
+  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, annotationEndpoints, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition, normalizeInternalLinks, internalLinkAt, bionicPrefix });
 })();

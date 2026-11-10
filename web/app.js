@@ -191,6 +191,7 @@ function renderWelcome() {
   document.querySelector('.welcome > p:not(.eyebrow)').textContent = state.libraryCount ? '从文献库选择一篇论文，标记值得追问的段落，再把文献之间的联系串起来。' : '导入论文，标记值得追问的段落，再把文献之间的联系串起来。';
 }
 function clearPage() {
+  if (annotationRangeEdit) closeRangeEdit();
   pdfReader?.clear();
   state.pageData = null; $('page-image').removeAttribute('src'); $('word-layer').replaceChildren(); $('pdf-page').hidden = true;
   clearSelection();
@@ -761,8 +762,29 @@ async function handleNoteAction(event) {
   if (action === 'copy-source') { if (typeof note.text === 'string' && note.text.trim()) await copyText(note.text, { label: '批注原文' }); return; }
   if (action === 'discuss') { await paperChatUI?.useAnnotation(note); if (state.active?.id) renderAnnotations(); return; }
   if (action === 'reselect') {
-    const id=state.active?.id;
-    try{const saved=await annotationEditor?.beforeAsk(id,note.id);if(state.active?.id!==id)return;const current=state.annotations.find(n=>n.id===note.id)||note;annotationRangeEdit={id,annotationId:note.id,page:note.page,version:saved||current.edit_version};clearSelection();await switchTab('reader');readingShell?.setTool('select');await pdfReader?.revealAnnotation(note.id,{page:note.page});rangeEditBar.hidden=false;toast('请在本页重新选择原文，再点「保存新范围」。已有译文和回复请重新核对。');}catch(error){toast(error.message,true);}return;
+    if (annotationRangeEdit?.saving) return;
+    closeRangeEdit();
+    const id = state.active.id, edit = { id, annotationId: note.id, page: note.page };
+    annotationRangeEdit = edit;
+    try {
+      const saved = await annotationEditor?.beforeAsk(id, note.id);
+      if (annotationRangeEdit !== edit || state.active?.id !== id) return;
+      const current = state.annotations.find(item => item.id === note.id) || note;
+      edit.version = saved || current.edit_version;
+      await switchTab('reader');
+      if (annotationRangeEdit !== edit || state.active?.id !== id) return;
+      readingShell?.setTool('select');
+      const handles = await pdfReader?.startRangeEdit(current, draft => {
+        if (annotationRangeEdit === edit) setRangeDraft(draft);
+      });
+      if (annotationRangeEdit !== edit) return;
+      edit.manual = !handles;
+      rangeEditLabel.textContent = handles ? '拖动 PDF 上的起点或终点' : '无法定位旧选区，请在原页重新选字';
+      rangeEditBar.hidden = false;
+    } catch (error) {
+      if (annotationRangeEdit === edit) { closeRangeEdit(); toast(error.message, true); }
+    }
+    return;
   }
   if (action === 'page') { await switchTab('reader'); await pdfReader?.revealAnnotation(note.id,{page:note.page});return; }
   if (action === 'linked-ink') { await linkedHandwritingUI?.reveal(note,button.dataset.regionId);return; }
@@ -1555,16 +1577,19 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onInkTrace:info=>inkDiagnostics?.record(info),
   onActivePage: (page,info) => {
     if(info.paperId!==state.active?.id)return;
-    if(annotationRangeEdit&&annotationRangeEdit.id!==info.paperId){annotationRangeEdit=null;rangeEditBar.hidden=true;}
+    if (annotationRangeEdit && annotationRangeEdit.id !== info.paperId) closeRangeEdit();
     state.page=page;outlineUI?.setPage(page);state.pageCount=info.pageCount;state.pageData={width:info.width,height:info.height};
     $('page-number').value=page;$('page-number').max=info.pageCount;$('page-total').textContent=`/ ${info.pageCount}`;publishReaderState();
   },
   onSelection: (selection,intent) => {
+    const edit = annotationRangeEdit;
+    if (edit && edit.id === state.active?.id) {
+      if (edit.manual) setRangeDraft(selection);
+      return;
+    }
     if(!selection){showReaderSelection(null);return;}
     if(selection?.id!==state.active?.id)return;
-    if(annotationRangeEdit&&selection.id!==annotationRangeEdit.id){annotationRangeEdit=null;rangeEditBar.hidden=true;}
     showReaderSelection(selection);
-    if(annotationRangeEdit){if(selection.id!==annotationRangeEdit.id||selection.page!==annotationRangeEdit.page)toast('请在原批注所在页重新选择文字。',true);return;}
     if(readingShell?.mode()==='auto'){void autoMarkup(selection,intent);return;}
     if(['highlight','underline','strikeout'].includes(intent.intent))openAnnotation(intent.intent,null,{selection,color:intent.color});
   },
@@ -1578,14 +1603,52 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
 });
 readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,locateAnnotations:locateCurrentPageAnnotations,contextChanged:()=>{readerSearchUI?.sync();resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
 const rangeEditBar=el('span','annotation-range-edit');rangeEditBar.hidden=true;
-const rangeEditLabel=el('span','','调整原文：在原页选择文字'),rangeEditSave=el('button','button subtle','保存新范围'),rangeEditCancel=el('button','button subtle','取消');rangeEditSave.type=rangeEditCancel.type='button';rangeEditBar.append(rangeEditLabel,rangeEditSave,rangeEditCancel);$('paper-tools').append(rangeEditBar);
-rangeEditCancel.addEventListener('click',()=>{annotationRangeEdit=null;rangeEditBar.hidden=true;clearSelection();});
-rangeEditSave.addEventListener('click',async()=>{
-  const edit=annotationRangeEdit,selection=state.selection;if(!edit||state.active?.id!==edit.id){annotationRangeEdit=null;rangeEditBar.hidden=true;return;}
-  if(!selection||selection.id!==edit.id||selection.page!==edit.page||!selection.text?.trim()){toast('请先在原批注所在页选择文字。',true);return;}
-  rangeEditSave.disabled=true;
-  try{await api('annotation_reselect',{id:edit.id,annotation_id:edit.annotationId,page:edit.page,rects:selection.rects,text:selection.text,expected_version:edit.version});annotationRangeEdit=null;rangeEditBar.hidden=true;clearSelection();if(state.active?.id===edit.id){await loadAnnotations(edit.id);await refreshPage(edit.page);}toast('原文范围已更新；已有译文和回复请重新核对。');}
-  catch(error){toast(`原文范围未更新：${error.message}`,true);}finally{rangeEditSave.disabled=false;}
+const rangeEditLabel = el('span'), rangeEditSave = el('button','button subtle','保存新范围'), rangeEditCancel = el('button','button subtle','取消');
+rangeEditSave.type = rangeEditCancel.type = 'button';
+rangeEditSave.disabled = true;
+rangeEditBar.append(rangeEditLabel, rangeEditSave, rangeEditCancel);
+$('paper-tools').append(rangeEditBar);
+function closeRangeEdit() {
+  annotationRangeEdit = null;
+  pdfReader?.endRangeEdit();
+  rangeEditBar.hidden = true;
+  rangeEditSave.disabled = true;
+  rangeEditCancel.disabled = false;
+  clearSelection();
+}
+function setRangeDraft(selection) {
+  const edit = annotationRangeEdit;
+  if (edit.saving) return;
+  edit.draft = selection?.id === edit.id && selection.page === edit.page && selection.text.trim() ? selection : null;
+  rangeEditSave.disabled = edit.saving || !edit.draft;
+}
+rangeEditCancel.addEventListener('click', closeRangeEdit);
+rangeEditSave.addEventListener('click', async () => {
+  const edit = annotationRangeEdit, draft = edit?.draft;
+  if (!draft || edit.saving || state.active?.id !== edit.id) return;
+  edit.saving = rangeEditSave.disabled = rangeEditCancel.disabled = true;
+  pdfReader?.lockRangeEdit?.(true);
+  try {
+    await api('annotation_reselect', { id: edit.id, annotation_id: edit.annotationId, page: edit.page,
+      rects: draft.rects, text: draft.text, expected_version: edit.version });
+  } catch (error) {
+    if (annotationRangeEdit === edit) {
+      edit.saving = rangeEditCancel.disabled = false;
+      rangeEditSave.disabled = !edit.draft;
+      pdfReader?.lockRangeEdit?.(false);
+      toast(`原文范围未更新：${error.message}`, true);
+    }
+    return;
+  }
+  if (annotationRangeEdit === edit) closeRangeEdit();
+  if (state.active?.id === edit.id) {
+    toast('原文范围已更新。已有译文和回复请重新核对。');
+    await loadAnnotations(edit.id);
+    if (state.active?.id === edit.id) {
+      try { await refreshPage(edit.page); }
+      catch (error) { toast(`原文范围已保存，页面显示待更新：${error.message}`, true); }
+    }
+  }
 });
 outlineUI=window.PaperOutline?.create({api,panels:readingPanels,getPaper:()=>state.active,getPage:()=>state.page,navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');await pdfReader?.revealRegion({...source,rects:source.rects?.length?source.rects:[[0,0,2,2]]});}});
 documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPanels,getPaper:()=>state.active,toast,sharedSearch:Boolean(window.PaperReaderSearch),
