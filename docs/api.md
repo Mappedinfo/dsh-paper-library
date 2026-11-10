@@ -667,3 +667,10 @@ scan/list 的 `usage` 提供当前生效的派生索引预算。均衡档每页 
 `paper_text_find` 是阅读界面的只读操作：`id, query, page?, offset?, limit?, expected_version?`。`query` 为 1–200 字符；每次只读取一个物理页，`page` 默认 1，`offset` 默认 0，`limit` 默认 40、最多 100。返回 `page_count, source_version, matches:[{page,rects}], page_matches, next_offset, next_page, no_extractable_text`；矩形已转换到页面显示旋转坐标。存在 `next_offset` 时先续取本页，否则用 `next_page`。沿用 15 秒 worker 超时，不渲染图片、不写 PDF、不建索引、不调用模型或 OCR。
 
 前端逐页串行搜索，每批保留最多 200 个定位区域，达到上限后显式继续；停止、关闭或切换文献后忽略迟到返回，不发起下一页。多行短语可能返回多个定位区域，计数表示位置而非独立语义出现次数。
+
+
+## 领域研究文献表
+
+`field_radar_table` 只读返回七列表格、HTML／TSV 剪贴板数据、逐格来源、覆盖和缺失说明。`field_radar_table_export` 保存本机 HTML／TSV／CSV／Markdown 和证据 JSON，HTTP 返回受控同源下载 URL，不返回任意路径。参数：`{id,expected_revision?,analysis_request_id?,filters?:{query?,task?,year?},offset?:0,limit?:1..100}`；导出另有 `format`，默认 html。原生工具为 `library_field_radar_table` / `library_field_radar_table_export`。
+
+选用的 AI 草稿必须已完成且属于同主题、同版本，保留 needs_review。整理和导出不调用模型或读取 PDF。逐格 schema、OD 判定及 CLI 见 [Field Radar](field-radar.md#文献对照表复制到-slides-与本机导出)。

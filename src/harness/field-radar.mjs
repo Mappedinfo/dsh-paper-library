@@ -1,3 +1,4 @@
+import { validatePaperComparison } from './field-radar-table.mjs'
 import { createRelationsStore } from './field-radar-relations.mjs'
 /** Explicit, bounded research imports. No model, remote fetch, PDF access or author-name merging. */
 import { createHash } from 'node:crypto'
@@ -31,7 +32,7 @@ export function validateFieldRadarDocument(input) {
   }
   const refs = row => { if (!row || typeof row !== 'object' || !Array.isArray(row.source_ids) || row.source_ids.some(value => !collections.sources.has(value))) throw fail('source_ids 缺失或引用不存在的来源。') }
   for (const source of doc.sources) { string(source.title, '来源标题', 2000); string(source.url, '来源网址', 10000); safeURL(source.url); if (source.accessed_at != null && (typeof source.accessed_at !== 'string' || !/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(source.accessed_at) || !Number.isFinite(Date.parse(source.accessed_at)) || new Date(source.accessed_at.slice(0, 10)).toISOString().slice(0, 10) !== source.accessed_at.slice(0, 10))) throw fail('来源访问日期无效；未知日期请留空。') }
-  for (const paper of doc.papers) { string(paper.title, '论文标题', 2000); refs(paper); if (paper.year != null && (!Number.isInteger(paper.year) || paper.year < 1000 || paper.year > 9999)) throw fail('论文年份无效；未知年份请留空。') }
+  for (const paper of doc.papers) { string(paper.title, '论文标题', 2000); refs(paper); if(paper.comparison!==undefined)paper.comparison=validatePaperComparison(paper.comparison,doc); if (paper.year != null && (!Number.isInteger(paper.year) || paper.year < 1000 || paper.year > 9999)) throw fail('论文年份无效；未知年份请留空。') }
   for (const scholar of doc.scholars) { string(scholar.name, '学者姓名', 500); refs(scholar); if (!Array.isArray(scholar.contributions) || scholar.contributions.length > 500) throw fail('学者贡献条目无效。'); for (const row of scholar.contributions) { refs(row); if (row.paper_id != null && !collections.papers.has(row.paper_id)) throw fail('学者贡献引用不存在的论文。') } }
   for (const claim of doc.claims) { string(claim.text, '论断'); refs(claim) }
   const queue = [{ value: doc, depth: 0 }]; let count = 0

@@ -144,3 +144,46 @@ PLAYWRIGHT_MODULE=/absolute/playwright/index.mjs node scripts/field-radar-relati
 ```
 
 只用合成样本执行安全、计量、存储与浏览器回归。不使用用户当前窗口。源码修改与已运行宿主/已打开页面是否加载新版是不同状态，测试不重载宿主或刷新用户页面。
+
+
+## 文献对照表：复制到 Slides 与本机导出
+
+「领域研究 → 文献对照表」从当前保存主题、关键词／任务／年份筛选整理七列：**研究组、论文简称、具体解决／生成什么、数据集与开放性、方法、年份、推理无需目标区域历史 OD？**。每页 20 篇。点「整理当前页」查看，点「复制到 Slides」复制 HTML 表格与 TSV 两种剪贴板格式；HTML、TSV、CSV、Markdown 可分别导出本页。切换主题、筛选、页码或草稿后旧结果失效，需重新整理。富文本粘贴效果取决于目标软件，若只接受纯文本，可用 TSV 经电子表格中转。导出不是发布或上传。
+
+表格复用现有来源、`papers[].task/output/task_axes.output/method/datasets/dataset/year` 和明确核验的 `research_groups`。缺简称时保留全称；缺组名不由共同作者或单位补造；代码开源不等于数据开放。每格保留来源标识与核验状态，完整导出附来源和范围说明，同名私有 JSON 保留未截断原记录与逐格证据。剪贴板只复制七列表格，不把来源脚注误粘成额外数据行。
+
+OD 标准固定为：**输出 OD 流量，推理目标区域时不输入其历史 OD。** 训练阶段可使用历史 OD，评估真值不等于推理输入。需要目标区域历史／部分 OD 的补全、校准不符合。只有已核验、直接引用来源并带证据文字的布尔字段才能产生「是／否」；缺证据、冲突或 AI 待核结果保留「未知」。不按论文／方法名称猜测。
+
+### 自动提取与审阅边界
+
+已有结构化资料可直接整理，不需要模型。需要从保存的摘录中提取更多字段时，进入同一「AI 自动分析」显式调用已配置的宿主模型。新分析附 `paper_comparisons:[{paper_id,comparison}]`，每次最多 20 篇；输出预算不足或未覆盖的文献须保留缺口，建议按明确主题拆分。旧结果仍能查看，不自动重跑或覆盖。表格页勾选「使用已保存 AI 表格草稿」时，仅采用已完成且与当前主题版本一致的草稿，所有 AI 字段强制标为待核对，不自动变成已验证事实。重复查询／整理／导出不调用模型。
+
+这不是全库无人值守抓取：不解析未选 PDF，不搜凭据，不补造未提供的原文，不自动抓取数据访问条款。已有后台逐篇分析的证据可按原流程纳入主题，再整理；不足的来源明确补充后才核验。
+
+每篇论文可保存以下可选 `comparison` 字段：
+
+- `short_name/research_group/task_output/method`：`{value:"文字",status:"verified|needs_review|unknown|conflicting",source_ids:["s1"],evidence:"原文或位置"}`。
+- `datasets`：`[{name:"数据名称",source_ids:["s1"],status:"verified",openness:{value:"open|restricted|closed|unknown",status:"verified",source_ids:["s1"],evidence:"开放、申请或限制的依据"}}]`。数据名来源不能替代开放性来源。
+- `od_generation`：`output_is_od`、`target_history_at_inference` 及可选 `training_history`、`evaluation_history`，各为 `{value:true或false,status:"verified",source_ids:["s1"],evidence:"明确依据"}`。最终标准是前者 true、后者 false；未知字段省略，不能用 false 代替缺失。
+
+逐格 `source_ids` 必须存在，资料导入和模型结果使用同一校验器。人工核验后通过已有主题 JSON 导入及 revision 检查保存；AI 草稿不反向覆盖原主题或 PDF。
+
+### 原生工具、HTTP 与命令行
+
+- `library_field_radar_table` / HTTP `field_radar_table`：只读整理，返回表格 HTML、TSV、单元格、覆盖数、来源与缺失说明。
+- `library_field_radar_table_export` / HTTP `field_radar_table_export`：写入原有 `.paper-library/field-radar-exports/`，支持 `format:html|tsv|csv|markdown`。原生工具返回本机路径，HTTP 只返回受控同源下载地址。
+- 参数为 `{id,expected_revision?,analysis_request_id?,filters?:{query?,task?,year?},offset?:0,limit?:1..100}`，导出另加 format（默认 html）。`analysis_request_id` 可选，明确选择已有 AI 草稿；旧版本或未完成草稿拒绝。超限拒绝而不是静默截断，`count/total/has_more` 说明本页覆盖。
+
+```sh
+node scripts/export-field-radar.mjs --library /absolute/library --id topic-id --view literature-table --format html --limit 100
+node scripts/export-field-radar.mjs --library /absolute/library --id topic-id --view literature-table --format tsv --analysis-request-id saved-request-id --expected-revision HASH --state-home /absolute/dsh-home
+```
+
+`--state-home` 可选，需与宿主 localStateHome 相同。CLI 复用当前资料库状态和安全导出实现，不启动浏览器、不调用模型。文件内容不可变，下载时核验完整性；表格 HTML 转义，CSV／TSV 防止公式注入。派生单元格合计最多 2 MiB，单个渲染格式最多 10 MiB；超限请减少本页 limit，不裁掉证据或字段。
+
+```sh
+node --test tests-js/field-radar*.test.mjs tests-js/bundled-skill.test.mjs tests-js/workspace-host.test.mjs tests-js/workspace-navigation.test.mjs
+npm run build
+```
+
+测试仅使用合成数据。源码／接口检查不代表真实模型提取质量、用户当前页面已刷新或 PowerPoint／Google Slides 已验收。

@@ -63,3 +63,12 @@ Before an English render, prepare faithful `document.translations.en.labels` map
 Use the existing 「领域研究 → 多维关系」 for a supplied offline relations report. Import its structured `relation-input.json` through `field_radar_relations_import` with the exact `expected_revision` from `field_radar_relations_get`, or `scripts/import-field-radar-relations.mjs INPUT.json LIBRARY REVISION [STATE_HOME]`. Initial revision is 0; state home must match the host. Never execute arbitrary supplied HTML or open unrestricted local-file routes. The bundled renderer regenerates bilingual Sankey/circular views from validated JSON; the snapshot is private and independent of the selected research topic.
 
 Keep source dates, IDs, uncertainty and classification evidence. Filtering highlights matches while chart widths retain the complete corpus, and paper cards are paginated. Rebuild and explicitly reimport JSON for corpus changes; no automatic scraping/model request is implied. Limits: 1 MiB, 200 records, 2–6 dimensions with at most 24 categories each; excessive circular tracks are rejected. Read docs/field-radar.md for the input/CLI contract. No PDF, source HTML or existing topic is overwritten by relation import.
+
+
+## 文献表格与 Slides 复制
+
+用户需要按研究组、论文简称、具体任务／输出、数据集及开放性、方法、年份和 OD 生成设定比较时，复用「领域研究 → 文献对照表」，不创建另一个工具台。先用 `library_field_radar_table` 读取当前主题与筛选的七列表格；需要文件时用 `library_field_radar_table_export`，格式为 html、tsv、csv 或 markdown。传入主题 ID、准确 expected_revision、filters、offset 和 limit（最多 100），检查 count/total/has_more，不把一页说成完整主题。界面提供每页 20 篇和「复制到 Slides」。
+
+表格不调用模型。若用户要求自动提取，复用原有 `library_field_radar_analyze`；新草稿最多提供 20 篇 `paper_comparisons`，仍为 AI 待核。表格工具可显式传同主题、同版本、已完成的 analysis_request_id 复用草稿；不因旧分析缺字段自动消耗模型，不覆盖主题或 PDF。现有逐篇分析可按原证据流程加入主题，未提供的全文不假装已读。
+
+OD 标准为生成 OD 流量，目标区域推理不输入其历史 OD；训练可使用历史 OD，评估真值不算推理输入。需要目标历史／部分 OD 的补全或校准不符合。缺直接字段证据时保留未知，不凭 Deep Gravity 等名称判断。研究组不能由机构／共著猜测，数据开放不能由代码开源推出，简称缺失保留全称。逐格 source_ids、证据、审阅状态和来源范围必须保留。完整 comparison schema 与 CLI 见 docs/field-radar.md。

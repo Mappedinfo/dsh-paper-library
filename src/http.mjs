@@ -138,8 +138,8 @@ export function createFetchHandler(options = {}) {
   const inkQueue = options.inkQueue || createInkQueue({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python,autoStart:false});
   const inkDiagnostics = createInkDiagnostics({store:localState});
   const fieldRadar = options.fieldRadar || createFieldRadarStore({ store: localState, library: options.library || defaultLibrary, request: (payload, signal) => dispatch(payload, { ...options, signal }) });
-  const fieldRadarExport = options.fieldRadarExport || createFieldRadarExporter({ library: options.library || defaultLibrary, radar: fieldRadar });
   const fieldRadarAnalysis = options.fieldRadarAnalysis || createFieldRadarAnalysis({ store: localState, radar: fieldRadar });
+  const fieldRadarExport = options.fieldRadarExport || createFieldRadarExporter({ library: options.library || defaultLibrary, radar: fieldRadar, getAnalysis: input=>fieldRadarAnalysis.handle(input) });
   const handle = async function handle(request) {
     const url = new URL(request.url);
     if (options.loopbackOnly) {
@@ -152,7 +152,7 @@ export function createFetchHandler(options = {}) {
     const path = url.pathname.slice(basePath.length).replace(/^\//,'');
     try {
       if (path.startsWith('field-radar-export/') && request.method === 'GET') {
-        const match = /^field-radar-export\/([a-f0-9]{64})\.(png|svg)$/.exec(path);
+        const match = /^field-radar-export\/([a-f0-9]{64})\.(png|svg|html|tsv|csv|markdown)$/.exec(path);
         if (!match) return json({ok:false,error:'Invalid export identifier'},400);
         const exported = await fieldRadarExport.get(match[1], match[2]).catch(error => { if (error.code === 'ENOENT') throw Object.assign(new Error('Export not found'), {status:404}); throw error; });
         return new Response(exported.bytes,{headers:{...baseHeaders,'Content-Type':exported.mime,'Content-Disposition':`attachment; filename="field-radar-${match[1]}.${match[2]}"`,'Content-Security-Policy':"default-src 'none'; sandbox"}});
@@ -204,6 +204,8 @@ export function createFetchHandler(options = {}) {
             : input?.action === 'annotation_caption' ? await options.annotationCaption(input, { signal: request.signal })
             : ['encyclopedia_list','encyclopedia_put'].includes(input?.action) ? await encyclopedia(input)
             : companionAction ? await options.companion.handle(input)
+            : input?.action === 'field_radar_table' ? await fieldRadarExport.tablePreview(input)
+            : input?.action === 'field_radar_table_export' ? await fieldRadarExport.tableExport(input).then(({path,...receipt})=>({...receipt,download_url:`${basePath}/field-radar-export/${receipt.id}.${receipt.format}`}))
             : input?.action === 'field_radar_render' ? await fieldRadarExport.render(input).then(({path,...receipt})=>({...receipt,download_url:`${basePath}/field-radar-export/${receipt.id}.${receipt.format}`}))
             : ['field_radar_analyze','field_radar_analysis_get'].includes(input?.action) ? await fieldRadarAnalysis.handle(input, { signal: request.signal })
             : typeof input?.action === 'string' && input.action.startsWith('field_radar_') ? await fieldRadar.handle(input, { signal: request.signal })

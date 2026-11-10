@@ -117,7 +117,7 @@ export function apply(ctx, rawConfig = {}) {
     onImported:items=>automaticAnalysis?.imported(items),
   }
   options.fieldRadar = createFieldRadarStore({ store: localState, library: config.library, request: (payload, signal) => dispatch(payload, { library: config.library, python: config.python, signal }) })
-  options.fieldRadarExport = createFieldRadarExporter({ library: config.library, radar: options.fieldRadar })
+  options.fieldRadarExport = createFieldRadarExporter({ library: config.library, radar: options.fieldRadar, getAnalysis: input=>options.fieldRadarAnalysis.handle(input) })
   options.fieldRadarAnalysis = createFieldRadarAnalysis({ store: localState, radar: options.fieldRadar,
     ai: createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: Math.min(config.maxLanguageOutputTokens || 8192, 8192) }),
     getModel: async () => {
