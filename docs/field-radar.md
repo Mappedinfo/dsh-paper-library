@@ -126,7 +126,13 @@ HTTP/原生工具同样传 `language:"en"`，回执返回 language。英文图�
 
 「领域研究 → 多维关系」在现有界面中重建离线关系报告的桑基图、逐篇圆形轨道、中英切换、维度筛选和来源记录。无需新服务，不载入、不执行用户提供的 HTML/JavaScript。输入必须是该报告的结构化 companion `relation-input.json`，由随插件发布的通用渲染器生成 SVG。原 HTML、PDF 与主题 JSON 均不改动。
 
-关系快照与当前主题选择独立，明确显示独立快照提示。每库保存一份当前关系快照，使用既有本机状态库、内容寻址分块与 revision 比较写入；旧分块保留。源日期保留在逐条来源中，导入日期不冒充研究更新日期。筛选只高亮相关图形，桑基宽度与标签始终对应完整快照；逐篇记录每页最多 20 项，中英文切换保持筛选。维度共现不是因果或单篇唯一路径，历史署名分组不证明当前团队身份。来源中的本库 ID 先经现有论文匹配接口核对，唯一且完整匹配后才打开。
+关系快照与主题分别保存，原始记录、来源及核验状态不覆盖。选中主题时默认通过 DOI 或唯一规范化题名建立共享论文索引；相同 ID 本身不视为同一论文，歧义和 DOI 冲突不自动合并。界面显示两边覆盖数，未在图中的主题论文仍保留在表格；取消「联动当前主题与文献表」可看完整独立快照。每库当前关系快照仍沿用内容寻址分块与 revision 写入，旧分块保留，导入日期不冒充来源日期。
+
+文献表七列筛选及主题关键词／任务／年份同时限制联动图。点击节点或色带选择其支撑论文，可切回文献表；每篇可从表格定位到图，也可从图打开表格。清除桑基选择会恢复全部表格筛选结果，包括没有关系记录的论文。筛选后按选中记录重算数量和宽度，不再仅高亮全图。
+
+可勾选展示维度（至少两列，可恢复），选择标准／宽／更宽列距及适应容器、1600／2400／3200 px 显示宽度，宽图可横向滚动。隐藏列不删除数据，也不清除该列筛选。减少列后按新的相邻维度计算同现，每条记录在每列总权重为 1，多标签按 1/k 分摊；不能沿全路径推断单篇论文关系、方法继承或因果，署名分组不证明当前团队身份。逐篇证据保留原始维度，关系分类不会升级为已核验表格事实。
+
+「导出当前 SVG」使用当前选择、列数、列距和数量；显示宽度是屏幕缩放，不改变 SVG 逻辑尺寸。「导出当前数据与依据」保留所选记录、引用来源、图种／语言／维度／筛选及主题和关系版本。图中原快照范围明确标为背景说明。文献表复制和四种导出使用同一 paper_ids 限制及逐格证据。来源中的本库 ID 仍须唯一匹配核对后才打开。
 
 私有导入 CLI（首次版本为 `0`，更新必须使用读取返回的 revision）：
 
@@ -134,13 +140,14 @@ HTTP/原生工具同样传 `language:"en"`，回执返回 language。英文图�
 node scripts/import-field-radar-relations.mjs /absolute/relation-input.json /absolute/library 0 /absolute/dsh-state-home
 ```
 
-末尾 state home 可省略，此时沿用 `DSH_HOME`/默认 home；必须与当前宿主的 `localStateHome` 一致。CLI 不读取宿主凭据，不猜配置路径。可通过现有认证 API 调用 `field_radar_relations_get` 和 `field_radar_relations_import`，后者参数为 `{document,expected_revision}`。get 返回 document、revision、digest、updated_at；import 返回保存回执。通用浏览器 state 接口不能写这些保留命名空间。
+末尾 state home 可省略，此时沿用 `DSH_HOME`/默认 home；必须与当前宿主的 `localStateHome` 一致。CLI 不读取宿主凭据，不猜配置路径。可通过现有认证 API 调用 `field_radar_relations_get` 和 `field_radar_relations_import`，后者参数为 `{document,expected_revision}`。get 返回 document、revision、digest、updated_at；可选传 {id,expected_revision} 加入 linkage，含逐条身份匹配和覆盖数，主题版本不一致拒绝。import 返回保存回执。通用浏览器 state 接口不能写这些保留命名空间。
 
 输入 schema_version 为 1，包含 title/scope（文本或 zh/en 标签）、sources、dimensions（id/label/categories）、records（id/title/source_ids/values/evidence）及可选 relationships/config。来源和关系引用须存在；标识符、颜色和 HTTP(S) 链接严格校验。限制 1 MiB、2–6 维、每维最多 24 类、1–200 篇、1000 来源、500 证据关系；圆形轨道过多会拒绝，不能静默裁掉维度。超过范围请明确分主题生成快照。更新 corpus 后重新生成并导入 companion JSON；本功能不会自动扩大样本、抓取论文或调用模型。
 
 ```
 node --test tests-js/field-radar-relations.test.mjs
 PLAYWRIGHT_MODULE=/absolute/playwright/index.mjs node scripts/field-radar-relations-browser-fixture.mjs
+PLAYWRIGHT_MODULE=/absolute/playwright/index.mjs node scripts/field-radar-linked-browser-fixture.mjs
 ```
 
 只用合成样本执行安全、计量、存储与浏览器回归。不使用用户当前窗口。源码修改与已运行宿主/已打开页面是否加载新版是不同状态，测试不重载宿主或刷新用户页面。
@@ -172,7 +179,7 @@ OD 标准固定为：**输出 OD 流量，推理目标区域时不输入其历�
 
 - `library_field_radar_table` / HTTP `field_radar_table`：只读整理，返回表格 HTML、TSV、单元格、覆盖数、来源与缺失说明。
 - `library_field_radar_table_export` / HTTP `field_radar_table_export`：写入原有 `.paper-library/field-radar-exports/`，支持 `format:html|tsv|csv|markdown`。原生工具返回本机路径，HTTP 只返回受控同源下载地址。
-- 参数为 `{id,expected_revision?,analysis_request_id?,filters?:{query?,task?,year?},column_filters?,sort_by?,sort_direction?:"asc"|"desc",all?:boolean,offset?:0,limit?:1..100}`，导出另加 format（默认 html）。`all:true` 返回当前主题的全部匹配项并要求 `offset:0`，沿用单主题最多 500 篇边界；省略 all 时保持原有有界分页。`column_filters` 可用 `research_group/short_name/task_output/datasets/method/year` 的包含文字条件及 `od_generation:"yes"|"no"|"unknown"`；`sort_by` 为同一组列名。多个列条件与主题筛选同时生效，排序先于分页。`analysis_request_id` 可选，明确选择已有 AI 草稿；旧版本或未完成草稿拒绝。超限拒绝而不是静默截断，`count/total/has_more` 说明本页覆盖。
+- 参数为 `{id,expected_revision?,analysis_request_id?,paper_ids?:string[],filters?:{query?,task?,year?},column_filters?,sort_by?,sort_direction?:"asc"|"desc",all?:boolean,offset?:0,limit?:1..100}`，导出另加 format（默认 html）。paper_ids 是最多 500 个当前主题论文 ID 的交集筛选；省略不限制，空数组为零篇。未知、重复或非法 ID 拒绝，回执与证据 JSON 保留该选择。`all:true` 返回当前主题的全部匹配项并要求 `offset:0`，沿用单主题最多 500 篇边界；省略 all 时保持原有有界分页。`column_filters` 可用 `research_group/short_name/task_output/datasets/method/year` 的包含文字条件及 `od_generation:"yes"|"no"|"unknown"`；`sort_by` 为同一组列名。多个列条件与主题筛选同时生效，排序先于分页。`analysis_request_id` 可选，明确选择已有 AI 草稿；旧版本或未完成草稿拒绝。超限拒绝而不是静默截断，`count/total/has_more` 说明本页覆盖。
 
 ```sh
 node scripts/export-field-radar.mjs --library /absolute/library --id topic-id --view literature-table --format html --all true

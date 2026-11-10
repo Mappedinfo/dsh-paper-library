@@ -29,7 +29,7 @@ const esc = v => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;',
 const badge = status => ({verified:'',needs_review:'〔AI 推断／待核〕',unverified:'〔未核验〕',unknown:'〔未知〕',conflicting:'〔证据冲突〕'}[status] || '〔未核验〕');
 function settings(input) {
   if (!object(input)) throw fail('Table options must be an object');
-  const {format='html',offset=0,limit=100,all=false,filters={},column_filters={},sort_by='',sort_direction='asc'}=input;
+  const {format='html',offset=0,limit=100,all=false,filters={},column_filters={},sort_by='',sort_direction='asc',paper_ids}=input;
   if (!['html','csv','tsv','markdown'].includes(format)) throw fail('Unsupported table format');
   if (!Number.isSafeInteger(offset)||offset<0||offset>10000||!Number.isSafeInteger(limit)||limit<1||limit>100) throw fail('Table pagination out of bounds');
   if (!object(filters)||Object.keys(filters).some(k=>!['query','task','year'].includes(k))||Object.values(filters).some(v=>typeof v!=='string'||v.length>500)) throw fail('Invalid table filters');
@@ -37,7 +37,8 @@ function settings(input) {
   const keys=FIELD_RADAR_TABLE_COLUMNS.map(c=>c.key);
   if (!object(column_filters)||Object.keys(column_filters).some(k=>!keys.includes(k))||Object.values(column_filters).some(v=>typeof v!=='string'||v.length>500)||column_filters.od_generation&&!['yes','no','unknown'].includes(column_filters.od_generation)) throw fail('Invalid table column filters');
   if (sort_by!==''&&!keys.includes(sort_by)||!['asc','desc'].includes(sort_direction)) throw fail('Invalid table sorting');
-  return {format,offset,limit,all,filters:{...filters},column_filters:{...column_filters},sort_by,sort_direction};
+  if(paper_ids!==undefined&&(!Array.isArray(paper_ids)||paper_ids.length>500||paper_ids.some(id=>typeof id!=='string'||! /^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$/.test(id))||new Set(paper_ids).size!==paper_ids.length))throw fail('Invalid table paper_ids');
+  return {format,offset,limit,all,...(paper_ids!==undefined?{paper_ids:[...paper_ids]}:{}),filters:{...filters},column_filters:{...column_filters},sort_by,sort_direction};
 }
 /** Validate a comparison independently so the topic importer and AI parser can share it. */
 export function validatePaperComparison(value, document, {forceReview=false}={}) {
@@ -118,7 +119,10 @@ export function buildFieldRadarTable(record,input={}) {
   const options=settings(input);
   if (!record?.document) throw fail('Research topic not found',404);
   if (input.expected_revision!==undefined&&(typeof input.expected_revision!=='string'||input.expected_revision!==record.revision)) throw fail('研究主题已变化，请刷新后再导出。',409);
-  const doc=tableDocument(record.document),scoped=globalThis.PaperFieldRadarData.filteredPapers(doc,options.filters);
+  const doc=tableDocument(record.document);
+  if(options.paper_ids?.some(id=>!doc.papers.some(p=>p.id===id)))throw fail('Unknown table paper_id');
+  const allowed=options.paper_ids===undefined?null:new Set(options.paper_ids);
+  const scoped=globalThis.PaperFieldRadarData.filteredPapers(doc,options.filters).filter(p=>!allowed||allowed.has(p.id));
   const normalize=value=>String(value).normalize('NFKC').toLocaleLowerCase().trim();
   const active=Object.entries(options.column_filters).filter(([,value])=>value.trim());
   let sortBytes=0;
@@ -149,7 +153,7 @@ const delimited = (v,sep) => {const s=spreadsheet(String(v));return s.includes(s
 const markdown = v => esc(spreadsheet(String(v))).replace(/\\/g,'\\\\').replace(/\|/g,'\\|').replace(/\r?\n/g,'<br>').replace(/`/g,'&#96;');
 export function renderFieldRadarTable(record,input={}) {
   const result=buildFieldRadarTable(record,input),{columns,rows,sources,settings}=result;
-  const notes=[`主题：${result.title}；主题 ID：${result.topic_id}；版本：${result.topic_revision??'未知'}；保存时间：${result.data_updated_at??'未知'}`,`导出范围：${result.count} / ${result.total} 篇；主题共 ${result.corpus_total} 篇；offset=${settings.offset}；has_more=${result.has_more}`,`筛选与排序：${JSON.stringify({filters:settings.filters,column_filters:settings.column_filters,sort_by:settings.sort_by,sort_direction:settings.sort_direction,all:settings.all})}`,...result.warnings,`证据范围：${result.evidence_scope}`, ...rows.map(r=>`论文 ${r.paper_id}；${r.evidence_scope}；论文级背景来源（不作逐格核验）：${r.context_source_ids.join(', ')||'未记录'}`),...sources.map(s=>`[${s.id}] ${s.title}；${s.url}；核验日期：${s.accessed_at||'未知'}；证据范围：${words(s.evidence_scope)||words(s.evidence_level)||'未记录'}`)];
+  const notes=[`主题：${result.title}；主题 ID：${result.topic_id}；版本：${result.topic_revision??'未知'}；保存时间：${result.data_updated_at??'未知'}`,`导出范围：${result.count} / ${result.total} 篇；主题共 ${result.corpus_total} 篇；offset=${settings.offset}；has_more=${result.has_more}`,`筛选与排序：${JSON.stringify({filters:settings.filters,...(settings.paper_ids!==undefined?{paper_ids:settings.paper_ids}:{}),column_filters:settings.column_filters,sort_by:settings.sort_by,sort_direction:settings.sort_direction,all:settings.all})}`,...result.warnings,`证据范围：${result.evidence_scope}`, ...rows.map(r=>`论文 ${r.paper_id}；${r.evidence_scope}；论文级背景来源（不作逐格核验）：${r.context_source_ids.join(', ')||'未记录'}`),...sources.map(s=>`[${s.id}] ${s.title}；${s.url}；核验日期：${s.accessed_at||'未知'}；证据范围：${words(s.evidence_scope)||words(s.evidence_level)||'未记录'}`)];
   let content;
   if(settings.format==='html')content=`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>${esc(result.title)}</title><style>body{font:14px system-ui,sans-serif;color:#172f3a;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bcccd1;padding:9px;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}th{background:#edf4f4}li{white-space:pre-wrap}</style><h1>${esc(result.title)}</h1><table><thead><tr>${columns.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.values.map(v=>`<td>${esc(spreadsheet(v))}</td>`).join('')}</tr>`).join('')}</tbody></table><p>${result.count} / ${result.total} 篇；offset=${settings.offset}；版本 ${esc(result.topic_revision??'未知')}</p><ol>${notes.map(v=>`<li>${esc(v)}</li>`).join('')}</ol></html>`;
   else if(settings.format==='markdown')content=[`| ${columns.map(c=>markdown(c.label)).join(' | ')} |`,`| ${columns.map(()=>'---').join(' | ')} |`,...rows.map(r=>`| ${r.values.map(markdown).join(' | ')} |`),'',...notes.map(v=>`- ${markdown(v)}`)].join('\n');

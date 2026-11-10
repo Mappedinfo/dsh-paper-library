@@ -98,7 +98,7 @@ export function createFieldRadarExporter({ library, radar, getAnalysis } = {}) {
       const bytes=Buffer.from(result.content),id=hash(Buffer.concat([bytes,Buffer.from(JSON.stringify({revision:record.revision,settings,records:result.records,sources:result.sources}))]));
       const path=join(folder,`${id}.${settings.format}`),metaPath=`${path}.json`;
       let generated_at=new Date().toISOString();try{generated_at=JSON.parse((await readFileSafe(metaPath)).toString()).receipt.generated_at;}catch(e){if(e.code!=='ENOENT')throw e;}
-      const receipt={id,topic_id:record.document.topic.id,view:settings.view,format:settings.format,total:result.total,offset:settings.offset,count:result.count,has_more:result.has_more,topic_revision:record.revision,data_updated_at:record.updated_at,generated_at,source_ids:result.source_ids,path,warnings:result.warnings,coverage:result.coverage,analysis_request_id:input.analysis_request_id??null};
+      const receipt={id,topic_id:record.document.topic.id,view:settings.view,format:settings.format,total:result.total,offset:settings.offset,count:result.count,has_more:result.has_more,topic_revision:record.revision,data_updated_at:record.updated_at,generated_at,source_ids:result.source_ids,path,warnings:result.warnings,coverage:result.coverage,analysis_request_id:input.analysis_request_id??null,...(settings.paper_ids!==undefined?{paper_ids:settings.paper_ids}:{})};
       const metadata=Buffer.from(JSON.stringify({receipt,export_settings:settings,filters:settings.filters,records:result.records,sources:result.sources,columns:result.columns,rows:result.rows},null,2));
       await writeOnce(path,bytes);await writeOnce(metaPath,metadata);return receipt;
     }finally{busy=false;}

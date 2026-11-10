@@ -33,3 +33,11 @@ body.has-field-radar{--workbench-height:42px}.has-field-radar .topbar{height:42p
 .radar-table-column-filters input,.radar-table-column-filters select{width:100%;min-width:0;box-sizing:border-box;padding:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
 .radar-literature-table th button{font:inherit;color:inherit;white-space:normal;text-align:left;width:100%}
 .radar-literature-evidence details,.radar-table-tools~.radar-content .radar-source{content-visibility:auto;contain-intrinsic-size:auto 80px}
+
+/* Linked views share filters without rewriting their source snapshots. */
+.radar-relations-dimensions{display:flex;flex-wrap:wrap;gap:12px;border:1px solid var(--line);padding:12px;margin-top:12px}
+.radar-relations-dimensions label{display:flex;align-items:center;gap:5px}
+.radar-relations-figure .mark[role=button]{cursor:pointer}
+.radar-relations-figure .mark:focus{outline:3px solid var(--teal,#288084);outline-offset:2px}
+.radar-relations-figure>p{color:#263238;padding:20px}
+#field-radar-relations .radar-toolbar>label{display:flex;align-items:center;gap:6px}

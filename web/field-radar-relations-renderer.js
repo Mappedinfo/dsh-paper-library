@@ -34,9 +34,10 @@ class Canvas{
  svg(title){return `<svg xmlns="http://www.w3.org/2000/svg" width="${this.w}" height="${this.h}" viewBox="0 0 ${this.w} ${this.h}" role="img"><title>${esc(title)}</title><style>text{font-family:Arial,'Noto Sans CJK SC','PingFang SC',sans-serif} .mark{transition:opacity .16s}</style>${this.s.join('')}</svg>`;}
 }
 function attrs(ids){return `class="mark" data-records="${esc(ids.join(' '))}"`;}
-function footer(c,d,kind){let y=c.h-220;c.line(70,y-35,c.w-70,y-35);c.text(70,y,tx(d.title,c.l)+' · '+(kind==='sankey'?(c.l==='zh'?d.dimensions.length+'维桑基图':d.dimensions.length+'-dimension Sankey'):(c.l==='zh'?'逐篇环形轨道':'Paper-aligned circular tracks')),38,C.ink,'start',600);y=c.para(70,y+48,tx(d.scope,c.l),c.w-140,23);const notes=d.config?.footnotes?.[c.l]??[];for(const n of notes.slice(0,3))y=c.para(70,y+7,n,c.w-140,21);}
-function renderSankey(d,computed=computeRelations(d),lang='en'){
- const w=Math.max(2800,d.dimensions.length*680),h=2050,c=new Canvas(w,h,lang,'sankey'),n=d.records.length,plotTop=170,plotH=1450,pad=52,maxCount=Math.max(...d.dimensions.map(dim=>computed.nodes.filter(n=>n.dimension===dim.id).length)),scale=(plotH-pad*(maxCount-1))/n;
+function footer(c,d,kind){let y=c.h-220;c.line(70,y-35,c.w-70,y-35);c.text(70,y,tx(d.title,c.l)+' · '+(kind==='sankey'?(c.l==='zh'?d.dimensions.length+'维桑基图':d.dimensions.length+'-dimension Sankey'):(c.l==='zh'?'逐篇环形轨道':'Paper-aligned circular tracks')),38,C.ink,'start',600);y=c.para(70,y+48,(d.selection_context?(c.l==='zh'?'原快照范围：':'Original snapshot scope: '):'')+tx(d.scope,c.l),c.w-140,23);const notes=d.config?.footnotes?.[c.l]??[];for(const n of notes.slice(0,3))y=c.para(70,y+7,n,c.w-140,21);}
+function renderSankey(d,computed=computeRelations(d),lang='en',options={}){
+ const widthScale=Number(options.width_scale??1);if(!Number.isFinite(widthScale)||widthScale<1||widthScale>2)fail('Invalid Sankey width scale');
+ const w=Math.round(Math.max(2800,d.dimensions.length*680)*widthScale),h=2050,c=new Canvas(w,h,lang,'sankey'),n=d.records.length,plotTop=170,plotH=1450,pad=52,maxCount=Math.max(...d.dimensions.map(dim=>computed.nodes.filter(n=>n.dimension===dim.id).length)),scale=(plotH-pad*(maxCount-1))/n;
  c.text(70,52,'FIELD RADAR / '+n+' '+(lang==='zh'?'篇独立作品':'DISTINCT WORKS'),22,C.muted);c.text(w-70,52,lang==='zh'?'相邻维度的论文同现':'Adjacent-dimension co-occurrence',22,C.muted,'end');
  const columns=d.dimensions.map((dim,j)=>computed.nodes.filter(x=>x.dimension===dim.id).map(x=>({...x}))),by={};
  // Barycentric sweeps reduce crossings without changing values or chronology.
@@ -67,5 +68,14 @@ function renderCircular(d,computed=computeRelations(d),lang='en'){
  c.text(95,1890,lang==='zh'?dims.length+'维信息共同落在同一论文扇区，避免全连接弦图变成“毛线团”。':dims.length+' attributes align on each paper sector, avoiding an all-to-all chord hairball.',27,C.blue,'start',600);c.para(95,1937,tx(d.config?.circular_note,lang)||(lang==='zh'?'每个扇区是同一记录；多标签维度展开为出现矩阵。标签分类与真实关系必须分开解释。':'Each sector represents the same record across tracks. Multilabel dimensions use an incidence matrix. Category membership and evidenced relationships are distinct.'),1660,23);footer(c,d,'circular');return c.svg(tx(d.title,lang));
 }
 
-return {validateInput,computeRelations,renderSankey,renderCircular};
+function projectRelations(input,{record_ids=input.records.map(r=>r.id),dimensions=input.dimensions.map(d=>d.id)}={}){
+ const d=validateInput(input),ids=new Set(record_ids),known=new Set(d.records.map(r=>r.id));
+ if(!Array.isArray(record_ids)||record_ids.some(id=>!known.has(id)))fail('Unknown selected record');
+ if(!Array.isArray(dimensions)||dimensions.length<2||new Set(dimensions).size!==dimensions.length||dimensions.some(id=>!d.dimensions.some(dim=>dim.id===id)))fail('Choose at least two known dimensions');
+ const dims=dimensions.map(id=>d.dimensions.find(dim=>dim.id===id)),records=d.records.filter(r=>ids.has(r.id));
+ const relationships=(d.relationships??[]).filter(e=>ids.has(e.from)&&ids.has(e.to));
+ const sourceIds=new Set([...records.flatMap(r=>[...r.source_ids,...Object.values(r.evidence??{}).flatMap(e=>e.source_ids??[])]),...relationships.flatMap(e=>e.source_ids)]);
+ return {...d,selection_context:{source_record_count:d.records.length,selected_record_count:records.length},dimensions:dims,records,relationships,sources:d.sources.filter(s=>sourceIds.has(s.id)),config:{...d.config,circular_order_by:(d.config?.circular_order_by??dims.map(d=>d.id)).filter(id=>dimensions.includes(id))}};
+}
+return {validateInput,computeRelations,projectRelations,renderSankey,renderCircular};
 })();

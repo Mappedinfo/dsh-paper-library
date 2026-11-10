@@ -1,3 +1,4 @@
+import { linkRadarRelations } from './field-radar-linkage.mjs'
 import { validatePaperComparison } from './field-radar-table.mjs'
 import { createRelationsStore } from './field-radar-relations.mjs'
 /** Explicit, bounded research imports. No model, remote fetch, PDF access or author-name merging. */
@@ -118,7 +119,14 @@ export function createFieldRadarStore({ store, request, library } = {}) {
     finally { await handle?.close() }
   }
   async function handle(input, context) {
-    if (input.action === 'field_radar_relations_get') return relations.get()
+    if (input.action === 'field_radar_relations_get') {
+      const result=await relations.get()
+      if(input.id===undefined)return result
+      const topic=await get(input.id)
+      if(!topic.document)throw fail('Research topic not found','FIELD_RADAR_NOT_FOUND',404)
+      if(input.expected_revision!==undefined&&input.expected_revision!==topic.revision)throw fail('研究主题已变化，请刷新后再联动。','FIELD_RADAR_STALE',409)
+      return {...result,linkage:linkRadarRelations(result.document,topic)}
+    }
     if (input.action === 'field_radar_relations_import') return relations.importDocument(input)
     if (input.action === 'field_radar_snapshot_get') return readSnapshot()
     if (input.action === 'field_radar_get') return get(input.id)
