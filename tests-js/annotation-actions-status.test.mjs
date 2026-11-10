@@ -127,10 +127,11 @@ test('range handles update the draft without writing until the user saves', {ski
   w.annotationEditor={beforeAsk:async()=>undefined};
   const edit=d.querySelector('[data-note-action=reselect]'),bar=d.querySelector('.annotation-range-edit'),[save,cancel]=bar.querySelectorAll('button');
   await w.handleNoteAction({target:edit});
+  assert.equal(bar.parentElement.id,'reader-content');assert.ok(save.classList.contains('primary'));
   assert.equal(bar.hidden,false);assert.equal(save.disabled,true);
   moveHandle({id:'paper-a',page:2,text:'Other',rects:[[1,2,3,4]]});assert.equal(save.disabled,true);
   moveHandle({id:'paper-a',page:1,text:'New source',rects:[[1,2,3,4]]});
-  assert.equal(save.disabled,false);assert.equal(calls.length,0);
+  assert.equal(save.disabled,false);assert.equal(calls.length,0);assert.match(bar.textContent,/尚未保存/);
   save.click();await new Promise(r=>setImmediate(r));
   assert.equal(save.disabled,false);assert.match(f.messages.at(-1),/Temporary error/);
   failSave=false;save.click();await new Promise(r=>setImmediate(r));
@@ -138,6 +139,42 @@ test('range handles update the draft without writing until the user saves', {ski
   await w.handleNoteAction({target:edit});cancel.click();
   assert.equal(w.annotationRangeEdit,null);assert.equal(bar.hidden,true);assert.ok(closed);assert.equal(calls.length,2);
  } finally {f.dom.window.close();}
+});
+
+test('right-click actions follow the PDF, title, or active range edit and leave text fields alone', {skip:!JSDOM}, async () => {
+  const f = fixture(), w = f.window, d = f.document, calls = [];
+  try {
+    const reader = d.getElementById('continuous-reader'), title = d.getElementById('toolbar-paper');
+    const sheet = d.createElement('div');sheet.className = 'pdr-sheet';sheet.dataset.pdfPage = '3';
+    sheet.textContent = 'Synthetic selection';reader.append(sheet);
+    w.state.active = { id:'paper-a', pdf:true, title:'Synthetic paper' };
+    w.openMetadata = () => calls.push('details');
+    w.locateCurrentPageAnnotations = page => calls.push(page);
+    w.rangeEditBar = { hidden:true };w.annotationRangeEdit = null;
+    w.rangeEditSave = d.createElement('button');w.rangeEditCancel = d.createElement('button');
+    w.rangeEditSave.onclick = () => calls.push('save');
+    w.eval(source.slice(source.indexOf('function installReaderContextMenu()'), source.indexOf('inkQueue=window.PaperInkQueueClient')));
+    const menu = d.querySelector('.reader-context-menu');
+    const item = label => [...menu.querySelectorAll('button')].find(button => button.textContent === label);
+    const rightClick = node => node.dispatchEvent(new w.MouseEvent('contextmenu', { bubbles:true, cancelable:true, button:2, clientX:80, clientY:90 }));
+
+    const range = d.createRange();range.selectNodeContents(sheet);w.getSelection().addRange(range);
+    assert.equal(rightClick(sheet),false);
+    item('复制选中文字').click();await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.copied,['Synthetic selection']);
+    rightClick(sheet);item('定位本页批注').click();assert.deepEqual(calls,[3]);
+
+    title.dispatchEvent(new w.KeyboardEvent('keydown',{ key:'F10', shiftKey:true, bubbles:true, cancelable:true }));
+    assert.equal(menu.getAttribute('aria-label'),'当前论文');
+    assert.ok(item('复制 APA 7 引用'));
+    d.activeElement.dispatchEvent(new w.KeyboardEvent('keydown',{ key:'Escape', bubbles:true, cancelable:true }));
+    assert.equal(menu.hidden,true);assert.equal(d.activeElement,title);
+
+    w.rangeEditBar.hidden = false;w.annotationRangeEdit = { id:'paper-a' };
+    rightClick(sheet);item('保存新范围').click();assert.deepEqual(calls,[3,'save']);
+    const input = d.createElement('textarea');sheet.append(input);
+    assert.equal(rightClick(input),true);assert.equal(menu.hidden,true);
+  } finally { f.dom.window.close(); }
 });
 
 test('PDF range handles extend and shrink a saved selection with pointer input', {skip:!JSDOM}, async () => {

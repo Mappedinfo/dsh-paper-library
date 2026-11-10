@@ -582,6 +582,8 @@ test('plain citation clicks take priority over annotation hits without consuming
   const start = readerSource.indexOf('    function pointerUp('), end = readerSource.indexOf('    function followInternalLink(', start);
   vm.runInContext(readerSource.slice(start, end), scope);
   const event = { pointerId: 1, pointerType: 'mouse', clientX: 25, clientY: 30, target: { closest: () => sheet }, preventDefault() {} };
+  scope.tool = 'note';scope.pointerUp({ ...event, button: 2 });scope.pointerUp({ ...event, button: 0, ctrlKey: true });assert.deepEqual(calls, []);
+  scope.tool = 'select';
   scope.pointerUp(event); assert.deepEqual(calls, ['link']);
   calls.length = 0; scope.nativeGesture.dragged = true; scope.pointerUp(event); assert.ok(!calls.includes('link'));
   calls.length = 0; scope.window.getSelection = () => ({ isCollapsed: false }); scope.pointerUp(event); assert.deepEqual(calls, []);

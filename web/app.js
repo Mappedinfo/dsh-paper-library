@@ -736,9 +736,9 @@ function linkAnnotationCard(annotationId, {block='center'}={}) {
   return true;
 }
 // 只同步批注侧栏，保持 PDF 当前页、缩放和阅读位置。
-function locateCurrentPageAnnotations() {
+function locateCurrentPageAnnotations(clickedPage) {
   if(!state.active?.pdf)return;
-  const snapshot=pdfReader?.getSnapshot(),page=snapshot?.paperId===state.active.id?snapshot.page:state.page;
+  const snapshot=pdfReader?.getSnapshot(),page=clickedPage??(snapshot?.paperId===state.active.id?snapshot.page:state.page);
   if(!Number.isInteger(page)||page<1)return;
   const notes=annotationThreads(state.annotations).notes;
   let index=-1;
@@ -779,7 +779,7 @@ async function handleNoteAction(event) {
       });
       if (annotationRangeEdit !== edit) return;
       edit.manual = !handles;
-      rangeEditLabel.textContent = handles ? '拖动 PDF 上的起点或终点' : '无法定位旧选区，请在原页重新选字';
+      updateRangeEditBar();
       rangeEditBar.hidden = false;
     } catch (error) {
       if (annotationRangeEdit === edit) { closeRangeEdit(); toast(error.message, true); }
@@ -1602,12 +1602,15 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onStatus: (message,error,options) => readingShell?.status(message,error,options),
 });
 readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,locateAnnotations:locateCurrentPageAnnotations,contextChanged:()=>{readerSearchUI?.sync();resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
-const rangeEditBar=el('span','annotation-range-edit');rangeEditBar.hidden=true;
-const rangeEditLabel = el('span'), rangeEditSave = el('button','button subtle','保存新范围'), rangeEditCancel = el('button','button subtle','取消');
+const rangeEditBar=el('div','annotation-range-edit');rangeEditBar.hidden=true;
+rangeEditBar.setAttribute('role', 'group');
+rangeEditBar.setAttribute('aria-label', '调整原文范围');
+const rangeEditLabel = el('span'), rangeEditSave = el('button','button primary','保存新范围'), rangeEditCancel = el('button','button subtle','取消');
+rangeEditLabel.setAttribute('role', 'status');
 rangeEditSave.type = rangeEditCancel.type = 'button';
 rangeEditSave.disabled = true;
 rangeEditBar.append(rangeEditLabel, rangeEditSave, rangeEditCancel);
-$('paper-tools').append(rangeEditBar);
+$('reader-content').append(rangeEditBar);
 function closeRangeEdit() {
   annotationRangeEdit = null;
   pdfReader?.endRangeEdit();
@@ -1620,21 +1623,29 @@ function setRangeDraft(selection) {
   const edit = annotationRangeEdit;
   if (edit.saving) return;
   edit.draft = selection?.id === edit.id && selection.page === edit.page && selection.text.trim() ? selection : null;
-  rangeEditSave.disabled = edit.saving || !edit.draft;
+  updateRangeEditBar();
+}
+function updateRangeEditBar() {
+  const { saving, draft, manual } = annotationRangeEdit;
+  rangeEditSave.disabled = saving || !draft;
+  rangeEditCancel.disabled = Boolean(saving);
+  rangeEditLabel.textContent = saving ? '正在保存新范围…' : draft ? '范围已调整，尚未保存' :
+    manual ? '无法定位旧选区，请在原页重新选字' : '拖动起点或终点以调整范围';
 }
 rangeEditCancel.addEventListener('click', closeRangeEdit);
 rangeEditSave.addEventListener('click', async () => {
   const edit = annotationRangeEdit, draft = edit?.draft;
   if (!draft || edit.saving || state.active?.id !== edit.id) return;
-  edit.saving = rangeEditSave.disabled = rangeEditCancel.disabled = true;
+  edit.saving = true;
+  updateRangeEditBar();
   pdfReader?.lockRangeEdit?.(true);
   try {
     await api('annotation_reselect', { id: edit.id, annotation_id: edit.annotationId, page: edit.page,
       rects: draft.rects, text: draft.text, expected_version: edit.version });
   } catch (error) {
     if (annotationRangeEdit === edit) {
-      edit.saving = rangeEditCancel.disabled = false;
-      rangeEditSave.disabled = !edit.draft;
+      edit.saving = false;
+      updateRangeEditBar();
       pdfReader?.lockRangeEdit?.(false);
       toast(`原文范围未更新：${error.message}`, true);
     }
@@ -1661,6 +1672,106 @@ readerSearchUI=window.PaperReaderSearch?.create({api,getPaper:()=>state.active,r
   onAnnotationNavigate:hit=>{pendingAnnotationSearchId=hit.id;state.noteOffset=hit.offset;renderAnnotations();},
   onLibrarySearch:query=>{$('search').value=query;$('search').dispatchEvent(new Event('input',{bubbles:true}));},
 });
+function installReaderContextMenu() {
+  const reader = $('continuous-reader'), title = $('toolbar-paper');
+  const brand = title.closest('.brand-group') || title;
+  const menu = el('div', 'reader-context-menu');
+  menu.hidden = true;
+  menu.setAttribute('role', 'menu');
+  document.body.append(menu);
+  title.tabIndex = 0;
+  title.setAttribute('aria-haspopup', 'menu');
+  let returnFocus = null;
+
+  function close(restoreFocus = false) {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    menu.replaceChildren();
+    if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+    returnFocus = null;
+  }
+  function show(event, surface, keyboard = false) {
+    const paper = state.active;
+    if (!paper || paper.archived || paper.resource_kind === 'dataset' || state.catalogSlideId || event.defaultPrevented) return;
+    if (event.target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return;
+    if (surface === reader && (!paper.pdf || event.target.closest('a,button:not(.pdr-range-handle)'))) return;
+
+    const edit = surface === reader && !rangeEditBar.hidden && annotationRangeEdit?.id === paper.id ? annotationRangeEdit : null;
+    const selection = surface === reader ? window.getSelection() : null;
+    const selected = selection && reader.contains(selection.anchorNode) && reader.contains(selection.focusNode) ? selection.toString().trim() : '';
+    const page = Number(event.target.closest('.pdr-sheet')?.dataset.pdfPage) || undefined;
+    let label, actions;
+    if (edit) {
+      label = '调整原文范围';
+      actions = [['保存新范围', () => rangeEditSave.click(), rangeEditSave.disabled], ['取消调整', () => rangeEditCancel.click(), rangeEditCancel.disabled]];
+    } else if (surface === reader) {
+      label = 'PDF 阅读';
+      actions = [
+        ...(selected ? [['复制选中文字', () => copyText(selected, { label: '选中文字' })]] : []),
+        ['文内搜索', () => $('reader-find')?.click(), !$('reader-find') || $('reader-find').disabled],
+        ['定位本页批注', () => locateCurrentPageAnnotations(page)],
+        ['整页显示', () => pdfReader?.fitPage()],
+      ];
+    } else {
+      label = '当前论文';
+      actions = [
+        ['复制论文标题', () => copyText(paper.title, { label: '论文标题' }), !paper.title],
+        ['复制 APA 7 引用', () => cite('apa'), $('copy-apa').disabled],
+        ['资料详情', openMetadata],
+        ...(paper.pdf ? [['下载批注 PDF', () => $('download-pdf').click()]] : []),
+      ];
+    }
+    event.preventDefault();
+    close();
+    returnFocus = keyboard ? event.target : surface === reader ? reader : title;
+    menu.setAttribute('aria-label', label);
+    const heading = el('div', 'reader-context-heading', label);
+    heading.setAttribute('aria-hidden', 'true');
+    menu.append(heading);
+    for (const [text, action, disabled] of actions) {
+      const item = el('button', 'reader-context-item', text);
+      item.type = 'button';
+      item.tabIndex = -1;
+      item.disabled = Boolean(disabled);
+      item.setAttribute('role', 'menuitem');
+      item.addEventListener('click', async () => {
+        close(true);
+        if (state.active?.id !== paper.id || (edit && annotationRangeEdit !== edit)) return;
+        try { await action(); } catch (error) { toast(error.message, true); }
+      });
+      menu.append(item);
+    }
+    const anchor = event.target.getBoundingClientRect();
+    const x = keyboard ? anchor.left : event.clientX, y = keyboard ? anchor.top + 24 : event.clientY;
+    menu.hidden = false;
+    menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - menu.offsetWidth - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - menu.offsetHeight - 8))}px`;
+    (menu.querySelector('button:not(:disabled)') || menu).focus({ preventScroll: true });
+  }
+  menu.tabIndex = -1;
+  menu.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); return; }
+    if (event.key === 'Tab') { close(true); return; }
+    if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+    const items = [...menu.querySelectorAll('button:not(:disabled)')];
+    if (!items.length) return;
+    event.preventDefault();
+    const current = items.indexOf(document.activeElement), step = event.key === 'ArrowUp' ? -1 : 1;
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (current + step + items.length) % items.length;
+    items[next].focus();
+  });
+  for (const surface of [reader, brand]) {
+    surface.addEventListener('contextmenu', event => show(event, surface));
+    surface.addEventListener('keydown', event => {
+      if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) show(event, surface, true);
+    });
+  }
+  document.addEventListener('pointerdown', event => { if (!menu.contains(event.target)) close(); }, true);
+  document.addEventListener('scroll', event => { if (!menu.contains(event.target)) close(); }, true);
+  window.addEventListener('resize', () => close());
+  window.addEventListener('blur', () => close());
+}
+installReaderContextMenu();
 inkQueue=window.PaperInkQueueClient?.create({api,persistence,
   onChange:records=>{pdfReader?.setInkEnabled(!inkQueue?.blocked()&&!inkSaveUncertain&&!pendingInkHandoff&&!restoringInkDraft&&!restoringReader);pdfReader?.setInkOverlays([...records.filter(job=>job.status!=='saved'),...records.filter(job=>job.status==='saved').slice(-16)]);readingShell?.queueChanged(records);if(state.active)renderAnnotations();publishReaderState();},
   onAccepted:async batch=>{inkDiagnostics?.record({event:'batch_accepted',paperId:batch.paperId,page:batch.page,annotationId:batch.annotation_id});if(!inkDraftStorageBlocked)await persistence?.put('reader:ink-draft',null);inkDraftUpdatedAt=Math.max(inkDraftUpdatedAt,batch.frozenAt||0);if(pendingInkHandoff&&!restoringReader){const record=pendingInkHandoff;setTimeout(()=>void adoptInkHandoff(record),0);}},

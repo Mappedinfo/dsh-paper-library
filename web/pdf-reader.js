@@ -699,6 +699,7 @@
       } catch (error) { g.preview.remove(); onStatus(`矩形框未保存：${error.message}`, true); }
     }
     function pointerDown(event) {
+      if (event.button > 0 || (event.pointerType === 'mouse' && event.ctrlKey)) return;
       input.observe(event);
       if (!(event.pointerType === 'touch' && (inkGesture || markupGesture || rectangleGesture || nativeGesture))) cancelNavigation();
       const clickedPage = Number(event.target.closest?.('.pdr-sheet')?.dataset.pdfPage);
@@ -1373,6 +1374,7 @@
       returnPosition = null; emitFocus(); updateWindow(position.page); announce(); onZoomChange(zoom); return true;
     }
     function pointerUp(event) {
+      if (event.button > 0 || (event.pointerType === 'mouse' && event.ctrlKey)) return;
       if (event.pointerType === 'touch' && handledTouches.has(event.pointerId)) { event.preventDefault(); if (!endTouch(event)) return; }
       nativePointerEnded(event);
       if (rectangleGesture?.pointerId === event.pointerId) { event.preventDefault(); moveRectangle(event); endRectangle(false, event); return; }

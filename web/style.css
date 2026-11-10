@@ -2318,5 +2318,24 @@ dialog .small {
 .annotation-preview-status { display: block; overflow-wrap: anywhere; }
 
 .annotation-inline-input[hidden],.annotation-translations[hidden],.annotation-range-edit[hidden]{display:none!important}
-.annotation-range-edit{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;background:var(--surface);border-radius:5px}
+.annotation-range-edit {
+  position:absolute; z-index:13; left:50%; bottom:14px; transform:translateX(-50%);
+  display:flex; align-items:center; gap:8px; width:max-content; max-width:calc(100% - 24px);
+  padding:7px 9px; color:var(--ink); background:var(--surface); border:1px solid var(--line);
+  border-radius:8px; box-shadow:0 4px 18px #17312730; font-size:12px;
+}
+.annotation-range-edit .button { flex:none; white-space:nowrap; }
+.reader-context-menu {
+  position:fixed; z-index:100; min-width:176px; max-width:calc(100vw - 16px); max-height:calc(100dvh - 16px);
+  overflow:auto; padding:4px; color:var(--ink); background:var(--surface);
+  border:1px solid var(--line); border-radius:8px; box-shadow:0 8px 26px #172a2540;
+}
+.reader-context-heading { padding:3px 8px; color:var(--muted); font-size:11px; }
+.reader-context-item {
+  display:block; width:100%; padding:6px 8px; border-radius:4px; background:transparent;
+  color:inherit; font:inherit; font-size:12px; text-align:start;
+}
+.reader-context-item:hover:not(:disabled),.reader-context-item:focus-visible {
+  background:var(--teal-light); outline:1px solid var(--teal); outline-offset:-1px;
+}
 .annotation-translations{margin-top:8px}.annotation-translations>.annotation-reply{margin-top:4px}
