@@ -1,6 +1,6 @@
 {
-  "verified_at": "2026-11-10T16:39:09.297837+00:00",
-  "scope": "Synthetic fixtures and isolated Chromium. No real-paper fixtures, model calls, live-browser interaction, publication, or reload.",
+  "verified_at": "2026-11-10T16:51:40.619279+00:00",
+  "scope": "Synthetic fixtures, isolated Chromium, and an authenticated local runtime read check. One idle-gated plugin hot reload after concurrent metadata maintenance completed. No real-paper fixtures, model calls, user-browser interaction, or publication.",
   "focused_javascript": {
     "tests": 89,
     "passed": 88,
@@ -53,7 +53,31 @@
     },
     "python": "One aggregate run had an intermittent existing external-scan ambiguity assertion; focused reruns and final full 987-test run passed. No claim that every aggregate attempt was green."
   },
-  "runtime": "Not reloaded while concurrent metadata maintenance is in progress; user browser not refreshed.",
+  "runtime": {
+    "source_commit": "8e07050",
+    "port": 3080,
+    "application": "applied",
+    "warnings": [],
+    "metadata_maintenance_finished_before_reload": true,
+    "before_and_after": {
+      "running_sessions": 0,
+      "analysis_queue": 0,
+      "ink_saved": 16,
+      "old_failed_and_interrupted_records_preserved": true
+    },
+    "static_files_match": [
+      "index.html",
+      "app.js",
+      "reading-distribution.js",
+      "paper-organization.js",
+      "settings.js",
+      "workbench.css"
+    ],
+    "new_route_probe": true,
+    "four_shared_settings_present": true,
+    "bounded_actual_pdf_response_shape_and_counts_consistent": true,
+    "user_browser_refreshed": false
+  },
   "merged_smoke": {
     "base_commit": "9c87f4e",
     "tests": 32,
