@@ -2303,6 +2303,8 @@ dialog .small {
 .annotation-inline-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 5px; }
 .annotation-inline-heading .field { margin: 0; flex: none; }
 .annotation-inline-input { width: 100%; min-height: 78px; resize: vertical; font: inherit; line-height: 1.55; }
+.annotation-inline-editor.is-expanded .annotation-inline-input { min-height: 240px; max-height: 60vh; overflow-y: auto; }
+.annotation-inline-heading .annotation-remark-expand { padding: 2px 4px; font-size: 12px; flex: none; }
 .annotation-inline-status { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin-left: auto; }
 .annotation-inline-status .error { overflow-wrap: anywhere; }
 .annotation-pending { border-style: dashed; }

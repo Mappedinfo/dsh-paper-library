@@ -81,6 +81,7 @@ body.handwriting-tools-visible{--workbench-height:145px}
 .annotation-excerpt-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .annotation-excerpt-heading .button{font-size:11px;padding:2px 4px}
 .annotation-card .annotation-quote{display:block;max-width:100%;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;border:0;padding:0;margin:3px 0;background:transparent;color:var(--ink);font:inherit;line-height:1.6;cursor:text;user-select:text;-webkit-user-select:text}
+.annotation-excerpt .annotation-quote.is-collapsed{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;line-clamp:4;overflow:hidden}
 .annotation-reply-body,.annotation-reply-body *{user-select:text;-webkit-user-select:text;cursor:text}
 
 .linked-ink-preview{display:block;width:100%;min-height:155px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#2455a4;padding:8px;cursor:pointer;text-align:right}

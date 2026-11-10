@@ -511,7 +511,13 @@ function renderAnnotations() {
     }
     if(!note.text){const style=window.PaperAnnotationStyle?.editor({note,paperId:state.active.id,api,onSaved:async()=>{if(state.active?.id===card.dataset.paperId){await loadAnnotations(state.active.id);await refreshPage(note.page);}}});if(style)meta.append(style);}
     card.append(meta);
-    if (note.text) { const excerpt=el('section','annotation-excerpt'),heading=el('div','annotation-excerpt-heading'),locate=el('button','button subtle','定位');locate.type='button';locate.dataset.noteAction='page';locate.setAttribute('aria-label',`定位原文：${note.text}`);heading.append(el('span','small muted','原文'));const style=window.PaperAnnotationStyle?.editor({note,paperId:state.active.id,api,onSaved:async()=>{if(state.active?.id===card.dataset.paperId){await loadAnnotations(state.active.id);await refreshPage(note.page);}}});if(style)heading.append(style);heading.append(locate);excerpt.append(heading,el('p','annotation-quote',note.text));card.append(excerpt); }
+    if (note.text) { const excerpt=el('section','annotation-excerpt'),heading=el('div','annotation-excerpt-heading'),locate=el('button','button subtle','定位');locate.type='button';locate.dataset.noteAction='page';locate.setAttribute('aria-label',`定位原文：${note.text}`);heading.append(el('span','small muted','原文'));const style=window.PaperAnnotationStyle?.editor({note,paperId:state.active.id,api,onSaved:async()=>{if(state.active?.id===card.dataset.paperId){await loadAnnotations(state.active.id);await refreshPage(note.page);}}});if(style)heading.append(style);heading.append(locate);
+      const quote=el('p','annotation-quote',note.text),expand=el('button','button subtle','展开原文');
+      const expanded=state.expandedAnnotationExcerpts ||= new Set(),key=JSON.stringify([state.active.id,note.id]);
+      quote.id=`annotation-excerpt-${crypto.randomUUID()}`;expand.type='button';expand.setAttribute('aria-controls',quote.id);
+      const paintExcerpt=()=>{const open=expanded.has(key);quote.classList.toggle('is-collapsed',!open);expand.textContent=open?'收起原文':'展开原文';expand.setAttribute('aria-expanded',String(open));};
+      expand.addEventListener('click',()=>{if(expanded.has(key))expanded.delete(key);else expanded.add(key);paintExcerpt();});
+      paintExcerpt();heading.append(expand);excerpt.append(heading,quote);card.append(excerpt); }
     if (note.comment || note.content) card.append(el('p', 'annotation-comment', note.comment || note.content));
     if (note.handwriting) { const handwritten = el('div', 'annotation-handwriting'); handwritten.append(el('p', 'small muted', note.handwriting.transcription_source === 'model' ? '手写便签 · AI 识别待校对' : '手写便签 · 原笔迹已保留')); if (note.handwriting.transcript) handwritten.append(el('p', '', note.handwriting.transcript)); card.append(handwritten); }
     linkedHandwritingUI?.decorate(card,note);

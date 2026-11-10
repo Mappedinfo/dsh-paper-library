@@ -50,6 +50,14 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
     input.rows=3;input.maxLength=16000;input.value=r.comment;input.placeholder=r.note.text?'自动保存；可直接写下问题，再点「问 DSH」。':'自动保存；请描述图片细节或写下问题，再点「问 DSH」。';
     input.id=`annotation-input-${crypto.randomUUID()}`;label.htmlFor=input.id;
     input.setAttribute('aria-label',`第 ${r.note.page} 页批注的备注或问题`);
+    const expand=node('button','button subtle annotation-remark-expand','展开');expand.type='button';
+    expand.setAttribute('aria-controls',input.id);expand.setAttribute('aria-expanded','false');
+    let expanded=false;
+    function sizeInput(){if(expanded){input.style.height='auto';input.style.height=`${Math.max(240,input.scrollHeight+2)}px`;}}
+    expand.addEventListener('click',()=>{
+      expanded=!expanded;root.classList.toggle('is-expanded',expanded);expand.textContent=expanded?'收起':'展开';expand.setAttribute('aria-expanded',String(expanded));
+      if(expanded)sizeInput();else input.style.height='';
+    });
     const footer=node('div','annotation-inline-status'),status=node('span','small muted'),retry=node('button','button subtle','重试保存');retry.type='button';status.setAttribute('role','status');
     retry.addEventListener('click',()=>void save(r));
     const compare=node('button','button subtle','核对 PDF 备注');compare.type='button';
@@ -70,10 +78,10 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
     input.addEventListener('compositionstart',()=>{composing=true;clearTimeout(r.timer);});
     input.addEventListener('compositionend',()=>{composing=false;update();});
     function update(){r.comment=input.value;const revision=++r.revision;r.error=null;paint(r);changed?.();void load(r.id).then(()=>checkpoint(r.paper)).catch(error=>{if(r.revision===revision){r.error=error.message;paint(r);}});if(!composing)schedule(r);}
-    input.addEventListener('input',update);
+    input.addEventListener('input',()=>{sizeInput();update();});
     input.addEventListener('blur',()=>{if(!composing&&dirty(r))void save(r);});
     const heading=node('div','annotation-inline-heading');
-    footer.append(status,retry,compare);heading.append(label,footer);root.append(heading,input);r.ui={root,input,status,retry,compare};paint(r);return root;
+    footer.append(status,retry,compare);heading.append(label,footer,expand);root.append(heading,input);r.ui={root,input,status,retry,compare};paint(r);return root;
   }
   async function save(r) {
     clearTimeout(r.timer);r.timer=null;
