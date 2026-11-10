@@ -1,0 +1,64 @@
+{
+  "verified_at": "2026-11-10T16:39:09.297837+00:00",
+  "scope": "Synthetic fixtures and isolated Chromium. No real-paper fixtures, model calls, live-browser interaction, publication, or reload.",
+  "focused_javascript": {
+    "tests": 89,
+    "passed": 88,
+    "failed": 0,
+    "skipped": 1,
+    "skip": "existing legacy native settings-file integration"
+  },
+  "pdf_related": {
+    "tests": 86,
+    "passed": 86
+  },
+  "final_python_suite": {
+    "passed": 987,
+    "failed": 0
+  },
+  "browser": {
+    "checks": 8,
+    "errors": [],
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "widths": [
+      511,
+      1450
+    ],
+    "checks_passed": [
+      "native PDF summary appears in requested title/tag row with two distinct lanes",
+      "measured counts and missing PDF are visibly distinct",
+      "light dark wide and narrow isolated layouts stay contained",
+      "density switches to native-position bands immediately",
+      "AI layer toggle hides only AI-style marks",
+      "off preference survives isolated page reload",
+      "re-enable and stronger fitting restore two cached lanes",
+      "refresh keyboard focus and zero PDF mutations or model calls"
+    ]
+  },
+  "build": "passed",
+  "syntax": "passed",
+  "package_wiring": "passed",
+  "diff_check": "passed",
+  "aggregate_limitations": {
+    "javascript": {
+      "tests": 1872,
+      "passed": 1853,
+      "failed": 18,
+      "skipped": 1,
+      "baseline": "All 18 failures reproduced on unchanged HEAD 6eb57a1 in an isolated source snapshot. Seventeen failures in existing annotation/UI fixtures; one existing PDF-intake title case mismatch.",
+      "source_snapshot": "Checks were run on the reading-distribution changes atop 6eb57a1, before concurrent commit 9c87f4e. The merged snapshot passed its 32-test smoke and repeated 8 browser checks; the earlier failure count is not a claim about that later full suite."
+    },
+    "python": "One aggregate run had an intermittent existing external-scan ambiguity assertion; focused reruns and final full 987-test run passed. No claim that every aggregate attempt was green."
+  },
+  "runtime": "Not reloaded while concurrent metadata maintenance is in progress; user browser not refreshed.",
+  "merged_smoke": {
+    "base_commit": "9c87f4e",
+    "tests": 32,
+    "passed": 32,
+    "failed": 0,
+    "browser_checks_repeated": 8
+  }
+}

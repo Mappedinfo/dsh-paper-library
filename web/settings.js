@@ -43,6 +43,18 @@ window.PaperLibrarySettings = (() => {
     resourceReset.addEventListener('click',async()=>{await refresh();if(snapshot){resourceDraft=null;resourceDraftRevision=null;renderResources();}});
     resourceApply.addEventListener('click',async()=>{const profile=resourceProfile.value,patch={resource_profile:profile};if(profile==='custom')for(const [key,input]of resourceInputs)patch[key]=Number(input.value);if(await save(patch,{expectedRevision:resourceDraftRevision??snapshot.revision,resource:true})){resourceDraft=null;resourceDraftRevision=null;renderResources();}});
     const inputs=new Map();
+    const distributionDefaults={reading_distribution_enabled:true,reading_distribution_mode:'density',reading_distribution_ai:true,reading_distribution_smoothing:3};
+    const distributionControls=make('fieldset');distributionControls.id='settings-reading-distribution';distributionControls.append(make('legend','','划线阅读轨迹'),make('p','small','按 PDF 位置展示原生标记分布，帮助回看划线集中处；不代表阅读完成率或理解程度。'));
+    for(const [key,label,help]of [
+      ['reading_distribution_enabled','显示阅读轨迹条带','浅薄荷色表示其他或未知来源的标记，不将其认定为人工划线。'],
+      ['reading_distribution_ai','显示 AI 样式轨迹（蓝色虚线）','与其他标记分开显示；仅按原生蓝色虚线识别，样式不能证明来源。'],
+    ]){const row=make('label','settings-option'),input=make('input'),copy=make('span');input.type='checkbox';input.id=`setting-${key}`;const hint=make('small','',help);hint.id=`setting-${key}-hint`;input.setAttribute('aria-describedby',hint.id);copy.append(make('strong','',label),hint);row.append(input,copy);distributionControls.append(row);inputs.set(key,input);input.addEventListener('change',()=>void save({[key]:input.checked}));}
+    const distributionMode=make('select');distributionMode.id='setting-reading_distribution_mode';distributionMode.setAttribute('aria-label','展示方式');distributionMode.setAttribute('aria-describedby','setting-reading_distribution_mode-hint');
+    for(const[value,label]of [['density','平滑密度'],['bands','划线条带']]){const option=make('option','',label);option.value=value;distributionMode.append(option);}
+    const modeRow=make('label','settings-side'),modeHint=make('p','small','平滑密度概括划线集中处，条带保留位置分布。');modeHint.id='setting-reading_distribution_mode-hint';modeRow.append(make('span','','展示方式'),distributionMode);distributionControls.append(modeRow,modeHint);inputs.set('reading_distribution_mode',distributionMode);distributionMode.addEventListener('change',()=>void save({reading_distribution_mode:distributionMode.value}));
+    const smoothing=make('select');smoothing.id='setting-reading_distribution_smoothing';smoothing.setAttribute('aria-label','平滑范围');smoothing.setAttribute('aria-describedby','setting-reading_distribution_smoothing-hint');
+    for(let value=1;value<=6;value++){const option=make('option','',`${value}${value===3?'（默认）':''}`);option.value=String(value);smoothing.append(option);}
+    const smoothingRow=make('label','settings-side'),smoothingHint=make('p','small','1–6，值越大越平滑；仅影响密度展示，不改变原始标记。');smoothingHint.id='setting-reading_distribution_smoothing-hint';smoothingRow.append(make('span','','平滑范围'),smoothing);distributionControls.append(smoothingRow,smoothingHint);inputs.set('reading_distribution_smoothing',smoothing);smoothing.addEventListener('change',()=>void save({reading_distribution_smoothing:Number(smoothing.value)}));
     const fontRow=make('label','settings-side'),fontSize=make('select');fontSize.id='setting-annotation_font_size';fontSize.setAttribute('aria-label','批注字号');
     for(let size=12;size<=24;size++){const option=make('option','',`${size} px${size===14?'（默认）':''}`);option.value=String(size);fontSize.append(option);}
     fontRow.append(make('span','','批注字号'),fontSize);controls.append(fontRow,make('p','small','用于批注原文、备注与 AI 回复。修改后自动保存，下次打开仍生效。'));inputs.set('annotation_font_size',fontSize);fontSize.addEventListener('change',()=>void save({annotation_font_size:Number(fontSize.value)}));
@@ -66,15 +78,16 @@ window.PaperLibrarySettings = (() => {
     maintenance.append(make('strong','','导出与维护'),make('p','','导出文献与数据集的 BibLaTeX 引用资料。演示文稿请在 Slides 工作台中导出。'));
     const exportLibrary=document.getElementById?.('export-library');if(exportLibrary)maintenance.append(exportLibrary);
     const footer=make('footer'),reload=make('button','button subtle','重新读取'),reset=make('button','button subtle','恢复默认');reload.type=reset.type='button';reload.addEventListener('click',()=>{void refresh();if(storage.open)void modelSettings?.refresh();});reset.addEventListener('click',()=>void save(null));footer.append(reload,reset);
-    dialog.append(header,description,status,languageSettings,paletteControls,resourceControls,controls,storage,maintenance,footer);document.body.append(dialog);
+    dialog.append(header,description,status,languageSettings,paletteControls,distributionControls,resourceControls,controls,storage,maintenance,footer);document.body.append(dialog);
     function say(text,error=false){status.textContent=text;status.classList.toggle('error',error);}
     function render(){
       renderResources();
       controls.disabled=busy||!snapshot?.writable;reset.disabled=busy||!snapshot?.writable;reload.disabled=busy;
-      const shown={...snapshot?.value,...pendingPatch};
+      distributionControls.disabled=busy||!snapshot?.writable;
+      const shown={...distributionDefaults,...snapshot?.value,...pendingPatch};
       paletteControls.disabled=busy||!snapshot?.writable;
       for(const [value,{input,row}]of paletteInputs){input.checked=value===(shown.ui_palette||'jade');row.classList.toggle('is-selected',input.checked);}
-      for(const[key,input]of inputs){if(input.type==='text'&&document.activeElement===input)continue;if(input.type==='checkbox')input.checked=shown[key]===true;else if(input.tagName==='SELECT'||input===fontSize)input.value=String(shown[key]??(key==='annotation_font_size'?14:'left'));else input.value=shown[key]??'';}
+      for(const[key,input]of inputs){if(input.type==='text'&&document.activeElement===input)continue;if(input.type==='checkbox')input.checked=shown[key]===true;else if(input.tagName==='SELECT'||input===fontSize||input===distributionMode||input===smoothing)input.value=String(shown[key]??(key==='annotation_font_size'?14:'left'));else input.value=shown[key]??'';}
       path.textContent=`资料库：${getLibrary()||'正在读取…'}`;
       description.textContent=snapshot?.backend==='dsh'&&snapshot.available===false?'设置由 DSH 管理。请在 DSH 的 Paper Library 面板或「设置 → Paper Library」中修改。':snapshot?.backend==='local'?'独立运行：设置保存在本机。安装到 DSH 后，插件设置会接入 DSH 的统一设置。':'DSH 中的入口：设置 → Paper Library（也保留插件配置入口）。两个入口共享同一份主机设置。';
     }

@@ -79,7 +79,7 @@ test('migration respects explicit native false, normalizes legacy strings and re
   const f = await fixture(t, { legacy, user: { auto_analysis: false, future: 7 } });
   const view = await f.service.get();
   assert.equal(view.backend, 'dsh'); assert.equal(view.writable, true);
-  assert.deepEqual(view.value, { ...RESOURCE_DEFAULTS, auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', ui_palette: 'jade', annotation_font_size: 14, sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_accent: 'system', latex_path_font: 'pixel', latex_split: 50, latex_sync_folder: true });
+  assert.deepEqual(view.value, { ...RESOURCE_DEFAULTS, auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', ui_palette: 'jade', annotation_font_size: 14, reading_distribution_enabled: true, reading_distribution_mode: 'density', reading_distribution_ai: true, reading_distribution_smoothing: 3, sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_accent: 'system', latex_path_font: 'pixel', latex_split: 50, latex_sync_folder: true });
   assert.deepEqual((await f.store.get('preferences')).value, legacy);
   assert.deepEqual((await f.store.get(backup)).value, legacy);
   assert.equal(f.settings.raw().future, 7);
@@ -367,3 +367,52 @@ for(const native of [true,false])test(`resource presets and atomic custom budget
 });
 
 test('invalid cross-field native resource settings remain editable with visible safe fallback',async t=>{const f=await fixture(t,{user:{resource_profile:'custom',resource_memory_mb:128,resource_preview_mb:96}});const value=await f.service.get();assert.match(value.resource_warning,/四分之一/);assert.equal(value.resource_policy.profile,'balanced');const saved=await f.service.update({resource_preview_mb:16},value.revision);assert.equal(saved.resource_warning,undefined);assert.equal(saved.resource_policy.memory_target_mb,128);});
+
+const distributionDefaults = { reading_distribution_enabled: true, reading_distribution_mode: 'density', reading_distribution_ai: true, reading_distribution_smoothing: 3 };
+for (const native of [true, false]) test(`reading distribution saves, reopens and resets without changing old settings (${native ? 'DSH' : 'standalone'})`, async t => {
+  const legacy = { annotation_font_size: 18, ui_palette: 'rose', legacy_data: { keep: true } };
+  const f = await fixture(t, { native, legacy }), initial = await f.service.get();
+  for (const [key, value] of Object.entries(distributionDefaults)) assert.equal(initial.value[key], value);
+  const patch = { reading_distribution_enabled: false, reading_distribution_mode: 'bands', reading_distribution_ai: false, reading_distribution_smoothing: 6 };
+  const saved = await f.service.update(patch, initial.revision);
+  for (const [key, value] of Object.entries(patch)) assert.equal(saved.value[key], value);
+  const persisted = native ? f.settings.raw() : (await f.store.get('preferences')).value;
+  for (const [key, value] of Object.entries(patch)) assert.equal(persisted[key], value);
+  assert.equal(saved.value.annotation_font_size, 18); assert.equal(saved.value.ui_palette, 'rose');
+  await f.service.dispose();
+  const reopened = createPaperLibrarySettings({ store: f.store, settings: f.settings, schema: {} });
+  t.after(() => reopened.dispose()); await reopened.ready;
+  for (const [key, value] of Object.entries(patch)) assert.equal((await reopened.get()).value[key], value);
+  await assert.rejects(reopened.update({ reading_distribution_smoothing: 1 }, initial.revision), code('STATE_CONFLICT'));
+  const reset = await reopened.reset((await reopened.get()).revision, Object.keys(distributionDefaults));
+  for (const [key, value] of Object.entries(distributionDefaults)) { assert.equal(reset.value[key], value); assert.equal(Object.hasOwn(reset.user, key), false); }
+  assert.equal(reset.value.annotation_font_size, 18); assert.equal(reset.value.ui_palette, 'rose');
+  assert.deepEqual((await reopened.localState.get('preferences')).value.legacy_data, { keep: true });
+  for (const reading_distribution_smoothing of [1, 6]) {
+    const current = await reopened.get();
+    assert.equal((await reopened.update({ reading_distribution_smoothing }, current.revision)).value.reading_distribution_smoothing, reading_distribution_smoothing);
+  }
+});
+
+for (const native of [true, false]) test(`reading distribution rejects malformed settings atomically (${native ? 'DSH' : 'standalone'})`, async t => {
+  const f = await fixture(t, { native }), initial = await f.service.get();
+  for (const [key, values] of Object.entries({
+    reading_distribution_enabled: ['true', 1, null], reading_distribution_ai: ['false', 0, {}],
+    reading_distribution_mode: ['human', '', true, 0, null], reading_distribution_smoothing: [0, 7, 2.5, '3', NaN, Infinity, null],
+  })) for (const value of values) assert.throws(() => f.service.update({ annotation_font_size: 20, [key]: value }, initial.revision), code('SETTINGS_INVALID'));
+  assert.deepEqual(await f.service.get(), initial);
+});
+
+test('reading distribution legacy choices migrate while invalid values remain recoverable', async t => {
+  const legacy = { reading_distribution_enabled: 'false', reading_distribution_ai: 'false', reading_distribution_mode: 'bands', reading_distribution_smoothing: 2 };
+  const f = await fixture(t, { legacy, user: { reading_distribution_ai: true } });
+  const value = (await f.service.get()).value;
+  assert.equal(value.reading_distribution_enabled, false); assert.equal(value.reading_distribution_ai, true);
+  assert.equal(value.reading_distribution_mode, 'bands'); assert.equal(value.reading_distribution_smoothing, 2);
+  assert.deepEqual((await f.store.get(backup)).value, legacy);
+  const invalid = { reading_distribution_mode: 'unknown', reading_distribution_smoothing: 7 };
+  const bad = await fixture(t, { legacy: invalid });
+  assert.equal((await bad.service.get()).value.reading_distribution_mode, 'density');
+  assert.equal((await bad.service.get()).value.reading_distribution_smoothing, 3);
+  assert.deepEqual((await bad.store.get(backup)).value, invalid);
+});

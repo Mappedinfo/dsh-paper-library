@@ -91,7 +91,7 @@ test('pending writes cannot overlap and unavailable or memory-only scopes never 
   }
 })
 
-test('reset clears only four plugin overrides and recovers composition defaults without touching other fields', async () => {
+test('reset clears only managed plugin overrides and recovers composition defaults without touching other fields', async () => {
   const fixture = scopeFixture({
     base: { ...SETTINGS_DEFAULTS, 'reading-panel-side': 'right' },
     user: { auto_analysis: true, analysis_fill: true, 'reading-panel-side': 'left', other_plugin_data: 'keep' },
@@ -127,7 +127,7 @@ test('native card exposes all labelled controls, quota descriptions and honest p
   const rendered = PaperLibrarySettingsCard({ model, t: key => key })
   const nodes = walk(rendered)
   const controls = nodes.filter(node => ['input', 'select'].includes(node.type))
-  assert.equal(controls.length, 7)
+  assert.equal(controls.length, 11)
   for (const control of controls) {
     assert.equal(control.props.disabled, true)
     assert.ok(nodes.some(node => node.type === 'label' && node.props.htmlFor === control.props.id))
@@ -351,4 +351,28 @@ test('native resource profile uses shared host mutations and rejects unknown tie
  }
  assert.equal(await model.set('resource_profile','unbounded'),false);
  model.dispose();
+});
+
+
+test('native reading distribution controls share defaults and save typed values with reset', async () => {
+  const backend = await import('../src/harness/settings.mjs');
+  const fixture = scopeFixture({ user: { unrelated: 'keep' } }), model = createSettingsCardModel(fixture.scope);
+  const nodes = walk(PaperLibrarySettingsCard({ model, t: key => key }));
+  assert.ok(nodes.some(node => node.type === 'legend' && node.children.includes('reading_distribution')));
+  for (const key of ['reading_distribution_enabled', 'reading_distribution_mode', 'reading_distribution_ai', 'reading_distribution_smoothing']) assert.equal(SETTINGS_DEFAULTS[key], backend.PAPER_LIBRARY_SETTINGS_DEFAULTS[key]);
+  const control = key => nodes.find(node => node.props.id === `paper-library-setting-${key}`);
+  assert.deepEqual(control('reading_distribution_mode').children.map(node => node.props.value), ['density', 'bands']);
+  assert.deepEqual(control('reading_distribution_smoothing').children.map(node => node.props.value), [1, 2, 3, 4, 5, 6]);
+  for (const [key, value] of Object.entries({ reading_distribution_enabled: false, reading_distribution_mode: 'bands', reading_distribution_ai: false, reading_distribution_smoothing: 6 })) {
+    control(key).props.onChange({ currentTarget: { checked: value, value: String(value) } });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(model.getSnapshot().scope.value[key], value);
+  }
+  const count = fixture.calls.length;
+  for (const [key, values] of Object.entries({ reading_distribution_enabled: ['false', 0], reading_distribution_ai: ['true', 1], reading_distribution_mode: ['other', true], reading_distribution_smoothing: [0, 7, 2.5, '3', NaN] })) for (const value of values) assert.equal(await model.set(key, value), false);
+  assert.equal(fixture.calls.length, count);
+  assert.equal(await model.reset(), true);
+  assert.deepEqual(model.getSnapshot().scope.user, { unrelated: 'keep' });
+  for (const key of Object.keys(SETTINGS_DEFAULTS).filter(key => key.startsWith('reading_distribution_'))) assert.equal(model.getSnapshot().scope.value[key], SETTINGS_DEFAULTS[key]);
+  model.dispose();
 });

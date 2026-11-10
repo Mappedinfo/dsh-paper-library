@@ -204,3 +204,44 @@ test('resource drafts keep their original CAS revision across polling and preser
  await f.ui.refresh();save.emit('click');await flush();assert.ok(f.calls.filter(c=>c.action==='settings_update').every(c=>c.args.expected_revision===view(1).revision),'polling must not advance the resource draft revision');
  restore.emit('click');await flush();assert.equal(preview.value,80);preview.value='64';preview.emit('input');save.emit('click');await flush();assert.equal(values.resource_preview_mb,64);assert.equal(f.calls.filter(c=>c.action==='settings_update').at(-1).args.expected_revision,view(2).revision);f.ui.dispose();
 });
+
+
+for (const backend of ['local', 'dsh']) test(`reading distribution controls persist typed preferences and restore defaults (${backend})`, async () => {
+  const defaults = { reading_distribution_enabled: true, reading_distribution_mode: 'density', reading_distribution_ai: true, reading_distribution_smoothing: 3 };
+  let values = { ...defaults, annotation_font_size: 18 }, user = { annotation_font_size: 18 }, revision = 1;
+  const f = fixture({ api: (action, args) => {
+    if (action === 'settings_update') { assert.equal(args.expected_revision, view(revision).revision); values = { ...values, ...args.patch }; user = { ...user, ...args.patch }; revision++; }
+    if (action === 'settings_reset') { values = { ...defaults, annotation_font_size: 14 }; user = {}; revision++; }
+    return view(revision, values, { backend, user });
+  } });
+  await f.ui.refresh();
+  const group = f.ids.get('settings-reading-distribution'); assert.ok(group);
+  assert.ok(group.children.some(node => /不代表阅读完成率或理解程度/.test(node.textContent)));
+  assert.equal(f.ids.get('setting-reading_distribution_enabled').checked, true);
+  assert.equal(f.ids.get('setting-reading_distribution_mode').value, 'density');
+  assert.equal(f.ids.get('setting-reading_distribution_ai').checked, true);
+  assert.equal(f.ids.get('setting-reading_distribution_smoothing').value, '3');
+  for (const [key, value] of Object.entries({ reading_distribution_enabled: false, reading_distribution_mode: 'bands', reading_distribution_ai: false, reading_distribution_smoothing: 6 })) {
+    f.change(key, typeof value === 'number' ? String(value) : value); await flush();
+    assert.equal(f.calls.filter(call => call.action === 'settings_update').at(-1).args.patch[key], value);
+    assert.equal(f.changes.at(-1).value[key], value);
+  }
+  assert.equal(values.annotation_font_size, 18, 'ordinary reading preferences survive strip edits');
+  await f.ui.refresh();
+  assert.equal(f.ids.get('setting-reading_distribution_enabled').checked, false);
+  assert.equal(f.ids.get('setting-reading_distribution_smoothing').value, '6');
+  f.ids.get('library-settings').children.find(node => node.tagName === 'footer').children.find(node => node.textContent === '恢复默认').emit('click'); await flush();
+  assert.equal(f.ids.get('setting-reading_distribution_enabled').checked, true);
+  assert.equal(f.ids.get('setting-reading_distribution_mode').value, 'density');
+  assert.equal(f.ids.get('setting-reading_distribution_ai').checked, true);
+  assert.equal(f.ids.get('setting-reading_distribution_smoothing').value, '3');
+  assert.match(f.status(), /已保存到/); f.ui.dispose();
+});
+
+test('failed reading strip save restores confirmed state and remains visibly unsaved', async () => {
+  const f = fixture({ api: action => { if (action === 'settings_update') throw Error('conflict'); return view(1, { reading_distribution_mode: 'density', reading_distribution_smoothing: 3 }); } });
+  await f.ui.refresh(); f.change('reading_distribution_mode', 'bands'); await flush();
+  assert.equal(f.ids.get('setting-reading_distribution_mode').value, 'density'); assert.match(f.status(), /未保存/);
+  f.change('reading_distribution_smoothing', '6'); await flush();
+  assert.equal(f.ids.get('setting-reading_distribution_smoothing').value, '3'); assert.match(f.status(), /未保存/); f.ui.dispose();
+});

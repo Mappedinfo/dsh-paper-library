@@ -9,17 +9,27 @@ export const SETTINGS_DEFAULTS = Object.freeze({
   'reading-panel-side': 'left',
   ui_palette: 'jade',
   annotation_font_size: 14,
+  reading_distribution_enabled: true,
+  reading_distribution_mode: 'density',
+  reading_distribution_ai: true,
+  reading_distribution_smoothing: 3,
   resource_profile: 'balanced',
 })
 const fields = Object.keys(SETTINGS_DEFAULTS)
+const distributionFields = fields.filter(key => key.startsWith('reading_distribution_'))
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value ?? {}, key)
-const valid = (key, value) => key === 'annotation_font_size' ? Number.isInteger(value) && value >= 12 && value <= 24 : key === 'resource_profile' ? ['eco', 'balanced', 'performance', 'custom'].includes(value) : key === 'ui_palette' ? ['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].includes(value) : key === 'reading-panel-side'
+const valid = (key, value) => key === 'reading_distribution_mode' ? ['density', 'bands'].includes(value) : key === 'reading_distribution_smoothing' ? Number.isSafeInteger(value) && value >= 1 && value <= 6 : key === 'annotation_font_size' ? Number.isInteger(value) && value >= 12 && value <= 24 : key === 'resource_profile' ? ['eco', 'balanced', 'performance', 'custom'].includes(value) : key === 'ui_palette' ? ['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].includes(value) : key === 'reading-panel-side'
   ? value === 'left' || value === 'right' : fields.includes(key) && typeof value === 'boolean'
 const writable = snapshot => snapshot.status === 'ready' && snapshot.mode === 'host'
   && snapshot.writable && Number.isSafeInteger(snapshot.revision)
 
 const locales = {
   zh: {
+    reading_distribution: '划线阅读轨迹', 'reading_distribution.hint': '按 PDF 位置展示原生标记分布，帮助回看划线集中处；不代表阅读完成率或理解程度。',
+    reading_distribution_enabled: '显示阅读轨迹条带', 'reading_distribution_enabled.hint': '浅薄荷色表示其他或未知来源的标记，不将其认定为人工划线。',
+    reading_distribution_mode: '展示方式', 'reading_distribution_mode.hint': '平滑密度概括划线集中处，条带保留位置分布。', density: '平滑密度', bands: '划线条带',
+    reading_distribution_ai: '显示 AI 样式轨迹（蓝色虚线）', 'reading_distribution_ai.hint': '与其他标记分开显示；仅按原生蓝色虚线识别，样式不能证明来源。',
+    reading_distribution_smoothing: '平滑范围', 'reading_distribution_smoothing.hint': '1–6，值越大越平滑；仅影响密度展示，不改变原始标记。',
     annotation_font_size: '批注字号', 'annotation_font_size.hint': '批注原文、备注和 AI 回复的字号，修改后自动保存。',
     title: 'Paper Library', description: '与资料库内的设置共用主机文件，修改后同步到已打开的阅读页。',
     auto_analysis: '新增或选中文献后自动整理', 'auto_analysis.hint': '新导入或选中且尚无整理记录的 PDF 会按全文分批排队。使用论文对应的 DSH 模型，会消耗模型额度。',
@@ -40,6 +50,11 @@ const locales = {
     'language.failed': '语言设置读取或保存失败，请检查连接后重试。', 'language.loading': '正在读取语言设置…', 'language.saving': '正在保存语言设置…',
   },
   en: {
+    reading_distribution: 'Reading mark distribution', 'reading_distribution.hint': 'Shows native marks by PDF position to revisit marked areas, not reading completion or understanding.',
+    reading_distribution_enabled: 'Show reading distribution strip', 'reading_distribution_enabled.hint': 'Pale mint represents other or unknown-origin marks, not confirmed human marks.',
+    reading_distribution_mode: 'Display mode', 'reading_distribution_mode.hint': 'Smooth density summarizes clusters; bands retain the position distribution.', density: 'Smooth density', bands: 'Mark bands',
+    reading_distribution_ai: 'Show AI-style marks (blue dashes)', 'reading_distribution_ai.hint': 'Separate from other marks. Native blue dashed styling identifies this group, not authorship.',
+    reading_distribution_smoothing: 'Smoothing range', 'reading_distribution_smoothing.hint': '1–6, higher is smoother. Affects density display only, not native marks.',
     annotation_font_size: 'Annotation font size', 'annotation_font_size.hint': 'Text size for excerpts, notes and AI replies. Changes save automatically.',
     ui_palette: 'Workspace palette', 'ui_palette.hint': 'Functional colors for reading, knowledge, writing and slides. Light/dark follows DSH.', jade: 'Jade & brass', navy: 'Navy & slate', neutral: 'Graphite neutral', rose: 'Soft rose', apricot: 'Warm apricot', system: 'Follow DSH',
     title: 'Paper Library', description: 'Shared with the library settings on the host. Open readers update when these choices change.',
@@ -245,17 +260,14 @@ export function PaperLibrarySettingsCard({ model, t, onMount, canReset = true })
   const disabled = !writable(scope) || state === 'saving'
   const status = scope.status === 'loading' ? 'loading' : scope.status !== 'ready' || scope.mode !== 'host'
     ? 'unavailable' : !scope.writable ? 'readonly' : state === 'idle' ? null : state
-  return h('section', { 'data-paper-library-settings': true, 'aria-label': t('title'), style: {
-    padding: '16px', border: '1px solid var(--dsw-alias-border-l1, #d9dde2)', borderRadius: '12px',
-    background: 'var(--dsw-alias-bg-base, transparent)', color: 'var(--dsw-alias-label-primary, inherit)',
-    font: 'inherit', fontSize: '13px', minWidth: 0, overflowWrap: 'anywhere',
-  } },
-  h('h3', { style: { fontSize: '15px', lineHeight: 1.4, margin: '0 0 6px', fontWeight: 600 } }, t('title')),
-  h('p', { style: { ...muted, margin: '0 0 14px' } }, t('description')),
-  ...fields.map(key => {
+  const renderField = key => {
     const id = `paper-library-setting-${key}`
     const value = own(pending, key) ? pending[key] : valid(key, scope.value?.[key]) ? scope.value[key] : SETTINGS_DEFAULTS[key]
-    const input = key === 'annotation_font_size'
+    const input = key === 'reading_distribution_mode'
+      ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, event.currentTarget.value) } }, ...['density', 'bands'].map(value => h('option', { key: value, value }, t(value))))
+      : key === 'reading_distribution_smoothing'
+      ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, Number(event.currentTarget.value)) } }, ...Array.from({ length: 6 }, (_, index) => index + 1).map(value => h('option', { key: value, value }, String(value))))
+      : key === 'annotation_font_size'
       ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, Number(event.currentTarget.value)) } }, ...Array.from({length:13},(_,index)=>index+12).map(value=>h('option',{key:value,value},`${value} px`)))
       : key === 'resource_profile'
       ? h('select', { id, value, disabled, 'aria-describedby': `${id}-hint`, style: control, onChange: event => { void model.set(key, event.currentTarget.value) } }, ...['eco', 'balanced', 'performance', 'custom'].map(value => h('option', { key: value, value }, t(value))))
@@ -268,7 +280,19 @@ export function PaperLibrarySettingsCard({ model, t, onMount, canReset = true })
     return h('div', { key, style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', columnGap: '16px', padding: '10px 0', borderTop: '1px solid var(--dsw-alias-border-l1, #d9dde2)' } },
       h('div', null, h('label', { htmlFor: id, style: { display: 'block', fontWeight: 500, lineHeight: 1.5, cursor: disabled ? 'default' : 'pointer' } }, t(key)),
         h('p', { id: `${id}-hint`, style: { ...muted, margin: '3px 0 0' } }, t(`${key}.hint`))), input)
-  }),
+  }
+  return h('section', { 'data-paper-library-settings': true, 'aria-label': t('title'), style: {
+    padding: '16px', border: '1px solid var(--dsw-alias-border-l1, #d9dde2)', borderRadius: '12px',
+    background: 'var(--dsw-alias-bg-base, transparent)', color: 'var(--dsw-alias-label-primary, inherit)',
+    font: 'inherit', fontSize: '13px', minWidth: 0, overflowWrap: 'anywhere',
+  } },
+  h('h3', { style: { fontSize: '15px', lineHeight: 1.4, margin: '0 0 6px', fontWeight: 600 } }, t('title')),
+  h('p', { style: { ...muted, margin: '0 0 14px' } }, t('description')),
+  ...fields.filter(key => !distributionFields.includes(key)).map(renderField),
+  h('fieldset', { style: { border: '1px solid var(--dsw-alias-border-l1, #d9dde2)', borderRadius: '7px', margin: '16px 0 0', padding: '8px 12px', minWidth: 0 } },
+    h('legend', { style: { fontWeight: 600 } }, t('reading_distribution')),
+    h('p', { style: { ...muted, margin: '0 0 8px' } }, t('reading_distribution.hint')),
+    ...distributionFields.map(renderField)),
   h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', marginTop: '12px' } },
     canReset ? h('button', { type: 'button', disabled, title: t('reset.hint'), style: { ...control, cursor: disabled ? 'default' : 'pointer' }, onClick: () => { void model.reset() } }, t('reset')) : null,
     status ? h('span', { role: ['conflict', 'failed'].includes(status) ? 'alert' : 'status', style: { ...muted, color: ['conflict', 'failed'].includes(status) ? 'var(--dsw-alias-state-error-primary, #b33939)' : muted.color } }, t(status)) : null),

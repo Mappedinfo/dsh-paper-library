@@ -8,6 +8,7 @@ window.PaperOrganization = (() => {
   const tags = item => [...new Set([...sourceLabels(item).filter(tag=>!item.hidden_source_tags?.includes(tag)),...(item.manual_tags||[]).map(label)].filter(t=>t!=='#'))];
   const isPaper = item => item && (!item.resource_kind || item.resource_kind==='paper');
   function create({state,api,loadList,onChanged,toast,root}) {
+    const distribution=window.PaperReadingDistribution?.create({api});
     const busy=new Set();let pickerOpen=false,ticket=0,tagOffset=0,tagNext=null,timer,editing=null,editTicket=0,hiddenSources=new Set();
     const controls=node('div',undefined,'paper-organization-filters');
     const favorite=button('☆ 偏好论文',()=>{state.favorite=!state.favorite;apply();});favorite.id='catalog-favorite';
@@ -111,11 +112,12 @@ window.PaperOrganization = (() => {
       const row=node('div',undefined,'paper-organization-actions');if(!isPaper(item))return row;
       const star=button(item.favorite?'★':'☆',()=>void toggle(item),'paper-favorite');star.dataset.organizationStar=item.id;star.title=item.favorite?'取消偏好论文':'加入偏好论文';star.setAttribute('aria-label',star.title);star.setAttribute('aria-pressed',String(Boolean(item.favorite)));star.disabled=busy.has(item.id);
       if(!item.archived)row.append(star,button('标签',()=>void edit(item),'paper-tag-edit'));
+      if(distribution&&!item.archived)row.append(distribution.mount(item));
       const values=tags(item);for(const tag of (compact?values.slice(0,3):values))row.append(chip(tag));
       if(compact&&values.length>3&&!item.archived)row.append(button(`+${values.length-3}`,()=>void edit(item),'paper-tag-edit'));
       return row;
     }
-    sync();return {actions,edit,filterTag,sync};
+    sync();return {actions,edit,filterTag,sync,applyPreferences:value=>distribution?.applyPreferences(value),invalidateDistribution:id=>distribution?.invalidate(id),dispose:()=>distribution?.dispose()};
   }
   return {create,tags};
 })();

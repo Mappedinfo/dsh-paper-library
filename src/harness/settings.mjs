@@ -15,6 +15,10 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   'reading-panel-side': 'left',
   ui_palette: 'jade',
   annotation_font_size: 14,
+  reading_distribution_enabled: true,
+  reading_distribution_mode: 'density',
+  reading_distribution_ai: true,
+  reading_distribution_smoothing: 3,
   ...RESOURCE_DEFAULTS,
   // Optional adapter to a separate data-sync service: a config file it owns, or
   // extra absolute folders. Both default to empty, so the library never needs it.
@@ -32,7 +36,7 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   latex_sync_folder: true,
 });
 export const TEXT_SETTINGS = Object.freeze(['sync_config', 'external_sources', 'latex_accent']);
-export const NUMBER_SETTINGS = Object.freeze({ annotation_font_size: { minimum: 12, maximum: 24 }, latex_split: { minimum: 25, maximum: 75 }, ...RESOURCE_FIELDS });
+export const NUMBER_SETTINGS = Object.freeze({ reading_distribution_smoothing: { minimum: 1, maximum: 6 }, annotation_font_size: { minimum: 12, maximum: 24 }, latex_split: { minimum: 25, maximum: 75 }, ...RESOURCE_FIELDS });
 const fields = Object.keys(PAPER_LIBRARY_SETTINGS_DEFAULTS);
 const markerKey = 'settings.migration:paper-library';
 const backupKey = 'settings.backup:paper-library';
@@ -58,6 +62,10 @@ export function createPaperLibrarySettingsSchema(Schema) {
     'reading-panel-side': Schema.union([Schema.const('left'), Schema.const('right')]).default('left'),
     ui_palette: Schema.union([Schema.const('jade'), Schema.const('navy'), Schema.const('neutral'), Schema.const('rose'), Schema.const('apricot'), Schema.const('system')]).default('jade'),
     annotation_font_size: Schema.number().default(14),
+    reading_distribution_enabled: Schema.boolean().default(true),
+    reading_distribution_mode: Schema.union([Schema.const('density'), Schema.const('bands')]).default('density'),
+    reading_distribution_ai: Schema.boolean().default(true),
+    reading_distribution_smoothing: Schema.number().default(3),
     resource_profile: Schema.union(['eco','balanced','performance','custom'].map(value=>Schema.const(value))).default('balanced'),
     ...Object.fromEntries(Object.entries(RESOURCE_FIELDS).map(([key,rule])=>[key,Schema.number().default(rule.default)])),
     sync_config: Schema.string().default(''),
@@ -81,6 +89,8 @@ function validatePatch(patch) {
       if (!['left', 'right'].includes(value)) throw invalid('设置值无效：reading-panel-side');
     } else if (key === 'ui_palette') {
       if (!['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].includes(value)) throw invalid('设置值无效：ui_palette');
+    } else if (key === 'reading_distribution_mode') {
+      if (!['density', 'bands'].includes(value)) throw invalid('设置值无效：reading_distribution_mode');
     } else if (key === 'resource_profile') {
       if (!['eco','balanced','performance','custom'].includes(value)) throw invalid('请选择有效的资源档位。');
     } else if (key === 'latex_engine') {

@@ -113,3 +113,17 @@
 .library-pane[data-workspace-focus=project] .workspace-related{display:flex;flex-direction:column;flex:1;min-height:0}
 .library-pane[data-workspace-focus=project] .workspace-related>summary{flex:none}
 .library-pane[data-workspace-focus=project] .workspace-related-body{flex:1;min-height:0;overflow:auto}
+
+/* Inline, passive native-PDF mark distribution under the catalog title. */
+.paper-organization-actions .reading-distribution{display:inline-flex;flex-direction:column;gap:2px;flex:0 1 248px;width:248px;max-width:100%;min-width:140px;margin:3px 12px 3px 8px;vertical-align:middle;border-radius:4px;outline-offset:3px}
+.paper-organization-actions .reading-distribution[hidden]{display:none}
+.reading-distribution-caption{display:flex;justify-content:space-between;gap:8px;font-size:10px;color:var(--muted);line-height:1.3}
+.reading-distribution-count{font-variant-numeric:tabular-nums}
+.reading-distribution-track{display:block;height:8px;overflow:hidden;border-radius:3px;background:color-mix(in srgb,#8ce7bb 14%,transparent);color:#70dcb4}
+.reading-distribution-track.is-ai{background:color-mix(in srgb,#99ceff 12%,transparent);color:#91caff}
+.reading-distribution-track svg{display:block;width:100%;height:100%;fill:currentColor}
+.reading-distribution-density{fill:currentColor;fill-opacity:.65;stroke:currentColor;stroke-width:.75}
+.is-ai .reading-distribution-density{stroke-dasharray:3 2}
+.reading-distribution-placeholder{height:12px;border:1px dashed var(--line);border-radius:3px;background:transparent}
+.reading-distribution:focus-visible{outline:2px solid var(--accent,var(--teal))}
+.paper-entry .reading-distribution{flex-basis:100%;width:100%;margin:4px 0}

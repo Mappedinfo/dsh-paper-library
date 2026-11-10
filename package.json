@@ -53,6 +53,7 @@
     "docs/validation.md",
     "docs/annotation-reference-design.md",
     "docs/ai-annotation-style.md",
+    "docs/reading-distribution.md",
     "docs/library-datasets-knowledge-design.md",
     "docs/upstream-manifest.md",
     "docs/validation",
