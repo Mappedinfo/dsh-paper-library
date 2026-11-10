@@ -34,7 +34,7 @@ Paper Library 将文献收集、PDF 阅读与批注、知识整理和 LaTeX 写�
 
 项目原创代码采用 [MIT](LICENSE)。默认 PDF 引擎 PyMuPDF 采用 AGPL/商业许可，CSL 等第三方组件保留原许可；完整安装的依赖栈并非仅受 MIT 约束。详见 [第三方许可](THIRD_PARTY.md)。
 
-**继续开发前先读 [项目交接](HANDOFF.md)**，其中记录当前能力、验证证据和待验证项。 版本变更见 [CHANGELOG](CHANGELOG.md)。
+**继续开发前先读 [项目交接](HANDOFF.md)**，其中记录当前状态、验证边界和下一步；历史记录仅按需检索。 版本变更见 [CHANGELOG](CHANGELOG.md)。
 
 本地资料维护另提供[基础元数据覆盖检查](docs/pdf-metadata-audit.md)：先复用 Zotero 和采集清单中的资料，再列出需要补全的文件，避免为已有字段重复调用模型。另有[独立模型 API 测试](docs/direct-model-probe.md)，用合成示例验证 GLM／Kimi 直连，无需运行 DSH。
 
