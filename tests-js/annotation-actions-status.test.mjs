@@ -14,8 +14,9 @@ function fixture(){
   const copied=[],messages=[];
   Object.assign(window,{state:{active:{id:'paper-a'},annotations:[],noteOffset:0},$:(id)=>document.getElementById(id),el:(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;},readerSearchUI:null,linkedHandwritingUI:null,handwritingUI:null,companionUI:null,annotationTranslationAvailable:false,displayDate:()=>'',toast:(message)=>messages.push(message),paperChatUI:{available:()=>true,hasAnnotation:()=>false},wikiUI:{show(){}},openDialog:id=>document.getElementById(id).setAttribute('open','')});
   Object.defineProperty(window.navigator,'clipboard',{configurable:true,value:{writeText:async text=>copied.push(text)}});
-  window.eval(source.slice(source.indexOf('function annotationThreads('),source.indexOf('/** 自动着色')));
-  window.eval(source.slice(source.indexOf('async function handleNoteAction('),source.indexOf('function fileBase64(')));
+  window.eval(source.slice(source.indexOf('const annotationLoadJobs='),source.indexOf('/** 自动着色'))
+    + source.slice(source.indexOf('let annotationLinkTimer ='),source.indexOf('function fileBase64('))
+    + '\nwindow.annotationLoadJobsForTest=annotationLoadJobs;');
   window.eval(source.slice(source.indexOf('async function copyText('),source.indexOf('async function cite(')));
   return {dom,window,document,copied,messages};
 }
@@ -86,7 +87,6 @@ test('locate current page clears filtering, opens the rail and crosses paginatio
  w.pdfReader={getSnapshot:()=>({paperId:'paper-a',page:43}),goTo:()=>assert.fail('PDF must not navigate')};
  w.readingPanels={show:name=>{assert.equal(name,'annotations');opened=true;},visible:()=>opened};
  w.readerSearchUI={filter:g=>filtered?{...g,notes:g.notes.slice(0,1)}:g,clearAnnotationFilter:()=>{filtered=false;}};
- w.eval(source.slice(source.indexOf('let annotationLinkTimer ='),source.indexOf('async function handleNoteAction(')));
  w.locateCurrentPageAnnotations();assert.equal(opened,true);assert.equal(filtered,false);assert.equal(w.state.noteOffset,40);assert.deepEqual(scrolls,[['a42','start']]);assert.equal(d.querySelector('.is-linked').dataset.annotationId,'a42');assert.equal(w.state.page,1);
  }finally{w.close();}
 });
@@ -95,9 +95,46 @@ test('locate nearest annotation prefers preceding page on a tie and reports abse
  w.HTMLElement.prototype.scrollIntoView=function(){};w.state.active.pdf=true;w.state.page=15;
  w.pdfReader={getSnapshot:()=>({paperId:'another-paper',page:3})};w.readingPanels={show(){},visible:()=>true};
  w.state.annotations=[{id:'later',page:17,type:'underline',text:'Later'},{id:'earlier',page:13,type:'underline',text:'Earlier'},{id:'bad',page:0,type:'note',comment:'No page'}];
- w.eval(source.slice(source.indexOf('let annotationLinkTimer ='),source.indexOf('async function handleNoteAction(')));
  w.locateCurrentPageAnnotations();assert.equal(f.document.querySelector('.is-linked').dataset.annotationId,'earlier');assert.match(f.messages.at(-1),/第 13 页.*最近/);
  w.state.annotations=[{id:'bad',page:0}];w.locateCurrentPageAnnotations();assert.match(f.messages.at(-1),/暂无可定位/);
+ }finally{w.close();}
+});
+
+test('PDF markup opens the exact sidebar page by annotation ID and only clears an excluding filter', {skip:!JSDOM},async()=>{
+ const f=fixture(),w=f.window,d=f.document;try{
+  let opened=false,filter='excluding';const scrolls=[];
+  w.HTMLElement.prototype.scrollIntoView=function({block}){scrolls.push([this.dataset.annotationId,block]);};
+  w.state.active.pdf=true;w.state.page=8;
+  w.state.annotations=Array.from({length:84},(_,i)=>({id:'a'+i,page:8,type:'underline',text:'Source '+i}));
+  w.state.annotations.push({id:'ink',kind:'linked-handwriting',parent_id:'a81',page:8});
+  w.readingPanels={show:name=>{assert.equal(name,'annotations');opened=true;},visible:()=>opened};
+  w.readerSearchUI={filter:group=>filter?{...group,notes:group.notes.filter(note=>note.id===(filter==='excluding'?'a0':'a81'))}:group,clearAnnotationFilter:()=>{filter=null;}};
+  w.eval(await readFile(new URL('../web/annotation-threads.js',import.meta.url),'utf8'));
+  w.renderAnnotations();
+  assert.match(source,/onAnnotationActivate: annotationId => \{void locatePdfAnnotation\(annotationId\);\}/);
+  await w.locatePdfAnnotation('ink');
+  assert.equal(filter,null);assert.equal(opened,true);assert.equal(w.state.noteOffset,80);
+  assert.equal(d.querySelector('.is-linked').dataset.annotationId,'a81');
+  await w.locatePdfAnnotation('a4');
+  assert.equal(w.state.noteOffset,0);assert.equal(d.querySelector('.is-linked').dataset.annotationId,'a4');
+  filter='including';w.renderAnnotations();await w.locatePdfAnnotation('a81');
+  assert.equal(filter,'including');assert.equal(w.state.noteOffset,0);assert.equal(d.querySelector('.is-linked').dataset.annotationId,'a81');
+  assert.deepEqual(scrolls,[['a81','center'],['a4','center'],['a81','center']]);assert.equal(w.state.page,8);
+ }finally{w.close();}
+});
+
+test('PDF activation waits for a delayed annotation list and flashes the latest click after a deferred render', {skip:!JSDOM},async()=>{
+ const f=fixture(),w=f.window,d=f.document;try{
+  const scrolls=[];let deferred=true,finishLoad;
+  w.HTMLElement.prototype.scrollIntoView=function(){scrolls.push(this.dataset.annotationId);};
+  w.readingPanels={show(){},visible:()=>true};w.annotationEditor={deferRender:()=>deferred,beforeRender:()=>null,decorate(){}};
+  w.annotationLoadJobsForTest.set('paper-a',{promise:new Promise(resolve=>{finishLoad=resolve;})});
+  const first=w.locatePdfAnnotation('a2'),latest=w.locatePdfAnnotation('a42');
+  w.state.annotations=Array.from({length:45},(_,i)=>({id:'a'+i,page:2,type:'underline',text:'Source '+i}));
+  finishLoad(true);await Promise.all([first,latest]);
+  assert.equal(w.state.noteOffset,40);assert.deepEqual(scrolls,[]);
+  deferred=false;w.renderAnnotations();
+  assert.deepEqual(scrolls,['a42']);assert.equal(d.querySelector('.is-linked').dataset.annotationId,'a42');
  }finally{w.close();}
 });
 

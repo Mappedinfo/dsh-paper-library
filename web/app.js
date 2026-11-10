@@ -474,6 +474,7 @@ function visibleAnnotationThreads() {
   return readerSearchUI?.filter(grouped)||grouped;
 }
 let pendingAnnotationSearchId=null;
+let pendingPdfAnnotationLink=null;
 function renderAnnotations() {
   if(typeof annotationEditor!=='undefined'&&annotationEditor?.deferRender?.(renderAnnotations))return;
   const restoreEditorFocus = typeof annotationEditor!=='undefined'?annotationEditor?.beforeRender():null;
@@ -577,6 +578,11 @@ function renderAnnotations() {
     const target=[...$('annotation-list').querySelectorAll('[data-annotation-id]')].find(node=>node.dataset.annotationId===pendingAnnotationSearchId);
     if(target){for(let parent=target.parentElement;parent&&parent!==$('annotation-list');parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;target.scrollIntoView({block:'start',inline:'nearest'});target.classList.add('is-linked');setTimeout(()=>target.classList.remove('is-linked'),2400);}
     pendingAnnotationSearchId=null;
+  }
+  if(pendingPdfAnnotationLink?.cardId){
+    const {cardId,paperId,itemTicket}=pendingPdfAnnotationLink;
+    pendingPdfAnnotationLink=null;
+    if(paperId===state.active?.id&&itemTicket===state.itemTicket)linkAnnotationCard(cardId);
   }
 }
 /** 自动着色：拖选即按当前颜色写成自然批注（不弹对话框）。
@@ -743,8 +749,7 @@ async function dismissAnnotation() {
   if (!$('annotation-comment').value.trim()) { state.annotationDraft = null; closeDialog('annotation-dialog'); return true; }
   return saveAnnotation({ preventDefault() {}, target: $('annotation-form'), submitter: null });
 }
-/** Reader ↔ rail linking: the shared rail keeps its own cards, so linking only
- * scrolls and flashes the matching card and never rewrites the list. */
+/** Scroll and flash a mounted rail card without moving the PDF. */
 let annotationLinkTimer = null;
 function linkAnnotationCard(annotationId, {block='center'}={}) {
   const escaped = window.CSS?.escape ? window.CSS.escape(annotationId) : annotationId.replace(/["\\]/g, '\\$&');
@@ -757,9 +762,47 @@ function linkAnnotationCard(annotationId, {block='center'}={}) {
   annotationLinkTimer = window.setTimeout(() => { annotationLinkTimer = null; if (card.isConnected) card.classList.remove('is-linked'); }, 2400);
   return true;
 }
+async function locatePdfAnnotation(annotationId) {
+  const paperId=state.active?.id;
+  if(!paperId||!annotationId)return;
+  const request={paperId,itemTicket:state.itemTicket};
+  pendingAnnotationSearchId=null;
+  pendingPdfAnnotationLink=request;
+  const current=()=>pendingPdfAnnotationLink===request&&paperId===state.active?.id&&request.itemTicket===state.itemTicket;
+  function target(){
+    const group=annotationThreads(state.annotations);
+    const hit=state.annotations.find(note=>note.id===annotationId);
+    const id=hit?.kind==='linked-handwriting'?hit.parent_id:annotationId;
+    const parent=!group.roots?.has(id)?[...group.replies].find(([,replies])=>replies.some(reply=>reply.id===id))?.[0]:undefined;
+    const cardId=group.roots?.get(parent??id)??parent??id;
+    return {group,cardId,index:group.notes.findIndex(note=>note.id===cardId)};
+  }
+  let {group,cardId,index}=target();
+  if(index<0){
+    const loaded=await (annotationLoadJobs.get(paperId)?.promise??loadAnnotations(paperId));
+    if(!current())return;
+    if(!loaded){pendingPdfAnnotationLink=null;return;}
+    ({group,cardId,index}=target());
+  }
+  if(index<0){
+    pendingPdfAnnotationLink=null;
+    if(state.annotationsTruncated)toast('这条批注超出侧栏当前读取范围。');
+    return;
+  }
+  const visible=readerSearchUI?.filter(group)||group;
+  const visibleIndex=visible.notes.findIndex(note=>note.id===cardId);
+  if(visibleIndex<0)readerSearchUI?.clearAnnotationFilter();
+  const offset=Math.floor((visibleIndex<0?index:visibleIndex)/40)*40;
+  if(!readingPanels?.visible('annotations'))readingPanels?.show('annotations');
+  if(visibleIndex>=0&&state.noteOffset===offset&&linkAnnotationCard(cardId)){pendingPdfAnnotationLink=null;return;}
+  state.noteOffset=offset;
+  request.cardId=cardId;
+  renderAnnotations();
+}
 // 只同步批注侧栏，保持 PDF 当前页、缩放和阅读位置。
 function locateCurrentPageAnnotations(clickedPage) {
   if(!state.active?.pdf)return;
+  pendingPdfAnnotationLink=null;
   const snapshot=pdfReader?.getSnapshot(),page=clickedPage??(snapshot?.paperId===state.active.id?snapshot.page:state.page);
   if(!Number.isInteger(page)||page<1)return;
   const notes=annotationThreads(state.annotations).notes;
@@ -779,7 +822,7 @@ function locateCurrentPageAnnotations(clickedPage) {
 async function handleNoteAction(event) {
   const button = event.target.closest('[data-note-action]'); if (!button) return;
   const action = button.dataset.noteAction;
-  if (action === 'previous' || action === 'next') { state.noteOffset += action === 'next' ? 40 : -40; renderAnnotations();$('annotation-list').scrollTop=0; return; }
+  if (action === 'previous' || action === 'next') { pendingPdfAnnotationLink=null;state.noteOffset += action === 'next' ? 40 : -40; renderAnnotations();$('annotation-list').scrollTop=0; return; }
   const note = state.annotations.find((entry) => entry.id === button.closest('[data-annotation-id]').dataset.annotationId); if (!note) return;
   if(action==='favorite'){
     const id=state.active?.id, key=JSON.stringify([id,note.id]), favorite=!favoriteAnnotationIds.has(note.id);
@@ -1347,7 +1390,7 @@ $('discuss-selection').addEventListener('click', () => paperChatUI?.useSelection
 $('annotation-comment').addEventListener('input', publishReaderState);
 $('annotation-dialog').addEventListener('close', publishReaderState);
 $('page-note').addEventListener('click', () => openAnnotation('note')); $('annotation-form').addEventListener('submit', saveAnnotation); $('annotation-list').addEventListener('click', event=>void handleNoteAction(event).catch(error=>toast(error.message,true)));
-document.addEventListener('annotation-page',event=>{if(!['previous','next'].includes(event.detail))return;const total=visibleAnnotationThreads().notes.length;state.noteOffset=Math.max(0,Math.min(Math.max(0,Math.ceil(total/40)-1)*40,state.noteOffset+(event.detail==='next'?40:-40)));renderAnnotations();$('annotation-list').scrollTop=0;});
+document.addEventListener('annotation-page',event=>{if(!['previous','next'].includes(event.detail))return;pendingPdfAnnotationLink=null;const total=visibleAnnotationThreads().notes.length;state.noteOffset=Math.max(0,Math.min(Math.max(0,Math.ceil(total/40)-1)*40,state.noteOffset+(event.detail==='next'?40:-40)));renderAnnotations();$('annotation-list').scrollTop=0;});
 // Rail → PDF: clicking a card body (never its action buttons) reveals the
 // matching markup in the document and flashes it.
 $('annotation-list').addEventListener('click', event => {
@@ -1651,7 +1694,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   },
   onRectangle: (selection,intent) => {if(selection.id===state.active?.id)return openAnnotation('square',null,{selection,color:intent.color,width:intent.width});},
   onPageNote: (selection,intent) => {if(selection.id===state.active?.id)openAnnotation('note',null,{selection,color:intent.color});},
-  onAnnotationActivate: (annotationId,info) => {if(info?.page&&state.active?.id&&annotationId){const note=state.annotations.find(value=>value.id===annotationId);linkAnnotationCard(note?.kind==='linked-handwriting'?note.parent_id:annotationId);}},
+  onAnnotationActivate: annotationId => {void locatePdfAnnotation(annotationId);},
   onInkChange: inkDraftChanged,
   onInputChange: info => readingShell?.inputChanged(info),
   onFocusChange: info => readingShell?.focusChanged(info),
@@ -1724,8 +1767,8 @@ documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPan
   annotated:async(id,page)=>{if(state.active?.id!==id)return;await loadAnnotations(id);if(state.active?.id===id)await pdfReader?.refresh(page,{defer:true});},
 });
 readerSearchUI=window.PaperReaderSearch?.create({api,getPaper:()=>state.active,reader:()=>pdfReader,navigate:()=>switchTab('reader'),getElements:()=>documentElementsUI,
-  onAnnotationSearch:()=>{pendingAnnotationSearchId=null;state.noteOffset=0;renderAnnotations();},
-  onAnnotationNavigate:hit=>{pendingAnnotationSearchId=hit.id;state.noteOffset=hit.offset;renderAnnotations();},
+  onAnnotationSearch:()=>{pendingPdfAnnotationLink=null;pendingAnnotationSearchId=null;state.noteOffset=0;renderAnnotations();},
+  onAnnotationNavigate:hit=>{pendingPdfAnnotationLink=null;pendingAnnotationSearchId=hit.id;state.noteOffset=hit.offset;renderAnnotations();},
   onLibrarySearch:query=>{$('search').value=query;$('search').dispatchEvent(new Event('input',{bubbles:true}));},
 });
 function installReaderContextMenu() {
