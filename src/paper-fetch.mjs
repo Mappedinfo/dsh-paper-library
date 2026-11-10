@@ -257,8 +257,9 @@ function normalizeDOI(value) {
 
 function crossrefCSL(item, doi, ctx) {
   if (item.DOI && String(item.DOI).toLowerCase() !== doi.toLowerCase()) throw new Error('Crossref returned metadata for a different DOI')
-  const type = { 'journal-article': 'article-journal', 'proceedings-article': 'paper-conference', 'book-chapter': 'chapter', book: 'book', 'edited-book': 'book', report: 'report', dissertation: 'thesis' }[item.type] ?? 'article'
+  const type = { 'journal-article': 'article-journal', 'proceedings-article': 'paper-conference', 'book-chapter': 'chapter', book: 'book', 'edited-book': 'book', report: 'report', dissertation: 'thesis', dataset: 'dataset' }[item.type] ?? 'article'
   const csl = { id: doi, type, DOI: doi, title: clean(first(item.title)), URL: item.URL || `https://doi.org/${doi}` }
+  if(item.type==='posted-content'&&item.subtype==='preprint')csl.genre='Preprint'
   for (const role of ['author','editor']) if (Array.isArray(item[role])) csl[role] = item[role].slice(0, 100).filter(person => person && typeof person === 'object').map(person => {
     const author = person.family ? { family: clean(person.family), ...(person.given ? { given: clean(person.given) } : {}) } : { literal: clean(person.name || person.given) }
     const affiliation = affiliations(person.affiliation, ctx.warnings)
@@ -290,7 +291,7 @@ async function doiMetadata(doi, ctx) {
 
 const dataciteTypes = {
   JournalArticle:'article-journal', ConferencePaper:'paper-conference', Book:'book', BookChapter:'chapter',
-  Dissertation:'thesis', Report:'report', Preprint:'article', Text:'article', DataPaper:'article-journal',
+  Dissertation:'thesis', Report:'report', Preprint:'article', Text:'article', DataPaper:'article-journal', Dataset:'dataset',
 }
 function dataciteCSL(record) {
   const a = record?.attributes, kind = a?.types?.resourceTypeGeneral
@@ -298,6 +299,8 @@ function dataciteCSL(record) {
   const doi = normalizeDOI(a.doi), title = clean(a.titles?.[0]?.title)
   if (!title) return undefined
   const metadata = { type:dataciteTypes[kind], DOI:doi, title, URL:`https://doi.org/${doi}` }
+  if(kind==='Preprint')metadata.genre='Preprint'
+  if(kind==='Dataset'&&a.version)metadata.version=clean(a.version)
   const authors = Array.isArray(a.creators) ? a.creators.slice(0, 100).filter(Boolean).map(person => {
     if (person.familyName && person.nameType !== 'Organizational') {
       return { family:clean(person.familyName), ...(person.givenName ? { given:clean(person.givenName) } : {}) }
@@ -337,7 +340,9 @@ export async function resolveTitleMetadata(title, options = {}) {
     const response=await requestPublic(`https://api.crossref.org/works?query.title=${encodeURIComponent(title)}&rows=5`,ctx,'metadata',11000);
     const data=JSON.parse(await readText(response));
     const matches=exactTitleRecords(data.message?.items,expected,item=>first(item?.title),item=>item?.DOI)
-      .filter(item=>!options.publishedOnly || item.type !== 'posted-content');
+      .filter(item=>(!options.publishedOnly || item.type !== 'posted-content')&&(!options.doiType ||
+        item.type===({'article-journal':'journal-article','paper-conference':'proceedings-article',preprint:'posted-content',dataset:'dataset'}[options.doiType])&&
+        (options.doiType!=='preprint'||item.subtype==='preprint')));
     if(matches.length===1){
       metadata=crossrefCSL(matches[0],normalizeDOI(matches[0].DOI),ctx);
       if(matches[0].type==='posted-content')ctx.warnings.push('找到同题名的预印本或早期稿 DOI，请核对引用版本。');
@@ -352,7 +357,9 @@ export async function resolveTitleMetadata(title, options = {}) {
     const response = await requestPublic(`https://api.datacite.org/dois?query=${encodeURIComponent(`titles.title:"${escaped}"`)}&page%5Bsize%5D=5`,ctx,'metadata',8000)
     const data = JSON.parse(await readText(response))
     const matches = exactTitleRecords(data.data,expected,row=>row?.attributes?.titles?.[0]?.title,row=>row?.attributes?.doi)
-      .filter(row=>!options.publishedOnly || !['Preprint','Text'].includes(row.attributes.types?.resourceTypeGeneral))
+      .filter(row=>(!options.publishedOnly || !['Preprint','Text'].includes(row.attributes.types?.resourceTypeGeneral))&&
+        (!options.doiType || row.attributes.types?.resourceTypeGeneral===({'article-journal':'JournalArticle','paper-conference':'ConferencePaper',preprint:'Preprint',dataset:'Dataset'}[options.doiType])&&
+          (options.doiType!=='dataset'||!row.attributes.version&&!row.attributes.relatedIdentifiers?.some(link=>link.relationType==='IsVersionOf'))))
       .map(dataciteCSL).filter(Boolean)
     if (matches.length > 1) {
       ctx.warnings.push('DataCite 找到多个同题名 DOI，请提供该出版版本的 DOI。')
@@ -361,7 +368,7 @@ export async function resolveTitleMetadata(title, options = {}) {
     metadata = matches[0]
     if (metadata?.type === 'article' && /^10\.48550\/arxiv\./i.test(metadata.DOI)) ctx.warnings.push('找到同题名的 arXiv 预印本 DOI，请核对引用版本。')
   } catch(error) { warn(ctx,error) }
-  if(!metadata&&!options.crossrefOnly&&!options.publishedOnly)try{
+  if(!metadata&&!options.crossrefOnly&&!options.publishedOnly&&!options.doiType)try{
     const response=await requestPublic(`https://export.arxiv.org/api/query?search_query=${encodeURIComponent('ti:"'+title.replace(/"/g,'')+'"')}&max_results=5`,ctx,'metadata');
     const xml=await readText(response);if(/<!DOCTYPE|<!ENTITY/i.test(xml))throw new Error('Unexpected XML document entities');
     const matches=[...xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)].map(match=>match[1]).filter(entry=>identityText(entry.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||'')===expected);
@@ -376,7 +383,14 @@ export async function resolveDOIMetadata(value, options = {}) {
   const doi = normalizeDOI(value)
   const ctx = context(options, doi)
   let result = { candidates: [`https://doi.org/${doi}`] }
-  try { result = await doiMetadata(doi, ctx) } catch (error) { warn(ctx, error) }
+  try {
+    if(options.doiType==='preprint'&&/^10\.48550\/arxiv\./i.test(doi)){
+      const response=await requestPublic(`https://api.datacite.org/dois/${encodeURIComponent(doi)}`,ctx,'metadata');
+      const metadata=dataciteCSL(JSON.parse(await readText(response)).data);
+      if(metadata?.DOI.toLowerCase()!==doi.toLowerCase())throw Error('DataCite returned no metadata for the requested DOI');
+      result={metadata};
+    }else result=await doiMetadata(doi,ctx);
+  } catch (error) { warn(ctx, error) }
   return { ...result, provenance: ctx.provenance, warnings: ctx.warnings }
 }
 

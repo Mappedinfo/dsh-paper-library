@@ -116,7 +116,7 @@ export function readerSnapshot(value) {
     tab: ['reader', 'annotations', 'conversation', 'graph'].includes(value.tab) ? value.tab : 'reader',
     chatDraft: boundedString(value.chatDraft ?? '', TEXT_LIMIT),
   }
-  if(value.workspace && ['paper','board','latex','project'].includes(value.workspace.section)) {
+  if(value.workspace && ['paper','board','latex','project','notes'].includes(value.workspace.section)) {
     const current=value.workspace.current;
     snapshot.workspace={section:value.workspace.section,table:value.workspace.table===true,current:current&&['paper','board','latex','project'].includes(current.kind)?{kind:current.kind,id:boundedString(current.id,200),title:boundedString(current.title||'',500)}:null};
   }

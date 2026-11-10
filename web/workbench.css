@@ -30,6 +30,12 @@
 #workspace-navigation-area{flex:0 0 auto;min-width:0;padding:0 10px;box-sizing:border-box}
 #workspace-navigation-home:empty{display:none}
 #workspace-catalog-body{flex:1;min-height:0;min-width:0;overflow:auto;padding:0 10px;box-sizing:border-box}
+#library-favorite-notes{flex:1;min-height:0;overflow:auto;padding:0 12px}
+#library-favorite-notes .favorite-note{padding:10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+#library-favorite-notes .favorite-note p{margin:4px 0;white-space:pre-wrap}
+.annotation-meta .annotation-favorite[aria-pressed=true]{color:var(--accent,var(--teal))}
+.annotation-qa-field{padding:5px 8px;border-inline-start:2px solid var(--line)}
+.annotation-qa-field p{margin:3px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .library-pane[data-workspace-section=board] .pane-heading,.library-pane[data-workspace-section=latex] .pane-heading,.library-pane[data-workspace-section=project] .pane-heading{display:none}
 .latex-topbar>#workspace-navigation-area{border-bottom:1px solid var(--line,#ddd)}
 #workspace-versions{flex:none;padding:0;margin:0;border:0;font-size:12px}

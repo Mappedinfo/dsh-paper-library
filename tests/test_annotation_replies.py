@@ -28,6 +28,43 @@ def setup(tmp_path):
     return paper, root, path, original, before
 
 
+def test_favorite_lists_live_pdf_text_and_deleting_the_annotation_removes_the_bookmark(tmp_path):
+    paper, root, path, original, original_bytes = setup(tmp_path)
+    before = path.read_bytes()
+    args = dict(id=paper, annotation_id=root["id"], page=1)
+    assert call(tmp_path, "annotation_favorite_set", **args, favorite=True)["favorite"]
+    assert call(tmp_path, "annotation_favorite_set", **args, favorite=True)["favorite"]
+    assert path.read_bytes() == before
+    assert call(tmp_path, "annotations", id=paper)["favorites"] == [root["id"]]
+    first = call(tmp_path, "annotation_favorites_list")["items"]
+    assert len(first) == 1 and first[0]["comment"] == "Remark 1"
+    call(tmp_path, "annotation_update", id=paper, annotation_id=root["id"], comment="Current version", version=root["edit_version"])
+    assert call(tmp_path, "annotation_favorites_list")["items"][0]["comment"] == "Current version"
+    call(tmp_path, "annotation_favorite_set", **args, favorite=False)
+    assert call(tmp_path, "annotation_favorites_list")["total"] == 0
+    call(tmp_path, "annotation_favorite_set", **args, favorite=True)
+    call(tmp_path, "annotation_delete", id=paper, annotation_id=root["id"])
+    assert call(tmp_path, "annotation_favorites_list")["total"] == 0
+    assert original.read_bytes() == original_bytes
+
+
+def test_native_reply_persists_verified_question_and_reply_time_without_changing_its_identity(tmp_path):
+    paper, root, path, _, _ = setup(tmp_path)
+    reply = dict(id=paper, text="Synthetic answer", model="synthetic/model", annotation_ids=[root["id"]],
+                 source_session_id="session", source_message_id="42")
+    first = call(tmp_path, "save_conversation_feedback", **reply)
+    result = call(tmp_path, "save_conversation_feedback", **reply, question="Synthetic question?",
+                  answered_at="2026-11-10T01:02:03.456Z")
+    assert result["id"] == first["id"] and result["duplicate"]
+    native = next(note for note in call(tmp_path, "annotations", id=paper)["annotations"] if note["id"] == result["id"])
+    assert native["question"] == "Synthetic question?"
+    assert native["answered_at"] == "2026-11-10T01:02:03.456Z"
+    assert native["reply_to"] == root["id"]
+    with fitz.open(path) as doc:
+        page = doc[0]
+        assert any("Synthetic question?" in annot.info["subject"] for annot in page.annots())
+
+
 def test_replies_share_root_native_irt_without_extra_underlines_and_keep_exact_references(tmp_path):
     paper, root, path, original, before = setup(tmp_path)
     second = call(tmp_path, "annotation_reply_create", id=paper, annotation_id=root["id"], reply_id=str(uuid.uuid4()), comment="Remark 2")["annotation"]

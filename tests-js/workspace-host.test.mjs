@@ -15,7 +15,7 @@ function fixture(options = {}) {
   const calls = [], contexts = [], tables = [], visible = [], alerts = []
   let boardOpen = options.boardOpen ?? false, latexOpen = options.latexOpen ?? false
   let boardCurrent = { kind: 'board', id: 'board-source', title: 'Source board' }, latexCurrent = { kind: 'latex', id: 'latex-source', title: 'Source draft' }
-  const elements = new Map(['workspace-navigation-area', 'workspace-navigation-home', 'library-literature-content', 'workspace-versions', 'latex-navigation-actions'].map(id => [id, { id, hidden: false, dataset: {}, parentNode: null }]))
+  const elements = new Map(['workspace-navigation-area', 'workspace-navigation-home', 'library-literature-content', 'library-favorite-notes', 'workspace-versions', 'latex-navigation-actions'].map(id => [id, { id, hidden: false, dataset: {}, parentNode: null }]))
   const home = elements.get('workspace-navigation-home'), area = elements.get('workspace-navigation-area'), writing = { prepend: node => { calls.push('nav:writing'); node.parentNode = writing } }, library = { dataset: {} }
   home.parentNode = { id: 'home-parent' }; home.after = node => { calls.push('nav:home'); node.parentNode = home.parentNode }; area.parentNode = home.parentNode
   const state = { active: options.active ?? { id: 'paper-source' }, project: 'old-reading-project', itemTicket: 0, pageTicket: 0 }

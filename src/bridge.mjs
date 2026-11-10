@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { arxivID, isDirectPDFURL, resolveAndFetch, resolveMetadata, resolveTitleMetadata } from './paper-fetch.mjs';
+import { arxivID, isDirectPDFURL, resolveAndFetch, resolveDOIMetadata, resolveMetadata, resolveTitleMetadata } from './paper-fetch.mjs';
 import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
 import { createTranslationServerClient } from './translation-server.mjs';
 import { resourcePolicyFor } from './resource-policy.mjs';
@@ -33,6 +33,8 @@ const libraryActions = new Set(['resource_list','resource_export','dataset_impor
  * Exported so a test can prove the tool surface and the bridge agree. */
 export const BRIDGE_ACTIONS = {core: actions, challenge: challengeActions, project: projectActions, library: libraryActions, external: externalActions, latex: latexActions};
 let importsPending = Promise.resolve();
+const doiLookups = new Map();
+for (const action of ['annotation_favorite_set','annotation_favorites_list']) actions.add(action);
 let importCount = 0;
 let importPayloadBytes = 0;
 const MAX_QUEUED_PAYLOAD = 96 * 1024 * 1024;
@@ -304,6 +306,44 @@ async function importFile(request, options) {
 
 const normalizedIdentity = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 const canonicalDOI = value => String(value || '').trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//i,'').replace(/^doi:\s*/i,'').toLowerCase();
+const doiTypes = new Set(['article-journal','paper-conference','preprint','dataset']);
+function lookupType(item) {
+  if (item.type==='article' && (/^preprint$/i.test(item.genre || '') || /^arxiv$/i.test(item.archive || ''))) return 'preprint';
+  return item.type;
+}
+async function fillDoi(request, options) {
+  const id=request.id, dataset=request.kind==='dataset';
+  if(typeof id!=='string'||!id||id.length>160)throw Error('请选择要查 DOI 的条目。');
+  const current=await core({action:dataset?'dataset_get':'get',id,include_details:false},options);
+  const type=lookupType(current);
+  if(current.DOI||!doiTypes.has(type))return {status:current.DOI?'saved':'skipped',DOI:current.DOI};
+  let arxiv, publicLink;
+  try{arxiv=arxivID(current.archive_location || current.URL || '');}catch{}
+  try{
+    const url=new URL(current.URL||current.landing_url);
+    publicLink=url.protocol==='https:'&&/\.[a-z]{2,}$/i.test(url.hostname)&&!/(?:\.local|\.internal|\.test|\.invalid)$/i.test(url.hostname);
+  }catch{}
+  const publishedVenue=['article-journal','paper-conference'].includes(type)&&current['container-title'];
+  if(request.manual!==true&&!publishedVenue&&!publicLink&&!arxiv)return {status:'needs-source'};
+  const fetchOptions={timeoutMs:19000,...options.fetchOptions,signal:options.signal,doiType:type};
+  const result=type==='preprint'&&arxiv
+    ? await resolveDOIMetadata(`10.48550/arXiv.${arxiv.replace(/v\d+$/,'')}`,fetchOptions)
+    : await resolveTitleMetadata(current.title,fetchOptions);
+  const found=result.metadata, DOI=canonicalDOI(found?.DOI);
+  const currentYear=current.issued?.['date-parts']?.[0]?.[0], foundYear=found?.issued?.['date-parts']?.[0]?.[0];
+  const authors=new Set((current.author||[]).flatMap(authorIdentities));
+  const authorMatch=found?.author?.some(author=>authorIdentities(author).some(name=>authors.has(name)));
+  const publisherMatch=dataset&&current.publisher&&normalizedIdentity(current.publisher)===normalizedIdentity(found?.publisher);
+  const matchesArxiv=type==='preprint'&&arxiv&&DOI===`10.48550/arxiv.${arxiv.replace(/v\d+$/,'').toLowerCase()}`;
+  if(!DOI||normalizedIdentity(found.title)!==normalizedIdentity(current.title)||
+      !(lookupType(found)===type||matchesArxiv)||currentYear&&foundYear&&currentYear!==foundYear||
+      !(matchesArxiv||authorMatch||publisherMatch&&currentYear&&currentYear===foundYear))
+    return {status:result.ambiguous?'ambiguous':DOI?'unverified':'not-found'};
+  const item=await core(dataset?
+    {action:'dataset_put',id,expected_revision:current.revision,metadata:{DOI}}:
+    {action:'update',id,expected_modified:current.modified,metadata:{DOI}},options);
+  return {status:'saved',DOI:item.DOI};
+}
 const missingMetadata = value => value === undefined || value === null || typeof value === 'string' && !value.trim() || Array.isArray(value) && !value.length || value && typeof value === 'object' && !Object.keys(value).length;
 
 function authorIdentities(person) {
@@ -516,6 +556,15 @@ export async function dispatch(request, options = {}) {
     return core(safe, options);
   }
   if (safe.action === 'metadata_lookup') return lookupMetadata(safe,options);
+  if (safe.action === 'catalog_doi_lookup') {
+    if(typeof safe.id!=='string'||safe.id.length>160)throw Error('文献标识无效。');
+    const key=JSON.stringify([options.library||defaultLibrary,safe.id,safe.kind==='dataset']);
+    if(doiLookups.has(key))return doiLookups.get(key);
+    if(doiLookups.size>=2)throw Error('DOI 查询繁忙，请稍后重试。');
+    const lookup=fillDoi(safe,options).finally(()=>doiLookups.delete(key));
+    doiLookups.set(key,lookup);
+    return lookup;
+  }
   if (safe.action === 'venue_ranking_lookup') return lookupVenueRanking(safe);
   if (safe.action === 'models') return options.models ? options.models(options.signal) : { models: [], configured: false };
   if (safe.action === 'bibliography_build') {

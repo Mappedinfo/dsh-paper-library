@@ -6,6 +6,7 @@ import { ANNOTATION_USAGE_KEY, annotationUsageProjection, emptyAnnotationUsage, 
 import { preparePaperReferenceMessages } from './paper-reference-resolver.mjs'
 import { prepareBoardReferenceMessages } from './board-references.mjs'
 import { annotationReplySources } from './annotation-replies.mjs'
+import { companionQuestion, explicitAnnotationQuestion } from './companion-queue.mjs'
 
 const ACTIONS = new Set(['chat_model_update', 'chat_ensure', 'chat_catalog', 'chat_context', 'chat_reference', 'chat_send', 'chat_history', 'chat_save_feedback'])
 const MESSAGE_LIMIT = 20
@@ -149,14 +150,29 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
     if(!text||text.length>28000)throw new Error('该回复为空或超过 PDF 批注保存上限。')
     const association=annotationReplySources(snapshot).get(messageId)
     if(association&&association.paperId!==paper.item.id)throw new Error('回复引用属于另一篇论文。')
-    const verified=[];let sourcePage=1
-    for(const id of association?.source_snapshot_ids||[]){const frozen=await snapshots.load(id,{paperId:paper.item.id,sessionId:paper.sessionId});verified.push(...frozen.annotation_refs.map(ref=>ref.id));sourcePage=frozen.annotation_refs[0]?.page||frozen.selection?.page||sourcePage}
+    const verified=[], questions=[];let sourcePage=1
+    for(const id of association?.source_snapshot_ids||[]){
+      const frozen=await snapshots.load(id,{paperId:paper.item.id,sessionId:paper.sessionId});
+      verified.push(...frozen.annotation_refs.map(ref=>ref.id));
+      sourcePage=frozen.annotation_refs[0]?.page||frozen.selection?.page||sourcePage;
+      if(frozen.question){
+        const comment=frozen.annotations[0]?.comment?.trim();
+        const explicit=explicitAnnotationQuestion(comment);
+        const question=frozen.question.startsWith(companionQuestion)?explicit||comment||'请回应这条阅读批注。':frozen.question;
+        questions.push(question);
+      }
+    }
     if(association&&JSON.stringify([...new Set(verified)])!==JSON.stringify(association.annotation_ids))throw new Error('回复引用记录与原始快照不一致，暂不关联批注。')
     const attached=ctx.sessions.get(paper.sessionId)
     if(attached&&await ctx.sessions.flush(attached)!==true)throw new Error('DSH 尚未确认回复已保存，暂不写入 PDF。')
     let usedModel
-    for(const row of snapshot.records)if(row.type==='event'&&row.event.seq<=event.seq&&row.event.type==='request/header')usedModel=modelOf(row.event.data.header?.config)
-    return core({action:'save_conversation_feedback',id:paper.item.id,text,model:usedModel?`${usedModel.provider}/${usedModel.model}`:'DSH · model not available in this history window',annotation_ids:association?.annotation_ids||[],source_snapshot_ids:association?.source_snapshot_ids||[],source_session_id:paper.sessionId,source_message_id:messageId,page:sourcePage},{library,python,signal})
+    for(const row of snapshot.records){
+      if(row.type!=='event'||row.event.seq>event.seq)continue;
+      if(row.event.type==='turn/start')usedModel=undefined;
+      if(row.event.type==='request/header')usedModel=modelOf(row.event.data.header?.config);
+    }
+    const answeredAt=Number.isSafeInteger(event.time)&&event.time>0&&event.time<8.64e15?new Date(event.time).toISOString():undefined;
+    return core({action:'save_conversation_feedback',id:paper.item.id,text,model:usedModel?`${usedModel.provider}/${usedModel.model}`:'',annotation_ids:association?.annotation_ids||[],source_snapshot_ids:association?.source_snapshot_ids||[],source_session_id:paper.sessionId,source_message_id:messageId,page:sourcePage,...(questions.length?{question:[...new Set(questions)].join('\n\n').slice(0,4000)}:{}),...(answeredAt?{answered_at:answeredAt}:{})},{library,python,signal})
   }
 
   async function automaticReplies(paper,snapshot,signal) {

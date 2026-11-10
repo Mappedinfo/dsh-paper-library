@@ -22,6 +22,18 @@ function fixture(t,{request,stored}={}){
  t.after(()=>{ui.dispose();dom.window.close();});
  return {w,editor,ui,notes,calls,saved,messages,render,timers,select:id=>{active={id,pdf:true};ui.sync();},async input(id,text){const r=w.document.querySelector(`[data-annotation-id="${id}"] textarea`);r.value=text;r.dispatchEvent(new w.Event('input'));return r;},async flush(){for(const [id,fn] of [...timers]){timers.delete(id);fn();}await tick();await tick();}};
 }
+test('a legacy QA note is recognized conservatively and keeps the original editable',async t=>{
+ const f=fixture(t),raw='AI问答重定位 | 2026-11-10 | 待核对\n问：合成问题？\n【原答复（依据原文）】\n合成回答。';
+ const parsed=f.w.PaperAnnotationEditor.legacyQa(raw);
+ assert.equal(parsed.question,'合成问题？');assert.equal(parsed.answer,'合成回答。');
+ assert.equal(parsed.date,'2026-11-10');assert.equal(parsed.model,undefined);
+ assert.equal(f.w.PaperAnnotationEditor.legacyQa('问：普通备注\n这里是我的理解'),null);
+ f.notes.push({id:'legacy',page:1,text:'source',comment:raw,version:'v1'});f.render();
+ const input=f.w.document.querySelector('textarea');
+ assert.equal(input.hidden,true);assert.equal(input.value,raw);
+ f.w.document.querySelector('.annotation-remark-expand').click();
+ assert.equal(input.hidden,false);assert.equal(input.value,raw);
+});
 test('rectangle release creates a native note automatically without a modal and retains an independent editor',async t=>{
  const f=fixture(t);assert.equal(await f.editor.create('square',{page:8,selection:{page:8,rects:[[1,2,30,40]]},color:'#112233',width:4}),true);
  const create=f.calls.find(c=>c.action==='annotate');assert.equal(create.type,'square');assert.equal(create.comment,'');assert.equal(create.companion_skip,true);assert.equal(create.width,4);

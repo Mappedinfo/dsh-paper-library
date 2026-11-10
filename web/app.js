@@ -429,6 +429,8 @@ function showReaderSelection(selection) {
 }
 
 const annotationLoadJobs=new Map();
+let favoriteAnnotationIds=new Set(), favoriteNotesRequest=0;
+const favoriteAnnotationWrites=new Set();
 async function loadAnnotations(id) {
   const previous=annotationLoadJobs.get(id);if(previous){previous.again=true;return previous.promise;}
   const job={again:false,promise:null};annotationLoadJobs.set(id,job);
@@ -438,7 +440,7 @@ async function loadAnnotations(id) {
       job.again=false;
       try{
         const result=await api('annotations',{id});if(id!==state.active?.id)return false;
-        state.annotations=result.annotations||[];const count=annotationThreads(state.annotations).notes.length;$('annotation-count').textContent=`${count}${result.truncated?'+':''}`;
+        state.annotations=result.annotations||[];favoriteAnnotationIds=new Set(result.favorites||[]);const count=annotationThreads(state.annotations).notes.length;$('annotation-count').textContent=`${count}${result.truncated?'+':''}`;
         state.annotationsTruncated=Boolean(result.truncated);state.noteOffset=Math.min(state.noteOffset,Math.max(0,Math.ceil(count/40)-1)*40);renderAnnotations();loaded=true;
       }catch(error){
         if(id===state.active?.id){
@@ -479,13 +481,28 @@ function renderAnnotations() {
   const fragment = document.createDocumentFragment();
   const {notes,replies,unlinked,remarks=new Map()}=visibleAnnotationThreads();
   state.noteOffset=Math.min(state.noteOffset,Math.max(0,Math.ceil(notes.length/40)-1)*40);
+  function qaField(label,text){
+    const field=el('div','annotation-qa-field');field.append(el('strong','small',label),el('p','',text));return field;
+  }
+  function legacyQa(note){
+    const record=window.PaperAnnotationEditor?.legacyQa(note.comment||note.content);
+    if(!record)return null;
+    const block=el('details','annotation-reply annotation-qa-legacy');
+    block.append(el('summary','','旧备注中的 AI 问答'),el('p','small muted',[record.model||'模型未记录',record.date?`备注标注日期 ${record.date}`:'时间未记录'].join(' · ')));
+    block.append(qaField('问题',record.question),qaField(`原答复${record.qualifier?' '+record.qualifier:''}`,record.answer));
+    return block;
+  }
   function replyCard(reply){
     const details=el('details','annotation-reply');details.dataset.annotationId=reply.id;details.open=true;
-    details.append(el('summary','',[reply.source_kind === 'annotation-translation' ? '翻译：AI 译文' : reply.source_kind === 'annotation-caption' ? 'AI 图像说明' : 'AI 批注',reply.model,reply.annotation_ids?.length>1?`涉及 ${reply.annotation_ids.length} 条批注`:''].filter(Boolean).join(' · ')));
-    details.append(el('p','small muted',displayDate(reply.generated||reply.created)));
+    const conversation=reply.source_kind==='dsh-conversation',model=typeof reply.model==='string'&&!reply.model.includes('model not available')?reply.model:'';
+    details.append(el('summary','',[reply.source_kind === 'annotation-translation' ? '翻译：AI 译文' : reply.source_kind === 'annotation-caption' ? 'AI 图像说明' : conversation?'AI 问答':'AI 批注',model||(conversation?'模型未记录':''),reply.annotation_ids?.length>1?`涉及 ${reply.annotation_ids.length} 条批注`:''].filter(Boolean).join(' · ')));
+    const answered=reply.answered_at?new Date(reply.answered_at):null;
+    details.append(el('p','small muted',answered&&!Number.isNaN(answered.valueOf())?`回复时间 ${answered.toLocaleString('zh-CN',{hour12:false})}`:[conversation?'保存日期':'',displayDate(reply.generated||reply.created)].filter(Boolean).join(' ')));
+    if(conversation&&reply.question)details.append(qaField('问题',reply.question));
     let body=(reply.comment||reply.content||reply.text||'').replace(/^AI-generated (?:conversation )?feedback[^\n]*\n\n/,'');
     if(reply.source_kind==='annotation-translation')body=body.replace(/\n\nAI 翻译 · [^\n]*\s*$/,'');
     if(reply.source_kind==='annotation-caption')body=body.replace(/^图像描述：/,'').replace(/\n\nAI 图像描述 · [^\n]*\s*$/,'');
+    if(conversation)details.append(el('strong','small','AI 回答'));
     const rendered=el('div','annotation-reply-body paper-markdown');if(window.PaperMarkdown)window.PaperMarkdown.render(rendered,body);else rendered.textContent=body;rendered.classList.add('is-preview');details.append(rendered);const expand=el('button','button subtle','展开全文');expand.type='button';expand.setAttribute('aria-expanded','false');expand.addEventListener('click',()=>{const expanded=rendered.classList.toggle('is-preview');expand.textContent=expanded?'展开全文':'收起全文';expand.setAttribute('aria-expanded',String(!expanded));});details.append(expand);
     const actions=el('div','annotation-actions'),copy=el('button','button subtle','复制回复'),follow=el('button','button subtle','引用并追问'),remove=el('button','button subtle delete-note','删除回复');
     copy.type=follow.type=remove.type='button';copy.addEventListener('click',()=>void copyText(body,{label:'AI 回复'}));
@@ -504,6 +521,10 @@ function renderAnnotations() {
     card.dataset.companionText=String([note.text,note.comment,note.content,note.handwriting?.transcript,note.linked_ink?.transcript].some(value=>typeof value==='string'&&value.trim()));
     const meta = el('div', 'annotation-meta'); const pageLink = el('button', 'page-link', `第 ${note.page} 页`); pageLink.dataset.noteAction = 'page';
     meta.append(pageLink, el('span', '', displayDate(note.modified || note.created)), el('span', 'note-type', note.kind === 'ai-feedback' || note.type === 'ai_feedback' || note.ai_generated ? 'AI 生成' : ({highlight:'高亮',underline:'下划线',strikeout:'删除线',note:'便笺',ink:'自由笔画',square:'矩形框'})[note.type] || '批注'));
+    const starred=favoriteAnnotationIds.has(note.id), star=el('button','button subtle annotation-favorite',starred?'★':'☆');
+    star.type='button';star.dataset.noteAction='favorite';star.setAttribute('aria-pressed',String(starred));
+    star.title=starred?'取消收藏批注':note.identity_reliable===false?'此批注没有稳定标识':'收藏批注';
+    star.setAttribute('aria-label',star.title);star.disabled=(!starred&&note.identity_reliable===false)||favoriteAnnotationWrites.has(JSON.stringify([state.active?.id,note.id]));meta.append(star);
     if (annotationTranslationAvailable && !window.PaperAnnotationThreads?.isAi(note)) {
       const translate = el('button', 'button subtle annotation-translate', translatingAnnotations.has(`${state.active?.id}:${note.id}`) ? '翻译中…' : '翻译');
       translate.type = 'button'; translate.dataset.noteAction = 'translate';
@@ -525,7 +546,7 @@ function renderAnnotations() {
       paintExcerpt();heading.append(expand);excerpt.append(heading,quote);
       if(translations.length){const translated=el('div','annotation-translations'),toggle=el('button','button subtle','展开翻译');toggle.type='button';const openTranslations=state.expandedAnnotationTranslations ||= new Set();translated.id=`annotation-translations-${crypto.randomUUID()}`;toggle.setAttribute('aria-controls',translated.id);translated.append(el('p','small muted','AI 译文可能基于较早的原文范围，请对照核验。'));for(const reply of translations)translated.append(replyCard(reply));const paintTranslation=()=>{const open=openTranslations.has(key);translated.hidden=!open;toggle.textContent=open?'收起翻译':'展开翻译';toggle.setAttribute('aria-expanded',String(open));};toggle.addEventListener('click',()=>{if(openTranslations.has(key))openTranslations.delete(key);else openTranslations.add(key);paintTranslation();});paintTranslation();heading.append(toggle);excerpt.append(translated);}
       card.append(excerpt); }
-    if (note.comment || note.content) card.append(el('p', 'annotation-comment', note.comment || note.content));
+    if (note.comment || note.content) card.append(legacyQa(note)||el('p', 'annotation-comment', note.comment || note.content));
     if (note.handwriting) { const handwritten = el('div', 'annotation-handwriting'); handwritten.append(el('p', 'small muted', note.handwriting.transcription_source === 'model' ? '手写便签 · AI 识别待校对' : '手写便签 · 原笔迹已保留')); if (note.handwriting.transcript) handwritten.append(el('p', '', note.handwriting.transcript)); card.append(handwritten); }
     linkedHandwritingUI?.decorate(card,note);
     const actions = el('div', 'annotation-actions'); const edit = el('button', 'button subtle', '编辑'); edit.dataset.noteAction = 'edit'; const remove = el('button', 'button subtle delete-note', '删除'); remove.dataset.noteAction = 'delete'; const copy = el('button', 'button subtle', '复制原文'); copy.type = 'button'; copy.dataset.noteAction = 'copy-source'; copy.disabled = typeof note.text !== 'string' || !note.text.trim(); copy.title = copy.disabled ? '这条批注没有选中的 PDF 原文' : '仅复制选中的 PDF 原文，不包含评论或 AI 回复'; actions.append(edit, remove, copy);
@@ -535,6 +556,7 @@ function renderAnnotations() {
     card.dataset.remarkNumber='1';card.append(actions);for(const reply of replies.get(note.id)||[])if(!note.text||reply.source_kind!=='annotation-translation')card.append(replyCard(reply));
     for(const [index,remark]of (remarks.get(note.id)||[]).entries()){
       const entry=el('article','annotation-remark');entry.dataset.annotationId=remark.id;entry.dataset.paperId=state.active?.id||'';entry.dataset.remarkNumber=String(index+2);entry.dataset.annotationVersion=remark.version||'';entry.dataset.companionText=String(Boolean(remark.text||remark.comment));
+      const previousQa=legacyQa(remark);if(previousQa)entry.append(previousQa);
       const tools=el('div','annotation-actions'),remove=el('button','button subtle','删除备注');remove.dataset.noteAction='delete';tools.append(remove);entry.append(tools);
       for(const reply of replies.get(remark.id)||[])entry.append(replyCard(reply));card.append(entry);
     }
@@ -759,6 +781,17 @@ async function handleNoteAction(event) {
   const action = button.dataset.noteAction;
   if (action === 'previous' || action === 'next') { state.noteOffset += action === 'next' ? 40 : -40; renderAnnotations();$('annotation-list').scrollTop=0; return; }
   const note = state.annotations.find((entry) => entry.id === button.closest('[data-annotation-id]').dataset.annotationId); if (!note) return;
+  if(action==='favorite'){
+    const id=state.active?.id, key=JSON.stringify([id,note.id]), favorite=!favoriteAnnotationIds.has(note.id);
+    if(!id||favoriteAnnotationWrites.has(key))return;
+    favoriteAnnotationWrites.add(key);button.disabled=true;
+    try{
+      await api('annotation_favorite_set',{id,annotation_id:note.id,page:note.page,favorite});
+      if(state.active?.id===id){if(favorite)favoriteAnnotationIds.add(note.id);else favoriteAnnotationIds.delete(note.id);await loadAnnotations(id);}
+    }catch(error){toast(error.message,true);}
+    finally{favoriteAnnotationWrites.delete(key);if(state.active?.id===id)renderAnnotations();}
+    return;
+  }
   if (action === 'copy-source') { if (typeof note.text === 'string' && note.text.trim()) await copyText(note.text, { label: '批注原文' }); return; }
   if (action === 'discuss') { await paperChatUI?.useAnnotation(note); if (state.active?.id) renderAnnotations(); return; }
   if (action === 'reselect') {
@@ -1351,7 +1384,7 @@ document.addEventListener('keydown', async (event) => {
 });
 function publishWorkspaceState(workspace){void persistence?.put(`workspace:last:${ENTRY_PAPER||'main'}`,workspace).catch(()=>{});if(window.parent!==window)window.parent.postMessage({type:'paper-library:workspace-state',version:1,workspace},window.location.origin);}
 function workspaceSnapshot(){const current=latexUI?.isOpen()?latexUI.current?.():boardUI?.isOpen()?boardUI.current?.():workspaceNavigationUI?.state().current;return {section:workspaceNavigationUI?.state().section||'paper',current:current?{kind:current.kind,id:current.id,title:current.title}:null,table:workbenchUI?.isTable()===true};}
-async function restoreWorkspaceSnapshot(value){if(!value||!['paper','board','latex','project'].includes(value.section))return;try{if(value.current&&['board','latex'].includes(value.current.kind)){await workspaceNavigationUI?.navigate(value.current);}else if(value.table||value.section!=='paper'){await workspaceNavigationUI?.selectRoot(value.section);}}catch(error){toast(`工作区恢复失败：${error.message}`,true);}}
+async function restoreWorkspaceSnapshot(value){if(!value||!['paper','board','latex','project','notes'].includes(value.section))return;try{if(value.current&&['board','latex'].includes(value.current.kind)){await workspaceNavigationUI?.navigate(value.current);}else if(value.table||value.section!=='paper'){await workspaceNavigationUI?.selectRoot(value.section);}}catch(error){toast(`工作区恢复失败：${error.message}`,true);}}
 function publishReaderState() {
   if(initializedReader&&!restoringReader)publishWorkspaceState(workspaceSnapshot());
 
@@ -1542,6 +1575,7 @@ refreshModels.id = 'refresh-models';
 refreshModels.type = 'button'; refreshModels.style.marginTop = '6px'; refreshModels.style.padding = '3px 0'; refreshModels.style.fontSize = '10px';
 refreshModels.addEventListener('click', () => { announceReady(); loadModels(); }); $('model-status').after(refreshModels);
 workbenchUI = window.PaperWorkbench?.create({ state, api, persistence, loadList, organization: () => organizationUI, openPaper: id => openResource(state.items.find(item => item.id === id) || {id}), toast, el, resource: () => resourceUI,
+  enableAutomaticDoi:()=>!workspaceNavigationUI||workspaceNavigationUI.state().section==='paper',
   tableChanged: table => { paperChatUI?.visible(!table && state.tab!=='graph' && readerPaperId===state.active?.id && (readingPanels?.visible('chat') ?? state.tab==='conversation')); queueMicrotask(()=>{readingShell?.sync();resourceUI?.sync();}); },
   selectPaper: item => { if(item.resource_kind === 'dataset'||item.resource_kind === 'slides'){void openResource(item);return;}state.catalogSlideId=null;state.catalogSlideTitle=null;resourceUI?.hide();knowledgeUI?.hide();publishReaderState();readerStateReady=false;++state.itemTicket; ++state.pageTicket; state.pageWanted=null; clearPage(); state.active=item; state.openedId=item.id; workbenchUI?.paperChanged(item); readingPanels?.paperChanged(item);outlineUI?.sync();void languageUI?.paperChanged(item);renderPaperHeader(); renderList();publishPaperWorkspace(item); },
   changed: (item, removedId) => {
@@ -2184,10 +2218,51 @@ function applyWorkspaceNavigation(value) {
   const pane = document.querySelector('.library-pane');
   if (pane) { pane.dataset.workspaceSection = value.section; pane.dataset.workspaceFocus = value.current?.kind || ''; }
   $('library-literature-content').hidden = value.section !== 'paper';
+  $('library-favorite-notes').hidden = value.section !== 'notes';
   const versions = $('workspace-versions'), showVersions = value.current?.kind === 'latex';
   if (!showVersions || versions.dataset.projectId !== value.current?.id) { versions.open = false; libraryLatexVersions?.clear(); }
   versions.hidden = !showVersions; versions.dataset.projectId = showVersions ? value.current.id : '';
   placeWorkspaceNavigation(latexUI?.isOpen() === true);
+}
+async function loadFavoriteNotes(offset=0){
+  const panel=$('library-favorite-notes'), request=++favoriteNotesRequest;
+  const heading=el('h2','','收藏批注'), status=el('p','small muted','正在读取…');
+  status.setAttribute('role','status');panel.replaceChildren(heading,status);
+  const button=(label,click)=>{const control=el('button','button subtle',label);control.type='button';control.addEventListener('click',click);return control;};
+  try{
+    const result=await api('annotation_favorites_list',{offset});
+    if(request!==favoriteNotesRequest||panel.hidden)return;
+    if(offset&&!result.items.length){void loadFavoriteNotes(Math.max(0,offset-12));return;}
+    status.textContent=result.total?`共 ${result.total} 条`:'点击批注卡片上的 ☆，即可在这里查看。';
+    for(const note of result.items){
+      const card=el('article','favorite-note');
+      const open=button(`${note.title} · 第 ${note.page} 页`,async()=>{
+        if(!await workspaceNavigationUI?.navigate({kind:'paper',id:note.paper_id,title:note.title}))return;
+        if(state.active?.id!==note.paper_id)return;
+        await loadAnnotations(note.paper_id);
+        if(state.active?.id!==note.paper_id)return;
+        readerSearchUI?.clearAnnotationFilter();readingPanels?.show('annotations');
+        const index=annotationThreads(state.annotations).notes.findIndex(entry=>entry.id===note.annotation_id);
+        if(index>=0){state.noteOffset=Math.floor(index/40)*40;renderAnnotations();linkAnnotationCard(note.annotation_id);}
+        await pdfReader?.revealAnnotation(note.annotation_id,{page:note.page});
+      });
+      open.disabled=Boolean(note.unavailable);
+      const remove=button('取消收藏',async()=>{
+        remove.disabled=true;
+        try{await api('annotation_favorite_set',{id:note.paper_id,annotation_id:note.annotation_id,favorite:false});if(!panel.hidden)void loadFavoriteNotes(offset);}
+        catch(error){toast(error.message,true);remove.disabled=false;}
+      });
+      card.append(open,remove);
+      if(note.unavailable)card.append(el('p','small muted','原批注暂不可用'));
+      else for(const text of [note.text,note.comment])if(text)card.append(el('p','',text));
+      panel.append(card);
+    }
+    if(offset)panel.append(button('上一页',()=>void loadFavoriteNotes(Math.max(0,offset-12))));
+    if(result.has_more)panel.append(button('下一页',()=>void loadFavoriteNotes(offset+12)));
+    panel.append(button('刷新',()=>void loadFavoriteNotes(offset)));
+  }catch(error){
+    if(request===favoriteNotesRequest&&!panel.hidden){status.textContent=error.message;panel.append(button('重试',()=>void loadFavoriteNotes(offset)));}
+  }
 }
 function workspaceContextChanged(target) {
   const writing = latexUI?.isOpen() === true, canvas = boardUI?.isOpen() === true;
@@ -2268,7 +2343,7 @@ async function openWorkspaceTarget(target) {
 if ($('workspace-navigation') && window.PaperWorkspaceNavigation) {
   const versions = $('library-latex-versions'); if (versions) $('workspace-version-list').append(versions);
   workspaceNavigationUI = window.PaperWorkspaceNavigation.create({root:$('workspace-navigation'),catalogRoot:$('workspace-catalog-body'),relatedRoot:$('workspace-related'),paperSearch:$('search').closest('label'),paperHeading:document.querySelector('#library-literature-content>.pane-heading'),api,toast,
-    actions:$('workspace-versions'),prepare:prepareWorkspaceNavigation,onRootChange:openWorkspaceRoot,onNavigate:openWorkspaceTarget,onChange:applyWorkspaceNavigation,onCreateProject:()=>projectDialogOpen(null)});
+    actions:$('workspace-versions'),prepare:prepareWorkspaceNavigation,onRootChange:openWorkspaceRoot,onNavigate:openWorkspaceTarget,onChange:applyWorkspaceNavigation,onNotes:loadFavoriteNotes,onCreateProject:()=>projectDialogOpen(null)});
   applyWorkspaceNavigation(workspaceNavigationUI.state());
   $('workspace-library')?.addEventListener('click',event=>{if(workspaceNavigationUI.state().section!=='paper'||boardUI?.isOpen()||latexUI?.isOpen()){event.preventDefault();event.stopImmediatePropagation();void workspaceNavigationUI.selectRoot('paper');}},true);
 }

@@ -19,7 +19,7 @@ async function load() {
 }
 
 function cleanItem(item, index) {
-  const { pdf, page_count, tags, hidden_source_tags, path, library, ...csl } = item;
+  const { pdf, page_count, tags, hidden_source_tags, storage_formats, path, library, ...csl } = item;
   const key=String(item.citekey || item.id || `ref${index + 1}`);
   return { ...csl, id:key, 'citation-key':key, type: item.type || 'article-journal' };
 }

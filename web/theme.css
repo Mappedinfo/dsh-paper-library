@@ -131,6 +131,7 @@ input[type="checkbox"] { accent-color: var(--dsw-alias-button-primary-fill); }
 .catalog-table .catalog-column-institution { width: 180px; }
 .catalog-table .catalog-column-dates { width: 170px; }
 .catalog-table .catalog-column-kind { width: 85px; }
+.catalog-table .catalog-column-storage { width: 80px; }
 .catalog-table .catalog-column-actions { width: 126px; }
 .catalog-table th, .catalog-table td { min-width: 0 !important; max-width: none; padding: 6px 10px; }
 .catalog-table .table-title, .catalog-table .table-cell-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; width: 100%; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; white-space: normal; line-height: 1.4; }

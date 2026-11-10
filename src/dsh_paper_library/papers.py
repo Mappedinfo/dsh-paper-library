@@ -60,7 +60,9 @@ class Papers:
         CREATE TABLE IF NOT EXISTS paper_archive(paper_id TEXT PRIMARY KEY, archived_at TEXT NOT NULL);
         """)
         from .paper_organization import SCHEMA_SQL as organization_schema
+        from .annotation_favorites import SCHEMA as annotation_favorites_schema
         self.db.executescript(organization_schema)
+        self.db.executescript(annotation_favorites_schema)
         # Synced corpora are indexed by symlink, never copied: external_files keeps the
         # size/mtime record that makes a rescan a walk plus lookups, and external_sources
         # records which roots were scanned and when. Neither table stores file contents.

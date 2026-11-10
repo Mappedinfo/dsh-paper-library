@@ -1,6 +1,16 @@
 'use strict';
+function paperLegacyAnnotationQa(value) {
+  if(typeof value!=='string')return null;
+  const text=value.replace(/\r\n?/g,'\n').trim();
+  const match=text.match(/^(?:(AI问答(?:重定位)?[^\n]*)\n)?(?:问|问题)[：:]\s*([\s\S]+?)\n\s*【(?:原答复|AI回答|AI 回复)([^】]*)】\s*([\s\S]+)$/u);
+  if(!match)return null;
+  const header=match[1]||'', question=match[2].trim();
+  const model=header.match(/(?:^|[|｜])\s*模型[：:]\s*([^|｜]+)/u)?.[1]?.trim();
+  const date=header.match(/(?:^|[|｜])\s*(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?)\s*(?=[|｜]|$)/u)?.[1];
+  return {question,answer:match[4].trim(),qualifier:match[3].trim(),model,date};
+}
 // 每条原生 PDF 批注独立编辑；草稿先存本地服务，保存成功后再清除。
-window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,refresh,changed,toast,captionAvailable=()=>false}) {
+window.PaperAnnotationEditor = { legacyQa:paperLegacyAnnotationQa, create({api,persistence,getPaper,getNotes,show,refresh,changed,toast,captionAvailable=()=>false}) {
   const papers=new Map(), delay=650;
   const captions=window.PaperAnnotationCaptions?.create({api,getPaper,getNotes,available:captionAvailable,saved:refresh});
   const previews=window.PaperAnnotationPreviews?.create({api,getPaper,onPreview:(box,note,result)=>captions?.decorate(box,note,result?.source_version)});
@@ -37,7 +47,7 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
   function paint(r) {
     if(!r.ui)return;
     const {status,retry,input,compare}=r.ui;
-    if(r.comment.trim())r.ui.open();
+    if(r.comment.trim()&&(!paperLegacyAnnotationQa(r.comment)||dirty(r)))r.ui.open();
     status.textContent=r.error?`${dirty(r)?'未保存':'PDF 已保存，草稿同步未完成'}：${r.error}`:r.running?'保存中…':dirty(r)?'等待自动保存…':'已保存';
     status.classList.toggle('error',Boolean(r.error));retry.hidden=!r.error;retry.disabled=Boolean(r.running);compare.hidden=!r.error||Boolean(r.payload);compare.disabled=Boolean(r.running);
     const card=input.closest('.annotation-remark, .annotation-card');if(card){card.dataset.companionText=String(Boolean((r.note.text||'').trim()||r.comment.trim()||r.note.handwriting?.transcript||r.note.linked_ink?.transcript));if(r.note.version)card.dataset.annotationVersion=r.note.version;}
@@ -53,8 +63,8 @@ window.PaperAnnotationEditor = { create({api,persistence,getPaper,getNotes,show,
     input.setAttribute('aria-label',`第 ${r.note.page} 页批注的备注或问题`);
     const expand=node('button','button subtle annotation-remark-expand','展开');expand.type='button';
     expand.setAttribute('aria-controls',input.id);expand.setAttribute('aria-expanded','false');
-    let expanded=false,collapsed=!r.comment.trim()&&!r.payload;
-    function paintCollapse(){input.hidden=collapsed;expand.textContent=collapsed?'添加备注':expanded?'收起':'展开';expand.setAttribute('aria-expanded',String(!collapsed));}
+    let expanded=false,collapsed=(!r.comment.trim()||Boolean(paperLegacyAnnotationQa(r.comment)))&&!r.payload;
+    function paintCollapse(){input.hidden=collapsed;expand.textContent=collapsed?(r.comment.trim()?'编辑原备注':'添加备注'):expanded?'收起':'展开';expand.setAttribute('aria-expanded',String(!collapsed));}
     function sizeInput(){if(expanded){input.style.height='auto';input.style.height=`${Math.max(240,input.scrollHeight+2)}px`;}}
     expand.addEventListener('click',()=>{
       if(collapsed){collapsed=false;paintCollapse();input.focus();return;}

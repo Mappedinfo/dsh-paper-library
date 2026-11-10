@@ -348,7 +348,16 @@ def list_resources(library, request):
     total = library.db.execute(prefix + "SELECT count(*)" + clause, args).fetchone()[0]
     expr = expressions[sort]
     rows = library.db.execute(prefix + "SELECT id,kind" + clause + f" ORDER BY ({expr}) IS NULL,{expr} {order},id LIMIT ? OFFSET ?", [*args, limit, offset]).fetchall()
-    items = [{**library.get(row["id"], archived), "resource_kind": "paper"} if row["kind"] == "paper" else _dataset(library, row["id"], archived) for row in rows]
+    items = []
+    for row in rows:
+        if row["kind"] == "paper":
+            items.append({**library.get(row["id"], archived), "resource_kind": "paper"})
+            continue
+        item = _dataset(library, row["id"], archived)
+        formats = library.db.execute("""SELECT DISTINCT lower(json_extract(payload,'$.format')) AS format
+            FROM dataset_assets WHERE dataset_id=? ORDER BY format LIMIT 4""", (item["id"],))
+        item["storage_formats"] = [entry["format"] or "数据附件" for entry in formats]
+        items.append(item)
     counts = library.db.execute(prefix + "SELECT kind,count(*) AS total,sum(archived_at IS NULL) AS active FROM resources GROUP BY kind").fetchall()
     values = {row["kind"]: {"total": row["total"], "active": row["active"], "archived": row["total"] - row["active"]} for row in counts}
     return {**_page(items, total, offset, limit), "kind": kind, "archived": archived, "counts": values,

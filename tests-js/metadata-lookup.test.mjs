@@ -32,6 +32,45 @@ function crossrefFixture(message,html='') {
   }};
 }
 
+test('automatic DOI only commits the matching publication type and corroborated title',async t=>{
+  const author=[{given:'Alice',family:'Reader'}], issued={'date-parts':[[2026]]};
+  const f=await fixture(t,{type:'paper-conference','container-title':'Synthetic Proceedings',author,issued});
+  const requests=[];
+  const fetchOptions={resolver,transport:async({url})=>{
+    requests.push(url.href);
+    return response(JSON.stringify({message:{items:[
+      {type:'posted-content',subtype:'preprint',title:[title],DOI:'10.1234/preprint',author,issued},
+      {type:'proceedings-article',title:[title],DOI:'10.1234/conference',author,issued},
+    ]}}));
+  }};
+  const result=await dispatch({action:'catalog_doi_lookup',id:f.item.id},{library:f.library,fetchOptions});
+  assert.equal(result.DOI,'10.1234/conference');
+  const saved=await core({action:'get',id:f.item.id},{library:f.library});
+  assert.equal(saved.DOI,result.DOI);
+  assert.equal(saved['container-title'],'Synthetic Proceedings');
+  assert.equal(requests.length,1);
+  const privateItem=await core({action:'create',metadata:{title:'Synthetic unpublished data',type:'article-journal'}},{library:f.library});
+  assert.equal((await dispatch({action:'catalog_doi_lookup',id:privateItem.id},{library:f.library,fetchOptions})).status,'needs-source');
+  assert.equal(requests.length,1);
+});
+
+test('preprint by identifier uses its registered DataCite DOI, and dataset version candidates are excluded',async t=>{
+  const f=await fixture(t,{type:'article',archive:'arXiv',archive_location:'2601.01234'});
+  const data=(doi,name,type,other={})=>({attributes:{doi,titles:[{title:name}],types:{resourceTypeGeneral:type},publicationYear:2026,publisher:'Synthetic Archive',...other}});
+  const dataset=await core({action:'dataset_put',expected_revision:0,metadata:{title:'Synthetic public dataset',publisher:'Synthetic Archive',URL:'https://repository.example.org/dataset',issued:{'date-parts':[[2026]]}}},{library:f.library});
+  const fetchOptions={resolver,transport:async({url})=>{
+    if(url.pathname==='/works')return response(JSON.stringify({message:{items:[]}}));
+    if(url.pathname==='/dois')return response(JSON.stringify({data:[
+      data('10.1234/version','Synthetic public dataset','Dataset',{version:'1.0'}),
+      data('10.1234/family','Synthetic public dataset','Dataset'),
+    ]}));
+    assert.match(url.href,/api\.datacite\.org\/dois\//);
+    return response(JSON.stringify({data:data('10.48550/arXiv.2601.01234',title,'Preprint')}));
+  }};
+  assert.equal((await dispatch({action:'catalog_doi_lookup',id:f.item.id},{library:f.library,fetchOptions})).DOI,'10.48550/arxiv.2601.01234');
+  assert.equal((await dispatch({action:'catalog_doi_lookup',id:dataset.id,kind:'dataset'},{library:f.library,fetchOptions})).DOI,'10.1234/family');
+});
+
 test('metadata_lookup returns a review draft, preserves manual fields and JCR, and never changes a managed PDF or catalog item',async t=>{
   const ranking={system:'JCR',year:2025,category:'Example category',quartile:'Q2',source:'Licensed user export'};
   const f=await fixture(t,{DOI:'10.1234/metadata',title:'Manually corrected title',abstract:'Manual abstract',citekey:'keep-key',URL:'https://manual.example/article',

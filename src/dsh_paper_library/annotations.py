@@ -211,7 +211,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 rects = [list(cls._rect(rect, page, inverse=True) * page.rotation_matrix) for rect in source_rects]
             except (TypeError, ValueError):
                 pass
-        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "subject": info.get("subject", "")[:1000] if not info.get("subject", "").startswith("paper-library:") else "", "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, **cls._annotation_style(annot), "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"width": annot.border.get("width", 1)} if kind == "square" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids", "parent_id") if key in extra}}
+        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "subject": info.get("subject", "")[:1000] if not info.get("subject", "").startswith("paper-library:") else "", "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, **cls._annotation_style(annot), "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"width": annot.border.get("width", 1)} if kind == "square" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids", "parent_id", "question", "answered_at") if key in extra}}
 
     def companion_excerpt(self, id, page):
         """One explicitly selected page, text only; no persistent index or OCR."""
@@ -425,20 +425,22 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         return value
 
     def annotations(self, id):
+        from .annotation_favorites import ids
+        favorites = ids(self, id)
         result, characters = [], 0
         with self._open_pdf(self.pdf_path(id)) as doc:
             for page in doc:
                 handwriting = self._handwriting_page(page)
                 for annot in page.annots() or []:
                     if len(result) >= _constants().MAX_ANNOTATIONS:
-                        return {"annotations": result, "truncated": True}
+                        return {"annotations": result, "truncated": True, "favorites": favorites}
                     value = self._annotation(page, annot, handwriting=handwriting)
                     value = self._with_annotation_version(value, bool(annot.info.get("id")))
                     characters += self._annotation_characters(value)
                     if characters > 2_000_000:
-                        return {"annotations": result, "truncated": True}
+                        return {"annotations": result, "truncated": True, "favorites": favorites}
                     result.append(value)
-        return {"annotations": result, "truncated": False}
+        return {"annotations": result, "truncated": False, "favorites": favorites}
 
     @staticmethod
     def _document_layout(doc, id):
@@ -975,7 +977,9 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             page.delete_annot(annot)
             return {"deleted": True}
         with self.lock():
-            return self._write_pdf(id, operation)
+            result = self._write_pdf(id, operation)
+            self.db.execute("DELETE FROM annotation_favorites WHERE paper_id=? AND annotation_id=?", (id, annotation_id))
+            return result
 
     def export_annotations(self, id, format="xfdf"):
         item = self.get(id)

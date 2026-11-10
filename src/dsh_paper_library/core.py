@@ -197,8 +197,10 @@ def csl_item(raw):
         item.pop(key, None)
     zotero = "itemType" in item or "creators" in item
     if zotero:
-        types = {"journalArticle": "article-journal", "conferencePaper": "paper-conference", "book": "book", "bookSection": "chapter", "thesis": "thesis", "report": "report", "preprint": "article", "webpage": "webpage", "dataset": "dataset"}
+        types = {"journalArticle": "article-journal", "conferencePaper": "paper-conference", "book": "book", "bookSection": "chapter", "thesis": "thesis", "report": "report", "preprint": "article", "manuscript": "manuscript", "webpage": "webpage", "dataset": "dataset", "presentation": "speech", "patent": "patent", "standard": "standard", "newspaperArticle": "article-newspaper", "magazineArticle": "article-magazine", "blogPost": "post-weblog"}
         item["type"] = types.get(item.get("itemType"), "article")
+        if item.get("itemType") == "preprint":
+            item["genre"] = "Preprint"
         # Zotero's top-level numeric version is a sync revision. CSL version is
         # a publication/release label and must survive JSON/BibLaTeX roundtrips.
         item.pop("version", None)
@@ -520,7 +522,7 @@ class Library(Papers, PdfWrites, AnnotationAccess):
                 color="#91bad6", extra=extra))
             return {"saved": True, "duplicate": False, "annotation": result["annotation"]}
 
-    def save_conversation_feedback(self, id, text, model, annotation_ids, source_session_id, source_message_id, page=1, source_snapshot_ids=None):
+    def save_conversation_feedback(self, id, text, model, annotation_ids, source_session_id, source_message_id, page=1, source_snapshot_ids=None, question="", answered_at=None):
         """Persist an explicitly saved, host-verified native assistant message.
 
         This worker action is internal to the Harness adapter: the host must read
@@ -530,6 +532,13 @@ class Library(Papers, PdfWrites, AnnotationAccess):
         """
         if not isinstance(text, str) or not text.strip() or len(text) > 28000:
             raise ValueError("Feedback must contain 1–28000 characters")
+        question = bounded_text(question, "Question", 4000)
+        if answered_at is not None:
+            answered_at = bounded_text(answered_at, "Answer timestamp", 30, required=True)
+            if not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z", answered_at):
+                raise ValueError("Answer timestamp must be UTC ISO 8601")
+            datetime.fromisoformat(answered_at.replace("Z", "+00:00"))
+        qa = {key: value for key, value in (("question", question), ("answered_at", answered_at)) if value}
         if not isinstance(annotation_ids, list) or len(annotation_ids) > 1000 or any(not isinstance(value, str) or not 1 <= len(value) <= 160 for value in annotation_ids) or len(set(annotation_ids)) != len(annotation_ids) or len(json.dumps(annotation_ids)) > 64000:
             raise ValueError("Conversation feedback requires bounded unique annotation IDs verified by the host")
         source_snapshot_ids = source_snapshot_ids or []
@@ -569,15 +578,20 @@ class Library(Papers, PdfWrites, AnnotationAccess):
             if any(value not in sources for value in annotation_ids):
                 raise ValueError("Source annotation is missing or is AI feedback; keep the reply in DSH and refresh its references")
             if duplicate:
-                if annotation_ids and not duplicate.get("annotation_ids"):
+                link_missing = annotation_ids and not duplicate.get("annotation_ids")
+                missing_qa = {key: value for key, value in qa.items() if not duplicate.get(key)}
+                if link_missing or missing_qa:
                     def connect(doc):
                         current, annot = self._find_annotation(doc, duplicate["id"])
                         extra = self._annotation_metadata(annot)
-                        extra.update(annotation_ids=annotation_ids, source_snapshot_ids=source_snapshot_ids)
+                        extra.update(missing_qa)
+                        if link_missing:
+                            extra.update(annotation_ids=annotation_ids, source_snapshot_ids=source_snapshot_ids)
                         annot.set_info(subject="paper-library:" + json.dumps(extra, ensure_ascii=False))
-                        target_page, parent = self._find_annotation(doc, annotation_ids[0])
-                        if current.number == target_page.number:
-                            annot.set_irt_xref(parent.xref)
+                        if link_missing:
+                            target_page, parent = self._find_annotation(doc, annotation_ids[0])
+                            if current.number == target_page.number:
+                                annot.set_irt_xref(parent.xref)
                         return {"annotation": self._annotation(current, annot)}
                     duplicate = self._write_pdf(id, connect)["annotation"]
                 return {**duplicate, "annotation_id": duplicate["id"], "duplicate": True}
@@ -585,7 +599,7 @@ class Library(Papers, PdfWrites, AnnotationAccess):
                 raise ValueError("PDF annotation limit reached; conversation feedback was not saved")
             if annotation_ids:
                 page = sources[annotation_ids[0]]
-            extra = {"kind": "ai-feedback", "model": str(model)[:200], "annotation_ids": annotation_ids, "source_snapshot_ids": source_snapshot_ids, "generated": now(), "source_kind": "dsh-conversation", "source_session_id": source_session_id, "source_message_id": source_message_id}
+            extra = {"kind": "ai-feedback", "model": str(model)[:200], "annotation_ids": annotation_ids, "source_snapshot_ids": source_snapshot_ids, "generated": now(), "source_kind": "dsh-conversation", "source_session_id": source_session_id, "source_message_id": source_message_id, **qa}
             def write_reply(doc):
                 current = self._page(doc, page)
                 x, y = 20, 20
@@ -637,6 +651,9 @@ def dispatch(request):
         if action in {"paper_organization_update", "paper_tags_list"}:
             from . import paper_organization
             return paper_organization.update(library, request) if action.endswith("update") else paper_organization.listing(library, request)
+        if action in {"annotation_favorite_set", "annotation_favorites_list"}:
+            from . import annotation_favorites
+            return annotation_favorites.update(library, request) if action.endswith("_set") else annotation_favorites.listing(library, request)
         if isinstance(action, str) and action.startswith("latex_"):
             # LaTeX projects own a real folder, not the managed PDF tree.
             from . import latex
@@ -699,13 +716,13 @@ def dispatch(request):
         actions = {
             "annotation_caption_result": ("id", "annotation_id", "page", "source_version", "text", "model"),
             "annotation_translation_result": ("id", "annotation_ref", "request_key", "text", "model"),
-            "list": ("query", "limit", "offset", "sort", "order", "archived", "favorite", "tag"), "get": ("id", "include_archived"), "create": ("metadata",), "archive": ("id",), "restore": ("id",), "update": ("id", "metadata"), "attach": ("id", "path"), "page_layout": ("id",), "page": ("id", "page", "scale", "include_layout", "render_width"),
+            "list": ("query", "limit", "offset", "sort", "order", "archived", "favorite", "tag"), "get": ("id", "include_archived"), "create": ("metadata",), "archive": ("id",), "restore": ("id",), "update": ("id", "metadata", "expected_modified"), "attach": ("id", "path"), "page_layout": ("id",), "page": ("id", "page", "scale", "include_layout", "render_width"),
             "annotations": ("id",), "annotation_preview": ("id", "annotation_id", "page", "render_width"), "annotate": ("id", "page", "type", "rects", "paths", "width", "annotation_id", "parent_id", "text", "comment", "author", "color"), "annotation_reply_create": ("id", "annotation_id", "reply_id", "comment"), "annotation_style": ("id", "annotation_id", "color", "line_style", "expected_version"), "annotation_update": ("id", "annotation_id", "comment", "version"), "annotation_reselect": ("id", "annotation_id", "page", "rects", "text", "expected_version"), "annotation_delete": ("id", "annotation_id"),
             "linked_handwriting_text": ("id", "parent_id", "transcript", "transcription_source", "expected_version", "request_id"),
             "handwriting_get": ("id", "annotation_id"), "handwriting_save": ("id", "annotation_id", "board", "transcript", "transcription_source", "expected_version", "request_id"),
             "annotation_catalog": ("id", "annotation_id"), "annotation_context_exact": ("id", "annotation_refs", "selection", "max_characters"), "companion_excerpt": ("id", "page"),
             "export_annotations": ("id", "format"), "link": ("source", "target", "relation", "note"), "graph": ("id", "limit", "offset", "focus_id", "view"), "feedback_context": ("id", "annotation_ids"), "save_feedback": ("id", "text", "model", "annotation_ids", "expected_context_hash", "replies"), "feedback": ("id",),
-            "save_conversation_feedback": ("id", "text", "model", "annotation_ids", "source_session_id", "source_message_id", "page", "source_snapshot_ids"),
+            "save_conversation_feedback": ("id", "text", "model", "annotation_ids", "source_session_id", "source_message_id", "page", "source_snapshot_ids", "question", "answered_at"),
         }
         if action not in actions:
             raise ValueError("Unknown core action")

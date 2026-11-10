@@ -64,7 +64,7 @@ function environment({ respond, active = null, storage = new Map(), library = 's
   const window = new Element('window');window.localStorage={getItem(){throw new Error('Use server state');},setItem(){throw new Error('Browser writes are forbidden');}};
   const state = { active, library, items: active ? [active] : [], sort: 'modified', order: 'desc', archived: false, offset: 0, limit: 40, tab: 'reader' };
   vm.runInNewContext(localStateSource,{window,TextEncoder});
-  vm.runInNewContext(source, { window, document, structuredClone }, { filename: 'web/workbench.js' });
+  vm.runInNewContext(source, { window, document, structuredClone, queueMicrotask }, { filename: 'web/workbench.js' });
   const workbench = window.PaperWorkbench.create({ state,
     persistence:customPersistence||(persistent?{get:async key=>storage.has(`${library}:${key}`)?plain(storage.get(`${library}:${key}`)):null,put:async(key,value)=>{storage.set(`${library}:${key}`,plain(value));return value;}}:undefined),
     ...panelHost,
@@ -301,6 +301,22 @@ test('an unpublished manuscript can fill a missing year without entering publica
   assert.deepEqual(f.requests.at(-1).metadata.publication_dates,{});
 });
 
+test('file format and citation type have independent columns and only the selected record starts a DOI lookup', async () => {
+  const paper={...original(),type:'paper-conference',DOI:'',pdf:true};
+  const dataset={id:'ds-synthetic',title:'Synthetic data',resource_kind:'dataset',storage_formats:['csv','jsonl']};
+  const f=environment({active:paper,panelHost:{enableAutomaticDoi:()=>true},respond:async action=>{
+    assert.equal(action,'catalog_doi_lookup');return {status:'not-found'};
+  }});
+  f.state.items.push(dataset);f.workbench.setTable(true);
+  await flush();
+  const grid=f.element('catalog-table');
+  assert.deepEqual(grid.querySelectorAll('th').slice(-2).map(n=>n.textContent),['文献类型','文件格式']);
+  const rows=grid.querySelectorAll('tr').slice(1);
+  assert.deepEqual(rows[0].children.slice(-2).map(n=>n.children[0].textContent),['会议论文','PDF']);
+  assert.deepEqual(rows[1].children.slice(-2).map(n=>n.children[0].textContent),['数据集','CSV / JSONL']);
+  assert.deepEqual(f.requests,[{action:'catalog_doi_lookup',id:paper.id,manual:false}]);
+});
+
 test('a dataset title still routes to the dataset view instead of the reader', async () => {
   const f = environment({ active: original() });
   const dataset = { id: 'dataset_synthetic', title: 'Synthetic dataset', resource_kind: 'dataset', citekey: 'syntheticData' };
@@ -423,7 +439,7 @@ test('metadata lookup adopts the complete author list in the review draft withou
 
 test('shared folder action follows selection, refuses missing files and never accepts a browser path',async()=>{
   const first={...original(),pdf:true};const second={...first,id:'paper-b'};const f=environment({active:first});f.state.items.push(second);f.workbench.setTable(true);
-  assert.equal(f.element('catalog-table').querySelectorAll('th').length,10);
+  assert.equal(f.element('catalog-table').querySelectorAll('th').length,11);
   await f.element('catalog-reveal').dispatch('click');assert.deepEqual(f.requests,[{action:'paper_reveal',id:first.id}]);
   const row=f.element('catalog-table').querySelectorAll('tr').find(n=>n.dataset.paperId===second.id);await row.querySelector('button').dispatch('click');
   await f.element('catalog-reveal').dispatch('click');assert.equal(f.requests.at(-1).id,second.id);
