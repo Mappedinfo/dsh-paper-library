@@ -10,3 +10,7 @@
 body.has-field-radar{--workbench-height:42px}.has-field-radar .topbar{height:42px;grid-template-rows:28px;padding-bottom:6px}.has-field-radar .reader-status-bar{display:none!important}.has-field-radar .workspace{height:calc(100dvh - 42px)}
 .radar-image-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;padding-top:4px}.radar-image-tools select{flex:0 1 220px;min-width:160px;max-width:260px}
 .radar-chart-gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px}.radar-chart-gallery .radar-card{display:flex;flex-direction:column}.radar-chart-gallery .radar-card h3{margin-top:0}.radar-chart-gallery .radar-card p{flex:1}.radar-chart-gallery [aria-pressed=true]{background:var(--teal-light);box-shadow:inset 0 -2px var(--teal)}.radar-chart-preview{margin:20px 0;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}.radar-chart-preview img{display:block;width:100%;height:auto}.radar-chart-preview figcaption{padding:12px 0 0;color:var(--muted);font-size:12px;overflow-wrap:anywhere}.radar-image-tools select:disabled{opacity:.55}
+
+.radar-relations-figure { overflow:auto; background:white; margin:1rem 0; }
+.radar-relations-figure svg { display:block; width:100%; min-width:1000px; height:auto; }
+.radar-relations-figure .relations-muted { opacity:.065 !important; }

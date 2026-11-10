@@ -121,3 +121,26 @@ HTTP/原生工具同样传 `language:"en"`，回执返回 language。英文图�
 ```
 
 映射键必须对应保存证据中的原始字符串，译文忠实保留原意、数字、人物身份与不确定性。渲染是确定性的本机操作，不调用模型自动翻译。中文字段缺少映射时，全英文版使用中性实体 ID 或 `Translation unavailable` 并报告缺失，不把未翻译中文混进英文图，也不创造英文事实。为汇报准备翻译时，应核对证据并通过已有主题导入/版本校验保存映射，保留原始字段及来源不变。切勿将替代标记当成已完成译文。
+
+## 内置多维关系（离线 relations.html 的安全接入）
+
+「领域研究 → 多维关系」在现有界面中重建离线关系报告的桑基图、逐篇圆形轨道、中英切换、维度筛选和来源记录。无需新服务，不载入、不执行用户提供的 HTML/JavaScript。输入必须是该报告的结构化 companion `relation-input.json`，由随插件发布的通用渲染器生成 SVG。原 HTML、PDF 与主题 JSON 均不改动。
+
+关系快照与当前主题选择独立，明确显示独立快照提示。每库保存一份当前关系快照，使用既有本机状态库、内容寻址分块与 revision 比较写入；旧分块保留。源日期保留在逐条来源中，导入日期不冒充研究更新日期。筛选只高亮相关图形，桑基宽度与标签始终对应完整快照；逐篇记录每页最多 20 项，中英文切换保持筛选。维度共现不是因果或单篇唯一路径，历史署名分组不证明当前团队身份。来源中的本库 ID 先经现有论文匹配接口核对，唯一且完整匹配后才打开。
+
+私有导入 CLI（首次版本为 `0`，更新必须使用读取返回的 revision）：
+
+```
+node scripts/import-field-radar-relations.mjs /absolute/relation-input.json /absolute/library 0 /absolute/dsh-state-home
+```
+
+末尾 state home 可省略，此时沿用 `DSH_HOME`/默认 home；必须与当前宿主的 `localStateHome` 一致。CLI 不读取宿主凭据，不猜配置路径。可通过现有认证 API 调用 `field_radar_relations_get` 和 `field_radar_relations_import`，后者参数为 `{document,expected_revision}`。get 返回 document、revision、digest、updated_at；import 返回保存回执。通用浏览器 state 接口不能写这些保留命名空间。
+
+输入 schema_version 为 1，包含 title/scope（文本或 zh/en 标签）、sources、dimensions（id/label/categories）、records（id/title/source_ids/values/evidence）及可选 relationships/config。来源和关系引用须存在；标识符、颜色和 HTTP(S) 链接严格校验。限制 1 MiB、2–6 维、每维最多 24 类、1–200 篇、1000 来源、500 证据关系；圆形轨道过多会拒绝，不能静默裁掉维度。超过范围请明确分主题生成快照。更新 corpus 后重新生成并导入 companion JSON；本功能不会自动扩大样本、抓取论文或调用模型。
+
+```
+node --test tests-js/field-radar-relations.test.mjs
+PLAYWRIGHT_MODULE=/absolute/playwright/index.mjs node scripts/field-radar-relations-browser-fixture.mjs
+```
+
+只用合成样本执行安全、计量、存储与浏览器回归。不使用用户当前窗口。源码修改与已运行宿主/已打开页面是否加载新版是不同状态，测试不重载宿主或刷新用户页面。

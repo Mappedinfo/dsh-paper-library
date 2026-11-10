@@ -1,0 +1,14 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { importFieldRadarAnalysis } from '../src/harness/field-radar-analysis-import.mjs';
+function fixture() {
+  const map = new Map(); let revision = 0;
+  const store = { get: async key => structuredClone(map.get(key) || { value: null, revision: 0 }), put: async (key, value, expected) => { if ((map.get(key)?.revision ?? 0) !== expected) throw Object.assign(Error('conflict'), { code: 'STATE_CONFLICT' }); const record = { value: structuredClone(value), revision: String(++revision) }; map.set(key, record); return record; } };
+  const document = { topic: { id: 'demo' }, papers: [{ id: 'p1' }], scholars: [], sources: [{ id: 's1' }] };
+  const radar = { get: async () => ({ document, revision: 'r1' }) };
+  const input = { id: 'demo', request_id: 'agent-review-1', expected_revision: 'r1', expected_pointer_revision: 0, provenance: { kind: 'chatgpt-native-subagent', external_model_calls: 0, evidence_scope: 'Synthetic source excerpt, not full text.' }, draft: { title: 'Synthesis', summary: 'Evidence-limited result', concepts: [{ text: 'A sourced interpretation', source_ids: ['s1'], paper_ids: ['p1'] }], distinctions: [], research_lines: [], relations: [], gaps: [] } };
+  return { store, radar, input, map };
+}
+test('native-agent import is source-bound, review-only, replayable and activates existing UI pointer', async () => { const f = fixture(); const result = await importFieldRadarAnalysis(f, f.input); assert.equal(result.status, 'complete'); assert.equal(result.draft.review_status, 'needs_review'); assert.equal(result.provenance.external_model_calls, 0); assert.equal(result.activated, true); const again = await importFieldRadarAnalysis(f, f.input); assert.equal(again.replayed, true); assert.equal(f.map.size, 2); });
+test('rejects stale topic, unknown sources, unsupported provenance and changed identity before mutation', async () => { for (const mutate of [i=>i.expected_revision='stale',i=>i.draft.concepts[0].source_ids=['unknown'],i=>i.provenance.kind='unidentified-model']) { const f=fixture();mutate(f.input);await assert.rejects(importFieldRadarAnalysis(f,f.input));assert.equal(f.map.size,0); } const f=fixture();await importFieldRadarAnalysis(f,f.input);f.input.draft.summary='changed';await assert.rejects(importFieldRadarAnalysis(f,f.input),{code:'FIELD_RADAR_ANALYSIS_CONFLICT'}); });
+test('never clobbers a newer UI request, while preserving the imported draft', async () => { const f=fixture();await f.store.put('knowledge-draft:field-radar:demo',{request_id:'user-newer'},0);await assert.rejects(importFieldRadarAnalysis(f,f.input),{code:'FIELD_RADAR_ANALYSIS_POINTER_CONFLICT'});assert.equal((await f.store.get('knowledge-draft:field-radar:demo')).value.request_id,'user-newer');assert.equal(f.map.size,2); });

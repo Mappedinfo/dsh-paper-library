@@ -92,6 +92,9 @@
     "docs/workspace-navigation.md",
     "docs/field-radar.md",
     "scripts/import-field-radar-snapshot.mjs",
+    "scripts/import-field-radar-relations.mjs",
+    "scripts/import-field-radar-analysis.mjs",
+    "docs/field-radar-agent-import.md",
     "scripts/export-field-radar.mjs"
   ],
   "dsh": {

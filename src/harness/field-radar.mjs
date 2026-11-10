@@ -1,3 +1,4 @@
+import { createRelationsStore } from './field-radar-relations.mjs'
 /** Explicit, bounded research imports. No model, remote fetch, PDF access or author-name merging. */
 import { createHash } from 'node:crypto'
 import { validateRadarTranslations } from './field-radar-i18n.mjs'
@@ -42,6 +43,7 @@ export function validateFieldRadarDocument(input) {
 
 export function createFieldRadarStore({ store, request, library } = {}) {
   if (!store?.get || !store?.put || !store?.list) throw fail('雷达需要本地状态存储。')
+  const relations = createRelationsStore(store)
   const key = value => `field-radar-topic:${id(value)}`
   async function get(topicId) {
     const manifest = await store.get(key(topicId))
@@ -115,6 +117,8 @@ export function createFieldRadarStore({ store, request, library } = {}) {
     finally { await handle?.close() }
   }
   async function handle(input, context) {
+    if (input.action === 'field_radar_relations_get') return relations.get()
+    if (input.action === 'field_radar_relations_import') return relations.importDocument(input)
     if (input.action === 'field_radar_snapshot_get') return readSnapshot()
     if (input.action === 'field_radar_get') return get(input.id)
     if (input.action === 'field_radar_import') return importDocument(input)
