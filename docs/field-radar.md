@@ -22,7 +22,7 @@ node scripts/import-field-radar-snapshot.mjs /absolute/path/to/field-radar/index
 
 ## 主题 JSON 与更新
 
-浏览器导入最多 1 MiB，导出保留完整字段。已有主题更新需在界面明确确认，并以当前 revision 写入；并发冲突不覆盖资料。存储复用资料库隔离的本机状态，内容分块和历史快照不可变。
+主题浏览器导入最多 4 MiB，导出保留完整字段。已有主题更新需在界面明确确认，并以当前 revision 写入；并发冲突不覆盖资料。存储复用资料库隔离的本机状态，内容分块和历史快照不可变。
 
 基础结构：`schema_version:1`、`topic:{id,title,question,scope}`，以及 `sources`、`papers`、`scholars`、`claims` 四个数组。每项有稳定 `id`；论文、学者贡献和论断带 `source_ids`。来源含 HTTP(S) URL、标题、证据层级和实际核验日期，未知日期留空。扩展可使用 `concepts`、`distinctions`、`research_lines`、`organizations`、`relationships`、`method_lineage`。论文可记录 `datasets`、`evaluation`、`task_axes` 和 `evidence_scope`。所有嵌套来源与实体引用均校验，不按人名合并身份。
 
@@ -128,7 +128,7 @@ HTTP/原生工具同样传 `language:"en"`，回执返回 language。英文图�
 
 关系快照与主题分别保存，原始记录、来源及核验状态不覆盖。选中主题时默认通过 DOI 或唯一规范化题名建立共享论文索引；相同 ID 本身不视为同一论文，歧义和 DOI 冲突不自动合并。界面显示两边覆盖数，未在图中的主题论文仍保留在表格；取消「联动当前主题与文献表」可看完整独立快照。每库当前关系快照仍沿用内容寻址分块与 revision 写入，旧分块保留，导入日期不冒充来源日期。
 
-文献表七列筛选及主题关键词／任务／年份同时限制联动图。点击节点或色带选择其支撑论文，可切回文献表；每篇可从表格定位到图，也可从图打开表格。清除桑基选择会恢复全部表格筛选结果，包括没有关系记录的论文。筛选后按选中记录重算数量和宽度，不再仅高亮全图。
+文献表九列筛选及主题关键词／任务／年份同时限制联动图。点击节点或色带选择其支撑论文，可切回文献表；每篇可从表格定位到图，也可从图打开表格。清除桑基选择会恢复全部表格筛选结果，包括没有关系记录的论文。筛选后按选中记录重算数量和宽度，不再仅高亮全图。
 
 可勾选展示维度（至少两列，可恢复），选择标准／宽／更宽列距及适应容器、1600／2400／3200 px 显示宽度，宽图可横向滚动。隐藏列不删除数据，也不清除该列筛选。减少列后按新的相邻维度计算同现，每条记录在每列总权重为 1，多标签按 1/k 分摊；不能沿全路径推断单篇论文关系、方法继承或因果，署名分组不证明当前团队身份。逐篇证据保留原始维度，关系分类不会升级为已核验表格事实。
 
@@ -142,7 +142,7 @@ node scripts/import-field-radar-relations.mjs /absolute/relation-input.json /abs
 
 末尾 state home 可省略，此时沿用 `DSH_HOME`/默认 home；必须与当前宿主的 `localStateHome` 一致。CLI 不读取宿主凭据，不猜配置路径。可通过现有认证 API 调用 `field_radar_relations_get` 和 `field_radar_relations_import`，后者参数为 `{document,expected_revision}`。get 返回 document、revision、digest、updated_at；可选传 {id,expected_revision} 加入 linkage，含逐条身份匹配和覆盖数，主题版本不一致拒绝。import 返回保存回执。通用浏览器 state 接口不能写这些保留命名空间。
 
-输入 schema_version 为 1，包含 title/scope（文本或 zh/en 标签）、sources、dimensions（id/label/categories）、records（id/title/source_ids/values/evidence）及可选 relationships/config。来源和关系引用须存在；标识符、颜色和 HTTP(S) 链接严格校验。限制 1 MiB、2–6 维、每维最多 24 类、1–200 篇、1000 来源、500 证据关系；圆形轨道过多会拒绝，不能静默裁掉维度。超过范围请明确分主题生成快照。更新 corpus 后重新生成并导入 companion JSON；本功能不会自动扩大样本、抓取论文或调用模型。
+输入 schema_version 为 1，包含 title/scope（文本或 zh/en 标签）、sources、dimensions（id/label/categories）、records（id/title/source_ids/values/evidence）及可选 relationships/config。来源和关系引用须存在；标识符、颜色和 HTTP(S) 链接严格校验。限制 1 MiB、2–10 维、每维最多 24 类、1–200 篇、1000 来源、500 证据关系；仅当前勾选维度参与绘图，圆形轨道过多会提示减少维度或切换桑基图，不能静默裁掉维度。超过范围请明确分主题生成快照。更新 corpus 后重新生成并导入 companion JSON；本功能不会自动扩大样本、抓取论文或调用模型。
 
 ```
 node --test tests-js/field-radar-relations.test.mjs
@@ -155,9 +155,9 @@ PLAYWRIGHT_MODULE=/absolute/playwright/index.mjs node scripts/field-radar-linked
 
 ## 文献对照表：复制到 Slides 与本机导出
 
-「领域研究 → 文献对照表」根据当前主题和关键词／任务／年份筛选自动显示七列，包括**研究组、论文简称、具体解决／生成什么、数据集与开放性、方法、年份、推理无需目标区域历史 OD？**。默认显示当前主题的**全部已保存文献**，也可切换每页 20／50／100 篇；每行依据和当前范围来源默认展开。上方七列筛选可组合，按全部匹配文献筛选后再分页，点击列名切换升序／降序。文本列按包含文字匹配，不区分大小写；OD 列仅按已核验的「是／否」及「未知／待核／冲突」筛选，不把草稿报告值当成已核验结论。切换主题、筛选、页码或草稿后自动载入对应表格。复制／导出范围默认「全部筛选结果」，也可明确选择「当前显示页」；HTML 富文本表格与 TSV 可复制到 Slides，也可分别导出 HTML、TSV、CSV 或 Markdown。富文本粘贴效果取决于目标软件，若只接受纯文本，可用 TSV 经电子表格中转。
+「领域研究 → 文献对照表」根据当前主题和关键词／任务／年份筛选自动显示九列，包括**研究组、论文简称、具体解决／生成什么、数据集与开放性、方法、年份、POI 使用／处理、建筑信息使用／处理、推理无需目标区域历史 OD？**。默认显示当前主题的**全部已保存文献**，也可切换每页 20／50／100 篇；每行依据和当前范围来源默认展开。上方九列筛选可组合，按全部匹配文献筛选后再分页，点击列名切换升序／降序。文本列按包含文字匹配，不区分大小写；OD 列仅按已核验的「是／否」及「未知／待核／冲突」筛选，不把草稿报告值当成已核验结论。切换主题、筛选、页码或草稿后自动载入对应表格。复制／导出范围默认「全部筛选结果」，也可明确选择「当前显示页」；HTML 富文本表格与 TSV 可复制到 Slides，也可分别导出 HTML、TSV、CSV 或 Markdown。富文本粘贴效果取决于目标软件，若只接受纯文本，可用 TSV 经电子表格中转。
 
-表格复用现有来源、`papers[].task/output/task_axes.output/method/datasets/dataset/year` 和明确核验的 `research_groups`。缺简称时保留全称；缺组名不由共同作者或单位补造；代码开源不等于数据开放。每格保留来源标识与核验状态，完整导出附来源和范围说明，同名私有 JSON 保留未截断原记录与逐格证据。剪贴板只复制七列表格，不把来源脚注误粘成额外数据行。
+表格复用现有来源、`papers[].task/output/task_axes.output/method/datasets/dataset/year` 和明确核验的 `research_groups`。缺简称时保留全称；缺组名不由共同作者或单位补造；代码开源不等于数据开放。每格保留来源标识与核验状态，完整导出附来源和范围说明，同名私有 JSON 保留未截断原记录与逐格证据。剪贴板只复制九列表格，不把来源脚注误粘成额外数据行。
 
 OD 标准固定为：**输出 OD 流量，推理目标区域时不输入其历史 OD。** 训练阶段可使用历史 OD，评估真值不等于推理输入。需要目标区域历史／部分 OD 的补全、校准不符合。只有已核验、直接引用来源并带证据文字的布尔字段才能产生「是／否」；缺证据、冲突或 AI 待核结果保留「未知」。不按论文／方法名称猜测。
 
@@ -179,7 +179,7 @@ OD 标准固定为：**输出 OD 流量，推理目标区域时不输入其历�
 
 - `library_field_radar_table` / HTTP `field_radar_table`：只读整理，返回表格 HTML、TSV、单元格、覆盖数、来源与缺失说明。
 - `library_field_radar_table_export` / HTTP `field_radar_table_export`：写入原有 `.paper-library/field-radar-exports/`，支持 `format:html|tsv|csv|markdown`。原生工具返回本机路径，HTTP 只返回受控同源下载地址。
-- 参数为 `{id,expected_revision?,analysis_request_id?,paper_ids?:string[],filters?:{query?,task?,year?},column_filters?,sort_by?,sort_direction?:"asc"|"desc",all?:boolean,offset?:0,limit?:1..100}`，导出另加 format（默认 html）。paper_ids 是最多 500 个当前主题论文 ID 的交集筛选；省略不限制，空数组为零篇。未知、重复或非法 ID 拒绝，回执与证据 JSON 保留该选择。`all:true` 返回当前主题的全部匹配项并要求 `offset:0`，沿用单主题最多 500 篇边界；省略 all 时保持原有有界分页。`column_filters` 可用 `research_group/short_name/task_output/datasets/method/year` 的包含文字条件及 `od_generation:"yes"|"no"|"unknown"`；`sort_by` 为同一组列名。多个列条件与主题筛选同时生效，排序先于分页。`analysis_request_id` 可选，明确选择已有 AI 草稿；旧版本或未完成草稿拒绝。超限拒绝而不是静默截断，`count/total/has_more` 说明本页覆盖。
+- 参数为 `{id,expected_revision?,analysis_request_id?,paper_ids?:string[],filters?:{query?,task?,year?},column_filters?,sort_by?,sort_direction?:"asc"|"desc",all?:boolean,offset?:0,limit?:1..100}`，导出另加 format（默认 html）。paper_ids 是最多 500 个当前主题论文 ID 的交集筛选；省略不限制，空数组为零篇。未知、重复或非法 ID 拒绝，回执与证据 JSON 保留该选择。`all:true` 返回当前主题的全部匹配项并要求 `offset:0`，沿用单主题最多 500 篇边界；省略 all 时保持原有有界分页。`column_filters` 可用 `research_group/short_name/task_output/datasets/method/year/poi_usage/building_usage` 的包含文字条件及 `od_generation:"yes"|"no"|"unknown"`；`sort_by` 为同一组列名。多个列条件与主题筛选同时生效，排序先于分页。`analysis_request_id` 可选，明确选择已有 AI 草稿；旧版本或未完成草稿拒绝。超限拒绝而不是静默截断，`count/total/has_more` 说明本页覆盖。
 
 ```sh
 node scripts/export-field-radar.mjs --library /absolute/library --id topic-id --view literature-table --format html --all true
@@ -195,3 +195,17 @@ npm run build
 ```
 
 测试仅使用合成数据。源码／接口检查不代表真实模型提取质量、用户当前页面已刷新或 PowerPoint／Google Slides 已验收。
+
+### POI 与建筑信息使用分析
+
+`comparison.poi_usage` / `comparison.building_usage` 使用相同有界结构：
+
+```json
+{"use_status":"used","variables":"POI类别计数；建筑FAR须说明定义","spatial_aggregation":"街区计数；非均值","building_binding":"未发现具体建筑匹配证据","condition_role":"预测输入","representation":"未发现学习编码器证据","handling_tags":["spatial_aggregation","prediction_input"],"pages":[3,4],"source_ids":["source-id"],"evidence":"合成示例：方法页逐页引文","status":"needs_review"}
+```
+
+`use_status` 为 used/not_used/not_found/unknown；未发现不等于明确未用。文本字段均为字符串；PDF物理页从1开始。标签只接受 spatial_aggregation、mean_aggregation、building_binding、generation_condition、prediction_input、learned_representation、other，只有 used 可含多标签。平均、建筑绑定、学习表征必须分别有直接依据，不能从区域聚合、POI存在或手工变量推断。来源必须属于主题。
+
+关系API在提供主题ID时按唯一身份派生两维，不更改原关系快照。待核和已核验标签分开显示；多标签每篇每列合计1，保留页码、文字和来源。没有关系记录的主题论文仍在文献表。可选择最多10列；原快照最多10维，另有两项派生维度可选。圆形图只画选中列，空间不足明确提示，不产生负半径；可切回桑基图。主题4MiB上限与最多35个120000-byte分块对应，导出仍有独立上限，无静默裁剪。
+
+若原关系快照已使用 poi_usage／building_usage 维度ID，原列完整保留，主题派生列使用唯一 derived_ 前缀ID，`usage_provenance.dimension_ids` 明确记录映射；不会把旧分类冒充本次分析。paper、comparison、usage字段的待核标记均向派生图传播；声明 verified 但无直接来源或空白证据时仍显示未核验。

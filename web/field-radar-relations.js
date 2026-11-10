@@ -27,7 +27,7 @@ window.PaperFieldRadarRelations={create({root,api,onOpenPaper,onSelection,onShow
  function controls(){
   filters.replaceChildren();dimensions.replaceChildren(el('legend','展示维度列（至少两列，未勾选的列可恢复）'));
   for(const dim of data?.dimensions??[]){
-   const label=el('label'),check=el('input');check.type='checkbox';check.checked=visibleDimensions.includes(dim.id);check.disabled=check.checked&&visibleDimensions.length<=2;check.dataset.dimension=dim.id;check.setAttribute('aria-label','显示维度 '+t(dim.label));check.onchange=()=>{visibleDimensions=data.dimensions.filter(d=>d.id===dim.id?check.checked:visibleDimensions.includes(d.id)).map(d=>d.id);controls();draw();};label.append(check,document.createTextNode(t(dim.label)));dimensions.append(label);
+   const label=el('label'),check=el('input');check.type='checkbox';check.checked=visibleDimensions.includes(dim.id);check.disabled=check.checked&&visibleDimensions.length<=2||!check.checked&&visibleDimensions.length>=10;check.dataset.dimension=dim.id;check.setAttribute('aria-label','显示维度 '+t(dim.label));check.onchange=()=>{visibleDimensions=data.dimensions.filter(d=>d.id===dim.id?check.checked:visibleDimensions.includes(d.id)).map(d=>d.id);controls();draw();};label.append(check,document.createTextNode(t(dim.label)));dimensions.append(label);
    const select=el('select'),all=el('option',t(dim.label)+(check.checked?'':'（隐藏列）'));all.value='';select.append(all);select.setAttribute('aria-label',t(dim.label));for(const c of dim.categories){const o=el('option',t(c.label));o.value=c.id;select.append(o);}select.value=choices.get(dim.id)||'';select.onchange=()=>{choices.set(dim.id,select.value);selectedRecords=null;offset=0;draw();};filters.append(select);
   }
  }
@@ -40,7 +40,7 @@ window.PaperFieldRadarRelations={create({root,api,onOpenPaper,onSelection,onShow
   figure.replaceChildren();svg='';currentDocument=null;exportSVG.disabled=exportJSON.disabled=!rows.length;
   if(rows.length){
    const R=globalThis.PaperRadarRelationsRenderer;currentDocument=R.projectRelations(data,{record_ids:rows.map(r=>r.id),dimensions:visibleDimensions});
-   svg=(kind==='sankey'?R.renderSankey:R.renderCircular)(currentDocument,R.computeRelations(currentDocument),lang,{width_scale:Number(spacing.value)});figure.innerHTML=svg;
+   try{svg=(kind==='sankey'?R.renderSankey:R.renderCircular)(currentDocument,R.computeRelations(currentDocument),lang,{width_scale:Number(spacing.value)});figure.innerHTML=svg;}catch(error){figure.append(el('p',error.message));exportSVG.disabled=true;renderCards(rows,map);return;}
    const node=figure.querySelector('svg');node.style.width=width.value==='fit'?'100%':width.value+'px';
    figure.querySelectorAll('.mark').forEach(mark=>{mark.setAttribute('tabindex','0');mark.setAttribute('role','button');mark.setAttribute('aria-label',mark.querySelector('title')?.textContent??'筛选关联论文');const choose=()=>{selectedRecords=mark.dataset.records.split(' ');offset=0;draw();};mark.addEventListener('click',choose);mark.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();choose();}});});
   }else figure.append(el('p',lang==='zh'?'当前筛选无关系记录；可清空筛选，或关闭联动查看完整原始快照。':'No records match. Clear filters or unlink to inspect the original snapshot.'));
@@ -74,7 +74,7 @@ window.PaperFieldRadarRelations={create({root,api,onOpenPaper,onSelection,onShow
    const changed=data!==null&&JSON.stringify(data.dimensions)!==JSON.stringify(result.document?.dimensions);
    data=result.document;snapshotRevision=result.revision;snapshotDigest=result.digest??null;linkage=result.linkage??null;allowedPaperIds=table?new Set(table.rows.map(r=>r.paper_id)):null;tableCount=table?.total??0;
    loading=false;if(!data){dimensions.replaceChildren();filters.replaceChildren();emit(null);status.textContent='尚未导入关系快照 / No relations snapshot imported.';return;}
-   if(!visibleDimensions||changed)visibleDimensions=data.dimensions.map(d=>d.id);
+   if(!visibleDimensions||changed)visibleDimensions=data.dimensions.slice(0,10).map(d=>d.id);
    if(changed){choices.clear();selectedRecords=null;}
    scope.disabled=!context?.id;scope.checked=linked&&Boolean(context?.id);offset=0;controls();if(pendingPaper){const id=pendingPaper;pendingPaper=null;focusPaper(id);}else draw();
   }catch(e){if(alive&&own===ticket){loading=false;data=null;linkage=null;allowedPaperIds=null;dimensions.replaceChildren();filters.replaceChildren();status.textContent='关系视图读取失败：'+e.message;figure.append(btn('重试读取',()=>void load()));}}

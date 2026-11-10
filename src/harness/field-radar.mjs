@@ -1,3 +1,4 @@
+import { addUsageDimensions } from './field-radar-usage.mjs'
 import { linkRadarRelations } from './field-radar-linkage.mjs'
 import { validatePaperComparison } from './field-radar-table.mjs'
 import { createRelationsStore } from './field-radar-relations.mjs'
@@ -9,7 +10,7 @@ import { constants } from 'node:fs'
 import { lstat, open } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
 import { LocalStateConflictError } from '../local-state.mjs'
-export const FIELD_RADAR_LIMITS = Object.freeze({ bytes: 1024 * 1024, papers: 500, scholars: 300, sources: 1000, claims: 1000, matchPage: 20, candidates: 50 })
+export const FIELD_RADAR_LIMITS = Object.freeze({ bytes: 4 * 1024 * 1024, papers: 500, scholars: 300, sources: 1000, claims: 1000, matchPage: 20, candidates: 50 })
 const fail = (message, code = 'FIELD_RADAR_INVALID', status = 400) => Object.assign(new Error(message), { code, status })
 const hash = text => createHash('sha256').update(text).digest('hex')
 const id = value => { if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$/.test(value)) throw fail('雷达标识须为 1–120 个字母、数字、点、下划线或短横线。'); return value }
@@ -20,7 +21,7 @@ const title = value => String(value || '').normalize('NFKC').toLowerCase().repla
 function page(input, maximum = 50) { const offset = input.offset ?? 0, limit = input.limit ?? 20; if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10000 || !Number.isSafeInteger(limit) || limit < 1 || limit > maximum) throw fail('分页参数超出范围。'); return { offset, limit } }
 export function validateFieldRadarDocument(input) {
   let text; try { text = JSON.stringify(input) } catch { throw fail('雷达资料必须是 JSON。') }
-  if (!text || Buffer.byteLength(text) > FIELD_RADAR_LIMITS.bytes) throw fail('雷达资料超过 1 MiB。', 'FIELD_RADAR_TOO_LARGE', 413)
+  if (!text || Buffer.byteLength(text) > FIELD_RADAR_LIMITS.bytes) throw fail('雷达资料超过 4 MiB。', 'FIELD_RADAR_TOO_LARGE', 413)
   const doc = JSON.parse(text)
   if (!doc || doc.schema_version !== 1 || !doc.topic || typeof doc.topic !== 'object') throw fail('需要 schema_version:1 与 topic。')
   if (Buffer.byteLength(JSON.stringify(doc.topic)) > 16000) throw fail('主题描述超过 16 KiB。')
@@ -51,9 +52,9 @@ export function createFieldRadarStore({ store, request, library } = {}) {
     const manifest = await store.get(key(topicId))
     if (!manifest.value) return { document: null, revision: 0, updated_at: null }
     const { chunks, digest } = manifest.value
-    if (!Array.isArray(chunks) || chunks.length > 12 || !/^[a-f0-9]{64}$/.test(digest)) throw fail('雷达存储清单损坏。', 'FIELD_RADAR_CORRUPT', 500)
+    if (!Array.isArray(chunks) || chunks.length > 35 || !/^[a-f0-9]{64}$/.test(digest)) throw fail('雷达存储清单损坏。', 'FIELD_RADAR_CORRUPT', 500)
     const parts = []
-    for (const chunk of chunks) { if (!/^[a-f0-9]{64}$/.test(chunk)) throw fail('雷达分块标识无效。'); const record = await store.get(`field-radar-chunk:${chunk}`); const data = record.value?.data; if (typeof data !== 'string' || hash(data) !== chunk) throw fail('雷达资料分块缺失或校验失败。', 'FIELD_RADAR_CORRUPT', 500); parts.push(Buffer.from(data, 'base64')) }
+    for (const chunk of chunks) { if (!/^[a-f0-9]{64}$/.test(chunk)) throw fail('雷达分块标识无效。'); const record = await store.get(`field-radar-chunk:${chunk}`); const data = record.value?.data; if (typeof data !== 'string' || data.length > 160000 || hash(data) !== chunk) throw fail('雷达资料分块缺失或校验失败。', 'FIELD_RADAR_CORRUPT', 500); parts.push(Buffer.from(data, 'base64')) }
     const bytes = Buffer.concat(parts)
     if (bytes.length > FIELD_RADAR_LIMITS.bytes || hash(bytes) !== digest) throw fail('雷达资料校验失败。', 'FIELD_RADAR_CORRUPT', 500)
     return { document: validateFieldRadarDocument(JSON.parse(bytes.toString('utf8'))), revision: manifest.revision, updated_at: manifest.updated_at }
@@ -125,7 +126,8 @@ export function createFieldRadarStore({ store, request, library } = {}) {
       const topic=await get(input.id)
       if(!topic.document)throw fail('Research topic not found','FIELD_RADAR_NOT_FOUND',404)
       if(input.expected_revision!==undefined&&input.expected_revision!==topic.revision)throw fail('研究主题已变化，请刷新后再联动。','FIELD_RADAR_STALE',409)
-      return {...result,linkage:linkRadarRelations(result.document,topic)}
+      const linkage=linkRadarRelations(result.document,topic)
+      return {...result,document:addUsageDimensions(result.document,topic,linkage),linkage}
     }
     if (input.action === 'field_radar_relations_import') return relations.importDocument(input)
     if (input.action === 'field_radar_snapshot_get') return readSnapshot()

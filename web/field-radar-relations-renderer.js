@@ -9,7 +9,7 @@ const uniq=a=>[...new Set(a)];
 const fail=s=>{throw Error(s)};
 function validateInput(d){
  if(d.schema_version!==1)fail('schema_version must be 1');
- if(!Array.isArray(d.dimensions)||d.dimensions.length<2)fail('At least two dimensions are required');
+ if(!Array.isArray(d.dimensions)||d.dimensions.length<2||d.dimensions.length>12)fail('At least two dimensions are required');
  if(!Array.isArray(d.records)||!d.records.length)fail('records must be nonempty');
  if(!Array.isArray(d.sources))fail('sources must be an array');
  const src=new Set(d.sources.map(s=>s.id));if(src.size!==d.sources.length)fail('Duplicate source id');
@@ -37,7 +37,7 @@ function attrs(ids){return `class="mark" data-records="${esc(ids.join(' '))}"`;}
 function footer(c,d,kind){let y=c.h-220;c.line(70,y-35,c.w-70,y-35);c.text(70,y,tx(d.title,c.l)+' · '+(kind==='sankey'?(c.l==='zh'?d.dimensions.length+'维桑基图':d.dimensions.length+'-dimension Sankey'):(c.l==='zh'?'逐篇环形轨道':'Paper-aligned circular tracks')),38,C.ink,'start',600);y=c.para(70,y+48,(d.selection_context?(c.l==='zh'?'原快照范围：':'Original snapshot scope: '):'')+tx(d.scope,c.l),c.w-140,23);const notes=d.config?.footnotes?.[c.l]??[];for(const n of notes.slice(0,3))y=c.para(70,y+7,n,c.w-140,21);}
 function renderSankey(d,computed=computeRelations(d),lang='en',options={}){
  const widthScale=Number(options.width_scale??1);if(!Number.isFinite(widthScale)||widthScale<1||widthScale>2)fail('Invalid Sankey width scale');
- const w=Math.round(Math.max(2800,d.dimensions.length*680)*widthScale),h=2050,c=new Canvas(w,h,lang,'sankey'),n=d.records.length,plotTop=170,plotH=1450,pad=52,maxCount=Math.max(...d.dimensions.map(dim=>computed.nodes.filter(n=>n.dimension===dim.id).length)),scale=(plotH-pad*(maxCount-1))/n;
+ const w=Math.round(Math.max(2800,d.dimensions.length*680)*widthScale),h=2050,c=new Canvas(w,h,lang,'sankey'),n=d.records.length,plotTop=170,plotH=1450,maxCount=Math.max(...d.dimensions.map(dim=>computed.nodes.filter(n=>n.dimension===dim.id).length)),pad=Math.min(52,plotH/(2*Math.max(1,maxCount-1))),scale=(plotH-pad*(maxCount-1))/n;
  c.text(70,52,'FIELD RADAR / '+n+' '+(lang==='zh'?'篇独立作品':'DISTINCT WORKS'),22,C.muted);c.text(w-70,52,lang==='zh'?'相邻维度的论文同现':'Adjacent-dimension co-occurrence',22,C.muted,'end');
  const columns=d.dimensions.map((dim,j)=>computed.nodes.filter(x=>x.dimension===dim.id).map(x=>({...x}))),by={};
  // Barycentric sweeps reduce crossings without changing values or chronology.
@@ -53,6 +53,7 @@ const polar=(cx,cy,r,a)=>[cx+r*Math.cos(a),cy+r*Math.sin(a)];
 function annulus(cx,cy,ri,ro,a,b){const [x1,y1]=polar(cx,cy,ro,a),[x2,y2]=polar(cx,cy,ro,b),[x3,y3]=polar(cx,cy,ri,b),[x4,y4]=polar(cx,cy,ri,a),large=b-a>Math.PI?1:0;return `M${x1},${y1} A${ro},${ro} 0 ${large} 1 ${x2},${y2} L${x3},${y3} A${ri},${ri} 0 ${large} 0 ${x4},${y4}Z`;}
 function renderCircular(d,computed=computeRelations(d),lang='en'){
  const w=3100,h=2320,c=new Canvas(w,h,lang,'circular'),cx=970,cy=1025,outer=775,n=d.records.length;const dims=d.dimensions,sort=d.config?.circular_order_by??[dims[0].id,dims.at(-1).id];const ord={};for(const dim of dims)ord[dim.id]=Object.fromEntries(dim.categories.map((x,i)=>[x.id,i]));const rows=[...d.records].sort((a,b)=>{for(const dim of sort){const v=ord[dim][a.values[dim][0]]-ord[dim][b.values[dim][0]];if(v)return v;}return a.id.localeCompare(b.id);});
+ const required=dims.reduce((sum,dim)=>sum+(d.records.some(x=>x.values[dim.id].length>1)?dim.categories.length*Math.max(13,Math.min(18,210/dim.categories.length)):44)+11,0);if(required>outer-80)throw Error('环形轨道空间不足，请减少展示维度或切换桑基图。');
  const tracks=[];let r=outer;for(const dim of dims){const multi=d.records.some(x=>x.values[dim.id].length>1),thick=multi?Math.max(13,Math.min(18,210/dim.categories.length)):44;const cats=multi?dim.categories:[null];for(const cat of cats){tracks.push({dim,cat,ri:r-thick,ro:r});r-=thick;}r-=11;}
  const inner=r,step=(Math.PI*2-.24)/n,start=-Math.PI/2+.12,pos={};c.text(70,52,'FIELD RADAR / '+n+' '+(lang==='zh'?'篇独立作品':'DISTINCT WORKS'),22,C.muted);c.text(w-70,52,lang==='zh'?'一个扇区 = 一篇论文':'One sector = one paper',22,C.muted,'end');
  rows.forEach((p,i)=>{const a=start+i*step+.004,b=start+(i+1)*step-.004,ang=(a+b)/2;pos[p.id]=ang;c.s.push(`<g ${attrs([p.id])}><title>${esc(p.id+' '+p.title+' | '+dims.map(dim=>tx(dim.label,lang)+': '+p.values[dim.id].map(v=>tx(dim.categories.find(z=>z.id===v).label,lang)).join(', ')).join(' | '))}</title>`);for(const tr of tracks){const vals=p.values[tr.dim.id];let color=C.soft;if(tr.cat){if(vals.includes(tr.cat.id))color=tr.cat.color??C.teal;}else{const cat=tr.dim.categories.find(z=>z.id===vals[0]);color=cat.color??C.blue;}c.s.push(`<path d="${annulus(cx,cy,tr.ri,tr.ro,a,b)}" fill="${color}" stroke="#fff" stroke-width=".5"/>`);if(!tr.cat){const [x,y]=polar(cx,cy,(tr.ri+tr.ro)/2,ang),deg=ang*180/Math.PI+90,catIdx=tr.dim.categories.findIndex(z=>z.id===vals[0]),dimIdx=dims.indexOf(tr.dim),code=tr.dim.kind==='ordinal'?tx(tr.dim.categories[catIdx].label,lang):(tr.dim.code??String.fromCharCode(65+dimIdx))+(catIdx+1);c.text(x,y+6,code,tr.dim.kind==='ordinal'?16:15,'#fff','middle',600,`transform="rotate(${deg} ${x} ${y})"`);}}
@@ -71,7 +72,7 @@ function renderCircular(d,computed=computeRelations(d),lang='en'){
 function projectRelations(input,{record_ids=input.records.map(r=>r.id),dimensions=input.dimensions.map(d=>d.id)}={}){
  const d=validateInput(input),ids=new Set(record_ids),known=new Set(d.records.map(r=>r.id));
  if(!Array.isArray(record_ids)||record_ids.some(id=>!known.has(id)))fail('Unknown selected record');
- if(!Array.isArray(dimensions)||dimensions.length<2||new Set(dimensions).size!==dimensions.length||dimensions.some(id=>!d.dimensions.some(dim=>dim.id===id)))fail('Choose at least two known dimensions');
+ if(!Array.isArray(dimensions)||dimensions.length<2||dimensions.length>10||new Set(dimensions).size!==dimensions.length||dimensions.some(id=>!d.dimensions.some(dim=>dim.id===id)))fail('Choose at least two known dimensions');
  const dims=dimensions.map(id=>d.dimensions.find(dim=>dim.id===id)),records=d.records.filter(r=>ids.has(r.id));
  const relationships=(d.relationships??[]).filter(e=>ids.has(e.from)&&ids.has(e.to));
  const sourceIds=new Set([...records.flatMap(r=>[...r.source_ids,...Object.values(r.evidence??{}).flatMap(e=>e.source_ids??[])]),...relationships.flatMap(e=>e.source_ids)]);

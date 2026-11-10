@@ -12,10 +12,11 @@
  * status/inference on the comparison or paper propagates to all its draft fields.
  */
 import '../../web/field-radar-data.js';
+import {USAGE_TAGS,USAGE_STATES,usageCell} from './field-radar-usage.mjs';
 
 export const FIELD_RADAR_TABLE_COLUMNS = Object.freeze([
   ['research_group','研究组'], ['short_name','论文简称'], ['task_output','具体解决／生成什么'],
-  ['datasets','数据集与开放性'], ['method','方法'], ['year','年份'], ['od_generation','推理无需目标区域历史 OD？']
+  ['datasets','数据集与开放性'], ['method','方法'], ['year','年份'], ['poi_usage','POI 使用／处理'], ['building_usage','建筑信息使用／处理'], ['od_generation','推理无需目标区域历史 OD？']
 ].map(([key,label]) => Object.freeze({key,label})));
 const fail = (message,status=400) => Object.assign(new Error(message),{code:'FIELD_RADAR_TABLE',status});
 const object = v => v && typeof v === 'object' && !Array.isArray(v);
@@ -47,19 +48,20 @@ export function validatePaperComparison(value, document, {forceReview=false}={})
   const c=JSON.parse(json),known=new Set(arr(document?.sources).map(s=>s.id));
   const check=(v,keys)=>{if(!object(v)||Object.keys(v).some(k=>!keys.includes(k)))throw fail('Invalid comparison object or unknown field');};
   const string=(v,max=16000)=>{if(typeof v!=='string'||v.length>max)throw fail('Comparison field must be bounded text');};
-  const common=(v)=>{if(v.status!==undefined&&!['verified','needs_review','unknown','conflicting','inference','draft','unverified'].includes(v.status))throw fail('Invalid comparison status');if(v.inference!==undefined&&typeof v.inference!=='boolean')throw fail('Invalid inference flag');if(v.source_ids!==undefined&&(!Array.isArray(v.source_ids)||v.source_ids.length>1000||v.source_ids.some(id=>typeof id!=='string'||!known.has(id))))throw fail('Comparison references unknown sources');if(v.evidence!==undefined)string(v.evidence);};
-  const meta=['status','inference','source_ids','evidence'];
+  const common=(v)=>{if(v.review_status!==undefined&&!['verified','needs_review','unknown','conflicting','inference','draft','unverified'].includes(v.review_status))throw fail('Invalid comparison review status');if(v.status!==undefined&&!['verified','needs_review','unknown','conflicting','inference','draft','unverified'].includes(v.status))throw fail('Invalid comparison status');if(v.inference!==undefined&&typeof v.inference!=='boolean')throw fail('Invalid inference flag');if(v.source_ids!==undefined&&(!Array.isArray(v.source_ids)||v.source_ids.length>1000||v.source_ids.some(id=>typeof id!=='string'||!known.has(id))))throw fail('Comparison references unknown sources');if(v.evidence!==undefined)string(v.evidence);};
+  const meta=['status','review_status','inference','source_ids','evidence'];
   const scalar=(v,type)=>{check(v,['value',...meta]);common(v);if(v.value!==undefined&&v.value!==null&&(type==='boolean'?typeof v.value!=='boolean':typeof v.value!=='string'))throw fail('Invalid comparison value');if(typeof v.value==='string')string(v.value);};
-  check(c,['short_name','research_group','task_output','datasets','method','od_generation',...meta]);common(c);
+  check(c,['short_name','research_group','task_output','datasets','method','od_generation','poi_usage','building_usage',...meta]);common(c);
   for(const key of ['short_name','research_group','task_output','method'])if(c[key]!==undefined)scalar(c[key],'string');
   if(c.datasets!==undefined){if(!Array.isArray(c.datasets)||c.datasets.length>100)throw fail('Invalid comparison datasets');for(const d of c.datasets){check(d,['name','openness',...meta]);common(d);string(d.name,2000);if(d.openness!==undefined){scalar(d.openness,'string');if(d.openness.value!=null&&!['open','restricted','closed','unknown'].includes(d.openness.value))throw fail('Invalid dataset openness');}}}
   if(c.od_generation!==undefined){const o=c.od_generation;check(o,['output_is_od','target_history_at_inference','training_history','evaluation_history',...meta]);common(o);for(const key of ['output_is_od','target_history_at_inference','training_history','evaluation_history'])if(o[key]!==undefined)scalar(o[key],'boolean');}
+  for(const key of ['poi_usage','building_usage'])if(c[key]!==undefined){const u=c[key];check(u,['use_status','variables','spatial_aggregation','building_binding','condition_role','representation','handling_tags','pages',...meta]);common(u);if(!Object.hasOwn(USAGE_STATES,u.use_status))throw fail('Invalid usage state');for(const k of ['variables','spatial_aggregation','building_binding','condition_role','representation'])if(u[k]!==undefined)string(u[k]);if(u.handling_tags!==undefined&&(!Array.isArray(u.handling_tags)||u.handling_tags.length>7||new Set(u.handling_tags).size!==u.handling_tags.length||u.handling_tags.some(t=>!Object.hasOwn(USAGE_TAGS,t))))throw fail('Invalid usage tags');if(u.use_status!=='used'&&u.handling_tags?.length)throw fail('Usage tags require used state');if(u.pages!==undefined&&(!Array.isArray(u.pages)||u.pages.length>1000||u.pages.some(p=>!Number.isSafeInteger(p)||p<1||p>100000)))throw fail('Invalid usage pages');}
   if(forceReview){const walk=v=>{if(Array.isArray(v)){v.forEach(walk);return;}if(!object(v))return;for(const [k,x]of Object.entries(v))if(k!=='source_ids')walk(x);v.status='needs_review';v.inference=true;};walk(c);}
   return c;
 }
 function tableDocument(value) {
   let json;try{json=JSON.stringify(value);}catch{throw fail('Table document must be JSON');}
-  if(!json||Buffer.byteLength(json)>1024*1024)throw fail('Table document exceeds 1 MiB',413);
+  if(!json||Buffer.byteLength(json)>4*1024*1024)throw fail('Table document exceeds 4 MiB',413);
   const d=JSON.parse(json);
   if(!object(d)||d.schema_version!==1||!object(d.topic)||typeof d.topic.title!=='string'||typeof d.topic.id!=='string'||!Array.isArray(d.papers)||d.papers.length>500||!Array.isArray(d.sources)||d.sources.length>1000)throw fail('Invalid table document');
   const validId=v=>typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$/.test(v);
@@ -108,7 +110,7 @@ function tableRow(p,doc) {
       const groups=arr(doc.research_groups).filter(g=>g?.status==='verified'&&!draft(g)&&!conflict(g)&&refs(g).length&&arr(g.paper_ids).includes(p.id)&&words(g.name));
       if (groups.length) group=cell(groups.map(g=>words(g.name)).join('；'),'verified',groups.flatMap(refs));
     }
-    const cells={research_group:group,short_name:field(c.short_name,`${p.title}（全称；未记录简称）`,pending),task_output:field(c.task_output,[words(p.task),words(p.output??p.task_axes?.output)].filter(Boolean).join('；输出：'),pending),datasets:datasetCells(p,c,pending),method:field(c.method,words(p.method),pending),year:cell(p.year==null?'未知':String(p.year),p.year==null?'unknown':pending?'needs_review':'unverified'),od_generation:eligibility(conflict(c)||conflict(p)?{...c.od_generation,status:'conflicting'}:c.od_generation,pending)};
+    const cells={poi_usage:usageCell(c.poi_usage,pending,conflict(c)||conflict(p)),building_usage:usageCell(c.building_usage,pending,conflict(c)||conflict(p)),research_group:group,short_name:field(c.short_name,`${p.title}（全称；未记录简称）`,pending),task_output:field(c.task_output,[words(p.task),words(p.output??p.task_axes?.output)].filter(Boolean).join('；输出：'),pending),datasets:datasetCells(p,c,pending),method:field(c.method,words(p.method),pending),year:cell(p.year==null?'未知':String(p.year),p.year==null?'unknown':pending?'needs_review':'unverified'),od_generation:eligibility(conflict(c)||conflict(p)?{...c.od_generation,status:'conflicting'}:c.od_generation,pending)};
     // Paper-level citations provide context only, never promote unsupported cells to verified facts.
     const comparisonRefs=[];const collect=v=>{if(!v||typeof v!=='object')return;comparisonRefs.push(...refs(v));Object.values(v).forEach(x=>{if(x&&typeof x==='object')collect(x);});};collect(c);
     const source_ids=unique([...refs(p),...comparisonRefs,...Object.values(cells).flatMap(v=>v.source_ids)]);
