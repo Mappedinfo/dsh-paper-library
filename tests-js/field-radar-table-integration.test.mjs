@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
+import {createRequire} from 'node:module';
 import {createFieldRadarExporter} from '../src/harness/field-radar-export.mjs';
 import {parseRadarAnalysis,radarAnalysisPrompt} from '../src/harness/field-radar-analysis.mjs';
 import {validateFieldRadarDocument} from '../src/harness/field-radar.mjs';
@@ -21,6 +22,57 @@ test('analysis parser accepts optional sourced comparisons but forces review and
 test('prompt preserves structured inputs and asks for inference-stage evidence rather than name heuristics',()=>{const doc=document();doc.papers[0].datasets=[{name:'Kept dataset'}];doc.papers[0].task_axes={output:'Kept output'};doc.papers[0].local_paper_id='private-native-id';const prompt=radarAnalysisPrompt(doc);for(const word of ['Kept dataset','Kept output','target_history_at_inference','paper_comparisons','评估真值不等于推理输入'])assert.ok(prompt.includes(word));assert.ok(!prompt.includes('private-native-id'));});
 test('topic import rejects invalid comparison structure and dangling cell evidence',()=>{const doc=document();assert.equal(validateFieldRadarDocument(doc).papers[0].comparison.short_name.value,'SYN');doc.papers[0].comparison.method={...fact('X'),source_ids:['invented']};assert.throws(()=>validateFieldRadarDocument(doc));});
 test('UI uses safe text cells, explicit scope invalidation, rich clipboard and page-limited export',async()=>{const source=await readFile(new URL('../web/field-radar.js',import.meta.url),'utf8');for(const text of ["['table', '文献对照表']","navigator.clipboard.write([new ClipboardItem","'text/html'","'text/plain'","scope!==tableScope()","result.rows","row.values","make('td',value)","limit:20","导出本页"])assert.ok(source.includes(text),text);assert.ok(!/innerHTML\s*=/.test(source));});
+
+const require = createRequire(import.meta.url);
+let JSDOM;
+try { ({JSDOM} = require(process.env.JSDOM_MODULE || 'jsdom')); } catch {}
+test('literature table auto-loads current scope, expands evidence, and can retry a failed page', {skip:!JSDOM}, async t=>{
+  const f=await fixture(t);
+  const preview=await f.exporter.tablePreview({id:'synthetic'});
+  const dom=new JSDOM('<header class="topbar-actions"></header><main class="workspace"></main>',{runScripts:'outside-only',url:'http://synthetic.invalid'});
+  const w=dom.window;
+  t.after(()=>dom.window.close());
+  for(const name of ['field-radar-data.js','field-radar.js'])w.eval(await readFile(new URL('../web/'+name,import.meta.url),'utf8'));
+  const timers=new Map(), calls=[];
+  let sequence=0, resolveFirst, failPage=true;
+  w.setTimeout=fn=>{timers.set(++sequence,fn);return sequence;};
+  w.clearTimeout=id=>timers.delete(id);
+  const nextLoad=()=>{assert.equal(timers.size,1);const [id,fn]=timers.entries().next().value;timers.delete(id);return fn();};
+  const ui=w.PaperFieldRadar.create({api:async(action,args,options)=>{
+    if(action==='field_radar_list')return {topics:[{topic:document().topic}]};
+    if(action==='field_radar_get')return record();
+    assert.equal(action,'field_radar_table');
+    calls.push({args,signal:options.signal});
+    if(calls.length===1)return new Promise(resolve=>{resolveFirst=resolve;});
+    if(args.offset&&failPage)throw Error('Synthetic read failure');
+    return {...preview,total:21,rows:preview.rows.map(row=>({...row,values:[args.filters.query||'Initial',...row.values.slice(1)]}))};
+  }});
+  await ui.open();
+  w.document.querySelector('#field-radar-tab-table').click();
+  assert.equal(w.document.querySelector('#field-radar-table-prepare'),null);
+  const first=nextLoad();
+  const query=w.document.querySelector('#field-radar-query');
+  for(const value of ['intermediate','current filter']){query.value=value;query.dispatchEvent(new w.Event('input'));}
+  assert.equal(calls[0].signal.aborted,true);
+  await nextLoad();
+  resolveFirst(preview);await first;
+  assert.deepEqual(calls.map(call=>call.args.filters.query),['','current filter']);
+  const content=w.document.querySelector('#field-radar-content');
+  assert.equal(content.querySelector('tbody td').textContent,'current filter');
+  assert.equal(content.querySelector('.radar-literature-evidence details').open,true);
+  assert.equal(content.querySelector('.radar-sources').open,true);
+  assert.match(content.querySelector('.radar-literature-evidence').textContent,/Synthetic source/);
+  content.querySelector('.radar-pager button:last-child').click();
+  await nextLoad();
+  assert.equal(calls.at(-1).args.offset,20);
+  assert.equal(timers.size,0);
+  assert.match(content.textContent,/Synthetic read failure/);
+  failPage=false;
+  [...content.querySelectorAll('button')].find(b=>b.textContent==='重试读取').click();
+  await nextLoad();
+  assert.ok(content.querySelector('.radar-literature-table'));
+  ui.dispose();
+});
 
 test('clipboard copies only the seven-column grid; full exports retain evidence notes',async t=>{const f=await fixture(t),r=await f.exporter.tablePreview({id:'synthetic'});assert.ok(r.clipboard_html.startsWith('<table>'));assert.ok(!r.clipboard_html.includes('<h1>'));assert.equal(r.clipboard_tsv.split('\r\n').length,2);assert.ok(r.tsv.split('\r\n').length>2);});
 test('legacy singular dataset and explicit output fields remain visible in reused tables',async t=>{const f=await fixture(t),r=record();delete r.document.papers[0].comparison;r.document.papers[0].dataset='Legacy dataset';r.document.papers[0].task_axes={output:'Explicit synthetic flow matrix'};const exporter=createFieldRadarExporter({library:f.library,radar:{get:async()=>r}});const table=await exporter.tablePreview({id:'synthetic'});assert.match(table.tsv,/Legacy dataset/);assert.match(table.tsv,/Explicit synthetic flow matrix/);});

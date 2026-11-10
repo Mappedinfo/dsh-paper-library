@@ -16,8 +16,12 @@ body.has-field-radar{--workbench-height:42px}.has-field-radar .topbar{height:42p
 .radar-relations-figure .relations-muted { opacity:.065 !important; }
 
 /* Seven-column evidence table stays within the existing research workspace. */
-.radar-table-scroll{max-width:100%;overflow:auto;border:1px solid var(--border,#d8e3df);border-radius:8px}
+.radar-table-scroll{max-width:100%;overflow:auto;border:1px solid var(--line);border-radius:8px}
 .radar-literature-table{border-collapse:collapse;min-width:1100px;width:100%;font-size:13px;line-height:1.5}
-.radar-literature-table th,.radar-literature-table td{padding:10px;vertical-align:top;border:1px solid var(--border,#d8e3df);text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;min-width:110px}
-.radar-literature-table th{position:sticky;top:0;background:var(--panel-bg,#f4f7f6);font-weight:600}
+.radar-literature-table th,.radar-literature-table td{padding:10px;vertical-align:top;border:1px solid var(--line);text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;min-width:110px}
+.radar-literature-table th{position:sticky;top:0;background:var(--dsw-alias-bg-module-platform,var(--surface));color:var(--ink);font-weight:600}
 .radar-literature-table td:nth-child(4),.radar-literature-table td:nth-child(7){min-width:220px}
+.radar-literature-evidence td{padding:6px 10px;background:var(--surface);font-size:12px}
+.radar-literature-evidence details{max-width:min(680px,78vw);white-space:normal}
+.radar-literature-evidence summary{cursor:pointer;font-weight:600}
+.radar-literature-evidence p{margin:4px 0}
