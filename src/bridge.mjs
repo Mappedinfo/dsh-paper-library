@@ -12,6 +12,7 @@ import { resourcePolicyFor } from './resource-policy.mjs';
 import { workerScheduler } from './worker-scheduler.mjs';
 import { revealPDF } from './reveal-pdf.mjs';
 import { apaCopyReadiness } from './citations.mjs';
+import { lookupVenueRanking } from './venue-rankings.mjs';
 
 export const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const defaultLibrary = join(homedir(), '.local', 'share', 'dsh-paper-library');
@@ -515,6 +516,7 @@ export async function dispatch(request, options = {}) {
     return core(safe, options);
   }
   if (safe.action === 'metadata_lookup') return lookupMetadata(safe,options);
+  if (safe.action === 'venue_ranking_lookup') return lookupVenueRanking(safe);
   if (safe.action === 'models') return options.models ? options.models(options.signal) : { models: [], configured: false };
   if (safe.action === 'bibliography_build') {
     // Canonical on-disk bibliography + factual audit. Verification is explicit,

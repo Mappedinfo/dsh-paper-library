@@ -59,3 +59,20 @@ test('favorite persistence does not overwrite tags and failure remains visible',
   assert.equal(f.ui.actions({id:'dataset',resource_kind:'dataset'}).children.length,0);
   f.dom.window.close();
 });
+
+test('tag editor removes a manual and source tag, adds one, and saves them together', {skip:!JSDOM}, async()=>{
+  const f=fixture(async(action,args)=>action==='get'?
+    {id:'a',tags:['Source'],manual_tags:['#Old'],organization_modified:'v1'}:
+    {id:'a',manual_tags:args.tags,hidden_source_tags:args.hidden_source_tags});
+  await f.ui.edit({id:'a'});
+  f.document.querySelector('[aria-label="删除手动标签 #Old"]').click();
+  f.document.querySelector('[aria-label="移除资料标签 #Source"]').click();
+  assert.ok(f.document.querySelector('[aria-label="恢复资料标签 #Source"]'));
+  f.document.querySelector('textarea').value='#New';
+  f.document.querySelector('form').dispatchEvent(new f.window.Event('submit',{cancelable:true}));
+  await tick();
+  assert.deepEqual(f.calls.at(-1),['paper_organization_update',{id:'a',tags:['#New'],expected_organization_modified:'v1',hidden_source_tags:['#Source']}]);
+  f.document.getElementById('rows').append(f.ui.actions({tags:['Source','one','two','three'],...f.patches[0]}));
+  assert.deepEqual([...f.document.querySelectorAll('#rows .paper-tag-chip')].map(b=>b.textContent),['#one','#two','#three','#New']);
+  f.dom.window.close();
+});

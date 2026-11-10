@@ -272,6 +272,35 @@ test('catalog title and row selection keep the table open for metadata enrichmen
   assert.deepEqual(f.opens, [], 'Edit selects without leaving the table'); assert.deepEqual(f.selections, ['paper-b']);
 });
 
+test('selected paper exposes tag management and renders a separate full-width tag row', async () => {
+  const item=original(), edits=[], options=[];
+  let f;
+  f=environment({active:item,panelHost:{organization:()=>({
+    edit:value=>edits.push(value.id),
+    actions:(value,mode)=>{options.push(mode);const actions=f.element('synthetic-tag-actions');actions.append(f.element('synthetic-tag'));return actions;},
+  })}});
+  f.workbench.setTable(true);
+  const rows=f.element('catalog-table').querySelectorAll('tr');
+  assert.equal(rows.at(-1).children[0].colSpan,rows.at(-2).children.length);
+  assert.match(rows.at(-1).className,/catalog-tags-row selected/);
+  assert.deepEqual(options,[undefined]);
+  await f.element('catalog-manage-tags').dispatch('click');
+  assert.deepEqual(edits,[item.id]);
+});
+
+test('an unpublished manuscript can fill a missing year without entering publication dates', async () => {
+  const item={...original(),type:'manuscript',issued:{},publication_dates:{}};
+  const f=environment({active:item});
+  f.workbench.setTable(true);
+  const row=f.element('catalog-table').querySelectorAll('tr').find(n=>n.dataset.paperId===item.id);
+  await row.children[2].querySelector('button').dispatch('click');
+  assert.equal(f.element('edit-type').value,'manuscript');
+  f.element('edit-year').value='2026';
+  await f.form.dispatch('submit');
+  assert.deepEqual(f.requests.at(-1).metadata.issued,{'date-parts':[[2026]]});
+  assert.deepEqual(f.requests.at(-1).metadata.publication_dates,{});
+});
+
 test('a dataset title still routes to the dataset view instead of the reader', async () => {
   const f = environment({ active: original() });
   const dataset = { id: 'dataset_synthetic', title: 'Synthetic dataset', resource_kind: 'dataset', citekey: 'syntheticData' };

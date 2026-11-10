@@ -193,7 +193,7 @@ def csl_item(raw):
         raise ValueError("metadata must be an object")
     item = dict(raw)
     # User organization has its own catalog table, never embedded into source CSL.
-    for key in ("favorite", "manual_tags", "organization_modified"):
+    for key in ("favorite", "manual_tags", "hidden_source_tags", "organization_modified"):
         item.pop(key, None)
     zotero = "itemType" in item or "creators" in item
     if zotero:

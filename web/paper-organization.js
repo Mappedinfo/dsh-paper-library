@@ -4,10 +4,11 @@ window.PaperOrganization = (() => {
   const node = (tag, text, className) => { const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n; };
   const button = (text, action, className='button subtle') => { const b=node('button',text,className);b.type='button';b.addEventListener('click',action);return b; };
   const label = value => '#'+String(typeof value==='string'?value:value?.tag||value?.name||'').replace(/^#+/,'').split('/').map(s=>s.trim()).join('/');
-  const tags = item => [...new Set([...(item.tags||[]),...(item.manual_tags||[])].map(label).filter(t=>t!=='#'))];
+  const sourceLabels = item => [...new Set((item.tags||[]).map(label).filter(t=>t!=='#'))];
+  const tags = item => [...new Set([...sourceLabels(item).filter(tag=>!item.hidden_source_tags?.includes(tag)),...(item.manual_tags||[]).map(label)].filter(t=>t!=='#'))];
   const isPaper = item => item && (!item.resource_kind || item.resource_kind==='paper');
   function create({state,api,loadList,onChanged,toast,root}) {
-    const busy=new Set();let pickerOpen=false,ticket=0,tagOffset=0,tagNext=null,timer,editing=null,editTicket=0;
+    const busy=new Set();let pickerOpen=false,ticket=0,tagOffset=0,tagNext=null,timer,editing=null,editTicket=0,hiddenSources=new Set();
     const controls=node('div',undefined,'paper-organization-filters');
     const favorite=button('☆ 偏好论文',()=>{state.favorite=!state.favorite;apply();});favorite.id='catalog-favorite';
     const picker=node('div',undefined,'paper-tag-picker'),summary=button('标签筛选',()=>setPickerOpen(!pickerOpen));summary.id='catalog-tag-picker';summary.setAttribute('aria-expanded','false');summary.setAttribute('aria-controls','paper-tag-popup');summary.title='搜索标签；选择父标签时包含所有子标签';
@@ -42,28 +43,61 @@ window.PaperOrganization = (() => {
     search.addEventListener('input',()=>{++ticket;clearTimeout(timer);timer=setTimeout(()=>{tagOffset=0;void loadTags();},180);});
     search.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();filterTag(search.value);}if(event.key==='Escape')setPickerOpen(false);});
     const dialog=node('dialog',undefined,'paper-tag-editor');dialog.id='paper-tag-editor';dialog.setAttribute('aria-labelledby','paper-tag-editor-title');
-    const heading=node('header'),title=node('h2','编辑标签');title.id='paper-tag-editor-title';const close=button('×',()=>dialog.close(),'icon-button');close.setAttribute('aria-label','关闭标签编辑');heading.append(title,close);
-    const paperTitle=node('p',undefined,'small muted'),sourceTags=node('div',undefined,'paper-tag-sources'),form=node('form'),field=node('label','手动标签','field'),input=node('textarea');input.rows=4;input.maxLength=21000;input.placeholder='#方法/深度学习/Transformer\n#阅读/待复习';input.setAttribute('aria-label','手动标签');field.append(input);
-    const hint=node('p','每行一个标签，也可用逗号分隔。父标签筛选包含全部子标签。','small muted'),error=node('p',undefined,'error');error.setAttribute('role','alert');
-    const save=node('button','保存标签','button primary');save.type='submit';form.append(field,hint,error,save);dialog.append(heading,paperTitle,sourceTags,form);document.body.append(dialog);
+    const heading=node('header'),title=node('h2','管理标签');title.id='paper-tag-editor-title';const close=button('×',()=>dialog.close(),'icon-button');close.setAttribute('aria-label','关闭标签编辑');heading.append(title,close);
+    const paperTitle=node('p',undefined,'small muted'),sourceTags=node('div',undefined,'paper-tag-sources'),manualTags=node('div',undefined,'paper-tag-sources'),form=node('form'),field=node('label','手动标签','field'),input=node('textarea');input.rows=4;input.maxLength=21000;input.placeholder='#方法/深度学习/Transformer\n#阅读/待复习';input.setAttribute('aria-label','手动标签');field.append(input);
+    const hint=node('p','在下方输入手动标签，每行一个，也可用逗号分隔。资料标签移除后仍可恢复。','small muted'),error=node('p',undefined,'error');error.setAttribute('role','alert');
+    const save=node('button','保存标签','button primary');save.type='submit';form.append(sourceTags,manualTags,hint,field,error,save);dialog.append(heading,paperTitle,form);document.body.append(dialog);
     dialog.addEventListener('close',()=>{++editTicket;editing=null;});
+    const manualValues=()=>input.value.split('\n').flatMap(line=>{
+      const value=line.trim();
+      return editing?.manual_tags?.includes(value)?[value]:value.split(/[,，]/).map(tag=>tag.trim()).filter(Boolean);
+    });
+    function renderEditorTags(){
+      sourceTags.replaceChildren();
+      manualTags.replaceChildren();
+      const sources=sourceLabels(editing);
+      if(sources.length)sourceTags.append(node('span','资料标签','small muted'));
+      for(const tag of sources){
+        const hidden=hiddenSources.has(tag);
+        const toggle=button(hidden?`恢复 ${tag}`:`${tag} ×`,()=>{
+          if(hidden)hiddenSources.delete(tag);
+          else{hiddenSources.add(tag);input.value=manualValues().filter(value=>label(value)!==tag).join('\n');}
+          renderEditorTags();
+          [...sourceTags.querySelectorAll('button')].find(b=>b.dataset.tag===tag)?.focus();
+        },'paper-tag-chip');
+        toggle.dataset.tag=tag;toggle.setAttribute('aria-label',`${hidden?'恢复':'移除'}资料标签 ${tag}`);sourceTags.append(toggle);
+      }
+      const values=[...new Set(manualValues().map(label).filter(tag=>tag!=='#'))];
+      if(values.length)manualTags.append(node('span','手动标签','small muted'));
+      for(const tag of values){
+        const remove=button(`${tag} ×`,()=>{
+          input.value=manualValues().filter(value=>label(value)!==tag).join('\n');
+          renderEditorTags();input.focus();
+        },'paper-tag-chip');
+        remove.setAttribute('aria-label',`删除手动标签 ${tag}`);manualTags.append(remove);
+      }
+    }
+    input.addEventListener('input',()=>{if(editing)renderEditorTags();});
     async function edit(item){
       const request=++editTicket;
       try{
         const current=await api('get',{id:item.id});if(request!==editTicket)return;
         editing=current;paperTitle.textContent=current.title||'未命名文献';input.value=(current.manual_tags||[]).join('\n');error.textContent='';save.disabled=false;input.disabled=false;
-        sourceTags.replaceChildren();if(current.tags?.length){sourceTags.append(node('span','资料标签（来源保留）','small muted'));for(const tag of tags({tags:current.tags}))sourceTags.append(node('span',tag,'chip'));}
+        hiddenSources=new Set(current.hidden_source_tags||[]);renderEditorTags();
         if(!dialog.open)dialog.showModal();input.focus();
       }catch(e){if(request===editTicket)toast(`无法读取标签：${e.message}`,true);}
     }
     form.addEventListener('submit',async event=>{
       event.preventDefault();if(!editing||save.disabled)return;
       const item=editing,request=editTicket;save.disabled=true;input.disabled=true;error.textContent='';
+      const tagButtons=[...form.querySelectorAll('.paper-tag-chip')];tagButtons.forEach(b=>b.disabled=true);
       try{
-        const patch=await api('paper_organization_update',{id:item.id,tags:input.value.split(/[,，\n]/).map(t=>t.trim()).filter(Boolean),expected_organization_modified:item.organization_modified??null});
+        const hidden=[...hiddenSources].sort();
+        const patch=await api('paper_organization_update',{id:item.id,tags:manualValues(),expected_organization_modified:item.organization_modified??null,
+          ...(JSON.stringify(hidden)!==JSON.stringify([...(item.hidden_source_tags||[])].sort())?{hidden_source_tags:hidden}:{})});
         onChanged(patch);if(request===editTicket)dialog.close();await loadList();
       }catch(e){if(request===editTicket)error.textContent=e.message;else toast(e.message,true);}
-      finally{if(request===editTicket){save.disabled=false;input.disabled=false;}}
+      finally{if(request===editTicket){save.disabled=false;input.disabled=false;tagButtons.forEach(b=>b.disabled=false);}}
     });
     async function toggle(item){
       if(busy.has(item.id))return;busy.add(item.id);refreshBusy(item.id,true);

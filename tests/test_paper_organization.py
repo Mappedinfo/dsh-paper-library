@@ -65,6 +65,26 @@ def test_filters_combine_before_pagination_and_respect_hierarchy(catalog):
     assert catalog("get", id=ids[4])["favorite"]
 
 
+def test_hidden_source_tag_preserves_metadata_and_is_reversible(catalog):
+    p = paper(catalog, tags=["method/source", "retained"])
+    patch = catalog("paper_organization_update", id=p["id"], tags=["#local"],
+                    hidden_source_tags=["#method/source", "#not-in-source"], expected_organization_modified=None)
+    assert patch["hidden_source_tags"] == ["#method/source"]
+    current = catalog("get", id=p["id"])
+    assert current["tags"] == ["method/source", "retained"]
+    assert current["manual_tags"] == ["#local"]
+    assert catalog("list", tag="#method")["total"] == 0
+    assert catalog("resource_list", tag="#method")["total"] == 0
+    assert catalog("resource_list")["items"][0]["hidden_source_tags"] == ["#method/source"]
+    assert catalog("paper_tags_list", query="#method")["total"] == 0
+    assert catalog("paper_tags_list", query="#retained")["total"] == 1
+    with pytest.raises(ValueError, match="其他窗口"):
+        catalog("paper_organization_update", id=p["id"], hidden_source_tags=[], expected_organization_modified=None)
+    catalog("paper_organization_update", id=p["id"], hidden_source_tags=[],
+            expected_organization_modified=patch["organization_modified"])
+    assert catalog("resource_list", tag="#method")["total"] == 1
+
+
 def test_tag_candidates_include_parents_count_papers_and_page(catalog):
     a = paper(catalog, tags=["method/deep", "method/deep/model", "shared"])
     b = paper(catalog, tags=["method/source", "shared"])

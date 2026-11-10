@@ -9,6 +9,9 @@ CREATE TABLE IF NOT EXISTS paper_organization(
   tags TEXT NOT NULL DEFAULT '[]', modified TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS paper_organization_favorite ON paper_organization(favorite,paper_id);
+CREATE TABLE IF NOT EXISTS paper_hidden_source_tags(
+  paper_id TEXT NOT NULL, tag TEXT NOT NULL, PRIMARY KEY(paper_id,tag)
+);
 """
 
 
@@ -49,15 +52,18 @@ def register(db):
 
 
 def get(library, id):
-    row = library.db.execute("SELECT * FROM paper_organization WHERE paper_id=?", (id,)).fetchone()
+    row = library.db.execute("""SELECT o.*, (
+      SELECT json_group_array(tag) FROM paper_hidden_source_tags h WHERE h.paper_id=o.paper_id
+    ) AS hidden_tags FROM paper_organization o WHERE o.paper_id=?""", (id,)).fetchone()
     return {"id": id, "favorite": bool(row["favorite"]) if row else False,
             "manual_tags": json.loads(row["tags"]) if row else [],
+            "hidden_source_tags": sorted(json.loads(row["hidden_tags"])) if row else [],
             "organization_modified": row["modified"] if row else None}
 
 
 def update(library, request):
     from .core import now
-    if not any(key in request for key in ("favorite", "tags")):
+    if not any(key in request for key in ("favorite", "tags", "hidden_source_tags")):
         raise ValueError("请选择收藏状态或手动标签")
     if "favorite" in request and not isinstance(request["favorite"], bool):
         raise ValueError("favorite must be boolean")
@@ -68,7 +74,7 @@ def update(library, request):
         tags = list(dict.fromkeys(normalize_tag(tag) for tag in tags))
     with library.lock():
         id = request.get("id")
-        library.get(id)  # Reject missing, dataset and archived identities.
+        paper = library.get(id)  # Reject missing, dataset and archived identities.
         current = get(library, id)
         if "expected_organization_modified" in request:
             expected = request["expected_organization_modified"]
@@ -78,11 +84,23 @@ def update(library, request):
                 raise ValueError("这篇论文的收藏或标签已在其他窗口更新，请重新打开后保存")
         favorite = request.get("favorite", current["favorite"])
         tags = tags if "tags" in request else current["manual_tags"]
-        if favorite == current["favorite"] and tags == current["manual_tags"]:
+        hidden = current["hidden_source_tags"]
+        if "hidden_source_tags" in request:
+            submitted = request["hidden_source_tags"]
+            if not isinstance(submitted, list) or len(submitted) > 100:
+                raise ValueError("每篇论文最多隐藏 100 个资料标签")
+            source_tags = {source_tag(json.dumps(tag, ensure_ascii=False) if isinstance(tag, dict) else tag)
+                           for tag in paper.get("tags", [])}
+            hidden = sorted({normalize_tag(tag) for tag in submitted} & source_tags)
+        if favorite == current["favorite"] and tags == current["manual_tags"] and hidden == current["hidden_source_tags"]:
             return current
         library.db.execute("""INSERT INTO paper_organization(paper_id,favorite,tags,modified) VALUES(?,?,?,?)
           ON CONFLICT(paper_id) DO UPDATE SET favorite=excluded.favorite,tags=excluded.tags,modified=excluded.modified""",
                            (id, int(favorite), json.dumps(tags, ensure_ascii=False), now()))
+        if hidden != current["hidden_source_tags"]:
+            library.db.execute("DELETE FROM paper_hidden_source_tags WHERE paper_id=?", (id,))
+            library.db.executemany("INSERT INTO paper_hidden_source_tags(paper_id,tag) VALUES(?,?)",
+                                   ((id, tag) for tag in hidden))
         return get(library, id)
 
 
@@ -103,7 +121,8 @@ def filters(request, id_column, metadata_column, kind_column=None):
     if tag:
         # Prefix equality avoids LIKE wildcard semantics for %, _ and backslash.
         where.append(f"""EXISTS (SELECT 1 FROM (
-          SELECT paper_tag(value) AS tag FROM json_each({metadata_column},'$.tags')
+          SELECT paper_tag(t.value) AS tag FROM json_each({metadata_column},'$.tags') t
+          WHERE NOT EXISTS (SELECT 1 FROM paper_hidden_source_tags h WHERE h.paper_id={id_column} AND h.tag=paper_tag(t.value))
           UNION ALL SELECT value FROM json_each(coalesce((SELECT tags FROM paper_organization WHERE paper_id={id_column}),'[]'))
         ) WHERE tag=? OR substr(tag,1,length(?)+1)=?||'/')""")
         args.extend([tag, tag, tag])
@@ -136,6 +155,7 @@ def listing(library, request):
       LEFT JOIN paper_organization o ON o.paper_id=p.id WHERE """ + " AND ".join(where) + """
     ), raw(id,tag) AS (
       SELECT s.id,paper_tag(t.value) FROM scoped s,json_each(s.metadata,'$.tags') t
+      WHERE NOT EXISTS (SELECT 1 FROM paper_hidden_source_tags h WHERE h.paper_id=s.id AND h.tag=paper_tag(t.value))
       UNION ALL SELECT s.id,t.value FROM scoped s,json_each(coalesce(s.tags,'[]')) t
     ), hierarchy(id,tag) AS (
       SELECT id,tag FROM raw WHERE tag IS NOT NULL

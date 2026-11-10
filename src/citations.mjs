@@ -19,7 +19,7 @@ async function load() {
 }
 
 function cleanItem(item, index) {
-  const { pdf, page_count, tags, path, library, ...csl } = item;
+  const { pdf, page_count, tags, hidden_source_tags, path, library, ...csl } = item;
   const key=String(item.citekey || item.id || `ref${index + 1}`);
   return { ...csl, id:key, 'citation-key':key, type: item.type || 'article-journal' };
 }
@@ -39,7 +39,7 @@ export function apaCopyReadiness(item) {
   const missing = [];
   if (!hasValue(item.title) || /^(?:untitled|未命名文献)$/i.test(String(item.title).trim())) missing.push('题名');
   if (!hasNames(item.author) && !(type === 'book' && hasNames(item.editor))) missing.push('作者');
-  if (!hasValue(item.issued?.['date-parts']?.[0]?.[0]) && !hasValue(item.issued?.literal) && !/^in press$/i.test(item.status || '')) missing.push('出版年份');
+  if (!hasValue(item.issued?.['date-parts']?.[0]?.[0]) && !hasValue(item.issued?.literal) && !/^in press$/i.test(item.status || '')) missing.push(type==='manuscript'?'稿件年份':'出版年份');
   if ((journal || type === 'chapter') && !venue) missing.push('期刊或出版出处');
   if (type === 'paper-conference' && !venue && !hasValue(item['event-title'])) missing.push('会议或论文集名称');
   if ((journal || proceedings) && !pages && !early) missing.push('页码或文章编号');
