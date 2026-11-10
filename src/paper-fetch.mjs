@@ -301,6 +301,8 @@ function dataciteCSL(record) {
   const metadata = { type:dataciteTypes[kind], DOI:doi, title, URL:`https://doi.org/${doi}` }
   if(kind==='Preprint')metadata.genre='Preprint'
   if(kind==='Dataset'&&a.version)metadata.version=clean(a.version)
+  const abstracts=(Array.isArray(a.descriptions)?a.descriptions:[]).filter(value=>value?.descriptionType==='Abstract'&&typeof value.description==='string').slice(0,2)
+  if(abstracts.length===1)metadata.abstract=clean(abstracts[0].description)
   const authors = Array.isArray(a.creators) ? a.creators.slice(0, 100).filter(Boolean).map(person => {
     if (person.familyName && person.nameType !== 'Organizational') {
       return { family:clean(person.familyName), ...(person.givenName ? { given:clean(person.givenName) } : {}) }
@@ -424,6 +426,8 @@ function landingMetadata(html, url, ctx) {
   const metadata = { type: conference ? 'paper-conference' : journal ? 'article-journal' : 'article', URL: url }
   const title = get('citation_title') ?? get('dc.title') ?? get('og:title')
   if (title) metadata.title = clean(title)
+  const abstract=get('citation_abstract')??get('dc.description.abstract')
+  if(abstract)metadata.abstract=clean(abstract)
   const authors = meta.get('dc.creator')
   if (citationAuthors.length) metadata.author = citationAuthors
   else if (authors) metadata.author = authors.map(name => ({ literal: clean(name) })).filter(person => person.literal)

@@ -1,6 +1,7 @@
 """合成跨章节证据：背景提到一种算法，方法页使用另一种目标。"""
 import hashlib
 import base64
+from contextlib import closing
 
 import pymupdf as fitz
 import pytest
@@ -35,6 +36,34 @@ def fixture(tmp_path):
 def call(fixture, action, **values):
     library, paper, _ = fixture
     return dispatch_request({"library": str(library.root), "id": paper["id"], "action": action, **values})
+
+
+def test_abstract_reads_explicit_section_from_managed_pdf_without_writing(tmp_path):
+    original = tmp_path / "abstract.pdf"
+    expected = "This synthetic abstract reports the result of a deliberately bounded retrieval test."
+    with fitz.open() as doc:
+        page = doc.new_page(width=595, height=842)
+        page.insert_text((30, 50), "Synthetic title")
+        page.insert_text((30, 110), "Abstract")
+        page.insert_textbox(fitz.Rect(30, 125, 280, 180), expected)
+        page.insert_text((315, 130), "This right-column paragraph is outside the abstract.")
+        page.insert_text((30, 220), "1. Introduction")
+        page.insert_text((30, 247), "The body contains a separate observation.")
+        doc.save(original)
+    before = original.read_bytes()
+    with closing(Library(tmp_path / "abstract-library")) as library:
+        paper = library.create({"title": "Synthetic title"})
+        library.attach(paper["id"], str(original))
+        managed = library.pdf_path(paper["id"])
+        managed_before = managed.read_bytes()
+        result = dispatch_request({"library": str(library.root), "id": paper["id"], "action": "paper_abstract_pdf"})
+        assert result["text"] == expected and result["page"] == 1
+        assert managed.read_bytes() == managed_before
+    assert original.read_bytes() == before
+
+
+def test_abstract_does_not_guess_from_body_without_heading(fixture):
+    assert call(fixture, "paper_abstract_pdf")["text"] is None
 
 
 def test_search_then_read_distinguishes_background_from_method(fixture, monkeypatch):

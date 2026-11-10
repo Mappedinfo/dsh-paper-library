@@ -9,6 +9,51 @@ import unicodedata
 from .paper_analysis import file_version
 
 
+_ABSTRACT_HEADING = re.compile(r"(?im)^[ \t]*(?:abstract|摘[ \t]*要)(?:[ \t]*[:：.—–-][ \t]*|[ \t]*(?:\n|$))")
+_ABSTRACT_END = re.compile(
+    r"(?im)^[ \t]*(?:keywords?|index terms|ccs concepts|acm reference format|"
+    r"关[ \t]*键[ \t]*词|中图分类号|(?:[\dIVX]+[.、]?[ \t]*)?(?:introduction|引言|绪论)|"
+    r"author summary|(?:figure|table)[ \t]+\d+)(?:[ \t]*[:：.—–-]|[ \t]*$|[ \t]+)"
+)
+
+
+def read_abstract(doc):
+    """Extract only text following an explicit heading and ending at a known boundary."""
+    import pymupdf as fitz
+    from .document_elements import _preflight_page
+
+    for index in range(min(2, doc.page_count)):
+        _preflight_page(doc, index + 1)
+        page = doc[index]
+        blocks = [b for b in page.get_text("blocks", flags=fitz.TEXTFLAGS_BLOCKS & ~fitz.TEXT_PRESERVE_IMAGES)
+                  if b[6] == 0 and b[4].strip()]
+        if sum(len(b[4]) for b in blocks) > 30_000:
+            continue
+        for position, block in enumerate(blocks):
+            start = _ABSTRACT_HEADING.search(block[4])
+            if not start:
+                continue
+            # If the heading is a short standalone block, use the following
+            # paragraph to establish the actual column, not the heading width.
+            tail = block[4][start.end():]
+            anchor = block if tail.strip() or position + 1 == len(blocks) else blocks[position + 1]
+            single_column = anchor[2] - anchor[0] < page.rect.width * .6
+            parts = []
+            for rect, value in [(block, tail), *[(b, b[4]) for b in blocks[position + 1:]]]:
+                if single_column and parts and abs(rect[0] - anchor[0]) > page.rect.width * .17:
+                    continue
+                end = _ABSTRACT_END.search(value)
+                piece = (value[:end.start()] if end else value).strip()
+                if piece:
+                    parts.append(piece)
+                if end:
+                    original = "\n\n".join(re.sub(r"(?<!\n)\n(?!\n)", " ", part).strip() for part in parts)
+                    if 40 <= len(original) <= 8000:
+                        return {"text": original, "page": index + 1}
+                    break
+    return {"text": None}
+
+
 def visual_page(doc, request):
     """直接渲染可见页面，覆盖栅格图、矢量表格和公式；裁剪使用显示方向的比例坐标。"""
     import pymupdf as fitz
@@ -73,6 +118,8 @@ def dispatch(library, request):
         result["page_count"] = doc.page_count
         if action == "paper_visual_read":
             result.update(visual_page(doc, request))
+        elif action == "paper_abstract_pdf":
+            result.update(read_abstract(doc))
         elif action == "paper_text_find":
             query = request.get("query")
             if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200 or not normalized(query):

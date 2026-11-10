@@ -1574,7 +1574,9 @@ const refreshModels = el('button', 'button subtle', '刷新模型');
 refreshModels.id = 'refresh-models';
 refreshModels.type = 'button'; refreshModels.style.marginTop = '6px'; refreshModels.style.padding = '3px 0'; refreshModels.style.fontSize = '10px';
 refreshModels.addEventListener('click', () => { announceReady(); loadModels(); }); $('model-status').after(refreshModels);
+const paperAbstractUI=window.PaperAbstract?.create({api});
 workbenchUI = window.PaperWorkbench?.create({ state, api, persistence, loadList, organization: () => organizationUI, openPaper: id => openResource(state.items.find(item => item.id === id) || {id}), toast, el, resource: () => resourceUI,
+  openAbstract:paperAbstractUI?.open,
   enableAutomaticDoi:()=>!workspaceNavigationUI||workspaceNavigationUI.state().section==='paper',
   tableChanged: table => { paperChatUI?.visible(!table && state.tab!=='graph' && readerPaperId===state.active?.id && (readingPanels?.visible('chat') ?? state.tab==='conversation')); queueMicrotask(()=>{readingShell?.sync();resourceUI?.sync();}); },
   selectPaper: item => { if(item.resource_kind === 'dataset'||item.resource_kind === 'slides'){void openResource(item);return;}state.catalogSlideId=null;state.catalogSlideTitle=null;resourceUI?.hide();knowledgeUI?.hide();publishReaderState();readerStateReady=false;++state.itemTicket; ++state.pageTicket; state.pageWanted=null; clearPage(); state.active=item; state.openedId=item.id; workbenchUI?.paperChanged(item); readingPanels?.paperChanged(item);outlineUI?.sync();void languageUI?.paperChanged(item);renderPaperHeader(); renderList();publishPaperWorkspace(item); },
@@ -2348,6 +2350,7 @@ if ($('workspace-navigation') && window.PaperWorkspaceNavigation) {
   $('workspace-library')?.addEventListener('click',event=>{if(workspaceNavigationUI.state().section!=='paper'||boardUI?.isOpen()||latexUI?.isOpen()){event.preventDefault();event.stopImmediatePropagation();void workspaceNavigationUI.selectRoot('paper');}},true);
 }
 fieldRadarUI = window.PaperFieldRadar?.create({api,toast,persistence,
+  openAbstract:paperAbstractUI?.open,
   prepare: async () => { if (!await prepareWorkspaceNavigation()) return false; return closeWorkspaceSurfaces(); },
   onOpenPaper: async id => { const ok = await workspaceNavigationUI?.navigate({kind:'paper',id,title:'文献'}); return ok !== false; },
   onKnowledge: async id => { const ok = await workspaceNavigationUI?.navigate({kind:'paper',id,title:'文献'}); if(ok===false)return false; await knowledgeUI?.show(state.active); return true; },

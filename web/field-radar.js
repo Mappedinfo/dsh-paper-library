@@ -5,7 +5,7 @@ window.PaperFieldRadar = (() => {
   const button = (text, action, id) => { const n = make('button', text, 'button subtle'); n.type = 'button'; if (id) n.id = id; n.addEventListener('click', action); return n; };
   const {list,text,filteredPapers,filterResearchRecords,selectViewRows}=globalThis.PaperFieldRadarData;
   function safeURL(value) { try { const u = new URL(value); return ['https:', 'http:'].includes(u.protocol) && !u.username && !u.password ? u.href : null; } catch { return null; } }
-  function create({ api, persistence, prepare, onOpenPaper, onKnowledge, toast, host = document.querySelector('.workspace'), triggerHost = document.querySelector('.topbar-actions') }) {
+  function create({ api, persistence, prepare, onOpenPaper, onKnowledge, openAbstract, toast, host = document.querySelector('.workspace'), triggerHost = document.querySelector('.topbar-actions') }) {
     let alive = true, opened = false, loading = false, epoch = 0, current = null, revision = 0, topics = [], topicOffset = 0, topicNext = null, tab = 'overview', offset = 0, query = '', task = '', year = '', matches = new Map(), matching = false, legacy = null, legacyData = null, importing = false, analysis = null, analysisRequest = null, analyzing = false, legacyLoading = false, legacyLookup = 0, claimLimit = 40, renderingImage = false;
     const root = make('section', undefined, 'field-radar'); root.id = 'field-radar'; root.hidden = true; root.setAttribute('aria-label', '领域研究与学者雷达'); host.append(root);
     const trigger = button('领域研究', () => void open(), 'field-radar-open'); trigger.title = '从研究问题查看方法、学者、作品与来源，并返回本库阅读'; trigger.setAttribute('aria-expanded', 'false'); triggerHost.prepend(trigger);
@@ -143,7 +143,7 @@ window.PaperFieldRadar = (() => {
       if(!result.rows.length){content.append(make('p','当前筛选没有匹配的文献。','radar-empty'));return;}
       for(const warning of result.warnings||[])content.append(make('p',String(warning),'radar-warning'));
       const wrap=make('div',undefined,'radar-table-scroll');wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label','文献对照表，可横向滚动');const table=make('table',undefined,'radar-literature-table');const head=make('thead'),headRow=make('tr');for(const column of result.columns){const cell=make('th');cell.scope='col';cell.setAttribute('aria-sort',tableSort===column.key?(tableDirection==='asc'?'ascending':'descending'):'none');const sort=button(column.label+(tableSort===column.key?(tableDirection==='asc'?' ↑':' ↓'):''),()=>{tableDirection=tableSort===column.key&&tableDirection==='asc'?'desc':'asc';tableSort=column.key;offset=0;render();});sort.title='按'+column.label+'排序';cell.append(sort);headRow.append(cell);}head.append(headRow);table.append(head);
-      const body=make('tbody'), sources=new Map((result.sources||[]).map(source=>[source.id,source]));
+      const body=make('tbody'), sources=new Map((result.sources||[]).map(source=>[source.id,source])), papers=new Map(current.papers.map(paper=>[paper.id,paper]));
       for(const row of result.rows){
         const tr=make('tr');
         for(const value of row.values)tr.append(make('td',value));
@@ -153,6 +153,7 @@ window.PaperFieldRadar = (() => {
         details.open=true;
         details.append(make('summary',`本行依据 · ${row.source_ids.length} 条来源`));
         details.append(make('p',row.evidence_scope,'muted'));
+        if(openAbstract)details.append(abstractButton(row.paper_id,papers.get(row.paper_id)?.title));
         details.append(button('在桑基图定位此篇',()=>{tab='relations';render();ensureRelations().focusPaper(row.paper_id);}));
         if(row.source_ids.length){
           const names=row.source_ids.slice(0,8).map(id=>(sources.get(id)?.title||id).slice(0,180));
@@ -177,6 +178,11 @@ window.PaperFieldRadar = (() => {
     async function openLinked(candidate, knowledge = false) {
       const ticket = epoch; try { const result = await (knowledge ? onKnowledge?.(candidate.id) : onOpenPaper?.(candidate.id)); if (result !== false && ticket === epoch) hide(); } catch (error) { message(error.message, true); }
     }
+    function abstractButton(id,title){
+      const control=button('摘要',()=>void openAbstract({id,topic_id:current.topic.id,expected_revision:revision},title));
+      control.setAttribute('aria-haspopup','dialog');
+      return control;
+    }
     function libraryActions(paper, box) {
       const match = matches.get(paper.id); if (!match) { const b = button('在本库匹配', () => void matchPapers([paper])); b.disabled = matching; box.append(b); return; }
       const labels = { matched: match.candidates?.[0]?.match_basis === 'doi' ? '本库 DOI 精确匹配' : '本库同题名候选，需核对版本', ambiguous: '候选需核对：重复版本或题名不完整', unmatched: '本次范围未找到', incomplete: '匹配范围未完整读取' }; box.append(make('span', labels[match.status] || match.status, 'radar-badge'));
@@ -193,7 +199,7 @@ window.PaperFieldRadar = (() => {
       for(const [field,label]of [['definition','任务定义'],['datasets','实验数据'],['evaluation','评估与划分'],['task_axes','建模对象与条件'],['impact','贡献与影响']])if(p[field]){const details=make('details',undefined,'radar-data-details');details.append(make('summary',label),structured(p[field]));card.append(details);}
       if(p.uncertainty)card.append(make('p',p.uncertainty,'radar-warning'));
       card.append(make('p', `个人阅读状态：${({read:'用户已标记已读',unread:'未读','needs-reading':'未确认（不限制 AI 分析）'})[p.reading_status] || '未确认'} · ${p.evidence_scope || '题录 / 摘要级来源；快速分析与个人阅读状态分别记录'}`, 'radar-reading'));
-      refs(p.source_ids, card); const actions = make('div', undefined, 'radar-paper-actions'); libraryActions(p, actions); const href = safeURL(p.url || (p.doi ? `https://doi.org/${p.doi}` : '')); if (href) { const a = make('a', '论文来源 ↗', 'button subtle'); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; actions.append(a); } card.append(actions); return card;
+      refs(p.source_ids, card); const actions = make('div', undefined, 'radar-paper-actions'); if(openAbstract)actions.append(abstractButton(p.id,p.title)); libraryActions(p, actions); const href = safeURL(p.url || (p.doi ? `https://doi.org/${p.doi}` : '')); if (href) { const a = make('a', '论文来源 ↗', 'button subtle'); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; actions.append(a); } card.append(actions); return card;
     }
     function renderOverview(papers) {
       const notice = make('div', undefined, 'radar-notice'); notice.append(make('strong', current.topic.question || current.topic.title), make('p', text(current.topic.scope) || '这是有来源的研究地图，不声称穷尽领域。')); content.append(notice);

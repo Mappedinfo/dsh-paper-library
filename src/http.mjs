@@ -3,13 +3,15 @@ import { createFieldRadarAnalysis } from './harness/field-radar-analysis.mjs';
 import { createFieldRadarStore } from './harness/field-radar.mjs';
 import { createEncyclopedia } from './encyclopedia.mjs';
 import { createAnnotationTranslation } from './harness/annotation-translation.mjs';
+import { createPaperAbstracts } from './harness/paper-abstracts.mjs';
+import { resolveMetadata } from './paper-fetch.mjs';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { defaultLibrary, dispatch, projectRoot, LATEX_RETRIEVAL_ACTIONS } from './bridge.mjs';
+import { core, defaultLibrary, dispatch, projectRoot, LATEX_RETRIEVAL_ACTIONS } from './bridge.mjs';
 import { createLocalStateStore, LocalStateError } from './local-state.mjs';
 import { createLanguageLearning } from './harness/language-learning.mjs';
 import { createPaperAnalysis } from './harness/paper-analysis.mjs';
@@ -27,6 +29,7 @@ import { catalogResources } from './catalog-resources.mjs';
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
 staticFiles['latex-search.js'] = ['latex-search.js', 'text/javascript;charset=utf-8'];
 staticFiles['paper-organization.js'] = ['paper-organization.js', 'text/javascript;charset=utf-8'];
+staticFiles['paper-abstract.js'] = ['paper-abstract.js', 'text/javascript;charset=utf-8'];
 for (const name of ['paper-outline.js','paper-outline.css','settings-models.js','reader-search.js','annotation-style.js','document-elements.js','document-elements.css','encyclopedia.js','workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css','local-state.js','floating-windows.js', 'floating-windows.css', 'language-learning.js','language-learning.css','theme.js','theme.css','latex-workspace.js','latex-workspace.css','latex-review.js','latex-versions.js','latex-writing-tools.js','latex-formulas.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['resource-library.js','resource-library.css','knowledge-workflow.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['paper-analysis.js','paper-analysis.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
@@ -138,6 +141,10 @@ export function createFetchHandler(options = {}) {
   const inkQueue = options.inkQueue || createInkQueue({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python,autoStart:false});
   const inkDiagnostics = createInkDiagnostics({store:localState});
   const fieldRadar = options.fieldRadar || createFieldRadarStore({ store: localState, library: options.library || defaultLibrary, request: (payload, signal) => dispatch(payload, { ...options, signal }) });
+  const paperAbstracts=createPaperAbstracts({store:localState,radar:fieldRadar,language:learningRecords,canTranslate:Boolean(options.languageLearning),
+    request:(payload,signal)=>dispatch(payload,{...options,signal}),
+    extract:(id,signal)=>core({action:'paper_abstract_pdf',id},{...options,signal}),
+    lookup:(id,signal)=>resolveMetadata(id,{timeoutMs:15000,...options.fetchOptions,signal})});
   const fieldRadarAnalysis = options.fieldRadarAnalysis || createFieldRadarAnalysis({ store: localState, radar: fieldRadar });
   const fieldRadarExport = options.fieldRadarExport || createFieldRadarExporter({ library: options.library || defaultLibrary, radar: fieldRadar, getAnalysis: input=>fieldRadarAnalysis.handle(input) });
   const handle = async function handle(request) {
@@ -201,6 +208,7 @@ export function createFetchHandler(options = {}) {
           if (latexAIAction && !options.latexAI) return json({ok:false,error:'LaTeX 提问与合写需要连接 DSH 模型服务。'},409);
           if (latexWsAction && !options.latexWorkspace) return json({ok:false,error:'LaTeX 工作区需要连接 DSH 主机。'},409);
           let result = input?.action === 'annotation_translate' ? await annotationTranslation(input, { signal: request.signal })
+            : ['paper_abstract_read','paper_abstract_translate'].includes(input?.action) ? await paperAbstracts(input,{signal:request.signal})
             : input?.action === 'annotation_caption' ? await options.annotationCaption(input, { signal: request.signal })
             : ['encyclopedia_list','encyclopedia_put'].includes(input?.action) ? await encyclopedia(input)
             : companionAction ? await options.companion.handle(input)

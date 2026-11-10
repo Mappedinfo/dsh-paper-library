@@ -95,6 +95,10 @@
 .venue-rank-sources{display:flex;flex-wrap:wrap;gap:6px 12px}
 .venue-rank-results{margin:6px 0 12px;padding-left:20px}
 .venue-rank-results:empty{display:none}
+.paper-abstract-dialog{width:min(780px,calc(100% - 32px));max-height:85dvh;padding:20px}
+.paper-abstract-content section+section{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
+.paper-abstract-content h3{margin:8px 0}
+.paper-abstract-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65}
 .venue-rank-results li+li{margin-top:6px}
 .venue-rank-results li>a,.venue-rank-results li>button{margin-inline-start:6px}
 .ranking-editor .ranking-row{grid-template-columns:minmax(88px,1fr) minmax(74px,1fr) minmax(80px,1fr)}
