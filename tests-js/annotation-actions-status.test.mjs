@@ -177,6 +177,23 @@ test('right-click actions follow the PDF, title, or active range edit and leave 
   } finally { f.dom.window.close(); }
 });
 
+test('APA clipboard requires a prepared, complete response for the current paper', {skip:!JSDOM}, async () => {
+  const f = fixture(), w = f.window;
+  try {
+    w.eval(source.slice(source.indexOf('let apaCopyPending'), source.indexOf('async function exportNotes(')));
+    w.api = async (action, args) => {
+      assert.equal(action,'cite');assert.equal(args.prepare_metadata,true);
+      return { prepared:true, missing_fields:['页码或文章编号'], text:'Partial reference' };
+    };
+    await w.cite('apa');
+    assert.deepEqual(f.copied,[]);assert.match(f.messages.at(-1),/缺少页码或文章编号/);
+    w.api = async () => ({ text:'Response from an older bridge' });
+    await w.cite('apa');assert.deepEqual(f.copied,[]);
+    w.api = async () => ({ prepared:true, text:'Complete reference' });
+    await w.cite('apa');assert.deepEqual(f.copied,['Complete reference']);
+  } finally { f.dom.window.close(); }
+});
+
 test('PDF range handles extend and shrink a saved selection with pointer input', {skip:!JSDOM}, async () => {
   const dom = new JSDOM('<div id="reader"></div>', { runScripts:'outside-only' });
   const w = dom.window, root = w.document.getElementById('reader');

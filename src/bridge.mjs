@@ -11,6 +11,7 @@ import { createTranslationServerClient } from './translation-server.mjs';
 import { resourcePolicyFor } from './resource-policy.mjs';
 import { workerScheduler } from './worker-scheduler.mjs';
 import { revealPDF } from './reveal-pdf.mjs';
+import { apaCopyReadiness } from './citations.mjs';
 
 export const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const defaultLibrary = join(homedir(), '.local', 'share', 'dsh-paper-library');
@@ -346,9 +347,9 @@ function metadataDraft(current, fetched) {
   return item;
 }
 
-async function lookupMetadata(request, options) {
+async function lookupMetadata(request, options, { forCitation = false, current } = {}) {
   if (typeof request.id !== 'string' || !request.id || request.id.length > 200) throw new Error('请选择一篇文献，再刷新资料。');
-  let current = await core({action:'get',id:request.id},options);
+  current ??= await core({action:'get',id:request.id},options);
   const doi = canonicalDOI(current.DOI);
   let target = doi || (typeof current.URL === 'string' && current.URL.trim()) || (String(current.archive||'').toLowerCase()==='arxiv'&&current.archive_location);
   let detected=false;
@@ -356,9 +357,13 @@ async function lookupMetadata(request, options) {
     const probe=await core({action:'metadata_probe',id:request.id},options);
     target=probe.doi||probe.arxiv;detected=Boolean(target);
   }
-  const fetchOptions={...options.fetchOptions,signal:options.signal};
+  const allowTitle = !forCitation || Boolean(current['container-title'] || current.parse?.verified);
+  if (!target && !allowTitle) throw new Error('请在资料详情中填写缺失项，或添加 DOI／公开论文链接以补全。');
+  const fetchOptions={...options.fetchOptions,signal:options.signal,...(forCitation?{timeoutMs:8000,crossrefOnly:Boolean(current['container-title'])}:{})};
   let result=target?await resolveMetadata(target,fetchOptions):await resolveTitleMetadata(current.title,fetchOptions);
-  if(detected&&(!result.metadata||normalizedIdentity(result.metadata.title)!==normalizedIdentity(current.title)))result=await resolveTitleMetadata(current.title,fetchOptions);
+  if(detected&&(!result.metadata||normalizedIdentity(result.metadata.title)!==normalizedIdentity(current.title))) {
+    result=allowTitle ? await resolveTitleMetadata(current.title,fetchOptions) : {...result,metadata:undefined};
+  }
 
   if (!result.metadata && target && options.translationServer) {
     // Optional loopback Zotero translation-server: translators supply candidate
@@ -393,7 +398,33 @@ async function lookupMetadata(request, options) {
     const title = normalizedIdentity(current.title);
     if (title.length < 8 || title !== normalizedIdentity(result.metadata.title)) throw new Error('在线题名与当前文献不能准确匹配，未生成补全草稿；请核对题名，或保存 DOI 后重试。');
   }
-  return {item:metadataDraft(current,result.metadata),author_candidates:result.metadata.author||[],warnings:result.warnings || [],provenance:result.provenance};
+  const fetched = result.metadata;
+  if (forCitation && current['container-title'] && !fetched['container-title'] && fetched.type === 'article') {
+    throw new Error('检索结果未能确认当前出版出处，请核对已发表版本的 DOI 或链接。');
+  }
+  if (forCitation && doi && fetched.title && normalizedIdentity(current.title) && normalizedIdentity(current.title) !== 'untitled' &&
+      normalizedIdentity(current.title) !== normalizedIdentity(fetched.title)) {
+    throw Object.assign(new Error('DOI 登记题名与当前文献不一致，请在资料详情核对。'), { code: 'CITATION_IDENTITY_CONFLICT' });
+  }
+  const item = metadataDraft(current, fetched);
+  if (forCitation) {
+    if (fetched.type && fetched.type !== 'article' &&
+        (!current.type || current.type === 'article' || current.parse?.field_sources?.type === 'default-record-type')) item.type = fetched.type;
+    if (current.title === 'Untitled' && fetched.title) item.title = fetched.title;
+    if (current.parse?.field_sources?.author === 'pdf-info-author-literal' && fetched.author?.length) {
+      item.author = fetched.author;
+    } else if (Array.isArray(item.author) && fetched.author?.length) {
+      item.author = item.author.map(person => {
+        if (!person.literal || person.family) return person;
+        const matches = fetched.author.filter(candidate => candidate.family && authorIdentities(candidate).includes(normalizedIdentity(person.literal)));
+        if (matches.length !== 1) return person;
+        const { literal, ...rest } = person;
+        const { given, family, suffix } = matches[0];
+        return { given, family, suffix, ...rest };
+      });
+    }
+  }
+  return {item,author_candidates:fetched.author||[],warnings:result.warnings || [],provenance:result.provenance};
 }
 
 /** Parse one reply per annotation. Returns null when the model answered with a
@@ -549,6 +580,25 @@ export async function dispatch(request, options = {}) {
   }
   if (safe.action === 'cite') {
     if (!Array.isArray(safe.ids) || safe.ids.length < 1 || safe.ids.length > 500) throw new Error('请选择 1–500 篇文献。');
+    if (safe.format === 'apa' && safe.prepare_metadata === true) {
+      if (safe.ids.length !== 1) throw new Error('请逐篇核对并复制 APA 7 引用。');
+      const [id] = safe.ids;
+      let item = await core({ action: 'get', id }, options), lookupMessage = '';
+      if (apaCopyReadiness(item).lookup) {
+        try { ({ item } = await lookupMetadata({ id }, options, { forCitation: true, current: item })); }
+        catch (error) {
+          options.signal?.throwIfAborted();
+          if (error.code === 'CITATION_IDENTITY_CONFLICT') throw error;
+          lookupMessage = String(error.message).slice(0, 300);
+          // Use the latest local data even if an online source was unavailable.
+          item = await core({ action: 'get', id }, options);
+        }
+      }
+      const { missing } = apaCopyReadiness(item);
+      if (missing.length) return { prepared: true, missing_fields: missing, lookup_message: lookupMessage };
+      const result = await citationJob({ action:'cite', items:[item], format:'apa' }, options);
+      return { ...result, prepared: true };
+    }
     const items = [];
     for (const id of safe.ids) items.push(await core({ action: 'get', id }, options));
     return citationJob({ action:'cite', items, format:safe.format }, options);

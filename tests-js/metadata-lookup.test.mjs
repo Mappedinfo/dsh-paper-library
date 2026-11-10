@@ -133,6 +133,45 @@ test('bridge exposes manual create, archive and restore while protecting archive
   assert.equal(restored.id,f.item.id);
 });
 
+test('APA copy fills verified proceedings data and person names before rendering, without saving the draft', async t => {
+  const f = await fixture(t, { type:'article', 'container-title':'Synthetic Proceedings', author:[{ literal:'Alice Reader' }] });
+  const requests = [];
+  const options = { library:f.library, fetchOptions:{ resolver, transport:async({url})=>{
+    requests.push(url);
+    return response(JSON.stringify({ message:{ items:[{
+      DOI:'10.1234/metadata', type:'proceedings-article', title:[title], author:[{given:'Alice',family:'Reader'}],
+      'container-title':['Synthetic Proceedings'], page:'22-29', publisher:'Demo Publisher', published:{'date-parts':[[2026]]},
+    }] } }));
+  } } };
+  const result = await dispatch({ action:'cite', ids:[f.item.id], format:'apa', prepare_metadata:true }, options);
+  assert.equal(result.prepared,true);
+  assert.match(result.text,/Reader, A\. \(2026\)/);
+  assert.match(result.text,/Synthetic Proceedings.*22–29/);
+  assert.match(result.text,/https:\/\/doi.org\/10\.1234\/metadata/);
+  assert.equal(requests.length,1);
+  const current = await core({action:'get',id:f.item.id},{library:f.library});
+  assert.equal(current.type,'article');assert.equal(current.DOI,undefined);assert.equal(current.page,undefined);
+});
+
+test('APA copy uses verified article numbers and withholds unresolved records', async t => {
+  const f = await fixture(t, { type:'article-journal', DOI:'10.1234/metadata' });
+  const request = { action:'cite', ids:[f.item.id], format:'apa', prepare_metadata:true };
+  const fetchOptions = crossrefFixture({ type:'journal-article', author:[{given:'Alice',family:'Reader'}],
+    'container-title':['Synthetic Journal'], volume:'2', issue:'1', 'article-number':'e42', published:{'date-parts':[[2026]]} });
+  const ready = await dispatch(request, { library:f.library, fetchOptions });
+  assert.match(ready.text,/Article e42/);
+  const blocked = await dispatch(request, { library:f.library, fetchOptions:{ resolver, transport:async()=>response('',503) } });
+  assert.equal(blocked.prepared,true);assert.ok(blocked.missing_fields.includes('页码或文章编号'));assert.equal(blocked.text,undefined);
+});
+
+test('APA copy does not send title-only private records to an online provider', async t => {
+  const f = await fixture(t), requests = [];
+  const result = await dispatch({ action:'cite', ids:[f.item.id], format:'apa', prepare_metadata:true }, {
+    library:f.library, fetchOptions:{ resolver, transport:async({url})=>{requests.push(url);return response('');} },
+  });
+  assert.equal(result.text,undefined);assert.ok(result.missing_fields.includes('作者'));assert.equal(requests.length,0);
+});
+
 test('bridge graph mutation allowlist reaches bounded core operations and preserves graph ownership',async t=>{
   const f=await fixture(t);
   const node=await dispatch({action:'graph_node_put',id:f.item.id,type:'concept',label:'Example concept'},{library:f.library});

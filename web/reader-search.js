@@ -66,22 +66,34 @@ window.PaperReaderSearch = (() => {
     scopeInput.addEventListener('input',()=>{if(!scopeInput.value)submitScope();});
     scopeInput.addEventListener('keydown',event=>{if(event.key==='Escape'){expanded=false;sync();scopeToggle.focus();}});
 
-    const pdfToggle=button('文内搜索','搜索当前 PDF（⌘/Ctrl F）',()=>showPDF());pdfToggle.id='reader-find';pdfToggle.prepend(magnify());pdfToggle.setAttribute('aria-controls','pdf-search-row');
+    const pdfToggle=button('文内搜索','搜索当前 PDF（⌘/Ctrl F）',()=>pdfForm.hidden?showPDF():hidePDF());pdfToggle.id='reader-find';pdfToggle.prepend(magnify());pdfToggle.setAttribute('aria-controls','pdf-search-row');
     $('toolbar-reader')?.append(pdfToggle);
     const pdfForm=make('form');pdfForm.id='pdf-search-row';pdfForm.className='reader-search-row pdf-search-row';pdfForm.hidden=true;
     const input=make('input');input.type='search';input.placeholder='搜索当前 PDF 文字';input.setAttribute('aria-label','搜索当前 PDF 文字');input.maxLength=200;
     const submit=make('button','搜索');submit.type='submit';submit.className='button subtle';
-    const match=make('select');match.setAttribute('aria-label','PDF 匹配方式');for(const [value,label] of [['partial','部分匹配'],['whole','完整词匹配']]){const option=make('option',label);option.value=value;match.append(option);}
-    const caseLabel=make('label','区分大小写');const caseBox=make('input');caseBox.type='checkbox';caseLabel.prepend(caseBox);
+    function searchSwitch(label, offLabel = label) {
+      const control = button(offLabel, label, () => {
+        const enabled = control.getAttribute('aria-checked') !== 'true';
+        control.setAttribute('aria-checked', String(enabled));
+        control.textContent = enabled ? label : offLabel;
+        if (input.value.trim()) start();
+      });
+      control.classList.add('paper-switch');
+      control.setAttribute('role', 'switch');
+      control.setAttribute('aria-checked', 'false');
+      return control;
+    }
+    const match = searchSwitch('完整词匹配', '部分匹配');
+    const matchCase = searchSwitch('区分大小写');
     let searchMatch='partial',searchCase=false;
     const previous=button('‹','上一个匹配位置',()=>move(-1)),next=button('›','下一个匹配位置',()=>move(1));
     const more=button('继续','继续搜索后续位置',()=>{if(cursor&&!busy){hits=[];index=-1;void run();}});
     const stop=button('停止','停止 PDF 搜索',()=>{++ticket;busy=false;update();});
-    const close=button('×','关闭 PDF 搜索',()=>{++ticket;busy=false;pdfForm.hidden=true;document.body.classList.remove('pdf-search-open');pdfToggle.setAttribute('aria-expanded','false');pdfToggle.focus();});
+    const close=button('×','关闭 PDF 搜索',hidePDF);
     const status=make('span');status.className='small';status.setAttribute('role','status');status.setAttribute('aria-live','polite');
-    pdfForm.append(input,match,caseLabel,submit,previous,next,more,stop,status,close);$('paper-tools')?.after(pdfForm);
+    pdfForm.append(input,match,matchCase,submit,previous,next,more,stop,status,close);$('paper-tools')?.after(pdfForm);
     function update(){previous.disabled=!hits.length;next.disabled=!hits.length;more.hidden=busy||!cursor;stop.hidden=!busy;status.textContent=`${hits.length?index+1:0} / ${hits.length} 个位置${cursor?'（本批）':''} · ${busy?'搜索中 · ':''}${scanned} / ${total} 页${noText?' · '+noText+' 页无可选文字':''}`;}
-    async function reveal(){const hit=hits[index],id=paperId;if(!hit)return;try{await navigate();if(!disposed&&getPaper()?.id===id&&hits[index]===hit)await reader()?.revealRegion({paperId:id,page:hit.page,rects:hit.rects,focusId:'pdf-search'});}catch(error){if(!disposed&&getPaper()?.id===id&&hits[index]===hit)status.textContent='定位未完成：'+error.message;}}
+    async function reveal(){const hit=hits[index],id=paperId,runId=ticket;if(!hit)return;try{await navigate();if(!disposed&&runId===ticket&&getPaper()?.id===id&&hits[index]===hit)await reader()?.revealRegion({paperId:id,page:hit.page,rects:hit.rects,focusId:'pdf-search'});}catch(error){if(!disposed&&runId===ticket&&getPaper()?.id===id&&hits[index]===hit)status.textContent='定位未完成：'+error.message;}}
     function move(delta){if(!hits.length)return;index=(index+delta+hits.length)%hits.length;update();void reveal();}
     async function run(){const runId=++ticket,id=paperId;busy=true;update();
       try{while(cursor&&hits.length<200){
@@ -96,11 +108,11 @@ window.PaperReaderSearch = (() => {
       finally{if(runId===ticket){busy=false;stop.hidden=true;more.hidden=!cursor;}}
       if(runId===ticket)update();
     }
-    function start(){++ticket;busy=false;hits=[];index=-1;scanned=0;total=0;noText=0;searchQuery=input.value.trim();searchMatch=match.value;searchCase=caseBox.checked;cursor=searchQuery?{page:1,offset:0}:null;update();if(cursor)void run();}
-    match.addEventListener('change',()=>{if(input.value.trim())start();});caseBox.addEventListener('change',()=>{if(input.value.trim())start();});
+    function start(){++ticket;busy=false;hits=[];index=-1;scanned=0;total=0;noText=0;searchQuery=input.value.trim();searchMatch=match.getAttribute('aria-checked')==='true'?'whole':'partial';searchCase=matchCase.getAttribute('aria-checked')==='true';cursor=searchQuery?{page:1,offset:0}:null;update();if(cursor)void run();}
     pdfForm.addEventListener('submit',event=>{event.preventDefault();start();});
     input.addEventListener('input',()=>{++ticket;busy=false;cursor=null;hits=[];index=-1;update();status.textContent=input.value?'按 Enter 搜索':'输入要查找的文字';});
     input.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();close.click();}else if(event.key==='Enter'&&searchQuery===input.value.trim()&&hits.length){event.preventDefault();move(event.shiftKey?-1:1);}});
+    function hidePDF(){++ticket;busy=false;pdfForm.hidden=true;document.body.classList.remove('pdf-search-open');pdfToggle.setAttribute('aria-expanded','false');update();pdfToggle.focus();}
     function showPDF(){sync();if(pdfToggle.disabled)return;pdfForm.hidden=false;document.body.classList.add('pdf-search-open');pdfToggle.setAttribute('aria-expanded','true');input.focus();input.select();}
     const keydown=event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='f'&&!event.altKey&&!event.target.closest('input,textarea,[contenteditable=true]')&&!document.querySelector('dialog[open]')){sync();if(!pdfToggle.disabled){event.preventDefault();showPDF();}}};document.addEventListener('keydown',keydown);
     function sync(){const paper=getPaper(),id=paper?.id||null;if(id!==paperId){paperId=id;++ticket;busy=false;hits=[];index=-1;cursor=null;input.value='';pdfForm.hidden=true;queries.clear();annotationSourceFilter='all';annotationMatch='all';annotationMatches=[];annotationIndex=-1;scopeInput.value='';onAnnotationSearch('');update();}
@@ -110,7 +122,7 @@ window.PaperReaderSearch = (() => {
       updateAnnotationNav();annotationOptions.hidden=scope!=='annotations';sourceSelect.value=annotationSourceFilter;matchSelect.value=annotationMatch;
       scopeInput.placeholder=`搜索${labels[scope]||''}${scope==='annotations'?'原文、备注与回复；空格分隔关键词':''}`;scopeInput.setAttribute('aria-label',scopeInput.placeholder);
     }
-    sync();return {sync,clearAnnotationFilter(){queries.delete('annotations');annotationSourceFilter='all';annotationMatch='all';if(scope==='annotations')scopeInput.value='';sync();},filter:group=>{const result=filterThreads(group,queries.get('annotations'),{source:annotationSourceFilter,match:annotationMatch});const selected=annotationMatches[annotationIndex]?.id;annotationMatches=[...result.notes.map((note,index)=>({id:note.id,offset:Math.floor(index/40)*40})),...result.unlinked.map(note=>({id:note.id,offset:0}))];annotationIndex=selected?annotationMatches.findIndex(note=>note.id===selected):-1;updateAnnotationNav();return result;},dispose(){disposed=true;++ticket;document.removeEventListener('keydown',keydown);document.body.classList.remove('pdf-search-open');scopeToggle.remove();scopeForm.remove();pdfToggle.remove();pdfForm.remove();}};
+    sync();return {sync,showPDF,clearAnnotationFilter(){queries.delete('annotations');annotationSourceFilter='all';annotationMatch='all';if(scope==='annotations')scopeInput.value='';sync();},filter:group=>{const result=filterThreads(group,queries.get('annotations'),{source:annotationSourceFilter,match:annotationMatch});const selected=annotationMatches[annotationIndex]?.id;annotationMatches=[...result.notes.map((note,index)=>({id:note.id,offset:Math.floor(index/40)*40})),...result.unlinked.map(note=>({id:note.id,offset:0}))];annotationIndex=selected?annotationMatches.findIndex(note=>note.id===selected):-1;updateAnnotationNav();return result;},dispose(){disposed=true;++ticket;document.removeEventListener('keydown',keydown);document.body.classList.remove('pdf-search-open');scopeToggle.remove();scopeForm.remove();pdfToggle.remove();pdfForm.remove();}};
   }
   return {create,filterThreads};
 })();

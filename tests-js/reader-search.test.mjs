@@ -20,7 +20,8 @@ test('PDF search scans pages, navigates each match, handles blank pages and clos
  assert.match(f.get('#pdf-search-row [role=status]').textContent,/1 \/ 2 个位置.*3 \/ 3 页.*1 页无可选文字/);assert.equal(f.revealed[0].page,1);
  f.get('[aria-label="下一个匹配位置"]').click();await tick();assert.equal(f.revealed.at(-1).page,3);
  f.get('[aria-label="上一个匹配位置"]').click();await tick();assert.equal(f.revealed.at(-1).page,1);
- f.get('[aria-label="关闭 PDF 搜索"]').click();assert.equal(f.get('#pdf-search-row').hidden,true);assert.equal(f.w.document.body.classList.contains('pdf-search-open'),false);
+ f.get('#reader-find').click();assert.equal(f.get('#pdf-search-row').hidden,true);assert.equal(f.w.document.body.classList.contains('pdf-search-open'),false);
+ f.get('#reader-find').click();assert.equal(f.get('#pdf-search-row').hidden,false);assert.equal(f.get('#pdf-search-row input').value,'word');
 });
 test('bounded batches continue inside a dense page without dropping remaining matches',async t=>{
  const f=fixture(t,async(a,p)=>{const count=Math.min(p.limit,205-p.offset);return{page:1,page_count:1,matches:Array.from({length:count},(_,i)=>match(1,p.offset+i)),next_offset:p.offset+count<205?p.offset+count:null,next_page:null};});
@@ -106,11 +107,16 @@ test('annotation result navigation crosses pages, wraps and resets after edits o
  f.get('[aria-label="清除当前侧栏搜索"]').click();ui.filter(group);assert.equal(next.parentElement.hidden,true);assert.equal(f.revealed.length,0);ui.dispose();
 });
 
-test('PDF search passes matching and case options on every page', async t => {
+test('PDF search switches apply their states immediately and can toggle back', async t => {
  const f=fixture(t,async()=>({page:1,page_count:1,matches:[],next_page:null,next_offset:null}));
+ f.get('#reader-find').click();
+ const whole=f.get('[role=switch][aria-label="完整词匹配"]'), matchCase=f.get('[role=switch][aria-label="区分大小写"]');
+ assert.equal(whole.textContent,'部分匹配');
  f.get('#pdf-search-row input[type=search]').value='Cat';
- f.get('#pdf-search-row select').value='whole';
- f.get('#pdf-search-row input[type=checkbox]').checked=true;
- f.submit('#pdf-search-row');await until(()=>f.calls.length===1);
- assert.equal(f.calls[0][1].match,'whole');assert.equal(f.calls[0][1].case_sensitive,true);
+ whole.click();await until(()=>f.calls.length===1);
+ assert.equal(whole.textContent,'完整词匹配');assert.equal(f.calls[0][1].match,'whole');assert.equal(f.calls[0][1].case_sensitive,false);
+ matchCase.click();await until(()=>f.calls.length===2);
+ assert.equal(f.calls[1][1].match,'whole');assert.equal(f.calls[1][1].case_sensitive,true);
+ whole.click();matchCase.click();await until(()=>f.calls.length===4);
+ assert.equal(f.calls[3][1].match,'partial');assert.equal(f.calls[3][1].case_sensitive,false);
 });

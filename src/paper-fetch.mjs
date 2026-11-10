@@ -246,15 +246,15 @@ function normalizeDOI(value) {
 
 function crossrefCSL(item, doi, ctx) {
   if (item.DOI && String(item.DOI).toLowerCase() !== doi.toLowerCase()) throw new Error('Crossref returned metadata for a different DOI')
-  const type = { 'journal-article': 'article-journal', 'proceedings-article': 'paper-conference', 'book-chapter': 'chapter', 'posted-content': 'article' }[item.type] ?? 'article'
+  const type = { 'journal-article': 'article-journal', 'proceedings-article': 'paper-conference', 'book-chapter': 'chapter', book: 'book', 'edited-book': 'book', report: 'report', dissertation: 'thesis' }[item.type] ?? 'article'
   const csl = { id: doi, type, DOI: doi, title: clean(first(item.title)), URL: item.URL || `https://doi.org/${doi}` }
-  if (Array.isArray(item.author)) csl.author = item.author.slice(0, 100).filter(person => person && typeof person === 'object').map(person => {
+  for (const role of ['author','editor']) if (Array.isArray(item[role])) csl[role] = item[role].slice(0, 100).filter(person => person && typeof person === 'object').map(person => {
     const author = person.family ? { family: clean(person.family), ...(person.given ? { given: clean(person.given) } : {}) } : { literal: clean(person.name || person.given) }
     const affiliation = affiliations(person.affiliation, ctx.warnings)
     if (affiliation.length) author.affiliation = affiliation
     return author
   }).filter(person => person.family || person.literal)
-  for (const [key, value] of Object.entries({ 'container-title': first(item['container-title']), volume: item.volume, issue: item.issue, page: item.page, publisher: item.publisher, abstract: item.abstract })) if (value) csl[key] = clean(value)
+  for (const [key, value] of Object.entries({ 'container-title': first(item['container-title']), volume: item.volume, issue: item.issue, page: item.page, number: item['article-number'], publisher: item.publisher, abstract: item.abstract })) if (value) csl[key] = clean(value)
   const dates = sourceDates([['published', item.published], ['online', item['published-online']], ['print', item['published-print']], ['accepted', item.accepted]])
   if (Object.keys(dates).length) csl.publication_dates = dates
   const issued = [item.published, item['published-print'], item['published-online'], item.issued].map(partialDate).find(Boolean)
@@ -335,7 +335,8 @@ function landingMetadata(html, url, ctx) {
     }
   }
   const get = key => first(meta.get(key))
-  const metadata = { type: 'article', URL: url }
+  const conference = get('citation_conference_title'), journal = get('citation_journal_title');
+  const metadata = { type: conference ? 'paper-conference' : journal ? 'article-journal' : 'article', URL: url }
   const title = get('citation_title') ?? get('dc.title') ?? get('og:title')
   if (title) metadata.title = clean(title)
   const authors = meta.get('dc.creator')
@@ -353,7 +354,9 @@ function landingMetadata(html, url, ctx) {
   if (Object.keys(dates).length) metadata.publication_dates = dates
   const date = dates.published ?? dates.print ?? dates.online ?? partialDate(get('dc.date'))
   if (date) metadata.issued = { 'date-parts': [date.split('-').map(Number)] }
-  for (const [key, value] of [['container-title', get('citation_journal_title')], ['volume', get('citation_volume')], ['issue', get('citation_issue')]]) if (value) metadata[key] = clean(value)
+  const firstPage = get('citation_firstpage'), lastPage = get('citation_lastpage');
+  const pages = firstPage && lastPage && firstPage !== lastPage ? `${firstPage}-${lastPage}` : firstPage;
+  for (const [key, value] of [['container-title', conference || journal], ['volume', get('citation_volume')], ['issue', get('citation_issue')], ['page', pages], ['number', get('citation_article_number')], ['publisher', get('citation_publisher')]]) if (value) metadata[key] = clean(value)
   const candidates = [...(meta.get('citation_pdf_url') ?? [])]
   for (const match of html.matchAll(/<(?:link|a)\b[^>]*>/gi)) {
     const attributes = attrs(match[0])

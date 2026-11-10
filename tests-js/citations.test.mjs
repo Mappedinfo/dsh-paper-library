@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cite, parseBibtex, safeCitationHtml } from '../src/citations.mjs';
+import { apaCopyReadiness, cite, parseBibtex, safeCitationHtml } from '../src/citations.mjs';
 
 // Fictional split names retain the initials and multi-author formatting checks.
 const article={id:'paper-1',citekey:'LearningNotes2020',type:'article-journal',title:'How to revise a reading note',author:[{family:'Example',given:'Reader A.'},{family:'Demo',given:'Learning B.'}],issued:{'date-parts':[[2020]]},'container-title':'Learning Methods Examples',volume:'12',issue:'3',page:'10-19',DOI:'10.5555/example'};
@@ -16,6 +16,9 @@ test('incomplete APA metadata stays visible without inventing bibliographic fiel
   const result=await cite([{id:'incomplete',type:'article-journal',title:'Synthetic study'}]);
   assert.match(result.warnings.join(' '),/作者、年份、期刊/);
   assert.match(result.text,/n\.d\./);
+});
+test('APA copy can proceed for a paginated print article without a DOI or issue', () => {
+  assert.deepEqual(apaCopyReadiness({...article,DOI:undefined,issue:undefined}), { missing:[], lookup:true });
 });
 test('BibLaTeX roundtrip keeps citekey, names and DOI',async()=>{
   const result=await cite([{...article,citekey:'custom-key:2020'}],'biblatex');

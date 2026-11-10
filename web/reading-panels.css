@@ -155,4 +155,4 @@ body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-
 .annotation-search-options{display:flex;align-items:center;gap:4px;flex:none}
 .annotation-search-options[hidden]{display:none!important}
 .annotation-search-options select{font:inherit;font-size:12px;max-width:135px;padding:4px;border:1px solid var(--line);border-radius:5px;background:var(--paper);color:var(--ink)}
-.pdf-search-row input[type=checkbox]{flex:none;width:auto}.pdf-search-row label{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.pdf-search-row .paper-switch{flex:none;white-space:nowrap}

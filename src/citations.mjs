@@ -24,6 +24,35 @@ function cleanItem(item, index) {
   return { ...csl, id:key, 'citation-key':key, type: item.type || 'article-journal' };
 }
 
+const hasValue = value => (typeof value === 'string' || typeof value === 'number') && Boolean(String(value).trim());
+const hasNames = names => Array.isArray(names) && names.some(person => [person?.family, person?.given, person?.literal].some(hasValue));
+
+/** Readiness for the copy command. General CSL exports still support APA's
+ * missing-information forms for users who deliberately need those. */
+export function apaCopyReadiness(item) {
+  const type = item.type || 'article-journal';
+  const venue = hasValue(item['container-title']);
+  const pages = hasValue(item.page) || hasValue(item.number);
+  const journal = type === 'article-journal';
+  const proceedings = type === 'paper-conference' && venue;
+  const early = /^(?:in press|advance online publication)$/i.test(String(item.status || '').trim());
+  const missing = [];
+  if (!hasValue(item.title) || /^(?:untitled|未命名文献)$/i.test(String(item.title).trim())) missing.push('题名');
+  if (!hasNames(item.author) && !(type === 'book' && hasNames(item.editor))) missing.push('作者');
+  if (!hasValue(item.issued?.['date-parts']?.[0]?.[0]) && !hasValue(item.issued?.literal) && !/^in press$/i.test(item.status || '')) missing.push('出版年份');
+  if ((journal || type === 'chapter') && !venue) missing.push('期刊或出版出处');
+  if (type === 'paper-conference' && !venue && !hasValue(item['event-title'])) missing.push('会议或论文集名称');
+  if ((journal || proceedings) && !pages && !early) missing.push('页码或文章编号');
+  if (['book','chapter'].includes(type) && !hasValue(item.publisher)) missing.push('出版者');
+  if (type === 'article' && venue) missing.push('出版类型（期刊或会议论文）');
+  if (['article','document','report','thesis','webpage'].includes(type) && ![item.DOI, item.URL, item.publisher, item.archive, item['container-title']].some(hasValue)) missing.push('出版出处或公开链接');
+  // Try to find volume, issue and DOI when available, but their absence alone
+  // does not prevent copying a reference to a source that omits them.
+  const lookup = missing.length > 0 || (journal && !early && (!hasValue(item.volume) || !hasValue(item.issue))) ||
+    ((journal || proceedings) && !hasValue(item.DOI)) || item.parse?.field_sources?.author === 'pdf-info-author-literal';
+  return { missing, lookup };
+}
+
 export async function parseBibtex(text) {
   const { Cite } = await load();
   if (text.length > 16 * 1024 * 1024) throw new Error('BibTeX 文件超过 16 MB；请分批导入。');

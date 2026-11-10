@@ -1040,15 +1040,35 @@ async function copyText(text, { label = '文本', html } = {}) {
     toast(`${label}已复制`);
   } catch { $('copy-fallback').value = text; $('text-dialog-title').textContent = label; openDialog('text-dialog'); $('copy-fallback').select(); }
 }
+let apaCopyPending = false;
 async function cite(format) {
-  if (!state.active) return;
-  const button = format === 'apa' ? $('copy-apa') : $('export-bib'); button.disabled = true;
+  const id = state.active?.id, apa = format === 'apa';
+  if (!id || (apa && apaCopyPending)) return;
+  const buttons = (apa ? [$('copy-apa'), $('toolbar-copy-apa')] : [$('export-bib')]).filter(Boolean);
+  if (apa) {
+    apaCopyPending = true;
+    toast('正在核对 APA 7 引用资料…');
+  }
+  for (const button of buttons) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
   try {
-    const result = await api('cite', { ids: [state.active.id], format });
-    if (format !== 'apa') { downloadText(result); toast('BibLaTeX 已导出'); return; }
+    const result = await api('cite', { ids: [id], format, ...(apa ? { prepare_metadata: true } : {}) });
+    if (!apa) { downloadText(result); toast('BibLaTeX 已导出'); return; }
+    if (state.active?.id !== id) return;
+    if (result.prepared !== true) throw new Error('引用资料检查尚未启用，请重新加载 Paper Library 插件后再试。');
+    if (result.missing_fields?.length) {
+      toast(`未复制 APA 7。缺少${result.missing_fields.join('、')}。${result.lookup_message || '请在「资料详情」核对后重试。'}`, true);
+      return;
+    }
     await copyText(result.text, { label: 'APA 7 引用', html: result.html });
-    if(result.warnings?.length)toast(`引用资料待补全：${result.warnings.join('；')}。可在「资料详情」修改或「补全资料」。`,true);
-  } catch (error) { toast(error.message, true); } finally { button.disabled = false; }
+  } catch (error) {
+    if (!apa || state.active?.id === id) toast(error.message, true);
+  } finally {
+    if (apa) apaCopyPending = false;
+    for (const button of buttons) {
+      button.removeAttribute('aria-busy');
+      button.disabled = !state.active || Boolean(state.active.archived || state.catalogSlideId);
+    }
+  }
 }
 async function exportNotes() {
   const format = $('export-notes').value; if (!format || !state.active) return;
@@ -1708,7 +1728,7 @@ function installReaderContextMenu() {
       label = 'PDF 阅读';
       actions = [
         ...(selected ? [['复制选中文字', () => copyText(selected, { label: '选中文字' })]] : []),
-        ['文内搜索', () => $('reader-find')?.click(), !$('reader-find') || $('reader-find').disabled],
+        ['文内搜索', () => readerSearchUI?.showPDF(), !$('reader-find') || $('reader-find').disabled],
         ['定位本页批注', () => locateCurrentPageAnnotations(page)],
         ['整页显示', () => pdfReader?.fitPage()],
       ];
