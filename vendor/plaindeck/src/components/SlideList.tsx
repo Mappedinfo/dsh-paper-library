@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, Copy, LayoutTemplate, Plus, Trash2, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { layoutPresetsFor, type LayoutPresetId, type Slide } from 'plaindeck/core'
 import { useEditor } from '../store'
 import { useT } from '../i18n'
@@ -22,30 +22,46 @@ function LayoutDiagram({ id }: { id: LayoutPresetId }) {
   </div>
 }
 
-function SlideThumbnail({ slide }: { slide: Slide }) {
+const SlideThumbnail = memo(function SlideThumbnail({ slide }: { slide: Slide }) {
   const canvas = useEditor(state => state.document.deck.canvas)
   const cropRef = useRef<HTMLDivElement>(null)
+  const [nearViewport, setNearViewport] = useState(() => typeof IntersectionObserver === 'undefined')
   const [width, setWidth] = useState(0)
   useEffect(() => {
     const crop = cropRef.current
-    if (!crop) return
-    const observer = new ResizeObserver(entries => setWidth(entries[0].contentRect.width))
+    if (!crop || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(([entry]) => setNearViewport(entry.isIntersecting), {
+      root: crop.closest('.slide-list'),
+      rootMargin: '100px 0px',
+    })
     observer.observe(crop)
     return () => observer.disconnect()
   }, [])
+  useEffect(() => {
+    const crop = cropRef.current
+    if (!nearViewport || !crop) return
+    setWidth(crop.clientWidth)
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
+    observer.observe(crop)
+    return () => observer.disconnect()
+  }, [nearViewport])
   return <div ref={cropRef} className="thumb-crop" style={{ aspectRatio: `${canvas.width} / ${canvas.height}` }}>
-    {width > 0 && <SlideSurface slide={slide} interactive={false} zoom={width / canvas.width} />}
+    {nearViewport && width > 0 && <SlideSurface slide={slide} interactive={false} zoom={width / canvas.width} />}
   </div>
-}
+})
 
 export function SlideList() {
   const [choosingLayout, setChoosingLayout] = useState(false)
-  const { document, activeSlidePath, setActiveSlide, addSlide, duplicateSlide, deleteSlide, moveSlide } = useEditor()
+  const document = useEditor(state => state.document)
+  const activeSlidePath = useEditor(state => state.activeSlidePath)
+  const { setActiveSlide, addSlide, duplicateSlide, deleteSlide, moveSlide } = useEditor.getState()
+  const activeButton = useRef<HTMLButtonElement>(null)
+  useEffect(() => { activeButton.current?.scrollIntoView?.({ block: 'nearest' }) }, [activeSlidePath])
   const { t, locale } = useT()
   return <aside className="slide-panel">
     <div className="panel-heading"><span>PAGES</span><strong>{String(document.deck.slides.length).padStart(2, '0')}</strong></div>
     <div className="slide-list">
-      {document.deck.slides.map((path, index) => <button key={path} className={`slide-thumb ${path === activeSlidePath ? 'active' : ''}`} onClick={() => setActiveSlide(path)}>
+      {document.deck.slides.map((path, index) => <button key={path} type="button" ref={path === activeSlidePath ? activeButton : undefined} aria-current={path === activeSlidePath ? 'page' : undefined} className={`slide-thumb ${path === activeSlidePath ? 'active' : ''}`} onClick={() => setActiveSlide(path)}>
         <span className="slide-number">{String(index + 1).padStart(3, '0')}</span>
         <SlideThumbnail slide={document.slides[path]} />
         <span className="slide-name">{document.slides[path].name ?? document.slides[path].id}</span>

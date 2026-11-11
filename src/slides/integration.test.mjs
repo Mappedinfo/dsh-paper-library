@@ -17,6 +17,7 @@ test('deep link opens its slide, serializes revisions, and retains a conflict dr
   const window = dom.window, calls = [], errors = []
   window.structuredClone = structuredClone
   window.ResizeObserver = class { observe() {} disconnect() {} }
+  window.HTMLElement.prototype.scrollTo = function (x, y) { this.scrollLeft = x; this.scrollTop = y }
   const project = { id: 'pd-00000000000000000000000000000000', title: '合成项目', slide_count: 1, updated_at: '2026-01-01' }
   const document = createDeckTemplate('blank', { title: project.title, lang: 'zh' })
   let releaseFirst
@@ -68,6 +69,7 @@ test('guidance persists consecutive brief edits with the returned revision', { s
   const window = dom.window, calls = []
   window.structuredClone = structuredClone
   window.ResizeObserver = class { observe() {} disconnect() {} }
+  window.HTMLElement.prototype.scrollTo = function (x, y) { this.scrollLeft = x; this.scrollTop = y }
   const project = { id: 'pd-00000000000000000000000000000000', title: '合成项目', slide_count: 1, updated_at: '2026-01-01' }
   const document = createDeckTemplate('blank', { title: project.title, lang: 'zh' })
   let releaseFirst

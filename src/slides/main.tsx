@@ -6,18 +6,18 @@ import type { DeckDocument } from 'plaindeck/core'
 import { Toolbar } from '../../vendor/plaindeck/src/components/Toolbar'
 import { SlideList } from '../../vendor/plaindeck/src/components/SlideList'
 import { SlideSurface } from '../../vendor/plaindeck/src/components/SlideSurface'
+import { CanvasViewport } from '../../vendor/plaindeck/src/components/CanvasViewport'
+import { usePrintDeck } from '../../vendor/plaindeck/src/components/PrintDeck'
 import { Inspector } from '../../vendor/plaindeck/src/components/Inspector'
 import { StatusBar } from '../../vendor/plaindeck/src/components/StatusBar'
 import { SlideNameEditor } from '../../vendor/plaindeck/src/components/SlideNameEditor'
 import { SummaryCardsDialog } from '../../vendor/plaindeck/src/components/SummaryCardsDialog'
 import { TableDialog } from '../../vendor/plaindeck/src/components/TableDialog'
 import { imageDimensions, fitImageFrame, transferredImageFiles, hasTransferredImages } from '../../vendor/plaindeck/src/core/imageImport'
-import { moveFrame } from '../../vendor/plaindeck/src/core/geometry'
 import { useEditor } from '../../vendor/plaindeck/src/store'
 import { useT } from '../../vendor/plaindeck/src/i18n'
 import { exportHtml } from '../../vendor/plaindeck/src/export/html'
 import { saveBlob } from '../../vendor/plaindeck/src/export/download'
-import { waitForPrintResources } from '../../vendor/plaindeck/src/export/print'
 import { createProjectZip } from '../../vendor/plaindeck/src/storage/zipStorage'
 import { api, downloadPptx } from './api'
 import { Guide } from './Guide'
@@ -256,37 +256,28 @@ function App() {
     } catch (error: any) { useEditor.getState().setSaveState('error', `图片未插入：${error.message}`) }
     finally { assetBusy.current = false; setBusy(false) }
   }, [])
-  const fitCanvas = useCallback(() => {
-    const scroller = canvasRef.current?.querySelector<HTMLElement>('.canvas-scroller')
-    if (!scroller) return
-    const canvas = useEditor.getState().document.deck.canvas, padding = getComputedStyle(scroller)
-    const width = scroller.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight), height = scroller.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom)
-    if (width > 0 && height > 0) useEditor.getState().setZoom(Math.min(width / canvas.width, height / canvas.height, .9))
-  }, [])
-  useEffect(() => {
-    if (chooser || !active.current) return
-    const observer = new ResizeObserver(fitCanvas); if (canvasRef.current) observer.observe(canvasRef.current); fitCanvas(); return () => observer.disconnect()
-  }, [chooser, fitCanvas, state.document.deck.canvas.width, state.document.deck.canvas.height])
+  const { print, printDeck } = usePrintDeck(!chooser)
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (chooser || guiding || present || exporting) return
+      if (event.defaultPrevented || chooser || guiding || present || exporting || cards || table || busy) return
       const target = event.target as HTMLElement, mod = event.metaKey || event.ctrlKey
       if (mod && event.key.toLowerCase() === 's') { event.preventDefault(); void save(true); return }
       if (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
       const editor = useEditor.getState()
+      if (mod && event.key.toLowerCase() === 'p') { event.preventDefault(); void print().catch(error => setMessage(`导出失败：${error.message}`)); return }
       if (mod && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? editor.redo() : editor.undo() }
       if (mod && event.key.toLowerCase() === 'y') { event.preventDefault(); editor.redo() }
       if (mod && event.key.toLowerCase() === 'd') { event.preventDefault(); editor.duplicateSelected() }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); editor.removeSelected() }
-      if (event.key.startsWith('Arrow') && editor.selectedIds.length === 1) {
-        const element = editor.document.slides[editor.activeSlidePath].elements.find(item => item.id === editor.selectedIds[0]); if (!element) return
-        event.preventDefault(); const amount = event.shiftKey ? 8 : 1
-        const dx = event.key === 'ArrowRight' ? amount : event.key === 'ArrowLeft' ? -amount : 0, dy = event.key === 'ArrowDown' ? amount : event.key === 'ArrowUp' ? -amount : 0
-        editor.updateElement(element.id, { frame: moveFrame(element.frame, dx, dy, editor.document.deck.canvas, 1) } as never, '移动元素')
+      if (event.key.startsWith('Arrow') && editor.selectedIds.length && !mod && !event.altKey) {
+        event.preventDefault()
+        const amount = event.shiftKey ? 8 : 1
+        editor.nudgeSelection(event.key === 'ArrowRight' ? amount : event.key === 'ArrowLeft' ? -amount : 0,
+          event.key === 'ArrowDown' ? amount : event.key === 'ArrowUp' ? -amount : 0)
       }
     }
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key)
-  }, [chooser, guiding, present, exporting, save])
+  }, [chooser, guiding, present, exporting, cards, table, busy, save, print])
   useEffect(() => {
     const paste = (event: ClipboardEvent) => {
       if (chooser || guiding || !event.clipboardData) return
@@ -311,7 +302,7 @@ function App() {
       assertSafeDocument(document)
       if (format === 'html') await exportHtml(document, selected.handle as any)
       if (format === 'zip') { const zip = await createProjectZip(document, path => readAsset(selected.handle, path)); saveBlob(await zip.generateAsync({ type: 'blob' }), `${document.deck.id}.zip`) }
-      if (format === 'pdf') { await waitForPrintResources(globalThis.document.querySelector('.print-deck') ?? globalThis.document); window.print() }
+      if (format === 'pdf') await print()
       if (format === 'pptx') {
         const { blob, filename, warnings } = await downloadPptx(selected.id, document)
         saveBlob(blob, filename)
@@ -384,10 +375,10 @@ function App() {
       <ToolbarContext title={state.document.deck.title} onLibrary={() => void openLibrary()} onDsh={() => void returnToDsh()} busy={busy} />
       {message && <div className="slides-navigation-notice" role="status"><span>{message}</span><button type="button" aria-label="关闭提示" onClick={() => setMessage('')}>×</button></div>}
       <main className="workspace"><SlideList /><section ref={canvasRef} className={`canvas-workspace ${dragging ? 'image-drop-active' : ''}`} onDragEnter={event => { if (hasTransferredImages(event.dataTransfer)) setDragging(true) }} onDragOver={event => { if (hasTransferredImages(event.dataTransfer)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }} onDrop={event => { const files = transferredImageFiles(event.dataTransfer); setDragging(false); if (files.length) { event.preventDefault(); void insertImages(files, canvasPoint(event)) } }}>
-        <div className="canvas-label"><span>画布</span><SlideNameEditor key={state.activeSlidePath} name={slide.name ?? slide.id} onCommit={state.renameSlide} /></div><div className="canvas-scroller"><div className="canvas-sized" style={{ width: state.document.deck.canvas.width * state.zoom, height: state.document.deck.canvas.height * state.zoom }}><SlideSurface slide={slide} zoom={state.zoom} /></div></div><div className="image-drop-overlay"><strong>添加图片</strong><span>将图片拖到画布</span></div></section><Inspector /></main>
+        <div className="canvas-label"><span>画布</span><SlideNameEditor key={state.activeSlidePath} name={slide.name ?? slide.id} onCommit={state.renameSlide} /></div><CanvasViewport shortcuts={!guiding && !present && !exporting && !cards && !table && !busy} /><div className="image-drop-overlay"><strong>添加图片</strong><span>将图片拖到画布</span></div></section><Inspector /></main>
       <StatusBar />
       {state.saveState === 'error' && <div className="slides-save-warning" role="alert"><span>{state.error}</span><button onClick={() => void save(true)}>重试保存</button><button onClick={openExport}>导出草稿</button>{state.dirtyRevisions.size > 0 && <button onClick={() => void reloadLatest()}>放弃草稿并重新读取</button>}</div>}
-      <div className="print-deck">{state.document.deck.slides.map(path => <div className="print-page" key={path}><SlideSurface slide={state.document.slides[path]} interactive={false} zoom={1} /></div>)}</div>
+      {printDeck}
     </div>}
     <input ref={zipRef} hidden type="file" accept=".zip,application/zip" onChange={event => { const file = event.target.files?.[0] ?? null; event.currentTarget.value = ''; void importZip(file) }} />
     <input ref={imageRef} hidden type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange={event => { const files = Array.from(event.target.files ?? []); event.currentTarget.value = ''; void insertImages(files) }} />

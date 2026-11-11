@@ -1,6 +1,6 @@
-import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, Image, LocateFixed, Minus, Search, Square, Table2, Type } from 'lucide-react'
+import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, ArrowUp, ArrowUpToLine, GripVertical, Image, LocateFixed, Minus, Search, Square, Table2, Type } from 'lucide-react'
 import { parseTableCells, tableCellsToTsv, themePresetsFor, type DeckFooter, type ElementAnimation, type FooterSlot, type SlideElement, type TableStyle } from 'plaindeck/core'
-import { useState } from 'react'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { centerFrame, framePlacement } from '../core/geometry'
 import { useEditor } from '../store'
 import { useT } from '../i18n'
@@ -90,6 +90,33 @@ export function Inspector() {
   const state = useEditor(); const slide = state.document.slides[state.activeSlidePath]
   const { t, locale } = useT()
   const [elementQuery, setElementQuery] = useState('')
+  const layerList = useRef<HTMLDivElement>(null)
+  const dragged = useRef<{ id: string; path: string } | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ id: string; above: boolean } | null>(null)
+  const lastSelected = state.selectedIds.at(-1)
+  useEffect(() => {
+    const list = layerList.current
+    const row = list && Array.from(list.children).find(child => (child as HTMLElement).dataset.layerId === lastSelected)
+    if (!list || !row) return
+    const bounds = list.getBoundingClientRect(), item = row.getBoundingClientRect()
+    if (item.top < bounds.top) list.scrollTop += item.top - bounds.top
+    else if (item.bottom > bounds.bottom) list.scrollTop += item.bottom - bounds.bottom
+  }, [lastSelected, state.activeSlidePath])
+  function layerDrop(event: DragEvent<HTMLDivElement>, id: string, commit: boolean) {
+    const source = dragged.current
+    if (!source || source.path !== state.activeSlidePath || source.id === id) { setDropTarget(null); return }
+    event.preventDefault()
+    const rect = event.currentTarget.getBoundingClientRect()
+    const above = event.clientY < rect.top + rect.height / 2
+    if (!commit) {
+      event.dataTransfer.dropEffect = 'move'
+      setDropTarget(previous => previous?.id === id && previous.above === above ? previous : { id, above })
+    } else {
+      state.moveLayer(source.id, id, above ? 'after' : 'before')
+      dragged.current = null
+      setDropTarget(null)
+    }
+  }
   const [querySource, setQuerySource] = useState(state.activeSlidePath)
   if (querySource !== state.activeSlidePath) { setQuerySource(state.activeSlidePath); setElementQuery('') }
   const selected = slide.elements.filter(element => state.selectedIds.includes(element.id)); const element = selected.length === 1 ? selected[0] : null
@@ -99,14 +126,36 @@ export function Inspector() {
     const value = item.type === 'text' ? item.text : item.type === 'shape' ? item.text : item.type === 'image' ? item.alt : item.type === 'table' ? item.cells[0]?.join(' / ') : ''
     return value?.trim().replace(/\s+/g, ' ').slice(0, 28) || `${typeNameFor(item.type)} · ${item.id}`
   }
-  const visibleElements = slide.elements.filter(item => `${item.id} ${typeNameFor(item.type)} ${elementName(item)}`.toLowerCase().includes(elementQuery.trim().toLowerCase()))
+  const visibleElements = slide.elements.filter(item => `${item.id} ${typeNameFor(item.type)} ${elementName(item)}`.toLowerCase().includes(elementQuery.trim().toLowerCase())).reverse()
+  const layerIndex = element ? slide.elements.indexOf(element) : -1
   const patch = (value: Partial<SlideElement>, label?: string) => element && state.updateElement(element.id, value, label)
   return <aside className="inspector">
     <div className="panel-heading"><span>INSPECTOR</span><strong>{selected.length ? `${selected.length} SELECTED` : 'PAGE'}</strong></div>
-    <section className="element-index"><div className="section-heading"><h3>{t.inspector.elementsHeading}</h3><span>{slide.elements.length}</span></div><label className="element-search"><Search /><input aria-label={t.inspector.filterElements} value={elementQuery} onChange={event => setElementQuery(event.target.value)} placeholder={t.inspector.filterPlaceholder} /></label><div className="element-list">
-      {visibleElements.map(item => { const placement = framePlacement(item.frame, state.document.deck.canvas); const name = elementName(item); const placementLabel = placement === 'inside' ? t.inspector.placementNames.inside : placement === 'partial' ? t.inspector.placementNames.partial : t.inspector.placementNames.outside; return <div className={`element-row ${state.selectedIds.includes(item.id) ? 'active' : ''}`} key={item.id}><button className="element-select" onClick={() => state.select([item.id])} title={t.inspector.selectElement(name)}><ElementIcon type={item.type} /><span><strong>{name}</strong><small className={placement}>{typeNameFor(item.type)} · {placementLabel}</small></span></button><button className="element-center" aria-label={t.inspector.centerElementAria(name)} title={t.inspector.centerElementTitle} onClick={() => { state.select([item.id]); state.updateElement(item.id, { frame: centerFrame(item.frame, state.document.deck.canvas) } as Partial<SlideElement>, t.store.centerOnCanvas) }}><LocateFixed /></button></div> })}
-      {!visibleElements.length && <p className="element-empty">{t.inspector.noMatchingElements}</p>}
-    </div><p className="element-index-hint">{t.inspector.elementsHint}</p></section>
+    <section className="element-index">
+      <div className="section-heading"><h3>{t.inspector.elementsHeading}</h3><span>{slide.elements.length}</span>
+        <div className="layer-order">
+          <button type="button" aria-label={t.inspector.layerUp} title={t.inspector.layerUp} disabled={layerIndex < 0 || layerIndex === slide.elements.length - 1} onClick={() => state.reorderLayer(1)}><ArrowUp /></button>
+          <button type="button" aria-label={t.inspector.layerDown} title={t.inspector.layerDown} disabled={layerIndex <= 0} onClick={() => state.reorderLayer(-1)}><ArrowDown /></button>
+        </div>
+      </div>
+      <label className="element-search"><Search /><input aria-label={t.inspector.filterElements} value={elementQuery} onChange={event => setElementQuery(event.target.value)} placeholder={t.inspector.filterPlaceholder} /></label>
+      <div className="element-list" ref={layerList} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }}>
+        {visibleElements.map(item => {
+          const placement = framePlacement(item.frame, state.document.deck.canvas)
+          const placementLabel = t.inspector.placementNames[placement]
+          const name = elementName(item), active = state.selectedIds.includes(item.id)
+          return <div className={`element-row ${active ? 'active' : ''}`} key={item.id} data-layer-id={item.id} data-drop={dropTarget?.id === item.id ? (dropTarget.above ? 'above' : 'below') : undefined}
+            onDragOver={event => layerDrop(event, item.id, false)} onDrop={event => layerDrop(event, item.id, true)}>
+            <span className="layer-grip" draggable title={t.inspector.dragLayer} aria-hidden="true"
+              onDragStart={event => { dragged.current = { id: item.id, path: state.activeSlidePath }; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', item.id) }}
+              onDragEnd={() => { dragged.current = null; setDropTarget(null) }}><GripVertical /></span>
+            <button type="button" className="element-select" aria-pressed={active} onClick={event => state.select(event.shiftKey ? active ? state.selectedIds.filter(id => id !== item.id) : [...state.selectedIds, item.id] : [item.id])} title={t.inspector.selectElement(name)}><ElementIcon type={item.type} /><span><strong>{name}</strong><small className={placement}>{typeNameFor(item.type)} · {placementLabel}</small></span></button>
+            <button type="button" className="element-center" aria-label={t.inspector.centerElementAria(name)} title={t.inspector.centerElementTitle} onClick={() => { state.select([item.id]); state.updateElement(item.id, { frame: centerFrame(item.frame, state.document.deck.canvas) } as Partial<SlideElement>, t.store.centerOnCanvas) }}><LocateFixed /></button>
+          </div>
+        })}
+        {!visibleElements.length && <p className="element-empty">{t.inspector.noMatchingElements}</p>}
+      </div><p className="element-index-hint">{t.inspector.elementsHint}</p>
+    </section>
     <FooterEditor />
     {!element && selected.length === 0 && <>
       <section><h3>DOCUMENT</h3><label className="field"><span>{t.inspector.documentTitle}</span><input value={state.document.deck.title} readOnly /></label><div className="metric-grid"><div><span>WIDTH</span><strong>{state.document.deck.canvas.width}</strong></div><div><span>HEIGHT</span><strong>{state.document.deck.canvas.height}</strong></div></div></section>

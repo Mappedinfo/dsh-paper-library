@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { applyOperations, layoutPresetsFor, type DeckOperation, type SlideElement } from 'plaindeck/core'
+import { applyOperations, FrameSchema, layoutPresetsFor, type DeckOperation, type SlideElement } from 'plaindeck/core'
 import { createSampleDocument } from '../core/sample'
 import { resolveDeckLocale } from '../core/language'
 import { PLACEHOLDER_IMAGE_SRC } from '../core/placeholder'
@@ -38,6 +38,39 @@ export const useEditor = create<EditorState>((set, get) => ({
     const state = get(); const next = name.trim(); const slide = state.document.slides[state.activeSlidePath]
     if (!next || next === (slide.name ?? slide.id)) return
     commitOperations(state, [{ op: 'rename-slide', slide: state.activeSlidePath, name: next }], getMessages().store.renameSlide)
+  },
+  updateFrames: (path, frames, label) => {
+    const state = get()
+    const slide = state.document.slides[path]
+    if (!slide || path !== state.activeSlidePath || !frames.size) return
+    let changed = false
+    const elements = slide.elements.map(element => {
+      const next = frames.get(element.id)
+      if (!next) return element
+      const frame = FrameSchema.parse(next)
+      const current = element.frame
+      if (frame.x === current.x && frame.y === current.y && frame.w === current.w && frame.h === current.h) return element
+      changed = true
+      return { ...element, frame }
+    })
+    if (changed) state.commitDocument({ ...state.document, slides: { ...state.document.slides, [path]: { ...slide, elements } } }, label, [path])
+  },
+  nudgeSelection: (dx, dy) => {
+    const { activeSlidePath, document, selectedIds, updateFrames } = get()
+    const selected = new Set(selectedIds)
+    const frames = new Map(document.slides[activeSlidePath].elements.filter(element => selected.has(element.id))
+      .map(({ id, frame }) => [id, { ...frame, x: frame.x + dx, y: frame.y + dy }]))
+    updateFrames(activeSlidePath, frames, getMessages().store.nudgeWithKeyboard)
+  },
+  moveLayer: (id, anchor, position) => {
+    const state = get()
+    if (id === anchor) return
+    const elements = state.document.slides[state.activeSlidePath].elements
+    const from = elements.findIndex(element => element.id === id)
+    const to = elements.findIndex(element => element.id === anchor)
+    if (from < 0 || to < 0 || from === to + (position === 'before' ? -1 : 1)) return
+    commitOperations(state, [{ op: 'move-element', slide: state.activeSlidePath, element: id, [position]: anchor }],
+      from < to ? getMessages().store.layerForward : getMessages().store.layerBackward)
   },
   updateElement: (id, patch, label) => {
     const state = get(); const slide = state.document.slides[state.activeSlidePath]
@@ -104,9 +137,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
   reorderLayer: direction => {
     const state = get(); if (state.selectedIds.length !== 1) return; const elements = state.document.slides[state.activeSlidePath].elements; const index = elements.findIndex(element => element.id === state.selectedIds[0]); const next = Math.max(0, Math.min(elements.length - 1, index + direction)); if (index < 0 || next === index) return
-    const placement = direction < 0 ? { before: elements[next].id } : { after: elements[next].id }
-    const labels = getMessages().store
-    commitOperations(state, [{ op: 'move-element', slide: state.activeSlidePath, element: state.selectedIds[0], ...placement }], direction > 0 ? labels.layerForward : labels.layerBackward)
+    state.moveLayer(state.selectedIds[0], elements[next].id, direction < 0 ? 'before' : 'after')
   },
   alignSelected: mode => {
     const state = get(); const slide = state.document.slides[state.activeSlidePath]

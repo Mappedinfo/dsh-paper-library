@@ -1,8 +1,8 @@
 # PlainDeck 源码子项目
 
-此目录固定复用 [Mappedinfo/PlainDeck](https://github.com/Mappedinfo/PlainDeck) 的提交 `95356c109f0d79e0a1547ef5a9a7c521b2262780`，保留上游相对目录结构和许可。它是 Paper Library 的 slides 编辑器基础；宿主 API、主机持久化、项目切换和入口适配放在主仓库 `src/slides/`，不直接修改本目录的上游文件。
+此目录固定复用 [Mappedinfo/PlainDeck](https://github.com/Mappedinfo/PlainDeck) 的提交 `e24105a34028fc87802e65b522fdc29a5b5312da`，保留上游相对目录结构和许可。它是 Paper Library 的 slides 编辑器基础；宿主 API、主机持久化、项目切换和入口适配放在主仓库 `src/slides/`，不直接修改本目录的上游文件。
 
-当前上游包声明为 0.10.0，但固定提交包含该标签之后的制作指导与布局修复。Web、core、render、react 必须一起更新，不能把本目录的编辑器配上 registry 0.10.0 的核心包。构建别名分别使用：
+当前上游包声明为 0.11.0。Web、core、render、react 均来自此固定提交，并一起构建。构建别名分别使用：
 
 - `plaindeck/core` → `packages/plaindeck/src/core/index.ts`
 - `plaindeck/render` → `packages/plaindeck/src/render/index.ts`

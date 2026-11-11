@@ -28,8 +28,8 @@ export function centerFrame(frame: Frame, canvas: { width: number; height: numbe
 export function resizeFrame(frame: Frame, dw: number, dh: number, canvas: { width: number; height: number }, grid = 8): Frame {
   return {
     ...frame,
-    w: snap(clamp(frame.w + dw, 32, canvas.width - frame.x), grid),
-    h: snap(clamp(frame.h + dh, 24, canvas.height - frame.y), grid),
+    w: snap(clamp(frame.w + dw, 32, Math.max(32, canvas.width - frame.x)), grid),
+    h: snap(clamp(frame.h + dh, 24, Math.max(24, canvas.height - frame.y)), grid),
   }
 }
 

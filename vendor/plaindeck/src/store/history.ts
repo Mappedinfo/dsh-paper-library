@@ -1,7 +1,7 @@
 import type { StoreApi } from 'zustand'
-import { clone, type EditorState } from './types'
+import type { EditorState } from './types'
 
-/** History + persistence bookkeeping: commits mark dirty revisions; undo/redo swap snapshots. */
+/** Documents are replaced immutably. History retains those snapshots and marks restored paths dirty. */
 export function createHistorySlice(set: StoreApi<EditorState>['setState']) {
   return {
     commitDocument(document: EditorState['document'], label: string, paths: string[]) {
@@ -10,7 +10,7 @@ export function createHistorySlice(set: StoreApi<EditorState>['setState']) {
         const dirtyRevisions = new Map(state.dirtyRevisions); paths.forEach(path => dirtyRevisions.set(path, revision))
         return {
           document, revision, saveState: 'dirty' as const, future: [],
-          past: [...state.past, { document: clone(state.document), label }].slice(-100),
+          past: [...state.past, { document: state.document, label }].slice(-100),
           dirtyPaths: new Set(dirtyRevisions.keys()), dirtyRevisions,
         }
       })
@@ -20,7 +20,11 @@ export function createHistorySlice(set: StoreApi<EditorState>['setState']) {
         const entry = state.past.at(-1); if (!entry) return state
         const revision = state.revision + 1; const paths = ['deck.json', entry.document.deck.theme, ...new Set([...state.document.deck.slides, ...entry.document.deck.slides])]
         const dirtyRevisions = new Map(state.dirtyRevisions); paths.forEach(path => dirtyRevisions.set(path, revision))
-        return { document: clone(entry.document), revision, past: state.past.slice(0, -1), future: [{ document: clone(state.document), label: entry.label }, ...state.future].slice(0, 100), dirtyPaths: new Set(dirtyRevisions.keys()), dirtyRevisions, saveState: 'dirty' as const }
+        const activeSlidePath = entry.document.slides[state.activeSlidePath] ? state.activeSlidePath : entry.document.deck.slides[0]
+        const selectedIds = activeSlidePath === state.activeSlidePath
+          ? state.selectedIds.filter(id => entry.document.slides[activeSlidePath].elements.some(element => element.id === id))
+          : []
+        return { document: entry.document, activeSlidePath, selectedIds, revision, past: state.past.slice(0, -1), future: [{ document: state.document, label: entry.label }, ...state.future].slice(0, 100), dirtyPaths: new Set(dirtyRevisions.keys()), dirtyRevisions, saveState: 'dirty' as const }
       })
     },
     redo() {
@@ -28,7 +32,11 @@ export function createHistorySlice(set: StoreApi<EditorState>['setState']) {
         const entry = state.future[0]; if (!entry) return state
         const revision = state.revision + 1; const paths = ['deck.json', entry.document.deck.theme, ...new Set([...state.document.deck.slides, ...entry.document.deck.slides])]
         const dirtyRevisions = new Map(state.dirtyRevisions); paths.forEach(path => dirtyRevisions.set(path, revision))
-        return { document: clone(entry.document), revision, future: state.future.slice(1), past: [...state.past, { document: clone(state.document), label: entry.label }].slice(-100), dirtyPaths: new Set(dirtyRevisions.keys()), dirtyRevisions, saveState: 'dirty' as const }
+        const activeSlidePath = entry.document.slides[state.activeSlidePath] ? state.activeSlidePath : entry.document.deck.slides[0]
+        const selectedIds = activeSlidePath === state.activeSlidePath
+          ? state.selectedIds.filter(id => entry.document.slides[activeSlidePath].elements.some(element => element.id === id))
+          : []
+        return { document: entry.document, activeSlidePath, selectedIds, revision, future: state.future.slice(1), past: [...state.past, { document: state.document, label: entry.label }].slice(-100), dirtyPaths: new Set(dirtyRevisions.keys()), dirtyRevisions, saveState: 'dirty' as const }
       })
     },
     clearDirty(captured: Map<string, number>) {

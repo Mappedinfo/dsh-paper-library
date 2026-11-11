@@ -47,8 +47,12 @@ export async function readAsset(root: DirectoryHandle, path: string): Promise<Bl
   return (await fileHandle(root, path)).getFile()
 }
 
+export function getCachedAssetUrl(root: DirectoryHandle, path: string): string | undefined {
+  return assetUrls.get(root)?.get(path)
+}
+
 export async function resolveAssetUrl(root: DirectoryHandle, path: string): Promise<string> {
-  const cached = assetUrls.get(root)?.get(path)
+  const cached = getCachedAssetUrl(root, path)
   if (cached) return cached
   const url = URL.createObjectURL(await readAsset(root, path))
   const urls = assetUrls.get(root) ?? new Map<string, string>(); urls.set(path, url); assetUrls.set(root, urls)

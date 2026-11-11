@@ -34,6 +34,9 @@ export interface EditorState {
   select(ids: string[]): void
   setZoom(zoom: number): void
   setSaveState(state: SaveState, error?: string | null): void
+  updateFrames(path: string, frames: ReadonlyMap<string, SlideElement['frame']>, label: string): void
+  nudgeSelection(dx: number, dy: number): void
+  moveLayer(id: string, anchor: string, position: 'before' | 'after'): void
   updateElement(id: string, patch: Partial<SlideElement>, label?: string): void
   addElement(type: SlideElement['type']): void
   addImage(src: string, frame: SlideElement['frame'], alt?: string): string

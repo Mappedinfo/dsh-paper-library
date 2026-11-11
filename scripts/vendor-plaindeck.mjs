@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repository = 'https://github.com/Mappedinfo/PlainDeck'
-const revision = '95356c109f0d79e0a1547ef5a9a7c521b2262780'
+const revision = 'e24105a34028fc87802e65b522fdc29a5b5312da'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const destination = join(root, 'vendor/plaindeck')
 const roots = ['src', 'packages/plaindeck/src/core', 'packages/plaindeck/src/render', 'packages/plaindeck/src/react']
@@ -26,11 +26,12 @@ const paths = git('ls-tree', '-r', '--name-only', revision, '--', ...roots, ...n
 for (const notice of notices) if (!paths.includes(notice)) throw new Error(`上游缺少许可或包元数据：${notice}`)
 const files = new Map(paths.map(path => [path, git('show', `${revision}:${path}`)]))
 
+const version = JSON.parse(files.get('packages/plaindeck/package.json').toString()).version
 const upstream = {
   repository,
   revision,
-  declared_version: '0.10.0',
-  version_note: '固定提交包含 v0.10.0 标签之后的制作指导与编辑器布局改动；不能与 registry 0.10.0 的 core 混用。',
+  declared_version: version,
+  version_note: '编辑器与 core、render、react 同源构建，不混用其他修订。',
   local_reference: '用户指定的 AnyPre 上游 clone；路径仅作为更新命令的参数，不写入分发文件。',
   license: 'MIT',
   files: paths,
@@ -39,7 +40,7 @@ const readme = `# PlainDeck 源码子项目
 
 此目录固定复用 [Mappedinfo/PlainDeck](${repository}) 的提交 \`${revision}\`，保留上游相对目录结构和许可。它是 Paper Library 的 slides 编辑器基础；宿主 API、主机持久化、项目切换和入口适配放在主仓库 \`src/slides/\`，不直接修改本目录的上游文件。
 
-当前上游包声明为 0.10.0，但固定提交包含该标签之后的制作指导与布局修复。Web、core、render、react 必须一起更新，不能把本目录的编辑器配上 registry 0.10.0 的核心包。构建别名分别使用：
+当前上游包声明为 ${version}。Web、core、render、react 均来自此固定提交，并一起构建。构建别名分别使用：
 
 - \`plaindeck/core\` → \`packages/plaindeck/src/core/index.ts\`
 - \`plaindeck/render\` → \`packages/plaindeck/src/render/index.ts\`

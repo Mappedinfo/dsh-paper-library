@@ -1,8 +1,8 @@
 {
   "repository": "https://github.com/Mappedinfo/PlainDeck",
-  "revision": "95356c109f0d79e0a1547ef5a9a7c521b2262780",
-  "declared_version": "0.10.0",
-  "version_note": "固定提交包含 v0.10.0 标签之后的制作指导与编辑器布局改动；不能与 registry 0.10.0 的 core 混用。",
+  "revision": "e24105a34028fc87802e65b522fdc29a5b5312da",
+  "declared_version": "0.11.0",
+  "version_note": "编辑器与 core、render、react 同源构建，不混用其他修订。",
   "local_reference": "用户指定的 AnyPre 上游 clone；路径仅作为更新命令的参数，不写入分发文件。",
   "license": "MIT",
   "files": [
@@ -41,8 +41,10 @@
     "packages/plaindeck/src/render/presentation.ts",
     "src/App.tsx",
     "src/analytics.ts",
+    "src/components/CanvasViewport.tsx",
     "src/components/Inspector.tsx",
     "src/components/PresentationGuide.tsx",
+    "src/components/PrintDeck.tsx",
     "src/components/SlideList.tsx",
     "src/components/SlideNameEditor.tsx",
     "src/components/SlideSurface.tsx",

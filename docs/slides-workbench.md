@@ -8,6 +8,8 @@ Paper Library 内集成 PlainDeck，用于本机制作演示文稿。DSH「开�
 
 在项目页填写名称并选择空白、论文阅读、方法汇报、数据叙事、课程、流程或提案模板。打开后可编辑文字、拖动元素、添加图片／原生表格／摘要卡片、调整版式和主题；保留 PlainDeck 的撤销重做、键盘移动、复制元素和缩放操作。
 
+- 右侧图层从最前面排到最后面，支持搜索、拖动排序和按钮排序。画布和图层可按住 Shift 多选，拖动或用方向键一起移动，一次撤销即可恢复整组。
+- 按住空格或鼠标中键可平移视图；Shift+1 适应整页，Shift+2 缩放到选区，画布右上角也有对应按钮。缩略图随滚动按需绘制，打印页只在打印时生成。
 - 停止编辑约 700 ms 后自动保存；保存按钮或 `⌘/Ctrl-S` 立即保存。项目标题显示在工作台中，可返回项目列表或文献库。
 - 图片可从工具栏选择、拖入画布或粘贴，保存到项目的 `assets/`；支持 PNG、JPEG、WebP、GIF，每张最多 8 MiB。SVG 图片暂不导入，上游的固定图片占位符继续可用。
 - 「制作指导」提供听众、目的、时长、核心主张和证据深度，生成可复制的制作提示词，列出可定位的审阅提示；简报保存在当前主机项目中。提示不代表内容已经人工核验，也不发起模型请求。
@@ -45,7 +47,7 @@ PPTX 现在保留动态入场和镜头缩放。`fade`、四个方向的渐入与
 
 ## 子项目与升级
 
-采用 **固定提交的源码子项目**，放在 [`vendor/plaindeck/`](../vendor/plaindeck/README.md)。上游为 [Mappedinfo/PlainDeck](https://github.com/Mappedinfo/PlainDeck)，本轮固定 `95356c109f0d79e0a1547ef5a9a7c521b2262780`；编辑器、core、React 渲染器与 HTML 渲染器来自同一提交。该提交包含 `0.10.0` 标签之后的制作指导，不能混用 registry 的 `plaindeck@0.10.0` core。
+采用 **固定提交的源码子项目**，放在 [`vendor/plaindeck/`](../vendor/plaindeck/README.md)。上游为 [Mappedinfo/PlainDeck](https://github.com/Mappedinfo/PlainDeck)，本轮固定 `e24105a34028fc87802e65b522fdc29a5b5312da`；编辑器、core、React 渲染器与 HTML 渲染器来自同一提交。对应 PlainDeck `0.11.0`。
 
 | 方案 | 本轮判断 |
 | --- | --- |
@@ -53,7 +55,7 @@ PPTX 现在保留动态入场和镜头缩放。`fade`、四个方向的渐入与
 | 仅依赖 npm 包 | 当前包不包含完整 Web 编辑器，且与本地编辑器版本不同 |
 | 固定源码子项目 | 构建和分发自包含，上游代码保持原样，宿主适配层单独维护 |
 
-宿主适配位于 `src/slides/`、`src/slides-store.mjs`；现有 esbuild 构建把浏览器目录存储和语言偏好替换为项目 API 与内存状态，不引入上游 PWA、分析埋点或浏览器草稿。上游 MIT、Juya 及运行依赖许可均保留。本轮不修改 AnyPre 工作区、不读取其 `projects/`，也不修改 DSH 源码。
+宿主适配位于 `src/slides/`、`src/slides-store.mjs`；现有 esbuild 构建把浏览器目录存储和语言偏好替换为项目 API 与内存状态，不引入上游 PWA、分析埋点或浏览器草稿。上游 MIT、Juya 及运行依赖许可均保留。同步脚本只读取 PlainDeck 的 Git 对象，不读取其项目目录。
 
 更新固定提交后按白名单重新提取；更新脚本仅使用 Git 对象，未跟踪文件不会进入快照：
 
@@ -69,3 +71,7 @@ node --test tests-js/slides-store.test.mjs tests-js/slides-http.test.mjs src/sli
 合成 DOM 组件测试可设置 `JSDOM_MODULE=/path/to/jsdom` 复用已安装的 jsdom；未设置时明确跳过这两项，不下载浏览器、不连接用户标签页。
 
 运行中的 DSH 另有 `scripts/slides-live-fixture.mjs` 实际浏览器检查：通过进程环境提供 `DSH_TEST_LAUNCH_URL` 和已安装的 `PLAYWRIGHT_MODULE`，在隔离的 1512×982 Chromium 会话中验证编辑、保存、冲突恢复、图片、表格、卡片、简报、放映和导出，以及浅深色控件对比度。仅打开本轮创建的合成项目，截图和下载写入临时目录，不操作已有用户标签页；热重载由原生插件管理器单独执行。检查结束会报告本轮项目标识，供保留示例及限定清理。浏览器打印布局检查不代替系统打印对话框验收。
+
+以合成稿件测量翻页与拖放，可运行 `PLAYWRIGHT_MODULE=/path/to/playwright node scripts/slides-canvas-benchmark.mjs`。脚本使用临时资料库，检查 8 页 × 12 元素和 30 页 × 40 元素两个场景；可用 `CHROMIUM_PATH` 指定浏览器。输出包括翻页和放下后的中位时间、缩略图元素数和打印元素数。时间受浏览器刷新率及机器负载影响。
+
+与旧版 `dd0649f` 比较，在 1512×982 的同一 Chromium 会话配置下，30 页 × 40 元素的合成稿件从 2,440 个已渲染元素降到 320 个（280 缩略图、40 画布、0 打印），拖放中位时间从 22.6 ms 降到 13.5 ms，翻页均约 17 ms。8 页 × 12 元素的场景从 204 个降到 96 个，时间基本持平。这是 PlainDeck 集成版的前后对比，没有使用 Paper 的帧率作为基线。

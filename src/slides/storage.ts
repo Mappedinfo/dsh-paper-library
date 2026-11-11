@@ -12,8 +12,11 @@ export async function readAsset(root: DirectoryHandle, path: string): Promise<Bl
   if (!allowed.has(result.mime)) throw new Error('不支持的图片格式。')
   return new Blob([decode(result.content_base64)], { type: result.mime })
 }
+export function getCachedAssetUrl(root: DirectoryHandle, path: string): string | undefined {
+  return urls.get(root)?.get(path)
+}
 export async function resolveAssetUrl(root: DirectoryHandle, path: string): Promise<string> {
-  const existing = urls.get(root)?.get(path)
+  const existing = getCachedAssetUrl(root, path)
   if (existing) return existing
   const url = URL.createObjectURL(await readAsset(root, path))
   const cache = urls.get(root) ?? new Map<string, string>(); cache.set(path, url); urls.set(root, cache)

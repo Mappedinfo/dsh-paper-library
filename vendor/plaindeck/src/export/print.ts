@@ -1,11 +1,13 @@
 export async function waitForPrintResources(root: ParentNode = document): Promise<void> {
-  await document.fonts?.ready
-  const images = [...root.querySelectorAll('img')]
-  await Promise.all(images.map(async image => {
-    if (!image.complete) await new Promise<void>(resolve => {
-      image.addEventListener('load', () => resolve(), { once: true })
-      image.addEventListener('error', () => resolve(), { once: true })
-    })
-    try { await image.decode() } catch { /* print the available fallback instead of hanging */ }
-  }))
+  // A slow or missing image must not keep the export dialog waiting indefinitely.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      (async () => {
+        await document.fonts?.ready
+        await Promise.all([...root.querySelectorAll('img')].map(image => image.decode?.().catch(() => undefined)))
+      })(),
+      new Promise<void>(resolve => { timer = setTimeout(resolve, 8000) }),
+    ])
+  } finally { clearTimeout(timer) }
 }
