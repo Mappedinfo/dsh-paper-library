@@ -4,14 +4,35 @@ import { realpath } from 'node:fs/promises'
 const KEY = 'paper.model.settings'
 const fail = (message, status = 409) => Object.assign(new Error(message), { code: 'PAPER_MODEL_UNAVAILABLE', status })
 
+// These aliases produce identical payloads in the installed pi-ai routes.
+function equivalentEfforts({ provider, model }) {
+  if (provider === 'opencode-go' && model === 'claude-haiku-5-5') return ['minimal']
+  if (provider === 'kimi-coding' && model === 'kimi-for-coding-highspeed') return ['minimal', 'medium', 'high']
+  return []
+}
+
+function canonicalEffort(route, effort) {
+  return equivalentEfforts(route).includes(effort) ? 'low' : effort
+}
+
+function effortLabel(route, effort) {
+  return effort === 'low' && route.provider === 'kimi-coding' && route.model === 'kimi-for-coding-highspeed' ? '开启推理' : undefined
+}
+
 function field(value, name) {
   if (typeof value !== 'string' || !value.trim() || value.length > 200 || /[\x00-\x1f]/.test(value)) throw fail(`${name}无效。`, 400)
   return value
 }
 function selection(value) {
   if (!value) return null
-  return { provider: field(value.provider, '模型供应商'), model: field(value.model, '模型'),
-    ...(value.reasoningEffort ? { reasoningEffort: field(value.reasoningEffort, '推理强度') } : {}) }
+  const route = { provider: field(value.provider, '模型供应商'), model: field(value.model, '模型') }
+  if (value.reasoningEffort) route.reasoningEffort = canonicalEffort(route, field(value.reasoningEffort, '推理强度'))
+  return route
+}
+
+function viewOf(record, models, route, warning) {
+  return { value: { model: selection(record.value?.model) }, revision: record.revision, models,
+    effective_model: route, effective_effort_label: route && effortLabel(route, route.reasoningEffort), warning, writable: true }
 }
 
 export function createPaperModel({ store, models, llm, getDefault, library }) {
@@ -32,16 +53,21 @@ export function createPaperModel({ store, models, llm, getDefault, library }) {
   async function efforts(route, signal) {
     try {
       const info = await llm.resolveModelInfo(route.provider, route.model, signal)
-      return (info?.reasoning?.efforts || []).slice(0, 40).map(({ id, name }) => ({ id, name }))
+      const aliases = equivalentEfforts(route)
+      const efforts = (info?.reasoning?.efforts || []).slice(0, 40)
+        .filter(({ id }) => !aliases.includes(id))
+        .map(({ id, name }) => ({ id, name: effortLabel(route, id) || name }))
+      const defaultEffort = canonicalEffort(route, info?.reasoning?.defaultEffort)
+      return { efforts, ...(efforts.some(({ id }) => id === defaultEffort) ? { defaultEffort } : {}) }
     } catch {
       signal?.throwIfAborted()
       throw fail('这个模型当前不可用，请重新读取模型列表。')
     }
   }
   async function validate(route, signal) {
-    const supported = await efforts(route, signal)
+    const { efforts: supported } = await efforts(route, signal)
     if (route.reasoningEffort && !supported.some(item => item.id === route.reasoningEffort)) throw fail('所选推理强度当前不可用，请重新选择。')
-    try { await llm.resolveCallConfig(route) } catch { signal?.throwIfAborted(); throw fail('模型配置当前不可用，请检查 DSH 模型设置。') }
+    try { await llm.resolveCallConfig(route, signal) } catch { signal?.throwIfAborted(); throw fail('模型配置当前不可用，请检查 DSH 模型设置。') }
     signal?.throwIfAborted()
     return route
   }
@@ -60,14 +86,14 @@ export function createPaperModel({ store, models, llm, getDefault, library }) {
       if (!catalog.models.some(item => item.provider === route.provider && item.id === route.model)) warning = '已保存的模型当前不在 DSH 可用列表中。'
       else try { await validate(route, signal) } catch (error) { signal?.throwIfAborted(); warning = error.message }
     } else if (!route) warning = 'DSH 尚未设置默认模型。'
-    return { value: { model: latest.value?.model || null }, revision: latest.revision, models: catalog.models, effective_model: route, warning, writable: true }
+    return viewOf(latest, catalog.models, route, warning)
   }
   async function handle(input, { signal } = {}) {
     if (input.action === 'paper_model_get') return view(signal)
     if (input.action === 'paper_model_efforts') {
       const route = selection(input.model)
       if (!route) throw fail('请选择模型。', 400)
-      return { efforts: await efforts(route, signal) }
+      return efforts(route, signal)
     }
     if (input.expected_revision !== 0 && (typeof input.expected_revision !== 'string' || !/^[a-f0-9]{64}$/.test(input.expected_revision))) throw fail('请刷新设置后保存。', 400)
     const model = selection(input.model)
@@ -80,8 +106,7 @@ export function createPaperModel({ store, models, llm, getDefault, library }) {
     changes++
     record = saved
     const route = current()
-    return { value: saved.value, revision: saved.revision, models: catalog.models, effective_model: route,
-      warning: route ? '' : 'DSH 尚未设置默认模型。', writable: true }
+    return viewOf(saved, catalog.models, route, route ? '' : 'DSH 尚未设置默认模型。')
   }
   function owns(agent) {
     const id = agent?.session?.id

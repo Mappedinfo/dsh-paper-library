@@ -40,7 +40,7 @@ test('model settings show effective defaults and save explicit choices with revi
     calls.push({action,args});
     if(action==='language_settings_get')return record;
     if(action==='paper_model_get')return paper;
-    if(action==='paper_model_efforts')return {efforts:[{id:'high',name:'高'}]};
+    if(action==='paper_model_efforts')return {efforts:[{id:'high',name:'高'}],defaultEffort:'high'};
     if(action==='paper_model_update')return {...paper,revision:1,effective_model:args.model};
     if(action==='language_settings_update')return{value:args.value,revision:2};
     throw Error(action);
@@ -53,6 +53,7 @@ test('model settings show effective defaults and save explicit choices with revi
   assert.equal(picker.children[1].label,'Test Host');
   assert.equal(picker.children[1].children[1].textContent,'fast');
   picker.value=JSON.stringify({provider:'host',model:'fast'});picker.listeners.change();await flush();
+  assert.equal(nodes[1].children[1].options[0].textContent,'模型默认（高）');
   nodes[1].children[1].value='high';await nodes[4].click();
   assert.equal(calls.at(-1).action,'paper_model_update');
   assert.deepEqual(json(calls.at(-1).args),{expected_revision:0,model:{provider:'host',model:'fast',reasoningEffort:'high'}});

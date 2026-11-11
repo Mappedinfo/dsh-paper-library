@@ -70,3 +70,47 @@ test('paper routes are global, pinned at admission, and applied to native paper 
   const reset = await model.handle({ action: 'paper_model_update', expected_revision: saved.revision, model: null })
   assert.deepEqual(reset.effective_model, host)
 })
+
+test('equivalent adapter efforts are merged per route and legacy selections keep their request behavior', async () => {
+  const haiku = { provider: 'opencode-go', model: 'claude-haiku-5-5' }
+  const kimi = { provider: 'kimi-coding', model: 'kimi-for-coding-highspeed' }
+  const unrelated = { provider: 'another-route', model: haiku.model }
+  const catalog = [haiku, kimi, unrelated].map(({ provider, model }) => ({ provider, id: model }))
+  let record = { value: { model: { ...haiku, reasoningEffort: 'minimal' } }, revision: 'a'.repeat(64) }
+  const resolved = []
+  const model = createPaperModel({
+    library: process.cwd(), models: async () => ({ models: catalog }), getDefault: () => null,
+    store: {
+      get: async () => record,
+      put: async (_key, value, expected) => {
+        assert.equal(expected, record.revision)
+        record = { value, revision: 'b'.repeat(64) }
+        return record
+      },
+    },
+    llm: {
+      resolveModelInfo: async (provider, id) => {
+        const ids = provider === kimi.provider
+          ? ['minimal', 'low', 'medium', 'high']
+          : ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+        assert.ok(catalog.some(entry => entry.provider === provider && entry.id === id))
+        return { reasoning: { efforts: ids.map(id => ({ id, name: id })), defaultEffort: 'minimal' } }
+      },
+      resolveCallConfig: async route => { resolved.push(route); return route },
+    },
+  })
+  const effortInfo = route => model.handle({ action: 'paper_model_efforts', model: route })
+  const haikuInfo = await effortInfo(haiku)
+  assert.deepEqual(haikuInfo.efforts.map(option => option.id), ['off', 'low', 'medium', 'high', 'xhigh', 'max'])
+  assert.equal(haikuInfo.defaultEffort, 'low')
+  assert.deepEqual(await effortInfo(kimi), { efforts: [{ id: 'low', name: '开启推理' }], defaultEffort: 'low' })
+  assert.ok((await effortInfo(unrelated)).efforts.some(option => option.id === 'minimal'))
+  const read = await model.handle({ action: 'paper_model_get' })
+  assert.equal(read.value.model.reasoningEffort, 'low')
+  assert.equal(record.value.model.reasoningEffort, 'minimal')
+  assert.equal((await model.resolve()).reasoningEffort, 'low')
+  const saved = await model.handle({ action: 'paper_model_update', model: { ...kimi, reasoningEffort: 'high' }, expected_revision: read.revision })
+  assert.equal(saved.effective_effort_label, '开启推理')
+  assert.equal(saved.value.model.reasoningEffort, 'low')
+  assert.deepEqual(resolved.at(-1), { ...kimi, reasoningEffort: 'low' })
+})

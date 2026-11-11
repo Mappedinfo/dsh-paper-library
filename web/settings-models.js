@@ -45,7 +45,8 @@ window.PaperSettingsModels = (() => {
     }
     function describePaper(){
       const route=paper?.effective_model;
-      paperInfo.textContent=`当前生效：${name(route)}${route?.reasoningEffort?` · ${route.reasoningEffort}`:''}。${paper?.warning?' '+paper.warning:''}`;
+      const level=paper?.effective_effort_label||route?.reasoningEffort;
+      paperInfo.textContent=`当前生效：${name(route)}${level?` · ${level}`:''}。${paper?.warning?' '+paper.warning:''}`;
     }
     function describeLanguage(){
       const override=language?.value?.model;
@@ -59,8 +60,11 @@ window.PaperSettingsModels = (() => {
       try{
         const result=await api('paper_model_efforts',{model:route});
         if(token!==effortTicket)return;
-        for(const option of result.efforts||[])appendOption(effort,option.id,option.name||option.id);
-        if(saved&&!(result.efforts||[]).some(item=>item.id===saved)){
+        const options=result.efforts||[];
+        const defaultOption=options.find(item=>item.id===result.defaultEffort);
+        if(defaultOption)effort.options[0].textContent=`模型默认（${defaultOption.name||defaultOption.id}）`;
+        for(const option of options)appendOption(effort,option.id,option.name||option.id);
+        if(saved&&!options.some(item=>item.id===saved)){
           appendOption(effort,saved,`${saved}（当前不可用）`,true);effortStatus.textContent='已保存的推理强度当前不可用，请选择模型默认或其他档位。';
         }
         effort.value=saved;
