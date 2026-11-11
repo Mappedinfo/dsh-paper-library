@@ -53,6 +53,31 @@ function fixture({ api, getPreferences } = {}) {
   };
 }
 
+test('settings defaults to a dialog and keeps the same controls in full-page mode', async()=>{
+  const f=fixture({api:()=>view(1)});
+  const dialog=f.ids.get('library-settings'),trigger=f.ids.get('settings-open'),expand=f.ids.get('settings-expand');
+  const sections=dialog.children[1].children[0];
+  trigger.emit('click');await flush();
+  assert.equal(dialog.open,true);
+  assert.equal(sections.hidden,true);
+  const setting=f.ids.get('setting-annotation_font_size');
+  expand.emit('click');
+  assert.equal(dialog.open,true);
+  assert.equal(sections.hidden,false);
+  assert.equal(f.ids.get('setting-annotation_font_size'),setting);
+  assert.equal(f.calls.length,1);
+  let prevented=false;
+  dialog.emit('cancel',{preventDefault(){prevented=true;}});
+  assert.equal(prevented,true);
+  assert.equal(sections.hidden,true);
+  expand.emit('click');dialog.close();
+  trigger.emit('click');await flush();
+  assert.equal(dialog.open,true);
+  assert.equal(expand.textContent,'全页设置');
+  assert.equal(sections.hidden,true);
+  f.ui.dispose();
+});
+
 test('an older document response cannot overwrite a newer successful automation opt-out', async () => {
   const old = deferred(); let reads = 0;
   const f = fixture({ api: action => action === 'settings_update' ? view(2, { auto_analysis: false }) : ++reads === 1 ? view(1, { auto_analysis: true }) : old.promise });

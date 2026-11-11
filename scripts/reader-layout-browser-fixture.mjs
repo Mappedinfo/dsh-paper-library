@@ -60,7 +60,9 @@ try {
   page.on('request', request => { if (/^https?:/.test(request.url()) && new URL(request.url()).origin !== origin) errors.push('external request'); });
   await page.goto(origin); await page.waitForLoadState('networkidle');
 
-  await page.locator('#library-graph-open').click();
+  assert.equal(await page.locator('.topbar-actions #library-graph-open').count(), 0);
+  await page.locator('#field-radar-open').click();
+  await page.locator('#field-radar #library-graph-open').click();
   await page.locator('#library-graph-content .kg-status').filter({ hasText: '/ 45' }).waitFor();
   await page.locator('#library-graph-content .kg-statistics').filter({ hasText: '45 篇有效文献' }).waitFor();
   assert.match(await page.locator('#library-graph-content .kg-statistics').innerText(), /年份缺失 1 篇/);
@@ -73,7 +75,7 @@ try {
   assert.equal(await graphCanvas.locator('.kg-node[aria-pressed="true"]').count(),1);
   await page.locator('#library-graph-fullscreen').click();
   await page.waitForFunction(()=>graphFullscreenTask===null);
-  const graphBounds=await page.locator('#library-graph-dialog').boundingBox();
+  const graphBounds=await page.locator('#library-graph-workspace').boundingBox();
   await page.screenshot({ path: join(run, 'global-graph-1512.png') });
   assert.ok(graphBounds.width>=1500&&graphBounds.height>=970);
   await page.locator('#library-graph-fullscreen').click();
@@ -82,7 +84,7 @@ try {
   await page.getByRole('button', { name: '下一批文献', exact: true }).click();
   await page.locator('#library-graph-content .kg-status').filter({ hasText: '41–45 / 45' }).waitFor();
   assert.equal(await page.locator('#library-graph-content [data-kg="add-node"]').isVisible(), false);
-  await page.locator('#library-graph-dialog').getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator('#field-radar-close').click();
   record('global graph opens without a paper, pages the catalog, and stays read-only');
 
   await page.locator(`#paper-list .paper-card[data-id="${paper.id}"]`).click();

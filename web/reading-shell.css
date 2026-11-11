@@ -15,6 +15,10 @@ body{--workbench-height:calc(65px + var(--reader-toolbar-height) + var(--annotat
 #reader-fullscreen{margin-left:0}
 .reader-ribbon-status{display:flex;align-items:center;flex:none;margin-left:auto}
 .paper-tools{gap:8px;border:0;padding:2px 0;min-height:32px;overflow-y:hidden}.paper-tools .button,.annotation-tool-group .button{font-size:11px;padding:4px 7px;min-height:27px}
+.reader-control-group{display:flex;align-items:center;gap:4px;flex:none;min-width:0}
+.reader-control-group:not(:has(> :not([hidden]))){display:none}
+.reader-control-group:has(~ .reader-control-group > :not([hidden])){padding-inline-end:6px;border-inline-end:1px solid var(--line)}
+.reader-control-group .toolbar-reader{border:0;padding:0;margin:0}
 .toolbar-reader{gap:7px;border:0;padding:0}.toolbar-reader input{width:38px;padding:2px;height:24px}.toolbar-reader .page-controls{gap:0}.toolbar-reader .page-controls label{display:flex;gap:5px;align-items:center}.toolbar-reader .page-controls span{font-size:10px}
 .annotation-tool-group,.library-tool-group{display:flex;gap:4px;align-items:center;flex-shrink:0}
 body.annotation-tools-visible{--annotation-tools-height:36px}

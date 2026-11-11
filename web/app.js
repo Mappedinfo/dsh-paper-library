@@ -1634,32 +1634,62 @@ organizationUI = window.PaperOrganization?.create({state,api,loadList,toast,root
   if(state.active?.id===patch.id){Object.assign(state.active,patch);$('paper-tags').replaceChildren(organizationUI.actions(state.active));}
   renderList();
 }});
-const libraryGraphDialog=el('dialog','library-graph-dialog');libraryGraphDialog.id='library-graph-dialog';libraryGraphDialog.setAttribute('aria-label','全库知识图谱');
-const libraryGraphHeader=el('header','library-graph-header'),libraryGraphTitle=el('strong','','Paper Library · 全库视角'),libraryGraphClose=el('button','button subtle','关闭');libraryGraphClose.type='button';libraryGraphClose.addEventListener('click',()=>void closeLibraryGraph());const libraryGraphRefresh=el('button','button subtle','刷新');libraryGraphRefresh.id='library-graph-refresh';libraryGraphRefresh.type='button';libraryGraphRefresh.addEventListener('click',()=>void libraryGraphUI?.reload());libraryGraphHeader.append(libraryGraphTitle,libraryGraphRefresh,libraryGraphClose);
-const libraryGraphRoot=el('section','library-graph-content');libraryGraphRoot.id='library-graph-content';libraryGraphDialog.append(libraryGraphHeader,libraryGraphRoot);document.body.append(libraryGraphDialog);
-const libraryGraphFullscreen=el('button','button subtle','全屏');libraryGraphFullscreen.id='library-graph-fullscreen';libraryGraphFullscreen.type='button';libraryGraphFullscreen.setAttribute('aria-pressed','false');libraryGraphFullscreen.title='全屏显示图谱；不支持浏览器全屏时展开至当前窗口';libraryGraphHeader.insertBefore(libraryGraphFullscreen,libraryGraphClose);
-let graphWindowExpanded=false,graphWasFullscreen=false,graphFullscreenTask=null;
-function syncGraphFullscreen(){libraryGraphDialog.classList.toggle('is-expanded',graphWindowExpanded||document.fullscreenElement===libraryGraphDialog);libraryGraphFullscreen.textContent=graphWindowExpanded?'退出全屏':'全屏';libraryGraphFullscreen.setAttribute('aria-pressed',String(graphWindowExpanded));libraryGraphUI?.resize?.();}
+const libraryGraphView=el('section','library-graph-workspace');libraryGraphView.id='library-graph-workspace';libraryGraphView.setAttribute('aria-label','全库图谱');
+const libraryGraphHeader=el('header','library-graph-header');
+const libraryGraphRefresh=el('button','button subtle','刷新图谱');libraryGraphRefresh.id='library-graph-refresh';libraryGraphRefresh.type='button';
+libraryGraphRefresh.addEventListener('click',()=>void libraryGraphUI?.reload());
+const libraryGraphFullscreen=el('button','button subtle','全屏');libraryGraphFullscreen.id='library-graph-fullscreen';libraryGraphFullscreen.type='button';
+libraryGraphFullscreen.title='全屏显示图谱';
+const libraryGraphRoot=el('section','library-graph-content');libraryGraphRoot.id='library-graph-content';
+libraryGraphHeader.append(libraryGraphRefresh,libraryGraphFullscreen);libraryGraphView.append(libraryGraphHeader,libraryGraphRoot);
+let graphWindowExpanded=false,graphFullscreenTask=null;
+function setGraphExpanded(value){
+  graphWindowExpanded=value;
+  libraryGraphView.classList.toggle('is-expanded',value);
+  libraryGraphFullscreen.textContent=value?'退出全屏':'全屏';
+  libraryGraphUI?.resize?.();
+}
+async function exitGraphFullscreen(){
+  if(document.fullscreenElement===libraryGraphView){
+    try{await document.exitFullscreen();}catch{toast('请先按 Esc 退出图谱全屏。',true);return false;}
+  }
+  setGraphExpanded(false);
+  return true;
+}
 async function toggleGraphFullscreen(){
-  if(graphFullscreenTask)return graphFullscreenTask;if(!libraryGraphDialog.open)return;
+  if(graphFullscreenTask)return graphFullscreenTask;
   graphFullscreenTask=(async()=>{
-    if(graphWindowExpanded){if(document.fullscreenElement===libraryGraphDialog){try{await document.exitFullscreen();}catch{toast('未能退出图谱全屏，请按 Esc。',true);return;}}graphWindowExpanded=false;graphWasFullscreen=false;}
-    else{graphWindowExpanded=true;syncGraphFullscreen();if(libraryGraphDialog.requestFullscreen){try{await libraryGraphDialog.requestFullscreen();graphWasFullscreen=true;}catch{graphWasFullscreen=false;toast('图谱已展开至当前窗口。');}}}
-    syncGraphFullscreen();
-  })();libraryGraphFullscreen.disabled=true;try{return await graphFullscreenTask;}finally{graphFullscreenTask=null;libraryGraphFullscreen.disabled=false;}
+    if(graphWindowExpanded)return exitGraphFullscreen();
+    setGraphExpanded(true);
+    if(libraryGraphView.requestFullscreen){
+      try{await libraryGraphView.requestFullscreen();}catch{ /* Use the expanded workspace if fullscreen is unavailable. */ }
+    }
+    return true;
+  })();
+  libraryGraphFullscreen.disabled=true;
+  try{return await graphFullscreenTask;}finally{graphFullscreenTask=null;libraryGraphFullscreen.disabled=false;}
 }
-async function closeLibraryGraph(){if(graphFullscreenTask)await graphFullscreenTask;if(document.fullscreenElement===libraryGraphDialog){try{await document.exitFullscreen();}catch{toast('请先按 Esc 退出图谱全屏。',true);return false;}}graphWindowExpanded=false;graphWasFullscreen=false;syncGraphFullscreen();libraryGraphDialog.close();return true;}
 libraryGraphFullscreen.addEventListener('click',()=>void toggleGraphFullscreen());
-libraryGraphDialog.addEventListener('cancel',event=>{event.preventDefault();if(graphWindowExpanded)void toggleGraphFullscreen();else void closeLibraryGraph();});
-document.addEventListener('fullscreenchange',()=>{if(graphWasFullscreen&&document.fullscreenElement!==libraryGraphDialog){graphWindowExpanded=false;graphWasFullscreen=false;syncGraphFullscreen();}});
-async function openGraphSource(id,page){
-  if(!await closeLibraryGraph())return;const ticket=await openPaper(id);if(!Number.isInteger(ticket)||ticket!==state.itemTicket||state.active?.id!==id)return;
-  await switchTab('reader');if(state.active?.id!==id||state.itemTicket!==ticket)return;await requestPage(page);
+libraryGraphView.addEventListener('keydown',event=>{
+  if(event.key==='Escape'&&graphWindowExpanded){event.preventDefault();event.stopPropagation();void exitGraphFullscreen();}
+});
+document.addEventListener('fullscreenchange',()=>{
+  if(document.fullscreenElement===libraryGraphView){libraryGraphView.dataset.fullscreen='true';libraryGraphUI?.resize?.();}
+  else if(libraryGraphView.dataset.fullscreen){delete libraryGraphView.dataset.fullscreen;setGraphExpanded(false);}
+});
+async function openGraphPaper(id){
+  if(graphFullscreenTask)await graphFullscreenTask;
+  if(!await exitGraphFullscreen())return;
+  fieldRadarUI?.hide();
+  const ticket=await openPaper(id);
+  return Number.isInteger(ticket)&&ticket===state.itemTicket&&state.active?.id===id?ticket:undefined;
 }
-const libraryGraphUI=window.PaperKnowledgeGraph?.create({root:libraryGraphRoot,scope:'library',api,getPaper:()=>null,openPaper:id=>{void closeLibraryGraph().then(closed=>{if(closed)void openPaper(id);});},navigatePaper:openGraphSource,toast});
-libraryGraphDialog.addEventListener('close',()=>{if(!libraryGraphDialog.open){graphWindowExpanded=false;graphWasFullscreen=false;syncGraphFullscreen();libraryGraphUI?.clear();}});
-function openLibraryGraph(options={}){if(!libraryGraphDialog.open)libraryGraphDialog.showModal();void libraryGraphUI?.focusPaper(options.focus_id||null);}
-const libraryGraphOpen=el('button','button subtle','全库图谱');libraryGraphOpen.id='library-graph-open';libraryGraphOpen.type='button';libraryGraphOpen.title='跨文献浏览知识图谱';libraryGraphOpen.addEventListener('click',openLibraryGraph);document.querySelector('.topbar-actions').prepend(libraryGraphOpen);
+async function openGraphSource(id,page){
+  const ticket=await openGraphPaper(id);if(ticket===undefined)return;
+  await switchTab('reader');if(state.active?.id===id&&state.itemTicket===ticket)await requestPage(page);
+}
+const libraryGraphUI=window.PaperKnowledgeGraph?.create({root:libraryGraphRoot,scope:'library',api,getPaper:()=>null,openPaper:id=>void openGraphPaper(id),navigatePaper:openGraphSource,toast});
+function openLibraryGraph(options={}){void fieldRadarUI?.open({view:'graph',focusId:options.focus_id});}
 knowledgeGraphUI = window.PaperKnowledgeGraph?.create({root:$('graph-tab'),api,getPaper:()=>state.active,onOpenLibrary:openLibraryGraph,onAnalyze:()=>analysisUI?.startFullGraph(),openPaper,navigatePage:async page=>{const id=state.active?.id,ticket=state.itemTicket;await switchTab('reader');if(state.active?.id===id&&state.itemTicket===ticket)await requestPage(page);},toast,onAddToBoard:node=>void boardUI?.addGraphNode(node.type==='paper'?{kind:'paper',label:node.label,paper:{id:node.paper_id||node.id,title:node.label}}:{kind:'concept',label:node.label})});
 paperChatUI = window.PaperLibraryChat?.create({ api, toast, persistence, getPaper: () => state.active, getContext: () => state.harnessContext,
   beforeSendAnnotations:async(id,ids)=>{for(const annotationId of ids)await annotationEditor?.beforeAsk(id,annotationId);},
@@ -1908,7 +1938,7 @@ if(languageUI){
 resourceUI = window.ResourceLibrary?.create({state,api,persistence,toast,loadList,openPaper,workbench:()=>workbenchUI,readingShell:()=>readingShell,knowledge:()=>knowledgeUI,prepare:()=>{publishReaderState();readerStateReady=false;readerPaperId=null;++state.itemTicket;state.pageWanted=null;clearPage();paperChatUI?.visible(false);readingPanels?.close('chat');readingPanels?.close('metadata');readingPanels?.setReadingActive(false);void languageUI?.paperChanged(null);},changed:()=>{renderList();readingShell?.sync();resourceUI?.sync();}});
 knowledgeUI = window.LibraryKnowledge?.create({state,api,persistence,toast,getSelection:()=>state.selection,getAnnotations:()=>state.annotations,openPaper,readingPanels:()=>readingPanels,resource:()=>resourceUI});
 challengeUI = window.ChallengeMining?.create({state,api,toast});
-analysisUI = window.PaperAnalysis?.create({state,api,persistence,toast,onOpenGraph:async()=>{await switchTab('graph');await knowledgeGraphUI?.showReading();},graphChanged:async id=>{if(state.active?.id===id)await knowledgeGraphUI?.reload();if(libraryGraphDialog.open)await libraryGraphUI?.reload();},openKnowledge:()=>knowledgeUI?.show(state.active),metadataChanged:async id=>{const item=await api('get',{id});if(state.active?.id===id){state.active=item;renderPaperHeader();}await loadList();},prepareChat:async(text,id)=>{
+analysisUI = window.PaperAnalysis?.create({state,api,persistence,toast,onOpenGraph:async()=>{await switchTab('graph');await knowledgeGraphUI?.showReading();},graphChanged:async id=>{if(state.active?.id===id)await knowledgeGraphUI?.reload();if(fieldRadarUI?.isOpen()&&!libraryGraphView.hidden)await libraryGraphUI?.reload();},openKnowledge:()=>knowledgeUI?.show(state.active),metadataChanged:async id=>{const item=await api('get',{id});if(state.active?.id===id){state.active=item;renderPaperHeader();}await loadList();},prepareChat:async(text,id)=>{
   if(state.active?.id!==id)throw new Error('请先返回这条整理结果所属的论文。');
   await switchTab('conversation');
   if(state.active?.id!==id||readerPaperId!==id||!paperChatUI||$('paper-chat-input').disabled)throw new Error('论文对话草稿尚未恢复，请稍后重试。');
@@ -2025,7 +2055,7 @@ async function currentPaper(){
   const id=currentPaperId(); if(!id)return null;
   try{return await api('get',{id});}catch{return null;}
 }
-const paperBoardNew=el('button','button subtle','画板');paperBoardNew.id='paper-board-new';paperBoardNew.type='button';paperBoardNew.title='新建一张画板并关联到这篇论文';
+const paperBoardNew=el('button','button subtle','新建画板');paperBoardNew.id='paper-board-new';paperBoardNew.type='button';paperBoardNew.title='新建一张画板并关联到这篇论文';
 const paperBoardOpen=el('button','button subtle','打开本文画板 ');paperBoardOpen.id='paper-board-open';paperBoardOpen.type='button';
 const paperBoardCount=el('span','count','0');paperBoardCount.id='paper-board-count';paperBoardOpen.append(paperBoardCount);
 const paperProjects=el('button','button subtle','阅读项目 ');paperProjects.id='paper-projects';paperProjects.type='button';paperProjects.title='按学习或研究主题组织文献；查看或修改本篇所属的阅读项目（与 LaTeX 写作项目不同）';
@@ -2396,6 +2426,11 @@ if ($('workspace-navigation') && window.PaperWorkspaceNavigation) {
 }
 fieldRadarUI = window.PaperFieldRadar?.create({api,toast,persistence,
   openAbstract:paperAbstractUI?.open,
+  libraryGraph:{
+    element:libraryGraphView,
+    open:id=>libraryGraphUI?.focusPaper(id),
+    close:()=>{void exitGraphFullscreen();libraryGraphUI?.clear();},
+  },
   prepare: async () => {
     if (!await prepareWorkspaceNavigation() || !await closeWorkspaceSurfaces()) return false;
     readingPanels?.close('metadata');
@@ -2507,8 +2542,7 @@ window.addEventListener('message', event => {
   });
 }
 // Shared local Lucide decoration survives later label/status updates.
-for(const[id,icon]of [['library-graph-open','waypoints'],['library-graph-refresh','refresh-cw'],['library-graph-fullscreen','layout-dashboard'],['catalog-expand','layout-dashboard'],['refresh','refresh-cw'],['settings-open','settings'],['settings-language','languages'],['slides-open','presentation'],['latex-open','file-text'],['board-open','layout-dashboard'],['paper-board-new','plus'],['paper-board-open','layout-dashboard'],['import-open','download'],['export-library','download'],['build-bibliography','file-text'],['catalog-archive','trash-2'],['metadata-open','circle-help'],['metadata-enrich','sparkles'],['ribbon-language','languages'],['ribbon-vocabulary','book-open'],['workspace-library','library'],['paper-datasets','layout-dashboard'],['knowledge-open','file-text'],['language-settings-open','settings'],['language-close','x'],['open-in-pane','panel-left'],['copy-apa','file-text'],['export-bib','download'],['project-new','plus'],['project-edit','pencil'],['project-archive','archive']]){const button=$(id);if(button&&window.PaperIcons){if(button.classList.contains('icon-button'))button.textContent='';window.PaperIcons.decorate(button,icon);}}
+for(const[id,icon]of [['library-graph-open','waypoints'],['library-graph-refresh','refresh-cw'],['library-graph-fullscreen','layout-dashboard'],['catalog-expand','layout-dashboard'],['refresh','refresh-cw'],['settings-open','settings'],['settings-expand','layout-dashboard'],['settings-language','languages'],['slides-open','presentation'],['latex-open','file-text'],['board-open','layout-dashboard'],['paper-board-new','plus'],['paper-board-open','layout-dashboard'],['import-open','download'],['export-library','download'],['build-bibliography','file-text'],['catalog-archive','trash-2'],['metadata-open','circle-help'],['metadata-enrich','sparkles'],['ribbon-language','languages'],['ribbon-vocabulary','book-open'],['workspace-library','library'],['paper-datasets','layout-dashboard'],['knowledge-open','file-text'],['language-settings-open','settings'],['language-close','x'],['open-in-pane','panel-left'],['copy-apa','file-text'],['export-bib','download'],['project-new','plus'],['project-edit','pencil'],['project-archive','archive']]){const button=$(id);if(button&&window.PaperIcons){if(button.classList.contains('icon-button'))button.textContent='';window.PaperIcons.decorate(button,icon);}}
 for(const tab of document.querySelectorAll('[data-tab]')){const icon={reader:'book-open',annotations:'pencil',conversation:'sparkles',graph:'waypoints'}[tab.dataset.tab];if(icon)window.PaperIcons?.decorate(tab,icon);}
+readingShell?.arrangeControls();
 initialize();
-
-for(const id of ['paper-datasets','knowledge-open']){const control=$(id);if(control&&$('ribbon-language'))document.querySelector('.reader-ribbon').insertBefore(control,$('ribbon-language'));}

@@ -5,11 +5,31 @@ window.PaperFieldRadar = (() => {
   const button = (text, action, id) => { const n = make('button', text, 'button subtle'); n.type = 'button'; if (id) n.id = id; n.addEventListener('click', action); return n; };
   const {list,text,filteredPapers,filterResearchRecords,selectViewRows}=globalThis.PaperFieldRadarData;
   function safeURL(value) { try { const u = new URL(value); return ['https:', 'http:'].includes(u.protocol) && !u.username && !u.password ? u.href : null; } catch { return null; } }
-  function create({ api, persistence, prepare, onOpenPaper, onKnowledge, openAbstract, toast, host = document.querySelector('.workspace'), triggerHost = document.querySelector('.topbar-actions') }) {
+  function create({ api, persistence, prepare, onOpenPaper, onKnowledge, openAbstract, libraryGraph, toast, host = document.querySelector('.workspace'), triggerHost = document.querySelector('.topbar-actions') }) {
     let alive = true, opened = false, loading = false, epoch = 0, current = null, revision = 0, topics = [], topicOffset = 0, topicNext = null, tab = 'overview', offset = 0, query = '', task = '', year = '', matches = new Map(), matching = false, legacy = null, legacyData = null, importing = false, analysis = null, analysisRequest = null, analyzing = false, legacyLoading = false, legacyLookup = 0, claimLimit = 40, renderingImage = false;
     const root = make('section', undefined, 'field-radar'); root.id = 'field-radar'; root.hidden = true; root.setAttribute('aria-label', '领域研究与学者雷达'); host.append(root);
-    const trigger = button('领域研究', () => void open(), 'field-radar-open'); trigger.title = '从研究问题查看方法、学者、作品与来源，并返回本库阅读'; trigger.setAttribute('aria-expanded', 'false'); triggerHost.prepend(trigger);
-    const heading = make('header', undefined, 'radar-heading'); heading.append(make('h1', '领域研究'), button('返回文献库', hide, 'field-radar-close')); root.append(heading);
+    const trigger = button('领域研究', () => void open(), 'field-radar-open'); trigger.title = '浏览研究主题和全库图谱'; trigger.setAttribute('aria-expanded', 'false');trigger.setAttribute('aria-controls',root.id); triggerHost.prepend(trigger);
+    const heading = make('header', undefined, 'radar-heading');
+    const back = button('返回文献库', hide, 'field-radar-close');
+    window.PaperIcons?.decorate(back,'arrow-left');
+    heading.append(make('h1','领域研究'),back);
+    root.append(heading);
+    const research = make('div',undefined,'radar-research');
+    research.id='field-radar-research';
+    const views = make('nav',undefined,'radar-views');
+    views.setAttribute('aria-label','领域研究工作区');
+    const researchView = button('研究主题',()=>void showView('research'),'field-radar-research-open');
+    researchView.setAttribute('aria-controls',research.id);
+    views.append(researchView);
+    let graphView, view='research';
+    if(libraryGraph){
+      graphView=button('全库图谱',()=>void showView('graph'),'library-graph-open');
+      graphView.setAttribute('aria-controls',libraryGraph.element.id);
+      views.append(graphView);
+      libraryGraph.element.hidden=true;
+    }
+    root.append(views,research);
+    if(libraryGraph)root.append(libraryGraph.element);
     const toolbar = make('div', undefined, 'radar-toolbar'), choose = make('select'); choose.id = 'field-radar-topic'; choose.setAttribute('aria-label', '研究主题');
     const topicPrev = button('上一组主题', () => { topicOffset = Math.max(0, topicOffset - 20); void loadTopics(false); }); const topicMore = button('下一组主题', () => { if (topicNext !== null) { topicOffset = topicNext; void loadTopics(false); } });
     const upload = make('input'); upload.type = 'file'; upload.accept = '.json,application/json'; upload.hidden = true; upload.id = 'field-radar-upload';
@@ -28,23 +48,23 @@ window.PaperFieldRadar = (() => {
     imageFormat.addEventListener('change',()=>{renderButton.textContent=chartText('后端导出 ')+imageFormat.value.toUpperCase();});
     imageView.addEventListener('change',()=>{chartOffset=0;imageGroup.disabled=imageView.value!=='publications';frequencyBy.disabled=imageView.value!=='frequency';if(tab==='charts')render();});
     imageGroup.addEventListener('change',()=>{chartOffset=0;if(tab==='charts')render();});imageGroup.disabled=true;
-    toolbar.append(choose, topicPrev, topicMore, importButton, exportButton, refresh, upload);root.append(toolbar);
+    toolbar.append(choose, topicPrev, topicMore, importButton, exportButton, refresh, upload);research.append(toolbar);
     const chartTools=make('details',undefined,'radar-chart-tools');chartTools.id='field-radar-chart-tools';
     const chartToolsLabel=make('summary','图表工具'),imageTools=make('div',undefined,'radar-toolbar radar-image-tools');
     imageTools.append(imageLanguage,imageView,imageGroup,frequencyBy,imageFormat,previewButton,renderButton);chartTools.append(chartToolsLabel,imageTools);
-    const status = make('p', '', 'radar-status'); status.id = 'field-radar-status'; status.setAttribute('role', 'status'); root.append(status);
-    const summary = make('div', undefined, 'radar-summary'); root.append(summary);
+    const status = make('p', '', 'radar-status'); status.id = 'field-radar-status'; status.setAttribute('role', 'status'); research.append(status);
+    const summary = make('div', undefined, 'radar-summary'); research.append(summary);
     const tabs = make('nav', undefined, 'radar-tabs'); tabs.setAttribute('aria-label', '领域研究视图'); const tabButtons = new Map();
-    for (const [id, label] of [['overview', '问题与方法'], ['people', '学者与组织'], ['lines', '概念与脉络'], ['charts', '图表与地图'], ['table', '文献对照表'], ['analysis', 'AI 自动分析'], ['timeline', '作品时间线'], ['evidence', '来源与待核'], ['relations', '多维关系'], ['legacy', '完整学者雷达']]) { const b = button(label, () => { tab = id; offset = 0; if(id==='charts'&&!['frequency','publications','citations','geography'].includes(imageView.value)){imageView.value='frequency';chartOffset=0;imageGroup.disabled=true;frequencyBy.disabled=false;} render(); if (id === 'legacy') void loadLegacy(); }, `field-radar-tab-${id}`); b.setAttribute('aria-pressed', 'false'); tabButtons.set(id, b); tabs.append(b); } root.append(tabs);
+    for (const [id, label] of [['overview', '问题与方法'], ['table', '文献对照表'], ['people', '学者与组织'], ['lines', '概念与脉络'], ['timeline', '作品时间线'], ['relations', '多维关系'], ['charts', '图表与地图'], ['evidence', '来源与待核'], ['analysis', 'AI 自动分析'], ['legacy', '完整学者雷达']]) { const b = button(label, () => { tab = id; offset = 0; if(id==='charts'&&!['frequency','publications','citations','geography'].includes(imageView.value)){imageView.value='frequency';chartOffset=0;imageGroup.disabled=true;frequencyBy.disabled=false;} render(); if (id === 'legacy') void loadLegacy(); }, `field-radar-tab-${id}`); b.setAttribute('aria-pressed', 'false'); tabButtons.set(id, b); tabs.append(b); } research.append(tabs);
     const filters = make('form', undefined, 'radar-filters'); filters.addEventListener('submit', event => event.preventDefault());
     const search = make('input'); search.type = 'search'; search.placeholder = '检索作品、作者、方法…'; search.setAttribute('aria-label', '检索领域研究'); search.id = 'field-radar-query';
     const taskSelect = make('select'); taskSelect.setAttribute('aria-label', '任务类型'); taskSelect.id = 'field-radar-task'; const yearSelect = make('select'); yearSelect.setAttribute('aria-label', '收录年份'); yearSelect.id = 'field-radar-year';
     const reset = button('清空筛选', () => { clearTableFilters(); clearRelationSelection(); query = task = year = ''; offset = 0; chartOffset=0; search.value = ''; taskSelect.value = ''; yearSelect.value = ''; render(); });
-    search.addEventListener('input', () => { query = search.value; offset = 0; chartOffset=0; render(); }); taskSelect.addEventListener('change', () => { task = taskSelect.value; offset = 0; chartOffset=0; render(); }); yearSelect.addEventListener('change', () => { year = yearSelect.value; offset = 0; chartOffset=0; render(); }); filters.append(search, taskSelect, yearSelect, reset); root.append(filters);
-    root.append(chartTools);
-    const content = make('div', undefined, 'radar-content'); content.id = 'field-radar-content'; root.append(content);
-    const legacyRoot = make('div', undefined, 'radar-legacy-mount'); legacyRoot.id = 'field-radar-legacy'; legacyRoot.hidden = true; root.append(legacyRoot);
-    const relationsRoot=make('div');relationsRoot.id='field-radar-relations';relationsRoot.hidden=true;root.append(relationsRoot);let relationsView=null,relationPaperIds=null;
+    search.addEventListener('input', () => { query = search.value; offset = 0; chartOffset=0; render(); }); taskSelect.addEventListener('change', () => { task = taskSelect.value; offset = 0; chartOffset=0; render(); }); yearSelect.addEventListener('change', () => { year = yearSelect.value; offset = 0; chartOffset=0; render(); }); filters.append(search, taskSelect, yearSelect, reset); research.append(filters);
+    research.append(chartTools);
+    const content = make('div', undefined, 'radar-content'); content.id = 'field-radar-content'; research.append(content);
+    const legacyRoot = make('div', undefined, 'radar-legacy-mount'); legacyRoot.id = 'field-radar-legacy'; legacyRoot.hidden = true; research.append(legacyRoot);
+    const relationsRoot=make('div');relationsRoot.id='field-radar-relations';relationsRoot.hidden=true;research.append(relationsRoot);let relationsView=null,relationPaperIds=null;
     function relationContext(){const request=selectedTableAnalysis();return current?{id:current.topic.id,expected_revision:revision,filters:{query,task,year},column_filters:{...tableFilters},...(request?{analysis_request_id:request}:{})}:null;}
     function ensureRelations(){if(!relationsView)relationsView=window.PaperFieldRadarRelations.create({root:relationsRoot,api,context:relationContext(),onOpenPaper:id=>openLinked({id}),onSelection:ids=>{if(JSON.stringify(relationPaperIds)===JSON.stringify(ids))return;relationPaperIds=ids;offset=0;render();},onShowTable:()=>{tab='table';offset=0;render();}});return relationsView;}
     function clearRelationSelection(){relationPaperIds=null;relationsView?.clear();}
@@ -70,7 +90,7 @@ window.PaperFieldRadar = (() => {
     const tableFilters={},tableFilterInputs=new Map();let renderedTab;
     const tableColumns=[['research_group','研究组'],['short_name','论文简称'],['task_output','具体解决／生成什么'],['datasets','数据集与开放性'],['method','方法'],['year','年份'],['poi_usage','POI 使用／处理'],['building_usage','建筑信息使用／处理'],['od_generation','推理无需目标区域历史 OD？']];
     // Keep controls outside the rerendered result so typing retains focus, selection and IME state.
-    const tableTools=make('section',undefined,'radar-table-tools');tableTools.hidden=true;tableTools.setAttribute('aria-label','文献表显示与按列筛选');root.insertBefore(tableTools,content);
+    const tableTools=make('section',undefined,'radar-table-tools');tableTools.hidden=true;tableTools.setAttribute('aria-label','文献表显示与按列筛选');research.insertBefore(tableTools,content);
     const tableViewTools=make('div',undefined,'radar-toolbar'),pageLabel=make('label','显示 '),pageSize=make('select');pageSize.id='field-radar-table-size';pageSize.setAttribute('aria-label','文献表显示篇数');
     for(const [value,label]of [['all','全部文献'],['20','每页 20 篇'],['50','每页 50 篇'],['100','每页 100 篇']]){const o=make('option',label);o.value=value;pageSize.append(o);}pageSize.value=tableSize;pageSize.addEventListener('change',()=>{tableSize=pageSize.value;offset=0;render();});pageLabel.append(pageSize);
     const exportLabel=make('label','复制／导出范围 '),exportScope=make('select');exportScope.id='field-radar-table-export-scope';exportScope.setAttribute('aria-label','文献表导出范围');for(const [value,label]of [['all','全部筛选结果'],['page','当前显示页']]){const o=make('option',label);o.value=value;exportScope.append(o);}exportScope.addEventListener('change',()=>{tableExportScope=exportScope.value;render();});exportLabel.append(exportScope);
@@ -278,10 +298,50 @@ window.PaperFieldRadar = (() => {
     async function loadLegacy() { if (legacy || legacyData || legacyLoading) return; legacyLoading=true; const ticket = epoch; legacyRoot.replaceChildren(make('p', '正在读取完整学者雷达快照…', 'radar-empty')); try { const result = await api('field_radar_snapshot_get'); if (!opened || ticket !== epoch || !alive) return; legacyData = result.snapshot; if (!legacyData) throw Error('尚未导入原有学者雷达快照。请从原快照导入到当前资料库。'); if (!window.PaperFieldRadarLegacy) throw Error('完整雷达界面未加载，请刷新插件。'); legacy = window.PaperFieldRadarLegacy.create({ root:legacyRoot, data:legacyData, onSearchPaper: async p => { const owner=++legacyLookup,at=epoch;try{ const result = await api('field_radar_match', { papers:[{id:'legacy-selection',title:p.title,doi:p.doi}],limit:1 }); if(!opened||at!==epoch||owner!==legacyLookup)return; const match = result.matches?.[0]; const old = legacyRoot.querySelector('.radar-legacy-match'); old?.remove(); const box = make('section', undefined, 'radar-legacy-match radar-card'); box.append(make('h3', p.title)); if (!match?.candidates?.length) box.append(make('p', '本次匹配范围未找到；可从原文献导入入口补充。')); for (const c of match?.candidates || []) box.append(button(`打开本库：${c.title}`, () => void openLinked(c))); legacyRoot.prepend(box); box.scrollIntoView?.({block:'nearest'}); }catch(error){if(opened&&at===epoch&&owner===legacyLookup)message(error.message,true);} }, onOpenPaper: id => openLinked({id}) }); } catch (error) { legacyData = null; if (ticket === epoch) legacyRoot.replaceChildren(make('p', error.message, 'radar-warning'), button('重试读取快照', () => void loadLegacy())); } finally {legacyLoading=false;} }
     choose.addEventListener('change', () => void loadTopic(choose.value));
     upload.addEventListener('change', async () => { const file = upload.files?.[0]; if (!file || importing) return; importing = true; importButton.disabled = true; const ticket = epoch; try { if (file.size > 4 * 1024 * 1024) throw Error('研究 JSON 超过 4 MiB，请拆分主题。'); const document = JSON.parse(await file.text()); if (!document.topic?.id) throw Error('缺少 topic.id。'); const existing = await api('field_radar_get',{id:document.topic.id}); if (existing.document && !window.confirm('这个主题已存在。更新会保存新版本并保留旧快照，是否继续？')) return; if (ticket !== epoch) return; const result = await api('field_radar_import', { document, expected_revision:existing.revision }); if (ticket !== epoch) return; const importedId=result.document.topic.id; ++epoch; current=null;matches=new Map();analysis=null;analysisRequest=null;query=task=year='';offset=0;search.value='';topicOffset=0; await loadTopics(false); if(current?.topic.id!==importedId)await loadTopic(importedId); choose.value=importedId; render(); message('研究主题已保存到当前资料库。原论文与批注未修改。'); } catch (error) { if (ticket === epoch) message(error.message, true); } finally { importing=false; importButton.disabled=false; upload.value=''; } });
-    async function open() { if (opened) return; try { if (await prepare?.() === false || !alive) return; opened=true; ++epoch; loading=false; root.hidden=false; host.classList.add('field-radar-active'); document.body.classList.add('has-field-radar'); trigger.setAttribute('aria-expanded','true'); render(); await loadTopics(); if(tab==='legacy')await loadLegacy(); }catch(error){toast?.(error.message,true);message(error.message,true);} }
-    function hide() { if(!opened)return; opened=false; cancelTableLoad(); ++epoch; ++legacyLookup; root.hidden=true; host.classList.remove('field-radar-active'); document.body.classList.remove('has-field-radar'); trigger.setAttribute('aria-expanded','false'); trigger.focus?.(); }
+    async function showView(value,{focusId=null,refresh=false}={}){
+      const previous=view;
+      view=value==='graph'&&libraryGraph?'graph':'research';
+      const graphActive=view==='graph';
+      research.hidden=graphActive;
+      views.hidden=!libraryGraph;
+      researchView.setAttribute('aria-pressed',String(!graphActive));
+      graphView?.setAttribute('aria-pressed',String(graphActive));
+      if(libraryGraph)libraryGraph.element.hidden=!graphActive;
+      if(previous!==view)host.scrollTop=0;
+      if(refresh)(graphActive?graphView:libraryGraph?researchView:back).focus();
+      if(!graphActive&&previous==='graph')libraryGraph.close();
+      if(graphActive){
+        if(previous!==view||focusId||refresh)await libraryGraph.open(focusId);
+        return;
+      }
+      render();
+      if(refresh||!current)await loadTopics();
+      if(opened&&view==='research'&&tab==='legacy')await loadLegacy();
+    }
+    let opening=null;
+    async function open({view:requestedView,focusId=null}={}){
+      try{
+        if(!opened&&opening)await opening;
+        if(opened){if(requestedView)await showView(requestedView,{focusId});return;}
+        const start=opening=(async()=>{
+          if(await prepare?.()===false||!alive)return;
+          opened=true;++epoch;loading=false;root.hidden=false;
+          host.classList.add('field-radar-active');document.body.classList.add('has-field-radar');
+          trigger.setAttribute('aria-expanded','true');
+          await showView(requestedView||'research',{focusId,refresh:true});
+        })();
+        try{await start;}finally{if(opening===start)opening=null;}
+      }catch(error){toast?.(error.message,true);message(error.message,true);}
+    }
+    function hide() {
+      if(!opened)return;
+      opened=false;cancelTableLoad();++epoch;++legacyLookup;
+      if(view==='graph')libraryGraph.close();
+      root.hidden=true;host.classList.remove('field-radar-active');document.body.classList.remove('has-field-radar');
+      trigger.setAttribute('aria-expanded','false');trigger.focus?.();
+    }
     root.addEventListener('keydown',event=>{if(event.key==='Escape'&&!['INPUT','TEXTAREA','SELECT'].includes(event.target.tagName)){event.preventDefault();hide();}});
-    render(); return { open, hide, isOpen:()=>opened, loadTopic, state:()=>({opened,topic:current?.topic.id,tab,query,task,year,revision}), dispose(){hide();alive=false;relationsView?.destroy();++epoch;legacy?.destroy?.();root.remove();trigger.remove();} };
+    render(); return { open, hide, isOpen:()=>opened, loadTopic, state:()=>({opened,view,topic:current?.topic.id,tab,query,task,year,revision}), dispose(){hide();alive=false;relationsView?.destroy();++epoch;legacy?.destroy?.();root.remove();trigger.remove();} };
   }
   return Object.freeze({create,safeURL,filteredPapers});
 })();

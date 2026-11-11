@@ -261,6 +261,30 @@ window.PaperReadingShell = (() => {
       contextChanged?.();
     }
     function setContext(value){context=value==='conversation'?'reader':value;sync();}
+    function arrangeControls(){
+      const group=(parent,label,controls)=>{
+        const items=controls.filter(Boolean);
+        if(!items.length)return;
+        const section=node('div',null,'reader-control-group');
+        section.setAttribute('role','group');section.setAttribute('aria-label',label);
+        section.append(...items);parent.append(section);
+      };
+      group(ribbon,'阅读工作区',[library,...['reader','annotations','conversation'].map(tab=>ribbon.querySelector(`[data-tab="${tab}"]`))]);
+      group(ribbon,'阅读显示',[appearance,fullscreen]);
+      group(ribbon,'文献资料',[$('metadata-open'),$('paper-reveal')]);
+      group(ribbon,'研究材料',[ribbon.querySelector('[data-tab="graph"]'),$('paper-datasets'),$('knowledge-open')]);
+      group(ribbon,'语言与参考',[$('ribbon-vocabulary'),$('ribbon-language'),$('ribbon-encyclopedia')]);
+      ribbon.append(ribbonStatus);
+
+      const find=$('reader-find');
+      readerTools.append(zoomGroup,layoutGroup,backPosition,...(find?[find]:[]),locateNotes);
+      const toolbar=$('paper-tools');
+      group(toolbar,'PDF 导航',[readerTools]);
+      group(toolbar,'引用与导出',[$('toolbar-copy-apa'),citations]);
+      group(toolbar,'文献库与数据集',[libraryTools,$('toolbar-dataset')]);
+      group(toolbar,'伴学与整理',[$('companion-toggle'),$('paper-analysis-open')]);
+      group(toolbar,'阅读项目与画板',[$('paper-projects'),$('paper-board-open'),$('paper-board-new')]);
+    }
     function leaveFocus(){
       focused=false;document.body.classList.remove('reader-focused');
       if(document.fullscreenElement)void document.exitFullscreen().catch(()=>{});
@@ -283,7 +307,7 @@ window.PaperReadingShell = (() => {
     // Prevent a homepage link from discarding a question/metadata draft.
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
     sync();
-    return {sync,setContext,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,zoomChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:['ink','square'].includes(tool)?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
+    return {sync,setContext,arrangeControls,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,zoomChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:['ink','square'].includes(tool)?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
       dispose(){if(zoomSaveTimer!==null)window.clearTimeout(zoomSaveTimer);for(const {disclosure,update} of organizerDisclosures)disclosure.removeEventListener('toggle',update);for(const {disclosure,toggle} of menus)disclosure.removeEventListener('toggle',toggle);menuObserver?.disconnect();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placeMenus);document.removeEventListener('scroll',placeMenus,true);document.removeEventListener('click',closeMenus);document.removeEventListener('keydown',menuKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);}};
   }
   return {create};

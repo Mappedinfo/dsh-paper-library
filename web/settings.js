@@ -13,7 +13,10 @@ window.PaperLibrarySettings = (() => {
     (document.querySelector('#topbar-end')||document.querySelector('.topbar-actions')).append(trigger);
     const dialog=make('dialog','library-settings');dialog.id='library-settings';dialog.setAttribute('aria-labelledby','library-settings-title');
     const header=make('header'),title=make('strong','','Paper Library 设置');title.id='library-settings-title';
-    const close=make('button','icon-button','×');close.type='button';close.setAttribute('aria-label','关闭设置');close.addEventListener('click',()=>dialog.close());header.append(title,close);
+    const windowActions=make('div','settings-window-actions');
+    const expand=make('button','button subtle','全页设置');expand.id='settings-expand';expand.type='button';
+    const close=make('button','icon-button','×');close.type='button';close.setAttribute('aria-label','关闭设置');close.addEventListener('click',()=>dialog.close());
+    windowActions.append(expand,close);header.append(title,windowActions);
     const description=make('p','settings-description','DSH 中的入口：设置 → Paper Library（也保留插件配置入口）。');
     const status=make('p','settings-status');status.id='settings-status';status.setAttribute('role','status');
     const controls=make('fieldset'),legend=make('legend','','阅读与自动化');controls.append(legend);
@@ -78,7 +81,29 @@ window.PaperLibrarySettings = (() => {
     maintenance.append(make('strong','','导出与维护'),make('p','','导出文献与数据集的 BibLaTeX 引用资料。演示文稿请在 Slides 工作台中导出。'));
     const exportLibrary=document.getElementById?.('export-library');if(exportLibrary)maintenance.append(exportLibrary);
     const footer=make('footer'),reload=make('button','button subtle','重新读取'),reset=make('button','button subtle','恢复默认');reload.type=reset.type='button';reload.addEventListener('click',()=>{void refresh();if(storage.open)void modelSettings?.refresh();});reset.addEventListener('click',()=>void save(null));footer.append(reload,reset);
-    dialog.append(header,description,status,languageSettings,paletteControls,distributionControls,resourceControls,controls,storage,maintenance,footer);document.body.append(dialog);
+    const layout=make('div','settings-layout'),body=make('div','settings-body'),sections=make('nav','settings-sections');
+    sections.hidden=true;sections.setAttribute('aria-label','设置目录');
+    for(const [label,section] of [
+      ['界面配色',paletteControls],['划线阅读轨迹',distributionControls],
+      ['资源与性能',resourceControls],['阅读与自动化',controls],
+      ['模型、外观与存储',storage],['导出与维护',maintenance],
+    ]){
+      const jump=make('button','button subtle',label);jump.type='button';
+      section.tabIndex=-1;
+      jump.addEventListener('click',()=>{section.scrollIntoView?.({block:'start'});section.focus?.({preventScroll:true});});
+      sections.append(jump);
+    }
+    body.append(description,status,languageSettings,paletteControls,distributionControls,resourceControls,controls,storage,maintenance);
+    layout.append(sections,body);dialog.append(header,layout,footer);document.body.append(dialog);
+    let fullPage=false;
+    function setFullPage(value){
+      fullPage=value;
+      dialog.classList.toggle('is-expanded',value);
+      sections.hidden=!value;
+      expand.textContent=value?'还原弹窗':'全页设置';
+    }
+    expand.addEventListener('click',()=>setFullPage(!fullPage));
+    dialog.addEventListener('cancel',event=>{if(fullPage){event.preventDefault();setFullPage(false);expand.focus?.();}});
     function say(text,error=false){status.textContent=text;status.classList.toggle('error',error);}
     function render(){
       renderResources();
@@ -119,11 +144,15 @@ window.PaperLibrarySettings = (() => {
     const unsubscribe=persistence?.subscribe(event=>{if(!readingPreferences&&event.key==='preferences'&&event.status==='saved')schedule();});
     function receive(event){const v=event.data;if(window.parent===window||event.source!==window.parent||event.origin!==window.location.origin||v?.type!=='paper-library:settings-changed'||v.version!==1||v.namespace!=='paper-library'||!Number.isSafeInteger(v.revision))return;schedule();}
     const focus=()=>{if(!document.hidden)schedule();};window.addEventListener('message',receive);window.addEventListener('focus',focus);document.addEventListener('visibilitychange',focus);
-    trigger.addEventListener('click',()=>{if(!dialog.open)dialog.showModal();void refresh();if(storage.open)void modelSettings?.refresh();clearInterval(visibleTimer);visibleTimer=setInterval(()=>{if(dialog.open&&!document.hidden)schedule();},3000);});
-    dialog.addEventListener('close',()=>{clearInterval(visibleTimer);visibleTimer=null;});
+    function showDialog(){
+      if(!dialog.open){setFullPage(false);dialog.showModal();}
+      clearInterval(visibleTimer);visibleTimer=setInterval(()=>{if(dialog.open&&!document.hidden)schedule();},3000);
+    }
+    trigger.addEventListener('click',()=>{showDialog();void refresh();if(storage.open)void modelSettings?.refresh();});
+    dialog.addEventListener('close',()=>{if(!dialog.open){setFullPage(false);clearInterval(visibleTimer);visibleTimer=null;}});
     if(window.parent!==window)window.parent.postMessage({type:'paper-library:settings-ready',version:1},window.location.origin);
     render();
-    return {refresh,async showResources(){if(!dialog.open)dialog.showModal();clearInterval(visibleTimer);visibleTimer=setInterval(()=>{if(dialog.open&&!document.hidden)schedule();},3000);await refresh();resourceControls.scrollIntoView?.({block:'start'});resourceProfile.focus?.();},dispose(){disposed=true;clearTimeout(timer);clearInterval(visibleTimer);unsubscribe?.();window.removeEventListener('message',receive);window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);}};
+    return {refresh,async showResources(){showDialog();await refresh();resourceControls.scrollIntoView?.({block:'start'});resourceProfile.focus?.();},dispose(){disposed=true;clearTimeout(timer);clearInterval(visibleTimer);unsubscribe?.();window.removeEventListener('message',receive);window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);}};
   }
   return {create};
 })();

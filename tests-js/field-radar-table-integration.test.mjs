@@ -26,6 +26,33 @@ test('UI uses safe text cells, explicit scope invalidation, rich clipboard and e
 const require = createRequire(import.meta.url);
 let JSDOM;
 try { ({JSDOM} = require(process.env.JSDOM_MODULE || 'jsdom')); } catch {}
+test('the library graph opens inside field radar without loading a topic and returns to topic research', {skip:!JSDOM}, async t=>{
+  const dom=new JSDOM('<header class="topbar-actions"></header><main class="workspace"></main>',{runScripts:'outside-only',url:'http://synthetic.invalid'});
+  t.after(()=>dom.window.close());
+  const w=dom.window,document=w.document;
+  for(const name of ['field-radar-data.js','field-radar.js'])w.eval(await readFile(new URL('../web/'+name,import.meta.url),'utf8'));
+  const graph=document.createElement('section');graph.id='synthetic-graph';
+  const calls=[],graphEvents=[];
+  const ui=w.PaperFieldRadar.create({
+    api:async action=>{calls.push(action);return {topics:[]};},
+    libraryGraph:{element:graph,open:id=>graphEvents.push(['open',id]),close:()=>graphEvents.push(['close'])},
+  });
+  assert.equal(document.querySelector('.topbar-actions #library-graph-open'),null);
+  await ui.open({view:'graph',focusId:'paper-a'});
+  assert.equal(graph.parentNode.id,'field-radar');
+  assert.equal(graph.hidden,false);
+  assert.equal(document.querySelector('#field-radar-research').hidden,true);
+  assert.deepEqual(calls,[]);
+  await ui.open({view:'research'});
+  assert.equal(graph.hidden,true);
+  assert.deepEqual(calls,['field_radar_list']);
+  assert.deepEqual(graphEvents,[['open','paper-a'],['close']]);
+  document.querySelector('#library-graph-open').click();
+  assert.equal(graph.hidden,false);
+  ui.hide();
+  assert.deepEqual(graphEvents,[['open','paper-a'],['close'],['open',null],['close']]);
+  ui.dispose();
+});
 test('literature table auto-loads current scope, expands evidence, and can retry a failed page', {skip:!JSDOM}, async t=>{
   const f=await fixture(t);
   const preview=await f.exporter.tablePreview({id:'synthetic'});
