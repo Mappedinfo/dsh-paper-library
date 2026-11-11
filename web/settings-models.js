@@ -1,43 +1,108 @@
 'use strict';
 window.PaperSettingsModels = (() => {
-  const name=model=>model?.provider&&model?.model?`${model.provider} / ${model.model}`:'未配置可用模型';
-  function create({api,getPaper,container}) {
-    const make=(tag,text)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;return node;};
-    const root=make('section');root.className='settings-models';root.setAttribute('aria-label','实际使用的模型');
-    const status=make('p');status.className='small';status.setAttribute('role','status');
-    const paperInfo=make('p'),languageInfo=make('p');paperInfo.className=languageInfo.className='small';
-    const paperSelect=make('select'),languageSelect=make('select');paperSelect.setAttribute('aria-label','当前论文模型');languageSelect.setAttribute('aria-label','翻译与润色模型');
-    const paperSave=make('button','应用到本篇'),languageSave=make('button','保存语言模型'),reload=make('button','刷新模型');
+  const name=model=>model?.provider&&model?.model?`${model.model} · ${model.provider}`:'未配置可用模型';
+  const make=(tag,text)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;return node;};
+  const key=model=>model?JSON.stringify({provider:model.provider,model:model.model}):'';
+  const appendOption=(host,value,label,disabled=false)=>{
+    const option=make('option',label);option.value=value;option.disabled=disabled;host.append(option);
+  };
+  function fillModels(select,models,chosen,automatic){
+    select.replaceChildren();
+    appendOption(select,'',automatic);
+    const groups=new Map();
+    for(const item of models){
+      if(!groups.has(item.provider)){
+        const group=make('optgroup');group.label=item.provider_name||item.provider;groups.set(item.provider,group);select.append(group);
+      }
+      appendOption(groups.get(item.provider),key({provider:item.provider,model:item.id}),item.name||item.id);
+    }
+    const value=key(chosen);
+    if(value&&!models.some(item=>item.provider===chosen.provider&&item.id===chosen.model))appendOption(select,value,`${name(chosen)}（当前不可用）`,true);
+    select.value=value;
+  }
+  const chosen=select=>select.value?JSON.parse(select.value):null;
+
+  function create({api,container}) {
+    const root=make('section');root.className='settings-models';root.setAttribute('aria-label','模型设置');
+    const status=make('p');status.setAttribute('role','status');
+    const paperInfo=make('p'),languageInfo=make('p');paperInfo.className=languageInfo.className='settings-model-effective';
+    const paperSelect=make('select'),effort=make('select'),languageSelect=make('select');
+    const effortStatus=make('p');effortStatus.className='small';effortStatus.setAttribute('role','status');
+    const paperSave=make('button','保存全局模型'),languageSave=make('button','保存语言模型'),reload=make('button','刷新模型');
     for(const button of [paperSave,languageSave,reload]){button.type='button';button.className='button subtle';}
-    for(const [label,select,save,info]of [['本篇对话、伴学与后台整理',paperSelect,paperSave,paperInfo],['翻译与润色',languageSelect,languageSave,languageInfo]]){
-      const row=make('label');row.append(make('strong',label),select);root.append(row,info,save);
+    const field=(label,select)=>{const row=make('label');select.setAttribute('aria-label',label);row.append(make('strong',label),select);return row;};
+    root.append(field('全局对话、伴学与后台整理模型',paperSelect),field('推理强度',effort),effortStatus,paperInfo,paperSave,
+      field('翻译与润色模型',languageSelect),languageInfo,languageSave,reload,status);
+    container.append(root);
+    let paper=null,language=null,busy=false,effortTicket=0,effortBusy=false,effortUnavailable=false;
+    function updateControls(){
+      paperSelect.disabled=busy||!paper?.writable;
+      effort.disabled=paperSelect.disabled||effortBusy||!paperSelect.value||effort.options.length<=1;
+      paperSave.disabled=paperSelect.disabled||effortBusy||effortUnavailable||Boolean(paperSelect.selectedOptions[0]?.disabled)||Boolean(effort.selectedOptions[0]?.disabled);
+      languageSelect.disabled=busy||!language;
+      languageSave.disabled=languageSelect.disabled||Boolean(languageSelect.selectedOptions[0]?.disabled);
+      reload.disabled=busy;
     }
-    root.append(reload,status);container.append(root);
-    let record=null,selectedPaper=null,busy=false,ticket=0;
-    function lock(value){busy=value;paperSelect.disabled=paperSave.disabled=value||!selectedPaper;languageSelect.disabled=languageSave.disabled=value||!record;reload.disabled=value;}
-    function options(select,models,chosen,automatic){select.replaceChildren();if(automatic){const option=make('option','自动选择（实际模型见下方）');option.value='';select.append(option);}
-      for(const item of models){const option=make('option',`${item.provider} / ${item.id}`);option.value=JSON.stringify({provider:item.provider,model:item.id});select.append(option);}
-      const value=chosen?JSON.stringify({provider:chosen.provider,model:chosen.model}):'';
-      if(value&&![...select.options].some(option=>option.value===value)){const option=make('option',`${name(chosen)}（当前不可用）`);option.value=value;option.disabled=true;select.append(option);}
-      select.value=value;
+    function describePaper(){
+      const route=paper?.effective_model;
+      paperInfo.textContent=`当前生效：${name(route)}${route?.reasoningEffort?` · ${route.reasoningEffort}`:''}。${paper?.warning?' '+paper.warning:''}`;
     }
-    function languageDescription(){const override=record?.value?.model;languageInfo.textContent=`翻译：${name(override||record?.translation_default_model)}；润色：${name(override||record?.default_model)}。手动指定后两项共用该模型，保存到资料库。`;}
-    async function refresh(){if(busy)return;const token=++ticket;lock(true);status.textContent='正在读取实际模型…';selectedPaper=getPaper()?.id||null;
-      try{record=await api('language_settings_get',{});if(token!==ticket)return;options(languageSelect,record.models||[],record.value?.model,true);languageDescription();
-        if(selectedPaper){const id=selectedPaper,result=await api('chat_ensure',{id});if(token!==ticket)return;if(getPaper()?.id!==id)throw Error('当前论文已切换，请刷新模型。');options(paperSelect,record.models||[],result.model,false);paperInfo.textContent=`当前：${name(result.model)}。仅修改本篇，其他论文与 DSH 默认模型不变。`;}
-        else{paperSelect.replaceChildren();paperInfo.textContent='请先选择一篇论文。';}status.textContent='';
-      }catch(error){status.textContent=`读取未完成：${error.message}`;selectedPaper=null;}finally{if(token===ticket)lock(false);}
+    function describeLanguage(){
+      const override=language?.value?.model;
+      languageInfo.replaceChildren(make('span',`翻译：${name(override||language?.translation_default_model)}`),make('span',`润色：${name(override||language?.default_model)}`));
     }
-    paperSave.addEventListener('click',async()=>{if(busy||!selectedPaper)return;const id=selectedPaper;if(getPaper()?.id!==id){status.textContent='当前论文已切换，请刷新模型。';return;}lock(true);
-      try{const result=await api('chat_model_update',{id,model:JSON.parse(paperSelect.value)});paperInfo.textContent=`当前：${name(result.model)}。仅用于本篇。`;status.textContent='论文模型已保存，后续调用使用新模型。';}
-      catch(error){status.textContent=`未保存：${error.message}`;}finally{lock(false);}
+    async function loadEfforts(saved=''){
+      const token=++effortTicket, route=chosen(paperSelect);
+      effort.replaceChildren();appendOption(effort,'','模型默认');effortStatus.textContent='';
+      effortUnavailable=false;effortBusy=!!route;updateControls();
+      if(!route)return;
+      try{
+        const result=await api('paper_model_efforts',{model:route});
+        if(token!==effortTicket)return;
+        for(const option of result.efforts||[])appendOption(effort,option.id,option.name||option.id);
+        if(saved&&!(result.efforts||[]).some(item=>item.id===saved)){
+          appendOption(effort,saved,`${saved}（当前不可用）`,true);effortStatus.textContent='已保存的推理强度当前不可用，请选择模型默认或其他档位。';
+        }
+        effort.value=saved;
+        if(!result.efforts?.length&&!saved)effortStatus.textContent='宿主未为此模型提供可选推理档位。';
+      }catch(error){
+        if(token!==effortTicket)return;
+        effortUnavailable=true;effortStatus.textContent=error.message;
+      }finally{if(token===effortTicket){effortBusy=false;updateControls();}}
+    }
+    async function refresh(){
+      if(busy)return;
+      busy=true;updateControls();status.textContent='正在读取模型…';
+      try{
+        paper=await api('paper_model_get',{});
+        fillModels(paperSelect,paper.models||[],paper.value?.model,'跟随 DSH 默认模型');describePaper();
+        language=await api('language_settings_get',{});
+        fillModels(languageSelect,language.models||[],language.value?.model,'自动选择');describeLanguage();
+        await loadEfforts(paper.value?.model?.reasoningEffort||'');status.textContent='';
+      }catch(error){status.textContent=error.message;}finally{busy=false;updateControls();}
+    }
+    paperSelect.addEventListener('change',()=>void loadEfforts());
+    effort.addEventListener('change',updateControls);
+    languageSelect.addEventListener('change',updateControls);
+    paperSave.addEventListener('click',async()=>{
+      if(paperSave.disabled)return;
+      const model=chosen(paperSelect),reasoningEffort=effort.value;
+      busy=true;updateControls();
+      try{
+        paper=await api('paper_model_update',{expected_revision:paper.revision,model:model&&{...model,...(reasoningEffort?{reasoningEffort}:{})}});
+        describePaper();status.textContent='资料库全局模型已保存，后续任务使用新设置。';
+      }catch(error){status.textContent=error.message;}finally{busy=false;updateControls();}
     });
-    languageSave.addEventListener('click',async()=>{if(busy||!record)return;lock(true);
-      try{const saved=await api('language_settings_update',{value:{...record.value,model:languageSelect.value?JSON.parse(languageSelect.value):null},expected_revision:record.revision});record={...record,...saved};languageDescription();status.textContent='语言模型已保存。';}
-      catch(error){status.textContent=`未保存：${error.message}；请刷新模型后重试。`;}finally{lock(false);}
+    languageSave.addEventListener('click',async()=>{
+      if(languageSave.disabled)return;
+      busy=true;updateControls();
+      try{
+        const saved=await api('language_settings_update',{value:{...language.value,model:chosen(languageSelect)},expected_revision:language.revision});
+        language={...language,...saved};describeLanguage();status.textContent='语言模型已保存。';
+      }catch(error){status.textContent=error.message;}finally{busy=false;updateControls();}
     });
-    reload.addEventListener('click',()=>void refresh());lock(false);
+    reload.addEventListener('click',()=>void refresh());updateControls();
     return {refresh};
   }
-  return {create};
+  return {create,fillModels,chosen,name};
 })();

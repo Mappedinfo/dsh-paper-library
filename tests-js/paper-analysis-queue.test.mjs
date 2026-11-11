@@ -4,26 +4,26 @@ import {createQueuedPaperAnalysis} from '../src/harness/paper-analysis-queue.mjs
 
 const tick=()=>new Promise(resolve=>setTimeout(resolve,2))
 async function until(fn){for(let i=0;i<500;i++){if(await fn())return;await tick()}assert.fail('Queue checkpoint not reached')}
-function fixture(){
-  const records=new Map(),jobs=new Map(),calls=[],waits=new Map(),listeners=new Set()
+function fixture(getModel){
+  const records=new Map(),jobs=new Map(),calls=[],routes=[],waits=new Map(),listeners=new Set()
   let auto=true,fill=true,inFlight=0,maxInFlight=0,reads=[]
   const store={async get(key){reads.push(key);return structuredClone(records.get(key)||{key,value:null,revision:0})},async put(key,value,expected){assert.equal(expected,records.get(key)?.revision??0);const saved={key,value:structuredClone(value),revision:expected+1};records.set(key,saved);return structuredClone(saved)}}
   const settings={async get(){return {available:true,value:{auto_analysis:auto,analysis_fill:fill}}},subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn)}}
-  const analysis=async input=>{
+  const analysis=async (input,{pinnedModel}={})=>{
     if(input.action==='paper_analysis_get'){const job=jobs.get(input.id);return job&&(input.request_id===undefined||job.request_id===input.request_id)?job:{status:'idle'}}
     if(input.action==='paper_analysis_cancel'){const job=jobs.get(input.id);if(!job||input.request_id!==undefined&&job.request_id!==input.request_id)throw Error('No matching job');waits.get(input.id)?.();jobs.set(input.id,{id:input.id,request_id:job.request_id,status:'cancelled'});return jobs.get(input.id)}
     if(input.action==='paper_analysis_start'){
       if(jobs.has(input.id))return jobs.get(input.id)
       if(inFlight>=2)throw Object.assign(new Error('busy'),{code:'ANALYSIS_BUSY'})
-      inFlight++;maxInFlight=Math.max(maxInFlight,inFlight);calls.push(input)
+      inFlight++;maxInFlight=Math.max(maxInFlight,inFlight);calls.push(input);routes.push(pinnedModel)
       let resolve;const promise=new Promise(done=>resolve=done);waits.set(input.id,()=>{inFlight--;jobs.set(input.id,{id:input.id,request_id:input.request_id,status:'complete'});resolve()});waits.get(input.id).promise=promise
       const job={id:input.id,request_id:input.request_id,status:'generating'};jobs.set(input.id,job);return job
     }
     throw Error('Unexpected analysis call')
   }
   analysis.wait=async id=>waits.get(id)?.promise;analysis.busy=()=>inFlight>=2;analysis.slots=()=>Math.max(0,2-inFlight);analysis.dispose=()=>{}
-  const options={analysis,store,settings},handle=createQueuedPaperAnalysis(options)
-  return {records,jobs,calls,waits,reads,options,handle,setAuto(value){auto=value;for(const fn of listeners)fn()},setFill(value){fill=value},done(id){waits.get(id)?.()},maxInFlight:()=>maxInFlight}
+  const options={analysis,store,settings,getModel},handle=createQueuedPaperAnalysis(options)
+  return {records,jobs,calls,routes,waits,reads,options,handle,setAuto(value){auto=value;for(const fn of listeners)fn()},setFill(value){fill=value},done(id){waits.get(id)?.()},maxInFlight:()=>maxInFlight}
 }
 test('import events persist a bounded-parallel queue; duplicate selection and metadata-only items add no extra work',async t=>{
   const f=fixture();t.after(()=>f.handle.dispose())
@@ -114,4 +114,25 @@ test('a stale request cannot inspect or cancel a different queued request',async
   assert.equal((await f.handle({action:'paper_analysis_get',id:'paper-c',request_id:'stale-c'})).status,'idle')
   assert.equal((await f.handle({action:'paper_analysis_get',id:'paper-c',request_id:queued.request_id})).status,'cancelled')
   f.done('paper-a');f.done('paper-b');await until(()=>f.records.get('analysis.queue:v1').value.entries.length===0);assert.equal(f.calls.length,2)
+})
+
+test('queued background analysis retains its accepted route after settings change and restart',async t=>{
+  const old={provider:'fixture',model:'first',reasoningEffort:'low'};
+  const next={provider:'fixture',model:'second',reasoningEffort:'high'};
+  let model=old;
+  const f=fixture(()=>model);
+  await f.handle.imported(['paper-a','paper-b','paper-c'].map(id=>({id,pdf:true})));
+  await until(()=>f.calls.length===2);
+  f.handle.dispose();
+  model=next;
+  f.done('paper-a');
+  const recovered=createQueuedPaperAnalysis(f.options);
+  t.after(()=>recovered.dispose());
+  await until(()=>f.calls.some(call=>call.id==='paper-c'));
+  assert.deepEqual(f.routes[2],old);
+  f.done('paper-b');f.done('paper-c');
+  await recovered.imported([{id:'paper-d',pdf:true}]);
+  await until(()=>f.calls.some(call=>call.id==='paper-d'));
+  assert.deepEqual(f.routes.at(-1),next);
+  f.done('paper-d');
 })

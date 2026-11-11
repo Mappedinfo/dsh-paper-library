@@ -52,10 +52,10 @@ test('the notes entrance opens bookmarks without loading an unrelated catalog', 
   assert.equal(f.calls.length, 0)
 })
 
-test('four entrances are distinct and a refused root switch leaves the original view untouched', async () => {
+test('five entrances are distinct and a refused root switch leaves the original view untouched', async () => {
   let allowed = false
   const f = fixture({ prepare: async () => allowed })
-  assert.deepEqual(f.findAll('workspace-root-button').map(node => node.textContent), ['文献', '画板', 'LaTeX 写作', '阅读项目'])
+  assert.deepEqual(f.findAll('workspace-root-button').map(node => node.textContent), ['文献', '数据集', '画板', 'LaTeX 写作', '阅读项目'])
   assert.equal(f.catalogRoot.hidden, true)
   assert.equal(f.relatedRoot.hidden, true)
   assert.equal(f.findAll('workspace-root-button')[0].getAttribute('aria-current'), 'page')

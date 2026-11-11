@@ -101,7 +101,7 @@ export async function discoverModels(llm, signal) {
       providers.push({ id: provider.id, name: provider.name ?? provider.id, models: [], error: error instanceof Error ? error.message : String(error) })
     }
   }
-  return { providers, models: providers.flatMap(provider => provider.models.map(model => ({ ...model, provider: provider.id }))), configured: providers.some(provider => provider.models.length > 0) }
+  return { providers, models: providers.flatMap(provider => provider.models.map(model => ({ ...model, provider: provider.id, provider_name: provider.name }))), configured: providers.some(provider => provider.models.length > 0) }
 }
 
 /** 为矩形图像说明选择已配置的视觉路线，不修改论文对话或宿主默认模型。 */

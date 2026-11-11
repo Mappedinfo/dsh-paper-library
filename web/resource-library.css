@@ -10,3 +10,19 @@
 @media(max-width:620px){body.has-dataset .workspace.show-detail>.detail-pane{display:block}body.has-dataset .workspace.show-detail>.library-pane{display:none}.resource-detail h2{font-size:16px}.knowledge-heading{align-items:start}}
 .resource-dialog-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}.resource-dialog-heading h3{margin:0}.resource-dialog-heading>div{min-width:0}.resource-dialog-owner{margin:5px 0 0;color:var(--muted);font-size:13px;overflow-wrap:anywhere}.resource-dialog-heading>button{flex:none}.resource-editor[data-modeless="true"]{position:fixed;top:min(130px,15dvh);right:16px;left:auto;bottom:auto;margin:0;z-index:50;max-height:calc(100dvh - 150px);overflow:auto;box-shadow:0 12px 38px #0003}.resource-editor[data-modeless="true"]::backdrop{display:none}
 .resource-editor[data-modeless=true][data-resource-mode=form].paper-floating-positioned{min-height:min(560px,calc(100dvh - 150px))}
+.paper-data-panel { padding: 10px; overflow: auto; min-height: 0; }
+.paper-data-section + .paper-data-section { margin-top: 14px; }
+.paper-data-section header, .workspace-dataset-actions:not([hidden]), .dataset-binding-form {
+  display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center;
+}
+.paper-data-section header { justify-content: space-between; }
+.paper-data-section h3 { margin: 0; font-size: 13px; }
+.paper-data-results .resource-row { margin-top: 6px; overflow-wrap: anywhere; }
+.paper-data-results blockquote { margin: 8px 0; padding-inline-start: 8px; border-inline-start: 2px solid var(--line); }
+.paper-data-results .field, .dataset-binding-form .field { display: inline-flex; align-items: center; gap: 6px; margin: 4px; }
+.dataset-binding-form { padding: 8px; border: 1px solid var(--line); border-radius: 6px; flex-basis: 100%; }
+.workspace-dataset-actions p { margin-block: 2px; flex-basis: 100%; }
+
+.dataset-binding-evidence { flex-basis: 100%; }
+.dataset-binding-evidence summary { cursor: pointer; }
+.paper-data-results .dataset-binding-evidence .field { display: grid; }

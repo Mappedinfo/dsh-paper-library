@@ -397,6 +397,73 @@ export async function resolveDOIMetadata(value, options = {}) {
   return { ...result, provenance: ctx.provenance, warnings: ctx.warnings }
 }
 
+function datasetAccess(rights) {
+  const codes = rights.map(right => String(right?.rightsUri || '').split(/[\/#]/).filter(Boolean).at(-1)?.toLowerCase())
+  // COAR Access Rights 1.1 and equivalent EPrints terms.
+  if (codes.some(code => ['c_16ec', 'c_f1cf', 'c_14cb', 'restrictedaccess', 'closedaccess', 'embargoedaccess'].includes(code))) return 'restricted'
+  return codes.some(code => ['c_abf2', 'openaccess'].includes(code)) ? 'accessible' : 'unknown'
+}
+
+function repositoryDataset(html) {
+  const found = []
+  for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+    if (attrs(match[1]).type?.toLowerCase() !== 'application/ld+json') continue
+    let item
+    try { item = JSON.parse(match[2]) } catch { continue }
+    const top = Array.isArray(item) ? item : Array.isArray(item?.['@graph']) ? item['@graph'] : [item]
+    for (const record of top) {
+      if (![record?.['@type']].flat().some(type => ['Dataset', 'https://schema.org/Dataset', 'http://schema.org/Dataset'].includes(type))) continue
+      const title = clean(record.name)
+      if (title) found.push({ title, version: clean(record.version),
+        access: record.isAccessibleForFree === true ? 'accessible' : record.isAccessibleForFree === false ? 'restricted' : 'unknown' })
+    }
+  }
+  return found.length === 1 ? found[0] : undefined
+}
+
+/** Verify one explicitly cited dataset identifier without downloading data. */
+export async function verifyDatasetSource(identifier, options = {}) {
+  let doi
+  try { doi = normalizeDOI(identifier) } catch {}
+  let url
+  try { url = doi ? `https://doi.org/${doi}` : publicURL(identifier).href }
+  catch { return { status: 'unverified', access: 'unknown' } }
+  const ctx = context(options, url)
+  if (doi) {
+    try {
+      const response = await requestPublic(`https://api.datacite.org/dois/${encodeURIComponent(doi)}`, ctx, 'metadata', 7000)
+      const record = JSON.parse(await readText(response, 256 * 1024)).data
+      const metadata = dataciteCSL(record)
+      if (metadata?.type === 'dataset' && metadata.DOI.toLowerCase() === doi.toLowerCase()) {
+        const rights = Array.isArray(record.attributes.rightsList) ? record.attributes.rightsList.slice(0, 20) : []
+        return { url, status: 'verified', access: datasetAccess(rights), doi: metadata.DOI, version: metadata.version || '', title: metadata.title }
+      }
+    } catch { options.signal?.throwIfAborted() }
+    try {
+      const response = await requestPublic(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, ctx, 'metadata', 7000)
+      const work = JSON.parse(await readText(response, 256 * 1024)).message
+      if (work?.type === 'dataset' && typeof work.DOI === 'string' && work.DOI.toLowerCase() === doi.toLowerCase() && clean(first(work.title)))
+        return { url, status: 'verified', access: 'unknown', doi: work.DOI, title: clean(first(work.title)) }
+    } catch { options.signal?.throwIfAborted() }
+    const answered = ctx.provenance.requests.some(item => [200, 404].includes(item.status))
+    return { url, status: answered ? 'unverified' : 'unreachable', access: 'unknown' }
+  }
+  try {
+    const response = await requestPublic(url, ctx, 'landing-metadata', 7000)
+    let metadata
+    if (/\b(?:html|xhtml)\b/i.test(response.headers['content-type'] || '')) {
+      try { metadata = repositoryDataset(await readText(response, 256 * 1024, true)) }
+      catch { options.signal?.throwIfAborted() }
+    } else response.close?.()
+    return metadata ? { ...metadata, url, status: 'verified' } : { url, status: 'reachable', access: 'unknown' }
+  } catch {
+    options.signal?.throwIfAborted()
+    const status = ctx.provenance.requests.at(-1)?.status
+    return { url, status: status === 401 || status === 403 ? 'restricted' : 'unreachable',
+      access: status === 401 || status === 403 ? 'restricted' : 'unknown' }
+  }
+}
+
 function attrs(tag) {
   const result = {}
   for (const match of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)) result[match[1].toLowerCase()] = decode(match[2] ?? match[3] ?? match[4])

@@ -101,6 +101,57 @@ def normalized(text):
     return re.sub(r"\s+", " ", text).casefold().strip()
 
 
+_DATA_HEADING = re.compile(
+    r"(?im)^\s*(?:[\d.IVX]+[.、]?[ \t]+)?(?:data availability(?: statement)?|data and code availability|"
+    r"datasets?|data sources|data sharing|experimental (?:setup|data)|methods?|methodology|"
+    r"appendix|数据(?:来源|可用性|共享|集)|实验设置|研究方法|附录)(?=\W|$)"
+)
+_DATA_EVIDENCE = re.compile(
+    r"(?i)\bdatasets?\b|data (?:were|was|are|is) (?:obtained|available|collected|provided)|"
+    r"upon (?:reasonable )?request|data availability|数据(?:集|来源|共享|可用性)"
+)
+
+
+def dataset_sources(doc):
+    """One bounded text pass, preferring data sections and preserving physical pages."""
+    from .document_elements import _preflight_page
+
+    budget = 200
+    if doc.page_count <= budget:
+        indexes = range(doc.page_count)
+    else:
+        indexes = [*range(budget // 2), *range(doc.page_count - budget // 2, doc.page_count)]
+    matches, unreadable = [], []
+    clipped = False
+    for index in indexes:
+        try:
+            _preflight_page(doc, index + 1)
+            text = doc[index].get_text("text", sort=True).strip()
+        except ValueError:
+            text = ""
+        if not text:
+            unreadable.append(index + 1)
+            continue
+        headings = list(_DATA_HEADING.finditer(text))
+        mentions = list(_DATA_EVIDENCE.finditer(text))
+        for match in (headings or mentions)[:3]:
+            start = max(0, match.start() - 220)
+            priority = 3 if re.search(r"(?i)availability|sharing|可用性|共享", match.group()) else 2 if headings else 1
+            matches.append((priority, index + 1, text[start:start + 4000]))
+            clipped |= len(text) > start + 4000 or bool(start)
+    selected, seen = [], set()
+    for _, page, text in sorted(matches, key=lambda match: (-match[0], match[1])):
+        if page in seen:
+            continue
+        seen.add(page)
+        selected.append({"page": page, "text": text})
+        if len(selected) >= 12:
+            break
+    return {"pages": selected, "scanned_pages": len(indexes), "unreadable_pages": unreadable,
+            "partial": len(indexes) < doc.page_count or bool(unreadable) or clipped or
+                       len({row[1] for row in matches}) > len(selected)}
+
+
 def dispatch(library, request):
     action = request["action"]
     paper = library.get(request.get("id"))
@@ -118,6 +169,8 @@ def dispatch(library, request):
         result["page_count"] = doc.page_count
         if action == "paper_visual_read":
             result.update(visual_page(doc, request))
+        elif action == "paper_dataset_sources":
+            result.update(dataset_sources(doc))
         elif action == "paper_abstract_pdf":
             result.update(read_abstract(doc))
         elif action == "paper_text_find":

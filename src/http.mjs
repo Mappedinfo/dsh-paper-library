@@ -1,3 +1,4 @@
+import { createPaperDatasets, PAPER_DATASET_ACTIONS } from './harness/paper-datasets.mjs';
 import { createFieldRadarExporter } from './harness/field-radar-export.mjs';
 import { createFieldRadarAnalysis } from './harness/field-radar-analysis.mjs';
 import { createFieldRadarStore } from './harness/field-radar.mjs';
@@ -40,7 +41,7 @@ for (const name of ['challenge-mining.js','challenge-mining.css','annotation-thr
 for (const name of ['board.js','board.css','board-flow.js','board-source.js','board-render.js','board-bridge.js','board-annotations.js','board-annotations.css','board-mermaid.js','board-drawio.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['workspace-navigation.js','workspace-navigation.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['field-radar-relations-renderer.js','field-radar-relations.js','field-radar-data.js','field-radar.js','field-radar.css','field-radar-legacy.js','field-radar-legacy.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
-const languageActions = new Set(['language_settings_get','language_settings_update','language_generate','language_history','language_vocabulary_sync','vocabulary_create','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
+const languageActions = new Set(['language_settings_get','language_settings_update','language_prompt_preview','language_generate','language_history','language_vocabulary_sync','vocabulary_create','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
 for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js','ink-diagnostics.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 staticFiles['annotation-editor.js']=['annotation-editor.js','text/javascript;charset=utf-8'];
 staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
@@ -129,6 +130,10 @@ export function createFetchHandler(options = {}) {
   const localState = options.settings ? store : settings.localState;
   // Browsing saved learning data is local and does not initialize an AI route or
   // paper conversation. Only the host-injected adapter may generate new output.
+  const paperDatasets = createPaperDatasets({ store: localState,
+    request: (payload, signal) => dispatch(payload, { ...options, signal }),
+    ai: options.paperDatasetAI, getModel: options.paperDatasetModel, verify: options.paperDatasetVerify,
+  });
   const learningRecords = options.languageLearning || createLanguageLearning({ store: localState, dispatch, library: options.library || defaultLibrary, python: options.python });
   const encyclopedia=createEncyclopedia({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python});
   const annotationTranslation = createAnnotationTranslation({ store: localState, languageLearning: learningRecords, dispatch, library: options.library || defaultLibrary, python: options.python });
@@ -191,7 +196,7 @@ export function createFetchHandler(options = {}) {
             } });
           }
           // Browser cannot forge AI output or arbitrary worker internals.
-          if (LATEX_RETRIEVAL_ACTIONS.has(input?.action) || ['annotation_translation_result','save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','metadata_probe','companion_excerpt','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata','external_rebind'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
+          if (LATEX_RETRIEVAL_ACTIONS.has(input?.action) || ['annotation_translation_result','save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','metadata_probe','companion_excerpt','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata','external_rebind','dataset_candidate_confirmed','dataset_candidate_matches','dataset_candidate_commit','paper_dataset_sources'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
           const companionAction=['companion_status','companion_ask','companion_retry','companion_cancel'].includes(input?.action);
           if(companionAction&&!options.companion)return json({ok:false,error:'批注提问需要连接 DSH 服务。'},409);
           const chatAction = typeof input?.action === 'string' && input.action.startsWith('chat_');
@@ -208,10 +213,14 @@ export function createFetchHandler(options = {}) {
           if (input?.action === 'knowledge_generate' && !options.libraryKnowledge) return json({ok:false,error:'尚未连接 DSH 模型服务；已保存的来源和知识笔记仍可查看。'},409);
           if (latexAIAction && !options.latexAI) return json({ok:false,error:'LaTeX 提问与合写需要连接 DSH 模型服务。'},409);
           if (latexWsAction && !options.latexWorkspace) return json({ok:false,error:'LaTeX 工作区需要连接 DSH 主机。'},409);
-          let result = input?.action === 'annotation_translate' ? await annotationTranslation(input, { signal: request.signal })
+          const paperModelAction = ['paper_model_get','paper_model_update','paper_model_efforts'].includes(input?.action);
+          if (paperModelAction && !options.paperModel && input.action !== 'paper_model_get') return json({ok:false,error:'论文模型设置需要连接 DSH。'},409);
+          let result = paperModelAction ? (options.paperModel ? await options.paperModel.handle(input, {signal:request.signal}) : {writable:false,value:{model:null},models:[],warning:'论文模型设置需要连接 DSH。'})
+            : input?.action === 'annotation_translate' ? await annotationTranslation(input, { signal: request.signal })
             : ['paper_abstract_read','paper_abstract_translate'].includes(input?.action) ? await paperAbstracts(input,{signal:request.signal})
             : input?.action === 'annotation_caption' ? await options.annotationCaption(input, { signal: request.signal })
             : ['encyclopedia_list','encyclopedia_put'].includes(input?.action) ? await encyclopedia(input)
+            : PAPER_DATASET_ACTIONS.has(input?.action) ? await paperDatasets(input, { signal: request.signal })
             : companionAction ? await options.companion.handle(input)
             : input?.action === 'field_radar_table' ? await fieldRadarExport.tablePreview(input)
             : input?.action === 'field_radar_table_export' ? await fieldRadarExport.tableExport(input).then(({path,...receipt})=>({...receipt,download_url:`${basePath}/field-radar-export/${receipt.id}.${receipt.format}`}))

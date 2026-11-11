@@ -666,7 +666,7 @@ def dispatch(request):
         if action == "paper_outline":
             from . import outline
             return outline.read(library, request)
-        if action in {"paper_visual_read", "paper_text_find", "paper_text_search", "paper_text_read", "paper_abstract_pdf"}:
+        if action in {"paper_visual_read", "paper_text_find", "paper_text_search", "paper_text_read", "paper_abstract_pdf", "paper_dataset_sources"}:
             from . import paper_retrieval
             return paper_retrieval.dispatch(library, request)
         if action in {"paper_organization_update", "paper_tags_list"}:

@@ -17,16 +17,20 @@ def read(library, request):
                 node = None
             while node is not None and visited < 1000:
                 visited += 1
-                if not node.is_external and 0 <= node.page < doc.page_count:
-                    items.append({'title': str(node.title or '未命名章节')[:240],
-                                  'level': min(len(stack) + 1, 8), 'page': node.page + 1})
-                if node.down is not None:
-                    stack.append(node.next)
-                    node = node.down
+                bookmark_id = f"bookmark-{visited}"
+                child = node.down
+                page = node.page + 1 if not node.is_external and 0 <= node.page < doc.page_count else None
+                if page is not None or child is not None:
+                    items.append({'id': bookmark_id, 'parent_id': stack[-1][1] if stack else None,
+                                  'title': str(node.title or '未命名章节')[:240],
+                                  'level': len(stack) + 1, 'page': page})
+                if child is not None:
+                    stack.append((node.next, bookmark_id))
+                    node = child
                 else:
                     node = node.next
                     while node is None and stack:
-                        node = stack.pop()
+                        node, _ = stack.pop()
             return {'items': items, 'source': 'bookmarks', 'page_count': doc.page_count,
                     'truncated': node is not None}
         number = request['page']

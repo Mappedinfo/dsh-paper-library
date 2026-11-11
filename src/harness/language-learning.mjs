@@ -1,7 +1,7 @@
 import { entryOrder } from '../entry-order.mjs'
 import { createHash } from 'node:crypto'
 
-const ACTIONS = new Set(['language_generate', 'language_history', 'language_vocabulary_sync', 'language_settings_get', 'language_settings_update', 'vocabulary_create', 'vocabulary_list', 'vocabulary_update', 'vocabulary_delete', 'vocabulary_export'])
+const ACTIONS = new Set(['language_generate', 'language_history', 'language_vocabulary_sync', 'language_settings_get', 'language_settings_update', 'language_prompt_preview', 'vocabulary_create', 'vocabulary_list', 'vocabulary_update', 'vocabulary_delete', 'vocabulary_export'])
 const SETTINGS_KEY = 'language.settings', PROMPT_VERSION = 'language-v3'
 const POLISH_DIRECTIONS = Object.freeze({
   general: 'Improve clarity and natural wording with minimal necessary edits.',
@@ -177,6 +177,20 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     let default_model = null
     try { if (typeof getDefaultModel === 'function') default_model = modelOf(await getDefaultModel()) } catch {}
     return { value: settingsValue(record.value), revision: record.revision, models: available.models || [], default_model,translation_default_model:preferredTranslationModel(available.models)||default_model }
+  }
+  function promptPreview(input) {
+    const target = input.target_language ?? 'auto'
+    const direction = input.polish_direction ?? 'general'
+    if (!['auto', 'zh-CN', 'en'].includes(target) || !Object.hasOwn(POLISH_DIRECTIONS, direction)) throw fail('翻译方向或润色方式无效。')
+    const settings = {
+      translate_prompt: string(input.translate_prompt ?? '', '翻译补充提示词', 2000, false),
+      polish_prompt: string(input.polish_prompt ?? '', '润色补充提示词', 2000, false),
+    }
+    const text = '<SOURCE_TEXT>'
+    const translation = (target === 'auto' ? ['zh-CN', 'en'] : [target]).map(target_language => ({
+      target_language, prompt: promptOf({ mode: 'translate', target_language, text }, settings),
+    }))
+    return { version: PROMPT_VERSION, translation, polish: promptOf({ mode: 'polish', polish_direction: direction, text }, settings) }
   }
   async function settingsUpdate(input, signal) {
     const value = input.value
@@ -370,6 +384,7 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     try {
       signal?.throwIfAborted()
       if (input.action === 'language_settings_get') return await settingsGet(signal)
+      if (input.action === 'language_prompt_preview') return promptPreview(input)
       if (input.action === 'language_settings_update') return await settingsUpdate(input, signal)
       if (input.action === 'language_generate' || input.action === 'vocabulary_create') {
         const request = input.action === 'vocabulary_create' ? vocabularyRequest(input) : requestOf(input), key = resultKey(request), fingerprint = hash(JSON.stringify(request)), active = flights.get(key)

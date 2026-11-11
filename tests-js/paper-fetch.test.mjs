@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { EventEmitter } from 'node:events'
 import https from 'node:https'
-import { isPublicAddress, resolveAndFetch, resolveDOIMetadata } from '../src/paper-fetch.mjs'
+import { isPublicAddress, resolveAndFetch, resolveDOIMetadata, verifyDatasetSource } from '../src/paper-fetch.mjs'
 
 const PUBLIC = [{ address: '93.184.215.14', family: 4 }]
 const resolver = async () => PUBLIC
@@ -168,4 +168,24 @@ test('total deadline bounds slow DNS and metadata body reads without starting an
   assert.equal(metadata.metadata, undefined)
   assert.equal(closed, true)
   assert.match(metadata.warnings.join(' '), /timeout/i)
+})
+
+test('dataset source verification distinguishes access, restricted rights, and reachable repositories', async () => {
+  const verify = (identifier, rights, statusCode = 200) => verifyDatasetSource(identifier, { resolver,
+    transport: async ({ url }) => url.hostname === 'api.datacite.org'
+      ? response(JSON.stringify({ data: { attributes: { doi: identifier, titles: [{ title: 'Synthetic Dataset' }],
+        types: { resourceTypeGeneral: 'Dataset' }, rightsList: rights } } }), {}, statusCode)
+      : response('', {}, statusCode),
+  })
+  assert.equal((await verify('10.1234/data', [{ rightsUri: 'http://purl.org/coar/access_right/c_abf2' }])).access, 'accessible')
+  assert.equal((await verify('10.1234/data', [{ rightsUri: 'http://purl.org/coar/access_right/c_16ec' }])).access, 'restricted')
+  const reachable = await verify('https://repository.example/dataset', [])
+  assert.deepEqual([reachable.status, reachable.access], ['reachable', 'unknown'])
+  const html = '<script type="application/ld+json">{"@type":"Dataset","name":"Synthetic data","isAccessibleForFree":true}</script>'
+  const repository = await verifyDatasetSource('https://repository.example/dataset', {resolver,
+    transport:async()=>response(html,{'content-type':'text/html'})})
+  assert.deepEqual([repository.status, repository.access, repository.title], ['verified','accessible','Synthetic data'])
+  const closed = await verify('https://repository.example/dataset', [], 403)
+  assert.deepEqual([closed.status, closed.access], ['restricted', 'restricted'])
+  assert.equal((await verify('https://repository.example/dataset', [], 404)).status, 'unreachable')
 })

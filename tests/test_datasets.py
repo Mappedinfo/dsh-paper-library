@@ -181,3 +181,50 @@ def test_resource_get_can_be_reused_inside_existing_shared_transaction(library):
     data = dataset(library)
     with library.lock():
         assert resource_get(library, "dataset", data["id"])["id"] == data["id"]
+
+
+def test_confirm_dataset_evidence_resolves_versions_and_rolls_back(tmp_path, library):
+    import pymupdf
+    from dsh_paper_library import datasets, paper_retrieval
+
+    path = tmp_path / "paper.pdf"
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        page.insert_text((60, 60), "Data availability")
+        page.insert_text((60, 90), "We used the Synthetic dataset version 2 (10.5555/release).")
+        doc.save(path)
+    paper = library.import_items(path=str(path))["items"][0]
+    source = paper_retrieval.dispatch(library, {"action": "paper_dataset_sources", "id": paper["id"]})
+    assert [page["page"] for page in source["pages"]] == [1]
+    assert "Synthetic dataset version 2" in source["pages"][0]["text"]
+    first, second = dataset(library), dataset(library)
+    release = call(library, "dataset_release_put", id=first["id"], expected_revision=0,
+                   metadata={"version": "2", "DOI": "10.5555/release"})
+    candidate = {"id": "a" * 64, "title": first["title"], "relation": "uses", "version": "2",
+                 "page": 1, "quote": source["pages"][0]["text"], "role": "evaluation", "conditions": ""}
+    payload = {"paper_id": paper["id"], "source_version": source["source_version"]}
+    with pytest.raises(ValueError, match="同名"):
+        call(library, "dataset_candidate_commit", **payload, candidate=candidate)
+    candidate["verified_doi"] = "10.5555/RELEASE"
+    matches = call(library, "dataset_candidate_matches", candidate=candidate)
+    assert not matches["requires_selection"] and matches["matches"][0]["release_id"] == release["id"]
+    saved = call(library, "dataset_candidate_commit", **payload, candidate=candidate)
+    assert saved["release_id"] == release["id"]
+    assert call(library, "dataset_candidate_commit", **payload, candidate=candidate, dataset_id=second["id"]) == saved
+    assert call(library, "dataset_candidate_confirmed", paper_id=paper["id"], candidate_ids=[candidate["id"]]) == [candidate["id"]]
+
+    other = {**candidate, "id": "b" * 64, "title": "New synthetic data", "verified_doi": "", "version": ""}
+    original = datasets.put_link
+
+    def fail(*args, **kwargs):
+        raise ValueError("simulated write failure")
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(datasets, "put_link", fail)
+        with pytest.raises(ValueError, match="simulated write failure"):
+            call(library, "dataset_candidate_commit", **payload, candidate=other)
+    assert datasets.put_link is original
+    assert call(library, "resource_list", kind="dataset", query=other["title"])["total"] == 0
+    assert call(library, "dataset_candidate_confirmed", paper_id=paper["id"], candidate_ids=[other["id"]]) == []
+    link = call(library, "dataset_candidate_commit", **payload, candidate=other)
+    assert call(library, "resource_list", kind="dataset", query=other["title"])["items"][0]["id"] == link["dataset_id"]

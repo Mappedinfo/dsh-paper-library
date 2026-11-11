@@ -7,17 +7,17 @@ import {createHash} from 'node:crypto'
 import {createLocalStateStore} from '../src/local-state.mjs'
 import {createCompanionQueue,companionQuestion} from '../src/harness/companion-queue.mjs'
 
-async function fixture(t){
+async function fixture(t,getModel){
   t.mock.timers.enable({apis:['setTimeout']})
   const root=await mkdtemp(join(tmpdir(),'companion-'));t.after(()=>rm(root,{recursive:true,force:true}))
   const store=createLocalStateStore({library:root,home:join(root,'home')});let enabled=true,failSend=false,feedback=[],running=true,pauseContext
-  const calls=[],queues=[],notes=new Map(),contexts=[],sends=[]
+  const calls=[],queues=[],notes=new Map(),contexts=[],sends=[],routes=[]
   const settings={get:async()=>({available:true,value:{'auto-paper-conversation':enabled}})}
-  async function paperChat(r){calls.push(r.action);if(r.action==='chat_catalog')return {annotations:[notes.get(r.annotation_id)].filter(Boolean)};if(r.action==='chat_context'){contexts.push(r);await pauseContext?.();return{snapshot_id:String(contexts.length).padStart(64,'a')}};if(r.action==='chat_send'){sends.push(r);if(failSend)throw Error('uncertain native admission');return{sessionId:'paper-session'}};if(r.action==='chat_history')return{feedback,running,queued:0};if(r.action==='chat_save_feedback')return{saved:{annotation_id:'reply'}};throw Error(r.action)}
-  const make=()=>{const q=createCompanionQueue({store,settings,paperChat,dispatch:async r=>{calls.push(r.action);return{page:r.page,text:'Selected source only'}},library:root,delay:0});queues.push(q);return q}
+  async function paperChat(r,{pinnedModel}={}){calls.push(r.action);if(r.action==='chat_catalog')return {annotations:[notes.get(r.annotation_id)].filter(Boolean)};if(r.action==='chat_context'){contexts.push(r);await pauseContext?.();return{snapshot_id:String(contexts.length).padStart(64,'a')}};if(r.action==='chat_send'){sends.push(r);routes.push(pinnedModel);if(failSend)throw Error('uncertain native admission');return{sessionId:'paper-session'}};if(r.action==='chat_history')return{feedback,running,queued:0};if(r.action==='chat_save_feedback')return{saved:{annotation_id:'reply'}};throw Error(r.action)}
+  const make=()=>{const q=createCompanionQueue({store,settings,paperChat,dispatch:async r=>{calls.push(r.action);return{page:r.page,text:'Selected source only'}},library:root,getModel,delay:0});queues.push(q);return q}
   t.after(()=>queues.forEach(q=>q.dispose()))
   const note=(id,comment='A question')=>{const value={id,comment,text:'Source words',page:2,type:'note',version:createHash('sha256').update(comment).digest('hex'),identity_reliable:true};notes.set(id,value);return value}
-  return{store,make,note,calls,contexts,sends,setEnabled:v=>enabled=v,setFail:v=>failSend=v,setFeedback:v=>feedback=v,setRunning:v=>running=v,setPauseContext:v=>pauseContext=v}
+  return{store,make,note,calls,contexts,sends,routes,setEnabled:v=>enabled=v,setFail:v=>failSend=v,setFeedback:v=>feedback=v,setRunning:v=>running=v,setPauseContext:v=>pauseContext=v}
 }
 test('human save coalesces versions, ignores bare marks and AI replies, and preserves each distinct note',async t=>{
   const f=await fixture(t),q=f.make();
@@ -144,4 +144,21 @@ test('explicit ask rejects missing, ambiguous and changed annotations before mod
   assert.equal(status.entries[0].status,'failed')
   assert.match(status.entries[0].error,/已变化/)
   assert.equal(f.sends.length,0)
+})
+
+test('queued companion prompts preserve the route accepted before a model change',async t=>{
+  const old={provider:'fixture',model:'first',reasoningEffort:'low'};
+  const next={provider:'fixture',model:'second',reasoningEffort:'high'};
+  let route=old;
+  const f=await fixture(t,()=>route),first=f.make();
+  await first.saved('paper-a',f.note('one'));
+  first.dispose();
+  route=next;
+  const recovered=f.make();
+  await recovered.drain();
+  assert.deepEqual(f.routes,[old]);
+  await recovered.feedback('paper-a',{status:'saved',message_id:'1',source_snapshot_ids:[f.sends[0].snapshot_id]});
+  await recovered.saved('paper-b',f.note('two'));
+  await recovered.drain();
+  assert.deepEqual(f.routes,[old,next]);
 })

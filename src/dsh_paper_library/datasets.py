@@ -58,6 +58,13 @@ def ensure_schema(library):
           created TEXT NOT NULL, modified TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS dataset_links_paper ON dataset_links(paper_id,id);
         CREATE INDEX IF NOT EXISTS dataset_links_dataset ON dataset_links(dataset_id,id);
+        CREATE TABLE IF NOT EXISTS dataset_candidate_confirmations(
+          paper_id TEXT NOT NULL, candidate_id TEXT NOT NULL, link_id TEXT NOT NULL,
+          PRIMARY KEY(paper_id,candidate_id));
+        CREATE TRIGGER IF NOT EXISTS dataset_confirmation_delete AFTER DELETE ON dataset_links BEGIN
+          DELETE FROM dataset_candidate_confirmations WHERE link_id=old.id;
+        END;
+        CREATE INDEX IF NOT EXISTS dataset_confirmation_link ON dataset_candidate_confirmations(link_id);
         CREATE TABLE IF NOT EXISTS dataset_assets(
           id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, release_id TEXT,
           payload TEXT NOT NULL, revision INTEGER NOT NULL,
@@ -398,8 +405,8 @@ def _link(row):
     return value
 
 
-def put_link(library, request):
-    with library.lock():
+def put_link(library, request, *, locked=False, new_id=None):
+    with nullcontext() if locked else library.lock():
         row = library.db.execute("SELECT * FROM dataset_links WHERE id=?", (request.get("id"),)).fetchone() if request.get("id") else None
         if request.get("id") and not row:
             raise ValueError("Dataset relation not found")
@@ -431,7 +438,7 @@ def put_link(library, request):
                    "reviewed_by": "user" if origin == "user" and review == "accepted" else None}
         if not current and library.db.execute("SELECT count(*) FROM dataset_links WHERE dataset_id=?", (dataset["id"],)).fetchone()[0] >= 10000:
             raise ValueError("Dataset relation storage limit reached")
-        id, stamp = current["id"] if current else _id("datasetlink"), now()
+        id, stamp = current["id"] if current else new_id or _id("datasetlink"), now()
         library.db.execute("INSERT INTO dataset_links VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET paper_id=excluded.paper_id,dataset_id=excluded.dataset_id,release_id=excluded.release_id,relation=excluded.relation,role=excluded.role,payload=excluded.payload,revision=excluded.revision,modified=excluded.modified",
                            (id, paper["id"], dataset["id"], release_id, relation, role, _json(payload), (current["revision"] if current else 0) + 1, current["created"] if current else stamp, stamp))
         return _link(library.db.execute("SELECT * FROM dataset_links WHERE id=?", (id,)).fetchone())
@@ -459,7 +466,7 @@ def list_links(library, request):
         where.extend(["d.archived_at IS NULL", "a.paper_id IS NULL"])
     clause = " FROM dataset_links l JOIN datasets d ON d.id=l.dataset_id JOIN papers p ON p.id=l.paper_id LEFT JOIN paper_archive a ON a.paper_id=p.id WHERE " + " AND ".join(where)
     counts = library.db.execute("SELECT count(*),count(DISTINCT l.paper_id),count(DISTINCT CASE WHEN l.relation='uses' AND json_extract(l.payload,'$.review_status')='accepted' THEN l.paper_id END)" + clause, args).fetchone()
-    rows = library.db.execute("SELECT l.*,p.title AS paper_title,d.title AS dataset_title,(d.archived_at IS NOT NULL OR a.paper_id IS NOT NULL) AS endpoint_archived" + clause + " ORDER BY l.created DESC,l.id LIMIT ? OFFSET ?", [*args, limit, offset]).fetchall()
+    rows = library.db.execute("SELECT l.*,p.title AS paper_title,d.title AS dataset_title, (SELECT json_extract(metadata,'$.version') FROM dataset_releases WHERE id=l.release_id) AS release_version,(d.archived_at IS NOT NULL OR a.paper_id IS NOT NULL) AS endpoint_archived" + clause + " ORDER BY l.created DESC,l.id LIMIT ? OFFSET ?", [*args, limit, offset]).fetchall()
     return {**_page([_link(row) for row in rows], counts[0], offset, limit), "paper_count": counts[1], "accepted_use_paper_count": counts[2], "count_scope": "matching stored relations, distinct papers; not total scholarly usage"}
 
 
@@ -685,6 +692,110 @@ def export_resources(library, request):
     return result
 
 
+def candidate_matches(library, candidate):
+    doi = canonical_doi(candidate.get("verified_doi"))
+    url = candidate.get("verified_url")
+    title = candidate["title"]
+    exact = []
+    if doi:
+        exact = library.db.execute("""
+            SELECT id AS dataset_id,NULL AS release_id,title FROM datasets WHERE doi=? AND archived_at IS NULL
+            UNION ALL
+            SELECT d.id,r.id,d.title FROM dataset_releases r JOIN datasets d ON d.id=r.dataset_id
+                WHERE r.doi=? AND d.archived_at IS NULL LIMIT 21
+        """, (doi, doi)).fetchall()
+    if not exact and url:
+        exact = library.db.execute("""
+            SELECT id AS dataset_id,NULL AS release_id,title FROM datasets
+                WHERE (json_extract(metadata,'$.URL')=? OR json_extract(metadata,'$.landing_url')=?) AND archived_at IS NULL
+            UNION ALL
+            SELECT d.id,r.id,d.title FROM dataset_releases r JOIN datasets d ON d.id=r.dataset_id
+                WHERE (json_extract(r.metadata,'$.URL')=? OR json_extract(r.metadata,'$.landing_url')=?) AND d.archived_at IS NULL
+            LIMIT 21
+        """, (url, url, url, url)).fetchall()
+    if exact:
+        matches = [dict(row) for row in exact]
+        if len(matches) == 1 and candidate.get("version"):
+            match = matches[0]
+            if match["release_id"]:
+                release = _release(library, match["release_id"], match["dataset_id"])
+                version = release["metadata"].get("version")
+                if version and version.casefold() != candidate["version"].casefold():
+                    return {"matches": matches, "requires_selection": True}
+            else:
+                releases = library.db.execute("""SELECT id FROM dataset_releases WHERE dataset_id=?
+                    AND json_extract(metadata,'$.version')=? COLLATE NOCASE LIMIT 2""", (match["dataset_id"], candidate["version"])).fetchall()
+                if len(releases) == 1:
+                    match["release_id"] = releases[0]["id"]
+                else:
+                    return {"matches": matches, "requires_selection": True}
+        return {"matches": matches[:20], "requires_selection": len(matches) != 1}
+    similar = library.db.execute("""SELECT id AS dataset_id,NULL AS release_id,title FROM datasets
+        WHERE title=? COLLATE NOCASE AND archived_at IS NULL ORDER BY id LIMIT 20""", (title,)).fetchall()
+    return {"matches": [dict(row) for row in similar], "requires_selection": bool(similar)}
+
+
+def confirm_candidate(library, request):
+    from .paper_analysis import file_version
+
+    candidate = request["candidate"]
+    paper_id, candidate_id = request["paper_id"], candidate["id"]
+    link_id = "datasetlink_" + hashlib.sha256(f"{paper_id}\0{candidate_id}".encode()).hexdigest()
+    with library.lock():
+        saved = library.db.execute("""SELECT l.* FROM dataset_candidate_confirmations c
+            JOIN dataset_links l ON l.id=c.link_id WHERE c.paper_id=? AND c.candidate_id=?""",
+            (paper_id, candidate_id)).fetchone()
+        if saved:
+            return _link(saved)
+        paper = library.get(paper_id)
+        if paper.get("archived"):
+            raise ValueError("论文已归档，请恢复后再绑定")
+        current = hashlib.sha256(json.dumps(file_version(library.pdf_path(paper_id)), sort_keys=True).encode()).hexdigest()
+        if request["source_version"] != current:
+            raise ValueError("原 PDF 已更新，请重新检索数据证据")
+        resolution = candidate_matches(library, candidate)
+        dataset_id, release_id = request.get("dataset_id"), request.get("release_id")
+        if dataset_id:
+            _dataset(library, dataset_id)
+            if release_id:
+                _release(library, release_id, dataset_id)
+        elif resolution["requires_selection"]:
+            raise ValueError("已有同名数据集或版本不明确，请先在资料库选择数据集和版本")
+        elif resolution["matches"]:
+            match = resolution["matches"][0]
+            dataset_id, release_id = match["dataset_id"], match["release_id"]
+        else:
+            metadata = {"title": candidate["title"], "registration_level": "L0"}
+            if candidate.get("verified_url"):
+                metadata["URL"] = candidate["verified_url"]
+            if candidate.get("verified_doi") and not candidate.get("version"):
+                metadata["DOI"] = candidate["verified_doi"]
+            if candidate.get("access") in {"accessible", "restricted"}:
+                metadata["access_status"] = candidate["access"]
+            dataset_id = put_dataset(library, {"metadata": metadata, "expected_revision": 0}, locked=True)["id"]
+            if candidate.get("version"):
+                version = {"version": candidate["version"]}
+                if candidate.get("verified_doi"):
+                    version["DOI"] = candidate["verified_doi"]
+                release_id = put_release(library, {"dataset_id": dataset_id, "metadata": version, "expected_revision": 0}, locked=True)["id"]
+        existing = library.db.execute("""SELECT * FROM dataset_links
+            WHERE paper_id=? AND dataset_id=? AND release_id IS ? AND relation=? ORDER BY id LIMIT 1""",
+            (paper_id, dataset_id, release_id, candidate["relation"])).fetchone()
+        evidence = [{"source_kind": "pdf-text", "source_id": paper_id, "page": candidate["page"], "quote": candidate["quote"]}]
+        if candidate.get("verified_url"):
+            evidence.append({"source_kind": "public-metadata", "source_uri": candidate["verified_url"]})
+        prior = _link(existing) if existing else {}
+        if prior:
+            evidence = (evidence + [item for item in prior["evidence"] if item not in evidence])[:20]
+        saved = put_link(library, {"paper_id": paper_id, "dataset_id": dataset_id, "release_id": release_id,
+            "relation": candidate["relation"], "role": prior.get("role") or candidate["role"],
+            "scope": prior.get("scope") or candidate["conditions"], "evidence": evidence,
+            "origin": "user", "review_status": "accepted", "expected_revision": prior.get("revision", 0),
+            **({"id": prior["id"]} if prior else {})}, locked=True, new_id=link_id)
+        library.db.execute("INSERT INTO dataset_candidate_confirmations VALUES(?,?,?)", (paper_id, candidate_id, saved["id"]))
+        return saved
+
+
 def dispatch(library, request):
     ensure_schema(library)
     action = request.get("action")
@@ -694,6 +805,18 @@ def dispatch(library, request):
         return export_resources(library, request)
     if action == "resource_get":
         return resource_get(library, request.get("kind", "paper"), request.get("id"), request.get("include_archived", False))
+    if action == "dataset_candidate_confirmed":
+        identifiers = request["candidate_ids"][:12]
+        if not identifiers:
+            return []
+        placeholders = ",".join("?" for _ in identifiers)
+        return [row["candidate_id"] for row in library.db.execute(
+            f"SELECT candidate_id FROM dataset_candidate_confirmations WHERE paper_id=? AND candidate_id IN ({placeholders})",
+            [request["paper_id"], *identifiers])]
+    if action == "dataset_candidate_matches":
+        return candidate_matches(library, request["candidate"])
+    if action == "dataset_candidate_commit":
+        return confirm_candidate(library, request)
     if action == "dataset_put":
         return put_dataset(library, request)
     if action == "dataset_import":

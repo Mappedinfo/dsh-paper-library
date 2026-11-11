@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{JSDOM}=require(process.env.JSDOM_MODULE||'jsdom');
-const sources=await Promise.all(['encyclopedia.js','language-learning.js'].map(file=>readFile(new URL('../web/'+file,import.meta.url),'utf8')));
+const sources=await Promise.all(['encyclopedia.js','settings-models.js','language-learning.js'].map(file=>readFile(new URL('../web/'+file,import.meta.url),'utf8')));
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function fixture(t){
  const dom=new JSDOM('',{url:'https://synthetic.invalid',runScripts:'outside-only'}),w=dom.window,doc=w.document,calls=[],writes=[],messages=[];

@@ -31,7 +31,7 @@ window.PaperReadingPanels = (() => {
       libraryContent.id='reading-sidebar-library-content';libraryContent.setAttribute('role','tabpanel');libraryContent.setAttribute('aria-labelledby','reading-sidebar-library');
       libraryContent.append(...libraryChildren);
       const tablist=make('div','reading-sidebar-tabs');tablist.setAttribute('role','tablist');tablist.setAttribute('aria-label','阅读侧栏内容');
-      libraryTab=button('文献库',showLibrary);libraryTab.id='reading-sidebar-library';
+      libraryTab=button('资料库',showLibrary);libraryTab.id='reading-sidebar-library';
       annotationsTab=button('批注',()=>{if(onAnnotationsRequest)onAnnotationsRequest();else show('annotations');});annotationsTab.id='reading-sidebar-annotations';
       for(const [tab,panel] of [[libraryTab,libraryContent.id],[annotationsTab,annotationsRoot.id]]){tab.setAttribute('role','tab');tab.setAttribute('aria-controls',panel);}
       const selectTab=tab=>{tab.focus();tab.click();};

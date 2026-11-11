@@ -72,7 +72,7 @@ window.PaperLibrarySettings = (() => {
     extraRow.append(extraCopy,extraInput);controls.append(extraRow);inputs.set('external_sources',extraInput);
     extraInput.addEventListener('change',()=>void save({external_sources:extraInput.value.trim()}));
     const storage=make('details','settings-storage'),summary=make('summary','','模型、外观与存储');storage.append(summary);
-    const modelSettings=window.PaperSettingsModels?.create({api,getPaper,container:storage});
+    const modelSettings=window.PaperSettingsModels?.create({api,container:storage});
     storage.addEventListener('toggle',()=>{if(storage.open)void modelSettings?.refresh();});
     storage.append(make('p','','明暗模式跟随 DSH；界面配色与批注字号可在上方调整。'));
     const languageSettings=make('button','button subtle','语言模型与提示词');languageSettings.id='settings-language';languageSettings.type='button';languageSettings.addEventListener('click',()=>{dialog.close();onLanguageSettings?.();});storage.append(languageSettings);

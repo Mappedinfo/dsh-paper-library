@@ -21,7 +21,7 @@ window.PaperOutline = (() => {
     function highlight(){
       let current=null;
       for(const entry of entries){
-        if(entry.item.page>currentPage)continue;
+        if(!Number.isInteger(entry.item.page)||entry.item.page>currentPage)continue;
         if(!current||entry.item.page>current.item.page||
           (entry.item.page===current.item.page&&entry.depth<current.depth))current=entry;
       }
@@ -38,8 +38,8 @@ window.PaperOutline = (() => {
       for(let page=thumbStart;page<=Math.min(total,thumbStart+49);page++){const box=document.createElement('button');box.type='button';box.dataset.page=String(page);box.textContent=`第 ${page} 页`;box.addEventListener('click',()=>{if(getPaper()?.id===id)void navigate({paperId:id,page,rects:[]});});thumbs.append(box);if(observer)observer.observe(box);else if(page<thumbStart+10){thumbQueue.push(box);pump();}}
     }
     let paperId=null,source='',next=1,total=0,epoch=0,loading=false,scanning=false,runner=null,disposed=false;
-    const entries=[], ancestors=[];
-    function clearOutline(){entries.length=0;ancestors.length=0;activeEntry=null;tree.replaceChildren();}
+    const entries=[], ancestors=[], bookmarks=new Map();
+    function clearOutline(){entries.length=0;ancestors.length=0;activeEntry=null;bookmarks.clear();tree.replaceChildren();}
     function render(){
       scan.hidden=mode!=='outline'||source!=='inferred';scan.disabled=loading||next>total||entries.length>=1000||(!scanning&&runner===epoch);
       scan.textContent=scanning?'暂停识别':next>total?'识别完成':next>1?'继续识别章节':'识别章节标题';
@@ -68,17 +68,19 @@ window.PaperOutline = (() => {
       for(const item of values){
         if(entries.length>=1000)break;
         while(ancestors.length&&ancestors.at(-1).item.level>=item.level)ancestors.pop();
-        const parent=ancestors.at(-1);
-        const node=document.createElement('li'),row=document.createElement('div'),link=document.createElement('button');
-        row.className='outline-row';link.type='button';link.className='outline-entry';
+        const parent=item.id?bookmarks.get(item.parent_id):ancestors.at(-1);
+        const jumpable=Number.isInteger(item.page);
+        const node=document.createElement('li'),row=document.createElement('div'),link=document.createElement(jumpable?'button':'span');
+        row.className='outline-row';if(jumpable)link.type='button';link.className='outline-entry';
         const title=document.createElement('span'),page=document.createElement('small');
-        title.textContent=item.title;page.textContent=String(item.page);
-        link.append(title,page);link.title=`第 ${item.page} 页 · ${item.title}`;
+        title.textContent=item.title;page.textContent=jumpable?String(item.page):'';
+        link.append(title,page);link.title=jumpable?`第 ${item.page} 页 · ${item.title}`:item.title;
         const id=paperId;
-        link.addEventListener('click',()=>{if(getPaper()?.id===id)void navigate({paperId:id,page:item.page,rects:item.rects||[]});});
+        if(jumpable)link.addEventListener('click',()=>{if(getPaper()?.id===id)void navigate({paperId:id,page:item.page,rects:item.rects||[]});});
         row.append(link);node.append(row);(parent?childList(parent):tree).append(node);
-        const entry={item,parent,node,row,link,index:entries.length,depth:ancestors.length};
-        entries.push(entry);ancestors.push(entry);
+        const entry={item,parent,node,row,link,index:entries.length,depth:parent?parent.depth+1:0};
+        entries.push(entry);
+        if(item.id)bookmarks.set(item.id,entry);else ancestors.push(entry);
       }
       currentPage=getPage();highlight();
     }

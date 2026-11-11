@@ -305,6 +305,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
   }
 
   async function analysisRoute(input, signal) {
+    if (input.admitted_model) return input.admitted_model
     if (typeof resolveModel === 'function') return resolveModel({ id: input.id, signal })
     const paper = await paperChat?.({ action: 'chat_ensure', id: input.id,
       ...(input.source_session_id ? { source_session_id: input.source_session_id } : {}) }, { signal })
@@ -437,7 +438,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
     } finally { flights.delete(record.key) }
   }
 
-  async function start(input) {
+  async function start(input, pinnedModel) {
     if (typeof agent !== 'function' || disposed) throw fail('尚未配置可用的分析模型。', 'ANALYSIS_UNAVAILABLE',409)
     validateMode(input)
     if (input.pages !== undefined && (!Array.isArray(input.pages) || !input.pages.length || input.pages.length>2000 || new Set(input.pages).size!==input.pages.length || input.pages.some(n=>!Number.isInteger(n)||n<1||n>2000))) throw fail('请指定有效且不重复的 PDF 页码。')
@@ -482,7 +483,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
         if (resume.analysis_title !== undefined && resume.analysis_title !== paper.title) throw fail('分析使用的文献标题已改变，请重新整理。','ANALYSIS_SOURCE_CHANGED',409)
       }
       const protocol = config ? {questionnaire:{version:config.version,hash:config.hash,groups:questionGroups(config,input)},questionnaire_snapshot:config,analysis_complete:false,metadata:{},field_sources:{}} : {}
-      const record=await store.put(key,{...request,...protocol,...(resume?.model?{resume_model:resume.model}:{}),...(resume?{...(resume.file_version?.schema==='pdf-content-v1'?{resume_file_version:resume.file_version}:{}),...(resume.analysis_title!==undefined?{resume_analysis_title:resume.analysis_title}:{}),...(Number.isInteger(resume.coverage?.page_count)?{resume_page_count:resume.coverage.page_count}:{})}:{}),...(repair?{resume_model:repair.model,repair_batch_count:repair.batch_count,repair_expected_modified:repair.expected_modified}:{}),prompt_templates:promptTemplateManifest(),fingerprint:hash(request),status:'queued',stage:'已排队',created_at:now(),...(execution==='direct'?{execution:'direct'}:{})},0)
+      const record=await store.put(key,{...request,...protocol,...(pinnedModel?{admitted_model:pinnedModel}:{}),...(resume?.model?{resume_model:resume.model}:{}),...(resume?{...(resume.file_version?.schema==='pdf-content-v1'?{resume_file_version:resume.file_version}:{}),...(resume.analysis_title!==undefined?{resume_analysis_title:resume.analysis_title}:{}),...(Number.isInteger(resume.coverage?.page_count)?{resume_page_count:resume.coverage.page_count}:{})}:{}),...(repair?{resume_model:repair.model,repair_batch_count:repair.batch_count,repair_expected_modified:repair.expected_modified}:{}),prompt_templates:promptTemplateManifest(),fingerprint:hash(request),status:'queued',stage:'已排队',created_at:now(),...(execution==='direct'?{execution:'direct'}:{})},0)
       const pointer=await store.get(latestKey(input.id))
       await store.put(latestKey(input.id),{request_id:input.request_id},pointer.revision)
       if (disposed) throw fail('后台服务已停止。','ANALYSIS_UNAVAILABLE',409)
@@ -492,7 +493,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
     } finally{admission=false}
   }
 
-  async function handle(input) {
+  async function handle(input, { pinnedModel } = {}) {
     if(!actions.has(input?.action)||!validId(input.id)||input.id.startsWith('dataset_'))throw fail('请选择文献。')
     if(input.request_id!==undefined&&!validId(input.request_id))throw fail('请求标识无效。')
     if(input.source_session_id!==undefined&&(typeof input.source_session_id!=='string'||!input.source_session_id||input.source_session_id.length>200||/[\x00-\x1f]/.test(input.source_session_id)))throw fail('来源对话标识无效。')
@@ -513,7 +514,7 @@ export function createPaperAnalysis({ store, dispatch, paperChat, resolveModel, 
       const key=jobKey(input.id,input.request_id), fingerprint=hash(requestOf(input))
       const active=starts.get(key)
       if(active){if(active.fingerprint!==fingerprint)throw fail('请求内容已改变，请重新开始。','ANALYSIS_CONFLICT',409);return active.promise}
-      const promise=start(input);starts.set(key,{fingerprint,promise})
+      const promise=start(input,pinnedModel);starts.set(key,{fingerprint,promise})
       try{return await promise}finally{starts.delete(key)}
     }
     let record=await read(input.id,input.request_id)

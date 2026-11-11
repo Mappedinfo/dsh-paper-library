@@ -1,5 +1,5 @@
 /** 以现有明确关联组织文献、画板与写作项目；只投影元数据，不创建层级或扫描源码。 */
-const KINDS = new Set(['paper', 'board', 'latex', 'project'])
+const KINDS = new Set(['paper', 'dataset', 'board', 'latex', 'project'])
 export const WORKSPACE_NAV_LIMITS = Object.freeze({ page: 20, boardScan: 50, latexScan: 200, projects: 10, projectPapers: 40, concurrency: 4 })
 const fail = message => Object.assign(new Error(message), { code: 'WORKSPACE_NAV_INVALID', status: 400 })
 const name = value => typeof value === 'string' && value.trim() ? value.slice(0, 500) : ''
@@ -38,10 +38,15 @@ export function createWorkspaceNavigation({ boards, request } = {}) {
   if (!boards?.list || !boards?.read || typeof request !== 'function') throw fail('工作区导航需要画板与目录元数据接口。')
   async function catalog(input, { signal } = {}) {
     const kind = input.kind, page = inputPage(input)
-    if (!['board', 'latex', 'project'].includes(kind)) throw fail('内容目录只接受 board、latex 或 project。')
+    if (!['dataset', 'board', 'latex', 'project'].includes(kind)) throw fail('内容目录只接受 dataset、board、latex 或 project。')
     const query = input.query ?? ''
     if (typeof query !== 'string' || query.length > 200) throw fail('检索词最多 200 个字符。')
     signal?.throwIfAborted()
+    if (kind === 'dataset') {
+      const listed = await request({ action: 'resource_list', kind, query, ...page }, signal)
+      return { ...listed, kind, items: (listed.items || []).map(item => record(kind, item)),
+        known_total: listed.total, has_more: page.offset + listed.items.length < listed.total, warnings: [] }
+    }
     if (kind === 'latex' || kind === 'project') {
       const listed = await request({ action: kind === 'latex' ? 'latex_project_list' : 'project_list', query, include_archived: false, ...page }, signal)
       const items = (listed.projects || []).map(item => record(kind, item, kind === 'project' ? { paper_count: Number.isSafeInteger(item.paper_count) ? item.paper_count : null, description: name(item.description) } : { reading_project_id: item.reading_project_id || null, missing: item.exists === false, main_path: name(item.main_path) || null }))
@@ -55,7 +60,15 @@ export function createWorkspaceNavigation({ boards, request } = {}) {
 
   async function related(input, { signal } = {}) {
     const kind = input.kind, id = identifier(input.id), page = inputPage(input)
-    if (!KINDS.has(kind) || input.group_kind !== undefined && !KINDS.has(input.group_kind)) throw fail('内容类别必须为 paper、board、latex 或 project。')
+    if (!KINDS.has(kind) || input.group_kind !== undefined && !KINDS.has(input.group_kind)) throw fail('内容类别必须为 paper、dataset、board、latex 或 project。')
+    if (kind === 'dataset') {
+      const dataset = await request({ action: 'dataset_get', id, include_details: false }, signal)
+      const links = await request({ action: 'dataset_link_list', dataset_id: id, ...page }, signal)
+      const papers = [...new Map(links.items.map(link => [link.paper_id,
+        record('paper', { id: link.paper_id, title: link.paper_title }, { relation: '关联论文' })])).values()]
+      return { focus: record(kind, dataset), groups: { paper: { ...links, items: papers, total: null, known_total: links.paper_count,
+        has_more: page.offset + links.items.length < links.total } }, warnings: [], truncated: false }
+    }
     const groups = allGroups(), warnings = [], incomplete = { paper: false, board: false, latex: false, project: false }
     const add = (type, item) => { if (!(type === kind && item.id === id) && !groups[type].has(item.id)) groups[type].set(item.id, item) }
     const warn = message => { if (!warnings.includes(message)) warnings.push(message) }

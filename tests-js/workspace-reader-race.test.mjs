@@ -24,7 +24,7 @@ function fixture(options = {}) {
     linkedHandwritingUI: null, resourceUI: null, knowledgeUI: null, languageUI: null,
     workbenchUI: { setTable: value => calls.push(['table', value]), header() {}, paperChanged() {} },
     paperChatUI: { visible() {}, paperOpened: () => options.chat?.promise },
-    readingPanels: { paperChanged() {} }, knowledgeGraphUI: { clear() {} },
+    readingPanels: { paperChanged() {} }, outlineUI:null, knowledgeGraphUI: { clear() {} },
     $: get, document: { querySelector: () => ({ classList: { add() {} } }) },
     api: async (action, input) => { calls.push(['api', action, input.id]); return options.metadata ? options.metadata.promise : source },
     persistence: { get: async () => { calls.push(['read-state']); return options.saved?.promise } },

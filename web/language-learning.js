@@ -32,15 +32,36 @@ window.PaperLanguageLearning = {
       <nav class="language-tabs" aria-label="语言工具"><button id="language-tab-work" class="button subtle" type="button">翻译与表述</button><button id="language-tab-history" class="button subtle" type="button">本篇记录</button><button id="language-tab-words" class="button subtle" type="button">难词本</button></nav>
       <p id="language-status" class="language-status" role="status"></p>
       <div id="language-work"><label class="field">选文或你的草稿<textarea id="language-source" rows="4" maxlength="8000" placeholder="拖选论文中的文字，或在这里输入要翻译、优化的表达。"></textarea></label><div class="language-actions"><label>译成 <select id="language-target"><option value="">跟随语言设置</option><option value="auto">自动识别 · 中英互译</option><option value="zh-CN">中文</option><option value="en">英文</option></select><span id="language-target-current" class="small" role="status"></span></label><button id="language-translate" class="button primary" type="button">直接翻译</button><button id="language-polish" class="button" type="button">优化表述</button></div><div id="language-polish-directions" class="language-polish-directions" role="group" aria-label="优化方向"></div><p class="small muted">译文与词条保存在本机；模型可在右上角设置，生成会使用模型额度。</p><div id="language-result"></div></div>
-      <div id="language-settings" hidden><p class="small muted">语言工具使用独立设置；不会改变宿主或论文对话的模型。</p><label class="field">模型<select id="language-settings-model"></select></label><label class="field">默认翻译方向<select id="language-settings-target"><option value="auto">自动识别 · 中文译英文，其他译中文</option><option value="zh-CN">始终译为中文</option><option value="en">始终译为英文</option></select></label><label class="field">翻译补充提示词<textarea id="language-settings-translate" maxlength="2000" rows="3" placeholder="例如：保留常见缩写"></textarea></label><label class="field">润色补充提示词<textarea id="language-settings-polish" maxlength="2000" rows="3" placeholder="例如：优先使用简洁句子"></textarea></label><p class="small muted">补充要求不能覆盖忠于原文和结果结构的基本规则。</p><div class="language-actions"><button id="language-settings-save" class="button primary" type="button">保存设置</button><button id="language-settings-reload" class="button subtle" type="button">重新读取</button></div></div>
+      <div id="language-settings" hidden><p class="small muted">语言工具使用独立设置；不会改变宿主或论文对话的模型。</p><label class="field">模型<select id="language-settings-model"></select></label><p id="language-effective-models" class="settings-model-effective"></p><label class="field">默认翻译方向<select id="language-settings-target"><option value="auto">自动识别 · 中文译英文，其他译中文</option><option value="zh-CN">始终译为中文</option><option value="en">始终译为英文</option></select></label><label class="field">翻译补充提示词<textarea id="language-settings-translate" maxlength="2000" rows="3" placeholder="例如：保留常见缩写"></textarea></label><label class="field">润色补充提示词<textarea id="language-settings-polish" maxlength="2000" rows="3" placeholder="例如：优先使用简洁句子"></textarea></label><details id="language-prompt-preview"><summary>查看当前提示词</summary><label class="field">预览润色方式<select id="language-preview-polish"></select></label><div id="language-prompt-output"></div></details><p class="small muted">补充要求不能覆盖忠于原文和结果结构的基本规则。</p><div class="language-actions"><button id="language-settings-save" class="button primary" type="button">保存设置</button><button id="language-settings-reload" class="button subtle" type="button">重新读取</button></div></div>
       <div id="language-history" hidden><div id="language-history-list"></div><div class="language-pagination"><button id="language-history-prev" class="button subtle" type="button">上一页</button><span id="language-history-range"></span><button id="language-history-next" class="button subtle" type="button">下一页</button></div></div>
       <div id="language-words" hidden><div class="language-word-filters"><input id="vocabulary-query" type="search" placeholder="检索词语、释义" aria-label="检索难词"><select id="vocabulary-status" aria-label="学习状态"><option value="">全部</option><option value="learning">待学习</option><option value="mastered">已掌握</option></select><button id="vocabulary-refresh" class="button subtle" type="button">刷新</button></div><p class="small muted">从翻译与表述优化中自动积累。AI 释义待核对；掌握程度由你标记。</p><div id="vocabulary-list"></div><div class="language-pagination"><button id="vocabulary-prev" class="button subtle" type="button">上一页</button><span id="vocabulary-range"></span><button id="vocabulary-next" class="button subtle" type="button">下一页</button></div><div class="language-actions"><button id="vocabulary-export-json" class="button subtle" type="button">导出 JSON</button><button id="vocabulary-export-csv" class="button subtle" type="button">导出 CSV</button></div></div>`;
     document.body.append(panel);
     $('language-target').value='';
     let available=false,paperId=null,loadTicket=0,viewTicket=0,view='work',busy=false,draftReady=false,sourcePage=null,lastResult=null,historyOffset=0,wordOffset=0,failedRequest=null,loadPromise=null,draftRevision=0,disposed=false;
-    let settingsRevision=null, settingsModels=[], knownTarget=null, targetTicket=0, polishDirection='general';
+    let settingsRevision=null, previewTicket=0, previewTimer, knownTarget=null, targetTicket=0, polishDirection='general';
     const directions={general:'通用',grammar:'语法纠错',concise:'精简表达',academic:'学术表达',cohesion:'逻辑衔接',plain:'通俗解释'},directionButtons=new Map();
     for(const [value,label]of Object.entries(directions)){const b=button('language-direction-'+value,label,()=>{polishDirection=value;failedRequest=null;++draftRevision;controls();remember();});b.setAttribute('aria-pressed',String(value===polishDirection));directionButtons.set(value,b);$('language-polish-directions').append(b);}
+    for(const [value,label]of Object.entries(directions)){const option=make('option',label);option.value=value;$('language-preview-polish').append(option);}
+    function schedulePreview(){
+      clearTimeout(previewTimer);
+      const ticket=++previewTicket, owner=viewTicket;
+      if(!$('language-prompt-preview').open||view!=='settings'||panel.hidden)return;
+      previewTimer=setTimeout(async()=>{
+        const output=$('language-prompt-output');
+        try{
+          const result=await api('language_prompt_preview',{
+            target_language:$('language-target').value||$('language-settings-target').value,
+            polish_direction:$('language-preview-polish').value,
+            translate_prompt:$('language-settings-translate').value,
+            polish_prompt:$('language-settings-polish').value,
+          });
+          if(ticket!==previewTicket||owner!==viewTicket||panel.hidden)return;
+          output.replaceChildren();
+          for(const value of result.translation)output.append(make('strong',value.target_language==='en'?'翻译为英文':'翻译为简体中文'),make('pre',value.prompt));
+          output.append(make('strong','润色'),make('pre',result.polish));
+        }catch(error){if(ticket===previewTicket&&owner===viewTicket&&!panel.hidden)output.textContent=error.message;}
+      },180);
+    }
     function updateTarget(){const chosen=$('language-target').value;const target=chosen||knownTarget;
       $('language-target-current').textContent=!target?' · 目标设置待读取':target==='auto'&&!$('language-source').value.trim()?' · 输入后识别目标':' · '+(target==='auto'?'检测目标：':'当前目标：')+(previewTranslationTarget($('language-source').value,target)==='en'?'英文':'中文');
     }
@@ -106,25 +127,24 @@ window.PaperLanguageLearning = {
       const ticket=++viewTicket;settingsRevision=null;$('language-settings-save').disabled=true;status('正在读取语言设置…');
       try{
         const result=await api('language_settings_get',{});if(ticket!==viewTicket||view!=='settings'||panel.hidden)return;
-        const value=result.value||{},select=$('language-settings-model');settingsRevision=result.revision;settingsModels=Array.isArray(result.models)?result.models:[];
-        const defaultName=result.default_model?`${result.default_model.provider} / ${result.default_model.model}`:'尚未选择';
-        const automatic=make('option',`自动：轻量翻译（${result.translation_default_model?.model||defaultName}）／DSH 润色`);automatic.value='';select.replaceChildren(automatic);
-        const groups=new Map();
-        for(let i=0;i<settingsModels.length;i++){const model=settingsModels[i];if(!groups.has(model.provider)){const group=make('optgroup');group.label=model.provider;groups.set(model.provider,group);select.append(group);}const option=make('option',model.name||model.id);option.value=String(i);groups.get(model.provider).append(option);}
-        const selected=settingsModels.findIndex(model=>model.provider===value.model?.provider&&model.id===value.model?.model);
-        if(value.model&&selected<0){const missing=make('option',`${value.model.provider} / ${value.model.model}（当前不可用）`);missing.value='missing';select.append(missing);select.value='missing';}else select.value=selected<0?'':String(selected);
+        const value=result.value||{},select=$('language-settings-model'),picker=window.PaperSettingsModels;
+        settingsRevision=result.revision;
+        picker.fillModels(select,result.models||[],value.model,'自动选择');
+        $('language-effective-models').replaceChildren(
+          make('span',`翻译：${picker.name(value.model||result.translation_default_model)}`),
+          make('span',`润色：${picker.name(value.model||result.default_model)}`));
         $('language-settings-target').value=['auto','zh-CN','en'].includes(value.target_language)?value.target_language:'auto';++targetTicket;knownTarget=$('language-settings-target').value;updateTarget();
         $('language-settings-translate').value=value.translate_prompt||'';$('language-settings-polish').value=value.polish_prompt||'';
-        $('language-settings-save').disabled=false;status('');
+        $('language-preview-polish').value=polishDirection;$('language-settings-save').disabled=false;status('');schedulePreview();
       }catch(error){if(ticket===viewTicket&&view==='settings')status(`读取设置失败：${error.message}`,true);}
     }
     async function saveSettings(){
-      if(settingsRevision===null)return;const selected=$('language-settings-model').value;
-      if(selected==='missing'){status('所选模型当前不可用，请重新选择。',true);return;}
-      const model=selected===''?null:settingsModels[Number(selected)];if(selected!==''&&!model){status('模型列表已变化，请重新读取。',true);return;}
-      const value={model:model?{provider:model.provider,model:model.id}:null,target_language:$('language-settings-target').value,translate_prompt:$('language-settings-translate').value,polish_prompt:$('language-settings-polish').value};
+      if(settingsRevision===null)return;
+      const select=$('language-settings-model');
+      if(select.selectedOptions[0]?.disabled){status('所选模型当前不可用，请重新选择。',true);return;}
+      const value={model:window.PaperSettingsModels.chosen(select),target_language:$('language-settings-target').value,translate_prompt:$('language-settings-translate').value,polish_prompt:$('language-settings-polish').value};
       $('language-settings-save').disabled=true;
-      try{const result=await api('language_settings_update',{value,expected_revision:settingsRevision});settingsRevision=result.revision;++targetTicket;knownTarget=value.target_language;updateTarget();status('语言设置已保存。');}
+      try{const result=await api('language_settings_update',{value,expected_revision:settingsRevision});settingsRevision=result.revision;++targetTicket;knownTarget=value.target_language;updateTarget();await loadSettings();status('语言设置已保存。');}
       catch(error){status(error.code==='STATE_CONFLICT'?`设置已在其他窗口更改；本窗口内容仍保留，请复制后重新读取。${error.message}`:error.message,true);}
       finally{$('language-settings-save').disabled=false;}
     }
@@ -169,11 +189,14 @@ window.PaperLanguageLearning = {
     function close(){hide();onClose?.();}
     $('language-close').addEventListener('click',close);
     $('language-settings-open').addEventListener('click',()=>show('settings'));$('language-settings-reload').addEventListener('click',()=>void loadSettings());$('language-settings-save').addEventListener('click',()=>void saveSettings());
+    $('language-prompt-preview').addEventListener('toggle',schedulePreview);
+    for(const id of ['language-settings-translate','language-settings-polish'])$(id).addEventListener('input',schedulePreview);
+    for(const id of ['language-settings-target','language-preview-polish'])$(id).addEventListener('change',schedulePreview);
     for(const next of ['work','history','words'])$(`language-tab-${next}`).addEventListener('click',()=>show(next));
     $('language-translate').addEventListener('click',()=>void generate('translate'));$('language-polish').addEventListener('click',()=>void generate('polish'));
     $('language-source').addEventListener('input',()=>{sourcePage=null;failedRequest=null;++draftRevision;updateTarget();remember();});$('language-target').addEventListener('change',()=>{failedRequest=null;++draftRevision;updateTarget();if(!$('language-target').value)void refreshTarget();remember();});
     for(const [kind,load]of [['language-history',history],['vocabulary',words]])for(const [direction,delta]of [['prev',-20],['next',20]])$(`${kind}-${direction}`).addEventListener('click',()=>{if(kind==='language-history')historyOffset=Math.max(0,historyOffset+delta);else wordOffset=Math.max(0,wordOffset+delta);void load();});
     let searchTimer;$('vocabulary-query').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{wordOffset=0;void words();},250);});$('vocabulary-status').addEventListener('change',()=>{wordOffset=0;void words();});$('vocabulary-refresh').addEventListener('click',()=>void words());for(const format of ['json','csv'])$(`vocabulary-export-${format}`).addEventListener('click',()=>void exportWords(format));
-    return {element:panel,navigation:panel.querySelector?.('.language-tabs'),settingsButton:$('language-settings-open'),paperChanged,useSelection,show,showSettings(){show('settings');},hide,close,setAvailable(value){available=Boolean(value);controls();},sync(){controls();for(const id of ['language-selection-translate','language-selection-polish','ribbon-language'])if($(id))$(id).disabled=!getPaper();},dispose(){remember();saveGeometry();disposed=true;clearTimeout(searchTimer);floating?.dispose();++loadTicket;++viewTicket;},snapshot:()=>({paperId,view,busy,lastResultId:lastResult?.id})};
+    return {element:panel,navigation:panel.querySelector?.('.language-tabs'),settingsButton:$('language-settings-open'),paperChanged,useSelection,show,showSettings(){show('settings');},hide,close,setAvailable(value){available=Boolean(value);controls();},sync(){controls();for(const id of ['language-selection-translate','language-selection-polish','ribbon-language'])if($(id))$(id).disabled=!getPaper();},dispose(){remember();saveGeometry();disposed=true;clearTimeout(searchTimer);clearTimeout(previewTimer);floating?.dispose();++loadTicket;++viewTicket;},snapshot:()=>({paperId,view,busy,lastResultId:lastResult?.id})};
   },
 };

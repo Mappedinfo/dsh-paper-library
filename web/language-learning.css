@@ -30,3 +30,8 @@
 
 .language-polish-directions{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0 12px;grid-column:1}.language-polish-directions .button{font-size:12px;padding:4px 8px}.language-polish-directions .button[aria-pressed="true"]{background:var(--teal);color:var(--bg)}
 #language-target-current{display:inline-block;white-space:nowrap}.language-panel-embedded #language-result{grid-row:1 / span 4}
+.settings-model-effective { font-size: 14px; line-height: 1.5; margin-block: 6px; }
+.settings-model-effective span { display: block; }
+#language-prompt-preview { margin-block: 12px; }
+#language-prompt-preview > summary { cursor: pointer; margin-block-end: 8px; }
+#language-prompt-output pre { white-space: pre-wrap; overflow-wrap: anywhere; margin-block: 6px 14px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; }

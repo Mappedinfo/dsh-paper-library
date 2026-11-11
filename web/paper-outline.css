@@ -28,10 +28,32 @@
 }
 .paper-outline nav { margin-top: 6px; }
 .outline-tree, .outline-branch { list-style: none; margin: 0; padding: 0; }
-.outline-branch {
-  margin-inline-start: 9px;
-  padding-inline-start: 4px;
+.outline-tree { --outline-indent: 13px; }
+.outline-branch { margin-inline-start: var(--outline-indent); }
+.outline-tree > li, .outline-branch > li {
+  position: relative;
+  padding-inline-start: 9px;
+}
+.outline-tree > li::before, .outline-branch > li::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 2px;
+  inset-block: 0;
   border-inline-start: 1px solid var(--line);
+  pointer-events: none;
+}
+.outline-tree > li:last-child::before, .outline-branch > li:last-child::before {
+  inset-block-end: auto;
+  height: 14px;
+}
+.outline-row::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 2px;
+  inset-block-start: 14px;
+  width: 7px;
+  border-block-start: 1px solid var(--line);
+  pointer-events: none;
 }
 .outline-row {
   display: grid;
@@ -67,7 +89,8 @@
   line-height: 18px;
   text-align: start;
 }
-.outline-entry span { overflow-wrap: anywhere; }
+.outline-entry:not(button) { cursor: default; color: var(--muted); }
+.outline-entry span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .outline-entry small { color: var(--muted); font-variant-numeric: tabular-nums; }
 .outline-entry[aria-current] { font-weight: 600; }
 .paper-outline button:focus-visible { outline: 2px solid var(--dsw-alias-link); outline-offset: -2px; }

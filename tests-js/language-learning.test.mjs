@@ -581,3 +581,19 @@ test('repair resumes after storage failure, preserves manual meanings and never 
   delete f.store.records.get(entry.key).value.vocabulary_version;
   await f.handle({action:'language_vocabulary_sync',id:request.id});assert.equal((await f.handle({action:'vocabulary_list'})).total,0);assert.equal(f.calls.length,1);
 });
+
+test('prompt preview uses the generation template, includes live supplements and spends no model call', async () => {
+  const f = fixture()
+  const input = { action: 'language_prompt_preview', target_language: 'auto', polish_direction: 'academic',
+    translate_prompt: 'Keep synthetic numbers.', polish_prompt: 'Use fixture wording.' }
+  const preview = await f.handle(input)
+  assert.equal(f.calls.length, 0)
+  assert.equal(f.kernelCalls.length, 0)
+  assert.deepEqual(preview.translation.map(item => item.target_language), ['zh-CN', 'en'])
+  assert.match(preview.polish, /Requested direction \(academic\).*Use fixture wording/s)
+  assert.match(preview.translation[0].prompt, /Keep synthetic numbers.*<SOURCE_TEXT>/s)
+  const settings = await f.handle({ action: 'language_settings_get' })
+  await f.handle({ action: 'language_settings_update', value: { ...settings.value, translate_prompt: input.translate_prompt }, expected_revision: settings.revision })
+  await f.handle(request)
+  assert.equal(f.calls[0].prompt, preview.translation[0].prompt.replace('<SOURCE_TEXT>', source))
+})

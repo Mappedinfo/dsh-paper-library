@@ -134,7 +134,7 @@ export function projectPaperHistory(snapshot) {
  * Bind one paper to a normal Harness Session. The returned action handler uses
  * only public Host services and never reads profile files or changes defaults.
  */
-export function createPaperChat(ctx, { library, python, dispatch, core = dispatch, store, boards, validateModel, maxAnnotationCharacters = 24000 }) {
+export function createPaperChat(ctx, { library, python, dispatch, core = dispatch, store, boards, validateModel, paperModel, maxAnnotationCharacters = 24000 }) {
   let feedbackListener,turnFailureListener
   const tails = new Map()
   let admitted = 0
@@ -220,7 +220,10 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
   async function identity(id, signal) {
     const item = await kernel({ action: id.startsWith('dataset_') ? 'dataset_get' : 'get', id, ...(id.startsWith('dataset_') ? { include_details:false } : {}) }, signal)
     const directory = await realpath(library)
-    return { item, directory, sessionId: paperSessionId(directory, id) }
+    const sessionId = paperSessionId(directory, id)
+    paperModel?.ownDirectory(directory)
+    if (item.resource_kind === 'dataset') paperModel?.exclude(sessionId)
+    return { item, directory, sessionId }
   }
 
   async function snapshotOf(sessionId, signal) {
@@ -258,6 +261,8 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
     const created = !attached && !stored
     const workspace = await ctx.workspaceRegistry.create(directory, 'Paper Library')
     signal?.throwIfAborted()
+    const usesLibraryModel = Boolean(paperModel && item.resource_kind !== 'dataset')
+    if (usesLibraryModel) await paperModel.ready.catch(() => {})
     if (created) {
       // prepare does not register a Session or start an Agent. The persistence
       // service validates, stores and owns the log until this handle closes.
@@ -266,7 +271,7 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
       const seed = [{ seq: 0, time, type: 'session/title', data: { title: `阅读 · ${String(item.title || item.citekey || '论文').replace(/\s+/g, ' ').slice(0, 180)}`, messageSeqs: [], source: { kind: 'user' } } }]
       const source = request.source_session_id ? ctx.sessions.get(request.source_session_id) : undefined
       const sourceSelection = source ? ctx.sessionProjections.stateOf(source, 'modelSelection') : undefined
-      const initialModel = modelOf(sourceSelection?.pending) ?? modelOf(sourceSelection?.lastUsed) ?? modelOf(ctx.agentDefaultModel.currentSelection())
+      const initialModel = usesLibraryModel ? paperModel.current() : modelOf(sourceSelection?.pending) ?? modelOf(sourceSelection?.lastUsed) ?? modelOf(ctx.agentDefaultModel.currentSelection())
       if (initialModel) seed.push({ seq: seed.length, time, type: 'model/selection', data: initialModel })
       // prepare 创建只读待持久化对象；初始事件必须通过 seed 回放，不能 append。
       const prepared = ctx.sessions.prepare(sessionId, { seed, meta: { cwd: directory, createdAt: time } })
@@ -290,7 +295,7 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
     if (snapshot.header.cwd !== directory) throw new Error('论文对话的工作目录不匹配；已保留原对话。')
     const titleProjection = snapshot.projections?.values?.title
     const title = typeof titleProjection === 'string' ? titleProjection : titleProjection?.title
-    return { sessionId, created, title: title || `阅读 · ${String(item.title || item.citekey || '论文').slice(0, 180)}`, model: currentModel(snapshot), modelSource: 'harness-session', snapshot }
+    return { sessionId, created, title: title || `阅读 · ${String(item.title || item.citekey || '论文').slice(0, 180)}`, model: usesLibraryModel ? paperModel.current() : currentModel(snapshot), modelSource: usesLibraryModel ? 'paper-library' : 'harness-session', snapshot }
   }
 
   async function context(paper, request, signal) {
@@ -365,10 +370,12 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
     }
   }
 
-  async function handle(request, signal) {
+  async function handle(request, signal, pinnedModel) {
     signal?.throwIfAborted()
     const paper = await identity(request.id, signal)
     if (paper.item.resource_kind === 'dataset' && !['chat_ensure','chat_history'].includes(request.action)) throw new Error('数据集请使用所选来源的知识工作流；PDF 批注引用仅用于文献。')
+    if (paperModel && request.action === 'chat_model_update') throw new Error('请在 Paper Library 全局设置中切换论文模型。')
+    const route = paperModel && request.action === 'chat_send' ? await paperModel.resolve(signal, pinnedModel) : null
     const ensured = await ensure(paper, request, signal)
     const { snapshot, ...session } = ensured
     if (request.action === 'chat_ensure') return session
@@ -434,18 +441,19 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
     await snapshots.bindRequest(request.request_id, prepared.snapshot_id, expected)
     signal?.throwIfAborted()
     const requestId = `paper-library-${createHash('sha256').update(`${paper.sessionId}\0${request.request_id}`).digest('hex')}`
-    const accepted = await controller.prompt({ sessionId: paper.sessionId, requestId, mode: 'queue', content: [{ type: 'text', text: prepared.draft_text }] }, signal ?? new AbortController().signal)
+    const prompt = () => controller.prompt({ sessionId: paper.sessionId, requestId, mode: 'queue', content: [{ type: 'text', text: prepared.draft_text }] }, signal ?? new AbortController().signal)
+    const accepted = await (route ? paperModel.admit(paper.sessionId, route, prompt) : prompt())
     const attached = ctx.sessions.get(paper.sessionId)
     if (attached) await ctx.sessions.flush(attached)
     return { ...session, ...prepared, requestId, accepted: accepted.accepted }
   }
 
-  const handler = async (input, { signal } = {}) => {
+  const handler = async (input, { signal, pinnedModel } = {}) => {
     const request = requestOf(input)
     if (admitted >= 32) throw new Error('论文对话请求较多，请稍后重试。')
     admitted++
     const previous = tails.get(request.id) ?? Promise.resolve()
-    const result = previous.catch(() => {}).then(() => handle(request, signal))
+    const result = previous.catch(() => {}).then(() => handle(request, signal, pinnedModel))
     const tail = result.then(() => {}, () => {})
     tails.set(request.id, tail)
     try { return await result } finally {
@@ -454,6 +462,7 @@ export function createPaperChat(ctx, { library, python, dispatch, core = dispatc
     }
   }
   handler.install = () => {
+    paperModel?.install(ctx)
     ctx.effect(() => ctx.sessionProjections.register(annotationUsageProjection), 'paper-library: logged annotation usage')
     ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
       const decision = await next()

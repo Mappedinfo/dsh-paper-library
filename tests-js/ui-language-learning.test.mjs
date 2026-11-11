@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import vm from 'node:vm'
 import {resolveTranslationTarget} from '../src/harness/language-learning.mjs'
 import { readFile } from 'node:fs/promises'
-const script = await readFile(new URL('../web/language-learning.js', import.meta.url), 'utf8')
+const scripts = await Promise.all(['settings-models.js','language-learning.js'].map(name=>readFile(new URL(`../web/${name}`,import.meta.url),'utf8')))
 const clone = value => JSON.parse(JSON.stringify(value))
 const tick = () => new Promise(resolve => setImmediate(resolve))
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
@@ -18,6 +18,7 @@ function fixture({ get, put, respond } = {}) {
     append(...nodes) { for (const node of nodes) { this.children.push(node); node.parentElement = this } }
     replaceChildren(...nodes) { this.children = []; this.append(...nodes) }
     replaceWith(node) { const parent = this.parentElement; parent.children.splice(parent.children.indexOf(this), 1, node); node.parentElement = parent }
+    get selectedOptions() { return this.children.flatMap(node=>node.tagName==='OPTGROUP'?node.children:[node]).filter(node=>node.value===this.value) }
     setAttribute() {} focus() {}
     getBoundingClientRect() { return { left: parseFloat(this.style.left) || 16, top: parseFloat(this.style.top) || 16, width: parseFloat(this.style.width) || 420, height: parseFloat(this.style.height) || 590 } }
     addEventListener(type, fn) { const listeners = this.listeners.get(type) || []; listeners.push(fn); this.listeners.set(type, listeners) }
@@ -29,7 +30,7 @@ function fixture({ get, put, respond } = {}) {
     floating.attached.push({ panel, options })
     return { restore() { floating.calls.push('restore') }, save() { floating.calls.push('save') }, dispose() { floating.calls.push('dispose') } }
   } } }
-  vm.runInNewContext(script, { window, document, setTimeout, clearTimeout, navigator: { clipboard: { writeText: async () => {} } }, URL, Blob }, { filename: 'web/language-learning.js' })
+  for(const script of scripts)vm.runInNewContext(script, { window, document, setTimeout, clearTimeout, navigator: { clipboard: { writeText: async () => {} } }, URL, Blob }, { filename: 'web/language-learning.js' })
   const result = args => ({ id: `result-${args.request_id}`, request_id: args.request_id, paper_id: args.id, page: args.page || null, mode: args.mode, source_text: args.text, result: 'Synthetic translated result', explanation: 'Synthetic explanation', model: { provider: 'dsh', model: 'current' }, vocabulary: [], status: 'complete' })
   const ui = window.PaperLanguageLearning.create({
     api: async (action, args) => { requests.push({ action, ...clone(args) }); const value = respond?.(action, args, result); if (value !== undefined) return value; return action === 'language_generate' ? result(args) : { items: [], total: 0 } },
@@ -71,7 +72,7 @@ test('settings show configured routes and save prompts with the loaded revision'
   assert.deepEqual(groups.map(group => group.label), ['host', 'other'])
   assert.deepEqual(groups.map(group => group.children.length), [2, 1])
   assert.equal(f.element('language-settings-target').value, 'en')
-  f.element('language-settings-model').value = '0';f.element('language-settings-translate').value = '保留术语';f.element('language-settings-polish').value = '简洁表达';
+  f.element('language-settings-model').value = groups[0].children[0].value;f.element('language-settings-translate').value = '保留术语';f.element('language-settings-polish').value = '简洁表达';
   await f.click('language-settings-save');
   const saved = f.requests.find(row => row.action === 'language_settings_update');
   assert.deepEqual(saved.value, { model: { provider: 'host', model: 'chosen' }, target_language: 'en', translate_prompt: '保留术语', polish_prompt: '简洁表达' });

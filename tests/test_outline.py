@@ -14,7 +14,9 @@ def paper(tmp_path, bookmarks=False, rotation=0):
         page.set_rotation(rotation)
         doc.new_page().insert_text((50, 60), '2.1 Synthetic method', fontname='hebo', fontsize=15)
         if bookmarks:
-            doc.set_toc([[1, 'Introduction', 1], [2, 'Synthetic method', 2]])
+            doc.set_toc([[1, 'Introduction', 1], [1, 'Methodology', -1],
+                         [2, 'Synthetic method', 1], [2, 'Experiment', 2],
+                         [3, 'Setup', 2], [2, 'Analysis', 2], [1, 'Conclusion', 2]])
         doc.save(source)
     library = str(tmp_path / 'library')
     item = dispatch({'library': library, 'action': 'import', 'path': str(source)})['items'][0]
@@ -23,8 +25,14 @@ def paper(tmp_path, bookmarks=False, rotation=0):
 
 def test_bookmark_hierarchy_and_pages(tmp_path):
     result = dispatch(paper(tmp_path, bookmarks=True))
-    assert result['items'] == [{'title': 'Introduction', 'level': 1, 'page': 1},
-                               {'title': 'Synthetic method', 'level': 2, 'page': 2}]
+    expected = [
+        (None, 'Introduction', 1, 1), (None, 'Methodology', 1, None),
+        ('bookmark-2', 'Synthetic method', 2, 1), ('bookmark-2', 'Experiment', 2, 2),
+        ('bookmark-4', 'Setup', 3, 2), ('bookmark-2', 'Analysis', 2, 2),
+        (None, 'Conclusion', 1, 2),
+    ]
+    assert [(item['parent_id'], item['title'], item['level'], item['page']) for item in result['items']] == expected
+    assert [item['id'] for item in result['items']] == [f'bookmark-{index}' for index in range(1, 8)]
     assert not result['truncated']
 
 

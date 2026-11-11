@@ -13,7 +13,7 @@ const valid=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,160}$/.test(value)
  * Several papers may run at once up to the analysis service's own concurrency
  * limit; reading batches within one paper remain serial.
  */
-export function createQueuedPaperAnalysis({analysis,store,settings}) {
+export function createQueuedPaperAnalysis({analysis,store,settings,getModel}) {
   let disposed=false,draining=false,timer,tail=Promise.resolve()
   const inFlight=new Set()
   const locked=fn=>{const value=tail.then(fn);tail=value.catch(()=>{});return value}
@@ -44,7 +44,8 @@ export function createQueuedPaperAnalysis({analysis,store,settings}) {
     const saved=await result(input.id);if(saved)return saved
     const preferences=await settings.get()
     if(!preferences.available||preferences.value?.auto_analysis!==true)return {id:input.id,status:'idle',stage:'自动整理已关闭'}
-    const item={id:input.id,request_id:input.request_id,...(input.pages?{pages:[...input.pages]}:{}),...(input.source_session_id?{source_session_id:input.source_session_id}:{}),
+    const model=await getModel?.()
+    const item={...(model?{model}:{}),id:input.id,request_id:input.request_id,...(input.pages?{pages:[...input.pages]}:{}),...(input.source_session_id?{source_session_id:input.source_session_id}:{}),
       ...(input.mode!==undefined?{mode:input.mode}:{}),...(input.notes!==undefined?{notes:input.notes}:{}),...inputOptions,
       apply_metadata:input.mode==='metadata'?(input.apply_metadata??preferences.value.analysis_fill===true):false,
       review:input.mode==='metadata'?false:(input.review??preferences.value.auto_review!==false)}
@@ -74,7 +75,7 @@ export function createQueuedPaperAnalysis({analysis,store,settings}) {
         if(!(await entries()).some(item=>item.id===first.id&&item.request_id===first.request_id))return null
         return analysis({action:'paper_analysis_start',...first,reuse:true,
           apply_metadata:first.mode==='metadata'?(first.apply_metadata??preferences.value.analysis_fill===true):false,
-          review:first.mode==='metadata'?false:(first.review??preferences.value.auto_review!==false)})
+          review:first.mode==='metadata'?false:(first.review??preferences.value.auto_review!==false)},{pinnedModel:first.model})
       })
       if(!response)return
       await analysis.wait(first.id,response.request_id||first.request_id)
@@ -111,7 +112,8 @@ export function createQueuedPaperAnalysis({analysis,store,settings}) {
         if(actual.status==='idle'&&removed){const cancelled={id:input.id,request_id:removed.request_id,status:'cancelled',stage:'已取消排队'};await remember(input.id,cancelled);return cancelled}
       }else{const old=await store.get(resultKey(input.id));if(old.value)await store.put(resultKey(input.id),null,old.revision)}
     }
-    return analysis(input)
+    const pinnedModel=input?.action==='paper_analysis_start'&&!input.resume_from&&!input.repair_from ? await getModel?.() : null
+    return analysis(input,{pinnedModel})
   }
   handle.imported=async items=>{
     const outcomes=[]

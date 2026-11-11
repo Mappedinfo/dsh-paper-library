@@ -16,7 +16,7 @@ export const explicitAnnotationQuestion = comment => comment?.match(/(?:^|\n)(?:
  * user request on one saved annotation.
  * No library scans, file watchers, browser drafts or model-generated admission.
  */
-export function createCompanionQueue({store,settings,paperChat,dispatch,library,python,delay=1800}) {
+export function createCompanionQueue({store,settings,paperChat,dispatch,library,python,getModel,delay=1800}) {
   let disposed=false,running=false,reconciled=false,timer,activeRequest,tail=Promise.resolve()
   const locked=fn=>{const result=tail.then(fn);tail=result.catch(()=>{});return result}
   const read=async()=>(await store.get(key)).value?.entries||[]
@@ -68,7 +68,8 @@ export function createCompanionQueue({store,settings,paperChat,dispatch,library,
       const rows=await read(),prior=rows.findLast(v=>v.id===id&&v.annotation_id===note.id)
         ||(await store.get(paperKey(id))).value?.records.findLast(v=>v.annotation_id===note.id)
       if(prior?.fingerprint===fingerprint)return prior
-      const row={id,annotation_id:note.id,fingerprint,request_id:randomUUID(),status:'queued',due:Date.now()+delay}
+      const model=await getModel?.()
+      const row={id,annotation_id:note.id,fingerprint,request_id:randomUUID(),status:'queued',due:Date.now()+delay,...(model?{model}:{})}
       await change(values=>[...values.filter(v=>!(v.id===id&&v.annotation_id===note.id&&v.status==='queued'&&!v.manual)),row]);return row
     })
     wake();return result
@@ -86,7 +87,8 @@ export function createCompanionQueue({store,settings,paperChat,dispatch,library,
         ||(await store.get(paperKey(id))).value?.records?.findLast(row=>row.annotation_id===annotationId&&row.annotation_version===note.version&&row.status==='saved')
       if(known?.status==='saved'||known?.manual)return known
       const existing=known||rows.findLast(row=>same(row)&&['queued','preparing'].includes(row.status)&&!row.annotation_version&&!row.snapshot_id)
-      const row={...(existing||{id,annotation_id:annotationId,request_id:randomUUID(),status:'queued'}),manual:true,annotation_version:note.version,due:Date.now()}
+      const model=existing?existing.model:await getModel?.()
+      const row={...(existing||{id,annotation_id:annotationId,request_id:randomUUID(),status:'queued'}),...(model?{model}:{}),manual:true,annotation_version:note.version,due:Date.now()}
       await change(values=>existing?values.map(value=>value.request_id===existing.request_id?row:value)
         :[...values.filter(value=>!(same(value)&&value.status==='queued')),row])
       return row
@@ -143,7 +145,7 @@ export function createCompanionQueue({store,settings,paperChat,dispatch,library,
             return send
           })
           if(!claimed)continue
-          const sent=await paperChat({action:'chat_send',id:row.id,request_id:row.request_id,snapshot_id:snapshot})
+          const sent=await paperChat({action:'chat_send',id:row.id,request_id:row.request_id,snapshot_id:snapshot},{pinnedModel:row.model})
           await locked(()=>change(rows=>rows.map(v=>v.request_id===row.request_id&&v.status==='sending'?{...v,status:'accepted',session_id:sent.sessionId,error:null}:v)))
         }catch(error){await update(row.request_id,{status:'failed',error:String(error.message).slice(0,600)})}
         finally{activeRequest=undefined}

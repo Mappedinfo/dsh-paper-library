@@ -1,3 +1,4 @@
+import { createPaperModel } from './paper-model.mjs'
 import { createFieldRadarExporter } from './field-radar-export.mjs'
 import { createFieldRadarStore } from './field-radar.mjs'
 import { createFieldRadarAnalysis } from './field-radar-analysis.mjs'
@@ -44,7 +45,7 @@ export const inject = ['tools', 'llm']
  * Keep constraints out of here (the loader validates on boot); range checks belong
  * to the settings adapter in ./settings.mjs. Unknown config keys pass through. */
 export const Config = Schema.object({
-  auto_analysis: Schema.boolean().default(true).description('新增或选中文献后自动整理（按全文分批排队，使用本篇模型额度）。').volatile(),
+  auto_analysis: Schema.boolean().default(true).description('新增或选中文献后自动整理（按全文分批排队，使用资料库全局模型额度）。').volatile(),
   analysis_fill: Schema.boolean().default(true).description('整理完成后补齐空缺资料（有原文依据才补缺，保留已有资料）。').volatile(),
   auto_review: Schema.boolean().default(true).description('整理完成后生成证据图谱评审草稿（待审）。').volatile(),
   'auto-paper-conversation': Schema.boolean().default(false).description('实时伴学：保存批注后自动回复。').volatile(),
@@ -135,7 +136,9 @@ export function apply(ctx, rawConfig = {}) {
     scoped.effect(() => registerBundledSkills(scoped), 'paper-library: bundled paper-fetch skill')
   })
   ctx.inject(['connection', 'webServer', 'sessionController', 'workspaceRegistry', 'sessionPersistence', 'sessionProjections', 'sessions', 'agents', 'agentDefaultModel'], web => {
-    const paperChat = createPaperChat(web, { library: config.library, python: config.python, dispatch, core, store:options.localState, boards, maxAnnotationCharacters: config.maxAnnotationCharacters,
+    const paperModel = createPaperModel({ store: options.localState, library: config.library, models: options.models, llm: ctx.llm,
+      getDefault: () => web.agentDefaultModel.currentSelection() })
+    const paperChat = createPaperChat(web, { library: config.library, python: config.python, dispatch, core, store:options.localState, boards, paperModel, maxAnnotationCharacters: config.maxAnnotationCharacters,
       validateModel: async (selection, signal) => {
         const available = await options.models(signal)
         if (!available.models.some(item => item.provider === selection.provider && item.id === selection.model)) throw new Error('所选模型不在 DSH 当前可用列表中，请重新读取。')
@@ -144,7 +147,7 @@ export function apply(ctx, rawConfig = {}) {
       },
     })
     paperChat.install()
-    const companion = createCompanionQueue({store:options.localState,settings,paperChat,dispatch,library:config.library,python:config.python})
+    const companion = createCompanionQueue({store:options.localState,settings,paperChat,dispatch,library:config.library,python:config.python,getModel:async()=>{await paperModel.ready.catch(()=>{});return paperModel.current()}})
     paperChat.onFeedback(companion.feedback)
     paperChat.onTurnFailure(companion.turnFailed)
     web.effect(()=>()=>{companion.dispose();paperChat.onFeedback(undefined);paperChat.onTurnFailure(undefined)},'paper-library: companion lifecycle')
@@ -162,7 +165,7 @@ export function apply(ctx, rawConfig = {}) {
         return (await paperChat({action:'chat_ensure',id:entity.id},{signal})).model
       },
     })
-    const paperAnalysis = createQueuedPaperAnalysis({store:options.localState,settings,analysis:createPaperAnalysis({store:options.localState,dispatch,paperChat,library:config.library,python:config.python,maxConcurrency:config.analysisConcurrency,reviewProfile:config.reviewProfile,
+    const paperAnalysis = createQueuedPaperAnalysis({store:options.localState,settings,getModel:()=>paperModel.resolve(),analysis:createPaperAnalysis({store:options.localState,dispatch,paperChat,library:config.library,python:config.python,maxConcurrency:config.analysisConcurrency,reviewProfile:config.reviewProfile,
       agent:createPaperAnalysisAgent(web,{cwd:config.library,maxOutputTokens:config.maxLanguageOutputTokens,generate:languageAI})})})
     automaticAnalysis=paperAnalysis
     web.effect(()=>()=>{automaticAnalysis=undefined;paperAnalysis.dispose()},'paper-library: background analysis lifecycle')
@@ -178,7 +181,7 @@ export function apply(ctx, rawConfig = {}) {
     // The workspace owns the manuscript folder under the DSH home and keeps it in the
     // sync service's own config; both are host-side jobs, so neither enters the worker.
     const latexWorkspace = createLatexWorkspace({ config, dispatch, settings, library: config.library, python: config.python })
-    const fetchHandler = createFetchHandler({ ...options, paperChat, companion, languageLearning, handwriting, annotationCaption, libraryKnowledge, paperAnalysis, challengeMining, latexAI, latexWorkspace, basePath: '/api/paper-library' })
+    const fetchHandler = createFetchHandler({ ...options, paperModel, paperDatasetAI: languageAI, paperDatasetModel: signal => paperModel.resolve(signal), paperChat, companion, languageLearning, handwriting, annotationCaption, libraryKnowledge, paperAnalysis, challengeMining, latexAI, latexWorkspace, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',
       path: '/api/paper-library',

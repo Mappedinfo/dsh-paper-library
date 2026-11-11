@@ -12,7 +12,8 @@ class Element {
   removeAttribute(k){delete this.attributes[k];}
   get childElementCount(){return this.children.length;}
   addEventListener(k,fn){this.listeners[k]=fn;}
-  get options(){return this.children;}
+  get options(){return this.children.flatMap(child=>child.tagName==='optgroup'?child.children:[child]);}
+  get selectedOptions(){return this.options.filter(option=>option.value===this.value);}
   click(){return this.listeners.click?.();}
 }
 const flush=async()=>{await new Promise(setImmediate);await new Promise(setImmediate);};
@@ -33,14 +34,32 @@ test('outline bookmarks navigate without starting extraction; paused inference s
 
 test('model settings show effective defaults and save explicit choices with revision and existing prompts',async()=>{
   const {window}=await load('settings-models.js');const container=new Element('div'),calls=[];
-  const record={revision:'rev1',value:{model:null,target_language:'en',translate_prompt:'keep',polish_prompt:'keep polish'},models:[{provider:'host',id:'general'},{provider:'host',id:'fast'}],default_model:{provider:'host',model:'general'},translation_default_model:{provider:'host',model:'fast'}};
-  const api=async(action,args)=>{calls.push({action,args});if(action==='language_settings_get')return record;if(action==='chat_ensure')return{model:{provider:'host',model:'general'}};if(action==='chat_model_update')return{model:args.model};if(action==='language_settings_update')return{value:args.value,revision:'rev2'};throw Error(action);};
-  const ui=window.PaperSettingsModels.create({api,getPaper:()=>({id:'paper-a'}),container});await ui.refresh();
+  const record={revision:1,value:{model:null,target_language:'en',translate_prompt:'keep',polish_prompt:'keep polish'},models:[{provider:'host',provider_name:'Test Host',id:'general'},{provider:'host',provider_name:'Test Host',id:'fast'}],default_model:{provider:'host',model:'general'},translation_default_model:{provider:'host',model:'fast'}};
+  const paper={writable:true,revision:0,value:{model:null},models:record.models,effective_model:record.default_model};
+  const api=async(action,args)=>{
+    calls.push({action,args});
+    if(action==='language_settings_get')return record;
+    if(action==='paper_model_get')return paper;
+    if(action==='paper_model_efforts')return {efforts:[{id:'high',name:'高'}]};
+    if(action==='paper_model_update')return {...paper,revision:1,effective_model:args.model};
+    if(action==='language_settings_update')return{value:args.value,revision:2};
+    throw Error(action);
+  };
+  const ui=window.PaperSettingsModels.create({api,container});await ui.refresh();
   const nodes=container.children[0].children;
-  assert.match(nodes[1].textContent,/host \/ general/);assert.match(nodes[4].textContent,/翻译：host \/ fast；润色：host \/ general/);
-  nodes[0].children[1].value=JSON.stringify({provider:'host',model:'fast'});await nodes[2].click();assert.equal(calls.at(-1).action,'chat_model_update');assert.equal(calls.at(-1).args.id,'paper-a');
-  nodes[3].children[1].value=JSON.stringify({provider:'host',model:'general'});await nodes[5].click();
-  assert.deepEqual(json(calls.at(-1).args),{expected_revision:'rev1',value:{...record.value,model:{provider:'host',model:'general'}}});assert.match(nodes[4].textContent,/翻译：host \/ general；润色：host \/ general/);
+  assert.match(nodes[3].textContent,/general · host/);
+  assert.deepEqual(nodes[6].children.map(n=>n.textContent),['翻译：fast · host','润色：general · host']);
+  const picker=nodes[0].children[1];
+  assert.equal(picker.children[1].label,'Test Host');
+  assert.equal(picker.children[1].children[1].textContent,'fast');
+  picker.value=JSON.stringify({provider:'host',model:'fast'});picker.listeners.change();await flush();
+  nodes[1].children[1].value='high';await nodes[4].click();
+  assert.equal(calls.at(-1).action,'paper_model_update');
+  assert.deepEqual(json(calls.at(-1).args),{expected_revision:0,model:{provider:'host',model:'fast',reasoningEffort:'high'}});
+  nodes[5].children[1].value=JSON.stringify({provider:'host',model:'general'});await nodes[7].click();
+  assert.deepEqual(json(calls.at(-1).args),{expected_revision:1,value:{...record.value,model:{provider:'host',model:'general'}}});
+  assert.deepEqual(nodes[6].children.map(n=>n.textContent),['翻译：general · host','润色：general · host']);
+  assert.ok(calls.every(call=>!call.action.startsWith('chat_')));
 });
 
 test('outline groups chapters, keeps current page visible when collapsed and offers bounded thumbnail groups',async()=>{

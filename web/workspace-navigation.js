@@ -1,7 +1,7 @@
 'use strict';
 // 内容分类共用检索行、路径和已有关系；阅读项目与写作项目分别展示。
 window.PaperWorkspaceNavigation = (() => {
-  const KINDS = Object.freeze({ paper: '文献', board: '画板', latex: 'LaTeX 写作', project: '阅读项目' });
+  const KINDS = Object.freeze({ paper: '文献', dataset: '数据集', board: '画板', latex: 'LaTeX 写作', project: '阅读项目' });
   const ROOTS = Object.freeze({ ...KINDS, notes: '笔记' });
   const PAGE = 20, TRAIL = 8;
   const key = item => item ? `${item.kind}\u0000${item.id}` : '';
@@ -23,13 +23,13 @@ window.PaperWorkspaceNavigation = (() => {
     const actionsHome = actions?.parentNode;
     if (!root || !catalogRoot || !relatedRoot || typeof api !== 'function') throw Error('工作区导航需要导航、目录与关联内容容器。');
     let live = true, section = 'paper', current = null, trail = [], transition = false, intent = 0, pending = null, catalogSequence = 0, relatedSequence = 0;
-    const catalogState = Object.fromEntries(['board', 'latex', 'project'].map(kind => [kind, { query: '', draft: '', offset: 0, page: null, busy: false, error: '', warnings: [] }]));
+    const catalogState = Object.fromEntries(['dataset', 'board', 'latex', 'project'].map(kind => [kind, { query: '', draft: '', offset: 0, page: null, busy: false, error: '', warnings: [] }]));
     let related = { groups: {}, busy: false, error: '', warnings: [], truncated: false }, groupRequests = {}, relatedLoaded = false, popup = null;
     const listeners = [];
     const el = (tag, className, text) => { const node = doc.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     const listen = (node, event, fn, options) => { node.addEventListener(event, fn, options); listeners.push(() => node.removeEventListener(event, fn, options)); };
     const button = (text, fn, className = 'workspace-nav-button') => { const node = el('button', className, text); node.type = 'button'; node.addEventListener('click', fn); return node; };
-    const nav = el('nav', 'workspace-navigation'); nav.setAttribute('aria-label', '文献、画板、写作与阅读项目导航');
+    const nav = el('nav', 'workspace-navigation'); nav.setAttribute('aria-label', '文献、数据集、画板、写作与阅读项目导航');
     const roots = el('div', 'workspace-navigation-roots'), crumbs = el('ol', 'workspace-breadcrumbs'); crumbs.setAttribute('aria-label', '关联内容路径');
     const rootButtons = {};
     for (const [kind, label] of Object.entries(ROOTS)) {
@@ -50,14 +50,15 @@ window.PaperWorkspaceNavigation = (() => {
     if(paperHeading){paperHeading.classList.add('workspace-paper-heading');nav.insertBefore(paperHeading,searchHost);}
     const catalog = el('section', 'workspace-catalog'); catalog.setAttribute('aria-label', '工作区目录');
     const catalogHeader = el('header', 'workspace-section-header'), catalogTitle = el('strong'), catalogRefresh = button('刷新', () => void loadCatalog()); const projectCreate = button('新建阅读项目', () => options.onCreateProject?.()); projectCreate.hidden = true; catalogHeader.append(catalogTitle, projectCreate, catalogRefresh);
-    const searchForm = el('form', 'workspace-catalog-search'), search = el('input'); search.type = 'search'; search.maxLength = 200; search.placeholder = '检索名称'; search.setAttribute('aria-label', '检索画板、写作或阅读项目');
+    const searchForm = el('form', 'workspace-catalog-search'), search = el('input'); search.type = 'search'; search.maxLength = 200; search.placeholder = '检索名称'; search.setAttribute('aria-label', '检索工作区目录');
     const searchButton = el('button', 'workspace-nav-button', '检索'); searchButton.type = 'submit'; searchForm.append(search, searchButton); if (paperSearch) searchHost.append(paperSearch); searchHost.append(searchForm);
     listen(search, 'input', () => { if (section !== 'paper' && !current) catalogState[section].draft = search.value.slice(0, 200); });
     listen(searchForm, 'submit', event => { event.preventDefault(); if (section === 'paper' || current) return; const state = catalogState[section]; state.draft = search.value.slice(0, 200); state.query = state.draft.trim(); state.offset = 0; void loadCatalog(); });
     const catalogStatus = el('p', 'workspace-nav-status'); catalogStatus.setAttribute('role', 'status');
     const catalogList = el('div', 'workspace-object-list'), catalogPager = el('div', 'workspace-nav-pagination');
     const catalogDescription = el('p', 'workspace-nav-description'); catalogDescription.hidden = true;
-    catalog.append(catalogHeader, catalogDescription, catalogStatus, catalogList, catalogPager); catalogRoot.replaceChildren(catalog);
+    const datasetActions = el('div', 'workspace-dataset-actions');
+    catalog.append(catalogHeader, datasetActions, catalogDescription, catalogStatus, catalogList, catalogPager); catalogRoot.replaceChildren(catalog);
     const relations = el('details', 'workspace-related'), relatedSummary = el('summary'), relatedBody = el('div', 'workspace-related-body');
     relatedSummary.setAttribute('aria-label', '关联子内容'); relations.append(relatedSummary, relatedBody);
     const relatedHeading = popupHeading('关联内容', () => closePopovers(true));
@@ -100,11 +101,13 @@ window.PaperWorkspaceNavigation = (() => {
     const emit = () => { if (live) options.onChange?.(state()); };
     const warnings = value => Array.isArray(value) ? value.filter(text => typeof text === 'string').slice(0, 6).map(text => text.slice(0, 300)) : [];
     function describe(item) { const embedded = item.via?.title && item.relation?.includes('阅读项目') && item.relation.includes(item.via.title); return [item.relation, item.via?.title && !embedded ? `经阅读项目：${item.via.title}` : '', item.missing ? '原内容已不可用' : ''].filter(Boolean).join(' · '); }
-    function row(item) {
+    function row(item, inCatalog = false) {
       const record = el('div', 'workspace-object-row'), open = button(item.title, () => void navigate(item), 'workspace-object-open');
       open.title = item.title; open.disabled = item.missing || transition;
       const detail = [describe(item), item.kind === 'project' && Number.isSafeInteger(item.paper_count) ? `${item.paper_count} 篇文献` : '', item.kind === 'project' ? item.description : ''].filter(Boolean).join(' · '); if (detail) open.append(el('small', 'workspace-object-relation', detail));
-      const arrow = el('span', 'workspace-object-arrow', '↗'); arrow.setAttribute('aria-hidden', 'true'); record.append(open, arrow); return record;
+      const arrow = el('span', 'workspace-object-arrow', '↗'); arrow.setAttribute('aria-hidden', 'true'); record.append(open, arrow);
+      if (inCatalog && item.kind === 'dataset') options.decorateDatasetRow?.(record, item);
+      return record;
     }
     function pager(host, result, action, busy) {
       host.replaceChildren(); if (!result || !result.items.length && !result.offset) return;
@@ -139,8 +142,10 @@ window.PaperWorkspaceNavigation = (() => {
       search.placeholder = `检索${KINDS[section]}`;
       catalogRefresh.disabled = value.busy || transition; search.disabled = transition; searchButton.disabled = value.busy || transition; search.value = value.draft;
       catalogStatus.textContent = [value.busy ? '正在读取…' : '', value.error ? `${value.error}${value.page ? '；仍显示上一次结果。' : ''}` : '', ...value.warnings].filter(Boolean).join(' '); catalogStatus.classList.toggle('is-error', !!value.error);
+      datasetActions.hidden = section !== 'dataset';
+      if (!datasetActions.hidden) options.datasetCatalogActions?.(datasetActions);
       catalogList.replaceChildren();
-      for (const item of value.page?.items || []) catalogList.append(row(item));
+      for (const item of value.page?.items || []) catalogList.append(row(item, true));
       if (!value.busy && !value.error && !value.page?.items.length) catalogList.append(el('p', 'workspace-nav-empty', value.query ? '没有找到匹配内容。' : `还没有${KINDS[section]}。`));
       pager(catalogPager, value.page, offset => { value.offset = offset; void loadCatalog(); }, value.busy || transition);
     }
@@ -236,7 +241,7 @@ window.PaperWorkspaceNavigation = (() => {
       finally { if (owner === intent) { pending = null; transition = false; if (live) render(); } }
     }
     render();
-    return { setCurrent, selectRoot, navigate, mountActions, closePopovers, refresh: () => { if (current) { ++relatedSequence; groupRequests = {}; related.busy = false; relatedLoaded = false; if (current.kind === 'project' || popup === 'related') return loadRelated(); renderRelated(); return true; } return loadCatalog(); }, state, dispose() { closePopovers(); mountActions(); live = false; ++intent; ++catalogSequence; ++relatedSequence; for (const remove of listeners) remove(); if (paperSearch && paperSearchHome) { paperSearch.hidden = false; paperSearchHome.append(paperSearch); } if(paperHeading&&paperHeadingHome){paperHeading.hidden=false;paperHeading.classList.remove('workspace-paper-heading');paperHeadingHome.prepend(paperHeading);} if (actions && actionsHome) actionsHome.append(actions); root.replaceChildren(); catalogRoot.replaceChildren(); relatedRoot.replaceChildren(); } };
+    return { setCurrent, selectRoot, navigate, mountActions, renderCatalog, closePopovers, refresh: () => { if (current) { ++relatedSequence; groupRequests = {}; related.busy = false; relatedLoaded = false; if (current.kind === 'project' || popup === 'related') return loadRelated(); renderRelated(); return true; } return loadCatalog(); }, state, dispose() { closePopovers(); mountActions(); live = false; ++intent; ++catalogSequence; ++relatedSequence; for (const remove of listeners) remove(); if (paperSearch && paperSearchHome) { paperSearch.hidden = false; paperSearchHome.append(paperSearch); } if(paperHeading&&paperHeadingHome){paperHeading.hidden=false;paperHeading.classList.remove('workspace-paper-heading');paperHeadingHome.prepend(paperHeading);} if (actions && actionsHome) actionsHome.append(actions); root.replaceChildren(); catalogRoot.replaceChildren(); relatedRoot.replaceChildren(); } };
   }
   return Object.freeze({ create });
 })();
