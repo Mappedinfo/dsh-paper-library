@@ -1,7 +1,12 @@
 /* One reading surface with a contextual ribbon; all scrolling stays inside its pane. */
-:root{--workbench-height:112px}
-body{height:100dvh;overflow:hidden}
-.topbar{height:var(--workbench-height);grid-template-rows:28px 28px 32px 19px;gap:0 12px;padding:5px 12px 0}
+:root{
+  --reader-toolbar-height:40px;
+  --annotation-tools-height:0px;
+  --reader-search-height:0px;
+  --reader-status-height:19px;
+}
+body{--workbench-height:calc(65px + var(--reader-toolbar-height) + var(--annotation-tools-height) + var(--reader-search-height) + var(--reader-status-height));height:100dvh;overflow:hidden}
+.topbar{height:var(--workbench-height);grid-template-rows:28px 28px var(--reader-toolbar-height);grid-auto-rows:max-content;gap:0 12px;padding:5px 12px 0}
 .brand{font-size:17px}.brand-mark{width:22px;height:25px;font-size:24px}.brand-group{gap:15px}.brand-group .toolbar-paper{font-size:12px;color:#465b51}
 .topbar-actions{font-size:10px}.topbar .status{display:none}
 .reader-ribbon{grid-column:1/-1;display:flex;align-items:stretch;gap:4px;min-width:0;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid #d8ded4;white-space:nowrap}
@@ -9,9 +14,12 @@ body{height:100dvh;overflow:hidden}
 .reader-ribbon [aria-pressed=true]{color:#185c4d;background:#e4ece3;box-shadow:inset 0 -2px #28675c}
 #reader-fullscreen{margin-left:0}
 .reader-ribbon-status{display:flex;align-items:center;flex:none;margin-left:auto}
-.paper-tools{gap:8px;border:0;padding:2px 0;min-height:32px;overflow-y:hidden}.paper-tools .button{font-size:11px;padding:4px 7px;min-height:27px}
+.paper-tools{gap:8px;border:0;padding:2px 0;min-height:32px;overflow-y:hidden}.paper-tools .button,.annotation-tool-group .button{font-size:11px;padding:4px 7px;min-height:27px}
 .toolbar-reader{gap:7px;border:0;padding:0}.toolbar-reader input{width:38px;padding:2px;height:24px}.toolbar-reader .page-controls{gap:0}.toolbar-reader .page-controls label{display:flex;gap:5px;align-items:center}.toolbar-reader .page-controls span{font-size:10px}
 .annotation-tool-group,.library-tool-group{display:flex;gap:4px;align-items:center;flex-shrink:0}
+body.annotation-tools-visible{--annotation-tools-height:36px}
+.annotation-tool-group{grid-column:1/-1;box-sizing:border-box;height:var(--annotation-tools-height);min-width:0;padding-inline:2px;border-top:1px solid var(--line);overflow:auto hidden;scrollbar-width:thin;white-space:nowrap}
+.annotation-tool-group>*{flex-shrink:0}
 .library-tool-group{flex:1 0 auto;min-width:0}
 .library-tool-group #catalog-archive{margin-left:auto;color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 38%,transparent)}
 .library-tool-group #catalog-archive:hover:not(:disabled){color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,var(--surface))}
@@ -38,7 +46,7 @@ body{height:100dvh;overflow:hidden}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 
 /* Free rail resize handle and PDF zoom controls */
-.reading-rail-resizer{position:absolute;top:0;bottom:0;left:calc(var(--rail-width,var(--rail-default,214px)) - 4px);width:8px;z-index:26;cursor:col-resize;touch-action:none}
+.reading-rail-resizer{position:absolute;top:56px;bottom:0;left:calc(var(--rail-width,var(--rail-default,214px)) - 4px);width:8px;z-index:26;cursor:col-resize;touch-action:none}
 .reading-rail-resizer:before{content:"";position:absolute;left:3px;top:0;bottom:0;width:2px;background:transparent}
 .reading-rail-resizer:hover:before,.reading-rail-resizer.is-active:before{background:var(--teal,#28675c)}
 .reading-rail-resizer:focus-visible{outline:2px solid var(--teal,#28675c);outline-offset:-1px}
@@ -57,8 +65,7 @@ body{height:100dvh;overflow:hidden}
 .reader-mode[data-mode=auto] .button#reader-mode-auto,.reader-mode[data-mode=ask] .button#reader-mode-ask{background:#e4ece3;outline:1px solid #b8cbb7;color:#174c40}
 
 /* One fixed row from entry to completion; autosave only changes its contents. */
-body.handwriting-tools-visible{--workbench-height:145px}
-.handwriting-tools-visible .topbar{grid-template-rows:28px 28px 32px 52px}
+body.handwriting-tools-visible{--reader-status-height:52px}
 .handwriting-tools-visible .reader-status-bar{height:52px;border-top:1px solid var(--line)}
 .reader-ink-draft{display:flex;align-items:center;gap:6px;flex:0 1 auto;min-width:0;height:52px;overflow:hidden;white-space:nowrap;color:var(--ink);font-size:12px}
 .reader-ink-draft[hidden],.reader-ink-width[hidden],.reader-mode[hidden]{display:none}
@@ -78,8 +85,10 @@ body.handwriting-tools-visible{--workbench-height:145px}
 .linked-handwriting-summary p{white-space:pre-wrap;overflow-wrap:anywhere}
 /* 原文作为可选取摘录展示，定位与复制是独立操作。 */
 .annotation-excerpt{margin:7px 0;padding:6px 9px;border:1px solid var(--line);border-radius:6px;background:var(--paper,var(--surface))}
-.annotation-excerpt-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.annotation-excerpt-heading .button{font-size:11px;padding:2px 4px}
+.annotation-excerpt-heading{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px}
+.annotation-excerpt-heading>span,.annotation-excerpt-heading>details{white-space:nowrap}
+.annotation-excerpt-heading .button{font-size:12px;min-height:28px;padding:3px 4px;white-space:nowrap}
+.annotation-excerpt-heading .annotation-style-menu>summary{display:flex;align-items:center;min-height:28px;padding-inline:4px}
 .annotation-card .annotation-quote{display:block;max-width:100%;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;border:0;padding:0;margin:3px 0;background:transparent;color:var(--ink);font:inherit;line-height:1.6;cursor:text;user-select:text;-webkit-user-select:text}
 .annotation-excerpt .annotation-quote.is-collapsed{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;line-clamp:4;overflow:hidden}
 .annotation-reply-body,.annotation-reply-body *{user-select:text;-webkit-user-select:text;cursor:text}
@@ -147,10 +156,7 @@ body.handwriting-tools-visible{--workbench-height:145px}
 .annotation-style-panel p:empty{display:none}
 .reader-color-presets-menu>summary{font-size:12px;cursor:pointer}
 
-body.pdf-search-open{--workbench-height:150px}
-body.pdf-search-open .topbar{grid-template-rows:28px 28px 32px 38px 19px}
-body.pdf-search-open.handwriting-tools-visible{--workbench-height:183px}
-body.pdf-search-open.handwriting-tools-visible .topbar{grid-template-rows:28px 28px 32px 38px 52px}
+body.pdf-search-open{--reader-search-height:38px}
 #pdf-search-row{grid-column:1/-1;box-sizing:border-box;height:38px}
 
 /* 顶部颜色与 PDF 批注对应；字号仅调整阅读内容，不放大操作栏。 */

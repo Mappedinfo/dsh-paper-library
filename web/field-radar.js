@@ -9,7 +9,7 @@ window.PaperFieldRadar = (() => {
     let alive = true, opened = false, loading = false, epoch = 0, current = null, revision = 0, topics = [], topicOffset = 0, topicNext = null, tab = 'overview', offset = 0, query = '', task = '', year = '', matches = new Map(), matching = false, legacy = null, legacyData = null, importing = false, analysis = null, analysisRequest = null, analyzing = false, legacyLoading = false, legacyLookup = 0, claimLimit = 40, renderingImage = false;
     const root = make('section', undefined, 'field-radar'); root.id = 'field-radar'; root.hidden = true; root.setAttribute('aria-label', '领域研究与学者雷达'); host.append(root);
     const trigger = button('领域研究', () => void open(), 'field-radar-open'); trigger.title = '从研究问题查看方法、学者、作品与来源，并返回本库阅读'; trigger.setAttribute('aria-expanded', 'false'); triggerHost.prepend(trigger);
-    const heading = make('header', undefined, 'radar-heading'), intro = make('div'); intro.append(make('span', 'PAPER LIBRARY / RESEARCH', 'radar-eyebrow'), make('h1', '领域研究'), make('p', '把问题、学者与作品连回自己的文献库。', 'muted')); heading.append(intro, button('返回文献库', hide, 'field-radar-close')); root.append(heading);
+    const heading = make('header', undefined, 'radar-heading'); heading.append(make('h1', '领域研究'), button('返回文献库', hide, 'field-radar-close')); root.append(heading);
     const toolbar = make('div', undefined, 'radar-toolbar'), choose = make('select'); choose.id = 'field-radar-topic'; choose.setAttribute('aria-label', '研究主题');
     const topicPrev = button('上一组主题', () => { topicOffset = Math.max(0, topicOffset - 20); void loadTopics(false); }); const topicMore = button('下一组主题', () => { if (topicNext !== null) { topicOffset = topicNext; void loadTopics(false); } });
     const upload = make('input'); upload.type = 'file'; upload.accept = '.json,application/json'; upload.hidden = true; upload.id = 'field-radar-upload';
@@ -28,7 +28,10 @@ window.PaperFieldRadar = (() => {
     imageFormat.addEventListener('change',()=>{renderButton.textContent=chartText('后端导出 ')+imageFormat.value.toUpperCase();});
     imageView.addEventListener('change',()=>{chartOffset=0;imageGroup.disabled=imageView.value!=='publications';frequencyBy.disabled=imageView.value!=='frequency';if(tab==='charts')render();});
     imageGroup.addEventListener('change',()=>{chartOffset=0;if(tab==='charts')render();});imageGroup.disabled=true;
-    toolbar.append(choose, topicPrev, topicMore, importButton, exportButton, refresh, upload);const imageTools=make('div',undefined,'radar-image-tools');imageTools.append(imageLanguage,imageView,imageGroup,frequencyBy,imageFormat,previewButton,renderButton);toolbar.append(imageTools); root.append(toolbar);
+    toolbar.append(choose, topicPrev, topicMore, importButton, exportButton, refresh, upload);root.append(toolbar);
+    const chartTools=make('details',undefined,'radar-chart-tools');chartTools.id='field-radar-chart-tools';
+    const chartToolsLabel=make('summary','图表工具'),imageTools=make('div',undefined,'radar-toolbar radar-image-tools');
+    imageTools.append(imageLanguage,imageView,imageGroup,frequencyBy,imageFormat,previewButton,renderButton);chartTools.append(chartToolsLabel,imageTools);
     const status = make('p', '', 'radar-status'); status.id = 'field-radar-status'; status.setAttribute('role', 'status'); root.append(status);
     const summary = make('div', undefined, 'radar-summary'); root.append(summary);
     const tabs = make('nav', undefined, 'radar-tabs'); tabs.setAttribute('aria-label', '领域研究视图'); const tabButtons = new Map();
@@ -38,6 +41,7 @@ window.PaperFieldRadar = (() => {
     const taskSelect = make('select'); taskSelect.setAttribute('aria-label', '任务类型'); taskSelect.id = 'field-radar-task'; const yearSelect = make('select'); yearSelect.setAttribute('aria-label', '收录年份'); yearSelect.id = 'field-radar-year';
     const reset = button('清空筛选', () => { clearTableFilters(); clearRelationSelection(); query = task = year = ''; offset = 0; chartOffset=0; search.value = ''; taskSelect.value = ''; yearSelect.value = ''; render(); });
     search.addEventListener('input', () => { query = search.value; offset = 0; chartOffset=0; render(); }); taskSelect.addEventListener('change', () => { task = taskSelect.value; offset = 0; chartOffset=0; render(); }); yearSelect.addEventListener('change', () => { year = yearSelect.value; offset = 0; chartOffset=0; render(); }); filters.append(search, taskSelect, yearSelect, reset); root.append(filters);
+    root.append(chartTools);
     const content = make('div', undefined, 'radar-content'); content.id = 'field-radar-content'; root.append(content);
     const legacyRoot = make('div', undefined, 'radar-legacy-mount'); legacyRoot.id = 'field-radar-legacy'; legacyRoot.hidden = true; root.append(legacyRoot);
     const relationsRoot=make('div');relationsRoot.id='field-radar-relations';relationsRoot.hidden=true;root.append(relationsRoot);let relationsView=null,relationPaperIds=null;
@@ -63,7 +67,7 @@ window.PaperFieldRadar = (() => {
       if(imagePreview?.scope===imageScope()){for(const warning of imagePreview.result.warnings||[])content.append(make('p',String(warning),'radar-warning'));if(imagePreview.result.available===false)content.append(make('p',chartText("当前范围缺少此图需要的已核验数据。下图说明缺失项，不表示零值。"),'radar-warning'));const figure=make('figure',undefined,'radar-chart-preview'),img=make('img');img.src=imagePreview.url;img.alt=imageView.selectedOptions[0]?.textContent||chartText("研究图表");img.addEventListener('error',()=>message(chartText("图片预览未能加载，请重新生成或导出查看。"),true));figure.append(img,make('figcaption',imageLanguage.value==='en'?`Current selection · Revision ${String(imagePreview.result.topic_revision||'').slice(0,8)} · Sources and missing data are documented in the chart and receipt`:`当前筛选 · 版本 ${String(imagePreview.result.topic_revision||'').slice(0,8)} · 来源及缺失说明见图内与导出回执`));content.append(figure);const paging=make('div',undefined,'radar-pager'),receipt=imagePreview.result;const previous=button(chartText("上一页图表"),()=>{if(renderingImage)return;chartOffset=Math.max(0,chartOffset-12);void renderImage(true);},'field-radar-chart-prev'),next=button(chartText("下一页图表"),()=>{if(renderingImage)return;chartOffset+=receipt.count;void renderImage(true);},'field-radar-chart-next');previous.disabled=renderingImage||chartOffset===0;next.disabled=renderingImage||!receipt.has_more||!receipt.count;paging.append(previous,make('span',`${receipt.total?chartOffset+1:0}–${chartOffset+receipt.count} / ${receipt.total}`),next);content.append(paging);}else content.append(make('p',imagePreview?chartText("筛选或图种已变化。点击「预览图表」生成当前范围的新图。"):chartText("选择图种并点击「预览图表」。证据不足时会直接显示缺失说明。"),'radar-empty'));
     }
     let tablePreview=null, tableLoad=null, tableFailure=null, tableBusy=false, useTableAnalysis=false, tableSize='all', tableSort='', tableDirection='asc', tableExportScope='all';
-    const tableFilters={},tableFilterInputs=new Map();
+    const tableFilters={},tableFilterInputs=new Map();let renderedTab;
     const tableColumns=[['research_group','研究组'],['short_name','论文简称'],['task_output','具体解决／生成什么'],['datasets','数据集与开放性'],['method','方法'],['year','年份'],['poi_usage','POI 使用／处理'],['building_usage','建筑信息使用／处理'],['od_generation','推理无需目标区域历史 OD？']];
     // Keep controls outside the rerendered result so typing retains focus, selection and IME state.
     const tableTools=make('section',undefined,'radar-table-tools');tableTools.hidden=true;tableTools.setAttribute('aria-label','文献表显示与按列筛选');root.insertBefore(tableTools,content);
@@ -71,12 +75,14 @@ window.PaperFieldRadar = (() => {
     for(const [value,label]of [['all','全部文献'],['20','每页 20 篇'],['50','每页 50 篇'],['100','每页 100 篇']]){const o=make('option',label);o.value=value;pageSize.append(o);}pageSize.value=tableSize;pageSize.addEventListener('change',()=>{tableSize=pageSize.value;offset=0;render();});pageLabel.append(pageSize);
     const exportLabel=make('label','复制／导出范围 '),exportScope=make('select');exportScope.id='field-radar-table-export-scope';exportScope.setAttribute('aria-label','文献表导出范围');for(const [value,label]of [['all','全部筛选结果'],['page','当前显示页']]){const o=make('option',label);o.value=value;exportScope.append(o);}exportScope.addEventListener('change',()=>{tableExportScope=exportScope.value;render();});exportLabel.append(exportScope);
     tableViewTools.append(pageLabel,exportLabel,button('清空列筛选与排序',()=>{clearTableFilters();offset=0;render();},'field-radar-table-clear'));tableTools.append(tableViewTools);
+    const columnDisclosure=make('details',undefined,'radar-column-disclosure');columnDisclosure.id='field-radar-column-filters';
+    const columnLabel=make('summary','按列筛选');columnDisclosure.append(columnLabel);tableViewTools.append(columnDisclosure);
     const columnFilters=make('form',undefined,'radar-table-column-filters');columnFilters.addEventListener('submit',event=>event.preventDefault());
     for(const [key,label]of tableColumns){const wrapper=make('label',label),input=make(key==='od_generation'?'select':'input');input.id='field-radar-table-filter-'+key;input.setAttribute('aria-label','按'+label+'筛选');
       if(key==='od_generation'){for(const [value,name]of [['','全部判定'],['yes','是（已核验）'],['no','否（已核验）'],['unknown','未知／待核／冲突']]){const o=make('option',name);o.value=value;input.append(o);}}
       else{input.type='search';input.maxLength=500;input.placeholder='包含文字…';}
       const update=()=>{tableFilters[key]=input.value;offset=0;render();};input.addEventListener(key==='od_generation'?'change':'input',event=>{if(!event.isComposing)update();});input.addEventListener('compositionend',update);wrapper.append(input);columnFilters.append(wrapper);tableFilterInputs.set(key,input);
-    }tableTools.append(columnFilters,make('p','各列条件同时生效，先筛选全部文献再分页。点击列名可升序／降序排序；未知、待核与冲突不会作为已核验的「是／否」。','muted'));
+    }columnDisclosure.append(columnFilters);
     function clearTableFilters(){for(const input of tableFilterInputs.values())input.value='';for(const key of Object.keys(tableFilters))delete tableFilters[key];tableSort='';tableDirection='asc';}
 
     const availableTableAnalysis=()=>analysisRequest&&analysis?.status==='complete'&&analysis.topic_revision===revision&&analysis.draft?.paper_comparisons?.length;
@@ -254,6 +260,10 @@ window.PaperFieldRadar = (() => {
     }
     function render() {
       if (!alive) return; tableTools.hidden=!['table','relations'].includes(tab)||!current;exportScope.disabled=tableBusy;syncTable(); for (const [id, b] of tabButtons) b.setAttribute('aria-pressed', String(id === tab)); filters.hidden = ['legacy','analysis'].includes(tab); content.hidden = ['legacy','relations'].includes(tab); legacyRoot.hidden = tab !== 'legacy'; relationsRoot.hidden=tab!=='relations'; summary.replaceChildren();
+      chartTools.hidden=!current||tab==='legacy';chartToolsLabel.hidden=tab==='charts';
+      if(tab!==renderedTab){chartTools.open=tab==='charts';renderedTab=tab;}
+      const activeColumns=Object.values(tableFilters).filter(value=>value.trim()).length;
+      columnLabel.textContent=activeColumns?`按列筛选 · ${activeColumns} 项`:'按列筛选';
       relationsView?.updateContext(relationContext());
       if (current) { summary.append(make('h2', current.topic.title), make('p', `${current.papers.length} 篇收录作品 · ${current.scholars.length} 位学者 · ${current.sources.length} 条来源 · ${current.topic.as_of || current.topic.updated_at || '时间以各条来源为准'}`, 'muted')); } else summary.append(make('p', '选择一个研究主题，或导入有来源的研究 JSON。完整雷达保留原有全名单数据。', 'muted'));
       if(tab==='relations'){summary.append(make('p','共享论文身份与筛选；原始主题、关系分类及来源分别保留。未在图中的论文仍保留在文献表。','radar-notice'));ensureRelations();return;}

@@ -54,7 +54,7 @@ window.PaperReadingShell = (() => {
     fullscreen.title='全屏阅读；Esc 返回';ribbon.append(fullscreen);
     top.insertBefore(ribbon,$('paper-tools'));
     const readerTools=$('toolbar-reader'), annotationTools=node('div',null,'annotation-tool-group'), libraryTools=node('div',null,'library-tool-group');
-    annotationTools.id='toolbar-annotation';libraryTools.id='toolbar-library';
+    annotationTools.id='toolbar-annotation';annotationTools.setAttribute('role','group');annotationTools.setAttribute('aria-label','PDF 批注工具');libraryTools.id='toolbar-library';
     for(const [type,label] of [['select','选择'],['ink','自由笔画'],['square','矩形框'],['highlight','高亮'],['underline','下划线'],['strikeout','删除线'],['note','便笺']]){
       const b=button(`reader-tool-${type}`,label,async()=>{if(beforeToolChange&&!await beforeToolChange(type))return;tool=type;context='annotations';if(['highlight','underline','strikeout'].includes(type)){markup=type;saveLayoutLater();}applyTool();sync();status(hintFor());});b.dataset.readerTool=type;annotationTools.append(b);
     }
@@ -152,14 +152,14 @@ window.PaperReadingShell = (() => {
     }).filter(Boolean);
     $('quick-import-form').hidden=true;
     const quick=$('quick-import-source');quick.disabled=true;
-    $('paper-tools').append(annotationTools,libraryTools);
+    $('paper-tools').append(libraryTools);
     // An unattached record has a direct recovery action on its empty reading surface.
     $('no-pdf').append($('attach-open'));
     $('previous-page').hidden=true;$('next-page').hidden=true;
     $('page-number').title='输入页码跳转，也可直接滚动阅读';
     const note=$('page-note');note.textContent='页便笺';annotationTools.append(note);
     const message=$('page-message');message.className='ribbon-status';message.setAttribute('role','status');message.setAttribute('aria-live','polite');
-    const statusBar=node('div',null,'reader-status-bar');statusBar.id='reader-status-bar';$('paper-tools').after(statusBar);
+    const statusBar=node('div',null,'reader-status-bar');statusBar.id='reader-status-bar';$('paper-tools').after(annotationTools,statusBar);
     // Reserve one row for the whole handwriting session, including an empty
     // buffer between autosaves. Draft changes must never move the PDF beneath a pen.
     const inkBar=node('div',null,'reader-ink-draft');inkBar.id='reader-ink-draft';inkBar.hidden=true;
@@ -244,7 +244,8 @@ window.PaperReadingShell = (() => {
       fullscreen.disabled=!pdf;fullscreen.textContent=focused?'退出全屏 ⤡':'全屏阅读 ⤢';fullscreen.setAttribute('aria-pressed',String(focused));
       readerTools.hidden=table||!pdf||!['reader','annotations'].includes(surface);
       annotationTools.hidden=table||!pdf||surface!=='annotations';
-      if(annotationTools.hidden)penSettings.open=false;
+      document.body.classList.toggle('annotation-tools-visible',!annotationTools.hidden);
+      if(annotationTools.hidden){penSettings.open=false;presetsMenu.open=false;}
       $('toolbar-actions').hidden=false;libraryTools.hidden=surface!=='library'&&active;
       $('import-open').disabled=false;$('build-bibliography').disabled=false;
       $('metadata-enrich').disabled=!active;

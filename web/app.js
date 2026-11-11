@@ -2396,7 +2396,11 @@ if ($('workspace-navigation') && window.PaperWorkspaceNavigation) {
 }
 fieldRadarUI = window.PaperFieldRadar?.create({api,toast,persistence,
   openAbstract:paperAbstractUI?.open,
-  prepare: async () => { if (!await prepareWorkspaceNavigation()) return false; return closeWorkspaceSurfaces(); },
+  prepare: async () => {
+    if (!await prepareWorkspaceNavigation() || !await closeWorkspaceSurfaces()) return false;
+    readingPanels?.close('metadata');
+    return true;
+  },
   onOpenPaper: async id => { const ok = await workspaceNavigationUI?.navigate({kind:'paper',id,title:'文献'}); return ok !== false; },
   onKnowledge: async id => { const ok = await workspaceNavigationUI?.navigate({kind:'paper',id,title:'文献'}); if(ok===false)return false; await knowledgeUI?.show(state.active); return true; },
 });

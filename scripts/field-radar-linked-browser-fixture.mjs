@@ -20,6 +20,7 @@ try{
  await page.locator('#field-radar-open').click();await page.locator('#field-radar-tab-table').click();await page.waitForFunction(()=>document.querySelectorAll('.radar-literature-table tbody tr:not(.radar-literature-evidence)').length===3);
  await page.locator('#field-radar-table-relations').click();await page.locator('#field-radar-relations svg').waitFor();assert.match(await page.locator('#field-radar-relations [role=status]').textContent(),/2 \/ 2.*2 \/ 3/);
  // Table column filters recompute the graph; clear retains input DOM and restores records.
+ const columnFilters=page.locator('#field-radar-column-filters');assert.equal(await columnFilters.evaluate(el=>el.open),false);await columnFilters.locator('summary').press('Enter');
  const method=page.locator('#field-radar-table-filter-method');await method.fill('alpha');await page.waitForFunction(()=>document.querySelectorAll('#field-radar-relations .radar-card').length===1);assert.match(await page.locator('#field-radar-relations svg').textContent(),/1 篇独立作品/);
  await method.fill('');await page.waitForFunction(()=>document.querySelectorAll('#field-radar-relations .radar-card').length===2);
  await page.getByRole('checkbox',{name:'显示维度 方法主类',exact:true}).uncheck();assert.equal(await page.locator('.radar-relations-dimensions input:checked').count(),2);assert.equal(await page.locator('.radar-relations-dimensions input:disabled').count(),2);assert.match(await page.locator('#field-radar-relations svg').textContent(),/2维桑基图/);

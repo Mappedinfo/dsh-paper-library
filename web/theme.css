@@ -134,6 +134,21 @@ input[type="checkbox"] { accent-color: var(--dsw-alias-button-primary-fill); }
 .catalog-table .catalog-column-storage { width: 80px; }
 .catalog-table .catalog-column-actions { width: 126px; }
 .catalog-table th, .catalog-table td { min-width: 0 !important; max-width: none; padding: 6px 10px; }
+@media (min-width: 1250px) {
+  .catalog-expanded .catalog-table table { min-width: 1440px; font-size: 13px; }
+  .catalog-expanded .catalog-table th .button { font-size: 13px; }
+  .catalog-expanded .catalog-column-title { width: 312px; }
+  .catalog-expanded .catalog-column-author { width: 151px; }
+  .catalog-expanded .catalog-column-year { width: 58px; }
+  .catalog-expanded .catalog-column-journal { width: 142px; }
+  .catalog-expanded .catalog-column-jcr { width: 92px; }
+  .catalog-expanded .catalog-column-citekey { width: 108px; }
+  .catalog-expanded .catalog-column-doi { width: 155px; }
+  .catalog-expanded .catalog-column-institution { width: 132px; }
+  .catalog-expanded .catalog-column-dates { width: 147px; }
+  .catalog-expanded .catalog-column-kind { width: 76px; }
+  .catalog-expanded .catalog-column-storage { width: 67px; }
+}
 .catalog-table .table-title, .catalog-table .table-cell-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; width: 100%; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; white-space: normal; line-height: 1.4; }
 .catalog-table .table-title { min-width: 0; margin: 0; border-radius: 2px; }
 .catalog-table .table-title:focus-visible { outline-offset: 1px; }

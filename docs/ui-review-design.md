@@ -1,5 +1,21 @@
 # Compact literature workbench
 
+## 桌面布局检查（2026-11-11）
+
+以 1512×982 的桌面视口为基准。先量测文献表、PDF 阅读、批注、资料、设置和领域研究，再修复首屏拥挤与控件裁切。用合成资料复查明暗主题、键盘操作和窄窗侧栏换边，并检查画板、LaTeX 与 Slides 的代表性界面。
+
+| 界面 | 调整及实测 |
+| --- | --- |
+| 文献表 | 同一视口的横向溢出从 179 px 降为 0，表头与表身文字从 12 px 调到 13 px。 |
+| 阅读侧栏 | 「筛选与管理」默认折叠，首篇文献提前约 310 px。切回完整文献表时直接显示筛选和管理操作。 |
+| 批注 | 阅读侧栏默认宽度从 235 px 调到 336 px，允许用户拖动。合成批注卡片的 19 px 溢出降为 0。批注工具使用独立的 36 px 行，笔输入和页便笺都可直接点击。 |
+| 资料与设置 | 资料面板宽度从 258 px 调到 338 px，示例长标题完整显示。设置宽度从 460 px 调到 620 px，六套配色改为两列，二态选项可用空格键切换。 |
+| 领域研究 | 图表工具与按列筛选默认折叠，图表页直接显示图表操作。文献对照表首行从距窗口顶部 1026 px 提前到 819 px。切入领域研究会收起资料面板。 |
+
+运行 `npm run build` 后，可用 `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node scripts/desktop-ui-browser-fixture.mjs` 重做桌面检查。截图和量测保存在本机 `.local/ui-desktop-audit/`。147 项定向 JavaScript 检查、33 项领域研究浏览器检查和 5 项 LaTeX 浏览器检查通过。
+
+画板拖入文献、关联手写、语言浮窗拖动和窄窗从批注定位 PDF 页码的既有完整脚本在基线及本轮均有未通过步骤。旧的独立 DSH 设置夹具预期的默认值与实际配置文档有差异，桌面夹具另行验证了设置开关的键盘操作。
+
 ## Annotation replies and export tools
 
 Accepted 2026-09-15: AI responses to explicitly referenced annotations belong under those annotations. Source-note counts exclude AI responses. Each reply has a collapsed heading, model/date, readable body and its own delete action. A shared response is labelled under every associated note while the PDF retains one body; unresolved historical responses remain accessible in a collapsed “未关联回复” group. Association uses actual DSH turn references and immutable snapshots; no content-based guessing or implicit inheritance from an earlier turn.

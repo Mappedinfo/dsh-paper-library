@@ -7,7 +7,9 @@
 .library-settings .settings-status.error{color:var(--danger,#a93c32)}
 .library-settings fieldset{border:0;margin:16px;padding:0;min-width:0}.library-settings legend{font-weight:600;margin-bottom:8px}
 .library-settings .settings-option{display:flex;align-items:flex-start;gap:10px;padding:10px 0;cursor:pointer}
-.library-settings .settings-option input{flex:none;width:15px;height:15px;margin:3px 0 0;accent-color:var(--ink)}
+.library-settings .settings-option input[type="checkbox"]{flex:none;width:15px;height:15px;margin:3px 0 0;accent-color:var(--ink)}
+.library-settings .settings-text-field{display:grid;gap:6px;cursor:auto}
+.library-settings .settings-text-field input{width:100%;min-width:0;box-sizing:border-box}
 .library-settings .settings-option strong{display:block;font-size:13px;font-weight:500}.library-settings small{display:block;font-size:12px;color:var(--muted);margin-top:3px}
 .library-settings .settings-side{display:flex;align-items:center;justify-content:space-between;margin-top:10px;gap:16px}.library-settings select{width:auto;min-width:100px;padding:5px 10px;font-size:12px}
 .library-settings .settings-storage{border-top:1px solid var(--line);padding:12px 16px;font-size:12px;color:var(--muted)}
@@ -19,6 +21,16 @@
 .settings-palettes{display:grid;gap:8px}.settings-palette{display:grid;grid-template-columns:18px 66px 1fr;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);cursor:pointer}
 .settings-palette.is-selected{border-color:var(--dsw-alias-link);box-shadow:inset 3px 0 var(--dsw-alias-link)}.settings-palette:focus-within{outline:2px solid var(--dsw-alias-link);outline-offset:2px}
 .settings-palette input{width:15px;height:15px;margin:0;accent-color:var(--dsw-alias-link)}.settings-palette strong{font-size:13px}.settings-palette small{margin-top:1px}
+@media (min-width:1250px){
+  .library-settings{width:min(620px,calc(100vw - 24px))}
+  .settings-palettes{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+.library-settings .settings-option input[role="switch"]{appearance:none;box-sizing:border-box;position:relative;width:34px;height:20px;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-interactive-bg-hover-solid);cursor:pointer}
+.settings-option input[role="switch"]::before{content:"";position:absolute;inset-block-start:2px;inset-inline-start:2px;width:14px;height:14px;border-radius:50%;background:var(--dsw-alias-label-secondary)}
+.settings-option input[role="switch"]:checked{background:var(--dsw-alias-button-primary-fill);border-color:var(--dsw-alias-button-primary-fill)}
+.settings-option input[role="switch"]:checked::before{inset-inline-start:16px;background:var(--dsw-alias-label-primary-foreground)}
+.settings-option input[role="switch"]:focus-visible{outline:2px solid var(--dsw-alias-link);outline-offset:2px}
+.settings-option input[role="switch"]:disabled{opacity:.5;cursor:default}
 .palette-swatches{height:24px;border-radius:5px;border:1px solid rgb(0 0 0 / .15);background:linear-gradient(90deg,#245c49 0 34%,#b58b53 34% 67%,#fffefa 67%)}
 [data-palette-option="navy"] .palette-swatches{background:linear-gradient(90deg,#254e70 0 34%,#70869b 34% 67%,#fff 67%)}
 [data-palette-option="system"] .palette-swatches{background:linear-gradient(90deg,var(--dsw-alias-label-primary) 0 34%,var(--dsw-alias-label-secondary) 34% 67%,var(--dsw-alias-bg-base) 67%)}

@@ -195,7 +195,12 @@ with pymupdf.open(sys.argv[1]) as doc:
   await page.setViewportSize({width:600,height:960}); await ready(); await target(toggle(),{fullRow:true});
   await toggle().click(); await active(true); await ready(); await target(toggle(),{fullRow:true}); await target(page.locator('#reader-ink-save'));
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  assert.equal(await page.evaluate(()=>parseFloat(getComputedStyle(document.body).getPropertyValue('--workbench-height'))),145);
+  assert.ok(await page.evaluate(()=>{
+    const toolbar=document.querySelector('#toolbar-annotation').getBoundingClientRect();
+    const handwriting=document.querySelector('#reader-ink-draft').getBoundingClientRect();
+    const workspace=document.querySelector('.workspace').getBoundingClientRect();
+    return toolbar.height>0&&toolbar.bottom<=handwriting.top&&handwriting.bottom<=workspace.top;
+  }));
   await stableLayout('narrow','entered_without_strokes');holdNextEnqueue=true;response=annotationReply('ink');
   await draw([[45,150],[75,155]]);await pathCount(1);await stableLayout('narrow','first_stroke');
   await draw([[90,155],[105,168],[120,155]]);await pathCount(2);await stableLayout('narrow','multiple_strokes');

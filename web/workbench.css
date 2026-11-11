@@ -57,8 +57,14 @@
 #library-literature-content .library-filterbar select,#library-literature-content .library-filterbar .button{box-sizing:border-box;min-height:30px;height:30px;max-width:none;margin:0;padding:4px 8px;font-size:12px;line-height:20px}
 .library-filterbar .field-inline{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:12px}
 .library-filterbar #project-status{font-size:11px;white-space:nowrap}
-.library-filterbar+#search-summary{display:block;flex:none;padding:0 10px;font-size:11px}
-.library-filterbar+#search-summary:empty{display:none}
+.library-rail-filters{flex:none;min-width:0;border-bottom:1px solid var(--line)}
+.library-rail-filters>summary{margin:0 10px;padding:6px 0;min-height:28px;color:var(--ink);font-size:12px;cursor:pointer}
+.library-rail-filters>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.library-rail-filters>.library-filterbar{border-bottom:0}
+.library-rail-filters .project-bar{flex-wrap:wrap}
+.library-rail-filters .project-bar select{max-width:100%}
+.library-rail-filters+#search-summary{display:block;flex:none;padding:0 10px;font-size:11px}
+.library-rail-filters+#search-summary:empty{display:none}
 .paper-organization-filters{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;flex-basis:100%}
 .catalog-controls>.paper-organization-filters{flex:0 1 auto}
 .catalog-selection-actions{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;padding-left:6px;border-left:1px solid var(--line,#ddd)}
