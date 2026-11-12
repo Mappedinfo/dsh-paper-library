@@ -117,6 +117,7 @@ try {
   assert.ok(await page.locator('#handwriting-canvas').isVisible()); assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   record('miniature board remains usable at narrow width and in dark theme');
   await page.locator('#handwriting-close').click();await page.setViewportSize({width:1280,height:1100});
+  await page.locator('#annotation-handwriting-toggle').click();
   await card().locator('[data-note-action=handwriting]').click();
   await page.waitForFunction(()=>pdfReader.getInkContext()?.parentId);
   // A viewport change queues ResizeObserver and raster work; draw only after

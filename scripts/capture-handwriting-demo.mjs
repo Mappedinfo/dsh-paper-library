@@ -97,6 +97,7 @@ try{
   await pen('mousePressed',range.a);for(let n=1;n<=16;n++)await pen('mouseMoved',{x:range.a.x+(range.b.x-range.a.x)*n/16,y:range.a.y});await pen('mouseReleased',range.b);
   parent=(await (await response).json()).result.annotation;await card().waitFor();await ready();
   assert.equal(parent.text,'Check the comparison before accepting the conclusion.');checks.push('The highlighted quotation was selected through trusted pen input.');
+  await page.locator('#annotation-handwriting-toggle').click();
   await card().locator('[data-note-action="handwriting"]').click();await page.waitForFunction(()=>linkedHandwritingUI?.session()&&readingShell.tool().type==='ink');await ready();
   await page.locator('#reader-ink-width').selectOption('2');
   const color=page.locator('#reader-color');await color.evaluate(input=>{input.value='#2b59a6';input.dispatchEvent(new Event('input',{bubbles:true}));});

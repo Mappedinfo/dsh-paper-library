@@ -64,12 +64,34 @@ window.PaperReadingPanels = (() => {
       const clampWidth=value=>Math.max(160,Math.min(720,Math.round(value)));
       function applyWidth(value){railWidth=clampWidth(value);workspace.style.setProperty('--rail-width',`${railWidth}px`);}
       function removeWidth(){railWidth=null;workspace.style.removeProperty('--rail-width');}
-      function fromEvent(event){const box=workspace.getBoundingClientRect();return side==='right'?box.right-event.clientX:event.clientX-box.left;}
-      listen(resizer,'pointerdown',event=>{if(event.button!==0)return;event.preventDefault();resizer.setPointerCapture(event.pointerId);resizer.classList.add('is-active');});
-      listen(resizer,'pointermove',event=>{if(!resizer.classList.contains('is-active'))return;applyWidth(fromEvent(event));});
-      const finish=event=>{if(!resizer.classList.contains('is-active'))return;resizer.classList.remove('is-active');if(railWidth&&persistence)void persistence.patch('reader:layout',{rail_width:railWidth}).catch(error=>toast?.(`侧栏宽度尚未保存：${error.message}`,true));};
-      listen(resizer,'pointerup',finish);listen(resizer,'pointercancel',finish);
-      listen(resizer,'keydown',event=>{if(!['ArrowLeft','ArrowRight'].includes(event.key))return;event.preventDefault();const step=(event.shiftKey?24:8)*(event.key==='ArrowRight'?1:-1)*(side==='right'?-1:1);const box=workspace.getBoundingClientRect();const currentWidth=railWidth??(side==='right'?box.right-resizer.getBoundingClientRect().left-4:resizer.getBoundingClientRect().left-box.left+4);applyWidth(currentWidth+step);if(persistence)void persistence.patch('reader:layout',{rail_width:railWidth}).catch(()=>{});});
+      const measureWidth=()=>libraryRoot.getBoundingClientRect().width;
+      const resizeDirection=()=>side==='right'?-1:1;
+      function saveWidth(){if(persistence)void persistence.patch('reader:layout',{rail_width:railWidth}).catch(error=>toast?.(`侧栏宽度尚未保存：${error.message}`,true));}
+      let drag=null;
+      listen(resizer,'pointerdown',event=>{
+        if(event.button!==0||drag)return;
+        event.preventDefault();resizer.setPointerCapture(event.pointerId);
+        drag={id:event.pointerId,x:event.clientX,width:measureWidth(),direction:resizeDirection(),changed:false};
+        resizer.classList.add('is-active');
+      });
+      listen(resizer,'pointermove',event=>{
+        if(!drag||event.pointerId!==drag.id)return;
+        const width=clampWidth(drag.width+(event.clientX-drag.x)*drag.direction);
+        if(width===railWidth||(!drag.changed&&width===Math.round(drag.width)))return;
+        applyWidth(width);drag.changed=true;
+      });
+      const finish=event=>{
+        if(!drag||event.pointerId!==drag.id)return;
+        if(drag.changed)saveWidth();
+        drag=null;resizer.classList.remove('is-active');
+      };
+      listen(resizer,'pointerup',finish);listen(resizer,'pointercancel',finish);listen(resizer,'lostpointercapture',finish);
+      listen(resizer,'keydown',event=>{
+        if(drag||!['ArrowLeft','ArrowRight'].includes(event.key))return;
+        event.preventDefault();
+        const step=(event.shiftKey?24:8)*(event.key==='ArrowRight'?1:-1)*resizeDirection();
+        applyWidth(measureWidth()+step);saveWidth();
+      });
       workspace.append(resizer);
       if(persistence)layoutReady=persistence.get('reader:layout').then(value=>{const saved=Number(value?.rail_width);if(!disposed&&Number.isFinite(saved)&&saved>=160&&saved<=720)applyWidth(saved);}).catch(()=>{});
     }

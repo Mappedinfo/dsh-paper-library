@@ -25,6 +25,9 @@ test('copy source stays beside delete and copies only exact PDF text; missing so
   window.state.annotations=[{id:'a',page:1,type:'underline',text:'  Original PDF text.\nSecond line. ',comment:'Private interpretation'},{id:'b',page:2,type:'note',text:'',comment:'Comment without a source quotation'}];
   window.renderAnnotations();
   const card=document.querySelector('[data-annotation-id="a"]'),button=card.querySelector('[data-note-action="copy-source"]');
+  const locate=card.querySelector('.annotation-meta [aria-label^="定位原文"]');
+  assert.equal(locate?.dataset.noteAction,'page');
+  assert.equal(card.querySelector('.annotation-excerpt [data-note-action="page"]'),null);
   assert.equal(button.previousElementSibling.dataset.noteAction,'delete');
   assert.deepEqual([...card.querySelector('.annotation-primary-actions').children].map(b=>b.textContent),['手写','编辑']);
   await window.handleNoteAction({target:button});assert.deepEqual(f.copied,['  Original PDF text.\nSecond line. ']);
@@ -74,7 +77,7 @@ test('AI reply copies full text and selected reply text becomes a new remark on 
  buttons.find(b=>b.textContent==='复制回复').click();await new Promise(r=>setImmediate(r));assert.deepEqual(f.copied,['First sentence.\nSecond sentence.']);
  const rendered=reply.querySelector('.annotation-reply-body'),range=d.createRange();range.setStart(rendered.firstChild,0);range.setEnd(rendered.firstChild,15);w.getSelection().addRange(range);
  buttons.find(b=>b.textContent==='引用并追问').click();assert.equal(created[0][0],'reply');assert.equal(created[0][1].note.id,'root');assert.match(created[0][1].comment,/> First sentence\./);assert.doesNotMatch(created[0][1].comment,/Second sentence/);
- assert.equal(d.querySelector('.annotation-quote').tagName,'P');assert.equal(d.querySelector('.annotation-excerpt [data-note-action="page"]').textContent,'定位');domClose(f);
+ assert.equal(d.querySelector('.annotation-quote').tagName,'P');assert.equal(d.querySelector('.annotation-meta [aria-label^="定位原文"]').textContent,'定位');domClose(f);
 });
 
 test('annotation search filters whole threads before pagination and has a truthful empty result', {skip:!JSDOM},async()=>{const f=fixture();try{const w=f.window;w.eval(await readFile(new URL('../web/reader-search.js',import.meta.url),'utf8'));w.state.annotations=Array.from({length:45},(_,i)=>({id:'a'+i,page:1,type:'underline',text:'Source '+i,comment:i===44?'needle':'other'}));w.state.noteOffset=40;w.readerSearchUI={filter:g=>w.PaperReaderSearch.filterThreads(g,'needle')};w.renderAnnotations();assert.equal(w.state.noteOffset,0);assert.equal(f.document.querySelectorAll('.annotation-card').length,1);assert.equal(f.document.querySelector('.annotation-card').dataset.annotationId,'a44');w.readerSearchUI={filter:g=>w.PaperReaderSearch.filterThreads(g,'missing')};w.renderAnnotations();assert.match(f.document.getElementById('annotation-list').textContent,/没有匹配的批注/);assert.doesNotMatch(f.document.getElementById('annotation-list').textContent,/第一条批注/);}finally{f.dom.window.close();}});

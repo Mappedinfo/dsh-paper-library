@@ -50,11 +50,11 @@ body.annotation-tools-visible{--annotation-tools-height:36px}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 
 /* Free rail resize handle and PDF zoom controls */
-.reading-rail-resizer{position:absolute;top:56px;bottom:0;left:calc(var(--rail-width,var(--rail-default,214px)) - 4px);width:8px;z-index:26;cursor:col-resize;touch-action:none}
+/* Both sidebar positions share the trailing edge of the first grid column. */
+.reading-rail-resizer{position:absolute;grid-area:1 / 1 / 2 / 2;inset:0 -4px 0 auto;width:8px;z-index:26;cursor:col-resize;touch-action:none}
 .reading-rail-resizer:before{content:"";position:absolute;left:3px;top:0;bottom:0;width:2px;background:transparent}
 .reading-rail-resizer:hover:before,.reading-rail-resizer.is-active:before{background:var(--teal,#28675c)}
 .reading-rail-resizer:focus-visible{outline:2px solid var(--teal,#28675c);outline-offset:-1px}
-.workspace[data-sidebar-side=right]>.reading-rail-resizer{left:auto;right:calc(var(--rail-width,var(--rail-default,214px)) - 4px)}
 .workspace.catalog-expanded>.reading-rail-resizer{display:none}
 @media(max-width:620px){.reading-rail-resizer{display:none}}
 .reader-zoom{display:inline-flex;align-items:center;gap:2px;margin-left:4px}
@@ -82,17 +82,21 @@ body.handwriting-tools-visible{--reader-status-height:52px}
 
 /* The linked target is still visible in its annotation card. */
 .annotation-card.is-handwriting{border-color:var(--accent,#2455a4);box-shadow:inset 3px 0 var(--accent,#2455a4)}
-.annotation-primary-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;flex-basis:100%;width:100%}
-.annotation-card .annotation-primary-actions .button{box-sizing:border-box;width:100%;min-width:0;min-height:44px;padding:10px 14px;font-size:14px;line-height:1.4;font-weight:600;justify-content:center;border:1px solid var(--dsw-alias-link,var(--accent,#2455a4));background:var(--surface,#fff);color:var(--dsw-alias-link,var(--accent,#2455a4))}
+.annotation-primary-actions{display:flex;gap:8px;flex-basis:100%;width:100%}
+.annotation-card .annotation-primary-actions .button{box-sizing:border-box;flex:1;min-width:0;min-height:44px;padding:10px 14px;font-size:14px;line-height:1.4;font-weight:600;justify-content:center;border:1px solid var(--dsw-alias-link,var(--accent,#2455a4));background:var(--surface,#fff);color:var(--dsw-alias-link,var(--accent,#2455a4))}
+body:not(.annotation-handwriting-enabled) .annotation-primary-actions [data-note-action="handwriting"]{display:none}
 .annotation-card .annotation-actions .button[data-note-action="handwriting"][aria-pressed="true"]{background:var(--accent,#2455a4);color:var(--on-accent,#fff)}
 .linked-handwriting-summary textarea{display:block;width:100%;min-height:96px;margin-block:8px;resize:vertical}
 .linked-handwriting-summary p{white-space:pre-wrap;overflow-wrap:anywhere}
 /* 原文作为可选取摘录展示，定位与复制是独立操作。 */
 .annotation-excerpt{margin:7px 0;padding:6px 9px;border:1px solid var(--line);border-radius:6px;background:var(--paper,var(--surface))}
+.annotation-meta{flex-wrap:wrap}
+.annotation-meta .note-type{margin-left:0}
+.annotation-meta-actions{display:flex;align-items:center;flex-wrap:wrap;gap:2px;margin-left:auto;min-width:0}
+.annotation-meta-actions .button{font-size:inherit;min-height:26px;padding:3px 5px;white-space:nowrap}
 .annotation-excerpt-heading{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px}
-.annotation-excerpt-heading>span,.annotation-excerpt-heading>details{white-space:nowrap}
+.annotation-excerpt-heading>span{white-space:nowrap}
 .annotation-excerpt-heading .button{font-size:12px;min-height:28px;padding:3px 4px;white-space:nowrap}
-.annotation-excerpt-heading .annotation-style-menu>summary{display:flex;align-items:center;min-height:28px;padding-inline:4px}
 .annotation-card .annotation-quote{display:block;max-width:100%;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;border:0;padding:0;margin:3px 0;background:transparent;color:var(--ink);font:inherit;line-height:1.6;cursor:text;user-select:text;-webkit-user-select:text}
 .annotation-excerpt .annotation-quote.is-collapsed{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;line-clamp:4;overflow:hidden}
 .annotation-reply-body,.annotation-reply-body *{user-select:text;-webkit-user-select:text;cursor:text}
@@ -116,7 +120,7 @@ body.handwriting-tools-visible{--reader-status-height:52px}
 .ink-queue-menu>summary:focus-visible{outline:2px solid var(--dsw-alias-link);outline-offset:-2px}
 .ink-queue-panel{position:fixed;z-index:65;box-sizing:border-box;width:330px;max-width:calc(100vw - 16px);overflow:auto;padding:12px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px #0003;white-space:normal}
 .ink-queue-item{padding:8px 0;border-bottom:1px solid var(--line)}
-.ink-queue-panel .button{min-height:44px;border:1px solid var(--line);margin:4px 6px 4px 0;color:var(--ink)}
+#ink-queue-menu .ink-queue-panel .button{min-height:44px;border:1px solid var(--line);margin:4px 6px 4px 0;color:var(--ink)}
 .ink-queue-item p{margin:4px 0;line-height:1.5;overflow-wrap:anywhere}
 
 /* Measured trigger coordinates keep menus below their own ribbon button. */
@@ -151,8 +155,8 @@ body.handwriting-tools-visible{--reader-status-height:52px}
 .annotation-color-swatch[aria-pressed="true"]{outline:2px solid var(--ink);outline-offset:2px}
 .annotation-color-swatch:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
 .annotation-excerpt-heading>span{margin-right:auto}
-.annotation-style-menu{position:relative;font-size:12px}
-.annotation-style-menu>summary{list-style:none;cursor:pointer}
+.annotation-style-menu{position:relative}
+.annotation-style-menu>summary{display:flex;align-items:center;list-style:none;cursor:pointer}
 .annotation-style-menu>summary::-webkit-details-marker{display:none}
 .annotation-style-panel{position:fixed;z-index:1000;width:236px;box-sizing:border-box;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--paper,var(--surface));color:var(--ink);box-shadow:0 5px 24px #0003}
 .annotation-style-panel label{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:9px 0}

@@ -96,15 +96,14 @@ try {
   const annotationReply = type => { const pending=page.waitForResponse(response => { try { const input=response.request().postDataJSON(); return (type==='ink'?input?.action==='ink_queue_enqueue':input?.action==='annotate'&&input.type===type) && response.status()!==429; } catch { return false; } }); pending.catch(()=>{}); return pending; };
   const saved = async responsePromise => { const response=await responsePromise; assert.equal(response.status(),200,await response.text()); const result=(await response.json()).result;if(result.job){const id=result.job.annotation_id;await page.waitForFunction(id=>inkQueue.records().find(job=>job.annotation_id===id)?.status==='saved',id);await page.waitForFunction(id=>state.annotations.some(note=>note.id===id),id);} await ready(); return result; };
   const shot = async name => { const path=join(run,`${name}.png`); await page.screenshot({path}); screenshots.push(relative(project,path)); };
-  const target = async (locator,{fullRow=false,minHeight=44}={}) => {
+  const target = async (locator,{minHeight=44}={}) => {
     await locator.scrollIntoViewIfNeeded();
-    const box=await locator.evaluate((button,{fullRow,minHeight})=>{
-      const rect=button.getBoundingClientRect(),parent=button.parentElement.getBoundingClientRect(),style=getComputedStyle(button);
+    const box=await locator.evaluate(button=>{
+      const rect=button.getBoundingClientRect();
       const hit=[[.5,.5],[.15,.25],[.85,.75]].every(([x,y])=>button.contains(document.elementFromPoint(rect.left+rect.width*x,rect.top+rect.height*y)));
-      return {height:rect.height,width:rect.width,rowWidth:parent.width,fontSize:parseFloat(style.fontSize),hit,inViewport:rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight,fullRow,minHeight};
-    },{fullRow,minHeight});
+      return {height:rect.height,width:rect.width,hit,inViewport:rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight};
+    });
     assert.ok(box.height>=minHeight,JSON.stringify(box)); assert.ok(box.hit&&box.inViewport,JSON.stringify(box));
-    if(fullRow){assert.ok(Math.abs(box.width-box.rowWidth)<=1,JSON.stringify(box));assert.ok(box.fontSize>=14,JSON.stringify(box));}
     return box;
   };
   const stableLayout = async (size, phase) => {
@@ -130,15 +129,27 @@ try {
     await page.goto(origin); await page.waitForLoadState('networkidle'); await page.waitForFunction(()=>initializedReader&&!restoringReader);
     if(!await page.evaluate(id=>readerStateReady&&state.active?.id===id,paper.id))await page.locator(`.paper-card[data-id="${paper.id}"]`).click();
     await page.waitForFunction(id=>readerStateReady&&state.active?.id===id,paper.id); await ready(); await page.locator('#reading-sidebar-annotations').click();
+    assert.equal(await page.locator('#annotation-handwriting-toggle').getAttribute('aria-checked'),'false');
+    await page.locator('#annotation-handwriting-toggle').click();
   };
   await open(); await page.locator('#reader-mode-auto').click(); await page.locator('#reader-tool-highlight').click();
   const highlightReply=annotationReply('highlight'); await dragText(await span(0,4)); parent=(await saved(highlightReply)).annotation;
   assert.equal(parent.type,'highlight'); assert.ok(parent.text.includes('linked handwriting')); await card().waitFor(); record('trusted pen creates a standard text-bound highlight');
-  await target(toggle(),{fullRow:true}); record('sidebar handwriting button spans its action row with an unobstructed 44-pixel target');
+  await page.locator('#annotation-handwriting-toggle').click();
+  await card().locator('.annotation-primary-actions [data-note-action="edit"]').waitFor();
+  assert.equal(await toggle().isVisible(),false);
+  assert.equal(await card().locator('.annotation-meta .annotation-style-menu').isVisible(),true);
+  assert.equal(await card().locator('.annotation-meta [aria-label^="定位原文"]').isVisible(),true);
+  await page.locator('#annotation-handwriting-toggle').click();
+  await target(toggle()); record('sidebar handwriting button has an unobstructed 44-pixel target');
 
   await page.locator('#reader-tool-underline').click(); await toggle().click(); await active(true); await ready();
   assert.equal(await toggle().getAttribute('aria-pressed'),'true'); assert.equal(await page.locator('#handwriting-dialog').isVisible(),false);
-  await target(toggle(),{fullRow:true}); await target(page.locator('#reader-ink-save')); record('active handwriting and finish controls retain unobstructed 44-pixel targets');
+  await target(toggle()); await target(page.locator('#reader-ink-save')); record('active handwriting and finish controls retain unobstructed 44-pixel targets');
+  await page.locator('#annotation-handwriting-toggle').click();
+  assert.equal(await toggle().isVisible(),false);
+  assert.equal(await page.locator('#reader-ink-save').isVisible(),true);
+  await page.locator('#annotation-handwriting-toggle').click();
   await page.locator('#reader-ink-status').waitFor({state:'visible'}); record('sidebar handwriting toggle keeps PDF visible without a separate board');
   await stableLayout('wide','entered_without_strokes');
   const firstPath=[[55,270],[85,255],[115,270],[85,288],[55,270]];
@@ -192,8 +203,8 @@ with pymupdf.open(sys.argv[1]) as doc:
   const recovered=(await core({action:'annotations',id:imported.id},{library:freshLibrary,python})).annotations; assert.deepEqual(recovered.find(note=>note.id===parent.id).linked_ink,(await linked()));
   assert.equal(recovered.find(note=>note.id==='legacy-source').handwriting.transcript,legacy.transcript); record('export and fresh import recover native ink relationships and legacy attachment from PDF alone');
   await open(); assert.equal(await linkedCount(),4); assert.equal(await toggle().getAttribute('aria-pressed'),'false'); await shot('linked-handwriting-reopened'); record('confirmed linked strokes reopen in the reading page');
-  await page.setViewportSize({width:600,height:960}); await ready(); await target(toggle(),{fullRow:true});
-  await toggle().click(); await active(true); await ready(); await target(toggle(),{fullRow:true}); await target(page.locator('#reader-ink-save'));
+  await page.setViewportSize({width:600,height:960}); await ready(); await target(toggle());
+  await toggle().click(); await active(true); await ready(); await target(toggle()); await target(page.locator('#reader-ink-save'));
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   assert.ok(await page.evaluate(()=>{
     const toolbar=document.querySelector('#toolbar-annotation').getBoundingClientRect();
@@ -210,7 +221,7 @@ with pymupdf.open(sys.argv[1]) as doc:
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.waitForFunction(()=>inkQueue.records().some(job=>job.status==='stage_failed'));await pathCount(0);await stableLayout('narrow','autosave_failed');await target(page.locator('#reader-ink-save'));await page.locator('#ink-queue-summary').click();await target(page.locator('.ink-queue-panel').getByRole('button',{name:'重试保存'}));await page.locator('#ink-queue-summary').click();await shot('linked-handwriting-narrow-targets');
   record('600-pixel handwriting row and PDF geometry remain fixed before drawing through autosave and retry states');
   await page.emulateMedia({colorScheme:'dark'});await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark'&&!document.documentElement.getAnimations({subtree:true}).some(animation=>animation.playState==='running'));
-  const inactive=legacyCard.locator('[data-note-action="handwriting"]');await target(inactive,{fullRow:true});
+  const inactive=legacyCard.locator('[data-note-action="handwriting"]');await target(inactive);
   const contrast=await inactive.evaluate(button=>{const style=getComputedStyle(button),luminance=color=>{const rgb=color.match(/[\d.]+/g).slice(0,3).map(Number).map(value=>{const n=value/255;return n<=.04045?n/12.92:((n+.055)/1.055)**2.4;});return .2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2];},a=luminance(style.color),b=luminance(style.backgroundColor);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);});assert.ok(contrast>=4.5,`Inactive handwriting contrast: ${contrast}`);
   await target(page.locator('#reader-ink-save'));await shot('linked-handwriting-narrow-dark');
   await page.locator('#reader-ink-save').click();await active(false);assert.ok(await page.evaluate(()=>inkQueue.handoff()));fault=null;

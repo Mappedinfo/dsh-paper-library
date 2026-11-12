@@ -524,22 +524,32 @@ function renderAnnotations() {
     card.dataset.companionText=String([note.text,note.comment,note.content,note.handwriting?.transcript,note.linked_ink?.transcript].some(value=>typeof value==='string'&&value.trim()));
     const meta = el('div', 'annotation-meta'); const pageLink = el('button', 'page-link', `第 ${note.page} 页`); pageLink.dataset.noteAction = 'page';
     meta.append(pageLink, el('span', '', displayDate(note.modified || note.created)), el('span', 'note-type', note.kind === 'ai-feedback' || note.type === 'ai_feedback' || note.ai_generated ? 'AI 生成' : ({highlight:'高亮',underline:'下划线',strikeout:'删除线',note:'便笺',ink:'自由笔画',square:'矩形框'})[note.type] || '批注'));
+    const metaActions=el('div','annotation-meta-actions');
+    const style=window.PaperAnnotationStyle?.editor({note,paperId:state.active.id,api,onSaved:async()=>{
+      if(state.active?.id===card.dataset.paperId){await loadAnnotations(state.active.id);await refreshPage(note.page);}
+    }});
+    if(style)metaActions.append(style);
+    if(note.text){
+      const locate=el('button','button subtle','定位');
+      locate.type='button';locate.dataset.noteAction='page';locate.setAttribute('aria-label',`定位原文：${note.text}`);
+      metaActions.append(locate);
+    }
     const starred=favoriteAnnotationIds.has(note.id), star=el('button','button subtle annotation-favorite',starred?'★':'☆');
     star.type='button';star.dataset.noteAction='favorite';star.setAttribute('aria-pressed',String(starred));
     star.title=starred?'取消收藏批注':note.identity_reliable===false?'此批注没有稳定标识':'收藏批注';
-    star.setAttribute('aria-label',star.title);star.disabled=(!starred&&note.identity_reliable===false)||favoriteAnnotationWrites.has(JSON.stringify([state.active?.id,note.id]));meta.append(star);
+    star.setAttribute('aria-label',star.title);star.disabled=(!starred&&note.identity_reliable===false)||favoriteAnnotationWrites.has(JSON.stringify([state.active?.id,note.id]));metaActions.append(star);
     if (annotationTranslationAvailable && !window.PaperAnnotationThreads?.isAi(note)) {
       const translate = el('button', 'button subtle annotation-translate', translatingAnnotations.has(`${state.active?.id}:${note.id}`) ? '翻译中…' : '翻译');
       translate.type = 'button'; translate.dataset.noteAction = 'translate';
       translate.title = '翻译这条批注的文字，并作为「翻译：」AI 批注保存到 PDF';
       if (!note.version) translate.title = '批注文字超过 8000 字符或内容不完整，请缩小后再翻译';
       translate.disabled = !note.version || translatingAnnotations.has(`${state.active?.id}:${note.id}`) || card.dataset.companionText !== 'true';
-      meta.append(translate);
+      metaActions.append(translate);
     }
-    if(!note.text){const style=window.PaperAnnotationStyle?.editor({note,paperId:state.active.id,api,onSaved:async()=>{if(state.active?.id===card.dataset.paperId){await loadAnnotations(state.active.id);await refreshPage(note.page);}}});if(style)meta.append(style);}
+    meta.append(metaActions);
     card.append(meta);
     const translations=(replies.get(note.id)||[]).filter(reply=>reply.source_kind==='annotation-translation');
-    if (note.text) { const excerpt=el('section','annotation-excerpt'),heading=el('div','annotation-excerpt-heading'),locate=el('button','button subtle','定位');locate.type='button';locate.dataset.noteAction='page';locate.setAttribute('aria-label',`定位原文：${note.text}`);heading.append(el('span','small muted','原文'));const style=window.PaperAnnotationStyle?.editor({note,paperId:state.active.id,api,onSaved:async()=>{if(state.active?.id===card.dataset.paperId){await loadAnnotations(state.active.id);await refreshPage(note.page);}}});if(style)heading.append(style);heading.append(locate);
+    if (note.text) { const excerpt=el('section','annotation-excerpt'),heading=el('div','annotation-excerpt-heading');heading.append(el('span','small muted','原文'));
       if(['highlight','underline','strikeout','note'].includes(note.type)&&note.edit_version&&!note.id.startsWith('external-')&&(note.type!=='note'||note.source==='paper-library')){const reselect=el('button','button subtle','编辑原文范围');reselect.type='button';reselect.dataset.noteAction='reselect';heading.append(reselect);}
       const quote=el('p','annotation-quote',note.text),expand=el('button','button subtle','展开原文');
       const expanded=state.expandedAnnotationExcerpts ||= new Set(),key=JSON.stringify([state.active.id,note.id]);

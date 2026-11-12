@@ -54,6 +54,14 @@ window.PaperReadingShell = (() => {
     fullscreen.title='全屏阅读；Esc 返回';ribbon.append(fullscreen);
     top.insertBefore(ribbon,$('paper-tools'));
     const readerTools=$('toolbar-reader'), annotationTools=node('div',null,'annotation-tool-group'), libraryTools=node('div',null,'library-tool-group');
+    const handwritingToggle=button('annotation-handwriting-toggle','批注手写',()=>{
+      const enabled=document.body.classList.toggle('annotation-handwriting-enabled');
+      handwritingToggle.setAttribute('aria-checked',String(enabled));
+    });
+    handwritingToggle.classList.add('paper-switch');
+    handwritingToggle.setAttribute('role','switch');
+    handwritingToggle.setAttribute('aria-checked','false');
+    handwritingToggle.title='在批注卡片中显示手写按钮';
     annotationTools.id='toolbar-annotation';annotationTools.setAttribute('role','group');annotationTools.setAttribute('aria-label','PDF 批注工具');libraryTools.id='toolbar-library';
     for(const [type,label] of [['select','选择'],['ink','自由笔画'],['square','矩形框'],['highlight','高亮'],['underline','下划线'],['strikeout','删除线'],['note','便笺']]){
       const b=button(`reader-tool-${type}`,label,async()=>{if(beforeToolChange&&!await beforeToolChange(type))return;tool=type;context='annotations';if(['highlight','underline','strikeout'].includes(type)){markup=type;saveLayoutLater();}applyTool();sync();status(hintFor());});b.dataset.readerTool=type;annotationTools.append(b);
@@ -243,6 +251,7 @@ window.PaperReadingShell = (() => {
       appearance.hidden=!pdf;if(!pdf)appearance.open=false;
       fullscreen.disabled=!pdf;fullscreen.textContent=focused?'退出全屏 ⤡':'全屏阅读 ⤢';fullscreen.setAttribute('aria-pressed',String(focused));
       readerTools.hidden=table||!pdf||!['reader','annotations'].includes(surface);
+      handwritingToggle.hidden=readerTools.hidden;
       annotationTools.hidden=table||!pdf||surface!=='annotations';
       document.body.classList.toggle('annotation-tools-visible',!annotationTools.hidden);
       if(annotationTools.hidden){penSettings.open=false;presetsMenu.open=false;}
@@ -282,7 +291,7 @@ window.PaperReadingShell = (() => {
       group(toolbar,'PDF 导航',[readerTools]);
       group(toolbar,'引用与导出',[$('toolbar-copy-apa'),citations]);
       group(toolbar,'文献库与数据集',[libraryTools,$('toolbar-dataset')]);
-      group(toolbar,'伴学与整理',[$('companion-toggle'),$('paper-analysis-open')]);
+      group(toolbar,'批注与伴学',[handwritingToggle,$('companion-toggle'),$('paper-analysis-open')]);
       group(toolbar,'阅读项目与画板',[$('paper-projects'),$('paper-board-open'),$('paper-board-new')]);
     }
     function leaveFocus(){
