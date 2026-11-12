@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paper Library · 漂浮的学术图书馆</title>
+<meta name="description" content="Paper Library 文档站：在深墨蓝的空间里，漂浮的文献一本书本书归架，每本都留着读过与想过的痕迹。">
+<meta property="og:title" content="Paper Library · 漂浮的学术图书馆">
+<meta property="og:description" content="文献收集、PDF 批注、证据整理与 LaTeX 写作的使用说明与设计记录。">
+<link rel="stylesheet" href="_assets/landing.css">
+<link rel="icon" href="_assets/favicon.svg" type="image/svg+xml">
+<script type="application/json" id="books"><!--BOOKS--></script>
+<script type="application/json" id="shelfmeta"><!--SHELVES--></script>
+</head>
+<body class="landing" data-repo="<!--REPO-->" data-generated="<!--GENERATED-->">
+
+<div class="drive" id="drive">
+  <div class="stage" id="stage" aria-label="漂浮的学术图书馆动画场景">
+    <div class="sky" aria-hidden="true"></div>
+    <div class="beam" aria-hidden="true"></div>
+    <div class="dust" aria-hidden="true"></div>
+    <div class="dust dust-far" aria-hidden="true"></div>
+
+    <div class="void" aria-hidden="true">
+      <div class="camera" id="camera"></div>
+    </div>
+
+    <div class="case-wrap" id="case-wrap" aria-hidden="true">
+      <div class="bookcase" id="bookcase"></div>
+    </div>
+
+    <section class="hero" id="hero">
+      <p class="kicker">DeepSeek Harness 社区插件 · 也可独立运行</p>
+      <h1>Paper&nbsp;Library</h1>
+      <p class="lede">收集文献、逐段批注、整理证据、写完论文——这一屋子书，就是它全部的说明书。</p>
+      <div class="cta">
+        <a class="primary" href="#library">查看文档</a>
+        <a class="secondary" href="<!--REPO-->" rel="noopener noreferrer" target="_blank">GitHub</a>
+        <button class="ghost" id="direct" type="button">直接进入书架</button>
+      </div>
+      <p class="hint" id="hint"><span>向下滚动</span><i aria-hidden="true">↓</i><span>书会自己回到架上</span></p>
+    </section>
+
+    <p class="scene-note" id="scene-note">共 <b id="count-books">0</b> 本文档 · <b id="count-shelves">0</b> 个主题书架</p>
+  </div>
+</div>
+
+<main class="after">
+  <section class="library" id="library" aria-labelledby="library-title">
+    <header class="lib-head">
+      <h2 id="library-title">书架就是目录</h2>
+      <p>下面每一本书都对应仓库里一份真实的 Markdown 文档；点开即是原文渲染，没有虚构的功能。上方场景里的书与这里是同一批。</p>
+      <form class="lib-search" action="readme.html" method="get">
+        <a class="btn" href="readme.html">安装与使用说明</a>
+        <a class="btn" href="_assets/search.json" rel="noopener">搜索索引</a>
+        <a class="btn" href="../index.html">独立画板</a>
+      </form>
+    </header>
+    <!--CATALOG-->
+  </section>
+
+  <footer class="site-foot">
+    <p>Paper Library 由 Mappedinfo 独立开发维护。文档站由 <code>scripts/build-docs-site.mjs</code> 从仓库内的 Markdown 直接生成，构建于 <!--GENERATED-->。</p>
+    <p>原创代码采用 MIT；PDF 引擎等依赖另有许可。<a href="<!--REPO-->/blob/main/THIRD_PARTY.md" rel="noopener noreferrer" target="_blank">第三方许可</a> · <a href="<!--REPO-->" rel="noopener noreferrer" target="_blank">GitHub 仓库</a></p>
+    <p class="demo-flag">场景中的高亮、页边批注与便签属于本站的演示排版，用于说明文档内容；它们不代表批注导出、手写识别等产品功能，产品行为以各篇文档正文为准。</p>
+  </footer>
+</main>
+
+<div class="reader" id="reader" role="dialog" aria-modal="true" aria-labelledby="reader-title" hidden>
+  <div class="reader-shell">
+    <div class="spread">
+      <article class="page page-l">
+        <p class="page-meta" id="reader-meta"></p>
+        <h2 id="reader-title"></h2>
+        <div class="page-text" id="reader-text"></div>
+      </article>
+      <aside class="page page-r">
+        <div class="margin-head">页边批注 <em>演示笔记</em></div>
+        <p class="margin-note" id="reader-note"></p>
+        <div class="sticky-note">
+          <span class="pin" aria-hidden="true"></span>
+          <p id="reader-sticky"></p>
+        </div>
+        <nav class="page-index" id="reader-index" aria-label="本篇小节"></nav>
+      </aside>
+    </div>
+    <div class="reader-bar">
+      <p class="reader-flag"><b>正文摘自真实文档</b>；高亮与便签为本站演示排版。</p>
+      <div class="reader-actions">
+        <a id="reader-open" class="btn primary">打开完整文档</a>
+        <a id="reader-source" class="btn" rel="noopener noreferrer" target="_blank">Markdown 原件</a>
+        <button id="reader-close" class="btn ghost" type="button">合上</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="_assets/landing.js" defer></script>
+</body>
+</html>

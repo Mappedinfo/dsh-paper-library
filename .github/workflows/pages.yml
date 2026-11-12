@@ -1,7 +1,9 @@
-# Publish the independent whiteboard to GitHub Pages.
+# Publish the independent whiteboard and the documentation site to GitHub Pages.
 #
-# The site is the thin static host around `web/board.js`, so this workflow only
-# assembles an artifact — it never runs a model, a database or the Python worker.
+# The board is the thin static host around `web/board.js` and keeps the Pages root; the docs
+# site is generated from this repository's own markdown by `scripts/build-docs-site.mjs` and is
+# published beside it under `/docs/`. This workflow only assembles an artifact — it never runs a
+# model, a database or the Python worker.
 # Following `main` keeps the public drawing service in step with the plugin while
 # remaining usable on its own.
 name: Deploy whiteboard site
@@ -14,7 +16,12 @@ on:
       # change to any file there — not only the four that used to be listed — must redeploy.
       - 'site/**'
       - 'web/**'
+      - 'docs-site/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'README.en.md'
       - 'scripts/build-site.mjs'
+      - 'scripts/build-docs-site.mjs'
       - 'scripts/build-paper-flow.mjs'
       - 'src/paper-flow/**'
       - 'vendor/paper-flow/**'

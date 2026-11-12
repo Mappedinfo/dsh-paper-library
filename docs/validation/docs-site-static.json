@@ -1,0 +1,17 @@
+{
+  "verified_at": "2026-11-12T11:12:46.532Z",
+  "scope": "The generated _site tree checked against the repository markdown it was built from: page and index coverage, one title per page, book covers that name real documents, indexed and quoted sentences that exist in the sources, no third-party asset request, no machine-local or library path, the demo-note labelling, and the Pages workflow wiring. This is a publication gate over files on disk; it says nothing about the live service, which the browser checks cover.",
+  "pages": 50,
+  "books": 50,
+  "markdown_sources": 50,
+  "checks": [
+    "every-source-document-becomes-one-page-and-the-index-covers-all-of-them",
+    "each-document-page-carries-one-title-and-never-repeats-it",
+    "every-book-on-the-wall-is-named-and-addressed-by-a-real-document",
+    "the-index-and-the-opened-books-quote-the-documents-own-sentences",
+    "no-asset-is-loaded-from-outside-the-site-and-no-private-path-was-copied-in",
+    "the-landing-page-labels-demo-notes-and-offers-a-non-animated-way-in",
+    "the-pages-workflow-builds-and-publishes-the-generated-site"
+  ],
+  "checks_count": 7
+}

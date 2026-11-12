@@ -12,7 +12,7 @@
 
 **简体中文** · [English](README.en.md)
 
-[安装与开发](#安装与开发) · [使用说明](#使用) · [PDF / Slides 演示](docs/demo/README.md) · [DSH 社区讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/6623) · [英文介绍](https://github.com/deepseek-ai/deepseek-harness/discussions/6623#discussioncomment-19481436) · [问题反馈](https://github.com/Mappedinfo/dsh-paper-library/issues)
+[安装与开发](#安装与开发) · [使用说明](#使用) · [文档网站](https://mappedinfo.github.io/dsh-paper-library/docs/) · [PDF / Slides 演示](docs/demo/README.md) · [DSH 社区讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/6623) · [英文介绍](https://github.com/deepseek-ai/deepseek-harness/discussions/6623#discussioncomment-19481436) · [问题反馈](https://github.com/Mappedinfo/dsh-paper-library/issues)
 
 </div>
 
@@ -345,6 +345,15 @@ JSON 可直接拖入流程面板；「完整细节」开关及问号说明当前
 因此**「导出 JSON」才是长期备份**；导入同标识的文件不会覆盖，而是另存为新画板。独立站支持 PNG 导出
 （按模型绘制，不依赖页面样式与字体）。构建与边界见 [docs/board-pages.md](docs/board-pages.md)，
 本地回执见 [docs/validation/board-standalone.json](docs/validation/board-standalone.json)（15 项，含粘贴 Mermaid 成图），线上回执见 [docs/validation/board-pages-live.json](docs/validation/board-pages-live.json)（`node scripts/verify-pages.mjs` 可随时复核，其中也验证 Mermaid 入口可用）。所有回执的「回执 ← 复现命令」索引见 [docs/validation/README.md](docs/validation/README.md)。
+
+## 文档网站（GitHub Pages）
+
+仓库里的公开文档同时发布为一个静态文档站：[**https://mappedinfo.github.io/dsh-paper-library/docs/**](https://mappedinfo.github.io/dsh-paper-library/docs/)。
+首屏是按固定种子散布的书海，向下滚动时同一批书转正、沿连续轨迹归入按文档主题排好的十个书架；悬停把书轻轻抽出并显示预览，点击翻开为阅读面板，书架、目录、搜索与小节直达链接负责导航。**每一本书都对应一个真实的 markdown 文件，预览和高亮句都是该文档自己的句子**；场景中的高亮、页边批注与便签属于本站的演示排版，页面内已明确标注，不代表批注导出、手写识别等产品功能，产品行为仍以文档正文为准。
+
+`npm run build:docs` 生成 `_site/docs/`，与 Pages 根目录的独立画板并存，由 `.github/workflows/pages.yml` 在 main 上自动构建部署；资源路径全为相对路径，`/docs/` 子路径无需额外配置。站点不请求本站之外的任何资源（README 徽章在文档站渲染为文字徽章而非远端图片），不调用模型，也不读取任何本地资料库。
+
+验证：`npm run verify:docs-site` 离线核对生成树与来源 markdown（7 项，回执 [docs/validation/docs-site-static.json](docs/validation/docs-site-static.json)）；`npm run test:docs-site` 用真实 Chromium 走查桌面与手机（18 项，含首帧书海、归架连续性、搜索命中与直达小节、减少动态效果，回执 [docs/validation/docs-site-browser.json](docs/validation/docs-site-browser.json)，与其他浏览器夹具一样通过 `PLAYWRIGHT_MODULE` 指定 Playwright）。构建、部署与边界见 [docs/docs-site.md](docs/docs-site.md)。
 
 ## 实时伴学
 

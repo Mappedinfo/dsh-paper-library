@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><!--TITLE--> · Paper Library 文档</title>
+<meta name="description" content="Paper Library 文档：<!--TITLE-->">
+<link rel="stylesheet" href="<!--ASSET-BASE-->/page.css">
+<link rel="icon" href="<!--ASSET-BASE-->/favicon.svg" type="image/svg+xml">
+</head>
+<body data-assets="<!--ASSET-BASE-->" data-landing="<!--DOCS-ROOT-->">
+<header class="masthead">
+  <a class="brand" href="<!--DOCS-ROOT-->">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-text">Paper Library<em>文档 · <!--SHELF--></em></span>
+  </a>
+  <search class="lookup" role="search">
+    <input id="q" type="search" placeholder="搜索文档、小节与关键词" aria-label="搜索文档" autocomplete="off" spellcheck="false">
+    <kbd aria-hidden="true">/</kbd>
+    <div id="results" class="results" hidden></div>
+  </search>
+  <nav class="masthead-links" aria-label="站点入口">
+    <a href="<!--DOCS-ROOT-->#shelf-library">书架</a>
+    <a href="<!--SHARED-ROOT-->index.html">独立画板</a>
+    <a href="<!--SOURCE-->" rel="noopener noreferrer" target="_blank">GitHub</a>
+  </nav>
+</header>
+
+<div class="layout">
+  <aside class="rail" aria-label="按主题浏览">
+    <button class="rail-toggle" id="rail-toggle" aria-expanded="false" aria-controls="rail-nav">全部文档</button>
+    <nav id="rail-nav" class="rail-nav"><!--NAV--></nav>
+  </aside>
+
+  <main class="reading" id="main">
+    <p class="crumb"><a href="<!--DOCS-ROOT-->">漂浮图书馆</a><span>›</span><a href="<!--DOCS-ROOT-->#shelf-<!--SHELF-ID-->"><!--SHELF--></a></p>
+    <!--TITLE-BLOCK-->
+    <!--BODY-->
+    <footer class="doc-foot">
+      <p>正文直接译自仓库中的 <a href="<!--SOURCE-->" rel="noopener noreferrer" target="_blank">Markdown 原件</a>，共 <!--WORDS--> 字 · <!--SECTIONS--> 个小节。文档站构建于 <!--GENERATED-->，内容以仓库 <code>main</code> 分支为准。</p>
+    </footer>
+  </main>
+
+  <aside class="toc" aria-label="本文目录">
+    <h2>目录</h2>
+    <ol><!--TOC--></ol>
+    <a class="permalink" href="<!--SOURCE-->" rel="noopener noreferrer" target="_blank">在 GitHub 编辑</a>
+  </aside>
+</div>
+
+<script src="<!--ASSET-BASE-->/page.js" defer></script>
+</body>
+</html>

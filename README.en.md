@@ -12,7 +12,7 @@
 
 [简体中文](README.md) · **English**
 
-[Install](#installation) · [Start reading](#start-with-one-pdf) · [Try the demos](#try-the-demos) · [DSH community](https://github.com/deepseek-ai/deepseek-harness/discussions/6623) · [English introduction](https://github.com/deepseek-ai/deepseek-harness/discussions/6623#discussioncomment-19481436) · [Report an issue](https://github.com/Mappedinfo/dsh-paper-library/issues)
+[Install](#installation) · [Start reading](#start-with-one-pdf) · [Try the demos](#try-the-demos) · [Documentation site](https://mappedinfo.github.io/dsh-paper-library/docs/) · [DSH community](https://github.com/deepseek-ai/deepseek-harness/discussions/6623) · [English introduction](https://github.com/deepseek-ai/deepseek-harness/discussions/6623#discussioncomment-19481436) · [Report an issue](https://github.com/Mappedinfo/dsh-paper-library/issues)
 
 </div>
 
@@ -230,6 +230,18 @@ Optional synthetic capacity checks:
 uv run python scripts/benchmark.py --output artifacts/capacity-new
 node --expose-gc scripts/benchmark-node.mjs artifacts/capacity-new/library artifacts/capacity-new/node-report.json
 ```
+
+Every public document in this repository is also published as a static site at
+[https://mappedinfo.github.io/dsh-paper-library/docs/](https://mappedinfo.github.io/dsh-paper-library/docs/).
+Its landing page is a sea of floating books that shelve themselves, by documentation topic, as you scroll; each book is one real markdown file, and the preview and the highlighted sentence are that document's own words. The highlights, margin notes, and sticky notes inside the scene are this site's demo typography, labelled as such on the page, and make no claim about annotation export or handwriting recognition. The site loads nothing from outside itself, calls no model, and never reads a local library.
+
+```sh
+npm run build:docs           # writes _site/docs/ beside the standalone whiteboard
+npm run verify:docs-site     # offline gate over the generated tree (7 checks)
+PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs npm run test:docs-site   # real Chromium, desktop + phone (18 checks)
+```
+
+Receipts: [docs/validation/docs-site-static.json](docs/validation/docs-site-static.json) and [docs/validation/docs-site-browser.json](docs/validation/docs-site-browser.json). Build, deployment, and boundary notes: [docs/docs-site.md](docs/docs-site.md).
 
 See [validation records](docs/validation.md) for what was tested. A passing synthetic test does not establish recognition quality on scanned papers or every real-world layout, and process-level measurements do not measure total browser-plus-host memory.
 

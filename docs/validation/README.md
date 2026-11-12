@@ -12,6 +12,7 @@ npm test                                     # node --test tests-js/*.test.mjs
 node scripts/validate.mjs                    # writes automated.json; also runs the Python suite
 npm run test:board && npm run test:standalone && npm run test:projects
 npm run verify:pages                         # refreshes board-pages-live.json from the deployed site
+npm run verify:docs-site && npm run test:docs-site   # documentation site: offline gate, then Chromium on desktop and phone
 ```
 
 Rows marked **native host** boot a second DeepSeek Harness with an isolated profile and need extra environment:
@@ -47,7 +48,9 @@ They stay out of `npm test` (which is browser-free) for that reason; browser-onl
 | `catalog-layout-browser.json` | `node scripts/catalog-layout-browser-fixture.mjs` | 2026-09-18 | Actual Chromium with synthetic metadata, isolated host disk storage, explicit text bounds and full-title hover/focus checks. Not formal user validation. |
 | `challenge-mining-browser.json` | `node scripts/challenge-panel-browser-fixture.mjs` | 2026-09-20 | Synthetic catalog in an isolated standalone server; corpus panel, P1 scan receipts, P3 aggregation, review gate, P4 structural check/comparison/review packet and exports  |
 | `challenge-mining-harness.json` | `node scripts/challenge-harness-smoke.mjs`（native host） | 2026-09-18 | Actual isolated DSH profile with a synthetic library: authenticated challenge routes, delivered panel assets, P1 scan, P3 aggregation with the review gate, P4 check/compa |
-| `companion-browser.json` | `node scripts/companion-browser-fixture.mjs` | 2026-09-16 | 4 项检查（回执未写 scope 字段） |
+| `companion-browser.json` | `node scripts/companion-browser-fixture.mjs` | 2026-09-16 | 4 项检查（回执未写 scope 字段）
+| `docs-site-browser.json` | `PLAYWRIGHT_MODULE=… npm run test:docs-site` | 2026-11-12 | The generated documentation site served locally in real Chromium: 18 checks covering the first-frame sea of books with an uncovered centre, one continuous shelving path, every book resting inside its topic shelf, hover preview and opened book quoting a real paragraph, one title per document page, search hits marked and section deep links, the direct-shelf entry, phone and reduced-motion paths, and every published page loading without page errors or third-party requests
+| `docs-site-static.json` | `npm run verify:docs-site` | 2026-11-12 | Offline gate over the generated `_site` tree against the repository markdown it was built from: page and index coverage, one title per page, books that name real documents, indexed and quoted sentences that exist in the sources, no third-party asset request, no machine-local or library path, the demo-note labelling, and the Pages workflow wiring (7 checks)
 | `feedback-browser.json` | `node scripts/feedback-browser-fixture.mjs` | 2026-09-20 | Synthetic standalone UI: per-annotation feedback write-back rendering and PDF linking; no model call or external request |
 | `harness-smoke.json` | `node tests-js/adapter-web-smoke.mjs`（native host） | 2026-09-15 | 9 项检查（回执未写 scope 字段） |
 | `language-browser.json` | `node scripts/language-browser-fixture.mjs` | 2026-09-14 | Actual Chromium UI and file storage with deterministic local model double; not real provider quality or formal user validation |

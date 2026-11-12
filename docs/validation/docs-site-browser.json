@@ -1,0 +1,240 @@
+{
+  "check": "docs-site-browser",
+  "ran_at": "2026-11-12T11:01:20.776Z",
+  "generator": "scripts/docs-site-browser-fixture.mjs",
+  "browser": "chromium (headless, real engine)",
+  "viewports": [
+    "1440x900 desktop",
+    "390x844 phone",
+    "1440x900 reduced-motion"
+  ],
+  "build": {
+    "output": "_site/docs",
+    "pages": 50,
+    "shelves": [
+      {
+        "id": "start",
+        "books": 8
+      },
+      {
+        "id": "reading",
+        "books": 8
+      },
+      {
+        "id": "library",
+        "books": 5
+      },
+      {
+        "id": "analysis",
+        "books": 7
+      },
+      {
+        "id": "board",
+        "books": 4
+      },
+      {
+        "id": "latex",
+        "books": 5
+      },
+      {
+        "id": "demo",
+        "books": 5
+      },
+      {
+        "id": "ui",
+        "books": 2
+      },
+      {
+        "id": "api",
+        "books": 4
+      },
+      {
+        "id": "quality",
+        "books": 2
+      }
+    ],
+    "search_bytes": 513447,
+    "copied_assets": 25,
+    "landing_books": 50
+  },
+  "checks": [
+    {
+      "label": "every-local-link-in-the-generated-pages-resolves",
+      "detail": {
+        "pages": 53,
+        "links": 3643
+      }
+    },
+    {
+      "label": "the-scene-is-built-from-real-documents",
+      "detail": {
+        "books": 50,
+        "slots": 50,
+        "cells": 10,
+        "cards": 50,
+        "titles": 50,
+        "faces": 300,
+        "marks": 200,
+        "driveHeight": 3060
+      }
+    },
+    {
+      "label": "first-frame-is-a-sea-of-books-with-a-clear-centre",
+      "detail": {
+        "visible": 50,
+        "covering": 0
+      }
+    },
+    {
+      "label": "shelving-is-one-continuous-path-that-ends-on-the-shelf",
+      "detail": {
+        "mean_px_at_progress": [
+          {
+            "p": 0,
+            "mean": 657
+          },
+          {
+            "p": 0.2,
+            "mean": 657
+          },
+          {
+            "p": 0.4,
+            "mean": 655
+          },
+          {
+            "p": 0.55,
+            "mean": 616
+          },
+          {
+            "p": 0.7,
+            "mean": 365
+          },
+          {
+            "p": 0.85,
+            "mean": 51
+          },
+          {
+            "p": 1,
+            "mean": 2
+          }
+        ]
+      }
+    },
+    {
+      "label": "all-books-rest-inside-their-topic-shelf",
+      "detail": {
+        "off_shelf": 0,
+        "cells": 10
+      }
+    },
+    {
+      "label": "hover-pulls-the-book-out-and-previews-its-first-paragraph",
+      "detail": {
+        "chars": 247
+      }
+    },
+    {
+      "label": "opening-a-book-shows-a-seriously-read-page-of-real-text",
+      "detail": {
+        "title": "持续批注与对话引用",
+        "marks": 1,
+        "tags": 4
+      }
+    },
+    {
+      "label": "a-shelf-book-opens-a-readable-document-page",
+      "detail": {
+        "title": "Community showcase",
+        "toc": 6,
+        "rail": 50
+      }
+    },
+    {
+      "label": "search-covers-the-whole-corpus-with-matched-words-marked",
+      "detail": {
+        "shown": true,
+        "hits": 9,
+        "marks": 9,
+        "first": "持续批注与对话引用"
+      }
+    },
+    {
+      "label": "a-search-result-jumps-straight-to-that-section",
+      "detail": {
+        "hash": "#%E6%9C%AC%E6%AC%A1%E5%BC%95%E7%94%A8%E7%9A%84%E6%89%B9%E6%B3%A8%E9%9B%86%E5%90%88",
+        "heading": "H2",
+        "y": 0
+      }
+    },
+    {
+      "label": "the-direct-shelf-entry-skips-the-walk-and-keeps-scrolling",
+      "detail": {
+        "mean": 2,
+        "scroll_y_kept": true
+      }
+    },
+    {
+      "label": "phone-keeps-the-whole-shelf-without-side-scroll-or-hover-dependency",
+      "detail": {
+        "overflow": 0,
+        "tipEnabled": false,
+        "heroVisible": true,
+        "books": 50
+      }
+    },
+    {
+      "label": "scrolling-on-a-phone-completes-the-same-move",
+      "detail": {
+        "mean": 1
+      }
+    },
+    {
+      "label": "the-reading-panel-fits-and-stays-legible-on-a-phone",
+      "detail": {
+        "open": true,
+        "width": 374.390625,
+        "scrollable": true
+      }
+    },
+    {
+      "label": "the-catalog-takes-the-reader-to-the-document-on-phones",
+      "detail": {
+        "ok": true,
+        "href": "/docs/community/update-2026-11-06.html"
+      }
+    },
+    {
+      "label": "reduce-motion-goes-straight-to-the-shelf",
+      "detail": {
+        "mean": 2
+      }
+    },
+    {
+      "label": "every-published-page-loads-on-its-own",
+      "detail": {
+        "pages": 51
+      }
+    },
+    {
+      "label": "the-site-loads-without-page-errors-or-third-party-requests",
+      "detail": {
+        "pages": 57
+      }
+    }
+  ],
+  "screenshots": [
+    "../../../artifacts/docs-site/desktop-01-floating.png",
+    "../../../artifacts/docs-site/desktop-02-shelving.png",
+    "../../../artifacts/docs-site/desktop-03-shelved.png",
+    "../../../artifacts/docs-site/desktop-04-hover.png",
+    "../../../artifacts/docs-site/desktop-05-open-book.png",
+    "../../../artifacts/docs-site/desktop-06-document.png",
+    "../../../artifacts/docs-site/desktop-07-search.png",
+    "../../../artifacts/docs-site/phone-01-floating.png",
+    "../../../artifacts/docs-site/phone-02-shelved.png",
+    "../../../artifacts/docs-site/phone-03-open-book.png",
+    "../../../artifacts/docs-site/phone-04-catalog.png",
+    "../../../artifacts/docs-site/desktop-08-reduced-motion.png"
+  ],
+  "boundary": "This measures the generated site in a browser served locally. It does not prove the GitHub Pages deployment, its latency or its availability; run scripts/verify-docs-site.mjs against the live URL for that."
+}

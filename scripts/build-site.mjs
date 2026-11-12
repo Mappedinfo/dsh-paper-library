@@ -9,6 +9,7 @@ import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildPaperFlow } from './build-paper-flow.mjs';
+import { buildDocsSite } from './build-docs-site.mjs';
 
 await buildPaperFlow();
 const project = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -53,4 +54,7 @@ for (const name of ['DAGRE-LICENSE.txt', 'GRAPHLIB-LICENSE.txt', 'MATHJAX-LICENS
 for (const name of ['react-LICENSE.txt', 'react-dom-LICENSE.txt']) await cp(join(project, 'licenses/slides', name), join(output, 'licenses/paper-flow', name));
 await cp(join(project, 'site/boards'), join(output, 'boards'), { recursive: true });
 
-console.log(JSON.stringify({ output: '_site', markup_lines: markup.split('\n').length, assets: ['index.html', 'board.js', 'board-flow.js', 'board-source.js', 'board-render.js', 'board-bridge.js', 'board-annotations.js', 'board-annotations.css', 'board-mermaid.js', 'board-drawio.js', 'board.css', 'theme.css', 'floating-windows.js', 'floating-windows.css', 'paper-flow-editor.js', 'paper-flow-editor.css', 'standalone.js', 'boards/example.json', 'boards/example.style.json'] }));
+// The board owns the Pages root; the documentation site is published beside it under /docs/.
+const docs = await buildDocsSite({ outDir: output });
+
+console.log(JSON.stringify({ output: '_site', docs, markup_lines: markup.split('\n').length, assets: ['index.html', 'board.js', 'board-flow.js', 'board-source.js', 'board-render.js', 'board-bridge.js', 'board-annotations.js', 'board-annotations.css', 'board-mermaid.js', 'board-drawio.js', 'board.css', 'theme.css', 'floating-windows.js', 'floating-windows.css', 'paper-flow-editor.js', 'paper-flow-editor.css', 'standalone.js', 'boards/example.json', 'boards/example.style.json'] }));
