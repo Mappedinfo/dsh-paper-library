@@ -431,6 +431,15 @@ function authorIdentities(person) {
 }
 
 function sameAuthorList(local, registered) {
+  // Some imports store a semicolon-delimited author list in one CSL literal.
+  // Expand it only for verification against a longer registered list.
+  if (local.length < registered.length) {
+    local = local.flatMap(person => {
+      if (typeof person?.literal !== 'string' || !/[;；]/u.test(person.literal)) return [person];
+      const names = person.literal.split(/[;；]/u).map(name => name.trim());
+      return names.every(normalizedIdentity) ? names.map(literal => ({ literal })) : [person];
+    });
+  }
   if(local.length!==registered.length)return false;
   const remaining=registered.map(person=>authorIdentities(person).map(joinHan));
   for(const person of local){

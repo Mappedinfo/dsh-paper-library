@@ -252,6 +252,24 @@ test('manual arXiv mismatches, unavailable records and offline failures leave th
   assert.deepEqual(await core({action:'get',id:f.item.id},{library:f.library}),before);
 });
 
+test('manual arXiv verification compares a semicolon-delimited local author list one name at a time',async t=>{
+  const author=[{literal:'Alice Reader; Kai Chen；Rui Sun'}];
+  const f=await fixture(t,{author});
+  const request={action:'catalog_doi_lookup',id:f.item.id,identifier:'2601.01234v2'};
+  const lookup=authors=>dispatch(request,{library:f.library,fetchOptions:arxivFixture({authors})});
+
+  for(const authors of [['Alice Reader','Kai Chen'],['Alice Reader','Kai Chen','Kai Chen']]){
+    const result=await lookup(authors);
+    assert.equal(result.status,'mismatch');
+    assert.equal(result.authorsMatch,false);
+  }
+  assert.equal((await core({action:'get',id:f.item.id},{library:f.library})).archive_location,undefined);
+  assert.equal((await lookup(['Rui Sun','Alice Reader','Kai Chen'])).status,'saved');
+  const saved=await core({action:'get',id:f.item.id},{library:f.library});
+  assert.equal(saved.archive_location,'2601.01234v2');
+  assert.deepEqual(saved.author,author);
+});
+
 test('manual arXiv uses revision checks and coalesces simultaneous normalized requests',async t=>{
   const f=await fixture(t,{author:[{literal:'Alice Reader'}]});
   let release,started;
