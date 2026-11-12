@@ -14,7 +14,7 @@
 
 ## 2. 当前任务与实际状态
 
-仓库公开文档已发布为 GitHub Pages 文档网站（<https://mappedinfo.github.io/dsh-paper-library/docs/>）：首屏是按固定种子散布的书海，滚动时同一批书转正归入 10 个主题书架，悬停抽出预览、点击翻开的阅读面板逐句引用该文档原文；文档页提供搜索、目录与小节直达，手机简化动效并支持「减少动态效果」。50 篇文档对应 50 本书，`npm run build:docs` 单独生成，`node scripts/build-site.mjs` 已与独立画板一并生成。`npm run verify:docs-site`（7 项离线核对）与 `npm run test:docs-site`（真实 Chromium，桌面与手机 18 项）通过并留下两份回执；回执核对的是本机生成构建，部署后的 URL 尚未单独验证。场景内高亮、页边批注与便签在页面内标注为本站演示排版，不代表产品功能。说明见 [docs/docs-site.md](docs/docs-site.md)。
+仓库公开文档已发布为 GitHub Pages 文档网站（<https://mappedinfo.github.io/dsh-paper-library/docs/>）：首屏是按固定种子散布的书海，滚动时同一批书转正归入 10 个主题书架，悬停抽出预览、点击翻开的阅读面板逐句引用该文档原文；文档页提供搜索、目录与小节直达，手机简化动效并支持「减少动态效果」。50 篇文档对应 50 本书，`npm run build:docs` 单独生成，`node scripts/build-site.mjs` 与独立画板一并生成并随 main 部署上线。`npm run verify:docs-site`（7 项离线核对）与 `npm run test:docs-site`（真实 Chromium，桌面与手机 18 项）核对本机生成构建；`npm run verify:docs-pages` 用真实浏览器读线上 URL 通过 7 项（索引每页均被提供、滚动归架均值 2px、打开的书逐句引用线上文档、搜索与直达、手机无横向滚动、零本站外请求），回执 [docs/validation/docs-site-live.json](docs/validation/docs-site-live.json)。场景内高亮、页边批注与便签在页面内标注为本站演示排版，不代表产品功能。说明见 [docs/docs-site.md](docs/docs-site.md)。
 
 手动核对 DOI 或 arXiv 时，支持把旧题录中存于一个字段的分号分隔作者名单拆开逐人匹配，保留完整名单核对和原作者字段。43 项题录相关测试通过，3080 单插件热载返回 applied、无警告，状态接口已验证。
 

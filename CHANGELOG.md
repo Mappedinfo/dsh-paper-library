@@ -4,7 +4,7 @@
 
 ## 未发布
 
-- 仓库公开文档新增 GitHub Pages 文档网站：首屏是按固定种子散布的书海，向下滚动时同一批书转正、沿连续轨迹归入按文档主题排好的十个书架；悬停抽出显示预览，点击翻开的阅读面板逐句引用该文档的真实段落，书架承担导航，文档页提供搜索、目录与小节直达链接。手机简化动效并支持「减少动态效果」。`npm run build:docs` 生成 `_site/docs/`，由 `.github/workflows/pages.yml` 与独立画板一并部署；`npm run verify:docs-site`（7 项离线核对）和 `npm run test:docs-site`（真实 Chromium，桌面与手机 18 项）留下可复现回执。站点不请求本站之外的任何资源（README 徽章渲染为文字徽章），不调用模型、不读取本地资料库；场景中的高亮、页边批注与便签在页面内标注为本站演示排版。见 [docs/docs-site.md](docs/docs-site.md)。
+- 仓库公开文档新增 GitHub Pages 文档网站：首屏是按固定种子散布的书海，向下滚动时同一批书转正、沿连续轨迹归入按文档主题排好的十个书架；悬停抽出显示预览，点击翻开的阅读面板逐句引用该文档的真实段落，书架承担导航，文档页提供搜索、目录与小节直达链接。手机简化动效并支持「减少动态效果」。`npm run build:docs` 生成 `_site/docs/`，由 `.github/workflows/pages.yml` 与独立画板一并部署；`npm run verify:docs-site`（7 项离线核对）、`npm run test:docs-site`（真实 Chromium，桌面与手机 18 项）和 `npm run verify:docs-pages`（发布后直接读线上 URL，7 项）留下可复现回执。站点不请求本站之外的任何资源（README 徽章渲染为文字徽章），不调用模型、不读取本地资料库；场景中的高亮、页边批注与便签在页面内标注为本站演示排版。见 [docs/docs-site.md](docs/docs-site.md)。
 
 - 文献标题下方新增只读划线分布：浅绿其他样式与浅蓝 AI 虚线样式分层，可切平滑密度／离散条带、调平滑度及关闭；按 PDF 页与位置归一，未知和实际无划线分开，不冒充阅读完成度。仅视野附近有界串行读取，无正文解析或 PDF 写入。
 

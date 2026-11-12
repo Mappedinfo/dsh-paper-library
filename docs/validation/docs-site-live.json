@@ -1,0 +1,30 @@
+{
+  "verified_at": "2026-11-12T11:33:29.612Z",
+  "site": "https://mappedinfo.github.io/dsh-paper-library/",
+  "scope": "The deployed GitHub Pages documentation site, read over the public network in real Chromium: every indexed page served, the live scene built from the live index, shelving completing, an opened book quoting the deployed document verbatim, search and section deep links, a phone layout, and no request outside Pages or failed response. It is a functional check of the public service, not an availability, latency or security measurement.",
+  "checks": [
+    "every-indexed-page-and-the-landing-are-served-by-github-pages",
+    "the-live-scene-is-built-from-the-live-index",
+    "scrolling-on-the-live-site-shelves-every-book",
+    "a-live-book-opens-on-words-the-deployed-document-really-has",
+    "live-search-marks-hits-and-jumps-to-that-section",
+    "a-phone-loads-and-shelves-the-live-site-without-side-scroll",
+    "the-live-site-asks-nothing-outside-github-pages-and-fails-nothing"
+  ],
+  "checks_count": 7,
+  "live_pages": 50,
+  "live_books": 50,
+  "books": 50,
+  "slots": 50,
+  "cells": 10,
+  "shelves": 10,
+  "scroll_y": 2160,
+  "mean": 1,
+  "href": "annotation-reference-design.html",
+  "marks": 9,
+  "hits": 9,
+  "heading": "H2",
+  "overflow": 0,
+  "requests_outside_pages": 0,
+  "failed": 0
+}

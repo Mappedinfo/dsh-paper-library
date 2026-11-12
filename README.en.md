@@ -241,7 +241,9 @@ npm run verify:docs-site     # offline gate over the generated tree (7 checks)
 PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs npm run test:docs-site   # real Chromium, desktop + phone (18 checks)
 ```
 
-Receipts: [docs/validation/docs-site-static.json](docs/validation/docs-site-static.json) and [docs/validation/docs-site-browser.json](docs/validation/docs-site-browser.json). Build, deployment, and boundary notes: [docs/docs-site.md](docs/docs-site.md).
+After a publish, `npm run verify:docs-pages` reads the deployed URL in a real browser (7 checks: every indexed page served, shelving completes, an opened book quotes the deployed document verbatim, search and section links work, the phone layout holds, and no request leaves Pages).
+
+Receipts: [docs/validation/docs-site-static.json](docs/validation/docs-site-static.json), [docs/validation/docs-site-browser.json](docs/validation/docs-site-browser.json), and [docs/validation/docs-site-live.json](docs/validation/docs-site-live.json) for the deployed site. Build, deployment, and boundary notes: [docs/docs-site.md](docs/docs-site.md).
 
 See [validation records](docs/validation.md) for what was tested. A passing synthetic test does not establish recognition quality on scanned papers or every real-world layout, and process-level measurements do not measure total browser-plus-host memory.
 

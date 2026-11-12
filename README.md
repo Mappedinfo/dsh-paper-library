@@ -353,7 +353,7 @@ JSON 可直接拖入流程面板；「完整细节」开关及问号说明当前
 
 `npm run build:docs` 生成 `_site/docs/`，与 Pages 根目录的独立画板并存，由 `.github/workflows/pages.yml` 在 main 上自动构建部署；资源路径全为相对路径，`/docs/` 子路径无需额外配置。站点不请求本站之外的任何资源（README 徽章在文档站渲染为文字徽章而非远端图片），不调用模型，也不读取任何本地资料库。
 
-验证：`npm run verify:docs-site` 离线核对生成树与来源 markdown（7 项，回执 [docs/validation/docs-site-static.json](docs/validation/docs-site-static.json)）；`npm run test:docs-site` 用真实 Chromium 走查桌面与手机（18 项，含首帧书海、归架连续性、搜索命中与直达小节、减少动态效果，回执 [docs/validation/docs-site-browser.json](docs/validation/docs-site-browser.json)，与其他浏览器夹具一样通过 `PLAYWRIGHT_MODULE` 指定 Playwright）。构建、部署与边界见 [docs/docs-site.md](docs/docs-site.md)。
+验证：`npm run verify:docs-site` 离线核对生成树与来源 markdown（7 项，回执 [docs/validation/docs-site-static.json](docs/validation/docs-site-static.json)）；`npm run test:docs-site` 用真实 Chromium 走查桌面与手机（18 项，含首帧书海、归架连续性、搜索命中与直达小节、减少动态效果，回执 [docs/validation/docs-site-browser.json](docs/validation/docs-site-browser.json)，与其他浏览器夹具一样通过 `PLAYWRIGHT_MODULE` 指定 Playwright）；发布后 `npm run verify:docs-pages` 直接读线上 URL，核对索引里的每一页都被提供、滚动归架、打开的书逐句引用线上文档、搜索与直达可用、手机无横向滚动且零本站外请求（7 项，回执 [docs/validation/docs-site-live.json](docs/validation/docs-site-live.json)，2026-11-12 已在线核对）。构建、部署与边界见 [docs/docs-site.md](docs/docs-site.md)。
 
 ## 实时伴学
 

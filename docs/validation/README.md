@@ -13,6 +13,7 @@ node scripts/validate.mjs                    # writes automated.json; also runs 
 npm run test:board && npm run test:standalone && npm run test:projects
 npm run verify:pages                         # refreshes board-pages-live.json from the deployed site
 npm run verify:docs-site && npm run test:docs-site   # documentation site: offline gate, then Chromium on desktop and phone
+npm run verify:docs-pages                      # documentation site as GitHub Pages actually serves it
 ```
 
 Rows marked **native host** boot a second DeepSeek Harness with an isolated profile and need extra environment:
@@ -50,6 +51,7 @@ They stay out of `npm test` (which is browser-free) for that reason; browser-onl
 | `challenge-mining-harness.json` | `node scripts/challenge-harness-smoke.mjs`（native host） | 2026-09-18 | Actual isolated DSH profile with a synthetic library: authenticated challenge routes, delivered panel assets, P1 scan, P3 aggregation with the review gate, P4 check/compa |
 | `companion-browser.json` | `node scripts/companion-browser-fixture.mjs` | 2026-09-16 | 4 项检查（回执未写 scope 字段）
 | `docs-site-browser.json` | `PLAYWRIGHT_MODULE=… npm run test:docs-site` | 2026-11-12 | The generated documentation site served locally in real Chromium: 18 checks covering the first-frame sea of books with an uncovered centre, one continuous shelving path, every book resting inside its topic shelf, hover preview and opened book quoting a real paragraph, one title per document page, search hits marked and section deep links, the direct-shelf entry, phone and reduced-motion paths, and every published page loading without page errors or third-party requests
+| `docs-site-live.json` | `npm run verify:docs-pages` | 2026-11-12 | The deployed GitHub Pages documentation site, read over the public network in real Chromium: every page the live index names is served, the live scene holds one book per indexed document, scrolling shelves them all, an opened book quotes the deployed document verbatim, live search marks hits and jumps to the section, a phone layout holds, and no request leaves Pages or fails (7 checks) |
 | `docs-site-static.json` | `npm run verify:docs-site` | 2026-11-12 | Offline gate over the generated `_site` tree against the repository markdown it was built from: page and index coverage, one title per page, books that name real documents, indexed and quoted sentences that exist in the sources, no third-party asset request, no machine-local or library path, the demo-note labelling, and the Pages workflow wiring (7 checks)
 | `feedback-browser.json` | `node scripts/feedback-browser-fixture.mjs` | 2026-09-20 | Synthetic standalone UI: per-annotation feedback write-back rendering and PDF linking; no model call or external request |
 | `harness-smoke.json` | `node tests-js/adapter-web-smoke.mjs`（native host） | 2026-09-15 | 9 项检查（回执未写 scope 字段） |

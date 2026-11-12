@@ -1,6 +1,6 @@
 {
   "check": "docs-site-browser",
-  "ran_at": "2026-11-12T11:01:20.776Z",
+  "ran_at": "2026-11-12T11:35:01.872Z",
   "generator": "scripts/docs-site-browser-fixture.mjs",
   "browser": "chromium (headless, real engine)",
   "viewports": [
@@ -53,7 +53,7 @@
         "books": 2
       }
     ],
-    "search_bytes": 513447,
+    "search_bytes": 514676,
     "copied_assets": 25,
     "landing_books": 50
   },
@@ -91,27 +91,27 @@
         "mean_px_at_progress": [
           {
             "p": 0,
-            "mean": 657
+            "mean": 631
           },
           {
             "p": 0.2,
-            "mean": 657
+            "mean": 631
           },
           {
             "p": 0.4,
-            "mean": 655
+            "mean": 630
           },
           {
             "p": 0.55,
-            "mean": 616
+            "mean": 593
           },
           {
             "p": 0.7,
-            "mean": 365
+            "mean": 352
           },
           {
             "p": 0.85,
-            "mean": 51
+            "mean": 49
           },
           {
             "p": 1,

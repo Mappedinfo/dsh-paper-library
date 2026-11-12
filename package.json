@@ -151,7 +151,8 @@
     "typecheck:paper-flow": "tsc -p tsconfig.paper-flow.json",
     "build:docs": "node scripts/build-docs-site.mjs",
     "test:docs-site": "node scripts/docs-site-browser-fixture.mjs",
-    "verify:docs-site": "node scripts/verify-docs-site.mjs"
+    "verify:docs-site": "node scripts/verify-docs-site.mjs",
+    "verify:docs-pages": "node scripts/verify-docs-pages.mjs"
   },
   "dependencies": {
     "@citation-js/core": "^0.7.18",
