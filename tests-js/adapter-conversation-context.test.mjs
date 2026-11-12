@@ -215,7 +215,7 @@ test('handwriting handoff accepts blank boards, full worker dimensions and Unico
   assert.equal(Object.hasOwn(readerSnapshot({ paperId: 'paper-1', page: 3, handwritingDraft: null }), 'handwritingDraft'), false)
 })
 
-function environment() {
+function environment({ modern = false } = {}) {
   const listeners = new Set(), frames = new Map(), timers = new Map(), messages = []
   let sequence = 0, current = 'source', state = { draft: '', phase: 'plain', occurrences: [], attachmentIds: [], draftRev: 1 }
   const operations = [], inputEdits = [], tabOptions = []
@@ -245,6 +245,24 @@ function environment() {
     },
     sidebarRight: { openTab: (kind, options) => { operations.push(`tab:${current}:${kind}`); tabOptions.push({ kind, options }) } },
   }
+  if (modern) {
+    let retained = false, refreshes = 0
+    const open = ctx.sessions.open
+    delete ctx.sessions.open
+    ctx.get = key => key === 'uiWorkspace' ? { openSession: open } : undefined
+    ctx.sessions.refresh = async () => { refreshes++; operations.push('refresh') }
+    ctx.sessions.list = { getSnapshot: () => ({ byId: refreshes > 1 ? { paper: { id: 'paper' } } : {} }) }
+    ctx.sessions.binding = id => current === id || (id === 'paper' && retained) ? binding : undefined
+    ctx.sessions.retainInfo = id => ({ getSnapshot: () => ({ retainedBy: current === id ? { mainView: 1 } : {} }) })
+    ctx.sessions.using = async (id, options, operation) => {
+      assert.equal(id, 'paper')
+      assert.equal(options.source, 'controllerOperation')
+      retained = true
+      operations.push(`retain:${id}`)
+      try { return await operation({ binding }) }
+      finally { retained = false; operations.push(`release:${id}`) }
+    }
+  }
   const bridge = createConversationBridge({ window, ctx })
   const target = { postMessage: (value, origin) => messages.push({ value, origin }) }
   const detach = bridge.attach(target)
@@ -258,6 +276,22 @@ function environment() {
     setCurrent: value => { current = value }, setBlock: value => { block = value }, setApplied: value => { applied = value },
   }
 }
+
+test('current DSH opens an existing cold session and holds it through the composer mount', async () => {
+  const e = environment({ modern: true })
+  assert.equal(e.ctx.sessions.binding('paper'), undefined)
+  e.action('draft', { text: 'Synthetic paper question' })
+  await tick()
+  assert.deepEqual(e.operations, ['refresh', 'refresh', 'retain:paper', 'open:paper'])
+  assert.equal(e.inputEdits.length, 0)
+  e.bridge.mountedSession('paper')
+  e.frame()
+  await tick()
+  assert.deepEqual(e.operations, ['refresh', 'refresh', 'retain:paper', 'open:paper', 'tab:paper:paper-library', 'release:paper'])
+  assert.equal(e.inputEdits[0].request.text, 'Synthetic paper question')
+  assert.equal(e.messages.at(-1).value.ok, true)
+  e.bridge.dispose()
+})
 
 test('only the registered iframe, same origin and supported message version may access main conversations', async () => {
   const e = environment()

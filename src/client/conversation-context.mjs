@@ -256,6 +256,17 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
   let pendingReference = null
   const post = (target, data) => { if (active) target.postMessage({ ...data, version: VERSION }, origin) }
 
+  function workspaceNavigation() {
+    return ctx.get?.('uiWorkspace') ?? ctx.uiWorkspace
+  }
+
+  function isMainSession(sessionId) {
+    if (typeof workspaceNavigation()?.openSession === 'function' && typeof ctx.sessions.retainInfo === 'function') {
+      return (ctx.sessions.retainInfo(sessionId).getSnapshot().retainedBy.mainView ?? 0) > 0
+    }
+    return ctx.sessions.list.getSnapshot().current === sessionId
+  }
+
   function relayReference() {
     if (!pendingReference) return
     // With several panes open, deliver to the pane the reader last touched;
@@ -290,7 +301,7 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
     frameTimer = window.requestAnimationFrame(() => {
       frameTimer = null
       if (navigation !== pending || !active) return
-      if (ctx.sessions.list.getSnapshot().current !== pending.sessionId) {
+      if (!isMainSession(pending.sessionId)) {
         finishNavigation(new Error('你已切换到其他对话，文献库导航已取消'))
         return
       }
@@ -313,7 +324,10 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
       const timer = window.setTimeout(() => finishNavigation(new Error('论文对话已切换，但文献库面板未能重新打开；请从右侧栏打开文献库')), NAVIGATION_TIMEOUT)
       navigation = { sessionId, text, reference, toInsert, resolve, reject, timer }
       try {
-        ctx.sessions.open(sessionId)
+        const workspace = workspaceNavigation()
+        if (typeof workspace?.openSession === 'function') workspace.openSession(sessionId)
+        else if (typeof ctx.sessions.open === 'function') ctx.sessions.open(sessionId)
+        else throw new Error('DSH 的会话导航尚未就绪，请稍后重试。')
         scheduleOpen()
       } catch (error) { finishNavigation(error) }
     })
@@ -325,7 +339,23 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
     if (typeof data.sessionId !== 'string' || !data.sessionId || data.sessionId.length > 200) throw new Error('论文对话标识无效')
     await ctx.sessions.refresh()
     if (!active) throw new Error('文献库已关闭')
-    const binding = ctx.sessions.binding(data.sessionId)
+    // On current DSH, a session can be saved on the Host without an active
+    // Client binding. Retain it until navigation and any draft edit finish.
+    if (typeof workspaceNavigation()?.openSession === 'function' && typeof ctx.sessions.using === 'function') {
+      const isKnown = () => ctx.sessions.binding(data.sessionId) || Object.hasOwn(ctx.sessions.list.getSnapshot().byId ?? {}, data.sessionId)
+      // The previous refresh can share a pull started before the session was saved.
+      if (!isKnown()) {
+        await ctx.sessions.refresh()
+        if (!active) throw new Error('文献库已关闭')
+        if (!isKnown()) throw new Error('DSH 暂未找到这篇论文的对话，请重试。')
+      }
+      return ctx.sessions.using(data.sessionId, { source: 'controllerOperation' }, reference => performBound(data, reference.binding))
+    }
+    return performBound(data, ctx.sessions.binding(data.sessionId))
+  }
+
+  async function performBound(data, binding) {
+    if (!active) throw new Error('文献库已关闭')
     if (!binding || binding.session.getSnapshot().removed) throw new Error('论文对话不存在，请重新打开文献')
     if (navigation) throw new Error('正在打开论文对话，请稍后重试')
     if (data.action === 'board_draft') {
@@ -430,7 +460,7 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
     async openReference({ sessionId, paperId, page, snapshot_id }) {
       boundedString(paperId, 200); pageNumber(page)
       if (!/^[a-f0-9]{64}$/.test(snapshot_id)) throw new Error('批注引用快照无效')
-      if (ctx.sessions.list.getSnapshot().current !== sessionId) throw new Error('你已切换到其他对话，请在原对话重新打开引用')
+      if (!isMainSession(sessionId)) throw new Error('你已切换到其他对话，请在原对话重新打开引用')
       pendingReference = { paperId, page, snapshot_id }
       try { await openSession(sessionId) }
       catch (error) { pendingReference = null; throw error }

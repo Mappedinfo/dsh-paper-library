@@ -48,8 +48,9 @@ staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
 staticFiles['slides.html']=['slides.html','text/html;charset=utf-8'];
 staticFiles['fonts/silkscreen-regular.ttf']=['fonts/silkscreen-regular.ttf','font/ttf'];
 const browserStatePrefixes = ['reader:', 'chat:', 'metadata:', 'language-draft:', 'resource-draft:', 'knowledge-draft:', 'annotation-edits:'];
+const browserStateSingletons = new Set(['preferences', 'reader', 'catalog:view']);
 function browserStateKey(key, listPrefix = false) {
-  if (typeof key !== 'string' || !(key === 'preferences' || key === 'reader' || /^workspace:last:[A-Za-z0-9_-]{1,160}$/.test(key) || browserStatePrefixes.some(prefix => key.startsWith(prefix)) || /^migration:[a-f0-9]{64}$/.test(key) || (listPrefix && key === 'migration:'))) throw new LocalStateError('此状态类别不能直接从浏览器访问。', 'STATE_FORBIDDEN', 403);
+  if (typeof key !== 'string' || !(browserStateSingletons.has(key) || /^workspace:last:[A-Za-z0-9_-]{1,160}$/.test(key) || browserStatePrefixes.some(prefix => key.startsWith(prefix)) || /^migration:[a-f0-9]{64}$/.test(key) || (listPrefix && key === 'migration:'))) throw new LocalStateError('此状态类别不能直接从浏览器访问。', 'STATE_FORBIDDEN', 403);
   return key;
 }
 async function stateRequest(store, input) {
@@ -58,7 +59,7 @@ async function stateRequest(store, input) {
   if (input.action !== 'state_list') throw new LocalStateError('未知的本地状态操作。');
   const prefix = browserStateKey(input.prefix, true);
   // Exact singleton keys must not make a new namespace readable by prefix.
-  if (prefix === 'preferences' || prefix === 'reader') {
+  if (browserStateSingletons.has(prefix)) {
     const offset = input.offset ?? 0, limit = input.limit ?? 20;
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10000 || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new LocalStateError('状态分页要求 offset 0–10000、limit 1–50。');
     const record = await store.get(prefix), total = record.revision === 0 ? 0 : 1;

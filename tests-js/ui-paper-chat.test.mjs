@@ -128,6 +128,7 @@ test('a late ensure response for paper A cannot replace paper B session or its c
   await flush();
   assert.equal(fixture.posts.length, 1, 'stale creation must not trigger a refresh action');
   assert.equal(fixture.posts[0].data.sessionId, 'session-paper-b');
+  assert.equal(fixture.requests.filter(request => request.action === 'chat_ensure' && request.id === 'paper-b').length, 2, 'opening the main conversation rechecks the saved session');
   fixture.bridgeResult(fixture.posts[0].data);
   await openingMain;
   assert.equal(fixture.requests.some(request => request.action === 'chat_send'), false);

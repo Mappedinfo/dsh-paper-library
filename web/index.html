@@ -130,7 +130,20 @@
       <div id="library-error" class="inline-error" role="alert" hidden></div>
       <div id="paper-list" class="paper-list" aria-live="polite"></div>
       <div id="catalog-table" class="catalog-table" hidden></div>
-      <div class="pagination"><button id="previous-list" class="button subtle" disabled>← 上一页</button><span id="list-range" class="muted"></span><button id="next-list" class="button subtle" disabled>下一页 →</button></div>
+      <div class="pagination catalog-pagination">
+        <button id="previous-list" class="button subtle" disabled>← 上一页</button>
+        <div class="catalog-pagination-summary">
+          <span id="list-range" class="muted"></span>
+          <select id="list-page-size" aria-label="每页显示条目数" disabled>
+            <option value="20">20 条／页</option>
+            <option value="40" selected>40 条／页</option>
+            <option value="60">60 条／页</option>
+            <option value="100">100 条／页</option>
+            <option value="200">200 条／页</option>
+          </select>
+        </div>
+        <button id="next-list" class="button subtle" disabled>下一页 →</button>
+      </div>
       <footer class="library-footer"><span class="live-dot"></span>本地文献库<span title="PDF 中的标准批注随文件保存">PDF 原生批注</span></footer>
       </div>
     </section>

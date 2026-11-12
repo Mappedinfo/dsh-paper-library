@@ -20,7 +20,7 @@ async function call(handler,input,headers={}) {
 
 test('HTTP state writes survive handler reload and expose actionable CAS conflicts', async t => {
   const f=await fixture(t), handler=createFetchHandler(f.options);
-  for (const key of ['preferences','reader','reader:paper_a','reader:language-window','workspace:last:main','workspace:last:paper_a','chat:paper_a','metadata:new','annotation-edits:paper-a:550e8400-e29b-41d4-a716-446655440000','language-draft:request_a',`migration:${'a'.repeat(64)}`]) {
+  for (const key of ['preferences','catalog:view','reader','reader:paper_a','reader:language-window','workspace:last:main','workspace:last:paper_a','chat:paper_a','metadata:new','annotation-edits:paper-a:550e8400-e29b-41d4-a716-446655440000','language-draft:request_a',`migration:${'a'.repeat(64)}`]) {
     const missing=await call(handler,{action:'state_get',key}); assert.equal(missing.result.revision,0);
     const saved=await call(handler,{action:'state_put',key,value:{text:'preserved',page:3},expected_revision:0});
     assert.equal(saved.status,200); assert.match(saved.result.revision,/^[a-f0-9]{64}$/);
@@ -39,15 +39,15 @@ test('HTTP state writes survive handler reload and expose actionable CAS conflic
 
 test('browser state namespaces cannot forge or inspect generated learning or vocabulary records', async t => {
   const f=await fixture(t), handler=createFetchHandler({...f.options,localState:f.store});
-  for (const key of ['language.result:paper_a:request_a','vocabulary:word_a','preferences.private','reader.private']) await f.store.put(key,{secret:'not browser writable'},0);
-  for (const key of ['language.result:paper_a:request_a','vocabulary:word_a','preferences.private','reader.private','../reader']) {
+  for (const key of ['language.result:paper_a:request_a','vocabulary:word_a','preferences.private','catalog:view.private','reader.private']) await f.store.put(key,{secret:'not browser writable'},0);
+  for (const key of ['language.result:paper_a:request_a','vocabulary:word_a','preferences.private','catalog:view.private','reader.private','../reader']) {
     for (const action of ['state_get','state_put','state_list']) {
       const result=await call(handler,{action,key,prefix:key,value:{forged:true},expected_revision:0});
       assert.equal(result.status,403); assert.equal(result.code,'STATE_FORBIDDEN');
     }
   }
   assert.equal((await call(handler,{action:'state_list'})).status,403);
-  for (const prefix of ['preferences','reader']) assert.deepEqual((await call(handler,{action:'state_list',prefix})).result.records,[]);
+  for (const prefix of ['preferences','catalog:view','reader']) assert.deepEqual((await call(handler,{action:'state_list',prefix})).result.records,[]);
   assert.equal((await call(handler,{action:'state_list',prefix:'chat:',limit:1000})).status,400);
   assert.equal((await call(handler,{action:'state_unknown',key:'reader'})).status,400);
   assert.equal((await call(handler,{action:'state_put',key:'reader',value:{},expected_revision:0},{origin:'https://attacker.example'})).status,403);

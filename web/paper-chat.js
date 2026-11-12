@@ -224,11 +224,11 @@ window.PaperLibraryChat = {
       pending.delete(event.data.requestId); clearTimeout(request.timer);
       if (event.data.ok) request.resolve(event.data); else request.reject(new Error(event.data.error || '主对话操作未完成。'));
     });
-    async function ensure(id = chat.paperId) {
+    async function ensure(id = chat.paperId, { verify = false } = {}) {
       if (!chat.available || !id) return null;
-      if (chat.sessionId && id === chat.paperId) return chat.sessionId;
-      if (chat.ensure?.id === id) return chat.ensure.promise;
       const ticket = chat.ticket;
+      if (chat.ensure?.id === id && chat.ensure.ticket === ticket) return chat.ensure.promise;
+      if (!verify && chat.sessionId && id === chat.paperId) return chat.sessionId;
       const promise = (async () => {
         const context = getContext();
         const result = await api('chat_ensure', { id, ...(context?.sessionId ? { source_session_id: context.sessionId } : {}) });
@@ -238,7 +238,7 @@ window.PaperLibraryChat = {
         if (result.created && window.parent !== window) bridge('refresh').catch(() => {});
         return result.sessionId;
       })();
-      chat.ensure = { id, promise };
+      chat.ensure = { id, ticket, promise };
       try { return await promise; } finally { if (chat.ensure?.promise === promise) chat.ensure = null; }
     }
     function renderHistory(result) {
@@ -366,7 +366,7 @@ window.PaperLibraryChat = {
     async function openMain(draft = false) {
       const id = chat.paperId, ticket = chat.ticket;
       try {
-        const sessionId = await ensure(id); if (!sessionId || !isCurrent(id, ticket)) return;
+        const sessionId = await ensure(id, { verify: true }); if (!sessionId || !isCurrent(id, ticket)) return;
         let prepared;
         if (draft) {
           const result = await api('chat_context', requestArgs($('paper-chat-input').value.trim() || '请结合引用内容回应我的阅读问题。'));

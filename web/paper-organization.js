@@ -4,6 +4,11 @@ window.PaperOrganization = (() => {
   const node = (tag, text, className) => { const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n; };
   const button = (text, action, className='button subtle') => { const b=node('button',text,className);b.type='button';b.addEventListener('click',action);return b; };
   const label = value => '#'+String(typeof value==='string'?value:value?.tag||value?.name||'').replace(/^#+/,'').split('/').map(s=>s.trim()).join('/');
+  const defaultRoots = ['#发表团队', '#发表学校', '#发表学校所在国', '#方法'];
+  function markCategory(button, tag) {
+    if (tag === '#方法' || tag.startsWith('#方法/')) button.classList.add('method-tag');
+    return button;
+  }
   const sourceLabels = item => [...new Set((item.tags||[]).map(label).filter(t=>t!=='#'))];
   const tags = item => [...new Set([...sourceLabels(item).filter(tag=>!item.hidden_source_tags?.includes(tag)),...(item.manual_tags||[]).map(label)].filter(t=>t!=='#'))];
   const isPaper = item => item && (!item.resource_kind || item.resource_kind==='paper');
@@ -19,7 +24,11 @@ window.PaperOrganization = (() => {
     const previous=button('上一页',()=>{tagOffset=Math.max(0,tagOffset-30);void loadTags();}),next=button('下一页',()=>{if(tagNext!==null){tagOffset=tagNext;void loadTags();}});
     const pager=node('div',undefined,'paper-tag-pager');pager.append(previous,status,next);
     const exact=button('按输入标签筛选',()=>filterTag(search.value));
-    popup.append(search,exact,results,pager);picker.append(summary,popup);
+    const rootFilters=node('div',undefined,'paper-tag-presets');
+    rootFilters.setAttribute('role','group');
+    rootFilters.setAttribute('aria-label','常用根标签');
+    for(const tag of defaultRoots)rootFilters.append(chip(tag));
+    popup.append(search,exact,rootFilters,results,pager);picker.append(summary,popup);
     const active=button('',()=>filterTag(''),'button subtle active-tag-filter');active.id='catalog-tag-clear';
     controls.append(favorite,picker,active);root.append(controls);
     function sync(){favorite.textContent=state.favorite?'★ 偏好论文':'☆ 偏好论文';favorite.setAttribute('aria-pressed',String(Boolean(state.favorite)));active.hidden=!state.tag;active.textContent=state.tag?`${state.tag} ×`:'';active.title='清除标签筛选';}
@@ -30,7 +39,7 @@ window.PaperOrganization = (() => {
       try{
         const result=await api('paper_tags_list',{query:search.value.trim(),offset:tagOffset,limit:30,archived:Boolean(state.archived),favorite:Boolean(state.favorite),...(state.project?{project:state.project}:{})});
         if(request!==ticket)return;
-        for(const entry of result.items||[]){const b=button(`${entry.tag} · ${entry.count}`,()=>filterTag(entry.tag),'paper-tag-option');results.append(b);}
+        for(const entry of result.items||[]){const b=button(`${entry.tag} · ${entry.count}`,()=>filterTag(entry.tag),'paper-tag-option');results.append(markCategory(b,entry.tag));}
         tagNext=result.next_offset??null;previous.disabled=tagOffset===0;next.disabled=tagNext===null;
         status.textContent=result.total?`${tagOffset+1}–${tagOffset+(result.items||[]).length} / ${result.total}`:'没有匹配标签';
       }catch(error){if(request!==ticket)return;status.textContent='标签读取失败';results.append(button('重试',()=>void loadTags()));toast(error.message,true);}
@@ -46,8 +55,22 @@ window.PaperOrganization = (() => {
     const dialog=node('dialog',undefined,'paper-tag-editor');dialog.id='paper-tag-editor';dialog.setAttribute('aria-labelledby','paper-tag-editor-title');
     const heading=node('header'),title=node('h2','管理标签');title.id='paper-tag-editor-title';const close=button('×',()=>dialog.close(),'icon-button');close.setAttribute('aria-label','关闭标签编辑');heading.append(title,close);
     const paperTitle=node('p',undefined,'small muted'),sourceTags=node('div',undefined,'paper-tag-sources'),manualTags=node('div',undefined,'paper-tag-sources'),form=node('form'),field=node('label','手动标签','field'),input=node('textarea');input.rows=4;input.maxLength=21000;input.placeholder='#方法/深度学习/Transformer\n#阅读/待复习';input.setAttribute('aria-label','手动标签');field.append(input);
-    const hint=node('p','在下方输入手动标签，每行一个，也可用逗号分隔。资料标签移除后仍可恢复。','small muted'),error=node('p',undefined,'error');error.setAttribute('role','alert');
-    const save=node('button','保存标签','button primary');save.type='submit';form.append(sourceTags,manualTags,hint,field,error,save);dialog.append(heading,paperTitle,form);document.body.append(dialog);
+    const hint=node('p','每行输入一个标签，也可用逗号分隔。点击下方分类后，填入斜杠后的名称。','small muted'),error=node('p',undefined,'error');error.setAttribute('role','alert');
+    const rootEditor=node('div',undefined,'paper-tag-presets');
+    rootEditor.setAttribute('role','group');
+    rootEditor.setAttribute('aria-label','插入标签前缀');
+    for(const tag of defaultRoots){
+      const insert=button(`${tag}/`,()=>{
+        const lines=input.value.trimEnd().split('\n');
+        if(!lines.at(-1)||defaultRoots.some(root=>lines.at(-1)===`${root}/`))lines.pop();
+        input.value=[...lines,`${tag}/`].join('\n');
+        input.focus();
+        input.setSelectionRange(input.value.length,input.value.length);
+        renderEditorTags();
+      },'paper-tag-chip');
+      rootEditor.append(markCategory(insert,tag));
+    }
+    const save=node('button','保存标签','button primary');save.type='submit';form.append(sourceTags,manualTags,hint,rootEditor,field,error,save);dialog.append(heading,paperTitle,form);document.body.append(dialog);
     dialog.addEventListener('close',()=>{++editTicket;editing=null;});
     const manualValues=()=>input.value.split('\n').flatMap(line=>{
       const value=line.trim();
@@ -66,7 +89,7 @@ window.PaperOrganization = (() => {
           renderEditorTags();
           [...sourceTags.querySelectorAll('button')].find(b=>b.dataset.tag===tag)?.focus();
         },'paper-tag-chip');
-        toggle.dataset.tag=tag;toggle.setAttribute('aria-label',`${hidden?'恢复':'移除'}资料标签 ${tag}`);sourceTags.append(toggle);
+        toggle.dataset.tag=tag;toggle.setAttribute('aria-label',`${hidden?'恢复':'移除'}资料标签 ${tag}`);sourceTags.append(markCategory(toggle,tag));
       }
       const values=[...new Set(manualValues().map(label).filter(tag=>tag!=='#'))];
       if(values.length)manualTags.append(node('span','手动标签','small muted'));
@@ -75,7 +98,7 @@ window.PaperOrganization = (() => {
           input.value=manualValues().filter(value=>label(value)!==tag).join('\n');
           renderEditorTags();input.focus();
         },'paper-tag-chip');
-        remove.setAttribute('aria-label',`删除手动标签 ${tag}`);manualTags.append(remove);
+        remove.setAttribute('aria-label',`删除手动标签 ${tag}`);manualTags.append(markCategory(remove,tag));
       }
     }
     input.addEventListener('input',()=>{if(editing)renderEditorTags();});
@@ -90,11 +113,13 @@ window.PaperOrganization = (() => {
     }
     form.addEventListener('submit',async event=>{
       event.preventDefault();if(!editing||save.disabled)return;
+      const values=manualValues();
+      if(values.some(value=>label(value).endsWith('/'))){error.textContent='请补全斜杠后的标签名称，或移除未填完的标签。';input.focus();return;}
       const item=editing,request=editTicket;save.disabled=true;input.disabled=true;error.textContent='';
       const tagButtons=[...form.querySelectorAll('.paper-tag-chip')];tagButtons.forEach(b=>b.disabled=true);
       try{
         const hidden=[...hiddenSources].sort();
-        const patch=await api('paper_organization_update',{id:item.id,tags:manualValues(),expected_organization_modified:item.organization_modified??null,
+        const patch=await api('paper_organization_update',{id:item.id,tags:values,expected_organization_modified:item.organization_modified??null,
           ...(JSON.stringify(hidden)!==JSON.stringify([...(item.hidden_source_tags||[])].sort())?{hidden_source_tags:hidden}:{})});
         onChanged(patch);if(request===editTicket)dialog.close();await loadList();
       }catch(e){if(request===editTicket)error.textContent=e.message;else toast(e.message,true);}
@@ -107,7 +132,7 @@ window.PaperOrganization = (() => {
       finally{busy.delete(item.id);refreshBusy(item.id,false);}
     }
     function refreshBusy(id,value){for(const b of document.querySelectorAll('[data-organization-star]'))if(b.dataset.organizationStar===id)b.disabled=value;}
-    function chip(tag){const b=button(tag,()=>filterTag(tag),'chip paper-tag-chip');b.title=`筛选 ${tag} 及其子标签`;return b;}
+    function chip(tag){const b=button(tag,()=>filterTag(tag),'chip paper-tag-chip');b.title=`筛选 ${tag} 及其子标签`;return markCategory(b,tag);}
     function actions(item,{compact=false}={}){
       const row=node('div',undefined,'paper-organization-actions');if(!isPaper(item))return row;
       const star=button(item.favorite?'★':'☆',()=>void toggle(item),'paper-favorite');star.dataset.organizationStar=item.id;star.title=item.favorite?'取消偏好论文':'加入偏好论文';star.setAttribute('aria-label',star.title);star.setAttribute('aria-pressed',String(Boolean(item.favorite)));star.disabled=busy.has(item.id);

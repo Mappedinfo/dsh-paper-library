@@ -434,6 +434,18 @@ select {
   font-size: 10px;
   padding: 5px;
 }
+.catalog-pagination-summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.catalog-pagination-summary select {
+  min-height: 24px;
+  padding: 2px 4px;
+  font-size: 11px;
+}
 
 .library-footer {
   display: flex;

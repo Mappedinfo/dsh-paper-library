@@ -89,6 +89,9 @@
 .paper-organization-actions .paper-favorite[aria-pressed="true"]{color:var(--accent,var(--teal))}
 .paper-organization-actions .paper-tag-chip,.paper-tag-sources .paper-tag-chip{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--teal-light);border:1px solid var(--line);border-radius:4px;color:var(--ink);font-size:10px;padding:2px 5px}
 .paper-tag-chip:hover,.paper-tag-edit:hover{text-decoration:underline}
+.paper-tag-presets{display:flex;flex-wrap:wrap;gap:5px;margin:7px 0}
+.paper-tag-presets .paper-tag-chip{padding:3px 5px;font-size:11px;border:1px solid var(--line);border-radius:4px;background:var(--paper);color:var(--ink);cursor:pointer}
+.paper-tag-chip.method-tag,.paper-tag-option.method-tag{background:color-mix(in srgb,var(--accent,var(--teal)) 14%,var(--paper));border-color:color-mix(in srgb,var(--accent,var(--teal)) 48%,var(--line))}
 .catalog-table .has-catalog-tags td{border-bottom:0}
 .catalog-table .catalog-tags-row td{padding-top:0}
 .catalog-table .catalog-tags-row .paper-tag-chip{white-space:normal;overflow-wrap:anywhere}

@@ -2,6 +2,7 @@
 
 // Catalogs stay paginated; continuous reading retains at most three nearby PDF pages.
 const $ = (id) => document.getElementById(id);
+const catalogPageSizes = new Set([20, 40, 60, 100, 200]);
 const state = {
   items: [], total: 0, libraryCount: 0, offset: 0, limit: 40, query: '', sort: 'modified', order: 'desc', archived: false, kind: 'all', favorite: false, tag: '', active: null, tab: 'reader',
   page: 1, pageCount: 0, pageData: null, selection: null, annotations: [], noteOffset: 0,
@@ -135,7 +136,7 @@ async function loadList() {
     if (ticket !== state.listTicket) return;
     // Removing a star/tag can empty the last filtered page; return to the last
     // existing page rather than showing an impossible range such as 41–40.
-    if((state.favorite||state.tag)&&!result.items?.length&&state.offset>0){state.offset=Math.max(0,Math.floor(((result.total||1)-1)/state.limit)*state.limit);return loadList();}
+    if(!result.items?.length&&state.offset>0&&state.offset>=result.total){state.offset=Math.max(0,Math.floor(((result.total||1)-1)/state.limit)*state.limit);return loadList();}
     state.items = result.items || []; state.total = result.total || 0;
     if (result.active_count !== undefined) { state.libraryCount = result.active_count; $('item-count').textContent = result.active_count; }
     renderList();
@@ -1347,6 +1348,14 @@ $('paper-list').addEventListener('click', (event) => { const card = event.target
 $('search').addEventListener('input', debounce(() => { state.query = $('search').value.trim(); state.offset = 0; loadList(); }));
 $('previous-list').addEventListener('click', () => { state.offset = Math.max(0, state.offset - state.limit); loadList(); });
 $('next-list').addEventListener('click', () => { state.offset += state.limit; loadList(); });
+$('list-page-size').addEventListener('change', event => {
+  const limit = Number(event.currentTarget.value);
+  if (!catalogPageSizes.has(limit) || limit === state.limit) return;
+  state.limit = limit;
+  state.offset = 0;
+  void persistence?.patch('catalog:view', { pageSize: limit }).catch(() => {});
+  void loadList();
+});
 $('refresh').addEventListener('click', () => { organizationUI?.invalidateDistribution();loadStatus(); loadList(); if (state.active && state.tab === 'annotations') loadModels(); });
 $('export-library').addEventListener('click', exportLibrary);
 $('build-bibliography').addEventListener('click', buildBibliography);
@@ -1595,6 +1604,13 @@ if(ENTRY_VIEW==='latex')document.body.classList.add('latex-focused');
 async function initialize() {
   announceReady();await loadStatus();
   if(ENTRY_VIEW==='board'||ENTRY_VIEW==='latex'){await applyEntryView();return;}
+  try {
+    const saved = await persistence?.get('catalog:view');
+    if (catalogPageSizes.has(saved?.pageSize)) state.limit = saved.pageSize;
+  } catch { /* The persistence layer already reports read failures. */ }
+  const pageSize = $('list-page-size');
+  pageSize.value = String(state.limit);
+  pageSize.disabled = false;
   await loadList();
   let savedWorkspace;try{savedWorkspace=readerRestore?.workspace||await persistence?.get(`workspace:last:${ENTRY_PAPER||'main'}`);}catch{}
   if(ENTRY_PAPER){

@@ -20,12 +20,32 @@ function fixture(api){
 test('favorite and tag chips filter together, reset pagination, and never open the paper', {skip:!JSDOM}, async()=>{
   const f=fixture(()=>({}));const {ui,document,state}=f;
   document.getElementById('rows').append(ui.actions({id:'a',tags:['Method/Neural'],manual_tags:['#Method/Neural','#Review'],favorite:false},{compact:true}));
-  assert.equal(document.querySelectorAll('.paper-tag-chip').length,2);
+  assert.equal(document.querySelectorAll('#rows .paper-tag-chip').length,2);
   document.querySelector('#catalog-favorite').click();assert.equal(state.favorite,true);assert.equal(state.offset,0);
-  document.querySelector('.paper-tag-chip').click();assert.equal(state.tag,'#Method/Neural');assert.equal(f.loads.at(-1).favorite,true);
+  document.querySelector('#rows .paper-tag-chip').click();assert.equal(state.tag,'#Method/Neural');assert.equal(f.loads.at(-1).favorite,true);
   assert.equal(document.querySelector('#catalog-tag-clear').hidden,false);
   document.querySelector('#catalog-tag-clear').click();assert.equal(state.tag,'');assert.equal(state.favorite,true);
   assert.equal(f.calls.length,0);f.dom.window.close();
+});
+test('default tag roots filter or insert a prefix without adding a tag until saved', {skip:!JSDOM}, async()=>{
+  const f=fixture(async(action,args)=>action==='get'?{id:'a',manual_tags:['#Original']}:action==='paper_tags_list'?{items:[],total:0}:{id:'a',manual_tags:args.tags});
+  f.document.querySelector('#catalog-tag-picker').click();
+  const roots=[...f.document.querySelectorAll('[aria-label="常用根标签"] button')];
+  assert.deepEqual(roots.map(button=>button.textContent),['#发表团队','#发表学校','#发表学校所在国','#方法']);
+  roots[2].click();
+  assert.equal(f.state.tag,'#发表学校所在国');
+  await f.ui.edit({id:'a'});
+  const input=f.document.querySelector('textarea');
+  const editorRoots=[...f.document.querySelectorAll('[aria-label="插入标签前缀"] button')];
+  editorRoots[0].click();editorRoots[3].click();
+  assert.equal(input.value,'#Original\n#方法/');
+  const submit=()=>f.document.querySelector('form').dispatchEvent(new f.window.Event('submit',{cancelable:true}));
+  submit();assert.match(f.document.querySelector('.error').textContent,/补全/);
+  assert.equal(f.calls.some(([action])=>action==='paper_organization_update'),false);
+  input.value+='SyntheticMethod';submit();await tick();
+  f.document.getElementById('rows').append(f.ui.actions(f.patches[0]));
+  assert.equal(f.document.querySelector('#rows .method-tag').textContent,'#方法/SyntheticMethod');
+  f.dom.window.close();
 });
 test('tag search pages from server and discards stale responses', {skip:!JSDOM}, async()=>{
   let resolveFirst;let n=0;
