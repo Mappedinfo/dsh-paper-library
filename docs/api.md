@@ -609,9 +609,19 @@ An independent deployment without a DSH migration marker uses local disk prefere
 ### PDF 参考文献与定向修订
 
 - `graph_references_extract {id,pages?}`：读取一篇在库 PDF 的编号／作者年份参考文献；默认末 40 页，可选升序连续的至多 40 页，总文字上限 256000 字符、200 条参考文献。识别 References／Bibliography／参考文献标题下从 `[1]` 开始的连续编号或“姓, 首字母., 年份. 正文”明确语法，须读到文末或附录边界；失败不覆盖旧结果。输出 `references`（原文、分页面片段、首个页码、实际出现的 DOI/arXiv 标识）、`reference_pages`、覆盖范围和警告。相同来源指纹返回 `duplicate:true`。不上传 PDF、不改原件、不猜书目字段。
-- `graph_references_get {id}`：缺失返回 `null`，已有快照附 `stale`。按去批注底稿的 `source_version` 核对，正常批注不使其过期；旧无身份快照标记过期。提取返回 `parser_version:2`、`count` 与可绘制的 `graph_count`；无法确认的作者年份条目保留原文、`graph_eligible:false`，不生成引用边。`graph {id?,focus_id?,view:"citations",limit?}` 将快照绘为明确方向的 `cites` 边；唯一 DOI 可匹配库内论文，未匹配的作品使用 `external_reference:true` 的论文节点，来源页仍属于引用它的论文。库外节点不提供无效的“打开文献”动作。图谱读取不重新解析 PDF，不把出边数当作入站引用量。
+- `graph_references_get {id}`：缺失返回 `null`，已有快照附 `stale`。按去批注底稿的 `source_version` 核对，正常批注不使其过期。提取返回 `parser_version:3`、`count` 与可绘制的 `graph_count`。版本 3 增加完整作者姓名和分栏解析；旧快照在下一次需要时可刷新。无法确认的作者年份条目保留原文、`graph_eligible:false`。`graph {id?,focus_id?,view:"citations",limit?}` 将快照绘为明确方向的 `cites` 边；唯一 DOI 可匹配库内论文，未匹配的作品使用 `external_reference:true` 的论文节点，来源页属于引用它的论文。
 - `paper_analysis_repair {id,request_id?,new_request_id?}`：针对已结束文字分析的未通过项发起新任务；省略原请求时使用最新任务。使用原题库、范围、模型和已保存来源快照，不重读可能已经变化的 PDF。每组只给模型待修订回答及原文，响应必须逐项对应旧 ID，允许有理由的撤回；其他有效回答不得改变或因冲突失效。原任务保留，`repair_from` 和 `source_basis:"saved-snapshots"` 明示来源；`repair_log` 记录原／新 ID、原因和状态。请求失败保留原组，原始修订响应分片保存，`include_raw:true` 可查看。仍未通过的修订不会自动采用。
 - `knowledge_draft_put` 可带 `supersedes_draft_id`：旧稿必须属于同一实体、同一来源列表，且未被接受／否决。旧稿不删除；新非否决图谱在浏览时替代旧稿，否决新稿后旧稿恢复显示。不能自动替代人工已经审阅的决定。
+
+### 引用描述
+
+`citation_context_candidates {id,pages?,reference_pages?,offset?,limit?,expected_fingerprint?}` 本地查找正文引文并绑定同一 PDF 的书目。默认在前 12 页识别引言、背景和相关工作标题；指定 `pages` 时接受至多 20 个连续物理页。书目默认从末 40 页定位，也可指定至多 40 个连续 `reference_pages`。返回 `items`、`targets`、`coverage`、`warnings` 和 `next_offset`，默认 12 个候选，最多 16 个。翻页传回 `fingerprint` 作为 `expected_fingerprint`。`parts` 的位置是从零开始的 Unicode 字符偏移，基于去 Markdown 样式、分栏排序后的物理页提取文本。
+
+`citation_claim_extract {id,pages?,reference_pages?,force?}` 在 DSH 或显式配置模型的独立服务中，按候选调用模型并保存待核对的陈述。也可经 `@mappedinfo/dsh-paper-library/analysis` 的 `createHeadlessAnalysis` 调用。一次最多 8 次模型调用和 192 条陈述，受配置的调用与超时额度约束。相同来源和范围复用，显式重抽用 `force:true`。模型可以选择当前候选中已绑定的引文 ID。程序校验目标和原文片段后才原子写入。正文变化、失败或并发更新时保留已有结果，覆盖不足在响应中显示。
+
+`citation_claim_search {source_id?,target_id?,relation?,query?,method?,task?,individual_only?,offset?,limit?}` 查询已保存描述。可用库内 ID、外部书目节点、`doi:…` 或 `arxiv:…` 指定目标；反查包括被描述论文和比较对象。方法及任务使用关键词匹配，`individual_only:true` 排除仅适用于群组的陈述。关系取值为 `studies`、`proposes`、`uses`、`reports`、`strength`、`limitation`、`compares`、`adopts`。返回 `items`、`total`、`next_offset`。每条包含发言论文、正文版本、陈述、角色、条件及可定位的原文证据。搜索使用私有索引，文件观测变化时返回 `needs-source-check`。
+
+`citation_claim_status {id}` 返回已保存范围、实际覆盖、待定位引文和正文状态。使用 `citation_claim_verify_source {id,sha256}` 核对单篇来源后定位历史证据。普通 PDF 批注变动不改变正文身份。
 
 ### 分层全文图谱
 

@@ -22,6 +22,7 @@ import { createAnnotationCaption } from './annotation-caption.mjs'
 import { createLibraryKnowledge } from './library-knowledge.mjs'
 import { createPaperAnalysis } from './paper-analysis.mjs'
 import { createPaperAnalysisAgent } from './paper-analysis-agent.mjs'
+import { createCitationClaims } from '../citation-claims.mjs'
 import { createQueuedPaperAnalysis } from './paper-analysis-queue.mjs'
 import { createChallengeMining } from './challenge-mining.mjs'
 import { createLatexAI } from './latex-ai.mjs'
@@ -131,7 +132,8 @@ export function apply(ctx, rawConfig = {}) {
       return (await service?.currentSelection?.()) || { provider: config.provider, model: config.model }
     },
   })
-  ctx.effect(() => registerLibraryTools(ctx, defineTool, dispatch, options, config), 'paper-library: tools')
+  const toolOptions = { ...options }
+  ctx.effect(() => registerLibraryTools(ctx, defineTool, dispatch, toolOptions, config), 'paper-library: tools')
   ctx.inject(['skills'], scoped => {
     scoped.effect(() => registerBundledSkills(scoped), 'paper-library: bundled paper-fetch skill')
   })
@@ -152,6 +154,13 @@ export function apply(ctx, rawConfig = {}) {
     paperChat.onTurnFailure(companion.turnFailed)
     web.effect(()=>()=>{companion.dispose();paperChat.onFeedback(undefined);paperChat.onTurnFailure(undefined)},'paper-library: companion lifecycle')
     const languageAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens })
+    const citationClaims = createCitationClaims({
+      worker: (request, signal) => core(request, { ...options, signal }),
+      agent: createPaperAnalysisAgent(web, { cwd: config.library, maxOutputTokens: config.maxLanguageOutputTokens, generate: languageAI }),
+      resolveModel: signal => paperModel.resolve(signal),
+    })
+    toolOptions.citationClaims = citationClaims
+    web.effect(() => () => { if (toolOptions.citationClaims === citationClaims) delete toolOptions.citationClaims }, 'paper-library: citation descriptions')
     const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python })
     const handwritingAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }, { attachments: () => ctx.get('attachments') })
     const handwriting = createHandwriting({ store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })
@@ -181,7 +190,7 @@ export function apply(ctx, rawConfig = {}) {
     // The workspace owns the manuscript folder under the DSH home and keeps it in the
     // sync service's own config; both are host-side jobs, so neither enters the worker.
     const latexWorkspace = createLatexWorkspace({ config, dispatch, settings, library: config.library, python: config.python })
-    const fetchHandler = createFetchHandler({ ...options, paperModel, paperDatasetAI: languageAI, paperDatasetModel: signal => paperModel.resolve(signal), paperChat, companion, languageLearning, handwriting, annotationCaption, libraryKnowledge, paperAnalysis, challengeMining, latexAI, latexWorkspace, basePath: '/api/paper-library' })
+    const fetchHandler = createFetchHandler({ ...options, citationClaims, paperModel, paperDatasetAI: languageAI, paperDatasetModel: signal => paperModel.resolve(signal), paperChat, companion, languageLearning, handwriting, annotationCaption, libraryKnowledge, paperAnalysis, challengeMining, latexAI, latexWorkspace, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',
       path: '/api/paper-library',

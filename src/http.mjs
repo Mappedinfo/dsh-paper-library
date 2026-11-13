@@ -197,7 +197,7 @@ export function createFetchHandler(options = {}) {
             } });
           }
           // Browser cannot forge AI output or arbitrary worker internals.
-          if (LATEX_RETRIEVAL_ACTIONS.has(input?.action) || ['annotation_translation_result','save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','metadata_probe','companion_excerpt','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata','external_rebind','dataset_candidate_confirmed','dataset_candidate_matches','dataset_candidate_commit','paper_dataset_sources'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
+          if (LATEX_RETRIEVAL_ACTIONS.has(input?.action) || ['annotation_translation_result','save_feedback','save_conversation_feedback','export_pdf','inspect_pdf','metadata_probe','companion_excerpt','paper_analysis_sources','paper_analysis_batch','paper_analysis_apply_metadata','external_rebind','dataset_candidate_confirmed','dataset_candidate_matches','dataset_candidate_commit','paper_dataset_sources','citation_claim_prepare','citation_claim_commit'].includes(input?.action)) return json({ok:false,error:'此操作不能直接提交。'},403);
           const companionAction=['companion_status','companion_ask','companion_retry','companion_cancel'].includes(input?.action);
           if(companionAction&&!options.companion)return json({ok:false,error:'批注提问需要连接 DSH 服务。'},409);
           const chatAction = typeof input?.action === 'string' && input.action.startsWith('chat_');

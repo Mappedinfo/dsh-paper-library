@@ -35,6 +35,7 @@ export const BRIDGE_ACTIONS = {core: actions, challenge: challengeActions, proje
 let importsPending = Promise.resolve();
 const doiLookups = new Map();
 for (const action of ['annotation_favorite_set','annotation_favorites_list']) actions.add(action);
+for (const action of ['citation_context_candidates','citation_claim_search','citation_claim_status','citation_claim_verify_source','citation_claim_extract']) actions.add(action);
 let importCount = 0;
 let importPayloadBytes = 0;
 const MAX_QUEUED_PAYLOAD = 96 * 1024 * 1024;
@@ -625,6 +626,10 @@ export function splitFeedbackReplies(text, annotations) {
 export async function dispatch(request, options = {}) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('请求必须是 JSON 对象。');
   const { library: ignoredLibrary, python: ignoredPython, ...safe } = request;
+  if (safe.action === 'citation_claim_extract') {
+    if (typeof options.citationClaims !== 'function') throw Object.assign(new Error('提取引用描述需要已配置的模型。'), { code: 'CITATION_MODEL_REQUIRED', status: 409 });
+    return options.citationClaims(safe, { signal: options.signal });
+  }
   if (safe.action === 'paper_reveal') {
     if (typeof safe.id !== 'string' || !safe.id || safe.id.length > 200) throw Error('请先选择一篇附有 PDF 的文献。');
     const file = await core({ action: 'export_pdf', id: safe.id }, options);

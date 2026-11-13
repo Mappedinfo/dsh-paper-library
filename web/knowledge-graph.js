@@ -3,6 +3,9 @@
   const TYPES = Object.freeze({ paper: '文献', author: '作者', institution: '单位', method: '方法', dataset: '数据', claim: '论点', evidence: '论据', concept: '概念', tag: '标签', observation: '观察', question: '问题', gap: '缺口', metric: '指标', experiment: '实验', task: '任务', topic: '主题', idea: '思路', figure: '图', formula: '公式', project: '项目', expert: '专家' });
   const RELATIONS = Object.freeze({ supports: '支持', contradicts: '矛盾', uses: '使用', evaluates: '评估', derived_from: '源自', explains: '解释', extends: '扩展', cites: '引用', related: '相关', authored_by: '作者为', affiliated_with: '隶属于', published_by: '出版方为', tagged: '标签为', contains: '包含', addresses:'针对', proposes:'提出', reports:'报告', qualifies:'限定', assumes:'假设', defines:'定义', identifies:'识别', motivates:'动机', justifies:'说明依据', measures:'测量', observed_on:'观察于', produced_by:'产生于', measured_by:'以此衡量', for_task:'针对任务', produces:'产出', mentions:'提及', describes:'描述' });
   const EDITABLE_TYPES = ['method', 'dataset', 'claim', 'evidence', 'concept', 'author', 'institution'];
+  const CITATION_RELATIONS = { studies: '研究任务', proposes: '提出方法', uses: '使用方法', reports: '报告结果', strength: '优点', limitation: '局限', compares: '比较', adopts: '沿用' };
+  const CITATION_ROLES = { subject: '被描述论文', baseline: '比较对象', dataset: '数据集出处', 'method-source': '方法出处' };
+  const CITATION_BINDINGS = { 'bibliography-only': '库外书目', 'conflicting-identifiers': '标识冲突', 'ambiguous-catalog': '库内匹配有歧义', 'version-conflict': '版本待确认', 'ambiguous-bibliography': '书目匹配有歧义', 'no-bibliography-match': '未找到书目条目', 'range-out-of-bounds': '引文范围超限', 'unverified-bibliography': '书目待核对' };
   const EDITABLE_RELATIONS = ['supports', 'contradicts', 'uses', 'evaluates', 'derived_from', 'explains', 'extends', 'cites', 'related', 'authored_by', 'affiliated_with', 'published_by'];
   const SVG = 'http://www.w3.org/2000/svg';
   let instanceSequence = 0;
@@ -75,12 +78,31 @@
     if (evidence.annotation_id) parts.push(`批注：${evidence.annotation_id}`);
     return parts.length ? parts.join('\n') : '尚未补充原文依据';
   }
+  function citationGraph(items) {
+    const nodes = new Map(), edges = [];
+    for (const claim of items) {
+      const source = claim.source;
+      nodes.set(source.id, { id: source.id, paper_id: source.id, type: 'paper', label: source.title });
+      const evidence = { page: source.status === 'current' ? claim.evidence[0]?.page : null, quote: claim.evidence[0]?.text };
+      const common = { paper_id: source.id, provenance: 'citation-description', editable: false, evidence };
+      nodes.set(claim.id, { ...common, id: claim.id, type: 'claim', label: claim.statement, description: claim.statement });
+      edges.push({ ...common, id: `${claim.id}:source`, source: source.id, target: claim.id, relation: 'describes' });
+      for (const target of claim.targets) {
+        if (!nodes.has(target.node_id)) nodes.set(target.node_id, { id: target.node_id, paper_id: target.paper_id, type: 'paper', label: target.label, external_reference: !target.paper_id });
+        const relation = claim.scope === 'group' && target.role === 'subject' ? '群组成员' :
+          target.role === 'subject' ? CITATION_RELATIONS[claim.relation] : CITATION_ROLES[target.role];
+        edges.push({ ...common, id: `${claim.id}:${target.id}:${target.role}`, source: claim.id, target: target.node_id, relation });
+      }
+    }
+    return { nodes: [...nodes.values()], edges };
+  }
   function create({ root, api, getPaper, openPaper, navigatePage, navigatePaper, onOpenLibrary, onAnalyze, scope = 'paper', onAddToBoard, toast = () => {} }) {
     if (!root) throw new Error('Knowledge graph requires a mount element');
     const libraryScope = scope === 'library';
     let graph = { nodes: [], edges: [] }, selected = null, edgePage = 0, revision = 0, paperId = null, editing = null, busy = false, catalogOffset = 0;
     let viewport = null, panGesture = null, statistics = null, statisticsFlight = null, statisticsRevision = 0, citationSource = '', focusPaperId = null;
-    let readingCursor = {}, readingQuestionOffset = 0;
+    let readingCursor = {}, readingQuestionOffset = 0, citationOffset = 0, citationResult = null, citationRuns = [], citationBack = [];
+    let citationExtraction = null;
     const markerId = `kg-arrow-${++instanceSequence}`;
     root.classList.add('knowledge-graph');
     root.innerHTML = `<div class="kg-toolbar"><div><h3>知识图谱</h3><p>记录方法、数据、论点与论据之间的联系。</p></div><div class="kg-actions"><button type="button" class="button subtle" data-kg="extract-references">提取参考文献</button><button type="button" class="button subtle" data-kg="add-board">加入画板</button><button type="button" class="button" data-kg="add-node">＋ 节点</button><button type="button" class="button" data-kg="add-edge">＋ 关系</button></div></div>
@@ -103,8 +125,23 @@
     if (!libraryScope && onOpenLibrary) {
       const globalButton=dom('button','button subtle','查看全库图谱');globalButton.type='button';globalButton.addEventListener('click',()=>onOpenLibrary({focus_id:paperId}));root.querySelector('.kg-actions').prepend(globalButton);
     }
-    const graphMode=dom('select');graphMode.setAttribute('aria-label','图谱模式');graphMode.dataset.kg='mode';if(!libraryScope)graphMode.append(option('reading','全文判断'));graphMode.append(option('all','全部关系'),option('citations','论文引用'));el('filter').parentElement.before(graphMode);
-    graphMode.addEventListener('change',()=>{el('filter').value='';readingCursor={};readingQuestionOffset=0;void load(getPaper(),catalogOffset);});
+    const graphMode=dom('select');graphMode.setAttribute('aria-label','图谱模式');graphMode.dataset.kg='mode';if(!libraryScope)graphMode.append(option('reading','全文判断'));graphMode.append(option('all','全部关系'),option('citations','论文引用'));if(!libraryScope)graphMode.append(option('citation-claims','引用描述'));el('filter').parentElement.before(graphMode);
+    const citationControls = dom('div', 'kg-actions'), citationDirection = dom('select'), citationRelation = dom('select');
+    citationDirection.setAttribute('aria-label', '引用描述方向');
+    citationDirection.append(option('outgoing', '本文如何描述前人'), option('incoming', '其他论文如何描述本文'));
+    citationRelation.setAttribute('aria-label', '引用描述类型');
+    citationRelation.append(option('', '所有描述类型'), ...Object.entries(CITATION_RELATIONS).map(([value, label]) => option(value, label)));
+    const citationPages = dom('input'); citationPages.type = 'text'; citationPages.maxLength = 14; citationPages.placeholder = '默认章节'; citationPages.setAttribute('aria-label', '自选正文页码，例如 8–12');
+    const citationPageLabel = dom('label', '', '正文页码 '); citationPageLabel.append(citationPages);
+    const citationExtract = action('提取引用描述', () => void extractCitationClaims(false), 'button');
+    const citationRefresh = action('重新提取', () => void extractCitationClaims(true), 'button subtle');
+    citationControls.append(citationDirection, citationRelation, citationPageLabel, citationExtract, citationRefresh);
+    el('status').before(citationControls);
+    const citationPanel = dom('section', 'kg-reading-list');
+    citationPanel.setAttribute('aria-label', '引用描述与原文');
+    el('relations').before(citationPanel);
+    for (const control of [citationDirection, citationRelation]) control.addEventListener('change', () => { citationOffset = 0; citationBack = []; void load(getPaper()); });
+    graphMode.addEventListener('change',()=>{el('filter').value='';readingCursor={};readingQuestionOffset=0;citationOffset=0;citationBack=[];void load(getPaper(),catalogOffset);});
     const readingNav=dom('nav','kg-reading-nav'),readingList=dom('section','kg-reading-list');readingNav.setAttribute('aria-label','全文判断导航');readingList.setAttribute('aria-label','全文判断内容');el('status').after(readingNav);el('inspector').after(readingList);
     const retryButton=action('重试读取图谱',()=>void load(getPaper(),catalogOffset),'button subtle');retryButton.hidden=true;el('status').after(retryButton);
     if(!libraryScope&&onAnalyze){const analyze=action('全文分析建图',async()=>{analyze.disabled=true;try{await onAnalyze();}catch(error){status(error.message,true);}finally{analyze.disabled=false;}},'button');analyze.dataset.kg='analyze';root.querySelector('.kg-actions').prepend(analyze);}
@@ -210,6 +247,12 @@
       })(); statisticsFlight = task; return task;
     }
     function evidenceContent(parent, entry) {
+      if (entry.provenance === 'citation-description') {
+        parent.append(dom('p', 'kg-provenance', '引用描述 · AI 提取，待核对'));
+        parent.append(dom('p', 'kg-evidence', evidenceSummary(entry.evidence)));
+        if (entry.evidence.page) parent.append(action(`打开来源 PDF 第 ${entry.evidence.page} 页`, () => jumpCitation(entry.paper_id, entry.evidence.page)));
+        return;
+      }
       parent.append(dom('p', 'kg-provenance', entry.provenance === 'pdf-reference' ? '来自 PDF 参考文献原文 · 未补造题录字段' : ['ai-analysis','analysis-answer','analysis-group'].includes(entry.provenance) ? `AI 分析 · ${entry.review_status==='accepted'?'已核对':'待核对'}` : ['catalog-metadata','catalog-reference'].includes(entry.provenance) ? '来自已保存文献资料' : '读者记录 · 需要结合原文判断'));
       parent.append(dom('p', 'kg-evidence', evidenceSummary(entry.evidence)));
       if (Number.isInteger(entry.evidence?.page) && entry.evidence.page > 0) {
@@ -290,6 +333,98 @@
         row.append(content); host.append(row);
       }
     }
+    function jumpCitation(id, page) {
+      if (id === getPaper()?.id) return navigatePage?.(page);
+      return navigatePaper?.(id, page);
+    }
+    function citationReceipt(run) {
+      const coverage = run.coverage;
+      const scope = coverage.sections.map(item => item.section).join('、') || '指定范围内未识别章节';
+      const pages = coverage.pages_scanned.join('、') || '无';
+      const details = dom('details', 'kg-relation');
+      const freshness = run.source_status === 'current' ? '' : ' · 正文版本待核对或已变化';
+      details.append(dom('summary', '', `PDF 页 ${pages} · ${run.count} 条描述 · ${coverage.unresolved_count} 个引文待定位${freshness}`));
+      details.append(dom('p', 'kg-help', `${scope}。找到 ${coverage.candidate_count} 个候选，模型处理 ${coverage.model_candidate_count} 个${coverage.truncated ? '，覆盖有截断' : ''}。`));
+      for (const warning of run.warnings) details.append(dom('p', 'kg-help', warning));
+      for (const item of run.unresolved || []) {
+        const page = item.parts[0]?.page;
+        const line = dom('p', 'kg-help', `${item.surface} · ${CITATION_BINDINGS[item.reason] || item.reason} `);
+        if (page && run.source_status === 'current') line.append(action(`第 ${page} 页`, () => jumpCitation(run.paper_id, page)));
+        details.append(line);
+        for (const label of item.alternatives || []) details.append(dom('p', 'kg-help', label));
+      }
+      return details;
+    }
+    function renderCitationClaims() {
+      const active = graphMode.value === 'citation-claims';
+      citationControls.hidden = citationPanel.hidden = !active;
+      citationControls.style.display = active ? '' : 'none';
+      citationExtract.disabled = citationRefresh.disabled = Boolean(citationExtraction) || !paperId || !getPaper()?.pdf;
+      citationRefresh.hidden = !citationRuns.length;
+      citationPanel.replaceChildren();
+      if (!active || !citationResult) return;
+      for (const run of citationRuns) citationPanel.append(citationReceipt(run));
+      if (!citationResult.items.length) citationPanel.append(dom('p', 'kg-help', '当前筛选下没有已保存的引用描述。'));
+      for (const claim of citationResult.items) {
+        const card = dom('article', 'kg-reading-judgment-card');
+        const sourceStatus = claim.source.status === 'current' ? '' : ' · 正文版本待核对或已变化';
+        const scope = claim.scope === 'group' ? ' · 群组评价' : claim.scope === 'shared' ? ' · 共同描述' : '';
+        const qualifiers = [claim.negated ? '否定表述' : '', claim.hedged ? '带有不确定性' : ''].filter(Boolean);
+        card.append(dom('p', 'kg-provenance', `${CITATION_RELATIONS[claim.relation]} · 待核对${scope}${sourceStatus}${qualifiers.map(value => ' · ' + value).join('')}`),
+          dom('p', 'kg-reading-judgment', claim.statement));
+        for (const target of claim.targets) {
+          const row = dom('p', 'kg-help', `${CITATION_ROLES[target.role]} · ${target.label}`);
+          if (CITATION_BINDINGS[target.binding]) row.append(document.createTextNode(` · ${CITATION_BINDINGS[target.binding]}`));
+          if (target.paper_id && target.paper_id !== paperId) row.append(action('打开文献', () => openPaper?.(target.paper_id)));
+          card.append(row);
+        }
+        if (claim.conditions.length) card.append(dom('p', 'kg-help', claim.conditions.join(' · ')));
+        const evidence = dom('details', 'kg-relation');
+        evidence.append(dom('summary', '', [claim.source.title, claim.section, '原文'].filter(Boolean).join(' · ')));
+        for (const part of claim.evidence) {
+          evidence.append(dom('blockquote', 'kg-evidence', part.text));
+          if (claim.source.status === 'current') evidence.append(action(`打开来源 PDF 第 ${part.page} 页`, () => jumpCitation(claim.source.id, part.page)));
+          else if (claim.source.status === 'needs-source-check') evidence.append(action(`核对后打开第 ${part.page} 页`, async () => {
+            try {
+              const checked = await api('citation_claim_verify_source', { id: claim.source.id, sha256: claim.source_version.sha256 });
+              if (checked.source_status === 'current') await jumpCitation(claim.source.id, part.page);
+              else toast('来源正文已变化或无法读取，请重新提取。', true);
+            } catch (error) { toast(error.message, true); }
+          }));
+        }
+        card.append(evidence); citationPanel.append(card);
+      }
+      if (citationOffset || citationResult.next_offset != null) {
+        const pager = dom('div', 'kg-actions');
+        const previous = action('上一页描述', () => { citationOffset = citationBack.pop() ?? 0; void load(getPaper()); });
+        const next = action('下一页描述', () => { citationBack.push(citationOffset); citationOffset = citationResult.next_offset; void load(getPaper()); });
+        previous.disabled = !citationOffset; next.disabled = citationResult.next_offset == null;
+        pager.append(previous, dom('span', 'kg-help', `共 ${citationResult.total} 条`), next); citationPanel.append(pager);
+      }
+    }
+    async function extractCitationClaims(force) {
+      const id = getPaper()?.id;
+      if (citationExtraction || !id || !getPaper()?.pdf) return;
+      let pages;
+      const range = citationPages.value.trim();
+      if (range) {
+        const match = /^(\d{1,4})(?:\s*[-–—]\s*(\d{1,4}))?$/.exec(range);
+        const first = Number(match?.[1]), last = Number(match?.[2] ?? match?.[1]);
+        if (!match || first < 1 || last < first || last - first >= 20) return status('请输入至多 20 个连续页码，例如 8–12。', true);
+        pages = Array.from({ length: last - first + 1 }, (_, index) => first + index);
+      }
+      citationExtraction = new AbortController();
+      citationExtract.disabled = citationRefresh.disabled = true;
+      status('正在定位引文并提取引用描述…');
+      try {
+        const result = await api('citation_claim_extract', { id, ...(pages ? { pages } : {}), force }, { signal: citationExtraction.signal });
+        if (getPaper()?.id !== id || graphMode.value !== 'citation-claims') return;
+        citationDirection.value = 'outgoing'; citationRelation.value = ''; citationOffset = 0; citationBack = [];
+        await load(getPaper());
+        toast(result.previous_retained ? '本次覆盖不足，已保留上次记录。' : `${result.reused ? '已读取' : '已保存'} ${result.count} 条引用描述。`);
+      } catch (error) { if (getPaper()?.id === id && graphMode.value === 'citation-claims') status(`提取未完成：${error.message}`, true); }
+      finally { citationExtraction = null; renderCitationClaims(); }
+    }
     function displayGraph(){const filter=el('filter').value;const nodes=graph.nodes.filter(node=>(graphMode.value!=='citations'||node.type==='paper')&&(!filter||node.type===filter||node.id===paperId));const ids=new Set(nodes.map(n=>n.id));return {...graph,nodes,edges:graph.edges.filter(e=>ids.has(e.source)&&ids.has(e.target)&&(graphMode.value!=='citations'||e.relation==='cites'))};}
     function renderCanvas() {
       const display=displayGraph(),visible=display.nodes;
@@ -338,29 +473,49 @@
     function render() {
       const types = new Set(graph.nodes.map(node => node.type)), legend = el('legend'); legend.replaceChildren();
       for (const [type, label] of Object.entries(TYPES)) if (types.has(type)) { const item = dom('span', `kg-legend-item kg-type-${type}`); item.append(dom('i'), document.createTextNode(label)); legend.append(item); }
-      el('extract-references').hidden = libraryScope; el('extract-references').disabled = busy || !paperId || !getPaper()?.pdf;
+      const citationMode = graphMode.value === 'citation-claims';
+      el('extract-references').hidden = libraryScope || citationMode; el('extract-references').disabled = busy || !paperId || !getPaper()?.pdf;
       const readingMode=!libraryScope&&graphMode.value==='reading';
-      el('filter').parentElement.hidden=readingMode;el('add-node').hidden=el('add-edge').hidden=libraryScope||readingMode;
+      el('filter').parentElement.hidden=readingMode||citationMode;el('add-node').hidden=el('add-edge').hidden=libraryScope||readingMode||citationMode;
       el('add-node').disabled = !paperId; el('add-edge').disabled = graph.nodes.length < 2;
       el('reset').disabled=!selected&&!focusPaperId&&!el('filter').value;
-      renderCanvas(); renderInspector(); renderRelations();renderReading();
+      renderCanvas(); renderInspector(); renderRelations();renderReading();renderCitationClaims();
     }
     async function load(item = getPaper(), offset = 0) {
       catalogOffset=offset;
-      if(!libraryScope&&paperId!==item?.id){readingCursor={};readingQuestionOffset=0;}
       const requestedMode=graphMode.value;retryButton.hidden=true;
+      if(!libraryScope&&paperId!==item?.id){
+        readingCursor={};readingQuestionOffset=0;
+        if (requestedMode === 'citation-claims') { citationOffset = 0; citationBack = []; citationPages.value = ''; }
+      }
+      if (requestedMode === 'citation-claims') { citationResult = null; citationRuns = []; }
       const run = ++revision; paperId = libraryScope ? null : item?.id || null; selected = null; edgePage = 0; viewport = null; closeEditor(); graph = { nodes: [], edges: [] }; render();
       if (libraryScope) void loadStatistics();
       if (!paperId && !libraryScope) { status('选择一篇文献查看本文图谱，或从顶栏打开全库图谱。'); return; }
       const requestedId = paperId; status(libraryScope ? '正在读取全库图谱…' : '正在读取本文图谱…');
       try {
         catalogPrevious.disabled=catalogNext.disabled=true;
+        if (requestedMode === 'citation-claims') {
+          const outgoing = citationDirection.value === 'outgoing';
+          const query = { [outgoing ? 'source_id' : 'target_id']: requestedId, offset: citationOffset, limit: 8 };
+          if (citationRelation.value) query.relation = citationRelation.value;
+          const result = await api('citation_claim_search', query);
+          if (run !== revision || getPaper()?.id !== requestedId || graphMode.value !== requestedMode) return;
+          const receipt = outgoing ? await api('citation_claim_status', { id: requestedId }) : { runs: [] };
+          if (run !== revision || getPaper()?.id !== requestedId || graphMode.value !== requestedMode) return;
+          citationRuns = receipt.runs;
+          const versions = new Map(citationRuns.map(value => [value.source_version.sha256, value.source_status]));
+          for (const claim of result.items) if (outgoing && versions.has(claim.source_version.sha256)) claim.source.status = versions.get(claim.source_version.sha256);
+          citationResult = result; graph = citationGraph(result.items); render();
+          status(`已保存 ${result.total} 条引用描述 · AI 提取，待核对。`);
+          return;
+        }
         let referenceNotice='';
         if(!libraryScope&&requestedMode==='citations'&&item?.pdf){
           try {
             const snapshot=await api('graph_references_get',{id:requestedId});
             if(run!==revision||getPaper()?.id!==requestedId||requestedMode!==graphMode.value)return;
-            if(!snapshot||snapshot.stale||snapshot.parser_version!==2){
+            if(!snapshot||snapshot.stale){
               status('正在从 PDF 参考文献构建引用关系…');
               const extracted=await api('graph_references_extract',{id:requestedId});
               referenceNotice=`已解析 ${extracted.count} 条题录，可绘制 ${extracted.graph_count??extracted.count} 条引用。`;

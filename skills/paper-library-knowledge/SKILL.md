@@ -25,6 +25,12 @@ Evidence／Figure／Formula 保存原文或来源材料，Observation 只描述�
 
 需要互操作时用 `export`，明确提供 `entity`／`entities` 与 `format:"library-json"` 或 `"rkos-v3"`。知识 JSON 保存所选范围内的已审核图、笔记及其引用来源，不是含原始文件、未审草稿和会话的整库备份。RKOS v3 仅为有损兼容子集，必须报告 losses。引用文件中的 BibLaTeX `@dataset` 与知识侧车中的图谱 `@dataset` 契约不同，知识侧车不可传给 biber。
 
+## 查询其他论文如何描述一项工作
+
+- `library_citation_claim_search` 查询已经抽取的引用描述。按发言论文用 `source_id`，按被描述论文用 `target_id`，后者可用库内 ID、已返回的库外书目节点或 `doi:…`／`arxiv:…`。可组合 `relation`、`method`、`task`、`query`。跟随 `next_offset` 分页。
+- 回答「哪些论文使用 X」时查 `relation:"uses"`、`method:"X"`、`individual_only:true`，只把 `role:"subject"` 且语义确认为使用的目标归组。另查 `adopts` 时，使用者是发言论文。回答「谁评价 B 的局限」时查 `target_id` 加 `relation:"limitation"`，逐个列出发言论文及其限定条件、否定、不确定性和 PDF 页。引用所附数据集和方法出处分别标注；群组判断作为整体引用。提取记录均待核对，正文版本待检查时说明是历史快照。
+- `library_citation_contexts` 对选中 A 作无模型定位，返回原文窗口、正文引文、A 的书目条目及匹配依据。若已有索引缺少覆盖，经用户明确要求可用 `library_citation_claim_extract` 按指定 A 提取，沿用已配置模型。可选 `pages` 为连续物理页。相同来源和范围复用；明确重抽时用 `force:true`。有歧义的引文保留候选。空查询结果只说明已建索引内未找到。
+
 ## 每次论文分析的数据与方法必查项
 
 保留原有问题和输出结构，逐项检查下面三组；看似无关也要给出本次阅读范围内的「未说明」或有理由的「不适用」，不能直接跳过。一个回答绑定一份数据、版本/子样本及一种用途，跨题复用身份与出处，不重复造同义数据/方法节点。

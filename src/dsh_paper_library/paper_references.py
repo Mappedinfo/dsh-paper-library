@@ -16,9 +16,10 @@ MAX_PAGES = 40
 MAX_CHARACTERS = 256000
 MAX_REFERENCES = 200
 MAX_REFERENCE_CHARACTERS = 4000
-PARSER_VERSION = 2
+PARSER_VERSION = 3
 HEADING = re.compile(r"^(?:\d+[.\s]+)?(?:references|bibliography|参考文献)\s*$", re.I)
 END_HEADING = re.compile(r"^(?:appendix|appendices|supplementary (?:material|information)|附录)(?:\s|$)", re.I)
+LETTER_APPENDIX = re.compile(r'^\s*(?:#{1,6}\s+)?\*\*[A-Z]\*\*\s+\*\*\S.{2,120}\*\*\s*$')
 NUMBER = re.compile(r"^\s*\[(\d{1,4})\]\s+(.+)$")
 DOI = re.compile(r"\b10\.\d{4,9}/[^\s<>\"]+", re.I)
 ARXIV = re.compile(r"(?:arxiv\s*:\s*|arxiv\.org/(?:abs|pdf)/|\babs/)(\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[A-Z]{2})?/\d{7}(?:v\d+)?)", re.I)
@@ -26,7 +27,15 @@ ARXIV = re.compile(r"(?:arxiv\s*:\s*|arxiv\.org/(?:abs|pdf)/|\babs/)(\d{4}\.\d{4
 AUTHOR = r"(?:(?:van|von|de|der|den|del|da|di|la)\s+){0,3}[A-ZÀ-ÖØ-Þ][\wÀ-ž’'\-]*(?:\s+[A-ZÀ-ÖØ-Þ][\wÀ-ž’'\-]*){0,3},\s*(?:[A-ZÀ-ÖØ-Þ]\.\s*){1,5}"
 AUTHOR_START = re.compile(r"^" + AUTHOR)
 AUTHOR_CANDIDATE = re.compile(r"^[A-Za-zÀ-ž][\wÀ-ž’'\- ]{0,65},\s*(?:[A-ZÀ-ÖØ-Þ][.,]|$)")
-AUTHOR_YEAR = re.compile(r"^(?P<authors>" + AUTHOR + r"(?:(?:,?\s*(?:and\s+|&\s+)?)" + AUTHOR + r")*(?:,?\s+et\s+al\.)?),?\s*(?:\((?P<parenthesized>(?:18|19|20)\d{2}[a-z]?)\)|(?P<year>(?:18|19|20)\d{2}[a-z]?))\.\s+(?P<body>.+)$")
+YEAR = r"(?:18|19|20)\d{2}[a-z]?"
+# Some ACL PDFs encode a surname as "Red ﬁeld" or split an accented glyph.
+NAME_TOKEN = r"[A-ZÀ-ÖØ-ÞŁ][\w’'ˇ¨`´\-]*(?:\.(?=\s))?(?:\s+(?:[ﬁﬀﬂﬃﬄ]\w*|[a-z]{1,5}(?=,|\.\s+\d)))?"
+FULL_NAME = NAME_TOKEN + r"(?:\s+(?:(?:van|von|de|der|den|del|da|di|la|dos)\s+){0,3}" + NAME_TOKEN + r"){1,7}"
+FULL_AUTHORS = FULL_NAME + r"(?:,\s+(?!and\s)" + FULL_NAME + r")*(?:,?\s+(?:and|&)\s+" + FULL_NAME + r")?"
+FULL_AUTHOR_YEAR = re.compile(r"^(?P<authors>" + FULL_AUTHORS + r")\.\s+(?:\[[ˇ¨`´]+\]\s+)?(?P<year>" + YEAR + r")\.\s+(?P<body>.+)$")
+FULL_AUTHOR_PREFIX = re.compile(r"^" + FULL_NAME + r"(?:[,\s.]|$)")
+AUTHOR_YEAR = re.compile(r"^(?P<authors>" + AUTHOR + r"(?:(?:,?\s*(?:and\s+|&\s+)?)" + AUTHOR + r")*(?:,?\s+et\s+al\.)?),?\s*(?:\((?P<parenthesized>" + YEAR + r")\)|(?P<year>" + YEAR + r"))\.\s+(?P<body>.+)$")
+YEAR_END = re.compile(rf'(?:^|\s)\(?{YEAR}\)?\.$')
 
 
 def readable_text(raw):
@@ -34,6 +43,26 @@ def readable_text(raw):
     text = re.sub(r"\u00ad\s*\n\s*", "", raw).replace("\u00ad", "")
     text = re.sub(r"(?<=[a-z])-\s*\n\s*(?=[a-z])", "", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def match_author_year(text):
+    return AUTHOR_YEAR.match(text) or FULL_AUTHOR_YEAR.match(text)
+
+
+def full_author_start(lines, index):
+    """ACL 题录年份可从下一行开始；只前瞻有限的完整作者前缀。"""
+    if not FULL_AUTHOR_PREFIX.match(lines[index][1]):
+        return None
+    for end in range(index + 1, min(len(lines), index + 9) + 1):
+        if end > index + 1 and AUTHOR_CANDIDATE.match(lines[end - 1][1]) and YEAR_END.search(lines[end - 2][1]):
+            break
+        text = readable_text("\n".join(line for _, line in lines[index:end]))
+        if len(text) > 1200:
+            break
+        match = FULL_AUTHOR_YEAR.match(text)
+        if match:
+            return match
+    return None
 
 
 def _append_line(row, page, line):
@@ -65,26 +94,30 @@ def parse_author_year(pages):
     for index, (page, line) in enumerate(lines):
         if NUMBER.match(line):
             raise ValueError('参考文献混用编号和作者年份格式；无法可靠确认分段，旧记录未改变。')
-        if AUTHOR_CANDIDATE.match(line):
+        full = full_author_start(lines, index)
+        if AUTHOR_CANDIDATE.match(line) or full:
             # 作者名单可能跨行／跨页。最多前瞻六行，遇到下一位新作者不提前停止。
             lookahead = []
-            match = None
+            match = full
             for _, part in lines[index:index + 6]:
+                if lookahead and AUTHOR_CANDIDATE.match(part) and YEAR_END.search(lookahead[-1]):
+                    break
                 lookahead.append(part)
                 candidate = readable_text('\n'.join(lookahead))
                 if len(candidate) > 1200:
                     break
-                match = AUTHOR_YEAR.match(candidate)
+                match = match_author_year(candidate)
                 if match:
                     break
             if match:
                 # 紧接在未写完的作者名单之后，是同一条目的延续而非新条目。
-                unfinished = current and current['citation_style'] == 'author-year' and not re.search(r'\b(?:18|19|20)\d{2}', '\n'.join(p['text'] for p in current['parts']))
+                previous = readable_text('\n'.join(p['text'] for p in current['parts'])) if current else ''
+                unfinished = current and current['citation_style'] == 'author-year' and not (match_author_year(previous) or YEAR_END.search(previous))
                 if not unfinished:
                     if current:
                         rows.append(current)
                     current = {'number': len(rows) + 1, 'page': page, 'parts': [], 'citation_style': 'author-year'}
-            elif not current or AUTHOR_YEAR.match(readable_text('\n'.join(p['text'] for p in current['parts']))):
+            elif not current or match_author_year(readable_text('\n'.join(p['text'] for p in current['parts']))):
                 if current:
                     rows.append(current)
                 current = {'number': len(rows) + 1, 'page': page, 'parts': [], 'citation_style': 'unrecognized', 'graph_eligible': False}
@@ -104,7 +137,7 @@ def parse_author_year(pages):
         if len(raw) > MAX_REFERENCE_CHARACTERS:
             raise ValueError('参考文献条目过长；旧记录未改变。')
         label = readable_text(raw)
-        match = AUTHOR_YEAR.match(label)
+        match = match_author_year(label)
         ids = identifiers(label)
         row.update(raw=raw, label=label, identifiers=ids)
         row.setdefault('graph_eligible', True)
@@ -113,8 +146,9 @@ def parse_author_year(pages):
             row['quality'] = 'needs-review'
             warnings.append(f'参考文献第 {row["number"]} 条可能截断或缺少正文，保留原文待核对，不生成引用关系。')
         else:
-            row['year'] = match['year'] or match['parenthesized']
+            row['year'] = match['year'] or match.groupdict().get('parenthesized')
             row['authors_raw'] = match['authors']
+            row['author_style'] = 'full-name' if match.re is FULL_AUTHOR_YEAR else 'family-initials'
             row['quality'] = 'parsed' if row['graph_eligible'] else 'needs-review'
         if len(ids['doi']) > 1 or len(ids['arxiv']) > 1:
             warnings.append(f'参考文献第 {row["number"]} 条包含多个标识符，不自动合并到库内文献。')
@@ -122,15 +156,15 @@ def parse_author_year(pages):
 
 
 def parse_references(pages):
+    lines = [(page, line.strip()) for page, text in pages for line in text.splitlines() if line.strip()]
     after_heading = False
-    for _, text in pages:
-        for line in text.splitlines():
-            if HEADING.fullmatch(line.strip()):
-                after_heading = True
-            elif after_heading and NUMBER.match(line):
-                return (*parse_numbered(pages), 'numbered')
-            elif after_heading and AUTHOR_CANDIDATE.match(line.strip()):
-                return (*parse_author_year(pages), 'author-year')
+    for index, (_, line) in enumerate(lines):
+        if HEADING.fullmatch(line):
+            after_heading = True
+        elif after_heading and NUMBER.match(line):
+            return (*parse_numbered(pages), 'numbered')
+        elif after_heading and (AUTHOR_CANDIDATE.match(line) or full_author_start(lines, index)):
+            return (*parse_author_year(pages), 'author-year')
     raise ValueError('没有可靠识别的参考文献目录；旧记录未改变。')
 
 
@@ -144,6 +178,10 @@ def identifiers(text):
     dois = sorted({match.group(0).rstrip('.,;:)').lower() for match in DOI.finditer(text)})
     arxiv = sorted({re.sub(r'v\d+$', '', match.group(1), flags=re.I).lower() for match in ARXIV.finditer(text)})
     return {"doi": dois, "arxiv": arxiv}
+
+
+def arxiv_versions(text):
+    return sorted({match.group(1).lower() for match in ARXIV.finditer(text)})
 
 
 def parse_numbered(pages):
@@ -191,7 +229,38 @@ def parse_numbered(pages):
     return rows, list(dict.fromkeys(warnings)), ended
 
 
-def extract(library, request):
+def _fallback_pages(doc, selected):
+    from .document_elements import _preflight_page
+    from .pdf_preprocessing import markdown_page
+
+    pages, count, started = [], 0, False
+    for number in selected:
+        _preflight_page(doc, number)
+        text = markdown_page(doc, number)
+        # Markdown adds bold and heading syntax around otherwise exact headings.
+        lines = []
+        for line in text.splitlines():
+            heading = re.sub(r'\*\*|^#{1,6}\s+', '', line).strip()
+            if HEADING.fullmatch(heading):
+                started = True
+                lines.append(heading)
+            elif started and (END_HEADING.match(heading) or LETTER_APPENDIX.fullmatch(line)):
+                lines.append('Appendix')
+                break
+            elif not re.fullmatch(r'\d{1,6}', heading):
+                lines.append(line)
+        count += len(text)
+        if count > MAX_CHARACTERS:
+            raise ValueError("分栏参考文献扫描超过字符预算。")
+        pages.append((number, '\n'.join(lines)))
+        if lines and lines[-1] == 'Appendix':
+            break
+    return pages
+
+
+def read_snapshot(library, request):
+    from .document_elements import _preflight_page
+
     paper_id = request.get("id")
     paper = library.get(paper_id)
     if paper.get("archived") or not paper.get("pdf"):
@@ -215,6 +284,7 @@ def extract(library, request):
         pages, count, page_blocks = [], 0, []
         margins = {}
         for number in selected:
+            _preflight_page(doc, number)
             page = doc[number - 1]
             blocks = []
             # FreeText 批注也可能被 Page.get_text 收进正文；显示列表显式排除批注。
@@ -240,29 +310,41 @@ def extract(library, request):
             pages.append((number, text))
         try:
             rows, warnings, ended, style = parse_references(pages)
-        except ValueError as error:
-            if explicit is None:
-                raise ValueError(f'{error} 本次仅回看 PDF 最后 {len(selected)} 页（{selected[0]}–{selected[-1]}）；可指定包含参考文献标题及末尾的连续页码，最多 40 页。') from error
-            raise
+        except ValueError:
+            rows = None
+        # Full-name bibliographies can superficially parse in y-order with entries interleaved.
+        if rows is None or any(row.get('author_style') == 'full-name' for row in rows):
+            try:
+                pages = _fallback_pages(doc, selected)
+                rows, warnings, ended, style = parse_references(pages)
+            except ValueError as error:
+                if explicit is None:
+                    raise ValueError(f'{error} 本次仅回看 PDF 最后 {len(selected)} 页（{selected[0]}–{selected[-1]}）；可指定包含参考文献标题及末尾的连续页码，最多 40 页。') from error
+                raise
         if selected[-1] != total and not ended:
             raise ValueError("所选页尚未覆盖参考文献末尾；请包含后续页或附录起始页，旧记录未改变。")
     if observed_file(path) != observed and _current_version(library, paper_id) != source_version:
         raise ValueError("PDF 正文在提取期间改变，请重试；旧记录未改变。")
     fingerprint = hashlib.sha256(json.dumps([PARSER_VERSION, pages], ensure_ascii=False).encode()).hexdigest()
-    value = {"paper_id": paper_id, "references": rows, "count": len(rows), "pages": selected, "page_count": total,
+    return {"paper_id": paper_id, "references": rows, "count": len(rows), "pages": selected, "page_count": total,
              "reference_pages": sorted({part['page'] for row in rows for part in row['parts']}),
              "source_fingerprint": fingerprint, "source_kind": f"pdf-{style}-bibliography", "warnings": warnings,
              "source_version": source_version,
              "parser_version": PARSER_VERSION, "graph_count": sum(row.get('graph_eligible', True) for row in rows),
              "scope": "selected-pages" if explicit is not None else "last-40-pages", "extracted_at": datetime.now(timezone.utc).isoformat(),
              "semantics": "PDF reference-list entries; no inferred bibliographic fields, no inbound citation counts"}
+
+
+def extract(library, request):
+    value = read_snapshot(library, request)
+    paper_id = value['paper_id']
     schema(library)
     with library.lock():
         library.get(paper_id)
         previous = library.db.execute("SELECT value FROM paper_reference_snapshots WHERE paper_id=?", (paper_id,)).fetchone()
         if previous:
             saved = json.loads(previous['value'])
-            if saved['source_fingerprint'] == fingerprint and saved.get('source_version') == source_version:
+            if saved['source_fingerprint'] == value['source_fingerprint'] and saved.get('source_version') == value['source_version']:
                 return {**saved, "duplicate": True, "stale": False}
         library.db.execute("INSERT INTO paper_reference_snapshots(paper_id,value) VALUES(?,?) ON CONFLICT(paper_id) DO UPDATE SET value=excluded.value", (paper_id, json.dumps(value, ensure_ascii=False)))
     return {**value, "duplicate": False, "stale": False}

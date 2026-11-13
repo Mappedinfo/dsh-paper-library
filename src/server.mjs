@@ -17,7 +17,8 @@ const configPath = option('--model-config', undefined);
 const paperAnalysis = configPath ? await createHeadlessAnalysis({library,python,localStateHome,
   modelConfig:await loadModelConfig(configPath)}) : undefined;
 const translationServer = translationServerUrl(option('--translation-server', undefined));
-const handle = createFetchHandler({library,python,localStateHome,paperAnalysis,loopbackOnly:true,...(translationServer?{translationServer}:{})});
+const citationClaims = paperAnalysis ? (input, options) => paperAnalysis(input, options) : undefined;
+const handle = createFetchHandler({library,python,localStateHome,paperAnalysis,citationClaims,loopbackOnly:true,...(translationServer?{translationServer}:{})});
 void handle.startInkQueue().catch(error=>console.error(`Ink queue recovery: ${error.message}`));
 const server = createServer(async(req,res) => {
   try {

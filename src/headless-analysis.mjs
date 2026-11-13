@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path'
 import { defaultLibrary, dispatch as defaultDispatch } from './bridge.mjs'
 import { createLocalStateStore } from './local-state.mjs'
 import { createPaperAnalysis } from './harness/paper-analysis.mjs'
+import { createCitationClaims } from './citation-claims.mjs'
 import { directModelOutputBudget, directModelReasoningOptions } from './direct-model.mjs'
 import { analysisInputOptions, analysisQuestionOptions } from './analysis-input.mjs'
 import { isFatalModelError, safeModelErrorMessage } from './model-errors.mjs'
@@ -145,6 +146,15 @@ export async function createHeadlessAnalysis(options = {}) {
   const engine = createPaperAnalysis({ store, dispatch, library, python: options.python, maxConcurrency, execution: 'direct', modelTimeoutMs: routedAgent.modelTimeoutMs,
     resolveModel: async () => { await getAgent(); return model() },
     agent: engineAgent })
+  const citationClaims = createCitationClaims({
+    worker: options.citationWorker ?? (async (input, signal) => {
+      const { core } = await import('./bridge.mjs')
+      return core(input, { library, python: options.python, signal })
+    }),
+    agent: engineAgent,
+    resolveModel: async () => { await getAgent(); return model() },
+    maxConcurrency, timeoutMs: routedAgent.modelTimeoutMs,
+  })
 
   async function start(input) {
     if (!validId(input.id) || input.id.startsWith('dataset_') || !validId(input.request_id)) throw fail('ANALYSIS_INVALID')
@@ -254,7 +264,11 @@ export async function createHeadlessAnalysis(options = {}) {
       usage: snapshot, usage_scope: 'headless_instance' }
   }
 
-  async function handle(input) {
+  async function handle(input, { signal } = {}) {
+    if (input?.action === 'citation_claim_extract') return citationClaims(input, { signal })
+    if (['citation_context_candidates', 'citation_claim_search', 'citation_claim_status', 'citation_claim_verify_source'].includes(input?.action)) {
+      return dispatch(input, { library, python: options.python, signal })
+    }
     if (!actions.has(input?.action)) throw fail('ANALYSIS_INVALID')
     if (input.action === 'paper_analysis_run') {
       const selected = batchRequest(input), previous = batches.get(input.request_id)

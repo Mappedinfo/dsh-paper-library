@@ -663,6 +663,15 @@ def dispatch(request):
     library = Library(root)
     try:
         action = request.get("action")
+        if action == "citation_context_candidates":
+            from .citation_contexts import public_candidates
+            return public_candidates(library, request)
+        if action in {"citation_claim_prepare", "citation_claim_commit", "citation_claim_search", "citation_claim_status", "citation_claim_verify_source"}:
+            from . import citation_claims
+            handlers = {"citation_claim_prepare": citation_claims.prepare, "citation_claim_commit": citation_claims.commit,
+                        "citation_claim_search": citation_claims.search, "citation_claim_status": citation_claims.status,
+                        "citation_claim_verify_source": citation_claims.verify_source}
+            return handlers[action](library, request)
         if action == "paper_outline":
             from . import outline
             return outline.read(library, request)

@@ -24,7 +24,7 @@ if (args.includes('--help')) {
     const library=flags.get('--library'), python=flags.get('--python');
     isAnalysis=typeof request?.action==='string' && request.action.startsWith('paper_analysis_');
     let result;
-    if (isAnalysis) {
+    if (isAnalysis || request?.action === 'citation_claim_extract') {
       const modelConfig=flags.has('--model-config') ? await loadModelConfig(flags.get('--model-config')) : undefined;
       headless=await createHeadlessAnalysis({library,python,localStateHome:flags.get('--state-home'),modelConfig});
       result=await headless(request);
