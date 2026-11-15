@@ -45,6 +45,7 @@ for (const name of ['field-radar-relations-renderer.js','field-radar-relations.j
 const languageActions = new Set(['language_settings_get','language_settings_update','language_prompt_preview','language_generate','language_history','language_vocabulary_sync','vocabulary_create','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
 for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js','ink-diagnostics.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 staticFiles['annotation-editor.js']=['annotation-editor.js','text/javascript;charset=utf-8'];
+staticFiles['annotation-tags.js']=['annotation-tags.js','text/javascript;charset=utf-8'];
 staticFiles['companion.js']=['companion.js','text/javascript;charset=utf-8'];
 staticFiles['slides.html']=['slides.html','text/html;charset=utf-8'];
 staticFiles['fonts/silkscreen-regular.ttf']=['fonts/silkscreen-regular.ttf','font/ttf'];

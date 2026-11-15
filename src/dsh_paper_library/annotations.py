@@ -21,6 +21,7 @@ import re
 import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
+from .annotation_tags import read_tags
 from .handwriting import HandwritingAccess
 from .ai_annotation_style import AI_BLUE, AI_WIDTH, apply_ai_reading_style, native_border, native_style, sync_dash_appearance
 
@@ -133,8 +134,9 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         return {"paths": paths, "width": width}
 
     @staticmethod
-    def _annotation_characters(value):
-        return len(value["text"]) + len(value["comment"]) + len(value.get("subject", "")) + (len(json.dumps(value["paths"], separators=(",", ":"))) if "paths" in value else 0) + (len(json.dumps(value["handwriting"], ensure_ascii=False)) if "handwriting" in value else 0) + (len(json.dumps(value["linked_ink"], ensure_ascii=False)) if "linked_ink" in value else 0)
+    def _annotation_characters(value, include_tags=False):
+        tags = sum(map(len, value.get("tags", []))) if include_tags else 0
+        return tags + len(value["text"]) + len(value["comment"]) + len(value.get("subject", "")) + (len(json.dumps(value["paths"], separators=(",", ":"))) if "paths" in value else 0) + (len(json.dumps(value["handwriting"], ensure_ascii=False)) if "handwriting" in value else 0) + (len(json.dumps(value["linked_ink"], ensure_ascii=False)) if "linked_ink" in value else 0)
 
     @staticmethod
     def _page(doc, number):
@@ -179,6 +181,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         import pymupdf as fitz
         info = annot.info
         extra = cls._annotation_metadata(annot)
+        tags = read_tags(page.parent, annot.xref)
         handwriting = cls._handwriting_page(page) if handwriting is None else handwriting
         linked_board = handwriting["parents"].get(annot.xref)
         own_board = handwriting["children"].get(annot.xref)
@@ -214,7 +217,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 rects = [list(cls._rect(rect, page, inverse=True) * page.rotation_matrix) for rect in source_rects]
             except (TypeError, ValueError):
                 pass
-        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, "comment": info.get("content", ""), "author": info.get("title", ""), "subject": info.get("subject", "")[:1000] if not info.get("subject", "").startswith("paper-library:") else "", "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, **cls._annotation_style(annot), **native_style(annot), "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"width": annot.border.get("width", 1)} if kind == "square" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids", "parent_id", "question", "answered_at") if key in extra}}
+        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, **({"tags": tags} if tags else {}), "comment": info.get("content", ""), "author": info.get("title", ""), "subject": info.get("subject", "")[:1000] if not info.get("subject", "").startswith("paper-library:") else "", "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, **cls._annotation_style(annot), **native_style(annot), "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"width": annot.border.get("width", 1)} if kind == "square" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids", "parent_id", "question", "answered_at") if key in extra}}
 
     def companion_excerpt(self, id, page):
         """One explicitly selected page, text only; no persistent index or OCR."""
@@ -453,7 +456,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                         return response(True)
                     value = self._annotation(page, annot, handwriting=handwriting)
                     value = self._with_annotation_version(value, bool(annot.info.get("id")))
-                    characters += self._annotation_characters(value)
+                    characters += self._annotation_characters(value, include_tags=True)
                     if characters > 2_000_000:
                         return response(True)
                     result.append(value)
@@ -602,7 +605,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 value = self._with_annotation_version(
                     self._annotation(current, a, handwriting=handwriting, raw_words=raw_words),
                     bool(a.info.get("id")))
-                annotation_characters += self._annotation_characters(value)
+                annotation_characters += self._annotation_characters(value, include_tags=True)
                 if len(annotations) >= 1000 or annotation_characters > 2_000_000:
                     annotation_truncated = True
                     break

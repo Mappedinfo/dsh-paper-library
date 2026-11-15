@@ -687,6 +687,10 @@ def dispatch(request):
         if action in {"annotation_favorite_set", "annotation_favorites_list"}:
             from . import annotation_favorites
             return annotation_favorites.update(library, request) if action.endswith("_set") else annotation_favorites.listing(library, request)
+        if action in {"annotation_tags_update", "annotation_tag_suggestions"}:
+            from . import annotation_tags
+            handler = annotation_tags.update if action == "annotation_tags_update" else annotation_tags.suggestions
+            return handler(library, request)
         if isinstance(action, str) and action.startswith("latex_"):
             # LaTeX projects own a real folder, not the managed PDF tree.
             from . import latex

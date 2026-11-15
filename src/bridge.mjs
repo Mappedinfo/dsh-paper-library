@@ -831,6 +831,10 @@ export async function dispatch(request, options = {}) {
     if (Buffer.byteLength(JSON.stringify(safe)) > 4096) throw new Error('全文搜索请求过大，请重新输入关键词。');
     return core(safe, options);
   }
+  if (['annotation_tags_update', 'annotation_tag_suggestions'].includes(safe.action)) {
+    if (Buffer.byteLength(JSON.stringify(safe)) > 24 * 1024) throw new Error('批注标签请求超过大小上限。');
+    return core(safe, options);
+  }
   if (!actions.has(safe.action) && !projectActions.has(safe.action) && !externalActions.has(safe.action) && !latexActions.has(safe.action)) throw new Error('未知文献操作。');
   if (safe.action === 'import') {
     const sources=['path','doi','url','items','content_base64'].filter(key=>safe[key]!==undefined && safe[key]!==null && safe[key]!=='');

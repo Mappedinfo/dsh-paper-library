@@ -12,7 +12,8 @@ window.PaperReaderSearch = (() => {
   function filterThreads(group, query, {source='all',match='all'}={}) {
     const terms=[...new Set(normalize(query).split(/[\s,，;；]+/).filter(Boolean))];
     if(!terms.length&&source==='all')return group;
-    const text=note=>[note.text,note.comment,note.content,note.author,note.subject,note.model,note.handwriting?.transcript,note.linked_ink?.transcript].filter(Boolean).join(' ');
+    const text=note=>[note.text,note.comment,note.content,note.author,note.subject,note.model,note.handwriting?.transcript,note.linked_ink?.transcript,
+      ...(note.tags||[]).map(tag=>`#${tag}`)].filter(Boolean).join(' ');
     const matches=entries=>{
       const selected=source==='all'?entries:entries.filter(note=>source==='reading'?note.ai_reading_style===true:annotationSource(note)===source);
       if(!selected.length)return false;
@@ -118,7 +119,7 @@ window.PaperReaderSearch = (() => {
       const nextScope=rail?.dataset.sidebarPanel||'library';if(nextScope!==scope){scope=nextScope;scopeInput.value=queries.get(scope)||'';}
       const supported=Boolean(labels[scope]);scopeToggle.hidden=!supported;scopeToggle.setAttribute('aria-expanded',String(expanded));scopeToggle.classList.toggle('active',Boolean(queries.get(scope))||(scope==='annotations'&&annotationSourceFilter!=='all'));scopeForm.hidden=!expanded||!supported||Boolean(header?.hidden);
       updateAnnotationNav();annotationOptions.hidden=scope!=='annotations';sourceSelect.value=annotationSourceFilter;matchSelect.value=annotationMatch;
-      scopeInput.placeholder=`搜索${labels[scope]||''}${scope==='annotations'?'原文、备注与回复；空格分隔关键词':''}`;scopeInput.setAttribute('aria-label',scopeInput.placeholder);
+      scopeInput.placeholder=`搜索${labels[scope]||''}${scope==='annotations'?'原文、备注、回复和标签':''}`;scopeInput.setAttribute('aria-label',scopeInput.placeholder);
     }
     sync();return {sync,showPDF,clearAnnotationFilter(){queries.delete('annotations');annotationSourceFilter='all';annotationMatch='all';if(scope==='annotations')scopeInput.value='';sync();},filter:group=>{const result=filterThreads(group,queries.get('annotations'),{source:annotationSourceFilter,match:annotationMatch});const selected=annotationMatches[annotationIndex]?.id;annotationMatches=[...result.notes.map((note,index)=>({id:note.id,offset:Math.floor(index/40)*40})),...result.unlinked.map(note=>({id:note.id,offset:0}))];annotationIndex=selected?annotationMatches.findIndex(note=>note.id===selected):-1;updateAnnotationNav();return result;},dispose(){disposed=true;++ticket;document.removeEventListener('keydown',keydown);document.body.classList.remove('pdf-search-open');scopeToggle.remove();scopeForm.remove();pdfToggle.remove();pdfForm.remove();}};
   }

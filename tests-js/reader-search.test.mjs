@@ -48,6 +48,21 @@ test('annotation search matches source, followup and AI reply while keeping the 
  assert.equal(f.w.PaperReaderSearch.filterThreads(group,'missing').notes.length,0);
  assert.equal(f.w.PaperReaderSearch.filterThreads(group,'orphan').unlinked.length,1);
 });
+test('sidebar annotation search finds manual labels and keeps their discussion',t=>{
+ const f=fixture(t,async()=>({}));f.get('#sidebar-search-toggle').click();
+ const input=f.get('#sidebar-search-row input');
+ assert.match(input.placeholder,/标签/);
+ const first={id:'annotation-a',text:'Unrelated excerpt',tags:['城市感知','Urban Sensing']},other={id:'annotation-b',text:'Another excerpt'};
+ const reply={id:'reply-a',comment:'Related explanation'};
+ const group={notes:[first,other],replies:new Map([[first.id,[reply]]]),unlinked:[]};
+ for(const query of ['#城市感知','sensing','城市感知 explanation']){
+   input.value=query;f.submit('#sidebar-search-row');
+   const result=f.ui.filter(group);
+   assert.deepEqual(Array.from(result.notes),[first]);
+   assert.deepEqual(result.replies.get(first.id),[reply]);
+ }
+});
+
 test('search errors stay visible and retry uses the failed page',async t=>{
  let fail=true;const f=fixture(t,async(a,p)=>{if(fail)throw Error('synthetic error');return{page:p.page,page_count:1,matches:[],next_offset:null,next_page:null};});
  f.get('#pdf-search-row input').value='test';f.submit('#pdf-search-row');await tick();assert.match(f.get('#pdf-search-row [role=status]').textContent,/synthetic error/);

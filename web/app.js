@@ -481,6 +481,8 @@ let pendingPdfAnnotationLink=null;
 function renderAnnotations() {
   if(typeof annotationEditor!=='undefined'&&annotationEditor?.deferRender?.(renderAnnotations))return;
   const restoreEditorFocus = typeof annotationEditor!=='undefined'?annotationEditor?.beforeRender():null;
+  const tagUI = typeof annotationTagsUI !== 'undefined' ? annotationTagsUI : null;
+  tagUI?.beforeRender();
   linkedHandwritingUI?.beforeRender();
   const fragment = document.createDocumentFragment();
   const {notes,replies,unlinked,remarks=new Map()}=visibleAnnotationThreads();
@@ -567,7 +569,10 @@ function renderAnnotations() {
     if (note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const handwriting = el('button', 'button subtle', '手写'); handwriting.dataset.noteAction = 'handwriting'; const primary=el('div','annotation-primary-actions');primary.append(handwriting,edit);actions.prepend(primary); const independent=el('button','button subtle','＋ 备注 / 追问');independent.type='button';independent.dataset.noteAction='remark';independent.title='在这处划线下追加备注，保留已有问答';actions.append(independent); if(note.handwriting){const legacy=el('button','button subtle','打开原便签');legacy.dataset.noteAction='handwriting-legacy';actions.append(legacy);} }
     if (paperChatUI?.available() && note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const selected = paperChatUI.hasAnnotation(note.id); const discuss = el('button', 'button subtle', selected ? '移出提问材料' : '选作提问材料'); discuss.dataset.noteAction = 'discuss'; discuss.title = '可多选批注作为提问材料，再到对话框统一发送；此按钮不会发送消息'; discuss.setAttribute('aria-pressed', String(selected)); actions.append(discuss); }
     const phrase=(note.text||note.comment||note.content||'').trim();if(phrase&&phrase.length<=200){const entry=el('button','button subtle','词条');entry.type='button';entry.title='匹配百科词条或创建带来源的词条';entry.addEventListener('click',()=>wikiUI.show('encyclopedia',phrase,{paper_id:state.active.id,title:state.active.title,page:note.page,annotation_id:note.id,quote:phrase}));actions.append(entry);}
-    card.dataset.remarkNumber='1';card.append(actions);for(const reply of replies.get(note.id)||[])if(!note.text||reply.source_kind!=='annotation-translation')card.append(replyCard(reply));
+    if(tagUI)actions.append(tagUI.editButton(note,state.active.id));
+    card.dataset.remarkNumber='1';card.append(actions);
+    const tagStrip=tagUI?.strip(note);if(tagStrip)card.append(tagStrip);
+    for(const reply of replies.get(note.id)||[])if(!note.text||reply.source_kind!=='annotation-translation')card.append(replyCard(reply));
     for(const [index,remark]of (remarks.get(note.id)||[]).entries()){
       const entry=el('article','annotation-remark');entry.dataset.annotationId=remark.id;entry.dataset.paperId=state.active?.id||'';entry.dataset.remarkNumber=String(index+2);entry.dataset.annotationVersion=remark.version||'';entry.dataset.companionText=String(Boolean(remark.text||remark.comment));
       const previousQa=legacyQa(remark);if(previousQa)entry.append(previousQa);
@@ -1845,6 +1850,9 @@ documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPan
   navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');await pdfReader?.revealRegion(source);},
   annotated:async(id,page)=>{if(state.active?.id!==id)return;await loadAnnotations(id);if(state.active?.id===id)await pdfReader?.refresh(page,{defer:true});},
 });
+const annotationTagsUI = window.PaperAnnotationTags?.create({ api, el, onSaved: id => {
+  if (state.active?.id === id) void loadAnnotations(id);
+} });
 readerSearchUI=window.PaperReaderSearch?.create({api,getPaper:()=>state.active,reader:()=>pdfReader,navigate:()=>switchTab('reader'),getElements:()=>documentElementsUI,
   onAnnotationSearch:()=>{pendingPdfAnnotationLink=null;pendingAnnotationSearchId=null;state.noteOffset=0;renderAnnotations();},
   onAnnotationNavigate:hit=>{pendingPdfAnnotationLink=null;pendingAnnotationSearchId=hit.id;state.noteOffset=hit.offset;renderAnnotations();},
