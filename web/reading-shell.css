@@ -160,6 +160,7 @@ body:not(.annotation-handwriting-enabled) .annotation-primary-actions [data-note
 .reader-appearance>summary::after{content:' ▾'}
 .reader-appearance[open]>summary{background:var(--surface);color:var(--ink)}
 .reader-appearance .reader-pen-options{width:220px}
+#reader-annotation-order{margin-inline-start:auto;font-size:12px}
 
 /* 同一组常用色用于新批注与已保存批注，颜色不依赖当前界面主题。 */
 .annotation-color-presets{display:grid;grid-template-columns:repeat(5,30px);gap:8px;padding:6px 0}

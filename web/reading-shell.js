@@ -20,7 +20,7 @@ window.PaperReadingShell = (() => {
     if (!disclosure?.open || !panel) return;
     window.PaperFloatingWindows?.placeBelow(disclosure.querySelector('summary'), panel);
   }
-  function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence, diagnostics, saveInk, returnToInk, beforeToolChange, locateAnnotations}) {
+  function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence, diagnostics, saveInk, returnToInk, beforeToolChange, locateAnnotations, onAnnotationOrderChange}) {
     const $ = id => document.getElementById(id);
     const node = (tag, text, className) => { const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n; };
     const button = (id, text, action) => {const n=node('button',text,'button subtle');n.type='button';n.id=id;n.addEventListener('click',action);return n;};
@@ -83,6 +83,20 @@ window.PaperReadingShell = (() => {
     const changeAppearance=()=>{appearanceTouched=true;darkPdf=darkCheck.checked;bionic=bionicCheck.checked;applyAppearance();void patchLayout({darkPdf,bionic});};
     darkCheck.addEventListener('change',changeAppearance);bionicCheck.addEventListener('change',changeAppearance);
 
+    const annotationOrderLabel=node('label','批注顺序'), annotationOrder=node('select');
+    annotationOrder.id='reader-annotation-order';
+    annotationOrder.title='按 PDF 中的位置排列，或按批注创建时间由新到旧排列。';
+    for(const [value,label] of [['position','原文顺序'],['time','批注时间']]){
+      const option=node('option',label);option.value=value;annotationOrder.append(option);
+    }
+    annotationOrderLabel.append(annotationOrder);appearanceOptions.append(annotationOrderLabel);
+    let annotationOrderTouched=false;
+    annotationOrder.addEventListener('change',()=>{
+      annotationOrderTouched=true;
+      onAnnotationOrderChange?.(annotationOrder.value);
+      void patchLayout({annotationOrder:annotationOrder.value});
+    });
+
     const saveLayoutLater=()=>{if(saveLayoutTimer!==null)window.clearTimeout(saveLayoutTimer);saveLayoutTimer=window.setTimeout(()=>{saveLayoutTimer=null;saveLayout();},150);};
     const hintFor=()=>tool==='ink'&&reader()?.getInkContext?.()?'直接在本页写画，笔迹绑定当前批注；再点侧栏手写按钮返回常规标注。':(MODE_HINTS[mode]||{})[tool]||hints[tool]||'';
     input.addEventListener('input',()=>{if(['ink','square'].includes(tool))inkColor=input.value;else color=input.value;applyTool();saveLayout();sync();});colorLabel.append(input);
@@ -144,6 +158,10 @@ window.PaperReadingShell = (() => {
       if(typeof value?.inkColor==='string'&&/^#[0-9a-f]{6}$/i.test(value.inkColor))inkColor=value.inkColor;
       if([1,2,4].includes(value?.inkWidth))inkWidth=value.inkWidth;
       if(!appearanceTouched){darkPdf=value?.darkPdf===true;bionic=value?.bionic===true;applyAppearance();}
+      if(!annotationOrderTouched && value?.annotationOrder==='time'){
+        annotationOrder.value='time';
+        onAnnotationOrderChange?.('time');
+      }
       if(typeof value?.penOnly==='boolean'){penOnly=value.penOnly;penCheck.checked=penOnly;reader()?.setPenOnly?.(penOnly);}
       applyTool();
       if(typeof value?.markup==='string'&&['highlight','underline','strikeout'].includes(value.markup))markup=value.markup;

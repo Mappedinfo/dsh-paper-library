@@ -87,3 +87,28 @@ test('remarks remain visible when the parent is missing and external nested repl
  const grouped=threads([note('orphan',{kind:'reader-reply',reply_to:'missing'}),note('a'),note('b',{reply_to:'a'}),note('c',{reply_to:'b'})]);
  assert.deepEqual(ids(grouped.notes),['orphan','a']);assert.deepEqual(ids(grouped.remarks.get('a')),['b','c']);
 });
+
+test('position uses physical pages and text rectangles, with stable ties and missing geometry last', () => {
+  const notes = [
+    note('next-page', { page: 2, rect: [0, 0, 4, 4] }),
+    note('unknown', { page: 1 }),
+    note('right', { page: 1, rect: [95, 18, 122, 24] }),
+    note('later', { page: 1, rect: [5, 42, 52, 48] }),
+    note('left', { page: 1, rects: [[75, 25, 125, 32], [25, 18, 50, 24]], rect: [5, 16, 125, 32] }),
+    note('tie', { page: 1, rect: [25, 18, 50, 26] }),
+  ];
+  assert.deepEqual(ids(threads(notes, 'position').notes), ['left', 'tie', 'right', 'later', 'unknown', 'next-page']);
+  assert.deepEqual(ids(notes), ['next-page', 'unknown', 'right', 'later', 'left', 'tie']);
+});
+
+test('time uses native PDF creation dates and offsets, keeping remarks under their roots', () => {
+  const older = note('older', { page: 1, created: `D:20261115150000+08'00'`, modified: 'D:20261116150000Z' });
+  const recent = note('recent', { page: 3, created: 'D:20261115073000Z' });
+  const fallback = note('fallback', { page: 4, modified: '2026-11-15T09:00:00+01:00' });
+  const undated = note('undated', { page: 1, created: 'invalid' });
+  const remark = note('remark', { reply_to: 'older', created: 'D:20261117000000Z' });
+  const result = threads([older, undated, recent, remark, fallback, ai('answer', { reply_to: 'remark' })], 'time');
+  assert.deepEqual(ids(result.notes), ['fallback', 'recent', 'older', 'undated']);
+  assert.deepEqual(ids(result.remarks.get('older')), ['remark']);
+  assert.deepEqual(ids(result.replies.get('remark')), ['answer']);
+});

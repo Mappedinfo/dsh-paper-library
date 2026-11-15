@@ -20,6 +20,33 @@ function fixture(){
   window.eval(source.slice(source.indexOf('async function copyText('),source.indexOf('async function cite(')));
   return {dom,window,document,copied,messages};
 }
+test('sidebar sorts before paginating and locates the matching PDF page under the selected order', {skip:!JSDOM}, async()=>{
+  const f=fixture(),{window:w,document:d}=f;
+  try{
+    w.eval(await readFile(new URL('../web/annotation-threads.js',import.meta.url),'utf8'));
+    w.state.active.pdf=true;
+    w.state.annotationOrder='position';
+    w.state.annotations=Array.from({length:42},(_,i)=>({id:`note-${i+1}`,type:'note',page:i+1,
+      created:new Date(Date.UTC(2026,0,1+i)).toISOString()}));
+    w.pdfReader=null;
+    w.readingPanels={show(){},visible:()=>true};
+    w.HTMLElement.prototype.scrollIntoView=()=>{};
+    const list=d.getElementById('annotation-list');
+    const first=()=>list.querySelector('.annotation-card')?.dataset.annotationId;
+    w.state.noteOffset=40;
+    w.renderAnnotations();
+    assert.equal(first(),'note-41');
+    w.setAnnotationOrder('time');
+    assert.equal(w.state.noteOffset,0);
+    assert.equal(first(),'note-42');
+    w.locateCurrentPageAnnotations(1);
+    assert.equal(w.state.noteOffset,40);
+    assert.equal(list.querySelector('.is-linked')?.dataset.annotationId,'note-1');
+    w.setAnnotationOrder('position');
+    assert.equal(first(),'note-1');
+  }finally{domClose(f);}
+});
+
 test('copy source stays beside delete and copies only exact PDF text; missing source stays disabled', {skip:!JSDOM}, async()=>{
   const f=fixture(),{window,document}=f;
   window.state.annotations=[{id:'a',page:1,type:'underline',text:'  Original PDF text.\nSecond line. ',comment:'Private interpretation'},{id:'b',page:2,type:'note',text:'',comment:'Comment without a source quotation'}];

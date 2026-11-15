@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 const catalogPageSizes = new Set([20, 40, 60, 100, 200]);
 const state = {
   items: [], total: 0, libraryCount: 0, offset: 0, limit: 40, query: '', sort: 'modified', order: 'desc', archived: false, kind: 'all', favorite: false, tag: '', active: null, tab: 'reader',
-  page: 1, pageCount: 0, pageData: null, selection: null, annotations: [], noteOffset: 0,
+  page: 1, pageCount: 0, pageData: null, selection: null, annotations: [], noteOffset: 0, annotationOrder: 'position',
   models: [], harnessContext: null, modelTicket: 0, library: '', project: '', listTicket: 0, itemTicket: 0, pageTicket: 0, metadataDraft: null, openedId: null,
   pageWanted: null, pageRunning: false, pagePromise: null, annotationDraft: null, aiBusy: false,
 };
@@ -463,7 +463,7 @@ async function loadAnnotations(id) {
 // unit-testable without the DOM. The inline fallback keeps the rail correct when
 // an already-running host has not yet been restarted after this asset was added.
 function annotationThreads(annotations) {
-  if (window.PaperAnnotationThreads) return window.PaperAnnotationThreads.threads(annotations);
+  if (window.PaperAnnotationThreads) return window.PaperAnnotationThreads.threads(annotations, state.annotationOrder);
   const list=Array.isArray(annotations)?annotations:[];
   const ai=note=>note.kind==='ai-feedback'||note.type==='ai_feedback'||note.ai_generated===true;
   const notes=list.filter(note=>!ai(note)&&!['handwriting-note','linked-handwriting','linked-handwriting-transcript'].includes(note.kind)),replies=new Map(notes.map(note=>[note.id,[]])),unlinked=[];
@@ -480,6 +480,14 @@ function visibleAnnotationThreads() {
 }
 let pendingAnnotationSearchId=null;
 let pendingPdfAnnotationLink=null;
+function setAnnotationOrder(order) {
+  if (!['position', 'time'].includes(order) || state.annotationOrder === order) return;
+  state.annotationOrder = order;
+  state.noteOffset = 0;
+  pendingPdfAnnotationLink = pendingAnnotationSearchId = null;
+  $('annotation-list').scrollTop = 0;
+  if (state.active?.pdf) renderAnnotations();
+}
 function renderAnnotations() {
   if(typeof annotationEditor!=='undefined'&&annotationEditor?.deferRender?.(renderAnnotations))return;
   const restoreEditorFocus = typeof annotationEditor!=='undefined'?annotationEditor?.beforeRender():null;
@@ -528,7 +536,9 @@ function renderAnnotations() {
     if(note.version)card.dataset.annotationVersion=note.version;
     card.dataset.companionText=String([note.text,note.comment,note.content,note.handwriting?.transcript,note.linked_ink?.transcript].some(value=>typeof value==='string'&&value.trim()));
     const meta = el('div', 'annotation-meta'); const pageLink = el('button', 'page-link', `第 ${note.page} 页`); pageLink.dataset.noteAction = 'page';
-    meta.append(pageLink, el('span', '', displayDate(note.modified || note.created)), el('span', 'note-type', note.kind === 'ai-feedback' || note.type === 'ai_feedback' || note.ai_generated ? 'AI 生成' : ({highlight:'高亮',underline:'下划线',strikeout:'删除线',note:'便笺',ink:'自由笔画',square:'矩形框'})[note.type] || '批注'));
+    const date = el('span', '', displayDate(note.created || note.modified));
+    if (note.created && note.modified && note.created !== note.modified) date.title = `最后修改：${displayDate(note.modified)}`;
+    meta.append(pageLink, date, el('span', 'note-type', note.kind === 'ai-feedback' || note.type === 'ai_feedback' || note.ai_generated ? 'AI 生成' : ({highlight:'高亮',underline:'下划线',strikeout:'删除线',note:'便笺',ink:'自由笔画',square:'矩形框'})[note.type] || '批注'));
     const metaActions=el('div','annotation-meta-actions');
     const style=window.PaperAnnotationStyle?.editor({note,paperId:state.active.id,api,onSaved:async()=>{
       if(state.active?.id===card.dataset.paperId){await loadAnnotations(state.active.id);await refreshPage(note.page);}
@@ -1786,7 +1796,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onFocusChange: info => readingShell?.focusChanged(info),
   onStatus: (message,error,options) => readingShell?.status(message,error,options),
 });
-readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,locateAnnotations:locateCurrentPageAnnotations,contextChanged:()=>{readerSearchUI?.sync();resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
+readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,locateAnnotations:locateCurrentPageAnnotations,onAnnotationOrderChange:setAnnotationOrder,contextChanged:()=>{readerSearchUI?.sync();resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
 const rangeEditBar=el('div','annotation-range-edit');rangeEditBar.hidden=true;
 rangeEditBar.setAttribute('role', 'group');
 rangeEditBar.setAttribute('aria-label', '调整原文范围');

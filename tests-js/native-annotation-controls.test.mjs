@@ -7,6 +7,33 @@ let JSDOM;try{({JSDOM}=require(process.env.JSDOM_MODULE||'jsdom'));}catch{}
 const html=await readFile(new URL('../web/index.html',import.meta.url),'utf8');
 const style=await readFile(new URL('../web/annotation-style.js',import.meta.url),'utf8');
 const shell=await readFile(new URL('../web/reading-shell.js',import.meta.url),'utf8');
+test('reading display restores and saves the annotation order separately from the PDF view', {skip:!JSDOM}, async()=>{
+  const {window}=new JSDOM(html,{runScripts:'outside-only',url:'http://synthetic.invalid/'}), doc=window.document;
+  const changes=[], writes=[];
+  for(const id of ['metadata-enrich','catalog-archive']){const b=doc.createElement('button');b.id=id;doc.body.append(b);}
+  window.eval(shell);
+  const ui=window.PaperReadingShell.create({
+    state:{active:{id:'synthetic',pdf:true},tab:'reader'}, workbench:()=>({isTable:()=>false}),
+    panels:()=>({visible:()=>false}), reader:()=>null, navigate(){},
+    persistence:{get:async()=>({annotationOrder:'time'}),patch:async(key,value)=>writes.push({key,...value})},
+    onAnnotationOrderChange:value=>changes.push(value),
+  });
+  try{
+    const choice=doc.getElementById('reader-annotation-order');
+    assert.equal(choice.closest('details').id,'reader-appearance');
+    assert.equal(choice.value,'position');
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(choice.value,'time');
+    assert.deepEqual(changes,['time']);
+    assert.deepEqual(writes,[]);
+    choice.value='position';
+    choice.dispatchEvent(new window.Event('change'));
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.deepEqual(changes,['time','position']);
+    assert.deepEqual(writes,[{key:'reader:layout',annotationOrder:'position'}]);
+  }finally{ui.dispose();window.close();}
+});
+
 test('rectangle and free-stroke controls use native tools and share explicit color/width', {skip:!JSDOM}, async()=>{
   const dom=new JSDOM(html,{runScripts:'outside-only',url:'http://synthetic.invalid/'}),{window}=dom,doc=window.document,calls=[];
   for(const id of ['metadata-enrich','catalog-archive']){const b=doc.createElement('button');b.id=id;doc.body.append(b);}
