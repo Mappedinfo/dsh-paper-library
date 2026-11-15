@@ -13,7 +13,7 @@ const PDF_LIMIT = 250 * 1024 * 1024
 const USER_AGENT = 'Mappedinfo-Paper-Library/0.1 (public scholarly PDF retrieval)'
 const ARXIV_ID = /^(?:\d{2}(?:0[1-9]|1[0-2])\.\d{4,5}|[a-z]+(?:-[a-z]+)*(?:\.[A-Z]{2})?\/\d{2}(?:0[1-9]|1[0-2])\d{3})(?:v[1-9]\d*)?$/
 const DOI = /^10\.\d{4,9}\/[^\s?#]+$/i
-const PUBLIC_METADATA_HOSTS = new Set(['api.crossref.org', 'api.datacite.org', 'export.arxiv.org'])
+const PUBLIC_METADATA_HOSTS = new Set(['api.crossref.org', 'api.datacite.org', 'export.arxiv.org', 'api2.openreview.net'])
 
 export function isDirectPDFURL(value) {
   if (typeof value !== 'string') return false
@@ -285,6 +285,13 @@ export async function lookupCitationCount(value, options = {}) {
   return { doi, status: unavailable ? 'unavailable' : 'not_found', fetched_at: ctx.provenance.fetched_at }
 }
 
+const conferenceEdition = /\b([A-Z][A-Z0-9-]{1,20})\s+((?:19|20)\d{2})\b/
+function conferenceLabel(value) {
+  const name = clean(value)
+  const short = conferenceEdition.exec(name)
+  return short ? `${short[1]} ${short[2]}` : name
+}
+
 function crossrefCSL(item, doi, ctx) {
   if (item.DOI && String(item.DOI).toLowerCase() !== doi.toLowerCase()) throw new Error('Crossref returned metadata for a different DOI')
   const type = { 'journal-article': 'article-journal', 'proceedings-article': 'paper-conference', 'book-chapter': 'chapter', book: 'book', 'edited-book': 'book', report: 'report', dissertation: 'thesis', dataset: 'dataset' }[item.type] ?? 'article'
@@ -297,6 +304,27 @@ function crossrefCSL(item, doi, ctx) {
     return author
   }).filter(person => person.family || person.literal)
   for (const [key, value] of Object.entries({ 'container-title': first(item['container-title']), volume: item.volume, issue: item.issue, page: item.page, number: item['article-number'], publisher: item.publisher, abstract: item.abstract })) if (value) csl[key] = clean(value)
+  const containers = Array.isArray(item['container-title']) ? item['container-title'].slice(0, 5).map(clean) : []
+  const series = containers[0]
+  // Springer deposits proceedings articles as book chapters and often lists
+  // the series before the actual volume. A bare series name proves no venue.
+  const proceedings = ['Lecture Notes in Computer Science', 'Lecture Notes in Artificial Intelligence', 'Communications in Computer and Information Science'].includes(series)
+    ? containers.slice(1).find(name => /\b(?:conference|symposium|workshop|congress)\b/i.test(name) || conferenceEdition.test(name))
+    : undefined
+  const event = clean(item.event?.name)
+  if (type === 'paper-conference' || type === 'chapter' && (event || proceedings)) {
+    csl.type = 'paper-conference'
+    if (event || proceedings) csl['event-title'] = conferenceLabel(event || proceedings)
+    if (proceedings) {
+      csl['container-title'] = proceedings
+      csl['collection-title'] = series
+    }
+    const eventYear = partialDate(item.event?.start)?.slice(0, 4)
+    if (eventYear) csl.event_year = Number(eventYear)
+  }
+  const relations = item.relation || {}
+  csl.publication_links = ['is-preprint-of', 'has-preprint', 'is-version-of', 'has-version'].flatMap(key =>
+    (Array.isArray(relations[key]) ? relations[key].slice(0, 4) : []).filter(link => link?.['id-type'] === 'doi').map(link => link.id)).slice(0, 4)
   const dates = sourceDates([['published', item.published], ['online', item['published-online']], ['print', item['published-print']], ['accepted', item.accepted]])
   if (Object.keys(dates).length) csl.publication_dates = dates
   const issued = [item.published, item['published-print'], item['published-online'], item.issued].map(partialDate).find(Boolean)
@@ -355,9 +383,9 @@ function dataciteCSL(record) {
   return metadata
 }
 
-function exactTitleRecords(rows, expected, titleOf, doiOf) {
+function exactTitleRecords(rows, expected, titleOf, doiOf, limit = 5) {
   const matches = new Map()
-  if (Array.isArray(rows)) for (const row of rows.slice(0, 5)) {
+  if (Array.isArray(rows)) for (const row of rows.slice(0, limit)) {
     if (identityText(titleOf(row)) !== expected) continue
     try { matches.set(normalizeDOI(doiOf(row)).toLowerCase(), row) } catch { /* Invalid identifiers are not candidates. */ }
   }
@@ -522,6 +550,7 @@ function landingMetadata(html, url, ctx) {
   const get = key => first(meta.get(key))
   const conference = get('citation_conference_title'), journal = get('citation_journal_title');
   const metadata = { type: conference ? 'paper-conference' : journal ? 'article-journal' : 'article', URL: url }
+  if (conference) metadata['event-title'] = conferenceLabel(conference)
   const title = get('citation_title') ?? get('dc.title') ?? get('og:title')
   if (title) metadata.title = clean(title)
   const abstract=get('citation_abstract')??get('dc.description.abstract')
@@ -567,6 +596,10 @@ function mergeMetadata(primary, supplement, ctx) {
     return primary
   }
   const metadata = { ...supplement, ...primary }
+  if (bothDOI && primary.type === 'chapter' && supplement.type === 'paper-conference' && supplement['container-title']) {
+    metadata.type = supplement.type
+    metadata['container-title'] = supplement['container-title']
+  }
   const dates = { ...supplement.publication_dates, ...primary.publication_dates }
   if (Object.keys(dates).length) metadata.publication_dates = dates
   if (primary.author?.length && supplement.author?.length) {
@@ -605,9 +638,16 @@ async function arxivMetadata(id, ctx) {
   if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error('Unexpected XML document entities')
   const entry = xml.match(/<entry\b[^>]*>([\s\S]*?)<\/entry>/i)?.[1]
   if (!entry) throw new Error('arXiv API returned no entry')
+  const record = arxivEntry(entry, ctx)
+  const returned = record?.archive_location
+  if (!returned || returned.replace(/v\d+$/, '') !== id.replace(/v\d+$/, '') || /v\d+$/.test(id) && returned !== id) throw new Error('arXiv API returned a different article or version')
+  return record
+}
+
+function arxivEntry(entry, ctx) {
   const field = tag => clean(entry.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'))?.[1])
   const returnedID = arxivID(field('id'))
-  if (!returnedID || returnedID.replace(/v\d+$/, '') !== id.replace(/v\d+$/, '') || /v\d+$/.test(id) && returnedID !== id) throw new Error('arXiv API returned a different article or version')
+  if (!returnedID) return undefined
   const metadata = { id: `arxiv:${returnedID}`, type: 'article', title: field('title'), URL: `https://arxiv.org/abs/${returnedID}`, archive: 'arXiv', archive_location: returnedID }
   metadata.author = [...entry.matchAll(/<author\b[^>]*>([\s\S]*?)<\/author>/gi)].slice(0, 100).map(match => {
     const author = { literal: clean(match[1].match(/<name\b[^>]*>([\s\S]*?)<\/name>/i)?.[1]) }
@@ -624,6 +664,73 @@ async function arxivMetadata(id, ctx) {
   if (field('summary')) metadata.abstract = field('summary')
   if (field('arxiv:doi')) { try { metadata.DOI = normalizeDOI(field('arxiv:doi')) } catch {} }
   return metadata
+}
+
+/** Find version candidates for a title already verified against a public identifier. */
+export async function publicationCandidates(anchor, { arxiv, matches, ...options }) {
+  const ctx = context({ ...options, timeoutMs: Math.min(options.timeoutMs ?? 9500, 9500) }, anchor.DOI || arxiv)
+  const request = async (url, parse) => {
+    try {
+      const response = await requestPublic(url, ctx, 'metadata', undefined, { allowNotFound: true })
+      return response ? parse(await readText(response)) : []
+    } catch (error) {
+      warn(ctx, error)
+      return []
+    }
+  }
+  const phrase = encodeURIComponent(anchor.title)
+  const [registry, preprints, reviews] = await Promise.all([
+    request(`https://api.crossref.org/works?query.title=${phrase}&rows=8`, text => {
+      const expected = identityText(anchor.title)
+      return exactTitleRecords(JSON.parse(text).message?.items, expected, row => first(row?.title), row => row?.DOI, 8)
+        .map(row => crossrefCSL(row, normalizeDOI(row.DOI), ctx)).filter(matches)
+    }),
+    arxiv && arxivID(anchor.archive_location)
+      ? [anchor]
+      : arxiv
+        ? arxivMetadata(arxiv, ctx).then(record => matches(record) ? [record] : []).catch(error => (warn(ctx, error), []))
+        : request(`https://export.arxiv.org/api/query?search_query=${encodeURIComponent(`ti:"${anchor.title.replace(/"/g, ' ')}"`)}&max_results=6`, text => {
+          if (/<!DOCTYPE|<!ENTITY/i.test(text)) throw new Error('Unexpected XML document entities')
+          return [...text.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)].slice(0, 6)
+            .map(entry => arxivEntry(entry[1], ctx)).filter(record => record && matches(record))
+        }),
+    request(`https://api2.openreview.net/notes/search?term=${phrase}&content=title&source=forum&limit=6`, text => {
+      const notes = JSON.parse(text).notes
+      return Array.isArray(notes) ? notes.slice(0, 6).flatMap(note => {
+        const { id, pdate, domain, content } = note || {}
+        const venueId = content?.venueid?.value
+        const venue = clean(content?.venue?.value)
+        const kind = /\/(?:Conference|Workshop)(?:\/[^/]+)?$/i.test(venueId) ? 'conference'
+          : (venueId === 'TMLR' || /\/Journal$/i.test(venueId)) ? 'journal' : null
+        if (!kind || domain !== venueId || typeof id !== 'string' || id !== note.forum || !/^[A-Za-z0-9_-]{1,80}$/.test(id) ||
+            !Number.isSafeInteger(pdate) || pdate <= 0 || pdate > Date.now() || !venue) return []
+        const authors = content.authors?.value
+        const item = { title: content.title?.value, author: Array.isArray(authors) ? authors.map(name => ({ literal: typeof name === 'string' ? name : name?.fullname })) : [] }
+        if (!matches(item)) return []
+        const date = new Date(pdate).toISOString().slice(0, 10)
+        const label = kind === 'conference' ? conferenceLabel(venue) : venue
+        const year = Number(venueId.match(/(?:^|\/)((?:19|20)\d{2})(?:\/|$)/)?.[1] || date.slice(0, 4))
+        return [{ kind, status: 'accepted', venue: label, year, date, source: 'OpenReview', url: `https://openreview.net/forum?id=${id}` }]
+      }) : []
+    }),
+  ])
+  // Registered preprint/edition links can fill gaps in a title search.
+  const linked = new Set()
+  for (const record of [anchor, ...registry, ...preprints]) {
+    for (const value of [...(record.publication_links || []), ...(record.archive === 'arXiv' ? [record.DOI] : [])]) {
+      try { linked.add(normalizeDOI(value).toLowerCase()) } catch { /* Missing or invalid DOI. */ }
+    }
+  }
+  const known = new Set([anchor, ...registry].map(record => record.DOI?.toLowerCase()))
+  const related = await Promise.all([...linked].filter(doi => !known.has(doi) && !/^10\.48550\/arxiv\./i.test(doi)).slice(0, 3)
+    .map(doi => request(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, text => {
+      const row = JSON.parse(text).message
+      if (row?.DOI?.toLowerCase() !== doi) return []
+      const item = crossrefCSL(row, doi, ctx)
+      return matches(item) ? [item] : []
+    })))
+  options.signal?.throwIfAborted()
+  return { registry: [...registry, ...related.flat()], preprints, reviews, warnings: [...new Set(ctx.warnings)] }
 }
 
 /** Bounded metadata refresh: no file writes, PDF candidates, model or library access.

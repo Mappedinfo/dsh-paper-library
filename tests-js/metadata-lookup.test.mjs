@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { core, dispatch, projectRoot } from '../src/bridge.mjs';
+import { createFetchHandler } from '../src/http.mjs';
 
 const title = 'Reading metadata evidence';
 const resolver = async () => [{address:'93.184.215.14',family:4}];
@@ -331,6 +332,105 @@ test('a record without DOI requires normalized exact title before proposing miss
   assert.deepEqual(result.item.publication_dates,{received:'2025-01'});
   assert.equal((await core({action:'get',id:f.item.id},{library:f.library})).author,undefined);
   await assert.rejects(dispatch({action:'metadata_lookup',id:f.item.id},{library:f.library,fetchOptions:{resolver,transport:async()=>response(meta('citation_title','A different paper'))}}),/题名.*不能准确匹配/);
+});
+
+const preprintID = '2601.01234';
+const conferenceDOI = '10.1234/synthetic-conference';
+const journalDOI = '10.1234/synthetic-journal';
+const publicationAuthor = [{ given: 'Alice', family: 'Reader' }];
+const conferenceVolume = {
+  DOI: conferenceDOI, type: 'book-chapter', title: [title], author: publicationAuthor,
+  'container-title': ['Lecture Notes in Computer Science', 'Synthetic Vision – SVC 2026'],
+  published: { 'date-parts': [[2026]] },
+};
+function versionFixture() {
+  return { resolver, transport: async ({ url }) => {
+    const json = value => response(JSON.stringify(value));
+    if (url.hostname === 'api.crossref.org') {
+      if (!url.searchParams.has('query.title')) return json({ message: conferenceVolume });
+      assert.equal(url.searchParams.get('query.title'), title);
+      return json({ message: { items: [
+        conferenceVolume,
+        { DOI: journalDOI, type: 'journal-article', title: [title], author: publicationAuthor,
+          'container-title': ['Synthetic Journal'], accepted: { 'date-parts': [[2026, 4, 10]] } },
+        { ...conferenceVolume, DOI: '10.1234/wrong-author', author: [{ family: 'Unrelated' }] },
+      ] } });
+    }
+    if (url.hostname === 'export.arxiv.org') return response(`<feed><entry><id>http://arxiv.org/abs/${preprintID}v2</id>
+      <title>${title}</title><published>2026-01-01T00:00:00Z</published><author><name>Alice Reader</name></author><arxiv:doi>${conferenceDOI}</arxiv:doi></entry></feed>`);
+    if (url.hostname === 'api2.openreview.net') {
+      const note = (id, venueId) => ({
+        id, forum: id, domain: 'SVC.net/2025/Conference', pdate: Date.parse('2025-06-30'),
+        content: { venueid: { value: venueId }, venue: { value: 'SVC 2025 Poster' },
+          title: { value: title }, authors: { value: ['Alice Reader'] } },
+      });
+      return json({ notes: [note('official', 'SVC.net/2025/Conference'), note('in-review', 'SVC.net/2025/Conference/Submission')] });
+    }
+    return response('', 404);
+  } };
+}
+
+test('version enrichment separates the primary arXiv record, verified proceedings, and a journal acceptance', async t => {
+  const f = await fixture(t, { archive: 'arXiv', archive_location: preprintID, author: publicationAuthor, tags: ['personal'] });
+  const options = { library: f.library, publicationLookup: true, fetchOptions: versionFixture() };
+  const draft = await dispatch({ action: 'metadata_lookup', id: f.item.id }, options);
+  assert.equal(draft.item.DOI, undefined);
+  assert.equal(draft.item.archive_location, preprintID);
+  assert.deepEqual(draft.item.publication_versions.map(row => [row.kind, row.status, row.venue]), [
+    ['preprint', 'posted', 'arXiv'],
+    ['conference', 'published', 'SVC 2026'],
+    ['journal', 'accepted', 'Synthetic Journal'],
+    ['conference', 'accepted', 'SVC 2025'],
+  ]);
+  assert.deepEqual(draft.item.tags, ['personal', '#预印本/arXiv', '#会议/SVC 2026', '#期刊/Synthetic Journal 2026', '#会议/SVC 2025']);
+  assert.equal(draft.item.publication_versions[1].series, 'Lecture Notes in Computer Science');
+  const beforeSave = await core({ action: 'get', id: f.item.id }, options);
+  assert.equal(beforeSave.publication_versions, undefined);
+  const saved = await dispatch({ action: 'update', id: f.item.id, expected_modified: draft.item.modified, metadata: draft.changes }, options);
+  assert.deepEqual(saved.publication_versions, draft.item.publication_versions);
+  const reopened = await dispatch({ action: 'metadata_lookup', id: f.item.id }, options);
+  assert.equal(reopened.changes.publication_versions, undefined);
+  assert.equal(reopened.changes.tags, undefined);
+});
+
+test('known DOI corrects a proceedings series on the same record and finds the associated arXiv version', async t => {
+  const f = await fixture(t, { DOI: conferenceDOI, type: 'chapter', 'container-title': 'Lecture Notes in Computer Science', author: publicationAuthor });
+  const handler = createFetchHandler({ library: f.library, localStateHome: join(f.directory, 'home'), fetchOptions: versionFixture() });
+  const response = await handler(new Request('http://127.0.0.1/api', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'metadata_lookup', id: f.item.id }),
+  }));
+  assert.equal(response.status, 200);
+  const { result } = await response.json();
+  assert.equal(result.item.type, 'paper-conference');
+  assert.equal(result.item['event-title'], 'SVC 2026');
+  assert.equal(result.item['container-title'], 'Synthetic Vision – SVC 2026');
+  assert.equal(result.item.DOI, conferenceDOI);
+  assert.equal(result.item.publication_versions[0].arxiv, `${preprintID}v2`);
+});
+
+test('manually linking an arXiv source also saves verified version remarks and tags', async t => {
+  const f = await fixture(t, { author: publicationAuthor });
+  const options = { library: f.library, publicationLookup: true, fetchOptions: versionFixture() };
+  const result = await dispatch({ action: 'catalog_doi_lookup', id: f.item.id, identifier: preprintID }, options);
+  assert.equal(result.status, 'saved');
+  const saved = await core({ action: 'get', id: f.item.id }, options);
+  assert.ok(saved.tags.includes('#会议/SVC 2026'));
+  assert.ok(saved.tags.includes('#期刊/Synthetic Journal 2026'));
+  assert.equal(saved.publication_versions[0].source, 'arXiv');
+  assert.equal(saved.DOI, undefined);
+});
+
+test('an arXiv URL import saves publication remarks without using a later DOI as the preprint identifier', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'publication-import-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const options = { library: join(directory, 'library'), publicationLookup: true, fetchOptions: versionFixture() };
+  const result = await dispatch({ action: 'import', url: `https://arxiv.org/abs/${preprintID}` }, options);
+  assert.equal(result.imported, 1);
+  const [saved] = result.items;
+  assert.equal(saved.DOI, undefined);
+  assert.equal(saved.archive, 'arXiv');
+  assert.ok(saved.tags.includes('#会议/SVC 2026'));
+  assert.ok(saved.publication_versions.some(row => row.doi === conferenceDOI));
 });
 
 test('lookup refuses missing identifiers, unavailable metadata and mismatched DOI without catalog mutation',async t=>{

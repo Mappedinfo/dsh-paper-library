@@ -64,7 +64,7 @@ function environment({ respond, active = null, storage = new Map(), library = 's
   const window = new Element('window');window.localStorage={getItem(){throw new Error('Use server state');},setItem(){throw new Error('Browser writes are forbidden');}};
   const state = { active, library, items: active ? [active] : [], sort: 'modified', order: 'desc', archived: false, offset: 0, limit: 40, tab: 'reader' };
   vm.runInNewContext(localStateSource,{window,TextEncoder});
-  vm.runInNewContext(source, { window, document, structuredClone, queueMicrotask }, { filename: 'web/workbench.js' });
+  vm.runInNewContext(source, { window, document, structuredClone, queueMicrotask, URL }, { filename: 'web/workbench.js' });
   const workbench = window.PaperWorkbench.create({ state,
     persistence:customPersistence||(persistent?{get:async key=>storage.has(`${library}:${key}`)?plain(storage.get(`${library}:${key}`)):null,put:async(key,value)=>{storage.set(`${library}:${key}`,plain(value));return value;}}:undefined),
     ...panelHost,
@@ -80,6 +80,27 @@ const original = () => ({ id: 'paper-a', title: 'Synthetic title', pdf: true, ty
   author: [{ family: 'Example', given: 'Alice', ORCID: 'synthetic-orcid', affiliation: [{ name: 'Synthetic University', ror: 'synthetic-ror', source: 'Synthetic title page' }] }],
   issued: { 'date-parts': [[2026, 9, 1]] }, publication_dates: { published: '2026-09-01', received: '2025-10', accepted: '2026-08-02' },
   journal_rankings: [{ system: 'JCR', year: 2025, category: 'Synthetic category', quartile: 'Q2', source: 'Synthetic fixture', verified_at: '2026-09-14' }],
+});
+
+test('catalog versions show the conference, source links, and previewed evidence survives saving', async () => {
+  const paper = { ...original(), modified: 'saved-revision', type: 'paper-conference', 'event-title': 'SVC 2026',
+    'container-title': 'Synthetic Vision – SVC 2026', 'collection-title': 'Lecture Notes in Computer Science',
+    tags: ['#会议/SVC 2026'], publication_versions: [
+      { kind: 'preprint', status: 'posted', venue: 'arXiv', arxiv: '2601.01234', source: 'arXiv', url: 'https://arxiv.org/abs/2601.01234' },
+      { kind: 'conference', status: 'published', venue: 'SVC 2026', source: 'Crossref', url: 'https://doi.org/10.1234/synthetic' },
+    ] };
+  const f = environment({ active: paper });
+  f.workbench.setTable(true);
+  const cell = f.element('catalog-table').querySelector('tbody').children[0].children[3];
+  assert.equal(cell.children[0].textContent, 'SVC 2026');
+  assert.equal(cell.querySelector('summary').textContent, '版本 · 2');
+  assert.deepEqual(cell.querySelectorAll('a').map(link => link.href), paper.publication_versions.map(version => version.url));
+  await f.workbench.edit(paper, { lookup: true });
+  await f.form.dispatch('submit');
+  const save = f.requests.find(request => request.action === 'update');
+  assert.deepEqual(save.metadata.publication_versions, paper.publication_versions);
+  assert.equal(save.metadata['event-title'], 'SVC 2026');
+  assert.equal(save.expected_modified, paper.modified);
 });
 
 test('the split-pane action survives removal of the old per-paper action container', () => {

@@ -5,7 +5,8 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { arxivID, isDirectPDFURL, normalizeDOI, resolveAndFetch, resolveDOIMetadata, resolveMetadata, resolveTitleMetadata } from './paper-fetch.mjs';
+import { isDeepStrictEqual } from 'node:util';
+import { arxivID, isDirectPDFURL, normalizeDOI, publicationCandidates, resolveAndFetch, resolveDOIMetadata, resolveMetadata, resolveTitleMetadata } from './paper-fetch.mjs';
 import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
 import { createTranslationServerClient } from './translation-server.mjs';
 import { resourcePolicyFor } from './resource-policy.mjs';
@@ -286,13 +287,22 @@ async function importFile(request, options) {
     const directory = await mkdtemp(join(tmpdir(),'paper-library-fetch-'));
     try {
       const fetched=await resolveAndFetch(target,{...options.fetchOptions,directory,signal:options.signal});
-      if(fetched.path) return await importPDF(fetched.path,options,core,fetched);
+      const arxiv = options.publicationLookup && arxivReference({ DOI: target, URL: target });
+      const publicRecord = fetched.metadata;
+      if (arxiv && publicRecord?.DOI && !/^10\.48550\/arxiv\./i.test(publicRecord.DOI)) {
+        // arxiv:doi can point to a later publication, not to the imported PDF.
+        fetched.metadata = { ...publicRecord, DOI: undefined };
+      }
+      if(fetched.path) {
+        const result = await importPDF(fetched.path,options,core,fetched);
+        return await enrichImportedPreprint(result, publicRecord, arxiv, options);
+      }
       if(fetched.metadata?.title) {
         const metadata={...bibliographicMetadata(fetched.metadata),acquisition:fetched.provenance};
         const result=await core({action:'import',items:[metadata]},options);
         result.acquisition={...fetched,path:undefined};
         result.warnings=[...(result.warnings || []),...(fetched.warnings || []),'已保存文献资料；尚未获得可读 PDF，可拖入文件继续关联。'];
-        return result;
+        return await enrichImportedPreprint(result, publicRecord, arxiv, options);
       }
       throw new Error(fetched.warnings?.join('；') || '未找到可公开获取的 PDF。请拖入已有 PDF，或使用论文的直接下载链接。');
     } finally {await rm(directory,{recursive:true,force:true});}
@@ -375,10 +385,12 @@ async function fillDoi(request, options) {
       metadata.arxiv_sources=[...sources,source];
       if(Buffer.byteLength(JSON.stringify(metadata.arxiv_sources),'utf8')>64*1024)throw Error('arXiv 来源记录超过 64 KiB，未覆盖旧来源。');
     }
+    const publication = options.publicationLookup ? await publicationDraft(current, registered, { ...fetchOptions, arxiv: requested }) : {};
+    Object.assign(metadata, publication.patch);
     options.signal?.throwIfAborted();
     if(Object.keys(metadata).length)await core({action:'update',id,expected_modified:current.modified,metadata},options);
     const preserved=arxivID(current.archive_location)||arxivID(current.URL);
-    return {status:'saved',arxiv:requested,resolved_arxiv:resolved,source,metadata,
+    return {status:'saved',arxiv:requested,resolved_arxiv:resolved,source,metadata,...(publication.warning ? { publication_warning: publication.warning } : {}),
       ...(preserved&&preserved!==requested?{preserved_arxiv:preserved}:{})};
   }
   if(request.doi!==undefined){
@@ -453,6 +465,109 @@ function sameAuthorList(local, registered) {
   return true;
 }
 
+function arxivReference(item) {
+  const fromDOI = value => {
+    const id = /^10\.48550\/arxiv\.(.+)$/i.exec(canonicalDOI(value))?.[1];
+    return arxivID(id?.replace(/\.([a-z]{2})\//, (_, category) => `.${category.toUpperCase()}/`));
+  };
+  return (/^arxiv$/i.test(item.archive || '') && arxivID(item.archive_location)) || arxivID(item.URL)
+    || fromDOI(item.DOI) || (Array.isArray(item.publication_links) && item.publication_links.map(fromDOI).find(Boolean));
+}
+
+function versionDate(issued) {
+  const parts = issued?.['date-parts']?.[0];
+  return Array.isArray(parts) && parts.length && Number.isInteger(parts[0])
+    ? parts.map((value, index) => String(value).padStart(index ? 2 : 4, '0')).join('-') : '';
+}
+
+function registeredVersion(item, source) {
+  const kind = { 'paper-conference': 'conference', 'article-journal': 'journal' }[item.type];
+  const venue = (item['event-title'] || item['container-title'] || '').slice(0, 350);
+  const doi = canonicalDOI(item.DOI);
+  if (!kind || !venue || !doi) return null;
+  const dates = item.publication_dates || {};
+  const published = dates.published || dates.online || dates.print;
+  const status = !published && dates.accepted ? 'accepted' : 'published';
+  const date = published || dates.accepted || versionDate(item.issued);
+  const year = item.event_year || Number(/\b(?:19|20)\d{2}\b/.exec(venue)?.[0] || date.slice(0, 4)) || undefined;
+  return { kind, status, venue, ...(year ? { year } : {}), date, doi, source, url: `https://doi.org/${doi}`,
+    ...(item['collection-title'] ? { series: item['collection-title'].slice(0, 200) } : {}) };
+}
+
+function versionTag({ kind, venue, year }) {
+  if (kind === 'preprint') return '#预印本/arXiv';
+  const label = (venue || '').replace(/[#/，,\p{C}]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 175);
+  if (!label) return '';
+  const edition = year && !label.includes(String(year)) ? `${label} ${year}` : label;
+  return `#${kind === 'conference' ? '会议' : '期刊'}/${edition}`;
+}
+
+async function publicationDraft(current, anchor, options) {
+  const arxiv = options.arxiv || arxivReference(anchor) || arxivReference(current);
+  const title = joinHan(normalizedIdentity(anchor.title));
+  const matches = item => title === joinHan(normalizedIdentity(item?.title)) &&
+    Array.isArray(item?.author) && sameAuthorList(anchor.author, item.author);
+  if ((!arxiv && !canonicalDOI(anchor.DOI)) || title.length < 8 || !Array.isArray(anchor.author) || !anchor.author.length ||
+      title !== joinHan(normalizedIdentity(current.title)) || current.author?.length && !matches(current)) return {};
+  if (!arxiv && !registeredVersion(anchor, options.source)) return {};
+  const { registry, preprints, reviews, warnings } = await publicationCandidates(anchor, { ...options, arxiv, matches });
+  const incoming = [
+    ...preprints.flatMap(record => {
+      const arxiv = arxivID(record.archive_location);
+      if (!arxiv) return [];
+      const date = versionDate(record.issued);
+      return [{ kind: 'preprint', status: 'posted', venue: 'arXiv', arxiv, ...(date ? { year: Number(date.slice(0, 4)) } : {}),
+        date, source: 'arXiv', url: `https://arxiv.org/abs/${arxiv}` }];
+    }),
+    ...[anchor, ...registry].map(record => registeredVersion(record, record === anchor ? options.source || 'Crossref' : 'Crossref')).filter(Boolean),
+    ...reviews,
+  ];
+  const patch = {};
+  const previous = Array.isArray(current.publication_versions) ? current.publication_versions : [];
+  const key = value => value?.doi || value?.arxiv || value?.url;
+  const versions = new Map(previous.filter(key).map(version => [key(version), version]));
+  const seen = new Set();
+  for (const version of incoming) {
+    const id = key(version);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const saved = versions.get(id);
+    if (saved?.status === 'published' && version.status === 'accepted') continue;
+    if (saved || versions.size < 16) versions.set(id, version);
+  }
+  if (versions.size && !isDeepStrictEqual([...versions.values()], previous)) patch.publication_versions = [...versions.values()];
+  const tags = Array.isArray(current.tags) ? current.tags : [];
+  const newTags = [...new Set(incoming.map(versionTag).filter(Boolean))]
+    .filter(tag => !tags.some(value => (typeof value === 'string' ? value : value?.tag) === tag));
+  if (newTags.length && tags.length < 100) patch.tags = [...tags, ...newTags.slice(0, 100 - tags.length)];
+  const fromDOI = [anchor, ...registry].find(record => record.type === 'paper-conference' &&
+    canonicalDOI(record.DOI) && canonicalDOI(record.DOI) === canonicalDOI(current.DOI));
+  if (fromDOI?.['event-title'] && (!current['container-title'] || current['container-title'] === fromDOI['collection-title']
+      || current['container-title'] === fromDOI['container-title']) && ['article', 'chapter', 'paper-conference'].includes(current.type)) {
+    for (const field of ['type', 'container-title', 'collection-title', 'event-title']) {
+      if (fromDOI[field] && fromDOI[field] !== current[field]) patch[field] = fromDOI[field];
+    }
+  }
+  const warning = arxiv && !incoming.some(version => version.kind !== 'preprint') &&
+    (warnings.length ? '部分公开来源暂不可用，暂未核验到会议或期刊版本。' : '暂未查到可核验的会议或期刊版本。');
+  return { patch, warning };
+}
+
+async function enrichImportedPreprint(result, record, arxiv, options) {
+  const [item] = result.items || [];
+  if (!arxiv || !item || !record?.title) return result;
+  try {
+    const { patch, warning } = await publicationDraft(item, record, { ...options.fetchOptions, arxiv, signal: options.signal });
+    if (patch && Object.keys(patch).length) {
+      result.items[0] = await core({ action: 'update', id: item.id, expected_modified: item.modified, metadata: patch }, options);
+    }
+    if (warning) result.warnings = [...(result.warnings || []), warning];
+  } catch (error) {
+    result.warnings = [...(result.warnings || []), `论文已导入，版本资料暂未更新：${String(error.message).slice(0, 180)}`];
+  }
+  return result;
+}
+
 function metadataDraft(current, fetched) {
   const item = structuredClone(current);
   const incoming = bibliographicMetadata(fetched);
@@ -493,7 +608,8 @@ async function lookupMetadata(request, options, { forCitation = false, current }
   const doi = canonicalDOI(current.DOI);
   const url = typeof current.URL === 'string' ? current.URL.trim() : '';
   let pdfLink = isDirectPDFURL(url);
-  const publishedOnly = Boolean(current['container-title']) || ['article-journal','paper-conference','chapter','book'].includes(current.type);
+  const knownPreprint = options.publicationLookup && (lookupType(current) === 'preprint' || /^10\.48550\/arxiv\./i.test(doi));
+  const publishedOnly = !knownPreprint && (Boolean(current['container-title']) || ['article-journal','paper-conference','chapter','book'].includes(current.type));
   let arxivHint;
   if (pdfLink) try { arxivHint = arxivID(url); } catch { /* Unusable URLs are not lookup targets. */ }
   let target = doi || (!pdfLink && url) || arxivHint || (String(current.archive||'').toLowerCase()==='arxiv'&&current.archive_location);
@@ -520,7 +636,8 @@ async function lookupMetadata(request, options, { forCitation = false, current }
   if (detected && (!fitsTitle(result.metadata) || !fitsEdition(result.metadata))) result.metadata=undefined;
   // A PDF URL, an unavailable landing page, or a landing page without a DOI
   // must not prevent the registered-title search for this one work.
-  if (!doi && allowTitle && (!result.metadata?.DOI || !fitsTitle(result.metadata) || !fitsEdition(result.metadata))) {
+  const explicitPreprint = options.publicationLookup && !doi && arxivID(target) && arxivID(result.metadata?.archive_location) && fitsTitle(result.metadata);
+  if (!doi && allowTitle && (!result.metadata?.DOI && !explicitPreprint || !fitsTitle(result.metadata) || !fitsEdition(result.metadata))) {
     try {
       const byTitle = await resolveTitleMetadata(current.title,{...fetchOptions,publishedOnly});
       if (fitsTitle(byTitle.metadata) && fitsEdition(byTitle.metadata)) result=byTitle;
@@ -576,7 +693,16 @@ async function lookupMetadata(request, options, { forCitation = false, current }
       normalizedIdentity(current.title) !== normalizedIdentity(fetched.title)) {
     throw Object.assign(new Error('DOI 登记题名与当前文献不一致，请在资料详情核对。'), { code: 'CITATION_IDENTITY_CONFLICT' });
   }
-  const item = metadataDraft(current, fetched);
+  const preprintCandidate = explicitPreprint ? { ...fetched, DOI: undefined } : fetched;
+  const item = metadataDraft(current, preprintCandidate);
+  let publication = {};
+  if (!forCitation && options.publicationLookup) {
+    const hosts = result.provenance?.requests || [];
+    const source = hosts.some(entry => entry.status === 200 && entry.url?.startsWith('https://api.crossref.org/')) ? 'Crossref'
+      : hosts.some(entry => entry.status === 200 && entry.url?.startsWith('https://api.datacite.org/')) ? 'DataCite' : 'Publisher';
+    publication = await publicationDraft(current, fetched, { ...fetchOptions, source });
+    Object.assign(item, publication.patch);
+  }
   if (forCitation) {
     if (pdfLink && fetched.URL && !isDirectPDFURL(fetched.URL)) item.URL = fetched.URL;
     if (fetched.type && fetched.type !== 'article' &&
@@ -595,7 +721,10 @@ async function lookupMetadata(request, options, { forCitation = false, current }
       });
     }
   }
-  return {item,author_candidates:fetched.author||[],warnings:result.warnings || [],provenance:result.provenance};
+  const changes = Object.fromEntries(Object.entries(bibliographicMetadata(item))
+    .filter(([field, value]) => field !== 'journal_rankings' && !isDeepStrictEqual(value, current[field])));
+  Object.assign(changes, publication.patch);
+  return {item,changes,author_candidates:fetched.author||[],warnings:[...(result.warnings || []), ...(publication.warning ? [publication.warning] : [])],provenance:result.provenance};
 }
 
 /** Parse one reply per annotation. Returns null when the model answered with a

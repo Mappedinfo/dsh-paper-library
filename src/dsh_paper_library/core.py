@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import unicodedata
 import uuid
+from urllib.parse import urlsplit
 
 from . import annotations, papers, pdf_write
 from .annotations import AnnotationAccess
@@ -99,6 +100,38 @@ def publication_date(value, field):
     return value
 
 
+def publication_versions(values):
+    if not isinstance(values, list) or len(values) > 16:
+        raise ValueError("publication_versions must contain at most 16 source records")
+    statuses = {"preprint": {"posted"}, "conference": {"accepted", "published"}, "journal": {"accepted", "published"}}
+    urls = {"arxiv.org", "doi.org", "openreview.net"}
+    sources = {"arXiv", "Crossref", "DataCite", "OpenReview", "Publisher"}
+    versions = []
+    for row in values:
+        if not isinstance(row, dict) or set(row) - {"kind", "status", "venue", "date", "source", "url", "doi", "arxiv", "series", "year"}:
+            raise ValueError("Publication version has unsupported fields")
+        kind = bounded_text(row.get("kind"), "Version kind", 20, required=True)
+        status = bounded_text(row.get("status"), "Version status", 20, required=True)
+        source = bounded_text(row.get("source"), "Version source", 30, required=True)
+        url = bounded_text(row.get("url"), "Version URL", 720, required=True)
+        parsed = urlsplit(url)
+        if status not in statuses.get(kind, ()) or source not in sources or parsed.scheme != "https" or parsed.netloc not in urls or not parsed.path or re.search(r"[\s\\]", url):
+            raise ValueError("Invalid publication version evidence")
+        version = {"kind": kind, "status": status, "source": source, "url": url,
+                   "venue": bounded_text(row.get("venue"), "Version venue", 350, required=True),
+                   "date": publication_date(row["date"], "Version date") if row.get("date") else ""}
+        for key, length in (("doi", 512), ("arxiv", 128), ("series", 200)):
+            if key in row:
+                version[key] = bounded_text(row[key], f"Version {key}", length)
+        if "year" in row:
+            year = row["year"]
+            if type(year) is not int or not 1 <= year <= 9999:
+                raise ValueError("Version year must be a calendar year")
+            version["year"] = year
+        versions.append(version)
+    return versions
+
+
 def normalize_research_metadata(item):
     """Validate supplied bibliographic evidence; no missing value is inferred."""
     if isinstance(item.get("issued"), dict) and "date-parts" in item["issued"]:
@@ -152,6 +185,8 @@ def normalize_research_metadata(item):
             raise ValueError("publication_dates accepts published, online, print, received and accepted")
         item["publication_dates"] = {field: publication_date(value, f"publication_dates.{field}")
                                      for field, value in values.items() if value not in (None, "")}
+    if "publication_versions" in item:
+        item["publication_versions"] = publication_versions(item["publication_versions"])
     if "journal_rankings" in item:
         rankings = item["journal_rankings"]
         if not isinstance(rankings, list) or len(rankings) > 30:

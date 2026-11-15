@@ -152,7 +152,7 @@ export function createFetchHandler(options = {}) {
     });
   }
   async function enrichMetadata(input, signal) {
-    const result = await dispatch(input, { ...options, signal, settings });
+    const result = await dispatch(input, { ...options, signal, settings, publicationLookup: true });
     const citation_snapshot = await catalogCitations.enrich(result.item, signal);
     return citation_snapshot ? { ...result, citation_snapshot } : result;
   }
@@ -278,7 +278,7 @@ export function createFetchHandler(options = {}) {
             : input?.action === 'handwriting_recognize' ? await options.handwriting(input, { signal: request.signal })
             : chatAction
             ? await options.paperChat(input, { signal: request.signal })
-            : await dispatch(input, { ...options, settings, signal: request.signal });
+            : await dispatch(input, { ...options, settings, signal: request.signal, publicationLookup: true });
           if(options.companion&&['annotate','annotation_update'].includes(input?.action)&&input.companion_skip!==true){
             try{result.companion=await options.companion.saved(input.id,result.annotation)}
             catch(error){result.companion={status:'failed',error:`批注已保存，伴学未入队：${error.message}`}}

@@ -27,7 +27,32 @@ window.PaperWorkbench = (() => {
     let table = false, editing = null, revision = 0, readingId = null;
     let editorVisible=false, initialFields=null, initialRankings=null, restoring=false, selectingForEdit=false, loadingEditId=null, drafts=new Map();
     const draftFields=['title','authors','year','citekey','tags','type','journal','volume','issue','page','publisher','doi','url','published','online','print','received','accepted','affiliations'];
-    const metadataKeys=['id','title','author','issued','type','genre','archive','citekey','tags','container-title','volume','issue','page','publisher','DOI','URL','publication_dates','journal_rankings'];
+    const metadataKeys=['id','modified','title','author','issued','type','genre','archive','archive_location','citekey','tags','container-title','collection-title','event-title','volume','issue','page','publisher','DOI','URL','publication_dates','publication_versions','journal_rankings'];
+    const versionInfo=node('section',undefined,'metadata-versions small');
+    versionInfo.hidden=true;
+    $('metadata-error').before(versionInfo);
+    function versionList(versions) {
+      const list=node('ul');
+      const statuses={posted:'预印本',accepted:'已接收',published:'已发表'};
+      for(const version of versions){
+        const date=version?.date && !version.venue?.endsWith(` ${version.date}`) ? version.date : '';
+        const description=[statuses[version?.status],version?.venue,version?.arxiv,date,version?.source].filter(Boolean).join(' · ');
+        if(!description)continue;
+        const item=node('li');
+        let source;
+        try{
+          const url=new URL(version.url);
+          if(url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&['arxiv.org','doi.org','openreview.net'].includes(url.hostname))source=url.href;
+        }catch{}
+        if(source){
+          const link=node('a',description);
+          link.href=source;link.target='_blank';link.rel='noopener noreferrer';item.append(link);
+        }else item.textContent=description;
+        if(version.series)item.append(node('small',` · ${version.series}`));
+        list.append(item);
+      }
+      return list;
+    }
     const draftLimit=256*1024, draftCount=12;
     const draftId=item=>item?.id||'@new';
     const stateKey=id=>`metadata:${id==='@new'?'new':id}`;
@@ -35,7 +60,7 @@ window.PaperWorkbench = (() => {
     function persistDraft(key,value){if(persistence)void persistence.put(stateKey(key),value).catch(error=>toast(`资料草稿尚未保存到本地服务：${error.message}`,true));}
     function formFields(){return Object.fromEntries(draftFields.map(key=>[key,$(`edit-${key}`).value]));}
     function formRankings(){return [...$('ranking-rows').children].map(row=>({original:JSON.parse(row.dataset.original),fields:Object.fromEntries([...row.querySelectorAll('[data-rank-field]')].map(input=>[input.dataset.rankField,input.value]))}));}
-    function snapshotDraft(){return {base:Object.fromEntries(metadataKeys.filter(key=>editing[key]!==undefined).map(key=>[key,structuredClone(editing[key])])),fields:formFields(),rankings:formRankings(),initialFields,initialRankings};}
+    function snapshotDraft(){return {base:Object.fromEntries(metadataKeys.filter(key=>editing[key]!==undefined).map(key=>[key,structuredClone(editing[key])])),fields:formFields(),rankings:formRankings(),initialFields,initialRankings,...(editing._publicationDraft?{publicationDraft:true}:{})};}
     function rememberDraft() {
       if(!editing||restoring)return true;
       const key=draftId(editing),draft=snapshotDraft();
@@ -296,13 +321,13 @@ window.PaperWorkbench = (() => {
               if(key==='arxiv_sources'&&Array.isArray(value)){
                 if(entry[key]===undefined)entry[key]=structuredClone(value);
                 else if(Array.isArray(entry[key]))for(const source of value)if(!entry[key].some(saved=>saved?.requested_id===source.requested_id&&saved?.resolved_id===source.resolved_id))entry[key].push(structuredClone(source));
-              }else if(entry[key]===undefined||entry[key]===null||entry[key]===''||Array.isArray(entry[key])&&!entry[key].length)entry[key]=structuredClone(value);
+              }else if(['tags','publication_versions'].includes(key)||entry[key]===undefined||entry[key]===null||entry[key]===''||Array.isArray(entry[key])&&!entry[key].length)entry[key]=structuredClone(value);
             }
           }
         }else for(const entry of [state.active,...state.items])if(entry?.id===item.id&&!entry.DOI)entry.DOI=result.DOI;
         doiDialog.close();
         const versionNote=result.arxiv&&!/v\d+$/.test(result.arxiv)?`（未指定版本；本次解析 ${result.resolved_arxiv||result.arxiv}）`:'';
-        toast(result.arxiv?`已保存 arXiv 来源：${result.arxiv}${versionNote}${result.preserved_arxiv?`；原有标识 ${result.preserved_arxiv} 保持不变`:''}`:`已核对并保存 DOI：${result.DOI}`);
+        toast(result.arxiv?`已保存 arXiv 来源：${result.arxiv}${versionNote}${result.preserved_arxiv?`；原有标识 ${result.preserved_arxiv} 保持不变`:''}${result.publication_warning?` · ${result.publication_warning}`:''}`:`已核对并保存 DOI：${result.DOI}`);
         try{await loadList();}catch(error){toast(`资料已保存，但文献列表刷新失败：${error.message}`,true);}
       }catch(error){doiStatus.textContent=error.code==='STATE_CONFLICT'?'核对期间条目资料已更新。请刷新文献列表后重新核对。':error.message;}
       finally{verifyingDoi=false;doiInput.disabled=doiSubmit.disabled=closeDoi.disabled=false;render();header();}
@@ -344,8 +369,10 @@ window.PaperWorkbench = (() => {
         if(key==='citations')catalogCitations?.mountHeader(th);
         headerRow.append(th);
       }head.append(headerRow);grid.append(head);
-      const body=node('tbody');for(const item of state.items){const selected=state.active?.id===item.id||state.catalogSlideId===item.id;const row=node('tr',undefined,selected?'selected':'');row.dataset.paperId=item.id;row.tabIndex=0;row.setAttribute('aria-selected',String(selected));const choose=()=>selectPaper(item);row.addEventListener('click',e=>{if(!e.target.closest('button,a,input,select,textarea'))choose();});row.addEventListener('keydown',e=>{if(e.target===row&&(e.key==='Enter'||e.key===' ')){e.preventDefault();choose();}});
-        const dates=item.publication_dates||{},kind=typeOf(item);const values=[item.title,(item.author||[]).map(name).join(' · '),item.issued?.['date-parts']?.[0]?.[0],item.resource_kind==='dataset'?item.publisher:item['container-title'],ranking(item),item.citekey,item.DOI,null,institutions(item).join('；'),[dates.published||dates.online||dates.print,dates.received,dates.accepted].map(v=>v||'—').join(' / '),kind==='presentation'?'演示文稿':types[kind]||kind,fileType(item)];
+      const body=node('tbody');for(const item of state.items){const selected=state.active?.id===item.id||state.catalogSlideId===item.id;const row=node('tr',undefined,selected?'selected':'');row.dataset.paperId=item.id;row.tabIndex=0;row.setAttribute('aria-selected',String(selected));const choose=()=>selectPaper(item);row.addEventListener('click',e=>{if(!e.target.closest('button,a,input,select,textarea,summary'))choose();});row.addEventListener('keydown',e=>{if(e.target===row&&(e.key==='Enter'||e.key===' ')){e.preventDefault();choose();}});
+        const dates=item.publication_dates||{},kind=typeOf(item);
+        const venue=item.resource_kind==='dataset'?item.publisher:(kind==='paper-conference'&&item['event-title'])||item['container-title']||(kind==='preprint'&&item.archive);
+        const values=[item.title,(item.author||[]).map(name).join(' · '),item.issued?.['date-parts']?.[0]?.[0],venue,ranking(item),item.citekey,item.DOI,null,institutions(item).join('；'),[dates.published||dates.online||dates.print,dates.received,dates.accepted].map(v=>v||'—').join(' / '),kind==='presentation'?'演示文稿':types[kind]||kind,fileType(item)];
         values.forEach((value,i)=>{const td=node('td'),text=String(value||'—');if(i===0){
           const b=button(value||'未命名条目',null,event=>{if(!openDoubleClickedTitle(item,event))selectPaper(item);},'table-title');
           b.setAttribute('aria-pressed',String(selected));b.title=b.textContent;td.append(b);
@@ -361,7 +388,14 @@ window.PaperWorkbench = (() => {
           }
           const enter=button('输入 DOI 或预印本链接',null,()=>enterDoi(item));enter.setAttribute('aria-haspopup','dialog');controls.append(enter);td.append(controls);
         }else if(i===7&&catalogCitations&&isPaper(item)){td.append(catalogCitations.cell(item));
-        }else{const textNode=node('span',text,'table-cell-text');textNode.title=text;td.append(textNode);}row.append(td);});
+        }else{
+          const textNode=node('span',text,'table-cell-text');textNode.title=text;td.append(textNode);
+          if(i===3&&Array.isArray(item.publication_versions)&&item.publication_versions.length){
+            const details=node('details',undefined,'catalog-publications');
+            details.append(node('summary',`版本 · ${item.publication_versions.length}`),versionList(item.publication_versions));
+            td.append(details);
+          }
+        }row.append(td);});
         body.append(row);
         const actions=isPaper(item)?organization?.()?.actions(item):null;
         if(actions?.children.length){
@@ -410,6 +444,10 @@ window.PaperWorkbench = (() => {
       if(saved&&!lookup)item=saved.base;
       restoring=true;
       editing=structuredClone(item||{});revision++;$('metadata-dialog-title').textContent=editing.id?'编辑文献资料':'新建文献条目';
+      editing._publicationDraft=Boolean((lookup||saved?.publicationDraft)&&Array.isArray(editing.publication_versions));
+      versionInfo.hidden=!Array.isArray(editing.publication_versions)||!editing.publication_versions.length;
+      versionInfo.replaceChildren();
+      if(!versionInfo.hidden)versionInfo.append(node('strong','出处与版本'),versionList(editing.publication_versions));
       oldForm.querySelectorAll('button').forEach(b=>b.disabled=false);
       $('edit-title').value=item?.title||'';$('edit-authors').value=(item?.author||[]).map(a=>a.literal||[a.family,a.given].filter(Boolean).join(', ')).join('\n');
       $('edit-year').value=item?.issued?.['date-parts']?.[0]?.[0]||'';$('edit-citekey').value=item?.citekey||'';$('edit-tags').value=(item?.tags||[]).map(t=>typeof t==='string'?t:t.tag).filter(Boolean).join(', ');
@@ -457,7 +495,13 @@ window.PaperWorkbench = (() => {
         if(type.value==='preprint'){metadata.type='article';metadata.genre='Preprint';}
         else if(/^preprint$/i.test(editing.genre||''))metadata.genre='';
         if(!metadata.DOI&&!editing.DOI&&(!editId||type.value===typeOf(editing)))delete metadata.DOI;
-        const result=await api(editId?'update':'create',{...(editId?{id:editId}:{}),metadata});
+        const verifiedVersions=editing._publicationDraft;
+        if(verifiedVersions){
+          for(const key of ['publication_versions','collection-title','event-title','archive','archive_location']){
+            if(editing[key]!==undefined)metadata[key]=editing[key];
+          }
+        }
+        const result=await api(editId?'update':'create',{...(editId?{id:editId}:{}),...(verifiedVersions&&editing.modified?{expected_modified:editing.modified}:{}),metadata});
         if(JSON.stringify(drafts.get(savedDraftKey))===submittedDraft){drafts.delete(savedDraftKey);persistDraft(savedDraftKey,null);}
         if(editRevision===revision){editing=null;editorVisible=false;if(closeMetadataPanel)closeMetadataPanel();else $('metadata-dialog').close();}changed(result);await loadList();toast('文献资料已保存');
       }catch(e){if(editRevision===revision){$('metadata-error').textContent=e.message;$('metadata-error').hidden=false;}else toast(e.message,true);}finally{if(editRevision===revision)buttons.forEach(b=>b.disabled=false);}
