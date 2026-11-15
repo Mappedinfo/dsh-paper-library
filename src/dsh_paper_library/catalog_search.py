@@ -66,11 +66,19 @@ def _snippet(display, needle):
     folded = _key(display)
     start = folded.find(needle)
     if start < 0:
-        return display[:230]
+        return {"snippet": display[:230]}
     end = start + len(needle)
+
+    def excerpt(first, last):
+        left, right = max(0, first - 90), min(len(display), last + 140)
+        return {
+            "snippet": ("…" if left else "") + display[left:right] + ("…" if right < len(display) else ""),
+            "match_start": first - left + bool(left),
+            "match_end": last - left + bool(left),
+        }
+
     if len(display) == len(folded) and not INNER_DASH.search(display):
-        left, right = max(0, start - 90), min(len(display), end + 140)
-        return ("…" if left else "") + display[left:right] + ("…" if right < len(display) else "")
+        return excerpt(start, end)
     dropped = {match.start() for match in INNER_DASH.finditer(display)}
     position = 0
     for index, character in enumerate(display):
@@ -78,10 +86,9 @@ def _snippet(display, needle):
         if position <= start < following:
             first = index
         if position < end <= following:
-            left, right = max(0, first - 90), min(len(display), index + 141)
-            return ("…" if left else "") + display[left:right] + ("…" if right < len(display) else "")
+            return excerpt(first, index + 1)
         position = following
-    return display[:230]
+    return {"snippet": display[:230]}
 
 
 def _version(path, stored):
@@ -259,5 +266,5 @@ def search(library, request):
         ).fetchall()
         return {**coverage, "matches": [
             {"paper_id": row["paper_id"], "page": row["page"], "title": row["title"],
-             "snippet": _snippet(row["display"], needle)} for row in rows[:limit]
+             **_snippet(row["display"], needle)} for row in rows[:limit]
         ], "next_cursor": {"scope": scope, "offset": offset + limit} if len(rows) > limit else None}

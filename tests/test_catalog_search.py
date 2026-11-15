@@ -133,10 +133,16 @@ def test_updated_attachment_invalidates_pagination_and_replaces_fts_text(library
 def test_ligatures_dashes_and_line_breaks_match_a_physical_page(library):
     paper, _ = attach(library, "Synthetic compound", ["Unrelated", 'Spatio-\nTemporal Traffic Prediction: "A study"'])
     list(all_batches(library))
-    for query in ("Spatio-Temporal Trafﬁc Prediction", "spatio‑temporal traffic prediction", 'prediction: "a study"', 'y"'):
+    for query, match in (
+        ("Spatio-Temporal Trafﬁc Prediction", "Spatio-Temporal Traffic Prediction"),
+        ("spatio‑temporal traffic prediction", "Spatio-Temporal Traffic Prediction"),
+        ('prediction: "a study"', 'Prediction: "A study"'),
+        ('y"', 'y"'),
+    ):
         hit = search(library, query=query)["matches"][0]
         assert (hit["paper_id"], hit["page"]) == (paper, 2)
         assert "Spatio-Temporal Traffic Prediction" in hit["snippet"]
+        assert hit["snippet"][hit["match_start"]:hit["match_end"]] == match
 
 
 def test_empty_scope_and_invalid_requests_are_distinct(library):

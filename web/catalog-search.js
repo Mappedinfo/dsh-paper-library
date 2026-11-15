@@ -4,8 +4,10 @@ window.PaperCatalogSearch = {
   create({ api, project, searchMetadata, prepare, navigate, toast }) {
     const get = part => document.getElementById(`catalog-search-${part}`);
     const form = get('form'), input = document.getElementById('search'), scope = get('scope');
-    const dialog = get('dialog'), status = get('status'), error = get('error'), results = get('results');
-    const stop = get('stop'), more = get('more'), restart = get('restart'), build = get('prepare');
+    const view = get('view'), catalog = view.parentElement;
+    const status = get('status'), error = get('error'), results = get('results');
+    const stop = get('stop'), previous = get('previous'), more = get('more'), restart = get('restart'), build = get('prepare');
+    const actions = [stop, build, restart, previous, more];
     let active, controller, task, opening = false;
 
     function syncMode() {
@@ -18,17 +20,19 @@ window.PaperCatalogSearch = {
     }
 
     function update() {
-      const { query, coverage, cursor, first, shown, failed } = active;
+      const { query, coverage, page, cursors, first, shown, paperCount, failed } = active;
       stop.hidden = task !== 'index';
-      more.hidden = Boolean(task) || !cursor;
-      restart.hidden = Boolean(task) || !query;
+      more.hidden = !cursors[page + 1];
+      previous.hidden = page === 0 || failed === 'CATALOG_SEARCH_CHANGED';
+      more.disabled = previous.disabled = Boolean(task);
+      restart.hidden = Boolean(task) || !query || !failed;
       build.hidden = Boolean(task) || (coverage ? coverage.pdfs_pending === 0 : Boolean(query));
-      results.hidden = !results.childElementCount;
+      get('actions').hidden = actions.every(button => button.hidden);
       results.setAttribute('aria-busy', String(task === 'search'));
       const pending = coverage?.pdfs_pending;
       const range = first === shown ? String(shown) : `${first}–${shown}`;
       const phase = task === 'index' ? '正在准备索引' : task === 'search' ? '正在搜索索引' :
-        failed ? '操作未完成' : query ? (shown ? `命中页 ${range}${cursor ? '，还有结果' : ''}` :
+        failed ? '操作未完成' : query ? (shown ? `命中页 ${range}（本页 ${paperCount} 篇文献）` :
           pending ? '已准备的内容暂未命中' : '未找到匹配页') : pending ? '索引准备已暂停' : '索引已就绪';
       const counts = coverage ? [
         `${coverage.pdfs_completed}/${coverage.pdf_count} 篇 PDF 已处理`,
@@ -47,22 +51,23 @@ window.PaperCatalogSearch = {
       task = null;
     }
 
-    function appendHit(hit) {
-      const row = document.createElement('li'), button = document.createElement('button');
-      const title = document.createElement('strong'), snippet = document.createElement('span');
+    function returnToCatalog(focus = false) {
+      cancel();
+      active = null;
+      results.replaceChildren();
+      view.hidden = true;
+      catalog.removeAttribute('data-catalog-text-results');
+      if (focus) input.focus();
+    }
+
+    function openHit(button, hit) {
       button.type = 'button';
-      button.className = 'button catalog-search-hit';
-      title.textContent = `${hit.title} · 第 ${hit.page} 页`;
-      snippet.textContent = hit.snippet;
-      button.append(title, snippet);
       button.addEventListener('click', async () => {
         if (opening) return;
         const search = active;
         opening = true;
         try {
-          if (!await prepare() || !dialog.open || active !== search) return;
-          cancel();
-          dialog.close();
+          if (!await prepare() || active !== search || !button.isConnected) return;
           if (!await navigate(hit)) toast('未能打开命中页，请重新搜索后再试。', true);
         } catch (failure) {
           toast(failure.message, true);
@@ -70,12 +75,52 @@ window.PaperCatalogSearch = {
           opening = false;
         }
       });
-      row.append(button);
-      results.append(row);
     }
 
-    async function run(nextTask, nextPage = false) {
-      if (controller) return;
+    function appendSnippet(node, hit) {
+      const { snippet, match_start: start, match_end: end } = hit;
+      const characters = Array.from(snippet);
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > characters.length) {
+        node.textContent = snippet;
+        return;
+      }
+      const mark = document.createElement('mark');
+      mark.textContent = characters.slice(start, end).join('');
+      node.append(characters.slice(0, start).join(''), mark, characters.slice(end).join(''));
+    }
+
+    function renderHits(hits) {
+      const papers = new Map();
+      for (const hit of hits) {
+        let pages = papers.get(hit.paper_id);
+        if (!pages) {
+          const row = document.createElement('li'), heading = document.createElement('h3'), title = document.createElement('button');
+          title.className = 'table-title catalog-search-paper';
+          title.textContent = hit.title;
+          openHit(title, hit);
+          heading.append(title);
+          pages = document.createElement('ul');
+          pages.className = 'catalog-search-pages';
+          row.append(heading, pages);
+          results.append(row);
+          papers.set(hit.paper_id, pages);
+        }
+        const row = document.createElement('li'), button = document.createElement('button');
+        const page = document.createElement('span'), snippet = document.createElement('span');
+        button.className = 'catalog-search-hit';
+        page.className = 'catalog-search-page';
+        page.textContent = `第 ${hit.page} 页`;
+        appendSnippet(snippet, hit);
+        button.append(page, snippet);
+        openHit(button, hit);
+        row.append(button);
+        pages.append(row);
+      }
+      return papers.size;
+    }
+
+    async function run(nextTask, page = 0) {
+      if (controller || !active) return;
       const current = new AbortController();
       controller = current;
       task = nextTask;
@@ -83,7 +128,7 @@ window.PaperCatalogSearch = {
       error.hidden = true;
       update();
       let refresh = false;
-      const currentRun = () => controller === current && dialog.open;
+      const currentRun = () => controller === current;
       const params = { project_id: active.projectId };
       try {
         if (nextTask === 'index') {
@@ -91,32 +136,36 @@ window.PaperCatalogSearch = {
             const data = await api('catalog_search_prepare', params, { signal: current.signal });
             if (!currentRun()) return;
             active.coverage = data;
-            active.cursor = null;
+            active.page = 0;
+            active.cursors = [null];
             update();
           } while (active.coverage.pdfs_pending);
           refresh = Boolean(active.query);
         } else {
+          const cursor = active.cursors[page];
           const data = await api('catalog_text_search', {
-            ...params, query: active.query, cursor: nextPage ? active.cursor : null,
+            ...params, query: active.query, cursor,
           }, { signal: current.signal });
           if (!currentRun()) return;
-          const offset = nextPage ? active.shown : 0;
+          const offset = cursor?.offset ?? 0;
+          active.page = page;
           active.first = offset + 1;
           active.shown = offset + data.matches.length;
           active.coverage = data;
-          active.cursor = data.next_cursor;
+          active.cursors.length = page + 1;
+          active.cursors.push(data.next_cursor);
           results.replaceChildren();
           results.scrollTop = 0;
-          data.matches.forEach(appendHit);
+          active.paperCount = renderHits(data.matches);
         }
       } catch (failure) {
         if (!currentRun()) return;
-        active.failed = true;
-        if (failure.code === 'CATALOG_SEARCH_CHANGED') active.cursor = null;
+        active.failed = failure.code || true;
+        if (failure.code === 'CATALOG_SEARCH_CHANGED') active.cursors = [null];
         error.textContent = failure.message;
         error.hidden = false;
       } finally {
-        if (controller === current) {
+        if (currentRun()) {
           cancel();
           update();
           if (refresh) void run('search');
@@ -127,8 +176,10 @@ window.PaperCatalogSearch = {
     input.addEventListener('input', () => {
       syncMode();
       if (scope.value === 'metadata') searchMetadata();
+      else if (active && !input.value.trim()) returnToCatalog();
     });
     scope.addEventListener('change', () => {
+      returnToCatalog();
       syncMode();
       if (scope.value === 'metadata') searchMetadata();
     });
@@ -139,13 +190,16 @@ window.PaperCatalogSearch = {
       if (scope.value === 'project' && !currentProject) return;
       const query = input.value.trim();
       cancel();
-      active = { query, projectId: currentProject?.id ?? null, first: 0, shown: 0 };
+      active = { query, projectId: currentProject?.id ?? null, page: 0, cursors: [null], first: 0, shown: 0 };
       results.replaceChildren();
       get('context').textContent = [currentProject?.title || '全库在库文献', query && `“${query}”`].filter(Boolean).join(' · ');
-      dialog.showModal();
+      catalog.setAttribute('data-catalog-text-results', '');
+      view.hidden = false;
       void run(query ? 'search' : 'index');
     });
-    more.addEventListener('click', () => void run('search', true));
+    get('clear').addEventListener('click', () => returnToCatalog(true));
+    previous.addEventListener('click', () => void run('search', active.page - 1));
+    more.addEventListener('click', () => void run('search', active.page + 1));
     stop.addEventListener('click', () => {
       cancel();
       if (active.query) void run('search');
@@ -153,19 +207,20 @@ window.PaperCatalogSearch = {
     });
     restart.addEventListener('click', () => void run('search'));
     build.addEventListener('click', () => void run('index'));
-    dialog.addEventListener('close', () => { if (!dialog.open) cancel(); });
     syncMode();
 
     return {
       syncProject() {
         const current = project();
         get('project').disabled = !current;
+        if (active?.projectId && active.projectId !== current?.id) returnToCatalog();
         if (!current && scope.value === 'project') {
           scope.value = 'library';
           syncMode();
         }
       },
       setMetadataQuery(query) {
+        returnToCatalog();
         input.value = query;
         scope.value = 'metadata';
         syncMode();
