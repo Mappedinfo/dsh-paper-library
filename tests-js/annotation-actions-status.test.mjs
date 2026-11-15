@@ -14,6 +14,7 @@ function fixture(){
   const copied=[],messages=[];
   Object.assign(window,{state:{active:{id:'paper-a'},annotations:[],noteOffset:0},$:(id)=>document.getElementById(id),el:(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;},readerSearchUI:null,linkedHandwritingUI:null,handwritingUI:null,companionUI:null,annotationTranslationAvailable:false,displayDate:()=>'',toast:(message)=>messages.push(message),paperChatUI:{available:()=>true,hasAnnotation:()=>false},wikiUI:{show(){}},openDialog:id=>document.getElementById(id).setAttribute('open','')});
   Object.defineProperty(window.navigator,'clipboard',{configurable:true,value:{writeText:async text=>copied.push(text)}});
+  window.annotationRangeEdit=null;
   window.eval(source.slice(source.indexOf('const annotationLoadJobs='),source.indexOf('/** 自动着色'))
     + source.slice(source.indexOf('let annotationLinkTimer ='),source.indexOf('function fileBase64('))
     + '\nwindow.annotationLoadJobsForTest=annotationLoadJobs;');
@@ -179,26 +180,32 @@ test('translation stays beside its source and expands from the excerpt heading',
  }finally{f.dom.window.close();}
 });
 
-test('range handles update the draft without writing until the user saves', {skip:!JSDOM},async()=>{
+test('the same range button starts and saves, with retry, cancel and unchanged exit', {skip:!JSDOM},async()=>{
  const f=fixture(),w=f.window,d=f.document,calls=[];
  try {
-  let moveHandle, closed=0, failSave=true;
-  w.annotationRangeEdit=null;
+  let moveHandle, closed=0, failSave=true, resolveSave;
   w.state.annotations=[{id:'root',page:1,type:'underline',text:'Original',edit_version:'v',rects:[[1,2,3,4]]}];
   w.pdfReader={startRangeEdit:async(note,onChange)=>{assert.equal(note.id,'root');moveHandle=onChange;return true;},endRangeEdit:()=>closed++};
   w.switchTab=async()=>{};w.readingShell={setTool:()=>{}};
-  w.api=async(action,args)=>{calls.push({action,args});if(failSave)throw Error('Temporary error');};w.loadAnnotations=async()=>{};w.refreshPage=async()=>{};w.clearSelection=()=>{w.state.selection=null};
+  w.api=async(action,args)=>{
+    calls.push({action,args});
+    if(failSave)throw Error('Temporary error');
+    await new Promise(resolve=>{resolveSave=resolve;});
+  };w.loadAnnotations=async()=>{};w.refreshPage=async()=>{};w.clearSelection=()=>{w.state.selection=null};
   w.eval(source.slice(source.indexOf('async function handleNoteAction('),source.indexOf('function fileBase64('))
     + source.slice(source.indexOf('const rangeEditBar='),source.indexOf('outlineUI=window.PaperOutline')));
   w.renderAnnotations();
-  w.annotationEditor={beforeAsk:async()=>undefined};
+  w.annotationEditor={beforeAsk:async()=>undefined,beforeRender:()=>null,decorate(){}};
   d.getElementById('paper-detail').hidden = false;
-  const edit=d.querySelector('[data-note-action=reselect]'),bar=d.querySelector('.annotation-range-edit'),[save,cancel]=bar.querySelectorAll('button');
+  const edit=()=>d.querySelector('[data-note-action=reselect]'),bar=d.querySelector('.annotation-range-edit'),[save,cancel]=bar.querySelectorAll('button');
   const edgeRule = css.match(/(body:has\(\[data-notification-avoid="bottom"\][^{}]+\) \.notification-region)\s*\{\s*top: 8px;\s*bottom: auto;/);
   assert.ok(edgeRule);
   const avoidsBottom = () => Boolean(d.querySelector(edgeRule[1]));
   assert.equal(avoidsBottom(), false);
-  await w.handleNoteAction({target:edit});
+  const starting=w.handleNoteAction({target:edit()});
+  assert.equal(edit().textContent,'正在打开…');assert.equal(edit().disabled,true);
+  await starting;
+  assert.equal(edit().textContent,'结束编辑');
   assert.equal(bar.parentElement.id,'reader-content');assert.ok(save.classList.contains('primary'));
   assert.equal(bar.hidden,false);assert.equal(save.disabled,true);
   assert.equal(avoidsBottom(), true);
@@ -208,12 +215,24 @@ test('range handles update the draft without writing until the user saves', {ski
   moveHandle({id:'paper-a',page:2,text:'Other',rects:[[1,2,3,4]]});assert.equal(save.disabled,true);
   moveHandle({id:'paper-a',page:1,text:'New source',rects:[[1,2,3,4]]});
   assert.equal(save.disabled,false);assert.equal(calls.length,0);assert.match(bar.textContent,/尚未保存/);
-  save.click();await new Promise(r=>setImmediate(r));
+  assert.equal(edit().textContent,'结束并保存');
+  w.renderAnnotations();
+  assert.equal(edit().textContent,'结束并保存');
+  await w.handleNoteAction({target:edit()});
   assert.equal(save.disabled,false);assert.match(f.messages.at(-1),/Temporary error/);
+  assert.equal(edit().textContent,'结束并保存');assert.equal(edit().disabled,false);
   assert.equal(avoidsBottom(), true);
-  failSave=false;save.click();await new Promise(r=>setImmediate(r));
+  failSave=false;
+  const saving=w.handleNoteAction({target:edit()});
+  assert.equal(edit().textContent,'正在保存…');assert.equal(edit().disabled,true);
+  await w.handleNoteAction({target:edit()});assert.equal(calls.length,2);
+  resolveSave();await saving;
   assert.equal(calls[1].action,'annotation_reselect');assert.equal(calls[1].args.expected_version,'v');assert.equal(calls[1].args.text,'New source');assert.equal(w.annotationRangeEdit,null);
-  await w.handleNoteAction({target:edit});cancel.click();
+  assert.equal(edit().textContent,'编辑原文范围');
+  await w.handleNoteAction({target:edit()});
+  await w.handleNoteAction({target:edit()});
+  assert.equal(w.annotationRangeEdit,null);assert.equal(calls.length,2);
+  await w.handleNoteAction({target:edit()});cancel.click();
   assert.equal(w.annotationRangeEdit,null);assert.equal(bar.hidden,true);assert.ok(closed);assert.equal(calls.length,2);
   assert.equal(avoidsBottom(), false);
  } finally {f.dom.window.close();}

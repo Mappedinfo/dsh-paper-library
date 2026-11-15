@@ -489,6 +489,19 @@ function setAnnotationOrder(order) {
   $('annotation-list').scrollTop = 0;
   if (state.active?.pdf) renderAnnotations();
 }
+function paintRangeEditButton(button, annotationId) {
+  const edit = annotationRangeEdit;
+  const samePaper = edit && edit.id === state.active?.id;
+  const editing = samePaper && edit.annotationId === annotationId;
+  button.textContent = !editing ? '编辑原文范围' : edit.starting ? '正在打开…' :
+    edit.saving ? '正在保存…' : edit.draft ? '结束并保存' : '结束编辑';
+  button.disabled = Boolean(samePaper && (edit.saving || (editing && edit.starting)));
+}
+function syncRangeEditButtons() {
+  for (const button of $('annotation-list').querySelectorAll('[data-note-action="reselect"]')) {
+    paintRangeEditButton(button, button.closest('[data-annotation-id]').dataset.annotationId);
+  }
+}
 function renderAnnotations() {
   if(typeof annotationEditor!=='undefined'&&annotationEditor?.deferRender?.(renderAnnotations))return;
   const restoreEditorFocus = typeof annotationEditor!=='undefined'?annotationEditor?.beforeRender():null;
@@ -567,7 +580,10 @@ function renderAnnotations() {
     card.append(meta);
     const translations=(replies.get(note.id)||[]).filter(reply=>reply.source_kind==='annotation-translation');
     if (note.text) { const excerpt=el('section','annotation-excerpt'),heading=el('div','annotation-excerpt-heading');heading.append(el('span','small muted','原文'));
-      if(['highlight','underline','strikeout','note'].includes(note.type)&&note.edit_version&&!note.id.startsWith('external-')&&(note.type!=='note'||note.source==='paper-library')){const reselect=el('button','button subtle','编辑原文范围');reselect.type='button';reselect.dataset.noteAction='reselect';heading.append(reselect);}
+      if(['highlight','underline','strikeout','note'].includes(note.type)&&note.edit_version&&!note.id.startsWith('external-')&&(note.type!=='note'||note.source==='paper-library')){
+        const reselect=el('button','button subtle');reselect.type='button';reselect.dataset.noteAction='reselect';
+        paintRangeEditButton(reselect,note.id);heading.append(reselect);
+      }
       const quote=el('p','annotation-quote',note.text),expand=el('button','button subtle','展开原文');
       const expanded=state.expandedAnnotationExcerpts ||= new Set(),key=JSON.stringify([state.active.id,note.id]);
       quote.id=`annotation-excerpt-${crypto.randomUUID()}`;expand.type='button';expand.setAttribute('aria-controls',quote.id);
@@ -870,10 +886,16 @@ async function handleNoteAction(event) {
   if (action === 'copy-source') { if (typeof note.text === 'string' && note.text.trim()) await copyText(note.text, { label: '批注原文' }); return; }
   if (action === 'discuss') { await paperChatUI?.useAnnotation(note); if (state.active?.id) renderAnnotations(); return; }
   if (action === 'reselect') {
+    const id = state.active.id;
+    if (annotationRangeEdit?.id === id && annotationRangeEdit.annotationId === note.id) {
+      await finishRangeEdit();
+      return;
+    }
     if (annotationRangeEdit?.saving) return;
     closeRangeEdit();
-    const id = state.active.id, edit = { id, annotationId: note.id, page: note.page };
+    const edit = { id, annotationId: note.id, page: note.page, starting: true };
     annotationRangeEdit = edit;
+    syncRangeEditButtons();
     try {
       const saved = await annotationEditor?.beforeAsk(id, note.id);
       if (annotationRangeEdit !== edit || state.active?.id !== id) return;
@@ -886,6 +908,7 @@ async function handleNoteAction(event) {
         if (annotationRangeEdit === edit) setRangeDraft(draft);
       });
       if (annotationRangeEdit !== edit) return;
+      edit.starting = false;
       edit.manual = !handles;
       updateRangeEditBar();
       rangeEditBar.hidden = false;
@@ -1841,13 +1864,15 @@ function closeRangeEdit() {
   rangeEditBar.hidden = true;
   rangeEditSave.disabled = true;
   rangeEditCancel.disabled = false;
+  syncRangeEditButtons();
   clearSelection();
 }
 function setRangeDraft(selection) {
   const edit = annotationRangeEdit;
   if (edit.saving) return;
+  const hadDraft = Boolean(edit.draft);
   edit.draft = selection?.id === edit.id && selection.page === edit.page && selection.text.trim() ? selection : null;
-  updateRangeEditBar();
+  if (hadDraft !== Boolean(edit.draft)) updateRangeEditBar();
 }
 function updateRangeEditBar() {
   const { saving, draft, manual } = annotationRangeEdit;
@@ -1855,11 +1880,15 @@ function updateRangeEditBar() {
   rangeEditCancel.disabled = Boolean(saving);
   rangeEditLabel.textContent = saving ? '正在保存新范围…' : draft ? '范围已调整，尚未保存' :
     manual ? '无法定位旧选区，请在原页重新选字' : '拖动起点或终点以调整范围';
+  syncRangeEditButtons();
 }
 rangeEditCancel.addEventListener('click', closeRangeEdit);
-rangeEditSave.addEventListener('click', async () => {
-  const edit = annotationRangeEdit, draft = edit?.draft;
-  if (!draft || edit.saving || state.active?.id !== edit.id) return;
+rangeEditSave.addEventListener('click', finishRangeEdit);
+async function finishRangeEdit() {
+  const edit = annotationRangeEdit;
+  if (!edit || edit.starting || edit.saving || state.active?.id !== edit.id) return;
+  const { draft } = edit;
+  if (!draft) { closeRangeEdit(); return; }
   edit.saving = true;
   updateRangeEditBar();
   pdfReader?.lockRangeEdit?.(true);
@@ -1884,7 +1913,7 @@ rangeEditSave.addEventListener('click', async () => {
       catch (error) { toast(`原文范围已保存，页面显示待更新：${error.message}`, true); }
     }
   }
-});
+}
 outlineUI=window.PaperOutline?.create({api,panels:readingPanels,getPaper:()=>state.active,getPage:()=>state.page,navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');if(state.active?.id!==source.paperId)return;if(source.rects?.length)await pdfReader?.revealRegion(source);else await requestPage(source.page);}});
 readerSearchUI=window.PaperReaderSearch?.create({api,panels:readingPanels,getPaper:()=>state.active,reader:()=>pdfReader,navigate:()=>switchTab('reader'),getElements:()=>documentElementsUI,
   onAnnotationSearch:()=>{pendingPdfAnnotationLink=null;pendingAnnotationSearchId=null;state.noteOffset=0;renderAnnotations();},
