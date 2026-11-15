@@ -118,7 +118,9 @@ window.PaperLanguageLearning = {
       const head=make('header',undefined,'language-result-heading');head.append(make('strong',record.mode==='polish'?'优化后的表述 · '+(directions[record.polish_direction]||'通用'):'译文'),make('span','AI 生成 · 已保存','small muted'));root.append(head,make('p',record.result||'','language-answer'));
       if(record.explanation){const notes=make('details');notes.append(make('summary','表达说明'),make('p',record.explanation,'language-answer'));root.append(notes);}
       const source=make('details');source.append(make('summary','对应原文'),make('p',record.source_text||'','language-answer'));root.append(source);
-      const model=record.model;root.append(make('p',`${record.page?`第 ${record.page} 页 · `:''}${model?`${model.provider} / ${model.model||model.id}`:''}${record.prompt_version?` · ${record.prompt_version}`:''}`,'small muted'));
+      const model=record.model;
+      const fallback=record.fallback_from;
+      root.append(make('p',`${record.page?`第 ${record.page} 页 · `:''}${model?`${model.provider} / ${model.model||model.id}`:''}${fallback?` · 已从 ${fallback.provider} / ${fallback.model} 切换`:''}${record.prompt_version?` · ${record.prompt_version}`:''}`,'small muted'));
       if(record.vocabulary?.length){const vocab=make('div',undefined,'language-found-words');for(const word of record.vocabulary)vocab.append(make('span',typeof word==='string'?word:word.term,'chip'));root.append(vocab);}
       const actions=make('div',undefined,'language-actions');actions.append(button('language-copy','复制结果',()=>void copy(record.result||'')),button('language-discuss','带入论文对话',()=>{if(record.paper_id!==getPaper()?.id||record.paper_id!==paperId){status('请先回到这条结果对应的论文。',true);return;}const text=[record.mode==='polish'?'请根据下面的表述优化结果继续讨论。':'请根据下面的翻译结果继续讨论。',`原文：${record.source_text}`,`AI 结果：${record.result}`].join('\n\n');if(text.length>4000){status('内容超过对话草稿长度，请复制所需片段后放入论文对话。',true);return;}void Promise.resolve(prepareChat?.(text,{paperId:record.paper_id,page:record.page})).catch(error=>status(error.message,true));}),button('language-result-words','查看难词',()=>show('words')));root.append(actions);
     }

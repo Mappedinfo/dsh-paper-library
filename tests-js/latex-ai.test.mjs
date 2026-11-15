@@ -270,6 +270,24 @@ test('translation sends only the explicit unsaved draft selection and follows th
   await assert.rejects(handle({ action: 'latex_ai_translate', id: project.id, selection, target_language: 'zh-CN', model_override: { provider: 'host', model: 'unknown' } }), error => error.code === 'LATEX_AI_MODEL_REQUIRED')
 })
 
+test('LaTeX translation falls back to an available service when the selected service times out', async () => {
+  const { project, library } = await fixture(['unused'])
+  const primary = { provider: 'host', model: 'default' }, calls = []
+  const handle = createLatexAI({ store: inMemoryStore(), getDefaultModel: () => primary, dispatch, library, python,
+    models: async () => ({ models: [{ provider: 'host', id: 'default' }, { provider: 'backup', id: 'translator' }] }),
+    ai: async ({ provider }) => {
+      calls.push(provider)
+      if (provider === primary.provider) throw Object.assign(new Error('timeout'), { code: 'TIMEOUT' })
+      return '合成译文'
+    },
+  })
+  const result = await handle({ action: 'latex_ai_translate', id: project.id, selection: 'A synthetic sentence.' })
+  assert.deepEqual(calls, ['host', 'backup'])
+  assert.deepEqual(result.fallback_from, primary)
+  assert.equal(result.model.model, 'translator')
+  assert.equal(result.answer, '合成译文')
+})
+
 test('translation uses the language preference, auto-detects prose and honours an explicit target', async () => {
   const { folder, project, library } = await fixture(['unused'])
   const store = inMemoryStore(), prompts = []

@@ -36,7 +36,11 @@ export async function collectFeedback(chunks, signal) {
   }
   signal?.throwIfAborted()
   if (!terminal) throw new Error('AI feedback stream ended without a finish event')
-  if (terminal.kind !== 'stop') throw new Error(`AI feedback did not complete (${terminal.kind}): ${terminal.failure?.message ?? 'retry with a complete response'}`)
+  if (terminal.kind !== 'stop') {
+    const error = new Error(`AI feedback did not complete (${terminal.kind}): ${terminal.failure?.message ?? 'retry with a complete response'}`)
+    error.llmFailure = { kind: terminal.kind, code: terminal.failure?.code, status: terminal.failure?.status }
+    throw error
+  }
   const answer = text.join('').trim()
   if (!answer) throw new Error('AI feedback returned no text')
   if (answer.length > 100_000) throw new Error('AI feedback exceeds the supported response length')

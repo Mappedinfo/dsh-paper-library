@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createLanguageLearning, resolveTranslationTarget } from '../src/harness/language-learning.mjs'
+import { createHarnessAI } from '../src/harness/ai.mjs'
 import { createAnnotationTranslation } from '../src/harness/annotation-translation.mjs'
 import { createLocalStateStore } from '../src/local-state.mjs'
 import { resolveConfig } from '../src/harness/config.mjs'
@@ -334,6 +335,65 @@ test('automatic translation chooses configured Flash without reasoning; polish a
  await handle({action:'language_settings_update',expected_revision:settings.revision,value:{model:f.route,translate_prompt:'',polish_prompt:''}});
  const explicit=await handle({...request,request_id:'explicit-translate'});assert.deepEqual(explicit.model,f.route);assert.equal(explicit.model_source,'language-override');
 });
+
+test('a DeepSeek terminal transport failure switches translation to the configured backup and saves only its complete result', async () => {
+  const f = fixture()
+  const primary = { provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'off' }
+  const backup = { provider: 'kimi-coding', model: 'kimi-for-coding-highspeed', reasoningEffort: 'low' }
+  f.options.models = async () => ({ models: [primary, backup].map(({ provider, model: id }) => ({ provider, id })) })
+  f.options.ai = createHarnessAI({
+    resolveModelInfo: async () => ({}),
+    async *stream(input) {
+      f.calls.push(input)
+      if (input.provider === primary.provider) {
+        yield { type: 'block-end', block: { type: 'text', text: '{"result":"partial' } }
+        yield { type: 'finish', reason: { kind: 'error', failure: { code: 'TRANSPORT', message: 'DeepSeek Messages transport failed' } } }
+        return
+      }
+      yield { type: 'block-end', block: { type: 'text', text: f.answer } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    },
+  }, value => value, {})
+  const handle = createLanguageLearning(f.options)
+  const result = await handle(request)
+  assert.equal(result.result, response.result)
+  assert.deepEqual(result.model, backup)
+  assert.deepEqual(result.fallback_from, primary)
+  assert.equal(result.model_source, 'translation-fallback')
+  assert.deepEqual(f.calls.map(call => call.provider), [primary.provider, backup.provider])
+  assert.deepEqual(f.calls[0].messages, f.calls[1].messages)
+  assert.equal((await handle(request)).replayed, true)
+  assert.equal(f.calls.length, 2)
+  assert.deepEqual((await handle({ action: 'vocabulary_list' })).items[0].encounters[0].model, backup)
+  assert.deepEqual((await handle.translateAbstract({ text: source, target: 'zh-CN' })).model, backup)
+})
+
+test('translation attempts one backup, keeps the two failure diagnoses and honors cancellation', async () => {
+  const f = fixture(), controller = new AbortController()
+  const available = [
+    { provider: 'deepseek-official', id: 'deepseek-flash' },
+    { provider: 'deepseek-account', id: 'deepseek-flash' },
+    { provider: 'kimi-coding', id: 'kimi-for-coding-highspeed' },
+    { provider: f.route.provider, id: f.route.model },
+  ]
+  f.options.models = async () => ({ models: available })
+  f.options.ai = async ({ provider }) => {
+    f.calls.push(provider)
+    throw Object.assign(new Error('provider payload'), { code: provider === 'kimi-coding' ? 'RATE_LIMIT' : 'TRANSPORT' })
+  }
+  let handle = createLanguageLearning(f.options)
+  await assert.rejects(handle(request), error => error.code === 'LANGUAGE_TRANSLATION_TEMPORARY'
+    && /DeepSeek|deepseek/.test(error.message) && /kimi.*限流/.test(error.message) && !error.message.includes('provider payload'))
+  assert.deepEqual(f.calls, ['deepseek-official', 'kimi-coding'])
+  f.options.ai = async ({ provider }) => {
+    f.calls.push(provider)
+    controller.abort(new Error('translation cancelled'))
+    throw Object.assign(new Error('interrupted'), { code: 'TRANSPORT' })
+  }
+  handle = createLanguageLearning(f.options)
+  await assert.rejects(handle({ ...request, request_id: 'cancelled-translation' }, { signal: controller.signal }), /translation cancelled/)
+  assert.deepEqual(f.calls, ['deepseek-official', 'kimi-coding', 'deepseek-official'])
+})
 
 test('vocabulary ordering applies to the whole matched set before pagination',async()=>{
  const f=fixture();for(const [i,term]of ['Zulu','alpha','Beta'].entries()){const id=String(i).padStart(64,'0');await f.store.put(`vocabulary:${id}`,{id,term,meaning:'Synthetic',status:'learning',encounters:[],created_at:`2026-01-0${i+1}`,updated_at:`2026-02-0${i+1}`},0);}
