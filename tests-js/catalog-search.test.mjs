@@ -28,6 +28,9 @@ test('catalog text search is reachable through the HTTP worker', async t => {
   assert.equal(status, 200, payload.error);
   assert.deepEqual(payload.result.matches, []);
   assert.equal(payload.result.next_cursor, null);
+  const result = await post({ action: 'catalog_search_prepare', query: undefined });
+  assert.equal(result[0], 200, result[1].error);
+  assert.equal(result[1].result.pdfs_pending, 0);
   const [, tooLarge] = await post({ query: 'a'.repeat(4097) });
   assert.match(tooLarge.error, /全文搜索请求过大/);
 });
@@ -42,7 +45,7 @@ test('the catalog form switches scopes, pages through results and routes a hit t
   dialog.showModal = () => { dialog.open = true; };
   dialog.close = () => { dialog.open = false; dialog.dispatchEvent(new window.Event('close')); };
   window.eval(await readFile(new URL('../web/catalog-search.js', import.meta.url), 'utf8'));
-  let project = null, metadata = 0;
+  let project = null, metadata = 0, warmed = false;
   const calls = [], opened = [], cursor = { index: 0, page: 41 };
   const hit = page => ({ paper_id: 'synthetic', title: '<b>Synthetic</b>', snippet: '<img> evidence', page });
   const ui = window.PaperCatalogSearch.create({
@@ -53,10 +56,14 @@ test('the catalog form switches scopes, pages through results and routes a hit t
     toast: message => assert.fail(message),
     async api(action, request) {
       calls.push({ action, ...request });
+      const coverage = { indexed_pages: 41, no_text_pages: 0, skipped_pages: 0,
+        unreadable_pdfs: 0, without_pdf: 0, pdf_count: 1, pdfs_completed: 1, pdfs_pending: 0 };
+      if (action === 'catalog_search_prepare') { warmed = true; return coverage; }
+      if (!warmed && request.project_id === null) return { ...coverage, matches: [], next_cursor: null,
+        indexed_pages: 0, pdfs_completed: 0, pdfs_pending: 1 };
       const first = calls.length === 1;
-      return { matches: first ? Array.from({ length: 40 }, (_, index) => hit(index + 1)) : [hit(41)],
-        next_cursor: first ? cursor : null, scanned_pages: first ? 40 : 1, no_text_pages: 0,
-        skipped_pages: 0, unreadable_pdfs: 0, without_pdf: 0, pdf_count: 1, pdfs_completed: first ? 0 : 1 };
+      return { ...coverage, matches: first ? Array.from({ length: 40 }, (_, index) => hit(index + 1)) : [hit(41)],
+        next_cursor: first ? cursor : null };
     },
   });
   const change = value => { scope.value = value; scope.dispatchEvent(new window.Event('change')); };
@@ -79,7 +86,7 @@ test('the catalog form switches scopes, pages through results and routes a hit t
   await settle();
   assert.deepEqual(calls[1].cursor, cursor);
   assert.equal(get('results').childElementCount, 1);
-  assert.match(get('status').textContent, /搜索结束.*41 个命中页/);
+  assert.match(get('status').textContent, /命中页 41.*41 页可搜索/);
   get('results').querySelector('button').click();
   await settle();
   assert.deepEqual(opened, [hit(41)]);
@@ -90,6 +97,21 @@ test('the catalog form switches scopes, pages through results and routes a hit t
   await settle();
   assert.equal(calls[2].project_id, null);
   assert.equal(calls[2].cursor, null);
+  assert.equal(get('results').hidden, true);
+  assert.match(get('status').textContent, /1 篇待索引/);
+  get('prepare').click();
+  await settle();
+  assert.equal(calls[3].action, 'catalog_search_prepare');
+  assert.equal(calls[4].action, 'catalog_text_search');
+  assert.equal(get('results').hidden, false);
+  dialog.close();
+  input.value = '';
+  input.dispatchEvent(new window.Event('input'));
+  assert.equal(get('submit').textContent, '准备索引');
+  submit();
+  await settle();
+  assert.equal(calls[5].action, 'catalog_search_prepare');
+  assert.match(get('status').textContent, /^索引已就绪/);
   dialog.close();
   ui.setMetadataQuery('title search');
   assert.equal(scope.value, 'metadata');

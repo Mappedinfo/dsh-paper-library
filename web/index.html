@@ -420,9 +420,10 @@
     <p id="catalog-search-error" class="inline-error" role="alert" hidden></p>
     <ol id="catalog-search-results" aria-label="全文搜索结果"></ol>
     <div class="dialog-actions">
-      <button id="catalog-search-stop" class="button" type="button" hidden>暂停搜索</button>
+      <button id="catalog-search-stop" class="button" type="button" hidden>暂停准备</button>
+      <button id="catalog-search-prepare" class="button" type="button" hidden>准备索引</button>
       <button id="catalog-search-restart" class="button subtle" type="button" hidden>重新搜索</button>
-      <button id="catalog-search-more" class="button primary" type="button" hidden>继续搜索</button>
+      <button id="catalog-search-more" class="button primary" type="button" hidden>下一页</button>
     </div>
   </dialog>
   <dialog id="project-membership-dialog" class="board-dialog"><div class="dialog-heading"><div><p class="eyebrow">READING PROJECTS</p><h2 id="project-membership-title">这篇文献属于哪些项目</h2></div><button type="button" class="icon-button dialog-close" aria-label="关闭">×</button></div><p class="small muted">勾选即加入，取消勾选即移出；一篇文献可以同时属于多个项目。</p><div id="project-membership-list" class="board-picker"></div><label class="field">新建项目并加入<input id="project-membership-new" maxlength="200" placeholder="项目标题，回车即可创建"></label><p id="project-membership-status" class="small muted" role="status"></p><div class="dialog-actions"><button type="button" class="button dialog-close">关闭</button></div></dialog>

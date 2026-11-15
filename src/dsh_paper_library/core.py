@@ -675,9 +675,10 @@ def dispatch(request):
         if action == "paper_outline":
             from . import outline
             return outline.read(library, request)
-        if action == "catalog_text_search":
+        if action in {"catalog_text_search", "catalog_search_prepare"}:
             from . import catalog_search
-            return catalog_search.search(library, request)
+            handler = catalog_search.search if action == "catalog_text_search" else catalog_search.prepare
+            return handler(library, request)
         if action in {"paper_visual_read", "paper_text_find", "paper_text_search", "paper_text_read", "paper_abstract_pdf", "paper_dataset_sources"}:
             from . import paper_retrieval
             return paper_retrieval.dispatch(library, request)

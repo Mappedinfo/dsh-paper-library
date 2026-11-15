@@ -127,12 +127,13 @@ def _encoded(value):
     return text, search, len(text.encode()) + len(search.encode()) + 512
 
 
-def _preflight_page(doc, number):
+def _preflight_page(doc, number, *, text_only=False):
     """在解释内容流/解码图像前检查可观察资源；不宣称是进程 RSS 硬上限。"""
     page = doc[number - 1]
     if max(page.rect.width, page.rect.height) > 20000 or page.rect.get_area() > 200_000_000:
         raise ElementBudgetError(f'第 {number} 页尺寸超过安全预算，暂停自动扫描。')
-    contents, forms, images = page.get_contents(), page.get_xobjects(), page.get_images(full=True)
+    contents, forms = page.get_contents(), page.get_xobjects()
+    images = [] if text_only else page.get_images(full=True)
     if len(contents) + len(forms) > 2048 or len(images) > 1000:
         raise ElementBudgetError(f'第 {number} 页对象过多，暂停自动扫描。')
     pixels = sum(max(0, image[2]) * max(0, image[3]) for image in images)

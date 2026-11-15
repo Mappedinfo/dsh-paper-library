@@ -5,36 +5,46 @@ window.PaperCatalogSearch = {
     const get = part => document.getElementById(`catalog-search-${part}`);
     const form = get('form'), input = document.getElementById('search'), scope = get('scope');
     const dialog = get('dialog'), status = get('status'), error = get('error'), results = get('results');
-    const stop = get('stop'), more = get('more'), restart = get('restart');
-    const limit = 40;
-    let search, controller, opening = false;
+    const stop = get('stop'), more = get('more'), restart = get('restart'), build = get('prepare');
+    let active, controller, task, opening = false;
 
     function syncMode() {
       const metadata = scope.value === 'metadata';
       input.placeholder = metadata ? '检索文献、数据集与演示…' : '输入 PDF 正文关键词';
       input.setAttribute('aria-label', metadata ? '检索文献、数据集与演示文稿' : 'PDF 正文关键词或短语');
       get('submit').hidden = metadata;
+      get('submit').textContent = input.value.trim() ? '搜索' : '准备索引';
       get('shortcut').hidden = !metadata;
     }
 
     function update() {
-      stop.hidden = !controller;
-      more.hidden = Boolean(controller) || search.complete || search.changed;
-      more.textContent = search.failed ? '重试' : results.childElementCount >= limit ? '继续找下一批' : '继续搜索';
-      restart.hidden = Boolean(controller);
-      results.setAttribute('aria-busy', String(Boolean(controller)));
-      const progress = search.total === null ? '' : `${search.completed}/${search.total} 篇 PDF 已处理 · ${search.scanned} 页已读取`;
-      const state = controller ? '搜索中' : search.failed ? '搜索未完成' : search.complete ? '搜索结束' : '待继续搜索';
-      const hits = search.hits ? `累计 ${search.hits} 个命中页` : search.complete ? '未找到匹配页' : '暂未命中';
-      status.textContent = [state, hits, progress, search.empty && `${search.empty} 页无可选文字`,
-        search.skipped && `${search.skipped} 页未能读取`, search.unreadable && `${search.unreadable} 篇 PDF 不可读`,
-        search.missing && `${search.missing} 条无 PDF`].filter(Boolean).join(' · ');
+      const { query, coverage, cursor, first, shown, failed } = active;
+      stop.hidden = task !== 'index';
+      more.hidden = Boolean(task) || !cursor;
+      restart.hidden = Boolean(task) || !query;
+      build.hidden = Boolean(task) || (coverage ? coverage.pdfs_pending === 0 : Boolean(query));
+      results.hidden = !results.childElementCount;
+      results.setAttribute('aria-busy', String(task === 'search'));
+      const pending = coverage?.pdfs_pending;
+      const range = first === shown ? String(shown) : `${first}–${shown}`;
+      const phase = task === 'index' ? '正在准备索引' : task === 'search' ? '正在搜索索引' :
+        failed ? '操作未完成' : query ? (shown ? `命中页 ${range}${cursor ? '，还有结果' : ''}` :
+          pending ? '已准备的内容暂未命中' : '未找到匹配页') : pending ? '索引准备已暂停' : '索引已就绪';
+      const counts = coverage ? [
+        `${coverage.pdfs_completed}/${coverage.pdf_count} 篇 PDF 已处理`,
+        pending && `${pending} 篇待索引`, `${coverage.indexed_pages} 页可搜索`,
+        coverage.no_text_pages && `${coverage.no_text_pages} 页无可选文字`,
+        coverage.skipped_pages && `${coverage.skipped_pages} 页未能读取`,
+        coverage.unreadable_pdfs && `${coverage.unreadable_pdfs} 篇 PDF 不可读`,
+        coverage.without_pdf && `${coverage.without_pdf} 条无 PDF`,
+      ] : [];
+      status.textContent = [phase, ...counts].filter(Boolean).join(' · ');
     }
 
     function cancel() {
       controller?.abort();
       controller = null;
-      if (search) update();
+      task = null;
     }
 
     function appendHit(hit) {
@@ -47,10 +57,10 @@ window.PaperCatalogSearch = {
       button.append(title, snippet);
       button.addEventListener('click', async () => {
         if (opening) return;
-        const active = search;
+        const search = active;
         opening = true;
         try {
-          if (!await prepare() || !dialog.open || search !== active) return;
+          if (!await prepare() || !dialog.open || active !== search) return;
           cancel();
           dialog.close();
           if (!await navigate(hit)) toast('未能打开命中页，请重新搜索后再试。', true);
@@ -64,83 +74,85 @@ window.PaperCatalogSearch = {
       results.append(row);
     }
 
-    async function run() {
-      if (controller || search.complete || search.changed) return;
-      const active = search, current = new AbortController();
+    async function run(nextTask, nextPage = false) {
+      if (controller) return;
+      const current = new AbortController();
       controller = current;
-      let replace = results.childElementCount >= limit;
-      error.hidden = true;
+      task = nextTask;
       active.failed = false;
+      error.hidden = true;
       update();
+      let refresh = false;
+      const currentRun = () => controller === current && dialog.open;
+      const params = { project_id: active.projectId };
       try {
-        while (true) {
+        if (nextTask === 'index') {
+          do {
+            const data = await api('catalog_search_prepare', params, { signal: current.signal });
+            if (!currentRun()) return;
+            active.coverage = data;
+            active.cursor = null;
+            update();
+          } while (active.coverage.pdfs_pending);
+          refresh = Boolean(active.query);
+        } else {
           const data = await api('catalog_text_search', {
-            query: active.query, project_id: active.projectId, cursor: active.cursor,
-            limit: replace ? limit : limit - results.childElementCount,
+            ...params, query: active.query, cursor: nextPage ? active.cursor : null,
           }, { signal: current.signal });
-          if (controller !== current || !dialog.open) return;
-          if (replace && data.matches.length) {
-            results.replaceChildren();
-            results.scrollTop = 0;
-            replace = false;
-          }
-          data.matches.forEach(appendHit);
+          if (!currentRun()) return;
+          const offset = nextPage ? active.shown : 0;
+          active.first = offset + 1;
+          active.shown = offset + data.matches.length;
+          active.coverage = data;
           active.cursor = data.next_cursor;
-          active.complete = !active.cursor;
-          active.hits += data.matches.length;
-          active.scanned += data.scanned_pages;
-          active.empty += data.no_text_pages;
-          active.skipped += data.skipped_pages;
-          active.unreadable += data.unreadable_pdfs;
-          active.total = data.pdf_count;
-          active.completed = data.pdfs_completed;
-          active.missing = data.without_pdf;
-          update();
-          if (active.complete || (!replace && results.childElementCount >= limit)) break;
+          results.replaceChildren();
+          results.scrollTop = 0;
+          data.matches.forEach(appendHit);
         }
       } catch (failure) {
-        if (controller !== current || !dialog.open) return;
+        if (!currentRun()) return;
         active.failed = true;
-        active.changed = failure.code === 'CATALOG_SEARCH_CHANGED';
+        if (failure.code === 'CATALOG_SEARCH_CHANGED') active.cursor = null;
         error.textContent = failure.message;
         error.hidden = false;
       } finally {
         if (controller === current) {
-          controller = null;
+          cancel();
           update();
+          if (refresh) void run('search');
         }
       }
     }
 
-    function start(query, currentProject) {
-      cancel();
-      search = { query, projectId: currentProject?.id ?? null, projectTitle: currentProject?.title,
-        cursor: null, complete: false, failed: false, changed: false, total: null,
-        scanned: 0, empty: 0, skipped: 0, unreadable: 0, hits: 0 };
-      results.replaceChildren();
-      get('context').textContent = `${search.projectTitle || '全库在库文献'} · “${search.query}”`;
-      void run();
-    }
-
-    input.addEventListener('input', () => { if (scope.value === 'metadata') searchMetadata(); });
+    input.addEventListener('input', () => {
+      syncMode();
+      if (scope.value === 'metadata') searchMetadata();
+    });
     scope.addEventListener('change', () => {
       syncMode();
       if (scope.value === 'metadata') searchMetadata();
     });
     form.addEventListener('submit', event => {
       event.preventDefault();
-      const query = input.value.trim();
       if (scope.value === 'metadata') return searchMetadata();
-      if (!query) return input.focus();
       const currentProject = scope.value === 'project' ? project() : null;
       if (scope.value === 'project' && !currentProject) return;
+      const query = input.value.trim();
+      cancel();
+      active = { query, projectId: currentProject?.id ?? null, first: 0, shown: 0 };
+      results.replaceChildren();
+      get('context').textContent = [currentProject?.title || '全库在库文献', query && `“${query}”`].filter(Boolean).join(' · ');
       dialog.showModal();
-      if (search?.query === query && search.projectId === (currentProject?.id ?? null)) update();
-      else start(query, currentProject);
+      void run(query ? 'search' : 'index');
     });
-    more.addEventListener('click', () => void run());
-    stop.addEventListener('click', cancel);
-    restart.addEventListener('click', () => start(search.query, search.projectId ? { id: search.projectId, title: search.projectTitle } : null));
+    more.addEventListener('click', () => void run('search', true));
+    stop.addEventListener('click', () => {
+      cancel();
+      if (active.query) void run('search');
+      else update();
+    });
+    restart.addEventListener('click', () => void run('search'));
+    build.addEventListener('click', () => void run('index'));
     dialog.addEventListener('close', () => { if (!dialog.open) cancel(); });
     syncMode();
 

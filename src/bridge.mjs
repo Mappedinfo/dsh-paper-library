@@ -197,7 +197,7 @@ function citationJob(request, options) {
 }
 
 function workerTimeout(request) {
-  if (request.action === 'catalog_text_search') return 15000;
+  if (['catalog_text_search', 'catalog_search_prepare'].includes(request.action)) return 15000;
   if (['paper_visual_read','paper_text_find', 'paper_text_search', 'paper_text_read'].includes(request.action)) return 15000;
   if (request.action === 'document_elements_scan') return 20000;
   if (request.action === 'latex_compile') {
@@ -827,9 +827,9 @@ export async function dispatch(request, options = {}) {
     }
     return core({ action: 'save_feedback', text, ...common }, options);
   }
-  if (safe.action === 'catalog_text_search') {
+  if (['catalog_text_search', 'catalog_search_prepare'].includes(safe.action)) {
     if (Buffer.byteLength(JSON.stringify(safe)) > 4096) throw new Error('全文搜索请求过大，请重新输入关键词。');
-    return core(safe, options);
+    return core(safe, safe.action === 'catalog_search_prepare' ? { ...options, workerPriority: 'background' } : options);
   }
   if (['annotation_tags_update', 'annotation_tag_suggestions'].includes(safe.action)) {
     if (Buffer.byteLength(JSON.stringify(safe)) > 24 * 1024) throw new Error('批注标签请求超过大小上限。');
