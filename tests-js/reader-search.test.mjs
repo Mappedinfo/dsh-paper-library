@@ -62,9 +62,21 @@ test('late results cannot replace new input or navigate a newly selected paper',
 test('scope magnifier shares one row, keeps separate queries and submits only current category',async t=>{
  const f=fixture(t,async()=>({}));f.get('#sidebar-search-toggle').click();const input=f.get('#sidebar-search-row input');input.value='remark';f.submit('#sidebar-search-row');
  f.setScope('elements-formula');assert.equal(input.value,'');assert.match(input.placeholder,/公式/);input.value='energy';f.submit('#sidebar-search-row');
- f.setScope('annotations');assert.equal(input.value,'remark');f.get('[aria-label="清除当前侧栏搜索"]').click();
+ f.setScope('annotations');assert.equal(input.value,'remark');f.get('[aria-label="关闭侧栏搜索并清除筛选"]').click();
  assert.deepEqual(f.filters.slice(-3),[['annotations','remark'],['formula','energy'],['annotations','']]);
+ assert.equal(f.get('#sidebar-search-row').hidden,true);
+ assert.equal(f.get('#sidebar-search-toggle').getAttribute('aria-expanded'),'false');
+ assert.equal(f.w.document.activeElement,f.get('#sidebar-search-toggle'));
+ f.get('#sidebar-search-toggle').click();assert.equal(input.value,'');
+ f.setScope('elements-formula');assert.equal(input.value,'energy');
  f.setScope('elements-figure');input.value='workflow';f.submit('#sidebar-search-row');assert.deepEqual(f.filters.at(-1),['figure','workflow']);
+});
+test('the sidebar close button collapses an empty search and the magnifier reopens it',t=>{
+ const f=fixture(t,async()=>({})),toggle=f.get('#sidebar-search-toggle'),row=f.get('#sidebar-search-row');
+ toggle.click();assert.equal(row.hidden,false);assert.equal(row.querySelector('input').value,'');
+ f.get('[aria-label="关闭侧栏搜索并清除筛选"]').click();
+ assert.equal(row.hidden,true);assert.equal(f.w.document.activeElement,toggle);
+ toggle.click();assert.equal(row.hidden,false);assert.equal(f.w.document.activeElement,row.querySelector('input'));
 });
 test('annotation search matches source, followup and AI reply while keeping the complete thread',t=>{
  const f=fixture(t,async()=>({}));const a={id:'a',text:'direction\u00adality'},b={id:'b',comment:'unrelated'},remark={id:'r',comment:'my second question'};
@@ -169,7 +181,8 @@ test('source controls reset pagination callback, survive scope switches and clea
  f.get('#sidebar-search-row input').value='alpha beta';f.submit('#sidebar-search-row');assert.equal(f.ui.filter(group).notes.length,1);
  f.setScope('elements-formula');assert.equal(source.parentElement.hidden,true);f.setScope('annotations');assert.equal(source.value,'reading');assert.equal(mode.value,'any');
  f.ui.clearAnnotationFilter();assert.equal(source.value,'all');assert.equal(f.ui.filter(group).notes.length,2);
- source.value='reading';source.dispatchEvent(new f.w.Event('change'));f.get('[aria-label="清除当前侧栏搜索"]').click();assert.equal(source.value,'all');
+ source.value='reading';source.dispatchEvent(new f.w.Event('change'));f.get('[aria-label="关闭侧栏搜索并清除筛选"]').click();assert.equal(source.value,'all');
+ f.get('#sidebar-search-toggle').click();
  source.value='reading';source.dispatchEvent(new f.w.Event('change'));f.setPaper({id:'second',pdf:true});assert.equal(source.value,'all');assert.equal(mode.value,'all');assert.equal(f.calls.length,0);
 });
 
@@ -187,7 +200,7 @@ test('annotation result navigation crosses pages, wraps and resets after edits o
  next.click();next.click();next.click();assert.equal(moves.at(-1).id,'orphan');next.click();assert.equal(moves.at(-1).id,'n0');prev.click();assert.equal(moves.at(-1).id,'orphan');
  ui.filter({...group,unlinked:[]});assert.match(f.get('#sidebar-search-row [role=status]').textContent,/0 \/ 43/);
  f.get('#sidebar-search-row input').value='missing';f.submit('#sidebar-search-row');ui.filter(group);assert.equal(next.disabled,true);assert.equal(prev.disabled,true);
- f.get('[aria-label="清除当前侧栏搜索"]').click();ui.filter(group);assert.equal(next.parentElement.hidden,true);assert.equal(f.revealed.length,0);ui.dispose();
+ f.get('[aria-label="关闭侧栏搜索并清除筛选"]').click();ui.filter(group);assert.equal(next.parentElement.hidden,true);assert.equal(f.revealed.length,0);ui.dispose();
 });
 
 test('PDF search switches apply their states immediately and can toggle back', async t => {

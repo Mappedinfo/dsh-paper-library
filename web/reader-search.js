@@ -35,7 +35,14 @@ window.PaperReaderSearch = (() => {
     const scopeForm=make('form');scopeForm.id='sidebar-search-row';scopeForm.className='reader-search-row';scopeForm.hidden=true;
     const scopeInput=make('input');scopeInput.type='search';scopeInput.maxLength=200;
     const scopeSubmit=make('button','搜索');scopeSubmit.type='submit';scopeSubmit.className='button subtle';
-    const clearScope=button('×','清除当前侧栏搜索',()=>{scopeInput.value='';if(scope==='annotations'){annotationSourceFilter='all';annotationMatch='all';}submitScope();scopeInput.focus();});scopeForm.append(scopeInput,scopeSubmit,clearScope);
+    const closeScope=button('×','关闭侧栏搜索并清除筛选',()=>{
+      expanded=false;
+      scopeInput.value='';
+      if(scope==='annotations'){annotationSourceFilter='all';annotationMatch='all';}
+      submitScope();
+      scopeToggle.focus();
+    });
+    scopeForm.append(scopeInput,scopeSubmit,closeScope);
     const annotationOptions=make('span');annotationOptions.className='annotation-search-options';
     const sourceSelect=make('select');sourceSelect.id='annotation-search-source';sourceSelect.setAttribute('aria-label','批注来源');
     for(const [value,label] of [['all','全部批注'],['reading','AI 阅读（蓝色虚线）'],['reply','AI 回复'],['translation','AI 翻译'],['caption','AI 图像说明']]){const option=make('option',label);option.value=value;sourceSelect.append(option);}
