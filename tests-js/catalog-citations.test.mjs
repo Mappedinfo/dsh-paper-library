@@ -6,7 +6,6 @@ import { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createFetchHandler } from '../src/http.mjs';
-import { createCatalogCitations } from '../src/catalog-citations.mjs';
 import { lookupCitationCount } from '../src/paper-fetch.mjs';
 
 const require = createRequire(import.meta.url);
@@ -78,17 +77,83 @@ test('HTTP snapshots are reused after a restart and catalog reads do not look up
   assert.equal(calls, 1);
 });
 
-test('catalog projection reuses sourced counts and resolves arXiv versions to their public DOI', async () => {
-  const service = createCatalogCitations({ store: { get: async () => ({ value: null }) } });
-  const { items } = await service.hydrate({ items: [
-    { resource_kind:'paper', URL:'https://arxiv.org/abs/2601.12345v2', openalex:{ cited_by_count:0 } },
-    { resource_kind:'paper', citation_count:1000 },
-    { resource_kind:'slides', DOI:'10.1234/not-a-paper' },
-  ] });
-  assert.equal(items[0].citation_lookup_doi, '10.48550/arxiv.2601.12345');
-  assert.equal(items[0].citation_snapshot.count, 0);
-  assert.equal(items[1].citation_snapshot, undefined);
-  assert.equal(items[2].citation_lookup_doi, undefined);
+test('citation sort uses the entire filtered scope before paginating, with known zero ahead of unknown', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'paper-citation-sort-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const handler = createFetchHandler({ library: join(root, 'library'), localStateHome: join(root, 'state'),
+    fetchOptions: { resolver, transport: async () => response({ id:'https://openalex.org/W15',
+      doi:'https://doi.org/10.48550/arxiv.2601.12345', cited_by_count:18 }) },
+  });
+  const post = async (action, fields) => {
+    const r = await handler(new Request('http://127.0.0.1/api', {
+      method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ action, ...fields }),
+    }));
+    const body = await r.json();
+    assert.equal(body.ok, true, body.error);
+    return body.result;
+  };
+  const unknown = await post('create', { metadata:{ title:'Synthetic unknown', citation_count:1000 } });
+  const zero = await post('create', { metadata:{ title:'Synthetic zero', openalex:{ cited_by_count:0 } } });
+  const preprint = await post('create', { metadata:{ title:'Synthetic preprint', URL:'https://arxiv.org/abs/2601.12345v2' } });
+  await post('create', { metadata:{ title:'Synthetic outside', 'is-referenced-by-count':200 } });
+  const { project } = await post('project_create', { title:'Synthetic project' });
+  for (const item of [unknown, zero, preprint]) {
+    await post('project_link', { id:project.id, paper_id:item.id });
+    await post('paper_organization_update', { id:item.id, favorite:true, tags:['#method/synthetic'] });
+  }
+  await post('catalog_citation_counts', { dois:['10.48550/arxiv.2601.12345'] });
+  const fields = { kind:'all', query:'Synthetic', project:project.id, favorite:true, tag:'#method', sort:'citations', limit:1 };
+  const expected = [[preprint.id,18], [zero.id,0], [unknown.id,undefined]];
+  for (const [offset, [id, count]] of expected.entries()) {
+    const result = await post('catalog_resource_list', { ...fields, offset });
+    assert.equal(result.order, 'desc');
+    assert.equal(result.total, 3);
+    assert.equal(result.items[0].id, id);
+    assert.equal(result.items[0].citation_snapshot?.count, count);
+  }
+  const asc = await post('catalog_resource_list', { ...fields, order:'asc', limit:3 });
+  assert.deepEqual(asc.items.map(item => item.id), [zero.id, preprint.id, unknown.id]);
+});
+
+test('metadata enrichment caches citation counts, and proposed DOIs enter the sort after saving the draft', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'paper-citation-enrich-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const doi = '10.1234/enrichment';
+  const title = 'Synthetic paper for citation count enrichment';
+  const paths = [];
+  const metadata = { DOI:doi, title:[title], type:'journal-article', 'container-title':['Synthetic journal'],
+    author:[{ family:'Example', given:'Reader' }] };
+  const handler = createFetchHandler({ library:join(root,'library'), localStateHome:join(root,'state'),
+    fetchOptions:{ resolver, async transport({ url }) {
+      paths.push(url.hostname);
+      if (url.hostname === 'api.crossref.org') {
+        return url.pathname === '/works' ? response({ message:{ items:[metadata] } }) : response({ message:metadata });
+      }
+      if (url.hostname === 'api.openalex.org') return response({ id:'https://openalex.org/W17', doi:`https://doi.org/${doi}`, cited_by_count:25 });
+      return response({}, 404);
+    } },
+  });
+  const post = async (action, fields) => {
+    const r = await handler(new Request('http://127.0.0.1/api', {
+      method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ action, ...fields }),
+    }));
+    const body = await r.json();
+    assert.equal(body.ok, true, body.error);
+    return body.result;
+  };
+  const item = await post('create', { metadata:{ title, author:[{ family:'Example', given:'Reader' }] } });
+  const result = await post('metadata_lookup', { id:item.id });
+  assert.equal(result.item.DOI, doi);
+  assert.equal(result.citation_snapshot.count, 25);
+  assert.equal(result.citation_snapshot.source, 'OpenAlex');
+  assert.ok(paths.includes('api.openalex.org'));
+  const fields = { kind:'paper', sort:'citations' };
+  assert.equal((await post('catalog_resource_list', fields)).items[0].citation_snapshot, undefined);
+  const unchanged = await post('get', { id:item.id });
+  assert.equal(unchanged.DOI, undefined);
+  assert.equal(unchanged.modified, item.modified);
+  await post('update', { id:item.id, metadata:{ DOI:doi }, expected_modified:item.modified });
+  assert.equal((await post('catalog_resource_list', fields)).items[0].citation_snapshot.count, 25);
 });
 
 test('the table citation control loads when visible and updates the count and provider in place', { skip: !JSDOM }, async t => {

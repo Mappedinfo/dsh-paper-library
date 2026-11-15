@@ -1,9 +1,9 @@
 'use strict';
 
 window.PaperCatalogCitations = {
-  create({ root, api, toast }) {
+  create({ root, api, toast, sortScope = () => null, onResort }) {
     const targets = new Map(), latest = new Map();
-    let heading, refreshButton, visible = false, running = false;
+    let heading, refreshButton, visible = false, running = false, previousSortedScope;
     const observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => {
       const entry = entries.find(value => value.target === heading);
       if (!entry) return;
@@ -19,7 +19,7 @@ window.PaperCatalogCitations = {
     }
 
     function paint(node, doi, saved) {
-      const result = latest.get(doi);
+      const result = sortScope() ? null : latest.get(doi);
       const found = result?.status === 'found' && (!saved?.fetched_at || result.fetched_at >= saved.fetched_at);
       const value = found ? result : saved?.status === 'found' ? saved : result || saved;
       node.replaceChildren();
@@ -49,10 +49,16 @@ window.PaperCatalogCitations = {
       if (running) return;
       const dois = [...targets].filter(([doi, group]) => manual || group.pending && !latest.has(doi)).map(([doi]) => doi);
       if (!dois.length) return;
+      const sorted = sortScope();
+      // Reordering can pull a different set of unknown rows onto this page.
+      // Start one automatic pass per sorted page, then wait for navigation or a click.
+      if (!manual && sorted && sorted === previousSortedScope) return;
+      previousSortedScope = sorted;
       const view = [...targets.keys()].join('\n');
       running = true;
       buttonState();
       let failures = 0;
+      let changed = false;
       try {
         for (let start = 0; start < dois.length && view === [...targets.keys()].join('\n'); start += 8) {
           const batch = dois.slice(start, start + 8);
@@ -61,7 +67,10 @@ window.PaperCatalogCitations = {
             failures += item.status === 'unavailable';
             latest.delete(item.doi);
             latest.set(item.doi, item);
-            for (const { node, saved } of targets.get(item.doi)?.cells || []) paint(node, item.doi, saved);
+            const cells = targets.get(item.doi)?.cells || [];
+            if (item.status === 'found' && (!cells.length || cells.some(({ saved }) =>
+              saved?.count !== item.count || saved.source !== item.source || saved.fetched_at !== item.fetched_at))) changed = true;
+            for (const { node, saved } of cells) paint(node, item.doi, saved);
           }
           while (latest.size > 1000) latest.delete(latest.keys().next().value);
         }
@@ -71,7 +80,8 @@ window.PaperCatalogCitations = {
       } finally {
         running = false;
         buttonState();
-        if (visible && view !== [...targets.keys()].join('\n')) void load(false);
+        if (changed && sortScope()) void onResort?.();
+        else if (visible && view !== [...targets.keys()].join('\n')) void load(false);
       }
     }
 

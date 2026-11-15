@@ -315,12 +315,21 @@ def list_resources(library, request):
     offset, limit = _paging(request, 40, 200)
     query = bounded_text(request.get("query", ""), "Query", 500)
     sort = request.get("sort") or "modified"
-    order = request.get("order") or ("desc" if sort in {"modified", "created", "year"} else "asc")
+    order = request.get("order") or ("desc" if sort in {"modified", "created", "year", "citations"} else "asc")
+    citation_cache = request.get("_citation_cache")
+    if citation_cache is not None and not isinstance(citation_cache, dict):
+        raise ValueError("Invalid catalog citation snapshot")
+    from . import catalog_citations
     expressions = {"title": "title COLLATE NOCASE", "author": "coalesce(json_extract(metadata,'$.author[0].family'),json_extract(metadata,'$.author[0].literal')) COLLATE NOCASE",
                    "year": "json_extract(metadata,'$.issued.date-parts[0][0]')", "journal": "json_extract(metadata,'$.container-title') COLLATE NOCASE",
                    "publisher": "json_extract(metadata,'$.publisher') COLLATE NOCASE", "modified": "modified", "created": "created", "citekey": "citekey COLLATE NOCASE", "kind": "kind"}
     expressions["jcr"] = "(SELECT max(json_extract(r.value,'$.quartile')) FROM json_each(metadata,'$.journal_rankings') r WHERE json_extract(r.value,'$.system')='JCR' AND json_extract(r.value,'$.year')=(SELECT max(json_extract(y.value,'$.year')) FROM json_each(metadata,'$.journal_rankings') y WHERE json_extract(y.value,'$.system')='JCR'))"
     expressions["ranking"] = ranking_sort("metadata")
+    if sort == "citations":
+        library.db.create_function("catalog_citation_count", 1,
+                                   lambda metadata: catalog_citations.sort_count(metadata, citation_cache or {}),
+                                   deterministic=True)
+        expressions["citations"] = "CASE WHEN kind='paper' THEN catalog_citation_count(metadata) END"
     if sort not in expressions or order not in {"asc", "desc"}:
         raise ValueError("Unsupported resource sort/order")
     union = "SELECT p.id,'paper' AS kind,p.title,p.metadata,p.citekey,p.created,p.modified,a.archived_at FROM papers p LEFT JOIN paper_archive a ON a.paper_id=p.id UNION ALL SELECT id,'dataset',title,metadata,citekey,created,modified,archived_at FROM datasets"
@@ -359,7 +368,12 @@ def list_resources(library, request):
     items = []
     for row in rows:
         if row["kind"] == "paper":
-            items.append({**library.get(row["id"], archived), "resource_kind": "paper"})
+            item = {**library.get(row["id"], archived), "resource_kind": "paper"}
+            if citation_cache is not None or sort == "citations":
+                for field in ("citation_snapshot", "citation_lookup_doi", "citation_needs_lookup"):
+                    item.pop(field, None)
+                item.update(catalog_citations.project(item, citation_cache or {}))
+            items.append(item)
             continue
         item = _dataset(library, row["id"], archived)
         formats = library.db.execute("""SELECT DISTINCT lower(json_extract(payload,'$.format')) AS format

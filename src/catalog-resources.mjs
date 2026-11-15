@@ -1,5 +1,5 @@
 /** Catalog-only aggregation. Citation/export APIs keep their original scope. */
-const sorts = new Set(['title', 'author', 'year', 'journal', 'publisher', 'modified', 'created', 'citekey', 'kind', 'jcr', 'ranking']);
+const sorts = new Set(['title', 'author', 'year', 'journal', 'publisher', 'modified', 'created', 'citekey', 'kind', 'jcr', 'ranking', 'citations']);
 const asciiFold = value => value.replace(/[A-Z]/g, char => char.toLowerCase());
 const binaryCompare = (left, right) => Buffer.compare(Buffer.from(String(left)), Buffer.from(String(right)));
 const sqlNoCase = value => asciiFold(String(value));
@@ -15,6 +15,7 @@ function slideTimestamp(value) {
 }
 
 function valueFor(item, sort) {
+  if (sort === 'citations') return item.citation_snapshot?.count ?? null;
   if ((sort === 'created' || sort === 'modified') && item.resource_kind === 'slides') return slideTimestamp(item[sort]);
   if (sort === 'kind') return item.resource_kind || 'paper';
   if (sort === 'author') return item.author?.[0]?.family ?? item.author?.[0]?.literal ?? null;
@@ -59,7 +60,7 @@ function slideResource(project) {
 /** Fetch at most one page plus the bounded slide count around the requested offset. */
 export async function catalogResources(input, { resourceList, slidesList }) {
   const kind = input.kind ?? 'all', query = input.query ?? '', archived = input.archived ?? false;
-  const sort = input.sort || 'modified', order = input.order || (['modified', 'created', 'year'].includes(sort) ? 'desc' : 'asc');
+  const sort = input.sort || 'modified', order = input.order || (['modified', 'created', 'year', 'citations'].includes(sort) ? 'desc' : 'asc');
   const offset = input.offset ?? 0, limit = input.limit ?? 40;
   if (!['all', 'paper', 'dataset', 'slides'].includes(kind)) throw new Error('不支持的目录类型。');
   if (typeof query !== 'string' || query.length > 500) throw new Error('检索词必须是 500 字以内的文本。');

@@ -134,6 +134,19 @@ export function createFetchHandler(options = {}) {
   const slidesRequest = async input => (await getSlidesStore()).handle(input);
   const localState = options.settings ? store : settings.localState;
   const catalogCitations = createCatalogCitations({ store: localState, fetchOptions: options.fetchOptions });
+  async function catalogList(input, signal) {
+    // Keep all worker pages and the mixed slide merge on one citation snapshot.
+    const catalogCitationCache = input.kind === 'slides' || input.kind === 'dataset' ? undefined : await catalogCitations.snapshot();
+    return catalogResources(input, {
+      slidesList: () => slidesRequest({ action: 'slides_catalog' }),
+      resourceList: payload => dispatch(payload, { ...options, signal, catalogCitationCache }),
+    });
+  }
+  async function enrichMetadata(input, signal) {
+    const result = await dispatch(input, { ...options, signal, settings });
+    const citation_snapshot = await catalogCitations.enrich(result.item, signal);
+    return citation_snapshot ? { ...result, citation_snapshot } : result;
+  }
   // Browsing saved learning data is local and does not initialize an AI route or
   // paper conversation. Only the host-injected adapter may generate new output.
   const paperDatasets = createPaperDatasets({ store: localState,
@@ -240,7 +253,8 @@ export function createFetchHandler(options = {}) {
             : input?.action === 'settings_update' ? await settings.update(input.patch, input.expected_revision)
             : input?.action === 'settings_reset' ? await settings.reset(input.expected_revision)
             : input?.action === 'catalog_citation_counts' ? await catalogCitations.refresh(input, { signal: request.signal })
-            : input?.action === 'catalog_resource_list' ? await catalogCitations.hydrate(await catalogResources(input, { slidesList: () => slidesRequest({ action: 'slides_catalog' }), resourceList: payload => dispatch(payload, { ...options, signal: request.signal }) }))
+            : input?.action === 'catalog_resource_list' ? await catalogList(input, request.signal)
+            : input?.action === 'metadata_lookup' ? await enrichMetadata(input, request.signal)
             : stateAction ? await stateRequest(localState, input)
             : typeof input?.action === 'string' && input.action.startsWith('slides_') ? await slidesRequest(input)
             : typeof input?.action === 'string' && input.action.startsWith('board_annotations_') ? await handleBoardAnnotationRequest(boardAnnotations, input)

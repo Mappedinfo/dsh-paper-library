@@ -656,6 +656,10 @@ export async function dispatch(request, options = {}) {
       const result = await core({action:'dataset_cite',id:safe.id,release_id:safe.release_id},options);
       return { ...await citationJob({action:'cite',items:[result.item],format:safe.format || 'apa'},options), warnings:result.warnings || [] };
     }
+    if (safe.action === 'resource_list') {
+      const { _citation_cache, ...request } = safe;
+      return core({ ...request, _citation_cache: options.catalogCitationCache }, options);
+    }
     return core(safe, options);
   }
   if (safe.action === 'metadata_lookup') return lookupMetadata(safe,options);

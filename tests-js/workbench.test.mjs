@@ -308,6 +308,39 @@ test('a double-click sequence cannot open a different title or a trashed paper',
   assert.equal(f.workbench.isTable(), true);
 });
 
+test('the citation heading starts at descending and resets pagination', async () => {
+  const f=environment({active:original()});
+  f.state.sort='title';f.state.order='asc';f.state.offset=80;
+  f.workbench.setTable(true);
+  const heading=()=>f.element('catalog-table').querySelectorAll('th')[7];
+  await heading().querySelector('button').dispatch('click');
+  assert.deepEqual([f.loads[0].sort,f.loads[0].order,f.loads[0].offset],['citations','desc',0]);
+  f.workbench.render();
+  assert.equal(heading().getAttribute('aria-sort'),'descending');
+  await heading().querySelector('button').dispatch('click');
+  assert.equal(f.loads[1].order,'asc');
+});
+
+test('metadata enrichment reports a verified zero without saving the draft', async () => {
+  const paper=original();
+  const f=environment({active:paper,respond:()=>({item:paper,citation_snapshot:{status:'found',count:0,source:'OpenAlex'}})});
+  await f.element('metadata-enrich').dispatch('click');
+  assert.deepEqual(f.requests,[{action:'metadata_lookup',id:paper.id}]);
+  assert.match(f.toasts[0][0],/引用量 0（OpenAlex）/);
+});
+
+test('successful citation lookups from metadata enrichment schedule a catalog refresh', async () => {
+  const start=appSource.indexOf('async function api('), end=appSource.indexOf('function errorAt(',start);
+  let refreshes=0;
+  let result={citation_snapshot:{status:'found',count:0}};
+  const context={fetch:async()=>({ok:true,json:async()=>({ok:true,result})}),refreshCitationCatalog:()=>refreshes++};
+  vm.runInNewContext(appSource.slice(start,end),context);
+  await context.api('metadata_lookup',{id:'paper-a'});
+  result={citation_snapshot:{status:'not_found'}};
+  await context.api('metadata_lookup',{id:'paper-b'});
+  assert.equal(refreshes,1);
+});
+
 test('selected paper exposes tag management and renders a separate full-width tag row', async () => {
   const item=original(), edits=[], options=[];
   let f;
@@ -553,7 +586,9 @@ test('shared folder action follows selection, refuses missing files and never ac
   const first={...original(),pdf:true};const second={...first,id:'paper-b'};const f=environment({active:first});f.state.items.push(second);f.workbench.setTable(true);
   const headers=f.element('catalog-table').querySelectorAll('th');
   assert.equal(headers.length,12);
-  assert.deepEqual(headers.slice(6,9).map(node=>node.textContent),['DOI / 预印本','引用量','单位']);
+  assert.equal(headers[6].textContent,'DOI / 预印本');
+  assert.equal(headers[7].querySelector('button').textContent,'引用量');
+  assert.equal(headers[8].textContent,'单位');
   await f.element('catalog-reveal').dispatch('click');assert.deepEqual(f.requests,[{action:'paper_reveal',id:first.id}]);
   const row=f.element('catalog-table').querySelectorAll('tr').find(n=>n.dataset.paperId===second.id);await row.querySelector('button').dispatch('click');
   await f.element('catalog-reveal').dispatch('click');assert.equal(f.requests.at(-1).id,second.id);

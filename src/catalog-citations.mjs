@@ -17,22 +17,7 @@ function identifier(item) {
   return arxiv ? `10.48550/arxiv.${arxiv.replace(/v\d+$/i, '').toLowerCase()}` : null;
 }
 
-const validCount = value => Number.isSafeInteger(value) && value >= 0;
 const fresh = value => value && Date.now() - Date.parse(value.fetched_at) < (value.status === 'found' ? 7 : 1) * day;
-
-function savedSnapshot(item) {
-  for (const [source, count, record] of [
-    ['OpenAlex', item.openalex?.cited_by_count, item.openalex],
-    ['Crossref', item.crossref?.['is-referenced-by-count'] ?? item['is-referenced-by-count'], item.crossref],
-    ['Semantic Scholar', item.semantic_scholar?.citationCount, item.semantic_scholar],
-  ]) {
-    if (validCount(count)) {
-      const fetched = record?.fetched_at ?? record?.as_of;
-      return { status: 'found', count, source, fetched_at: typeof fetched === 'string' ? fetched : null };
-    }
-  }
-  return null;
-}
 
 function records(record) {
   return new Map(Array.isArray(record?.value) ? record.value.map(value => [value.doi, value]) : []);
@@ -77,18 +62,9 @@ export function createCatalogCitations({ store, fetchOptions = {} }) {
     }
   }
 
-  async function hydrate(result) {
-    const items = result.items || [];
-    if (!items.some(item => !item.resource_kind || item.resource_kind === 'paper')) return result;
+  async function snapshot() {
     const values = records(await store.get(key).catch(() => null));
-    return { ...result, items: items.map(item => {
-      if (item.resource_kind && item.resource_kind !== 'paper') return item;
-      const doi = identifier(item);
-      const cached = values.get(doi);
-      const snapshot = cached?.status === 'found' ? cached : savedSnapshot(item) || cached;
-      return { ...item, ...(doi ? { citation_lookup_doi: doi, citation_needs_lookup: !fresh(cached) } : {}),
-        ...(snapshot ? { citation_snapshot: snapshot } : {}) };
-    }) };
+    return Object.fromEntries([...values].map(([doi, value]) => [doi, { value, fresh: fresh(value) }]));
   }
 
   async function refresh(input, { signal } = {}) {
@@ -118,5 +94,16 @@ export function createCatalogCitations({ store, fetchOptions = {} }) {
     return { items };
   }
 
-  return { hydrate, refresh };
+  async function enrich(item, signal) {
+    const doi = identifier(item);
+    if (!doi) return null;
+    try {
+      return (await refresh({ dois: [doi] }, { signal })).items[0];
+    } catch {
+      signal?.throwIfAborted();
+      return { doi, status: 'unavailable' };
+    }
+  }
+
+  return { snapshot, refresh, enrich };
 }

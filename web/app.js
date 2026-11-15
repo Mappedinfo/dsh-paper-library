@@ -76,6 +76,7 @@ async function api(action, args = {}, options = {}) {
     error.status=response.status;error.code=data.code || data.error?.code;error.current=data.current || data.error?.current;error.generation_status=data.generation_status||data.error?.generation_status;error.retry_with_new_request=data.retry_with_new_request??data.error?.retry_with_new_request;throw error;
   }
   if(['annotate','annotation_update','annotation_style','annotation_delete','annotation_reselect','attach'].includes(action))organizationUI?.invalidateDistribution(args.id);
+  if(action==='metadata_lookup'&&data.result?.citation_snapshot?.status==='found')refreshCitationCatalog();
   return data.result;
 }
 function errorAt(id, error) {
@@ -88,6 +89,7 @@ function toast(message, isError = false) {
   toastTimer = setTimeout(() => { $('toast').hidden = true; }, isError ? 7000 : 3500);
 }
 function debounce(fn, delay = 220) { let timer; return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), delay); }; }
+const refreshCitationCatalog = debounce(loadList, 450);
 function tags(item) { return (item.tags || []).map((tag) => typeof tag === 'string' ? tag : tag.tag || tag.name || '').filter(Boolean); }
 function authorName(author) { return window.PaperWorkbench?.authorName?.(author) || author.literal || [author.given, author.family].filter(Boolean).join(' ') || ''; }
 function authors(item) { const full=(item.author||[]).map(authorName).filter(Boolean).join(' · ');return full?full+(window.PaperWorkbench?.incompleteAuthor?.(item)?'（姓名待补全）':''):'作者信息待补充'; }
