@@ -30,7 +30,7 @@ Papers and reading records stay in your chosen library on the machine running DS
 | Build knowledge | Translate passages, improve wording, collect bilingual vocabulary, and explore evidence and citation graphs |
 | Write and present | Arrange papers on boards, edit and compile LaTeX, and export editable PowerPoint slides through PlainDeck |
 
-**Version scope:** this page describes the current `main` source as of November 9, 2026. npm's published version was `0.2.5` when checked on that date; `main` includes updates not yet released to npm. Use the [source installation](#installation) for the features described here. The badge reports the published package version, not feature parity with `main`.
+**Version scope:** this page describes source version `0.3.0`. The npm badge shows the registry version. Check it with `npm view @mappedinfo/dsh-paper-library version`, or follow the [source installation](#installation).
 
 ![Paper Library with synthetic reading exercises](docs/images/learning-library.jpg)
 

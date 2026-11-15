@@ -28,7 +28,7 @@ Paper Library 将文献收集、PDF 阅读与批注、知识整理和 LaTeX 写�
 | 积累语言与知识 | 中英翻译、五种表述优化方向、双语词条与原句来源、全文分析与引用图谱 |
 | 写作与展示 | 多文献画板、LaTeX 工作台、PlainDeck Slides 与可编辑 PPTX 导出 |
 
-**版本说明**：npm 当前发布版为 `0.2.5`（2026-11-09 核实）；下文介绍当前 `main` 源码，包含尚未发布到 npm 的更新。体验新功能请使用[源码安装](#安装与开发)。徽章显示 npm 实际发布版本，不表示与 `main` 功能同步。
+**版本说明**：当前源码版本为 `0.3.0`。npm 徽章显示注册表上的实际版本，使用 `npm view @mappedinfo/dsh-paper-library version` 可核对。安装方式见[安装与开发](#安装与开发)。
 
 **把使用说明当作演示来试用**：[PDF 手册](docs/demo/guide.pdf) · [带批注 PDF 示例](docs/demo/guide-annotated.pdf) · [可编辑动态 PPTX](docs/demo/slides.pptx) · [PlainDeck 项目 ZIP](docs/demo/slides.zip) · [Slides 静态 PDF](docs/demo/slides.pdf)。导入手册阅读批注，导入 ZIP 修改并再次导出；[主稿与复现说明](docs/demo/README.md)记录内容和验证范围。
 
@@ -522,13 +522,13 @@ PDF 上传和下载均使用流式处理，不做整份 Base64 拷贝。服务�
 
 打开论文时只保存一个轻量的原生对话记录，不启动 Agent 或调用模型；不会在批量导入时为所有文献启动对话。批注目录只在当前论文打开、保存或明确刷新时按需解析，快照检查器只保留当前预览。插件只在当前对话视图可见时刷新有限历史，隐藏后停止刷新。真正打开 DSH 主对话或发送消息后，Agent 的驻留与释放由 Harness 管理；当前未测量大量已激活对话长期阅读后的总内存。
 
-没有常驻向量模型、后台 OCR 或全库 PDF 预解析。目前快速检索覆盖元数据和摘要，**不建立全库全文索引**；当前篇可使用按需 PDF 文内搜索。这是当前版本的功能边界，不能据此判断 Zotero 的高内存原因。
+快速检索覆盖元数据和摘要。PDF 全文索引由读者按需准备并增量更新，也可以在当前 PDF 内临时搜索。
 
 本轮合成 2,000 条记录／1,000 个 PDF 的检查中，读取一篇 45 条批注的论文、打开另外 20 篇冷会话并刷新历史 30 次后，Harness 主进程闲置 RSS 为 569.88 MiB，采样最大值为 602.17 MiB；精确批注读取的短时 PDF worker 峰值为 58.14 MiB。历史刷新没有打开 PDF，闲置时没有 PDF worker 或活跃 Agent。上述数字不包含浏览器，不能相加当作应用总峰值，也不能与较早的独立运行直接比较性能改进。详细方法见[验证记录](docs/validation.md)。合成文件是小型文字 PDF，不能代替真实扫描件/大图 PDF 的容量验证。
 
 ## 安装与开发
 
-**当前源码版本为 v0.2.5，包含 Windows 启动与 PDF 保存兼容修复。** npm 的 `latest` 可用 `npm view @mappedinfo/dsh-paper-library version` 核对；也可按下方步骤安装当前 `main` 源码。
+**当前源码版本为 v0.3.0，新增 PDF 全文索引、文内搜索侧栏与独立论文标签页。** npm 的 `latest` 可用 `npm view @mappedinfo/dsh-paper-library version` 核对；也可按下方步骤安装当前 `main` 源码。
 
 Node `^22.19 || >=24`、Python `>=3.11`、`uv` 和已构建的本地 DeepSeek Harness。
 
