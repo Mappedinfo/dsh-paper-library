@@ -35,6 +35,7 @@
   <script src="./board-bridge.js" defer></script>
   <script src="./board-annotations.js" defer></script>
   <script src="./workspace-navigation.js" defer></script>
+  <script src="./catalog-search.js" defer></script>
   <script src="./paper-abstract.js" defer></script>
   <script src="./board-mermaid.js" defer></script>
   <script src="./board-drawio.js" defer></script>
@@ -108,7 +109,7 @@
       <div id="workspace-catalog-body" hidden></div>
       <section id="library-favorite-notes" aria-label="收藏批注" hidden></section>
       <div id="library-literature-content">
-      <div class="pane-heading"><div><h1>文献 · <span id="item-count" class="count">—</span></h1></div><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="检索文献、数据集与演示…" autocomplete="off" aria-label="检索文献、数据集与演示文稿"><kbd>⌘ K</kbd></label><div class="shelf-actions"><button id="build-bibliography" class="button subtle" title="根据文献库条目生成 references.bib 和引用信息核对报告，不会选择本次提问的引用">生成 references.bib</button><button id="export-library" class="button subtle" title="导出全部文献为 BibLaTeX">导出文献库</button><button id="refresh" class="icon-button" title="刷新文献库" aria-label="刷新文献库">↻</button></div></div>
+      <div class="pane-heading"><div><h1>文献 · <span id="item-count" class="count">—</span></h1></div><form id="catalog-search-form" class="search-field" role="search" aria-label="文献库搜索"><select id="catalog-search-scope" aria-label="搜索范围"><option value="metadata">题录</option><option value="library">全库全文</option><option id="catalog-search-project" value="project" disabled>项目全文</option></select><input id="search" type="search" placeholder="检索文献、数据集与演示…" autocomplete="off" aria-label="检索文献、数据集与演示文稿"><kbd id="catalog-search-shortcut">⌘ K</kbd><button id="catalog-search-submit" class="workspace-nav-button" type="submit" aria-haspopup="dialog" hidden>搜索</button></form><div class="shelf-actions"><button id="build-bibliography" class="button subtle" title="根据文献库条目生成 references.bib 和引用信息核对报告，不会选择本次提问的引用">生成 references.bib</button><button id="export-library" class="button subtle" title="导出全部文献为 BibLaTeX">导出文献库</button><button id="refresh" class="icon-button" title="刷新文献库" aria-label="刷新文献库">↻</button></div></div>
       <div class="library-filterbar" aria-label="阅读项目与文献筛选">
       <div class="library-organizer-row">
       <div class="project-bar">
@@ -411,6 +412,18 @@
   <dialog id="text-dialog"><div class="dialog-heading"><h2 id="text-dialog-title">引用文本</h2><button type="button" class="icon-button dialog-close" aria-label="关闭">×</button></div><p class="muted">自动复制不可用，请选择下方文本复制。</p><textarea id="copy-fallback" rows="9" readonly></textarea></dialog>
 
   <dialog id="project-dialog" class="board-dialog"><div class="dialog-heading"><h2 id="project-dialog-title">新建阅读项目</h2><button type="button" class="icon-button dialog-close" aria-label="关闭">×</button></div><label class="field">标题<input id="project-title" maxlength="200" required></label><label class="field">说明 <span>可留空</span><textarea id="project-description" rows="3" maxlength="2000"></textarea></label><label class="field">标签 <span>以逗号分隔</span><input id="project-tags" maxlength="400"></label><p id="project-error" class="inline-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" class="button dialog-close">取消</button><button id="project-save" type="button" class="button primary">保存项目</button></div></dialog>
+  <dialog id="catalog-search-dialog" class="board-dialog" aria-labelledby="catalog-search-title">
+    <div class="dialog-heading"><h2 id="catalog-search-title">PDF 全文搜索</h2><button class="icon-button dialog-close" type="button" aria-label="关闭" autofocus>×</button></div>
+    <p id="catalog-search-context" class="small"></p>
+    <p id="catalog-search-status" class="small muted" role="status"></p>
+    <p id="catalog-search-error" class="inline-error" role="alert" hidden></p>
+    <ol id="catalog-search-results" aria-label="全文搜索结果"></ol>
+    <div class="dialog-actions">
+      <button id="catalog-search-stop" class="button" type="button" hidden>暂停搜索</button>
+      <button id="catalog-search-restart" class="button subtle" type="button" hidden>重新搜索</button>
+      <button id="catalog-search-more" class="button primary" type="button" hidden>继续搜索</button>
+    </div>
+  </dialog>
   <dialog id="project-membership-dialog" class="board-dialog"><div class="dialog-heading"><div><p class="eyebrow">READING PROJECTS</p><h2 id="project-membership-title">这篇文献属于哪些项目</h2></div><button type="button" class="icon-button dialog-close" aria-label="关闭">×</button></div><p class="small muted">勾选即加入，取消勾选即移出；一篇文献可以同时属于多个项目。</p><div id="project-membership-list" class="board-picker"></div><label class="field">新建项目并加入<input id="project-membership-new" maxlength="200" placeholder="项目标题，回车即可创建"></label><p id="project-membership-status" class="small muted" role="status"></p><div class="dialog-actions"><button type="button" class="button dialog-close">关闭</button></div></dialog>
   <dialog id="board-paper-dialog" class="board-dialog"><div class="dialog-heading"><h2>把文献加入画板</h2><button type="button" class="icon-button dialog-close" aria-label="关闭">×</button></div><label class="field">检索标题、作者或引用键<input id="board-paper-search" type="search" autocomplete="off" placeholder="标题、作者或引用键"></label><p id="board-paper-status" class="small muted" role="status"></p><div id="board-paper-list" class="board-picker"></div><label class="field">新画板主题 <span>用于「用勾选的文献新建画板」</span><input id="board-paper-topic" maxlength="120" placeholder="例如：阅读、思考与写作"></label><p id="board-paper-selected" class="small muted" role="status">尚未勾选文献。</p><div class="dialog-actions"><button id="board-paper-add" class="button subtle" type="button" disabled>加入当前画板</button><button id="board-paper-generate" class="button primary" type="button" disabled>用勾选的文献新建画板</button><button type="button" class="button dialog-close">关闭</button></div></dialog>
   <div id="notification-region" class="notification-region" aria-label="操作与保存提示"><div id="toast" class="toast" role="status" hidden></div></div>

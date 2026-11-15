@@ -128,6 +128,7 @@ async function loadStatus() {
   } catch (error) { $('library-status').textContent = '连接未完成'; errorAt('library-error', error); }
 }
 async function loadList() {
+  catalogSearchUI?.syncProject();
   const ticket = ++state.listTicket;
   errorAt('library-error', null);
   if (!state.items.length) $('paper-list').replaceChildren(el('div', 'loading', '正在检索文献…'));
@@ -1355,7 +1356,28 @@ async function saveLink(event) {
 }
 
 $('paper-list').addEventListener('click', (event) => { const card = event.target.closest('[data-id]'); if (card) openResource(state.items.find(item => item.id === card.dataset.id)); });
-$('search').addEventListener('input', debounce(() => { state.query = $('search').value.trim(); state.offset = 0; loadList(); }));
+const searchMetadata = debounce(() => {
+  if ($('catalog-search-scope').value !== 'metadata') return;
+  state.query = $('search').value.trim();
+  state.offset = 0;
+  void loadList();
+});
+const catalogSearchUI = window.PaperCatalogSearch?.create({
+  api, toast, prepare: prepareWorkspaceNavigation,
+  project: () => state.project ? { id: state.project, title: projectList.find(item => item.id === state.project)?.title || '当前阅读项目' } : null,
+  searchMetadata,
+  async navigate({ paper_id, page }) {
+    const ticket = await openPaper(paper_id);
+    if (ticket !== state.itemTicket || state.active?.id !== paper_id || !state.active.pdf || page > state.pageCount) return false;
+    return Boolean(await requestPage(page));
+  },
+});
+if (!catalogSearchUI) {
+  $('catalog-search-scope').value = 'metadata';
+  $('catalog-search-scope').hidden = true;
+  $('search').addEventListener('input', searchMetadata);
+  $('catalog-search-form').addEventListener('submit', event => { event.preventDefault(); searchMetadata(); });
+}
 $('previous-list').addEventListener('click', () => { state.offset = Math.max(0, state.offset - state.limit); loadList(); });
 $('next-list').addEventListener('click', () => { state.offset += state.limit; loadList(); });
 $('list-page-size').addEventListener('change', event => {
@@ -1826,7 +1848,10 @@ documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPan
 readerSearchUI=window.PaperReaderSearch?.create({api,getPaper:()=>state.active,reader:()=>pdfReader,navigate:()=>switchTab('reader'),getElements:()=>documentElementsUI,
   onAnnotationSearch:()=>{pendingPdfAnnotationLink=null;pendingAnnotationSearchId=null;state.noteOffset=0;renderAnnotations();},
   onAnnotationNavigate:hit=>{pendingPdfAnnotationLink=null;pendingAnnotationSearchId=hit.id;state.noteOffset=hit.offset;renderAnnotations();},
-  onLibrarySearch:query=>{$('search').value=query;$('search').dispatchEvent(new Event('input',{bubbles:true}));},
+  onLibrarySearch(query) {
+    if (catalogSearchUI) catalogSearchUI.setMetadataQuery(query);
+    else { $('search').value = query; searchMetadata(); }
+  },
 });
 function installReaderContextMenu() {
   const reader = $('continuous-reader'), title = $('toolbar-paper');
@@ -2168,6 +2193,7 @@ async function refreshProjects(){
       if(select.value!==state.project){state.project='';select.value='';}
     }
     boardUI?.setProjects?.(projectList.map(project=>({id:project.id,title:`${project.title}（${project.paper_count}）`})));
+    catalogSearchUI?.syncProject();
     const edit=$('project-edit'),archive=$('project-archive');
     if(edit)edit.disabled=!state.project;
     if(archive)archive.disabled=!state.project;
@@ -2453,7 +2479,7 @@ async function openWorkspaceTarget(target) {
 }
 if ($('workspace-navigation') && window.PaperWorkspaceNavigation) {
   const versions = $('library-latex-versions'); if (versions) $('workspace-version-list').append(versions);
-  workspaceNavigationUI = window.PaperWorkspaceNavigation.create({root:$('workspace-navigation'),catalogRoot:$('workspace-catalog-body'),relatedRoot:$('workspace-related'),paperSearch:$('search').closest('label'),paperHeading:document.querySelector('#library-literature-content>.pane-heading'),api,toast,
+  workspaceNavigationUI = window.PaperWorkspaceNavigation.create({root:$('workspace-navigation'),catalogRoot:$('workspace-catalog-body'),relatedRoot:$('workspace-related'),paperSearch:$('catalog-search-form'),paperHeading:document.querySelector('#library-literature-content>.pane-heading'),api,toast,
     actions:$('workspace-versions'),prepare:prepareWorkspaceNavigation,onRootChange:openWorkspaceRoot,onNavigate:openWorkspaceTarget,onChange:applyWorkspaceNavigation,onNotes:loadFavoriteNotes,datasetCatalogActions:host=>resourceUI?.catalogActions(host),decorateDatasetRow:(row,item)=>resourceUI?.catalogRow(row,item),onCreateProject:()=>projectDialogOpen(null)});
   applyWorkspaceNavigation(workspaceNavigationUI.state());
   $('workspace-library')?.addEventListener('click',event=>{if(workspaceNavigationUI.state().section!=='paper'||boardUI?.isOpen()||latexUI?.isOpen()){event.preventDefault();event.stopImmediatePropagation();void workspaceNavigationUI.selectRoot('paper');}},true);

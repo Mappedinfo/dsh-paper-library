@@ -95,10 +95,14 @@ def integer(request, key, default, minimum, maximum):
     return value
 
 
-def normalized(text):
+def normalized_spacing(text):
     text = unicodedata.normalize("NFKC", text).replace("\u00ad", "")
     text = re.sub(r"(?<=\w)-\s*\n\s*(?=\w)", "", text)
-    return re.sub(r"\s+", " ", text).casefold().strip()
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def normalized(text):
+    return normalized_spacing(text).casefold()
 
 
 _DATA_HEADING = re.compile(

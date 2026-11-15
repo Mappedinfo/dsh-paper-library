@@ -197,6 +197,7 @@ function citationJob(request, options) {
 }
 
 function workerTimeout(request) {
+  if (request.action === 'catalog_text_search') return 15000;
   if (['paper_visual_read','paper_text_find', 'paper_text_search', 'paper_text_read'].includes(request.action)) return 15000;
   if (request.action === 'document_elements_scan') return 20000;
   if (request.action === 'latex_compile') {
@@ -214,7 +215,7 @@ function workerTimeout(request) {
 function runProcess(command, args, request, options) {
   const timeoutMs = workerTimeout(request);
   const scan = request.action === 'document_elements_scan';
-  const boundedDocumentRead = ['paper_visual_read','paper_text_find', 'paper_text_search', 'paper_text_read', 'document_elements_scan', 'document_elements_list', 'document_element_flow', 'document_element_preview'].includes(request.action);
+  const boundedDocumentRead = ['catalog_text_search', 'paper_visual_read','paper_text_find', 'paper_text_search', 'paper_text_read', 'document_elements_scan', 'document_elements_list', 'document_element_flow', 'document_element_preview'].includes(request.action);
   const maxOutputBytes = boundedDocumentRead ? 8 * 1024 * 1024 : 32 * 1024 * 1024;
   return new Promise((accept, reject) => {
     if (options.signal?.aborted) return reject(new Error('操作已取消。'));
@@ -825,6 +826,10 @@ export async function dispatch(request, options = {}) {
       return { ...saved, ...(split.missing.length ? { warnings: [...(saved.warnings || []), `${split.missing.length} 条批注没有获得对应回复；可重新生成补齐。`] } : {}) };
     }
     return core({ action: 'save_feedback', text, ...common }, options);
+  }
+  if (safe.action === 'catalog_text_search') {
+    if (Buffer.byteLength(JSON.stringify(safe)) > 4096) throw new Error('全文搜索请求过大，请重新输入关键词。');
+    return core(safe, options);
   }
   if (!actions.has(safe.action) && !projectActions.has(safe.action) && !externalActions.has(safe.action) && !latexActions.has(safe.action)) throw new Error('未知文献操作。');
   if (safe.action === 'import') {
