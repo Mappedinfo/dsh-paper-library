@@ -1,15 +1,14 @@
 """Bounded, read-only native markup geometry for one paper's reading strip.
 
-This is a distribution of locatable root marks, not evidence that any page was
-read or understood. ``other`` means nonmatching/unknown source, never proven
-human. ``ai_style`` reuses the native blue-dashed style classifier and does not
-prove authorship either. No annotation contents, PDF text, images, or rendering
-are read. Each usable root mark contributes one unit at its displayed rect's
-vertical midpoint; the frontend may smooth the fixed-size histograms.
+Group native root marks by recorded origin, with conservative fallbacks for
+older PDFs. Each locatable mark contributes one unit at its displayed rect's
+vertical midpoint. The former style buckets are also returned for callers.
 """
 from __future__ import annotations
 
+import json
 import math
+import re
 
 from .ai_annotation_style import native_style
 
@@ -19,6 +18,8 @@ MAX_ANNOTATIONS = 20000
 # PDF native Highlight, Underline, Squiggly and StrikeOut. Replies and other
 # shapes (including AI-reading rectangles and notes) are deliberately excluded.
 MARK_TYPES = {8, 9, 10, 11}
+MARK_ORIGIN_KEY = "PaperLibraryMarkOrigin"
+_MARK_ID = re.compile(r"(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})")
 
 
 def _response():
@@ -27,6 +28,8 @@ def _response():
     return {"status": "unknown", "reason": None, "reasons": [],
             "page_count": None, "bin_count": BIN_COUNT,
             "other": group(), "ai_style": group(),
+            "manual": {**group(), "inferred_count": None}, "ai": {**group(), "inferred_count": None},
+            "unclassified_count": None,
             "total_marks": None, "marked_pages": None,
             "coverage": {"scanned_pages": 0, "visited_pages": 0,
                          "scanned_annotations": 0, "skipped_marks": 0},
@@ -68,6 +71,40 @@ def _position(page, annot):
     return ((visible.y0 + visible.y1) / 2 - bounds.y0) / bounds.height
 
 
+def _origin(doc, xref, blue_dashed):
+    kind, recorded = doc.xref_get_key(xref, MARK_ORIGIN_KEY)
+    if kind == "name" and recorded in {"/Manual", "/AI"}:
+        return ("manual" if recorded == "/Manual" else "ai"), False
+    if kind != "null":
+        return None, False
+    if blue_dashed:
+        return "ai", True
+    # Legacy reader marks used Reader, a stable UUID and a Paper Library
+    # subject with the selection and, for retried writes, a request hash.
+    if blue_dashed is not False or doc.xref_get_key(xref, "T") != ("string", "Reader"):
+        return None, False
+    kind, identifier = doc.xref_get_key(xref, "NM")
+    if kind != "string" or not _MARK_ID.fullmatch(identifier):
+        return None, False
+    kind, subject = doc.xref_get_key(xref, "Subj")
+    prefix = 'paper-library:'
+    if kind != "string" or len(subject) > 100000 or not subject.startswith(prefix):
+        return None, False
+    try:
+        value = json.loads(subject[len(prefix):])
+    except (ValueError, RecursionError):
+        return None, False
+    if isinstance(value, dict) and isinstance(value.get("text"), str) and (
+        value.keys() == {"text"} or (
+            value.keys() == {"text", "create_request_hash"}
+            and isinstance(value["create_request_hash"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", value["create_request_hash"])
+        )
+    ):
+        return "manual", True
+    return None, False
+
+
 def _scan(doc):
     result = _response()
     page_count = doc.page_count
@@ -76,9 +113,13 @@ def _scan(doc):
         _reason(result, "empty_pdf")
         return result
     groups = {"other": set(), "ai_style": set()}
-    for name in groups:
+    sources = {"manual": set(), "ai": set()}
+    for name in groups | sources:
         result[name]["annotation_count"] = 0
         result[name]["marked_pages"] = 0
+    for name in sources:
+        result[name]["inferred_count"] = 0
+    result["unclassified_count"] = 0
     result["total_marks"] = result["marked_pages"] = 0
     coverage = result["coverage"]
     if doc.is_repaired:
@@ -112,19 +153,32 @@ def _scan(doc):
                 coverage["scanned_annotations"] += 1
                 try:
                     # Any non-null /IRT is a reply, even if malformed/dangling.
-                    # Content/author/subject are neither read nor classifiers.
+                    # Do not read comment bodies or extract page text.
                     if (annot.type[0] in MARK_TYPES
                             and doc.xref_get_key(annot.xref, "IRT")[0] == "null"):
                         position = _position(page, annot)
                         index = min(BIN_COUNT - 1, max(0, int((number + position) / page_count * BIN_COUNT)))
                         try:
-                            name = "ai_style" if native_style(annot)["ai_reading_style"] else "other"
+                            blue_dashed = native_style(annot)["ai_reading_style"]
                         except Exception:
-                            name = "other"
+                            blue_dashed = None
                             _reason(result, "style_unavailable")
+                        name = "ai_style" if blue_dashed else "other"
                         result[name]["bins"][index] += 1
                         result[name]["annotation_count"] += 1
                         groups[name].add(number)
+                        try:
+                            origin, inferred = _origin(doc, annot.xref, blue_dashed)
+                        except Exception:
+                            origin, inferred = None, False
+                            _reason(result, "origin_unavailable")
+                        if origin is None:
+                            result["unclassified_count"] += 1
+                        else:
+                            result[origin]["bins"][index] += 1
+                            result[origin]["annotation_count"] += 1
+                            result[origin]["inferred_count"] += int(inferred)
+                            sources[origin].add(number)
                 except Exception:
                     coverage["skipped_marks"] += 1
                     _reason(result, "invalid_annotation")
@@ -136,7 +190,7 @@ def _scan(doc):
         except Exception:
             # A broken page/chain never becomes a measured zero-mark page.
             _reason(result, "page_read_error")
-    for name, pages in groups.items():
+    for name, pages in (groups | sources).items():
         result[name]["marked_pages"] = len(pages)
     result["total_marks"] = sum(result[name]["annotation_count"] for name in groups)
     result["marked_pages"] = len(groups["other"] | groups["ai_style"])

@@ -26,9 +26,9 @@ const writable = snapshot => snapshot.status === 'ready' && snapshot.mode === 'h
 const locales = {
   zh: {
     reading_distribution: '划线阅读轨迹', 'reading_distribution.hint': '按 PDF 位置展示原生标记分布，帮助回看划线集中处；不代表阅读完成率或理解程度。',
-    reading_distribution_enabled: '显示阅读轨迹条带', 'reading_distribution_enabled.hint': '浅薄荷色表示其他或未知来源的标记，不将其认定为人工划线。',
+    reading_distribution_enabled: '显示阅读轨迹条带', 'reading_distribution_enabled.hint': '手动与 AI 划线共用一个坐标轴，旧批注会标明推定来源。',
     reading_distribution_mode: '展示方式', 'reading_distribution_mode.hint': '平滑密度概括划线集中处，条带保留位置分布。', density: '平滑密度', bands: '划线条带',
-    reading_distribution_ai: '显示 AI 样式轨迹（蓝色虚线）', 'reading_distribution_ai.hint': '与其他标记分开显示；仅按原生蓝色虚线识别，样式不能证明来源。',
+    reading_distribution_ai: '显示 AI 划线分布', 'reading_distribution_ai.hint': '蓝色填充与绿色手动划线叠画。',
     reading_distribution_smoothing: '平滑范围', 'reading_distribution_smoothing.hint': '1–6，值越大越平滑；仅影响密度展示，不改变原始标记。',
     annotation_font_size: '批注字号', 'annotation_font_size.hint': '批注原文、备注和 AI 回复的字号，修改后自动保存。',
     title: 'Paper Library', description: '与资料库内的设置共用主机文件，修改后同步到已打开的阅读页。',
@@ -51,9 +51,9 @@ const locales = {
   },
   en: {
     reading_distribution: 'Reading mark distribution', 'reading_distribution.hint': 'Shows native marks by PDF position to revisit marked areas, not reading completion or understanding.',
-    reading_distribution_enabled: 'Show reading distribution strip', 'reading_distribution_enabled.hint': 'Pale mint represents other or unknown-origin marks, not confirmed human marks.',
+    reading_distribution_enabled: 'Show reading distribution strip', 'reading_distribution_enabled.hint': 'Manual and AI marks share the same axes. Inferred origins are identified in the summary.',
     reading_distribution_mode: 'Display mode', 'reading_distribution_mode.hint': 'Smooth density summarizes clusters; bands retain the position distribution.', density: 'Smooth density', bands: 'Mark bands',
-    reading_distribution_ai: 'Show AI-style marks (blue dashes)', 'reading_distribution_ai.hint': 'Separate from other marks. Native blue dashed styling identifies this group, not authorship.',
+    reading_distribution_ai: 'Show AI marks', 'reading_distribution_ai.hint': 'Blue fill overlays the green manual marks on the same axes.',
     reading_distribution_smoothing: 'Smoothing range', 'reading_distribution_smoothing.hint': '1–6, higher is smoother. Affects density display only, not native marks.',
     annotation_font_size: 'Annotation font size', 'annotation_font_size.hint': 'Text size for excerpts, notes and AI replies. Changes save automatically.',
     ui_palette: 'Workspace palette', 'ui_palette.hint': 'Functional colors for reading, knowledge, writing and slides. Light/dark follows DSH.', jade: 'Jade & brass', navy: 'Navy & slate', neutral: 'Graphite neutral', rose: 'Soft rose', apricot: 'Warm apricot', system: 'Follow DSH',

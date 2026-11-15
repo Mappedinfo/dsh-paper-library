@@ -51,7 +51,7 @@ def result(path, doc):
 
 def check_shape(value):
     assert value['bin_count'] == 96
-    for name in ('other', 'ai_style'):
+    for name in ('other', 'ai_style', 'manual', 'ai'):
         assert len(value[name]['bins']) == 96
         assert all(type(n) is int and n >= 0 for n in value[name]['bins'])
         if value[name]['annotation_count'] is not None:
@@ -107,6 +107,8 @@ def test_counts_only_root_text_marks_without_content_or_rendering(tmp_path, monk
     assert value['total_marks'] == value['other']['annotation_count'] == 4
     assert value['marked_pages'] == value['other']['marked_pages'] == 1
     assert value['ai_style']['annotation_count'] == 0
+    assert value['manual']['annotation_count'] == value['ai']['annotation_count'] == 0
+    assert value['unclassified_count'] == 4
     assert 'PRIVATE' not in json.dumps(value)
     assert 'human' not in json.dumps(value)
     assert path.read_bytes() == before
@@ -333,6 +335,56 @@ def test_no_cache_keeps_external_native_changes_visible(tmp_path):
         page.add_underline_annot(fitz.Rect(20, 100, 150, 120))
         doc.saveIncr()
     assert rd.read_distribution(library, 'synthetic')['total_marks'] == 1
+
+
+def test_origin_takes_precedence_over_style_and_legacy_inference_is_counted(tmp_path):
+    path, doc = paper(tmp_path)
+    page = doc[0]
+    for index, (marked_origin, dashed, reader_metadata) in enumerate((
+        ('/Manual', True, False), ('/AI', False, False),
+        (None, False, True), (None, True, False), (None, False, False), (None, False, True),
+    )):
+        annot = page.add_underline_annot(fitz.Rect(20, 30 + index * 50, 150, 50 + index * 50))
+        if dashed:
+            apply_ai_reading_style(doc, annot)
+        if marked_origin:
+            doc.xref_set_key(annot.xref, rd.MARK_ORIGIN_KEY, marked_origin)
+        if reader_metadata:
+            subject = {'text': 'synthetic excerpt'}
+            if index == 5:
+                subject['create_request_hash'] = 'a' * 64
+            annot.set_info(title='Reader', subject='paper-library:' + json.dumps(subject))
+            identifier = 'a' * 32 if index != 5 else '01234567-89ab-4def-8123-456789abcdef'
+            doc.xref_set_key(annot.xref, 'NM', fitz.get_pdf_str(identifier))
+    value = result(path, doc)
+    assert value['status'] == 'ready'
+    assert value['total_marks'] == 6
+    assert value['manual']['annotation_count'] == 3
+    assert value['manual']['inferred_count'] == 2
+    assert value['ai']['annotation_count'] == 2
+    assert value['ai']['inferred_count'] == 1
+    assert value['unclassified_count'] == 1
+    assert value['ai_style']['annotation_count'] == 2
+    assert next(i for i, n in enumerate(value['manual']['bins']) if n) < next(i for i, n in enumerate(value['ai']['bins']) if n)
+
+
+def test_new_manual_and_ai_marks_persist_origin_in_managed_pdf(tmp_path):
+    path, doc = paper(tmp_path)
+    saved(path, doc)
+    library = Library(tmp_path / 'library')
+    try:
+        item = library.import_items(path=str(path))['items'][0]
+        for index, (profile, color, style) in enumerate(((None, '#2f80ed', 'dashed'), ('ai-reading', '#268b68', 'solid'))):
+            mark = library.annotate(item['id'], page=1, type='underline', rects=[[20, 100, 150, 120]],
+                                    annotation_id=f'{index:08x}-89ab-4def-8123-456789abcdef', annotation_profile=profile)['annotation']
+            library.annotation_style(item['id'], mark['id'], color, style, mark['style_version'])
+        value = library.reading_distribution(item['id'])
+        assert value['manual']['annotation_count'] == value['ai']['annotation_count'] == 1
+        assert value['manual']['inferred_count'] == value['ai']['inferred_count'] == 0
+        assert value['manual']['bins'] == value['ai']['bins']
+        assert value['ai_style']['annotation_count'] == 1
+    finally:
+        library.close()
 
 
 def test_library_and_worker_dispatch_integration(tmp_path):

@@ -3,7 +3,7 @@
 window.PaperReadingDistribution = (() => {
   const SIZE=96,TTL=60000,LIMIT=120;
   const make=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
-  const reasons={no_pdf:'没有 PDF',page_limit:'超过页数预算',annotation_limit:'超过批注预算',invalid_geometry:'部分位置无法识别',unreadable_pdf:'PDF 暂不可读',pdf_unavailable:'PDF 暂不可读',unsupported_pdf:'PDF 加密或格式不支持',invalid_pdf:'PDF 格式异常',empty_pdf:'PDF 没有页面',pdf_changed:'读取期间 PDF 已变化，请刷新重试',invalid_annotation:'部分批注位置无效',page_read_error:'部分页面无法读取',style_unavailable:'部分样式无法识别',repaired_pdf:'PDF 需要修复，结果可能不完整'};
+  const reasons={no_pdf:'没有 PDF',page_limit:'超过页数预算',annotation_limit:'超过批注预算',invalid_geometry:'部分位置无法识别',unreadable_pdf:'PDF 暂不可读',pdf_unavailable:'PDF 暂不可读',unsupported_pdf:'PDF 加密或格式不支持',invalid_pdf:'PDF 格式异常',empty_pdf:'PDF 没有页面',pdf_changed:'读取期间 PDF 已变化，请刷新重试',invalid_annotation:'部分批注位置无效',page_read_error:'部分页面无法读取',style_unavailable:'部分样式无法识别',origin_unavailable:'部分来源无法读取',repaired_pdf:'PDF 需要修复，结果可能不完整'};
   function smooth(bins,width=3){
     const sigma=Math.max(1,Math.min(6,Number(width)||3)),radius=Math.ceil(sigma*3),result=bins.map(()=>0);
     // Preserve mass at page/document edges rather than inventing marks outside the PDF.
@@ -12,15 +12,16 @@ window.PaperReadingDistribution = (() => {
   }
   function values(result){
     if(!result||!['ready','partial','unknown'].includes(result.status)||result.bin_count!==SIZE)throw Error('划线分布格式不可识别');
-    for(const key of ['other','ai_style'])if(!Array.isArray(result[key]?.bins)||result[key].bins.length!==SIZE||result[key].bins.some(n=>!Number.isFinite(n)||n<0))throw Error('划线位置数据无效');
+    for(const group of Object.values(sources(result)))if(!Array.isArray(group?.bins)||group.bins.length!==SIZE||group.bins.some(n=>!Number.isFinite(n)||n<0))throw Error('划线位置数据无效');
     return result;
   }
+  function sources(result){
+    return result.manual||result.ai ? {manual:result.manual,ai:result.ai} : {manual:result.other,ai:result.ai_style};
+  }
   function geometry(result,{mode='density',smoothing=3,ai=true}={}){
-    const total=Math.max(1,...['other','ai_style'].map(key=>result[key].bins.reduce((a,b)=>a+b,0)));
-    const groups=['other',...(ai?['ai_style']:[])].map(key=>({key,bins:result[key].bins.map(n=>n/total)}));
-    const lanes=groups.map(group=>({...group,weights:mode==='bands'?group.bins:smooth(group.bins,smoothing)}));
-    const peak=Math.max(1e-12,...lanes.flatMap(group=>group.weights));
-    return lanes.map(group=>({...group,levels:group.weights.map(n=>n/peak)}));
+    const layers=Object.entries(sources(result)).map(([key,{bins}])=>({key,weights:mode==='bands'?bins:smooth(bins,smoothing)}));
+    const peak=Math.max(1e-12,...layers.flatMap(group=>group.weights));
+    return layers.filter(group=>ai||group.key!=='ai').map(group=>({key:group.key,levels:group.weights.map(n=>n/peak)}));
   }
   function create({api}){
     let enabled=false,mode='density',ai=true,smoothing=3,disposed=false,running=false,controller=null,epoch=0;
@@ -35,19 +36,47 @@ window.PaperReadingDistribution = (() => {
       box.replaceChildren();box.classList.toggle('is-unknown',!value||value.status==='unknown');
       let text='待读取',hint='仅在可见时读取原生 PDF 划线位置。';
       if(value?.status==='unknown'){text='未知';hint=value.error||reasons[value.reason]||'暂不能读取 PDF 划线分布';}
-      else if(value){text=value.total_marks?`${value.status==='partial'?'≥':''}${value.total_marks} 处`:value.status==='partial'?'已查范围未见划线':'未发现划线';hint=`${value.status==='partial'?'部分读取，以下为已读取下限。':''}其他样式 ${value.other.annotation_count??'未知'} 处（${value.other.marked_pages??'未知'} 页）；AI 蓝虚线样式 ${value.ai_style.annotation_count??'未知'} 处（${value.ai_style.marked_pages??'未知'} 页）。PDF 共 ${value.page_count??'未知'} 页。${value.status==='partial'?`已扫描 ${value.coverage?.scanned_pages??'未知'} 页；${(value.reasons||[]).map(r=>reasons[r]||r).join('、')}。`:''}`;}
+      const groups=value&&sources(value);
+      const labels=!value||value.status==='unknown'||value.manual ? {manual:'手动',ai:'AI'} : {manual:'其他划线',ai:'AI 样式'};
+      if(value&&value.status!=='unknown'){
+        text=value.total_marks?`${value.status==='partial'?'≥':''}${value.total_marks} 处`:value.status==='partial'?'已查范围未见划线':'未发现划线';
+        const details=Object.entries(groups).map(([key,group])=>{
+          const inferred=group.inferred_count ? `，其中推定 ${group.inferred_count} 处` : '';
+          return `${labels[key]} ${group.annotation_count??'未知'} 处（${group.marked_pages??'未知'} 页${inferred}）`;
+        });
+        if(value.unclassified_count)details.push(`来源未明 ${value.unclassified_count} 处`);
+        hint=`${value.status==='partial'?'部分读取，以下为已读取下限。':''}${details.join('；')}。PDF 共 ${value.page_count??'未知'} 页。`;
+        if(value.status==='partial')hint+=`已扫描 ${value.coverage?.scanned_pages??'未知'} 页；${(value.reasons||[]).map(r=>reasons[r]||r).join('、')}。`;
+        if(groups.manual.inferred_count||groups.ai.inferred_count)hint+='旧批注按写入特征或蓝色虚线推定来源。';
+      }
       const caption=make('span','reading-distribution-caption');caption.append(make('span','','划线分布'),make('span','reading-distribution-count',text));box.append(caption);
-      const full=`${hint} 从左至右为 PDF 物理页与页内纵向位置。浅绿是其他划线（来源未确认），浅蓝虚线是 AI 样式（同款人工线也会匹配）。只表示标注分布，不代表阅读完成度或理解程度。${mode==='density'?'曲线为高斯平滑的相对集中度，两层共用本篇峰值；不比较跨文献强度。':'条带显示划线位置，两层共用本篇峰值；不比较跨文献强度。'}可在设置中调整。`;
+      const full=`${hint} 从左至右为 PDF 物理页与页内纵向位置。绿色为${labels.manual}，蓝色为${labels.ai}，共用同一坐标轴和峰值。只表示标注分布，不代表阅读完成度或理解程度。`;
       box.title=full;box.setAttribute('aria-label',`划线分布：${text}。${full}`);
       if(value&&value.status!=='unknown'){
-        for(const lane of geometry(value,{mode,smoothing,ai})){
-          const track=make('span',`reading-distribution-track ${lane.key==='ai_style'?'is-ai':'is-other'}`);track.setAttribute('aria-hidden','true');
-          const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 288 12');svg.setAttribute('preserveAspectRatio','none');
-          if(mode==='density'&&lane.levels.some(n=>n>0)){
-            const path=document.createElementNS(svg.namespaceURI,'path');const points=lane.levels.map((n,i)=>`${(i+.5)*3},${11-n*9}`).join(' L');path.setAttribute('d',`M0,11 L${points} L288,11 Z`);path.setAttribute('class','reading-distribution-density');svg.append(path);
-          }else lane.levels.forEach((n,i)=>{if(!n)return;const rect=document.createElementNS(svg.namespaceURI,'rect');rect.setAttribute('x',String(i*3));rect.setAttribute('y','1');rect.setAttribute('width','3');rect.setAttribute('height','10');rect.setAttribute('opacity',String(.25+.75*Math.sqrt(n)));svg.append(rect);});
-          track.append(svg);box.append(track);
+        const track=make('span','reading-distribution-track');track.setAttribute('aria-hidden','true');
+        const legend=make('span','reading-distribution-legend');legend.setAttribute('aria-hidden','true');
+        const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+        svg.setAttribute('viewBox','0 0 288 20');svg.setAttribute('preserveAspectRatio','none');
+        const prefix=value.status==='partial'?'≥':'';
+        for(const layer of geometry(value,{mode,smoothing,ai})){
+          const group=document.createElementNS(svg.namespaceURI,'g');group.setAttribute('class',`is-${layer.key}`);
+          if(mode==='density'&&layer.levels.some(n=>n>0)){
+            const path=document.createElementNS(svg.namespaceURI,'path');
+            const points=layer.levels.map((n,i)=>`${(i+.5)*3},${19-n*17}`).join(' L');
+            path.setAttribute('d',`M0,19 L${points} L288,19 Z`);
+            group.append(path);
+          }else layer.levels.forEach((n,i)=>{
+            if(!n)return;
+            const rect=document.createElementNS(svg.namespaceURI,'rect'),height=Math.max(1,n*17);
+            rect.setAttribute('x',String(i*3));rect.setAttribute('width','3');
+            rect.setAttribute('y',String(19-height));rect.setAttribute('height',String(height));
+            group.append(rect);
+          });
+          svg.append(group);
+          legend.append(make('span',`is-${layer.key}`,`${labels[layer.key]} ${prefix}${groups[layer.key].annotation_count??'—'}`));
         }
+        if(value.unclassified_count)legend.append(make('span','',`未明 ${prefix}${value.unclassified_count}`));
+        track.append(svg);box.append(track,legend);
       }else{box.append(make('span','reading-distribution-placeholder'));}
     }
     function enqueue(row){

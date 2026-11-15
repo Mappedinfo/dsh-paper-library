@@ -712,6 +712,9 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             apply_ai_reading_style(doc, annot)
         annotation_id = annotation_id or uuid.uuid4().hex
         doc.xref_set_key(annot.xref, "NM", fitz.get_pdf_str(annotation_id))
+        from .reading_distribution import MARK_TYPES, MARK_ORIGIN_KEY
+        if annot.type[0] in MARK_TYPES and (annotation_profile == "ai-reading" or set(extra or {}) <= {"create_request_hash"}):
+            doc.xref_set_key(annot.xref, MARK_ORIGIN_KEY, "/AI" if annotation_profile == "ai-reading" else "/Manual")
         if linked_parent is not None:
             annot.set_irt_xref(linked_parent.xref)
             group = self._linked_handwriting_page(current)["linked_parents"][linked_parent.xref]

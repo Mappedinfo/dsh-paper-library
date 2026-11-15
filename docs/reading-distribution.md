@@ -2,8 +2,8 @@
 
 文献表每条标题下方的标签行显示「划线分布」。位置从左到右对应 PDF 物理页与页内纵向位置，不是已读百分比，也不衡量理解程度。普通列表和当前文献标签区复用同一显示。
 
-- 浅绿：其他划线，来源未确认，不能直接称为人工阅读。
-- 浅蓝：符合原生 AI 蓝色虚线样式的划线。同款人工标记也会匹配；旧 AI 标记没有这种样式时仍在「其他」中。样式约定见 [AI 标注](ai-annotation-style.md)。
+- 绿色填充显示手动划线，蓝色填充显示 AI 划线，两者共用横轴、基线和纵向刻度。蓝线用虚线轮廓，方便辨认重叠位置。
+- 新划线的来源记录随原生 PDF 批注保存，调整颜色或线型不改变来源。旧划线按 Paper Library 留下的写入特征或 AI 蓝色虚线样式推定，并标出推定数量。缺少可用依据的划线计入「来源未明」，不进入两条曲线。样式约定见 [AI 标注](ai-annotation-style.md)。
 - 数字是所读取的根划线批注数。悬停或键盘聚焦可查看两类数量、涉及页数、页数分母、读取边界及说明。
 - 「未知」不等于 0；「未发现划线」仅表示已完整检查的 PDF 中没有符合类型的标记。部分读取用 ≥ 和下限说明；局部未发现不会称作全文无划线。
 
@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | reading_distribution_enabled | true | 显示／关闭条带 |
 | reading_distribution_mode | density | density 平滑密度或 bands 离散条带 |
-| reading_distribution_ai | true | 单独显示 AI 样式层 |
+| reading_distribution_ai | true | 开关蓝色 AI 填充 |
 | reading_distribution_smoothing | 3 | 密度平滑强度，整数 1–6 |
 
 设置保存到主机，立即更新显示；不会改变 PDF 原生颜色或批注。关闭后停止新读取并忽略在途结果。设置服务暂不可用时不覆盖最后已确认的开关。
@@ -32,11 +32,11 @@
 
 - `status`: ready / partial / unknown。
 - `page_count`, `bin_count:96`, `total_marks`, `marked_pages`。
-- `other`, `ai_style`: `{bins:[96 counts], annotation_count, marked_pages}`。
+- `manual`, `ai`: `{bins:[96 counts], annotation_count, marked_pages, inferred_count}`，以及 `unclassified_count`。保留原有 `other`、`ai_style` 样式统计字段供既有调用者使用。
 - `reason`, `reasons`, `coverage:{scanned_pages,visited_pages,scanned_annotations,skipped_marks}`。
 - `limits:{pages:2000,annotations:20000,bins:96}`。
 
-unknown 的计数为 null，不可把占位零数组当作实际零。partial 的计数和分布是已观察下限。2000 页以上沿用 PDF 打开器的拒绝边界；20,000 个原生批注预算计入回复和非划线类型，避免通过非目标类型绕过预算。损坏页面、循环对象、无法定位、样式解析失败及读取期间文件变化都有显式状态。不会读取批注内容、正文、图像或渲染页面；不保存统计到目录或批注表。
+unknown 的计数为 null，不可把占位零数组当作实际零。partial 的计数和分布是已观察下限。2000 页以上沿用 PDF 打开器的拒绝边界；20,000 个原生批注预算计入回复和非划线类型，避免通过非目标类型绕过预算。损坏页面、循环对象、无法定位、属性解析失败及读取期间文件变化都有显式状态。读取原生位置、样式和用于判别来源的属性，既有内部主题只用于识别旧记录格式。不会读取备注正文、提取 PDF 正文或渲染页面。
 
 ## 性能与刷新
 

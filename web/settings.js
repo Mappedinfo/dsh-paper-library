@@ -49,8 +49,8 @@ window.PaperLibrarySettings = (() => {
     const distributionDefaults={reading_distribution_enabled:true,reading_distribution_mode:'density',reading_distribution_ai:true,reading_distribution_smoothing:3};
     const distributionControls=make('fieldset');distributionControls.id='settings-reading-distribution';distributionControls.append(make('legend','','划线阅读轨迹'),make('p','small','按 PDF 位置展示原生标记分布，帮助回看划线集中处；不代表阅读完成率或理解程度。'));
     for(const [key,label,help]of [
-      ['reading_distribution_enabled','显示阅读轨迹条带','浅薄荷色表示其他或未知来源的标记，不将其认定为人工划线。'],
-      ['reading_distribution_ai','显示 AI 样式轨迹（蓝色虚线）','与其他标记分开显示；仅按原生蓝色虚线识别，样式不能证明来源。'],
+      ['reading_distribution_enabled','显示阅读轨迹条带','手动与 AI 划线共用一个坐标轴，旧批注会标明推定来源。'],
+      ['reading_distribution_ai','显示 AI 划线分布','蓝色填充与绿色手动划线叠画。'],
     ]){const row=make('label','settings-option'),input=make('input'),copy=make('span');input.type='checkbox';input.setAttribute('role','switch');input.id=`setting-${key}`;const hint=make('small','',help);hint.id=`setting-${key}-hint`;input.setAttribute('aria-describedby',hint.id);copy.append(make('strong','',label),hint);row.append(input,copy);distributionControls.append(row);inputs.set(key,input);input.addEventListener('change',()=>void save({[key]:input.checked}));}
     const distributionMode=make('select');distributionMode.id='setting-reading_distribution_mode';distributionMode.setAttribute('aria-label','展示方式');distributionMode.setAttribute('aria-describedby','setting-reading_distribution_mode-hint');
     for(const[value,label]of [['density','平滑密度'],['bands','划线条带']]){const option=make('option','',label);option.value=value;distributionMode.append(option);}
