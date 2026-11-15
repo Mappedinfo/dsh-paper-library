@@ -24,12 +24,26 @@ with pymupdf.open() as d:
  const scan=await send({action:'document_elements_scan',limit:4});assert.equal(scan.coverage.complete,true);
  const list=await send({action:'document_elements_list',kind:'figure',subtype:'flowchart'});assert.equal(list.total,1);const figure=list.elements[0];
  const preview=await send({action:'document_element_preview',element_id:figure.id});assert.equal(preview.mime_type,'image/png');assert.equal(Buffer.from(preview.image,'base64').subarray(1,4).toString(),'PNG');
+ const figureAction=(action,values={})=>send({action,element_id:figure.id,...values});
+ const download=await figureAction('document_element_download');
+ assert.equal(download.mime_type,'image/png');
+ assert.equal(download.element_id,figure.id);
+ assert.equal(Buffer.from(download.image,'base64').subarray(1,4).toString(),'PNG');
+ assert.ok(download.width>=preview.width&&download.width<=1800);
+ assert.equal(figure.favorite,false);
+ await figureAction('document_element_favorite_set',{favorite:true});
+ const onlyFavorites=()=>send({action:'document_elements_list',kind:'figure',favorites_only:true});
+ assert.deepEqual((await onlyFavorites()).elements.map(e=>[e.id,e.favorite]),[[figure.id,true]]);
  const marked=await send({action:'document_element_annotate',element_id:figure.id});assert.ok(marked.annotation.id);assert.equal((await send({action:'document_element_annotate',element_id:figure.id})).reused,true);
  const algorithm=(await send({action:'document_elements_list',kind:'algorithm'})).elements[0];const flow=await send({action:'document_element_flow',element_id:algorithm.id});assert.ok(flow.flow.nodes.length>=5);assert.ok(flow.flow.edges.some(e=>e.kind==='back'));
  const formulas=await send({action:'document_elements_list',kind:'formula'});assert.ok(formulas.elements.some(e=>e.context.includes('denotes')));
  const refs=await send({action:'graph_references_extract'});assert.equal(refs.graph_count,2);const graph=await send({action:'graph',view:'citations',limit:100});assert.equal(graph.edges.filter(e=>e.relation==='cites').length,2);
  assert.equal((await send({action:'graph_references_get'})).stale,false);assert.deepEqual(await readFile(path),original);
  assert.ok(scan.usage.index_bytes>0);const beforeClear=await send({action:'annotations'});const cleared=await send({action:'document_elements_clear'});assert.equal(cleared.usage.index_bytes,0);assert.equal((await send({action:'document_elements_list'})).total,0);assert.deepEqual(await send({action:'annotations'}),beforeClear);assert.deepEqual(await readFile(path),original);
+ await send({action:'document_elements_scan',start_page:1});
+ assert.deepEqual((await onlyFavorites()).elements.map(e=>e.id),[figure.id]);
+ await figureAction('document_element_favorite_set',{favorite:false});
+ assert.equal((await onlyFavorites()).total,0);
  const missing=await handler(new Request('http://localhost/document-elements.js'));assert.equal(missing.status,200);assert.match(await missing.text(),/PaperDocumentElements/);
 });
 

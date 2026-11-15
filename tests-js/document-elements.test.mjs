@@ -23,6 +23,37 @@ test('single paper scan resumes in bounded batches and finishes all pages withou
 });
 test('late paper response cannot populate another paper or continue the old scan',async t=>{let resolveOld;const calls=[];const env=setup(async(a,p)=>{calls.push([a,p]);if(p.id==='paper-a')return new Promise(r=>{resolveOld=r;});return {elements:[],total:0,coverage};});t.after(env.close);env.panels.show('elements-figure');env.setPaper({id:'paper-b',title:'Other',pdf:true});await settle();resolveOld({elements:[{...element,title:'OLD'}],total:1,coverage:{complete:false}});await settle();assert.equal(env.doc.querySelector('#document-elements-figure').textContent.includes('OLD'),false);assert.equal(calls.some(([a,p])=>a==='document_elements_scan'&&p.id==='paper-a'),false);});
 test('flowchart filtering and paginated lookup reach the worker',async t=>{const calls=[];const env=setup(async(a,p)=>{calls.push([a,p]);return {elements:Array.from({length:40},(_,i)=>({...element,id:'e'+i,kind:'figure'})),total:45,coverage};});t.after(env.close);env.panels.show('elements-figure');await settle();[...env.doc.querySelectorAll('#document-elements-figure button')].find(b=>b.textContent==='只看流程图').click();await settle();assert.equal(calls.at(-1)[1].subtype,'flowchart');env.doc.querySelector('#document-elements-figure [aria-label="下一页"]').click();await settle();assert.equal(calls.at(-1)[1].offset,40);assert.equal(calls.at(-1)[1].limit,40);});
+test('figure controls save a PNG and update favorites without replacing the preview card', async t => {
+ const figure={...element,kind:'figure',title:'Synthetic figure'}, downloads=[];
+ let favorite=false;
+ const env=setup(async (action,args)=>{
+  if(action==='document_elements_list'){
+   const elements=args.favorites_only&&!favorite?[]:[{...figure,favorite}];
+   return {elements,total:elements.length,coverage};
+  }
+  if(action==='document_element_favorite_set'){favorite=args.favorite;return {element_id:figure.id,favorite};}
+  if(action==='document_element_download')return {element_id:figure.id,mime_type:'image/png',image:'YWJj'};
+  throw Error(action);
+ });t.after(env.close);
+ env.w.URL.createObjectURL=blob=>{assert.equal(blob.type,'image/png');assert.equal(blob.size,3);return 'blob:http://localhost/synthetic';};
+ env.w.URL.revokeObjectURL=()=>{};
+ env.w.HTMLAnchorElement.prototype.click=function(){downloads.push(this.download);};
+ env.panels.show('elements-figure');await settle();
+ const root=env.doc.getElementById('document-elements-figure'),card=root.querySelector('article');
+ const star=card.querySelector('[aria-label="收藏图片"]');
+ assert.equal(star.getAttribute('aria-pressed'),'false');
+ star.click();await settle();
+ assert.equal(root.querySelector('article'),card);
+ assert.equal(star.getAttribute('aria-pressed'),'true');
+ [...card.querySelectorAll('button')].find(button=>button.textContent==='另存 PNG').click();await settle();
+ assert.deepEqual(downloads,['figure-p1-e1.png']);
+ [...root.querySelectorAll('button')].find(button=>button.textContent==='只看收藏').click();await settle();
+ assert.equal(root.querySelector('article'),card);
+ star.click();await settle();
+ assert.match(root.textContent,/当前范围没有收藏的图片/);
+ assert.equal(root.querySelector('article'),null);
+ assert.deepEqual(env.errors,[]);
+});
 test('failed preview is retryable, search does not mutate notes, and SVG renders loop edges as safe text',async t=>{let attempts=0;const env=setup(async a=>{if(a==='document_elements_list')return {elements:[element],total:1,coverage};if(a==='document_element_preview'){if(!attempts++)throw Error('temporary');return {mime_type:'image/png',image:'YWJj'};}throw Error(a);});t.after(env.close);env.panels.show('elements-formula');await settle();let btn=[...env.doc.querySelectorAll('#document-elements-formula button')].find(e=>e.textContent==='预览裁剪');btn.click();await settle();assert.equal(btn.textContent,'重试截图');btn.click();await settle();assert.equal(env.doc.querySelector('.document-element-image').hidden,false);
  const svg=env.w.PaperDocumentElements.flowSVG({nodes:[{id:'a',kind:'loop',label:'<script>alert(1)</script>'},{id:'b',kind:'step',label:'Update'}],edges:[{source:'a',target:'b',kind:'true',label:'是'},{source:'b',target:'a',kind:'back',label:'循环'}]});assert.equal(svg.querySelector('script'),null);assert.equal(svg.querySelectorAll('[data-edge-kind]').length,2);assert.match(svg.textContent,/<script>/);assert.equal(svg.querySelectorAll('[data-node-id]').length,2);
 });

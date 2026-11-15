@@ -185,6 +185,8 @@ def _schema(library):
       page INTEGER NOT NULL, kind TEXT NOT NULL, search_text TEXT NOT NULL,
       value TEXT NOT NULL, PRIMARY KEY(paper_id,version,id))''')
     library.db.execute('CREATE INDEX IF NOT EXISTS document_elements_page ON document_elements(paper_id,version,page,kind)')
+    library.db.execute('''CREATE TABLE IF NOT EXISTS document_figure_favorites (
+      paper_id TEXT NOT NULL, version TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(paper_id,version,id))''')
 
 
 def _version(library, paper_id, path, doc):
@@ -731,6 +733,8 @@ def _dispatch(library, request):
             try:
                 version = _version(library, paper_id, path, doc)
             except ElementBudgetError as exc:
+                if action in {'document_element_download', 'document_element_favorite_set'}:
+                    raise
                 previous = library.db.execute('SELECT version FROM document_element_pages WHERE paper_id=? ORDER BY rowid DESC LIMIT 1', (paper_id,)).fetchone()
                 version = previous['version'] if previous else ''
                 return {**_status(library, paper_id, version, count), 'paused': True, 'budget_reason': str(exc),
@@ -743,11 +747,16 @@ def _dispatch(library, request):
                 offset = _integer(request.get('offset', 0), 'offset', 0, 500000)
                 kind, query = request.get('kind'), request.get('query', '')
                 subtype = request.get('subtype')
+                favorites_only = request.get('favorites_only', False)
                 warning_offset = _integer(request.get('warning_offset', 0), 'warning_offset', 0, 2000)
                 if kind and kind not in KINDS:
                     raise ValueError('Unsupported document element kind')
                 if not isinstance(query, str) or len(query) > 500:
                     raise ValueError('query must be text up to 500 characters')
+                if not isinstance(favorites_only, bool) or (favorites_only and kind != 'figure'):
+                    raise ValueError('收藏筛选仅适用于图片。')
+                favorite = """EXISTS(SELECT 1 FROM document_figure_favorites f
+                    WHERE f.paper_id=document_elements.paper_id AND f.version=document_elements.version AND f.id=document_elements.id)"""
                 clause, params = 'paper_id=? AND version=?', [paper_id, version]
                 if kind:
                     clause += ' AND kind=?'
@@ -760,12 +769,32 @@ def _dispatch(library, request):
                 if query:
                     clause += " AND search_text LIKE ? ESCAPE '\\'"
                     params.append('%' + query.casefold().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%')
+                if favorites_only:
+                    clause += ' AND ' + favorite
                 total = library.db.execute('SELECT COUNT(*) FROM document_elements WHERE ' + clause, params).fetchone()[0]
-                rows = library.db.execute("SELECT value FROM document_elements WHERE " + clause + " ORDER BY page,json_extract(value,'$.rect[1]'),id LIMIT ? OFFSET ?", [*params, limit, offset]).fetchall()
+                rows = library.db.execute(f"SELECT value, (kind='figure' AND {favorite}) favorite FROM document_elements WHERE "
+                                          + clause + " ORDER BY page,json_extract(value,'$.rect[1]'),id LIMIT ? OFFSET ?",
+                                          [*params, limit, offset]).fetchall()
+                elements = [json.loads(row['value']) for row in rows]
+                for element, row in zip(elements, rows):
+                    if element['kind'] == 'figure':
+                        element['favorite'] = bool(row['favorite'])
                 notices = library.db.execute('SELECT page,warnings FROM document_element_pages WHERE paper_id=? AND version=? ORDER BY page LIMIT 40 OFFSET ?', (paper_id, version, warning_offset)).fetchall()
-                return {**_status(library, paper_id, version, count), 'elements': [json.loads(row['value']) for row in rows], 'total': total, 'offset': offset,
+                return {**_status(library, paper_id, version, count), 'elements': elements, 'total': total, 'offset': offset,
                         'page_warnings': [{'page': row['page'], 'warnings': json.loads(row['warnings'])} for row in notices]}
             value = _element(library, paper_id, version, request.get('element_id'))
+            if action in {'document_element_download', 'document_element_favorite_set'} and value['kind'] != 'figure':
+                raise ValueError('此操作仅适用于图片。')
+            if action == 'document_element_favorite_set':
+                favorite = request.get('favorite')
+                if not isinstance(favorite, bool):
+                    raise ValueError('无效的图片收藏状态。')
+                key = (paper_id, version, value['id'])
+                if favorite:
+                    library.db.execute('INSERT OR IGNORE INTO document_figure_favorites VALUES(?,?,?)', key)
+                else:
+                    library.db.execute('DELETE FROM document_figure_favorites WHERE paper_id=? AND version=? AND id=?', key)
+                return {'element_id': value['id'], 'favorite': favorite}
             if action == 'document_element_flow':
                 if value['kind'] != 'algorithm':
                     raise ValueError('Only algorithm candidates can build a flowchart')
@@ -775,23 +804,25 @@ def _dispatch(library, request):
                 if value.get('truncated') or value.get('extraction_incomplete'):
                     flow.update(complete=False, status='partial')
                 return {'flow': flow, 'element': value, 'source_version': version}
-            if action == 'document_element_preview':
-                width = _integer(request.get('render_width', 480), 'render_width', 64, 640)
+            if action in {'document_element_preview', 'document_element_download'}:
+                export = action == 'document_element_download'
+                side, pixels, byte_limit = (1800, 3_000_000, 4 * 1024 * 1024) if export else (640, 300_000, 1024 * 1024)
+                width = side if export else _integer(request.get('render_width', 480), 'render_width', 64, side)
                 rect = fitz.Rect(value['rect'])
                 page = doc[value['page'] - 1]
                 _preflight_page(doc, value['page'])
                 rotation = value.get('preview_rotation', 0)
                 upright_width = rect.height if rotation in (90, 270) else rect.width
-                scale = min(width / upright_width, 4, 640 / max(rect.width, rect.height), math.sqrt(300000 / rect.get_area()))
+                scale = min(width / upright_width, 4, side / max(rect.width, rect.height), math.sqrt(pixels / rect.get_area()))
                 image = None
                 for _ in range(4):
                     pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale).prerotate(rotation), clip=rect, colorspace=fitz.csRGB, alpha=False, annots=False)
                     image = pix.tobytes('png')
-                    if len(image) <= 1024 * 1024:
+                    if len(image) <= byte_limit:
                         break
                     scale *= .65
-                if len(image) > 1024 * 1024:
-                    raise ValueError('Document element preview exceeds image budget')
+                if len(image) > byte_limit:
+                    raise ValueError('图片超过可导出的大小。' if export else 'Document element preview exceeds image budget')
                 return {'element_id': value['id'], 'page': value['page'], 'rect': value['rect'], 'mime_type': 'image/png', 'image': base64.b64encode(image).decode(), 'width': pix.width, 'height': pix.height, 'preview_rotation': rotation, 'source_version': version}
             if action == 'document_element_annotate':
                 page = doc[value['page'] - 1]

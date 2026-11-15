@@ -32,6 +32,15 @@ READER_MAX_PNG_BYTES = 16 * 1024 * 1024
 READER_MAX_INTERNAL_LINKS = 1000
 from .linked_handwriting import LinkedHandwritingAccess, LINKED_KINDS
 
+_RANGE_EDIT_KEY = "PaperLibraryRangeEdited"
+
+
+def annotation_range_hash(value):
+    rects = [[round(float(coord), 3) for coord in rect] for rect in value["rects"]]
+    return hashlib.sha256(json.dumps([value["page"], rects], separators=(",", ":")).encode()).hexdigest()
+
+
+
 def _constants():
     """The cap table from `core.py`, resolved when a method runs.
 
@@ -437,6 +446,21 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         favorites = ids(self, id)
         result, characters = [], 0
         def response(truncated):
+            sources = {note["id"]: note for note in result if note.get("kind") != "ai-feedback"}
+            for reply in result:
+                if reply.get("source_kind") != "annotation-translation":
+                    continue
+                source = sources.get(reply.get("reply_to"))
+                declared = reply.get("annotation_ids")
+                if source is None and isinstance(declared, list) and len(declared) == 1 and isinstance(declared[0], str):
+                    source = sources.get(declared[0])
+                if source is None:
+                    continue
+                saved_range = reply.get("source_range_hash")
+                if isinstance(saved_range, str) and re.fullmatch(r"[0-9a-f]{64}", saved_range):
+                    reply["translation_range_stale"] = saved_range != annotation_range_hash(source)
+                elif source.get("range_edited"):
+                    reply["translation_range_stale"] = True
             values = result
             if ai_reading_only:
                 selected = {a["id"] for a in values if a.get("ai_reading_style") is True}
@@ -455,6 +479,12 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                     if len(result) >= _constants().MAX_ANNOTATIONS:
                         return response(True)
                     value = self._annotation(page, annot, handwriting=handwriting)
+                    if value.get("source_kind") == "annotation-translation":
+                        saved_range = self._annotation_metadata(annot).get("source_range_hash")
+                        if isinstance(saved_range, str) and re.fullmatch(r"[0-9a-f]{64}", saved_range):
+                            value["source_range_hash"] = saved_range
+                    elif value["type"] in {"highlight", "underline", "strikeout", "note"} and doc.xref_get_key(annot.xref, _RANGE_EDIT_KEY) == ("bool", "true"):
+                        value["range_edited"] = True
                     value = self._with_annotation_version(value, bool(annot.info.get("id")))
                     characters += self._annotation_characters(value, include_tags=True)
                     if characters > 2_000_000:
@@ -984,7 +1014,10 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             annot.set_info(modDate="D:" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%SZ"))
             annot.update()
             self._readable_underline(doc, annot)
-            return {"annotation": self._with_annotation_version(self._annotation(current, annot), True)}
+            selected = self._annotation(current, annot)
+            if annotation_range_hash(selected) != annotation_range_hash(value):
+                doc.xref_set_key(annot.xref, _RANGE_EDIT_KEY, "true")
+            return {"annotation": self._with_annotation_version(selected, True)}
         with self.lock():
             return self._write_pdf(id, operation)
 

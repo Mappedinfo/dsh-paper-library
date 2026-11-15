@@ -31,7 +31,7 @@ window.PaperDocumentElements = (() => {
     return svg;
   }
   function create({api,panels,getPaper,navigate,annotated,toast,yieldWork,openSettings,sharedSearch=false}) {
-    let active=null,disposed=false,ticket=0,previewCount=0,lastInput=Date.now(),lastBatch=0;const views=new Map(),papers=new Map(),previewQueue=[],images=[];
+    let active=null,disposed=false,ticket=0,previewCount=0,lastInput=Date.now(),lastBatch=0,downloading=false;const views=new Map(),papers=new Map(),previewQueue=[],images=[];
     let resources={preview_bytes:12*1048576,preview_count:12,batch_pages:1,batch_gap_ms:2000,idle_ms:1200};
     const touch=()=>{lastInput=Date.now();};
     for(const event of ['pointerdown','keydown','wheel'])document.addEventListener(event,touch,{capture:true,passive:true});
@@ -56,8 +56,10 @@ window.PaperDocumentElements = (() => {
       const stat=node('p','small document-elements-status');stat.setAttribute('role','status');const pager=node('div','pagination'),count=node('span');
       const previous=button('←',()=>{const v=views.get(kind);v.offset=Math.max(0,v.offset-40);void reload();}),next=button('→',()=>{views.get(kind).offset+=40;void reload();});previous.setAttribute('aria-label','上一页');next.setAttribute('aria-label','下一页');pager.append(previous,count,next);
       const list=node('div','document-elements-list');root.append(toolbar,stat,adjust,pager,list);
-      const view={kind,root,input,scan,clear,adjust,status:stat,list,previous,next,count,offset:0,flowOnly:false,cards:new Map(),aux:new Map()};views.set(kind,view);
+      const view={kind,root,input,scan,clear,adjust,status:stat,list,previous,next,count,offset:0,flowOnly:false,favoritesOnly:false,cards:new Map(),aux:new Map()};views.set(kind,view);
       if(kind==='figure'){const filter=button('只看流程图',()=>{view.flowOnly=!view.flowOnly;filter.setAttribute('aria-pressed',String(view.flowOnly));void reload(true);});filter.setAttribute('aria-pressed','false');toolbar.append(filter);
+        const favorites=button('只看收藏',()=>{view.favoritesOnly=!view.favoritesOnly;favorites.setAttribute('aria-pressed',String(view.favoritesOnly));void reload(true);});
+        favorites.setAttribute('aria-pressed','false');toolbar.append(favorites);
         const mark=button('标注本页流程图',async()=>{const id=getPaper()?.id;if(!id)return;const candidates=(view.elements||[]).filter(e=>e.subtype==='flowchart'&&e.method!=='caption-only');if(!candidates.length){toast?.('本页没有已定位区域的流程图。');return;}mark.disabled=true;let count=0;try{for(const e of candidates){if(disposed||getPaper()?.id!==id)break;const result=await api('document_element_annotate',{id,element_id:e.id});count++;if(getPaper()?.id===id)await annotated?.(id,e.page,result);}if(getPaper()?.id===id)toast?.(`已标注 ${count} 个流程图区域。`);}catch(error){toast?.(`已标注 ${count} 个区域，后续未完成：${error.message}`,true);}finally{mark.disabled=false;}});toolbar.append(mark);
       }
       panels.registerPanel({id:`elements-${kind}`,label,element:root,reading:true,onShow:()=>{if(active!==kind){activate(kind);void open();}}});
@@ -68,12 +70,12 @@ window.PaperDocumentElements = (() => {
       const wanted=new Set(elements.map(e=>e.id));
       for(const [key,item]of v.cards)if(!wanted.has(key)){releaseCard(item);item.root.remove();v.cards.delete(key);}
       const nodes=[];
-      for(const e of elements){const signature=JSON.stringify([sourceVersion,e]);let item=v.cards.get(e.id);
+      for(const e of elements){const {favorite,...source}=e;const signature=JSON.stringify([sourceVersion,source]);let item=v.cards.get(e.id);
         if(item&&item.signature!==signature){releaseCard(item);item.root.remove();v.cards.delete(e.id);item=null;}
-        if(!item){item=card(e,id,v);item.signature=signature;v.cards.set(e.id,item);}nodes.push(item.root);
+        if(!item){item=card(e,id,v);item.signature=signature;v.cards.set(e.id,item);}item.updateFavorite?.(favorite===true);nodes.push(item.root);
       }
       const auxiliary=(key,value,build)=>{const signature=JSON.stringify(value);let item=v.aux.get(key);if(!item||item.signature!==signature){const root=build();if(item?.root.tagName==='DETAILS')root.open=item.root.open;item={signature,root};v.aux.set(key,item);}nodes.push(item.root);};
-      if(!elements.length)auxiliary('empty',Boolean(result.coverage?.complete),()=>node('p','small',result.coverage?.complete?'未识别到匹配内容。扫描页、复杂排版或无编号公式可能需要在 PDF 中手动框选。':'尚无匹配内容；扫描完成后会自动更新。'));
+      if(!elements.length)auxiliary('empty',[Boolean(result.coverage?.complete),v.favoritesOnly],()=>node('p','small',v.favoritesOnly?'当前范围没有收藏的图片。':result.coverage?.complete?'未识别到匹配内容。扫描页、复杂排版或无编号公式可能需要在 PDF 中手动框选。':'尚无匹配内容；扫描完成后会自动更新。'));
       if(result.page_warnings?.length)auxiliary('page-warnings',result.page_warnings,()=>{const details=node('details','document-element-warnings');details.append(node('summary','','提取范围与遗漏提示'));for(const page of result.page_warnings){const important=page.warnings.filter(w=>!w.startsWith('版面规则提取候选'));if(important.length)details.append(node('p','small','第 '+page.page+' 页：'+important.join(' ')));}details.append(node('p','small','版面规则提取候选；无编号公式、扫描页和复杂跨栏内容可能遗漏，请核对原页。'));return details;});
       if(result.warnings?.length)auxiliary('warnings',result.warnings,()=>node('p','small',result.warnings.join(' ')));
       const keep=new Set(nodes);for(const child of [...v.list.children])if(!keep.has(child))child.remove();
@@ -81,7 +83,8 @@ window.PaperDocumentElements = (() => {
       for(let i=0;i<nodes.length;i++)if(v.list.children[i]!==nodes[i])v.list.insertBefore(nodes[i],v.list.children[i]||null);
     }
     async function reload(reset=false){const v=views.get(active),id=getPaper()?.id;if(!v||!id||disposed)return;const run=++ticket;if(reset)v.offset=0;if(v.paperId!==id){clearView(v);v.paperId=id;v.offset=0;}status(v,record(id));
-      try{const result=await api('document_elements_list',{id,kind:v.kind,query:v.input.value,offset:v.offset,limit:40,...(v.flowOnly?{subtype:'flowchart'}:{})});if(!valid(run,id)||active!==v.kind)return;
+      try{const result=await api('document_elements_list',{id,kind:v.kind,query:v.input.value,offset:v.offset,limit:40,...(v.flowOnly?{subtype:'flowchart'}:{}),...(v.favoritesOnly?{favorites_only:true}:{})});if(!valid(run,id)||active!==v.kind)return;
+        if(v.offset>0&&!result.elements?.length&&v.favoritesOnly){v.offset=Math.max(0,v.offset-40);return reload();}
         const r=record(id);r.coverage=result.coverage;r.usage=result.usage;if(result.paused){r.paused=true;r.notice='扫描已暂停：'+(result.budget_reason||'已达到资源预算');}status(v,r);if(result.stale&&!result.paused)v.status.textContent='PDF 内容或提取版本已改变，将重新提取；旧结果暂不使用。';
         const elements=result.elements||[],total=result.total??elements.length;v.count.textContent=total?(v.offset+1)+'–'+(v.offset+elements.length)+' / '+total:'0 项';v.previous.disabled=v.offset===0;v.next.disabled=v.offset+elements.length>=total;
         // 在响应到达时读取位置，保留等待期间用户自己滚动后的最新位置。
@@ -100,7 +103,47 @@ window.PaperDocumentElements = (() => {
     }
     function enqueue(fn,owner){if(previewQueue.length>=40||previewQueue.some(job=>job.owner===owner))return;const job=()=>fn();job.owner=owner;previewQueue.push(job);pump();}
     function pump(){while(!disposed&&previewCount<1&&previewQueue.length){const job=previewQueue.shift();previewCount++;void job().finally(()=>{previewCount--;pump();});}}
+    async function saveFigure(id,e,save){
+      if(downloading){toast?.('正在另存一张图片，请稍候。');return;}
+      downloading=true;save.disabled=true;
+      try{
+        const result=await api('document_element_download',{id,element_id:e.id});
+        if(result.mime_type!=='image/png'||result.element_id!==e.id||typeof result.image!=='string')throw new Error('未返回有效的图片。');
+        const bytes=Uint8Array.from(atob(result.image),char=>char.charCodeAt(0));
+        const url=URL.createObjectURL(new Blob([bytes],{type:'image/png'}));
+        const a=node('a');
+        try{
+          a.href=url;a.download=`figure-p${e.page}-${e.id.slice(0,8)}.png`;
+          document.body.append(a);a.click();
+        }finally{a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
+      }catch(error){toast?.(`图片未另存：${error.message}`,true);}
+      finally{downloading=false;save.disabled=false;}
+    }
     function card(e,id,v){const item={alive:true},current=()=>!disposed&&item.alive&&active===v.kind&&getPaper()?.id===id&&v.paperId===id;const root=node('article','document-element-card'),heading=node('header'),title=node('strong','',e.title||kinds[e.kind]),page=button(`第 ${e.page} 页`,()=>void navigate({paperId:id,page:e.page,rects:[e.rect],focusId:e.id}));heading.append(title,page);root.append(heading);for(const segment of (e.source_segments||[]).slice(1)){root.append(button(`续页 ${segment.page}`,()=>void navigate({paperId:id,page:segment.page,rects:[segment.rect],focusId:e.id})));}
+      if(e.kind==='figure'){
+        const tools=node('div','document-figure-tools');
+        const save=button('另存 PNG',()=>{if(current())void saveFigure(id,e,save);});
+        let isFavorite=e.favorite===true,saving=false;
+        const star=button('',async()=>{
+          if(!current()||saving)return;
+          saving=true;star.disabled=true;
+          try{
+            const result=await api('document_element_favorite_set',{id,element_id:e.id,favorite:!isFavorite});
+            if(current()){
+              paintFavorite(result.favorite===true);
+              void reload();
+            }else if(active==='figure'&&getPaper()?.id===id)void reload();
+          }catch(error){if(current())toast?.(error.message,true);}
+          finally{saving=false;star.disabled=false;}
+        });
+        function paintFavorite(value){
+          isFavorite=value;star.textContent=value?'★':'☆';star.title=value?'取消收藏图片':'收藏图片';
+          star.setAttribute('aria-label','收藏图片');star.setAttribute('aria-pressed',String(value));
+        }
+        item.updateFavorite=value=>{if(!saving)paintFavorite(value);};
+        paintFavorite(isFavorite);
+        tools.append(save,star,page);heading.append(tools);
+      }
       if(e.subtype==='flowchart')root.append(node('span','small','流程图候选 · 根据图题识别'));
       const image=node('img','document-element-image');image.alt=e.title||kinds[e.kind];image.hidden=true;image.addEventListener('click',()=>void navigate({paperId:id,page:e.page,rects:[e.rect],focusId:e.id}));
       const state=node('p','small'),preview=button('预览裁剪',()=>enqueue(loadPreview,item));root.append(image,state,preview);let loaded=false,loading=false;

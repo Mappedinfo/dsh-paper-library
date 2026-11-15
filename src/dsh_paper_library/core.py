@@ -572,7 +572,8 @@ class Library(Papers, PdfWrites, AnnotationAccess):
             if count >= MAX_ANNOTATIONS:
                 raise ValueError("PDF annotation limit reached")
             extra = {"kind": "ai-feedback", "source_kind": "annotation-translation", "source_message_id": request_key,
-                     "annotation_ids": [source["id"]], "generated": now(), "model": str(model)[:200]}
+                     "annotation_ids": [source["id"]], "source_range_hash": annotations.annotation_range_hash(source),
+                     "generated": now(), "model": str(model)[:200]}
             result = self._write_pdf(id, lambda doc: self._add_annotation(doc, source["page"], "note",
                 comment="翻译：" + text.strip() + "\n\nAI 翻译 · " + extra["model"], author="AI 翻译 · Paper Library",
                 color="#91bad6", extra=extra))
@@ -735,7 +736,7 @@ def dispatch(request):
             # Indexing of corpora another tool syncs: symlinks in, no copies out.
             from . import external
             return external.dispatch(library, request)
-        if action in {"document_elements_scan", "document_elements_clear", "document_elements_list", "document_element_preview", "document_element_annotate", "document_element_flow"}:
+        if action in {"document_elements_scan", "document_elements_clear", "document_elements_list", "document_element_preview", "document_element_download", "document_element_favorite_set", "document_element_annotate", "document_element_flow"}:
             from . import document_elements
             return document_elements.dispatch(library, request)
         if action in {"graph_references_extract", "graph_references_get"}:
