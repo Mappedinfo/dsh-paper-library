@@ -132,7 +132,9 @@ input[type="checkbox"] { accent-color: var(--dsw-alias-button-primary-fill); }
 .catalog-citation-source { display: block; color: var(--muted); font-size: 10px; }
 .catalog-table th .catalog-citation-refresh { margin-left: 4px; padding: 0 3px; }
 .catalog-table .catalog-column-institution { width: 180px; }
-.catalog-table .catalog-column-dates { width: 170px; }
+.catalog-table .catalog-column-published,
+.catalog-table .catalog-column-received,
+.catalog-table .catalog-column-accepted { width: 104px; }
 .catalog-table .catalog-column-kind { width: 85px; }
 .catalog-table .catalog-column-storage { width: 80px; }
 .catalog-table .catalog-column-actions { width: 126px; }
@@ -148,7 +150,6 @@ input[type="checkbox"] { accent-color: var(--dsw-alias-button-primary-fill); }
   .catalog-expanded .catalog-column-citekey { width: 108px; }
   .catalog-expanded .catalog-column-doi { width: 155px; }
   .catalog-expanded .catalog-column-institution { width: 132px; }
-  .catalog-expanded .catalog-column-dates { width: 147px; }
   .catalog-expanded .catalog-column-kind { width: 76px; }
   .catalog-expanded .catalog-column-storage { width: 67px; }
 }

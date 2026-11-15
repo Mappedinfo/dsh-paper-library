@@ -1798,6 +1798,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
 });
 readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,locateAnnotations:locateCurrentPageAnnotations,onAnnotationOrderChange:setAnnotationOrder,contextChanged:()=>{readerSearchUI?.sync();resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
 const rangeEditBar=el('div','annotation-range-edit');rangeEditBar.hidden=true;
+rangeEditBar.dataset.notificationAvoid = 'bottom';
 rangeEditBar.setAttribute('role', 'group');
 rangeEditBar.setAttribute('aria-label', '调整原文范围');
 const rangeEditLabel = el('span'), rangeEditSave = el('button','button primary','保存新范围'), rangeEditCancel = el('button','button subtle','取消');

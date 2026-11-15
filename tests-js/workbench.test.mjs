@@ -342,6 +342,33 @@ test('the citation heading starts at descending and resets pagination', async ()
   assert.equal(f.loads[1].order,'asc');
 });
 
+test('publication, receipt and acceptance dates have separate cells and sort controls', async () => {
+  const paper = { ...original(), publication_dates: { online: '2026-09', accepted: '2026-08-02' } };
+  const f = environment({ active: paper });
+  f.workbench.setTable(true);
+  const table = f.element('catalog-table');
+  const heading = index => table.querySelectorAll('th')[index];
+  assert.deepEqual(table.querySelectorAll('td').slice(9, 12).map(cell => cell.querySelector('span').textContent),
+    ['2026-09', '—', '2026-08-02']);
+  const sort = f.element('catalog-sort');
+  for (const [index, key, label] of [[9, 'published', '发表日期'], [10, 'received', '收稿日期'], [11, 'accepted', '接收日期']]) {
+    assert.equal(heading(index).querySelector('button').textContent, label);
+    assert.ok(sort.options.some(option => option.value === key));
+    f.state.offset = 80;
+    await heading(index).querySelector('button').dispatch('click');
+    assert.deepEqual([f.state.sort, f.state.order, f.state.offset], [key, 'desc', 0]);
+    f.workbench.render();
+    assert.equal(heading(index).getAttribute('aria-sort'), 'descending');
+    await heading(index).querySelector('button').dispatch('click');
+    assert.equal(f.state.order, 'asc');
+    f.workbench.render();
+  }
+  sort.value = 'received';
+  await sort.dispatch('change');
+  assert.deepEqual([f.state.sort, f.state.order], ['received', 'desc']);
+  assert.equal(f.loads.length, 7);
+});
+
 test('metadata enrichment reports a verified zero without saving the draft', async () => {
   const paper=original();
   const f=environment({active:paper,respond:()=>({item:paper,citation_snapshot:{status:'found',count:0,source:'OpenAlex'}})});
@@ -606,7 +633,7 @@ test('metadata lookup adopts the complete author list in the review draft withou
 test('shared folder action follows selection, refuses missing files and never accepts a browser path',async()=>{
   const first={...original(),pdf:true};const second={...first,id:'paper-b'};const f=environment({active:first});f.state.items.push(second);f.workbench.setTable(true);
   const headers=f.element('catalog-table').querySelectorAll('th');
-  assert.equal(headers.length,12);
+  assert.equal(headers.length,14);
   assert.equal(headers[6].textContent,'DOI / 预印本');
   assert.equal(headers[7].querySelector('button').textContent,'引用量');
   assert.equal(headers[8].textContent,'单位');

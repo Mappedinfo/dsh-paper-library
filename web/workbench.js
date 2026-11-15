@@ -22,7 +22,14 @@ window.PaperWorkbench = (() => {
     item.type==='article'&&(/^preprint$/i.test(item.genre||'')||/^arxiv$/i.test(item.archive||''))?'preprint':item.type;
   const fileType = item => item.resource_kind==='slides'?'PlainDeck':item.pdf?'PDF':
     item.storage_formats?.length?item.storage_formats.slice(0,3).map(format=>/^[a-z0-9]+$/i.test(format)?format.toUpperCase():format).join(' / ')+(item.storage_formats.length>3?'…':''):'无附件';
-  const columns = [['title','标题'],['author','作者'],['year','年份'],['journal','期刊 / 出处'],['ranking','文章分区'],['citekey','引用键'],[null,'DOI / 预印本'],['citations','引用量'],[null,'单位'],[null,'发表 / 收稿 / 接收'],[null,'文献类型'],[null,'文件格式']];
+  const columns = [
+    ['title','标题'], ['author','作者'], ['year','年份'], ['journal','期刊 / 出处'],
+    ['ranking','文章分区','jcr'], ['citekey','引用键'], [null,'DOI / 预印本','doi'],
+    ['citations','引用量'], [null,'单位','institution'],
+    ['published','发表日期'], ['received','收稿日期'], ['accepted','接收日期'],
+    [null,'文献类型','kind'], [null,'文件格式','storage'],
+  ];
+  const descendingByDefault = new Set(['citations','published','received','accepted']);
   function create({state,api,loadList,openPaper,selectPaper,changed,tableChanged,toast,el,resource,organization,openMetadataPanel,closeMetadataPanel,persistence,enableAutomaticDoi,openAbstract}) {
     let table = false, editing = null, revision = 0, readingId = null;
     let editorVisible=false, initialFields=null, initialRankings=null, restoring=false, selectingForEdit=false, loadingEditId=null, drafts=new Map();
@@ -117,7 +124,7 @@ window.PaperWorkbench = (() => {
     scope.addEventListener('change',()=>{state.archived=scope.value==='archived';state.offset=0;expand.disabled=state.archived;if(state.archived)setTable(true);void loadList();});
     const sort=node('select');sort.id='catalog-sort';sort.setAttribute('aria-label','文献排序');
     for(const [value,label] of [['modified','最近修改'],['created','最近导入'],...columns.filter(c=>c[0])]) { const o=node('option',label);o.value=value;sort.append(o); }
-    sort.addEventListener('change',()=>sortBy(sort.value,sort.value==='citations'&&state.sort!=='citations'?'desc':state.order));
+    sort.addEventListener('change',()=>sortBy(sort.value,descendingByDefault.has(sort.value)&&state.sort!==sort.value?'desc':state.order));
     const order=button('降序 ↓','catalog-order',()=>sortBy(state.sort,state.order==='asc'?'desc':'asc'));
     const kind=node('select');kind.id='catalog-kind';kind.setAttribute('aria-label','条目类型');for(const [value,label] of [['all','全部类型'],['paper','文献'],['dataset','数据集'],['slides','演示文稿']]){const option=node('option',label);option.value=value;kind.append(option);}kind.addEventListener('change',()=>{state.kind=kind.value;state.offset=0;void loadList();});
     const projectFilter=document.querySelector('.library-filterbar > .library-organizer-row');
@@ -357,14 +364,15 @@ window.PaperWorkbench = (() => {
         if(enableAutomaticDoi()&&!doiDialog.open&&doiEligible(latest)&&!doiAttempts.has(doiKey(latest)))void findDoi(latest);
       });
       if(!table)return;
-      const grid=node('table');grid.setAttribute('aria-label','文献、数据集与演示文稿资料表');const widths=node('colgroup');for(const field of ['title','author','year','journal','jcr','citekey','doi','citations','institution','dates','kind','storage']){const col=node('col');col.className=`catalog-column-${field}`;widths.append(col);}grid.append(widths);const head=node('thead');const headerRow=node('tr');
-      for(const [key,label] of columns){
+      const grid=node('table');grid.setAttribute('aria-label','文献、数据集与演示文稿资料表');const widths=node('colgroup');grid.append(widths);const head=node('thead');const headerRow=node('tr');
+      for(const [key,label,field=key] of columns){
+        widths.append(node('col',undefined,`catalog-column-${field}`));
         const th=node('th');th.scope='col';
         if(key){
           const sorted=state.sort===key;
           th.setAttribute('aria-sort',sorted?(state.order==='asc'?'ascending':'descending'):'none');
           th.append(button(`${label}${sorted?(state.order==='asc'?' ↑':' ↓'):''}`,null,
-            ()=>sortBy(key,(state.sort===key?state.order==='asc':key==='citations')?'desc':'asc')));
+            ()=>sortBy(key,(state.sort===key?state.order==='asc':descendingByDefault.has(key))?'desc':'asc')));
         }else th.textContent=label;
         if(key==='citations')catalogCitations?.mountHeader(th);
         headerRow.append(th);
@@ -372,7 +380,8 @@ window.PaperWorkbench = (() => {
       const body=node('tbody');for(const item of state.items){const selected=state.active?.id===item.id||state.catalogSlideId===item.id;const row=node('tr',undefined,selected?'selected':'');row.dataset.paperId=item.id;row.tabIndex=0;row.setAttribute('aria-selected',String(selected));const choose=()=>selectPaper(item);row.addEventListener('click',e=>{if(!e.target.closest('button,a,input,select,textarea,summary'))choose();});row.addEventListener('keydown',e=>{if(e.target===row&&(e.key==='Enter'||e.key===' ')){e.preventDefault();choose();}});
         const dates=item.publication_dates||{},kind=typeOf(item);
         const venue=item.resource_kind==='dataset'?item.publisher:(kind==='paper-conference'&&item['event-title'])||item['container-title']||(kind==='preprint'&&item.archive);
-        const values=[item.title,(item.author||[]).map(name).join(' · '),item.issued?.['date-parts']?.[0]?.[0],venue,ranking(item),item.citekey,item.DOI,null,institutions(item).join('；'),[dates.published||dates.online||dates.print,dates.received,dates.accepted].map(v=>v||'—').join(' / '),kind==='presentation'?'演示文稿':types[kind]||kind,fileType(item)];
+        const values=[item.title,(item.author||[]).map(name).join(' · '),item.issued?.['date-parts']?.[0]?.[0],venue,ranking(item),item.citekey,item.DOI,null,institutions(item).join('；'),
+          dates.published||dates.online||dates.print,dates.received,dates.accepted,kind==='presentation'?'演示文稿':types[kind]||kind,fileType(item)];
         values.forEach((value,i)=>{const td=node('td'),text=String(value||'—');if(i===0){
           const b=button(value||'未命名条目',null,event=>{if(!openDoubleClickedTitle(item,event))selectPaper(item);},'table-title');
           b.setAttribute('aria-pressed',String(selected));b.title=b.textContent;td.append(b);

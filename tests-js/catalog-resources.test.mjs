@@ -86,4 +86,16 @@ test('catalog merges synthetic papers, datasets and presentations before sorting
   assert.equal((await call({ action: 'catalog_resource_list', kind: 'all', project: project.id })).total, 0)
   const noPython = createFetchHandler({ ...options, python: '/nonexistent/python' })
   assert.equal((await call({ action: 'catalog_resource_list', kind: 'slides' }, noPython)).total, 2)
+  await call({ action: 'update', id: paper.id, metadata: {
+    publication_dates: { online: '2026-04', received: '2025', accepted: '2026-01-09' },
+  } })
+  for (const sort of ['published', 'received', 'accepted']) {
+    for (const order of ['asc', 'desc']) {
+      const first = await call({ action: 'catalog_resource_list', sort, order, limit: 1 })
+      const rest = await call({ action: 'catalog_resource_list', sort, order, limit: 3, offset: 1 })
+      assert.equal(first.items[0].id, paper.id)
+      assert.ok(rest.items.every(entry => entry.id !== paper.id))
+      assert.equal(new Set([...first.items, ...rest.items].map(entry => entry.id)).size, 4)
+    }
+  }
 })

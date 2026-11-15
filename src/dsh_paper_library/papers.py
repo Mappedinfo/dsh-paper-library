@@ -26,6 +26,14 @@ MAX_IMPORT = PaperConflictError = clamp = csl_item = now = parse_ris = None
 LIBRARY_LOCK_TIMEOUT_SECONDS = 30
 
 
+def publication_date_sorts(metadata):
+    # Stored ISO dates sort lexically at their supplied precision.
+    dates = {key: f"nullif(json_extract({metadata},'$.publication_dates.{key}'),'')"
+             for key in ("published", "online", "print", "received", "accepted")}
+    return {"published": "coalesce(" + ",".join(dates[key] for key in ("published", "online", "print")) + ")",
+            "received": dates["received"], "accepted": dates["accepted"]}
+
+
 def install_helpers(**helpers):
     module = globals()
     for name, value in helpers.items():
@@ -295,7 +303,9 @@ class Papers:
             raise ValueError("archived must be boolean")
         query = str(query).strip()[:500]
         from .core import ranking_sort
+        date_sorts = publication_date_sorts("papers.metadata")
         expressions = {
+            **date_sorts,
             "title": "papers.title COLLATE NOCASE",
             "author": "coalesce(json_extract(papers.metadata,'$.author[0].family'),json_extract(papers.metadata,'$.author[0].literal')) COLLATE NOCASE",
             "year": "coalesce(json_extract(papers.metadata,'$.issued.date-parts[0][0]'),CAST(substr(json_extract(papers.metadata,'$.publication_dates.published'),1,4) AS INTEGER))",
@@ -329,7 +339,7 @@ class Papers:
             default_order = "papers.modified DESC,papers.id"
         if sort is not None:
             expression = expressions[sort]
-            direction = order or ("desc" if sort in {"modified", "created", "year"} else "asc")
+            direction = order or ("desc" if sort in date_sorts or sort in {"modified", "created", "year"} else "asc")
             sorting = f"({expression}) IS NULL ASC, {expression} {direction}, papers.id ASC"
         else:
             if order is not None:

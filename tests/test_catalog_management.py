@@ -99,6 +99,36 @@ def test_server_sorting_and_page_caps_are_stable_and_metadata_only(tmp_path, mon
             request(tmp_path, "list", **invalid)
 
 
+def test_date_sorts_compose_with_filters_and_page_with_missing_last(tmp_path, monkeypatch):
+    monkeypatch.setattr(Library, "_open_pdf", no_pdf)
+    entries = {
+        "A": {"published": "2026-04-09", "online": "2025", "received": "2025-10", "accepted": "2026-01-08"},
+        "B": {"online": "2026-04", "received": "2025-11-03", "accepted": "2026"},
+        "C": {"print": "2026", "received": "2025", "accepted": "2026-02"},
+        "Unknown": {},
+    }
+    for suffix, dates in entries.items():
+        request(tmp_path, "create", metadata={"title": f"Scoped {suffix}", "publication_dates": dates,
+                                              "issued": {"date-parts": [[2030]]}})
+    request(tmp_path, "create", metadata={"title": "Outside filter", "publication_dates": dict.fromkeys(
+        ("published", "received", "accepted"), "2040")})
+
+    for action in ("list", "resource_list"):
+        for field, descending in {"published": ["A", "B", "C"], "received": ["B", "A", "C"],
+                                  "accepted": ["C", "A", "B"]}.items():
+            for order, expected in [(None, descending), ("asc", descending[::-1])]:
+                args = {"library": str(tmp_path / "library"), "action": action,
+                        "query": "Scoped", "sort": field, "limit": 2}
+                if order:
+                    args["order"] = order
+                first = dispatch_request(args)
+                second = dispatch_request({**args, "offset": 2})
+                assert first["order"] == (order or "desc")
+                assert first["total"] == second["total"] == 4
+                assert [row["title"] for row in first["items"] + second["items"]] == [
+                    f"Scoped {name}" for name in [*expected, "Unknown"]]
+
+
 def test_jcr_sort_uses_latest_year_worst_category_and_missing_last(tmp_path):
     first = request(tmp_path, "create", metadata={"title": "Mixed", "journal_rankings": [ranking("Q1", 2024), ranking("Q2", 2025), ranking("Q4", 2025, "Other category")]})
     second = request(tmp_path, "create", metadata={"title": "Single", "journal_rankings": [ranking("Q2")]})

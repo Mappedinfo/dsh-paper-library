@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 import uuid
 
 from .core import bounded_text, canonical_doi, csl_item, now, ranking_sort
+from .papers import publication_date_sorts
 
 RELATIONS = {"mentions", "cites", "uses", "produces", "describes"}
 STATUSES = {"needs-review", "accepted", "rejected"}
@@ -315,7 +316,8 @@ def list_resources(library, request):
     offset, limit = _paging(request, 40, 200)
     query = bounded_text(request.get("query", ""), "Query", 500)
     sort = request.get("sort") or "modified"
-    order = request.get("order") or ("desc" if sort in {"modified", "created", "year", "citations"} else "asc")
+    date_sorts = publication_date_sorts("metadata")
+    order = request.get("order") or ("desc" if sort in date_sorts or sort in {"modified", "created", "year", "citations"} else "asc")
     citation_cache = request.get("_citation_cache")
     if citation_cache is not None and not isinstance(citation_cache, dict):
         raise ValueError("Invalid catalog citation snapshot")
@@ -325,6 +327,7 @@ def list_resources(library, request):
                    "publisher": "json_extract(metadata,'$.publisher') COLLATE NOCASE", "modified": "modified", "created": "created", "citekey": "citekey COLLATE NOCASE", "kind": "kind"}
     expressions["jcr"] = "(SELECT max(json_extract(r.value,'$.quartile')) FROM json_each(metadata,'$.journal_rankings') r WHERE json_extract(r.value,'$.system')='JCR' AND json_extract(r.value,'$.year')=(SELECT max(json_extract(y.value,'$.year')) FROM json_each(metadata,'$.journal_rankings') y WHERE json_extract(y.value,'$.system')='JCR'))"
     expressions["ranking"] = ranking_sort("metadata")
+    expressions.update(date_sorts)
     if sort == "citations":
         library.db.create_function("catalog_citation_count", 1,
                                    lambda metadata: catalog_citations.sort_count(metadata, citation_cache or {}),

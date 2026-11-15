@@ -1323,7 +1323,12 @@ dialog .small {
   gap: 8px;
   pointer-events: none;
 }
-.notification-region > * { pointer-events: auto; }
+.notification-region button { pointer-events: auto; }
+/* Docked controls reserve their edge while they and their pane are visible. */
+body:has([data-notification-avoid="bottom"]:not([hidden], [hidden] *)) .notification-region {
+  top: 8px;
+  bottom: auto;
+}
 .toast {
   position: static;
   align-self: center;

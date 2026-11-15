@@ -192,19 +192,30 @@ test('range handles update the draft without writing until the user saves', {ski
     + source.slice(source.indexOf('const rangeEditBar='),source.indexOf('outlineUI=window.PaperOutline')));
   w.renderAnnotations();
   w.annotationEditor={beforeAsk:async()=>undefined};
+  d.getElementById('paper-detail').hidden = false;
   const edit=d.querySelector('[data-note-action=reselect]'),bar=d.querySelector('.annotation-range-edit'),[save,cancel]=bar.querySelectorAll('button');
+  const edgeRule = css.match(/(body:has\(\[data-notification-avoid="bottom"\][^{}]+\) \.notification-region)\s*\{\s*top: 8px;\s*bottom: auto;/);
+  assert.ok(edgeRule);
+  const avoidsBottom = () => Boolean(d.querySelector(edgeRule[1]));
+  assert.equal(avoidsBottom(), false);
   await w.handleNoteAction({target:edit});
   assert.equal(bar.parentElement.id,'reader-content');assert.ok(save.classList.contains('primary'));
   assert.equal(bar.hidden,false);assert.equal(save.disabled,true);
+  assert.equal(avoidsBottom(), true);
+  bar.parentElement.hidden = true;
+  assert.equal(avoidsBottom(), false);
+  bar.parentElement.hidden = false;
   moveHandle({id:'paper-a',page:2,text:'Other',rects:[[1,2,3,4]]});assert.equal(save.disabled,true);
   moveHandle({id:'paper-a',page:1,text:'New source',rects:[[1,2,3,4]]});
   assert.equal(save.disabled,false);assert.equal(calls.length,0);assert.match(bar.textContent,/尚未保存/);
   save.click();await new Promise(r=>setImmediate(r));
   assert.equal(save.disabled,false);assert.match(f.messages.at(-1),/Temporary error/);
+  assert.equal(avoidsBottom(), true);
   failSave=false;save.click();await new Promise(r=>setImmediate(r));
   assert.equal(calls[1].action,'annotation_reselect');assert.equal(calls[1].args.expected_version,'v');assert.equal(calls[1].args.text,'New source');assert.equal(w.annotationRangeEdit,null);
   await w.handleNoteAction({target:edit});cancel.click();
   assert.equal(w.annotationRangeEdit,null);assert.equal(bar.hidden,true);assert.ok(closed);assert.equal(calls.length,2);
+  assert.equal(avoidsBottom(), false);
  } finally {f.dom.window.close();}
 });
 
