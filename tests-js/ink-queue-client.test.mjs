@@ -134,7 +134,7 @@ test('complete omission retains a pending batch as uncertain and surfaces host l
 
 test('iframe handoff publishes the frozen request revision without mutating the reader undo token',async()=>{
   const appSource=await readFile(new URL('../web/app.js',import.meta.url),'utf8');
-  const start=appSource.indexOf('function publishReaderState()'),end=appSource.indexOf('async function restoreReaderState()',start);
+  const start=appSource.indexOf('function publishReaderState('),end=appSource.indexOf('async function restoreReaderState()',start);
   assert.ok(start>=0&&end>start);const messages=[],current={...draft(),revision:9};
   const context={workspaceSnapshot:()=>({}),initializedReader:false,state:{active:{id:'paper-a'},page:1,tab:'reader'},restoringReader:false,readerPaperId:'paper-a',workbenchUI:null,paperChatUI:null,readingPanels:null,
     handwritingUI:null,linkedHandwritingUI:null,pdfReader:{getInkDraft:()=>current},inkSaveIdentity:{paperId:'paper-a',revision:9,requestRevision:3,id},inkSaveUncertain:false,inkDraftUpdatedAt:100,

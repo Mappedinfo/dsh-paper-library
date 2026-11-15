@@ -263,6 +263,7 @@ export function createPaperLibrarySettings({ store, settings, schema, base = {},
     notify(); return (await snapshot()).descriptor;
   }
   const localState = {
+    recentReaderIds: () => store.recentReaderIds(),
     async get(key) { return key === 'preferences' ? (await snapshot()).record : store.get(key); },
     put(key, value, expected) {
       if (key !== 'preferences') return store.put(key, value, expected);

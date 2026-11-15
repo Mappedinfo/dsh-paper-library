@@ -531,7 +531,7 @@ test('failed archive preserves selection and displays the server error', async (
 test('table selection cannot publish the previous reader chat draft under the selected catalogue paper', () => {
   // Run the actual bridge function with a selected metadata row while the prior
   // reader still owns its private draft. The table has not opened the new paper.
-  const start = appSource.indexOf('function publishReaderState()');
+  const start = appSource.indexOf('function publishReaderState(');
   const end = appSource.indexOf('async function restoreReaderState()', start);
   assert.ok(start >= 0 && end > start);
   const messages = [];

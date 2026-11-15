@@ -211,6 +211,19 @@ class Papers:
         result.update(organization_get(self, id))
         return result
 
+    def recent_reading(self, ids, limit):
+        if not isinstance(ids, list) or len(ids) > 100 or not 1 <= limit <= 10:
+            raise ValueError("Invalid recent reading request")
+        rows = self.db.execute(
+            """SELECT p.id, p.title FROM json_each(?) AS candidates
+               JOIN papers AS p ON p.id = candidates.value
+               LEFT JOIN paper_archive AS a ON a.paper_id = p.id
+               WHERE a.paper_id IS NULL AND p.pdf_path IS NOT NULL
+               ORDER BY candidates.key LIMIT ?""",
+            (json.dumps(ids), limit),
+        )
+        return {"items": [dict(row) for row in rows]}
+
     def pdf_path(self, id):
         self.get(id)  # An archived record is inspectable only through explicit metadata reads.
         row = self.db.execute("SELECT pdf_path FROM papers WHERE id=?", (id,)).fetchone()

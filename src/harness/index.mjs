@@ -101,7 +101,7 @@ export function apply(ctx, rawConfig = {}) {
   // Synced corpora stay optional: with no configured roots the list is empty and
   // every other path behaves exactly as before.
   const sources = createExternalSources({ config })
-  const localState = Object.fromEntries(['get','put','list'].map(method => [method, (...args) => sharedSettings.localState[method](...args)]))
+  const localState = Object.fromEntries(['get','put','list','recentReaderIds'].map(method => [method, (...args) => sharedSettings.localState[method](...args)]))
   // Boards reuse the private state store, so no second persistence path exists.
   const boards = createBoardStore({ localState })
   const inkQueue = createInkQueue({store:localState,dispatch,library:config.library,python:config.python})

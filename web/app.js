@@ -255,7 +255,7 @@ async function openPaper(id, { background = false } = {}) {
     if(savedReader&&!restoringReader)await applyReaderSnapshot(savedReader,false);
     if(!current())return;
     if (item.pdf) loadAnnotations(id); else renderAnnotations(); loadFeedback(id);
-    publishReaderState();
+    publishReaderState({ rememberOpen: !background });
     publishPaperWorkspace(item);
     return ticket;
   } catch (error) { if (current()) { $('paper-title').textContent = '文献未能打开'; errorAt('detail-error', error); } }
@@ -1477,7 +1477,7 @@ document.addEventListener('keydown', async (event) => {
 function publishWorkspaceState(workspace){void persistence?.put(`workspace:last:${ENTRY_PAPER||'main'}`,workspace).catch(()=>{});if(window.parent!==window)window.parent.postMessage({type:'paper-library:workspace-state',version:1,workspace},window.location.origin);}
 function workspaceSnapshot(){const current=latexUI?.isOpen()?latexUI.current?.():boardUI?.isOpen()?boardUI.current?.():workspaceNavigationUI?.state().current;return {section:workspaceNavigationUI?.state().section||'paper',current:current?{kind:current.kind,id:current.id,title:current.title}:null,table:workbenchUI?.isTable()===true};}
 async function restoreWorkspaceSnapshot(value){if(!value||!['paper','dataset','board','latex','project','notes'].includes(value.section))return;try{if(value.current&&['dataset','board','latex'].includes(value.current.kind)){await workspaceNavigationUI?.navigate(value.current);}else if(value.table||value.section!=='paper'){await workspaceNavigationUI?.selectRoot(value.section);}}catch(error){toast(`工作区恢复失败：${error.message}`,true);}}
-function publishReaderState() {
+function publishReaderState({ rememberOpen = false } = {}) {
   if(initializedReader&&!restoringReader)publishWorkspaceState(workspaceSnapshot());
 
   if (restoringReader || !state.active || state.active.resource_kind === 'dataset' || workbenchUI?.isTable() || (workbenchUI && readerPaperId !== state.active.id)) return true;
@@ -1503,7 +1503,7 @@ function publishReaderState() {
   if (new Blob([serialized]).size > 256 * 1024) return false;
   if(persistence&&readerStateReady){
     const durable={...snapshot};delete durable.chatDraft;delete durable.chatContext;delete durable.handwritingDraft;delete durable.linkedHandwriting;delete durable.inkDraftRecord;
-    void persistence.put(`reader:${state.active.id}`,durable).catch(()=>{});
+    void persistence.put(`reader:${state.active.id}`,durable,{ touch: rememberOpen }).catch(()=>{});
     void persistence.put('reader',{paperId:state.active.id}).catch(()=>{});
   }
   if(window.parent!==window)window.parent.postMessage({ type: 'paper-library:reader-state', version: 1, snapshot }, window.location.origin);
@@ -1863,6 +1863,80 @@ readerSearchUI=window.PaperReaderSearch?.create({api,getPaper:()=>state.active,r
     else { $('search').value = query; searchMetadata(); }
   },
 });
+function installRecentPapers() {
+  const trigger = $('toolbar-paper');
+  const panel = el('section', 'reader-context-menu recent-papers');
+  panel.id = 'recent-papers-panel';
+  panel.setAttribute('aria-label', '最近阅读');
+  panel.hidden = true;
+  trigger.after(panel);
+  let request;
+
+  function close(restoreFocus = false) {
+    if (panel.hidden) return;
+    request?.abort();
+    panel.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) trigger.focus({ preventScroll: true });
+  }
+  function place() {
+    if (!panel.hidden) window.PaperFloatingWindows?.placeBelow(trigger, panel);
+  }
+  trigger.addEventListener('click', async () => {
+    if (!panel.hidden) return close();
+    const heading = el('div', 'reader-context-heading', '最近阅读');
+    const status = el('div', 'reader-context-heading', '正在读取…');
+    status.setAttribute('role', 'status');
+    panel.replaceChildren(heading, status);
+    panel.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    place();
+    const controller = new AbortController();
+    request = controller;
+    try {
+      const { items } = await api('recent_papers', {}, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      if (!items.length) {
+        status.textContent = '还没有阅读记录';
+        return;
+      }
+      status.remove();
+      for (const item of items) {
+        const choice = el('button', 'reader-context-item', title(item));
+        choice.type = 'button';
+        if (item.id === state.active?.id) choice.setAttribute('aria-current', 'true');
+        choice.addEventListener('click', () => {
+          close(true);
+          if (readerStateReady && readerPaperId === item.id && state.active?.id === item.id &&
+            readerSurfaceActive() && !workbenchUI?.isTable()) return;
+          void openPaper(item.id).catch(error => toast(error.message, true));
+        });
+        panel.append(choice);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) status.textContent = error.message;
+    } finally {
+      if (request === controller) request = null;
+    }
+  });
+  const outside = event => {
+    if (!trigger.contains(event.target) && !panel.contains(event.target)) close();
+  };
+  document.addEventListener('pointerdown', outside, true);
+  document.addEventListener('focusin', outside);
+  trigger.addEventListener('contextmenu', () => close());
+  for (const element of [trigger, panel]) {
+    element.addEventListener('keydown', event => {
+      if (panel.hidden || event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+    });
+  }
+  window.addEventListener('resize', place);
+}
+installRecentPapers();
+
 function installReaderContextMenu() {
   const reader = $('continuous-reader'), title = $('toolbar-paper');
   const brand = title.closest('.brand-group') || title;
@@ -1870,8 +1944,6 @@ function installReaderContextMenu() {
   menu.hidden = true;
   menu.setAttribute('role', 'menu');
   document.body.append(menu);
-  title.tabIndex = 0;
-  title.setAttribute('aria-haspopup', 'menu');
   let returnFocus = null;
 
   function close(restoreFocus = false) {

@@ -16,6 +16,17 @@ test('first-read outages retain an exportable candidate and never overwrite prev
 test('legacy migration verifies service writes before removing only known browser keys',async()=>{const remote=server(),legacy=new Map([['paper-library:synthetic:model','synthetic/model'],['paper-library:synthetic:paper-drafts-v2',JSON.stringify([['paper-a',{draft:'Old draft',annotationRefs:[]}]])],['paper-library:reading-panel-side:v1','right'],['unrelated-private-key','untouched']]);const a=client(remote,{legacy});const result=await a.store.migrateLegacy(()=>'synthetic');assert.equal(result.migrated,3);assert.deepEqual([...legacy.keys()],['unrelated-private-key']);assert.equal((await a.store.get('chat:paper-a')).draft,'Old draft');assert.equal((await a.store.get('preferences'))['reading-panel-side'],'right');});
 test('legacy migration backs up conflicts on the service without resurrecting a cleared host draft',async()=>{for(const remoteValue of [{draft:'New host'},null]){const remote=server(),legacy=new Map([['paper-library:synthetic:paper-drafts-v2',JSON.stringify([['paper-a',{draft:'Old browser'}]])]]);await remote.api('state_put',{key:'chat:paper-a',value:remoteValue,expected_revision:0});const a=client(remote,{legacy});const result=await a.store.migrateLegacy('synthetic');assert.equal(result.retained,0);assert.equal(result.backedUp,1);assert.equal(legacy.size,0);assert.deepEqual(remote.records.get('chat:paper-a').value,remoteValue);const backup=[...remote.records.values()].find(record=>record.key.startsWith('migration:'));assert.deepEqual(backup.value.value,[['paper-a',{draft:'Old browser'}]]);assert.ok(a.errors.length);}});
 test('client lifecycle flush covers a write submitted immediately before it',async()=>{const remote=server(),a=client(remote);const pending=a.store.put('reader',{paperId:'paper-a'});await a.store.flush({keepalive:true});assert.equal(remote.records.get('reader')?.value.paperId,'paper-a');await pending;});
+test('reopening a saved reader can renew its save time without changing its contents', async () => {
+  const remote = server(), { store } = client(remote);
+  const key = 'reader:paper-a', snapshot = { paperId: 'paper-a', page: 4 };
+  await store.put(key, snapshot);
+  const revision = remote.records.get(key).revision;
+  await store.put(key, snapshot);
+  assert.equal(remote.records.get(key).revision, revision);
+  await store.put(key, snapshot, { touch: true });
+  assert.notEqual(remote.records.get(key).revision, revision);
+  assert.deepEqual(remote.records.get(key).value, snapshot);
+});
 test('legacy preferences respect a host tombstone and keep their old values in verified backups',async()=>{
   const remote=server(),legacy=new Map([['paper-library:synthetic:model','synthetic/old'],['paper-library:reading-panel-side:v1','right']]);
   await remote.api('state_put',{key:'preferences',value:null,expected_revision:0});const a=client(remote,{legacy});

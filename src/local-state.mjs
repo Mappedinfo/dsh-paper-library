@@ -216,5 +216,20 @@ export function createLocalStateStore({ library, home } = {}) {
     const nextOffset = offset + records.length, hasMore = nextOffset < total;
     return { records, total, offset, limit, next_offset: hasMore ? nextOffset : null, hasMore, truncated: records.length < Math.min(limit, Math.max(0, total - offset)) };
   }
-  return { get, put, list };
+  async function recentReaderIds() {
+    // Each reader snapshot already records its last save in the filesystem.
+    // Read file times only; previewing history needs no draft or PDF contents.
+    const { state } = await ready();
+    const directory = await opendir(state);
+    const entries = [];
+    for await (const entry of directory) {
+      const match = /^reader~([A-Za-z0-9_-]{1,160})\.json$/.exec(entry.name);
+      if (!match || !entry.isFile()) continue;
+      const info = await safeFile(join(state, entry.name), true);
+      if (info) entries.push({ id: match[1], updated: info.mtimeMs });
+    }
+    entries.sort((a, b) => b.updated - a.updated || a.id.localeCompare(b.id));
+    return entries.map(entry => entry.id);
+  }
+  return { get, put, list, recentReaderIds };
 }

@@ -14,7 +14,7 @@ const referenceSource=snippet('openReferencedPaper','function entryView(');
 const selectionSource=source.slice(source.indexOf('function showReaderSelection('),source.indexOf('async function loadAnnotations('));
 const inkSource=snippet('adoptInkHandoff','async function returnToInkDraft(');
 const resourceOpenSource=snippet('openResource','function renderPaperHeader(');
-const publishSource=source.slice(source.indexOf('function publishReaderState()'),source.indexOf('async function restoreReaderState()'));
+const publishSource=source.slice(source.indexOf('function publishReaderState('),source.indexOf('async function restoreReaderState()'));
 const inkModule=vm.createContext({window:{}});
 vm.runInContext(await readFile(new URL('../web/pdf-reader.js',import.meta.url),'utf8'),inkModule);
 test('project, type and search filters preserve the full-library count', () => {
@@ -240,7 +240,7 @@ test('selection changes publish only the current paper coordinates and clearing 
   f.context.handwritingUI = null;
   Object.assign(f.context, { linkedHandwritingUI: null, pdfReader: null, inkSaveIdentity: null, inkSaveUncertain: false, inkDraftUpdatedAt: 0 });
   f.context.window={parent:{postMessage:value=>messages.push(value)},location:{origin:'http://localhost:43121'}};f.context.Blob=Blob;
-  const start=source.indexOf('function publishReaderState()'),end=source.indexOf('async function restoreReaderState()',start);
+  const start=source.indexOf('function publishReaderState('),end=source.indexOf('async function restoreReaderState()',start);
   vm.runInContext(source.slice(start,end),f.context);
   const selection={id:'paper-a',page:2,text:'Synthetic selected text',rects:[[1,2,8,9]]};
   f.context.showReaderSelection(selection);

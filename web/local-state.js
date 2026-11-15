@@ -95,13 +95,13 @@ window.PaperLibraryLocalState = (() => {
       }).finally(()=>{entry.running=null;trim();if(entry.dirty&&!entry.error&&!entry.conflict)void run(entry);});
       return entry.running;
     }
-    async function update(key,value,merge){
+    async function update(key,value,merge,touch=false){
       const entry=entryFor(key);entry.updating++;
       try {
       try{await load(entry);}catch(error){const pending=merge?{...(entry.value||{}),...copy(value)}:copy(value);if(byteLength(pending)>LIMIT)throw new Error('这份草稿超过 256 KiB，请缩短内容后保存。');entry.value=pending;entry.dirty=true;++entry.sequence;emit(entry,'error',error);throw error;}
       const next=merge?{...(entry.value&&typeof entry.value==='object'&&!Array.isArray(entry.value)?entry.value:{}),...copy(value)}:copy(value);
       if(byteLength(next)>LIMIT)throw new Error('这份草稿超过 256 KiB，请缩短内容后保存。');
-      if(equal(entry.value,next)&&!entry.dirty)return copy(entry.value);
+      if(!touch&&equal(entry.value,next)&&!entry.dirty)return copy(entry.value);
       entry.value=next;entry.dirty=true;const sequence=++entry.sequence;
       if(entry.conflict){const error=conflict(entry);throw error;}
       emit(entry,'pending');const pending=new Promise((resolve,reject)=>entry.waiters.push({sequence,resolve,reject}));void run(entry);return pending;
@@ -141,7 +141,7 @@ window.PaperLibraryLocalState = (() => {
       if(report.retained)onError?.(new Error('部分旧浏览器草稿与本地服务内容不同或未能迁移，已保留原数据；请核对后再清理。'),{status:'migration-retained'});
       return report;
     }
-    return {get,put:(key,value)=>update(key,value,false),patch:(key,value)=>update(key,value,true),flush,migrateLegacy,
+    return {get,put:(key,value,{touch=false}={})=>update(key,value,false,touch),patch:(key,value)=>update(key,value,true),flush,migrateLegacy,
       exportPending:()=>[...entries.values()].filter(entry=>entry.dirty).map(entry=>({key:entry.key,value:copy(entry.value),...(entry.error?{error:entry.error.message}:{})})),
       subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},status:key=>{const entry=entries.get(key);return entry?{status:entry.status,error:entry.error,dirty:entry.dirty}:{status:'idle',dirty:false};},
       async retry(key){const entry=entryFor(key);if(entry.conflict)throw entry.error;if(entry.error&&!entry.dirty)await load(entry,true);if(entry.dirty)await run(entry);if(entry.error)throw entry.error;return copy(entry.value);},

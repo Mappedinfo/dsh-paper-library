@@ -134,6 +134,15 @@ export function createFetchHandler(options = {}) {
   const slidesRequest = async input => (await getSlidesStore()).handle(input);
   const localState = options.settings ? store : settings.localState;
   const catalogCitations = createCatalogCitations({ store: localState, fetchOptions: options.fetchOptions });
+  async function recentPapers(signal) {
+    const ids = await store.recentReaderIds();
+    const items = [];
+    for (let start = 0; start < ids.length && items.length < 10; start += 100) {
+      const batch = await core({ action: 'recent_reading', ids: ids.slice(start, start + 100), limit: 10 - items.length }, { ...options, signal });
+      items.push(...batch.items);
+    }
+    return { items };
+  }
   async function catalogList(input, signal) {
     // Keep all worker pages and the mixed slide merge on one citation snapshot.
     const catalogCitationCache = input.kind === 'slides' || input.kind === 'dataset' ? undefined : await catalogCitations.snapshot();
@@ -253,6 +262,7 @@ export function createFetchHandler(options = {}) {
             : input?.action === 'settings_update' ? await settings.update(input.patch, input.expected_revision)
             : input?.action === 'settings_reset' ? await settings.reset(input.expected_revision)
             : input?.action === 'catalog_citation_counts' ? await catalogCitations.refresh(input, { signal: request.signal })
+            : input?.action === 'recent_papers' ? await recentPapers(request.signal)
             : input?.action === 'catalog_resource_list' ? await catalogList(input, request.signal)
             : input?.action === 'metadata_lookup' ? await enrichMetadata(input, request.signal)
             : stateAction ? await stateRequest(localState, input)

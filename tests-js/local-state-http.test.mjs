@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFetchHandler } from '../src/http.mjs';
 import { createLocalStateStore } from '../src/local-state.mjs';
 import { resolveConfig } from '../src/harness/config.mjs';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 async function fixture(t) {
   const root=await mkdtemp(join(tmpdir(),'paper-state-http-')),library=join(root,'library'),home=join(root,'dsh-home');
@@ -51,6 +52,33 @@ test('browser state namespaces cannot forge or inspect generated learning or voc
   assert.equal((await call(handler,{action:'state_list',prefix:'chat:',limit:1000})).status,400);
   assert.equal((await call(handler,{action:'state_unknown',key:'reader'})).status,400);
   assert.equal((await call(handler,{action:'state_put',key:'reader',value:{},expected_revision:0},{origin:'https://attacker.example'})).status,403);
+});
+
+test('recent reading restores older snapshots, returns ten current titles, and skips archived or unread entries', async t => {
+  const f = await fixture(t), handler = createFetchHandler(f.options);
+  const source = fileURLToPath(new URL('../docs/demo/guide.pdf', import.meta.url));
+  assert.deepEqual((await call(handler, { action: 'recent_papers' })).result, { items: [] });
+  const imported = await call(handler, { action: 'import', items: Array.from({ length: 14 }, (_, i) => ({ title: `Synthetic paper ${i}` })) });
+  assert.equal(imported.status, 200);
+  const papers = imported.result.items;
+  assert.equal(papers.length, 14);
+  const libraryHash = createHash('sha256').update(await realpath(f.library)).digest('hex');
+  const stateDir = join(f.home, 'paper-library', libraryHash, 'state');
+  async function remember(id, age) {
+    await f.store.put(`reader:${id}`, { paperId: id, page: 2, privateDraft: 'not a history result' }, 0);
+    const when = new Date(1_700_000_000_000 + age * 1000);
+    await utimes(join(stateDir, `reader~${id}.json`), when, when);
+  }
+  for (const [index, { id }] of papers.entries()) {
+    if (index !== 13) assert.equal((await call(handler, { action: 'attach', id, path: source })).status, 200);
+    if (index !== 0) await remember(id, index);
+  }
+  await remember('deleted-paper', 100);
+  assert.equal((await call(handler, { action: 'archive', id: papers[12].id })).status, 200);
+  assert.equal((await call(handler, { action: 'update', id: papers[11].id, metadata: { title: 'Updated title' } })).status, 200);
+  const received = await call(createFetchHandler(f.options), { action: 'recent_papers', limit: 50 });
+  assert.equal(received.status, 200);
+  assert.deepEqual(received.result.items, papers.slice(2, 12).reverse().map(({ id, title }, i) => ({ id, title: i === 0 ? 'Updated title' : title })));
 });
 
 test('state and language capability flags reflect injected handlers; language routes preserve signals and recovery errors', async t => {

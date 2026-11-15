@@ -181,6 +181,41 @@ test('range handles update the draft without writing until the user saves', {ski
  } finally {f.dom.window.close();}
 });
 
+test('the current paper title opens the recent reading list and switches through the normal reader', {skip:!JSDOM}, async () => {
+  const f = fixture(), w = f.window, d = f.document, opened = [];
+  try {
+    const trigger = d.getElementById('toolbar-paper');
+    w.state.active = { id: 'paper-a' };
+    w.title = item => item.title;
+    w.readerStateReady = true;
+    w.readerPaperId = 'paper-a';
+    w.openPaper = async id => opened.push(id);
+    w.api = async action => {
+      assert.equal(action, 'recent_papers');
+      return { items: [{ id: 'paper-a', title: 'Current paper' }, { id: 'paper-b', title: 'Earlier paper' }] };
+    };
+    w.eval(source.slice(source.indexOf('function installRecentPapers()'), source.indexOf('function installReaderContextMenu()')));
+    const panel = d.getElementById(trigger.getAttribute('aria-controls'));
+    const open = async () => {
+      trigger.click();
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+      return [...panel.querySelectorAll('button')];
+    };
+    let choices = await open();
+    assert.deepEqual(choices.map(button => button.textContent), ['Current paper', 'Earlier paper']);
+    assert.equal(choices[0].getAttribute('aria-current'), 'true');
+    choices[1].focus();
+    choices[1].dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.equal(panel.hidden, true);
+    assert.equal(d.activeElement, trigger);
+    choices = await open();
+    choices[1].click();
+    assert.deepEqual(opened, ['paper-b']);
+    assert.equal(panel.hidden, true);
+  } finally { f.dom.window.close(); }
+});
+
 test('right-click actions follow the PDF, title, or active range edit and leave text fields alone', {skip:!JSDOM}, async () => {
   const f = fixture(), w = f.window, d = f.document, calls = [];
   try {
