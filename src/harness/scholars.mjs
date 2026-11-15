@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { LocalStateError } from '../local-state.mjs';
 import { normalizeDOI } from '../paper-fetch.mjs';
+import { RESEARCH_TYPES, researchIdentity } from './research-directory.mjs';
 
 const prefix = 'scholar:profile:';
 const fields = {
   name: 160, native_name: 160, organization: 240, department: 240, position: 160,
-  email_domain: 253, notes: 4000,
+  email_domain: 253, notes: 4000, publication_count_source: 500,
 };
 const identifier = /^[A-Za-z0-9_-]{1,160}$/;
 const invalid = message => new LocalStateError(message, 'SCHOLAR_INVALID');
@@ -40,6 +41,15 @@ function editProfile(previous, patch) {
     if (Object.hasOwn(patch, key)) profile[key] = text(patch[key], limit, '资料');
   }
   if (!profile.name) throw invalid('请输入学者姓名。');
+  if (Object.hasOwn(patch, 'kind')) {
+    if (!RESEARCH_TYPES.includes(patch.kind)) throw invalid('研究人员类别无效。');
+    profile.kind = patch.kind;
+  }
+  if (Object.hasOwn(patch, 'publication_count')) {
+    const count = patch.publication_count;
+    if (count !== null && (!Number.isSafeInteger(count) || count < 0 || count > 10000000)) throw invalid('发文量须为非负整数。');
+    profile.publication_count = count;
+  }
   if (profile.email_domain && !/^(?:[a-z\d](?:[a-z\d-]*[a-z\d])?\.)+[a-z]{2,}$/i.test(profile.email_domain)) {
     throw invalid('请输入有效的邮箱域名。');
   }
@@ -48,9 +58,9 @@ function editProfile(previous, patch) {
   if (Object.hasOwn(patch, 'organization_url')) profile.organization_url = patch.organization_url ? publicLink(patch.organization_url) : '';
   if (Object.hasOwn(patch, 'topics')) {
     const topics = new Map((profile.topics || []).map(topic => [topic.name, topic]));
-    for (const topic of list(patch.topics, 16)) {
+    for (const topic of list(patch.topics, 24)) {
       if (!topic || typeof topic !== 'object') throw invalid('研究方向无效。');
-      const name = text(topic.name, 120, '研究方向', true);
+      const name = text(topic.name, 320, '研究方向', true);
       const url = Object.hasOwn(topic, 'url') ? (topic.url ? publicLink(topic.url) : '') : topics.get(name)?.url;
       topics.set(name, { name, ...(url ? { url } : {}) });
     }
@@ -79,46 +89,81 @@ function publication(value) {
   };
 }
 
-export function createScholars({ store, request }) {
-  const pack = record => ({ profile: record.value, revision: record.revision });
-  async function read(id) {
+export function createScholars({ store, request, directory }) {
+  const empty = { entries: [], entriesById: new Map(), publications: new Map() };
+  const overlay = (imported, manual) => ({ kind: 'scholar', ...imported, ...manual });
+  const pack = (profile, revision) => {
+    const { publication_keys, ...rest } = profile;
+    return { profile: { ...rest, linked_publication_count: publication_keys?.length ?? 0 }, revision };
+  };
+  async function read(id, data) {
     const record = await store.get(identity(id));
-    if (!record.value) throw new LocalStateError('找不到该学者。', 'SCHOLAR_NOT_FOUND', 404);
-    return record;
+    const imported = data.entriesById.get(id) || (record.value && data.entries.find(item => researchIdentity(item) === researchIdentity(record.value)));
+    if (!record.value && !imported) throw new LocalStateError('找不到该档案。', 'SCHOLAR_NOT_FOUND', 404);
+    return { record, imported, profile: overlay(imported, record.value) };
   }
   return async function scholars(input, { signal } = {}) {
+    if (input.action === 'scholar_import') return directory.refresh({ signal });
+    const data = directory ? await directory.load() : empty;
     if (input.action === 'scholar_list') {
-      const page = await store.list({ prefix, offset: input.offset ?? 0, limit: 30 });
-      const items = page.records.map(({ value }) => ({
-        id: value.id, name: label(value), organization: value.organization, followed: value.followed,
+      const offset = input.offset ?? 0, kind = input.kind ?? '', query = text(input.query ?? '', 200, '检索词').normalize('NFKC').toLowerCase();
+      if (!Number.isSafeInteger(offset) || offset < 0 || (kind && !RESEARCH_TYPES.includes(kind))) throw invalid('目录筛选参数无效。');
+      const imported = new Map(data.entriesById), importedIdentities = new Map(data.entries.map(item => [researchIdentity(item), item]));
+      const manual = [];
+      for (let start = 0; start !== null;) {
+        signal?.throwIfAborted();
+        const page = await store.list({ prefix, offset: start, limit: 50 });
+        for (const { value } of page.records) {
+          const base = imported.get(value.id) || importedIdentities.get(researchIdentity(value));
+          if (base) imported.delete(base.id);
+          manual.push(overlay(base, value));
+        }
+        start = page.next_offset;
+      }
+      const visible = [...manual, ...imported.values()].filter(item => {
+        if (kind && item.kind !== kind && !item.roles?.includes(kind)) return false;
+        return !query || [item.name, item.native_name, item.organization, ...(item.aliases || []), ...(item.topics || []).map(topic => topic.name)]
+          .some(value => typeof value === 'string' && value.normalize('NFKC').toLowerCase().includes(query));
+      }).sort((a, b) => Number(b.followed) - Number(a.followed) || label(a).localeCompare(label(b), 'zh-CN') || a.id.localeCompare(b.id));
+      const items = visible.slice(offset, offset + 30).map(value => ({
+        id: value.id, name: label(value), organization: value.organization, followed: value.followed, kind: value.kind,
+        publication_count: value.publication_count, linked_publication_count: value.publication_keys?.length ?? value.works.length,
+        source_work_count: value.source_work_count, topics: value.topics?.slice(0, 3), evidence_status: value.evidence_status,
       }));
-      return { items, total: page.total, next_offset: page.next_offset };
+      return { items, total: visible.length, next_offset: offset + items.length < visible.length ? offset + items.length : null, counts: data.counts };
     }
     if (input.action === 'scholar_save' && input.id === undefined) {
       const id = randomUUID();
-      const profile = editProfile({ id, followed: true, works: [], reviewed: [] }, input.patch);
-      return pack(await store.put(identity(id), profile, 0));
+      const profile = editProfile({ id, kind: 'scholar', followed: true, works: [], reviewed: [] }, input.patch);
+      return pack(profile, (await store.put(identity(id), profile, 0)).revision);
     }
-    const record = await read(input.id);
-    const profile = record.value;
-    if (input.action === 'scholar_get') return pack(record);
+    const { record, imported, profile } = await read(input.id, data);
+    if (input.action === 'scholar_get') return pack(profile, record.revision);
+    if (input.action === 'scholar_source_publications') {
+      const offset = input.offset ?? 0;
+      if (!Number.isSafeInteger(offset) || offset < 0) throw invalid('论文分页无效。');
+      const keys = profile.publication_keys || [];
+      const items = keys.slice(offset, offset + 40).map(key => data.publications.get(key)).filter(Boolean);
+      return { items, total: keys.length, has_more: offset + items.length < keys.length };
+    }
     if (input.action === 'scholar_publications') {
       return request({
         action: 'scholar_publications',
-        names: [...new Set([profile.name, profile.native_name, ...(profile.aliases || [])].filter(Boolean))],
+        names: ['scholar', 'pi'].includes(profile.kind) ? [...new Set([profile.name, profile.native_name, ...(profile.aliases || [])].filter(Boolean))] : [],
         dois: profile.works.map(work => work.doi),
         confirmed: profile.reviewed.filter(row => row.match === 'confirmed').map(row => row.id),
         excluded: profile.reviewed.filter(row => row.match === 'excluded').map(row => row.id),
         offset: input.offset ?? 0,
       }, signal);
     }
+    const manual = record.value || { id: profile.id, name: profile.name, followed: profile.followed, works: [], reviewed: [] };
     let next;
-    if (input.action === 'scholar_save') next = editProfile(profile, input.patch);
+    if (input.action === 'scholar_save') next = editProfile(manual, input.patch);
     else if (input.action === 'scholar_work_save') {
       const work = publication(input.work);
       if (input.previous_doi && input.previous_doi !== work.doi && profile.works.some(row => row.doi === work.doi)) throw invalid('已登记相同 DOI。');
       const others = profile.works.filter(row => row.doi !== work.doi && row.doi !== input.previous_doi);
-      next = { ...profile, works: list([...others, work], 50) };
+      next = { ...manual, works: list([...others, work], 50) };
     } else if (input.action === 'scholar_review') {
       const { paper_id, match } = input;
       if (typeof paper_id !== 'string' || !identifier.test(paper_id) || !['confirmed', 'excluded', null].includes(match)) throw invalid('论文关联状态无效。');
@@ -128,8 +173,9 @@ export function createScholars({ store, request }) {
         if (id !== paper_id || archived || (resource_kind && resource_kind !== 'paper')) throw invalid('论文已不可用。');
         reviewed.push({ id, title: String(title || id).slice(0, 500), match });
       }
-      next = { ...profile, reviewed: list(reviewed, 500) };
+      next = { ...manual, reviewed: list(reviewed, 500) };
     } else throw invalid('学者操作无效。');
-    return pack(await store.put(record.key, next, input.expected_revision));
+    const saved = await store.put(record.key, next, input.expected_revision);
+    return pack(overlay(imported, saved.value), saved.revision);
   };
 }

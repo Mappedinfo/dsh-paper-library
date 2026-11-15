@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFetchHandler } from '../src/http.mjs';
@@ -71,4 +71,69 @@ test('the scholar feature is mounted and served by the normal library surface', 
     assert.ok(markup.includes(`./${file}`));
     assert.equal((await handler(new Request(`http://localhost/library/${file}`))).status, 200);
   }
+});
+
+test('research directory imports affiliations and topic groups with sources and retains edits on refresh', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'research-directory-test-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const options = { library: join(root, 'library'), localStateHome: join(root, 'state') };
+  const handle = createFetchHandler(options);
+  async function call(action, args = {}) {
+    const response = await handle(new Request('http://localhost/api', { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, ...args }) }));
+    const payload = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(payload));
+    return payload.result;
+  }
+
+  const paper = await call('create', { metadata: { title: 'Synthetic study', DOI: '10.1234/synthetic-group',
+    author: [{ given: 'Jane', family: 'Synthetic', affiliation: [{ name: 'Mobility Lab, Example University' }] }] } });
+  const evidence = { id: 'source', title: 'Synthetic lab source', url: 'https://example.com/lab' };
+  const document = {
+    schema_version: 1, topic: { id: 'synthetic-topic', title: 'Synthetic topic', question: 'Example?' },
+    sources: [evidence], claims: [],
+    scholars: [{ id: 'jane', name: 'Jane Synthetic', current_role: 'Principal Investigator', organization: 'Example University',
+      source_ids: ['source'], research_interests: ['Mobility'], contributions: [{ paper_id: 'work', source_ids: ['source'] }] }],
+    papers: [{ id: 'work', title: paper.title, doi: '10.1234/synthetic-group', local_paper_id: paper.id, source_ids: ['source'],
+      comparison: { research_group: { value: 'Other Author（通讯作者，假定 PI；组归属待核）', status: 'needs_review', source_ids: ['source'] } } }],
+    groups: [{ id: 'theme', title: 'Topic bucket', relationship_type: 'analyst_primary_task_category', not_a_verified_current_lab: true, source_ids: ['source'] }],
+    research_groups: [{ id: 'lab', name: 'Mobility Lab', institution: 'Example University', members: ['Jane Synthetic'],
+      paper_ids: ['work'], source_ids: ['source'], status: 'verified' }],
+  };
+  await call('field_radar_import', { document, expected_revision: 0 });
+  const snapshotDirectory = join(options.library, '.paper-library');
+  await mkdir(snapshotDirectory, {recursive:true});
+  await writeFile(join(snapshotDirectory, 'field-radar-snapshot.json'), JSON.stringify({
+    people: [{ name: 'Jane Synthetic', unit: 'Example University', group: 'Mobility Lab', works: [0], identityVerified: true }],
+    works: [{ id: 'synthetic-work', title: paper.title, doi: '10.1234/synthetic-group' }],
+  }));
+  const { counts } = await call('scholar_import');
+  assert.equal(counts.papers, 1);
+  assert.equal(counts.topics, 1);
+  assert.equal(counts.group, 1);
+  assert.equal(counts.school, 1);
+  assert.equal(counts.snapshot_people, 1);
+  const groups = await call('scholar_list', { kind: 'group' });
+  const id = groups.items[0].id;
+  assert.equal(groups.total, 1);
+  assert.equal(groups.items[0].linked_publication_count, 1);
+  const imported = await call('scholar_get', { id });
+  assert.deepEqual(imported.profile.members, ['Jane Synthetic']);
+  assert.ok(imported.profile.sources.some(source => source.url === evidence.url));
+  const sourcePapers = await call('scholar_source_publications', { id });
+  assert.equal(sourcePapers.items[0].id, paper.id);
+  const types = (await call('scholar_list', { kind: 'pi' })).items.map(row => row.kind);
+  assert.deepEqual([...types].sort(), ['lead', 'pi']);
+  const person = (await call('scholar_list', { kind: 'pi', query: 'Jane' })).items[0];
+  assert.equal((await call('scholar_get', { id: person.id })).profile.source_work_count, 1);
+  assert.equal((await call('scholar_list', { query: 'Topic bucket' })).total, 0);
+  await call('scholar_save', { id, expected_revision: imported.revision, patch: {
+    followed: true, notes: 'Private synthetic note', publication_count: 18, publication_count_source: 'Synthetic CV',
+  } });
+  await call('scholar_import');
+  const restored = (await call('scholar_get', { id })).profile;
+  assert.equal(restored.publication_count, 18);
+  assert.equal(restored.notes, 'Private synthetic note');
+  assert.equal(restored.followed, true);
+  assert.equal(restored.linked_publication_count, 1);
 });

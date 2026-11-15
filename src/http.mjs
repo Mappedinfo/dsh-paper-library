@@ -28,6 +28,7 @@ import { createInkDiagnostics } from './ink-diagnostics.mjs';
 import { catalogResources } from './catalog-resources.mjs';
 import { createCatalogCitations } from './catalog-citations.mjs';
 import { createScholars } from './harness/scholars.mjs';
+import { createResearchDirectory } from './harness/research-directory.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
 staticFiles['latex-search.js'] = ['latex-search.js', 'text/javascript;charset=utf-8'];
@@ -136,7 +137,6 @@ export function createFetchHandler(options = {}) {
   const slidesRequest = async input => (await getSlidesStore()).handle(input);
   const localState = options.settings ? store : settings.localState;
   const catalogCitations = createCatalogCitations({ store: localState, fetchOptions: options.fetchOptions });
-  const scholars = createScholars({ store: localState, request: (payload, signal) => core(payload, { ...options, signal }) });
   async function recentPapers(signal) {
     const ids = await store.recentReaderIds();
     const items = [];
@@ -178,6 +178,9 @@ export function createFetchHandler(options = {}) {
   const inkQueue = options.inkQueue || createInkQueue({store:localState,dispatch,library:options.library||defaultLibrary,python:options.python,autoStart:false});
   const inkDiagnostics = createInkDiagnostics({store:localState});
   const fieldRadar = options.fieldRadar || createFieldRadarStore({ store: localState, library: options.library || defaultLibrary, request: (payload, signal) => dispatch(payload, { ...options, signal }) });
+  const directoryRequest = (payload, signal) => core(payload, { ...options, signal });
+  const researchDirectory = createResearchDirectory({ store: localState, request: directoryRequest, radar: fieldRadar });
+  const scholars = createScholars({ store: localState, request: directoryRequest, directory: researchDirectory });
   const paperAbstracts=createPaperAbstracts({store:localState,radar:fieldRadar,language:learningRecords,canTranslate:Boolean(options.languageLearning),
     request:(payload,signal)=>dispatch(payload,{...options,signal}),
     extract:(id,signal)=>core({action:'paper_abstract_pdf',id},{...options,signal}),
@@ -259,7 +262,7 @@ export function createFetchHandler(options = {}) {
             : ['field_radar_analyze','field_radar_analysis_get'].includes(input?.action) ? await fieldRadarAnalysis.handle(input, { signal: request.signal })
             : typeof input?.action === 'string' && input.action.startsWith('field_radar_') ? await fieldRadar.handle(input, { signal: request.signal })
             : ['workspace_catalog','workspace_related'].includes(input?.action) ? await workspaceNavigation.handle(input, { signal: request.signal })
-            : ['scholar_list','scholar_get','scholar_save','scholar_publications','scholar_work_save','scholar_review'].includes(input?.action) ? await scholars(input, { signal: request.signal })
+            : ['scholar_list','scholar_get','scholar_save','scholar_publications','scholar_work_save','scholar_review','scholar_import','scholar_source_publications'].includes(input?.action) ? await scholars(input, { signal: request.signal })
             : ['ink_diagnostics_append','ink_diagnostics_get'].includes(input?.action) ? await inkDiagnostics.handle(input)
             : typeof input?.action === 'string' && input.action.startsWith('ink_queue_') ? await inkQueue.handle(input)
             : input?.action === 'settings_get' ? await settings.get()

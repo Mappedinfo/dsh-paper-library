@@ -2,7 +2,7 @@
 // 内容分类共用检索行、路径和已有关系；阅读项目与写作项目分别展示。
 window.PaperWorkspaceNavigation = (() => {
   const KINDS = Object.freeze({ paper: '文献', dataset: '数据集', board: '画板', latex: 'LaTeX 写作', project: '阅读项目' });
-  const ROOTS = Object.freeze({ ...KINDS, notes: '笔记', scholar: '学者' });
+  const ROOTS = Object.freeze({ ...KINDS, notes: '笔记', scholar: '研究人员' });
   const PAGE = 20, TRAIL = 8;
   const key = item => item ? `${item.kind}\u0000${item.id}` : '';
   function target(value) {

@@ -54,7 +54,7 @@ test('the notes entrance opens bookmarks without loading an unrelated catalog', 
 
 test('the scholar entrance uses its own panel and preserves the paper search', async () => {
   const f = fixture({ scholars: true })
-  const control = f.findAll('workspace-root-button').find(button => button.textContent === '学者')
+  const control = f.findAll('workspace-root-button').find(button => button.textContent === '研究人员')
   assert.ok(control)
   await f.nav.selectRoot('scholar')
   assert.equal(f.changes.at(-1).section, 'scholar')

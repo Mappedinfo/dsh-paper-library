@@ -1,6 +1,8 @@
 'use strict';
 
 window.PaperScholars = (() => {
+  const kinds = { scholar: '学者', pi: 'PI', group: '课题组', school: '院校', organization: '科研机构', lead: '待核线索' };
+  const evidence = { verified: '已核验', publication: '发表时记录', needs_review: '待核验' };
   function create({ root, api, openPaper, toast }) {
     const doc = root.ownerDocument;
     const el = (tag, text, className) => {
@@ -28,9 +30,10 @@ window.PaperScholars = (() => {
     const nameOf = item => item.native_name && item.native_name !== item.name ? `${item.native_name} / ${item.name}` : item.name;
     const dialog = el('dialog', undefined, 'scholar-dialog');
     const content = el('div');
+    root.setAttribute('aria-label', '研究人员目录');
     root.replaceChildren(content, dialog);
     let active = false, selected = null, generation = 0, saving = false;
-    let catalogOffset = 0, paperOffset = 0, restoreFocus = null;
+    let catalogOffset = 0, paperOffset = 0, restoreFocus = null, kindFilter = '', query = '';
     const paperPage = 40, scholarPage = 30;
     dialog.addEventListener('close', () => {
       if (restoreFocus?.isConnected) restoreFocus.focus();
@@ -51,7 +54,7 @@ window.PaperScholars = (() => {
       target.append(node);
       return node;
     }
-    function table(caption, columns) {
+    function table(caption, columns, target = content) {
       const wrap = el('div', undefined, 'scholar-table-wrap');
       const table = el('table', undefined, 'scholar-table');
       const head = el('thead'), headers = el('tr'), body = el('tbody');
@@ -63,7 +66,7 @@ window.PaperScholars = (() => {
         headers.append(th);
       }
       wrap.append(table);
-      content.append(wrap);
+      target.append(wrap);
       return body;
     }
     function row(body, values) {
@@ -76,7 +79,7 @@ window.PaperScholars = (() => {
       }
       body.append(tr);
     }
-    function pager(offset, size, hasMore, load) {
+    function pager(offset, size, hasMore, load, target = content) {
       if (!offset && !hasMore) return;
       const controls = el('div', undefined, 'scholar-controls');
       const back = button('上一页', () => load(Math.max(0, offset - size)));
@@ -84,23 +87,49 @@ window.PaperScholars = (() => {
       back.disabled = offset === 0;
       next.disabled = !hasMore;
       controls.append(back, next);
-      content.append(controls);
+      target.append(controls);
     }
 
     async function loadCatalog(offset = 0) {
       selected = null;
       catalogOffset = offset;
       const owner = ++generation;
-      begin('学者', [button('添加学者', () => editProfile()), button('刷新', () => void loadCatalog(offset))]);
-      const pending = status('正在读取关注列表…');
+      const importButton = button('导入文献与领域研究', async () => {
+        importButton.disabled = true;
+        const message = status('正在导入已有资料…', controls);
+        try {
+          const { counts } = await api('scholar_import');
+          if (!active || owner !== generation) return;
+          toast(`已读取 ${counts.papers} 篇文献和 ${counts.topics} 个研究主题，导入 ${counts.group} 项课题组记录。`);
+          void loadCatalog(0);
+        } catch (error) { if (active && owner === generation) message.textContent = error.message; }
+        finally { importButton.disabled = false; }
+      });
+      begin('研究人员', [button('添加档案', () => editProfile()), importButton, button('刷新', () => void loadCatalog(offset))]);
+      const controls = el('form', undefined, 'scholar-controls');
+      const type = el('select'), search = el('input'), submit = el('button', '搜索', 'workspace-nav-button');
+      type.setAttribute('aria-label', '研究人员类别');
+      for (const [value, label] of [['', '全部类型'], ...Object.entries(kinds)]) {
+        const option = el('option', label); option.value = value; type.append(option);
+      }
+      type.value = kindFilter;
+      search.type = 'search'; search.maxLength = 200; search.value = query;
+      search.placeholder = '检索名称、院校或研究兴趣'; search.setAttribute('aria-label', search.placeholder);
+      submit.type = 'submit';
+      controls.append(type, search, submit); content.append(controls);
+      controls.addEventListener('submit', event => { event.preventDefault(); query = search.value.trim(); void loadCatalog(0); });
+      type.addEventListener('change', () => { kindFilter = type.value; query = search.value.trim(); void loadCatalog(0); });
+      const pending = status('正在读取目录…');
       try {
-        const page = await api('scholar_list', { offset });
+        const page = await api('scholar_list', { offset, kind: kindFilter, query });
         if (!active || owner !== generation) return;
-        if (!page.items.length) { pending.textContent = '添加一位学者，开始整理其研究方向和论文。'; return; }
+        if (!page.items.length) { pending.textContent = page.counts ? '当前筛选没有匹配记录。' : '可添加档案，或导入文献与领域研究中的资料。'; return; }
         pending.remove();
-        const body = table(`学者目录 · ${page.total} 位`, ['姓名', '机构', '关注状态']);
+        const body = table(`研究人员目录 · ${page.total} 项`, ['名称', '类型', '所属机构', '发文量', '来源关联', '研究兴趣', '核验', '关注']);
         for (const item of page.items) {
-          row(body, [button(item.name, () => void loadProfile(item.id)), item.organization || '—', item.followed ? '已关注' : '未关注']);
+          row(body, [button(item.name, () => void loadProfile(item.id)), kinds[item.kind], item.organization || '—',
+            item.publication_count ?? '—', item.linked_publication_count, item.topics?.map(topic => topic.name).join(' · ') || '—',
+            evidence[item.evidence_status] || '—', item.followed ? '已关注' : '未关注']);
         }
         pager(offset, scholarPage, page.next_offset != null, value => void loadCatalog(value));
       } catch (error) { if (active && owner === generation) pending.textContent = error.message; }
@@ -110,13 +139,18 @@ window.PaperScholars = (() => {
       selected = id;
       paperOffset = offset;
       const owner = ++generation;
-      begin('学者档案', [button('返回学者列表', () => void loadCatalog(catalogOffset))]);
-      const pending = status('正在读取学者档案…');
+      begin('研究档案', [button('返回列表', () => void loadCatalog(catalogOffset))]);
+      const pending = status('正在读取档案…');
       let entry;
       try {
         entry = await api('scholar_get', { id });
         if (!active || owner !== generation) return;
         renderProfile(entry);
+        if (entry.profile.linked_publication_count) {
+          const sourceWorks = el('div');
+          content.append(sourceWorks);
+          void loadSourcePapers(id, 0, owner, sourceWorks);
+        }
         const pendingWorks = status('正在匹配本库题录…');
         try {
           const works = await api('scholar_publications', { id, offset });
@@ -138,22 +172,58 @@ window.PaperScholars = (() => {
       follow.setAttribute('aria-pressed', String(item.followed));
       begin(nameOf(item), [
         follow, button('编辑档案', () => editProfile(entry)),
-        button('返回学者列表', () => void loadCatalog(catalogOffset)),
+        button('返回列表', () => void loadCatalog(catalogOffset)),
       ]);
-      const info = table('学者档案', ['字段', '资料']);
+      const info = table('档案资料', ['字段', '资料']);
+      row(info, ['类型', kinds[item.kind]]);
+      if (item.roles?.includes('pi') && item.kind === 'lead') row(info, ['角色线索', 'PI 待核验']);
+      if (item.evidence_status) row(info, ['核验状态', evidence[item.evidence_status]]);
       const affiliation = el('span');
       affiliation.append(item.organization_url ? link(item.organization, item.organization_url) : item.organization || '—');
       if (item.department) affiliation.append(` · ${item.department}`);
       row(info, ['机构', affiliation]);
       if (item.position) row(info, ['职称', item.position]);
+      if (item.members?.length) row(info, ['来源中列出的成员', item.members.join(' · ')]);
+      if (item.description) row(info, ['研究简介', item.description]);
+      if (item.scope) row(info, ['研究范围', item.scope]);
+      if (item.evidence_note) row(info, ['来源说明', item.evidence_note]);
+      if (item.last_checked) row(info, ['来源核对日期', item.last_checked]);
+      row(info, ['发文量', item.publication_count == null ? '—' : [item.publication_count, item.publication_count_source].filter(Boolean).join(' · ')]);
+      if (item.linked_publication_count || item.source_work_count) row(info, ['来源收录', `${Math.max(item.linked_publication_count || 0, item.source_work_count || 0)} 篇`]);
       if (item.email_domain) row(info, ['邮箱域名', item.email_domain]);
       if (item.homepage) row(info, ['主页', link('打开学者主页', item.homepage)]);
       if (item.topics?.length) {
         const topics = el('span', undefined, 'scholar-topics');
         for (const topic of item.topics) topics.append(topic.url ? link(topic.name, topic.url) : el('span', topic.name));
-        row(info, ['研究方向', topics]);
+        row(info, ['研究兴趣', topics]);
       }
       if (item.notes) row(info, ['分析笔记', el('div', item.notes, 'scholar-notes')]);
+      if (item.sources?.length) {
+        const details = el('details'), list = el('ul');
+        details.append(el('summary', `来源 · ${item.source_count ?? item.sources.length}`));
+        for (const source of item.sources) {
+          const line = el('li');
+          line.append(source.url ? link(source.label, source.url) : source.label);
+          list.append(line);
+        }
+        details.append(list); row(info, ['来源', details]);
+      }
+    }
+
+    async function loadSourcePapers(id, offset, owner, host) {
+      host.replaceChildren();
+      const pending = status('正在读取来源关联论文…', host);
+      try {
+        const page = await api('scholar_source_publications', { id, offset });
+        if (!active || owner !== generation) return;
+        pending.remove();
+        const body = table(`来源关联论文 · ${page.total} 篇`, ['论文', '年份', '出处', '操作'], host);
+        for (const paper of page.items) {
+          const action = paper.id ? button('打开文献', () => void openPaper(paper)) : paper.url ? link('来源', paper.url) : '—';
+          row(body, [paper.title, paper.year, paper.venue || '—', action]);
+        }
+        pager(offset, paperPage, page.has_more, value => void loadSourcePapers(id, value, owner, host), host);
+      } catch (error) { if (active && owner === generation) pending.textContent = error.message; }
     }
 
     function renderPapers(entry, result, offset) {
@@ -184,7 +254,7 @@ window.PaperScholars = (() => {
           const match = { doi: 'DOI 已匹配', confirmed: '已确认', candidate: '同名待确认' }[paper.match] || '已登记 · 未关联在库文献';
           row(body, [title, work?.year || paper.year || '—', work?.venue || paper.venue || '—', match, actions]);
         }
-      } else if (result) status('本库暂未匹配到论文。可添加有来源的代表作。');
+      } else if (result && !item.linked_publication_count) status('本库暂未匹配到论文。可添加有来源的代表作。');
       const excluded = item.reviewed.filter(review => review.match === 'excluded');
       if (excluded.length) {
         const details = el('details', undefined, 'scholar-excluded');
@@ -233,9 +303,13 @@ window.PaperScholars = (() => {
       const inputs = {};
       for (const [key, label, length, type = 'text', required = false] of specs) {
         const field = el('label', label);
-        const input = el(type === 'multiline' ? 'textarea' : 'input');
-        if (type !== 'multiline') input.type = type;
-        input.maxLength = length;
+        const input = el(type === 'multiline' ? 'textarea' : type === 'kind' ? 'select' : 'input');
+        if (type === 'kind') {
+          for (const [value, label] of Object.entries(kinds)) { const choice = el('option', label); choice.value = value; input.append(choice); }
+        } else {
+          if (type !== 'multiline') input.type = type;
+          input.maxLength = length;
+        }
         input.required = required;
         if (key === 'year') input.inputMode = 'numeric';
         input.value = current[key] ?? '';
@@ -260,14 +334,17 @@ window.PaperScholars = (() => {
 
     function editProfile(entry) {
       const item = entry?.profile || {};
-      editor(entry ? '编辑学者档案' : '添加学者', [
-        ['name', '姓名', 160, 'text', true], ['native_name', '中文姓名或本名', 160],
+      editor(entry ? '编辑研究档案' : '添加研究档案', [
+        ['kind', '类型', 0, 'kind'], ['name', '名称', 160, 'text', true], ['native_name', '中文名或原名', 160],
         ['aliases', '署名别名（每行一个）', 1200, 'multiline'],
-        ['organization', '机构', 240], ['department', '院系或研究组', 240], ['position', '职称', 160],
+        ['organization', '所属机构', 240], ['department', '院系或研究组', 240], ['position', '职称或角色', 160],
         ['homepage', '主页', 2048, 'url'], ['organization_url', '机构来源链接', 2048, 'url'],
-        ['email_domain', '邮箱域名', 253], ['topics', '研究方向（每行一个）', 1900, 'multiline'],
+        ['email_domain', '邮箱域名', 253], ['topics', '研究兴趣（每行一个）', 7900, 'multiline'],
+        ['publication_count', '发文量', 8], ['publication_count_source', '发文量来源或统计口径', 500],
         ['notes', '分析笔记', 4000, 'multiline'],
-      ], { ...item, aliases: item.aliases?.join('\n'), topics: item.topics?.map(topic => topic.name).join('\n') }, (patch, error) => {
+      ], { kind: 'scholar', ...item, aliases: item.aliases?.join('\n'), topics: item.topics?.map(topic => topic.name).join('\n') }, (patch, error) => {
+        if (patch.publication_count && !/^\d+$/.test(patch.publication_count)) { error.textContent = '发文量须为非负整数。'; return; }
+        patch.publication_count = patch.publication_count ? Number(patch.publication_count) : null;
         patch.aliases = patch.aliases.split('\n').map(value => value.trim()).filter(Boolean);
         patch.topics = patch.topics.split('\n').map(name => name.trim()).filter(Boolean).map(name => ({ name }));
         return update(entry, 'scholar_save', { patch }, error);
