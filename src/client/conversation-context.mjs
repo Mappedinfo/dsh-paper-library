@@ -1,5 +1,6 @@
 import { annotationReferenceInsert, parseAnnotationReference } from './annotation-references.mjs'
 import { boardReferenceInsert, boardReferenceToken } from './board-references.mjs'
+import { paperTabAddress, paperTabKind } from './paper-tabs.mjs'
 
 const VERSION = 1
 const ACTION = 'paper-library:conversation-action'
@@ -248,6 +249,8 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
   // their own paper instead of stealing each other's last state. Keyless
   // callers share the 'default' slot, preserving single-pane behaviour.
   const snapshots = new Map()
+  const tabLabels = new Map()
+  const tabLabelListeners = new Set()
   let lastActiveTarget = null
   let active = true
   let navigation = null
@@ -272,7 +275,8 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
     // With several panes open, deliver to the pane the reader last touched;
     // fall back to the most recent ready frame when that pane is gone.
     const recent = lastActiveTarget !== null ? frames.get(lastActiveTarget) : undefined
-    const target = recent?.ready ? lastActiveTarget : [...frames].reverse().find(([, frame]) => frame.ready)?.[0]
+    const target = recent?.ready && recent.visible() ? lastActiveTarget
+      : [...frames].reverse().find(([, frame]) => frame.ready && frame.visible())?.[0]
     if (!target) return
     post(target, { type: 'paper-library:reference-open', ...pendingReference })
     pendingReference = null
@@ -400,7 +404,7 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
     if (data.type === 'paper-library:reader-state') {
       try {
         snapshots.set(frame.key, readerSnapshot(data.snapshot))
-        lastActiveTarget = event.source
+        if (frame.visible()) lastActiveTarget = event.source
       }
       catch (error) { post(event.source, { type: 'paper-library:reader-state-error', error: error.message }) }
       return
@@ -411,6 +415,27 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
         return
       }
       ctx.sidebarRight.openTab('paper-library-slides', data.id ? { preferNewPane: true, revealIfOpened: false, params: { project: data.id } } : { preferNewPane: true })
+      return
+    }
+    if (data.type === 'paper-library:tab-label') {
+      if (typeof data.label !== 'string' || data.label.length > 200) return
+      const label = data.label.trim()
+      if ((tabLabels.get(frame.key) || '') !== label) {
+        if (label) tabLabels.set(frame.key, label)
+        else tabLabels.delete(frame.key)
+        for (const listener of tabLabelListeners) listener()
+      }
+      return
+    }
+    if (data.type === 'paper-library:open-tab') {
+      if (!frame.visible()) return
+      try {
+        const address = paperTabAddress(data.id)
+        const title = boundedString(data.title, 200, true)
+        ctx.sidebarRight.openResource(address, { kind: paperTabKind, ...(title ? { params: { title } } : {}) })
+      } catch (error) {
+        post(event.source, { type: 'paper-library:reader-state-error', error: error.message })
+      }
       return
     }
     if (data.type === 'paper-library:open-pane') {
@@ -448,7 +473,7 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
       post(event.source, result)
       if (!frames.has(event.source) && ['open', 'draft', 'board_draft'].includes(data.action)) {
         terminalRelay = { ...result, relay: true, sessionId: data.sessionId }
-        const recipient = [...frames].reverse().find(([, candidate]) => candidate.ready)?.[0]
+        const recipient = [...frames].reverse().find(([, candidate]) => candidate.ready && candidate.visible())?.[0]
         if (recipient) relayResult(recipient)
       }
     })
@@ -456,6 +481,14 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
   window.addEventListener('message', onMessage)
 
   return {
+    tabLabel: key => tabLabels.get(key),
+    subscribeTabLabels(listener) {
+      tabLabelListeners.add(listener)
+      return () => tabLabelListeners.delete(listener)
+    },
+    forgetTabLabel(key) {
+      if (tabLabels.delete(key)) for (const listener of tabLabelListeners) listener()
+    },
     /** Reveal a page after a user explicitly opens an immutable reference. */
     async openReference({ sessionId, paperId, page, snapshot_id }) {
       boundedString(paperId, 200); pageNumber(page)
@@ -467,8 +500,8 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
     },
     /** Authorize exactly one generated iframe's WindowProxy until its pane unmounts.
      *  `key` identifies the hosting sidebar tab, isolating its reader snapshot. */
-    attach(target, key) {
-      const record = { ready: false, requests: new Map(), key: typeof key === 'string' && key ? key : 'default' }
+    attach(target, key, visible = () => true) {
+      const record = { ready: false, requests: new Map(), key: typeof key === 'string' && key ? key : 'default', visible }
       frames.set(target, record)
       return () => { if (frames.get(target) === record) frames.delete(target) }
     },
@@ -491,7 +524,8 @@ export function createConversationBridge({ window, ctx, rememberReference = () =
       active = false
       window.removeEventListener('message', onMessage)
       finishNavigation(new Error('文献库插件已卸载'))
-      frames.clear(); mounted.clear(); snapshots.clear(); lastActiveTarget = null; terminalRelay = null; pendingReference = null
+      frames.clear(); mounted.clear(); snapshots.clear(); tabLabels.clear(); tabLabelListeners.clear()
+      lastActiveTarget = null; terminalRelay = null; pendingReference = null
     },
   }
 }

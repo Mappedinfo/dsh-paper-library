@@ -13,7 +13,7 @@ test('published client bundle registers entry tabs and preserves hidden slide dr
   const sources = []
   const effects = []
   let flowActive = false
-  const react = { createElement: (type, props) => ({ type, props }), useRef: value => ({ current: value }), useEffect: () => {}, useState: value => [flowActive ? true : value, () => {}] }
+  const react = { createElement: (type, props) => ({ type, props }), useRef: value => ({ current: value }), useEffect: () => {}, useState: value => [flowActive ? true : value, () => {}], useSyncExternalStore: (_subscribe, snapshot) => snapshot() }
   new Script(readFileSync(bundle, 'utf8')).runInNewContext({
     window: { location: { origin: 'http://localhost:3080' }, addEventListener: () => {}, removeEventListener: () => {}, __ModuleLoader__: { load: entry => {
       assert.equal(entry.id, '@mappedinfo/dsh-paper-library')
@@ -28,9 +28,9 @@ test('published client bundle registers entry tabs and preserves hidden slide dr
     sessions: { subagentAddress: () => undefined },
     inputTriggers: { registerSource: source => { sources.push(source); return () => { const index = sources.indexOf(source); if (index >= 0) sources.splice(index, 1) } } },
     slots: {
-      inject: (name, callback) => { assert.ok(['sidebar.right.pane.tab', 'conversation.input.overlay', 'conversation.input.dock', 'settings.section'].includes(name)); return callback() },
+      inject: (name, callback) => { assert.ok(['sidebar.right.pane.tab', 'sidebar.right.pane.tab.title', 'conversation.input.overlay', 'conversation.input.dock', 'settings.section'].includes(name)); return callback() },
       register: (definition, component) => {
-        const key = definition.name === 'sidebar.right.pane.tab' ? `body:${definition.key}` : definition.name === 'conversation.input.dock' ? `dock:${definition.id}` : definition.name === 'settings.section' ? `settings:${definition.id}` : 'mount'
+        const key = definition.name.startsWith('sidebar.right.pane.tab') ? `${definition.name}:${definition.key}` : definition.name === 'conversation.input.dock' ? `dock:${definition.id}` : definition.name === 'settings.section' ? `settings:${definition.id}` : 'mount'
         if (definition.name === 'sidebar.right.pane.tab') bodies.set(definition.key, { definition, component })
         registrations.set(key, { definition, component })
         return () => { registrations.delete(key); bodies.delete(definition.key) }
@@ -43,6 +43,17 @@ test('published client bundle registers entry tabs and preserves hidden slide dr
   const libraryTab = tabs.get('@mappedinfo/dsh-paper-library')
   const canvasTab = tabs.get('@mappedinfo/dsh-paper-library/whiteboard')
   const slidesTab = tabs.get('@mappedinfo/dsh-paper-library/slides')
+  const paperTab = tabs.get('@mappedinfo/dsh-paper-library/paper')
+  const address = 'dsh-resource://paper-library/paper/paper-one'
+  assert.equal(paperTab.canOpen(address), true)
+  assert.equal(paperTab.canOpen(address + '/../../file'), false)
+  assert.equal(paperTab.guide, undefined)
+  const paperView = bodies.get(paperTab.id).component({ useTabInfo: () => ({tab:{visible:false,contentId:address}}) })
+  const paperFrame = paperView.type(paperView.props)
+  assert.equal(paperFrame.props.src,'/api/paper-library/?paper=paper-one')
+  assert.equal(paperFrame.props.style.display,'none','hidden paper tabs preserve their independent reader')
+  const chip = registrations.get(`sidebar.right.pane.tab.title:${paperTab.id}`).component({ useTabInfo: () => ({tab:{navigation:{params:{title:'Synthetic title'}}}}) })
+  assert.equal(chip.type(chip.props).props.title,'Synthetic title')
   assert.equal(slidesTab.kind, 'paper-library-slides')
   assert.equal(slidesTab.keepMounted, true, 'the host must retain the draft-bearing editor body too')
   assert.equal(slidesTab.multiple, true)

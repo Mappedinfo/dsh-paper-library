@@ -286,6 +286,7 @@ async function openResource(item){
   return openPaper(item.id);
 }function renderPaperHeader() {
   const item = state.active; if (!item) return;
+  publishPaperTabLabel();
   $('paper-title').textContent = title(item);
   const details = [authors(item), year(item), item['container-title']].filter(Boolean);
   $('paper-authors').textContent = details.join(' · ');
@@ -1514,7 +1515,7 @@ function publishReaderState({ rememberOpen = false } = {}) {
   if(persistence&&readerStateReady){
     const durable={...snapshot};delete durable.chatDraft;delete durable.chatContext;delete durable.handwritingDraft;delete durable.linkedHandwriting;delete durable.inkDraftRecord;
     void persistence.put(`reader:${state.active.id}`,durable,{ touch: rememberOpen }).catch(()=>{});
-    void persistence.put('reader',{paperId:state.active.id}).catch(()=>{});
+    void persistence.put(readerEntryKey,{paperId:state.active.id}).catch(()=>{});
   }
   if(window.parent!==window)window.parent.postMessage({ type: 'paper-library:reader-state', version: 1, snapshot }, window.location.origin);
   return true;
@@ -1627,6 +1628,25 @@ function entryPaper(){
 }
 const ENTRY_VIEW=entryView();
 const ENTRY_PAPER=entryPaper();
+const readerEntryKey=ENTRY_PAPER?`reader:tab:${ENTRY_PAPER}`:'reader';
+const readerLabelKey=`reader:tab-label:${ENTRY_PAPER||'main'}`;
+let customPaperTabLabel='';
+function publishPaperTabLabel() {
+  const label=customPaperTabLabel||String(state.active?.title||'').trim().slice(0,200);
+  document.title=label||'Paper Library';
+  if(window.parent!==window)window.parent.postMessage({type:'paper-library:tab-label',version:1,label},window.location.origin);
+}
+function openPaperTab(paper) {
+  if(paper.archived||typeof paper.id!=='string'||!/^[A-Za-z0-9_-]{1,160}$/u.test(paper.id))return;
+  if(!publishReaderState()){toast('当前阅读草稿过大，请先保存再打开新标签页。',true);return;}
+  if(window.parent!==window){
+    window.parent.postMessage({type:'paper-library:open-tab',version:1,id:paper.id,title:String(paper.title||'').slice(0,200)},window.location.origin);
+  }else{
+    const url=new URL(window.location.pathname,window.location.origin);
+    url.searchParams.set('paper',paper.id);
+    window.open(url.href,'_blank','noopener');
+  }
+}
 // DSH opens its own slide tab; standalone uses the link's separate browser tab.
 $('slides-open')?.addEventListener('click', event => {
   if (window.parent === window) return;
@@ -1653,6 +1673,11 @@ if(ENTRY_VIEW==='latex')document.body.classList.add('latex-focused');
 async function initialize() {
   announceReady();await loadStatus();
   if(ENTRY_VIEW==='board'||ENTRY_VIEW==='latex'){await applyEntryView();return;}
+  try{
+    const saved=await persistence?.get(readerLabelKey);
+    if(typeof saved?.label==='string')customPaperTabLabel=saved.label.slice(0,80);
+  }catch{}
+  publishPaperTabLabel();
   try {
     const saved = await persistence?.get('catalog:view');
     if (catalogPageSizes.has(saved?.pageSize)) state.limit = saved.pageSize;
@@ -1663,9 +1688,11 @@ async function initialize() {
   await loadList();
   let savedWorkspace;try{savedWorkspace=readerRestore?.workspace||await persistence?.get(`workspace:last:${ENTRY_PAPER||'main'}`);}catch{}
   if(ENTRY_PAPER){
-    // This tab was opened for one paper; the global last-paper key belongs to the
-    // main library tab and must not pull this pane onto another document.
-    initializedReader=true;await openPaper(ENTRY_PAPER);
+    const saved=await persistence?.get(readerEntryKey).catch(()=>null);
+    const target=typeof saved?.paperId==='string'&&/^[A-Za-z0-9_-]{1,160}$/u.test(saved.paperId)?saved.paperId:ENTRY_PAPER;
+    initializedReader=true;
+    const opened=await openPaper(target);
+    if(opened===undefined&&target!==ENTRY_PAPER&&!state.active)await openPaper(ENTRY_PAPER);
   } else {
     try{const saved=await persistence?.get('reader');if(saved?.paperId){const detail=saved.page?saved:await persistence.get(`reader:${saved.paperId}`);if(detail){readerRestore=detail;durableReaderLoaded=true;}}}
     catch(error){toast(`阅读位置读取失败：${error.message}`,true);}
@@ -1858,6 +1885,14 @@ rangeEditSave.addEventListener('click', async () => {
   }
 });
 outlineUI=window.PaperOutline?.create({api,panels:readingPanels,getPaper:()=>state.active,getPage:()=>state.page,navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');if(state.active?.id!==source.paperId)return;if(source.rects?.length)await pdfReader?.revealRegion(source);else await requestPage(source.page);}});
+readerSearchUI=window.PaperReaderSearch?.create({api,panels:readingPanels,getPaper:()=>state.active,reader:()=>pdfReader,navigate:()=>switchTab('reader'),getElements:()=>documentElementsUI,
+  onAnnotationSearch:()=>{pendingPdfAnnotationLink=null;pendingAnnotationSearchId=null;state.noteOffset=0;renderAnnotations();},
+  onAnnotationNavigate:hit=>{pendingPdfAnnotationLink=null;pendingAnnotationSearchId=hit.id;state.noteOffset=hit.offset;renderAnnotations();},
+  onLibrarySearch(query) {
+    if (catalogSearchUI) catalogSearchUI.setMetadataQuery(query);
+    else { $('search').value = query; searchMetadata(); }
+  },
+});
 documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPanels,getPaper:()=>state.active,toast,sharedSearch:Boolean(window.PaperReaderSearch),
   openSettings:()=>settingsUI?.showResources(),
   navigate:async source=>{if(state.active?.id!==source.paperId)return;await switchTab('reader');await pdfReader?.revealRegion(source);},
@@ -1866,14 +1901,6 @@ documentElementsUI = window.PaperDocumentElements?.create({api,panels:readingPan
 const annotationTagsUI = window.PaperAnnotationTags?.create({ api, el, onSaved: id => {
   if (state.active?.id === id) void loadAnnotations(id);
 } });
-readerSearchUI=window.PaperReaderSearch?.create({api,getPaper:()=>state.active,reader:()=>pdfReader,navigate:()=>switchTab('reader'),getElements:()=>documentElementsUI,
-  onAnnotationSearch:()=>{pendingPdfAnnotationLink=null;pendingAnnotationSearchId=null;state.noteOffset=0;renderAnnotations();},
-  onAnnotationNavigate:hit=>{pendingPdfAnnotationLink=null;pendingAnnotationSearchId=hit.id;state.noteOffset=hit.offset;renderAnnotations();},
-  onLibrarySearch(query) {
-    if (catalogSearchUI) catalogSearchUI.setMetadataQuery(query);
-    else { $('search').value = query; searchMetadata(); }
-  },
-});
 function installRecentPapers() {
   const trigger = $('toolbar-paper');
   const panel = el('section', 'reader-context-menu recent-papers');
@@ -1881,6 +1908,12 @@ function installRecentPapers() {
   panel.setAttribute('aria-label', '最近阅读');
   panel.hidden = true;
   trigger.after(panel);
+  function action(name, click, className = 'button subtle') {
+    const control = el('button', className, name);
+    control.type = 'button';
+    control.addEventListener('click', click);
+    return control;
+  }
   let request;
 
   function close(restoreFocus = false) {
@@ -1895,10 +1928,42 @@ function installRecentPapers() {
   }
   trigger.addEventListener('click', async () => {
     if (!panel.hidden) return close();
+    const controls = el('div', 'recent-paper-actions');
+    const active = state.active;
+    if (active && !active.archived && active.resource_kind !== 'dataset' && !state.catalogSlideId) {
+      controls.append(action('在新标签页打开', () => { close(true); openPaperTab(active); }));
+    }
+    const renameForm = el('form', 'recent-paper-name');
+    renameForm.hidden = true;
+    const label = el('input');
+    label.maxLength = 80;
+    label.setAttribute('aria-label', '标签页名称');
+    label.placeholder = '留空时使用论文标题';
+    const save = el('button', 'button primary', '保存');
+    save.type = 'submit';
+    renameForm.append(label, save);
+    controls.append(action('重命名标签页', () => {
+      label.value = customPaperTabLabel;
+      renameForm.hidden = false;
+      label.focus();
+    }));
+    renameForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (save.disabled) return;
+      const name = label.value.trim().slice(0,80);
+      save.disabled = true;
+      try {
+        await persistence?.put(readerLabelKey, {label:name});
+        customPaperTabLabel = name;
+        publishPaperTabLabel();
+        close(true);
+      } catch (error) { toast(`标签页名称未保存：${error.message}`, true); }
+      finally { save.disabled = false; }
+    });
     const heading = el('div', 'reader-context-heading', '最近阅读');
     const status = el('div', 'reader-context-heading', '正在读取…');
     status.setAttribute('role', 'status');
-    panel.replaceChildren(heading, status);
+    panel.replaceChildren(controls, renameForm, heading, status);
     panel.hidden = false;
     trigger.setAttribute('aria-expanded', 'true');
     place();
@@ -1922,7 +1987,12 @@ function installRecentPapers() {
             readerSurfaceActive() && !workbenchUI?.isTable()) return;
           void openPaper(item.id).catch(error => toast(error.message, true));
         });
-        panel.append(choice);
+        const row = el('div', 'recent-paper-row');
+        const separately = action('↗', () => { close(true); openPaperTab(item); });
+        separately.setAttribute('aria-label', `在新标签页打开：${title(item)}`);
+        separately.title = '在新标签页打开';
+        row.append(choice, separately);
+        panel.append(row);
       }
     } catch (error) {
       if (!controller.signal.aborted) status.textContent = error.message;

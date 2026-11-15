@@ -6,10 +6,16 @@ const require=createRequire(import.meta.url),{JSDOM}=require(process.env.JSDOM_M
 const script=await readFile(new URL('../web/reader-search.js',import.meta.url),'utf8');
 const tick=()=>new Promise(r=>setImmediate(r));
 async function until(fn){for(let i=0;i<100;i++){if(fn())return;await tick();}assert.ok(fn(),'condition settled');}
-function fixture(t,api){
+function fixture(t,api,withResults=false){
  const w=new JSDOM('<header><div id="paper-tools"><div id="toolbar-reader"></div></div></header><section class="shared-reading-sidebar" data-sidebar-panel="annotations"><header class="reading-sidebar-header"><button id="reading-sidebar-side"></button></header></section>',{runScripts:'outside-only'}).window;
  w.setTimeout=fn=>setImmediate(fn);w.eval(script);let paper={id:'synthetic',pdf:true};const calls=[],revealed=[],filters=[];
- const ui=w.PaperReaderSearch.create({api:async(a,p)=>{calls.push([a,p]);return api(a,p);},getPaper:()=>paper,reader:()=>({revealRegion:v=>revealed.push(v)}),navigate:async()=>{},getElements:()=>({search:(...v)=>filters.push(v)}),onAnnotationSearch:q=>filters.push(['annotations',q]),onLibrarySearch:q=>filters.push(['library',q])});
+ let sidebar;
+ const panels=withResults?{
+   registerPanel({id,label,element}){assert.equal(id,'pdf-search');assert.equal(label,'文内搜索');sidebar=element;w.document.querySelector('.shared-reading-sidebar').append(element);},
+   visible:()=>!sidebar.hidden,
+   show(){sidebar.hidden=false;},
+ }:undefined;
+ const ui=w.PaperReaderSearch.create({panels,api:async(a,p)=>{calls.push([a,p]);return api(a,p);},getPaper:()=>paper,reader:()=>({revealRegion:v=>revealed.push(v)}),navigate:async()=>{},getElements:()=>({search:(...v)=>filters.push(v)}),onAnnotationSearch:q=>filters.push(['annotations',q]),onLibrarySearch:q=>filters.push(['library',q])});
  t.after(()=>{ui.dispose();w.close();});return {w,ui,calls,revealed,filters,setPaper(p){paper=p;ui.sync();},setScope(s){w.document.querySelector('.shared-reading-sidebar').dataset.sidebarPanel=s;ui.sync();},get:selector=>w.document.querySelector(selector),submit(selector){w.document.querySelector(selector).dispatchEvent(new w.Event('submit',{cancelable:true}));}};
 }
 const match=(page,n=0)=>({page,rects:[[10+n,20,30+n,40]]});
@@ -22,6 +28,25 @@ test('PDF search scans pages, navigates each match, handles blank pages and clos
  f.get('[aria-label="上一个匹配位置"]').click();await tick();assert.equal(f.revealed.at(-1).page,1);
  f.get('#reader-find').click();assert.equal(f.get('#pdf-search-row').hidden,true);assert.equal(f.w.document.body.classList.contains('pdf-search-open'),false);
  f.get('#reader-find').click();assert.equal(f.get('#pdf-search-row').hidden,false);assert.equal(f.get('#pdf-search-row input').value,'word');
+});
+test('the toolbar and sidebar share results, and excerpts jump to their exact PDF position',async t=>{
+ const f=fixture(t,async(a,p)=>({page:p.page,page_count:2,matches:[{...match(p.page),snippet:`Original <evidence> on page ${p.page}`}],next_page:p.page===1?2:null,next_offset:null}),true);
+ const panel=f.get('#pdf-search-panel'),side=f.get('#pdf-search-panel input'),top=f.get('#pdf-search-row input');
+ assert.match(panel.textContent,/输入文字/);assert.equal(f.calls.length,0);
+ top.value='evidence';top.dispatchEvent(new f.w.Event('input'));assert.equal(side.value,'evidence');
+ f.get('#reader-find').click();f.submit('#pdf-search-row');
+ await until(()=>panel.querySelectorAll('li').length===2);
+ assert.equal(panel.hidden,false);
+ assert.equal(panel.querySelector('evidence'),null);
+ const second=panel.querySelectorAll('li button')[1];
+ assert.match(second.textContent,/第 2 页.*Original <evidence>/);
+ second.click();await tick();assert.equal(f.revealed.at(-1).page,2);
+ assert.match(f.get('#pdf-search-row [role=status]').textContent,/2 \/ 2/);
+ f.get('#reader-find').click();assert.equal(f.get('#pdf-search-row').hidden,true);assert.equal(panel.querySelectorAll('li').length,2);
+ side.value='new';side.dispatchEvent(new f.w.Event('input'));assert.equal(top.value,'new');assert.equal(panel.querySelectorAll('li').length,0);
+ f.submit('#pdf-search-panel form');await until(()=>panel.querySelectorAll('li').length===2);assert.equal(f.calls.at(-1)[1].query,'new');
+ f.setPaper({id:'other',pdf:false});
+ assert.match(panel.textContent,/没有 PDF/);assert.equal(side.disabled,true);assert.equal(top.value,'');assert.equal(panel.querySelectorAll('li').length,0);
 });
 test('bounded batches continue inside a dense page without dropping remaining matches',async t=>{
  const f=fixture(t,async(a,p)=>{const count=Math.min(p.limit,205-p.offset);return{page:1,page_count:1,matches:Array.from({length:count},(_,i)=>match(1,p.offset+i)),next_offset:p.offset+count<205?p.offset+count:null,next_page:null};});

@@ -636,6 +636,26 @@ test('the reader may ask for a split pane, bounded to a paper id', () => {
   e.bridge.dispose()
 })
 
+test('native paper tabs use a per-paper resource and the tab label is scoped to the originating frame', () => {
+  const e = environment(), opened = []
+  e.ctx.sidebarRight.openResource = (address, options) => opened.push({address,options})
+  e.message({ type: 'paper-library:open-tab', id: 'paper-9', title: 'Example paper', url: 'https://invalid.test' })
+  e.message({ type: 'paper-library:open-tab', id: '../private' })
+  assert.deepEqual(opened,[{address:'dsh-resource://paper-library/paper/paper-9',
+    options:{kind:'paper-library-paper',params:{title:'Example paper'}}}])
+  assert.equal(e.messages.at(-1).value.type,'paper-library:reader-state-error')
+  const background = {postMessage(){}}
+  e.bridge.attach(background, 'paper-tab-2', () => false)
+  e.message({type:'paper-library:open-tab',id:'another'},background)
+  assert.equal(opened.length,1)
+  e.message({type:'paper-library:tab-label',label:'对照阅读'},background)
+  assert.equal(e.bridge.tabLabel('paper-tab-2'),'对照阅读')
+  assert.equal(e.bridge.tabLabel('default'),undefined)
+  e.bridge.forgetTabLabel('paper-tab-2')
+  assert.equal(e.bridge.tabLabel('paper-tab-2'),undefined)
+  e.bridge.dispose()
+})
+
 test('the library opens the fixed slides workbench without forwarding page URLs or paths', () => {
   const e = environment()
   e.message({ type: 'paper-library:open-slides', url: 'https://invalid.test', root: '/private' })

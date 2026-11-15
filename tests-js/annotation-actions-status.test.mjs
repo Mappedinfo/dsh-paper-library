@@ -219,8 +219,8 @@ test('range handles update the draft without writing until the user saves', {ski
  } finally {f.dom.window.close();}
 });
 
-test('the current paper title opens the recent reading list and switches through the normal reader', {skip:!JSDOM}, async () => {
-  const f = fixture(), w = f.window, d = f.document, opened = [];
+test('the current paper menu switches readers, opens native tabs, and saves a display name', {skip:!JSDOM}, async () => {
+  const f = fixture(), w = f.window, d = f.document, opened = [], tabs = [], labels = [];
   try {
     const trigger = d.getElementById('toolbar-paper');
     w.state.active = { id: 'paper-a' };
@@ -228,6 +228,11 @@ test('the current paper title opens the recent reading list and switches through
     w.readerStateReady = true;
     w.readerPaperId = 'paper-a';
     w.openPaper = async id => opened.push(id);
+    w.openPaperTab = paper => tabs.push(paper.id);
+    w.customPaperTabLabel = '';
+    w.readerLabelKey = 'reader:tab-label:main';
+    w.publishPaperTabLabel = () => labels.push(w.customPaperTabLabel);
+    w.persistence = {put:async(key,value)=>assert.equal(key,w.readerLabelKey)};
     w.api = async action => {
       assert.equal(action, 'recent_papers');
       return { items: [{ id: 'paper-a', title: 'Current paper' }, { id: 'paper-b', title: 'Earlier paper' }] };
@@ -238,7 +243,7 @@ test('the current paper title opens the recent reading list and switches through
       trigger.click();
       await new Promise(resolve => setImmediate(resolve));
       assert.equal(trigger.getAttribute('aria-expanded'), 'true');
-      return [...panel.querySelectorAll('button')];
+      return [...panel.querySelectorAll('.reader-context-item')];
     };
     let choices = await open();
     assert.deepEqual(choices.map(button => button.textContent), ['Current paper', 'Earlier paper']);
@@ -251,6 +256,15 @@ test('the current paper title opens the recent reading list and switches through
     choices[1].click();
     assert.deepEqual(opened, ['paper-b']);
     assert.equal(panel.hidden, true);
+    await open();
+    panel.querySelector('[aria-label="在新标签页打开：Earlier paper"]').click();
+    assert.deepEqual(tabs,['paper-b']);assert.deepEqual(opened,['paper-b']);
+    await open();
+    [...panel.querySelectorAll('button')].find(button=>button.textContent==='重命名标签页').click();
+    panel.querySelector('input').value='对照阅读';
+    panel.querySelector('form').dispatchEvent(new w.Event('submit',{cancelable:true}));
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.deepEqual(labels,['对照阅读']);
   } finally { f.dom.window.close(); }
 });
 

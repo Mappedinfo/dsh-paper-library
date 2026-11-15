@@ -1,4 +1,4 @@
-import { createElement, useEffect, useRef, useState } from 'react'
+import { createElement, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { bindModelContext } from './model-context.mjs'
 import { bindThemeContext } from './theme-context.mjs'
 import { createConversationBridge } from './conversation-context.mjs'
@@ -7,8 +7,10 @@ import { createBoardReferences } from './board-references.mjs'
 import { registerPaperLibrarySettings } from './settings.mjs'
 import { bindReturnToDsh } from './return-to-dsh.mjs'
 import { bindFlowWindow, retainFlowFrame } from './flow-lifecycle.mjs'
+import { paperTabId, paperTabKind, paperTabPrefix } from './paper-tabs.mjs'
 
 const ID = '@mappedinfo/dsh-paper-library'
+const PAPER_ID = `${ID}/paper`
 const NS = 'paperLibrary'
 const referenceButtonStyle = {
   boxSizing: 'border-box', maxWidth: '100%', minWidth: 0, padding: '4px 8px',
@@ -63,27 +65,41 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
   const canvas = view === 'board'
   const latex = view === 'latex'
   const slides = view === 'slides'
+  const paperTab = view === 'paper'
   const { tab } = useTabInfo()
   const frame = useRef(null)
+  const frameVisible = useRef(tab.visible)
+  frameVisible.current = tab.visible
+  const bridgeActive = tab.visible || paperTab
   const [flowActive, setFlowActive] = useState(false)
-  const requestedPaper = !canvas && !latex && !slides ? tab.navigation?.params?.paper : undefined
+  const requestedPaper = paperTab ? paperTabId(tab.navigation?.address || tab.contentId)
+    : !canvas && !latex && !slides ? tab.navigation?.params?.paper : undefined
   const requestedSlides = slides && /^pd-[a-f0-9]{32}$/.test(tab.navigation?.params?.project || '') ? tab.navigation.params.project : undefined
   const paperForFrame = useRef(requestedPaper)
   if (!flowActive) paperForFrame.current = requestedPaper
   const initialSlides = useRef(requestedSlides).current
   const navigationRevision = tab.navigation?.revision ?? 0
+  const lastNavigation = useRef(navigationRevision)
   useEffect(() => bindFlowWindow({ window, getFrame: () => frame.current, onChange: setFlowActive }), [])
   useEffect(() => {
-    if (!tab.visible || !frame.current?.contentWindow) return undefined
-    return conversationBridge.attach(frame.current.contentWindow, tab.id)
-  }, [conversationBridge, tab.visible, tab.id])
+    if (!bridgeActive || !frame.current?.contentWindow) return undefined
+    return conversationBridge.attach(frame.current.contentWindow, tab.id, () => frameVisible.current)
+  }, [conversationBridge, bridgeActive, tab.id])
+  useEffect(() => {
+    if (!tab.signal || canvas || latex || slides) return undefined
+    const closed = () => conversationBridge.forgetTabLabel(tab.id)
+    tab.signal.addEventListener('abort', closed, { once: true })
+    return () => tab.signal.removeEventListener('abort', closed)
+  }, [conversationBridge, tab.signal, tab.id, canvas, latex, slides])
   // Re-navigating an already-mounted tab (split budget exhausted, or a second
   // 「分栏打开」 landing in the same pane) bumps the navigation revision with new
   // params; forward the target paper to the live iframe instead of remounting it.
   useEffect(() => {
     if (!tab.visible || !frame.current?.contentWindow || !requestedPaper) return
+    if (paperTab && lastNavigation.current === navigationRevision) return
+    lastNavigation.current = navigationRevision
     conversationBridge.openPaper(frame.current.contentWindow, requestedPaper)
-  }, [conversationBridge, tab.visible, navigationRevision, requestedPaper])
+  }, [conversationBridge, tab.visible, navigationRevision, requestedPaper, paperTab])
   useEffect(() => {
     if (tab.visible && frame.current?.contentWindow && requestedSlides) frame.current.contentWindow.postMessage({ type: 'paper-library:open-slide-project', id: requestedSlides }, window.location.origin)
   }, [tab.visible, navigationRevision, requestedSlides])
@@ -103,8 +119,8 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
     if (!tab.visible || !frame.current?.contentWindow) return undefined
     return bindReturnToDsh({ window, target: frame.current.contentWindow, tabId: tab.id, sessionId, sidebar: sidebarRight })
   }, [sidebarRight, sessionId, tab.id, tab.visible])
-  // Preserve a live flow or slide editor, including failed-save drafts, across tab switches.
-  if (!retainFlowFrame({ visible: tab.visible, slides, flowActive })) return null
+  // A dedicated reader keeps its page, search, and any in-progress selection in place.
+  if (!paperTab && !retainFlowFrame({ visible: tab.visible, slides, flowActive })) return null
   const src = canvas ? '/api/paper-library/?view=board'
     : latex ? '/api/paper-library/?view=latex'
     : slides ? `/api/paper-library/slides.html${initialSlides ? `?project=${encodeURIComponent(initialSlides)}` : ''}`
@@ -120,6 +136,13 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
     allowFullScreen: true,
     style: { display: tab.visible ? undefined : 'none', width: '100%', height: '100%', minHeight: '480px', border: 0, background: 'var(--dsw-alias-bg-base, transparent)' },
   })
+}
+
+function PaperTabTitle({ useTabInfo, bridge, t }) {
+  const { tab } = useTabInfo()
+  const label = useSyncExternalStore(bridge.subscribeTabLabels, () => bridge.tabLabel(tab.id))
+    || tab.navigation?.params?.title || t('title')
+  return createElement('span', { title: label }, label)
 }
 
 /** Observe an always-mounted composer extension seat without adding visual chrome. */
@@ -241,6 +264,20 @@ export function apply(ctx) {
     title: () => t('title'),
     guide: [{ order: 15, title: () => t('title'), description: () => t('description'), icon: LibraryGlyph }],
   }), 'paper-library: tab type')
+  ctx.effect(() => ctx.sidebarRightTabs.register({
+    id: PAPER_ID,
+    kind: paperTabKind,
+    patterns: [`${paperTabPrefix}*`],
+    canOpen: address => paperTabId(address) !== null,
+    keepMounted: true,
+    priority: 'extension',
+    title: () => t('title'),
+  }), 'paper-library: individual reader tab type')
+  for (const id of [ID, PAPER_ID]) {
+    ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
+      name: 'sidebar.right.pane.tab.title', key: id,
+    }, props => createElement(PaperTabTitle, { ...props, bridge: conversationBridge, t }))), 'paper-library: tab title')
+  }
   // The whiteboard is its own tab type of the same plugin: its own start-page capsule, its
   // own tab, and the same bridge bindings, so 「放入对话」 works from either surface.
   ctx.effect(() => ctx.sidebarRightTabs.register({
@@ -282,6 +319,12 @@ export function apply(ctx) {
     locale: NS,
     inject: paneProps,
   }, props => createElement(LibraryPane, { ...props, t }))), 'paper-library: tab body')
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+    name: 'sidebar.right.pane.tab',
+    key: PAPER_ID,
+    locale: NS,
+    inject: paneProps,
+  }, props => createElement(LibraryPane, { ...props, t, view: 'paper' }))), 'paper-library: individual reader tab body')
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
     name: 'sidebar.right.pane.tab',
     key: CANVAS_ID,

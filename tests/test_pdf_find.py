@@ -25,6 +25,7 @@ def test_find_rotated_pages_and_continuation(tmp_path, rotation, monkeypatch):
     result=call(query='direction\u00adality',page=1,limit=5)
     assert len(result['matches'])==5 and result['next_offset']==5
     assert result['page_matches']==18 and result['next_page']==2
+    assert result['matches'][0]['snippet'] == 'Synthetic directionality example'
     with fitz.open(path) as doc:
         expected=doc[0].search_for('directionality')[0]*doc[0].rotation_matrix
         assert result['matches'][0]['rects'][0]==pytest.approx(list(expected))

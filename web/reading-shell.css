@@ -20,6 +20,11 @@ body{--workbench-height:calc(65px + var(--reader-toolbar-height) + var(--annotat
 .reader-context-menu.recent-papers{box-sizing:border-box;width:min(390px,calc(100vw - 16px));min-width:0}
 .recent-papers .reader-context-item{white-space:normal;overflow-wrap:anywhere}
 .recent-papers .reader-context-item[aria-current="true"]{background:var(--teal-light);font-weight:600}
+.recent-paper-actions,.recent-paper-name,.recent-paper-row{display:flex;align-items:center;gap:4px}
+.recent-paper-actions{flex-wrap:wrap;padding:3px;border-bottom:1px solid var(--line)}
+.recent-paper-name{padding:6px 3px}
+.recent-paper-name input,.recent-paper-row .reader-context-item{flex:1;min-width:0}
+.recent-paper-row .button,.recent-paper-name .button{flex:none}
 .topbar-actions{font-size:10px}.topbar .status{display:none}
 .reader-ribbon{grid-column:1/-1;display:flex;align-items:stretch;gap:4px;min-width:0;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid #d8ded4;white-space:nowrap}
 .reader-ribbon .button,.reader-ribbon .tab{font-family:inherit;font-size:11px;line-height:1.1;border:0;border-radius:3px 3px 0 0;min-height:27px;padding:6px 9px;color:#52695c;flex-shrink:0}

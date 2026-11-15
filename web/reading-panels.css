@@ -172,3 +172,10 @@ body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-
 .annotation-search-options[hidden]{display:none!important}
 .annotation-search-options select{font:inherit;font-size:12px;max-width:135px;padding:4px;border:1px solid var(--line);border-radius:5px;background:var(--paper);color:var(--ink)}
 .pdf-search-row .paper-switch{flex:none;white-space:nowrap}
+.pdf-search-panel{display:flex;flex:1;min-height:0;min-width:0;flex-direction:column}
+.pdf-search-actions{display:flex;align-items:center;gap:6px;flex:none;padding:8px;color:var(--muted);font-size:12px}
+.pdf-search-actions [role=status]{flex:1;overflow-wrap:anywhere}
+.pdf-search-results{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;list-style:none;margin:0;padding:0 6px 6px}
+.pdf-search-results .button{display:grid;gap:3px;width:100%;padding:8px;white-space:normal;text-align:start;overflow-wrap:anywhere;border-bottom:1px solid var(--line)}
+.pdf-search-results .button span:first-child{color:var(--muted);font-size:11px}
+.pdf-search-results .button[aria-current=true]{background:var(--teal-light);color:var(--ink)}

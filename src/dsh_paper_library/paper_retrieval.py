@@ -178,6 +178,8 @@ def dispatch(library, request):
         elif action == "paper_abstract_pdf":
             result.update(read_abstract(doc))
         elif action == "paper_text_find":
+            import pymupdf as fitz
+
             query = request.get("query")
             if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200 or not normalized(query):
                 raise ValueError("PAPER_RETRIEVAL_INVALID: query must contain 1–200 characters")
@@ -190,8 +192,9 @@ def dispatch(library, request):
             case_sensitive = request.get("case_sensitive", False)
             if match_mode not in ("partial", "whole") or not isinstance(case_sensitive, bool):
                 raise ValueError("PAPER_RETRIEVAL_INVALID: invalid search options")
+            text_page = page.get_textpage(flags=fitz.TEXTFLAGS_SEARCH)
             if match_mode == "partial" and not case_sensitive:
-                found = [[rect] for rect in page.search_for(needle)]
+                found = [[rect] for rect in page.search_for(needle, textpage=text_page)]
             else:
                 # Keep each character's original rectangle so matching does not guess coordinates.
                 chars = []
@@ -209,16 +212,22 @@ def dispatch(library, request):
                 for hit in re.finditer(pattern, text, 0 if case_sensitive else re.IGNORECASE):
                     boxes = [box for _, box in chars[hit.start():hit.end()] if box]
                     if boxes:
-                        import pymupdf as fitz
                         rect = fitz.Rect(boxes[0])
                         for box in boxes[1:]: rect |= fitz.Rect(box)
                         found.append([rect])
-            matches = [{"page": number, "rects": [list(rect * page.rotation_matrix) for rect in rects]} for rects in found[offset:offset + limit]]
+            matches = []
+            for rects in found[offset:offset + limit]:
+                first = rects[0]
+                # Fit a short excerpt around the match in the unrotated text layer.
+                context = first + (-95, -1, 95, 1)
+                snippet = " ".join(page.get_textbox(context, textpage=text_page).split())[:240]
+                matches.append({"page": number, "rects": [list(rect * page.rotation_matrix) for rect in rects],
+                                "snippet": snippet})
             end = offset + len(matches)
             result.update(matches=matches, page=number, page_matches=len(found),
                           next_offset=end if end < len(found) else None,
                           next_page=number + 1 if number < doc.page_count else None,
-                          no_extractable_text=not bool(page.get_text("text").strip()))
+                          no_extractable_text=not bool(text_page.extractText().strip()))
         elif action == "paper_text_search":
             query = request.get("query")
             if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200 or not normalized(query):
