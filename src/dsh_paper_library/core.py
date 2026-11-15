@@ -787,6 +787,7 @@ def dispatch(request):
             path = library.pdf_path(request["id"])
             return {"path": str(path), "filename": path.name}
         actions = {
+            "author_paper_candidates": ("id", "names"),
             "recent_reading": ("ids", "limit"),
             "annotation_caption_result": ("id", "annotation_id", "page", "source_version", "text", "model"),
             "annotation_translation_result": ("id", "annotation_ref", "request_key", "text", "model"),

@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import unicodedata
 import uuid
 
 # Bound by `core.py` after import, because a mixin cannot import `core` (that would be circular).
@@ -210,6 +211,52 @@ class Papers:
         from .paper_organization import get as organization_get
         result.update(organization_get(self, id))
         return result
+
+    def author_paper_candidates(self, id, names):
+        if (not isinstance(names, list) or not 1 <= len(names) <= 8
+                or any(not isinstance(name, str) or not 1 <= len(name) <= 160 for name in names)):
+            raise ValueError("Provide 1–8 author names of at most 160 characters")
+
+        def key(name):
+            return "".join(char for char in unicodedata.normalize("NFKC", name).lower() if char.isalnum())
+
+        def author_matches(raw, wanted):
+            author = json.loads(raw)
+            literal = author.get("literal")
+            forms = literal.replace("；", ";").split(";") if isinstance(literal, str) else []
+            given, family = (author.get(field) for field in ("given", "family"))
+            parts = [part for part in (given, family) if isinstance(part, str) and part]
+            forms.extend((" ".join(parts), " ".join(reversed(parts))))
+            return any(key(form) == wanted for form in forms)
+
+        self.db.create_function("paper_author_matches", 2, author_matches, deterministic=True)
+        groups = []
+        for name in names:
+            wanted = key(name)
+            if not wanted:
+                raise ValueError("Author name must contain a letter or number")
+            rows = self.db.execute(
+                """SELECT p.id, substr(p.title,1,350) title, p.citekey, p.doi,
+                          json_extract(p.metadata,'$.issued.date-parts[0][0]') year,
+                          a.value author
+                   FROM papers p JOIN json_each(p.metadata,'$.author') a
+                   WHERE p.id <> ? AND a.type = 'object'
+                     AND NOT EXISTS (SELECT 1 FROM paper_archive ar WHERE ar.paper_id=p.id)
+                     AND paper_author_matches(a.value,?)
+                   ORDER BY p.modified DESC,p.id,a.key LIMIT 7""", (id, wanted),
+            ).fetchall()
+            items = []
+            for row in rows[:6]:
+                author = json.loads(row["author"])
+                literal = author.get("literal")
+                if isinstance(literal, str) and (";" in literal or "；" in literal):
+                    matched = next((part.strip() for part in literal.replace("；", ";").split(";")
+                                    if key(part) == wanted), None)
+                    if matched:
+                        author = {"literal": matched}
+                items.append({**dict(row), "author": author})
+            groups.append({"name": name, "truncated": len(rows) > 6, "items": items})
+        return {"groups": groups}
 
     def recent_reading(self, ids, limit):
         if not isinstance(ids, list) or len(ids) > 100 or not 1 <= limit <= 10:

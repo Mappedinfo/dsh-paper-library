@@ -13,7 +13,7 @@ const PDF_LIMIT = 250 * 1024 * 1024
 const USER_AGENT = 'Mappedinfo-Paper-Library/0.1 (public scholarly PDF retrieval)'
 const ARXIV_ID = /^(?:\d{2}(?:0[1-9]|1[0-2])\.\d{4,5}|[a-z]+(?:-[a-z]+)*(?:\.[A-Z]{2})?\/\d{2}(?:0[1-9]|1[0-2])\d{3})(?:v[1-9]\d*)?$/
 const DOI = /^10\.\d{4,9}\/[^\s?#]+$/i
-const PUBLIC_METADATA_HOSTS = new Set(['api.crossref.org', 'api.datacite.org', 'export.arxiv.org', 'api2.openreview.net'])
+const PUBLIC_METADATA_HOSTS = new Set(['api.crossref.org', 'api.datacite.org', 'export.arxiv.org', 'api2.openreview.net', 'pub.orcid.org'])
 
 export function isDirectPDFURL(value) {
   if (typeof value !== 'string') return false
@@ -285,6 +285,48 @@ export async function lookupCitationCount(value, options = {}) {
   return { doi, status: unavailable ? 'unavailable' : 'not_found', fetched_at: ctx.provenance.fetched_at }
 }
 
+export function publicORCID(value) {
+  const id = typeof value === 'string' ? value.trim().replace(/^https?:\/\/orcid\.org\//i, '').toUpperCase() : ''
+  if (!/^\d{4}-\d{4}-\d{4}-\d{3}[0-9X]$/.test(id)) return null
+  const digits = id.replaceAll('-', '')
+  const total = [...digits.slice(0, 15)].reduce((sum, digit) => (sum + Number(digit)) * 2, 0)
+  const check = (12 - total % 11) % 11
+  return digits[15] === (check === 10 ? 'X' : String(check)) ? id : null
+}
+
+/** Public registry data only, queried by a previously matched identifier. */
+export async function readAuthorEmployments(value, options = {}) {
+  const id = publicORCID(value)
+  if (!id) throw new Error('Invalid ORCID')
+  const url = `https://pub.orcid.org/v3.0/${id}/employments`
+  const ctx = context({ ...options, timeoutMs: 6500 }, id)
+  const record = `https://orcid.org/${id}`
+  try {
+    const response = await requestPublic(url, ctx, 'metadata', undefined, { allowNotFound: true, followRedirects: false })
+    const result = response ? JSON.parse(await readText(response, 256 * 1024)) : { 'affiliation-group': [] }
+    if (!Array.isArray(result?.['affiliation-group'])) throw new Error('Unexpected ORCID employment record')
+    const groups = result['affiliation-group']
+    const cleanDate = date => {
+      const parts = ['year', 'month', 'day'].map(key => date?.[key]?.value)
+      return /^\d{4}$/.test(parts[0] || '') && (parts[1] || !parts[2])
+        ? partialDate(parts.filter(Boolean).join('-')) || null : null
+    }
+    const records = groups.slice(0, 12).flatMap(group => (Array.isArray(group?.summaries) ? group.summaries.slice(0, 4) : [])
+      .flatMap(summary => {
+        const row = summary?.['employment-summary']
+        const organization = clean(row?.organization?.name).slice(0, 240)
+        if (!organization || row.visibility && row.visibility !== 'PUBLIC') return []
+        return [{ organization, department: clean(row['department-name']).slice(0, 240) || null,
+          role: clean(row['role-title']).slice(0, 160) || null, start_date: cleanDate(row['start-date']),
+          end_date: cleanDate(row['end-date']), asserted_by: clean(row.source?.['source-name']?.value).slice(0, 160) || null }]
+      })).slice(0, 12)
+    return { source: 'ORCID', url: record, status: records.length ? 'found' : 'empty', records }
+  } catch {
+    options.signal?.throwIfAborted()
+    return { source: 'ORCID', url: record, status: 'unavailable', records: [] }
+  }
+}
+
 const conferenceEdition = /\b([A-Z][A-Z0-9-]{1,20})\s+((?:19|20)\d{2})\b/
 function conferenceLabel(value) {
   const name = clean(value)
@@ -301,6 +343,8 @@ function crossrefCSL(item, doi, ctx) {
     const author = person.family ? { family: clean(person.family), ...(person.given ? { given: clean(person.given) } : {}) } : { literal: clean(person.name || person.given) }
     const affiliation = affiliations(person.affiliation, ctx.warnings)
     if (affiliation.length) author.affiliation = affiliation
+    const orcid = publicORCID(person.ORCID)
+    if (orcid && role === 'author') author.ORCID = orcid
     return author
   }).filter(person => person.family || person.literal)
   for (const [key, value] of Object.entries({ 'container-title': first(item['container-title']), volume: item.volume, issue: item.issue, page: item.page, number: item['article-number'], publisher: item.publisher, abstract: item.abstract })) if (value) csl[key] = clean(value)
@@ -363,10 +407,16 @@ function dataciteCSL(record) {
   const abstracts=(Array.isArray(a.descriptions)?a.descriptions:[]).filter(value=>value?.descriptionType==='Abstract'&&typeof value.description==='string').slice(0,2)
   if(abstracts.length===1)metadata.abstract=clean(abstracts[0].description)
   const authors = Array.isArray(a.creators) ? a.creators.slice(0, 100).filter(Boolean).map(person => {
-    if (person.familyName && person.nameType !== 'Organizational') {
-      return { family:clean(person.familyName), ...(person.givenName ? { given:clean(person.givenName) } : {}) }
-    }
-    return { literal:clean(person.name) }
+    const author = person.familyName && person.nameType !== 'Organizational'
+      ? { family:clean(person.familyName), ...(person.givenName ? { given:clean(person.givenName) } : {}) }
+      : { literal:clean(person.name) }
+    const identifiers = Array.isArray(person.nameIdentifiers) ? person.nameIdentifiers : []
+    const orcids = new Set(identifiers.slice(0, 8).filter(entry => entry?.nameIdentifierScheme === 'ORCID')
+      .map(entry => publicORCID(entry.nameIdentifier)).filter(Boolean))
+    if (orcids.size === 1 && person.nameType !== 'Organizational') author.ORCID = [...orcids][0]
+    const affiliation = affiliations(person.affiliation)
+    if (affiliation.length) author.affiliation = affiliation
+    return author
   }).filter(person => person.family || person.literal) : []
   if (authors.length) metadata.author = authors
   const year = Number(a.publicationYear)

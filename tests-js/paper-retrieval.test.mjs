@@ -7,7 +7,7 @@ import { companionQuestion } from '../src/harness/companion-queue.mjs'
 test('retrieval tools expose a closed read-only scope and preserve continuation fields', async () => {
   const calls=[], registered=new Map(), hooks=[]
   registerLibraryTools({tools:{register:tool=>{registered.set(tool.name,tool);return()=>{}}},on:(name,fn)=>{hooks.push(fn);return()=>{}}}, value=>value, async (request,options)=>{calls.push({request,options});return {pages:[]}}, {library:'/synthetic-library'}, {requireToolApproval:true})
-  for(const [name,args] of [['library_paper_search',{id:'paper-1',query:'Word2Vec',start_page:13,page_limit:12,expected_version:'version'}],['library_paper_read',{id:'paper-1',pages:[22],text_offset:4000,expected_version:'version'}]]){
+  for(const [name,args] of [['library_paper_search',{id:'paper-1',query:'Word2Vec',start_page:13,page_limit:12,expected_version:'version'}],['library_paper_read',{id:'paper-1',pages:[22],text_offset:4000,expected_version:'version'}],['library_paper_authors',{id:'paper-1',names:['Alice Reader'],public_lookup:true}]]){
     const spec=TOOL_SPECS.find(v=>v.name===name)
     assert.equal(spec.mutate,undefined)
     const request=requestFromTool(spec,{...args,library:'/elsewhere',python:'unsafe',action:'delete'}, {})
@@ -19,9 +19,11 @@ test('retrieval tools expose a closed read-only scope and preserve continuation 
 })
 
 test('guidance requires cross-section retrieval without broad scans or duplicate annotations',()=>{
-  const guidance=paperRetrievalGuidance('synthetic-1')
+  const guidance=paperRetrievalGuidance('synthetic-1', {includeAuthors:true})
   assert.match(guidance,/paper_id="synthetic-1"/)
   for(const term of ['library_paper_search','library_paper_read','library_paper_view','region=','next_page','next_offset','expected_version','24000'])assert.ok(guidance.includes(term))
   assert.match(companionQuestion,/主动检索、读取相关原文后再判断/)
   assert.match(guidance,/不另调用批注写入工具/)
+  assert.match(guidance,/library_paper_authors/)
+  assert.match(guidance,/同名或同单位只是线索/)
 })

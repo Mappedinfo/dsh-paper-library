@@ -109,6 +109,16 @@ test('explicit ask upgrades a queued auto request and a retry still runs when th
   assert.deepEqual(f.sends[0],f.sends[1])
   assert.equal(f.contexts.length,1)
 })
+
+test('Ask DSH uses an unprefixed author analysis request from the exact saved annotation',async t=>{
+  const f=await fixture(t),q=f.make(),note=f.note('authors','帮我核对 Alice Reader 的署名单位和课题组')
+  f.setEnabled(false)
+  await q.handle({action:'companion_ask',id:'paper-a',annotation_id:note.id,version:note.version})
+  await q.drain()
+  assert.equal(f.sends.length,1)
+  assert.deepEqual(f.contexts[0].annotation_refs,[{id:note.id,version:note.version}])
+  assert.match(f.contexts[0].question,/读者备注明确提出的问题或分析要求/)
+})
 test('an automatic preparation promoted by a direct ask survives a subsequent automatic save',async t=>{
   const f=await fixture(t),q=f.make(),note=f.note('one')
   const auto=await q.saved('paper-a',note)

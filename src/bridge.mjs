@@ -14,6 +14,7 @@ import { workerScheduler } from './worker-scheduler.mjs';
 import { revealPDF } from './reveal-pdf.mjs';
 import { apaCopyReadiness } from './citations.mjs';
 import { lookupVenueRanking } from './venue-rankings.mjs';
+import { lookupPaperAuthors } from './harness/paper-authors.mjs';
 
 export const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const defaultLibrary = join(homedir(), '.local', 'share', 'dsh-paper-library');
@@ -792,6 +793,10 @@ export async function dispatch(request, options = {}) {
     return core(safe, options);
   }
   if (safe.action === 'metadata_lookup') return lookupMetadata(safe,options);
+  if (safe.action === 'paper_authors_lookup') return lookupPaperAuthors(safe, {
+    request: (payload, signal) => core(payload, { ...options, signal }),
+    fetchOptions: options.fetchOptions, signal: options.signal,
+  });
   if (safe.action === 'catalog_doi_lookup') {
     if(typeof safe.id!=='string'||safe.id.length>160)throw Error('文献标识无效。');
     let doi, arxiv;
