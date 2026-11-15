@@ -272,6 +272,42 @@ test('catalog title and row selection keep the table open for metadata enrichmen
   assert.deepEqual(f.opens, [], 'Edit selects without leaving the table'); assert.deepEqual(f.selections, ['paper-b']);
 });
 
+test('double-clicking a title opens its paper after selection rebuilds the table', async () => {
+  const f = environment({ active: original() });
+  const paper = { ...original(), id: 'paper-b', title: 'Second synthetic paper' };
+  f.state.items.push(paper);
+  f.workbench.setTable(true);
+  const title = () => f.element('catalog-table').querySelectorAll('tr')
+    .find(row => row.dataset.paperId === paper.id).querySelector('button');
+  const firstTitle = title();
+  await firstTitle.dispatch('click', { detail: 1 });
+  assert.deepEqual(f.selections, [paper.id]);
+  assert.equal(f.workbench.isTable(), true);
+  assert.deepEqual(f.opens, []);
+
+  f.workbench.render();
+  assert.notEqual(title(), firstTitle);
+  await title().dispatch('click', { detail: 2 });
+  assert.deepEqual(f.opens, [paper.id]);
+  assert.deepEqual(f.selections, [paper.id]);
+  assert.equal(f.workbench.isTable(), false);
+});
+
+test('a double-click sequence cannot open a different title or a trashed paper', async () => {
+  const f = environment({ active: original() });
+  const paper = { ...original(), id: 'paper-b' }, trashed = { ...original(), id: 'paper-c', archived: true };
+  f.state.items.push(paper, trashed);
+  f.workbench.setTable(true);
+  const clickTitle = (id, detail) => f.element('catalog-table').querySelectorAll('tr')
+    .find(row => row.dataset.paperId === id).querySelector('button').dispatch('click', { detail });
+  await clickTitle('paper-a', 1);
+  await clickTitle(paper.id, 2);
+  await clickTitle(trashed.id, 1);
+  await clickTitle(trashed.id, 2);
+  assert.deepEqual(f.opens, []);
+  assert.equal(f.workbench.isTable(), true);
+});
+
 test('selected paper exposes tag management and renders a separate full-width tag row', async () => {
   const item=original(), edits=[], options=[];
   let f;
