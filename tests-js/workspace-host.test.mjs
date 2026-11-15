@@ -30,6 +30,7 @@ function fixture(options = {}) {
     paperChatUI: { saveDraft: async () => { calls.push('chat:save'); if (options.chatFailure) throw Error('synthetic chat save failure') } },
     persistence: { flush: async () => { calls.push('state:flush'); if (options.saveFailure) throw Error('synthetic persistence conflict') } },
     resourceUI: { hide: () => calls.push('resource:hide') }, knowledgeUI: { hide: () => calls.push('knowledge:hide') },
+    scholarsUI: { setVisible: value => calls.push(`scholars:${value}`) },
     workbenchUI: { setTable: value => tables.push(value) }, readingPanels: { showLibrary: () => visible.push('library') },
     workspaceNavigationUI: { state: () => ({ current: options.current ?? null }), setCurrent: (...args) => contexts.push(plain(args)), mountActions: host => { elements.get('workspace-navigation-area').actionsHost = host } },
     libraryLatexVersions: { clear: () => calls.push('versions:clear') },

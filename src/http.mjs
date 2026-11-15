@@ -27,6 +27,7 @@ import { createInkQueue } from './ink-queue.mjs';
 import { createInkDiagnostics } from './ink-diagnostics.mjs';
 import { catalogResources } from './catalog-resources.mjs';
 import { createCatalogCitations } from './catalog-citations.mjs';
+import { createScholars } from './harness/scholars.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
 staticFiles['latex-search.js'] = ['latex-search.js', 'text/javascript;charset=utf-8'];
@@ -43,6 +44,7 @@ staticFiles['return-to-dsh.js']=['return-to-dsh.js','text/javascript;charset=utf
 for (const name of ['challenge-mining.js','challenge-mining.css','annotation-threads.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['board.js','board.css','board-flow.js','board-source.js','board-render.js','board-bridge.js','board-annotations.js','board-annotations.css','board-mermaid.js','board-drawio.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['workspace-navigation.js','workspace-navigation.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
+for (const name of ['scholars.js','scholars.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['field-radar-relations-renderer.js','field-radar-relations.js','field-radar-data.js','field-radar.js','field-radar.css','field-radar-legacy.js','field-radar-legacy.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 const languageActions = new Set(['language_settings_get','language_settings_update','language_prompt_preview','language_generate','language_history','language_vocabulary_sync','vocabulary_create','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
 for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js','ink-diagnostics.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
@@ -134,6 +136,7 @@ export function createFetchHandler(options = {}) {
   const slidesRequest = async input => (await getSlidesStore()).handle(input);
   const localState = options.settings ? store : settings.localState;
   const catalogCitations = createCatalogCitations({ store: localState, fetchOptions: options.fetchOptions });
+  const scholars = createScholars({ store: localState, request: (payload, signal) => core(payload, { ...options, signal }) });
   async function recentPapers(signal) {
     const ids = await store.recentReaderIds();
     const items = [];
@@ -256,6 +259,7 @@ export function createFetchHandler(options = {}) {
             : ['field_radar_analyze','field_radar_analysis_get'].includes(input?.action) ? await fieldRadarAnalysis.handle(input, { signal: request.signal })
             : typeof input?.action === 'string' && input.action.startsWith('field_radar_') ? await fieldRadar.handle(input, { signal: request.signal })
             : ['workspace_catalog','workspace_related'].includes(input?.action) ? await workspaceNavigation.handle(input, { signal: request.signal })
+            : ['scholar_list','scholar_get','scholar_save','scholar_publications','scholar_work_save','scholar_review'].includes(input?.action) ? await scholars(input, { signal: request.signal })
             : ['ink_diagnostics_append','ink_diagnostics_get'].includes(input?.action) ? await inkDiagnostics.handle(input)
             : typeof input?.action === 'string' && input.action.startsWith('ink_queue_') ? await inkQueue.handle(input)
             : input?.action === 'settings_get' ? await settings.get()

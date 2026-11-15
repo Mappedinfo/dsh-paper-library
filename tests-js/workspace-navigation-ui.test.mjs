@@ -33,7 +33,7 @@ function fixture(options = {}) {
   const paperHeading=new Element('div');paperHeading.append(new Element('h1'));searchHome.append(paperHeading);
   vm.runInNewContext(source, { window, document })
   const api = async (action, args) => { calls.push({ action, ...plain(args) }); return options.api ? options.api(action, args) : action === 'workspace_catalog' ? page([item(args.kind, 'synthetic-a')], { offset: args.offset }) : related({ kind: args.kind, id: args.id }) }
-  const nav = window.PaperWorkspaceNavigation.create({ root, catalogRoot, relatedRoot, api, paperSearch, paperHeading, actions, onNotes: options.onNotes, onCreateProject: options.onCreateProject, onChange: value => changes.push(plain(value)), onRootChange: async value => { roots.push(value); return options.onRootChange?.(value) }, onNavigate: async value => { navigated.push(plain(value)); return options.onNavigate?.(value) }, prepare: options.prepare, toast: message => warnings.push(message) })
+  const nav = window.PaperWorkspaceNavigation.create({ root, catalogRoot, relatedRoot, api, paperSearch, paperHeading, actions, scholars: options.scholars, onNotes: options.onNotes, onCreateProject: options.onCreateProject, onChange: value => changes.push(plain(value)), onRootChange: async value => { roots.push(value); return options.onRootChange?.(value) }, onNavigate: async value => { navigated.push(plain(value)); return options.onNavigate?.(value) }, prepare: options.prepare, toast: message => warnings.push(message) })
   const all = start => [start, ...start.children.flatMap(all)]
   const find = (className, start = root) => all(start).find(node => node.classes.has(className))
   const findAll = (className, start = root) => all(start).filter(node => node.classes.has(className))
@@ -50,6 +50,21 @@ test('the notes entrance opens bookmarks without loading an unrelated catalog', 
   assert.equal(f.catalogRoot.hidden, true)
   assert.equal(opened, 1)
   assert.equal(f.calls.length, 0)
+})
+
+test('the scholar entrance uses its own panel and preserves the paper search', async () => {
+  const f = fixture({ scholars: true })
+  const control = f.findAll('workspace-root-button').find(button => button.textContent === '学者')
+  assert.ok(control)
+  await f.nav.selectRoot('scholar')
+  assert.equal(f.changes.at(-1).section, 'scholar')
+  assert.equal(control.getAttribute('aria-current'), 'page')
+  assert.equal(f.catalogRoot.hidden, true)
+  assert.equal(f.find('workspace-nav-search').hidden, true)
+  assert.deepEqual(f.calls, [])
+  await f.nav.selectRoot('paper')
+  assert.equal(f.paperInput.value, '原文献检索')
+  assert.equal(f.paperSearch.hidden, false)
 })
 
 test('five entrances are distinct and a refused root switch leaves the original view untouched', async () => {

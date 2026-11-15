@@ -1,0 +1,56 @@
+#library-scholars {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px 24px;
+  color: var(--ink);
+  font-size: 13px;
+}
+.scholar-header, .scholar-controls, .scholar-row-actions, .scholar-topics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.scholar-header h2 {
+  flex: 1 1 auto;
+  margin: 4px 12px 4px 0;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+.scholar-controls { margin-block: 12px 4px; }
+.scholar-table-wrap { overflow: auto; margin: 8px 0 14px; }
+.scholar-table { border-collapse: collapse; width: 100%; text-align: left; }
+.scholar-table caption { padding: 6px 0; text-align: left; font-weight: 600; }
+.scholar-table th, .scholar-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.scholar-table th { background: var(--surface, var(--paper)); white-space: nowrap; }
+.scholar-table :is(th, td):first-child { width: 28%; }
+.scholar-table .scholar-row-actions { min-width: 115px; }
+.scholar-row-actions > button { flex: 0 0 auto; }
+#library-scholars a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.scholar-topics > * {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.scholar-muted, .scholar-work-note, .scholar-status { color: var(--muted); }
+.scholar-work-note { margin: 4px 0 0; }
+.scholar-status:empty { display: none; }
+.scholar-notes { white-space: pre-wrap; }
+.scholar-excluded { margin: 10px 0; }
+.scholar-excluded summary { cursor: pointer; }
+.scholar-excluded > div { margin: 6px 0; }
+.scholar-dialog { width: min(560px, calc(100% - 32px)); max-height: calc(100% - 32px); }
+.scholar-form { display: grid; gap: 8px; }
+.scholar-form h2 { margin: 0 0 4px; font-size: 17px; }
+.scholar-form label { display: grid; gap: 4px; }
+.scholar-form :is(input, textarea) { width: 100%; box-sizing: border-box; }
+.scholar-form textarea { min-height: 60px; resize: vertical; }
+.scholar-form .scholar-status { margin: 0; color: var(--error, #b32525); }

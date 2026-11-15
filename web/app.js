@@ -29,7 +29,7 @@ let analysisUI;
 let settingsUI;
 let challengeUI;
 let boardUI;
-let workspaceNavigationUI, workspaceNavigationTransition = false;
+let workspaceNavigationUI, scholarsUI, workspaceNavigationTransition = false;
 let canvasNotesUI, canvasNotesContext = null, canvasNotesPending = false;
 let latexUI;
 let libraryLatexVersions;
@@ -1487,7 +1487,7 @@ document.addEventListener('keydown', async (event) => {
 });
 function publishWorkspaceState(workspace){void persistence?.put(`workspace:last:${ENTRY_PAPER||'main'}`,workspace).catch(()=>{});if(window.parent!==window)window.parent.postMessage({type:'paper-library:workspace-state',version:1,workspace},window.location.origin);}
 function workspaceSnapshot(){const current=latexUI?.isOpen()?latexUI.current?.():boardUI?.isOpen()?boardUI.current?.():workspaceNavigationUI?.state().current;return {section:workspaceNavigationUI?.state().section||'paper',current:current?{kind:current.kind,id:current.id,title:current.title}:null,table:workbenchUI?.isTable()===true};}
-async function restoreWorkspaceSnapshot(value){if(!value||!['paper','dataset','board','latex','project','notes'].includes(value.section))return;try{if(value.current&&['dataset','board','latex'].includes(value.current.kind)){await workspaceNavigationUI?.navigate(value.current);}else if(value.table||value.section!=='paper'){await workspaceNavigationUI?.selectRoot(value.section);}}catch(error){toast(`工作区恢复失败：${error.message}`,true);}}
+async function restoreWorkspaceSnapshot(value){if(!value||!['paper','dataset','board','latex','project','notes','scholar'].includes(value.section))return;try{if(value.current&&['dataset','board','latex'].includes(value.current.kind)){await workspaceNavigationUI?.navigate(value.current);}else if(value.table||value.section!=='paper'){await workspaceNavigationUI?.selectRoot(value.section);}}catch(error){toast(`工作区恢复失败：${error.message}`,true);}}
 function publishReaderState({ rememberOpen = false } = {}) {
   if(initializedReader&&!restoringReader)publishWorkspaceState(workspaceSnapshot());
 
@@ -2517,6 +2517,7 @@ function applyWorkspaceNavigation(value) {
   if (pane) { pane.dataset.workspaceSection = value.section; pane.dataset.workspaceFocus = value.current?.kind || ''; }
   $('library-literature-content').hidden = value.section !== 'paper';
   $('library-favorite-notes').hidden = value.section !== 'notes';
+  scholarsUI?.setVisible(value.section === 'scholar');
   resourceUI?.navigationChanged?.(value);
   const versions = $('workspace-versions'), showVersions = value.current?.kind === 'latex';
   if (!showVersions || versions.dataset.projectId !== value.current?.id) { versions.open = false; libraryLatexVersions?.clear(); }
@@ -2642,8 +2643,10 @@ async function openWorkspaceTarget(target) {
 }
 if ($('workspace-navigation') && window.PaperWorkspaceNavigation) {
   const versions = $('library-latex-versions'); if (versions) $('workspace-version-list').append(versions);
+  scholarsUI = window.PaperScholars?.create({root:$('library-scholars'),api,toast,
+    openPaper: paper => workspaceNavigationUI.navigate({kind:'paper',id:paper.id,title:paper.title})});
   workspaceNavigationUI = window.PaperWorkspaceNavigation.create({root:$('workspace-navigation'),catalogRoot:$('workspace-catalog-body'),relatedRoot:$('workspace-related'),paperSearch:$('catalog-search-form'),paperHeading:document.querySelector('#library-literature-content>.pane-heading'),api,toast,
-    actions:$('workspace-versions'),prepare:prepareWorkspaceNavigation,onRootChange:openWorkspaceRoot,onNavigate:openWorkspaceTarget,onChange:applyWorkspaceNavigation,onNotes:loadFavoriteNotes,datasetCatalogActions:host=>resourceUI?.catalogActions(host),decorateDatasetRow:(row,item)=>resourceUI?.catalogRow(row,item),onCreateProject:()=>projectDialogOpen(null)});
+    actions:$('workspace-versions'),prepare:prepareWorkspaceNavigation,onRootChange:openWorkspaceRoot,onNavigate:openWorkspaceTarget,onChange:applyWorkspaceNavigation,onNotes:loadFavoriteNotes,scholars:Boolean(scholarsUI),datasetCatalogActions:host=>resourceUI?.catalogActions(host),decorateDatasetRow:(row,item)=>resourceUI?.catalogRow(row,item),onCreateProject:()=>projectDialogOpen(null)});
   applyWorkspaceNavigation(workspaceNavigationUI.state());
   $('workspace-library')?.addEventListener('click',event=>{if(workspaceNavigationUI.state().section!=='paper'||boardUI?.isOpen()||latexUI?.isOpen()){event.preventDefault();event.stopImmediatePropagation();void workspaceNavigationUI.selectRoot('paper');}},true);
 }

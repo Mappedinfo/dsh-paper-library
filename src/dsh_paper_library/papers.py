@@ -26,6 +26,25 @@ MAX_IMPORT = PaperConflictError = clamp = csl_item = now = parse_ris = None
 LIBRARY_LOCK_TIMEOUT_SECONDS = 30
 
 
+def author_name_key(name):
+    return "".join(char for char in unicodedata.normalize("NFKC", name).lower() if char.isalnum())
+
+
+def author_name_forms(author):
+    literal = author.get("literal")
+    forms = literal.replace("；", ";").split(";") if isinstance(literal, str) else []
+    given, family = (author.get(field) for field in ("given", "family"))
+    parts = [part for part in (given, family) if isinstance(part, str) and part]
+    return [*forms, " ".join(parts), " ".join(reversed(parts))]
+
+
+def author_display_name(author):
+    literal = author.get("literal")
+    if isinstance(literal, str) and literal.strip():
+        return literal.strip()
+    return " ".join(part for part in (author.get("given"), author.get("family")) if isinstance(part, str))
+
+
 def publication_date_sorts(metadata):
     # Stored ISO dates sort lexically at their supplied precision.
     dates = {key: f"nullif(json_extract({metadata},'$.publication_dates.{key}'),'')"
@@ -225,22 +244,13 @@ class Papers:
                 or any(not isinstance(name, str) or not 1 <= len(name) <= 160 for name in names)):
             raise ValueError("Provide 1–8 author names of at most 160 characters")
 
-        def key(name):
-            return "".join(char for char in unicodedata.normalize("NFKC", name).lower() if char.isalnum())
-
         def author_matches(raw, wanted):
-            author = json.loads(raw)
-            literal = author.get("literal")
-            forms = literal.replace("；", ";").split(";") if isinstance(literal, str) else []
-            given, family = (author.get(field) for field in ("given", "family"))
-            parts = [part for part in (given, family) if isinstance(part, str) and part]
-            forms.extend((" ".join(parts), " ".join(reversed(parts))))
-            return any(key(form) == wanted for form in forms)
+            return any(author_name_key(form) == wanted for form in author_name_forms(json.loads(raw)))
 
         self.db.create_function("paper_author_matches", 2, author_matches, deterministic=True)
         groups = []
         for name in names:
-            wanted = key(name)
+            wanted = author_name_key(name)
             if not wanted:
                 raise ValueError("Author name must contain a letter or number")
             rows = self.db.execute(
@@ -259,12 +269,68 @@ class Papers:
                 literal = author.get("literal")
                 if isinstance(literal, str) and (";" in literal or "；" in literal):
                     matched = next((part.strip() for part in literal.replace("；", ";").split(";")
-                                    if key(part) == wanted), None)
+                                    if author_name_key(part) == wanted), None)
                     if matched:
                         author = {"literal": matched}
                 items.append({**dict(row), "author": author})
             groups.append({"name": name, "truncated": len(rows) > 6, "items": items})
         return {"groups": groups}
+
+    def scholar_publications(self, names, dois, confirmed, excluded, offset=0):
+        for values, size, width in ((names, 10, 160), (dois, 50, 400),
+                                    (confirmed, 500, 160), (excluded, 500, 160)):
+            if not isinstance(values, list) or len(values) > size or any(
+                not isinstance(value, str) or not 1 <= len(value) <= width for value in values
+            ):
+                raise ValueError("Invalid scholar publication filters")
+        if type(offset) is not int or offset < 0:
+            raise ValueError("Invalid scholar publication offset")
+        wanted = {author_name_key(name) for name in names} - {""}
+        self.db.create_function(
+            "scholar_author_matches", 1,
+            lambda raw: any(author_name_key(form) in wanted for form in author_name_forms(json.loads(raw))),
+            deterministic=True,
+        )
+        # Match only catalog metadata. DOI and explicit review take
+        # priority over a name match, and archived items are omitted.
+        rows = self.db.execute("""
+            WITH candidates AS MATERIALIZED (
+                SELECT p.id, substr(p.title,1,500) title, p.doi, p.pdf_path IS NOT NULL AS pdf,
+                       CAST(json_extract(p.metadata,'$.issued.date-parts[0][0]') AS INT) year,
+                       substr(json_extract(p.metadata,'$.container-title'),1,300) venue,
+                       substr(json_extract(p.metadata,'$.author'),1,12000) authors,
+                       CASE WHEN lower(p.doi) IN (SELECT value FROM json_each(:dois)) THEN 'doi'
+                            WHEN p.id IN (SELECT value FROM json_each(:confirmed)) THEN 'confirmed'
+                            WHEN EXISTS (SELECT 1 FROM json_each(p.metadata,'$.author') a
+                                         WHERE CASE WHEN a.type='object' THEN scholar_author_matches(a.value) ELSE 0 END)
+                            THEN 'candidate' END AS match
+                FROM papers p LEFT JOIN paper_archive ar ON ar.paper_id=p.id
+                WHERE ar.paper_id IS NULL AND p.id NOT IN (SELECT value FROM json_each(:excluded))
+            )
+            SELECT *, count(*) OVER () total FROM candidates WHERE match IS NOT NULL
+            ORDER BY (match='candidate'), year DESC, title COLLATE NOCASE, id
+            LIMIT 40 OFFSET :offset
+        """, {"dois": json.dumps(dois), "confirmed": json.dumps(confirmed),
+              "excluded": json.dumps(excluded), "offset": offset}).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            item.pop("total")
+            try:
+                authors = json.loads(item.pop("authors") or "[]")
+            except json.JSONDecodeError:
+                authors = []
+            item["authors"] = [author_display_name(author)[:160]
+                               for author in authors[:20] if isinstance(author, dict)] if isinstance(authors, list) else []
+            items.append(item)
+        linked_dois = self.db.execute("""
+            SELECT DISTINCT lower(p.doi) FROM papers p JOIN json_each(?) d ON lower(p.doi)=d.value
+            WHERE NOT EXISTS (SELECT 1 FROM paper_archive ar WHERE ar.paper_id=p.id)
+              AND p.id NOT IN (SELECT value FROM json_each(?))
+        """, (json.dumps(dois), json.dumps(excluded))).fetchall()
+        return {"items": items, "linked_dois": [row[0] for row in linked_dois],
+                "total": rows[0]["total"] if rows else 0,
+                "has_more": bool(rows and offset + len(rows) < rows[0]["total"])}
 
     def recent_reading(self, ids, limit):
         if not isinstance(ids, list) or len(ids) > 100 or not 1 <= limit <= 10:

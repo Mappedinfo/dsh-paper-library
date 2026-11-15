@@ -2,7 +2,7 @@
 // 内容分类共用检索行、路径和已有关系；阅读项目与写作项目分别展示。
 window.PaperWorkspaceNavigation = (() => {
   const KINDS = Object.freeze({ paper: '文献', dataset: '数据集', board: '画板', latex: 'LaTeX 写作', project: '阅读项目' });
-  const ROOTS = Object.freeze({ ...KINDS, notes: '笔记' });
+  const ROOTS = Object.freeze({ ...KINDS, notes: '笔记', scholar: '学者' });
   const PAGE = 20, TRAIL = 8;
   const key = item => item ? `${item.kind}\u0000${item.id}` : '';
   function target(value) {
@@ -29,11 +29,12 @@ window.PaperWorkspaceNavigation = (() => {
     const el = (tag, className, text) => { const node = doc.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
     const listen = (node, event, fn, options) => { node.addEventListener(event, fn, options); listeners.push(() => node.removeEventListener(event, fn, options)); };
     const button = (text, fn, className = 'workspace-nav-button') => { const node = el('button', className, text); node.type = 'button'; node.addEventListener('click', fn); return node; };
-    const nav = el('nav', 'workspace-navigation'); nav.setAttribute('aria-label', '文献、数据集、画板、写作与阅读项目导航');
+    const nav = el('nav', 'workspace-navigation'); nav.setAttribute('aria-label', '资料库导航');
     const roots = el('div', 'workspace-navigation-roots'), crumbs = el('ol', 'workspace-breadcrumbs'); crumbs.setAttribute('aria-label', '关联内容路径');
     const rootButtons = {};
     for (const [kind, label] of Object.entries(ROOTS)) {
       if (kind === 'notes' && !options.onNotes) continue;
+      if (kind === 'scholar' && !options.scholars) continue;
       if (roots.children.length) { const divider = el('span', 'workspace-root-divider', '/'); divider.setAttribute('aria-hidden', 'true'); roots.append(divider); }
       const control = button(label, () => void selectRoot(kind), 'workspace-root-button'); control.dataset.kind = kind; rootButtons[kind] = control; roots.append(control);
     }
@@ -52,8 +53,8 @@ window.PaperWorkspaceNavigation = (() => {
     const catalogHeader = el('header', 'workspace-section-header'), catalogTitle = el('strong'), catalogRefresh = button('刷新', () => void loadCatalog()); const projectCreate = button('新建阅读项目', () => options.onCreateProject?.()); projectCreate.hidden = true; catalogHeader.append(catalogTitle, projectCreate, catalogRefresh);
     const searchForm = el('form', 'workspace-catalog-search'), search = el('input'); search.type = 'search'; search.maxLength = 200; search.placeholder = '检索名称'; search.setAttribute('aria-label', '检索工作区目录');
     const searchButton = el('button', 'workspace-nav-button', '检索'); searchButton.type = 'submit'; searchForm.append(search, searchButton); if (paperSearch) searchHost.append(paperSearch); searchHost.append(searchForm);
-    listen(search, 'input', () => { if (section !== 'paper' && !current) catalogState[section].draft = search.value.slice(0, 200); });
-    listen(searchForm, 'submit', event => { event.preventDefault(); if (section === 'paper' || current) return; const state = catalogState[section]; state.draft = search.value.slice(0, 200); state.query = state.draft.trim(); state.offset = 0; void loadCatalog(); });
+    listen(search, 'input', () => { if (catalogState[section] && !current) catalogState[section].draft = search.value.slice(0, 200); });
+    listen(searchForm, 'submit', event => { event.preventDefault(); const state = catalogState[section]; if (!state || current) return; state.draft = search.value.slice(0, 200); state.query = state.draft.trim(); state.offset = 0; void loadCatalog(); });
     const catalogStatus = el('p', 'workspace-nav-status'); catalogStatus.setAttribute('role', 'status');
     const catalogList = el('div', 'workspace-object-list'), catalogPager = el('div', 'workspace-nav-pagination');
     const catalogDescription = el('p', 'workspace-nav-description'); catalogDescription.hidden = true;
@@ -118,7 +119,7 @@ window.PaperWorkspaceNavigation = (() => {
     function renderNavigation() {
       if (paperSearch) paperSearch.hidden = section !== 'paper';
       if (paperHeading) paperHeading.hidden = section !== 'paper';
-      searchForm.hidden = section === 'paper' || section === 'notes' || !!current; searchHost.hidden = section === 'notes' || section !== 'paper' && !!current;
+      searchForm.hidden = !catalogState[section] || !!current; searchHost.hidden = section !== 'paper' && searchForm.hidden;
       search.disabled = transition; if (paperSearch) paperSearch.setAttribute('aria-busy', String(transition));
       for (const [kind, control] of Object.entries(rootButtons)) { control.setAttribute('aria-pressed', String(section === kind)); control.disabled = transition; if (section === kind && !current) control.setAttribute('aria-current', 'page'); else control.removeAttribute('aria-current'); }
       pathButton.hidden = !current; relatedButton.hidden = !current || current.kind === 'project'; actionHost.hidden = !current && (!actions || actions.hidden);
@@ -135,7 +136,7 @@ window.PaperWorkspaceNavigation = (() => {
       }
     }
     function renderCatalog() {
-      const visible = section !== 'paper' && section !== 'notes' && !current; catalogRoot.hidden = !visible; if (!visible) return;
+      const visible = Boolean(catalogState[section]) && !current; catalogRoot.hidden = !visible; if (!visible) return;
       const value = catalogState[section]; catalogTitle.textContent = `${KINDS[section]}${value.page ? ` · ${count(value.page)}` : ''}`;
       projectCreate.hidden = section !== 'project' || typeof options.onCreateProject !== 'function'; projectCreate.disabled = transition;
       catalogDescription.hidden = section !== 'project'; catalogDescription.textContent = '按主题组织阅读与研究文献，可关联画板和写作；LaTeX 写作是单独的写作项目。';
@@ -176,7 +177,7 @@ window.PaperWorkspaceNavigation = (() => {
     }
     function render() { renderNavigation(); renderCatalog(); renderRelated(); }
     async function loadCatalog() {
-      if (!live || current || section === 'paper' || section === 'notes') return false;
+      if (!live || current || !catalogState[section]) return false;
       const kind = section, value = catalogState[kind], query = value.query, offset = value.offset, owner = ++catalogSequence;
       value.busy = true; value.error = ''; renderCatalog();
       try {
@@ -224,7 +225,8 @@ window.PaperWorkspaceNavigation = (() => {
         if (await options.onRootChange?.(kind) === false || !live || owner !== intent) return false;
         closePopovers(); section = kind; current = null; trail = []; ++catalogSequence; ++relatedSequence; groupRequests = {}; relatedLoaded = false; related = { groups: {}, busy: false, error: '', warnings: [], truncated: false }; render(); emit();
         if (kind === 'notes') void options.onNotes();
-        else if (kind !== 'paper') void loadCatalog(); return true;
+        else if (catalogState[kind]) void loadCatalog();
+        return true;
       } catch (error) { options.toast?.(error.message || '切换工作区失败', true); return false; }
       finally { if (live && owner === intent) { transition = false; render(); } }
     }
