@@ -92,12 +92,21 @@ test('research directory imports affiliations and topic groups with sources and 
   const document = {
     schema_version: 1, topic: { id: 'synthetic-topic', title: 'Synthetic topic', question: 'Example?' },
     sources: [evidence], claims: [],
-    scholars: [{ id: 'jane', name: 'Jane Synthetic', current_role: 'Principal Investigator', organization: 'Example University',
-      source_ids: ['source'], research_interests: ['Mobility'], contributions: [{ paper_id: 'work', source_ids: ['source'] }] }],
+    scholars: [
+      { id: 'jane', name: 'Jane Synthetic', current_role: 'Principal Investigator', organization: 'Example University',
+        source_ids: ['source'], research_interests: ['Mobility'], contributions: [{ paper_id: 'work', source_ids: ['source'] }] },
+      { id: 'partner', name: 'Alex Synthetic', organization: 'Partner University', source_ids: ['source'], contributions: [] },
+      { id: 'another-jane', name: 'Jane Synthetic', organization: 'Different University', source_ids: ['source'], contributions: [] },
+      { id: 'name-only', name: 'Unmatched Synthetic', organization: 'Different University', source_ids: ['source'], contributions: [] },
+    ],
     papers: [{ id: 'work', title: paper.title, doi: '10.1234/synthetic-group', local_paper_id: paper.id, source_ids: ['source'],
       comparison: { research_group: { value: 'Other Author（通讯作者，假定 PI；组归属待核）', status: 'needs_review', source_ids: ['source'] } } }],
-    groups: [{ id: 'theme', title: 'Topic bucket', relationship_type: 'analyst_primary_task_category', not_a_verified_current_lab: true, source_ids: ['source'] }],
-    research_groups: [{ id: 'lab', name: 'Mobility Lab', institution: 'Example University', members: ['Jane Synthetic'],
+    groups: [
+      { id: 'theme', title: 'Topic bucket', relationship_type: 'analyst_primary_task_category', not_a_verified_current_lab: true, source_ids: ['source'] },
+      { id: 'lab', name: 'Mobility Lab', members: ['Jane Synthetic'], source_ids: ['source'] },
+    ],
+    research_groups: [{ id: 'lab', name: 'Mobility Lab', institution: 'Example University',
+      members: ['jane synthetic', 'Unmatched Synthetic'], scholar_ids: ['partner'],
       paper_ids: ['work'], source_ids: ['source'], status: 'verified' }],
   };
   await call('field_radar_import', { document, expected_revision: 0 });
@@ -118,7 +127,13 @@ test('research directory imports affiliations and topic groups with sources and 
   assert.equal(groups.total, 1);
   assert.equal(groups.items[0].linked_publication_count, 1);
   const imported = await call('scholar_get', { id });
-  assert.deepEqual(imported.profile.members, ['Jane Synthetic']);
+  const { member_rows: members } = imported.profile;
+  assert.deepEqual(members.map(row => row.name), ['Jane Synthetic', 'Unmatched Synthetic', 'Alex Synthetic']);
+  assert.equal(members[0].organization, 'Example University');
+  assert.ok(members[0].id);
+  assert.deepEqual(members[1], { name: 'Unmatched Synthetic' });
+  assert.equal(members[2].organization, 'Partner University');
+  assert.equal((await call('scholar_get', { id: members[2].id })).profile.name, 'Alex Synthetic');
   assert.ok(imported.profile.sources.some(source => source.url === evidence.url));
   const sourcePapers = await call('scholar_source_publications', { id });
   assert.equal(sourcePapers.items[0].id, paper.id);
@@ -136,4 +151,5 @@ test('research directory imports affiliations and topic groups with sources and 
   assert.equal(restored.notes, 'Private synthetic note');
   assert.equal(restored.followed, true);
   assert.equal(restored.linked_publication_count, 1);
+  assert.deepEqual(restored.member_rows, members);
 });

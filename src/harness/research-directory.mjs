@@ -83,6 +83,7 @@ function buildDirectory(catalog, documents, snapshot, relations) {
     if (Number.isSafeInteger(value.source_work_count)) item.source_work_count = Math.max(item.source_work_count || 0, value.source_work_count);
     item.roles = unique([...item.roles, ...array(value.roles)]);
     item.members = unique([...item.members, ...array(value.members).map(member => clean(typeof member === 'string' ? member : member?.name, 160))]);
+    if (value.memberIds?.length) item.member_profile_ids = unique([...(item.member_profile_ids || []), ...value.memberIds]).slice(0, 100);
     for (const candidate of array(value.topics)) {
       const text = clean(typeof candidate === 'string' ? candidate : candidate?.name || candidate?.label || candidate?.topic, 320);
       if (text && !item.topics.some(topic => topic.name === text)) item.topics.push({ name: text });
@@ -129,24 +130,32 @@ function buildDirectory(catalog, documents, snapshot, relations) {
     const paperRefs = row => array(row?.paper_ids).map(id => byPaper.get(id)).filter(Boolean);
     const tracked = new Set(array(document.tracking_list).flatMap(row => array(row.scholar_ids)));
     const trackedGroups = new Set(array(document.tracking_list).map(row => row.research_group_id));
+    const scholars = new Map();
     for (const row of array(document.scholars)) {
       const role = clean(row.current_role || row.current_title || row.role);
       const topics = Array.isArray(row.research_interests) ? row.research_interests : [row.research_interests];
       const organization = affiliation(row.current_institution || row.current_organization || row.organization || row.organization_at_publication);
-      add({ kind: leader(role) ? 'pi' : 'scholar', name: row.name, native_name: row.name_zh, position: role,
+      const person = add({ kind: leader(role) ? 'pi' : 'scholar', name: row.name, native_name: row.name_zh, position: role,
         organization, aliases: row.aliases, topics, followed: tracked.has(row.id), publication_count: row.publication_count,
         evidence_note: row.identity_note, last_checked: row.current_affiliation_verified_on,
         publication_count_source: row.publication_count_source || context },
       { sources: evidence(row), works: array(row.contributions).map(item => byPaper.get(item.paper_id)), status: verified(row.identity_status) ? 'verified' : 'needs_review', context });
+      if (person) scholars.set(row.id, person.id);
     }
     const groups = new Map();
-    for (const row of [...array(document.groups), ...array(document.research_groups)]) {
+    for (const row of [...array(document.research_lines), ...array(document.groups), ...array(document.research_groups)]) {
       if (!row || row.not_a_verified_current_lab || row.relationship_type === 'analyst_primary_task_category') continue;
-      if (row.name || row.label || row.title) groups.set(row.id || row.name, row);
+      if (row.name || row.label || row.title) {
+        const id = row.id || row.name || row.label || row.title;
+        const previous = groups.get(id);
+        groups.set(id, { ...previous, ...row, members: [...array(previous?.members), ...array(row.members)],
+          scholar_ids: unique([...array(previous?.scholar_ids), ...array(row.scholar_ids)]) });
+      }
     }
     for (const row of groups.values()) {
       add({ kind: 'group', name: row.name || row.label || row.title, organization: affiliation(row.institution),
-        members: row.members, topics: [row.research_question, ...array(row.research_interests)], followed: trackedGroups.has(row.id),
+        members: row.members, memberIds: row.scholar_ids.map(id => scholars.get(id)).filter(Boolean),
+        topics: [row.research_question, ...array(row.research_interests)], followed: trackedGroups.has(row.id),
         description: row.summary, scope: typeof row.task_boundaries === 'string' ? row.task_boundaries : array(row.task_boundaries).filter(value => typeof value === 'string').join(' · '),
         evidence_note: row.group_name_note, last_checked: row.last_checked },
       { sources: evidence(row), works: paperRefs(row), status: verified(row.status) ? 'verified' : 'needs_review', context });

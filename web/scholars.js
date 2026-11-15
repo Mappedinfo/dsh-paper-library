@@ -33,7 +33,7 @@ window.PaperScholars = (() => {
     root.setAttribute('aria-label', '研究人员目录');
     root.replaceChildren(content, dialog);
     let active = false, selected = null, generation = 0, saving = false;
-    let catalogOffset = 0, paperOffset = 0, restoreFocus = null, kindFilter = '', query = '';
+    let catalogOffset = 0, paperOffset = 0, restoreFocus = null, kindFilter = '', query = '', memberOrigin = null;
     const paperPage = 40, scholarPage = 30;
     dialog.addEventListener('close', () => {
       if (restoreFocus?.isConnected) restoreFocus.focus();
@@ -92,6 +92,7 @@ window.PaperScholars = (() => {
 
     async function loadCatalog(offset = 0) {
       selected = null;
+      memberOrigin = null;
       catalogOffset = offset;
       const owner = ++generation;
       const importButton = button('导入文献与领域研究', async () => {
@@ -135,11 +136,22 @@ window.PaperScholars = (() => {
       } catch (error) { if (active && owner === generation) pending.textContent = error.message; }
     }
 
+    function profileBackActions() {
+      const actions = [];
+      if (memberOrigin) actions.push(button('返回合作线', () => {
+        const id = memberOrigin;
+        memberOrigin = null;
+        void loadProfile(id);
+      }));
+      actions.push(button('返回列表', () => void loadCatalog(catalogOffset)));
+      return actions;
+    }
+
     async function loadProfile(id, offset = 0) {
       selected = id;
       paperOffset = offset;
       const owner = ++generation;
-      begin('研究档案', [button('返回列表', () => void loadCatalog(catalogOffset))]);
+      begin('研究档案', profileBackActions());
       const pending = status('正在读取档案…');
       let entry;
       try {
@@ -172,8 +184,19 @@ window.PaperScholars = (() => {
       follow.setAttribute('aria-pressed', String(item.followed));
       begin(nameOf(item), [
         follow, button('编辑档案', () => editProfile(entry)),
-        button('返回列表', () => void loadCatalog(catalogOffset)),
+        ...profileBackActions(),
       ]);
+      if (item.member_rows?.length) {
+        const members = table(`来源列出的成员 · ${item.member_rows.length} 人`, ['姓名', '档案类型', '档案所列机构', '研究人员档案']);
+        for (const member of item.member_rows) {
+          const action = member.id ? button('查看档案', () => {
+            memberOrigin = item.id;
+            void loadProfile(member.id);
+          }) : '暂无匹配档案';
+          if (member.id) action.setAttribute('aria-label', `查看 ${member.name} 的档案`);
+          row(members, [member.name, kinds[member.kind], member.organization || '—', action]);
+        }
+      }
       const info = table('档案资料', ['字段', '资料']);
       row(info, ['类型', kinds[item.kind]]);
       if (item.roles?.includes('pi') && item.kind === 'lead') row(info, ['角色线索', 'PI 待核验']);
@@ -183,7 +206,6 @@ window.PaperScholars = (() => {
       if (item.department) affiliation.append(` · ${item.department}`);
       row(info, ['机构', affiliation]);
       if (item.position) row(info, ['职称', item.position]);
-      if (item.members?.length) row(info, ['来源中列出的成员', item.members.join(' · ')]);
       if (item.description) row(info, ['研究简介', item.description]);
       if (item.scope) row(info, ['研究范围', item.scope]);
       if (item.evidence_note) row(info, ['来源说明', item.evidence_note]);

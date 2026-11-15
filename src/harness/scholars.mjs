@@ -33,6 +33,40 @@ function identity(id) {
 }
 const label = profile => profile.native_name && profile.native_name !== profile.name
   ? `${profile.native_name} / ${profile.name}` : profile.name;
+const matchText = value => String(value ?? '').normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ');
+const personNames = person => [person.name, person.native_name, ...(person.aliases || [])].map(matchText);
+
+function memberRows(profile, people, importedById) {
+  const explicit = (profile.member_profile_ids || []).map(id => {
+    const identity = importedById.get(id);
+    const exact = people.find(person => person.id === id);
+    if (exact || !identity) return exact;
+    const matches = people.filter(person => researchIdentity(person) === researchIdentity(identity));
+    return matches.length === 1 ? matches[0] : identity;
+  }).filter(Boolean);
+  const local = profile.organization
+    ? people.filter(person => matchText(person.organization) === matchText(profile.organization)) : [];
+  const usedNames = new Set(), usedIds = new Set(), rows = [];
+  function add(name, person) {
+    if (person && usedIds.has(person.id)) return;
+    if (person) usedIds.add(person.id);
+    rows.push(person ? { name, id: person.id, kind: person.kind, organization: person.organization } : { name });
+  }
+  for (const name of profile.members || []) {
+    const key = matchText(name);
+    if (!key || usedNames.has(key)) continue;
+    usedNames.add(key);
+    const named = explicit.filter(person => personNames(person).includes(key));
+    if (named.length) {
+      for (const person of named) add(name, person);
+      continue;
+    }
+    const matches = local.filter(person => personNames(person).includes(key));
+    add(name, matches.length === 1 ? matches[0] : null);
+  }
+  for (const person of explicit) add(person.name, person);
+  return rows.slice(0, 100);
+}
 
 function editProfile(previous, patch) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw invalid('学者资料无效。');
@@ -93,7 +127,7 @@ export function createScholars({ store, request, directory }) {
   const empty = { entries: [], entriesById: new Map(), publications: new Map() };
   const overlay = (imported, manual) => ({ kind: 'scholar', ...imported, ...manual });
   const pack = (profile, revision) => {
-    const { publication_keys, ...rest } = profile;
+    const { publication_keys, member_profile_ids, ...rest } = profile;
     return { profile: { ...rest, linked_publication_count: publication_keys?.length ?? 0 }, revision };
   };
   async function read(id, data) {
@@ -102,25 +136,28 @@ export function createScholars({ store, request, directory }) {
     if (!record.value && !imported) throw new LocalStateError('找不到该档案。', 'SCHOLAR_NOT_FOUND', 404);
     return { record, imported, profile: overlay(imported, record.value) };
   }
+  async function directoryProfiles(data, signal) {
+    const imported = new Map(data.entriesById), importedIdentities = new Map(data.entries.map(item => [researchIdentity(item), item]));
+    const manual = [];
+    for (let start = 0; start !== null;) {
+      signal?.throwIfAborted();
+      const page = await store.list({ prefix, offset: start, limit: 50 });
+      for (const { value } of page.records) {
+        const base = imported.get(value.id) || importedIdentities.get(researchIdentity(value));
+        if (base) imported.delete(base.id);
+        manual.push(overlay(base, value));
+      }
+      start = page.next_offset;
+    }
+    return [...manual, ...imported.values()];
+  }
   return async function scholars(input, { signal } = {}) {
     if (input.action === 'scholar_import') return directory.refresh({ signal });
     const data = directory ? await directory.load() : empty;
     if (input.action === 'scholar_list') {
       const offset = input.offset ?? 0, kind = input.kind ?? '', query = text(input.query ?? '', 200, '检索词').normalize('NFKC').toLowerCase();
       if (!Number.isSafeInteger(offset) || offset < 0 || (kind && !RESEARCH_TYPES.includes(kind))) throw invalid('目录筛选参数无效。');
-      const imported = new Map(data.entriesById), importedIdentities = new Map(data.entries.map(item => [researchIdentity(item), item]));
-      const manual = [];
-      for (let start = 0; start !== null;) {
-        signal?.throwIfAborted();
-        const page = await store.list({ prefix, offset: start, limit: 50 });
-        for (const { value } of page.records) {
-          const base = imported.get(value.id) || importedIdentities.get(researchIdentity(value));
-          if (base) imported.delete(base.id);
-          manual.push(overlay(base, value));
-        }
-        start = page.next_offset;
-      }
-      const visible = [...manual, ...imported.values()].filter(item => {
+      const visible = (await directoryProfiles(data, signal)).filter(item => {
         if (kind && item.kind !== kind && !item.roles?.includes(kind)) return false;
         return !query || [item.name, item.native_name, item.organization, ...(item.aliases || []), ...(item.topics || []).map(topic => topic.name)]
           .some(value => typeof value === 'string' && value.normalize('NFKC').toLowerCase().includes(query));
@@ -138,7 +175,14 @@ export function createScholars({ store, request, directory }) {
       return pack(profile, (await store.put(identity(id), profile, 0)).revision);
     }
     const { record, imported, profile } = await read(input.id, data);
-    if (input.action === 'scholar_get') return pack(profile, record.revision);
+    if (input.action === 'scholar_get') {
+      const result = pack(profile, record.revision);
+      if (profile.members?.length || profile.member_profile_ids?.length) {
+        const people = (await directoryProfiles(data, signal)).filter(item => ['scholar', 'pi'].includes(item.kind));
+        result.profile.member_rows = memberRows(profile, people, data.entriesById);
+      }
+      return result;
+    }
     if (input.action === 'scholar_source_publications') {
       const offset = input.offset ?? 0;
       if (!Number.isSafeInteger(offset) || offset < 0) throw invalid('论文分页无效。');
