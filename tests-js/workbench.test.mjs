@@ -551,7 +551,9 @@ test('metadata lookup adopts the complete author list in the review draft withou
 
 test('shared folder action follows selection, refuses missing files and never accepts a browser path',async()=>{
   const first={...original(),pdf:true};const second={...first,id:'paper-b'};const f=environment({active:first});f.state.items.push(second);f.workbench.setTable(true);
-  assert.equal(f.element('catalog-table').querySelectorAll('th').length,11);
+  const headers=f.element('catalog-table').querySelectorAll('th');
+  assert.equal(headers.length,12);
+  assert.deepEqual(headers.slice(6,9).map(node=>node.textContent),['DOI / 预印本','引用量','单位']);
   await f.element('catalog-reveal').dispatch('click');assert.deepEqual(f.requests,[{action:'paper_reveal',id:first.id}]);
   const row=f.element('catalog-table').querySelectorAll('tr').find(n=>n.dataset.paperId===second.id);await row.querySelector('button').dispatch('click');
   await f.element('catalog-reveal').dispatch('click');assert.equal(f.requests.at(-1).id,second.id);

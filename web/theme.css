@@ -128,6 +128,9 @@ input[type="checkbox"] { accent-color: var(--dsw-alias-button-primary-fill); }
 .catalog-table .catalog-column-jcr { width: 120px; }
 .catalog-table .catalog-column-citekey { width: 140px; }
 .catalog-table .catalog-column-doi { width: 165px; }
+.catalog-table .catalog-column-citations { width: 104px; }
+.catalog-citation-source { display: block; color: var(--muted); font-size: 10px; }
+.catalog-table th .catalog-citation-refresh { margin-left: 4px; padding: 0 3px; }
 .catalog-table .catalog-column-institution { width: 180px; }
 .catalog-table .catalog-column-dates { width: 170px; }
 .catalog-table .catalog-column-kind { width: 85px; }

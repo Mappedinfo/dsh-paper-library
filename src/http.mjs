@@ -26,6 +26,7 @@ import { createPaperLibrarySettings } from './harness/settings.mjs';
 import { createInkQueue } from './ink-queue.mjs';
 import { createInkDiagnostics } from './ink-diagnostics.mjs';
 import { catalogResources } from './catalog-resources.mjs';
+import { createCatalogCitations } from './catalog-citations.mjs';
 
 const staticFiles = { '': ['index.html','text/html;charset=utf-8'], 'index.html': ['index.html','text/html;charset=utf-8'], 'app.js':['app.js','text/javascript;charset=utf-8'], 'paper-chat.js':['paper-chat.js','text/javascript;charset=utf-8'], 'style.css':['style.css','text/css;charset=utf-8'] };
 staticFiles['latex-search.js'] = ['latex-search.js', 'text/javascript;charset=utf-8'];
@@ -33,6 +34,7 @@ staticFiles['reading-distribution.js'] = ['reading-distribution.js', 'text/javas
 staticFiles['paper-organization.js'] = ['paper-organization.js', 'text/javascript;charset=utf-8'];
 staticFiles['paper-abstract.js'] = ['paper-abstract.js', 'text/javascript;charset=utf-8'];
 staticFiles['catalog-search.js'] = ['catalog-search.js', 'text/javascript;charset=utf-8'];
+staticFiles['catalog-citations.js'] = ['catalog-citations.js', 'text/javascript;charset=utf-8'];
 for (const name of ['paper-outline.js','paper-outline.css','settings-models.js','reader-search.js','annotation-style.js','document-elements.js','document-elements.css','encyclopedia.js','workbench.js','knowledge-graph.js','workbench.css','knowledge-graph.css','pdf-reader.js','pdf-reader.css','reading-panels.js','reading-panels.css','reading-shell.js','reading-shell.css','local-state.js','floating-windows.js', 'floating-windows.css', 'language-learning.js','language-learning.css','theme.js','theme.css','latex-workspace.js','latex-workspace.css','latex-review.js','latex-versions.js','latex-writing-tools.js','latex-formulas.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['resource-library.js','resource-library.css','knowledge-workflow.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['paper-analysis.js','paper-analysis.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
@@ -131,6 +133,7 @@ export function createFetchHandler(options = {}) {
   };
   const slidesRequest = async input => (await getSlidesStore()).handle(input);
   const localState = options.settings ? store : settings.localState;
+  const catalogCitations = createCatalogCitations({ store: localState, fetchOptions: options.fetchOptions });
   // Browsing saved learning data is local and does not initialize an AI route or
   // paper conversation. Only the host-injected adapter may generate new output.
   const paperDatasets = createPaperDatasets({ store: localState,
@@ -236,7 +239,8 @@ export function createFetchHandler(options = {}) {
             : input?.action === 'settings_get' ? await settings.get()
             : input?.action === 'settings_update' ? await settings.update(input.patch, input.expected_revision)
             : input?.action === 'settings_reset' ? await settings.reset(input.expected_revision)
-            : input?.action === 'catalog_resource_list' ? await catalogResources(input, { slidesList: () => slidesRequest({ action: 'slides_catalog' }), resourceList: payload => dispatch(payload, { ...options, signal: request.signal }) })
+            : input?.action === 'catalog_citation_counts' ? await catalogCitations.refresh(input, { signal: request.signal })
+            : input?.action === 'catalog_resource_list' ? await catalogCitations.hydrate(await catalogResources(input, { slidesList: () => slidesRequest({ action: 'slides_catalog' }), resourceList: payload => dispatch(payload, { ...options, signal: request.signal }) }))
             : stateAction ? await stateRequest(localState, input)
             : typeof input?.action === 'string' && input.action.startsWith('slides_') ? await slidesRequest(input)
             : typeof input?.action === 'string' && input.action.startsWith('board_annotations_') ? await handleBoardAnnotationRequest(boardAnnotations, input)

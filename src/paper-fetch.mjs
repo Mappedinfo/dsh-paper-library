@@ -135,7 +135,7 @@ function warn(ctx, error) {
   ctx.warnings.push(errorText(error))
 }
 
-async function requestPublic(value, ctx, kind, timeoutMs) {
+async function requestPublic(value, ctx, kind, timeoutMs, { allowNotFound = false, followRedirects = true } = {}) {
   let url = publicURL(value)
   const signal = timeoutMs ? AbortSignal.any([ctx.signal, AbortSignal.timeout(timeoutMs)]) : ctx.signal
   for (let redirects = 0; redirects <= 5; redirects++) {
@@ -163,6 +163,7 @@ async function requestPublic(value, ctx, kind, timeoutMs) {
       } }), requestSignal)
       record.status = response.statusCode
       if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
+        if (!followRedirects) throw new Error('Public source redirected the request')
         const location = response.headers.location
         response.close?.()
         if (typeof location !== 'string') throw new Error('Redirect response omitted a Location URL')
@@ -170,6 +171,7 @@ async function requestPublic(value, ctx, kind, timeoutMs) {
         url = publicURL(new URL(location, url).href)
         continue
       }
+      if (response.statusCode === 404 && allowNotFound) { response.close?.(); return null }
       if (response.statusCode !== 200) throw new Error(`Public source returned HTTP ${response.statusCode}; login, payment, and retry bypasses are not attempted`)
       if (response.headers['content-encoding'] && response.headers['content-encoding'] !== 'identity') throw new Error('Compressed response was not accepted; the source ignored identity encoding')
       return { ...response, close: response.close?.bind(response), url: url.href, signal: requestSignal }
@@ -253,6 +255,34 @@ export function normalizeDOI(value) {
   if (/^https?:\/\/(?:dx\.)?doi\.org\//i.test(doi)) doi = decodeURIComponent(new URL(doi).pathname.slice(1))
   if (doi.length > 512 || !DOI.test(doi)) throw new Error('Invalid DOI')
   return doi
+}
+
+/** Fetch only an inbound citation count for the exact registered DOI. */
+export async function lookupCitationCount(value, options = {}) {
+  const doi = normalizeDOI(value).toLowerCase()
+  const ctx = context({ ...options, timeoutMs: 10000 }, doi)
+  const openalex = `https://api.openalex.org/works/https://doi.org/${encodeURIComponent(doi)}?select=id,doi,cited_by_count`
+  const crossref = `https://api.crossref.org/works/${encodeURIComponent(doi)}`
+  let unavailable = false
+  for (const [source, url] of [['OpenAlex', openalex], ['Crossref', crossref]]) {
+    try {
+      const response = await requestPublic(url, ctx, 'metadata', 5000, { allowNotFound: true, followRedirects: false })
+      if (!response) continue
+      const payload = JSON.parse(await readText(response, TEXT_LIMIT, true))
+      const work = source === 'OpenAlex' ? payload : payload.message
+      const returned = work?.doi ?? work?.DOI
+      const count = source === 'OpenAlex' ? work?.cited_by_count : work?.['is-referenced-by-count']
+      if (typeof returned !== 'string' || normalizeDOI(returned).toLowerCase() !== doi ||
+          !Number.isSafeInteger(count) || count < 0) continue
+      const workId = /^https:\/\/openalex\.org\/(W\d{1,20})$/.exec(work.id)?.[0]
+      return { doi, status: 'found', count, source, url: source === 'OpenAlex' ? workId || openalex : crossref,
+        fetched_at: ctx.provenance.fetched_at }
+    } catch {
+      options.signal?.throwIfAborted()
+      unavailable = true
+    }
+  }
+  return { doi, status: unavailable ? 'unavailable' : 'not_found', fetched_at: ctx.provenance.fetched_at }
 }
 
 function crossrefCSL(item, doi, ctx) {
