@@ -20,6 +20,10 @@ MAX_ANNOTATIONS = 20000
 MARK_TYPES = {8, 9, 10, 11}
 MARK_ORIGIN_KEY = "PaperLibraryMarkOrigin"
 _MARK_ID = re.compile(r"(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})")
+_AI_MARK_LABEL = r"(?:AI\s*(?:自主阅读|阅读批注|阅读|批注)|AI[- ]generated (?:reading mark|annotation)|AI reading (?:mark|annotation))"
+_AI_MARK_HEADER = re.compile(rf"^\s*(?:\[\s*{_AI_MARK_LABEL}\s*\]|【\s*{_AI_MARK_LABEL}\s*】|{_AI_MARK_LABEL}\s*[:：\n])", re.I)
+_AI_MARK_SOURCE = re.compile(rf"^{_AI_MARK_LABEL}$", re.I)
+_LOCAL_SUBJECT = "paper-library:"
 
 
 def _response():
@@ -29,7 +33,7 @@ def _response():
             "page_count": None, "bin_count": BIN_COUNT,
             "other": group(), "ai_style": group(),
             "manual": {**group(), "inferred_count": None}, "ai": {**group(), "inferred_count": None},
-            "unclassified_count": None,
+            "unclassified_count": None, "ai_reply_count": None,
             "total_marks": None, "marked_pages": None,
             "coverage": {"scanned_pages": 0, "visited_pages": 0,
                          "scanned_annotations": 0, "skipped_marks": 0},
@@ -71,6 +75,26 @@ def _position(page, annot):
     return ((visible.y0 + visible.y1) / 2 - bounds.y0) / bounds.height
 
 
+def _annotation_attribute(doc, xref, key):
+    kind, value = doc.xref_get_key(xref, key)
+    return value if kind == "string" else ""
+
+
+def _local_metadata(subject):
+    if len(subject) > 100000 or not subject.startswith(_LOCAL_SUBJECT):
+        return {}
+    try:
+        value = json.loads(subject[len(_LOCAL_SUBJECT):])
+    except (ValueError, RecursionError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _ai_reply(doc, xref):
+    subject = _annotation_attribute(doc, xref, "Subj")
+    return subject == "AI 伴学回复" or _local_metadata(subject).get("kind") == "ai-feedback"
+
+
 def _origin(doc, xref, blue_dashed):
     kind, recorded = doc.xref_get_key(xref, MARK_ORIGIN_KEY)
     if kind == "name" and recorded in {"/Manual", "/AI"}:
@@ -79,22 +103,22 @@ def _origin(doc, xref, blue_dashed):
         return None, False
     if blue_dashed:
         return "ai", True
+    author = _annotation_attribute(doc, xref, "T")
+    subject = _annotation_attribute(doc, xref, "Subj")
+    if (_AI_MARK_SOURCE.fullmatch(subject.strip()) or _AI_MARK_SOURCE.fullmatch(author.strip())
+            or _AI_MARK_HEADER.match(_annotation_attribute(doc, xref, "Contents")[:256])):
+        return "ai", True
+    value = _local_metadata(subject)
+    if any(value.get(key) == "ai-reading" for key in ("kind", "source_kind", "annotation_profile")):
+        return "ai", True
     # Legacy reader marks used Reader, a stable UUID and a Paper Library
     # subject with the selection and, for retried writes, a request hash.
-    if blue_dashed is not False or doc.xref_get_key(xref, "T") != ("string", "Reader"):
+    if blue_dashed is not False or author != "Reader":
         return None, False
     kind, identifier = doc.xref_get_key(xref, "NM")
     if kind != "string" or not _MARK_ID.fullmatch(identifier):
         return None, False
-    kind, subject = doc.xref_get_key(xref, "Subj")
-    prefix = 'paper-library:'
-    if kind != "string" or len(subject) > 100000 or not subject.startswith(prefix):
-        return None, False
-    try:
-        value = json.loads(subject[len(prefix):])
-    except (ValueError, RecursionError):
-        return None, False
-    if isinstance(value, dict) and isinstance(value.get("text"), str) and (
+    if isinstance(value.get("text"), str) and (
         value.keys() == {"text"} or (
             value.keys() == {"text", "create_request_hash"}
             and isinstance(value["create_request_hash"], str)
@@ -119,7 +143,7 @@ def _scan(doc):
         result[name]["marked_pages"] = 0
     for name in sources:
         result[name]["inferred_count"] = 0
-    result["unclassified_count"] = 0
+    result["unclassified_count"] = result["ai_reply_count"] = 0
     result["total_marks"] = result["marked_pages"] = 0
     coverage = result["coverage"]
     if doc.is_repaired:
@@ -152,10 +176,16 @@ def _scan(doc):
                 seen.add(xref)
                 coverage["scanned_annotations"] += 1
                 try:
-                    # Any non-null /IRT is a reply, even if malformed/dangling.
-                    # Do not read comment bodies or extract page text.
-                    if (annot.type[0] in MARK_TYPES
-                            and doc.xref_get_key(annot.xref, "IRT")[0] == "null"):
+                    # Count PDF replies separately, even when the reply itself
+                    # uses a markup type. Only root marks contribute positions.
+                    relation = doc.xref_get_key(xref, "IRT")[0]
+                    if relation != "null":
+                        if relation == "xref":
+                            try:
+                                result["ai_reply_count"] += int(_ai_reply(doc, xref))
+                            except Exception:
+                                _reason(result, "origin_unavailable")
+                    elif annot.type[0] in MARK_TYPES:
                         position = _position(page, annot)
                         index = min(BIN_COUNT - 1, max(0, int((number + position) / page_count * BIN_COUNT)))
                         try:

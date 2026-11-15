@@ -23,7 +23,7 @@ test('Gaussian smoothing preserves annotation mass including both edges',()=>{fo
 test('both layers share one peak so sparse AI does not look equally dense',()=>{const lanes=math.geometry(result(10,1));assert.equal(Math.max(...lanes[0].levels),1);assert.ok(Math.abs(Math.max(...lanes[1].levels)-.1)<1e-9);assert.equal(math.geometry(result(),{ai:false}).length,1);});
 test('bands keep exact native positions and smoothing preserves peak location',()=>{const lanes=math.geometry(result(),{mode:'bands'});assert.equal(lanes[0].levels.filter(Boolean).length,1);assert.equal(lanes[1].levels.filter(Boolean).length,1);assert.equal(math.smooth(bins(40),3).indexOf(Math.max(...math.smooth(bins(40),3))),40);});
 test('manual and AI overlap at the same x coordinate and share the bands baseline', {skip:!JSDOM},async()=>{
- const data={...result(1,3),ai:{...group(20,3),inferred_count:2},unclassified_count:5,total_marks:9};
+ const data={...result(1,3),ai:{...group(20,3),inferred_count:2},unclassified_count:5,total_marks:9,ai_reply_count:6};
  const f=fixture(async()=>data);
  try{
   f.ui.applyPreferences({reading_distribution_mode:'bands'});const row=f.mount();f.visible(row);await tick();
@@ -34,6 +34,8 @@ test('manual and AI overlap at the same x coordinate and share the bands baselin
   assert.equal(baseline(manual),baseline(ai));
   assert.ok(Number(ai.getAttribute('height'))>Number(manual.getAttribute('height')));
   assert.match(row.title,/推定 2 处.*来源未明 5 处/);
+  assert.match(row.querySelector('.reading-distribution-legend').textContent,/AI 划线 3.*AI 回复 6/);
+  assert.equal(row.querySelector('.reading-distribution-count').textContent,'9 处');
   const height=manual.getAttribute('height');
   f.ui.applyPreferences({reading_distribution_mode:'bands',reading_distribution_ai:false});
   assert.equal(row.querySelector('svg g.is-manual rect').getAttribute('height'),height);

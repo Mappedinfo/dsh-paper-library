@@ -3,7 +3,8 @@
 文献表每条标题下方的标签行显示「划线分布」。位置从左到右对应 PDF 物理页与页内纵向位置，不是已读百分比，也不衡量理解程度。普通列表和当前文献标签区复用同一显示。
 
 - 绿色填充显示手动划线，蓝色填充显示 AI 划线，两者共用横轴、基线和纵向刻度。蓝线用虚线轮廓，方便辨认重叠位置。
-- 新划线的来源记录随原生 PDF 批注保存，调整颜色或线型不改变来源。旧划线按 Paper Library 留下的写入特征或 AI 蓝色虚线样式推定，并标出推定数量。缺少可用依据的划线计入「来源未明」，不进入两条曲线。样式约定见 [AI 标注](ai-annotation-style.md)。
+- 新划线的来源记录随原生 PDF 批注保存，调整颜色或线型不改变来源。旧划线按写入特征、AI 蓝色虚线、明确的 AI 阅读元数据，或「AI 自主阅读」「AI 批注」等来源声明推定，并标出推定数量。普通题号、问题文字和讨论中提到 AI 的内容不构成来源声明。来源未明的划线单独计数。样式约定见 [AI 标注](ai-annotation-style.md)。
+- 已保存到 PDF 的 AI 翻译和 AI 问答等回复单独显示条数，位置仍以原始划线为准。
 - 数字是所读取的根划线批注数。悬停或键盘聚焦可查看两类数量、涉及页数、页数分母、读取边界及说明。
 - 「未知」不等于 0；「未发现划线」仅表示已完整检查的 PDF 中没有符合类型的标记。部分读取用 ≥ 和下限说明；局部未发现不会称作全文无划线。
 
@@ -32,11 +33,11 @@
 
 - `status`: ready / partial / unknown。
 - `page_count`, `bin_count:96`, `total_marks`, `marked_pages`。
-- `manual`, `ai`: `{bins:[96 counts], annotation_count, marked_pages, inferred_count}`，以及 `unclassified_count`。保留原有 `other`、`ai_style` 样式统计字段供既有调用者使用。
+- `manual`, `ai`: `{bins:[96 counts], annotation_count, marked_pages, inferred_count}`，以及 `unclassified_count`、`ai_reply_count`。保留原有 `other`、`ai_style` 样式统计字段供既有调用者使用。
 - `reason`, `reasons`, `coverage:{scanned_pages,visited_pages,scanned_annotations,skipped_marks}`。
 - `limits:{pages:2000,annotations:20000,bins:96}`。
 
-unknown 的计数为 null，不可把占位零数组当作实际零。partial 的计数和分布是已观察下限。2000 页以上沿用 PDF 打开器的拒绝边界；20,000 个原生批注预算计入回复和非划线类型，避免通过非目标类型绕过预算。损坏页面、循环对象、无法定位、属性解析失败及读取期间文件变化都有显式状态。读取原生位置、样式和用于判别来源的属性，既有内部主题只用于识别旧记录格式。不会读取备注正文、提取 PDF 正文或渲染页面。
+unknown 的计数为 null，不可把占位零数组当作实际零。partial 的计数和分布是已观察下限。2000 页以上沿用 PDF 打开器的拒绝边界；20,000 个原生批注预算计入回复和非划线类型，避免通过非目标类型绕过预算。损坏页面、循环对象、无法定位、属性解析失败及读取期间文件变化都有显式状态。旧划线的来源声明识别只检查原生属性和备注开头，且在本机完成。
 
 ## 性能与刷新
 

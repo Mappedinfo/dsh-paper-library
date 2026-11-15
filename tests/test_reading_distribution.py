@@ -69,7 +69,7 @@ def test_empty_pdf_is_measured_zero(tmp_path):
     assert value['reason'] is None
 
 
-def test_counts_only_root_text_marks_without_content_or_rendering(tmp_path, monkeypatch):
+def test_counts_only_root_text_marks_without_page_text_or_rendering(tmp_path, monkeypatch):
     path, doc = paper(tmp_path, 2)
     page = doc[0]
     parent = None
@@ -385,6 +385,43 @@ def test_new_manual_and_ai_marks_persist_origin_in_managed_pdf(tmp_path):
         assert value['ai_style']['annotation_count'] == 1
     finally:
         library.close()
+
+
+def test_legacy_declarations_identify_root_marks_without_confusing_ai_replies(tmp_path):
+    path, doc = paper(tmp_path)
+    page = doc[0]
+    signals = [
+        ({'subject': 'AI 自主阅读'}, None),
+        ({'content': '【AI 批注】Q12：Synthetic evidence'}, None),
+        ({'subject': 'paper-library:{"source_kind":"ai-reading"}'}, None),
+        ({'content': '问题 12：Synthetic question about AI'}, None),
+        ({'content': '讨论记录中引用了「AI 自主阅读」'}, None),
+        ({'content': 'AI问答重定位\n问：问题\n【原答复】内容'}, None),
+        ({'content': 'AI 批注：manual annotation copied an answer'}, '/Manual'),
+    ]
+    for index, (info, origin) in enumerate(signals):
+        mark = page.add_underline_annot(fitz.Rect(20, 20 + index * 35, 150, 40 + index * 35))
+        mark.set_info(**info)
+        if origin:
+            doc.xref_set_key(mark.xref, rd.MARK_ORIGIN_KEY, origin)
+    root = mark.xref
+    translation = page.add_text_annot((25, 285), 'Synthetic translation')
+    translation.set_info(subject='paper-library:{"kind":"ai-feedback","source_kind":"annotation-translation"}')
+    translation.set_irt_xref(root)
+    legacy = page.add_text_annot((25, 315), 'Synthetic answer')
+    legacy.set_info(subject='AI 伴学回复')
+    legacy.set_irt_xref(root)
+    note = page.add_text_annot((25, 345), 'Synthetic human discussion')
+    note.set_irt_xref(root)
+    standalone = page.add_text_annot((25, 365), 'Synthetic standalone result')
+    standalone.set_info(subject='paper-library:{"kind":"ai-feedback"}')
+    value = result(path, doc)
+    assert value['total_marks'] == 7
+    assert value['ai']['annotation_count'] == value['ai']['inferred_count'] == 3
+    assert value['ai_style']['annotation_count'] == 0
+    assert value['manual']['annotation_count'] == 1
+    assert value['unclassified_count'] == 3
+    assert value['ai_reply_count'] == 2
 
 
 def test_library_and_worker_dispatch_integration(tmp_path):

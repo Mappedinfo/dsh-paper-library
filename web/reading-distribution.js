@@ -45,9 +45,10 @@ window.PaperReadingDistribution = (() => {
           return `${labels[key]} ${group.annotation_count??'未知'} 处（${group.marked_pages??'未知'} 页${inferred}）`;
         });
         if(value.unclassified_count)details.push(`来源未明 ${value.unclassified_count} 处`);
+        if(value.ai_reply_count)details.push(`AI 回复 ${value.ai_reply_count} 条（含翻译和问答）`);
         hint=`${value.status==='partial'?'部分读取，以下为已读取下限。':''}${details.join('；')}。PDF 共 ${value.page_count??'未知'} 页。`;
         if(value.status==='partial')hint+=`已扫描 ${value.coverage?.scanned_pages??'未知'} 页；${(value.reasons||[]).map(r=>reasons[r]||r).join('、')}。`;
-        if(groups.manual.inferred_count||groups.ai.inferred_count)hint+='旧批注按写入特征或蓝色虚线推定来源。';
+        if(groups.manual.inferred_count||groups.ai.inferred_count)hint+='旧划线按写入特征、蓝色虚线或明确的来源声明推定。';
       }
       const caption=make('span','reading-distribution-caption');caption.append(make('span','','划线分布'),make('span','reading-distribution-count',text));box.append(caption);
       const full=`${hint} 从左至右为 PDF 物理页与页内纵向位置。绿色为${labels.manual}，蓝色为${labels.ai}，共用同一坐标轴和峰值。只表示标注分布，不代表阅读完成度或理解程度。`;
@@ -73,9 +74,11 @@ window.PaperReadingDistribution = (() => {
             group.append(rect);
           });
           svg.append(group);
-          legend.append(make('span',`is-${layer.key}`,`${labels[layer.key]} ${prefix}${groups[layer.key].annotation_count??'—'}`));
+          const name=value.manual&&layer.key==='ai'?'AI 划线':labels[layer.key];
+          legend.append(make('span',`is-${layer.key}`,`${name} ${prefix}${groups[layer.key].annotation_count??'—'}`));
         }
         if(value.unclassified_count)legend.append(make('span','',`未明 ${prefix}${value.unclassified_count}`));
+        if(value.ai_reply_count)legend.append(make('span','',`AI 回复 ${prefix}${value.ai_reply_count}`));
         track.append(svg);box.append(track,legend);
       }else{box.append(make('span','reading-distribution-placeholder'));}
     }
