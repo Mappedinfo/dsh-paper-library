@@ -463,3 +463,10 @@ body > #latex-view { height: 100dvh; }
 }
 .latex-citation-choice small { margin: 0; }
 .latex-codemirror .cm-completionDetail { display: inline-block; max-width: 30em; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+
+.latex-spelling-actions:not([hidden]) { display: flex; flex-wrap: wrap; gap: 4px; }
+.latex-term-dialog { width: min(440px, calc(100vw - 48px)); }
+.latex-term-dialog h2 { margin: 0 0 8px; font-size: 17px; }
+.latex-term-dialog label { display: grid; gap: 3px; margin-block: 8px; }
+.latex-term-dialog textarea { margin: 0; font: inherit; }
+.latex-term-dialog .latex-git-actions { justify-content: end; }

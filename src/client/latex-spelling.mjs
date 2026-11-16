@@ -74,8 +74,8 @@ const chinesePhrase = /^\p{Script=Han}{2,32}$/u
 export function buildGlossary(rows) {
   const words = new Map(), chinese = new Map()
   for (const entry of rows || []) {
-    const term = entry.term?.trim(), meaning = entry.meaning?.trim()
-    if (!term || !meaning) continue
+    const term = entry.term?.trim(), meaning = entry.meaning?.trim() || ''
+    if (!term) continue
     const english = englishPhrase.test(term) ? [term] : meaning.split(/[;；/、,，]/).map(value => value.trim()).filter(value => englishPhrase.test(value))
     for (const phrase of english) {
       for (const word of phrase.match(/[A-Za-z][A-Za-z']{2,}/g) || []) {
@@ -120,7 +120,7 @@ export function spellingSuggestions(item, glossary) {
   for (const [key, entry] of glossary?.words || []) {
     if (Math.abs(key.length - word.length) > cutoff) continue
     const score = distance(word, key)
-    if (score <= cutoff) matches.push({ score, label: `${entry.phrase}（${entry.meaning}）` })
+    if (score <= cutoff) matches.push({ score, label: entry.meaning ? `${entry.phrase}（${entry.meaning}）` : entry.phrase })
   }
   matches.sort((a, b) => a.score - b.score || a.label.localeCompare(b.label))
   checker ||= nspell(aff, dic)
@@ -142,7 +142,7 @@ function terminologyHits(source, glossary, max) {
   return hits
 }
 
-export function checkSpelling(source, limit = 100, glossary) {
+export function checkSpelling(source, limit = 100, glossary, dictionary) {
   if (typeof source !== 'string') return { items: [], truncated: false, checkedCharacters: 0, checkedWords: 0 }
   const clipped = source.length > MAX_CHARACTERS
   source = source.slice(0, MAX_CHARACTERS)
@@ -182,7 +182,8 @@ export function checkSpelling(source, limit = 100, glossary) {
     checkedWords++
     const word = match[0]
     if (word.length > 80) continue // Long identifiers are not ordinary prose words.
-    if (checker.correct(word) || glossary?.words.has(word.toLowerCase())) continue
+    const key = word.toLowerCase()
+    if (checker.correct(word) || glossary?.words.has(key) || dictionary?.has(key)) continue
     items.push({ word, from: match.index, to: match.index + word.length })
     if (items.length >= limit) return finish(true, match.index + word.length, 'results')
   }

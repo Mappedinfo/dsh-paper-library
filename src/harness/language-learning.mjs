@@ -357,6 +357,22 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     rows.sort(compare);for(const row of rows.slice(offset,offset+limit))items.push(publicWord(await store.get(row.key)));
     return {items,total:rows.length,offset,limit,hasMore:offset+items.length<rows.length,...scope,order};
   }
+  async function addManualTerm(input) {
+    const term = lexicalText(string(input.term, '术语', 80)).trim()
+    const meaning = string(input.meaning ?? '', '释义', 2000, false)
+    if (!/[\p{L}\p{N}]/u.test(term) || /[\u0000-\u001f\u007f]/u.test(term)) throw fail('请输入有效的术语。')
+    const id = hash(canonical(term))
+    const record = await cas(`vocabulary:${id}`, previous => {
+      if (previous && !previous.deleted) {
+        if (previous.meaning || !meaning) return undefined
+        return { ...previous, meaning, meaning_source: 'user', updated_at: stamp() }
+      }
+      const time = stamp()
+      return { id, term, meaning, status: 'learning', suggested_by: 'user', meaning_source: 'user',
+        created_at: time, updated_at: time, encounters: [], encounters_truncated: false }
+    })
+    return publicWord(record)
+  }
   async function vocabularyMutation(input) {
     const id = string(input.id, '词汇标识', 64)
     if (!/^[a-f0-9]{64}$/.test(id)) throw fail('词汇标识无效。')
@@ -398,6 +414,7 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
       if (input.action === 'language_settings_get') return await settingsGet(signal)
       if (input.action === 'language_prompt_preview') return promptPreview(input)
       if (input.action === 'language_settings_update') return await settingsUpdate(input, signal)
+      if (input.action === 'vocabulary_create' && input.mode === 'manual') return await addManualTerm(input)
       if (input.action === 'language_generate' || input.action === 'vocabulary_create') {
         const request = input.action === 'vocabulary_create' ? vocabularyRequest(input) : requestOf(input), key = resultKey(request), fingerprint = hash(JSON.stringify(request)), active = flights.get(key)
         const view = async result => {

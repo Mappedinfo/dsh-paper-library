@@ -240,7 +240,7 @@ export function createFetchHandler(options = {}) {
           const latexAIAction = typeof input?.action === 'string' && input.action.startsWith('latex_ai_');
           const latexWsAction = typeof input?.action === 'string' && input.action.startsWith('latex_ws_');
           if (chatAction && !options.paperChat) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板打开论文对话。'},400);
-          if (['annotation_translate','language_generate','vocabulary_create'].includes(input?.action) && !options.languageLearning) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
+          if (['annotation_translate','language_generate','vocabulary_create'].includes(input?.action) && !options.languageLearning && !(input.action === 'vocabulary_create' && input.mode === 'manual')) return json({ok:false,error:'请从 DeepSeek Harness 的文献库面板生成翻译或润色，已保存记录仍可在此查看。'},400);
           if (input?.action === 'handwriting_recognize' && !options.handwriting) return json({ok:false,error:'转文字需要 DSH 中支持图片的模型；笔迹可继续保存。'},409);
           if (input?.action === 'annotation_caption_result') return json({ok:false,error:'图像描述只能由宿主模型生成并写入。'},403);
           if (input?.action === 'annotation_caption' && !options.annotationCaption) return json({ok:false,error:'图像描述需要 DSH 中支持图像输入的模型；矩形批注仍保留。',code:'ANNOTATION_CAPTION_MODEL_REQUIRED'},409);

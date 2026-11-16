@@ -394,6 +394,10 @@ window.PaperLatexWorkspace = (() => {
     const formulaHost = make('section', 'latex-formula-panel'); formulaHost.id = 'latex-formula-panel'; formulaHost.hidden = true;
     const spellResults = make('div', 'latex-spelling-results'); spellResults.id = 'latex-spelling-results'; spellResults.hidden = true;
     const spellDetails = make('p', 'latex-spelling-detail'); spellDetails.setAttribute('role', 'status');
+    const spellActions = make('div', 'latex-spelling-actions'); spellActions.hidden = true;
+    const spellAddDictionary = make('button', 'button subtle', '加入词典'); spellAddDictionary.type = 'button'; spellAddDictionary.id = 'latex-spelling-add-dictionary';
+    const spellAddTerm = make('button', 'button subtle', '加入术语'); spellAddTerm.type = 'button'; spellAddTerm.id = 'latex-spelling-add-term';
+    spellActions.append(spellAddDictionary, spellAddTerm);
     const translateResults = make('section', 'latex-translation-results'); translateResults.id = 'latex-translation-results'; translateResults.hidden = true;
     const translateHeading = make('strong', '', '选文译文'); translateHeading.id = 'latex-translation-heading';
     translateResults.setAttribute('aria-labelledby', translateHeading.id);
@@ -646,7 +650,85 @@ window.PaperLatexWorkspace = (() => {
     editor.addEventListener('select', () => updateNavigatorActive());
     if (!sourceEditor) for (const event of ['click', 'keyup']) editor.addEventListener(event, () => updateNavigatorActive());
     let spellEnabled = true, spellTimer = null, spellRevision = 0, spellLoaded = false, spellEpoch = 0, spellingLoading = null;
-    let glossaryJob = null, spellHits = new Map();
+    const dictionaryKey = 'reader:latex-custom-dictionary';
+    let glossaryJob = null, dictionaryJob = null, spellHits = new Map(), spellWord = '', dictionarySaving = false;
+    const termDialog = make('dialog', 'latex-writing-dialog latex-term-dialog'); termDialog.id = 'latex-term-dialog';
+    termDialog.setAttribute('aria-labelledby', 'latex-term-heading');
+    const termForm = make('form'); termForm.id = 'latex-term-form';
+    const termHeading = make('h2', '', '加入术语'); termHeading.id = 'latex-term-heading';
+    const termLabel = make('label', '', '术语');
+    const termInput = make('input'); termInput.id = 'latex-term-word'; termInput.required = true; termInput.maxLength = 80;
+    termLabel.append(termInput);
+    const meaningLabel = make('label', '', '释义或全称（选填）');
+    const termMeaning = make('textarea'); termMeaning.id = 'latex-term-meaning'; termMeaning.rows = 3; termMeaning.maxLength = 2000;
+    meaningLabel.append(termMeaning);
+    const termStatus = make('p', 'small'); termStatus.setAttribute('role', 'status');
+    const termControls = make('div', 'latex-git-actions');
+    const termCancel = make('button', 'button subtle', '取消'); termCancel.type = 'button';
+    const termSave = make('button', 'button primary', '保存术语'); termSave.type = 'submit';
+    termControls.append(termCancel, termSave);
+    termForm.append(termHeading, termLabel, meaningLabel, termStatus, termControls); termDialog.append(termForm); view.append(termDialog);
+    let termSaving = false;
+
+    function dictionaryWords(record) {
+      const words = record.value?.words;
+      return Array.isArray(words) ? words.filter(word => typeof word === 'string' && word.length <= 80) : [];
+    }
+    function loadDictionary() {
+      dictionaryJob ||= api('state_get', { key: dictionaryKey }).then(record => ({
+        dictionary: new Set(dictionaryWords(record).map(word => word.toLowerCase())),
+      })).catch(() => ({ dictionaryUnavailable: true }));
+      return dictionaryJob;
+    }
+    spellAddDictionary.addEventListener('click', async () => {
+      if (!spellWord || dictionarySaving) return;
+      const word = spellWord, key = word.toLowerCase();
+      dictionarySaving = true; spellAddDictionary.disabled = true;
+      try {
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const record = await api('state_get', { key: dictionaryKey });
+          const words = dictionaryWords(record);
+          if (words.some(saved => saved.toLowerCase() === key)) break;
+          try {
+            await api('state_put', { key: dictionaryKey, expected_revision: record.revision, value: { words: [...words, word] } });
+            break;
+          } catch (error) {
+            if (error.code !== 'STATE_CONFLICT' || attempt === 3) throw error;
+          }
+        }
+        dictionaryJob = null;
+        if (!disposed) { scheduleSpelling(); say(`「${word}」已加入词典。`); }
+      } catch (error) {
+        if (!disposed) say(`词典未保存：${error.message}`, true);
+      } finally {
+        dictionarySaving = false; spellAddDictionary.disabled = false;
+      }
+    });
+    spellAddTerm.addEventListener('click', () => {
+      if (!spellWord || termDialog.open) return;
+      termInput.value = spellWord; termMeaning.value = ''; termStatus.textContent = '';
+      termDialog.showModal(); termMeaning.focus();
+    });
+    termCancel.addEventListener('click', () => termDialog.close());
+    termDialog.addEventListener('cancel', event => { if (termSaving) event.preventDefault(); });
+    termForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const term = termInput.value.trim(), meaning = termMeaning.value.trim();
+      if (!term || termSaving) return;
+      termSaving = termSave.disabled = termCancel.disabled = termInput.disabled = termMeaning.disabled = true;
+      try {
+        const saved = await api('vocabulary_create', { mode: 'manual', term, meaning });
+        glossaryJob = null;
+        if (!disposed) {
+          termDialog.close(); scheduleSpelling();
+          say(`「${saved.term}」已保存到「语言与词条」。`);
+        }
+      } catch (error) {
+        if (!disposed) termStatus.textContent = error.message;
+      } finally {
+        termSaving = termSave.disabled = termCancel.disabled = termInput.disabled = termMeaning.disabled = false;
+      }
+    });
     function ensureSpelling() {
       if (window.PaperLatexSpelling?.checkSpelling) return Promise.resolve(window.PaperLatexSpelling);
       if (!spellingLoading) spellingLoading = new Promise((resolve, reject) => {
@@ -680,11 +762,11 @@ window.PaperLatexWorkspace = (() => {
       const { item, checker, glossary } = hit;
       editor.setSelectionRange(item.from, item.to); editor.focus();
       const choices = checker.spellingSuggestions?.(item, glossary);
-      if (!choices) return;
       const messages = [];
-      if (choices.terms.length) messages.push(`已保存词条：${choices.terms.join('、')}`);
-      if (choices.suggestions.length) messages.push(`拼写建议：${choices.suggestions.join('、')}`);
+      if (choices?.terms?.length) messages.push(`已保存词条：${choices.terms.join('、')}`);
+      if (choices?.suggestions?.length) messages.push(`拼写建议：${choices.suggestions.join('、')}`);
       spellDetails.textContent = `${item.word} · ${messages.join(' · ') || '暂无拼写建议'}`;
+      spellWord = item.terminology ? '' : item.word; spellActions.hidden = !spellWord;
     }
     editorWrap.addEventListener('click', event => {
       const mark = event.target.closest?.('[data-latex-spell]');
@@ -692,7 +774,7 @@ window.PaperLatexWorkspace = (() => {
     });
     function scheduleSpelling() {
       const epoch = ++spellEpoch; clearTimeout(spellTimer);
-      spellHits = new Map(); spellDetails.textContent = '';
+      spellHits = new Map(); spellDetails.textContent = ''; spellWord = ''; spellActions.hidden = true;
       if (!spellEnabled || !file) {
         spellResults.hidden = true; spellResults.textContent = '';
         sourceEditor?.setSpellingMarks?.([]); return;
@@ -701,15 +783,15 @@ window.PaperLatexWorkspace = (() => {
         try {
           const checker = await ensureSpelling();
           if (epoch !== spellEpoch || disposed) return;
-          const { glossary, partial, unavailable } = await loadGlossary(checker);
+          const [{ glossary, partial, unavailable }, { dictionary, dictionaryUnavailable }] = await Promise.all([loadGlossary(checker), loadDictionary()]);
           if (epoch !== spellEpoch || disposed) return;
-          const result = checker.checkSpelling(editor.value, 100, glossary);
+          const result = checker.checkSpelling(editor.value, 100, glossary, dictionary);
           const marks = [...result.items, ...(result.terminology || [])];
           sourceEditor?.setSpellingMarks?.(marks.map(item => ({
             ...item, title: item.terminology ? item.terms.join('、') : '可能拼写有误，点击查看建议',
           })));
           spellResults.textContent = '';
-          spellResults.hidden = !marks.length && !result.truncated && !partial && !unavailable;
+          spellResults.hidden = !marks.length && !result.truncated && !partial && !unavailable && !dictionaryUnavailable;
           if (marks.length) spellResults.append(make('span', '', `拼写 ${result.items.length} · 术语 ${marks.length - result.items.length}`));
           for (const item of marks) spellHits.set(item.from, { item, checker, glossary });
           for (const item of marks.slice(0, 24)) {
@@ -719,7 +801,8 @@ window.PaperLatexWorkspace = (() => {
           if (marks.length > 24) spellResults.append(make('small', '', '其他提示可点击源码中的下划线。'));
           if (result.truncated) spellResults.append(make('small', '', `已检查至第 ${result.checkedCharacters} 字符。`));
           if (partial || unavailable) spellResults.append(make('small', '', unavailable ? '已保存词条暂不可用。' : '仅使用了部分已保存词条。'));
-          spellResults.append(spellDetails);
+          if (dictionaryUnavailable) spellResults.append(make('small', '', '自定义词典暂不可用。'));
+          spellResults.append(spellDetails, spellActions);
         } catch (error) {
           if (epoch !== spellEpoch || disposed) return;
           spellResults.hidden = false; spellResults.textContent = `本地拼写检查不可用：${error.message}`;
@@ -728,7 +811,7 @@ window.PaperLatexWorkspace = (() => {
     }
     sourceSpell.addEventListener('click', async () => {
       sourceSpell.disabled = true;
-      spellEnabled = !spellEnabled; if (spellEnabled) glossaryJob = null; sourceSpell.setAttribute('aria-pressed', String(spellEnabled)); scheduleSpelling();
+      spellEnabled = !spellEnabled; if (spellEnabled) glossaryJob = dictionaryJob = null; sourceSpell.setAttribute('aria-pressed', String(spellEnabled)); scheduleSpelling();
       try { const record = await api('state_put', { key: 'reader:latex-spelling', value: { enabled: spellEnabled }, expected_revision: spellRevision }); spellRevision = record.revision; }
       catch (error) { say(`拼写开关未能保存：${error.message}`, true); }
       finally { sourceSpell.disabled = false; }
@@ -2690,7 +2773,7 @@ window.PaperLatexWorkspace = (() => {
         const wanted = preferred || (project?.id && projects.some(item => item.id === project.id) ? project.id : projects[0]?.id);
         if ((project || !view.hidden) && !await savedBeforeLeaving(true)) { projectSelect.value = project?.id || ''; return false; }
         if (!valid()) return false;
-        glossaryJob = null; void loadSpelling();
+        glossaryJob = dictionaryJob = null; void loadSpelling();
         view.hidden = false;
         document.body.classList.add('latex-focused');
         setTab('pdf');
@@ -2706,6 +2789,7 @@ window.PaperLatexWorkspace = (() => {
     }
 
     async function close() {
+      if (termDialog.open) termDialog.close();
       if (switching || gitBusy) { say('正在更新项目，请稍候再关闭。', true); return; }
       ++openRequest;
       clearTimeout(timer); clearTimeout(compileTimer); closeMenu(); if (gitDialog.open) gitDialog.close(); resetCitationDialog();
@@ -2800,7 +2884,7 @@ window.PaperLatexWorkspace = (() => {
           ai: { available: ai.available, proposal: ai.proposal?.id || null },
         }),
       },
-    dispose() { disposed = true; resetCitationDialog(); cancelAiRun({ quiet: true }); clearPublicRetrieval(); cancelTranslation(); reviewer?.dispose(); writingTools?.dispose(); formulas?.destroy(); sourceEditor?.destroy(); cancelReads(); clearRendered(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); resizeObserver?.disconnect(); window.removeEventListener('resize', requestResize); window.removeEventListener('beforeunload', protectDraft); document.removeEventListener('selectionchange', pdfSelectionChanged); clearTimeout(timer); clearTimeout(compileTimer); clearTimeout(spellTimer); view.hidden = true; document.body.classList.remove('latex-focused'); },
+    dispose() { disposed = true; if (termDialog.open) termDialog.close(); resetCitationDialog(); cancelAiRun({ quiet: true }); clearPublicRetrieval(); cancelTranslation(); reviewer?.dispose(); writingTools?.dispose(); formulas?.destroy(); sourceEditor?.destroy(); cancelReads(); clearRendered(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); resizeObserver?.disconnect(); window.removeEventListener('resize', requestResize); window.removeEventListener('beforeunload', protectDraft); document.removeEventListener('selectionchange', pdfSelectionChanged); clearTimeout(timer); clearTimeout(compileTimer); clearTimeout(spellTimer); view.hidden = true; document.body.classList.remove('latex-focused'); },
     };
   }
   return { create };

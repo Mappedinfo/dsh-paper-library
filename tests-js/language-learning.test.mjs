@@ -667,3 +667,34 @@ test('LaTeX glossary projects bilingual fields without encounters or model calls
   assert.deepEqual(result, { items: [{ term: 'Epistemic', meaning: '认识上的；有关知识的' }], truncated: false, view: 'latex-glossary' })
   assert.equal(f.calls.length, before)
 })
+
+test('manual terms enter the existing glossary without a model or duplicate records', async () => {
+  const f = fixture()
+  const add = fields => f.handle({ action: 'vocabulary_create', mode: 'manual', ...fields })
+  const first = await add({ term: 'SPOK' })
+  assert.equal(first.meaning, '')
+  assert.equal(first.suggested_by, 'user')
+  assert.deepEqual(first.encounters, [])
+  const saved = await add({ term: 'spok', meaning: 'Synthetic expansion' })
+  assert.equal(saved.id, first.id)
+  assert.equal(saved.meaning, 'Synthetic expansion')
+  const duplicate = await add({ term: 'SPOK', meaning: 'Candidate replacement' })
+  assert.equal(duplicate.meaning, 'Synthetic expansion')
+  assert.deepEqual((await f.handle({ action: 'vocabulary_list', view: 'latex-glossary' })).items,
+    [{ term: 'SPOK', meaning: 'Synthetic expansion' }])
+  assert.equal(f.calls.length, 0)
+  assert.equal(f.kernelCalls.length, 0)
+})
+
+test('manual terms can be saved over HTTP without a connected model', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'latex-manual-term-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const handle = createFetchHandler({ library: join(root, 'library'), localStateHome: join(root, 'state') })
+  const response = await handle(new Request('http://localhost/api', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      action: 'vocabulary_create', mode: 'manual', term: 'SPOK', meaning: 'Synthetic expansion',
+    }) }))
+  const result = await response.json()
+  assert.equal(response.status, 200, result.error)
+  assert.equal(result.result.term, 'SPOK')
+})

@@ -434,6 +434,56 @@ test('spelling is on by default and renders suggestions without applying them', 
   f.ui.dispose();
 });
 
+test('spelling actions save accepted words and manual terms without editing the LaTeX source', async () => {
+  let words = [], meanings = [], updates = 0;
+  const f = await fixture((action, args) => {
+    if (action === 'state_get') return args.key === 'reader:latex-custom-dictionary'
+      ? { value: { words }, revision: 'dictionary' } : { value: null, revision: 0 };
+    if (action === 'state_put' && args.key === 'reader:latex-custom-dictionary') {
+      if (++updates === 1) {
+        words = ['Other'];
+        throw Object.assign(Error('conflict'), { code: 'STATE_CONFLICT' });
+      }
+      words = [...args.value.words];
+      return { value: { words }, revision: 'confirmed' };
+    }
+    if (action === 'vocabulary_list') return { items: meanings, view: 'latex-glossary' };
+    if (action === 'vocabulary_create') {
+      assert.equal(args.mode, 'manual'); assert.equal(args.term, 'GeoGraph');
+      meanings = [{ term: args.term, meaning: args.meaning }];
+      return meanings[0];
+    }
+  });
+  f.window.PaperLatexSpelling = {
+    buildGlossary: rows => rows,
+    checkSpelling: (_text, _limit, glossary, dictionary) => ({ items: [
+      { word: 'SPOK', from: 0, to: 4 }, { word: 'GeoGraph', from: 5, to: 13 },
+    ].filter(item => !dictionary?.has(item.word.toLowerCase()) && !glossary.some(row => row.term === item.word)) }),
+  };
+  const editor = f.ids.get('latex-editor'), source = 'SPOK GeoGraph';
+  editor.value = source; await editor.dispatch('input');
+  const scan = () => [...f.timers.values()].find(timer => timer.ms === 450).fn();
+  const results = f.ids.get('latex-spelling-results');
+  const issue = word => results.querySelectorAll('button').find(button => button.textContent === word);
+  await scan();
+  await issue('SPOK').dispatch('click');
+  await f.ids.get('latex-spelling-add-dictionary').dispatch('click');
+  assert.deepEqual(words, ['Other', 'SPOK']);
+  await scan();
+  assert.equal(issue('SPOK'), undefined);
+  await issue('GeoGraph').dispatch('click');
+  await f.ids.get('latex-spelling-add-term').dispatch('click');
+  assert.equal(f.ids.get('latex-term-word').value, 'GeoGraph');
+  f.ids.get('latex-term-meaning').value = 'Synthetic expansion';
+  await f.ids.get('latex-term-form').dispatch('submit');
+  assert.equal(f.ids.get('latex-term-dialog').open, false);
+  await scan();
+  assert.equal(issue('GeoGraph'), undefined);
+  assert.equal(editor.value, source);
+  assert.ok(!f.calls.some(call => call.action === 'latex_write'));
+  f.ui.dispose();
+});
+
 test('native note and shortcut insert one comment line and preserve the selected prose', async () => {
   const f = await fixture();
   const editor = f.ids.get('latex-editor');

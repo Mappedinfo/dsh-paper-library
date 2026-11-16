@@ -83,3 +83,12 @@ test('saved bilingual terms supply local spell suggestions and terminology remin
   const ordinary = checkSpelling('Humand mobility genration.', 100, glossary)
   assert.equal(spellingSuggestions(ordinary.items.at(-1), glossary).suggestions.includes('generation'), true)
 })
+
+test('custom spellings and manual terms without meanings are accepted across case variants', async () => {
+  const window = {}, bundle = await readFile(new URL('../lib/latex-spelling.js', import.meta.url), 'utf8')
+  vm.runInNewContext(bundle, { window })
+  const { buildGlossary, checkSpelling } = window.PaperLatexSpelling
+  const glossary = buildGlossary([{ term: 'GeoGraph', meaning: '' }])
+  const words = checkSpelling('spok uses GeoGraph and geogrpah.', 100, glossary, new Set(['spok']))
+  assert.deepEqual(Array.from(words.items, item => item.word), ['geogrpah'])
+})
