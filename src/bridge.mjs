@@ -10,7 +10,7 @@ import { arxivID, isDirectPDFURL, normalizeDOI, publicationCandidates, resolveAn
 import { bibliographicMetadata, importPDF } from './import-pdf.mjs';
 import { createTranslationServerClient } from './translation-server.mjs';
 import { resourcePolicyFor } from './resource-policy.mjs';
-import { workerScheduler } from './worker-scheduler.mjs';
+import { createWorkerScheduler, workerScheduler } from './worker-scheduler.mjs';
 import { revealPDF } from './reveal-pdf.mjs';
 import { apaCopyReadiness } from './citations.mjs';
 import { lookupVenueRanking } from './venue-rankings.mjs';
@@ -28,7 +28,7 @@ const externalActions = new Set(['external_status','external_scan','external_pru
 // LaTeX projects edit the reader's own folder: writes are revision-checked and
 // compiling runs their local latexmk, so every action stays behind this list.
 export const LATEX_RETRIEVAL_ACTIONS = new Set(['latex_retrieval_list', 'latex_search', 'latex_retrieval_read', 'latex_pdf_text']);
-const latexActions = new Set(['latex_git_status','latex_git_commit','latex_git_push','latex_project_create','latex_project_list','latex_project_get','latex_project_update','latex_project_archive','latex_project_restore','latex_project_link_reading','latex_version_list','latex_version_get','latex_version_pdf_pages','latex_version_pdf_page','latex_version_read','latex_version_review','latex_version_review_export','latex_tree',...LATEX_RETRIEVAL_ACTIONS,'latex_source_search','latex_asset_import','latex_table_import','latex_formula_check','latex_outline','latex_media_preview','latex_review_list','latex_review_put','latex_review_export','latex_review_delete','latex_read','latex_lint','latex_write','latex_compile','latex_pdf_pages','latex_pdf_page','latex_pdf_search','latex_history','latex_diff','latex_compare','latex_synctex_edit','latex_synctex_view','latex_clean']);
+const latexActions = new Set(['latex_citation_search','latex_citation_insert','latex_git_status','latex_git_commit','latex_git_push','latex_project_create','latex_project_list','latex_project_get','latex_project_update','latex_project_archive','latex_project_restore','latex_project_link_reading','latex_version_list','latex_version_get','latex_version_pdf_pages','latex_version_pdf_page','latex_version_read','latex_version_review','latex_version_review_export','latex_tree',...LATEX_RETRIEVAL_ACTIONS,'latex_source_search','latex_asset_import','latex_table_import','latex_formula_check','latex_outline','latex_media_preview','latex_review_list','latex_review_put','latex_review_export','latex_review_delete','latex_read','latex_lint','latex_write','latex_compile','latex_pdf_pages','latex_pdf_page','latex_pdf_search','latex_history','latex_diff','latex_compare','latex_synctex_edit','latex_synctex_view','latex_clean']);
 
 const libraryActions = new Set(['resource_list','resource_export','dataset_import','dataset_put','dataset_get','dataset_archive','dataset_restore','dataset_release_put','dataset_release_get','dataset_release_list','dataset_link_put','dataset_candidate_confirmed','dataset_candidate_matches','dataset_candidate_commit','dataset_link_list','dataset_link_delete','dataset_asset_put','dataset_asset_list','dataset_asset_preview','dataset_graph_promote','knowledge_source_put','knowledge_source_get','knowledge_source_check','knowledge_source_list','knowledge_draft_put','knowledge_draft_get','knowledge_draft_list','knowledge_draft_review','knowledge_draft_lint','knowledge_note_put','knowledge_note_get','knowledge_note_list','knowledge_export']);
 /** Every action the reader bridge admits, grouped by the module that owns it.
@@ -76,7 +76,14 @@ function enqueueImport(request,options) {
   return result;
 }
 
+const gitWorkerSymbol = Symbol.for('mappedinfo.paper-library.git-worker.v1');
+const gitWorkerScheduler = globalThis[gitWorkerSymbol] ||= createWorkerScheduler({ maxQueued: 4 });
+const gitMutation = new Set(['latex_git_commit', 'latex_git_push']);
+
 export async function core(request, options = {}) {
+  if (gitMutation.has(request.action)) {
+    return gitWorkerScheduler.schedule(({ signal }) => runWorker(request, { ...options, signal }), { signal: options.signal });
+  }
   const documentAction = /^document_element/.test(request.action || '');
   const resourcePolicy = documentAction ? await resourcePolicyFor(options) : null;
   options = {...options, ...(resourcePolicy?{resourcePolicy}: {})};
@@ -199,6 +206,8 @@ function citationJob(request, options) {
 }
 
 function workerTimeout(request) {
+  if (request.action === 'latex_git_commit') return 360000;
+  if (request.action === 'latex_git_push') return 240000;
   if (['catalog_text_search', 'catalog_search_prepare'].includes(request.action)) return 15000;
   if (request.action === 'annotation_favorites_list' && request.view === 'notes') return 15000;
   if (['paper_visual_read','paper_text_find', 'paper_text_search', 'paper_text_read'].includes(request.action)) return 15000;
@@ -757,9 +766,60 @@ export function splitFeedbackReplies(text, annotations) {
   return { replies, missing: ids.filter(id => !seen.has(id)) };
 }
 
+function citationIdentityMatches(item, local) {
+  const doi = value => String(value || '').trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '').toLowerCase();
+  const paperDoi = doi(item.DOI), localDoi = doi(local.DOI);
+  if (paperDoi && localDoi) return paperDoi === localDoi;
+  const normalize = value => String(value || '').normalize('NFKD').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const title = normalize(item.title);
+  if (!title || title !== normalize(local.title)) return false;
+  const author = value => normalize(value?.author?.[0]?.family || value?.author?.[0]?.literal);
+  const paperAuthor = author(item), localAuthor = author(local);
+  return !paperAuthor || !localAuthor || paperAuthor === localAuthor;
+}
+
+async function insertLatexCitation(request, options) {
+  const { id, paper_id, citekey, bibliography, expected_root, expected_binding_generation } = request;
+  if (typeof id !== 'string' || !/^lt-[0-9a-f]{12}$/.test(id) ||
+      typeof paper_id !== 'string' || !paper_id || paper_id.length > 160 ||
+      typeof citekey !== 'string' || !citekey || citekey.length > 160 ||
+      (bibliography !== undefined && (typeof bibliography !== 'string' || !bibliography || bibliography.length > 500))) {
+    throw new Error('请选择有效的文献引用及项目书目。');
+  }
+  if (typeof expected_root !== 'string' || !Number.isSafeInteger(expected_binding_generation)) {
+    throw new Error('请重新打开当前 LaTeX 项目后插入引用。');
+  }
+  const binding = { id, expected_root, expected_binding_generation };
+  const item = await core({ action: 'get', id: paper_id }, options);
+  if (item.citekey !== citekey) throw new Error('Paper Library 的引用键已变化，请重新搜索。');
+  for (let attempt = 0; ; attempt++) {
+    const snapshot = await core({ action: 'latex_citation_sources', ...binding }, options);
+    const { resources, linked } = snapshot;
+    const matches = await citationJob({ action: 'latex-citation-check', citekey, resources }, options);
+    if (matches.length) {
+      const local = matches[0];
+      if (matches.length > 1 || local.citekey !== citekey || !citationIdentityMatches(item, local)) {
+        throw new Error(`项目书目中已有重名或无法确认身份的引用键「${citekey}」。请先核对书目条目。`);
+      }
+      const target = resources.find(resource => resource.path === local.path);
+      return { citekey, path: local.path, added: false, linked, resource: target.resource };
+    }
+    if (!bibliography && resources.length > 1) return { choices: resources.map(resource => resource.path) };
+    const target = bibliography ? resources.find(resource => resource.path === bibliography) : resources[0];
+    if (!target) throw new Error('所选书目已不在当前编译主文件的引用范围内，请重新选择。');
+    const { text } = await citationJob({ action: 'cite', items: [item], format: target.format }, options);
+    try {
+      return await core({ action: 'latex_citation_append', ...binding, path: target.path, version: snapshot.version, entry: text, citekey }, options);
+    } catch (error) {
+      if (attempt || error.code !== 'LATEX_CITATION_CHANGED') throw error;
+    }
+  }
+}
+
 export async function dispatch(request, options = {}) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('请求必须是 JSON 对象。');
   const { library: ignoredLibrary, python: ignoredPython, ...safe } = request;
+  if (safe.action === 'latex_citation_insert') return insertLatexCitation(safe, options);
   if (safe.action === 'citation_claim_extract') {
     if (typeof options.citationClaims !== 'function') throw Object.assign(new Error('提取引用描述需要已配置的模型。'), { code: 'CITATION_MODEL_REQUIRED', status: 409 });
     return options.citationClaims(safe, { signal: options.signal });

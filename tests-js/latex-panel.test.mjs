@@ -473,13 +473,41 @@ test('source review displays only verified current anchors using UTF-16 offsets'
   f.ui.dispose();
 });
 
+test('Paper Library picker waits for bibliography choice before inserting the citation', async () => {
+  const item = { id: 'p-1', citekey: 'Example2022', title: 'Synthetic title', authors: ['A. Example'], year: 2022 };
+  const f = await fixture((action, args) => {
+    if (action === 'latex_citation_search') return { items: [item] };
+    if (action === 'latex_citation_insert') return args.bibliography
+      ? { path: args.bibliography, citekey: item.citekey, added: true, linked: true }
+      : { choices: ['paper.bib', 'local.bib'] };
+  });
+  const editor = f.ids.get('latex-editor');
+  editor.setSelectionRange(0, 0);
+  await f.ids.get('latex-insert-citation').dispatch('click'); await tick();
+  const dialog = f.ids.get('latex-citation-dialog');
+  const select = label => dialog.querySelectorAll('button').find(node => node.textContent.startsWith(label));
+  await select(item.title).dispatch('click'); await tick();
+  assert.equal(editor.value, 'main.tex\nsecond line');
+  assert.equal(dialog.open, true);
+  await select('local.bib').dispatch('click'); await tick();
+  assert.equal(editor.value, '\\cite{Example2022}main.tex\nsecond line');
+  assert.equal(dialog.open, false);
+  const copy = f.calls.filter(call => call.action === 'latex_citation_insert');
+  assert.equal(copy[1].bibliography, 'local.bib');
+  assert.equal(copy[1].paper_id, item.id);
+  f.ui.dispose();
+});
+
 test('Git toolbar detects the project and requires explicit file selection and branch confirmation', async () => {
-  const oid = 'a'.repeat(40);
+  const oid = 'a'.repeat(40); let attempts = 0;
   const f = await fixture((action) => {
     if (action === 'latex_git_status') return { available: true, branch: 'main', repository: '/synthetic/repo', scope: 'manuscript',
       changes: [{ path: 'main.tex', status: ' M' }], change_count: 1, history: [], version: 'state',
       push_version: 'push-state', upstream: { ready: true, remote: 'origin', branch: 'main', destinations: ['example.invalid/repo'], ahead: 1, behind: 0, outgoing: [] } };
-    if (action === 'latex_git_commit') return { head: oid };
+    if (action === 'latex_git_commit') {
+      if (++attempts === 1) throw Error('Git 提交超过时间限制');
+      return { head: oid };
+    }
     if (action === 'latex_git_push') return { head: oid, remote: 'origin', branch: 'main' };
   });
   const open = f.ids.get('latex-git-open');
@@ -487,15 +515,22 @@ test('Git toolbar detects the project and requires explicit file selection and b
   await open.dispatch('click'); await tick();
   const dialog = f.ids.get('latex-git-dialog');
   const button = label => dialog.querySelectorAll('button').find(node => node.textContent === label);
-  const [file, message, confirm] = dialog.querySelectorAll('input');
+  const [all, file, message, confirm] = dialog.querySelectorAll('input');
   assert.equal(button('提交所选文件').disabled, true);
   assert.equal(button('推送').disabled, true);
-  file.checked = true; message.value = 'Synthetic update'; message.oninput();
+  all.checked = true; await all.dispatch('change'); assert.equal(file.checked, true);
+  message.value = 'Synthetic update'; message.oninput();
   assert.equal(button('提交所选文件').disabled, false);
   await button('提交所选文件').dispatch('click'); await tick();
+  const [retryAll, retryFile, retryMessage] = dialog.querySelectorAll('input');
+  assert.equal(retryAll.checked, true); assert.equal(retryFile.checked, true);
+  assert.equal(retryMessage.value, 'Synthetic update');
+  assert.equal(button('提交所选文件').disabled, false);
+  await button('提交所选文件').dispatch('click'); await tick();
+  assert.equal(dialog.querySelectorAll('input')[1].checked, false);
   const commit = f.calls.find(call => call.action === 'latex_git_commit');
   assert.deepEqual(Array.from(commit.paths), ['main.tex']); assert.equal(commit.expected_version, 'state');
-  const nextConfirm = dialog.querySelectorAll('input')[2];
+  const nextConfirm = dialog.querySelectorAll('input')[3];
   assert.notEqual(nextConfirm, confirm);
   nextConfirm.checked = true; await nextConfirm.dispatch('change');
   await button('推送').dispatch('click'); await tick();

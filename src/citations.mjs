@@ -85,7 +85,7 @@ export async function cite(items, format = 'apa') {
   if (new Set(data.map(i => i.id)).size !== data.length) throw new Error('引用键重复，请先编辑为唯一引用键。');
   if (format === 'csl-json') return { text: JSON.stringify(data, null, 2), filename: 'references.json', mime: 'application/json' };
   const { CSL, Cite, plugins, style, locale } = await load();
-  if (format === 'biblatex') {
+  if (format === 'biblatex' || format === 'bibtex') {
     for(const item of data) if(!/^[^\s,{}\\%#"'=()]+$/u.test(item.id)) throw new Error(`引用键含 BibLaTeX 不支持的字符，请先编辑：${item.id}`);
     const bibliography = new Cite(data);
     const manualIds = new Set(data.filter(isManual).map(item => item.id));
@@ -93,7 +93,7 @@ export async function cite(items, format = 'apa') {
     if (manualIds.size) {
       // Citation.js maps CSL reports to @report. Restore the BibTeX manual
       // type after field conversion and reuse its TeX serializer.
-      const entries = bibliography.format('biblatex', { format: 'object' });
+      const entries = bibliography.format(format, { format: 'object' });
       for (const entry of entries) {
         if (!manualIds.has(entry.label)) continue;
         entry.type = 'manual';
@@ -106,7 +106,7 @@ export async function cite(items, format = 'apa') {
       const { format: formatEntries } = await import('@citation-js/plugin-bibtex/lib/output/bibtex.js');
       text = formatEntries(entries, plugins.dict.get('text'));
     } else {
-      text = bibliography.format('biblatex', { format: 'text' });
+      text = bibliography.format(format, { format: 'text' });
     }
     return { text, filename: 'references.bib', mime: 'application/x-bibtex' };
   }

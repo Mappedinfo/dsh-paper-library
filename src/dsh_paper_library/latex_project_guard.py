@@ -7,9 +7,9 @@ LOCK_WAIT_SECONDS = 30
 
 
 @contextmanager
-def project_lock(library, project_id, *, compiling=False, wait=LOCK_WAIT_SECONDS):
+def project_lock(library, project_id, *, compiling=False, git=False, wait=LOCK_WAIT_SECONDS):
     # project_id is validated by the caller before it becomes a filename.
-    suffix = "-build" if compiling else ""
+    suffix = "-build" if compiling else "-git" if git else ""
     lock = FileLock(library.root / f".latex-{project_id}{suffix}.lock", timeout=wait,
                     mode=0o600, fallback_to_soft=False, preserve_lock_file=True)
     try:

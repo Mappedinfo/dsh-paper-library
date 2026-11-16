@@ -1,12 +1,13 @@
 /** Manual build version through the shared worker, bridge and HTTP preview. */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, stat, chmod } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { setTimeout as delay } from 'node:timers/promises'
 import { dispatch } from '../src/bridge.mjs'
 import { createFetchHandler } from '../src/http.mjs'
 
@@ -91,7 +92,23 @@ test('registered synthetic project uses Git worktree actions through HTTP', asyn
   const status = await post('latex_git_status', { id })
   assert.equal(status.scope, '.')
   assert.deepEqual(status.changes.map(item => item.path), ['main.tex'])
-  const committed = await post('latex_git_commit', { id, paths: ['main.tex'], message: 'Scoped update', expected_version: status.version })
+  const hooks = join(root, '.git', 'hooks'), preCommit = join(hooks, 'pre-commit')
+  await writeFile(preCommit, '#!/bin/sh\ntouch .git/fixture-hook-started\nwhile [ ! -e .git/fixture-hook-release ]; do sleep 0.1; done\n')
+  await chmod(preCommit, 0o755)
+  const pendingCommit = post('latex_git_commit', { id, paths: ['main.tex'], message: 'Scoped update', expected_version: status.version })
+  let entered = false
+  try {
+    for (let attempt = 0; attempt < 100 && !entered; attempt++) {
+      entered = await stat(join(root, '.git', 'fixture-hook-started')).then(() => true, () => false)
+      if (!entered) await delay(25)
+    }
+    assert.equal(entered, true, 'Git is waiting for the repository hook')
+    const live = await Promise.race([post('latex_git_status', { id }), delay(3000, null, { ref: false })])
+    assert.equal(live?.head, status.head, 'read requests finish before a waiting Git mutation')
+  } finally {
+    await writeFile(join(root, '.git', 'fixture-hook-release'), '')
+  }
+  const committed = await pendingCommit
   const outgoing = await post('latex_git_status', { id })
   assert.equal(outgoing.upstream.ahead, 1)
   const pushed = await post('latex_git_push', { id, expected_version: outgoing.push_version })

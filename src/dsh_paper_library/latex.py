@@ -464,10 +464,10 @@ def lint(library, id=None, mode="editing", main_path=None, paths=None, include_a
     return {"id": row["id"], **lint_project(Path(row["root"]), row["main_path"] if main_path is None else main_path, mode, paths)}
 
 
-def _atomic_write(destination: Path, body: str):
+def _atomic_write(destination: Path, body: str, *, newline=None):
     descriptor, temporary = tempfile.mkstemp(prefix=".latex-write-", suffix=".tmp", dir=destination.parent)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline=newline) as handle:
             handle.write(body)
             handle.flush()
             os.fsync(handle.fileno())
@@ -479,7 +479,7 @@ def _atomic_write(destination: Path, body: str):
 
 
 
-def write(library, id=None, path=None, content=None, expected_revision=None, origin="reader", include_archived=False):
+def write(library, id=None, path=None, content=None, expected_revision=None, origin="reader", include_archived=False, *, preserve_newlines=False):
     row = _project(library, id, include_archived)
     root = Path(row["root"])
     absolute, relative = _inside(root, path, "文件路径")
@@ -492,7 +492,8 @@ def write(library, id=None, path=None, content=None, expected_revision=None, ori
     if absolute.exists():
         if not absolute.is_file():
             raise ValueError("目标不是普通文件")
-        current_body = absolute.read_text(encoding="utf-8", errors="replace")
+        with absolute.open(encoding="utf-8", errors="replace", newline="" if preserve_newlines else None) as handle:
+            current_body = handle.read()
         current = _digest(current_body)
         if expected_revision is not None and expected_revision != current:
             raise LatexConflict({"path": relative, "revision": current, "content": current_body if len(current_body) <= MAX_FILE_BYTES else None})
@@ -505,7 +506,7 @@ def write(library, id=None, path=None, content=None, expected_revision=None, ori
         previous = None
     if previous is not None:
         _remember(library, row["id"], relative, previous, "before-write")
-    _atomic_write(absolute, content)
+    _atomic_write(absolute, content, newline="" if preserve_newlines else None)
     revision = _digest(content)
     _remember(library, row["id"], relative, content, origin)
     library.db.execute("UPDATE latex_projects SET modified=? WHERE id=?", (now(), row["id"]))
@@ -1046,10 +1047,13 @@ def clean(library, id=None, include_archived=False):
     return {"id": row["id"], "removed": sorted(removed)[:500], "removed_count": len(removed), "kept": sorted(kept)[:200], "limits": {"listed": 500}}
 
 
-from . import latex_versions, latex_assets, latex_retrieval, latex_pdf_search, latex_git
+from . import latex_versions, latex_assets, latex_retrieval, latex_pdf_search, latex_git, latex_citation
 from .latex_formulas import latex_formula_check
 
 ACTIONS = {
+    "latex_citation_search": (latex_citation.search, ("query",)),
+    "latex_citation_sources": (latex_citation.sources, ("id",)),
+    "latex_citation_append": (latex_citation.append, ("id", "path", "version", "entry", "citekey")),
     "latex_git_status": (latex_git.status, ("id",)),
     "latex_git_commit": (latex_git.commit, ("id", "paths", "message", "expected_version")),
     "latex_git_push": (latex_git.push, ("id", "expected_version")),
@@ -1120,15 +1124,23 @@ def dispatch(library, request):
         if "expected_binding_generation" in request and (isinstance(request["expected_binding_generation"], bool) or not isinstance(request["expected_binding_generation"], int)):
             raise ValueError("项目绑定已变化；请重新打开项目。未保存的内容仍在当前编辑器中。")
         check_binding(row, request.get("expected_root"), request.get("expected_binding_generation"))
+    if action in {"latex_git_commit", "latex_git_push"}:
+        with project_lock(library, project_id, git=True, wait=0):
+            verify()
+            return function(library, **args)
     if action == "latex_compile":
         with project_lock(library, project_id, compiling=True):
             verify()
             return function(library, **args)
     if action == "latex_project_update":
-        with project_lock(library, project_id):
-            with project_lock(library, project_id, compiling=True, wait=0):
-                verify()
-                return function(library, **args)
+        with (project_lock(library, project_id), project_lock(library, project_id, compiling=True, wait=0),
+              project_lock(library, project_id, git=True, wait=0)):
+            verify()
+            return function(library, **args)
+    if action == "latex_citation_append":
+        with project_lock(library, project_id), project_lock(library, project_id, compiling=True, wait=0):
+            verify()
+            return function(library, **args)
     with project_lock(library, project_id):
         verify()
         return function(library, **args)

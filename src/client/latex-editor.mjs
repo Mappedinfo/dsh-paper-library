@@ -8,11 +8,49 @@ import { stex } from '@codemirror/legacy-modes/mode/stex'
 import { tags } from '@lezer/highlight'
 
 // These are suggestions, not a claim that a command is valid in every project.
-const commands = ['documentclass', 'usepackage', 'begin', 'end', 'section', 'subsection', 'subsubsection', 'label', 'ref', 'eqref', 'cite', 'citep', 'citet', 'textbf', 'textit', 'emph', 'footnote', 'include', 'input', 'includegraphics', 'caption', 'item', 'frac', 'sum']
+const citeCommands = ['cite', 'citep', 'citet', 'parencite', 'textcite', 'autocite', 'footcite', 'supercite', 'smartcite', 'nocite']
+const commands = ['documentclass', 'usepackage', 'begin', 'end', 'section', 'subsection', 'subsubsection', 'label', 'ref', 'eqref', ...citeCommands, 'textbf', 'textit', 'emph', 'footnote', 'include', 'input', 'includegraphics', 'caption', 'item', 'frac', 'sum']
 function latexCompletion(context) {
   const word = context.matchBefore(/\\[A-Za-z]*/)
   if (!word || (!context.explicit && word.from === word.to)) return null
   return { from: word.from, options: commands.map(command => ({ label: `\\${command}`, type: 'keyword' })), validFor: /\\[A-Za-z]*/ }
+}
+
+const citationStart = new RegExp(String.raw`\\(?:${citeCommands.join('|')})\*?\s*(?:\[[^\]\r\n]*\]\s*){0,2}\{([^{}\r\n%]*)$`)
+function citationRange(state, pos) {
+  const line = state.doc.lineAt(pos)
+  const before = line.text.slice(0, pos - line.from)
+  if (/(?:^|[^\\])(?:\\\\)*%/.test(before)) return null
+  const match = before.match(citationStart)
+  if (!match) return null
+  let command = match.index
+  while (command > 0 && before[command - 1] === '\\') command--
+  if ((match.index - command) % 2) return null
+  const term = match[1].slice(match[1].lastIndexOf(',') + 1).trimStart()
+  const after = line.text.slice(pos - line.from)
+  const rest = after.match(/^[^\s{},%]*(?=\s*[,}])/)?.[0] || ''
+  return { from: pos - term.length, to: pos + rest.length, query: term.trimEnd(),
+    close: !/^\s*[,}]/.test(after.slice(rest.length)) }
+}
+
+function libraryCompletion(context, citation) {
+  const range = citation && citationRange(context.state, context.pos)
+  if (!range) return latexCompletion(context)
+  if (range.query.length > 160) return null
+  const controller = new AbortController()
+  context.addEventListener('abort', () => controller.abort(), { onDocChange: true })
+  return citation.search(range.query, controller.signal).then(items => {
+    if (controller.signal.aborted || !items.length) return null
+    return { from: range.from, filter: false, options: items.map(item => ({
+      label: item.citekey, detail: [item.title, item.year].filter(Boolean).join(' · '),
+      info: item.authors?.length ? item.authors.join(' · ') : undefined,
+      section: 'Paper Library', type: 'text',
+      apply(view) {
+        const target = citationRange(view.state, view.state.selection.main.head)
+        if (target) citation.pick(item, target)
+      },
+    })) }
+  }).catch(() => null)
 }
 
 const theme = EditorView.theme({
@@ -65,7 +103,7 @@ function annotationMarks(mapChanges = false) {
 const spelling = annotationMarks(), review = annotationMarks(true)
 
 /** Provide the workspace's existing textarea contract while CodeMirror owns input. */
-function create(textarea, container) {
+function create(textarea, container, citation) {
   const editable = new Compartment()
   let disabled = false
   let silent = false
@@ -80,7 +118,7 @@ function create(textarea, container) {
       'replaced match on line $': '已替换第 $ 行的匹配', 'replaced $ matches': '已替换 $ 处匹配',
       'No completions': '没有补全建议',
     }),
-    autocompletion({ override: [latexCompletion] }),
+    autocompletion({ override: [context => libraryCompletion(context, citation)] }),
     keymap.of([...completionKeymap, ...searchKeymap, ...defaultKeymap, ...historyKeymap]),
     EditorView.contentAttributes.of({ 'aria-label': 'LaTeX 源文件内容', spellcheck: 'false' }),
     editable.of([EditorState.readOnly.of(false), EditorView.editable.of(true)]),
@@ -121,7 +159,7 @@ function create(textarea, container) {
     if (!marks.length && view.state.field(layer.field) === Decoration.none) return
     view.dispatch({ effects: layer.set.of(Decoration.set(marks, true)) })
   }
-  return { view, cursorLine: () => view.state.doc.lineAt(view.state.selection.main.head).number, openSearch: () => openSearchPanel(view), setProjectSearchMatches(ranges) {
+  return { view, citationRange: () => citationRange(view.state, view.state.selection.main.head), cursorLine: () => view.state.doc.lineAt(view.state.selection.main.head).number, openSearch: () => openSearchPanel(view), setProjectSearchMatches(ranges) {
     const length = view.state.doc.length
     const marks = ranges.filter(({ from, to }) => Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to > from && to <= length)
       .map(({ from, to, active }) => Decoration.mark({ class: active ? 'latex-search-source-hit active' : 'latex-search-source-hit' }).range(from, to))

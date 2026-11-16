@@ -7,14 +7,18 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
+import threading
 from urllib.parse import urlsplit
 
 from filelock import FileLock, Timeout
 
 MAX_FILES = 200
 MAX_OUTPUT = 512 * 1024
+COMMIT_TIMEOUT = 300
+PUSH_TIMEOUT = 180
 REPO_ENV = {
     "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
     "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
@@ -31,24 +35,69 @@ def _git(cwd, *args, allowed=(0,), timeout=8):
     env = {key: value for key, value in os.environ.items() if key not in REPO_ENV}
     env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="Never", LC_ALL="C")
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        command = [binary, "--literal-pathspecs", "-c", "core.fsmonitor=false", *args]
+        separate_group = os.name == "posix"
+        previous = None
+        if separate_group and threading.current_thread() is threading.main_thread():
+            previous = signal.signal(signal.SIGTERM, _interrupted)
         try:
-            result = subprocess.run([binary, "--literal-pathspecs", "-c", "core.fsmonitor=false", *args], cwd=cwd, env=env,
-                                    stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, timeout=timeout)
-        except subprocess.TimeoutExpired as exc:
-            raise ValueError("Git 操作超时，请刷新核对结果。") from exc
+            with subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                  stdout=stdout, stderr=stderr, start_new_session=separate_group) as process:
+                try:
+                    code = process.wait(timeout=timeout)
+                except BaseException as exc:
+                    _stop_git(process, separate_group)
+                    if not isinstance(exc, subprocess.TimeoutExpired):
+                        raise
+                    action = {"commit": "提交", "push": "推送"}.get(args[0], "读取")
+                    detail = _diagnostic(stdout, stderr)
+                    raise ValueError(f"Git {action}超过 {timeout} 秒，请刷新核对结果。"
+                                     + (f" 最后输出：{detail}" if detail else "")) from exc
+        finally:
+            if previous is not None:
+                signal.signal(signal.SIGTERM, previous)
         stdout.seek(0)
         captured = stdout.read(MAX_OUTPUT + 1)
         if len(captured) > MAX_OUTPUT:
             raise ValueError("Git 返回的改动列表超过读取上限。")
-        if result.returncode not in allowed:
-            stderr.seek(0)
-            message = stderr.read(4096).decode("utf-8", "replace")
-            if not message:
-                message = captured[:1024].decode("utf-8", "replace")
-            # Ignore any printed URL credentials or query strings in command diagnostics.
-            message = re.sub(r"[a-zA-Z][\w+.-]*://[^\s'\"]+", lambda m: _destination(m[0]), message)
-            raise ValueError(message.strip()[:800] or f"Git 操作失败（{result.returncode}）。")
-        return result.returncode, captured
+        if code not in allowed:
+            message = _diagnostic(stdout, stderr)
+            raise ValueError(message or f"Git 操作失败（{code}）。")
+        return code, captured
+
+
+def _interrupted(signum, _):
+    raise SystemExit(128 + signum)
+
+
+def _stop_git(process, separate_group):
+    try:
+        if separate_group:
+            os.killpg(process.pid, signal.SIGTERM)
+        else:
+            process.terminate()
+        process.wait(timeout=2)
+    except ProcessLookupError:
+        pass
+    except subprocess.TimeoutExpired:
+        try:
+            if separate_group:
+                os.killpg(process.pid, signal.SIGKILL)
+            else:
+                process.kill()
+        except ProcessLookupError:
+            pass
+
+
+def _diagnostic(stdout, stderr):
+    output = []
+    for stream in (stdout, stderr):
+        length = stream.seek(0, os.SEEK_END)
+        stream.seek(max(0, length - 1600))
+        output.append(stream.read(1600).decode("utf-8", "replace").strip())
+    message = "\n".join(part for part in output if part)
+    # Strip URL credentials and query strings from command diagnostics.
+    return re.sub(r"[a-zA-Z][\w+.-]*://[^\s'\"]+", lambda m: _destination(m[0]), message)[-1200:]
 
 
 def _text(cwd, *args, allowed=(0,)):
@@ -194,8 +243,8 @@ def commit(library, id, paths, message, expected_version):
         if new:
             _git(repo, "add", "--intent-to-add", "--", *new)
         try:
-            _git(repo, "commit", "--only", "-m", message.strip(), "--", *selected, timeout=25)
-        except ValueError:
+            _git(repo, "commit", "--only", "-m", message.strip(), "--", *selected, timeout=COMMIT_TIMEOUT)
+        except (ValueError, SystemExit):
             # Remove the staging entries we introduced on ordinary commit failure.
             if new and _text(repo, "rev-parse", "--verify", "HEAD", allowed=(0, 128)) == (state["head"] or ""):
                 _git(repo, "rm", "--cached", "--force", "--ignore-unmatch", "--", *new)
@@ -214,7 +263,7 @@ def push(library, id, expected_version):
             raise ValueError("分支或推送目标已变化，请刷新并重新核对。")
         remote, ref, _, _ = target
         _git(repo, "push", "--porcelain", "--no-follow-tags", "--recurse-submodules=no", "--",
-             remote, f"{state['head']}:{ref}", timeout=40)
+             remote, f"{state['head']}:{ref}", timeout=PUSH_TIMEOUT)
         return {"head": state["head"], "remote": remote, "branch": state["upstream"]["branch"]}
 
     return _mutation(library, id, execute)

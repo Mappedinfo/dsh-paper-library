@@ -122,7 +122,7 @@ window.PaperLatexWorkspace = (() => {
     const gitMessageLabel = make('label', '', '提交说明'); gitMessageLabel.append(gitMessage);
     const gitHead = make('header', 'latex-git-actions'); gitHead.append(gitHeading, gitRefresh, gitClose);
     gitDialog.append(gitHead, gitStatus, gitContent);
-    let gitSequence = 0, gitBusy = false;
+    let gitSequence = 0, gitBusy = false, gitSelected = new Set();
     gitClose.addEventListener('click', () => gitDialog.close());
     gitRefresh.addEventListener('click', () => void refreshGit());
     gitOpen.addEventListener('click', () => { gitDialog.showModal(); void refreshGit(); });
@@ -130,6 +130,7 @@ window.PaperLatexWorkspace = (() => {
     function gitActions(disabled) {
       gitBusy = disabled; gitRefresh.disabled = gitClose.disabled = disabled;
       for (const button of gitContent.querySelectorAll('button')) button.disabled = disabled || button.dataset.blocked === 'true';
+      for (const input of gitContent.querySelectorAll('input')) input.disabled = disabled || input.dataset.blocked === 'true';
       gitDialog.setAttribute('aria-busy', String(disabled));
     }
     gitDialog.addEventListener('cancel', event => { if (gitBusy) event.preventDefault(); });
@@ -141,8 +142,11 @@ window.PaperLatexWorkspace = (() => {
       const filesBox = make('fieldset', 'latex-git-files');
       filesBox.append(make('legend', '', `项目改动 · ${state.change_count}`));
       const picks = [];
+      const all = make('input'); all.type = 'checkbox'; all.id = 'latex-git-select-all';
+      const allLabel = make('label', 'latex-git-file latex-git-select-all');
+      filesBox.append(allLabel);
       for (const change of state.changes) {
-        const box = make('input'); box.type = 'checkbox';
+        const box = make('input'); box.type = 'checkbox'; box.checked = gitSelected.has(change.path);
         const row = make('label', 'latex-git-file');
         const code = make('code', '', change.status.trim()); code.title = 'Git 改动状态';
         row.append(box, code, make('span', '', change.path)); filesBox.append(row);
@@ -150,12 +154,18 @@ window.PaperLatexWorkspace = (() => {
       }
       if (!picks.length) filesBox.append(make('p', 'small muted', '当前项目没有可提交的改动。'));
       if (state.change_count > picks.length) filesBox.append(make('p', 'small muted', '列表仅显示可选的前 200 项。'));
+      all.dataset.blocked = String(!picks.length); all.disabled = !picks.length; allLabel.hidden = !picks.length;
+      allLabel.append(all, make('strong', '', state.change_count > picks.length ? '全选可见文件' : '全选'));
       const commit = make('button', 'button primary', '提交所选文件'); commit.type = 'button';
       const syncCommit = () => {
-        commit.dataset.blocked = String(!state.branch || !gitMessage.value.trim() || !picks.some(({ box }) => box.checked));
+        gitSelected = new Set(picks.filter(({ box }) => box.checked).map(({ path }) => path));
+        all.checked = picks.length > 0 && gitSelected.size === picks.length;
+        all.indeterminate = gitSelected.size > 0 && gitSelected.size < picks.length;
+        commit.dataset.blocked = String(!state.branch || !gitMessage.value.trim() || !gitSelected.size);
         commit.disabled = gitBusy || commit.dataset.blocked === 'true';
       };
       gitMessage.oninput = syncCommit;
+      all.addEventListener('change', () => { for (const { box } of picks) box.checked = all.checked; syncCommit(); });
       for (const { box } of picks) box.addEventListener('change', syncCommit);
       syncCommit();
       commit.addEventListener('click', () => void applyGit(owner, 'commit', {
@@ -228,9 +238,9 @@ window.PaperLatexWorkspace = (() => {
           if (!await savedBeforeLeaving()) { gitStatus.textContent = '请先解决源码保存问题。'; return; }
           message = '源码已保存。请重新核对此次要提交的文件。';
         } else if (owner === project && !disposed) {
-          gitStatus.textContent = operation === 'commit' ? '正在提交…' : '正在推送…';
+          gitStatus.textContent = operation === 'commit' ? '正在提交，等待仓库检查完成…' : '正在推送，等待远端响应…';
           const response = await api(`latex_git_${operation}`, { id: owner.id, ...args });
-          if (operation === 'commit') gitMessage.value = '';
+          if (operation === 'commit') { gitMessage.value = ''; gitSelected.clear(); }
           message = operation === 'commit' ? `已提交 ${response.head.slice(0, 8)}。` : `已推送 ${response.head.slice(0, 8)} 到 ${response.remote}/${response.branch}。`;
         }
       } catch (error) { message = error.message; }
@@ -379,7 +389,8 @@ window.PaperLatexWorkspace = (() => {
     const formulaCheck = make('button', 'button subtle', '提取并检查公式'); formulaCheck.id = 'latex-formula-check'; formulaCheck.type = 'button';
     const nativeNote = make('button', 'button subtle', '插入原生备注（%）'); nativeNote.id = 'latex-native-note'; nativeNote.type = 'button';
     const todoNote = make('button', 'button subtle', '插入 TODO　⌘/Ctrl+Shift+Enter'); todoNote.id = 'latex-todo-note'; todoNote.type = 'button';
-    sourceToolsMenu.append(nativeNote, todoNote, figureInsert, tableInsert, formulaCheck, make('p', '', '图片拖到源码区或粘贴截图，保存到项目 figures/。表格支持 Markdown、Excel 选区和 .xlsx 文件。'));
+    const sourceCitation = make('button', 'button subtle', '引用 Paper Library 文献'); sourceCitation.id = 'latex-insert-citation'; sourceCitation.type = 'button';
+    sourceToolsMenu.append(sourceCitation, nativeNote, todoNote, figureInsert, tableInsert, formulaCheck, make('p', '', '图片拖到源码区或粘贴截图，保存到项目 figures/。表格支持 Markdown、Excel 选区和 .xlsx 文件。'));
     const formulaHost = make('section', 'latex-formula-panel'); formulaHost.id = 'latex-formula-panel'; formulaHost.hidden = true;
     const spellResults = make('div', 'latex-spelling-results'); spellResults.id = 'latex-spelling-results'; spellResults.hidden = true;
     const spellDetails = make('p', 'latex-spelling-detail'); spellDetails.setAttribute('role', 'status');
@@ -397,7 +408,10 @@ window.PaperLatexWorkspace = (() => {
     const editor = make('textarea'); editor.id = 'latex-editor'; editor.spellcheck = false; editor.autocomplete = 'off'; editor.setAttribute('aria-label', 'LaTeX 源文件内容');
     editorWrap.append(gutter, editor);
     let sourceEditor = null;
-    try { sourceEditor = window.PaperLatexEditor?.create?.(editor, editorWrap) || null; } catch { /* Keep the native textarea usable if the enhanced editor cannot mount. */ }
+    try { sourceEditor = window.PaperLatexEditor?.create?.(editor, editorWrap, {
+      search: searchLibraryCitation,
+      pick: (item, range) => void insertLibraryCitation(item, { ...writingContext(), range }),
+    }) || null; } catch { /* Keep the native textarea usable if the enhanced editor cannot mount. */ }
     if (sourceEditor) { editorWrap.classList.add('latex-codemirror'); gutter.hidden = true; }
     sourceSearch.hidden = !sourceEditor;
     sourceSearch.addEventListener('click', () => sourceEditor?.openSearch());
@@ -739,6 +753,132 @@ window.PaperLatexWorkspace = (() => {
     const formulas = window.PaperLatexFormulas?.create({ host: formulaHost, api, getProject: () => project,
       beforeRefresh: async () => { if (!project || !file || switching) return false; await flush('manual'); await saveQueue; return !dirty && !pendingConflict; },
       onLocate: ({ path, line }) => gotoSource(path, line) });
+    const citationDialog = make('dialog', 'latex-writing-dialog latex-citation-dialog');
+    citationDialog.id = 'latex-citation-dialog'; citationDialog.setAttribute('aria-labelledby', 'latex-citation-heading');
+    const citationHeading = make('h2', '', '引用 Paper Library 文献'); citationHeading.id = 'latex-citation-heading';
+    const citationClose = make('button', 'button subtle', '关闭'); citationClose.type = 'button';
+    const citationHead = make('header', 'latex-git-actions'); citationHead.append(citationHeading, citationClose);
+    const citationQuery = make('input'); citationQuery.type = 'search'; citationQuery.maxLength = 160;
+    citationQuery.placeholder = '引用键、题名、作者或 DOI'; citationQuery.setAttribute('aria-label', '检索 Paper Library 文献');
+    const citationStatus = make('p', 'small'); citationStatus.setAttribute('role', 'status');
+    const citationResults = make('div', 'latex-citation-results');
+    citationDialog.append(citationHead, citationQuery, citationStatus, citationResults); view.append(citationDialog);
+    let citationOwner = null, citationRequest = null, citationTimer, citationBusy = false;
+
+    function canCite(context) {
+      return !context.blocked && /\.(?:tex|ltx)$/i.test(context.path);
+    }
+    function citeHere(target) {
+      const current = writingContext();
+      return !disposed && canCite(current) && current.id === target.id && current.root === target.root
+        && current.binding_generation === target.binding_generation && current.path === target.path && current.content === target.content;
+    }
+    async function searchLibraryCitation(query, signal) {
+      if (!canCite(writingContext())) return [];
+      return (await api('latex_citation_search', { query }, { signal })).items;
+    }
+    function resetCitationDialog() {
+      citationOwner = null;
+      citationRequest?.abort();
+      clearTimeout(citationTimer);
+      if (citationDialog.open) citationDialog.close();
+    }
+    citationClose.addEventListener('click', () => resetCitationDialog());
+    citationDialog.addEventListener('cancel', event => {
+      event.preventDefault();
+      if (!citationBusy) resetCitationDialog();
+    });
+    function openCitationDialog() {
+      if (!citationDialog.open) citationDialog.showModal();
+    }
+    sourceCitation.addEventListener('click', () => {
+      const target = writingContext();
+      if (!canCite(target)) { say('请先在 LaTeX 源文件中选择插入位置。', true); return; }
+      citationOwner = { ...target, range: sourceEditor?.citationRange?.() };
+      closeSourceTools();
+      citationQuery.hidden = false; citationQuery.value = citationOwner.range?.query || '';
+      openCitationDialog();
+      citationQuery.focus();
+      void fillCitationSearch();
+    });
+    citationQuery.addEventListener('input', () => {
+      citationRequest?.abort();
+      clearTimeout(citationTimer);
+      citationTimer = setTimeout(() => void fillCitationSearch(), 220);
+    });
+    async function fillCitationSearch() {
+      const target = citationOwner, request = new AbortController();
+      if (!target || !citationDialog.open) return;
+      citationRequest?.abort(); citationRequest = request;
+      citationResults.textContent = ''; citationStatus.textContent = '检索文献…';
+      try {
+        const items = await searchLibraryCitation(citationQuery.value.trim(), request.signal);
+        if (request.signal.aborted || !citeHere(target) || !citationDialog.open) return;
+        citationStatus.textContent = items.length ? '选中文献即可插入引用。' : '没有匹配的文献。';
+        for (const item of items) {
+          const choice = make('button', 'button subtle latex-citation-choice');
+          choice.type = 'button';
+          choice.append(make('strong', '', item.title || item.citekey),
+            make('small', '', [item.citekey, ...(item.authors || []), item.year].filter(Boolean).join(' · ')));
+          choice.addEventListener('click', () => void insertLibraryCitation(item, target));
+          citationResults.append(choice);
+        }
+      } catch (error) {
+        if (!request.signal.aborted && citationDialog.open) citationStatus.textContent = error.message;
+      }
+    }
+    function setCitationBusy(busy) {
+      citationBusy = busy;
+      citationClose.disabled = citationQuery.disabled = busy;
+      citationDialog.setAttribute('aria-busy', String(busy));
+      for (const button of citationResults.querySelectorAll('button')) button.disabled = busy;
+    }
+    async function insertLibraryCitation(item, target, bibliography) {
+      if (citationBusy || !citeHere(target)) return;
+      setCitationBusy(true);
+      say('正在核对项目书目…');
+      if (citationDialog.open) citationStatus.textContent = '正在核对项目书目…';
+      try {
+        // The bibliography declarations may be in the editor's current draft.
+        if (!await savedBeforeLeaving() || !citeHere(target)) return;
+        clearTimeout(compileTimer);
+        const result = await api('latex_citation_insert', {
+          id: target.id, paper_id: item.id, citekey: item.citekey, ...(bibliography ? { bibliography } : {}),
+        });
+        if (!citeHere(target)) {
+          if (project?.id === target.id && result.added) say(`已补入 ${result.path}。源码已变化，请重新选择插入位置。`, true);
+          return;
+        }
+        if (result.choices) {
+          citationQuery.hidden = true; citationResults.textContent = '';
+          citationStatus.textContent = `选择写入「${item.citekey}」的项目书目。`;
+          for (const path of result.choices) {
+            const option = make('button', 'button subtle latex-citation-choice', path); option.type = 'button';
+            option.addEventListener('click', () => void insertLibraryCitation(item, target, path));
+            citationResults.append(option);
+          }
+          openCitationDialog();
+          citationResults.querySelector('button')?.focus();
+          return;
+        }
+        resetCitationDialog();
+        const range = target.range;
+        const text = range ? result.citekey + (range.close ? '}' : '') : `\\cite{${result.citekey}}`;
+        if (!insertWriting(text, { ...target, selectionStart: range?.from ?? target.selectionEnd, selectionEnd: range?.to ?? target.selectionEnd })) return;
+        const receipt = result.added ? `已补入 ${result.path}` : `已复用 ${result.path}`;
+        const link = result.linked ? '' : `。主文件尚未声明书目，请连接 ${result.resource || result.path} 后编译`;
+        say(`已插入 ${result.citekey} · ${receipt}${link}。`);
+        if (result.created) void loadTree().catch(() => {});
+      } catch (error) {
+        if (citeHere(target)) {
+          if (citationDialog.open) citationStatus.textContent = error.message;
+          say(`引用未插入：${error.message}`, true);
+        }
+      } finally {
+        setCitationBusy(false);
+      }
+    }
+
     function insertNativeNote(prefix) {
       const target = writingContext();
       if (target.blocked || !/\.(?:tex|sty|cls|dtx|ltx)$/i.test(target.path)) {
@@ -1081,7 +1221,7 @@ window.PaperLatexWorkspace = (() => {
       formulas?.clear(); formulas?.close();
       project = projects.find(item => item.id === id) || null;
       if (!project) { await renderEmpty(); return; }
-      gitMessage.value = ''; void refreshGit({ onlyMatch: true });
+      gitMessage.value = ''; gitSelected.clear(); void refreshGit({ onlyMatch: true });
       syncLocationFields();
       resetPdfSource({ kind: 'current' });
       projectSelect.value = project.id;
@@ -2203,7 +2343,7 @@ window.PaperLatexWorkspace = (() => {
         if (disposed || id !== project?.id) return;
         project = result.project; projects = projects.map(item => item.id === id ? project : item);
         chapterScope = null; outlineList.textContent = '';
-        changed = true; syncLocationFields(); void refreshGit({ onlyMatch: true });
+        changed = true; syncLocationFields(); gitSelected.clear(); gitMessage.value = ''; void refreshGit({ onlyMatch: true });
         resetPdfSource({ kind: 'current' });
         errors.textContent = ''; diagnosticsToggle.hidden = true; setDiagnosticsOpen(false);
         reviewer?.reset(); formulas?.clear(); formulas?.close(); pdfBuild = null; updateSyncHint();
@@ -2568,7 +2708,7 @@ window.PaperLatexWorkspace = (() => {
     async function close() {
       if (switching || gitBusy) { say('正在更新项目，请稍候再关闭。', true); return; }
       ++openRequest;
-      clearTimeout(timer); clearTimeout(compileTimer); closeMenu(); if (gitDialog.open) gitDialog.close();
+      clearTimeout(timer); clearTimeout(compileTimer); closeMenu(); if (gitDialog.open) gitDialog.close(); resetCitationDialog();
       cancelAiRun();
       if (!await savedBeforeLeaving(true)) return;
       clearPublicRetrieval();
@@ -2660,7 +2800,7 @@ window.PaperLatexWorkspace = (() => {
           ai: { available: ai.available, proposal: ai.proposal?.id || null },
         }),
       },
-    dispose() { disposed = true; cancelAiRun({ quiet: true }); clearPublicRetrieval(); cancelTranslation(); reviewer?.dispose(); writingTools?.dispose(); formulas?.destroy(); sourceEditor?.destroy(); cancelReads(); clearRendered(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); resizeObserver?.disconnect(); window.removeEventListener('resize', requestResize); window.removeEventListener('beforeunload', protectDraft); document.removeEventListener('selectionchange', pdfSelectionChanged); clearTimeout(timer); clearTimeout(compileTimer); clearTimeout(spellTimer); view.hidden = true; document.body.classList.remove('latex-focused'); },
+    dispose() { disposed = true; resetCitationDialog(); cancelAiRun({ quiet: true }); clearPublicRetrieval(); cancelTranslation(); reviewer?.dispose(); writingTools?.dispose(); formulas?.destroy(); sourceEditor?.destroy(); cancelReads(); clearRendered(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); resizeObserver?.disconnect(); window.removeEventListener('resize', requestResize); window.removeEventListener('beforeunload', protectDraft); document.removeEventListener('selectionchange', pdfSelectionChanged); clearTimeout(timer); clearTimeout(compileTimer); clearTimeout(spellTimer); view.hidden = true; document.body.classList.remove('latex-focused'); },
     };
   }
   return { create };
