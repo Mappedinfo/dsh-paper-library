@@ -20,6 +20,25 @@ function pageNumber(value) {
   return value
 }
 
+function selectionPart(value, rectLimit, textLimit) {
+  if (!Array.isArray(value?.rects) || value.rects.length > rectLimit) throw new Error('阅读选区过大')
+  const rects = value.rects.map(rect => {
+    if (!Array.isArray(rect) || rect.length !== 4 || rect.some(number => !Number.isFinite(number))) throw new Error('阅读选区坐标无效')
+    return [...rect]
+  })
+  return { page: pageNumber(value.page), text: boundedString(value.text, textLimit), rects }
+}
+
+function readerSelection(value, rectLimit, textLimit) {
+  const result = selectionPart(value, rectLimit, textLimit)
+  if (value.segments === undefined) return result
+  if (!Array.isArray(value.segments) || value.segments.length < 2 || value.segments.length > 3) throw new Error('跨页选区最多包含 3 页')
+  const segments = value.segments.map(part => selectionPart(part, 200, 20000))
+  if (segments[0].page !== result.page || segments.at(-1).page - result.page > 2 ||
+      segments.some((part, index) => !part.text.trim() || !part.rects.length || index > 0 && part.page <= segments[index - 1].page)) throw new Error('跨页选区的分段无效')
+  return { ...segments[0], text: boundedString(segments.map(part => part.text).join('\n\n'), 20000), segments }
+}
+
 function linkedParent(value) {
   if (typeof value !== 'string' || !value.trim() || value.length > 160 || /[\x00-\x1f\x7f]/.test(value)) throw new Error('关联手写的批注身份无效')
   return value
@@ -127,13 +146,7 @@ export function readerSnapshot(value) {
     snapshot.panels = {side: panels.side, annotations: panels.annotations === true, metadata: panels.metadata === true, chat: panels.chat === true}
   }
   if (value.readerSelection != null) {
-    const selection=value.readerSelection
-    if (!Array.isArray(selection.rects) || selection.rects.length > 200) throw new Error('阅读选区过大')
-    const rects=selection.rects.map(rect=>{
-      if(!Array.isArray(rect)||rect.length!==4||rect.some(number=>!Number.isFinite(number)))throw new Error('阅读选区坐标无效')
-      return [...rect]
-    })
-    snapshot.readerSelection={page:pageNumber(selection.page),text:boundedString(selection.text,20000),rects}
+    snapshot.readerSelection=readerSelection(value.readerSelection,200,20000)
   }
   if (value.chatContext != null) {
     const context = value.chatContext
@@ -180,13 +193,11 @@ export function readerSnapshot(value) {
       snapshot.annotationDraft.note = note
     }
     if (draft.selection) {
-      const selection = draft.selection
-      if (!Array.isArray(selection.rects) || selection.rects.length > 256) throw new Error('批注选区过大')
-      const rects = selection.rects.map(rect => {
-        if (!Array.isArray(rect) || rect.length !== 4 || rect.some(number => !Number.isFinite(number))) throw new Error('批注选区坐标无效')
-        return [...rect]
-      })
-      snapshot.annotationDraft.selection = { page: pageNumber(selection.page), text: boundedString(selection.text, TEXT_LIMIT), rects }
+      snapshot.annotationDraft.selection = readerSelection(draft.selection, 256, TEXT_LIMIT)
+    }
+    if (draft.batchId !== undefined) {
+      if (!snapshot.annotationDraft.selection?.segments || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(draft.batchId)) throw new Error('跨页批注保存标识无效')
+      snapshot.annotationDraft.batchId = draft.batchId
     }
   }
   if (value.handwritingDraft != null) snapshot.handwritingDraft = handwritingDraft(value.handwritingDraft, snapshot.paperId)

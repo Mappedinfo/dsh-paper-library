@@ -9,10 +9,11 @@ const source=await readFile(new URL('../web/pdf-reader.js',import.meta.url),'utf
 const css=await readFile(new URL('../web/pdf-reader.css',import.meta.url),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const plain=value=>JSON.parse(JSON.stringify(value));
-async function fixture({rotation=0,scale=1,completeRectangle}={}){
+async function fixture({rotation=0,scale=1,completeRectangle,wordsPerPage=[[]]}={}){
   const dom=new JSDOM(`<style>${css}</style><div id="reader"></div>`,{runScripts:'outside-only',pretendToBeVisual:true,url:'http://synthetic.invalid/'});
   const {window}=dom,root=window.document.querySelector('#reader'),calls=[],rectangles=[],selections=[],statuses=[],captured=new Set();
   const page={page:1,width:rotation%180?600:400,height:rotation%180?400:600,rotation};
+  const pages=wordsPerPage.map((_,index)=>({...page,page:index+1}));
   Object.defineProperties(root,{clientWidth:{value:640},clientHeight:{value:500}});
   root.getBoundingClientRect=()=>({left:0,top:0,width:640,height:500,right:640,bottom:500});
   root.setPointerCapture=id=>captured.add(id);root.hasPointerCapture=id=>captured.has(id);root.releasePointerCapture=id=>captured.delete(id);
@@ -21,19 +22,53 @@ async function fixture({rotation=0,scale=1,completeRectangle}={}){
   window.eval(source);
   const ui=window.PaperPDFReader.create({root,getPaper:()=>({id:'synthetic',pdf:'synthetic.pdf'}),api:async(action,args)=>{
     calls.push([action,plain(args)]);assert.equal(action,'page','Rectangle creation does not issue a write API call');
-    return {...page,page_count:1,scale:1,image:'iVBORw0KGgo=',words:[],annotations:[],internal_links:[],layout:{page_count:1,pages:[page]}};
+    return {...pages[args.page-1],page_count:pages.length,scale:1,image:'iVBORw0KGgo=',words:wordsPerPage[args.page-1],annotations:[],internal_links:[],layout:{page_count:pages.length,pages}};
   },onRectangle:(value,options)=>{rectangles.push([plain(value),plain(options)]);return completeRectangle?.();},onSelection:value=>selections.push(value),onStatus:(...value)=>statuses.push(value)});
   await ui.open({id:'synthetic',pdf:'synthetic.pdf'});await tick();
-  const sheet=root.querySelector('.pdr-sheet');
-  sheet.getBoundingClientRect=()=>({left:20,top:30,width:page.width*scale,height:page.height*scale,right:20+page.width*scale,bottom:30+page.height*scale});
+  const sheets=[...root.querySelectorAll('.pdr-sheet')],sheet=sheets[0];
+  for(const [index,slot] of sheets.entries()) {
+    const top=30+index*(page.height*scale+20);
+    slot.getBoundingClientRect=()=>({left:20,top,width:page.width*scale,height:page.height*scale,right:20+page.width*scale,bottom:top+page.height*scale});
+  }
   function pointer(type,x,y,extra={}){
     const event=new window.MouseEvent(type,{bubbles:true,cancelable:true,clientX:20+x*scale,clientY:30+y*scale,button:0});
     Object.defineProperties(event,{pointerType:{value:extra.pointerType||'mouse'},pointerId:{value:extra.pointerId||1},isPrimary:{value:extra.isPrimary??true}});
     (extra.target||sheet).dispatchEvent(event);return event;
   }
   function start(){ui.setTool('square',{color:'#336699',width:3});pointer('pointerdown',10,20);pointer('pointermove',80,100);assert.ok(root.querySelector('.pdr-square-draft'));}
-  return {dom,window,root,sheet,page,ui,pointer,start,calls,rectangles,selections,statuses,captured,close(){ui.dispose();dom.window.close();}};
+  return {dom,window,root,sheet,sheets,page,ui,pointer,start,calls,rectangles,selections,statuses,captured,close(){ui.dispose();dom.window.close();}};
 }
+
+test('a captured underline gesture uses both physical pages, including a backwards drag', {skip:!JSDOM}, async t=>{
+  const f=await fixture({scale:.5,wordsPerPage:[[[30,520,70,540,'Before']],[[80,30,140,50,'After']]]});t.after(()=>f.close());
+  assert.equal(f.sheets[1].dataset.loaded,'true');
+  const document=f.window.document;
+  const words=f.sheets.map(sheet=>sheet.querySelector('.pdr-word'));
+  for(const [index,word] of words.entries()){
+    const [x,y,right,bottom]=JSON.parse(word.dataset.rect), box=f.sheets[index].getBoundingClientRect();
+    word.getBoundingClientRect=()=>({left:box.left+x/2,top:box.top+y/2,right:box.left+right/2,bottom:box.top+bottom/2,width:(right-x)/2,height:(bottom-y)/2});
+  }
+  const hit=clientY=>clientY<350?0:1;
+  document.elementFromPoint=(x,y)=>words[hit(y)];
+  document.caretPositionFromPoint=(x,y)=>{
+    const index=hit(y), node=words[index].querySelector('.pdf-word-text').firstChild;
+    return {offsetNode:node,offset:index===0?0:node.length};
+  };
+  f.ui.setTool('underline',{color:'#336699'});
+  const first=[30,530],second=[140,680];
+  for(const backwards of [false,true]){
+    const start=backwards?second:first, end=backwards?first:second;
+    f.pointer('pointerdown',...start,{target:words[backwards?1:0]});
+    f.pointer('pointerup',...end,{target:f.root});
+    const captured=f.selections.at(-1);
+    assert.deepEqual(plain(captured.segments),[
+      {page:1,text:'Before',rects:[[30,520,70,540]],wordCount:1},
+      {page:2,text:'After',rects:[[80,30,140,50]],wordCount:1},
+    ]);
+    assert.equal(captured.text,'Before\n\nAfter');
+  }
+  assert.equal(f.selections.length,2);
+});
 
 test('rectangle uses displayed PDF points at zoom and rotation, with transparent live preview', {skip:!JSDOM}, async()=>{
   for(const rotation of [0,90,180,270])for(const scale of [.5,2]){

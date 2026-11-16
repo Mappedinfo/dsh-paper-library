@@ -65,6 +65,38 @@ def test_create_retries_reuse_native_object_and_preserve_later_comment(tmp_path,
         assert len(metadata["create_request_hash"]) == 64
 
 
+def test_cross_page_underline_saves_native_parts_atomically_and_replays_once(tmp_path):
+    paper, original, original_bytes, managed = fixture(tmp_path)
+    initial = managed.read_bytes()
+    segments = [
+        {"page": 1, "text": "end of the first page", "rects": [[60, 80, 150, 95]]},
+        {"page": 2, "text": "continuation on the second page", "rects": [[60, 80, 180, 95]]},
+    ]
+    body = {"id": paper, "annotation_id": str(uuid.uuid4()), "type": "underline",
+            "segments": segments, "color": "#336699", "comment": "One remark for the selected span"}
+    with pytest.raises(ValueError, match="inside displayed page"):
+        request(tmp_path, "annotate", **{**body, "segments": [segments[0], {**segments[1], "rects": [[0, 0, 1000, 20]]}]})
+    assert managed.read_bytes() == initial
+
+    created = request(tmp_path, "annotate", **body)
+    assert created["annotation"] == created["annotations"][0]
+    assert [(note["page"], note["text"]) for note in created["annotations"]] == [(s["page"], s["text"]) for s in segments]
+    assert [note["comment"] for note in created["annotations"]] == [body["comment"], ""]
+    with fitz.open(managed) as doc:
+        for i, note in enumerate(created["annotations"]):
+            page = doc[i]
+            native = [item for item in page.annots() if item.type[1] == "Underline"]
+            assert len(native) == 1 and native[0].info["id"] == note["id"]
+            assert native[0].vertices
+    assert original.read_bytes() == original_bytes
+    written = managed.read_bytes()
+    assert len(list((tmp_path / "library" / "backups").glob("*.bak"))) == 1
+    assert request(tmp_path, "annotate", **body) == {**created, "duplicate": True}
+    with pytest.raises(ValueError, match="different content"):
+        request(tmp_path, "annotate", **{**body, "segments": [segments[0], {**segments[1], "text": "Different second page"}]})
+    assert managed.read_bytes() == written
+
+
 @pytest.mark.parametrize("change", [
     {"comment": "different initial request"}, {"rects": [[50, 70, 180, 95]]},
     {"text": "different source"}, {"page": 2}, {"type": "note"},

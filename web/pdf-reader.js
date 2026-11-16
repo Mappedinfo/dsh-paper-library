@@ -3,6 +3,7 @@
   const MAX_PAGES = 2000, MAX_RESIDENT = 3, MAX_SPREAD_RESIDENT = 4, GAP = 16, CAPTION = 24, PADDING = 12;
   const TOOLS = new Set(['select', 'highlight', 'underline', 'strikeout', 'note', 'ink', 'square']);
   const MARKUP_TOOLS = new Set(['highlight', 'underline', 'strikeout']);
+  const MAX_SELECTION_PAGES = 3;
   const MAX_INK_PATHS = 64, MAX_INK_POINTS = 4096;
   let appearanceSequence = 0;
   /** 只强化英文词的前半段；标点、数字、混合公式及单字母不作为词重绘。 */
@@ -428,7 +429,9 @@
     root.classList.add('paper-pdf-reader'); root.tabIndex = 0; root.setAttribute('aria-label', 'PDF 连续阅读区域');
     const strip = dom('div', 'pdr-pages'); root.replaceChildren(strip);
     function inputBusy(page, allowPan = false) {
-      const editing = [inkGesture, markupGesture, rectangleGesture, nativeGesture, rangeDrag].some(gesture => gesture && (!page || Number(gesture.sheet.dataset.pdfPage) === page));
+      const editing = [inkGesture, markupGesture, rectangleGesture, nativeGesture, rangeDrag].some(gesture =>
+        gesture && (!page || Number(gesture.sheet.dataset.pdfPage) === page ||
+          gesture.pages?.includes(page) && slots[page - 1]?.sheet.dataset.loaded === 'true'));
       const touching = !!touchPan || touchPoints.size > 0;
       return editing || !!browserPinch || (touching && !(allowPan && touchPan));
     }
@@ -638,13 +641,24 @@
       if (!gesture.sheet.isConnected || (gesture.anchor && !gesture.anchor.node.isConnected)) { endMarkup(true); return; }
       if (!gesture.dragged && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 3) return;
       gesture.dragged = true;
-      const box = gesture.sheet.getBoundingClientRect();
-      if (!gesture.anchor || event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) return;
-      const focus = textCaret(gesture.sheet, event.clientX, event.clientY); if (!focus) return;
+      const sheet = document.elementFromPoint?.(event.clientX, event.clientY)?.closest?.('.pdr-sheet');
+      gesture.invalid = '请将选区终点拖到 PDF 正文。';
+      if (!gesture.anchor || !sheet || !root.contains(sheet)) return;
+      const selectedPages = pagesBetween(gesture.sheet.dataset.pdfPage, sheet.dataset.pdfPage);
+      if (!selectedPages) { gesture.invalid = `一次最多划选 ${MAX_SELECTION_PAGES} 页，请缩小选区。`; return; }
+      if (String(gesture.pages) !== String(selectedPages)) {
+        gesture.pages = selectedPages;
+        updateWindow();
+      }
+      if (selectedPages.some(page => slots[page - 1]?.sheet.dataset.loaded !== 'true')) {
+        gesture.invalid = '选区中的页面仍在载入，请等正文显示后再划选。'; return;
+      }
+      const focus = textCaret(sheet, event.clientX, event.clientY); if (!focus) return;
       const value = window.getSelection(); if (!value) return;
       try {
         value.setBaseAndExtent(gesture.anchor.node, gesture.anchor.offset, focus.node, focus.offset);
         pendingRange = value.rangeCount ? value.getRangeAt(0).cloneRange() : null;
+        gesture.invalid = null;
       } catch { endMarkup(true); }
     }
     function endMarkup(cancelled = false) {
@@ -980,9 +994,10 @@
       const row = pageAt(metrics, root.scrollTop + root.clientHeight * .35);
       const next = layout === 'spread' && metrics[active - 1]?.rowStart === row ? active : row;
       if (next !== active) { active = next; announce(); }
-      const busyPage = Number((inkGesture || markupGesture || rectangleGesture || nativeGesture || rangeDrag)?.sheet.dataset.pdfPage);
+      const gesture = inkGesture || markupGesture || rectangleGesture || nativeGesture || rangeDrag;
+      const busyPage = Number(gesture?.sheet.dataset.pdfPage);
       const wanted = wantedPages(priority || jumpTarget);
-      queue.want(busyPage ? [busyPage, ...wanted] : wanted);
+      queue.want(gesture?.pages ? [...gesture.pages, ...wanted] : busyPage ? [busyPage, ...wanted] : wanted);
       inputEnded();
     }
     function scroll() { if (frame !== null) return; frame = window.requestAnimationFrame(() => { frame = null; updateWindow(); }); }
@@ -1087,6 +1102,11 @@
       flushRefresh(); return pending;
     }
     function layerOf(node) { const element = node?.nodeType === 3 ? node.parentElement : node; return element?.closest?.('.pdr-word-layer'); }
+    function pagesBetween(anchor, focus) {
+      const first = Math.min(Number(anchor), Number(focus)), last = Math.max(Number(anchor), Number(focus));
+      if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || first < 1 || last > pages.length || last - first >= MAX_SELECTION_PAGES) return null;
+      return Array.from({ length: last - first + 1 }, (_, index) => first + index);
+    }
     /** The selection's slice inside one word span, or null when it cannot be built. */
     function sliceOf(range, span) {
       try {
@@ -1264,11 +1284,24 @@
         if (root.contains(value.anchorNode) || root.contains(value.focusNode)) { selection = null; lastSelection = ''; onSelection(null, { intent: tool, color }); onStatus('请选择同一 PDF 页内的文字，再保存批注。', true); }
         return;
       }
-      if (anchor !== focus) { selection = null; lastSelection = ''; onSelection(null, { intent: tool, color }); onStatus('选文跨越了多个 PDF 页面，请分别选择并保存每一页的批注。', true); return; }
-      const page = Number(anchor.dataset.pdfPage), sheet = anchor.closest?.('.pdr-sheet');
       try {
-        const result = readRange(value.getRangeAt(0), sheet, anchor.children, page); if (!result) return;
-        const digest = JSON.stringify([result.page, result.text, result.rects]); if (digest === lastSelection) return;
+        const selectedPages = pagesBetween(anchor.dataset.pdfPage, focus.dataset.pdfPage);
+        if (!selectedPages) throw Error(`一次最多划选 ${MAX_SELECTION_PAGES} 页，请缩小选区。`);
+        const range = value.getRangeAt(0), segments = [];
+        for (const page of selectedPages) {
+          const sheet = slots[page - 1]?.sheet, layer = sheet?.querySelector('.pdr-word-layer');
+          if (sheet?.dataset.loaded !== 'true' || !layer) throw Error('选区中的页面仍在载入，请等正文显示后再划选。');
+          const part = readRange(range, sheet, layer.children, page);
+          if (part) segments.push(part);
+        }
+        if (!segments.length) return;
+        const result = segments.length === 1 ? segments[0] : {
+          ...segments[0], segments,
+          text: segments.map(part => part.text).join('\n\n'),
+          wordCount: segments.reduce((sum, part) => sum + part.wordCount, 0)
+        };
+        if (result.text.length > 20000) throw Error('选择范围超过单次批注上限，请缩小到较短的段落。');
+        const digest = JSON.stringify(segments); if (digest === lastSelection) return;
         lastSelection = digest; selection = { id: paperId, ...result }; onSelection(selection, { intent: tool, color });
       } catch (error) { selection = null; lastSelection = ''; onSelection(null, { intent: tool, color }); onStatus(error.message, true); }
     }
@@ -1382,9 +1415,8 @@
       if (markupGesture?.pointerId === event.pointerId) {
         event.preventDefault(); moveMarkup(event);
         const gesture = markupGesture; if (!gesture) return;
-        const box = gesture.sheet.getBoundingClientRect(), outside = event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom;
-        endMarkup(outside);
-        if (outside) { if (gesture.dragged) onStatus('请在同一 PDF 页内划选文字，再保存批注。', true); return; }
+        endMarkup(Boolean(gesture.invalid));
+        if (gesture.invalid) { onStatus(gesture.invalid, true); return; }
         if (gesture.dragged) captureSelection();
         else if (!activateInternalLink(gesture.sheet, event)) activateAnnotation(gesture.sheet, event);
         return;
@@ -1519,7 +1551,14 @@
       const value = window.getSelection();
       if (!value?.rangeCount || value.isCollapsed) { lastSelection = ''; return; }
       const anchor = layerOf(value.anchorNode), focus = layerOf(value.focusNode);
-      if (!anchor || anchor !== focus || !root.contains(anchor)) return;
+      if (!anchor || !focus || !root.contains(anchor) || !root.contains(focus)) return;
+      if (nativeGesture && !markupGesture) {
+        const selectedPages = pagesBetween(anchor.dataset.pdfPage, focus.dataset.pdfPage);
+        if (selectedPages && String(nativeGesture.pages) !== String(selectedPages)) {
+          nativeGesture.pages = selectedPages;
+          updateWindow();
+        }
+      }
       // Remember the last real selection of the current drag for pointerup.
       try { pendingRange = value.getRangeAt(0).cloneRange(); } catch { pendingRange = null; }
     }

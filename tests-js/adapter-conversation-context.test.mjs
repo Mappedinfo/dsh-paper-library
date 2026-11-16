@@ -486,6 +486,15 @@ test('a replacement frame already ready receives the terminal result without ano
   e.bridge.dispose()
 })
 
+test('a reading snapshot keeps both pages of a pending text selection', () => {
+  const segments = [{page:3,text:'First half',rects:[[1,50,30,61]]},{page:4,text:'Second half',rects:[[1,2,30,13]]}];
+  const selection = {...segments[0],text:'First half\n\nSecond half',segments};
+  const annotationDraft = {mode:'underline',id:'paper-1',page:3,comment:'',selection,batchId:'12345678-1234-1234-1234-123456789abc'};
+  const snapshot = readerSnapshot({paperId:'paper-1',page:4,readerSelection:selection,annotationDraft});
+  assert.deepEqual(snapshot.readerSelection,selection);
+  assert.deepEqual(snapshot.annotationDraft,annotationDraft);
+});
+
 test('the latest bounded reading snapshot restores once per new iframe, preserving PDF and chat drafts', () => {
   const e = environment()
   const snapshot = { paperId: 'paper-1', page: 3, tab: 'conversation', chatDraft: '这里需要进一步核验', chatContext: { annotationIds: ['note-1'], selection: { page: 3, text: 'The selected source passage.' } }, annotationDraft: { mode: 'highlight', id: 'paper-1', page: 3, comment: '我的问题', selection: { page: 3, text: 'Quoted evidence.', rects: [[1, 2, 30, 40]] } }, image: 'data:must-not-be-retained' }

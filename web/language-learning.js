@@ -90,7 +90,7 @@ window.PaperLanguageLearning = {
     }
     async function useSelection(mode){
       const item=getPaper();await paperChanged(item);if(item?.id!==paperId||item?.id!==getPaper()?.id)return;if(show()===false)return;const s=selected();
-      if(s&&draftReady){$('language-source').value=s.text;sourcePage=s.page;failedRequest=null;++draftRevision;remember();await generate(mode);}
+      if(s&&draftReady){$('language-source').value=s.text;sourcePage=s.segments?null:s.page;failedRequest=null;++draftRevision;remember();await generate(mode);}
       else{status('先在 PDF 中选择文字，或在下方输入内容。');$('language-source').focus();}
     }
     async function generate(mode){

@@ -73,6 +73,26 @@ test('failed saving blocks DSH and leaves only that draft retryable',async t=>{
  assert.equal(f.calls.some(c=>c.action==='companion_ask'),false);assert.match(f.w.document.querySelector('.annotation-inline-status').textContent,/version conflict/);
  assert.equal(f.editor.pending()[0].comment,'Keep this question');assert.equal(f.w.document.querySelector('textarea').value,'Keep this question');
 });
+
+test('a cross-page underline retains its entire draft until every page is acknowledged', async t=>{
+  const segments = [
+    {page:3,text:'Start of the paragraph',rects:[[10,500,180,520]]},
+    {page:4,text:'Continued on the next page',rects:[[10,40,190,60]]},
+  ];
+  let incomplete=true;
+  const f=fixture(t,{request:(action,args)=>{
+    if(action!=='annotate')return;
+    const annotations=args.segments.map((part,index)=>({...part,id:index===0?args.annotation_id:'second',type:args.type,version:'native'}));
+    return {annotation:annotations[0],annotations:incomplete?annotations.slice(0,1):annotations};
+  }});
+  assert.equal(await f.editor.create('underline',{selection:{...segments[0],text:segments.map(part=>part.text).join('\n\n'),segments}}),false);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.editor.pending()[0].payload.segments)),segments);
+  const initial=f.calls[0];
+  incomplete=false;
+  await f.editor.beforeAsk('paper-a',initial.annotation_id);
+  assert.deepEqual(f.calls.filter(call=>call.action==='annotate'),[initial,initial]);
+  assert.equal(f.editor.pending().length,0);
+});
 test('durable drafts restore over clean card values and never submit themselves to AI',async t=>{
  const note={id:'existing',page:4,type:'underline',text:'Quote',comment:'PDF value',version:'base'};
  const f=fixture(t,{stored:{drafts:[{note,comment:'Unsaved question',saved:'PDF value',payload:null}]}});f.notes.push(note);f.render();await f.editor.ready('paper-a');

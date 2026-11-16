@@ -727,7 +727,69 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                     break
         return {"annotation": self._with_annotation_version(self._annotation(current, annot), True)}
 
-    def annotate(self, id, **kwargs):
+    def _annotate_markup_pages(self, id, segments, *, annotation_id=None, type="highlight",
+                               comment="", author="Reader", color="#ffdb66", width=2):
+        if type not in {"highlight", "underline", "strikeout"}:
+            raise ValueError("Multiple pages are only supported for text markup")
+        if not isinstance(annotation_id, str) or not re.fullmatch(r"(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})", annotation_id):
+            raise ValueError("annotation_id must be a lowercase UUID")
+        if not isinstance(segments, list) or not 2 <= len(segments) <= 3:
+            raise ValueError("Provide 2–3 page segments")
+        previous_page, characters = 0, 0
+        for part in segments:
+            if not isinstance(part, dict) or set(part) != {"page", "text", "rects"}:
+                raise ValueError("Each markup segment requires page, text and rects")
+            page, text, rects = part["page"], part["text"], part["rects"]
+            if page.__class__ is not int or page <= previous_page:
+                raise ValueError("Markup segment pages must be in ascending order")
+            if not isinstance(text, str) or not text.strip() or not isinstance(rects, list) or not 1 <= len(rects) <= 200:
+                raise ValueError("Each markup segment requires text and 1–200 rectangles")
+            if any(not isinstance(rect, list) or any(isinstance(coordinate, bool) for coordinate in rect) for rect in rects):
+                raise ValueError("Each markup rectangle requires four numeric coordinates")
+            previous_page, characters = page, characters + len(text)
+        if previous_page - segments[0]["page"] > 2:
+            raise ValueError("The selected span cannot exceed three physical pages")
+        if characters > 20000 or not isinstance(comment, str) or len(comment) > 30000 or not isinstance(author, str):
+            raise ValueError("Annotation text/comment exceeds limit")
+        fingerprint = hashlib.sha256(json.dumps(
+            {"segments": segments, "type": type, "comment": comment, "author": author, "color": color, "width": width},
+            sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+        ids = [annotation_id, *(str(uuid.uuid5(uuid.UUID(annotation_id), f"page:{part['page']}")) for part in segments[1:])]
+        with self.lock():
+            with self._open_pdf(self.pdf_path(id)) as doc:
+                for part in segments:
+                    page = self._page(doc, part["page"])
+                    for rect in part["rects"]:
+                        self._rect(rect, page, inverse=True)
+                matches, count = {}, 0
+                for page in doc:
+                    for annot in page.annots() or []:
+                        count += 1
+                        if count > _constants().MAX_ANNOTATIONS:
+                            raise ValueError("Annotation retry exceeds the bounded annotation scan")
+                        key = annot.info.get("id")
+                        if key in ids:
+                            if key in matches or self._annotation_metadata(annot).get("create_request_hash") != fingerprint:
+                                raise ValueError("Annotation annotation_id already exists with different content")
+                            matches[key] = self._with_annotation_version(self._annotation(page, annot), True)
+                if matches:
+                    if len(matches) != len(ids):
+                        raise ValueError("Some pages of the original markup were removed; refresh before creating a new selection")
+                    annotations = [matches[key] for key in ids]
+                    return {"annotation": annotations[0], "annotations": annotations, "duplicate": True}
+
+            def write(doc):
+                annotations = [self._add_annotation(doc, **part, type=type, annotation_id=key, color=color,
+                               comment=comment if index == 0 else "", author=author, width=width,
+                               extra={"create_request_hash": fingerprint})["annotation"]
+                               for index, (part, key) in enumerate(zip(segments, ids, strict=True))]
+                return {"annotation": annotations[0], "annotations": annotations}
+
+            return self._write_pdf(id, write)
+
+    def annotate(self, id, segments=None, **kwargs):
+        if segments is not None:
+            return self._annotate_markup_pages(id, segments, **kwargs)
         if kwargs.get("annotation_profile") == "ai-reading":
             kwargs["type"] = {"highlight": "underline", "note": "square"}.get(kwargs.get("type", "highlight"), kwargs.get("type", "highlight"))
             kwargs.update(color=AI_BLUE, width=AI_WIDTH)

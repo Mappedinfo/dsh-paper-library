@@ -104,6 +104,7 @@ window.PaperAnnotationEditor = { legacyQa:paperLegacyAnnotationQa, create({api,p
     if(r.conflict){paint(r);return false;}
     r.error=null;
     r.running=(async()=>{
+      let savedPages;
       try {
         await load(r.id);
         // Keep the immutable create request until its response is known. Text
@@ -114,6 +115,12 @@ window.PaperAnnotationEditor = { legacyQa:paperLegacyAnnotationQa, create({api,p
           if(!creating&&!r.note.edit_version&&!r.note.version)throw Error('缺少批注版本，请核对 PDF 最新备注后再保存。');
           const result=creating?await api(r.payload.reply_id?'annotation_reply_create':'annotate',r.payload):await api('annotation_update',{id:r.id,annotation_id:r.note.id,comment,version:r.note.edit_version||r.note.version,companion_skip:true});
           if(!result?.annotation?.id)throw Error('保存结果缺少批注标识，请重试核对。');
+          if (creating && r.payload.segments) {
+            const expectedPages = r.payload.segments.map(part => part.page);
+            if (JSON.stringify(result.annotations?.map(note => note.page)) !== JSON.stringify(expectedPages))
+              throw Error('保存结果缺少跨页批注，请重试核对。');
+            savedPages = expectedPages;
+          }
           r.note=clone(result.annotation);r.saved=comment;r.payload=null;
           // A create retry may discover a note subsequently edited elsewhere.
           // Preserve that edit, and do not use its fresh version to overwrite it.
@@ -125,7 +132,7 @@ window.PaperAnnotationEditor = { legacyQa:paperLegacyAnnotationQa, create({api,p
         }
         await checkpoint(r.paper);
       }catch(error){r.error=error.message;return false;}
-      try{await refresh(r.id,r.note,{reveal:false});}catch(error){toast(`批注已保存，页面暂未刷新：${error.message}`,true);}
+      try{await refresh(r.id,r.note,{reveal:false,pages:savedPages});}catch(error){toast(`批注已保存，页面暂未刷新：${error.message}`,true);}
       return true;
     })();paint(r);
     try{return await r.running;}finally{r.running=null;paint(r);changed?.();}
@@ -149,7 +156,8 @@ window.PaperAnnotationEditor = { legacyQa:paperLegacyAnnotationQa, create({api,p
       if([...list.querySelectorAll('.annotation-card, .annotation-remark')].some(c=>c.dataset.annotationId===r.note.id))continue;
       list.querySelector('.empty-state')?.remove();
       const card=node('article','annotation-card annotation-pending');card.dataset.annotationId=r.note.id;card.dataset.paperId=id;
-      card.append(node('div','annotation-meta',`第 ${r.note.page} 页 · ${r.payload?'新批注':'待保存批注'}`));
+      const pages = r.payload?.segments ? `${r.note.page}–${r.payload.segments.at(-1).page}` : r.note.page;
+      card.append(node('div','annotation-meta',`第 ${pages} 页 · ${r.payload?'新批注':'待保存批注'}`));
       if(r.note.text)card.append(node('blockquote','annotation-quote',r.note.text));
       card.append(node('div','annotation-actions'));mount(card,r);const parent=r.note.reply_to&&[...list.querySelectorAll(':scope > .annotation-card')].find(c=>c.dataset.annotationId===r.note.reply_to);if(parent){card.classList.remove('annotation-card');card.classList.add('annotation-remark');card.dataset.remarkNumber=String(parent.querySelectorAll('.annotation-remark').length+2);parent.append(card);mount(card,r);}else list.prepend(card);
     }
@@ -162,12 +170,14 @@ window.PaperAnnotationEditor = { legacyQa:paperLegacyAnnotationQa, create({api,p
     if(getPaper()?.id!==id)return;show(annotationId);decorate();const r=paper(id).rows.get(annotationId);
     r?.ui?.open();r?.ui?.root.scrollIntoView?.({block:'nearest'});r?.ui?.input.focus({preventScroll:true});
   }
-  async function create(mode,{note=null,selection=null,color='#ffdb66',width=2,page,comment=''}={}) {
+  async function create(mode,{note=null,selection=null,color='#ffdb66',width=2,page,comment='',batchId}={}) {
     const id=getPaper()?.id;if(!id)return false;
     if(mode==='edit'){const r=row(id,note);focus(id,note.id);return true;}
-    const annotationId=crypto.randomUUID(),pageNumber=page||selection?.page||note?.page||1;
-    const payload=mode==='reply'?{id,annotation_id:note.reply_to||note.id,reply_id:annotationId,comment,companion_skip:true}:{id,annotation_id:annotationId,page:pageNumber,type:mode,text:selection?.text||note?.text||'',rects:selection?.rects||note?.rects||[note?.rect||[20,20,40,40]],color,width,comment,author:'Reader',companion_skip:true};
-    const r=row(id,{id:annotationId,page:pageNumber,type:mode==='reply'?'note':mode,text:payload.text||note?.text||'',comment,...(mode==='reply'?{kind:'reader-reply',reply_to:note.reply_to||note.id}:{})},payload);
+    const annotationId=batchId||crypto.randomUUID(),pageNumber=selection?.page||page||note?.page||1;
+    const geometry=selection?.segments ? {segments:selection.segments.map(({page,text,rects})=>({page,text,rects}))} :
+      {page:pageNumber,text:selection?.text||note?.text||'',rects:selection?.rects||note?.rects||[note?.rect||[20,20,40,40]]};
+    const payload=mode==='reply'?{id,annotation_id:note.reply_to||note.id,reply_id:annotationId,comment,companion_skip:true}:{id,annotation_id:annotationId,type:mode,...geometry,color,width,comment,author:'Reader',companion_skip:true};
+    const r=row(id,{id:annotationId,page:pageNumber,type:mode==='reply'?'note':mode,text:selection?.text||note?.text||'',comment,...(mode==='reply'?{kind:'reader-reply',reply_to:note.reply_to||note.id}:{})},payload);
     show();decorate();focus(id,annotationId);
     return save(r);
   }

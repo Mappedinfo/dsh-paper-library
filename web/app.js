@@ -430,7 +430,9 @@ function showReaderSelection(selection) {
   if (!selection) { clearSelection(); publishReaderState(); return; }
   if (selection.id && selection.id !== state.active?.id) return;
   state.selection={...selection,id:state.active.id};
-  $('selection-count').textContent=`第 ${selection.page} 页 · 已选择文字`;
+  $('selection-count').textContent=selection.segments
+    ? `第 ${selection.page}–${selection.segments.at(-1).page} 页 · 已选择文字`
+    : `第 ${selection.page} 页 · 已选择文字`;
   $('selection-preview').textContent=selection.text;$('selection-tools').hidden=false;publishReaderState();
 }
 
@@ -714,13 +716,16 @@ async function autoMarkup(selection, intent = {}) {
   const color = intent.color || readingShell?.tool().color || '#ffdb66';
   autoMarkupBusy = true;
   try {
-    const result=await api('annotate', { id: selection.id, page: selection.page, type, text: selection.text, rects: selection.rects, comment: '', author: 'Reader', color });
+    const geometry = selection.segments
+      ? { annotation_id: window.crypto.randomUUID(), segments: selection.segments.map(({page,text,rects})=>({page,text,rects})) }
+      : { page: selection.page, text: selection.text, rects: selection.rects };
+    const result=await api('annotate', { id: selection.id, type, ...geometry, comment: '', author: 'Reader', color });
     clearSelection();
     toast(`已${MARKUP_LABELS[type] || '批注'} · 可在批注栏继续提问`);
     await loadAnnotations(selection.id);
     if(state.active?.id===selection.id){readingPanels?.show('annotations');if(result.annotation?.id)linkAnnotationCard(result.annotation.id);}
     publishReaderState();
-    if (state.active?.id === selection.id) await refreshPage(selection.page);
+    if (state.active?.id === selection.id) await Promise.all((result.annotations || [{page:selection.page}]).map(note=>refreshPage(note.page)));
     await companionUI?.refresh();
   } catch (error) {
     toast(`着色未保存：${error.message}`, true);
@@ -757,7 +762,10 @@ async function saveAnnotation(event) {
     try {
       result = draft.mode === 'edit'
         ? await api('annotation_update', { id: draft.id, annotation_id: draft.note.id, comment, companion_skip:true })
-        : await api('annotate', { id: draft.id, page: draft.page, type: draft.mode, text: draft.selection?.text || '', rects: draft.selection?.rects || [[20, 20, 40, 40]], comment, author: 'Reader', color: draft.color || '#ffdb66', ...(draft.mode === 'square' ? {width:draft.width ?? 2} : {}), companion_skip:true });
+        : await api('annotate', { id: draft.id, type: draft.mode,
+          ...(draft.selection?.segments ? {annotation_id: draft.batchId ||= window.crypto.randomUUID(), segments: draft.selection.segments.map(({page,text,rects})=>({page,text,rects}))} :
+            {page:draft.page,text:draft.selection?.text||'',rects:draft.selection?.rects||[[20,20,40,40]]}),
+          comment, author: 'Reader', color: draft.color || '#ffdb66', ...(draft.mode === 'square' ? {width:draft.width ?? 2} : {}), companion_skip:true });
     } catch (error) {
       if (state.annotationDraft === draft) { errorAt('annotation-error', error); if (!$('annotation-dialog').open) openDialog('annotation-dialog'); }
       else toast(`批注未保存：${error.message}`, true);
@@ -782,7 +790,7 @@ async function saveAnnotation(event) {
     }
     try {
       void companionUI?.refresh();
-      if (state.active?.id === draft.id) { await loadAnnotations(draft.id); if (state.active?.id === draft.id) await refreshPage(draft.page); }
+      if (state.active?.id === draft.id) { await loadAnnotations(draft.id); if (state.active?.id === draft.id) await Promise.all((result.annotations || [{page:draft.page}]).map(note=>refreshPage(note.page))); }
       publishReaderState();
       if (state.active?.id === draft.id) {
         await paperChatUI?.annotationsChanged(draft.id);
@@ -1470,7 +1478,10 @@ $('previous-page').addEventListener('click', () => advancePage(-1)); $('next-pag
 $('page-number').addEventListener('change', () => requestPage($('page-number').value));
 $('word-layer').addEventListener('pointerup', () => setTimeout(readSelection, 0)); $('word-layer').addEventListener('keyup', readSelection);
 $('clear-selection').addEventListener('click', () => {clearSelection();publishReaderState();}); $('annotate-selection').addEventListener('click', () => openAnnotation('highlight'));
-$('discuss-selection').addEventListener('click', () => paperChatUI?.useSelection(state.selection));
+$('discuss-selection').addEventListener('click', () => {
+  if (state.selection?.segments) return toast('请先保存跨页批注，再在侧栏选取两页的批注一同提问。', true);
+  paperChatUI?.useSelection(state.selection);
+});
 $('annotation-comment').addEventListener('input', publishReaderState);
 $('annotation-dialog').addEventListener('close', publishReaderState);
 $('page-note').addEventListener('click', () => openAnnotation('note')); $('annotation-form').addEventListener('submit', saveAnnotation); $('annotation-list').addEventListener('click', event=>void handleNoteAction(event).catch(error=>toast(error.message,true)));
@@ -1518,13 +1529,15 @@ function publishReaderState({ rememberOpen = false } = {}) {
   if (restoringReader || !state.active || state.active.resource_kind === 'dataset' || workbenchUI?.isTable() || (workbenchUI && readerPaperId !== state.active.id)) return true;
   const snapshot = { workspace:workspaceSnapshot(), paperId: state.active.id, page: state.page, tab: state.tab, chatDraft: paperChatUI?.draft() || '', chatContext: paperChatUI?.context() || { annotationRefs: [] },
     ...(readingPanels ? {panels:{outline:readingPanels.visible('outline'),elements:documentElementsUI?.selected(),annotations:readingPanels.visible('annotations'),metadata:readingPanels.visible('metadata'),chat:readingPanels.visible('chat'),side:$('reading-workspace').dataset.readingSide || 'left'}} : {}),
-    ...(state.selection?.id===state.active.id ? {readerSelection:{page:state.selection.page,text:state.selection.text,rects:state.selection.rects}} : {}),
+    ...(state.selection?.id===state.active.id ? {readerSelection:{page:state.selection.page,text:state.selection.text,rects:state.selection.rects,...(state.selection.segments?{segments:state.selection.segments}:{})}} : {}),
   };
   if ($('annotation-dialog').open && state.annotationDraft?.id === state.active.id) {
     const draft = state.annotationDraft;
     snapshot.annotationDraft = { mode: draft.mode, id: draft.id, page: draft.page, color: draft.color, ...(draft.width !== undefined ? {width:draft.width} : {}), comment: $('annotation-comment').value,
       ...(draft.note ? { note: { id: draft.note.id, page: draft.note.page } } : {}),
-      ...(draft.selection ? { selection: { page: draft.selection.page, text: draft.selection.text, rects: draft.selection.rects } } : {}),
+      ...(draft.selection ? { selection: { page: draft.selection.page, text: draft.selection.text, rects: draft.selection.rects,
+        ...(draft.selection.segments ? {segments:draft.selection.segments} : {}) } } : {}),
+      ...(draft.batchId ? {batchId:draft.batchId} : {}),
     };
   }
   const handwritingDraft = handwritingUI?.handoff();
@@ -1582,7 +1595,7 @@ async function applyReaderSnapshot(snapshot,legacyChat=false) {
       if (typeof annotationEditor!=='undefined'&&annotationEditor) {
         const note=draft.mode==='edit'?state.annotations.find(n=>n.id===draft.note?.id):null;
         if(note){annotationEditor.focus(state.active.id,note.id);await annotationEditor.restoreDraft(state.active.id,note,draft.comment||'');}
-        else await annotationEditor.create(draft.mode==='edit'?'note':draft.mode,{selection:draft.selection,color:draft.color,width:draft.width,page:draft.page,comment:draft.comment||''});
+        else await annotationEditor.create(draft.mode==='edit'?'note':draft.mode,{selection:draft.selection,color:draft.color,width:draft.width,page:draft.page,comment:draft.comment||'',batchId:draft.batchId});
       } else {
       if (draft.mode === 'edit') {
         await loadAnnotations(state.active.id);
@@ -1639,6 +1652,7 @@ async function openReferencedPaper(value) {
 /**
  * Which of the two entry surfaces this page was opened as. The plugin registers the
  * whiteboard as its own DSH tab, and that tab loads this same page with `?view=board`, so
+        if(draft.batchId)state.annotationDraft.batchId=draft.batchId;
  * one page serves both entries without a second copy of the canvas.
  */
 function entryView(){
@@ -1871,7 +1885,7 @@ function setRangeDraft(selection) {
   const edit = annotationRangeEdit;
   if (edit.saving) return;
   const hadDraft = Boolean(edit.draft);
-  edit.draft = selection?.id === edit.id && selection.page === edit.page && selection.text.trim() ? selection : null;
+  edit.draft = selection?.id === edit.id && !selection.segments && selection.page === edit.page && selection.text.trim() ? selection : null;
   if (hadDraft !== Boolean(edit.draft)) updateRangeEditBar();
 }
 function updateRangeEditBar() {
@@ -2158,7 +2172,7 @@ void restoreInkDraft().then(()=>inkQueue?.refresh()).then(()=>linkedHandwritingU
 handwritingUI = window.PaperHandwritingNote?.create({ api, persistence, toast, draftChanged: publishReaderState, available: () => handwritingAvailable, changed: async (id, page) => { if (state.active?.id === id) { await loadAnnotations(id); await paperChatUI?.annotationsChanged(id); await refreshPage(page); } } });
 annotationEditor=window.PaperAnnotationEditor?.create({api,persistence,captionAvailable:()=>annotationCaptionAvailable,getPaper:()=>state.active,getNotes:()=>state.annotations,
   show:annotationId=>{readingPanels?.show('annotations');if(annotationId){const grouped=annotationThreads(state.annotations),root=grouped.roots?.get(annotationId)||annotationId;const index=grouped.notes.findIndex(n=>n.id===root);if(index>=0){state.noteOffset=Math.floor(index/40)*40;renderAnnotations();}}},
-  refresh:async(id,note,{reveal=false}={})=>{if(state.active?.id!==id)return;await loadAnnotations(id);if(state.active?.id===id){if(reveal)annotationEditor.focus(id,note.id);await refreshPage(note.page);await paperChatUI?.annotationsChanged(id);}},
+  refresh:async(id,note,{reveal=false,pages=[note.page]}={})=>{if(state.active?.id!==id)return;await loadAnnotations(id);if(state.active?.id===id){if(reveal)annotationEditor.focus(id,note.id);await Promise.all(pages.map(refreshPage));await paperChatUI?.annotationsChanged(id);}},
   changed:()=>companionUI?.decorate(),toast});
 companionUI=window.PaperCompanion?.create({api,persistence,getPaper:()=>state.active,refreshAnnotations:loadAnnotations,beforeAsk:(id,annotationId)=>annotationEditor?.beforeAsk(id,annotationId),toast});
 const wikiUI=window.PaperEncyclopedia.create({api,toast,openReference:openReferencedPaper,getSource:()=>state.active?{paper_id:state.active.id,title:state.active.title,page:state.selection?.id===state.active.id?state.selection.page:state.page,quote:state.selection?.id===state.active.id?state.selection.text:''}:null});
