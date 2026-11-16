@@ -207,26 +207,51 @@ test('a note edited while the model runs rejects the late proposal without savin
   assert.equal(await readFile(join(f.folder, 'main.tex'), 'utf8'), BODY)
 })
 
-test('PDF-note context requires an explicit source target, never infers a mapping and stays bounded', async () => {
+test('PDF-note questions use the saved build context, and PDF proposals still require a source target', async () => {
   const store = inMemoryStore(), prompts = []
   const note = { id: 'pdf:synthetic:note', version: 'saved-version', stale: true, status: 'open', anchor: { kind: 'pdf', page: 2, pdf_version: 'old-build' }, text: 'Q'.repeat(9000), comment: 'C'.repeat(9000) }
   const handler = createLatexAI({ store, config: { provider: 'stub', model: 'stub' }, ai: async ({ prompt }) => { prompts.push(prompt); return 'reply' }, dispatch: async request => {
     if (request.action === 'latex_project_get') return { project: { id: 'paper', title: '合成项目', root: '/synthetic', main_path: 'main.tex', binding_generation: 0 } }
     if (request.action === 'latex_review_list') return { annotations: [note] }
+    if (request.action === 'latex_review_question_context') return { annotation: note, material: {
+      path: 'PDF 第 2 页', revision: 'old-build', kind: 'review-pdf', body: 'Synthetic surrounding PDF paragraph.', truncated: false,
+    } }
     if (request.action === 'latex_read') return { path: request.path, revision: 'source-revision', content: BODY }
     throw Error('Unexpected action')
   } })
   const request = { action: 'latex_ai_ask', id: 'paper', review_note: { id: note.id, version: note.version }, question: '问题' }
-  await assert.rejects(handler(request), error => error.code === 'LATEX_AI_NOTE_PATH')
+  await assert.rejects(handler({ ...request, action: 'latex_ai_propose', instruction: 'Explain' }), error => error.code === 'LATEX_AI_NOTE_PATH')
   assert.equal(prompts.length, 0)
-  const result = await handler({ ...request, path: 'chapter.tex' })
-  assert.equal(result.path, 'chapter.tex'); assert.equal(result.review_note.kind, 'pdf')
+  const result = await handler(request)
+  assert.equal(result.path, 'PDF 第 2 页');
+  assert.match(prompts[0], /Synthetic surrounding PDF paragraph/); assert.ok(!prompts[0].includes(BODY)); assert.equal(result.review_note.kind, 'pdf')
   const snapshot = JSON.parse(prompts[0].split('REVIEW_NOTE_JSON:\n')[1].split('\n\n作者的问题：')[0])
   assert.equal(snapshot.quote.length, 8000); assert.equal(snapshot.comment.length, 8000)
   assert.equal(snapshot.quote_truncated, true); assert.equal(snapshot.comment_truncated, true)
   assert.deepEqual(snapshot.anchor, { kind: 'pdf', page: 2, pdf_version: 'old-build' })
   assert.match(prompts[0], /PDF 页码不提供当前源码位置映射/)
 })
+
+test('a note beyond the opening excerpt sends nearby saved source and uses the DSH default model', async () => {
+  const f = await fixture([]);
+  const source = 'B'.repeat(26000) + '\nBefore the annotation.\n' + BODY + 'After the annotation.\n';
+  await writeFile(join(f.folder, 'main.tex'), source);
+  const note = await sourceNote(f);
+  const sent = [];
+  const handler = createLatexAI({ store: inMemoryStore(), dispatch, library: f.library, python,
+    getDefaultModel: async () => ({ provider: 'dsh-test', model: 'configured-default' }),
+    ai: async request => { sent.push(request); return '发送成功'; },
+  });
+  const reply = await handler({ action: 'latex_ai_ask', id: f.project.id, review_note: { id: note.id, version: note.version } });
+  assert.equal(sent[0].model, 'configured-default');
+  assert.match(sent[0].prompt, /Before the annotation/);
+  assert.match(sent[0].prompt, /After the annotation/);
+  assert.match(sent[0].prompt, /The neighbourhood effect is small/);
+  assert.ok(sent[0].prompt.includes(note.comment));
+  assert.ok(!sent[0].prompt.includes('B'.repeat(6000)));
+  assert.equal(reply.material.kind, 'review-source');
+  assert.equal(await readFile(join(f.folder, 'main.tex'), 'utf8'), source);
+});
 
 test('a question sends a bounded excerpt and keeps the answer, never the file', async () => {
   const { call, prompts, folder, project } = await fixture(['先确认这句话的主张边界，再补一句限定。'])

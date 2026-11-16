@@ -140,12 +140,14 @@ window.PaperLatexReview = (() => {
     function say(text, error = false) { message.textContent = text; message.classList.toggle('error', error); }
     function label(value) { return value.kind === 'source' ? `${value.path}:${value.line || '选段'} · 源码` : `PDF 第 ${value.page} 页 · 编译 ${value.pdf_version.slice(0, 10)}`; }
     function key(value = context()) { return JSON.stringify([value.id, value.main, value.binding_generation ?? 0]); }
+    const blocksQuestion = note => saving || draft?.note_id === note.id;
     function begin(value, type = 'note', { instant = false } = {}) {
       if (draft || saving) { show(); say('请先保存或取消当前批注，选段已保留。', true); return false; }
       draft = { key: key(), anchor: value, type, request_id: crypto.randomUUID().replaceAll('-', '') };
       comment.value = '';
       if (instant) { void saveDraft(); return true; }
       composer.hidden = false; anchor.textContent = label(value); quote.textContent = value.text || '区域便笺'; comment.value = ''; show(); comment.focus();
+      render();
       say(value.kind === 'pdf' && context().dirty ? '此批注属于已编译 PDF；源码有未保存改动。' : '批注写入自审记录，正文不改动。');
       return true;
     }
@@ -172,7 +174,7 @@ window.PaperLatexReview = (() => {
     function edit(note) {
       if (draft || saving || collaborating) { say(collaborating ? 'DSH 正在处理批注，请稍候再编辑。' : '请先保存或取消当前批注。', true); show(); return; }
       draft = { key: key(), note_id: note.id, expected_version: note.version, status: note.status };
-      composer.hidden = false; anchor.textContent = label(note.anchor); quote.textContent = note.text; comment.value = note.comment; show(); comment.focus();
+      composer.hidden = false; anchor.textContent = label(note.anchor); quote.textContent = note.text; comment.value = note.comment; show(); render(); comment.focus();
     }
     async function saveDraft() {
       if (!draft || saving || draft.key !== key()) return false;
@@ -194,7 +196,7 @@ window.PaperLatexReview = (() => {
         say(`批注未保存：${error.message}。当前文字和选段已保留，可重试或取消。`, true);
         return false;
       }
-      finally { saving = false; save.disabled = false; cancel.disabled = false; }
+      finally { saving = false; save.disabled = false; cancel.disabled = false; if (!disposed) render(); }
     }
     async function setStatus(note) {
       if (draft || saving || collaborating) { say(collaborating ? 'DSH 正在处理批注，请稍候再修改状态。' : '请先保存或取消当前批注。', true); return; }
@@ -203,12 +205,12 @@ window.PaperLatexReview = (() => {
         await api('latex_review_put', { id: context().id, note_id: note.id, expected_version: note.version, comment: note.comment, status: note.status === 'resolved' ? 'open' : 'resolved' });
         await refreshNotes();
       } catch (error) { say(`状态未保存：${error.message}，请刷新后重试。`, true); }
-      finally { saving = false; }
+      finally { saving = false; if (!disposed) render(); }
     }
     async function runNote(kind, note) {
       const run = kind === 'ask' ? onAsk : onPropose;
       if (disposed || collaborating || typeof run !== 'function') return false;
-      if (draft || saving) { say('请先保存或取消当前批注，再问 DSH。', true); show(); return false; }
+      if (kind === 'ask' ? blocksQuestion(note) : draft || saving) { say('请先保存或取消当前批注，再继续。', true); show(); return false; }
       if (!notes.some(value => value.id === note.id && value.version === note.version)) { say('批注已变化，请刷新后重试。', true); return false; }
       const owner = { key: key(), id: note.id, version: note.version, kind };
       collaborating = owner; render(); say(kind === 'ask' ? 'DSH 正在阅读这条批注…' : '正在按这条批注生成修改提案…');
@@ -279,7 +281,7 @@ window.PaperLatexReview = (() => {
         const ask = make('button', 'button subtle', '问 DSH'); ask.type = 'button'; ask.dataset.reviewAction = 'ask'; ask.addEventListener('click', () => void runNote('ask', note));
         const propose = make('button', 'button subtle', '生成修改提案'); propose.type = 'button'; propose.dataset.reviewAction = 'propose'; propose.addEventListener('click', () => void runNote('propose', note));
         editButton.disabled = resolve.disabled = Boolean(collaborating);
-        ask.disabled = Boolean(collaborating || saving || draft || typeof onAsk !== 'function'); propose.disabled = Boolean(collaborating || saving || draft || typeof onPropose !== 'function');
+        ask.disabled = Boolean(collaborating || blocksQuestion(note) || typeof onAsk !== 'function'); propose.disabled = Boolean(collaborating || saving || draft || typeof onPropose !== 'function');
         row.append(editButton, resolve, ask, propose); card.append(row); renderCollaboration(note, card); list.append(card);
       }
       if (!visible.length) list.append(make('p', 'latex-review-empty', '暂无此类批注。源码选段后点「批注选段／当前行」；PDF 可选择高亮或区域便笺。'));
@@ -300,7 +302,7 @@ window.PaperLatexReview = (() => {
       } catch (error) { say(`导出失败：${error.message}`, true); }
     }
     save.addEventListener('click', () => void saveDraft());
-    cancel.addEventListener('click', () => { if (!saving) { draft = null; comment.value = ''; composer.hidden = true; say('已取消未保存批注。'); } });
+    cancel.addEventListener('click', () => { if (!saving) { draft = null; comment.value = ''; composer.hidden = true; render(); say('已取消未保存批注。'); } });
     refresh.addEventListener('click', () => void refreshNotes()); filter.addEventListener('change', render);
     return { refresh: refreshNotes, annotations: () => notes, beginSource, setCollaboration, cancelCollaboration, beginPdf: (anchor, type, options) => begin(anchor, type, options), hasDraft: () => Boolean(draft || saving),
       reset() { if (draft || saving) return false; ++sequence; notes = []; collaborating = null; collaboration = []; collaborationKey = null; pendingProposal = null; render(); return true; },

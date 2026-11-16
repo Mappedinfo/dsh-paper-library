@@ -35,7 +35,12 @@ const MAX_LOG_BYTES = 224 * 1024
 const MAX_REVIEW_TEXT = 8000
 const MAX_REVIEW_COMMENT = 8000
 /** Material kinds read the same way to the model and to a person reviewing the log. */
-const MATERIAL_LABELS = { selection: '作者选中的片段', file: '整个文件', 'file-head': '文件开头（已截断）' }
+const MATERIAL_LABELS = {
+  selection: '作者选中的片段', file: '整个文件', 'file-head': '文件开头（已截断）',
+  'review-source': '原批注附近的已保存源码', 'review-source-history': '原批注对应历史修订的附近源码',
+  'review-source-relocated': '重定位后当前版本的附近源码', 'review-source-unverified': '当前源码中原行号附近的辅助背景，位置未核验',
+  'review-pdf': '原编译 PDF 批注页的附近文字', 'review-quote-only': '附近上下文不可用，只有批注保存的原文和留言',
+}
 
 const PROPOSAL_ACTIONS = new Set(['latex_ai_ask', 'latex_ai_propose', 'latex_ai_proposal', 'latex_ai_accept', 'latex_ai_discard', 'latex_ai_status', 'latex_ai_translate'])
 
@@ -63,6 +68,12 @@ export function createLatexAI({ store, ai, research, config = {}, dispatch, libr
     return { provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) }
   }
 
+  async function questionRoute(request) {
+    if (request.provider !== undefined || request.model !== undefined || (config.provider && config.model)) return routeOf(request)
+    const selected = typeof getDefaultModel === 'function' ? await getDefaultModel() : null
+    return routeOf(selected ?? request)
+  }
+
   async function read(id, path, project, signal) {
     const file = await dispatch({ action: 'latex_read', id, path, expected_root: project.root, expected_binding_generation: project.binding_generation }, { library, python, signal })
     return file
@@ -88,8 +99,8 @@ export function createLatexAI({ store, ai, research, config = {}, dispatch, libr
   function askPrompt({ path, question, material, project, reviewNote }) {
     return `${ASK_SYSTEM}
 项目：${project.title}
-文件：${path}（材料范围：${MATERIAL_LABELS[material.kind] || material.kind}）
-
+文件：${path}${material.line ? `:${material.line}` : ''}（材料范围：${MATERIAL_LABELS[material.kind] || material.kind}）
+${reviewNote ? '结合分开提供的原文、附近上下文和用户留言，直接回答留言里的写作问题；上下文不完整时明确指出。' : ''}
 <<<MATERIAL
 ${material.body}
 MATERIAL${reviewMaterial(reviewNote)}
@@ -176,22 +187,26 @@ MATERIAL${reviewMaterial(reviewNote)}
     return project
   }
 
-  async function reviewNoteOf(request, project, signal) {
+  async function reviewNoteOf(request, project, signal, purpose = 'propose') {
     if (request.review_note === undefined) return null
     const selected = request.review_note
     if (!selected || typeof selected !== 'object' || Array.isArray(selected)) throw fail('批注引用格式无效。')
     const id = text(selected.id, '批注标识', 300, true), version = text(selected.version, '批注版本', 200, true)
     if (request.selection !== undefined) throw fail('批注操作不能同时使用编辑器选文，请重新点击该条批注。')
     signal?.throwIfAborted()
-    const result = await dispatch({ action: 'latex_review_list', id: project.id, expected_root: project.root, expected_binding_generation: project.binding_generation }, { library, python, signal })
+    const context = purpose === 'ask'
+    const binding = { id: project.id, expected_root: project.root, expected_binding_generation: project.binding_generation }
+    const result = await dispatch(context
+      ? { action: 'latex_review_question_context', ...binding, note_id: id, version }
+      : { action: 'latex_review_list', ...binding }, { library, python, signal })
     await projectOf(project.id, project.root, project.binding_generation, signal)
-    const note = (Array.isArray(result.annotations) ? result.annotations : []).find(item => item.id === id)
-    if (!note) throw fail('这条批注已不在当前项目入口中，请刷新批注列表。', 'LATEX_AI_NOTE_STALE', 409)
+    const note = context ? result.annotation : (Array.isArray(result.annotations) ? result.annotations : []).find(item => item.id === id)
+    if (!note || note.id !== id) throw fail('这条批注已不在当前项目入口中，请刷新批注列表。', 'LATEX_AI_NOTE_STALE', 409)
     if (note.version !== version) throw fail('这条批注已更新，请刷新后重新提问或生成提案。', 'LATEX_AI_NOTE_STALE', 409)
     const anchor = note.anchor
     if (!anchor || !['source', 'pdf'].includes(anchor.kind)) throw fail('批注来源无效，原记录已保留。', 'LATEX_AI_NOTE_STALE', 409)
     if (anchor.kind === 'source' && request.path !== undefined && request.path !== anchor.path) throw fail('源码批注只能针对其所属文件，请重新打开这条批注。', 'LATEX_AI_NOTE_PATH', 409)
-    if (anchor.kind === 'pdf' && !text(request.path, 'PDF 批注的目标源码文件', 1000)) throw fail('请明确选择 PDF 批注要讨论或修改的源码文件。', 'LATEX_AI_NOTE_PATH', 409)
+    if (purpose === 'propose' && anchor.kind === 'pdf' && !text(request.path, 'PDF 批注的目标源码文件', 1000)) throw fail('请明确选择 PDF 批注要讨论或修改的源码文件。', 'LATEX_AI_NOTE_PATH', 409)
     return {
       id, version, kind: anchor.kind, stale: note.stale === true, status: note.status,
       anchor: anchor.kind === 'source'
@@ -199,6 +214,7 @@ MATERIAL${reviewMaterial(reviewNote)}
         : { kind: 'pdf', page: anchor.page, pdf_version: anchor.pdf_version },
       quote: String(note.text || '').slice(0, MAX_REVIEW_TEXT), comment: String(note.comment || '').slice(0, MAX_REVIEW_COMMENT),
       quote_truncated: String(note.text || '').length > MAX_REVIEW_TEXT, comment_truncated: String(note.comment || '').length > MAX_REVIEW_COMMENT,
+      ...(context ? { material: result.material } : {}),
     }
   }
   const reviewReference = note => note ? { review_note: { id: note.id, version: note.version, kind: note.kind, stale: note.stale } } : {}
@@ -215,19 +231,21 @@ MATERIAL${reviewMaterial(reviewNote)}
   async function ask(request, signal) {
     const id = identifier(request.id, '项目标识')
     const project = await projectOf(id, request.expected_root, request.expected_binding_generation, signal)
-    const reviewNote = await reviewNoteOf(request, project, signal)
-    const file = await read(id, request.path ?? (reviewNote?.kind === 'source' ? reviewNote.anchor.path : project.main_path), project, signal)
-    const question = text(request.question, '问题', MAX_QUESTION, true)
-    const material = materialOf(file.content, request.selection)
-    const route = routeOf(request)
-    const result = await respond(request, project, askPrompt({ path: file.path, question, material, project, reviewNote }), route, signal)
+    const selected = await reviewNoteOf(request, project, signal, 'ask')
+    const { material: context, ...reviewNote } = selected || {}
+    if (selected && typeof context?.body !== 'string') throw fail('未能读取这条批注的上下文，请刷新后重试。', 'LATEX_AI_NOTE_STALE', 409)
+    const file = context || await read(id, request.path ?? project.main_path, project, signal)
+    const question = text(request.question, '问题', MAX_QUESTION, !selected) || '请回答这条批注里的问题，或解释原文及其上下文。'
+    const material = context ? { ...context, characters: context.body.length } : materialOf(file.content, request.selection)
+    const route = await questionRoute(request)
+    const result = await respond(request, project, askPrompt({ path: file.path, question, material, project, reviewNote: selected ? reviewNote : null }), route, signal)
     await projectOf(id, project.root, project.binding_generation, signal)
-    if (reviewNote) await reviewNoteOf(request, project, signal)
+    if (selected) await reviewNoteOf(request, project, signal, 'verify')
     signal?.throwIfAborted()
     const bounded = String(result.text || '').slice(0, MAX_ANSWER)
-    const entry = { kind: 'ask', path: file.path, question, answer: bounded, model: `${route.provider}/${route.model}`, revision: file.revision, material: { kind: material.kind, characters: material.characters, truncated: material.truncated }, ...reviewReference(reviewNote), ...retrievalReference(result.retrieval), created: now() }
+    const entry = { kind: 'ask', path: file.path, question, answer: bounded, model: `${route.provider}/${route.model}`, revision: file.revision, material: { kind: material.kind, characters: material.characters, truncated: material.truncated }, ...reviewReference(selected), ...retrievalReference(result.retrieval), created: now() }
     await appendLog(id, project.binding_generation, entry, signal)
-    return { id, path: file.path, revision: file.revision, answer: bounded, model: route, material: entry.material, ...reviewReference(reviewNote), ...retrievalReference(result.retrieval), entry }
+    return { id, path: file.path, revision: file.revision, answer: bounded, model: route, material: entry.material, ...reviewReference(selected), ...retrievalReference(result.retrieval), entry }
   }
 
   async function translate(request, signal) {

@@ -14,6 +14,8 @@
 
 ## 2. 当前任务与实际状态
 
+LaTeX 自审批注保存后可直接点「问 DSH」。提问携带原文、附近上下文和用户留言。源码按所属文件及修订定位，PDF 从原编译页读取。回复显示于该条批注下方。见 [LaTeX 自审](docs/latex-self-review.md#使用)。
+
 LaTeX 拼写建议支持将词加入自定义词典或保存至「语言与词条」。自定义拼写与人工词条立即用于重新检查，释义可留空。
 
 LaTeX 引用补全连接 Paper Library，按当前主入口声明复用或追加 BibTeX／BibLaTeX 条目。Git 面板支持全选，并为仓库钩子与推送分别提供等待时间，失败后保留所选文件。见 [引用 Paper Library 文献](docs/latex-projects.md#引用-paper-library-文献)。

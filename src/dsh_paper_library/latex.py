@@ -1047,7 +1047,7 @@ def clean(library, id=None, include_archived=False):
     return {"id": row["id"], "removed": sorted(removed)[:500], "removed_count": len(removed), "kept": sorted(kept)[:200], "limits": {"listed": 500}}
 
 
-from . import latex_versions, latex_assets, latex_retrieval, latex_pdf_search, latex_git, latex_citation
+from . import latex_versions, latex_assets, latex_retrieval, latex_pdf_search, latex_git, latex_citation, latex_review
 from .latex_formulas import latex_formula_check
 
 ACTIONS = {
@@ -1078,6 +1078,7 @@ ACTIONS = {
     "latex_outline": (outline, ("id", "include_archived")),
     "latex_media_preview": (media_preview, ("id", "path", "page", "scale", "include_archived")),
     "latex_review_list": (review_list, ("id",)),
+    "latex_review_question_context": (latex_review.question_context, ("id", "note_id", "version")),
     "latex_review_put": (review_put, ("id", "note_id", "anchor", "comment", "status", "expected_version", "type", "request_id")),
     "latex_review_export": (review_export, ("id", "format")),
     "latex_review_delete": (review_delete, ("id", "note_id", "expected_version")),

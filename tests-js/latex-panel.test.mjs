@@ -1630,6 +1630,34 @@ test('saved note actions use their own reference and source file instead of unre
   f.ui.dispose()
 })
 
+test('an original PDF note asks directly while the current source and another note have drafts', async () => {
+  const pdfNote = savedReview('note-pdf', 'pdf'), other = savedReview();
+  const f = await fixture(action => {
+    if (action === 'latex_review_list') return { annotations: [pdfNote, other] };
+    if (action === 'latex_ai_status') return { entries: [] };
+    if (action === 'latex_ai_ask') return reviewAiResponse(action, pdfNote);
+  }, { review: true });
+  const reviewer = f.ui.testHooks.reviewer();
+  await tick();
+  f.ids.get('latex-review-filter').value = 'open';
+  await reviewer.refresh();
+  reviewer.testHooks.edit(other);
+  f.ids.get('latex-review-comment').value = 'Keep unrelated draft';
+  const editor = f.ids.get('latex-editor');
+  editor.value = 'An unsaved manuscript edit'; await editor.dispatch('input');
+  const card = f.ids.get('latex-review-list').querySelectorAll('.latex-review-card').find(row => row.dataset.note === pdfNote.id);
+  const ask = card.querySelectorAll('button').find(button => button.dataset.reviewAction === 'ask');
+  assert.equal(ask.disabled, false);
+  await ask.dispatch('click'); await tick();
+  const request = f.calls.find(call => call.action === 'latex_ai_ask');
+  assert.equal(request.review_note.id, pdfNote.id);
+  assert.equal(Object.hasOwn(request, 'path'), false);
+  assert.equal(f.calls.some(call => call.action === 'latex_write'), false);
+  assert.equal(f.ids.get('latex-review-comment').value, 'Keep unrelated draft');
+  assert.match(f.ids.get('latex-review-list').textContent, /Synthetic note-specific reply/);
+  f.ui.dispose();
+});
+
 test('a historical PDF note explicitly targets current source and proposal acceptance opens the proposed file', async () => {
   const note = savedReview('note-pdf', 'pdf')
   const f = await fixture(action => {
@@ -1711,6 +1739,7 @@ test('the source annotation composer saves a manual note with four actions', asy
   assert.equal(f.ids.get('latex-review-composer').hidden, true)
   const actions = f.ids.get('latex-review-list').querySelector('.latex-review-card-actions')
   assert.deepEqual(actions.children.map(child => child.textContent), ['编辑', '解决', '问 DSH', '生成修改提案'])
+  assert.equal(actions.children[2].disabled, false)
   assert.equal(f.calls.some(call => call.action === 'latex_ai_ask' || call.action === 'latex_ai_propose'), false)
   f.ui.dispose()
 })

@@ -251,6 +251,44 @@ def test_source_anchor_unicode_cas_status_stale_and_dual_entry_isolation(tmp_pat
 
 
 @pytest.mark.skipif(not (shutil.which("latexmk") and shutil.which("pdflatex")), reason="Synthetic PDF review test requires latexmk and pdflatex")
+def test_review_question_uses_original_pdf_page_after_recompile(tmp_path):
+    root, _, call = project(tmp_path)
+    token = call("latex_pdf_pages")["build"]["pdf_version"]
+    word = call("latex_pdf_page", page=1)["words"][0]
+    anchor = {"kind": "pdf", "pdf_version": token, "page": 1, "rects": [word[:4]], "text": word[4]}
+    assert call("latex_review_put", anchor=anchor, type="highlight", comment="Check the definition.")["saved"]
+    note = call("latex_review_list")["annotations"][0]
+
+    (root / "one.tex").write_text("Replacement from a newer PDF build.\n")
+    assert call("latex_compile", engine="pdflatex")["ok"]
+    assert call("latex_pdf_pages")["build"]["pdf_version"] != token
+    result = call("latex_review_question_context", note_id=note["id"], version=note["version"])
+    assert result["annotation"]["stale"]
+    assert result["annotation"]["comment"] == "Check the definition."
+    material = result["material"]
+    assert material["kind"] == "review-pdf" and material["page"] == 1 and material["revision"] == token
+    assert "First page review sentence." in material["body"]
+    assert "Second sentence for the source anchor." in material["body"]
+    assert "Replacement" not in material["body"]
+    assert call("latex_review_question_context", note_id=note["id"], version="old-note-version")["material"] is None
+
+
+def test_review_question_uses_saved_source_revision(tmp_path):
+    _, _, call = project(tmp_path, compile=False)
+    original = call("latex_read", path="one.tex")
+    quote = "First page review sentence."
+    anchor = {"kind": "source", "path": "one.tex", "revision": original["revision"],
+              "start": 0, "end": len(quote), "text": quote}
+    note = call("latex_review_put", anchor=anchor, comment="Check this wording.")["annotation"]
+    call("latex_write", path="one.tex", content="New context.\n", expected_revision=original["revision"])
+    result = call("latex_review_question_context", note_id=note["id"], version=note["version"])
+    assert result["annotation"]["stale"] and result["annotation"]["text"] == quote
+    material = result["material"]
+    assert material["kind"] == "review-source-history" and material["revision"] == original["revision"]
+    assert material["body"] == original["content"]
+
+
+@pytest.mark.skipif(not (shutil.which("latexmk") and shutil.which("pdflatex")), reason="Synthetic PDF review test requires latexmk and pdflatex")
 def test_pdf_notes_recover_from_native_copy_preserve_original_and_export(tmp_path):
     root, library, call = project(tmp_path)
     original = root / "main.pdf"

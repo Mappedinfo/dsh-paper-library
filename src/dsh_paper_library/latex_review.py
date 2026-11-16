@@ -24,6 +24,7 @@ MAX_RELOCATION_PAGES = 80
 MAX_RELOCATION_WORDS = 120000
 MAX_RELOCATION_CHARACTERS = 1000000
 MAX_RELOCATION_TOTAL_CHARACTERS = 8000000
+MAX_QUESTION_CONTEXT = 6000
 HEX = re.compile(r"^[0-9a-f]{64}$")
 NOTE = re.compile(r"^[0-9a-f]{32}$")
 
@@ -435,6 +436,94 @@ def listing(library, id=None):
             "limits": {"annotations": MAX_NOTES, "builds": MAX_BUILDS, "relocation_pages": MAX_RELOCATION_PAGES,
                        "relocation_words": MAX_RELOCATION_WORDS, "relocation_characters": MAX_RELOCATION_CHARACTERS,
                        "relocation_total_characters": MAX_RELOCATION_TOTAL_CHARACTERS}}
+
+
+
+def _source_question_context(library, row, note):
+    from .latex import read
+
+    anchor = note["anchor"]
+    path, original_revision = anchor["path"], anchor["revision"]
+    try:
+        current = read(library, row["id"], path)
+    except (ValueError, OSError):
+        current = None
+    source = current["content"] if current and current["revision"] == original_revision else None
+    kind, start, end = "review-source", anchor["start"], anchor["end"]
+    revision = original_revision
+    if source is None:
+        saved = library.db.execute(
+            "SELECT body FROM latex_revisions WHERE project_id=? AND path=? AND sha256=? ORDER BY created DESC LIMIT 1",
+            (row["id"], path, original_revision),
+        ).fetchone()
+        if saved is not None:
+            source, kind = saved["body"], "review-source-history"
+    if source is not None and source[start:end] != anchor["text"]:
+        source = None
+    if source is None and current:
+        source, revision = current["content"], current["revision"]
+        relocated = note.get("relocation", {})
+        target = relocated.get("anchor", {})
+        if relocated.get("status") == "matched" and target.get("path") == path and target.get("revision") == revision:
+            kind, start, end = "review-source-relocated", target["start"], target["end"]
+        else:
+            kind = "review-source-unverified"
+            lines = source.splitlines(keepends=True)
+            start = min(len(source), sum(map(len, lines[:max(0, anchor["line"] - 1)])))
+            end = start
+    if source is None:
+        return {"path": path, "revision": original_revision, "kind": "review-quote-only", "body": "", "truncated": False}
+    room = max(0, MAX_QUESTION_CONTEXT - min(end - start, MAX_QUESTION_CONTEXT // 2))
+    left, right = max(0, start - room // 2), min(len(source), end + room // 2)
+    if right - left > MAX_QUESTION_CONTEXT:
+        right = left + MAX_QUESTION_CONTEXT
+    return {"path": path, "revision": revision, "kind": kind, "body": source[left:right],
+            "line": source.count("\n", 0, left) + 1, "truncated": left > 0 or right < len(source)}
+
+
+def _pdf_question_context(library, row, note):
+    import pymupdf as fitz
+
+    anchor = note["anchor"]
+    sha, number = anchor["pdf_version"], anchor["page"]
+    material = {"path": f"PDF 第 {number} 页", "revision": sha, "page": number, "kind": "review-quote-only",
+                "body": "", "truncated": False}
+    if not isinstance(sha, str) or not HEX.fullmatch(sha):
+        return material
+    try:
+        copy = directory(library, row) / f"{sha}.pdf"
+        if copy.is_symlink() or not copy.is_file() or copy.stat().st_size > MAX_PDF_BYTES:
+            return material
+        with library._open_pdf(copy) as doc:
+            if not 1 <= number <= doc.page_count:
+                return material
+            page = doc[number - 1]
+            rects = [fitz.Rect(rect) & page.rect for rect in (anchor.get("rects") or [])[:200]]
+            rects = [rect for rect in rects if not rect.is_empty and not rect.is_infinite]
+            # Anchors are in displayed-page coordinates; text extraction uses the native orientation.
+            bounds = page.rect
+            if rects:
+                top = max(bounds.y0, min(rect.y0 for rect in rects) - 150)
+                bottom = min(bounds.y1, max(rect.y1 for rect in rects) + 150)
+                bounds = fitz.Rect(bounds.x0, top, bounds.x1, bottom)
+            content = page.get_text("text", sort=True, clip=bounds * page.derotation_matrix).strip()
+    except (OSError, ValueError, RuntimeError):
+        return material
+    if content:
+        material.update(kind="review-pdf", body=content[:MAX_QUESTION_CONTEXT],
+                        truncated=bool(rects) or len(content) > MAX_QUESTION_CONTEXT)
+    return material
+
+
+def question_context(library, id=None, note_id=None, version=None):
+    from .latex import _project
+
+    row = _project(library, id)
+    note = next((entry for entry in listing(library, id)["annotations"] if entry["id"] == note_id), None)
+    if not note or note["version"] != version:
+        return {"annotation": note, "material": None}
+    material = (_source_question_context if note["anchor"]["kind"] == "source" else _pdf_question_context)(library, row, note)
+    return {"annotation": note, "material": material}
 
 
 def put(library, id=None, note_id=None, anchor=None, comment="", status="open", expected_version=None, type="note", request_id=None):

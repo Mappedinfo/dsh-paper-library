@@ -2679,15 +2679,15 @@ window.PaperLatexWorkspace = (() => {
     }
 
     async function aiRun(kind, note) {
-      if (ai.busy || !file || !project || switching || view.hidden || disposed) return false;
+      if (ai.busy || !project || switching || view.hidden || disposed || (kind === 'propose' && !file)) return false;
       if (kind === 'propose' && ai.proposal) {
         throw new Error(detachedProposal.hidden ? '请在对应批注下接受或放弃当前提案。' : '请在「设置」中接受或放弃待处理的旧提案。');
       }
-      if (dirty || saving || pendingConflict) throw new Error('请先保存当前源码。');
+      if (kind === 'propose' && (dirty || saving || pendingConflict)) throw new Error('请先保存当前源码。');
       const value = kind === 'ask' ? '请根据这条已保存批注与原引用，回答其中的问题并解释相关内容。' : '请依据这条已保存批注，为指定的当前源码提出必要修改；保留原意、引文与证据强度，不猜测旧 PDF 的源码位置。';
       const retrieval = requestRetrieval();
       const owner = aiOwner(note.anchor.kind === 'source' ? note.anchor.path : file), request = ++aiRequest;
-      const args = { id: owner.id, path: owner.path, review_note: { id: note.id, version: note.version }, ...aiRoute(), retrieval };
+      const args = { id: owner.id, ...(kind === 'propose' || note.anchor.kind === 'source' ? { path: owner.path } : {}), review_note: { id: note.id, version: note.version }, ...aiRoute(), retrieval };
       const controller = new AbortController(); aiAbort = controller;
       if (retrieval.public_queries.length) clearPublicRetrieval();
       aiBusy(true);
