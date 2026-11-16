@@ -8,11 +8,12 @@ import { webcrypto } from 'node:crypto'
 const source = await readFile(new URL('../web/latex-workspace.js', import.meta.url), 'utf8')
 const reviewSource = await readFile(new URL('../web/latex-review.js', import.meta.url), 'utf8')
 const searchSource = await readFile(new URL('../web/latex-search.js', import.meta.url), 'utf8')
+const versionSource = await readFile(new URL('../web/latex-versions.js', import.meta.url), 'utf8')
 const tick = () => new Promise(done => setImmediate(done))
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
 const image = { image: 'aW1hZ2U=', width: 600, height: 800, pixel_width: 1200, pixel_height: 1600, page_count: 4, bytes: 5, supported: true }
 
-async function fixture(override = () => undefined, { review = false, spellChecker, writingTools, sourceEditor, onContext, rail, onSettingsClose } = {}) {
+async function fixture(override = () => undefined, { review = false, versions = false, spellChecker, writingTools, sourceEditor, onContext, rail, onSettingsClose } = {}) {
   const ids = new Map(), revoked = [], calls = [], urls = [], timers = new Map()
   class Element {
     constructor(tag = 'div') {
@@ -63,6 +64,7 @@ async function fixture(override = () => undefined, { review = false, spellChecke
   if (writingTools) window.PaperLatexWritingTools = { create: () => writingTools }
   if (sourceEditor) window.PaperLatexEditor = { create: () => sourceEditor }
   if (review) vm.runInNewContext(reviewSource, globals)
+  if (versions) vm.runInNewContext(versionSource, globals)
   vm.runInNewContext(searchSource, globals)
   vm.runInNewContext(source, globals)
   const ui = window.PaperLatexWorkspace.create({ api, onContext, rail, onSettingsClose })
@@ -548,7 +550,7 @@ test('Paper Library picker waits for bibliography choice before inserting the ci
   f.ui.dispose();
 });
 
-test('Git toolbar detects the project and requires explicit file selection and branch confirmation', async () => {
+test('Versions separates compiled PDF snapshots from Git actions and preserves failed commit inputs', async () => {
   const oid = 'a'.repeat(40); let attempts = 0;
   const f = await fixture((action) => {
     if (action === 'latex_git_status') return { available: true, branch: 'main', repository: '/synthetic/repo', scope: 'manuscript',
@@ -559,33 +561,43 @@ test('Git toolbar detects the project and requires explicit file selection and b
       return { head: oid, index_lock_recovered: true };
     }
     if (action === 'latex_git_push') return { head: oid, remote: 'origin', branch: 'main' };
-  });
-  const open = f.ids.get('latex-git-open');
-  assert.equal(open.textContent, 'Git · main');
-  await open.dispatch('click'); await tick();
-  const dialog = f.ids.get('latex-git-dialog');
-  const button = label => dialog.querySelectorAll('button').find(node => node.textContent === label);
-  const [all, file, message, confirm] = dialog.querySelectorAll('input');
+    if (action === 'latex_version_list') return { total: 1, versions: [{ id: 'snapshot', project_title: 'Synthetic PDF', created: '2026-01-01', main_path: 'main.tex', engine: 'pdflatex', source_count: 2, review_count: 0 }] };
+  }, { versions: true });
+  assert.equal(f.calls.some(call => call.action === 'latex_git_status'), false);
+  await f.ids.get('latex-tab-version').dispatch('click'); await tick();
+  const snapshots = f.ids.get('latex-version-compiled-panel'), git = f.ids.get('latex-version-git-panel');
+  assert.equal(snapshots.hidden, false);
+  assert.match(snapshots.textContent, /Synthetic PDF/);
+  assert.equal(git.hidden, true);
+  await f.ids.get('latex-version-compiled').dispatch('keydown', { key: 'ArrowRight' }); await tick();
+  assert.equal(snapshots.hidden, true);
+  assert.equal(git.hidden, false);
+  assert.match(git.textContent, /main · \/synthetic\/repo/);
+  const button = label => git.querySelectorAll('button').find(node => node.textContent === label);
+  const [all, file, message, confirm] = git.querySelectorAll('input');
   assert.equal(button('提交所选文件').disabled, true);
   assert.equal(button('推送').disabled, true);
   all.checked = true; await all.dispatch('change'); assert.equal(file.checked, true);
   message.value = 'Synthetic update'; message.oninput();
   assert.equal(button('提交所选文件').disabled, false);
   await button('提交所选文件').dispatch('click'); await tick();
-  const [retryAll, retryFile, retryMessage] = dialog.querySelectorAll('input');
+  const [retryAll, retryFile, retryMessage] = git.querySelectorAll('input');
   assert.equal(retryAll.checked, true); assert.equal(retryFile.checked, true);
   assert.equal(retryMessage.value, 'Synthetic update');
   assert.equal(button('提交所选文件').disabled, false);
   await button('提交所选文件').dispatch('click'); await tick();
-  assert.equal(dialog.querySelectorAll('input')[1].checked, false);
-  assert.match(dialog.textContent, /已移开失效的索引锁。已提交 aaaaaaaa/);
+  assert.equal(git.querySelectorAll('input')[1].checked, false);
+  assert.match(git.textContent, /已移开失效的索引锁。已提交 aaaaaaaa/);
   const commit = f.calls.find(call => call.action === 'latex_git_commit');
   assert.deepEqual(Array.from(commit.paths), ['main.tex']); assert.equal(commit.expected_version, 'state');
-  const nextConfirm = dialog.querySelectorAll('input')[3];
+  const nextConfirm = git.querySelectorAll('input')[3];
   assert.notEqual(nextConfirm, confirm);
   nextConfirm.checked = true; await nextConfirm.dispatch('change');
   await button('推送').dispatch('click'); await tick();
   assert.equal(f.calls.find(call => call.action === 'latex_git_push').expected_version, 'push-state');
+  await f.ids.get('latex-version-compiled').dispatch('click'); await tick();
+  assert.equal(git.hidden, true);
+  assert.equal(snapshots.hidden, false);
   f.ui.dispose();
 });
 
@@ -1505,6 +1517,36 @@ test('preview actions share a toolbar and switch with the active preview', async
   assert.equal(f.ids.get('latex-media-prev').parentElement.hidden, false)
   f.ui.dispose()
 })
+
+test('media preview opens the project picker and identifies the selected file', async () => {
+  const first = 'figures/diagram.png', second = 'references/sample.pdf';
+  const f = await fixture((action, args) => {
+    if (action !== 'latex_tree') return;
+    const assets = args.id === 'one' ? [first, second].map(path => ({ path, kind: 'asset', bytes: 10 })) : [];
+    return { files: [{ path: 'main.tex', kind: 'text' }, ...assets] };
+  });
+  const navigator = f.ids.get('latex-navigator'), media = f.ids.get('latex-media');
+  const [diagram, reference] = media.querySelectorAll('button');
+  await f.ids.get('latex-nav-toggle').dispatch('click');
+  assert.equal(navigator.hidden, true);
+  await f.ids.get('latex-tab-media').dispatch('click');
+  assert.equal(navigator.hidden, false);
+  assert.equal(f.ids.get('latex-nav-media').getAttribute('aria-selected'), 'true');
+  await diagram.dispatch('click'); await tick();
+  assert.equal(diagram.getAttribute('aria-current'), 'true');
+  assert.equal(f.ids.get('latex-media-path').textContent, first);
+  await reference.dispatch('click'); await tick();
+  assert.equal(diagram.getAttribute('aria-current'), 'false');
+  assert.equal(reference.getAttribute('aria-current'), 'true');
+  assert.equal(f.ids.get('latex-media-preview').querySelector('img').alt, second);
+  await f.ids.get('latex-nav-outline').dispatch('click');
+  await f.ids.get('latex-media-pick').dispatch('click');
+  assert.equal(media.hidden, false);
+  await f.ui.testHooks.setProject('two');
+  assert.equal(f.ids.get('latex-media-preview').querySelector('img'), null);
+  assert.equal(f.ids.get('latex-media-next').disabled, true);
+  f.ui.dispose();
+});
 
 test('workspace theme persists as a local preference without changing the host', async () => {
   let preferences = { latex_theme: 'system', latex_auto_compile: false }

@@ -255,6 +255,10 @@ body > #latex-view { height: 100dvh; }
 .latex-breadcrumb { flex: 0 0 auto; padding: 8px 12px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; border-bottom: 1px solid var(--line); color: var(--muted); overflow-wrap: anywhere; }
 .latex-menu #latex-entry { width: 100%; max-width: none; }
 .latex-versions, #library-latex-versions { padding: 8px; }
+.latex-version-switch {
+  display: flex; flex-wrap: wrap; gap: 4px; flex: 0 0 auto;
+  padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--surface);
+}
 .latex-version-card { padding: 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .latex-version-card strong { font-size: 12px; }
 .latex-version-card p { margin: 5px 0; }
@@ -433,18 +437,19 @@ body > #latex-view { height: 100dvh; }
 .latex-spelling-results small { display: block; color: var(--muted); }
 .latex-spelling-detail { margin: 3px 0 0; }
 .latex-spelling-detail:empty { display: none; }
-#latex-git-open { max-width: 128px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.latex-git-dialog { width: min(660px, calc(100vw - 48px)); }
-.latex-git-dialog h2, .latex-git-dialog h3 { margin: 0; }
-.latex-git-dialog header h2 { margin-inline-end: auto; font-size: 17px; }
-.latex-git-dialog p, .latex-git-file, .latex-git-log li { overflow-wrap: anywhere; }
-.latex-git-dialog fieldset { min-width: 0; max-height: 30vh; overflow: auto; margin: 0; padding: 6px 9px; border: 1px solid var(--line); }
+.latex-git-panel { min-width: 0; min-height: 0; overflow: auto; padding: 8px 12px 14px; }
+.latex-git-panel h3 { margin: 0; }
+.latex-git-panel header { justify-content: space-between; margin-bottom: 6px; }
+.latex-git-panel header p { margin: 0; color: var(--muted); }
+.latex-git-panel p, .latex-git-file, .latex-git-log li { overflow-wrap: anywhere; }
+.latex-git-panel fieldset { min-width: 0; max-height: 30vh; overflow: auto; margin: 0; padding: 6px 9px; border: 1px solid var(--line); }
 .latex-git-file { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; }
 .latex-git-file code { color: var(--muted); min-width: 2ch; }
 .latex-git-actions { display: flex; align-items: center; gap: 8px; }
 .latex-git-actions label { flex: 1; display: grid; gap: 3px; }
 .latex-git-actions input { min-width: 0; width: 100%; box-sizing: border-box; }
-.latex-git-dialog fieldset + .latex-git-actions { margin-block: 10px 14px; align-items: end; }
+.latex-git-panel fieldset + .latex-git-actions { margin-block: 10px 14px; align-items: end; flex-wrap: wrap; }
+.latex-git-panel fieldset + .latex-git-actions label { min-width: min(100%, 170px); }
 .latex-git-log { list-style: none; margin: 7px 0; padding: 0; }
 .latex-git-log li { display: flex; align-items: baseline; gap: 7px; }
 .latex-git-log code { color: var(--muted); }

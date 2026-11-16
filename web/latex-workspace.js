@@ -24,7 +24,7 @@ window.PaperLatexWorkspace = (() => {
 
   function create({api: transport, toast = () => {}, getLibrary = () => '', rail = null, onVersionSaved = () => {}, onContext = () => {}, onSettingsClose = () => {}}) {
     const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
-    let projects = [], project = null, tree = null, file = null, revision = null, pageCount = 0, page = 1, tab = 'pdf';
+    let projects = [], project = null, tree = null, file = null, revision = null, pageCount = 0, page = 1, tab = 'pdf', versionMode = 'compiled';
     // Bind project actions to the location this window opened. A different
     // window may have changed it since this editor loaded its source.
     const api = (action, args = {}, options) => {
@@ -109,31 +109,25 @@ window.PaperLatexWorkspace = (() => {
     const menuButton = make('button', 'button subtle latex-menu-button', '⚙'); menuButton.id = 'latex-menu-open'; menuButton.type = 'button';
     menuButton.setAttribute('aria-expanded', 'false'); menuButton.setAttribute('aria-controls', 'latex-menu'); menuButton.setAttribute('aria-label', '设置'); menuButton.title = '设置';
     if (window.PaperIcons) { menuButton.textContent = ''; window.PaperIcons.decorate(menuButton, 'settings'); }
-    const gitOpen = make('button', 'button subtle', 'Git'); gitOpen.type = 'button'; gitOpen.id = 'latex-git-open';
-    gitOpen.setAttribute('aria-haspopup', 'dialog'); gitOpen.disabled = true;
-    const gitDialog = make('dialog', 'latex-writing-dialog latex-git-dialog');
-    gitDialog.id = 'latex-git-dialog'; gitDialog.setAttribute('aria-labelledby', 'latex-git-heading');
-    const gitHeading = make('h2', '', 'Git 版本管理'); gitHeading.id = 'latex-git-heading';
+    const gitPanel = make('section', 'latex-git-panel');
+    gitPanel.id = 'latex-version-git-panel'; gitPanel.setAttribute('role', 'tabpanel');
+    gitPanel.setAttribute('aria-labelledby', 'latex-version-git');
     const gitRefresh = make('button', 'button subtle', '刷新'); gitRefresh.type = 'button';
-    const gitClose = make('button', 'button subtle', '关闭'); gitClose.type = 'button';
-    const gitStatus = make('p'); gitStatus.setAttribute('role', 'status');
+    const gitStatus = make('p'); gitStatus.id = 'latex-git-status'; gitStatus.setAttribute('role', 'status');
     const gitContent = make('div');
     const gitMessage = make('input'); gitMessage.type = 'text'; gitMessage.placeholder = '例如：补充实验设置'; gitMessage.maxLength = 2000;
     const gitMessageLabel = make('label', '', '提交说明'); gitMessageLabel.append(gitMessage);
-    const gitHead = make('header', 'latex-git-actions'); gitHead.append(gitHeading, gitRefresh, gitClose);
-    gitDialog.append(gitHead, gitStatus, gitContent);
-    let gitSequence = 0, gitBusy = false, gitSelected = new Set();
-    gitClose.addEventListener('click', () => gitDialog.close());
-    gitRefresh.addEventListener('click', () => void refreshGit());
-    gitOpen.addEventListener('click', () => { gitDialog.showModal(); void refreshGit(); });
+    const gitHead = make('header', 'latex-git-actions'); gitHead.append(gitStatus, gitRefresh);
+    gitPanel.append(gitHead, gitContent);
+    let gitSequence = 0, gitBusy = false, gitSelected = new Set(), gitNotice = '';
+    gitRefresh.addEventListener('click', () => { gitNotice = ''; void refreshGit(); });
 
     function gitActions(disabled) {
-      gitBusy = disabled; gitRefresh.disabled = gitClose.disabled = disabled;
+      gitBusy = disabled; gitRefresh.disabled = disabled;
       for (const button of gitContent.querySelectorAll('button')) button.disabled = disabled || button.dataset.blocked === 'true';
       for (const input of gitContent.querySelectorAll('input')) input.disabled = disabled || input.dataset.blocked === 'true';
-      gitDialog.setAttribute('aria-busy', String(disabled));
+      gitPanel.setAttribute('aria-busy', String(disabled));
     }
-    gitDialog.addEventListener('cancel', event => { if (gitBusy) event.preventDefault(); });
 
     function renderGit(state, owner) {
       gitContent.textContent = '';
@@ -206,51 +200,46 @@ window.PaperLatexWorkspace = (() => {
       return list;
     }
 
-    async function refreshGit({ announce = '', onlyMatch = false } = {}) {
+    async function refreshGit() {
       const owner = project, ticket = ++gitSequence;
-      gitOpen.disabled = !owner || owner.exists === false;
-      gitOpen.textContent = 'Git'; gitOpen.title = '';
-      if (!onlyMatch) {
-        gitContent.textContent = '';
-        gitStatus.textContent = owner ? '读取 Git 状态…' : '请先选择项目。';
+      gitContent.textContent = '';
+      if (!owner || owner.exists === false) {
+        gitStatus.textContent = owner ? '项目文件夹不可用。' : '请先选择项目。';
+        return;
       }
-      if (!owner || owner.exists === false) { gitStatus.textContent = '项目文件夹不可用。'; return; }
+      gitStatus.textContent = '读取 Git 状态…';
       try {
         const result = await api('latex_git_status', { id: owner.id });
         if (ticket !== gitSequence || owner !== project || disposed) return;
-        gitOpen.textContent = result.branch ? `Git · ${result.branch}` : 'Git';
-        gitOpen.title = result.repository || result.message || '';
-        if (!onlyMatch || gitDialog.open) {
-          renderGit(result, owner);
-          if (announce) gitStatus.textContent = `${announce} ${gitStatus.textContent}`;
-        }
+        renderGit(result, owner);
+        if (gitNotice) gitStatus.textContent = `${gitNotice} ${gitStatus.textContent}`;
       } catch (error) {
-        if (ticket === gitSequence && owner === project) gitStatus.textContent = `无法读取 Git 状态：${error.message}`;
+        if (ticket === gitSequence && owner === project) gitStatus.textContent = `${gitNotice ? `${gitNotice} ` : ''}无法读取 Git 状态：${error.message}`;
       }
     }
 
     async function applyGit(owner, operation, args) {
-      if (gitBusy || owner !== project || disposed) return;
+      if (gitBusy || switching || owner !== project || disposed) return;
       gitActions(true);
-      let message;
+      gitNotice = '';
       try {
         if (operation === 'commit' && (dirty || saving)) {
           if (!await savedBeforeLeaving()) { gitStatus.textContent = '请先解决源码保存问题。'; return; }
-          message = '源码已保存。请重新核对此次要提交的文件。';
+          gitNotice = '源码已保存。请重新核对此次要提交的文件。';
         } else if (owner === project && !disposed) {
           gitStatus.textContent = operation === 'commit' ? '正在提交，等待 Git 索引及仓库检查…' : '正在推送，等待远端响应…';
           const response = await api(`latex_git_${operation}`, { id: owner.id, ...args });
           if (operation === 'commit') { gitMessage.value = ''; gitSelected.clear(); }
-          message = operation === 'commit' ? `${response.index_lock_recovered ? '已移开失效的索引锁。' : ''}已提交 ${response.head.slice(0, 8)}。` : `已推送 ${response.head.slice(0, 8)} 到 ${response.remote}/${response.branch}。`;
+          gitNotice = operation === 'commit' ? `${response.index_lock_recovered ? '已移开失效的索引锁。' : ''}已提交 ${response.head.slice(0, 8)}。` : `已推送 ${response.head.slice(0, 8)} 到 ${response.remote}/${response.branch}。`;
         }
-      } catch (error) { message = error.message; }
+      } catch (error) { gitNotice = error.message; }
       finally {
-        if (owner === project && !disposed && message) await refreshGit({ announce: message });
+        if (owner === project && !disposed && gitNotice) await refreshGit();
         gitActions(false);
       }
     }
 
-    toolbar.append(title, projectSelect, gitOpen, mainLabel, saveState, compile, autoToggle, diagnosticsToggle, navToggle, layoutControls, reviewDivider, reviewToggle, aiToggle);
+    toolbar.append(title, projectSelect, mainLabel, saveState, compile, autoToggle, diagnosticsToggle, navToggle, layoutControls, reviewDivider, reviewToggle, aiToggle);
 
     const menu = make('div', 'latex-menu'); menu.id = 'latex-menu'; menu.setAttribute('aria-label', '项目与设置'); menu.hidden = true;
     const navigationActions = make('div'); navigationActions.id = 'latex-navigation-actions'; menu.append(navigationActions);
@@ -432,7 +421,7 @@ window.PaperLatexWorkspace = (() => {
     for (const [name, label] of tabSpecs) {
       const button = make('button', 'latex-tab', label); button.id = `latex-tab-${name}`; button.type = 'button';
       button.setAttribute('role', 'tab'); button.setAttribute('aria-controls', `latex-pane-${name}`);
-      button.addEventListener('click', () => setTab(name));
+      button.addEventListener('click', () => { setTab(name); if (name === 'media') showMediaNavigator(); });
       tabButtons.set(name, button); tabs.append(button);
     }
     const buildInfo = make('span', 'latex-build-info'); buildInfo.id = 'latex-build-info';
@@ -475,17 +464,20 @@ window.PaperLatexWorkspace = (() => {
     const errors = make('ul', 'latex-errors'); errors.id = 'latex-errors'; errors.hidden = true;
     panePdf.append(syncHint, preview);
     const paneMedia = make('div', 'latex-pane'); paneMedia.id = 'latex-pane-media'; paneMedia.setAttribute('role', 'tabpanel');
+    paneMedia.setAttribute('aria-labelledby', 'latex-tab-media');
     const mediaHead = make('div', 'latex-preview-head');
+    const mediaPick = make('button', 'button subtle', '选择媒体'); mediaPick.id = 'latex-media-pick'; mediaPick.type = 'button';
+    mediaPick.setAttribute('aria-controls', 'latex-media');
+    mediaPick.addEventListener('click', () => { showMediaNavigator(); navButtons.get('media').focus(); });
     const mediaPrev = make('button', 'icon-button', '‹'); mediaPrev.id = 'latex-media-prev'; mediaPrev.type = 'button'; mediaPrev.setAttribute('aria-label', '媒体上一页');
     const mediaNext = make('button', 'icon-button', '›'); mediaNext.id = 'latex-media-next'; mediaNext.type = 'button'; mediaNext.setAttribute('aria-label', '媒体下一页');
     const mediaFit = make('button', 'button subtle', '适应'); mediaFit.id = 'latex-media-fit'; mediaFit.type = 'button';
     const mediaPlus = make('button', 'button subtle', '＋'); mediaPlus.id = 'latex-media-plus'; mediaPlus.type = 'button'; mediaPlus.setAttribute('aria-label', '放大媒体');
     const mediaMinus = make('button', 'button subtle', '−'); mediaMinus.id = 'latex-media-minus'; mediaMinus.type = 'button'; mediaMinus.setAttribute('aria-label', '缩小媒体');
     const mediaInfo = make('span', 'latex-page-label'); mediaInfo.id = 'latex-media-info'; mediaInfo.setAttribute('role', 'status');
-    mediaHead.append(mediaPrev, mediaNext, mediaMinus, mediaFit, mediaPlus);
+    mediaHead.append(mediaPick, mediaPrev, mediaNext, mediaMinus, mediaFit, mediaPlus);
     const mediaCrumb = make('code', 'latex-breadcrumb'); mediaCrumb.id = 'latex-media-path';
     const mediaPreview = make('div', 'latex-preview'); mediaPreview.id = 'latex-media-preview';
-    mediaPreview.textContent = '从左侧「媒体」选择项目内的文件。';
     paneMedia.append(mediaCrumb, mediaInfo, mediaPreview);
 
     const paneAi = make('div', 'latex-pane'); paneAi.id = 'latex-pane-ai'; paneAi.setAttribute('role', 'tabpanel'); paneAi.hidden = Boolean(rail);
@@ -506,17 +498,34 @@ window.PaperLatexWorkspace = (() => {
     paneAi.append(writingPanel);
 
     const paneVersion = make('div', 'latex-pane'); paneVersion.id = 'latex-pane-version'; paneVersion.setAttribute('role', 'tabpanel');
+    paneVersion.setAttribute('aria-labelledby', 'latex-tab-version');
+    const versionSwitch = make('div', 'latex-version-switch'); versionSwitch.setAttribute('role', 'tablist'); versionSwitch.setAttribute('aria-label', '版本管理方式');
+    const compiledPanel = make('section', 'latex-pane'); compiledPanel.id = 'latex-version-compiled-panel';
+    compiledPanel.setAttribute('role', 'tabpanel'); compiledPanel.setAttribute('aria-labelledby', 'latex-version-compiled');
+    const versionButtons = new Map();
+    for (const [name, label] of [['compiled', '手动编译 PDF'], ['git', 'Git 管理']]) {
+      const button = make('button', 'latex-tab', label); button.id = `latex-version-${name}`; button.type = 'button';
+      button.setAttribute('role', 'tab'); button.setAttribute('aria-controls', `latex-version-${name}-panel`);
+      button.addEventListener('click', () => setVersionMode(name));
+      button.addEventListener('keydown', event => {
+        const next = event.key === 'ArrowLeft' || event.key === 'ArrowRight' ? (name === 'compiled' ? 'git' : 'compiled') :
+          event.key === 'Home' ? 'compiled' : event.key === 'End' ? 'git' : null;
+        if (!next) return;
+        event.preventDefault(); setVersionMode(next); versionButtons.get(next).focus();
+      });
+      versionButtons.set(name, button); versionSwitch.append(button);
+    }
     const versionRoot = make('section', 'latex-versions'); versionRoot.id = 'latex-versions';
     const returnCurrent = make('button', 'button subtle', '返回当前编译稿'); returnCurrent.id = 'latex-version-current'; returnCurrent.type = 'button'; returnCurrent.addEventListener('click', () => void showCurrentPdf());
     const versions = window.PaperLatexVersions?.create({ root: versionRoot, api, scope: () => project ? { id: project.id } : null,
       openVersion: (version, reviewPdfVersion) => showVersion(version.id, reviewPdfVersion) });
     const versionHead = make('div', 'latex-preview-head');
     const diffOpen = make('button', 'button subtle', '与上一版对比'); diffOpen.id = 'latex-diff-open'; diffOpen.type = 'button';
-    const diffHint = make('span', 'latex-page-label', '当前文件与它上一个落库版本');
+    const diffHint = make('span', 'latex-page-label', '当前源码与其上一个保存版本');
     versionHead.append(diffOpen, diffHint);
     const diff = make('pre', 'latex-diff'); diff.id = 'latex-diff';
-    diff.textContent = '点「与上一版对比」查看这个文件的改动；菜单里的「与其他项目对比」结果显示在这里。';
-    paneVersion.append(returnCurrent, versionRoot, versionHead, diff);
+    compiledPanel.append(returnCurrent, versionRoot, versionHead, diff);
+    paneVersion.append(versionSwitch, compiledPanel, gitPanel);
 
     const previewToolbar = make('div', 'latex-preview-toolbar');
     previewToolbar.setAttribute('aria-label', '预览工具');
@@ -537,7 +546,6 @@ window.PaperLatexWorkspace = (() => {
     const editorSurface = make('div', 'latex-editor-surface');
     editorSurface.append(topbar, errors, content, footer);
     view.append(navigator, editorSurface);
-    view.append(gitDialog);
     let layout = 'split';
     function setLayout(mode) {
       if (!layoutButtons.has(mode)) return;
@@ -551,13 +559,15 @@ window.PaperLatexWorkspace = (() => {
       if (mode === 'pdf') setTab('pdf');
       if (mode !== 'source') requestResize();
     }
-    navToggle.addEventListener('click', () => {
-      navigator.hidden = !navigator.hidden;
+    function setNavigatorVisible(visible) {
+      if (navigator.hidden === !visible) return;
+      navigator.hidden = !visible;
       view.classList.toggle('latex-nav-collapsed', navigator.hidden);
       navToggle.title = navigator.hidden ? '展开侧边导航' : '收起侧边导航';
       navToggle.setAttribute('aria-expanded', String(!navigator.hidden));
       if (layout !== 'source') requestResize();
-    });
+    }
+    navToggle.addEventListener('click', () => setNavigatorVisible(navigator.hidden));
     const reviewPanel = make('section', 'latex-review-panel'); reviewPanel.id = 'latex-review-panel'; reviewPanel.setAttribute('aria-label', '批注');
     writingPanel.append(reviewPanel);
     const reviewer = window.PaperLatexReview?.create({ root: reviewPanel, api,
@@ -618,7 +628,25 @@ window.PaperLatexWorkspace = (() => {
 
     function say(text, error = false) { status.textContent = text; status.classList.toggle('error', error); }
     function setSaveState(text, kind = '') { saveState.textContent = text; saveState.dataset.state = kind; }
-    function setTab(name) {
+    function setVersionMode(name) {
+      versionMode = name;
+      compiledPanel.hidden = name !== 'compiled'; gitPanel.hidden = name !== 'git';
+      for (const [mode, button] of versionButtons) {
+        const active = mode === name;
+        button.classList.toggle('active', active); button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1;
+      }
+      if (tab !== 'version') return;
+      if (name === 'git') { if (!gitBusy) void refreshGit(); }
+      else void versions?.refresh();
+    }
+    function resetProjectVersions() {
+      ++gitSequence; gitSelected.clear(); gitMessage.value = ''; gitNotice = ''; gitContent.textContent = ''; gitStatus.textContent = '';
+      versions?.clear();
+      diff.textContent = '点「与上一版对比」查看这个文件的改动。';
+      setVersionMode(versionMode);
+    }
+
+    function setTab(name, version = versionMode) {
       if (name !== 'pdf') clearPdfSelection();
       tab = name;
       if (!rail) syncRailToggle();
@@ -630,7 +658,7 @@ window.PaperLatexWorkspace = (() => {
       }
       for (const [candidate, pane] of [['pdf', panePdf], ['media', paneMedia], ['ai', paneAi], ['version', paneVersion]]) pane.hidden = candidate !== name;
       if (name === 'ai' && project) void aiStatus();
-      if (name === 'version' && project) void versions?.refresh();
+      if (name === 'version') setVersionMode(version);
       if (name === 'pdf' && pageCount) requestResize();
     }
     function lineNumbers() {
@@ -1304,16 +1332,14 @@ window.PaperLatexWorkspace = (() => {
       formulas?.clear(); formulas?.close();
       project = projects.find(item => item.id === id) || null;
       if (!project) { await renderEmpty(); return; }
-      gitMessage.value = ''; gitSelected.clear(); void refreshGit({ onlyMatch: true });
+      resetProjectVersions();
       syncLocationFields();
       resetPdfSource({ kind: 'current' });
       projectSelect.value = project.id;
       errors.textContent = ''; errors.hidden = true; diagnosticsToggle.hidden = true; diagnosticsToggle.setAttribute('aria-expanded', 'false');
       reviewer?.reset(); pdfBuild = null; updateSyncHint();
       file = null; revision = null; editor.value = ''; editor.disabled = true; lineNumbers();
-      pageCount = 0; pageGeometry = []; pdfVersion = ''; mediaPath = null; mediaGeometry = null;
-      if (mediaUrl) { URL.revokeObjectURL(mediaUrl); mediaUrl = null; }
-      mediaPreview.textContent = '从左侧「媒体」选择项目内的文件。'; mediaCrumb.textContent = ''; mediaInfo.textContent = '';
+      pageCount = 0; pageGeometry = []; pdfVersion = ''; resetMedia();
       tree = null; fileList.textContent = ''; outlineList.textContent = ''; mediaList.textContent = ''; currentFile.textContent = '选择源文件';
       compile.disabled = false; mainSelect.disabled = false;
       if (project.exists === false) {
@@ -1346,7 +1372,8 @@ window.PaperLatexWorkspace = (() => {
     }
 
     async function renderEmpty() {
-      void refreshGit({ onlyMatch: true });
+      resetProjectVersions();
+      resetMedia();
       chapterScope = null;
       projectSearch?.reset();
       syncLocationFields();
@@ -1396,6 +1423,18 @@ window.PaperLatexWorkspace = (() => {
       navMode = name;
       for (const [mode, button] of navButtons) button.setAttribute('aria-selected', String(mode === name));
       outlineList.hidden = name !== 'outline'; fileList.hidden = name !== 'files'; mediaList.hidden = name !== 'media';
+      navHint.hidden = name !== 'outline';
+    }
+    function showMediaNavigator() {
+      setNavigatorVisible(true);
+      setNav('media');
+    }
+    function updateMediaSelection() {
+      for (const button of mediaList.querySelectorAll('button')) {
+        const current = button.dataset.media === mediaPath;
+        button.classList.toggle('active', current);
+        button.setAttribute('aria-current', current ? 'true' : 'false');
+      }
     }
     function sourceButton(path, label = path, line = 1, kind = 'file') {
       const button = make('button', 'latex-file-open', label); button.type = 'button'; button.dataset.path = path; button.dataset.line = String(line);
@@ -1503,6 +1542,7 @@ window.PaperLatexWorkspace = (() => {
       tree = result;
       directoryTree(fileList, (tree.files || []).filter(item => item.kind === 'text'));
       directoryTree(mediaList, (tree.files || []).filter(item => item.kind === 'asset' || item.kind === 'other'), true);
+      updateMediaSelection();
       mainLabel.textContent = `编译：${project.main_path || '未设置'}`;
       mainLabel.title = `编译主文件：${project.main_path || '未设置'}`;
       mainSelect.textContent = '';
@@ -1954,13 +1994,21 @@ window.PaperLatexWorkspace = (() => {
     }, { passive: true });
 
     let mediaUrl = null;
+    function resetMedia() {
+      mediaPath = null; mediaPage = 1; mediaZoom = 1; mediaCount = 0; mediaGeometry = null;
+      if (mediaUrl) { URL.revokeObjectURL(mediaUrl); mediaUrl = null; }
+      mediaCrumb.textContent = ''; mediaInfo.textContent = '';
+      mediaPreview.textContent = '从项目侧边栏的「媒体」选择要预览的文件。'; mediaPreview.setAttribute('aria-busy', 'false');
+      for (const button of [mediaPrev, mediaNext, mediaFit, mediaPlus, mediaMinus]) button.disabled = true;
+    }
     async function openMedia(path, { page: wanted = 1, refresh = false } = {}) {
       if (!project) return;
       if (!refresh && layout === 'source') setLayout('split');
-      if (!refresh && path !== mediaPath) { mediaZoom = 1; mediaGeometry = null; }
+      if (path !== mediaPath) { mediaZoom = 1; mediaGeometry = null; mediaCount = 0; }
       if (wanted !== mediaPage) mediaGeometry = null;
-      mediaPath = path; mediaPage = wanted; setTab('media'); setNav('media');
-      mediaPrev.disabled = true; mediaNext.disabled = true;
+      mediaPath = path; mediaPage = wanted; setTab('media');
+      if (!refresh) { setNav('media'); updateMediaSelection(); }
+      for (const button of [mediaPrev, mediaNext, mediaFit, mediaPlus, mediaMinus]) button.disabled = true;
       mediaAbort?.abort(); mediaAbort = new AbortController();
       const id = project.id, epoch = generation, ticket = ++mediaRequest;
       mediaCrumb.textContent = path; mediaInfo.textContent = '媒体加载中…'; mediaPreview.textContent = '';
@@ -1985,6 +2033,7 @@ window.PaperLatexWorkspace = (() => {
         mediaPreview.append(img);
         mediaInfo.textContent = `${Math.round(result.source_width || result.width)} × ${Math.round(result.source_height || result.height)} · ${Math.round(result.bytes / 1024)} KiB · 第 ${wanted}/${mediaCount} 页 · ${Math.round(mediaZoom * 100)}%`;
         mediaPrev.disabled = wanted <= 1; mediaNext.disabled = wanted >= mediaCount;
+        mediaFit.disabled = mediaPlus.disabled = mediaMinus.disabled = false;
       } catch (error) {
         if (ticket !== mediaRequest || epoch !== generation || error.name === 'AbortError') return;
         mediaInfo.textContent = '媒体加载失败'; mediaPreview.textContent = error.message;
@@ -2359,7 +2408,7 @@ window.PaperLatexWorkspace = (() => {
     async function showDiff() {
       if (!project) return;
       if (dirty) await flush('manual');
-      setTab('version');
+      setTab('version', 'compiled');
       try {
         const result = await api('latex_diff', { id: project.id, path: file || project.main_path, from_revision: 'previous', to_revision: 'current' });
         diff.textContent = result.changed ? result.diff : '与上一版没有差异。';
@@ -2373,7 +2422,7 @@ window.PaperLatexWorkspace = (() => {
     compareRun.addEventListener('click', async () => {
       const other = compareSelect.value;
       if (!project || !other) { say('请选择另一个项目再对比。', true); return; }
-      closeMenu(); setTab('version');
+      closeMenu(); setTab('version', 'compiled');
       try {
         const result = await api('latex_compare', { a: project.id, b: other, path: file || undefined });
         diff.textContent = result.changed ? result.diff : '两个项目在这一文件上没有差异。';
@@ -2426,7 +2475,7 @@ window.PaperLatexWorkspace = (() => {
         if (disposed || id !== project?.id) return;
         project = result.project; projects = projects.map(item => item.id === id ? project : item);
         chapterScope = null; outlineList.textContent = '';
-        changed = true; syncLocationFields(); gitSelected.clear(); gitMessage.value = ''; void refreshGit({ onlyMatch: true });
+        changed = true; syncLocationFields(); resetProjectVersions(); resetMedia(); mediaList.textContent = '';
         resetPdfSource({ kind: 'current' });
         errors.textContent = ''; diagnosticsToggle.hidden = true; setDiagnosticsOpen(false);
         reviewer?.reset(); formulas?.clear(); formulas?.close(); pdfBuild = null; updateSyncHint();
@@ -2792,7 +2841,7 @@ window.PaperLatexWorkspace = (() => {
       if (termDialog.open) termDialog.close();
       if (switching || gitBusy) { say('正在更新项目，请稍候再关闭。', true); return; }
       ++openRequest;
-      clearTimeout(timer); clearTimeout(compileTimer); closeMenu(); if (gitDialog.open) gitDialog.close(); resetCitationDialog();
+      clearTimeout(timer); clearTimeout(compileTimer); closeMenu(); resetCitationDialog();
       cancelAiRun();
       if (!await savedBeforeLeaving(true)) return;
       clearPublicRetrieval();

@@ -61,7 +61,33 @@ const theme = EditorView.theme({
   '.cm-gutters': { color: 'var(--muted)', backgroundColor: 'var(--dsw-alias-interactive-bg-hover)', borderRight: '1px solid var(--line)' },
   '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'var(--dsw-alias-interactive-bg-hover)' },
   '.cm-panels, .cm-tooltip': { color: 'var(--ink)', backgroundColor: 'var(--surface)', borderColor: 'var(--line)' },
-  '.cm-panel input, .cm-panel button': { color: 'var(--ink)', backgroundColor: 'var(--surface)', border: '1px solid var(--line)' },
+  '.cm-panel.cm-search': {
+    display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '5px 6px',
+    padding: '7px 36px 7px 8px', font: '12px/1.4 var(--sans)',
+  },
+  '.cm-panel.cm-search .cm-button, .cm-panel.cm-search .cm-textfield': {
+    minHeight: '26px', boxSizing: 'border-box', margin: '0', padding: '3px 7px',
+    font: 'inherit', color: 'var(--ink)', backgroundColor: 'var(--panel)', backgroundImage: 'none',
+    border: '1px solid var(--line)', borderRadius: '5px',
+  },
+  '.cm-panel.cm-search .cm-textfield': { minWidth: '5em', flex: '1 1 9em' },
+  '.cm-panel.cm-search .cm-textfield::placeholder': { color: 'var(--muted)', opacity: '1' },
+  '.cm-panel.cm-search button': { cursor: 'pointer' },
+  '.cm-panel.cm-search .cm-button:hover, .cm-panel.cm-search .cm-button:active, .cm-panel.cm-search [name=close]:hover': {
+    backgroundColor: 'var(--latex-active-bg)', backgroundImage: 'none',
+  },
+  '.cm-panel.cm-search label': { display: 'inline-flex', alignItems: 'center', gap: '4px', margin: '0', font: 'inherit' },
+  '.cm-panel.cm-search input[type=checkbox]': { margin: '0', accentColor: 'var(--latex-active-marker)' },
+  '.cm-panel.cm-search br': { flexBasis: '100%', height: '0' },
+  '.cm-panel.cm-search [name=close]': {
+    top: '7px', right: '6px', width: '26px', height: '26px', borderRadius: '5px',
+    color: 'var(--ink)', fontSize: '17px',
+  },
+  '.cm-panel.cm-search :is(button, input):focus-visible': { outline: '2px solid var(--latex-active-marker)', outlineOffset: '1px' },
+  '.cm-content .cm-searchMatch': { backgroundColor: 'color-mix(in srgb, var(--teal) 22%, transparent)' },
+  '.cm-content .cm-searchMatch.cm-searchMatch-selected': {
+    backgroundColor: 'color-mix(in srgb, var(--teal) 35%, transparent)', boxShadow: 'inset 0 -2px var(--teal)',
+  },
   '.cm-tooltip-autocomplete > ul > li[aria-selected]': { backgroundColor: 'var(--teal)', color: 'var(--surface)' },
   '&.cm-focused': { outline: 'none' },
 })
