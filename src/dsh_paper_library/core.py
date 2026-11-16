@@ -828,6 +828,15 @@ def dispatch(request):
             item = library.get(request["id"])
             path = library.pdf_path(request["id"])
             return {"path": str(path), "filename": path.name}
+        if request.get("view") == "paper-remark":
+            from . import paper_remarks
+            if action == "annotations":
+                return paper_remarks.listing(library, request.get("ids"))
+            if action == "annotation_update":
+                if "expected_version" not in request:
+                    raise ValueError("请先读取当前文献备注。")
+                return paper_remarks.save(library, request.get("id"), request.get("comment"),
+                                          request["expected_version"])
         actions = {
             "author_paper_candidates": ("id", "names"),
             "scholar_publications": ("names", "dois", "confirmed", "excluded", "offset"),

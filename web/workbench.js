@@ -41,14 +41,14 @@ window.PaperWorkbench = (() => {
   const fileType = item => item.resource_kind==='slides'?'PlainDeck':item.pdf?'PDF':
     item.storage_formats?.length?item.storage_formats.slice(0,3).map(format=>/^[a-z0-9]+$/i.test(format)?format.toUpperCase():format).join(' / ')+(item.storage_formats.length>3?'…':''):'无附件';
   const columns = [
-    ['title','标题'], ['author','作者'], ['year','年份'], ['journal','期刊 / 出处'],
+    ['title','标题'], [null,'备注','remark'], ['author','作者'], ['year','年份'], ['journal','期刊 / 出处'],
     ['ranking','文章分区','jcr'], ['citekey','引用键'], [null,'DOI / 预印本 / 来源','doi'],
     ['citations','引用量'], [null,'单位','institution'],
     ['published','发表日期'], ['received','收稿日期'], ['accepted','接收日期'],
     [null,'文献类型','kind'], [null,'文件格式','storage'],
   ];
   const descendingByDefault = new Set(['citations','published','received','accepted']);
-  function create({state,api,loadList,openPaper,selectPaper,changed,tableChanged,toast,el,resource,organization,openMetadataPanel,closeMetadataPanel,persistence,enableAutomaticDoi,openAbstract}) {
+  function create({state,api,loadList,openPaper,selectPaper,changed,tableChanged,toast,el,resource,organization,openMetadataPanel,closeMetadataPanel,persistence,enableAutomaticDoi,openAbstract,paperRemarks}) {
     let table = false, editing = null, revision = 0, readingId = null;
     let editorVisible=false, initialFields=null, initialRankings=null, restoring=false, selectingForEdit=false, loadingEditId=null, drafts=new Map();
     const draftFields=['title','authors','year','citekey','tags','type','journal','volume','issue','page','publisher','doi','doi-status','url','published','online','print','received','accepted','affiliations'];
@@ -425,7 +425,7 @@ window.PaperWorkbench = (() => {
         const venue=item.resource_kind==='dataset'?item.publisher:(kind==='paper-conference'&&item['event-title'])||item['container-title']||(kind==='preprint'&&item.archive);
         const values=[item.title,(item.author||[]).map(name).join(' · '),item.issued?.['date-parts']?.[0]?.[0],venue,ranking(item),item.citekey,item.DOI||(item.doi_status==='not-applicable'?'无 DOI':null),null,institutions(item).join('；'),
           dates.published||dates.online||dates.print,dates.received,dates.accepted,typeLabel(item),fileType(item)];
-        values.forEach((value,i)=>{const td=node('td'),text=String(value||'—');if(i===0){
+        values.forEach((value,i)=>{const td=node('td',undefined,i===2?'catalog-year-cell':undefined),text=String(value||'—');if(i===0){
           const b=button(value||'未命名条目',null,event=>{if(!openDoubleClickedTitle(item,event))selectPaper(item);},'table-title');
           b.setAttribute('aria-pressed',String(selected));b.title=b.textContent;td.append(b);
         }else if(i===2&&!value&&isPaper(item)&&!item.archived){const addYear=button('填年份',null,async()=>{if(await edit(item))$('edit-year').focus();},'button subtle catalog-add-year');addYear.setAttribute('aria-label',`填写年份：${item.title}`);td.append(addYear);}else if(i===6&&canEnterDoi(item)){
@@ -454,7 +454,13 @@ window.PaperWorkbench = (() => {
             details.append(node('summary',`版本 · ${item.publication_versions.length}`),versionList(item.publication_versions));
             td.append(details);
           }
-        }row.append(td);});
+        }
+        row.append(td);
+        if(i===0){
+          const remark=node('td',undefined,'catalog-remark-cell');
+          if(paperRemarks)remark.append(paperRemarks.cell(item));
+          row.append(remark);
+        }});
         body.append(row);
         const actions=isPaper(item)?organization?.()?.actions(item):null;
         if(actions?.children.length){
@@ -463,7 +469,7 @@ window.PaperWorkbench = (() => {
           const cell=node('td');cell.colSpan=columns.length;cell.append(actions);tagsRow.append(cell);body.append(tagsRow);
           tagsRow.addEventListener('click',e=>{if(!e.target.closest('button'))choose();});
         }
-      }grid.append(body);$('catalog-table').replaceChildren(grid);catalogCitations?.connect();if(!state.items.length)$('catalog-table').append(node('p',state.archived?'回收站为空。':state.project&&state.kind==='slides'?'演示文稿不属于阅读项目；切回全部条目查看。':'没有匹配的条目。','empty-state'));
+      }grid.append(body);$('catalog-table').replaceChildren(grid);paperRemarks?.connectTable($('catalog-table'));catalogCitations?.connect();if(!state.items.length)$('catalog-table').append(node('p',state.archived?'回收站为空。':state.project&&state.kind==='slides'?'演示文稿不属于阅读项目；切回全部条目查看。':'没有匹配的条目。','empty-state'));
     }
     function header() {
       syncCatalogActions();

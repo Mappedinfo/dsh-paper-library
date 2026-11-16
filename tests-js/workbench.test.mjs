@@ -91,7 +91,7 @@ test('catalog versions show the conference, source links, and previewed evidence
     ] };
   const f = environment({ active: paper });
   f.workbench.setTable(true);
-  const cell = f.element('catalog-table').querySelector('tbody').children[0].children[3];
+  const cell = f.element('catalog-table').querySelector('tbody').children[0].children[4];
   assert.equal(cell.children[0].textContent, 'SVC 2026');
   assert.equal(cell.querySelector('summary').textContent, '版本 · 2');
   assert.deepEqual(cell.querySelectorAll('a').map(link => link.href), paper.publication_versions.map(version => version.url));
@@ -333,7 +333,7 @@ test('the citation heading starts at descending and resets pagination', async ()
   const f=environment({active:original()});
   f.state.sort='title';f.state.order='asc';f.state.offset=80;
   f.workbench.setTable(true);
-  const heading=()=>f.element('catalog-table').querySelectorAll('th')[7];
+  const heading=()=>f.element('catalog-table').querySelectorAll('th')[8];
   await heading().querySelector('button').dispatch('click');
   assert.deepEqual([f.loads[0].sort,f.loads[0].order,f.loads[0].offset],['citations','desc',0]);
   f.workbench.render();
@@ -348,10 +348,10 @@ test('publication, receipt and acceptance dates have separate cells and sort con
   f.workbench.setTable(true);
   const table = f.element('catalog-table');
   const heading = index => table.querySelectorAll('th')[index];
-  assert.deepEqual(table.querySelectorAll('td').slice(9, 12).map(cell => cell.querySelector('span').textContent),
+  assert.deepEqual(table.querySelectorAll('td').slice(10, 13).map(cell => cell.querySelector('span').textContent),
     ['2026-09', '—', '2026-08-02']);
   const sort = f.element('catalog-sort');
-  for (const [index, key, label] of [[9, 'published', '发表日期'], [10, 'received', '收稿日期'], [11, 'accepted', '接收日期']]) {
+  for (const [index, key, label] of [[10, 'published', '发表日期'], [11, 'received', '收稿日期'], [12, 'accepted', '接收日期']]) {
     assert.equal(heading(index).querySelector('button').textContent, label);
     assert.ok(sort.options.some(option => option.value === key));
     f.state.offset = 80;
@@ -410,7 +410,7 @@ test('an unpublished manuscript can fill a missing year without entering publica
   const f=environment({active:item});
   f.workbench.setTable(true);
   const row=f.element('catalog-table').querySelectorAll('tr').find(n=>n.dataset.paperId===item.id);
-  await row.children[2].querySelector('button').dispatch('click');
+  await row.children[3].querySelector('button').dispatch('click');
   assert.equal(f.element('edit-type').value,'manuscript');
   f.element('edit-year').value='2026';
   await f.form.dispatch('submit');
@@ -476,7 +476,7 @@ test('manual DOI entry targets its row, shows an author mismatch, and updates th
   assert.equal(input.value,'10.1234/wrong');assert.equal(paper.DOI,undefined);assert.equal(dialog.open,true);
   input.value='https://doi.org/10.1234/right';await dialog.querySelector('form').dispatch('submit');
   assert.equal(dialog.open,false);assert.equal(paper.DOI,'10.1234/right');assert.equal(selected.DOI,undefined);
-  assert.equal(row().children[6].children[0].textContent,'10.1234/right');assert.equal(f.loads.length,1);
+  assert.equal(row().children[7].children[0].textContent,'10.1234/right');assert.equal(f.loads.length,1);
 });
 
 test('arXiv entry keeps editor drafts, suppresses double submit and preserves input after an offline failure',async()=>{
@@ -641,7 +641,7 @@ test('plain catalog cells and keyboard select the row before metadata enrichment
  const a=original(),b={...original(),id:'paper-b',title:'Another synthetic paper'};
  const f=environment({active:a});f.state.items=[a,b];f.workbench.setTable(true);
  const row=f.element('catalog-table').querySelectorAll('tr').find(node=>node.dataset.paperId==='paper-b');
- await row.dispatch('click',{target:row.children[1]});
+ await row.dispatch('click',{target:row.children[2]});
  assert.equal(f.state.active.id,b.id);assert.equal(f.element('metadata-enrich').disabled,false);assert.deepEqual(f.opens,[]);
  await row.dispatch('keydown',{target:row,key:'Enter'});assert.equal(f.selections.at(-1),b.id);assert.equal(f.workbench.isTable(),true);
 });
@@ -656,10 +656,10 @@ test('metadata lookup adopts the complete author list in the review draft withou
 test('shared folder action follows selection, refuses missing files and never accepts a browser path',async()=>{
   const first={...original(),pdf:true};const second={...first,id:'paper-b'};const f=environment({active:first});f.state.items.push(second);f.workbench.setTable(true);
   const headers=f.element('catalog-table').querySelectorAll('th');
-  assert.equal(headers.length,14);
-  assert.equal(headers[6].textContent,'DOI / 预印本 / 来源');
-  assert.equal(headers[7].querySelector('button').textContent,'引用量');
-  assert.equal(headers[8].textContent,'单位');
+  assert.equal(headers.length,15);
+  assert.equal(headers[7].textContent,'DOI / 预印本 / 来源');
+  assert.equal(headers[8].querySelector('button').textContent,'引用量');
+  assert.equal(headers[9].textContent,'单位');
   await f.element('catalog-reveal').dispatch('click');assert.deepEqual(f.requests,[{action:'paper_reveal',id:first.id}]);
   const row=f.element('catalog-table').querySelectorAll('tr').find(n=>n.dataset.paperId===second.id);await row.querySelector('button').dispatch('click');
   await f.element('catalog-reveal').dispatch('click');assert.equal(f.requests.at(-1).id,second.id);

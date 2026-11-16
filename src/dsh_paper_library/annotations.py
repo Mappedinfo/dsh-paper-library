@@ -24,6 +24,7 @@ import xml.etree.ElementTree as ET
 from .annotation_tags import read_tags
 from .handwriting import HandwritingAccess
 from .ai_annotation_style import AI_BLUE, AI_WIDTH, apply_ai_reading_style, native_border, native_style, sync_dash_appearance
+from .paper_remarks import KIND as PAPER_REMARK_KIND, is_paper_remark
 
 READER_MAX_SCALE = 8.0
 READER_MAX_PIXELS = 16_000_000
@@ -172,7 +173,10 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
 
     @staticmethod
     def _annotation_metadata(annot):
-        subject = annot.info.get("subject", "")
+        info = annot.info
+        if is_paper_remark(annot, info):
+            return {"kind": PAPER_REMARK_KIND}
+        subject = info.get("subject", "")
         # Explicit external AI declaration plus native reply identity. Author
         # names/prose alone never classify a human's note as generated content.
         if subject == "AI 伴学回复" and annot.irt_xref:

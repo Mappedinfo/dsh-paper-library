@@ -18,7 +18,7 @@
 .catalog-expanded{display:block}.catalog-expanded .detail-pane{display:none}.catalog-expanded .library-pane{height:100%;display:flex;flex-direction:column}.catalog-expanded .pane-heading{padding:12px 18px 8px}.catalog-expanded .shelf-actions{flex-direction:row;align-items:center}.catalog-expanded .search-field{max-width:600px;margin:0 18px 8px}.catalog-expanded .quick-import{display:none}.catalog-expanded .catalog-controls{padding:0 18px 7px}.catalog-expanded #search-summary{padding-left:18px}.catalog-expanded .catalog-controls select{max-width:none;font-size:12px}.catalog-expanded .catalog-controls .button{font-size:12px;padding:4px 8px}.catalog-expanded .catalog-table{flex:1;min-height:0}.catalog-expanded .pagination{justify-content:center;gap:30px}.catalog-expanded .library-footer{display:none}
 .catalog-table{overflow:auto;min-width:0;border-top:1px solid #d8ded4}.catalog-table table{border-collapse:separate;border-spacing:0;width:100%;font-size:11px;line-height:1.4}.catalog-table th{position:sticky;top:0;background:#f1f3ed;text-align:left;z-index:1;white-space:nowrap;font-weight:500}.catalog-table th,.catalog-table td{padding:8px 10px;border-bottom:1px solid #e1e5dc;vertical-align:top}.catalog-table th .button{font-size:11px;padding:0}.catalog-table td{min-width:110px;max-width:220px;overflow-wrap:anywhere}.catalog-table td:first-child{min-width:250px;max-width:340px}.catalog-table td:nth-child(3),.catalog-table td:nth-child(10){min-width:44px}.catalog-table tr.selected td{background:#e7efe7}.table-title{border:0;background:transparent;color:inherit;font:inherit;font-weight:600;padding:0;text-align:left;cursor:pointer}.table-title:hover{text-decoration:underline}.table-row-actions{min-width:105px!important}.table-row-actions .button{display:block;white-space:nowrap;padding:2px 0;font-size:10px}
 .metadata-extra{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}.metadata-extra .full-width{grid-column:1/-1}.metadata-extra .field input{font-size:12px}.metadata-extra h3{font-size:14px;margin:8px 0}.ranking-row{display:grid;grid-template-columns:90px 70px 1fr;gap:8px;border-bottom:1px solid #dde2d7;padding:8px 0}.ranking-row>.field:nth-child(4){grid-column:1/-1}.ranking-row .field{margin:0}.ranking-row>.button{justify-self:start}.metadata-extra label span{font-size:10px}#metadata-dialog{max-height:90dvh;overflow-y:auto;max-width:700px}#metadata-dialog h2{font-size:20px}#metadata-dialog .field{font-size:12px}#edit-title{font-size:14px}
-.catalog-table td:nth-child(3){white-space:nowrap;min-width:60px}.catalog-expanded .search-field{min-height:34px}.toolbar-reader{margin-right:5px}
+.catalog-table .catalog-year-cell{white-space:nowrap;min-width:60px}.catalog-expanded .search-field{min-height:34px}.toolbar-reader{margin-right:5px}
 .catalog-publications{margin-top:4px;color:var(--muted);font-size:.92em}
 .catalog-publications summary{cursor:pointer;width:fit-content}
 .catalog-publications ul,.metadata-versions ul{margin:4px 0;padding-inline-start:16px}
@@ -37,6 +37,22 @@
 #workspace-navigation-home:empty{display:none}
 #workspace-catalog-body{flex:1;min-height:0;min-width:0;overflow:auto;padding:0 10px;box-sizing:border-box}
 #library-favorite-notes{flex:1;min-height:0;overflow:auto;padding:12px 16px}
+.catalog-table .catalog-column-remark{width:166px}
+.catalog-table .catalog-remark-cell{white-space:normal}
+.catalog-table .catalog-remark-preview.button{
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+  max-width:100%;min-height:0;overflow:hidden;white-space:normal;
+  overflow-wrap:anywhere;text-align:start;font-weight:500;padding:2px 4px;
+}
+.paper-remark-card{padding:6px 9px;border:1px solid var(--line);border-radius:7px;margin-block:0 7px;background:var(--surface)}
+.paper-remark-card summary{cursor:pointer;font-weight:600;padding-block:4px}
+.paper-remark-card summary span{margin-inline-start:8px;font-weight:400}
+.paper-remark-content,.paper-remark-current{white-space:pre-wrap;overflow-wrap:anywhere}
+.paper-remark-content{margin:8px 0}
+.paper-remark-editor{max-width:min(560px,calc(100% - 24px));width:100%;max-height:calc(100% - 24px);overflow:auto}
+.paper-remark-editor h2{margin:0}
+.paper-remark-editor textarea{width:100%;resize:vertical}
+.paper-remark-current{margin:8px 0;padding:8px;border-inline-start:2px solid var(--line);max-height:10em;overflow:auto}
 .notes-library-heading,.notes-library-views,.notes-library-status,.notes-library-pager{
   display:flex;align-items:center;gap:8px
 }

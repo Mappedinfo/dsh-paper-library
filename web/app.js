@@ -469,7 +469,7 @@ function annotationThreads(annotations) {
   if (window.PaperAnnotationThreads) return window.PaperAnnotationThreads.threads(annotations, state.annotationOrder);
   const list=Array.isArray(annotations)?annotations:[];
   const ai=note=>note.kind==='ai-feedback'||note.type==='ai_feedback'||note.ai_generated===true;
-  const notes=list.filter(note=>!ai(note)&&!['handwriting-note','linked-handwriting','linked-handwriting-transcript'].includes(note.kind)),replies=new Map(notes.map(note=>[note.id,[]])),unlinked=[];
+  const notes=list.filter(note=>!ai(note)&&!['handwriting-note','linked-handwriting','linked-handwriting-transcript','paper-remark'].includes(note.kind)),replies=new Map(notes.map(note=>[note.id,[]])),unlinked=[];
   for(const reply of list.filter(ai)){
     const declared=(Array.isArray(reply.annotation_ids)&&reply.annotation_ids.length?reply.annotation_ids:[reply.reply_to]).filter(id=>typeof id==='string'&&replies.has(id));
     const anchor=replies.has(reply.reply_to)?reply.reply_to:declared[0],parents=anchor?[anchor]:[];
@@ -512,6 +512,8 @@ function renderAnnotations() {
   linkedHandwritingUI?.beforeRender();
   const fragment = document.createDocumentFragment();
   const {notes,replies,unlinked,remarks=new Map()}=visibleAnnotationThreads();
+  if (state.active?.pdf && typeof paperRemarkUI !== 'undefined' && paperRemarkUI)
+    fragment.append(paperRemarkUI.sidebar(state.active,state.annotations.find(note=>note.kind==='paper-remark')));
   state.noteOffset=Math.min(state.noteOffset,Math.max(0,Math.ceil(notes.length/40)-1)*40);
   function qaField(label,text){
     const field=el('div','annotation-qa-field');field.append(el('strong','small',label),el('p','',text));return field;
@@ -821,6 +823,12 @@ function linkAnnotationCard(annotationId, {block='center'}={}) {
 async function locatePdfAnnotation(annotationId) {
   const paperId=state.active?.id;
   if(!paperId||!annotationId)return;
+  if(state.annotations.some(note=>note.id===annotationId&&note.kind==='paper-remark')){
+    readingPanels?.show('annotations');
+    const panel=$('annotation-list').querySelector('.paper-remark-card');
+    if(panel){panel.open=true;panel.scrollIntoView({block:'nearest'});}
+    return;
+  }
   const request={paperId,itemTicket:state.itemTicket};
   pendingAnnotationSearchId=null;
   pendingPdfAnnotationLink=request;
@@ -1758,7 +1766,17 @@ refreshModels.id = 'refresh-models';
 refreshModels.type = 'button'; refreshModels.style.marginTop = '6px'; refreshModels.style.padding = '3px 0'; refreshModels.style.fontSize = '10px';
 refreshModels.addEventListener('click', () => { announceReady(); loadModels(); }); $('model-status').after(refreshModels);
 const paperAbstractUI=window.PaperAbstract?.create({api});
+const paperRemarkUI=window.PaperRemark?.create({api,toast,
+  async onSaved(id){
+    if(state.active?.id!==id||readerPaperId!==id)return;
+    await loadAnnotations(id);
+    if(state.active?.id===id&&readerPaperId===id)await refreshPage(1);
+  },
+  locate(item,note){if(state.active?.id===item.id)pdfReader?.revealAnnotation(note.id,{page:1})
+    .catch(error=>toast(error.message,true));},
+});
 workbenchUI = window.PaperWorkbench?.create({ state, api, persistence, loadList, organization: () => organizationUI, openPaper: id => openResource(state.items.find(item => item.id === id) || {id}), toast, el, resource: () => resourceUI,
+  paperRemarks:paperRemarkUI,
   openAbstract:paperAbstractUI?.open,
   enableAutomaticDoi:()=>!workspaceNavigationUI||workspaceNavigationUI.state().section==='paper',
   tableChanged: table => { paperChatUI?.visible(!table && state.tab!=='graph' && readerPaperId===state.active?.id && (readingPanels?.visible('chat') ?? state.tab==='conversation')); queueMicrotask(()=>{readingShell?.sync();resourceUI?.sync();}); },

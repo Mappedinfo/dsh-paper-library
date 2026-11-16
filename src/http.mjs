@@ -286,7 +286,7 @@ export function createFetchHandler(options = {}) {
             : chatAction
             ? await options.paperChat(input, { signal: request.signal })
             : await dispatch(input, { ...options, settings, signal: request.signal, publicationLookup: true });
-          if(options.companion&&['annotate','annotation_update'].includes(input?.action)&&input.companion_skip!==true){
+          if(options.companion&&['annotate','annotation_update'].includes(input?.action)&&input.view!=='paper-remark'&&input.companion_skip!==true){
             try{result.companion=await options.companion.saved(input.id,result.annotation)}
             catch(error){result.companion={status:'failed',error:`批注已保存，伴学未入队：${error.message}`}}
           }
