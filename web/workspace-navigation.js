@@ -247,3 +247,240 @@ window.PaperWorkspaceNavigation = (() => {
   }
   return Object.freeze({ create });
 })();
+
+window.PaperLibraryNotes = (() => {
+  function create({ root, api, getPaper, openNote, toast }) {
+    const make = (tag, text, className) => {
+      const node = root.ownerDocument.createElement(tag);
+      if (text) node.textContent = text;
+      if (className) node.className = className;
+      return node;
+    };
+    const button = (text, run) => {
+      const node = make('button', text, 'button subtle');
+      node.type = 'button';
+      node.addEventListener('click', run);
+      return node;
+    };
+    const option = (value, title) => {
+      const node = make('option', title); node.value = value;
+      return node;
+    };
+    const select = (label, options) => {
+      const node = make('select');
+      node.setAttribute('aria-label', label);
+      node.append(...options.map(([value, title]) => option(value, title)));
+      return node;
+    };
+    const labeled = (title, input) => {
+      const label = make('label');
+      label.append(make('span', title), input);
+      return label;
+    };
+    const input = (label, placeholder, length) => {
+      const node = make('input');
+      node.type = 'search'; node.maxLength = length; node.placeholder = placeholder;
+      node.setAttribute('aria-label', label);
+      return node;
+    };
+
+    const head = make('header', '', 'notes-library-heading'), views = make('div', '', 'notes-library-views');
+    views.setAttribute('role', 'group'); views.setAttribute('aria-label', '展示样式');
+    const cardsButton = button('卡片', () => setView('cards'));
+    const tableButton = button('表格', () => setView('table'));
+    const refresh = button('刷新', () => void readScope(true));
+    views.append(cardsButton, tableButton, refresh);
+    head.append(make('h2', '笔记'), views);
+
+    const form = make('form', '', 'notes-library-filters');
+    const scope = select('检索范围', [['all','全库'],['paper','当前文献'],['project','阅读项目']]);
+    const projects = select('选择阅读项目', [['','选择项目']]), projectField = labeled('项目', projects);
+    const category = select('收录条件', [['all','标星或有标签'],['starred','已标星'],['tagged','有标签'],['both','标星且有标签']]);
+    const field = select('检索字段', [['all','全部字段'],['content','原文与备注'],['paper','文献标题'],['tags','标签']]);
+    const query = input('笔记关键词', '输入关键词', 200);
+    const tag = input('筛选标签', '输入或选择标签', 60);
+    const tags = make('datalist'); tags.id = 'notes-library-tags';
+    tag.setAttribute('list', tags.id);
+    const submit = make('button', '搜索', 'button'); submit.type = 'submit';
+    form.append(labeled('范围',scope),projectField,labeled('收录',category),labeled('字段',field),labeled('关键词',query),labeled('标签',tag),submit,tags);
+    const statusBar = make('div', '', 'notes-library-status'), status = make('p'), coverageStatus = make('span');
+    status.setAttribute('role', 'status');
+    const pause = button('暂停更新', () => {
+      scanController?.abort();
+      scanController = null;
+      showCoverage(coverage);
+    });
+    statusBar.append(status,coverageStatus,pause);
+    const results = make('div', '', 'notes-library-results'), pager = make('footer', '', 'notes-library-pager');
+    const back = button('上一页', () => void loadPage(Math.max(0, offset - 24)));
+    const next = button('下一页', () => void loadPage(offset + 24));
+    pager.append(back,next);
+    root.replaceChildren(head,form,statusBar,results,pager);
+
+    let view = 'cards', offset = 0, scopeTicket = 0, listTicket = 0, active = false;
+    let scopeArgs = {}, filters = {}, coverage, lastPage, scanController;
+    function setView(value) {
+      view = value;
+      cardsButton.setAttribute('aria-pressed', String(view === 'cards'));
+      tableButton.setAttribute('aria-pressed', String(view === 'table'));
+      if (lastPage) render(lastPage);
+    }
+
+    function tagButtons(note) {
+      const group = make('div', '', 'notes-library-tags');
+      for (const label of note.tags) group.append(button('#' + label, () => {
+        tag.value = label;
+        search();
+      }));
+      return group;
+    }
+    function openButton(note) {
+      const control = button(`${note.title} · 第 ${note.page} 页`, async () => {
+        control.disabled = true;
+        try { await openNote(note); } catch (error) { toast(error.message,true); }
+        finally { control.disabled = Boolean(note.unavailable); }
+      });
+      control.classList.add('notes-library-source');
+      control.disabled = Boolean(note.unavailable);
+      return control;
+    }
+    function excerpts(note) {
+      const content = make('div', '', 'notes-library-excerpts');
+      if (note.unavailable) content.append(make('p','原批注暂不可用','muted'));
+      if (note.text) content.append(make('blockquote',note.text));
+      if (note.comment) content.append(make('p',note.comment,'notes-library-comment'));
+      return content;
+    }
+    function star(note) {
+      const mark = make('span', note.favorite ? '★' : '', 'notes-library-star');
+      if (note.favorite) { mark.title = '已收藏'; mark.setAttribute('aria-label', '已收藏'); }
+      return mark;
+    }
+    function render(page) {
+      results.replaceChildren();
+      status.textContent = page.total ? `${page.offset + 1}–${page.offset + page.items.length} / ${page.total} 条` :
+        filters.query || filters.tag || filters.category !== 'all' ? '没有匹配的笔记。' : '在阅读侧栏为批注标星或添加标签后，会显示在这里。';
+      tags.replaceChildren(...page.tags.map(row=>option(row.tag,`${row.tag} · ${row.total}`)));
+      pager.hidden = !page.offset && !page.has_more;
+      back.disabled = !page.offset; next.disabled = !page.has_more;
+      if (!page.items.length) return;
+      if (view === 'cards') {
+        const grid = make('div', '', 'notes-library-cards');
+        for (const note of page.items) {
+          const card = make('article', '', 'notes-library-card'), source = make('header');
+          source.append(openButton(note),star(note));
+          card.append(source,excerpts(note),tagButtons(note)); grid.append(card);
+        }
+        results.append(grid);
+        return;
+      }
+      const table = make('table', '', 'notes-library-table'), columns = make('tr'), body = make('tbody');
+      for (const name of ['来源', '原文与备注', '标签', '收藏']) {
+        const cell = make('th', name); cell.scope = 'col'; columns.append(cell);
+      }
+      const heading = make('thead'); heading.append(columns); table.append(heading,body);
+      for (const note of page.items) {
+        const row = make('tr');
+        for (const element of [openButton(note),excerpts(note),tagButtons(note),star(note)]) {
+          const cell = make('td'); cell.append(element); row.append(cell);
+        }
+        body.append(row);
+      }
+      results.append(table);
+    }
+
+    function showCoverage(value) {
+      coverage = value;
+      pause.hidden = !scanController;
+      coverageStatus.textContent = value && (value.pending || value.incomplete || scanController)
+        ? `${scanController ? '正在更新 · ' : ''}已读取 ${value.indexed} / ${value.documents} 篇 PDF${value.incomplete ? ` · ${value.incomplete} 篇读取不完整` : ''}` : '';
+    }
+    async function loadPage(value = 0) {
+      const request = ++listTicket, epoch = scopeTicket;
+      offset = value;
+      try {
+        const page = await api('annotation_favorites_list', {view:'notes',...scopeArgs,...filters,offset});
+        if (!active || epoch !== scopeTicket) return;
+        if (request !== listTicket) return page.coverage;
+        if (offset && !page.items.length) return loadPage(Math.max(0,offset-24));
+        lastPage = page;
+        render(page);
+        showCoverage(page.coverage);
+        return page.coverage;
+      } catch (error) {
+        if (active && epoch === scopeTicket && request === listTicket) status.textContent = error.message;
+      }
+    }
+    function eligible() {
+      return scope.value === 'all' || scope.value === 'paper' && Boolean(scopeArgs.paper_id) ||
+        scope.value === 'project' && Boolean(scopeArgs.project_id);
+    }
+    function search() {
+      filters = {query:query.value.trim(),tag:tag.value.trim(),field:field.value,category:category.value};
+      if (eligible()) void loadPage();
+    }
+    async function readScope(retryIncomplete = false) {
+      const epoch = ++scopeTicket;
+      scanController?.abort(); scanController = null;
+      const paper = getPaper();
+      scopeArgs = scope.value === 'paper' && paper?.pdf && !paper.archived ? {paper_id:paper.id} :
+        scope.value === 'project' && projects.value ? {project_id:projects.value} : {};
+      projectField.hidden = scope.value !== 'project';
+      results.replaceChildren(); pager.hidden = true; lastPage = null; showCoverage(null);
+      if (!eligible()) {
+        status.textContent = scope.value === 'project' ? '请选择阅读项目。' : '请先打开一篇有 PDF 的在库文献。';
+        return;
+      }
+      status.textContent = '正在读取笔记…';
+      const current = await loadPage();
+      if (!active || epoch !== scopeTicket || !(current?.pending || retryIncomplete && current?.incomplete)) return;
+      const controller = new AbortController();
+      scanController = controller; showCoverage(current);
+      let steps = 0, retry = retryIncomplete;
+      try {
+        let progress;
+        do {
+          progress = await api('annotation_favorites_list', {view:'notes',prepare:true,...scopeArgs,retry_incomplete:retry}, {signal:controller.signal});
+          retry = false;
+          if (!active || epoch !== scopeTicket || controller.signal.aborted) return;
+          showCoverage(progress);
+          if (++steps === 1 || !progress.pending || steps % 4 === 0) await loadPage(offset);
+          if (!progress.progressed && progress.pending) throw Error('部分 PDF 正在变化，可稍后刷新。');
+          if (progress.pending) await new Promise(resolve => setTimeout(resolve, 100));
+        } while (progress.pending && active && epoch === scopeTicket && !controller.signal.aborted);
+      } catch (error) {
+        if (active && epoch === scopeTicket && !controller.signal.aborted) toast(error.message,true);
+      } finally {
+        if (scanController === controller) { scanController = null; showCoverage(coverage); }
+      }
+    }
+
+    async function readProjects() {
+      try {
+        const rows = [];
+        for (let offset=0;offset<500;) {
+          const page = await api('project_list',{offset,limit:200});
+          if (!active) return;
+          rows.push(...page.projects);
+          offset += page.projects.length;
+          if (!page.projects.length || offset >= page.total) break;
+        }
+        const value = projects.value;
+        projects.replaceChildren(option('','选择项目'),...rows.map(row=>option(row.id,row.title)));
+        if (rows.some(row=>row.id===value)) projects.value = value;
+        else if (value && scope.value === 'project') void readScope();
+      } catch (error) { if (active) toast(error.message,true); }
+    }
+    form.addEventListener('submit',event=>{event.preventDefault();search();});
+    scope.addEventListener('change',()=>{void readScope(); if (scope.value === 'project') void readProjects();});
+    projects.addEventListener('change',()=>void readScope());
+    for (const control of [category,field,tag]) control.addEventListener('change',search);
+    setView(view); pager.hidden = projectField.hidden = pause.hidden = true;
+    filters = {query:'',tag:'',field:'all',category:'all'};
+    return {
+      open() { active = true; void readScope(); if (scope.value === 'project') void readProjects(); },
+      close() { active = false; ++scopeTicket; scanController?.abort(); scanController = null; },
+    };
+  }
+  return { create };
+})();

@@ -437,7 +437,7 @@ function showReaderSelection(selection) {
 }
 
 const annotationLoadJobs=new Map();
-let favoriteAnnotationIds=new Set(), favoriteNotesRequest=0;
+let favoriteAnnotationIds=new Set();
 const favoriteAnnotationWrites=new Set();
 async function loadAnnotations(id) {
   const previous=annotationLoadJobs.get(id);if(previous){previous.again=true;return previous.promise;}
@@ -2561,6 +2561,7 @@ function applyWorkspaceNavigation(value) {
   if (pane) { pane.dataset.workspaceSection = value.section; pane.dataset.workspaceFocus = value.current?.kind || ''; }
   $('library-literature-content').hidden = value.section !== 'paper';
   $('library-favorite-notes').hidden = value.section !== 'notes';
+  if (value.section !== 'notes') notesLibraryUI?.close();
   scholarsUI?.setVisible(value.section === 'scholar');
   resourceUI?.navigationChanged?.(value);
   const versions = $('workspace-versions'), showVersions = value.current?.kind === 'latex';
@@ -2568,46 +2569,20 @@ function applyWorkspaceNavigation(value) {
   versions.hidden = !showVersions; versions.dataset.projectId = showVersions ? value.current.id : '';
   placeWorkspaceNavigation(latexUI?.isOpen() === true);
 }
-async function loadFavoriteNotes(offset=0){
-  const panel=$('library-favorite-notes'), request=++favoriteNotesRequest;
-  const heading=el('h2','','收藏批注'), status=el('p','small muted','正在读取…');
-  status.setAttribute('role','status');panel.replaceChildren(heading,status);
-  const button=(label,click)=>{const control=el('button','button subtle',label);control.type='button';control.addEventListener('click',click);return control;};
-  try{
-    const result=await api('annotation_favorites_list',{offset});
-    if(request!==favoriteNotesRequest||panel.hidden)return;
-    if(offset&&!result.items.length){void loadFavoriteNotes(Math.max(0,offset-12));return;}
-    status.textContent=result.total?`共 ${result.total} 条`:'点击批注卡片上的 ☆，即可在这里查看。';
-    for(const note of result.items){
-      const card=el('article','favorite-note');
-      const open=button(`${note.title} · 第 ${note.page} 页`,async()=>{
-        if(!await workspaceNavigationUI?.navigate({kind:'paper',id:note.paper_id,title:note.title}))return;
-        if(state.active?.id!==note.paper_id)return;
-        await loadAnnotations(note.paper_id);
-        if(state.active?.id!==note.paper_id)return;
-        readerSearchUI?.clearAnnotationFilter();readingPanels?.show('annotations');
-        const index=annotationThreads(state.annotations).notes.findIndex(entry=>entry.id===note.annotation_id);
-        if(index>=0){state.noteOffset=Math.floor(index/40)*40;renderAnnotations();linkAnnotationCard(note.annotation_id);}
-        await pdfReader?.revealAnnotation(note.annotation_id,{page:note.page});
-      });
-      open.disabled=Boolean(note.unavailable);
-      const remove=button('取消收藏',async()=>{
-        remove.disabled=true;
-        try{await api('annotation_favorite_set',{id:note.paper_id,annotation_id:note.annotation_id,favorite:false});if(!panel.hidden)void loadFavoriteNotes(offset);}
-        catch(error){toast(error.message,true);remove.disabled=false;}
-      });
-      card.append(open,remove);
-      if(note.unavailable)card.append(el('p','small muted','原批注暂不可用'));
-      else for(const text of [note.text,note.comment])if(text)card.append(el('p','',text));
-      panel.append(card);
-    }
-    if(offset)panel.append(button('上一页',()=>void loadFavoriteNotes(Math.max(0,offset-12))));
-    if(result.has_more)panel.append(button('下一页',()=>void loadFavoriteNotes(offset+12)));
-    panel.append(button('刷新',()=>void loadFavoriteNotes(offset)));
-  }catch(error){
-    if(request===favoriteNotesRequest&&!panel.hidden){status.textContent=error.message;panel.append(button('重试',()=>void loadFavoriteNotes(offset)));}
-  }
-}
+const notesLibraryUI = window.PaperLibraryNotes?.create({
+  root: $('library-favorite-notes'), api, toast, getPaper: () => state.active,
+  async openNote(note) {
+    if (!await workspaceNavigationUI?.navigate({kind:'paper',id:note.paper_id,title:note.title})) return;
+    const ticket = state.itemTicket;
+    await loadAnnotations(note.paper_id);
+    if (state.active?.id !== note.paper_id || state.itemTicket !== ticket) return;
+    readerSearchUI?.clearAnnotationFilter();
+    readingPanels?.show('annotations');
+    await locatePdfAnnotation(note.annotation_id);
+    if (state.active?.id === note.paper_id && state.itemTicket === ticket)
+      await pdfReader?.revealAnnotation(note.annotation_id,{page:note.page});
+  },
+});
 function workspaceContextChanged(target) {
   const writing = latexUI?.isOpen() === true, canvas = boardUI?.isOpen() === true;
   // Context notifications may arrive after a metadata read or an old surface's
@@ -2690,7 +2665,7 @@ if ($('workspace-navigation') && window.PaperWorkspaceNavigation) {
   scholarsUI = window.PaperScholars?.create({root:$('library-scholars'),api,toast,
     openPaper: paper => workspaceNavigationUI.navigate({kind:'paper',id:paper.id,title:paper.title})});
   workspaceNavigationUI = window.PaperWorkspaceNavigation.create({root:$('workspace-navigation'),catalogRoot:$('workspace-catalog-body'),relatedRoot:$('workspace-related'),paperSearch:$('catalog-search-form'),paperHeading:document.querySelector('#library-literature-content>.pane-heading'),api,toast,
-    actions:$('workspace-versions'),prepare:prepareWorkspaceNavigation,onRootChange:openWorkspaceRoot,onNavigate:openWorkspaceTarget,onChange:applyWorkspaceNavigation,onNotes:loadFavoriteNotes,scholars:Boolean(scholarsUI),datasetCatalogActions:host=>resourceUI?.catalogActions(host),decorateDatasetRow:(row,item)=>resourceUI?.catalogRow(row,item),onCreateProject:()=>projectDialogOpen(null)});
+    actions:$('workspace-versions'),prepare:prepareWorkspaceNavigation,onRootChange:openWorkspaceRoot,onNavigate:openWorkspaceTarget,onChange:applyWorkspaceNavigation,onNotes:()=>notesLibraryUI?.open(),scholars:Boolean(scholarsUI),datasetCatalogActions:host=>resourceUI?.catalogActions(host),decorateDatasetRow:(row,item)=>resourceUI?.catalogRow(row,item),onCreateProject:()=>projectDialogOpen(null)});
   applyWorkspaceNavigation(workspaceNavigationUI.state());
   $('workspace-library')?.addEventListener('click',event=>{if(workspaceNavigationUI.state().section!=='paper'||boardUI?.isOpen()||latexUI?.isOpen()){event.preventDefault();event.stopImmediatePropagation();void workspaceNavigationUI.selectRoot('paper');}},true);
 }

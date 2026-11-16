@@ -722,6 +722,9 @@ def dispatch(request):
             from . import paper_organization
             return paper_organization.update(library, request) if action.endswith("update") else paper_organization.listing(library, request)
         if action in {"annotation_favorite_set", "annotation_favorites_list"}:
+            if action == "annotation_favorites_list" and request.get("view") == "notes":
+                from . import annotation_notes
+                return (annotation_notes.prepare if request.get("prepare") is True else annotation_notes.listing)(library, request)
             from . import annotation_favorites
             return annotation_favorites.update(library, request) if action.endswith("_set") else annotation_favorites.listing(library, request)
         if action in {"annotation_tags_update", "annotation_tag_suggestions"}:
