@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createAnnotationCaption } from '../src/harness/annotation-caption.mjs'
+import { createHarnessAI } from '../src/harness/ai.mjs'
 import { createLocalStateStore } from '../src/local-state.mjs'
 import { createFetchHandler } from '../src/http.mjs'
 import { dispatch } from '../src/bridge.mjs'
@@ -72,6 +73,22 @@ test('unsupported model remains explicit without fake caption and only explicit 
   assert.ok((await f.handle({ ...input, retry: true })).saved); assert.equal(f.calls.length, 2)
 })
 
+test('a cached OpenCode routing failure can be retried using the host session', async () => {
+  const f = fixture()
+  const model = { provider: 'opencode-go', model: 'vision' }
+  f.options.paperChat = async () => ({ sessionId: 'paper-session', model })
+  const handle = createAnnotationCaption(f.options)
+  f.modelError = Error('400 {"type":"MissingSessionID","message":"missing x-opencode-session"}')
+  await assert.rejects(handle(input), error => error.code === 'ANNOTATION_CAPTION_ROUTING' && !error.message.includes('400'))
+  const previous = [...f.records.values()][0]
+  previous.value.error = f.modelError.message
+  previous.value.code = 'ANNOTATION_CAPTION_FAILED'
+  await assert.rejects(handle(input), error => error.code === 'ANNOTATION_CAPTION_ROUTING' && error.retry_with_new_request)
+  f.modelError = null
+  assert.ok((await handle({ ...input, retry: true, sessionId: 'untrusted' })).saved)
+  assert.deepEqual(f.calls.map(call => call.sessionId), ['paper-session', 'paper-session'])
+})
+
 test('a restarted pending request does not resend and invalid input allocates no provider calls', async () => {
   const f = fixture(); let release; f.gate = new Promise(resolve => { release = resolve })
   const p = f.handle(input); while (!f.calls.length) await tick()
@@ -89,11 +106,30 @@ test('HTTP host caption → bridge → native PDF stores one /IRT reply; standal
   const paper = (await dispatch({ action: 'import', path: source }, options)).items[0]
   const note = (await dispatch({ action: 'annotate', id: paper.id, page: 1, type: 'square', rects: [[90,90,260,230]] }, options)).annotation
   const store = createLocalStateStore({ library: options.library, home: options.localStateHome }); let count = 0
-  const caption = createAnnotationCaption({ ...options, dispatch, store, paperChat: async () => ({ model: { provider: 'synthetic', model: 'vision' } }), ai: async req => { count++; assert.ok(req.images[0].data.length > 100); return '合成图显示红色矩形。' } })
+  const model = { provider: 'opencode-go', model: 'synthetic-vision' }, sessionId = 'synthetic-host-paper-session'
+  const ai = createHarnessAI({ prepareCall: async () => ({
+    inputModalities: ['image'],
+    async *stream(options) {
+      count++
+      if (options.sessionId !== sessionId) {
+        yield { type: 'finish', reason: { kind: 'error', failure: { message: '400 MissingSessionID: missing x-opencode-session' } } }
+        return
+      }
+      assert.ok(options.messages[0].content[1].ref)
+      yield { type: 'block-end', block: { type: 'text', text: '合成图显示红色矩形。' } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    },
+  }) }, value => value, { maxOutputTokens: 128 }, { attachments: {
+    async admitPromptContent(content) {
+      assert.ok(content[1].data.length > 100)
+      return [content[0], { type: 'image', ref: 'synthetic-image' }]
+    },
+  } })
+  const caption = createAnnotationCaption({ ...options, dispatch, store, paperChat: async () => ({ model, sessionId }), ai })
   const handler = createFetchHandler({ ...options, localState: store, annotationCaption: caption })
   const post = async (handler, body) => handler(new Request('http://localhost/api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }))
   const body = { ...input, id: paper.id, annotation_id: note.id }
-  const response = await post(handler, body), data = await response.json()
+  const response = await post(handler, { ...body, sessionId: 'forged-client-session' }), data = await response.json()
   assert.equal(response.status, 200, JSON.stringify(data)); assert.equal(data.result.annotation.source_kind, 'annotation-caption'); assert.equal(data.result.annotation.reply_to, note.id)
   assert.equal((await (await post(handler, body)).json()).result.duplicate, true); assert.equal(count, 1)
   const notes = (await dispatch({ action: 'annotations', id: paper.id }, options)).annotations

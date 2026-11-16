@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { LocalStateError } from '../local-state.mjs';
 
-export const RESEARCH_TYPES = Object.freeze(['scholar', 'pi', 'group', 'school', 'organization', 'lead']);
+export const RESEARCH_TYPES = Object.freeze(['scholar', 'pi', 'group', 'collaboration', 'school', 'organization', 'lead']);
 const manifestKey = 'research-directory:current';
 const digest = value => createHash('sha256').update(value).digest('hex');
 const clean = (value, width = 240) => typeof value === 'string' ? value.trim().slice(0, width) : '';
@@ -12,7 +12,8 @@ const verified = value => ['verified', 'verified-metadata', 'verified-official']
 const personType = value => value === 'scholar' || value === 'pi';
 const orgType = name => /\b(?:university|college|polytechnic|universit[éeà])\b|大学|學院|学院/i.test(name) ? 'school' : 'organization';
 const labName = name => /\b(?:lab(?:orator(?:y|ies))?|research (?:group|team))\b|实验室|實驗室|课题组|研究组/i.test(name);
-const leader = value => /\b(?:principal investigator|lab director|group leader|lab head|PI)\b|课题组负责人|实验室主任|首席研究员/i.test(clean(value));
+const leader = value => /\b(?:principal investigator|lab director|group leader|lab head|PI)\b|\bdirector of\b.{0,90}\b(?:lab|laboratory)\b|课题组负责人|实验室主任|首席研究员/i.test(clean(value));
+const collaborationName = name => /合作|协作|署名|研究线|发表团队|collaboration|coauthorship|research line/i.test(name);
 const validDOI = value => /^10\.\d{4,9}\//i.test(value);
 
 function publicURL(value) {
@@ -56,14 +57,15 @@ function buildDirectory(catalog, documents, snapshot, relations) {
     }
     return key;
   }
-  function add(value, { sources = [], works = [], status = 'needs_review', context = '' } = {}) {
+  function add(value, { sources = [], works = [], status = 'needs_review', context = '', legacyKind = value.kind } = {}) {
     const name = clean(value.name, 160), organization = clean(value.organization);
     if (!known(name)) return;
-    const identity = researchIdentity({ ...value, name, organization });
+    const identity = researchIdentity({ kind: legacyKind, name, organization });
     const id = 'research-' + digest(identity).slice(0, 28);
     let item = profiles.get(id);
     if (!item) {
       item = { id, kind: value.kind, name, organization, aliases: [], topics: [], members: [], roles: [], sources: [], evidence_status: status,
+        ...(legacyKind !== value.kind ? { legacy_kind: legacyKind } : {}),
         citations: new Set(), references: new Map(), followed: false, works: [], reviewed: [] };
       profiles.set(id, item);
     }
@@ -126,6 +128,17 @@ function buildDirectory(catalog, documents, snapshot, relations) {
     const context = clean(document.topic?.title, 500) || '领域研究';
     const sourceIndex = new Map(array(document.sources).map(source => [source.id, source]));
     const evidence = row => [{ label: '领域研究 · ' + context }, ...array(row?.source_ids).map(id => sourceIndex.get(id)).filter(Boolean)];
+    const groupTitle = row => clean(row.name || row.label || row.title, 160);
+    function groupKind(row) {
+      const name = groupTitle(row);
+      const hasLab = labName(name) || known(row.official_lab_name || row.official_group_name)
+        || array(row.source_ids).some(id => {
+          const source = sourceIndex.get(id);
+          const title = normalized(source?.title);
+          return source?.kind === 'team_homepage' && title && normalized(name).endsWith(title);
+        });
+      return !row.not_a_verified_current_lab && !collaborationName(name) && hasLab ? 'group' : 'collaboration';
+    }
     const byPaper = new Map(array(document.papers).map(paper => [paper.id, work(paper)]));
     const paperRefs = row => array(row?.paper_ids).map(id => byPaper.get(id)).filter(Boolean);
     const tracked = new Set(array(document.tracking_list).flatMap(row => array(row.scholar_ids)));
@@ -144,7 +157,7 @@ function buildDirectory(catalog, documents, snapshot, relations) {
     }
     const groups = new Map();
     for (const row of [...array(document.research_lines), ...array(document.groups), ...array(document.research_groups)]) {
-      if (!row || row.not_a_verified_current_lab || row.relationship_type === 'analyst_primary_task_category') continue;
+      if (!row || row.relationship_type === 'analyst_primary_task_category') continue;
       if (row.name || row.label || row.title) {
         const id = row.id || row.name || row.label || row.title;
         const previous = groups.get(id);
@@ -153,12 +166,13 @@ function buildDirectory(catalog, documents, snapshot, relations) {
       }
     }
     for (const row of groups.values()) {
-      add({ kind: 'group', name: row.name || row.label || row.title, organization: affiliation(row.institution),
+      const kind = groupKind(row);
+      add({ kind, name: groupTitle(row), organization: affiliation(row.institution),
         members: row.members, memberIds: row.scholar_ids.map(id => scholars.get(id)).filter(Boolean),
         topics: [row.research_question, ...array(row.research_interests)], followed: trackedGroups.has(row.id),
         description: row.summary, scope: typeof row.task_boundaries === 'string' ? row.task_boundaries : array(row.task_boundaries).filter(value => typeof value === 'string').join(' · '),
         evidence_note: row.group_name_note, last_checked: row.last_checked },
-      { sources: evidence(row), works: paperRefs(row), status: verified(row.status) ? 'verified' : 'needs_review', context });
+      { sources: evidence(row), works: paperRefs(row), status: kind === 'group' && verified(row.status) ? 'verified' : 'needs_review', context, legacyKind: 'group' });
     }
     for (const row of array(document.organizations).filter(Boolean)) {
       const name = affiliation(row);
@@ -170,10 +184,11 @@ function buildDirectory(catalog, documents, snapshot, relations) {
       const group = paper.comparison?.research_group;
       if (known(group?.value)) {
         const pendingPI = /假定\s*PI|\bPI\s*待核/i.test(group.value);
-        const matched = [...groups.values()].find(row => normalized(row.name || row.label || row.title) === normalized(group.value));
-        const kind = matched ? 'group' : verified(group.status) && labName(group.value) ? 'group' : 'lead';
+        const matched = [...groups.values()].find(row => normalized(groupTitle(row)) === normalized(group.value));
+        const legacyKind = matched || verified(group.status) && labName(group.value) ? 'group' : 'lead';
+        const kind = matched ? groupKind(matched) : collaborationName(group.value) && !pendingPI ? 'collaboration' : legacyKind;
         add({ kind, name: group.value, organization: affiliation(matched?.institution), roles: pendingPI ? ['pi'] : [] },
-          { sources: [...evidence(paper), ...evidence(group)], works, status: verified(group.status) && kind === 'group' ? 'verified' : 'needs_review', context });
+          { sources: [...evidence(paper), ...evidence(group)], works, status: verified(group.status) && kind === 'group' ? 'verified' : 'needs_review', context, legacyKind });
       }
     }
   }
@@ -191,7 +206,7 @@ function buildDirectory(catalog, documents, snapshot, relations) {
       if (row.id === 'other') continue;
       const name = typeof row.label === 'string' ? row.label : row.label?.zh || row.label?.en;
       const item = evidence.get(row.id);
-      if (item) add({ kind: 'lead', name }, { ...item, status: 'needs_review', context: '关系图组别' });
+      if (item) add({ kind: 'collaboration', name }, { ...item, status: 'needs_review', context: '关系图组别', legacyKind: 'lead' });
     }
   }
   if (snapshot) {
@@ -206,8 +221,10 @@ function buildDirectory(catalog, documents, snapshot, relations) {
       const works = sampled.map(work);
       add({ kind: 'scholar', name: person.name, aliases: person.aliases, organization, topics: [person.subfield || person.area],
         source_work_count: new Set(works.filter(Boolean)).size }, { sources: sourceRows, works, status: person.identityVerified === true ? 'verified' : 'needs_review' });
-      add({ kind: 'group', name: person.group, members: [person.name], organization, topics: [person.subfield || person.area] },
-        { sources: sourceRows, works: [], status: 'needs_review' });
+      const group = clean(person.group, 160);
+      const kind = labName(group) && !collaborationName(group) ? 'group' : 'collaboration';
+      add({ kind, name: group, members: [person.name], organization, topics: [person.subfield || person.area] },
+        { sources: sourceRows, works: [], status: 'needs_review', legacyKind: 'group' });
     }
   }
   const entries = [...profiles.values()].map(({ citations, references, ...item }) => ({

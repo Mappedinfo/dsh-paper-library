@@ -1,7 +1,7 @@
 'use strict';
 
 window.PaperScholars = (() => {
-  const kinds = { scholar: '学者', pi: 'PI', group: '课题组', school: '院校', organization: '科研机构', lead: '待核线索' };
+  const kinds = { scholar: '学者', pi: 'PI', group: '课题组', collaboration: '合作群体', school: '院校', organization: '科研机构', lead: '待核线索' };
   const evidence = { verified: '已核验', publication: '发表时记录', needs_review: '待核验' };
   function create({ root, api, openPaper, toast }) {
     const doc = root.ownerDocument;
@@ -101,7 +101,7 @@ window.PaperScholars = (() => {
         try {
           const { counts } = await api('scholar_import');
           if (!active || owner !== generation) return;
-          toast(`已读取 ${counts.papers} 篇文献和 ${counts.topics} 个研究主题，导入 ${counts.group} 项课题组记录。`);
+          toast(`已读取 ${counts.papers} 篇文献和 ${counts.topics} 个研究主题，导入 ${counts.group} 个课题组和 ${counts.collaboration} 个合作群体。`);
           void loadCatalog(0);
         } catch (error) { if (active && owner === generation) message.textContent = error.message; }
         finally { importButton.disabled = false; }
@@ -187,14 +187,14 @@ window.PaperScholars = (() => {
         ...profileBackActions(),
       ]);
       if (item.member_rows?.length) {
-        const members = table(`来源列出的成员 · ${item.member_rows.length} 人`, ['姓名', '档案类型', '档案所列机构', '研究人员档案']);
+        const members = table(`来源列出的成员 · ${item.member_rows.length} 人`, ['姓名', '档案类型', '档案中的职称／角色', '档案所列机构', '研究人员档案']);
         for (const member of item.member_rows) {
           const action = member.id ? button('查看档案', () => {
             memberOrigin = item.id;
             void loadProfile(member.id);
           }) : '暂无匹配档案';
           if (member.id) action.setAttribute('aria-label', `查看 ${member.name} 的档案`);
-          row(members, [member.name, kinds[member.kind], member.organization || '—', action]);
+          row(members, [member.name, kinds[member.kind], member.position || '—', member.organization || '—', action]);
         }
       }
       const info = table('档案资料', ['字段', '资料']);

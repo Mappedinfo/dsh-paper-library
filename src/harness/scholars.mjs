@@ -50,7 +50,8 @@ function memberRows(profile, people, importedById) {
   function add(name, person) {
     if (person && usedIds.has(person.id)) return;
     if (person) usedIds.add(person.id);
-    rows.push(person ? { name, id: person.id, kind: person.kind, organization: person.organization } : { name });
+    rows.push(person ? { name, id: person.id, kind: person.kind, organization: person.organization,
+      ...(person.position ? { position: person.position } : {}) } : { name });
   }
   for (const name of profile.members || []) {
     const key = matchText(name);
@@ -125,19 +126,23 @@ function publication(value) {
 
 export function createScholars({ store, request, directory }) {
   const empty = { entries: [], entriesById: new Map(), publications: new Map() };
-  const overlay = (imported, manual) => ({ kind: 'scholar', ...imported, ...manual });
+  const overlay = (imported, manual) => ({
+    kind: 'scholar', ...imported, ...manual,
+    ...(imported?.legacy_kind && manual?.kind === imported.legacy_kind && !manual.kind_override ? { kind: imported.kind } : {}),
+  });
+  const identities = item => [researchIdentity(item), ...(item.legacy_kind ? [researchIdentity({ ...item, kind: item.legacy_kind })] : [])];
   const pack = (profile, revision) => {
-    const { publication_keys, member_profile_ids, ...rest } = profile;
+    const { publication_keys, member_profile_ids, legacy_kind, kind_override, ...rest } = profile;
     return { profile: { ...rest, linked_publication_count: publication_keys?.length ?? 0 }, revision };
   };
   async function read(id, data) {
     const record = await store.get(identity(id));
-    const imported = data.entriesById.get(id) || (record.value && data.entries.find(item => researchIdentity(item) === researchIdentity(record.value)));
+    const imported = data.entriesById.get(id) || (record.value && data.entries.find(item => identities(item).includes(researchIdentity(record.value))));
     if (!record.value && !imported) throw new LocalStateError('找不到该档案。', 'SCHOLAR_NOT_FOUND', 404);
     return { record, imported, profile: overlay(imported, record.value) };
   }
   async function directoryProfiles(data, signal) {
-    const imported = new Map(data.entriesById), importedIdentities = new Map(data.entries.map(item => [researchIdentity(item), item]));
+    const imported = new Map(data.entriesById), importedIdentities = new Map(data.entries.flatMap(item => identities(item).map(key => [key, item])));
     const manual = [];
     for (let start = 0; start !== null;) {
       signal?.throwIfAborted();
@@ -202,7 +207,10 @@ export function createScholars({ store, request, directory }) {
     }
     const manual = record.value || { id: profile.id, name: profile.name, followed: profile.followed, works: [], reviewed: [] };
     let next;
-    if (input.action === 'scholar_save') next = editProfile(manual, input.patch);
+    if (input.action === 'scholar_save') {
+      next = editProfile(manual, input.patch);
+      if (Object.hasOwn(input.patch, 'kind') && next.kind !== profile.kind) next.kind_override = true;
+    }
     else if (input.action === 'scholar_work_save') {
       const work = publication(input.work);
       if (input.previous_doi && input.previous_doi !== work.doi && profile.works.some(row => row.doi === work.doi)) throw invalid('已登记相同 DOI。');

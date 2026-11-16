@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFetchHandler } from '../src/http.mjs';
+import { createHash } from 'node:crypto';
+import { createLocalStateStore } from '../src/local-state.mjs';
 
 test('scholar profiles persist and distinguish DOI evidence, confirmed authors and name matches', async t => {
   const root = await mkdtemp(join(tmpdir(), 'paper-scholars-test-'));
@@ -93,7 +95,7 @@ test('research directory imports affiliations and topic groups with sources and 
     schema_version: 1, topic: { id: 'synthetic-topic', title: 'Synthetic topic', question: 'Example?' },
     sources: [evidence], claims: [],
     scholars: [
-      { id: 'jane', name: 'Jane Synthetic', current_role: 'Principal Investigator', organization: 'Example University',
+      { id: 'jane', name: 'Jane Synthetic', current_role: 'Professor and Director of Mobility Lab', organization: 'Example University',
         source_ids: ['source'], research_interests: ['Mobility'], contributions: [{ paper_id: 'work', source_ids: ['source'] }] },
       { id: 'partner', name: 'Alex Synthetic', organization: 'Partner University', source_ids: ['source'], contributions: [] },
       { id: 'another-jane', name: 'Jane Synthetic', organization: 'Different University', source_ids: ['source'], contributions: [] },
@@ -105,8 +107,10 @@ test('research directory imports affiliations and topic groups with sources and 
       { id: 'theme', title: 'Topic bucket', relationship_type: 'analyst_primary_task_category', not_a_verified_current_lab: true, source_ids: ['source'] },
       { id: 'lab', name: 'Mobility Lab', members: ['Jane Synthetic'], source_ids: ['source'] },
     ],
+    research_lines: [{ id: 'coauthored-work', name: 'Network generation', status: 'evidence_based_topic_line_not_current_team',
+      members: ['Unmatched Synthetic'], paper_ids: ['work'], source_ids: ['source'] }],
     research_groups: [{ id: 'lab', name: 'Mobility Lab', institution: 'Example University',
-      members: ['jane synthetic', 'Unmatched Synthetic'], scholar_ids: ['partner'],
+      members: ['jane synthetic', 'Unmatched Synthetic'], scholar_ids: ['jane', 'partner'],
       paper_ids: ['work'], source_ids: ['source'], status: 'verified' }],
   };
   await call('field_radar_import', { document, expected_revision: 0 });
@@ -116,20 +120,33 @@ test('research directory imports affiliations and topic groups with sources and 
     people: [{ name: 'Jane Synthetic', unit: 'Example University', group: 'Mobility Lab', works: [0], identityVerified: true }],
     works: [{ id: 'synthetic-work', title: paper.title, doi: '10.1234/synthetic-group' }],
   }));
+  const legacyId = 'research-' + createHash('sha256').update(JSON.stringify(['group', 'networkgeneration', ''])).digest('hex').slice(0, 28);
+  const store = createLocalStateStore({ library: options.library, home: options.localStateHome });
+  await store.put('scholar:profile:' + legacyId, { id: legacyId, kind: 'group', name: 'Network generation',
+    followed: true, notes: 'Existing group note', works: [], reviewed: [] }, 0);
   const { counts } = await call('scholar_import');
   assert.equal(counts.papers, 1);
   assert.equal(counts.topics, 1);
   assert.equal(counts.group, 1);
+  assert.equal(counts.collaboration, 1);
   assert.equal(counts.school, 1);
   assert.equal(counts.snapshot_people, 1);
   const groups = await call('scholar_list', { kind: 'group' });
   const id = groups.items[0].id;
   assert.equal(groups.total, 1);
   assert.equal(groups.items[0].linked_publication_count, 1);
+  const collaborators = await call('scholar_list', { kind: 'collaboration' });
+  assert.deepEqual(collaborators.items.map(row => [row.id, row.kind, row.followed]), [[legacyId, 'collaboration', true]]);
+  const collaboration = (await call('scholar_get', { id: legacyId })).profile;
+  assert.equal(collaboration.notes, 'Existing group note');
+  assert.deepEqual(collaboration.member_rows, [{ name: 'Unmatched Synthetic' }]);
+  assert.equal((await call('scholar_source_publications', { id: legacyId })).items[0].id, paper.id);
   const imported = await call('scholar_get', { id });
   const { member_rows: members } = imported.profile;
   assert.deepEqual(members.map(row => row.name), ['Jane Synthetic', 'Unmatched Synthetic', 'Alex Synthetic']);
   assert.equal(members[0].organization, 'Example University');
+  assert.equal(members[0].kind, 'pi');
+  assert.equal(members[0].position, 'Professor and Director of Mobility Lab');
   assert.ok(members[0].id);
   assert.deepEqual(members[1], { name: 'Unmatched Synthetic' });
   assert.equal(members[2].organization, 'Partner University');
