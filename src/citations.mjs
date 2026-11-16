@@ -26,6 +26,8 @@ function cleanItem(item, index) {
 
 const hasValue = value => (typeof value === 'string' || typeof value === 'number') && Boolean(String(value).trim());
 const hasNames = names => Array.isArray(names) && names.some(person => [person?.family, person?.given, person?.literal].some(hasValue));
+const isManual = item => item.type === 'report' &&
+  /^(?:manual|user manual|user guide|technical manual|说明书|用户手册)$/i.test(item.genre || '');
 
 /** Readiness for the copy command. General CSL exports still support APA's
  * missing-information forms for users who deliberately need those. */
@@ -46,7 +48,7 @@ export function apaCopyReadiness(item) {
   if (['book','chapter'].includes(type) && !hasValue(item.publisher)) missing.push('出版者');
   if (type === 'article' && venue) missing.push('出版类型（期刊或会议论文）');
   if (['article','document','report','thesis','webpage'].includes(type) &&
-      !(type === 'report' && /^(?:manual|user manual|user guide|technical manual|说明书|用户手册)$/i.test(item.genre || '')) &&
+      !isManual(item) &&
       ![item.DOI, item.URL, item.publisher, item.archive, item['container-title']].some(hasValue)) missing.push('出版出处或公开链接');
   // Try to find volume, issue and DOI when available, but their absence alone
   // does not prevent copying a reference to a source that omits them.
@@ -82,10 +84,30 @@ export async function cite(items, format = 'apa') {
   const data = items.map(cleanItem);
   if (new Set(data.map(i => i.id)).size !== data.length) throw new Error('引用键重复，请先编辑为唯一引用键。');
   if (format === 'csl-json') return { text: JSON.stringify(data, null, 2), filename: 'references.json', mime: 'application/json' };
-  const { CSL, Cite, style, locale } = await load();
+  const { CSL, Cite, plugins, style, locale } = await load();
   if (format === 'biblatex') {
     for(const item of data) if(!/^[^\s,{}\\%#"'=()]+$/u.test(item.id)) throw new Error(`引用键含 BibLaTeX 不支持的字符，请先编辑：${item.id}`);
-    const text = new Cite(data).format('biblatex', { format: 'text' });
+    const bibliography = new Cite(data);
+    const manualIds = new Set(data.filter(isManual).map(item => item.id));
+    let text;
+    if (manualIds.size) {
+      // Citation.js maps CSL reports to @report. Restore the BibTeX manual
+      // type after field conversion and reuse its TeX serializer.
+      const entries = bibliography.format('biblatex', { format: 'object' });
+      for (const entry of entries) {
+        if (!manualIds.has(entry.label)) continue;
+        entry.type = 'manual';
+        delete entry.properties.entrysubtype;
+        if (entry.properties.institution) {
+          entry.properties.organization = entry.properties.institution;
+          delete entry.properties.institution;
+        }
+      }
+      const { format: formatEntries } = await import('@citation-js/plugin-bibtex/lib/output/bibtex.js');
+      text = formatEntries(entries, plugins.dict.get('text'));
+    } else {
+      text = bibliography.format('biblatex', { format: 'text' });
+    }
     return { text, filename: 'references.bib', mime: 'application/x-bibtex' };
   }
   if (format !== 'apa') throw new Error('不支持的引用格式。');

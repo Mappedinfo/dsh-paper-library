@@ -52,7 +52,7 @@ Paper Library 将文献收集、PDF 阅读与批注、知识整理和 LaTeX 写�
 
 ### 文献库、阅读与批注
 
-资料表分别显示「文献类型」和「文件格式」。文献类型沿用 [Zotero](https://www.zotero.org/support/kb/item_types_and_fields) 与 [CSL](https://docs.citationstyles.org/en/stable/specification.html#appendix-iii-types) 的分类，包括论文、图书、说明书、报告、软件、标准、专利、地图和网页等。说明书在 CSL 中保存为 `report`，并用 `genre: Manual` 保留细分类别。文件格式来自已有附件或工作台，例如 PDF、CSV 或 PlainDeck。
+资料表分别显示「文献类型」和「文件格式」。文献类型沿用 [Zotero](https://www.zotero.org/support/kb/item_types_and_fields) 与 [CSL](https://docs.citationstyles.org/en/stable/specification.html#appendix-iii-types) 的分类，包括论文、图书、说明书、报告、软件、标准、专利、地图和网页等。说明书在 CSL 中保存为 `report`，并用 `genre: Manual` 保留细分类别。`.bib` 导入与导出使用 BibTeX 和 BibLaTeX 的标准 `@manual` 类型。文件格式来自已有附件或工作台，例如 PDF、CSV 或 PlainDeck。
 
 没有 DOI 的 PDF 可以直接导入。只有来源网址时，可选择「导入 → 手动登记资料」并填写题名、类型和来源。点击文献表中的类型可打开资料详情。确认没有 DOI 后，可在 DOI 栏标记「无 DOI」，之后可清除标记或补入 DOI。作者字段可按换行、英文分号或中文分号拆分，英文逗号仍用于「姓, 名」。
 

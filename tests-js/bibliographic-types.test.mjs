@@ -8,15 +8,21 @@ import {apaCopyReadiness, cite, parseBibtex} from '../src/citations.mjs';
 import {importPDF} from '../src/import-pdf.mjs';
 import {zoteroItemToMetadata} from '../src/translation-server.mjs';
 
-test('a manual stays a report with a Manual subtype across citation formats', async () => {
-  const [manual] = await parseBibtex('@manual{SyntheticGuide, title={Synthetic Guide}, author={Example, Alice}, year={2025}}');
+test('manuals export as native BibTeX entries while CSL keeps its report subtype', async () => {
+  const [manual] = await parseBibtex('@manual{SyntheticGuide, title={Synthetic Guide}, author={Example, Alice}, organization={Example University}, year={2025}}');
   assert.equal(manual.type, 'report');
   assert.equal(manual.genre, 'Manual');
   assert.deepEqual(apaCopyReadiness(manual), { missing: [], lookup: false });
   assert.match((await cite([manual], 'apa')).text, /Synthetic guide/i);
-  const bib = await cite([manual], 'biblatex');
-  assert.match(bib.text, /entrysubtype = \{Manual\}/);
-  assert.equal((await parseBibtex(bib.text))[0].genre, 'Manual');
+  const report = {id:'SyntheticReport',type:'report',genre:'Technical report',title:'Synthetic Technical Report'};
+  const bib = await cite([manual,report], 'biblatex');
+  assert.match(bib.text, /@manual\{SyntheticGuide,/);
+  assert.match(bib.text, /organization = \{Example University\}/);
+  assert.match(bib.text, /@report\{SyntheticReport,/);
+  const [imported] = await parseBibtex(bib.text);
+  assert.equal(imported.genre, 'Manual');
+  assert.equal(imported.publisher, 'Example University');
+  assert.deepEqual(imported.issued, manual.issued);
   const csl = JSON.parse((await cite([manual], 'csl-json')).text)[0];
   assert.equal(csl.type, 'report');
   assert.equal(csl.genre, 'Manual');
