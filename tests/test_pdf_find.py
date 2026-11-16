@@ -1,4 +1,5 @@
-"""文内定位仅使用合成 PDF，不渲染、不写文件。"""
+"""文内定位仅使用合成 PDF。"""
+from contextlib import closing
 import hashlib
 import pymupdf as fitz
 import pytest
@@ -56,3 +57,72 @@ def test_find_matching_options(tmp_path):
     with pytest.raises(ValueError):
         call(match='invalid')
     library.close()
+
+
+def test_batched_index_skips_non_candidates_and_expired_pages_are_rebuilt(tmp_path, monkeypatch):
+    source = tmp_path / "synthetic.pdf"
+    with fitz.open() as doc:
+        header = doc.new_page()
+        header.insert_text((40, 80), "1 Introduction", fontname="hebo", fontsize=16)
+        doc.new_page()
+        page = doc.new_page()
+        page.insert_text((40, 80), "Cat cat catalogue and international\nresearch")
+        doc.save(source)
+    with closing(Library(tmp_path / "lib")) as library:
+        item = library.attach(library.create({"title": "Synthetic"})["id"], str(source))
+        path = library.pdf_path(item["id"])
+        request = {"library": str(library.root), "id": item["id"], "action": "paper_text_find",
+                   "page_limit": 16, "include_sections": True}
+
+        def call(query, **options):
+            return dispatch_request({**request, "query": query, **options})
+
+        cold = call("cat")
+        assert [row["page"] for row in cold["page_results"]] == [1, 2, 3]
+        assert cold["page_results"][1]["no_extractable_text"]
+        assert cold["page_results"][0]["section_context"]["last"]["title"] == "1 Introduction"
+        original = fitz.Page.get_textpage
+        reads = []
+
+        def track(page, *args, **kwargs):
+            reads.append(page.number + 1)
+            return original(page, *args, **kwargs)
+
+        monkeypatch.setattr(fitz.Page, "get_textpage", track)
+        assert call("cat") == cold
+        assert reads == [3]
+        assert [row["page_matches"] for row in call("research")["page_results"]] == [0, 0, 1]
+        joined = call("international research")["page_results"][-1]
+        single = dispatch_request({k: v for k, v in request.items() if k != "page_limit"} |
+                                  {"query": "international research", "page": 3})
+        assert joined["matches"] == single["matches"]
+        assert joined["matches"]
+        assert [row["page_matches"] for row in call("cat", match="whole", case_sensitive=True)["page_results"]] == [0, 0, 1]
+        with fitz.open(path) as doc:
+            doc[0].insert_text((40, 130), "The newly matching word")
+            doc.saveIncr()
+        with pytest.raises(ValueError, match="PAPER_RETRIEVAL_CHANGED"):
+            call("newly", expected_version=cold["source_version"])
+        fresh = call("newly")
+        assert fresh["source_version"] != cold["source_version"]
+        assert [row["page_matches"] for row in fresh["page_results"]] == [1, 0, 0]
+
+
+def test_batch_continuation_respects_one_hit_budget_across_pages(tmp_path):
+    source = tmp_path / "synthetic.pdf"
+    with fitz.open() as doc:
+        for count in (5, 1, 2):
+            page = doc.new_page()
+            for i in range(count):
+                page.insert_text((40, 40 + i * 30), "needle context")
+        doc.save(source)
+    with closing(Library(tmp_path / "lib")) as library:
+        item = library.attach(library.create({"title": "Synthetic"})["id"], str(source))
+    request = {"library": str(tmp_path / "lib"), "id": item["id"], "action": "paper_text_find",
+               "query": "needle", "page_limit": 3, "limit": 3}
+    first = dispatch_request(request)["page_results"]
+    assert [(row["page"], len(row["matches"]), row["next_offset"]) for row in first] == [(1, 3, 3)]
+    second = dispatch_request({**request, "offset": 3})["page_results"]
+    assert [(row["page"], len(row["matches"]), row["next_offset"]) for row in second] == [(1, 2, None), (2, 1, None)]
+    last = dispatch_request({**request, "page": second[-1]["next_page"]})["page_results"]
+    assert [(row["page"], len(row["matches"]), row["next_page"]) for row in last] == [(3, 2, None)]

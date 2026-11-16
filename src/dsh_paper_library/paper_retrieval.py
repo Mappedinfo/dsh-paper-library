@@ -1,10 +1,11 @@
-"""按需读取单篇 PDF 正文与有界页面图像；不建索引、不修改 PDF。"""
+"""按需检索单篇 PDF 正文与有界页面图像。"""
 import base64
 from bisect import bisect_right
 import hashlib
 import json
 import math
 import re
+from time import monotonic
 import unicodedata
 
 from .paper_analysis import file_version
@@ -106,11 +107,10 @@ def normalized(text):
     return normalized_spacing(text).casefold()
 
 
-def page_sections(doc, page, text_page):
+def page_sections(page, text_page, items):
     from . import outline
 
     number = page.number + 1
-    items, _ = outline.bookmarks(doc)
     titles = {outline.heading_key(item["title"]) for item in items if item["page"] == number}
     prior = max(((item["page"], index, item["title"]) for index, item in enumerate(items)
                  if item["page"] is not None and item["page"] < number), default=None)
@@ -140,6 +140,116 @@ def page_sections(doc, page, text_page):
         "before": {"title": prior[2], "page": prior[0]} if prior else None,
         "last": sections[-1] if sections else None,
     }
+
+
+def _match_rects(page, text_page, needle, whole, case_sensitive):
+    import pymupdf as fitz
+
+    if not whole and not case_sensitive:
+        return page.search_for(needle, textpage=text_page)
+    # Retain the original character coordinates and whole-word rules.
+    chars = []
+    for block in page.get_text("rawdict", flags=fitz.TEXTFLAGS_RAWDICT & ~fitz.TEXT_PRESERVE_IMAGES)["blocks"]:
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                chars.extend((char["c"], char["bbox"]) for char in span.get("chars", []))
+            chars.append(("\n", None))
+    text = "".join(char for char, _ in chars)
+    pattern = re.escape(needle)
+    if whole:
+        pattern = r"(?<!\w)" + pattern + r"(?!\w)"
+    found = []
+    for hit in re.finditer(pattern, text, 0 if case_sensitive else re.IGNORECASE):
+        boxes = [box for _, box in chars[hit.start():hit.end()] if box]
+        if boxes:
+            rect = fitz.Rect(boxes[0])
+            for box in boxes[1:]:
+                rect |= fitz.Rect(box)
+            found.append(rect)
+    return found
+
+
+def find_text(library, doc, request, version, paper_id):
+    import pymupdf as fitz
+    from . import outline, reader_text_index
+
+    query = request.get("query")
+    if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200 or not normalized(query):
+        raise ValueError("PAPER_RETRIEVAL_INVALID: query must contain 1–200 characters")
+    first = integer(request, "page", 1, 1, doc.page_count)
+    offset = integer(request, "offset", 0, 0, 10_000_000)
+    limit = integer(request, "limit", 40, 1, 100)
+    batch = "page_limit" in request
+    pages = integer(request, "page_limit", 1, 1, 16)
+    last = min(doc.page_count, first + pages - 1)
+    needle = unicodedata.normalize("NFKC", query).replace("\u00ad", "").strip()
+    match_mode = request.get("match", "partial")
+    case_sensitive = request.get("case_sensitive", False)
+    if match_mode not in ("partial", "whole") or not isinstance(case_sensitive, bool):
+        raise ValueError("PAPER_RETRIEVAL_INVALID: invalid search options")
+    # Only rule out simple keywords and phrases in the standard text layer.
+    probe = reader_text_index.key(needle) if (
+        batch and match_mode == "partial" and not case_sensitive
+        and re.fullmatch(r"[A-Za-z0-9\s-]+", needle, re.ASCII)
+    ) else None
+    version_key = f"{fitz.VersionBind}:{fitz.VersionFitz}:{version}"
+    cached = reader_text_index.read(library, paper_id, version_key, first, last) if batch else {}
+    sections_requested = request.get("include_sections") is True
+    deadline = monotonic() + .65
+    results, updates = [], []
+    bookmarks = None
+    for number in range(first, last + 1):
+        if results and (not limit or monotonic() >= deadline):
+            break
+        previous = cached.get(number)
+        result = {"page": number, "matches": [], "page_matches": 0, "next_offset": None,
+                  "next_page": number + 1 if number < doc.page_count else None}
+        if (probe and previous and previous[0] is not None and probe not in previous[0]
+                and (not sections_requested or previous[2] is not None)):
+            result["no_extractable_text"] = previous[1]
+            if sections_requested:
+                result["section_context"] = previous[2]
+        else:
+            page = doc.load_page(number - 1)
+            text_page = page.get_textpage(flags=fitz.TEXTFLAGS_SEARCH)
+            found = _match_rects(page, text_page, needle, match_mode == "whole", case_sensitive)
+            section_for, context = None, previous[2] if previous else None
+            if sections_requested and (found or context is None):
+                try:
+                    if bookmarks is None:
+                        bookmarks, _ = outline.bookmarks(doc)
+                    section_for, context = page_sections(page, text_page, bookmarks)
+                except (ValueError, RuntimeError):
+                    pass  # A damaged outline must not prevent text search.
+            if sections_requested and context is not None:
+                result["section_context"] = context
+            if previous is None:
+                text = text_page.extractText()
+                haystack = reader_text_index.key(text) if batch and len(text) <= reader_text_index.MAX_PAGE_TEXT else None
+                no_text = not bool(text.strip())
+            else:
+                haystack, no_text, _ = previous
+            if batch and (previous is None or context != previous[2]):
+                updates.append((number, haystack, no_text, context))
+            rotation = page.rotation_matrix
+            for rect in found[offset:offset + limit]:
+                snippet = " ".join(page.get_textbox(rect + (-95, -1, 95, 1), textpage=text_page).split())[:240]
+                result["matches"].append({
+                    "page": number, "rects": [list(rect * rotation)], "snippet": snippet,
+                    **(section_for(rect) if section_for else {}),
+                })
+            end = offset + len(result["matches"])
+            result.update(page_matches=len(found), next_offset=end if end < len(found) else None,
+                          no_extractable_text=no_text)
+        results.append(result)
+        if result["next_offset"] is not None:
+            break
+        offset = 0
+        limit -= len(result["matches"])
+    if batch:
+        reader_text_index.write(library, paper_id, version_key, updates)
+        return {"page_results": results}
+    return results[0]
 
 
 _DATA_HEADING = re.compile(
@@ -215,62 +325,7 @@ def dispatch(library, request):
         elif action == "paper_abstract_pdf":
             result.update(read_abstract(doc))
         elif action == "paper_text_find":
-            import pymupdf as fitz
-
-            query = request.get("query")
-            if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200 or not normalized(query):
-                raise ValueError("PAPER_RETRIEVAL_INVALID: query must contain 1–200 characters")
-            number = integer(request, "page", 1, 1, doc.page_count)
-            offset = integer(request, "offset", 0, 0, 10_000_000)
-            limit = integer(request, "limit", 40, 1, 100)
-            page = doc.load_page(number - 1)
-            needle = unicodedata.normalize("NFKC", query).replace("\u00ad", "").strip()
-            match_mode = request.get("match", "partial")
-            case_sensitive = request.get("case_sensitive", False)
-            if match_mode not in ("partial", "whole") or not isinstance(case_sensitive, bool):
-                raise ValueError("PAPER_RETRIEVAL_INVALID: invalid search options")
-            text_page = page.get_textpage(flags=fitz.TEXTFLAGS_SEARCH)
-            if match_mode == "partial" and not case_sensitive:
-                found = [[rect] for rect in page.search_for(needle, textpage=text_page)]
-            else:
-                # Keep each character's original rectangle so matching does not guess coordinates.
-                chars = []
-                for block in page.get_text("rawdict")["blocks"]:
-                    for line in block.get("lines", []):
-                        for span in line.get("spans", []):
-                            for char in span.get("chars", []):
-                                chars.append((char["c"], char["bbox"]))
-                        chars.append(("\n", None))
-                text = "".join(c for c, _ in chars)
-                pattern = re.escape(needle)
-                if match_mode == "whole":
-                    pattern = r"(?<!\w)" + pattern + r"(?!\w)"
-                found = []
-                for hit in re.finditer(pattern, text, 0 if case_sensitive else re.IGNORECASE):
-                    boxes = [box for _, box in chars[hit.start():hit.end()] if box]
-                    if boxes:
-                        rect = fitz.Rect(boxes[0])
-                        for box in boxes[1:]: rect |= fitz.Rect(box)
-                        found.append([rect])
-            section_for = None
-            if request.get("include_sections") is True:
-                try:
-                    section_for, result["section_context"] = page_sections(doc, page, text_page)
-                except (ValueError, RuntimeError):
-                    pass  # A damaged outline must not prevent text search.
-            matches = []
-            for rects in found[offset:offset + limit]:
-                first = rects[0]
-                # Fit a short excerpt around the match in the unrotated text layer.
-                context = first + (-95, -1, 95, 1)
-                snippet = " ".join(page.get_textbox(context, textpage=text_page).split())[:240]
-                matches.append({"page": number, "rects": [list(rect * page.rotation_matrix) for rect in rects],
-                                "snippet": snippet, **(section_for(first) if section_for else {})})
-            end = offset + len(matches)
-            result.update(matches=matches, page=number, page_matches=len(found),
-                          next_offset=end if end < len(found) else None,
-                          next_page=number + 1 if number < doc.page_count else None,
-                          no_extractable_text=not bool(text_page.extractText().strip()))
+            result.update(find_text(library, doc, request, version, paper["id"]))
         elif action == "paper_text_search":
             query = request.get("query")
             if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200 or not normalized(query):

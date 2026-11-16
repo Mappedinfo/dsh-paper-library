@@ -15,7 +15,7 @@ function fixture(t,api,withResults=false){
    visible:()=>!sidebar.hidden,
    show(){sidebar.hidden=false;},
  }:undefined;
- const ui=w.PaperReaderSearch.create({panels,api:async(a,p)=>{calls.push([a,p]);return api(a,p);},getPaper:()=>paper,reader:()=>({revealRegion:v=>revealed.push(v)}),navigate:async()=>{},getElements:()=>({search:(...v)=>filters.push(v)}),onAnnotationSearch:q=>filters.push(['annotations',q]),onLibrarySearch:q=>filters.push(['library',q])});
+ const ui=w.PaperReaderSearch.create({panels,api:async(a,p,o)=>{calls.push([a,p,o]);return api(a,p,o);},getPaper:()=>paper,reader:()=>({revealRegion:v=>revealed.push(v)}),navigate:async()=>{},getElements:()=>({search:(...v)=>filters.push(v)}),onAnnotationSearch:q=>filters.push(['annotations',q]),onLibrarySearch:q=>filters.push(['library',q])});
  t.after(()=>{ui.dispose();w.close();});return {w,ui,calls,revealed,filters,setPaper(p){paper=p;ui.sync();},setScope(s){w.document.querySelector('.shared-reading-sidebar').dataset.sidebarPanel=s;ui.sync();},get:selector=>w.document.querySelector(selector),submit(selector){w.document.querySelector(selector).dispatchEvent(new w.Event('submit',{cancelable:true}));}};
 }
 const match=(page,n=0)=>({page,rects:[[10+n,20,30+n,40]]});
@@ -83,7 +83,24 @@ test('sidebar arrows navigate each match and the same-page section overrides the
 });
 test('late results cannot replace new input or navigate a newly selected paper',async t=>{
  let resolve;const f=fixture(t,()=>new Promise(r=>resolve=r));f.get('#pdf-search-row input').value='old';f.submit('#pdf-search-row');
- f.setPaper({id:'another',pdf:true});resolve({page:1,page_count:1,matches:[match(1)],next_page:null,next_offset:null});await tick();assert.equal(f.revealed.length,0);assert.equal(f.get('#pdf-search-row').hidden,true);
+ f.setPaper({id:'another',pdf:true});assert.equal(f.calls[0][2].signal.aborted,true);
+ resolve({page:1,page_count:1,matches:[match(1)],next_page:null,next_offset:null});await tick();assert.equal(f.revealed.length,0);assert.equal(f.get('#pdf-search-row').hidden,true);
+});
+test('batched results keep chapter context and discard rectangles if the PDF changes',async t=>{
+ const introduction={page:1,title:'1 Introduction'};
+ const f=fixture(t,async(a,p)=>{
+   if(p.page===3){assert.equal(p.expected_version,'v1');throw Error('PAPER_RETRIEVAL_CHANGED');}
+   assert.equal(p.page_limit,16);
+   return {page_count:3,source_version:'v1',page_results:[
+     {page:1,matches:[],section_context:{last:introduction},next_page:2},
+     {page:2,matches:[{...match(2),section:null}],next_page:3},
+   ]};
+ },true);
+ f.get('#pdf-search-panel input').value='needle';f.submit('#pdf-search-panel form');
+ await until(()=>f.calls.length===2&&f.get('[aria-label="停止 PDF 搜索"]').hidden);
+ assert.equal(f.revealed[0].page,2);
+ assert.match(f.get('#pdf-search-panel [role=status]').textContent,/PDF 已更新/);
+ assert.equal(f.get('#pdf-search-panel li'),null);
 });
 test('scope magnifier shares one row, keeps separate queries and submits only current category',async t=>{
  const f=fixture(t,async()=>({}));f.get('#sidebar-search-toggle').click();const input=f.get('#sidebar-search-row input');input.value='remark';f.submit('#sidebar-search-row');

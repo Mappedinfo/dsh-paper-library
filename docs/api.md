@@ -683,11 +683,11 @@ scan/list 的 `usage` 提供当前生效的派生索引预算。均衡档每页 
 
 ## PDF 文内定位搜索
 
-`paper_text_find` 接受 `id, query, page?, offset?, limit?, expected_version?, include_sections?`。`query` 为 1–200 字符。每次只读取一个物理页，`page` 默认 1，`offset` 默认 0，`limit` 默认 40、最多 100。返回页数、来源版本、匹配片段及下一批位置。匹配位置使用页面显示旋转坐标。存在 `next_offset` 时先续取本页，否则用 `next_page`。沿用 15 秒 worker 超时，不渲染图片、不写 PDF、不建索引、不调用模型或 OCR。
+`paper_text_find` 接受 `id, query, page?, offset?, limit?, page_limit?, match?, case_sensitive?, expected_version?, include_sections?`。`query` 为 1–200 字符，`page` 默认 1，`offset` 默认 0，`limit` 默认 40、最多 100。省略 `page_limit` 时沿用单页返回格式。指定 `page_limit`（1–16）时返回有序的 `page_results`，每批共享命中数上限，并在页间检查局部处理预算。匹配位置使用页面显示旋转坐标。续查时传入 `source_version` 作为 `expected_version`，读取最后一项的 `next_offset` 优先续查同页，否则用 `next_page`。
 
 `include_sections: true` 时，服务将 PDF 书签标题与本页文字层对照，并返回可定位的 `matches[].section {title,page}`。值为 `null` 表示匹配位于本页首个已识别章节之前，侧栏此时可沿用前页的章节。省略字段表示位置无法核对。可用的 `section_context` 包含本页前最近的原生书签 `before` 和本页最后定位到的章节 `last`。
 
-前端逐页串行搜索，每批保留最多 200 个定位区域，达到上限后显式继续；停止、关闭或切换文献后忽略迟到返回，不发起下一页。多行短语可能返回多个定位区域，计数表示位置而非独立语义出现次数。
+批量搜索按需在资料库内缓存已搜索的页文本特征和章节摘要。简单关键词和短语用缓存排除无命中页，匹配和坐标仍由 PDF 引擎确认。PDF 版本变更后重新读取。前端每轮最多显示 200 个定位区域，达到上限后可继续；停止或切换文献会取消等待中的请求。多行短语可能返回多个定位区域。
 
 
 ## 领域研究文献表
