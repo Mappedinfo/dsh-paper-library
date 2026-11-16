@@ -58,3 +58,43 @@ test('one synthetic manual version is available from project queries and bounded
   const rendered = await dispatch({ action: 'latex_version_pdf_page', version_id: built.version.id, page: 1 }, options)
   assert.ok(rendered.words.length)
 })
+
+test('registered synthetic project uses Git worktree actions through HTTP', async t => {
+  const git = promisify(execFile)
+  const base = await mkdtemp(join(tmpdir(), 'latex-git-http-'))
+  t.after(() => rm(base, { recursive: true, force: true }))
+  const root = join(base, 'manuscript'), remote = join(base, 'remote')
+  await mkdir(root); await mkdir(remote)
+  const command = (...args) => git('git', ['-C', root, ...args])
+  await command('init', '-b', 'main')
+  await command('config', 'user.name', 'Synthetic fixture')
+  await command('config', 'user.email', 'fixture@example.invalid')
+  await git('git', ['-C', remote, 'init', '--bare'])
+  await command('remote', 'add', 'origin', remote)
+  const main = join(root, 'main.tex')
+  await writeFile(main, 'Original\n')
+  await command('add', 'main.tex')
+  await command('commit', '-m', 'Start')
+  await command('push', '-u', 'origin', 'main')
+  const options = { library: join(base, 'library'), python: fileURLToPath(new URL('../.venv/bin/python', import.meta.url)), localStateHome: join(base, 'state') }
+  const handler = createFetchHandler(options)
+  async function post(action, fields) {
+    const req = new Request('http://127.0.0.1/api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...fields }) })
+    const res = await handler(req)
+    const data = await res.json()
+    assert.equal(data.ok, true, data.error)
+    return data.result
+  }
+  const { project } = await post('latex_project_create', { root })
+  const id = project.id
+  await writeFile(main, 'Updated\n')
+  const status = await post('latex_git_status', { id })
+  assert.equal(status.scope, '.')
+  assert.deepEqual(status.changes.map(item => item.path), ['main.tex'])
+  const committed = await post('latex_git_commit', { id, paths: ['main.tex'], message: 'Scoped update', expected_version: status.version })
+  const outgoing = await post('latex_git_status', { id })
+  assert.equal(outgoing.upstream.ahead, 1)
+  const pushed = await post('latex_git_push', { id, expected_version: outgoing.push_version })
+  assert.equal(pushed.head, committed.head)
+  assert.equal((await git('git', ['-C', remote, 'rev-parse', 'main'])).stdout.trim(), pushed.head)
+})

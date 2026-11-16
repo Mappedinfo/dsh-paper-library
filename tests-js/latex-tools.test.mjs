@@ -48,8 +48,12 @@ test('latex requests map to worker actions and never carry deployment paths', ()
 test('the bridge admits native actions and keeps writing retrieval request-local', () => {
   const produced = new Set()
   for (const item of LATEX_TOOL_SPECS) for (const operation of item.parameters.operation.enum) produced.add(`latex_${operation}`)
-  const panelOnly = new Set(['latex_version_review_export', 'latex_pdf_search', 'latex_source_search', ...LATEX_RETRIEVAL_ACTIONS])
+  const gitActions = ['latex_git_status', 'latex_git_commit', 'latex_git_push']
+  const panelOnly = new Set([...gitActions, 'latex_version_review_export', 'latex_pdf_search', 'latex_source_search', ...LATEX_RETRIEVAL_ACTIONS])
   assert.deepEqual([...produced, ...panelOnly].sort(), [...BRIDGE_ACTIONS.latex].sort())
+  for (const action of gitActions) for (const tool of LATEX_TOOL_SPECS) {
+    assert.throws(() => latexToolRequest(tool, { operation: action.slice(6), input_json: '{}' }), /Unsupported LaTeX operation/)
+  }
   for (const action of LATEX_RETRIEVAL_ACTIONS) assert.throws(() => latexToolRequest(spec('library_latex'), { operation: action.slice(6), input_json: '{}' }), /Unsupported LaTeX operation/)
 })
 

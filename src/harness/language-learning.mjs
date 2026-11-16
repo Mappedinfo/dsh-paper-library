@@ -339,6 +339,18 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     return value => value && !value.deleted && (!status || value.status === status) && (!query || canonical(`${value.term} ${value.meaning}`).includes(query))
   }
   async function vocabularyList(input) {
+    if (input.view === 'latex-glossary') {
+      const items = []
+      let characters = 0, clipped = false
+      const scope = await scan('vocabulary:', ({ value }) => {
+        if (!value || value.deleted || typeof value.term !== 'string' || typeof value.meaning !== 'string') return
+        const term = value.term.slice(0, 80), meaning = value.meaning.slice(0, 200)
+        if (characters + term.length + meaning.length > 160_000) { clipped = true; return }
+        characters += term.length + meaning.length
+        items.push({ term, meaning })
+      })
+      return { items, truncated: clipped || scope.truncated, view: input.view }
+    }
     const { offset, limit } = paging(input), matches = vocabularyFilter(input), rows = [],items=[];
     const order=input.sort??'id',compare=entryOrder(order);
     const scope=await scan('vocabulary:',record=>{if(matches(record.value)){const v=record.value;rows.push({key:record.key,id:v.id,term:v.term,created_at:v.created_at,updated_at:v.updated_at});}});

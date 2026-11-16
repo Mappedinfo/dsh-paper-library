@@ -68,7 +68,81 @@ function maskCommands(source) {
   return pieces.join('')
 }
 
-export function checkSpelling(source, limit = 100) {
+const englishPhrase = /^[A-Za-z][A-Za-z0-9' -]{1,79}$/
+const chinesePhrase = /^\p{Script=Han}{2,32}$/u
+
+export function buildGlossary(rows) {
+  const words = new Map(), chinese = new Map()
+  for (const entry of rows || []) {
+    const term = entry.term?.trim(), meaning = entry.meaning?.trim()
+    if (!term || !meaning) continue
+    const english = englishPhrase.test(term) ? [term] : meaning.split(/[;；/、,，]/).map(value => value.trim()).filter(value => englishPhrase.test(value))
+    for (const phrase of english) {
+      for (const word of phrase.match(/[A-Za-z][A-Za-z']{2,}/g) || []) {
+        const key = word.toLowerCase()
+        if (!words.has(key)) words.set(key, { word, phrase, meaning: phrase === term ? meaning : term })
+      }
+      const source = phrase === term ? meaning : term
+      if (!chinesePhrase.test(source)) continue
+      const group = chinese.get(source[0]) || new Map()
+      const candidates = group.get(source) || []
+      if (candidates.length < 4 && !candidates.includes(phrase)) candidates.push(phrase)
+      group.set(source, candidates)
+      chinese.set(source[0], group)
+    }
+  }
+  const matchers = new Map()
+  for (const [first, group] of chinese) matchers.set(first, {
+    pattern: new RegExp([...group.keys()].sort((a, b) => b.length - a.length).join('|'), 'y'),
+    group,
+  })
+  return { words, matchers }
+}
+
+function distance(a, b) {
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i), twoBack
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i]
+    for (let j = 1; j <= b.length; j++) {
+      let cost = Math.min(next[j - 1] + 1, previous[j] + 1, previous[j - 1] + Number(a[i - 1] !== b[j - 1]))
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) cost = Math.min(cost, twoBack[j - 2] + 1)
+      next.push(cost)
+    }
+    twoBack = previous; previous = next
+  }
+  return previous[b.length]
+}
+
+export function spellingSuggestions(item, glossary) {
+  if (item.terminology) return { terms: item.terms, suggestions: [] }
+  const word = item.word.toLowerCase(), cutoff = word.length >= 7 ? 2 : 1
+  const matches = []
+  for (const [key, entry] of glossary?.words || []) {
+    if (Math.abs(key.length - word.length) > cutoff) continue
+    const score = distance(word, key)
+    if (score <= cutoff) matches.push({ score, label: `${entry.phrase}（${entry.meaning}）` })
+  }
+  matches.sort((a, b) => a.score - b.score || a.label.localeCompare(b.label))
+  checker ||= nspell(aff, dic)
+  return { terms: [...new Set(matches.map(match => match.label))].slice(0, 5), suggestions: checker.suggest(item.word).slice(0, 6) }
+}
+
+function terminologyHits(source, glossary, max) {
+  const hits = []
+  if (!glossary?.matchers.size) return hits
+  for (let index = 0; index < source.length && hits.length < max; index++) {
+    const matcher = glossary.matchers.get(source[index])
+    if (!matcher) continue
+    matcher.pattern.lastIndex = index
+    const found = matcher.pattern.exec(source)?.[0]
+    if (!found) continue
+    hits.push({ word: found, from: index, to: index + found.length, terminology: true, terms: matcher.group.get(found) })
+    index += found.length - 1
+  }
+  return hits
+}
+
+export function checkSpelling(source, limit = 100, glossary) {
   if (typeof source !== 'string') return { items: [], truncated: false, checkedCharacters: 0, checkedWords: 0 }
   const clipped = source.length > MAX_CHARACTERS
   source = source.slice(0, MAX_CHARACTERS)
@@ -99,14 +173,18 @@ export function checkSpelling(source, limit = 100) {
   segments.push(source.slice(cursor))
   const mask = maskCommands(segments.join('').replace(/\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$\$[\s\S]*?\$\$|\$[^$\n]*\$/g, blank))
   const items = []; let checkedWords = 0
+  const finish = (truncated, checkedCharacters, limitReason) => ({
+    items, terminology: terminologyHits(mask.slice(0, checkedCharacters), glossary, limit),
+    truncated, checkedWords, checkedCharacters, ...(limitReason ? { limitReason } : {}),
+  })
   for (const match of mask.matchAll(/\b[A-Za-z][A-Za-z']{2,}\b/g)) {
-    if (checkedWords >= MAX_WORDS) return { items, truncated: true, checkedWords, checkedCharacters: match.index, limitReason: 'words' }
+    if (checkedWords >= MAX_WORDS) return finish(true, match.index, 'words')
     checkedWords++
     const word = match[0]
     if (word.length > 80) continue // Long identifiers are not ordinary prose words.
-    if (checker.correct(word)) continue
+    if (checker.correct(word) || glossary?.words.has(word.toLowerCase())) continue
     items.push({ word, from: match.index, to: match.index + word.length })
-    if (items.length >= limit) return { items, truncated: true, checkedWords, checkedCharacters: match.index + word.length, limitReason: 'results' }
+    if (items.length >= limit) return finish(true, match.index + word.length, 'results')
   }
-  return { items, truncated: clipped, checkedWords, checkedCharacters: source.length, ...(clipped ? { limitReason: 'characters' } : {}) }
+  return finish(clipped, source.length, clipped ? 'characters' : undefined)
 }

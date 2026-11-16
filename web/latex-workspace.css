@@ -422,3 +422,30 @@ body > #latex-view { height: 100dvh; }
   .latex-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 6px minmax(0, 1fr); }
   .latex-splitter { cursor: row-resize; }
 }
+
+.latex-spelling-mark, .latex-terminology-mark, .latex-source-review-mark {
+  text-decoration-line: underline;
+  text-underline-offset: 3px;
+}
+.latex-spelling-mark { text-decoration-style: wavy; text-decoration-color: var(--dsw-alias-state-danger-label, #d05258); }
+.latex-terminology-mark { text-decoration-style: dotted; text-decoration-color: var(--latex-accent, #8665bc); }
+.latex-source-review-mark { text-decoration-color: var(--latex-accent, #8665bc); text-decoration-thickness: 2px; }
+.latex-spelling-results small { display: block; color: var(--muted); }
+.latex-spelling-detail { margin: 3px 0 0; }
+.latex-spelling-detail:empty { display: none; }
+#latex-git-open { max-width: 128px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.latex-git-dialog { width: min(660px, calc(100vw - 48px)); }
+.latex-git-dialog h2, .latex-git-dialog h3 { margin: 0; }
+.latex-git-dialog header h2 { margin-inline-end: auto; font-size: 17px; }
+.latex-git-dialog p, .latex-git-file, .latex-git-log li { overflow-wrap: anywhere; }
+.latex-git-dialog fieldset { min-width: 0; max-height: 30vh; overflow: auto; margin: 0; padding: 6px 9px; border: 1px solid var(--line); }
+.latex-git-file { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; }
+.latex-git-file code { color: var(--muted); min-width: 2ch; }
+.latex-git-actions { display: flex; align-items: center; gap: 8px; }
+.latex-git-actions label { flex: 1; display: grid; gap: 3px; }
+.latex-git-actions input { min-width: 0; width: 100%; box-sizing: border-box; }
+.latex-git-dialog fieldset + .latex-git-actions { margin-block: 10px 14px; align-items: end; }
+.latex-git-log { list-style: none; margin: 7px 0; padding: 0; }
+.latex-git-log li { display: flex; align-items: baseline; gap: 7px; }
+.latex-git-log code { color: var(--muted); }
+.latex-git-push { margin-block-start: 12px; padding-block-start: 9px; border-top: 1px solid var(--line); }

@@ -1,2 +1,2 @@
-import { checkSpelling } from './latex-spelling.mjs'
-window.PaperLatexSpelling = { checkSpelling }
+import { buildGlossary, checkSpelling, spellingSuggestions } from './latex-spelling.mjs'
+window.PaperLatexSpelling = { buildGlossary, checkSpelling, spellingSuggestions }

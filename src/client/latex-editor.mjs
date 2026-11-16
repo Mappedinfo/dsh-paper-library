@@ -45,6 +45,25 @@ const projectSearchMarks = StateField.define({
   provide: field => EditorView.decorations.from(field),
 })
 
+function annotationMarks(mapChanges = false) {
+  const set = StateEffect.define()
+  const field = StateField.define({
+    create: () => Decoration.none,
+    update(marks, transaction) {
+      for (const effect of transaction.effects) if (effect.is(set)) return effect.value
+      if (!transaction.docChanged) return marks
+      if (!mapChanges) return Decoration.none
+      transaction.changes.iterChangedRanges((from, to) => {
+        marks = marks.update({ filterFrom: from, filterTo: to, filter: (start, end) => !(start < to && end > from) })
+      })
+      return marks.map(transaction.changes)
+    },
+    provide: state => EditorView.decorations.from(state),
+  })
+  return { set, field }
+}
+const spelling = annotationMarks(), review = annotationMarks(true)
+
 /** Provide the workspace's existing textarea contract while CodeMirror owns input. */
 function create(textarea, container) {
   const editable = new Compartment()
@@ -52,7 +71,7 @@ function create(textarea, container) {
   let silent = false
   const extensions = [
     lineNumbers(), highlightActiveLine(), highlightActiveLineGutter(), history(), bracketMatching(),
-    StreamLanguage.define(stex), highlighting, theme, EditorView.lineWrapping, projectSearchMarks,
+    StreamLanguage.define(stex), highlighting, theme, EditorView.lineWrapping, projectSearchMarks, spelling.field, review.field,
     EditorState.phrases.of({
       Find: '查找', Replace: '替换', next: '下一个', previous: '上一个', all: '全选匹配',
       'match case': '区分大小写', regexp: '正则表达式', 'by word': '全词匹配',
@@ -96,6 +115,12 @@ function create(textarea, container) {
     const limit = view.state.doc.length
     view.dispatch({ selection: { anchor: Math.max(0, Math.min(start, limit)), head: Math.max(0, Math.min(end, limit)) }, scrollIntoView: true })
   }
+  function paint(layer, ranges, className) {
+    const marks = ranges.filter(({ from, to }) => Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to > from && to <= view.state.doc.length)
+      .map(({ from, to, title, terminology }) => Decoration.mark({ class: terminology ? 'latex-terminology-mark' : className, attributes: { ...(title ? { title } : {}), ...(layer === spelling ? { 'data-latex-spell': String(from) } : {}) } }).range(from, to))
+    if (!marks.length && view.state.field(layer.field) === Decoration.none) return
+    view.dispatch({ effects: layer.set.of(Decoration.set(marks, true)) })
+  }
   return { view, cursorLine: () => view.state.doc.lineAt(view.state.selection.main.head).number, openSearch: () => openSearchPanel(view), setProjectSearchMatches(ranges) {
     const length = view.state.doc.length
     const marks = ranges.filter(({ from, to }) => Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to > from && to <= length)
@@ -103,7 +128,9 @@ function create(textarea, container) {
     // A document update already clears this field before the input callback.
     if (!marks.length && view.state.field(projectSearchMarks) === Decoration.none) return
     view.dispatch({ effects: setProjectSearchMarks.of(Decoration.set(marks, true)) })
-  }, insert: (text, start, end) => {
+  }, setSpellingMarks: ranges => paint(spelling, ranges, 'latex-spelling-mark'),
+  setReviewMarks: ranges => paint(review, ranges, 'latex-source-review-mark'),
+  insert: (text, start, end) => {
     if (disabled) return false
     view.dispatch({ changes: { from: start, to: end, insert: text }, selection: { anchor: start + text.length }, scrollIntoView: true, userEvent: 'input' })
     view.focus()

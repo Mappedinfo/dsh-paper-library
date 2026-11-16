@@ -1046,10 +1046,13 @@ def clean(library, id=None, include_archived=False):
     return {"id": row["id"], "removed": sorted(removed)[:500], "removed_count": len(removed), "kept": sorted(kept)[:200], "limits": {"listed": 500}}
 
 
-from . import latex_versions, latex_assets, latex_retrieval, latex_pdf_search
+from . import latex_versions, latex_assets, latex_retrieval, latex_pdf_search, latex_git
 from .latex_formulas import latex_formula_check
 
 ACTIONS = {
+    "latex_git_status": (latex_git.status, ("id",)),
+    "latex_git_commit": (latex_git.commit, ("id", "paths", "message", "expected_version")),
+    "latex_git_push": (latex_git.push, ("id", "expected_version")),
     "latex_project_create": (create, ("root", "title", "main_path", "create_missing")),
     "latex_project_list": (listing, ("query", "include_archived", "limit", "offset")),
     "latex_project_get": (get, ("id", "include_archived")),
@@ -1111,7 +1114,7 @@ def dispatch(library, request):
     def verify():
         row = _project(library, project_id, include_archived=True)
         guarded = {"latex_write", "latex_compile", "latex_project_update", "latex_project_archive", "latex_project_restore", "latex_project_link_reading",
-                   "latex_asset_import", "latex_review_put", "latex_review_delete", "latex_review_export", "latex_clean"}
+                   "latex_git_commit", "latex_git_push", "latex_asset_import", "latex_review_put", "latex_review_delete", "latex_review_export", "latex_clean"}
         if action in guarded and row["binding_generation"] and "expected_binding_generation" not in request:
             raise ValueError("项目绑定已变化；请重新打开项目后再操作。未保存的内容仍在当前编辑器中。")
         if "expected_binding_generation" in request and (isinstance(request["expected_binding_generation"], bool) or not isinstance(request["expected_binding_generation"], int)):

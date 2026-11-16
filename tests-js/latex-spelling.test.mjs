@@ -67,3 +67,19 @@ test('distributed dictionary runs independently when the enhanced editor is unav
   assert.deepEqual(Array.from(result.items, item => item.word), ['mispelled'])
   assert.equal(window.PaperLatexEditor, undefined)
 })
+
+
+test('saved bilingual terms supply local spell suggestions and terminology reminders', async () => {
+  const window = {}, bundle = await readFile(new URL('../lib/latex-spelling.js', import.meta.url), 'utf8')
+  vm.runInNewContext(bundle, { window })
+  const { buildGlossary, checkSpelling, spellingSuggestions } = window.PaperLatexSpelling
+  const glossary = buildGlossary([{ term: '通勤流', meaning: 'commuting flow' }, { term: 'GeoGraph', meaning: '地理图' }])
+  const draft = 'The GeoGraph examines 通勤流 and Geogrpah. % 地理图'
+  const result = checkSpelling(draft, 100, glossary)
+  assert.deepEqual(Array.from(result.items, item => item.word), ['Geogrpah'])
+  assert.deepEqual(Array.from(result.terminology, item => item.word), ['通勤流'])
+  assert.equal(spellingSuggestions(result.terminology[0], glossary).terms[0], 'commuting flow')
+  assert.match(spellingSuggestions(result.items[0], glossary).terms[0], /GeoGraph.*地理图/)
+  const ordinary = checkSpelling('Humand mobility genration.', 100, glossary)
+  assert.equal(spellingSuggestions(ordinary.items.at(-1), glossary).suggestions.includes('generation'), true)
+})

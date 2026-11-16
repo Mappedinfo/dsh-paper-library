@@ -28,11 +28,13 @@ async function fixture(override = () => undefined, { review = false, spellChecke
     setAttribute(key, value) { this.attributes[key] = String(value) } getAttribute(key) { return this.attributes[key] }
     addEventListener(key, value) { if (!this.events.has(key)) this.events.set(key, []); this.events.get(key).push(value) }
     removeEventListener() {}
+    dispatchEvent(event) { void this.dispatch(event.type); return true }
     async dispatch(key, args = {}) { await Promise.all((this.events.get(key) || []).map(fn => fn({ target: this, preventDefault() {}, stopPropagation() {}, ...args }))) }
     querySelectorAll(selector) { const matches = node => selector === 'button[data-path]' ? node.tagName === 'BUTTON' && node.dataset.path : selector.startsWith('.') ? node.className?.split(' ').includes(selector.slice(1)) : node.tagName.toLowerCase() === selector; return this.children.flatMap(node => [...(matches(node) ? [node] : []), ...node.querySelectorAll(selector)]) }
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null }
     get selectedOptions() { return this.children.filter(node => node.value === this.value) }
-    focus() {} setSelectionRange(a, b) { this.selectionStart = a; this.selectionEnd = b }
+    focus() {} showModal() { this.open = true } close() { this.open = false }
+    setSelectionRange(a, b) { this.selectionStart = a; this.selectionEnd = b }
     getBoundingClientRect() { return { left: 0, top: 0, right: this.clientWidth, bottom: this.clientHeight, width: this.clientWidth, height: this.clientHeight } }
   }
   const body = new Element('body'), window = new Element('window'); window.devicePixelRatio = 2
@@ -56,7 +58,7 @@ async function fixture(override = () => undefined, { review = false, spellChecke
     static createObjectURL() { const url = `blob:${urls.length}`; urls.push(url); return url }
     static revokeObjectURL(url) { revoked.push(url) }
   }
-  const globals = { window, document, crypto: webcrypto, AbortController, Uint8Array, Blob, Range: { START_TO_START: 0, END_TO_END: 2 }, atob: value => Buffer.from(value, 'base64').toString('binary'), URL: FixtureURL, setTimeout: (fn, ms) => { const id = timers.size + 1; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id), getComputedStyle: () => ({ lineHeight: '20' }) }
+  const globals = { window, document, crypto: webcrypto, AbortController, Event, Uint8Array, Blob, Range: { START_TO_START: 0, END_TO_END: 2 }, atob: value => Buffer.from(value, 'base64').toString('binary'), URL: FixtureURL, setTimeout: (fn, ms) => { const id = timers.size + 1; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id), getComputedStyle: () => ({ lineHeight: '20' }) }
   if (spellChecker) window.PaperLatexSpelling = { checkSpelling: spellChecker }
   if (writingTools) window.PaperLatexWritingTools = { create: () => writingTools }
   if (sourceEditor) window.PaperLatexEditor = { create: () => sourceEditor }
@@ -397,7 +399,7 @@ test('a project whose folder moved remains selectable for safe location repair',
 
 test('textarea fallback can turn on local spelling and navigate to a detected word', async () => {
   const f = await fixture(action => {
-    if (action === 'state_get') return { value: null, revision: 0 }
+    if (action === 'state_get') return { value: { enabled: false }, revision: 0 }
     if (action === 'state_put') return { revision: 'saved' }
   }, { spellChecker: () => ({ items: [{ word: 'typoo', from: 0, to: 5 }], truncated: false }) })
   const editor = f.ids.get('latex-editor'); editor.value = 'typoo in text';
@@ -409,6 +411,97 @@ test('textarea fallback can turn on local spelling and navigate to a detected wo
   assert.equal(f.calls.some(call => call.action === 'state_put' && call.key === 'reader:latex-spelling'), true)
   f.ui.dispose()
 })
+
+test('spelling is on by default and renders suggestions without applying them', async () => {
+  const marks = [];
+  const f = await fixture(action => { if (action === 'state_get') return { value: null, revision: 0 } }, {
+    sourceEditor: { setSpellingMarks: rows => marks.push(...rows), destroy() {} },
+  });
+  f.window.PaperLatexSpelling = {
+    checkSpelling: () => ({ items: [{ word: 'typoo', from: 0, to: 5 }] }),
+    spellingSuggestions: () => ({ terms: ['technical term'], suggestions: ['typo'] }),
+  };
+  const editor = f.ids.get('latex-editor'); editor.value = 'typoo and text';
+  await editor.dispatch('input');
+  await [...f.timers.values()].find(timer => timer.ms === 450).fn();
+  assert.equal(f.ids.get('latex-spell-toggle').getAttribute('aria-pressed'), 'true');
+  assert.equal(marks.at(-1).word, 'typoo');
+  const result = f.ids.get('latex-spelling-results');
+  await result.querySelector('button').dispatch('click');
+  assert.match(result.textContent, /technical term.*typo/);
+  assert.equal(editor.value, 'typoo and text');
+  assert.ok(!f.calls.some(call => call.action === 'latex_write'));
+  f.ui.dispose();
+});
+
+test('native note and shortcut insert one comment line and preserve the selected prose', async () => {
+  const f = await fixture();
+  const editor = f.ids.get('latex-editor');
+  const body = String.raw`\section{Synthetic}
+  Model output.
+Following line.`;
+  editor.value = body;
+  const start = body.indexOf('Model');
+  editor.setSelectionRange(start, start + 5);
+  await f.ids.get('latex-native-note').dispatch('click');
+  assert.equal(editor.value, body.replace('Model output.\n', 'Model output.\n  % \n'));
+  await f.ids.get('latex-view').dispatch('keydown', { key: 'Enter', metaKey: true, shiftKey: true, target: editor });
+  assert.equal(editor.value, body.replace('Model output.\n', 'Model output.\n  % \n  % TODO: \n'));
+  assert.equal(editor.value.slice(editor.selectionStart - 8, editor.selectionStart), '% TODO: ');
+  editor.value = String.raw`\begin{verbatim}
+Literal output
+\end{verbatim}`;
+  editor.setSelectionRange(editor.value.indexOf('Literal'), editor.value.indexOf('Literal'));
+  await f.ids.get('latex-todo-note').dispatch('click');
+  assert.ok(!editor.value.includes('% TODO'));
+  f.ui.dispose();
+});
+
+test('source review displays only verified current anchors using UTF-16 offsets', async () => {
+  const marks = [];
+  const f = await fixture((action, args) => {
+    if (action === 'latex_read') return { path: args.path, content: '😀 road traffic', revision: 'v1', bytes: 17, lines: 1 };
+    if (action === 'latex_review_list') return { annotations: [
+      { id: 'a', status: 'open', comment: 'Synthetic note', anchor: { kind: 'source', path: 'main.tex', revision: 'v1', start: 2, end: 6 } },
+      { id: 'b', status: 'open', comment: 'Old anchor', anchor: { kind: 'source', path: 'main.tex', revision: 'old', start: 7, end: 14 } },
+    ] };
+  }, { review: true, sourceEditor: { setReviewMarks: rows => marks.push(rows), destroy() {} } });
+  assert.deepEqual(JSON.parse(JSON.stringify(marks.at(-1))), [{ from: 3, to: 7, title: 'Synthetic note' }]);
+  assert.equal(f.ids.get('latex-editor').value, '😀 road traffic');
+  await f.ui.testHooks.openFile('draft.tex');
+  assert.equal(marks.at(-1).length, 0);
+  f.ui.dispose();
+});
+
+test('Git toolbar detects the project and requires explicit file selection and branch confirmation', async () => {
+  const oid = 'a'.repeat(40);
+  const f = await fixture((action) => {
+    if (action === 'latex_git_status') return { available: true, branch: 'main', repository: '/synthetic/repo', scope: 'manuscript',
+      changes: [{ path: 'main.tex', status: ' M' }], change_count: 1, history: [], version: 'state',
+      push_version: 'push-state', upstream: { ready: true, remote: 'origin', branch: 'main', destinations: ['example.invalid/repo'], ahead: 1, behind: 0, outgoing: [] } };
+    if (action === 'latex_git_commit') return { head: oid };
+    if (action === 'latex_git_push') return { head: oid, remote: 'origin', branch: 'main' };
+  });
+  const open = f.ids.get('latex-git-open');
+  assert.equal(open.textContent, 'Git · main');
+  await open.dispatch('click'); await tick();
+  const dialog = f.ids.get('latex-git-dialog');
+  const button = label => dialog.querySelectorAll('button').find(node => node.textContent === label);
+  const [file, message, confirm] = dialog.querySelectorAll('input');
+  assert.equal(button('提交所选文件').disabled, true);
+  assert.equal(button('推送').disabled, true);
+  file.checked = true; message.value = 'Synthetic update'; message.oninput();
+  assert.equal(button('提交所选文件').disabled, false);
+  await button('提交所选文件').dispatch('click'); await tick();
+  const commit = f.calls.find(call => call.action === 'latex_git_commit');
+  assert.deepEqual(Array.from(commit.paths), ['main.tex']); assert.equal(commit.expected_version, 'state');
+  const nextConfirm = dialog.querySelectorAll('input')[2];
+  assert.notEqual(nextConfirm, confirm);
+  nextConfirm.checked = true; await nextConfirm.dispatch('change');
+  await button('推送').dispatch('click'); await tick();
+  assert.equal(f.calls.find(call => call.action === 'latex_git_push').expected_version, 'push-state');
+  f.ui.dispose();
+});
 
 test('translation sends only an unsaved selection and never writes the source', async () => {
   const f = await fixture((action) => {

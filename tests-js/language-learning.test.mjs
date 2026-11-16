@@ -657,3 +657,13 @@ test('prompt preview uses the generation template, includes live supplements and
   await f.handle(request)
   assert.equal(f.calls[0].prompt, preview.translation[0].prompt.replace('<SOURCE_TEXT>', source))
 })
+
+
+test('LaTeX glossary projects bilingual fields without encounters or model calls', async () => {
+  const f = fixture()
+  await f.handle(request)
+  const before = f.calls.length
+  const result = await f.handle({ action: 'vocabulary_list', view: 'latex-glossary' })
+  assert.deepEqual(result, { items: [{ term: 'Epistemic', meaning: '认识上的；有关知识的' }], truncated: false, view: 'latex-glossary' })
+  assert.equal(f.calls.length, before)
+})

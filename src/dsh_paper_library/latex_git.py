@@ -1,0 +1,220 @@
+"""Git operations for a registered LaTeX folder inside its existing worktree."""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import tempfile
+from urllib.parse import urlsplit
+
+from filelock import FileLock, Timeout
+
+MAX_FILES = 200
+MAX_OUTPUT = 512 * 1024
+REPO_ENV = {
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_PREFIX", "GIT_NAMESPACE", "GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS",
+    "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
+}
+OID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+
+
+def _git(cwd, *args, allowed=(0,), timeout=8):
+    binary = shutil.which("git")
+    if binary is None:
+        raise ValueError("本机没有可用的 Git。")
+    env = {key: value for key, value in os.environ.items() if key not in REPO_ENV}
+    env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="Never", LC_ALL="C")
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        try:
+            result = subprocess.run([binary, "--literal-pathspecs", "-c", "core.fsmonitor=false", *args], cwd=cwd, env=env,
+                                    stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError("Git 操作超时，请刷新核对结果。") from exc
+        stdout.seek(0)
+        captured = stdout.read(MAX_OUTPUT + 1)
+        if len(captured) > MAX_OUTPUT:
+            raise ValueError("Git 返回的改动列表超过读取上限。")
+        if result.returncode not in allowed:
+            stderr.seek(0)
+            message = stderr.read(4096).decode("utf-8", "replace")
+            if not message:
+                message = captured[:1024].decode("utf-8", "replace")
+            # Ignore any printed URL credentials or query strings in command diagnostics.
+            message = re.sub(r"[a-zA-Z][\w+.-]*://[^\s'\"]+", lambda m: _destination(m[0]), message)
+            raise ValueError(message.strip()[:800] or f"Git 操作失败（{result.returncode}）。")
+        return result.returncode, captured
+
+
+def _text(cwd, *args, allowed=(0,)):
+    _, result = _git(cwd, *args, allowed=allowed)
+    return result.decode("utf-8", "replace").rstrip("\r\n")
+
+
+def _destination(value):
+    if "://" in value:
+        try:
+            parsed = urlsplit(value)
+            return parsed.hostname + parsed.path if parsed.hostname else "远端"
+        except ValueError:
+            return "远端"
+    value = value.split("?", 1)[0]
+    return re.sub(r"^[^@/]+@(?=[^/]+:)", "", value)
+
+
+def _digest(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=True).encode()).hexdigest()
+
+
+def _repo(library, paper_id):
+    from .latex import _project
+
+    row = _project(library, paper_id)
+    folder = Path(row["root"])
+    if not folder.is_dir():
+        return None, None, "项目文件夹不可用。"
+    if shutil.which("git") is None:
+        return None, None, "本机没有可用的 Git。"
+    code, raw = _git(folder, "rev-parse", "--show-toplevel", allowed=(0, 128))
+    if code:
+        return None, None, "未找到此项目所属的 Git 工作区。"
+    repo = Path(os.fsdecode(raw).rstrip("\r\n")).resolve()
+    scope = folder.resolve().relative_to(repo).as_posix()
+    return repo, scope, None
+
+
+def _history(repo, scope, revision, limit=8):
+    command = ["log", f"-{limit}", "--format=%H%x00%s", "-z", revision, "--"]
+    if scope is not None:
+        command.append(scope)
+    fields = _text(repo, *command).split("\0")
+    return [{"id": oid, "subject": title[:200]} for oid, title in zip(fields[::2], fields[1::2]) if OID.fullmatch(oid)]
+
+
+def _upstream(repo, branch, head):
+    if not branch:
+        return None, None
+    remote = _text(repo, "config", "--get", f"branch.{branch}.remote", allowed=(0, 1))
+    ref = _text(repo, "config", "--get", f"branch.{branch}.merge", allowed=(0, 1))
+    if not remote or remote == "." or not ref.startswith("refs/heads/"):
+        return None, None
+    code, _ = _git(repo, "check-ref-format", ref, allowed=(0, 1))
+    if code:
+        return None, None
+    urls = _text(repo, "remote", "get-url", "--push", "--all", "--", remote, allowed=(0, 2)).splitlines()
+    if not urls:
+        return None, None
+    mirror = _text(repo, "config", "--bool", "--get", f"remote.{remote}.mirror", allowed=(0, 1)) == "true"
+    upstream = _text(repo, "rev-parse", "--verify", "@{upstream}", allowed=(0, 128))
+    data = {"remote": remote, "branch": ref[len("refs/heads/"):],
+            "destinations": [_destination(url)[:220] for url in urls[:8]],
+            "ready": bool(head and not mirror and len(urls) <= 8), "ahead": None, "behind": None, "outgoing": []}
+    if upstream and head:
+        data["ahead"], data["behind"] = map(int, _text(repo, "rev-list", "--left-right", "--count", f"{head}...{upstream}").split())
+        data["outgoing"] = _history(repo, None, f"{upstream}..{head}")
+    return data, (remote, ref, urls, upstream)
+
+
+def _stamp(target):
+    try:
+        data = target.lstat()
+    except FileNotFoundError:
+        return None
+    return data.st_ino, data.st_size, data.st_mtime_ns, data.st_ctime_ns
+
+
+def _state(repo, scope):
+    branch = _text(repo, "symbolic-ref", "--quiet", "HEAD", allowed=(0, 1)).removeprefix("refs/heads/")
+    head = _text(repo, "rev-parse", "--verify", "HEAD", allowed=(0, 128))
+    _, raw = _git(repo, "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--", scope)
+    changes, stamps, total = [], [], 0
+    for record in raw.split(b"\0"):
+        if not record:
+            continue
+        total += 1
+        if len(changes) >= MAX_FILES:
+            continue
+        kind, path = record[:2].decode("ascii"), os.fsdecode(record[3:])
+        # Porcelain -z always emits paths relative to the root of the worktree.
+        relative = Path(path).relative_to(scope).as_posix()
+        if len(relative) > 1024 or any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in relative):
+            continue
+        changes.append({"path": relative, "status": kind})
+        stamps.append(_stamp(repo / path))
+    upstream, target = _upstream(repo, branch, head)
+    return {"available": True, "repository": str(repo), "scope": scope, "branch": branch or None,
+            "head": head or None, "changes": changes, "change_count": total,
+            "history": _history(repo, scope, head) if head else [], "upstream": upstream,
+            "version": _digest([str(repo), scope, branch, head, changes, stamps]),
+            "push_version": _digest([str(repo), branch, head, target]) if target else None}, target
+
+
+def status(library, id):
+    repo, scope, error = _repo(library, id)
+    if error:
+        return {"available": False, "message": error}
+    return _state(repo, scope)[0]
+
+
+def _mutation(library, id, operation):
+    repo, scope, error = _repo(library, id)
+    if error:
+        raise ValueError(error)
+    lock = library.root / f".latex-git-{_digest(str(repo))}.lock"
+    try:
+        with FileLock(lock, timeout=2, mode=0o600):
+            return operation(repo, scope)
+    except Timeout as exc:
+        raise ValueError("此 Git 仓库正在处理另一项操作，请稍后重试。") from exc
+
+
+def commit(library, id, paths, message, expected_version):
+    if (not isinstance(paths, list) or not 1 <= len(paths) <= MAX_FILES
+            or any(not isinstance(path, str) or not 1 <= len(path) <= 1024 for path in paths) or len(set(paths)) != len(paths)):
+        raise ValueError("请选择要提交的项目文件。")
+    if not isinstance(message, str) or not message.strip() or len(message) > 2000 or "\0" in message:
+        raise ValueError("请输入 1–2000 字符的提交说明。")
+
+    def execute(repo, scope):
+        state, _ = _state(repo, scope)
+        if not state["branch"]:
+            raise ValueError("请先切换到 Git 分支，再提交项目文件。")
+        if state["version"] != expected_version:
+            raise ValueError("Git 改动已变化，请刷新后重新核对要提交的文件。")
+        changes = {row["path"]: row["status"] for row in state["changes"]}
+        if any(path not in changes for path in paths):
+            raise ValueError("部分文件已不在此项目的待提交列表中。")
+        selected = [(Path(scope) / path).as_posix() for path in paths]
+        new = [path for relative, path in zip(paths, selected) if changes[relative] == "??"]
+        if new:
+            _git(repo, "add", "--intent-to-add", "--", *new)
+        try:
+            _git(repo, "commit", "--only", "-m", message.strip(), "--", *selected, timeout=25)
+        except ValueError:
+            # Remove the staging entries we introduced on ordinary commit failure.
+            if new and _text(repo, "rev-parse", "--verify", "HEAD", allowed=(0, 128)) == (state["head"] or ""):
+                _git(repo, "rm", "--cached", "--force", "--ignore-unmatch", "--", *new)
+            raise
+        return {"head": _text(repo, "rev-parse", "--verify", "HEAD")}
+
+    return _mutation(library, id, execute)
+
+
+def push(library, id, expected_version):
+    def execute(repo, scope):
+        state, target = _state(repo, scope)
+        if not target or not state["upstream"]["ready"]:
+            raise ValueError("当前分支没有可推送的远端跟踪分支，或远端使用镜像推送。")
+        if expected_version != state["push_version"]:
+            raise ValueError("分支或推送目标已变化，请刷新并重新核对。")
+        remote, ref, _, _ = target
+        _git(repo, "push", "--porcelain", "--no-follow-tags", "--recurse-submodules=no", "--",
+             remote, f"{state['head']}:{ref}", timeout=40)
+        return {"head": state["head"], "remote": remote, "branch": state["upstream"]["branch"]}
+
+    return _mutation(library, id, execute)
