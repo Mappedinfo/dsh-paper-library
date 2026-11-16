@@ -556,7 +556,7 @@ test('Git toolbar detects the project and requires explicit file selection and b
       push_version: 'push-state', upstream: { ready: true, remote: 'origin', branch: 'main', destinations: ['example.invalid/repo'], ahead: 1, behind: 0, outgoing: [] } };
     if (action === 'latex_git_commit') {
       if (++attempts === 1) throw Error('Git 提交超过时间限制');
-      return { head: oid };
+      return { head: oid, index_lock_recovered: true };
     }
     if (action === 'latex_git_push') return { head: oid, remote: 'origin', branch: 'main' };
   });
@@ -578,6 +578,7 @@ test('Git toolbar detects the project and requires explicit file selection and b
   assert.equal(button('提交所选文件').disabled, false);
   await button('提交所选文件').dispatch('click'); await tick();
   assert.equal(dialog.querySelectorAll('input')[1].checked, false);
+  assert.match(dialog.textContent, /已移开失效的索引锁。已提交 aaaaaaaa/);
   const commit = f.calls.find(call => call.action === 'latex_git_commit');
   assert.deepEqual(Array.from(commit.paths), ['main.tex']); assert.equal(commit.expected_version, 'state');
   const nextConfirm = dialog.querySelectorAll('input')[3];

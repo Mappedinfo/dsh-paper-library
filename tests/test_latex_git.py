@@ -1,8 +1,11 @@
+import shlex
+import shutil
 import subprocess
 
 import pytest
 
 from dsh_paper_library.core import dispatch
+from dsh_paper_library import latex_git
 
 
 def git(where, *args):
@@ -95,3 +98,101 @@ def test_latex_git_protects_project_binding_and_keeps_untracked_on_failed_commit
     assert main.read_text() == "Original\n"
     hook.unlink()
     assert dispatch({**command, "expected_version": dispatch({**base, "action": "latex_git_status"})["version"]})["head"]
+
+
+@pytest.fixture
+def git_commit_fixture(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-b", "main")
+    git(repo, "config", "user.email", "fixture@example.invalid")
+    git(repo, "config", "user.name", "Synthetic fixture")
+    (repo / "main.tex").write_text("Original\n")
+    git(repo, "add", "main.tex")
+    git(repo, "commit", "-m", "Start")
+
+    def prepare(worktree, filename="main.tex"):
+        (worktree / filename).write_text("Reviewed change\n")
+        base = {"library": str(tmp_path / "library")}
+        base["id"] = dispatch({**base, "action": "latex_project_create", "root": str(worktree)})["project"]["id"]
+        state = dispatch({**base, "action": "latex_git_status"})
+        return {**base, "action": "latex_git_commit", "paths": [filename], "message": "Reviewed", "expected_version": state["version"]}
+
+    return repo, prepare
+
+
+def test_latex_git_retires_stale_worktree_lock_and_retries_add(git_commit_fixture, monkeypatch):
+    repo, prepare = git_commit_fixture
+    worktree = repo.parent / "linked manuscript"
+    git(repo, "worktree", "add", "-b", "linked", str(worktree))
+    request = prepare(worktree, "new.tex")
+    lock = latex_git._index_lock(worktree)
+    primary_lock = latex_git._index_lock(repo)
+    assert lock != primary_lock
+    primary_lock.write_bytes(b"Unrelated lock")
+    lock.write_bytes(b"Original lock bytes")
+    monkeypatch.setattr(latex_git, "INDEX_LOCK_STALE", 0)
+    monkeypatch.setattr(latex_git, "_index_in_use", lambda path: False)
+    result = dispatch(request)
+    assert result["index_lock_recovered"]
+    assert result["head"] == git(worktree, "rev-parse", "HEAD")
+    assert git(worktree, "show", "--format=", "--name-only", "HEAD") == "new.tex"
+    assert primary_lock.read_bytes() == b"Unrelated lock"
+    assert not lock.exists()
+    recovered, = lock.parent.glob("index.lock.paper-library-recovered-*")
+    assert recovered.read_bytes() == b"Original lock bytes"
+
+
+@pytest.mark.parametrize("edited", [False, True])
+def test_latex_git_waits_for_temporary_lock_and_rechecks_review(git_commit_fixture, monkeypatch, edited):
+    repo, prepare = git_commit_fixture
+    request = prepare(repo)
+    lock = latex_git._index_lock(repo)
+    lock.touch()
+    head = git(repo, "rev-parse", "HEAD")
+
+    def release(_):
+        if edited:
+            (repo / "main.tex").write_text("Changed while waiting\n")
+        lock.unlink()
+
+    monkeypatch.setattr(latex_git, "sleep", release)
+    if edited:
+        with pytest.raises(ValueError, match="等待 Git 索引时改动已变化"):
+            dispatch(request)
+        assert git(repo, "rev-parse", "HEAD") == head
+    else:
+        result = dispatch(request)
+        assert result["head"] != head and not result["index_lock_recovered"]
+    assert not list(lock.parent.glob("index.lock.paper-library-recovered-*"))
+
+
+@pytest.mark.skipif(not shutil.which("lsof"), reason="File-holder detection requires lsof")
+def test_latex_git_preserves_an_old_lock_still_open(git_commit_fixture, monkeypatch):
+    repo, prepare = git_commit_fixture
+    request = prepare(repo)
+    lock = latex_git._index_lock(repo)
+    monkeypatch.setattr(latex_git, "INDEX_LOCK_STALE", 0)
+    monkeypatch.setattr(latex_git, "INDEX_LOCK_WAIT", 0)
+    with lock.open("wb") as holder:
+        holder.write(b"Occupied")
+        holder.flush()
+        with pytest.raises(ValueError, match="Git 索引仍被占用"):
+            dispatch(request)
+        assert lock.read_bytes() == b"Occupied"
+    assert not list(lock.parent.glob("index.lock.paper-library-recovered-*"))
+
+
+def test_latex_git_does_not_replay_a_failing_hook_that_reports_a_lock(git_commit_fixture):
+    repo, prepare = git_commit_fixture
+    request = prepare(repo)
+    lock = latex_git._index_lock(repo)
+    attempts = lock.parent / "hook-attempts"
+    hook = lock.parent / "hooks" / "pre-commit"
+    diagnostic = f"fatal: Unable to create '{lock}': File exists."
+    hook.write_text(f"#!/bin/sh\necho attempt >> {shlex.quote(str(attempts))}\necho {shlex.quote(diagnostic)} >&2\nexit 1\n")
+    hook.chmod(0o755)
+    with pytest.raises(ValueError, match="Unable to create"):
+        dispatch(request)
+    assert attempts.read_text() == "attempt\n"
+    assert not lock.exists()

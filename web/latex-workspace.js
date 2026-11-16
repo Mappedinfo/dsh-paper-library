@@ -238,10 +238,10 @@ window.PaperLatexWorkspace = (() => {
           if (!await savedBeforeLeaving()) { gitStatus.textContent = '请先解决源码保存问题。'; return; }
           message = '源码已保存。请重新核对此次要提交的文件。';
         } else if (owner === project && !disposed) {
-          gitStatus.textContent = operation === 'commit' ? '正在提交，等待仓库检查完成…' : '正在推送，等待远端响应…';
+          gitStatus.textContent = operation === 'commit' ? '正在提交，等待 Git 索引及仓库检查…' : '正在推送，等待远端响应…';
           const response = await api(`latex_git_${operation}`, { id: owner.id, ...args });
           if (operation === 'commit') { gitMessage.value = ''; gitSelected.clear(); }
-          message = operation === 'commit' ? `已提交 ${response.head.slice(0, 8)}。` : `已推送 ${response.head.slice(0, 8)} 到 ${response.remote}/${response.branch}。`;
+          message = operation === 'commit' ? `${response.index_lock_recovered ? '已移开失效的索引锁。' : ''}已提交 ${response.head.slice(0, 8)}。` : `已推送 ${response.head.slice(0, 8)} 到 ${response.remote}/${response.branch}。`;
         }
       } catch (error) { message = error.message; }
       finally {
