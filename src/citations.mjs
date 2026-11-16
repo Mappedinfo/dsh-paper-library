@@ -13,7 +13,7 @@ async function load() {
     const config = plugins.config.get('@bibtex');
     config.format.useIdAsLabel = true;
     config.format.checkLabel = false;
-    return { CSL: csl.default, Cite: core.Cite || core.default.Cite || core.default, style, locale };
+    return { CSL: csl.default, Cite: core.Cite || core.default.Cite || core.default, plugins, style, locale };
   });
   return engines;
 }
@@ -45,18 +45,25 @@ export function apaCopyReadiness(item) {
   if ((journal || proceedings) && !pages && !early) missing.push('页码或文章编号');
   if (['book','chapter'].includes(type) && !hasValue(item.publisher)) missing.push('出版者');
   if (type === 'article' && venue) missing.push('出版类型（期刊或会议论文）');
-  if (['article','document','report','thesis','webpage'].includes(type) && ![item.DOI, item.URL, item.publisher, item.archive, item['container-title']].some(hasValue)) missing.push('出版出处或公开链接');
+  if (['article','document','report','thesis','webpage'].includes(type) &&
+      !(type === 'report' && /^(?:manual|user manual|user guide|technical manual|说明书|用户手册)$/i.test(item.genre || '')) &&
+      ![item.DOI, item.URL, item.publisher, item.archive, item['container-title']].some(hasValue)) missing.push('出版出处或公开链接');
   // Try to find volume, issue and DOI when available, but their absence alone
   // does not prevent copying a reference to a source that omits them.
   const lookup = missing.length > 0 || (journal && !early && (!hasValue(item.volume) || !hasValue(item.issue))) ||
-    ((journal || proceedings) && !hasValue(item.DOI)) || item.parse?.field_sources?.author === 'pdf-info-author-literal';
+    ((journal || proceedings) && item.doi_status !== 'not-applicable' && !hasValue(item.DOI)) || item.parse?.field_sources?.author === 'pdf-info-author-literal';
   return { missing, lookup };
 }
 
 export async function parseBibtex(text) {
-  const { Cite } = await load();
+  const { Cite, plugins } = await load();
   if (text.length > 16 * 1024 * 1024) throw new Error('BibTeX 文件超过 16 MB；请分批导入。');
-  return new Cite(text, { forceType: '@biblatex/text' }).data.map(item => ({ ...item, citekey: String(item['citation-key'] || item.id) }));
+  const entries = plugins.input.data(text, '@biblatex/text');
+  const manuals = new Set(entries.filter(entry => entry.type === 'manual').map(entry => entry.label));
+  return new Cite(entries, { forceType: '@biblatex/entries+list' }).data.map(item => {
+    const citekey = String(item['citation-key'] || item.id);
+    return { ...item, citekey, ...(manuals.has(citekey) ? { type: 'report', genre: 'Manual' } : {}) };
+  });
 }
 
 // Citation output can contain source-supplied markup. Only a small formatting

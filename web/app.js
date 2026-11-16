@@ -51,7 +51,7 @@ let restoringReader = false;
 let initializedReader = false;
 const intake = { pending: [], records: [], running: false, current: null, sequence: 0, total: 0, completed: 0, failed: 0, metadataOnly: 0, promise: null };
 const relationNames = { related: '相关', supports: '支持', contradicts: '相矛盾', cites: '引用', tagged: '标签', tag: '标签', has_tag: '标签' };
-const typeNames = { 'article-journal': '期刊论文', 'paper-conference': '会议论文', book: '图书', chapter: '章节', thesis: '学位论文', report: '报告', document: '文献' };
+const paperTypeLabel = item => window.PaperWorkbench?.typeLabel?.(item) || '文献';
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -167,7 +167,7 @@ function renderList() {
       });
     }
     card.append(el('h3', '', title(item)), el('p', '', item.resource_kind==='slides' ? `${item.slide_count} 页` : `${item.resource_kind === 'dataset' ? item.publisher || '发布者未提供' : authors(item)}${year(item) ? ` · ${year(item)}` : ''}`));
-    card.append(el('p', 'card-journal', item.resource_kind === 'slides' ? '演示文稿' : item.resource_kind === 'dataset' ? '数据集' : item['container-title'] || typeNames[item.type] || '文献资料'));
+    card.append(el('p', 'card-journal', item.resource_kind === 'slides' ? '演示文稿' : item.resource_kind === 'dataset' ? '数据集' : item['container-title'] || paperTypeLabel(item)));
     const footer = el('div', 'card-footer');
     if (item.resource_kind === 'dataset') footer.append(el('span', 'chip', '数据集'));
     if (item.resource_kind === 'slides') footer.append(el('span', 'chip', '演示文稿'));
@@ -175,7 +175,7 @@ function renderList() {
     if (item.journal_rankings?.length) footer.append(el('span', 'chip', window.PaperWorkbench?.ranking(item)));
     if (item.citekey) footer.append(el('span', 'card-key', item.citekey));
     if(item.resource_kind==='dataset')for (const tag of tags(item).slice(0, 3)) footer.append(el('span', 'chip', tag));
-    if (!footer.children.length) footer.append(el('span', 'chip', item.citekey || typeNames[item.type] || '文献资料'));
+    if (!footer.children.length) footer.append(el('span', 'chip', item.citekey || paperTypeLabel(item)));
     card.append(footer);
     if(organizationUI && (!item.resource_kind || item.resource_kind==='paper')){const entry=el('article',`paper-entry${selected?' selected':''}`);entry.append(card,organizationUI.actions(item,{compact:true}));fragment.append(entry);}else fragment.append(card);
   }
@@ -290,7 +290,7 @@ async function openResource(item){
   $('paper-title').textContent = title(item);
   const details = [authors(item), year(item), item['container-title']].filter(Boolean);
   $('paper-authors').textContent = details.join(' · ');
-  $('paper-type').textContent = `${typeNames[item.type] || '文献'}${item.citekey ? ` / ${item.citekey}` : ''}`;
+  $('paper-type').textContent = `${paperTypeLabel(item)}${item.citekey ? ` / ${item.citekey}` : ''}`;
   $('paper-tags').replaceChildren(...(organizationUI?[organizationUI.actions(item)]:tags(item).map((tag) => el('span', 'chip', tag))));
   const fileNotes = [item.pdf_filename ? `PDF：${item.pdf_filename}` : '', item.parse?.needs_review ? '自动识别的文献资料待核对' : ''].filter(Boolean);
   $('paper-file-meta').textContent = fileNotes.join(' · '); $('paper-file-meta').hidden = !fileNotes.length; $('paper-file-meta').classList.toggle('needs-review', Boolean(item.parse?.needs_review));
@@ -1094,10 +1094,11 @@ function editableTarget(target) { return Boolean(target?.isContentEditable || ta
 function handlePaste(event) {
   const text = event.clipboardData?.getData('text/plain')?.trim(); if (!text || !linkArguments(text)) return;
   const inputId = ['quick-import-source', 'import-source'].includes(event.target?.id) ? event.target.id : null;
+  if (inputId === 'import-source') return;
   if (!inputId && editableTarget(event.target)) return;
   event.preventDefault();
   if (inputId) $(inputId).value = text;
-  if (enqueueLink(text, inputId) && inputId === 'import-source') closeDialog('import-dialog');
+  enqueueLink(text, inputId);
 }
 function transferLinks(transfer) {
   const value = transfer?.getData('text/uri-list') || transfer?.getData('text/plain') || '';
@@ -1121,7 +1122,7 @@ function handleDragOver(event) {
 }
 function importPapers(event) {
   event.preventDefault(); const source = $('import-source').value.trim(); errorAt('import-error', null);
-  if (!source) { errorAt('import-error', '请粘贴论文链接、DOI 或填写本地路径，也可直接选择文件。'); return; }
+  if (!source) { errorAt('import-error', '请粘贴资料链接、DOI 或填写本地路径，也可直接选择文件。'); return; }
   const args = linkArguments(source) || { path: source };
   if (enqueueImports([{ args, label: source, inputId: 'import-source', originalInput: source }])) closeDialog('import-dialog');
 }
@@ -1138,7 +1139,7 @@ async function saveMetadata(event) {
   event.preventDefault(); const id = event.target.dataset.itemId; setBusy(event.target, true); errorAt('metadata-error', null);
   try {
     const original = state.metadataDraft;
-    const author = $('edit-authors').value === original?.authorsText ? original.item.author || [] : $('edit-authors').value.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => { const parts = line.split(','); return parts.length > 1 ? { family: parts.shift().trim(), given: parts.join(',').trim() } : { literal: line }; });
+    const author = $('edit-authors').value === original?.authorsText ? original.item.author || [] : $('edit-authors').value.split(/[\n;；]/).map((line) => line.trim()).filter(Boolean).map((line) => { const parts = line.split(','); return parts.length > 1 ? { family: parts.shift().trim(), given: parts.join(',').trim() } : { literal: line }; });
     const issued = $('edit-year').value === original?.yearText ? original.item.issued || {} : $('edit-year').value ? { 'date-parts': [[Number($('edit-year').value)]] } : {};
     const metadata = { title: $('edit-title').value.trim(), author, citekey: $('edit-citekey').value.trim(), tags: $('edit-tags').value.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean), issued };
     const result = await api('update', { id, metadata });
@@ -1453,6 +1454,14 @@ for (const button of document.querySelectorAll('.dialog-close')) button.addEvent
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', (event) => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) { if (dialog.id === 'annotation-dialog') void dismissAnnotation(); else dialog.close(); } } });
 $('annotation-dialog').addEventListener('cancel', event => { if (annotationSaveBusy) event.preventDefault(); });
 $('import-form').addEventListener('submit', importPapers);
+$('import-manual')?.addEventListener('click',()=>{
+  if(!workbenchUI)return;
+  const url=linkArguments($('import-source').value)?.url;
+  closeDialog('import-dialog');
+  if(workbenchUI.edit(null)&&url){
+    const field=$('edit-url');field.value=url;field.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+});
 $('import-file').addEventListener('change', () => { enqueueFiles($('import-file').files); $('import-file').value = ''; });
 $('quick-import-form').addEventListener('submit', (event) => { event.preventDefault(); if (!enqueueLink($('quick-import-source').value, 'quick-import-source')) toast('请输入完整论文链接或 DOI。', true); });
 $('drop-zone').addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('import-file').click(); } });

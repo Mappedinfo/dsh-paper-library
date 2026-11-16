@@ -418,6 +418,29 @@ test('an unpublished manuscript can fill a missing year without entering publica
   assert.deepEqual(f.requests.at(-1).metadata.publication_dates,{});
 });
 
+test('source markers and manual classification use bibliographic fields, and split mixed author separators', async () => {
+  const paper={...original(),DOI:'',URL:'https://example.org/manual.pdf'};
+  const f=environment({active:paper});
+  f.workbench.setTable(true);
+  const buttons=()=>f.element('catalog-table').querySelectorAll('button');
+  const openDoi=()=>buttons().find(button=>button.textContent==='输入 DOI 或预印本链接');
+  assert.equal(f.element('catalog-table').querySelector('a').href,paper.URL);
+  await openDoi().dispatch('click');
+  const marks=()=>f.element('catalog-doi-dialog').querySelectorAll('button');
+  await marks().find(button=>button.textContent==='标记无 DOI').dispatch('click');
+  assert.equal(f.requests.at(-1).metadata.doi_status,'not-applicable');
+  assert.ok(buttons().some(button=>button.textContent==='无 DOI'));
+  await f.workbench.edit(paper);
+  f.element('edit-type').value='manual';
+  f.element('edit-authors').value='Example, Alice; 北京市规划院；李明\nWriter, Bob;';
+  await f.form.dispatch('submit');
+  const saved=f.requests.at(-1).metadata;
+  assert.equal(saved.type,'report');
+  assert.equal(saved.genre,'Manual');
+  assert.deepEqual(saved.author.map(({family,given,literal})=>family?[family,given]:literal),
+    [['Example','Alice'],'北京市规划院','李明',['Writer','Bob']]);
+});
+
 test('file format and citation type have independent columns and only the selected record starts a DOI lookup', async () => {
   const paper={...original(),type:'paper-conference',DOI:'',pdf:true};
   const dataset={id:'ds-synthetic',title:'Synthetic data',resource_kind:'dataset',storage_formats:['csv','jsonl']};
@@ -634,7 +657,7 @@ test('shared folder action follows selection, refuses missing files and never ac
   const first={...original(),pdf:true};const second={...first,id:'paper-b'};const f=environment({active:first});f.state.items.push(second);f.workbench.setTable(true);
   const headers=f.element('catalog-table').querySelectorAll('th');
   assert.equal(headers.length,14);
-  assert.equal(headers[6].textContent,'DOI / 预印本');
+  assert.equal(headers[6].textContent,'DOI / 预印本 / 来源');
   assert.equal(headers[7].querySelector('button').textContent,'引用量');
   assert.equal(headers[8].textContent,'单位');
   await f.element('catalog-reveal').dispatch('click');assert.deepEqual(f.requests,[{action:'paper_reveal',id:first.id}]);

@@ -239,6 +239,35 @@ def ranking_sort(metadata):
             f"ORDER BY {system}, {year} DESC, {order} DESC LIMIT 1)")
 
 
+ZOTERO_TYPES = {
+    "journalArticle": "article-journal", "conferencePaper": "paper-conference", "book": "book",
+    "bookSection": "chapter", "thesis": "thesis", "report": "report", "preprint": "article",
+    "manuscript": "manuscript", "webpage": "webpage", "dataset": "dataset", "presentation": "speech",
+    "patent": "patent", "standard": "standard", "newspaperArticle": "article-newspaper",
+    "magazineArticle": "article-magazine", "blogPost": "post-weblog", "document": "document",
+    "computerProgram": "software", "dictionaryEntry": "entry-dictionary",
+    "encyclopediaArticle": "entry-encyclopedia", "forumPost": "post", "map": "map", "artwork": "graphic",
+    "film": "motion_picture", "videoRecording": "motion_picture", "audioRecording": "song",
+    "podcast": "broadcast", "radioBroadcast": "broadcast", "tvBroadcast": "broadcast",
+    "interview": "interview", "email": "personal_communication", "letter": "personal_communication",
+    "instantMessage": "personal_communication", "statute": "legislation", "case": "legal_case",
+    "bill": "bill", "hearing": "hearing",
+}
+
+RIS_TYPES = {
+    "JOUR": "article-journal", "EJOUR": "article-journal", "BOOK": "book", "EBOOK": "book",
+    "CHAP": "chapter", "ECHAP": "chapter", "CONF": "paper-conference", "CPAPER": "paper-conference",
+    "THES": "thesis", "DATA": "dataset", "RPRT": "report", "GOVDOC": "report", "STAND": "standard",
+    "COMP": "software", "PAT": "patent", "MANSCPT": "manuscript", "UNPB": "manuscript",
+    "ELEC": "webpage", "WEB": "webpage", "BLOG": "post-weblog", "NEWS": "article-newspaper",
+    "MGZN": "article-magazine", "DICT": "entry-dictionary", "ENCYC": "entry-encyclopedia",
+    "SLIDE": "speech", "MAP": "map", "ART": "graphic", "FIGURE": "figure", "SOUND": "song",
+    "MPCT": "motion_picture", "VIDEO": "motion_picture", "PCOMM": "personal_communication",
+    "ICOMM": "personal_communication", "STAT": "legislation", "CASE": "legal_case",
+    "BILL": "bill", "HEAR": "hearing", "GEN": "document",
+}
+
+
 def csl_item(raw):
     """Keep CSL fields; translate Zotero export objects without guessing authors/dates."""
     if not isinstance(raw, dict):
@@ -249,8 +278,7 @@ def csl_item(raw):
         item.pop(key, None)
     zotero = "itemType" in item or "creators" in item
     if zotero:
-        types = {"journalArticle": "article-journal", "conferencePaper": "paper-conference", "book": "book", "bookSection": "chapter", "thesis": "thesis", "report": "report", "preprint": "article", "manuscript": "manuscript", "webpage": "webpage", "dataset": "dataset", "presentation": "speech", "patent": "patent", "standard": "standard", "newspaperArticle": "article-newspaper", "magazineArticle": "article-magazine", "blogPost": "post-weblog"}
-        item["type"] = types.get(item.get("itemType"), "article")
+        item["type"] = ZOTERO_TYPES.get(item.get("itemType"), "article")
         if item.get("itemType") == "preprint":
             item["genre"] = "Preprint"
         # Zotero's top-level numeric version is a sync revision. CSL version is
@@ -258,7 +286,9 @@ def csl_item(raw):
         item.pop("version", None)
         if raw.get("versionNumber") not in (None, ""):
             item["version"] = str(raw["versionNumber"])
-        for old, new in {"publicationTitle": "container-title", "bookTitle": "container-title", "date": "issued", "url": "URL", "pages": "page", "place": "publisher-place"}.items():
+        for old, new in {"publicationTitle": "container-title", "bookTitle": "container-title", "date": "issued",
+                         "url": "URL", "pages": "page", "place": "publisher-place", "reportType": "genre",
+                         "institution": "publisher", "company": "publisher"}.items():
             if old in item and new not in item:
                 item[new] = item[old]
         for role in ("author", "editor", "translator"):
@@ -290,8 +320,14 @@ def csl_item(raw):
         item["citekey"] = str(key)
     item["title"] = str(item.get("title") or "Untitled")
     item["type"] = item.get("type") or "article"
+    if item["type"] == "manual":
+        item.update(type="report", genre="Manual")
     if item.get("DOI"):
         item["DOI"] = canonical_doi(item["DOI"])
+    if item.get("DOI") or item.get("doi_status") != "not-applicable":
+        item.pop("doi_status", None)
+    else:
+        item.pop("DOI", None)
     # Host filesystem paths and attachment objects never become portable metadata.
     # The normalized item must remain CSL on subsequent updates. Retaining
     # itemType would misinterpret an already normalized publication version as
@@ -313,7 +349,7 @@ def parse_ris(text):
         if tag == "TY":
             if current:
                 entries.append(current)
-            current = {"type": {"JOUR": "article-journal", "BOOK": "book", "CHAP": "chapter", "CONF": "paper-conference", "THES": "thesis", "DATA": "dataset"}.get(value, "article"), "tags": []}
+            current = {"type": RIS_TYPES.get(value.strip(), "article"), "tags": []}
         elif tag == "ER":
             if current:
                 entries.append(current)
@@ -321,6 +357,8 @@ def parse_ris(text):
         elif current is not None:
             if tag in fields:
                 current[fields[tag]] = value
+            elif tag == "M3" and current["type"] == "report":
+                current["genre"] = value
             elif tag in {"AU", "A1", "A2"}:
                 name = value.split(",", 1)
                 current.setdefault("editor" if tag == "A2" else "author", []).append({"family": name[0].strip(), "given": name[1].strip()} if len(name) == 2 else {"literal": value})

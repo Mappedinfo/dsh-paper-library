@@ -53,6 +53,7 @@ def audit(library, request):
     records, missing = [], {"citekey": [], "doi": [], "title": [], "author": [], "year": []}
     pdf_present, pdf_missing = [], []
     lookup_by_url, manual_only = [], []
+    doi_not_applicable = []
     for row in rows:
         metadata = json.loads(row["metadata"])
         doi = _doi(row["doi"] or metadata.get("DOI"))
@@ -64,7 +65,9 @@ def audit(library, request):
         year = _year(metadata)
         if not row["citekey"]:
             missing["citekey"].append(row["id"])
-        if not doi:
+        if not doi and metadata.get("doi_status") == "not-applicable":
+            doi_not_applicable.append(row["id"])
+        elif not doi:
             missing["doi"].append(row["id"])
             # Records without a DOI are still actionable when a landing URL
             # remains; without either identifier only manual entry helps.
@@ -109,6 +112,7 @@ def audit(library, request):
             "pdf_files_missing": len(pdf_missing),
         },
         "missing": {field: _cap(ids) for field, ids in missing.items()},
+        "doi_not_applicable": _cap(doi_not_applicable),
         "actionable": {
             "lookup_by_url": _cap(lookup_by_url),
             "manual_only": _cap(manual_only),

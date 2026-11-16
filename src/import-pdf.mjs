@@ -2,7 +2,7 @@ import { resolveDOIMetadata, resolveTitleMetadata } from './paper-fetch.mjs';
 
 // Network metadata is data: never allow attachment paths or worker arguments to
 // arrive from a publisher response. Only bibliographic fields can be imported.
-const fields = ['type','title','author','editor','translator','issued','DOI','URL','abstract','container-title','collection-title','publisher','publisher-place','volume','issue','page','ISBN','ISSN','language','edition','number','event-title','event-place','archive','archive_location','publication_dates','journal_rankings'];
+const fields = ['type','genre','title','author','editor','translator','issued','DOI','URL','abstract','container-title','collection-title','publisher','publisher-place','volume','issue','page','ISBN','ISSN','language','edition','number','event-title','event-place','archive','archive_location','publication_dates','journal_rankings'];
 export function bibliographicMetadata(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   return Object.fromEntries(fields.filter(key => raw[key] !== undefined && raw[key] !== null).map(key => [key,raw[key]]));
@@ -37,7 +37,7 @@ export async function importPDF(path, options, core, remote = {}) {
       warnings.push('下载页面的文献信息与 PDF 标题未能匹配；保留 PDF 本地解析结果，请核对资料。');
     }
   }
-  if ((!portable || incomplete) && !source && !remote.metadata) {
+  if ((!portable || incomplete) && !source && !remote.metadata && local.doi_status !== 'not-applicable') {
     const candidates = inspection.doi_candidates || [];
     const doi = inspection.metadata?.DOI || (candidates.length === 1 ? candidates[0] : null);
     const titleLookup = !doi && normalize(local.title).length >= 8 && inspection.parse?.field_sources?.title !== 'filename-fallback';

@@ -49,8 +49,18 @@ export function zoteroItemToMetadata(item) {
   const metadata = {}
   const text = (value, max = 4000) => typeof value === 'string' && value.trim() && value.length <= max ? value.trim() : undefined
   if (text(item.title)) metadata.title = text(item.title)
-  const type = { journalArticle: 'article-journal', magazineArticle: 'article-magazine', newspaperArticle: 'article-newspaper', conferencePaper: 'paper-conference', book: 'book', bookSection: 'chapter', report: 'report', thesis: 'thesis', preprint: 'article', webpage: 'webpage', document: 'document', dataset: 'dataset', computerProgram: 'software' }[item.itemType]
+  const type = {
+    journalArticle: 'article-journal', magazineArticle: 'article-magazine', newspaperArticle: 'article-newspaper',
+    conferencePaper: 'paper-conference', book: 'book', bookSection: 'chapter', report: 'report', thesis: 'thesis',
+    preprint: 'article', manuscript: 'manuscript', webpage: 'webpage', document: 'document', dataset: 'dataset',
+    computerProgram: 'software', standard: 'standard', patent: 'patent', presentation: 'speech', map: 'map',
+    dictionaryEntry: 'entry-dictionary', encyclopediaArticle: 'entry-encyclopedia', blogPost: 'post-weblog',
+    forumPost: 'post', artwork: 'graphic', film: 'motion_picture', videoRecording: 'motion_picture',
+    audioRecording: 'song', podcast: 'broadcast', interview: 'interview', statute: 'legislation', case: 'legal_case',
+  }[item.itemType]
   if (type) metadata.type = type
+  const genre = item.itemType === 'preprint' ? 'Preprint' : type === 'report' && text(item.reportType, 200)
+  if (genre) metadata.genre = genre
   if (Array.isArray(item.creators)) {
     const authors = item.creators.filter(creator => creator && creator.creatorType === 'author').slice(0, 200).map(creator => {
       if (text(creator.lastName, 500)) return { family: text(creator.lastName, 500), ...(text(creator.firstName, 500) ? { given: text(creator.firstName, 500) } : {}) }
@@ -64,7 +74,8 @@ export function zoteroItemToMetadata(item) {
   if (text(item.abstractNote)) metadata.abstract = text(item.abstractNote)
   const container = text(item.publicationTitle, 500) || text(item.proceedingsTitle, 500) || (type !== 'book' && type !== 'report' ? text(item.bookTitle, 500) : undefined)
   if (container) metadata['container-title'] = container
-  if (text(item.publisher, 500)) metadata.publisher = text(item.publisher, 500)
+  const publisher = text(item.publisher, 500) || text(item.institution, 500) || text(item.company, 500)
+  if (publisher) metadata.publisher = publisher
   for (const [from, to] of [['volume', 'volume'], ['issue', 'issue'], ['pages', 'page'], ['ISBN', 'ISBN'], ['ISSN', 'ISSN'], ['editionNumber', 'edition'], ['series', 'collection-title']]) {
     if (text(item[from], 200)) metadata[to] = text(item[from], 200)
   }

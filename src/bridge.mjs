@@ -411,6 +411,7 @@ async function fillDoi(request, options) {
     return current.DOI?{status:'saved',DOI:current.DOI}:save(doi);
   }
   const type=lookupType(current);
+  if(current.doi_status==='not-applicable'&&!current.DOI)return {status:'skipped'};
   if(current.DOI||!doiTypes.has(type))return {status:current.DOI?'saved':'skipped',DOI:current.DOI};
   let arxiv, publicLink;
   try{arxiv=arxivID(current.archive_location || current.URL || '');}catch{}
@@ -576,7 +577,7 @@ function metadataDraft(current, fetched) {
   for (const [field,value] of Object.entries(incoming)) {
     // Rankings are user/import-sourced. An online lookup never replaces or adds
     // them, nor does it substitute a different author list for a manual list.
-    if (field === 'journal_rankings' || missingMetadata(value)) continue;
+    if (field === 'journal_rankings' || missingMetadata(value) || field === 'DOI' && current.doi_status === 'not-applicable') continue;
     if (missingMetadata(item[field])) item[field] = structuredClone(value);
   }
   if (incoming.publication_dates && current.publication_dates) {
@@ -608,6 +609,7 @@ async function lookupMetadata(request, options, { forCitation = false, current }
   if (typeof request.id !== 'string' || !request.id || request.id.length > 200) throw new Error('请选择一篇文献，再刷新资料。');
   current ??= await core({action:'get',id:request.id},options);
   const doi = canonicalDOI(current.DOI);
+  const noDoi = current.doi_status === 'not-applicable' && !doi;
   const url = typeof current.URL === 'string' ? current.URL.trim() : '';
   let pdfLink = isDirectPDFURL(url);
   const knownPreprint = options.publicationLookup && (lookupType(current) === 'preprint' || /^10\.48550\/arxiv\./i.test(doi));
@@ -617,7 +619,7 @@ async function lookupMetadata(request, options, { forCitation = false, current }
   let target = doi || (!pdfLink && url) || arxivHint || (String(current.archive||'').toLowerCase()==='arxiv'&&current.archive_location);
   let detected=false;
   const warnings = [];
-  if(!target&&!pdfLink&&current.pdf){
+  if(!target&&!pdfLink&&current.pdf&&!noDoi){
     try {
       const probe=await core({action:'metadata_probe',id:request.id},options);
       target=probe.doi||probe.arxiv;detected=Boolean(target);
@@ -626,7 +628,7 @@ async function lookupMetadata(request, options, { forCitation = false, current }
       warnings.push(`未能从本地 PDF 核对标识符：${String(error.message).slice(0,160)}`);
     }
   }
-  const allowTitle = !forCitation || Boolean(current['container-title'] || current.parse?.verified);
+  const allowTitle = !noDoi && (!forCitation || Boolean(current['container-title'] || current.parse?.verified));
   if (!target && !allowTitle) throw new Error('请在资料详情中填写缺失项，或添加 DOI／公开论文链接以补全。');
   const fetchOptions={timeoutMs:21000,...options.fetchOptions,signal:options.signal};
   const targetOptions=!doi&&allowTitle ? {...fetchOptions,timeoutMs:Math.min(fetchOptions.timeoutMs,8000)} : fetchOptions;
@@ -698,7 +700,7 @@ async function lookupMetadata(request, options, { forCitation = false, current }
   const preprintCandidate = explicitPreprint ? { ...fetched, DOI: undefined } : fetched;
   const item = metadataDraft(current, preprintCandidate);
   let publication = {};
-  if (!forCitation && options.publicationLookup) {
+  if (!forCitation && options.publicationLookup && current.doi_status !== 'not-applicable') {
     const hosts = result.provenance?.requests || [];
     const source = hosts.some(entry => entry.status === 200 && entry.url?.startsWith('https://api.crossref.org/')) ? 'Crossref'
       : hosts.some(entry => entry.status === 200 && entry.url?.startsWith('https://api.datacite.org/')) ? 'DataCite' : 'Publisher';
@@ -708,7 +710,7 @@ async function lookupMetadata(request, options, { forCitation = false, current }
   if (forCitation) {
     if (pdfLink && fetched.URL && !isDirectPDFURL(fetched.URL)) item.URL = fetched.URL;
     if (fetched.type && fetched.type !== 'article' &&
-        (!current.type || current.type === 'article' || current.parse?.field_sources?.type === 'default-record-type')) item.type = fetched.type;
+        (!current.type || current.type === 'article')) item.type = fetched.type;
     if (current.title === 'Untitled' && fetched.title) item.title = fetched.title;
     if (current.parse?.field_sources?.author === 'pdf-info-author-literal' && fetched.author?.length) {
       item.author = fetched.author;
@@ -888,6 +890,7 @@ export async function dispatch(request, options = {}) {
     return { count: items.length, kind, ...written,
       conflicts: audit.citekey_conflict_count, doi_duplicates: audit.doi_duplicate_count,
       missing: Object.fromEntries(Object.entries(audit.missing).map(([field, value]) => [field, value.count])),
+      doi_not_applicable: audit.doi_not_applicable.count,
       actionable: { lookup_by_url: audit.actionable.lookup_by_url.count, manual_only: audit.actionable.manual_only.count },
       pdf_missing: audit.totals.pdf_files_missing, verification,
       warnings: ['references.bib 保存引用元数据；文件、使用关联与知识正文不属于此格式。', ...(verification.truncated ? [`DOI 核验覆盖前 ${verifyLimit} 条，剩余 ${verification.remaining} 条未核验；请分批再次运行。`] : [])] };
