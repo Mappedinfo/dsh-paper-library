@@ -55,6 +55,32 @@ test('bounded batches continue inside a dense page without dropping remaining ma
  f.get('[aria-label="继续搜索后续位置"]').click();await until(()=>f.calls.length===6&&f.get('[aria-label="停止 PDF 搜索"]').hidden);
  assert.equal(f.calls.at(-1)[1].offset,200);assert.match(f.get('#pdf-search-row [role=status]').textContent,/5 个位置/);assert.equal(f.get('[aria-label="继续搜索后续位置"]').hidden,true);
 });
+test('sidebar arrows navigate each match and the same-page section overrides the carried section',async t=>{
+ const introduction={page:1,title:'1 Introduction'},method={page:3,title:'2 Methods'};
+ const f=fixture(t,async(a,p)=>({
+   page:p.page,page_count:3,next_page:p.page<3?p.page+1:null,next_offset:null,
+   section_context:{last:p.page===1?introduction:p.page===3?method:null,before:null},
+   matches:p.page===1?[]:p.page===2?[{...match(2),section:null}]:[{...match(3),section:null},{...match(3,2),section:method}],
+ }),true);
+ const previous=f.get('[aria-label="上一个匹配位置（侧栏）"]'),next=f.get('[aria-label="下一个匹配位置（侧栏）"]');
+ assert.equal(next.disabled,true);
+ f.get('#pdf-search-panel input').value='needle';f.submit('#pdf-search-panel form');
+ await until(()=>f.w.document.querySelectorAll('#pdf-search-panel li').length===3);
+ const labels=[...f.w.document.querySelectorAll('.pdf-search-result-location')].map(node=>node.textContent);
+ assert.deepEqual(labels,['第 2 页 · 1 Introduction','第 3 页 · 1 Introduction','第 3 页 · 2 Methods']);
+ assert.ok(f.calls.every(([,args])=>args.include_sections===true));
+ next.click();await tick();
+ assert.equal(f.revealed.at(-1).page,3);
+ assert.match(f.get('#pdf-search-panel [role=status]').textContent,/2 \/ 3/);
+ f.get('[aria-label="下一个匹配位置"]').click();await tick();
+ assert.match(f.get('#pdf-search-panel [aria-current]').getAttribute('aria-label'),/2 Methods/);
+ previous.click();await tick();
+ assert.deepEqual(f.revealed.at(-1).rects,match(3).rects);
+ assert.match(f.get('#pdf-search-row [role=status]').textContent,/2 \/ 3/);
+ f.setPaper({id:'new-paper',pdf:true});
+ assert.equal(next.disabled,true);
+ assert.equal(f.get('.pdf-search-result-location'),null);
+});
 test('late results cannot replace new input or navigate a newly selected paper',async t=>{
  let resolve;const f=fixture(t,()=>new Promise(r=>resolve=r));f.get('#pdf-search-row input').value='old';f.submit('#pdf-search-row');
  f.setPaper({id:'another',pdf:true});resolve({page:1,page_count:1,matches:[match(1)],next_page:null,next_offset:null});await tick();assert.equal(f.revealed.length,0);assert.equal(f.get('#pdf-search-row').hidden,true);

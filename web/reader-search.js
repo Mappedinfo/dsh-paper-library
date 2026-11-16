@@ -107,16 +107,18 @@ window.PaperReaderSearch = (() => {
     const resultsSubmit=make('button','搜索');resultsSubmit.type='submit';resultsSubmit.className='button subtle';resultsForm.append(resultsInput,resultsSubmit);
     const resultsActions=make('div');resultsActions.className='pdf-search-actions';
     const resultsStatus=make('span');resultsStatus.setAttribute('role','status');
+    const resultsPrevious=button('↑','上一个匹配位置（侧栏）',()=>move(-1));
+    const resultsNext=button('↓','下一个匹配位置（侧栏）',()=>move(1));
     const resultsMore=button('继续','继续搜索后续位置（侧栏）',continueSearch);
     const resultsStop=button('停止','停止 PDF 搜索（侧栏）',stopSearch);
-    resultsActions.append(resultsStatus,resultsMore,resultsStop);
+    resultsActions.append(resultsStatus,resultsPrevious,resultsNext,resultsMore,resultsStop);
     const resultsList=make('ol');resultsList.className='pdf-search-results';
     resultsPanel.append(resultsForm,resultsActions,resultsList);
     panels?.registerPanel({id:'pdf-search',label:'文内搜索',element:resultsPanel,reading:true});
-    let activeResult, searchMessage='';
+    let activeResult, searchMessage='', precedingSection=null;
     function replaceHits(){hits=[];index=-1;activeResult=null;resultsList.replaceChildren();}
     function update(){
-      previous.disabled=next.disabled=!hits.length;
+      previous.disabled=next.disabled=resultsPrevious.disabled=resultsNext.disabled=!hits.length;
       more.hidden=resultsMore.hidden=busy||!cursor;
       stop.hidden=resultsStop.hidden=!busy;
       const progress=`${hits.length?index+1:0} / ${hits.length} 个位置${cursor?'（本批）':''} · ${busy?'搜索中 · ':''}${scanned} / ${total} 页${noText?' · '+noText+' 页无可选文字':''}`;
@@ -124,9 +126,11 @@ window.PaperReaderSearch = (() => {
       resultsStatus.textContent=searchMessage||(!getPaper()?.pdf?'当前文献没有 PDF。':!searchQuery?'输入文字，查找当前 PDF。':!busy&&!hits.length&&!cursor?`未找到匹配位置 · ${progress}`:progress);
       resultsInput.disabled=resultsSubmit.disabled=!getPaper()?.pdf;
       for(let position=resultsList.children.length;position<hits.length;position++){
-        const {page,snippet}=hits[position];
-        const row=make('li'), control=button('',`第 ${page} 页，匹配位置 ${position+1}`,()=>selectHit(position));
-        control.append(make('span',`第 ${page} 页`),make('span',snippet||searchQuery));
+        const {page,snippet,section}=hits[position];
+        const location=`第 ${page} 页${section ? ` · ${section.title}` : ''}`;
+        const row=make('li'), control=button('',`${location}，匹配位置 ${position+1}`,()=>selectHit(position));
+        const metadata=make('span',location);metadata.className='pdf-search-result-location';
+        control.append(metadata,make('span',snippet||searchQuery));
         row.append(control);resultsList.append(row);
       }
       const selected=resultsList.children[index]?.firstElementChild;
@@ -142,10 +146,16 @@ window.PaperReaderSearch = (() => {
     function move(delta){if(hits.length)selectHit((index+delta+hits.length)%hits.length);}
     async function run(){const runId=++ticket,id=paperId;busy=true;searchMessage='';update();
       try{while(cursor&&hits.length<200){
-        const result=await api('paper_text_find',{id,query:searchQuery,match:searchMatch,case_sensitive:searchCase,page:cursor.page,offset:cursor.offset,limit:Math.min(40,200-hits.length)});
+        const result=await api('paper_text_find',{id,query:searchQuery,match:searchMatch,case_sensitive:searchCase,page:cursor.page,offset:cursor.offset,limit:Math.min(40,200-hits.length),include_sections:true});
         if(disposed||runId!==ticket||getPaper()?.id!==id)return;
-        total=result.page_count;hits.push(...result.matches);
-        if(result.next_offset!=null)cursor={page:result.page,offset:result.next_offset};else{scanned=result.page;if(result.no_extractable_text)noText++;cursor=result.next_page?{page:result.next_page,offset:0}:null;}
+        const context=result.section_context;
+        if(context?.before?.page>(precedingSection?.page||0))precedingSection=context.before;
+        total=result.page_count;
+        hits.push(...result.matches.map(hit=>Object.hasOwn(hit,'section')?{...hit,section:hit.section||precedingSection}:hit));
+        if(result.next_offset!=null)cursor={page:result.page,offset:result.next_offset};else{
+          precedingSection=context?.last||precedingSection;
+          scanned=result.page;if(result.no_extractable_text)noText++;cursor=result.next_page?{page:result.next_page,offset:0}:null;
+        }
         if(index<0&&hits.length){index=0;void reveal();}update();
         if(cursor&&hits.length<200)await new Promise(resolve=>setTimeout(resolve,60));
         if(disposed||runId!==ticket||getPaper()?.id!==id)return;
@@ -155,7 +165,7 @@ window.PaperReaderSearch = (() => {
     }
     function start(){
       if(!getPaper()?.pdf)return;
-      ++ticket;busy=false;replaceHits();scanned=0;total=0;noText=0;searchMessage='';
+      ++ticket;busy=false;replaceHits();scanned=0;total=0;noText=0;searchMessage='';precedingSection=null;
       resultsInput.value=input.value;searchQuery=input.value.trim();
       searchMatch=match.getAttribute('aria-checked')==='true'?'whole':'partial';searchCase=matchCase.getAttribute('aria-checked')==='true';
       cursor=searchQuery?{page:1,offset:0}:null;
@@ -164,14 +174,14 @@ window.PaperReaderSearch = (() => {
     pdfForm.addEventListener('submit',event=>{event.preventDefault();start();});
     resultsForm.addEventListener('submit',event=>{event.preventDefault();input.value=resultsInput.value;start();});
     for(const [field,other] of [[input,resultsInput],[resultsInput,input]])field.addEventListener('input',()=>{
-      other.value=field.value;++ticket;busy=false;cursor=null;replaceHits();searchQuery='';scanned=total=noText=0;
+      other.value=field.value;++ticket;busy=false;cursor=null;replaceHits();searchQuery='';precedingSection=null;scanned=total=noText=0;
       searchMessage=field.value?'按 Enter 搜索':'';update();
     });
     input.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();close.click();}else if(event.key==='Enter'&&searchQuery===input.value.trim()&&hits.length){event.preventDefault();move(event.shiftKey?-1:1);}});
     function hidePDF(){if(!panels){++ticket;busy=false;}pdfForm.hidden=true;document.body.classList.remove('pdf-search-open');pdfToggle.setAttribute('aria-expanded','false');update();pdfToggle.focus();}
     function showPDF(){sync();if(pdfToggle.disabled)return;pdfForm.hidden=false;document.body.classList.add('pdf-search-open');pdfToggle.setAttribute('aria-expanded','true');input.focus();input.select();}
     const keydown=event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='f'&&!event.altKey&&!event.target.closest('input,textarea,[contenteditable=true]')&&!document.querySelector('dialog[open]')){sync();if(!pdfToggle.disabled){event.preventDefault();showPDF();}}};document.addEventListener('keydown',keydown);
-    function sync(){const paper=getPaper(),id=paper?.id||null;if(id!==paperId){paperId=id;++ticket;busy=false;replaceHits();cursor=null;input.value=resultsInput.value='';searchMessage=searchQuery='';scanned=total=noText=0;pdfForm.hidden=true;queries.clear();annotationSourceFilter='all';annotationMatch='all';annotationMatches=[];annotationIndex=-1;scopeInput.value='';onAnnotationSearch('');}
+    function sync(){const paper=getPaper(),id=paper?.id||null;if(id!==paperId){paperId=id;++ticket;busy=false;replaceHits();cursor=null;input.value=resultsInput.value='';searchMessage=searchQuery='';precedingSection=null;scanned=total=noText=0;pdfForm.hidden=true;queries.clear();annotationSourceFilter='all';annotationMatch='all';annotationMatches=[];annotationIndex=-1;scopeInput.value='';onAnnotationSearch('');}
       pdfToggle.disabled=!paper?.pdf||Boolean($('toolbar-reader')?.hidden);if(pdfToggle.disabled)pdfForm.hidden=true;document.body.classList.toggle('pdf-search-open',!pdfForm.hidden);pdfToggle.setAttribute('aria-expanded',String(!pdfForm.hidden));
       const nextScope=rail?.dataset.sidebarPanel||'library';if(nextScope!==scope){scope=nextScope;scopeInput.value=queries.get(scope)||'';}
       const supported=Boolean(labels[scope]);scopeToggle.hidden=!supported;scopeToggle.setAttribute('aria-expanded',String(expanded));scopeToggle.classList.toggle('active',Boolean(queries.get(scope))||(scope==='annotations'&&annotationSourceFilter!=='all'));scopeForm.hidden=!expanded||!supported||Boolean(header?.hidden);

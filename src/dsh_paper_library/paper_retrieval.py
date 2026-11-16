@@ -1,5 +1,6 @@
 """按需读取单篇 PDF 正文与有界页面图像；不建索引、不修改 PDF。"""
 import base64
+from bisect import bisect_right
 import hashlib
 import json
 import math
@@ -103,6 +104,42 @@ def normalized_spacing(text):
 
 def normalized(text):
     return normalized_spacing(text).casefold()
+
+
+def page_sections(doc, page, text_page):
+    from . import outline
+
+    number = page.number + 1
+    items, _ = outline.bookmarks(doc)
+    titles = {outline.heading_key(item["title"]) for item in items if item["page"] == number}
+    prior = max(((item["page"], index, item["title"]) for index, item in enumerate(items)
+                 if item["page"] is not None and item["page"] < number), default=None)
+    lines = outline.page_lines(text_page.extractDICT()["blocks"])
+    starts = list(outline.headings(page, lines, titles))
+    indexes = [index for index, _ in starts]
+    sections = [{"title": item["title"], "page": number} for _, item in starts]
+    bounds = [line["bbox"] for line in lines]
+
+    def locate(rect):
+        if not sections:
+            return {"section": None}
+        # Use the text layer's reading order rather than vertical coordinates.
+        # A continuation in the right column can sit above a heading on the left.
+        best, overlap = None, 0
+        for index, (x0, y0, x1, y1) in enumerate(bounds):
+            width = min(x1, rect.x1) - max(x0, rect.x0)
+            height = min(y1, rect.y1) - max(y0, rect.y0)
+            if width > 0 and height > 0 and width * height > overlap:
+                best, overlap = index, width * height
+        if best is None:
+            return {}
+        position = bisect_right(indexes, best)
+        return {"section": sections[position - 1] if position else None}
+
+    return locate, {
+        "before": {"title": prior[2], "page": prior[0]} if prior else None,
+        "last": sections[-1] if sections else None,
+    }
 
 
 _DATA_HEADING = re.compile(
@@ -215,6 +252,12 @@ def dispatch(library, request):
                         rect = fitz.Rect(boxes[0])
                         for box in boxes[1:]: rect |= fitz.Rect(box)
                         found.append([rect])
+            section_for = None
+            if request.get("include_sections") is True:
+                try:
+                    section_for, result["section_context"] = page_sections(doc, page, text_page)
+                except (ValueError, RuntimeError):
+                    pass  # A damaged outline must not prevent text search.
             matches = []
             for rects in found[offset:offset + limit]:
                 first = rects[0]
@@ -222,7 +265,7 @@ def dispatch(library, request):
                 context = first + (-95, -1, 95, 1)
                 snippet = " ".join(page.get_textbox(context, textpage=text_page).split())[:240]
                 matches.append({"page": number, "rects": [list(rect * page.rotation_matrix) for rect in rects],
-                                "snippet": snippet})
+                                "snippet": snippet, **(section_for(first) if section_for else {})})
             end = offset + len(matches)
             result.update(matches=matches, page=number, page_matches=len(found),
                           next_offset=end if end < len(found) else None,
