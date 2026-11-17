@@ -6,10 +6,10 @@ const require=createRequire(import.meta.url),{JSDOM}=require(process.env.JSDOM_M
 const script=await readFile(new URL('../web/encyclopedia.js',import.meta.url),'utf8');
 const markdown=await readFile(new URL('../lib/paper-markdown.js',import.meta.url),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-function fixture(t,create,{source={paper_id:'synthetic',title:'Synthetic paper',page:2,quote:'A synthetic sentence.'},items=[],sync=()=>({hasMore:false}),searchUsage}={}){
+function fixture(t,create,{source={paper_id:'synthetic',title:'Synthetic paper',page:2,quote:'A synthetic sentence.'},items=[],list=()=>({items,total:items.length}),sync=()=>({hasMore:false}),searchUsage}={}){
  const dom=new JSDOM('',{url:'https://synthetic.invalid',runScripts:'outside-only'}),w=dom.window,calls=[],jumps=[];
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};w.confirm=()=>true;
- w.eval(markdown);w.eval(script);const ui=w.PaperEncyclopedia.create({getSource:()=>source,toast:()=>{},openReference:ref=>jumps.push(ref),searchUsage,api:async(action,args)=>{calls.push({action,...args});if(action==='language_vocabulary_sync')return sync(args);if(action.endsWith('_list'))return {items,total:items.length};return create(args);}});
+ w.eval(markdown);w.eval(script);const ui=w.PaperEncyclopedia.create({getSource:()=>source,toast:()=>{},openReference:ref=>jumps.push(ref),searchUsage,api:async(action,args)=>{calls.push({action,...args});if(action==='language_vocabulary_sync')return sync(args);if(action.endsWith('_list'))return list(args);return create(args);}});
  t.after(()=>w.close());return {w,ui,calls,jumps,click:label=>[...w.document.querySelectorAll('button')].find(n=>n.textContent===label).click(),input:label=>[...w.document.querySelectorAll('label')].find(n=>n.firstChild.textContent===label).querySelector('input,textarea'),submit:()=>w.document.querySelector('.wiki-word-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}))};
 }
 const result=args=>({id:'word',term:args.term,meaning:'合成的',meaning_source:'ai',status:'learning',encounters:[{paper_id:args.id,title:'Synthetic paper',page:args.page,source_sentence:args.source_sentence,sentence_translation:'一个合成句子。',author_background:args.author_background,model:{provider:'synthetic',model:'mock'}}]});
@@ -84,6 +84,28 @@ test('AI explanation sends only the submitted public query, then shows inspectab
  assert.equal(block.querySelector('.wiki-inline-citation').href,'https://example.edu/term');
  assert.match(block.textContent,/用途共同出现.*Planning source.*Two uses co-occur/s);
  assert.match(f.w.document.querySelector('.wiki-article').textContent,/混合使用.*Private note/s);
+ const status=f.w.document.querySelector('.wiki-header [role=status]');
+ assert.equal(status.textContent,'已自动保存释义和引用。');
+ assert.equal(status.title,status.textContent);
+ assert.equal(f.w.document.querySelector('.wiki-dialog > [role=status]'),null);
+});
+
+test('vocabulary sorting stays above the list, reloads the first page, and keeps the word being viewed',async t=>{
+ const items=['Zulu','Alpha'].map(term=>({id:term,term,encounters:[]}));
+ const f=fixture(t,()=>{},{source:null,list:args=>({items:args.sort==='term_asc'?[...items].reverse():items,total:31,hasMore:args.offset===0})});
+ const doc=f.w.document;
+ f.ui.show('words');await tick();
+ const sort=doc.querySelector('.wiki-index select');
+ assert.deepEqual([...sort.options].map(option=>option.textContent),
+  ['最近更新','最新加入','最早加入','字母 A–Z','字母 Z–A']);
+ assert.equal(doc.querySelector('.wiki-search select'),null);
+ f.click('下一页');await tick();assert.equal(f.calls.at(-1).offset,30);
+ sort.value='term_asc';sort.dispatchEvent(new f.w.Event('change'));await tick();
+ assert.deepEqual(f.calls.at(-1),{action:'vocabulary_list',query:'',sort:'term_asc',offset:0,limit:30});
+ assert.deepEqual([...doc.querySelectorAll('.wiki-index-item')].map(item=>item.textContent),['Alpha','Zulu']);
+ assert.equal(doc.querySelector('.wiki-article h2').textContent,'Zulu');
+ sort.value='created_asc';sort.dispatchEvent(new f.w.Event('change'));await tick();
+ assert.equal(f.calls.at(-1).sort,'created_asc');
 });
 
 test('an inconclusive search returns to the word and reloads saved clues and query',async t=>{

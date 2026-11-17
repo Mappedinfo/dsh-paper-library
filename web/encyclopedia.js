@@ -4,7 +4,10 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
   const button=(label,action)=>{const b=node('button',label,'button subtle');b.type='button';b.addEventListener('click',action);return b;};
   const dialog=node('dialog',undefined,'wiki-dialog');dialog.setAttribute('aria-label','阅读百科与语言词条');
   const header=node('header',undefined,'wiki-header'),close=button('关闭',()=>leave());header.append(close);
-  const tabs=node('nav',undefined,'wiki-tabs');tabs.setAttribute('aria-label','词条分类');header.prepend(tabs);
+  const heading=node('div',undefined,'wiki-header-main'),status=node('p','','wiki-status small muted');
+  status.setAttribute('role','status');
+  const tabs=node('nav',undefined,'wiki-tabs');tabs.setAttribute('aria-label','词条分类');heading.append(tabs,status);header.prepend(heading);
+  function setStatus(message){status.textContent=message;status.title=message;}
   let docked=false;
   const syncedPapers=new Set();
   const listedWords=new Map();
@@ -15,8 +18,19 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
   const search=node('form',undefined,'wiki-search');const submit=button('检索',()=>{query=queryInput.value.trim();offset=0;void load();});
   const add=button('新建词条',()=>edit(null)),addFromPaper=button('从当前论文添加',()=>createWord());
   search.append(queryInput,submit,add,addFromPaper);search.addEventListener('submit',event=>{event.preventDefault();query=queryInput.value.trim();offset=0;void load();});
-  const sortControl=node('select');sortControl.setAttribute('aria-label','词条排序');for(const [value,label]of [['updated_desc','最近更新'],['created_desc','最新添加'],['created_asc','最早添加'],['term_asc','字母 A–Z'],['term_desc','字母 Z–A']]){const option=node('option',label);option.value=value;sortControl.append(option);}sortControl.value=sort;sortControl.addEventListener('change',()=>{sort=sortControl.value;offset=0;void load();});search.append(sortControl);
-  const layout=node('div',undefined,'wiki-layout'),index=node('aside',undefined,'wiki-index'),article=node('article',undefined,'wiki-article'),status=node('p','', 'small muted');status.setAttribute('role','status');layout.append(index,article);dialog.append(header,search,status,layout);document.body.append(dialog);
+  const sortControl=node('select');sortControl.setAttribute('aria-label','词条排序');
+  for(const [value,label]of [['updated_desc','最近更新'],['created_desc','最新加入'],['created_asc','最早加入'],['term_asc','字母 A–Z'],['term_desc','字母 Z–A']]){
+    const option=node('option',label);option.value=value;sortControl.append(option);
+  }
+  sortControl.value=sort;
+  sortControl.addEventListener('change',()=>{
+    if(!discard()){sortControl.value=sort;return;}
+    sort=sortControl.value;offset=0;void load(selected);
+  });
+  const layout=node('div',undefined,'wiki-layout'),sidebar=node('aside',undefined,'wiki-index');
+  const index=node('div',undefined,'wiki-index-list'),article=node('article',undefined,'wiki-article');
+  const sortLabel=node('label','排序','wiki-index-sort');sortLabel.append(sortControl);
+  sidebar.append(sortLabel,index);layout.append(sidebar,article);dialog.append(header,search,layout);document.body.append(dialog);
   const tabButtons={};for(const [value,label]of [['encyclopedia','百科'],['words','语言与词条']]){tabButtons[value]=button(label,()=>showSection(value==='words'&&language?'language':value));tabs.append(tabButtons[value]);}
   function discard(){if(dirty&&!window.confirm('词条尚未保存，放弃本次编辑？'))return false;dirty=false;return true;}
   function leave(){if(!discard())return;++ticket;language?.hide();dialog.close();}
@@ -59,7 +73,7 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
   }
   dialog.addEventListener('cancel',event=>{event.preventDefault();leave();});
   function markup(text){const root=node('div',undefined,'wiki-prose');for(const line of String(text||'尚未填写释义。').split('\n')){const p=node(line.startsWith('## ')?'h3':'p');let end=0;const raw=line.replace(/^## /,'');for(const match of raw.matchAll(/\[\[([^\]\n]{1,200})\]\]/g)){p.append(document.createTextNode(raw.slice(end,match.index)),button(match[1],()=>{if(!discard())return;query=match[1];queryInput.value=query;offset=0;void load();}));end=match.index+match[0].length;}p.append(document.createTextNode(raw.slice(end)));root.append(p);}return root;}
-  async function load(preferred=null){if(!discard())return;const seq=++ticket;status.textContent='正在读取词条…';for(const [key,b]of Object.entries(tabButtons))b.setAttribute('aria-pressed',String(key===mode));
+  async function load(preferred=null){if(!discard())return;const seq=++ticket;setStatus('正在读取词条…');for(const [key,b]of Object.entries(tabButtons))b.setAttribute('aria-pressed',String(key===mode));
     try{
       let syncWarning='';
       const paperId=mode==='words'?getSource()?.paper_id:null;
@@ -67,7 +81,7 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
         try{
           let cursor=0;
           while(seq===ticket&&dialog.open){
-            status.textContent=`正在登记本篇已有译文… ${cursor} 条已检查`;
+            setStatus(`正在登记本篇已有译文… ${cursor} 条已检查`);
             const batch=await api('language_vocabulary_sync',{id:paperId,offset:cursor,limit:20});
             if(seq!==ticket||!dialog.open)return;
             if(batch.truncated){syncWarning=' · 部分旧译文超出本次补登记范围';break;}
@@ -81,6 +95,7 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
       const result=await api(mode==='words'?'vocabulary_list':'encyclopedia_list',{query,sort,offset,limit:30});
       if(seq!==ticket)return;
       index.replaceChildren();
+      index.scrollTop=0;
       listedWords.clear();
       const items=result.items||[];
       for(const item of items){
@@ -89,12 +104,12 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
         b.classList.add('wiki-index-item');index.append(b);
       }
       const pager=node('div',undefined,'wiki-pagination');const prev=button('上一页',()=>{offset=Math.max(0,offset-30);void load();}),next=button('下一页',()=>{offset+=30;void load();});prev.disabled=offset===0;next.disabled=!result.hasMore;pager.append(prev,next);index.append(pager);
-      status.textContent=`${result.total} 个词条${result.truncated?' · 达到读取上限，请缩小检索范围':''}${syncWarning}`;
+      setStatus(`${result.total} 个词条${result.truncated?' · 达到读取上限，请缩小检索范围':''}${syncWarning}`);
       const item=preferred ? items.find(entry=>entry.id===preferred.id)||preferred : items[0];
       if(item)show(item);
       else {selected=null;article.replaceChildren(node('p','还没有匹配词条。'),button(mode==='words'?'新建单词或词组':'创建百科词条',()=>edit(null)));}
     }
-    catch(error){if(seq===ticket)status.textContent=error.message;}}
+    catch(error){if(seq===ticket)setStatus(error.message);}}
   function sources(root,items,word=null){
     const section=node('section',undefined,'wiki-sources');section.append(node('h3','文献来源'));
     if(!items.length)section.append(node('p','尚未关联文献。'));
@@ -140,8 +155,8 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
     try{
       const saved=await api('vocabulary_update',{id:item.id,expected_revision:item.revision,...patch});
       if(owner!==ticket)return;
-      dirty=false;show(saved);status.textContent=message;
-    }catch(error){if(owner===ticket)status.textContent=error.message;}
+      dirty=false;show(saved);setStatus(message);
+    }catch(error){if(owner===ticket)setStatus(error.message);}
     finally{control.disabled=false;}
   }
   function citationLink(source,label){
@@ -257,14 +272,14 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
       event.preventDefault();if(run.disabled)return;
       const mode=currentMode();
       run.disabled=query.disabled=modes.disabled=link.disabled=true;
-      status.textContent='正在公开检索，完成后会自动保存…';
+      setStatus('正在公开检索，完成后会自动保存…');
       try{
         const result=await api('vocabulary_explain',{id:item.id,expected_revision:item.revision,query:query.value.trim(),public_search:true,
           ...(mode!=='standard'?{research_mode:mode}:{}),...(mode==='link'?{public_url:link.value.trim()}:{})});
         if(owner!==ticket)return;
         show(result.word);
-        status.textContent=result.status==='explained'?'已自动保存释义和引用。':'已自动保存本次检索。';
-      }catch(error){if(owner===ticket)status.textContent=error.message;}
+        setStatus(result.status==='explained'?'已自动保存释义和引用。':'已自动保存本次检索。');
+      }catch(error){if(owner===ticket)setStatus(error.message);}
       finally{run.disabled=query.disabled=modes.disabled=false;updateMode();}
     });
     article.replaceChildren(node('h2',item.term),node('h3','AI 检索与解释'),form);
@@ -281,8 +296,8 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
       const owner=ticket;usage.disabled=true;
       try{
         if(await searchUsage(item.term)){if(owner===ticket)leave();}
-        else if(owner===ticket)status.textContent='未能切换到全文检索。';
-      }catch(error){if(owner===ticket)status.textContent=error.message;}
+        else if(owner===ticket)setStatus('未能切换到全文检索。');
+      }catch(error){if(owner===ticket)setStatus(error.message);}
       finally{usage.disabled=false;}
     });
     if(searchUsage)controls.append(usage);
@@ -299,11 +314,11 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
     article.append(note);sources(article,item.encounters||[],item);
   }
   function show(item){++ticket;selected=item;article.replaceChildren(node('h2',item.term));if(mode==='words'){listedWords.set(item.id,item);showWord(item);return;}
-    const labels={term:'术语',organization:'机构',abbreviation:'缩写',person:'人物',concept:'概念'};article.append(node('p',`${labels[item.kind]||'词条'} · 人工整理${item.aliases?.length?' · '+item.aliases.join(' / '):''}`,'small muted'),markup(item.definition),button('编辑词条',()=>edit(item)));if(pendingSource)article.append(button('将当前批注加入来源',async()=>{try{const saved=await api('encyclopedia_put',{...item,expected_revision:item.revision,source:pendingSource});pendingSource=null;show(saved);status.textContent='已关联当前批注。';}catch(e){status.textContent=e.message;}}));sources(article,item.sources||[]);}
+    const labels={term:'术语',organization:'机构',abbreviation:'缩写',person:'人物',concept:'概念'};article.append(node('p',`${labels[item.kind]||'词条'} · 人工整理${item.aliases?.length?' · '+item.aliases.join(' / '):''}`,'small muted'),markup(item.definition),button('编辑词条',()=>edit(item)));if(pendingSource)article.append(button('将当前批注加入来源',async()=>{try{const saved=await api('encyclopedia_put',{...item,expected_revision:item.revision,source:pendingSource});pendingSource=null;show(saved);setStatus('已关联当前批注。');}catch(e){setStatus(e.message);}}));sources(article,item.sources||[]);}
   function edit(item){if(mode==='words'){editWord(item);return;}if(!discard())return;++ticket;article.replaceChildren(node('h2',item?'编辑词条':'新建百科词条'));const form=node('form'),field=(label,value,max,textarea=false)=>{const l=node('label',label,'field'),input=node(textarea?'textarea':'input');input.value=value||'';input.maxLength=max;if(textarea)input.rows=12;l.append(input);form.append(l);return input;};const term=field('词条',item?.term||query,200);term.readOnly=Boolean(item);const aliases=field('别名与缩写（每行一个）',item?.aliases?.join('\n')||'',4000,true);aliases.rows=2;
     const kind=node('select');kind.setAttribute('aria-label','词条类型');for(const [value,label]of [['term','术语'],['concept','概念'],['organization','机构'],['abbreviation','缩写'],['person','人物']]){const option=node('option',label);option.value=value;kind.append(option);}kind.value=item?.kind||'term';form.append(kind);
     const definition=field('内容（可用 [[词条名]] 建立内部链接）',item?.definition,12000,true);form.addEventListener('input',()=>dirty=true);const save=node('button','保存','button primary');save.type='submit';form.append(save);if(pendingSource)form.append(node('p',`来源：${pendingSource.title||'当前文献'} · 第 ${pendingSource.page} 页`,'small muted'));
-    form.addEventListener('submit',async event=>{event.preventDefault();save.disabled=true;try{const saved=await api('encyclopedia_put',{term:term.value,kind:kind.value,aliases:aliases.value.split('\n').map(x=>x.trim()).filter(Boolean),definition:definition.value,expected_revision:item?.revision??0,...(pendingSource?{source:pendingSource}:{})});dirty=false;pendingSource=null;status.textContent='词条已保存。';show(saved);}catch(e){status.textContent=e.message;}finally{save.disabled=false;}});article.append(form);}
+    form.addEventListener('submit',async event=>{event.preventDefault();save.disabled=true;try{const saved=await api('encyclopedia_put',{term:term.value,kind:kind.value,aliases:aliases.value.split('\n').map(x=>x.trim()).filter(Boolean),definition:definition.value,expected_revision:item?.revision??0,...(pendingSource?{source:pendingSource}:{})});dirty=false;pendingSource=null;setStatus('词条已保存。');show(saved);}catch(e){setStatus(e.message);}finally{save.disabled=false;}});article.append(form);}
   function editWord(item=null,field='meaning'){
     if(!discard())return;
     const owner=++ticket,previous=selected;
@@ -328,7 +343,7 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
         const saved=await api('vocabulary_create',{mode:'manual',term:term.value,meaning:meaning.value,note:note.value});
         if(owner!==ticket)return;
         dirty=false;show(saved);await load(saved);
-      }catch(error){if(owner===ticket)status.textContent=error.message;}
+      }catch(error){if(owner===ticket)setStatus(error.message);}
       finally{save.disabled=false;for(const input of inputs)input.disabled=false;}
     });
     article.replaceChildren(node('h2',heading),form);(item?note||meaning:term).focus();
@@ -359,16 +374,16 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
     form.addEventListener('input',()=>dirty=true);
     form.addEventListener('submit',async event=>{
       event.preventDefault();if(busy)return;
-      if(background.value!=='unknown'&&!evidence.value.trim()){status.textContent='请填写作者语言背景的核实依据，或保持未知。';return;}
+      if(background.value!=='unknown'&&!evidence.value.trim()){setStatus('请填写作者语言背景的核实依据，或保持未知。');return;}
       const payload={id:source.paper_id,page:Number(page.value),term:term.value.trim(),source_sentence:sentence.value.trim(),author_background:{kind:background.value,evidence:evidence.value.trim()}};
       const next=JSON.stringify(payload);if(next!==fingerprint||!request){request=window.crypto.randomUUID();fingerprint=next;}
       busy=true;save.disabled=true;for(const input of form.querySelectorAll('input,textarea,select'))input.disabled=true;
-      status.textContent='正在翻译词条与原句…';
+      setStatus('正在翻译词条与原句…');
       try{
         const saved=await api('vocabulary_create',{...payload,request_id:request});
         if(seq!==ticket){toast('难词已保存，可在难词本查看。');return;}
-        dirty=false;pendingSource=null;status.textContent='难词与原句译文已保存 · AI 译文待核对';show(saved);
-      }catch(error){if(seq===ticket){status.textContent=error.message;if(error.retry_with_new_request)request=null;}}
+        dirty=false;pendingSource=null;setStatus('难词与原句译文已保存 · AI 译文待核对');show(saved);
+      }catch(error){if(seq===ticket){setStatus(error.message);if(error.retry_with_new_request)request=null;}}
       finally{busy=false;save.disabled=false;for(const input of form.querySelectorAll('input,textarea,select'))input.disabled=false;}
     });
   }
