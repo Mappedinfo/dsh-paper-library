@@ -224,36 +224,48 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
     const owner=++ticket,form=node('form',undefined,'wiki-word-form');
     const query=wordField(form,'公开检索词',item.explanation_search?.query||item.explanation?.query||item.term,200);
     query.required=true;
-    const modeLabel=node('label','检索方式','field'),mode=node('select');
-    for(const [value,label] of [['standard','联网检索'],['deep','DeepSeek 深度检索'],['link','阅读公开链接']]){
-      const option=node('option',label);option.value=value;mode.append(option);
+    const modes=node('fieldset',undefined,'wiki-research-modes');
+    modes.append(node('legend','检索方式'));
+    const choices=[
+      ['standard','联网检索','适合日常查证。优先用 DeepSeek 搜索，服务不可用或证据不足时，改查 DSH 网页检索与 Crossref、arXiv 学术索引。'],
+      ['deep','DeepSeek 深度检索','适合需要多步核对的问题。DeepSeek 会搜索、打开网页并在页内查找证据，可能耗时更长。需配置 DeepSeek API 密钥。'],
+      ['link','阅读公开链接','适合已有明确来源的情况。DeepSeek 根据你提供的公开 HTTPS 网页生成释义。需配置 DeepSeek API 密钥。'],
+    ];
+    const savedMode=item.explanation_search?.research_mode;
+    const selected=choices.some(([value])=>value===savedMode)?savedMode:'standard';
+    for(const [value,title,description] of choices){
+      const label=node('label',undefined,'wiki-research-mode'),option=node('input'),content=node('span');
+      option.type='radio';option.name='research_mode';option.value=value;option.checked=value===selected;
+      const heading=node('strong',title),detail=node('span',description,'wiki-research-mode-description');
+      heading.id=`wiki-research-${value}-name`;detail.id=`wiki-research-${value}-description`;
+      option.setAttribute('aria-labelledby',heading.id);option.setAttribute('aria-describedby',detail.id);
+      content.append(heading,detail);label.append(option,content);modes.append(label);
     }
-    mode.value=item.explanation_search?.research_mode||'standard';modeLabel.append(mode);form.append(modeLabel);
+    form.append(modes);
     const link=wordField(form,'公开 HTTPS 链接',item.explanation_search?.public_url,2048);
     link.type='url';
-    const hint=node('p',undefined,'small muted');
+    const currentMode=()=>modes.querySelector(':checked').value;
     function updateMode(){
-      link.required=mode.value==='link';
-      link.parentElement.hidden=!link.required;
-      hint.textContent=link.required?'DeepSeek 会收到上方检索词和公开链接。'
-        :mode.value==='deep'?'DeepSeek 使用上方检索词搜索并阅读相关公开网页。'
-        :'仅用上方检索词查询公开来源。DeepSeek 不可用或证据不足时，改用 DSH 网页检索和学术索引。';
+      const readingLink=currentMode()==='link';
+      link.required=readingLink;link.disabled=run.disabled||!readingLink;link.parentElement.hidden=!readingLink;
     }
-    mode.addEventListener('change',updateMode);updateMode();form.append(hint);
+    form.append(node('p','检索词会发送给公开检索服务。阅读公开链接时，DeepSeek 也会收到所填网址。','small muted'));
     const actions=node('div',undefined,'wiki-source-actions'),run=node('button','检索、生成并保存','button primary');
     run.type='submit';actions.append(run,button('取消',()=>show(item)));form.append(actions);
+    modes.addEventListener('change',updateMode);updateMode();
     form.addEventListener('submit',async event=>{
       event.preventDefault();if(run.disabled)return;
-      run.disabled=query.disabled=mode.disabled=link.disabled=true;
+      const mode=currentMode();
+      run.disabled=query.disabled=modes.disabled=link.disabled=true;
       status.textContent='正在公开检索，完成后会自动保存…';
       try{
         const result=await api('vocabulary_explain',{id:item.id,expected_revision:item.revision,query:query.value.trim(),public_search:true,
-          ...(mode.value!=='standard'?{research_mode:mode.value}:{}),...(mode.value==='link'?{public_url:link.value.trim()}:{})});
+          ...(mode!=='standard'?{research_mode:mode}:{}),...(mode==='link'?{public_url:link.value.trim()}:{})});
         if(owner!==ticket)return;
         show(result.word);
         status.textContent=result.status==='explained'?'已自动保存释义和引用。':'已自动保存本次检索。';
       }catch(error){if(owner===ticket)status.textContent=error.message;}
-      finally{run.disabled=query.disabled=mode.disabled=link.disabled=false;}
+      finally{run.disabled=query.disabled=modes.disabled=false;updateMode();}
     });
     article.replaceChildren(node('h2',item.term),node('h3','AI 检索与解释'),form);
     query.focus();

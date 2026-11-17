@@ -153,6 +153,12 @@ body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-
 .wiki-term-citations summary{color:var(--muted);cursor:pointer}
 .wiki-inline-citation{white-space:nowrap}
 .wiki-word-form{display:grid;gap:12px}.wiki-word-form details{padding:10px 0}.wiki-word-form details[open] summary{margin-bottom:10px}
+.wiki-research-modes{display:grid;gap:6px;min-inline-size:0;margin:0;padding:0;border:0}
+.wiki-research-modes legend{margin-bottom:6px;padding:0;font-size:12px}
+.wiki-research-mode{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;cursor:pointer}
+.wiki-research-mode input{margin:3px 0 0;padding:0;accent-color:var(--teal)}
+.wiki-research-mode:has(input:checked){background:var(--dsw-alias-interactive-bg-hover);border-color:var(--muted)}
+.wiki-research-mode-description{display:block;color:var(--muted);font-size:12px;line-height:1.5}
 
 .annotation-pagination{flex:none}.annotation-pagination .pagination{margin:0;padding:0;display:flex;align-items:center;gap:2px;font-size:11px;border:0}.annotation-pagination .button{padding:2px 5px;min-width:22px}.shared-reading-sidebar:not([data-sidebar-panel="annotations"]) .annotation-pagination{display:none}
 

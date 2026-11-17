@@ -144,16 +144,27 @@ test('selecting public link research reveals the link field and saves the mode a
   status:'unavailable',reason:'missing_key',query:args.query,research_mode:args.research_mode,public_url:args.public_url
  }}}),{items:[word]});
  f.ui.show('words');await tick();f.click('AI 检索与解释');
- const link=f.input('公开 HTTPS 链接'),select=f.w.document.querySelector('.wiki-word-form select');
+ const link=f.input('公开 HTTPS 链接'),modes=f.w.document.querySelector('.wiki-research-modes');
+ const descriptions=[...modes.querySelectorAll('.wiki-research-mode-description')];
+ assert.equal(descriptions.length,3);
+ assert.match(descriptions[0].textContent,/Crossref、arXiv/);
+ assert.match(descriptions[1].textContent,/打开网页并在页内查找证据/);
+ assert.match(descriptions[2].textContent,/你提供的公开 HTTPS 网页/);
+ assert.ok(descriptions.every(item=>!item.closest('[hidden]')));
+ assert.equal(modes.querySelector(':checked').value,'standard');
  assert.equal(link.parentElement.hidden,true);
- select.value='link';select.dispatchEvent(new f.w.Event('change'));
+ modes.querySelector('[value=link]').click();
  assert.equal(link.parentElement.hidden,false);assert.equal(link.required,true);
- link.value='https://example.edu/public';f.submit();await tick();
+ link.value='https://example.edu/public';
+ modes.querySelector('[value=deep]').click();
+ assert.equal(link.parentElement.hidden,true);assert.equal(link.disabled,true);
+ modes.querySelector('[value=link]').click();assert.equal(link.disabled,false);
+ f.submit();await tick();
  assert.deepEqual(f.calls.at(-1),{action:'vocabulary_explain',id:'word',expected_revision:'rev1',query:'Synthetic concept',
   public_search:true,research_mode:'link',public_url:'https://example.edu/public'});
  assert.match(f.w.document.querySelector('.wiki-term-search').textContent,/DEEPSEEK_API_KEY/);
  assert.match(f.w.document.querySelector('[role=status]').textContent,/已自动保存本次检索/);
  f.click('重新检索与解释');
- assert.equal(f.w.document.querySelector('.wiki-word-form select').value,'link');
+ assert.equal(f.w.document.querySelector('.wiki-research-modes :checked').value,'link');
  assert.equal(f.input('公开 HTTPS 链接').value,'https://example.edu/public');
 });
