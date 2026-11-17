@@ -40,7 +40,9 @@ window.PaperWorkspaceNavigation = (() => {
       const control = button(label, () => void selectRoot(kind), 'workspace-root-button'); control.dataset.kind = kind; rootButtons[kind] = control; roots.append(control);
     }
     const rootKinds = Object.keys(rootButtons);
-    const moreRoots = button('»»»', () => { rootsExpanded = !rootsExpanded; renderNavigation(); }, 'workspace-nav-button workspace-root-more');
+    const moreRoots = button('', () => { rootsExpanded = !rootsExpanded; renderNavigation(); }, 'workspace-nav-button workspace-root-more');
+    const moreIcon = window.PaperIcons?.create('chevron-down');
+    if (moreIcon) moreRoots.append(moreIcon);
     roots.append(moreRoots);
     const searchHost = el('div', 'workspace-nav-search'), actionHost = el('div', 'workspace-nav-actions');
     const pathButton = button('路径', () => togglePopup('path'), 'workspace-nav-button workspace-path-toggle');
@@ -133,7 +135,7 @@ window.PaperWorkspaceNavigation = (() => {
         if (section === kind && !current) control.setAttribute('aria-current', 'page'); else control.removeAttribute('aria-current');
       }
       moreRoots.hidden = rootKinds.length <= 3; moreRoots.disabled = transition;
-      moreRoots.textContent = rootsExpanded ? '«««' : '»»»';
+      if (!moreIcon) moreRoots.textContent = rootsExpanded ? '‹' : '›';
       moreRoots.setAttribute('aria-expanded', String(rootsExpanded));
       moreRoots.setAttribute('aria-label', rootsExpanded ? '收起其他工作区入口' : '展开其他工作区入口');
       moreRoots.title = rootsExpanded ? '收起其他入口' : '展开其他入口';

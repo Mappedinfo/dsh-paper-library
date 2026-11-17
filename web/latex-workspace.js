@@ -97,7 +97,7 @@ window.PaperLatexWorkspace = (() => {
     aiToggle.setAttribute('role', 'switch'); aiToggle.setAttribute('aria-checked', 'false'); aiToggle.setAttribute('aria-controls', 'latex-writing-panel');
     const reviewToggle = make('button', 'button subtle', '自审'); reviewToggle.id = 'latex-review-open'; reviewToggle.type = 'button';
     reviewToggle.hidden = true; // Keep the old action addressable without a second toolbar entry.
-    const reviewDivider = make('span', 'latex-toolbar-divider'); reviewDivider.setAttribute('role', 'separator'); reviewDivider.setAttribute('aria-orientation', 'vertical');
+    const sidebarDivider = make('span', 'latex-toolbar-divider'); sidebarDivider.setAttribute('role', 'separator'); sidebarDivider.setAttribute('aria-orientation', 'vertical');
     const navToggle = make('button', 'button subtle paper-switch', '侧边导航'); navToggle.id = 'latex-nav-toggle'; navToggle.type = 'button';
     navToggle.setAttribute('aria-controls', 'latex-navigator'); navToggle.setAttribute('aria-expanded', 'true');
     const layoutControls = make('div', 'latex-layout-controls'); layoutControls.setAttribute('role', 'group'); layoutControls.setAttribute('aria-label', '工作区视图');
@@ -443,7 +443,7 @@ window.PaperLatexWorkspace = (() => {
     const darkPdfToggle = make('button', 'button subtle latex-layout-button', '深色 PDF'); darkPdfToggle.id = 'latex-pdf-dark'; darkPdfToggle.type = 'button';
     darkPdfToggle.setAttribute('aria-pressed', 'false'); darkPdfToggle.title = '切换 PDF 页面配色';
     pdfDisplay.append(zoomSelect, spreadToggle, darkPdfToggle);
-    toolbar.append(title, projectSelect, mainLabel, saveState, compile, autoToggle, diagnosticsToggle, navToggle, layoutControls, pdfDisplay, reviewDivider, reviewToggle, aiToggle);
+    toolbar.append(title, projectSelect, mainLabel, saveState, compile, autoToggle, diagnosticsToggle, navToggle, aiToggle, reviewToggle, sidebarDivider, layoutControls, pdfDisplay);
     const renderState = make('span', 'latex-render-state'); renderState.id = 'latex-render-state'; renderState.setAttribute('role', 'status');
     const pdfTools = make('div', 'latex-pdf-tools');
     for (const [mode, label] of [['select', '选择'], ['highlight', '高亮'], ['underline', '下划线'], ['strikeout', '删除线'], ['comment', '批注'], ['note', '区域']]) {

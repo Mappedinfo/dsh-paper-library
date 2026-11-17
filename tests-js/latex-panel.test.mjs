@@ -226,7 +226,10 @@ test('the annotation rail keeps drafts without a separate writing panel', async 
   assert.equal(f.ids.get('latex-review-panel').parentElement, panel)
   assert.deepEqual(panel.children.map(child => child.id), ['latex-review-panel'])
   assert.equal(f.ids.get('latex-review-open').hidden, true)
-  assert.equal(f.ids.get('latex-ai-open').textContent, '批注与写作')
+  const reviewSwitch = f.ids.get('latex-ai-open')
+  assert.equal(reviewSwitch.textContent, '批注与写作')
+  const toolbarItems = navToggle.parentElement.children
+  assert.equal(toolbarItems[toolbarItems.indexOf(navToggle) + 1], reviewSwitch)
   assert.equal(f.ids.get('latex-review-export-pdf').type, 'button')
   for (const id of ['latex-writing-history', 'latex-writing-history-body', 'latex-ai-input', 'latex-ai-ask', 'latex-ai-propose', 'latex-ai-add-note', 'latex-ai-scope']) assert.equal(f.ids.has(id), false)
   assert.doesNotMatch(panel.textContent, /我的批注/)
@@ -234,7 +237,6 @@ test('the annotation rail keeps drafts without a separate writing panel', async 
   f.ids.get('latex-review-comment').value = 'Synthetic manual annotation'
   assert.equal(active, 'latex-ai')
   assert.equal(f.ids.get('latex-review-composer').hidden, false)
-  const reviewSwitch = f.ids.get('latex-ai-open')
   assert.equal(reviewSwitch.getAttribute('role'), 'switch')
   assert.equal(reviewSwitch.getAttribute('aria-checked'), 'true')
   await reviewSwitch.dispatch('click')

@@ -46,13 +46,16 @@ test('three entrances are shown until expanded and the chosen destination stays 
   const visible = () => f.findAll('workspace-root-button').filter(node => !node.hidden).map(node => node.dataset.kind);
   const more = f.find('workspace-root-more');
   assert.deepEqual(visible(), ['paper', 'dataset', 'board']);
+  assert.equal(more.textContent, '›');
   more.click();
   assert.equal(more.getAttribute('aria-expanded'), 'true');
+  assert.equal(more.textContent, '‹');
   assert.equal(visible().length, 7);
   f.findAll('workspace-root-button').find(node => node.dataset.kind === 'latex').click();
   await wait();
   assert.deepEqual(visible(), ['paper', 'dataset', 'latex']);
   assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.equal(more.textContent, '›');
 });
 
 test('the notes entrance opens bookmarks without loading an unrelated catalog', async () => {
