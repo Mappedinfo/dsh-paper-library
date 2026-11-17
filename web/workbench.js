@@ -56,6 +56,51 @@ window.PaperWorkbench = (() => {
     const versionInfo=node('section',undefined,'metadata-versions small');
     versionInfo.hidden=true;
     $('metadata-error').before(versionInfo);
+    const datasetInfo=node('section',undefined,'metadata-versions small');
+    datasetInfo.id='metadata-datasets';datasetInfo.hidden=true;
+    $('metadata-error').before(datasetInfo);
+    const datasetJobs=new Set();
+    let datasetInfoRequest=0;
+    async function showMetadataDatasets(id, archived=false) {
+      const token=++datasetInfoRequest;
+      datasetInfo.hidden=!id;
+      datasetInfo.replaceChildren(node('strong','关联数据集'));
+      if(!id)return;
+      const status=node('p',datasetJobs.has(id)?'正在检索本文采用的数据集…':'正在读取关联…');
+      datasetInfo.append(status);
+      try{
+        const {dataset_links:links}=await api('get',{id,include_dataset_links:true,...(archived?{include_archived:true}:{})});
+        if(token!==datasetInfoRequest||editing?.id!==id)return;
+        const items=links?.items||[];
+        if(items.length){
+          const list=node('ul');
+          const relations={uses:'使用',mentions:'提及',cites:'引用',produces:'产出',describes:'描述'};
+          for(const entry of items)list.append(node('li',[entry.dataset_title,entry.release_version,relations[entry.relation],
+            entry.review_status==='needs-review'?'待核对':entry.review_status==='rejected'?'已排除':''].filter(Boolean).join(' · ')));
+          status.before(list);
+        }
+        status.textContent=[datasetJobs.has(id)?'正在检索本文采用的数据集…':'',!items.length?'尚未关联数据集。':'',
+          links?.total>items.length?`显示 ${items.length} / ${links.total} 条。完整关系请查看「数据集」。`:''].filter(Boolean).join(' ');
+        if(!archived)datasetInfo.append(button('查看数据集关系','metadata-dataset-links',()=>{void resource()?.showPaperLinks();}));
+      }catch(error){if(token===datasetInfoRequest&&editing?.id===id)status.textContent=`读取数据集关系失败：${error.message}`;}
+    }
+    async function discoverDatasets(item) {
+      const id=item.id;
+      if(!state.paperDatasetSearch||!isPaper(item)||!item.pdf||datasetJobs.has(id))return;
+      datasetJobs.add(id);
+      try{
+        const result=await api('paper_datasets_auto',{id});
+        if(state.active?.id===id){
+          const pending=result.candidates.filter(candidate=>candidate.relation==='uses'&&!candidate.confirmed).length;
+          toast(`数据集检索完成 · ${result.auto_linked} 条已关联${pending?` · ${pending} 条使用候选待核对`:''}`);
+        }
+        resource()?.refreshPaperData?.(id);
+      }catch(error){if(state.active?.id===id)toast(`数据集检索未完成：${error.message}`,true);}
+      finally{
+        datasetJobs.delete(id);
+        if(editorVisible&&editing?.id===id)void showMetadataDatasets(id);
+      }
+    }
     function versionList(versions) {
       const list=node('ul');
       const statuses={posted:'预印本',accepted:'已接收',published:'已发表'};
@@ -509,6 +554,7 @@ window.PaperWorkbench = (() => {
       if(saved&&!lookup)item=saved.base;
       restoring=true;
       editing=structuredClone(item||{});revision++;$('metadata-dialog-title').textContent=editing.id?'编辑文献资料':'新建文献条目';
+      void showMetadataDatasets(editing.id, Boolean(editing.archived));
       editing._publicationDraft=Boolean((lookup||saved?.publicationDraft)&&Array.isArray(editing.publication_versions));
       versionInfo.hidden=!Array.isArray(editing.publication_versions)||!editing.publication_versions.length;
       versionInfo.replaceChildren();
@@ -589,6 +635,7 @@ window.PaperWorkbench = (() => {
     }
     async function enrich() {
       const item=state.active;if(!item||!rememberDraft())return;const id=item.id;const token=++revision;$('metadata-enrich').disabled=true;$('metadata-enrich').textContent='正在查找…';
+      void discoverDatasets(item);
       try{const result=await api('metadata_lookup',{id});if(token!==revision||state.active?.id!==id)return;const draft=result.author_candidates?.length?{...result.item,author:result.author_candidates}:result.item;if(!await edit(draft,{lookup:true}))return;
             toast(['已将可核验资料填入编辑表单，请核对后保存。',citationStatus(result.citation_snapshot)].filter(Boolean).join(' · '));if(result.warnings?.length){$('metadata-error').textContent=result.warnings.join('；');$('metadata-error').hidden=false;}}
       catch(e){toast(e.message,true);}finally{$('metadata-enrich').textContent='补全资料';header();}

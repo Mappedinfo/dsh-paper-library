@@ -204,7 +204,7 @@ export function apply(ctx, rawConfig = {}) {
     // The workspace owns the manuscript folder under the DSH home and keeps it in the
     // sync service's own config; both are host-side jobs, so neither enters the worker.
     const latexWorkspace = createLatexWorkspace({ config, dispatch, settings, library: config.library, python: config.python })
-    const fetchHandler = createFetchHandler({ ...options, citationClaims, paperModel, paperDatasetAI: languageAI, paperDatasetModel: signal => paperModel.resolve(signal), paperChat, companion, languageLearning, handwriting, annotationCaption, libraryKnowledge, paperAnalysis, challengeMining, latexAI, latexWorkspace, basePath: '/api/paper-library' })
+    const fetchHandler = createFetchHandler({ ...options, citationClaims, paperModel, paperDatasetAI: languageAI, paperDatasetModel: signal => paperModel.resolve(signal), paperChat, companion, languageLearning, nativeResearch, handwriting, annotationCaption, libraryKnowledge, paperAnalysis, challengeMining, latexAI, latexWorkspace, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',
       path: '/api/paper-library',

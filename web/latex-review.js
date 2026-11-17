@@ -115,12 +115,20 @@ window.PaperLatexReview = (() => {
     let collaborationKey = null, pendingProposal = null;
     const head = make('div', 'latex-review-head');
     const filter = make('select'); filter.id = 'latex-review-filter'; filter.setAttribute('aria-label', '批注筛选');
-    for (const [value, label] of [['open', '待处理'], ['all', '全部'], ['resolved', '已解决'], ['stale', '待重定位'], ['source', '源码'], ['pdf', 'PDF']]) { const option = make('option', '', label); option.value = value; filter.append(option); }
+    for (const [value, label] of [['open', '待处理'], ['all', '全部'], ['resolved', '已解决'], ['stale', '待重定位']]) { const option = make('option', '', label); option.value = value; filter.append(option); }
+    filter.value = 'open';
+    const kinds = make('div', 'latex-review-types'); kinds.setAttribute('role', 'group'); kinds.setAttribute('aria-label', '批注来源');
+    const typeFilters = new Map();
+    for (const [kind, label] of [['source', '源码'], ['pdf', 'PDF']]) {
+      const control = make('input'); control.type = 'checkbox'; control.id = `latex-review-filter-${kind}`; control.checked = true;
+      const choice = make('label'); choice.append(control, make('span', '', label)); kinds.append(choice);
+      typeFilters.set(kind, control); control.addEventListener('change', render);
+    }
     const refresh = make('button', 'button subtle', '刷新'); refresh.type = 'button'; refresh.id = 'latex-review-refresh';
     const stop = make('button', 'button latex-ai-stop', '停止'); stop.type = 'button'; stop.id = 'latex-review-ai-stop'; stop.hidden = true;
     stop.setAttribute('aria-label', '停止当前批注的 DSH 操作');
     stop.addEventListener('click', () => onStop?.());
-    head.append(filter, refresh, stop);
+    head.append(filter, kinds, refresh, stop);
     const message = make('p', 'latex-review-message'); message.id = 'latex-review-message'; message.setAttribute('role', 'status');
     const composer = make('section', 'latex-review-composer'); composer.id = 'latex-review-composer'; composer.hidden = true;
     const anchor = make('p', 'latex-review-anchor'); anchor.id = 'latex-review-anchor';
@@ -259,7 +267,8 @@ window.PaperLatexReview = (() => {
       const proposal = collaborationKey === key() ? pendingProposal : null;
       const proposalNote = proposal && notes.find(note => note.id === proposal.noteId);
       onDetachedProposal(proposal && !proposalNote ? proposal.element : null);
-      const visible = notes.filter(note => note === proposalNote || filter.value === 'all' || filter.value === note.status || filter.value === note.anchor.kind || filter.value === 'stale' && note.stale && !matchedAnchor(note));
+      const visible = notes.filter(note => typeFilters.get(note.anchor.kind)?.checked &&
+        (note === proposalNote || filter.value === 'all' || filter.value === note.status || filter.value === 'stale' && note.stale && !matchedAnchor(note)));
       for (const note of visible) {
         const card = make('article', 'latex-review-card'); card.dataset.note = note.id;
         const relocated = matchedAnchor(note), target = relocated || note.anchor;
@@ -284,7 +293,8 @@ window.PaperLatexReview = (() => {
         ask.disabled = Boolean(collaborating || blocksQuestion(note) || typeof onAsk !== 'function'); propose.disabled = Boolean(collaborating || saving || draft || typeof onPropose !== 'function');
         row.append(editButton, resolve, ask, propose); card.append(row); renderCollaboration(note, card); list.append(card);
       }
-      if (!visible.length) list.append(make('p', 'latex-review-empty', '暂无此类批注。源码选段后点「批注选段／当前行」；PDF 可选择高亮或区域便笺。'));
+      if (!visible.length) list.append(make('p', 'latex-review-empty', [...typeFilters.values()].some(control => control.checked)
+        ? '暂无此类批注。' : '勾选「源码」或「PDF」以查看批注。'));
     }
     async function download(format) {
       if (!context().id) return;

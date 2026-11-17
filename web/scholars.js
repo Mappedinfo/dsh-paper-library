@@ -130,7 +130,8 @@ window.PaperScholars = (() => {
         for (const item of page.items) {
           row(body, [button(item.name, () => void loadProfile(item.id)), kinds[item.kind], item.organization || '—',
             item.publication_count ?? '—', item.linked_publication_count, item.topics?.map(topic => topic.name).join(' · ') || '—',
-            evidence[item.evidence_status] || '—', item.followed ? '已关注' : '未关注']);
+            item.has_public_verification && item.evidence_status !== 'verified' ? 'AI 已检索 · 待复核' : evidence[item.evidence_status] || '—',
+            item.followed ? '已关注' : '未关注']);
         }
         pager(offset, scholarPage, page.next_offset != null, value => void loadCatalog(value));
       } catch (error) { if (active && owner === generation) pending.textContent = error.message; }
@@ -183,9 +184,11 @@ window.PaperScholars = (() => {
       const follow = button(item.followed ? '取消关注' : '关注', () => void update(entry, 'scholar_save', { patch: { followed: !item.followed } }));
       follow.setAttribute('aria-pressed', String(item.followed));
       begin(nameOf(item), [
+        ...(entry.can_verify ? [button('AI 公开核验', () => openVerification(entry))] : []),
         follow, button('编辑档案', () => editProfile(entry)),
         ...profileBackActions(),
       ]);
+      if (item.public_verification) renderVerification(item.public_verification);
       if (item.member_rows?.length) {
         const members = table(`来源列出的成员 · ${item.member_rows.length} 人`, ['姓名', '档案类型', '档案中的职称／角色', '档案所列机构', '研究人员档案']);
         for (const member of item.member_rows) {
@@ -230,6 +233,54 @@ window.PaperScholars = (() => {
         }
         details.append(list); row(info, ['来源', details]);
       }
+    }
+
+    function openVerification(entry) {
+      if (content.querySelector('.scholar-verification-form')) return;
+      const owner = generation, item = entry.profile;
+      const form = el('form', undefined, 'scholar-verification-form');
+      const query = el('input'); query.required = true; query.maxLength = 200;
+      query.value = [item.name, item.organization].filter(Boolean).join(' ').slice(0, 200);
+      const label = el('label', '公开检索词'); label.append(query);
+      const run = el('button', '开始核验', 'workspace-nav-button'); run.type = 'submit';
+      form.append(label, run, button('取消', () => form.remove()));
+      const pending = status('DeepSeek 将使用此检索词搜索公开来源。', form);
+      form.addEventListener('submit', async event => {
+        event.preventDefault(); if (run.disabled) return;
+        run.disabled = query.disabled = true;
+        pending.textContent = '正在公开核验…';
+        try {
+          const result = await api('scholar_verify', { id: item.id, expected_revision: entry.revision, query: query.value.trim(), public_search: true });
+          if (!active || owner !== generation || !form.isConnected) return;
+          if (result.status === 'explained') { void loadProfile(item.id, paperOffset); return; }
+          const reason = { missing_key: '请在 DSH 中配置 DEEPSEEK_API_KEY。', authentication: 'DeepSeek 未接受当前 API 密钥。',
+            rate_limited: 'DeepSeek 请求达到限额，请稍后重试。', timeout: '公开核验超时，可重试。' }[result.reason];
+          pending.textContent = reason || (result.status === 'insufficient' ? '证据不足，可加上公开机构名称以区分同名。' : '公开核验暂未完成，请重试。');
+        } catch (error) { if (active && owner === generation) pending.textContent = error.message; }
+        finally { run.disabled = query.disabled = false; }
+      });
+      content.firstElementChild.after(form); query.focus();
+    }
+
+    function renderVerification(value) {
+      const { report } = value;
+      const panel = el('section', undefined, 'scholar-verification');
+      const refs = new Map(report.sources.map(source => [source.id, source]));
+      panel.append(el('h3', 'AI 公开核验 · 待复核'),
+        el('p', [value.query, value.checked_at.slice(0, 10)].join(' · '), 'scholar-status'));
+      for (const claim of [report.definition, ...report.paragraphs]) {
+        const line = el('p', claim.text);
+        for (const id of claim.citations) {
+          const source = refs.get(id);
+          if (source) { const citation = link(`[${id}]`, source.url); citation.title = source.title; line.append(' ', citation); }
+        }
+        panel.append(line);
+      }
+      const sources = el('ul');
+      for (const source of report.sources) {
+        const row = el('li'); row.append(link(`[${source.id}] ${source.title}`, source.url)); sources.append(row);
+      }
+      panel.append(sources); content.append(panel);
     }
 
     async function loadSourcePapers(id, offset, owner, host) {

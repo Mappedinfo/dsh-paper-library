@@ -255,7 +255,7 @@ window.ResourceLibrary = (() => {
       const save=button('保存关系',async()=>{
         save.disabled=true;
         try{
-          await api('dataset_link_put',{...entry,release_id:release.value||null,relation:relation.value,...evidence.value(),expected_revision:entry.revision});
+          await api('dataset_link_put',{...entry,release_id:release.value||null,relation:relation.value,...evidence.value(),origin:'user',expected_revision:entry.revision});
           if(state.active?.id===owner.id)void loadPaperData();
         }catch(error){status.textContent=error.message;save.disabled=false;}
       });
@@ -298,22 +298,29 @@ window.ResourceLibrary = (() => {
         if(offset+items(result).length<result.total)list.append(button('下一页',()=>loadPaperData(offset+20)));
       }catch(error){if(current())list.replaceChildren(node('p',error.message,'inline-error'),button('重试',()=>loadPaperData(offset)));}
       if(!current())return;
-      const head=node('header'),search=button('检索本文数据',async()=>{
-        search.disabled=true;
+      const head=node('header');
+      async function searchPaperData(automatic){
+        search.disabled=autoSearch.disabled=true;
         progress.textContent='正在读取 PDF 并核验公开标识…';
         try{
-          const result=await api('paper_datasets_search',{id:owner.id});
-          if(current()){progress.textContent='';renderCandidates(result);}
+          const result=await api(automatic?'paper_datasets_auto':'paper_datasets_search',{id:owner.id});
+          if(!current())return;
+          if(automatic){
+            toast(`数据集检索完成 · ${result.auto_linked} 条已关联${result.auto_skipped?` · ${result.auto_skipped} 条未自动关联`:''}`);
+            void loadPaperData(offset);
+          }else{progress.textContent='';renderCandidates(result);}
         }catch(error){if(current())progress.textContent=error.message;}
-        finally{if(current())search.disabled=false;}
-      });
-      search.disabled=true;
+        finally{if(current())search.disabled=autoSearch.disabled=false;}
+      }
+      const search=button('检索本文数据',()=>void searchPaperData(false));
+      const autoSearch=button('自动检索并关联',()=>void searchPaperData(true));
+      search.disabled=autoSearch.disabled=true;
       const progress=node('p','','small'),results=node('div',undefined,'paper-data-results');
       progress.setAttribute('role','status');
-      head.append(node('h3','AI 检索候选'),search);
+      head.append(node('h3','AI 检索候选'),search,autoSearch);
       candidates.append(head,progress,results);
       function renderCandidates(result){
-        search.disabled=!result.can_search;
+        search.disabled=autoSearch.disabled=!result.can_search;
         results.replaceChildren();
         if(result.coverage){
           const cover=result.coverage;
@@ -363,7 +370,9 @@ window.ResourceLibrary = (() => {
       }catch(error){toast(error.message,true);}
     }
     async function archive(item){try{await api(item.archived?'dataset_restore':'dataset_archive',{id:item.id,expected_revision:item.revision});if(state.active?.id===item.id){hide();state.active=null;$('welcome').hidden=false;}await loadList();void refreshDatasetCatalog?.();changed();toast(item.archived?'数据集已恢复':'数据集已移入回收站');}catch(e){toast(e.message,true);}}
-    return {open,hide,edit,archive,sync,showPaperLinks,syncPaper,navigationChanged,catalogActions,catalogRow,closeDialog:requestClose,dispose(){void saveDraft?.()?.catch(()=>{});cancelPreview();}};
+    return {open,hide,edit,archive,sync,showPaperLinks,syncPaper,navigationChanged,catalogActions,catalogRow,
+      refreshPaperData(id){if(state.active?.id===id&&panels?.visible('data'))void loadPaperData();},
+      closeDialog:requestClose,dispose(){void saveDraft?.()?.catch(()=>{});cancelPreview();}};
   }
   function download(text,name,type='text/plain'){const url=URL.createObjectURL(new Blob([text],{type}));const a=node('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   return {create,download};

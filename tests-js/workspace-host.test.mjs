@@ -31,6 +31,8 @@ function fixture(options = {}) {
     persistence: { flush: async () => { calls.push('state:flush'); if (options.saveFailure) throw Error('synthetic persistence conflict') } },
     resourceUI: { hide: () => calls.push('resource:hide') }, knowledgeUI: { hide: () => calls.push('knowledge:hide') },
     scholarsUI: { setVisible: value => calls.push(`scholars:${value}`) },
+    notesLibraryUI: { close() {} },
+    ensureCatalogLoaded: async () => { calls.push('catalog:load'); },
     workbenchUI: { setTable: value => tables.push(value) }, readingPanels: { showLibrary: () => visible.push('library') },
     workspaceNavigationUI: { state: () => ({ current: options.current ?? null }), setCurrent: (...args) => contexts.push(plain(args)), mountActions: host => { elements.get('workspace-navigation-area').actionsHost = host } },
     libraryLatexVersions: { clear: () => calls.push('versions:clear') },
@@ -43,6 +45,14 @@ function fixture(options = {}) {
   for (const name of ['readerSurfaceActive', 'cancelReaderOpening', 'publishPaperWorkspace', 'placeWorkspaceNavigation', 'applyWorkspaceNavigation', 'workspaceContextChanged', 'prepareWorkspaceNavigation', 'closeWorkspaceSurfaces', 'openWorkspaceRoot', 'openWorkspaceTarget']) vm.runInContext(functionSource(name), context)
   return { context, calls, contexts, tables, visible, alerts, elements, area, home, writing, library, state }
 }
+
+test('opening literature from a dedicated LaTeX entry loads its catalog', async () => {
+  const f = fixture({ latexOpen: true });
+  assert.equal(await f.context.openWorkspaceRoot('paper'), true);
+  assert.ok(f.calls.indexOf('latex:close') < f.calls.indexOf('catalog:load'));
+  assert.deepEqual(f.tables, [true]);
+  assert.deepEqual(f.visible, ['library']);
+});
 
 test('an unavailable exact target is checked before closing the current source surface', async () => {
   for (const options of [{ apiFailure: true }, { api: () => ({ project: { id: 'wrong' } }) }, { api: () => ({ project: { id: 'latex-destination', archived: true } }) }, { api: () => ({ project: { id: 'latex-destination', exists: false } }) }]) {

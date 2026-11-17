@@ -180,7 +180,7 @@ export function createFetchHandler(options = {}) {
   const fieldRadar = options.fieldRadar || createFieldRadarStore({ store: localState, library: options.library || defaultLibrary, request: (payload, signal) => dispatch(payload, { ...options, signal }) });
   const directoryRequest = (payload, signal) => core(payload, { ...options, signal });
   const researchDirectory = createResearchDirectory({ store: localState, request: directoryRequest, radar: fieldRadar });
-  const scholars = createScholars({ store: localState, request: directoryRequest, directory: researchDirectory });
+  const scholars = createScholars({ store: localState, request: directoryRequest, directory: researchDirectory, nativeResearch: options.nativeResearch });
   const paperAbstracts=createPaperAbstracts({store:localState,radar:fieldRadar,language:learningRecords,canTranslate:Boolean(options.languageLearning),
     request:(payload,signal)=>dispatch(payload,{...options,signal}),
     extract:(id,signal)=>core({action:'paper_abstract_pdf',id},{...options,signal}),
@@ -262,7 +262,7 @@ export function createFetchHandler(options = {}) {
             : ['field_radar_analyze','field_radar_analysis_get'].includes(input?.action) ? await fieldRadarAnalysis.handle(input, { signal: request.signal })
             : typeof input?.action === 'string' && input.action.startsWith('field_radar_') ? await fieldRadar.handle(input, { signal: request.signal })
             : ['workspace_catalog','workspace_related'].includes(input?.action) ? await workspaceNavigation.handle(input, { signal: request.signal })
-            : ['scholar_list','scholar_get','scholar_save','scholar_publications','scholar_work_save','scholar_review','scholar_import','scholar_source_publications'].includes(input?.action) ? await scholars(input, { signal: request.signal })
+            : ['scholar_list','scholar_get','scholar_save','scholar_publications','scholar_work_save','scholar_review','scholar_import','scholar_source_publications','scholar_verify'].includes(input?.action) ? await scholars(input, { signal: request.signal })
             : ['ink_diagnostics_append','ink_diagnostics_get'].includes(input?.action) ? await inkDiagnostics.handle(input)
             : typeof input?.action === 'string' && input.action.startsWith('ink_queue_') ? await inkQueue.handle(input)
             : input?.action === 'settings_get' ? await settings.get()
@@ -294,7 +294,7 @@ export function createFetchHandler(options = {}) {
           if(input.action==='status')result={...result,handwriting_recognition:Boolean(options.handwriting),annotation_caption:Boolean(options.annotationCaption),durable_ink_queue:true};
           if (input.action === 'status') result = { ...result, paper_conversations: Boolean(options.paperChat), annotation_references: options.paperChat?.annotationReferences === true, catalog_management: true, typed_graph: true, reading_workspace: true, durable_state: true, learning_records: true, language_learning: Boolean(options.languageLearning) };
           if (input.action === 'status') result = { ...result, latex_ai: Boolean(options.latexAI), latex_workspace: Boolean(options.latexWorkspace), latex_root: options.latexRoot || null };
-          if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true, challenge_mining:Boolean(options.challengeMining), challenge_scan:true, challenge_themes:true, challenge_export:true, challenge_comparison:true, challenge_review_packet:true, whiteboard:true };
+          if (input.action === 'status') result = { ...result, dataset_library:true, dataset_preview:true, paper_dataset_search:Boolean(options.paperDatasetAI && options.paperDatasetModel), knowledge_workflow:true, knowledge_generation:Boolean(options.libraryKnowledge),paper_analysis:Boolean(options.paperAnalysis),paper_analysis_records:true, challenge_mining:Boolean(options.challengeMining), challenge_scan:true, challenge_themes:true, challenge_export:true, challenge_comparison:true, challenge_review_packet:true, whiteboard:true };
           return json({ok:true,result});
         } finally { jsonRequests--; }
       }

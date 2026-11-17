@@ -75,6 +75,37 @@ test('the scholar feature is mounted and served by the normal library surface', 
   }
 });
 
+test('public researcher verification sends only the committed query and saves a sourced report', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'researcher-verification-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const outbound = [];
+  const handle = createFetchHandler({ library: join(root, 'library'), localStateHome: join(root, 'state'), nativeResearch: async ({ signal, ...input }) => {
+    outbound.push(input);
+    return { status: 'explained', explanation: { definition: { text: '公开身份记录', citations: [1] }, paragraphs: [],
+      sources: [{ id: 1, title: 'Synthetic university', url: 'https://example.edu/profile' }] } };
+  } });
+  async function call(action, args, expected = 200) {
+    const response = await handle(new Request('http://localhost/api', { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, ...args }) }));
+    assert.equal(response.status, expected);
+    return (await response.json()).result;
+  }
+  const entry = await call('scholar_save', { patch: { name: 'Synthetic Person', notes: 'Private example', organization: 'Original record' } });
+  const id = entry.profile.id;
+  const verify = { id, expected_revision: entry.revision, query: 'Synthetic Person Example University' };
+  await call('scholar_verify', verify, 400);
+  assert.deepEqual(outbound, []);
+  const result = await call('scholar_verify', { ...verify, public_search: true });
+  assert.deepEqual(outbound, [{ query: verify.query, mode: 'deep', purpose: 'scholar' }]);
+  const saved = await call('scholar_get', { id });
+  assert.deepEqual(saved.profile.public_verification, result.verification);
+  assert.equal(saved.profile.organization, 'Original record');
+  assert.equal(saved.profile.evidence_status, undefined);
+  assert.equal(saved.can_verify, true);
+  await call('scholar_verify', { ...verify, public_search: true }, 409);
+  assert.equal(outbound.length, 1);
+});
+
 test('research directory imports affiliations and topic groups with sources and retains edits on refresh', async t => {
   const root = await mkdtemp(join(tmpdir(), 'research-directory-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));

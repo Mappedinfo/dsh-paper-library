@@ -757,6 +757,11 @@ def confirm_candidate(library, request):
 
     candidate = request["candidate"]
     paper_id, candidate_id = request["paper_id"], candidate["id"]
+    automatic = request.get("automatic") is True
+    if automatic and (candidate.get("relation") != "uses" or candidate.get("verification") != "verified"
+                      or not (candidate.get("verified_doi") or candidate.get("verified_url"))
+                      or request.get("dataset_id") or request.get("release_id")):
+        raise ValueError("自动关联需要明确的使用证据及已核验的数据集标识")
     link_id = "datasetlink_" + hashlib.sha256(f"{paper_id}\0{candidate_id}".encode()).hexdigest()
     with library.lock():
         saved = library.db.execute("""SELECT l.* FROM dataset_candidate_confirmations c
@@ -802,12 +807,16 @@ def confirm_candidate(library, request):
         if candidate.get("verified_url"):
             evidence.append({"source_kind": "public-metadata", "source_uri": candidate["verified_url"]})
         prior = _link(existing) if existing else {}
+        if automatic and prior:
+            library.db.execute("INSERT INTO dataset_candidate_confirmations VALUES(?,?,?)", (paper_id, candidate_id, prior["id"]))
+            return prior
         if prior:
             evidence = (evidence + [item for item in prior["evidence"] if item not in evidence])[:20]
         saved = put_link(library, {"paper_id": paper_id, "dataset_id": dataset_id, "release_id": release_id,
             "relation": candidate["relation"], "role": prior.get("role") or candidate["role"],
             "scope": prior.get("scope") or candidate["conditions"], "evidence": evidence,
-            "origin": "user", "review_status": "accepted", "expected_revision": prior.get("revision", 0),
+            "origin": "ai" if automatic else "user", "review_status": "needs-review" if automatic else "accepted",
+            "expected_revision": prior.get("revision", 0),
             **({"id": prior["id"]} if prior else {})}, locked=True, new_id=link_id)
         library.db.execute("INSERT INTO dataset_candidate_confirmations VALUES(?,?,?)", (paper_id, candidate_id, saved["id"]))
         return saved

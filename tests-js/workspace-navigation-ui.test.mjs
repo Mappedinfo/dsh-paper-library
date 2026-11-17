@@ -41,6 +41,20 @@ function fixture(options = {}) {
   return { nav, document, window, positions, actions, actionsHome, paperHeading, paperSearch, paperInput, searchHome, root, catalogRoot, relatedRoot, calls, changes, roots, warnings, navigated, all, find, findAll, text }
 }
 
+test('three entrances are shown until expanded and the chosen destination stays visible after navigation', async () => {
+  const f = fixture({ scholars: true, onNotes() {} });
+  const visible = () => f.findAll('workspace-root-button').filter(node => !node.hidden).map(node => node.dataset.kind);
+  const more = f.find('workspace-root-more');
+  assert.deepEqual(visible(), ['paper', 'dataset', 'board']);
+  more.click();
+  assert.equal(more.getAttribute('aria-expanded'), 'true');
+  assert.equal(visible().length, 7);
+  f.findAll('workspace-root-button').find(node => node.dataset.kind === 'latex').click();
+  await wait();
+  assert.deepEqual(visible(), ['paper', 'dataset', 'latex']);
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+});
+
 test('the notes entrance opens bookmarks without loading an unrelated catalog', async () => {
   let opened = 0
   const f = fixture({ onNotes: () => { opened++ } })

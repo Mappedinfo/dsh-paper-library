@@ -228,3 +228,40 @@ def test_confirm_dataset_evidence_resolves_versions_and_rolls_back(tmp_path, lib
     assert call(library, "dataset_candidate_confirmed", paper_id=paper["id"], candidate_ids=[other["id"]]) == []
     link = call(library, "dataset_candidate_commit", **payload, candidate=other)
     assert call(library, "resource_list", kind="dataset", query=other["title"])["items"][0]["id"] == link["dataset_id"]
+
+
+def test_automatic_dataset_links_are_many_to_many_and_projected_into_paper_metadata(tmp_path, library):
+    import pymupdf
+    from dsh_paper_library.core import dispatch as paper_request
+    from dsh_paper_library.paper_retrieval import dispatch as retrieve
+
+    papers = []
+    for number in (1, 2):
+        path = tmp_path / f"synthetic-{number}.pdf"
+        with pymupdf.open() as doc:
+            page = doc.new_page()
+            page.insert_text((60, 60), "We used Synthetic Dataset (10.5555/shared).")
+            if number == 1:
+                page.insert_text((60, 80), "We used Supplementary Synthetic Dataset (10.5555/extra).")
+            page.insert_text((60, 100), f"Synthetic paper {number}.")
+            doc.save(path)
+        paper = library.import_items(path=str(path))["items"][0]
+        source = retrieve(library, {"action": "paper_dataset_sources", "id": paper["id"]})
+        papers.append((paper, source))
+
+    def associate(pair, title, doi, candidate_id):
+        paper, source = pair
+        return call(library, "dataset_candidate_commit", paper_id=paper["id"], source_version=source["source_version"], automatic=True,
+                    candidate={"id": candidate_id * 64, "title": title, "relation": "uses", "version": "",
+                               "page": 1, "quote": f"We used {title} ({doi}).", "role": "", "conditions": "",
+                               "verification": "verified", "verified_doi": doi})
+
+    first = associate(papers[0], "Synthetic Dataset", "10.5555/shared", "a")
+    assert associate(papers[0], "Synthetic Dataset", "10.5555/shared", "a") == first
+    second = associate(papers[1], "Synthetic Dataset", "10.5555/shared", "a")
+    extra = associate(papers[0], "Supplementary Synthetic Dataset", "10.5555/extra", "b")
+    assert first["origin"] == "ai" and first["review_status"] == "needs-review"
+    assert first["dataset_id"] == second["dataset_id"] != extra["dataset_id"]
+    assert call(library, "dataset_link_list", dataset_id=first["dataset_id"])["paper_count"] == 2
+    metadata = paper_request({"library": str(library.root), "action": "get", "id": papers[0][0]["id"], "include_dataset_links": True})
+    assert {item["id"] for item in metadata["dataset_links"]["items"]} == {first["id"], extra["id"]}

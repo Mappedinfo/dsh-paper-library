@@ -828,6 +828,13 @@ def dispatch(request):
             item = library.get(request["id"])
             path = library.pdf_path(request["id"])
             return {"path": str(path), "filename": path.name}
+        if action == "get" and request.get("include_dataset_links") is True:
+            from . import datasets
+            archived = request.get("include_archived", False)
+            item = library.get(request["id"], archived)
+            datasets.ensure_schema(library)
+            item["dataset_links"] = datasets.list_links(library, {"paper_id": item["id"], "limit": 20, "include_archived": archived})
+            return item
         if request.get("view") == "paper-remark":
             from . import paper_remarks
             if action == "annotations":

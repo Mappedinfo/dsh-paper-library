@@ -206,6 +206,9 @@ body > #latex-view { height: 100dvh; }
 .latex-writing-panel > .latex-review-panel { flex: 1 1 auto; height: auto; }
 .latex-writing-panel .latex-review-message:empty { display: none; }
 .latex-writing-panel .latex-review-head, .latex-writing-panel .latex-review-exports { padding: 6px 10px; }
+.latex-review-types { display: flex; align-items: center; gap: 9px; }
+.latex-review-types label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; cursor: pointer; }
+.latex-review-types input { margin: 0; padding: 0; accent-color: var(--latex-active-marker); }
 .latex-writing-panel .latex-review-list { padding: 4px 10px; }
 .latex-review-actions.latex-review-card-actions{gap:4px;padding:6px 0;display:flex;flex-wrap:wrap}
 .latex-review-card-actions .button{min-height:28px;padding:4px 6px;font-size:12px;line-height:18px;white-space:nowrap}

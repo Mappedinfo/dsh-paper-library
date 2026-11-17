@@ -31,13 +31,17 @@ window.PaperWorkspaceNavigation = (() => {
     const button = (text, fn, className = 'workspace-nav-button') => { const node = el('button', className, text); node.type = 'button'; node.addEventListener('click', fn); return node; };
     const nav = el('nav', 'workspace-navigation'); nav.setAttribute('aria-label', '资料库导航');
     const roots = el('div', 'workspace-navigation-roots'), crumbs = el('ol', 'workspace-breadcrumbs'); crumbs.setAttribute('aria-label', '关联内容路径');
-    const rootButtons = {};
+    const rootButtons = {}, rootDividers = {};
+    let rootsExpanded = false;
     for (const [kind, label] of Object.entries(ROOTS)) {
       if (kind === 'notes' && !options.onNotes) continue;
       if (kind === 'scholar' && !options.scholars) continue;
-      if (roots.children.length) { const divider = el('span', 'workspace-root-divider', '/'); divider.setAttribute('aria-hidden', 'true'); roots.append(divider); }
+      if (roots.children.length) { const divider = el('span', 'workspace-root-divider', '/'); divider.setAttribute('aria-hidden', 'true'); roots.append(divider); rootDividers[kind] = divider; }
       const control = button(label, () => void selectRoot(kind), 'workspace-root-button'); control.dataset.kind = kind; rootButtons[kind] = control; roots.append(control);
     }
+    const rootKinds = Object.keys(rootButtons);
+    const moreRoots = button('»»»', () => { rootsExpanded = !rootsExpanded; renderNavigation(); }, 'workspace-nav-button workspace-root-more');
+    roots.append(moreRoots);
     const searchHost = el('div', 'workspace-nav-search'), actionHost = el('div', 'workspace-nav-actions');
     const pathButton = button('路径', () => togglePopup('path'), 'workspace-nav-button workspace-path-toggle');
     const relatedButton = button('关联', () => togglePopup('related'), 'workspace-nav-button workspace-related-toggle');
@@ -121,7 +125,18 @@ window.PaperWorkspaceNavigation = (() => {
       if (paperHeading) paperHeading.hidden = section !== 'paper';
       searchForm.hidden = !catalogState[section] || !!current; searchHost.hidden = section !== 'paper' && searchForm.hidden;
       search.disabled = transition; if (paperSearch) paperSearch.setAttribute('aria-busy', String(transition));
-      for (const [kind, control] of Object.entries(rootButtons)) { control.setAttribute('aria-pressed', String(section === kind)); control.disabled = transition; if (section === kind && !current) control.setAttribute('aria-current', 'page'); else control.removeAttribute('aria-current'); }
+      const primary = rootKinds.includes(section) ? new Set([section, ...rootKinds.filter(kind => kind !== section).slice(0, 2)]) : new Set(rootKinds.slice(0, 3));
+      for (const [kind, control] of Object.entries(rootButtons)) {
+        control.hidden = !rootsExpanded && !primary.has(kind);
+        if (rootDividers[kind]) rootDividers[kind].hidden = control.hidden;
+        control.setAttribute('aria-pressed', String(section === kind)); control.disabled = transition;
+        if (section === kind && !current) control.setAttribute('aria-current', 'page'); else control.removeAttribute('aria-current');
+      }
+      moreRoots.hidden = rootKinds.length <= 3; moreRoots.disabled = transition;
+      moreRoots.textContent = rootsExpanded ? '«««' : '»»»';
+      moreRoots.setAttribute('aria-expanded', String(rootsExpanded));
+      moreRoots.setAttribute('aria-label', rootsExpanded ? '收起其他工作区入口' : '展开其他工作区入口');
+      moreRoots.title = rootsExpanded ? '收起其他入口' : '展开其他入口';
       pathButton.hidden = !current; relatedButton.hidden = !current || current.kind === 'project'; actionHost.hidden = !current && (!actions || actions.hidden);
       pathButton.disabled = transition; relatedButton.disabled = transition;
       pathButton.title = current ? `${KINDS[current.kind]} · ${current.title}` : '关联内容路径';
@@ -211,6 +226,7 @@ window.PaperWorkspaceNavigation = (() => {
       if (next && transition && (!pending || key(pending.target) !== key(next))) { ++intent; pending = null; transition = false; }
       if (same && (confirmedSection === undefined || confirmedSection === section)) { if (next && next.title !== current.title) { current = next; trail[trail.length - 1] = next; renderNavigation(); emit(); } return true; }
       closePopovers();
+      rootsExpanded = false;
       ++catalogSequence; ++relatedSequence; groupRequests = {}; relatedLoaded = false; related = { groups: {}, busy: false, error: '', warnings: [], truncated: false };
       if (next) { section = next.kind; trail = pending && key(pending.target) === key(next) ? pending.trail : [next]; current = next; }
       else { current = null; trail = []; if (confirmedSection) section = confirmedSection; }
@@ -223,7 +239,7 @@ window.PaperWorkspaceNavigation = (() => {
       try {
         if (await options.prepare?.() === false || !live || owner !== intent) return false;
         if (await options.onRootChange?.(kind) === false || !live || owner !== intent) return false;
-        closePopovers(); section = kind; current = null; trail = []; ++catalogSequence; ++relatedSequence; groupRequests = {}; relatedLoaded = false; related = { groups: {}, busy: false, error: '', warnings: [], truncated: false }; render(); emit();
+        closePopovers(); rootsExpanded = false; section = kind; current = null; trail = []; ++catalogSequence; ++relatedSequence; groupRequests = {}; relatedLoaded = false; related = { groups: {}, busy: false, error: '', warnings: [], truncated: false }; render(); emit();
         if (kind === 'notes') void options.onNotes();
         else if (catalogState[kind]) void loadCatalog();
         return true;

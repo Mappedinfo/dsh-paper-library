@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { LocalStateError } from '../local-state.mjs';
+import { LocalStateConflictError, LocalStateError } from '../local-state.mjs';
 import { normalizeDOI } from '../paper-fetch.mjs';
 import { RESEARCH_TYPES, researchIdentity } from './research-directory.mjs';
 
@@ -124,7 +124,8 @@ function publication(value) {
   };
 }
 
-export function createScholars({ store, request, directory }) {
+export function createScholars({ store, request, directory, nativeResearch }) {
+  let verificationRunning = false;
   const empty = { entries: [], entriesById: new Map(), publications: new Map() };
   const overlay = (imported, manual) => ({
     kind: 'scholar', ...imported, ...manual,
@@ -171,6 +172,7 @@ export function createScholars({ store, request, directory }) {
         id: value.id, name: label(value), organization: value.organization, followed: value.followed, kind: value.kind,
         publication_count: value.publication_count, linked_publication_count: value.publication_keys?.length ?? value.works.length,
         source_work_count: value.source_work_count, topics: value.topics?.slice(0, 3), evidence_status: value.evidence_status,
+        has_public_verification: Boolean(value.public_verification),
       }));
       return { items, total: visible.length, next_offset: offset + items.length < visible.length ? offset + items.length : null, counts: data.counts };
     }
@@ -186,7 +188,7 @@ export function createScholars({ store, request, directory }) {
         const people = (await directoryProfiles(data, signal)).filter(item => ['scholar', 'pi'].includes(item.kind));
         result.profile.member_rows = memberRows(profile, people, data.entriesById);
       }
-      return result;
+      return { ...result, can_verify: Boolean(nativeResearch) };
     }
     if (input.action === 'scholar_source_publications') {
       const offset = input.offset ?? 0;
@@ -206,6 +208,28 @@ export function createScholars({ store, request, directory }) {
       }, signal);
     }
     const manual = record.value || { id: profile.id, name: profile.name, followed: profile.followed, works: [], reviewed: [] };
+    if (input.action === 'scholar_verify') {
+      if (!nativeResearch) throw new LocalStateError('公开核验需要 DSH 中的 DeepSeek 联网工具。', 'SCHOLAR_VERIFY_UNAVAILABLE', 409);
+      if (input.public_search !== true) throw invalid('请明确提交用于公开核验的检索词。');
+      const query = text(input.query, 200, '公开检索词', true);
+      if (/[\x00-\x1f\x7f]/u.test(query)) throw invalid('公开检索词须为单行文字。');
+      if (input.expected_revision !== record.revision) throw new LocalStateConflictError(record);
+      if (verificationRunning) throw new LocalStateError('已有档案正在核验，请稍后重试。', 'SCHOLAR_VERIFY_BUSY', 409);
+      verificationRunning = true;
+      const deadline = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(120_000)]);
+      try {
+        const result = await nativeResearch({ query, mode: 'deep', purpose: 'scholar', signal: deadline });
+        deadline.throwIfAborted();
+        if (result.status !== 'explained') return result;
+        const verification = { query, checked_at: new Date().toISOString(), report: result.explanation };
+        await store.put(record.key, { ...manual, public_verification: verification }, record.revision);
+        return { status: 'explained', verification };
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (deadline.aborted) return { status: 'unavailable', reason: 'timeout' };
+        throw error;
+      } finally { verificationRunning = false; }
+    }
     let next;
     if (input.action === 'scholar_save') {
       next = editProfile(manual, input.patch);

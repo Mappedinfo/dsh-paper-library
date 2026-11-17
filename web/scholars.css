@@ -54,3 +54,10 @@
 .scholar-form :is(input, textarea) { width: 100%; box-sizing: border-box; }
 .scholar-form textarea { min-height: 60px; resize: vertical; }
 .scholar-form .scholar-status { margin: 0; color: var(--error, #b32525); }
+.scholar-verification-form{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;padding:10px 0}
+.scholar-verification-form label{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+.scholar-verification-form input{min-width:0;flex:1}
+.scholar-verification-form .scholar-status{flex-basis:100%}
+.scholar-verification{padding:10px 0;border-bottom:1px solid var(--line)}
+.scholar-verification p{margin:5px 0;overflow-wrap:anywhere}
+.scholar-verification a{color:var(--dsw-alias-link)}

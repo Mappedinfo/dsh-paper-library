@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { normalizeDOI, verifyDatasetSource } from '../paper-fetch.mjs'
 
 export const PAPER_DATASET_ACTIONS = new Set([
-  'paper_datasets_get', 'paper_datasets_search', 'paper_datasets_matches', 'paper_datasets_confirm',
+  'paper_datasets_get', 'paper_datasets_search', 'paper_datasets_auto', 'paper_datasets_matches', 'paper_datasets_confirm',
 ])
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const clean = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) : ''
@@ -54,6 +54,17 @@ function parseCandidates(raw, sources) {
   return { candidates: [...candidates.values()], discarded: output.candidates.length - candidates.size }
 }
 
+function canAutoLink(candidate) {
+  if (candidate.relation !== 'uses' || candidate.verification !== 'verified' || !(candidate.verified_doi || candidate.verified_url)) return false
+  const quote = candidate.quote.normalize('NFKC').toLowerCase()
+  const title = spaces(candidate.title.normalize('NFKC')).toLowerCase()
+  const registered = spaces((candidate.public_title || '').normalize('NFKC')).toLowerCase()
+  if (!registered || !(` ${registered} `.includes(` ${title} `) || ` ${title} `.includes(` ${registered} `))) return false
+  const use = /\b(?:we|this (?:study|work))\s+(?:(?:also|directly|primarily)\s+)?(?:use[ds]?|employ(?:s|ed)?|adopt(?:s|ed)?)\b|\b(?:trained|tested|evaluated|benchmarked)\s+on\b|本文(?:使用|采用)|我们(?:使用|采用)|在.{1,160}上(?:训练|测试|评估)/u
+  const negation = /\b(?:not|never|without|unlike)\b|未使用|不使用|未采用|不采用/u
+  return quote.split(/(?<=[.!?])\s+|[。！？；]/u).some(sentence => sentence.includes(title) && use.test(sentence) && !negation.test(sentence))
+}
+
 export function createPaperDatasets({ store, request, ai, getModel, verify = verifyDatasetSource }) {
   const running = new Set()
   const capable = Boolean(ai && getModel)
@@ -71,7 +82,7 @@ export function createPaperDatasets({ store, request, ai, getModel, verify = ver
       return { ...value, candidates: candidates.map(item => ({ ...item, confirmed: confirmed.includes(item.id) })), can_search: Boolean(paper.pdf && capable) }
     }
     if (input.action === 'paper_datasets_get') return view(record.value)
-    if (input.action === 'paper_datasets_search') {
+    if (input.action === 'paper_datasets_search' || input.action === 'paper_datasets_auto') {
       if (!paper.pdf || !capable) throw fail('检索需要论文 PDF 和 DSH 模型。', 'DATASET_SEARCH_UNAVAILABLE')
       if (running.size >= 1) throw fail('已有数据检索在处理，请稍后重试。', 'DATASET_SEARCH_BUSY')
       running.add(input.id)
@@ -89,6 +100,7 @@ export function createPaperDatasets({ store, request, ai, getModel, verify = ver
             'Distinguish actual use from mention, citation, and datasets produced by the authors. Include actual access terms only when stated. Code availability alone is not data availability.',
             'Return JSON {"candidates":[{"title":"","version":"","relation":"uses|mentions|cites|produces|describes","role":"","conditions":"","page":1,"quote":"","identifier":""}]} with at most 12 entries.',
             'Copy an exact supporting quote from the specified physical PDF page. Only give a DOI or public repository address explicitly associated with this dataset inside the supporting quote; leave it empty otherwise.',
+            'For actual use, select a quote that contains both the dataset name and the authors’ statement of use. Include a publicly cited identifier in that same quote when available.',
             JSON.stringify(sources.pages),
           ].join('\n')
           const parsed = parseCandidates(await ai({ prompt, ...model, signal: deadline }), sources)
@@ -113,7 +125,24 @@ export function createPaperDatasets({ store, request, ai, getModel, verify = ver
         }
         deadline.throwIfAborted()
         const value = { source_version: sources.source_version, coverage, candidates, discarded, ...(model ? { model } : {}) }
-        return view((await store.put(key, value, record.revision)).value)
+        const saved = await store.put(key, value, record.revision)
+        if (input.action !== 'paper_datasets_auto') return view(saved.value)
+        let auto_linked = 0, auto_skipped = 0
+        for (const candidate of candidates.filter(canAutoLink)) {
+          deadline.throwIfAborted()
+          const resolution = await request({ action: 'dataset_candidate_matches', candidate }, deadline)
+          if (resolution.requires_selection) { auto_skipped++; continue }
+          try {
+            const link = await request({ action: 'dataset_candidate_commit', paper_id: input.id, candidate,
+              source_version: sources.source_version, automatic: true }, deadline)
+            if (link.review_status === 'rejected') auto_skipped++
+            else auto_linked++
+          } catch {
+            deadline.throwIfAborted()
+            auto_skipped++
+          }
+        }
+        return { ...await view(saved.value), auto_linked, auto_skipped }
       } finally { running.delete(input.id) }
     }
     const candidate = record.value?.candidates?.find(item => item.id === input.candidate_id)

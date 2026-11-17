@@ -514,8 +514,8 @@ test('source review displays only verified current anchors using UTF-16 offsets'
   const f = await fixture((action, args) => {
     if (action === 'latex_read') return { path: args.path, content: '😀 road traffic', revision: 'v1', bytes: 17, lines: 1 };
     if (action === 'latex_review_list') return { annotations: [
-      { id: 'a', status: 'open', comment: 'Synthetic note', anchor: { kind: 'source', path: 'main.tex', revision: 'v1', start: 2, end: 6 } },
-      { id: 'b', status: 'open', comment: 'Old anchor', anchor: { kind: 'source', path: 'main.tex', revision: 'old', start: 7, end: 14 } },
+      { id: 'a', status: 'open', text: 'road', comment: 'Synthetic note', anchor: { kind: 'source', path: 'main.tex', revision: 'v1', start: 2, end: 6 } },
+      { id: 'b', status: 'open', text: 'traffic', comment: 'Old anchor', anchor: { kind: 'source', path: 'main.tex', revision: 'old', start: 7, end: 14 } },
     ] };
   }, { review: true, sourceEditor: { setReviewMarks: rows => marks.push(rows), destroy() {} } });
   assert.deepEqual(JSON.parse(JSON.stringify(marks.at(-1))), [{ from: 3, to: 7, title: 'Synthetic note' }]);
@@ -1779,7 +1779,7 @@ test('a historical PDF note explicitly targets current source and proposal accep
   assert.equal(list.querySelector('.latex-review-pending-proposal')?.parentElement?.dataset.note, note.id)
   assert.equal(list.querySelectorAll('.latex-review-collaboration').length, 0, 'The active proposal is displayed once')
   const filter = f.ids.get('latex-review-filter')
-  filter.value = 'source'; await filter.dispatch('change')
+  filter.value = 'resolved'; await filter.dispatch('change')
   assert.equal(list.querySelector('.latex-review-pending-proposal')?.parentElement?.dataset.note, note.id, 'The reviewable proposal stays accessible when filtered')
   await f.ids.get('latex-ai-accept').dispatch('click'); await tick()
   assert.equal(f.ui.testHooks.state().file, 'a.tex')

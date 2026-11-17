@@ -112,6 +112,7 @@ async function loadStatus() {
     $('library-status').textContent = '本地文献库'; $('library-status').title = state.library;
     $('item-count').textContent = result.count ?? '0';
     state.libraryCount = result.count || 0; renderWelcome();
+    state.paperDatasetSearch = result.paper_dataset_search === true;
     $('auto-feedback').checked = readPreference(preferenceKey()) === 'true';
     paperChatUI?.setAvailable(result.paper_conversations);
     paperChatUI?.setHostCompanion(result.realtime_companion);
@@ -129,6 +130,7 @@ async function loadStatus() {
     void settingsUI?.refresh();
   } catch (error) { $('library-status').textContent = '连接未完成'; errorAt('library-error', error); }
 }
+let catalogLoaded = false, catalogInitialization;
 async function loadList() {
   catalogSearchUI?.syncProject();
   const ticket = ++state.listTicket;
@@ -141,6 +143,7 @@ async function loadList() {
     // existing page rather than showing an impossible range such as 41–40.
     if(!result.items?.length&&state.offset>0&&state.offset>=result.total){state.offset=Math.max(0,Math.floor(((result.total||1)-1)/state.limit)*state.limit);return loadList();}
     state.items = result.items || []; state.total = result.total || 0;
+    catalogLoaded = true;
     if (result.active_count !== undefined) { state.libraryCount = result.active_count; $('item-count').textContent = result.active_count; }
     renderList();
   } catch (error) {
@@ -1725,14 +1728,7 @@ async function applyEntryView(){
 // the board itself is loaded.
 if(ENTRY_VIEW==='board')document.body.classList.add('board-focused');
 if(ENTRY_VIEW==='latex')document.body.classList.add('latex-focused');
-async function initialize() {
-  announceReady();await loadStatus();
-  if(ENTRY_VIEW==='board'||ENTRY_VIEW==='latex'){await applyEntryView();return;}
-  try{
-    const saved=await persistence?.get(readerLabelKey);
-    if(typeof saved?.label==='string')customPaperTabLabel=saved.label.slice(0,80);
-  }catch{}
-  publishPaperTabLabel();
+async function loadInitialCatalog() {
   try {
     const saved = await persistence?.get('catalog:view');
     if (catalogPageSizes.has(saved?.pageSize)) state.limit = saved.pageSize;
@@ -1741,6 +1737,21 @@ async function initialize() {
   pageSize.value = String(state.limit);
   pageSize.disabled = false;
   await loadList();
+}
+function ensureCatalogLoaded() {
+  if (catalogLoaded) return;
+  catalogInitialization ||= loadInitialCatalog().finally(() => { catalogInitialization = null; });
+  return catalogInitialization;
+}
+async function initialize() {
+  announceReady();await loadStatus();
+  if(ENTRY_VIEW==='board'||ENTRY_VIEW==='latex'){await applyEntryView();return;}
+  try{
+    const saved=await persistence?.get(readerLabelKey);
+    if(typeof saved?.label==='string')customPaperTabLabel=saved.label.slice(0,80);
+  }catch{}
+  publishPaperTabLabel();
+  await ensureCatalogLoaded();
   let savedWorkspace;try{savedWorkspace=readerRestore?.workspace||await persistence?.get(`workspace:last:${ENTRY_PAPER||'main'}`);}catch{}
   if(ENTRY_PAPER){
     const saved=await persistence?.get(readerEntryKey).catch(()=>null);
@@ -2639,10 +2650,10 @@ function workspaceContextChanged(target) {
     workspaceNavigationUI.setCurrent(null, { section: writing ? 'latex' : 'board' });
   }
   else {
-    workspaceNavigationUI.setCurrent(null);
+    workspaceNavigationUI.setCurrent(null, { section: 'paper' });
     workbenchUI?.setTable(true);
     readingPanels?.showLibrary();
-    void workspaceNavigationUI.refresh();
+    void ensureCatalogLoaded();
   }
 }
 async function prepareWorkspaceNavigation() {
@@ -2669,6 +2680,7 @@ async function openWorkspaceRoot(kind) {
     if (!await closeWorkspaceSurfaces()) return false;
     cancelReaderOpening();
     workbenchUI?.setTable(true); readingPanels?.showLibrary();
+    if (kind === 'paper') await ensureCatalogLoaded();
     return true;
   } finally { workspaceNavigationTransition = false; }
 }

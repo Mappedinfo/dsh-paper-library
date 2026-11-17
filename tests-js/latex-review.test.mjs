@@ -24,6 +24,22 @@ function fixture(api, options = {}) {
   return { ui, ids, state, clicked }
 }
 
+test('source and PDF toggles intersect the selected review status', async () => {
+  const source = { id: 'source:a', anchor: { kind: 'source', path: 'one.tex', line: 1 }, text: 'Source sample', status: 'open' };
+  const pdf = { id: 'pdf:b', anchor: { kind: 'pdf', page: 1, pdf_version: 'synthetic-version' }, text: 'PDF sample', status: 'open' };
+  const f = fixture(async () => ({ annotations: [source, pdf, { ...pdf, id: 'pdf:c', text: 'Resolved sample', status: 'resolved' }] }));
+  await f.ui.refresh();
+  const list = f.ids.get('latex-review-list');
+  const set = (kind, checked) => { const input = f.ids.get(`latex-review-filter-${kind}`); input.checked = checked; input.events.get('change')(); };
+  const ids = () => list.children.map(card => card.dataset.note).filter(Boolean);
+  assert.deepEqual(ids(), ['source:a', 'pdf:b']);
+  set('pdf', false); assert.deepEqual(ids(), ['source:a']);
+  set('source', false); assert.deepEqual(ids(), []);
+  set('pdf', true); assert.deepEqual(ids(), ['pdf:b']);
+  f.ids.get('latex-review-filter').value = 'resolved'; f.ids.get('latex-review-filter').events.get('change')();
+  assert.deepEqual(ids(), ['pdf:c']);
+});
+
 test('PDF export binds the active project generation including zero', async () => {
   const f = fixture(async () => ({}))
   f.state.binding_generation = 0

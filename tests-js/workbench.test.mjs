@@ -16,8 +16,8 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function environment({ respond, active = null, storage = new Map(), library = 'synthetic-library', panelHost, persistent=false, persistence:customPersistence } = {}) {
-  const ids = new Map(), selectors = new Map(), requests = [], changes = [], toasts = [], loads = [], opens = [], selections = [];
+function environment({ respond, active = null, storage = new Map(), library = 'synthetic-library', panelHost, persistent=false, persistence:customPersistence, datasetSearch=false, datasets } = {}) {
+  const ids = new Map(), selectors = new Map(), requests = [], datasetRequests = [], changes = [], toasts = [], loads = [], opens = [], selections = [];
   class Element {
     constructor(tag = 'div') {
       this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.attributes = {}; this.listeners = new Map();
@@ -62,18 +62,24 @@ function environment({ respond, active = null, storage = new Map(), library = 's
   const exportLabel = new Element('label'); exportLabel.append(element('export-notes', 'select')); body.append(exportLabel);
   const document = { body, getElementById: element, createElement: tag => new Element(tag), querySelector: selector, querySelectorAll: value => body.querySelectorAll(value) };
   const window = new Element('window');window.localStorage={getItem(){throw new Error('Use server state');},setItem(){throw new Error('Browser writes are forbidden');}};
-  const state = { active, library, items: active ? [active] : [], sort: 'modified', order: 'desc', archived: false, offset: 0, limit: 40, tab: 'reader' };
+  const state = { active, library, items: active ? [active] : [], sort: 'modified', order: 'desc', archived: false, offset: 0, limit: 40, tab: 'reader', paperDatasetSearch: datasetSearch };
   vm.runInNewContext(localStateSource,{window,TextEncoder});
   vm.runInNewContext(source, { window, document, structuredClone, queueMicrotask, URL }, { filename: 'web/workbench.js' });
   const workbench = window.PaperWorkbench.create({ state,
     persistence:customPersistence||(persistent?{get:async key=>storage.has(`${library}:${key}`)?plain(storage.get(`${library}:${key}`)):null,put:async(key,value)=>{storage.set(`${library}:${key}`,plain(value));return value;}}:undefined),
     ...panelHost,
-    api: async (action, data) => { requests.push({ action, ...plain(data) }); return respond ? respond(action, data) : { id: data.id || 'created', ...data.metadata, pdf: false }; },
+    api: async (action, data, options) => {
+      if (action === 'paper_datasets_auto' || action === 'get' && data.include_dataset_links) {
+        datasetRequests.push({ action, ...plain(data) });
+        return datasets?.(action, data) || { dataset_links: { items: [], total: 0 } };
+      }
+      requests.push({ action, ...plain(data) }); return respond ? respond(action, data, options) : { id: data.id || 'created', ...data.metadata, pdf: false };
+    },
     loadList: async () => { loads.push(plain(state)); }, openPaper: async id => opens.push(id),
     selectPaper: item => { selections.push(item.id); state.active = item; workbench.paperChanged(item); workbench.header(); }, changed: (...args) => changes.push(plain(args)),
     toast: (...args) => toasts.push(args),
   });
-  return { workbench, state, element, selector, form, requests, changes, toasts, loads, opens, selections, window, storage };
+  return { workbench, state, element, selector, form, requests, datasetRequests, changes, toasts, loads, opens, selections, window, storage };
 }
 
 const original = () => ({ id: 'paper-a', title: 'Synthetic title', pdf: true, type: 'article-journal', citekey: 'Example2026',
@@ -108,6 +114,24 @@ test('the split-pane action survives removal of the old per-paper action contain
   assert.equal(split.parentElement,f.element('toolbar-actions'));
   assert.equal(f.selector('.paper-actions').parentElement,null);
   f.workbench.header();assert.equal(split.disabled,false);
+});
+
+test('single-paper enrichment starts dataset discovery and refreshes linked dataset metadata', async () => {
+  const paper = original(), discovery = deferred();
+  let linked = false;
+  const f = environment({ active: paper, datasetSearch: true,
+    respond: action => { assert.equal(action, 'metadata_lookup'); return { item: paper }; },
+    datasets: (action) => action === 'paper_datasets_auto' ? discovery.promise : { dataset_links: { total: Number(linked), items: linked
+      ? [{ dataset_title: 'Synthetic dataset', release_version: '2', relation: 'uses', review_status: 'needs-review' }] : [] } },
+  });
+  await f.element('metadata-enrich').dispatch('click'); await flush();
+  assert.deepEqual(f.datasetRequests.map(request => request.action), ['paper_datasets_auto', 'get']);
+  linked = true;
+  discovery.resolve({ candidates: [], auto_linked: 1 }); await flush();
+  const entries = f.element('metadata-datasets').querySelectorAll('li');
+  assert.equal(entries[0].textContent, 'Synthetic dataset · 2 · 使用 · 待核对');
+  assert.ok(f.toasts.some(([value]) => value.includes('1 条已关联')));
+  assert.deepEqual(f.requests.map(request => request.action), ['metadata_lookup']);
 });
 
 test('metadata service loading disables fields and a late paper response cannot replace the current editor',async()=>{

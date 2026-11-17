@@ -331,6 +331,10 @@ Authenticated browser actions (same `/api/paper-library/api` envelope; all are a
 
 论文侧栏数据检索使用 `paper_datasets_get {id}` 与 `paper_datasets_search {id}`。搜索需要 DSH 模型和附带的 PDF，候选必须通过原文摘录检查。公开元数据请求仅使用摘录中的 DOI 或公开仓库地址。访问状态可按仓库声明或 [COAR 访问权词表](https://vocabularies.coar-repositories.org/access_rights/) 核验。确认用 `paper_datasets_matches {id,candidate_id}` 和 `paper_datasets_confirm {id,candidate_id,dataset_id?,release_id?}`。资料库条目、版本及关联在同一个目录事务中保存；同一候选确认可重试。候选仍在本机待核记录中，可以回到 PDF 对照。数据集目录通过 `workspace_catalog {kind:"dataset",query,offset,limit}` 分页。
 
+`paper_datasets_auto {id}` 在搜索后自动关联符合条件的使用候选。原文摘录须明确表明使用该数据集，公开登记须能核对标识与名称，已有目标须唯一。回执含 `auto_linked` 和 `auto_skipped`；新增关系标记 `origin:"ai"`、`review_status:"needs-review"`。文献和数据集共用可按任一端查询的多对多关系。`get {id,include_dataset_links:true}` 在该文献的元数据中附带最多 20 条关系、总数及版本信息。
+
+`scholar_verify {id,expected_revision,query,public_search:true}` 通过 DSH 配置的 DeepSeek 联网工具核验明确提交的公开检索词。带来源引用的报告保存在 `scholar_get.profile.public_verification`，供查看和复核。档案原有研究人员资料继续由原录入和来源管理。
+
 `resource_list` accepts an optional `project` filter, which restricts the result to `kind='paper'` members of that project and composes with `query`, `sort`, `order`, paging and `archived`. An unknown project id is an error rather than an unfiltered listing. 画板关联通过整板 `board_save` 与 `expected_revision` 保存，`links` 可含 `papers`（最多 50）、`projects`（最多 20）、`slides`（最多 20）三个 ID 数组，summary 增加 `linked_slides`。关联侧栏复用 `resource_list`、`project_list`、`catalog_resource_list` 检索与分页，每页 20 条；论文查询活动目录，阅读项目包含归档。点击候选只选中，明确关联／解除才修改；目标删除后保留 ID 以便解除，不阻断画板保存。可读源文件同样支持顶层 `slides` 数组往返；关联和解除不复制或修改目标与画板内容。
 
 ## PlainDeck PPTX export
