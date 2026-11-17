@@ -418,15 +418,22 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
         searchWeb: searchWeb ? (query, options) => searchWeb(query, { ...options, provider: model.provider }) : undefined,
         generate: async (prompt, signal) => ({ raw: await awaitWithAbort(ai({ prompt, ...model, signal }), signal), model }),
       })
-      if (result.status !== 'explained') return result
       const value = record.value, time = stamp()
-      const updateGloss = value.meaning_source !== 'user' || !value.meaning
+      const { status, explanation, sources, reason } = result
       const next = {
         ...value,
-        ...(updateGloss ? { meaning: result.explanation.definition.text, meaning_source: 'ai' } : {}),
-        explanation: { ...result.explanation, created_at: time }, updated_at: time,
+        updated_at: time,
+        explanation_search: { status, query, saved_at: time, ...(sources ? { sources } : {}), ...(reason ? { reason } : {}) },
       }
-      return { status: result.status, word: publicWord(await store.put(key, next, record.revision)) }
+      if (explanation) {
+        next.explanation = { ...explanation, created_at: time }
+        if (value.meaning_source !== 'user' || !value.meaning) {
+          next.meaning = explanation.definition.text
+          next.meaning_source = 'ai'
+        }
+      }
+      return { status, ...(sources ? { sources } : {}), ...(reason ? { reason } : {}),
+        word: publicWord(await store.put(key, next, record.revision)) }
     } finally { explaining.delete(id); generating-- }
   }
   async function vocabularyMutation(input) {

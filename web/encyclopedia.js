@@ -184,29 +184,41 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
     renderCitations(block,value.sources,'参考来源');
     article.append(block);
   }
+  function explanationStatus(attempt){
+    if(attempt.status==='generation_failed')return attempt.reason==='invalid_citations'
+      ? '模型返回的引用未通过校验，可重新生成。'
+      : '此次释义生成失败，可重试。';
+    if(attempt.status==='unavailable')return '公开检索暂不可用，可稍后重试。';
+    return '没有找到足以支持释义的片段，可调整检索词再试。';
+  }
+  function renderSearchAttempt(attempt){
+    if(!attempt||attempt.status==='explained')return;
+    const block=node('section',undefined,'wiki-word-note wiki-term-search');
+    block.append(node('h3','最近一次检索'),node('p',attempt.query),node('p',explanationStatus(attempt),'small muted'));
+    renderCitations(block,attempt.sources,'已保存的检索线索');
+    article.append(block);
+  }
   function explainWord(item){
     if(!discard())return;
     const owner=++ticket,form=node('form',undefined,'wiki-word-form');
-    const query=wordField(form,'公开检索词',item.explanation?.query||item.term,200);
+    const query=wordField(form,'公开检索词',item.explanation_search?.query||item.explanation?.query||item.term,200);
     query.required=true;
     form.append(node('p','公开搜索仅发送上方检索词。DSH 使用词条名称和检索片段生成释义。','small muted'));
-    const actions=node('div',undefined,'wiki-source-actions'),run=node('button','检索并生成','button primary');
+    const actions=node('div',undefined,'wiki-source-actions'),run=node('button','检索、生成并保存','button primary');
     run.type='submit';actions.append(run,button('取消',()=>show(item)));form.append(actions);
-    const results=node('div');
     form.addEventListener('submit',async event=>{
       event.preventDefault();if(run.disabled)return;
-      run.disabled=query.disabled=true;results.replaceChildren();
-      status.textContent='正在公开检索并生成释义…';
+      run.disabled=query.disabled=true;
+      status.textContent='正在公开检索，完成后会自动保存…';
       try{
         const result=await api('vocabulary_explain',{id:item.id,expected_revision:item.revision,query:query.value.trim(),public_search:true});
         if(owner!==ticket)return;
-        if(result.status==='explained'){show(result.word);status.textContent='已保存 AI 检索释义与引用。';return;}
-        status.textContent=result.status==='unavailable'?'公开检索暂不可用，可稍后重试。':'没有找到足以支持释义的片段，可调整检索词再试。';
-        renderCitations(results,result.sources,'检索线索');
+        show(result.word);
+        status.textContent=result.status==='explained'?'已自动保存释义和引用。':'已自动保存本次检索。';
       }catch(error){if(owner===ticket)status.textContent=error.message;}
       finally{run.disabled=query.disabled=false;}
     });
-    article.replaceChildren(node('h2',item.term),node('h3','AI 检索与解释'),form,results);
+    article.replaceChildren(node('h2',item.term),node('h3','AI 检索与解释'),form);
     query.focus();
   }
   function showWord(item){
@@ -214,7 +226,7 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
     article.append(node('p',`${provenance} · ${item.status==='mastered'?'已掌握':'待学习'}`,'small muted'));
     if(item.meaning&&(item.meaning_source==='user'||item.meaning!==item.explanation?.definition?.text))article.append(markup(item.meaning));
     const controls=node('div',undefined,'wiki-source-actions');
-    controls.append(button(item.explanation?'重新检索与解释':'AI 检索与解释',()=>explainWord(item)));
+    controls.append(button(item.explanation||item.explanation_search?'重新检索与解释':'AI 检索与解释',()=>explainWord(item)));
     const mastery=button(item.status==='mastered'?'重新学习':'标记已掌握',()=>void updateWord(item,{status:item.status==='mastered'?'learning':'mastered'},'已更新学习状态。',mastery));
     const usage=button('全库搜索用例',async()=>{
       const owner=ticket;usage.disabled=true;
@@ -234,6 +246,7 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
     if(item.note)note.append(node('p',item.note));
     article.append(controls);
     if(item.explanation)renderExplanation(item.explanation);
+    renderSearchAttempt(item.explanation_search);
     article.append(note);sources(article,item.encounters||[],item);
   }
   function show(item){++ticket;selected=item;article.replaceChildren(node('h2',item.term));if(mode==='words'){listedWords.set(item.id,item);showWord(item);return;}

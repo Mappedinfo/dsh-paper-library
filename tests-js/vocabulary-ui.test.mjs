@@ -85,6 +85,24 @@ test('AI explanation sends only the submitted public query, then shows inspectab
  assert.match(f.w.document.querySelector('.wiki-article').textContent,/混合使用.*Private note/s);
 });
 
+test('an inconclusive search returns to the word and reloads saved clues and query',async t=>{
+ const word={id:'word',revision:'rev1',term:'mixed use',encounters:[]},items=[word];
+ const f=fixture(t,async args=>{
+  items[0]={...word,revision:'rev2',explanation_search:{status:'insufficient',query:args.query,
+   sources:[{id:1,title:'Saved clue',url:'https://example.edu/term',evidence:'metadata'}]}};
+  return {status:'insufficient',word:items[0]};
+ },{items});
+ f.ui.show('words');await tick();f.click('AI 检索与解释');
+ f.input('公开检索词').value='mixed use urban planning';f.submit();await tick();
+ assert.equal(f.w.document.querySelector('.wiki-word-form'),null);
+ assert.match(f.w.document.querySelector('[role=status]').textContent,/已自动保存本次检索/);
+ f.ui.close();f.ui.show('words');await tick();
+ const report=f.w.document.querySelector('.wiki-term-search');
+ assert.match(report.textContent,/mixed use urban planning.*资料|mixed use urban planning.*足以支持释义/s);
+ assert.equal(report.querySelector('a').textContent,'Saved clue');
+ f.click('重新检索与解释');assert.equal(f.input('公开检索词').value,'mixed use urban planning');
+});
+
 test('opening vocabulary repairs only the current paper in bounded batches before showing saved terms',async t=>{
  const f=fixture(t,()=>{}, {items:[{id:'directionality',term:'directionality',meaning:'方向性',encounters:[]}],sync:args=>({hasMore:args.offset===0,next_offset:args.offset+20})});
  f.ui.show('words');for(let i=0;i<10&&!f.w.document.querySelector('.wiki-index-item');i++)await new Promise(r=>setTimeout(r,5));

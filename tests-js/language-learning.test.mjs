@@ -775,6 +775,8 @@ test('term explanation uses the submitted public query and saves source-backed r
   assert.equal(f.calls.length, 1)
   assert.doesNotMatch(f.calls[0].prompt, /Private note|Unsafe web entry/)
   const { word } = response
+  assert.equal(word.explanation_search.status, 'explained')
+  assert.equal(word.explanation_search.query, explain.query)
   assert.equal(word.meaning, entry.meaning)
   assert.equal(word.note, entry.note)
   assert.deepEqual(word.explanation.definition.citations, [1])
@@ -784,30 +786,47 @@ test('term explanation uses the submitted public query and saves source-backed r
   assert.deepEqual(stored.items[0].explanation, word.explanation)
 })
 
-test('term explanation requires text evidence and rejects unsupported references before saving', async () => {
+test('term explanation saves clues while rejecting unsupported references', async () => {
   const f = fixture(), entry = await f.handle({ action: 'vocabulary_create', mode: 'manual', term: 'mixed use' })
   let abstract = null
   const handle = createLanguageLearning({ ...f.options, scholarlySearch: { search: async () => ({ status: 'ok', results: [
     { provider: 'crossref', title: 'Reference work', url: 'https://doi.org/10.1234/real', abstract },
     { provider: 'crossref', title: 'Metadata only', url: 'https://doi.org/10.1234/metadata' },
   ] }) } })
-  const explain = { action: 'vocabulary_explain', id: entry.id, query: entry.term, expected_revision: entry.revision, public_search: true }
-  const insufficient = await handle(explain)
+  const explain = { action: 'vocabulary_explain', id: entry.id, query: entry.term, public_search: true }
+  let revision = entry.revision
+  const run = async query => {
+    const result = await handle({ ...explain, query: query || explain.query, expected_revision: revision })
+    revision = result.word.revision
+    return result
+  }
+  const insufficient = await run()
   assert.equal(insufficient.status, 'insufficient')
   assert.equal(insufficient.sources[0].evidence, 'metadata')
+  assert.equal(insufficient.word.explanation_search.query, entry.term)
+  assert.equal(insufficient.word.explanation_search.sources[0].url, 'https://doi.org/10.1234/real')
+  assert.notEqual(revision, entry.revision)
   assert.equal(f.calls.length, 0)
   abstract = 'Mixed use is a combination of land uses.'
   const body = citations => JSON.stringify({ status: 'explained', definition: { text: '结合多种土地用途。', citations },
     paragraphs: [{ text: '这是土地利用概念。', citations: [1] }] })
   for (const citations of [[2], [999]]) {
     f.answer = body(citations)
-    await assert.rejects(handle(explain), { code: 'VOCABULARY_EXPLANATION_INVALID' })
+    const failed = await run()
+    assert.equal(failed.status, 'generation_failed')
+    assert.equal(failed.word.explanation_search.reason, 'invalid_citations')
+    assert.equal(failed.word.explanation, undefined)
   }
-  assert.equal((await handle({ action: 'vocabulary_list' })).items[0].revision, entry.revision)
   f.answer = body([1])
-  const result = await handle(explain)
+  const result = await run()
   assert.equal(result.word.meaning, '结合多种土地用途。')
   assert.equal(result.word.meaning_source, 'ai')
+  f.answer = new Error('Temporary transport issue')
+  const failed = await run('mixed use urban planning')
+  assert.equal(failed.word.explanation_search.reason, 'model_error')
+  const stored = (await handle({ action: 'vocabulary_list' })).items[0]
+  assert.equal(stored.explanation_search.query, 'mixed use urban planning')
+  assert.deepEqual(stored.explanation, result.word.explanation)
 })
 
 test('term explanation over HTTP respects vocabulary edits made while the model is running', async () => {
