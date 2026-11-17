@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { preferredTranslationModel, translateWithFallback } from './translation-model.mjs'
 import { awaitWithAbort } from './ai.mjs'
 import { explainPublicTerm } from './term-explanation.mjs'
+import { publicResearchURL } from './deepseek-public-research.mjs'
 
 export { preferredTranslationModel } from './translation-model.mjs'
 
@@ -160,7 +161,7 @@ function publicWord(record) {
  * A pending request is never automatically resent after process failure. Once
  * validated output is durable, replay completes vocabulary writes without AI.
  */
-export function createLanguageLearning({ store, ai, getDefaultModel, models, dispatch, library, python, scholarlySearch, searchWeb }) {
+export function createLanguageLearning({ store, ai, getDefaultModel, models, dispatch, library, python, scholarlySearch, searchWeb, nativeResearch }) {
   const flights = new Map(), explaining = new Set()
   let admitted = 0, generating = 0
   const resultKey = request => `language.result:${hash(request.id)}:${hash(request.request_id)}`
@@ -402,7 +403,12 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     if (input.public_search !== true) throw fail('请提交用于公开检索的检索词。')
     const query = string(input.query, '公开检索词', 200)
     if (/[\x00-\x1f\x7f]/u.test(query) || !/[\p{L}\p{N}]/u.test(query)) throw fail('请输入有效的公开检索词。')
-    if (typeof ai !== 'function' || typeof getDefaultModel !== 'function' || (!scholarlySearch && !searchWeb))
+    const mode = input.research_mode ?? 'standard'
+    if (!['standard', 'deep', 'link'].includes(mode)) throw fail('检索方式无效。')
+    const link = mode === 'link' ? publicResearchURL(input.public_url) : ''
+    if (mode === 'link' && (!link.startsWith('https:') || /https?:\/\//iu.test(query))) throw fail('请将公开 HTTPS 链接单独填写在链接栏。')
+    const fallbackAvailable = typeof ai === 'function' && typeof getDefaultModel === 'function' && (scholarlySearch || searchWeb)
+    if (!nativeResearch && !fallbackAvailable)
       throw fail('AI 检索与解释需要 DSH 宿主及公开检索服务。', 'VOCABULARY_EXPLANATION_UNAVAILABLE', 409)
     const { id, key, record } = await wordForUpdate(input)
     if (explaining.has(id)) throw fail('这个词条正在检索与解释。', 'VOCABULARY_EXPLANATION_BUSY', 409)
@@ -410,20 +416,43 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     explaining.add(id); generating++
     try {
       const deadline = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(120_000)])
-      const settings = settingsValue((await store.get(SETTINGS_KEY)).value)
-      const { model } = await generationModel(settings, 'explain', deadline)
-      deadline.throwIfAborted()
-      const result = await explainPublicTerm({
-        term: record.value.term, query, signal: deadline, search: scholarlySearch,
-        searchWeb: searchWeb ? (query, options) => searchWeb(query, { ...options, provider: model.provider }) : undefined,
-        generate: async (prompt, signal) => ({ raw: await awaitWithAbort(ai({ prompt, ...model, signal }), signal), model }),
-      })
+      let engine = 'deepseek', result = { status: 'unavailable', reason: 'missing_key', sources: [] }
+      if (nativeResearch) {
+        const nativeDeadline = mode === 'standard' ? AbortSignal.any([deadline, AbortSignal.timeout(40_000)]) : deadline
+        try { result = await nativeResearch({ query, mode, link, signal: nativeDeadline }) }
+        catch {
+          signal?.throwIfAborted()
+          result = { status: 'unavailable', reason: nativeDeadline.aborted ? 'timeout' : 'provider_error', sources: [] }
+        }
+      }
+      if (mode === 'standard' && result.status !== 'explained' && fallbackAvailable) {
+        let fallback
+        try {
+          const settings = settingsValue((await store.get(SETTINGS_KEY)).value)
+          const { model } = await generationModel(settings, 'explain', deadline)
+          deadline.throwIfAborted()
+          fallback = await explainPublicTerm({
+            term: record.value.term, query, signal: deadline, search: scholarlySearch,
+            searchWeb: searchWeb ? (query, options) => searchWeb(query, { ...options, provider: model.provider }) : undefined,
+            generate: async (prompt, signal) => ({ raw: await awaitWithAbort(ai({ prompt, ...model, signal }), signal), model }),
+          })
+        } catch {
+          signal?.throwIfAborted()
+          fallback = { status: 'unavailable', reason: deadline.aborted ? 'timeout' : 'model_unavailable', sources: [] }
+        }
+        if (fallback.status === 'explained' || !result.sources?.length) {
+          engine = 'scholarly'
+          result = fallback
+        }
+      }
+      signal?.throwIfAborted()
       const value = record.value, time = stamp()
       const { status, explanation, sources, reason } = result
       const next = {
         ...value,
         updated_at: time,
-        explanation_search: { status, query, saved_at: time, ...(sources ? { sources } : {}), ...(reason ? { reason } : {}) },
+        explanation_search: { status, query, research_mode: mode, engine, ...(link ? { public_url: link } : {}),
+          saved_at: time, ...(sources ? { sources } : {}), ...(reason ? { reason } : {}) },
       }
       if (explanation) {
         next.explanation = { ...explanation, created_at: time }

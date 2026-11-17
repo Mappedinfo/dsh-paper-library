@@ -28,6 +28,7 @@ import { createChallengeMining } from './challenge-mining.mjs'
 import { createLatexAI } from './latex-ai.mjs'
 import { createLatexResearch } from './latex-research.mjs'
 import { createScholarlySearch } from './scholarly-search.mjs'
+import { createDeepSeekPublicResearch } from './deepseek-public-research.mjs'
 import { createHarnessToolAI } from './tool-ai.mjs'
 import { createLatexWorkspace } from './latex-workspace.mjs'
 import { createBoardStore } from './board-store.mjs'
@@ -169,7 +170,12 @@ export function apply(ctx, rawConfig = {}) {
       signal.throwIfAborted()
       return service.search({ query, maxResults: 5 }, signal)
     }
-    const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python, scholarlySearch, searchWeb })
+    const nativeResearch = createDeepSeekPublicResearch({ resolveKey: async () => {
+      let credentials
+      try { credentials = web.get('credentials') } catch { /* This host may omit the credential service. */ }
+      return (await credentials?.resolve('DEEPSEEK_API_KEY'))?.value || process.env.DEEPSEEK_API_KEY
+    } })
+    const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python, scholarlySearch, searchWeb, nativeResearch })
     const handwritingAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }, { attachments: () => ctx.get('attachments') })
     const handwriting = createHandwriting({ store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })
     const annotationCaption = createAnnotationCaption({ selectModel: (current, signal) => selectCaptionModel(ctx.llm, current, signal), store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })

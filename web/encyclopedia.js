@@ -160,7 +160,8 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
     for(const source of sources){
       const link=citationLink(source,source.title);
       if(!link)continue;
-      const entry=node('li'),kind={abstract:'摘要',snippet:'网页搜索摘录',metadata:'题录'}[source.evidence];
+      const entry=node('li'),kind={abstract:'摘要',snippet:'网页搜索摘录',
+        metadata:source.provider==='deepseek-native'?'DeepSeek 搜索结果':'题录',webpage:'DeepSeek 已阅读网页'}[source.evidence];
       entry.append(node('span',`[${source.id}] `),link);
       const details=[source.authors?.join('、'),source.year,kind].filter(Boolean).join(' · ');
       if(details)entry.append(node('p',details,'small muted'));
@@ -171,7 +172,9 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
   }
   function renderExplanation(value){
     const block=node('section',undefined,'wiki-word-note wiki-term-explanation');
-    block.append(node('h3','AI 检索释义'),node('p','依据摘要与网页检索片段 · 待核对','small muted'));
+    const evidence=value.link_summary?'DeepSeek 网页解读 · 待核对'
+      :value.native?'DeepSeek 联网引用 · 待核对':'依据摘要与网页检索片段 · 待核对';
+    block.append(node('h3','AI 检索释义'),node('p',evidence,'small muted'));
     const refs=new Map(value.sources.map(source=>[source.id,source]));
     for(const section of [value.definition,...value.paragraphs]){
       const line=node('p',section.text);
@@ -181,20 +184,31 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
       }
       block.append(line);
     }
-    renderCitations(block,value.sources,'参考来源');
+    renderCitations(block,value.sources,value.link_summary?'阅读来源':'参考来源');
     article.append(block);
   }
   function explanationStatus(attempt){
+    const message={
+      missing_key:'DeepSeek 联网工具需要配置 DEEPSEEK_API_KEY。',
+      authentication:'DeepSeek 未接受当前 API 密钥。',
+      rate_limited:'DeepSeek 联网请求达到限额，可稍后重试。',
+      timeout:'检索或生成用时过长，已保存本次尝试。',
+      provider_refusal:'DeepSeek 未生成释义，可调整检索词。',
+      model_unavailable:'用于生成释义的模型暂不可用。',
+    }[attempt.reason];
+    if(message)return message;
     if(attempt.status==='generation_failed')return attempt.reason==='invalid_citations'
       ? '模型返回的引用未通过校验，可重新生成。'
       : '此次释义生成失败，可重试。';
     if(attempt.status==='unavailable')return '公开检索暂不可用，可稍后重试。';
-    return '没有找到足以支持释义的片段，可调整检索词再试。';
+    return attempt.research_mode==='link'?'公开链接未返回可支持释义的引用，可更换来源。':'没有找到足以支持释义的片段，可调整检索词再试。';
   }
   function renderSearchAttempt(attempt){
     if(!attempt||attempt.status==='explained')return;
     const block=node('section',undefined,'wiki-word-note wiki-term-search');
     block.append(node('h3','最近一次检索'),node('p',attempt.query),node('p',explanationStatus(attempt),'small muted'));
+    const link=attempt.public_url&&citationLink({url:attempt.public_url,title:'公开链接'},attempt.public_url);
+    if(link)block.append(link);
     renderCitations(block,attempt.sources,'已保存的检索线索');
     article.append(block);
   }
@@ -203,20 +217,36 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
     const owner=++ticket,form=node('form',undefined,'wiki-word-form');
     const query=wordField(form,'公开检索词',item.explanation_search?.query||item.explanation?.query||item.term,200);
     query.required=true;
-    form.append(node('p','公开搜索仅发送上方检索词。DSH 使用词条名称和检索片段生成释义。','small muted'));
+    const modeLabel=node('label','检索方式','field'),mode=node('select');
+    for(const [value,label] of [['standard','联网检索'],['deep','DeepSeek 深度检索'],['link','阅读公开链接']]){
+      const option=node('option',label);option.value=value;mode.append(option);
+    }
+    mode.value=item.explanation_search?.research_mode||'standard';modeLabel.append(mode);form.append(modeLabel);
+    const link=wordField(form,'公开 HTTPS 链接',item.explanation_search?.public_url,2048);
+    link.type='url';
+    const hint=node('p',undefined,'small muted');
+    function updateMode(){
+      link.required=mode.value==='link';
+      link.parentElement.hidden=!link.required;
+      hint.textContent=link.required?'DeepSeek 会收到上方检索词和公开链接。'
+        :mode.value==='deep'?'DeepSeek 使用上方检索词搜索并阅读相关公开网页。'
+        :'仅用上方检索词查询公开来源。DeepSeek 不可用或证据不足时，改用 DSH 网页检索和学术索引。';
+    }
+    mode.addEventListener('change',updateMode);updateMode();form.append(hint);
     const actions=node('div',undefined,'wiki-source-actions'),run=node('button','检索、生成并保存','button primary');
     run.type='submit';actions.append(run,button('取消',()=>show(item)));form.append(actions);
     form.addEventListener('submit',async event=>{
       event.preventDefault();if(run.disabled)return;
-      run.disabled=query.disabled=true;
+      run.disabled=query.disabled=mode.disabled=link.disabled=true;
       status.textContent='正在公开检索，完成后会自动保存…';
       try{
-        const result=await api('vocabulary_explain',{id:item.id,expected_revision:item.revision,query:query.value.trim(),public_search:true});
+        const result=await api('vocabulary_explain',{id:item.id,expected_revision:item.revision,query:query.value.trim(),public_search:true,
+          ...(mode.value!=='standard'?{research_mode:mode.value}:{}),...(mode.value==='link'?{public_url:link.value.trim()}:{})});
         if(owner!==ticket)return;
         show(result.word);
         status.textContent=result.status==='explained'?'已自动保存释义和引用。':'已自动保存本次检索。';
       }catch(error){if(owner===ticket)status.textContent=error.message;}
-      finally{run.disabled=query.disabled=false;}
+      finally{run.disabled=query.disabled=mode.disabled=link.disabled=false;}
     });
     article.replaceChildren(node('h2',item.term),node('h3','AI 检索与解释'),form);
     query.focus();

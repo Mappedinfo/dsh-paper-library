@@ -118,3 +118,23 @@ test('repair failure stays visible and search retries; switching tabs stops late
  let release;const g=fixture(t,()=>{}, {sync:()=>new Promise(r=>release=r)});g.ui.show('words');await tick();g.click('百科');release({hasMore:true,next_offset:20});await tick();
  assert.equal(g.calls.filter(x=>x.action==='language_vocabulary_sync').length,1);assert.match(g.w.document.querySelector('.wiki-article').textContent,/创建百科词条/);
 });
+
+test('selecting public link research reveals the link field and saves the mode and result',async t=>{
+ const word={id:'word',revision:'rev1',term:'Synthetic concept',note:'Private note',encounters:[]};
+ const f=fixture(t,async args=>({status:'unavailable',word:{...word,revision:'rev2',explanation_search:{
+  status:'unavailable',reason:'missing_key',query:args.query,research_mode:args.research_mode,public_url:args.public_url
+ }}}),{items:[word]});
+ f.ui.show('words');await tick();f.click('AI 检索与解释');
+ const link=f.input('公开 HTTPS 链接'),select=f.w.document.querySelector('.wiki-word-form select');
+ assert.equal(link.parentElement.hidden,true);
+ select.value='link';select.dispatchEvent(new f.w.Event('change'));
+ assert.equal(link.parentElement.hidden,false);assert.equal(link.required,true);
+ link.value='https://example.edu/public';f.submit();await tick();
+ assert.deepEqual(f.calls.at(-1),{action:'vocabulary_explain',id:'word',expected_revision:'rev1',query:'Synthetic concept',
+  public_search:true,research_mode:'link',public_url:'https://example.edu/public'});
+ assert.match(f.w.document.querySelector('.wiki-term-search').textContent,/DEEPSEEK_API_KEY/);
+ assert.match(f.w.document.querySelector('[role=status]').textContent,/已自动保存本次检索/);
+ f.click('重新检索与解释');
+ assert.equal(f.w.document.querySelector('.wiki-word-form select').value,'link');
+ assert.equal(f.input('公开 HTTPS 链接').value,'https://example.edu/public');
+});

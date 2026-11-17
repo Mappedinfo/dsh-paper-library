@@ -860,3 +860,45 @@ test('term explanation over HTTP respects vocabulary edits made while the model 
   assert.equal(word.note, 'Edited while waiting')
   assert.equal(word.explanation, undefined)
 })
+
+test('native research persists the selected mode and falls back for ordinary search only', async () => {
+  const f = fixture(), calls = []
+  let nativeAvailable = true
+  const handle = createLanguageLearning({ ...f.options,
+    nativeResearch: async ({ query, mode, link }) => {
+      calls.push({ query, mode, link })
+      if (!nativeAvailable) return { status: 'unavailable', reason: 'missing_key', sources: [] }
+      return { status: 'explained', explanation: { native: true, query,
+        definition: { text: '合成释义。', citations: [1] }, paragraphs: [],
+        sources: [{ id: 1, url: link, evidence: 'webpage', title: 'Reference work' }] } }
+    },
+    scholarlySearch: { search: async ({ query }) => {
+      calls.push({ fallback: query })
+      return { status: 'ok', results: [{ provider: 'crossref', title: 'Reference work',
+        url: 'https://doi.org/10.1234/synthetic' }] }
+    } },
+  })
+  const entry = await handle({ action: 'vocabulary_create', mode: 'manual', term: 'Synthetic concept', meaning: '人工释义', note: 'Private note' })
+  const explain = { action: 'vocabulary_explain', id: entry.id, query: 'Synthetic public query', public_search: true }
+  const request = { ...explain, expected_revision: entry.revision, research_mode: 'link' }
+  await assert.rejects(handle({ ...request, public_url: 'https://localhost/private' }), /公开 HTTPS/)
+  assert.deepEqual(calls, [])
+  const public_url = 'https://example.edu/public'
+  const { word } = await handle({ ...request, public_url })
+  assert.equal(word.meaning, '人工释义')
+  assert.equal(word.explanation_search.engine, 'deepseek')
+  assert.equal(word.explanation_search.public_url, public_url)
+  assert.deepEqual(calls, [{ query: explain.query, mode: 'link', link: public_url }])
+  assert.equal(f.calls.length, 0)
+  nativeAvailable = false
+  const deep = await handle({ ...explain, expected_revision: word.revision, research_mode: 'deep' })
+  assert.equal(deep.word.explanation_search.reason, 'missing_key')
+  assert.equal(deep.word.explanation_search.research_mode, 'deep')
+  assert.equal(calls.length, 2)
+  const standard = await handle({ ...explain, expected_revision: deep.word.revision })
+  assert.equal(standard.word.explanation_search.engine, 'scholarly')
+  assert.equal(standard.word.explanation_search.status, 'insufficient')
+  assert.equal(standard.word.explanation_search.sources[0].url, 'https://doi.org/10.1234/synthetic')
+  assert.deepEqual(standard.word.explanation, word.explanation)
+  assert.deepEqual(calls.at(-1), { fallback: explain.query })
+})
