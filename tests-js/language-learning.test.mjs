@@ -19,7 +19,7 @@ function memoryStore() {
     async put(key, value, expected) {
       await store.beforePut?.(key, value)
       const current = await store.get(key)
-      if (expected !== current.revision) throw Object.assign(new Error('conflict'), { code: 'STATE_CONFLICT', current })
+      if (expected !== current.revision) throw Object.assign(new Error('conflict'), { code: 'STATE_CONFLICT', status: 409, current })
       const record = { key, value: structuredClone(value), revision: createHash('sha256').update(String(++sequence)).digest('hex'), updated_at: new Date().toISOString() }
       records.set(key, record); return structuredClone(record)
     },
@@ -748,4 +748,96 @@ test('detaching a paper preserves other encounters and suppresses automatic reat
     term: 'Epistemic', source_sentence: source })
   assert.deepEqual(attached.encounters.map(({ paper_id }) => paper_id), ['paper-b', 'paper-a'])
   assert.equal(attached.note, detached.note)
+})
+
+test('term explanation uses the submitted public query and saves source-backed references without replacing a manual meaning', async () => {
+  const f = fixture(), searches = []
+  const handle = createLanguageLearning({ ...f.options,
+    scholarlySearch: { async search({ query }) {
+      searches.push(query)
+      return { status: 'ok', results: [{ provider: 'crossref', title: 'Article abstract', url: 'https://doi.org/10.1234/synthetic',
+        abstract: 'Synthetic urban usage concerns two land uses.', authors: ['Synthetic Researcher'], year: 2023 }] }
+    } },
+    searchWeb: async query => {
+      searches.push(query)
+      return { sources: [{ title: 'Institutional source', url: 'https://example.edu/term', snippet: 'Mixed uses co-occur in the same urban area.' },
+        { title: 'Unsafe web entry', url: 'http://127.0.0.1/private', snippet: 'Do not expose.' }] }
+    },
+  })
+  const entry = await handle({ action: 'vocabulary_create', mode: 'manual', term: 'mixed use', meaning: '人工释义', note: 'Private note' })
+  const explain = { action: 'vocabulary_explain', id: entry.id, query: 'mixed use planning', expected_revision: entry.revision }
+  await assert.rejects(handle(explain), /公开检索/)
+  assert.deepEqual(searches, [])
+  f.answer = JSON.stringify({ status: 'explained', definition: { text: '一个区域内包含多种土地用途。', citations: [2] },
+    paragraphs: [{ text: '概念强调不同用途的共存。', citations: [1, 2] }] })
+  const response = await handle({ ...explain, public_search: true })
+  assert.deepEqual(searches, ['mixed use planning', 'mixed use planning'])
+  assert.equal(f.calls.length, 1)
+  assert.doesNotMatch(f.calls[0].prompt, /Private note|Unsafe web entry/)
+  const { word } = response
+  assert.equal(word.meaning, entry.meaning)
+  assert.equal(word.note, entry.note)
+  assert.deepEqual(word.explanation.definition.citations, [1])
+  assert.deepEqual(word.explanation.paragraphs[0].citations, [2, 1])
+  assert.deepEqual(word.explanation.sources.map(item => item.url), ['https://example.edu/term', 'https://doi.org/10.1234/synthetic'])
+  const stored = await handle({ action: 'vocabulary_list' })
+  assert.deepEqual(stored.items[0].explanation, word.explanation)
+})
+
+test('term explanation requires text evidence and rejects unsupported references before saving', async () => {
+  const f = fixture(), entry = await f.handle({ action: 'vocabulary_create', mode: 'manual', term: 'mixed use' })
+  let abstract = null
+  const handle = createLanguageLearning({ ...f.options, scholarlySearch: { search: async () => ({ status: 'ok', results: [
+    { provider: 'crossref', title: 'Reference work', url: 'https://doi.org/10.1234/real', abstract },
+    { provider: 'crossref', title: 'Metadata only', url: 'https://doi.org/10.1234/metadata' },
+  ] }) } })
+  const explain = { action: 'vocabulary_explain', id: entry.id, query: entry.term, expected_revision: entry.revision, public_search: true }
+  const insufficient = await handle(explain)
+  assert.equal(insufficient.status, 'insufficient')
+  assert.equal(insufficient.sources[0].evidence, 'metadata')
+  assert.equal(f.calls.length, 0)
+  abstract = 'Mixed use is a combination of land uses.'
+  const body = citations => JSON.stringify({ status: 'explained', definition: { text: '结合多种土地用途。', citations },
+    paragraphs: [{ text: '这是土地利用概念。', citations: [1] }] })
+  for (const citations of [[2], [999]]) {
+    f.answer = body(citations)
+    await assert.rejects(handle(explain), { code: 'VOCABULARY_EXPLANATION_INVALID' })
+  }
+  assert.equal((await handle({ action: 'vocabulary_list' })).items[0].revision, entry.revision)
+  f.answer = body([1])
+  const result = await handle(explain)
+  assert.equal(result.word.meaning, '结合多种土地用途。')
+  assert.equal(result.word.meaning_source, 'ai')
+})
+
+test('term explanation over HTTP respects vocabulary edits made while the model is running', async () => {
+  const f = fixture()
+  let start, release
+  const started = new Promise(resolve => { start = resolve })
+  const pause = new Promise(resolve => { release = resolve })
+  const languageLearning = createLanguageLearning({ ...f.options, scholarlySearch: { search: async () => ({
+    status: 'ok', results: [{ provider: 'crossref', title: 'Reference work',
+      url: 'https://doi.org/10.1234/real', abstract: 'Mixed use is a combination of land uses.' }],
+  }) }, ai: async () => {
+    start()
+    await pause
+    const block = { text: '结合多种土地用途。', citations: [1] }
+    return JSON.stringify({ status: 'explained', definition: block, paragraphs: [block] })
+  } })
+  const handler = createFetchHandler({ library: '/synthetic/library', localState: f.store, languageLearning })
+  const entry = await languageLearning({ action: 'vocabulary_create', mode: 'manual', term: 'mixed use' })
+  const edit = { id: entry.id, expected_revision: entry.revision }
+  const pending = handler(new Request('http://localhost/api', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      action: 'vocabulary_explain', ...edit, query: entry.term, public_search: true,
+    }) }))
+  await started
+  await languageLearning({ action: 'vocabulary_update', ...edit, note: 'Edited while waiting' })
+  release()
+  const response = await pending
+  assert.equal(response.status, 409)
+  assert.equal((await response.json()).code, 'STATE_CONFLICT')
+  const word = (await languageLearning({ action: 'vocabulary_list' })).items[0]
+  assert.equal(word.note, 'Edited while waiting')
+  assert.equal(word.explanation, undefined)
 })

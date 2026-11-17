@@ -146,6 +146,12 @@ body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-
 .wiki-word-note{border-top:1px solid var(--line);margin-top:16px;padding-top:10px}
 .wiki-word-note h3{margin:0}
 .wiki-word-note p{white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0}
+.wiki-term-explanation h4{margin:12px 0 4px}
+.wiki-term-citations{list-style:none;margin:0;padding:0;overflow-wrap:anywhere}
+.wiki-term-citations li+li{margin-top:8px}
+.wiki-term-citations li p,.wiki-term-citations blockquote{margin:2px 0}
+.wiki-term-citations summary{color:var(--muted);cursor:pointer}
+.wiki-inline-citation{white-space:nowrap}
 .wiki-word-form{display:grid;gap:12px}.wiki-word-form details{padding:10px 0}.wiki-word-form details[open] summary{margin-bottom:10px}
 
 .annotation-pagination{flex:none}.annotation-pagination .pagination{margin:0;padding:0;display:flex;align-items:center;gap:2px;font-size:11px;border:0}.annotation-pagination .button{padding:2px 5px;min-width:22px}.shared-reading-sidebar:not([data-sidebar-panel="annotations"]) .annotation-pagination{display:none}

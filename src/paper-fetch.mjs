@@ -135,6 +135,22 @@ function warn(ctx, error) {
   ctx.warnings.push(errorText(error))
 }
 
+/** Resolve proxy Fake-IP only for known metadata hosts, never arbitrary download hosts. */
+export async function resolveMetadataFakeIP(hostname, answers, signal) {
+  if (!PUBLIC_METADATA_HOSTS.has(hostname) || !answers?.length ||
+      !answers.every(answer => isIP(answer.address) === 4 && v4In(answer.address, '198.18.0.0', 15))) return null
+  const dnsSignal = AbortSignal.any([signal, AbortSignal.timeout(6000)])
+  const dns = await pinnedRequest({
+    url: new URL(`https://1.1.1.1/dns-query?name=${encodeURIComponent(hostname)}&type=A`),
+    address: '1.1.1.1', family: 4, signal: dnsSignal, headers: { Accept: 'application/dns-json' },
+  })
+  try {
+    if (dns.statusCode !== 200) throw Error('公开题录 DNS 查询失败')
+    const data = JSON.parse(await readText({ ...dns, signal: dnsSignal }, 16384))
+    return (data.Answer || []).filter(row => row.type === 1).map(row => ({ address: row.data, family: 4 }))
+  } finally { dns.close() }
+}
+
 async function requestPublic(value, ctx, kind, timeoutMs, { allowNotFound = false, followRedirects = true } = {}) {
   let url = publicURL(value)
   const signal = timeoutMs ? AbortSignal.any([ctx.signal, AbortSignal.timeout(timeoutMs)]) : ctx.signal
@@ -147,13 +163,8 @@ async function requestPublic(value, ctx, kind, timeoutMs, { allowNotFound = fals
     try {
       const hostname = url.hostname.replace(/^\[|\]$/g, '')
       let answers = isIP(hostname) ? [{ address: hostname, family: isIP(hostname) }] : await abortable(ctx.resolver(hostname), signal)
-      // 部分本地代理用 198.18/15 作为 Fake-IP。仅对固定题录服务
-      // 通过加密 DNS 取得真实公网地址，随后仍校验并固定连接地址。
-      if(!ctx.options.resolver && PUBLIC_METADATA_HOSTS.has(hostname) && answers.length && answers.every(answer=>isIP(answer.address)===4&&v4In(answer.address,'198.18.0.0',15))) {
-        const dnsSignal=AbortSignal.any([signal,AbortSignal.timeout(6000)]);
-        const dns=await pinnedRequest({url:new URL(`https://1.1.1.1/dns-query?name=${encodeURIComponent(hostname)}&type=A`),address:'1.1.1.1',family:4,signal:dnsSignal,headers:{Accept:'application/dns-json'}});
-        try {if(dns.statusCode!==200)throw Error('公开题录 DNS 查询失败');const data=JSON.parse(await readText({...dns,signal:dnsSignal},16384));answers=(data.Answer||[]).filter(row=>row.type===1).map(row=>({address:row.data,family:4}));record.dns_provider='Cloudflare DoH';}finally{dns.close();}
-      }
+      const publicAnswers = !ctx.options.resolver && await resolveMetadataFakeIP(hostname, answers, signal)
+      if (publicAnswers) { answers = publicAnswers; record.dns_provider = 'Cloudflare DoH' }
       if (!Array.isArray(answers) || !answers.length || answers.some(answer => !isPublicAddress(answer.address) || isLocalInterface(answer.address) || isIP(answer.address) !== answer.family)) throw new Error('DNS resolved to a private, local, reserved, or invalid address')
       const { address, family } = answers.find(answer => answer.family === 4) ?? answers[0]
       const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(15_000)])

@@ -47,7 +47,7 @@ for (const name of ['board.js','board.css','board-flow.js','board-source.js','bo
 for (const name of ['workspace-navigation.js','workspace-navigation.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['scholars.js','scholars.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 for (const name of ['field-radar-relations-renderer.js','field-radar-relations.js','field-radar-data.js','field-radar.js','field-radar.css','field-radar-legacy.js','field-radar-legacy.css']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
-const languageActions = new Set(['language_settings_get','language_settings_update','language_prompt_preview','language_generate','language_history','language_vocabulary_sync','vocabulary_create','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export']);
+const languageActions = new Set(['language_settings_get','language_settings_update','language_prompt_preview','language_generate','language_history','language_vocabulary_sync','vocabulary_create','vocabulary_list','vocabulary_update','vocabulary_delete','vocabulary_export','vocabulary_explain']);
 for (const name of ['handwriting-note.js','handwriting-note.css','linked-handwriting.js','ink-preview.js','ink-queue-client.js','ink-diagnostics.js']) staticFiles[name] = [name, name.endsWith('.js') ? 'text/javascript;charset=utf-8' : 'text/css;charset=utf-8'];
 staticFiles['annotation-editor.js']=['annotation-editor.js','text/javascript;charset=utf-8'];
 staticFiles['annotation-tags.js']=['annotation-tags.js','text/javascript;charset=utf-8'];

@@ -144,11 +144,77 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
     }catch(error){if(owner===ticket)status.textContent=error.message;}
     finally{control.disabled=false;}
   }
+  function citationLink(source,label){
+    try{
+      const url=new URL(source.url);
+      if(!['http:','https:'].includes(url.protocol)||url.username||url.password)return null;
+      const link=node('a',label);
+      link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';link.title=source.title;
+      return link;
+    }catch{return null;}
+  }
+  function renderCitations(root,sources,heading){
+    if(!sources?.length)return;
+    root.append(node('h4',heading));
+    const list=node('ul',undefined,'wiki-term-citations');
+    for(const source of sources){
+      const link=citationLink(source,source.title);
+      if(!link)continue;
+      const entry=node('li'),kind={abstract:'摘要',snippet:'网页搜索摘录',metadata:'题录'}[source.evidence];
+      entry.append(node('span',`[${source.id}] `),link);
+      const details=[source.authors?.join('、'),source.year,kind].filter(Boolean).join(' · ');
+      if(details)entry.append(node('p',details,'small muted'));
+      if(source.excerpt){const detail=node('details');detail.append(node('summary','查看检索片段'),node('blockquote',source.excerpt));entry.append(detail);}
+      list.append(entry);
+    }
+    root.append(list);
+  }
+  function renderExplanation(value){
+    const block=node('section',undefined,'wiki-word-note wiki-term-explanation');
+    block.append(node('h3','AI 检索释义'),node('p','依据摘要与网页检索片段 · 待核对','small muted'));
+    const refs=new Map(value.sources.map(source=>[source.id,source]));
+    for(const section of [value.definition,...value.paragraphs]){
+      const line=node('p',section.text);
+      for(const id of section.citations){
+        const source=refs.get(id),link=source&&citationLink(source,`[${id}]`);
+        if(link){link.className='wiki-inline-citation';line.append(' ',link);}
+      }
+      block.append(line);
+    }
+    renderCitations(block,value.sources,'参考来源');
+    article.append(block);
+  }
+  function explainWord(item){
+    if(!discard())return;
+    const owner=++ticket,form=node('form',undefined,'wiki-word-form');
+    const query=wordField(form,'公开检索词',item.explanation?.query||item.term,200);
+    query.required=true;
+    form.append(node('p','公开搜索仅发送上方检索词。DSH 使用词条名称和检索片段生成释义。','small muted'));
+    const actions=node('div',undefined,'wiki-source-actions'),run=node('button','检索并生成','button primary');
+    run.type='submit';actions.append(run,button('取消',()=>show(item)));form.append(actions);
+    const results=node('div');
+    form.addEventListener('submit',async event=>{
+      event.preventDefault();if(run.disabled)return;
+      run.disabled=query.disabled=true;results.replaceChildren();
+      status.textContent='正在公开检索并生成释义…';
+      try{
+        const result=await api('vocabulary_explain',{id:item.id,expected_revision:item.revision,query:query.value.trim(),public_search:true});
+        if(owner!==ticket)return;
+        if(result.status==='explained'){show(result.word);status.textContent='已保存 AI 检索释义与引用。';return;}
+        status.textContent=result.status==='unavailable'?'公开检索暂不可用，可稍后重试。':'没有找到足以支持释义的片段，可调整检索词再试。';
+        renderCitations(results,result.sources,'检索线索');
+      }catch(error){if(owner===ticket)status.textContent=error.message;}
+      finally{run.disabled=query.disabled=false;}
+    });
+    article.replaceChildren(node('h2',item.term),node('h3','AI 检索与解释'),form,results);
+    query.focus();
+  }
   function showWord(item){
     const provenance=item.meaning?(item.meaning_source==='user'?'人工释义':'AI 释义 · 待核对'):'尚无释义';
     article.append(node('p',`${provenance} · ${item.status==='mastered'?'已掌握':'待学习'}`,'small muted'));
-    if(item.meaning)article.append(markup(item.meaning));
+    if(item.meaning&&(item.meaning_source==='user'||item.meaning!==item.explanation?.definition?.text))article.append(markup(item.meaning));
     const controls=node('div',undefined,'wiki-source-actions');
+    controls.append(button(item.explanation?'重新检索与解释':'AI 检索与解释',()=>explainWord(item)));
     const mastery=button(item.status==='mastered'?'重新学习':'标记已掌握',()=>void updateWord(item,{status:item.status==='mastered'?'learning':'mastered'},'已更新学习状态。',mastery));
     const usage=button('全库搜索用例',async()=>{
       const owner=ticket;usage.disabled=true;
@@ -166,7 +232,9 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
     head.append(node('h3','备注'),button(item.note?'编辑备注':'添加备注',()=>editWord(item,'note')));
     note.append(head);
     if(item.note)note.append(node('p',item.note));
-    article.append(controls,note);sources(article,item.encounters||[],item);
+    article.append(controls);
+    if(item.explanation)renderExplanation(item.explanation);
+    article.append(note);sources(article,item.encounters||[],item);
   }
   function show(item){++ticket;selected=item;article.replaceChildren(node('h2',item.term));if(mode==='words'){listedWords.set(item.id,item);showWord(item);return;}
     const labels={term:'术语',organization:'机构',abbreviation:'缩写',person:'人物',concept:'概念'};article.append(node('p',`${labels[item.kind]||'词条'} · 人工整理${item.aliases?.length?' · '+item.aliases.join(' / '):''}`,'small muted'),markup(item.definition),button('编辑词条',()=>edit(item)));if(pendingSource)article.append(button('将当前批注加入来源',async()=>{try{const saved=await api('encyclopedia_put',{...item,expected_revision:item.revision,source:pendingSource});pendingSource=null;show(saved);status.textContent='已关联当前批注。';}catch(e){status.textContent=e.message;}}));sources(article,item.sources||[]);}

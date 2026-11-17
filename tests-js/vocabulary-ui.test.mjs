@@ -65,6 +65,26 @@ test('searching word usage opens whole-library search with only that word or phr
  assert.deepEqual(uses,['mixed use']);assert.equal(f.w.document.querySelector('dialog').open,false);
 });
 
+test('AI explanation sends only the submitted public query, then shows inspectable inline references',async t=>{
+ const word={id:'word',revision:'rev1',term:'mixed use',note:'Private note',encounters:[],meaning:'混合使用',meaning_source:'user'};
+ const saved={...word,explanation:{
+  definition:{text:'土地的多种用途共同出现。',citations:[1]},
+  paragraphs:[{text:'可在城市规划语境下讨论。',citations:[1]}],
+  sources:[{id:1,title:'Planning source',url:'https://example.edu/term',evidence:'snippet',excerpt:'Two uses co-occur.'}]
+ }};
+ const f=fixture(t,async()=>({status:'explained',word:saved}),{items:[word]});
+ f.ui.show('words');await tick();f.click('AI 检索与解释');
+ const input=f.input('公开检索词');assert.equal(input.value,'mixed use');input.value='mixed use planning';
+ assert.equal(f.calls.some(call=>call.action==='vocabulary_explain'),false);
+ f.submit();await tick();
+ assert.deepEqual(f.calls.find(call=>call.action==='vocabulary_explain'),{action:'vocabulary_explain',
+  id:'word',expected_revision:'rev1',query:'mixed use planning',public_search:true});
+ const block=f.w.document.querySelector('.wiki-term-explanation');
+ assert.equal(block.querySelector('.wiki-inline-citation').href,'https://example.edu/term');
+ assert.match(block.textContent,/用途共同出现.*Planning source.*Two uses co-occur/s);
+ assert.match(f.w.document.querySelector('.wiki-article').textContent,/混合使用.*Private note/s);
+});
+
 test('opening vocabulary repairs only the current paper in bounded batches before showing saved terms',async t=>{
  const f=fixture(t,()=>{}, {items:[{id:'directionality',term:'directionality',meaning:'方向性',encounters:[]}],sync:args=>({hasMore:args.offset===0,next_offset:args.offset+20})});
  f.ui.show('words');for(let i=0;i<10&&!f.w.document.querySelector('.wiki-index-item');i++)await new Promise(r=>setTimeout(r,5));

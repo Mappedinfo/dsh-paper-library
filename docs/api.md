@@ -487,6 +487,7 @@ Browser-addressable keys are `preferences`, `reader`, `reader:<paper>`, `chat:<p
 - `vocabulary_list {query?,sort?:'id'|'term_asc'|'term_desc'|'created_desc'|'created_asc'|'updated_desc',status?:'learning'|'mastered',offset=0,limit=20}` 按词条、释义或备注检索，返回词条修订、学习状态、最近来源和全部关联论文的简表。
 - `vocabulary_update {id,meaning?,status?,note?,detach_paper_id?,expected_revision}` 可更新备注（最多 4000 字符，空字符串清除），或解除指定论文与词条的关联。解除会从词条移除该论文的全部原句和译文，历史翻译记录仍可查看。自动登记会尊重解除记录，用户可稍后显式重新关联。`vocabulary_delete {id,expected_revision}` 保存删除标记。
 - `vocabulary_export {format:'json'|'csv',query?,status?}` returns `{filename,mime_type,content,count,truncated}`; export is bounded to 2,000 words / 8 MiB and CSV neutralizes spreadsheet formula prefixes.
+- `vocabulary_explain {id,expected_revision,query,public_search:true}` 通过 DSH 网页检索（可用时）、Crossref 和 arXiv 检索明确提交的公开词，来源限于题录、摘要和网页检索片段。生成时每段只可引用本次返回且有证据片段的来源；成功返回 `{status:'explained',word}`，释义与编号引用保存在词条，已有人工释义保留。`insufficient` 或 `unavailable` 返回候选来源及状态。
 
 Records and word review remain available in standalone mode using the same local files. Generating requires the installed DSH integration. Opening panels, browsing words or reading history starts neither PDF scans nor a model. Language results can be copied or appended to the correct paper's existing conversation draft; they are not automatically sent to the conversation or written into the PDF.
 

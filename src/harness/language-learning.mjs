@@ -1,10 +1,12 @@
 import { entryOrder } from '../entry-order.mjs'
 import { createHash } from 'node:crypto'
 import { preferredTranslationModel, translateWithFallback } from './translation-model.mjs'
+import { awaitWithAbort } from './ai.mjs'
+import { explainPublicTerm } from './term-explanation.mjs'
 
 export { preferredTranslationModel } from './translation-model.mjs'
 
-const ACTIONS = new Set(['language_generate', 'language_history', 'language_vocabulary_sync', 'language_settings_get', 'language_settings_update', 'language_prompt_preview', 'vocabulary_create', 'vocabulary_list', 'vocabulary_update', 'vocabulary_delete', 'vocabulary_export'])
+const ACTIONS = new Set(['language_generate', 'language_history', 'language_vocabulary_sync', 'language_settings_get', 'language_settings_update', 'language_prompt_preview', 'vocabulary_create', 'vocabulary_list', 'vocabulary_update', 'vocabulary_delete', 'vocabulary_export', 'vocabulary_explain'])
 const SETTINGS_KEY = 'language.settings', PROMPT_VERSION = 'language-v3'
 const POLISH_DIRECTIONS = Object.freeze({
   general: 'Improve clarity and natural wording with minimal necessary edits.',
@@ -158,8 +160,8 @@ function publicWord(record) {
  * A pending request is never automatically resent after process failure. Once
  * validated output is durable, replay completes vocabulary writes without AI.
  */
-export function createLanguageLearning({ store, ai, getDefaultModel, models, dispatch, library, python }) {
-  const flights = new Map()
+export function createLanguageLearning({ store, ai, getDefaultModel, models, dispatch, library, python, scholarlySearch, searchWeb }) {
+  const flights = new Map(), explaining = new Set()
   let admitted = 0, generating = 0
   const resultKey = request => `language.result:${hash(request.id)}:${hash(request.request_id)}`
   const defaults = () => ({ model: null, translate_prompt: '', polish_prompt: '', target_language: 'auto' })
@@ -388,12 +390,47 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     })
     return publicWord(record)
   }
-  async function vocabularyMutation(input) {
+  async function wordForUpdate(input) {
     const id = string(input.id, '词汇标识', 64)
     if (!/^[a-f0-9]{64}$/.test(id)) throw fail('词汇标识无效。')
     const key = `vocabulary:${id}`, record = await store.get(key)
     if (!record.value || record.value.deleted) throw fail('词汇已删除或不存在。', 'VOCABULARY_MISSING', 404)
     if (input.expected_revision !== record.revision) throw fail('词汇已在其他窗口更新，请刷新后再编辑。', 'STATE_CONFLICT', 409)
+    return { id, key, record }
+  }
+  async function explainWord(input, signal) {
+    if (input.public_search !== true) throw fail('请提交用于公开检索的检索词。')
+    const query = string(input.query, '公开检索词', 200)
+    if (/[\x00-\x1f\x7f]/u.test(query) || !/[\p{L}\p{N}]/u.test(query)) throw fail('请输入有效的公开检索词。')
+    if (typeof ai !== 'function' || typeof getDefaultModel !== 'function' || (!scholarlySearch && !searchWeb))
+      throw fail('AI 检索与解释需要 DSH 宿主及公开检索服务。', 'VOCABULARY_EXPLANATION_UNAVAILABLE', 409)
+    const { id, key, record } = await wordForUpdate(input)
+    if (explaining.has(id)) throw fail('这个词条正在检索与解释。', 'VOCABULARY_EXPLANATION_BUSY', 409)
+    if (generating >= 2) throw fail('已有两个语言请求正在生成，请稍后重试。', 'LANGUAGE_BUSY', 429)
+    explaining.add(id); generating++
+    try {
+      const deadline = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(120_000)])
+      const settings = settingsValue((await store.get(SETTINGS_KEY)).value)
+      const { model } = await generationModel(settings, 'explain', deadline)
+      deadline.throwIfAborted()
+      const result = await explainPublicTerm({
+        term: record.value.term, query, signal: deadline, search: scholarlySearch,
+        searchWeb: searchWeb ? (query, options) => searchWeb(query, { ...options, provider: model.provider }) : undefined,
+        generate: async (prompt, signal) => ({ raw: await awaitWithAbort(ai({ prompt, ...model, signal }), signal), model }),
+      })
+      if (result.status !== 'explained') return result
+      const value = record.value, time = stamp()
+      const updateGloss = value.meaning_source !== 'user' || !value.meaning
+      const next = {
+        ...value,
+        ...(updateGloss ? { meaning: result.explanation.definition.text, meaning_source: 'ai' } : {}),
+        explanation: { ...result.explanation, created_at: time }, updated_at: time,
+      }
+      return { status: result.status, word: publicWord(await store.put(key, next, record.revision)) }
+    } finally { explaining.delete(id); generating-- }
+  }
+  async function vocabularyMutation(input) {
+    const { id, key, record } = await wordForUpdate(input)
     if (input.action === 'vocabulary_delete') {
       const deleted = await store.put(key, { id, deleted: true, deleted_at: stamp() }, record.revision)
       return { id, deleted: true, revision: deleted.revision }
@@ -453,6 +490,7 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
       if (input.action === 'language_history') return await history(input)
       if (input.action === 'vocabulary_list') return await vocabularyList(input)
       if (input.action === 'vocabulary_export') return await vocabularyExport(input)
+      if (input.action === 'vocabulary_explain') return await explainWord(input, signal)
       return await vocabularyMutation(input)
     } finally { admitted-- }
   }

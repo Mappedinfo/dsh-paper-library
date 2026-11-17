@@ -9,7 +9,7 @@ import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { networkInterfaces } from 'node:os'
 import { Readable } from 'node:stream'
-import { isPublicAddress } from '../paper-fetch.mjs'
+import { isPublicAddress, resolveMetadataFakeIP } from '../paper-fetch.mjs'
 
 export const SCHOLARLY_SEARCH_LIMITS = Object.freeze({
   queryCharacters: 200, results: 5, requests: 2, responseBytes: 512 * 1024,
@@ -55,8 +55,9 @@ async function serialArxiv(operation, signal) {
 }
 
 /** 生产网络入口固定域名、校验全部 DNS 答案并将 socket 绑定到已校验地址。 */
-async function pinnedFetch(url, { signal, headers }, resolver) {
-  const answers = await abortable(resolver(url.hostname), signal)
+async function pinnedFetch(url, { signal, headers }, resolver, usePublicDNS) {
+  const resolved = await abortable(resolver(url.hostname), signal)
+  const answers = (usePublicDNS && await resolveMetadataFakeIP(url.hostname, resolved, signal)) || resolved
   const localAddresses = new Set(Object.values(networkInterfaces()).flat().filter(Boolean).map(entry => entry.address))
   if (!Array.isArray(answers) || !answers.length || answers.some(answer => !isPublicAddress(answer.address) || localAddresses.has(answer.address) || isIP(answer.address) !== answer.family)) {
     throw failure('unsafe_dns', 'Scholarly source DNS did not resolve exclusively to public addresses')
@@ -167,7 +168,7 @@ async function readBounded(response, signal) {
 export function createScholarlySearch(options = {}) {
   for (const key of ['fetch', 'resolver']) if (options[key] !== undefined && typeof options[key] !== 'function') throw new TypeError(`${key} must be a function`)
   const resolver = options.resolver ?? (hostname => lookup(hostname, { all: true, verbatim: true }))
-  const fetch = options.fetch ?? ((url, init) => pinnedFetch(url, init, resolver))
+  const fetch = options.fetch ?? ((url, init) => pinnedFetch(url, init, resolver, options.resolver === undefined))
   async function source(provider, url, signal, limit) {
     const operation = async () => {
       const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(SCHOLARLY_SEARCH_LIMITS.requestTimeoutMs)])

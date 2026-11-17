@@ -161,7 +161,15 @@ export function apply(ctx, rawConfig = {}) {
     })
     toolOptions.citationClaims = citationClaims
     web.effect(() => () => { if (toolOptions.citationClaims === citationClaims) delete toolOptions.citationClaims }, 'paper-library: citation descriptions')
-    const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python })
+    const scholarlySearch = createScholarlySearch()
+    const searchWeb = async (query, { provider, signal }) => {
+      let service
+      try { service = web.get('web') } catch { /* Standalone DSH profiles may omit the service. */ }
+      if (!service || !await service.searchReady(provider)) return null
+      signal.throwIfAborted()
+      return service.search({ query, maxResults: 5 }, signal)
+    }
+    const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python, scholarlySearch, searchWeb })
     const handwritingAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }, { attachments: () => ctx.get('attachments') })
     const handwriting = createHandwriting({ store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })
     const annotationCaption = createAnnotationCaption({ selectModel: (current, signal) => selectCaptionModel(ctx.llm, current, signal), store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })
@@ -184,7 +192,7 @@ export function apply(ctx, rawConfig = {}) {
     // store; proposals hold replacements, never a second copy of the manuscript.
     const research = createLatexResearch({
       run: createHarnessToolAI(ctx.llm, { createUserMessage, createAssistantMessage, createToolResultMessage, BlockAssembler, assertSupportedJsonSchema, validateJsonSchemaValue }, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }),
-      search: createScholarlySearch(), dispatch, library: config.library, python: config.python,
+      search: scholarlySearch, dispatch, library: config.library, python: config.python,
     })
     const latexAI = createLatexAI({ store: options.localState, ai: languageAI, research, config, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python })
     // The workspace owns the manuscript folder under the DSH home and keeps it in the
