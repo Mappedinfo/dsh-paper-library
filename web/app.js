@@ -2202,7 +2202,15 @@ annotationEditor=window.PaperAnnotationEditor?.create({api,persistence,captionAv
   refresh:async(id,note,{reveal=false,pages=[note.page]}={})=>{if(state.active?.id!==id)return;await loadAnnotations(id);if(state.active?.id===id){if(reveal)annotationEditor.focus(id,note.id);await Promise.all(pages.map(refreshPage));await paperChatUI?.annotationsChanged(id);}},
   changed:()=>companionUI?.decorate(),toast});
 companionUI=window.PaperCompanion?.create({api,persistence,getPaper:()=>state.active,refreshAnnotations:loadAnnotations,beforeAsk:(id,annotationId)=>annotationEditor?.beforeAsk(id,annotationId),toast});
-const wikiUI=window.PaperEncyclopedia.create({api,toast,openReference:openReferencedPaper,getSource:()=>state.active?{paper_id:state.active.id,title:state.active.title,page:state.selection?.id===state.active.id?state.selection.page:state.page,quote:state.selection?.id===state.active.id?state.selection.text:''}:null});
+const wikiUI=window.PaperEncyclopedia.create({api,toast,openReference:openReferencedPaper,
+  getSource:()=>state.active?.pdf?{paper_id:state.active.id,title:state.active.title,page:state.selection?.id===state.active.id?state.selection.page:state.page,quote:state.selection?.id===state.active.id?state.selection.text:''}:null,
+  searchUsage:async term=>{
+    if(!catalogSearchUI)throw Error('当前工作台无法搜索全文。');
+    const opened=workspaceNavigationUI ? await workspaceNavigationUI.selectRoot('paper') :
+      await prepareWorkspaceNavigation() && await openWorkspaceRoot('paper');
+    return opened && catalogSearchUI.searchLibrary(term);
+  },
+});
 const wikiButton=el('button','button subtle','百科');wikiButton.id='ribbon-encyclopedia';wikiButton.type='button';wikiButton.addEventListener('click',()=>wikiUI.show());document.querySelector('.reader-ribbon').insertBefore(wikiButton,$('reader-fullscreen'));
 languageUI=window.PaperLanguageLearning?.create({api,persistence,embedded:true,onOpen:next=>wikiUI.openLanguage(next),onClose:()=>wikiUI.close(),openVocabulary:()=>wikiUI.show('words'),getPaper:()=>state.active,getSelection:()=>state.selection,toast,openReference:openReferencedPaper,
   beforeOpen:()=>readingPanels?.close('chat'),prepareChat:async(text,source)=>{

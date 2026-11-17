@@ -145,7 +145,13 @@ function publicResult(value, replayed = false) {
 }
 function publicWord(record) {
   const value = record.value
-  return { ...value, revision: record.revision, encounters: value.encounters.slice(-5), encounters_retained: value.encounters.length, encounters_preview: value.encounters.length > 5 }
+  const { detached_papers, ...fields } = value
+  const linkedPapers = new Map()
+  for (const { paper_id, title, page } of value.encounters) {
+    if (paper_id) linkedPapers.set(paper_id, { paper_id, title, page })
+  }
+  return { ...fields, revision: record.revision, linked_papers: [...linkedPapers.values()],
+    encounters: value.encounters.slice(-5), encounters_retained: value.encounters.length, encounters_preview: value.encounters.length > 5 }
 }
 
 /** Durable, on-demand language assistance using the host default or an explicit language route.
@@ -216,13 +222,19 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     const id = hash(canonical(suggestion.term)), key = `vocabulary:${id}`
     return cas(key, previous => {
       if (previous?.encounters?.some(entry => entry.result_id === result.id)) return undefined
+      const detachedAt = previous?.detached_papers?.[hash(result.paper_id)]
+      if (detachedAt && (result.created_at <= detachedAt ||
+          (!result.request?.vocabulary_term && !previous.encounters.some(entry => entry.paper_id === result.paper_id)))) return undefined
       if (result.request?.vocabulary_term && previous?.deleted) throw fail('这个词条已被删除，请先核对词条状态。', 'VOCABULARY_MISSING', 409)
       if (previous?.deleted) return undefined
       if (result.request?.vocabulary_term && previous?.encounters?.length >= MAX_ENCOUNTERS) throw fail('词条已保存 60 条来源，未覆盖已有来源。', 'VOCABULARY_SOURCE_LIMIT', 409)
       const encounter = { result_id: result.id, paper_id: result.paper_id, page: result.page, source_sentence: suggestion.source_sentence, source_text_hash: hash(result.source_text), model: result.model, created_at: result.created_at, meaning: suggestion.meaning, title: result.paper_title || '来源文献', ...(suggestion.sentence_translation ? { sentence_translation: suggestion.sentence_translation, source_provenance: 'selected_text', author_background: {kind:'unknown',evidence:'',source:'unknown'} } : {}),
         ...(result.request?.vocabulary_term ? { title: result.paper_title, sentence_translation: result.result, target_language: result.target_language, source_provenance: 'user_supplied', author_background: result.request.author_background } : {}) }
       if (!previous) return { id, term: suggestion.term, meaning: suggestion.meaning, status: 'learning', suggested_by: result.request?.vocabulary_term ? 'user' : 'ai', meaning_source: 'ai', created_at: result.created_at, updated_at: result.created_at, encounters: [encounter], encounters_truncated: false }
-      return { ...previous, updated_at: result.created_at, encounters: previous.encounters.length < MAX_ENCOUNTERS ? [...previous.encounters, encounter] : previous.encounters, encounters_truncated: previous.encounters_truncated || previous.encounters.length >= MAX_ENCOUNTERS }
+      return { ...previous, ...(!previous.meaning ? { meaning: suggestion.meaning, meaning_source: 'ai' } : {}),
+        updated_at: result.created_at > previous.updated_at ? result.created_at : previous.updated_at,
+        encounters: previous.encounters.length < MAX_ENCOUNTERS ? [...previous.encounters, encounter] : previous.encounters,
+        encounters_truncated: previous.encounters_truncated || previous.encounters.length >= MAX_ENCOUNTERS }
     })
   }
   async function finish(key, record, replayed) {
@@ -336,7 +348,7 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
   function vocabularyFilter(input) {
     const query = input.query === undefined ? '' : canonical(string(input.query, '检索词', 200, false)), status = input.status
     if (status !== undefined && status !== '' && !['learning', 'mastered'].includes(status)) throw fail('词汇学习状态无效。')
-    return value => value && !value.deleted && (!status || value.status === status) && (!query || canonical(`${value.term} ${value.meaning}`).includes(query))
+    return value => value && !value.deleted && (!status || value.status === status) && (!query || [value.term, value.meaning || '', value.note || ''].some(field => canonical(field).includes(query)))
   }
   async function vocabularyList(input) {
     if (input.view === 'latex-glossary') {
@@ -360,15 +372,18 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
   async function addManualTerm(input) {
     const term = lexicalText(string(input.term, '术语', 80)).trim()
     const meaning = string(input.meaning ?? '', '释义', 2000, false)
+    const note = string(input.note ?? '', '备注', 4000, false)
     if (!/[\p{L}\p{N}]/u.test(term) || /[\u0000-\u001f\u007f]/u.test(term)) throw fail('请输入有效的术语。')
     const id = hash(canonical(term))
     const record = await cas(`vocabulary:${id}`, previous => {
       if (previous && !previous.deleted) {
-        if (previous.meaning || !meaning) return undefined
-        return { ...previous, meaning, meaning_source: 'user', updated_at: stamp() }
+        const fillMeaning = !previous.meaning && Boolean(meaning), fillNote = !previous.note && Boolean(note)
+        if (!fillMeaning && !fillNote) return undefined
+        return { ...previous, ...(fillMeaning ? { meaning, meaning_source: 'user' } : {}),
+          ...(fillNote ? { note } : {}), updated_at: stamp() }
       }
       const time = stamp()
-      return { id, term, meaning, status: 'learning', suggested_by: 'user', meaning_source: 'user',
+      return { id, term, meaning, ...(note ? { note } : {}), status: 'learning', suggested_by: 'user', meaning_source: 'user',
         created_at: time, updated_at: time, encounters: [], encounters_truncated: false }
     })
     return publicWord(record)
@@ -386,7 +401,14 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     const next = { ...record.value, updated_at: stamp() }
     if (input.meaning !== undefined) { next.meaning = string(input.meaning, '词义', 2000); next.meaning_source = 'user' }
     if (input.status !== undefined) { if (!['learning', 'mastered'].includes(input.status)) throw fail('词汇学习状态无效。'); next.status = input.status }
-    if (input.meaning === undefined && input.status === undefined) throw fail('没有提供词汇修改内容。')
+    if (input.note !== undefined) next.note = string(input.note, '备注', 4000, false)
+    if (input.detach_paper_id !== undefined) {
+      const paper = paperId(input.detach_paper_id)
+      next.encounters = record.value.encounters.filter(entry => entry.paper_id !== paper)
+      if (next.encounters.length === record.value.encounters.length) throw fail('此词条已无该论文来源，请刷新。', 'VOCABULARY_SOURCE_MISSING', 404)
+      next.detached_papers = { ...record.value.detached_papers, [hash(paper)]: next.updated_at }
+    }
+    if (![input.meaning, input.status, input.note, input.detach_paper_id].some(value => value !== undefined)) throw fail('没有提供词汇修改内容。')
     return publicWord(await store.put(key, next, record.revision))
   }
   async function vocabularyExport(input) {
@@ -402,7 +424,7 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     // Prefix spreadsheet formula-looking user/AI values to keep CSV inert.
     const cell = value => { const raw = String(value ?? ''), text = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw; return `"${text.replaceAll('"', '""')}"` }
     const content = input.format === 'json' ? JSON.stringify({ vocabulary: items, generated_at: stamp(), truncated: scope.truncated || omitted > 0 })
-      : [['term', 'meaning', 'status', 'suggested_by', 'paper_id', 'page', 'source_sentence', 'sentence_translation', 'author_background', 'author_background_evidence', 'model', 'result_id'], ...items.map(word => { const last = word.encounters.at(-1); return [word.term, word.meaning, word.status, word.suggested_by, last?.paper_id, last?.page, last?.source_sentence, last?.sentence_translation, last?.author_background?.kind, last?.author_background?.evidence, last ? `${last.model.provider}/${last.model.model}` : '', last?.result_id] })].map(row => row.map(cell).join(',')).join('\r\n')
+      : [['term', 'meaning', 'status', 'suggested_by', 'paper_id', 'page', 'source_sentence', 'sentence_translation', 'author_background', 'author_background_evidence', 'model', 'result_id', 'note'], ...items.map(word => { const last = word.encounters.at(-1); return [word.term, word.meaning, word.status, word.suggested_by, last?.paper_id, last?.page, last?.source_sentence, last?.sentence_translation, last?.author_background?.kind, last?.author_background?.evidence, last?.model ? `${last.model.provider}/${last.model.model}` : '', last?.result_id, word.note] })].map(row => row.map(cell).join(',')).join('\r\n')
     return { format: input.format, filename: `paper-library-vocabulary.${input.format}`, mime_type: input.format === 'json' ? 'application/json' : 'text/csv; charset=utf-8', content, count: items.length, ...scope, truncated: scope.truncated || omitted > 0, omitted }
   }
   const handle = async (input, { signal } = {}) => {

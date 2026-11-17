@@ -698,3 +698,54 @@ test('manual terms can be saved over HTTP without a connected model', async t =>
   assert.equal(response.status, 200, result.error)
   assert.equal(result.result.term, 'SPOK')
 })
+
+test('standalone vocabulary notes are editable, searchable and included in exports', async () => {
+  const f = fixture()
+  const save = { action: 'vocabulary_create', mode: 'manual', term: 'mixed use', note: 'First explanation' }
+  const first = await f.handle(save)
+  const duplicate = await f.handle({ ...save, id: 'open-paper', note: 'Candidate replacement' })
+  assert.equal(duplicate.note, first.note)
+  assert.deepEqual(duplicate.linked_papers, [])
+  const edit = { action: 'vocabulary_update', id: first.id, expected_revision: first.revision }
+  const revised = await f.handle({ ...edit, note: 'A personal reminder\nSecond line' })
+  assert.equal(revised.note, 'A personal reminder\nSecond line')
+  assert.equal((await f.handle({ action: 'vocabulary_list', query: 'SECOND LINE' })).total, 1)
+  assert.match((await f.handle({ action: 'vocabulary_export', format: 'csv' })).content, /"note"\r\n.*"A personal reminder\nSecond line"/s)
+  await assert.rejects(f.handle({ ...edit, note: 'stale' }), { code: 'STATE_CONFLICT' })
+  const cleared = await f.handle({ ...edit, expected_revision: revised.revision, note: '' })
+  assert.equal(cleared.note, '')
+  assert.equal(f.calls.length, 0)
+  assert.equal(f.kernelCalls.length, 0)
+})
+
+test('detaching a paper preserves other encounters and suppresses automatic reattachment', async () => {
+  const f = fixture()
+  await f.handle(request)
+  await f.handle({ ...request, page: 4, request_id: 'second-page' })
+  await f.handle({ ...request, id: 'paper-b', request_id: 'other-paper' })
+  const list = async () => (await f.handle({ action: 'vocabulary_list' })).items[0]
+  const before = await list()
+  const detached = await f.handle({ action: 'vocabulary_update', id: before.id, expected_revision: before.revision,
+    note: 'Keep my note', status: 'mastered', detach_paper_id: 'paper-a' })
+  assert.deepEqual(detached.encounters.map(({ paper_id }) => paper_id), ['paper-b'])
+  assert.deepEqual(detached.linked_papers.map(({ paper_id }) => paper_id), ['paper-b'])
+  assert.equal(detached.meaning, before.meaning)
+  assert.equal(detached.note, 'Keep my note')
+  assert.equal(detached.status, 'mastered')
+  assert.equal(Object.hasOwn(detached, 'detached_papers'), false)
+
+  const old = [...f.store.records.values()].find(entry => entry.value.request_id === request.request_id)
+  await f.store.put(old.key, { ...old.value, vocabulary_version: 1 }, old.revision)
+  await f.handle({ action: 'language_vocabulary_sync', id: 'paper-a' })
+  await f.handle({ ...request, request_id: 'later-auto' })
+  assert.deepEqual((await list()).encounters.map(({ paper_id }) => paper_id), ['paper-b'])
+  const history = await f.handle({ action: 'language_history', id: 'paper-a' })
+  assert.ok(history.items.some(row => row.request_id === request.request_id))
+
+  await new Promise(resolve => setTimeout(resolve, 5))
+  f.answer = JSON.stringify({ meaning: 'Another gloss', sentence_translation: '人工选定的合成原句。' })
+  const attached = await f.handle({ action: 'vocabulary_create', request_id: 'explicit-link', id: 'paper-a', page: 2,
+    term: 'Epistemic', source_sentence: source })
+  assert.deepEqual(attached.encounters.map(({ paper_id }) => paper_id), ['paper-b', 'paper-a'])
+  assert.equal(attached.note, detached.note)
+})

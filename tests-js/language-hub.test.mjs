@@ -52,11 +52,11 @@ test('shared settings button loads and saves original language settings without 
  f.doc.getElementById('language-settings-translate').value='Keep abbreviations.';f.doc.getElementById('language-settings-save').click();await tick();const saved=f.calls.find(call=>call.action==='language_settings_update');assert.equal(saved.expected_revision,'settings-1');assert.equal(saved.value.translate_prompt,'Keep abbreviations.');assert.equal(f.doc.querySelectorAll('dialog').length,1);
 });
 test('new vocabulary still saves a bilingual paper association inside the unified workspace',async t=>{
- const f=fixture(t);await f.open();f.wiki.show('language');await tick();f.click('新建词条');const form=f.doc.querySelector('.wiki-word-form');form.querySelector('input').value='synthetic';form.dispatchEvent(new f.w.Event('submit',{cancelable:true}));await tick();
+ const f=fixture(t);await f.open();f.wiki.show('language');await tick();f.click('从当前论文添加');const form=f.doc.querySelector('.wiki-word-form');form.querySelector('input').value='synthetic';form.dispatchEvent(new f.w.Event('submit',{cancelable:true}));await tick();
  const call=f.calls.find(call=>call.action==='vocabulary_create');assert.equal(call.id,'paper-a');assert.equal(call.page,3);assert.equal(call.source_sentence,'A synthetic sentence.');assert.equal(f.doc.querySelectorAll('.wiki-bilingual>div').length,2);
 });
 test('declining to discard an edited word prevents selection translation from silently generating',async t=>{
- const f=fixture(t);await f.open();f.wiki.show('language');await tick();f.click('新建词条');const form=f.doc.querySelector('.wiki-word-form');form.querySelector('input').dispatchEvent(new f.w.Event('input',{bubbles:true}));f.w.confirm=()=>false;
+ const f=fixture(t);await f.open();f.wiki.show('language');await tick();f.click('从当前论文添加');const form=f.doc.querySelector('.wiki-word-form');form.querySelector('input').dispatchEvent(new f.w.Event('input',{bubbles:true}));f.w.confirm=()=>false;
  await f.language.useSelection('translate');assert.equal(f.calls.some(call=>call.action==='language_generate'),false);assert.equal(f.doc.querySelector('.wiki-word-form'),form);assert.equal(f.language.element.hidden,true);
 });
 
@@ -80,7 +80,7 @@ test('docked mode survives close and selection translation; Escape closes withou
 });
 
 test('docking does not discard edited vocabulary and preserves its close confirmation',async t=>{
- const f=fixture(t);await f.open();f.wiki.show('language');await tick();f.click('新建词条');const form=f.doc.querySelector('.wiki-word-form'),input=form.querySelector('input');input.value='unsaved term';input.dispatchEvent(new f.w.Event('input',{bubbles:true}));f.w.confirm=()=>false;
+ const f=fixture(t);await f.open();f.wiki.show('language');await tick();f.click('从当前论文添加');const form=f.doc.querySelector('.wiki-word-form'),input=form.querySelector('input');input.value='unsaved term';input.dispatchEvent(new f.w.Event('input',{bubbles:true}));f.w.confirm=()=>false;
  f.doc.getElementById('wiki-dock').click();assert.equal(f.doc.querySelector('.wiki-word-form'),form);assert.equal(input.value,'unsaved term');f.doc.dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));assert.equal(f.doc.querySelector('.wiki-dialog').open,true);
 });
 

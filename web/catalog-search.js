@@ -183,12 +183,7 @@ window.PaperCatalogSearch = {
       syncMode();
       if (scope.value === 'metadata') searchMetadata();
     });
-    form.addEventListener('submit', event => {
-      event.preventDefault();
-      if (scope.value === 'metadata') return searchMetadata();
-      const currentProject = scope.value === 'project' ? project() : null;
-      if (scope.value === 'project' && !currentProject) return;
-      const query = input.value.trim();
+    function startSearch(query, currentProject = null) {
       cancel();
       active = { query, projectId: currentProject?.id ?? null, page: 0, cursors: [null], first: 0, shown: 0 };
       results.replaceChildren();
@@ -196,6 +191,13 @@ window.PaperCatalogSearch = {
       catalog.setAttribute('data-catalog-text-results', '');
       view.hidden = false;
       void run(query ? 'search' : 'index');
+    }
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      if (scope.value === 'metadata') return searchMetadata();
+      const currentProject = scope.value === 'project' ? project() : null;
+      if (scope.value === 'project' && !currentProject) return;
+      startSearch(input.value.trim(), currentProject);
     });
     get('clear').addEventListener('click', () => returnToCatalog(true));
     previous.addEventListener('click', () => void run('search', active.page - 1));
@@ -210,6 +212,16 @@ window.PaperCatalogSearch = {
     syncMode();
 
     return {
+      searchLibrary(phrase) {
+        const query = phrase.trim();
+        if (!query) return false;
+        input.value = query;
+        scope.value = 'library';
+        syncMode();
+        startSearch(query);
+        input.focus();
+        return true;
+      },
       syncProject() {
         const current = project();
         get('project').disabled = !current;

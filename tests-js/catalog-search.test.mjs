@@ -105,9 +105,11 @@ test('catalog searches group page excerpts inline, preserve results during readi
   assert.equal(calls[2].cursor, null);
   assert.equal(get('results').childElementCount, 2);
 
-  change('library');
-  submit();
+  assert.equal(ui.searchLibrary('mixed use'), true);
   await settle();
+  assert.equal(scope.value, 'library');
+  assert.equal(input.value, 'mixed use');
+  assert.equal(calls[3].query, 'mixed use');
   assert.equal(calls[3].project_id, null);
   assert.equal(calls[3].cursor, null);
   assert.equal(get('results').childElementCount, 0);
