@@ -177,12 +177,19 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
     block.append(node('h3','AI 检索释义'),node('p',evidence,'small muted'));
     const refs=new Map(value.sources.map(source=>[source.id,source]));
     for(const section of [value.definition,...value.paragraphs]){
-      const line=node('p',section.text);
+      const content=node('div',undefined,'paper-markdown');
+      if(window.PaperMarkdown){
+        window.PaperMarkdown.render(content,section.text);
+        // Only links from this explanation's checked sources are actionable.
+        for(const link of content.querySelectorAll('a'))link.replaceWith(...link.childNodes);
+      }else content.append(node('p',section.text));
+      const line=content.lastElementChild?.tagName==='P'?content.lastElementChild:node('p');
       for(const id of section.citations){
         const source=refs.get(id),link=source&&citationLink(source,`[${id}]`);
         if(link){link.className='wiki-inline-citation';line.append(' ',link);}
       }
-      block.append(line);
+      if(!line.parentElement&&line.hasChildNodes())content.append(line);
+      block.append(content);
     }
     renderCitations(block,value.sources,value.link_summary?'阅读来源':'参考来源');
     article.append(block);

@@ -1026,6 +1026,60 @@ test('scrolling moves through PDF pages while rendering at most three nearby pag
   f.ui.dispose()
 })
 
+test('top-level PDF display settings fit spreads, navigate by rows, and reuse rasters in dark mode', async () => {
+  const f = await fixture(action => {
+    if (action === 'latex_pdf_pages') return { page_count: 5, version: 'pdf-v1', pages: [600, 900, 800, 800, 800].map(height => ({ width: 600, height })) }
+    if (action === 'latex_synctex_edit') return { path: 'main.tex', line: 2 }
+  })
+  const preview = f.ids.get('latex-preview'), spread = f.ids.get('latex-pdf-spread'), dark = f.ids.get('latex-pdf-dark')
+  const zoom = f.ids.get('latex-zoom'), next = f.ids.get('latex-page-next'), prev = f.ids.get('latex-page-prev')
+  assert.equal(zoom.parentElement, spread.parentElement)
+  assert.equal(dark.parentElement.parentElement.getAttribute('aria-label'), 'LaTeX 工作台工具栏')
+  const pages = () => preview.querySelectorAll('.latex-page-row').map(row => row.children.map(stage => Number(stage.dataset.page)))
+  await f.ui.testHooks.renderPage(2)
+  await spread.dispatch('click'); await tick()
+  assert.equal(f.ui.testHooks.state().page, 2)
+  assert.equal(spread.getAttribute('aria-pressed'), 'true')
+  assert.equal(prev.disabled, true)
+  assert.match(f.ids.get('latex-sync-hint').textContent, /^第 1–2 \/ 5 页/)
+  assert.deepEqual(pages(), [[1, 2], [3, 4]])
+  const [row] = preview.querySelectorAll('.latex-page-row')
+  assert.equal(row.style.width, '576px')
+  assert.equal(row.children[1].style.width, '280px')
+  const currentImg = row.children[1].querySelector('img')
+  const renders = f.calls.filter(call => call.action === 'latex_pdf_page').length
+  await dark.dispatch('click')
+  assert.equal(dark.getAttribute('aria-pressed'), 'true')
+  assert.ok(preview.classList.contains('latex-dark-pdf'))
+  assert.equal(row.children[1].querySelector('img'), currentImg)
+  assert.equal(f.calls.filter(call => call.action === 'latex_pdf_page').length, renders)
+  await next.dispatch('click'); await tick()
+  assert.equal(f.ui.testHooks.state().page, 3)
+  assert.equal(preview.scrollTop, 436, 'the tallest page determines the spread height')
+  await next.dispatch('click'); await tick()
+  assert.deepEqual(pages(), [[3, 4], [5]])
+  assert.equal(next.disabled, true)
+  await prev.dispatch('click'); await tick()
+  await f.ui.testHooks.renderPage(4)
+  preview.clientWidth = 720
+  await f.window.dispatch('resize')
+  const resize = [...f.timers.values()].find(timer => timer.ms === 180)
+  resize.fn(); await tick()
+  assert.equal(f.ui.testHooks.state().page, 4)
+  assert.equal(preview.scrollTop, 526, 'resizing preserves the current spread')
+  zoom.value = '2'; await zoom.dispatch('change'); await tick()
+  assert.equal(preview.scrollLeft, 696, 'jumping to a magnified right page reveals its column')
+  zoom.value = '1'; await zoom.dispatch('change'); await tick()
+  assert.equal(preview.querySelector('.latex-page-row').style.width, '696px')
+  const rightStage = preview.querySelectorAll('.latex-page-stage').find(stage => stage.dataset.page === '4')
+  await rightStage.dispatch('dblclick', { clientX: 50, clientY: 60 })
+  assert.ok(f.calls.some(call => call.action === 'latex_synctex_edit' && call.page === 4))
+  await spread.dispatch('click'); await tick()
+  assert.equal(f.ui.testHooks.state().page, 4)
+  assert.ok(pages().every(row => row.length === 1))
+  f.ui.dispose()
+})
+
 test('the approaching page preloads before it enters and keeps visible raster nodes', async () => {
   const f = await fixture()
   await tick(); await tick()
@@ -1128,7 +1182,7 @@ test('scrolling back preloads the preceding PDF page before it reenters the view
 })
 
 test('select-mode PDF text exposes one-click highlighting while historical pages stay read-only', async () => {
-  const layout = { page_count: 1, version: 'pdf-v1', build: { pdf_version: 'synthetic-sha' }, pages: [{ width: 600, height: 800 }] };
+  const layout = { page_count: 2, version: 'pdf-v1', build: { pdf_version: 'synthetic-sha' }, pages: [{ width: 600, height: 800 }, { width: 600, height: 800 }] };
   const f = await fixture((action, args) => {
     if (action === 'latex_pdf_pages' || action === 'latex_version_pdf_pages') return layout;
     if (action === 'latex_pdf_page' || action === 'latex_version_pdf_page') return { ...image, ...args, words: [[10, 20, 50, 35, 'Synthetic']] };
@@ -1139,8 +1193,8 @@ test('select-mode PDF text exposes one-click highlighting while historical pages
   const readerSource = await readFile(new URL('../web/pdf-reader.js', import.meta.url), 'utf8');
   vm.runInNewContext(readerSource, { window: f.window });
   const preview = f.ids.get('latex-preview');
-  async function selectWord() {
-    const layer = preview.querySelector('.latex-text-layer'), word = layer.querySelector('.latex-pdf-word').firstChild;
+  async function selectWord(stage = preview) {
+    const layer = stage.querySelector('.latex-text-layer'), word = layer.querySelector('.latex-pdf-word').firstChild;
     const rect = { left: 10, right: 50, top: 15, bottom: 28, width: 40, height: 13 };
     f.document.createRange = () => ({ selectNodeContents() {}, toString: () => 'Synthetic', getBoundingClientRect: () => rect });
     const range = {
@@ -1178,11 +1232,17 @@ test('select-mode PDF text exposes one-click highlighting while historical pages
   assert.equal(highlight.hidden, true);
   assert.ok(f.calls.some(call => call.action === 'latex_synctex_edit' && call.page === 1));
 
+  await f.ids.get('latex-pdf-spread').dispatch('click'); await tick();
+  const rightStage = preview.querySelectorAll('.latex-page-stage').find(stage => stage.dataset.page === '2');
+  await selectWord(rightStage);
+  await highlight.dispatch('click'); await tick();
+  assert.deepEqual(f.calls.filter(call => call.action === 'latex_review_put').map(call => call.anchor.page), [1, 2]);
+
   assert.equal(await f.ui.showVersion('synthetic-version'), true);
   await selectWord();
   assert.equal(preview.querySelector('.latex-selection-highlight'), null);
   await highlight.dispatch('click');
-  assert.equal(f.calls.filter(call => call.action === 'latex_review_put').length, 1);
+  assert.equal(f.calls.filter(call => call.action === 'latex_review_put').length, 2);
   f.ui.dispose();
 });
 

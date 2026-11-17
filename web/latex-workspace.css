@@ -116,6 +116,7 @@ body > #latex-view { height: 100dvh; }
 .latex-search-source-hit.active { background: color-mix(in srgb, #e9aa26 48%, transparent); }
 .latex-layout-controls { display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 1px; border: 1px solid var(--line); border-radius: 6px; box-sizing: border-box; }
 .latex-toolbar .latex-layout-button { height: 26px; min-height: 26px; }
+.latex-toolbar #latex-zoom { width: 68px; height: 26px; min-height: 26px; padding: 3px 16px 3px 5px; }
 .latex-layout-button[aria-pressed=true] { background: var(--latex-active-bg); color: var(--ink); }
 .latex-menu-button { margin-left: auto; line-height: 1; display: inline-flex; align-items: center; justify-content: center; min-width: 30px; }
 .latex-main { max-width: 140px; overflow: hidden; text-overflow: ellipsis; font-size: 12px; color: var(--muted); }
@@ -315,7 +316,6 @@ body > #latex-view { height: 100dvh; }
 .latex-preview-toolbar #latex-synctex-forward { height: 28px; min-height: 28px; padding: 3px 5px; font: 11px/1.5 var(--sans); white-space: nowrap; }
 .latex-preview-toolbar .latex-tab { padding: 4px 7px; font-size: 12px; }
 .latex-preview-toolbar .icon-button { width: 22px; min-width: 22px; height: 26px; min-height: 26px; padding: 2px; }
-.latex-preview-toolbar #latex-zoom { width: 62px; min-width: 62px; height: 28px; min-height: 28px; padding: 3px 15px 3px 5px; font-size: 11px; line-height: 16px; }
 .latex-preview-toolbar .latex-pdf-tools button { padding: 3px 7px; height: 28px; min-height: 28px; font-size: 12px; }
 .latex-toolbar-divider { flex: 0 0 1px; align-self: center; height: 18px; margin: 0 4px; background: var(--line); }
 .latex-spelling-results, .latex-translation-results { flex: 0 0 auto; max-height: 170px; overflow: auto; padding: 7px 10px; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 12px; }
@@ -343,15 +343,17 @@ body > #latex-view { height: 100dvh; }
 .latex-preview-head { display: flex; align-items: center; gap: 4px; padding: 0; flex: 0 0 auto; background: var(--surface); }
 .latex-preview-head[hidden] { display: none; }
 .latex-render-state { color: var(--muted); font-size: 10px; margin-left: auto; }
-#latex-zoom { font-size: 12px; max-width: 86px; }
 #latex-media-info { padding: 5px 12px; }
 .latex-page-label { font-size: 12px; color: var(--muted); }
 .latex-preview {
   flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px; display: flex; justify-content: flex-start;
   flex-direction: column; align-items: flex-start; background: var(--dsw-alias-bg-module-platform);
 }
-.latex-page-stage { position: relative; flex: 0 0 auto; margin: 0 auto; }
+.latex-page-row { display: flex; flex: 0 0 auto; align-items: flex-start; gap: 16px; margin-inline: auto; }
+.latex-page-stage { position: relative; flex: 0 0 auto; }
 .latex-page { width: 100%; max-width: none; box-shadow: var(--shadow); background: #fff; }
+.latex-dark-pdf { background: #11171e; }
+.latex-dark-pdf .latex-page { filter: invert(.9) hue-rotate(180deg); }
 .latex-media-image { display: block; flex: 0 0 auto; max-width: none; height: auto; margin: 0 auto; background: #fff; box-shadow: var(--shadow); }
 .latex-page-stage .latex-page { display: block; cursor: crosshair; }
 .latex-selection-highlight { position: absolute; z-index: 3; white-space: nowrap; background: var(--surface); box-shadow: var(--shadow); }

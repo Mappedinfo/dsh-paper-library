@@ -4,11 +4,12 @@ import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{JSDOM}=require(process.env.JSDOM_MODULE||'jsdom');
 const script=await readFile(new URL('../web/encyclopedia.js',import.meta.url),'utf8');
+const markdown=await readFile(new URL('../lib/paper-markdown.js',import.meta.url),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function fixture(t,create,{source={paper_id:'synthetic',title:'Synthetic paper',page:2,quote:'A synthetic sentence.'},items=[],sync=()=>({hasMore:false}),searchUsage}={}){
  const dom=new JSDOM('',{url:'https://synthetic.invalid',runScripts:'outside-only'}),w=dom.window,calls=[],jumps=[];
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};w.confirm=()=>true;
- w.eval(script);const ui=w.PaperEncyclopedia.create({getSource:()=>source,toast:()=>{},openReference:ref=>jumps.push(ref),searchUsage,api:async(action,args)=>{calls.push({action,...args});if(action==='language_vocabulary_sync')return sync(args);if(action.endsWith('_list'))return {items,total:items.length};return create(args);}});
+ w.eval(markdown);w.eval(script);const ui=w.PaperEncyclopedia.create({getSource:()=>source,toast:()=>{},openReference:ref=>jumps.push(ref),searchUsage,api:async(action,args)=>{calls.push({action,...args});if(action==='language_vocabulary_sync')return sync(args);if(action.endsWith('_list'))return {items,total:items.length};return create(args);}});
  t.after(()=>w.close());return {w,ui,calls,jumps,click:label=>[...w.document.querySelectorAll('button')].find(n=>n.textContent===label).click(),input:label=>[...w.document.querySelectorAll('label')].find(n=>n.firstChild.textContent===label).querySelector('input,textarea'),submit:()=>w.document.querySelector('.wiki-word-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}))};
 }
 const result=args=>({id:'word',term:args.term,meaning:'合成的',meaning_source:'ai',status:'learning',encounters:[{paper_id:args.id,title:'Synthetic paper',page:args.page,source_sentence:args.source_sentence,sentence_translation:'一个合成句子。',author_background:args.author_background,model:{provider:'synthetic',model:'mock'}}]});
@@ -101,6 +102,24 @@ test('an inconclusive search returns to the word and reloads saved clues and que
  assert.match(report.textContent,/mixed use urban planning.*资料|mixed use urban planning.*足以支持释义/s);
  assert.equal(report.querySelector('a').textContent,'Saved clue');
  f.click('重新检索与解释');assert.equal(f.input('公开检索词').value,'mixed use urban planning');
+});
+
+test('saved research explanations render Markdown structure and keep only checked links actionable',async t=>{
+ const word={id:'word',revision:'rev1',term:'Synthetic concept',encounters:[],explanation:{
+  definition:{text:'这是**合成术语**。',citations:[1]},
+  paragraphs:[{text:'2. **用法**\n3. *例子*：[生成的链接](https://example.net/bad)\n<img src="https://example.net/image" onerror="alert(1)">',citations:[1]}],
+  sources:[{id:1,title:'Checked source',url:'https://example.edu/concept',evidence:'snippet'}]
+ }};
+ const f=fixture(t,()=>{}, {items:[word]});
+ f.ui.show('words');await tick();
+ const block=f.w.document.querySelector('.wiki-term-explanation');
+ assert.equal(block.querySelector('strong').textContent,'合成术语');
+ assert.equal(block.querySelector('ol').start,2);
+ assert.equal(block.querySelector('li em').textContent,'例子');
+ assert.equal(block.querySelector('img'),null);
+ assert.match(block.textContent,/生成的链接/);
+ assert.equal(block.querySelectorAll('.wiki-inline-citation').length,2);
+ assert.ok([...block.querySelectorAll('a')].every(link=>link.href==='https://example.edu/concept'));
 });
 
 test('opening vocabulary repairs only the current paper in bounded batches before showing saved terms',async t=>{

@@ -16,6 +16,7 @@ window.PaperLatexWorkspace = (() => {
   const AUTOSAVE_MS = 900;
   const AUTOCOMPILE_MS = 2500;
   const MAX_RENDERED_PAGES = 3;
+  const MAX_RENDERED_SPREADS = 2;
   const MAX_PREFETCH_DISPLAY_BYTES = 48 * 1024 * 1024;
   const PDF_PAGE_GAP = 16, PDF_PREVIEW_PADDING = 12;
   const MAX_PDF_SEARCH_HITS = 120;
@@ -40,7 +41,7 @@ window.PaperLatexWorkspace = (() => {
     let lastBuildOk = null, autoPaused = false, pendingCompile = false;
     const rendered = new Map();
     const pdfLoads = new Map();
-    let pdfWindowKey = '', pdfStages = new Map(), pdfPriority = new Set(), pdfScrollTop = 0, pdfScrollDirection = 1;
+    let pdfWindowKey = '', pdfStages = new Map(), pdfPriority = new Set(), pdfScrollTop = 0, pdfScrollDirection = 1, pdfRenderedWidth = 0;
     let pendingConflict = null;
     let settings = { ...DEFAULT_SETTINGS };
     let settingsRevision = null;
@@ -49,6 +50,7 @@ window.PaperLatexWorkspace = (() => {
     let chapterScope = null, navMode = 'outline', fileRequest = 0, navRequest = 0;
     let fileAbort = null, navAbort = null, mediaAbort = null, mediaRequest = 0;
     let pdfVersion = '', zoom = 1, mediaPath = null, mediaPage = 1, mediaZoom = 1, mediaCount = 0;
+    let pdfPagesPerRow = 1;
     let mediaGeometry = null, resizeTimer = null, outlineTimer = null;
     let switching = false, entryRequest = 0, openRequest = 0;
     let pdfBuild = null, pdfTool = 'select', pdfSelection = null, pdfSelectionTimer = null;
@@ -238,8 +240,6 @@ window.PaperLatexWorkspace = (() => {
         gitActions(false);
       }
     }
-
-    toolbar.append(title, projectSelect, mainLabel, saveState, compile, autoToggle, diagnosticsToggle, navToggle, layoutControls, reviewDivider, reviewToggle, aiToggle);
 
     const menu = make('div', 'latex-menu'); menu.id = 'latex-menu'; menu.setAttribute('aria-label', '项目与设置'); menu.hidden = true;
     const navigationActions = make('div'); navigationActions.id = 'latex-navigation-actions'; menu.append(navigationActions);
@@ -434,6 +434,16 @@ window.PaperLatexWorkspace = (() => {
     const pageLabel = make('span', 'latex-page-label'); pageLabel.id = 'latex-page-label'; pageLabel.textContent = '—';
     const zoomSelect = make('select'); zoomSelect.id = 'latex-zoom'; zoomSelect.setAttribute('aria-label', 'PDF 缩放');
     for (const [value, label] of [['1', '全宽'], ['1.25', '125%'], ['1.5', '150%'], ['2', '200%'], ['3', '300%'], ['4', '400%']]) { const option = make('option', '', label); option.value = value; zoomSelect.append(option); }
+    zoomSelect.value = String(zoom);
+    zoomSelect.title = '全宽适应当前 PDF 预览区域；百分比在此基础上放大';
+    const pdfDisplay = make('div', 'latex-layout-controls latex-pdf-display');
+    pdfDisplay.setAttribute('role', 'group'); pdfDisplay.setAttribute('aria-label', 'PDF 显示');
+    const spreadToggle = make('button', 'button subtle latex-layout-button', '双页'); spreadToggle.id = 'latex-pdf-spread'; spreadToggle.type = 'button';
+    spreadToggle.setAttribute('aria-pressed', 'false'); spreadToggle.title = '切换单页或双页连续预览';
+    const darkPdfToggle = make('button', 'button subtle latex-layout-button', '深色 PDF'); darkPdfToggle.id = 'latex-pdf-dark'; darkPdfToggle.type = 'button';
+    darkPdfToggle.setAttribute('aria-pressed', 'false'); darkPdfToggle.title = '切换 PDF 页面配色';
+    pdfDisplay.append(zoomSelect, spreadToggle, darkPdfToggle);
+    toolbar.append(title, projectSelect, mainLabel, saveState, compile, autoToggle, diagnosticsToggle, navToggle, layoutControls, pdfDisplay, reviewDivider, reviewToggle, aiToggle);
     const renderState = make('span', 'latex-render-state'); renderState.id = 'latex-render-state'; renderState.setAttribute('role', 'status');
     const pdfTools = make('div', 'latex-pdf-tools');
     for (const [mode, label] of [['select', '选择'], ['highlight', '高亮'], ['underline', '下划线'], ['strikeout', '删除线'], ['comment', '批注'], ['note', '区域']]) {
@@ -448,7 +458,7 @@ window.PaperLatexWorkspace = (() => {
     const toPdf = make('button', 'button subtle', '跳到 PDF'); toPdf.id = 'latex-synctex-forward'; toPdf.type = 'button';
     toPdf.title = '把编辑器光标所在行定位到 PDF（SyncTeX）；双击 PDF 可反向跳到源码';
     toPdf.setAttribute('aria-label', '从光标行跳到 PDF 对应位置');
-    previewHead.append(pagePrev, pageLabel, pageNext, zoomSelect, toPdf, renderState);
+    previewHead.append(pagePrev, pageLabel, pageNext, toPdf, renderState);
     const preview = make('div', 'latex-preview'); preview.id = 'latex-preview';
     const selectionHighlight = make('button', 'button latex-selection-highlight', '添加高亮');
     selectionHighlight.type = 'button'; selectionHighlight.hidden = true;
@@ -556,6 +566,7 @@ window.PaperLatexWorkspace = (() => {
       right.hidden = mode === 'source';
       splitter.hidden = mode !== 'split';
       for (const [candidate, button] of layoutButtons) button.setAttribute('aria-pressed', String(candidate === mode));
+      syncPdfDisplay();
       if (mode === 'pdf') setTab('pdf');
       if (mode !== 'source') requestResize();
     }
@@ -622,7 +633,7 @@ window.PaperLatexWorkspace = (() => {
       reviewer.beginSource();
     });
     function updateSyncHint() {
-      const position = pageCount ? `第 ${page} / ${pageCount} 页 · ` : '';
+      const position = pageCount ? `${pdfPageLabel()} · ` : '';
       syncHint.textContent = position + (pdfSource.kind === 'version' ? '历史版本只读预览；当前源码不能与此 PDF 同步定位或写入批注。' : (dirty ? '源码有未保存修改；PDF 仍属于上次编译，双击定位暂停。' : (pdfBuild?.reason || '编译后可双击正文定位源码；自审批注保存在审阅副本。')));
     }
 
@@ -649,6 +660,7 @@ window.PaperLatexWorkspace = (() => {
     function setTab(name, version = versionMode) {
       if (name !== 'pdf') clearPdfSelection();
       tab = name;
+      syncPdfDisplay();
       if (!rail) syncRailToggle();
       previewHead.hidden = name !== 'pdf'; pdfTools.hidden = name !== 'pdf'; mediaHead.hidden = name !== 'media';
       for (const [candidate, button] of tabButtons) {
@@ -660,6 +672,10 @@ window.PaperLatexWorkspace = (() => {
       if (name === 'ai' && project) void aiStatus();
       if (name === 'version') setVersionMode(version);
       if (name === 'pdf' && pageCount) requestResize();
+    }
+    function syncPdfDisplay() {
+      const disabled = tab !== 'pdf' || layout === 'source';
+      zoomSelect.disabled = spreadToggle.disabled = darkPdfToggle.disabled = disabled;
     }
     function lineNumbers() {
       if (sourceEditor) return; // CodeMirror renders only the visible gutter lines.
@@ -1637,7 +1653,7 @@ window.PaperLatexWorkspace = (() => {
       clearPdfSelection();
       pdfStages.clear(); cancelPdfLoads(); pdfWindowKey = '';
       pdfPriority.clear();
-      pdfScrollTop = 0; pdfScrollDirection = 1;
+      pdfScrollTop = 0; pdfScrollDirection = 1; pdfRenderedWidth = 0;
       preview.setAttribute('aria-busy', 'false');
       for (const item of rendered.values()) URL.revokeObjectURL(item.url);
       rendered.clear();
@@ -1692,33 +1708,53 @@ window.PaperLatexWorkspace = (() => {
       // without ever requesting fewer pixels than the display needs.
       return Math.ceil(width * (window.devicePixelRatio || 1) / geometry.width * 8) / 8;
     }
-    function pdfMetrics(width) {
-      let top = 0;
-      return pageGeometry.map(geometry => {
-        const height = width * geometry.height / geometry.width;
-        const metric = { top, height }; top += height + PDF_PAGE_GAP; return metric;
-      });
+    const pdfRow = number => Math.ceil(number / pdfPagesPerRow);
+    const firstPdfPage = row => (row - 1) * pdfPagesPerRow + 1;
+    const pdfGutter = () => (pdfPagesPerRow - 1) * PDF_PAGE_GAP;
+    const pdfWidth = () => Math.max(80, (previewWidth(preview) - pdfGutter()) / pdfPagesPerRow) * zoom;
+    const pdfHeight = (width, number) => width * pageGeometry[number - 1].height / pageGeometry[number - 1].width;
+    function pdfPageLabel() {
+      const first = firstPdfPage(pdfRow(page));
+      const last = Math.min(pageCount, first + pdfPagesPerRow - 1);
+      return `第 ${first === last ? first : `${first}–${last}`} / ${pageCount} 页`;
     }
-    function pdfPageAt(metrics, point) {
-      let low = 0, high = metrics.length - 1;
-      while (low < high) { const mid = Math.floor((low + high + 1) / 2); if (metrics[mid].top <= point) low = mid; else high = mid - 1; }
+    function pdfRows(width) {
+      let top = 0;
+      const rows = [];
+      for (let number = 1; number <= pageGeometry.length; number += pdfPagesPerRow) {
+        const last = Math.min(number + pdfPagesPerRow - 1, pageGeometry.length);
+        const height = Math.max(pdfHeight(width, number), pdfHeight(width, last));
+        rows.push({ top, height }); top += height + PDF_PAGE_GAP;
+      }
+      return rows;
+    }
+    function pdfRowAt(rows, point) {
+      let low = 0, high = rows.length - 1;
+      while (low < high) { const mid = Math.floor((low + high + 1) / 2); if (rows[mid].top <= point) low = mid; else high = mid - 1; }
       return low + 1;
     }
-    function pdfNearby(metrics, wanted, scroll) {
-      const top = (scroll ? metrics[wanted - 1].top : (preview.scrollTop || 0)) - PDF_PREVIEW_PADDING;
-      const first = pdfPageAt(metrics, top), firstMetric = metrics[first - 1];
-      const visibleStart = firstMetric.top + firstMetric.height <= top && first < pageCount ? first + 1 : first;
+    function pdfNearby(rows, wanted, scrollTop) {
+      const maxRows = pdfPagesPerRow === 1 ? MAX_RENDERED_PAGES : MAX_RENDERED_SPREADS;
+      const top = scrollTop - PDF_PREVIEW_PADDING;
+      const first = pdfRowAt(rows, top), firstMetric = rows[first - 1];
+      const visibleStart = firstMetric.top + firstMetric.height <= top && first < rows.length ? first + 1 : first;
       const bottom = top + Math.max(1, preview.clientHeight);
-      const last = pdfPageAt(metrics, bottom - .01);
+      const last = pdfRowAt(rows, bottom - .01);
       // The incoming page becomes urgent as soon as the gap reaches the viewport.
-      const gapNeighbor = pdfPageAt(metrics, bottom + PDF_PAGE_GAP);
+      const gapNeighbor = pdfRowAt(rows, bottom + PDF_PAGE_GAP);
       // Keep the outgoing page until it leaves the viewport. Use the freed
       // slot for the approaching page while the current one is still visible.
-      const approaching = pdfScrollDirection < 0 ? Math.min(visibleStart, Math.max(visibleStart - 1, last - MAX_RENDERED_PAGES + 1)) : visibleStart;
-      const start = Math.max(1, wanted - MAX_RENDERED_PAGES + 1, Math.min(wanted, approaching, pageCount - MAX_RENDERED_PAGES + 1));
-      const pages = Array.from({ length: Math.min(MAX_RENDERED_PAGES, pageCount - start + 1) }, (_, index) => start + index);
+      const approaching = pdfScrollDirection < 0 ? Math.min(visibleStart, Math.max(visibleStart - 1, last - maxRows + 1)) : visibleStart;
+      const start = Math.max(1, wanted - maxRows + 1, Math.min(wanted, approaching, rows.length - maxRows + 1));
+      const end = Math.min(start + maxRows - 1, rows.length);
+      const startPage = firstPdfPage(start), endPage = Math.min(firstPdfPage(end + 1) - 1, pageCount);
+      const pages = Array.from({ length: endPage - startPage + 1 }, (_, index) => startPage + index);
       const priorityStart = pdfScrollDirection < 0 ? first : visibleStart;
-      return { pages, priority: new Set([wanted, ...pages.filter(number => number >= priorityStart && number <= gapNeighbor)]) };
+      const priority = new Set(pages.filter(number => {
+        const row = pdfRow(number);
+        return row === wanted || (row >= priorityStart && row <= gapNeighbor);
+      }));
+      return { pages, priority, start, end };
     }
     async function renderPage(number, { scroll = true, retry = false } = {}) {
       if (!project || !pageCount) return;
@@ -1726,19 +1762,23 @@ window.PaperLatexWorkspace = (() => {
       const wanted = page, id = project.id, epoch = generation, source = pdfSource, sourceEpoch = pdfSourceEpoch;
       const geometry = pageGeometry[wanted - 1];
       if (!geometry) return;
-      const width = previewWidth(preview, zoom);
-      const metrics = pdfMetrics(width), metric = metrics[wanted - 1];
-      const previousScroll = preview.scrollTop || 0;
-      const delta = (scroll ? metric.top : previousScroll) - pdfScrollTop;
+      const width = pdfWidth(), row = pdfRow(wanted);
+      const rows = pdfRows(width), metric = rows[row - 1];
+      let targetScroll = scroll ? metric.top : preview.scrollTop || 0;
+      if (!scroll && pdfRenderedWidth && pdfRenderedWidth !== width) {
+        const oldRow = pdfRows(pdfRenderedWidth)[row - 1];
+        targetScroll = Math.max(0, metric.top + (targetScroll - oldRow.top) * width / pdfRenderedWidth);
+      }
+      const delta = targetScroll - pdfScrollTop;
       if (delta) pdfScrollDirection = Math.sign(delta);
-      pageLabel.textContent = `第 ${wanted} / ${pageCount} 页`;
+      pageLabel.textContent = pdfPageLabel();
       updateSyncHint();
-      pagePrev.disabled = page <= 1; pageNext.disabled = page >= pageCount;
-      const { pages: nearby, priority } = pdfNearby(metrics, wanted, scroll);
+      pagePrev.disabled = row === 1; pageNext.disabled = row === rows.length;
+      const { pages: nearby, priority, start, end } = pdfNearby(rows, row, targetScroll);
       pdfPriority = priority;
       const sourceKey = source.kind === 'version' ? `version:${source.versionId}:${source.reviewPdfVersion || ''}` : 'current';
       const keys = new Map(nearby.map(value => [value, `${id}:${sourceKey}:${value}:${pdfVersion}:${density(width, pageGeometry[value - 1])}`]));
-      const windowKey = `${width}:${[...keys.values()].join('|')}`;
+      const windowKey = `${pdfPagesPerRow}:${width}:${[...keys.values()].join('|')}`;
       const changed = windowKey !== pdfWindowKey;
       if (changed) {
         clearPdfSelection();
@@ -1747,24 +1787,33 @@ window.PaperLatexWorkspace = (() => {
         for (const [key, value] of rendered) if (!kept.has(key)) { URL.revokeObjectURL(value.url); rendered.delete(key); }
         const existing = pdfStages; pdfStages = new Map();
         preview.textContent = '';
-        const before = make('div', 'latex-page-spacer'); before.style.height = `${metrics[nearby[0] - 1].top}px`; before.style.flex = '0 0 auto'; before.setAttribute('aria-hidden', 'true');
+        const before = make('div', 'latex-page-spacer'); before.style.height = `${rows[start - 1].top}px`; before.style.flex = '0 0 auto'; before.setAttribute('aria-hidden', 'true');
         const after = make('div', 'latex-page-spacer');
-        const last = metrics[metrics.length - 1];
-        const final = metrics[nearby[nearby.length - 1] - 1];
+        const last = rows[rows.length - 1];
+        const final = rows[end - 1];
         after.style.height = `${Math.max(0, last.top + last.height - final.top - final.height)}px`; after.style.flex = '0 0 auto'; after.setAttribute('aria-hidden', 'true');
         preview.append(before);
+        let strip;
         for (const number of nearby) {
-          const item = metrics[number - 1], old = existing.get(number);
+          const row = pdfRow(number);
+          if (number === firstPdfPage(row)) {
+            strip = make('div', 'latex-page-row');
+            strip.style.width = `${width * pdfPagesPerRow + pdfGutter()}px`;
+            if (row !== end) strip.style.marginBottom = `${PDF_PAGE_GAP}px`;
+            preview.append(strip);
+          }
+          const old = existing.get(number);
           const stage = old?.dataset.renderKey === keys.get(number) && old.style.width === `${width}px` ? old : make('div', 'latex-page-stage');
-          stage.style.width = `${width}px`; stage.style.height = `${item.height}px`;
-          stage.dataset.page = String(number); stage.dataset.renderKey = keys.get(number); pdfStages.set(number, stage); preview.append(stage);
+          stage.style.width = `${width}px`; stage.style.height = `${pdfHeight(width, number)}px`;
+          stage.dataset.page = String(number); stage.dataset.renderKey = keys.get(number); pdfStages.set(number, stage); strip.append(stage);
           patchPdfSearch(stage);
-          if (number !== nearby[nearby.length - 1]) { const gap = make('div', 'latex-page-spacer'); gap.style.height = `${PDF_PAGE_GAP}px`; gap.style.flex = '0 0 auto'; preview.append(gap); }
         }
         preview.append(after);
         cancelPdfLoads();
       }
-      if (scroll || changed) preview.scrollTop = scroll ? metric.top : previousScroll;
+      if (scroll || changed) preview.scrollTop = targetScroll;
+      if (scroll && pdfPagesPerRow === 2) preview.scrollLeft = (wanted - firstPdfPage(row)) * (width + PDF_PAGE_GAP);
+      pdfRenderedWidth = width;
       pdfScrollTop = preview.scrollTop || 0;
       const stages = pdfStages;
       const load = async (number, stage) => {
@@ -1977,7 +2026,7 @@ window.PaperLatexWorkspace = (() => {
     function requestResize() {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
-        if (!view.hidden && tab === 'pdf' && pageCount) void renderPage(page, { scroll: false });
+        if (!view.hidden && layout !== 'source' && tab === 'pdf' && pageCount) void renderPage(page, { scroll: false });
         if (!view.hidden && tab === 'media' && mediaPath && mediaGeometry) void openMedia(mediaPath, { page: mediaPage, refresh: true });
       }, 180);
     }
@@ -1985,11 +2034,23 @@ window.PaperLatexWorkspace = (() => {
     resizeObserver?.observe(right);
     window.addEventListener('resize', requestResize);
     zoomSelect.addEventListener('change', () => { zoom = Number(zoomSelect.value); void renderPage(page); });
+    spreadToggle.addEventListener('click', () => {
+      pdfPagesPerRow = pdfPagesPerRow === 1 ? 2 : 1;
+      spreadToggle.setAttribute('aria-pressed', String(pdfPagesPerRow === 2));
+      preview.scrollLeft = 0;
+      void renderPage(page);
+    });
+    darkPdfToggle.addEventListener('click', () => {
+      const active = preview.classList.toggle('latex-dark-pdf');
+      darkPdfToggle.setAttribute('aria-pressed', String(active));
+    });
     preview.addEventListener('scroll', () => {
       clearPdfSelection();
       if (!pageCount || !project || tab !== 'pdf') return;
-      const metrics = pdfMetrics(previewWidth(preview, zoom));
-      const next = pdfPageAt(metrics, Math.max(0, (preview.scrollTop || 0) + (preview.clientHeight || 0) * .35));
+      const top = preview.scrollTop || 0;
+      if (top === pdfScrollTop) return;
+      const row = pdfRowAt(pdfRows(pdfRenderedWidth || pdfWidth()), top + preview.clientHeight * .35);
+      const next = pdfRow(page) === row ? page : firstPdfPage(row);
       void renderPage(next, { scroll: false });
     }, { passive: true });
 
@@ -2046,8 +2107,8 @@ window.PaperLatexWorkspace = (() => {
     mediaPlus.addEventListener('click', () => { mediaZoom = Math.min(4, mediaZoom * 1.25); if (mediaPath) void openMedia(mediaPath, { page: mediaPage, refresh: true }); });
     mediaMinus.addEventListener('click', () => { mediaZoom = Math.max(0.25, mediaZoom / 1.25); if (mediaPath) void openMedia(mediaPath, { page: mediaPage, refresh: true }); });
 
-    pagePrev.addEventListener('click', () => void renderPage(page - 1));
-    pageNext.addEventListener('click', () => void renderPage(page + 1));
+    pagePrev.addEventListener('click', () => void renderPage(firstPdfPage(pdfRow(page) - 1)));
+    pageNext.addEventListener('click', () => void renderPage(firstPdfPage(pdfRow(page) + 1)));
 
     async function searchProject(scope, query, { signal, cursor }) {
       if (!project || project.exists === false || switching) throw new Error('请先打开可用的 LaTeX 项目。');
@@ -2169,10 +2230,10 @@ window.PaperLatexWorkspace = (() => {
       await renderPage(hit.page);
       if (!isCurrent()) return;
       const geometry = pageGeometry[hit.page - 1], rect = hit.rects[0];
-      const metric = pdfMetrics(previewWidth(preview, zoom))[hit.page - 1];
+      const width = pdfWidth(), metric = pdfRows(width)[pdfRow(hit.page) - 1];
       if (geometry && metric && rect) {
         const center = (rect[1] + rect[3]) / (2 * geometry.height);
-        preview.scrollTop = Math.max(0, metric.top + center * metric.height - preview.clientHeight / 2);
+        preview.scrollTop = Math.max(0, metric.top + center * pdfHeight(width, hit.page) - preview.clientHeight / 2);
       }
     }
 
