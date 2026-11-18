@@ -13,7 +13,8 @@ const tick = () => new Promise(done => setImmediate(done))
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
 const image = { image: 'aW1hZ2U=', width: 600, height: 800, pixel_width: 1200, pixel_height: 1600, page_count: 4, bytes: 5, supported: true }
 
-async function fixture(override = () => undefined, { review = false, versions = false, spellChecker, writingTools, sourceEditor, onContext, rail, onSettingsClose } = {}) {
+async function fixture(override = () => undefined, { review = false, versions = false, spellChecker, writingTools, sourceEditor, memoryFactory, onContext, rail, onSettingsClose } = {}) {
+  let timerSequence=0;
   const ids = new Map(), revoked = [], calls = [], urls = [], timers = new Map()
   class Element {
     constructor(tag = 'div') {
@@ -33,7 +34,7 @@ async function fixture(override = () => undefined, { review = false, versions = 
     async dispatch(key, args = {}) { await Promise.all((this.events.get(key) || []).map(fn => fn({ target: this, preventDefault() {}, stopPropagation() {}, ...args }))) }
     querySelectorAll(selector) { const matches = node => selector === 'button[data-path]' ? node.tagName === 'BUTTON' && node.dataset.path : selector.startsWith('.') ? node.className?.split(' ').includes(selector.slice(1)) : node.tagName.toLowerCase() === selector; return this.children.flatMap(node => [...(matches(node) ? [node] : []), ...node.querySelectorAll(selector)]) }
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null }
-    get selectedOptions() { return this.children.filter(node => node.value === this.value) }
+    get selectedOptions() { return this.querySelectorAll('option').filter(node => node.value === this.value) }
     focus() {} showModal() { this.open = true } close() { this.open = false }
     setSelectionRange(a, b) { this.selectionStart = a; this.selectionEnd = b }
     getBoundingClientRect() { return { left: 0, top: 0, right: this.clientWidth, bottom: this.clientHeight, width: this.clientWidth, height: this.clientHeight } }
@@ -43,6 +44,7 @@ async function fixture(override = () => undefined, { review = false, versions = 
   const api = async (action, args, options) => {
     calls.push({ action, ...args, signal: options?.signal })
     const response = override(action, args, options); if (response !== undefined) return await response
+    if (action === 'latex_memory_get' || action === 'latex_memory_save' || action === 'latex_favorite_set') return {favorites:[],recent:[]};
     if (action === 'settings_get') return { value: { latex_auto_compile: false }, revision: '1' }
     if (action === 'latex_ws_status') return { root: '/synthetic', sync: {} }
     if (action === 'latex_project_list') return { projects: ['one', 'two'].map(id => ({ id, title: id, main_path: 'main.tex', pdf_present: true })) }
@@ -59,10 +61,11 @@ async function fixture(override = () => undefined, { review = false, versions = 
     static createObjectURL() { const url = `blob:${urls.length}`; urls.push(url); return url }
     static revokeObjectURL(url) { revoked.push(url) }
   }
-  const globals = { window, document, crypto: webcrypto, AbortController, Event, Uint8Array, Blob, Range: { START_TO_START: 0, END_TO_END: 2 }, atob: value => Buffer.from(value, 'base64').toString('binary'), URL: FixtureURL, setTimeout: (fn, ms) => { const id = timers.size + 1; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id), getComputedStyle: () => ({ lineHeight: '20' }) }
+  const globals = { window, document, crypto: webcrypto, AbortController, Event, Uint8Array, Blob, Range: { START_TO_START: 0, END_TO_END: 2 }, atob: value => Buffer.from(value, 'base64').toString('binary'), URL: FixtureURL, setTimeout: (fn, ms) => { const id = ++timerSequence; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id), getComputedStyle: () => ({ lineHeight: '20' }) }
   if (spellChecker) window.PaperLatexSpelling = { checkSpelling: spellChecker }
   if (writingTools) window.PaperLatexWritingTools = { create: () => writingTools }
   if (sourceEditor) window.PaperLatexEditor = { create: () => sourceEditor }
+  if(memoryFactory)window.PaperLatexEditor={...window.PaperLatexEditor,createProjectMemory:memoryFactory};
   if (review) vm.runInNewContext(reviewSource, globals)
   if (versions) vm.runInNewContext(versionSource, globals)
   vm.runInNewContext(searchSource, globals)
@@ -2050,4 +2053,84 @@ test('preset themes and custom backgrounds are local, readable and restore witho
  const line=f.ids.get('latex-setting-editor-line-height');line.value='relaxed';await line.dispatch('change');await tick();assert.equal(root.style['--latex-editor-line-height'],'1.9');
  assert.equal(f.window.dataset.latexTheme,undefined);assert.equal(f.ids.get('latex-preview').classList.contains('latex-dark-pdf'),false);
  f.ui.dispose();
+});
+
+async function projectMemoryFixture(seed=[]){
+ const {createLatexProjectMemory}=await import('../src/latex-project-memory.mjs');const records=new Map();
+ const store={get:async key=>structuredClone(records.get(key)||{value:null,revision:0}),put:async(key,value,expected)=>{const previous=records.get(key)||{revision:0};if(previous.revision!==expected)throw Object.assign(Error('conflict'),{code:'STATE_CONFLICT'});const record={value:structuredClone(value),revision:expected+1};records.set(key,record);return structuredClone(record);}};
+ const memory=createLatexProjectMemory({store});for(const input of seed)await memory(input);return memory;
+}
+const memoryActions=new Set(['latex_memory_get','latex_memory_save','latex_favorite_set']);
+const savedPosition=(id='two',extra={})=>({action:'latex_memory_save',id,title:id,root:'',binding_generation:0,path:'b.tex',revision:'revision',selection_start:5,selection_end:9,line:1,column:5,scroll_top:50,pdf_page:3,zoom:1.5,layout:'source',...extra});
+
+test('favorites lead the picker while reopening resumes the last project, file, cursor and PDF page',async()=>{
+ const memory=await projectMemoryFixture([{action:'latex_favorite_set',id:'one',title:'one',favorite:true},savedPosition()]);
+ const override=(action,args)=>memoryActions.has(action)?memory({action,...args}):undefined;
+ const f=await fixture(override);await tick();
+ assert.equal(f.ui.testHooks.state().project,'two');assert.equal(f.ui.testHooks.state().file,'b.tex');assert.equal(f.ui.testHooks.state().page,3);
+ assert.equal(f.ids.get('latex-editor').selectionStart,5);assert.equal(f.ids.get('latex-editor').selectionEnd,9);assert.equal(f.ids.get('latex-editor').scrollTop,50);assert.equal(f.ids.get('latex-zoom').value,'1.5');
+ assert.equal(f.ids.get('latex-project').children[0].label,'收藏项目');assert.equal(f.ids.get('latex-project').children[0].children[0].value,'one');
+ await f.ids.get('latex-project-favorite').dispatch('click');assert.equal((await memory({action:'latex_memory_get'})).favorites.length,2);assert.equal(f.ids.get('latex-project-favorite').attributes['aria-pressed'],'true');
+ const editor=f.ids.get('latex-editor');editor.selectionStart=2;editor.selectionEnd=2;editor.scrollTop=85;
+ await f.ui.close();f.ui.dispose();const next=await fixture(override);
+ assert.equal(next.ui.testHooks.state().file,'b.tex');assert.equal(next.ids.get('latex-editor').selectionStart,2);assert.equal(next.ids.get('latex-editor').scrollTop,85);
+ assert.ok(!next.calls.some(call=>call.action==='latex_write'));next.ui.dispose();
+});
+
+test('updated source resumes by line, while a relocated project never reuses the old folder position',async()=>{
+ const memory=await projectMemoryFixture([savedPosition('one',{path:'main.tex',revision:'older',line:2,column:3,selection_start:999,selection_end:999})]);
+ const f=await fixture((action,args)=>memoryActions.has(action)?memory({action,...args}):undefined);
+ assert.equal(f.ids.get('latex-editor').selectionStart,'main.tex\n'.length+3);f.ui.dispose();
+ const rebound=await projectMemoryFixture([savedPosition('one',{root:'/old',binding_generation:0})]);
+ const next=await fixture((action,args)=>{
+  if(memoryActions.has(action))return rebound({action,...args});
+  if(action==='latex_project_list')return{projects:[{id:'one',title:'one',root:'/new',binding_generation:1,main_path:'main.tex',pdf_present:false}]};
+ });assert.equal(next.ui.testHooks.state().file,'main.tex');assert.notEqual(next.ids.get('latex-editor').selectionStart,5);next.ui.dispose();
+});
+
+test('a missing remembered file falls back to the main file without changing source or dropping favorites',async()=>{
+ const memory=await projectMemoryFixture([{action:'latex_favorite_set',id:'one',title:'one',favorite:true},savedPosition('one',{path:'deleted.tex'})]);
+ const f=await fixture((action,args)=>{
+  if(memoryActions.has(action))return memory({action,...args});
+  if(action==='latex_read'&&args.path==='deleted.tex')throw Error('synthetic missing file');
+ });assert.equal(f.ui.testHooks.state().file,'main.tex');assert.equal(f.ids.get('latex-project-favorite').attributes['aria-pressed'],'true');assert.ok(!f.calls.some(call=>call.action==='latex_write'));f.ui.dispose();
+});
+
+test('a late project position cannot steal a newer selected project',async()=>{
+ const memory=await projectMemoryFixture();let delay=false;const pending=deferred();
+ const f=await fixture((action,args)=>{
+  if(action==='latex_memory_get'&&args.id==='one'&&delay)return pending.promise;
+  if(memoryActions.has(action))return memory({action,...args});
+ });delay=true;const old=f.ui.testHooks.setProject('one');await tick();await f.ui.testHooks.setProject('two');pending.resolve({session:savedPosition('one')});await old;
+ assert.equal(f.ui.testHooks.state().project,'two');assert.equal(f.ui.testHooks.state().file,'main.tex');f.ui.dispose();
+});
+
+test('a favorite outside the first catalog batch remains selectable and loads its current identity',async()=>{
+ const memory=await projectMemoryFixture([{action:'latex_favorite_set',id:'outside',title:'Favorite outside the batch',favorite:true}]);
+ const f=await fixture((action,args)=>{
+  if(memoryActions.has(action))return memory({action,...args});
+  if(action==='latex_project_get'&&args.id==='outside')return{project:{id:'outside',title:'Favorite outside the batch',main_path:'main.tex',pdf_present:false}};
+ });
+ assert.equal(f.ids.get('latex-project').children[0].children[0].value,'outside');await f.ui.testHooks.setProject('outside');
+ assert.equal(f.ui.testHooks.state().project,'outside');assert.equal(f.ui.testHooks.state().file,'main.tex');f.ui.dispose();
+});
+
+test('a rejected favorite save leaves the star unchanged and never blocks closing a saved source',async()=>{
+ const memory=await projectMemoryFixture();
+ const f=await fixture((action,args)=>{
+  if(action==='latex_favorite_set')throw Error('synthetic storage unavailable');
+  if(memoryActions.has(action))return memory({action,...args});
+ });await tick();await f.ids.get('latex-project-favorite').dispatch('click');
+ assert.equal(f.ids.get('latex-project-favorite').attributes['aria-pressed'],'false');await f.ui.close();assert.equal(f.ui.isOpen(),false);f.ui.dispose();
+});
+
+test('editor shared memory works through the existing host state API without reloading a busy plugin',async()=>{
+ const{createLatexProjectMemory}=await import('../src/latex-project-memory.mjs');const records=new Map();
+ const f=await fixture((action,args)=>{
+  if(action==='state_get')return records.get(args.key)||{value:null,revision:0};
+  if(action==='state_put'){const current=records.get(args.key)||{revision:0};assert.equal(current.revision,args.expected_revision);const next={value:args.value,revision:current.revision+1};records.set(args.key,next);return next;}
+ },{memoryFactory:createLatexProjectMemory});await tick();
+ await f.ids.get('latex-project-favorite').dispatch('click');await f.ui.close();
+ assert.equal(records.get('reader:latex-projects:index').value.favorites[0].id,'one');assert.equal(records.get('reader:latex-projects:session:one').value.path,'main.tex');
+ assert.ok(!f.calls.some(call=>memoryActions.has(call.action)));f.ui.dispose();
 });

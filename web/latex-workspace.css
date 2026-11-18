@@ -546,3 +546,7 @@ body > #latex-view { height: 100dvh; }
 .latex-appearance-grid select{width:100%;min-width:0;max-width:none}
 .latex-appearance-grid .latex-check>span,.latex-appearance-field>span{font-size:12px;color:var(--muted)}
 .latex-appearance-field .latex-menu-row{margin-top:5px}.latex-appearance-grid input[type=color]{width:38px;flex-basis:38px}
+
+.latex-toolbar .latex-project-favorite{font-size:20px;width:30px;min-width:30px;padding:0;line-height:1}
+.latex-project-favorite[aria-pressed=true]{color:var(--latex-active-marker);background:var(--latex-active-bg)}
+#latex-project-memory-retry{font-size:11px}

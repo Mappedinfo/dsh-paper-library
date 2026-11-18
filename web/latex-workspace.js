@@ -66,6 +66,16 @@ window.PaperLatexWorkspace = (() => {
     let pdfBuild = null, pdfTool = 'select', pdfSelection = null, pdfSelectionTimer = null;
     let pdfSource = { kind: 'current' }, pdfSourceEpoch = 0, pdfSourceIntent = 0;
     let projectSearch = null;
+    let projectMemory={favorites:[],recent:[],last_project:null}, memoryLoaded=false, memoryTimer=null, memoryTail=Promise.resolve(), restoringMemory=false, favoriteBusy=false, memoryUnavailable=false;
+    let activeSession=null, memoryFingerprint=null,projectChoiceRequest=0,memoryClient=null;
+    // 编辑器包复用与主机相同的校验／合并逻辑；旧主机也能通过既有状态接口续写。
+    function memoryRequest(action,input={}){
+      if(!memoryClient&&window.PaperLatexEditor?.createProjectMemory)memoryClient=window.PaperLatexEditor.createProjectMemory({store:{
+        get:key=>api('state_get',{key},{keepalive:true}),
+        put:(key,value,expected_revision)=>api('state_put',{key,value,expected_revision},{keepalive:true}),
+      }});
+      return memoryClient?memoryClient({action,...input}):api(action,input,{keepalive:true});
+    }
 
     // A standalone surface, like the whiteboard: the page itself becomes the workspace and
     // `?view=latex` opens it without the library, so a DSH tab can host it directly.
@@ -93,6 +103,8 @@ window.PaperLatexWorkspace = (() => {
     // ---- toolbar: project, compile, and one menu for everything project-shaped ----
     const toolbar = make('header', 'latex-toolbar'); toolbar.setAttribute('aria-label', 'LaTeX 工作台工具栏');
     const projectSelect = make('select'); projectSelect.id = 'latex-project'; projectSelect.setAttribute('aria-label', '选择 LaTeX 项目');
+    const favoriteProject=make('button','button subtle latex-project-favorite','☆');favoriteProject.id='latex-project-favorite';favoriteProject.type='button';favoriteProject.setAttribute('aria-label','收藏当前项目');favoriteProject.setAttribute('aria-pressed','false');favoriteProject.disabled=true;
+    const memoryRetry=make('button','button subtle','重试保存位置');memoryRetry.id='latex-project-memory-retry';memoryRetry.type='button';memoryRetry.hidden=true;
     const compile = make('button', 'button primary', '编译'); compile.id = 'latex-compile'; compile.type = 'button';
     const diagnosticsToggle = make('button', 'button subtle latex-diagnostics-toggle', '编译状态'); diagnosticsToggle.id = 'latex-diagnostics-toggle'; diagnosticsToggle.type = 'button';
     diagnosticsToggle.setAttribute('aria-expanded', 'false'); diagnosticsToggle.setAttribute('aria-controls', 'latex-errors');
@@ -473,7 +485,7 @@ window.PaperLatexWorkspace = (() => {
     const darkPdfToggle = make('button', 'button subtle latex-layout-button', '深色 PDF'); darkPdfToggle.id = 'latex-pdf-dark'; darkPdfToggle.type = 'button';
     darkPdfToggle.setAttribute('aria-pressed', 'false'); darkPdfToggle.title = '切换 PDF 页面配色';
     pdfDisplay.append(zoomSelect, spreadToggle, darkPdfToggle);
-    toolbar.append(title, projectSelect, mainLabel, saveState, compile, editorFontControls, autoToggle, diagnosticsToggle, navToggle, aiToggle, reviewToggle, sidebarDivider, layoutControls, pdfDisplay);
+    toolbar.append(title, projectSelect, favoriteProject, memoryRetry, mainLabel, saveState, compile, editorFontControls, autoToggle, diagnosticsToggle, navToggle, aiToggle, reviewToggle, sidebarDivider, layoutControls, pdfDisplay);
     const renderState = make('span', 'latex-render-state'); renderState.id = 'latex-render-state'; renderState.setAttribute('role', 'status');
     const pdfTools = make('div', 'latex-pdf-tools');
     for (const [mode, label] of [['select', '选择'], ['highlight', '高亮'], ['underline', '下划线'], ['strikeout', '删除线'], ['comment', '批注'], ['note', '区域']]) {
@@ -599,6 +611,7 @@ window.PaperLatexWorkspace = (() => {
       syncPdfDisplay();
       if (mode === 'pdf') setTab('pdf');
       if (mode !== 'source') requestResize();
+      scheduleProjectMemory();
     }
     function setNavigatorVisible(visible) {
       if (navigator.hidden === !visible) return;
@@ -715,13 +728,15 @@ window.PaperLatexWorkspace = (() => {
       gutter.textContent = buffer.join('\n');
       gutter.scrollTop = editor.scrollTop;
     }
+    preview.addEventListener('scroll',scheduleProjectMemory);
     editor.addEventListener('scroll', () => { gutter.scrollTop = editor.scrollTop; });
     editor.addEventListener('input', () => {
       dirty = true; pendingConflict = null; conflictBar.hidden = true; lineNumbers(); setSaveState('未保存', 'dirty'); scheduleSave();
       projectSearch?.reset('source');
       updateSyncHint(); if (!sourceEditor) updateNavigatorActive(); scheduleSpelling();
     });
-    editor.addEventListener('select', () => updateNavigatorActive());
+    editor.addEventListener('select', () => {updateNavigatorActive();scheduleProjectMemory();});
+    for(const event of ['input','scroll','click','keyup'])editor.addEventListener(event,scheduleProjectMemory);
     if (!sourceEditor) for (const event of ['click', 'keyup']) editor.addEventListener(event, () => updateNavigatorActive());
     let spellEnabled = true, spellTimer = null, spellRevision = 0, spellLoaded = false, spellEpoch = 0, spellingLoading = null;
     const dictionaryKey = 'reader:latex-custom-dictionary';
@@ -1279,6 +1294,7 @@ window.PaperLatexWorkspace = (() => {
           revision = result.revision;
           dirty = editor.value !== body;
           setSaveState(result.changed ? '已保存' : '没有改动', 'saved');
+          void rememberProject(true);
           if (reason === 'manual') say(`已保存 ${file}（${result.bytes} 字节）`);
           if (result.changed) {
             scheduleCompile(); scheduleOutline();
@@ -1343,13 +1359,88 @@ window.PaperLatexWorkspace = (() => {
       const body = editor.value;
       try {
         const result = await api('latex_write', { id: project.id, path: pendingConflict.path, content: body, expected_revision: pendingConflict.current.revision, origin: 'reader' });
-        revision = result.revision; dirty = false; pendingConflict = null; conflictBar.hidden = true; setSaveState('已覆盖保存', 'saved');
+        revision = result.revision; dirty = false; pendingConflict = null; conflictBar.hidden = true; setSaveState('已覆盖保存', 'saved');void rememberProject(true);
         say('已用你的版本覆盖，并保留了一份写入前历史。');
         scheduleCompile();
       } catch (error) {
         say(`覆盖失败：${error.message}`, true);
       }
     });
+
+    // 收藏与续写只存导航元数据；源码保存、版本与批注仍走原有项目路径。
+    function acceptMemory(value){
+      if(!value||disposed)return;
+      memoryUnavailable=false;
+      projectMemory={favorites:Array.isArray(value.favorites)?value.favorites:[],recent:Array.isArray(value.recent)?value.recent:[],last_project:value.last_project||null};
+      memoryLoaded=true;renderProjectChoices();
+    }
+    async function loadMemory(){
+      try{const result=await memoryRequest('latex_memory_get',{});memoryUnavailable=false;acceptMemory(result);}
+      catch(error){memoryUnavailable=true;favoriteProject.title='收藏和续写记录暂不可用：'+error.message;}
+    }
+    function renderProjectChoices(){
+      const current=project?.id||projectSelect.value, selected=new Set(), known=new Map(projects.map(item=>[item.id,item]));
+      projectSelect.textContent='';
+      const appendGroup=(label,items,star=false)=>{
+        const group=make('optgroup');group.label=label;
+        for(const cached of items){
+          if(!cached?.id||selected.has(cached.id))continue;
+          const item=known.get(cached.id)||cached;
+          if(item.archived)continue;
+          selected.add(item.id);
+          const recent=projectMemory.recent.find(value=>value.id===item.id);
+          const option=make('option','',(star?'★ ':'')+(item.title||item.id)+(recent?.file?' · '+recent.file:'')+(item.exists===false?'（文件夹不可用）':''));
+          option.value=item.id;group.append(option);
+        }
+        if(group.children.length)projectSelect.append(group);
+      };
+      appendGroup('收藏项目',projectMemory.favorites,true);appendGroup('最近写作',projectMemory.recent);appendGroup('其他项目',projects);
+      if(!projectSelect.children.length){const option=make('option','','还没有 LaTeX 项目');option.value='';projectSelect.append(option);}
+      if(current&&selected.has(current))projectSelect.value=current;
+      const starred=!!project&&projectMemory.favorites.some(item=>item.id===project.id);
+      favoriteProject.textContent=starred?'★':'☆';favoriteProject.setAttribute('aria-pressed',String(starred));favoriteProject.setAttribute('aria-label',starred?'取消收藏当前项目':'收藏当前项目');
+      favoriteProject.title=(starred?'取消收藏':'收藏当前项目')+(project?' · '+project.title:'');favoriteProject.disabled=!project||favoriteBusy||memoryUnavailable;
+      const recent=projectMemory.recent.find(item=>item.id===project?.id);
+      projectSelect.title=project?(project.title+(recent?.file?'\n最近文件：'+recent.file:'')+(recent?.saved_at?'\n上次保存：'+new Date(recent.saved_at).toLocaleString():'')):'选择 LaTeX 项目';
+    }
+    function captureProjectMemory(sourceSaved=false){
+      if(restoringMemory||!project||!file||editor.disabled)return null;
+      const start=Math.max(0,Number(editor.selectionStart)||0),end=Math.max(start,Number(editor.selectionEnd)||start),before=editor.value.slice(0,start).split('\n');
+      return{id:project.id,title:project.title||project.id,root:project.root||'',binding_generation:project.binding_generation||0,path:file,revision:revision||'',selection_start:start,selection_end:end,line:before.length,column:before.at(-1).length,scroll_top:Math.max(0,Math.round(editor.scrollTop||0)),pdf_page:Math.max(1,page),zoom,layout,source_saved:sourceSaved};
+    }
+    function rememberProject(sourceSaved=false){
+      clearTimeout(memoryTimer);memoryTimer=null;
+      const snapshot=captureProjectMemory(sourceSaved);if(!snapshot)return memoryTail;
+      const fingerprint=JSON.stringify(snapshot);if(fingerprint===memoryFingerprint)return memoryTail;memoryFingerprint=fingerprint;
+      const save=async()=>{
+        try{const result=await memoryRequest('latex_memory_save',snapshot);if(!disposed){acceptMemory(result);memoryRetry.hidden=true;}}
+        catch(error){if(memoryFingerprint===fingerprint)memoryFingerprint=null;if(!disposed){memoryRetry.hidden=false;memoryRetry.title='续写位置尚未保存：'+error.message;}}
+      };
+      memoryTail=memoryTail.then(save,save);return memoryTail;
+    }
+    function scheduleProjectMemory(){
+      if(disposed||view.hidden||restoringMemory||!file)return;
+      clearTimeout(memoryTimer);memoryTimer=setTimeout(()=>{void rememberProject();},1200);
+    }
+    function restoreSourcePosition(session,read){
+      if(!session||session.path!==read.path)return;
+      let start=Number.isSafeInteger(session.selection_start)?session.selection_start:0,end=Number.isSafeInteger(session.selection_end)?session.selection_end:start;
+      if(session.revision!==read.revision){
+        const lines=read.content.split('\n'),line=Math.max(0,Math.min((session.line||1)-1,lines.length-1));
+        start=lines.slice(0,line).reduce((sum,text)=>sum+text.length+1,0)+Math.min(Math.max(0,session.column||0),lines[line].length);end=start;
+      }
+      if(sourceEditor?.restorePosition)sourceEditor.restorePosition({start,end:Math.max(start,end),scrollTop:Math.max(0,Number(session.scroll_top)||0)});
+      else editor.setSelectionRange(Math.min(start,editor.value.length),Math.min(Math.max(start,end),editor.value.length));
+      editor.scrollTop=Math.max(0,Number(session.scroll_top)||0);gutter.scrollTop=editor.scrollTop;updateNavigatorActive();
+    }
+    favoriteProject.addEventListener('click',async()=>{
+      if(!project||favoriteBusy)return;
+      const owner={id:project.id,title:project.title},favorite=!projectMemory.favorites.some(item=>item.id===owner.id);favoriteBusy=true;renderProjectChoices();
+      try{const save=async()=>{acceptMemory(await memoryRequest('latex_favorite_set',{...owner,favorite}));};const request=memoryTail.then(save,save);memoryTail=request.catch(()=>{});await request;say(favorite?'已收藏项目，项目列表会优先显示。':'已取消项目收藏。');}
+      catch(error){say('收藏未保存：'+error.message,true);}
+      finally{favoriteBusy=false;renderProjectChoices();}
+    });
+    memoryRetry.addEventListener('click',()=>void rememberProject());
 
     // ---- projects -----------------------------------------------------------------
     async function refreshProjects(preferred, valid = () => !disposed) {
@@ -1360,16 +1451,12 @@ window.PaperLatexWorkspace = (() => {
         if (!fetched?.project || fetched.project.id !== preferred || fetched.project.archived) throw new Error('指定的 LaTeX 项目不存在或已归档。');
         listed.push(fetched.project);
       }
+      if(!preferred&&projectMemory.last_project&&!listed.some(item=>item.id===projectMemory.last_project)){
+        try{const extra=await api('latex_project_get',{id:projectMemory.last_project,include_archived:false});if(extra.project&&!extra.project.archived)listed.push(extra.project);}catch{}
+      }
       if (!valid()) return null;
       projects = listed;
-      projectSelect.textContent = '';
-      if (!projects.length) {
-        const option = make('option', '', '还没有 LaTeX 项目'); option.value = ''; projectSelect.append(option);
-      }
-      for (const item of projects) {
-        const option = make('option', '', `${item.title}${item.exists === false ? '（文件夹不可用）' : ''}`);
-        option.value = item.id; projectSelect.append(option);
-      }
+      renderProjectChoices();
       compareSelect.textContent = '';
       const none = make('option', '', '选择另一个项目…'); none.value = ''; compareSelect.append(none);
       for (const item of projects) { const option = make('option', '', item.title); option.value = item.id; compareSelect.append(option); }
@@ -1381,7 +1468,14 @@ window.PaperLatexWorkspace = (() => {
 
     async function selectProject(id) {
       if (switching || compiling || gitBusy) { projectSelect.value = project?.id || ''; return; }
+      const choice=++projectChoiceRequest,validChoice=()=>choice===projectChoiceRequest&&!disposed;
       if (!await savedBeforeLeaving(true)) { projectSelect.value = project?.id || ''; return; }
+      if(!validChoice())return;
+      if(id&&!projects.some(item=>item.id===id)){
+        try{await refreshProjects(id,validChoice);}catch(error){if(!validChoice())return;projectSelect.value=project?.id||'';say('无法打开项目：'+error.message,true);return;}
+      }
+      await rememberProject();
+      if(!validChoice())return;
       cancelTranslation();
       resetAiState();
       if (!id) { project = null; await renderEmpty(); return; }
@@ -1392,6 +1486,7 @@ window.PaperLatexWorkspace = (() => {
       clearRendered();
       formulas?.clear(); formulas?.close();
       project = projects.find(item => item.id === id) || null;
+      renderProjectChoices();
       if (!project) { await renderEmpty(); return; }
       resetProjectVersions();
       syncLocationFields();
@@ -1404,6 +1499,7 @@ window.PaperLatexWorkspace = (() => {
       tree = null; fileList.textContent = ''; outlineList.textContent = ''; mediaList.textContent = ''; currentFile.textContent = '选择源文件';
       compile.disabled = false; mainSelect.disabled = false;
       if (project.exists === false) {
+        restoringMemory=false;
         mainLabel.textContent = `编译：${project.main_path || '未设置'}`;
         mainSelect.textContent = '';
         const option = make('option', '', project.main_path || '未设置'); option.value = project.main_path || ''; mainSelect.append(option);
@@ -1413,15 +1509,28 @@ window.PaperLatexWorkspace = (() => {
         return;
       }
       setPreviewMessage('读取项目…');
+      restoringMemory=true;activeSession=null;
+      try{const memory=await memoryRequest('latex_memory_get',{id});if(ticket!==generation||!validChoice())return;
+        if(memory.session&&memory.session.root===(project.root||'')&&memory.session.binding_generation===(project.binding_generation||0))activeSession=memory.session;
+      }catch{ /* 位置服务失败不阻止读取真实项目。 */ }
+      if(ticket!==generation)return;
       try { await loadTree(); }
-      catch (error) { if (ticket === generation) { say(`项目导航读取失败：${error.message}`, true); notifyContext(); } return; }
-      if (ticket !== generation) return;
+      catch (error) { if (ticket === generation) { say(`项目导航读取失败：${error.message}`, true); notifyContext(); restoringMemory=false; } return; }
+      if (ticket !== generation || !validChoice()) return;
       const main = project.main_path || (tree?.files || []).find(item => item.kind === 'text')?.path;
-      if (main) await openFile(main);
+      if(activeSession?.path){
+        const resumed=await openFile(activeSession.path,{resume:activeSession});
+        if(ticket!==generation)return;
+        if(!resumed&&main)await openFile(main);
+      }else if (main) await openFile(main);
       else { file = null; revision = null; editor.value = ''; lineNumbers(); say('这个项目里还没有可编辑的文本源文件。'); }
-      page = 1;
+      if(ticket!==generation||!validChoice())return;
+      page = Number.isSafeInteger(activeSession?.pdf_page)?Math.max(1,activeSession.pdf_page):1;
+      if(activeSession&&[1,1.25,1.5,2,3,4].includes(activeSession.zoom)){zoom=activeSession.zoom;zoomSelect.value=String(zoom);}
+      if(activeSession?.layout)setLayout(activeSession.layout);
       if (project.pdf_present) await loadLayout(); else setPreviewMessage('还没有 PDF；点「编译」生成。');
       if (ticket !== generation) return;
+      restoringMemory=false;void rememberProject();
       void reviewer?.refresh();
       // An existing PDF means idle recompiling can start safely; a folder that has never
       // built needs one manual compile first, so a broken document cannot loop.
@@ -1435,6 +1544,7 @@ window.PaperLatexWorkspace = (() => {
     async function renderEmpty() {
       resetProjectVersions();
       resetMedia();
+      activeSession=null;restoringMemory=false;renderProjectChoices();
       chapterScope = null;
       projectSearch?.reset();
       syncLocationFields();
@@ -1645,6 +1755,9 @@ window.PaperLatexWorkspace = (() => {
       if (!isCurrent() || (switching && !options.duringSwitch)) return false;
       if (path === file && !options.force && !editor.disabled) return true;
       if (!project || !await savedBeforeLeaving() || !isCurrent()) return false;
+      const owner=project.id,ownerGeneration=generation;
+      await rememberProject();
+      if(!isCurrent()||disposed||owner!==project?.id||ownerGeneration!==generation)return false;
       const id = project.id, ticket = ++fileRequest, epoch = generation;
       fileAbort?.abort(); fileAbort = new AbortController(); editor.disabled = true;
       let read;
@@ -1657,11 +1770,12 @@ window.PaperLatexWorkspace = (() => {
       cancelTranslation(); file = read.path; revision = read.revision; dirty = false;
       editor.disabled = false; currentFile.textContent = file;
       editor.value = read.content; lineNumbers(); editor.scrollTop = 0; gutter.scrollTop = 0;
+      restoreSourcePosition(options.resume,read);
       patchSourceSearch();
       paintSourceNotes();
       scheduleSpelling();
       pendingConflict = null; conflictBar.hidden = true;
-      setSaveState('已载入', 'saved');
+      setSaveState('已载入', 'saved');scheduleProjectMemory();
       updateNavigatorActive();
       say(`${file} · ${read.bytes} 字节 · ${read.lines} 行 · 修订 ${read.revision.slice(0, 8)}`);
       return true;
@@ -1804,6 +1918,7 @@ window.PaperLatexWorkspace = (() => {
     async function renderPage(number, { scroll = true, retry = false } = {}) {
       if (!project || !pageCount) return;
       page = Math.min(Math.max(1, number), pageCount);
+      scheduleProjectMemory();
       const wanted = page, id = project.id, epoch = generation, source = pdfSource, sourceEpoch = pdfSourceEpoch;
       const geometry = pageGeometry[wanted - 1];
       if (!geometry) return;
@@ -2078,7 +2193,7 @@ window.PaperLatexWorkspace = (() => {
     const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(requestResize) : null;
     resizeObserver?.observe(right);
     window.addEventListener('resize', requestResize);
-    zoomSelect.addEventListener('change', () => { zoom = Number(zoomSelect.value); void renderPage(page); });
+    zoomSelect.addEventListener('change', () => { zoom = Number(zoomSelect.value); scheduleProjectMemory();void renderPage(page); });
     spreadToggle.addEventListener('click', () => {
       pdfPagesPerRow = pdfPagesPerRow === 1 ? 2 : 1;
       spreadToggle.setAttribute('aria-pressed', String(pdfPagesPerRow === 2));
@@ -2893,7 +3008,7 @@ window.PaperLatexWorkspace = (() => {
         ai.proposal = null; renderProposal();
         if (!await openFile(owner.path, { force: true })) { if(ownsAi(owner))say('提案已写入；本窗口还有未保存内容，请保留草稿并处理保存冲突。', true);return; }
         if (!ownsAi(owner)) return;
-        setSaveState('已接受 AI 建议', 'saved');
+        setSaveState('已接受 AI 建议', 'saved');void rememberProject(true);
         say(`已写入（${result.origin}）：${result.written.bytes} 字节`);
         scheduleCompile();
       } catch (error) {
@@ -2934,9 +3049,10 @@ window.PaperLatexWorkspace = (() => {
       if (switching || compiling || gitBusy) return false;
       try {
         if (settingsRevision === null) await loadSettings();
+        if(!memoryLoaded)await loadMemory();
         if (!valid()) return false;
         if (!await refreshProjects(preferred, valid) || !valid()) return false;
-        const wanted = preferred || (project?.id && projects.some(item => item.id === project.id) ? project.id : projects[0]?.id);
+        const wanted = preferred || (project?.id && projects.some(item => item.id === project.id) ? project.id : null) || (projects.some(item=>item.id===projectMemory.last_project)?projectMemory.last_project:null) || projectMemory.favorites.find(item=>projects.some(p=>p.id===item.id))?.id || projects[0]?.id;
         if ((project || !view.hidden) && !await savedBeforeLeaving(true)) { projectSelect.value = project?.id || ''; return false; }
         if (!valid()) return false;
         glossaryJob = dictionaryJob = null; void loadSpelling();
@@ -2957,10 +3073,11 @@ window.PaperLatexWorkspace = (() => {
     async function close() {
       if (termDialog.open) termDialog.close();
       if (switching || gitBusy) { say('正在更新项目，请稍候再关闭。', true); return; }
-      ++openRequest;
+      ++openRequest;++projectChoiceRequest;
       clearTimeout(timer); clearTimeout(compileTimer); closeMenu(); resetCitationDialog();
       cancelAiRun();
       if (!await savedBeforeLeaving(true)) return;
+      await rememberProject();
       clearPublicRetrieval();
       cancelTranslation();
       projectSearch?.close();
@@ -3013,6 +3130,9 @@ window.PaperLatexWorkspace = (() => {
     trigger.addEventListener('click', () => void open());
     const protectDraft = event => { if (dirty || saving || pendingConflict || reviewer?.hasDraft() || writingTools?.hasDraft()) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', protectDraft);
+    const saveHiddenPosition=()=>{if(document.hidden)void rememberProject();};
+    const saveLeavingPosition=()=>{void rememberProject();};
+    document.addEventListener('visibilitychange',saveHiddenPosition);window.addEventListener('pagehide',saveLeavingPosition);
     applySettings(DEFAULT_SETTINGS, null);
     setNav('outline');
     setTab('pdf');
@@ -3050,7 +3170,7 @@ window.PaperLatexWorkspace = (() => {
           ai: { available: ai.available, proposal: ai.proposal?.id || null },
         }),
       },
-    dispose() { disposed = true; if (termDialog.open) termDialog.close(); resetCitationDialog(); cancelAiRun({ quiet: true }); clearPublicRetrieval(); cancelTranslation(); reviewer?.dispose(); writingTools?.dispose(); formulas?.destroy(); sourceEditor?.destroy(); cancelReads(); clearRendered(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); resizeObserver?.disconnect(); window.removeEventListener('resize', requestResize); window.removeEventListener('beforeunload', protectDraft); document.removeEventListener('selectionchange', pdfSelectionChanged); clearTimeout(timer); clearTimeout(compileTimer); clearTimeout(spellTimer); view.hidden = true; document.body.classList.remove('latex-focused'); },
+    dispose() { void rememberProject();clearTimeout(memoryTimer);disposed = true; if (termDialog.open) termDialog.close(); resetCitationDialog(); cancelAiRun({ quiet: true }); clearPublicRetrieval(); cancelTranslation(); reviewer?.dispose(); writingTools?.dispose(); formulas?.destroy(); sourceEditor?.destroy(); cancelReads(); clearRendered(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); resizeObserver?.disconnect(); window.removeEventListener('resize', requestResize); window.removeEventListener('beforeunload', protectDraft);document.removeEventListener('visibilitychange',saveHiddenPosition);window.removeEventListener('pagehide',saveLeavingPosition); document.removeEventListener('selectionchange', pdfSelectionChanged); clearTimeout(timer); clearTimeout(compileTimer); clearTimeout(spellTimer); view.hidden = true; document.body.classList.remove('latex-focused'); },
     };
   }
   return { create };

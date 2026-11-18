@@ -1,3 +1,4 @@
+import { createLatexProjectMemory } from '../latex-project-memory.mjs'
 import { EditorState, Compartment, StateEffect, StateField } from '@codemirror/state'
 import { Decoration, EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
@@ -155,6 +156,8 @@ function create(textarea, container, citation) {
   ]
   const newState = text => EditorState.create({ doc: text, extensions })
   const view = new EditorView({ state: newState(textarea.value), parent: container })
+  const forwardScroll=()=>textarea.dispatchEvent(new Event('scroll'));
+  view.scrollDOM.addEventListener('scroll',forwardScroll);
   textarea.hidden = true
   Object.defineProperties(textarea, {
     value: { configurable: true, get: () => view.state.doc.toString(), set: value => {
@@ -185,7 +188,11 @@ function create(textarea, container, citation) {
     if (!marks.length && view.state.field(layer.field) === Decoration.none) return
     view.dispatch({ effects: layer.set.of(Decoration.set(marks, true)) })
   }
-  return { view, requestMeasure: () => view.requestMeasure(), citationRange: () => citationRange(view.state, view.state.selection.main.head), cursorLine: () => view.state.doc.lineAt(view.state.selection.main.head).number, openSearch: () => openSearchPanel(view), setProjectSearchMatches(ranges) {
+  return { view, restorePosition({start,end,scrollTop}) {
+    const limit=view.state.doc.length;
+    view.dispatch({selection:{anchor:Math.max(0,Math.min(start,limit)),head:Math.max(0,Math.min(end,limit))}});
+    view.scrollDOM.scrollTop=Math.max(0,scrollTop);
+  }, requestMeasure: () => view.requestMeasure(), citationRange: () => citationRange(view.state, view.state.selection.main.head), cursorLine: () => view.state.doc.lineAt(view.state.selection.main.head).number, openSearch: () => openSearchPanel(view), setProjectSearchMatches(ranges) {
     const length = view.state.doc.length
     const marks = ranges.filter(({ from, to }) => Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to > from && to <= length)
       .map(({ from, to, active }) => Decoration.mark({ class: active ? 'latex-search-source-hit active' : 'latex-search-source-hit' }).range(from, to))
@@ -199,6 +206,6 @@ function create(textarea, container, citation) {
     view.dispatch({ changes: { from: start, to: end, insert: text }, selection: { anchor: start + text.length }, scrollIntoView: true, userEvent: 'input' })
     view.focus()
     return true
-  }, destroy: () => view.destroy() }
+  }, destroy: () => {view.scrollDOM.removeEventListener('scroll',forwardScroll);view.destroy()} }
 }
-window.PaperLatexEditor = { create }
+window.PaperLatexEditor = { create, createProjectMemory: createLatexProjectMemory }

@@ -1,3 +1,4 @@
+import { createLatexProjectMemory } from './latex-project-memory.mjs';
 import { createPaperDatasets, PAPER_DATASET_ACTIONS } from './harness/paper-datasets.mjs';
 import { createFieldRadarExporter } from './harness/field-radar-export.mjs';
 import { createFieldRadarAnalysis } from './harness/field-radar-analysis.mjs';
@@ -136,6 +137,7 @@ export function createFetchHandler(options = {}) {
   };
   const slidesRequest = async input => (await getSlidesStore()).handle(input);
   const localState = options.settings ? store : settings.localState;
+  const latexMemory = createLatexProjectMemory({store:localState});
   const catalogCitations = createCatalogCitations({ store: localState, fetchOptions: options.fetchOptions });
   async function recentPapers(signal) {
     const ids = await store.recentReaderIds();
@@ -265,6 +267,7 @@ export function createFetchHandler(options = {}) {
             : ['scholar_list','scholar_get','scholar_save','scholar_publications','scholar_work_save','scholar_review','scholar_import','scholar_source_publications','scholar_verify'].includes(input?.action) ? await scholars(input, { signal: request.signal })
             : ['ink_diagnostics_append','ink_diagnostics_get'].includes(input?.action) ? await inkDiagnostics.handle(input)
             : typeof input?.action === 'string' && input.action.startsWith('ink_queue_') ? await inkQueue.handle(input)
+            : ['latex_memory_get','latex_memory_save','latex_favorite_set'].includes(input?.action) ? await latexMemory(input)
             : input?.action === 'model_translation_probe' ? (options.languageLearning?.translateAbstract ? await options.languageLearning.translateAbstract({text:'This study compares two methods.',target:'zh-CN'},{signal:request.signal}) : (()=>{throw Object.assign(new Error('翻译测试需要连接 DSH。'),{status:409})})())
             : input?.action === 'model_network_get' ? (options.modelNetwork ? await options.modelNetwork.describe() : {available:false,providers:[],warning:'网络分流需要连接 DSH。'})
             : input?.action === 'model_network_probe' ? (options.modelNetwork ? await options.modelNetwork.probe(input.provider, request.signal) : (()=>{throw Object.assign(new Error('网络检查需要连接 DSH。'),{status:409})})())
