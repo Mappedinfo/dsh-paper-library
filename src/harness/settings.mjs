@@ -5,6 +5,7 @@
 import { createHash } from 'node:crypto';
 import { RESOURCE_DEFAULTS, RESOURCE_FIELDS, RESOURCE_PROFILES, resolveResourcePolicy, validateResourceSettings } from '../resource-policy.mjs';
 import { LocalStateConflictError, LocalStateError } from '../local-state.mjs';
+import { MODEL_NETWORK_DEFAULTS, validateNetworkSetting } from '../model-network.mjs';
 
 export const PAPER_LIBRARY_SETTINGS_NAMESPACE = 'paper-library';
 export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
@@ -20,6 +21,7 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   reading_distribution_ai: true,
   reading_distribution_smoothing: 3,
   ...RESOURCE_DEFAULTS,
+  ...MODEL_NETWORK_DEFAULTS,
   // Optional adapter to a separate data-sync service: a config file it owns, or
   // extra absolute folders. Both default to empty, so the library never needs it.
   sync_config: '',
@@ -35,7 +37,7 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   latex_split: 50,
   latex_sync_folder: true,
 });
-export const TEXT_SETTINGS = Object.freeze(['sync_config', 'external_sources', 'latex_accent']);
+export const TEXT_SETTINGS = Object.freeze(['sync_config', 'external_sources', 'latex_accent', 'network_proxy_url']);
 export const NUMBER_SETTINGS = Object.freeze({ reading_distribution_smoothing: { minimum: 1, maximum: 6 }, annotation_font_size: { minimum: 12, maximum: 24 }, latex_split: { minimum: 25, maximum: 75 }, ...RESOURCE_FIELDS });
 const fields = Object.keys(PAPER_LIBRARY_SETTINGS_DEFAULTS);
 const markerKey = 'settings.migration:paper-library';
@@ -68,6 +70,7 @@ export function createPaperLibrarySettingsSchema(Schema) {
     reading_distribution_smoothing: Schema.number().default(3),
     resource_profile: Schema.union(['eco','balanced','performance','custom'].map(value=>Schema.const(value))).default('balanced'),
     ...Object.fromEntries(Object.entries(RESOURCE_FIELDS).map(([key,rule])=>[key,Schema.number().default(rule.default)])),
+    ...Object.fromEntries(Object.entries(MODEL_NETWORK_DEFAULTS).map(([key,value])=>[key,key==='network_proxy_url'?Schema.string().default(value):Schema.union(['direct','proxy','system'].map(mode=>Schema.const(mode))).default(value)])),
     sync_config: Schema.string().default(''),
     external_sources: Schema.string().default(''),
     latex_starter: Schema.boolean().default(true),
@@ -85,7 +88,9 @@ function validatePatch(patch) {
   if (!plain(patch)) throw invalid('设置必须是字段对象。');
   for (const [key, value] of Object.entries(patch)) {
     if (!fields.includes(key)) throw invalid(`此字段不属于可编辑设置：${key}`);
-    if (key === 'reading-panel-side') {
+    if (Object.hasOwn(MODEL_NETWORK_DEFAULTS, key)) {
+      try { validateNetworkSetting(key, value); } catch (error) { throw invalid(error.message); }
+    } else if (key === 'reading-panel-side') {
       if (!['left', 'right'].includes(value)) throw invalid('设置值无效：reading-panel-side');
     } else if (key === 'ui_palette') {
       if (!['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].includes(value)) throw invalid('设置值无效：ui_palette');

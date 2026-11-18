@@ -80,3 +80,31 @@ test('outline groups chapters, keeps current page visible when collapsed and off
  ui.setPage(1);assert.equal(parent.attributes['aria-current'],'location');
  root.children[0].children[1].click();assert.equal(root.children[5].children.length,50);root.children[4].children[2].click();assert.equal(root.children[5].children.length,10);root.children[5].children[0].click();assert.equal(jumps[0].page,51);ui.dispose();
 });
+
+test('network settings save separate routes with a revision and probe only confirmed choices',async()=>{
+ const{window}=await load('settings-models.js'),container=new Element('div'),calls=[];
+ let record={revision:'first',writable:true,value:{network_deepseek:'direct',network_opencode_go:'proxy',network_glm:'direct',network_kimi:'direct',network_proxy_url:''}};
+ const api=async(action,args)=>{
+   calls.push({action,args});
+   if(action==='settings_get')return record;
+   if(action==='model_network_get')return {available:true,proxy_url:'http://127.0.0.1:9999',proxy_source:'macOS 系统代理',providers:[{id:'deepseek',name:'DeepSeek 官方',mode:'direct'},{id:'opencode_go',name:'OpenCode Go',mode:'proxy'}]};
+   if(action==='settings_update'){record={...record,revision:'second',value:{...record.value,...args.patch}};return record;}
+   if(action==='model_network_probe')return {mode:record.value['network_'+args.provider],message:'连接超时，请检查当前网络、DNS 与代理。'};
+   if(action==='model_translation_probe')return {model:{provider:'synthetic',model:'test'},text:'本研究比较两种方法。'};
+   if(action==='paper_model_get')return {writable:false,models:[],value:{model:null}};
+   if(action==='language_settings_get')return {models:[],value:{model:null}};
+   throw Error(action);
+ };
+ const ui=window.PaperSettingsModels.create({api,container});await ui.refresh();
+ const network=container.children[0].children.at(-1),[heading,hint,grid,addressRow,detected,save,translation,,status]=network.children;
+ assert.equal(heading.textContent,'模型网络');assert.match(detected.textContent,/9999/);
+ const row=grid.children[0],select=row.children[0].children[1];
+ assert.equal(select.value,'direct');assert.equal(grid.children[1].children[0].children[1].value,'proxy');
+ select.value='proxy';select.listeners.change();assert.match(status.textContent,/尚未保存/);
+ await row.children[1].click();assert.match(row.children[2].textContent,/直连：连接超时/);
+ assert.equal(calls.at(-1).action,'model_network_probe');
+ addressRow.children[1].value='http://127.0.0.1:8888';await save.click();
+ const saved=calls.find(call=>call.action==='settings_update');assert.equal(saved.args.expected_revision,'first');assert.equal(saved.args.patch.network_deepseek,'proxy');assert.equal(saved.args.patch.network_opencode_go,'proxy');assert.equal(saved.args.patch.network_proxy_url,'http://127.0.0.1:8888');
+ assert.match(status.textContent,/网络方式已保存/);
+ await translation.click();assert.match(status.textContent,/翻译测试成功/);assert.equal(calls.at(-1).action,'model_translation_probe');assert.deepEqual(json(calls.at(-1).args),{});
+});

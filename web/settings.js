@@ -71,7 +71,7 @@ window.PaperLibrarySettings = (() => {
     const extraCopy=make('span');extraCopy.append(make('strong','','额外外部文献源'),make('small','','JSON 数组，每项 {id, root}；根目录写绝对路径。扫描只建符号链接，不改动源目录，第一次写批注时才复制进来。'));
     extraRow.append(extraCopy,extraInput);controls.append(extraRow);inputs.set('external_sources',extraInput);
     extraInput.addEventListener('change',()=>void save({external_sources:extraInput.value.trim()}));
-    const storage=make('details','settings-storage'),summary=make('summary','','模型、外观与存储');storage.append(summary);
+    const storage=make('details','settings-storage'),summary=make('summary','','模型、网络与存储');storage.append(summary);
     const modelSettings=window.PaperSettingsModels?.create({api,container:storage});
     storage.addEventListener('toggle',()=>{if(storage.open)void modelSettings?.refresh();});
     storage.append(make('p','','明暗模式跟随 DSH；界面配色与批注字号可在上方调整。'));
@@ -86,7 +86,7 @@ window.PaperLibrarySettings = (() => {
     for(const [label,section] of [
       ['界面配色',paletteControls],['划线阅读轨迹',distributionControls],
       ['资源与性能',resourceControls],['阅读与自动化',controls],
-      ['模型、外观与存储',storage],['导出与维护',maintenance],
+      ['模型、网络与存储',storage],['导出与维护',maintenance],
     ]){
       const jump=make('button','button subtle',label);jump.type='button';
       section.tabIndex=-1;

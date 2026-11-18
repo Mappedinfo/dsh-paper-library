@@ -55,8 +55,8 @@ export function sessionContext(sessionId) {
 }
 
 /** Reuse Harness provider services without reading or retaining credentials. */
-export function createHarnessAI(llm, createUserMessage, config, { attachments } = {}) {
-  return async ({ prompt, provider = config.provider, model = config.model, reasoningEffort, signal, images, sessionId }) => {
+export function createHarnessAI(llm, createUserMessage, config, { attachments, network } = {}) {
+  const generate = async ({ prompt, provider = config.provider, model = config.model, reasoningEffort, signal, images, sessionId }) => {
     const context = sessionContext(sessionId)
     if (!provider || !model) throw new Error('Select a configured Harness provider and model before requesting AI feedback')
     if (reasoningEffort !== undefined && (typeof reasoningEffort !== 'string' || !reasoningEffort.trim())) throw new Error('reasoningEffort must be a non-empty configured model effort')
@@ -91,6 +91,7 @@ export function createHarnessAI(llm, createUserMessage, config, { attachments } 
     const options = { ...(prepared?.config || call), messages: [message], signal, ...context }
     return collectFeedback(prepared ? prepared.stream(options) : llm.stream(options), signal)
   }
+  return network ? request => network.run(() => generate(request)) : generate
 }
 
 /** Return bounded, keyless route metadata for the library's model selector. */

@@ -53,7 +53,7 @@ test('model discovery returns the UI route format and preserves a failed provide
     listProviders: () => [{ id: 'local', name: 'Local' }, { id: 'missing' }],
     listModels: async provider => { if (provider === 'missing') throw new Error('unavailable'); return [{ id: 'reader', name: 'Reader' }] },
   })
-  assert.deepEqual(result.models, [{ id: 'reader', name: 'Reader', provider: 'local' }])
+  assert.deepEqual(result.models, [{ id: 'reader', name: 'Reader', provider: 'local', provider_name: 'Local' }])
   assert.equal(result.configured, true)
   assert.equal(result.providers[1].error, 'unavailable')
 })

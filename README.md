@@ -562,6 +562,10 @@ npm start -- --library /absolute/library --port 43121
 node src/cli.mjs --library /absolute/library < request.json
 ```
 
+「设置 → 模型、网络与存储 → 模型网络」可为 OpenCode Go、DeepSeek 官方、GLM 官方和 Kimi 官方分别选择直连、代理或跟随 DSH。默认 OpenCode Go 走代理，三家官方 API 直连；按实际 API 域名分流，因此通过 Go 调用的同名模型仍走 Go 通路。代理地址可手填 HTTP／HTTPS URL；留空时优先读取 macOS 当前系统代理，再读取环境变量，避免沿用旧 VPN 的启动环境。设置保存在主机磁盘，下一次辅助 AI 请求生效，不改系统代理、DNS 或 VPN 规则。此分流用于资料库的翻译、润色、图像说明等辅助请求，其他 DSH 会话沿用宿主通路。
+
+每家服务可「检查连接」：只请求固定公开端点，不发送密钥或文献；收到 HTTP 回应仅表示链路可达。另有「测试翻译」，通过当前语言模型翻译一句固定示例，不读论文、不保存批注；测试会调用模型。VPN 全局隧道仍由 VPN 的规则控制，应用直连不等于绕过操作系统 TUN。
+
 默认服务仅监听 `127.0.0.1`，拒绝跨来源写入；Harness 内使用其现有认证服务。论文对话不读取其他应用的密钥，不创建第二套服务配置。部署配置支持绝对路径 `library`、`python`；`localStateHome` 可覆盖状态文件所在的 DSH home。`provider`、`model`、`maxOutputTokens` 保留给原有独立反馈 API，论文对话与语言工具复用 Harness 模型服务，各自使用资料库对应的设置。语言生成独立使用 `maxLanguageOutputTokens`，默认 8,192，以容纳完整译文和词汇释义。`analysisConcurrency` 控制同时自动整理论文的上限，默认 2，可调 1–4。`translationServer` 可指向一个自部署的本机 Zotero translation-server（仅回环 http，如 `http://127.0.0.1:1969`）：「补全资料」在主路径（Crossref／页面元数据）取不到结果时，把同一 DOI／arXiv／页面链接交给侧车的 translators 再试一次；候选条目仍须通过既有的 DOI／题名人身份核对才生成可核对草稿，不会写目录。插件不打包、安装或启动该服务（其许可证为 AGPL-3.0，见 [第三方许可](THIRD_PARTY.md)），也绝不向它发送 PDF 正文、批注或草稿。详见 [API](docs/api.md) 与 `cordis.patch.yml`。
 
 验证命令：

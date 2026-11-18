@@ -10,6 +10,7 @@ import { createFetchHandler } from '../http.mjs'
 import { resolveConfig } from './config.mjs'
 import { createExternalSources } from './external-sources.mjs'
 import { createHarnessAI, discoverModels, selectCaptionModel } from './ai.mjs'
+import { createModelNetwork, MODEL_NETWORK_DEFAULTS } from '../model-network.mjs'
 import { createNodeHandler } from './http.mjs'
 import { registerLibraryTools } from './tools.mjs'
 import { registerBundledSkills } from './skills.mjs'
@@ -60,6 +61,7 @@ export const Config = Schema.object({
   ui_palette: Schema.union([Schema.const('jade'), Schema.const('navy'), Schema.const('neutral'), Schema.const('rose'), Schema.const('apricot'), Schema.const('system')]).default('jade').description('Paper Library 配色：jade 墨绿铜金 / navy 深海蓝灰 / neutral 石墨中性 / rose 樱粉柔光 / apricot 杏橙暖光 / system 跟随 DSH；明暗模式继续跟随宿主。').volatile(),
   resource_profile: Schema.union(['eco','balanced','performance','custom'].map(value=>Schema.const(value))).default('balanced').description('资源档位：节能256 / 均衡512 / 高性能1024 MiB处理目标，custom自定义；不是整个DSH内存硬上限。').volatile(),
   ...Object.fromEntries(Object.entries(RESOURCE_FIELDS).map(([key,rule])=>[key,Schema.number().default(rule.default).description(`${rule.label}：${rule.minimum}–${rule.maximum}，自定义档生效。`).volatile()])),
+  ...Object.fromEntries(Object.entries(MODEL_NETWORK_DEFAULTS).map(([key,value])=>[key,(key==='network_proxy_url'?Schema.string().default(value):Schema.union(['direct','proxy','system'].map(mode=>Schema.const(mode))).default(value)).description('资料库辅助模型网络：direct 直连 / proxy 使用指定或检测到的 HTTP 代理 / system 跟随 DSH；代理地址留空时检测环境及 macOS 系统代理。').volatile()])),
   sync_config: Schema.string().default('').description('数据同步服务配置文件（绝对路径，留空不启用）。').volatile(),
   external_sources: Schema.string().default('').description('额外外部文献源（JSON 数组文本，留空不启用）。').volatile(),
   latex_starter: Schema.boolean().default(true).description('新建 LaTeX 文件夹时生成 starter 文件。').volatile(),
@@ -99,6 +101,8 @@ export function apply(ctx, rawConfig = {}) {
   })
   // Delegation stays live when the optional settings provider mounts/unmounts.
   const settings = { get: () => sharedSettings.get(), update: (...args) => sharedSettings.update(...args), reset: (...args) => sharedSettings.reset(...args),subscribe:fn=>{settingsListeners.add(fn);return()=>settingsListeners.delete(fn)} }
+  const modelNetwork = createModelNetwork({ settings })
+  ctx.effect(() => () => modelNetwork.dispose(), 'paper-library: scoped model network')
   // Synced corpora stay optional: with no configured roots the list is empty and
   // every other path behaves exactly as before.
   const sources = createExternalSources({ config })
@@ -115,7 +119,8 @@ export function apply(ctx, rawConfig = {}) {
     provider: config.provider,
     model: config.model,
     ...(config.translationServer ? { translationServer: config.translationServer } : {}),
-    ai: createHarnessAI(ctx.llm, createUserMessage, config),
+    ai: createHarnessAI(ctx.llm, createUserMessage, config, { network: modelNetwork }),
+    modelNetwork,
     models: signal => discoverModels(ctx.llm, signal),
     localState,
     settings,
@@ -126,7 +131,7 @@ export function apply(ctx, rawConfig = {}) {
   options.fieldRadar = createFieldRadarStore({ store: localState, library: config.library, request: (payload, signal) => dispatch(payload, { library: config.library, python: config.python, signal }) })
   options.fieldRadarExport = createFieldRadarExporter({ library: config.library, radar: options.fieldRadar, getAnalysis: input=>options.fieldRadarAnalysis.handle(input) })
   options.fieldRadarAnalysis = createFieldRadarAnalysis({ store: localState, radar: options.fieldRadar,
-    ai: createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: Math.min(config.maxLanguageOutputTokens || 8192, 8192) }),
+    ai: createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: Math.min(config.maxLanguageOutputTokens || 8192, 8192) }, { network: modelNetwork }),
     getModel: async () => {
       let service
       try { service = ctx.get('agentDefaultModel') } catch { /* Optional in command-line profiles. */ }
@@ -154,7 +159,7 @@ export function apply(ctx, rawConfig = {}) {
     paperChat.onFeedback(companion.feedback)
     paperChat.onTurnFailure(companion.turnFailed)
     web.effect(()=>()=>{companion.dispose();paperChat.onFeedback(undefined);paperChat.onTurnFailure(undefined)},'paper-library: companion lifecycle')
-    const languageAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens })
+    const languageAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }, { network: modelNetwork })
     const citationClaims = createCitationClaims({
       worker: (request, signal) => core(request, { ...options, signal }),
       agent: createPaperAnalysisAgent(web, { cwd: config.library, maxOutputTokens: config.maxLanguageOutputTokens, generate: languageAI }),
@@ -170,13 +175,13 @@ export function apply(ctx, rawConfig = {}) {
       signal.throwIfAborted()
       return service.search({ query, maxResults: 5 }, signal)
     }
-    const nativeResearch = createDeepSeekPublicResearch({ resolveKey: async () => {
+    const nativeResearch = createDeepSeekPublicResearch({ fetch: (...args) => modelNetwork.run(() => fetch(...args)), resolveKey: async () => {
       let credentials
       try { credentials = web.get('credentials') } catch { /* This host may omit the credential service. */ }
       return (await credentials?.resolve('DEEPSEEK_API_KEY'))?.value || process.env.DEEPSEEK_API_KEY
     } })
     const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python, scholarlySearch, searchWeb, nativeResearch })
-    const handwritingAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }, { attachments: () => ctx.get('attachments') })
+    const handwritingAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }, { network: modelNetwork, attachments: () => ctx.get('attachments') })
     const handwriting = createHandwriting({ store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })
     const annotationCaption = createAnnotationCaption({ selectModel: (current, signal) => selectCaptionModel(ctx.llm, current, signal), store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })
     const libraryKnowledge = createLibraryKnowledge({ store: options.localState, ai: languageAI, paperChat, dispatch, library: config.library, python: config.python,

@@ -22,6 +22,57 @@ window.PaperSettingsModels = (() => {
   }
   const chosen=select=>select.value?JSON.parse(select.value):null;
 
+
+  function createNetwork({api,container}) {
+    const root=make('section');root.className='settings-network';root.setAttribute('aria-label','模型网络');
+    const heading=make('h3','模型网络'),hint=make('p','翻译、润色等资料库辅助 AI 请求分别选路。直连绕过应用代理；VPN 全局隧道仍由 VPN 规则控制。');hint.className='small';
+    const grid=make('div'),status=make('p'),detected=make('p');grid.className='settings-network-grid';status.setAttribute('role','status');detected.className='small';
+    const address=make('input');address.type='url';address.placeholder='自动检测，或填写 http://127.0.0.1:7890';address.autocomplete='off';address.spellcheck=false;address.setAttribute('aria-label','HTTP／HTTPS 代理地址');
+    const addressRow=make('label');addressRow.append(make('strong','HTTP／HTTPS 代理地址'),address);
+    const save=make('button','保存网络方式'),translation=make('button','测试翻译');for(const button of [save,translation]){button.type='button';button.className='button subtle';}
+    const testHint=make('small','测试翻译使用一句固定示例，会调用当前语言模型，不读取文献或保存批注。');
+    root.append(heading,hint,grid,addressRow,detected,save,translation,testHint,status);container.append(root);
+    let record=null,busy=false;const rows=new Map();
+    function controls(){save.disabled=busy||!record?.writable;translation.disabled=busy||!record;address.disabled=save.disabled;for(const row of rows.values()){row.select.disabled=save.disabled;row.probe.disabled=busy||!record;}}
+    async function refresh(){
+      busy=true;controls();
+      try{
+        record=await api('settings_get',{});const result=await api('model_network_get',{});
+        grid.replaceChildren();rows.clear();
+        for(const provider of result.providers||[]){
+          const row=make('div'),label=make('label'),select=make('select'),probe=make('button','检查连接'),detail=make('p');row.className='settings-network-row';detail.className='small';detail.setAttribute('role','status');
+          select.setAttribute('aria-label',provider.name+'请求方式');
+          for(const [value,text]of [['direct','直连（绕过代理）'],['proxy','代理（VPN 本地端口）'],['system','跟随 DSH']])appendOption(select,value,text);
+          select.value=record.value['network_'+provider.id]||provider.mode;probe.type='button';probe.className='button subtle';label.append(make('span',provider.name),select);row.append(label,probe,detail);grid.append(row);rows.set(provider.id,{select,probe,detail});
+          select.addEventListener('change',()=>{status.textContent='网络方式尚未保存；连接检查使用已保存的方式。';detail.textContent='';});
+          probe.addEventListener('click',async()=>{
+            if(busy)return;busy=true;controls();detail.textContent='正在检查已保存的通路…';
+            try{const result=await api('model_network_probe',{provider:provider.id});detail.textContent=(result.mode==='direct'?'直连：':result.mode==='proxy'?'代理：':'跟随 DSH：')+result.message;}
+            catch(error){detail.textContent=error.message;}finally{busy=false;controls();}
+          });
+        }
+        address.value=record.value.network_proxy_url||'';
+        detected.textContent=result.available?(result.proxy_url?'当前代理：'+result.proxy_url+' · '+result.proxy_source:'未检测到代理，请启动 VPN／代理或填写地址。'):result.warning;
+        if(result.warning&&result.proxy_url)detected.textContent+=' · '+result.warning;
+        status.textContent='';if(!result.available)record=null;
+      }catch(error){record=null;status.textContent=error.message;}finally{busy=false;controls();}
+    }
+    address.addEventListener('input',()=>{status.textContent='代理地址尚未保存。';});
+    save.addEventListener('click',async()=>{
+      if(save.disabled)return;
+      busy=true;controls();
+      const patch={network_proxy_url:address.value.trim()};for(const[id,row]of rows)patch['network_'+id]=row.select.value;
+      try{await api('settings_update',{patch,expected_revision:record.revision});await refresh();status.textContent='网络方式已保存，后续请求立即使用新通路。';}
+      catch(error){status.textContent=error.message;}finally{busy=false;controls();}
+    });
+    translation.addEventListener('click',async()=>{
+      if(busy||translation.disabled)return;busy=true;controls();status.textContent='正在测试翻译，主模型不可用时会尝试备用服务…';
+      try{const result=await api('model_translation_probe',{});status.textContent='翻译测试成功 · '+name(result.model)+(result.fallback_from?'（已从 '+name(result.fallback_from)+' 切换）':'')+'：'+result.text;}
+      catch(error){status.textContent=error.message;}finally{busy=false;controls();}
+    });
+    controls();return{refresh};
+  }
+
   function create({api,container}) {
     const root=make('section');root.className='settings-models';root.setAttribute('aria-label','模型设置');
     const status=make('p');status.setAttribute('role','status');
@@ -34,6 +85,7 @@ window.PaperSettingsModels = (() => {
     root.append(field('全局对话、伴学与后台整理模型',paperSelect),field('推理强度',effort),effortStatus,paperInfo,paperSave,
       field('翻译与润色模型',languageSelect),languageInfo,languageSave,reload,status);
     container.append(root);
+    const network=createNetwork({api,container:root});
     let paper=null,language=null,busy=false,effortTicket=0,effortBusy=false,effortUnavailable=false;
     function updateControls(){
       paperSelect.disabled=busy||!paper?.writable;
@@ -78,6 +130,7 @@ window.PaperSettingsModels = (() => {
       if(busy)return;
       busy=true;updateControls();status.textContent='正在读取模型…';
       try{
+        await network.refresh();
         paper=await api('paper_model_get',{});
         fillModels(paperSelect,paper.models||[],paper.value?.model,'跟随 DSH 默认模型');describePaper();
         language=await api('language_settings_get',{});

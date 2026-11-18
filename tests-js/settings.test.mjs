@@ -1,3 +1,4 @@
+import { MODEL_NETWORK_DEFAULTS } from '../src/model-network.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -79,7 +80,7 @@ test('migration respects explicit native false, normalizes legacy strings and re
   const f = await fixture(t, { legacy, user: { auto_analysis: false, future: 7 } });
   const view = await f.service.get();
   assert.equal(view.backend, 'dsh'); assert.equal(view.writable, true);
-  assert.deepEqual(view.value, { ...RESOURCE_DEFAULTS, auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', ui_palette: 'jade', annotation_font_size: 14, reading_distribution_enabled: true, reading_distribution_mode: 'density', reading_distribution_ai: true, reading_distribution_smoothing: 3, sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_accent: 'system', latex_path_font: 'pixel', latex_split: 50, latex_sync_folder: true });
+  assert.deepEqual(view.value, { ...MODEL_NETWORK_DEFAULTS, ...RESOURCE_DEFAULTS, auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', ui_palette: 'jade', annotation_font_size: 14, reading_distribution_enabled: true, reading_distribution_mode: 'density', reading_distribution_ai: true, reading_distribution_smoothing: 3, sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_accent: 'system', latex_path_font: 'pixel', latex_split: 50, latex_sync_folder: true });
   assert.deepEqual((await f.store.get('preferences')).value, legacy);
   assert.deepEqual((await f.store.get(backup)).value, legacy);
   assert.equal(f.settings.raw().future, 7);
@@ -415,4 +416,14 @@ test('reading distribution legacy choices migrate while invalid values remain re
   assert.equal((await bad.service.get()).value.reading_distribution_mode, 'density');
   assert.equal((await bad.service.get()).value.reading_distribution_smoothing, 3);
   assert.deepEqual((await bad.store.get(backup)).value, invalid);
+});
+
+for(const native of [true,false])test(`model network routes persist independently and reject unsafe proxy URLs (${native?'DSH':'local'})`,async t=>{
+ const f=await fixture(t,{native}),initial=await f.service.get();
+ assert.equal(initial.value.network_deepseek,'direct');assert.equal(initial.value.network_opencode_go,'proxy');
+ const saved=await f.service.update({network_opencode_go:'system',network_kimi:'proxy',network_proxy_url:'http://127.0.0.1:9999'},initial.revision);
+ assert.equal((await f.service.get()).value.network_kimi,'proxy');assert.equal(saved.value.network_deepseek,'direct');
+ for(const network_proxy_url of ['socks5://proxy.test','http://user:password@proxy.test','http://proxy.test/path'])assert.throws(()=>f.service.update({network_proxy_url},saved.revision),code('SETTINGS_INVALID'));
+ assert.throws(()=>f.service.update({network_deepseek:'auto'},saved.revision),code('SETTINGS_INVALID'));
+ const reset=await f.service.reset(saved.revision,Object.keys(MODEL_NETWORK_DEFAULTS));assert.equal(reset.value.network_proxy_url,'');assert.equal(reset.value.network_kimi,'direct');
 });
