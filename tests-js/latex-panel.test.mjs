@@ -2013,3 +2013,41 @@ test('a note-specific stop aborts its request and immediately re-enables the sav
   assert.doesNotMatch(f.ids.get('latex-review-message').textContent, /Late transport error/)
   f.ui.dispose()
 })
+
+test('toolbar font and size changes preserve unsaved source and queue only appearance settings',async()=>{
+ let preferences={latex_auto_compile:false},revision=1,measures=0;
+ const f=await fixture((action,args)=>{
+  if(action==='settings_get')return{value:preferences,revision:String(revision)};
+  if(action==='settings_update'){assert.equal(args.expected_revision,String(revision));preferences={...preferences,...args.patch};return{value:preferences,revision:String(++revision)};}
+ },{sourceEditor:{requestMeasure(){measures++},setReviewMarks(){},destroy(){}}});
+ const editor=f.ids.get('latex-editor'),font=f.ids.get('latex-editor-font'),size=f.ids.get('latex-editor-font-size'),root=f.ids.get('latex-view');
+ editor.value='Synthetic unsaved paragraph';editor.selectionStart=5;editor.selectionEnd=9;
+ font.value='serif';await font.dispatch('change');await tick();
+ size.value='21';await size.dispatch('change');await tick();
+ assert.equal(preferences.latex_editor_font,'serif');assert.equal(root.style['--latex-editor-font-size'],'21px');assert.match(root.style['--latex-editor-font'],/Georgia/);assert.ok(measures>0);
+ assert.equal(editor.value,'Synthetic unsaved paragraph');assert.equal(editor.selectionStart,5);assert.equal(editor.selectionEnd,9);
+ await f.ids.get('latex-editor-font-larger').dispatch('click');await tick();assert.equal(preferences.latex_editor_font_size,22);
+ size.value='10';await size.dispatch('change');await tick();assert.equal(f.ids.get('latex-editor-font-smaller').disabled,true);
+ size.value='28';await size.dispatch('change');await tick();assert.equal(f.ids.get('latex-editor-font-larger').disabled,true);
+ const before=f.calls.filter(call=>call.action==='settings_update').length;size.value='500';await size.dispatch('change');await tick();assert.equal(size.value,'28');assert.equal(f.calls.filter(call=>call.action==='settings_update').length,before);
+ assert.ok(!f.calls.some(call=>call.action==='latex_write'||call.action==='latex_compile'));
+ assert.ok(font.parentElement.parentElement.parentElement.attributes['aria-label']==='LaTeX 工作台工具栏');
+ f.ui.dispose();
+});
+
+test('preset themes and custom backgrounds are local, readable and restore without touching PDF modes',async()=>{
+ let preferences={latex_auto_compile:false},revision=1;
+ const f=await fixture((action,args)=>{
+  if(action==='settings_get')return{value:preferences,revision:String(revision)};
+  if(action==='settings_update'){preferences={...preferences,...args.patch};return{value:preferences,revision:String(++revision)};}
+ });
+ const root=f.ids.get('latex-view'),theme=f.ids.get('latex-setting-theme'),background=f.ids.get('latex-setting-editor-background'),reset=f.ids.get('latex-setting-background-reset');
+ for(const value of ['overleaf-light','overleaf-dark','vscode-light','vscode-dark','quiet-light']){theme.value=value;await theme.dispatch('change');await tick();assert.equal(root.dataset.latexTheme,value);}
+ background.value='#121212';await background.dispatch('change');await tick();assert.equal(root.dataset.latexEditorTone,'dark');assert.equal(root.style['--latex-editor-background'],'#121212');
+ theme.value='vscode-light';await theme.dispatch('change');await tick();assert.equal(root.dataset.latexEditorTone,'dark','custom writing background remains explicit across theme changes');
+ background.value='#eeeeee';await background.dispatch('change');await tick();assert.equal(root.dataset.latexEditorTone,'light');
+ await reset.dispatch('click');await tick();assert.equal(preferences.latex_editor_background,'theme');assert.equal(root.style['--latex-editor-background'],'var(--panel)');assert.equal(root.dataset.latexEditorTone,'theme');
+ const line=f.ids.get('latex-setting-editor-line-height');line.value='relaxed';await line.dispatch('change');await tick();assert.equal(root.style['--latex-editor-line-height'],'1.9');
+ assert.equal(f.window.dataset.latexTheme,undefined);assert.equal(f.ids.get('latex-preview').classList.contains('latex-dark-pdf'),false);
+ f.ui.dispose();
+});

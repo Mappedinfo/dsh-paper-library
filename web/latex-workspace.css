@@ -4,6 +4,12 @@
  * comes from the plugin's theme bridge, so light and dark both read correctly. */
 @font-face { font-family: 'PaperPixel'; src: url('./fonts/silkscreen-regular.ttf') format('truetype'); font-style: normal; font-weight: 400; font-display: swap; }
 #latex-view {
+  --latex-editor-font: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --latex-editor-font-size: 13px;
+  --latex-editor-line-height: 1.6;
+  --latex-syntax-command: light-dark(#195b91, #8ecaff);
+  --latex-syntax-atom: light-dark(#75511c, #e5bf7a);
+  --latex-syntax-string: light-dark(#88520f, #f7ad31);
   --latex-path-font: 'PaperPixel', 'Andale Mono', Monaco, ui-monospace, monospace;
   --latex-pane-head-height: 38px;
   --latex-nav-width: clamp(168px, 16vw, 214px);
@@ -43,10 +49,49 @@
   --error: #ff9b9d; --dsw-alias-bg-module-platform: #161b20;
 }
 /* 本地明暗配色不依赖宿主当前的明暗模式，文字仍使用各自的高对比前景。 */
-#latex-view[data-latex-theme=parchment], #latex-view[data-latex-theme=midnight] {
-  --latex-active-bg: color-mix(in srgb, var(--ink) 12%, var(--surface));
+#latex-view[data-latex-theme]:not([data-latex-theme=system]) {
+  --latex-active-bg: var(--teal-light);
+  --latex-active-marker: var(--teal);
   --latex-context-bg: color-mix(in srgb, var(--ink) 4%, var(--surface));
   --latex-active-border: var(--line);
+}
+/* 独立工作台主题：控制背景、界面文字和源码高亮，不读取宿主明暗决定选定主题。 */
+#latex-view[data-latex-theme=overleaf-light] {
+  color-scheme: light; --paper:#f7f9f7; --surface:#f1f5f2; --panel:#ffffff; --ink:#202a24;
+  --muted:#59675e; --line:#d7e1da; --teal:#236b45; --teal-light:#e4f0e7; --error:#a72e35;
+  --latex-syntax-command:#185e9b; --latex-syntax-atom:#79521f; --latex-syntax-string:#8a342e;
+}
+#latex-view[data-latex-theme=overleaf-dark] {
+  color-scheme: dark; --paper:#202a28; --surface:#27332f; --panel:#1e2724; --ink:#e5eee7;
+  --muted:#b0c1b5; --line:#41554a; --teal:#96d2a9; --teal-light:#324d3d; --error:#ff9b9d;
+  --latex-syntax-command:#91c6f2; --latex-syntax-atom:#e9c080; --latex-syntax-string:#b4dca4;
+}
+#latex-view[data-latex-theme=vscode-light] {
+  color-scheme: light; --paper:#f8f8f8; --surface:#f3f3f3; --panel:#ffffff; --ink:#1f1f1f;
+  --muted:#616161; --line:#d7d7d7; --teal:#005fb8; --teal-light:#e6effb; --error:#a1260d;
+  --latex-syntax-command:#0000a3; --latex-syntax-atom:#066b45; --latex-syntax-string:#a31515;
+}
+#latex-view[data-latex-theme=vscode-dark] {
+  color-scheme: dark; --paper:#181818; --surface:#252526; --panel:#1f1f1f; --ink:#d4d4d4;
+  --muted:#abb0b5; --line:#454545; --teal:#75beff; --teal-light:#263c52; --error:#f48771;
+  --latex-syntax-command:#569cd6; --latex-syntax-atom:#b5cea8; --latex-syntax-string:#ce9178;
+}
+#latex-view[data-latex-theme=quiet-light] {
+  color-scheme: light; --paper:#f4f4f1; --surface:#ededeb; --panel:#fdfdfb; --ink:#333333;
+  --muted:#65665d; --line:#d2d3cd; --teal:#4b6b45; --teal-light:#e4eddf; --error:#a72e35;
+  --latex-syntax-command:#69458b; --latex-syntax-atom:#466744; --latex-syntax-string:#8c442a;
+}
+#latex-view[data-latex-theme=parchment] { --latex-syntax-command:#195b91; --latex-syntax-atom:#75511c; --latex-syntax-string:#88520f; }
+#latex-view[data-latex-theme=midnight] { --latex-syntax-command:#8ecaff; --latex-syntax-atom:#e5bf7a; --latex-syntax-string:#f7ad31; }
+#latex-view[data-latex-theme]:not([data-latex-theme=system]) {
+  --white:var(--panel); --dsw-alias-bg-module-platform:var(--paper);
+  --dsw-alias-bg-layer-1:var(--panel); --dsw-alias-bg-layer-2:var(--panel); --dsw-specific-input-major:var(--panel);
+  --dsw-alias-label-primary:var(--ink); --dsw-alias-label-secondary:var(--muted); --dsw-alias-label-tertiary:var(--muted);
+  --dsw-alias-border-l2:var(--line); --dsw-alias-border-l4:var(--line);
+  --dsw-alias-interactive-bg-hover:color-mix(in srgb,var(--ink) 6%,var(--panel));
+  --dsw-alias-interactive-bg-hover-solid:color-mix(in srgb,var(--ink) 9%,var(--surface));
+  --dsw-alias-interactive-bg-active:var(--teal-light); --dsw-alias-state-warn-label:var(--latex-syntax-string);
+  --dsw-alias-button-primary-fill:var(--ink); --dsw-alias-button-primary-hover:var(--muted); --dsw-alias-label-primary-foreground:var(--panel);
 }
 #latex-view[data-latex-accent=custom] {
   --latex-active-bg: color-mix(in srgb, var(--latex-accent-color) 18%, var(--surface));
@@ -299,17 +344,25 @@ body > #latex-view { height: 100dvh; }
 .latex-file-open.current-file:hover { background: var(--latex-active-bg); }
 .latex-file-open.active { border-color: transparent; background: var(--latex-active-bg); box-shadow: inset 3px 0 var(--latex-active-marker); color: var(--ink); font-weight: 600; }
 .latex-outline-file .latex-file-open.active { color: var(--ink); }
-.latex-editor-wrap { display: flex; flex: 1; min-height: 0; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--panel);
-  --latex-syntax-command: light-dark(#195b91, #8ecaff); --latex-syntax-atom: light-dark(#75511c, #e5bf7a);
+.latex-editor-wrap {
+  display:flex;flex:1;min-height:0;
+  font:var(--latex-editor-font-size)/var(--latex-editor-line-height) var(--latex-editor-font);
+  background:var(--latex-editor-background,var(--panel));color:var(--latex-editor-ink);
+  --latex-editor-ink:var(--ink);--latex-editor-muted:var(--muted);
+  --latex-editor-gutter:color-mix(in srgb,var(--latex-editor-ink) 3%,var(--latex-editor-background,var(--panel)));
+  --latex-editor-active:color-mix(in srgb,var(--latex-editor-ink) 6%,transparent);
 }
+/* 自选背景自动选用黑／白前景；保守的单色语法避免中间亮度背景上彩字不可读。 */
+#latex-view[data-latex-editor-tone=light] .latex-editor-wrap {color-scheme:light;--latex-editor-active:transparent;--latex-editor-ink:#000;--latex-editor-muted:#000;--latex-syntax-command:#000;--latex-syntax-atom:#000;--latex-syntax-string:#000;}
+#latex-view[data-latex-editor-tone=dark] .latex-editor-wrap {color-scheme:dark;--latex-editor-active:transparent;--latex-editor-ink:#fff;--latex-editor-muted:#fff;--latex-syntax-command:#fff;--latex-syntax-atom:#fff;--latex-syntax-string:#fff;}
 .latex-gutter {
-  padding: 10px 6px 10px 10px; text-align: right; color: var(--muted);
-  background: var(--dsw-alias-interactive-bg-hover); border-right: 1px solid var(--line);
+  padding: 10px 6px 10px 10px; text-align: right; color: var(--latex-editor-muted);
+  background: var(--latex-editor-gutter); border-right: 1px solid var(--line);
   white-space: pre; overflow: hidden; user-select: none;
 }
 .latex-editor-wrap textarea {
   flex: 1; min-width: 0; resize: none; border: 0; outline: none; padding: 10px 12px; border-radius: 0;
-  font: inherit; tab-size: 2; background: transparent; color: var(--ink); white-space: pre; overflow: auto;
+  font: inherit; tab-size: 2; background: transparent; color: var(--latex-editor-ink); white-space: pre; overflow: auto;
 }
 
 .latex-preview-toolbar { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; height: var(--latex-pane-head-height); box-sizing: border-box; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 4px 6px; border-bottom: 1px solid var(--line); background: var(--surface); }
@@ -480,3 +533,16 @@ body > #latex-view { height: 100dvh; }
 .latex-term-dialog label { display: grid; gap: 3px; margin-block: 8px; }
 .latex-term-dialog textarea { margin: 0; font: inherit; }
 .latex-term-dialog .latex-git-actions { justify-content: end; }
+
+/* 顶部字体控件始终属于工具栏，调整只改变源码显示。 */
+.latex-editor-font-controls{display:flex;align-items:center;gap:3px;border-inline-start:1px solid var(--line);padding-inline-start:7px}
+.latex-editor-font-controls label{gap:4px}.latex-editor-font-controls #latex-editor-font{width:128px;max-width:128px}
+.latex-editor-font-controls #latex-editor-font-size{width:45px;min-width:45px;height:30px;box-sizing:border-box;padding:3px;text-align:center;font-size:12px;appearance:textfield}
+#latex-editor-font-size::-webkit-inner-spin-button,#latex-editor-font-size::-webkit-outer-spin-button{appearance:none;margin:0}
+.latex-editor-font-controls .button{min-width:26px;padding-inline:5px}.latex-font-unit{font-size:11px;color:var(--muted)}
+.latex-appearance{padding-bottom:12px;border-bottom:1px solid var(--line)}
+.latex-appearance-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px;margin:6px 0}
+.latex-appearance-grid>.latex-check{display:flex;flex-direction:column;align-items:flex-start;gap:5px}
+.latex-appearance-grid select{width:100%;min-width:0;max-width:none}
+.latex-appearance-grid .latex-check>span,.latex-appearance-field>span{font-size:12px;color:var(--muted)}
+.latex-appearance-field .latex-menu-row{margin-top:5px}.latex-appearance-grid input[type=color]{width:38px;flex-basis:38px}

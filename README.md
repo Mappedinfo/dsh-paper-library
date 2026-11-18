@@ -50,6 +50,8 @@ Paper Library 将文献收集、PDF 阅读与批注、知识整理和 LaTeX 写�
 - **LaTeX 写作**：在工作台中编辑源码、调用本机 TeX 编译并查看 PDF，比较版本；双击 PDF 精确定位源码，记录源码选段与 PDF 高亮／区域便笺，原文改变后可按唯一高置信文本自动恢复定位，在统一自审列表复查和导出（[单人自审](docs/latex-self-review.md)）；向 DSH 提问或审阅修改提案，接受后才写入文件。[LaTeX 工作台](#文献工作台)
 - **Slides 制作**：通过集成的 PlainDeck 画布编辑演示文稿，添加文字、图片、表格与卡片，调整主题、放映，导出可编辑 PPTX、HTML、ZIP 或打印为 PDF。DSH 对话可直接导出已保存项目，源码和图片保存在当前资料库。[Slides 工作台](docs/slides-workbench.md)
 
+LaTeX 工作台提供八种主题选择（含 Overleaf 风格、VS Code 明暗与 Quiet Light）。顶部可调写作字体和 10–28 px 字号，设置菜单前部可调整背景、强调色及行距；外观保存在主机偏好中，不改变 PDF 排版。[写作外观说明](docs/latex-projects.md#写作主题背景与字体)
+
 ### 文献库、阅读与批注
 
 资料表分别显示「文献类型」和「文件格式」。文献类型沿用 [Zotero](https://www.zotero.org/support/kb/item_types_and_fields) 与 [CSL](https://docs.citationstyles.org/en/stable/specification.html#appendix-iii-types) 的分类，包括论文、图书、说明书、报告、软件、标准、专利、地图和网页等。说明书在 CSL 中保存为 `report`，并用 `genre: Manual` 保留细分类别。`.bib` 导入与导出使用 BibTeX 和 BibLaTeX 的标准 `@manual` 类型。文件格式来自已有附件或工作台，例如 PDF、CSV 或 PlainDeck。

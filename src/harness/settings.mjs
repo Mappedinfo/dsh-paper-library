@@ -32,13 +32,17 @@ export const PAPER_LIBRARY_SETTINGS_DEFAULTS = Object.freeze({
   latex_auto_compile: true,
   latex_engine: 'xelatex',
   latex_theme: 'system',
+  latex_editor_font: 'mono',
+  latex_editor_font_size: 13,
+  latex_editor_background: 'theme',
+  latex_editor_line_height: 'normal',
   latex_accent: 'system',
   latex_path_font: 'pixel',
   latex_split: 50,
   latex_sync_folder: true,
 });
-export const TEXT_SETTINGS = Object.freeze(['sync_config', 'external_sources', 'latex_accent', 'network_proxy_url']);
-export const NUMBER_SETTINGS = Object.freeze({ reading_distribution_smoothing: { minimum: 1, maximum: 6 }, annotation_font_size: { minimum: 12, maximum: 24 }, latex_split: { minimum: 25, maximum: 75 }, ...RESOURCE_FIELDS });
+export const TEXT_SETTINGS = Object.freeze(['sync_config', 'external_sources', 'latex_accent', 'network_proxy_url', 'latex_editor_background']);
+export const NUMBER_SETTINGS = Object.freeze({ reading_distribution_smoothing: { minimum: 1, maximum: 6 }, annotation_font_size: { minimum: 12, maximum: 24 }, latex_split: { minimum: 25, maximum: 75 }, latex_editor_font_size: { minimum: 10, maximum: 28 }, ...RESOURCE_FIELDS });
 const fields = Object.keys(PAPER_LIBRARY_SETTINGS_DEFAULTS);
 const markerKey = 'settings.migration:paper-library';
 const backupKey = 'settings.backup:paper-library';
@@ -76,7 +80,11 @@ export function createPaperLibrarySettingsSchema(Schema) {
     latex_starter: Schema.boolean().default(true),
     latex_auto_compile: Schema.boolean().default(true),
     latex_engine: Schema.union([Schema.const('xelatex'), Schema.const('pdflatex'), Schema.const('lualatex')]).default('xelatex'),
-    latex_theme: Schema.union([Schema.const('system'), Schema.const('parchment'), Schema.const('midnight')]).default('system'),
+    latex_theme: Schema.union(['system', 'overleaf-light', 'overleaf-dark', 'vscode-light', 'vscode-dark', 'quiet-light', 'parchment', 'midnight'].map(value=>Schema.const(value))).default('system'),
+    latex_editor_font: Schema.union(['mono','menlo','monaco','source-code-pro','jetbrains-mono','serif','sans'].map(value=>Schema.const(value))).default('mono'),
+    latex_editor_font_size: Schema.number().default(13),
+    latex_editor_background: Schema.string().default('theme'),
+    latex_editor_line_height: Schema.union(['compact','normal','relaxed'].map(value=>Schema.const(value))).default('normal'),
     latex_accent: Schema.string().default('system'),
     latex_path_font: Schema.union([Schema.const('pixel'), Schema.const('mono'), Schema.const('system')]).default('pixel'),
     latex_split: Schema.number().default(50),
@@ -101,9 +109,15 @@ function validatePatch(patch) {
     } else if (key === 'latex_engine') {
       if (!['xelatex', 'pdflatex', 'lualatex'].includes(value)) throw invalid('设置值无效：latex_engine');
     } else if (key === 'latex_theme') {
-      if (!['system', 'parchment', 'midnight'].includes(value)) throw invalid('设置值无效：latex_theme');
+      if (!['system', 'overleaf-light', 'overleaf-dark', 'vscode-light', 'vscode-dark', 'quiet-light', 'parchment', 'midnight'].includes(value)) throw invalid('设置值无效：latex_theme');
+    } else if (key === 'latex_editor_font') {
+      if (!['mono','menlo','monaco','source-code-pro','jetbrains-mono','serif','sans'].includes(value)) throw invalid('请选择可用的写作字体。');
+    } else if (key === 'latex_editor_line_height') {
+      if (!['compact','normal','relaxed'].includes(value)) throw invalid('请选择紧凑、标准或宽松行距。');
+    } else if (key === 'latex_editor_background') {
+      if (typeof value !== 'string' || value !== 'theme' && !/^#[0-9a-f]{6}$/i.test(value)) throw invalid('写作背景需要 theme（跟随主题）或 #RRGGBB 颜色。');
     } else if (key === 'latex_accent') {
-      if (typeof value !== 'string' || value !== 'system' && !/^#[0-9a-f]{6}$/i.test(value)) throw invalid('LaTeX 界面强调色需要 system（跟随 DSH）或 #RRGGBB 颜色。');
+      if (typeof value !== 'string' || value !== 'system' && !/^#[0-9a-f]{6}$/i.test(value)) throw invalid('LaTeX 界面强调色需要 system（跟随主题）或 #RRGGBB 颜色。');
     } else if (key === 'latex_path_font') {
       if (!['pixel', 'mono', 'system'].includes(value)) throw invalid('设置值无效：latex_path_font');
     } else if (key === 'sync_config') {

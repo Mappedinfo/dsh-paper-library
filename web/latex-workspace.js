@@ -21,7 +21,17 @@ window.PaperLatexWorkspace = (() => {
   const PDF_PAGE_GAP = 16, PDF_PREVIEW_PADDING = 12;
   const MAX_PDF_SEARCH_HITS = 120;
   const SPLIT_MIN = 25, SPLIT_MAX = 75;
-  const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_path_font: 'pixel', latex_accent: 'system', latex_split: 50, latex_sync_folder: true };
+  const DEFAULT_SETTINGS = { latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_editor_font: 'mono', latex_editor_font_size: 13, latex_editor_background: 'theme', latex_editor_line_height: 'normal', latex_path_font: 'pixel', latex_accent: 'system', latex_split: 50, latex_sync_folder: true };
+
+  const EDITOR_FONTS = [
+    ['mono', '系统等宽', 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'],
+    ['menlo', 'Menlo', 'Menlo, Consolas, ui-monospace, monospace'],
+    ['monaco', 'Monaco', 'Monaco, Menlo, ui-monospace, monospace'],
+    ['source-code-pro', 'Source Code Pro', '"Source Code Pro", Menlo, Consolas, monospace'],
+    ['jetbrains-mono', 'JetBrains Mono', '"JetBrains Mono", Menlo, Consolas, monospace'],
+    ['serif', '衬线写作', 'Georgia, "Songti SC", "Noto Serif CJK SC", serif'],
+    ['sans', '界面字体', '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif'],
+  ];
 
   function create({api: transport, toast = () => {}, getLibrary = () => '', rail = null, onVersionSaved = () => {}, onContext = () => {}, onSettingsClose = () => {}}) {
     const make = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
@@ -90,6 +100,14 @@ window.PaperLatexWorkspace = (() => {
     const autoToggle = make('button', 'button subtle paper-switch', '自动编译');
     autoToggle.id = 'latex-auto-state'; autoToggle.type = 'button';
     autoToggle.setAttribute('role', 'switch'); autoToggle.setAttribute('aria-label', '自动编译');
+    const editorFontControls = make('div', 'latex-editor-font-controls'); editorFontControls.setAttribute('role','group'); editorFontControls.setAttribute('aria-label','写作字体与字号');
+    const editorFont = make('select'); editorFont.id='latex-editor-font'; editorFont.setAttribute('aria-label','写作字体'); editorFont.title='源码编辑器字体';
+    for (const [value,label] of EDITOR_FONTS) { const option=make('option','',label);option.value=value;editorFont.append(option); }
+    const fontLabel=make('label','latex-check');fontLabel.append(make('span','','字体'),editorFont);
+    const editorFontSize=make('input');editorFontSize.id='latex-editor-font-size';editorFontSize.type='number';editorFontSize.min='10';editorFontSize.max='28';editorFontSize.step='1';editorFontSize.setAttribute('aria-label','写作字号');editorFontSize.title='源码字号，10–28 px';
+    const fontSmaller=make('button','button subtle','−'),fontLarger=make('button','button subtle','+');
+    for (const [button,label,id] of [[fontSmaller,'减小写作字号','latex-editor-font-smaller'],[fontLarger,'增大写作字号','latex-editor-font-larger']]) {button.type='button';button.id=id;button.setAttribute('aria-label',label);button.title=label;}
+    editorFontControls.append(fontLabel,fontSmaller,editorFontSize,make('span','latex-font-unit','px'),fontLarger);
     const mainLabel = make('span', 'latex-main'); mainLabel.id = 'latex-main';
     const mainSelect = make('select'); mainSelect.id = 'latex-entry'; mainSelect.setAttribute('aria-label', '编译主文件');
     const saveState = make('span', 'latex-save-state'); saveState.id = 'latex-save-state'; saveState.setAttribute('role', 'status');
@@ -300,19 +318,31 @@ window.PaperLatexWorkspace = (() => {
     for (const [value, label] of [['xelatex', 'XeLaTeX'], ['pdflatex', 'pdfLaTeX'], ['lualatex', 'LuaLaTeX']]) { const option = make('option', '', label); option.value = value; settingEngine.append(option); }
     const engineLabel = make('label', 'latex-check'); engineLabel.append(make('span', '', '编译引擎（全部项目）'), settingEngine);
     const settingTheme = make('select'); settingTheme.id = 'latex-setting-theme'; settingTheme.setAttribute('aria-label', 'LaTeX 工作台配色');
-    for (const [value, label] of [['system', '跟随宿主'], ['parchment', '纸色'], ['midnight', '夜色']]) { const option = make('option', '', label); option.value = value; settingTheme.append(option); }
+    for (const [value, label] of [['system','跟随 DSH'],['overleaf-light','Overleaf 风格 · 纯净浅色'],['overleaf-dark','Overleaf 风格 · 柔和深色'],['vscode-light','VS Code · Light Modern'],['vscode-dark','VS Code · Dark Modern'],['quiet-light','Quiet Light · 低干扰'],['parchment','纸色'],['midnight','夜色']]) { const option = make('option', '', label); option.value = value; settingTheme.append(option); }
     const themeLabel = make('label', 'latex-check'); themeLabel.append(make('span', '', '工作台配色'), settingTheme);
     const settingPathFont = make('select'); settingPathFont.id = 'latex-setting-path-font'; settingPathFont.setAttribute('aria-label', '文件路径字体');
     for (const [value, label] of [['pixel', '像素'], ['mono', '等宽'], ['system', '跟随界面']]) { const option = make('option', '', label); option.value = value; settingPathFont.append(option); }
     const pathFontLabel = make('label', 'latex-check'); pathFontLabel.append(make('span', '', '文件路径字体'), settingPathFont);
-    const accentPresets = [['system', '跟随 DSH'], ['#4176e6', '蓝色'], ['#27806b', '青绿'], ['#b7791f', '琥珀'], ['#8250c4', '紫色'], ['custom', '自定义…']];
+    const accentPresets = [['system', '跟随主题'], ['#4176e6', '蓝色'], ['#27806b', '青绿'], ['#b7791f', '琥珀'], ['#8250c4', '紫色'], ['custom', '自定义…']];
     const settingAccent = make('select'); settingAccent.id = 'latex-setting-accent'; settingAccent.setAttribute('aria-label', '界面高亮配色');
     for (const [value, label] of accentPresets) { const option = make('option', '', label); option.value = value; settingAccent.append(option); }
     const settingAccentColor = make('input'); settingAccentColor.id = 'latex-setting-accent-color'; settingAccentColor.type = 'color'; settingAccentColor.value = '#4176e6'; settingAccentColor.setAttribute('aria-label', '自定义界面高亮颜色'); settingAccentColor.hidden = true;
     const accentLabel = make('label', 'latex-check'); accentLabel.append(make('span', '', '界面高亮'), settingAccent, settingAccentColor);
+    const appearanceRow=make('section','latex-menu-section latex-appearance');appearanceRow.id='latex-appearance';appearanceRow.setAttribute('aria-label','写作外观');
+    const appearanceGrid=make('div','latex-appearance-grid');
+    const settingBackground=make('input');settingBackground.type='color';settingBackground.id='latex-setting-editor-background';settingBackground.value='#ffffff';settingBackground.setAttribute('aria-label','自定义写作背景');
+    const backgroundReset=make('button','button subtle','跟随主题');backgroundReset.type='button';backgroundReset.id='latex-setting-background-reset';
+    const backgroundMode=make('span','latex-menu-hint');backgroundMode.id='latex-setting-background-state';
+    const backgroundLabel=make('div','latex-appearance-field');const backgroundLine=make('div','latex-menu-row');backgroundLine.append(settingBackground,backgroundReset,backgroundMode);backgroundLabel.append(make('span','','写作背景'),backgroundLine);
+    const settingLineHeight=make('select');settingLineHeight.id='latex-setting-editor-line-height';settingLineHeight.setAttribute('aria-label','写作行距');
+    for(const [value,label] of [['compact','紧凑'],['normal','标准'],['relaxed','宽松']]){const option=make('option','',label);option.value=value;settingLineHeight.append(option);}
+    const lineHeightLabel=make('label','latex-check');lineHeightLabel.append(make('span','','写作行距'),settingLineHeight);
+    appearanceGrid.append(themeLabel,backgroundLabel,accentLabel,lineHeightLabel,pathFontLabel);
+    appearanceRow.append(make('strong','','写作外观'),appearanceGrid,make('p','latex-menu-hint','字体和字号在顶部工具栏调整；未安装的字体自动使用本机备用字体。外观仅影响编辑界面，PDF 排版由 LaTeX 源码决定。'));
     const settingsRetry = make('button', 'button subtle', '重试保存设置'); settingsRetry.id = 'latex-settings-retry'; settingsRetry.type = 'button'; settingsRetry.hidden = true;
-    const settingsLine = make('div', 'latex-menu-row'); settingsLine.append(settingStarterLabel, settingAutoLabel, engineLabel, themeLabel, pathFontLabel, accentLabel, settingsRetry);
+    const settingsLine = make('div', 'latex-menu-row'); settingsLine.append(settingStarterLabel, settingAutoLabel, engineLabel);
     settingRow.append(settingsLine);
+    appearanceRow.append(settingsRetry);
 
     const writingModelSettings = make('div', 'latex-menu-section'); writingModelSettings.id = 'latex-writing-model-settings';
     const retrievalSettings = make('section', 'latex-menu-section latex-retrieval-settings'); retrievalSettings.id = 'latex-retrieval-settings'; retrievalSettings.setAttribute('aria-label', '本次检索');
@@ -343,7 +373,7 @@ window.PaperLatexWorkspace = (() => {
     const syncAttach = make('button', 'button subtle', '纳入同步'); syncAttach.id = 'latex-sync-attach'; syncAttach.type = 'button';
     const rootLine = make('div', 'latex-menu-row'); rootLine.append(rootPath, syncState, syncAttach);
     rootRow.append(rootLine, make('p', 'latex-menu-hint', '论文目录由插件维护；数据同步服务会把它作为一个独立源备份（只新增，不删改其他源）。'));
-    menu.append(entryRow, locationRow, readingRow, createRow, registerRow, compareRow, settingRow, writingModelSettings, retrievalSettings, translateSettings, rootRow);
+    menu.append(appearanceRow, entryRow, locationRow, readingRow, createRow, registerRow, compareRow, settingRow, writingModelSettings, retrievalSettings, translateSettings, rootRow);
 
     // ---- body: source | divider | (pdf | dsh | versions) ----
     const content = make('div', 'latex-content');
@@ -443,7 +473,7 @@ window.PaperLatexWorkspace = (() => {
     const darkPdfToggle = make('button', 'button subtle latex-layout-button', '深色 PDF'); darkPdfToggle.id = 'latex-pdf-dark'; darkPdfToggle.type = 'button';
     darkPdfToggle.setAttribute('aria-pressed', 'false'); darkPdfToggle.title = '切换 PDF 页面配色';
     pdfDisplay.append(zoomSelect, spreadToggle, darkPdfToggle);
-    toolbar.append(title, projectSelect, mainLabel, saveState, compile, autoToggle, diagnosticsToggle, navToggle, aiToggle, reviewToggle, sidebarDivider, layoutControls, pdfDisplay);
+    toolbar.append(title, projectSelect, mainLabel, saveState, compile, editorFontControls, autoToggle, diagnosticsToggle, navToggle, aiToggle, reviewToggle, sidebarDivider, layoutControls, pdfDisplay);
     const renderState = make('span', 'latex-render-state'); renderState.id = 'latex-render-state'; renderState.setAttribute('role', 'status');
     const pdfTools = make('div', 'latex-pdf-tools');
     for (const [mode, label] of [['select', '选择'], ['highlight', '高亮'], ['underline', '下划线'], ['strikeout', '删除线'], ['comment', '批注'], ['note', '区域']]) {
@@ -1050,6 +1080,21 @@ window.PaperLatexWorkspace = (() => {
       settingEngine.value = settings.latex_engine || 'xelatex';
       settingTheme.value = settings.latex_theme || 'system';
       view.dataset.latexTheme = settingTheme.value;
+      const chosenFont=EDITOR_FONTS.find(([id])=>id===settings.latex_editor_font)||EDITOR_FONTS[0];
+      editorFont.value=chosenFont[0];view.style.setProperty('--latex-editor-font',chosenFont[2]);
+      const size=Number.isSafeInteger(settings.latex_editor_font_size)?Math.max(10,Math.min(28,settings.latex_editor_font_size)):13;
+      editorFontSize.value=String(size);view.style.setProperty('--latex-editor-font-size',size+'px');fontSmaller.disabled=size<=10;fontLarger.disabled=size>=28;
+      settingLineHeight.value=['compact','normal','relaxed'].includes(settings.latex_editor_line_height)?settings.latex_editor_line_height:'normal';
+      view.style.setProperty('--latex-editor-line-height',({compact:'1.4',normal:'1.6',relaxed:'1.9'})[settingLineHeight.value]);
+      const background=/^#[a-f0-9]{6}$/i.test(settings.latex_editor_background)?settings.latex_editor_background.toLowerCase():null;
+      settingBackground.value=background||({'overleaf-dark':'#1e2724','vscode-dark':'#1f1f1f',midnight:'#1b222a',parchment:'#fffdf7','quiet-light':'#fdfdfb'})[settingTheme.value]||'#ffffff';
+      backgroundMode.textContent=background?'自定义 · 高对比文字':'主题背景';backgroundReset.disabled=!background;
+      view.style.setProperty('--latex-editor-background',background||'var(--panel)');
+      if(background){
+        const rgb=[1,3,5].map(start=>parseInt(background.slice(start,start+2),16)/255).map(value=>value<=.04045?value/12.92:((value+.055)/1.055)**2.4);
+        view.dataset.latexEditorTone=rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722>.179?'light':'dark';
+      }else view.dataset.latexEditorTone='theme';
+      sourceEditor?.requestMeasure?.();
       settingPathFont.value = settings.latex_path_font || 'pixel';
       view.dataset.latexPathFont = settingPathFont.value;
       const accent = /^#[a-f0-9]{6}$/i.test(settings.latex_accent) ? settings.latex_accent.toLowerCase() : 'system';
@@ -1104,7 +1149,7 @@ window.PaperLatexWorkspace = (() => {
         } catch (error) {
           entry.failed = true;
           showPendingSettings();
-          say(`设置未保存：${error.message}。选择已保留，请在写作设置中重试。`, true);
+          say(`设置未保存：${error.message}。选择已保留，请在项目与设置中重试。`, true);
           return false;
         }
       };
@@ -2595,6 +2640,17 @@ window.PaperLatexWorkspace = (() => {
     });
     settingStarter.addEventListener('change', () => void saveSetting({ latex_starter: settingStarter.checked }));
     settingEngine.addEventListener('change', () => void saveSetting({ latex_engine: settingEngine.value }));
+    editorFont.addEventListener('change',()=>void saveSetting({latex_editor_font:editorFont.value}));
+    editorFontSize.addEventListener('change',()=>{
+      const value=Number(editorFontSize.value);
+      if(!Number.isSafeInteger(value)||value<10||value>28){editorFontSize.value=String(settings.latex_editor_font_size);say('写作字号请输入 10–28 的整数。',true);return;}
+      void saveSetting({latex_editor_font_size:value});
+    });
+    fontSmaller.addEventListener('click',()=>void saveSetting({latex_editor_font_size:Math.max(10,settings.latex_editor_font_size-1)}));
+    fontLarger.addEventListener('click',()=>void saveSetting({latex_editor_font_size:Math.min(28,settings.latex_editor_font_size+1)}));
+    settingBackground.addEventListener('change',()=>void saveSetting({latex_editor_background:settingBackground.value}));
+    backgroundReset.addEventListener('click',()=>void saveSetting({latex_editor_background:'theme'}));
+    settingLineHeight.addEventListener('change',()=>void saveSetting({latex_editor_line_height:settingLineHeight.value}));
     settingTheme.addEventListener('change', () => void saveSetting({ latex_theme: settingTheme.value }));
     settingPathFont.addEventListener('change', () => void saveSetting({ latex_path_font: settingPathFont.value }));
     settingAccent.addEventListener('change', () => {

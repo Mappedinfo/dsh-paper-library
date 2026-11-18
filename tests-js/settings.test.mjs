@@ -69,7 +69,7 @@ test('schema exposes exactly the live preference fields with safe defaults', () 
   // The LaTeX workspace defaults: starter file and idle recompiling on, split in the middle.
   assert.equal(schema.latex_starter.value, true); assert.equal(schema.latex_auto_compile.value, true);
   assert.deepEqual(schema.latex_engine.values, ['xelatex', 'pdflatex', 'lualatex']); assert.equal(schema.latex_engine.value, 'xelatex');
-  assert.deepEqual(schema.latex_theme.values, ['system', 'parchment', 'midnight']); assert.equal(schema.latex_theme.value, 'system');
+  assert.deepEqual(schema.latex_theme.values, ['system','overleaf-light','overleaf-dark','vscode-light','vscode-dark','quiet-light','parchment','midnight']); assert.equal(schema.latex_theme.value, 'system');
   assert.equal(schema.latex_accent.type, 'string'); assert.equal(schema.latex_accent.value, 'system');
   assert.deepEqual(schema.latex_path_font.values, ['pixel', 'mono', 'system']); assert.equal(schema.latex_path_font.value, 'pixel');
   assert.equal(schema.latex_split.value, 50); assert.equal(schema.latex_sync_folder.value, true);
@@ -80,7 +80,7 @@ test('migration respects explicit native false, normalizes legacy strings and re
   const f = await fixture(t, { legacy, user: { auto_analysis: false, future: 7 } });
   const view = await f.service.get();
   assert.equal(view.backend, 'dsh'); assert.equal(view.writable, true);
-  assert.deepEqual(view.value, { ...MODEL_NETWORK_DEFAULTS, ...RESOURCE_DEFAULTS, auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', ui_palette: 'jade', annotation_font_size: 14, reading_distribution_enabled: true, reading_distribution_mode: 'density', reading_distribution_ai: true, reading_distribution_smoothing: 3, sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_accent: 'system', latex_path_font: 'pixel', latex_split: 50, latex_sync_folder: true });
+  assert.deepEqual(view.value, { ...MODEL_NETWORK_DEFAULTS, ...RESOURCE_DEFAULTS, auto_analysis: false, analysis_fill: true, auto_review: true, 'auto-paper-conversation': false, 'reading-panel-side': 'right', ui_palette: 'jade', annotation_font_size: 14, reading_distribution_enabled: true, reading_distribution_mode: 'density', reading_distribution_ai: true, reading_distribution_smoothing: 3, sync_config: '', external_sources: '', latex_starter: true, latex_auto_compile: true, latex_engine: 'xelatex', latex_theme: 'system', latex_editor_font: 'mono', latex_editor_font_size: 13, latex_editor_background: 'theme', latex_editor_line_height: 'normal', latex_accent: 'system', latex_path_font: 'pixel', latex_split: 50, latex_sync_folder: true });
   assert.deepEqual((await f.store.get('preferences')).value, legacy);
   assert.deepEqual((await f.store.get(backup)).value, legacy);
   assert.equal(f.settings.raw().future, 7);
@@ -426,4 +426,17 @@ for(const native of [true,false])test(`model network routes persist independentl
  for(const network_proxy_url of ['socks5://proxy.test','http://user:password@proxy.test','http://proxy.test/path'])assert.throws(()=>f.service.update({network_proxy_url},saved.revision),code('SETTINGS_INVALID'));
  assert.throws(()=>f.service.update({network_deepseek:'auto'},saved.revision),code('SETTINGS_INVALID'));
  const reset=await f.service.reset(saved.revision,Object.keys(MODEL_NETWORK_DEFAULTS));assert.equal(reset.value.network_proxy_url,'');assert.equal(reset.value.network_kimi,'direct');
+});
+
+for(const native of [true,false])test(`writing themes, typography and background persist with safe limits (${native?'DSH':'local'})`,async t=>{
+ const f=await fixture(t,{native}),initial=await f.service.get();
+ const fields=['latex_theme','latex_editor_font','latex_editor_font_size','latex_editor_background','latex_editor_line_height'];
+ let saved=initial;
+ for(const latex_theme of ['overleaf-light','overleaf-dark','vscode-light','vscode-dark','quiet-light','parchment','midnight'])saved=await f.service.update({latex_theme},saved.revision);
+ saved=await f.service.update({latex_editor_font:'jetbrains-mono',latex_editor_font_size:19,latex_editor_background:'#13161b',latex_editor_line_height:'relaxed'},saved.revision);
+ f.service.dispose();const reopened=createPaperLibrarySettings({store:f.store,settings:f.settings,schema:{},watch:f.settings&&(fn=>f.settings.watch(fn))});t.after(()=>reopened.dispose());await reopened.ready;
+ const value=(await reopened.get()).value;assert.equal(value.latex_editor_font,'jetbrains-mono');assert.equal(value.latex_editor_font_size,19);assert.equal(value.latex_editor_background,'#13161b');assert.equal(value.latex_editor_line_height,'relaxed');
+ for(const latex_editor_font_size of [9,29,13.5,'16',null])assert.throws(()=>reopened.update({latex_editor_font_size},saved.revision),code('SETTINGS_INVALID'));
+ for(const patch of [{latex_editor_background:'url(https://evil.invalid)'},{latex_editor_background:'#123'},{latex_editor_font:'monospace; color: red'},{latex_editor_line_height:'2em'}])assert.throws(()=>reopened.update(patch,saved.revision),code('SETTINGS_INVALID'));
+ const reset=await reopened.reset(saved.revision,fields);for(const field of fields)assert.equal(reset.value[field],PAPER_LIBRARY_SETTINGS_DEFAULTS[field]);
 });

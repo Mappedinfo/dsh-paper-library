@@ -54,12 +54,12 @@ function libraryCompletion(context, citation) {
 }
 
 const theme = EditorView.theme({
-  '&': { height: '100%', minWidth: '0', flex: '1', color: 'var(--ink)', backgroundColor: 'var(--panel)', font: 'inherit' },
-  '.cm-scroller': { overflow: 'auto', fontFamily: 'inherit', lineHeight: '1.6' },
-  '.cm-content': { padding: '10px 0', caretColor: 'var(--ink)' },
+  '&': { height: '100%', minWidth: '0', flex: '1', color: 'var(--latex-editor-ink, var(--ink))', backgroundColor: 'var(--latex-editor-background, var(--panel))', font: 'inherit' },
+  '.cm-scroller': { overflow: 'auto', fontFamily: 'inherit', lineHeight: 'var(--latex-editor-line-height, 1.6)' },
+  '.cm-content': { padding: '10px 0', caretColor: 'var(--latex-editor-ink, var(--ink))' },
   '.cm-line': { padding: '0 12px' },
-  '.cm-gutters': { color: 'var(--muted)', backgroundColor: 'var(--dsw-alias-interactive-bg-hover)', borderRight: '1px solid var(--line)' },
-  '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'var(--dsw-alias-interactive-bg-hover)' },
+  '.cm-gutters': { color: 'var(--latex-editor-muted, var(--muted))', backgroundColor: 'var(--latex-editor-gutter)', borderRight: '1px solid var(--line)' },
+  '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'var(--latex-editor-active)' },
   '.cm-panels, .cm-tooltip': { color: 'var(--ink)', backgroundColor: 'var(--surface)', borderColor: 'var(--line)' },
   '.cm-panel.cm-search': {
     display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '5px 6px',
@@ -93,8 +93,8 @@ const theme = EditorView.theme({
 })
 const highlighting = syntaxHighlighting(HighlightStyle.define([
   { tag: [tags.keyword, tags.controlKeyword, tags.tagName, tags.special(tags.variableName), tags.function(tags.variableName)], color: 'var(--latex-syntax-command)' },
-  { tag: [tags.comment], color: 'var(--muted)', fontStyle: 'italic' },
-  { tag: [tags.string, tags.special(tags.string)], color: 'var(--dsw-alias-state-warn-label, var(--ink))' },
+  { tag: [tags.comment], color: 'var(--latex-editor-muted, var(--muted))', fontStyle: 'italic' },
+  { tag: [tags.string, tags.special(tags.string)], color: 'var(--latex-syntax-string, var(--ink))' },
   { tag: [tags.number, tags.atom], color: 'var(--latex-syntax-atom)' },
 ]))
 
@@ -185,7 +185,7 @@ function create(textarea, container, citation) {
     if (!marks.length && view.state.field(layer.field) === Decoration.none) return
     view.dispatch({ effects: layer.set.of(Decoration.set(marks, true)) })
   }
-  return { view, citationRange: () => citationRange(view.state, view.state.selection.main.head), cursorLine: () => view.state.doc.lineAt(view.state.selection.main.head).number, openSearch: () => openSearchPanel(view), setProjectSearchMatches(ranges) {
+  return { view, requestMeasure: () => view.requestMeasure(), citationRange: () => citationRange(view.state, view.state.selection.main.head), cursorLine: () => view.state.doc.lineAt(view.state.selection.main.head).number, openSearch: () => openSearchPanel(view), setProjectSearchMatches(ranges) {
     const length = view.state.doc.length
     const marks = ranges.filter(({ from, to }) => Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to > from && to <= length)
       .map(({ from, to, active }) => Decoration.mark({ class: active ? 'latex-search-source-hit active' : 'latex-search-source-hit' }).range(from, to))
