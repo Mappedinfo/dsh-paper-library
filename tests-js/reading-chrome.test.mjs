@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {createRequire} from 'node:module';
 import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('../web/reading-shell.js', import.meta.url), 'utf8');
@@ -60,4 +61,54 @@ test('opening a menu closes the previous menu, and geometry updates only open me
   second.open = true; second.events.toggle();
   assert.equal(first.open, false); assert.equal(second.open, true);
   context.place(); assert.deepEqual(calls, ['pen', 'pen']);
+});
+
+const require = createRequire(import.meta.url);
+let JSDOM;
+try { ({JSDOM} = require(process.env.JSDOM_MODULE || 'jsdom')); } catch {}
+
+test('reading and drawing feedback stays in the active tools without a separate status row', {skip: !JSDOM}, async () => {
+  const html = await readFile(new URL('../web/index.html', import.meta.url), 'utf8');
+  const dom = new JSDOM(html, {runScripts:'outside-only', url:'http://synthetic.invalid/'});
+  const w = dom.window, doc = w.document;
+  for (const id of ['metadata-enrich','catalog-archive']) {
+    const button = doc.createElement('button'); button.id = id; doc.body.append(button);
+  }
+  w.eval(source);
+  const ui = w.PaperReadingShell.create({
+    state: {active:{id:'synthetic', pdf:true},page:1,tab:'reader'},
+    workbench:()=>({isTable:()=>false}), panels:()=>({visible:()=>false}),
+    reader:()=>({setTool(){}}), navigate(){}, toast(){},
+  });
+  try {
+    ui.arrangeControls();
+    const message = doc.getElementById('page-message'), draft = doc.getElementById('reader-ink-draft');
+    assert.equal(doc.getElementById('reader-status-bar'), null);
+    assert.equal(message.hidden, true);
+    assert.equal(draft.hidden, true);
+    ui.focusChanged({pending:true,canReturn:true});
+    assert.equal(message.closest('#toolbar-reader')?.id, 'toolbar-reader');
+    assert.equal(message.hidden, false);
+    ui.focusChanged({pending:false,canReturn:true});
+    assert.equal(message.hidden, true);
+    ui.status('正在载入 PDF 首屏…', false, {scope:'page'});
+    ui.status('', false, {scope:'page'});
+    assert.equal(message.hidden, true);
+    ui.setTool('ink');
+    assert.equal(draft.closest('#paper-tools')?.id, 'paper-tools');
+    assert.equal(draft.hidden, false);
+    ui.status('笔迹尚未保存', true);
+    assert.equal(message.closest('#toolbar-annotation')?.id, 'toolbar-annotation');
+    assert.equal(message.classList.contains('error'), true);
+    ui.focusChanged({pending:false,canReturn:true});
+    ui.status('', false, {scope:'page'});
+    assert.equal(message.textContent, '笔迹尚未保存');
+    doc.body.classList.add('board-mode');
+    ui.status('正在载入 PDF 首屏…');
+    assert.equal(message.hidden, true);
+    assert.equal(message.textContent, '');
+    const css = await readFile(new URL('../web/reading-shell.css', import.meta.url), 'utf8');
+    assert.doesNotMatch(css, /--reader-status-height|\.reader-status-bar/);
+    assert.match(css, /body\.board-mode \.reader-ink-draft/);
+  } finally { ui.dispose(); w.close(); }
 });

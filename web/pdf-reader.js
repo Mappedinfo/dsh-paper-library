@@ -983,7 +983,12 @@
         renderedScales.set(page, Number.isFinite(result.scale) && result.scale > 0 ? result.scale : job.requestedScale);
         if (result.byte_limited && Number.isFinite(result.scale) && result.scale > 0) rasterCaps.set(page, result.scale);
         if (!current(id, ticket) || !sheet.contains(image)) return;
-        if (page === active) { announce(true); const limited = layoutWidth / geometry.width * Math.min(3, window.devicePixelRatio || 1) > scaleFor(page) * 1.02; onStatus((result.words_truncated ? '这一页的可选文字超过上限，仅显示部分文字层。' : result.words.length ? '连续滚动阅读；选中文字后可批注或提问。' : '这一页没有可选择的文字，可使用页批注。') + (limited ? ' 当前放大已达单页清晰度上限。' : '')); }
+        if (page === active) {
+          announce(true);
+          const limited = layoutWidth / geometry.width * Math.min(3, window.devicePixelRatio || 1) > scaleFor(page) * 1.02;
+          const text = result.words_truncated ? '这一页的可选文字超过上限，仅显示部分文字层。' : result.words.length ? '' : '本页没有可选文字。';
+          reportStatus([text, limited ? '当前放大已达单页清晰度上限。' : ''].filter(Boolean).join(' '), false, {scope:'page'});
+        }
       },
       evict: page => placeholder(page),
       onError: (page, error, info) => { if (!info?.preserved) placeholder(page, `第 ${page} 页读取失败：${error.message}`, true); if (page === active) onStatus(error.message, true); },
@@ -1041,7 +1046,7 @@
     }
     async function open(paper, { page = 1 } = {}) {
       clear(); if (!paper?.id || !paper.pdf || disposed) return false;
-      paperId = paper.id; queue.reset(paperId); const id = paperId, ticket = generation; onStatus('正在载入 PDF 首屏…');
+      paperId = paper.id; queue.reset(paperId); const id = paperId, ticket = generation; reportStatus('正在载入 PDF 首屏…', false, {scope:'page'});
       root.setAttribute('aria-busy', 'true');
       const loading = dom('div', 'pdr-placeholder pdr-initial-loading'); loading.setAttribute('role', 'status'); loading.append(dom('span', 'pdr-spinner'), dom('span', '', '正在准备连续阅读…')); strip.append(loading);
       layoutPromise = (async () => {

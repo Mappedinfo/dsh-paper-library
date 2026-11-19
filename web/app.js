@@ -378,7 +378,7 @@ async function renderPageQueue() {
         $('page-number').value = state.page; $('page-number').max = state.pageCount; $('page-total').textContent = `/ ${state.pageCount}`;
         $('page-image').src = `data:image/png;base64,${pageData.image}`;
         $('pdf-page').hidden = false; renderWords(pageData.words || [], pageData.width, pageData.height);
-        $('page-message').textContent = pageData.words?.length ? '文字选择按整词保存。PDF 中的已有批注会随页面显示。' : '这一页没有可选择的文字，可能是扫描页面。你仍可添加页批注。';
+        readingShell?.status(pageData.words?.length ? '' : '这一页没有可选择的文字，可能是扫描页面。你仍可添加页批注。', false, {scope:'page'});
         errorAt('detail-error', null);
         publishReaderState();
       } catch (error) { if (wanted.ticket === state.pageTicket && wanted.id === state.active?.id) errorAt('detail-error', error); }

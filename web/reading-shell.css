@@ -3,9 +3,8 @@
   --reader-toolbar-height:40px;
   --annotation-tools-height:0px;
   --reader-search-height:0px;
-  --reader-status-height:19px;
 }
-body{--workbench-height:calc(65px + var(--reader-toolbar-height) + var(--annotation-tools-height) + var(--reader-search-height) + var(--reader-status-height));height:100dvh;overflow:hidden}
+body{--workbench-height:calc(65px + var(--reader-toolbar-height) + var(--annotation-tools-height) + var(--reader-search-height));height:100dvh;overflow:hidden}
 .topbar{height:var(--workbench-height);grid-template-rows:28px 28px var(--reader-toolbar-height);grid-auto-rows:max-content;gap:0 12px;padding:5px 12px 0}
 .brand{font-size:17px}.brand-mark{width:22px;height:25px;font-size:24px}.brand-group{gap:15px}.brand-group .toolbar-paper{font-size:12px;color:#465b51}
 #toolbar-paper {
@@ -48,8 +47,9 @@ body.annotation-tools-visible{--annotation-tools-height:36px}
 .annotation-reply{border-top:1px solid var(--line,#d8ded4);padding:9px 0 0;margin-top:9px;font-size:11px}.annotation-reply>summary{cursor:pointer;font-weight:600;overflow-wrap:anywhere}.annotation-reply-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;margin:8px 0;max-height:360px;overflow:auto}.annotation-unlinked{margin:8px 12px;padding:10px;border:1px solid var(--line,#d8ded4);border-radius:6px;font-size:11px}.annotation-reply .small{font-size:10px}
 .annotation-tool-group [aria-pressed=true]{background:#e4ece3;outline:1px solid #b8cbb7;color:#174c40}
 .reader-color{display:flex;align-items:center;gap:4px;font-size:10px;color:#67776e}.reader-color input{width:26px;height:23px;border:1px solid #d4dbcf;border-radius:3px;padding:2px}
-.reader-status-bar{grid-column:1/-1;display:flex;align-items:center;gap:12px;min-width:0;height:19px;overflow:hidden}
-.ribbon-status{flex:1;min-width:0;margin:0;font-size:11px;line-height:18px;color:#748177;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ribbon-status.error{color:#a14b39}
+.reader-inline-feedback{min-width:0;max-width:38ch;margin:0;color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reader-inline-feedback.error{color:var(--error)}
+.reader-inline-feedback[hidden],body.board-mode .reader-inline-feedback,body.board-mode .reader-ink-draft,body.board-mode .ink-queue-menu{display:none}
 .workspace{height:calc(100dvh - var(--workbench-height));--rail-default:214px;grid-template-columns:var(--rail-width,var(--rail-default)) minmax(0,1fr);position:relative}
 .detail-pane{height:100%;min-height:0;overflow:hidden;position:relative}#paper-detail{height:100%;min-height:0;display:flex;flex-direction:column}#paper-detail[hidden]{display:none}
 #reading-workspace{flex:1;min-height:0;height:100%;min-width:0;position:relative}
@@ -85,10 +85,9 @@ body.annotation-tools-visible{--annotation-tools-height:36px}
 .reader-mode .button{font-size:10px;padding:3px 6px}
 .reader-mode[data-mode=auto] .button#reader-mode-auto,.reader-mode[data-mode=ask] .button#reader-mode-ask{background:#e4ece3;outline:1px solid #b8cbb7;color:#174c40}
 
-/* One fixed row from entry to completion; autosave only changes its contents. */
-body.handwriting-tools-visible{--reader-status-height:52px}
-.handwriting-tools-visible .reader-status-bar{height:52px;border-top:1px solid var(--line)}
-.reader-ink-draft{display:flex;align-items:center;gap:6px;flex:0 1 auto;min-width:0;height:52px;overflow:hidden;white-space:nowrap;color:var(--ink);font-size:12px}
+/* Keep the drawing controls in the existing toolbar throughout a pen session. */
+body.handwriting-tools-visible:not(.board-mode){--reader-toolbar-height:56px}
+.reader-ink-draft{display:flex;align-items:center;gap:6px;flex:none;max-width:100%;min-width:0;height:52px;overflow:hidden;white-space:nowrap;color:var(--ink);font-size:12px}
 .reader-ink-draft[hidden],.reader-ink-width[hidden],.reader-mode[hidden]{display:none}
 .reader-ink-draft .button{flex-shrink:0;min-width:44px;min-height:44px;padding:8px 10px;font-size:12px}
 .reader-ink-summary{flex:0 1 auto;min-width:0;max-width:420px;overflow:hidden;text-overflow:ellipsis}

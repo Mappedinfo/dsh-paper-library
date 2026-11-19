@@ -2,20 +2,8 @@
 
 /** Contextual office-style ribbon. It moves existing controls, keeping their handlers. */
 window.PaperReadingShell = (() => {
-  const hints = {
-    select: '拖选文字，可添加批注或放入论文对话。',
-    highlight: '拖选要高亮的文字，再写下想法并保存。',
-    underline: '拖选文字，保存为 PDF 下划线批注。',
-    strikeout: '拖选文字，保存为 PDF 删除线批注。',
-    note: '点击页面中的位置，添加一条便笺。',
-    square: '拖框标记图片细节；可添加说明后保存为 PDF 矩形批注。',
-    ink: '用笔或鼠标自由写画；点「完成笔画」继续阅读，保存为 PDF 原生笔迹。',
-  };
+  const readerToolsAvailable = new Set(['select','highlight','underline','strikeout','note','square','ink']);
   const MODES = { auto: '自动着色', ask: '勾选后提问' };
-  const MODE_HINTS = {
-    auto: { select: '拖选文字即按当前颜色直接着色，之后可在批注栏提问。', highlight: '拖选文字即高亮保存，不再弹出对话框。', underline: '拖选文字即保存下划线，不再弹出对话框。', strikeout: '拖选文字即保存删除线，不再弹出对话框。' },
-    ask: { select: '拖选文字，可添加批注或放入论文对话。' },
-  };
   function placeMenu(disclosure, panel) {
     if (!disclosure?.open || !panel) return;
     window.PaperFloatingWindows?.placeBelow(disclosure.querySelector('summary'), panel);
@@ -46,7 +34,6 @@ window.PaperReadingShell = (() => {
     citations.append(node('summary','引用与导出'));
     citations.append($('toolbar-actions'));$('paper-tools').append(citations);
     bindMenu(citations,$('toolbar-actions'));
-    citations.addEventListener('toggle',()=>{if(citations.open)status('对当前论文复制引用，或导出文件与已保存的批注。');});
     // Metadata and chat stay within reading; graph is the only other paper surface.
     $('metadata-open').textContent='资料详情';$('metadata-open').title='查看与编辑文献资料详情';
     ribbon.append($('metadata-open'));if($('paper-reveal'))ribbon.append($('paper-reveal'));
@@ -64,7 +51,7 @@ window.PaperReadingShell = (() => {
     handwritingToggle.title='在批注卡片中显示手写按钮';
     annotationTools.id='toolbar-annotation';annotationTools.setAttribute('role','group');annotationTools.setAttribute('aria-label','PDF 批注工具');libraryTools.id='toolbar-library';
     for(const [type,label] of [['select','选择'],['ink','自由笔画'],['square','矩形框'],['highlight','高亮'],['underline','下划线'],['strikeout','删除线'],['note','便笺']]){
-      const b=button(`reader-tool-${type}`,label,async()=>{if(beforeToolChange&&!await beforeToolChange(type))return;tool=type;context='annotations';if(['highlight','underline','strikeout'].includes(type)){markup=type;saveLayoutLater();}applyTool();sync();status(hintFor());});b.dataset.readerTool=type;annotationTools.append(b);
+      const b=button(`reader-tool-${type}`,label,async()=>{if(beforeToolChange&&!await beforeToolChange(type))return;tool=type;context='annotations';if(['highlight','underline','strikeout'].includes(type)){markup=type;saveLayoutLater();}applyTool();sync();});b.dataset.readerTool=type;annotationTools.append(b);
     }
     const colorLabel=node('label','颜色','reader-color');const input=node('input');input.type='color';input.id='reader-color';input.value=color;input.setAttribute('aria-label','批注颜色');
     // Layout preferences share one write queue: overlapping read-modify-write
@@ -98,7 +85,6 @@ window.PaperReadingShell = (() => {
     });
 
     const saveLayoutLater=()=>{if(saveLayoutTimer!==null)window.clearTimeout(saveLayoutTimer);saveLayoutTimer=window.setTimeout(()=>{saveLayoutTimer=null;saveLayout();},150);};
-    const hintFor=()=>tool==='ink'&&reader()?.getInkContext?.()?'直接在本页写画，笔迹绑定当前批注；再点侧栏手写按钮返回常规标注。':(MODE_HINTS[mode]||{})[tool]||hints[tool]||'';
     input.addEventListener('input',()=>{if(['ink','square'].includes(tool))inkColor=input.value;else color=input.value;applyTool();saveLayout();sync();});colorLabel.append(input);
     const presetsMenu=node('details',null,'reader-color-presets-menu'),presetsSummary=node('summary','常用配色');presetsMenu.append(presetsSummary);
     const presetsPanel=node('div',null,'reader-pen-options');
@@ -113,7 +99,7 @@ window.PaperReadingShell = (() => {
     modeGroup.append(node('span','选文后','reader-mode-label'));
     const modeButtons={};
     for(const [value,label] of Object.entries(MODES)){
-      const b=button(`reader-mode-${value}`,label,()=>{mode=value;if(value==='auto'&&tool==='select')reader()?.setTool(tool,color);saveLayout();sync();status(hintFor());});
+      const b=button(`reader-mode-${value}`,label,()=>{mode=value;if(value==='auto'&&tool==='select')reader()?.setTool(tool,color);saveLayout();sync();});
       b.setAttribute('aria-pressed',String(mode===value));modeButtons[value]=b;modeGroup.append(b);
     }
     const penSettings=node('details',null,'reader-pen-settings');penSettings.id='reader-pen-settings';
@@ -122,7 +108,7 @@ window.PaperReadingShell = (() => {
     const inputKind=node('p','在页面上用笔或手指操作后显示识别结果。');inputKind.id='reader-input-kind';inputKind.setAttribute('role','status');
     penOptions.append(penLabel,inputKind,node('p','手写和划线标注时，手指拖动页面可滚动；选择和便笺仍可用鼠标操作。若 Pencil 被识别为鼠标兼容输入，请关闭「仅用笔标注」。'));penSettings.append(penOptions);
     if(diagnostics){const exportLog=button('reader-ink-diagnostics','导出手写诊断',async()=>{exportLog.disabled=true;try{const report=await diagnostics.exportReport(),url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='handwriting-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('手写诊断已导出，包含最近事件与笔数，不含正文或笔迹坐标。');}catch(error){toast(error.message,true);}finally{exportLog.disabled=false;}});penOptions.append(exportLog);}
-    penCheck.addEventListener('change',()=>{penOnly=penCheck.checked;reader()?.setPenOnly?.(penOnly);void patchLayout({penOnly});status(hintFor());});
+    penCheck.addEventListener('change',()=>{penOnly=penCheck.checked;reader()?.setPenOnly?.(penOnly);void patchLayout({penOnly});status('');});
     function inputChanged(info){const labels={pen:'已识别：手写笔',touch:'已识别：触控',mouse:'收到：鼠标兼容输入',unknown:'输入类型未能识别'};inputKind.dataset.inputKind=info?.lastType||'';inputKind.textContent=labels[info?.lastType]||'在页面上用笔或手指操作后显示识别结果。';if(info?.seenPen&&info.lastType!=='pen')inputKind.textContent+=' · 已检测到手写笔';}
     bindMenu(penSettings,penOptions);
     penSettings.addEventListener('toggle',()=>{if(penSettings.open)inputChanged(reader()?.getInputInfo?.());});
@@ -184,17 +170,16 @@ window.PaperReadingShell = (() => {
     $('previous-page').hidden=true;$('next-page').hidden=true;
     $('page-number').title='输入页码跳转，也可直接滚动阅读';
     const note=$('page-note');note.textContent='页便笺';annotationTools.append(note);
-    const message=$('page-message');message.className='ribbon-status';message.setAttribute('role','status');message.setAttribute('aria-live','polite');
-    const statusBar=node('div',null,'reader-status-bar');statusBar.id='reader-status-bar';$('paper-tools').after(annotationTools,statusBar);
-    // Reserve one row for the whole handwriting session, including an empty
-    // buffer between autosaves. Draft changes must never move the PDF beneath a pen.
+    const message=$('page-message');message.className='reader-inline-feedback';message.hidden=true;
+    message.setAttribute('role','status');message.setAttribute('aria-live','polite');readerTools.append(message);
+    $('paper-tools').after(annotationTools);
     const inkBar=node('div',null,'reader-ink-draft');inkBar.id='reader-ink-draft';inkBar.hidden=true;
     const inkLabel=node('span',null,'reader-ink-summary');inkLabel.id='reader-ink-status';inkLabel.setAttribute('role','status');
     const inkReturn=button('reader-ink-return','返回',()=>void returnToInk?.());inkReturn.title='返回待存笔迹';inkReturn.setAttribute('aria-label','返回待存笔迹');
     const inkUndo=button('reader-ink-undo','撤销',()=>reader()?.undoInk());inkUndo.title='撤销一笔';inkUndo.setAttribute('aria-label','撤销一笔');
     const inkDiscard=button('reader-ink-discard','清除',()=>reader()?.clearInk());inkDiscard.setAttribute('aria-label','清除待存笔迹');
     const inkSave=button('reader-ink-save','完成笔画',()=>{if(linkedSession){void finishLinked?.();return;}if(saveInk?.()&&!reader()?.getInkContext?.()){tool='select';applyTool();sync();}});
-    inkSave.classList.add('primary');inkBar.append(inkSave,inkReturn,inkUndo,inkDiscard,inkLabel);statusBar.append(inkBar,message);
+    inkSave.classList.add('primary');inkBar.append(inkSave,inkReturn,inkUndo,inkDiscard,inkLabel);$('paper-tools').prepend(inkBar);
     function syncInk(){
       const draft=reader()?.getInkDraft?.(),target=draft||linkedSession||reader()?.getInkContext?.()||{paperId:state.active?.id,page:state.page};
       const visible=tool==='ink'||Boolean(draft)||Boolean(linkedSession)||Boolean(reader()?.getInkContext?.());
@@ -251,7 +236,15 @@ window.PaperReadingShell = (() => {
     const intro=$('annotations-tab').querySelector('.section-toolbar');if(intro)intro.hidden=true;
     const chatIntro=$('conversation-tab').querySelector('.section-toolbar h3');if(chatIntro)chatIntro.textContent='论文对话';
     $('paper-chat-input').rows=3;
-    function status(text,error=false,options={}){if(options.clearIf!==undefined&&message.textContent!==options.clearIf)return;message.textContent=text||hintFor();message.classList.toggle('error',error);}
+    function status(text,error=false,options={}){
+      if(options.clearIf!==undefined&&message.textContent!==options.clearIf)return;
+      if(!text&&options.scope&&message.dataset.feedbackScope!==options.scope)return;
+      const pdfActive=!readerTools.hidden&&!document.body.classList.contains('board-mode');
+      const value=pdfActive?text||'':'';
+      const host=error&&!annotationTools.hidden?annotationTools:readerTools;
+      if(message.parentNode!==host)host.append(message);
+      message.dataset.feedbackScope=options.scope||'';message.textContent=value;message.title=value;message.hidden=!value;message.classList.toggle('error',Boolean(value)&&error);
+    }
     function sync(){
       const table=Boolean(workbench()?.isTable()), active=Boolean(state.active&&!state.active.archived&&state.active.resource_kind!=='dataset'), pdf=active&&Boolean(state.active.pdf);
       if((table||state.active?.resource_kind==='dataset')&&focused)leaveFocus();
@@ -281,9 +274,8 @@ window.PaperReadingShell = (() => {
       modeGroup.dataset.mode=mode;
       modeGroup.hidden=['ink','square'].includes(tool);widthLabel.hidden=!['ink','square'].includes(tool);
       input.value=['ink','square'].includes(tool)?inkColor:color;widthInput.value=String(inkWidth);syncInk();
-      message.hidden=!active||table;
-      if(surface==='graph')status('选择节点查看联系与来源；有页码的依据可返回 PDF。');
-      else status(hintFor());
+      if(readerTools.hidden||document.body.classList.contains('board-mode'))status('');
+      else if(message.parentNode===annotationTools&&annotationTools.hidden)readerTools.append(message);
       placeMenus();
       contextChanged?.();
     }
@@ -335,7 +327,7 @@ window.PaperReadingShell = (() => {
     // Prevent a homepage link from discarding a question/metadata draft.
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
     sync();
-    return {sync,setContext,arrangeControls,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,zoomChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!Object.hasOwn(hints,value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:['ink','square'].includes(tool)?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
+    return {sync,setContext,arrangeControls,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,zoomChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!readerToolsAvailable.has(value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:['ink','square'].includes(tool)?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
       dispose(){if(zoomSaveTimer!==null)window.clearTimeout(zoomSaveTimer);for(const {disclosure,update} of organizerDisclosures)disclosure.removeEventListener('toggle',update);for(const {disclosure,toggle} of menus)disclosure.removeEventListener('toggle',toggle);menuObserver?.disconnect();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placeMenus);document.removeEventListener('scroll',placeMenus,true);document.removeEventListener('click',closeMenus);document.removeEventListener('keydown',menuKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);}};
   }
   return {create};
