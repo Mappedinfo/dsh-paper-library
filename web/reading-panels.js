@@ -3,13 +3,15 @@
 // native-conversation state stay owned by the original reader components.
 window.PaperReadingPanels = (() => {
   const names = new Set(['annotations','metadata','chat']);
-  function create({root,annotationsRoot,conversationRoot,metadataRoot,libraryRoot,onAnnotationsRequest,onChatVisibility,onPanelChange,toast,persistence}) {
+  function create({root,annotationsRoot,conversationRoot,metadataRoot,libraryRoot,sidebarToggle,onAnnotationsRequest,onChatVisibility,onPanelChange,toast,persistence}) {
     if (!root || !annotationsRoot || !conversationRoot || !metadataRoot) throw new Error('Reading panels require the workspace and three existing content roots');
     let sidebar = null, side = 'left', sideRevision=0, chatOpen = false, collapsed = false, paper = null, disposed = false, lastChatVisible = false, readingActive=true, sharedOpen=false, railWidth=null;
     // Panels another surface owns (today the LaTeX workspace's DSH collaboration). They live in
     // the same rail, with the same side toggle, width and resizer as the annotation panel; the
     // reading tabs step aside while such a panel is active and come back untouched after.
-    let externalActive = false, annotationContext = false;
+    let externalActive = false, annotationContext = false, sharedHidden = false, focused = false;
+    const narrow = window.matchMedia?.('(max-width: 620px)');
+    const narrowBoard = window.matchMedia?.('(max-width: 640px)');
     const extraPanels = new Map();
     const panelAliases = new Map();
     const listeners = [], originals = [annotationsRoot,conversationRoot,metadataRoot].map(element=>({element,parent:element.parentNode,next:element.nextSibling,hidden:element.hidden,open:element.open}));
@@ -38,7 +40,10 @@ window.PaperReadingPanels = (() => {
       listen(tablist,'keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const tabs=[libraryTab,annotationsTab,...[...extraPanels.values()].map(panel=>panel.tab)].filter(tab=>!tab.hidden&&!tab.disabled);const index=tabs.indexOf(event.target);const next=event.key==='Home'?tabs[0]:event.key==='End'?tabs.at(-1):tabs[(index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length];if(next)selectTab(next);});
       tablist.append(libraryTab,annotationsTab);
       sharedMove=button('⇄',()=>setSide(side==='left'?'right':'left'));sharedMove.id='reading-sidebar-side';
-      sharedClose=button('×',()=>{sharedOpen=false;if(sidebar==='annotations'||extraPanels.has(sidebar))sidebar=null;render();});sharedClose.id='reading-sidebar-close';sharedClose.setAttribute('aria-label','收起阅读侧栏');
+      sharedClose=button('×',()=>{
+        if(canToggleRail()){setRailVisible(false);sidebarToggle?.focus();return;}
+        sharedOpen=false;if(sidebar==='annotations'||extraPanels.has(sidebar))sidebar=null;render();
+      });sharedClose.id='reading-sidebar-close';sharedClose.setAttribute('aria-label','收起阅读侧栏');
       const pager=make('div','annotation-pagination');pager.id='annotation-pagination';pager.setAttribute('aria-label','批注分页');pager.addEventListener('click',event=>{const action=event.target.closest('[data-note-action]')?.dataset.noteAction;if(action)annotationsRoot.dispatchEvent(new CustomEvent('annotation-page',{detail:action,bubbles:true}));});sharedHeader.append(tablist,pager,sharedMove,sharedClose);
       annotationsRoot.setAttribute('role','tabpanel');annotationsRoot.setAttribute('aria-labelledby',annotationsTab.id);
       libraryRoot.append(sharedHeader,libraryContent,annotationsRoot);libraryRoot.classList.add('shared-reading-sidebar');
@@ -100,6 +105,19 @@ window.PaperReadingPanels = (() => {
       if(visible!==lastChatVisible){lastChatVisible=visible;onChatVisibility?.(visible);}
       onPanelChange?.({side,sidebar,chat:visible,chatOpen,chatCollapsed:chatOpen&&collapsed});
     }
+    function railVisible() {
+      const compact = annotationContext ? narrowBoard?.matches : narrow?.matches;
+      return !sharedHidden && (sharedOpen || (!compact && !focused));
+    }
+    function canToggleRail() {
+      return Boolean(libraryRoot && !externalActive && (annotationContext || (readingActive && paper && !paper.archived)));
+    }
+    function setRailVisible(value) {
+      sharedHidden=!value;
+      sharedOpen=value;
+      render();
+    }
+    if(sidebarToggle)listen(sidebarToggle,'click',()=>{if(canToggleRail())setRailVisible(!railVisible());});
     function render(emit=true) {
       if(disposed)return;
       root.dataset.readingSide=side;root.classList.toggle('has-reading-sidebar',Boolean(sidebar)&&(!libraryRoot||sidebar==='metadata')&&!aside.classList.contains('paper-floating-positioned'));
@@ -107,7 +125,14 @@ window.PaperReadingPanels = (() => {
       aside.hidden=!sidebar||(Boolean(libraryRoot)&&(sidebar==='annotations'||extraPanels.has(sidebar)));asideTitle.textContent=sidebar==='metadata'?'资料详情':'批注';
       move.textContent=side==='left'?'移至右侧':'移至左侧';
       const annotationActive = readingActive || annotationContext;
-      annotationsRoot.hidden=sidebar!=='annotations'||(Boolean(libraryRoot)&&!annotationActive);metadataRoot.hidden=sidebar!=='metadata';
+      const railToggleAvailable=canToggleRail();
+      annotationsRoot.hidden=sidebar!=='annotations'||(Boolean(libraryRoot)&&(!annotationActive||(railToggleAvailable&&sharedHidden)));metadataRoot.hidden=sidebar!=='metadata';
+      if(sidebarToggle){
+        const expanded = railToggleAvailable && railVisible();
+        sidebarToggle.hidden=!railToggleAvailable;
+        sidebarToggle.setAttribute('aria-checked',String(expanded));
+        sidebarToggle.title=expanded?'收起侧边栏':'展开侧边栏';
+      }
       if(libraryRoot){
         const selectedExtra=extraPanels.has(sidebar)&&(externalActive||readingActive)?sidebar:null;
         const annotations=annotationActive&&!externalActive&&sidebar==='annotations';
@@ -115,6 +140,7 @@ window.PaperReadingPanels = (() => {
         libraryContent.hidden=annotations||externalActive||Boolean(selectedExtra);
         libraryRoot.dataset.sidebarPanel=selectedExtra||(annotations?'annotations':'library');
         libraryRoot.parentNode.classList.toggle('shared-sidebar-open',(annotationActive||externalActive)&&sharedOpen);
+        libraryRoot.parentNode.classList.toggle('reading-sidebar-hidden',railToggleAvailable&&sharedHidden);
         libraryRoot.parentNode.dataset.sidebarSide=(annotationActive||externalActive)?side:'left';
         libraryTab.hidden=externalActive;
         annotationsTab.hidden=externalActive;
@@ -148,9 +174,9 @@ window.PaperReadingPanels = (() => {
     function show(name) {
       name=known(name);if(disposed)return false;
       // A panel another surface owns needs no paper: it belongs to that surface, not the reader.
-      if(extraPanels.has(name)){const panel=extraPanels.get(name);if(panel.reading&&(!paper||paper.archived))return false;externalActive=!panel.reading;sidebar=name;sharedOpen=true;render();panel.onShow?.();return true;}
+      if(extraPanels.has(name)){const panel=extraPanels.get(name);if(panel.reading&&(!paper||paper.archived))return false;externalActive=!panel.reading;sidebar=name;sharedOpen=true;if(panel.reading)sharedHidden=false;render();panel.onShow?.();return true;}
       if(name!=='metadata'&&!(name==='annotations'&&annotationContext)&&(!paper||paper.archived)){toast?.('请先打开一篇可阅读的文献。',true);return false;}
-      if(name==='chat'){chatOpen=true;collapsed=false;}else {sidebar=name;if(name==='annotations')sharedOpen=true;}
+      if(name==='chat'){chatOpen=true;collapsed=false;}else {sidebar=name;if(name==='annotations'){sharedOpen=true;sharedHidden=false;}}
       render();return true;
     }
     function close(name) {
@@ -163,7 +189,7 @@ window.PaperReadingPanels = (() => {
       }else return;
       render();
     }
-    function visible(name) {name=panelAliases.get(name)||name;if(!names.has(name)&&!extraPanels.has(name))return false;return !disposed&&(name==='chat'?chatOpen&&!collapsed:sidebar===name&&(!extraPanels.get(name)?.reading||readingActive));}
+    function visible(name) {name=panelAliases.get(name)||name;if(!names.has(name)&&!extraPanels.has(name))return false;return !disposed&&(name==='chat'?chatOpen&&!collapsed:sidebar===name&&(!extraPanels.get(name)?.reading||readingActive)&&!(canToggleRail()&&sharedHidden&&(name==='annotations'||extraPanels.get(name)?.reading)));}
     function toggle(name) {return visible(name)?close(name):show(name);}
     function setSide(value,{persist=true}={}) {
       if(!['left','right'].includes(value))throw new Error('Reading sidebar side must be left or right');
@@ -174,7 +200,7 @@ window.PaperReadingPanels = (() => {
       if(!paper||paper.archived){if(!annotationContext)sidebar=null;chatOpen=false;}
       render();
     }
-    function setReadingActive(value){const next=Boolean(value);if(next===readingActive)return;readingActive=next;render(false);}
+    function setReadingActive(value,{focused:inFocus=focused}={}){const next=Boolean(value);if(next===readingActive&&inFocus===focused)return;readingActive=next;focused=inFocus;render(false);}
     /** Register a rail panel another surface owns; nothing changes until it is shown. */
     function registerPanel({id,label,element,aliases=[],reading=false,onShow}={}) {
       if(typeof id!=='string'||!id.trim()||typeof label!=='string'||!label.trim()||!element)throw new Error('A rail panel needs an id, a label and an element');
@@ -199,10 +225,11 @@ window.PaperReadingPanels = (() => {
       else if(extraPanels.has(sidebar))sidebar=null;
       render(false);
     }
-    function showLibrary(){if(disposed)return;sharedOpen=true;if(sidebar==='annotations'||extraPanels.get(sidebar)?.reading)sidebar=null;render();}
+    function showLibrary(){if(disposed)return;sharedOpen=true;sharedHidden=false;if(sidebar==='annotations'||extraPanels.get(sidebar)?.reading)sidebar=null;render();}
     const resize = () => {if(disposed)return;root.classList.toggle('reading-panels-roomy',root.clientWidth>=880);placeSidebar();};
     const observer=typeof window.ResizeObserver==='function'?new window.ResizeObserver(resize):null;
     observer?.observe(root);listen(window,'resize',resize);resize();
+    for(const query of [narrow,narrowBoard])if(query?.addEventListener)listen(query,'change',()=>render(false));
     listen(metadataRoot,'close',()=>{if(sidebar==='metadata')close('metadata');});
     for(const panel of [aside,chat])listen(panel,'paper-floating-positioned',()=>render(false));
     for(const panel of [aside,chat])listen(panel,'keydown',event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();close(panel===chat?'chat':sidebar);}});
@@ -220,7 +247,8 @@ window.PaperReadingPanels = (() => {
       for(const panel of extraPanels.values()){panel.tab.remove();panel.element.remove();}
       extraPanels.clear();
       panelAliases.clear();
-      if(libraryRoot){libraryRoot.append(...libraryChildren);sharedHeader.remove();libraryContent.remove();libraryRoot.classList.remove('shared-reading-sidebar');delete libraryRoot.dataset.sidebarPanel;libraryRoot.parentNode.classList.remove('shared-sidebar-open');delete libraryRoot.parentNode.dataset.sidebarSide;annotationsRoot.removeAttribute('role');annotationsRoot.removeAttribute('aria-labelledby');}
+      if(sidebarToggle){sidebarToggle.hidden=true;sidebarToggle.setAttribute('aria-checked','false');}
+      if(libraryRoot){libraryRoot.append(...libraryChildren);sharedHeader.remove();libraryContent.remove();libraryRoot.classList.remove('shared-reading-sidebar');delete libraryRoot.dataset.sidebarPanel;libraryRoot.parentNode.classList.remove('shared-sidebar-open','reading-sidebar-hidden');delete libraryRoot.parentNode.dataset.sidebarSide;annotationsRoot.removeAttribute('role');annotationsRoot.removeAttribute('aria-labelledby');}
       aside.remove();chat.remove();globalHost.remove();root.classList.remove('paper-reading-workspace','has-reading-sidebar','reading-panels-roomy');delete root.dataset.readingSide;
       if(resizer){resizer.remove();workspace.style?.removeProperty('--rail-width');}
     }};

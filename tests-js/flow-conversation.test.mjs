@@ -59,13 +59,20 @@ test('stale board/session, absent session, disposed panel and invalid snapshots 
   } finally { f.bridge.dispose() }
 })
 
-function hostFixture({ snapshot, save, eqtrace } = {}) {
+function hostFixture({ snapshot, save, eqtrace, initial = workspace() } = {}) {
   const calls = [], sent = [], messages = [], view = { addEventListener() {}, removeEventListener() {} }
-  let rendered, sessionId = 'session-current', revision = 'a'.repeat(64), value = workspace()
+  let rendered, sessionId = 'session-current', revision = 'a'.repeat(64), value = initial
   const root = { hidden: false, querySelectorAll: () => [] }
   const jsx = (type, props) => ({ type, props: props || {} })
   const module = { exports: {} }
-  const react = { Component: class {}, useEffect() {}, useRef: current => ({ current }), useState: initializer => [typeof initializer === 'function' ? initializer() : initializer, () => {}] }
+  const stateSlots = []
+  let slot = 0
+  const react = { Component: class {}, useEffect() {}, useId: () => 'fixture-dialog', useRef: current => ({ current }),
+    useState(initialValue) {
+      const i = slot++
+      if (!(i in stateSlots)) stateSlots[i] = typeof initialValue === 'function' ? initialValue() : initialValue
+      return [stateSlots[i], value => { stateSlots[i] = typeof value === 'function' ? value(stateSlots[i]) : value }]
+    } }
   new Function('require', 'module', 'exports', 'window', compiled.outputFiles[0].text)(name => {
     if (name === 'react') return react
     if (name === 'react-dom/client') return { createRoot: () => ({ render: element => { rendered = element }, unmount() {} }) }
@@ -82,7 +89,7 @@ function hostFixture({ snapshot, save, eqtrace } = {}) {
       if (action === 'board_flow_snapshot') return snapshot ? snapshot(args) : { board_id: args.id, snapshot_id: 'c'.repeat(64), text: '有界合成快照' }
       throw Error(`Unexpected action ${action}`)
     }, async sendSnapshot(...args) { sent.push(args); return true } })
-  return { flow, calls, sent, messages, props: () => rendered.props, setSession: value => { sessionId = value } }
+  return { flow, calls, sent, messages, props: () => rendered.props, renderPanel() { slot = 0; return rendered.type(rendered.props) }, setSession: value => { sessionId = value } }
 }
 
 test('flow host flushes current edits before freezing exact saved revision and selected source nodes', async () => {
@@ -158,6 +165,77 @@ test('EqTrace generation adds a graph to the current board and discards results 
       } else {
         await assert.rejects(generating, /工作区已切换或修改/u)
         assert.equal(f.props().controller.state().workspace.documents.length, 1)
+      }
+    } finally { f.flow.dispose() }
+  }
+})
+
+test('the encoder–decoder toolbar example opens its own figure and preserves empty or edited comparison workspaces', async () => {
+  const label = '编码器–解码器示例'
+  const walk = el => !el || !el.props ? [] : [el, ...[el.props.children].flat(Infinity).flatMap(walk)]
+  for (const initial of [null, workspace()]) {
+    const f = hostFixture({ initial })
+    try {
+      await f.flow.open({ id: 'b-example', title: '教学测试' })
+      const controller = f.props().controller
+      if (initial) {
+        const current = controller.state().workspace
+        current.selection.right = { ...current.selection.left }
+        current.documents[0].flows[0].nodes[0].label = '编辑中的节点'
+        controller.edit(current)
+      }
+      const before = controller.state()
+      const read = () => {
+        const tree = walk(f.renderPanel())
+        const actions = tree.find(el => el.props.className?.includes('board-flow-actions'))
+        const triggers = tree.filter(el => el.type === 'button' && el.props.children === label)
+        assert.equal(triggers.length, 1)
+        assert.ok(walk(actions).includes(triggers[0]))
+        const preview = tree.find(el => el.props.title === label && typeof el.props.onClose === 'function')
+        assert.equal(triggers[0].props['aria-controls'], preview.props.id)
+        return { button: triggers[0], preview }
+      }
+      const closed = read()
+      assert.equal(closed.preview.props.open, false)
+      closed.button.props.onClick()
+      const opened = read()
+      assert.equal(opened.preview.props.open, true)
+      const figure = walk(opened.preview).find(el => el.props.flow)
+      assert.equal(figure.props.flow.id, 'network')
+      assert.match(figure.props.documentId, /^eqtrace-/u)
+      assert.equal(walk(opened.preview).some(el => el.type === 'button' && el.props.children === '将示例加入空画板'), initial === null)
+      opened.preview.props.onClose()
+      assert.equal(read().preview.props.open, false)
+      assert.deepEqual(controller.state(), before)
+      assert.deepEqual(f.calls.map(call => call.action), ['board_flow_get'])
+    } finally { f.flow.dispose() }
+  }
+})
+
+test('only an explicit action in the same loaded empty board may add the example', async () => {
+  const walk = el => !el?.props ? [] : [el, ...[el.props.children].flat(Infinity).flatMap(walk)]
+  const button = (f, text) => walk(f.renderPanel()).find(el => el.type === 'button' && el.props.children === text)
+  for (const change of ['keep', 'edit', 'switch', 'reload']) {
+    const f = hostFixture({ initial: null })
+    try {
+      await f.flow.open({ id: 'b-example', title: '空画板' })
+      const controller = f.props().controller
+      button(f, '编码器–解码器示例').props.onClick()
+      const add = button(f, '将示例加入空画板')
+      assert.ok(add)
+      if (change === 'edit') controller.edit(workspace())
+      if (change === 'switch') await f.flow.open({ id: 'b-second', title: '另一空画板' })
+      if (change === 'reload') await controller.reload()
+      const before = controller.state()
+      add.props.onClick()
+      if (change === 'keep') {
+        assert.equal(controller.state().dirty, true)
+        assert.match(controller.state().workspace.selection.left.documentId, /^eqtrace-/u)
+        assert.equal(await controller.flush(), true)
+        assert.equal(f.calls.at(-1).action, 'board_flow_save')
+      } else {
+        assert.deepEqual(controller.state(), before)
+        assert.equal(f.calls.some(call => call.action === 'board_flow_save'), false)
       }
     } finally { f.flow.dispose() }
   }

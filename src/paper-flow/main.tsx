@@ -1,8 +1,9 @@
 /// <reference path="./inline-css.d.ts" />
-import { Component, useEffect, useRef, useState } from 'react'
+import { Component, useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { PaperFlowWorkbench } from '../../vendor/paper-flow/index'
+import { FlowWindow } from '../../vendor/paper-flow/FlowWindow'
 import type { FlowWorkspace, FlowRef, FlowGraph } from '../../vendor/paper-flow/types'
 import type { PaperFlowWorkbenchHandle } from '../../vendor/paper-flow/PaperFlowWorkbench'
 import { createFlowController } from './controller.mjs'
@@ -42,6 +43,19 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
   const emptyFileInput = useRef<HTMLInputElement>(null), importSerial = useRef(0), dragDepth = useRef(0)
   const [emptyImport, setEmptyImport] = useState({ name: '', loading: false, error: '' }), [dropActive, setDropActive] = useState(false)
   const [editorKey, setEditorKey] = useState('')
+  const [exampleOwner, setExampleOwner] = useState<Pick<FlowState, 'id' | 'version' | 'epoch'> | null>(null)
+  const exampleId = useId(), exampleTrigger = useRef<HTMLButtonElement>(null)
+  const exampleOpen = !!exampleOwner && exampleOwner.id === view.id && exampleOwner.epoch === view.epoch
+  const emptyBoard = (state: FlowState) => !!state.id && state.workspace === null && !state.loading && !state.error && !state.dirty && !state.blocked && !state.invalid
+  const canAddExample = exampleOpen && exampleOwner.version === view.version && emptyBoard(view)
+  function closeExample() {
+    setExampleOwner(null)
+    exampleTrigger.current?.focus()
+  }
+  function addExample() {
+    if (!canAddExample || !controller.current(exampleOwner, true) || !emptyBoard(controller.state() as FlowState)) return
+    if (controller.applyExternal(validateFlowWorkspace(attentionExample), exampleOwner)) closeExample()
+  }
   const activeDoc = view.workspace?.documents.find(doc => doc.paper.id === view.workspace?.selection.left.documentId)
   const figures: FlowGraph[] = activeDoc ? eqTraceFlows(activeDoc) : []
   const figure = figures.find(item => item.id === view.workspace?.selection.left.flowId)
@@ -89,6 +103,7 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
       <strong title={view.title}>{view.title || '流程工作区'}</strong><span className={`board-flow-status${view.blocked || view.invalid ? ' is-error' : ''}`} role="status">{status}</span>
       <div className="board-flow-actions board-flow-host-tools" ref={hostTools}>
         {figure && !view.workspace?.selection.right && <button type="button" onClick={() => setEditorKey(paperVisible ? documentKey : '')}>{paperVisible ? '编辑与比较' : '查看论文插图'}</button>}
+        <button ref={exampleTrigger} type="button" aria-expanded={exampleOpen} aria-controls={exampleId} onClick={() => setExampleOwner({ id: view.id, epoch: view.epoch, version: view.version })}>编码器–解码器示例</button>
         <EqTracePanel sourceOnly={paperVisible} key={`${view.id}:${view.epoch}`} workspace={view.workspace} generate={generate} />
         <button type="button" disabled={!view.dirty || view.loading || view.invalid || view.blocked} onClick={() => void controller.flush()}>保存</button>
         {(view.blocked || view.invalid) && <button type="button" disabled={view.loading || view.invalid} onClick={() => void controller.flush({ retry: true })}>重试保存</button>}
@@ -99,6 +114,11 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
     </header>
   return <section className="board-flow-host" aria-label="流程工作区">
     {header}
+    <FlowWindow id={exampleId} kind="eqtrace" title="编码器–解码器示例" open={exampleOpen}
+      onClose={closeExample}>
+      {canAddExample && <button type="button" onClick={addExample}>将示例加入空画板</button>}
+      <Figure flow={attentionExample.flows[0]} documentId={attentionExample.paper.id} />
+    </FlowWindow>
     <div className="board-flow-content" data-paper-view={paperVisible || undefined} inert={view.loading || undefined}
       onDragEnter={event => { if (view.workspace && !paperVisible) return; event.preventDefault(); if (isFlowFileDrag(event.dataTransfer)) { dragDepth.current++; setDropActive(true) } }}
       onDragOver={event => { if (view.workspace && !paperVisible) return; event.preventDefault(); if (isFlowFileDrag(event.dataTransfer)) { event.dataTransfer.dropEffect = 'copy'; setDropActive(true) } }}
@@ -127,7 +147,7 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
           <button type="button" onClick={() => void annotate(target(value.ref, value.nodeIds))}>批注此节点{value.nodeIds.length > 1 ? `组（${value.nodeIds.length}）` : ''}</button>
         </div>)}</div>} /></FlowErrorBoundary> : <div className="board-flow-empty">
         <h2>开始整理流程</h2><p>导入流程或 EqTrace JSON 查看流程与论文插图，也可以从空白流程或教学示例开始。拖入的 JSON 文件最大 192 KiB。</p>
-        <div><button type="button" onClick={() => controller.edit(starterWorkspace())}>新建流程</button><button type="button" onClick={() => emptyFileInput.current?.click()}>导入 JSON</button><input className="board-flow-import-input" ref={emptyFileInput} type="file" accept=".json,application/json" aria-label="导入流程 JSON" onChange={event => { const files = Array.from(event.currentTarget.files || []); event.currentTarget.value = ''; if (files.length) void choose(files) }} /><button type="button" onClick={() => controller.edit(starterWorkspace(true))}>打开教学示例</button><button type="button" onClick={() => controller.edit(validateFlowWorkspace(attentionExample))}>编码器–解码器示例</button></div>
+        <div><button type="button" onClick={() => controller.edit(starterWorkspace())}>新建流程</button><button type="button" onClick={() => emptyFileInput.current?.click()}>导入 JSON</button><input className="board-flow-import-input" ref={emptyFileInput} type="file" accept=".json,application/json" aria-label="导入流程 JSON" onChange={event => { const files = Array.from(event.currentTarget.files || []); event.currentTarget.value = ''; if (files.length) void choose(files) }} /><button type="button" onClick={() => controller.edit(starterWorkspace(true))}>打开教学示例</button></div>
         {emptyImport.loading && <p role="status">正在读取 {emptyImport.name}…</p>}{emptyImport.error && <p className="board-flow-error" role="alert">{emptyImport.error}</p>}
       </div>}
     </div>

@@ -97,12 +97,13 @@
     <div class="topbar-actions"><span id="library-status" class="status">正在连接文献库…</span><a id="slides-open" class="button subtle" href="slides.html" target="_blank" rel="noopener" title="打开 Slides 工作台：使用 PlainDeck 制作演示文稿">Slides</a><button id="board-open" class="button subtle" type="button" title="打开文献画板：自由摆放节点与连线，可整理成思维导图">画板</button><button id="latex-open" class="button subtle" type="button" title="打开 LaTeX 工作台：编辑项目文件夹里的 .tex 并查看它编译出的 PDF">LaTeX</button><button id="queue-toggle" class="button subtle" hidden>导入进度</button><button id="import-open" class="button primary">＋ 导入文献</button><span id="topbar-end" class="topbar-end"></span></div>
     <div id="paper-tools" class="paper-tools" aria-label="当前文献工具栏">
       <button id="toolbar-paper" class="toolbar-paper" type="button" aria-expanded="false" aria-controls="recent-papers-panel">选择一篇文献</button>
+      <button id="reading-sidebar-toggle" class="button subtle paper-switch" type="button" role="switch" aria-checked="false" aria-controls="reading-sidebar" hidden>侧边栏</button>
       <div id="toolbar-actions" class="toolbar-actions"></div>
       <div id="toolbar-reader" class="toolbar-reader"></div>
     </div>
   </header>
   <main class="workspace">
-    <section class="library-pane" aria-label="文献、数据集与演示文稿库">
+    <section id="reading-sidebar" class="library-pane" aria-label="文献、数据集与演示文稿库">
       <form id="quick-import-form" class="quick-import"><label for="quick-import-source">粘贴论文链接或 DOI，自动保存</label><div><input id="quick-import-source" type="text" placeholder="https://… 或 10.…" autocomplete="off" aria-label="粘贴论文链接或 DOI 自动导入"><button type="submit" class="icon-button" aria-label="导入链接">↵</button></div><p>也可把一个或多个 PDF 拖到窗口任意位置。</p></form>
       <div id="workspace-navigation-home"></div>
       <section id="workspace-navigation-area" aria-label="内容导航">

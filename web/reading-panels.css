@@ -78,6 +78,9 @@ body.reader-focused .workspace.shared-sidebar-open:not(.catalog-expanded){displa
 body.reader-focused .workspace.shared-sidebar-open[data-sidebar-side=right]:not(.catalog-expanded){grid-template-columns:minmax(0,1fr) var(--rail-width,var(--rail-default,214px))}
 body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-sidebar{display:flex;height:100%}
 .reader-focused .reading-sidebar-header #reading-sidebar-close{display:block;padding:4px}
+.workspace.reading-sidebar-hidden:not(.catalog-expanded){grid-template-columns:minmax(0,1fr)}
+.workspace.reading-sidebar-hidden:not(.catalog-expanded)>.detail-pane{grid-column:1;grid-row:1}
+.workspace.reading-sidebar-hidden>.shared-reading-sidebar{display:none}
 
 /* 列表独立滚动，批注操作始终留在侧栏底部。 */
 .library-pane.shared-reading-sidebar #annotations-tab:not([hidden]){display:flex;flex-direction:column;overflow:hidden}

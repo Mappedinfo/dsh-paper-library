@@ -1865,7 +1865,7 @@ paperChatUI = window.PaperLibraryChat?.create({ api, toast, persistence, getPape
   navigate: switchTab, navigateReference: (paperId, page) => openReferencedPaper({ paperId, page }), changed: publishReaderState,
   savedFeedback: async id => { if (state.active?.id !== id) return; await loadFeedback(id); await loadAnnotations(id); if (state.active.pdf) await refreshPage(); },
 });
-readingPanels = window.PaperReadingPanels?.create({persistence,root:$('reading-workspace'),annotationsRoot:$('annotations-tab'),conversationRoot:$('conversation-tab'),metadataRoot:$('metadata-dialog'),libraryRoot:document.querySelector('.library-pane'),onAnnotationsRequest:()=>canvasNotesContext?void openCanvasNotes(canvasNotesContext):void switchTab('annotations'),
+readingPanels = window.PaperReadingPanels?.create({persistence,root:$('reading-workspace'),annotationsRoot:$('annotations-tab'),conversationRoot:$('conversation-tab'),metadataRoot:$('metadata-dialog'),libraryRoot:$('reading-sidebar'),sidebarToggle:$('reading-sidebar-toggle'),onAnnotationsRequest:()=>canvasNotesContext?void openCanvasNotes(canvasNotesContext):void switchTab('annotations'),
   onChatVisibility: visible => paperChatUI?.visible(visible && state.tab!=='graph' && !workbenchUI?.isTable()),
   onPanelChange: value => { outlineUI?.sync();documentElementsUI?.sync(value);workbenchUI?.metadataVisibility(value.sidebar==='metadata'); readingShell?.sync(); publishReaderState(); }, toast,
 });

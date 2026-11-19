@@ -7,6 +7,27 @@ let JSDOM;try{({JSDOM}=require(process.env.JSDOM_MODULE||'jsdom'));}catch{}
 const html=await readFile(new URL('../web/index.html',import.meta.url),'utf8');
 const style=await readFile(new URL('../web/annotation-style.js',import.meta.url),'utf8');
 const shell=await readFile(new URL('../web/reading-shell.js',import.meta.url),'utf8');
+const panels=await readFile(new URL('../web/reading-panels.js',import.meta.url),'utf8');
+
+test('the paper toolbar switch controls the actual shared reading sidebar', {skip:!JSDOM}, ()=>{
+  const {window}=new JSDOM(html,{runScripts:'outside-only',url:'http://synthetic.invalid/'}),doc=window.document;
+  const get=id=>doc.getElementById(id);
+  let ui, rail;
+  try {
+    for(const id of ['metadata-enrich','catalog-archive']){const b=doc.createElement('button');b.id=id;doc.body.append(b);}
+    window.eval(shell);window.eval(panels);
+    const toggle=get('reading-sidebar-toggle'),sidebar=get(toggle.getAttribute('aria-controls'));
+    rail=window.PaperReadingPanels.create({root:get('reading-workspace'),annotationsRoot:get('annotations-tab'),conversationRoot:get('conversation-tab'),metadataRoot:get('metadata-dialog'),libraryRoot:sidebar,sidebarToggle:toggle});
+    const active={id:'synthetic',pdf:true};rail.paperChanged(active);
+    ui=window.PaperReadingShell.create({state:{active,tab:'reader'},workbench:()=>({isTable:()=>false}),panels:()=>rail,reader:()=>null,navigate(){}});
+    ui.arrangeControls();
+    assert.equal(toggle.closest('#paper-tools'),get('paper-tools'));
+    assert.equal(toggle.getAttribute('role'),'switch');assert.equal(toggle.getAttribute('aria-checked'),'true');
+    toggle.click();assert.equal(toggle.getAttribute('aria-checked'),'false');assert.ok(sidebar.parentNode.classList.contains('reading-sidebar-hidden'));
+    toggle.click();assert.equal(toggle.getAttribute('aria-checked'),'true');assert.ok(!sidebar.parentNode.classList.contains('reading-sidebar-hidden'));
+  } finally {ui?.dispose();rail?.dispose();window.close();}
+});
+
 test('reading display restores and saves the annotation order separately from the PDF view', {skip:!JSDOM}, async()=>{
   const {window}=new JSDOM(html,{runScripts:'outside-only',url:'http://synthetic.invalid/'}), doc=window.document;
   const changes=[], writes=[];

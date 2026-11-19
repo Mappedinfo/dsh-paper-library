@@ -254,8 +254,8 @@ window.PaperReadingShell = (() => {
     function status(text,error=false,options={}){if(options.clearIf!==undefined&&message.textContent!==options.clearIf)return;message.textContent=text||hintFor();message.classList.toggle('error',error);}
     function sync(){
       const table=Boolean(workbench()?.isTable()), active=Boolean(state.active&&!state.active.archived&&state.active.resource_kind!=='dataset'), pdf=active&&Boolean(state.active.pdf);
-      panels()?.setReadingActive?.(!table&&active&&state.tab!=='graph');
       if((table||state.active?.resource_kind==='dataset')&&focused)leaveFocus();
+      panels()?.setReadingActive?.(!table&&active&&state.tab!=='graph',{focused});
       const surface=table?'library':context;
       document.body.classList.toggle('library-mode',table);document.body.classList.toggle('has-paper',active);
       library.setAttribute('aria-pressed',String(table));
@@ -306,6 +306,7 @@ window.PaperReadingShell = (() => {
       const find=$('reader-find');
       readerTools.append(zoomGroup,layoutGroup,backPosition,...(find?[find]:[]),locateNotes);
       const toolbar=$('paper-tools');
+      group(toolbar,'阅读布局',[$('reading-sidebar-toggle')]);
       group(toolbar,'PDF 导航',[readerTools]);
       group(toolbar,'引用与导出',[$('toolbar-copy-apa'),citations]);
       group(toolbar,'文献库与数据集',[libraryTools,$('toolbar-dataset')]);

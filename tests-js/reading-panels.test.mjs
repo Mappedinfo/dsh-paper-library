@@ -30,6 +30,7 @@ function environment({width=741,storage=new Map(),sharedLibrary=false,onAnnotati
   }
   const body=new Element('body'),old=new Element(),root=new Element(),workspace=sharedLibrary?new Element():body;
   const libraryRoot=sharedLibrary?new Element('section'):undefined;
+  const sidebarToggle=sharedLibrary?new Element('button'):undefined;
   let libraryChildren,search,paperList;
   if(sharedLibrary){
     const heading=new Element('header'),pager=new Element('footer');search=new Element('input');paperList=new Element();
@@ -39,11 +40,12 @@ function environment({width=741,storage=new Map(),sharedLibrary=false,onAnnotati
   const annotationsRoot=new Element('section'),conversationRoot=new Element('section'),metadataRoot=new Element('dialog');
   annotationsRoot.id='annotations-tab';conversationRoot.id='conversation-tab';metadataRoot.id='metadata-dialog';annotationsRoot.hidden=true;conversationRoot.hidden=true;old.append(annotationsRoot,conversationRoot,metadataRoot);
   const original=[...old.children],window=new Element('window');window.localStorage={getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)};
+  window.matchMedia=query=>({matches:width<=Number(query.match(/(\d+)px/)[1])});
   const observers=[];window.ResizeObserver=class {constructor(fn){this.fn=fn;observers.push(this);}observe(){}disconnect(){this.disconnected=true;}};
   const document={body,createElement:tag=>new Element(tag)};
   vm.runInNewContext(source,{window,document},{filename:'web/reading-panels.js'});
-  const panels=window.PaperReadingPanels.create({root,annotationsRoot,conversationRoot,metadataRoot,libraryRoot,onAnnotationsRequest,persistence:{get:async key=>storage.get(key)||null,patch:async(key,value)=>storage.set(key,{...storage.get(key),...value})},onChatVisibility:value=>visibility.push(value),onPanelChange:value=>changes.push({...value}),toast:(...args)=>toasts.push(args)});
-  return {panels,root,body,old,original,annotationsRoot,conversationRoot,metadataRoot,visibility,changes,toasts,ids,window,document,storage,observers,workspace,libraryRoot,libraryChildren,search,paperList};
+  const panels=window.PaperReadingPanels.create({root,annotationsRoot,conversationRoot,metadataRoot,libraryRoot,sidebarToggle,onAnnotationsRequest,persistence:{get:async key=>storage.get(key)||null,patch:async(key,value)=>storage.set(key,{...storage.get(key),...value})},onChatVisibility:value=>visibility.push(value),onPanelChange:value=>changes.push({...value}),toast:(...args)=>toasts.push(args)});
+  return {panels,root,body,old,original,annotationsRoot,conversationRoot,metadataRoot,visibility,changes,toasts,ids,window,document,storage,observers,workspace,libraryRoot,sidebarToggle,libraryChildren,search,paperList};
 }
 const paper={id:'synthetic-a',title:'Synthetic paper'};
 
@@ -202,6 +204,74 @@ test('narrow shared rail close clears its mobile-open state and Escape preserves
   f.panels.show('annotations');const event=f.libraryRoot.dispatch('keydown',{key:'Escape'});
   assert.equal(event.defaultPrevented,true);assert.equal(f.workspace.classList.contains('shared-sidebar-open'),false);
   assert.equal(f.panels.visible('annotations'),false);assert.equal(f.panels.visible('chat'),true);
+});
+
+test('toolbar switch hides the reading rail and restores its selected tab and side',()=>{
+  for(const width of [430,900]){
+    const f=environment({sharedLibrary:true,width});
+    const toggle=f.sidebarToggle, divider=f.ids.get('reading-rail-resizer');
+    assert.equal(toggle.hidden,true);
+    f.panels.paperChanged(paper);
+    assert.equal(toggle.hidden,false);
+    assert.equal(toggle.getAttribute('aria-checked'),String(width>620));
+    f.panels.setSide('right');
+    f.panels.show('annotations');f.panels.show('chat');
+    f.annotationsRoot.scrollTop=104;f.annotationsRoot.draft='Keep this draft';
+    toggle.click();
+    assert.equal(toggle.getAttribute('aria-checked'),'false');
+    assert.equal(f.workspace.classList.contains('reading-sidebar-hidden'),true);
+    assert.equal(f.panels.visible('annotations'),false);assert.equal(f.panels.visible('chat'),true);
+    assert.equal(divider.hidden,true);
+    f.panels.setReadingActive(false);
+    assert.equal(toggle.hidden,true);assert.equal(f.workspace.classList.contains('reading-sidebar-hidden'),false);
+    f.panels.setReadingActive(true);
+    toggle.click();
+    assert.equal(toggle.getAttribute('aria-checked'),'true');
+    assert.equal(f.workspace.classList.contains('reading-sidebar-hidden'),false);
+    assert.equal(f.workspace.dataset.sidebarSide,'right');assert.equal(f.libraryRoot.dataset.sidebarPanel,'annotations');
+    assert.equal(f.annotationsRoot.hidden,false);assert.equal(divider.hidden,false);
+    assert.equal(f.annotationsRoot.scrollTop,104);assert.equal(f.annotationsRoot.draft,'Keep this draft');
+    f.ids.get('reading-sidebar-close').click();
+    assert.equal(toggle.getAttribute('aria-checked'),'false');
+    f.panels.show('annotations');
+    assert.equal(toggle.getAttribute('aria-checked'),'true');
+  }
+});
+
+test('画板及流程批注可通过工具栏收展，没选论文时保留草稿、位置和焦点',()=>{
+  for (const width of [630,1205]) {
+    const f=environment({sharedLibrary:true,width});
+    const toggle=f.sidebarToggle;
+    f.panels.setReadingActive(false);
+    f.panels.setAnnotationContext(true);
+    assert.equal(toggle.hidden,false);
+    assert.equal(toggle.getAttribute('aria-checked'),String(width>640));
+    f.panels.show('annotations');
+    f.panels.setSide('right');
+    f.annotationsRoot.draft='尚未保存的流程批注';
+    f.annotationsRoot.scrollTop=68;
+    f.ids.get('reading-sidebar-close').click();
+    assert.equal(f.document.activeElement,toggle);
+    assert.equal(toggle.title,'展开侧边栏');
+    assert.equal(f.panels.visible('annotations'),false);
+    assert.equal(f.workspace.classList.contains('reading-sidebar-hidden'),true);
+    assert.equal(f.ids.get('reading-rail-resizer').hidden,true);
+
+    f.panels.setAnnotationContext(true);
+    toggle.click();
+    assert.equal(f.libraryRoot.dataset.sidebarPanel,'annotations');
+    assert.equal(f.workspace.dataset.sidebarSide,'right');
+    assert.equal(f.annotationsRoot.hidden,false);
+    assert.equal(f.annotationsRoot.draft,'尚未保存的流程批注');
+    assert.equal(f.annotationsRoot.scrollTop,68);
+    assert.equal(toggle.getAttribute('aria-checked'),'true');
+    toggle.click();
+    f.panels.show('annotations');
+    assert.equal(toggle.title,'收起侧边栏');
+    assert.equal(f.workspace.classList.contains('reading-sidebar-hidden'),false);
+    f.panels.setAnnotationContext(false);
+    assert.equal(toggle.hidden,true);
+  }
 });
 
 test('shared tabs expose connected tab roles and keyboard navigation respects unavailable annotations',()=>{
