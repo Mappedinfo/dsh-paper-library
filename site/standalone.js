@@ -322,7 +322,7 @@
       root,
       api: (action, payload) => store.handle({ action, ...payload }),
       toast,
-      capabilities: { libraryPapers: false, conversation: false },
+      capabilities: { libraryPapers: false, conversation: false, eqTraceSource: false },
       onCanvasContext: updateContext, onAnnotations: value => void openNotes(value), prepareAnnotationsLeave: () => noteUI?.prepareLeave() ?? true,
     });
 

@@ -59,7 +59,7 @@ test('stale board/session, absent session, disposed panel and invalid snapshots 
   } finally { f.bridge.dispose() }
 })
 
-function hostFixture({ snapshot, save } = {}) {
+function hostFixture({ snapshot, save, eqtrace } = {}) {
   const calls = [], sent = [], messages = [], view = { addEventListener() {}, removeEventListener() {} }
   let rendered, sessionId = 'session-current', revision = 'a'.repeat(64), value = workspace()
   const root = { hidden: false, querySelectorAll: () => [] }
@@ -73,9 +73,10 @@ function hostFixture({ snapshot, save } = {}) {
     if (name === '../../vendor/paper-flow/index') return { PaperFlowWorkbench() {} }
     throw Error(`Unexpected module ${name}`)
   }, module, module.exports, view)
-  const flow = view.PaperBoardFlow.create({ root, toast: message => messages.push(message), onClose() {}, getSessionId: () => sessionId,
+  const flow = view.PaperBoardFlow.create({ root, canGenerateEqTrace: !!eqtrace, toast: message => messages.push(message), onClose() {}, getSessionId: () => sessionId,
     async api(action, args) {
       calls.push({ action, args })
+      if (action === 'board_flow_eqtrace') return eqtrace(args)
       if (action === 'board_flow_get') return { id: args.id, workspace: value, revision }
       if (action === 'board_flow_save') { if (save) return save(args); value = args.workspace; revision = 'b'.repeat(64); return { id: args.id, workspace: value, revision } }
       if (action === 'board_flow_snapshot') return snapshot ? snapshot(args) : { board_id: args.id, snapshot_id: 'c'.repeat(64), text: '有界合成快照' }
@@ -133,4 +134,31 @@ test('unsaved/conflicting source and absent DSH session never freeze or post flo
     assert.equal(empty.calls.some(call => call.action === 'board_flow_snapshot'), false)
     assert.equal(empty.sent.length, 0)
   } finally { empty.flow.dispose() }
+})
+
+test('EqTrace generation adds a graph to the current board and discards results after edits, cancellation or board changes', async () => {
+  const doc = workspace()
+  doc.paper.id = 'eqtrace-synthetic'; doc.flows[0].id = 'training'
+  const files = { entry: { name: 'train.py', text: 'pass' } }
+  for (const alter of ['keep', 'edit', 'cancel', 'switch']) {
+    const late = deferred(), f = hostFixture({ eqtrace: () => late.promise })
+    try {
+      await f.flow.open({ id: 'b-current', title: '合成板' })
+      let active = true
+      const generating = f.props().generate(async () => files, () => active)
+      await tick()
+      assert.deepEqual(f.calls.at(-1), { action: 'board_flow_eqtrace', args: { id: 'b-current', ...files } })
+      if (alter === 'edit') f.props().controller.edit(f.props().controller.state().workspace)
+      if (alter === 'cancel') active = false
+      if (alter === 'switch') await f.flow.open({ id: 'b-other', title: '另一画板' })
+      late.resolve(doc)
+      if (alter === 'keep') {
+        assert.equal(await generating, 'eqtrace-synthetic')
+        assert.equal(f.props().controller.state().workspace.documents.length, 2)
+      } else {
+        await assert.rejects(generating, /工作区已切换或修改/u)
+        assert.equal(f.props().controller.state().workspace.documents.length, 1)
+      }
+    } finally { f.flow.dispose() }
+  }
 })

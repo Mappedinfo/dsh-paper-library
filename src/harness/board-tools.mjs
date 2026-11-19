@@ -59,8 +59,14 @@ function boardFrom(input) {
 }
 
 /** One request path for both callers; `writer` is 'user' or 'llm'. */
-export async function handleBoardRequest(store, input, { writer = 'user', flowStore } = {}) {
+export async function handleBoardRequest(store, input, { writer = 'user', flowStore, python } = {}) {
   const action = input?.action
+  if (action === 'board_flow_eqtrace') {
+    if (writer !== 'user') throw Object.assign(new Error('从源码制图仅供读者本人操作。'), { code: 'BOARD_FORBIDDEN', status: 403 })
+    await store.read(input.id)
+    const { generateBoardEqTrace } = await import('./board-eqtrace.mjs')
+    return generateBoardEqTrace(input, { python })
+  }
   if (action === 'board_flow_get' || action === 'board_flow_save' || action === 'board_flow_snapshot') {
     if (writer !== 'user') throw Object.assign(new Error('paperFlow 工作区目前只供读者本人操作。'), { code: 'BOARD_FORBIDDEN', status: 403 })
     if (!flowStore) throw Object.assign(new Error('paperFlow 工作区存储尚未连接。'), { code: 'BOARD_FLOW_STORE_MISSING', status: 500 })

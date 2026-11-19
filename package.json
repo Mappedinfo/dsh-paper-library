@@ -83,6 +83,8 @@
     "docs/slides-workbench.md",
     "!src/slides/*.test.mjs",
     "vendor/paper-flow",
+    "vendor/eqtrace",
+    "examples/eqtrace-training.json",
     "src/paper-flow",
     "examples/paper-flow-teaching.json",
     "lib/paper-flow-editor.js",

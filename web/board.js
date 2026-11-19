@@ -1289,7 +1289,7 @@
         if (!factory || !live || id !== boardId || ticket !== boardLoadTicket) return false;
         const host = $('board-flow-view');
         if (!host) throw Error('流程工作区容器未就绪，请刷新页面。');
-        flowUI ||= factory.create({ root: host, api, toast, prepareReturnToDsh: options.prepareReturnToDsh,
+        flowUI ||= factory.create({ root: host, api, toast, canGenerateEqTrace: capabilities.eqTraceSource !== false, prepareReturnToDsh: options.prepareReturnToDsh,
           ...(capabilities.conversation ? { sendSnapshot: (snapshot, sessionId) => bridge.sendSnapshot(snapshot, sessionId), getSessionId: options.getSessionId } : {}),
           onCanvasContext: options.onCanvasContext, onAnnotations: options.onAnnotations,
           onClose() { publishFlowWindow(false); root.classList.remove('has-paper-flow'); host.hidden = true; renderInspector(); stage.focus?.(); } });

@@ -12,10 +12,13 @@ import { validateFlowWorkspace } from './validation.mjs'
 import { isFlowFileDrag, selectFlowImportFile } from '../../vendor/paper-flow/import-files.js'
 import { createBoardAnnotationStore, handleBoardAnnotationRequest } from '../harness/board-annotations.mjs'
 import { normalizeBoardAnnotationRecord } from '../board-annotation-schema.mjs'
+import { EqTracePanel, type GenerateEqTrace } from './EqTracePanel'
+import { addEqTraceDocument } from './eqtrace-import.mjs'
+import { eqTraceFlows } from './eqtrace-figure.mjs'
 import './host.css'
 
 type FlowTarget = { kind: 'flow'; paper_id: string; flow_id: string; node_id?: string; node_ids?: string[] }
-type HostOptions = { root: HTMLElement; api(action: string, args: object): Promise<any>; toast(message: string, error?: boolean): void; onClose(): void; prepareReturnToDsh?: () => Promise<boolean>; sendSnapshot?: (snapshot: any, sessionId: string) => Promise<boolean>; getSessionId?: () => string | null; onCanvasContext?: (context: any) => void; onAnnotations?: (context: any) => void }
+type HostOptions = { root: HTMLElement; canGenerateEqTrace?: boolean; api(action: string, args: object): Promise<any>; toast(message: string, error?: boolean): void; onClose(): void; prepareReturnToDsh?: () => Promise<boolean>; sendSnapshot?: (snapshot: any, sessionId: string) => Promise<boolean>; getSessionId?: () => string | null; onCanvasContext?: (context: any) => void; onAnnotations?: (context: any) => void }
 type OpenOptions = { id: string; title: string; seed?: unknown }
 type FlowState = { id: string | null; title: string; workspace: FlowWorkspace | null; revision: unknown; version: number; epoch: number; dirty: boolean; saving: boolean; blocked: boolean; invalid: boolean; error: string; loading: boolean }
 
@@ -31,7 +34,7 @@ function backup(workspace: unknown) {
   const link = document.createElement('a'); link.href = url; link.download = 'paper-flow-draft.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, send, context, annotate, canSend }: { controller: ReturnType<typeof createFlowController>; close(): Promise<boolean>; subscribe(listener: (value: FlowState) => void): () => void; prepareReturnToDsh?: () => Promise<boolean>; workbench: React.RefObject<PaperFlowWorkbenchHandle | null>; send(ref: FlowRef, ids?: string[]): Promise<void>; context(target: FlowTarget): void; annotate(target: FlowTarget): Promise<void>; canSend: boolean }) {
+function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, send, context, annotate, canSend, generate }: { controller: ReturnType<typeof createFlowController>; close(): Promise<boolean>; subscribe(listener: (value: FlowState) => void): () => void; prepareReturnToDsh?: () => Promise<boolean>; workbench: React.RefObject<PaperFlowWorkbenchHandle | null>; send(ref: FlowRef, ids?: string[]): Promise<void>; context(target: FlowTarget): void; annotate(target: FlowTarget): Promise<void>; canSend: boolean; generate?: GenerateEqTrace }) {
   const [view, setView] = useState<FlowState>(() => controller.state() as FlowState)
   const hostTools = useRef<HTMLDivElement>(null)
   const emptyFileInput = useRef<HTMLInputElement>(null), importSerial = useRef(0), dragDepth = useRef(0)
@@ -70,6 +73,7 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
       <button type="button" onClick={() => void close()}>← 返回画板</button>
       <strong title={view.title}>{view.title || '流程工作区'}</strong><span className={`board-flow-status${view.blocked || view.invalid ? ' is-error' : ''}`} role="status">{status}</span>
       <div className="board-flow-actions board-flow-host-tools" ref={hostTools}>
+        <EqTracePanel key={`${view.id}:${view.epoch}`} workspace={view.workspace} generate={generate} />
         <button type="button" disabled={!view.dirty || view.loading || view.invalid || view.blocked} onClick={() => void controller.flush()}>保存</button>
         {(view.blocked || view.invalid) && <button type="button" disabled={view.loading || view.invalid} onClick={() => void controller.flush({ retry: true })}>重试保存</button>}
         <button type="button" disabled={!view.workspace} onClick={() => backup(view.workspace)}>备份 JSON</button>
@@ -86,6 +90,11 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
       onDrop={event => { if (view.workspace) return; event.preventDefault(); event.stopPropagation(); dragDepth.current = 0; setDropActive(false); void choose(Array.from(event.dataTransfer.files)) }}>
       {!view.workspace && dropActive && <div className="paper-flow-drop-target" role="status"><strong>松开以导入 JSON</strong><span>一次一个文件，最大 192 KiB</span></div>}
       {view.workspace ? <FlowErrorBoundary recoveryKey={`${view.id}:${view.version}`}><PaperFlowWorkbench ref={workbench} key={`${view.id}:${view.epoch}`} workspace={view.workspace} onWorkspaceChange={(next: FlowWorkspace) => controller.edit(next, { id: view.id, epoch: view.epoch, version: view.version })}
+        prepareImport={(raw, parsed) => {
+          const imported = typeof raw === 'string' ? JSON.parse(raw) : raw
+          return imported?.kind === 'paper-flow-document' && eqTraceFlows(imported).length
+            ? addEqTraceDocument(view.workspace, imported).workspace : parsed
+        }}
         toolbar={<>{canSend && <button type="button" onClick={() => void send(view.workspace!.selection.left)}>流程放入 DSH</button>}<button type="button" onClick={() => void annotate(target(view.workspace!.selection.left))}>流程批注</button></>}
         onNodeSelect={contexts => { if (contexts[0]) context(target(contexts[0].ref, contexts[0].nodeIds)) }}
         renderNodeDetails={(_node, _graph, contexts) => <div className="board-flow-node-actions">{contexts.map(value => <div key={value.side}>
@@ -93,7 +102,7 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
           {canSend && <button type="button" onClick={() => void send(value.ref, value.nodeIds)}>节点与上下游放入 DSH</button>}
           <button type="button" onClick={() => void annotate(target(value.ref, value.nodeIds))}>批注此节点{value.nodeIds.length > 1 ? `组（${value.nodeIds.length}）` : ''}</button>
         </div>)}</div>} /></FlowErrorBoundary> : <div className="board-flow-empty">
-        <h2>开始整理流程</h2><p>新建一份流程、导入已有 JSON，或先打开不含研究资料的教学示例。也可以将一个 JSON 文件直接拖入面板（最大 192 KiB）。</p>
+        <h2>开始整理流程</h2><p>导入流程或 EqTrace JSON 查看流程与论文插图，也可以从空白流程或教学示例开始。拖入的 JSON 文件最大 192 KiB。</p>
         <div><button type="button" onClick={() => controller.edit(starterWorkspace())}>新建流程</button><button type="button" onClick={() => emptyFileInput.current?.click()}>导入 JSON</button><input className="board-flow-import-input" ref={emptyFileInput} type="file" accept=".json,application/json" aria-label="导入流程 JSON" onChange={event => { const files = Array.from(event.currentTarget.files || []); event.currentTarget.value = ''; if (files.length) void choose(files) }} /><button type="button" onClick={() => controller.edit(starterWorkspace(true))}>打开教学示例</button></div>
         {emptyImport.loading && <p role="status">正在读取 {emptyImport.name}…</p>}{emptyImport.error && <p className="board-flow-error" role="alert">{emptyImport.error}</p>}
       </div>}
@@ -101,7 +110,7 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
   </section>
 }
 
-function create({ root, api, toast, onClose, prepareReturnToDsh, sendSnapshot, getSessionId, onCanvasContext, onAnnotations }: HostOptions) {
+function create({ root, api, toast, onClose, canGenerateEqTrace, prepareReturnToDsh, sendSnapshot, getSessionId, onCanvasContext, onAnnotations }: HostOptions) {
   const react = createRoot(root)
   const listeners = new Set<(value: FlowState) => void>()
   const subscribe = (listener: (value: FlowState) => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }
@@ -110,6 +119,20 @@ function create({ root, api, toast, onClose, prepareReturnToDsh, sendSnapshot, g
   let visible = false, disposed = false
   const workbench = { current: null as PaperFlowWorkbenchHandle | null }
   const context = (target: FlowTarget) => { if (!disposed) onCanvasContext?.({ id: controller.state().id, target }) }
+  const generate: GenerateEqTrace = async (read, active) => {
+    const owner = controller.token()
+    const check = () => {
+      if (!active() || !visible || !controller.current(owner, true)) throw Error('工作区已切换或修改，请在当前画板重新生成。')
+    }
+    check()
+    const files = await read()
+    check()
+    const document = await api('board_flow_eqtrace', { id: owner.id, ...files })
+    check()
+    const added = addEqTraceDocument(controller.state().workspace, document)
+    if (!controller.applyExternal(added.workspace, owner)) throw Error('生成结果未载入，当前工作区已保留。')
+    return added.documentId
+  }
   async function annotate(target: FlowTarget) {
     const owner = controller.token()
     if (!await prepareLeave() || !controller.current(owner, true)) return
@@ -135,7 +158,7 @@ function create({ root, api, toast, onClose, prepareReturnToDsh, sendSnapshot, g
     const ok = await controller.prepareLeave(); if (!ok) toast('流程草稿尚未保存，请先重试或备份。', true); return ok
   }
   async function close() { if (!visible || !await prepareLeave()) return false; controller.invalidatePending(); visible = false; root.hidden = true; onClose(); return true }
-  react.render(<Panel controller={controller} close={close} subscribe={subscribe} prepareReturnToDsh={prepareReturnToDsh} workbench={workbench} send={send} context={context} annotate={annotate} canSend={!!sendSnapshot} />)
+  react.render(<Panel controller={controller} close={close} subscribe={subscribe} prepareReturnToDsh={prepareReturnToDsh} workbench={workbench} send={send} generate={canGenerateEqTrace ? generate : undefined} context={context} annotate={annotate} canSend={!!sendSnapshot} />)
   root.hidden = true
   return {
     async open(options: OpenOptions) { if (disposed) return false; const current = controller.state(); if (visible && (current.id !== options.id || !current.dirty && !current.blocked && !current.invalid) && !await prepareLeave()) return false; const ok = await controller.open(options); if (!ok) { toast(controller.state().error || '流程工作区尚未保存或读取失败。', true); return false } visible = true; root.hidden = false; return true },

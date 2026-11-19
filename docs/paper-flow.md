@@ -6,6 +6,23 @@
 
 「导入 JSON」使用统一按钮并显示文件名、读取状态和错误，也可直接拖入整个流程面板；一次一个 `.json` 文件，读取前检查 192 KiB 上限。拖入失败保留当前图，晚到结果不会覆盖切换后的工作区。「完整细节」开关显示当前状态，旁边问号说明：关闭时只按输入明确的概览分组合并展示，打开时展示分项；没有声明分组时可能没有变化，不修改原始声明或比较依据。浅绿色「保存工作区」下载 JSON 备份，主机保存状态仍在上方单独显示。
 
+## 用 EqTrace 从实验源码制图
+
+在本机版 PaperLibrary（DSH 插件或本机服务）的画板打开「论文流程」→「EqTrace 代码成图」。选择训练入口、模型定义，或分别只选其一；每份文件最多 256 KiB。若训练与网络同文件，只选训练入口即可。多模型文件请填写具体类名，自定义模型入口可填 `Class.method`。生成后可在「EqTrace 论文插图」中切换两张图并下载单独的 SVG。
+
+- **网络结构图**依照所选方法中的变量赋值和张量操作连接节点。线性层的输入输出宽度、卷积核等参数只有源码给出时才显示。实线与待解析的候选关系保留各自标记。
+- **训练流程图**依照源码可辨认的训练步骤、分支、批循环、进程启动和等待连线。图描述代码可能走的路径，某次实际运行的完成状态须查对应运行记录。
+- 对可可靠折叠的复杂流程，出版图默认显示阶段总览，可切回全部节点。工作区保存完整流程与出处，节点详情可核对文件及行号。SVG 保留矢量文字和连线，可置入论文排版；请按稿件的最终栏宽核对字号与标签。
+
+纯静态画板可直接导入 [双图示例 JSON](../examples/eqtrace-training.json) 或在其他机器用 EqTrace 生成的 JSON。CLI 示例使用[合成残差模型与训练入口](https://github.com/Mappedinfo/eqtrace/tree/main/examples/paper_flow)：
+
+```sh
+eqtrace paper-flow --root examples/paper_flow --entry train.py --model residual.py \
+  --class ResidualRegressor --title "残差回归" --out residual-flow.json
+```
+
+本地宿主随包提供[固定版本的 EqTrace 静态模块](../vendor/eqtrace/README.md)，使用本地 Python 3.11+。源码只在读者发起生成时进入本地主机的临时目录，解析结束即清理；保存在画板中的是流程文档及其源码依据。可显式以 `PAPER_LIBRARY_EQTRACE` 指向另一份支持 `paper-flow` 的 CLI 绝对路径。Python 文件只作为文本读取，全程不导入网络、不启动训练、不请求语言模型。
+
 ## 文档与保存
 
 输入可以是 schemaVersion:1 的 paper-flow-document 或 paper-flow-workspace，解析后统一为工作区；含文档与流程、左右选择、视图、比较配置和独立编辑草稿。示例见 [教学 JSON](../examples/paper-flow-teaching.json)。校验检查端口引用、类型、DAG、显式分组、比较和草稿几何；格式通过不证明论文中的科学主张。

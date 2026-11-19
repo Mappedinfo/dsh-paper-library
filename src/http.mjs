@@ -281,7 +281,7 @@ export function createFetchHandler(options = {}) {
             : stateAction ? await stateRequest(localState, input)
             : typeof input?.action === 'string' && input.action.startsWith('slides_') ? await slidesRequest(input)
             : typeof input?.action === 'string' && input.action.startsWith('board_annotations_') ? await handleBoardAnnotationRequest(boardAnnotations, input)
-            : boardAction ? await handleBoardRequest(boards, input, { writer: 'user', flowStore: boardFlows })
+            : boardAction ? await handleBoardRequest(boards, input, { writer: 'user', flowStore: boardFlows, python: options.python })
             : typeof input?.action === 'string' && input.action.startsWith('paper_analysis_') ? await analysisRecords(input)
             : typeof input?.action === 'string' && (input.action.startsWith('challenge_extract_') || input.action.startsWith('challenge_theme_suggest_')) ? await challengeRecords(input, { signal: request.signal })
             : input?.action === 'knowledge_generate' ? await options.libraryKnowledge(input, { signal: request.signal })

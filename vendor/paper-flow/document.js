@@ -3,7 +3,7 @@ export { defaultView, defaultComparison, normalizeGraph } from "./model.js";
 import { compareFlows, prepareGraph } from "./comparison.js";
 import engine from "./core/graph.js";
 import { emptyDraft } from "./core/editing.js";
-import { budgetFlowInput } from "./budget.js";
+import { budgetFlowInput, FLOW_LIMITS } from "./budget.js";
 import { validCompareField } from "./core/hints.js";
 const copy = (value) => structuredClone(value);
 const object = (v) => !!v && typeof v === "object" && !Array.isArray(v);
@@ -45,6 +45,46 @@ export function createWorkspace(documents, selection) {
     comparison: defaultComparison(),
     drafts: {},
   };
+}
+// 明确标注的出版总览只可折叠原流程中的路径；校验与项目名称、阶段名称无关。
+function validateFigureOverview(source, path) {
+  const graph = source.figure_overview;
+  const fail = (code, message) => [{ severity: "error", code, path, message }];
+  if (!object(graph) || graph.figure_overview !== undefined ||
+      !Array.isArray(graph.nodes) || graph.nodes.length > FLOW_LIMITS.nodesPerFlow ||
+      !Array.isArray(graph.edges) || graph.edges.length > FLOW_LIMITS.edgesPerFlow)
+    return fail("overview.shape", "阶段总览必须是一层有界流程图");
+  const diagnostics = validateGraph(graph, path);
+  if (diagnostics.length) return diagnostics;
+  const owners = new Map();
+  const outgoing = new Map(source.nodes.map(n => [n.id, []]));
+  for (const edge of source.edges) outgoing.get(edge.from.split(":")[0]).push(edge.to.split(":")[0]);
+  for (const group of graph.nodes) {
+    const members = group.config?.members;
+    if (!Array.isArray(members) || !members.length) return fail("overview.members", "总览节点须声明非空的原节点成员");
+    for (const id of members) {
+      if (!outgoing.has(id) || owners.has(id)) return fail("overview.members", "总览成员未知或重复归属");
+      owners.set(id, group.id);
+    }
+  }
+  const targets = new Map();
+  for (const group of graph.nodes) {
+    const found = new Set(), visited = new Set(group.config.members), queue = [...visited];
+    for (let i = 0; i < queue.length; i++) {
+      for (const child of outgoing.get(queue[i])) {
+        if (visited.has(child)) continue;
+        visited.add(child);
+        if (owners.has(child)) found.add(owners.get(child));
+        else queue.push(child);
+      }
+    }
+    targets.set(group.id, found);
+  }
+  for (const edge of graph.edges) {
+    if (!targets.get(edge.from.split(":")[0]).has(edge.to.split(":")[0]))
+      return fail("overview.path", "总览连线缺少不穿越其他已展示组的原始有向路径");
+  }
+  return [];
 }
 export function validateGraph(g, path = "graph") {
   const diagnostics = [];
@@ -183,6 +223,8 @@ export function validateGraph(g, path = "graph") {
         add("group.structure", path + ".paper_groups", e.message);
       }
   }
+  if (!diagnostics.length && g.figure_overview !== undefined)
+    diagnostics.push(...validateFigureOverview(g, path + ".figure_overview"));
   return diagnostics;
 }
 export function validateDocument(d, path = "document") {

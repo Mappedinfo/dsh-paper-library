@@ -40,6 +40,7 @@ export type PaperFlowWorkbenchProps = {
   workspace: FlowWorkspace;
   onWorkspaceChange: (workspace: FlowWorkspace) => void;
   services?: FlowServices;
+  prepareImport?: (input: unknown, parsed: FlowWorkspace) => FlowWorkspace;
   renderNodeDetails?: (node: FlowNode, graph: FlowGraph, contexts: { ref: FlowRef; nodeIds: string[]; side: string }[]) => ReactNode;
   onNodeSelect?: (contexts: { ref: FlowRef; nodeIds: string[]; side: string }[]) => void;
   toolbar?: ReactNode;
@@ -61,7 +62,7 @@ const mergedKey = (w: FlowWorkspace) =>
   ]);
 export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlowWorkbenchProps>(
   function PaperFlowWorkbench(
-    { workspace: w, onWorkspaceChange, services, renderNodeDetails, onNodeSelect, toolbar },
+    { workspace: w, onWorkspaceChange, services, prepareImport, renderNodeDetails, onNodeSelect, toolbar },
     ref,
   ) {
     const [editable, setEditable] = useState(false),
@@ -118,7 +119,11 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
     }
     function load(input: unknown) {
       importGuard.invalidate();
-      const parsed = parseFlowInput(input);
+      let parsed = parseFlowInput(input);
+      if (parsed.ok && prepareImport) {
+        try { parsed = { ...parsed, value: prepareImport(input, parsed.value) }; }
+        catch (error) { parsed = { ok: false, diagnostics: [{ severity: "error", code: "host.import", path: "$", message: error instanceof Error ? error.message : String(error) }] }; }
+      }
       setDiagnostics(parsed.diagnostics);
       if (parsed.ok) {
         change(parsed.value);
