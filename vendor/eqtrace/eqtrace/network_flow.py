@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 import tokenize
 
+from .tensor_shapes import annotated_shape, infer_network_tensor, overview_tensors
+
 
 def _dotted(node):
     if isinstance(node, ast.Name):
@@ -44,19 +46,25 @@ def _layer_declarations(cls):
     if not args:
         return {}
     owner = args[0].arg
+    prefix = owner + "."
     writes = Counter(
-        n.attr for n in ast.walk(init)
+        _dotted(n)[len(prefix):] for n in ast.walk(init)
         if isinstance(n, ast.Attribute) and isinstance(n.ctx, (ast.Store, ast.Del))
-        and isinstance(n.value, ast.Name) and n.value.id == owner
+        and _dotted(n).startswith(prefix)
     )
     layers = {}
     for stmt in init.body:
-        if isinstance(stmt, (ast.Assign, ast.AnnAssign)) and isinstance(stmt.value, ast.Call):
-            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
-            for target in targets:
-                if (isinstance(target, ast.Attribute) and _dotted(target.value) == owner
-                        and writes[target.attr] == 1):
-                    layers[target.attr] = stmt.value
+        if not isinstance(stmt, (ast.Assign, ast.AnnAssign)) or not isinstance(stmt.value, ast.Call):
+            continue
+        targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+        for target in targets:
+            name = _dotted(target)
+            if not name.startswith(prefix):
+                continue
+            key = name[len(prefix):]
+            owner_path = key.rpartition(".")[0]
+            if writes[key] == 1 and (not owner_path or owner_path in layers):
+                layers[key] = stmt.value
     return layers
 
 
@@ -75,7 +83,9 @@ _LAYER_ARGS = {
     "Conv1d": ("in_channels", "out_channels", "kernel_size", "stride", "padding", "dilation", "groups", "bias"),
     "Conv2d": ("in_channels", "out_channels", "kernel_size", "stride", "padding", "dilation", "groups", "bias"),
     "Conv3d": ("in_channels", "out_channels", "kernel_size", "stride", "padding", "dilation", "groups", "bias"),
-    "LayerNorm": ("normalized_shape",),
+    "LayerNorm": ("normalized_shape", "eps", "elementwise_affine", "bias"),
+    "MultiheadAttention": ("embed_dim", "num_heads", "dropout", "bias", "add_bias_kv",
+                           "add_zero_attn", "kdim", "vdim", "batch_first"),
     "Dropout": ("p", "inplace"),
     "ReLU": ("inplace",), "ReLU6": ("inplace",), "SiLU": ("inplace",),
     "LeakyReLU": ("negative_slope", "inplace"),
@@ -97,6 +107,7 @@ class _ForwardGraph:
         self.path, self.cls, self.method, self.aliases = path, cls, method, aliases
         self.statement, self.sites, self.unpack_groups = None, {}, []
         self.nodes, self.edges, self.diagnostics = [], [], []
+        self.nodes_by_id = {}
         self.counts, self.bindings = Counter(), {}
         self.layers = _layer_declarations(cls)
         self.attributes = {}
@@ -125,6 +136,19 @@ class _ForwardGraph:
             "ports": {"in": {"in": {"type": "tensor"}}, "out": {"out": {"type": "tensor"}}},
             "evidence": evidence, "detail": reason or ast.unparse(loc), "config": config,
         })
+        node = self.nodes[-1]
+        def lookup(name):
+            ids = self.bindings.get(name, [])
+            if len(ids) == 1:
+                outs = self.nodes_by_id[ids[0]]["tensor"]["outputs"]
+                if len(outs) == 1:
+                    return outs[0]["shape"]
+            return None
+        node["tensor"] = infer_network_tensor(
+            node, loc, [self.nodes_by_id[uid] for uid in parents], lookup,
+            annotated_shape(loc.annotation) if isinstance(loc, ast.arg) else None,
+        )
+        self.nodes_by_id[uid] = node
         for source in dict.fromkeys(parents):
             self.edges.append({"id": f"e-{source}-{uid}", "from": source + ":out",
                                "to": uid + ":in", "kind": "candidate" if reason else "data"})
@@ -222,12 +246,13 @@ class _ForwardGraph:
     def call(self, expr):
         callee = expr.func
         receiver = callee.value if isinstance(callee, ast.Attribute) else None
-        declared = _dotted(receiver) == self.owner and callee.attr in self.layers
+        member = _dotted(callee).removeprefix(self.owner + ".") if self.owner and _dotted(callee).startswith(self.owner + ".") else ""
+        declared = member in self.layers
         qualified = _qualified(callee, self.aliases)
         root = _dotted(callee).partition(".")[0]
         torch_api = qualified.startswith("torch.") and root not in self.bindings
         parents = []
-        if receiver is not None and _dotted(receiver) != self.owner and not torch_api:
+        if receiver is not None and _dotted(receiver) != self.owner and not torch_api and not declared:
             parents = list(self.expression(receiver))
         elif not isinstance(callee, (ast.Name, ast.Attribute)):
             parents = list(self.expression(callee))
@@ -236,7 +261,7 @@ class _ForwardGraph:
         parents += [p for arg in expr.args for p in self.expression(arg)]
         parents += [p for kw in expr.keywords for p in self.expression(kw.value)]
         if declared:
-            return self.layer(callee.attr, self.layers[callee.attr], parents, expr)
+            return self.layer(member, self.layers[member], parents, expr)
         name = qualified or ast.unparse(callee)
         reason = None
         if not torch_api:
@@ -262,8 +287,9 @@ class _ForwardGraph:
             if isinstance(call.func, ast.Attribute):
                 if call.func.attr.endswith("_") and not call.func.attr.startswith("__"):
                     return True
-                if _dotted(call.func.value) == self.owner and call.func.attr in self.layers:
-                    ctor = self.layers[call.func.attr]
+                member = name[len(self.owner) + 1:] if self.owner and name.startswith(self.owner + ".") else ""
+                if member in self.layers:
+                    ctor = self.layers[member]
                     for item in ast.walk(ctor):
                         if not isinstance(item, ast.Call):
                             continue
@@ -340,7 +366,7 @@ class _ForwardGraph:
 
 
 def _network_overview(flow, sites, unpack_groups):
-    """Contract independent input ports, explicit tuple outputs and unbranched expression chains."""
+    """Contract explicit tuple outputs and unbranched chains; retain distinct source inputs."""
     original = {n["id"]: n for n in flow["nodes"]}
     outgoing, incoming = defaultdict(set), defaultdict(set)
     endpoints = []
@@ -356,9 +382,6 @@ def _network_overview(flow, sites, unpack_groups):
         groups.append((members, label, op))
         assigned.update(members)
 
-    inputs = [uid for uid, n in original.items() if n["op"] == "input" and not incoming[uid]]
-    if len(inputs) > 1:
-        group(inputs, "Inputs · " + ", ".join(original[i]["label"] for i in inputs), "input")
     for members, names in unpack_groups:
         root, *outputs = members
         # Unpacking gives names to multiple ports of one expression. Leave unrelated fan-out intact.
@@ -400,8 +423,10 @@ def _network_overview(flow, sites, unpack_groups):
         owners.update({uid: key for uid in members})
         sources = list(dict.fromkeys(original[uid]["evidence"] for uid in members))
         config = {"members": members, "source_evidence": sources}
-        if len(members) == 1 and "parameters" in first["config"]:
-            config["parameters"] = first["config"]["parameters"]
+        if len(members) == 1:
+            for item in ("parameters", "attribute", "declaration"):
+                if item in first["config"]:
+                    config[item] = first["config"][item]
         if any(original[uid]["config"].get("resolution") == "unresolved" for uid in members):
             config["resolution"] = "unresolved"
         projected.append({"id": key, "label": label, "op": op, "type": first["type"],
@@ -434,6 +459,7 @@ def _network_overview(flow, sites, unpack_groups):
                 ready.append(child)
     if visited != len(projected):
         return None
+    overview_tensors(projected, original, endpoints, owners)
     return {"id": "network-overview", "name": flow["name"], "nodes": projected, "edges": edges}
 
 

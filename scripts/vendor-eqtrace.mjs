@@ -11,7 +11,7 @@ const git = (...args) => execFileSync('git', ['-C', repo, ...args])
 const commit = git('rev-parse', '--verify', '--end-of-options', revision + '^{commit}').toString().trim()
 const target = fileURLToPath(new URL('../vendor/eqtrace/', import.meta.url))
 const files = new Map([['LICENSE', git('show', commit + ':LICENSE')]])
-for (const name of ['__init__', 'network_flow', 'training_flow', 'paper_flow']) {
+for (const name of ['__init__', 'network_flow', 'training_flow', 'tensor_shapes', 'training_tensors', 'paper_flow']) {
   const file = 'eqtrace/' + name + '.py'
   files.set(file, git('show', commit + ':code/src/' + file))
 }

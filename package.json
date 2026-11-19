@@ -85,6 +85,7 @@
     "vendor/paper-flow",
     "vendor/eqtrace",
     "examples/eqtrace-training.json",
+    "examples/eqtrace-attention.json",
     "src/paper-flow",
     "examples/paper-flow-teaching.json",
     "lib/paper-flow-editor.js",

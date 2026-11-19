@@ -34,7 +34,7 @@ def build_paper_flow(root: Path, entry: Path | None = None, model: Path | None =
     network = extract_network_flow(network_source, root, class_name)
     if network is None and (model is not None or class_name):
         raise ValueError(f"{network_source.name} 中找不到对应网络，请检查模型类或 Class.method。")
-    training = extract_training_flow(entry, root) if entry is not None else None
+    training = extract_training_flow(entry, root, network=network, model_path=network_source) if entry is not None else None
     if entry is not None and training is None:
         raise ValueError(f"{entry.name} 中没有识别到训练步骤。仅分析网络时请使用 --model。")
     flows = [flow for flow in (network, training) if flow is not None]

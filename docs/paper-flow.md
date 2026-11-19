@@ -8,20 +8,22 @@
 
 ## 用 EqTrace 从实验源码制图
 
-在本机版 PaperLibrary（DSH 插件或本机服务）的画板打开「论文流程」→「EqTrace 代码成图」。选择训练入口、模型定义，或分别只选其一；每份文件最多 256 KiB。若训练与网络同文件，只选训练入口即可。多模型文件请填写具体类名，自定义模型入口可填 `Class.method`。生成后可在「EqTrace 论文插图」中切换两张图并下载单独的 SVG。
+在画板工具栏打开「论文流程」。空工作区可直接选「编码器–解码器示例」，也可用「导入 JSON」打开已有的 EqTrace 文档。出版图默认显示在主画布。文档同时包含两种图时，用「网络结构」和「训练流程」切换。有阶段总览时可从「源码阶段总览」切换到「全部节点」。「编辑与比较」打开原有流程工具，「查看论文插图」返回主画布。[编码器–解码器示例](../examples/eqtrace-attention.json) · [残差模型与训练双图](../examples/eqtrace-training.json)
 
-- **网络结构图**依照所选方法中的变量赋值和张量操作连接节点。线性层的输入输出宽度、卷积核等参数只有源码给出时才显示。实线与待解析的候选关系保留各自标记。
-- **训练流程图**依照源码可辨认的训练步骤、分支、批循环、进程启动和等待连线。图描述代码可能走的路径，某次实际运行的完成状态须查对应运行记录。
-- 对可可靠折叠的复杂流程，出版图默认显示阶段总览，可切回全部节点。工作区保存完整流程与出处，节点详情可核对文件及行号。SVG 保留矢量文字和连线，可置入论文排版；请按稿件的最终栏宽核对字号与标签。
+**读网络图。** 在编码器–解码器示例中，悬停解码器的交叉注意力节点。查询来自目标序列，形状为 `B × T × 32`。键和值来自编码器，形状为 `B × S × 32`。其中 `B` 是批大小，`S` 和 `T` 分别是源、目标序列长度。输出保留查询的长度，输入投影权重为 `96 × 32`。源码显式设置了 `need_weights=False`，因此 `attn_weights` 一行显示「未返回（None）」。[示例源码](https://github.com/Mappedinfo/eqtrace/blob/main/examples/paper_flow/attention.py)
 
-纯静态画板可直接导入 [双图示例 JSON](../examples/eqtrace-training.json) 或在其他机器用 EqTrace 生成的 JSON。CLI 示例使用[合成残差模型与训练入口](https://github.com/Mappedinfo/eqtrace/tree/main/examples/paper_flow)：
+**读训练图。** 残差回归示例把批循环内的清梯度、前向、损失、反向和参数更新按源码顺序连接，保存权重位于循环之后。对带多进程的脚本，图可分别标出启动和等待。总览合并有源码依据的阶段，详细图保留分支、控制条件与出处。某次运行实际经过哪些阶段、是否成功完成，须结合该次运行记录判断。[合成训练入口](https://github.com/Mappedinfo/eqtrace/blob/main/examples/paper_flow/train.py)
+
+每个节点都可用鼠标悬停、Tab 聚焦或轻点查看。浮窗按输入、输出和参数列出已声明或可静态推导的形状，以条格、矩阵或末两轴切片表示不同维数。标量标作 `[]`，可确定的符号维原样保留，证据不足显示「形状未知」，控制或调度节点可显示「不涉及张量」。旧文档仍可查看已有的端口信息。卡片较长时可滚动，Escape 关闭。网格表示维度，不包含运行时张量数值。「下载论文 SVG」导出当前总览或详细图的矢量文字与连线。
+
+**从源码生成。** 本机 PaperLibrary 服务和 DSH 插件支持选择 Python 源码。空工作区使用「EqTrace 代码成图」，出版图主画布使用「从源码生成」。选训练入口、模型定义或两者，每份最多 256 KiB。训练和模型同文件时可只选训练入口。文件有多个网络时填模型类名，自定义前向方法可填 `Class.method`。宿主把选定文件交给本机 `board_flow_eqtrace`，后者通过隔离启动入口调用随包的 EqTrace 纯规则解析器。所选源码按文本做静态分析，解析结束后清理临时目录，画板保存生成的流程和源码依据。此过程无需导入用户模型、执行训练或调用语言模型。[随包模块与版本](../vendor/eqtrace/README.md)
+
+独立静态站支持导入和浏览生成的 JSON。也可在装有 EqTrace 的机器上从其仓库根目录运行以下命令，再将 `residual-flow.json` 导入画板。使用本机 PaperLibrary 时，可用 `PAPER_LIBRARY_EQTRACE` 显式指定另一份支持 `paper-flow` 命令的 CLI 绝对路径。
 
 ```sh
 eqtrace paper-flow --root examples/paper_flow --entry train.py --model residual.py \
   --class ResidualRegressor --title "残差回归" --out residual-flow.json
 ```
-
-本地宿主随包提供[固定版本的 EqTrace 静态模块](../vendor/eqtrace/README.md)，使用本地 Python 3.11+。源码只在读者发起生成时进入本地主机的临时目录，解析结束即清理；保存在画板中的是流程文档及其源码依据。可显式以 `PAPER_LIBRARY_EQTRACE` 指向另一份支持 `paper-flow` 的 CLI 绝对路径。Python 文件只作为文本读取，全程不导入网络、不启动训练、不请求语言模型。
 
 ## 文档与保存
 

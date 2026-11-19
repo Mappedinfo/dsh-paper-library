@@ -3,7 +3,7 @@ import { Component, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { PaperFlowWorkbench } from '../../vendor/paper-flow/index'
-import type { FlowWorkspace, FlowRef } from '../../vendor/paper-flow/types'
+import type { FlowWorkspace, FlowRef, FlowGraph } from '../../vendor/paper-flow/types'
 import type { PaperFlowWorkbenchHandle } from '../../vendor/paper-flow/PaperFlowWorkbench'
 import { createFlowController } from './controller.mjs'
 import { starterWorkspace } from './starter.mjs'
@@ -12,13 +12,15 @@ import { validateFlowWorkspace } from './validation.mjs'
 import { isFlowFileDrag, selectFlowImportFile } from '../../vendor/paper-flow/import-files.js'
 import { createBoardAnnotationStore, handleBoardAnnotationRequest } from '../harness/board-annotations.mjs'
 import { normalizeBoardAnnotationRecord } from '../board-annotation-schema.mjs'
-import { EqTracePanel, type GenerateEqTrace } from './EqTracePanel'
+import { EqTracePanel, Figure, type GenerateEqTrace } from './EqTracePanel'
 import { addEqTraceDocument } from './eqtrace-import.mjs'
 import { eqTraceFlows } from './eqtrace-figure.mjs'
+import attentionExample from '../../examples/eqtrace-attention.json'
 import './host.css'
 
 type FlowTarget = { kind: 'flow'; paper_id: string; flow_id: string; node_id?: string; node_ids?: string[] }
 type HostOptions = { root: HTMLElement; canGenerateEqTrace?: boolean; api(action: string, args: object): Promise<any>; toast(message: string, error?: boolean): void; onClose(): void; prepareReturnToDsh?: () => Promise<boolean>; sendSnapshot?: (snapshot: any, sessionId: string) => Promise<boolean>; getSessionId?: () => string | null; onCanvasContext?: (context: any) => void; onAnnotations?: (context: any) => void }
+type WorkbenchRef = React.RefObject<PaperFlowWorkbenchHandle | null> & { revealEditor?: () => void }
 type OpenOptions = { id: string; title: string; seed?: unknown }
 type FlowState = { id: string | null; title: string; workspace: FlowWorkspace | null; revision: unknown; version: number; epoch: number; dirty: boolean; saving: boolean; blocked: boolean; invalid: boolean; error: string; loading: boolean }
 
@@ -34,11 +36,21 @@ function backup(workspace: unknown) {
   const link = document.createElement('a'); link.href = url; link.download = 'paper-flow-draft.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, send, context, annotate, canSend, generate }: { controller: ReturnType<typeof createFlowController>; close(): Promise<boolean>; subscribe(listener: (value: FlowState) => void): () => void; prepareReturnToDsh?: () => Promise<boolean>; workbench: React.RefObject<PaperFlowWorkbenchHandle | null>; send(ref: FlowRef, ids?: string[]): Promise<void>; context(target: FlowTarget): void; annotate(target: FlowTarget): Promise<void>; canSend: boolean; generate?: GenerateEqTrace }) {
+function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, send, context, annotate, canSend, generate }: { controller: ReturnType<typeof createFlowController>; close(): Promise<boolean>; subscribe(listener: (value: FlowState) => void): () => void; prepareReturnToDsh?: () => Promise<boolean>; workbench: WorkbenchRef; send(ref: FlowRef, ids?: string[]): Promise<void>; context(target: FlowTarget): void; annotate(target: FlowTarget): Promise<void>; canSend: boolean; generate?: GenerateEqTrace }) {
   const [view, setView] = useState<FlowState>(() => controller.state() as FlowState)
   const hostTools = useRef<HTMLDivElement>(null)
   const emptyFileInput = useRef<HTMLInputElement>(null), importSerial = useRef(0), dragDepth = useRef(0)
   const [emptyImport, setEmptyImport] = useState({ name: '', loading: false, error: '' }), [dropActive, setDropActive] = useState(false)
+  const [editorKey, setEditorKey] = useState('')
+  const activeDoc = view.workspace?.documents.find(doc => doc.paper.id === view.workspace?.selection.left.documentId)
+  const figures: FlowGraph[] = activeDoc ? eqTraceFlows(activeDoc) : []
+  const figure = figures.find(item => item.id === view.workspace?.selection.left.flowId)
+  const documentKey = JSON.stringify([view.id, view.epoch, activeDoc?.paper.id])
+  const paperVisible = !!figure && !view.workspace?.selection.right && editorKey !== documentKey
+  useEffect(() => {
+    workbench.revealEditor = () => setEditorKey(documentKey)
+    return () => { delete workbench.revealEditor }
+  }, [workbench, documentKey])
   const target = (ref: FlowRef, ids?: string[]): FlowTarget => ({ kind: 'flow', paper_id: ref.documentId, flow_id: ref.flowId, ...(ids?.length === 1 ? { node_id: ids[0] } : ids?.length ? { node_ids: ids } : {}) })
   useEffect(() => { if (view.workspace) context(target(view.workspace.selection.left)) }, [view.id, view.epoch, view.workspace?.selection.left.documentId, view.workspace?.selection.left.flowId])
   useEffect(() => () => { importSerial.current++ }, [])
@@ -61,7 +73,10 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
       setEmptyImport({ name: file.name || 'JSON 文件', loading: true, error: '' })
       const contents = await file.text()
       if (!current()) return
-      controller.applyExternal(validateFlowWorkspace(contents), owner)
+      const parsed = JSON.parse(contents)
+      const incoming = view.workspace && parsed?.kind === 'paper-flow-document' && eqTraceFlows(parsed).length
+        ? addEqTraceDocument(view.workspace, parsed).workspace : validateFlowWorkspace(parsed)
+      controller.applyExternal(incoming, owner)
       setEmptyImport({ name: file.name || 'JSON 文件', loading: false, error: '' })
     } catch (error: any) { if (current()) setEmptyImport({ name: '', loading: false, error: `无法导入：${error.message || error}` }) }
   }
@@ -73,7 +88,8 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
       <button type="button" onClick={() => void close()}>← 返回画板</button>
       <strong title={view.title}>{view.title || '流程工作区'}</strong><span className={`board-flow-status${view.blocked || view.invalid ? ' is-error' : ''}`} role="status">{status}</span>
       <div className="board-flow-actions board-flow-host-tools" ref={hostTools}>
-        <EqTracePanel key={`${view.id}:${view.epoch}`} workspace={view.workspace} generate={generate} />
+        {figure && !view.workspace?.selection.right && <button type="button" onClick={() => setEditorKey(paperVisible ? documentKey : '')}>{paperVisible ? '编辑与比较' : '查看论文插图'}</button>}
+        <EqTracePanel sourceOnly={paperVisible} key={`${view.id}:${view.epoch}`} workspace={view.workspace} generate={generate} />
         <button type="button" disabled={!view.dirty || view.loading || view.invalid || view.blocked} onClick={() => void controller.flush()}>保存</button>
         {(view.blocked || view.invalid) && <button type="button" disabled={view.loading || view.invalid} onClick={() => void controller.flush({ retry: true })}>重试保存</button>}
         <button type="button" disabled={!view.workspace} onClick={() => backup(view.workspace)}>备份 JSON</button>
@@ -83,12 +99,20 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
     </header>
   return <section className="board-flow-host" aria-label="流程工作区">
     {header}
-    <div className="board-flow-content" inert={view.loading || undefined}
-      onDragEnter={event => { if (view.workspace) return; event.preventDefault(); if (isFlowFileDrag(event.dataTransfer)) { dragDepth.current++; setDropActive(true) } }}
-      onDragOver={event => { if (view.workspace) return; event.preventDefault(); if (isFlowFileDrag(event.dataTransfer)) { event.dataTransfer.dropEffect = 'copy'; setDropActive(true) } }}
-      onDragLeave={event => { if (view.workspace) return; event.preventDefault(); if (--dragDepth.current <= 0) { dragDepth.current = 0; setDropActive(false) } }}
-      onDrop={event => { if (view.workspace) return; event.preventDefault(); event.stopPropagation(); dragDepth.current = 0; setDropActive(false); void choose(Array.from(event.dataTransfer.files)) }}>
-      {!view.workspace && dropActive && <div className="paper-flow-drop-target" role="status"><strong>松开以导入 JSON</strong><span>一次一个文件，最大 192 KiB</span></div>}
+    <div className="board-flow-content" data-paper-view={paperVisible || undefined} inert={view.loading || undefined}
+      onDragEnter={event => { if (view.workspace && !paperVisible) return; event.preventDefault(); if (isFlowFileDrag(event.dataTransfer)) { dragDepth.current++; setDropActive(true) } }}
+      onDragOver={event => { if (view.workspace && !paperVisible) return; event.preventDefault(); if (isFlowFileDrag(event.dataTransfer)) { event.dataTransfer.dropEffect = 'copy'; setDropActive(true) } }}
+      onDragLeave={event => { if (view.workspace && !paperVisible) return; event.preventDefault(); if (--dragDepth.current <= 0) { dragDepth.current = 0; setDropActive(false) } }}
+      onDrop={event => { if (view.workspace && !paperVisible) return; event.preventDefault(); event.stopPropagation(); dragDepth.current = 0; setDropActive(false); void choose(Array.from(event.dataTransfer.files)) }}>
+      {(!view.workspace || paperVisible) && dropActive && <div className="paper-flow-drop-target" role="status"><strong>松开以导入 JSON</strong><span>一次一个文件，最大 192 KiB</span></div>}
+      {paperVisible && activeDoc && figure && view.workspace && <div className="eqtrace-main" aria-label="交互式论文插图">
+        <nav className="eqtrace-nav" aria-label="选择论文插图"><strong>{activeDoc.paper.title}</strong><div>
+          {figures.map(item => <button key={item.id} type="button" aria-pressed={item.id === figure.id}
+            onClick={() => view.workspace && controller.edit({ ...view.workspace, selection: { left: { documentId: activeDoc.paper.id, flowId: item.id } } })}>
+            {item.id === 'network' ? '网络结构' : '训练流程'}</button>)}
+        </div></nav>
+        <Figure key={documentKey + figure.id} flow={figure} documentId={activeDoc.paper.id} />
+      </div>}
       {view.workspace ? <FlowErrorBoundary recoveryKey={`${view.id}:${view.version}`}><PaperFlowWorkbench ref={workbench} key={`${view.id}:${view.epoch}`} workspace={view.workspace} onWorkspaceChange={(next: FlowWorkspace) => controller.edit(next, { id: view.id, epoch: view.epoch, version: view.version })}
         prepareImport={(raw, parsed) => {
           const imported = typeof raw === 'string' ? JSON.parse(raw) : raw
@@ -103,7 +127,7 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
           <button type="button" onClick={() => void annotate(target(value.ref, value.nodeIds))}>批注此节点{value.nodeIds.length > 1 ? `组（${value.nodeIds.length}）` : ''}</button>
         </div>)}</div>} /></FlowErrorBoundary> : <div className="board-flow-empty">
         <h2>开始整理流程</h2><p>导入流程或 EqTrace JSON 查看流程与论文插图，也可以从空白流程或教学示例开始。拖入的 JSON 文件最大 192 KiB。</p>
-        <div><button type="button" onClick={() => controller.edit(starterWorkspace())}>新建流程</button><button type="button" onClick={() => emptyFileInput.current?.click()}>导入 JSON</button><input className="board-flow-import-input" ref={emptyFileInput} type="file" accept=".json,application/json" aria-label="导入流程 JSON" onChange={event => { const files = Array.from(event.currentTarget.files || []); event.currentTarget.value = ''; if (files.length) void choose(files) }} /><button type="button" onClick={() => controller.edit(starterWorkspace(true))}>打开教学示例</button></div>
+        <div><button type="button" onClick={() => controller.edit(starterWorkspace())}>新建流程</button><button type="button" onClick={() => emptyFileInput.current?.click()}>导入 JSON</button><input className="board-flow-import-input" ref={emptyFileInput} type="file" accept=".json,application/json" aria-label="导入流程 JSON" onChange={event => { const files = Array.from(event.currentTarget.files || []); event.currentTarget.value = ''; if (files.length) void choose(files) }} /><button type="button" onClick={() => controller.edit(starterWorkspace(true))}>打开教学示例</button><button type="button" onClick={() => controller.edit(validateFlowWorkspace(attentionExample))}>编码器–解码器示例</button></div>
         {emptyImport.loading && <p role="status">正在读取 {emptyImport.name}…</p>}{emptyImport.error && <p className="board-flow-error" role="alert">{emptyImport.error}</p>}
       </div>}
     </div>
@@ -117,7 +141,7 @@ function create({ root, api, toast, onClose, canGenerateEqTrace, prepareReturnTo
   const controller = createFlowController({ api, validate: validateFlowWorkspace, onChange: (detail: FlowState) => listeners.forEach(listener => listener(detail)) })
   const unbindUnload = bindFlowUnloadGuard({ window, state: controller.state })
   let visible = false, disposed = false
-  const workbench = { current: null as PaperFlowWorkbenchHandle | null }
+  const workbench: WorkbenchRef = { current: null as PaperFlowWorkbenchHandle | null }
   const context = (target: FlowTarget) => { if (!disposed) onCanvasContext?.({ id: controller.state().id, target }) }
   const generate: GenerateEqTrace = async (read, active) => {
     const owner = controller.token()
@@ -163,7 +187,7 @@ function create({ root, api, toast, onClose, canGenerateEqTrace, prepareReturnTo
   return {
     async open(options: OpenOptions) { if (disposed) return false; const current = controller.state(); if (visible && (current.id !== options.id || !current.dirty && !current.blocked && !current.invalid) && !await prepareLeave()) return false; const ok = await controller.open(options); if (!ok) { toast(controller.state().error || '流程工作区尚未保存或读取失败。', true); return false } visible = true; root.hidden = false; return true },
     prepareLeave, close, isOpen: () => visible,
-    focus(target: FlowTarget) { if (!visible || disposed) return false; workbench.current?.focus({ documentId: target.paper_id, flowId: target.flow_id }, target.node_ids || (target.node_id ? [target.node_id] : [])); return true },
+    focus(target: FlowTarget) { if (!visible || disposed) return false; workbench.revealEditor?.(); workbench.current?.focus({ documentId: target.paper_id, flowId: target.flow_id }, target.node_ids || (target.node_id ? [target.node_id] : [])); return true },
     dispose() { if (disposed) return; disposed = true; unbindUnload(); controller.dispose(); react.unmount(); root.hidden = true },
   }
 }

@@ -84,12 +84,46 @@ test('export bounds include negative-coordinate detours, their bends and arrow m
   const svg = renderEqTraceFigure(f)
   const [, width, height] = svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/u).map(Number)
   const [, offsetX, offsetY] = svg.match(/<g transform="translate\(([-\d.]+) ([-\d.]+)\)">/u).map(Number)
-  const paths = [...svg.matchAll(/<path d="(M[-\d. ]+L[-\d.L ]+)" fill="none"/gu)]
+  const paths = [...svg.matchAll(/<path d="(M[-\d.LQ ]+)" fill="none"/gu)]
   assert.equal(paths.length, f.edges.length)
-  const points = paths.flatMap(match => [...match[1].matchAll(/[ML]([-\d.]+) ([-\d.]+)/gu)].map(([, x, y]) => [Number(x), Number(y)]))
+  const points = paths.flatMap(match => {
+    const coordinates = match[1].match(/-?[\d.]+/gu).map(Number)
+    return coordinates.flatMap((x, i) => i % 2 ? [] : [[x, coordinates[i + 1]]])
+  })
   assert.ok(points.some(([x, y]) => x < -11 || y < -9), 'synthetic case exercises a detour beyond a fixed-size margin')
   for (const [x, y] of points) {
     assert.ok(x + offsetX >= 7 && x + offsetX <= width - 7)
     assert.ok(y + offsetY >= 7 && y + offsetY <= height - 7)
   }
+})
+
+test('reference-style network keeps true parallel towers, input labels, module boundaries and vector arrows', () => {
+  const nodes = ['left', 'right', 'la', 'lb', 'ra', 'sum', 'rb', 'out'].map(id => node(id))
+  for (const ix of [0, 1]) Object.assign(nodes[ix], { type: 'data', op: 'input' })
+  Object.assign(nodes[2], { type: 'model', op: 'torch.nn.MultiheadAttention', config: { attribute: 'encoder.attention' } })
+  Object.assign(nodes[3], { type: 'model', op: 'torch.nn.LayerNorm', config: { attribute: 'encoder.norm' } })
+  Object.assign(nodes[4], { type: 'model', op: 'torch.nn.Linear', config: { attribute: 'decoder.projection' } })
+  Object.assign(nodes[5], { op: 'Add' })
+  Object.assign(nodes[6], { type: 'model', op: 'torch.nn.LayerNorm', config: { attribute: 'decoder.norm' } })
+  Object.assign(nodes[7], { type: 'output', op: 'return' })
+  const edges = [['left', 'la'], ['right', 'ra'], ['la', 'lb'], ['lb', 'sum'], ['ra', 'sum'], ['sum', 'rb'], ['rb', 'out']].map(([a,b]) => edge(a,b))
+  const svg = renderEqTraceFigure({ id: 'network', name: 'Test.forward', nodes, edges })
+  const positions = new Map([...svg.matchAll(/<g data-node="([^"]+)" data-shape="([^"]+)" data-x="([-\d.]+)" data-y="([-\d.]+)"/gu)].map(([,id,shape,x,y])=>[id,{shape,x:+x,y:+y}]))
+  assert.match(svg, /data-module="encoder"/u); assert.match(svg, /data-module="decoder"/u)
+  assert.equal(positions.get('sum').shape, 'operator'); assert.equal(positions.get('left').shape, 'terminal')
+  assert.equal(positions.get('la').shape, 'attention'); assert.equal(positions.get('rb').shape, 'normalization')
+  assert.ok(positions.get('la').x < positions.get('ra').x)
+  for (const e of edges) assert.ok(positions.get(e.from.split(':')[0]).y > positions.get(e.to.split(':')[0]).y)
+  assert.equal((svg.match(/<polygon points=/gu) || []).length, edges.length)
+  assert.doesNotMatch(svg, /N×|Positional encoding/iu)
+})
+
+test('the training view reads from the entry at the bottom to output at the top, keeping branch bypasses', () => {
+  const f = graph(); f.id = 'training'
+  f.edges.push(edge('a','d','zero-iterations'))
+  const svg = renderEqTraceFigure(f)
+  const positions = [...svg.matchAll(/data-node="([a-d])"[^>]*data-y="([-\d.]+)"/gu)].map(([,id,y]) => [id,+y])
+  assert.deepEqual(positions.sort((a,b)=>b[1]-a[1]).map(p=>p[0]), ['a','b','c','d'])
+  assert.match(svg, /zero iterations/u)
+  assert.equal((svg.match(/<polygon points=/gu) || []).length, 4)
 })

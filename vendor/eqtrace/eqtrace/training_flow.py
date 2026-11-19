@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 import tokenize
 
+from .training_tensors import step_tensor, training_records
+
 
 
 @dataclass
@@ -22,6 +24,7 @@ class Step:
     condition: str = ""
     members: list[str] = field(default_factory=list)
     exit_members: list[str] = field(default_factory=list)
+    tensor: dict | None = None
 
 
 def _source(node):
@@ -162,7 +165,8 @@ def _param_env(fn, call, outer):
 class Reader:
     """Walk the executable entry and directly named local function bodies."""
 
-    def __init__(self, tree):
+    def __init__(self, tree, tensors):
+        self.tensors = tensors
         self.expansions = 0
         self.aliases = {}
         for stmt in tree.body:
@@ -227,6 +231,8 @@ class Reader:
         if not isinstance(node, ast.Call):
             return steps
         operation = self.operation(node, env)
+        if operation:
+            operation.tensor = self.tensors.get(node)
         fn = defs.get(node.func.id) if isinstance(node.func, ast.Name) else None
         if fn is not None and fn not in active:
             if len(active) >= 24 or self.expansions >= 300:
@@ -390,7 +396,7 @@ class Reader:
 
 
 
-def extract_training_flow(entry: Path, root: Path):
+def extract_training_flow(entry: Path, root: Path, *, network=None, model_path=None):
     """Return a static flow for a Python script with a recognized training operation."""
     root = Path(root).resolve()
     entry = Path(entry)
@@ -400,7 +406,7 @@ def extract_training_flow(entry: Path, root: Path):
     relative = entry.relative_to(root).as_posix()
     with tokenize.open(entry) as source:
         tree = ast.parse(source.read(), filename=relative)
-    reader = Reader(tree)
+    reader = Reader(tree, training_records(tree, network, entry, model_path or entry))
     defs, env = {}, {}
     steps = reader.block(tree.body, env, defs)
 
@@ -442,6 +448,7 @@ def _render(steps, relative, overview=False):
             typ = "output" if step.op == "save" else "method"
         node = {"id": nid, "label": step.title, "type": typ, "op": step.op, "evidence": f"{relative}:{step.line}",
                 "ports": {"in": {"in": {"type": "flow"}}, "out": {"out": {"type": "flow"}}}, "detail": step.detail}
+        node["tensor"] = step_tensor(step.op, step.tensor)
         if step.op in {"loop", "guard", "condition"}:
             node["condition"] = step.condition or step.title.removeprefix("If ")
         if owner:

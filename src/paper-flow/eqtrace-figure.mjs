@@ -1,15 +1,11 @@
-import dagre from '../../vendor/paper-flow/core/dagre.min.js'
+import { architectureLayout } from './eqtrace-architecture.mjs'
 import { parseFlowInput } from '../../vendor/paper-flow/document.js'
 
-const ink = '#263741'
-const font = 'Arial, Helvetica, Noto Sans CJK SC, sans-serif'
-const styles = {
-  data: ['Input', '#f2f7f9', '#486978'],
-  representation: ['Representation', '#eef5f6', '#456a71'],
-  model: ['Layer', '#e5f1ef', '#275f59'],
-  method: ['Operation', '#fff', '#53636c'],
-  decision: ['Decision', '#fbf1e1', '#856137'],
-  output: ['Output', '#eaf1f7', '#42627e'],
+const ink = '#161616'
+const font = 'Helvetica, Arial, Noto Sans CJK SC, sans-serif'
+const palette = {
+  embedding: '#f9dce2', attention: '#ffe4b8', projection: '#dedff3', normalization: '#f4efb8',
+  transform: '#cbeaf4', activation: '#e2efce', control: '#f1edce', parameter: '#ecdfef', unknown: '#f1f1f1',
 }
 
 const xml = value => String(value).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/gu, '').replace(/[&<>"']/gu, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[ch])
@@ -33,7 +29,7 @@ function wrap(text, size, maxWidth) {
 }
 
 function textLines(lines, x, y, leading, attributes) {
-  return `<text ${attributes}>${lines.map((line, i) => `<tspan x="${px(x)}" y="${px(y + i * leading)}">${xml(line)}</tspan>`).join('')}</text>`
+  return lines.map((line, i) => `<text x="${px(x)}" y="${px(y + i * leading)}" ${attributes}>${xml(line)}</text>`).join('')
 }
 
 function operationNote(node) {
@@ -51,103 +47,49 @@ function operationNote(node) {
 }
 
 function nodeBox(node) {
-  const style = [...(styles[node.type] || styles.method)]
-  if (node.config?.members) style[0] = 'Stage'
-  else if (node.type === 'model' && node.op === 'forward') style[0] = 'Model'
-  const lines = wrap(node.label, 15, 170)
-  const detail = wrap(operationNote(node), 11, 170)
-  const width = Math.max(113, ...lines.map(line => length(line, 15) + 26), ...detail.map(line => length(line, 11) + 26))
-  return { width: Math.ceil(width), height: 36 + lines.length * 19 + detail.length * 14, lines, detail, style, node }
+  const op = (node.op || '').split('.').at(-1), attribute = node.config?.attribute || ''
+  const unresolved = node.config?.resolution === 'unresolved' || op === 'unresolved'
+  const symbols = { Add: '+', add: '+', Mult: '×', mul: '×', Sub: '−', sub: '−' }
+  const symbol = (!node.config?.members || node.config.members.length === 1) && Object.hasOwn(symbols, op) ? symbols[op] : ''
+  const terminal = ['input', 'return', 'definition'].includes(op) && !unresolved
+  let label = node.label, note = '', role = 'transform'
+  const parts = node.label.split(' · ')
+  if (node.type === 'model' && attribute && op) {
+    label = op === 'MultiheadAttention' ? 'Multi-head attention' : op === 'LayerNorm' ? 'Layer norm' : op === 'Embedding' ? 'Embedding' : op
+    const identifier = attribute.split('.').at(-1)
+    if (op === 'MultiheadAttention' && ['self_attention', 'cross_attention'].includes(identifier))
+      label = identifier === 'cross_attention' ? 'Cross-attention' : 'Self-attention'
+    if (node.config.parameters?.num_heads != null) note = `${node.config.parameters.num_heads} heads`
+    else note = operationNote(node)
+    if (op === 'Embedding') note = [attribute.replace(/_/gu, ' '), note].filter(Boolean).join(' · ')
+  } else if (parts.length > 1 && !node.config?.members) {
+    label = parts[0]; note = parts.slice(1).join(' · ')
+  } else if (label.startsWith('torch.') && !unresolved) {
+    label = label.split('.').at(-1)
+  }
+  if (!note && node.config?.parameters) note = operationNote(node)
+  if (/attention/iu.test(op)) role = 'attention'
+  else if (/embed/iu.test(op)) role = 'embedding'
+  else if (/norm/iu.test(op)) role = 'normalization'
+  else if (/^(linear|projection)$/iu.test(op)) role = 'projection'
+  else if (/softmax|relu|gelu|sigmoid|tanh/iu.test(op)) role = 'activation'
+  else if (unresolved) role = 'unknown'
+  else if (node.type === 'decision' || /checks?|guard|loop|branch|wait|exit/iu.test(op)) role = 'control'
+  else if (/optim|grad|backward/iu.test(op)) role = 'projection'
+  else if (/loss|score|save/iu.test(op)) role = 'activation'
+  else if (node.type === 'data' && !terminal) role = 'parameter'
+  if (symbol) return { node, symbol, terminal: false, role, unresolved, width: 24, height: 24, lines: [], detail: [] }
+  const lines = wrap(label, 16, 170), detail = wrap(note, 12, 170)
+  const width = Math.ceil(Math.max(terminal ? 65 : 126, ...lines.map(s => length(s, 16) + 22), ...detail.map(s => length(s, 12) + 22)))
+  return { node, role, terminal, unresolved, lines, detail, width, height: (terminal ? 8 : 13) + lines.length * 19 + detail.length * 15 }
 }
 
 function drawNode(box) {
-  const { x, y, width, height, lines, detail, style, node } = box
+  const { x, y, width, height, lines, detail, role, terminal, symbol, unresolved, node } = box
   const left = px(x - width / 2), top = px(y - height / 2)
-  const unresolved = node.config?.resolution === 'unresolved'
-  const type = unresolved ? `${style[0]} · unresolved` : style[0]
-  return `<g data-node="${xml(node.id)}"><title>${xml(node.label)}</title><rect x="${left}" y="${top}" width="${width}" height="${height}" rx="4" fill="${style[1]}" stroke="${style[2]}" stroke-width="${node.type === 'model' ? 1.6 : 1.15}"${unresolved ? ' stroke-dasharray="5 3"' : ''}/><text x="${left + 12}" y="${top + 16}" font-size="10" font-weight="600" fill="${style[2]}">${xml(type)}</text>${textLines(lines, left + 12, top + 37, 19, `font-size="15" font-weight="600" fill="${ink}"`)}${textLines(detail, left + 12, top + 36 + lines.length * 19, 14, 'font-size="11" fill="#495965"')}</g>`
-}
-
-function layoutGraph(flow, direction) {
-  const graph = new dagre.graphlib.Graph({ multigraph: true })
-  graph.setGraph({ rankdir: direction, ranksep: 32, nodesep: 24, edgesep: 14, marginx: 7, marginy: 7 })
-  graph.setDefaultEdgeLabel(() => ({}))
-  const ids = new Map(flow.nodes.map((node, i) => [node.id, String(i)]))
-  flow.nodes.forEach(node => graph.setNode(ids.get(node.id), nodeBox(node)))
-  flow.edges.forEach((edge, i) => {
-    const lines = wrap(edge.label || '', 11, 95)
-    const a = ids.get(edge.from.split(':')[0]), b = ids.get(edge.to.split(':')[0])
-    if (a === undefined || b === undefined) throw Error('流程边引用未知节点。')
-    graph.setEdge(a, b, { edge, lines, width: lines.length ? Math.max(...lines.map(line => length(line, 11))) + 8 : 0, height: lines.length * 14, labelpos: 'c' }, String(i))
-  })
-  dagre.layout(graph)
-  return { ...graph.graph(), nodes: graph.nodes().map(id => graph.node(id)), edges: graph.edges().map(id => graph.edge(id)) }
-}
-
-// 存在唯一拓扑序且相邻步骤由原边连接时，可把主路径折成两三行。额外连接使用独立通道。
-function foldChain(flow) {
-  if (flow.nodes.length < 4 || flow.edges.length > flow.nodes.length + 2) return null
-  const records = new Map(flow.nodes.map(node => [node.id, { ...nodeBox(node), incoming: 0, outgoing: [] }]))
-  for (const edge of flow.edges) {
-    const source = records.get(edge.from.split(':')[0]), target = records.get(edge.to.split(':')[0])
-    if (!source || !target) return null
-    source.outgoing.push({ edge, target }); target.incoming++
-  }
-  const nodes = [], ready = [...records.values()].filter(n => n.incoming === 0)
-  while (ready.length === 1) {
-    const current = ready.pop()
-    current.index = nodes.length; nodes.push(current)
-    for (const { target } of current.outgoing) if (--target.incoming === 0) ready.push(target)
-  }
-  if (nodes.length !== records.size) return null
-  const main = [], extra = []
-  for (const a of nodes) for (const { edge, target: b } of a.outgoing) {
-    const row = { a, b, edge, lines: wrap(edge.label || '', 11, 86) }
-    row.width = row.lines.length ? Math.max(...row.lines.map(text => length(text, 11))) + 8 : 0
-    row.height = row.lines.length * 14
-    if (b.index === a.index + 1 && !main[a.index]) main[a.index] = row
-    else extra.push(row)
-  }
-  if (extra.length > 3 || main.length !== nodes.length - 1 || !Array.from(main).every(Boolean)) return null
-  const cellWidth = Math.max(...nodes.map(n => n.width))
-  const gapX = Math.max(32, ...main.map(e => e.width + 12))
-  const gapY = Math.max(32, ...main.map(e => e.height + 16)) + extra.length * 15
-  const gutter = extra.length ? 15 + extra.length * 9 : 7
-  const paperColumns = Math.max(2, Math.floor((840 - 2 * gutter + gapX) / (cellWidth + gapX)))
-  const columns = Math.min(4, paperColumns, Math.ceil(Math.sqrt(nodes.length * 1.35)))
-  const width = 2 * gutter + columns * cellWidth + (columns - 1) * gapX
-  let height = extra.length ? gapY : 7
-  for (let i = 0; i < nodes.length; i += columns) {
-    const row = nodes.slice(i, i + columns), backward = Math.floor(i / columns) % 2 === 1
-    const h = Math.max(...row.map(n => n.height))
-    row.forEach((n, j) => {
-      const col = backward ? columns - 1 - j : j
-      n.x = gutter + cellWidth / 2 + col * (cellWidth + gapX)
-      n.y = height + h / 2; n.rowTop = height; n.rowBottom = height + h
-    })
-    height += h + (i + columns < nodes.length ? gapY : 7)
-  }
-  for (const e of main) {
-    const { a, b } = e, sign = Math.sign(b.x - a.x)
-    e.points = sign ? [{ x: a.x + sign * a.width / 2, y: a.y }, { x: b.x - sign * b.width / 2, y: b.y }] : [{ x: a.x, y: a.y + a.height / 2 }, { x: b.x, y: b.y - b.height / 2 }]
-    e.x = (e.points[0].x + e.points[1].x) / 2; e.y = (e.points[0].y + e.points[1].y) / 2
-  }
-  extra.forEach((e, i) => {
-    const { a, b } = e, gap = 12 + i * 15 + e.height / 2
-    const sameRow = a.rowTop === b.rowTop, adjacentRow = b.index < (Math.floor(a.index / columns) + 2) * columns
-    const start = { x: a.x - a.width / 5, y: a.y + (sameRow ? -1 : 1) * a.height / 2 }
-    const end = { x: b.x + b.width / 5, y: b.y - b.height / 2 }
-    const track = sameRow ? a.rowTop - gap : a.rowBottom + gap
-    if (sameRow || adjacentRow) {
-      e.points = [start, { x: start.x, y: track }, { x: end.x, y: track }, end]
-      e.x = (start.x + end.x) / 2; e.y = track
-    } else {
-      const rail = 5 + i * 9, approach = b.rowTop - gap
-      e.points = [start, { x: start.x, y: track }, { x: rail, y: track }, { x: rail, y: approach }, { x: end.x, y: approach }, end]
-      e.x = (rail + end.x) / 2; e.y = approach
-    }
-  })
-  return { nodes, edges: [...main, ...extra], width, height }
+  const shape = symbol ? `<circle cx="${px(x)}" cy="${px(y)}" r="${width / 2}" fill="white" stroke="${ink}" stroke-width="1.9"/><text x="${px(x)}" y="${px(y + 6)}" text-anchor="middle" font-size="21" fill="${ink}">${xml(symbol)}</text>` :
+    `<rect x="${left}" y="${top}" width="${width}" height="${height}" rx="4" fill="${terminal ? '#fff' : palette[role]}"${terminal ? ' fill-opacity="0"' : ''} stroke="${terminal ? 'none' : ink}" stroke-width="1.85"${unresolved ? ' stroke-dasharray="4 3"' : ''}/>${textLines(lines, x, top + (terminal ? 18 : 22), 19, `font-size="16" text-anchor="middle" fill="${ink}"`)}${textLines(detail, x, top + 21 + lines.length * 19 - 3, 15, 'font-size="12" text-anchor="middle" fill="#343434"')}`
+  return `<g data-node="${xml(node.id)}" data-shape="${symbol ? 'operator' : terminal ? 'terminal' : role}" data-x="${px(x)}" data-y="${px(y)}"><title>${xml(node.label)}</title>${shape}</g>`
 }
 
 // Dagre 的 graph.width/height 只反映部分几何；长跨边的折点可能落在负坐标。
@@ -157,7 +99,7 @@ function fitDrawing(drawing) {
     left = Math.min(left, x - width / 2); right = Math.max(right, x + width / 2)
     top = Math.min(top, y - height / 2); bottom = Math.max(bottom, y + height / 2)
   }
-  for (const node of drawing.nodes) include(node.x, node.y, node.width, node.height)
+  for (const box of [...drawing.nodes, ...drawing.groups]) include(box.x, box.y, box.width, box.height)
   for (const edge of drawing.edges) {
     for (const point of edge.points) include(point.x, point.y)
     if (edge.lines.length) include(edge.x, edge.y, edge.width, edge.height)
@@ -167,12 +109,26 @@ function fitDrawing(drawing) {
     shiftX: pad - left, shiftY: pad - top }
 }
 
-function balancedLayout(flow) {
-  const folded = foldChain(flow)
-  if (folded) return fitDrawing(folded)
-  const portrait = fitDrawing(layoutGraph(flow, 'TB')), landscape = fitDrawing(layoutGraph(flow, 'LR'))
-  const score = layout => Math.max(layout.width, layout.height * 1.45)
-  return score(portrait) <= score(landscape) ? portrait : landscape
+function edgeGeometry(points) {
+  // 侧连接用圆角折线，三角箭头直接写入矢量文件，兼容不渲染 marker 的预览器。
+  const clean = points.filter((p, i) => !i || Math.hypot(p.x - points[i - 1].x, p.y - points[i - 1].y) > .03)
+  const pos = p => `${px(p.x)} ${px(p.y)}`
+  if (clean.length < 2) return { path: '', arrow: '' }
+  let path = `M${pos(clean[0])}`
+  for (let i = 1; i < clean.length - 1; i++) {
+    const a = clean[i - 1], b = clean[i], c = clean[i + 1]
+    const u = Math.hypot(a.x - b.x, a.y - b.y), v = Math.hypot(c.x - b.x, c.y - b.y)
+    const r = Math.min(6, u / 3, v / 3)
+    const near = (n, len) => ({ x: b.x + (n.x - b.x) * r / len, y: b.y + (n.y - b.y) * r / len })
+    path += ` L${pos(near(a, u))} Q${pos(b)} ${pos(near(c, v))}`
+  }
+  const end = clean.at(-1), before = clean.at(-2)
+  const distance = Math.hypot(end.x - before.x, end.y - before.y)
+  const dx = (end.x - before.x) / distance, dy = (end.y - before.y) / distance
+  const tip = { x: end.x - dx * .7, y: end.y - dy * .7 }
+  const back = { x: tip.x - 7 * dx, y: tip.y - 7 * dy }
+  const left = { x: back.x - 3.6 * dy, y: back.y + 3.6 * dx }, right = { x: back.x + 3.6 * dy, y: back.y - 3.6 * dx }
+  return { path: path + ` L${pos(end)}`, arrow: `${pos(tip)} ${pos(left)} ${pos(right)}` }
 }
 
 export function eqTraceFlows(document) {
@@ -190,14 +146,14 @@ export function renderEqTraceFigure(source, { detail = 'overview' } = {}) {
   }
   if (!flow.nodes.length) throw Error('此流程尚无可绘制节点。')
   const relations = { enter: 'enter', iteration: 'iterate', 'zero-iterations': 'zero iterations', 'last-iteration': 'loop exit', 'condition-true': 'true', 'condition-false': 'false', 'after-launch': 'after launch', 'exception-candidate': 'possible exception' }
-  const graph = balancedLayout({ ...flow, edges: flow.edges.map(edge => ({ ...edge, label: edge.label || (Object.hasOwn(relations, edge.kind) ? relations[edge.kind] : '') })) })
+  const graph = fitDrawing(architectureLayout({ ...flow, edges: flow.edges.map(edge => ({ ...edge, label: edge.label || (Object.hasOwn(relations, edge.kind) ? relations[edge.kind] : '') })) }, source, nodeBox, wrap, length))
   const styles = new Map([
-    ['source-order', { label: 'Source order within a block', color: '#476580', dash: '6 3' }],
-    ['zero-iterations', { label: 'Bypass loop', color: '#795c38', dash: '4 3' }],
-    ['exception-candidate', { label: 'Possible exception', color: '#795c38', dash: '4 3' }],
-    ['contains', { label: 'Block containment', color: '#586b53', dash: '1.5 3' }],
-    ['candidate', { label: 'Candidate connection', color: '#795c38', dash: '5 4' }],
-    ['data', { label: 'Data dependency', color: '#52636b', dash: '' }],
+    ['source-order', { label: 'Source order within a block', color: ink, dash: '' }],
+    ['zero-iterations', { label: 'Bypass loop', color: '#474747', dash: '4 3' }],
+    ['exception-candidate', { label: 'Possible exception', color: '#474747', dash: '4 3' }],
+    ['contains', { label: 'Block containment', color: ink, dash: '1.5 3' }],
+    ['candidate', { label: 'Candidate connection', color: '#474747', dash: '5 4' }],
+    ['data', { label: 'Data dependency', color: ink, dash: '' }],
   ])
   const declared = new Set(graph.edges.map(({ edge }) => edge.kind))
   const keys = [...styles.keys()].filter(key => declared.has(key))
@@ -207,17 +163,23 @@ export function renderEqTraceFigure(source, { detail = 'overview' } = {}) {
   const captionHeight = caption ? 21 : 0
   const width = Math.ceil(Math.max(graph.width + 22, legendWidth, length(caption, 11) + 22)), height = Math.ceil(graph.height + 18 + captionHeight + legendRows.length * 17)
   const edges = graph.edges.map(({ edge, points, x, y, lines, width: w, height: h }) => {
-    const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${px(p.x)} ${px(p.y)}`).join(' ')
-    const style = styles.get(edge.kind) || { color: '#52636b', dash: '' }
+    const { path, arrow } = edgeGeometry(points)
+    const style = styles.get(edge.kind) || { color: ink, dash: '' }
     const dash = style.dash ? ` stroke-dasharray="${style.dash}"` : ''
     const label = lines.length ? `<rect x="${px(x - w / 2)}" y="${px(y - h / 2)}" width="${px(w)}" height="${h}" fill="white"/>${textLines(lines, x, y - h / 2 + 11, 14, 'text-anchor="middle" font-size="11" fill="#42525b"')}` : ''
-    return `<g data-edge="${xml(edge.id)}"><title>${xml(edge.label || edge.kind || '依赖')}</title><path d="${path}" fill="none" stroke="${style.color}" stroke-width="1.4" stroke-linejoin="round" marker-end="url(#arrow)"${dash}/>${label}</g>`
+    return `<g data-edge="${xml(edge.id)}"><title>${xml(edge.label || edge.kind || '依赖')}</title><path d="${path}" fill="none" stroke="${style.color}" stroke-width="1.65" stroke-linejoin="round" ${dash}/><polygon points="${arrow}" fill="${style.color}"/>${label}</g>`
   }).join('')
+  function groupLabel(g) {
+    const label = g.label.split('.').at(-1).replace(/_/gu, ' ')
+    if (length(label, 10) <= g.width - 12) return label
+    return wrap(label, 10, g.width - 24)[0] + '…'
+  }
+  const groups = graph.groups.map(g => `<g data-module="${xml(g.label)}"><title>${xml(g.label)}</title><rect x="${px(g.x - g.width / 2)}" y="${px(g.y - g.height / 2)}" width="${px(g.width)}" height="${px(g.height)}" rx="12" fill="${g.whole ? '#f5f5f5' : '#eeeeee'}" stroke="#373737" stroke-width="${g.whole ? 1.6 : 1.35}"/>${g.whole ? '' : `<text x="${px(g.x - g.width / 2 + 6)}" y="${px(g.y - g.height / 2 + 12)}" font-size="10" fill="#484848">${xml(groupLabel(g))}</text>`}</g>`).join('')
   const legend = legendRows.map(({ color, dash, label }, i) => {
     const y = px(graph.height + captionHeight + 23 + i * 17)
     return `<path d="M14 ${y}h25" stroke="${color}" stroke-width="1.4"${dash ? ` stroke-dasharray="${dash}"` : ''}/><text x="46" y="${y + 4}" font-size="11" fill="#42525b">${xml(label)}</text>`
   }).join('')
   // 复杂拓扑保留足够的物理画幅；缩小到版心时可在宿主看到尺寸与缩放提示。
   const paperWidth = Math.max(56, Math.min(180, width * .265), width * .22)
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px(paperWidth)}mm" height="${px(paperWidth * height / width)}mm" viewBox="0 0 ${width} ${height}" role="img" font-family="${font}"><title>${xml(flow.name)}</title><defs><marker id="arrow" markerWidth="7" markerHeight="7" refX="6.5" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L7 3.5L0 7Z" fill="#52636b"/></marker></defs><rect width="100%" height="100%" fill="#fff"/>${caption ? `<text x="17" y="17" font-size="11" fill="#42525b">${xml(caption)}</text>` : ''}<g transform="translate(${px(11 + graph.shiftX)} ${px(9 + captionHeight + graph.shiftY)})">${edges}${graph.nodes.map(drawNode).join('')}</g>${legend}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px(paperWidth)}mm" height="${px(paperWidth * height / width)}mm" viewBox="0 0 ${width} ${height}" role="img" font-family="${font}"><title>${xml(flow.name)}</title><rect width="${width}" height="${height}" fill="#fff"/>${caption ? `<text x="17" y="17" font-size="11" fill="#42525b">${xml(caption)}</text>` : ''}<g transform="translate(${px((width - graph.width) / 2 + graph.shiftX)} ${px(9 + captionHeight + graph.shiftY)})">${groups}${edges}${graph.nodes.map(drawNode).join('')}</g>${legend}</svg>`
 }
