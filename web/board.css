@@ -215,3 +215,16 @@ body.board-focused #board-view{grid-column:1}
 #board-flow-view{position:absolute;inset:0;z-index:30;min-width:0;min-height:0;background:var(--paper)}
 #board-flow-view[hidden]{display:none}
 #board-view.has-paper-flow>.board-bar,#board-view.has-paper-flow>.board-stage{visibility:hidden;pointer-events:none}
+
+/* 原生工具栏负责常规模式的入口。专注、系统全屏及流程视口全屏使用当前画布内的入口。 */
+#paper-tools .paper-flow-native-panels[hidden],
+body:has(#board-view:fullscreen, #board-view.has-paper-flow .board-flow-host.paper-flow-host-fullscreen) #paper-tools .paper-flow-native-panels { display: none; }
+.paper-flow-native-panels [aria-expanded="true"] { border-color: currentColor; color: var(--dsw-alias-link, #176250); }
+body:has(#library-return-to-dsh) #board-view :is(.board-toolbar, .board-flow-host-tools) > .return-to-dsh { display: none; }
+body.board-focused:has(#library-return-to-dsh) #board-view:not(.has-paper-flow) .board-toolbar > .return-to-dsh,
+body:has(#library-return-to-dsh) #board-view:fullscreen:not(.has-paper-flow) .board-toolbar > .return-to-dsh,
+body.board-focused:has(#library-return-to-dsh) #board-view.has-paper-flow .board-flow-host-tools > .return-to-dsh,
+body:has(#library-return-to-dsh) #board-view:fullscreen.has-paper-flow .board-flow-host-tools > .return-to-dsh,
+body:has(#library-return-to-dsh) #board-view.has-paper-flow .board-flow-host.paper-flow-host-fullscreen .board-flow-host-tools > .return-to-dsh { display: inline-flex; }
+body.board-focused #library-return-to-dsh,
+body:has(#board-view:fullscreen, #board-view.has-paper-flow .board-flow-host.paper-flow-host-fullscreen) #library-return-to-dsh { display: none; }

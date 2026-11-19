@@ -58,6 +58,12 @@
 .paper-flow-toolbar .paper-flow-file-input {
   display: none;
 }
+.paper-flow-file-notice {
+  flex-basis: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.paper-flow-file-notice :is(p, ul) { margin: 2px 0; }
 .paper-flow-file-name {
   display: inline-block;
   max-width: 160px;
@@ -67,12 +73,12 @@
   font-size: 12px;
   color: var(--dsw-alias-label-secondary, #666);
 }
-.paper-flow-workbench .paper-flow-toolbar button.paper-flow-save-workspace {
+.paper-flow-toolbar.paper-flow-comparison-toolbar button.paper-flow-save-workspace {
   color: var(--dsw-alias-label-primary, #15592b);
   background: color-mix(in srgb, #54b27a 18%, var(--dsw-alias-bg-layer-1, #fff));
   border-color: color-mix(in srgb, #388955 55%, var(--dsw-alias-border-l2, #ddd));
 }
-.paper-flow-workbench .paper-flow-toolbar button.paper-flow-save-workspace:hover {
+.paper-flow-toolbar.paper-flow-comparison-toolbar button.paper-flow-save-workspace:hover {
   background: color-mix(in srgb, #54b27a 28%, var(--dsw-alias-bg-layer-1, #fff));
 }
 .paper-flow-detail-control,
@@ -316,7 +322,8 @@
 .paper-flow-details dd {
   margin: 0;
 }
-.paper-flow-workbench.is-fullscreen {
+.paper-flow-workbench.is-fullscreen,
+:root .paper-flow-host-fullscreen {
   position: fixed;
   inset: 0;
   overflow: hidden;

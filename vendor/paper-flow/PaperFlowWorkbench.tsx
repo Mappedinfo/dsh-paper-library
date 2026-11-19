@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { DragEvent, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { FlowCanvas, type FlowCanvasHandle } from "./FlowCanvas";
 import { FlowCompare, FlowComparisonReport } from "./FlowCompare";
 import { FlowLegend } from "./FlowLegend";
@@ -32,6 +33,7 @@ import type {
 import "./paperFlow.css";
 export type PaperFlowWorkbenchHandle = {
   load(input: unknown): FlowParseResult;
+  importFiles(files: readonly File[]): Promise<void>;
   focus(ref: FlowRef, ids: string[]): void;
   snapshot(): FlowWorkspace;
   exitFullscreen(): void;
@@ -44,7 +46,23 @@ export type PaperFlowWorkbenchProps = {
   renderNodeDetails?: (node: FlowNode, graph: FlowGraph, contexts: { ref: FlowRef; nodeIds: string[]; side: string }[]) => ReactNode;
   onNodeSelect?: (contexts: { ref: FlowRef; nodeIds: string[]; side: string }[]) => void;
   toolbar?: ReactNode;
+  comparisonHost?: HTMLElement | null;
+  controlsHost?: HTMLElement | null;
+  /** 两个工具栏移出画布后，由共同宿主承载全屏；不传时维持工作台自身全屏。 */
+  fullscreenHost?: HTMLElement | null;
 };
+type ImportSurface = "comparison" | "canvas";
+type FileNotice = { surface: ImportSurface; text?: string; error?: boolean; diagnostics?: FlowDiagnostic[] };
+
+function showDiagnostics(diagnostics: FlowDiagnostic[]) {
+  return diagnostics.length > 0 && (
+    <div className="error-box" role="alert">
+      <b>未载入：请修正以下数据</b>
+      <ul>{diagnostics.map((d, i) => <li key={i}>{d.path}：{d.message}</li>)}</ul>
+    </div>
+  );
+}
+
 const valueOf = (ref: FlowRef) => JSON.stringify(ref);
 let workbenchSerial = 0;
 const mergedKey = (w: FlowWorkspace) =>
@@ -62,7 +80,7 @@ const mergedKey = (w: FlowWorkspace) =>
   ]);
 export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlowWorkbenchProps>(
   function PaperFlowWorkbench(
-    { workspace: w, onWorkspaceChange, services, prepareImport, renderNodeDetails, onNodeSelect, toolbar },
+    { workspace: w, onWorkspaceChange, services, prepareImport, renderNodeDetails, onNodeSelect, toolbar, comparisonHost, controlsHost, fullscreenHost },
     ref,
   ) {
     const [editable, setEditable] = useState(false),
@@ -78,7 +96,8 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
       [fullscreen, setFullscreen] = useState(false),
       [pdfBusy, setPdfBusy] = useState(false),
       [dropActive, setDropActive] = useState(false),
-      [fileState, setFileState] = useState<{ name: string; ticket?: { generation: number; workspace: FlowWorkspace } }>({ name: "" }),
+      [fileNotice, setFileNotice] = useState<FileNotice | null>(null),
+      [fileState, setFileState] = useState<{ name: string; surface?: ImportSurface; ticket?: { generation: number; workspace: FlowWorkspace } }>({ name: "" }),
       [windows, setWindows] = useState<{ legend: boolean; detailHelp: boolean; report: string | null; manual: string | null }>({ legend: false, detailHelp: false, report: null, manual: null });
     const drawings = useRef<Record<string, FlowDrawing>>({}),
       emptyDraft = useRef<FlowEditDraft>(blankDraft()).current,
@@ -95,6 +114,27 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
       importGuard.activate();
       return () => { importGuard.dispose(); pdfController.current?.abort(); };
     }, [importGuard]);
+    useEffect(() => {
+      const target = fullscreenHost || section.current;
+      if (!fullscreen || !target) return;
+      fullscreenHost?.classList.add("paper-flow-host-fullscreen");
+      function escape(event: KeyboardEvent) {
+        if (event.key === "Escape" && !event.defaultPrevented && target!.contains(event.target as Node)) {
+          event.preventDefault();
+          setFullscreen(false);
+        }
+      }
+      const doc = target.ownerDocument;
+      doc.addEventListener("keydown", escape);
+      return () => {
+        doc.removeEventListener("keydown", escape);
+        fullscreenHost?.classList.remove("paper-flow-host-fullscreen");
+      };
+    }, [fullscreen, fullscreenHost]);
+    function mountToolbar(row: ReactNode, host?: HTMLElement | null) {
+      // 未指定共同全屏宿主时，把工具留在独占视口内，确保仍能操作和退出。
+      return host && (!fullscreen || fullscreenHost) ? createPortal(row, host) : row;
+    }
     const left = resolveFlow(w, w.selection.left)!,
       right = w.selection.right ? resolveFlow(w, w.selection.right) : undefined;
     const selectionKey = JSON.stringify([w.selection.left, w.selection.right || null]);
@@ -114,43 +154,66 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
       importGuard.invalidate();
       setDetail(null);
       setMessage("");
+      setFileNotice(null);
       drawings.current = {};
       onWorkspaceChange(next);
     }
-    function load(input: unknown) {
+    function applyInput(input: unknown) {
       importGuard.invalidate();
       let parsed = parseFlowInput(input);
       if (parsed.ok && prepareImport) {
         try { parsed = { ...parsed, value: prepareImport(input, parsed.value) }; }
         catch (error) { parsed = { ok: false, diagnostics: [{ severity: "error", code: "host.import", path: "$", message: error instanceof Error ? error.message : String(error) }] }; }
       }
-      setDiagnostics(parsed.diagnostics);
       if (parsed.ok) {
         change(parsed.value);
         setEditable(false);
       }
       return parsed;
     }
-    async function importFiles(files: FileList | readonly File[] | null | undefined) {
+    function load(input: unknown) {
+      const parsed = applyInput(input);
+      setDiagnostics(parsed.diagnostics);
+      return parsed;
+    }
+    async function importFiles(files: FileList | readonly File[], surface: ImportSurface = "comparison") {
       const ticket = importGuard.begin();
+      setFileNotice(null);
+      setDiagnostics([]);
       try {
         const file = selectFlowImportFile(files);
-        setDiagnostics([]);
-        setFileState({ name: file.name || "JSON 文件", ticket });
+        const name = file.name || "JSON 文件";
+        setFileState({ name, surface, ticket });
         const text = await file.text();
         if (!importGuard.accepts(ticket)) return;
-        const parsed = load(text);
-        setFileState({ name: file.name || "JSON 文件" });
-        if (parsed.ok) setMessage(`已导入 ${file.name || "JSON 文件"}`);
+        const parsed = applyInput(text);
+        setFileState({ name });
+        setFileNotice({ surface, text: parsed.ok ? `已导入 ${name}` : undefined, diagnostics: parsed.diagnostics });
       } catch (error) {
         if (!importGuard.accepts(ticket)) return;
         setFileState({ name: "" });
-        setDiagnostics([{ severity: "error", code: "file.import", path: "$", message: error instanceof Error ? error.message : "无法读取工作区文件" }]);
+        setFileNotice({ surface, error: true, text: error instanceof Error ? error.message : "无法读取工作区文件" });
       }
     }
+    function keepComparisonDrag(event: DragEvent<HTMLElement>) {
+      // Portal 事件仍会沿 React 树传入原画布，拖过比较栏时保留在栏内。
+      if (comparisonHost && (!fullscreen || fullscreenHost)) event.stopPropagation();
+    }
+    function dropFile(event: DragEvent<HTMLElement>, surface: ImportSurface) {
+      event.preventDefault();
+      event.stopPropagation();
+      dragDepth.current = 0;
+      setDropActive(false);
+      void importFiles(event.dataTransfer.files, surface);
+    }
     const importing = !!fileState.ticket && importGuard.accepts(fileState.ticket);
+    const reading = `正在读取 ${fileState.name}…`;
+    const notice = fileNotice && <>
+      {fileNotice.text && <p role={fileNotice.error ? "alert" : "status"}>{fileNotice.text}</p>}
+      {fileNotice.diagnostics && showDiagnostics(fileNotice.diagnostics)}
+    </>;
     useImperativeHandle(ref, () => ({
-      load,
+      load, importFiles,
       snapshot: () => structuredClone(w),
       exitFullscreen: () => setFullscreen(false),
       focus: (flowRef, ids) => {
@@ -269,15 +332,18 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
     return (
       <section
         ref={section}
-        className={`paper-flow-workbench${fullscreen ? " is-fullscreen" : ""}`}
+        className={`paper-flow-workbench${fullscreen && !fullscreenHost ? " is-fullscreen" : ""}`}
         aria-label="通用论文流程工作台"
         onDragEnter={(event) => { event.preventDefault(); if (isFlowFileDrag(event.dataTransfer)) { dragDepth.current++; setDropActive(true); } }}
         onDragOver={(event) => { event.preventDefault(); if (isFlowFileDrag(event.dataTransfer)) { event.dataTransfer.dropEffect = "copy"; setDropActive(true); } }}
         onDragLeave={(event) => { event.preventDefault(); if (--dragDepth.current <= 0) { dragDepth.current = 0; setDropActive(false); } }}
-        onDrop={(event) => { event.preventDefault(); event.stopPropagation(); dragDepth.current = 0; setDropActive(false); void importFiles(event.dataTransfer.files); }}
+        onDrop={(event) => dropFile(event, "canvas")}
       >
         {dropActive && <div className="paper-flow-drop-target" role="status"><strong>松开以导入 JSON</strong><span>一次一个文件，最大 192 KiB</span></div>}
-        <div className="paper-flow-toolbar">
+        {mountToolbar(<div className="paper-flow-toolbar paper-flow-comparison-toolbar"
+          onDragEnter={keepComparisonDrag} onDragLeave={keepComparisonDrag}
+          onDragOver={(event) => { keepComparisonDrag(event); event.preventDefault(); if (isFlowFileDrag(event.dataTransfer)) event.dataTransfer.dropEffect = "copy"; }}
+          onDrop={(event) => dropFile(event, "comparison")}>
           <label>
             论文／流程 A
             <select
@@ -313,7 +379,7 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
                 if (files.length) await importFiles(files);
               }}
             />
-            <span className="paper-flow-file-name" role="status" title={fileState.name}>{importing ? `正在读取 ${fileState.name}…` : fileState.name || "或拖入面板"}</span>
+            <span className="paper-flow-file-name" role="status" title={fileState.name}>{importing && fileState.surface === "comparison" ? reading : fileState.name || "或拖入面板"}</span>
           </div>
           <button
             type="button"
@@ -326,16 +392,18 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
                   serializeWorkspace(w),
                   "application/json",
                 );
-              } catch (e) {
-                setMessage(String(e));
+                setFileNotice({ surface: "comparison", text: "已发起工作区 JSON 备份下载" });
+              } catch (error) {
+                setFileNotice({ surface: "comparison", error: true, text: `工作区备份失败：${error instanceof Error ? error.message : String(error)}` });
               }
             }}
           >
             保存工作区
           </button>
+          {fileNotice?.surface === "comparison" && <div className="paper-flow-file-notice">{notice}</div>}
           {toolbar}
-        </div>
-        <div className="paper-flow-toolbar">
+        </div>, comparisonHost)}
+        {mountToolbar(<div className="paper-flow-toolbar paper-flow-controls-toolbar">
           <label>
             布局
             <select
@@ -474,7 +542,7 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
           {right && <button ref={manualTrigger} type="button" className="paper-flow-popover-trigger"
             aria-expanded={windows.manual === selectionKey} aria-controls={`${windowPrefix}-manual`}
             onClick={() => { if (windows.manual === selectionKey) closeWindow("manual"); else { setDetail(null); setWindows((value) => ({ ...value, manual: selectionKey })); } }}>人工对应与排除</button>}
-          <button onClick={() => setFullscreen(!fullscreen)}>
+          <button type="button" aria-pressed={fullscreen} onClick={() => setFullscreen(!fullscreen)}>
             {fullscreen ? "退出全屏" : "全屏"}
           </button>
           <button
@@ -493,20 +561,11 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
               {pdfBusy ? "PDF 生成中…" : "PDF ↓"}
             </button>
           )}
-        </div>
+        </div>, controlsHost)}
         {message && <p role="status">{message}</p>}
-        {diagnostics.length > 0 && (
-          <div className="error-box" role="alert">
-            <b>未载入：请修正以下数据</b>
-            <ul>
-              {diagnostics.map((d, i) => (
-                <li key={i}>
-                  {d.path}：{d.message}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        {importing && fileState.surface === "canvas" && <p role="status">{reading}</p>}
+        {fileNotice?.surface === "canvas" && notice}
+        {showDiagnostics(diagnostics)}
         <div className="paper-flow-summaries">
           {[left, right]
             .filter((g): g is FlowGraph => !!g)

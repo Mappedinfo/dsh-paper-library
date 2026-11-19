@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { resolveObjectURL } from 'node:buffer'
 import { build } from 'esbuild'
 import { createWorkspace } from '../vendor/paper-flow/document.js'
 
@@ -8,21 +9,28 @@ import { createWorkspace } from '../vendor/paper-flow/document.js'
 const compiled = await build({
   entryPoints: [new URL('../vendor/paper-flow/PaperFlowWorkbench.tsx', import.meta.url).pathname],
   bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic',
-  external: ['react', 'react/jsx-runtime'], loader: { '.css': 'text' },
+  external: ['react', 'react-dom', 'react/jsx-runtime'], loader: { '.css': 'text' },
   logLevel: 'silent',
 })
 const waits = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 const document = id => ({ schemaVersion: 1, kind: 'paper-flow-document', paper: { id, title: id }, flows: [{ id: 'main', name: 'Synthetic', nodes: [{ id: 'n', label: 'Node', type: 'method', ports: { in: {}, out: {} } }], edges: [] }] })
 const walk = element => !element || typeof element !== 'object' ? [] : [element, ...[element.props?.children].flat(9).flatMap(walk)]
 
-function fixture() {
-  const slots = [], effects = [], changes = []; let cursor = 0
+function fixture(options = {}) {
+  const slots = [], effects = new Set(), changes = []; let cursor = 0
   const hook = value => { const index = cursor++; return slots[index] ||= { current: value } }
   const react = {
     forwardRef: fn => fn,
     useRef: hook,
     useState: initial => { const slot = hook(initial); return [slot.current, value => { slot.current = typeof value === 'function' ? value(slot.current) : value }] },
-    useEffect: callback => { const slot = hook(null); if (!slot.current) { slot.current = callback(); effects.push(slot.current) } },
+    useEffect: (callback, dependencies) => {
+      const slot = hook(null)
+      if (!slot.current || dependencies.some((value, i) => !Object.is(value, slot.current.dependencies[i]))) {
+        slot.current?.cleanup?.()
+        slot.current = { dependencies, cleanup: callback() }
+        effects.add(slot)
+      }
+    },
     useImperativeHandle: (ref, callback) => { if (ref) ref.current = callback() },
     useMemo: callback => callback(),
   }
@@ -30,6 +38,7 @@ function fixture() {
   const module = { exports: {} }
   new Function('require', 'module', 'exports', compiled.outputFiles[0].text)(name => {
     if (name === 'react') return react
+    if (name === 'react-dom') return { createPortal: (children, container) => ({ type: 'portal', container, props: { children } }) }
     if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
     throw Error(`Unexpected import: ${name}`)
   }, module, module.exports)
@@ -38,11 +47,11 @@ function fixture() {
   const render = next => {
     if (next) workspace = next
     cursor = 0
-    return module.exports.PaperFlowWorkbench({ workspace, onWorkspaceChange: value => changes.push(value) }, ref)
+    return module.exports.PaperFlowWorkbench({ workspace, onWorkspaceChange: value => changes.push(value), ...options }, ref)
   }
   const element = (tree, type, match) => walk(tree).find(item => item.type === type && match(item.props))
   const begin = (tree, file) => element(tree, 'input', props => props['aria-label'] === '导入论文或工作区 JSON').props.onChange({ target: { files: [file], value: 'chosen' } })
-  return { render, begin, element, changes, ref, unmount: () => effects.forEach(cleanup => cleanup?.()) }
+  return { render, begin, element, changes, ref, unmount: () => effects.forEach(slot => slot.current.cleanup?.()) }
 }
 
 test('late file reads cannot replace a workspace edited before the parent rerenders', async () => {
@@ -235,4 +244,148 @@ test('comparison and manual windows keep drafts when closed, but close when the 
   tree = f.render({ ...workspace, selection: { ...workspace.selection, right: { documentId: 'c', flowId: 'main' } } })
   assert.equal(walk(tree).find(item => item.props?.kind === 'manual').props.open, false)
   assert.equal(walk(tree).find(item => item.props?.kind === 'report').props.open, false)
+})
+
+test('each toolbar has one owner, and moved controls still select, import, compare and open the original floating windows', async () => {
+  const opts = { comparisonHost: {}, controlsHost: {}, toolbar: { type: 'button', props: { children: '宿主操作' } } }
+  const f = fixture(opts)
+  const portals = tree => walk(tree).filter(el => el.type === 'portal')
+  const placed = (tree, container) => portals(tree).find(el => el.container === container)
+  let tree = f.render()
+  const controls = placed(tree, opts.controlsHost), comparison = placed(tree, opts.comparisonHost)
+  assert.equal(portals(tree).length, 2)
+  const trigger = (where, label) => f.element(where, 'button', props => props.children === label)
+  assert.ok(trigger(comparison, '宿主操作')); assert.ok(trigger(comparison, '保存工作区')); assert.ok(trigger(comparison, '导入 JSON'))
+  assert.ok(trigger(controls, 'SVG ↓')); assert.ok(trigger(controls, '图例')); assert.ok(trigger(controls, '＋'))
+  assert.equal(walk(tree).filter(el => el.type === 'button' && el.props.children === '图例').length, 1)
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"><title>Synthetic</title></svg>'
+  walk(tree).find(el => typeof el.props?.onDrawing === 'function').props.onDrawing({ svg })
+  const saved = [], originalDocument = globalThis.document
+  try {
+    globalThis.document = { createElement() { return { click() { saved.push({ name: this.download, blob: resolveObjectURL(this.href) }) } } } }
+    trigger(controls, 'SVG ↓').props.onClick()
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document
+    else globalThis.document = originalDocument
+  }
+  assert.equal(saved[0].name, 'paper-flow.svg')
+  assert.equal(await saved[0].blob.text(), svg)
+  trigger(controls, '＋').props.onClick(); assert.equal(typeof f.changes.at(-1).view.zoom, 'number')
+  const pick = f.element(comparison, 'select', props => props['aria-label'] === '论文与流程 B')
+  pick.props.onChange({ target: { value: JSON.stringify({ documentId: 'original', flowId: 'main' }) } })
+  tree = f.render(f.changes.at(-1))
+  const report = trigger(placed(tree, opts.controlsHost), '比较报告')
+  report.props.onClick()
+  const opened = f.render()
+  assert.equal(walk(opened).find(el => el.props?.kind === 'report').props.open, true)
+  await f.begin(placed(opened, opts.comparisonHost), { name: 'import.json', size: 64, text: async () => JSON.stringify(document('new')) })
+  assert.equal(f.changes.at(-1).selection.left.documentId, 'new')
+  for (const host of ['comparisonHost', 'controlsHost']) {
+    const row = f.render()
+    opts[host] = null
+    const mixed = f.render()
+    assert.equal(portals(mixed).length, portals(row).length - 1)
+    assert.ok(trigger(mixed, '导入 JSON')); assert.ok(trigger(mixed, '图例'))
+  }
+})
+
+test('common-host fullscreen keeps both portals and exits on Escape, imperative exit, host replacement or unmount', () => {
+  function makeHost() {
+    const tokens = new Set(), events = new Map()
+    return { tokens, events, classList: { add: t => tokens.add(t), remove: t => tokens.delete(t) },
+      contains: node => node === 'inside', ownerDocument: { addEventListener: (t, fn) => events.set(t, fn), removeEventListener: t => events.delete(t) } }
+  }
+  const host = makeHost(), replacement = makeHost()
+  const opts = { comparisonHost: {}, controlsHost: {}, fullscreenHost: host }
+  const f = fixture(opts)
+  const full = () => {
+    f.element(f.render(), 'button', props => props.children === '全屏').props.onClick()
+    return f.render()
+  }
+  let tree = full()
+  assert.equal(host.tokens.has('paper-flow-host-fullscreen'), true)
+  assert.doesNotMatch(tree.props.className, /is-fullscreen/u)
+  assert.equal(walk(tree).filter(el => el.type === 'portal').length, 2)
+  host.events.get('keydown')({key:'Escape', target:'outside'})
+  assert.equal(f.element(f.render(), 'button', p => p.children === '退出全屏').props['aria-pressed'], true)
+  host.events.get('keydown')({key:'Escape', target:'inside', preventDefault() {}})
+  f.render(); assert.equal(host.tokens.size, 0)
+  full(); f.ref.current.exitFullscreen(); f.render(); assert.equal(host.tokens.size, 0)
+  full(); opts.fullscreenHost = replacement; f.render()
+  assert.equal(host.tokens.size, 0); assert.equal(replacement.tokens.size, 1)
+  f.unmount(); assert.equal(replacement.tokens.size, 0); assert.equal(replacement.events.size, 0)
+  const legacy = fixture({ controlsHost: {} })
+  legacy.element(legacy.render(), 'button', props => props.children === '全屏').props.onClick()
+  tree = legacy.render()
+  assert.match(tree.props.className, /is-fullscreen/u)
+  assert.equal(walk(tree).filter(el => el.type === 'portal').length, 0)
+  assert.ok(legacy.element(tree, 'button', p => p.children === '退出全屏'))
+})
+
+test('comparison portal keeps file and archive feedback visible while export feedback stays on the canvas', async () => {
+  const comparisonHost = {}, f = fixture({ comparisonHost, controlsHost: {} })
+  const pair = () => {
+    const tree = f.render(), portal = walk(tree).find(el => el.container === comparisonHost)
+    const canvas = tree.props.children.filter(child => child?.type !== 'portal')
+    return { row: portal.props.children, canvas: { props: { children: canvas } } }
+  }
+  const notice = (where, role) => walk(where).filter(el => el.props?.role === role).map(el => JSON.stringify(el.props.children)).join(' ')
+  const waiting = waits()
+  let { row } = pair()
+  const read = f.begin(row, { name: 'broken.json', size: 50, text: () => waiting.promise })
+  assert.match(notice(pair().row, 'status'), /正在读取 broken\.json/)
+  waiting.resolve('{'); await read
+  let views = pair()
+  assert.match(notice(views.row, 'alert'), /未载入.*JSON/)
+  assert.doesNotMatch(notice(views.canvas, 'alert'), /未载入/)
+  assert.equal(f.changes.length, 0)
+  const documentBefore = globalThis.document
+  try {
+    const backup = () => f.element(pair().row, 'button', props => props.children === '保存工作区').props.onClick()
+    globalThis.document = { createElement: () => ({ click() {} }) }; backup()
+    assert.match(notice(pair().row, 'status'), /已发起工作区 JSON 备份下载/)
+    globalThis.document = { createElement: () => ({ click() { URL.revokeObjectURL(this.href); throw Error('没有可用的下载位置') } }) }
+    backup()
+    assert.match(notice(pair().row, 'alert'), /工作区备份失败.*没有可用的下载位置/)
+  } finally {
+    if (documentBefore === undefined) delete globalThis.document
+    else globalThis.document = documentBefore
+  }
+  f.element(f.render(), 'button', props => props.children === 'SVG ↓').props.onClick()
+  views = pair()
+  assert.match(notice(views.canvas, 'status'), /画布尚未生成/)
+  assert.doesNotMatch(notice(views.row, 'status'), /画布尚未生成/)
+})
+
+test('a comparison-row drop stops at the row; sidebar and canvas drops use the same import owner', async () => {
+  const host = {}, f = fixture({ comparisonHost: host })
+  const tree = f.render(), row = walk(tree).find(el => el.container === host).props.children
+  const waiting = waits(), file = { name: 'stale.json', size: 30, text: () => waiting.promise }
+  const pending = f.ref.current.importFiles([file])
+  let reads = 0, stopped = false
+  const fresh = { name: 'fresh.json', size: 50, text: async () => { reads++; return JSON.stringify(document('fresh')) } }
+  const event = { dataTransfer: { types: ['Files'], files: [fresh] }, preventDefault() {}, stopPropagation() { stopped = true } }
+  for (const key of ['onDragEnter', 'onDragOver', 'onDragLeave']) {
+    stopped = false
+    row.props[key](event)
+    assert.equal(stopped, true, key)
+  }
+  assert.equal(event.dataTransfer.dropEffect, 'copy')
+  stopped = false
+  row.props.onDrop(event)
+  if (!stopped) tree.props.onDrop(event)
+  if (!stopped) await f.ref.current.importFiles(event.dataTransfer.files)
+  assert.equal(stopped, true)
+  await new Promise(setImmediate)
+  waiting.resolve(JSON.stringify(document('old'))); await pending
+  assert.equal(reads, 1); assert.deepEqual(f.changes.map(w => w.selection.left.documentId), ['fresh'])
+  const portal = () => walk(f.render()).find(el => el.container === host)
+  assert.match(JSON.stringify(portal()), /已导入 fresh\.json/)
+  await f.ref.current.importFiles([{ name: 'x.pdf', size: 10, text: async () => '' }])
+  assert.match(JSON.stringify(portal()), /仅支持 .json/)
+  const canvasEvent = { ...event, dataTransfer: { files: [] } }
+  tree.props.onDrop(canvasEvent)
+  const updated = f.render()
+  assert.doesNotMatch(JSON.stringify(portal()), /不支持链接或文字/)
+  assert.match(JSON.stringify(updated), /不支持链接或文字/)
 })

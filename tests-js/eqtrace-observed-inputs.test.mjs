@@ -22,31 +22,36 @@ function npy(name, shape) {
   return new File([header, Buffer.alloc(shape.reduce((n, d) => n * d, 4))], name)
 }
 
-async function mount(t, document) {
-  const bundle = await build({
+let bundlePromise
+async function environment(t) {
+  const bundle = await (bundlePromise ??= build({
     stdin: {
       contents: `import {createElement} from 'react'; import {createRoot} from 'react-dom/client';
-        import {flushSync} from 'react-dom'; import {Figure} from './src/paper-flow/EqTracePanel.tsx';
+        import {flushSync} from 'react-dom'; import {Figure,EqTraceSourceForm} from './src/paper-flow/EqTracePanel.tsx';
         export function mount(el, flow, documentId) {
           const root = createRoot(el);
-          flushSync(() => root.render(createElement(Figure,{flow,documentId})));
+          const render = (dataHost,controlsHost) => flushSync(() => root.render(createElement(Figure,{flow,documentId,dataHost,controlsHost})));
+          render();
+          return {render,unmount:() => root.unmount()};
+        }
+        export function mountSource(el,options) {
+          const root = createRoot(el);
+          flushSync(() => root.render(createElement(EqTraceSourceForm,options)));
           return () => root.unmount();
         }`,
       resolveDir: fileURLToPath(new URL('../', import.meta.url)),
     },
     format: 'iife', globalName: 'ObservedInputTest', platform: 'browser', bundle: true,
     jsx: 'automatic', write: false, define: {'process.env.NODE_ENV':'"production"'}, logLevel: 'silent',
-  })
-  const dom = new JSDOM('<main id="figure"></main>', {runScripts:'outside-only', url:'http://synthetic.invalid/'})
+  }))
+  const dom = new JSDOM('<header></header><aside></aside><main></main>', {runScripts:'outside-only', url:'http://synthetic.invalid/'})
   const w = dom.window, doc = w.document
-  t.after(() => w.close())
+  const cleanups = []
+  t.after(() => { for (const fn of cleanups.reverse()) fn(); w.close() })
   w.TextDecoder = TextDecoder
   // Only layout observation is stubbed. The file reader, rendered SVG, focus and tooltip are real.
   w.ResizeObserver = class { observe() {} disconnect() {} }
   w.eval(bundle.outputFiles[0].text)
-  const flow = document.flows.find(f => f.id === 'network')
-  const unmount = w.ObservedInputTest.mount(doc.querySelector('main'), flow, document.paper.id)
-  t.after(unmount)
 
   function changed(check, label) {
     if (check()) return Promise.resolve()
@@ -62,13 +67,21 @@ async function mount(t, document) {
       observer.observe(doc.body, {subtree:true, childList:true, characterData:true, attributes:true})
     })
   }
+  return {w, doc, changed, cleanups}
+}
+
+async function mount(t, document) {
+  const {w, doc, changed, cleanups} = await environment(t)
+  const flow = document.flows.find(f => f.id === 'network')
+  const figure = w.ObservedInputTest.mount(doc.querySelector('main'), flow, document.paper.id)
+  cleanups.push(figure.unmount)
   const select = doc.querySelector('.eqtrace-projection select')
   if (select) { select.value = 'full'; select.dispatchEvent(new w.Event('change', {bubbles:true})) }
   const panel = doc.querySelector('.eqtrace-data-inputs')
   panel.open = true
 
   function picker(name) {
-    const input = panel.querySelector(`input[type="file"][aria-label="${name} 的实际输入文件"]`)
+    const input = doc.querySelector(`input[type="file"][aria-label="${name} 的实际输入文件"]`)
     assert.ok(input, 'Missing file chooser for ' + name)
     return input
   }
@@ -92,7 +105,7 @@ async function mount(t, document) {
     await changed(tip, attribute + ' tooltip')
     return tip()
   }
-  return {changed, choose, remove, inspect, picker}
+  return {changed, choose, remove, inspect, picker, doc, figure}
 }
 
 function bindings(tip) {
@@ -126,6 +139,14 @@ test('NPY selections update real LayerNorm and cross-attention previews, reject 
   assert.match(item(norm,'输出','output').querySelector('.eqtrace-tensor-sketch').textContent, /S = 11/)
 
   const cross = await ui.inspect('decoder.cross_attention')
+  const dataHost = ui.doc.querySelector('aside'), controlsHost = ui.doc.querySelector('header')
+  ui.figure.render(dataHost, controlsHost)
+  assert.equal(dataHost.contains(ui.picker('source')), true)
+  assert.ok(controlsHost.querySelector('.eqtrace-projection select'))
+  assert.match(controlsHost.textContent, /下载论文 SVG/)
+  assert.equal(ui.doc.querySelector('main .eqtrace-data-inputs'), null)
+  assert.equal(ui.doc.querySelector('[role="tooltip"]'), cross)
+  assert.equal(bindings(cross).S.source, 'source.npy')
   assert.deepEqual(bindings(cross).T, {value:'未指定',source:undefined})
   assert.match(item(cross,'输入','query').textContent, /3 × T × 32/)
   assert.match(item(cross,'输入','key').textContent, /3 × 11 × 32/)
@@ -151,4 +172,53 @@ test('NPY selections update real LayerNorm and cross-attention previews, reject 
     B:{value:'2',source:undefined}, T:{value:'5',source:undefined}, S:{value:'8',source:undefined},
   })
   assert.match(item(cross,'输出','attn_output').textContent, /示例输入.*2 × 5 × 32/)
+})
+
+
+test('the inline source form delegates selection to its host, retains files for retry and ignores stale completion', {skip:!JSDOM,timeout:5000}, async t => {
+  const {w, doc, changed, cleanups} = await environment(t)
+  const host = doc.querySelector('aside'), generated = [], reads = []
+  let attempt = 0, complete, activeSource, started
+  const parsing = new Promise(resolve => { started = resolve })
+  const unmount = w.ObservedInputTest.mountSource(host, {
+    async generate(read, active) {
+      activeSource = active
+      reads.push(await read())
+      if (++attempt === 1) throw new Error('synthetic failure')
+      if (attempt === 3) await new Promise(resolve => { complete = resolve; started() })
+      return 'eqtrace-generated'
+    },
+    onGenerated(id) { generated.push(id) },
+  })
+  let mounted = true
+  cleanups.push(() => { if (mounted) unmount() })
+  assert.equal(doc.querySelector('[role="dialog"]'), null)
+  const form = host.querySelector('form'), submit = form.querySelector('[type="submit"]')
+  const model = form.querySelectorAll('input[type="file"]')[1]
+  function choose() {
+    Object.defineProperty(model, 'files', {value:[new File(['# synthetic model'], 'sample.py')],configurable:true})
+    model.dispatchEvent(new w.Event('change',{bubbles:true}))
+  }
+  choose()
+  await changed(() => !submit.disabled,'source selection')
+  submit.click()
+  await changed(() => form.querySelector('[role="alert"]')?.textContent.includes('synthetic failure'),'generation error')
+  assert.deepEqual(generated, [])
+  submit.click()
+  await changed(() => generated.length===1 && submit.disabled,'host callback and form reset')
+  assert.equal(reads[1].model.name,'sample.py')
+  assert.equal(reads[1].model.text,'# synthetic model')
+  assert.deepEqual(generated,['eqtrace-generated'])
+
+  choose()
+  await changed(() => !submit.disabled, 'new source selection')
+  submit.click()
+  await changed(() => submit.textContent.includes('正在解析'),'pending generation')
+  // Wait until the fake parser has consumed the files, exactly as the real host would.
+  await parsing
+  unmount(); mounted = false
+  assert.equal(activeSource(),false)
+  complete()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(generated,['eqtrace-generated'])
 })

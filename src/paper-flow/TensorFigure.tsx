@@ -103,7 +103,7 @@ export function TensorFigure({ svg, name, nodes, examples, meanings, observed, i
       group.querySelector('title')?.remove()
     }
     host.replaceChildren(drawing)
-    setPortal(host.closest<HTMLElement>('.paper-flow-popover-eqtrace') || host.parentElement)
+    setPortal(host.parentElement)
     setSelected(null)
     return () => { cancelDelay(); host.replaceChildren() }
   }, [svg, name, byId, markerId])

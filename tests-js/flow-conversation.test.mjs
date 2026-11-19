@@ -62,7 +62,7 @@ test('stale board/session, absent session, disposed panel and invalid snapshots 
 function hostFixture({ snapshot, save, eqtrace, initial = workspace() } = {}) {
   const calls = [], sent = [], messages = [], view = { addEventListener() {}, removeEventListener() {} }
   let rendered, sessionId = 'session-current', revision = 'a'.repeat(64), value = initial
-  const root = { hidden: false, querySelectorAll: () => [] }
+  const root = { hidden: false, querySelectorAll: () => [], ownerDocument: new EventTarget() }
   const jsx = (type, props) => ({ type, props: props || {} })
   const module = { exports: {} }
   const stateSlots = []
@@ -170,9 +170,8 @@ test('EqTrace generation adds a graph to the current board and discards results 
   }
 })
 
-test('the encoder–decoder toolbar example opens its own figure and preserves empty or edited comparison workspaces', async () => {
-  const label = '编码器–解码器示例'
-  const walk = el => !el || !el.props ? [] : [el, ...[el.props.children].flat(Infinity).flatMap(walk)]
+test('编码器示例直接显示在主画布，返回后保留工作区和比较选择', async () => {
+  const walk = el => !el?.props ? [] : [el, ...[el.props.children].flat(Infinity).flatMap(walk)]
   for (const initial of [null, workspace()]) {
     const f = hostFixture({ initial })
     try {
@@ -185,27 +184,16 @@ test('the encoder–decoder toolbar example opens its own figure and preserves e
         controller.edit(current)
       }
       const before = controller.state()
-      const read = () => {
-        const tree = walk(f.renderPanel())
-        const actions = tree.find(el => el.props.className?.includes('board-flow-actions'))
-        const triggers = tree.filter(el => el.type === 'button' && el.props.children === label)
-        assert.equal(triggers.length, 1)
-        assert.ok(walk(actions).includes(triggers[0]))
-        const preview = tree.find(el => el.props.title === label && typeof el.props.onClose === 'function')
-        assert.equal(triggers[0].props['aria-controls'], preview.props.id)
-        return { button: triggers[0], preview }
-      }
-      const closed = read()
-      assert.equal(closed.preview.props.open, false)
-      closed.button.props.onClick()
-      const opened = read()
-      assert.equal(opened.preview.props.open, true)
-      const figure = walk(opened.preview).find(el => el.props.flow)
-      assert.equal(figure.props.flow.id, 'network')
+      const read = () => walk(f.renderPanel())
+      const button = (tree, label) => tree.find(el => el.type === 'button' && el.props.children === label)
+      button(read(), '编码器–解码器示例').props.onClick()
+      const tree = read()
+      const content = tree.find(el => el.props.className === 'board-flow-content')
+      const figure = walk(content).find(el => el.props.flow?.id === 'network')
       assert.match(figure.props.documentId, /^eqtrace-/u)
-      assert.equal(walk(opened.preview).some(el => el.type === 'button' && el.props.children === '将示例加入空画板'), initial === null)
-      opened.preview.props.onClose()
-      assert.equal(read().preview.props.open, false)
+      assert.equal(!!button(tree, '将示例加入空画板'), initial === null)
+      button(tree, '返回原流程').props.onClick()
+      assert.ok(button(read(), '编码器–解码器示例'))
       assert.deepEqual(controller.state(), before)
       assert.deepEqual(f.calls.map(call => call.action), ['board_flow_get'])
     } finally { f.flow.dispose() }

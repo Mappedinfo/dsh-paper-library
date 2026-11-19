@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { FlowGraph } from '../../vendor/paper-flow/types'
 import { nodeTensorPreview } from './tensor-preview.mjs'
 import { bindInputShape, readNpyShape } from './tensor-data.mjs'
@@ -6,7 +7,7 @@ import { bindInputShape, readNpyShape } from './tensor-data.mjs'
 export type ObservedDimensions = Record<string, { value: number; source: string }>
 type InputPort = { id: string; name: string; shape: (string | number)[] }
 type InputFile = { name: string; shape: number[]; dimensions: Record<string, number> }
-type Props = { onChange: (dimensions: ObservedDimensions) => void }
+type Props = { onChange: (dimensions: ObservedDimensions) => void; host?: HTMLElement | null }
 
 function collectDimensions(files: Map<string, InputFile>): ObservedDimensions {
   const result: ObservedDimensions = Object.create(null)
@@ -22,7 +23,7 @@ function collectDimensions(files: Map<string, InputFile>): ObservedDimensions {
   return result
 }
 
-function InputPicker({ inputs, onChange }: { inputs: InputPort[] } & Props) {
+function InputPicker({ inputs, onChange, host }: { inputs: InputPort[] } & Props) {
   const [files, setFiles] = useState(new Map<string, InputFile>())
   const current = useRef(files)
   const requests = useRef(new Map<string, number>())
@@ -61,8 +62,8 @@ function InputPicker({ inputs, onChange }: { inputs: InputPort[] } & Props) {
     }
   }
 
-  return <details className="eqtrace-data-inputs">
-    <summary>关联实际输入{files.size > 0 ? `（${files.size}）` : ''}</summary>
+  if (!inputs.length) return null
+  const fields = <>
     <p>选择同一次模型调用中各输入的 .npy 文件，含批次轴。仅读取本地文件头，关联用于当前预览。</p>
     {inputs.map(input => {
       const file = files.get(input.id)
@@ -78,10 +79,14 @@ function InputPicker({ inputs, onChange }: { inputs: InputPort[] } & Props) {
         {messages[input.id] && <span role="status">{messages[input.id]}</span>}
       </div>
     })}
-  </details>
+  </>
+  const title = `关联实际输入${files.size ? `（${files.size}）` : ''}`
+  // Keep selection, pending reads and error state above the portal when the host changes.
+  return host ? createPortal(<section className="eqtrace-data-inputs" aria-label={title}><h3>{title}</h3>{fields}</section>, host)
+    : <details className="eqtrace-data-inputs"><summary>{title}</summary>{fields}</details>
 }
 
-export function TensorDataInputs({ flow, onChange }: { flow: FlowGraph } & Props) {
+export function TensorDataInputs({ flow, onChange, host }: { flow: FlowGraph } & Props) {
   const inputs: InputPort[] = []
   for (const node of flow.nodes) {
     if (node.op !== 'input') continue
@@ -92,5 +97,5 @@ export function TensorDataInputs({ flow, onChange }: { flow: FlowGraph } & Props
       }
     }
   }
-  return inputs.length ? <InputPicker key={JSON.stringify(inputs)} inputs={inputs} onChange={onChange} /> : null
+  return <InputPicker key={JSON.stringify(inputs)} inputs={inputs} onChange={onChange} host={host}/>
 }

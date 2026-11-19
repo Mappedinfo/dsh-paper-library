@@ -20,3 +20,39 @@ window.PaperBoardFlowLoader = (() => {
   }
   return Object.freeze({ load });
 })();
+
+// 原生文献工具栏和流程组件共用 ownerDocument 的面板状态，不另存选择。
+(() => {
+  const tools = document.getElementById?.('paper-tools');
+  if (!tools) return;
+  const doc = tools.ownerDocument;
+  const group = doc.createElement('div');
+  group.className = 'reader-control-group paper-flow-native-panels';
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', '论文流程面板');
+  group.hidden = true;
+  const buttons = new Map();
+  for (const [panel, label] of [['compare', '比较'], ['code', '代码与数据']]) {
+    const button = doc.createElement('button');
+    button.type = 'button';
+    button.id = 'paper-flow-' + panel + '-toggle';
+    button.className = 'button subtle';
+    button.textContent = label;
+    button.setAttribute('aria-controls', 'paper-flow-' + panel + '-panel');
+    button.setAttribute('aria-expanded', 'false');
+    button.addEventListener('click', () => {
+      if (!group.hidden) doc.dispatchEvent(new CustomEvent('paper-flow-panel-toggle', { detail: { panel } }));
+    });
+    group.append(button);
+    buttons.set(panel, button);
+  }
+  tools.prepend(group);
+  doc.addEventListener('paper-flow-panels-state', event => {
+    const state = event.detail;
+    if (!state || typeof state.open !== 'boolean') return;
+    group.hidden = !state.open;
+    for (const [panel, button] of buttons) {
+      button.setAttribute('aria-expanded', String(state.open && state.panel === panel));
+    }
+  });
+})();
