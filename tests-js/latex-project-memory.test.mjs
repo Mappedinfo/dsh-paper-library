@@ -26,8 +26,15 @@ test('resume records are per project, contain no source body and retain the last
 
 test('resume metadata rejects traversal, invalid positions and oversized or arbitrary payload fields',async t=>{
  const f=await fixture(t);
- for(const extra of [{id:'../secret'},{path:'../secret.tex'},{path:'/secret.tex'},{path:'nested/../secret.tex'},{selection_start:-1},{pdf_page:0},{zoom:99},{root:'x'.repeat(4097)},{layout:'script'}])await assert.rejects(f.memory(session('one',extra)),{code:'LATEX_MEMORY_INVALID'});
+ for(const extra of [{id:'../secret'},{path:'../secret.tex'},{path:'/secret.tex'},{path:'nested/../secret.tex'},{selection_start:-1},{pdf_page:0},{zoom:99},{root:'x'.repeat(4097)},{layout:'script'},{pane_order:'arbitrary'},{editor_mode:'html'}])await assert.rejects(f.memory(session('one',extra)),{code:'LATEX_MEMORY_INVALID'});
  assert.deepEqual((await f.memory({action:'latex_memory_get'})).recent,[]);
+})
+
+test('editor mode and source/PDF placement survive reopening independently of source contents',async t=>{
+ const f=await fixture(t);await f.memory(session('one',{pane_order:'pdf-first',editor_mode:'visual'}));
+ const reopened=createLatexProjectMemory({store:createLocalStateStore(f.options)}),state=await reopened({action:'latex_memory_get',id:'one'});
+ assert.equal(state.session.pane_order,'pdf-first');assert.equal(state.session.editor_mode,'visual');assert.equal(state.session.path,'sections/intro.tex');
+ const legacy=await f.memory(session('two'));assert.equal(legacy.session.pane_order,'source-first');assert.equal(legacy.session.editor_mode,'source');
 })
 
 test('recent project index is bounded without evicting saved project positions or favorites',async t=>{

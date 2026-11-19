@@ -323,6 +323,12 @@ body > #latex-view { height: 100dvh; }
   min-height: 0; min-width: 0;
 }
 .latex-body[data-layout=source], .latex-body[data-layout=pdf] { grid-template-columns: minmax(0, 1fr); }
+.latex-body[data-layout=split][data-pane-order=pdf-first] { grid-template-columns: minmax(0, 1fr) 6px minmax(160px, var(--latex-split, 50%)); }
+.latex-editor-pane { order: 1; }
+.latex-splitter { order: 2; }
+.latex-preview-pane { order: 3; }
+.latex-body[data-pane-order=pdf-first] > .latex-editor-pane { order: 3; }
+.latex-body[data-pane-order=pdf-first] > .latex-preview-pane { order: 1; }
 .latex-editor-pane, .latex-preview-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
 .latex-editor-pane[hidden], .latex-preview-pane[hidden], .latex-splitter[hidden] { display: none; }
 .latex-splitter { cursor: col-resize; background: var(--line); touch-action: none; }
@@ -481,9 +487,42 @@ body > #latex-view { height: 100dvh; }
 .latex-conflict[hidden] { display: none; }
 
 @media (max-width: 900px) {
-  .latex-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 6px minmax(0, 1fr); }
+  .latex-body, .latex-body[data-layout=split][data-pane-order=pdf-first] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, var(--latex-split, 50%)) 6px minmax(0, 1fr); }
+  .latex-body[data-layout=split][data-pane-order=pdf-first] { grid-template-rows: minmax(0, 1fr) 6px minmax(0, var(--latex-split, 50%)); }
+  .latex-body[data-layout=source], .latex-body[data-layout=pdf] { grid-template-rows: minmax(0, 1fr); }
   .latex-splitter { cursor: row-resize; }
 }
+
+#latex-editor-mode { width: 122px; }
+#latex-swap-panes { font-size: 19px; min-width: 32px; }
+.latex-format-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.latex-format-bar[hidden] { display: none; }
+.latex-format-bar .button { min-width: 28px; height: 28px; padding: 2px 7px; }
+.latex-format-bold { font-weight: 750; }.latex-format-italic { font-family: Georgia, serif; font-style: italic; }.latex-format-underline { text-decoration: underline; }
+.latex-visual-help { margin-inline-start: auto; color: var(--muted); font: 12px/1.5 var(--sans); }
+.latex-visual-editor .cm-gutters { display: none; }
+.latex-visual-editor .cm-content { padding: 24px 18px 80px; color: var(--latex-editor-ink); }
+.latex-visual-editor .cm-line { padding: 2px 4px; }
+.latex-visual-editor .cm-activeLine { background: transparent; }
+.latex-visual-editor .latex-visual-bold { font-weight: 750; }
+.latex-visual-editor .latex-visual-italic { font-style: italic; }
+.latex-visual-editor .latex-visual-underline { text-decoration: underline; text-underline-offset: 3px; }
+.latex-visual-editor .latex-visual-code { font-family: ui-monospace, monospace; padding: 1px 3px; background: var(--latex-editor-gutter); border-radius: 3px; }
+.latex-visual-editor .latex-visual-normal { font-weight: 400; font-style: normal; }
+.latex-visual-editor [class*=latex-visual-heading-] { color: var(--latex-editor-ink); font-weight: 700; line-height: 1.35; }
+.latex-visual-editor .latex-visual-heading-1 { font-size: 1.65em; }.latex-visual-editor .latex-visual-heading-2 { font-size: 1.4em; }.latex-visual-editor .latex-visual-heading-3 { font-size: 1.2em; }.latex-visual-editor .latex-visual-heading-4 { font-size: 1.1em; }
+.latex-visual-editor .latex-visual-line-heading { padding-block: 12px 5px; }
+.latex-visual-editor .latex-visual-line-list { padding-inline-start: 18px; }
+.latex-visual-editor .latex-visual-comment { font-family: ui-monospace, monospace; font-size: .9em; color: var(--latex-editor-muted); }
+.latex-visual-widget { cursor: text; color: var(--latex-editor-ink); }
+.latex-visual-widget:focus-visible { outline: 2px solid var(--latex-active-marker); outline-offset: 2px; }
+.latex-visual-preamble { display: inline-block; font: 12px/1.5 var(--sans); color: var(--latex-editor-muted); border: 1px solid var(--line); border-radius: 5px; padding: 4px 8px; margin-bottom: 12px; cursor: pointer; }
+.latex-visual-title { display: inline-block; font-size: 1.7em; font-weight: 700; line-height: 1.4; padding-block: 14px; }
+.latex-visual-label { padding-inline-end: .5em; font-weight: 600; }
+.latex-visual-citation { color: var(--latex-active-marker); }
+.latex-visual-math { display: inline-block; max-width: 100%; overflow-x: auto; vertical-align: middle; }
+.latex-visual-math math[display=block] { margin: .6em 0; }
+.latex-visual-raw { font-family: ui-monospace, monospace; font-size: .9em; }
 
 .latex-spelling-mark, .latex-terminology-mark, .latex-source-review-mark {
   text-decoration-line: underline;

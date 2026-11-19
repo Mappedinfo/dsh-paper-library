@@ -2063,6 +2063,36 @@ async function projectMemoryFixture(seed=[]){
 const memoryActions=new Set(['latex_memory_get','latex_memory_save','latex_favorite_set']);
 const savedPosition=(id='two',extra={})=>({action:'latex_memory_save',id,title:id,root:'',binding_generation:0,path:'b.tex',revision:'revision',selection_start:5,selection_end:9,line:1,column:5,scroll_top:50,pdf_page:3,zoom:1.5,layout:'source',...extra});
 
+test('swapping source and preview preserves the draft, adjusts splitter direction, and resumes per project',async()=>{
+ const memory=await projectMemoryFixture([]);
+ const f=await fixture((action,args)=>memoryActions.has(action)?memory({action,...args}):action==='settings_update'?{value:{latex_auto_compile:false,...args.patch},revision:'2'}:undefined);
+ const editor=f.ids.get('latex-editor');editor.value='unsaved synthetic draft';await editor.dispatch('input');
+ const before=f.calls.filter(c=>c.action==='latex_write').length;
+ await f.ids.get('latex-swap-panes').dispatch('click');
+ assert.equal(f.ui.testHooks.state().paneOrder,'pdf-first');assert.equal(editor.value,'unsaved synthetic draft');
+ assert.equal(f.ids.get('latex-swap-panes').getAttribute('aria-pressed'),'true');assert.equal(f.calls.filter(c=>c.action==='latex_write').length,before);
+ const split=f.ui.testHooks.state().split;await f.ids.get('latex-splitter').dispatch('keydown',{key:'ArrowRight'});assert.equal(f.ui.testHooks.state().split,split-2);
+ await f.ids.get('latex-layout-pdf').dispatch('click');await f.ids.get('latex-swap-panes').dispatch('click');assert.equal(f.ui.testHooks.state().layout,'split');assert.equal(f.ui.testHooks.state().paneOrder,'source-first');
+ f.ui.testHooks.setPaneOrder('pdf-first');await f.ui.testHooks.flush();await f.ui.close();
+ assert.equal((await memory({action:'latex_memory_get',id:'one'})).session.pane_order,'pdf-first');f.ui.dispose();
+})
+
+test('visual mode, format actions and resumed display use the same editor without source writes on mode changes',async()=>{
+ const modes=[],formats=[],memory=await projectMemoryFixture([savedPosition('one',{path:'main.tex',pane_order:'pdf-first',editor_mode:'visual'})]);
+ const enhanced={setMode:mode=>modes.push(mode),format:kind=>{formats.push(kind);return true},requestMeasure(){},destroy(){}};
+ const f=await fixture((action,args)=>memoryActions.has(action)?memory({action,...args}):undefined,{sourceEditor:enhanced});
+ assert.equal(f.ids.get('latex-editor-mode').value,'visual');assert.equal(f.ui.testHooks.state().paneOrder,'pdf-first');assert.equal(f.ids.get('latex-format-bar').hidden,false);
+ await f.ids.get('latex-format-bold').dispatch('click');assert.deepEqual(formats,['bold']);
+ const editor=f.ids.get('latex-editor'),source=editor.value,writes=f.calls.filter(c=>c.action==='latex_write').length;
+ f.ids.get('latex-editor-mode').value='source';await f.ids.get('latex-editor-mode').dispatch('change');assert.equal(f.ids.get('latex-format-bar').hidden,true);assert.equal(modes.at(-1),'source');
+ assert.equal(editor.value,source);assert.equal(f.calls.filter(c=>c.action==='latex_write').length,writes);
+ await f.ui.close();assert.equal((await memory({action:'latex_memory_get',id:'one'})).session.editor_mode,'source');f.ui.dispose();
+})
+
+test('native fallback keeps source editing available and never advertises an unavailable visual editor',async()=>{
+ const f=await fixture();assert.equal(f.ids.get('latex-editor-mode').disabled,true);f.ui.testHooks.setEditorMode('visual');assert.equal(f.ui.testHooks.state().editorMode,'source');assert.equal(f.ids.get('latex-format-bar').hidden,true);f.ui.dispose();
+})
+
 test('favorites lead the picker while reopening resumes the last project, file, cursor and PDF page',async()=>{
  const memory=await projectMemoryFixture([{action:'latex_favorite_set',id:'one',title:'one',favorite:true},savedPosition()]);
  const override=(action,args)=>memoryActions.has(action)?memory({action,...args}):undefined;

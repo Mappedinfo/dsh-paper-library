@@ -16,6 +16,7 @@ Project scaffolding was generated through the author's `academic-templates/dev-p
 | citeproc-js | CSL processor | [citeproc-js](https://github.com/Juris-M/citeproc-js) / CPAL-1.0-or-later or AGPL-3.0-or-later; default here uses the AGPL option, [upstream notice retained](licenses/citeproc-NOTICE.txt) |
 | Citation.js core and BibTeX plugin | BibLaTeX parsing and output | [Citation.js](https://github.com/citation-js/citation-js) / MIT |
 | CodeMirror 6、LaTeX 模式、Lezer 及配套包 | 本地打包的源码编辑器 | [CodeMirror](https://codemirror.net/) / MIT；依赖许可声明保存在 [codemirror-MIT.txt](licenses/codemirror-MIT.txt) |
+| KaTeX 0.19.1 | LaTeX 可视化编辑中的本地 MathML 公式预览 | [KaTeX](https://katex.org/) / MIT；[许可](licenses/katex-MIT.txt)，不启用受信任命令，不下载字体或远程资源 |
 | dictionary-en、nspell、is-buffer | 本地英文拼写字典及检查器 | [dictionary-en](https://github.com/wooorm/dictionaries) / MIT 和 BSD，[许可](licenses/dictionary-en.txt)；[nspell](https://github.com/wooorm/nspell) / [MIT](licenses/nspell.txt)；is-buffer / [MIT](licenses/is-buffer.txt) |
 | EqTrace | 从选定的 Python 源码提取网络与训练流程 | [源码](https://github.com/Mappedinfo/eqtrace) / [MIT](vendor/eqtrace/LICENSE)，[随包版本](vendor/eqtrace/REVISION) |
 | PlainDeck | Slides 编辑器、开放项目格式、模板与渲染器 | [PlainDeck](https://github.com/Mappedinfo/PlainDeck) / MIT；固定源码与原许可见 [子项目说明](vendor/plaindeck/README.md)，Juya 派生设计目录的原声明保留在子项目内 |

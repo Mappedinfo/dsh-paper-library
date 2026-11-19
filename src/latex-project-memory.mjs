@@ -12,12 +12,14 @@ function sessionOf(value) {
   if (![1,1.25,1.5,2,3,4].includes(zoom)) throw fail('PDF 缩放无效。')
   const layout = value.layout ?? 'split'
   if (!['source','split','pdf'].includes(layout)) throw fail('编辑布局无效。')
+  const paneOrder = value.pane_order ?? 'source-first', editorMode = value.editor_mode ?? 'source'
+  if (!['source-first','pdf-first'].includes(paneOrder) || !['source','visual'].includes(editorMode)) throw fail('编辑显示方式无效。')
   return { root: text(value.root ?? '',4096,'项目位置'), binding_generation: integer(value.binding_generation ?? 0,0,1e9,'项目位置版本'), path,
     revision: text(value.revision ?? '',200,'源码版本'),
     selection_start: integer(value.selection_start ?? 0,0,10000000,'光标位置'), selection_end: integer(value.selection_end ?? 0,0,10000000,'选区位置'),
     line: integer(value.line ?? 1,1,10000000,'行号'), column: integer(value.column ?? 0,0,10000000,'列号'),
     scroll_top: integer(Math.round(value.scroll_top ?? 0),0,100000000,'滚动位置'),
-    pdf_page: integer(value.pdf_page ?? 1,1,100000,'PDF 页码'), zoom, layout }
+    pdf_page: integer(value.pdf_page ?? 1,1,100000,'PDF 页码'), zoom, layout, pane_order: paneOrder, editor_mode: editorMode }
 }
 export function createLatexProjectMemory({ store }) {
   async function mutate(key, update) {

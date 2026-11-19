@@ -7,6 +7,7 @@ import { searchKeymap, openSearchPanel } from '@codemirror/search'
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete'
 import { stex } from '@codemirror/legacy-modes/mode/stex'
 import { tags } from '@lezer/highlight'
+import { visualEditing, visualField, setVisualMode, applyFormat } from './latex-visual-editor.mjs'
 
 // These are suggestions, not a claim that a command is valid in every project.
 const citeCommands = ['cite', 'citep', 'citet', 'parencite', 'textcite', 'autocite', 'footcite', 'supercite', 'smartcite', 'nocite']
@@ -134,8 +135,10 @@ function create(textarea, container, citation) {
   const editable = new Compartment()
   let disabled = false
   let silent = false
+  let visual = false
+  const canFormat = () => citation?.canFormat?.() !== false
   const extensions = [
-    lineNumbers(), highlightActiveLine(), highlightActiveLineGutter(), history(), bracketMatching(),
+    lineNumbers(), highlightActiveLine(), highlightActiveLineGutter(), history(), bracketMatching(), visualEditing(canFormat),
     StreamLanguage.define(stex), highlighting, theme, EditorView.lineWrapping, projectSearchMarks, spelling.field, review.field,
     EditorState.phrases.of({
       Find: '查找', Replace: '替换', next: '下一个', previous: '上一个', all: '全选匹配',
@@ -166,6 +169,7 @@ function create(textarea, container, citation) {
       try {
         view.setState(newState(String(value ?? '')))
         view.dispatch({ effects: editable.reconfigure([EditorState.readOnly.of(disabled), EditorView.editable.of(!disabled)]) })
+        if (visual) setVisualMode(view, true)
       } finally { silent = false }
     } },
     selectionStart: { configurable: true, get: () => view.state.selection.main.from },
@@ -188,7 +192,10 @@ function create(textarea, container, citation) {
     if (!marks.length && view.state.field(layer.field) === Decoration.none) return
     view.dispatch({ effects: layer.set.of(Decoration.set(marks, true)) })
   }
-  return { view, restorePosition({start,end,scrollTop}) {
+  return { view, setMode(mode) { visual = mode === 'visual'; setVisualMode(view, visual) },
+  format: kind => canFormat() && applyFormat(view, kind),
+  visualStatus: () => ({ bounded: view.state.field(visualField).plan.bounded }),
+  restorePosition({start,end,scrollTop}) {
     const limit=view.state.doc.length;
     view.dispatch({selection:{anchor:Math.max(0,Math.min(start,limit)),head:Math.max(0,Math.min(end,limit))}});
     view.scrollDOM.scrollTop=Math.max(0,scrollTop);

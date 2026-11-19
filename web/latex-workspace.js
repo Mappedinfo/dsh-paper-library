@@ -137,6 +137,11 @@ window.PaperLatexWorkspace = (() => {
       button.setAttribute('aria-pressed', String(mode === 'split')); button.addEventListener('click', () => setLayout(mode));
       layoutButtons.set(mode, button); layoutControls.append(button);
     }
+    const editorModeSelect = make('select'); editorModeSelect.id = 'latex-editor-mode'; editorModeSelect.setAttribute('aria-label', '编辑模式');
+    for (const [value, label] of [['source', '源码'], ['visual', '所见即所得']]) { const option = make('option', '', label); option.value = value; editorModeSelect.append(option); }
+    editorModeSelect.value = 'source'; editorModeSelect.title = '切换编辑方式；共用同一份 LaTeX 源码和保存记录';
+    const swapPanes = make('button', 'button subtle', '⇄'); swapPanes.id = 'latex-swap-panes'; swapPanes.type = 'button';
+    swapPanes.setAttribute('aria-label', '交换编辑区与预览区左右位置'); swapPanes.setAttribute('aria-pressed', 'false'); swapPanes.title = '交换编辑区与预览区左右位置';
     aiToggle.title = '查看批注、向 DSH 提问或审阅修改提案';
     const menuButton = make('button', 'button subtle latex-menu-button', '⚙'); menuButton.id = 'latex-menu-open'; menuButton.type = 'button';
     menuButton.setAttribute('aria-expanded', 'false'); menuButton.setAttribute('aria-controls', 'latex-menu'); menuButton.setAttribute('aria-label', '设置'); menuButton.title = '设置';
@@ -401,7 +406,7 @@ window.PaperLatexWorkspace = (() => {
     const outlineList = make('div', 'latex-outline'); outlineList.id = 'latex-outline'; outlineList.setAttribute('role', 'tabpanel');
     const mediaList = make('div', 'latex-media'); mediaList.id = 'latex-media'; mediaList.setAttribute('role', 'tabpanel');
     const navHint = make('p', 'latex-nav-hint'); navHint.textContent = '按已保存源码顺序；宏与条件不展开。';
-    const body = make('div', 'latex-body');
+    const body = make('div', 'latex-body'); body.dataset.layout = 'split';
     const left = make('section', 'latex-editor-pane'); left.setAttribute('aria-label', '源文件');
     const fileList = make('ul', 'latex-files'); fileList.id = 'latex-files';
     fileList.setAttribute('role', 'tabpanel');
@@ -446,11 +451,25 @@ window.PaperLatexWorkspace = (() => {
     try { sourceEditor = window.PaperLatexEditor?.create?.(editor, editorWrap, {
       search: searchLibraryCitation,
       pick: (item, range) => void insertLibraryCitation(item, { ...writingContext(), range }),
+      canFormat: () => /\.tex$/i.test(file || '') && !writingContext().blocked,
     }) || null; } catch { /* Keep the native textarea usable if the enhanced editor cannot mount. */ }
     if (sourceEditor) { editorWrap.classList.add('latex-codemirror'); gutter.hidden = true; }
+    const formatBar = make('div', 'latex-format-bar'); formatBar.id = 'latex-format-bar'; formatBar.setAttribute('role', 'group'); formatBar.setAttribute('aria-label', '文字格式'); formatBar.hidden = true;
+    for (const [kind, label, hint] of [['bold', 'B', '加粗 · ⌘/Ctrl+B'], ['italic', 'I', '斜体 · ⌘/Ctrl+I'], ['underline', 'U', '下划线 · ⌘/Ctrl+U'], ['code', '等宽', '等宽文字'], ['heading', '标题', '章节标题']]) {
+      const button = make('button', `button subtle latex-format-${kind}`, label); button.type = 'button'; button.id = `latex-format-${kind}`; button.title = hint; button.setAttribute('aria-label', hint);
+      button.addEventListener('mousedown', event => event.preventDefault()); // Keep the editor selection when using the toolbar.
+      button.addEventListener('click', () => {
+        if (writingContext().blocked || !sourceEditor?.format?.(kind)) say('请在正文中选择完整文字；公式、引用和文档设置请直接编辑源码。', true);
+      });
+      formatBar.append(button);
+    }
+    const visualHelp = make('span', 'latex-visual-help', '公式与引用点入编辑'); visualHelp.title = '常见标题、文字格式和列表直接呈现；复杂宏、表格及不支持的公式保留源码。PDF 为正式排版。'; formatBar.append(visualHelp);
+    editorModeSelect.disabled = !sourceEditor?.setMode;
+    editorModeSelect.addEventListener('change', () => setEditorMode(editorModeSelect.value));
+    swapPanes.addEventListener('click', () => { setPaneOrder(paneOrder === 'source-first' ? 'pdf-first' : 'source-first'); if (layout !== 'split') setLayout('split'); });
     sourceSearch.hidden = !sourceEditor;
     sourceSearch.addEventListener('click', () => sourceEditor?.openSearch());
-    left.append(breadcrumb, sourceToolsMenu, formulaHost, spellResults, translateResults, editorWrap);
+    left.append(breadcrumb, formatBar, sourceToolsMenu, formulaHost, spellResults, translateResults, editorWrap);
 
     const splitter = make('div', 'latex-splitter'); splitter.id = 'latex-splitter'; splitter.setAttribute('role', 'separator');
     splitter.setAttribute('aria-orientation', 'vertical'); splitter.setAttribute('aria-label', '调整源码与预览宽度'); splitter.tabIndex = 0;
@@ -485,7 +504,7 @@ window.PaperLatexWorkspace = (() => {
     const darkPdfToggle = make('button', 'button subtle latex-layout-button', '深色 PDF'); darkPdfToggle.id = 'latex-pdf-dark'; darkPdfToggle.type = 'button';
     darkPdfToggle.setAttribute('aria-pressed', 'false'); darkPdfToggle.title = '切换 PDF 页面配色';
     pdfDisplay.append(zoomSelect, spreadToggle, darkPdfToggle);
-    toolbar.append(title, projectSelect, favoriteProject, memoryRetry, mainLabel, saveState, compile, editorFontControls, autoToggle, diagnosticsToggle, navToggle, aiToggle, reviewToggle, sidebarDivider, layoutControls, pdfDisplay);
+    toolbar.append(title, projectSelect, favoriteProject, memoryRetry, mainLabel, saveState, compile, editorFontControls, autoToggle, diagnosticsToggle, navToggle, aiToggle, reviewToggle, sidebarDivider, editorModeSelect, layoutControls, swapPanes, pdfDisplay);
     const renderState = make('span', 'latex-render-state'); renderState.id = 'latex-render-state'; renderState.setAttribute('role', 'status');
     const pdfTools = make('div', 'latex-pdf-tools');
     for (const [mode, label] of [['select', '选择'], ['highlight', '高亮'], ['underline', '下划线'], ['strikeout', '删除线'], ['comment', '批注'], ['note', '区域']]) {
@@ -598,7 +617,20 @@ window.PaperLatexWorkspace = (() => {
     const editorSurface = make('div', 'latex-editor-surface');
     editorSurface.append(topbar, errors, content, footer);
     view.append(navigator, editorSurface);
-    let layout = 'split';
+    let layout = 'split', paneOrder = 'source-first', editorMode = 'source';
+    function setPaneOrder(order) {
+      paneOrder = order === 'pdf-first' ? 'pdf-first' : 'source-first'; body.dataset.paneOrder = paneOrder;
+      swapPanes.setAttribute('aria-pressed', String(paneOrder === 'pdf-first'));
+      sourceEditor?.requestMeasure?.(); requestResize(); scheduleProjectMemory();
+    }
+    function setEditorMode(mode) {
+      editorMode = mode === 'visual' && sourceEditor?.setMode ? 'visual' : 'source'; editorModeSelect.value = editorMode;
+      const visual = editorMode === 'visual' && /\.tex$/i.test(file || '');
+      sourceEditor?.setMode?.(visual ? 'visual' : 'source'); formatBar.hidden = !visual;
+      layoutButtons.get('source').textContent = visual ? '仅编辑' : '仅源码';
+      if (sourceEditor?.visualStatus?.().bounded && visual) say('当前文件较大或嵌套较深，部分内容保留源码显示。');
+      scheduleProjectMemory();
+    }
     function setLayout(mode) {
       if (!layoutButtons.has(mode)) return;
       if (mode === 'source') clearPdfSelection();
@@ -611,6 +643,7 @@ window.PaperLatexWorkspace = (() => {
       syncPdfDisplay();
       if (mode === 'pdf') setTab('pdf');
       if (mode !== 'source') requestResize();
+      sourceEditor?.requestMeasure?.();
       scheduleProjectMemory();
     }
     function setNavigatorVisible(visible) {
@@ -1189,7 +1222,9 @@ window.PaperLatexWorkspace = (() => {
     function splitFromEvent(event) {
       const rect = body.getBoundingClientRect();
       if (!rect.width) return settings.latex_split;
-      return ((event.clientX - rect.left) / rect.width) * 100;
+      const vertical = window.matchMedia?.('(max-width: 900px)').matches;
+      const fraction = vertical ? (event.clientY - rect.top) / rect.height : (event.clientX - rect.left) / rect.width;
+      return (paneOrder === 'pdf-first' ? 1 - fraction : fraction) * 100;
     }
     splitter.addEventListener('pointerdown', event => {
       dragging = true; splitter.setPointerCapture(event.pointerId); splitter.classList.add('dragging'); event.preventDefault();
@@ -1204,7 +1239,7 @@ window.PaperLatexWorkspace = (() => {
     splitter.addEventListener('keydown', event => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       event.preventDefault();
-      void saveSetting({ latex_split: setSplit(settings.latex_split + (event.key === 'ArrowRight' ? 2 : -2)) });
+      void saveSetting({ latex_split: setSplit(settings.latex_split + (event.key === 'ArrowRight' ? 2 : -2) * (paneOrder === 'pdf-first' ? -1 : 1)) });
     });
 
     async function refreshWorkspace() {
@@ -1406,7 +1441,7 @@ window.PaperLatexWorkspace = (() => {
     function captureProjectMemory(sourceSaved=false){
       if(restoringMemory||!project||!file||editor.disabled)return null;
       const start=Math.max(0,Number(editor.selectionStart)||0),end=Math.max(start,Number(editor.selectionEnd)||start),before=editor.value.slice(0,start).split('\n');
-      return{id:project.id,title:project.title||project.id,root:project.root||'',binding_generation:project.binding_generation||0,path:file,revision:revision||'',selection_start:start,selection_end:end,line:before.length,column:before.at(-1).length,scroll_top:Math.max(0,Math.round(editor.scrollTop||0)),pdf_page:Math.max(1,page),zoom,layout,source_saved:sourceSaved};
+      return{id:project.id,title:project.title||project.id,root:project.root||'',binding_generation:project.binding_generation||0,path:file,revision:revision||'',selection_start:start,selection_end:end,line:before.length,column:before.at(-1).length,scroll_top:Math.max(0,Math.round(editor.scrollTop||0)),pdf_page:Math.max(1,page),zoom,layout,pane_order:paneOrder,editor_mode:editorMode,source_saved:sourceSaved};
     }
     function rememberProject(sourceSaved=false){
       clearTimeout(memoryTimer);memoryTimer=null;
@@ -1528,6 +1563,7 @@ window.PaperLatexWorkspace = (() => {
       page = Number.isSafeInteger(activeSession?.pdf_page)?Math.max(1,activeSession.pdf_page):1;
       if(activeSession&&[1,1.25,1.5,2,3,4].includes(activeSession.zoom)){zoom=activeSession.zoom;zoomSelect.value=String(zoom);}
       if(activeSession?.layout)setLayout(activeSession.layout);
+      setPaneOrder(activeSession?.pane_order); setEditorMode(activeSession?.editor_mode);
       if (project.pdf_present) await loadLayout(); else setPreviewMessage('还没有 PDF；点「编译」生成。');
       if (ticket !== generation) return;
       restoringMemory=false;void rememberProject();
@@ -1770,6 +1806,7 @@ window.PaperLatexWorkspace = (() => {
       cancelTranslation(); file = read.path; revision = read.revision; dirty = false;
       editor.disabled = false; currentFile.textContent = file;
       editor.value = read.content; lineNumbers(); editor.scrollTop = 0; gutter.scrollTop = 0;
+      setEditorMode(editorMode);
       restoreSourcePosition(options.resume,read);
       patchSourceSearch();
       paintSourceNotes();
@@ -3157,6 +3194,7 @@ window.PaperLatexWorkspace = (() => {
         reviewer: () => reviewer,
         compile: reason => compileOnce(reason || 'manual'),
         setTab,
+        setEditorMode, setPaneOrder, setLayout,
         showRail,
         railVisible: () => Boolean(rail?.visible?.('latex-ai')),
         setSplit: (percent, persist) => setSplit(percent, { persist: persist === true }),
@@ -3164,7 +3202,7 @@ window.PaperLatexWorkspace = (() => {
         attachSync: () => api('latex_ws_sync_attach'),
         status: () => refreshWorkspace(),
         state: () => ({
-          project: project?.id || null, file, revision, dirty, pageCount, page, tab, pdfSource: { ...pdfSource }, split: settings.latex_split, rail: Boolean(rail), railOpen: Boolean(rail?.visible?.('latex-ai')),
+          project: project?.id || null, file, revision, dirty, pageCount, page, tab, pdfSource: { ...pdfSource }, split: settings.latex_split, editorMode, paneOrder, layout, rail: Boolean(rail), railOpen: Boolean(rail?.visible?.('latex-ai')),
           auto: settings.latex_auto_compile !== false, autoPaused, lastBuildOk, root: workspace.root,
           syncCovered: Boolean(workspace.sync?.covered), conflict: Boolean(pendingConflict),
           ai: { available: ai.available, proposal: ai.proposal?.id || null },
