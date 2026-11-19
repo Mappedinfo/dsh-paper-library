@@ -1,6 +1,17 @@
 .board-flow-host { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; color: var(--dsw-alias-label-primary, #222); background: var(--dsw-alias-bg-base, #fff); font: 12px/1.45 var(--dsw-font-family, system-ui, sans-serif); }
 .board-flow-header { position: sticky; top: 0; z-index: 1401; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; flex: 0 0 auto; min-width: 0; padding: 5px 8px; box-sizing: border-box; background: var(--dsw-alias-bg-layer-1, #fff); border-bottom: 1px solid var(--dsw-alias-border-l2, #ddd); }
 .board-flow-header strong { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-flow-titles { min-width: 0; max-width: min(52%, 64rem); }
+.board-flow-titles[hidden], .board-flow-titles:empty, .paper-flow-info[hidden] { display: none; }
+.paper-flow-titles, .paper-flow-title { display: flex; align-items: center; min-width: 0; }
+.paper-flow-titles { gap: 12px; }
+.paper-flow-title { gap: 4px; }
+.paper-flow-title-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.board-flow-header .paper-flow-info-button { flex: none; width: 22px; height: 22px; min-height: 0; padding: 0; border: 1px solid currentColor; border-radius: 50%; color: var(--dsw-alias-label-secondary, #555); font: bold 14px/1 Georgia, serif; }
+.board-flow-header .paper-flow-info-button[aria-expanded="true"] { color: var(--dsw-alias-link, #005ea8); }
+.paper-flow-info { position: absolute; z-index: 1; inset-block-start: 100%; inset-inline-start: min(12%, 12rem); box-sizing: border-box; width: max-content; max-width: min(30rem, 85%); max-height: 45vh; overflow: auto; overflow-wrap: anywhere; padding: 8px 12px; border: 1px solid var(--dsw-alias-border-l2, #ccc); border-radius: 5px; background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-primary, #222); box-shadow: 0 4px 12px #0002; }
+.paper-flow-info :is(p, pre) { margin: 0; white-space: pre-wrap; }
+.paper-flow-info p + pre { margin-top: 6px; }
 .board-flow-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-left: auto; }
 .board-flow-header button, .board-flow-empty button, .board-flow-import { box-sizing: border-box; min-height: 28px; padding: 4px 8px; border: 1px solid var(--dsw-alias-border-l2, #ccc); border-radius: 4px; background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-primary, #222); font: inherit; cursor: pointer; }
 .board-flow-header button:hover:not(:disabled), .board-flow-empty button:hover, .board-flow-import:hover { background: var(--dsw-alias-interactive-bg-hover, #eee); }

@@ -48,6 +48,7 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
   const [comparisonHost, setComparisonHost] = useState<HTMLDivElement | null>(null)
   const [dataHost, setDataHost] = useState<HTMLDivElement | null>(null)
   const [controlsHost, setControlsHost] = useState<HTMLDivElement | null>(null)
+  const [titlesHost, setTitlesHost] = useState<HTMLDivElement | null>(null)
   const [figureControls, setFigureControls] = useState<HTMLDivElement | null>(null)
   const [fullscreenHost, setFullscreenHost] = useState<HTMLElement | null>(null)
   const activeDoc = view.workspace?.documents.find(doc => doc.paper.id === view.workspace?.selection.left.documentId)
@@ -125,7 +126,9 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
   const eqDocuments = view.workspace?.documents.filter(doc => eqTraceFlows(doc).length) || []
   const header = <header className="board-flow-header">
       <button type="button" onClick={() => void close()}>← 返回画板</button>
-      <strong title={view.title}>{view.title || '流程工作区'}</strong><span className={`board-flow-status${view.blocked || view.invalid ? ' is-error' : ''}`} role="status">{status}</span>
+      <strong title={view.title}>{view.title || '流程工作区'}</strong>
+      <div className="board-flow-titles" ref={setTitlesHost} hidden={!view.workspace || paperVisible || view.loading} />
+      <span className={`board-flow-status${view.blocked || view.invalid ? ' is-error' : ''}`} role="status">{status}</span>
       <div className="board-flow-local-panels" role="group" aria-label="流程侧栏">
         {(['compare','code'] as const).map(id => <button type="button" key={id} data-panel-toggle={id}
           aria-expanded={panel === id} aria-controls={`paper-flow-${id}-panel`} onClick={() => togglePanel(id)}>{dockNames[id]}</button>)}
@@ -186,6 +189,7 @@ function Panel({ controller, close, subscribe, prepareReturnToDsh, workbench, se
       </section>}
       {view.workspace ? <FlowErrorBoundary recoveryKey={`${view.id}:${view.version}`}><PaperFlowWorkbench ref={workbench} key={`${view.id}:${view.epoch}`} workspace={view.workspace}
         comparisonHost={comparisonHost} controlsHost={controlsHost} fullscreenHost={fullscreenHost}
+        titlesHost={paperVisible || view.loading ? null : titlesHost}
         onWorkspaceChange={(next: FlowWorkspace) => {
           if (controller.edit(next, { id: view.id, epoch: view.epoch, version: view.version })) setPreview(null)
         }}

@@ -106,7 +106,7 @@ test('native toggles dock the actual A/B and input tools; the canvas example lea
     const chooseC=[...sideB.options].find(option=>option.textContent.includes('Synthetic C'))
     sideB.value=chooseC.value
     sideB.dispatchEvent(new f.w.Event('change',{bubbles:true}))
-    await f.waitFor(()=>canvas.textContent.includes('Flow C')||f.saves.length,'A/B edit')
+    await f.waitFor(()=>header.textContent.includes('Flow C'),'updated comparison title')
     await f.toggle('code',true)
     assert.ok(code.querySelector('.eqtrace-form input[type="file"]'))
     f.button(header,'编码器–解码器示例').click()
@@ -137,6 +137,62 @@ test('native toggles dock the actual A/B and input tools; the canvas example lea
     assert.deepEqual(f.saves.at(-1).drafts,original.drafts)
     assert.deepEqual(f.saves.at(-1).documents,original.documents)
     assert.deepEqual(f.errors,[])
+  })
+
+
+test('selected flow titles share the board header and optional notes follow their own selection',
+  {skip:!JSDOM,timeout:12000}, async t => {
+    const work=originalWorkspace()
+    Object.assign(work.documents[0].flows[0],{subtitle:'First source note',metric_text:'First metric'})
+    work.documents[1].flows[0].reported_results={score:0.375}
+    const f=await fixture(t,work)
+    await f.host.open({id:'summary-board',title:'Synthetic board'})
+    await f.waitFor(()=>f.root.querySelector('.paper-flow-controls-toolbar'),'loaded flow workspace')
+    const header=f.root.querySelector('.board-flow-header'), canvas=f.root.querySelector('.board-flow-content')
+    const info=side=>header.querySelector(`button[aria-label="查看 ${side} 流程说明"]`)
+    const expanded=button=>button?.getAttribute('aria-expanded')==='true'
+    const content=button=>f.doc.getElementById(button.getAttribute('aria-controls'))
+    await f.waitFor(()=>info('A')&&info('B'),'header flow information')
+    for(const name of ['Synthetic board','Flow A','Flow B']) assert.ok(header.textContent.includes(name))
+    assert.equal(canvas.querySelector('.paper-flow-summaries'),null)
+    const a=info('A'), b=info('B')
+    assert.equal(a.getAttribute('aria-expanded'),'false')
+    assert.equal(b.getAttribute('aria-expanded'),'false')
+    assert.equal(content(a).hidden,true)
+    assert.equal(content(b).hidden,true)
+    a.click()
+    await f.waitFor(()=>expanded(a),'open A information')
+    assert.equal(content(a).hidden,false)
+    assert.match(content(a).textContent,/First source note/)
+    assert.match(content(a).textContent,/First metric/)
+    a.dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}))
+    await f.waitFor(()=>!expanded(a),'dismiss information using Escape')
+    assert.equal(content(a).hidden,true)
+    assert.equal(f.doc.activeElement,a)
+
+    b.click()
+    await f.waitFor(()=>expanded(b),'open B results')
+    assert.match(content(b).textContent,/0\.375/)
+    await f.toggle('compare',true)
+    const choice=f.doc.querySelector('select[aria-label="论文与流程 B"]')
+    choice.value=[...choice.options].find(option=>option.textContent.includes('Synthetic C')).value
+    choice.dispatchEvent(new f.w.Event('change',{bubbles:true}))
+    await f.waitFor(()=>header.textContent.includes('Flow C')&&!info('B'),'new B with no information')
+    assert.doesNotMatch(header.textContent,/0\.375|Flow B/)
+    choice.value=''
+    choice.dispatchEvent(new f.w.Event('change',{bubbles:true}))
+    await f.waitFor(()=>canvas.querySelector('.paper-flow-single'),'single canvas')
+    assert.equal(canvas.querySelector('.paper-flow-single > section > h3'),null)
+    assert.ok(header.textContent.includes('Flow A'))
+
+    info('A').click()
+    await f.waitFor(()=>expanded(info('A')),'reopen A information')
+    f.button(header,'编码器–解码器示例').click()
+    await f.waitFor(()=>canvas.querySelector('.eqtrace-main .eqtrace-figure-surface svg'),'open inline example')
+    assert.equal(header.querySelector('button[aria-expanded="true"][aria-label="查看 A 流程说明"]'),null)
+    f.button(header,'返回原流程').click()
+    await f.waitFor(()=>!canvas.querySelector('.eqtrace-main')&&info('A'),'restore single flow')
+    assert.equal(info('A').getAttribute('aria-expanded'),'false')
   })
 
 

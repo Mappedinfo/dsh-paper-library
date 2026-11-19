@@ -15,6 +15,7 @@ export type FlowCompareProps = {
   b: FlowGraph;
   identityA: string;
   identityB: string;
+  titlesInHeader?: boolean;
   options: FlowViewOptions;
   spec: FlowComparisonSpec;
   comparison?: ReturnType<typeof compareFlows>;
@@ -103,11 +104,11 @@ export function FlowCompare(props: FlowCompareProps) {
         {props.options.mode === "parallel" ? (
           <>
             <section aria-label="论文 A">
-              <h3>A · {props.a.name}</h3>
+              <h3>{props.titlesInHeader ? "A" : "A · " + props.a.name}</h3>
               {drawing("a", aligned.a, props.draftA, props.identityA, a)}
             </section>
             <section aria-label="论文 B">
-              <h3>B · {props.b.name}</h3>
+              <h3>{props.titlesInHeader ? "B" : "B · " + props.b.name}</h3>
               {drawing("b", aligned.b, props.draftB, props.identityB, b)}
             </section>
           </>

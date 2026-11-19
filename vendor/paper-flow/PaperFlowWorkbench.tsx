@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { FlowCanvas, type FlowCanvasHandle } from "./FlowCanvas";
 import { FlowCompare, FlowComparisonReport } from "./FlowCompare";
 import { FlowLegend } from "./FlowLegend";
+import { FlowTitles } from "./FlowTitles";
 import { FlowWindow } from "./FlowWindow";
 import {
   blankDraft,
@@ -48,6 +49,7 @@ export type PaperFlowWorkbenchProps = {
   toolbar?: ReactNode;
   comparisonHost?: HTMLElement | null;
   controlsHost?: HTMLElement | null;
+  titlesHost?: HTMLElement | null;
   /** 两个工具栏移出画布后，由共同宿主承载全屏；不传时维持工作台自身全屏。 */
   fullscreenHost?: HTMLElement | null;
 };
@@ -80,7 +82,7 @@ const mergedKey = (w: FlowWorkspace) =>
   ]);
 export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlowWorkbenchProps>(
   function PaperFlowWorkbench(
-    { workspace: w, onWorkspaceChange, services, prepareImport, renderNodeDetails, onNodeSelect, toolbar, comparisonHost, controlsHost, fullscreenHost },
+    { workspace: w, onWorkspaceChange, services, prepareImport, renderNodeDetails, onNodeSelect, toolbar, comparisonHost, controlsHost, titlesHost, fullscreenHost },
     ref,
   ) {
     const [editable, setEditable] = useState(false),
@@ -138,6 +140,7 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
     const left = resolveFlow(w, w.selection.left)!,
       right = w.selection.right ? resolveFlow(w, w.selection.right) : undefined;
     const selectionKey = JSON.stringify([w.selection.left, w.selection.right || null]);
+    const titleTarget = !fullscreen || fullscreenHost ? titlesHost : null;
     const previousSelection = useRef(selectionKey);
     const comparison = useMemo(() => right ? compareFlows(left, right, w.comparison) : null, [left, right, w.comparison]);
     useEffect(() => {
@@ -566,7 +569,7 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
         {importing && fileState.surface === "canvas" && <p role="status">{reading}</p>}
         {fileNotice?.surface === "canvas" && notice}
         {showDiagnostics(diagnostics)}
-        <div className="paper-flow-summaries">
+        {titleTarget ? createPortal(<FlowTitles key={selectionKey} left={left} right={right} />, titleTarget) : <div className="paper-flow-summaries">
           {[left, right]
             .filter((g): g is FlowGraph => !!g)
             .map((g, i) => (
@@ -584,11 +587,12 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
                 )}
               </div>
             ))}
-        </div>
+        </div>}
         {right ? (
           <FlowCompare
             a={left}
             b={right}
+            titlesInHeader={!!titleTarget}
             spec={w.comparison}
             comparison={comparison || undefined}
             options={w.view}
@@ -609,7 +613,7 @@ export const PaperFlowWorkbench = forwardRef<PaperFlowWorkbenchHandle, PaperFlow
         ) : (
           <div className="paper-flow-single">
             <section aria-label={left.name}>
-            <h3>{left.name}</h3>
+            {!titleTarget && <h3>{left.name}</h3>}
             <FlowCanvas
               ref={single}
               identity={flowKey(w.selection.left)}
