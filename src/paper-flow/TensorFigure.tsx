@@ -2,22 +2,30 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 're
 import { createPortal } from 'react-dom'
 import DOMPurify from 'dompurify'
 import type { FlowNode } from '../../vendor/paper-flow/types'
-import { nodeTensorPreview, shapeSketch, tileCount } from './tensor-preview.mjs'
+import { nodeTensorPreview, tensorDimensionContext, bindTensorShape, boundAxisLabel, shapeSketch, tileCount } from './tensor-preview.mjs'
+import type { ObservedDimensions } from './TensorDataInputs'
 
 type TensorItem = { name: string; kind?: string; shape: (string | number)[] | null; note: string }
+type DimensionProps = { examples?: unknown; meanings?: unknown; observed?: ObservedDimensions; imported?: unknown }
+type DimensionContext = ReturnType<typeof tensorDimensionContext>
 type Selected = { node: FlowNode; target: SVGGElement; pinned: boolean }
 const svgTags = ['svg', 'g', 'title', 'desc', 'defs', 'marker', 'rect', 'path', 'text', 'tspan', 'line', 'circle', 'ellipse', 'polygon', 'polyline']
 const svgAttrs = ['id', 'xmlns', 'viewBox', 'width', 'height', 'x', 'y', 'x1', 'x2', 'y1', 'y2', 'dx', 'dy', 'rx', 'ry', 'cx', 'cy', 'r', 'points', 'd', 'transform', 'text-anchor', 'dominant-baseline', 'font-size', 'font-weight', 'font-family', 'fill', 'fill-opacity', 'stroke', 'stroke-opacity', 'stroke-width', 'stroke-dasharray', 'stroke-linejoin', 'stroke-linecap', 'marker-end', 'markerWidth', 'markerHeight', 'refX', 'refY', 'orient', 'markerUnits', 'data-node', 'data-edge', 'data-x', 'data-y', 'data-shape', 'data-module']
 
-function Shape({ item }: { item: TensorItem }) {
-  const { kind, axes, prefix, open, label } = shapeSketch(item.shape, item.kind)
+function Shape({ item, context }: { item: TensorItem; context: DimensionContext }) {
+  const original = shapeSketch(item.shape, item.kind)
+  const bound = bindTensorShape(item.shape, context)
+  const { kind, axes, prefix, open, label } = shapeSketch(bound.shape, item.kind)
+  const axisLabel = (axis: unknown) => boundAxisLabel(axis, context)
+  const sourceLabel = context.mode === 'actual' ? '实际输入' : '示例输入'
   const last = axes.at(-1), previous = axes.at(-2)
   const vector = kind === 'vector'
   const finiteSlices = !open && prefix.every((axis: unknown) => typeof axis === 'number')
   const planes = finiteSlices ? Math.min(3, prefix.reduce((size: number, axis: number) => size * axis, 1)) : 3
   const rows = vector ? 1 : tileCount(previous), columns = tileCount(last)
   return <li className="eqtrace-tensor-item" data-shape-kind={kind}>
-    <div className="eqtrace-tensor-item-heading"><span>{item.name}</span><code>{label}</code></div>
+    <div className="eqtrace-tensor-item-heading"><span>{item.name}</span><code>{original.label}</code></div>
+    {bound.hasSymbols && bound.changed && <div className="eqtrace-tensor-substitution"><span>{sourceLabel}</span><code>→ {label}</code></div>}
     {kind === 'scalar' && <div className="eqtrace-tensor-scalar"><i aria-hidden="true" />标量 · 0 轴</div>}
     {kind === 'empty' && <div className="eqtrace-tensor-explain">含长度为 0 的轴</div>}
     {kind === 'open' && <div className="eqtrace-tensor-explain">前导轴数量未知</div>}
@@ -29,23 +37,30 @@ function Shape({ item }: { item: TensorItem }) {
         </g>
       </svg>
       <div>{open && <span>前导轴数未定</span>}
-        {kind === 'slices' && prefix.length > 0 && <span>切片索引轴 · {prefix.join(' × ')}</span>}
-        {vector ? <span>{open ? '末轴' : '向量轴'} · {last}</span> : <><span>行轴 · {previous}</span><span>列轴 · {last}</span></>}
+        {kind === 'slices' && prefix.length > 0 && <span>切片索引轴 · {original.prefix.map(axisLabel).join('，')}</span>}
+        {vector ? <span>{open ? '末轴' : '向量轴'} · {axisLabel(original.axes.at(-1))}</span> : <><span>行轴 · {axisLabel(original.axes.at(-2))}</span><span>列轴 · {axisLabel(original.axes.at(-1))}</span></>}
       </div>
     </div>}
     {item.note && <div className="eqtrace-tensor-explain">{item.note}</div>}
   </li>
 }
 
-function Contents({ node }: { node: FlowNode }) {
+function Contents({ node, examples, meanings, observed, imported }: { node: FlowNode } & DimensionProps) {
   const tensor = nodeTensorPreview(node)
+  const context = tensorDimensionContext(tensor, examples, meanings, observed, imported)
+  const symbols = [...context.bindings.values()]
   const status = ({ inferred: '静态推导', partial: '部分已知', unknown: '形状未知', not_applicable: '不涉及张量' } as Record<string, string>)[tensor.status]
   const lists: [string, TensorItem[]][] = [['输入', tensor.inputs], ['输出', tensor.outputs], ['参数', tensor.parameters]]
   const hasShape = lists.some(([, items]) => items.some(item => Array.isArray(item.shape)))
   return <>
     <header><strong>{node.label}</strong><span>{status}</span></header>
+    {!!symbols.length && <section className="eqtrace-dimension-bindings" aria-label="本节点的维度符号">
+      <h4>{context.mode === 'actual' ? '实际输入' : symbols.some(s => s.value !== undefined) ? '示例输入' : '维度符号'}</h4>
+      <ul>{symbols.map(s => <li key={s.name}><code>{s.name} = {s.value ?? '未指定'}</code>{s.meaning && <span>{s.meaning}</span>}{s.source && <small>{s.source}</small>}</li>)}</ul>
+      {context.mode === 'actual' && <p>{symbols.some(s => s.source) ? (context.imported ? '轴值取自文档的实际输入记录，节点张量形状按源码推导。' : '轴值取自输入文件，节点张量形状按源码推导。') : '本节点的符号尚无实际输入尺寸。'}</p>}
+    </section>}
     {tensor.status !== 'not_applicable' && lists.map(([label, items]) => !!items.length && <section key={label} aria-label={label}>
-      <h4>{label}</h4><ul>{items.map((item, index) => <Shape key={index} item={item}/>)}</ul>
+      <h4>{label}</h4><ul>{items.map((item, index) => <Shape key={index} item={item} context={context}/>)}</ul>
     </section>)}
     {tensor.note && <p>{tensor.note}</p>}
     {tensor.status === 'unknown' && !tensor.note && !lists.some(([, items]) => items.length) && <p>源码未提供可确定的张量形状。</p>}
@@ -54,7 +69,7 @@ function Contents({ node }: { node: FlowNode }) {
 }
 
 /** 给本地渲染器的 SVG 副本接入节点交互；导出继续使用原始 SVG。 */
-export function TensorFigure({ svg, name, nodes }: { svg: string; name: string; nodes: FlowNode[] }) {
+export function TensorFigure({ svg, name, nodes, examples, meanings, observed, imported }: { svg: string; name: string; nodes: FlowNode[] } & DimensionProps) {
   const surface = useRef<HTMLDivElement>(null), tip = useRef<HTMLDivElement>(null)
   const tooltipId = useId(), markerId = 'eqtrace-arrow-' + tooltipId.replace(/[^a-zA-Z0-9_-]/g, '')
   const [selected, setSelected] = useState<Selected | null>(null)
@@ -160,6 +175,6 @@ export function TensorFigure({ svg, name, nodes }: { svg: string; name: string; 
       onFocus={event => select(event.target)} onBlur={event => { if (!hit(event.relatedTarget)) dismissSoon() }}
       onClick={event => { if (hit(event.target)) select(event.target, true); else setSelected(null) }} />
     {selected && portal && createPortal(<div ref={tip} id={tooltipId} role="tooltip" className="eqtrace-tensor-tooltip" data-tensor-node={selected.node.id}
-      onPointerEnter={cancelDelay} onPointerLeave={dismissSoon}><Contents node={selected.node}/></div>, portal)}
+      onPointerEnter={cancelDelay} onPointerLeave={dismissSoon}><Contents node={selected.node} examples={examples} meanings={meanings} observed={observed} imported={imported}/></div>, portal)}
   </div>
 }

@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { FlowGraph, FlowWorkspace } from '../../vendor/paper-flow/types'
 import { TensorFigure } from './TensorFigure'
+import { TensorDataInputs, type ObservedDimensions } from './TensorDataInputs'
 import { FlowWindow } from '../../vendor/paper-flow/FlowWindow'
 import { downloadFile } from '../../vendor/paper-flow/canvas.js'
 import { eqTraceFlows, renderEqTraceFigure } from './eqtrace-figure.mjs'
@@ -10,6 +11,7 @@ type Source = { name: string; text: string }
 export type GenerateEqTrace = (read: () => Promise<{ entry?: Source; model?: Source; class_name?: string }>, active: () => boolean) => Promise<string>
 
 export function Figure({ flow, documentId }: { flow: FlowGraph; documentId: string }) {
+  const [observed, setObserved] = useState<ObservedDimensions>({})
   const [detail, setDetail] = useState<'overview' | 'full'>('overview')
   const overview = flow.figure_overview != null && detail === 'overview'
   const rendered = useMemo(() => {
@@ -22,6 +24,7 @@ export function Figure({ flow, documentId }: { flow: FlowGraph; documentId: stri
   return <>
     {flow.figure_overview != null && <label className="eqtrace-projection">图中显示 <select value={detail} onChange={event => setDetail(event.target.value as 'overview' | 'full')}>
       <option value="overview">源码阶段总览</option><option value="full">全部节点</option></select></label>}
+    <TensorDataInputs flow={flow} onChange={setObserved}/>
     {rendered.error && <p role="alert">{rendered.error}</p>}
     {rendered.svg && <div className="eqtrace-figure-tools"><span>{overview ? `阶段总览 · 原流程 ${flow.nodes.length} 个节点` : `${flow.nodes.length} 个节点 · ${flow.edges.length} 条连接`} · {Math.round(width)} × {Math.round(height)} mm</span>
       <button type="button" onClick={() => downloadFile(`${documentId}-${flow.id}${overview ? '-overview' : ''}.svg`, rendered.svg, 'image/svg+xml')}>下载论文 SVG</button></div>}
@@ -29,7 +32,7 @@ export function Figure({ flow, documentId }: { flow: FlowGraph; documentId: stri
     {!!diagnostics.length && <details><summary>{diagnostics.length} 条静态解析说明</summary><ul>{diagnostics.map((item, i) => <li key={i}>{String(item?.message || item?.code || item)} {typeof item?.evidence === 'string' && <code>{item.evidence}</code>}</li>)}</ul></details>}
     {rendered.svg && <>
       <p className="eqtrace-tensor-hint">悬停、聚焦或轻点节点可查看张量形状。</p>
-      <TensorFigure key={detail} svg={rendered.svg} name={flow.name} nodes={overview ? (flow.figure_overview as FlowGraph).nodes : flow.nodes}/>
+      <TensorFigure key={detail} examples={flow.example_dimensions} meanings={flow.example_dimension_meanings} observed={observed} imported={flow.observed_dimensions} svg={rendered.svg} name={flow.name} nodes={overview ? (flow.figure_overview as FlowGraph).nodes : flow.nodes}/>
     </>}
   </>
 }

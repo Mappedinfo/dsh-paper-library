@@ -65,3 +65,19 @@
 .eqtrace-main { min-height: 0; overflow: auto; padding: 14px 20px; }
 .eqtrace-main > .eqtrace-nav { margin-bottom: 8px; }
 .eqtrace-main .eqtrace-figure-surface > svg { display: block; margin: auto; width: auto; max-width: 100%; height: auto; max-height: max(580px, 68vh); }
+
+.eqtrace-dimension-bindings { padding: 2px 0 8px; border-bottom: 1px solid var(--dsw-alias-border-l2, #c9d7d8); }
+.eqtrace-dimension-bindings ul { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.eqtrace-dimension-bindings li { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px; }
+.eqtrace-dimension-bindings code { font-weight: 650; }
+.eqtrace-dimension-bindings small, .eqtrace-dimension-bindings p { color: var(--dsw-alias-label-secondary, #506169); font-size: 11px; }
+.eqtrace-tensor-substitution { display: flex; justify-content: space-between; gap: 8px; color: var(--dsw-alias-label-primary, #20363d); }
+.eqtrace-tensor-substitution span { white-space: nowrap; font-size: 11px; }
+
+.eqtrace-data-inputs { margin: 8px 0; }
+.eqtrace-data-inputs > summary { width: fit-content; cursor: pointer; }
+.eqtrace-data-inputs p { margin: 6px 0; }
+.eqtrace-data-input { display: grid; gap: 3px; margin: 7px 0; }
+.eqtrace-data-input label { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.eqtrace-data-input code { color: var(--dsw-alias-label-secondary, #52656c); }
+.eqtrace-data-input input { max-width: 100%; font: inherit; }
