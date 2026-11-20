@@ -126,10 +126,13 @@ export function LibraryPane({ useTabInfo, t, sessionId, directory, modelAvailabl
     : slides ? `/api/paper-library/slides.html${initialSlides ? `?project=${encodeURIComponent(initialSlides)}` : ''}`
     : paperForFrame.current ? `/api/paper-library/?paper=${encodeURIComponent(paperForFrame.current)}`
     : '/api/paper-library/'
+  // Host tab identity isolates navigation memory even when two tabs read the same paper.
+  const scopedSrc = !slides && typeof tab.id === 'string' && tab.id
+    ? `${src}${src.includes('?') ? '&' : '?'}workspace=${encodeURIComponent(tab.id)}` : src
   return createElement('iframe', {
     ref: frame,
     title: t(canvas ? 'canvas.title' : latex ? 'latex.title' : slides ? 'slides.title' : 'title'),
-    src,
+    src: scopedSrc,
     loading: 'lazy',
     referrerPolicy: 'same-origin',
     allow: 'clipboard-write; fullscreen',

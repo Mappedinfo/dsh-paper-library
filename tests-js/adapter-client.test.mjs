@@ -42,6 +42,7 @@ test('published client bundle registers entry tabs and preserves hidden slide dr
   // separate start-page capsules, so each opens its own tab next to the other.
   const libraryTab = tabs.get('@mappedinfo/dsh-paper-library')
   const canvasTab = tabs.get('@mappedinfo/dsh-paper-library/whiteboard')
+  const latexTab = tabs.get('@mappedinfo/dsh-paper-library/latex')
   const slidesTab = tabs.get('@mappedinfo/dsh-paper-library/slides')
   const paperTab = tabs.get('@mappedinfo/dsh-paper-library/paper')
   const address = 'dsh-resource://paper-library/paper/paper-one'
@@ -106,6 +107,15 @@ test('published client bundle registers entry tabs and preserves hidden slide dr
   assert.equal(iframe.type, 'iframe')
   assert.equal(iframe.props.src, '/api/paper-library/')
   assert.equal(iframe.props.title, 'Paper Library')
+  const frameFor = (kind, tab) => { const element = bodies.get(kind).component({ useTabInfo: () => ({ tab }) }); return element.type(element.props) }
+  const libraryScope = frameFor(libraryTab.id, { id: 'library-tab', visible: true })
+  const writerScope = frameFor(latexTab.id, { id: 'writer-tab', visible: true })
+  const paperScope = frameFor(paperTab.id, { id: 'reader/tab 1', visible: true, contentId: address })
+  for (const [frame, expected] of [[libraryScope, 'library-tab'], [writerScope, 'writer-tab'], [paperScope, 'reader/tab 1']]) {
+    assert.equal(new URL(frame.props.src, 'http://localhost').searchParams.get('workspace'), expected)
+  }
+  assert.equal(new URL(paperScope.props.src, 'http://localhost').searchParams.get('paper'), 'paper-one')
+  assert.equal(new URL(writerScope.props.src, 'http://localhost').searchParams.get('view'), 'latex')
   // The whiteboard tab is the same page asking for its board-only entry view.
   const canvasInjected = bodies.get(canvasTab.id).definition.inject('session-1')
   assert.ok(canvasInjected.conversationBridge, 'the canvas keeps the composer bridge, so 「放入对话」 works there too')

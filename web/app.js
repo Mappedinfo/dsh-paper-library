@@ -1540,9 +1540,25 @@ document.addEventListener('keydown', async (event) => {
   else document.querySelector('.workspace').classList.remove('show-detail');
   $('search').focus();$('search').select();
 });
-function publishWorkspaceState(workspace){void persistence?.put(`workspace:last:${ENTRY_PAPER||'main'}`,workspace).catch(()=>{});if(window.parent!==window)window.parent.postMessage({type:'paper-library:workspace-state',version:1,workspace},window.location.origin);}
+let workspaceStorageKey;
+async function workspaceStateKey(){
+  if(!workspaceStorageKey)workspaceStorageKey=(async()=>{
+    let scope=new URLSearchParams(location.search).get('workspace')||'';
+    if(!scope&&window.parent===window){
+      const previous=history.state;
+      scope=typeof previous?.paperLibraryWorkspace==='string'?previous.paperLibraryWorkspace:crypto.randomUUID();
+      if(scope!==previous?.paperLibraryWorkspace)history.replaceState({...previous,paperLibraryWorkspace:scope},'');
+    }
+    const identity=JSON.stringify([ENTRY_VIEW,ENTRY_PAPER,scope.slice(0,500)]);
+    const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(identity));
+    workspaceStorageKey='workspace:last:tab-'+Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
+    return workspaceStorageKey;
+  })();
+  return workspaceStorageKey;
+}
+function publishWorkspaceState(workspace){if(persistence){if(typeof workspaceStorageKey==='string')void persistence.put(workspaceStorageKey,workspace).catch(()=>{});else void workspaceStateKey().then(key=>persistence.put(key,workspace)).catch(()=>{});}if(window.parent!==window)window.parent.postMessage({type:'paper-library:workspace-state',version:1,workspace},window.location.origin);}
 function workspaceSnapshot(){const current=latexUI?.isOpen()?latexUI.current?.():boardUI?.isOpen()?boardUI.current?.():workspaceNavigationUI?.state().current;return {section:workspaceNavigationUI?.state().section||'paper',current:current?{kind:current.kind,id:current.id,title:current.title}:null,table:workbenchUI?.isTable()===true};}
-async function restoreWorkspaceSnapshot(value){if(!value||!['paper','dataset','board','latex','project','notes','scholar'].includes(value.section))return;try{if(value.current&&['dataset','board','latex'].includes(value.current.kind)){await workspaceNavigationUI?.navigate(value.current);}else if(value.table||value.section!=='paper'){await workspaceNavigationUI?.selectRoot(value.section);}}catch(error){toast(`工作区恢复失败：${error.message}`,true);}}
+async function restoreWorkspaceSnapshot(value){if(ENTRY_PAPER||!value||!['paper','dataset','board','latex','project','notes','scholar'].includes(value.section))return;try{if(value.current&&['dataset','board','latex'].includes(value.current.kind)){await workspaceNavigationUI?.navigate(value.current);}else if(value.table||value.section!=='paper'){await workspaceNavigationUI?.selectRoot(value.section);}}catch(error){toast(`工作区恢复失败：${error.message}`,true);}}
 function publishReaderState({ rememberOpen = false } = {}) {
   if(initializedReader&&!restoringReader)publishWorkspaceState(workspaceSnapshot());
 
@@ -1752,7 +1768,7 @@ async function initialize() {
   }catch{}
   publishPaperTabLabel();
   await ensureCatalogLoaded();
-  let savedWorkspace;try{savedWorkspace=readerRestore?.workspace||await persistence?.get(`workspace:last:${ENTRY_PAPER||'main'}`);}catch{}
+  let savedWorkspace;try{savedWorkspace=readerRestore?.workspace||await persistence?.get(await workspaceStateKey());}catch{}
   if(ENTRY_PAPER){
     const saved=await persistence?.get(readerEntryKey).catch(()=>null);
     const target=typeof saved?.paperId==='string'&&/^[A-Za-z0-9_-]{1,160}$/u.test(saved.paperId)?saved.paperId:ENTRY_PAPER;
