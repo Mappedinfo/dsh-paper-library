@@ -178,10 +178,11 @@ test('each saved annotation has four actions and stale notes can ask DSH with a 
 
 test('DSH callback failures preserve the annotation and allow retry without touching its comment', async () => {
   const note = savedNote(); let fail = true
-  const f = fixture(async () => ({ annotations: [note] }), { onAsk: async () => { if (fail) throw Error('Synthetic model failure'); return true } })
+  const f = fixture(async () => ({ annotations: [note] }), { onAsk: async () => { if (fail) throw Error('Synthetic model failure。'); return true } })
   await f.ui.refresh()
   assert.equal(await f.ui.testHooks.runNote('ask', note), false)
   assert.match(f.ids.get('latex-review-message').textContent, /Synthetic model failure/)
+  assert.doesNotMatch(f.ids.get('latex-review-message').textContent, /。。/)
   assert.equal(f.ui.annotations()[0].comment, 'Why this claim?')
   fail = false; assert.equal(await f.ui.testHooks.runNote('ask', note), true)
 })

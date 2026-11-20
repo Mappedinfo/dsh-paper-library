@@ -206,7 +206,7 @@ export function apply(ctx, rawConfig = {}) {
     // LaTeX questions and co-writing reuse the language route and the local state
     // store; proposals hold replacements, never a second copy of the manuscript.
     const research = createLatexResearch({
-      run: createHarnessToolAI(ctx.llm, { createUserMessage, createAssistantMessage, createToolResultMessage, BlockAssembler, assertSupportedJsonSchema, validateJsonSchemaValue }, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }),
+      run: createHarnessToolAI(ctx.llm, { createUserMessage, createAssistantMessage, createToolResultMessage, BlockAssembler, assertSupportedJsonSchema, validateJsonSchemaValue }, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }, { network: modelNetwork }),
       search: scholarlySearch, dispatch, library: config.library, python: config.python,
     })
     const latexAI = createLatexAI({ store: options.localState, ai: languageAI, research, config, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python })

@@ -227,7 +227,7 @@ window.PaperLatexReview = (() => {
         if (disposed || owner.key !== key() || collaborating !== owner) return false;
         say(result === false ? 'DSH 操作未完成，请重试。' : kind === 'ask' ? '回复已添加到对应批注。' : '提案处理已完成。', result === false);
         return result !== false;
-      } catch (error) { if (!disposed && owner.key === key() && collaborating === owner) say(`DSH 操作未完成：${error.message}。批注仍保留，可重试。`, true); return false; }
+      } catch (error) { if (!disposed && owner.key === key() && collaborating === owner) say(`DSH 操作未完成：${String(error.message || '请求失败').replace(/[。.!！\s]+$/u, '')}。批注仍保留，可重试。`, true); return false; }
       finally { if (collaborating === owner) { collaborating = null; if (!disposed && owner.key === key()) render(); } }
     }
     function cancelCollaboration(message = '') {

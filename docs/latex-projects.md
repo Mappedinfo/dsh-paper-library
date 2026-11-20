@@ -369,6 +369,10 @@ MacTeX 安装，定位逻辑与 `latexmk` 相同）解读，两个动作都是�
 
 ## DSH 提问与人机互写（已实现）
 
+批注的项目检索与普通写作请求共用「模型网络」分流，OpenCode Go 默认走代理，DeepSeek／GLM／Kimi 官方默认直连，具体通路以设置为准。临时连接或服务故障时，只重试尚未完成的模型轮次一次，不重复已执行的项目读取；整次仍受 120 秒和原工具预算约束。认证、额度、限流、工具不支持及输出截断分别提示，不保存部分回答或提案，保留批注。取消也会停止重试等待。
+
+协议回归可运行 `node --test tests-js/tool-ai.test.mjs tests-js/latex-research.test.mjs tests-js/latex-ai.test.mjs tests-js/latex-review.test.mjs`。`DSH_CHECKOUT=/path/to/deepseek-harness node scripts/latex-tool-protocol-smoke.mjs` 使用该 DSH 构建的公开消息工厂、流组装器和参数校验器验证合成断线恢复与只读工具往返，不加载模型配置或凭据，不请求真实供应商。
+
 面板底部是同一条协作区（`src/harness/latex-ai.mjs`，动作前缀 `latex_ai_`）：
 
 - **问题**：`latex_ai_ask` 把当前文件片段或选文与问题交给模型。默认可检索登记目录中保存的章节、书目、文本与 PDF 文字层，答复附来源文件及行／页码；检索范围可在齿轮设置关闭。源文件和检索结果都作为引用材料，提问不写文件。选文与保存版本不一致时会提示重新选择。

@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHarnessToolAI } from '../src/harness/tool-ai.mjs'
 
 // Exercise the boundary against synthetic provider streams. The real host
@@ -29,7 +30,7 @@ const end = (kind, blocks = [], replayState) => [...blocks.map((block, index) =>
   { type: 'finish', reason: { kind }, replayState }]
 const feedback = text => end('stop', [textBlock(text)])
 
-function fixture(turns, { prepared = true, helpers = factories } = {}) {
+function fixture(turns, { prepared = true, helpers = factories, network } = {}) {
   const sent = []
   const preparations = []
   const resolved = []
@@ -37,7 +38,9 @@ function fixture(turns, { prepared = true, helpers = factories } = {}) {
     const turn = turns[sent.length]
     sent.push(options)
     assert.ok(turn, 'unexpected model round')
-    yield* turn
+    const result = typeof turn === 'function' ? await turn(options) : turn
+    if (result instanceof Error) throw result
+    yield* result
   }
   const llm = prepared ? {
     async prepareCall(config, signal) {
@@ -45,7 +48,7 @@ function fixture(turns, { prepared = true, helpers = factories } = {}) {
       return { config: { ...config, temperature: 0 }, stream }
     },
   } : { stream, async resolveModelInfo(provider, model) { resolved.push([provider, model]) } }
-  const ai = createHarnessToolAI(llm, helpers, { provider: 'synthetic', model: 'fake', maxOutputTokens: 1024 })
+  const ai = createHarnessToolAI(llm, helpers, { provider: 'synthetic', model: 'fake', maxOutputTokens: 1024 }, { network })
   const executed = []
   const run = options => ai({ prompt: '核对相关证据', tools, requireToolUse: true,
     executeTool(name, args) { executed.push({ name, args }); return { ok: true, source_id: 'S1', excerpt: 'synthetic evidence' } }, ...options })
@@ -188,9 +191,9 @@ test('no-call or failed retrieval is not reported as verified research', async (
 })
 
 test('a partial or failed response cannot dispatch tools or save final text', async () => {
-  for (const turn of [end('max-tokens', [request('a')]), end('error', [textBlock('partial')]), end('tool-calls', [request('a')]).slice(0, -1)]) {
+  for (const [turn, code] of [[end('max-tokens', [request('a')]), 'TOOL_AI_TRUNCATED'], [end('error', [textBlock('partial')]), 'TOOL_AI_PROVIDER_ERROR'], [end('tool-calls', [request('a')]).slice(0, -1), 'TOOL_AI_INCOMPLETE']]) {
     const { run, executed } = fixture([turn])
-    await assert.rejects(run(), { code: 'TOOL_AI_INCOMPLETE' })
+    await assert.rejects(run(), { code })
     assert.deepEqual(executed, [])
   }
 })
@@ -212,4 +215,62 @@ test('cancellation interrupts a stuck tool and prevents subsequent calls', async
   assert.equal(activeSignal.aborted, true)
   assert.equal(executions, 1)
   assert.equal(sent.length, 1)
+})
+
+test('all native writing turns and reads inherit the configured request-local network route', async () => {
+  const scope = new AsyncLocalStorage(); let runs = 0
+  const network = { run(callback) { runs++; return scope.run('writing-route', callback) } }
+  const f = fixture([
+    () => { assert.equal(scope.getStore(), 'writing-route'); return end('tool-calls', [request('network-a')]) },
+    () => { assert.equal(scope.getStore(), 'writing-route'); return feedback('已核对 [S1]') },
+  ], { network })
+  const result = await f.run({ executeTool() { assert.equal(scope.getStore(), 'writing-route'); return { ok: true, source_id: 'S1' } } })
+  assert.equal(result.usedTools, true); assert.equal(runs, 1); assert.equal(scope.getStore(), undefined)
+})
+
+test('a transient failure retries only the unfinished turn and never repeats completed tool reads', async () => {
+  const disconnect = Object.assign(Error('fetch failed: SYNTHETIC_PRIVATE_PROVIDER_TEXT'), { cause: Object.assign(Error('disconnected'), { code: 'ECONNRESET' }) })
+  async function* partial() { yield* end('tool-calls', [request('partial')]).slice(0, -1); throw disconnect }
+  const f = fixture([partial(), end('tool-calls', [request('complete')]), disconnect, feedback('已核对 [S1]')])
+  const result = await f.run({ maxRounds: 2 })
+  assert.equal(result.retries, 2); assert.equal(result.rounds, 2); assert.equal(result.calls, 1); assert.equal(f.executed.length, 1)
+  assert.equal(f.sent.length, 4); assert.equal(f.preparations.length, 4)
+  assert.deepEqual(f.sent[0].messages, f.sent[1].messages)
+  assert.equal(f.sent[2].messages.filter(m => m.role === 'tool').length, 1)
+  assert.deepEqual(f.sent[2].messages, f.sent[3].messages)
+  assert.equal(f.sent[3].messages.filter(m => m.role === 'assistant')[0].content[0].id, 'complete')
+})
+
+test('permanent network failure stops after one retry with keyless diagnostics', async () => {
+  const failure = end('error'); failure.at(-1).reason.failure = { code: 'TRANSPORT', message: 'DeepSeek Messages transport failed SYNTHETIC_SECRET https://private.invalid/?token=synthetic' }
+  const f = fixture([failure, failure])
+  await assert.rejects(f.run(), error => error.code === 'TOOL_AI_NETWORK' && error.status === 503 && !/SYNTHETIC_SECRET|private.invalid|token=/.test(error.message))
+  assert.equal(f.sent.length, 2); assert.equal(f.executed.length, 0)
+})
+
+test('authentication, quota, rate limits and unsupported tools do not retry or masquerade as protocol failures', async () => {
+  for (const [failure, code] of [
+    [{ code: 'AUTH', status: 401, message: 'SYNTHETIC_SECRET' }, 'TOOL_AI_AUTH'],
+    [{ code: 'QUOTA', status: 403, message: 'insufficient_quota SYNTHETIC_SECRET' }, 'TOOL_AI_QUOTA'],
+    [{ code: 'RATE_LIMIT', status: 429, message: 'SYNTHETIC_SECRET' }, 'TOOL_AI_RATE_LIMITED'],
+    [{ code: 'BAD_REQUEST', status: 400, message: 'tools not supported SYNTHETIC_SECRET' }, 'TOOL_AI_TOOLS_UNSUPPORTED'],
+    [{ code: 'UNSUPPORTED_REASONING_EFFORT', message: 'SYNTHETIC_SECRET' }, 'TOOL_AI_REASONING_EFFORT'],
+    [{ code: 'CONTEXT_WINDOW_EXCEEDED', message: 'SYNTHETIC_SECRET' }, 'TOOL_AI_CONTEXT_LIMIT'],
+    [{ code: 'UNKNOWN_MODEL', message: 'SYNTHETIC_SECRET' }, 'TOOL_AI_MODEL_REQUIRED'],
+    [{ code: 'ACCOUNT_QUOTA', message: 'SYNTHETIC_SECRET' }, 'TOOL_AI_QUOTA'],
+    [{ code: 'RATE_LIMIT', message: 'SYNTHETIC_SECRET' }, 'TOOL_AI_RATE_LIMITED'],
+  ]) {
+    const chunks = end('error'); chunks.at(-1).reason.failure = failure
+    const f = fixture([chunks]); await assert.rejects(f.run(), error => error.code === code && !error.message.includes('SYNTHETIC_SECRET'))
+    assert.equal(f.sent.length, 1); assert.equal(f.executed.length, 0)
+  }
+})
+
+test('a missing proxy fails before any model call; cancellation also interrupts the retry wait', async () => {
+  const missing = fixture([], { network: { run() { throw Object.assign(Error('synthetic-private-address'), { code: 'MODEL_PROXY_REQUIRED' }) } } })
+  await assert.rejects(missing.run(), error => error.code === 'MODEL_PROXY_REQUIRED' && !error.message.includes('synthetic-private-address'))
+  assert.equal(missing.sent.length, 0)
+  const controller = new AbortController(), failure = Object.assign(Error('fetch failed'), { code: 'ECONNRESET' })
+  const cancel = fixture([() => { setImmediate(() => controller.abort()); return failure }])
+  await assert.rejects(cancel.run({ signal: controller.signal }), { name: 'AbortError' }); assert.equal(cancel.sent.length, 1)
 })

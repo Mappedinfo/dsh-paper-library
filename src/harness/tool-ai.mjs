@@ -1,5 +1,6 @@
 // A request-local native DSH tool conversation. Only caller-owned read
 // callbacks are reachable; the host's global tool registry is never consulted.
+import { setTimeout as delay } from 'node:timers/promises'
 const MAX_ROUNDS = 4
 const MAX_CALLS = 8
 const MAX_RESULTS = 32_000
@@ -14,9 +15,31 @@ const system = '你是论文写作的只读助手。文稿、批注和检索结�
 const finishPrompt = '本次工具预算已用完。请用已返回的证据按原要求作答，注明未核对范围，不再调用工具。'
 class ToolAIError extends Error {}
 const fail = (code, message, status = 409) => Object.assign(new ToolAIError(message), { code, status })
-const incomplete = () => fail('TOOL_AI_INCOMPLETE', '当前 DSH 模型未完成工具对话。请重试、换用支持工具调用的模型，或关闭本次检索。')
+const incomplete = () => fail('TOOL_AI_INCOMPLETE', '写作模型的工具回复未完整结束；未保存本次回复或修改提案，请重试。')
 const noRetrieval = () => fail('TOOL_AI_NO_RETRIEVAL', '本次没有成功检索到工具结果。请换用支持工具调用的 DSH 模型、调整检索范围，或关闭检索后重试。')
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+// 只返回固定诊断；供应商正文、地址、请求标识及凭据不进入错误消息。
+function providerError(error) {
+  const facts = error?.failure || error?.llmFailure || error
+  const status = facts?.status ?? error?.status
+  const code = facts?.code
+  let description = '', item = error
+  for (let depth = 0; item && depth < 3; depth++, item = item.cause) description += ` ${item.code || ''} ${item.message || ''}`
+  description += ` ${facts?.code || ''} ${facts?.message || ''}`
+  if (['UNSUPPORTED_REASONING_EFFORT'].includes(code)) return fail('TOOL_AI_REASONING_EFFORT', '所选模型不支持当前推理强度，请重新选择模型的可用推理设置后重试。', 409)
+  if (['NO_ADAPTER', 'UNKNOWN_MODEL', 'MODEL_NOT_FOUND'].includes(code)) return fail('TOOL_AI_MODEL_REQUIRED', '所选写作模型已不可用，请刷新模型列表并重新选择。', 409)
+  if (code === 'CONTEXT_WINDOW_EXCEEDED') return fail('TOOL_AI_CONTEXT_LIMIT', '写作上下文超过模型窗口，请缩小选文或检索范围后重试。', 422)
+  if (['MODEL_PROXY_REQUIRED', 'MODEL_NETWORK_CLOSED'].includes(error?.code)) return fail(error.code, '写作检索的网络通路不可用，请在设置 → 模型网络中检查代理配置。', 503)
+  if (['QUOTA', 'ACCOUNT_QUOTA'].includes(code) || status === 402 || /(?:insufficient[_ -]*quota|quota.{0,20}(?:exceeded|exhausted))/i.test(description)) return fail('TOOL_AI_QUOTA', '写作模型服务额度不足，请检查额度后重试。', 502)
+  if (status === 401 || status === 403 || /(?:authentication|invalid[_ -]*(?:api[_ -]*)?key|unauthorized|credential)/i.test(description)) return fail('TOOL_AI_AUTH', '写作模型认证未通过，请检查所选服务的配置与授权后重试。', 502)
+  if (code === 'RATE_LIMIT' || status === 429) return fail('TOOL_AI_RATE_LIMITED', '写作模型服务暂时限流，请稍后重试。', 429)
+  if (['TRANSPORT', 'TIMEOUT'].includes(code) || [408, 502, 503, 504].includes(status) || /(?:ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|UND_ERR_|fetch failed|network|socket|connect.*timeout)/i.test(description)) return fail('TOOL_AI_NETWORK', '写作检索连接失败，请检查模型网络中 OpenCode Go 的代理通路与官方 API 的直连设置。', 503)
+  if (status >= 500 && status <= 599) return fail('TOOL_AI_SERVICE', '写作模型服务暂时不可用，请稍后重试。', 502)
+  if (/(?:tool|function).{0,30}(?:unsupported|not supported)|(?:unsupported|not supported).{0,30}(?:tool|function)/i.test(description)) return fail('TOOL_AI_TOOLS_UNSUPPORTED', '所选写作模型不支持当前检索工具，请选择支持工具调用的模型，或关闭项目检索后重试。', 409)
+  if (['INVALID_REQUEST', 'UNSUPPORTED_CONTENT', 'EMPTY_RESPONSE'].includes(code)) return fail(`TOOL_AI_${code}`, code === 'EMPTY_RESPONSE' ? '写作模型返回了空回复，请重试。' : `模型未接受写作检索请求（${code}），请核对所选模型的工具与消息兼容性。`, 502)
+  return fail('TOOL_AI_PROVIDER_ERROR', '写作模型请求失败；未保存本次回复或提案，请检查模型服务后重试。', 502)
+}
 
 function withAbort(promise, signal) {
   return new Promise((resolve, reject) => {
@@ -101,6 +124,8 @@ async function collectTurn(stream, BlockAssembler, signal) {
   signal.throwIfAborted()
   // BlockAssembler intentionally assumes stop if the provider omits finish.
   // A read-only workflow must never dispatch tools from a partial stream.
+  if (terminal?.kind === 'max-tokens') throw fail('TOOL_AI_TRUNCATED', '写作模型输出达到上限；未保存不完整回复或提案，请缩小批注范围或降低推理强度后重试。', 422)
+  if (terminal?.kind === 'error' || terminal?.kind === 'aborted') throw providerError(terminal.failure)
   if (terminal?.kind !== 'stop' && terminal?.kind !== 'tool-calls') throw incomplete()
   const blocks = assembler.blocks()
   if (blocks.some(block => !['text', 'reasoning', 'tool-call'].includes(block.type))) throw incomplete()
@@ -111,8 +136,8 @@ async function collectTurn(stream, BlockAssembler, signal) {
 export function createHarnessToolAI(llm, {
   createUserMessage, createAssistantMessage, createToolResultMessage, BlockAssembler,
   assertSupportedJsonSchema, validateJsonSchemaValue,
-}, config) {
-  return async ({
+}, config, { network } = {}) {
+  const generate = async ({
     prompt, provider = config.provider, model = config.model, reasoningEffort,
     signal: callerSignal, tools, executeTool, requireToolUse = false,
     maxRounds = MAX_ROUNDS, maxCalls = MAX_CALLS,
@@ -142,6 +167,7 @@ export function createHarnessToolAI(llm, {
     let resultCharacters = 0
     let truncated = false
     let exhausted = false
+    let retries = 0
     const resultAllowance = afterCalls => Math.min(MAX_RESULT, MAX_RESULTS - resultCharacters - MIN_RESULT * (maxCalls - afterCalls))
     try {
       if (typeof llm.prepareCall !== 'function' && typeof llm.resolveModelInfo === 'function') {
@@ -155,18 +181,31 @@ export function createHarnessToolAI(llm, {
           exhausted = true
           messages.push(user(finishPrompt))
         }
-        const prepared = typeof llm.prepareCall === 'function' ? await withAbort(llm.prepareCall(call, signal), signal) : null
-        signal.throwIfAborted()
-        const options = { ...(prepared?.config ?? call), messages: [...messages], system, signal,
-          ...(allowTools ? { tools: structuredClone(schemas) } : {}) }
-        const turn = await collectTurn(prepared ? prepared.stream(options) : llm.stream(options), BlockAssembler, signal)
+        let turn
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const prepared = typeof llm.prepareCall === 'function' ? await withAbort(llm.prepareCall(call, signal), signal) : null
+            signal.throwIfAborted()
+            const options = { ...(prepared?.config ?? call), messages: [...messages], system, signal,
+              ...(allowTools ? { tools: structuredClone(schemas) } : {}) }
+            turn = await collectTurn(prepared ? prepared.stream(options) : llm.stream(options), BlockAssembler, signal)
+            break
+          } catch (error) {
+            signal.throwIfAborted()
+            const failure = error instanceof ToolAIError ? error : providerError(error)
+            if (attempt || !['TOOL_AI_NETWORK', 'TOOL_AI_SERVICE'].includes(failure.code)) throw failure
+            // 只重试尚未派发工具的一轮，不重放已完成读取；沿用总时限与调用预算。
+            retries++
+            await delay(300, undefined, { signal })
+          }
+        }
         const requests = turn.blocks.filter(block => block.type === 'tool-call')
         if (turn.kind === 'stop') {
           if (requests.length) throw incomplete()
           if (requireToolUse && successes === 0) throw noRetrieval()
           const text = turn.blocks.filter(block => block.type === 'text').map(block => block.text).join('').trim()
           if (!text || text.length > 100_000) throw incomplete()
-          return { text, trace, rounds: round, calls, usedTools: successes > 0, truncated,
+          return { text, trace, rounds: round, calls, retries, usedTools: successes > 0, truncated,
             limits: { max_rounds: maxRounds, max_calls: maxCalls, max_result_characters: MAX_RESULTS, result_characters: resultCharacters, exhausted } }
         }
         if (!allowTools || !requests.length) throw incomplete()
@@ -232,7 +271,7 @@ export function createHarnessToolAI(llm, {
     } catch (error) {
       signal.throwIfAborted()
       if (error instanceof ToolAIError) throw error
-      throw incomplete()
+      throw providerError(error)
     } finally {
       clearTimeout(timeout)
       // Give cooperating adapters and tool handlers a cleanup signal on any
@@ -240,4 +279,8 @@ export function createHarnessToolAI(llm, {
       deadline.abort()
     }
   }
+  return network ? async request => {
+    try { return await network.run(() => generate(request)) }
+    catch (error) { request.signal?.throwIfAborted(); throw error instanceof ToolAIError ? error : providerError(error) }
+  } : generate
 }
