@@ -6,9 +6,11 @@ The default installation uses PyMuPDF/MuPDF and the AGPL option of citeproc-js. 
 
 Project scaffolding was generated through the author's `academic-templates/dev-project` Copier template on 2026-09-14. This Mappedinfo project carries no university affiliation.
 
-### GitHub Pages 知识库连接页
+### GitHub Pages 浏览器知识库
 
-`/library/` 的 HTML、CSS 和 JavaScript 是本项目原创代码，发布包在 `licenses/project-MIT.txt` 附有 MIT 全文。连接页使用访问者设备上已有的系统字体，无字体文件、第三方脚本或 CDN 依赖。本机工作台使用本地安装的 PyMuPDF 与 TeX 工具链；PDF 引擎的许可见下表。TeX 发行版、宏包和稿件选用的字体各自保留原许可，发布排版后的 PDF 前应核对所用字体的嵌入和分发条款。独立画板的流程编辑器另带组件来源说明以及其打包依赖的许可，保存在 Pages 的 `licenses/paper-flow/`。
+网页版使用 PDF.js（Apache-2.0）渲染和 pdf-lib（MIT）写入标准 PDF 批注；字符映射、备用字体、解码器和辅助库另有各自的许可。界面使用设备上的系统字体。浏览器 TeX 编译采用 mp-tikz-wasm 及配套的 TeX Live 文件，中文模板使用 Noto Sans SC（SIL Open Font License 1.1）。这些组件、宏包和字体保留各自许可。ZIP 导出使用 client-zip（MIT）。
+
+构建时从锁定的包或固定版本的发行材料提取所需资源和通知，随 Pages 发布组件清单、字体许可及 TeX 对应源码入口。独立画板的许可位于 `licenses/paper-flow/`。[网页组件与字体许可](https://mappedinfo.github.io/dsh-paper-library/library/licenses.html)
 
 | Component | Purpose | Upstream / license |
 |---|---|---|

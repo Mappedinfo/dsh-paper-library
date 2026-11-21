@@ -23,7 +23,7 @@ node scripts/board-standalone-fixture.mjs   # real Chromium receipt, needs a sta
 
 `.github/workflows/pages.yml` runs the same build on every push to `main` that touches the
 site inputs and deploys `_site` through `actions/deploy-pages`. The published site is
-<https://mappedinfo.github.io/dsh-paper-library/>; every asset path is relative, so the
+<https://mappedinfo.github.io/dsh-paper-library/board.html>; every asset path is relative, so the
 project subpath needs no configuration. Pages is enabled once in the repository settings
 (Source: GitHub Actions); after that the workflow self-deploys.
 

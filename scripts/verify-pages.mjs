@@ -15,14 +15,14 @@ const site = (process.env.SITE_URL ?? 'https://mappedinfo.github.io/dsh-paper-li
 const checks = [];
 const record = label => { checks.push(label); console.log(`PASS ${label}`); };
 
-const assets = ['', 'board.js', 'board.css', 'theme.css', 'standalone.js', 'board-source.js', 'board-mermaid.js', 'board-drawio.js'];
+const assets = ['board.html', 'board.js', 'board.css', 'theme.css', 'standalone.js', 'board-source.js', 'board-mermaid.js', 'board-drawio.js'];
 for (const asset of assets) {
   const response = await fetch(`${site}${asset}`, { redirect: 'follow' });
   assert.equal(response.status, 200, `${asset || '(root)'} must be served`);
   const body = await response.text();
   assert.ok(body.length > 200, `${asset || '(root)'} must not be an empty placeholder`);
   if (asset === 'board.js') assert.ok(body.includes('PaperBoard'), 'the deployed canvas is the real one');
-  if (asset === '') assert.ok(body.includes('id="board-stage"'), 'the deployed page carries the board markup');
+  if (asset === 'board.html') assert.ok(body.includes('id="board-stage"'), 'the deployed page carries the board markup');
 }
 record('every-published-asset-is-served-and-carries-the-real-canvas');
 
@@ -35,7 +35,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   page.on('response', response => { if (response.status() >= 400) errors.push(`HTTP ${response.status()} ${response.url()}`); });
   page.on('request', request => { if (!request.url().startsWith(site) && !request.url().startsWith('data:') && !request.url().startsWith('blob:')) external.push(request.url()); });
-  await page.goto(site);
+  await page.goto(site + 'board.html');
   await page.waitForLoadState('networkidle');
   await page.locator('#board-stage').waitFor();
   await page.waitForFunction(() => document.querySelectorAll('#board-select option').length >= 1);

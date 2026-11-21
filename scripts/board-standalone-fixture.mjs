@@ -14,7 +14,7 @@ const checks = [];
 const record = label => { checks.push(label); console.log(`PASS ${label}`); };
 const types = { '.html': 'text/html;charset=utf-8', '.js': 'text/javascript;charset=utf-8', '.css': 'text/css;charset=utf-8', '.json': 'application/json;charset=utf-8' };
 
-await stat(join(site, 'index.html'));
+await stat(join(site, 'board.html'));
 
 let server, browser;
 const errors = [], external = [];
@@ -54,7 +54,7 @@ try {
     return { name: task.suggestedFilename(), body: await readFile(path) };
   };
 
-  await page.goto(origin);
+  await page.goto(origin + '/board.html');
   await page.waitForLoadState('networkidle');
   await page.locator('#board-stage').waitFor();
   assert.equal(await page.locator('#board-view').isVisible(), true, 'the standalone page opens straight onto a board');
@@ -125,7 +125,7 @@ try {
   const other = await second.newPage();
   other.on('pageerror', error => errors.push(error.message));
   other.on('dialog', dialog => void dialog.accept());
-  await other.goto(origin);
+  await other.goto(origin + '/board.html');
   await other.locator('#board-stage').waitFor();
   await other.waitForFunction(() => document.querySelectorAll('#board-select option').length === 1);
   assert.equal((await other.evaluate(() => document.querySelectorAll('.board-node').length)), 0, 'a fresh profile starts empty');

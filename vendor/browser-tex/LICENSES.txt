@@ -1,0 +1,25 @@
+Paper Library 网页 LaTeX 编译器
+
+本站按需向浏览器提供 TeX 程序、宏包及字体。程序以独立 Web Worker 运行，用户稿件及生成结果均在浏览器或所选文件夹中处理。
+上游构建采用 mp-tikz-wasm 0.5.1（TeX Live 2025），其原始分项清单见 NOTICE.md。
+完整许可文本见 licenses/。本站自有界面的 MIT 许可仅适用于自身代码。
+
+程序、补丁与构建脚本
+  本站对应源码 sources/mp-tikz-wasm-0.5.1.tar.gz
+  本站对应 TeX Live 源码 sources/texlive-20250308-source.tar.xz
+  上游版本 https://github.com/jmckalex/mp-tikz-wasm/tree/v0.5.1
+  上游构建步骤在源码包 README.md 的 Building from source、scripts/、patches/ 与 vendor/SOURCES.lock。
+  JavaScript 接口、工作线程支持与 MetaPost 启动模块保留 LGPL-3.0-or-later 及内含各组件许可。
+  本站分发的 pdfTeX 与 LuaTeX WASM 使用 GPL-2.0-or-later 的 GPLv3 许可选项。kpathsea 等内部组件保留原许可。
+  BibTeX 采用 Oren Patashnik 的 BibTeX 条款，包含 kpathsea；四种标准 .bst 样式保持原样，作者和复制条款在各文件的文件头。
+  独立 WASM/JS 文件可从 dist/ 获取与替换。本站构建脚本位于
+  https://github.com/Mappedinfo/dsh-paper-library/blob/main/scripts/build-browser-tex.mjs
+
+排版宏包与字体
+  站点分发选定的 TeX Live 2025 排版资源；文件内容保持其原上游状态，每个资源包的 manifest.json 列出包含的文件。
+  LaTeX、PGF/TikZ 等按组件遵循 LPPL 或各自源文件条款，见 licenses/LPPL-1.3c.txt、licenses/LICENSE.TL、licenses/LICENSE.CTAN 与原文件头。
+  Computer Modern 及 AMS 字形/度量分别保留 Knuth 与 AMS 的原许可。AMS Type 1 字体的完整声明和保留字体名称见 licenses/AMS-OFL.txt。
+  Latin Modern 字体使用 GUST Font License，见 licenses/GUST-FONT-LICENSE.txt。字体设计源文件由 GUST 发布于 https://ctan.org/pkg/lm 。
+  Noto Sans SC Regular，Noto CJK Sans 2.004，未修改。Copyright 2014–2021 Adobe。遵循 SIL Open Font License 1.1，
+  见 licenses/Noto-OFL.txt。对应版本、字体、源文件和项目说明 https://github.com/notofonts/noto-cjk/tree/Sans2.004 。
+  当前发布未包含 Ghostscript、URW Classico、PostScript 字体包和 latex-doc 中的语言包集合。

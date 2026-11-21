@@ -125,7 +125,7 @@ Arrange papers, notes, shapes, and relationships on a board, link several papers
 
 ![Synthetic reading, thinking, and writing board](docs/images/learning-board.jpg)
 
-You can try the [standalone board](https://mappedinfo.github.io/dsh-paper-library/) without installing DSH. It does not connect to a paper library or DSH model. Export JSON for a durable copy of your work. [Board and flow-workspace details (Chinese)](README.md#文献画板)
+You can try the [standalone board](https://mappedinfo.github.io/dsh-paper-library/board.html) without installing DSH. It does not connect to a paper library or DSH model. Export JSON for a durable copy of your work. [Board and flow-workspace details (Chinese)](README.md#文献画板)
 
 ### Datasets and knowledge records
 
@@ -177,11 +177,11 @@ The usage guide itself is a practice document. Import it, annotate it, or open t
 
 The downloadable guide and slides are currently in Chinese. Screenshots use synthetic documents and generic learning exercises; their UI corresponds to the versions recorded in the [demo notes](docs/demo/README.md) and [screenshot provenance](docs/community/README.md), not necessarily every current control. Handwriting screenshots use scripted pen input, not a physical Pencil trial. They do not establish real-model answer quality.
 
-## Open a local library from GitHub Pages
+## Browser library
 
-DeepSeek Harness remains the primary platform. The [Pages connector](https://mappedinfo.github.io/dsh-paper-library/library/) opens a workspace on your own computer. After installing the source dependencies below, run `node src/cli.mjs pages --library "/path/to/library"` and paste the printed address into the connector. You can also open that address directly offline. PDFs, native annotations, manuscript sources, and compiler output stay on your machine.
+[Open the web library](https://mappedinfo.github.io/dsh-paper-library/library/) to import a PDF or create a LaTeX manuscript. It starts in IndexedDB and restores your files on reload. Reading, native PDF annotations, source editing and TeX compilation run in the browser. DeepSeek Harness remains the primary platform for the full plugin.
 
-Select **PDF** to read, annotate or export a managed copy. Select **LaTeX** to edit a registered project or create one in the library, check for concurrent edits, compile with local TeX and preview the result. For optional excerpt Q&A, pass your own `--api-url` (a full Chat Completions endpoint) and `--api-model`. Pass the name of a local credential variable with `--api-key-env` if required. Only the excerpt and question you submit, together with a fixed instruction, are sent to the configured service. The connector and local workspace use system fonts. [Third-party licenses](THIRD_PARTY.md)
+Use the storage button below the library title to copy the browser library into an ordinary folder or open an existing one. After you grant permission, edits go directly into that folder. Desktop Chrome and Edge support this workflow. Browsers without directory write access can import a folder and download a ZIP. Before clearing site data, migrate or export any files you want to keep. Optional excerpt Q&A uses the endpoint, model and key you enter in that tab. [Component and font licenses](https://mappedinfo.github.io/dsh-paper-library/library/licenses.html)
 
 ## Installation
 

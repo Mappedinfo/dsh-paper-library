@@ -4,41 +4,79 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'">
-  <title>连接本地知识库 · Paper Library</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; frame-src blob:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; form-action 'none'; object-src 'none'; base-uri 'none'">
+  <title>我的知识库 · Paper Library</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="./library.css">
-  <script defer src="./connect.js"></script>
+  <link rel="stylesheet" href="./pdf.css">
+  <link rel="stylesheet" href="./latex.css">
+  <script type="module" src="./app.js"></script>
 </head>
 <body>
-  <header><a class="brand" href="../docs/index.html" lang="en">Paper Library</a><nav aria-label="项目"><a href="../docs/index.html">DSH 使用文档</a><a href="../index.html">独立画板</a></nav></header>
+  <header class="masthead">
+    <a class="brand" href="./"><i aria-hidden="true"></i>Paper Library</a>
+    <nav aria-label="主导航"><a href="./" aria-current="page">知识库</a><a href="../board.html">画板</a><a href="../docs/">使用说明</a></nav>
+    <button class="quiet" id="ask-open" type="button">片段问答</button>
+  </header>
   <main>
-    <h1>连接本地知识库</h1>
-    <p class="intro">在浏览器中阅读和批注 PDF，或继续写 LaTeX。文献、批注和稿件都保存在你选择的本机目录。</p>
-    <div class="columns">
-      <section aria-labelledby="connect-title">
-        <h2 id="connect-title">打开工作台</h2>
-        <form id="connect">
-          <label for="address">本机服务地址</label>
-          <input id="address" type="url" placeholder="http://127.0.0.1:43122" required autocomplete="off" spellcheck="false" aria-describedby="address-hint">
-          <p id="address-hint">粘贴启动服务时终端显示的地址。</p>
-          <div class="buttons"><button type="submit" value="pdf">PDF 阅读与批注</button><button type="submit" value="latex">LaTeX 写作</button></div>
-        </form>
-        <noscript><p>请启用 JavaScript，或直接在浏览器打开终端显示的本机地址。</p></noscript>
-      </section>
-      <section aria-labelledby="start-title">
-        <h2 id="start-title">启动本机服务</h2>
-        <p>在项目目录运行下面的命令，将路径替换为你的知识库目录。使用期间请保持终端打开。</p>
-        <pre><code>node src/cli.mjs pages --library "/path/to/library"</code></pre>
-        <details>
-          <summary>首次安装与自定义端口</summary>
-          <p>从 <a href="https://github.com/mappedinfo/dsh-paper-library">项目源码</a>安装，准备好 Node.js 和 uv，然后在项目目录运行：</p>
-          <pre><code>npm ci --ignore-scripts --legacy-peer-deps
-uv sync --locked</code></pre>
-          <p>如需更换端口，在启动命令末尾加上 <code>--port 43123</code>。编译 LaTeX 还需本机安装 latexmk 和 TeX 引擎。</p>
-        </details>
-      </section>
-    </div>
+    <noscript>请启用 JavaScript，以便浏览器在本机保存和打开文件。</noscript>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+    <section id="shelf" aria-labelledby="library-title">
+      <header class="shelf-heading">
+        <div><h1 id="library-title">我的知识库</h1><button id="location" type="button" class="location" disabled>正在打开浏览器资料库…</button></div>
+        <div class="actions"><button id="new" type="button" disabled>新建 LaTeX</button><button id="import" type="button" class="primary" disabled>导入文件</button></div>
+      </header>
+      <div id="reconnect-bar" hidden><span>请重新授权，以继续访问上次的文件夹。</span><button id="reconnect" type="button">授权访问</button><button id="recover-browser" type="button">返回浏览器库</button></div>
+      <div class="shelf-tools">
+        <div class="filters" role="group" aria-label="文件类型">
+          <button type="button" data-kind="all" aria-pressed="true">全部</button><button type="button" data-kind="pdf" aria-pressed="false">PDF</button><button type="button" data-kind="tex" aria-pressed="false">LaTeX</button>
+        </div>
+        <input id="search" type="search" placeholder="按文件名搜索" aria-label="按文件名搜索">
+      </div>
+      <div id="shelf-body" aria-busy="true">
+        <table id="files" hidden><thead><tr><th scope="col">文件名</th><th scope="col">类型</th><th scope="col">大小</th></tr></thead><tbody></tbody></table>
+        <div id="empty" hidden><span class="paper-icon" aria-hidden="true"></span><h2 id="empty-title"></h2><p id="empty-detail"></p></div>
+        <footer id="pager" hidden><span id="count"></span><div><button id="prev" type="button">上一页</button><button id="next" type="button">下一页</button></div></footer>
+      </div>
+    </section>
+    <section id="document" hidden aria-label="当前文件">
+      <div class="doc-heading"><button type="button" id="back">← 知识库</button><h1 id="filename"></h1></div>
+      <div id="work-panel"></div>
+    </section>
   </main>
-  <footer><p>GitHub Pages 只打开你指定的本机地址。阅读、批注与写作无需外部 API。</p><a href="../licenses/project-MIT.txt">页面代码许可</a></footer>
+  <input id="file-input" type="file" multiple hidden accept=".pdf,.tex,.bib,.sty,.cls,.bst,.def,.cfg,.clo,.tikz,.png,.jpg,.jpeg">
+  <input id="directory-input" type="file" multiple webkitdirectory hidden>
+  <dialog id="storage-dialog" aria-labelledby="storage-title">
+    <div class="dialog-title"><h2 id="storage-title">存储位置</h2><button type="button" data-close>关闭</button></div>
+    <p id="where"></p>
+    <div class="storage-options">
+      <div id="migrate-row"><button id="migrate" type="button">迁移到文件夹</button><span>将当前浏览器库连同备份复制到所选文件夹，以后直接在其中保存。浏览器副本保留。</span></div>
+      <div id="open-folder-row"><button id="open-folder" type="button">打开已有文件夹</button><span>直接读取和编辑文件夹中的 PDF 与稿件。</span></div>
+      <div id="use-browser-row" hidden><button id="use-browser" type="button">切回浏览器库</button><span>重新打开保存在此浏览器中的文件。</span></div>
+      <div id="import-folder-row" hidden><button id="import-folder" type="button">从文件夹导入副本</button><span>此浏览器支持读取所选文件夹，修改保存在浏览器库。需要直接写回文件夹时，可使用桌面 Chrome 或 Edge。</span></div>
+      <div><button id="archive" type="button">下载知识库 ZIP</button><span>保留文件名和子目录，解压后即可用作普通文件夹。</span></div>
+    </div>
+    <p role="status" id="storage-status"></p>
+  </dialog>
+  <dialog id="new-dialog" aria-labelledby="new-title">
+    <div class="dialog-title"><h2 id="new-title">新建 LaTeX 稿件</h2><button type="button" data-close>关闭</button></div>
+    <form id="new-form"><label for="new-path">文件名</label><input id="new-path" value="main.tex" maxlength="240" required autocomplete="off"><p>可使用子目录，例如 <code>论文/main.tex</code>。</p><button type="submit" class="primary">创建并写作</button><span id="new-status" role="status"></span></form>
+  </dialog>
+  <dialog id="ask-dialog" aria-labelledby="ask-title">
+    <div class="dialog-title"><h2 id="ask-title">片段问答</h2><button type="button" data-close>关闭</button></div>
+    <form id="ask-form" autocomplete="off">
+      <details id="api-settings" open><summary>我的模型 API</summary>
+        <label for="endpoint">Chat Completions 接口</label><input id="endpoint" type="url" required placeholder="https://…/v1/chat/completions">
+        <label for="model">模型名</label><input id="model" maxlength="200" required>
+        <label for="key">API 密钥（按需填写）</label><input id="key" type="password" autocomplete="off">
+        <small>配置仅在当前标签页有效。所选接口需要允许此网页跨域访问。</small>
+      </details>
+      <label for="excerpt">要发送的摘录</label><textarea id="excerpt" rows="4" maxlength="16000" required></textarea>
+      <label for="question">问题</label><textarea id="question" rows="2" maxlength="4000" required></textarea>
+      <button type="submit" class="primary">发送到我的 API</button><p id="ask-status" role="status"></p>
+      <section hidden id="ai-result"><h3>AI 回答</h3><div id="answer"></div></section>
+    </form>
+  </dialog>
+  <footer class="site-foot"><span>Paper Library · 网页版</span><a href="./licenses.html">组件与字体许可</a></footer>
 </body>
 </html>

@@ -103,7 +103,7 @@ for (const path of htmlFiles) {
   for (const url of [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map(match => match[1])) {
     if (!url || /^(?:[a-z]+:)?\/\//.test(url) || url.startsWith('#') || /^(data|blob|mailto):/.test(url)) continue;
     const file = url.split('#')[0].split('?')[0];
-    if (file) assert.ok(await exists(resolve(dirname(path), file)), `${path} points at a missing ${url}`);
+    if (file) assert.ok(await exists(resolve(dirname(path), file.endsWith('/') ? file + 'index.html' : file)), `${path} points at a missing ${url}`);
   }
   // A documented API path such as /api/users/0 is not a home directory; require a real filesystem root.
   assert.ok(!/(^|[\s"'(])\/(?:Users|home)\/[A-Za-z0-9._-]+\//i.test(html) && !/Library\/Application Support/i.test(html),

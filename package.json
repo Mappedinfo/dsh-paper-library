@@ -249,8 +249,12 @@
   "devDependencies": {
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
+    "client-zip": "2.5.0",
     "esbuild": "^0.25.0",
+    "fake-indexeddb": "6.2.8",
     "jsdom": "27.2.0",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "6.5.438",
     "typescript": "5.7.3"
   },
   "keywords": [

@@ -40,25 +40,16 @@ Paper Library 将文献收集、PDF 阅读与批注、知识整理和 LaTeX 写�
 
 **无界面批量分析**：[独立后端使用说明](docs/headless-analysis.md)提供命令行与程序调用入口，支持独立资料提取、36 个问题的逐题分批阅读和待审阅笔记。[可编辑问题与提示词](docs/reading-questions.md)采用选择项、可选自由判断和原文证据，由程序生成图谱；全文分析不再提取书目资料与原始 Abstract。默认文本路径保持不变；可显式选择 Markdown，并由独立 GLM／Kimi／DeepSeek 后端按页接收有界图像，原生 DSH 明确拒绝图像请求。结果保存在同一资料库，之后可在 Paper Library 查看、审阅及明确写回。默认不自动修改 PDF 资料；模型次数与并发均有上限。与 Research Knowledge OS 的文献、证据、论断图谱已有 `rkos-v3` 导出适配，完整边界见[兼容性说明](docs/research-os-compatibility.md)。
 
-## 从 GitHub Pages 打开本地知识库
+## 浏览器知识库
 
-DSH 是 Paper Library 的主平台。也可以从 [GitHub Pages 连接页](https://mappedinfo.github.io/dsh-paper-library/library/) 打开同一资料库，在浏览器阅读 PDF、写批注和编辑 LaTeX。Pages 只提供连接表单，进入工作台后，浏览器直接访问自己电脑上的服务。
+[打开网页版](https://mappedinfo.github.io/dsh-paper-library/library/)即可导入 PDF，或点「新建 LaTeX」开始写作。首次打开时，资料保存在当前浏览器的 IndexedDB。刷新页面可继续使用，无需安装插件、启动服务或填写地址。DSH 仍是完整文献工作流的主平台。
 
-首次从源码使用时，在项目目录安装依赖，然后指定资料库目录。已有 DSH 资料库可以直接选用。新建资料库建议放在源码目录之外。
+- **在浏览器中阅读和写作**。选中文件即可阅读 PDF、添加原生批注或编辑 LaTeX 源码。批注写入 PDF，写入前备份原文件。LaTeX 在浏览器中编译并逐页预览 PDF，可保存或下载结果；首次编译会从本站载入引擎、配套宏包和字体。新稿件使用支持中文的 LuaLaTeX 模板。
+- **迁移到普通文件夹**。点库名下方的「管理文件夹 → 迁移到文件夹」，选择目录并授权。复制核对成功后，后续修改直接写入该目录。浏览器副本保留；遇到同名且内容不同的文件会显示冲突。
+- **继续使用已有文件夹**。点「管理文件夹 → 打开已有文件夹」即可访问目录中的 PDF、稿件和插图。下次打开网页时会恢复目录，浏览器要求时再授权。桌面 Chrome、Edge 可直接写回文件夹；缺少目录写入接口的浏览器可导入文件夹副本，并将知识库下载为 ZIP。清除网站数据前请先迁移或导出。
+- **片段问答可选**。自行填写允许网页跨域访问的 Chat Completions 接口、模型名及按需使用的密钥。配置仅在当前标签页生效；点发送后，浏览器才将问题、摘录和固定问答提示发往指定接口。PDF 阅读、批注、保存和编译都无需模型 API。
 
-```sh
-npm ci --ignore-scripts --legacy-peer-deps
-uv sync --locked
-node src/cli.mjs pages --library "/path/to/library"
-```
-
-把终端显示的地址（默认 `http://127.0.0.1:43122/library/`）粘贴到连接页，选择工作区。直接打开该地址也可离线使用。关闭终端服务即可断开连接；其他端口用 `--port` 指定，已有 Python 环境可用 `--python` 指定。
-
-- **PDF 阅读与批注**。检索本机题录，打开已有 PDF 或导入本机文件。高亮、下划线、删除线、矩形框和便笺写入资料库的 PDF 管理副本。可修改自己的备注、下载带批注的 PDF，导入原件和已有第三方批注保留。
-- **LaTeX 写作**。打开已登记的 DSH 写作项目，或在资料库的 `manuscripts/` 下新建稿件。可切换和新建源文件、保存修改，并用本机 `latexmk` 编译和逐页预览。已有项目沿用原文件夹。同时编辑同一文件时，保存会检查修订版本。仅对信任的项目点击编译；本入口跳过 `latexmkrc` 并关闭 shell escape，依赖这些功能的项目可在原写作环境中编译。
-- **可选模型 API**。阅读、批注、写作与编译均无需模型。要使用「片段问答」，启动时自行指定完整的 OpenAI Chat Completions 兼容接口和模型名，例如在命令末尾加上 `--api-url http://127.0.0.1:8000/v1/chat/completions --api-model YOUR_MODEL`。远程服务使用 HTTPS；如需 Bearer 密钥，先在本机设置自己的环境变量，再加 `--api-key-env PAPER_MODEL_KEY`。点发送后，仅将输入的问题、粘贴的片段及固定问答提示发给该接口。回答在当前标签页标作 AI 输出。GitHub Pages 不接收文件、密钥或问答。
-
-连接页和本机界面使用系统字体。PDF 渲染沿用本机 PyMuPDF（AGPL 或商业许可），TeX 发行版、宏包和稿件字体遵循各自许可。[第三方许可](THIRD_PARTY.md)
+网页程序与依赖从本站加载，用户文献和稿件保存在设备上。网页用系统字体，PDF 备用字体及中文排版字体保留各自许可。[网页组件与字体许可](https://mappedinfo.github.io/dsh-paper-library/library/licenses.html)
 
 ## 从收集文献到阅读、整理与写作
 
@@ -385,7 +376,7 @@ JSON 可直接拖入流程面板；「完整细节」开关及问号说明当前
 ### 独立画板（GitHub Pages）
 
 同一份画布代码也作为一个**独立静态画板**发布在 GitHub Pages 上，不需要 DSH、不需要服务器：
-[**https://mappedinfo.github.io/dsh-paper-library/**](https://mappedinfo.github.io/dsh-paper-library/)
+[**打开独立画板**](https://mappedinfo.github.io/dsh-paper-library/board.html)
 （用 URL 渲染仓库里的源文件：[`?src=boards/example.json`](https://mappedinfo.github.io/dsh-paper-library/?src=boards/example.json)）
 （2026-09-18 已用真实浏览器在线核对：资源可访问、可绘制、刷新后恢复、自动排版、连线与折线、导出 PNG、并用 URL 渲染仓库源文件，零第三方请求，见 [线上回执](docs/validation/board-pages-live.json)）。它由 `.github/workflows/pages.yml` 在 main 上自动构建部署；
 页面里的文献库、阅读器、对话引用控件在独立模式下**隐藏而不是假装可用**。存储用的是浏览器
@@ -399,7 +390,7 @@ JSON 可直接拖入流程面板；「完整细节」开关及问号说明当前
 仓库里的公开文档同时发布为一个静态文档站：[**https://mappedinfo.github.io/dsh-paper-library/docs/**](https://mappedinfo.github.io/dsh-paper-library/docs/)。
 首屏是按固定种子散布的书海，向下滚动时同一批书转正、沿连续轨迹归入按文档主题排好的十个书架；悬停把书轻轻抽出并显示预览，点击翻开为阅读面板，书架、目录、搜索与小节直达链接负责导航。**每一本书都对应一个真实的 markdown 文件，预览和高亮句都是该文档自己的句子**；场景中的高亮、页边批注与便签属于本站的演示排版，页面内已明确标注，不代表批注导出、手写识别等产品功能，产品行为仍以文档正文为准。
 
-`npm run build:docs` 生成 `_site/docs/`，与 Pages 根目录的独立画板并存，由 `.github/workflows/pages.yml` 在 main 上自动构建部署；资源路径全为相对路径，`/docs/` 子路径无需额外配置。站点不请求本站之外的任何资源（README 徽章在文档站渲染为文字徽章而非远端图片），不调用模型，也不读取任何本地资料库。
+`npm run build:docs` 生成 `_site/docs/`，与浏览器知识库、独立画板并存，由 `.github/workflows/pages.yml` 在 main 上自动构建部署；资源路径全为相对路径，`/docs/` 子路径无需额外配置。站点不请求本站之外的任何资源（README 徽章在文档站渲染为文字徽章而非远端图片），不调用模型，也不读取任何本地资料库。
 
 验证：`npm run verify:docs-site` 离线核对生成树与来源 markdown（7 项，回执 [docs/validation/docs-site-static.json](docs/validation/docs-site-static.json)）；`npm run test:docs-site` 用真实 Chromium 走查桌面与手机（18 项，含首帧书海、归架连续性、搜索命中与直达小节、减少动态效果，回执 [docs/validation/docs-site-browser.json](docs/validation/docs-site-browser.json)，与其他浏览器夹具一样通过 `PLAYWRIGHT_MODULE` 指定 Playwright）；发布后 `npm run verify:docs-pages` 直接读线上 URL，核对索引里的每一页都被提供、滚动归架、打开的书逐句引用线上文档、搜索与直达可用、手机无横向滚动且零本站外请求（7 项，回执 [docs/validation/docs-site-live.json](docs/validation/docs-site-live.json)，2026-11-12 已在线核对）。构建、部署与边界见 [docs/docs-site.md](docs/docs-site.md)。
 

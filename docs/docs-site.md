@@ -62,7 +62,7 @@ and four on a phone viewport.
 ## Publishing
 
 `.github/workflows/pages.yml` runs `node scripts/build-site.mjs`, which assembles the
-whiteboard at the Pages root and calls `buildDocsSite()` to write the documentation beside it
+whiteboard at `/board.html` and calls `buildDocsSite()` to write the documentation beside it
 under `/docs/`, then uploads `_site` with `actions/upload-pages-artifact` and deploys with
 `actions/deploy-pages`. Its trigger paths cover `docs/**`, `docs-site/**`, either README and the
 two build scripts (alongside the whiteboard's own inputs), and the workflow also runs on
@@ -82,5 +82,5 @@ export or handwriting recognition, which the documents describe themselves.
 fixture serves that build, not the deployment. `verify:docs-pages` is the one that reads the
 public URL, and it fetches with `cache: no-store`, so it reports what Pages is serving now rather
 than what this checkout produced. It is a functional check of the public service: not an
-availability, latency or security measurement, and it does not cover the whiteboard at the root,
+availability, latency or security measurement, and it does not cover the whiteboard at `/board.html`,
 which `node scripts/verify-pages.mjs` checks separately.

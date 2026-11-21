@@ -1,4 +1,4 @@
-/** Assemble the whiteboard, library connector and documentation for GitHub Pages.
+/** Assemble the browser library, whiteboard and documentation for GitHub Pages.
  *
  * The board markup is extracted from the plugin's own `web/index.html` instead of being
  * copied, so the plugin page and the standalone page cannot drift: one edit updates both.
@@ -8,6 +8,9 @@
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build as esbuild } from 'esbuild';
+import { buildBrowserPdf } from './build-browser-pdf.mjs';
+import { buildBrowserTex } from './build-browser-tex.mjs';
 import { buildPaperFlow } from './build-paper-flow.mjs';
 import { buildDocsSite } from './build-docs-site.mjs';
 
@@ -43,15 +46,22 @@ const page = template.replace('<!--BOARD_MARKUP-->', markup);
 
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
-await writeFile(join(output, 'index.html'), page);
+await writeFile(join(output, 'board.html'), page);
+await cp(join(project, 'site/home.html'), join(output, 'index.html'));
+await cp(join(project, 'site/home.js'), join(output, 'home.js'));
 await writeFile(join(output, '.nojekyll'), '');
 for (const asset of ['board.js', 'board-flow.js', 'board-source.js', 'board-render.js', 'board-bridge.js', 'board-annotations.js', 'board-annotations.css', 'board-mermaid.js', 'board-drawio.js', 'board.css', 'theme.css', 'floating-windows.js', 'floating-windows.css']) await cp(join(project, 'web', asset), join(output, asset));
 for (const asset of ['paper-flow-editor.js', 'paper-flow-editor.css']) await cp(join(project, 'lib', asset), join(output, asset));
 await cp(join(project, 'site/standalone.js'), join(output, 'standalone.js'));
-// 连接页只分发这三个静态文件。本机工作台及用户选定的资料库不参与打包。
-await mkdir(join(output, 'library'));
-const connectorAssets = ['index.html', 'connect.js', 'library.css'];
-for (const name of connectorAssets) await cp(join(project, 'site/library', name), join(output, 'library', name));
+// 发布清单只含网页程序。文献、稿件以及用户选定的文件夹不会参与构建。
+const library = join(output, 'library');
+await mkdir(library);
+const libraryAssets = ['index.html', 'app.js', 'library.css', 'storage.js', 'assistant.js', 'licenses.html'];
+for (const name of libraryAssets) await cp(join(project, 'site/library', name), join(library, name));
+await esbuild({ entryPoints: [join(project, 'site/library/archive.js')], outfile: join(library, 'archive.js'), bundle: true, format: 'esm', platform: 'browser' });
+await cp(join(project, 'node_modules/client-zip/LICENSE.txt'), join(library, 'client-zip-LICENSE.txt'));
+await buildBrowserPdf(library);
+await buildBrowserTex(library);
 await mkdir(join(output, 'licenses/paper-flow'), { recursive: true });
 await cp(join(project, 'LICENSE'), join(output, 'licenses/project-MIT.txt'));
 await cp(join(project, 'vendor/paper-flow/README.md'), join(output, 'licenses/paper-flow/README.txt'));
@@ -61,7 +71,5 @@ await cp(join(project, 'node_modules/scheduler/LICENSE'), join(output, 'licenses
 await cp(join(project, 'licenses/markdown/dompurify-LICENSE.txt'), join(output, 'licenses/paper-flow/dompurify-LICENSE.txt'));
 await cp(join(project, 'site/boards'), join(output, 'boards'), { recursive: true });
 
-// The board owns the Pages root; the documentation site is published beside it under /docs/.
 const docs = await buildDocsSite({ outDir: output });
-
-console.log(JSON.stringify({ output: '_site', docs, markup_lines: markup.split('\n').length, assets: ['index.html', 'board.js', 'board-flow.js', 'board-source.js', 'board-render.js', 'board-bridge.js', 'board-annotations.js', 'board-annotations.css', 'board-mermaid.js', 'board-drawio.js', 'board.css', 'theme.css', 'floating-windows.js', 'floating-windows.css', 'paper-flow-editor.js', 'paper-flow-editor.css', 'standalone.js', 'boards/example.json', 'boards/example.style.json', ...connectorAssets.map(name => `library/${name}`)] }));
+console.log(JSON.stringify({ output: '_site', docs, library: 'library/', board: 'board.html', markup_lines: markup.split('\n').length }));
