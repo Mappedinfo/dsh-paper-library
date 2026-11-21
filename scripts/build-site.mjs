@@ -56,8 +56,18 @@ await cp(join(project, 'site/standalone.js'), join(output, 'standalone.js'));
 // 发布清单只含网页程序。文献、稿件以及用户选定的文件夹不会参与构建。
 const library = join(output, 'library');
 await mkdir(library);
-const libraryAssets = ['index.html', 'app.js', 'library.css', 'storage.js', 'assistant.js', 'licenses.html'];
+const libraryAssets = ['index.html', 'app.js', 'library.css', 'appearance.js', 'auxiliary.css', 'storage.js', 'assistant.js', 'licenses.html'];
 for (const name of libraryAssets) await cp(join(project, 'site/library', name), join(library, name));
+// 直接发布本地工作台的外观；浏览器版的数据操作仍由上面的独立入口处理。
+const ui = join(library, 'ui');
+await mkdir(join(ui, 'fonts'), { recursive: true });
+for (const name of ['style.css', 'workbench.css', 'workspace-navigation.css', 'pdf-reader.css',
+  'reading-panels.css', 'reading-shell.css', 'theme.css', 'icons.css', 'latex-workspace.css', 'theme.js', 'icons.js']) {
+  await cp(join(project, 'web', name), join(ui, name));
+}
+await cp(join(project, 'web/fonts/silkscreen-regular.ttf'), join(ui, 'fonts/silkscreen-regular.ttf'));
+await cp(join(project, 'licenses/silkscreen-OFL.txt'), join(ui, 'fonts/silkscreen-OFL.txt'));
+await cp(join(project, 'licenses/slides/lucide-react-LICENSE.txt'), join(ui, 'lucide-LICENSE.txt'));
 await esbuild({ entryPoints: [join(project, 'site/library/archive.js')], outfile: join(library, 'archive.js'), bundle: true, format: 'esm', platform: 'browser' });
 await cp(join(project, 'node_modules/client-zip/LICENSE.txt'), join(library, 'client-zip-LICENSE.txt'));
 await buildBrowserPdf(library);

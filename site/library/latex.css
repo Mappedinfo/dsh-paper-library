@@ -1,14 +1,19 @@
-.tex-workbench { display:grid; gap:12px; width:100%; min-width:0; }
-.tex-workbench h2 { font-size:1.07rem; margin:0; }
-.tex-workbench .tex-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,295px),1fr)); gap:12px; }
-.tex-workbench .tex-pane { min-width:0; border:1px solid #d6ded9; border-radius:8px; padding:12px; background:#fff; }
-.tex-workbench .tex-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 10px; }
-.tex-workbench .tex-toolbar h2 { margin-right:auto; }
-.tex-workbench .tex-source { box-sizing:border-box; display:block; resize:vertical; width:100%; min-height:46vh; border:1px solid #bacac3; border-radius:4px; padding:12px; font:14px/1.65 ui-monospace,monospace; background:#fcfdfa; color:#18251e; }
-.tex-workbench .tex-sheet { display:grid; place-items:start center; background:#eef1ed; overflow:auto; padding:8px; }
-.tex-workbench .tex-sheet:empty { display:none; }
-.tex-workbench canvas { display:block; width:auto; height:auto; max-width:100%; }
-.tex-workbench .tex-status,.tex-workbench details { font-size:.9rem; margin:0; }
-.tex-workbench .tex-error { color:#963c24; }
-.tex-workbench pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:13em; overflow:auto; }
-.tex-workbench .tex-nav { margin:10px 0 0; }
+/* Browser storage supplies the workspace files, while the host stylesheet draws the workbench. */
+#latex-view.browser-tex { height: 100%; }
+.browser-tex .latex-nav-tabs > strong { padding: 5px 8px; font-size: 12px; font-weight: 500; }
+.browser-tex .latex-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--latex-pane-head-height);
+  padding: 4px 6px;
+  box-sizing: border-box;
+}
+.browser-tex .latex-gutter > span { display: block; }
+.browser-tex .latex-preview canvas { display: block; width: 100%; height: auto; margin-inline: auto; }
+.browser-tex .latex-preview-head > span { font-size: 12px; color: var(--muted); }
+.browser-tex .tex-log { border-top: 1px solid var(--line); background: var(--surface); }
+.browser-tex .tex-log summary { cursor: pointer; padding: 6px 12px; font-size: 12px; }
+.browser-tex .tex-log pre { max-height: 12rem; margin: 0; overflow-wrap: anywhere; }
+.browser-tex .latex-status:empty { padding-block: 0; }
+.browser-tex [hidden] { display: none !important; }

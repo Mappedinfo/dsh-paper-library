@@ -1,0 +1,14 @@
+/* 独立画板和许可页沿用工作台顶栏，各自的正文占用剩余空间。 */
+.standalone-page > .topbar { height: auto; min-height: 40px; padding: 5px 12px; align-content: center; }
+.standalone-page > .topbar .topbar-actions { flex-wrap: wrap; }
+.standalone-board { margin: 0; height: 100dvh; display: flex; flex-direction: column; }
+.standalone-board #board-view { flex: 1; min-height: 0; }
+.standalone-board #board-view:fullscreen { background: var(--paper); }
+.board-storage-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; border-top: 1px solid var(--line); padding: 4px 12px; font-size: 11px; color: var(--muted); }
+.board-storage-footer a:first-of-type { margin-inline-start: auto; }
+#site-storage-status { color: var(--dsw-alias-state-warn-label); }
+.license-page { max-width: 78ch; margin: 24px auto; padding: 0 16px; }
+.license-page h1 { font-size: 18px; margin: 0 0 12px; }
+.license-page ul { padding-inline-start: 22px; }
+.license-page li { padding: 4px 0; }
+.license-page a, .board-storage-footer a { color: var(--dsw-alias-link); text-decoration: underline; }

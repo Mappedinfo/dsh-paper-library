@@ -8,7 +8,7 @@ Project scaffolding was generated through the author's `academic-templates/dev-p
 
 ### GitHub Pages 浏览器知识库
 
-网页版使用 PDF.js（Apache-2.0）渲染和 pdf-lib（MIT）写入标准 PDF 批注；字符映射、备用字体、解码器和辅助库另有各自的许可。界面使用设备上的系统字体。浏览器 TeX 编译采用 mp-tikz-wasm 及配套的 TeX Live 文件，中文模板使用 Noto Sans SC（SIL Open Font License 1.1）。这些组件、宏包和字体保留各自许可。ZIP 导出使用 client-zip（MIT）。
+网页版沿用本地工作台的 Lucide 图标，许可中保留 Feather 版权声明。正文使用系统字体，LaTeX 文件路径使用 Silkscreen Regular（SIL Open Font License 1.1）。PDF.js（Apache-2.0）渲染 PDF，pdf-lib（MIT）写入标准 PDF 批注。字符映射、备用字体、解码器和辅助库另有各自的许可。浏览器 TeX 编译采用 mp-tikz-wasm 及配套的 TeX Live 文件，中文模板使用 Noto Sans SC（SIL Open Font License 1.1）。ZIP 导出使用 client-zip（MIT）。
 
 构建时从锁定的包或固定版本的发行材料提取所需资源和通知，随 Pages 发布组件清单、字体许可及 TeX 对应源码入口。独立画板的许可位于 `licenses/paper-flow/`。[网页组件与字体许可](https://mappedinfo.github.io/dsh-paper-library/library/licenses.html)
 

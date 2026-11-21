@@ -85,6 +85,23 @@ test('the shelf opens with IndexedDB, imports files and restores them on refresh
   assert.match(el('files').textContent, /reading\.pdf/);
   assert.match(el('files').textContent, /draft\.tex/);
   assert.match(el('files').textContent, /figure\.png图片/);
+  assert.equal(el('paper-list').querySelectorAll('.paper-card').length, 3);
+  el('root-latex').click();
+  await waitFor(() => !el('root-latex').disabled);
+  assert.equal(el('catalog-table').hidden, false);
+  assert.equal(el('files').tBodies[0].rows.length, 1);
+  el('files').querySelector('button.table-title').click();
+  await waitFor(() => el('latex-view') && !el('back').disabled);
+  const sourceEditor = el('latex-view').querySelector('textarea');
+  assert.equal(sourceEditor.value, 'Synthetic source');
+  el('latex-view').querySelector('button[data-layout="source"]').click();
+  assert.equal(el('latex-view').querySelector('[data-id="pdf-pane"]').hidden, true);
+  sourceEditor.value = 'Updated synthetic draft';
+  sourceEditor.dispatchEvent(new window.Event('input'));
+  el('latex-view').querySelector('[data-id="save"]').click();
+  await waitFor(() => el('latex-view').querySelector('[data-id="status"]').textContent.includes('已保存'));
+  el('back').click();
+  await waitFor(() => el('document').hidden && !el('back').disabled);
   el = await openShelf();
   assert.equal(el('empty').hidden, true);
   assert.match(el('count').textContent, /3 份/);
@@ -174,4 +191,37 @@ test('published app, lazy editors, archive, fonts and their license notices are 
   await assert.rejects(stat(join(artifact, 'library-local')), { code:'ENOENT' });
   await assert.rejects(stat(join(library, 'connect.js')), { code:'ENOENT' });
   dom.window.close(); notices.window.close();
+});
+
+test('Pages loads the DSH workbench styles in their original order and shares its palette with the board', { skip: !artifact }, async () => {
+  const app = new JSDOM(html, { url: base + 'library/', runScripts: 'outside-only' });
+  const { window } = app;
+  try {
+    const links = doc => [...doc.querySelectorAll('link[rel="stylesheet"]')].map(el => el.getAttribute('href'));
+    const native = new JSDOM(await readFile(join(project, 'web/index.html'), 'utf8'));
+    const shared = links(window.document).filter(path => path.startsWith('./ui/')).map(path => path.slice(5));
+    try {
+      assert.deepEqual(shared, links(native.window.document).map(path => path.slice(2)).filter(name => shared.includes(name)));
+      for (const name of ['workbench.css', 'workspace-navigation.css', 'pdf-reader.css', 'reading-shell.css', 'theme.css', 'icons.css', 'latex-workspace.css']) {
+        assert.ok(shared.includes(name), name);
+      }
+    } finally { native.window.close(); }
+    for (const name of [...shared, 'theme.js', 'icons.js', 'fonts/silkscreen-regular.ttf']) {
+      assert.deepEqual(await readFile(join(library, 'ui', name)), await readFile(join(project, 'web', name)), name);
+    }
+    window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+    window.eval(await readFile(join(library, 'ui/theme.js'), 'utf8'));
+    const appearance = await readFile(join(library, 'appearance.js'), 'utf8');
+    window.eval(appearance);
+    assert.equal(window.document.documentElement.dataset.palette, 'jade');
+    window.PaperLibraryAppearance.apply('navy');
+    window.PaperLibraryTheme.setPalette('jade');
+    window.eval(appearance);
+    assert.equal(window.document.documentElement.dataset.palette, 'navy');
+    const board = new JSDOM(await readFile(join(artifact, 'board.html'), 'utf8'));
+    try {
+      assert.ok(board.window.document.querySelector('script[src="./library/appearance.js"]'));
+      assert.ok(board.window.document.querySelector('header.topbar.site-header'));
+    } finally { board.window.close(); }
+  } finally { window.close(); }
 });

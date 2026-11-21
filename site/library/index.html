@@ -1,82 +1,123 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-palette="jade">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; frame-src blob:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; form-action 'none'; object-src 'none'; base-uri 'none'">
-  <title>我的知识库 · Paper Library</title>
+  <title>Paper Library</title>
   <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./ui/style.css">
+  <link rel="stylesheet" href="./ui/workbench.css">
+  <link rel="stylesheet" href="./ui/workspace-navigation.css">
+  <link rel="stylesheet" href="./ui/pdf-reader.css">
+  <link rel="stylesheet" href="./ui/reading-panels.css">
+  <link rel="stylesheet" href="./ui/reading-shell.css">
+  <link rel="stylesheet" href="./ui/theme.css">
+  <link rel="stylesheet" href="./ui/icons.css">
+  <link rel="stylesheet" href="./ui/latex-workspace.css">
   <link rel="stylesheet" href="./library.css">
   <link rel="stylesheet" href="./pdf.css">
   <link rel="stylesheet" href="./latex.css">
+  <script src="./ui/theme.js" defer></script>
+  <script src="./appearance.js" defer></script>
+  <script src="./ui/icons.js" defer></script>
   <script type="module" src="./app.js"></script>
 </head>
-<body>
-  <header class="masthead">
-    <a class="brand" href="./"><i aria-hidden="true"></i>Paper Library</a>
-    <nav aria-label="主导航"><a href="./" aria-current="page">知识库</a><a href="../board.html">画板</a><a href="../docs/">使用说明</a></nav>
-    <button class="quiet" id="ask-open" type="button">片段问答</button>
+<body class="browser-library">
+  <header class="topbar">
+    <div class="brand-group">
+      <a class="brand" id="home" href="./" aria-label="Paper Library 首页"><span class="brand-mark" aria-hidden="true">P<span>↗</span></span><span>Paper Library<small>阅读 · 批注 · 连接</small></span></a>
+      <span class="toolbar-paper" id="filename">选择一篇文献</span>
+    </div>
+    <div class="topbar-actions">
+      <a class="button subtle" id="board-open" data-icon="layout-dashboard" href="../board.html">画板</a>
+      <button class="button subtle" id="latex-open" data-icon="file-text" type="button" disabled>LaTeX</button>
+      <button class="button primary" id="import" data-icon="download" type="button" disabled>导入文献</button>
+      <button class="button subtle" id="location" data-icon="settings" type="button" aria-haspopup="dialog" title="管理文件夹" disabled><span id="location-label">正在打开浏览器库…</span></button>
+    </div>
+    <nav class="reader-ribbon" aria-label="文献工作区">
+      <button class="button subtle" id="back" type="button" data-icon="library" aria-controls="workspace" aria-pressed="true">库</button>
+      <div id="reader-tabs" class="reader-control-group" role="group" aria-label="阅读工作区"></div>
+      <button class="button subtle paper-switch" id="sidebar-toggle" type="button" role="switch" aria-checked="true" aria-controls="shelf" hidden>侧边栏</button>
+      <button class="button subtle" id="ask-open" type="button" data-icon="circle-help" aria-haspopup="dialog">片段问答</button>
+    </nav>
   </header>
-  <main>
-    <noscript>请启用 JavaScript，以便浏览器在本机保存和打开文件。</noscript>
-    <div id="notice" role="status" aria-live="polite" hidden></div>
-    <section id="shelf" aria-labelledby="library-title">
-      <header class="shelf-heading">
-        <div><h1 id="library-title">我的知识库</h1><button id="location" type="button" class="location" disabled>正在打开浏览器资料库…</button></div>
-        <div class="actions"><button id="new" type="button" disabled>新建 LaTeX</button><button id="import" type="button" class="primary" disabled>导入文件</button></div>
-      </header>
-      <div id="reconnect-bar" hidden><span>请重新授权，以继续访问上次的文件夹。</span><button id="reconnect" type="button">授权访问</button><button id="recover-browser" type="button">返回浏览器库</button></div>
-      <div class="shelf-tools">
-        <div class="filters" role="group" aria-label="文件类型">
-          <button type="button" data-kind="all" aria-pressed="true">全部</button><button type="button" data-kind="pdf" aria-pressed="false">PDF</button><button type="button" data-kind="tex" aria-pressed="false">LaTeX</button>
+  <noscript>请启用 JavaScript，以便浏览器在本机保存和打开文件。</noscript>
+  <div id="notice" class="browser-notice" role="status" aria-live="polite" hidden></div>
+  <main id="workspace" class="workspace">
+    <section id="shelf" class="library-pane shared-reading-sidebar" aria-label="资料库">
+      <div class="reading-library-content">
+        <section id="workspace-navigation-area" aria-label="内容导航">
+          <nav class="workspace-navigation" aria-label="知识库工作区">
+            <div class="workspace-navigation-roots">
+              <button class="workspace-root-button" id="root-paper" data-kind="paper" type="button" aria-pressed="true" aria-current="page">文献</button><span class="workspace-root-divider" aria-hidden="true">/</span>
+              <a class="workspace-root-button" data-kind="board" href="../board.html">画板</a><span class="workspace-root-divider" aria-hidden="true">/</span>
+              <button class="workspace-root-button" id="root-latex" data-kind="latex" type="button" aria-pressed="false">LaTeX 写作</button>
+            </div>
+            <div class="workspace-nav-search">
+              <form id="catalog-search-form" class="search-field" role="search"><input id="search" type="search" placeholder="检索文件名…" autocomplete="off" aria-label="检索文件名"><kbd aria-hidden="true">⌘ K</kbd></form>
+            </div>
+          </nav>
+        </section>
+        <div id="library-literature-content">
+          <div class="pane-heading"><h1><span id="catalog-heading">文献</span> · <span id="item-count" class="count">—</span></h1><div class="shelf-actions">
+            <button id="catalog-expand" type="button" class="icon-button" data-icon="layout-dashboard" title="展开表格" aria-label="展开表格" aria-expanded="false"></button>
+            <button id="refresh" type="button" class="icon-button" data-icon="refresh-cw" title="刷新文献库" aria-label="刷新文献库"></button>
+          </div></div>
+          <div class="library-filterbar">
+            <label class="field-inline">类型 <select id="file-kind"><option value="all">全部条目</option><option value="pdf">PDF</option><option value="tex">LaTeX</option><option value="asset">图片</option></select></label>
+            <button id="new" class="button subtle" data-icon="plus" type="button" disabled>新建 LaTeX</button>
+          </div>
+          <div id="reconnect-bar" class="inline-error" hidden>请重新授权，以继续访问上次的文件夹。<button id="reconnect" class="button" type="button">授权访问</button><button id="recover-browser" class="button subtle" type="button">返回浏览器库</button></div>
+          <div id="shelf-body" aria-busy="true">
+            <div id="paper-list" class="paper-list" aria-live="polite"></div>
+            <div id="catalog-table" class="catalog-table" hidden><table id="files"><colgroup><col><col class="catalog-column-kind"><col class="browser-size-column"></colgroup><thead><tr><th scope="col">文件名</th><th scope="col">类型</th><th scope="col">大小</th></tr></thead><tbody></tbody></table></div>
+            <div id="empty" class="empty-state" hidden><h3 id="empty-title"></h3><p id="empty-detail"></p></div>
+          </div>
+          <div id="pager" class="pagination catalog-pagination" hidden><button id="prev" class="button subtle" type="button">← 上一页</button><span id="count" class="muted"></span><button id="next" class="button subtle" type="button">下一页 →</button></div>
         </div>
-        <input id="search" type="search" placeholder="按文件名搜索" aria-label="按文件名搜索">
-      </div>
-      <div id="shelf-body" aria-busy="true">
-        <table id="files" hidden><thead><tr><th scope="col">文件名</th><th scope="col">类型</th><th scope="col">大小</th></tr></thead><tbody></tbody></table>
-        <div id="empty" hidden><span class="paper-icon" aria-hidden="true"></span><h2 id="empty-title"></h2><p id="empty-detail"></p></div>
-        <footer id="pager" hidden><span id="count"></span><div><button id="prev" type="button">上一页</button><button id="next" type="button">下一页</button></div></footer>
       </div>
     </section>
-    <section id="document" hidden aria-label="当前文件">
-      <div class="doc-heading"><button type="button" id="back">← 知识库</button><h1 id="filename"></h1></div>
-      <div id="work-panel"></div>
+    <section class="detail-pane" aria-label="阅读与写作">
+      <div id="welcome" class="welcome"><div class="welcome-paper" aria-hidden="true"><span></span><span></span><span></span><span></span><i>“</i></div><h2>让阅读留下线索。</h2><p id="welcome-detail">导入论文，标记值得追问的段落，再把文献之间的联系串起来。</p><button id="welcome-import" class="button primary" type="button" disabled>导入第一篇文献 ↗</button></div>
+      <section id="document" hidden aria-label="当前文件"><div id="work-panel"></div></section>
     </section>
   </main>
   <input id="file-input" type="file" multiple hidden accept=".pdf,.tex,.bib,.sty,.cls,.bst,.def,.cfg,.clo,.tikz,.png,.jpg,.jpeg">
   <input id="directory-input" type="file" multiple webkitdirectory hidden>
   <dialog id="storage-dialog" aria-labelledby="storage-title">
-    <div class="dialog-title"><h2 id="storage-title">存储位置</h2><button type="button" data-close>关闭</button></div>
-    <p id="where"></p>
+    <div class="dialog-heading"><h2 id="storage-title">管理文件夹</h2><button type="button" class="icon-button dialog-close" data-close aria-label="关闭">×</button></div>
+    <p class="muted" id="where"></p>
     <div class="storage-options">
-      <div id="migrate-row"><button id="migrate" type="button">迁移到文件夹</button><span>将当前浏览器库连同备份复制到所选文件夹，以后直接在其中保存。浏览器副本保留。</span></div>
-      <div id="open-folder-row"><button id="open-folder" type="button">打开已有文件夹</button><span>直接读取和编辑文件夹中的 PDF 与稿件。</span></div>
-      <div id="use-browser-row" hidden><button id="use-browser" type="button">切回浏览器库</button><span>重新打开保存在此浏览器中的文件。</span></div>
-      <div id="import-folder-row" hidden><button id="import-folder" type="button">从文件夹导入副本</button><span>此浏览器支持读取所选文件夹，修改保存在浏览器库。需要直接写回文件夹时，可使用桌面 Chrome 或 Edge。</span></div>
-      <div><button id="archive" type="button">下载知识库 ZIP</button><span>保留文件名和子目录，解压后即可用作普通文件夹。</span></div>
+      <div id="migrate-row"><button class="button" id="migrate" type="button">迁移到文件夹</button><p class="muted">将浏览器库及备份复制到所选文件夹，以后直接在其中保存。浏览器副本保留。</p></div>
+      <div id="open-folder-row"><button class="button" id="open-folder" type="button">打开已有文件夹</button><p class="muted">直接读取和编辑所选文件夹中的文献与稿件。</p></div>
+      <div id="use-browser-row" hidden><button class="button" id="use-browser" type="button">切回浏览器库</button><p class="muted">继续使用保存在此浏览器中的文件。</p></div>
+      <div id="import-folder-row" hidden><button class="button" id="import-folder" type="button">从文件夹导入副本</button><p class="muted">修改保存在浏览器库。桌面 Chrome 和 Edge 支持直接写回文件夹。</p></div>
+      <div><button class="button" id="archive" type="button">下载知识库 ZIP</button><p class="muted">解压后可作为普通文件夹使用，包含原文件名及子目录。</p></div>
     </div>
-    <p role="status" id="storage-status"></p>
+    <p class="small" id="storage-status" role="status"></p>
+    <label class="field">界面配色<select id="ui-palette"><option value="jade">墨绿铜金</option><option value="navy">深海蓝灰</option><option value="neutral">石墨中性</option><option value="rose">樱粉柔光</option><option value="apricot">杏橙暖光</option><option value="system">系统配色</option></select></label>
+    <div class="dialog-actions"><a class="button subtle" href="../docs/">使用说明</a><a class="button subtle" href="./licenses.html">组件与字体许可</a></div>
   </dialog>
   <dialog id="new-dialog" aria-labelledby="new-title">
-    <div class="dialog-title"><h2 id="new-title">新建 LaTeX 稿件</h2><button type="button" data-close>关闭</button></div>
-    <form id="new-form"><label for="new-path">文件名</label><input id="new-path" value="main.tex" maxlength="240" required autocomplete="off"><p>可使用子目录，例如 <code>论文/main.tex</code>。</p><button type="submit" class="primary">创建并写作</button><span id="new-status" role="status"></span></form>
+    <div class="dialog-heading"><h2 id="new-title">新建 LaTeX 稿件</h2><button type="button" class="icon-button dialog-close" data-close aria-label="关闭">×</button></div>
+    <form id="new-form"><label class="field">文件名<input id="new-path" value="main.tex" maxlength="240" required autocomplete="off"><span>可使用子目录，例如 论文/main.tex。</span></label><div class="dialog-actions"><span id="new-status" role="status"></span><button type="submit" class="button primary">创建并写作</button></div></form>
   </dialog>
   <dialog id="ask-dialog" aria-labelledby="ask-title">
-    <div class="dialog-title"><h2 id="ask-title">片段问答</h2><button type="button" data-close>关闭</button></div>
+    <div class="dialog-heading"><h2 id="ask-title">片段问答</h2><button type="button" class="icon-button dialog-close" data-close aria-label="关闭">×</button></div>
     <form id="ask-form" autocomplete="off">
       <details id="api-settings" open><summary>我的模型 API</summary>
-        <label for="endpoint">Chat Completions 接口</label><input id="endpoint" type="url" required placeholder="https://…/v1/chat/completions">
-        <label for="model">模型名</label><input id="model" maxlength="200" required>
-        <label for="key">API 密钥（按需填写）</label><input id="key" type="password" autocomplete="off">
-        <small>配置仅在当前标签页有效。所选接口需要允许此网页跨域访问。</small>
+        <label class="field">Chat Completions 接口<input id="endpoint" type="url" required placeholder="https://…/v1/chat/completions"></label>
+        <div class="field-row"><label class="field">模型名<input id="model" maxlength="200" required></label><label class="field">API 密钥（按需填写）<input id="key" type="password" autocomplete="off"></label></div>
+        <p class="muted">配置仅在当前标签页有效。所选接口需要允许此网页跨域访问。</p>
       </details>
-      <label for="excerpt">要发送的摘录</label><textarea id="excerpt" rows="4" maxlength="16000" required></textarea>
-      <label for="question">问题</label><textarea id="question" rows="2" maxlength="4000" required></textarea>
-      <button type="submit" class="primary">发送到我的 API</button><p id="ask-status" role="status"></p>
+      <label class="field">要发送的摘录<textarea id="excerpt" rows="4" maxlength="16000" required></textarea></label>
+      <label class="field">问题<textarea id="question" rows="2" maxlength="4000" required></textarea></label>
+      <div class="dialog-actions"><button type="submit" class="button primary">发送到我的 API</button></div><p id="ask-status" role="status"></p>
       <section hidden id="ai-result"><h3>AI 回答</h3><div id="answer"></div></section>
     </form>
   </dialog>
-  <footer class="site-foot"><span>Paper Library · 网页版</span><a href="./licenses.html">组件与字体许可</a></footer>
 </body>
 </html>

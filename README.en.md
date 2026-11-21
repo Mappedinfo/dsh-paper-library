@@ -179,9 +179,9 @@ The downloadable guide and slides are currently in Chinese. Screenshots use synt
 
 ## Browser library
 
-[Open the web library](https://mappedinfo.github.io/dsh-paper-library/library/) to import a PDF or create a LaTeX manuscript. It starts in IndexedDB and restores your files on reload. Reading, native PDF annotations, source editing and TeX compilation run in the browser. DeepSeek Harness remains the primary platform for the full plugin.
+[Open the web library](https://mappedinfo.github.io/dsh-paper-library/library/) to import a PDF or create a LaTeX manuscript. It shares the local Paper Library catalog, reader and writing workspace styles. Files start in IndexedDB and are restored on reload. Reading, native PDF annotations, source editing and TeX compilation run in the browser. DeepSeek Harness remains the primary platform for the full plugin.
 
-Use the storage button below the library title to copy the browser library into an ordinary folder or open an existing one. After you grant permission, edits go directly into that folder. Desktop Chrome and Edge support this workflow. Browsers without directory write access can import a folder and download a ZIP. Before clearing site data, migrate or export any files you want to keep. Optional excerpt Q&A uses the endpoint, model and key you enter in that tab. [Component and font licenses](https://mappedinfo.github.io/dsh-paper-library/library/licenses.html)
+Use the folder button in the top toolbar to copy the browser library into an ordinary folder or open an existing one. After you grant permission, edits go directly into that folder. Desktop Chrome and Edge support this workflow. Browsers without directory write access can import a folder and download a ZIP. Before clearing site data, migrate or export any files you want to keep. Optional excerpt Q&A uses the endpoint, model and key you enter in that tab. [Component and font licenses](https://mappedinfo.github.io/dsh-paper-library/library/licenses.html)
 
 ## Installation
 

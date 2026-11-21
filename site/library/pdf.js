@@ -28,47 +28,103 @@ export function mountPdf(panel, { store, entry, onSaved }) {
   const root = el('section');
   root.className = 'browser-pdf';
   root.innerHTML = `
-    <div class="bp-bar">
-      <button data-el="prev" aria-label="上一页">上一页</button>
-      <label>页 <input data-el="number" aria-label="PDF 页码" type="number" min="1" value="1"></label>
-      <span data-el="count"></span><button data-el="next" aria-label="下一页">下一页</button>
-      <label>缩放 <select data-el="zoom"><option value="1">适合宽度</option><option value=".75">75%</option><option value="1.25">125%</option><option value="1.75">175%</option></select></label>
-      <label>批注 <select data-el="tool"><option value="">浏览</option></select></label>
-      <button data-el="export">下载 PDF</button>
+    <div class="paper-tools" aria-label="当前文献工具栏">
+      <div class="reader-control-group" role="group" aria-label="PDF 导航"><div class="toolbar-reader">
+        <div class="page-controls"><button class="icon-button" data-el="prev" aria-label="上一页">←</button>
+          <label><input data-el="number" aria-label="页码" type="number" min="1" value="1"><span data-el="count">/ —</span></label>
+          <button class="icon-button" data-el="next" aria-label="下一页">→</button></div>
+        <label class="bp-zoom">缩放 <select data-el="zoom"><option value="1">适合宽度</option><option value=".75">75%</option><option value="1.25">125%</option><option value="1.75">175%</option></select></label>
+      </div></div>
+      <div class="reader-control-group" role="group" aria-label="导出"><button class="button subtle" data-el="export">下载批注 PDF</button></div>
+      <span class="reader-inline-feedback" role="status" data-el="status"></span>
     </div>
-    <p class="bp-status" role="status" data-el="status"></p>
-    <div class="bp-layout"><div class="bp-scroll" data-el="scroll"><div class="bp-sheet" data-el="sheet">
-      <canvas data-el="canvas" aria-label="当前 PDF 页"></canvas><div class="bp-text" data-el="text"></div>
-      <div data-el="region" class="bp-region" hidden></div>
-    </div></div>
-    <aside class="bp-notes"><h3>本页批注</h3><div data-el="notes"></div></aside></div>
-    <dialog data-el="dialog"><form data-el="form"><h3 data-el="title"></h3><blockquote data-el="quote" hidden></blockquote>
-      <label>备注<textarea data-el="comment" rows="4" maxlength="10000"></textarea></label>
-      <p data-el="error" role="status"></p><div class="bp-actions"><button type="button" data-el="cancel">取消</button>
-      <button type="submit" data-el="save">保存批注</button></div></form></dialog>`;
+    <div class="annotation-tool-group" data-el="tools" role="group" aria-label="PDF 批注工具" hidden></div>
+    <div class="bp-layout">
+      <aside id="bp-annotation-rail" class="shared-reading-sidebar bp-notes" data-el="rail" aria-label="本页批注" hidden>
+        <div class="reading-sidebar-header"><strong>本页批注</strong><span class="count" data-el="note-count"></span></div>
+        <div id="annotation-list" class="annotation-list" data-el="notes"></div>
+      </aside>
+      <div class="paper-pdf-reader" data-el="scroll" tabindex="0" aria-label="当前 PDF 页">
+        <div class="pdr-pages"><div class="pdr-page-slot"><div class="pdr-sheet bp-sheet" data-el="sheet">
+          <canvas data-el="canvas" aria-label="PDF 页内容"></canvas><div class="bp-text" data-el="text"></div>
+          <div data-el="region" class="pdr-square-draft bp-region" hidden></div>
+        </div><div class="pdr-page-caption" data-el="caption"></div></div></div>
+      </div>
+    </div>
+    <dialog data-el="dialog" aria-labelledby="bp-dialog-title"><form data-el="form">
+      <div class="dialog-heading"><h2 id="bp-dialog-title" data-el="title"></h2></div>
+      <blockquote data-el="quote" hidden></blockquote>
+      <label class="field">备注<textarea data-el="comment" rows="4" maxlength="10000"></textarea></label>
+      <p class="form-result" data-el="error" role="status"></p><div class="dialog-actions">
+      <button class="button subtle" type="button" data-el="cancel">取消</button>
+      <button class="button primary" type="submit" data-el="save">保存批注</button></div></form></dialog>`;
   panel.append(root);
   const get = name => root.querySelector('[data-el="' + name + '"]');
   const status = text => { get('status').textContent = text; };
-  const sheet = get('sheet'), layer = get('text'), dialog = get('dialog'), tool = get('tool');
+  const sheet = get('sheet'), layer = get('text'), dialog = get('dialog');
+  const tools = get('tools');
+  const viewTabs = panel.ownerDocument.getElementById('reader-tabs');
+  const readerTab = el('button', '阅读'), annotationsTab = el('button', '批注');
+  for (const tab of [readerTab, annotationsTab]) {
+    tab.type = 'button'; tab.className = 'tab';
+    tab.setAttribute('aria-pressed', String(tab === readerTab));
+  }
+  annotationsTab.setAttribute('aria-controls', 'bp-annotation-rail');
+  let tool = '';
   const name = entry.path.split('/').at(-1);
   let task, doc, page, viewport, textTask, paint, source, revision, pending, drag;
   let number = 1, busy = true, saving = false, disposed = false, editable = false;
-  for (const [value, label] of Object.entries(markNames)) {
-    const item = el('option', label); item.value = value; tool.append(item);
+  let renderedWidth = 0, resizeTimer;
+  const availableWidth = () => Math.max(240, get('scroll').clientWidth - 24);
+  function resizePage() {
+    clearTimeout(resizeTimer);
+    if (disposed || busy || saving || dialog.open || !doc || !renderedWidth || availableWidth() === renderedWidth) return;
+    resizeTimer = setTimeout(() => {
+      if (!disposed && !busy && !saving && !dialog.open && availableWidth() !== renderedWidth) void render();
+    }, 120);
   }
+  const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(resizePage) : null;
+  observer?.observe(get('scroll'));
+  for (const type of ['', 'Square', 'Highlight', 'Underline', 'StrikeOut', 'Text']) {
+    const button = el('button', markNames[type] || '选择');
+    button.type = 'button';
+    button.className = 'button subtle';
+    button.dataset.tool = type;
+    button.setAttribute('aria-pressed', String(type === tool));
+    button.onclick = () => selectTool(type);
+    tools.append(button);
+  }
+  window.PaperIcons?.decorate(get('export'), 'download');
+  function selectTool(type) {
+    stopDrag();
+    tool = type;
+    for (const button of tools.children) button.setAttribute('aria-pressed', String(button.dataset.tool === type));
+    sheet.dataset.draw = String(['Text', 'Square'].includes(tool));
+    status(hint());
+  }
+  function showAnnotations(show) {
+    readerTab.setAttribute('aria-pressed', String(!show));
+    annotationsTab.setAttribute('aria-pressed', String(show));
+    get('rail').hidden = tools.hidden = !show;
+    if (!show) selectTool('');
+    resizePage();
+  }
+  readerTab.onclick = () => showAnnotations(false);
+  annotationsTab.onclick = () => showAnnotations(true);
   function controls() {
     get('prev').disabled = busy || number <= 1;
     get('next').disabled = busy || !doc || number >= doc.numPages;
     get('zoom').disabled = busy || !doc;
     get('number').disabled = busy || !doc;
     get('export').disabled = !source;
-    tool.disabled = busy || !editable;
+    annotationsTab.disabled = readerTab.disabled = busy || !doc;
+    for (const button of tools.children) button.disabled = busy || !editable;
   }
   function hint() {
     if (!editable) return '此文件仅供阅读和下载。';
-    if (markup.has(tool.value)) return '拖选本页文字以添加' + markNames[tool.value] + '。';
-    if (tool.value === 'Square') return '在页面上拖动以标出一个区域。';
-    if (tool.value === 'Text') return '点击页面，放置便笺。';
+    if (markup.has(tool)) return '拖选本页文字以添加' + markNames[tool] + '。';
+    if (tool === 'Square') return '在页面上拖动以标出一个区域。';
+    if (tool === 'Text') return '点击页面，放置便笺。';
     return '';
   }
   function showEditor(data, quote = '', note = '') {
@@ -81,17 +137,26 @@ export function mountPdf(panel, { store, entry, onSaved }) {
   function notes(items) {
     const filtered = items.filter(a => a.subtype !== 'Link' && a.subtype !== 'Popup' && a.subtype !== 'Widget');
     const list = get('notes'); list.replaceChildren();
-    if (!filtered.length) list.append(el('p', '本页暂无批注。'));
+    get('note-count').textContent = String(filtered.length);
+    if (!filtered.length) {
+      const empty = el('p', '本页暂无批注。'); empty.className = 'muted'; list.append(empty);
+    }
     for (const item of filtered.slice(0, 300)) {
-      const card = el('article'), title = el('strong', markNames[item.subtype] || item.subtype);
-      card.append(title);
-      if (item.titleObj?.str && item.titleObj.str !== webAuthor) card.append(el('small', item.titleObj.str));
+      const card = el('article'), meta = el('header'), type = el('span', markNames[item.subtype] || item.subtype);
+      card.className = 'annotation-card'; meta.className = 'annotation-meta'; type.className = 'note-type';
+      meta.append(el('span', '第 ' + number + ' 页'));
+      if (item.titleObj?.str && item.titleObj.str !== webAuthor) meta.append(el('span', item.titleObj.str));
+      meta.append(type); card.append(meta);
+      if (item.color?.length === 3) card.style.setProperty('--annotation-card-color', 'rgb(' + Array.from(item.color).join(' ') + ')');
       const note = item.contentsObj?.str || '';
-      if (note) card.append(el('p', note.slice(0, 10000)));
+      if (note) {
+        const content = el('p', note.slice(0, 10000)); content.className = 'annotation-comment'; card.append(content);
+      }
       if (editable && item.titleObj?.str === webAuthor) {
-        const edit = el('button', '编辑备注');
+        const actions = el('div'), edit = el('button', '编辑备注');
+        actions.className = 'annotation-actions'; edit.className = 'button subtle';
         edit.onclick = () => { if (!busy) showEditor({ pageNumber: number, annotationId: item.id }, '', note); };
-        card.append(edit);
+        actions.append(edit); card.append(actions);
       }
       list.append(card);
     }
@@ -102,12 +167,15 @@ export function mountPdf(panel, { store, entry, onSaved }) {
     busy = true; controls(); status('正在读取页面…');
     number = Math.max(1, Math.min(doc.numPages, Math.trunc(target) || 1));
     get('number').value = number; get('number').max = doc.numPages; get('count').textContent = '/ ' + doc.numPages;
+    get('caption').textContent = '第 ' + number + ' 页';
+    get('note-count').textContent = '';
     get('notes').replaceChildren(); layer.replaceChildren(); layer.hidden = true;
     try {
       page?.cleanup(); page = await doc.getPage(number);
       if (disposed) return;
-      const base = page.getViewport({ scale: 1 }), width = Math.max(240, get('scroll').clientWidth - 24);
-      const scale = Math.min(5, width / base.width * Number(get('zoom').value), 6000 / Math.max(base.width, base.height));
+      const base = page.getViewport({ scale: 1 });
+      renderedWidth = availableWidth();
+      const scale = Math.min(5, renderedWidth / base.width * Number(get('zoom').value), 6000 / Math.max(base.width, base.height));
       viewport = page.getViewport({ scale });
       const ratio = Math.min(devicePixelRatio || 1, 2, Math.sqrt(MAX_PIXELS / (viewport.width * viewport.height)),
         8192 / Math.max(viewport.width, viewport.height));
@@ -127,7 +195,7 @@ export function mountPdf(panel, { store, entry, onSaved }) {
       if (disposed) return;
       layer.hidden = false; status(hint());
     } catch (err) { if (!disposed) status('无法完整显示本页。' + err.message); }
-    finally { if (!disposed) { busy = false; controls(); } }
+    finally { if (!disposed) { busy = false; controls(); resizePage(); } }
   }
   async function load(blob, at) {
     await task?.destroy();
@@ -154,7 +222,7 @@ export function mountPdf(panel, { store, entry, onSaved }) {
       Math.min(viewport.height, Math.max(0, (e.clientY - box.top) * viewport.height / box.height))];
   }
   function selectText() {
-    if (busy || disposed || !editable || !markup.has(tool.value) || dialog.open) return;
+    if (busy || disposed || !editable || !markup.has(tool) || dialog.open) return;
     const selection = window.getSelection();
     if (!selection?.rangeCount || selection.isCollapsed || !layer.contains(selection.anchorNode) || !layer.contains(selection.focusNode)) return;
     const selected = selection.getRangeAt(0);
@@ -177,18 +245,18 @@ export function mountPdf(panel, { store, entry, onSaved }) {
       }
       node = walker.nextNode();
     }
-    if (quads.length) showEditor({ pageNumber: number, type: tool.value, quads }, selection.toString());
+    if (quads.length) showEditor({ pageNumber: number, type: tool, quads }, selection.toString());
   }
   sheet.addEventListener('pointerup', () => setTimeout(selectText, 0));
   layer.addEventListener('keyup', event => { if (event.key === 'Enter') selectText(); });
   function stopDrag() { drag = null; get('region').hidden = true; }
   sheet.addEventListener('pointerdown', event => {
-    if (!editable || busy || event.button !== 0 || !['Square','Text'].includes(tool.value)) return;
+    if (!editable || busy || event.button !== 0 || !['Square','Text'].includes(tool)) return;
     event.preventDefault(); sheet.setPointerCapture(event.pointerId);
     drag = { start: position(event), pointer: event.pointerId };
   });
   sheet.addEventListener('pointermove', event => {
-    if (!drag || drag.pointer !== event.pointerId || tool.value !== 'Square') return;
+    if (!drag || drag.pointer !== event.pointerId || tool !== 'Square') return;
     const [x,y] = drag.start, [b,c] = position(event), region = get('region'); region.hidden = false;
     Object.assign(region.style, { left: Math.min(x,b) + 'px', top: Math.min(y,c) + 'px',
       width: Math.abs(x-b) + 'px', height: Math.abs(y-c) + 'px' });
@@ -198,15 +266,14 @@ export function mountPdf(panel, { store, entry, onSaved }) {
     const [x,y] = drag.start, [b,c] = position(event);
     stopDrag();
     let q;
-    if (tool.value === 'Text') {
+    if (tool === 'Text') {
       const s = Math.min(18 * viewport.scale, viewport.width, viewport.height);
       const left = Math.max(0, Math.min(x, viewport.width - s)), top = Math.max(0, Math.min(y, viewport.height - s));
       q = quad(left, top, left + s, top + s);
     } else if (Math.abs(b-x) >= 3 && Math.abs(c-y) >= 3) q = quad(Math.min(x,b), Math.min(y,c), Math.max(x,b), Math.max(y,c));
-    if (q) showEditor({ pageNumber: number, type: tool.value, quads: [q] });
+    if (q) showEditor({ pageNumber: number, type: tool, quads: [q] });
   });
   sheet.addEventListener('pointercancel', stopDrag);
-  tool.onchange = () => { stopDrag(); sheet.dataset.draw = String(['Text','Square'].includes(tool.value)); status(hint()); };
   get('prev').onclick = () => { if (!busy) void render(number - 1); };
   get('next').onclick = () => { if (!busy) void render(number + 1); };
   get('number').onchange = () => { if (!busy) void render(Number(get('number').value)); };
@@ -214,7 +281,7 @@ export function mountPdf(panel, { store, entry, onSaved }) {
   get('export').onclick = () => { if (source) download(source, name); };
   get('cancel').onclick = () => dialog.close();
   dialog.oncancel = event => { if (saving) event.preventDefault(); };
-  dialog.onclose = () => { pending = null; };
+  dialog.onclose = () => { pending = null; resizePage(); };
   get('form').onsubmit = async event => {
     event.preventDefault();
     if (!pending || saving) return;
@@ -244,9 +311,14 @@ export function mountPdf(panel, { store, entry, onSaved }) {
     source = result.blob; revision = result.revision;
     if (source.size > maxPdfBytes) throw new Error('浏览器阅读单份 PDF 的上限为 64 MiB。');
     await load(source, 1);
+    if (!disposed) viewTabs.append(readerTab, annotationsTab);
   })().catch(err => { if (!disposed) { busy = false; controls(); status('打开 PDF 失败。' + err.message); } });
   return {
     canLeave() { if (saving) return false; return !pending || confirm('放弃尚未保存的批注？'); },
-    destroy() { disposed = true; paint?.cancel(); textTask?.cancel(); task?.destroy()?.catch(() => {}); root.remove(); source = null; },
+    destroy() {
+      disposed = true; readerTab.remove(); annotationsTab.remove();
+      clearTimeout(resizeTimer); observer?.disconnect();
+      paint?.cancel(); textTask?.cancel(); task?.destroy()?.catch(() => {}); root.remove(); source = null;
+    },
   };
 }
