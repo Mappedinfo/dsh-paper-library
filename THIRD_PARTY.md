@@ -6,6 +6,10 @@ The default installation uses PyMuPDF/MuPDF and the AGPL option of citeproc-js. 
 
 Project scaffolding was generated through the author's `academic-templates/dev-project` Copier template on 2026-09-14. This Mappedinfo project carries no university affiliation.
 
+### GitHub Pages 知识库连接页
+
+`/library/` 的 HTML、CSS 和 JavaScript 是本项目原创代码，发布包在 `licenses/project-MIT.txt` 附有 MIT 全文。连接页使用访问者设备上已有的系统字体，无字体文件、第三方脚本或 CDN 依赖。本机工作台使用本地安装的 PyMuPDF 与 TeX 工具链；PDF 引擎的许可见下表。TeX 发行版、宏包和稿件选用的字体各自保留原许可，发布排版后的 PDF 前应核对所用字体的嵌入和分发条款。独立画板的流程编辑器另带组件来源说明以及其打包依赖的许可，保存在 Pages 的 `licenses/paper-flow/`。
+
 | Component | Purpose | Upstream / license |
 |---|---|---|
 | PyMuPDF / MuPDF | Native PDF annotations, metadata, current-page render | [PyMuPDF](https://pymupdf.readthedocs.io/en/latest/) / AGPL or Artifex commercial license; default dependency uses AGPL |

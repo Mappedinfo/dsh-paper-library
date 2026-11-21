@@ -4,7 +4,17 @@ import { createHeadlessAnalysis, loadModelConfig } from './headless-analysis.mjs
 
 // JSON on stdin keeps paths/Unicode and batch requests shell-quoting independent.
 const args=process.argv.slice(2);
-if (args.includes('--help')) {
+if (args[0] === 'pages') {
+  try {
+    const { pagesUsage, startPages } = await import('./pages-server.mjs');
+    if (args.includes('--help')) console.log(pagesUsage);
+    else await startPages(args.slice(1));
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
+} else if (args.includes('--help')) {
+  console.log('本机网页工作台：paper-library pages --help');
   console.log('paper-library [--library /path] [--python /path] [--state-home /path] [--model-config /path/config.json] < request.json\nRequest: {"action":"list","query":"urban"}\nBatch: {"action":"paper_analysis_run","ids":["paper-id"],"request_id":"batch-id","mode":"metadata"}\nPPTX: {"action":"slides_export_pptx","id":"pd-…"}\nSee docs/api.md for actions.');
 } else {
   let headless, isAnalysis = false, parsed = false;

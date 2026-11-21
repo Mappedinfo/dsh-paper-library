@@ -1,4 +1,4 @@
-# Publish the independent whiteboard and the documentation site to GitHub Pages.
+# 发布独立画板、文档及本地知识库连接页。
 #
 # The board is the thin static host around `web/board.js` and keeps the Pages root; the docs
 # site is generated from this repository's own markdown by `scripts/build-docs-site.mjs` and is
@@ -6,7 +6,7 @@
 # model, a database or the Python worker.
 # Following `main` keeps the public drawing service in step with the plugin while
 # remaining usable on its own.
-name: Deploy whiteboard site
+name: Deploy Paper Library Pages
 
 on:
   push:
@@ -20,6 +20,9 @@ on:
       - 'docs/**'
       - 'README.md'
       - 'README.en.md'
+      - 'LICENSE'
+      - 'licenses/**'
+      - 'tests-js/pages-connector.test.mjs'
       - 'scripts/build-site.mjs'
       - 'scripts/build-docs-site.mjs'
       - 'scripts/build-paper-flow.mjs'
@@ -50,8 +53,12 @@ jobs:
           node-version: '22'
       - name: Install build dependencies
         run: npm ci --ignore-scripts
-      - name: Assemble the static whiteboard
+      - name: Assemble the static site
         run: node scripts/build-site.mjs
+      - name: Verify local library connector
+        run: node --test tests-js/pages-connector.test.mjs
+        env:
+          PAGES_ARTIFACT: _site
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>本地文献库 · Paper Library</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./shell.css">
+  <link rel="stylesheet" href="/pdf-reader.css">
+  <link rel="stylesheet" href="./pdf.css">
+  <link rel="stylesheet" href="./latex.css">
+  <script src="/pdf-reader.js" defer></script>
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="workspace-bar">
+    <div class="workspace-brand"><span class="book-mark" aria-hidden="true"></span><strong>Paper Library</strong></div>
+    <nav aria-label="工作区">
+      <a href="#pdf" data-view="pdf">PDF 阅读与批注</a>
+      <a href="#latex" data-view="latex">LaTeX 写作</a>
+    </nav>
+    <div class="connection-info"><span>本机资料库</span><strong id="library-name"></strong></div>
+    <button id="assistant-open" type="button">片段问答</button>
+  </header>
+  <main>
+    <div id="workspace-error" role="alert" hidden><span id="error-text"></span> <button id="retry" type="button">重试连接</button></div>
+    <section id="pdf-panel" aria-label="PDF 阅读与批注" hidden></section>
+    <section id="latex-panel" aria-label="LaTeX 写作" hidden></section>
+  </main>
+  <dialog id="assistant-dialog" aria-labelledby="assistant-title">
+    <div class="dialog-heading"><h2 id="assistant-title">片段问答</h2><button type="button" id="assistant-close">关闭</button></div>
+    <p id="model-detail">正在读取本机配置…</p>
+    <form id="assistant-form" hidden>
+      <label for="excerpt">要发送的 PDF 原文或 LaTeX 片段</label>
+      <textarea id="excerpt" rows="5" maxlength="16000" required></textarea>
+      <label for="question">你的问题</label>
+      <textarea id="question" rows="2" maxlength="4000" required></textarea>
+      <button type="submit" class="send">发送到已配置的 API</button>
+      <span id="ask-status" role="status"></span>
+    </form>
+    <section id="answer-block" hidden><h3>AI 回答</h3><div id="answer-text"></div></section>
+  </dialog>
+</body>
+</html>

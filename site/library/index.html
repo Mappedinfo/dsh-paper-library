@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+  <title>连接本地知识库 · Paper Library</title>
+  <link rel="stylesheet" href="./library.css">
+  <script defer src="./connect.js"></script>
+</head>
+<body>
+  <header><a class="brand" href="../docs/index.html" lang="en">Paper Library</a><nav aria-label="项目"><a href="../docs/index.html">DSH 使用文档</a><a href="../index.html">独立画板</a></nav></header>
+  <main>
+    <h1>连接本地知识库</h1>
+    <p class="intro">在浏览器中阅读和批注 PDF，或继续写 LaTeX。文献、批注和稿件都保存在你选择的本机目录。</p>
+    <div class="columns">
+      <section aria-labelledby="connect-title">
+        <h2 id="connect-title">打开工作台</h2>
+        <form id="connect">
+          <label for="address">本机服务地址</label>
+          <input id="address" type="url" placeholder="http://127.0.0.1:43122" required autocomplete="off" spellcheck="false" aria-describedby="address-hint">
+          <p id="address-hint">粘贴启动服务时终端显示的地址。</p>
+          <div class="buttons"><button type="submit" value="pdf">PDF 阅读与批注</button><button type="submit" value="latex">LaTeX 写作</button></div>
+        </form>
+        <noscript><p>请启用 JavaScript，或直接在浏览器打开终端显示的本机地址。</p></noscript>
+      </section>
+      <section aria-labelledby="start-title">
+        <h2 id="start-title">启动本机服务</h2>
+        <p>在项目目录运行下面的命令，将路径替换为你的知识库目录。使用期间请保持终端打开。</p>
+        <pre><code>node src/cli.mjs pages --library "/path/to/library"</code></pre>
+        <details>
+          <summary>首次安装与自定义端口</summary>
+          <p>从 <a href="https://github.com/mappedinfo/dsh-paper-library">项目源码</a>安装，准备好 Node.js 和 uv，然后在项目目录运行：</p>
+          <pre><code>npm ci --ignore-scripts --legacy-peer-deps
+uv sync --locked</code></pre>
+          <p>如需更换端口，在启动命令末尾加上 <code>--port 43123</code>。编译 LaTeX 还需本机安装 latexmk 和 TeX 引擎。</p>
+        </details>
+      </section>
+    </div>
+  </main>
+  <footer><p>GitHub Pages 只打开你指定的本机地址。阅读、批注与写作无需外部 API。</p><a href="../licenses/project-MIT.txt">页面代码许可</a></footer>
+</body>
+</html>

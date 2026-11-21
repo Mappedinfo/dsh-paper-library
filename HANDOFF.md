@@ -14,6 +14,8 @@
 
 ## 2. 当前任务与实际状态
 
+2026-11-21：GitHub Pages 增加 `/library/` 连接页；本机入口为 `node src/cli.mjs pages --library <目录>`。工作台支持原生 PDF 批注、LaTeX 源码保存与本机编译预览，片段问答需显式配置 API 并手动发送。DSH 仍是主平台。[使用说明](README.md#从-github-pages-打开本地知识库)与 `tests-js/pages-*.test.mjs` 覆盖此入口。
+
 文献阅读与 LaTeX 写作的工作区导航按 DSH 标签页隔离；明确打开文献时不再套用旧写作／画板导航。独立浏览器标签页保留各自的导航标识，刷新可续用。文献阅读位置、批注草稿和 LaTeX 项目续写记录保留。128 项相关检查通过，另 12 项旧阅读／模型夹具失败在修改前原样复现；未做界面验收。回归入口为 `tests-js/workspace-tab-state.test.mjs` 与 `tests-js/adapter-client.test.mjs`，见 [工作区导航](docs/workspace-navigation.md)。
 
 LaTeX 写作检索接入与语言请求相同的模型网络分流；临时连接／服务故障只重试未完成轮次一次，保留工具读取结果与原总预算。认证、限流、额度、截断和工具不支持分别提示，部分流不生成回复或提案。批注错误提示去掉重复句号。定向回归与原生 DSH 合成协议检查见 [DSH 写作](docs/latex-projects.md#dsh-提问与人机互写已实现)。

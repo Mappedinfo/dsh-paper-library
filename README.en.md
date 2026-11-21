@@ -177,6 +177,12 @@ The usage guide itself is a practice document. Import it, annotate it, or open t
 
 The downloadable guide and slides are currently in Chinese. Screenshots use synthetic documents and generic learning exercises; their UI corresponds to the versions recorded in the [demo notes](docs/demo/README.md) and [screenshot provenance](docs/community/README.md), not necessarily every current control. Handwriting screenshots use scripted pen input, not a physical Pencil trial. They do not establish real-model answer quality.
 
+## Open a local library from GitHub Pages
+
+DeepSeek Harness remains the primary platform. The [Pages connector](https://mappedinfo.github.io/dsh-paper-library/library/) opens a workspace on your own computer. After installing the source dependencies below, run `node src/cli.mjs pages --library "/path/to/library"` and paste the printed address into the connector. You can also open that address directly offline. PDFs, native annotations, manuscript sources, and compiler output stay on your machine.
+
+Select **PDF** to read, annotate or export a managed copy. Select **LaTeX** to edit a registered project or create one in the library, check for concurrent edits, compile with local TeX and preview the result. For optional excerpt Q&A, pass your own `--api-url` (a full Chat Completions endpoint) and `--api-model`. Pass the name of a local credential variable with `--api-key-env` if required. Only the excerpt and question you submit, together with a fixed instruction, are sent to the configured service. The connector and local workspace use system fonts. [Third-party licenses](THIRD_PARTY.md)
+
 ## Installation
 
 Requirements: **Node `^22.19.0 || >=24`**, **Python `>=3.11`**, **uv**, and a locally built DeepSeek Harness checkout for the integrated plugin. LaTeX additionally requires `latexmk` and a TeX engine.

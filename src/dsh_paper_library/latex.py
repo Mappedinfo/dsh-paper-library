@@ -633,8 +633,8 @@ def _synctex() -> str:
 def _compile_env() -> dict:
     env = dict(os.environ)
     path = env.get("PATH", "")
-    if TEXBIN not in path.split(":"):
-        env["PATH"] = f"{TEXBIN}:{path}" if path else TEXBIN
+    if Path(TEXBIN).is_dir() and TEXBIN not in path.split(os.pathsep):
+        env["PATH"] = os.pathsep.join([TEXBIN, path]) if path else TEXBIN
     # Keep the build non-interactive and reproducible for a hung or missing input.
     env.setdefault("TEXMFVAR", str(Path.home() / ".texlive" / "texmf-var"))
     return env
@@ -648,7 +648,7 @@ def _artifact_stamp(path):
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
-def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, include_archived=False, save_version=False):
+def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, include_archived=False, save_version=False, local_web=False):
     row = _project(library, id, include_archived)
     if not isinstance(save_version, bool):
         raise ValueError("save_version 必须是布尔值")
@@ -664,7 +664,14 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
         raise ValueError(f"超时必须在 5–{COMPILE_MAX_TIMEOUT} 秒之间")
     # A verified PDF/SyncTeX pair must come from this invocation, even when an
     # external editor replaced an output which latexmk's cache considers fresh.
-    command = [_latexmk(), "-g", f"-{engine}", "-interaction=nonstopmode", "-file-line-error", "-synctex=1", absolute.name]
+    command = [_latexmk()]
+    env = _compile_env()
+    if local_web:
+        # 浏览器只编译用户选定的本机稿件。跳过 latexmk 配置脚本，关闭引擎 shell escape。
+        command.extend(["-norc", "-no-shell-escape"])
+        env["MIKTEX_MPM_AUTOINSTALL"] = "f"
+    command.extend(["-g", f"-{engine}", "-interaction=nonstopmode", "-file-line-error", "-synctex=1",
+                    f"./{absolute.name}" if local_web else absolute.name])
     from .latex_review import source_snapshot, record_build
     version_sources, version_failure = None, None
     if save_version:
@@ -684,7 +691,7 @@ def compile_project(library, id=None, engine="xelatex", timeout_seconds=None, in
     started = datetime.now(timezone.utc)
     try:
         completed = subprocess.run(
-            command, cwd=str(absolute.parent), env=_compile_env(), stdin=subprocess.DEVNULL,
+            command, cwd=str(absolute.parent), env=env, stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False,
         )
         output = completed.stdout.decode("utf-8", "replace")
@@ -1090,7 +1097,7 @@ ACTIONS = {
     "latex_pdf_text": (latex_retrieval.pdf_text, ("id", "path", "page", "pages", "expected_root", "expected_binding_generation")),
     "latex_lint": (lint, ("id", "mode", "main_path", "paths", "include_archived")),
     "latex_write": (write, ("id", "path", "content", "expected_revision", "origin", "include_archived")),
-    "latex_compile": (compile_project, ("id", "engine", "timeout_seconds", "include_archived", "save_version")),
+    "latex_compile": (compile_project, ("id", "engine", "timeout_seconds", "include_archived", "save_version", "local_web")),
     "latex_pdf_pages": (pdf_pages, ("id", "include_archived")),
     "latex_pdf_page": (pdf_page, ("id", "page", "scale", "include_archived")),
     "latex_pdf_search": (latex_pdf_search.search, ("id", "query", "start_page", "expected_version", "version_id", "review_pdf_version")),

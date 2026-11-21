@@ -40,6 +40,26 @@ Paper Library 将文献收集、PDF 阅读与批注、知识整理和 LaTeX 写�
 
 **无界面批量分析**：[独立后端使用说明](docs/headless-analysis.md)提供命令行与程序调用入口，支持独立资料提取、36 个问题的逐题分批阅读和待审阅笔记。[可编辑问题与提示词](docs/reading-questions.md)采用选择项、可选自由判断和原文证据，由程序生成图谱；全文分析不再提取书目资料与原始 Abstract。默认文本路径保持不变；可显式选择 Markdown，并由独立 GLM／Kimi／DeepSeek 后端按页接收有界图像，原生 DSH 明确拒绝图像请求。结果保存在同一资料库，之后可在 Paper Library 查看、审阅及明确写回。默认不自动修改 PDF 资料；模型次数与并发均有上限。与 Research Knowledge OS 的文献、证据、论断图谱已有 `rkos-v3` 导出适配，完整边界见[兼容性说明](docs/research-os-compatibility.md)。
 
+## 从 GitHub Pages 打开本地知识库
+
+DSH 是 Paper Library 的主平台。也可以从 [GitHub Pages 连接页](https://mappedinfo.github.io/dsh-paper-library/library/) 打开同一资料库，在浏览器阅读 PDF、写批注和编辑 LaTeX。Pages 只提供连接表单，进入工作台后，浏览器直接访问自己电脑上的服务。
+
+首次从源码使用时，在项目目录安装依赖，然后指定资料库目录。已有 DSH 资料库可以直接选用。新建资料库建议放在源码目录之外。
+
+```sh
+npm ci --ignore-scripts --legacy-peer-deps
+uv sync --locked
+node src/cli.mjs pages --library "/path/to/library"
+```
+
+把终端显示的地址（默认 `http://127.0.0.1:43122/library/`）粘贴到连接页，选择工作区。直接打开该地址也可离线使用。关闭终端服务即可断开连接；其他端口用 `--port` 指定，已有 Python 环境可用 `--python` 指定。
+
+- **PDF 阅读与批注**。检索本机题录，打开已有 PDF 或导入本机文件。高亮、下划线、删除线、矩形框和便笺写入资料库的 PDF 管理副本。可修改自己的备注、下载带批注的 PDF，导入原件和已有第三方批注保留。
+- **LaTeX 写作**。打开已登记的 DSH 写作项目，或在资料库的 `manuscripts/` 下新建稿件。可切换和新建源文件、保存修改，并用本机 `latexmk` 编译和逐页预览。已有项目沿用原文件夹。同时编辑同一文件时，保存会检查修订版本。仅对信任的项目点击编译；本入口跳过 `latexmkrc` 并关闭 shell escape，依赖这些功能的项目可在原写作环境中编译。
+- **可选模型 API**。阅读、批注、写作与编译均无需模型。要使用「片段问答」，启动时自行指定完整的 OpenAI Chat Completions 兼容接口和模型名，例如在命令末尾加上 `--api-url http://127.0.0.1:8000/v1/chat/completions --api-model YOUR_MODEL`。远程服务使用 HTTPS；如需 Bearer 密钥，先在本机设置自己的环境变量，再加 `--api-key-env PAPER_MODEL_KEY`。点发送后，仅将输入的问题、粘贴的片段及固定问答提示发给该接口。回答在当前标签页标作 AI 输出。GitHub Pages 不接收文件、密钥或问答。
+
+连接页和本机界面使用系统字体。PDF 渲染沿用本机 PyMuPDF（AGPL 或商业许可），TeX 发行版、宏包和稿件字体遵循各自许可。[第三方许可](THIRD_PARTY.md)
+
 ## 从收集文献到阅读、整理与写作
 
 - **收集、管理与引用**：导入 PDF、论文链接、DOI 或 JSON／RIS／BibTeX，检索与维护元数据，复制 APA 7 引用、导出 BibLaTeX，并检查引用键与资料缺失。[使用方法](#使用)

@@ -1,0 +1,38 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, sans-serif;
+  color: #202d28;
+  background: #fafaf6;
+}
+* { box-sizing: border-box; }
+body { min-height: 100vh; margin: 0; display: flex; flex-direction: column; }
+header, main, footer { width: min(100% - 48px, 1060px); margin-inline: auto; }
+header, footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 28px; padding-block: 22px; }
+header { border-bottom: 1px solid #c9d3ca; }
+a { color: #285d47; text-underline-offset: 0.2em; }
+.brand { font: 600 24px Georgia, serif; text-decoration: none; }
+nav { display: flex; gap: 24px; }
+nav, footer { font-size: 14px; }
+main { flex: 1; padding-block: clamp(44px, 9vh, 100px); }
+h1, h2, p { margin-top: 0; }
+h1 { margin-bottom: 16px; font-size: clamp(36px, 4vw, 58px); line-height: 1.2; letter-spacing: -0.045em; }
+h2 { font-size: 22px; margin-bottom: 24px; }
+p { line-height: 1.75; }
+.intro { max-width: 40em; color: #4e6056; font-size: 18px; margin-bottom: 44px; }
+.columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: clamp(30px, 5vw, 72px); }
+section { border-top: 2px solid #4b735a; padding-top: 24px; min-width: 0; }
+label { display: block; margin-bottom: 8px; font-weight: 600; }
+input, button, summary { font: inherit; }
+input { width: 100%; padding: 12px; color: #203a2b; background: white; border: 1px solid #8eaa98; border-radius: 4px; }
+#address-hint { font-size: 14px; color: #52665a; margin: 6px 0 22px; }
+.buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+button { padding: 11px 17px; border: 1px solid #315f47; border-radius: 4px; background: #315f47; color: white; font-weight: 600; cursor: pointer; }
+button + button { background: transparent; color: #254f3b; }
+button:hover { filter: brightness(0.9); }
+:focus-visible { outline: 3px solid #a66329; outline-offset: 3px; }
+pre { padding: 14px; background: #eaf0e9; border-left: 3px solid #91aa95; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+code { font-family: ui-monospace, monospace; font-size: 0.9em; }
+summary { cursor: pointer; color: #285d47; }
+details[open] summary { margin-bottom: 12px; }
+footer { border-top: 1px solid #c9d3ca; color: #52665a; }
+footer p { margin: 0; }

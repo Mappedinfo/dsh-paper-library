@@ -1,0 +1,34 @@
+:root { color-scheme:light; --ink:#242d2b; --muted:#586862; --line:#cbd2cc; --surface:white; --paper:#f3f3ed; --accent:#265c4d; --sans:system-ui,sans-serif; font:15px/1.5 var(--sans); color:var(--ink); background:var(--paper); }
+* { box-sizing:border-box; }
+body { margin:0; }
+[hidden] { display:none !important; }
+button,input,select,textarea { font:inherit; color:inherit; }
+button,input,select,textarea { border:1px solid #9aa8a1; border-radius:4px; background:#fff; }
+button { padding:.28rem .65rem; cursor:pointer; }
+button:hover:enabled { background:#f2f5ef; }
+button:disabled { opacity:.55; cursor:default; }
+:focus-visible { outline:2px solid #146e58; outline-offset:2px; }
+input,select,textarea { padding:.35rem .5rem; }
+.workspace-bar { min-height:62px; display:flex; align-items:center; gap:26px; flex-wrap:wrap; padding:8px 22px; background:#fafbf7; border-bottom:1px solid var(--line); }
+.workspace-brand { display:flex; align-items:center; gap:10px; color:#244c40; }
+.workspace-brand strong { font:600 21px Georgia,serif; letter-spacing:-.035em; }
+.book-mark { width:19px; height:23px; background:#315f50; border-radius:2px; border-left:4px solid #668779; box-shadow:inset 0 -3px #d3d9ce; }
+.workspace-bar nav { display:flex; gap:3px; }
+.workspace-bar nav a { padding:.45rem .8rem; border-radius:4px; color:var(--muted); font-weight:550; text-decoration:none; white-space:nowrap; }
+.workspace-bar nav a[aria-current] { background:#e4ece5; color:var(--accent); }
+.connection-info { margin-left:auto; display:flex; align-items:center; gap:7px; min-width:0; }
+.connection-info span { font-size:.8rem; color:var(--muted); }
+.connection-info strong { max-width:25vw; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:.9rem; }
+.workspace-bar button { font-size:.9rem; }
+main { padding:16px 22px; }
+#workspace-error { padding:10px 16px; color:#92391e; background:#fff0e2; }
+dialog { width:min(640px,95vw); max-height:90vh; border:1px solid var(--line); border-radius:10px; padding:22px; color:var(--ink); }
+dialog::backdrop { background:#16332858; }
+.dialog-heading { display:flex; align-items:center; justify-content:space-between; }
+.dialog-heading h2 { margin:0; font-size:1.35rem; }
+#model-detail { overflow-wrap:anywhere; color:var(--muted); }
+#assistant-form label, #assistant-form textarea { display:block; width:100%; margin-bottom:6px; }
+#assistant-form textarea { resize:vertical; margin-bottom:14px; }
+#assistant-form .send { background:var(--accent); color:white; }
+#ask-status { margin-left:.5rem; color:var(--muted); }
+#answer-text { white-space:pre-wrap; overflow-wrap:anywhere; }

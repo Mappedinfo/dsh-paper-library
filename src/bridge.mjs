@@ -161,11 +161,11 @@ async function provisionVenv(python) {
 
 let venvProvisioning = null;
 const dependencyRuntimes = new Map();
-async function ensurePythonDependency(python, moduleName, requirement, label, install, probe = `import ${moduleName}`) {
+async function ensurePythonDependency(python, moduleName, requirement, label, install, probe = `import ${moduleName}`, workerEnv = process.env) {
   const identity = `${python}\0${moduleName}`;
   if (!dependencyRuntimes.has(identity)) dependencyRuntimes.set(identity, (async () => {
     const available = await new Promise(accept => {
-      const child = spawn(python, ['-c', probe], { stdio: 'ignore' });
+      const child = spawn(python, ['-c', probe], { stdio: 'ignore', env: workerEnv });
       const timer = setTimeout(() => { child.kill(); accept(false); }, 10000);
       child.on('error', () => { clearTimeout(timer); accept(false); }); child.on('close', code => { clearTimeout(timer); accept(code === 0); });
     });
@@ -191,7 +191,7 @@ async function runWorker(request, options) {
   // Old plugin-owned venvs survive package updates; provision new core imports
   // once before starting a worker. Never mutate an explicitly selected runtime.
   await ensurePythonDependency(python, 'filelock', 'filelock>=3.32.7,<4', '跨平台文件锁依赖', !options.python,
-    'import filelock; assert (3,32,7) <= tuple(map(int,filelock.__version__.split("."))) < (4,)');
+    'import filelock; assert (3,32,7) <= tuple(map(int,filelock.__version__.split("."))) < (4,)', options.workerEnv);
   if (request.action === 'latex_table_import') await ensurePythonDependency(python, 'openpyxl', 'openpyxl>=3.1.5,<4', 'XLSX 读取依赖', !options.python);
   return runProcess(python, ['-m', 'dsh_paper_library.worker'], { ...request, _resource_policy: options.resourcePolicy || null, library: resolve(options.library || defaultLibrary) }, options);
 }
@@ -233,7 +233,7 @@ function runProcess(command, args, request, options) {
     if (options.signal?.aborted) return reject(new Error('操作已取消。'));
     const child = spawn(command, args, {
       cwd: projectRoot, stdio: ['pipe','pipe','pipe'],
-      env: { ...process.env, PYTHONPATH: join(projectRoot, 'src'), PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' },
+      env: { ...(options.workerEnv ?? process.env), PYTHONPATH: join(projectRoot, 'src'), PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' },
     });
     let stdout = '', stderr = '', bytes = 0, fail, scanKillTimer;
     const terminate = error => {
