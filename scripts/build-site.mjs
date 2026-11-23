@@ -47,6 +47,10 @@ const page = template.replace('<!--BOARD_MARKUP-->', markup);
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 await writeFile(join(output, 'board.html'), page);
+await esbuild({
+  entryPoints: [join(project, 'src/client/markdown.mjs')], outfile: join(output, 'paper-markdown.js'),
+  bundle: true, format: 'iife', platform: 'browser', target: 'es2022', minify: true, legalComments: 'inline',
+});
 await cp(join(project, 'site/home.html'), join(output, 'index.html'));
 await cp(join(project, 'site/home.js'), join(output, 'home.js'));
 await writeFile(join(output, '.nojekyll'), '');
@@ -74,6 +78,7 @@ await buildBrowserPdf(library);
 await buildBrowserTex(library);
 await mkdir(join(output, 'licenses/paper-flow'), { recursive: true });
 await cp(join(project, 'LICENSE'), join(output, 'licenses/project-MIT.txt'));
+await cp(join(project, 'licenses/markdown'), join(output, 'licenses/markdown'), { recursive: true });
 await cp(join(project, 'vendor/paper-flow/README.md'), join(output, 'licenses/paper-flow/README.txt'));
 for (const name of ['DAGRE-LICENSE.txt', 'GRAPHLIB-LICENSE.txt', 'MATHJAX-LICENSE.txt']) await cp(join(project, 'vendor/paper-flow/core', name), join(output, 'licenses/paper-flow', name));
 for (const name of ['react-LICENSE.txt', 'react-dom-LICENSE.txt']) await cp(join(project, 'licenses/slides', name), join(output, 'licenses/paper-flow', name));

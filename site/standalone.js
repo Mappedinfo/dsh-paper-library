@@ -17,6 +17,12 @@
   const MAX_BYTES = 4 * 1024 * 1024;
   const FLOW_BYTES = 192 * 1024;
   const ID = /^[A-Za-z0-9_-]{1,60}$/;
+  const checkMarkdown = markdown => {
+    if (markdown === undefined) return;
+    if (typeof markdown !== 'string' || markdown.length > window.PaperBoardSource.LIMITS.markdown) {
+      throw Object.assign(new Error('Markdown 草稿超出画板可保存的范围。'), { code: 'BOARD_INVALID', status: 400 });
+    }
+  };
 
   const board = () => window.PaperBoard;
   const nowId = prefix => {
@@ -89,6 +95,7 @@
     } : null;
 
     async function save(state, record) {
+      checkMarkdown(record.board.markdown);
       record.revision = await digest(JSON.stringify(record.board));
       write(state);
       return record;
@@ -189,7 +196,9 @@
           const record = find(state, input.id);
           if (!record) throw Object.assign(new Error(`画板 ${input.id} 不存在或已删除。`), { code: 'BOARD_NOT_FOUND', status: 404 });
           if (input.expected_revision !== record.revision) throw conflict({ value: record.board, revision: record.revision });
-          record.board = { ...input.board, id: record.board.id, created_at: record.board.created_at, updated_at: stamp() };
+          const markdown = input.board.markdown === undefined ? record.board.markdown : input.board.markdown;
+          record.board = { ...input.board, markdown,
+            id: record.board.id, created_at: record.board.created_at, updated_at: stamp() };
           await save(state, record);
           return { board: record.board, revision: record.revision, summary: summary(record) };
         }
@@ -243,6 +252,7 @@
         let added = 0, renamed = 0;
         for (const value of incoming.slice(0, MAX_BOARDS)) {
           if (!value || typeof value !== 'object' || !Array.isArray(value.nodes) || !Array.isArray(value.edges)) continue;
+          checkMarkdown(value.markdown);
           if (live(state).length >= MAX_BOARDS) throw Object.assign(new Error(`独立模式最多保存 ${MAX_BOARDS} 张画板，请先导出并清理。`), { code: 'BOARD_TOO_LARGE', status: 413 });
           const taken = state.records.some(record => record.board?.id === value.id);
           if (importedIds.has(value.id) && (Object.hasOwn(incomingFlows, value.id) || Object.hasOwn(incomingNotes, value.id))) throw flowFailure('备份包含重复画板标识，无法确定工作区或批注归属。');
@@ -406,12 +416,16 @@
       } catch { style = null; }
       const converted = window.PaperBoardSource?.fromSource(content, style ?? {});
       if (!converted) throw new Error('这个页面没有加载源文件模块。');
-      const signature = JSON.stringify(converted.board.nodes.map(node => [node.text, node.x, node.y])) + JSON.stringify(converted.board.edges.map(edge => [edge.from, edge.to]));
+      const sourceSignature = board => JSON.stringify([
+        board.nodes.map(node => [node.text, node.x, node.y]),
+        board.edges.map(edge => [edge.from, edge.to]),
+        board.markdown || '',
+      ]);
+      const signature = sourceSignature(converted.board);
       const existing = await store.handle({ action: 'board_list' });
       for (const summary of existing.boards) {
         const record = await store.handle({ action: 'board_get', id: summary.id });
-        const same = JSON.stringify(record.board.nodes.map(node => [node.text, node.x, node.y])) + JSON.stringify(record.board.edges.map(edge => [edge.from, edge.to]));
-        if (same === signature) { await panel.refreshList(); await panel.load(summary.id); status(`已打开本地副本：${src}`); return true; }
+        if (sourceSignature(record.board) === signature) { await panel.refreshList(); await panel.load(summary.id); status(`已打开本地副本：${src}`); return true; }
       }
       panel.applySourceTexts(JSON.stringify(content, null, 2), style ? JSON.stringify(style, null, 2) : '{}');
       await panel.flush();

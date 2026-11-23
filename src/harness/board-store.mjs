@@ -16,7 +16,7 @@ export const BOARD_SNAPSHOT_PREFIX = 'board-ref:'
 export const BOARD_LIMITS = Object.freeze({
   listing: 50, nodes: 400, edges: 800, titleCharacters: 200, textCharacters: 2000,
   labelCharacters: 200, relations: 6, waypoints: 8, coordinate: 1_000_000, zoomMin: 0.2, zoomMax: 4,
-  snapshotCharacters: 24_000, searchCharacters: 400,
+  snapshotCharacters: 24_000, searchCharacters: 400, markdownCharacters: 24_000,
 })
 
 const ID = /^[A-Za-z0-9_-]{1,60}$/
@@ -38,7 +38,7 @@ function edgeAngleValue(value, label) {
 }
 const ARROWS = new Set(['forward', 'both', 'none'])
 const PAPER_FIELDS = new Set(['id', 'title', 'year', 'citekey'])
-const BOARD_FIELDS = new Set(['schema', 'id', 'title', 'created_at', 'updated_at', 'origin', 'status', 'view', 'nodes', 'edges', 'style', 'links'])
+const BOARD_FIELDS = new Set(['schema', 'id', 'title', 'created_at', 'updated_at', 'origin', 'status', 'view', 'nodes', 'edges', 'style', 'links', 'markdown'])
 const LINK_FIELDS = new Set(['papers', 'projects', 'slides'])
 const LAYOUT_MODES = new Set(['tree', 'radial', 'layered'])
 const LAYOUT_DIRECTIONS = new Set(['lr', 'tb', 'rl', 'bt'])
@@ -350,6 +350,8 @@ export function validateBoard(value, { id, origin: forcedOrigin } = {}) {
   duplicate(board.edges.map(edge => edge.id), '连线')
   const style = normalizeStyle(value.style, nodeIds)
   if (style) board.style = style
+  const markdown = boundedText(value.markdown, 'Markdown', BOARD_LIMITS.markdownCharacters, false)
+  if (markdown) board.markdown = markdown
   const links = normalizeLinks(value.links)
   if (links) board.links = links
   if (value.created_at !== undefined) {
@@ -491,7 +493,8 @@ export function createBoardStore({ localState }) {
     const record = await readRecord(id)
     // The board keeps the origin it was created with; a reader save ends board-level review
     // but item-level proposals survive until `accept`, so an auto-save cannot launder them.
-    const merged = validateBoard({ ...board, id: record.value.id, created_at: record.value.created_at }, { id: record.value.id, origin: record.value.origin })
+    const markdown = writer === 'user' && board.markdown !== undefined ? board.markdown : record.value.markdown
+    const merged = validateBoard({ ...board, markdown, id: record.value.id, created_at: record.value.created_at }, { id: record.value.id, origin: record.value.origin })
     const at = stamp()
     const stored = writer === 'llm'
       ? { ...markProposals(merged, record.value), updated_at: at, status: record.value.status }

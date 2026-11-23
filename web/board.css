@@ -63,7 +63,19 @@
 .board-status.is-saved{color:var(--dsw-alias-state-success-primary)}
 .board-conflict{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--dsw-alias-state-warn-tertiary);color:var(--dsw-alias-state-warn-label)}
 .board-conflict[hidden]{display:none}
+.board-body{display:flex;flex:1;min-height:280px;min-width:0}
+.board-body[data-markdown-layout="stacked"]{flex-direction:column}
+.board-markdown{display:flex;flex:0 0 36%;flex-direction:column;min-height:0;min-width:0;border-inline-end:1px solid var(--line);background:var(--surface,var(--paper))}
+.board-body[data-markdown-layout="stacked"]>.board-markdown{border-inline-end:0;border-bottom:1px solid var(--line)}
+.board-markdown-tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px;border-bottom:1px solid var(--line)}
+.board-markdown-tools .button{font-size:12px}
+.board-markdown textarea{box-sizing:border-box;flex:1;min-height:0;width:100%;padding:12px 14px;border:0;resize:none;background:var(--surface,var(--paper));color:var(--ink);font:13px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;tab-size:2}
+.board-markdown-preview{flex:1;min-width:0;min-height:0;overflow:auto;background:var(--paper)}
+.board-markdown-preview p{padding:12px 16px}
+.board-markdown-preview canvas{display:block}
+.board-body [hidden]:is(.board-markdown,.board-stage,.board-markdown-preview,canvas,p){display:none}
 .board-stage{position:relative;flex:1;min-height:280px;overflow:hidden;background-color:var(--paper);background-image:radial-gradient(circle,var(--line) 1px,transparent 1px);touch-action:none}
+.board-body>.board-stage{min-width:0;min-height:0}
 #board-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:default}
 #board-canvas.is-pan{cursor:grab}
 #board-canvas.is-panning{cursor:grabbing}
@@ -214,7 +226,7 @@ body.board-focused #board-view{grid-column:1}
 #board-view{position:relative}
 #board-flow-view{position:absolute;inset:0;z-index:30;min-width:0;min-height:0;background:var(--paper)}
 #board-flow-view[hidden]{display:none}
-#board-view.has-paper-flow>.board-bar,#board-view.has-paper-flow>.board-stage{visibility:hidden;pointer-events:none}
+#board-view.has-paper-flow>.board-bar,#board-view.has-paper-flow>.board-body{visibility:hidden;pointer-events:none}
 
 /* 原生工具栏负责常规模式的入口。专注、系统全屏及流程视口全屏使用当前画布内的入口。 */
 #paper-tools .paper-flow-native-panels[hidden],

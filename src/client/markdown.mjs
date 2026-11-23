@@ -16,4 +16,4 @@ export function renderMarkdown(host, text) {
   }
   host.replaceChildren(fragment);
 }
-window.PaperMarkdown = { render: renderMarkdown };
+window.PaperMarkdown = { render: renderMarkdown, lex: text => marked.lexer(text, { gfm: true }) };

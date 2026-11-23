@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
+import { marked } from 'marked';
 import { validateBoard } from '../src/harness/board-store.mjs';
 
 const moduleSource = await readFile(new URL('../web/board-source.js', import.meta.url), 'utf8');
@@ -9,6 +10,21 @@ const context = { window: {} };
 vm.createContext(context);
 vm.runInContext(moduleSource, context);
 const source = context.window.PaperBoardSource;
+
+test('Markdown projects headings, nested lists and prose without changing the source', () => {
+  const markdown = '# 主题\n\n## 方法\n\n1. **采样**\n   - [校验](https://example.com/)\n\n独立段落。\n\n~~~md\n# 示例代码\n~~~\n\n## 结论\n';
+  const graph = source.fromMarkdown(markdown, { lex: text => marked.lexer(text) });
+  const labels = Object.fromEntries(graph.nodes.map(node => [node.id, node.text]));
+  assert.deepEqual(Array.from(graph.edges, edge => [labels[edge.from], labels[edge.to]]), [
+    ['主题', '方法'], ['方法', '采样'], ['采样', '校验'], ['方法', '独立段落。'], ['主题', '结论'],
+  ]);
+  assert.equal(graph.nodes.find(node => node.text === '独立段落。').kind, 'note');
+  const exported = source.toSource({ ...graph, markdown });
+  assert.equal(source.fromSource(exported.source, exported.style).board.markdown, markdown);
+  assert.equal(source.fromSource({ nodes: [], markdown }, {}).board.markdown, markdown);
+  assert.equal(source.fromMarkdown('~~~js\nignored\n~~~', { lex: text => marked.lexer(text) }), null);
+  assert.throws(() => source.fromMarkdown('a'.repeat(source.LIMITS.markdown + 1), { lex: marked.lexer }), /Markdown/);
+});
 
 const sample = () => ({
   schema: source.SOURCE_SCHEMA,

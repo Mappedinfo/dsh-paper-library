@@ -27,7 +27,7 @@
   const ARROWS = ['forward', 'none', 'both'];
   const MODES = ['tree', 'radial', 'layered'];
   const DIRECTIONS = ['lr', 'tb', 'rl', 'bt'];
-  const LIMITS = { nodes: 400, edges: 800, text: 2000, label: 200, title: 200, waypoints: 8, gapMin: 8, gapMax: 400, coordinate: 1000000 };
+  const LIMITS = { nodes: 400, edges: 800, text: 2000, label: 200, title: 200, markdown: 24000, waypoints: 8, gapMin: 8, gapMax: 400, coordinate: 1000000 };
   const DEFAULT_SIZE = { text: { w: 220, h: 64 }, note: { w: 220, h: 140 }, concept: { w: 200, h: 100 }, paper: { w: 260, h: 120 }, rect: { w: 220, h: 140 }, ellipse: { w: 200, h: 120 }, diamond: { w: 200, h: 120 } };
   const COLOUR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
@@ -503,6 +503,7 @@
     const pins = { ...(board.style?.layout?.pins ?? {}) };
     if (options.pinManual) for (const node of nodes) if (!pins[node.id]) pins[node.id] = [node.x, node.y];
     const source = { schema: SOURCE_SCHEMA, title: String(board.title ?? '未命名画板').slice(0, LIMITS.title) };
+    if (board.markdown) source.markdown = board.markdown;
     const style = board.style ? JSON.parse(JSON.stringify(board.style)) : {};
     const mode = options.mode ?? style.layout?.mode ?? 'tree';
     const direction = options.direction ?? style.layout?.direction ?? 'lr';
@@ -546,9 +547,10 @@
   }
 
   function validateSource(value) {
-    closed(value, '画板源文件', ['schema', 'title', 'layout', 'nodes', 'edges', 'note', 'papers', 'projects', 'slides']);
+    closed(value, '画板源文件', ['schema', 'title', 'layout', 'nodes', 'edges', 'note', 'papers', 'projects', 'slides', 'markdown']);
     if (value.schema !== undefined && value.schema !== SOURCE_SCHEMA) fail(`画板源文件版本不受支持（需要 ${SOURCE_SCHEMA}）。`);
     const source = { schema: SOURCE_SCHEMA, title: text(value.title, '标题', LIMITS.title)?.trim() || '未命名画板' };
+    if (value.markdown !== undefined) source.markdown = text(value.markdown, 'Markdown', LIMITS.markdown);
     if (value.layout !== undefined) {
       if (typeof value.layout !== 'string' || !value.layout.split('-').every(part => [...MODES, ...DIRECTIONS].includes(part))) fail('layout 需要形如 tree-lr、radial 或 layered-tb。');
       source.layout = value.layout;
@@ -568,7 +570,7 @@
       });
       if (!source[key].length) delete source[key];
     }
-    if (!Array.isArray(value.nodes) || !value.nodes.length || value.nodes.length > LIMITS.nodes) fail(`nodes 必须是 1–${LIMITS.nodes} 项。`);
+    if (!Array.isArray(value.nodes) || (!value.nodes.length && !source.markdown) || value.nodes.length > LIMITS.nodes) fail(`nodes 必须是 1–${LIMITS.nodes} 项，只有 Markdown 草稿时可留空。`);
     const ids = new Set();
     source.nodes = value.nodes.map((entry, index) => {
       closed(entry, `第 ${index + 1} 个节点`, ['id', 'kind', 'text', 'paper', 'paperTitle', 'year', 'citekey', 'proposed', 'color', 'pin']);
@@ -782,6 +784,7 @@
       board: {
         schema: 1,
         title: source.title,
+        ...(source.markdown === undefined ? {} : { markdown: source.markdown }),
         ...(Object.keys(links).length ? { links } : {}),
         origin: 'user',
         status: 'saved',
@@ -797,6 +800,59 @@
       mode,
       direction,
     };
+  }
+
+  // Headings nest by level; list items nest by their actual Markdown token
+  // hierarchy. Preserve the source separately from the text projected here.
+  function fromMarkdown(markdown, { title = '思维导图', lex = window.PaperMarkdown?.lex } = {}) {
+    text(markdown, 'Markdown', LIMITS.markdown, true);
+    if (!lex) fail('Markdown 解析器尚未加载，请刷新后重试。');
+    const nodes = [], edges = [], roots = [];
+    const plain = tokens => (tokens ?? []).map(token => {
+      if (token.type === 'html') return '';
+      if (token.type === 'br') return ' ';
+      return token.tokens ? plain(token.tokens) : token.text || '';
+    }).join('');
+    const label = token => (token.tokens ? plain(token.tokens) : token.text || '').replace(/\s+/g, ' ').trim();
+    const add = (value, kind, parent) => {
+      if (nodes.length >= LIMITS.nodes) fail('Markdown 生成的节点太多，请将文稿分到多张画板。');
+      if (value.length > LIMITS.text) fail('有一段超过 2000 个字符，请拆成更短的段落。');
+      const node = { id: 'md-' + (nodes.length + 1), kind, text: value };
+      nodes.push(node);
+      if (parent) edges.push({ from: parent.id, to: node.id, kind: 'line' });
+      else roots.push(node);
+      return node;
+    };
+    function visit(tokens, parent) {
+      const headings = [];
+      for (const token of tokens) {
+        if (token.type === 'heading') {
+          while (headings.at(-1)?.depth >= token.depth) headings.pop();
+          const value = label(token);
+          if (value) headings.push({ depth: token.depth, node: add(value, 'concept', headings.at(-1)?.node || parent) });
+          continue;
+        }
+        const branch = headings.at(-1)?.node || parent;
+        if (token.type === 'list') {
+          for (const item of token.items) {
+            const content = item.tokens.filter(entry => entry.type === 'text' || entry.type === 'paragraph');
+            const value = content.map(label).filter(Boolean).join(' ');
+            const node = value ? add(value, 'concept', branch) : branch;
+            visit(item.tokens.filter(entry => !content.includes(entry)), node);
+          }
+        } else if (token.type === 'paragraph' || token.type === 'text') {
+          const value = label(token);
+          if (value) add(value, 'note', branch);
+        } else if (token.type === 'blockquote') visit(token.tokens, branch);
+      }
+    }
+    visit(lex(markdown), null);
+    if (!nodes.length) return null;
+    if (roots.length > 1 || roots[0].kind !== 'concept') {
+      const root = add(title, 'concept', null);
+      for (const node of roots) if (node !== root) edges.push({ from: root.id, to: node.id, kind: 'line' });
+    }
+    return fromSource({ title, nodes, edges }, { layout: { mode: 'tree', direction: 'lr', gapX: 90, gapY: 28 } }).board;
   }
 
   /** Presentation for one node/edge, resolved from the sidecar with sensible fallbacks. */
@@ -819,6 +875,6 @@
   window.PaperBoardSource = Object.freeze({
     SOURCE_SCHEMA, STYLE_SCHEMA, LIMITS, DEFAULT_SIZE, MODES, DIRECTIONS, NODE_KINDS, EDGE_KINDS, RELATIONS, ARROWS, EDGE_ANGLE,
     anchorPoint, anchorAtAngle, incidenceAt, edgeAngle, edgePoints, edgeRenderPoints, edgeGeometry, edgePath, edgeMidpoint, distanceToSegment, distanceToPoints, nearestLeg, dragWaypoint,
-    layout, nodeStyle, edgeStyle, toSource, fromSource, validateSource, validateStyle,
+    layout, nodeStyle, edgeStyle, toSource, fromSource, fromMarkdown, validateSource, validateStyle,
   });
 })();

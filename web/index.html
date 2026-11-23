@@ -252,6 +252,8 @@
           <button id="board-focus" class="button subtle" type="button" aria-pressed="false" title="在当前窗口专注画板，隐藏顶栏、文献库与阅读批注（Esc 退出）">专注</button>
         </div>
         <button id="board-flow-open" class="button subtle" type="button" title="打开当前画板的论文流程编辑、比较与导入导出">论文流程</button>
+        <button id="board-markdown-open" class="button subtle" type="button" aria-expanded="false" aria-controls="board-markdown">Markdown</button>
+        <button id="board-markdown-split" class="button subtle" type="button" aria-pressed="false" title="切换 Markdown 与画板的分栏方向">上下分栏</button>
         <button id="board-send" class="button subtle" type="button" title="把这张画板作为不可变引用放进 DSH 主输入框；只准备草稿，不会发送">放入对话</button>
         <button id="board-annotations-open" class="button subtle" type="button">画板批注</button>
       </div>
@@ -391,7 +393,21 @@
       <button id="board-conflict-reload" class="button subtle" type="button">载入已保存版本</button>
       <button id="board-conflict-copy" class="button subtle" type="button">另存为新画板</button>
     </div>
-    <div id="board-stage" class="board-stage"></div>
+    <div id="board-body" class="board-body">
+      <section id="board-markdown" class="board-markdown" aria-label="Markdown 写作" hidden>
+        <div class="board-markdown-tools">
+          <button id="board-markdown-preview-toggle" class="button subtle" type="button" aria-controls="board-markdown-preview" aria-pressed="true">导图预览</button>
+          <button id="board-markdown-insert" class="button primary" type="button" disabled>加入画布</button>
+          <span id="board-markdown-status" class="board-status" role="status"></span>
+        </div>
+        <textarea id="board-markdown-input" aria-label="Markdown 源文" spellcheck="false" placeholder="# 主题&#10;## 分支&#10;- 要点&#10;  - 子要点"></textarea>
+      </section>
+      <div id="board-stage" class="board-stage"></div>
+      <div id="board-markdown-preview" class="board-markdown-preview" aria-label="思维导图预览" tabindex="0" hidden>
+        <p id="board-markdown-empty" class="muted">添加标题、列表或段落，查看导图。</p>
+        <canvas id="board-markdown-map" aria-label="思维导图" role="img" hidden></canvas>
+      </div>
+    </div>
     <dialog id="board-source-dialog" class="board-dialog board-source-dialog">
       <div class="dialog-heading"><div><p class="eyebrow">READABLE SOURCE</p><h2>画板源文件</h2></div><button type="button" class="icon-button dialog-close" aria-label="关闭">×</button></div>
       <p class="small muted">内容文件只写标题、节点与连线：短标识、稳定键序、不含像素坐标。显示效果与固定位置写在样式辅助文件里，两者都可以手改或由 AI 生成。</p>

@@ -124,6 +124,20 @@ test('saving is revision-checked and a stale writer never overwrites the stored 
   assert.ok(Date.parse(renamed.board.updated_at) >= Date.parse(created.board.created_at));
 });
 
+test('Markdown survives ordinary board updates and can be cleared by its editor', async t => {
+  const { store } = await fixture(t);
+  const markdown = '# 草稿\n\n  - 原始缩进\n';
+  const created = await store.create({ board: board({ markdown }) });
+  const oldClient = await store.save({ id: created.board.id, board: board(), expectedRevision: created.revision });
+  assert.equal(oldClient.board.markdown, markdown);
+  const agent = await store.save({ id: created.board.id, board: board({ markdown: '# 另一份文本' }),
+    expectedRevision: oldClient.revision, origin: 'llm' });
+  assert.equal(agent.board.markdown, markdown);
+  const cleared = await store.save({ id: created.board.id, board: board({ markdown: '' }), expectedRevision: agent.revision });
+  assert.equal(cleared.board.markdown, undefined);
+  assert.throws(() => validateBoard(board({ markdown: 7 })), /Markdown/);
+});
+
 test('deleting a board tombstones the record, hides it from listing and keeps it recoverable', async t => {
   const f = await fixture(t);
   const created = await f.store.create({ board: board() });

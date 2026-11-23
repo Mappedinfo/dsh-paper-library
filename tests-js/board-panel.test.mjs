@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
+import { marked } from 'marked';
 
 const source = await readFile(new URL('../web/board.js', import.meta.url), 'utf8');
 const sourceModule = await readFile(new URL('../web/board-source.js', import.meta.url), 'utf8');
@@ -91,7 +92,7 @@ function environment(ids = []) {
   return { doc, registry, Element };
 }
 
-function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, sessionId = null, flowFactory, flowLoader, onCanvasContext, onAnnotations, prepareAnnotationsLeave, hasPendingAnnotations, onContext } = {}) {
+function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, sessionId = null, flowFactory, flowLoader, onCanvasContext, onAnnotations, prepareAnnotationsLeave, hasPendingAnnotations, onContext, markdown = false } = {}) {
   const ids = [
     'board-stage', 'board-select', 'board-status', 'board-zoom-label', 'board-zoom-in', 'board-zoom-out', 'board-fit',
     'board-undo', 'board-redo', 'board-delete', 'board-title', 'board-new', 'board-close', 'board-add-paper', 'board-send', 'board-tidy', 'board-fullscreen',
@@ -110,6 +111,11 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
     'board-association-selected', 'board-association-link', 'board-association-unlink',
     'board-menu-open', 'board-menu', 'board-inspector', 'board-inspector-node', 'board-inspector-edge', 'board-flow-open', 'board-flow-view', 'board-annotations-open',
   ];
+  if (markdown) ids.push(
+    'board-body', 'board-markdown', 'board-markdown-preview', 'board-markdown-map', 'board-markdown-insert',
+    'board-markdown-status', 'board-markdown-empty', 'board-markdown-open', 'board-markdown-split', 'board-markdown-preview-toggle',
+    { id: 'board-markdown-input', tag: 'textarea' },
+  );
   const { doc, registry, Element } = environment(ids);
   doc.defaultView.confirm = () => confirm;
   const root = new Element('section');
@@ -123,6 +129,12 @@ function loadPanel({ api, confirm = true, capabilities, canvas, parent = false, 
   // test reaches the same frame through `window`. Building the view first and pointing both at it
   // is what makes `window === document.defaultView` true inside the sandbox too.
   const frameWindow = doc.defaultView;
+  if (markdown) {
+    registry.get('board-markdown').hidden = registry.get('board-markdown-preview').hidden = true;
+    registry.get('board-markdown-map').getContext = () => new Proxy({}, { get: () => () => {} });
+    frameWindow.getComputedStyle = () => ({ getPropertyValue: () => '' });
+    frameWindow.PaperMarkdown = { lex: input => marked.lexer(input) };
+  }
   if (flowLoader) frameWindow.PaperBoardFlowLoader = flowLoader;
   frameWindow.location = { origin: 'https://host.example' };
   frameWindow.parent = frameWindow;
@@ -189,6 +201,65 @@ function nameShape(harness, text) {
   area.value = text;
   area.dispatch('blur');
 }
+
+test('Markdown is saved separately from the live preview and joins the editable canvas on request', async () => {
+  const existing = { id: 'original', kind: 'note', x: 10, y: 10, w: 220, h: 100, text: '已有节点' };
+  const writes = [];
+  const h = loadPanel({ markdown: true, api: apiStub({
+    board_get: ({ id }) => ({ board: { id, title: '合成画板', nodes: [existing], edges: [] }, revision: 'a'.repeat(64) }),
+    board_save: ({ board }) => { writes.push(board); return { board, revision: 'b'.repeat(64) }; },
+  }) });
+  assert.equal(await h.panel.open({ id: 'first' }), true);
+  const element = id => h.registry.get(id);
+  const split = element('board-markdown-split');
+  split.dispatch('click', { currentTarget: split });
+  assert.equal(element('board-body').dataset.markdownLayout, 'stacked');
+  assert.equal(element('board-markdown').hidden, false);
+  assert.equal(h.stage.hidden, true);
+  const editor = element('board-markdown-input');
+  editor.value = '# 主题\n- 分支\n';
+  editor.dispatch('input');
+  await h.runTimers();
+  assert.equal(element('board-markdown-map').hidden, false);
+  assert.equal(h.panel.board().nodes.length, 1);
+  assert.equal(writes.at(-1).markdown, editor.value);
+  element('board-markdown-insert').dispatch('click');
+  await h.runTimers();
+  assert.equal(h.stage.hidden, false);
+  assert.equal(h.panel.board().nodes.length, 3);
+  assert.equal(h.panel.board().edges.length, 1);
+  assert.deepEqual(h.panel.board().nodes[0], existing);
+  element('board-undo').dispatch('click');
+  assert.equal(h.panel.board().nodes.length, 1);
+  assert.equal(h.panel.board().markdown, editor.value);
+  h.panel.dispose();
+});
+
+test('a save response preserves Markdown typed while the write was pending', async () => {
+  let finishFirstSave;
+  const writes = [];
+  const h = loadPanel({ markdown: true, api: apiStub({
+    board_save: ({ board }) => {
+      writes.push(board.markdown);
+      const result = { board, revision: 'c'.repeat(64) };
+      return writes.length === 1 ? new Promise(resolve => { finishFirstSave = () => resolve(result); }) : result;
+    },
+  }) });
+  await h.panel.open({ id: 'first' });
+  h.registry.get('board-markdown-open').dispatch('click');
+  const editor = h.registry.get('board-markdown-input');
+  editor.value = '# 第一稿';
+  editor.dispatch('input');
+  editor.dispatch('blur');
+  assert.equal(typeof finishFirstSave, 'function');
+  editor.value = '# 第二稿';
+  editor.dispatch('input');
+  finishFirstSave();
+  await h.runTimers();
+  assert.deepEqual(writes, ['# 第一稿', '# 第二稿']);
+  assert.equal(h.panel.board().markdown, editor.value);
+  h.panel.dispose();
+});
 
 const state = [];
 const apiStub = (overrides = {}) => async (action, payload, options) => {

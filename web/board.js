@@ -455,6 +455,12 @@
     const doc = root.ownerDocument || document;
     const $ = id => doc.getElementById(id);
     const stage = $('board-stage');
+    const markdownPane = $('board-markdown');
+    const markdownInput = $('board-markdown-input');
+    const markdownPreview = $('board-markdown-preview');
+    const markdownMap = $('board-markdown-map');
+    let markdownTimer;
+    let markdownLayout = 'side';
     let board = emptyBoard();
     let boardId = null;
     let boardLoadTicket = 0;
@@ -605,6 +611,93 @@
       return true;
     }
 
+    function showMarkdownPreview(show) {
+      if (!markdownPane) return;
+      markdownPreview.hidden = !show;
+      stage.hidden = show;
+      $('board-markdown-preview-toggle').setAttribute('aria-pressed', String(show));
+      if (!show) markdownMap.width = markdownMap.height = 0;
+    }
+
+    function refreshMarkdown() {
+      clearTimeout(markdownTimer);
+      if (!markdownPane || markdownPane.hidden || !ready) return;
+      const output = $('board-markdown-status'), emptyMap = $('board-markdown-empty');
+      const insert = $('board-markdown-insert');
+      insert.disabled = markdownMap.hidden = emptyMap.hidden = true;
+      output.textContent = '';
+      output.classList.remove('is-error');
+      try {
+        const graph = board.markdown?.trim() && sourceApi().fromMarkdown(board.markdown, { title: board.title });
+        if (graph) {
+          const bounds = boundsOf(graph.nodes);
+          const colors = doc.defaultView.getComputedStyle(markdownPreview);
+          const palette = {
+            background: colors.getPropertyValue('--paper').trim() || '#fff',
+            nodeFill: colors.getPropertyValue('--surface').trim() || '#fff',
+            noteFill: colors.getPropertyValue('--surface').trim() || '#fdf6e8',
+            nodeStroke: colors.getPropertyValue('--line').trim() || '#b9c3b6',
+            ink: colors.getPropertyValue('--ink').trim() || '#0f1115',
+            edge: colors.getPropertyValue('--muted').trim() || '#6b7268',
+          };
+          renderToCanvas(graph, markdownMap, { padding: 24, scale: Math.min(1, 4096 / (Math.max(bounds.w, bounds.h) + 48)), palette });
+          markdownMap.hidden = insert.disabled = false;
+          output.textContent = `${graph.nodes.length} 个节点`;
+          return;
+        }
+        emptyMap.textContent = board.markdown?.trim() ? '文稿里还没有可生成导图的标题、列表或段落。' : '添加标题、列表或段落，查看导图。';
+      } catch (error) {
+        output.textContent = error.message;
+        output.classList.add('is-error');
+        emptyMap.textContent = '导图预览暂不可用。';
+      }
+      emptyMap.hidden = false;
+    }
+
+    function toggleMarkdown(show, focus = true) {
+      if (!markdownPane || show && !ready) return;
+      commitTextEdit();
+      closeMenus(null);
+      markdownPane.hidden = !show;
+      $('board-markdown-open').setAttribute('aria-expanded', String(show));
+      showMarkdownPreview(show);
+      clearTimeout(markdownTimer);
+      if (show) {
+        markdownInput.value = board.markdown || '';
+        refreshMarkdown();
+        if (focus) markdownInput.focus();
+      }
+      resize();
+    }
+
+    function insertMarkdown() {
+      if (!ready || !board.markdown?.trim()) return;
+      let additions;
+      try {
+        const graph = sourceApi().fromMarkdown(board.markdown, { title: board.title });
+        if (!graph) return;
+        if (board.nodes.length + graph.nodes.length > LIMITS.nodes || board.edges.length + graph.edges.length > LIMITS.edges) {
+          throw new Error('加入后将超过画板容量，请把导图加入空白画板。');
+        }
+        const bounds = boundsOf(board.nodes), diagram = boundsOf(graph.nodes);
+        const dx = (bounds ? bounds.x + bounds.w + 96 : 0) - diagram.x;
+        const dy = (bounds?.y ?? 0) - diagram.y;
+        const ids = new Map(graph.nodes.map(node => [node.id, makeId('n')]));
+        const nodes = graph.nodes.map(node => ({ ...node, x: round(node.x + dx), y: round(node.y + dy), id: ids.get(node.id) }));
+        const edges = graph.edges.map(edge => ({ ...edge, from: ids.get(edge.from), to: ids.get(edge.to), id: makeId('e') }));
+        if (nodes.some(({ x, y }) => Math.max(Math.abs(x), Math.abs(y)) > sourceApi().LIMITS.coordinate)) throw new Error('导图放不进当前画板的坐标范围。');
+        additions = { nodes, edges };
+      } catch (error) { toast(error.message, true); return; }
+      showMarkdownPreview(false);
+      view = viewportFor(additions.nodes, surfaceSize());
+      selection = new Set(additions.nodes.map(node => node.id));
+      mutate(current => ({ ...current, nodes: [...current.nodes, ...additions.nodes], edges: [...current.edges, ...additions.edges] }));
+      $('board-markdown-insert').disabled = true;
+      renderInspector();
+      saveNow();
+      svg.focus();
+    }
+
     function scheduleSave() {
       if (!live || !boardId) return;
       pendingSave = true;
@@ -639,7 +732,7 @@
     }
 
     /** The parts of a board a local edit can change while a write is in flight. */
-    const localContent = value => JSON.stringify({ title: value.title, nodes: value.nodes, edges: value.edges, style: value.style ?? null, links: value.links ?? null });
+    const localContent = value => JSON.stringify({ title: value.title, nodes: value.nodes, edges: value.edges, style: value.style ?? null, links: value.links ?? null, markdown: value.markdown ?? '' });
 
     /**
      * Saving is debounced, so anything that takes the board away — closing the view,
@@ -689,7 +782,7 @@
         // over it. The host's metadata (status, timestamps, revision) is adopted either way.
         board = localContent(board) === sent
           ? result.board
-          : { ...result.board, title: board.title, nodes: board.nodes, edges: board.edges, style: board.style, links: board.links };
+          : { ...result.board, title: board.title, nodes: board.nodes, edges: board.edges, style: board.style, links: board.links, markdown: board.markdown };
         conflict = null;
         renderConflict();
         status('已保存', 'saved');
@@ -1101,6 +1194,10 @@
         if (menu) { event.preventDefault(); closeMenus(null); menu.trigger.focus(); return; }
       }
       const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      if (target === markdownInput && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault(); saveNow(); return;
+      }
+      if (markdownPreview && !markdownPreview.hidden) return;
       if (event.key === ' ') spaceDown = true;
       if (typing) return;
       const meta = event.metaKey || event.ctrlKey;
@@ -1159,6 +1256,12 @@
         if (button) button.disabled = !ready;
       }
       if ($('board-flow-open')) $('board-flow-open').disabled = !ready;
+      if (markdownPane) {
+        $('board-markdown-open').disabled = !ready;
+        $('board-markdown-split').disabled = !ready;
+        markdownInput.disabled = !ready;
+        if (!ready) $('board-markdown-insert').disabled = true;
+      }
       stage.classList.toggle('is-loading', !ready);
     }
 
@@ -1271,6 +1374,10 @@
       else view = viewportFor(board.nodes, surfaceSize());
       ready = true;
       render(); renderInspector(); writeLayoutControls(layoutBlock());
+      if (markdownPane && !markdownPane.hidden) {
+        markdownInput.value = board.markdown || '';
+        refreshMarkdown();
+      }
       if (boardList) boardList.value = boardId;
       applyReady();
       status('已载入');
@@ -1379,6 +1486,7 @@
       resetAssociationSelection();
       closeTextEdit();
       root.hidden = true;
+      toggleMarkdown(false);
       setFocus(false);
       doc.body.classList.remove('board-mode');
       options.onCanvasContext?.(null);
@@ -1594,6 +1702,7 @@
       board = {
         ...board,
         title: converted.board.title,
+        ...(converted.board.markdown === undefined ? {} : { markdown: converted.board.markdown }),
         nodes: converted.board.nodes,
         edges: converted.board.edges,
         style: Object.keys(converted.style).length > 1 || Object.keys(converted.style).length ? converted.style : undefined,
@@ -1601,6 +1710,10 @@
       selection = new Set();
       pushHistory(); render(); renderInspector();
       writeLayoutControls({ mode: converted.mode, direction: converted.direction, ...(converted.style.layout ?? {}) });
+      if (markdownPane && !markdownPane.hidden) {
+        markdownInput.value = board.markdown || '';
+        refreshMarkdown();
+      }
       scheduleSave();
       return { nodes: board.nodes.length, edges: board.edges.length };
     }
@@ -1941,10 +2054,10 @@
       if (sendButton) sendButton.addEventListener('click', () => void sendToConversation());
       bridge.listen();
       const zoomIn = $('board-zoom-in'), zoomOut = $('board-zoom-out'), fit = $('board-fit');
-      if (zoomIn) zoomIn.addEventListener('click', () => { const size = surfaceSize(); view = applyZoom(view, 1.2, { x: size.width / 2, y: size.height / 2 }); applyView(); });
-      if (zoomOut) zoomOut.addEventListener('click', () => { const size = surfaceSize(); view = applyZoom(view, 1 / 1.2, { x: size.width / 2, y: size.height / 2 }); applyView(); });
-      if (fit) fit.addEventListener('click', () => { view = viewportFor(board.nodes, surfaceSize()); applyView(); scheduleSave(); });
-      for (const [name, id] of Object.entries(TOOL_IDS)) { const button = $(id); if (button) button.addEventListener('click', () => setTool(name)); }
+      if (zoomIn) zoomIn.addEventListener('click', () => { showMarkdownPreview(false); const size = surfaceSize(); view = applyZoom(view, 1.2, { x: size.width / 2, y: size.height / 2 }); applyView(); });
+      if (zoomOut) zoomOut.addEventListener('click', () => { showMarkdownPreview(false); const size = surfaceSize(); view = applyZoom(view, 1 / 1.2, { x: size.width / 2, y: size.height / 2 }); applyView(); });
+      if (fit) fit.addEventListener('click', () => { showMarkdownPreview(false); view = viewportFor(board.nodes, surfaceSize()); applyView(); scheduleSave(); });
+      for (const [name, id] of Object.entries(TOOL_IDS)) $(id)?.addEventListener('click', () => { showMarkdownPreview(false); setTool(name); });
       const addPaperButton = $('board-add-paper');
       if (addPaperButton) addPaperButton.addEventListener('click', () => { options.onRequestPapers?.(); });
       for (const button of doc.querySelectorAll?.('#board-source-dialog .dialog-close') ?? []) button.addEventListener('click', () => sourceDialog?.close?.());
@@ -2244,6 +2357,35 @@
     }
 
     const flowButton = $('board-flow-open');
+    if (markdownPane) {
+      markdownInput.maxLength = sourceApi().LIMITS.markdown;
+      $('board-markdown-open').addEventListener('click', () => toggleMarkdown(markdownPane.hidden));
+      $('board-markdown-split').addEventListener('click', event => {
+        if (!ready) return;
+        markdownLayout = markdownLayout === 'side' ? 'stacked' : 'side';
+        $('board-body').dataset.markdownLayout = markdownLayout;
+        event.currentTarget.textContent = markdownLayout === 'stacked' ? '左右分栏' : '上下分栏';
+        event.currentTarget.setAttribute('aria-pressed', String(markdownLayout === 'stacked'));
+        if (markdownPane.hidden) toggleMarkdown(true);
+        else resize();
+      });
+      $('board-markdown-preview-toggle').addEventListener('click', () => {
+        showMarkdownPreview(markdownPreview.hidden);
+        if (!markdownPreview.hidden) refreshMarkdown();
+        resize();
+      });
+      $('board-markdown-insert').addEventListener('click', insertMarkdown);
+      markdownInput.addEventListener('input', () => {
+        if (!ready) return;
+        board = { ...board, markdown: markdownInput.value };
+        scheduleSave();
+        showMarkdownPreview(true);
+        $('board-markdown-insert').disabled = true;
+        clearTimeout(markdownTimer);
+        markdownTimer = setTimeout(refreshMarkdown, 160);
+      });
+      markdownInput.addEventListener('blur', () => { if (ready) saveNow(); });
+    }
     $('board-annotations-open')?.addEventListener('click', () => {
       if (ready && boardId) options.onAnnotations?.({ id: boardId, target: { kind: 'board', node_ids: selectedNodes().map(node => node.id) } });
     });
@@ -2292,6 +2434,7 @@
       setTool,
       dispose() {
         ++boardLoadTicket;
+        clearTimeout(markdownTimer);
         publishFlowWindow(false);
         flowUI?.dispose();
         cancelDrag();
