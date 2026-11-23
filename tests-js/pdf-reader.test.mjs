@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
+import { JSDOM } from 'jsdom';
 const context = vm.createContext({ window: {} });
 const readerSource = await readFile(new URL('../web/pdf-reader.js', import.meta.url), 'utf8');
 vm.runInContext(readerSource, context);
@@ -480,6 +481,79 @@ test('selection uses displayed PDF coordinates, merges only adjacent words on a 
     'A line break joins without a space; words on one line keep theirs');
   assert.throws(() => mergeSelection([[0, 0, 10, 10, 'x'.repeat(20001)]], 1), /上限/);
   assert.throws(() => mergeSelection(Array.from({ length: 201 }, (_, i) => [0, i * 20, 10, i * 20 + 10, 'x']), 1), /上限/);
+});
+
+test('cross-page selection filters both text and geometry, supports restore and appends independent ranges', () => {
+  const { window } = new JSDOM('<main></main>');
+  try {
+    const { document } = window, root = document.querySelector('main'), detections = [];
+    const { marginLines, skippableMargins, combineSelectionParts } = context.window.PaperPDFReader;
+    const dom = (tag, className) => Object.assign(document.createElement(tag), { className: className || '' });
+    const row = (y, text) => [25, y, 230, y + 10, text];
+    const pages = [{ width: 500, height: 800 }, { width: 500, height: 800 }];
+    const input = [
+      [row(682, 'The road'), row(715, '© The Author(s) 2023'),
+        row(730, 'A. Reader (Eds.): Proceedings, pp. 57–69'), row(745, 'https://doi.org/10.1234/synthetic'),
+        [300, 715, 470, 725, 'A second column']],
+      [[25, 32, 40, 42, '58'], [98, 32, 230, 42, 'S. Reader et al.'],
+        row(72, 'type and speed limit.'), row(100, 'Another paragraph.')],
+    ];
+    const marginBySheet = new WeakMap();
+    const slots = input.map((words, index) => {
+      const sheet = dom('div','pdr-sheet'), layer = dom('div','pdr-word-layer'), spans = new Map();
+      const y = index * 800;
+      sheet.dataset.loaded = 'true'; layer.dataset.pdfPage = index + 1;
+      sheet.getBoundingClientRect = () => ({ left:0,top:y,width:500,height:800 });
+      for (const word of words) {
+        const span = dom('span','pdr-word');
+        span.textContent=word[4]; spans.set(word,span);
+        span.getBoundingClientRect = () => ({left:word[0],top:y+word[1],right:word[2],bottom:y+word[3]});
+        layer.append(span);
+      }
+      marginBySheet.set(sheet,{margins:marginLines(words,800),spans});
+      root.append(sheet); sheet.append(layer);
+      return { sheet, layer };
+    });
+    const scope = vm.createContext({ window, document, Range:window.Range, slots, pages, root, dom, marginBySheet,
+      mergeSelection, clipWords, combineSelectionParts, skippableMargins, MAX_SELECTION_PAGES:3,
+      paperId:'synthetic-paper', tool:'underline', color:'#336699',
+      rangeEdit:null, markupGesture:null, pendingRange:null, selection:null, lastSelection:'',
+      reviewParts:[], collecting:false, includeMargins:false, queue:{snapshot:()=>({residents:[1,2]})},
+      onSelection: selection=>detections.push(plain(selection)), onStatus: message=>assert.fail(message),
+    });
+    const extract=(from,to)=>readerSource.slice(readerSource.indexOf(from),readerSource.indexOf(to,readerSource.indexOf(from)));
+    vm.runInContext(extract('    function layerOf(', '    const sameEndpoint') +
+      extract('    function paintSelectionDraft(', '    /** Annotation hit-testing'), scope);
+    function select(start, end, gesture) {
+      window.getSelection().setBaseAndExtent(start.firstChild, 0, end.firstChild, end.textContent.length);
+      scope.captureSelection(gesture);
+      return detections.at(-1);
+    }
+    const [first, second] = slots.map(slot=>[...slot.layer.children]);
+    const filtered = select(first[0],second[2]);
+    assert.equal(filtered.review.excluded.length,5);
+    assert.deepEqual(filtered.segments.map(part=>part.rects), [[[25,682,230,692],[300,715,470,725]],[[25,72,230,82]]]);
+    assert.equal(filtered.segments[0].text,'The roadA second column');
+    assert.equal(filtered.segments[1].text,'type and speed limit.');
+    assert.equal(root.querySelectorAll('.pdr-selection-draft').length,2);
+    scope.editSelectionReview({restore:true});
+    assert.match(detections.at(-1).segments[0].text,/The Author/);
+    scope.editSelectionReview({restore:false});
+    assert.equal(detections.at(-1).segments[1].rects.length,1);
+
+    scope.clearSelectionDraft();
+    const base = select(first[0],first[0]);
+    const appended = select(second[3],second[3],{append:true,base});
+    assert.deepEqual(appended.segments.map(part=>part.text),['The road','Another paragraph.']);
+    scope.editSelectionReview({remove:0});
+    assert.equal(detections.at(-1).text,'Another paragraph.');
+    assert.equal(detections.at(-1).segments,undefined);
+    const samePage = select(second[0],second[0],{append:true});
+    assert.deepEqual(samePage.rects,[[25,100,230,110],[25,32,40,42]]);
+    assert.equal(samePage.segments,undefined);
+    scope.clearSelectionDraft();
+    assert.equal(root.querySelectorAll('.pdr-selection-draft').length,0);
+  } finally { window.close(); }
 });
 
 test('a partial selection keeps only the selected slice of each word', () => {

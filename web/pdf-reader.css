@@ -21,6 +21,8 @@
 .paper-pdf-reader[data-tool="ink"],.paper-pdf-reader[data-tool="highlight"],.paper-pdf-reader[data-tool="underline"],.paper-pdf-reader[data-tool="strikeout"],
 .paper-pdf-reader[data-tool="ink"] .pdr-sheet,.paper-pdf-reader[data-tool="highlight"] .pdr-sheet,.paper-pdf-reader[data-tool="underline"] .pdr-sheet,.paper-pdf-reader[data-tool="strikeout"] .pdr-sheet { touch-action:none; }
 .pdr-ink-draft,.pdr-ink-overlay { position:absolute; inset:0; width:100%; height:100%; z-index:2; pointer-events:none; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+.pdr-selection-draft { position:absolute; inset:0; z-index:2; pointer-events:none; }
+.pdr-selection-draft span { position:absolute; background:var(--pdr-selection,rgba(88,146,245,.28)); }
 .paper-pdf-reader[data-tool="highlight"] .pdr-word-layer,.paper-pdf-reader[data-tool="underline"] .pdr-word-layer,.paper-pdf-reader[data-tool="strikeout"] .pdr-word-layer { cursor:text; }
 .pdr-placeholder { position:absolute; inset:0; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; padding:20px; color:#899087; text-align:center; font-size:12px; }
 .pdr-sheet[data-loaded="false"] { background:linear-gradient(#f0f2ef 0 0) 10% 15%/80% 12px no-repeat,linear-gradient(#f0f2ef 0 0) 10% 20%/72% 8px no-repeat,linear-gradient(#f0f2ef 0 0) 10% 24%/80% 8px no-repeat,#fff; }

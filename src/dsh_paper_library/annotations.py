@@ -189,6 +189,15 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 pass
         return {}
 
+    @staticmethod
+    def _markup_group(annot, metadata):
+        group = metadata.get("markup_group")
+        if annot.type[0] in {8, 9, 11} and isinstance(group, str) and re.fullmatch(
+            r"(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})", group
+        ):
+            return group
+        return None
+
     @classmethod
     def _annotation(cls, page, annot, exact=False, handwriting=None, raw_words=None):
         import pymupdf as fitz
@@ -230,7 +239,8 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
                 rects = [list(cls._rect(rect, page, inverse=True) * page.rotation_matrix) for rect in source_rects]
             except (TypeError, ValueError):
                 pass
-        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, **({"tags": tags} if tags else {}), "comment": info.get("content", ""), "author": info.get("title", ""), "subject": info.get("subject", "")[:1000] if not info.get("subject", "").startswith("paper-library:") else "", "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, **cls._annotation_style(annot), **native_style(annot), "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"width": annot.border.get("width", 1)} if kind == "square" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids", "parent_id", "question", "answered_at") if key in extra}}
+        group = cls._markup_group(annot, extra)
+        return {"id": info.get("id") or f"external-{page.number + 1}-{annot.xref}", "page": page.number + 1, "type": kind, "text": text, **({"tags": tags} if tags else {}), "comment": info.get("content", ""), "author": info.get("title", ""), "subject": info.get("subject", "")[:1000] if not info.get("subject", "").startswith("paper-library:") else "", "rect": list(cls._rect(annot.rect, page)), "rects": rects, "created": info.get("creationDate"), "modified": info.get("modDate"), "color": annot.colors, **cls._annotation_style(annot), **native_style(annot), "source": "paper-library" if extra and extra.get("source_kind") != "external-companion" else "external-pdf", **({"markup_group": group} if group else {}), **(cls._ink_geometry(page, annot) if kind == "ink" else {}), **({"width": annot.border.get("width", 1)} if kind == "square" else {}), **({"handwriting": linked_board} if linked_board else {}), **({"linked_ink": linked_ink} if linked_ink else {}), **(linked_child or {}), **({"parent_id": own_board["parent_id"], "transcript": own_board["transcript"], "transcription_source": own_board["transcription_source"], "handwriting_version": own_board["version"]} if own_board else {}), **({"reply_to": reply_to} if reply_to else {}), **{key: extra[key] for key in ("kind", "model", "annotation_ids", "generated", "source_kind", "source_session_id", "source_message_id", "source_snapshot_ids", "parent_id", "question", "answered_at") if key in extra}}
 
     def companion_excerpt(self, id, page):
         """One explicitly selected page, text only; no persistent index or OCR."""
@@ -717,7 +727,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         annotation_id = annotation_id or uuid.uuid4().hex
         doc.xref_set_key(annot.xref, "NM", fitz.get_pdf_str(annotation_id))
         from .reading_distribution import MARK_TYPES, MARK_ORIGIN_KEY
-        if annot.type[0] in MARK_TYPES and (annotation_profile == "ai-reading" or set(extra or {}) <= {"create_request_hash"}):
+        if annot.type[0] in MARK_TYPES and (annotation_profile == "ai-reading" or set(extra or {}) <= {"create_request_hash", "markup_group"}):
             doc.xref_set_key(annot.xref, MARK_ORIGIN_KEY, "/AI" if annotation_profile == "ai-reading" else "/Manual")
         if linked_parent is not None:
             annot.set_irt_xref(linked_parent.xref)
@@ -785,7 +795,7 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             def write(doc):
                 annotations = [self._add_annotation(doc, **part, type=type, annotation_id=key, color=color,
                                comment=comment if index == 0 else "", author=author, width=width,
-                               extra={"create_request_hash": fingerprint})["annotation"]
+                               extra={"create_request_hash": fingerprint, "markup_group": annotation_id})["annotation"]
                                for index, (part, key) in enumerate(zip(segments, ids, strict=True))]
                 return {"annotation": annotations[0], "annotations": annotations}
 
@@ -1090,9 +1100,8 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
         with self.lock():
             return self._write_pdf(id, operation)
 
-    def annotation_delete(self, id, annotation_id):
-        def operation(doc):
-            page, annot = self._find_annotation(doc, annotation_id)
+    def annotation_delete(self, id, annotation_id, markup_group=None):
+        def delete_from_page(doc, page, annot):
             child = self._handwriting_child(page, annot)
             linked = [reply.xref for reply in page.annots() or [] if self._is_linked_handwriting(reply) and reply.irt_xref == annot.xref]
             deleting = {annot.xref, *linked, *([child.xref] if child else [])}
@@ -1107,10 +1116,37 @@ class AnnotationAccess(HandwritingAccess, LinkedHandwritingAccess):
             if child:
                 page.delete_annot(child)
             page.delete_annot(annot)
-            return {"deleted": True}
+        def operation(doc):
+            page, annot = self._find_annotation(doc, annotation_id)
+            if markup_group is None:
+                delete_from_page(doc, page, annot)
+                return {"deleted": True}
+            if annotation_id != markup_group or self._markup_group(annot, self._annotation_metadata(annot)) != markup_group:
+                raise ValueError("批注分组已变更，请重新加载。")
+            members, scanned = [], 0
+            # The root is on the first page and a group spans at most three.
+            for number in range(page.number, min(doc.page_count, page.number + 3)):
+                for member in doc[number].annots() or []:
+                    scanned += 1
+                    if scanned > _constants().MAX_ANNOTATIONS:
+                        raise ValueError("批注过多，无法安全删除整组。")
+                    if self._markup_group(member, self._annotation_metadata(member)) == markup_group:
+                        key = member.info.get("id")
+                        expected = annotation_id if number == page.number else str(uuid.uuid5(uuid.UUID(annotation_id), f"page:{number + 1}"))
+                        if key != expected or member.type[0] != annot.type[0]:
+                            raise ValueError("批注分组已变更，请重新加载。")
+                        members.append((number, member.xref, key))
+            if not 1 <= len(members) <= 3 or len({number for number, _, _ in members}) != len(members):
+                raise ValueError("批注分组已变更，请重新加载。")
+            for number, xref, _ in members:
+                current = doc[number]
+                delete_from_page(doc, current, current.load_annot(xref))
+            return {"deleted": True, "pages": [number + 1 for number, _, _ in members],
+                    "annotation_ids": [key for _, _, key in members]}
         with self.lock():
             result = self._write_pdf(id, operation)
-            self.db.execute("DELETE FROM annotation_favorites WHERE paper_id=? AND annotation_id=?", (id, annotation_id))
+            self.db.executemany("DELETE FROM annotation_favorites WHERE paper_id=? AND annotation_id=?",
+                                [(id, key) for key in result.get("annotation_ids", [annotation_id])])
             return result
 
     def export_annotations(self, id, format="xfdf"):

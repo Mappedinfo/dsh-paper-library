@@ -20,7 +20,7 @@ window.PaperReaderSearch = (() => {
       const haystack=normalize(selected.map(text).join(' '));
       return !terms.length||(match==='any'?terms.some(term=>haystack.includes(term)):terms.every(term=>haystack.includes(term)));
     };
-    const related=note=>[note,...(group.replies.get(note.id)||[])];
+    const related=note=>[...(group.parts?.get(note.id)||[note]),...(group.replies.get(note.id)||[])];
     return {...group,notes:group.notes.filter(note=>matches([...related(note),...(group.remarks?.get(note.id)||[]).flatMap(related)])),unlinked:group.unlinked.filter(note=>matches([note]))};
   }
   function create({api,getPaper,reader,navigate,panels,getElements,onAnnotationSearch,onAnnotationNavigate,onLibrarySearch}) {

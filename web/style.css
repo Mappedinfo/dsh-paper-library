@@ -789,6 +789,12 @@ select {
   font-size: 11px;
 }
 
+.selection-review { font-size: 12px; }
+.selection-review-parts,.selection-review-margins { margin: 4px 0; padding-inline-start: 20px; max-height: 7em; overflow: auto; }
+.selection-review-parts li > span { display: inline-block; max-width: calc(100% - 4em); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+.selection-review-parts button { margin-inline-start: 4px; }
+.annotation-part { margin-block: 4px; }
+
 .notes-content,.graph-content {
   padding: 28px 35px;
 }

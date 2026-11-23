@@ -71,6 +71,31 @@ test('clipboard failure offers the same original text in the existing manual cop
   await f.window.handleNoteAction({target:f.document.querySelector('[data-note-action="copy-source"]')});
   assert.equal(f.document.getElementById('copy-fallback').value,'Exact source');assert.equal(f.document.getElementById('text-dialog-title').textContent,'批注原文');assert.equal(f.document.getElementById('text-dialog').open,true);assert.equal(f.messages.length,0);domClose(f);
 });
+test('one cross-page card copies both parts, shares remarks and reveals each native underline', {skip:!JSDOM},async()=>{
+  const f=fixture(),{window:w,document:d}=f;
+  try {
+    w.eval(await readFile(new URL('../web/annotation-threads.js',import.meta.url),'utf8'));
+    w.state.annotations=[
+      {id:'first',markup_group:'first',page:1,type:'underline',text:'The first part',comment:'One shared remark'},
+      {id:'second',markup_group:'first',page:2,type:'underline',text:'continues here.'},
+      {id:'old',page:2,type:'underline',text:'An independent old annotation'},
+    ];
+    const reveals=[];
+    w.pdfReader={revealAnnotation:(id,{page})=>reveals.push([id,page])};
+    w.switchTab=async()=>{};
+    w.renderAnnotations();
+    const list=d.getElementById('annotation-list'),card=list.querySelector('[data-annotation-id="first"]');
+    assert.equal(list.querySelectorAll(':scope > .annotation-card').length,2);
+    assert.match(card.querySelector('.annotation-meta').textContent,/第 1、2 页/);
+    assert.equal(card.querySelector('.annotation-quote').textContent,'The first part\n\ncontinues here.');
+    assert.match(card.textContent,/One shared remark/);
+    await w.handleNoteAction({target:card.querySelector('[data-note-action="copy-source"]')});
+    assert.deepEqual(f.copied,['The first part\n\ncontinues here.']);
+    await w.handleNoteAction({target:card.querySelector('[data-annotation-id="second"][data-note-action="page"]')});
+    assert.deepEqual(reveals,[['second',2]]);
+    assert.equal(w.annotationThreads(w.state.annotations).roots.get('second'),'first');
+  } finally { domClose(f); }
+});
 test('toast and unsaved warning share a stacked region; pending retries retain the warning until confirmed saved', {skip:!JSDOM},async()=>{
   const f=fixture(),{window,document}=f;let notify,flushes=0;
   window.persistence={subscribe:fn=>{notify=fn},flush:async()=>{flushes++},exportPending:()=>[{key:'draft',value:'Unchanged draft'}]};

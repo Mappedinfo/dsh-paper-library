@@ -57,6 +57,8 @@ window.PaperLibraryChat = {
       if (!$('paper-reference-drawer').hidden) renderCatalog();
       decorateAnnotations();
     }
+    const cardAnnotationIds = card => card.dataset.annotationParts ?
+      JSON.parse(card.dataset.annotationParts) : [card.dataset.annotationId];
     function decorateAnnotations() {
       const toggle=$('discuss-all-notes'),cancel=$('annotation-bulk-cancel'),all=$('annotation-bulk-page');
       $('draft-all-notes').hidden=bulkSelecting;
@@ -68,7 +70,7 @@ window.PaperLibraryChat = {
       if(all){all.hidden=!bulkSelecting;all.disabled=bulkBusy||chat.busy;}
       const list=$('annotation-list');
       for(const card of list?.querySelectorAll?.(':scope > .annotation-card')||[]) {
-        const id=card.dataset.annotationId,isCurrentPaper=card.dataset.paperId===chat.paperId;
+        const ids=cardAnnotationIds(card),isCurrentPaper=card.dataset.paperId===chat.paperId;
         let label=card.querySelector(':scope > .annotation-bulk-check');
         if(!bulkSelecting||!isCurrentPaper){label?.remove();card.classList.remove('annotation-bulk-selected');continue;}
         if(!label){
@@ -76,20 +78,20 @@ window.PaperLibraryChat = {
           label.append(box,element('span','','选取提问'));card.prepend(label);
           box.addEventListener('change',()=>{
             if(bulkBusy||chat.busy||card.dataset.paperId!==chat.paperId)return;
-            if(!box.checked){removeReference(id);return;}
-            const note=chat.catalog.find(value=>value.id===id);
-            if(note)setReferences([note]);else void useNote({id});
+            if(!box.checked){ids.forEach(removeReference);return;}
+            const notes=ids.map(id=>chat.catalog.find(value=>value.id===id));
+            if(notes.every(Boolean))setReferences(notes);else void useNotes(ids.map(id=>({id})));
             decorateAnnotations();
           });
         }
-        const box=label.querySelector('input');box.checked=chat.notes.some(ref=>ref.id===id);box.disabled=bulkBusy||chat.busy;
+        const box=label.querySelector('input');box.checked=ids.every(id=>chat.notes.some(ref=>ref.id===id));box.disabled=bulkBusy||chat.busy;
         card.classList.toggle('annotation-bulk-selected',box.checked);
       }
     }
     async function selectVisibleAnnotations() {
       if(!bulkSelecting||bulkBusy||chat.busy)return;
       const id=chat.paperId,ticket=chat.ticket;
-      const ids=[...($('annotation-list')?.querySelectorAll?.(':scope > .annotation-card')||[])].filter(card=>card.dataset.paperId===id).map(card=>card.dataset.annotationId);
+      const ids=[...($('annotation-list')?.querySelectorAll?.(':scope > .annotation-card')||[])].filter(card=>card.dataset.paperId===id).flatMap(cardAnnotationIds);
       try{const notes=await catalog(true);if(isCurrent(id,ticket))setReferences(notes.filter(note=>ids.includes(note.id)));}catch(error){toast(error.message,true);}
     }
     async function submitBulk() {
@@ -401,15 +403,20 @@ window.PaperLibraryChat = {
       status('正在准备这篇论文的 DSH 对话…');
       try { await ensure(item.id); if (chat.paperId !== item.id) return; await catalog(); if (chat.visible) await history(); } catch (error) { if (chat.paperId === item.id) status(error.message, true); }
     }
-    async function useNote(note) {
-      if (!isUserNote(note)) return;
-      if (chat.notes.some(ref => ref.id === note.id)) { removeReference(note.id); toast('已移出提问材料'); return; }
+    async function useNotes(selection) {
+      if (!selection.length || !selection.every(isUserNote)) return;
+      const ids = selection.map(note => note.id);
+      if (ids.every(id => chat.notes.some(ref => ref.id === id))) {
+        ids.forEach(removeReference);
+        toast('已移出提问材料');
+        return;
+      }
       const id = chat.paperId, ticket = chat.ticket;
       try {
-        const notes = await catalog(true); const current = notes.find(value => value.id === note.id);
+        const notes = await catalog(true); const current = ids.map(id => notes.find(value => value.id === id));
         if (!isCurrent(id, ticket)) return;
-        if (!current) throw new Error('当前引用目录未找到这条批注，请刷新批注后重试。');
-        if (setReferences([current])) toast(`已选作提问材料 · 共 ${chat.notes.length} 条，尚未发送`);
+        if (current.some(note => !note)) throw new Error('当前引用目录缺少选段，请刷新批注后重试。');
+        if (setReferences(current)) toast(`已选作提问材料 · 共 ${chat.notes.length} 条，尚未发送`);
       } catch (error) { toast(error.message, true); }
     }
     const prompts=document.createElement('div');prompts.className='paper-chat-suggestions';prompts.setAttribute('aria-label','常见论文问题');
@@ -454,10 +461,12 @@ window.PaperLibraryChat = {
       setAvailable(value) { chat.available = Boolean(value); controls(); },
       setHostCompanion(value) {hostCompanion=Boolean(value);},
       available: () => chat.available,
+      refreshSessions: () => bridge('refresh'),
+      openSavedQa: sessionId => bridge('open', { sessionId }),
       paperOpened,
       hasStoredDraft:()=>chat.storedDraft,
       visible(value) { chat.visible = value; if (value) void history(); else stopTimer(); },
-      useAnnotation: useNote,
+      useAnnotation: note => useNotes([note]), useAnnotations: useNotes,
       decorateAnnotations,
       hasAnnotation: id => chat.notes.some(ref => ref.id === id),
       async annotationsChanged(id) { if (id === chat.paperId && chat.available) { try { await catalog(true); } catch { /* status shown */ } } },

@@ -428,15 +428,57 @@ function readSelection() {
   $('selection-preview').textContent = state.selection.text; $('selection-tools').hidden = false;
 }
 let annotationRangeEdit=null;
-function clearSelection() { state.selection = null; $('selection-tools').hidden = true; window.getSelection()?.removeAllRanges(); }
-function showReaderSelection(selection) {
+function clearSelection() {
+  state.selection = null;
+  $('selection-tools').hidden = true;
+  if (typeof pdfReader !== 'undefined') pdfReader?.clearSelectionDraft?.();
+  window.getSelection()?.removeAllRanges();
+}
+function showReaderSelection(selection, intent) {
   if (!selection) { clearSelection(); publishReaderState(); return; }
   if (selection.id && selection.id !== state.active?.id) return;
-  state.selection={...selection,id:state.active.id};
+  state.selection={...selection,id:state.active.id,intent};
   $('selection-count').textContent=selection.segments
     ? `第 ${selection.page}–${selection.segments.at(-1).page} 页 · 已选择文字`
     : `第 ${selection.page} 页 · 已选择文字`;
-  $('selection-preview').textContent=selection.text;$('selection-tools').hidden=false;publishReaderState();
+  const preview = $('selection-preview');
+  preview.parentElement.querySelector('.selection-review')?.remove();
+  const save = $('annotate-selection');
+  save.textContent = selection.review ? '保存批注' : '高亮并批注';
+  save.title = '按住 Shift 拖选可追加选段';
+  if (selection.review) preview.after(selectionReviewControls(selection.review));
+  preview.textContent=selection.text;$('selection-tools').hidden=false;publishReaderState();
+}
+function selectionReviewControls(review) {
+  const details = el('div','selection-review');
+  const button = (label, run) => {
+    const control = el('button','button subtle',label);
+    control.type = 'button';
+    control.addEventListener('click', run);
+    return control;
+  };
+  if (review.collecting) {
+    $('selection-count').textContent += ` · ${review.parts.length} 段`;
+    const list = el('ol','selection-review-parts');
+    for (const [index, part] of review.parts.entries()) {
+      const item = el('li');
+      const remove = button('移除', () => pdfReader?.editSelectionReview({ remove:index }));
+      remove.setAttribute('aria-label', `移除第 ${index + 1} 段`);
+      item.append(el('span','',`第 ${part.page} 页 · ${part.text}`), remove);
+      list.append(item);
+    }
+    details.append(list);
+  }
+  if (review.excluded.length) {
+    const skipped = el('details');
+    skipped.append(el('summary','',`${review.includeMargins ? '已恢复' : '已跳过'} ${review.excluded.length} 行页边文字`));
+    const list = el('ul','selection-review-margins');
+    for (const line of review.excluded) list.append(el('li','',`第 ${line.page} 页 · ${line.text}`));
+    skipped.append(list);
+    details.append(skipped, button(review.includeMargins ? '跳过这些行' : '恢复这些行',
+      () => pdfReader?.editSelectionReview({ restore:!review.includeMargins })));
+  }
+  return details;
 }
 
 const annotationLoadJobs=new Map();
@@ -514,7 +556,7 @@ function renderAnnotations() {
   tagUI?.beforeRender();
   linkedHandwritingUI?.beforeRender();
   const fragment = document.createDocumentFragment();
-  const {notes,replies,unlinked,remarks=new Map()}=visibleAnnotationThreads();
+  const {notes,replies,unlinked,parts,remarks=new Map()}=visibleAnnotationThreads();
   if (state.active?.pdf && typeof paperRemarkUI !== 'undefined' && paperRemarkUI)
     fragment.append(paperRemarkUI.sidebar(state.active,state.annotations.find(note=>note.kind==='paper-remark')));
   state.noteOffset=Math.min(state.noteOffset,Math.max(0,Math.ceil(notes.length/40)-1)*40);
@@ -553,18 +595,21 @@ function renderAnnotations() {
   }
   for (const note of notes.slice(state.noteOffset, state.noteOffset + 40)) {
     const card = el('article', 'annotation-card'); card.dataset.annotationId = note.id; card.dataset.paperId = state.active?.id || '';
+    const group = parts?.get(note.id), sourceText = group ? group.map(part => part.text).join('\n\n') : note.text;
+    if (group) card.dataset.annotationParts = JSON.stringify(group.map(part => part.id));
     const stroke=note.color?.stroke;
     if(Array.isArray(stroke)&&stroke.length===3&&stroke.every(Number.isFinite))card.style.setProperty('--annotation-card-color',`rgb(${stroke.map(value=>Math.round(Math.max(0,Math.min(1,value))*255)).join(',')})`);
     if(note.version)card.dataset.annotationVersion=note.version;
     card.dataset.companionText=String([note.text,note.comment,note.content,note.handwriting?.transcript,note.linked_ink?.transcript].some(value=>typeof value==='string'&&value.trim()));
-    const meta = el('div', 'annotation-meta'); const pageLink = el('button', 'page-link', `第 ${note.page} 页`); pageLink.dataset.noteAction = 'page';
+    const meta = el('div', 'annotation-meta'); const pageLink = el('button', 'page-link', `第 ${group ? group.map(part => part.page).join('、') : note.page} 页`); pageLink.dataset.noteAction = 'page';
     const date = el('span', '', displayDate(note.created || note.modified));
     if (note.created && note.modified && note.created !== note.modified) date.title = `最后修改：${displayDate(note.modified)}`;
     meta.append(pageLink, date, el('span', 'note-type', note.kind === 'ai-feedback' || note.type === 'ai_feedback' || note.ai_generated ? 'AI 生成' : ({highlight:'高亮',underline:'下划线',strikeout:'删除线',note:'便笺',ink:'自由笔画',square:'矩形框'})[note.type] || '批注'));
     const metaActions=el('div','annotation-meta-actions');
-    const style=window.PaperAnnotationStyle?.editor({note,paperId:state.active.id,api,onSaved:async()=>{
-      if(state.active?.id===card.dataset.paperId){await loadAnnotations(state.active.id);await refreshPage(note.page);}
+    const styleFor = part => window.PaperAnnotationStyle?.editor({note:part,paperId:state.active.id,api,onSaved:async()=>{
+      if(state.active?.id===card.dataset.paperId){await loadAnnotations(state.active.id);await refreshPage(part.page);}
     }});
+    const style = group ? null : styleFor(note);
     if(style)metaActions.append(style);
     if(note.text){
       const locate=el('button','button subtle','定位');
@@ -575,28 +620,54 @@ function renderAnnotations() {
     star.type='button';star.dataset.noteAction='favorite';star.setAttribute('aria-pressed',String(starred));
     star.title=starred?'取消收藏批注':note.identity_reliable===false?'此批注没有稳定标识':'收藏批注';
     star.setAttribute('aria-label',star.title);star.disabled=(!starred&&note.identity_reliable===false)||favoriteAnnotationWrites.has(JSON.stringify([state.active?.id,note.id]));metaActions.append(star);
-    if (annotationTranslationAvailable && !window.PaperAnnotationThreads?.isAi(note)) {
-      const translate = el('button', 'button subtle annotation-translate', translatingAnnotations.has(`${state.active?.id}:${note.id}`) ? '翻译中…' : '翻译');
+    const translateFor = part => {
+      if (!annotationTranslationAvailable || window.PaperAnnotationThreads?.isAi(part)) return null;
+      const translating = translatingAnnotations.has(`${state.active?.id}:${part.id}`);
+      const translate = el('button', 'button subtle annotation-translate', translating ? '翻译中…' : '翻译');
       translate.type = 'button'; translate.dataset.noteAction = 'translate';
+      translate.dataset.annotationId = part.id;
       translate.title = '翻译这条批注的文字，并作为「翻译：」AI 批注保存到 PDF';
-      if (!note.version) translate.title = '批注文字超过 8000 字符或内容不完整，请缩小后再翻译';
-      translate.disabled = !note.version || translatingAnnotations.has(`${state.active?.id}:${note.id}`) || card.dataset.companionText !== 'true';
-      metaActions.append(translate);
-    }
+      if (!part.version) translate.title = '批注文字超过 8000 字符或内容不完整，请缩小后再翻译';
+      translate.disabled = !part.version || translating || ![part.text,part.comment,part.content,part.handwriting?.transcript,part.linked_ink?.transcript]
+        .some(value=>typeof value==='string'&&value.trim());
+      return translate;
+    };
+    const translate = group ? null : translateFor(note);
+    if (translate) metaActions.append(translate);
     meta.append(metaActions);
     card.append(meta);
     const translations=(replies.get(note.id)||[]).filter(reply=>reply.source_kind==='annotation-translation');
-    if (note.text) { const excerpt=el('section','annotation-excerpt'),heading=el('div','annotation-excerpt-heading');heading.append(el('span','small muted','原文'));
-      if(['highlight','underline','strikeout','note'].includes(note.type)&&note.edit_version&&!note.id.startsWith('external-')&&(note.type!=='note'||note.source==='paper-library')){
+    if (sourceText) { const excerpt=el('section','annotation-excerpt'),heading=el('div','annotation-excerpt-heading');heading.append(el('span','small muted','原文'));
+      if(!group&&['highlight','underline','strikeout','note'].includes(note.type)&&note.edit_version&&!note.id.startsWith('external-')&&(note.type!=='note'||note.source==='paper-library')){
         const reselect=el('button','button subtle');reselect.type='button';reselect.dataset.noteAction='reselect';
         paintRangeEditButton(reselect,note.id);heading.append(reselect);
       }
-      const quote=el('p','annotation-quote',note.text),expand=el('button','button subtle','展开原文');
+      const quote=el('p','annotation-quote',sourceText),expand=el('button','button subtle','展开原文');
       const expanded=state.expandedAnnotationExcerpts ||= new Set(),key=JSON.stringify([state.active.id,note.id]);
       quote.id=`annotation-excerpt-${crypto.randomUUID()}`;expand.type='button';expand.setAttribute('aria-controls',quote.id);
       const paintExcerpt=()=>{const open=expanded.has(key);quote.classList.toggle('is-collapsed',!open);expand.textContent=open?'收起原文':'展开原文';expand.setAttribute('aria-expanded',String(open));};
       expand.addEventListener('click',()=>{if(expanded.has(key))expanded.delete(key);else expanded.add(key);paintExcerpt();});
       paintExcerpt();heading.append(expand);excerpt.append(heading,quote);
+      if (group) {
+        const partsControls = el('details','annotation-part');
+        partsControls.append(el('summary','small','分页面定位与编辑'));
+        for (const part of group) {
+          const controls = el('div','annotation-excerpt-heading');
+          const locate = el('button','button subtle',`定位第 ${part.page} 页`);
+          locate.type = 'button'; locate.dataset.noteAction = 'page'; locate.dataset.annotationId = part.id;
+          controls.append(locate);
+          if (part.edit_version) {
+            const reselect = el('button','button subtle');
+            reselect.type = 'button'; reselect.dataset.noteAction = 'reselect'; reselect.dataset.annotationId = part.id;
+            paintRangeEditButton(reselect,part.id);controls.append(reselect);
+          }
+          const partStyle = styleFor(part), partTranslation = translateFor(part);
+          if (partStyle) controls.append(partStyle);
+          if (partTranslation) controls.append(partTranslation);
+          partsControls.append(controls);
+        }
+        excerpt.append(partsControls);
+      }
       if(translations.length){const translated=el('div','annotation-translations'),toggle=el('button','button subtle','展开翻译');toggle.type='button';const openTranslations=state.expandedAnnotationTranslations ||= new Set();translated.id=`annotation-translations-${crypto.randomUUID()}`;toggle.setAttribute('aria-controls',translated.id);for(const reply of translations)translated.append(replyCard(reply));const paintTranslation=()=>{const open=openTranslations.has(key);translated.hidden=!open;toggle.textContent=open?'收起翻译':'展开翻译';toggle.setAttribute('aria-expanded',String(open));};toggle.addEventListener('click',()=>{if(openTranslations.has(key))openTranslations.delete(key);else openTranslations.add(key);paintTranslation();});paintTranslation();heading.append(toggle);excerpt.append(translated);}
       card.append(excerpt); }
     if (note.comment || note.content) card.append(legacyQa(note)||el('p', 'annotation-comment', note.comment || note.content));
@@ -604,7 +675,7 @@ function renderAnnotations() {
     linkedHandwritingUI?.decorate(card,note);
     const actions = el('div', 'annotation-actions'); const edit = el('button', 'button subtle', '编辑'); edit.dataset.noteAction = 'edit'; const remove = el('button', 'button subtle delete-note', '删除'); remove.dataset.noteAction = 'delete'; const copy = el('button', 'button subtle', '复制原文'); copy.type = 'button'; copy.dataset.noteAction = 'copy-source'; copy.disabled = typeof note.text !== 'string' || !note.text.trim(); copy.title = copy.disabled ? '这条批注没有选中的 PDF 原文' : '仅复制选中的 PDF 原文，不包含评论或 AI 回复'; actions.append(edit, remove, copy);
     if (note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const handwriting = el('button', 'button subtle', '手写'); handwriting.dataset.noteAction = 'handwriting'; const primary=el('div','annotation-primary-actions');primary.append(handwriting,edit);actions.prepend(primary); const independent=el('button','button subtle','＋ 备注 / 追问');independent.type='button';independent.dataset.noteAction='remark';independent.title='在这处划线下追加备注，保留已有问答';actions.append(independent); if(note.handwriting){const legacy=el('button','button subtle','打开原便签');legacy.dataset.noteAction='handwriting-legacy';actions.append(legacy);} }
-    if (paperChatUI?.available() && note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const selected = paperChatUI.hasAnnotation(note.id); const discuss = el('button', 'button subtle', selected ? '移出提问材料' : '选作提问材料'); discuss.dataset.noteAction = 'discuss'; discuss.title = '可多选批注作为提问材料，再到对话框统一发送；此按钮不会发送消息'; discuss.setAttribute('aria-pressed', String(selected)); actions.append(discuss); }
+    if (paperChatUI?.available() && note.kind !== 'ai-feedback' && note.type !== 'ai_feedback' && !note.ai_generated) { const selected = (group || [note]).every(part => paperChatUI.hasAnnotation(part.id)); const discuss = el('button', 'button subtle', selected ? '移出提问材料' : '选作提问材料'); discuss.dataset.noteAction = 'discuss'; discuss.title = '可多选批注作为提问材料，再到对话框统一发送；此按钮不会发送消息'; discuss.setAttribute('aria-pressed', String(selected)); actions.append(discuss); }
     const phrase=(note.text||note.comment||note.content||'').trim();if(phrase&&phrase.length<=200){const entry=el('button','button subtle','词条');entry.type='button';entry.title='匹配百科词条或创建带来源的词条';entry.addEventListener('click',()=>wikiUI.show('encyclopedia',phrase,{paper_id:state.active.id,title:state.active.title,page:note.page,annotation_id:note.id,quote:phrase}));actions.append(entry);}
     if(tagUI)actions.append(tagUI.editButton(note,state.active.id));
     card.dataset.remarkNumber='1';card.append(actions);
@@ -872,25 +943,30 @@ function locateCurrentPageAnnotations(clickedPage) {
   pendingPdfAnnotationLink=null;
   const snapshot=pdfReader?.getSnapshot(),page=clickedPage??(snapshot?.paperId===state.active.id?snapshot.page:state.page);
   if(!Number.isInteger(page)||page<1)return;
-  const notes=annotationThreads(state.annotations).notes;
-  let index=-1;
+  const {notes,parts}=annotationThreads(state.annotations);
+  let index=-1, nearest;
   for(let i=0;i<notes.length;i++){
-    const candidate=notes[i];if(!Number.isInteger(candidate.page)||candidate.page<1)continue;
-    if(index<0||Math.abs(candidate.page-page)<Math.abs(notes[index].page-page)||
-      (Math.abs(candidate.page-page)===Math.abs(notes[index].page-page)&&candidate.page<notes[index].page))index=i;
+    for (const candidate of parts?.get(notes[i].id) || [notes[i]]) {
+      if(!Number.isInteger(candidate.page)||candidate.page<1)continue;
+      if(!nearest||Math.abs(candidate.page-page)<Math.abs(nearest.page-page)||
+        (Math.abs(candidate.page-page)===Math.abs(nearest.page-page)&&candidate.page<nearest.page)){
+        index=i;nearest=candidate;
+      }
+    }
   }
   if(index<0){toast(state.annotationsTruncated?'已读取的批注中没有可定位的页码。':'当前文献暂无可定位的批注。');return;}
   readerSearchUI?.clearAnnotationFilter();
   readingPanels?.show('annotations');
   state.noteOffset=Math.floor(index/40)*40;renderAnnotations();
   linkAnnotationCard(notes[index].id,{block:'start'});
-  if(notes[index].page!==page||state.annotationsTruncated)toast(`已定位${state.annotationsTruncated?'已读取批注中':''}第 ${notes[index].page} 页的${notes[index].page===page?'':'最近'}批注。`);
+  if(nearest.page!==page||state.annotationsTruncated)toast(`已定位${state.annotationsTruncated?'已读取批注中':''}第 ${nearest.page} 页的${nearest.page===page?'':'最近'}批注。`);
 }
 async function handleNoteAction(event) {
   const button = event.target.closest('[data-note-action]'); if (!button) return;
   const action = button.dataset.noteAction;
   if (action === 'previous' || action === 'next') { pendingPdfAnnotationLink=null;state.noteOffset += action === 'next' ? 40 : -40; renderAnnotations();$('annotation-list').scrollTop=0; return; }
   const note = state.annotations.find((entry) => entry.id === button.closest('[data-annotation-id]').dataset.annotationId); if (!note) return;
+  const group = note.markup_group === note.id ? annotationThreads(state.annotations).parts?.get(note.id) : null;
   if(action==='favorite'){
     const id=state.active?.id, key=JSON.stringify([id,note.id]), favorite=!favoriteAnnotationIds.has(note.id);
     if(!id||favoriteAnnotationWrites.has(key))return;
@@ -902,8 +978,16 @@ async function handleNoteAction(event) {
     finally{favoriteAnnotationWrites.delete(key);if(state.active?.id===id)renderAnnotations();}
     return;
   }
-  if (action === 'copy-source') { if (typeof note.text === 'string' && note.text.trim()) await copyText(note.text, { label: '批注原文' }); return; }
-  if (action === 'discuss') { await paperChatUI?.useAnnotation(note); if (state.active?.id) renderAnnotations(); return; }
+  if (action === 'copy-source') {
+    const text = group ? group.map(part => part.text).join('\n\n') : note.text;
+    if (typeof text === 'string' && text.trim()) await copyText(text, { label: '批注原文' });
+    return;
+  }
+  if (action === 'discuss') {
+    if (group) await paperChatUI?.useAnnotations(group); else await paperChatUI?.useAnnotation(note);
+    if (state.active?.id) renderAnnotations();
+    return;
+  }
   if (action === 'reselect') {
     const id = state.active.id;
     if (annotationRangeEdit?.id === id && annotationRangeEdit.annotationId === note.id) {
@@ -946,7 +1030,8 @@ async function handleNoteAction(event) {
     try {
       const result = await api('annotation_translate', { id, annotation_id: note.id, version: note.version, retry: failedTranslations.has(key) });
       failedTranslations.delete(key);
-      (state.expandedAnnotationTranslations ||= new Set()).add(JSON.stringify([id,note.id]));
+      const cardId = annotationThreads(state.annotations).roots?.get(note.id) || note.id;
+      (state.expandedAnnotationTranslations ||= new Set()).add(JSON.stringify([id,cardId]));
       toast(result.duplicate ? '已有译文保存在原批注下。' : '译文已作为 PDF 批注保存。');
       if (state.active?.id === id) { await loadAnnotations(id); await refreshPage(note.page); }
     } catch (error) { failedTranslations.add(key); toast(`翻译未完成：${error.message}`, true); }
@@ -959,11 +1044,21 @@ async function handleNoteAction(event) {
   if (action === 'handwriting-legacy') { await handwritingUI?.open(state.active,note);return; }
   if (action === 'linked-recognize'||action === 'linked-recognize-new') { await linkedHandwritingUI?.recognize(state.active.id,note,{fresh:action==='linked-recognize-new'});return; }
   if (action === 'delete') {
-    if(inkQueue?.hasPending(state.active.id,note.id)){toast('这条批注还有待保存笔迹，请先处理后再删除。',true);return;}
-    if (button.dataset.confirm !== 'true') { button.dataset.confirm = 'true'; button.textContent = '确认删除'; setTimeout(() => { if (button.isConnected) { delete button.dataset.confirm; button.textContent = '删除'; } }, 5000); return; }
-    if(linkedHandwritingUI?.active(state.active.id,note.id)&&!await linkedHandwritingUI.finish())return;
+    const members = group || [note];
+    if(members.some(part=>inkQueue?.hasPending(state.active.id,part.id))){toast('这条批注还有待保存笔迹，请先处理后再删除。',true);return;}
+    if (button.dataset.confirm !== 'true') { button.dataset.confirm = 'true'; button.textContent = group ? '确认删除整组' : '确认删除'; setTimeout(() => { if (button.isConnected) { delete button.dataset.confirm; button.textContent = '删除'; } }, 5000); return; }
+    if(members.some(part=>linkedHandwritingUI?.active(state.active.id,part.id))&&!await linkedHandwritingUI.finish())return;
     const id = state.active.id; button.disabled = true;
-    try { await annotationEditor?.beforeAsk(id,note.id); await api('annotation_delete', { id, annotation_id: note.id }); annotationEditor?.discard(id,note.id); toast('批注已删除'); if (state.active?.id === id) { await loadAnnotations(id); await paperChatUI?.annotationsChanged(id); await refreshPage(note.page); } }
+    try {
+      for (const part of members) await annotationEditor?.beforeAsk(id,part.id);
+      const result = await api('annotation_delete', { id, annotation_id: note.id, ...(group ? {markup_group:note.id} : {}) });
+      for (const part of members) annotationEditor?.discard(id,part.id);
+      toast('批注已删除');
+      if (state.active?.id === id) {
+        await loadAnnotations(id); await paperChatUI?.annotationsChanged(id);
+        await Promise.all((result?.pages || [note.page]).map(refreshPage));
+      }
+    }
     catch (error) { toast(error.message, true); button.disabled = false; }
   }
 }
@@ -1497,9 +1592,15 @@ const headerCitation=el('button','button subtle','复制 APA 7');headerCitation.
 $('previous-page').addEventListener('click', () => advancePage(-1)); $('next-page').addEventListener('click', () => advancePage(1));
 $('page-number').addEventListener('change', () => requestPage($('page-number').value));
 $('word-layer').addEventListener('pointerup', () => setTimeout(readSelection, 0)); $('word-layer').addEventListener('keyup', readSelection);
-$('clear-selection').addEventListener('click', () => {clearSelection();publishReaderState();}); $('annotate-selection').addEventListener('click', () => openAnnotation('highlight'));
+$('clear-selection').addEventListener('click', () => {clearSelection();publishReaderState();});
+$('annotate-selection').addEventListener('click', () => {
+  const selection = state.selection;
+  if (!selection) return;
+  if (!selection.review) { openAnnotation('highlight'); return; }
+  void autoMarkup(selection, selection.intent);
+});
 $('discuss-selection').addEventListener('click', () => {
-  if (state.selection?.segments) return toast('请先保存跨页批注，再在侧栏选取两页的批注一同提问。', true);
+  if (state.selection?.segments) return toast('请先保存跨页批注，再从侧栏选作提问材料。', true);
   paperChatUI?.useSelection(state.selection);
 });
 $('annotation-comment').addEventListener('input', publishReaderState);
@@ -1903,7 +2004,8 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
     }
     if(!selection){showReaderSelection(null);return;}
     if(selection?.id!==state.active?.id)return;
-    showReaderSelection(selection);
+    showReaderSelection(selection,intent);
+    if(selection.review)return;
     if(readingShell?.mode()==='auto'){void autoMarkup(selection,intent);return;}
     if(['highlight','underline','strikeout'].includes(intent.intent))openAnnotation(intent.intent,null,{selection,color:intent.color});
   },

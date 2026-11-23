@@ -302,6 +302,86 @@
     const text = joinSelection(pieces);
     return { page, text, rects, wordCount: pieces.length };
   }
+  function marginLines(words, height) {
+    if (!Number.isFinite(height) || height <= 0) return [];
+    const edge = height * .16;
+    const positions = words.filter(word => Array.isArray(word) && word.length >= 5 &&
+      word.slice(0, 4).every(Number.isFinite) && word[3] > word[1] && typeof word[4] === 'string')
+      .sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+    const rows = [];
+    for (const word of positions) {
+      const last = rows.at(-1);
+      if (last && Math.abs(last.top - word[1]) <= 1) {
+        last.words.push(word);
+        last.bottom = Math.max(last.bottom, word[3]);
+      } else {
+        rows.push({ top: word[1], bottom: word[3], words: [word] });
+      }
+    }
+    const margins = [];
+    let imprint;
+    for (const [index, row] of rows.entries()) {
+      const edgeSide = row.bottom <= edge ? 'top' : row.top >= height - edge ? 'bottom' : null;
+      if (!edgeSide) continue;
+      const content = row.words.sort((a, b) => a[0] - b[0]);
+      const size = row.bottom - row.top;
+      // Separate columns at the same baseline so a copyright or running
+      // header cannot classify a neighbouring block as part of itself.
+      const blocks = [];
+      for (const word of content) {
+        if (!blocks.length || word[0] - blocks.at(-1).at(-1)[2] > Math.max(26, 3 * size)) blocks.push([]);
+        blocks.at(-1).push(word);
+      }
+      const inward = edgeSide === 'top' ? rows[index + 1]?.top - row.bottom : row.top - rows[index - 1]?.bottom;
+      const detached = inward >= Math.max(4, size * .45);
+      const hasPageNumber = blocks.some(words => words.length === 1 && /^\d{1,5}$/.test(words[0][4]));
+      for (const words of blocks) {
+        const text = words.map(word => word[4]).join(' ').trim();
+        const normalized = text.toLowerCase().replace(/\b\d+\b/g, '#').replace(/\s+/g, ' ');
+        const copyright = /^(?:©|\(c\)|copyright\b)\s*(?:the authors?\b|\d{4}\b|.{1,60}\ball rights reserved\b)/i.test(text);
+        const publication = /^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:\s*10\.)|\((?:eds?\.|editors?)\).{0,110}\b(?:pp?\.|lncs|lnai|vol\.)/i.test(text);
+        const left = words[0][0];
+        if (edgeSide === 'bottom' && copyright) imprint = { bottom: row.bottom, left };
+        const inImprint = imprint && row.top - imprint.bottom <= 2 * size && row.top >= imprint.bottom &&
+          Math.abs(left - imprint.left) <= size * 1.5;
+        if (inImprint && publication) imprint = { bottom: row.bottom, left };
+        const strong = edgeSide === 'bottom' && (copyright || Boolean(inImprint && publication)) ||
+          detached && (/^(?:(?:page\s+)?\d{1,5}|page\s+[ivxlcdm]{1,6})$/i.test(text) ||
+            /^\d{1,5}\s+.{2,72}\bet\s+al\.?$|^.{2,72}\bet\s+al\.?(?:\s+\d{1,5})$/i.test(text) ||
+            hasPageNumber && /^(?:[A-Z]\.\s*){1,3}.{2,60}\bet\s+al\.?$/i.test(text));
+        margins.push({ ...row, words, text, signature: edgeSide + ':' + normalized, position: row.top / height, strong,
+          repeatable: detached && text.length >= 4 && text.length <= 120 && !/[.!?。！？]$/.test(text) });
+      }
+    }
+    return margins;
+  }
+  function skippableMargins(margins, neighbours, endpoints) {
+    return margins.filter(line => !line.words.some(word => endpoints.has(word)) &&
+      (line.strong || line.repeatable && neighbours.some(rows => rows.some(other =>
+        other.repeatable && other.signature === line.signature && Math.abs(other.position - line.position) <= .025))));
+  }
+  function combineSelectionParts(parts) {
+    const byPage = new Map();
+    for (const part of parts.flat()) {
+      const existing = byPage.get(part.page);
+      if (!existing) {
+        byPage.set(part.page, { ...part, rects: [...part.rects] });
+        continue;
+      }
+      existing.text += '\n\n' + part.text;
+      existing.rects.push(...part.rects);
+      existing.wordCount += part.wordCount;
+    }
+    const pages = [...byPage.values()].sort((a, b) => a.page - b.page);
+    if (!pages.length) return null;
+    if (pages.at(-1).page - pages[0].page >= MAX_SELECTION_PAGES ||
+      pages.some(part => part.rects.length > 200))
+      throw Error('选段超过单次批注范围，请将选段控制在相邻三页内。');
+    const text = pages.map(part => part.text).join('\n\n');
+    if (text.length > 20000) throw Error('选择范围超过单次批注上限，请缩小选区。');
+    return pages.length === 1 ? pages[0] : { ...pages[0], segments: pages, text,
+      wordCount: pages.reduce((sum, part) => sum + part.wordCount, 0) };
+  }
   const compactText = text => text.replace(/[\s\u00ad]/gu, '');
   function annotationEndpoints(words, { text, rects, type }) {
     const runs = [];
@@ -414,6 +494,8 @@
     const overlays = createInkOverlays(), inputWaiters = new Set(), dirtyPages = new Set(), refreshWaiters = new Map();
     let nativeGesture = null, nativeEndTimer = null, refreshTimer = null, focusSequence = 0, focusState = null, returnPosition = null, focusCancelled = null;
     let rangeEdit = null, rangeDrag = null, rangeEditRequest = 0;
+    let reviewParts = [], collecting = false, includeMargins = false;
+    const marginBySheet = new WeakMap();
     let inkWidth = 2, inkGesture = null, inkFrame = null, inkEnabled = true, markupGesture = null, rectangleGesture = null, touchPan = null, policyRejected = false;
     const touchPoints = new Map();
     let pinch = null, browserPinch = null, zoomFrame = null, pendingZoom = null, touchUsedPinch = false;
@@ -629,11 +711,12 @@
       const node = word.querySelector('.pdf-word-text')?.firstChild;
       return node?.nodeType === 3 ? { node, offset: x <= boxes[point.index].left ? 0 : node.textContent.length } : null;
     }
-    function startMarkup(event, sheet) {
+    function startMarkup(event, sheet, append = false) {
       event.preventDefault();
       if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
-      window.getSelection()?.removeAllRanges(); selection = null; lastSelection = ''; pendingRange = null;
-      markupGesture = { pointerId: event.pointerId, pointerType: event.pointerType, sheet, anchor: textCaret(sheet, event.clientX, event.clientY, true), x: event.clientX, y: event.clientY, dragged: false };
+      const base = append ? selection : null;
+      window.getSelection()?.removeAllRanges(); lastSelection = ''; pendingRange = null;
+      markupGesture = { pointerId: event.pointerId, pointerType: event.pointerType, sheet, anchor: textCaret(sheet, event.clientX, event.clientY, true), x: event.clientX, y: event.clientY, dragged: false, append, base };
       try { root.setPointerCapture(event.pointerId); } catch { /* A missed capture is cancelled on leaving the reader. */ }
     }
     function moveMarkup(event) {
@@ -665,7 +748,7 @@
       const gesture = markupGesture; if (!gesture) return null;
       markupGesture = null;
       try { if (root.hasPointerCapture?.(gesture.pointerId)) root.releasePointerCapture(gesture.pointerId); } catch { /* Already released by the platform. */ }
-      if (cancelled) { pendingRange = null; lastSelection = ''; selection = null; window.getSelection()?.removeAllRanges(); }
+      if (cancelled) { pendingRange = null; lastSelection = ''; window.getSelection()?.removeAllRanges(); }
       inputEnded();
       return gesture;
     }
@@ -720,6 +803,12 @@
       if (pages[clickedPage - 1] && clickedPage !== active && !(event.pointerType === 'touch' && (inkGesture || markupGesture || rectangleGesture || nativeGesture))) { active = clickedPage; announce(); }
       if (event.pointerType === 'touch') { beginTouch(event); return; }
       if (['pen', 'mouse'].includes(event.pointerType) && (touchPoints.size || pendingZoom || browserPinch)) { flushZoom(); resetTouchZoom(); }
+      const append = !rangeEdit && (event.shiftKey || collecting);
+      if (tool === 'select' && append && event.button === 0 && event.isPrimary !== false) {
+        const sheet = event.target.closest?.('.pdr-sheet');
+        if (sheet && root.contains(sheet) && sheet.dataset.loaded === 'true') startMarkup(event, sheet, true);
+        return;
+      }
       if (tool === 'select' && event.button === 0 && event.isPrimary !== false) {
         const sheet = event.target.closest?.('.pdr-sheet'); if (sheet && root.contains(sheet)) nativeGesture = { pointerId: event.pointerId, sheet, x: event.clientX, y: event.clientY, dragged: false };
       }
@@ -737,7 +826,7 @@
         if (!paperId || inkGesture || markupGesture || rectangleGesture) return;
         const sheet = event.target.closest?.('.pdr-sheet'); if (!sheet || !root.contains(sheet) || sheet.dataset.loaded !== 'true') return;
         if (event.isPrimary === false || event.button !== 0) return;
-        startMarkup(event, sheet); acceptedAnnotationInput(); return;
+        startMarkup(event, sheet, append); acceptedAnnotationInput(); return;
       }
       if (tool !== 'ink') return;
       if (!inkEnabled || !paperId || event.pointerType === 'touch' || event.isPrimary === false || event.button !== 0 || inkGesture) { traceInk('input_blocked', { paperId, pointerType: event.pointerType, reason: !inkEnabled ? 'disabled' : inkGesture ? 'stroke_active' : 'pointer_ineligible' }); return; }
@@ -800,6 +889,7 @@
         Object.assign(rangeEdit, { layer: null, spans: null, handles: null, previewLayer: null });
       }
       renderedScales.delete(page); pageAnnotations.delete(page); pageLinks.delete(page);
+      marginBySheet.delete(slot.sheet);
       overlays.forget(paperId, page);
       for (const image of slot.sheet.querySelectorAll('img')) image.removeAttribute('src');
       const note = dom('div', `pdr-placeholder${error ? ' pdr-error' : ''}`); note.append(dom('span', '', message));
@@ -842,6 +932,9 @@
     function renderWords(sheet, words, geometry) {
       const layer = dom('div', 'word-layer pdr-word-layer'); layer.dataset.pdfPage = String(geometry.page); layer.setAttribute('aria-label', `PDF 第 ${geometry.page} 页可选文字`);
       const fragment = document.createDocumentFragment(), factor = layoutWidth / geometry.width;
+      const margins = marginLines(words, geometry.height), spans = new Map();
+      const marginWords = new Set(margins.flatMap(line => line.words));
+      marginBySheet.set(sheet, { margins, spans });
       let previous = null, lineLast = null;
       const mathLines = new Set(words.filter(word => Array.isArray(word) && Number.isFinite(word[1]) && typeof word[4] === 'string' && /[=+×÷∑∏√∫∂≤≥≠∞^_{}]/.test(word[4])).map(word => Math.round(word[1] * 2)));
       const flushTrailing = () => { if (!lineLast) return; const width = Math.max(6, (lineLast.y1 - lineLast.y0) * .6); fragment.append(gapRun(lineLast.x1, lineLast.x1 + width, lineLast.y0, lineLast.y1, geometry, factor)); lineLast = null; };
@@ -850,6 +943,7 @@
         const [x0, y0, x1, y1, text] = word;
         if (x1 <= x0 || y1 <= y0 || x0 < -1 || y0 < -1 || x1 > geometry.width + 1 || y1 > geometry.height + 1) { previous = null; flushTrailing(); continue; }
         const span = dom('span', 'pdf-word pdr-word'); span.dataset.rect = JSON.stringify([x0, y0, x1, y1]); span.dataset.pdfPage = String(geometry.page); span.dataset.height = String(y1 - y0);
+        if (marginWords.has(word)) spans.set(word, span);
         const run = dom('i', 'pdf-word-text', text);
         const prefix = !mathLines.has(Math.round(y0 * 2)) && bionicPrefix(text);
         if (prefix) span.dataset.bionicPrefix = JSON.stringify(prefix);
@@ -976,7 +1070,7 @@
         // raster markup to its rail entry without a second catalogue read.
         pageAnnotations.set(page, (result.annotations || []).filter(annotation => annotation && typeof annotation.id === 'string' && Array.isArray(annotation.rects) && annotation.rects.some(rect => Array.isArray(rect) && rect.length >= 4)));
         const rasterIds = (result.annotations || []).map(annotation => annotation?.id).filter(value => typeof value === 'string'), retired = overlays.forPage(id, page).filter(batch => rasterIds.includes(batch.annotation_id));
-        overlays.confirm(id, page, rasterIds); paintOverlays(page); paintFocus();
+        overlays.confirm(id, page, rasterIds); paintOverlays(page); paintFocus(); paintSelectionDraft(page);
         if (rangeEdit?.page === page) paintRangeEdit();
         traceInk('page_install', { paperId: id, page, count: rasterIds.length });
         for (const batch of retired) traceInk('overlay_retire', { paperId: id, page, annotationId: batch.annotation_id, reason: 'raster_confirmed' });
@@ -1035,7 +1129,7 @@
     function clear() {
       // The draft belongs to its original paper/page, not to the disposable
       // raster window. The caller offers save/discard before leaving the page.
-      endInk(false, 'reader_clear'); endMarkup(true); endRectangle(true); endRangeEdit(); resetTouchZoom(); nativeGesture = null; cancelNavigation(); returnPosition = null; overlays.clearRasters();
+      endInk(false, 'reader_clear'); endMarkup(true); endRectangle(true); endRangeEdit(); clearSelectionDraft(); resetTouchZoom(); nativeGesture = null; cancelNavigation(); returnPosition = null; overlays.clearRasters();
       ++generation; paperId = null; jumpTarget = null; selection = null; lastSelection = ''; queue.reset(null); renderedScales.clear(); rasterCaps.clear(); pageAnnotations.clear(); pageLinks.clear(); pages = []; metrics = []; slots = []; active = 1; layoutWidth = 0; layoutPromise = null; initialPage = null; strip.replaceChildren(); root.scrollTop = 0; root.setAttribute('aria-busy', 'false');
       if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; } if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
       if (resizeTimer !== null) { window.clearTimeout(resizeTimer); resizeTimer = null; }
@@ -1272,13 +1366,62 @@
       paintRangeEdit();
       return true;
     }
-    function captureSelection() {
+    function paintSelectionDraft(onlyPage) {
+      const parts = selection?.review ? selection.segments || [selection] : [];
+      for (const layer of root.querySelectorAll('.pdr-selection-draft')) {
+        if (!onlyPage || Number(layer.dataset.pdfPage) === onlyPage) layer.remove();
+      }
+      for (const part of parts) {
+        const sheet = slots[part.page - 1]?.sheet, geometry = pages[part.page - 1];
+        if (!sheet || sheet.dataset.loaded !== 'true' || onlyPage && onlyPage !== part.page) continue;
+        const layer = dom('div', 'pdr-selection-draft');
+        layer.dataset.pdfPage = part.page;
+        layer.setAttribute('aria-hidden', 'true');
+        for (const [x0, y0, x1, y1] of part.rects) {
+          const rectangle = dom('span');
+          Object.assign(rectangle.style, { left: (x0 / geometry.width * 100) + '%', top: (y0 / geometry.height * 100) + '%',
+            width: ((x1 - x0) / geometry.width * 100) + '%', height: ((y1 - y0) / geometry.height * 100) + '%' });
+          layer.append(rectangle);
+        }
+        sheet.append(layer);
+      }
+    }
+    function clearSelectionDraft() {
+      selection = null;
+      reviewParts = [];
+      collecting = includeMargins = false;
+      pendingRange = null;
+      lastSelection = '';
+      window.getSelection()?.removeAllRanges();
+      paintSelectionDraft();
+    }
+    function showSelectionReview(parts, append, restore) {
+      const result = combineSelectionParts(parts.map(part => restore ? part.raw : part.cleaned));
+      if (!result) { clearSelectionDraft(); onSelection(null); return; }
+      reviewParts = parts;
+      collecting = append;
+      includeMargins = restore;
+      const review = { collecting, includeMargins, parts: parts.map(part => {
+        const pages = restore ? part.raw : part.cleaned;
+        return { page: pages[0].page, text: pages.map(page => page.text).join('\n\n') };
+      }), excluded: parts.flatMap(part => part.excluded) };
+      selection = { id: paperId, ...result, review };
+      pendingRange = null;
+      window.getSelection()?.removeAllRanges();
+      paintSelectionDraft();
+      onSelection(selection, { intent: tool, color });
+    }
+    function editSelectionReview({ remove, restore }) {
+      if (!reviewParts.length) return;
+      try {
+        const parts = Number.isInteger(remove) ? reviewParts.filter((_, index) => index !== remove) : reviewParts;
+        showSelectionReview(parts, collecting, restore ?? includeMargins);
+      } catch (error) { onStatus(error.message, true); }
+    }
+    function captureSelection(gesture) {
       if (rangeEdit || tool === 'note' || tool === 'ink' || tool === 'square' || markupGesture || !paperId) return;
       const live = window.getSelection();
-      // A drag can end over a non-text area (past the last word of a line, a
-      // caption, the page margin): Chrome then resolves the caret to the layer
-      // and collapses the selection. Restore the last real range of this drag so
-      // the reader keeps what it showed while dragging.
+      // In a page margin the browser may collapse the selection at pointerup.
       if (live && (!live.rangeCount || live.isCollapsed) && pendingRange?.startContainer?.isConnected && pendingRange?.endContainer?.isConnected) {
         try { live.removeAllRanges(); live.addRange(pendingRange); } catch { /* keep the collapsed selection */ }
       }
@@ -1286,29 +1429,73 @@
       if (!value?.rangeCount || value.isCollapsed) return;
       const anchor = layerOf(value.anchorNode), focus = layerOf(value.focusNode);
       if (!anchor || !focus || !root.contains(anchor) || !root.contains(focus)) {
-        if (root.contains(value.anchorNode) || root.contains(value.focusNode)) { selection = null; lastSelection = ''; onSelection(null, { intent: tool, color }); onStatus('请选择同一 PDF 页内的文字，再保存批注。', true); }
+        if (root.contains(value.anchorNode) || root.contains(value.focusNode)) onStatus('请从 PDF 正文开始并结束划选。', true);
         return;
       }
       try {
         const selectedPages = pagesBetween(anchor.dataset.pdfPage, focus.dataset.pdfPage);
-        if (!selectedPages) throw Error(`一次最多划选 ${MAX_SELECTION_PAGES} 页，请缩小选区。`);
-        const range = value.getRangeAt(0), segments = [];
+        if (!selectedPages) throw Error('一次最多划选 ' + MAX_SELECTION_PAGES + ' 页，请缩小选区。');
+        const range = value.getRangeAt(0), raw = [], cleaned = [], excluded = [];
+        const endpointSpans = [value.anchorNode, value.focusNode].map(node =>
+          (node.nodeType === 3 ? node.parentElement : node).closest('.pdr-word'));
+        // Consult only the already rendered neighbours, and keep any line
+        // the user explicitly used as an endpoint.
+        const neighbours = new Map(queue.snapshot().residents.map(page =>
+          [page, marginBySheet.get(slots[page - 1]?.sheet)?.margins || []]));
         for (const page of selectedPages) {
           const sheet = slots[page - 1]?.sheet, layer = sheet?.querySelector('.pdr-word-layer');
           if (sheet?.dataset.loaded !== 'true' || !layer) throw Error('选区中的页面仍在载入，请等正文显示后再划选。');
           const part = readRange(range, sheet, layer.children, page);
-          if (part) segments.push(part);
+          if (!part) continue;
+          raw.push(part);
+          const margin = marginBySheet.get(sheet);
+          if (!margin || selectedPages.length === 1) { cleaned.push(part); continue; }
+          const endpoints = new Set([...margin.spans].filter(([, span]) => endpointSpans.includes(span)).map(([word]) => word));
+          const lines = skippableMargins(margin.margins, [...neighbours].filter(([number]) =>
+            number !== page && Math.abs(number - page) <= 2).map(([, rows]) => rows), endpoints);
+          const skipped = new Set();
+          for (const line of lines) {
+            const spans = line.words.map(word => margin.spans.get(word)).filter(span => span && range.intersectsNode(span));
+            if (!spans.length) continue;
+            spans.forEach(span => skipped.add(span));
+            excluded.push({ page, text: line.text });
+          }
+          const filtered = skipped.size ? readRange(range, sheet,
+            [...layer.children].filter(span => span.classList.contains('pdr-word') && !skipped.has(span)), page) : part;
+          if (filtered) cleaned.push(filtered);
         }
-        if (!segments.length) return;
-        const result = segments.length === 1 ? segments[0] : {
-          ...segments[0], segments,
-          text: segments.map(part => part.text).join('\n\n'),
-          wordCount: segments.reduce((sum, part) => sum + part.wordCount, 0)
-        };
-        if (result.text.length > 20000) throw Error('选择范围超过单次批注上限，请缩小到较短的段落。');
-        const digest = JSON.stringify(segments); if (digest === lastSelection) return;
-        lastSelection = digest; selection = { id: paperId, ...result }; onSelection(selection, { intent: tool, color });
-      } catch (error) { selection = null; lastSelection = ''; onSelection(null, { intent: tool, color }); onStatus(error.message, true); }
+        if (!raw.length) return;
+        if (!cleaned.length) { cleaned.push(...raw); excluded.length = 0; }
+        const digest = JSON.stringify(raw); if (digest === lastSelection) return;
+        if (gesture?.append || excluded.length) {
+          const previous = gesture?.append ? [...reviewParts] : [];
+          if (gesture?.append && !previous.length && gesture.base) {
+            const base = (gesture.base.segments || [gesture.base]).map(({ page, text, rects, wordCount }) =>
+              ({ page, text, rects, wordCount }));
+            previous.push({ raw: base, cleaned: base, excluded: [] });
+          }
+          if (!previous.some(part => JSON.stringify(part.raw) === digest)) previous.push({ raw, cleaned, excluded });
+          showSelectionReview(previous, Boolean(gesture?.append), Boolean(gesture?.append && includeMargins));
+          return;
+        }
+        const result = combineSelectionParts([raw]);
+        reviewParts = [];
+        collecting = includeMargins = false;
+        lastSelection = digest;
+        selection = { id: paperId, ...result };
+        paintSelectionDraft();
+        onSelection(selection, { intent: tool, color });
+      } catch (error) {
+        if (reviewParts.length) {
+          pendingRange = null;
+          window.getSelection()?.removeAllRanges();
+        } else {
+          selection = null;
+          lastSelection = '';
+          onSelection(null, { intent: tool, color });
+        }
+        onStatus(error.message, true);
+      }
     }
     /** Annotation hit-testing uses the same display-space rectangles as the word
      * layer, so a click that did not select text can link raster markup to its
@@ -1422,7 +1609,7 @@
         const gesture = markupGesture; if (!gesture) return;
         endMarkup(Boolean(gesture.invalid));
         if (gesture.invalid) { onStatus(gesture.invalid, true); return; }
-        if (gesture.dragged) captureSelection();
+        if (gesture.dragged) captureSelection(gesture);
         else if (!activateInternalLink(gesture.sheet, event)) activateAnnotation(gesture.sheet, event);
         return;
       }
@@ -1481,7 +1668,10 @@
       const options = typeof nextColor === 'object' && nextColor !== null ? nextColor : { color: nextColor };
       if (options.color !== undefined && !/^#[0-9a-f]{6}$/i.test(options.color)) throw new Error('Annotation color must be #RRGGBB');
       if (options.width !== undefined && (!Number.isFinite(options.width) || options.width < .5 || options.width > 8)) throw new Error('手写笔宽必须在 0.5–8 之间');
-      if (value !== tool) { endInk(false, 'tool_change'); endMarkup(true); endRectangle(true); resetTouchZoom(); nativeGesture = null; inputEnded(); }
+      if (value !== tool) {
+        endInk(false, 'tool_change'); endMarkup(true); endRectangle(true); resetTouchZoom(); nativeGesture = null; inputEnded();
+        if (reviewParts.length) { clearSelectionDraft(); onSelection(null); }
+      }
       tool = value;
       if (options.color !== undefined) color = options.color;
       if (options.width !== undefined) inkWidth = options.width;
@@ -1574,7 +1764,7 @@
     root.addEventListener('gesturestart', gestureStart, { passive: false }); root.addEventListener('gesturechange', gestureChange, { passive: false }); root.addEventListener('gestureend', gestureEnd, { passive: false });
     document.addEventListener('selectionchange', selectionChanged); document.addEventListener('pointerup', nativePointerEnded); document.addEventListener('pointercancel', nativePointerEnded);
     function dispose() { clear(); disposed = true; ink.clear(); overlays.clear(); queue.dispose(); resizeObserver.disconnect(); root.removeEventListener('pointerdown', pointerDown); root.removeEventListener('pointermove', pointerMove); root.removeEventListener('pointercancel', pointerCancel); root.removeEventListener('lostpointercapture', pointerCancel); root.removeEventListener('pointerleave', pointerLeave); root.removeEventListener('scroll', scroll); root.removeEventListener('pointerup', pointerUp); root.removeEventListener('keyup', captureSelection); root.removeEventListener('click', click); root.removeEventListener('wheel', wheel); root.removeEventListener('gesturestart', gestureStart); root.removeEventListener('gesturechange', gestureChange); root.removeEventListener('gestureend', gestureEnd); root.removeEventListener('keydown', userNavigate); document.removeEventListener('selectionchange', selectionChanged); document.removeEventListener('pointerup', nativePointerEnded); document.removeEventListener('pointercancel', nativePointerEnded); }
-    return { open, goTo, advance, refresh, clear, dispose, setTool, setZoom, fitToWidth, fitPage, getZoom: () => zoom, setLayout, getLayout: () => layout, setReadingAppearance, getReadingAppearance: () => ({ ...readingAppearance }), resize, revealAnnotation, revealRegion, startRangeEdit, endRangeEdit, lockRangeEdit, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, layout, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
+    return { open, goTo, advance, refresh, clear, dispose, setTool, setZoom, fitToWidth, fitPage, getZoom: () => zoom, setLayout, getLayout: () => layout, setReadingAppearance, getReadingAppearance: () => ({ ...readingAppearance }), resize, revealAnnotation, revealRegion, startRangeEdit, endRangeEdit, lockRangeEdit, editSelectionReview, clearSelectionDraft, returnToReadingPosition, getReadingReturnPosition: () => returnPosition ? { ...returnPosition } : null, setInkOverlays, getInkOverlays: () => overlays.snapshot(), getInkDraft: () => ink.snapshot(), undoInk, clearInk, restoreInkDraft, setInkContext, getInkContext: () => ink.getContext(), setInkEnabled, setPenOnly, getInputInfo: () => input.info(), isInking: () => ink.isDrawing(), getSnapshot: () => ({ paperId, page: active, pageCount: pages.length, zoom, layout, selection: selection ? { ...selection, rects: selection.rects.map(rect => [...rect]) } : null, residentPages: queue.snapshot().residents, inFlightPage: queue.snapshot().inFlight?.page || null }) };
   }
-  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, annotationEndpoints, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition, normalizeInternalLinks, internalLinkAt, bionicPrefix });
+  window.PaperPDFReader = Object.freeze({ create, createPageWindow, validateLayout, pageMetrics, pageAt, visibleWindow, mergeSelection, clipWords, joinSelection, marginLines, skippableMargins, combineSelectionParts, annotationEndpoints, hexTint, annotationTint, inkPoint, createInkBuffer, createInputPolicy, createInkTrace, createInkOverlays, regionRects, minimumScroll, nearestTextPosition, normalizeInternalLinks, internalLinkAt, bionicPrefix });
 })();

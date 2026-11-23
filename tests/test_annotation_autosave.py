@@ -82,12 +82,15 @@ def test_cross_page_underline_saves_native_parts_atomically_and_replays_once(tmp
     assert created["annotation"] == created["annotations"][0]
     assert [(note["page"], note["text"]) for note in created["annotations"]] == [(s["page"], s["text"]) for s in segments]
     assert [note["comment"] for note in created["annotations"]] == [body["comment"], ""]
+    assert {note["markup_group"] for note in created["annotations"]} == {body["annotation_id"]}
     with fitz.open(managed) as doc:
         for i, note in enumerate(created["annotations"]):
             page = doc[i]
             native = [item for item in page.annots() if item.type[1] == "Underline"]
             assert len(native) == 1 and native[0].info["id"] == note["id"]
             assert native[0].vertices
+            metadata = json.loads(native[0].info["subject"].removeprefix("paper-library:"))
+            assert metadata["markup_group"] == body["annotation_id"]
     assert original.read_bytes() == original_bytes
     written = managed.read_bytes()
     assert len(list((tmp_path / "library" / "backups").glob("*.bak"))) == 1
@@ -95,6 +98,18 @@ def test_cross_page_underline_saves_native_parts_atomically_and_replays_once(tmp
     with pytest.raises(ValueError, match="different content"):
         request(tmp_path, "annotate", **{**body, "segments": [segments[0], {**segments[1], "text": "Different second page"}]})
     assert managed.read_bytes() == written
+    read_back = request(tmp_path, "annotations", id=paper)["annotations"]
+    assert [note["id"] for note in read_back if note.get("markup_group") == body["annotation_id"]] == [
+        note["id"] for note in created["annotations"]
+    ]
+    with pytest.raises(ValueError, match="分组已变更"):
+        request(tmp_path, "annotation_delete", id=paper, annotation_id=body["annotation_id"], markup_group="another")
+    assert managed.read_bytes() == written
+    deleted = request(tmp_path, "annotation_delete", id=paper, annotation_id=body["annotation_id"], markup_group=body["annotation_id"])
+    assert deleted["pages"] == [1, 2]
+    remaining = request(tmp_path, "annotations", id=paper)["annotations"]
+    assert [note["comment"] for note in remaining] == ["External annotation stays intact"]
+    assert original.read_bytes() == original_bytes
 
 
 @pytest.mark.parametrize("change", [
