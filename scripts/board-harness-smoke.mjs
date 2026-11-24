@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto'
 import { access, mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createContext, runInContext } from 'node:vm'
 import { core } from '../src/bridge.mjs'
 
 const project = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -97,6 +98,24 @@ try {
   assert.equal((await fetch(`${origin}/api/paper-library/api`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'board_list' }) })).status, 401)
   checks.push('unauthenticated-whiteboard-access-refused')
 
+  // Test what the mounted plugin actually serves, including the built browser artifact.
+  const boardPage = await fetch(`${origin}/api/paper-library/?view=board`, { headers })
+  assert.equal(boardPage.status, 200)
+  const html = await boardPage.text()
+  assert.match(html, /id="board-markdown-input"/)
+  const context = createContext({ window: {} })
+  for (const asset of ['paper-markdown.js', 'board-source.js']) {
+    assert.ok(html.includes(`./${asset}`))
+    const response = await fetch(`${origin}/api/paper-library/${asset}`, { headers })
+    assert.equal(response.status, 200, `Build the plugin before running the whiteboard smoke test (${asset}).`)
+    runInContext(await response.text(), context, { filename: asset })
+  }
+  const markdown = '# 主题\n\n- 分支\n  - 子项\n'
+  const diagram = context.window.PaperBoardSource.fromMarkdown(markdown)
+  assert.equal(diagram.nodes.map(node => node.text).join('|'), '主题|分支|子项')
+  assert.equal(diagram.edges.length, 2)
+  checks.push('served-board-assets-parse-markdown-into-a-mind-map')
+
   // 1. The authenticated board surface works inside a real host.
   const created = await api({
     action: 'board_create',
@@ -124,9 +143,13 @@ try {
   checks.push('native-board-records-and-immutable-snapshot-round-trip')
 
   // A save from a real host run is revision-checked like every other plugin record.
-  const saved = await api({ action: 'board_save', id: boardId, board: { ...read.board, title: '原生画板 v2' }, expected_revision: read.revision })
+  const saved = await api({ action: 'board_save', id: boardId, board: { ...read.board, title: '原生画板 v2', markdown }, expected_revision: read.revision })
   assert.equal(saved.board.title, '原生画板 v2')
-  assert.equal((await api({ action: 'board_get', id: boardId })).revision, saved.revision)
+  const readBack = await api({ action: 'board_get', id: boardId })
+  assert.equal(readBack.revision, saved.revision)
+  assert.equal(readBack.board.markdown, markdown)
+  assert.deepEqual(readBack.board.nodes, read.board.nodes)
+  checks.push('native-board-saves-and-reopens-markdown-with-existing-nodes')
   const stale = await fetch(`${origin}/api/paper-library/api`, { method: 'POST', headers, body: JSON.stringify({ action: 'board_save', id: boardId, board: read.board, expected_revision: read.revision }) })
   assert.equal(stale.status, 409)
   checks.push('native-board-writes-are-revision-checked')

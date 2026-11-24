@@ -14,6 +14,8 @@
 
 ## 2. 当前任务与实际状态
 
+2026-11-24：3080 的画板已载入 Markdown 界面，但生成的解析器与运行中的画板后端仍是旧版。重建 `paper-markdown.js` 后单独热重载 Paper Library，返回 `applied`、无警告。用 3080 返回的脚本生成三节点导图，并在合成测试画板保存、回读文稿及核对原节点，验证后移除测试画板。已打开的画板待刷新。
+
 2026-11-23：画板工具栏新增 Markdown 写作和上下分栏。标题、嵌套列表和段落可即时预览为导图，点「加入画布」后成为可编辑节点与连线，现有画布内容保留。文稿随画板自动保存，并包含在 JSON 源文件中。[使用说明](README.md#文献画板)
 
 2026-11-23：连续跨页选文按已载入页面的文字位置及重复内容跳过高置信页边行，保存前可查看与恢复。Shift 可收集同页或相邻三页内的多段文字，预览可逐段移除；跨页批注按页保存为原生 PDF 对象，分组关系随 PDF 保存，侧栏共用备注并可分页面定位与编辑。定向验收覆盖选文几何、分组读回与整组删除；未操作 3080 或实读文献。参见 [阅读与批注](README.md#文献库阅读与批注)。
@@ -341,6 +343,7 @@ Slides 工作台已同步 PlainDeck 0.11.0（上游 `e24105a`）：新增图层�
 
 - 本机 DSH 源码位于此仓库同级组织以外的 `deepseek-ai/deepseek-harness` 仓库；优先读取其当前运维说明和 plugin-manager 实现，接口可能变化。
 - 本轮 web profile 的包是源码 symlink，Python worker 按需启动；静态文件按请求读取；已加载的宿主 JavaScript 需要热重载，已打开的浏览器还可能保留旧脚本。
+- `src/client/` 有改动时，热重载前先构建配套的 `lib/` 资源。画板 Markdown 验收应使用实际服务返回的解析器生成导图，并走一次 `board_save`／`board_get` 确认文稿能回读。
 - 宿主身份及一次性入口由明确的 `$DSH_HOME/web-url` 读取，仅在进程内部交换 cookie。**不要打印 URL token、cookie、模型凭据或整份宿主配置。**
 - 已验证 RPC：`pluginManager/listPlugins`、`session/list`、`pluginManager/setPluginEnabled`。只操作 `include:paper-library`，保持 `enabled=true`；不先禁用，不重启全宿主。
 - RPC 请求为 `POST /api/<method>`，JSON 包含 `type: client-request`、唯一 `rpcId`、`method`、`payload.args`；会话查询用 `{_request:{}}`。重载调用参数 `{id:"include:paper-library",enabled:true}`。
