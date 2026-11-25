@@ -1126,7 +1126,7 @@
     function clear() {
       // The draft belongs to its original paper/page, not to the disposable
       // raster window. The caller offers save/discard before leaving the page.
-      endInk(false, 'reader_clear'); endMarkup(true); endRectangle(true); endRangeEdit(); clearSelectionDraft(); resetTouchZoom(); nativeGesture = null; cancelNavigation(); returnPosition = null; overlays.clearRasters();
+      endInk(false, 'reader_clear'); endMarkup(true); endRectangle(true); endRangeEdit(); clearSelectionDraft(); resetTouchZoom(); nativeGesture = null; returnPosition = null; cancelNavigation(); overlays.clearRasters();
       ++generation; paperId = null; jumpTarget = null; selection = null; lastSelection = ''; queue.reset(null); renderedScales.clear(); rasterCaps.clear(); pageAnnotations.clear(); pageLinks.clear(); pages = []; metrics = []; slots = []; active = 1; layoutWidth = 0; layoutPromise = null; initialPage = null; strip.replaceChildren(); root.scrollTop = 0; root.setAttribute('aria-busy', 'false');
       if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; } if (selectionTimer !== null) { window.clearTimeout(selectionTimer); selectionTimer = null; }
       if (resizeTimer !== null) { window.clearTimeout(resizeTimer); resizeTimer = null; }
@@ -1504,7 +1504,7 @@
       }
       return null;
     }
-    function emitFocus() { onFocusChange({ active: !!focusState && !focusState.loading, pending: !!focusState?.loading, focusId: focusState?.focusId || null, kind: focusState?.kind || null, canReturn: !!returnPosition }); }
+    function emitFocus() { onFocusChange({ active: !!focusState && !focusState.loading, pending: !!focusState?.loading, focusId: focusState?.focusId || null, kind: focusState?.kind || null, canReturn: !!returnPosition, returnPage: returnPosition?.page }); }
     function clearFocus() {
       for (const node of root.querySelectorAll('.pdr-annotation-flash')) node.remove();
       if (flashTimer !== null) { window.clearTimeout(flashTimer); flashTimer = null; }
@@ -1536,9 +1536,22 @@
       focusState = { page, rects: clipped, kind: annotation?.type === 'ink' ? 'ink' : 'quote', focusId: annotation?.id || '', tint: annotationTint(annotation, 1), loading: false, expires: Date.now() + 1800 };
       paintFocus(); emitFocus(); flashTimer = window.setTimeout(() => { if (sequence === focusSequence) { focusState = null; clearFocus(); emitFocus(); } }, 1800);
     }
+    function viewportAnchor() {
+      if (!root.clientWidth || !root.clientHeight) return null;
+      const viewport = root.getBoundingClientRect();
+      return {
+        x: viewport.left + (root.clientLeft || 0) + root.clientWidth * .5,
+        y: viewport.top + (root.clientTop || 0) + root.clientHeight * .35,
+      };
+    }
     function readingPosition() {
-      const row = pageAt(metrics, root.scrollTop), page = layout === 'spread' && metrics[active - 1]?.rowStart === row ? active : row, metric = metrics[page - 1];
-      return metric ? { paperId, page, fraction: (root.scrollTop - metric.top) / metric.height, horizontal: root.scrollLeft / layoutWidth, zoom, layout, scrollTop: root.scrollTop, scrollLeft: root.scrollLeft, viewportWidth: root.clientWidth, viewportHeight: root.clientHeight } : null;
+      const anchor = viewportAnchor();
+      if (!anchor) return null;
+      const row = pageAt(metrics, root.scrollTop + root.clientHeight * .35);
+      const page = layout === 'spread' && metrics[active - 1]?.rowStart === row ? active : row;
+      const sheet = slots[page - 1]?.sheet.getBoundingClientRect();
+      if (!sheet?.width || !sheet.height) return null;
+      return { paperId, page, x: (anchor.x - sheet.left) / sheet.width, y: (anchor.y - sheet.top) / sheet.height, zoom, layout };
     }
     function scrollRegionIntoView(page, rects) {
       const geometry = pages[page - 1], sheet = slots[page - 1].sheet.getBoundingClientRect(), viewport = root.getBoundingClientRect();
@@ -1554,7 +1567,6 @@
       if (!annotationId && !regionRects(value.rects, pages[page - 1]).length) return false;
       cancelNavigation(); const sequence = focusSequence, valid = () => current(id, ticket) && sequence === focusSequence;
       const cancelled = new Promise(resolve => { focusCancelled = () => resolve(false); });
-      if (!returnPosition) returnPosition = readingPosition();
       focusState = { page, kind: value.kind === 'ink' ? 'ink' : 'quote', focusId: typeof value.focusId === 'string' ? value.focusId.slice(0, 256) : annotationId || '', loading: true }; emitFocus();
       try {
         if (!await waitForInput(null, valid)) return false;
@@ -1570,7 +1582,11 @@
         const annotation = annotationId ? (pageAnnotations.get(page) || []).find(item => item.id === annotationId) : null;
         const geometry = pages[page - 1], rects = regionRects(annotationId ? annotation?.rects : value.rects, geometry, value.kind === 'ink' ? 3 : 1);
         if (!rects.length) return false;
+        const from = readingPosition();
+        if (!from) return false;
+        const { scrollTop, scrollLeft } = root;
         scrollRegionIntoView(page, rects);
+        if (root.scrollTop !== scrollTop || root.scrollLeft !== scrollLeft) returnPosition = from;
         active = page; announce();
         focusState = { ...focusState, rects, tint: annotationTint(annotation, 1), loading: false, expires: Date.now() + 1800 }; paintFocus(); emitFocus();
         flashTimer = window.setTimeout(() => { flashTimer = null; if (valid()) { focusState = null; clearFocus(); emitFocus(); } }, 1800);
@@ -1586,14 +1602,30 @@
       return typeof id === 'string' ? focusRegion({ paperId, page: target, kind: 'quote', focusId: id }, id) : Promise.resolve(false);
     }
     async function returnToReadingPosition() {
-      const position = returnPosition; if (!position || position.paperId !== paperId) return false;
+      const position = returnPosition;
+      if (!position || position.paperId !== paperId || !viewportAnchor()) return false;
       cancelNavigation(); const sequence = focusSequence, id = paperId, ticket = generation, valid = () => current(id, ticket) && focusSequence === sequence;
-      if (!await waitForInput(null, valid)) return false;
+      if (!await waitForInput(null, valid) || !valid() || !viewportAnchor()) return false;
       if (position.layout && position.layout !== layout) { layout = position.layout; arrangeSlots(); layoutWidth = 0; }
-      zoom = position.zoom; resize(); const metric = metrics[position.page - 1]; if (!metric || !valid()) return false;
-      active = position.page; root.scrollTop = metric.top + position.fraction * metric.height; root.scrollLeft = position.horizontal * layoutWidth;
-      if (position.viewportWidth === root.clientWidth && position.viewportHeight === root.clientHeight) { root.scrollTop = position.scrollTop; root.scrollLeft = position.scrollLeft; }
-      returnPosition = null; emitFocus(); updateWindow(position.page); announce(); onZoomChange(zoom); return true;
+      zoom = position.zoom;
+      resize();
+      const anchor = viewportAnchor(), page = position.page, sheet = slots[page - 1]?.sheet.getBoundingClientRect();
+      if (!anchor || !sheet?.width || !sheet.height) return false;
+      jumpTarget = active = page;
+      root.scrollTop += sheet.top + position.y * sheet.height - anchor.y;
+      root.scrollLeft += sheet.left + position.x * sheet.width - anchor.x;
+      announce();
+      onZoomChange(zoom);
+      const cancelled = new Promise(resolve => { focusCancelled = () => resolve(false); });
+      try {
+        updateWindow(page);
+        if (!await Promise.race([queue.ready(page), cancelled]) || !valid()) return false;
+        returnPosition = null;
+        emitFocus();
+        return true;
+      } finally {
+        if (valid()) { focusCancelled = null; jumpTarget = null; updateWindow(); }
+      }
     }
     function pointerUp(event) {
       if (event.button > 0 || (event.pointerType === 'mouse' && event.ctrlKey)) return;

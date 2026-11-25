@@ -673,14 +673,17 @@ test('reference destination navigation restores exact original page, both scroll
   const root = { scrollTop: 210, scrollLeft: 300, clientWidth: 900, clientHeight: 500, getBoundingClientRect: () => ({ left: 0, top: 0 }) };
   const scope = vm.createContext({ paperId: 'synthetic-reference', pages, root, layout: 'spread', zoom: 1.84, layoutWidth: 600, metrics: pageMetrics(pages, 600, 'spread'), active: 2,
     returnPosition: null, generation: 1, focusSequence: 0, focusCancelled: null, focusState: null, disposed: false, jumpTarget: null, flashTimer: null, pageAt, regionRects, minimumScroll,
-    current: () => true, waitForInput: async () => true, cancelNavigation: () => { scope.focusSequence++; }, emitFocus() {}, paintFocus() {}, clearFocus() {}, onActivePage: page => announcedPages.push(page),
+    current: () => true, waitForInput: async () => true, cancelNavigation: () => { scope.focusCancelled?.(); scope.jumpTarget = null; scope.focusSequence++; }, emitFocus() {}, paintFocus() {}, clearFocus() {}, onActivePage: page => announcedPages.push(page),
     window: { setTimeout: () => 1 }, dirtyPages: new Set(), refreshWaiters: new Map(), pageAnnotations: new Map(),
     queue: { want() {}, ready: async () => true, snapshot: () => ({ residents: [1, 2, 3, 4] }) }, wantedPages: page => [page], annotationTint: () => '#333333', updateWindow() {}, onZoomChange() {}, arrangeSlots() {},
-    resize: () => { scope.layoutWidth = 600; scope.metrics = pageMetrics(pages, 600, scope.layout); } });
-  scope.slots = pages.map((page, i) => ({ sheet: { dataset: { loaded: 'true' }, getBoundingClientRect: () => ({ left: -root.scrollLeft, top: scope.metrics[i].top - root.scrollTop, width: 600, height: 800 }) } }));
+    resize: () => { scope.layoutWidth = root.clientWidth * 2 / 3; scope.metrics = pageMetrics(pages, scope.layoutWidth, scope.layout); } });
+  scope.slots = pages.map((page, i) => ({ sheet: { dataset: { loaded: 'true' }, getBoundingClientRect: () => ({
+    left: (scope.layout === 'spread' && i % 2 ? scope.layoutWidth + 16 : 0) - root.scrollLeft,
+    top: scope.metrics[i].top + 24 - root.scrollTop, width: scope.layoutWidth, height: scope.layoutWidth * page.height / page.width,
+  }) } }));
   const announceStart = readerSource.indexOf('    function announce('), announceEnd = readerSource.indexOf('    function placeholder(', announceStart);
   vm.runInContext(readerSource.slice(announceStart, announceEnd), scope);
-  const start = readerSource.indexOf('    function readingPosition('), end = readerSource.indexOf('    function pointerUp(', start); vm.runInContext(readerSource.slice(start, end), scope);
+  const start = readerSource.indexOf('    function viewportAnchor('), end = readerSource.indexOf('    function pointerUp(', start); vm.runInContext(readerSource.slice(start, end), scope);
   assert.equal(await scope.revealRegion({ paperId: scope.paperId, page: 4, rects: [[80, 500, 200, 520]] }), true);
   assert.equal(scope.active, 4); assert.equal(scope.returnPosition.page, 2); assert.ok(root.scrollTop > 210);
   scope.layout = 'single'; scope.zoom = 1; root.scrollLeft = 0;
@@ -688,6 +691,38 @@ test('reference destination navigation restores exact original page, both scroll
   assert.equal(scope.active, 2); assert.equal(scope.layout, 'spread'); assert.equal(scope.zoom, 1.84);
   assert.equal(root.scrollTop, 210); assert.equal(root.scrollLeft, 300); assert.equal(scope.returnPosition, null);
   assert.deepEqual(announcedPages, [4, 2], 'Toolbar receives the restored page even when updateWindow sees active unchanged');
+
+  const reference = { paperId: scope.paperId, page: 4, rects: [[80, 500, 200, 520]] };
+  await scope.revealRegion(reference);
+  root.scrollTop = scope.metrics[2].top - 50;
+  const destination = { paperId: scope.paperId, page: 1, rects: [[80, 80, 200, 100]] };
+  await scope.revealRegion(destination);
+  const saved = scope.returnPosition;
+  assert.equal(saved.page, 4, 'A sliver of the preceding spread leaves the current spread active');
+  await scope.revealRegion(destination);
+  assert.equal(scope.returnPosition, saved, 'In-view focus does not replace the return position');
+  assert.equal(await scope.revealAnnotation('missing', { page: 2 }), false);
+  assert.equal(scope.returnPosition, saved);
+
+  root.clientWidth = 0;
+  assert.equal(await scope.returnToReadingPosition(), false);
+  assert.equal(scope.returnPosition, saved, 'A hidden pane preserves the return position');
+  root.clientWidth = 720; root.clientHeight = 400;
+  let ready;
+  scope.queue.ready = page => {
+    assert.equal(page, 4);
+    return new Promise(resolve => { ready = resolve; });
+  };
+  const returning = scope.returnToReadingPosition();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(scope.returnPosition, saved, 'Wait for the restored page before consuming the return position');
+  ready(true);
+  assert.equal(await returning, true);
+  const restored = scope.readingPosition();
+  assert.equal(restored.page, 4);
+  assert.ok(Math.abs(restored.x - saved.x) < 1e-9);
+  assert.ok(Math.abs(restored.y - saved.y) < 1e-9);
+  assert.equal(scope.returnPosition, null);
 });
 
 test('full width remeasures the pane, fills wide single/spread layouts and clears horizontal panning', () => {

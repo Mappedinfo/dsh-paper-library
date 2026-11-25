@@ -44,13 +44,34 @@ test('failed handwriting preparation never navigates to a slide project', async 
 });
 test('finishing or cancelling a jump clears only its own loading status',async()=>{
   const shell=await readFile(new URL('../web/reading-shell.js',import.meta.url),'utf8');
-  const body=shell.match(/function focusChanged\(info\)\{[^\n]+\}/)[0];let value='';
+  const body=shell.slice(shell.indexOf('function focusChanged(info)'),shell.indexOf('const beforeUnload'));let value='';
   const context={backPosition:{hidden:true},status:(text,error,options)=>{if(options?.clearIf&&value!==options.clearIf)return;value=text;}};
   vm.createContext(context);vm.runInContext(body,context);
-  context.focusChanged({pending:true,canReturn:true});assert.equal(value,'正在定位…');assert.equal(context.backPosition.hidden,false);
+  context.focusChanged({pending:true,canReturn:true,returnPage:4});assert.equal(value,'正在定位…');assert.equal(context.backPosition.hidden,false);assert.match(context.backPosition.title,/第 4 页/);
   context.focusChanged({pending:false,canReturn:true});assert.equal(value,'');
   value='保存未确认';context.focusChanged({pending:false,canReturn:false});assert.equal(value,'保存未确认');assert.equal(context.backPosition.hidden,true);
 });
+
+test('return to reading reveals the current PDF through the board save guard', async () => {
+  const calls = [], paper = { id: 'synthetic-paper' };
+  let boardOpen = true, canClose = false;
+  const context = vm.createContext({
+    state: { active: paper }, pdfReader: { getSnapshot: () => ({ paperId: paper.id }) },
+    readerSurfaceActive: () => !boardOpen,
+    closeWorkspaceSurfaces: async () => { calls.push('close'); if (canClose) boardOpen = false; return canClose; },
+    workbenchUI: { setTable: value => calls.push(['table', value]) },
+    switchTab: async tab => calls.push(['tab', tab]), publishPaperWorkspace: item => calls.push(['paper', item.id]),
+  });
+  vm.runInContext(snippet('showReadingReturn', 'async function openWorkspaceRoot('), context);
+  assert.equal(await context.showReadingReturn({ paperId: paper.id }), false);
+  assert.deepEqual(calls, ['close']);
+  calls.length = 0; canClose = true;
+  assert.equal(await context.showReadingReturn({ paperId: 'other-paper' }), false);
+  assert.deepEqual(calls, []);
+  assert.equal(await context.showReadingReturn({ paperId: paper.id }), true);
+  assert.deepEqual(calls, ['close', ['table', false], ['tab', 'reader'], ['paper', paper.id]]);
+});
+
 async function handwritingBarFixture(){
   const shell=await readFile(new URL('../web/reading-shell.js',import.meta.url),'utf8'),classes=new Set(),node=()=>({hidden:false,disabled:false,textContent:'',classList:{toggle(){}}});
   let draft=null,inkContext=null,saveCalls=0;

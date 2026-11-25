@@ -2024,7 +2024,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
   onFocusChange: info => readingShell?.focusChanged(info),
   onStatus: (message,error,options) => readingShell?.status(message,error,options),
 });
-readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,locateAnnotations:locateCurrentPageAnnotations,onAnnotationOrderChange:setAnnotationOrder,contextChanged:()=>{readerSearchUI?.sync();resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
+readingShell = window.PaperReadingShell?.create({state,workbench:()=>workbenchUI,panels:()=>readingPanels,reader:()=>pdfReader,navigate:switchTab,toast,persistence,diagnostics:inkDiagnostics,saveInk:saveInkDraft,returnToInk:returnToInkDraft,beforeToolChange:()=>linkedHandwritingUI?.finish()??true,locateAnnotations:locateCurrentPageAnnotations,onAnnotationOrderChange:setAnnotationOrder,showReadingReturn,contextChanged:()=>{readerSearchUI?.sync();resourceUI?.sync();analysisUI?.sync();companionUI?.sync();}});
 const rangeEditBar=el('div','annotation-range-edit');rangeEditBar.hidden=true;
 rangeEditBar.dataset.notificationAvoid = 'bottom';
 rangeEditBar.setAttribute('role', 'group');
@@ -2800,6 +2800,17 @@ async function closeWorkspaceSurfaces() {
   if (latexUI?.isOpen()) { await latexUI.close(); if (latexUI.isOpen()) return false; }
   if (document.fullscreenElement) await document.exitFullscreen();
   resourceUI?.hide(); knowledgeUI?.hide();
+  return true;
+}
+async function showReadingReturn({paperId}) {
+  const sameReader = () => state.active?.id === paperId && pdfReader?.getSnapshot().paperId === paperId;
+  if (!sameReader()) return false;
+  if (!readerSurfaceActive() && !await closeWorkspaceSurfaces()) return false;
+  if (!sameReader() || !readerSurfaceActive()) return false;
+  workbenchUI?.setTable(false);
+  await switchTab('reader');
+  if (!sameReader() || !readerSurfaceActive()) return false;
+  publishPaperWorkspace(state.active);
   return true;
 }
 async function openWorkspaceRoot(kind) {

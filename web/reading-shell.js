@@ -7,7 +7,7 @@ window.PaperReadingShell = (() => {
     if (!disclosure?.open || !panel) return;
     window.PaperFloatingWindows?.placeBelow(disclosure.querySelector('summary'), panel);
   }
-  function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence, diagnostics, saveInk, returnToInk, beforeToolChange, locateAnnotations, onAnnotationOrderChange}) {
+  function create({state, workbench, panels, reader, navigate, toast, contextChanged, persistence, diagnostics, saveInk, returnToInk, beforeToolChange, locateAnnotations, onAnnotationOrderChange, showReadingReturn}) {
     const $ = id => document.getElementById(id);
     const node = (tag, text, className) => { const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n; };
     const button = (id, text, action) => {const n=node('button',text,'button subtle');n.type='button';n.id=id;n.addEventListener('click',action);return n;};
@@ -251,8 +251,24 @@ window.PaperReadingShell = (() => {
       }
       const refresh=button('','刷新保存状态',()=>void inkQueue?.refresh().catch(error=>toast(error.message,true)));queuePanel.append(refresh);
     }
-    const backPosition=button('reader-return-position','返回刚才位置',async()=>{if(await reader()?.returnToReadingPosition()){const value=reader()?.getLayout();selectLayout(value);void patchLayout({readerLayout:value});}});backPosition.hidden=true;readerTools.append(backPosition);
-    function focusChanged(info){backPosition.hidden=!info?.canReturn;if(info?.pending)status('正在定位…');else status('',false,{clearIf:'正在定位…'});}
+    const backPosition=button('reader-return-position','返回刚才位置',async()=>{
+      const pdf=reader(), position=pdf?.getReadingReturnPosition();
+      if(!position||backPosition.disabled)return;
+      backPosition.disabled=true;
+      try{
+        if(showReadingReturn&&!await showReadingReturn(position))return;
+        if(await pdf.returnToReadingPosition()){
+          const value=pdf.getLayout();selectLayout(value);void patchLayout({readerLayout:value});
+        }
+      }catch(error){status(`返回阅读位置未完成：${error.message}`,true);}
+      finally{backPosition.disabled=false;}
+    });
+    backPosition.hidden=true;readerTools.append(backPosition);
+    function focusChanged(info){
+      backPosition.hidden=!info?.canReturn;
+      backPosition.title=info?.returnPage?`返回第 ${info.returnPage} 页的阅读位置`:'';
+      if(info?.pending)status('正在定位…');else status('',false,{clearIf:'正在定位…'});
+    }
     const beforeUnload=event=>{if(reader()?.getInkDraft?.()||reader()?.isInking?.()||inkQueue?.blocked()){event.preventDefault();event.returnValue='';}};
     window.addEventListener('beforeunload',beforeUnload);
     const header=document.querySelector('.paper-header');header.classList.add('reader-document-summary');
