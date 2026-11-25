@@ -44,6 +44,10 @@ test('translation draft DOM and text survive vocabulary, encyclopedia, close and
 test('selection translation uses unified dialog, original paper and page then opens word index',async t=>{
  const f=fixture(t);await f.language.useSelection('translate');
  assert.equal(f.doc.querySelector('.wiki-dialog').open,true);assert.equal(f.doc.querySelectorAll('#language-panel').length,1);assert.equal(f.language.element.parentElement,f.doc.querySelector('.wiki-dialog'));
+ const work=f.doc.getElementById('language-work'), draft=work.querySelector(':scope > .language-draft'), result=f.doc.getElementById('language-result');
+ assert.equal(result.parentElement,work);
+ for(const id of ['language-source','language-target','language-translate','language-polish','language-polish-directions'])assert.ok(draft.querySelector(`#${id}`));
+ assert.equal(draft.querySelector('#language-direction-general').getAttribute('aria-pressed'),'true');
  const call=f.calls.find(call=>call.action==='language_generate');assert.equal(call.id,'paper-a');assert.equal(call.page,3);assert.equal(call.text,'A synthetic sentence.');assert.match(f.doc.getElementById('language-result').textContent,/合成的译文/);
  f.doc.getElementById('language-result-words').click();await tick();assert.equal(f.language.element.hidden,true);assert.equal(f.doc.querySelector('.wiki-layout').hidden,false);assert.ok(f.calls.some(call=>call.action==='vocabulary_list'));
 });

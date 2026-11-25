@@ -11,14 +11,16 @@
 /* 语言处理与词条共用大阅读窗口，不另开遮挡正文的小浮层。 */
 .wiki-header .wiki-language-tabs{border:0;padding:0;margin-left:auto;gap:4px;flex:none}
 .wiki-header .wiki-language-tabs .button{font-size:13px;padding:6px 10px}
-.wiki-dialog>.language-panel-embedded{position:static;inset:auto;z-index:auto;flex:1;width:auto;max-width:none;height:auto;min-height:0;max-height:none;min-width:0;margin:0;padding:20px 28px;border:0;border-radius:0;box-shadow:none;resize:none;overflow:auto;font-size:14px;background:transparent}
+.wiki-dialog>.language-panel-embedded{position:static;inset:auto;z-index:auto;flex:1;width:auto;max-width:none;height:auto;min-height:0;max-height:none;min-width:0;margin:0;padding:20px 28px;border:0;border-radius:0;box-shadow:none;resize:none;overflow:auto;font-size:14px;background:transparent;container:language-panel / inline-size}
 .language-panel-embedded .field{font-size:14px;gap:8px}.language-panel-embedded textarea{font-size:14px;padding:12px;min-height:150px;line-height:1.7}
 .language-panel-embedded .small{font-size:12px}.language-panel-embedded summary,.language-panel-embedded .language-actions label,.language-panel-embedded select{font-size:13px}
 .language-panel-embedded select{height:34px}.language-panel-embedded .language-actions .button{font-size:13px;padding:7px 12px}
 .language-panel-embedded .language-status{font-size:13px;margin:0 0 12px}.language-panel-embedded .language-status:empty{margin:0}
-.language-panel-embedded #language-work{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:28px;align-content:start}
-.language-panel-embedded #language-work>.field{grid-column:1;margin-top:0}.language-panel-embedded #language-work>.language-actions{grid-column:1;align-self:start}.language-panel-embedded #language-work>p{grid-column:1}
-.language-panel-embedded #language-result{grid-column:2;grid-row:1 / span 3;min-width:0}.language-panel-embedded .language-result-heading{margin-top:0;padding-top:0;border-top:0}
+.language-panel-embedded #language-work{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 28px;align-items:start}
+@container language-panel (width < 748px){.language-panel-embedded #language-work{grid-template-columns:minmax(0,1fr)}}
+.language-panel-embedded .language-draft>.field{margin-top:0}
+.language-draft .language-actions label{display:flex;align-items:center;flex-wrap:wrap;gap:4px;min-width:0}
+.language-panel-embedded .language-result-heading{margin-top:0;padding-top:0;border-top:0}
 .language-panel-embedded .language-history-row{font-size:13px;padding:16px 4px}.language-panel-embedded .language-history-row span,.language-panel-embedded .language-history-row p{font-size:14px}
 .language-panel-embedded #language-settings{max-width:760px;margin:0 auto}.language-panel-embedded #language-settings textarea{min-height:96px}
 
@@ -27,8 +29,8 @@
 
 .wiki-header>button:last-child{margin-left:auto}.wiki-language-active>.wiki-header>button:last-child{margin-left:0}
 
-.language-polish-directions{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0 12px;grid-column:1}.language-polish-directions .button{font-size:12px;padding:4px 8px}.language-polish-directions .button[aria-pressed="true"]{background:var(--teal);color:var(--bg)}
-#language-target-current{display:inline-block;white-space:nowrap}.language-panel-embedded #language-result{grid-row:1 / span 4}
+.language-polish-directions{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:8px 0 12px}.language-polish-directions .button{font-size:12px;padding:4px 8px}.language-polish-directions .button[aria-pressed="true"]{background:var(--dsw-alias-button-primary-fill,var(--teal));color:var(--dsw-alias-label-primary-foreground,var(--surface))}
+#language-target-current{display:inline-block;white-space:nowrap}
 .settings-model-effective { font-size: 14px; line-height: 1.5; margin-block: 6px; }
 .settings-model-effective span { display: block; }
 #language-prompt-preview { margin-block: 12px; }
