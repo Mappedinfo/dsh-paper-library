@@ -5,7 +5,7 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{JSDOM}=require(process.env.JSDOM_MODULE||'jsdom');
 const sources=await Promise.all(['encyclopedia.js','settings-models.js','language-learning.js'].map(file=>readFile(new URL('../web/'+file,import.meta.url),'utf8')));
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-function fixture(t,{words=[],synthesizeSpeech}={}){
+function fixture(t,{words=[],synthesizeSpeech,generatePronunciation}={}){
  const dom=new JSDOM('',{url:'https://synthetic.invalid',runScripts:'outside-only'}),w=dom.window,doc=w.document,calls=[],writes=[],messages=[];
  let paper={id:'paper-a',title:'Synthetic paper'},selection={id:'paper-a',page:3,text:'A synthetic sentence.'};
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;this.dataset.testModal='true';};w.HTMLDialogElement.prototype.show=function(){this.open=true;this.dataset.testModal='false';};w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'));};w.confirm=()=>true;
@@ -17,6 +17,7 @@ function fixture(t,{words=[],synthesizeSpeech}={}){
   if(action==='language_generate')return {id:'result-a',paper_id:args.id,page:args.page,mode:args.mode,source_text:args.text,result:'合成的译文。',status:'complete',vocabulary:[]};
   if(action==='vocabulary_create')return {id:'word-a',term:args.term,meaning:'合成的',status:'learning',encounters:[{paper_id:args.id,page:args.page,quote:args.source_sentence,sentence_translation:'一个合成句子。'}]};
   if(action==='vocabulary_list')return {items:words,total:words.length};
+  if(action==='vocabulary_pronunciation')return generatePronunciation(args);
   return {items:[],total:0};
  };
  const wiki=w.PaperEncyclopedia.create({api,toast:()=>{},openReference:()=>{},synthesizeSpeech,getSource:()=>({paper_id:paper.id,title:paper.title,page:selection.page,quote:selection.text})});
@@ -26,6 +27,20 @@ function fixture(t,{words=[],synthesizeSpeech}={}){
  t.after(()=>{language.dispose();w.close();});
  return {w,doc,wiki,language,calls,writes,messages,click,open:()=>language.paperChanged(paper)};
 }
+test('a saved vocabulary entry can show separately labeled British and American IPA',async t=>{
+ const initial={id:'word-1',revision:'r1',term:'perimeter',encounters:[]};
+ const f=fixture(t,{words:[initial],generatePronunciation:()=>({...initial,revision:'r2',pronunciation:{uk:'pəˈrɪmɪtə',us:'pəˈrɪmətɚ',source:'ai'}})});
+ f.wiki.show('words');await tick();
+ assert.equal(f.calls.some(call=>call.action==='vocabulary_pronunciation'),false);
+ f.click('生成音标');await tick();
+ assert.deepEqual(f.calls.find(call=>call.action==='vocabulary_pronunciation'),{action:'vocabulary_pronunciation',id:'word-1',expected_revision:'r1'});
+ assert.equal(f.doc.querySelector('[lang="en-GB-fonipa"]').textContent,'/pəˈrɪmɪtə/');
+ assert.equal(f.doc.querySelector('[lang="en-US-fonipa"]').textContent,'/pəˈrɪmətɚ/');
+ assert.match(f.doc.querySelector('.wiki-pronunciation').textContent,/AI 音标 · 待核对/);
+ f.click('编辑音标');
+ assert.deepEqual([...f.doc.querySelectorAll('.wiki-word-form input')].map(input=>input.value),['perimeter','pəˈrɪmɪtə','pəˈrɪmətɚ']);
+});
+
 test('pronunciation and source playback send only the requested text and stop when switching views',async t=>{
  const term='synthetic term',sentence='A synthetic term appears here.', requests=[],played=[],stopped=[],revoked=[];
  const f=fixture(t,{words:[{id:'word-1',term,encounters:[{source_sentence:sentence,sentence_translation:'本句的译文。'}]}],synthesizeSpeech:(text,signal)=>{

@@ -47,6 +47,37 @@ function fixture(store = memoryStore()) {
   return f
 }
 
+test('British and American IPA are saved on existing words and can be corrected without a model call', async () => {
+  const f = fixture()
+  await f.handle(request)
+  const [word] = (await f.handle({ action: 'vocabulary_list' })).items
+  const generate = { action: 'vocabulary_pronunciation', id: word.id, expected_revision: word.revision }
+  f.answer = JSON.stringify({ uk: '/ˌep.ɪˈstiː.mɪk/', us: '/ˌep.əˈstiː.mɪk/' })
+  const saved = await f.handle({ ...generate, term: 'ignored override' })
+  assert.deepEqual(saved.pronunciation, { uk: 'ˌep.ɪˈstiː.mɪk', us: 'ˌep.əˈstiː.mɪk', source: 'ai', model: f.route })
+  assert.match(f.calls.at(-1).prompt, /"term":"Epistemic"/)
+  assert.doesNotMatch(f.calls.at(-1).prompt, /uncertainty remains|ignored override/)
+  assert.deepEqual(saved.encounters, word.encounters)
+  const manual = await f.handle({ action: 'vocabulary_update', id: saved.id, expected_revision: saved.revision, pronunciation: { uk: '/ˌɛpɪˈstiːmɪk/', us: '' } })
+  assert.deepEqual(manual.pronunciation, { uk: 'ˌɛpɪˈstiːmɪk', us: '', source: 'user' })
+  await assert.rejects(f.handle(generate), { code: 'STATE_CONFLICT' })
+  assert.deepEqual((await f.handle({ ...generate, expected_revision: manual.revision })).pronunciation, manual.pronunciation)
+  assert.equal(f.calls.length, 2)
+  const [reloaded] = (await createLanguageLearning(f.options)({ action: 'vocabulary_list' })).items
+  assert.deepEqual(reloaded.pronunciation, manual.pronunciation)
+})
+
+test('incomplete or malformed generated IPA leaves the word available for manual editing', async () => {
+  const f = fixture()
+  const word = await f.handle({ action: 'vocabulary_create', mode: 'manual', term: 'perimeter' })
+  const generate = { action: 'vocabulary_pronunciation', id: word.id, expected_revision: word.revision }
+  for (const answer of [{ uk: 'pəˈrɪmɪtə' }, { uk: '<invalid>', us: 'pəˈrɪmətɚ' }]) {
+    f.answer = JSON.stringify(answer)
+    await assert.rejects(f.handle(generate), { code: 'LANGUAGE_INCOMPLETE' })
+  }
+  assert.equal((await f.handle({ action: 'vocabulary_list' })).items[0].revision, word.revision)
+})
+
 test('language output budget is independent from feedback and finitely validated', () => {
   const config = resolveConfig({ library: '/synthetic/library' })
   assert.equal(config.maxLanguageOutputTokens, 8192); assert.equal(config.maxOutputTokens, 1600)

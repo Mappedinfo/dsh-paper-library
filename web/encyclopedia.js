@@ -343,7 +343,33 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,synthesize
     article.replaceChildren(node('h2',item.term),node('h3','AI 检索与解释'),form);
     query.focus();
   }
+  function pronunciationRow(item){
+    const row=node('div',undefined,'wiki-pronunciation wiki-source-actions'),value=item.pronunciation;
+    const variants=node('dl');
+    for(const [key,label,lang] of [['uk','英式','en-GB-fonipa'],['us','美式','en-US-fonipa']]){
+      const group=node('div');
+      const phonetics=node('dd',value?.[key]?`/${value[key]}/`:'—');
+      if(value?.[key])phonetics.lang=lang;
+      group.append(node('dt',label),phonetics);variants.append(group);
+    }
+    row.append(variants);
+    if(value)row.append(node('span',value.source==='ai'?'AI 音标 · 待核对':'手动填写','small muted'));
+    else {
+      const generate=button('生成音标',async()=>{
+        const owner=ticket;generate.disabled=true;generate.textContent='正在生成音标…';
+        try{
+          const saved=await api('vocabulary_pronunciation',{id:item.id,expected_revision:item.revision});
+          if(owner===ticket){show(saved);setStatus('英美音标已保存。');}
+        }catch(error){if(owner===ticket)setStatus(error.message);}
+        finally{generate.disabled=false;generate.textContent='生成音标';}
+      });
+      generate.title='将词条发送给已配置的语言模型生成英美 IPA';row.append(generate);
+    }
+    row.append(button('编辑音标',()=>editWord(item,'pronunciation')));
+    return row;
+  }
   function showWord(item){
+    if(item.pronunciation||/\p{Script=Latin}/u.test(item.term)&&!/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(item.term))article.append(pronunciationRow(item));
     const provenance=item.meaning?(item.meaning_source==='user'?'人工释义':'AI 释义 · 待核对'):'尚无释义';
     article.append(node('p',`${provenance} · ${item.status==='mastered'?'已掌握':'待学习'}`,'small muted'));
     if(item.meaning&&(item.meaning_source==='user'||item.meaning!==item.explanation?.definition?.text))article.append(markup(item.meaning));
@@ -383,12 +409,14 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,synthesize
   function editWord(item=null,field='meaning'){
     if(!discard())return;
     const owner=++ticket,previous=selected;
-    const heading=item?(field==='note'?'编辑备注':'编辑释义'):'新建单词／词组';
+    const heading=item?{note:'编辑备注',meaning:'编辑释义',pronunciation:'编辑英美音标'}[field]:'新建单词／词组';
     const form=node('form',undefined,'wiki-word-form');
     const term=wordField(form,'单词或词组',item?.term||(query.length<=80?query:''),80);
     term.required=true;term.readOnly=Boolean(item);
     const meaning=!item||field==='meaning'?wordField(form,item?'释义':'释义（选填）',item?.meaning,2000,4):null;
     const note=!item||field==='note'?wordField(form,item?'备注':'备注（选填）',item?.note,4000,4):null;
+    const british=field==='pronunciation'?wordField(form,'英式 IPA',item.pronunciation?.uk,240):null;
+    const american=field==='pronunciation'?wordField(form,'美式 IPA',item.pronunciation?.us,240):null;
     if(item&&meaning)meaning.required=true;
     const save=node('button','保存','button primary');save.type='submit';
     const cancel=button('取消',()=>{if(discard()){if(previous)show(previous);else void load();}});
@@ -396,10 +424,14 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,synthesize
     form.addEventListener('input',()=>dirty=true);
     form.addEventListener('submit',async event=>{
       event.preventDefault();if(save.disabled)return;
-      const inputs=[term,meaning,note].filter(Boolean);
+      const inputs=[term,meaning,note,british,american].filter(Boolean);
       for(const input of inputs)input.disabled=true;
       try{
-        if(item){await updateWord(item,{[field]:(note||meaning).value},field==='note'?'备注已保存。':'释义已保存。',save);return;}
+        if(item){
+          const value=british?{uk:british.value,us:american.value}:(note||meaning).value;
+          const message={note:'备注已保存。',meaning:'释义已保存。',pronunciation:'音标已保存。'}[field];
+          await updateWord(item,{[field]:value},message,save);return;
+        }
         save.disabled=true;
         const saved=await api('vocabulary_create',{mode:'manual',term:term.value,meaning:meaning.value,note:note.value});
         if(owner!==ticket)return;
@@ -407,7 +439,7 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,synthesize
       }catch(error){if(owner===ticket)setStatus(error.message);}
       finally{save.disabled=false;for(const input of inputs)input.disabled=false;}
     });
-    article.replaceChildren(node('h2',heading),form);(item?note||meaning:term).focus();
+    article.replaceChildren(node('h2',heading),form);(item?note||meaning||british:term).focus();
   }
   function wordField(form,label,value,max,rows=0){
     const wrap=node('label',label,'field'),input=node(rows?'textarea':'input');

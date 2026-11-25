@@ -155,6 +155,11 @@ body.reader-focused .workspace.shared-sidebar-open>.library-pane.shared-reading-
 .wiki-word-heading{border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:12px}
 .wiki-article .wiki-word-heading h2{border:0;margin:0;padding:0;overflow-wrap:anywhere}
 .wiki-speech-status:empty{display:none}
+.wiki-pronunciation{margin-bottom:12px}
+.wiki-pronunciation dl{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0;min-width:0}
+.wiki-pronunciation dl div{display:flex;align-items:baseline;gap:6px;min-width:0}
+.wiki-pronunciation dt{color:var(--muted);font-size:.88em;white-space:nowrap}
+.wiki-pronunciation dd{margin:0;overflow-wrap:anywhere}
 .wiki-word-note{border-top:1px solid var(--line);margin-top:16px;padding-top:10px}
 .wiki-word-note h3{margin:0}
 .wiki-word-note p{white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0}

@@ -255,6 +255,8 @@ PDF 工具栏的「文内搜索」可点击展开或收起，⌘/Ctrl + F 直接
 
 点词条标题旁的「朗读词条」听词组发音，点文献来源旁的「朗读原句」听对应摘录。每次点击只将对应的文本发送给 DeepSeek 生成语音，复用 DSH 配置的 `DEEPSEEK_API_KEY` 和 Paper Library 的 DeepSeek 网络设置。语音不写入资料库。[DeepSeek 语音合成文档](https://api-docs.deepseek.com/guides/tts/)
 
+英文词条标题下显示英式和美式 IPA。首次使用可点「生成音标」，仅将词条文本交给当前配置的语言模型，结果标记为待核对。也可直接点「编辑音标」手动填写或纠正，保存后会在重新打开词条时显示。
+
 词条中的「AI 检索与解释」提供「联网检索」「DeepSeek 深度检索」和「阅读公开链接」。联网检索优先使用 DeepSeek 官方联网工具。服务不可用或证据不足时，使用已有的 DSH 网页检索与 Crossref、arXiv 学术索引生成释义。深度检索与阅读公开链接需要在 DSH 中配置 `DEEPSEEK_API_KEY`。只向 DeepSeek 联网工具提交表单中的公开检索词及所填的公开 HTTPS 链接。见 [DeepSeek 联网工具](https://api-docs.deepseek.com/zh-cn/guides/web_tools/)。
 
 检索完成后自动保存可核查的中文释义和来源。资料不足或生成失败时保存最近一次检索及已有线索。保存的 AI 解释可与人工释义并存。
