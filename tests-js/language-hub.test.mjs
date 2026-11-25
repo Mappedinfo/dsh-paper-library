@@ -5,7 +5,7 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{JSDOM}=require(process.env.JSDOM_MODULE||'jsdom');
 const sources=await Promise.all(['encyclopedia.js','settings-models.js','language-learning.js'].map(file=>readFile(new URL('../web/'+file,import.meta.url),'utf8')));
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-function fixture(t){
+function fixture(t,{words=[],synthesizeSpeech}={}){
  const dom=new JSDOM('',{url:'https://synthetic.invalid',runScripts:'outside-only'}),w=dom.window,doc=w.document,calls=[],writes=[],messages=[];
  let paper={id:'paper-a',title:'Synthetic paper'},selection={id:'paper-a',page:3,text:'A synthetic sentence.'};
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;this.dataset.testModal='true';};w.HTMLDialogElement.prototype.show=function(){this.open=true;this.dataset.testModal='false';};w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'));};w.confirm=()=>true;
@@ -16,15 +16,45 @@ function fixture(t){
   if(action==='language_settings_update')return {revision:'settings-2',value:args.value};
   if(action==='language_generate')return {id:'result-a',paper_id:args.id,page:args.page,mode:args.mode,source_text:args.text,result:'合成的译文。',status:'complete',vocabulary:[]};
   if(action==='vocabulary_create')return {id:'word-a',term:args.term,meaning:'合成的',status:'learning',encounters:[{paper_id:args.id,page:args.page,quote:args.source_sentence,sentence_translation:'一个合成句子。'}]};
+  if(action==='vocabulary_list')return {items:words,total:words.length};
   return {items:[],total:0};
  };
- const wiki=w.PaperEncyclopedia.create({api,toast:()=>{},openReference:()=>{},getSource:()=>({paper_id:paper.id,title:paper.title,page:selection.page,quote:selection.text})});
+ const wiki=w.PaperEncyclopedia.create({api,toast:()=>{},openReference:()=>{},synthesizeSpeech,getSource:()=>({paper_id:paper.id,title:paper.title,page:selection.page,quote:selection.text})});
  const language=w.PaperLanguageLearning.create({api,embedded:true,onOpen:next=>wiki.openLanguage(next),onClose:()=>wiki.close(),openVocabulary:()=>wiki.show('words'),getPaper:()=>paper,getSelection:()=>selection,toast:value=>messages.push(value),persistence:{get:async()=>null,put:async(...args)=>writes.push(args),flush:async()=>{}}});
  wiki.attachLanguage(language);language.setAvailable(true);
  const click=label=>[...doc.querySelectorAll('button')].find(button=>button.textContent===label).click();
  t.after(()=>{language.dispose();w.close();});
  return {w,doc,wiki,language,calls,writes,messages,click,open:()=>language.paperChanged(paper)};
 }
+test('pronunciation and source playback send only the requested text and stop when switching views',async t=>{
+ const term='synthetic term',sentence='A synthetic term appears here.', requests=[],played=[],stopped=[],revoked=[];
+ const f=fixture(t,{words:[{id:'word-1',term,encounters:[{source_sentence:sentence,sentence_translation:'本句的译文。'}]}],synthesizeSpeech:(text,signal)=>{
+   requests.push({text,signal});return Promise.resolve(new f.w.Blob(['wav'],{type:'audio/wav'}));
+ }});
+ f.w.URL.createObjectURL=()=>`blob:test-${requests.length}`;
+ f.w.URL.revokeObjectURL=url=>revoked.push(url);
+ let canPlay=false;
+ f.w.Audio=class {
+   async play(){if(!canPlay)throw new f.w.DOMException('Needs click','NotAllowedError');played.push(this.src);}
+   pause(){stopped.push(this.src);}
+   removeAttribute(){this.src='';}
+ };
+ f.wiki.show('words');await tick();
+ assert.equal(requests.length,0);
+ f.click('朗读词条');await tick();
+ assert.deepEqual(requests.map(({text})=>text),[term]);
+ canPlay=true;f.click('播放词条');await tick();
+ assert.deepEqual(played,['blob:test-1']);
+ f.click('朗读原句');await tick();
+ assert.deepEqual(requests.map(({text})=>text),[term,sentence]);
+ assert.equal(requests[0].signal.aborted,true);
+ f.click('翻译与表述');await tick();
+ assert.deepEqual(stopped,['blob:test-1','blob:test-2']);
+ assert.deepEqual(revoked,stopped);
+ f.wiki.show('words');await tick();f.click('朗读原句');await tick();assert.equal(requests.at(-1).text,sentence);
+ f.wiki.close();assert.equal(requests.at(-1).signal.aborted,true);
+});
+
 test('language and vocabulary share one large dialog and one header navigation',async t=>{
  const f=fixture(t);await f.open();f.wiki.show('language');await tick();
  const dialog=f.doc.querySelector('.wiki-dialog');assert.equal(dialog.open,true);assert.equal(f.doc.querySelectorAll('dialog').length,1);assert.equal(dialog.querySelector('#language-panel'),f.language.element);

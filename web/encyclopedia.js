@@ -1,5 +1,5 @@
 'use strict';
-window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=()=>null}){
+window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,synthesizeSpeech,getSource=()=>null}){
   const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
   const button=(label,action)=>{const b=node('button',label,'button subtle');b.type='button';b.addEventListener('click',action);return b;};
   const dialog=node('dialog',undefined,'wiki-dialog');dialog.setAttribute('aria-label','阅读百科与语言词条');
@@ -8,6 +8,62 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
   status.setAttribute('role','status');
   const tabs=node('nav',undefined,'wiki-tabs');tabs.setAttribute('aria-label','词条分类');heading.append(tabs,status);header.prepend(heading);
   function setStatus(message){status.textContent=message;status.title=message;}
+  let speech=null;
+  function stopSpeech(){
+    const current=speech;
+    if(!current)return;
+    speech=null;
+    current.controller.abort();
+    if(current.audio){
+      current.audio.pause();
+      current.audio.removeAttribute('src');
+      URL.revokeObjectURL(current.url);
+    }
+    current.reset();
+  }
+  function addSpeech(container,text,target){
+    if(!synthesizeSpeech||!text?.trim())return;
+    const label=`朗读${target}`,feedback=node('span','','wiki-speech-status small muted');
+    feedback.setAttribute('role','status');
+    const reset=()=>{control.textContent=label;feedback.textContent='';};
+    function playbackFailed(current,message){
+      if(speech!==current)return;
+      stopSpeech();feedback.textContent=message;
+    }
+    async function play(current){
+      current.ready=false;control.textContent='停止朗读';feedback.textContent='';
+      try{await current.audio.play();}
+      catch(error){
+        if(speech!==current)return;
+        if(error.name==='NotAllowedError'){
+          current.ready=true;control.textContent=`播放${target}`;feedback.textContent='语音已生成，点击播放。';
+        }else playbackFailed(current,'无法播放语音，请重试。');
+      }
+    }
+    const control=button(label,async()=>{
+      if(speech?.control===control){
+        if(speech.ready)await play(speech);else stopSpeech();
+        return;
+      }
+      stopSpeech();
+      const current={control,controller:new AbortController(),reset};
+      speech=current;control.textContent='取消生成';feedback.textContent='正在生成语音…';
+      try{
+        const audioBlob=await synthesizeSpeech(text,current.controller.signal);
+        if(speech!==current)return;
+        current.audio=new Audio();
+        current.url=URL.createObjectURL(audioBlob);
+        current.audio.onended=()=>{if(speech===current)stopSpeech();};
+        current.audio.onerror=()=>playbackFailed(current,'无法播放语音，请重试。');
+        current.audio.src=current.url;
+        await play(current);
+      }catch(error){playbackFailed(current,error.message);}
+    });
+    control.title=`点击将${target}发送给 DeepSeek 生成语音`;
+    control.setAttribute('aria-description',control.title);
+    container.append(control,feedback);
+  }
+  window.addEventListener('pagehide',stopSpeech);
   let docked=false;
   const syncedPapers=new Set();
   const listedWords=new Map();
@@ -32,7 +88,7 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
   const sortLabel=node('label','排序','wiki-index-sort');sortLabel.append(sortControl);
   sidebar.append(sortLabel,index);layout.append(sidebar,article);dialog.append(header,search,layout);document.body.append(dialog);
   const tabButtons={};for(const [value,label]of [['encyclopedia','百科'],['words','语言与词条']]){tabButtons[value]=button(label,()=>showSection(value==='words'&&language?'language':value));tabs.append(tabButtons[value]);}
-  function discard(){if(dirty&&!window.confirm('词条尚未保存，放弃本次编辑？'))return false;dirty=false;return true;}
+  function discard(){if(dirty&&!window.confirm('词条尚未保存，放弃本次编辑？'))return false;dirty=false;stopSpeech();return true;}
   function leave(){if(!discard())return;++ticket;language?.hide();dialog.close();}
   function dockPosition(){if(docked){const bottom=document.querySelector('.topbar')?.getBoundingClientRect().bottom||8;dialog.style.setProperty('--wiki-dock-top',`${Math.max(8,Math.min(bottom+8,window.innerHeight-240))}px`);}}
   function openWindow(){dialog.setAttribute('aria-modal',String(!docked));dockPosition();if(!dialog.open){if(docked)dialog.show();else dialog.showModal();}}
@@ -133,7 +189,9 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
       block.append(sourceActions(source));
       const pair=node('div',undefined,'wiki-bilingual');
       for(const [label,text]of [['原句',source.quote||source.source_sentence||''],['译文 · AI 待核对',source.sentence_translation||'尚无原句译文']]){
-        const column=node('div');column.append(node('strong',label),node('blockquote',text));pair.append(column);
+        const column=node('div'),heading=node('div',undefined,'wiki-speech-row');heading.append(node('strong',label));
+        if(word&&label==='原句')addSpeech(heading,text,'原句');
+        column.append(heading,node('blockquote',text));pair.append(column);
       }
       if(source.meaning)block.append(node('p',`词义 · ${source.meaning}`));block.append(pair);if(source.source_provenance==='user_supplied'||source.source_kind==='user_supplied')block.append(node('p','原句由用户选取或填写，尚未逐字核验。','small muted'));
       const background=source.author_background||{},labels={chinese:'中文语言背景作者',non_chinese:'非中文语言背景作者',mixed:'混合语言背景作者'};
@@ -313,7 +371,10 @@ window.PaperEncyclopedia={create({api,toast,openReference,searchUsage,getSource=
     renderSearchAttempt(item.explanation_search);
     article.append(note);sources(article,item.encounters||[],item);
   }
-  function show(item){++ticket;selected=item;article.replaceChildren(node('h2',item.term));if(mode==='words'){listedWords.set(item.id,item);showWord(item);return;}
+  function show(item){++ticket;stopSpeech();selected=item;const title=node('h2',item.term);if(mode==='words'){
+    const heading=node('div',undefined,'wiki-speech-row wiki-word-heading');heading.append(title);addSpeech(heading,item.term,'词条');article.replaceChildren(heading);
+    listedWords.set(item.id,item);showWord(item);return;}
+    article.replaceChildren(title);
     const labels={term:'术语',organization:'机构',abbreviation:'缩写',person:'人物',concept:'概念'};article.append(node('p',`${labels[item.kind]||'词条'} · 人工整理${item.aliases?.length?' · '+item.aliases.join(' / '):''}`,'small muted'),markup(item.definition),button('编辑词条',()=>edit(item)));if(pendingSource)article.append(button('将当前批注加入来源',async()=>{try{const saved=await api('encyclopedia_put',{...item,expected_revision:item.revision,source:pendingSource});pendingSource=null;show(saved);setStatus('已关联当前批注。');}catch(e){setStatus(e.message);}}));sources(article,item.sources||[]);}
   function edit(item){if(mode==='words'){editWord(item);return;}if(!discard())return;++ticket;article.replaceChildren(node('h2',item?'编辑词条':'新建百科词条'));const form=node('form'),field=(label,value,max,textarea=false)=>{const l=node('label',label,'field'),input=node(textarea?'textarea':'input');input.value=value||'';input.maxLength=max;if(textarea)input.rows=12;l.append(input);form.append(l);return input;};const term=field('词条',item?.term||query,200);term.readOnly=Boolean(item);const aliases=field('别名与缩写（每行一个）',item?.aliases?.join('\n')||'',4000,true);aliases.rows=2;
     const kind=node('select');kind.setAttribute('aria-label','词条类型');for(const [value,label]of [['term','术语'],['concept','概念'],['organization','机构'],['abbreviation','缩写'],['person','人物']]){const option=node('option',label);option.value=value;kind.append(option);}kind.value=item?.kind||'term';form.append(kind);

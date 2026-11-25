@@ -78,7 +78,7 @@ async function stateRequest(store, input) {
 const baseHeaders = {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
 };
 function json(result, status=200) { return new Response(JSON.stringify(result), { status, headers: { ...baseHeaders, 'Content-Type':'application/json;charset=utf-8' } }); }
 const MAX_PDF_BYTES = 250 * 1024 * 1024;
@@ -113,14 +113,14 @@ async function importUpload(request, url, options) {
   }
 }
 
-async function readBounded(request, maxBytes) {
+async function readBounded(request, maxBytes, limitMessage = '上传超过 32 MB，请使用本地路径。') {
   const declared = Number(request.headers.get('content-length') || 0);
-  if (declared > maxBytes) throw new Error('上传超过 32 MB，请使用本地路径。');
+  if (declared > maxBytes) throw new Error(limitMessage);
   const chunks = []; let size = 0;
   if (!request.body) throw new Error('缺少请求内容。');
   for await (const chunk of request.body) {
     size += chunk.length;
-    if (size > maxBytes) throw new Error('上传超过 32 MB，请使用本地路径。');
+    if (size > maxBytes) throw new Error(limitMessage);
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString('utf8');
@@ -189,6 +189,7 @@ export function createFetchHandler(options = {}) {
     lookup:(id,signal)=>resolveMetadata(id,{timeoutMs:15000,...options.fetchOptions,signal})});
   const fieldRadarAnalysis = options.fieldRadarAnalysis || createFieldRadarAnalysis({ store: localState, radar: fieldRadar });
   const fieldRadarExport = options.fieldRadarExport || createFieldRadarExporter({ library: options.library || defaultLibrary, radar: fieldRadar, getAnalysis: input=>fieldRadarAnalysis.handle(input) });
+  let speechRequests = 0;
   const handle = async function handle(request) {
     const url = new URL(request.url);
     if (options.loopbackOnly) {
@@ -207,6 +208,17 @@ export function createFetchHandler(options = {}) {
         return new Response(exported.bytes,{headers:{...baseHeaders,'Content-Type':exported.mime,'Content-Disposition':`attachment; filename="field-radar-${match[1]}.${match[2]}"`,'Content-Security-Policy':"default-src 'none'; sandbox"}});
       }
       if (path === 'upload' && request.method === 'POST') return await importUpload(request,url,options);
+      if (path === 'language-speech' && request.method === 'POST') {
+        if (!options.languageSpeech) return json({ok:false,error:'DeepSeek 朗读需要连接 DSH。'},409);
+        if (!request.headers.get('content-type')?.startsWith('application/json')) return json({ok:false,error:'需要 application/json 请求。'},415);
+        if (speechRequests >= 2) return json({ok:false,error:'已有朗读请求正在处理，请稍后再试。'},429);
+        speechRequests++;
+        try {
+          const { text } = JSON.parse(await readBounded(request, 16 * 1024, '朗读请求超出大小限制。')) || {};
+          const audio = await options.languageSpeech(text, request.signal);
+          return new Response(audio, { headers: { ...baseHeaders, 'Content-Type': 'audio/wav' } });
+        } finally { speechRequests--; }
+      }
       // 小体积草稿独立限流，不被长时间模型调用占满；仍校验命名空间与修订。
       if(path==='state'&&request.method==='POST'){
         if(!request.headers.get('content-type')?.startsWith('application/json'))return json({ok:false,error:'需要 application/json 请求。'},415);

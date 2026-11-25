@@ -30,6 +30,7 @@ import { createLatexAI } from './latex-ai.mjs'
 import { createLatexResearch } from './latex-research.mjs'
 import { createScholarlySearch } from './scholarly-search.mjs'
 import { createDeepSeekPublicResearch } from './deepseek-public-research.mjs'
+import { createDeepSeekSpeech } from './deepseek-speech.mjs'
 import { createHarnessToolAI } from './tool-ai.mjs'
 import { createLatexWorkspace } from './latex-workspace.mjs'
 import { createBoardStore } from './board-store.mjs'
@@ -179,11 +180,13 @@ export function apply(ctx, rawConfig = {}) {
       signal.throwIfAborted()
       return service.search({ query, maxResults: 5 }, signal)
     }
-    const nativeResearch = createDeepSeekPublicResearch({ fetch: (...args) => modelNetwork.run(() => fetch(...args)), resolveKey: async () => {
+    const deepSeekTransport = { fetch: (...args) => modelNetwork.run(() => fetch(...args)), resolveKey: async () => {
       let credentials
       try { credentials = web.get('credentials') } catch { /* This host may omit the credential service. */ }
       return (await credentials?.resolve('DEEPSEEK_API_KEY'))?.value || process.env.DEEPSEEK_API_KEY
-    } })
+    } }
+    const nativeResearch = createDeepSeekPublicResearch(deepSeekTransport)
+    const languageSpeech = createDeepSeekSpeech(deepSeekTransport)
     const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python, scholarlySearch, searchWeb, nativeResearch })
     const handwritingAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }, { network: modelNetwork, attachments: () => ctx.get('attachments') })
     const handwriting = createHandwriting({ store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })
@@ -213,7 +216,7 @@ export function apply(ctx, rawConfig = {}) {
     // The workspace owns the manuscript folder under the DSH home and keeps it in the
     // sync service's own config; both are host-side jobs, so neither enters the worker.
     const latexWorkspace = createLatexWorkspace({ config, dispatch, settings, library: config.library, python: config.python })
-    const fetchHandler = createFetchHandler({ ...options, citationClaims, paperModel, paperDatasetAI: languageAI, paperDatasetModel: signal => paperModel.resolve(signal), paperChat, companion, languageLearning, nativeResearch, handwriting, annotationCaption, libraryKnowledge, paperAnalysis, challengeMining, latexAI, latexWorkspace, basePath: '/api/paper-library' })
+    const fetchHandler = createFetchHandler({ ...options, citationClaims, paperModel, paperDatasetAI: languageAI, paperDatasetModel: signal => paperModel.resolve(signal), paperChat, companion, languageLearning, languageSpeech, nativeResearch, handwriting, annotationCaption, libraryKnowledge, paperAnalysis, challengeMining, latexAI, latexWorkspace, basePath: '/api/paper-library' })
     web.effect(() => web.webServer.register({
       kind: 'prefix',
       path: '/api/paper-library',

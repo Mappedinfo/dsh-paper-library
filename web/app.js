@@ -61,14 +61,16 @@ function el(tag, className, text) {
 }
 async function api(action, args = {}, options = {}) {
   let response;
+  const speech = action === 'language_speech';
   // The server rejects excess requests before reading or dispatching them. Retry
   // only that explicit admission response; an uncertain mutation is never replayed.
   for (let attempt = 0; attempt < 5; attempt++) {
-    response = await fetch(action.startsWith('state_')?'./state':'./api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...args }),...(options.keepalive?{keepalive:true}:{}),...(options.signal?{signal:options.signal}:{}) });
-    if (response.status !== 429 || attempt === 4) break;
+    response = await fetch(speech?'./language-speech':action.startsWith('state_')?'./state':'./api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(speech?args:{ action, ...args }),...(options.keepalive?{keepalive:true}:{}),...(options.signal?{signal:options.signal}:{}) });
+    if (speech || response.status !== 429 || attempt === 4) break;
     await response.text();
     await new Promise(resolve => setTimeout(resolve, 250 * 2 ** attempt));
   }
+  if (speech && response.ok && response.headers.get('content-type') === 'audio/wav') return response.blob();
   let data;
   try { data = await response.json(); } catch { throw new Error(`服务返回无法读取的响应（HTTP ${response.status}）。请刷新后重试。`); }
   if (!response.ok || !data.ok) {
@@ -2341,6 +2343,7 @@ annotationEditor=window.PaperAnnotationEditor?.create({api,persistence,captionAv
   changed:()=>companionUI?.decorate(),toast});
 companionUI=window.PaperCompanion?.create({api,persistence,getPaper:()=>state.active,refreshAnnotations:loadAnnotations,beforeAsk:(id,annotationId)=>annotationEditor?.beforeAsk(id,annotationId),toast});
 const wikiUI=window.PaperEncyclopedia.create({api,toast,openReference:openReferencedPaper,
+  synthesizeSpeech:(text,signal)=>api('language_speech',{text},{signal}),
   getSource:()=>state.active?.pdf?{paper_id:state.active.id,title:state.active.title,page:state.selection?.id===state.active.id?state.selection.page:state.page,quote:state.selection?.id===state.active.id?state.selection.text:''}:null,
   searchUsage:async term=>{
     if(!catalogSearchUI)throw Error('当前工作台无法搜索全文。');
