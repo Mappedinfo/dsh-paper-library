@@ -85,9 +85,19 @@
     return { dispose }
   }
 
+  // PDF colors stay literal across displays. Light fills preserve dark text,
+  // and the darker companion colors keep thin marks visible on the page.
+  const annotationPalettes = Object.freeze({
+    jade: Object.freeze({ highlight: '#a9dbbb', stroke: '#347556' }),
+    navy: Object.freeze({ highlight: '#b1d2f0', stroke: '#285a80' }),
+    neutral: Object.freeze({ highlight: '#c7ced7', stroke: '#525d6c' }),
+    rose: Object.freeze({ highlight: '#efb9cf', stroke: '#9b3d67' }),
+    apricot: Object.freeze({ highlight: '#f4c49a', stroke: '#994c25' }),
+    system: Object.freeze({ highlight: '#ffdb66', stroke: '#2455a4' }),
+  })
   const setPalette = value => {
-    if (['jade', 'navy', 'neutral', 'rose', 'apricot', 'system'].includes(value)) window.document.documentElement.dataset.palette = value
+    if (Object.hasOwn(annotationPalettes, value)) window.document.documentElement.dataset.palette = value
   }
   setPalette('jade')
-  window.PaperLibraryTheme = { create, tokens: TOKENS, instance: create(), setPalette }
+  window.PaperLibraryTheme = { create, tokens: TOKENS, instance: create(), setPalette, annotationPalettes }
 })()

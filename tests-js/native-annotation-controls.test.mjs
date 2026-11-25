@@ -105,6 +105,38 @@ test('rectangle and free-stroke controls use native tools and share explicit col
   ui.dispose();dom.window.close();
 });
 
+test('new markup, pen strokes and page notes follow the selected palette with independent overrides', {skip:!JSDOM}, async()=>{
+  const {window}=new JSDOM(html,{runScripts:'outside-only'}),doc=window.document,calls=[],writes=[];
+  for(const id of ['metadata-enrich','catalog-archive']){const b=doc.createElement('button');b.id=id;doc.body.append(b);}
+  window.PaperLibraryTheme={annotationPalettes:{jade:{highlight:'#a9dbbb',stroke:'#347556'},rose:{highlight:'#efb9cf',stroke:'#9b3d67'},system:{highlight:'#ffdb66',stroke:'#2455a4'}}};
+  doc.documentElement.dataset.palette='jade';
+  window.eval(style);window.eval(shell);
+  const reader={setTool:(...args)=>calls.push(args),getInkDraft:()=>null,getInkContext:()=>null};
+  const ui=window.PaperReadingShell.create({state:{active:{id:'synthetic',pdf:true},page:1,tab:'reader'},workbench:()=>({isTable:()=>false}),panels:()=>({visible:()=>false}),reader:()=>reader,navigate(){},toast(){},
+    persistence:{get:async()=>({markup:'underline',color:'#556677','annotation:rose:ink':'#9e4771'}),patch:async(_key,patch)=>writes.push({...patch})},
+  });
+  const tick=()=>new Promise(resolve=>setImmediate(resolve));
+  try {
+    await tick();
+    assert.deepEqual(calls.at(-1),['select','#347556']);
+    ui.setTool('highlight');
+    assert.equal(ui.tool().color,'#a9dbbb');
+    assert.equal(ui.annotationColor('note'),'#347556');
+    ui.setAnnotationPalette('rose');
+    assert.equal(ui.tool().color,'#efb9cf');
+    ui.setTool('ink');
+    assert.equal(calls.at(-1)[1].color,'#9e4771');
+    doc.getElementById('reader-reset-annotation-color').click();
+    assert.equal(ui.tool().color,'#9b3d67');
+    ui.setAnnotationPalette('jade');
+    assert.equal(ui.tool().color,'#347556');
+    ui.setTool('select');ui.setAnnotationPalette('system');
+    assert.equal(ui.tool().color,'#556677');
+    await tick();
+    assert.deepEqual(writes,[{'annotation:rose:ink':null}]);
+  } finally {ui.dispose();window.close();}
+});
+
 test('reading display toggles restore independent preferences and do not switch annotation tools', {skip:!JSDOM}, async()=>{
  const dom=new JSDOM(html,{runScripts:'outside-only',url:'http://synthetic.invalid/'}),w=dom.window,d=w.document,appearance=[],writes=[];
  for(const id of ['metadata-enrich','catalog-archive']){const b=d.createElement('button');b.id=id;d.body.append(b);}w.eval(shell);

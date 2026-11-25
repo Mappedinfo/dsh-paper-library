@@ -826,14 +826,15 @@ async function autoMarkup(selection, intent = {}) {
 }
 let annotationSaveBusy = false;
 function openAnnotation(mode, note = null, options = {}) {
-  if (typeof annotationEditor !== 'undefined' && annotationEditor) return annotationEditor.create(mode,{note,selection:options.selection||(['highlight','underline','strikeout'].includes(mode)?state.selection:null),color:options.color||readingShell?.tool().color||'#ffdb66',width:options.width??2,page:note?.page||options.selection?.page||state.page});
+  const color = options.color || readingShell?.annotationColor?.(mode) || readingShell?.tool().color || '#ffdb66';
+  if (typeof annotationEditor !== 'undefined' && annotationEditor) return annotationEditor.create(mode,{note,selection:options.selection||(['highlight','underline','strikeout'].includes(mode)?state.selection:null),color,width:options.width??2,page:note?.page||options.selection?.page||state.page});
   if (annotationSaveBusy) { toast('正在保存批注，请稍候。'); return; }
   if (!state.active?.pdf) return;
   const markup = ['highlight','underline','strikeout'].includes(mode);
   if (markup && !state.selection && !options.selection) return;
   if (mode === 'square' && !options.selection?.rects?.length) return;
   const selection = options.selection || (markup ? state.selection : null);
-  state.annotationDraft = { mode, id: state.active.id, page: note?.page || selection?.page || state.page, note, selection, color: options.color || readingShell?.tool().color || '#ffdb66', ...(mode === 'square' ? {width: options.width ?? 2} : {}) };
+  state.annotationDraft = { mode, id: state.active.id, page: note?.page || selection?.page || state.page, note, selection, color, ...(mode === 'square' ? {width: options.width ?? 2} : {}) };
   $('annotation-dialog-title').textContent = ({edit:'编辑批注',highlight:'高亮并批注',underline:'下划线批注',strikeout:'删除线批注',square:'矩形框批注',note:'添加便笺'})[mode] || '添加批注';
   $('annotation-page-label').textContent = `第 ${state.annotationDraft.page} 页`;
   $('annotation-quote').textContent = note?.text || selection?.text || ''; $('annotation-quote').hidden = !$('annotation-quote').textContent;
@@ -2396,6 +2397,7 @@ settingsUI = window.PaperLibrarySettings?.create({onLanguageSettings:()=>languag
   if(descriptor.available!==false)organizationUI?.applyPreferences(value);
   documentElementsUI?.applyResources(descriptor.resource_policy);
   window.PaperLibraryTheme?.setPalette(value.ui_palette);
+  readingShell?.setAnnotationPalette?.(value.ui_palette);
   const annotationSize=value.annotation_font_size;
   document.documentElement.style.setProperty('--annotation-font-size',`${Number.isInteger(annotationSize)&&annotationSize>=12&&annotationSize<=24?annotationSize:14}px`);
   analysisUI?.applyPreferences(value,descriptor.writable);

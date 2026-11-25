@@ -25,10 +25,11 @@ const view = (revision, patch = {}, extra = {}) => ({ namespace: 'paper-library'
 function fixture({ api, getPreferences } = {}) {
   const ids = new Map(), changes = [], calls = [], timeouts = new Map(), intervals = new Map(); let timerId = 0, listener;
   class Element {
-    constructor(tag) { this.tagName = tag; this.children = []; this.listeners = new Map(); this.attributes = {}; this.classList = { toggle() {} }; this.checked = false; this.disabled = false; this.open = false; this.value = ''; }
+    constructor(tag) { this.tagName = tag; this.children = []; this.listeners = new Map(); this.attributes = {}; this.classList = { toggle() {} }; this.checked = false; this.disabled = false; this.hidden = false; this.open = false; this.value = ''; }
     set id(id) { this._id = id; ids.set(id, this); } get id() { return this._id; }
     append(...nodes) { this.children.push(...nodes); }
     setAttribute(key, value) { this.attributes[key] = value; }
+    removeAttribute(key) { delete this.attributes[key]; }
     addEventListener(name, fn) { if (!this.listeners.has(name)) this.listeners.set(name, new Set()); this.listeners.get(name).add(fn); }
     removeEventListener(name, fn) { this.listeners.get(name)?.delete(fn); }
     emit(name, event = {}) { for (const fn of this.listeners.get(name) ?? []) fn(event); }
@@ -53,13 +54,13 @@ function fixture({ api, getPreferences } = {}) {
   };
 }
 
-test('settings defaults to a dialog and keeps the same controls in full-page mode', async()=>{
+test('settings keeps the directory and the same controls in dialog and full-page modes', async()=>{
   const f=fixture({api:()=>view(1)});
   const dialog=f.ids.get('library-settings'),trigger=f.ids.get('settings-open'),expand=f.ids.get('settings-expand');
   const sections=dialog.children[1].children[0];
   trigger.emit('click');await flush();
   assert.equal(dialog.open,true);
-  assert.equal(sections.hidden,true);
+  assert.equal(sections.hidden,false);
   const setting=f.ids.get('setting-annotation_font_size');
   expand.emit('click');
   assert.equal(dialog.open,true);
@@ -69,12 +70,31 @@ test('settings defaults to a dialog and keeps the same controls in full-page mod
   let prevented=false;
   dialog.emit('cancel',{preventDefault(){prevented=true;}});
   assert.equal(prevented,true);
-  assert.equal(sections.hidden,true);
+  assert.equal(sections.hidden,false);
   expand.emit('click');dialog.close();
   trigger.emit('click');await flush();
   assert.equal(dialog.open,true);
   assert.equal(expand.textContent,'全页设置');
-  assert.equal(sections.hidden,true);
+  assert.equal(sections.hidden,false);
+  f.ui.dispose();
+});
+
+test('the settings directory marks clicked sections and follows manual scrolling', async()=>{
+  const f=fixture({api:()=>view(1)});
+  const [directory,body]=f.ids.get('library-settings').children[1].children;
+  body.scrollTop=0;body.scrollHeight=1200;body.clientHeight=400;
+  body.getBoundingClientRect=()=>({top:60});
+  for(const [index,section] of body.children.slice(3).entries())section.getBoundingClientRect=()=>({top:60+index*160-body.scrollTop});
+  const current=()=>directory.children.find(link=>link.attributes['aria-current']==='location');
+  assert.equal(current().textContent,'界面配色');
+  directory.children[2].emit('click');
+  assert.equal(body.scrollTop,308);
+  body.emit('scroll');assert.equal(current().textContent,'资源与性能');
+  body.scrollTop=480;body.emit('scroll');assert.equal(current().textContent,'阅读与自动化');
+  directory.children[4].emit('click');
+  assert.equal(body.children[7].open,true);
+  assert.equal(current().textContent,'模型、网络与存储');
+  body.scrollTop=800;body.emit('scroll');assert.equal(current().textContent,'导出与维护');
   f.ui.dispose();
 });
 

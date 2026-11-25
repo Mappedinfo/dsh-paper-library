@@ -46,6 +46,20 @@ function child({ embedded = true, dark = false } = {}) {
 }
 const packet = (tokens = {}, mode = 'dark') => ({ type: 'paper-library:theme', version: 1, status: 'ready', mode, tokens })
 
+test('annotation palette fills keep PDF text readable and companion strokes contrast with paper', () => {
+  const { api } = child({ embedded: false })
+  const luminance = hex => hex.slice(1).match(/../g)
+    .map(value => Number.parseInt(value, 16) / 255)
+    .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
+    .reduce((sum, value, i) => sum + value * [.2126, .7152, .0722][i], 0)
+  assert.equal(Object.keys(api.annotationPalettes).length, 6)
+  for (const [name, { highlight, stroke }] of Object.entries(api.annotationPalettes)) {
+    assert.ok((luminance(highlight) + .05) / (luminance('#18212b') + .05) >= 7, name)
+    assert.ok(1.05 / (luminance(highlight) + .05) >= 1.25, name)
+    assert.ok(1.05 / (luminance(stroke) + .05) >= 4.5, name)
+  }
+})
+
 test('official theme semantics and font size win over custom theme names and earlier DOM projection', async () => {
   const f = host(), dispose = bindThemeContext(f)
   await tick()

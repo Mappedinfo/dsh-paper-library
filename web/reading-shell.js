@@ -19,10 +19,21 @@ window.PaperReadingShell = (() => {
       const toggle=()=>{if(!disclosure.open)return;for(const other of menus)if(other.disclosure!==disclosure)other.disclosure.open=false;placeMenu(disclosure,panel);};
       disclosure.addEventListener('toggle',toggle);menus.push({disclosure,panel,toggle});
     };
-    let context='reader', tool='select', color='#ffdb66', inkColor='#2455a4', inkWidth=2, markup='highlight', focused=false, saveLayoutTimer=null, penOnly=false, darkPdf=false, bionic=false, appearanceTouched=false;
+    let context='reader', tool='select', inkWidth=2, markup='highlight', focused=false, saveLayoutTimer=null, penOnly=false, darkPdf=false, bionic=false, appearanceTouched=false;
+    const annotationPalettes = window.PaperLibraryTheme?.annotationPalettes || {};
+    let paletteName = document.documentElement.dataset.palette || 'system';
+    const colorOverrides = new Map();
+    const isPenTool = type => type === 'ink' || type === 'square';
+    const colorPreference = (name, type) => `annotation:${name}:${isPenTool(type) ? 'ink' : 'text'}`;
+    const annotationColor = (type = tool) => {
+      const colors = annotationPalettes[paletteName];
+      const style = type === 'select' ? markup : type;
+      const defaultColor = colors ? (style === 'highlight' ? colors.highlight : colors.stroke) : (isPenTool(style) ? '#2455a4' : '#ffdb66');
+      return colorOverrides.get(colorPreference(paletteName, style)) ?? defaultColor;
+    };
     let autoMarkup=true, autoMarkupTouched=false;
     let inkBusy=false, inkError='', inkTitle='', linkedSession=null, linkedBusy=false, finishLinked=null, inkRecords=[];
-    const applyTool=()=>reader()?.setTool(tool,['ink','square'].includes(tool)?{color:inkColor,width:inkWidth}:color);
+    const applyTool=()=>reader()?.setTool(tool,isPenTool(tool)?{color:annotationColor(),width:inkWidth}:annotationColor());
     const ribbon=node('nav',null,'reader-ribbon');ribbon.setAttribute('aria-label','文献工作区');
     const projectActions=document.querySelector('.project-actions');
     projectActions?.addEventListener('click',event=>{if(event.target.closest('.project-actions-panel button'))projectActions.open=false;});
@@ -53,12 +64,12 @@ window.PaperReadingShell = (() => {
     for(const [type,label] of [['select','选择'],['ink','自由笔画'],['square','矩形框'],['highlight','高亮'],['underline','下划线'],['strikeout','删除线'],['note','便笺']]){
       const b=button(`reader-tool-${type}`,label,async()=>{if(beforeToolChange&&!await beforeToolChange(type))return;tool=type;context='annotations';if(['highlight','underline','strikeout'].includes(type)){markup=type;saveLayoutLater();}applyTool();sync();});b.dataset.readerTool=type;annotationTools.append(b);
     }
-    const colorLabel=node('label','颜色','reader-color');const input=node('input');input.type='color';input.id='reader-color';input.value=color;input.setAttribute('aria-label','批注颜色');
+    const colorLabel=node('label','颜色','reader-color');const input=node('input');input.type='color';input.id='reader-color';input.value=annotationColor();input.setAttribute('aria-label','批注颜色');
     // Layout preferences share one write queue: overlapping read-modify-write
     // patches race the revision and would surface as a save conflict banner.
     let layoutQueue=Promise.resolve();
     const patchLayout=value=>{layoutQueue=layoutQueue.then(()=>persistence?persistence.patch('reader:layout',value):null).catch(()=>{});return layoutQueue;};
-    const saveLayout=()=>patchLayout({color,markup,inkColor,inkWidth});
+    const saveLayout=()=>patchLayout({markup,inkWidth});
     const appearance=node('details',null,'reader-appearance');appearance.id='reader-appearance';
     const appearanceSummary=node('summary','阅读显示');appearanceSummary.setAttribute('aria-controls','reader-appearance-options');appearance.append(appearanceSummary);
     const appearanceOptions=node('div',null,'reader-pen-options');appearanceOptions.id='reader-appearance-options';
@@ -85,11 +96,19 @@ window.PaperReadingShell = (() => {
     });
 
     const saveLayoutLater=()=>{if(saveLayoutTimer!==null)window.clearTimeout(saveLayoutTimer);saveLayoutTimer=window.setTimeout(()=>{saveLayoutTimer=null;saveLayout();},150);};
-    input.addEventListener('input',()=>{if(['ink','square'].includes(tool))inkColor=input.value;else color=input.value;applyTool();saveLayout();sync();});colorLabel.append(input);
+    function setAnnotationColor(value) {
+      const key = colorPreference(paletteName, tool);
+      colorOverrides.set(key, value);
+      void patchLayout({[key]:value});
+      applyTool();
+      sync();
+    }
+    input.addEventListener('input',()=>setAnnotationColor(input.value));colorLabel.append(input);
     const presetsMenu=node('details',null,'reader-color-presets-menu'),presetsSummary=node('summary','常用配色');presetsMenu.append(presetsSummary);
     const presetsPanel=node('div',null,'reader-pen-options');
     const presets=window.PaperAnnotationStyle?.palette(input.value,value=>{input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));});
-    if(presets){presetsPanel.append(presets.element);presetsMenu.append(presetsPanel);bindMenu(presetsMenu,presetsPanel);presetsMenu.addEventListener('toggle',()=>{if(presetsMenu.open)presets.set(input.value);});input.addEventListener('input',()=>presets.set(input.value));}
+    const resetColor = button('reader-reset-annotation-color','使用主题默认色',()=>setAnnotationColor(null));
+    if(presets){presetsPanel.append(presets.element,resetColor);presetsMenu.append(presetsPanel);bindMenu(presetsMenu,presetsPanel);}
     const widthLabel=node('label','粗细','reader-ink-width');const widthInput=node('select');widthInput.id='reader-ink-width';widthInput.setAttribute('aria-label','笔画与矩形边框粗细');
     for(const [value,label] of [[1,'细'],[2,'中'],[4,'粗']]){const option=node('option',label);option.value=String(value);widthInput.append(option);}widthInput.value=String(inkWidth);widthLabel.append(widthInput);
     widthInput.addEventListener('change',()=>{inkWidth=Number(widthInput.value);applyTool();saveLayout();});
@@ -140,8 +159,16 @@ window.PaperReadingShell = (() => {
     if(persistence)void persistence.get('reader:layout').then(value=>{
       if(!layoutTouched&&['single','spread'].includes(value?.readerLayout))selectLayout(value.readerLayout);
       const saved=Number(value?.zoom);if(Number.isFinite(saved)&&saved!==1)setZoom(saved);
-      if(typeof value?.color==='string'&&/^#[0-9a-f]{6}$/i.test(value.color))color=value.color;
-      if(typeof value?.inkColor==='string'&&/^#[0-9a-f]{6}$/i.test(value.inkColor))inkColor=value.inkColor;
+      const validColor = color => typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color);
+      for (const name of new Set(['system', ...Object.keys(annotationPalettes)])) {
+        for (const [type, legacy, oldDefault] of [['select', value?.color, '#ffdb66'], ['ink', value?.inkColor, '#2455a4']]) {
+          const key = colorPreference(name, type);
+          if (colorOverrides.has(key)) continue;
+          const saved = value?.[key];
+          if (saved === null || validColor(saved)) colorOverrides.set(key, saved);
+          else if (name === 'system' && validColor(legacy) && legacy.toLowerCase() !== oldDefault) colorOverrides.set(key, legacy);
+        }
+      }
       if([1,2,4].includes(value?.inkWidth))inkWidth=value.inkWidth;
       if(!appearanceTouched){darkPdf=value?.darkPdf===true;bionic=value?.bionic===true;applyAppearance();}
       if(!annotationOrderTouched && value?.annotationOrder==='time'){
@@ -149,8 +176,8 @@ window.PaperReadingShell = (() => {
         onAnnotationOrderChange?.('time');
       }
       if(typeof value?.penOnly==='boolean'){penOnly=value.penOnly;penCheck.checked=penOnly;reader()?.setPenOnly?.(penOnly);}
-      applyTool();
       if(typeof value?.markup==='string'&&['highlight','underline','strikeout'].includes(value.markup))markup=value.markup;
+      applyTool();
       if(!autoMarkupTouched&&typeof value?.autoMarkup==='boolean')autoMarkup=value.autoMarkup;
       sync();
     }).catch(()=>{});
@@ -273,7 +300,10 @@ window.PaperReadingShell = (() => {
       autoToggle.setAttribute('aria-checked',String(autoMarkup));
       autoToggle.hidden=['ink','square'].includes(tool);widthLabel.hidden=!['ink','square'].includes(tool);
       $('continuous-reader').classList.toggle('pdr-temporary-selection',!autoMarkup);
-      input.value=['ink','square'].includes(tool)?inkColor:color;widthInput.value=String(inkWidth);syncInk();
+      input.value=annotationColor();
+      presets?.set(input.value);
+      resetColor.disabled=!colorOverrides.get(colorPreference(paletteName,tool));
+      widthInput.value=String(inkWidth);syncInk();
       if(readerTools.hidden||document.body.classList.contains('board-mode'))status('');
       else if(message.parentNode===annotationTools&&annotationTools.hidden)readerTools.append(message);
       placeMenus();
@@ -326,8 +356,15 @@ window.PaperReadingShell = (() => {
     document.addEventListener('fullscreenchange',fullscreenChange);document.addEventListener('keydown',keydown);
     // Prevent a homepage link from discarding a question/metadata draft.
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
+    applyTool();
     sync();
-    return {sync,setContext,arrangeControls,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,zoomChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!readerToolsAvailable.has(value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:['ink','square'].includes(tool)?inkColor:color,width:inkWidth,markup}),autoMarkup:()=>autoMarkup,markup:()=>markup,isFocused:()=>focused,
+    return {sync,setContext,arrangeControls,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,zoomChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!readerToolsAvailable.has(value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:annotationColor(),width:inkWidth,markup}),autoMarkup:()=>autoMarkup,markup:()=>markup,isFocused:()=>focused,
+      annotationColor, setAnnotationPalette(value) {
+        if (!Object.hasOwn(annotationPalettes,value) || value===paletteName) return;
+        paletteName=value;
+        applyTool();
+        sync();
+      },
       dispose(){if(zoomSaveTimer!==null)window.clearTimeout(zoomSaveTimer);for(const {disclosure,update} of organizerDisclosures)disclosure.removeEventListener('toggle',update);for(const {disclosure,toggle} of menus)disclosure.removeEventListener('toggle',toggle);menuObserver?.disconnect();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placeMenus);document.removeEventListener('scroll',placeMenus,true);document.removeEventListener('click',closeMenus);document.removeEventListener('keydown',menuKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);}};
   }
   return {create};

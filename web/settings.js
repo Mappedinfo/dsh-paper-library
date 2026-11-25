@@ -25,9 +25,19 @@ window.PaperLibrarySettings = (() => {
     for(const [value,label,help] of [['jade','墨绿铜金','温暖纸面 · 墨绿操作'],['navy','深海蓝灰','清亮白底 · 海蓝操作'],['neutral','石墨中性','中性灰阶 · 专业克制'],['rose','樱粉柔光','柔粉纸面 · 玫瑰操作'],['apricot','杏橙暖光','奶杏纸面 · 暖橙操作'],['system','跟随 DSH','沿用宿主配色']]){
       const row=make('label','settings-palette'),input=make('input'),swatches=make('span','palette-swatches'),copy=make('span');
       row.setAttribute('data-palette-option',value);input.type='radio';input.name='paper-library-palette';input.value=value;input.id=`setting-palette-${value}`;swatches.setAttribute('aria-hidden','true');
-      copy.append(make('strong','',label),make('small','',help));row.append(input,swatches,copy);paletteControls.append(row);paletteInputs.set(value,{input,row});input.addEventListener('change',()=>{if(input.checked)void save({ui_palette:value});});
+      copy.append(make('strong','',label),make('small','',help));
+      const colors=window.PaperLibraryTheme?.annotationPalettes?.[value];
+      if(colors){
+        const preview=make('span','palette-annotation-preview','批注');
+        preview.style.setProperty('--annotation-fill',colors.highlight);
+        preview.style.setProperty('--annotation-stroke',colors.stroke);
+        preview.title='默认高亮与划线颜色';
+        preview.setAttribute('aria-hidden','true');
+        copy.append(preview);
+      }
+      row.append(input,swatches,copy);paletteControls.append(row);paletteInputs.set(value,{input,row});input.addEventListener('change',()=>{if(input.checked)void save({ui_palette:value});});
     }
-    paletteControls.append(make('p','palette-legend','阅读 · 墨绿　知识 · 紫色　写作 · 海蓝　演示 · 铜金。明暗随 DSH；PDF 批注保留原色。'));
+    paletteControls.append(make('p','palette-legend','新批注的默认高亮和划线颜色跟随界面配色。阅读工具栏可自定义颜色。'));
     const resourceControls=make('fieldset','settings-resources');resourceControls.id='settings-resources';resourceControls.append(make('legend','','资源与性能'));
     const resourceProfile=make('select');resourceProfile.id='setting-resource_profile';resourceProfile.setAttribute('aria-label','资源档位');
     for(const [value,label]of [['eco','节能 · 256 MiB'],['balanced','均衡 · 512 MiB'],['performance','高性能 · 1024 MiB'],['custom','自定义']]){const option=make('option','',label);option.value=value;resourceProfile.append(option);}resourceControls.append(resourceProfile);
@@ -82,7 +92,9 @@ window.PaperLibrarySettings = (() => {
     const exportLibrary=document.getElementById?.('export-library');if(exportLibrary)maintenance.append(exportLibrary);
     const footer=make('footer'),reload=make('button','button subtle','重新读取'),reset=make('button','button subtle','恢复默认');reload.type=reset.type='button';reload.addEventListener('click',()=>{void refresh();if(storage.open)void modelSettings?.refresh();});reset.addEventListener('click',()=>void save(null));footer.append(reload,reset);
     const layout=make('div','settings-layout'),body=make('div','settings-body'),sections=make('nav','settings-sections');
-    sections.hidden=true;sections.setAttribute('aria-label','设置目录');
+    sections.setAttribute('aria-label','设置目录');
+    const sectionLinks=new Map();
+    let jumpScrollTop=null;
     for(const [label,section] of [
       ['界面配色',paletteControls],['划线阅读轨迹',distributionControls],
       ['资源与性能',resourceControls],['阅读与自动化',controls],
@@ -90,16 +102,39 @@ window.PaperLibrarySettings = (() => {
     ]){
       const jump=make('button','button subtle',label);jump.type='button';
       section.tabIndex=-1;
-      jump.addEventListener('click',()=>{section.scrollIntoView?.({block:'start'});section.focus?.({preventScroll:true});});
+      jump.addEventListener('click',()=>jumpTo(section));
+      sectionLinks.set(section,jump);
       sections.append(jump);
     }
+    function markSection(selected){
+      for(const [section,link] of sectionLinks){
+        if(section===selected)link.setAttribute('aria-current','location');
+        else link.removeAttribute('aria-current');
+      }
+    }
+    function jumpTo(section){
+      if(section===storage)storage.open=true;
+      body.scrollTop+=section.getBoundingClientRect().top-body.getBoundingClientRect().top-12;
+      jumpScrollTop=body.scrollTop;
+      markSection(section);
+      section.focus?.({preventScroll:true});
+    }
+    function followScroll(){
+      if(body.scrollTop===jumpScrollTop)return;
+      jumpScrollTop=null;
+      const edge=body.getBoundingClientRect().top+24;
+      const ordered=[...sectionLinks.keys()];
+      const atEnd=body.scrollTop>0&&body.scrollHeight-body.clientHeight-body.scrollTop<=1;
+      markSection(atEnd?ordered.at(-1):ordered.findLast(section=>section.getBoundingClientRect().top<=edge)||ordered[0]);
+    }
+    body.addEventListener('scroll',followScroll,{passive:true});
+    markSection(paletteControls);
     body.append(description,status,languageSettings,paletteControls,distributionControls,resourceControls,controls,storage,maintenance);
     layout.append(sections,body);dialog.append(header,layout,footer);document.body.append(dialog);
     let fullPage=false;
     function setFullPage(value){
       fullPage=value;
       dialog.classList.toggle('is-expanded',value);
-      sections.hidden=!value;
       expand.textContent=value?'还原弹窗':'全页设置';
     }
     expand.addEventListener('click',()=>setFullPage(!fullPage));
@@ -152,7 +187,7 @@ window.PaperLibrarySettings = (() => {
     dialog.addEventListener('close',()=>{if(!dialog.open){setFullPage(false);clearInterval(visibleTimer);visibleTimer=null;}});
     if(window.parent!==window)window.parent.postMessage({type:'paper-library:settings-ready',version:1},window.location.origin);
     render();
-    return {refresh,async showResources(){showDialog();await refresh();resourceControls.scrollIntoView?.({block:'start'});resourceProfile.focus?.();},dispose(){disposed=true;clearTimeout(timer);clearInterval(visibleTimer);unsubscribe?.();window.removeEventListener('message',receive);window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);}};
+    return {refresh,async showResources(){showDialog();await refresh();jumpTo(resourceControls);resourceProfile.focus?.({preventScroll:true});},dispose(){disposed=true;clearTimeout(timer);clearInterval(visibleTimer);unsubscribe?.();window.removeEventListener('message',receive);window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);}};
   }
   return {create};
 })();
