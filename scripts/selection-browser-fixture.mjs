@@ -48,6 +48,8 @@ try {
   await page.goto(origin); await page.waitForLoadState('networkidle');
   await page.waitForSelector(`#paper-list .paper-card[data-id="${paper.id}"]`);
   await page.click(`#paper-list .paper-card[data-id="${paper.id}"]`);
+  await page.locator('[data-tab="annotations"]').click();
+  await page.locator('#reader-mode-auto').click();
   await page.locator('#continuous-reader .pdr-sheet[data-pdf-page="1"] img.pdr-page-image').waitFor();
 
   // 1. The selectable run must sit exactly over its raster word box.

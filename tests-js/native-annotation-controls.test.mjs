@@ -36,7 +36,7 @@ test('reading display restores and saves the annotation order separately from th
   const ui=window.PaperReadingShell.create({
     state:{active:{id:'synthetic',pdf:true},tab:'reader'}, workbench:()=>({isTable:()=>false}),
     panels:()=>({visible:()=>false}), reader:()=>null, navigate(){},
-    persistence:{get:async()=>({annotationOrder:'time'}),patch:async(key,value)=>writes.push({key,...value})},
+    persistence:{get:async()=>({annotationOrder:'time',autoMarkup:false}),patch:async(key,value)=>writes.push({key,...value})},
     onAnnotationOrderChange:value=>changes.push(value),
   });
   try{
@@ -45,6 +45,7 @@ test('reading display restores and saves the annotation order separately from th
     assert.equal(choice.value,'position');
     await new Promise(resolve=>setImmediate(resolve));
     assert.equal(choice.value,'time');
+    assert.equal(doc.getElementById('reader-mode-auto').getAttribute('aria-checked'),'false');
     assert.deepEqual(changes,['time']);
     assert.deepEqual(writes,[]);
     choice.value='position';
@@ -53,6 +54,35 @@ test('reading display restores and saves the annotation order separately from th
     assert.deepEqual(changes,['time','position']);
     assert.deepEqual(writes,[{key:'reader:layout',annotationOrder:'position'}]);
   }finally{ui.dispose();window.close();}
+});
+
+test('automatic markup defaults on for old layouts and toggles independently', {skip:!JSDOM}, async()=>{
+  const {window}=new JSDOM(html,{runScripts:'outside-only'}), doc=window.document;
+  const writes=[];
+  for(const id of ['metadata-enrich','catalog-archive']){const b=doc.createElement('button');b.id=id;doc.body.append(b);}
+  window.eval(shell);
+  const ui=window.PaperReadingShell.create({
+    state:{active:{id:'synthetic',pdf:true},tab:'reader'}, workbench:()=>({isTable:()=>false}),
+    panels:()=>({visible:()=>false}), reader:()=>null, navigate(){},
+    persistence:{get:async()=>({mode:'ask'}),patch:async(key,patch)=>writes.push({key,...patch})},
+  });
+  const tick=()=>new Promise(resolve=>setImmediate(resolve));
+  try {
+    const toggle=doc.getElementById('reader-mode-auto');
+    await tick();
+    assert.equal(toggle.getAttribute('role'),'switch');
+    assert.equal(toggle.getAttribute('aria-checked'),'true');
+    toggle.click();
+    await tick();
+    assert.equal(ui.autoMarkup(),false);
+    assert.equal(toggle.getAttribute('aria-checked'),'false');
+    assert.ok(doc.getElementById('continuous-reader').classList.contains('pdr-temporary-selection'));
+    assert.equal(ui.tool().type,'select');
+    assert.deepEqual(writes,[{key:'reader:layout',autoMarkup:false}]);
+    toggle.click();
+    await tick();
+    assert.equal(ui.autoMarkup(),true);
+  } finally {ui.dispose();window.close();}
 });
 
 test('rectangle and free-stroke controls use native tools and share explicit color/width', {skip:!JSDOM}, async()=>{
@@ -64,14 +94,14 @@ test('rectangle and free-stroke controls use native tools and share explicit col
   const click=async id=>{doc.getElementById(id).click();await new Promise(resolve=>setImmediate(resolve));};
   await click('reader-locate-annotations');assert.equal(calls.at(-1),'locate-notes');
   await click('reader-tool-square');assert.equal(ui.tool().type,'square');assert.equal(doc.getElementById('reader-tool-square').textContent,'矩形框');
-  assert.equal(doc.getElementById('reader-mode-group').hidden,true);assert.equal(doc.getElementById('reader-ink-width').parentElement.hidden,false);
+  assert.equal(doc.getElementById('reader-mode-auto').hidden,true);assert.equal(doc.getElementById('reader-ink-width').parentElement.hidden,false);
   const color=doc.getElementById('reader-color'),width=doc.getElementById('reader-ink-width');
   color.value='#336699';color.dispatchEvent(new window.Event('input'));width.value='4';width.dispatchEvent(new window.Event('change'));
   assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),['square',{color:'#336699',width:4}]);
   await click('reader-tool-ink');assert.equal(doc.getElementById('reader-tool-ink').textContent,'自由笔画');assert.equal(doc.getElementById('reader-ink-save').textContent,'完成笔画');
   assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),['ink',{color:'#336699',width:4}]);
   doc.querySelector('.reader-color-presets-menu [aria-label=\"玫瑰\"]').click();assert.equal(color.value,'#df718b');assert.equal(calls.at(-1)[1].color,'#df718b');
-  await click('reader-tool-select');assert.equal(doc.getElementById('reader-mode-group').hidden,false);assert.equal(width.parentElement.hidden,true);
+  await click('reader-tool-select');assert.equal(doc.getElementById('reader-mode-auto').hidden,false);assert.equal(width.parentElement.hidden,true);
   ui.dispose();dom.window.close();
 });
 

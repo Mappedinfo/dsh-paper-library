@@ -166,6 +166,7 @@ try {
     assert.equal(injectedFailures, 1); record('failed-page-retains-placeholder-and-explicit-retry-clears-error-and-loads-that-page');
     await jump(1);
     await page.locator('[data-tab="annotations"]').click();
+    await page.locator('#reader-mode-auto').click();
     if (await page.locator('.library-pane #annotations-tab').isVisible()) await page.locator('#reading-sidebar-library').click();
     const colors = { highlight: '#fed766', underline: '#2674ba', strikeout: '#c53b45', note: '#3a9365' };
     for (const type of ['highlight', 'underline', 'strikeout', 'note']) {
@@ -180,6 +181,7 @@ try {
         await start.scrollIntoViewIfNeeded(); const a = await start.boundingBox(), b = await end.boundingBox();
         assert.ok(a && b); await page.mouse.move(a.x + 1, a.y + a.height * .5); await page.mouse.down();
         await page.mouse.move(b.x + b.width - 1, b.y + b.height * .5, { steps: 12 }); await page.mouse.up();
+        await page.locator('#annotate-selection').click();
       }
       await page.locator('#annotation-dialog').waitFor();
       await page.locator('#annotation-comment').fill(`Synthetic UI ${type} comment`);
@@ -223,12 +225,13 @@ try {
     assert.equal(partial.text, preview, 'The annotation stores the exact selected slice');
     assert.ok(!partial.text.startsWith('Evidence') && partial.text.endsWith('stan'), `Stored quote must be the exact slice: ${partial.text}`);
     assert.ok(partial.rects[0][0] > 0 && partial.rects[0][2] - partial.rects[0][0] < 400, 'The rectangle covers the slice, not the line start');
-    // The same drag with a markup tool active opens the annotation dialog
-    // immediately, and its quote must be the same exact slice.
+    // With automatic markup off, the markup tool preserves the same exact slice
+    // for the explicit annotation action.
     await page.locator('#reader-tool-highlight').click(); await ready(1);
     await page.evaluate(() => { window.__markupAtUp = ''; document.addEventListener('pointerup', () => { window.__markupAtUp = window.getSelection().toString(); }, true); });
     await page.mouse.move(fromBox.x + fromBox.width * .45, fromBox.y + fromBox.height * .5); await page.mouse.down();
     await page.mouse.move(toBox.x + toBox.width * .5, toBox.y + toBox.height * .5, { steps: 14 }); await page.mouse.up();
+    await page.locator('#annotate-selection').click();
     await page.locator('#annotation-dialog').waitFor();
     const atUp = (await page.evaluate(() => window.__markupAtUp)).replace(/\s+/g, ' ').trim();
     const quoted = (await page.locator('#annotation-quote').innerText()).replace(/\s+/g, ' ').trim();

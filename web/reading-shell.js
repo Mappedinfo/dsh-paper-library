@@ -3,7 +3,6 @@
 /** Contextual office-style ribbon. It moves existing controls, keeping their handlers. */
 window.PaperReadingShell = (() => {
   const readerToolsAvailable = new Set(['select','highlight','underline','strikeout','note','square','ink']);
-  const MODES = { auto: '自动着色', ask: '勾选后提问' };
   function placeMenu(disclosure, panel) {
     if (!disclosure?.open || !panel) return;
     window.PaperFloatingWindows?.placeBelow(disclosure.querySelector('summary'), panel);
@@ -20,7 +19,8 @@ window.PaperReadingShell = (() => {
       const toggle=()=>{if(!disclosure.open)return;for(const other of menus)if(other.disclosure!==disclosure)other.disclosure.open=false;placeMenu(disclosure,panel);};
       disclosure.addEventListener('toggle',toggle);menus.push({disclosure,panel,toggle});
     };
-    let context='reader', tool='select', color='#ffdb66', inkColor='#2455a4', inkWidth=2, mode='ask', markup='highlight', focused=false, saveLayoutTimer=null, penOnly=false, darkPdf=false, bionic=false, appearanceTouched=false;
+    let context='reader', tool='select', color='#ffdb66', inkColor='#2455a4', inkWidth=2, markup='highlight', focused=false, saveLayoutTimer=null, penOnly=false, darkPdf=false, bionic=false, appearanceTouched=false;
+    let autoMarkup=true, autoMarkupTouched=false;
     let inkBusy=false, inkError='', inkTitle='', linkedSession=null, linkedBusy=false, finishLinked=null, inkRecords=[];
     const applyTool=()=>reader()?.setTool(tool,['ink','square'].includes(tool)?{color:inkColor,width:inkWidth}:color);
     const ribbon=node('nav',null,'reader-ribbon');ribbon.setAttribute('aria-label','文献工作区');
@@ -58,7 +58,7 @@ window.PaperReadingShell = (() => {
     // patches race the revision and would surface as a save conflict banner.
     let layoutQueue=Promise.resolve();
     const patchLayout=value=>{layoutQueue=layoutQueue.then(()=>persistence?persistence.patch('reader:layout',value):null).catch(()=>{});return layoutQueue;};
-    const saveLayout=()=>patchLayout({mode,color,markup,inkColor,inkWidth});
+    const saveLayout=()=>patchLayout({color,markup,inkColor,inkWidth});
     const appearance=node('details',null,'reader-appearance');appearance.id='reader-appearance';
     const appearanceSummary=node('summary','阅读显示');appearanceSummary.setAttribute('aria-controls','reader-appearance-options');appearance.append(appearanceSummary);
     const appearanceOptions=node('div',null,'reader-pen-options');appearanceOptions.id='reader-appearance-options';
@@ -93,15 +93,15 @@ window.PaperReadingShell = (() => {
     const widthLabel=node('label','粗细','reader-ink-width');const widthInput=node('select');widthInput.id='reader-ink-width';widthInput.setAttribute('aria-label','笔画与矩形边框粗细');
     for(const [value,label] of [[1,'细'],[2,'中'],[4,'粗']]){const option=node('option',label);option.value=String(value);widthInput.append(option);}widthInput.value=String(inkWidth);widthLabel.append(widthInput);
     widthInput.addEventListener('change',()=>{inkWidth=Number(widthInput.value);applyTool();saveLayout();});
-    // Two reading habits: mark while reading (自动着色) or select then ask
-    // (勾选后提问, the default). The choice, colour and markup type persist.
-    const modeGroup=node('div',null,'reader-mode');modeGroup.id='reader-mode-group';modeGroup.setAttribute('role','group');modeGroup.setAttribute('aria-label','选文后的行为');
-    modeGroup.append(node('span','选文后','reader-mode-label'));
-    const modeButtons={};
-    for(const [value,label] of Object.entries(MODES)){
-      const b=button(`reader-mode-${value}`,label,()=>{mode=value;if(value==='auto'&&tool==='select')reader()?.setTool(tool,color);saveLayout();sync();});
-      b.setAttribute('aria-pressed',String(mode===value));modeButtons[value]=b;modeGroup.append(b);
-    }
+    const autoToggle=button('reader-mode-auto','自动着色',()=>{
+      autoMarkupTouched=true;
+      autoMarkup=!autoMarkup;
+      void patchLayout({autoMarkup});
+      sync();
+    });
+    autoToggle.classList.add('paper-switch');
+    autoToggle.setAttribute('role','switch');
+    autoToggle.title='开启后选文自动添加批注，关闭后可临时选文并右键复制';
     const penSettings=node('details',null,'reader-pen-settings');penSettings.id='reader-pen-settings';
     const penSummary=node('summary','笔输入');penSummary.setAttribute('aria-controls','reader-pen-options');penSettings.append(penSummary);
     const penOptions=node('div',null,'reader-pen-options'),penLabel=node('label'),penCheck=node('input');penOptions.id='reader-pen-options';penCheck.type='checkbox';penCheck.id='reader-pen-only';penLabel.append(penCheck,document.createTextNode('仅用笔标注'));
@@ -112,7 +112,7 @@ window.PaperReadingShell = (() => {
     function inputChanged(info){const labels={pen:'已识别：手写笔',touch:'已识别：触控',mouse:'收到：鼠标兼容输入',unknown:'输入类型未能识别'};inputKind.dataset.inputKind=info?.lastType||'';inputKind.textContent=labels[info?.lastType]||'在页面上用笔或手指操作后显示识别结果。';if(info?.seenPen&&info.lastType!=='pen')inputKind.textContent+=' · 已检测到手写笔';}
     bindMenu(penSettings,penOptions);
     penSettings.addEventListener('toggle',()=>{if(penSettings.open)inputChanged(reader()?.getInputInfo?.());});
-    annotationTools.append(modeGroup,colorLabel);if(presets)annotationTools.append(presetsMenu);annotationTools.append(widthLabel,penSettings);
+    annotationTools.append(autoToggle,colorLabel);if(presets)annotationTools.append(presetsMenu);annotationTools.append(widthLabel,penSettings);
     // Fit-width default with free zoom: steppers, an explicit percentage and reset.
     let zoom=1, zoomSaveTimer=null;
     const zoomGroup=node('span',null,'reader-zoom');
@@ -151,7 +151,7 @@ window.PaperReadingShell = (() => {
       if(typeof value?.penOnly==='boolean'){penOnly=value.penOnly;penCheck.checked=penOnly;reader()?.setPenOnly?.(penOnly);}
       applyTool();
       if(typeof value?.markup==='string'&&['highlight','underline','strikeout'].includes(value.markup))markup=value.markup;
-      if(typeof value?.mode==='string'&&Object.hasOwn(MODES,value.mode))mode=value.mode;
+      if(!autoMarkupTouched&&typeof value?.autoMarkup==='boolean')autoMarkup=value.autoMarkup;
       sync();
     }).catch(()=>{});
     // One global import entry. Link intake belongs inside that same import surface.
@@ -270,9 +270,9 @@ window.PaperReadingShell = (() => {
       $('import-open').disabled=false;$('build-bibliography').disabled=false;
       $('metadata-enrich').disabled=!active;
       for(const b of annotationTools.querySelectorAll('[data-reader-tool]'))b.setAttribute('aria-pressed',String(b.dataset.readerTool===tool));
-      for(const [value,b] of Object.entries(modeButtons))b.setAttribute('aria-pressed',String(mode===value));
-      modeGroup.dataset.mode=mode;
-      modeGroup.hidden=['ink','square'].includes(tool);widthLabel.hidden=!['ink','square'].includes(tool);
+      autoToggle.setAttribute('aria-checked',String(autoMarkup));
+      autoToggle.hidden=['ink','square'].includes(tool);widthLabel.hidden=!['ink','square'].includes(tool);
+      $('continuous-reader').classList.toggle('pdr-temporary-selection',!autoMarkup);
       input.value=['ink','square'].includes(tool)?inkColor:color;widthInput.value=String(inkWidth);syncInk();
       if(readerTools.hidden||document.body.classList.contains('board-mode'))status('');
       else if(message.parentNode===annotationTools&&annotationTools.hidden)readerTools.append(message);
@@ -327,7 +327,7 @@ window.PaperReadingShell = (() => {
     // Prevent a homepage link from discarding a question/metadata draft.
     document.querySelector('.brand').addEventListener('click',e=>{e.preventDefault();workbench()?.setTable(true);});
     sync();
-    return {sync,setContext,arrangeControls,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,zoomChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!readerToolsAvailable.has(value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:['ink','square'].includes(tool)?inkColor:color,width:inkWidth,mode,markup}),mode:()=>mode,markup:()=>markup,isFocused:()=>focused,
+    return {sync,setContext,arrangeControls,status,leaveFocus,inkChanged,inkSaving,inputChanged,queueChanged,focusChanged,zoomChanged,linkedChanged,setInkQueue(value){inkQueue=value;},setTool(value){if(!readerToolsAvailable.has(value))return;tool=value;context='annotations';applyTool();sync();},tool:()=>({type:tool,color:['ink','square'].includes(tool)?inkColor:color,width:inkWidth,markup}),autoMarkup:()=>autoMarkup,markup:()=>markup,isFocused:()=>focused,
       dispose(){if(zoomSaveTimer!==null)window.clearTimeout(zoomSaveTimer);for(const {disclosure,update} of organizerDisclosures)disclosure.removeEventListener('toggle',update);for(const {disclosure,toggle} of menus)disclosure.removeEventListener('toggle',toggle);menuObserver?.disconnect();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('resize',placeMenus);document.removeEventListener('scroll',placeMenus,true);document.removeEventListener('click',closeMenus);document.removeEventListener('keydown',menuKey,true);document.removeEventListener('fullscreenchange',fullscreenChange);document.removeEventListener('keydown',keydown);}};
   }
   return {create};

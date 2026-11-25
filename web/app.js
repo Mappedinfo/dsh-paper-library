@@ -434,20 +434,32 @@ function clearSelection() {
   if (typeof pdfReader !== 'undefined') pdfReader?.clearSelectionDraft?.();
   window.getSelection()?.removeAllRanges();
 }
-function showReaderSelection(selection, intent) {
+function showReaderSelection(selection, intent, temporary = false) {
   if (!selection) { clearSelection(); publishReaderState(); return; }
   if (selection.id && selection.id !== state.active?.id) return;
-  state.selection={...selection,id:state.active.id,intent};
+  state.selection={...selection,id:state.active.id,intent,...(temporary ? {temporary:true} : {})};
   $('selection-count').textContent=selection.segments
     ? `第 ${selection.page}–${selection.segments.at(-1).page} 页 · 已选择文字`
     : `第 ${selection.page} 页 · 已选择文字`;
   const preview = $('selection-preview');
   preview.parentElement.querySelector('.selection-review')?.remove();
   const save = $('annotate-selection');
-  save.textContent = selection.review ? '保存批注' : '高亮并批注';
+  save.textContent = selection.review ? '保存批注' : '添加批注';
   save.title = '按住 Shift 拖选可追加选段';
   if (selection.review) preview.after(selectionReviewControls(selection.review));
   preview.textContent=selection.text;$('selection-tools').hidden=false;publishReaderState();
+}
+function handlePdfSelection(selection, intent) {
+  const edit = annotationRangeEdit;
+  if (edit && edit.id === state.active?.id) {
+    if (edit.manual) setRangeDraft(selection);
+    return;
+  }
+  if (!selection) { showReaderSelection(null); return; }
+  if (selection.id !== state.active?.id) return;
+  const automatic = readingShell?.autoMarkup() ?? true;
+  showReaderSelection(selection, intent, !automatic);
+  if (automatic && !selection.review) void autoMarkup(selection, intent);
 }
 function selectionReviewControls(review) {
   const details = el('div','selection-review');
@@ -1596,8 +1608,9 @@ $('clear-selection').addEventListener('click', () => {clearSelection();publishRe
 $('annotate-selection').addEventListener('click', () => {
   const selection = state.selection;
   if (!selection) return;
-  if (!selection.review) { openAnnotation('highlight'); return; }
-  void autoMarkup(selection, selection.intent);
+  if (selection.review) { void autoMarkup(selection, selection.intent); return; }
+  const { intent, color } = selection.intent || {};
+  openAnnotation(Object.hasOwn(MARKUP_LABELS, intent) ? intent : (readingShell?.markup() || 'highlight'), null, {selection,color});
 });
 $('discuss-selection').addEventListener('click', () => {
   if (state.selection?.segments) return toast('请先保存跨页批注，再从侧栏选作提问材料。', true);
@@ -1666,7 +1679,7 @@ function publishReaderState({ rememberOpen = false } = {}) {
   if (restoringReader || !state.active || state.active.resource_kind === 'dataset' || workbenchUI?.isTable() || (workbenchUI && readerPaperId !== state.active.id)) return true;
   const snapshot = { workspace:workspaceSnapshot(), paperId: state.active.id, page: state.page, tab: state.tab, chatDraft: paperChatUI?.draft() || '', chatContext: paperChatUI?.context() || { annotationRefs: [] },
     ...(readingPanels ? {panels:{outline:readingPanels.visible('outline'),elements:documentElementsUI?.selected(),annotations:readingPanels.visible('annotations'),metadata:readingPanels.visible('metadata'),chat:readingPanels.visible('chat'),side:$('reading-workspace').dataset.readingSide || 'left'}} : {}),
-    ...(state.selection?.id===state.active.id ? {readerSelection:{page:state.selection.page,text:state.selection.text,rects:state.selection.rects,...(state.selection.segments?{segments:state.selection.segments}:{})}} : {}),
+    ...(state.selection?.id===state.active.id && !state.selection.temporary ? {readerSelection:{page:state.selection.page,text:state.selection.text,rects:state.selection.rects,...(state.selection.segments?{segments:state.selection.segments}:{})}} : {}),
   };
   if ($('annotation-dialog').open && state.annotationDraft?.id === state.active.id) {
     const draft = state.annotationDraft;
@@ -1996,19 +2009,7 @@ pdfReader = window.PaperPDFReader?.create({root:$('continuous-reader'),api,getPa
     state.page=page;outlineUI?.setPage(page);state.pageCount=info.pageCount;state.pageData={width:info.width,height:info.height};
     $('page-number').value=page;$('page-number').max=info.pageCount;$('page-total').textContent=`/ ${info.pageCount}`;publishReaderState();
   },
-  onSelection: (selection,intent) => {
-    const edit = annotationRangeEdit;
-    if (edit && edit.id === state.active?.id) {
-      if (edit.manual) setRangeDraft(selection);
-      return;
-    }
-    if(!selection){showReaderSelection(null);return;}
-    if(selection?.id!==state.active?.id)return;
-    showReaderSelection(selection,intent);
-    if(selection.review)return;
-    if(readingShell?.mode()==='auto'){void autoMarkup(selection,intent);return;}
-    if(['highlight','underline','strikeout'].includes(intent.intent))openAnnotation(intent.intent,null,{selection,color:intent.color});
-  },
+  onSelection: handlePdfSelection,
   onRectangle: (selection,intent) => {if(selection.id===state.active?.id)return openAnnotation('square',null,{selection,color:intent.color,width:intent.width});},
   onPageNote: (selection,intent) => {if(selection.id===state.active?.id)openAnnotation('note',null,{selection,color:intent.color});},
   onAnnotationActivate: annotationId => {void locatePdfAnnotation(annotationId);},
@@ -2242,7 +2243,9 @@ function installReaderContextMenu() {
 
     const edit = surface === reader && !rangeEditBar.hidden && annotationRangeEdit?.id === paper.id ? annotationRangeEdit : null;
     const selection = surface === reader ? window.getSelection() : null;
-    const selected = selection && reader.contains(selection.anchorNode) && reader.contains(selection.focusNode) ? selection.toString().trim() : '';
+    const nativeText = selection && reader.contains(selection.anchorNode) && reader.contains(selection.focusNode) ? selection.toString().trim() : '';
+    const captured = surface === reader && !$('selection-tools').hidden && state.selection?.id === paper.id ? state.selection : null;
+    const selected = captured?.temporary || captured?.review || nativeText ? captured?.text || nativeText : '';
     const page = Number(event.target.closest('.pdr-sheet')?.dataset.pdfPage) || undefined;
     let label, actions;
     if (edit) {

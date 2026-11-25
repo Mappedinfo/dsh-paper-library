@@ -91,7 +91,7 @@ try {
   await page.goto(origin); await page.waitForLoadState('networkidle');
   await page.waitForFunction(() => initializedReader && !restoringReader);
   await page.locator(`#paper-list .paper-card[data-id="${paper.id}"]`).click(); await ready(1);
-  await page.locator('[data-tab="annotations"]').click(); await page.locator('#reader-mode-auto').click(); await ready(1);
+  await page.locator('[data-tab="annotations"]').click(); await ready(1);
 
   const partial = await points(1, 0, 3, .4), partialNote = await saveDrag(partial);
   assert.equal(partialNote.type, 'highlight'); assert.ok(!partialNote.text.startsWith('Synthetic')); assert.ok(!partialNote.text.endsWith('describes')); assert.match(partialNote.text, /measurement text/);
@@ -137,9 +137,9 @@ try {
   await page.locator('#reader-tool-highlight').click(); await showPage(3);
   const chinese = await points(3, 0, -1, .001), chineseNote = await saveDrag(chinese, 'highlight', 3);
   assert.equal(chineseNote.text, chinese.words.join('').trim()); assert.ok(!chineseNote.text.includes(' ')); await shot('pencil-cjk-markup'); record('trusted-pen-cjk-markup-keeps-original-characters-without-added-spaces');
-  await page.locator('#reader-mode-ask').click();
-  const beforeAsk = writes.length; await page.locator('#reader-tool-underline').click(); await drag(await points(3, 0, 0, .2));
-  await page.locator('#annotation-dialog').waitFor(); assert.ok((await page.locator('#annotation-quote').innerText()).length > 0); assert.equal(writes.length, beforeAsk); await page.evaluate(() => document.getElementById('annotation-dialog').close()); record('pen-selection-respects-ask-mode-and-waits-for-explicit-save');
+  await page.locator('#reader-mode-auto').click();
+  const beforeTemporary = writes.length; await page.locator('#reader-tool-underline').click(); await drag(await points(3, 0, 0, .2));
+  await page.locator('#selection-tools').waitFor(); assert.ok((await page.locator('#selection-preview').innerText()).length > 0); assert.equal(writes.length, beforeTemporary); await page.locator('#clear-selection').click(); record('pen-selection-stays-temporary-while-automatic-markup-is-off');
 
   assert.equal(await digest(source), originalHash); assert.equal((await annotations()).filter(note => note.type === 'ink').length, 0); record('text-markup-preserves-original-pdf-and-does-not-create-ink-objects');
   events = await page.evaluate(() => window.markupPointerEvents);

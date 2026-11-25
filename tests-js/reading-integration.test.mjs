@@ -103,6 +103,7 @@ test('the shared finish action follows its copied linked session and stays avail
 function environment({table=false,readerId='paper-a',paper={id:'paper-a',pdf:true},panelValues={},snapshot=null}={}){
   const nodes=new Map(),calls=[],visibility=[],panels={annotations:false,metadata:false,chat:false,...panelValues};
   const element=id=>{if(!nodes.has(id))nodes.set(id,{hidden:false,open:false,value:'',dataset:{readingSide:'left'},classList:{toggle(){}},setAttribute(){},removeAttribute(){}});return nodes.get(id);};
+  element('selection-preview').parentElement={querySelector:()=>null};
   const context={state:{active:paper,tab:'reader',page:1,pageData:null,models:[],annotations:[]},readerPaperId:readerId,readerRestore:snapshot,restoringReader:false,durableReaderLoaded:false,persistence:null,readerStateReady:false,
     $:element,document:{querySelectorAll:()=>[]},documentElementsUI:null,publishWorkspaceState(){},workspaceSnapshot:()=>({section:"paper",current:null,table}),
     workbenchUI:{isTable:()=>table,setTable:value=>{table=value;calls.push(['table',value]);},header(){},edit:item=>{panels.metadata=true;calls.push(['edit',item.id]);}},
@@ -247,6 +248,33 @@ test('selection changes publish only the current paper coordinates and clearing 
   assert.deepEqual(JSON.parse(JSON.stringify(messages[0].snapshot.readerSelection)),{page:2,text:selection.text,rects:selection.rects});
   f.context.showReaderSelection({...selection,id:'another-paper'});assert.equal(messages.length,1,'A stale PDF callback cannot relabel its selection');
   f.context.showReaderSelection(null);assert.equal(messages.length,2);assert.equal(messages[1].snapshot.readerSelection,undefined);
+  f.context.showReaderSelection(selection,{intent:'select'},true);
+  assert.equal(f.context.state.selection.text,selection.text);
+  assert.equal(messages.at(-1).snapshot.readerSelection,undefined,'Temporary text does not leave the active reader');
+});
+
+test('PDF selections only enter the annotation flow while automatic markup is on',()=>{
+  const {context,element}=environment();
+  const writes=[], rangeDrafts=[];
+  const selection={id:'paper-a',page:1,text:'Synthetic passage',rects:[[1,2,8,9]]};
+  const intent={intent:'underline',color:'#336699'};
+  let automatic=false;
+  Object.assign(context,{
+    annotationRangeEdit:null, autoMarkup:(...args)=>writes.push(args), setRangeDraft:value=>rangeDrafts.push(value),
+    readingShell:{autoMarkup:()=>automatic},
+  });
+  context.handlePdfSelection(selection,intent);
+  assert.equal(context.state.selection.temporary,true);
+  assert.equal(element('selection-tools').hidden,false);
+  assert.deepEqual(writes,[]);
+  automatic=true;
+  context.handlePdfSelection(selection,intent);
+  assert.equal(context.state.selection.temporary,undefined);
+  assert.deepEqual(writes,[[selection,intent]]);
+  context.annotationRangeEdit={id:'paper-a',manual:true};
+  context.handlePdfSelection(selection,intent);
+  assert.deepEqual(rangeDrafts,[selection]);
+  assert.equal(writes.length,1);
 });
 
 test('reader selection snapshots reject excess or invalid coordinates and detach retained arrays',()=>{

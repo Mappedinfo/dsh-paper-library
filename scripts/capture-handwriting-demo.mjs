@@ -87,7 +87,8 @@ try{
   // Resize through the existing user-facing separator, with no CSS overrides.
   const separator=page.locator('#reading-rail-resizer'),box=await separator.boundingBox();
   await page.mouse.move(box.x+box.width/2,box.y+80);await page.mouse.down();await page.mouse.move(310,box.y+80,{steps:8});await page.mouse.up();await ready();
-  await page.locator('#reader-mode-auto').click();await page.locator('#reader-tool-highlight').click();
+  if (await page.locator('#reader-mode-auto').getAttribute('aria-checked') === 'false') await page.locator('#reader-mode-auto').click();
+  await page.locator('#reader-tool-highlight').click();
   const range=await page.evaluate(()=>{
     const words=[...document.querySelectorAll('.pdr-sheet[data-pdf-page="1"] .pdr-word')],start=words.findIndex(word=>word.textContent==='Check'),end=words.findIndex((word,index)=>index>start&&word.textContent==='conclusion.');
     if(start<0||end<start)throw new Error('Synthetic passage was not found');

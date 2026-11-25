@@ -132,7 +132,7 @@ try {
     assert.equal(await page.locator('#annotation-handwriting-toggle').getAttribute('aria-checked'),'false');
     await page.locator('#annotation-handwriting-toggle').click();
   };
-  await open(); await page.locator('#reader-mode-auto').click(); await page.locator('#reader-tool-highlight').click();
+  await open(); await page.locator('#reader-tool-highlight').click();
   const highlightReply=annotationReply('highlight'); await dragText(await span(0,4)); parent=(await saved(highlightReply)).annotation;
   assert.equal(parent.type,'highlight'); assert.ok(parent.text.includes('linked handwriting')); await card().waitFor(); record('trusted pen creates a standard text-bound highlight');
   await page.locator('#annotation-handwriting-toggle').click();

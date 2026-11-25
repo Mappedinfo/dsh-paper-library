@@ -335,6 +335,14 @@ test('right-click actions follow the PDF, title, or active range edit and leave 
     assert.deepEqual(f.copied,['Synthetic selection']);
     rightClick(sheet);item('定位本页批注').click();assert.deepEqual(calls,[3]);
 
+    w.getSelection().removeAllRanges();
+    d.getElementById('selection-tools').hidden=false;
+    w.state.selection={id:'paper-a',text:'First passage\n\nNext passage',temporary:true,review:{collecting:true}};
+    rightClick(sheet);item('复制选中文字').click();await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.copied,['Synthetic selection','First passage\n\nNext passage']);
+    w.state.selection.id='another-paper';
+    rightClick(sheet);assert.equal(item('复制选中文字'),undefined);
+
     title.dispatchEvent(new w.KeyboardEvent('keydown',{ key:'F10', shiftKey:true, bubbles:true, cancelable:true }));
     assert.equal(menu.getAttribute('aria-label'),'当前论文');
     assert.ok(item('复制 APA 7 引用'));

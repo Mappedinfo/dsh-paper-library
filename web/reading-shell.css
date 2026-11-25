@@ -80,15 +80,11 @@ body.annotation-tools-visible{--annotation-tools-height:36px}
 .reader-zoom input::-webkit-inner-spin-button{appearance:none}
 #reader-zoom-fit{font-size:inherit}
 .topbar-end{display:inline-flex;align-items:center;gap:4px;flex:none;white-space:nowrap;order:1000}
-.reader-mode{display:flex;align-items:center;gap:2px;padding:0 6px 0 0;border-right:1px solid #dfe1d6;font-size:10px;color:#67776e}
-.reader-mode-label{white-space:nowrap;margin-right:2px}
-.reader-mode .button{font-size:10px;padding:3px 6px}
-.reader-mode[data-mode=auto] .button#reader-mode-auto,.reader-mode[data-mode=ask] .button#reader-mode-ask{background:#e4ece3;outline:1px solid #b8cbb7;color:#174c40}
 
 /* Keep the drawing controls in the existing toolbar throughout a pen session. */
 body.handwriting-tools-visible:not(.board-mode){--reader-toolbar-height:56px}
 .reader-ink-draft{display:flex;align-items:center;gap:6px;flex:none;max-width:100%;min-width:0;height:52px;overflow:hidden;white-space:nowrap;color:var(--ink);font-size:12px}
-.reader-ink-draft[hidden],.reader-ink-width[hidden],.reader-mode[hidden]{display:none}
+.reader-ink-draft[hidden],.reader-ink-width[hidden],#reader-mode-auto[hidden]{display:none}
 .reader-ink-draft .button{flex-shrink:0;min-width:44px;min-height:44px;padding:8px 10px;font-size:12px}
 .reader-ink-summary{flex:0 1 auto;min-width:0;max-width:420px;overflow:hidden;text-overflow:ellipsis}
 #reader-ink-save{min-width:96px;font-size:14px}

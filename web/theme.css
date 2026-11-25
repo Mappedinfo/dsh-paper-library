@@ -272,7 +272,6 @@ dialog blockquote { background: var(--dsw-alias-interactive-bg-hover); border-co
   .reader-ribbon .button, .reader-ribbon .tab { font-size: 11px; }
 }
 .reader-mode{border-right-color:var(--dsw-alias-border-l2,#dfe1d6)}
-.reader-mode[data-mode=auto] .button#reader-mode-auto,.reader-mode[data-mode=ask] .button#reader-mode-ask{color:var(--ink);background:var(--dsw-alias-interactive-bg-active);outline-color:var(--dsw-alias-border-l2)}
 
 /* 可选工作台配色；只覆盖界面语义，不触碰 PDF 像素或批注颜色。 */
 :root:is([data-palette="jade"],[data-palette="navy"],[data-palette="neutral"],[data-palette="rose"],[data-palette="apricot"]) {

@@ -80,7 +80,7 @@ try{
   const markup=async(first,last)=>{const range=await page.evaluate(({first,last})=>{const words=document.querySelectorAll('.pdr-sheet[data-pdf-page="1"] .pdr-word'),a=words[first].getBoundingClientRect(),b=words[last].getBoundingClientRect();return {from:{x:a.left+2,y:a.top+a.height/2},to:{x:b.right-2,y:b.top+b.height/2}};},{first,last});await pen('mousePressed',range.from);for(let n=1;n<=12;n++)await pen('mouseMoved',{x:range.from.x+(range.to.x-range.from.x)*n/12,y:range.from.y+(range.to.y-range.from.y)*n/12});await pen('mouseReleased',range.to);};
   const settled=async id=>{await until(async()=>{const jobs=await hostJobs();return jobs.find(j=>j.annotation_id===id&&j.status==='saved');},`save ${id} did not finish`);await page.evaluate(()=>inkQueue.refresh());await page.waitForFunction(id=>inkQueue.records().find(j=>j.annotation_id===id)?.status==='saved',id);};
   const shot=async name=>{const path=join(run,`${name}.png`);await page.screenshot({path});screenshots.push(relative(project,path));};
-  await open();await go(1);await page.locator('#reader-mode-auto').click();await page.locator('#reader-tool-highlight').click();
+  await open();await go(1);await page.locator('#reader-tool-highlight').click();
   let response=reply('highlight');await markup(0,4);let result=await response;assert.equal(result.status(),200);parent=(await result.json()).result.annotation;await card(parent.id).waitFor();record('trusted pen creates the parent highlight on a synthetic PDF');
 
   await page.locator('#reader-tool-underline').click();await toggle(parent.id).click();await active(parent.id,true);await ready();nextFault={kind:'delay'};
