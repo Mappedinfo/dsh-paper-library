@@ -94,20 +94,7 @@ try {
   });
   await reset();
   const multi = await drag(plan.from, plan.to);
-  // Words on one visual line keep their space; the wrap contributes nothing.
-  const expectedText = await page.evaluate(expected => {
-    const words = [...document.querySelectorAll('#continuous-reader .pdr-sheet[data-pdf-page="1"] .pdr-word')];
-    const start = words.findIndex(word => word.textContent.trim() === expected[0]);
-    const parts = words.slice(start, start + expected.length).map(word => ({ text: word.textContent.trim(), top: Math.round(word.getBoundingClientRect().top) }));
-    let text = '', previousTop = null;
-    for (const part of parts) {
-      if (previousTop === null) text = part.text;
-      else text += part.top === previousTop ? ' ' + part.text : part.text;
-      previousTop = part.top;
-    }
-    return text;
-  }, plan.expected);
-  assert.equal(multi.preview, expectedText, 'Every dragged word is captured in order, without a space at the wrap');
+  assert.equal(multi.preview, plan.expected.join(' '), 'The selected English words stay separated across visual lines');
   assert.ok(/[A-Za-z]/.test(multi.preview) && multi.preview.includes(' '), 'Latin words on one line keep their space');
   assert.ok(!multi.preview.includes('  '), 'Captured text has no double spaces');
   assert.equal(multi.hidden, false);

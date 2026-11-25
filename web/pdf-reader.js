@@ -250,11 +250,7 @@
     return words;
   }
   const CJK = /[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]/;
-  /** Join selected pieces the way the page is laid out:
-   * - a wrap contributes no space (the page breaks the line, not a space),
-   *   which also keeps a hyphenated break as one word ("measure-" + "ment");
-   * - CJK neighbours never get a separator, matching the page text;
-   * - Latin words on the same visual line keep their space. */
+  /** Separate words across visual lines and preserve CJK spacing and hyphenated wraps. */
   function joinSelection(pieces) {
     let text = '', previous = null;
     for (const piece of pieces) {
@@ -262,8 +258,9 @@
       if (!text) { text = piece.text; previous = piece; continue; }
       const sameLine = Math.abs(previous.top - piece.top) < 2 && Math.abs(previous.bottom - piece.bottom) < 2
         || Math.abs(previous.left - piece.left) < 2 && Math.abs(previous.right - piece.right) < 2;
-      const cjk = CJK.test(text.slice(-1)) || CJK.test(piece.text[0]);
-      text += sameLine && !cjk ? ' ' + piece.text : piece.text;
+      const cjk = CJK.test(previous.text.at(-1)) || CJK.test(piece.text[0]);
+      const hyphenatedWrap = !sameLine && /\p{Script=Latin}[-\u00ad\u2010\u2011]$/u.test(previous.text) && /^\p{Script=Latin}/u.test(piece.text);
+      text += cjk || hyphenatedWrap ? piece.text : ' ' + piece.text;
       previous = piece;
     }
     return text;

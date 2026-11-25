@@ -477,8 +477,7 @@ test('layout rejects missing, duplicate, invalid and oversized page geometry ins
 
 test('selection uses displayed PDF coordinates, merges only adjacent words on a line and preserves columns', () => {
   const selection = mergeSelection([[10, 20, 30, 30, 'First'], [32, 20, 50, 30, 'line'], [250, 20, 300, 30, 'column'], [10, 40, 30, 50, 'Next']], 2);
-  assert.deepEqual(plain(selection), { page: 2, text: 'First line columnNext', rects: [[10, 20, 50, 30], [250, 20, 300, 30], [10, 40, 30, 50]], wordCount: 4 },
-    'A line break joins without a space; words on one line keep theirs');
+  assert.deepEqual(plain(selection), { page: 2, text: 'First line column Next', rects: [[10, 20, 50, 30], [250, 20, 300, 30], [10, 40, 30, 50]], wordCount: 4 });
   assert.throws(() => mergeSelection([[0, 0, 10, 10, 'x'.repeat(20001)]], 1), /上限/);
   assert.throws(() => mergeSelection(Array.from({ length: 201 }, (_, i) => [0, i * 20, 10, i * 20 + 10, 'x']), 1), /上限/);
 });
@@ -533,7 +532,7 @@ test('cross-page selection filters both text and geometry, supports restore and 
     const filtered = select(first[0],second[2]);
     assert.equal(filtered.review.excluded.length,5);
     assert.deepEqual(filtered.segments.map(part=>part.rects), [[[25,682,230,692],[300,715,470,725]],[[25,72,230,82]]]);
-    assert.equal(filtered.segments[0].text,'The roadA second column');
+    assert.equal(filtered.segments[0].text,'The road A second column');
     assert.equal(filtered.segments[1].text,'type and speed limit.');
     assert.equal(root.querySelectorAll('.pdr-selection-draft').length,2);
     scope.editSelectionReview({restore:true});
@@ -575,7 +574,7 @@ test('a partial selection keeps only the selected slice of each word', () => {
   ]);
   // Clipped words merge into the exact selected span, not the whole line.
   const merged = mergeSelection(clipWords(entries), 1);
-  assert.deepEqual(plain(merged), { page: 1, text: 'ence sentence stan dardNext', wordCount: 5,
+  assert.deepEqual(plain(merged), { page: 1, text: 'ence sentence stan dard Next', wordCount: 5,
     rects: [[102, 300, 300, 326], [420, 300, 520, 326], [680, 300, 700, 326], [530, 340, 560, 366]] },
     'Adjacent words merge; a large gap and a second line stay separate rectangles');
 });
@@ -597,13 +596,14 @@ test('clipWords never drops a selected word and only skips whitespace', () => {
 });
 
 
-test('a selected line break joins without a space and CJK never gets one', () => {
+test('selected words keep spaces across lines while CJK and hyphenated wraps join directly', () => {
   const piece = (text, left, top, right, bottom) => ({ text, left, top, right, bottom });
-  // Same Latin line keeps its space; a wrap contributes nothing.
   assert.equal(joinSelection([piece('the', 10, 20, 30, 30), piece('reader.', 34, 20, 60, 30)]), 'the reader.');
-  assert.equal(joinSelection([piece('the', 10, 20, 30, 30), piece('reader.', 10, 34, 60, 44)]), 'thereader.');
+  assert.equal(joinSelection([piece('explicit', 72, 20, 115, 30), piece('constraint', 10, 34, 71, 44)]), 'explicit constraint');
   // A hyphenated wrap stays one word, exactly as the page prints it.
   assert.equal(joinSelection([piece('measure-', 10, 20, 60, 30), piece('ment', 10, 34, 40, 44)]), 'measure-ment');
+  assert.equal(joinSelection([piece('measure\u00ad', 10, 20, 60, 30), piece('ment', 10, 34, 40, 44)]), 'measure\u00adment');
+  assert.equal(joinSelection([piece('measure-', 10, 20, 60, 30), piece('phase', 64, 20, 106, 30)]), 'measure- phase');
   // Chinese has no separators, on a line or across one.
   assert.equal(joinSelection([piece('这是', 10, 20, 40, 30), piece('一个例子', 44, 20, 90, 30)]), '这是一个例子');
   assert.equal(joinSelection([piece('这是', 10, 20, 40, 30), piece('一个例子', 10, 34, 90, 44)]), '这是一个例子');
@@ -611,7 +611,7 @@ test('a selected line break joins without a space and CJK never gets one', () =>
   assert.equal(joinSelection([piece('方法', 10, 20, 40, 30), piece('A', 44, 20, 60, 30)]), '方法A');
   // Rotated pages lay a line out vertically: words of one line share left/right.
   assert.equal(joinSelection([piece('first', 10, 20, 30, 30), piece('second', 10, 34, 30, 44)]), 'first second');
-  assert.equal(joinSelection([piece('first', 10, 20, 30, 30), piece('second', 40, 34, 60, 44)]), 'firstsecond');
+  assert.equal(joinSelection([piece('first', 10, 20, 30, 30), piece('second', 40, 34, 60, 44)]), 'first second');
   assert.equal(joinSelection([]), '');
 });
 
