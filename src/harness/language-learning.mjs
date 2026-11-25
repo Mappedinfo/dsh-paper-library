@@ -4,6 +4,7 @@ import { preferredTranslationModel, translateWithFallback } from './translation-
 import { awaitWithAbort } from './ai.mjs'
 import { explainPublicTerm } from './term-explanation.mjs'
 import { publicResearchURL } from './deepseek-public-research.mjs'
+import { DEFAULT_SPEECH_VOICE, isSpeechVoice } from './deepseek-speech.mjs'
 
 export { preferredTranslationModel } from './translation-model.mjs'
 
@@ -173,8 +174,11 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
   const flights = new Map(), explaining = new Set()
   let admitted = 0, generating = 0
   const resultKey = request => `language.result:${hash(request.id)}:${hash(request.request_id)}`
-  const defaults = () => ({ model: null, translate_prompt: '', polish_prompt: '', target_language: 'auto' })
-  const settingsValue = value => ({ ...defaults(), ...(value || {}), target_language: ['auto', 'zh-CN', 'en'].includes(value?.target_language) ? value.target_language : 'auto' })
+  const defaults = () => ({ model: null, translate_prompt: '', polish_prompt: '', target_language: 'auto', speech_voice: DEFAULT_SPEECH_VOICE })
+  const settingsValue = value => ({ ...defaults(), ...(value || {}),
+    target_language: ['auto', 'zh-CN', 'en'].includes(value?.target_language) ? value.target_language : 'auto',
+    speech_voice: isSpeechVoice(value?.speech_voice) ? value.speech_voice : DEFAULT_SPEECH_VOICE,
+  })
   async function generationModel(settings, mode, signal) {
     const available=typeof models==='function'?await models(signal):{models:[]}
     const fastModel=!settings.model&&mode==='translate'?preferredTranslationModel(available.models):null
@@ -210,15 +214,18 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     const translate_prompt = string(value.translate_prompt ?? '', '翻译补充提示词', 2000, false)
     const polish_prompt = string(value.polish_prompt ?? '', '润色补充提示词', 2000, false)
     const current = await store.get(SETTINGS_KEY)
-    const target_language = value.target_language ?? settingsValue(current.value).target_language
+    const previous = settingsValue(current.value)
+    const target_language = value.target_language ?? previous.target_language
     if (!['auto', 'zh-CN', 'en'].includes(target_language)) throw fail('翻译目标语言无效。')
+    const speech_voice = value.speech_voice === undefined ? previous.speech_voice : value.speech_voice
+    if (!isSpeechVoice(speech_voice)) throw fail('朗读音色无效，请选择 Stella 或 Tide。')
     let model = null
     if (value.model != null) {
       model = modelOf(value.model)
       const available = typeof models === 'function' ? await models(signal) : { models: [] }
       if (!(available.models || []).some(item => item.provider === model.provider && item.id === model.model)) throw fail('所选模型不在 DSH 当前可用模型列表中，请刷新后重新选择。', 'LANGUAGE_MODEL_UNAVAILABLE', 409)
     }
-    const saved = await store.put(SETTINGS_KEY, { model, translate_prompt, polish_prompt, target_language }, input.expected_revision)
+    const saved = await store.put(SETTINGS_KEY, { model, translate_prompt, polish_prompt, target_language, speech_voice }, input.expected_revision)
     return { value: saved.value, revision: saved.revision }
   }
   async function cas(key, transform) {
@@ -568,6 +575,7 @@ export function createLanguageLearning({ store, ai, getDefaultModel, models, dis
     } finally { admitted-- }
   }
   handle.abstractTarget=async text=>resolveTranslationTarget(text,settingsValue((await store.get(SETTINGS_KEY)).value).target_language)
+  handle.speechVoice=async ()=>settingsValue((await store.get(SETTINGS_KEY)).value).speech_voice
   handle.translateAbstract=async ({text,target}, {signal}={})=>{
     if(typeof ai!=='function'||typeof getDefaultModel!=='function')throw fail('自动翻译摘要需要 DSH 宿主模型。','LANGUAGE_MODEL_REQUIRED',409)
     if(generating>=2)throw fail('已有两个语言请求正在生成，请稍后重试。','LANGUAGE_BUSY',429)

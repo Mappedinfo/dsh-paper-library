@@ -28,7 +28,7 @@ Paper Library 将文献收集、PDF 阅读与批注、知识整理和 LaTeX 写�
 | 积累语言与知识 | 中英翻译、五种表述优化方向、双语词条与原句来源、全文分析与引用图谱 |
 | 写作与展示 | 多文献画板、LaTeX 工作台、PlainDeck Slides 与可编辑 PPTX 导出 |
 
-**版本说明**：当前源码版本为 `0.3.0`。npm 徽章显示注册表上的实际版本，使用 `npm view @mappedinfo/dsh-paper-library version` 可核对。安装方式见[安装与开发](#安装与开发)。
+**版本说明**：当前源码版本为 `0.4.0`。npm 徽章显示注册表上的实际版本，使用 `npm view @mappedinfo/dsh-paper-library version` 可核对。安装方式见[安装与开发](#安装与开发)。
 
 **把使用说明当作演示来试用**：[PDF 手册](docs/demo/guide.pdf) · [带批注 PDF 示例](docs/demo/guide-annotated.pdf) · [可编辑动态 PPTX](docs/demo/slides.pptx) · [PlainDeck 项目 ZIP](docs/demo/slides.zip) · [Slides 静态 PDF](docs/demo/slides.pdf)。导入手册阅读批注，导入 ZIP 修改并再次导出；[主稿与复现说明](docs/demo/README.md)记录内容和验证范围。
 
@@ -253,7 +253,7 @@ PDF 工具栏的「文内搜索」可点击展开或收起，⌘/Ctrl + F 直接
 
 在「语言与词条 → 词条」点「新建单词／词组」，可独立保存词条并选填释义和备注。已有词条可随时编辑备注，或点「全库搜索用例」查看已索引的 PDF 命中页和原文片段。通过「从当前论文添加」或「补充原句与译文」可显式关联当前论文和页码。「解除论文关联」会从该词条移除该论文的原句和译文，保留词条、备注、学习状态及其他论文来源。
 
-点词条标题旁的「朗读词条」听词组发音，点文献来源旁的「朗读原句」听对应摘录。每次点击只将对应的文本发送给 DeepSeek 生成语音，复用 DSH 配置的 `DEEPSEEK_API_KEY` 和 Paper Library 的 DeepSeek 网络设置。语音不写入资料库。[DeepSeek 语音合成文档](https://api-docs.deepseek.com/guides/tts/)
+点词条标题旁的「朗读词条」听词组发音，点文献来源旁的「朗读原句」听对应摘录。在「语言设置」的「朗读音色」中可选择 Stella（默认女声）或 Tide（男声），保存后两种朗读都使用所选音色。每次点击只将对应的文本发送给 DeepSeek 生成语音，复用 DSH 配置的 `DEEPSEEK_API_KEY` 和 Paper Library 的 DeepSeek 网络设置。语音不写入资料库。[DeepSeek 语音合成文档](https://api-docs.deepseek.com/guides/tts/)
 
 英文词条标题下显示英式和美式 IPA。首次使用可点「生成音标」，仅将词条文本交给当前配置的语言模型，结果标记为待核对。也可直接点「编辑音标」手动填写或纠正，保存后会在重新打开词条时显示。
 
@@ -562,7 +562,7 @@ PDF 上传和下载均使用流式处理，不做整份 Base64 拷贝。服务�
 
 ## 安装与开发
 
-**当前源码版本为 v0.3.0，新增 PDF 全文索引、文内搜索侧栏与独立论文标签页。** npm 的 `latest` 可用 `npm view @mappedinfo/dsh-paper-library version` 核对；也可按下方步骤安装当前 `main` 源码。
+**当前源码版本为 v0.4.0，新增词条朗读、音色设置与英美音标。** 用 `npm view @mappedinfo/dsh-paper-library version` 核对 `latest`，或按下方步骤安装当前 `main` 源码。
 
 Node `^22.19 || >=24`、Python `>=3.11`、`uv` 和已构建的本地 DeepSeek Harness。
 

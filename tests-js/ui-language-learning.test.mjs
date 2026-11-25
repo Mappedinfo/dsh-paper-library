@@ -72,10 +72,13 @@ test('settings show configured routes and save prompts with the loaded revision'
   assert.deepEqual(groups.map(group => group.label), ['host', 'other'])
   assert.deepEqual(groups.map(group => group.children.length), [2, 1])
   assert.equal(f.element('language-settings-target').value, 'en')
+  const voice = f.element('language-settings-speech-voice')
+  assert.equal(voice.value, 'stella')
+  voice.value = 'tide'
   f.element('language-settings-model').value = groups[0].children[0].value;f.element('language-settings-translate').value = '保留术语';f.element('language-settings-polish').value = '简洁表达';
   await f.click('language-settings-save');
   const saved = f.requests.find(row => row.action === 'language_settings_update');
-  assert.deepEqual(saved.value, { model: { provider: 'host', model: 'chosen' }, target_language: 'en', translate_prompt: '保留术语', polish_prompt: '简洁表达' });
+  assert.deepEqual(saved.value, { model: { provider: 'host', model: 'chosen' }, target_language: 'en', speech_voice: 'tide', translate_prompt: '保留术语', polish_prompt: '简洁表达' });
   assert.equal(saved.expected_revision, 'rev-1');
 })
 

@@ -186,8 +186,8 @@ export function apply(ctx, rawConfig = {}) {
       return (await credentials?.resolve('DEEPSEEK_API_KEY'))?.value || process.env.DEEPSEEK_API_KEY
     } }
     const nativeResearch = createDeepSeekPublicResearch(deepSeekTransport)
-    const languageSpeech = createDeepSeekSpeech(deepSeekTransport)
     const languageLearning = createLanguageLearning({ store: options.localState, ai: languageAI, paperChat, getDefaultModel: () => web.agentDefaultModel.currentSelection(), models: options.models, dispatch, library: config.library, python: config.python, scholarlySearch, searchWeb, nativeResearch })
+    const languageSpeech = createDeepSeekSpeech({ ...deepSeekTransport, resolveVoice: languageLearning.speechVoice })
     const handwritingAI = createHarnessAI(ctx.llm, createUserMessage, { ...config, maxOutputTokens: config.maxLanguageOutputTokens }, { network: modelNetwork, attachments: () => ctx.get('attachments') })
     const handwriting = createHandwriting({ store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })
     const annotationCaption = createAnnotationCaption({ selectModel: (current, signal) => selectCaptionModel(ctx.llm, current, signal), store: options.localState, ai: handwritingAI, paperChat, dispatch, library: config.library, python: config.python })

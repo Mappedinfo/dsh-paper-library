@@ -12,15 +12,20 @@ function speechRequest(text, origin) {
 
 test('the DSH speech route forwards only text and returns WAV without caching', async () => {
   const wave = Buffer.alloc(46)
+  let voice
+  const voices = []
   wave.write('RIFF', 0)
   wave.write('WAVE', 8)
   const languageSpeech = createDeepSeekSpeech({
     resolveKey: async () => 'synthetic-key',
+    resolveVoice: async () => voice,
     async fetch(url, input) {
       assert.equal(url, 'https://api.deepseek.com/v1/tools/tts')
       assert.equal(input.redirect, 'error')
       assert.equal(input.headers.authorization, 'Bearer synthetic-key')
-      assert.deepEqual(JSON.parse(input.body), { text: 'A synthetic term.', format: 'wav', filter_markdown: false })
+      const { voice_id, ...rest } = JSON.parse(input.body)
+      assert.deepEqual(rest, { text: 'A synthetic term.', format: 'wav', filter_markdown: false })
+      voices.push(voice_id)
       return new Response(wave, { headers: { 'content-type': 'audio/wav' } })
     },
   })
@@ -30,6 +35,11 @@ test('the DSH speech route forwards only text and returns WAV without caching', 
   assert.equal(response.headers.get('content-type'), 'audio/wav')
   assert.equal(response.headers.get('cache-control'), 'no-store')
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), wave)
+  voice = 'tide'
+  const second = await handle(speechRequest('A synthetic term.'))
+  assert.equal(second.status, 200)
+  await second.arrayBuffer()
+  assert.deepEqual(voices, ['stella', 'tide'])
   assert.equal((await handle(speechRequest('A synthetic term.', 'https://other.example'))).status, 403)
   assert.equal((await handle(speechRequest('x'.repeat(2001)))).status, 400)
   const page = await handle(new Request('http://localhost/api/paper-library/'))

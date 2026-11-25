@@ -136,18 +136,23 @@ test('settings use CAS, configured models and mode-specific guidance without cha
   await assert.rejects(f.handle({ action: 'language_settings_update', value: { ...value, model: { provider: 'unknown', model: 'forged' } }, expected_revision: saved.revision }), error => error.code === 'LANGUAGE_MODEL_UNAVAILABLE')
 })
 
-test('translation target settings default to auto, retain legacy updates and enforce revisions', async () => {
+test('translation target and speech voice default correctly and survive legacy settings updates', async () => {
   const store = memoryStore()
   const old = { model: null, translate_prompt: 'old', polish_prompt: '' }
   await store.put('language.settings', old, 0)
   const f = fixture(store), initial = await f.handle({ action: 'language_settings_get' })
   assert.equal(initial.value.target_language, 'auto')
-  const updated = await f.handle({ action: 'language_settings_update', value: { ...old, target_language: 'en' }, expected_revision: initial.revision })
+  assert.equal(await f.handle.speechVoice(), 'stella')
+  const updated = await f.handle({ action: 'language_settings_update', value: { ...old, target_language: 'en', speech_voice: 'tide' }, expected_revision: initial.revision })
   assert.equal(updated.value.target_language, 'en')
+  assert.equal(await f.handle.speechVoice(), 'tide')
   const legacy = await f.handle({ action: 'language_settings_update', value: { ...old, translate_prompt: 'legacy edit' }, expected_revision: updated.revision })
   assert.equal(legacy.value.target_language, 'en')
+  assert.equal(legacy.value.speech_voice, 'tide')
+  assert.equal(await createLanguageLearning(f.options).speechVoice(), 'tide')
   await assert.rejects(f.handle({ action: 'language_settings_update', value: { ...old, target_language: 'auto' }, expected_revision: updated.revision }), error => error.code === 'STATE_CONFLICT')
   await assert.rejects(f.handle({ action: 'language_settings_update', value: { ...old, target_language: 'fr' }, expected_revision: legacy.revision }), /翻译目标语言无效/)
+  await assert.rejects(f.handle({ action: 'language_settings_update', value: { ...old, speech_voice: 'other' }, expected_revision: legacy.revision }), /朗读音色无效/)
 })
 
 test('automatic translation resolves bounded source script while old requests replay unchanged', async () => {
