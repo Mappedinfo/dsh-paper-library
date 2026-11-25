@@ -618,8 +618,13 @@ function renderAnnotations() {
     if (note.created && note.modified && note.created !== note.modified) date.title = `最后修改：${displayDate(note.modified)}`;
     meta.append(pageLink, date, el('span', 'note-type', note.kind === 'ai-feedback' || note.type === 'ai_feedback' || note.ai_generated ? 'AI 生成' : ({highlight:'高亮',underline:'下划线',strikeout:'删除线',note:'便笺',ink:'自由笔画',square:'矩形框'})[note.type] || '批注'));
     const metaActions=el('div','annotation-meta-actions');
-    const styleFor = part => window.PaperAnnotationStyle?.editor({note:part,paperId:state.active.id,api,onSaved:async()=>{
-      if(state.active?.id===card.dataset.paperId){await loadAnnotations(state.active.id);await refreshPage(part.page);}
+    const styleFor = part => window.PaperAnnotationStyle?.editor({note:part,paperId:card.dataset.paperId,api,
+      isCurrent:()=>state.active?.id===card.dataset.paperId,onSaved:async()=>{
+        if(state.active?.id!==card.dataset.paperId)return;
+        await loadAnnotations(card.dataset.paperId);
+        if(state.active?.id!==card.dataset.paperId)return;
+        try{await refreshPage(part.page);}
+        catch(error){if(state.active?.id===card.dataset.paperId)toast(`样式已保存，PDF 显示待更新：${error.message}`,true);}
     }});
     const style = group ? null : styleFor(note);
     if(style)metaActions.append(style);

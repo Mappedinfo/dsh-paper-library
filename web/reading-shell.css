@@ -171,9 +171,10 @@ body:not(.annotation-handwriting-enabled) .annotation-primary-actions [data-note
 .annotation-style-menu{position:relative}
 .annotation-style-menu>summary{display:flex;align-items:center;list-style:none;cursor:pointer}
 .annotation-style-menu>summary::-webkit-details-marker{display:none}
-.annotation-style-panel{position:fixed;z-index:1000;width:236px;box-sizing:border-box;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--paper,var(--surface));color:var(--ink);box-shadow:0 5px 24px #0003}
+.annotation-style-panel{position:fixed;z-index:1000;width:min(236px,calc(100vw - 16px));max-height:calc(100dvh - 16px);overflow:auto;box-sizing:border-box;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--paper,var(--surface));color:var(--ink);box-shadow:0 5px 24px #0003}
 .annotation-style-panel label{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:9px 0}
 .annotation-style-panel input[type="color"]{width:42px;height:28px;padding:2px}
+.annotation-style-actions{display:flex;flex-wrap:wrap;gap:6px}
 .annotation-style-panel p:empty{display:none}
 .reader-color-presets-menu>summary{font-size:12px;cursor:pointer}
 
