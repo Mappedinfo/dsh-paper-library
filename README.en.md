@@ -6,6 +6,7 @@
 
 [![npm version](https://img.shields.io/npm/v/%40mappedinfo%2Fdsh-paper-library?logo=npm&color=235e4f)](https://www.npmjs.com/package/@mappedinfo/dsh-paper-library)
 [![npm downloads](https://img.shields.io/npm/dm/%40mappedinfo%2Fdsh-paper-library?logo=npm&color=467bb5)](https://www.npmjs.com/package/@mappedinfo/dsh-paper-library)
+[![GitHub release downloads](https://img.shields.io/github/downloads/Mappedinfo/dsh-paper-library/total?logo=github&label=GitHub%20release%20downloads&color=57606a)](https://github.com/Mappedinfo/dsh-paper-library/releases)
 [![DSH community plugin](https://img.shields.io/badge/DSH-Community_Plugin-467bb5)](https://github.com/deepseek-ai/deepseek-harness)
 [![DSH discussion](https://img.shields.io/badge/DSH-Discussion_%236623-8c6bb1?logo=github)](https://github.com/deepseek-ai/deepseek-harness/discussions/6623)
 [![Original code MIT](https://img.shields.io/badge/Original_Code-MIT-b38a52)](LICENSE)
